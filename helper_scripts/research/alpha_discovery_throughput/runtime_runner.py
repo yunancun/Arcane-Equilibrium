@@ -1904,6 +1904,134 @@ def summarize_bounded_probe_result_review(
     }
 
 
+def _bounded_probe_execution_realism_review_path(lane_dir: Path) -> Path:
+    canonical = lane_dir / "bounded_probe_execution_realism_review_latest.json"
+    if canonical.exists():
+        return canonical
+    candidates = sorted(
+        lane_dir.glob(
+            "bounded_probe_execution_realism_review*/"
+            "bounded_probe_execution_realism_review_latest.json"
+        ),
+        key=lambda path: str(path),
+        reverse=True,
+    )
+    return candidates[0] if candidates else canonical
+
+
+def summarize_bounded_probe_execution_realism_review(
+    data_dir: Path,
+    *,
+    now_utc: dt.datetime,
+    max_age_seconds: int = DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS,
+) -> dict[str, Any]:
+    """Summarize bounded probe execution-realism review if present."""
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    path = _bounded_probe_execution_realism_review_path(lane_dir)
+    payload, err = _read_json(path)
+    if err:
+        return {
+            "bounded_probe_execution_realism_review_present": False,
+            "bounded_probe_execution_realism_review_source_path": str(path),
+            "bounded_probe_execution_realism_review_source_error": err,
+        }
+    assert payload is not None
+    generated_at = payload.get("generated_at_utc")
+    fresh, age, freshness_error = _source_fresh(
+        generated_at,
+        now_utc=now_utc,
+        max_age_seconds=max_age_seconds,
+    )
+    source_review = payload.get("source_result_review")
+    if not isinstance(source_review, dict):
+        source_review = {}
+    probe = payload.get("probe_execution_summary")
+    if not isinstance(probe, dict):
+        probe = {}
+    control = payload.get("matched_control_execution_summary")
+    if not isinstance(control, dict):
+        control = {}
+    gap = payload.get("gap_decomposition")
+    if not isinstance(gap, dict):
+        gap = {}
+    answers = payload.get("answers")
+    if not isinstance(answers, dict):
+        answers = {}
+    hypotheses = payload.get("execution_gap_hypotheses")
+    if not isinstance(hypotheses, list):
+        hypotheses = []
+    next_actions = payload.get("next_actions")
+    if not isinstance(next_actions, list):
+        next_actions = []
+    first_hypothesis = hypotheses[0] if hypotheses and isinstance(hypotheses[0], dict) else {}
+    return {
+        "bounded_probe_execution_realism_review_present": True,
+        "bounded_probe_execution_realism_review_status": payload.get("status"),
+        "bounded_probe_execution_realism_review_reason": payload.get("reason"),
+        "bounded_probe_execution_realism_review_next_actions": next_actions,
+        "bounded_probe_execution_realism_review_generated_at_utc": generated_at,
+        "bounded_probe_execution_realism_review_age_seconds": age,
+        "bounded_probe_execution_realism_review_source_ok": fresh,
+        "bounded_probe_execution_realism_review_source_path": str(path),
+        "bounded_probe_execution_realism_review_source_error": freshness_error,
+        "bounded_probe_execution_realism_review_side_cell_key": payload.get(
+            "side_cell_key"
+        ),
+        "bounded_probe_execution_realism_review_result_review_status": (
+            source_review.get("status")
+        ),
+        "bounded_probe_execution_realism_review_evidence_quality_status": (
+            source_review.get("evidence_quality_status")
+        ),
+        "bounded_probe_execution_realism_review_probe_edge_capture_ratio": (
+            source_review.get("probe_edge_capture_ratio")
+        ),
+        "bounded_probe_execution_realism_review_probe_execution_gap_bps": (
+            source_review.get("probe_execution_gap_bps")
+        ),
+        "bounded_probe_execution_realism_review_probe_avg_net_bps": (
+            probe.get("avg_net_bps")
+        ),
+        "bounded_probe_execution_realism_review_probe_avg_gross_bps": (
+            probe.get("avg_gross_bps")
+        ),
+        "bounded_probe_execution_realism_review_probe_avg_cost_bps": (
+            probe.get("avg_cost_bps")
+        ),
+        "bounded_probe_execution_realism_review_probe_fill_backed_pct": (
+            probe.get("fill_backed_pct")
+        ),
+        "bounded_probe_execution_realism_review_control_avg_net_bps": (
+            control.get("avg_net_bps")
+        ),
+        "bounded_probe_execution_realism_review_net_capture_gap_bps": (
+            gap.get("net_capture_gap_bps")
+        ),
+        "bounded_probe_execution_realism_review_gross_capture_gap_bps": (
+            gap.get("gross_capture_gap_bps")
+        ),
+        "bounded_probe_execution_realism_review_cost_or_slippage_gap_bps": (
+            gap.get("cost_or_slippage_gap_bps")
+        ),
+        "bounded_probe_execution_realism_review_entry_delay_gap_ms": (
+            gap.get("entry_delay_gap_ms")
+        ),
+        "bounded_probe_execution_realism_review_hypothesis_count": len(hypotheses),
+        "bounded_probe_execution_realism_review_primary_hypothesis": (
+            first_hypothesis.get("kind")
+        ),
+        "bounded_probe_execution_realism_review_execution_gap_confirmed": (
+            answers.get("execution_realism_gap_confirmed")
+        ),
+        "bounded_probe_execution_realism_review_fill_backed_probe_execution_available": (
+            answers.get("fill_backed_probe_execution_available")
+        ),
+        "bounded_probe_execution_realism_review_cost_gate_or_operator_review_allowed": (
+            answers.get("cost_gate_or_operator_review_allowed")
+        ),
+    }
+
+
 def collect_cost_gate_learning_lane_arm(
     data_dir: Path,
     *,
@@ -1939,6 +2067,12 @@ def collect_cost_gate_learning_lane_arm(
     bounded_probe_result_review_summary = summarize_bounded_probe_result_review(
         data_dir,
         now_utc=now_utc,
+    )
+    bounded_probe_execution_realism_review_summary = (
+        summarize_bounded_probe_execution_realism_review(
+            data_dir,
+            now_utc=now_utc,
+        )
     )
     source_summary: dict[str, Any] = {}
     if repo_root is not None:
@@ -1989,6 +2123,7 @@ def collect_cost_gate_learning_lane_arm(
                 **decision_packet_summary,
                 **sealed_probe_preflight_summary,
                 **bounded_probe_result_review_summary,
+                **bounded_probe_execution_realism_review_summary,
                 **historical_summary,
                 **loop_summary,
                 **ledger_summary,
@@ -2036,6 +2171,7 @@ def collect_cost_gate_learning_lane_arm(
             **decision_packet_summary,
             **sealed_probe_preflight_summary,
             **bounded_probe_result_review_summary,
+            **bounded_probe_execution_realism_review_summary,
             **historical_summary,
             **loop_summary,
             **ledger_summary,

@@ -177,6 +177,23 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
         if bounded_review_next_actions
         else "refresh_bounded_probe_result_review"
     )
+    bounded_execution_review_present = (
+        detail.get("bounded_probe_execution_realism_review_present") is True
+    )
+    bounded_execution_review_source_ok = (
+        detail.get("bounded_probe_execution_realism_review_source_ok") is True
+    )
+    bounded_execution_review_status = str(
+        detail.get("bounded_probe_execution_realism_review_status") or ""
+    ).upper()
+    bounded_execution_review_next_actions = _list(
+        detail.get("bounded_probe_execution_realism_review_next_actions")
+    )
+    bounded_execution_review_next_trigger = (
+        str(bounded_execution_review_next_actions[0])
+        if bounded_execution_review_next_actions
+        else "refresh_bounded_probe_execution_realism_review"
+    )
 
     if source_activation_ready is False:
         return {
@@ -220,6 +237,33 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "blocker_class": "data_coverage",
             "primary_blocker": "bounded_probe_result_review_not_fresh",
             "next_trigger": "refresh_bounded_probe_result_review",
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
+
+    if bounded_execution_review_present and not bounded_execution_review_source_ok:
+        return {
+            "action": RUN_READ_ONLY_CAPTURE,
+            "reason": "bounded_probe_execution_realism_review_stale_or_unreadable",
+            "blocker_class": "data_coverage",
+            "primary_blocker": "bounded_probe_execution_realism_review_not_fresh",
+            "next_trigger": "refresh_bounded_probe_execution_realism_review",
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
+
+    if (
+        bounded_execution_review_source_ok
+        and bounded_execution_review_status == "AUTHORITY_BOUNDARY_VIOLATION"
+    ):
+        return {
+            "action": BLOCK,
+            "reason": "bounded_probe_execution_realism_review_authority_boundary_violation",
+            "blocker_class": "source_health",
+            "primary_blocker": (
+                "bounded_probe_execution_realism_review_authority_boundary_violation"
+            ),
+            "next_trigger": bounded_execution_review_next_trigger,
             "operator_actionable": False,
             "engineering_actionable": True,
         }
@@ -284,6 +328,65 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED",
             "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED",
         } and bounded_review_quality_status == "PROBE_UNDERPERFORMS_MATCHED_CONTROL_EXECUTION_GAP":
+            if not bounded_execution_review_present:
+                return {
+                    "action": RUN_READ_ONLY_CAPTURE,
+                    "reason": "bounded_probe_execution_realism_review_required",
+                    "blocker_class": "execution_realism",
+                    "primary_blocker": (
+                        "bounded_probe_execution_realism_review_required"
+                    ),
+                    "next_trigger": "refresh_bounded_probe_execution_realism_review",
+                    "operator_actionable": False,
+                    "engineering_actionable": True,
+                }
+            if bounded_execution_review_status == (
+                "EXECUTION_REALISM_GAP_DIAGNOSED_REPAIR_REQUIRED"
+            ):
+                return {
+                    "action": RUN_READ_ONLY_CAPTURE,
+                    "reason": (
+                        "bounded_probe_execution_realism_review_repair_required"
+                    ),
+                    "blocker_class": "execution_realism",
+                    "primary_blocker": (
+                        "bounded_probe_execution_realism_gap_diagnosed_repair_required"
+                    ),
+                    "next_trigger": bounded_execution_review_next_trigger,
+                    "operator_actionable": False,
+                    "engineering_actionable": True,
+                }
+            if bounded_execution_review_status in {
+                "EXECUTION_REALISM_PROBE_SAMPLE_BELOW_REVIEW_FLOOR",
+                "EXECUTION_REALISM_CONTROL_SAMPLE_BELOW_REVIEW_FLOOR",
+            }:
+                return {
+                    "action": RUN_READ_ONLY_CAPTURE,
+                    "reason": (
+                        "bounded_probe_execution_realism_review_needs_matching_rows"
+                    ),
+                    "blocker_class": "sample_gate",
+                    "primary_blocker": (
+                        "bounded_probe_execution_realism_review_needs_matching_rows"
+                    ),
+                    "next_trigger": bounded_execution_review_next_trigger,
+                    "operator_actionable": False,
+                    "engineering_actionable": True,
+                }
+            if bounded_execution_review_status == "NO_EXECUTION_REALISM_GAP_TO_REVIEW":
+                return {
+                    "action": RUN_READ_ONLY_CAPTURE,
+                    "reason": (
+                        "bounded_probe_execution_realism_review_not_aligned_with_result_review"
+                    ),
+                    "blocker_class": "source_health",
+                    "primary_blocker": (
+                        "bounded_probe_execution_realism_review_not_aligned_with_result_review"
+                    ),
+                    "next_trigger": "refresh_bounded_probe_execution_realism_review",
+                    "operator_actionable": False,
+                    "engineering_actionable": True,
+                }
             return {
                 "action": RUN_READ_ONLY_CAPTURE,
                 "reason": "bounded_probe_result_review_execution_realism_gap",
@@ -2500,6 +2603,113 @@ def classify_profitability_blocker(
                 ),
                 "bounded_probe_result_review_anecdote_risk": detail.get(
                     "bounded_probe_result_review_anecdote_risk"
+                ),
+                "bounded_probe_execution_realism_review_present": detail.get(
+                    "bounded_probe_execution_realism_review_present"
+                ),
+                "bounded_probe_execution_realism_review_status": detail.get(
+                    "bounded_probe_execution_realism_review_status"
+                ),
+                "bounded_probe_execution_realism_review_reason": detail.get(
+                    "bounded_probe_execution_realism_review_reason"
+                ),
+                "bounded_probe_execution_realism_review_next_actions": detail.get(
+                    "bounded_probe_execution_realism_review_next_actions"
+                ),
+                "bounded_probe_execution_realism_review_generated_at_utc": detail.get(
+                    "bounded_probe_execution_realism_review_generated_at_utc"
+                ),
+                "bounded_probe_execution_realism_review_source_ok": detail.get(
+                    "bounded_probe_execution_realism_review_source_ok"
+                ),
+                "bounded_probe_execution_realism_review_source_path": detail.get(
+                    "bounded_probe_execution_realism_review_source_path"
+                ),
+                "bounded_probe_execution_realism_review_source_error": detail.get(
+                    "bounded_probe_execution_realism_review_source_error"
+                ),
+                "bounded_probe_execution_realism_review_side_cell_key": detail.get(
+                    "bounded_probe_execution_realism_review_side_cell_key"
+                ),
+                "bounded_probe_execution_realism_review_result_review_status": (
+                    detail.get(
+                        "bounded_probe_execution_realism_review_result_review_status"
+                    )
+                ),
+                "bounded_probe_execution_realism_review_evidence_quality_status": (
+                    detail.get(
+                        "bounded_probe_execution_realism_review_evidence_quality_status"
+                    )
+                ),
+                "bounded_probe_execution_realism_review_probe_edge_capture_ratio": (
+                    detail.get(
+                        "bounded_probe_execution_realism_review_probe_edge_capture_ratio"
+                    )
+                ),
+                "bounded_probe_execution_realism_review_probe_execution_gap_bps": (
+                    detail.get(
+                        "bounded_probe_execution_realism_review_probe_execution_gap_bps"
+                    )
+                ),
+                "bounded_probe_execution_realism_review_probe_avg_net_bps": detail.get(
+                    "bounded_probe_execution_realism_review_probe_avg_net_bps"
+                ),
+                "bounded_probe_execution_realism_review_probe_avg_gross_bps": (
+                    detail.get(
+                        "bounded_probe_execution_realism_review_probe_avg_gross_bps"
+                    )
+                ),
+                "bounded_probe_execution_realism_review_probe_avg_cost_bps": detail.get(
+                    "bounded_probe_execution_realism_review_probe_avg_cost_bps"
+                ),
+                "bounded_probe_execution_realism_review_probe_fill_backed_pct": (
+                    detail.get(
+                        "bounded_probe_execution_realism_review_probe_fill_backed_pct"
+                    )
+                ),
+                "bounded_probe_execution_realism_review_control_avg_net_bps": (
+                    detail.get(
+                        "bounded_probe_execution_realism_review_control_avg_net_bps"
+                    )
+                ),
+                "bounded_probe_execution_realism_review_net_capture_gap_bps": (
+                    detail.get(
+                        "bounded_probe_execution_realism_review_net_capture_gap_bps"
+                    )
+                ),
+                "bounded_probe_execution_realism_review_gross_capture_gap_bps": (
+                    detail.get(
+                        "bounded_probe_execution_realism_review_gross_capture_gap_bps"
+                    )
+                ),
+                "bounded_probe_execution_realism_review_cost_or_slippage_gap_bps": (
+                    detail.get(
+                        "bounded_probe_execution_realism_review_cost_or_slippage_gap_bps"
+                    )
+                ),
+                "bounded_probe_execution_realism_review_entry_delay_gap_ms": detail.get(
+                    "bounded_probe_execution_realism_review_entry_delay_gap_ms"
+                ),
+                "bounded_probe_execution_realism_review_hypothesis_count": detail.get(
+                    "bounded_probe_execution_realism_review_hypothesis_count"
+                ),
+                "bounded_probe_execution_realism_review_primary_hypothesis": detail.get(
+                    "bounded_probe_execution_realism_review_primary_hypothesis"
+                ),
+                "bounded_probe_execution_realism_review_execution_gap_confirmed": (
+                    detail.get(
+                        "bounded_probe_execution_realism_review_execution_gap_confirmed"
+                    )
+                ),
+                "bounded_probe_execution_realism_review_fill_backed_probe_execution_available": (
+                    detail.get(
+                        "bounded_probe_execution_realism_review_fill_backed_probe_execution_available"
+                    )
+                ),
+                "bounded_probe_execution_realism_review_cost_gate_or_operator_review_allowed": (
+                    detail.get(
+                        "bounded_probe_execution_realism_review_cost_gate_or_operator_review_allowed"
+                    )
                 ),
                 "latest_admission_decision": detail.get("latest_admission_decision"),
                 "latest_record_type": detail.get("latest_record_type"),
