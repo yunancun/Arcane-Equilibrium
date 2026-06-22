@@ -41,10 +41,28 @@ v406 修正這個驗收缺口。healthcheck 現在把 sealed horizon preflight r
 - Mac alpha/worklist focused pytest：`60 passed`。
 - Mac source/test diff check passed。
 - Source commit：`9b439620 Require sealed preflight in stack healthcheck [skip ci]`。
+- Docs/state commit：`b2a1c55b Record sealed preflight healthcheck enforcement [skip ci]`。
+- GitHub `origin/main` pushed to `b2a1c55b`。
+- Linux `trade-core:/home/ncyu/BybitOpenClaw/srv` fast-forwarded to `b2a1c55b`。
+- Linux py_compile passed for touched healthcheck/alpha/worklist/test modules。
+- Linux `helper_scripts/cron/tests/test_demo_learning_stack_healthcheck.py`：`9 passed`。
+- Linux alpha/worklist focused pytest：`60 passed`。
+- Linux `git diff --check` passed。
+- Linux read-only healthcheck stdout smoke reported:
+  - `status=NOT_INSTALLED`
+  - `source_ready=true`
+  - `stack_installed=false`
+  - `demo_learning_evidence_cron_entry_present=false`
+  - `sealed_horizon_probe_preflight_cron_entry_present=false`
+  - `cost_gate_learning_lane_cron_entry_present=false`
+  - `demo_learning_stack_healthcheck_cron_entry_present=false`
+  - `sealed_horizon_probe_preflight_present=true`
+  - `bounded_probe_result_review_present=false`
+  - `bounded_probe_execution_realism_review_present=false`
 
 ## 邊界
 
-本 checkpoint 是 source/test/docs only so far。未執行 CI。沒有 PG write/schema migration、沒有 Bybit private/signed/trading call、沒有 deploy/rebuild/restart、沒有 crontab install、沒有 env/auth/risk/order/strategy/runtime mutation、沒有 Cost Gate lowering、沒有 probe/order authority、沒有 promotion proof。
+本 checkpoint 是 source/test/docs + Linux source sync/read-only/static tests + read-only healthcheck stdout smoke。未執行 CI。沒有 PG write/schema migration、沒有 Bybit private/signed/trading call、沒有 deploy/rebuild/restart、沒有 crontab install、沒有 env/auth/risk/order/strategy/runtime mutation、沒有 Cost Gate lowering、沒有 probe/order authority、沒有 promotion proof。
 
 ## 對盈利路徑的含義
 
