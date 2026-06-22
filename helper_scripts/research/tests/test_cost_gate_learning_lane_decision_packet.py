@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
+import sys
 
 from cost_gate_learning_lane.decision_packet import (
     build_profit_learning_decision_packet,
+    main,
     render_markdown,
 )
 
@@ -272,3 +275,74 @@ def test_stale_counterfactual_fails_closed_before_plan_review() -> None:
 
     assert packet["status"] == "REFRESH_REJECT_COUNTERFACTUAL"
     assert packet["artifacts"]["counterfactual"]["status"] == "STALE"
+
+
+def test_cli_missing_optional_sealed_evidence_fails_closed_to_packet(
+    tmp_path, monkeypatch
+) -> None:
+    data_flow = tmp_path / "data_flow.json"
+    counterfactual = tmp_path / "counterfactual.json"
+    plan = tmp_path / "plan.json"
+    activation = tmp_path / "activation.json"
+    blocked_review = tmp_path / "blocked_review.json"
+    missing_sealed = tmp_path / "missing_sealed.json"
+    out_json = tmp_path / "packet.json"
+    out_md = tmp_path / "packet.md"
+
+    for path, payload in [
+        (data_flow, _data_flow()),
+        (counterfactual, _counterfactual()),
+        (plan, _ready_plan()),
+        (
+            activation,
+            {
+                "schema_version": "cost_gate_demo_learning_lane_activation_preflight_v1",
+                "generated_at_utc": "2026-06-22T11:58:00+00:00",
+                "status": "DATA_ACCUMULATING",
+            },
+        ),
+        (
+            blocked_review,
+            {
+                "schema_version": "cost_gate_demo_learning_lane_blocked_outcome_review_v2",
+                "generated_at_utc": "2026-06-22T11:59:00+00:00",
+                "status": "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT",
+                "review_candidate_count": 1,
+            },
+        ),
+    ]:
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "decision_packet",
+            "--data-flow-json",
+            str(data_flow),
+            "--counterfactual-json",
+            str(counterfactual),
+            "--plan-json",
+            str(plan),
+            "--activation-preflight-json",
+            str(activation),
+            "--blocked-outcome-review-json",
+            str(blocked_review),
+            "--sealed-horizon-learning-evidence-json",
+            str(missing_sealed),
+            "--max-artifact-age-hours",
+            "336",
+            "--output",
+            str(out_md),
+            "--json-output",
+            str(out_json),
+        ],
+    )
+
+    assert main() == 0
+    packet = json.loads(out_json.read_text(encoding="utf-8"))
+    assert packet["status"] == "OPERATOR_REVIEW_DEMO_PROBE_CANDIDATES"
+    assert packet["artifacts"]["sealed_horizon_learning_evidence"]["status"] == "MISSING"
+    assert packet["answers"]["sealed_horizon_learning_evidence_available"] is False
+    assert packet["answers"]["order_authority_granted"] is False
+    assert out_md.exists()

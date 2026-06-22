@@ -707,6 +707,8 @@ def render_markdown(packet: dict[str, Any]) -> str:
 def _read_json(path: Path | None) -> dict[str, Any] | None:
     if path is None:
         return None
+    if not path.exists():
+        return None
     return json.loads(path.read_text(encoding="utf-8"))
 
 
