@@ -191,6 +191,7 @@ def test_learning_worklist_carries_ranked_cost_gate_blocked_review_evidence():
                 "blocked_signal_top_review_side_cell_key": "ma_crossover|ETHUSDT|Sell",
                 "blocked_signal_top_review_wrongful_block_score": 3.444444,
                 "blocked_signal_top_review_net_cost_cushion_bps": 5.166667,
+                "sealed_horizon_probe_preflight_status": "OPERATOR_REVIEW_REQUIRED",
             }
         ],
     })
