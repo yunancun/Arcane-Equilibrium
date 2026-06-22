@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Sealed Horizon Preflight Refresh Wrapper
+
+- Added an artifact-only `sealed_horizon_probe_preflight_cron.sh` wrapper so canonical sealed preflight latest/status/heartbeat can be refreshed without manual one-off commands.
+- Linux smoke selected the v389 aligned sealed decision packet despite an explicit stale/generic latest, refreshing `/tmp/openclaw/cost_gate_learning_lane/sealed_horizon_probe_preflight_latest.json` sha256 `5cae49e9837285aced6835ff8199e3b2183c669846b5fd8a59cd0c11a47b157d`.
+- Remaining blockers are unchanged: actual operator approval review and production learning-lane ledger/outcome accumulation; no cron install, Cost Gate lowering, probe/order authority, or promotion proof.
+
 ## 2026-06-22 Sealed Horizon Preflight Decision Resolver
 
 - `sealed_horizon_probe_preflight.py` can now use `--decision-packet-search-root` to supersede a stale/generic explicit decision packet with a fresh aligned sealed decision packet.
