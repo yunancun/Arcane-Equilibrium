@@ -191,6 +191,27 @@ def test_learning_worklist_carries_ranked_cost_gate_blocked_review_evidence():
                 "blocked_signal_top_review_side_cell_key": "ma_crossover|ETHUSDT|Sell",
                 "blocked_signal_top_review_wrongful_block_score": 3.444444,
                 "blocked_signal_top_review_net_cost_cushion_bps": 5.166667,
+                "learning_loop_last_scorecard_horizon_stability_status": (
+                    "MULTI_HORIZON_PROFIT_LEARNING_CANDIDATES_PRESENT"
+                ),
+                "learning_loop_last_scorecard_horizon_stability_horizons": [
+                    15,
+                    30,
+                    60,
+                    120,
+                    240,
+                ],
+                "profit_learning_counterfactual_horizon_stability_status": (
+                    "MULTI_HORIZON_PROFIT_LEARNING_CANDIDATES_PRESENT"
+                ),
+                "profit_learning_top_side_cells": [
+                    {
+                        "candidate_key": "ma_crossover|ETHUSDT|Sell",
+                        "horizon_status": "CANDIDATE_MULTI_HORIZON_STABLE",
+                        "candidate_horizons_minutes": [15, 30, 60, 120, 240],
+                        "best_horizon_minutes": 120,
+                    }
+                ],
                 "sealed_horizon_probe_preflight_status": "OPERATOR_REVIEW_REQUIRED",
             }
         ],
@@ -202,7 +223,7 @@ def test_learning_worklist_carries_ranked_cost_gate_blocked_review_evidence():
     assert worklist["status"] == "OPERATOR_GATED_LEARNING_READY"
     assert task["task_type"] == "operator_probe_review"
     assert task["learning_objective"] == (
-        "operator_review_top_blocked_signal_side_cell_before_bounded_demo_probe"
+        "operator_review_multi_horizon_blocked_signal_side_cell_before_bounded_demo_probe"
     )
     assert task["requires_operator_authorization"] is True
     assert task["runtime_mutation_required"] is False
@@ -218,8 +239,18 @@ def test_learning_worklist_carries_ranked_cost_gate_blocked_review_evidence():
     assert task["evidence"]["blocked_signal_top_review_candidate_net_cost_cushion_bps"] == (
         5.166667
     )
+    assert task["evidence"][
+        "learning_loop_last_scorecard_horizon_stability_status"
+    ] == "MULTI_HORIZON_PROFIT_LEARNING_CANDIDATES_PRESENT"
+    assert task["evidence"]["profit_learning_top_side_cells"][0][
+        "candidate_horizons_minutes"
+    ] == [15, 30, 60, 120, 240]
     assert (
         "candidate_specific_side_cell_or_candidate_key_evidence_present"
+        in task["completion_evidence_required"]
+    )
+    assert (
+        "horizon_stability_status_and_candidate_horizons_recorded_when_available"
         in task["completion_evidence_required"]
     )
 
