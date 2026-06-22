@@ -316,6 +316,23 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "engineering_actionable": True,
         }
 
+    if blocked_review_status == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT":
+        return {
+            "action": READY_FOR_PROBE,
+            "reason": "cost_gate_blocked_outcome_review_candidate",
+            "blocker_class": "probe_ready",
+            "primary_blocker": (
+                "cost_gate_blocked_signal_outcomes_need_demo_probe_authority_review"
+            ),
+            "next_trigger": (
+                detail.get("blocked_signal_outcome_review_next_trigger")
+                or blocked_review.get("next_trigger")
+                or "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
+            ),
+            "operator_actionable": True,
+            "engineering_actionable": True,
+        }
+
     if dry_run_review_source_ok:
         if dry_run_review_status == "DRY_RUN_PREVIEW_FAILED_REPAIR_REQUIRED":
             return {
@@ -1095,22 +1112,6 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "primary_blocker": "cost_gate_rejects_recorded_need_blocked_signal_outcomes",
             "next_trigger": "run_cost_gate_outcome_refresh_for_blocked_signal_outcomes",
             "operator_actionable": False,
-            "engineering_actionable": True,
-        }
-    if blocked_review_status == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT":
-        return {
-            "action": READY_FOR_PROBE,
-            "reason": "cost_gate_blocked_outcome_review_candidate",
-            "blocker_class": "probe_ready",
-            "primary_blocker": (
-                "cost_gate_blocked_signal_outcomes_need_demo_probe_authority_review"
-            ),
-            "next_trigger": (
-                detail.get("blocked_signal_outcome_review_next_trigger")
-                or blocked_review.get("next_trigger")
-                or "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
-            ),
-            "operator_actionable": True,
             "engineering_actionable": True,
         }
     if blocked_review_status == "NO_DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE":

@@ -2336,6 +2336,99 @@ def test_cost_gate_arm_uses_dry_run_review_after_activation_packet(tmp_path):
     ] is False
 
 
+def test_cost_gate_blocked_review_candidate_supersedes_dry_run_apply_gate():
+    now = dt.datetime(2026, 6, 21, 18, 10, tzinfo=dt.timezone.utc)
+    arm = {
+        "arm_id": "cost_gate_demo_learning_lane",
+        "gate_status": "OPERATOR_REVIEW",
+        "sample_count": 2,
+        "artifacts_ready": False,
+        "source_ok": True,
+        "source_path": (
+            "/tmp/openclaw/cost_gate_learning_lane/"
+            "demo_learning_lane_plan_latest.json"
+        ),
+        "detail": {
+            "plan_status": "READY_FOR_DEMO_LEARNING_PROBE",
+            "main_cost_gate_adjustment": "NONE",
+            "order_authority": "NOT_GRANTED",
+            "selected_probe_candidate_count": 2,
+            "blocked_signal_outcome_count": 22419,
+            "blocked_signal_positive_outcome_count": 14117,
+            "blocked_signal_net_positive_pct": 62.9698,
+            "blocked_signal_outcome_review_schema_version": (
+                "cost_gate_demo_learning_lane_blocked_outcome_review_v2"
+            ),
+            "blocked_signal_outcome_review_status": (
+                "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
+            ),
+            "blocked_signal_outcome_review_reason": (
+                "one_or_more_blocked_side_cells_clear_review_thresholds"
+            ),
+            "blocked_signal_outcome_review_next_trigger": (
+                "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
+            ),
+            "blocked_signal_top_review_candidate_side_cell_key": (
+                "ma_crossover|ETHUSDT|Sell"
+            ),
+            "blocked_signal_top_review_candidate_wrongful_block_score": (
+                75.49272112494981
+            ),
+            "blocked_signal_top_review_candidate_net_cost_cushion_bps": (
+                37.746360562474905
+            ),
+            "demo_learning_stack_dry_run_review_present": True,
+            "demo_learning_stack_dry_run_review_source_ok": True,
+            "demo_learning_stack_dry_run_review_status": (
+                "DRY_RUN_PREVIEW_PASSED_OPERATOR_APPLY_REVIEW_REQUIRED"
+            ),
+            "demo_learning_stack_dry_run_review_dry_run_preview_passed": True,
+            "demo_learning_stack_dry_run_review_crontab_mutated": False,
+            "demo_learning_stack_dry_run_review_order_authority_granted": False,
+            "demo_learning_stack_dry_run_review_probe_authority_granted": False,
+            "demo_learning_stack_dry_run_review_global_cost_gate_lowering_recommended": (
+                False
+            ),
+        },
+    }
+
+    plan = build_discovery_plan([arm], now_utc=now)
+
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert blocker["primary_blocker"] == (
+        "cost_gate_blocked_signal_outcomes_need_demo_probe_authority_review"
+    )
+    assert blocker["next_trigger"] == (
+        "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
+    )
+    assert blocker["operator_actionable"] is True
+    assert blocker["blocked_signal_top_review_candidate_side_cell_key"] == (
+        "ma_crossover|ETHUSDT|Sell"
+    )
+    assert blocker["demo_learning_stack_dry_run_review_status"] == (
+        "DRY_RUN_PREVIEW_PASSED_OPERATOR_APPLY_REVIEW_REQUIRED"
+    )
+    assert blocker["demo_learning_stack_dry_run_review_order_authority_granted"] is False
+    assert blocker["demo_learning_stack_dry_run_review_probe_authority_granted"] is False
+
+    task = plan["learning_worklist"]["top_task"]
+    assert task["task_type"] == "operator_probe_review"
+    assert task["learning_objective"] == (
+        "operator_review_top_blocked_signal_side_cell_before_bounded_demo_probe"
+    )
+    assert task["requires_operator_authorization"] is True
+    assert task["runtime_mutation_required"] is False
+    assert task["evidence"]["blocked_signal_top_review_candidate_side_cell_key"] == (
+        "ma_crossover|ETHUSDT|Sell"
+    )
+    assert task["evidence"][
+        "demo_learning_stack_dry_run_review_order_authority_granted"
+    ] is False
+    assert task["evidence"][
+        "demo_learning_stack_dry_run_review_probe_authority_granted"
+    ] is False
+
+
 def test_cost_gate_arm_uses_stack_healthcheck_for_missing_bounded_reviews(tmp_path):
     data = tmp_path / "openclaw"
     artifact = _write_demo_learning_stack_healthcheck_latest(
