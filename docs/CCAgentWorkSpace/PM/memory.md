@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Demo-Learning Stack Activation Packet
+
+- `demo_learning_stack_activation_packet_v1` now turns stack health + Cost Gate activation preflight into one no-authority operator review artifact.
+- It reports missing four-cron stack entries, operator dry-run/apply/rollback/verify commands, and the intended Cost Gate escape thesis: rejected-signal accumulation -> matched-control blocked outcomes -> bounded demo probe review -> execution-realism repair.
+- This improves the path to profitability by making the data-learning activation step reviewable without installing cron, lowering Cost Gate, enabling writers, granting probe/order authority, or claiming promotion proof.
+
 ## 2026-06-22 Bounded Probe Edge-Capture Execution Gap
 
 - `bounded_demo_probe_evidence_quality_v1` now measures whether positive probe outcomes actually capture matched blocked-signal control edge via `probe_edge_capture_ratio` and `probe_execution_gap_bps`.
