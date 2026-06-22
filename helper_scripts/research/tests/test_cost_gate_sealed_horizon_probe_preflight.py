@@ -146,6 +146,11 @@ def test_preflight_blocks_on_operator_review_and_production_lane() -> None:
     assert packet["answers"]["main_cost_gate_adjustment"] == "NONE"
     assert "operator_sealed_horizon_review_recorded" in packet["blocking_gates"]
     assert "production_learning_lane_accumulating" in packet["blocking_gates"]
+    design = packet["bounded_demo_probe_design"]
+    assert design["status"] == "NOT_READY_FOR_OPERATOR_PROBE_REVIEW"
+    assert design["authority_boundary"]["probe_authority_granted"] is False
+    assert design["authority_boundary"]["order_authority_granted"] is False
+    assert design["suggested_initial_probe_limits"]["active"] is False
 
 
 def test_operator_review_without_learning_lane_still_blocks_probe() -> None:
@@ -161,6 +166,39 @@ def test_operator_review_without_learning_lane_still_blocks_probe() -> None:
     assert packet["answers"]["operator_review_recorded"] is True
     assert packet["answers"]["production_learning_lane_accumulating"] is False
     assert packet["blocking_gates"] == ["production_learning_lane_accumulating"]
+    assert packet["bounded_demo_probe_design"]["status"] == (
+        "NOT_READY_FOR_OPERATOR_PROBE_REVIEW"
+    )
+
+
+def test_accumulating_lane_turns_missing_operator_review_into_concrete_probe_design() -> None:
+    packet = build_sealed_horizon_bounded_demo_probe_preflight(
+        sealed_horizon_learning_evidence=_sealed_evidence(),
+        decision_packet=_decision_packet(),
+        activation_preflight=_activation("DATA_ACCUMULATING"),
+        now_utc=NOW,
+    )
+
+    design = packet["bounded_demo_probe_design"]
+
+    assert packet["status"] == "OPERATOR_REVIEW_REQUIRED"
+    assert packet["answers"]["bounded_demo_probe_design_ready_for_operator_review"] is True
+    assert design["status"] == "OPERATOR_REVIEW_READY_FOR_BOUNDED_DEMO_PROBE_DESIGN"
+    assert design["candidate"]["strategy_name"] == "ma_crossover"
+    assert design["candidate"]["symbol"] == "BTCUSDT"
+    assert design["candidate"]["side"] == "Sell"
+    assert design["candidate"]["outcome_horizon_minutes"] == 240
+    assert design["evidence_snapshot"]["avg_net_bps"] == 3.0511
+    assert design["suggested_initial_probe_limits"]["active"] is False
+    assert design["suggested_initial_probe_limits"][
+        "requires_separate_operator_authorization"
+    ] is True
+    assert design["suggested_initial_probe_limits"][
+        "max_probe_intents_before_review"
+    ] == 3
+    assert design["success_criteria"]["min_realized_avg_net_bps"] == 0.0
+    assert design["success_criteria"]["promotion_evidence"] is False
+    assert "main_cost_gate_adjustment_requested" in design["stop_conditions"]
 
 
 def test_all_review_gates_ready_still_does_not_grant_authority() -> None:
@@ -181,6 +219,12 @@ def test_all_review_gates_ready_still_does_not_grant_authority() -> None:
     assert packet["answers"]["global_cost_gate_lowering_recommended"] is False
     assert "Sealed Horizon Bounded Demo Probe Preflight" in markdown
     assert "ma_crossover|BTCUSDT|Sell" in markdown
+    assert "READY_FOR_SEPARATE_OPERATOR_AUTHORIZATION" in markdown
+    design = packet["bounded_demo_probe_design"]
+    assert design["status"] == "READY_FOR_SEPARATE_OPERATOR_AUTHORIZATION"
+    assert design["suggested_initial_probe_limits"]["active"] is False
+    assert design["authority_boundary"]["probe_authority_granted"] is False
+    assert design["authority_boundary"]["order_authority_granted"] is False
 
 
 def test_authority_granting_input_fails_closed() -> None:
@@ -195,6 +239,7 @@ def test_authority_granting_input_fails_closed() -> None:
     assert packet["status"] == "AUTHORITY_BOUNDARY_VIOLATION"
     assert packet["answers"]["ready_for_operator_bounded_demo_probe_authorization"] is False
     assert "authority_boundary_preserved" in packet["blocking_gates"]
+    assert packet["bounded_demo_probe_design"]["status"] == "AUTHORITY_BOUNDARY_VIOLATION"
 
 
 def test_decision_packet_search_root_prefers_aligned_sealed_packet(tmp_path) -> None:

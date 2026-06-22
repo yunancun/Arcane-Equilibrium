@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Sealed Horizon Bounded Probe Design
+
+- `sealed_horizon_bounded_demo_probe_preflight_v1` now embeds inactive `bounded_demo_probe_design_v1` with candidate side-cell/horizon, edge snapshot, initial demo caps, success criteria, stop conditions, and required review artifacts.
+- Profitability scorecard mirrors the bounded-probe design status/limits in top path evidence, making the operator-review step concrete without granting Cost Gate lowering, probe/order authority, runtime mutation, or promotion proof.
+- Current remaining gate is still actual operator review/authorization; the design packet is review input only.
+
 ## 2026-06-22 Cost Gate Learning-Lane Accumulation Gate
 
 - A controlled artifact-only 168h learning-lane refresh produced 40,000 ledger rows, 20,000 blocked-signal outcomes, and a review candidate `ma_crossover|ETHUSDT|Sell`, proving the production learning lane can accumulate evidence from recorded rejects without lowering Cost Gate or submitting orders.

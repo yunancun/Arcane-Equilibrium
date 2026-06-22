@@ -335,8 +335,12 @@ def _sealed_probe_preflight_fields(
             "sealed_probe_preflight_blocking_gates": [],
             "sealed_probe_preflight_blocking_gate_count": 0,
             "sealed_probe_preflight_ready_for_operator_authorization": False,
+            "sealed_probe_preflight_bounded_demo_probe_design_status": None,
         }
     answers = _dict(payload.get("answers"))
+    design = _dict(payload.get("bounded_demo_probe_design"))
+    limits = _dict(design.get("suggested_initial_probe_limits"))
+    success = _dict(design.get("success_criteria"))
     return {
         "sealed_probe_preflight_present": True,
         "sealed_probe_preflight_schema_version": payload.get("schema_version"),
@@ -375,6 +379,24 @@ def _sealed_probe_preflight_fields(
         ),
         "sealed_probe_preflight_promotion_evidence": (
             answers.get("promotion_evidence") is True
+        ),
+        "sealed_probe_preflight_bounded_demo_probe_design_status": (
+            design.get("status")
+        ),
+        "sealed_probe_preflight_bounded_demo_probe_max_probe_intents_before_review": (
+            limits.get("max_probe_intents_before_review")
+        ),
+        "sealed_probe_preflight_bounded_demo_probe_max_demo_notional_usdt_per_order": (
+            limits.get("max_demo_notional_usdt_per_order")
+        ),
+        "sealed_probe_preflight_bounded_demo_probe_max_total_demo_notional_usdt_before_review": (
+            limits.get("max_total_demo_notional_usdt_before_review")
+        ),
+        "sealed_probe_preflight_bounded_demo_probe_min_realized_avg_net_bps": (
+            success.get("min_realized_avg_net_bps")
+        ),
+        "sealed_probe_preflight_bounded_demo_probe_promotion_evidence": (
+            success.get("promotion_evidence") is True
         ),
     }
 
