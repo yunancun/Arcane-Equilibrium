@@ -42,6 +42,15 @@ REQUIRED_SOURCE_RELATIVE_PATHS = (
     "helper_scripts/research/cost_gate_learning_lane/status.py",
 )
 
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+        + "\n",
+        encoding="utf-8",
+    )
+
 WRITER_ENABLE_ENV = "OPENCLAW_DEMO_LEARNING_LANE_WRITER"
 WRITER_PLAN_ENV = "OPENCLAW_DEMO_LEARNING_LANE_PLAN"
 WRITER_LEDGER_ENV = "OPENCLAW_DEMO_LEARNING_LANE_LEDGER"
@@ -1771,6 +1780,11 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=DEFAULT_PLAN_MAX_AGE_SECONDS,
     )
+    parser.add_argument(
+        "--json-output",
+        type=Path,
+        help="Optional path to write the activation preflight JSON artifact.",
+    )
     parser.add_argument("--print-json", action="store_true", help="Print JSON output.")
     args = parser.parse_args(argv)
 
@@ -1795,6 +1809,8 @@ def main(argv: list[str] | None = None) -> int:
         max_loop_age_seconds=args.max_loop_age_seconds,
         max_plan_age_seconds=args.max_plan_age_seconds,
     )
+    if args.json_output:
+        _write_json(args.json_output, payload)
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
     return 0
 
