@@ -30,6 +30,18 @@ v391 把 sealed horizon candidate 的下一步從文字 gate 變成可重跑 art
 - `python3 -m py_compile ...` passed.
 - `PYTHONPATH=helper_scripts/research python3 -m pytest helper_scripts/research/tests/test_cost_gate_sealed_horizon_probe_preflight.py helper_scripts/research/tests/test_alpha_discovery_throughput.py helper_scripts/research/tests/test_alpha_discovery_learning_worklist.py -q` = `59 passed`.
 - `PYTHONPATH=helper_scripts/research python3 -m pytest helper_scripts/research/tests/test_cost_gate_sealed_horizon_probe_preflight.py helper_scripts/research/tests/test_cost_gate_learning_lane_decision_packet.py helper_scripts/research/tests/test_cost_gate_sealed_horizon_learning_evidence.py helper_scripts/research/tests/test_profitability_path_scorecard.py helper_scripts/research/tests/test_alpha_discovery_throughput.py helper_scripts/research/tests/test_alpha_discovery_learning_worklist.py -q` = `72 passed`.
+- Linux `trade-core` fast-forwarded and ran the same focused suites:
+  - preflight/alpha/worklist = `59 passed`
+  - related Cost Gate/scorecard/alpha = `72 passed`
+- Linux artifact smoke:
+  - preflight JSON：`/tmp/openclaw/profitability_refresh/20260622T031320Z/sealed_horizon_probe_preflight_v391/sealed_horizon_probe_preflight_latest.json`
+  - preflight sha256：`09b498b1b254f75e6c3de04ce7ea8206735b547e5bce0f465c7f5a2c287e2fbc`
+  - status：`OPERATOR_REVIEW_AND_PRODUCTION_LEARNING_LANE_REQUIRED`
+  - blocking gates：`operator_sealed_horizon_review_recorded`, `production_learning_lane_accumulating`
+  - alpha smoke latest：`/tmp/openclaw/profitability_refresh/20260622T031320Z/alpha_discovery_v391_smoke/alpha_discovery_latest.json`
+  - alpha smoke sha256：`cc0966b2bbdf34fb54b53ff4efcf9a5138afccc8a26a6b84e95cb65f2c398f1c`
+  - alpha blocker：`sealed_horizon_probe_preflight_requires_operator_review_and_learning_lane`
+  - worklist objective：`operator_review_sealed_horizon_preflight_and_activate_production_learning_lane`
 
 ## Boundary
 

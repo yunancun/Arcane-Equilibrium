@@ -25,3 +25,5 @@
 ## 下一個合理決策
 
 先用 preflight artifact 審 `ma_crossover|BTCUSDT|Sell@240m`。只有當 operator review 記錄存在，且 production learning lane 在真 demo runtime 持續積累 ledger/outcome rows 後，才值得另開 Rust-authority bounded demo probe authorization。
+
+Linux smoke 結果：preflight status 是 `OPERATOR_REVIEW_AND_PRODUCTION_LEARNING_LANE_REQUIRED`，blocking gates 是 `operator_sealed_horizon_review_recorded` 和 `production_learning_lane_accumulating`；probe/order authority 都仍是 false。
