@@ -1761,3 +1761,9 @@
 - Alpha smoke after source sync reports top objective `operator_review_multi_horizon_blocked_signal_side_cell_before_bounded_demo_probe`, matched cell horizons `[15,30,60,120,240]`, `requires_operator_authorization=true`, `runtime_mutation_required=false`, and order/probe authority false.
 - Remaining gate: decision packet still records `DATA_FLOW_MONITOR_REQUIRED`; this candidate is reviewable but not tradeable until data-flow, bounded demo probe authorization, matched-control result review, and execution-realism evidence are complete.
 - Verification: Mac/Linux focused decision/alpha/worklist tests `71 passed`; cron static `13 passed`; source commits `65278ca9`, `aed33504`, `1f7180a1` pushed `[skip ci]`; Linux source clean at `1f7180a1`; read-only multi-horizon scorecard refresh, packet refresh, and alpha smoke passed.
+
+## 2026-06-22 Cost Gate Data-Flow Packet Refresh Cron
+
+- v413 wires demo data-flow monitor + profit-learning decision packet refresh into `cost_gate_learning_lane_cron.sh`, so the learning lane now auto-records whether rejects are present, whether silent-drop risk exists, and whether blocked side-cells are ready for operator review.
+- Linux smoke initially failed on a missing optional sealed-evidence artifact; source now treats absent optional packet inputs as `MISSING` and still emits a fail-closed packet.
+- Latest runtime evidence: data-flow `DEMO_ORDER_FLOW_PRESENT_NO_FILLS`, `broad_cost_gate_rejects=58968`, `broad_orders=3`, `broad_fills=0`, decision packet `OPERATOR_REVIEW_DEMO_PROBE_CANDIDATES`, `silent_drop_risk=false`, alpha top task `operator_probe_review`; no Cost Gate lowering, probe/order authority, runtime mutation, or promotion proof.
