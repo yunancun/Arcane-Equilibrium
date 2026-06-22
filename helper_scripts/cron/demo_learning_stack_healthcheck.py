@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Read-only healthcheck for the demo-learning cron stack.
 
-This checks whether the two operator-installed learning crons are present and
-fresh enough to prove the runtime is accumulating demo-learning evidence.
+This checks whether the four operator-installed learning stack crons are
+present and fresh enough to prove the runtime is accumulating demo-learning
+evidence and bounded-review inputs.
 It reads crontab, local artifacts, and local git metadata only.
 """
 
@@ -172,14 +173,22 @@ def _cron_summary(text: str, error: str | None) -> dict[str, Any]:
         "demo_learning_evidence_entry_present": present(
             "demo_learning_evidence_audit_cron.sh"
         ),
+        "sealed_horizon_probe_preflight_entry_present": present(
+            "sealed_horizon_probe_preflight_cron.sh"
+        ),
         "cost_gate_learning_lane_entry_present": present(
             "cost_gate_learning_lane_cron.sh"
+        ),
+        "demo_learning_stack_healthcheck_entry_present": present(
+            "demo_learning_stack_healthcheck_cron.sh"
         ),
         "matching_entries": [
             line
             for line in active_entries
             if "demo_learning_evidence_audit_cron.sh" in line
+            or "sealed_horizon_probe_preflight_cron.sh" in line
             or "cost_gate_learning_lane_cron.sh" in line
+            or "demo_learning_stack_healthcheck_cron.sh" in line
         ][:10],
     }
 
@@ -288,6 +297,18 @@ def build_healthcheck(
     demo_status = demo["latest_status"]
     review_json = cost.get("latest_json") or {}
     lane_dir = data_dir / "cost_gate_learning_lane"
+    sealed_preflight_cron = _component_summary(
+        name="sealed_horizon_probe_preflight",
+        heartbeat=_file_age(
+            heartbeat_dir / "sealed_horizon_probe_preflight.last_fire",
+            now_utc=now,
+        ),
+        status_log=log_dir / "sealed_horizon_probe_preflight.log",
+        latest_json=lane_dir / "sealed_horizon_probe_preflight_latest.json",
+        now_utc=now,
+        max_heartbeat_age_seconds=max_heartbeat_age_seconds,
+        max_status_age_seconds=max_status_age_seconds,
+    )
     sealed_preflight = _artifact_status(
         lane_dir / "sealed_horizon_probe_preflight_latest.json",
         now_utc=now,
@@ -313,10 +334,20 @@ def build_healthcheck(
     cost_error = any(rc not in (None, 0) for rc in cost_rcs)
     stack_installed = (
         cron["demo_learning_evidence_entry_present"]
+        and cron["sealed_horizon_probe_preflight_entry_present"]
         and cron["cost_gate_learning_lane_entry_present"]
+        and cron["demo_learning_stack_healthcheck_entry_present"]
     )
-    heartbeats_recent = demo["heartbeat_recent"] and cost["heartbeat_recent"]
-    statuses_recent = demo["latest_status_recent"] and cost["latest_status_recent"]
+    heartbeats_recent = (
+        demo["heartbeat_recent"]
+        and sealed_preflight_cron["heartbeat_recent"]
+        and cost["heartbeat_recent"]
+    )
+    statuses_recent = (
+        demo["latest_status_recent"]
+        and sealed_preflight_cron["latest_status_recent"]
+        and cost["latest_status_recent"]
+    )
     latest_artifacts_present = (
         demo["latest_json_error"] is None and cost["latest_json_error"] is None
     )
@@ -346,11 +377,11 @@ def build_healthcheck(
         next_action = "reconcile_runtime_source_before_stack_install_or_validation"
     elif not stack_installed:
         status = "NOT_INSTALLED"
-        reason = "one_or_both_demo_learning_stack_crons_missing"
+        reason = "one_or_more_demo_learning_stack_crons_missing"
         next_action = "install_stack_after_operator_source_reconcile"
     elif not heartbeats_recent:
         status = "INSTALLED_NOT_FIRING"
-        reason = "one_or_both_stack_heartbeats_missing_or_stale"
+        reason = "one_or_more_stack_heartbeats_missing_or_stale"
         next_action = "inspect_cron_logs_and_crontab_schedule"
     elif not statuses_recent:
         status = "FIRING_NO_RECENT_STATUS"
@@ -394,8 +425,30 @@ def build_healthcheck(
         "answers": {
             "source_ready": source_ready,
             "stack_installed": stack_installed,
+            "demo_learning_evidence_cron_entry_present": cron[
+                "demo_learning_evidence_entry_present"
+            ],
+            "sealed_horizon_probe_preflight_cron_entry_present": cron[
+                "sealed_horizon_probe_preflight_entry_present"
+            ],
+            "cost_gate_learning_lane_cron_entry_present": cron[
+                "cost_gate_learning_lane_entry_present"
+            ],
+            "demo_learning_stack_healthcheck_cron_entry_present": cron[
+                "demo_learning_stack_healthcheck_entry_present"
+            ],
             "heartbeats_recent": heartbeats_recent,
+            "demo_learning_evidence_heartbeat_recent": demo["heartbeat_recent"],
+            "sealed_horizon_probe_preflight_heartbeat_recent": sealed_preflight_cron[
+                "heartbeat_recent"
+            ],
+            "cost_gate_learning_lane_heartbeat_recent": cost["heartbeat_recent"],
             "statuses_recent": statuses_recent,
+            "demo_learning_evidence_status_recent": demo["latest_status_recent"],
+            "sealed_horizon_probe_preflight_status_recent": sealed_preflight_cron[
+                "latest_status_recent"
+            ],
+            "cost_gate_learning_lane_status_recent": cost["latest_status_recent"],
             "latest_artifacts_present": latest_artifacts_present,
             "sealed_horizon_probe_preflight_present": sealed_preflight["present"],
             "bounded_probe_reviews_present": bounded_reviews_present,
@@ -424,6 +477,7 @@ def build_healthcheck(
         "cron": cron,
         "components": {
             "demo_learning_evidence": demo,
+            "sealed_horizon_probe_preflight_cron": sealed_preflight_cron,
             "cost_gate_learning_lane": cost,
             "sealed_horizon_probe_preflight": sealed_preflight,
             "bounded_probe_result_review": bounded_result_review,

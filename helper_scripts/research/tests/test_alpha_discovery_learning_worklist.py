@@ -303,8 +303,18 @@ def test_learning_worklist_carries_demo_learning_stack_health_evidence():
                 "demo_learning_stack_healthcheck_source_ok": True,
                 "demo_learning_stack_source_ready": True,
                 "demo_learning_stack_stack_installed": False,
+                "demo_learning_stack_demo_learning_evidence_cron_entry_present": False,
+                "demo_learning_stack_sealed_horizon_probe_preflight_cron_entry_present": False,
+                "demo_learning_stack_cost_gate_learning_lane_cron_entry_present": False,
+                "demo_learning_stack_healthcheck_cron_entry_present": False,
                 "demo_learning_stack_heartbeats_recent": False,
+                "demo_learning_stack_demo_learning_evidence_heartbeat_recent": False,
+                "demo_learning_stack_sealed_horizon_probe_preflight_heartbeat_recent": False,
+                "demo_learning_stack_cost_gate_learning_lane_heartbeat_recent": False,
                 "demo_learning_stack_statuses_recent": False,
+                "demo_learning_stack_demo_learning_evidence_status_recent": False,
+                "demo_learning_stack_sealed_horizon_probe_preflight_status_recent": False,
+                "demo_learning_stack_cost_gate_learning_lane_status_recent": False,
                 "demo_learning_stack_latest_artifacts_present": False,
                 "demo_learning_stack_cost_gate_learning_ledger_rows_present": False,
                 "demo_learning_stack_blocked_signal_outcomes_present": False,
@@ -331,6 +341,12 @@ def test_learning_worklist_carries_demo_learning_stack_health_evidence():
         "NOT_INSTALLED"
     )
     assert task["evidence"]["demo_learning_stack_stack_installed"] is False
+    assert (
+        task["evidence"][
+            "demo_learning_stack_sealed_horizon_probe_preflight_cron_entry_present"
+        ]
+        is False
+    )
     assert task["evidence"][
         "demo_learning_stack_cost_gate_learning_ledger_rows_present"
     ] is False

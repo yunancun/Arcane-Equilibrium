@@ -1487,8 +1487,38 @@ def summarize_demo_learning_stack_healthcheck(
         "demo_learning_stack_healthcheck_source_error": freshness_error,
         "demo_learning_stack_source_ready": answers.get("source_ready"),
         "demo_learning_stack_stack_installed": answers.get("stack_installed"),
+        "demo_learning_stack_demo_learning_evidence_cron_entry_present": answers.get(
+            "demo_learning_evidence_cron_entry_present"
+        ),
+        "demo_learning_stack_sealed_horizon_probe_preflight_cron_entry_present": (
+            answers.get("sealed_horizon_probe_preflight_cron_entry_present")
+        ),
+        "demo_learning_stack_cost_gate_learning_lane_cron_entry_present": answers.get(
+            "cost_gate_learning_lane_cron_entry_present"
+        ),
+        "demo_learning_stack_healthcheck_cron_entry_present": answers.get(
+            "demo_learning_stack_healthcheck_cron_entry_present"
+        ),
         "demo_learning_stack_heartbeats_recent": answers.get("heartbeats_recent"),
+        "demo_learning_stack_demo_learning_evidence_heartbeat_recent": answers.get(
+            "demo_learning_evidence_heartbeat_recent"
+        ),
+        "demo_learning_stack_sealed_horizon_probe_preflight_heartbeat_recent": (
+            answers.get("sealed_horizon_probe_preflight_heartbeat_recent")
+        ),
+        "demo_learning_stack_cost_gate_learning_lane_heartbeat_recent": answers.get(
+            "cost_gate_learning_lane_heartbeat_recent"
+        ),
         "demo_learning_stack_statuses_recent": answers.get("statuses_recent"),
+        "demo_learning_stack_demo_learning_evidence_status_recent": answers.get(
+            "demo_learning_evidence_status_recent"
+        ),
+        "demo_learning_stack_sealed_horizon_probe_preflight_status_recent": (
+            answers.get("sealed_horizon_probe_preflight_status_recent")
+        ),
+        "demo_learning_stack_cost_gate_learning_lane_status_recent": answers.get(
+            "cost_gate_learning_lane_status_recent"
+        ),
         "demo_learning_stack_latest_artifacts_present": answers.get(
             "latest_artifacts_present"
         ),
