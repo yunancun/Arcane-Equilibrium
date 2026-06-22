@@ -221,6 +221,20 @@ def _component_summary(
     }
 
 
+def _artifact_status(path: Path, *, now_utc: dt.datetime) -> dict[str, Any]:
+    payload, error = _read_json(path)
+    generated_at = payload.get("generated_at_utc") or payload.get("ts_utc")
+    return {
+        "path": str(path),
+        "present": error is None,
+        "error": error,
+        "status": payload.get("status"),
+        "reason": payload.get("reason"),
+        "generated_at_utc": generated_at,
+        "age_seconds": _age_seconds(str(generated_at or ""), now_utc=now_utc),
+    }
+
+
 def build_healthcheck(
     *,
     data_dir: Path,
@@ -273,6 +287,19 @@ def build_healthcheck(
     cost_status = cost["latest_status"]
     demo_status = demo["latest_status"]
     review_json = cost.get("latest_json") or {}
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    sealed_preflight = _artifact_status(
+        lane_dir / "sealed_horizon_probe_preflight_latest.json",
+        now_utc=now,
+    )
+    bounded_result_review = _artifact_status(
+        lane_dir / "bounded_probe_result_review_latest.json",
+        now_utc=now,
+    )
+    bounded_execution_review = _artifact_status(
+        lane_dir / "bounded_probe_execution_realism_review_latest.json",
+        now_utc=now,
+    )
 
     cost_rcs = [
         cost_status.get("scorecard_rc"),
@@ -280,6 +307,8 @@ def build_healthcheck(
         cost_status.get("materializer_rc"),
         cost_status.get("refresh_rc"),
         cost_status.get("review_rc"),
+        cost_status.get("bounded_probe_result_review_rc"),
+        cost_status.get("bounded_probe_execution_realism_review_rc"),
     ]
     cost_error = any(rc not in (None, 0) for rc in cost_rcs)
     stack_installed = (
@@ -290,6 +319,9 @@ def build_healthcheck(
     statuses_recent = demo["latest_status_recent"] and cost["latest_status_recent"]
     latest_artifacts_present = (
         demo["latest_json_error"] is None and cost["latest_json_error"] is None
+    )
+    bounded_reviews_present = (
+        bounded_result_review["present"] and bounded_execution_review["present"]
     )
     ledger_rows = cost_status.get("ledger_row_count")
     blocked_outcomes = (
@@ -340,6 +372,14 @@ def build_healthcheck(
         status = "LEDGER_ONLY_NEEDS_OUTCOME_REFRESH"
         reason = "ledger_rows_present_but_no_blocked_signal_outcomes_yet"
         next_action = "wait_for_outcome_refresh_or_inspect_price_observation_windows"
+    elif not sealed_preflight["present"]:
+        status = "BOUNDED_PROBE_PREFLIGHT_MISSING"
+        reason = "sealed_horizon_probe_preflight_latest_missing_or_unreadable"
+        next_action = "refresh_sealed_horizon_probe_preflight_before_bounded_probe_reviews"
+    elif not bounded_reviews_present:
+        status = "BOUNDED_PROBE_REVIEW_ARTIFACTS_MISSING"
+        reason = "bounded_probe_result_or_execution_realism_review_latest_missing_or_unreadable"
+        next_action = "rerun_cost_gate_learning_lane_cron_after_sealed_preflight_refresh"
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -357,18 +397,37 @@ def build_healthcheck(
             "heartbeats_recent": heartbeats_recent,
             "statuses_recent": statuses_recent,
             "latest_artifacts_present": latest_artifacts_present,
+            "sealed_horizon_probe_preflight_present": sealed_preflight["present"],
+            "bounded_probe_reviews_present": bounded_reviews_present,
+            "bounded_probe_result_review_present": bounded_result_review["present"],
+            "bounded_probe_execution_realism_review_present": (
+                bounded_execution_review["present"]
+            ),
+            "bounded_probe_result_review_skip_reason": cost_status.get(
+                "bounded_probe_result_review_skip_reason"
+            ),
+            "bounded_probe_execution_realism_review_skip_reason": cost_status.get(
+                "bounded_probe_execution_realism_review_skip_reason"
+            ),
             "cost_gate_learning_stage_error": cost_error,
             "cost_gate_learning_ledger_rows_present": bool(ledger_rows),
             "blocked_signal_outcomes_present": bool(blocked_outcomes),
             "blocked_outcome_review_present": bool(review_status),
             "demo_learning_evidence_classification_status": demo_classification_status,
             "cost_gate_learning_review_status": review_status,
+            "bounded_probe_result_review_status": bounded_result_review["status"],
+            "bounded_probe_execution_realism_review_status": (
+                bounded_execution_review["status"]
+            ),
         },
         "source": source,
         "cron": cron,
         "components": {
             "demo_learning_evidence": demo,
             "cost_gate_learning_lane": cost,
+            "sealed_horizon_probe_preflight": sealed_preflight,
+            "bounded_probe_result_review": bounded_result_review,
+            "bounded_probe_execution_realism_review": bounded_execution_review,
         },
         "boundary": (
             "read-only crontab/artifact/status/source healthcheck with optional "

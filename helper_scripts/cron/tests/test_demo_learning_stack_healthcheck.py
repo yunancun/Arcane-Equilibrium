@@ -95,9 +95,13 @@ def _populate_active_data(data_dir: Path) -> None:
                 "materializer_rc": 0,
                 "refresh_rc": 0,
                 "review_rc": 0,
+                "bounded_probe_result_review_rc": 0,
+                "bounded_probe_execution_realism_review_rc": 0,
                 "ledger_row_count": 9,
                 "blocked_signal_outcome_count": 4,
                 "review_status": "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT",
+                "bounded_probe_result_review_status": "NO_PROBE_OUTCOMES_RECORDED",
+                "bounded_probe_execution_realism_review_status": "NO_EXECUTION_REALISM_GAP_TO_REVIEW",
             },
             sort_keys=True,
         )
@@ -114,6 +118,39 @@ def _populate_active_data(data_dir: Path) -> None:
                 "schema_version": "cost_gate_demo_learning_lane_blocked_outcome_review_v2",
                 "status": "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT",
                 "blocked_signal_outcome_count": 4,
+            }
+        ),
+    )
+    _write(
+        data_dir / "cost_gate_learning_lane/sealed_horizon_probe_preflight_latest.json",
+        json.dumps(
+            {
+                "schema_version": "sealed_horizon_bounded_demo_probe_preflight_v1",
+                "generated_at_utc": "2026-06-21T23:57:00Z",
+                "status": "OPERATOR_REVIEW_REQUIRED",
+            }
+        ),
+    )
+    _write(
+        data_dir / "cost_gate_learning_lane/bounded_probe_result_review_latest.json",
+        json.dumps(
+            {
+                "schema_version": "bounded_demo_probe_result_review_v1",
+                "generated_at_utc": "2026-06-21T23:57:30Z",
+                "status": "NO_PROBE_OUTCOMES_RECORDED",
+                "reason": "bounded_demo_probe_has_no_completed_outcomes",
+            }
+        ),
+    )
+    _write(
+        data_dir
+        / "cost_gate_learning_lane/bounded_probe_execution_realism_review_latest.json",
+        json.dumps(
+            {
+                "schema_version": "bounded_demo_probe_execution_realism_review_v1",
+                "generated_at_utc": "2026-06-21T23:57:45Z",
+                "status": "NO_EXECUTION_REALISM_GAP_TO_REVIEW",
+                "reason": "bounded_probe_result_review_does_not_report_execution_realism_gap",
             }
         ),
     )
@@ -143,7 +180,21 @@ def test_active_stack_reports_evidence_active(tmp_path: Path) -> None:
     assert payload["answers"]["heartbeats_recent"] is True
     assert payload["answers"]["cost_gate_learning_ledger_rows_present"] is True
     assert payload["answers"]["blocked_signal_outcomes_present"] is True
+    assert payload["answers"]["sealed_horizon_probe_preflight_present"] is True
+    assert payload["answers"]["bounded_probe_reviews_present"] is True
+    assert payload["answers"]["bounded_probe_result_review_present"] is True
+    assert (
+        payload["answers"]["bounded_probe_execution_realism_review_present"] is True
+    )
+    assert payload["answers"]["bounded_probe_result_review_status"] == (
+        "NO_PROBE_OUTCOMES_RECORDED"
+    )
     assert payload["components"]["cost_gate_learning_lane"]["latest_status"]["ledger_row_count"] == 9
+    assert payload["components"]["bounded_probe_result_review"]["present"] is True
+    assert (
+        payload["components"]["bounded_probe_execution_realism_review"]["present"]
+        is True
+    )
 
 
 def test_json_output_writes_explicit_artifact(tmp_path: Path) -> None:
@@ -199,6 +250,44 @@ def test_stale_heartbeat_blocks_active_status(tmp_path: Path) -> None:
     assert payload["status"] == "INSTALLED_NOT_FIRING"
     assert payload["answers"]["heartbeats_recent"] is False
     assert payload["components"]["cost_gate_learning_lane"]["heartbeat_recent"] is False
+
+
+def test_missing_bounded_probe_reviews_block_active_status(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    head = _git_repo(repo)
+    data = tmp_path / "data"
+    _populate_active_data(data)
+    (data / "cost_gate_learning_lane/bounded_probe_result_review_latest.json").unlink()
+
+    payload = _run(tmp_path, data, repo, _active_crontab(), head)
+
+    assert payload["status"] == "BOUNDED_PROBE_REVIEW_ARTIFACTS_MISSING"
+    assert payload["answers"]["blocked_signal_outcomes_present"] is True
+    assert payload["answers"]["bounded_probe_reviews_present"] is False
+    assert payload["answers"]["bounded_probe_result_review_present"] is False
+    assert (
+        payload["answers"]["bounded_probe_execution_realism_review_present"] is True
+    )
+    assert payload["next_action"] == (
+        "rerun_cost_gate_learning_lane_cron_after_sealed_preflight_refresh"
+    )
+
+
+def test_missing_sealed_preflight_blocks_bounded_probe_review_status(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    head = _git_repo(repo)
+    data = tmp_path / "data"
+    _populate_active_data(data)
+    (data / "cost_gate_learning_lane/sealed_horizon_probe_preflight_latest.json").unlink()
+
+    payload = _run(tmp_path, data, repo, _active_crontab(), head)
+
+    assert payload["status"] == "BOUNDED_PROBE_PREFLIGHT_MISSING"
+    assert payload["answers"]["sealed_horizon_probe_preflight_present"] is False
+    assert payload["answers"]["bounded_probe_reviews_present"] is True
+    assert payload["next_action"] == (
+        "refresh_sealed_horizon_probe_preflight_before_bounded_probe_reviews"
+    )
 
 
 def test_dirty_source_blocks_validation(tmp_path: Path) -> None:
