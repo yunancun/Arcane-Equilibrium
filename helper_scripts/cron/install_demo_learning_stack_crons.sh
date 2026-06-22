@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # install_demo_learning_stack_crons.sh - operator-gated installer for the
-# demo-learning evidence heartbeat, cost-gate learning-lane cron, and stack
-# health artifact refresher.
+# demo-learning evidence heartbeat, sealed horizon preflight refresher,
+# cost-gate learning-lane cron, and stack health artifact refresher.
 #
 # Purpose:
 #   Install the bounded learning crons as one reviewed stack, avoiding a
-#   half-installed state where demo evidence or Cost Gate learning runs without
-#   the health artifact that alpha-discovery consumes for completion evidence.
+#   half-installed state where demo evidence, sealed preflight, or Cost Gate
+#   learning runs without the health artifact that alpha-discovery consumes for
+#   completion evidence.
 #
 # Default behavior is a dry-run preview. Crontab mutation requires
 # OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY=1.
@@ -24,6 +25,8 @@ OPENCLAW_DEMO_LEARNING_STACK_PREFLIGHT="${OPENCLAW_DEMO_LEARNING_STACK_PREFLIGHT
 OPENCLAW_DEMO_LEARNING_STACK_PREINSTALL_REFRESH="${OPENCLAW_DEMO_LEARNING_STACK_PREINSTALL_REFRESH:-1}"
 
 DEMO_INSTALLER="$OPENCLAW_BASE_DIR/helper_scripts/cron/install_demo_learning_evidence_audit_cron.sh"
+SEALED_PREFLIGHT_INSTALLER="$OPENCLAW_BASE_DIR/helper_scripts/cron/install_sealed_horizon_probe_preflight_cron.sh"
+SEALED_PREFLIGHT_WRAPPER="$OPENCLAW_BASE_DIR/helper_scripts/cron/sealed_horizon_probe_preflight_cron.sh"
 COST_INSTALLER="$OPENCLAW_BASE_DIR/helper_scripts/cron/install_cost_gate_learning_lane_cron.sh"
 HEALTH_INSTALLER="$OPENCLAW_BASE_DIR/helper_scripts/cron/install_demo_learning_stack_healthcheck_cron.sh"
 COST_WRAPPER="$OPENCLAW_BASE_DIR/helper_scripts/cron/cost_gate_learning_lane_cron.sh"
@@ -152,6 +155,11 @@ PY
 }
 
 _run_preinstall_refresh() {
+    echo "Running artifact-only sealed horizon preflight refresh before stack install..."
+    OPENCLAW_BASE_DIR="$OPENCLAW_BASE_DIR" \
+    OPENCLAW_DATA_DIR="$OPENCLAW_DATA_DIR" \
+    "$SEALED_PREFLIGHT_WRAPPER"
+
     echo "Running read-only/artifact-only Cost Gate preinstall refresh before stack install..."
     OPENCLAW_BASE_DIR="$OPENCLAW_BASE_DIR" \
     OPENCLAW_DATA_DIR="$OPENCLAW_DATA_DIR" \
@@ -168,6 +176,16 @@ _run_child_previews() {
     OPENCLAW_DEMO_LEARNING_EVIDENCE_EXPECTED_HEAD="$OPENCLAW_DEMO_LEARNING_STACK_EXPECTED_HEAD" \
     OPENCLAW_EXPECTED_SOURCE_HEAD="$OPENCLAW_DEMO_LEARNING_STACK_EXPECTED_HEAD" \
     "$DEMO_INSTALLER"
+
+    echo
+    echo "=== Sealed horizon probe preflight cron preview ==="
+    OPENCLAW_BASE_DIR="$OPENCLAW_BASE_DIR" \
+    OPENCLAW_DATA_DIR="$OPENCLAW_DATA_DIR" \
+    OPENCLAW_SEALED_HORIZON_PREFLIGHT_CRON_APPLY=0 \
+    OPENCLAW_SEALED_HORIZON_PREFLIGHT_EXPECTED_HEAD="$OPENCLAW_DEMO_LEARNING_STACK_EXPECTED_HEAD" \
+    OPENCLAW_DEMO_LEARNING_STACK_EXPECTED_HEAD="$OPENCLAW_DEMO_LEARNING_STACK_EXPECTED_HEAD" \
+    OPENCLAW_EXPECTED_SOURCE_HEAD="$OPENCLAW_DEMO_LEARNING_STACK_EXPECTED_HEAD" \
+    "$SEALED_PREFLIGHT_INSTALLER"
 
     echo
     echo "=== Cost Gate learning-lane cron preview ==="
@@ -199,6 +217,14 @@ _install_children() {
 
     OPENCLAW_BASE_DIR="$OPENCLAW_BASE_DIR" \
     OPENCLAW_DATA_DIR="$OPENCLAW_DATA_DIR" \
+    OPENCLAW_SEALED_HORIZON_PREFLIGHT_CRON_APPLY=1 \
+    OPENCLAW_SEALED_HORIZON_PREFLIGHT_EXPECTED_HEAD="$OPENCLAW_DEMO_LEARNING_STACK_EXPECTED_HEAD" \
+    OPENCLAW_DEMO_LEARNING_STACK_EXPECTED_HEAD="$OPENCLAW_DEMO_LEARNING_STACK_EXPECTED_HEAD" \
+    OPENCLAW_EXPECTED_SOURCE_HEAD="$OPENCLAW_DEMO_LEARNING_STACK_EXPECTED_HEAD" \
+    "$SEALED_PREFLIGHT_INSTALLER"
+
+    OPENCLAW_BASE_DIR="$OPENCLAW_BASE_DIR" \
+    OPENCLAW_DATA_DIR="$OPENCLAW_DATA_DIR" \
     OPENCLAW_COST_GATE_LEARNING_CRON_APPLY=1 \
     OPENCLAW_COST_GATE_LEARNING_EXPECTED_HEAD="$OPENCLAW_DEMO_LEARNING_STACK_EXPECTED_HEAD" \
     OPENCLAW_EXPECTED_SOURCE_HEAD="$OPENCLAW_DEMO_LEARNING_STACK_EXPECTED_HEAD" \
@@ -226,6 +252,11 @@ _remove_children() {
 
     OPENCLAW_BASE_DIR="$OPENCLAW_BASE_DIR" \
     OPENCLAW_DATA_DIR="$OPENCLAW_DATA_DIR" \
+    OPENCLAW_SEALED_HORIZON_PREFLIGHT_CRON_APPLY="${OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY:-0}" \
+    "$SEALED_PREFLIGHT_INSTALLER" --remove
+
+    OPENCLAW_BASE_DIR="$OPENCLAW_BASE_DIR" \
+    OPENCLAW_DATA_DIR="$OPENCLAW_DATA_DIR" \
     OPENCLAW_DEMO_LEARNING_EVIDENCE_CRON_APPLY="${OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY:-0}" \
     "$DEMO_INSTALLER" --remove
 }
@@ -235,6 +266,8 @@ _validate_bool01 "OPENCLAW_DEMO_LEARNING_STACK_PREINSTALL_REFRESH" "$OPENCLAW_DE
 _validate_cron_env_value "OPENCLAW_BASE_DIR" "$OPENCLAW_BASE_DIR"
 _validate_cron_env_value "OPENCLAW_DATA_DIR" "$OPENCLAW_DATA_DIR"
 _require_executable "$DEMO_INSTALLER"
+_require_executable "$SEALED_PREFLIGHT_INSTALLER"
+_require_executable "$SEALED_PREFLIGHT_WRAPPER"
 _require_executable "$COST_INSTALLER"
 _require_executable "$HEALTH_INSTALLER"
 _require_executable "$COST_WRAPPER"
@@ -246,11 +279,11 @@ echo "Expected head: ${OPENCLAW_DEMO_LEARNING_STACK_EXPECTED_HEAD:-<required on 
 echo "Apply: ${OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY:-0}"
 echo "Preflight: $OPENCLAW_DEMO_LEARNING_STACK_PREFLIGHT"
 echo "Preinstall refresh: $OPENCLAW_DEMO_LEARNING_STACK_PREINSTALL_REFRESH"
-echo "Boundary: crontab-only stack installer plus artifact-only preinstall refresh/health status; no source sync, deploy, restart, PG write, Bybit call, order authority, or Cost Gate relaxation"
+echo "Boundary: crontab-only stack installer plus artifact-only preinstall refresh/health status; no source sync, deploy, restart, PG write, Bybit call, order authority, probe authority, or Cost Gate relaxation"
 
 if [[ "${1:-}" == "--remove" ]]; then
     echo
-    echo "Removing healthcheck cron first, then Cost Gate learning cron, then demo-learning evidence cron."
+    echo "Removing healthcheck cron first, then Cost Gate learning cron, then sealed horizon preflight cron, then demo-learning evidence cron."
     _remove_children
     exit 0
 fi
@@ -260,7 +293,7 @@ _run_child_previews
 if [[ "${OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY:-0}" != "1" ]]; then
     echo
     echo "DRY-RUN: not modifying crontab."
-    echo "Set OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY=1 and OPENCLAW_DEMO_LEARNING_STACK_EXPECTED_HEAD=<pushed-head> to install both crons."
+    echo "Set OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY=1 and OPENCLAW_DEMO_LEARNING_STACK_EXPECTED_HEAD=<pushed-head> to install the full demo-learning cron stack."
     exit 0
 fi
 
@@ -275,4 +308,4 @@ if [[ "$OPENCLAW_DEMO_LEARNING_STACK_PREFLIGHT" == "1" ]]; then
 fi
 
 _install_children
-echo "INSTALLED: demo-learning evidence, Cost Gate learning-lane, and stack healthcheck cron stack."
+echo "INSTALLED: demo-learning evidence, sealed horizon preflight, Cost Gate learning-lane, and stack healthcheck cron stack."
