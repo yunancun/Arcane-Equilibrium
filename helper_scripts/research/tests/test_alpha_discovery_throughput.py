@@ -1155,7 +1155,7 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
         now_utc=dt.datetime(2026, 6, 19, 1, 0, tzinfo=dt.timezone.utc),
     )
 
-    assert result["schema_version"] == "alpha_discovery_runtime_killboard_v8"
+    assert result["schema_version"] == "alpha_discovery_runtime_killboard_v9"
     assert result["killboard"]["is_fast_discovery_active"] is True
     assert result["killboard"]["source_present_count"] == 5
     assert result["killboard"]["runtime_source_activation_ready"] is False
@@ -2102,6 +2102,79 @@ def _write_bounded_probe_execution_realism_review_latest(
     return path
 
 
+def _write_bounded_probe_shadow_placement_impact_latest(
+    data: Path,
+    *,
+    status: str = "SHADOW_PLACEMENT_TOUCHABILITY_IMPROVED_SAMPLE_MISMATCH",
+    generated_at: str = "2026-06-21T18:04:55+00:00",
+    candidate_matched_order_count: int = 0,
+    candidate_matched_submit_count: int = 0,
+) -> Path:
+    path = (
+        data
+        / "cost_gate_learning_lane"
+        / "bounded_probe_shadow_placement_impact_latest.json"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    next_actions = [
+        "operator_review_mechanical_touchability_before_rust_patch",
+        "collect_candidate_matched_bounded_demo_probe_evidence_after_authorization",
+    ]
+    if status == "SHADOW_PLACEMENT_TOUCHABILITY_REPAIR_EFFECTIVE_FOR_MATCHED_SAMPLE":
+        next_actions = [
+            "operator_review_existing_rust_authority_path_patch",
+            "run_bounded_demo_probe_then_refresh_fill_lineage_and_execution_realism",
+        ]
+    payload = {
+        "schema_version": "bounded_demo_probe_shadow_placement_impact_v1",
+        "generated_at_utc": generated_at,
+        "status": status,
+        "reason": "fixture_bounded_probe_shadow_placement_impact",
+        "candidate": {
+            "strategy_name": "ma_crossover",
+            "symbol": "ETHUSDT",
+            "side": "Sell",
+            "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+            "outcome_horizon_minutes": 240,
+        },
+        "shadow_summary": {
+            "reviewed_order_count": 6,
+            "shadow_submit_count": 6,
+            "shadow_skip_count": 0,
+            "candidate_matched_order_count": candidate_matched_order_count,
+            "candidate_matched_submit_count": candidate_matched_submit_count,
+            "future_bbo_would_cross_shadow_limit_count": 4,
+            "status_counts": {"SHADOW_SUBMIT_NEAR_TOUCH": 6},
+            "max_original_best_touch_gap_bps": 1530.6074,
+            "max_shadow_initial_touch_gap_bps": 58.2092,
+            "avg_shadow_initial_touch_gap_bps": 17.0489,
+            "max_gap_reduction_bps": 1522.1026,
+            "avg_gap_reduction_bps": 1200.0,
+            "sample_scope": (
+                "candidate_matched_runtime_sample"
+                if candidate_matched_order_count
+                else "current_demo_order_flow_not_candidate_matched"
+            ),
+        },
+        "answers": {
+            "shadow_placement_improves_touchability": True,
+            "candidate_matched_runtime_sample_present": (
+                candidate_matched_order_count > 0
+            ),
+            "candidate_specific_alpha_proof": False,
+            "runtime_mutation_performed": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+        "next_actions": next_actions,
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
 def test_cost_gate_arm_uses_demo_learning_evidence_for_pg_reject_gap(tmp_path):
     data = tmp_path / "openclaw"
     artifact = _write_demo_learning_evidence_latest(
@@ -2884,6 +2957,58 @@ def test_cost_gate_bounded_probe_result_review_supersedes_preflight(tmp_path):
     )
     assert task["task_type"] == "reject_or_archive"
     assert task["evidence"]["bounded_probe_result_review_stop_probe_recommended"] is True
+
+
+def test_shadow_placement_impact_drives_placement_repair_task(tmp_path):
+    data = tmp_path / "openclaw"
+    _write_profit_learning_decision_packet_latest(
+        data,
+        status="OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE",
+        reason="sealed_horizon_learning_evidence_clears_review_thresholds",
+        next_actions=[
+            "operator_may_authorize_minimal_rust_authority_bounded_demo_probe_separately"
+        ],
+        sealed_horizon_candidate=True,
+    )
+    _write_sealed_horizon_probe_preflight_latest(
+        data,
+        status="READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION",
+    )
+    _write_bounded_probe_shadow_placement_impact_latest(data)
+
+    now = dt.datetime(2026, 6, 21, 18, 5, tzinfo=dt.timezone.utc)
+    arm = collect_cost_gate_learning_lane_arm(data, now_utc=now)
+    plan = build_discovery_plan([arm], now_utc=now)
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    task = plan["learning_worklist"]["top_task"]
+
+    assert arm["detail"]["bounded_probe_shadow_placement_impact_status"] == (
+        "SHADOW_PLACEMENT_TOUCHABILITY_IMPROVED_SAMPLE_MISMATCH"
+    )
+    assert blocker["blocker_class"] == "execution_realism"
+    assert blocker["primary_blocker"] == (
+        "bounded_probe_shadow_placement_candidate_sample_missing"
+    )
+    assert blocker["next_trigger"] == (
+        "operator_review_mechanical_touchability_before_rust_patch"
+    )
+    assert blocker["bounded_probe_shadow_placement_submit_count"] == 6
+    assert blocker["bounded_probe_shadow_placement_candidate_matched_order_count"] == 0
+    assert blocker["bounded_probe_shadow_placement_max_gap_reduction_bps"] == 1522.1026
+    assert blocker["bounded_probe_shadow_placement_candidate_specific_alpha_proof"] is False
+    assert blocker["bounded_probe_shadow_placement_order_authority_granted"] is False
+    assert task["task_type"] == "bounded_probe_placement_repair"
+    assert task["learning_objective"] == (
+        "make_bounded_demo_probe_orders_touchable_then_collect_candidate_matched_fill_lineage"
+    )
+    assert task["requires_operator_authorization"] is True
+    assert task["runtime_mutation_required"] is False
+    assert task["evidence"]["bounded_probe_shadow_placement_sample_scope"] == (
+        "current_demo_order_flow_not_candidate_matched"
+    )
+    assert task["evidence"][
+        "bounded_probe_shadow_placement_candidate_specific_alpha_proof"
+    ] is False
 
 
 def test_positive_bounded_probe_result_without_control_stays_data_coverage(tmp_path):

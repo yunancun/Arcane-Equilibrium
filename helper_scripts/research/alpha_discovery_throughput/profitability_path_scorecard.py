@@ -102,6 +102,11 @@ def _score_priority(path: dict[str, Any]) -> tuple[int, float]:
         "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_REPAIR_REQUIRED": 6,
         "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_REVIEW_REQUIRED": 6,
         "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_GAP": 6,
+        "BOUNDED_DEMO_PROBE_PLACEMENT_REPAIR_READY_FOR_OPERATOR_REVIEW": 6,
+        "BOUNDED_DEMO_PROBE_PLACEMENT_TOUCHABILITY_REPAIR_SAMPLE_MISMATCH": 6,
+        "BOUNDED_DEMO_PROBE_PLACEMENT_PARTIAL_SKIP_REVIEW_REQUIRED": 7,
+        "BOUNDED_DEMO_PROBE_PLACEMENT_REPAIR_WOULD_SKIP_ALL_ORDERS": 8,
+        "BOUNDED_DEMO_PROBE_PLACEMENT_SAMPLE_REQUIRED": 8,
         "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_SAMPLE_REQUIRED": 7,
         "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_REVIEW_NOT_ALIGNED": 8,
         "BOUNDED_DEMO_PROBE_CONTROL_COMPARISON_REQUIRED": 7,
@@ -289,6 +294,16 @@ def _bounded_probe_execution_realism_review_by_key(
         or _dict(payload.get("candidate")).get("side_cell_key")
         or _dict(payload.get("source_result_review")).get("side_cell_key")
     )
+    if not key:
+        return {}
+    return {key: payload}
+
+
+def _bounded_probe_shadow_placement_impact_by_key(
+    bounded_probe_shadow_placement_impact: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    payload = _dict(bounded_probe_shadow_placement_impact)
+    key = _str(_dict(payload.get("candidate")).get("side_cell_key"))
     if not key:
         return {}
     return {key: payload}
@@ -580,6 +595,97 @@ def _bounded_probe_execution_realism_review_fields(
     }
 
 
+def _bounded_probe_shadow_placement_impact_fields(
+    impact: dict[str, Any] | None,
+) -> dict[str, Any]:
+    payload = _dict(impact)
+    if not payload:
+        return {
+            "bounded_probe_shadow_placement_impact_present": False,
+            "bounded_probe_shadow_placement_impact_status": None,
+            "bounded_probe_shadow_placement_sample_scope": None,
+            "bounded_probe_shadow_placement_submit_count": 0,
+            "bounded_probe_shadow_placement_candidate_matched_order_count": 0,
+            "bounded_probe_shadow_placement_improves_touchability": False,
+            "bounded_probe_shadow_placement_candidate_specific_alpha_proof": False,
+        }
+    candidate = _dict(payload.get("candidate"))
+    summary = _dict(payload.get("shadow_summary"))
+    answers = _dict(payload.get("answers"))
+    return {
+        "bounded_probe_shadow_placement_impact_present": True,
+        "bounded_probe_shadow_placement_impact_schema_version": payload.get(
+            "schema_version"
+        ),
+        "bounded_probe_shadow_placement_impact_status": payload.get("status"),
+        "bounded_probe_shadow_placement_impact_reason": payload.get("reason"),
+        "bounded_probe_shadow_placement_impact_generated_at_utc": payload.get(
+            "generated_at_utc"
+        ),
+        "bounded_probe_shadow_placement_impact_next_actions": _list(
+            payload.get("next_actions")
+        ),
+        "bounded_probe_shadow_placement_side_cell_key": candidate.get(
+            "side_cell_key"
+        ),
+        "bounded_probe_shadow_placement_outcome_horizon_minutes": candidate.get(
+            "outcome_horizon_minutes"
+        ),
+        "bounded_probe_shadow_placement_sample_scope": summary.get("sample_scope"),
+        "bounded_probe_shadow_placement_reviewed_order_count": summary.get(
+            "reviewed_order_count"
+        ),
+        "bounded_probe_shadow_placement_submit_count": summary.get(
+            "shadow_submit_count"
+        ),
+        "bounded_probe_shadow_placement_skip_count": summary.get(
+            "shadow_skip_count"
+        ),
+        "bounded_probe_shadow_placement_candidate_matched_order_count": (
+            summary.get("candidate_matched_order_count")
+        ),
+        "bounded_probe_shadow_placement_candidate_matched_submit_count": (
+            summary.get("candidate_matched_submit_count")
+        ),
+        "bounded_probe_shadow_placement_future_bbo_cross_count": summary.get(
+            "future_bbo_would_cross_shadow_limit_count"
+        ),
+        "bounded_probe_shadow_placement_max_original_best_touch_gap_bps": (
+            summary.get("max_original_best_touch_gap_bps")
+        ),
+        "bounded_probe_shadow_placement_max_initial_touch_gap_bps": (
+            summary.get("max_shadow_initial_touch_gap_bps")
+        ),
+        "bounded_probe_shadow_placement_avg_initial_touch_gap_bps": (
+            summary.get("avg_shadow_initial_touch_gap_bps")
+        ),
+        "bounded_probe_shadow_placement_max_gap_reduction_bps": summary.get(
+            "max_gap_reduction_bps"
+        ),
+        "bounded_probe_shadow_placement_improves_touchability": (
+            answers.get("shadow_placement_improves_touchability") is True
+        ),
+        "bounded_probe_shadow_placement_candidate_matched_runtime_sample_present": (
+            answers.get("candidate_matched_runtime_sample_present") is True
+        ),
+        "bounded_probe_shadow_placement_candidate_specific_alpha_proof": (
+            answers.get("candidate_specific_alpha_proof") is True
+        ),
+        "bounded_probe_shadow_placement_order_authority_granted": (
+            answers.get("order_authority_granted") is True
+        ),
+        "bounded_probe_shadow_placement_probe_authority_granted": (
+            answers.get("probe_authority_granted") is True
+        ),
+        "bounded_probe_shadow_placement_main_cost_gate_adjustment": answers.get(
+            "main_cost_gate_adjustment"
+        ),
+        "bounded_probe_shadow_placement_promotion_evidence": (
+            answers.get("promotion_evidence") is True
+        ),
+    }
+
+
 def _first_text(items: Any, fallback: str) -> str:
     for item in _list(items):
         text = _str(item)
@@ -839,6 +945,67 @@ def _bounded_probe_result_path_state(
     return None
 
 
+def _bounded_probe_shadow_placement_path_state(
+    impact: dict[str, Any] | None,
+) -> tuple[str, str, str] | None:
+    payload = _dict(impact)
+    status = _str(payload.get("status"))
+    next_actions = payload.get("next_actions")
+    if not status:
+        return None
+    if status == "AUTHORITY_BOUNDARY_VIOLATION":
+        return (
+            "BOUNDED_DEMO_PROBE_PLACEMENT_AUTHORITY_BOUNDARY_VIOLATION",
+            "remove_authority_granting_shadow_placement_input_before_any_review",
+            _first_text(next_actions, "remove_authority_granting_input_before_review"),
+        )
+    if status in {
+        "PLACEMENT_REPAIR_PLAN_REQUIRED",
+        "ORDER_TOUCHABILITY_AUDIT_REQUIRED",
+        "PLACEMENT_REPAIR_PLAN_NOT_READY",
+        "ORDER_TOUCHABILITY_SAMPLE_REQUIRED",
+    }:
+        return (
+            "BOUNDED_DEMO_PROBE_PLACEMENT_SAMPLE_REQUIRED",
+            "fresh_placement_repair_plan_and_order_touchability_sample_required",
+            _first_text(next_actions, "refresh_bounded_probe_shadow_placement_impact"),
+        )
+    if status == "SHADOW_PLACEMENT_REPAIR_WOULD_SKIP_ALL_ORDERS":
+        return (
+            "BOUNDED_DEMO_PROBE_PLACEMENT_REPAIR_WOULD_SKIP_ALL_ORDERS",
+            "inspect_bbo_spread_or_passive_gap_before_rust_patch",
+            _first_text(
+                next_actions,
+                "inspect_bbo_spread_or_max_initial_gap_before_rust_patch",
+            ),
+        )
+    if status == "SHADOW_PLACEMENT_TOUCHABILITY_IMPROVED_SAMPLE_MISMATCH":
+        return (
+            "BOUNDED_DEMO_PROBE_PLACEMENT_TOUCHABILITY_REPAIR_SAMPLE_MISMATCH",
+            "operator_reviews_mechanical_touchability_then_collect_candidate_matched_flow",
+            _first_text(
+                next_actions,
+                "operator_review_mechanical_touchability_before_rust_patch",
+            ),
+        )
+    if status == "SHADOW_PLACEMENT_TOUCHABILITY_REPAIR_EFFECTIVE_FOR_MATCHED_SAMPLE":
+        return (
+            "BOUNDED_DEMO_PROBE_PLACEMENT_REPAIR_READY_FOR_OPERATOR_REVIEW",
+            "operator_reviews_existing_rust_authority_path_near_touch_patch",
+            _first_text(
+                next_actions,
+                "operator_review_existing_rust_authority_path_patch",
+            ),
+        )
+    if status == "SHADOW_PLACEMENT_PARTIAL_SKIP_REQUIRED":
+        return (
+            "BOUNDED_DEMO_PROBE_PLACEMENT_PARTIAL_SKIP_REVIEW_REQUIRED",
+            "review_shadow_skips_before_rust_authority_path_patch",
+            _first_text(next_actions, "review_shadow_skips_before_rust_patch"),
+        )
+    return None
+
+
 def _base_path(
     *,
     path_id: str,
@@ -889,6 +1056,7 @@ def _cost_gate_candidate_paths(
     horizon_sealed_replay: dict[str, Any] | None,
     horizon_learning_evidence: dict[str, Any] | None,
     sealed_horizon_probe_preflight: dict[str, Any] | None,
+    bounded_probe_shadow_placement_impact: dict[str, Any] | None,
     bounded_probe_result_review: dict[str, Any] | None,
     bounded_probe_execution_realism_review: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
@@ -911,6 +1079,11 @@ def _cost_gate_candidate_paths(
     )
     sealed_probe_preflight_by_key = _sealed_probe_preflight_by_key(
         sealed_horizon_probe_preflight
+    )
+    bounded_probe_shadow_placement_impact_by_key = (
+        _bounded_probe_shadow_placement_impact_by_key(
+            bounded_probe_shadow_placement_impact
+        )
     )
     bounded_probe_result_review_by_key = _bounded_probe_result_review_by_key(
         bounded_probe_result_review
@@ -979,6 +1152,9 @@ def _cost_gate_candidate_paths(
         sealed = sealed_by_key.get(key)
         learning_evidence = learning_evidence_by_key.get(key)
         sealed_probe_preflight = sealed_probe_preflight_by_key.get(key)
+        bounded_probe_shadow_placement_impact = (
+            bounded_probe_shadow_placement_impact_by_key.get(key)
+        )
         bounded_probe_result_review = bounded_probe_result_review_by_key.get(key)
         bounded_probe_execution_realism_review = (
             bounded_probe_execution_realism_review_by_key.get(key)
@@ -993,8 +1169,15 @@ def _cost_gate_candidate_paths(
             bounded_probe_result_review,
             execution_realism_review=bounded_probe_execution_realism_review,
         )
+        shadow_placement_path_state = _bounded_probe_shadow_placement_path_state(
+            bounded_probe_shadow_placement_impact
+        )
         if result_path_state:
             path_status, required_next_gate, path_next_action = result_path_state
+        elif shadow_placement_path_state:
+            path_status, required_next_gate, path_next_action = (
+                shadow_placement_path_state
+            )
         elif learning_ready and sealed_probe_preflight:
             path_status, required_next_gate, path_next_action = (
                 _sealed_preflight_path_state(sealed_probe_preflight)
@@ -1022,6 +1205,9 @@ def _cost_gate_candidate_paths(
         sealed_evidence = _sealed_replay_evidence(sealed)
         learning_fields = _sealed_learning_evidence_fields(learning_evidence)
         sealed_preflight_fields = _sealed_probe_preflight_fields(sealed_probe_preflight)
+        shadow_placement_fields = _bounded_probe_shadow_placement_impact_fields(
+            bounded_probe_shadow_placement_impact
+        )
         bounded_probe_result_fields = _bounded_probe_result_review_fields(
             bounded_probe_result_review
         )
@@ -1066,6 +1252,7 @@ def _cost_gate_candidate_paths(
                 **sealed_evidence,
                 **learning_fields,
                 **sealed_preflight_fields,
+                **shadow_placement_fields,
                 **bounded_probe_result_fields,
                 **bounded_probe_execution_realism_fields,
             },
@@ -1319,6 +1506,7 @@ def _profitability_engineering_closure(
     *,
     candidates: list[dict[str, Any]],
     sealed_horizon_probe_preflight: dict[str, Any] | None,
+    bounded_probe_shadow_placement_impact: dict[str, Any] | None,
     bounded_probe_result_review: dict[str, Any] | None,
     bounded_probe_execution_realism_review: dict[str, Any] | None,
 ) -> dict[str, Any]:
@@ -1327,6 +1515,11 @@ def _profitability_engineering_closure(
     preflight_status = _str(preflight.get("status"))
     preflight_answers = _dict(preflight.get("answers"))
     blocking_gates = _list(preflight.get("blocking_gates"))
+    shadow_placement = _dict(bounded_probe_shadow_placement_impact)
+    shadow_status = _str(shadow_placement.get("status"))
+    shadow_summary = _dict(shadow_placement.get("shadow_summary"))
+    shadow_answers = _dict(shadow_placement.get("answers"))
+    shadow_next_actions = _list(shadow_placement.get("next_actions"))
     result_review = _dict(bounded_probe_result_review)
     result_status = _str(result_review.get("status"))
     result_summary = _dict(result_review.get("probe_result_summary"))
@@ -1395,6 +1588,14 @@ def _profitability_engineering_closure(
         status = "BOUNDED_DEMO_PROBE_FIRST_REVIEW_OPERATOR_REQUIRED"
     elif result_status == "COLLECT_MORE_PROBE_OUTCOMES_BEFORE_FIRST_REVIEW":
         status = "BOUNDED_DEMO_PROBE_ACCUMULATING_OUTCOMES_BEFORE_REVIEW"
+    elif shadow_status == "SHADOW_PLACEMENT_TOUCHABILITY_IMPROVED_SAMPLE_MISMATCH":
+        status = "BOUNDED_DEMO_PROBE_PLACEMENT_TOUCHABILITY_SAMPLE_MISMATCH"
+    elif shadow_status == "SHADOW_PLACEMENT_TOUCHABILITY_REPAIR_EFFECTIVE_FOR_MATCHED_SAMPLE":
+        status = "BOUNDED_DEMO_PROBE_PLACEMENT_REPAIR_OPERATOR_REVIEW_REQUIRED"
+    elif shadow_status == "SHADOW_PLACEMENT_PARTIAL_SKIP_REQUIRED":
+        status = "BOUNDED_DEMO_PROBE_PLACEMENT_PARTIAL_SKIP_REVIEW_REQUIRED"
+    elif shadow_status == "SHADOW_PLACEMENT_REPAIR_WOULD_SKIP_ALL_ORDERS":
+        status = "BOUNDED_DEMO_PROBE_PLACEMENT_REPAIR_WOULD_SKIP_ALL_ORDERS"
     elif preflight_status == "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION":
         status = "OPERATOR_CAN_REVIEW_BOUNDED_DEMO_PROBE_AUTHORIZATION"
     elif preflight_status == "OPERATOR_REVIEW_AND_PRODUCTION_LEARNING_LANE_REQUIRED":
@@ -1459,6 +1660,20 @@ def _profitability_engineering_closure(
         remaining = ["operator reviews first bounded probe results before additional probe budget"]
     elif result_status == "COLLECT_MORE_PROBE_OUTCOMES_BEFORE_FIRST_REVIEW":
         remaining = ["complete first-review bounded probe outcome floor"]
+    elif shadow_status == "SHADOW_PLACEMENT_TOUCHABILITY_IMPROVED_SAMPLE_MISMATCH":
+        remaining = [
+            "operator reviews mechanical near-touch improvement before any Rust authority-path patch",
+            "collect candidate-matched order-to-fill and fill-fee-slippage lineage after separate authorization",
+        ]
+    elif shadow_status == "SHADOW_PLACEMENT_TOUCHABILITY_REPAIR_EFFECTIVE_FOR_MATCHED_SAMPLE":
+        remaining = [
+            "operator reviews existing Rust authority-path near-touch patch before bounded Demo probe",
+            "record candidate-matched fill-backed execution evidence before any Cost Gate change",
+        ]
+    elif shadow_status == "SHADOW_PLACEMENT_PARTIAL_SKIP_REQUIRED":
+        remaining = ["review shadow skipped orders before any Rust authority-path patch"]
+    elif shadow_status == "SHADOW_PLACEMENT_REPAIR_WOULD_SKIP_ALL_ORDERS":
+        remaining = ["repair spread or max-passive-gap assumptions before Rust patch"]
     if not remaining and top and status == "PROFITABILITY_PATHS_REQUIRE_NEXT_PROOF_GATE":
         remaining = [_str(top.get("required_next_gate"))]
     next_actions = [
@@ -1470,6 +1685,7 @@ def _profitability_engineering_closure(
                 else ""
             ),
             *[str(item) for item in result_next_actions],
+            *[str(item) for item in shadow_next_actions],
             *[str(item) for item in preflight_next_actions],
             _str(top.get("next_action")),
             "continue_low_friction_mm_and_external_alpha_search",
@@ -1541,6 +1757,28 @@ def _profitability_engineering_closure(
             "bounded_probe_result_review_anecdote_risk": (
                 result_quality.get("anecdote_risk") is True
             ),
+            "bounded_probe_shadow_placement_status": shadow_status or None,
+            "bounded_probe_shadow_placement_sample_scope": shadow_summary.get(
+                "sample_scope"
+            ),
+            "bounded_probe_shadow_placement_submit_count": shadow_summary.get(
+                "shadow_submit_count"
+            ),
+            "bounded_probe_shadow_placement_candidate_matched_order_count": (
+                shadow_summary.get("candidate_matched_order_count")
+            ),
+            "bounded_probe_shadow_placement_max_initial_touch_gap_bps": (
+                shadow_summary.get("max_shadow_initial_touch_gap_bps")
+            ),
+            "bounded_probe_shadow_placement_max_gap_reduction_bps": (
+                shadow_summary.get("max_gap_reduction_bps")
+            ),
+            "bounded_probe_shadow_placement_improves_touchability": (
+                shadow_answers.get("shadow_placement_improves_touchability") is True
+            ),
+            "bounded_probe_shadow_placement_candidate_specific_alpha_proof": (
+                shadow_answers.get("candidate_specific_alpha_proof") is True
+            ),
             "bounded_probe_execution_realism_review_status": (
                 execution_status or None
             ),
@@ -1595,6 +1833,7 @@ def build_profitability_path_scorecard(
     horizon_sealed_replay: dict[str, Any] | None = None,
     horizon_learning_evidence: dict[str, Any] | None = None,
     sealed_horizon_probe_preflight: dict[str, Any] | None = None,
+    bounded_probe_shadow_placement_impact: dict[str, Any] | None = None,
     bounded_probe_result_review: dict[str, Any] | None = None,
     bounded_probe_execution_realism_review: dict[str, Any] | None = None,
     fillsim: dict[str, Any] | None = None,
@@ -1614,6 +1853,7 @@ def build_profitability_path_scorecard(
         horizon_sealed_replay=horizon_sealed_replay,
         horizon_learning_evidence=horizon_learning_evidence,
         sealed_horizon_probe_preflight=sealed_horizon_probe_preflight,
+        bounded_probe_shadow_placement_impact=bounded_probe_shadow_placement_impact,
         bounded_probe_result_review=bounded_probe_result_review,
         bounded_probe_execution_realism_review=bounded_probe_execution_realism_review,
     ))
@@ -1640,6 +1880,11 @@ def build_profitability_path_scorecard(
         "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_SAMPLE_REQUIRED",
         "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_GAP",
         "BOUNDED_DEMO_PROBE_CONTROL_COMPARISON_REQUIRED",
+        "BOUNDED_DEMO_PROBE_PLACEMENT_REPAIR_READY_FOR_OPERATOR_REVIEW",
+        "BOUNDED_DEMO_PROBE_PLACEMENT_TOUCHABILITY_REPAIR_SAMPLE_MISMATCH",
+        "BOUNDED_DEMO_PROBE_PLACEMENT_PARTIAL_SKIP_REVIEW_REQUIRED",
+        "BOUNDED_DEMO_PROBE_PLACEMENT_REPAIR_WOULD_SKIP_ALL_ORDERS",
+        "BOUNDED_DEMO_PROBE_PLACEMENT_SAMPLE_REQUIRED",
     }]
     if not candidates:
         status = "NO_PROFITABILITY_PATH_ARTIFACTS"
@@ -1656,6 +1901,7 @@ def build_profitability_path_scorecard(
         bounded_probe_execution_realism_review=(
             bounded_probe_execution_realism_review
         ),
+        bounded_probe_shadow_placement_impact=bounded_probe_shadow_placement_impact,
     )
     return {
         "schema_version": PROFITABILITY_PATH_SCORECARD_SCHEMA_VERSION,
@@ -1696,6 +1942,21 @@ def build_profitability_path_scorecard(
             ),
             "bounded_demo_probe_result_review_present": bool(
                 _dict(bounded_probe_result_review)
+            ),
+            "bounded_demo_probe_shadow_placement_impact_present": bool(
+                _dict(bounded_probe_shadow_placement_impact)
+            ),
+            "bounded_demo_probe_shadow_placement_improves_touchability": (
+                _dict(
+                    _dict(bounded_probe_shadow_placement_impact).get("answers")
+                ).get("shadow_placement_improves_touchability")
+                is True
+            ),
+            "bounded_demo_probe_shadow_placement_candidate_specific_alpha_proof": (
+                _dict(
+                    _dict(bounded_probe_shadow_placement_impact).get("answers")
+                ).get("candidate_specific_alpha_proof")
+                is True
             ),
             "bounded_demo_probe_result_review_operator_review_required": (
                 _dict(_dict(bounded_probe_result_review).get("answers")).get(
@@ -1770,6 +2031,11 @@ def build_profitability_path_scorecard(
                 "bounded_probe_result_review",
                 input_paths.get("bounded_probe_result_review"),
                 bounded_probe_result_review,
+            ),
+            "bounded_probe_shadow_placement_impact": _artifact_summary(
+                "bounded_probe_shadow_placement_impact",
+                input_paths.get("bounded_probe_shadow_placement_impact"),
+                bounded_probe_shadow_placement_impact,
             ),
             "bounded_probe_execution_realism_review": _artifact_summary(
                 "bounded_probe_execution_realism_review",
@@ -1895,6 +2161,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--horizon-sealed-replay-json", type=Path)
     parser.add_argument("--horizon-learning-evidence-json", type=Path)
     parser.add_argument("--sealed-horizon-probe-preflight-json", type=Path)
+    parser.add_argument("--bounded-probe-shadow-placement-impact-json", type=Path)
     parser.add_argument("--bounded-probe-result-review-json", type=Path)
     parser.add_argument("--bounded-probe-execution-realism-review-json", type=Path)
     parser.add_argument("--fillsim-json", type=Path)
@@ -1917,6 +2184,9 @@ def main() -> int:
         "horizon_sealed_replay": args.horizon_sealed_replay_json,
         "horizon_learning_evidence": args.horizon_learning_evidence_json,
         "sealed_horizon_probe_preflight": args.sealed_horizon_probe_preflight_json,
+        "bounded_probe_shadow_placement_impact": (
+            args.bounded_probe_shadow_placement_impact_json
+        ),
         "bounded_probe_result_review": args.bounded_probe_result_review_json,
         "bounded_probe_execution_realism_review": (
             args.bounded_probe_execution_realism_review_json
@@ -1935,6 +2205,9 @@ def main() -> int:
         horizon_learning_evidence=_read_json(args.horizon_learning_evidence_json),
         sealed_horizon_probe_preflight=_read_json(
             args.sealed_horizon_probe_preflight_json
+        ),
+        bounded_probe_shadow_placement_impact=_read_json(
+            args.bounded_probe_shadow_placement_impact_json
         ),
         bounded_probe_result_review=_read_json(args.bounded_probe_result_review_json),
         bounded_probe_execution_realism_review=_read_json(

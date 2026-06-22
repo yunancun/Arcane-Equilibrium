@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-LEARNING_WORKLIST_SCHEMA_VERSION = "alpha_learning_worklist_v5"
+LEARNING_WORKLIST_SCHEMA_VERSION = "alpha_learning_worklist_v6"
 
 _TASK_PRIORITY = {
     "promotion_review": 0,
@@ -19,6 +19,7 @@ _TASK_PRIORITY = {
     "runtime_source_reconcile": 20,
     "cost_gate_learning_activation": 30,
     "cost_gate_outcome_review": 35,
+    "bounded_probe_placement_repair": 36,
     "bounded_probe_execution_realism": 38,
     "polymarket_execution_realism": 40,
     "polymarket_replay_history": 45,
@@ -253,6 +254,32 @@ _EVIDENCE_KEYS = (
     "sealed_horizon_probe_preflight_probe_authority_granted",
     "sealed_horizon_probe_preflight_main_cost_gate_adjustment",
     "sealed_horizon_probe_preflight_promotion_evidence",
+    "bounded_probe_shadow_placement_impact_status",
+    "bounded_probe_shadow_placement_impact_reason",
+    "bounded_probe_shadow_placement_impact_next_actions",
+    "bounded_probe_shadow_placement_impact_generated_at_utc",
+    "bounded_probe_shadow_placement_impact_source_ok",
+    "bounded_probe_shadow_placement_impact_source_path",
+    "bounded_probe_shadow_placement_impact_source_error",
+    "bounded_probe_shadow_placement_side_cell_key",
+    "bounded_probe_shadow_placement_sample_scope",
+    "bounded_probe_shadow_placement_reviewed_order_count",
+    "bounded_probe_shadow_placement_submit_count",
+    "bounded_probe_shadow_placement_skip_count",
+    "bounded_probe_shadow_placement_candidate_matched_order_count",
+    "bounded_probe_shadow_placement_candidate_matched_submit_count",
+    "bounded_probe_shadow_placement_future_bbo_cross_count",
+    "bounded_probe_shadow_placement_max_original_best_touch_gap_bps",
+    "bounded_probe_shadow_placement_max_initial_touch_gap_bps",
+    "bounded_probe_shadow_placement_avg_initial_touch_gap_bps",
+    "bounded_probe_shadow_placement_max_gap_reduction_bps",
+    "bounded_probe_shadow_placement_improves_touchability",
+    "bounded_probe_shadow_placement_candidate_matched_runtime_sample_present",
+    "bounded_probe_shadow_placement_candidate_specific_alpha_proof",
+    "bounded_probe_shadow_placement_order_authority_granted",
+    "bounded_probe_shadow_placement_probe_authority_granted",
+    "bounded_probe_shadow_placement_main_cost_gate_adjustment",
+    "bounded_probe_shadow_placement_promotion_evidence",
     "bounded_probe_result_review_status",
     "bounded_probe_result_review_reason",
     "bounded_probe_result_review_next_actions",
@@ -361,6 +388,13 @@ def _classify_task_type(row: dict[str, Any]) -> str:
         or "demo_learning_stack_activation" in primary
     ):
         return "cost_gate_learning_activation"
+    if arm_id == "cost_gate_demo_learning_lane" and (
+        "shadow_placement" in primary
+        or "shadow_placement" in next_trigger
+        or "placement_repair" in primary
+        or "placement_repair" in next_trigger
+    ):
+        return "bounded_probe_placement_repair"
     if _bool(row.get("operator_actionable")):
         return "operator_probe_review"
     if blocker_class == "rejected_no_edge":
@@ -469,6 +503,8 @@ def _learning_objective(row: dict[str, Any], task_type: str) -> str:
         return "activate_bounded_cost_gate_reject_learning_before_lowering_main_gate"
     if task_type == "cost_gate_outcome_review":
         return "compare_blocked_signal_outcomes_against_market_path"
+    if task_type == "bounded_probe_placement_repair":
+        return "make_bounded_demo_probe_orders_touchable_then_collect_candidate_matched_fill_lineage"
     if task_type == "bounded_probe_execution_realism":
         return "measure_probe_slippage_timing_and_fill_quality_against_matched_control_edge"
     if task_type == "mm_signal_search":
@@ -562,6 +598,8 @@ def _completion_gate(task_type: str) -> str:
         return "learning_lane_ledger_and_blocked_outcomes_accumulating"
     if task_type == "cost_gate_outcome_review":
         return "blocked_signal_outcome_review_refreshed"
+    if task_type == "bounded_probe_placement_repair":
+        return "candidate_matched_near_touch_shadow_or_fill_lineage_recorded"
     if task_type == "bounded_probe_execution_realism":
         return "bounded_probe_execution_realism_gap_pass_or_reject_recorded"
     if task_type == "mm_signal_search":
@@ -635,6 +673,15 @@ def _completion_evidence_required(task_type: str) -> list[str]:
             "review status is DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT or NO_DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE",
             "positive blocked outcomes include side_cell_key and net_bps evidence",
             "top blocked side-cell carries wrongful_block_score and net_cost_cushion_bps",
+        ]
+    if task_type == "bounded_probe_placement_repair":
+        return [
+            "bounded_probe_shadow_placement_impact_status is fresh and parseable",
+            "shadow placement shows near-touch submit or explicit skip reason",
+            "candidate_matched_order_count is recorded before alpha proof claims",
+            "max_initial_touch_gap_bps and max_gap_reduction_bps are recorded",
+            "order/probe authority remains not granted until separate operator authorization",
+            "future fill/fee/slippage lineage is required before any Cost Gate change",
         ]
     if task_type == "bounded_probe_execution_realism":
         return [
@@ -720,6 +767,7 @@ def _operator_authorization_required(row: dict[str, Any], task_type: str) -> boo
         "operator_probe_review",
         "runtime_source_reconcile",
         "cost_gate_learning_activation",
+        "bounded_probe_placement_repair",
     }:
         return True
     next_trigger = _str(row.get("next_trigger")).lower()

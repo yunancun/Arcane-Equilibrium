@@ -394,6 +394,61 @@ def _bounded_probe_result_review(
     }
 
 
+def _bounded_probe_shadow_placement_impact(
+    status: str = "SHADOW_PLACEMENT_TOUCHABILITY_IMPROVED_SAMPLE_MISMATCH",
+    *,
+    candidate_matched_order_count: int = 0,
+    candidate_matched_submit_count: int = 0,
+) -> dict:
+    return {
+        "schema_version": "bounded_demo_probe_shadow_placement_impact_v1",
+        "generated_at_utc": "2026-06-22T07:04:00+00:00",
+        "status": status,
+        "reason": "fixture_shadow_placement_impact",
+        "candidate": {
+            "strategy_name": "ma_crossover",
+            "symbol": "BTCUSDT",
+            "side": "Sell",
+            "side_cell_key": "ma_crossover|BTCUSDT|Sell",
+            "outcome_horizon_minutes": 240,
+        },
+        "shadow_summary": {
+            "reviewed_order_count": 6,
+            "shadow_submit_count": 6,
+            "shadow_skip_count": 0,
+            "candidate_matched_order_count": candidate_matched_order_count,
+            "candidate_matched_submit_count": candidate_matched_submit_count,
+            "future_bbo_would_cross_shadow_limit_count": 4,
+            "max_original_best_touch_gap_bps": 1530.6074,
+            "max_shadow_initial_touch_gap_bps": 58.2092,
+            "avg_shadow_initial_touch_gap_bps": 17.0489,
+            "max_gap_reduction_bps": 1522.1026,
+            "sample_scope": (
+                "candidate_matched_runtime_sample"
+                if candidate_matched_order_count
+                else "current_demo_order_flow_not_candidate_matched"
+            ),
+        },
+        "answers": {
+            "shadow_placement_improves_touchability": True,
+            "candidate_matched_runtime_sample_present": (
+                candidate_matched_order_count > 0
+            ),
+            "candidate_specific_alpha_proof": False,
+            "runtime_mutation_performed": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+        "next_actions": [
+            "operator_review_mechanical_touchability_before_rust_patch",
+            "collect_candidate_matched_bounded_demo_probe_evidence_after_authorization",
+        ],
+    }
+
+
 def _bounded_probe_execution_realism_review(
     *,
     status: str = "EXECUTION_REALISM_GAP_DIAGNOSED_REPAIR_REQUIRED",
@@ -735,6 +790,79 @@ def test_bounded_probe_result_failure_stops_cost_gate_escape_path() -> None:
     assert scorecard["answers"]["global_cost_gate_lowering_recommended"] is False
     assert scorecard["answers"]["promotion_evidence"] is False
     assert scorecard["artifacts"]["bounded_probe_result_review"]["present"] is True
+
+
+def test_shadow_placement_impact_updates_cost_gate_escape_closure() -> None:
+    scorecard = build_profitability_path_scorecard(
+        cost_gate_counterfactual=_cost_gate_counterfactual(),
+        profit_learning_packet={
+            "status": "OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE",
+            "next_actions": [
+                "operator_may_authorize_minimal_rust_authority_bounded_demo_probe_separately"
+            ],
+            "answers": {
+                "global_cost_gate_lowering_recommended": False,
+                "order_authority_granted": False,
+            },
+            "activation": {"status": "EVIDENCE_STACK_ACTIVE"},
+        },
+        activation_preflight={"status": "EVIDENCE_STACK_ACTIVE"},
+        horizon_sealed_replay=_sealed_horizon_replay(),
+        horizon_learning_evidence=_sealed_horizon_learning_evidence(),
+        sealed_horizon_probe_preflight=_sealed_horizon_probe_preflight(
+            "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+        ),
+        bounded_probe_shadow_placement_impact=(
+            _bounded_probe_shadow_placement_impact()
+        ),
+        now_utc=dt.datetime(2026, 6, 22, 7, tzinfo=dt.timezone.utc),
+    )
+
+    top = {row["path_id"]: row for row in scorecard["top_paths"]}[
+        "horizon_edge_amplification:ma_crossover|BTCUSDT|Sell"
+    ]
+    closure = scorecard["profitability_engineering_closure"]
+    strategy = closure["cost_gate_escape_strategy"]
+
+    assert top["status"] == (
+        "BOUNDED_DEMO_PROBE_PLACEMENT_TOUCHABILITY_REPAIR_SAMPLE_MISMATCH"
+    )
+    assert top["required_next_gate"] == (
+        "operator_reviews_mechanical_touchability_then_collect_candidate_matched_flow"
+    )
+    assert top["evidence"]["bounded_probe_shadow_placement_submit_count"] == 6
+    assert top["evidence"][
+        "bounded_probe_shadow_placement_candidate_matched_order_count"
+    ] == 0
+    assert top["evidence"]["bounded_probe_shadow_placement_max_gap_reduction_bps"] == (
+        1522.1026
+    )
+    assert top["evidence"][
+        "bounded_probe_shadow_placement_candidate_specific_alpha_proof"
+    ] is False
+    assert closure["status"] == (
+        "BOUNDED_DEMO_PROBE_PLACEMENT_TOUCHABILITY_SAMPLE_MISMATCH"
+    )
+    assert "candidate-matched order-to-fill" in closure[
+        "proof_gates_remaining"
+    ][1]
+    assert strategy["bounded_probe_shadow_placement_status"] == (
+        "SHADOW_PLACEMENT_TOUCHABILITY_IMPROVED_SAMPLE_MISMATCH"
+    )
+    assert strategy["bounded_probe_shadow_placement_improves_touchability"] is True
+    assert strategy[
+        "bounded_probe_shadow_placement_candidate_specific_alpha_proof"
+    ] is False
+    assert scorecard["answers"][
+        "bounded_demo_probe_shadow_placement_improves_touchability"
+    ] is True
+    assert scorecard["answers"][
+        "bounded_demo_probe_shadow_placement_candidate_specific_alpha_proof"
+    ] is False
+    assert scorecard["answers"]["global_cost_gate_lowering_recommended"] is False
+    assert scorecard["artifacts"]["bounded_probe_shadow_placement_impact"][
+        "present"
+    ] is True
 
 
 def test_bounded_probe_learning_review_requires_operator_without_promotion() -> None:

@@ -183,6 +183,23 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
         if sealed_preflight_next_actions
         else "refresh_sealed_horizon_probe_preflight"
     )
+    shadow_placement_present = (
+        detail.get("bounded_probe_shadow_placement_impact_present") is True
+    )
+    shadow_placement_source_ok = (
+        detail.get("bounded_probe_shadow_placement_impact_source_ok") is True
+    )
+    shadow_placement_status = str(
+        detail.get("bounded_probe_shadow_placement_impact_status") or ""
+    ).upper()
+    shadow_placement_next_actions = _list(
+        detail.get("bounded_probe_shadow_placement_impact_next_actions")
+    )
+    shadow_placement_next_trigger = (
+        str(shadow_placement_next_actions[0])
+        if shadow_placement_next_actions
+        else "refresh_bounded_probe_shadow_placement_impact"
+    )
     bounded_review_present = (
         detail.get("bounded_probe_result_review_present") is True
     )
@@ -278,6 +295,17 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "engineering_actionable": True,
         }
 
+    if shadow_placement_present and not shadow_placement_source_ok:
+        return {
+            "action": RUN_READ_ONLY_CAPTURE,
+            "reason": "bounded_probe_shadow_placement_impact_stale_or_unreadable",
+            "blocker_class": "data_coverage",
+            "primary_blocker": "bounded_probe_shadow_placement_impact_not_fresh",
+            "next_trigger": "refresh_bounded_probe_shadow_placement_impact",
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
+
     if bounded_review_present and not bounded_review_source_ok:
         return {
             "action": RUN_READ_ONLY_CAPTURE,
@@ -301,6 +329,22 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
         }
 
     if (
+        shadow_placement_source_ok
+        and shadow_placement_status == "AUTHORITY_BOUNDARY_VIOLATION"
+    ):
+        return {
+            "action": BLOCK,
+            "reason": "bounded_probe_shadow_placement_authority_boundary_violation",
+            "blocker_class": "source_health",
+            "primary_blocker": (
+                "bounded_probe_shadow_placement_authority_boundary_violation"
+            ),
+            "next_trigger": shadow_placement_next_trigger,
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
+
+    if (
         bounded_execution_review_source_ok
         and bounded_execution_review_status == "AUTHORITY_BOUNDARY_VIOLATION"
     ):
@@ -315,114 +359,6 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "operator_actionable": False,
             "engineering_actionable": True,
         }
-
-    if blocked_review_status == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT":
-        return {
-            "action": READY_FOR_PROBE,
-            "reason": "cost_gate_blocked_outcome_review_candidate",
-            "blocker_class": "probe_ready",
-            "primary_blocker": (
-                "cost_gate_blocked_signal_outcomes_need_demo_probe_authority_review"
-            ),
-            "next_trigger": (
-                detail.get("blocked_signal_outcome_review_next_trigger")
-                or blocked_review.get("next_trigger")
-                or "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
-            ),
-            "operator_actionable": True,
-            "engineering_actionable": True,
-        }
-
-    if dry_run_review_source_ok:
-        if dry_run_review_status == "DRY_RUN_PREVIEW_FAILED_REPAIR_REQUIRED":
-            return {
-                "action": RUN_READ_ONLY_CAPTURE,
-                "reason": "demo_learning_stack_dry_run_preview_failed",
-                "blocker_class": "data_coverage",
-                "primary_blocker": (
-                    "demo_learning_stack_dry_run_preview_failed_repair_required"
-                ),
-                "next_trigger": dry_run_review_next_trigger,
-                "operator_actionable": False,
-                "engineering_actionable": True,
-            }
-        if (
-            dry_run_review_status
-            == "DRY_RUN_PREVIEW_PASSED_OPERATOR_APPLY_REVIEW_REQUIRED"
-        ):
-            return {
-                "action": RUN_READ_ONLY_CAPTURE,
-                "reason": "demo_learning_stack_dry_run_preview_passed",
-                "blocker_class": "data_coverage",
-                "primary_blocker": (
-                    "demo_learning_stack_dry_run_preview_passed_operator_apply_review_required"
-                ),
-                "next_trigger": dry_run_review_next_trigger,
-                "operator_actionable": True,
-                "engineering_actionable": True,
-            }
-
-    if activation_packet_source_ok:
-        if activation_packet_status == "SOURCE_NOT_READY":
-            return {
-                "action": BLOCK,
-                "reason": "demo_learning_stack_activation_packet_source_not_ready",
-                "blocker_class": "source_health",
-                "primary_blocker": (
-                    "demo_learning_stack_activation_packet_source_not_ready"
-                ),
-                "next_trigger": activation_packet_next_trigger,
-                "operator_actionable": False,
-                "engineering_actionable": True,
-            }
-        if activation_packet_status == "READY_FOR_OPERATOR_DRY_RUN":
-            return {
-                "action": RUN_READ_ONLY_CAPTURE,
-                "reason": "demo_learning_stack_activation_packet_ready_for_operator_dry_run",
-                "blocker_class": "data_coverage",
-                "primary_blocker": (
-                    "demo_learning_stack_activation_packet_ready_for_operator_dry_run"
-                ),
-                "next_trigger": activation_packet_next_trigger,
-                "operator_actionable": False,
-                "engineering_actionable": True,
-            }
-        if activation_packet_status == "STACK_INSTALLED_REPAIR_REQUIRED":
-            return {
-                "action": RUN_READ_ONLY_CAPTURE,
-                "reason": "demo_learning_stack_activation_packet_repair_required",
-                "blocker_class": "data_coverage",
-                "primary_blocker": (
-                    "demo_learning_stack_activation_packet_repair_required"
-                ),
-                "next_trigger": activation_packet_next_trigger,
-                "operator_actionable": False,
-                "engineering_actionable": True,
-            }
-        if activation_packet_status == "LEARNING_REVIEW_REFRESH_REQUIRED":
-            return {
-                "action": RUN_READ_ONLY_CAPTURE,
-                "reason": "demo_learning_stack_activation_packet_review_refresh_required",
-                "blocker_class": "data_coverage",
-                "primary_blocker": (
-                    "demo_learning_stack_activation_packet_review_refresh_required"
-                ),
-                "next_trigger": activation_packet_next_trigger,
-                "operator_actionable": False,
-                "engineering_actionable": True,
-            }
-        if activation_packet_status == "REVIEW_REQUIRED":
-            return {
-                "action": RUN_READ_ONLY_CAPTURE,
-                "reason": "demo_learning_stack_activation_packet_review_required",
-                "blocker_class": "data_coverage",
-                "primary_blocker": (
-                    "demo_learning_stack_activation_packet_review_required"
-                ),
-                "next_trigger": activation_packet_next_trigger,
-                "operator_actionable": False,
-                "engineering_actionable": True,
-            }
 
     if bounded_review_source_ok:
         if bounded_review_status == "AUTHORITY_BOUNDARY_VIOLATION":
@@ -594,6 +530,176 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
                 ),
                 "next_trigger": bounded_review_next_trigger,
                 "operator_actionable": True,
+                "engineering_actionable": True,
+            }
+
+    if shadow_placement_source_ok:
+        if shadow_placement_status in {
+            "PLACEMENT_REPAIR_PLAN_REQUIRED",
+            "ORDER_TOUCHABILITY_AUDIT_REQUIRED",
+            "PLACEMENT_REPAIR_PLAN_NOT_READY",
+            "ORDER_TOUCHABILITY_SAMPLE_REQUIRED",
+        }:
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "bounded_probe_shadow_placement_input_or_sample_required",
+                "blocker_class": "data_coverage",
+                "primary_blocker": (
+                    "bounded_probe_shadow_placement_input_or_sample_required"
+                ),
+                "next_trigger": shadow_placement_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if shadow_placement_status == "SHADOW_PLACEMENT_REPAIR_WOULD_SKIP_ALL_ORDERS":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "bounded_probe_shadow_placement_would_skip_all_orders",
+                "blocker_class": "execution_realism",
+                "primary_blocker": (
+                    "bounded_probe_shadow_placement_would_skip_all_orders"
+                ),
+                "next_trigger": shadow_placement_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if shadow_placement_status == (
+            "SHADOW_PLACEMENT_TOUCHABILITY_IMPROVED_SAMPLE_MISMATCH"
+        ):
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": (
+                    "bounded_probe_shadow_placement_candidate_sample_missing"
+                ),
+                "blocker_class": "execution_realism",
+                "primary_blocker": (
+                    "bounded_probe_shadow_placement_candidate_sample_missing"
+                ),
+                "next_trigger": shadow_placement_next_trigger,
+                "operator_actionable": True,
+                "engineering_actionable": True,
+            }
+        if shadow_placement_status in {
+            "SHADOW_PLACEMENT_TOUCHABILITY_REPAIR_EFFECTIVE_FOR_MATCHED_SAMPLE",
+            "SHADOW_PLACEMENT_PARTIAL_SKIP_REQUIRED",
+        }:
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "bounded_probe_shadow_placement_ready_for_operator_review",
+                "blocker_class": "execution_realism",
+                "primary_blocker": (
+                    "bounded_probe_shadow_placement_ready_for_operator_review"
+                ),
+                "next_trigger": shadow_placement_next_trigger,
+                "operator_actionable": True,
+                "engineering_actionable": True,
+            }
+
+    if blocked_review_status == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT":
+        return {
+            "action": READY_FOR_PROBE,
+            "reason": "cost_gate_blocked_outcome_review_candidate",
+            "blocker_class": "probe_ready",
+            "primary_blocker": (
+                "cost_gate_blocked_signal_outcomes_need_demo_probe_authority_review"
+            ),
+            "next_trigger": (
+                detail.get("blocked_signal_outcome_review_next_trigger")
+                or blocked_review.get("next_trigger")
+                or "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
+            ),
+            "operator_actionable": True,
+            "engineering_actionable": True,
+        }
+
+    if dry_run_review_source_ok:
+        if dry_run_review_status == "DRY_RUN_PREVIEW_FAILED_REPAIR_REQUIRED":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "demo_learning_stack_dry_run_preview_failed",
+                "blocker_class": "data_coverage",
+                "primary_blocker": (
+                    "demo_learning_stack_dry_run_preview_failed_repair_required"
+                ),
+                "next_trigger": dry_run_review_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if (
+            dry_run_review_status
+            == "DRY_RUN_PREVIEW_PASSED_OPERATOR_APPLY_REVIEW_REQUIRED"
+        ):
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "demo_learning_stack_dry_run_preview_passed",
+                "blocker_class": "data_coverage",
+                "primary_blocker": (
+                    "demo_learning_stack_dry_run_preview_passed_operator_apply_review_required"
+                ),
+                "next_trigger": dry_run_review_next_trigger,
+                "operator_actionable": True,
+                "engineering_actionable": True,
+            }
+
+    if activation_packet_source_ok:
+        if activation_packet_status == "SOURCE_NOT_READY":
+            return {
+                "action": BLOCK,
+                "reason": "demo_learning_stack_activation_packet_source_not_ready",
+                "blocker_class": "source_health",
+                "primary_blocker": (
+                    "demo_learning_stack_activation_packet_source_not_ready"
+                ),
+                "next_trigger": activation_packet_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if activation_packet_status == "READY_FOR_OPERATOR_DRY_RUN":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "demo_learning_stack_activation_packet_ready_for_operator_dry_run",
+                "blocker_class": "data_coverage",
+                "primary_blocker": (
+                    "demo_learning_stack_activation_packet_ready_for_operator_dry_run"
+                ),
+                "next_trigger": activation_packet_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if activation_packet_status == "STACK_INSTALLED_REPAIR_REQUIRED":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "demo_learning_stack_activation_packet_repair_required",
+                "blocker_class": "data_coverage",
+                "primary_blocker": (
+                    "demo_learning_stack_activation_packet_repair_required"
+                ),
+                "next_trigger": activation_packet_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if activation_packet_status == "LEARNING_REVIEW_REFRESH_REQUIRED":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "demo_learning_stack_activation_packet_review_refresh_required",
+                "blocker_class": "data_coverage",
+                "primary_blocker": (
+                    "demo_learning_stack_activation_packet_review_refresh_required"
+                ),
+                "next_trigger": activation_packet_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if activation_packet_status == "REVIEW_REQUIRED":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "demo_learning_stack_activation_packet_review_required",
+                "blocker_class": "data_coverage",
+                "primary_blocker": (
+                    "demo_learning_stack_activation_packet_review_required"
+                ),
+                "next_trigger": activation_packet_next_trigger,
+                "operator_actionable": False,
                 "engineering_actionable": True,
             }
 
@@ -2918,6 +3024,99 @@ def classify_profitability_blocker(
                 ),
                 "sealed_horizon_probe_preflight_promotion_evidence": detail.get(
                     "sealed_horizon_probe_preflight_promotion_evidence"
+                ),
+                "bounded_probe_shadow_placement_impact_present": detail.get(
+                    "bounded_probe_shadow_placement_impact_present"
+                ),
+                "bounded_probe_shadow_placement_impact_status": detail.get(
+                    "bounded_probe_shadow_placement_impact_status"
+                ),
+                "bounded_probe_shadow_placement_impact_reason": detail.get(
+                    "bounded_probe_shadow_placement_impact_reason"
+                ),
+                "bounded_probe_shadow_placement_impact_next_actions": detail.get(
+                    "bounded_probe_shadow_placement_impact_next_actions"
+                ),
+                "bounded_probe_shadow_placement_impact_generated_at_utc": detail.get(
+                    "bounded_probe_shadow_placement_impact_generated_at_utc"
+                ),
+                "bounded_probe_shadow_placement_impact_source_ok": detail.get(
+                    "bounded_probe_shadow_placement_impact_source_ok"
+                ),
+                "bounded_probe_shadow_placement_impact_source_path": detail.get(
+                    "bounded_probe_shadow_placement_impact_source_path"
+                ),
+                "bounded_probe_shadow_placement_impact_source_error": detail.get(
+                    "bounded_probe_shadow_placement_impact_source_error"
+                ),
+                "bounded_probe_shadow_placement_side_cell_key": detail.get(
+                    "bounded_probe_shadow_placement_side_cell_key"
+                ),
+                "bounded_probe_shadow_placement_sample_scope": detail.get(
+                    "bounded_probe_shadow_placement_sample_scope"
+                ),
+                "bounded_probe_shadow_placement_reviewed_order_count": detail.get(
+                    "bounded_probe_shadow_placement_reviewed_order_count"
+                ),
+                "bounded_probe_shadow_placement_submit_count": detail.get(
+                    "bounded_probe_shadow_placement_submit_count"
+                ),
+                "bounded_probe_shadow_placement_skip_count": detail.get(
+                    "bounded_probe_shadow_placement_skip_count"
+                ),
+                "bounded_probe_shadow_placement_candidate_matched_order_count": (
+                    detail.get(
+                        "bounded_probe_shadow_placement_candidate_matched_order_count"
+                    )
+                ),
+                "bounded_probe_shadow_placement_candidate_matched_submit_count": (
+                    detail.get(
+                        "bounded_probe_shadow_placement_candidate_matched_submit_count"
+                    )
+                ),
+                "bounded_probe_shadow_placement_future_bbo_cross_count": detail.get(
+                    "bounded_probe_shadow_placement_future_bbo_cross_count"
+                ),
+                "bounded_probe_shadow_placement_max_original_best_touch_gap_bps": (
+                    detail.get(
+                        "bounded_probe_shadow_placement_max_original_best_touch_gap_bps"
+                    )
+                ),
+                "bounded_probe_shadow_placement_max_initial_touch_gap_bps": (
+                    detail.get(
+                        "bounded_probe_shadow_placement_max_initial_touch_gap_bps"
+                    )
+                ),
+                "bounded_probe_shadow_placement_avg_initial_touch_gap_bps": (
+                    detail.get(
+                        "bounded_probe_shadow_placement_avg_initial_touch_gap_bps"
+                    )
+                ),
+                "bounded_probe_shadow_placement_max_gap_reduction_bps": detail.get(
+                    "bounded_probe_shadow_placement_max_gap_reduction_bps"
+                ),
+                "bounded_probe_shadow_placement_improves_touchability": detail.get(
+                    "bounded_probe_shadow_placement_improves_touchability"
+                ),
+                "bounded_probe_shadow_placement_candidate_matched_runtime_sample_present": detail.get(
+                    "bounded_probe_shadow_placement_candidate_matched_runtime_sample_present"
+                ),
+                "bounded_probe_shadow_placement_candidate_specific_alpha_proof": (
+                    detail.get(
+                        "bounded_probe_shadow_placement_candidate_specific_alpha_proof"
+                    )
+                ),
+                "bounded_probe_shadow_placement_order_authority_granted": detail.get(
+                    "bounded_probe_shadow_placement_order_authority_granted"
+                ),
+                "bounded_probe_shadow_placement_probe_authority_granted": detail.get(
+                    "bounded_probe_shadow_placement_probe_authority_granted"
+                ),
+                "bounded_probe_shadow_placement_main_cost_gate_adjustment": detail.get(
+                    "bounded_probe_shadow_placement_main_cost_gate_adjustment"
+                ),
+                "bounded_probe_shadow_placement_promotion_evidence": detail.get(
+                    "bounded_probe_shadow_placement_promotion_evidence"
                 ),
                 "bounded_probe_result_review_status": detail.get(
                     "bounded_probe_result_review_status"

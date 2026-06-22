@@ -27,7 +27,7 @@ from polymarket_leadlag import replay_history as polymarket_replay_history
 from . import RUNNER_VERSION
 from .discovery_loop import build_discovery_plan
 
-RUNTIME_KILLBOARD_SCHEMA_VERSION = "alpha_discovery_runtime_killboard_v8"
+RUNTIME_KILLBOARD_SCHEMA_VERSION = "alpha_discovery_runtime_killboard_v9"
 DEFAULT_MAX_ARTIFACT_AGE_SECONDS = 6 * 60 * 60
 DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS = 36 * 60 * 60
 DEFAULT_POLYMARKET_REPLAY_HISTORY_REPORT_LIMIT = 4096
@@ -2056,6 +2056,141 @@ def summarize_sealed_horizon_probe_preflight(
     }
 
 
+def _bounded_probe_shadow_placement_impact_path(lane_dir: Path) -> Path:
+    canonical = lane_dir / "bounded_probe_shadow_placement_impact_latest.json"
+    if canonical.exists():
+        return canonical
+    candidates = sorted(
+        lane_dir.glob(
+            "bounded_probe_shadow_placement_impact*/"
+            "bounded_probe_shadow_placement_impact_latest.json"
+        ),
+        key=lambda path: str(path),
+        reverse=True,
+    )
+    return candidates[0] if candidates else canonical
+
+
+def summarize_bounded_probe_shadow_placement_impact(
+    data_dir: Path,
+    *,
+    now_utc: dt.datetime,
+    max_age_seconds: int = DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS,
+) -> dict[str, Any]:
+    """Summarize no-authority bounded probe shadow placement impact if present."""
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    path = _bounded_probe_shadow_placement_impact_path(lane_dir)
+    payload, err = _read_json(path)
+    if err:
+        return {
+            "bounded_probe_shadow_placement_impact_present": False,
+            "bounded_probe_shadow_placement_impact_source_path": str(path),
+            "bounded_probe_shadow_placement_impact_source_error": err,
+        }
+    assert payload is not None
+    generated_at = payload.get("generated_at_utc")
+    fresh, age, freshness_error = _source_fresh(
+        generated_at,
+        now_utc=now_utc,
+        max_age_seconds=max_age_seconds,
+    )
+    candidate = payload.get("candidate")
+    if not isinstance(candidate, dict):
+        candidate = {}
+    summary = payload.get("shadow_summary")
+    if not isinstance(summary, dict):
+        summary = {}
+    answers = payload.get("answers")
+    if not isinstance(answers, dict):
+        answers = {}
+    next_actions = payload.get("next_actions")
+    if not isinstance(next_actions, list):
+        next_actions = []
+    return {
+        "bounded_probe_shadow_placement_impact_present": True,
+        "bounded_probe_shadow_placement_impact_status": payload.get("status"),
+        "bounded_probe_shadow_placement_impact_reason": payload.get("reason"),
+        "bounded_probe_shadow_placement_impact_next_actions": next_actions,
+        "bounded_probe_shadow_placement_impact_generated_at_utc": generated_at,
+        "bounded_probe_shadow_placement_impact_age_seconds": age,
+        "bounded_probe_shadow_placement_impact_source_ok": fresh,
+        "bounded_probe_shadow_placement_impact_source_path": str(path),
+        "bounded_probe_shadow_placement_impact_source_error": freshness_error,
+        "bounded_probe_shadow_placement_side_cell_key": candidate.get(
+            "side_cell_key"
+        ),
+        "bounded_probe_shadow_placement_strategy_name": candidate.get(
+            "strategy_name"
+        ),
+        "bounded_probe_shadow_placement_symbol": candidate.get("symbol"),
+        "bounded_probe_shadow_placement_side": candidate.get("side"),
+        "bounded_probe_shadow_placement_outcome_horizon_minutes": candidate.get(
+            "outcome_horizon_minutes"
+        ),
+        "bounded_probe_shadow_placement_sample_scope": summary.get("sample_scope"),
+        "bounded_probe_shadow_placement_reviewed_order_count": summary.get(
+            "reviewed_order_count"
+        ),
+        "bounded_probe_shadow_placement_submit_count": summary.get(
+            "shadow_submit_count"
+        ),
+        "bounded_probe_shadow_placement_skip_count": summary.get(
+            "shadow_skip_count"
+        ),
+        "bounded_probe_shadow_placement_candidate_matched_order_count": (
+            summary.get("candidate_matched_order_count")
+        ),
+        "bounded_probe_shadow_placement_candidate_matched_submit_count": (
+            summary.get("candidate_matched_submit_count")
+        ),
+        "bounded_probe_shadow_placement_future_bbo_cross_count": summary.get(
+            "future_bbo_would_cross_shadow_limit_count"
+        ),
+        "bounded_probe_shadow_placement_status_counts": summary.get(
+            "status_counts"
+        ),
+        "bounded_probe_shadow_placement_max_original_best_touch_gap_bps": (
+            summary.get("max_original_best_touch_gap_bps")
+        ),
+        "bounded_probe_shadow_placement_max_initial_touch_gap_bps": (
+            summary.get("max_shadow_initial_touch_gap_bps")
+        ),
+        "bounded_probe_shadow_placement_avg_initial_touch_gap_bps": (
+            summary.get("avg_shadow_initial_touch_gap_bps")
+        ),
+        "bounded_probe_shadow_placement_max_gap_reduction_bps": summary.get(
+            "max_gap_reduction_bps"
+        ),
+        "bounded_probe_shadow_placement_avg_gap_reduction_bps": summary.get(
+            "avg_gap_reduction_bps"
+        ),
+        "bounded_probe_shadow_placement_improves_touchability": answers.get(
+            "shadow_placement_improves_touchability"
+        ),
+        "bounded_probe_shadow_placement_candidate_matched_runtime_sample_present": (
+            answers.get("candidate_matched_runtime_sample_present")
+        ),
+        "bounded_probe_shadow_placement_candidate_specific_alpha_proof": (
+            answers.get("candidate_specific_alpha_proof")
+        ),
+        "bounded_probe_shadow_placement_order_authority_granted": answers.get(
+            "order_authority_granted"
+        ),
+        "bounded_probe_shadow_placement_probe_authority_granted": answers.get(
+            "probe_authority_granted"
+        ),
+        "bounded_probe_shadow_placement_main_cost_gate_adjustment": answers.get(
+            "main_cost_gate_adjustment"
+        ),
+        "bounded_probe_shadow_placement_global_cost_gate_lowering_recommended": (
+            answers.get("global_cost_gate_lowering_recommended")
+        ),
+        "bounded_probe_shadow_placement_promotion_evidence": answers.get(
+            "promotion_evidence"
+        ),
+    }
+
+
 def _bounded_probe_result_review_path(lane_dir: Path) -> Path:
     canonical = lane_dir / "bounded_probe_result_review_latest.json"
     if canonical.exists():
@@ -2369,6 +2504,12 @@ def collect_cost_gate_learning_lane_arm(
         data_dir,
         now_utc=now_utc,
     )
+    bounded_probe_shadow_placement_impact_summary = (
+        summarize_bounded_probe_shadow_placement_impact(
+            data_dir,
+            now_utc=now_utc,
+        )
+    )
     bounded_probe_result_review_summary = summarize_bounded_probe_result_review(
         data_dir,
         now_utc=now_utc,
@@ -2429,6 +2570,7 @@ def collect_cost_gate_learning_lane_arm(
                 **stack_dry_run_review_summary,
                 **decision_packet_summary,
                 **sealed_probe_preflight_summary,
+                **bounded_probe_shadow_placement_impact_summary,
                 **bounded_probe_result_review_summary,
                 **bounded_probe_execution_realism_review_summary,
                 **historical_summary,
@@ -2479,6 +2621,7 @@ def collect_cost_gate_learning_lane_arm(
             **stack_dry_run_review_summary,
             **decision_packet_summary,
             **sealed_probe_preflight_summary,
+            **bounded_probe_shadow_placement_impact_summary,
             **bounded_probe_result_review_summary,
             **bounded_probe_execution_realism_review_summary,
             **historical_summary,
