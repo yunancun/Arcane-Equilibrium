@@ -8,15 +8,16 @@
 # Hard boundary:
 #   Artifact/ledger feedback only. PG is readonly via libpq PGOPTIONS plus the
 #   helper-side readonly session. Writes are limited to local JSONL ledger
-#   outcome rows, review artifacts, status log, heartbeat, and lock files under
-#   OPENCLAW_DATA_DIR. No order, auth, risk, strategy flag, engine, or runtime
-#   mutation.
+#   outcome rows, review/data-flow/decision-packet artifacts, status log,
+#   heartbeat, and lock files under OPENCLAW_DATA_DIR. No order, auth, risk,
+#   strategy flag, engine, or runtime mutation.
 set -euo pipefail
 
 BASE="${OPENCLAW_BASE_DIR:-$HOME/BybitOpenClaw/srv}"
 DATA="${OPENCLAW_DATA_DIR:-/tmp/openclaw}"
 LANE_DIR="${DATA}/cost_gate_learning_lane"
 COUNTERFACTUAL_DIR="${DATA}/cost_gate_counterfactual"
+DATA_FLOW_DIR="${DATA}/demo_data_flow_monitor"
 LOG_DIR="${DATA}/logs"
 LOG="${LOG_DIR}/cost_gate_learning_lane_cron.log"
 STATUS_LOG="${LOG_DIR}/cost_gate_learning_lane.log"
@@ -27,9 +28,19 @@ LEDGER="${OPENCLAW_COST_GATE_LEARNING_LEDGER:-$LANE_DIR/probe_ledger.jsonl}"
 SCORECARD_JSON="${OPENCLAW_COST_GATE_SCORECARD_JSON:-$DATA/cost_gate_counterfactual/cost_gate_reject_counterfactual_latest.json}"
 SCORECARD_MD="${OPENCLAW_COST_GATE_SCORECARD_MD:-$DATA/cost_gate_counterfactual/cost_gate_reject_counterfactual_latest.md}"
 PLAN_JSON="${OPENCLAW_COST_GATE_LEARNING_PLAN_JSON:-$LANE_DIR/demo_learning_lane_plan_latest.json}"
+DATA_FLOW_JSON="${OPENCLAW_COST_GATE_DATA_FLOW_MONITOR_JSON:-$DATA_FLOW_DIR/demo_data_flow_monitor_latest.json}"
+DATA_FLOW_MD="${OPENCLAW_COST_GATE_DATA_FLOW_MONITOR_MD:-$DATA_FLOW_DIR/demo_data_flow_monitor_latest.md}"
+DECISION_PACKET_JSON="${OPENCLAW_COST_GATE_PROFIT_LEARNING_DECISION_PACKET_JSON:-$LANE_DIR/profit_learning_decision_packet_latest.json}"
+DECISION_PACKET_MD="${OPENCLAW_COST_GATE_PROFIT_LEARNING_DECISION_PACKET_MD:-$LANE_DIR/profit_learning_decision_packet_latest.md}"
+ACTIVATION_PREFLIGHT_JSON="${OPENCLAW_COST_GATE_ACTIVATION_PREFLIGHT_JSON:-$LANE_DIR/activation_preflight_latest.json}"
+SEALED_LEARNING_EVIDENCE_JSON="${OPENCLAW_COST_GATE_SEALED_HORIZON_LEARNING_EVIDENCE_JSON:-$LANE_DIR/sealed_horizon_learning_evidence_latest.json}"
 SEALED_PREFLIGHT_JSON="${OPENCLAW_COST_GATE_BOUNDED_PROBE_PREFLIGHT_JSON:-$LANE_DIR/sealed_horizon_probe_preflight_latest.json}"
 
 REFRESH_SCORECARD="${OPENCLAW_COST_GATE_LEARNING_REFRESH_SCORECARD:-1}"
+REFRESH_DATA_FLOW_MONITOR="${OPENCLAW_COST_GATE_REFRESH_DATA_FLOW_MONITOR:-1}"
+REFRESH_DECISION_PACKET="${OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET:-1}"
+DATA_FLOW_WINDOW_HOURS="${OPENCLAW_COST_GATE_DATA_FLOW_WINDOW_HOURS:-1,4,24}"
+DATA_FLOW_TOP_LIMIT="${OPENCLAW_COST_GATE_DATA_FLOW_TOP_LIMIT:-10}"
 SCORECARD_LOOKBACK_HOURS="${OPENCLAW_COST_GATE_SCORECARD_LOOKBACK_HOURS:-168}"
 SCORECARD_LIMIT="${OPENCLAW_COST_GATE_SCORECARD_LIMIT:-50000}"
 REFRESH_PLAN="${OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN:-1}"
@@ -57,7 +68,7 @@ REVIEW_MIN_AVG_NET_BPS="${OPENCLAW_COST_GATE_REVIEW_MIN_AVG_NET_BPS:-0.0}"
 REVIEW_MIN_NET_POSITIVE_PCT="${OPENCLAW_COST_GATE_REVIEW_MIN_NET_POSITIVE_PCT:-60.0}"
 STALE_LOCK_MIN="${OPENCLAW_COST_GATE_LEARNING_STALE_LOCK_MIN:-30}"
 
-mkdir -p "$LANE_DIR" "$COUNTERFACTUAL_DIR" "$LOG_DIR" "$LOCK_ROOT" "$HEARTBEAT_DIR"
+mkdir -p "$LANE_DIR" "$COUNTERFACTUAL_DIR" "$DATA_FLOW_DIR" "$LOG_DIR" "$LOCK_ROOT" "$HEARTBEAT_DIR"
 
 ts() { date -u '+%Y-%m-%d %H:%M:%S'; }
 
@@ -93,6 +104,13 @@ if [[ ! "$PG_TIMEFRAME" =~ ^[[:alnum:]]{1,16}$ ]]; then
     exit 2
 fi
 validate_bool01 "OPENCLAW_COST_GATE_LEARNING_REFRESH_SCORECARD" "$REFRESH_SCORECARD"
+validate_bool01 "OPENCLAW_COST_GATE_REFRESH_DATA_FLOW_MONITOR" "$REFRESH_DATA_FLOW_MONITOR"
+validate_bool01 "OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET" "$REFRESH_DECISION_PACKET"
+if [[ ! "$DATA_FLOW_WINDOW_HOURS" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+    echo "[$(ts)] FATAL: OPENCLAW_COST_GATE_DATA_FLOW_WINDOW_HOURS must be comma-separated integers: ${DATA_FLOW_WINDOW_HOURS}" | tee -a "$LOG" >&2
+    exit 2
+fi
+validate_int "OPENCLAW_COST_GATE_DATA_FLOW_TOP_LIMIT" "$DATA_FLOW_TOP_LIMIT"
 validate_int "OPENCLAW_COST_GATE_SCORECARD_LOOKBACK_HOURS" "$SCORECARD_LOOKBACK_HOURS"
 validate_int "OPENCLAW_COST_GATE_SCORECARD_LIMIT" "$SCORECARD_LIMIT"
 validate_bool01 "OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN" "$REFRESH_PLAN"
@@ -171,6 +189,10 @@ export OPENCLAW_DATA_DIR="$DATA"
 STAMP="$(date -u '+%Y%m%dT%H%M%SZ')"
 SCORECARD_JSON_OUT="${COUNTERFACTUAL_DIR}/cost_gate_reject_counterfactual_${STAMP}.json"
 SCORECARD_MD_OUT="${COUNTERFACTUAL_DIR}/cost_gate_reject_counterfactual_${STAMP}.md"
+DATA_FLOW_JSON_OUT="${DATA_FLOW_DIR}/demo_data_flow_monitor_${STAMP}.json"
+DATA_FLOW_MD_OUT="${DATA_FLOW_DIR}/demo_data_flow_monitor_${STAMP}.md"
+DECISION_PACKET_JSON_OUT="${LANE_DIR}/profit_learning_decision_packet_${STAMP}.json"
+DECISION_PACKET_MD_OUT="${LANE_DIR}/profit_learning_decision_packet_${STAMP}.md"
 REFRESH_OUT="${LANE_DIR}/outcome_refresh_${STAMP}.json"
 REFRESH_LATEST="${LANE_DIR}/outcome_refresh_latest.json"
 REVIEW_OUT="${LANE_DIR}/blocked_outcome_review_${STAMP}.json"
@@ -200,6 +222,17 @@ SCORECARD_ARGS=(
     --output "$SCORECARD_MD_OUT"
     --json-output "$SCORECARD_JSON_OUT"
 )
+
+DATA_FLOW_ARGS=(
+    "$BASE/helper_scripts/db/audit/demo_data_flow_monitor.py"
+    --top-limit "$DATA_FLOW_TOP_LIMIT"
+    --output "$DATA_FLOW_MD_OUT"
+    --json-output "$DATA_FLOW_JSON_OUT"
+)
+IFS=',' read -r -a DATA_FLOW_WINDOWS <<< "$DATA_FLOW_WINDOW_HOURS"
+for window in "${DATA_FLOW_WINDOWS[@]}"; do
+    DATA_FLOW_ARGS+=(--window-hours "$window")
+done
 
 PLAN_ARGS=(
     -m cost_gate_learning_lane.policy
@@ -277,6 +310,18 @@ BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_ARGS=(
     --output "$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_MD_OUT"
 )
 
+DECISION_PACKET_ARGS=(
+    -m cost_gate_learning_lane.decision_packet
+    --data-flow-json "$DATA_FLOW_JSON"
+    --counterfactual-json "$SCORECARD_JSON"
+    --plan-json "$PLAN_JSON"
+    --activation-preflight-json "$ACTIVATION_PREFLIGHT_JSON"
+    --blocked-outcome-review-json "$REVIEW_LATEST"
+    --sealed-horizon-learning-evidence-json "$SEALED_LEARNING_EVIDENCE_JSON"
+    --output "$DECISION_PACKET_MD_OUT"
+    --json-output "$DECISION_PACKET_JSON_OUT"
+)
+
 echo "[$(ts)] === Cost-gate learning lane refresh start append=${APPEND_OUTCOMES} ledger=${LEDGER} ===" >> "$LOG"
 scorecard_rc=0
 if [[ "$REFRESH_SCORECARD" == "1" ]]; then
@@ -294,6 +339,24 @@ if [[ "$REFRESH_SCORECARD" == "1" ]]; then
     fi
 else
     echo "[$(ts)] SKIP: cost-gate counterfactual scorecard refresh disabled by OPENCLAW_COST_GATE_LEARNING_REFRESH_SCORECARD=0" >> "$LOG"
+fi
+
+data_flow_monitor_rc=0
+if [[ "$REFRESH_DATA_FLOW_MONITOR" == "1" ]]; then
+    (
+        cd "$BASE"
+        export PYTHONPATH="$BASE${PYTHONPATH:+:$PYTHONPATH}"
+        export PYTHONDONTWRITEBYTECODE=1
+        "$PYBIN" "${DATA_FLOW_ARGS[@]}"
+    ) >> "$LOG" 2>&1 || data_flow_monitor_rc=$?
+    if [[ -f "$DATA_FLOW_JSON_OUT" ]]; then
+        cp "$DATA_FLOW_JSON_OUT" "$DATA_FLOW_JSON"
+    fi
+    if [[ -f "$DATA_FLOW_MD_OUT" ]]; then
+        cp "$DATA_FLOW_MD_OUT" "$DATA_FLOW_MD"
+    fi
+else
+    echo "[$(ts)] SKIP: demo data-flow monitor refresh disabled by OPENCLAW_COST_GATE_REFRESH_DATA_FLOW_MONITOR=0" >> "$LOG"
 fi
 
 plan_rc=0
@@ -415,7 +478,25 @@ else
     fi
 fi
 
-STATUS_JSON=$(SCORECARD_JSON_OUT="$SCORECARD_JSON_OUT" SCORECARD_JSON="$SCORECARD_JSON" SCORECARD_RC="$scorecard_rc" REFRESH_SCORECARD="$REFRESH_SCORECARD" PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN" PREINSTALL_REFRESH_ONLY="$PREINSTALL_REFRESH_ONLY" HISTORICAL_REVIEW_OUT="$HISTORICAL_REVIEW_OUT" MATERIALIZER_OUT="$MATERIALIZER_OUT" REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" BOUNDED_PROBE_PREFLIGHT_JSON="$SEALED_PREFLIGHT_JSON" BOUNDED_PROBE_RESULT_REVIEW_OUT="$BOUNDED_PROBE_RESULT_REVIEW_OUT" BOUNDED_PROBE_RESULT_REVIEW_LATEST="$BOUNDED_PROBE_RESULT_REVIEW_LATEST" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST" HISTORICAL_REVIEW_RC="$historical_review_rc" MATERIALIZER_RC="$materializer_rc" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" BOUNDED_PROBE_RESULT_REVIEW_RC="$bounded_probe_result_review_rc" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_RC="$bounded_probe_execution_realism_review_rc" BOUNDED_PROBE_RESULT_REVIEW_SKIP_REASON="$bounded_probe_result_review_skip_reason" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_SKIP_REASON="$bounded_probe_execution_realism_review_skip_reason" REFRESH_BOUNDED_PROBE_RESULT_REVIEW="$REFRESH_BOUNDED_PROBE_RESULT_REVIEW" REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW="$REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW" LEDGER="$LEDGER" MATERIALIZE_REJECTS="$MATERIALIZE_REJECTS" APPEND_MATERIALIZED_REJECTS="$APPEND_MATERIALIZED_REJECTS" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
+decision_packet_rc=0
+if [[ "$REFRESH_DECISION_PACKET" == "1" ]]; then
+    (
+        cd "$BASE"
+        export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
+        export PYTHONDONTWRITEBYTECODE=1
+        "$PYBIN" "${DECISION_PACKET_ARGS[@]}"
+    ) >> "$LOG" 2>&1 || decision_packet_rc=$?
+    if [[ -f "$DECISION_PACKET_JSON_OUT" ]]; then
+        cp "$DECISION_PACKET_JSON_OUT" "$DECISION_PACKET_JSON"
+    fi
+    if [[ -f "$DECISION_PACKET_MD_OUT" ]]; then
+        cp "$DECISION_PACKET_MD_OUT" "$DECISION_PACKET_MD"
+    fi
+else
+    echo "[$(ts)] SKIP: profit-learning decision packet refresh disabled by OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET=0" >> "$LOG"
+fi
+
+STATUS_JSON=$(SCORECARD_JSON_OUT="$SCORECARD_JSON_OUT" SCORECARD_JSON="$SCORECARD_JSON" SCORECARD_RC="$scorecard_rc" REFRESH_SCORECARD="$REFRESH_SCORECARD" DATA_FLOW_JSON_OUT="$DATA_FLOW_JSON_OUT" DATA_FLOW_JSON="$DATA_FLOW_JSON" DATA_FLOW_MONITOR_RC="$data_flow_monitor_rc" REFRESH_DATA_FLOW_MONITOR="$REFRESH_DATA_FLOW_MONITOR" DECISION_PACKET_JSON_OUT="$DECISION_PACKET_JSON_OUT" DECISION_PACKET_JSON="$DECISION_PACKET_JSON" DECISION_PACKET_RC="$decision_packet_rc" REFRESH_DECISION_PACKET="$REFRESH_DECISION_PACKET" PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN" PREINSTALL_REFRESH_ONLY="$PREINSTALL_REFRESH_ONLY" HISTORICAL_REVIEW_OUT="$HISTORICAL_REVIEW_OUT" MATERIALIZER_OUT="$MATERIALIZER_OUT" REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" BOUNDED_PROBE_PREFLIGHT_JSON="$SEALED_PREFLIGHT_JSON" BOUNDED_PROBE_RESULT_REVIEW_OUT="$BOUNDED_PROBE_RESULT_REVIEW_OUT" BOUNDED_PROBE_RESULT_REVIEW_LATEST="$BOUNDED_PROBE_RESULT_REVIEW_LATEST" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST" HISTORICAL_REVIEW_RC="$historical_review_rc" MATERIALIZER_RC="$materializer_rc" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" BOUNDED_PROBE_RESULT_REVIEW_RC="$bounded_probe_result_review_rc" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_RC="$bounded_probe_execution_realism_review_rc" BOUNDED_PROBE_RESULT_REVIEW_SKIP_REASON="$bounded_probe_result_review_skip_reason" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_SKIP_REASON="$bounded_probe_execution_realism_review_skip_reason" REFRESH_BOUNDED_PROBE_RESULT_REVIEW="$REFRESH_BOUNDED_PROBE_RESULT_REVIEW" REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW="$REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW" LEDGER="$LEDGER" MATERIALIZE_REJECTS="$MATERIALIZE_REJECTS" APPEND_MATERIALIZED_REJECTS="$APPEND_MATERIALIZED_REJECTS" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
 import datetime
 import hashlib
 import json
@@ -437,6 +518,8 @@ def load(path):
 
 
 scorecard, scorecard_sha, scorecard_err = load(os.environ["SCORECARD_JSON_OUT"])
+data_flow, data_flow_sha, data_flow_err = load(os.environ["DATA_FLOW_JSON_OUT"])
+decision_packet, decision_packet_sha, decision_packet_err = load(os.environ["DECISION_PACKET_JSON_OUT"])
 plan, plan_sha, plan_err = load(os.environ["PLAN_OUT"])
 historical, historical_sha, historical_err = load(os.environ["HISTORICAL_REVIEW_OUT"])
 materializer, materializer_sha, materializer_err = load(os.environ["MATERIALIZER_OUT"])
@@ -457,6 +540,8 @@ status = {
     "ts_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "check": "cost_gate_learning_lane",
     "scorecard_rc": int(os.environ["SCORECARD_RC"]),
+    "data_flow_monitor_rc": int(os.environ["DATA_FLOW_MONITOR_RC"]),
+    "decision_packet_rc": int(os.environ["DECISION_PACKET_RC"]),
     "plan_rc": int(os.environ["PLAN_RC"]),
     "historical_review_rc": int(os.environ["HISTORICAL_REVIEW_RC"]),
     "materializer_rc": int(os.environ["MATERIALIZER_RC"]),
@@ -465,6 +550,8 @@ status = {
     "bounded_probe_result_review_rc": int(os.environ["BOUNDED_PROBE_RESULT_REVIEW_RC"]),
     "bounded_probe_execution_realism_review_rc": int(os.environ["BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_RC"]),
     "refresh_scorecard": os.environ["REFRESH_SCORECARD"] == "1",
+    "refresh_data_flow_monitor": os.environ["REFRESH_DATA_FLOW_MONITOR"] == "1",
+    "refresh_decision_packet": os.environ["REFRESH_DECISION_PACKET"] == "1",
     "refresh_plan": os.environ["REFRESH_PLAN"] == "1",
     "refresh_bounded_probe_result_review": os.environ["REFRESH_BOUNDED_PROBE_RESULT_REVIEW"] == "1",
     "refresh_bounded_probe_execution_realism_review": os.environ["REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW"] == "1",
@@ -491,6 +578,23 @@ status = {
     "scorecard_horizon_stability_horizons": (
         ((scorecard.get("learning_lane_scorecard") or {}).get("horizon_stability_scorecard") or {}).get("horizons_minutes")
     ),
+    "data_flow_monitor_artifact_path": os.environ["DATA_FLOW_JSON_OUT"],
+    "data_flow_monitor_latest_path": os.environ["DATA_FLOW_JSON"],
+    "data_flow_monitor_sha256": data_flow_sha,
+    "data_flow_monitor_error": data_flow_err,
+    "data_flow_monitor_status": (data_flow.get("summary") or {}).get("status"),
+    "data_flow_monitor_reason": (data_flow.get("summary") or {}).get("reason"),
+    "data_flow_monitor_next_action": (data_flow.get("summary") or {}).get("next_action"),
+    "data_flow_monitor_key_counts": (data_flow.get("summary") or {}).get("key_counts"),
+    "decision_packet_artifact_path": os.environ["DECISION_PACKET_JSON_OUT"],
+    "decision_packet_latest_path": os.environ["DECISION_PACKET_JSON"],
+    "decision_packet_sha256": decision_packet_sha,
+    "decision_packet_error": decision_packet_err,
+    "decision_packet_status": decision_packet.get("status"),
+    "decision_packet_reason": decision_packet.get("reason"),
+    "decision_packet_next_actions": decision_packet.get("next_actions"),
+    "decision_packet_silent_drop_risk": (decision_packet.get("answers") or {}).get("silent_drop_risk"),
+    "decision_packet_data_flow_status": (decision_packet.get("data_flow") or {}).get("status"),
     "plan_artifact_path": os.environ["PLAN_OUT"],
     "plan_latest_path": os.environ["PLAN_JSON"],
     "plan_sha256": plan_sha,
