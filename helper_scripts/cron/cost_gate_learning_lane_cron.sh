@@ -27,6 +27,7 @@ LEDGER="${OPENCLAW_COST_GATE_LEARNING_LEDGER:-$LANE_DIR/probe_ledger.jsonl}"
 SCORECARD_JSON="${OPENCLAW_COST_GATE_SCORECARD_JSON:-$DATA/cost_gate_counterfactual/cost_gate_reject_counterfactual_latest.json}"
 SCORECARD_MD="${OPENCLAW_COST_GATE_SCORECARD_MD:-$DATA/cost_gate_counterfactual/cost_gate_reject_counterfactual_latest.md}"
 PLAN_JSON="${OPENCLAW_COST_GATE_LEARNING_PLAN_JSON:-$LANE_DIR/demo_learning_lane_plan_latest.json}"
+SEALED_PREFLIGHT_JSON="${OPENCLAW_COST_GATE_BOUNDED_PROBE_PREFLIGHT_JSON:-$LANE_DIR/sealed_horizon_probe_preflight_latest.json}"
 
 REFRESH_SCORECARD="${OPENCLAW_COST_GATE_LEARNING_REFRESH_SCORECARD:-1}"
 SCORECARD_LOOKBACK_HOURS="${OPENCLAW_COST_GATE_SCORECARD_LOOKBACK_HOURS:-168}"
@@ -49,6 +50,8 @@ MATERIALIZER_LOOKBACK_HOURS="${OPENCLAW_COST_GATE_MATERIALIZER_LOOKBACK_HOURS:-4
 MATERIALIZER_LIMIT="${OPENCLAW_COST_GATE_MATERIALIZER_LIMIT:-10000}"
 APPEND_OUTCOMES="${OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES:-1}"
 RECORD_PROBE_OUTCOMES="${OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES:-0}"
+REFRESH_BOUNDED_PROBE_RESULT_REVIEW="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_RESULT_REVIEW:-1}"
+REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW:-1}"
 REVIEW_MIN_OUTCOMES="${OPENCLAW_COST_GATE_REVIEW_MIN_OUTCOMES_PER_SIDE_CELL:-3}"
 REVIEW_MIN_AVG_NET_BPS="${OPENCLAW_COST_GATE_REVIEW_MIN_AVG_NET_BPS:-0.0}"
 REVIEW_MIN_NET_POSITIVE_PCT="${OPENCLAW_COST_GATE_REVIEW_MIN_NET_POSITIVE_PCT:-60.0}"
@@ -112,6 +115,8 @@ validate_int "OPENCLAW_COST_GATE_MATERIALIZER_LOOKBACK_HOURS" "$MATERIALIZER_LOO
 validate_int "OPENCLAW_COST_GATE_MATERIALIZER_LIMIT" "$MATERIALIZER_LIMIT"
 validate_bool01 "OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES" "$APPEND_OUTCOMES"
 validate_bool01 "OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES" "$RECORD_PROBE_OUTCOMES"
+validate_bool01 "OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_RESULT_REVIEW" "$REFRESH_BOUNDED_PROBE_RESULT_REVIEW"
+validate_bool01 "OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW" "$REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW"
 validate_int "OPENCLAW_COST_GATE_REVIEW_MIN_OUTCOMES_PER_SIDE_CELL" "$REVIEW_MIN_OUTCOMES"
 validate_decimal "OPENCLAW_COST_GATE_REVIEW_MIN_AVG_NET_BPS" "$REVIEW_MIN_AVG_NET_BPS"
 validate_decimal "OPENCLAW_COST_GATE_REVIEW_MIN_NET_POSITIVE_PCT" "$REVIEW_MIN_NET_POSITIVE_PCT"
@@ -170,6 +175,14 @@ REFRESH_OUT="${LANE_DIR}/outcome_refresh_${STAMP}.json"
 REFRESH_LATEST="${LANE_DIR}/outcome_refresh_latest.json"
 REVIEW_OUT="${LANE_DIR}/blocked_outcome_review_${STAMP}.json"
 REVIEW_LATEST="${LANE_DIR}/blocked_outcome_review_latest.json"
+BOUNDED_PROBE_RESULT_REVIEW_OUT="${LANE_DIR}/bounded_probe_result_review_${STAMP}.json"
+BOUNDED_PROBE_RESULT_REVIEW_MD_OUT="${LANE_DIR}/bounded_probe_result_review_${STAMP}.md"
+BOUNDED_PROBE_RESULT_REVIEW_LATEST="${LANE_DIR}/bounded_probe_result_review_latest.json"
+BOUNDED_PROBE_RESULT_REVIEW_MD_LATEST="${LANE_DIR}/bounded_probe_result_review_latest.md"
+BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT="${LANE_DIR}/bounded_probe_execution_realism_review_${STAMP}.json"
+BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_MD_OUT="${LANE_DIR}/bounded_probe_execution_realism_review_${STAMP}.md"
+BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST="${LANE_DIR}/bounded_probe_execution_realism_review_latest.json"
+BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_MD_LATEST="${LANE_DIR}/bounded_probe_execution_realism_review_latest.md"
 HISTORICAL_REVIEW_OUT="${LANE_DIR}/historical_scorecard_review_${STAMP}.json"
 HISTORICAL_REVIEW_LATEST="${LANE_DIR}/historical_scorecard_review_latest.json"
 MATERIALIZER_OUT="${LANE_DIR}/reject_materializer_${STAMP}.json"
@@ -248,6 +261,22 @@ REVIEW_ARGS=(
     --output "$REVIEW_OUT"
 )
 
+BOUNDED_PROBE_RESULT_REVIEW_ARGS=(
+    -m cost_gate_learning_lane.bounded_probe_result_review
+    --preflight-json "$SEALED_PREFLIGHT_JSON"
+    --ledger "$LEDGER"
+    --json-output "$BOUNDED_PROBE_RESULT_REVIEW_OUT"
+    --output "$BOUNDED_PROBE_RESULT_REVIEW_MD_OUT"
+)
+
+BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_ARGS=(
+    -m cost_gate_learning_lane.bounded_probe_execution_realism_review
+    --result-review-json "$BOUNDED_PROBE_RESULT_REVIEW_OUT"
+    --ledger "$LEDGER"
+    --json-output "$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT"
+    --output "$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_MD_OUT"
+)
+
 echo "[$(ts)] === Cost-gate learning lane refresh start append=${APPEND_OUTCOMES} ledger=${LEDGER} ===" >> "$LOG"
 scorecard_rc=0
 if [[ "$REFRESH_SCORECARD" == "1" ]]; then
@@ -286,8 +315,14 @@ historical_review_rc=0
 materializer_rc=0
 refresh_rc=0
 review_rc=0
+bounded_probe_result_review_rc=0
+bounded_probe_execution_realism_review_rc=0
+bounded_probe_result_review_skip_reason=""
+bounded_probe_execution_realism_review_skip_reason=""
 if [[ "$PREINSTALL_REFRESH_ONLY" == "1" ]]; then
-    echo "[$(ts)] SKIP: preinstall refresh-only mode; refreshed scorecard/plan, skipped historical/materializer/outcome/review stages" >> "$LOG"
+    bounded_probe_result_review_skip_reason="preinstall_refresh_only"
+    bounded_probe_execution_realism_review_skip_reason="preinstall_refresh_only"
+    echo "[$(ts)] SKIP: preinstall refresh-only mode; refreshed scorecard/plan, skipped historical/materializer/outcome/review/bounded-probe stages" >> "$LOG"
 else
     (
         cd "$BASE"
@@ -332,9 +367,55 @@ else
     if [[ -f "$REVIEW_OUT" ]]; then
         cp "$REVIEW_OUT" "$REVIEW_LATEST"
     fi
+
+    if [[ "$REFRESH_BOUNDED_PROBE_RESULT_REVIEW" == "1" ]]; then
+        if [[ -f "$SEALED_PREFLIGHT_JSON" ]]; then
+            (
+                cd "$BASE"
+                export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
+                export PYTHONDONTWRITEBYTECODE=1
+                "$PYBIN" "${BOUNDED_PROBE_RESULT_REVIEW_ARGS[@]}"
+            ) >> "$LOG" 2>&1 || bounded_probe_result_review_rc=$?
+            if [[ -f "$BOUNDED_PROBE_RESULT_REVIEW_OUT" ]]; then
+                cp "$BOUNDED_PROBE_RESULT_REVIEW_OUT" "$BOUNDED_PROBE_RESULT_REVIEW_LATEST"
+                if [[ -f "$BOUNDED_PROBE_RESULT_REVIEW_MD_OUT" ]]; then
+                    cp "$BOUNDED_PROBE_RESULT_REVIEW_MD_OUT" "$BOUNDED_PROBE_RESULT_REVIEW_MD_LATEST"
+                fi
+            fi
+        else
+            bounded_probe_result_review_skip_reason="sealed_horizon_probe_preflight_missing"
+            echo "[$(ts)] SKIP: bounded probe result review missing sealed preflight: $SEALED_PREFLIGHT_JSON" >> "$LOG"
+        fi
+    else
+        bounded_probe_result_review_skip_reason="disabled"
+        echo "[$(ts)] SKIP: bounded probe result review disabled by OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_RESULT_REVIEW=0" >> "$LOG"
+    fi
+
+    if [[ "$REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW" == "1" ]]; then
+        if [[ -f "$BOUNDED_PROBE_RESULT_REVIEW_OUT" ]]; then
+            (
+                cd "$BASE"
+                export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
+                export PYTHONDONTWRITEBYTECODE=1
+                "$PYBIN" "${BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_ARGS[@]}"
+            ) >> "$LOG" 2>&1 || bounded_probe_execution_realism_review_rc=$?
+            if [[ -f "$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT" ]]; then
+                cp "$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT" "$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST"
+                if [[ -f "$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_MD_OUT" ]]; then
+                    cp "$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_MD_OUT" "$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_MD_LATEST"
+                fi
+            fi
+        else
+            bounded_probe_execution_realism_review_skip_reason="bounded_probe_result_review_missing"
+            echo "[$(ts)] SKIP: bounded probe execution-realism review missing result review: $BOUNDED_PROBE_RESULT_REVIEW_OUT" >> "$LOG"
+        fi
+    else
+        bounded_probe_execution_realism_review_skip_reason="disabled"
+        echo "[$(ts)] SKIP: bounded probe execution-realism review disabled by OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW=0" >> "$LOG"
+    fi
 fi
 
-STATUS_JSON=$(SCORECARD_JSON_OUT="$SCORECARD_JSON_OUT" SCORECARD_JSON="$SCORECARD_JSON" SCORECARD_RC="$scorecard_rc" REFRESH_SCORECARD="$REFRESH_SCORECARD" PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN" PREINSTALL_REFRESH_ONLY="$PREINSTALL_REFRESH_ONLY" HISTORICAL_REVIEW_OUT="$HISTORICAL_REVIEW_OUT" MATERIALIZER_OUT="$MATERIALIZER_OUT" REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" HISTORICAL_REVIEW_RC="$historical_review_rc" MATERIALIZER_RC="$materializer_rc" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" LEDGER="$LEDGER" MATERIALIZE_REJECTS="$MATERIALIZE_REJECTS" APPEND_MATERIALIZED_REJECTS="$APPEND_MATERIALIZED_REJECTS" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
+STATUS_JSON=$(SCORECARD_JSON_OUT="$SCORECARD_JSON_OUT" SCORECARD_JSON="$SCORECARD_JSON" SCORECARD_RC="$scorecard_rc" REFRESH_SCORECARD="$REFRESH_SCORECARD" PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN" PREINSTALL_REFRESH_ONLY="$PREINSTALL_REFRESH_ONLY" HISTORICAL_REVIEW_OUT="$HISTORICAL_REVIEW_OUT" MATERIALIZER_OUT="$MATERIALIZER_OUT" REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" BOUNDED_PROBE_PREFLIGHT_JSON="$SEALED_PREFLIGHT_JSON" BOUNDED_PROBE_RESULT_REVIEW_OUT="$BOUNDED_PROBE_RESULT_REVIEW_OUT" BOUNDED_PROBE_RESULT_REVIEW_LATEST="$BOUNDED_PROBE_RESULT_REVIEW_LATEST" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST" HISTORICAL_REVIEW_RC="$historical_review_rc" MATERIALIZER_RC="$materializer_rc" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" BOUNDED_PROBE_RESULT_REVIEW_RC="$bounded_probe_result_review_rc" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_RC="$bounded_probe_execution_realism_review_rc" BOUNDED_PROBE_RESULT_REVIEW_SKIP_REASON="$bounded_probe_result_review_skip_reason" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_SKIP_REASON="$bounded_probe_execution_realism_review_skip_reason" REFRESH_BOUNDED_PROBE_RESULT_REVIEW="$REFRESH_BOUNDED_PROBE_RESULT_REVIEW" REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW="$REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW" LEDGER="$LEDGER" MATERIALIZE_REJECTS="$MATERIALIZE_REJECTS" APPEND_MATERIALIZED_REJECTS="$APPEND_MATERIALIZED_REJECTS" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
 import datetime
 import hashlib
 import json
@@ -361,6 +442,8 @@ historical, historical_sha, historical_err = load(os.environ["HISTORICAL_REVIEW_
 materializer, materializer_sha, materializer_err = load(os.environ["MATERIALIZER_OUT"])
 refresh, refresh_sha, refresh_err = load(os.environ["REFRESH_OUT"])
 review, review_sha, review_err = load(os.environ["REVIEW_OUT"])
+bounded_result, bounded_result_sha, bounded_result_err = load(os.environ["BOUNDED_PROBE_RESULT_REVIEW_OUT"])
+bounded_exec, bounded_exec_sha, bounded_exec_err = load(os.environ["BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT"])
 ledger = Path(os.environ["LEDGER"])
 ledger_rows = None
 try:
@@ -379,8 +462,12 @@ status = {
     "materializer_rc": int(os.environ["MATERIALIZER_RC"]),
     "refresh_rc": int(os.environ["REFRESH_RC"]),
     "review_rc": int(os.environ["REVIEW_RC"]),
+    "bounded_probe_result_review_rc": int(os.environ["BOUNDED_PROBE_RESULT_REVIEW_RC"]),
+    "bounded_probe_execution_realism_review_rc": int(os.environ["BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_RC"]),
     "refresh_scorecard": os.environ["REFRESH_SCORECARD"] == "1",
     "refresh_plan": os.environ["REFRESH_PLAN"] == "1",
+    "refresh_bounded_probe_result_review": os.environ["REFRESH_BOUNDED_PROBE_RESULT_REVIEW"] == "1",
+    "refresh_bounded_probe_execution_realism_review": os.environ["REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW"] == "1",
     "preinstall_refresh_only": os.environ["PREINSTALL_REFRESH_ONLY"] == "1",
     "materialize_rejects": os.environ["MATERIALIZE_REJECTS"] == "1",
     "append_materialized_rejects": os.environ["APPEND_MATERIALIZED_REJECTS"] == "1",
@@ -448,6 +535,69 @@ status = {
     "review_top_candidate_wrongful_block_score": review.get("top_review_candidate_wrongful_block_score"),
     "review_top_candidate_net_cost_cushion_bps": review.get("top_review_candidate_net_cost_cushion_bps"),
     "blocked_signal_outcome_count": review.get("blocked_signal_outcome_count"),
+    "bounded_probe_preflight_path": os.environ["BOUNDED_PROBE_PREFLIGHT_JSON"],
+    "bounded_probe_result_review_artifact_path": os.environ["BOUNDED_PROBE_RESULT_REVIEW_OUT"],
+    "bounded_probe_result_review_latest_path": os.environ["BOUNDED_PROBE_RESULT_REVIEW_LATEST"],
+    "bounded_probe_result_review_sha256": bounded_result_sha,
+    "bounded_probe_result_review_error": bounded_result_err,
+    "bounded_probe_result_review_skip_reason": os.environ["BOUNDED_PROBE_RESULT_REVIEW_SKIP_REASON"] or None,
+    "bounded_probe_result_review_status": bounded_result.get("status"),
+    "bounded_probe_result_review_reason": bounded_result.get("reason"),
+    "bounded_probe_result_review_side_cell_key": bounded_result.get("side_cell_key"),
+    "bounded_probe_result_review_completed_probe_outcome_count": (
+        (bounded_result.get("probe_result_summary") or {}).get("completed_probe_outcome_count")
+        if isinstance(bounded_result.get("probe_result_summary"), dict)
+        else None
+    ),
+    "bounded_probe_result_review_avg_realized_net_bps": (
+        (bounded_result.get("probe_result_summary") or {}).get("avg_realized_net_bps")
+        if isinstance(bounded_result.get("probe_result_summary"), dict)
+        else None
+    ),
+    "bounded_probe_result_review_evidence_quality_status": (
+        (bounded_result.get("evidence_quality") or {}).get("status")
+        if isinstance(bounded_result.get("evidence_quality"), dict)
+        else None
+    ),
+    "bounded_probe_result_review_probe_execution_gap_bps": (
+        (bounded_result.get("evidence_quality") or {}).get("probe_execution_gap_bps")
+        if isinstance(bounded_result.get("evidence_quality"), dict)
+        else None
+    ),
+    "bounded_probe_result_review_execution_realism_gap": (
+        (bounded_result.get("evidence_quality") or {}).get("execution_realism_gap")
+        if isinstance(bounded_result.get("evidence_quality"), dict)
+        else None
+    ),
+    "bounded_probe_execution_realism_review_artifact_path": os.environ["BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT"],
+    "bounded_probe_execution_realism_review_latest_path": os.environ["BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST"],
+    "bounded_probe_execution_realism_review_sha256": bounded_exec_sha,
+    "bounded_probe_execution_realism_review_error": bounded_exec_err,
+    "bounded_probe_execution_realism_review_skip_reason": os.environ["BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_SKIP_REASON"] or None,
+    "bounded_probe_execution_realism_review_status": bounded_exec.get("status"),
+    "bounded_probe_execution_realism_review_reason": bounded_exec.get("reason"),
+    "bounded_probe_execution_realism_review_primary_hypothesis": (
+        (bounded_exec.get("execution_gap_hypotheses") or [{}])[0].get("kind")
+        if isinstance(bounded_exec.get("execution_gap_hypotheses"), list)
+        and bounded_exec.get("execution_gap_hypotheses")
+        and isinstance((bounded_exec.get("execution_gap_hypotheses") or [{}])[0], dict)
+        else None
+    ),
+    "bounded_probe_execution_realism_review_net_capture_gap_bps": (
+        (bounded_exec.get("gap_decomposition") or {}).get("net_capture_gap_bps")
+        if isinstance(bounded_exec.get("gap_decomposition"), dict)
+        else None
+    ),
+    "bounded_probe_execution_realism_review_probe_fill_backed_pct": (
+        (bounded_exec.get("probe_execution_summary") or {}).get("fill_backed_pct")
+        if isinstance(bounded_exec.get("probe_execution_summary"), dict)
+        else None
+    ),
+    "bounded_probe_execution_realism_review_cost_gate_or_operator_review_allowed": (
+        (bounded_exec.get("answers") or {}).get("cost_gate_or_operator_review_allowed")
+        if isinstance(bounded_exec.get("answers"), dict)
+        else None
+    ),
     "boundary": "artifact_only_readonly_pg_jsonl_ledger_no_order_no_cost_gate_relaxation",
 }
 print(json.dumps(status, ensure_ascii=False, sort_keys=True))
@@ -457,7 +607,7 @@ if [[ -n "$STATUS_JSON" ]]; then
     echo "$STATUS_JSON" >> "$STATUS_LOG"
 fi
 
-echo "[$(ts)] === Cost-gate learning lane refresh end scorecard_rc=${scorecard_rc} plan_rc=${plan_rc} historical_review_rc=${historical_review_rc} materializer_rc=${materializer_rc} refresh_rc=${refresh_rc} review_rc=${review_rc} ===" >> "$LOG"
+echo "[$(ts)] === Cost-gate learning lane refresh end scorecard_rc=${scorecard_rc} plan_rc=${plan_rc} historical_review_rc=${historical_review_rc} materializer_rc=${materializer_rc} refresh_rc=${refresh_rc} review_rc=${review_rc} bounded_probe_result_review_rc=${bounded_probe_result_review_rc} bounded_probe_execution_realism_review_rc=${bounded_probe_execution_realism_review_rc} ===" >> "$LOG"
 
 # fail-soft: rc/status are recorded; alpha-discovery reads artifacts and ledger
 # state. Operator action is required for deploy, writer enablement, or probe authority.
