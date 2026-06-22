@@ -1753,3 +1753,11 @@
 - Runtime alpha smoke after source sync produced top task `operator_probe_review`, objective `operator_review_top_blocked_signal_side_cell_before_bounded_demo_probe`, `requires_operator_authorization=true`, and `runtime_mutation_required=false`; no Cost Gate/order/probe authority was granted.
 - Verification: Mac py_compile passed; Mac alpha/worklist tests `65 passed`; source commits `51e3e520` and `9768b3dd` pushed `[skip ci]`; Linux fast-forwarded to `9768b3dd`; Linux same checks `65 passed`; Linux artifact-only refresh/smoke passed and source remained clean.
 - Boundary: source/test/docs + Linux source sync + `/tmp/openclaw` artifact-only refresh/smoke only; no CI, no cron install, no PG write/schema migration, no Bybit private/signed/trading call, no deploy/restart, no env/auth/risk/order/strategy mutation, no Cost Gate lowering, no probe/order authority, no promotion proof.
+
+## 2026-06-22 Multi-Horizon Cost Gate Learning Review Path
+
+- v412 makes the Cost Gate learning cron default to multi-horizon scorecards (`15,30,60,120,240`) and carries horizon-stability evidence through the profit-learning decision packet into alpha/worklist.
+- Runtime read-only counterfactual latest reports `MULTI_HORIZON_PROFIT_LEARNING_CANDIDATES_PRESENT`; top candidate `ma_crossover|ETHUSDT|Sell` is `CANDIDATE_MULTI_HORIZON_STABLE` across all five horizons, best horizon `120m`, best avg net `121.1121bp`, net-positive `100.0%`, sample `10074`.
+- Alpha smoke after source sync reports top objective `operator_review_multi_horizon_blocked_signal_side_cell_before_bounded_demo_probe`, matched cell horizons `[15,30,60,120,240]`, `requires_operator_authorization=true`, `runtime_mutation_required=false`, and order/probe authority false.
+- Remaining gate: decision packet still records `DATA_FLOW_MONITOR_REQUIRED`; this candidate is reviewable but not tradeable until data-flow, bounded demo probe authorization, matched-control result review, and execution-realism evidence are complete.
+- Verification: Mac/Linux focused decision/alpha/worklist tests `71 passed`; cron static `13 passed`; source commits `65278ca9`, `aed33504`, `1f7180a1` pushed `[skip ci]`; Linux source clean at `1f7180a1`; read-only multi-horizon scorecard refresh, packet refresh, and alpha smoke passed.
