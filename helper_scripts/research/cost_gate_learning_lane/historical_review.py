@@ -99,6 +99,14 @@ def _side_cell_key(row: dict[str, Any]) -> str:
     )
 
 
+def _effective_sample_count(row: dict[str, Any]) -> int:
+    sample_count = _int(row.get("sample_count_for_gate"))
+    if sample_count > 0:
+        return sample_count
+    distinct_ts = _int(row.get("distinct_ts"))
+    return distinct_ts if distinct_ts > 0 else _int(row.get("n"))
+
+
 def validate_historical_scorecard_review_config(
     cfg: HistoricalScorecardReviewConfig,
 ) -> None:
@@ -118,6 +126,10 @@ def _compact_row(row: dict[str, Any]) -> dict[str, Any]:
         "side": row.get("side"),
         "reject_reason_code": row.get("reject_reason_code"),
         "n": _int(row.get("n")),
+        "sample_count_for_gate": _effective_sample_count(row),
+        "distinct_ts": _int(row.get("distinct_ts")),
+        "rows_per_distinct_ts": _float(row.get("rows_per_distinct_ts")),
+        "timespan_minutes": _float(row.get("timespan_minutes")),
         "avg_gross_bps": _float(row.get("avg_gross_bps")),
         "p50_gross_bps": _float(row.get("p50_gross_bps")),
         "p90_gross_bps": _float(row.get("p90_gross_bps")),
@@ -137,7 +149,7 @@ def _rank_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         key=lambda row: (
             _float(row.get("avg_net_bps")) or float("-inf"),
             _float(row.get("net_positive_pct")) or float("-inf"),
-            _int(row.get("n")),
+            _effective_sample_count(row),
         ),
         reverse=True,
     )
@@ -212,13 +224,13 @@ def build_historical_scorecard_review(
         row for row in _list(scorecard.get("probe_candidates"))
         if isinstance(row, dict)
         and row.get("learning_lane_action") == "LEARNING_PROBE_CANDIDATE"
-        and _int(row.get("n")) >= cfg.min_candidate_sample
+        and _effective_sample_count(row) >= cfg.min_candidate_sample
     ]
     if not probe_rows:
         probe_rows = [
             row for row in rows
             if row.get("learning_lane_action") == "LEARNING_PROBE_CANDIDATE"
-            and _int(row.get("n")) >= cfg.min_candidate_sample
+            and _effective_sample_count(row) >= cfg.min_candidate_sample
         ]
     block_rows = [
         row for row in rows

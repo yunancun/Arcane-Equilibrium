@@ -556,15 +556,20 @@ def render_markdown(packet: dict[str, Any]) -> str:
                 "",
                 "## Top Counterfactual Side Cells",
                 "",
-                "| side_cell | action | score | n | avg_net_bps | net_positive_pct |",
-                "|---|---|---:|---:|---:|---:|",
+                "| side_cell | action | score | sample_n | rows | avg_net_bps | net_positive_pct |",
+                "|---|---|---:|---:|---:|---:|---:|",
             ]
         )
         for row in top:
+            sample_n = (
+                row.get("sample_count_for_gate")
+                or row.get("distinct_ts")
+                or row.get("n")
+            )
             lines.append(
                 "| "
                 f"{row.get('side_cell_key')} | {row.get('learning_lane_action')} | "
-                f"{row.get('priority_score')} | {row.get('n')} | "
+                f"{row.get('priority_score')} | {sample_n} | {row.get('n')} | "
                 f"{row.get('avg_net_bps')} | {row.get('net_positive_pct')} |"
             )
     return "\n".join(lines) + "\n"

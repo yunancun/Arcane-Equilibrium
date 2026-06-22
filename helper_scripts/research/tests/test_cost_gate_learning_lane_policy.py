@@ -414,6 +414,90 @@ def test_policy_plan_prefers_profit_opportunity_ranking_when_present():
     assert plan["order_authority"] == "NOT_GRANTED"
 
 
+def test_policy_and_historical_review_use_effective_sample_gate() -> None:
+    payload = _scorecard_payload()
+    scorecard = payload["learning_lane_scorecard"]
+    duplicate_inflated = {
+        "side_cell_key": "dup_signal|SOLUSDT|Buy",
+        "strategy_name": "dup_signal",
+        "symbol": "SOLUSDT",
+        "side": "Buy",
+        "reject_reason_code": "cost_gate_js_demo_negative_edge",
+        "learning_lane_action": "LEARNING_PROBE_CANDIDATE",
+        "learning_lane_reason": "avg_net_positive_and_median_gross_clears_friction",
+        "priority_tier": "HIGH_PRIORITY_BOUNDED_DEMO_LEARNING",
+        "priority_score": 99.0,
+        "priority_components": {"sample_score": 25.0},
+        "n": 500,
+        "sample_count_for_gate": 3,
+        "distinct_ts": 3,
+        "rows_per_distinct_ts": 166.6667,
+        "timespan_minutes": 2.0,
+        "avg_net_bps": 60.0,
+        "p50_gross_bps": 70.0,
+        "p90_gross_bps": 100.0,
+        "net_positive_pct": 99.0,
+        "order_authority": "NOT_GRANTED",
+        "main_cost_gate_adjustment": "NONE",
+        "promotion_evidence": False,
+    }
+    valid_candidate = {
+        "side_cell_key": "ma_crossover|NEARUSDT|Sell",
+        "strategy_name": "ma_crossover",
+        "symbol": "NEARUSDT",
+        "side": "Sell",
+        "reject_reason_code": "cost_gate_js_demo_negative_edge",
+        "learning_lane_action": "LEARNING_PROBE_CANDIDATE",
+        "learning_lane_reason": "avg_net_positive_and_median_gross_clears_friction",
+        "priority_tier": "MEDIUM_PRIORITY_BOUNDED_DEMO_LEARNING",
+        "priority_score": 70.0,
+        "priority_components": {"hit_rate_score": 25.0},
+        "n": 244,
+        "sample_count_for_gate": 244,
+        "distinct_ts": 244,
+        "rows_per_distinct_ts": 1.0,
+        "timespan_minutes": 243.0,
+        "avg_net_bps": 16.2197,
+        "p50_gross_bps": 13.2,
+        "p90_gross_bps": 31.0,
+        "net_positive_pct": 99.95,
+        "order_authority": "NOT_GRANTED",
+        "main_cost_gate_adjustment": "NONE",
+        "promotion_evidence": False,
+    }
+    scorecard["rows"] = [duplicate_inflated, valid_candidate]
+    scorecard["probe_candidates"] = [duplicate_inflated, valid_candidate]
+    scorecard["profit_opportunity_ranking"] = {
+        "schema_version": "cost_gate_profit_opportunity_ranking_v1",
+        "status": "PROFIT_LEARNING_CANDIDATES_PRESENT",
+        "top_side_cells": [duplicate_inflated, valid_candidate],
+    }
+
+    plan = build_plan_from_payload(
+        payload,
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+        cfg=LearningLanePolicyConfig(max_probe_side_cells=2, max_total_probe_orders=4),
+    )
+    review = build_historical_scorecard_review(
+        payload,
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+        cfg=HistoricalScorecardReviewConfig(max_side_cells=2),
+    )
+
+    assert [row["side_cell_key"] for row in plan["probe_candidates"]] == [
+        "ma_crossover|NEARUSDT|Sell"
+    ]
+    assert plan["probe_candidates"][0]["sample_count_for_gate"] == 244
+    assert plan["probe_candidates"][0]["n"] == 244
+    assert [row["side_cell_key"] for row in review["historical_probe_candidates"]] == [
+        "ma_crossover|NEARUSDT|Sell"
+    ]
+    assert review["historical_probe_candidates"][0]["sample_count_for_gate"] == 244
+    assert "dup_signal|SOLUSDT|Buy" not in [
+        row["side_cell_key"] for row in plan["probe_candidates"]
+    ]
+
+
 def test_historical_scorecard_review_prioritizes_candidates_without_authority():
     review = build_historical_scorecard_review(
         _scorecard_payload(),

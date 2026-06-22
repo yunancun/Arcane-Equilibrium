@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Cost Gate Downstream Effective-Sample Guard
+
+- Bounded learning policy and historical scorecard review now consume the v381 effective sample fields, preferring `sample_count_for_gate` / `distinct_ts` before raw rows for sample gates, scoring, ranking, and compact outputs.
+- Decision packet markdown now shows `sample_n` versus raw rows, reducing operator ambiguity when duplicated feature rows exist.
+- Regression proves `n=500` with `sample_count_for_gate=3` cannot enter bounded demo probe or historical review; no Cost Gate lowering, probe/order authority, runtime mutation, or promotion proof was granted.
+
 ## 2026-06-22 Cost Gate Reject Counterfactual Sample Guard
 
 - Runtime read-only counterfactual showed Cost Gate blocks contain learning candidates: BTCUSDT Buy is positive at 15m/60m after 4bp friction, while 240m flips to BTCUSDT Sell and confirms BTCUSDT Buy blocked.
