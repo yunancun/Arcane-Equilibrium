@@ -21,3 +21,11 @@ No Cost Gate lowering, no Bybit trading call, no runtime mutation, no deploy/res
 ## Operator Gate
 
 The remaining decision is still actual operator review/authorization. If approved later, implementation should enforce the limits through the Rust authority path, not by bypassing Cost Gate in Python.
+
+## Latest Evidence
+
+- Sealed preflight latest: `/tmp/openclaw/cost_gate_learning_lane/sealed_horizon_probe_preflight_latest.json`
+- sha256: `6d642a78e23d744c21fbb49e7618ffd66e7a2fa279923c73fc7d0f6b3ceea14d`
+- Status: `OPERATOR_REVIEW_REQUIRED`
+- Design status: `OPERATOR_REVIEW_READY_FOR_BOUNDED_DEMO_PROBE_DESIGN`
+- Profitability scorecard smoke sha256: `6eb327b7c0f5ad96eaad2d9e0e9bb4ffaff88c3222910f4d442cb15905082f30`

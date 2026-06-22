@@ -41,6 +41,9 @@ This change makes that experiment auditable before any approval. It supports the
 - `PYTHONPATH=helper_scripts/research python3 -m pytest helper_scripts/research/tests/test_alpha_discovery_throughput.py helper_scripts/research/tests/test_cost_gate_sealed_horizon_operator_review.py helper_scripts/research/tests/test_cost_gate_sealed_horizon_learning_evidence.py -q` -> `58 passed`.
 - `PYTHONPATH=helper_scripts/research python3 -m pytest helper_scripts/research/tests/test_cost_gate_learning_lane_policy.py -q` -> `71 passed`.
 - `git diff --check` passed.
+- Linux source fast-forwarded to `39176be3`; Linux py_compile and focused preflight/profitability tests passed (`12 passed`).
+- Linux artifact-only sealed preflight smoke refreshed `/tmp/openclaw/cost_gate_learning_lane/sealed_horizon_probe_preflight_latest.json` sha256 `6d642a78e23d744c21fbb49e7618ffd66e7a2fa279923c73fc7d0f6b3ceea14d`, status `OPERATOR_REVIEW_REQUIRED`, design status `OPERATOR_REVIEW_READY_FOR_BOUNDED_DEMO_PROBE_DESIGN`, candidate `ma_crossover|BTCUSDT|Sell@240m`.
+- Linux artifact-only profitability scorecard smoke wrote `/tmp/openclaw/profitability_refresh/20260622T031320Z/bounded_probe_design_v397/profitability_path_scorecard_latest.json` sha256 `6eb327b7c0f5ad96eaad2d9e0e9bb4ffaff88c3222910f4d442cb15905082f30`, closure `COST_GATE_ESCAPE_PREFLIGHT_BLOCKED_BY_OPERATOR_REVIEW`.
 
 ## Boundaries
 
