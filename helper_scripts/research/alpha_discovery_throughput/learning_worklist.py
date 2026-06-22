@@ -19,6 +19,7 @@ _TASK_PRIORITY = {
     "runtime_source_reconcile": 20,
     "cost_gate_learning_activation": 30,
     "cost_gate_outcome_review": 35,
+    "bounded_probe_execution_realism": 38,
     "polymarket_execution_realism": 40,
     "polymarket_replay_history": 45,
     "polymarket_candidate_replay": 50,
@@ -192,7 +193,10 @@ _EVIDENCE_KEYS = (
     "bounded_probe_result_review_matched_control_avg_net_bps",
     "bounded_probe_result_review_matched_control_net_positive_pct",
     "bounded_probe_result_review_probe_minus_control_avg_net_bps",
+    "bounded_probe_result_review_probe_edge_capture_ratio",
+    "bounded_probe_result_review_probe_execution_gap_bps",
     "bounded_probe_result_review_probe_outperforms_matched_control",
+    "bounded_probe_result_review_execution_realism_gap",
     "bounded_probe_result_review_anecdote_risk",
 )
 
@@ -241,6 +245,8 @@ def _classify_task_type(row: dict[str, Any]) -> str:
     ):
         return "runtime_source_reconcile"
     if arm_id == "cost_gate_demo_learning_lane":
+        if blocker_class == "execution_realism":
+            return "bounded_probe_execution_realism"
         if "blocked_signal" in primary or "blocked_outcome" in primary:
             return "cost_gate_outcome_review"
         if (
@@ -316,6 +322,8 @@ def _learning_objective(row: dict[str, Any], task_type: str) -> str:
         return "activate_bounded_cost_gate_reject_learning_before_lowering_main_gate"
     if task_type == "cost_gate_outcome_review":
         return "compare_blocked_signal_outcomes_against_market_path"
+    if task_type == "bounded_probe_execution_realism":
+        return "measure_probe_slippage_timing_and_fill_quality_against_matched_control_edge"
     if task_type == "mm_signal_search":
         return "find_train_confirmed_low_friction_mm_signal_that_clears_current_fee"
     if task_type == "fee_path_review":
@@ -350,6 +358,8 @@ def _completion_gate(task_type: str) -> str:
         return "learning_lane_ledger_and_blocked_outcomes_accumulating"
     if task_type == "cost_gate_outcome_review":
         return "blocked_signal_outcome_review_refreshed"
+    if task_type == "bounded_probe_execution_realism":
+        return "bounded_probe_execution_realism_gap_pass_or_reject_recorded"
     if task_type == "mm_signal_search":
         return "train_confirmed_sample_gated_current_fee_gross_edge_found"
     if task_type == "fee_path_review":
@@ -418,6 +428,13 @@ def _completion_evidence_required(task_type: str) -> list[str]:
             "review status is DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT or NO_DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE",
             "positive blocked outcomes include side_cell_key and net_bps evidence",
             "top blocked side-cell carries wrongful_block_score and net_cost_cushion_bps",
+        ]
+    if task_type == "bounded_probe_execution_realism":
+        return [
+            "bounded_probe_result_review_execution_realism_gap is explicit",
+            "probe_edge_capture_ratio and probe_execution_gap_bps are recorded",
+            "slippage timing fill-quality or horizon-retiming hypothesis is recorded",
+            "Cost Gate review remains blocked until probe captures matched-control edge",
         ]
     if task_type == "mm_signal_search":
         return [

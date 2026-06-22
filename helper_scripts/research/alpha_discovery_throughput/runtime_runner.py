@@ -1888,8 +1888,17 @@ def summarize_bounded_probe_result_review(
         "bounded_probe_result_review_probe_minus_control_avg_net_bps": quality.get(
             "probe_minus_control_avg_net_bps"
         ),
+        "bounded_probe_result_review_probe_edge_capture_ratio": quality.get(
+            "probe_edge_capture_ratio"
+        ),
+        "bounded_probe_result_review_probe_execution_gap_bps": quality.get(
+            "probe_execution_gap_bps"
+        ),
         "bounded_probe_result_review_probe_outperforms_matched_control": quality.get(
             "probe_outperforms_matched_control"
+        ),
+        "bounded_probe_result_review_execution_realism_gap": quality.get(
+            "execution_realism_gap"
         ),
         "bounded_probe_result_review_anecdote_risk": quality.get("anecdote_risk"),
     }

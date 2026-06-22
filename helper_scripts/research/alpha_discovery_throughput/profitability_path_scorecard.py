@@ -99,6 +99,7 @@ def _score_priority(path: dict[str, Any]) -> tuple[int, float]:
         "SEALED_HORIZON_PREFLIGHT_READY_FOR_OPERATOR_AUTHORIZATION": 6,
         "BOUNDED_DEMO_PROBE_LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED": 5,
         "BOUNDED_DEMO_PROBE_FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED": 6,
+        "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_GAP": 6,
         "BOUNDED_DEMO_PROBE_CONTROL_COMPARISON_REQUIRED": 7,
         "BOUNDED_DEMO_PROBE_COLLECT_MORE_OUTCOMES": 7,
         "SEALED_HORIZON_PREFLIGHT_REQUIRES_OPERATOR_REVIEW": 7,
@@ -347,6 +348,9 @@ def _bounded_probe_result_review_fields(
             "bounded_probe_result_review_learning_review_candidate": False,
             "bounded_probe_result_review_evidence_quality_status": None,
             "bounded_probe_result_review_matched_control_outcome_count": 0,
+            "bounded_probe_result_review_probe_edge_capture_ratio": None,
+            "bounded_probe_result_review_probe_execution_gap_bps": None,
+            "bounded_probe_result_review_execution_realism_gap": False,
             "bounded_probe_result_review_anecdote_risk": False,
         }
     summary = _dict(payload.get("probe_result_summary"))
@@ -446,8 +450,17 @@ def _bounded_probe_result_review_fields(
         "bounded_probe_result_review_probe_minus_control_avg_net_bps": (
             quality.get("probe_minus_control_avg_net_bps")
         ),
+        "bounded_probe_result_review_probe_edge_capture_ratio": (
+            quality.get("probe_edge_capture_ratio")
+        ),
+        "bounded_probe_result_review_probe_execution_gap_bps": (
+            quality.get("probe_execution_gap_bps")
+        ),
         "bounded_probe_result_review_probe_outperforms_matched_control": (
             quality.get("probe_outperforms_matched_control") is True
+        ),
+        "bounded_probe_result_review_execution_realism_gap": (
+            quality.get("execution_realism_gap") is True
         ),
         "bounded_probe_result_review_anecdote_risk": (
             quality.get("anecdote_risk") is True
@@ -625,6 +638,18 @@ def _bounded_probe_result_path_state(
             "BOUNDED_DEMO_PROBE_CONTROL_COMPARISON_REQUIRED",
             "record_matched_blocked_signal_control_outcomes_before_operator_gate_review",
             _first_text(next_actions, quality_next_action),
+        )
+    if status in {
+        "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED",
+        "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED",
+    } and quality_status == "PROBE_UNDERPERFORMS_MATCHED_CONTROL_EXECUTION_GAP":
+        return (
+            "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_GAP",
+            "investigate_probe_execution_realism_before_cost_gate_or_operator_review",
+            _first_text(
+                next_actions,
+                "investigate_probe_execution_realism_slippage_and_timing_before_cost_gate_review",
+            ),
         )
     if status == "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED":
         return (
@@ -1150,6 +1175,11 @@ def _profitability_engineering_closure(
         "MATCHED_CONTROL_SAMPLE_BELOW_FIRST_REVIEW_FLOOR",
     }:
         status = "BOUNDED_DEMO_PROBE_CONTROL_COMPARISON_REQUIRED"
+    elif result_status in {
+        "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED",
+        "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED",
+    } and result_quality_status == "PROBE_UNDERPERFORMS_MATCHED_CONTROL_EXECUTION_GAP":
+        status = "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_GAP"
     elif result_status == "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED":
         status = "BOUNDED_DEMO_PROBE_LEARNING_REVIEW_OPERATOR_REQUIRED"
     elif result_status == "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED":
@@ -1187,6 +1217,13 @@ def _profitability_engineering_closure(
     }:
         remaining = [
             "record matched blocked-signal control outcomes before treating positive probe results as Cost Gate evidence"
+        ]
+    elif result_status in {
+        "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED",
+        "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED",
+    } and result_quality_status == "PROBE_UNDERPERFORMS_MATCHED_CONTROL_EXECUTION_GAP":
+        remaining = [
+            "investigate bounded demo probe execution realism gap before treating matched-control edge as capturable"
         ]
     elif result_status == "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED":
         remaining = ["operator reviews bounded probe learning results before any gate or promotion change"]
@@ -1257,6 +1294,15 @@ def _profitability_engineering_closure(
             ),
             "bounded_probe_result_review_probe_minus_control_avg_net_bps": (
                 result_quality.get("probe_minus_control_avg_net_bps")
+            ),
+            "bounded_probe_result_review_probe_edge_capture_ratio": (
+                result_quality.get("probe_edge_capture_ratio")
+            ),
+            "bounded_probe_result_review_probe_execution_gap_bps": (
+                result_quality.get("probe_execution_gap_bps")
+            ),
+            "bounded_probe_result_review_execution_realism_gap": (
+                result_quality.get("execution_realism_gap") is True
             ),
             "bounded_probe_result_review_anecdote_risk": (
                 result_quality.get("anecdote_risk") is True
