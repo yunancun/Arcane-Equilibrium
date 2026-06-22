@@ -532,12 +532,6 @@ def _blocked_signal_horizon_review_objective(row: dict[str, Any]) -> str | None:
     if (
         cell_status == "CANDIDATE_MULTI_HORIZON_STABLE"
         and len(candidate_horizons) >= 2
-        and scorecard_status
-        in {
-            "",
-            "MULTI_HORIZON_PROFIT_LEARNING_CANDIDATES_PRESENT",
-            "HORIZON_SPECIFIC_PROFIT_LEARNING_CANDIDATES_PRESENT",
-        }
     ):
         return (
             "operator_review_multi_horizon_blocked_signal_side_cell_before_"
