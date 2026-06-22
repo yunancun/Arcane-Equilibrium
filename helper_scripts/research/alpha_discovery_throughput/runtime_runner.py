@@ -1492,6 +1492,30 @@ def summarize_demo_learning_stack_healthcheck(
         "demo_learning_stack_latest_artifacts_present": answers.get(
             "latest_artifacts_present"
         ),
+        "demo_learning_stack_sealed_horizon_probe_preflight_present": answers.get(
+            "sealed_horizon_probe_preflight_present"
+        ),
+        "demo_learning_stack_bounded_probe_reviews_present": answers.get(
+            "bounded_probe_reviews_present"
+        ),
+        "demo_learning_stack_bounded_probe_result_review_present": answers.get(
+            "bounded_probe_result_review_present"
+        ),
+        "demo_learning_stack_bounded_probe_execution_realism_review_present": (
+            answers.get("bounded_probe_execution_realism_review_present")
+        ),
+        "demo_learning_stack_bounded_probe_result_review_status": answers.get(
+            "bounded_probe_result_review_status"
+        ),
+        "demo_learning_stack_bounded_probe_execution_realism_review_status": (
+            answers.get("bounded_probe_execution_realism_review_status")
+        ),
+        "demo_learning_stack_bounded_probe_result_review_skip_reason": (
+            answers.get("bounded_probe_result_review_skip_reason")
+        ),
+        "demo_learning_stack_bounded_probe_execution_realism_review_skip_reason": (
+            answers.get("bounded_probe_execution_realism_review_skip_reason")
+        ),
         "demo_learning_stack_cost_gate_learning_stage_error": answers.get(
             "cost_gate_learning_stage_error"
         ),

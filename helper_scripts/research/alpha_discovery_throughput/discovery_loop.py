@@ -651,6 +651,33 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
                 "engineering_actionable": True,
             }
 
+    if stack_health_status == "BOUNDED_PROBE_PREFLIGHT_MISSING":
+        return {
+            "action": RUN_READ_ONLY_CAPTURE,
+            "reason": "bounded_probe_preflight_missing_for_learning_stack",
+            "blocker_class": "data_coverage",
+            "primary_blocker": "bounded_probe_preflight_missing_for_learning_stack",
+            "next_trigger": (
+                stack_health_next_action
+                or "refresh_sealed_horizon_probe_preflight_before_bounded_probe_reviews"
+            ),
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
+    if stack_health_status == "BOUNDED_PROBE_REVIEW_ARTIFACTS_MISSING":
+        return {
+            "action": RUN_READ_ONLY_CAPTURE,
+            "reason": "bounded_probe_review_artifacts_missing_for_learning_stack",
+            "blocker_class": "data_coverage",
+            "primary_blocker": "bounded_probe_review_artifacts_missing_for_learning_stack",
+            "next_trigger": (
+                stack_health_next_action
+                or "rerun_cost_gate_learning_lane_cron_after_sealed_preflight_refresh"
+            ),
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
+
     if ledger_status in {"MISSING", "EMPTY"}:
         if stack_health_status == "SOURCE_NOT_READY":
             return {
@@ -1963,6 +1990,30 @@ def classify_profitability_blocker(
                 ),
                 "demo_learning_stack_latest_artifacts_present": detail.get(
                     "demo_learning_stack_latest_artifacts_present"
+                ),
+                "demo_learning_stack_sealed_horizon_probe_preflight_present": detail.get(
+                    "demo_learning_stack_sealed_horizon_probe_preflight_present"
+                ),
+                "demo_learning_stack_bounded_probe_reviews_present": detail.get(
+                    "demo_learning_stack_bounded_probe_reviews_present"
+                ),
+                "demo_learning_stack_bounded_probe_result_review_present": detail.get(
+                    "demo_learning_stack_bounded_probe_result_review_present"
+                ),
+                "demo_learning_stack_bounded_probe_execution_realism_review_present": detail.get(
+                    "demo_learning_stack_bounded_probe_execution_realism_review_present"
+                ),
+                "demo_learning_stack_bounded_probe_result_review_status": detail.get(
+                    "demo_learning_stack_bounded_probe_result_review_status"
+                ),
+                "demo_learning_stack_bounded_probe_execution_realism_review_status": detail.get(
+                    "demo_learning_stack_bounded_probe_execution_realism_review_status"
+                ),
+                "demo_learning_stack_bounded_probe_result_review_skip_reason": detail.get(
+                    "demo_learning_stack_bounded_probe_result_review_skip_reason"
+                ),
+                "demo_learning_stack_bounded_probe_execution_realism_review_skip_reason": detail.get(
+                    "demo_learning_stack_bounded_probe_execution_realism_review_skip_reason"
                 ),
                 "demo_learning_stack_cost_gate_learning_stage_error": detail.get(
                     "demo_learning_stack_cost_gate_learning_stage_error"
