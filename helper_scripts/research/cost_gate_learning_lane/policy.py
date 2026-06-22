@@ -102,6 +102,14 @@ def _side_cell_key(row: dict[str, Any]) -> str:
     )
 
 
+def _effective_sample_count(row: dict[str, Any]) -> int:
+    sample_count = _int(row.get("sample_count_for_gate"))
+    if sample_count > 0:
+        return sample_count
+    distinct_ts = _int(row.get("distinct_ts"))
+    return distinct_ts if distinct_ts > 0 else _int(row.get("n"))
+
+
 def validate_policy_config(cfg: LearningLanePolicyConfig) -> None:
     if cfg.max_probe_side_cells < 1 or cfg.max_probe_side_cells > 20:
         raise ValueError("--max-probe-side-cells must be in [1, 20]")
@@ -123,7 +131,7 @@ def _rank_candidates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         key=lambda row: (
             _float(row.get("avg_net_bps")) or float("-inf"),
             _float(row.get("net_positive_pct")) or float("-inf"),
-            _int(row.get("n")),
+            _effective_sample_count(row),
         ),
         reverse=True,
     )
@@ -150,7 +158,7 @@ def _profit_priority_components(
     row: dict[str, Any],
     thresholds: dict[str, float],
 ) -> dict[str, float]:
-    n = max(_int(row.get("n")), 0)
+    n = max(_effective_sample_count(row), 0)
     avg_net = _float(row.get("avg_net_bps")) or 0.0
     p50_gross = _float(row.get("p50_gross_bps")) or 0.0
     net_positive_pct = _float(row.get("net_positive_pct")) or 0.0
@@ -230,6 +238,10 @@ def _derive_profit_opportunity_ranking(scorecard: dict[str, Any]) -> dict[str, A
                     key: round(value, 4) for key, value in components.items()
                 },
                 "n": _int(row.get("n")),
+                "sample_count_for_gate": _effective_sample_count(row),
+                "distinct_ts": _int(row.get("distinct_ts")),
+                "rows_per_distinct_ts": _float(row.get("rows_per_distinct_ts")),
+                "timespan_minutes": _float(row.get("timespan_minutes")),
                 "avg_net_bps": avg_net,
                 "p50_gross_bps": p50_gross,
                 "p90_gross_bps": _float(row.get("p90_gross_bps")),
@@ -254,7 +266,7 @@ def _derive_profit_opportunity_ranking(scorecard: dict[str, Any]) -> dict[str, A
             action_order.get(str(row.get("learning_lane_action")), 9),
             -(float(row.get("priority_score") or 0.0)),
             -_sort_float(row.get("avg_net_bps")),
-            -_int(row.get("n")),
+            -_effective_sample_count(row),
         )
     )
     candidate_count = sum(
@@ -288,6 +300,10 @@ def _compact_row(row: dict[str, Any]) -> dict[str, Any]:
         "side": row.get("side"),
         "reject_reason_code": row.get("reject_reason_code"),
         "n": _int(row.get("n")),
+        "sample_count_for_gate": _effective_sample_count(row),
+        "distinct_ts": _int(row.get("distinct_ts")),
+        "rows_per_distinct_ts": _float(row.get("rows_per_distinct_ts")),
+        "timespan_minutes": _float(row.get("timespan_minutes")),
         "avg_gross_bps": _float(row.get("avg_gross_bps")),
         "p50_gross_bps": _float(row.get("p50_gross_bps")),
         "p90_gross_bps": _float(row.get("p90_gross_bps")),
@@ -353,7 +369,7 @@ def _ranking_probe_rows(
         row for row in _list(ranking.get("top_side_cells"))
         if isinstance(row, dict)
         and row.get("learning_lane_action") == "LEARNING_PROBE_CANDIDATE"
-        and _int(row.get("n")) >= cfg.min_candidate_sample
+        and _effective_sample_count(row) >= cfg.min_candidate_sample
         and row.get("order_authority") == "NOT_GRANTED"
         and row.get("main_cost_gate_adjustment") == "NONE"
         and row.get("promotion_evidence") is False
@@ -440,14 +456,14 @@ def build_plan_from_payload(
             row for row in _list(scorecard.get("probe_candidates"))
             if isinstance(row, dict)
             and row.get("learning_lane_action") == "LEARNING_PROBE_CANDIDATE"
-            and _int(row.get("n")) >= cfg.min_candidate_sample
+            and _effective_sample_count(row) >= cfg.min_candidate_sample
         ]
         if not probe_rows:
             probe_rows = [
                 row for row in rows
                 if isinstance(row, dict)
                 and row.get("learning_lane_action") == "LEARNING_PROBE_CANDIDATE"
-                and _int(row.get("n")) >= cfg.min_candidate_sample
+                and _effective_sample_count(row) >= cfg.min_candidate_sample
             ]
         ranked = _rank_candidates(probe_rows)
     selected = ranked[: cfg.max_probe_side_cells]
