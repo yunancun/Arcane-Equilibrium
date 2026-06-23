@@ -74,6 +74,17 @@ _EVIDENCE_KEYS = (
     "mm_signal_search_best_sample_starved_current_fee_holdout_candidate",
     "mm_signal_search_sample_gated_holdout_gross_count",
     "mm_signal_search_best_sample_gated_holdout_gross_candidate",
+    "mm_signal_search_history_low_friction_near_miss_stability_status",
+    "mm_signal_search_history_low_friction_near_miss_stability_reason",
+    "mm_signal_search_history_low_friction_near_miss_windows",
+    "mm_signal_search_history_low_friction_near_miss_repeated_key_count",
+    "mm_signal_search_history_low_friction_near_miss_best_repeated_key",
+    "mm_signal_search_history_low_friction_near_miss_motif_stability_status",
+    "mm_signal_search_history_low_friction_near_miss_motif_stability_reason",
+    "mm_signal_search_history_low_friction_near_miss_repeated_motif_count",
+    "mm_signal_search_history_low_friction_near_miss_best_repeated_motif",
+    "mm_signal_search_history_guided_search_constraint",
+    "mm_signal_search_history_guided_next_action",
     "mm_signal_search_lower_fee_path_not_actionable_now",
     "candidate_replay_status",
     "candidate_replay_sample_count",
@@ -848,6 +859,8 @@ def _completion_evidence_required(task_type: str) -> list[str]:
     if task_type == "mm_signal_search":
         return [
             "mm_signal_search_directive records failure mode and search constraint",
+            "repeated low-friction near-miss motif history is preserved when present",
+            "distinct-date history or explicit motif invalidation is recorded for repeated near-miss motifs",
             (
                 "required gross uplift multiple is reduced by a new candidate "
                 "or removed by train confirmation"

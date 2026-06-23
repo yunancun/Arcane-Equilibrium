@@ -1673,6 +1673,11 @@ def _mm_low_friction_gross_stability_scorecard(detail: dict[str, Any]) -> dict[s
     low_friction = _dict(detail.get("low_friction_signal_scorecard"))
     low_friction_failure = _dict(low_friction.get("failure_summary"))
     train_confirmed = _dict(low_friction.get("train_confirmed_gross_scorecard"))
+    history = _dict(detail.get("history_scorecard"))
+    near_miss_stability = _dict(history.get("low_friction_near_miss_stability"))
+    near_miss_motif_stability = _dict(
+        history.get("low_friction_near_miss_motif_stability")
+    )
     candidate = _dict(
         gross_decomp.get("best_low_friction_signal_holdout_gross_candidate")
     )
@@ -1831,6 +1836,33 @@ def _mm_low_friction_gross_stability_scorecard(detail: dict[str, Any]) -> dict[s
         "best_sample_gated_holdout_gross_candidate": low_friction_failure.get(
             "best_sample_gated_holdout_gross_candidate"
         ),
+        "history_low_friction_near_miss_stability_status": (
+            near_miss_stability.get("status")
+        ),
+        "history_low_friction_near_miss_stability_reason": (
+            near_miss_stability.get("reason")
+        ),
+        "history_low_friction_near_miss_windows": (
+            near_miss_stability.get("sample_gated_near_miss_windows")
+        ),
+        "history_low_friction_near_miss_repeated_key_count": (
+            near_miss_stability.get("repeated_key_count")
+        ),
+        "history_low_friction_near_miss_best_repeated_key": (
+            near_miss_stability.get("best_repeated_near_miss_key")
+        ),
+        "history_low_friction_near_miss_motif_stability_status": (
+            near_miss_motif_stability.get("status")
+        ),
+        "history_low_friction_near_miss_motif_stability_reason": (
+            near_miss_motif_stability.get("reason")
+        ),
+        "history_low_friction_near_miss_repeated_motif_count": (
+            near_miss_motif_stability.get("repeated_motif_count")
+        ),
+        "history_low_friction_near_miss_best_repeated_motif": (
+            near_miss_motif_stability.get("best_repeated_near_miss_motif")
+        ),
         "train_confirmed_gross_count": low_friction_failure.get(
             "train_confirmed_gross_count"
         ),
@@ -1877,6 +1909,15 @@ def _mm_signal_search_directive(
     stable_multiple = _positive_multiple_or_none(
         current_fee_round_trip,
         stable_min_gross,
+    )
+    near_miss_motif_status = str(
+        low_friction_stability.get(
+            "history_low_friction_near_miss_motif_stability_status"
+        )
+        or ""
+    ).upper()
+    history_guided_search = near_miss_motif_status.startswith(
+        "LOW_FRICTION_NEAR_MISS_MOTIF_REPEATS"
     )
 
     lower_fee_scale_gated = (
@@ -1982,6 +2023,61 @@ def _mm_signal_search_directive(
         "best_sample_gated_holdout_gross_candidate": (
             low_friction_stability.get("best_sample_gated_holdout_gross_candidate")
         ),
+        "history_low_friction_near_miss_stability_status": (
+            low_friction_stability.get(
+                "history_low_friction_near_miss_stability_status"
+            )
+        ),
+        "history_low_friction_near_miss_stability_reason": (
+            low_friction_stability.get(
+                "history_low_friction_near_miss_stability_reason"
+            )
+        ),
+        "history_low_friction_near_miss_windows": (
+            low_friction_stability.get("history_low_friction_near_miss_windows")
+        ),
+        "history_low_friction_near_miss_repeated_key_count": (
+            low_friction_stability.get(
+                "history_low_friction_near_miss_repeated_key_count"
+            )
+        ),
+        "history_low_friction_near_miss_best_repeated_key": (
+            low_friction_stability.get(
+                "history_low_friction_near_miss_best_repeated_key"
+            )
+        ),
+        "history_low_friction_near_miss_motif_stability_status": (
+            low_friction_stability.get(
+                "history_low_friction_near_miss_motif_stability_status"
+            )
+        ),
+        "history_low_friction_near_miss_motif_stability_reason": (
+            low_friction_stability.get(
+                "history_low_friction_near_miss_motif_stability_reason"
+            )
+        ),
+        "history_low_friction_near_miss_repeated_motif_count": (
+            low_friction_stability.get(
+                "history_low_friction_near_miss_repeated_motif_count"
+            )
+        ),
+        "history_low_friction_near_miss_best_repeated_motif": (
+            low_friction_stability.get(
+                "history_low_friction_near_miss_best_repeated_motif"
+            )
+        ),
+        "history_guided_search_constraint": (
+            "prioritize_repeated_low_friction_near_miss_motif_then_require_"
+            "distinct_date_train_holdout_confirmation"
+            if history_guided_search
+            else None
+        ),
+        "history_guided_next_action": (
+            "accumulate_distinct_window_history_for_repeated_low_friction_motif_"
+            "and_search_edge_uplift"
+            if history_guided_search
+            else None
+        ),
         "unstable_holdout_candidate_name": low_friction_stability.get(
             "candidate_name"
         ),
@@ -2035,6 +2131,39 @@ def _mm_signal_search_directive_row_extra(
         ),
         "mm_signal_search_best_sample_gated_holdout_gross_candidate": (
             directive.get("best_sample_gated_holdout_gross_candidate")
+        ),
+        "mm_signal_search_history_low_friction_near_miss_stability_status": (
+            directive.get("history_low_friction_near_miss_stability_status")
+        ),
+        "mm_signal_search_history_low_friction_near_miss_stability_reason": (
+            directive.get("history_low_friction_near_miss_stability_reason")
+        ),
+        "mm_signal_search_history_low_friction_near_miss_windows": (
+            directive.get("history_low_friction_near_miss_windows")
+        ),
+        "mm_signal_search_history_low_friction_near_miss_repeated_key_count": (
+            directive.get("history_low_friction_near_miss_repeated_key_count")
+        ),
+        "mm_signal_search_history_low_friction_near_miss_best_repeated_key": (
+            directive.get("history_low_friction_near_miss_best_repeated_key")
+        ),
+        "mm_signal_search_history_low_friction_near_miss_motif_stability_status": (
+            directive.get("history_low_friction_near_miss_motif_stability_status")
+        ),
+        "mm_signal_search_history_low_friction_near_miss_motif_stability_reason": (
+            directive.get("history_low_friction_near_miss_motif_stability_reason")
+        ),
+        "mm_signal_search_history_low_friction_near_miss_repeated_motif_count": (
+            directive.get("history_low_friction_near_miss_repeated_motif_count")
+        ),
+        "mm_signal_search_history_low_friction_near_miss_best_repeated_motif": (
+            directive.get("history_low_friction_near_miss_best_repeated_motif")
+        ),
+        "mm_signal_search_history_guided_search_constraint": (
+            directive.get("history_guided_search_constraint")
+        ),
+        "mm_signal_search_history_guided_next_action": (
+            directive.get("history_guided_next_action")
         ),
         "mm_signal_search_lower_fee_path_not_actionable_now": directive.get(
             "lower_fee_path_not_actionable_now"
@@ -2197,6 +2326,46 @@ def _mm_cost_wall_escape_scorecard(detail: dict[str, Any]) -> dict[str, Any]:
         "low_friction_gross_stability_status": low_friction_stability.get("status"),
         "low_friction_gross_stability_reason": low_friction_stability.get("reason"),
         "low_friction_gross_stability_scorecard": low_friction_stability,
+        "history_low_friction_near_miss_stability_status": (
+            low_friction_stability.get(
+                "history_low_friction_near_miss_stability_status"
+            )
+        ),
+        "history_low_friction_near_miss_stability_reason": (
+            low_friction_stability.get(
+                "history_low_friction_near_miss_stability_reason"
+            )
+        ),
+        "history_low_friction_near_miss_repeated_key_count": (
+            low_friction_stability.get(
+                "history_low_friction_near_miss_repeated_key_count"
+            )
+        ),
+        "history_low_friction_near_miss_best_repeated_key": (
+            low_friction_stability.get(
+                "history_low_friction_near_miss_best_repeated_key"
+            )
+        ),
+        "history_low_friction_near_miss_motif_stability_status": (
+            low_friction_stability.get(
+                "history_low_friction_near_miss_motif_stability_status"
+            )
+        ),
+        "history_low_friction_near_miss_motif_stability_reason": (
+            low_friction_stability.get(
+                "history_low_friction_near_miss_motif_stability_reason"
+            )
+        ),
+        "history_low_friction_near_miss_repeated_motif_count": (
+            low_friction_stability.get(
+                "history_low_friction_near_miss_repeated_motif_count"
+            )
+        ),
+        "history_low_friction_near_miss_best_repeated_motif": (
+            low_friction_stability.get(
+                "history_low_friction_near_miss_best_repeated_motif"
+            )
+        ),
         "low_friction_train_confirmed_gross_status": (
             low_friction_stability.get("train_confirmed_gross_status")
         ),

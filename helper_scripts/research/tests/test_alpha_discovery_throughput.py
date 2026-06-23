@@ -645,6 +645,35 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
                             "cell": {"symbol": "LABUSDT", "policy": "informed_skip"},
                         },
                     },
+                    "low_friction_near_miss_stability": {
+                        "status": (
+                            "LOW_FRICTION_NEAR_MISS_REPEATS_BUT_DATE_INSUFFICIENT"
+                        ),
+                        "reason": "repeated_key_but_distinct_dates_below_min",
+                        "sample_gated_near_miss_windows": 3,
+                        "repeated_key_count": 1,
+                        "best_repeated_near_miss_key": {
+                            "key": (
+                                "low_friction_signal_scorecard_holdout_near_miss|"
+                                "quoted_half_spread_bps_train_p75_sample_gated"
+                            ),
+                            "windows": 2,
+                        },
+                    },
+                    "low_friction_near_miss_motif_stability": {
+                        "status": (
+                            "LOW_FRICTION_NEAR_MISS_MOTIF_REPEATS_BUT_DATE_INSUFFICIENT"
+                        ),
+                        "reason": "repeated_motif_but_distinct_dates_below_min",
+                        "repeated_motif_count": 1,
+                        "best_repeated_near_miss_motif": {
+                            "motif_key": (
+                                "low_friction_motif|spread_combo|recent_trade_imbalance"
+                            ),
+                            "windows": 3,
+                            "distinct_window_dates": ["2026-06-20"],
+                        },
+                    },
                 },
                 "fee_path_feasibility": {
                     "status": "STANDARD_VIP_TIER_CAN_CLEAR_BUT_SCALE_OR_CAPITAL_GATED",
@@ -743,6 +772,18 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
         == "quoted_half_spread_bps_train_p90_and_n1_spike"
     )
     assert directive["sample_gated_holdout_gross_count"] == 8
+    assert directive["history_low_friction_near_miss_stability_status"] == (
+        "LOW_FRICTION_NEAR_MISS_REPEATS_BUT_DATE_INSUFFICIENT"
+    )
+    assert directive["history_low_friction_near_miss_repeated_key_count"] == 1
+    assert directive["history_low_friction_near_miss_motif_stability_status"] == (
+        "LOW_FRICTION_NEAR_MISS_MOTIF_REPEATS_BUT_DATE_INSUFFICIENT"
+    )
+    assert directive["history_low_friction_near_miss_repeated_motif_count"] == 1
+    assert directive["history_guided_search_constraint"] == (
+        "prioritize_repeated_low_friction_near_miss_motif_then_require_"
+        "distinct_date_train_holdout_confirmation"
+    )
     assert directive["recommended_search_constraint"] == (
         "require_train_and_holdout_sample_gated_min_gross_ge_current_fee_round_trip"
     )
@@ -771,9 +812,24 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
     assert blockers["mm_verdict_maker_edge"][
         "mm_signal_search_sample_starved_current_fee_holdout_count"
     ] == 2
+    assert blockers["mm_verdict_maker_edge"][
+        "mm_signal_search_history_low_friction_near_miss_motif_stability_status"
+    ] == "LOW_FRICTION_NEAR_MISS_MOTIF_REPEATS_BUT_DATE_INSUFFICIENT"
+    assert blockers["mm_verdict_maker_edge"][
+        "mm_signal_search_history_low_friction_near_miss_repeated_motif_count"
+    ] == 1
+    assert blockers["mm_verdict_maker_edge"][
+        "mm_signal_search_history_guided_next_action"
+    ] == (
+        "accumulate_distinct_window_history_for_repeated_low_friction_motif_"
+        "and_search_edge_uplift"
+    )
     assert blockers["mm_verdict_maker_edge"]["cost_wall_escape_scorecard"][
         "low_friction_signal_status"
     ] == "LOW_FRICTION_SIGNAL_HOLDOUT_GROSS_POSITIVE_BELOW_CURRENT_FEE"
+    assert blockers["mm_verdict_maker_edge"]["cost_wall_escape_scorecard"][
+        "history_low_friction_near_miss_motif_stability_status"
+    ] == "LOW_FRICTION_NEAR_MISS_MOTIF_REPEATS_BUT_DATE_INSUFFICIENT"
     assert blockers["mm_verdict_maker_edge"]["low_friction_gross_stability_status"] == (
         "LOW_FRICTION_HOLDOUT_GROSS_NOT_TRAIN_CONFIRMED"
     )

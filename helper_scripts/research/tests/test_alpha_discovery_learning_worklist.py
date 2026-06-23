@@ -81,6 +81,34 @@ def test_learning_worklist_prioritizes_runtime_reconcile_over_mm_signal_search()
                         "gap_to_current_fee_round_trip_bps": 3.2,
                     },
                 },
+                "history_scorecard": {
+                    "low_friction_near_miss_stability": {
+                        "status": (
+                            "LOW_FRICTION_NEAR_MISS_REPEATS_BUT_DATE_INSUFFICIENT"
+                        ),
+                        "reason": "repeated_key_but_distinct_dates_below_min",
+                        "sample_gated_near_miss_windows": 2,
+                        "repeated_key_count": 1,
+                        "best_repeated_near_miss_key": {
+                            "key": (
+                                "low_friction_signal_scorecard_holdout_near_miss|"
+                                "sample_gated_below_fee"
+                            ),
+                            "windows": 2,
+                        },
+                    },
+                    "low_friction_near_miss_motif_stability": {
+                        "status": (
+                            "LOW_FRICTION_NEAR_MISS_MOTIF_REPEATS_BUT_DATE_INSUFFICIENT"
+                        ),
+                        "reason": "repeated_motif_but_distinct_dates_below_min",
+                        "repeated_motif_count": 1,
+                        "best_repeated_near_miss_motif": {
+                            "motif_key": "low_friction_motif|spread_combo",
+                            "windows": 2,
+                        },
+                    },
+                },
             },
         },
     ], now_utc=dt.datetime(2026, 6, 22, tzinfo=dt.timezone.utc))
@@ -158,6 +186,25 @@ def test_learning_worklist_prioritizes_runtime_reconcile_over_mm_signal_search()
             "name"
         ]
         == "sample_gated_below_fee"
+    )
+    assert mm_task["evidence"][
+        "mm_signal_search_history_low_friction_near_miss_stability_status"
+    ] == "LOW_FRICTION_NEAR_MISS_REPEATS_BUT_DATE_INSUFFICIENT"
+    assert mm_task["evidence"][
+        "mm_signal_search_history_low_friction_near_miss_repeated_key_count"
+    ] == 1
+    assert mm_task["evidence"][
+        "mm_signal_search_history_low_friction_near_miss_motif_stability_status"
+    ] == "LOW_FRICTION_NEAR_MISS_MOTIF_REPEATS_BUT_DATE_INSUFFICIENT"
+    assert (
+        mm_task["evidence"][
+            "mm_signal_search_history_low_friction_near_miss_best_repeated_motif"
+        ]["motif_key"]
+        == "low_friction_motif|spread_combo"
+    )
+    assert mm_task["evidence"]["mm_signal_search_history_guided_search_constraint"] == (
+        "prioritize_repeated_low_friction_near_miss_motif_then_require_"
+        "distinct_date_train_holdout_confirmation"
     )
     assert (
         mm_task["evidence"]["mm_signal_search_lower_fee_path_not_actionable_now"]
