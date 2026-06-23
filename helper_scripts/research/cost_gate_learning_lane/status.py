@@ -811,6 +811,12 @@ def summarize_cost_gate_learning_lane_loop(
     materializer_latest_path = lane_dir / "reject_materializer_latest.json"
     refresh_latest_path = lane_dir / "outcome_refresh_latest.json"
     review_latest_path = lane_dir / "blocked_outcome_review_latest.json"
+    false_negative_candidate_packet_latest_path = (
+        lane_dir / "false_negative_candidate_packet_latest.json"
+    )
+    false_negative_operator_review_latest_path = (
+        lane_dir / "false_negative_operator_review_latest.json"
+    )
 
     heartbeat_present, heartbeat_mtime, heartbeat_age = _file_mtime_age(
         heartbeat_path,
@@ -820,6 +826,12 @@ def summarize_cost_gate_learning_lane_loop(
     materializer_payload, materializer_err = _read_json(materializer_latest_path)
     refresh_payload, refresh_err = _read_json(refresh_latest_path)
     review_payload, review_err = _read_json(review_latest_path)
+    false_negative_candidate_packet_payload, false_negative_candidate_packet_err = (
+        _read_json(false_negative_candidate_packet_latest_path)
+    )
+    false_negative_operator_review_payload, false_negative_operator_review_err = (
+        _read_json(false_negative_operator_review_latest_path)
+    )
 
     status_ts = status_row.get("ts_utc") if status_row else None
     status_age = _age_seconds(status_ts, now_utc=now_utc)
@@ -848,6 +860,16 @@ def summarize_cost_gate_learning_lane_loop(
     )
     refresh_rc = _int(status_row.get("refresh_rc")) if status_row else None
     review_rc = _int(status_row.get("review_rc")) if status_row else None
+    false_negative_candidate_packet_rc = (
+        _int(status_row.get("false_negative_candidate_packet_rc"))
+        if status_row
+        else None
+    )
+    false_negative_operator_review_rc = (
+        _int(status_row.get("false_negative_operator_review_rc"))
+        if status_row
+        else None
+    )
     bounded_authority_patch_readiness_rc = (
         _int(status_row.get("bounded_probe_authority_patch_readiness_rc"))
         if status_row
@@ -914,6 +936,28 @@ def summarize_cost_gate_learning_lane_loop(
     )
     if not isinstance(materializer_decision_counts, dict):
         materializer_decision_counts = None
+    materializer_source_counts = (
+        status_row.get("materializer_source_counts")
+        if status_row and status_row.get("materializer_source_counts") is not None
+        else (materializer_payload or {}).get("source_counts")
+    )
+    if not isinstance(materializer_source_counts, dict):
+        materializer_source_counts = None
+    materializer_snapshot_input_row_count = (
+        _int(status_row.get("materializer_snapshot_input_row_count"))
+        if status_row and status_row.get("materializer_snapshot_input_row_count") is not None
+        else (
+            _int(materializer_source_counts.get("snapshot_input_row_count"))
+            if isinstance(materializer_source_counts, dict)
+            and materializer_source_counts.get("snapshot_input_row_count") is not None
+            else None
+        )
+    )
+    materializer_snapshot_json_error = (
+        status_row.get("materializer_snapshot_json_error")
+        if status_row and status_row.get("materializer_snapshot_json_error") is not None
+        else (materializer_payload or {}).get("snapshot_json_error")
+    )
     review_status = (
         str(status_row.get("review_status") or "").strip()
         if status_row
@@ -987,6 +1031,8 @@ def summarize_cost_gate_learning_lane_loop(
             or materializer_rc not in (None, 0)
             or refresh_rc not in (None, 0)
             or review_rc not in (None, 0)
+            or false_negative_candidate_packet_rc not in (None, 0)
+            or false_negative_operator_review_rc not in (None, 0)
             or bounded_authority_patch_readiness_rc not in (None, 0)
             or bounded_operator_authorization_rc not in (None, 0)
         ):
@@ -1065,6 +1111,18 @@ def summarize_cost_gate_learning_lane_loop(
         "learning_loop_refresh_latest_error": refresh_err,
         "learning_loop_review_latest_path": str(review_latest_path),
         "learning_loop_review_latest_error": review_err,
+        "learning_loop_false_negative_candidate_packet_latest_path": str(
+            false_negative_candidate_packet_latest_path
+        ),
+        "learning_loop_false_negative_candidate_packet_latest_error": (
+            false_negative_candidate_packet_err
+        ),
+        "learning_loop_false_negative_operator_review_latest_path": str(
+            false_negative_operator_review_latest_path
+        ),
+        "learning_loop_false_negative_operator_review_latest_error": (
+            false_negative_operator_review_err
+        ),
         "learning_loop_materialize_rejects_enabled": materialize_rejects_enabled,
         "learning_loop_append_materialized_rejects_enabled": (
             append_materialized_rejects_enabled
@@ -1081,8 +1139,31 @@ def summarize_cost_gate_learning_lane_loop(
             materializer_appended_record_count
         ),
         "learning_loop_last_materializer_decision_counts": materializer_decision_counts,
+        "learning_loop_last_materializer_source_counts": materializer_source_counts,
+        "learning_loop_last_materializer_snapshot_input_row_count": (
+            materializer_snapshot_input_row_count
+        ),
+        "learning_loop_last_materializer_snapshot_json_error": (
+            materializer_snapshot_json_error
+        ),
         "learning_loop_last_refresh_rc": refresh_rc,
         "learning_loop_last_review_rc": review_rc,
+        "learning_loop_last_false_negative_candidate_packet_rc": (
+            false_negative_candidate_packet_rc
+        ),
+        "learning_loop_last_false_negative_candidate_packet_status": (
+            status_row.get("false_negative_candidate_packet_status")
+            if status_row
+            else (false_negative_candidate_packet_payload or {}).get("status")
+        ),
+        "learning_loop_last_false_negative_operator_review_rc": (
+            false_negative_operator_review_rc
+        ),
+        "learning_loop_last_false_negative_operator_review_status": (
+            status_row.get("false_negative_operator_review_status")
+            if status_row
+            else (false_negative_operator_review_payload or {}).get("status")
+        ),
         "learning_loop_refresh_bounded_probe_authority_patch_readiness_enabled": (
             refresh_bounded_authority_patch_readiness_enabled
         ),
@@ -1762,6 +1843,26 @@ def build_cost_gate_learning_lane_activation_preflight(
             ),
             "reject_materializer_appended_records": _int(
                 loop.get("learning_loop_last_appended_materialized_record_count")
+            ),
+            "reject_materializer_snapshot_records": _int(
+                loop.get("learning_loop_last_materializer_snapshot_input_row_count")
+            ),
+            "reject_materializer_snapshot_error": (
+                loop.get("learning_loop_last_materializer_snapshot_json_error")
+            ),
+            "false_negative_candidate_packet_available": (
+                loop.get("learning_loop_false_negative_candidate_packet_latest_error")
+                is None
+            ),
+            "false_negative_operator_review_available": (
+                loop.get("learning_loop_false_negative_operator_review_latest_error")
+                is None
+            ),
+            "false_negative_candidate_packet_status": (
+                loop.get("learning_loop_last_false_negative_candidate_packet_status")
+            ),
+            "false_negative_operator_review_status": (
+                loop.get("learning_loop_last_false_negative_operator_review_status")
             ),
             "historical_counterfactual_review_available": (
                 str(historical_review.get("historical_scorecard_review_status"))

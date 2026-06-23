@@ -3,9 +3,10 @@
 
 The Rust hot-path writer is the live capture path, but it is operator-gated.
 This module recovers already-recorded PG ``learning.decision_features`` rejects
-into the same append-only JSONL contract used by the runtime adapter. It only
-builds or appends artifact rows; it never writes PG, calls Bybit, submits
-orders, lowers the main Cost Gate, or mutates runtime config.
+and recent pipeline-snapshot rejects into the same append-only JSONL contract
+used by the runtime adapter. It only builds or appends artifact rows; it never
+writes PG, calls Bybit, submits orders, lowers the main Cost Gate, or mutates
+runtime config.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ for _path in (str(RESEARCH_ROOT), str(ROOT)):
 
 from cost_gate_learning_lane.contract import (  # noqa: E402
     ADAPTER_SCHEMA_VERSION,
+    ELIGIBLE_REJECT_REASON_CODE,
     PROBE_ADMISSION_DECISION_RECORD_TYPE,
 )
 from cost_gate_learning_lane.runtime_adapter import (  # noqa: E402
@@ -36,7 +38,9 @@ from cost_gate_learning_lane.runtime_adapter import (  # noqa: E402
     append_jsonl_ledger,
     build_ledger_record,
     evaluate_probe_admission,
+    normalize_reject_reason_code,
     read_jsonl_ledger,
+    side_cell_key,
 )
 
 
@@ -61,6 +65,10 @@ def _utc_now() -> dt.datetime:
 
 def _str(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
 def _int(value: Any, default: int = 0) -> int:
@@ -217,11 +225,117 @@ def reject_feature_row_to_event(row: dict[str, Any]) -> dict[str, Any]:
     return event
 
 
+def _snapshot_side(intent: dict[str, Any]) -> str:
+    for key in ("side", "order_side"):
+        if _str(intent.get(key)):
+            return _side_label(intent.get(key))
+    if isinstance(intent.get("is_long"), bool):
+        return "Buy" if intent.get("is_long") is True else "Sell"
+    intent_type = _str(intent.get("intent_type")).lower()
+    if "long" in intent_type or "buy" in intent_type:
+        return "Buy"
+    if "short" in intent_type or "sell" in intent_type:
+        return "Sell"
+    return ""
+
+
+def pipeline_snapshot_recent_intents_to_feature_rows(
+    snapshot: dict[str, Any],
+    *,
+    engine_modes: tuple[str, ...] = ("demo", "live_demo"),
+    limit: int = 10_000,
+    snapshot_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Convert pipeline_snapshot recent cost-gate rejects to feature rows.
+
+    This fallback closes the gap where the engine snapshot clearly shows
+    cost-gate rejections, but PG decision-feature persistence is stale. Rows
+    still pass through the same admission policy and append-only ledger
+    de-duplication as PG materialized rows.
+    """
+    mode = _str(snapshot.get("trading_mode") or snapshot.get("engine_mode")).lower()
+    if mode and mode not in engine_modes:
+        return []
+    recent = snapshot.get("recent_intents")
+    if not isinstance(recent, list):
+        return []
+
+    rows: list[dict[str, Any]] = []
+    for item in recent:
+        if not isinstance(item, dict):
+            continue
+        intent = item.get("intent")
+        if not isinstance(intent, dict):
+            continue
+        result = _str(item.get("result"))
+        normalized_reason = normalize_reject_reason_code(result)
+        if normalized_reason != ELIGIBLE_REJECT_REASON_CODE:
+            continue
+        ts_ms = _int(item.get("timestamp_ms"))
+        symbol = _str(intent.get("symbol")).upper()
+        strategy = _str(intent.get("strategy") or intent.get("strategy_name"))
+        side = _snapshot_side(intent)
+        if not symbol or not strategy or not side or ts_ms <= 0:
+            continue
+        limit_price = _float(intent.get("limit_price") or intent.get("price"))
+        context_parts = [
+            "snapshot",
+            str(ts_ms),
+            strategy,
+            symbol,
+            side,
+        ]
+        if limit_price is not None:
+            context_parts.append(f"{limit_price:.12g}")
+        row: dict[str, Any] = {
+            "ts_ms": ts_ms,
+            "context_id": "|".join(context_parts),
+            "engine_mode": mode or "demo",
+            "strategy_name": strategy,
+            "symbol": symbol,
+            "side": side,
+            "reject_reason_code": normalized_reason,
+            "raw_reject_result": result,
+            "_materializer_source": "pipeline_snapshot_recent_intents",
+        }
+        if snapshot_path is not None:
+            row["_source_snapshot_path"] = str(snapshot_path)
+        if limit_price is not None and limit_price > 0.0:
+            row["last_price"] = limit_price
+        rows.append(row)
+    return rows[-limit:]
+
+
 def _ledger_attempt_ids(rows: list[dict[str, Any]]) -> set[str]:
     return {
         _str(row.get("attempt_id"))
         for row in rows
         if _str(row.get("attempt_id"))
+    }
+
+
+def _event_equivalence_key(row: dict[str, Any]) -> str:
+    event = _dict(row.get("event")) or row
+    side_cell = _str(row.get("side_cell_key")) or side_cell_key(
+        event.get("strategy_name") or event.get("strategy"),
+        event.get("symbol"),
+        event.get("side"),
+    )
+    ts_ms = 0
+    for key in ("ts_ms", "attempt_ts_ms", "generated_at_ms"):
+        ts_ms = _int(row.get(key) if row.get(key) is not None else event.get(key))
+        if ts_ms > 0:
+            break
+    if not side_cell or ts_ms <= 0:
+        return ""
+    return f"{side_cell}|{ts_ms // 1000}"
+
+
+def _ledger_event_equivalence_keys(rows: list[dict[str, Any]]) -> set[str]:
+    return {
+        key
+        for key in (_event_equivalence_key(row) for row in rows)
+        if key
     }
 
 
@@ -246,14 +360,21 @@ def build_materialized_reject_ledger_batch(
     now = (now_utc or _utc_now()).astimezone(dt.timezone.utc)
     existing = existing_ledger_rows or []
     seen_attempt_ids = _ledger_attempt_ids(existing)
+    seen_event_keys = _ledger_event_equivalence_keys(existing)
     materialized: list[dict[str, Any]] = []
     skipped_existing = 0
+    skipped_existing_event_key = 0
     malformed_rows = 0
 
     for feature_row in feature_rows:
         event = reject_feature_row_to_event(feature_row)
         if not event.get("symbol") or _int(event.get("ts_ms")) <= 0:
             malformed_rows += 1
+            continue
+        event_key = _event_equivalence_key(event)
+        if event_key and event_key in seen_event_keys:
+            skipped_existing += 1
+            skipped_existing_event_key += 1
             continue
         decision = evaluate_probe_admission(
             plan,
@@ -269,8 +390,14 @@ def build_materialized_reject_ledger_batch(
         if attempt_id in seen_attempt_ids:
             skipped_existing += 1
             continue
-        record["source"] = "materialized_from_pg_decision_features"
-        record["source_schema"] = "learning.decision_features"
+        materializer_source = _str(feature_row.get("_materializer_source"))
+        if materializer_source == "pipeline_snapshot_recent_intents":
+            record["source"] = "materialized_from_pipeline_snapshot_recent_intents"
+            record["source_schema"] = "pipeline_snapshot.recent_intents"
+            record["source_snapshot_path"] = feature_row.get("_source_snapshot_path")
+        else:
+            record["source"] = "materialized_from_pg_decision_features"
+            record["source_schema"] = "learning.decision_features"
         record["source_context_id"] = event.get("context_id")
         record["materialized_at_utc"] = now.isoformat()
         record["boundary"] = (
@@ -280,6 +407,8 @@ def build_materialized_reject_ledger_batch(
         )
         materialized.append(record)
         seen_attempt_ids.add(attempt_id)
+        if event_key:
+            seen_event_keys.add(event_key)
 
     status = "MATERIALIZED_REJECT_ROWS_PRESENT" if materialized else "NO_NEW_REJECT_ROWS"
     return {
@@ -291,6 +420,7 @@ def build_materialized_reject_ledger_batch(
         "input_feature_row_count": len(feature_rows),
         "materialized_record_count": len(materialized),
         "skipped_existing_attempt_count": skipped_existing,
+        "skipped_existing_event_key_count": skipped_existing_event_key,
         "malformed_feature_row_count": malformed_rows,
         "decision_counts": _decision_counts(materialized),
         "records": materialized,
@@ -358,6 +488,31 @@ def _read_json_or_jsonl_rows(path: Path) -> list[dict[str, Any]]:
     raise ValueError(f"{path} did not contain rows")
 
 
+def _read_pipeline_snapshot_rows(
+    path: Path,
+    cfg: RejectMaterializerConfig,
+) -> tuple[list[dict[str, Any]], str | None]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return [], "missing"
+    except json.JSONDecodeError as exc:
+        return [], f"json_decode_error:{exc}"
+    except OSError as exc:
+        return [], f"{type(exc).__name__}:{exc}"
+    if not isinstance(payload, dict):
+        return [], "json_not_object"
+    return (
+        pipeline_snapshot_recent_intents_to_feature_rows(
+            payload,
+            engine_modes=cfg.engine_modes,
+            limit=cfg.limit,
+            snapshot_path=path,
+        ),
+        None,
+    )
+
+
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -374,6 +529,15 @@ def _build_parser() -> argparse.ArgumentParser:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--source-pg", action="store_true")
     source.add_argument("--source-rows", type=Path)
+    parser.add_argument(
+        "--snapshot-json",
+        type=Path,
+        default=None,
+        help=(
+            "optional pipeline_snapshot.json fallback; recent cost-gate rejected "
+            "intents are materialized in addition to the primary source"
+        ),
+    )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--append-ledger", action="store_true")
     parser.add_argument("--engine-mode", action="append", dest="engine_modes")
@@ -409,18 +573,32 @@ def main() -> int:
     plan = _read_json(args.plan)
     existing = read_jsonl_ledger(args.ledger)
 
+    source_rows_count = 0
+    pg_rows_count: int | None = None
+    snapshot_rows: list[dict[str, Any]] = []
+    snapshot_error: str | None = None
+
     if args.source_rows:
         feature_rows = _read_json_or_jsonl_rows(args.source_rows)
+        source_rows_count = len(feature_rows)
     else:
         conn = connect_readonly_reject_materializer_pg(
             statement_timeout_ms_default=cfg.statement_timeout_ms,
         )
         try:
             feature_rows = fetch_cost_gate_reject_feature_rows(conn, cfg)
+            pg_rows_count = len(feature_rows)
         finally:
             close = getattr(conn, "close", None)
             if callable(close):
                 close()
+
+    if args.snapshot_json is not None:
+        snapshot_rows, snapshot_error = _read_pipeline_snapshot_rows(
+            args.snapshot_json,
+            cfg,
+        )
+        feature_rows = feature_rows + snapshot_rows
 
     batch = build_materialized_reject_ledger_batch(
         plan,
@@ -429,6 +607,13 @@ def main() -> int:
         admission_cfg=admission_cfg,
         risk_state=args.risk_state,
     )
+    batch["source_counts"] = {
+        "pg_input_feature_row_count": pg_rows_count,
+        "source_rows_input_row_count": source_rows_count if args.source_rows else None,
+        "snapshot_input_row_count": len(snapshot_rows),
+    }
+    batch["snapshot_json_path"] = str(args.snapshot_json) if args.snapshot_json else None
+    batch["snapshot_json_error"] = snapshot_error
     if args.append_ledger:
         append_materialized_records_to_ledger(args.ledger, batch)
     if args.output:

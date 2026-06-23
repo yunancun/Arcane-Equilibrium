@@ -71,6 +71,7 @@ from cost_gate_learning_lane.reject_materializer import (
     append_materialized_records_to_ledger,
     build_cost_gate_reject_feature_sql,
     build_materialized_reject_ledger_batch,
+    pipeline_snapshot_recent_intents_to_feature_rows,
     reject_feature_row_to_event,
 )
 from cost_gate_learning_lane.runtime_adapter import (
@@ -2385,6 +2386,33 @@ def test_alpha_discovery_routes_positive_blocked_outcome_review_candidate(
         "".join(json.dumps(row) + "\n" for row in ledger_rows),
         encoding="utf-8",
     )
+    review = build_blocked_signal_outcome_review(
+        ledger_rows,
+        now_utc=dt.datetime(2026, 6, 21, 14, 20, tzinfo=dt.timezone.utc),
+    )
+    packet = build_false_negative_candidate_packet(
+        review,
+        now_utc=dt.datetime(2026, 6, 21, 14, 21, tzinfo=dt.timezone.utc),
+        source_path=lane_dir / "blocked_outcome_review_latest.json",
+    )
+    (lane_dir / "blocked_outcome_review_latest.json").write_text(
+        json.dumps(review),
+        encoding="utf-8",
+    )
+    (lane_dir / "false_negative_candidate_packet_latest.json").write_text(
+        json.dumps(packet),
+        encoding="utf-8",
+    )
+    false_negative_review = build_false_negative_operator_review(
+        false_negative_candidate_packet=packet,
+        source_path=lane_dir / "false_negative_candidate_packet_latest.json",
+        decision="defer",
+        now_utc=dt.datetime(2026, 6, 21, 14, 22, tzinfo=dt.timezone.utc),
+    )
+    (lane_dir / "false_negative_operator_review_latest.json").write_text(
+        json.dumps(false_negative_review),
+        encoding="utf-8",
+    )
 
     arm = collect_cost_gate_learning_lane_arm(
         data_dir,
@@ -2397,16 +2425,16 @@ def test_alpha_discovery_routes_positive_blocked_outcome_review_candidate(
     row = discovery["profitability_blocker_scorecard"]["arms"][0]
 
     assert discovery["arms"][0]["action"] == "READY_FOR_PROBE"
-    assert discovery["arms"][0]["reason"] == "cost_gate_blocked_outcome_review_candidate"
+    assert discovery["arms"][0]["reason"] == "cost_gate_false_negative_candidate_packet_ready"
     assert discovery["profitability_blocker_scorecard"]["status"] == (
         "ACTIONABLE_PROBE_READY"
     )
     assert row["blocker_class"] == "probe_ready"
     assert row["primary_blocker"] == (
-        "cost_gate_blocked_signal_outcomes_need_demo_probe_authority_review"
+        "cost_gate_false_negative_candidates_need_operator_review"
     )
     assert row["next_trigger"] == (
-        "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
+        "operator_review_ranked_false_negative_candidates_before_bounded_demo_probe_authority"
     )
     assert row["blocked_signal_outcome_review_status"] == (
         "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
@@ -3832,6 +3860,9 @@ def test_runtime_adapter_normalizes_cost_gate_negative_reason_text():
     assert normalize_reject_reason_code(
         "cost_gate(JS-demo): negative edge -15.2 bps blocked"
     ) == "cost_gate_js_demo_negative_edge"
+    assert normalize_reject_reason_code(
+        "rejected:cost_gate(JS-demo): estimated=-2.74bps < 0 — blocked / 負估計阻擋"
+    ) == "cost_gate_js_demo_negative_edge"
 
 
 def test_reject_materializer_builds_blocked_admission_rows_from_feature_rows():
@@ -3926,6 +3957,100 @@ def test_reject_materializer_append_is_explicit_and_readable(tmp_path: Path):
     assert len(rows) == 1
     assert rows[0]["attempt_id"] == "ctx-materialized-append"
     assert rows[0]["decision"] == "ORDER_AUTHORITY_NOT_GRANTED"
+
+
+def test_reject_materializer_materializes_recent_pipeline_snapshot_rejects():
+    rows = pipeline_snapshot_recent_intents_to_feature_rows(
+        {
+            "trading_mode": "demo",
+            "recent_intents": [
+                {
+                    "timestamp_ms": 1_782_245_279_951,
+                    "result": "rejected:cost_gate(JS-demo): estimated=-2.74bps < 0",
+                    "intent": {
+                        "strategy": "ma_crossover",
+                        "symbol": "ethusdt",
+                        "intent_type": "open_short",
+                        "limit_price": 2000.5,
+                    },
+                },
+                {
+                    "timestamp_ms": 1_782_245_279_952,
+                    "result": "rejected:cost_gate(JS-demo): atr unavailable",
+                    "intent": {
+                        "strategy": "ma_crossover",
+                        "symbol": "ETHUSDT",
+                        "is_long": True,
+                    },
+                },
+            ],
+        },
+        engine_modes=("demo",),
+        snapshot_path=Path("/tmp/openclaw/pipeline_snapshot.json"),
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["context_id"].startswith(
+        "snapshot|1782245279951|ma_crossover|ETHUSDT|Sell|2000.5"
+    )
+    assert rows[0]["engine_mode"] == "demo"
+    assert rows[0]["side"] == "Sell"
+    assert rows[0]["reject_reason_code"] == "cost_gate_js_demo_negative_edge"
+    assert rows[0]["last_price"] == 2000.5
+    assert rows[0]["_materializer_source"] == "pipeline_snapshot_recent_intents"
+
+    batch = build_materialized_reject_ledger_batch(
+        _runtime_plan(),
+        rows,
+        now_utc=dt.datetime(2026, 6, 21, 12, 0, tzinfo=dt.timezone.utc),
+    )
+
+    assert batch["materialized_record_count"] == 1
+    record = batch["records"][0]
+    assert record["source"] == "materialized_from_pipeline_snapshot_recent_intents"
+    assert record["source_schema"] == "pipeline_snapshot.recent_intents"
+    assert record["source_snapshot_path"] == "/tmp/openclaw/pipeline_snapshot.json"
+    assert record["event"]["symbol"] == "ETHUSDT"
+    assert record["event"]["side"] == "Sell"
+    assert record["decision"] == "ORDER_AUTHORITY_NOT_GRANTED"
+    assert record["allowed_to_submit_order"] is False
+
+
+def test_reject_materializer_skips_snapshot_duplicate_when_pg_event_exists():
+    ts_ms = 1_782_245_279_951
+    batch = build_materialized_reject_ledger_batch(
+        _runtime_plan(),
+        [
+            {
+                "ts_ms": ts_ms,
+                "context_id": "snapshot|duplicate",
+                "engine_mode": "demo",
+                "strategy_name": "ma_crossover",
+                "symbol": "ETHUSDT",
+                "side": "Sell",
+                "reject_reason_code": "cost_gate_js_demo_negative_edge",
+                "_materializer_source": "pipeline_snapshot_recent_intents",
+            }
+        ],
+        existing_ledger_rows=[
+            {
+                "record_type": "probe_admission_decision",
+                "attempt_id": "ctx-pg-real",
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "event": {
+                    "strategy_name": "ma_crossover",
+                    "symbol": "ETHUSDT",
+                    "side": "Sell",
+                    "ts_ms": ts_ms,
+                },
+            }
+        ],
+        now_utc=dt.datetime(2026, 6, 21, 12, 0, tzinfo=dt.timezone.utc),
+    )
+
+    assert batch["materialized_record_count"] == 0
+    assert batch["skipped_existing_attempt_count"] == 1
+    assert batch["skipped_existing_event_key_count"] == 1
 
 
 def test_reject_materializer_sql_is_cost_gate_negative_edge_readonly_shape():

@@ -65,6 +65,7 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "bounded_probe_execution_realism_review_latest.json" in src
     assert "historical_scorecard_review_latest.json" in src
     assert "reject_materializer_latest.json" in src
+    assert "pipeline_snapshot.json" in src
     assert "cost_gate_reject_counterfactual.py" in src
     assert "demo_data_flow_monitor.py" in src
     assert "demo_order_to_fill_gap_audit.py" in src
@@ -86,6 +87,7 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "materializer_materialized_record_count" in src
     assert "materializer_appended_record_count" in src
     assert "materializer_decision_counts" in src
+    assert "materializer_snapshot_input_row_count" in src
     assert "scorecard_status" in src
     assert "scorecard_probe_candidate_count" in src
     assert "scorecard_horizon_stability_status" in src
@@ -141,6 +143,7 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "bounded_probe_execution_realism_review_primary_hypothesis" in src
     assert "bounded_probe_execution_realism_review_cost_gate_or_operator_review_allowed" in src
     assert "--source-pg" in src
+    assert "--snapshot-json" in src
     assert "--record-blocked-outcomes" in src
     assert "--data-flow-json" in src
     assert "--counterfactual-json" in src
@@ -169,6 +172,7 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "OPENCLAW_COST_GATE_LEARNING_APPEND_MATERIALIZED_REJECTS" in src
     assert "OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES" in src
     assert "OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES" in src
+    assert "OPENCLAW_COST_GATE_LEARNING_PIPELINE_SNAPSHOT_JSON" in src
     assert "OPENCLAW_COST_GATE_BOUNDED_PROBE_PREFLIGHT_JSON" in src
     assert "OPENCLAW_DEMO_ORDER_TO_FILL_GAP_AUDIT_JSON" in src
     assert "OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT" in src
