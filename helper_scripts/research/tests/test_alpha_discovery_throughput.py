@@ -691,6 +691,38 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
                         ),
                     },
                 },
+                "mm_motif_amplification_packet": {
+                    "status": (
+                        "MM_MOTIF_AMPLIFICATION_REQUIRES_DISTINCT_DATE_HISTORY"
+                    ),
+                    "next_action": (
+                        "accumulate_distinct_window_history_for_repeated_low_friction_motif"
+                    ),
+                    "summary": {
+                        "top_motif_key": (
+                            "low_friction_motif|spread_combo|recent_trade_imbalance"
+                        ),
+                        "top_status": "MOTIF_REPEATS_DISTINCT_DATES_INSUFFICIENT",
+                        "top_bottleneck_leg": "train",
+                        "top_min_train_holdout_gross_bps": 1.032,
+                        "top_min_gross_gap_to_current_fee_bps": 2.968,
+                        "top_required_uplift_multiple": 3.876,
+                        "top_distinct_dates_remaining": 2,
+                        "top_frontier_candidate_count": 2,
+                        "top_frontier_best_min_gross_key": "frontier-mm-search",
+                        "top_frontier_best_min_train_holdout_gross_bps": 1.2,
+                        "top_frontier_gap_to_current_fee_bps": 2.8,
+                        "top_frontier_experiment_focus": (
+                            "lift_train_gross_edge_without_destroying_holdout_sample_gate"
+                        ),
+                    },
+                    "top_candidate": {
+                        "search_constraint": (
+                            "preserve_repeated_motif_axes_and_require_train_holdout_"
+                            "sample_gated_min_gross_ge_current_fee_round_trip"
+                        ),
+                    },
+                },
             },
         },
         {
@@ -796,6 +828,11 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
         "quoted_half_spread_bps_train_p90_and_recent_trade_count_30s_train_p10"
     )
     assert directive["lower_fee_path_not_actionable_now"] is True
+    assert directive["motif_amplification_top_frontier_candidate_count"] == 2
+    assert directive["motif_amplification_top_frontier_best_min_gross_key"] == (
+        "frontier-mm-search"
+    )
+    assert directive["motif_amplification_top_frontier_gap_to_current_fee_bps"] == 2.8
     assert blockers["mm_verdict_maker_edge"]["mm_signal_search_status"] == (
         "SEARCH_REQUIRED_EDGE_UPLIFT"
     )
@@ -824,6 +861,12 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
         "accumulate_distinct_window_history_for_repeated_low_friction_motif_"
         "and_search_edge_uplift"
     )
+    assert blockers["mm_verdict_maker_edge"][
+        "mm_signal_search_motif_amplification_top_frontier_candidate_count"
+    ] == 2
+    assert blockers["mm_verdict_maker_edge"][
+        "mm_signal_search_motif_amplification_top_frontier_best_min_gross_key"
+    ] == "frontier-mm-search"
     assert blockers["mm_verdict_maker_edge"]["cost_wall_escape_scorecard"][
         "low_friction_signal_status"
     ] == "LOW_FRICTION_SIGNAL_HOLDOUT_GROSS_POSITIVE_BELOW_CURRENT_FEE"
@@ -1587,6 +1630,20 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
                 "repeated_motif_count": 1,
                 "best_repeated_near_miss_motif": {
                     "motif_key": "low_friction_motif|spread_combo",
+                    "frontier_summary": {
+                        "candidate_count": 1,
+                        "best_min_gross_key": "frontier-runtime",
+                        "best_min_train_holdout_gross_bps": 1.1,
+                        "best_min_gross_gap_to_current_fee_bps": 2.9,
+                        "best_train_key": "frontier-runtime",
+                        "best_train_gross_bps": 1.1,
+                        "best_holdout_key": "frontier-runtime",
+                        "best_holdout_gross_bps": 2.5,
+                    },
+                    "candidate_frontier": [{
+                        "key": "frontier-runtime",
+                        "min_train_holdout_gross_bps": 1.1,
+                    }],
                 },
             },
         }),
@@ -1728,6 +1785,10 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
     )
     assert motif_packet["summary"]["top_motif_key"] == (
         "low_friction_motif|spread_combo"
+    )
+    assert motif_packet["summary"]["top_frontier_candidate_count"] == 1
+    assert motif_packet["summary"]["top_frontier_best_min_gross_key"] == (
+        "frontier-runtime"
     )
     assert raw_arms["mm_verdict_maker_edge"]["detail"]["walk_forward_failure_summary"]["status"] == (
         "TRAIN_POSITIVE_HOLDOUT_DECAY"

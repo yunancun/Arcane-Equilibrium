@@ -300,6 +300,13 @@ def test_history_scorecard_groups_low_friction_near_miss_motifs() -> None:
     assert best["best_cell"]["motif_key"] == (
         "low_friction_motif|spread_thin_queue_favorable|thin_queue|spread_delta"
     )
+    assert best["frontier_summary"]["candidate_count"] == 3
+    assert best["frontier_summary"]["best_min_train_holdout_gross_bps"] == 0.1
+    assert best["frontier_summary"]["best_train_gross_bps"] == 0.1
+    assert best["frontier_summary"]["best_holdout_gross_bps"] == 3.5
+    assert len(best["candidate_frontier"]) == 3
+    assert best["candidate_frontier"][0]["bottleneck_leg"] == "train"
+    assert best["candidate_frontier"][0]["gap_to_current_fee_round_trip_bps"] == 3.9
     assert best["best_cell"]["train_holdout_gross_current_fee_consistent"] is False
     assert scorecard["status"] == "HISTORY_NO_CURRENT_FEE_SAMPLE_GATED_EDGE"
 
