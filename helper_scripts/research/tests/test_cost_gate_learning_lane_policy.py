@@ -1094,9 +1094,11 @@ def test_activation_preflight_reports_not_accumulating_without_runtime_artifacts
 def test_activation_preflight_cli_writes_json_output(tmp_path: Path) -> None:
     data_dir = tmp_path / "data"
     out = tmp_path / "activation_preflight_latest.json"
+    repo_root, _remote = _init_source_repo_with_origin(tmp_path)
+    now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
     plan = build_plan_from_payload(
-        _scorecard_payload(),
-        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+        _scorecard_payload(generated_at=now.isoformat()),
+        now_utc=now,
     )
     lane_dir = data_dir / "cost_gate_learning_lane"
     lane_dir.mkdir(parents=True)
@@ -1109,6 +1111,8 @@ def test_activation_preflight_cli_writes_json_output(tmp_path: Path) -> None:
         [
             "--data-dir",
             str(data_dir),
+            "--repo-root",
+            str(repo_root),
             "--json-output",
             str(out),
         ]
