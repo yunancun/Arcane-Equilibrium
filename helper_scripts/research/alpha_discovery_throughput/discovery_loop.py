@@ -101,6 +101,12 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
     false_negative_packet_status = str(
         detail.get("false_negative_candidate_packet_status") or ""
     ).upper()
+    false_negative_packet_present = (
+        detail.get("false_negative_candidate_packet_present") is True
+    )
+    false_negative_packet_source_ok = (
+        detail.get("false_negative_candidate_packet_source_ok") is True
+    )
     false_negative_packet_operator_ready = (
         detail.get("false_negative_candidate_packet_operator_review_ready") is True
     )
@@ -343,7 +349,25 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "engineering_actionable": True,
         }
 
-    if packet_present and not packet_source_ok:
+    false_negative_queue_ready = (
+        false_negative_packet_status
+        == "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW"
+        and false_negative_packet_source_ok
+        and false_negative_packet_operator_ready
+    )
+
+    if false_negative_packet_present and not false_negative_packet_source_ok:
+        return {
+            "action": RUN_READ_ONLY_CAPTURE,
+            "reason": "cost_gate_false_negative_candidate_packet_stale_or_unreadable",
+            "blocker_class": "data_coverage",
+            "primary_blocker": "cost_gate_false_negative_candidate_packet_not_fresh",
+            "next_trigger": false_negative_packet_next_trigger,
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
+
+    if packet_present and not packet_source_ok and not false_negative_queue_ready:
         return {
             "action": RUN_READ_ONLY_CAPTURE,
             "reason": "profit_learning_decision_packet_stale_or_unreadable",
@@ -376,7 +400,11 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "engineering_actionable": True,
         }
 
-    if sealed_preflight_present and not sealed_preflight_source_ok:
+    if (
+        sealed_preflight_present
+        and not sealed_preflight_source_ok
+        and not false_negative_queue_ready
+    ):
         return {
             "action": RUN_READ_ONLY_CAPTURE,
             "reason": "sealed_horizon_probe_preflight_stale_or_unreadable",
@@ -387,7 +415,11 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "engineering_actionable": True,
         }
 
-    if operator_auth_present and not operator_auth_source_ok:
+    if (
+        operator_auth_present
+        and not operator_auth_source_ok
+        and not false_negative_queue_ready
+    ):
         return {
             "action": RUN_READ_ONLY_CAPTURE,
             "reason": "bounded_probe_operator_authorization_stale_or_unreadable",
@@ -398,7 +430,11 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "engineering_actionable": True,
         }
 
-    if shadow_placement_present and not shadow_placement_source_ok:
+    if (
+        shadow_placement_present
+        and not shadow_placement_source_ok
+        and not false_negative_queue_ready
+    ):
         return {
             "action": RUN_READ_ONLY_CAPTURE,
             "reason": "bounded_probe_shadow_placement_impact_stale_or_unreadable",
@@ -409,7 +445,11 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "engineering_actionable": True,
         }
 
-    if bounded_review_present and not bounded_review_source_ok:
+    if (
+        bounded_review_present
+        and not bounded_review_source_ok
+        and not false_negative_queue_ready
+    ):
         return {
             "action": RUN_READ_ONLY_CAPTURE,
             "reason": "bounded_probe_result_review_stale_or_unreadable",
@@ -420,7 +460,11 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "engineering_actionable": True,
         }
 
-    if bounded_execution_review_present and not bounded_execution_review_source_ok:
+    if (
+        bounded_execution_review_present
+        and not bounded_execution_review_source_ok
+        and not false_negative_queue_ready
+    ):
         return {
             "action": RUN_READ_ONLY_CAPTURE,
             "reason": "bounded_probe_execution_realism_review_stale_or_unreadable",
@@ -781,6 +825,7 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
         if (
             false_negative_operator_review_present
             and not false_negative_operator_review_source_ok
+            and not false_negative_queue_ready
         ):
             return {
                 "action": RUN_READ_ONLY_CAPTURE,
@@ -830,11 +875,7 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
                 "operator_actionable": False,
                 "engineering_actionable": True,
             }
-        if (
-            false_negative_packet_status
-            == "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW"
-            and false_negative_packet_operator_ready
-        ):
+        if false_negative_queue_ready:
             return {
                 "action": READY_FOR_PROBE,
                 "reason": "cost_gate_false_negative_candidate_packet_ready",
@@ -4331,6 +4372,9 @@ def classify_profitability_blocker(
                 ),
                 "profitability_cost_gate_escape_operator_authorization_active_runtime_order_authority": detail.get(
                     "profitability_cost_gate_escape_operator_authorization_active_runtime_order_authority"
+                ),
+                "cost_gate_artifact_spine_summary": detail.get(
+                    "cost_gate_artifact_spine_summary"
                 ),
                 "sealed_horizon_probe_preflight_status": detail.get(
                     "sealed_horizon_probe_preflight_status"

@@ -25,6 +25,10 @@ from cost_gate_learning_lane.status import (
 from polymarket_leadlag import replay_history as polymarket_replay_history
 
 from . import RUNNER_VERSION
+from .artifact_spine import (
+    build_cost_gate_artifact_spine,
+    summarize_cost_gate_artifact_spine,
+)
 from .discovery_loop import build_discovery_plan
 from .mm_current_fee_confirmation import build_mm_current_fee_confirmation_packet
 from .mm_motif_amplification import build_mm_motif_amplification_packet
@@ -3170,6 +3174,24 @@ def summarize_bounded_probe_execution_realism_review(
     }
 
 
+def _with_cost_gate_artifact_spine(
+    data_dir: Path,
+    detail: dict[str, Any],
+    *,
+    now_utc: dt.datetime,
+) -> dict[str, Any]:
+    """Attach the logical Cost Gate artifact spine to an arm detail payload."""
+    out = dict(detail)
+    spine = build_cost_gate_artifact_spine(
+        data_dir=data_dir,
+        detail=out,
+        now_utc=now_utc,
+    )
+    out["cost_gate_artifact_spine"] = spine
+    out["cost_gate_artifact_spine_summary"] = summarize_cost_gate_artifact_spine(spine)
+    return out
+
+
 def collect_cost_gate_learning_lane_arm(
     data_dir: Path,
     *,
@@ -3288,7 +3310,7 @@ def collect_cost_gate_learning_lane_arm(
             source_ok=True,
             source_path=path,
             source_error=f"optional_plan_{err}",
-            detail={
+            detail=_with_cost_gate_artifact_spine(data_dir, {
                 "plan_status": "SOURCE_SCORECARD_UNAVAILABLE",
                 "note": "cost_gate_learning_lane_plan_not_seen",
                 **source_summary,
@@ -3309,7 +3331,7 @@ def collect_cost_gate_learning_lane_arm(
                 **historical_summary,
                 **loop_summary,
                 **ledger_summary,
-            },
+            }, now_utc=now_utc),
         )
     assert payload is not None
     generated_at = payload.get("generated_at_utc")
@@ -3332,7 +3354,7 @@ def collect_cost_gate_learning_lane_arm(
         source_ok=fresh,
         source_path=path,
         source_error=freshness_error,
-        detail={
+        detail=_with_cost_gate_artifact_spine(data_dir, {
             "plan_status": status,
             "generated_at_utc": generated_at,
             "age_seconds": age,
@@ -3365,7 +3387,7 @@ def collect_cost_gate_learning_lane_arm(
             **historical_summary,
             **loop_summary,
             **ledger_summary,
-        },
+        }, now_utc=now_utc),
     )
 
 
@@ -3735,6 +3757,21 @@ def _profitability_path_summary_from_arms(arms: list[dict[str, Any]]) -> dict[st
     }
 
 
+def _cost_gate_artifact_spine_summary_from_arms(
+    arms: list[dict[str, Any]],
+) -> dict[str, Any]:
+    for arm in arms:
+        if arm.get("arm_id") != "cost_gate_demo_learning_lane":
+            continue
+        detail = arm.get("detail")
+        if not isinstance(detail, dict):
+            return {}
+        return summarize_cost_gate_artifact_spine(
+            detail.get("cost_gate_artifact_spine")
+        )
+    return {}
+
+
 def build_runtime_killboard(
     *,
     data_dir: Path,
@@ -3761,6 +3798,9 @@ def build_runtime_killboard(
     learning_worklist = _learning_worklist(plan)
     learning_summary = _learning_summary(learning_worklist)
     profitability_path_summary = _profitability_path_summary_from_arms(arms)
+    cost_gate_artifact_spine_summary = _cost_gate_artifact_spine_summary_from_arms(
+        arms
+    )
     scorecard = (
         plan.get("profitability_blocker_scorecard")
         if isinstance(plan.get("profitability_blocker_scorecard"), dict)
@@ -3815,12 +3855,43 @@ def build_runtime_killboard(
                 counts.get("READY_FOR_PROBE", 0) > 0
                 and runtime_source_activation_ready
             ),
+            "cost_gate_spine_node_count": cost_gate_artifact_spine_summary.get(
+                "spine_node_count"
+            ),
+            "cost_gate_spine_ready_node_count": (
+                cost_gate_artifact_spine_summary.get("ready_spine_node_count")
+            ),
+            "cost_gate_spine_alpha_evidence_node_count": (
+                cost_gate_artifact_spine_summary.get("alpha_evidence_node_count")
+            ),
+            "cost_gate_spine_ready_alpha_evidence_node_count": (
+                cost_gate_artifact_spine_summary.get(
+                    "ready_alpha_evidence_node_count"
+                )
+            ),
+            "cost_gate_spine_governance_stale_or_unreadable_artifact_ids": (
+                cost_gate_artifact_spine_summary.get(
+                    "governance_stale_or_unreadable_artifact_ids"
+                )
+            ),
+            "cost_gate_spine_alpha_evidence_stale_or_unreadable_artifact_ids": (
+                cost_gate_artifact_spine_summary.get(
+                    "alpha_evidence_stale_or_unreadable_artifact_ids"
+                )
+            ),
+            "cost_gate_spine_probe_result_learning_valid": (
+                cost_gate_artifact_spine_summary.get("probe_result_learning_valid")
+            ),
+            "cost_gate_spine_proof_gap": cost_gate_artifact_spine_summary.get(
+                "proof_gap"
+            ),
             **profitability_path_summary,
             **learning_summary,
         },
         "runtime_source": runtime_source,
         "discovery_plan": plan,
         "profitability_blocker_scorecard": plan.get("profitability_blocker_scorecard"),
+        "cost_gate_artifact_spine_summary": cost_gate_artifact_spine_summary,
         "learning_worklist": learning_worklist,
         "arms_raw": arms,
     }
@@ -3857,6 +3928,20 @@ def _history_row(killboard: dict[str, Any]) -> dict[str, Any]:
         "run_read_only_capture": kb.get("run_read_only_capture"),
         "wait": kb.get("wait"),
         "block": kb.get("block"),
+        "cost_gate_spine_node_count": kb.get("cost_gate_spine_node_count"),
+        "cost_gate_spine_ready_node_count": kb.get(
+            "cost_gate_spine_ready_node_count"
+        ),
+        "cost_gate_spine_alpha_evidence_node_count": kb.get(
+            "cost_gate_spine_alpha_evidence_node_count"
+        ),
+        "cost_gate_spine_ready_alpha_evidence_node_count": kb.get(
+            "cost_gate_spine_ready_alpha_evidence_node_count"
+        ),
+        "cost_gate_spine_probe_result_learning_valid": kb.get(
+            "cost_gate_spine_probe_result_learning_valid"
+        ),
+        "cost_gate_spine_proof_gap": kb.get("cost_gate_spine_proof_gap"),
         "profitability_path_scorecard_status": kb.get(
             "profitability_path_scorecard_status"
         ),
