@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-23 MM Motif Frontier Amplification
+
+- `fill_sim_history.py` now emits same-motif low-friction candidate frontiers; `mm_motif_amplification_packet_v1` uses frontier-best min train/holdout gross as the primary uplift baseline while preserving the old best-cell value for provenance.
+- Linux artifact-only refresh at `2026-06-23T17:21:19Z` reports top motif `low_friction_motif|spread_combo|recent_trade_imbalance`, best-cell min gross `1.032bps`, frontier-best min gross `1.392bps`, remaining gap `2.608bps`, required uplift `2.8736x`, and frontier focus `lift_train_gross_edge_without_destroying_holdout_sample_gate`.
+- PM read: this turns the MM path into a concrete same-motif train-leg amplification task, but still grants no Cost Gate lowering, no probe/order authority, no runtime mutation, and no promotion proof.
+
 ## 2026-06-23 Profitability Scorecard Operator-Authorization Gate
 
 - `alpha_profitability_path_scorecard_v1` now consumes `bounded_probe_operator_authorization_latest.json`, so the main profitability closure names the concrete Cost Gate escape authority gates instead of stopping at a generic sealed-preflight blocker.
