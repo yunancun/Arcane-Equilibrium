@@ -3408,6 +3408,101 @@ def test_cost_gate_blocked_review_candidate_supersedes_dry_run_apply_gate():
     ] is False
 
 
+def test_cost_gate_false_negative_packet_drives_ranked_operator_review_task():
+    now = dt.datetime(2026, 6, 23, 20, 0, tzinfo=dt.timezone.utc)
+    arm = {
+        "arm_id": "cost_gate_demo_learning_lane",
+        "gate_status": "OPERATOR_REVIEW",
+        "sample_count": 2,
+        "artifacts_ready": False,
+        "source_ok": True,
+        "source_path": (
+            "/tmp/openclaw/cost_gate_learning_lane/"
+            "demo_learning_lane_plan_latest.json"
+        ),
+        "detail": {
+            "plan_status": "READY_FOR_DEMO_LEARNING_PROBE",
+            "main_cost_gate_adjustment": "NONE",
+            "order_authority": "NOT_GRANTED",
+            "selected_probe_candidate_count": 2,
+            "blocked_signal_outcome_count": 45677,
+            "blocked_signal_outcome_review_schema_version": (
+                "cost_gate_demo_learning_lane_blocked_outcome_review_v2"
+            ),
+            "blocked_signal_outcome_review_status": (
+                "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
+            ),
+            "blocked_signal_outcome_review_next_trigger": (
+                "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
+            ),
+            "blocked_signal_top_review_candidate_side_cell_key": (
+                "grid_trading|AVAXUSDT|Sell"
+            ),
+            "blocked_signal_top_review_candidate_wrongful_block_score": 91.4,
+            "blocked_signal_top_review_candidate_net_cost_cushion_bps": 6.2,
+            "false_negative_candidate_packet_status": (
+                "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW"
+            ),
+            "false_negative_candidate_packet_next_actions": [
+                (
+                    "operator_review_ranked_false_negative_candidates_before_"
+                    "bounded_demo_probe_authority"
+                ),
+                "preserve_global_cost_gate_no_lowering",
+            ],
+            "false_negative_candidate_packet_false_negative_count": 16,
+            "false_negative_candidate_packet_edge_amplification_count": 0,
+            "false_negative_candidate_packet_top_side_cell_key": (
+                "grid_trading|AVAXUSDT|Sell"
+            ),
+            "false_negative_candidate_packet_top_wrongful_block_score": 91.4,
+            "false_negative_candidate_packet_top_net_cost_cushion_bps": 6.2,
+            "false_negative_candidate_packet_operator_review_ready": True,
+            "false_negative_candidate_packet_engineering_actionable": False,
+            "false_negative_candidate_packet_global_cost_gate_lowering_recommended": (
+                False
+            ),
+            "false_negative_candidate_packet_probe_authority_granted": False,
+            "false_negative_candidate_packet_order_authority_granted": False,
+            "false_negative_candidate_packet_promotion_evidence": False,
+        },
+    }
+
+    plan = build_discovery_plan([arm], now_utc=now)
+
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert blocker["reason"] == "cost_gate_false_negative_candidate_packet_ready"
+    assert blocker["primary_blocker"] == (
+        "cost_gate_false_negative_candidates_need_operator_review"
+    )
+    assert blocker["next_trigger"] == (
+        "operator_review_ranked_false_negative_candidates_before_"
+        "bounded_demo_probe_authority"
+    )
+    assert blocker["false_negative_candidate_packet_false_negative_count"] == 16
+    assert blocker["false_negative_candidate_packet_top_side_cell_key"] == (
+        "grid_trading|AVAXUSDT|Sell"
+    )
+    assert blocker[
+        "false_negative_candidate_packet_global_cost_gate_lowering_recommended"
+    ] is False
+    task = plan["learning_worklist"]["top_task"]
+    assert task["task_type"] == "operator_probe_review"
+    assert task["learning_objective"] == (
+        "operator_review_ranked_cost_gate_false_negative_candidates_"
+        "before_bounded_demo_probe"
+    )
+    assert task["requires_operator_authorization"] is True
+    assert task["runtime_mutation_required"] is False
+    assert task["evidence"]["false_negative_candidate_packet_false_negative_count"] == 16
+    assert task["evidence"]["false_negative_candidate_packet_top_side_cell_key"] == (
+        "grid_trading|AVAXUSDT|Sell"
+    )
+    assert task["evidence"][
+        "false_negative_candidate_packet_order_authority_granted"
+    ] is False
+
+
 def test_cost_gate_arm_uses_stack_healthcheck_for_missing_bounded_reviews(tmp_path):
     data = tmp_path / "openclaw"
     artifact = _write_demo_learning_stack_healthcheck_latest(

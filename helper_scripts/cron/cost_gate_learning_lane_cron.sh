@@ -33,6 +33,8 @@ DATA_FLOW_JSON="${OPENCLAW_COST_GATE_DATA_FLOW_MONITOR_JSON:-$DATA_FLOW_DIR/demo
 DATA_FLOW_MD="${OPENCLAW_COST_GATE_DATA_FLOW_MONITOR_MD:-$DATA_FLOW_DIR/demo_data_flow_monitor_latest.md}"
 DECISION_PACKET_JSON="${OPENCLAW_COST_GATE_PROFIT_LEARNING_DECISION_PACKET_JSON:-$LANE_DIR/profit_learning_decision_packet_latest.json}"
 DECISION_PACKET_MD="${OPENCLAW_COST_GATE_PROFIT_LEARNING_DECISION_PACKET_MD:-$LANE_DIR/profit_learning_decision_packet_latest.md}"
+FALSE_NEGATIVE_CANDIDATE_PACKET_JSON="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDIDATE_PACKET_JSON:-$LANE_DIR/false_negative_candidate_packet_latest.json}"
+FALSE_NEGATIVE_CANDIDATE_PACKET_MD="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDIDATE_PACKET_MD:-$LANE_DIR/false_negative_candidate_packet_latest.md}"
 ACTIVATION_PREFLIGHT_JSON="${OPENCLAW_COST_GATE_ACTIVATION_PREFLIGHT_JSON:-$LANE_DIR/activation_preflight_latest.json}"
 SEALED_LEARNING_EVIDENCE_JSON="${OPENCLAW_COST_GATE_SEALED_HORIZON_LEARNING_EVIDENCE_JSON:-$LANE_DIR/sealed_horizon_learning_evidence_latest.json}"
 SEALED_PREFLIGHT_JSON="${OPENCLAW_COST_GATE_BOUNDED_PROBE_PREFLIGHT_JSON:-$LANE_DIR/sealed_horizon_probe_preflight_latest.json}"
@@ -46,6 +48,7 @@ REFRESH_SCORECARD="${OPENCLAW_COST_GATE_LEARNING_REFRESH_SCORECARD:-1}"
 REFRESH_DATA_FLOW_MONITOR="${OPENCLAW_COST_GATE_REFRESH_DATA_FLOW_MONITOR:-1}"
 REFRESH_ORDER_TOUCHABILITY_AUDIT="${OPENCLAW_COST_GATE_REFRESH_ORDER_TOUCHABILITY_AUDIT:-1}"
 REFRESH_DECISION_PACKET="${OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET:-1}"
+REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET="${OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET:-1}"
 DATA_FLOW_WINDOW_HOURS="${OPENCLAW_COST_GATE_DATA_FLOW_WINDOW_HOURS:-1,4,24}"
 DATA_FLOW_TOP_LIMIT="${OPENCLAW_COST_GATE_DATA_FLOW_TOP_LIMIT:-10}"
 ORDER_TOUCHABILITY_ENGINE_MODES="${OPENCLAW_DEMO_ORDER_TO_FILL_GAP_ENGINE_MODES:-demo,live_demo}"
@@ -152,6 +155,7 @@ validate_bool01 "OPENCLAW_COST_GATE_LEARNING_REFRESH_SCORECARD" "$REFRESH_SCOREC
 validate_bool01 "OPENCLAW_COST_GATE_REFRESH_DATA_FLOW_MONITOR" "$REFRESH_DATA_FLOW_MONITOR"
 validate_bool01 "OPENCLAW_COST_GATE_REFRESH_ORDER_TOUCHABILITY_AUDIT" "$REFRESH_ORDER_TOUCHABILITY_AUDIT"
 validate_bool01 "OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET" "$REFRESH_DECISION_PACKET"
+validate_bool01 "OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET" "$REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET"
 if [[ ! "$DATA_FLOW_WINDOW_HOURS" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
     echo "[$(ts)] FATAL: OPENCLAW_COST_GATE_DATA_FLOW_WINDOW_HOURS must be comma-separated integers: ${DATA_FLOW_WINDOW_HOURS}" | tee -a "$LOG" >&2
     exit 2
@@ -280,6 +284,10 @@ REFRESH_OUT="${LANE_DIR}/outcome_refresh_${STAMP}.json"
 REFRESH_LATEST="${LANE_DIR}/outcome_refresh_latest.json"
 REVIEW_OUT="${LANE_DIR}/blocked_outcome_review_${STAMP}.json"
 REVIEW_LATEST="${LANE_DIR}/blocked_outcome_review_latest.json"
+FALSE_NEGATIVE_CANDIDATE_PACKET_OUT="${LANE_DIR}/false_negative_candidate_packet_${STAMP}.json"
+FALSE_NEGATIVE_CANDIDATE_PACKET_MD_OUT="${LANE_DIR}/false_negative_candidate_packet_${STAMP}.md"
+FALSE_NEGATIVE_CANDIDATE_PACKET_LATEST="$FALSE_NEGATIVE_CANDIDATE_PACKET_JSON"
+FALSE_NEGATIVE_CANDIDATE_PACKET_MD_LATEST="$FALSE_NEGATIVE_CANDIDATE_PACKET_MD"
 SEALED_LEARNING_EVIDENCE_OUT="${LANE_DIR}/sealed_horizon_learning_evidence_${STAMP}.json"
 SEALED_LEARNING_EVIDENCE_REVIEW_OUT="${LANE_DIR}/sealed_horizon_learning_evidence_review_${STAMP}.json"
 SEALED_LEARNING_EVIDENCE_REVIEW_LATEST="${LANE_DIR}/sealed_horizon_learning_evidence_review_latest.json"
@@ -418,6 +426,13 @@ REVIEW_ARGS=(
     --min-avg-net-bps "$REVIEW_MIN_AVG_NET_BPS"
     --min-net-positive-pct "$REVIEW_MIN_NET_POSITIVE_PCT"
     --output "$REVIEW_OUT"
+)
+
+FALSE_NEGATIVE_CANDIDATE_PACKET_ARGS=(
+    -m cost_gate_learning_lane.false_negative_candidate_packet
+    --blocked-outcome-review-json "$REVIEW_OUT"
+    --json-output "$FALSE_NEGATIVE_CANDIDATE_PACKET_OUT"
+    --output "$FALSE_NEGATIVE_CANDIDATE_PACKET_MD_OUT"
 )
 
 SEALED_LEARNING_EVIDENCE_ARGS=(
@@ -580,6 +595,7 @@ historical_review_rc=0
 materializer_rc=0
 refresh_rc=0
 review_rc=0
+false_negative_candidate_packet_rc=0
 sealed_horizon_learning_evidence_rc=0
 order_touchability_audit_rc=0
 bounded_probe_touchability_preflight_rc=0
@@ -590,6 +606,7 @@ bounded_probe_shadow_placement_impact_rc=0
 bounded_probe_result_review_rc=0
 bounded_probe_execution_realism_review_rc=0
 bounded_probe_touchability_preflight_skip_reason=""
+false_negative_candidate_packet_skip_reason=""
 sealed_horizon_learning_evidence_skip_reason=""
 order_touchability_audit_skip_reason=""
 bounded_probe_placement_repair_plan_skip_reason=""
@@ -600,6 +617,7 @@ bounded_probe_result_review_skip_reason=""
 bounded_probe_execution_realism_review_skip_reason=""
 if [[ "$PREINSTALL_REFRESH_ONLY" == "1" ]]; then
     order_touchability_audit_skip_reason="preinstall_refresh_only"
+    false_negative_candidate_packet_skip_reason="preinstall_refresh_only"
     sealed_horizon_learning_evidence_skip_reason="preinstall_refresh_only"
     bounded_probe_touchability_preflight_skip_reason="preinstall_refresh_only"
     bounded_probe_placement_repair_plan_skip_reason="preinstall_refresh_only"
@@ -608,7 +626,7 @@ if [[ "$PREINSTALL_REFRESH_ONLY" == "1" ]]; then
     bounded_probe_shadow_placement_impact_skip_reason="preinstall_refresh_only"
     bounded_probe_result_review_skip_reason="preinstall_refresh_only"
     bounded_probe_execution_realism_review_skip_reason="preinstall_refresh_only"
-    echo "[$(ts)] SKIP: preinstall refresh-only mode; refreshed scorecard/plan, skipped historical/materializer/outcome/review/sealed evidence/bounded-probe stages" >> "$LOG"
+    echo "[$(ts)] SKIP: preinstall refresh-only mode; refreshed scorecard/plan, skipped historical/materializer/outcome/review/false-negative packet/sealed evidence/bounded-probe stages" >> "$LOG"
 else
     (
         cd "$BASE"
@@ -652,6 +670,24 @@ else
     ) >> "$LOG" 2>&1 || review_rc=$?
     if [[ -f "$REVIEW_OUT" ]]; then
         cp "$REVIEW_OUT" "$REVIEW_LATEST"
+    fi
+
+    if [[ "$REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET" == "1" ]]; then
+        (
+            cd "$BASE"
+            export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
+            export PYTHONDONTWRITEBYTECODE=1
+            "$PYBIN" "${FALSE_NEGATIVE_CANDIDATE_PACKET_ARGS[@]}"
+        ) >> "$LOG" 2>&1 || false_negative_candidate_packet_rc=$?
+        if [[ -f "$FALSE_NEGATIVE_CANDIDATE_PACKET_OUT" ]]; then
+            cp "$FALSE_NEGATIVE_CANDIDATE_PACKET_OUT" "$FALSE_NEGATIVE_CANDIDATE_PACKET_LATEST"
+            if [[ -f "$FALSE_NEGATIVE_CANDIDATE_PACKET_MD_OUT" ]]; then
+                cp "$FALSE_NEGATIVE_CANDIDATE_PACKET_MD_OUT" "$FALSE_NEGATIVE_CANDIDATE_PACKET_MD_LATEST"
+            fi
+        fi
+    else
+        false_negative_candidate_packet_skip_reason="disabled"
+        echo "[$(ts)] SKIP: false-negative candidate packet disabled by OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET=0" >> "$LOG"
     fi
 
     if [[ "$REFRESH_SEALED_HORIZON_LEARNING_EVIDENCE" == "1" ]]; then
@@ -853,6 +889,11 @@ else
     echo "[$(ts)] SKIP: profit-learning decision packet refresh disabled by OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET=0" >> "$LOG"
 fi
 
+export FALSE_NEGATIVE_CANDIDATE_PACKET_OUT="$FALSE_NEGATIVE_CANDIDATE_PACKET_OUT"
+export FALSE_NEGATIVE_CANDIDATE_PACKET_LATEST="$FALSE_NEGATIVE_CANDIDATE_PACKET_LATEST"
+export FALSE_NEGATIVE_CANDIDATE_PACKET_RC="$false_negative_candidate_packet_rc"
+export FALSE_NEGATIVE_CANDIDATE_PACKET_SKIP_REASON="$false_negative_candidate_packet_skip_reason"
+export REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET="$REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET"
 export BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT="$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT"
 export BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_LATEST="$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_LATEST"
 export BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_RC="$bounded_probe_shadow_placement_impact_rc"
@@ -910,6 +951,9 @@ historical, historical_sha, historical_err = load(os.environ["HISTORICAL_REVIEW_
 materializer, materializer_sha, materializer_err = load(os.environ["MATERIALIZER_OUT"])
 refresh, refresh_sha, refresh_err = load(os.environ["REFRESH_OUT"])
 review, review_sha, review_err = load(os.environ["REVIEW_OUT"])
+false_negative_packet, false_negative_packet_sha, false_negative_packet_err = load(
+    os.environ["FALSE_NEGATIVE_CANDIDATE_PACKET_OUT"]
+)
 sealed_learning, sealed_learning_sha, sealed_learning_err = load(
     os.environ["SEALED_LEARNING_EVIDENCE_OUT"]
 )
@@ -951,6 +995,7 @@ status = {
     "materializer_rc": int(os.environ["MATERIALIZER_RC"]),
     "refresh_rc": int(os.environ["REFRESH_RC"]),
     "review_rc": int(os.environ["REVIEW_RC"]),
+    "false_negative_candidate_packet_rc": int(os.environ["FALSE_NEGATIVE_CANDIDATE_PACKET_RC"]),
     "sealed_horizon_learning_evidence_rc": int(os.environ["SEALED_HORIZON_LEARNING_EVIDENCE_RC"]),
     "bounded_probe_touchability_preflight_rc": int(os.environ["BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_RC"]),
     "bounded_probe_placement_repair_plan_rc": int(os.environ["BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_RC"]),
@@ -963,6 +1008,7 @@ status = {
     "refresh_data_flow_monitor": os.environ["REFRESH_DATA_FLOW_MONITOR"] == "1",
     "refresh_order_touchability_audit": os.environ["REFRESH_ORDER_TOUCHABILITY_AUDIT"] == "1",
     "refresh_decision_packet": os.environ["REFRESH_DECISION_PACKET"] == "1",
+    "refresh_false_negative_candidate_packet": os.environ["REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET"] == "1",
     "refresh_plan": os.environ["REFRESH_PLAN"] == "1",
     "refresh_sealed_horizon_learning_evidence": os.environ["REFRESH_SEALED_HORIZON_LEARNING_EVIDENCE"] == "1",
     "append_sealed_horizon_learning_evidence": os.environ["APPEND_SEALED_HORIZON_LEARNING_EVIDENCE"] == "1",
@@ -1068,6 +1114,74 @@ status = {
     "review_top_candidate_wrongful_block_score": review.get("top_review_candidate_wrongful_block_score"),
     "review_top_candidate_net_cost_cushion_bps": review.get("top_review_candidate_net_cost_cushion_bps"),
     "blocked_signal_outcome_count": review.get("blocked_signal_outcome_count"),
+    "false_negative_candidate_packet_artifact_path": os.environ["FALSE_NEGATIVE_CANDIDATE_PACKET_OUT"],
+    "false_negative_candidate_packet_latest_path": os.environ["FALSE_NEGATIVE_CANDIDATE_PACKET_LATEST"],
+    "false_negative_candidate_packet_sha256": false_negative_packet_sha,
+    "false_negative_candidate_packet_error": false_negative_packet_err,
+    "false_negative_candidate_packet_skip_reason": os.environ["FALSE_NEGATIVE_CANDIDATE_PACKET_SKIP_REASON"] or None,
+    "false_negative_candidate_packet_status": false_negative_packet.get("status"),
+    "false_negative_candidate_packet_reason": false_negative_packet.get("reason"),
+    "false_negative_candidate_packet_next_actions": false_negative_packet.get("next_actions"),
+    "false_negative_candidate_packet_false_negative_count": (
+        (false_negative_packet.get("summary") or {}).get("false_negative_candidate_count")
+        if isinstance(false_negative_packet.get("summary"), dict)
+        else None
+    ),
+    "false_negative_candidate_packet_edge_amplification_count": (
+        (false_negative_packet.get("summary") or {}).get("edge_amplification_candidate_count")
+        if isinstance(false_negative_packet.get("summary"), dict)
+        else None
+    ),
+    "false_negative_candidate_packet_top_side_cell_key": (
+        (false_negative_packet.get("summary") or {}).get("top_false_negative_side_cell_key")
+        if isinstance(false_negative_packet.get("summary"), dict)
+        else None
+    ),
+    "false_negative_candidate_packet_top_wrongful_block_score": (
+        (false_negative_packet.get("summary") or {}).get("top_false_negative_wrongful_block_score")
+        if isinstance(false_negative_packet.get("summary"), dict)
+        else None
+    ),
+    "false_negative_candidate_packet_top_net_cost_cushion_bps": (
+        (false_negative_packet.get("summary") or {}).get("top_false_negative_net_cost_cushion_bps")
+        if isinstance(false_negative_packet.get("summary"), dict)
+        else None
+    ),
+    "false_negative_candidate_packet_top_edge_amplification_side_cell_key": (
+        (false_negative_packet.get("summary") or {}).get("top_edge_amplification_side_cell_key")
+        if isinstance(false_negative_packet.get("summary"), dict)
+        else None
+    ),
+    "false_negative_candidate_packet_operator_review_ready": (
+        (false_negative_packet.get("answers") or {}).get("operator_review_ready")
+        if isinstance(false_negative_packet.get("answers"), dict)
+        else None
+    ),
+    "false_negative_candidate_packet_engineering_actionable": (
+        (false_negative_packet.get("answers") or {}).get("engineering_actionable")
+        if isinstance(false_negative_packet.get("answers"), dict)
+        else None
+    ),
+    "false_negative_candidate_packet_global_cost_gate_lowering_recommended": (
+        (false_negative_packet.get("answers") or {}).get("global_cost_gate_lowering_recommended")
+        if isinstance(false_negative_packet.get("answers"), dict)
+        else None
+    ),
+    "false_negative_candidate_packet_probe_authority_granted": (
+        (false_negative_packet.get("answers") or {}).get("probe_authority_granted")
+        if isinstance(false_negative_packet.get("answers"), dict)
+        else None
+    ),
+    "false_negative_candidate_packet_order_authority_granted": (
+        (false_negative_packet.get("answers") or {}).get("order_authority_granted")
+        if isinstance(false_negative_packet.get("answers"), dict)
+        else None
+    ),
+    "false_negative_candidate_packet_promotion_evidence": (
+        (false_negative_packet.get("answers") or {}).get("promotion_evidence")
+        if isinstance(false_negative_packet.get("answers"), dict)
+        else None
+    ),
     "sealed_horizon_learning_evidence_artifact_path": os.environ["SEALED_LEARNING_EVIDENCE_OUT"],
     "sealed_horizon_learning_evidence_latest_path": os.environ["SEALED_LEARNING_EVIDENCE_JSON"],
     "sealed_horizon_learning_evidence_review_artifact_path": os.environ["SEALED_LEARNING_EVIDENCE_REVIEW_OUT"],
@@ -1305,7 +1419,7 @@ if [[ -n "$STATUS_JSON" ]]; then
     echo "$STATUS_JSON" >> "$STATUS_LOG"
 fi
 
-echo "[$(ts)] === Cost-gate learning lane refresh end scorecard_rc=${scorecard_rc} plan_rc=${plan_rc} historical_review_rc=${historical_review_rc} materializer_rc=${materializer_rc} refresh_rc=${refresh_rc} review_rc=${review_rc} sealed_horizon_learning_evidence_rc=${sealed_horizon_learning_evidence_rc} order_touchability_audit_rc=${order_touchability_audit_rc} bounded_probe_touchability_preflight_rc=${bounded_probe_touchability_preflight_rc} bounded_probe_placement_repair_plan_rc=${bounded_probe_placement_repair_plan_rc} bounded_probe_authority_patch_readiness_rc=${bounded_probe_authority_patch_readiness_rc} bounded_probe_operator_authorization_rc=${bounded_probe_operator_authorization_rc} bounded_probe_shadow_placement_impact_rc=${bounded_probe_shadow_placement_impact_rc} bounded_probe_result_review_rc=${bounded_probe_result_review_rc} bounded_probe_execution_realism_review_rc=${bounded_probe_execution_realism_review_rc} ===" >> "$LOG"
+echo "[$(ts)] === Cost-gate learning lane refresh end scorecard_rc=${scorecard_rc} plan_rc=${plan_rc} historical_review_rc=${historical_review_rc} materializer_rc=${materializer_rc} refresh_rc=${refresh_rc} review_rc=${review_rc} false_negative_candidate_packet_rc=${false_negative_candidate_packet_rc} sealed_horizon_learning_evidence_rc=${sealed_horizon_learning_evidence_rc} order_touchability_audit_rc=${order_touchability_audit_rc} bounded_probe_touchability_preflight_rc=${bounded_probe_touchability_preflight_rc} bounded_probe_placement_repair_plan_rc=${bounded_probe_placement_repair_plan_rc} bounded_probe_authority_patch_readiness_rc=${bounded_probe_authority_patch_readiness_rc} bounded_probe_operator_authorization_rc=${bounded_probe_operator_authorization_rc} bounded_probe_shadow_placement_impact_rc=${bounded_probe_shadow_placement_impact_rc} bounded_probe_result_review_rc=${bounded_probe_result_review_rc} bounded_probe_execution_realism_review_rc=${bounded_probe_execution_realism_review_rc} ===" >> "$LOG"
 
 # fail-soft: rc/status are recorded; alpha-discovery reads artifacts and ledger
 # state. Operator action is required for deploy, writer enablement, or probe authority.

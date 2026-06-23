@@ -38,6 +38,10 @@ from cost_gate_learning_lane.outcome_review import (
     BlockedOutcomeReviewConfig,
     build_blocked_signal_outcome_review,
 )
+from cost_gate_learning_lane.false_negative_candidate_packet import (
+    build_false_negative_candidate_packet,
+    render_false_negative_candidate_packet_markdown,
+)
 from cost_gate_learning_lane.status import (
     ACTIVATION_PREFLIGHT_SCHEMA_VERSION,
     REQUIRED_SOURCE_RELATIVE_PATHS,
@@ -3509,6 +3513,132 @@ def test_blocked_signal_outcome_review_separates_cost_wall_from_no_edge():
     assert side_cell["false_negative_candidate"] is False
     assert scorecard["edge_amplification_required_side_cell_count"] == 1
     assert scorecard["false_negative_candidate_count"] == 0
+
+
+def test_false_negative_candidate_packet_ranks_cost_gate_escape_paths():
+    scorecard = build_blocked_signal_outcome_review(
+        [
+            {
+                "record_type": "blocked_signal_outcome",
+                "generated_at_utc": "2026-06-21T12:15:00+00:00",
+                "attempt_id": "fn-1",
+                "side_cell_key": "grid_trading|AVAXUSDT|Sell",
+                "strategy_name": "grid_trading",
+                "symbol": "AVAXUSDT",
+                "side": "Sell",
+                "gross_bps": 12.0,
+                "cost_bps": 4.0,
+                "realized_net_bps": 8.0,
+                "horizon_minutes": 60,
+            },
+            {
+                "record_type": "blocked_signal_outcome",
+                "generated_at_utc": "2026-06-21T13:15:00+00:00",
+                "attempt_id": "fn-2",
+                "side_cell_key": "grid_trading|AVAXUSDT|Sell",
+                "strategy_name": "grid_trading",
+                "symbol": "AVAXUSDT",
+                "side": "Sell",
+                "gross_bps": 7.0,
+                "cost_bps": 4.0,
+                "realized_net_bps": 3.0,
+                "horizon_minutes": 60,
+            },
+            {
+                "record_type": "blocked_signal_outcome",
+                "generated_at_utc": "2026-06-21T14:15:00+00:00",
+                "attempt_id": "fn-3",
+                "side_cell_key": "grid_trading|AVAXUSDT|Sell",
+                "strategy_name": "grid_trading",
+                "symbol": "AVAXUSDT",
+                "side": "Sell",
+                "gross_bps": 6.0,
+                "cost_bps": 4.0,
+                "realized_net_bps": 2.0,
+                "horizon_minutes": 60,
+            },
+            {
+                "record_type": "blocked_signal_outcome",
+                "generated_at_utc": "2026-06-21T12:15:00+00:00",
+                "attempt_id": "edge-1",
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "strategy_name": "ma_crossover",
+                "symbol": "ETHUSDT",
+                "side": "Sell",
+                "gross_bps": 3.5,
+                "cost_bps": 4.0,
+                "realized_net_bps": -0.5,
+                "horizon_minutes": 60,
+            },
+            {
+                "record_type": "blocked_signal_outcome",
+                "generated_at_utc": "2026-06-21T13:15:00+00:00",
+                "attempt_id": "edge-2",
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "strategy_name": "ma_crossover",
+                "symbol": "ETHUSDT",
+                "side": "Sell",
+                "gross_bps": 2.5,
+                "cost_bps": 4.0,
+                "realized_net_bps": -1.5,
+                "horizon_minutes": 60,
+            },
+            {
+                "record_type": "blocked_signal_outcome",
+                "generated_at_utc": "2026-06-21T14:15:00+00:00",
+                "attempt_id": "edge-3",
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "strategy_name": "ma_crossover",
+                "symbol": "ETHUSDT",
+                "side": "Sell",
+                "gross_bps": 5.0,
+                "cost_bps": 4.0,
+                "realized_net_bps": 1.0,
+                "horizon_minutes": 60,
+            },
+        ],
+        cfg=BlockedOutcomeReviewConfig(min_outcomes_per_side_cell=3),
+        now_utc=dt.datetime(2026, 6, 21, 15, 0, tzinfo=dt.timezone.utc),
+    )
+
+    packet = build_false_negative_candidate_packet(
+        scorecard,
+        now_utc=dt.datetime(2026, 6, 21, 15, 5, tzinfo=dt.timezone.utc),
+    )
+
+    assert packet["schema_version"] == "cost_gate_false_negative_candidate_packet_v1"
+    assert packet["status"] == (
+        "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW"
+    )
+    assert packet["summary"]["false_negative_candidate_count"] == 1
+    assert packet["summary"]["edge_amplification_candidate_count"] == 1
+    assert packet["answers"]["operator_review_ready"] is True
+    assert packet["answers"]["engineering_actionable"] is True
+    assert packet["answers"]["global_cost_gate_lowering_recommended"] is False
+    assert packet["answers"]["probe_authority_granted"] is False
+    assert packet["answers"]["order_authority_granted"] is False
+    assert packet["answers"]["promotion_evidence"] is False
+    top_false_negative = packet["ranked_false_negative_candidates"][0]
+    assert top_false_negative["side_cell_key"] == "grid_trading|AVAXUSDT|Sell"
+    assert top_false_negative["candidate_class"] == "false_negative_after_cost"
+    assert top_false_negative["operator_review_required"] is True
+    assert top_false_negative["false_negative_rank"] == 1
+    assert top_false_negative["required_net_uplift_bps"] == 0.0
+    assert top_false_negative["next_action"] == (
+        "operator_review_bounded_probe_authority_without_global_gate_lowering"
+    )
+    top_edge = packet["edge_amplification_candidates"][0]
+    assert top_edge["side_cell_key"] == "ma_crossover|ETHUSDT|Sell"
+    assert top_edge["candidate_class"] == "edge_amplification_required"
+    assert top_edge["engineering_actionable"] is True
+    assert top_edge["edge_amplification_rank"] == 1
+    assert top_edge["required_net_uplift_bps"] == 0.3333
+    assert top_edge["next_action"] == (
+        "amplify_edge_or_reduce_friction_for_same_side_cell"
+    )
+    markdown = render_false_negative_candidate_packet_markdown(packet)
+    assert "grid_trading|AVAXUSDT|Sell" in markdown
+    assert "ma_crossover|ETHUSDT|Sell" in markdown
 
 
 def test_runtime_adapter_outcome_rows_are_idempotent_and_feed_disable():

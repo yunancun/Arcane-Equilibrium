@@ -287,6 +287,22 @@ _EVIDENCE_KEYS = (
     "blocked_signal_review_edge_amplification_required_side_cell_count",
     "blocked_signal_review_diagnosis_counts",
     "blocked_signal_review_cost_gate_escape_recommendation_counts",
+    "false_negative_candidate_packet_status",
+    "false_negative_candidate_packet_reason",
+    "false_negative_candidate_packet_next_actions",
+    "false_negative_candidate_packet_false_negative_count",
+    "false_negative_candidate_packet_edge_amplification_count",
+    "false_negative_candidate_packet_top_side_cell_key",
+    "false_negative_candidate_packet_top_wrongful_block_score",
+    "false_negative_candidate_packet_top_net_cost_cushion_bps",
+    "false_negative_candidate_packet_top_edge_amplification_side_cell_key",
+    "false_negative_candidate_packet_top_edge_amplification_required_net_uplift_bps",
+    "false_negative_candidate_packet_operator_review_ready",
+    "false_negative_candidate_packet_engineering_actionable",
+    "false_negative_candidate_packet_global_cost_gate_lowering_recommended",
+    "false_negative_candidate_packet_probe_authority_granted",
+    "false_negative_candidate_packet_order_authority_granted",
+    "false_negative_candidate_packet_promotion_evidence",
     "learning_loop_last_scorecard_status",
     "learning_loop_last_scorecard_probe_candidate_count",
     "learning_loop_last_scorecard_horizon_stability_status",
@@ -734,9 +750,17 @@ def _learning_objective(row: dict[str, Any], task_type: str) -> str:
             and (
                 "blocked_signal" in _str(row.get("primary_blocker"))
                 or "blocked_outcome" in _str(row.get("primary_blocker"))
+                or "false_negative" in _str(row.get("primary_blocker"))
             )
             and _blocked_signal_review_candidate_key(row)
         ):
+            if _str(row.get("false_negative_candidate_packet_status")) == (
+                "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW"
+            ):
+                return (
+                    "operator_review_ranked_cost_gate_false_negative_candidates_"
+                    "before_bounded_demo_probe"
+                )
             horizon_objective = _blocked_signal_horizon_review_objective(row)
             if horizon_objective:
                 return horizon_objective
@@ -834,7 +858,8 @@ def _learning_objective(row: dict[str, Any], task_type: str) -> str:
 
 def _blocked_signal_review_candidate_key(row: dict[str, Any]) -> str:
     return _str(
-        row.get("blocked_signal_top_review_candidate_side_cell_key")
+        row.get("false_negative_candidate_packet_top_side_cell_key")
+        or row.get("blocked_signal_top_review_candidate_side_cell_key")
         or row.get("blocked_signal_top_review_side_cell_key")
         or row.get("learning_loop_last_review_top_candidate_side_cell_key")
         or row.get("learning_loop_last_review_top_side_cell_key")
@@ -951,6 +976,7 @@ def _completion_evidence_required(task_type: str) -> list[str]:
             "bounded_probe_operator_authorization_active_runtime_order_authority is false before plan inclusion",
             "isolated_probe_preflight_passes",
             "candidate_specific_side_cell_or_candidate_key_evidence_present",
+            "false_negative_candidate_packet records ranked candidate count and no-authority answers when present",
             "horizon_stability_status_and_candidate_horizons_recorded_when_available",
             "sealed_horizon_learning_evidence_review_ready_or_blocked_review_candidate_present",
             "bounded_probe_result_review_status_recorded_when_probe_outcomes_exist",

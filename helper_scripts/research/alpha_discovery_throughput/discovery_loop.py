@@ -98,6 +98,23 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
         or blocked_review.get("top_side_cell_cost_gate_escape_recommendation")
         or ""
     )
+    false_negative_packet_status = str(
+        detail.get("false_negative_candidate_packet_status") or ""
+    ).upper()
+    false_negative_packet_operator_ready = (
+        detail.get("false_negative_candidate_packet_operator_review_ready") is True
+    )
+    false_negative_packet_engineering_actionable = (
+        detail.get("false_negative_candidate_packet_engineering_actionable") is True
+    )
+    false_negative_packet_next_actions = _list(
+        detail.get("false_negative_candidate_packet_next_actions")
+    )
+    false_negative_packet_next_trigger = (
+        str(false_negative_packet_next_actions[0])
+        if false_negative_packet_next_actions
+        else "refresh_cost_gate_false_negative_candidate_packet"
+    )
     historical_review = _dict(detail.get("historical_scorecard_review"))
     historical_review_status = str(
         detail.get("historical_scorecard_review_status")
@@ -720,6 +737,22 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             }
 
     if blocked_review_status == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT":
+        if (
+            false_negative_packet_status
+            == "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW"
+            and false_negative_packet_operator_ready
+        ):
+            return {
+                "action": READY_FOR_PROBE,
+                "reason": "cost_gate_false_negative_candidate_packet_ready",
+                "blocker_class": "probe_ready",
+                "primary_blocker": (
+                    "cost_gate_false_negative_candidates_need_operator_review"
+                ),
+                "next_trigger": false_negative_packet_next_trigger,
+                "operator_actionable": True,
+                "engineering_actionable": True,
+            }
         return {
             "action": READY_FOR_PROBE,
             "reason": "cost_gate_blocked_outcome_review_candidate",
@@ -1345,6 +1378,21 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "engineering_actionable": True,
         }
     if blocked_review_status == "NO_DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE":
+        if (
+            false_negative_packet_status == "COST_GATE_EDGE_AMPLIFICATION_REQUIRED"
+            and false_negative_packet_engineering_actionable
+        ):
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "cost_gate_false_negative_packet_edge_amplification_required",
+                "blocker_class": "cost_wall",
+                "primary_blocker": (
+                    "cost_gate_blocked_signal_edge_amplification_required"
+                ),
+                "next_trigger": false_negative_packet_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
         if blocked_review_edge_amplification_count > 0:
             return {
                 "action": RUN_READ_ONLY_CAPTURE,
@@ -3827,6 +3875,56 @@ def classify_profitability_blocker(
                         "blocked_signal_review_cost_gate_escape_recommendation_counts"
                     )
                     or blocked_review.get("cost_gate_escape_recommendation_counts")
+                ),
+                "false_negative_candidate_packet_status": detail.get(
+                    "false_negative_candidate_packet_status"
+                ),
+                "false_negative_candidate_packet_reason": detail.get(
+                    "false_negative_candidate_packet_reason"
+                ),
+                "false_negative_candidate_packet_next_actions": detail.get(
+                    "false_negative_candidate_packet_next_actions"
+                ),
+                "false_negative_candidate_packet_false_negative_count": detail.get(
+                    "false_negative_candidate_packet_false_negative_count"
+                ),
+                "false_negative_candidate_packet_edge_amplification_count": detail.get(
+                    "false_negative_candidate_packet_edge_amplification_count"
+                ),
+                "false_negative_candidate_packet_top_side_cell_key": detail.get(
+                    "false_negative_candidate_packet_top_side_cell_key"
+                ),
+                "false_negative_candidate_packet_top_wrongful_block_score": detail.get(
+                    "false_negative_candidate_packet_top_wrongful_block_score"
+                ),
+                "false_negative_candidate_packet_top_net_cost_cushion_bps": detail.get(
+                    "false_negative_candidate_packet_top_net_cost_cushion_bps"
+                ),
+                "false_negative_candidate_packet_top_edge_amplification_side_cell_key": detail.get(
+                    "false_negative_candidate_packet_top_edge_amplification_side_cell_key"
+                ),
+                "false_negative_candidate_packet_top_edge_amplification_required_net_uplift_bps": detail.get(
+                    "false_negative_candidate_packet_top_edge_amplification_required_net_uplift_bps"
+                ),
+                "false_negative_candidate_packet_operator_review_ready": detail.get(
+                    "false_negative_candidate_packet_operator_review_ready"
+                ),
+                "false_negative_candidate_packet_engineering_actionable": detail.get(
+                    "false_negative_candidate_packet_engineering_actionable"
+                ),
+                "false_negative_candidate_packet_global_cost_gate_lowering_recommended": (
+                    detail.get(
+                        "false_negative_candidate_packet_global_cost_gate_lowering_recommended"
+                    )
+                ),
+                "false_negative_candidate_packet_probe_authority_granted": detail.get(
+                    "false_negative_candidate_packet_probe_authority_granted"
+                ),
+                "false_negative_candidate_packet_order_authority_granted": detail.get(
+                    "false_negative_candidate_packet_order_authority_granted"
+                ),
+                "false_negative_candidate_packet_promotion_evidence": detail.get(
+                    "false_negative_candidate_packet_promotion_evidence"
                 ),
                 "blocked_signal_outcome_review": blocked_review or None,
                 "profit_learning_decision_packet_status": detail.get(
