@@ -508,9 +508,21 @@ def test_learning_worklist_carries_ranked_cost_gate_blocked_review_evidence():
                 "blocked_signal_top_review_candidate_side_cell_key": (
                     "ma_crossover|ETHUSDT|Sell"
                 ),
+                "blocked_signal_top_review_candidate_learning_diagnosis": (
+                    "FALSE_NEGATIVE_CANDIDATE_AFTER_COST"
+                ),
+                "blocked_signal_top_review_candidate_cost_gate_escape_recommendation": (
+                    "operator_review_bounded_probe_authority_without_global_gate_lowering"
+                ),
                 "blocked_signal_top_review_candidate_wrongful_block_score": 3.444444,
                 "blocked_signal_top_review_candidate_net_cost_cushion_bps": 5.166667,
                 "blocked_signal_top_review_side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "blocked_signal_top_review_learning_diagnosis": (
+                    "FALSE_NEGATIVE_CANDIDATE_AFTER_COST"
+                ),
+                "blocked_signal_top_review_cost_gate_escape_recommendation": (
+                    "operator_review_bounded_probe_authority_without_global_gate_lowering"
+                ),
                 "blocked_signal_top_review_wrongful_block_score": 3.444444,
                 "blocked_signal_top_review_net_cost_cushion_bps": 5.166667,
                 "learning_loop_last_scorecard_horizon_stability_status": (
@@ -551,6 +563,9 @@ def test_learning_worklist_carries_ranked_cost_gate_blocked_review_evidence():
     assert task["evidence"]["blocked_signal_top_review_candidate_side_cell_key"] == (
         "ma_crossover|ETHUSDT|Sell"
     )
+    assert task["evidence"][
+        "blocked_signal_top_review_candidate_learning_diagnosis"
+    ] == "FALSE_NEGATIVE_CANDIDATE_AFTER_COST"
     assert task["evidence"]["blocked_signal_top_review_candidate_wrongful_block_score"] == (
         3.444444
     )
@@ -572,6 +587,53 @@ def test_learning_worklist_carries_ranked_cost_gate_blocked_review_evidence():
     )
     assert (
         "horizon_stability_status_and_candidate_horizons_recorded_when_available"
+        in task["completion_evidence_required"]
+    )
+
+
+def test_learning_worklist_routes_cost_gate_cost_wall_to_edge_amplification():
+    worklist = build_learning_worklist({
+        "arms": [
+            {
+                "arm_id": "cost_gate_demo_learning_lane",
+                "blocker_class": "cost_wall",
+                "primary_blocker": (
+                    "cost_gate_blocked_signal_edge_amplification_required"
+                ),
+                "next_trigger": "amplify_edge_or_reduce_friction_for_same_side_cell",
+                "operator_actionable": False,
+                "engineering_actionable": True,
+                "blocked_signal_outcome_review_status": (
+                    "NO_DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE"
+                ),
+                "blocked_signal_top_review_side_cell_key": (
+                    "ma_crossover|ETHUSDT|Sell"
+                ),
+                "blocked_signal_top_review_learning_diagnosis": (
+                    "GROSS_EDGE_POSITIVE_COST_CUSHION_INSUFFICIENT"
+                ),
+                "blocked_signal_top_review_cost_gate_escape_recommendation": (
+                    "amplify_edge_or_reduce_friction_for_same_side_cell"
+                ),
+                "blocked_signal_review_edge_amplification_required_side_cell_count": 1,
+            }
+        ],
+    })
+
+    task = worklist["top_task"]
+
+    assert worklist["status"] == "LEARNING_WORK_AVAILABLE"
+    assert task["task_type"] == "cost_gate_outcome_review"
+    assert task["learning_objective"] == (
+        "amplify_or_retime_blocked_signal_edge_to_clear_cost_gate"
+    )
+    assert task["requires_operator_authorization"] is False
+    assert task["runtime_mutation_required"] is False
+    assert task["evidence"]["blocked_signal_top_review_learning_diagnosis"] == (
+        "GROSS_EDGE_POSITIVE_COST_CUSHION_INSUFFICIENT"
+    )
+    assert (
+        "top blocked side-cell carries learning_diagnosis and cost_gate_escape_recommendation"
         in task["completion_evidence_required"]
     )
 

@@ -89,6 +89,15 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
         or blocked_review.get("status")
         or ""
     ).upper()
+    blocked_review_edge_amplification_count = _int(
+        detail.get("blocked_signal_review_edge_amplification_required_side_cell_count")
+        or blocked_review.get("edge_amplification_required_side_cell_count")
+    )
+    blocked_review_top_recommendation = str(
+        detail.get("blocked_signal_top_review_cost_gate_escape_recommendation")
+        or blocked_review.get("top_side_cell_cost_gate_escape_recommendation")
+        or ""
+    )
     historical_review = _dict(detail.get("historical_scorecard_review"))
     historical_review_status = str(
         detail.get("historical_scorecard_review_status")
@@ -1336,6 +1345,21 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "engineering_actionable": True,
         }
     if blocked_review_status == "NO_DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE":
+        if blocked_review_edge_amplification_count > 0:
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "cost_gate_blocked_outcomes_need_edge_amplification",
+                "blocker_class": "cost_wall",
+                "primary_blocker": (
+                    "cost_gate_blocked_signal_edge_amplification_required"
+                ),
+                "next_trigger": (
+                    blocked_review_top_recommendation
+                    or "amplify_edge_or_reduce_friction_for_same_side_cell"
+                ),
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
         return {
             "action": BLOCK,
             "reason": "cost_gate_blocked_outcomes_confirm_current_block",
@@ -3744,6 +3768,17 @@ def classify_profitability_blocker(
                 "blocked_signal_top_review_status": detail.get(
                     "blocked_signal_top_review_status"
                 ) or blocked_review.get("top_side_cell_status"),
+                "blocked_signal_top_review_learning_diagnosis": detail.get(
+                    "blocked_signal_top_review_learning_diagnosis"
+                ) or blocked_review.get("top_side_cell_learning_diagnosis"),
+                "blocked_signal_top_review_cost_gate_escape_recommendation": (
+                    detail.get(
+                        "blocked_signal_top_review_cost_gate_escape_recommendation"
+                    )
+                    or blocked_review.get(
+                        "top_side_cell_cost_gate_escape_recommendation"
+                    )
+                ),
                 "blocked_signal_top_review_wrongful_block_score": detail.get(
                     "blocked_signal_top_review_wrongful_block_score"
                 ) or blocked_review.get("top_side_cell_wrongful_block_score"),
@@ -3753,12 +3788,46 @@ def classify_profitability_blocker(
                 "blocked_signal_top_review_candidate_side_cell_key": detail.get(
                     "blocked_signal_top_review_candidate_side_cell_key"
                 ) or blocked_review.get("top_review_candidate_side_cell_key"),
+                "blocked_signal_top_review_candidate_learning_diagnosis": (
+                    detail.get(
+                        "blocked_signal_top_review_candidate_learning_diagnosis"
+                    )
+                    or blocked_review.get("top_review_candidate_learning_diagnosis")
+                ),
+                "blocked_signal_top_review_candidate_cost_gate_escape_recommendation": (
+                    detail.get(
+                        "blocked_signal_top_review_candidate_cost_gate_escape_recommendation"
+                    )
+                    or blocked_review.get(
+                        "top_review_candidate_cost_gate_escape_recommendation"
+                    )
+                ),
                 "blocked_signal_top_review_candidate_wrongful_block_score": detail.get(
                     "blocked_signal_top_review_candidate_wrongful_block_score"
                 ) or blocked_review.get("top_review_candidate_wrongful_block_score"),
                 "blocked_signal_top_review_candidate_net_cost_cushion_bps": detail.get(
                     "blocked_signal_top_review_candidate_net_cost_cushion_bps"
                 ) or blocked_review.get("top_review_candidate_net_cost_cushion_bps"),
+                "blocked_signal_review_false_negative_candidate_count": detail.get(
+                    "blocked_signal_review_false_negative_candidate_count"
+                ) or blocked_review.get("false_negative_candidate_count"),
+                "blocked_signal_review_edge_amplification_required_side_cell_count": (
+                    detail.get(
+                        "blocked_signal_review_edge_amplification_required_side_cell_count"
+                    )
+                    or blocked_review.get(
+                        "edge_amplification_required_side_cell_count"
+                    )
+                ),
+                "blocked_signal_review_diagnosis_counts": detail.get(
+                    "blocked_signal_review_diagnosis_counts"
+                ) or blocked_review.get("diagnosis_counts"),
+                "blocked_signal_review_cost_gate_escape_recommendation_counts": (
+                    detail.get(
+                        "blocked_signal_review_cost_gate_escape_recommendation_counts"
+                    )
+                    or blocked_review.get("cost_gate_escape_recommendation_counts")
+                ),
                 "blocked_signal_outcome_review": blocked_review or None,
                 "profit_learning_decision_packet_status": detail.get(
                     "profit_learning_decision_packet_status"

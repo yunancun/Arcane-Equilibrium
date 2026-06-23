@@ -274,20 +274,32 @@ _EVIDENCE_KEYS = (
     "blocked_signal_net_positive_pct",
     "blocked_signal_top_review_side_cell_key",
     "blocked_signal_top_review_status",
+    "blocked_signal_top_review_learning_diagnosis",
+    "blocked_signal_top_review_cost_gate_escape_recommendation",
     "blocked_signal_top_review_wrongful_block_score",
     "blocked_signal_top_review_net_cost_cushion_bps",
     "blocked_signal_top_review_candidate_side_cell_key",
+    "blocked_signal_top_review_candidate_learning_diagnosis",
+    "blocked_signal_top_review_candidate_cost_gate_escape_recommendation",
     "blocked_signal_top_review_candidate_wrongful_block_score",
     "blocked_signal_top_review_candidate_net_cost_cushion_bps",
+    "blocked_signal_review_false_negative_candidate_count",
+    "blocked_signal_review_edge_amplification_required_side_cell_count",
+    "blocked_signal_review_diagnosis_counts",
+    "blocked_signal_review_cost_gate_escape_recommendation_counts",
     "learning_loop_last_scorecard_status",
     "learning_loop_last_scorecard_probe_candidate_count",
     "learning_loop_last_scorecard_horizon_stability_status",
     "learning_loop_last_scorecard_horizon_stability_next_trigger",
     "learning_loop_last_scorecard_horizon_stability_horizons",
     "learning_loop_last_review_top_side_cell_key",
+    "learning_loop_last_review_top_learning_diagnosis",
+    "learning_loop_last_review_top_cost_gate_escape_recommendation",
     "learning_loop_last_review_top_wrongful_block_score",
     "learning_loop_last_review_top_net_cost_cushion_bps",
     "learning_loop_last_review_top_candidate_side_cell_key",
+    "learning_loop_last_review_top_candidate_learning_diagnosis",
+    "learning_loop_last_review_top_candidate_cost_gate_escape_recommendation",
     "learning_loop_last_review_top_candidate_wrongful_block_score",
     "learning_loop_last_review_top_candidate_net_cost_cushion_bps",
     "profit_learning_decision_packet_status",
@@ -769,6 +781,21 @@ def _learning_objective(row: dict[str, Any], task_type: str) -> str:
             )
         return "activate_bounded_cost_gate_reject_learning_before_lowering_main_gate"
     if task_type == "cost_gate_outcome_review":
+        recommendation = _str(
+            row.get("blocked_signal_top_review_cost_gate_escape_recommendation")
+            or row.get("learning_loop_last_review_top_cost_gate_escape_recommendation")
+        )
+        diagnosis = _str(
+            row.get("blocked_signal_top_review_learning_diagnosis")
+            or row.get("learning_loop_last_review_top_learning_diagnosis")
+        )
+        if (
+            "amplify_edge" in recommendation
+            or "COST_CUSHION_INSUFFICIENT" in diagnosis
+        ):
+            return "amplify_or_retime_blocked_signal_edge_to_clear_cost_gate"
+        if "matched_controls" in recommendation or "UNSTABLE" in diagnosis:
+            return "add_regime_filter_or_matched_controls_for_blocked_signal_edge"
         return "compare_blocked_signal_outcomes_against_market_path"
     if task_type == "bounded_probe_placement_repair":
         return "make_bounded_demo_probe_orders_touchable_then_collect_candidate_matched_fill_lineage"
@@ -952,6 +979,7 @@ def _completion_evidence_required(task_type: str) -> list[str]:
             "review status is DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT or NO_DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE",
             "positive blocked outcomes include side_cell_key and net_bps evidence",
             "top blocked side-cell carries wrongful_block_score and net_cost_cushion_bps",
+            "top blocked side-cell carries learning_diagnosis and cost_gate_escape_recommendation",
         ]
     if task_type == "bounded_probe_placement_repair":
         return [
