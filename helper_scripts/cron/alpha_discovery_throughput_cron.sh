@@ -166,6 +166,8 @@ add_profitability_json_arg "--cost-gate-counterfactual-json" "$DATA/cost_gate_co
 add_profitability_json_arg "--profit-learning-packet-json" "$DATA/cost_gate_learning_lane/profit_learning_decision_packet_latest.json"
 add_profitability_json_arg "--learning-plan-json" "$DATA/cost_gate_learning_lane/demo_learning_lane_plan_latest.json"
 add_profitability_json_arg "--activation-preflight-json" "$DATA/cost_gate_learning_lane/activation_preflight_latest.json"
+add_profitability_json_arg "--demo-learning-stack-activation-packet-json" "$DATA/demo_learning_stack_activation_packet/demo_learning_stack_activation_packet_latest.json"
+add_profitability_json_arg "--demo-learning-stack-dry-run-review-json" "$DATA/demo_learning_stack_dry_run_review/demo_learning_stack_dry_run_review_latest.json"
 add_profitability_json_arg "--horizon-sealed-replay-json" "$HORIZON_SEALED_REPLAY_JSON"
 add_profitability_json_arg "--horizon-learning-evidence-json" "$HORIZON_LEARNING_EVIDENCE_JSON"
 add_profitability_json_arg "--sealed-horizon-operator-review-json" "$SEALED_OPERATOR_REVIEW_JSON"

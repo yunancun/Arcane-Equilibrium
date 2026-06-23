@@ -1938,11 +1938,17 @@ def _dedupe_gate_details(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _cost_gate_root_blockers(
     *,
+    demo_learning_stack_activation_packet: dict[str, Any] | None,
+    demo_learning_stack_dry_run_review: dict[str, Any] | None,
     sealed_horizon_probe_preflight: dict[str, Any] | None,
     bounded_probe_operator_authorization: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
-    # Prefer the upstream preflight gates before the aggregate authorization gates.
+    # Prefer durable learning-stack gates before preflight/authorization gates.
     return _dedupe_gate_details([
+        *_demo_learning_stack_root_blockers(
+            activation_packet=demo_learning_stack_activation_packet,
+            dry_run_review=demo_learning_stack_dry_run_review,
+        ),
         *_failed_gate_details(
             sealed_horizon_probe_preflight,
             source="sealed_horizon_probe_preflight",
@@ -1952,6 +1958,147 @@ def _cost_gate_root_blockers(
             source="bounded_probe_operator_authorization",
         ),
     ])
+
+
+def _demo_learning_stack_root_blockers(
+    *,
+    activation_packet: dict[str, Any] | None,
+    dry_run_review: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    activation = _dict(activation_packet)
+    dry_run = _dict(dry_run_review)
+    activation_answers = _dict(activation.get("answers"))
+    dry_run_answers = _dict(dry_run.get("answers"))
+
+    stack_installed = activation_answers.get("stack_installed") is True
+    if (
+        stack_installed
+        or _str(activation.get("status")) == "STACK_ALREADY_ACTIVE"
+        or _str(activation.get("status")) == "EVIDENCE_STACK_ACTIVE"
+    ):
+        return []
+
+    if dry_run:
+        dry_status = _str(dry_run.get("status"))
+        if dry_status == "DRY_RUN_PREVIEW_PASSED_OPERATOR_APPLY_REVIEW_REQUIRED":
+            return [{
+                "source": "demo_learning_stack_dry_run_review",
+                "gate": "demo_learning_stack_operator_apply_required",
+                "status": dry_status,
+                "reason": dry_run.get("reason"),
+                "upstream_status": activation.get("status")
+                or dry_run.get("activation_packet_status"),
+                "upstream_reason": activation.get("reason")
+                or dry_run.get("activation_packet_reason"),
+                "candidate": None,
+                "next_action": dry_run.get("operator_next_action")
+                or "operator_review_dry_run_preview_then_apply_learning_stack_if_accepted",
+                "missing_cron_count": activation_answers.get("missing_cron_count")
+                or dry_run.get("activation_packet_missing_cron_count"),
+                "missing_crons": activation_answers.get("missing_crons"),
+                "crontab_mutated": dry_run_answers.get("crontab_mutated") is True,
+                "runtime_mutation_required": True,
+                "order_authority_granted": dry_run_answers.get(
+                    "order_authority_granted"
+                )
+                is True,
+                "probe_authority_granted": dry_run_answers.get(
+                    "probe_authority_granted"
+                )
+                is True,
+                "global_cost_gate_lowering_recommended": dry_run_answers.get(
+                    "global_cost_gate_lowering_recommended"
+                )
+                is True,
+            }]
+        if dry_status:
+            return [{
+                "source": "demo_learning_stack_dry_run_review",
+                "gate": "demo_learning_stack_dry_run_repair_required",
+                "status": dry_status,
+                "reason": dry_run.get("reason"),
+                "upstream_status": activation.get("status")
+                or dry_run.get("activation_packet_status"),
+                "upstream_reason": activation.get("reason")
+                or dry_run.get("activation_packet_reason"),
+                "candidate": None,
+                "next_action": dry_run.get("operator_next_action")
+                or "repair_demo_learning_stack_dry_run_before_any_cron_apply",
+                "missing_cron_count": activation_answers.get("missing_cron_count")
+                or dry_run.get("activation_packet_missing_cron_count"),
+                "missing_crons": activation_answers.get("missing_crons"),
+                "crontab_mutated": dry_run_answers.get("crontab_mutated") is True,
+                "runtime_mutation_required": False,
+                "order_authority_granted": dry_run_answers.get(
+                    "order_authority_granted"
+                )
+                is True,
+                "probe_authority_granted": dry_run_answers.get(
+                    "probe_authority_granted"
+                )
+                is True,
+                "global_cost_gate_lowering_recommended": dry_run_answers.get(
+                    "global_cost_gate_lowering_recommended"
+                )
+                is True,
+            }]
+
+    activation_status = _str(activation.get("status"))
+    if activation_status == "READY_FOR_OPERATOR_DRY_RUN":
+        return [{
+            "source": "demo_learning_stack_activation_packet",
+            "gate": "demo_learning_stack_dry_run_required",
+            "status": activation_status,
+            "reason": activation.get("reason"),
+            "upstream_status": activation_status,
+            "upstream_reason": activation.get("reason"),
+            "candidate": None,
+            "next_action": activation.get("operator_next_action")
+            or "review_demo_learning_stack_activation_packet_and_run_dry_run_preview",
+            "missing_cron_count": activation_answers.get("missing_cron_count"),
+            "missing_crons": activation_answers.get("missing_crons"),
+            "runtime_mutation_required": False,
+            "order_authority_granted": activation_answers.get(
+                "order_authority_granted"
+            )
+            is True,
+            "probe_authority_granted": activation_answers.get(
+                "probe_authority_granted"
+            )
+            is True,
+            "global_cost_gate_lowering_recommended": activation_answers.get(
+                "global_cost_gate_lowering_recommended"
+            )
+            is True,
+        }]
+    if activation_status:
+        return [{
+            "source": "demo_learning_stack_activation_packet",
+            "gate": "demo_learning_stack_activation_required",
+            "status": activation_status,
+            "reason": activation.get("reason"),
+            "upstream_status": activation_status,
+            "upstream_reason": activation.get("reason"),
+            "candidate": None,
+            "next_action": activation.get("operator_next_action")
+            or "repair_or_activate_demo_learning_stack_before_probe_review",
+            "missing_cron_count": activation_answers.get("missing_cron_count"),
+            "missing_crons": activation_answers.get("missing_crons"),
+            "runtime_mutation_required": False,
+            "order_authority_granted": activation_answers.get(
+                "order_authority_granted"
+            )
+            is True,
+            "probe_authority_granted": activation_answers.get(
+                "probe_authority_granted"
+            )
+            is True,
+            "global_cost_gate_lowering_recommended": activation_answers.get(
+                "global_cost_gate_lowering_recommended"
+            )
+            is True,
+        }]
+    return []
 
 
 def _edge_amplification_backlog(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2001,6 +2148,11 @@ def _profitability_next_move(
     if primary_gate == "operator_sealed_horizon_review_recorded":
         move_class = "operator_reviews_sealed_horizon_edge_before_probe"
         objective = "turn blocked-signal edge into bounded demo probe learning evidence"
+    elif primary_gate.startswith("demo_learning_stack_"):
+        move_class = "activate_sustainable_demo_learning_stack"
+        objective = (
+            "restore continuous demo learning data accumulation before bounded probe review"
+        )
     elif primary_gate:
         move_class = "complete_cost_gate_escape_source_gate"
         objective = "remove the current source gate before bounded demo probe authorization"
@@ -2037,13 +2189,17 @@ def _profitability_next_move(
             "promotion_evidence": False,
             "reason": "cross Cost Gate with bounded side-cell/horizon evidence, not a global gate cut",
         },
-        "runtime_mutation_required": False,
+        "runtime_mutation_required": (
+            _dict(primary_blocker).get("runtime_mutation_required") is True
+        ),
     }
 
 
 def _profitability_engineering_closure(
     *,
     candidates: list[dict[str, Any]],
+    demo_learning_stack_activation_packet: dict[str, Any] | None,
+    demo_learning_stack_dry_run_review: dict[str, Any] | None,
     sealed_horizon_probe_preflight: dict[str, Any] | None,
     bounded_probe_shadow_placement_impact: dict[str, Any] | None,
     bounded_probe_operator_authorization: dict[str, Any] | None,
@@ -2051,6 +2207,10 @@ def _profitability_engineering_closure(
     bounded_probe_execution_realism_review: dict[str, Any] | None,
 ) -> dict[str, Any]:
     top = candidates[0] if candidates else {}
+    stack_activation = _dict(demo_learning_stack_activation_packet)
+    stack_activation_answers = _dict(stack_activation.get("answers"))
+    stack_dry_run = _dict(demo_learning_stack_dry_run_review)
+    stack_dry_run_answers = _dict(stack_dry_run.get("answers"))
     preflight = _dict(sealed_horizon_probe_preflight)
     preflight_status = _str(preflight.get("status"))
     preflight_answers = _dict(preflight.get("answers"))
@@ -2107,9 +2267,15 @@ def _profitability_engineering_closure(
         }
         and result_quality_status == "PROBE_UNDERPERFORMS_MATCHED_CONTROL_EXECUTION_GAP"
     )
+    stack_root_blockers = _demo_learning_stack_root_blockers(
+        activation_packet=demo_learning_stack_activation_packet,
+        dry_run_review=demo_learning_stack_dry_run_review,
+    )
 
     if not candidates:
         status = "NO_PROFITABILITY_PATH_TO_CLOSE"
+    elif stack_root_blockers:
+        status = "DEMO_LEARNING_STACK_ACTIVATION_REQUIRED"
     elif result_status == "AUTHORITY_BOUNDARY_VIOLATION":
         status = "AUTHORITY_BOUNDARY_VIOLATION_REPAIR_FIRST"
     elif result_status == "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED":
@@ -2199,7 +2365,23 @@ def _profitability_engineering_closure(
 
     preflight_next_actions = _list(preflight.get("next_actions"))
     remaining = _proof_gate_labels(blocking_gates)
-    if result_status == "AUTHORITY_BOUNDARY_VIOLATION":
+    if stack_root_blockers:
+        first_stack_blocker = stack_root_blockers[0]
+        if first_stack_blocker.get("gate") == "demo_learning_stack_operator_apply_required":
+            remaining = [
+                "operator reviews passed dry-run preview before applying the demo-learning cron stack",
+                "demo-learning evidence, sealed preflight, Cost Gate learning, and healthcheck crons must run before bounded probe review",
+            ]
+        elif first_stack_blocker.get("gate") == "demo_learning_stack_dry_run_required":
+            remaining = [
+                "run demo-learning stack dry-run preview before any cron apply",
+                "demo-learning evidence, sealed preflight, Cost Gate learning, and healthcheck crons must be installed as one reviewed stack",
+            ]
+        else:
+            remaining = [
+                "repair or activate the demo-learning stack before bounded probe review"
+            ]
+    elif result_status == "AUTHORITY_BOUNDARY_VIOLATION":
         remaining = ["remove authority-granting result-review input before continuing"]
     elif result_status == "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED":
         remaining = ["realized bounded demo probe edge failed; keep Cost Gate blocked"]
@@ -2303,6 +2485,11 @@ def _profitability_engineering_closure(
         remaining = [_str(top.get("required_next_gate"))]
     next_actions = [
         action for action in [
+            *[
+                _str(row.get("next_action"))
+                for row in stack_root_blockers
+                if _str(row.get("next_action"))
+            ],
             *[str(item) for item in execution_next_actions],
             (
                 "refresh_bounded_probe_execution_realism_review"
@@ -2319,6 +2506,8 @@ def _profitability_engineering_closure(
         if action
     ]
     root_blockers = _cost_gate_root_blockers(
+        demo_learning_stack_activation_packet=demo_learning_stack_activation_packet,
+        demo_learning_stack_dry_run_review=demo_learning_stack_dry_run_review,
         sealed_horizon_probe_preflight=sealed_horizon_probe_preflight,
         bounded_probe_operator_authorization=bounded_probe_operator_authorization,
     )
@@ -2356,6 +2545,24 @@ def _profitability_engineering_closure(
             "probe_authority_granted": False,
             "order_authority_granted": False,
             "promotion_evidence": False,
+            "demo_learning_stack_activation_packet_status": (
+                stack_activation.get("status") or None
+            ),
+            "demo_learning_stack_activation_packet_missing_cron_count": (
+                stack_activation_answers.get("missing_cron_count")
+            ),
+            "demo_learning_stack_activation_packet_missing_crons": (
+                stack_activation_answers.get("missing_crons")
+            ),
+            "demo_learning_stack_dry_run_review_status": (
+                stack_dry_run.get("status") or None
+            ),
+            "demo_learning_stack_dry_run_review_operator_apply_required": (
+                stack_dry_run_answers.get("operator_apply_required") is True
+            ),
+            "demo_learning_stack_dry_run_review_crontab_mutated": (
+                stack_dry_run_answers.get("crontab_mutated") is True
+            ),
             "sealed_horizon_probe_preflight_status": preflight_status or None,
             "sealed_horizon_probe_preflight_ready": (
                 preflight_answers.get(
@@ -2540,6 +2747,8 @@ def build_profitability_path_scorecard(
     profit_learning_packet: dict[str, Any] | None = None,
     learning_plan: dict[str, Any] | None = None,
     activation_preflight: dict[str, Any] | None = None,
+    demo_learning_stack_activation_packet: dict[str, Any] | None = None,
+    demo_learning_stack_dry_run_review: dict[str, Any] | None = None,
     horizon_sealed_replay: dict[str, Any] | None = None,
     horizon_learning_evidence: dict[str, Any] | None = None,
     sealed_horizon_operator_review: dict[str, Any] | None = None,
@@ -2618,6 +2827,8 @@ def build_profitability_path_scorecard(
     )
     closure = _profitability_engineering_closure(
         candidates=candidates,
+        demo_learning_stack_activation_packet=demo_learning_stack_activation_packet,
+        demo_learning_stack_dry_run_review=demo_learning_stack_dry_run_review,
         sealed_horizon_probe_preflight=sealed_horizon_probe_preflight,
         bounded_probe_result_review=bounded_probe_result_review,
         bounded_probe_execution_realism_review=(
@@ -2653,6 +2864,24 @@ def build_profitability_path_scorecard(
             "autonomous_learning_loop_accumulating": (
                 _activation_status(profit_learning_packet, activation_preflight)
                 == "EVIDENCE_STACK_ACTIVE"
+            ),
+            "demo_learning_stack_activation_packet_present": bool(
+                _dict(demo_learning_stack_activation_packet)
+            ),
+            "demo_learning_stack_dry_run_review_present": bool(
+                _dict(demo_learning_stack_dry_run_review)
+            ),
+            "demo_learning_stack_operator_apply_required": (
+                _dict(
+                    _dict(demo_learning_stack_dry_run_review).get("answers")
+                ).get("operator_apply_required")
+                is True
+            ),
+            "demo_learning_stack_crontab_mutated_by_dry_run": (
+                _dict(
+                    _dict(demo_learning_stack_dry_run_review).get("answers")
+                ).get("crontab_mutated")
+                is True
             ),
             "bounded_demo_probe_preflight_present": bool(
                 _dict(sealed_horizon_probe_preflight)
@@ -2776,6 +3005,16 @@ def build_profitability_path_scorecard(
                 "activation_preflight",
                 input_paths.get("activation_preflight"),
                 activation_preflight,
+            ),
+            "demo_learning_stack_activation_packet": _artifact_summary(
+                "demo_learning_stack_activation_packet",
+                input_paths.get("demo_learning_stack_activation_packet"),
+                demo_learning_stack_activation_packet,
+            ),
+            "demo_learning_stack_dry_run_review": _artifact_summary(
+                "demo_learning_stack_dry_run_review",
+                input_paths.get("demo_learning_stack_dry_run_review"),
+                demo_learning_stack_dry_run_review,
             ),
             "horizon_sealed_replay": _artifact_summary(
                 "horizon_sealed_replay",
@@ -2973,6 +3212,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--profit-learning-packet-json", type=Path)
     parser.add_argument("--learning-plan-json", type=Path)
     parser.add_argument("--activation-preflight-json", type=Path)
+    parser.add_argument("--demo-learning-stack-activation-packet-json", type=Path)
+    parser.add_argument("--demo-learning-stack-dry-run-review-json", type=Path)
     parser.add_argument("--horizon-sealed-replay-json", type=Path)
     parser.add_argument("--horizon-learning-evidence-json", type=Path)
     parser.add_argument("--sealed-horizon-operator-review-json", type=Path)
@@ -2998,6 +3239,12 @@ def main() -> int:
         "profit_learning_packet": args.profit_learning_packet_json,
         "learning_plan": args.learning_plan_json,
         "activation_preflight": args.activation_preflight_json,
+        "demo_learning_stack_activation_packet": (
+            args.demo_learning_stack_activation_packet_json
+        ),
+        "demo_learning_stack_dry_run_review": (
+            args.demo_learning_stack_dry_run_review_json
+        ),
         "horizon_sealed_replay": args.horizon_sealed_replay_json,
         "horizon_learning_evidence": args.horizon_learning_evidence_json,
         "sealed_horizon_operator_review": args.sealed_horizon_operator_review_json,
@@ -3022,6 +3269,12 @@ def main() -> int:
         profit_learning_packet=_read_json(args.profit_learning_packet_json),
         learning_plan=_read_json(args.learning_plan_json),
         activation_preflight=_read_json(args.activation_preflight_json),
+        demo_learning_stack_activation_packet=_read_json(
+            args.demo_learning_stack_activation_packet_json
+        ),
+        demo_learning_stack_dry_run_review=_read_json(
+            args.demo_learning_stack_dry_run_review_json
+        ),
         horizon_sealed_replay=_read_json(args.horizon_sealed_replay_json),
         horizon_learning_evidence=_read_json(args.horizon_learning_evidence_json),
         sealed_horizon_operator_review=_read_json(

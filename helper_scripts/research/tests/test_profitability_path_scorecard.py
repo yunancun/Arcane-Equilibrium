@@ -298,6 +298,74 @@ def _sealed_horizon_probe_preflight(
     }
 
 
+def _demo_learning_stack_activation_packet() -> dict:
+    return {
+        "schema_version": "demo_learning_stack_activation_packet_v1",
+        "generated_at_utc": "2026-06-22T05:55:00Z",
+        "status": "READY_FOR_OPERATOR_DRY_RUN",
+        "reason": "source_ready_but_one_or_more_stack_crons_missing",
+        "install_review_ready": True,
+        "operator_next_action": (
+            "review_demo_learning_stack_activation_packet_and_run_dry_run_preview"
+        ),
+        "answers": {
+            "source_ready": True,
+            "stack_installed": False,
+            "missing_cron_count": 4,
+            "missing_crons": [
+                "demo_learning_evidence",
+                "sealed_horizon_probe_preflight",
+                "cost_gate_learning_lane",
+                "demo_learning_stack_healthcheck",
+            ],
+            "cost_gate_activation_ready": True,
+            "global_cost_gate_lowering_recommended": False,
+            "order_authority_granted": False,
+            "probe_authority_granted": False,
+            "promotion_proof": False,
+        },
+        "profitability_path": {
+            "cost_gate_escape_thesis": (
+                "collect rejected demo signals and matched blocked outcomes"
+            ),
+            "edge_amplification_levers": [
+                "side_cell_filtering",
+                "horizon_retiming",
+            ],
+        },
+        "boundary": "read-only activation packet only",
+    }
+
+
+def _demo_learning_stack_dry_run_review() -> dict:
+    return {
+        "schema_version": "demo_learning_stack_dry_run_review_v1",
+        "generated_at_utc": "2026-06-22T05:56:00Z",
+        "status": "DRY_RUN_PREVIEW_PASSED_OPERATOR_APPLY_REVIEW_REQUIRED",
+        "reason": "installer_dry_run_preview_passed_without_crontab_mutation",
+        "operator_next_action": (
+            "operator_review_dry_run_preview_then_apply_learning_stack_if_accepted"
+        ),
+        "activation_packet_status": "READY_FOR_OPERATOR_DRY_RUN",
+        "activation_packet_missing_cron_count": 4,
+        "answers": {
+            "dry_run_preview_executed": True,
+            "dry_run_preview_passed": True,
+            "crontab_mutated": False,
+            "operator_apply_required": True,
+            "global_cost_gate_lowering_recommended": False,
+            "order_authority_granted": False,
+            "probe_authority_granted": False,
+            "promotion_proof": False,
+        },
+        "dry_run_preview": {
+            "forced_apply_gate": "0",
+            "mutates_crontab": False,
+        },
+        "boundary": "dry-run review artifact only",
+    }
+
+
 def _bounded_probe_operator_authorization(
     status: str = "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW",
     *,
@@ -889,6 +957,63 @@ def test_sealed_horizon_preflight_drives_profitability_closure_gates() -> None:
     assert scorecard["answers"]["bounded_demo_probe_preflight_present"] is True
     assert scorecard["answers"]["bounded_demo_probe_preflight_ready"] is False
     assert scorecard["artifacts"]["sealed_horizon_probe_preflight"]["present"] is True
+
+
+def test_demo_learning_stack_apply_gate_precedes_operator_probe_review() -> None:
+    scorecard = build_profitability_path_scorecard(
+        cost_gate_counterfactual=_cost_gate_counterfactual(),
+        profit_learning_packet={
+            "status": "OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE",
+            "next_actions": [
+                "operator_review_sealed_horizon_learning_evidence_before_bounded_demo_probe"
+            ],
+            "answers": {
+                "global_cost_gate_lowering_recommended": False,
+                "order_authority_granted": False,
+            },
+            "activation": {"status": "NOT_ACCUMULATING"},
+        },
+        activation_preflight={"status": "NOT_ACCUMULATING"},
+        demo_learning_stack_activation_packet=(
+            _demo_learning_stack_activation_packet()
+        ),
+        demo_learning_stack_dry_run_review=_demo_learning_stack_dry_run_review(),
+        horizon_sealed_replay=_sealed_horizon_replay(),
+        horizon_learning_evidence=_sealed_horizon_learning_evidence(),
+        sealed_horizon_probe_preflight=_sealed_horizon_probe_preflight(
+            "OPERATOR_REVIEW_REQUIRED"
+        ),
+        now_utc=dt.datetime(2026, 6, 22, 6, tzinfo=dt.timezone.utc),
+    )
+
+    closure = scorecard["profitability_engineering_closure"]
+    next_move = closure["profitability_next_move"]
+    strategy = closure["cost_gate_escape_strategy"]
+
+    assert scorecard["answers"]["autonomous_learning_loop_accumulating"] is False
+    assert scorecard["answers"]["demo_learning_stack_operator_apply_required"] is True
+    assert scorecard["answers"]["demo_learning_stack_crontab_mutated_by_dry_run"] is False
+    assert closure["status"] == "DEMO_LEARNING_STACK_ACTIVATION_REQUIRED"
+    assert closure["primary_cost_gate_root_blocker"]["source"] == (
+        "demo_learning_stack_dry_run_review"
+    )
+    assert closure["primary_cost_gate_root_blocker"]["gate"] == (
+        "demo_learning_stack_operator_apply_required"
+    )
+    assert closure["primary_cost_gate_root_blocker"]["missing_cron_count"] == 4
+    assert closure["cost_gate_root_blockers"][1]["gate"] == (
+        "operator_sealed_horizon_review_recorded"
+    )
+    assert next_move["move_class"] == "activate_sustainable_demo_learning_stack"
+    assert next_move["recommended_action"] == (
+        "operator_review_dry_run_preview_then_apply_learning_stack_if_accepted"
+    )
+    assert next_move["runtime_mutation_required"] is True
+    assert next_move["cost_gate_policy"]["global_cost_gate_lowering"] is False
+    assert strategy["demo_learning_stack_dry_run_review_operator_apply_required"] is True
+    assert strategy["demo_learning_stack_dry_run_review_crontab_mutated"] is False
+    assert strategy["order_authority_granted"] is False
+    assert scorecard["answers"]["order_authority_granted"] is False
 
 
 def test_ready_preflight_keeps_authority_separate_from_profitability_closure() -> None:
