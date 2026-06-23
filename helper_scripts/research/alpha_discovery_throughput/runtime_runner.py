@@ -2020,6 +2020,27 @@ def summarize_profitability_path_scorecard(
     levers = closure.get("edge_amplification_levers")
     if not isinstance(levers, list):
         levers = []
+    root_blockers = closure.get("cost_gate_root_blockers")
+    if not isinstance(root_blockers, list):
+        root_blockers = []
+    edge_backlog = closure.get("edge_amplification_backlog")
+    if not isinstance(edge_backlog, list):
+        edge_backlog = []
+    next_move = (
+        closure.get("profitability_next_move")
+        if isinstance(closure.get("profitability_next_move"), dict)
+        else {}
+    )
+    primary_root_blocker = (
+        closure.get("primary_cost_gate_root_blocker")
+        if isinstance(closure.get("primary_cost_gate_root_blocker"), dict)
+        else {}
+    )
+    next_move_edge = (
+        next_move.get("edge_snapshot")
+        if isinstance(next_move.get("edge_snapshot"), dict)
+        else {}
+    )
     operator_read = (
         payload.get("operator_read")
         if isinstance(payload.get("operator_read"), dict)
@@ -2085,6 +2106,28 @@ def summarize_profitability_path_scorecard(
         "profitability_next_actions": next_actions[:8],
         "profitability_recommended_engineering_sequence": recommended_sequence[:8],
         "profitability_edge_amplification_levers": levers,
+        "profitability_cost_gate_root_blockers": root_blockers[:8],
+        "profitability_primary_cost_gate_root_blocker": (
+            primary_root_blocker or None
+        ),
+        "profitability_edge_amplification_backlog": edge_backlog[:8],
+        "profitability_next_move_status": next_move.get("status"),
+        "profitability_next_move_class": next_move.get("move_class"),
+        "profitability_next_move_primary_objective": next_move.get(
+            "primary_objective"
+        ),
+        "profitability_next_move_recommended_action": next_move.get(
+            "recommended_action"
+        ),
+        "profitability_next_move_candidate_key": next_move_edge.get(
+            "candidate_key"
+        ),
+        "profitability_next_move_edge_above_cost_bps": next_move_edge.get(
+            "edge_above_cost_bps"
+        ),
+        "profitability_next_move_runtime_mutation_required": next_move.get(
+            "runtime_mutation_required"
+        ),
         "profitability_cost_gate_escape_method": escape.get("method"),
         "profitability_cost_gate_escape_global_cost_gate_lowering": escape.get(
             "global_cost_gate_lowering"
@@ -3081,6 +3124,28 @@ def _profitability_path_summary_from_arms(arms: list[dict[str, Any]]) -> dict[st
         "profitability_edge_amplification_levers": detail.get(
             "profitability_edge_amplification_levers"
         ),
+        "profitability_cost_gate_root_blockers": detail.get(
+            "profitability_cost_gate_root_blockers"
+        ),
+        "profitability_primary_cost_gate_root_blocker": detail.get(
+            "profitability_primary_cost_gate_root_blocker"
+        ),
+        "profitability_edge_amplification_backlog": detail.get(
+            "profitability_edge_amplification_backlog"
+        ),
+        "profitability_next_move_class": detail.get("profitability_next_move_class"),
+        "profitability_next_move_primary_objective": detail.get(
+            "profitability_next_move_primary_objective"
+        ),
+        "profitability_next_move_recommended_action": detail.get(
+            "profitability_next_move_recommended_action"
+        ),
+        "profitability_next_move_candidate_key": detail.get(
+            "profitability_next_move_candidate_key"
+        ),
+        "profitability_next_move_edge_above_cost_bps": detail.get(
+            "profitability_next_move_edge_above_cost_bps"
+        ),
         "profitability_global_cost_gate_lowering_recommended": detail.get(
             "profitability_global_cost_gate_lowering_recommended"
         ),
@@ -3251,6 +3316,15 @@ def _history_row(killboard: dict[str, Any]) -> dict[str, Any]:
         ),
         "profitability_proof_gate_count_remaining": kb.get(
             "profitability_proof_gate_count_remaining"
+        ),
+        "profitability_next_move_recommended_action": kb.get(
+            "profitability_next_move_recommended_action"
+        ),
+        "profitability_next_move_candidate_key": kb.get(
+            "profitability_next_move_candidate_key"
+        ),
+        "profitability_next_move_edge_above_cost_bps": kb.get(
+            "profitability_next_move_edge_above_cost_bps"
         ),
         "profitability_global_cost_gate_lowering_recommended": kb.get(
             "profitability_global_cost_gate_lowering_recommended"

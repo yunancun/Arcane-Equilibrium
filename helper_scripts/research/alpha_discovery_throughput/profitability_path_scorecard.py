@@ -1770,6 +1770,194 @@ def _lever_status(candidates: list[dict[str, Any]], path_class: str) -> dict[str
     }
 
 
+def _edge_snapshot(row: dict[str, Any]) -> dict[str, Any]:
+    edge_bps = _float(row.get("current_edge_bps"))
+    cost_bps = _float(row.get("cost_threshold_bps"))
+    edge_above_cost = (
+        _round(edge_bps - cost_bps)
+        if edge_bps is not None and cost_bps is not None
+        else None
+    )
+    return {
+        "path_id": row.get("path_id"),
+        "path_class": row.get("class"),
+        "status": row.get("status"),
+        "candidate_key": row.get("candidate_key"),
+        "current_edge_bps": _round(edge_bps),
+        "cost_threshold_bps": _round(cost_bps),
+        "edge_above_cost_bps": edge_above_cost,
+        "sample_count": row.get("sample_count"),
+        "best_horizon_minutes": row.get("best_horizon_minutes"),
+        "candidate_horizons_minutes": row.get("candidate_horizons_minutes"),
+        "required_next_gate": row.get("required_next_gate"),
+        "next_action": row.get("next_action"),
+        "why_it_can_cross_cost_gate": row.get("why_it_can_cross_cost_gate"),
+    }
+
+
+def _failed_gate_details(
+    payload: dict[str, Any] | None,
+    *,
+    source: str,
+) -> list[dict[str, Any]]:
+    packet = _dict(payload)
+    out: list[dict[str, Any]] = []
+    fallback_candidate = _dict(packet.get("candidate"))
+    for gate in _list(packet.get("gates")):
+        if not isinstance(gate, dict) or gate.get("passed") is True:
+            continue
+        evidence = _dict(gate.get("evidence"))
+        candidate = (
+            _dict(evidence.get("candidate"))
+            or _dict(evidence.get("preflight_candidate"))
+            or fallback_candidate
+        )
+        out.append({
+            "source": source,
+            "gate": gate.get("name"),
+            "status": gate.get("status"),
+            "reason": gate.get("reason"),
+            "upstream_status": evidence.get("status"),
+            "upstream_reason": evidence.get("reason"),
+            "candidate": candidate or None,
+            "next_action": _first_text(gate.get("next_actions"), ""),
+        })
+    if out:
+        return out
+    for gate in _list(packet.get("blocking_gates")):
+        gate_name = _str(gate)
+        if not gate_name:
+            continue
+        out.append({
+            "source": source,
+            "gate": gate_name,
+            "status": packet.get("status"),
+            "reason": _proof_gate_labels([gate_name])[0],
+            "upstream_status": packet.get("status"),
+            "upstream_reason": packet.get("reason"),
+            "candidate": fallback_candidate or None,
+            "next_action": _first_text(packet.get("next_actions"), ""),
+        })
+    return out
+
+
+def _dedupe_gate_details(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for row in rows:
+        key = (_str(row.get("source")), _str(row.get("gate")))
+        if not key[0] or not key[1] or key in seen:
+            continue
+        seen.add(key)
+        out.append(row)
+    return out
+
+
+def _cost_gate_root_blockers(
+    *,
+    sealed_horizon_probe_preflight: dict[str, Any] | None,
+    bounded_probe_operator_authorization: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    # Prefer the upstream preflight gates before the aggregate authorization gates.
+    return _dedupe_gate_details([
+        *_failed_gate_details(
+            sealed_horizon_probe_preflight,
+            source="sealed_horizon_probe_preflight",
+        ),
+        *_failed_gate_details(
+            bounded_probe_operator_authorization,
+            source="bounded_probe_operator_authorization",
+        ),
+    ])
+
+
+def _edge_amplification_backlog(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    preferred_classes = [
+        "horizon_retiming_or_side_cell_filter",
+        "bounded_demo_learning_probe",
+        "low_friction_mm_alpha_search",
+        "external_event_leadlag_alpha",
+        "event_driven_listing_fade",
+        "fee_or_scale",
+    ]
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for path_class in preferred_classes:
+        rows = [row for row in candidates if row.get("class") == path_class]
+        if not rows:
+            continue
+        snapshot = _edge_snapshot(rows[0])
+        snapshot["path_count"] = len(rows)
+        out.append(snapshot)
+        seen.add(path_class)
+    for row in candidates:
+        path_class = _str(row.get("class"))
+        if not path_class or path_class in seen:
+            continue
+        snapshot = _edge_snapshot(row)
+        snapshot["path_count"] = 1
+        out.append(snapshot)
+        seen.add(path_class)
+    return out[:8]
+
+
+def _profitability_next_move(
+    *,
+    closure_status: str,
+    leading_path: dict[str, Any],
+    root_blockers: list[dict[str, Any]],
+    next_actions: list[str],
+) -> dict[str, Any]:
+    primary_blocker = root_blockers[0] if root_blockers else {}
+    recommended_action = (
+        _str(primary_blocker.get("next_action"))
+        or (next_actions[0] if next_actions else "")
+        or _str(leading_path.get("next_action"))
+    )
+    primary_gate = _str(primary_blocker.get("gate"))
+    if primary_gate == "operator_sealed_horizon_review_recorded":
+        move_class = "operator_reviews_sealed_horizon_edge_before_probe"
+        objective = "turn blocked-signal edge into bounded demo probe learning evidence"
+    elif primary_gate:
+        move_class = "complete_cost_gate_escape_source_gate"
+        objective = "remove the current source gate before bounded demo probe authorization"
+    elif closure_status == "OPERATOR_CAN_AUTHORIZE_BOUNDED_DEMO_PROBE_WITH_EXACT_CONFIRM":
+        move_class = "operator_authorizes_bounded_demo_probe_artifact"
+        objective = "emit a reviewed bounded demo probe authorization artifact"
+    elif closure_status.startswith("BOUNDED_DEMO_PROBE_EXECUTION_REALISM"):
+        move_class = "repair_execution_realism_capture_gap"
+        objective = "raise realized capture of an already observed blocked-signal edge"
+    else:
+        move_class = "continue_ranked_alpha_and_edge_amplification"
+        objective = "find or amplify a path with edge above current cost"
+    return {
+        "schema_version": "profitability_next_move_v1",
+        "status": closure_status,
+        "move_class": move_class,
+        "primary_objective": objective,
+        "recommended_action": recommended_action or None,
+        "primary_root_blocker": primary_blocker or None,
+        "edge_snapshot": _edge_snapshot(leading_path) if leading_path else {},
+        "expected_learning_data": [
+            "admission ledger rows",
+            "matched blocked-signal control outcomes",
+            "demo order intent and order-state lineage",
+            "fill fee slippage rows",
+            "bounded probe result review",
+            "execution-realism review when realized edge under-captures control edge",
+        ],
+        "cost_gate_policy": {
+            "global_cost_gate_lowering": False,
+            "main_cost_gate_adjustment": "NONE",
+            "order_authority_granted": False,
+            "probe_authority_granted": False,
+            "promotion_evidence": False,
+            "reason": "cross Cost Gate with bounded side-cell/horizon evidence, not a global gate cut",
+        },
+        "runtime_mutation_required": False,
+    }
+
+
 def _profitability_engineering_closure(
     *,
     candidates: list[dict[str, Any]],
@@ -2047,6 +2235,17 @@ def _profitability_engineering_closure(
         ]
         if action
     ]
+    root_blockers = _cost_gate_root_blockers(
+        sealed_horizon_probe_preflight=sealed_horizon_probe_preflight,
+        bounded_probe_operator_authorization=bounded_probe_operator_authorization,
+    )
+    edge_backlog = _edge_amplification_backlog(candidates)
+    next_move = _profitability_next_move(
+        closure_status=status,
+        leading_path=top,
+        root_blockers=root_blockers,
+        next_actions=list(dict.fromkeys(next_actions)),
+    )
 
     return {
         "schema_version": "profitability_engineering_closure_v1",
@@ -2063,6 +2262,10 @@ def _profitability_engineering_closure(
         "proof_gates_remaining": remaining,
         "proof_gate_count_remaining": len(remaining),
         "next_actions": list(dict.fromkeys(next_actions)),
+        "cost_gate_root_blockers": root_blockers,
+        "primary_cost_gate_root_blocker": root_blockers[0] if root_blockers else None,
+        "profitability_next_move": next_move,
+        "edge_amplification_backlog": edge_backlog,
         "cost_gate_escape_strategy": {
             "method": "bounded_side_cell_horizon_probe_after_preflight",
             "global_cost_gate_lowering": False,
@@ -2533,6 +2736,9 @@ def build_profitability_path_scorecard(
         },
         "operator_read": {
             "do_not_lower_global_cost_gate": True,
+            "profitability_next_move": closure.get("profitability_next_move"),
+            "cost_gate_root_blockers": closure.get("cost_gate_root_blockers"),
+            "edge_amplification_backlog": closure.get("edge_amplification_backlog"),
             "recommended_engineering_sequence": closure["next_actions"],
         },
     }
@@ -2589,6 +2795,43 @@ def render_markdown(scorecard: dict[str, Any]) -> str:
         ])
         for gate in _list(closure.get("proof_gates_remaining")):
             lines.append(f"- `{gate}`")
+        next_move = _dict(closure.get("profitability_next_move"))
+        if next_move:
+            edge = _dict(next_move.get("edge_snapshot"))
+            lines.extend([
+                "",
+                "## Profitability Next Move",
+                "",
+                f"- Class: `{next_move.get('move_class')}`",
+                f"- Objective: `{next_move.get('primary_objective')}`",
+                f"- Recommended action: `{next_move.get('recommended_action')}`",
+                f"- Candidate: `{edge.get('candidate_key')}`",
+                f"- Edge above cost bps: `{edge.get('edge_above_cost_bps')}`",
+            ])
+        root_blockers = _list(closure.get("cost_gate_root_blockers"))
+        if root_blockers:
+            lines.extend(["", "## Cost Gate Root Blockers", ""])
+            for blocker in root_blockers[:8]:
+                if not isinstance(blocker, dict):
+                    continue
+                lines.append(
+                    "- "
+                    f"`{blocker.get('source')}.{blocker.get('gate')}` "
+                    f"status=`{blocker.get('status')}` "
+                    f"next=`{blocker.get('next_action')}`"
+                )
+        backlog = _list(closure.get("edge_amplification_backlog"))
+        if backlog:
+            lines.extend(["", "## Edge Amplification Backlog", ""])
+            for item in backlog[:8]:
+                if not isinstance(item, dict):
+                    continue
+                lines.append(
+                    "- "
+                    f"`{item.get('path_class')}` `{item.get('candidate_key')}` "
+                    f"edge_above_cost_bps=`{item.get('edge_above_cost_bps')}` "
+                    f"next=`{item.get('next_action')}`"
+                )
 
     lines.extend(["", "## Next Actions", ""])
     for action in _list(_dict(scorecard.get("operator_read")).get("recommended_engineering_sequence")):

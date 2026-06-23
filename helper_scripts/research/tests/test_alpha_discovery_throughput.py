@@ -1874,6 +1874,38 @@ def _write_profitability_path_scorecard_latest(
                 "operator_review_sealed_horizon_probe_preflight",
                 "continue_low_friction_mm_and_external_alpha_search",
             ],
+            "cost_gate_root_blockers": [
+                {
+                    "source": "sealed_horizon_probe_preflight",
+                    "gate": "operator_sealed_horizon_review_recorded",
+                    "status": "PENDING_OPERATOR_REVIEW",
+                    "reason": "operator review must approve preflight review without granting authority",
+                    "next_action": "operator_review_sealed_horizon_probe_preflight",
+                }
+            ],
+            "primary_cost_gate_root_blocker": {
+                "source": "sealed_horizon_probe_preflight",
+                "gate": "operator_sealed_horizon_review_recorded",
+                "status": "PENDING_OPERATOR_REVIEW",
+                "reason": "operator review must approve preflight review without granting authority",
+                "next_action": "operator_review_sealed_horizon_probe_preflight",
+            },
+            "profitability_next_move": {
+                "schema_version": "profitability_next_move_v1",
+                "status": "COST_GATE_ESCAPE_PREFLIGHT_BLOCKED_BY_OPERATOR_REVIEW",
+                "move_class": "operator_reviews_sealed_horizon_edge_before_probe",
+                "primary_objective": "turn blocked-signal edge into bounded demo probe learning evidence",
+                "recommended_action": "operator_review_sealed_horizon_probe_preflight",
+                "edge_snapshot": {
+                    "path_id": "horizon_edge_amplification:ma_crossover|BTCUSDT|Sell",
+                    "path_class": "horizon_retiming_or_side_cell_filter",
+                    "candidate_key": "ma_crossover|BTCUSDT|Sell",
+                    "current_edge_bps": 9.0,
+                    "cost_threshold_bps": 4.0,
+                    "edge_above_cost_bps": 5.0,
+                },
+                "runtime_mutation_required": False,
+            },
             "cost_gate_escape_strategy": {
                 "method": "bounded_side_cell_horizon_probe_after_preflight",
                 "global_cost_gate_lowering": False,
@@ -1917,9 +1949,25 @@ def _write_profitability_path_scorecard_latest(
                     "next_action": "operator_review_sealed_horizon_probe_preflight",
                 }
             ],
+            "edge_amplification_backlog": [
+                {
+                    "path_class": "horizon_retiming_or_side_cell_filter",
+                    "candidate_key": "ma_crossover|BTCUSDT|Sell",
+                    "edge_above_cost_bps": 5.0,
+                    "next_action": "operator_review_sealed_horizon_probe_preflight",
+                }
+            ],
         },
         "operator_read": {
             "do_not_lower_global_cost_gate": True,
+            "profitability_next_move": {
+                "schema_version": "profitability_next_move_v1",
+                "status": "COST_GATE_ESCAPE_PREFLIGHT_BLOCKED_BY_OPERATOR_REVIEW",
+                "move_class": "operator_reviews_sealed_horizon_edge_before_probe",
+                "primary_objective": "turn blocked-signal edge into bounded demo probe learning evidence",
+                "recommended_action": "operator_review_sealed_horizon_probe_preflight",
+                "runtime_mutation_required": False,
+            },
             "recommended_engineering_sequence": [
                 "operator_review_sealed_horizon_probe_preflight",
                 "continue_low_friction_mm_and_external_alpha_search",
@@ -3015,6 +3063,13 @@ def test_cost_gate_profitability_path_scorecard_reaches_learning_surfaces(tmp_pa
     assert arm["detail"]["profitability_global_cost_gate_lowering_recommended"] is False
     assert arm["detail"]["profitability_order_authority_granted"] is False
     assert arm["detail"]["profitability_promotion_evidence"] is False
+    assert arm["detail"]["profitability_next_move_recommended_action"] == (
+        "operator_review_sealed_horizon_probe_preflight"
+    )
+    assert arm["detail"]["profitability_next_move_edge_above_cost_bps"] == 5.0
+    assert arm["detail"]["profitability_primary_cost_gate_root_blocker"]["gate"] == (
+        "operator_sealed_horizon_review_recorded"
+    )
 
     assert blocker["profitability_leading_candidate_key"] == (
         "ma_crossover|BTCUSDT|Sell"
@@ -3030,6 +3085,12 @@ def test_cost_gate_profitability_path_scorecard_reaches_learning_surfaces(tmp_pa
     assert blocker[
         "profitability_cost_gate_escape_operator_authorization_object_emitted"
     ] is False
+    assert blocker["profitability_next_move_recommended_action"] == (
+        "operator_review_sealed_horizon_probe_preflight"
+    )
+    assert blocker["profitability_edge_amplification_backlog"][0][
+        "edge_above_cost_bps"
+    ] == 5.0
 
     assert task["evidence"]["profitability_engineering_closure_status"] == (
         "COST_GATE_ESCAPE_PREFLIGHT_BLOCKED_BY_OPERATOR_REVIEW"
@@ -3044,6 +3105,9 @@ def test_cost_gate_profitability_path_scorecard_reaches_learning_surfaces(tmp_pa
     assert task["evidence"][
         "profitability_cost_gate_escape_operator_authorization_status"
     ] == "SEALED_HORIZON_PREFLIGHT_NOT_READY"
+    assert task["evidence"]["profitability_next_move_recommended_action"] == (
+        "operator_review_sealed_horizon_probe_preflight"
+    )
 
 
 def test_runtime_killboard_mirrors_profitability_closure(tmp_path):
@@ -3083,6 +3147,11 @@ def test_runtime_killboard_mirrors_profitability_closure(tmp_path):
     assert kb[
         "profitability_cost_gate_escape_operator_authorization_object_emitted"
     ] is False
+    assert kb["profitability_next_move_recommended_action"] == (
+        "operator_review_sealed_horizon_probe_preflight"
+    )
+    assert kb["profitability_next_move_candidate_key"] == "ma_crossover|BTCUSDT|Sell"
+    assert kb["profitability_next_move_edge_above_cost_bps"] == 5.0
 
 
 def test_cost_gate_profit_packet_sealed_horizon_candidate_reaches_worklist(tmp_path):
