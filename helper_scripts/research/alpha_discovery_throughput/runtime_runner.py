@@ -26,6 +26,7 @@ from polymarket_leadlag import replay_history as polymarket_replay_history
 
 from . import RUNNER_VERSION
 from .discovery_loop import build_discovery_plan
+from .mm_motif_amplification import build_mm_motif_amplification_packet
 
 RUNTIME_KILLBOARD_SCHEMA_VERSION = "alpha_discovery_runtime_killboard_v10"
 DEFAULT_MAX_ARTIFACT_AGE_SECONDS = 6 * 60 * 60
@@ -778,6 +779,11 @@ def collect_mm_verdict_arm(
     history_scorecard, history_scorecard_source, history_scorecard_error = (
         _mm_history_scorecard(data_dir, fillsim)
     )
+    mm_motif_amplification_packet = (
+        build_mm_motif_amplification_packet(fillsim_history=history_scorecard)
+        if history_scorecard
+        else None
+    )
     ts_utc = status.get("ts_utc")
     fresh, age, freshness_error = _source_fresh(
         ts_utc,
@@ -823,6 +829,7 @@ def collect_mm_verdict_arm(
                 "history_scorecard": history_scorecard,
                 "history_scorecard_source": history_scorecard_source,
                 "history_scorecard_error": history_scorecard_error,
+                "mm_motif_amplification_packet": mm_motif_amplification_packet,
                 "horizon_scorecard": fillsim.get("horizon_scorecard"),
                 "walk_forward_failure_summary": (
                     (fillsim.get("walk_forward_feature_scorecard") or {})
@@ -857,6 +864,7 @@ def collect_mm_verdict_arm(
             "history_scorecard": history_scorecard,
             "history_scorecard_source": history_scorecard_source,
             "history_scorecard_error": history_scorecard_error,
+            "mm_motif_amplification_packet": mm_motif_amplification_packet,
             "horizon_scorecard": fillsim.get("horizon_scorecard"),
             "walk_forward_failure_summary": (
                 (fillsim.get("walk_forward_feature_scorecard") or {})

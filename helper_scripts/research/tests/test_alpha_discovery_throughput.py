@@ -1719,6 +1719,16 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
         ]["status"]
         == "LOW_FRICTION_NEAR_MISS_MOTIF_REPEATS_BUT_DATE_INSUFFICIENT"
     )
+    motif_packet = raw_arms["mm_verdict_maker_edge"]["detail"][
+        "mm_motif_amplification_packet"
+    ]
+    assert motif_packet["schema_version"] == "mm_motif_amplification_packet_v1"
+    assert motif_packet["status"] == (
+        "MM_MOTIF_AMPLIFICATION_REQUIRES_DISTINCT_DATE_HISTORY"
+    )
+    assert motif_packet["summary"]["top_motif_key"] == (
+        "low_friction_motif|spread_combo"
+    )
     assert raw_arms["mm_verdict_maker_edge"]["detail"]["walk_forward_failure_summary"]["status"] == (
         "TRAIN_POSITIVE_HOLDOUT_DECAY"
     )

@@ -85,6 +85,16 @@ _EVIDENCE_KEYS = (
     "mm_signal_search_history_low_friction_near_miss_best_repeated_motif",
     "mm_signal_search_history_guided_search_constraint",
     "mm_signal_search_history_guided_next_action",
+    "mm_signal_search_motif_amplification_status",
+    "mm_signal_search_motif_amplification_next_action",
+    "mm_signal_search_motif_amplification_top_motif_key",
+    "mm_signal_search_motif_amplification_top_status",
+    "mm_signal_search_motif_amplification_top_bottleneck_leg",
+    "mm_signal_search_motif_amplification_top_min_train_holdout_gross_bps",
+    "mm_signal_search_motif_amplification_top_min_gross_gap_to_current_fee_bps",
+    "mm_signal_search_motif_amplification_top_required_uplift_multiple",
+    "mm_signal_search_motif_amplification_top_distinct_dates_remaining",
+    "mm_signal_search_motif_amplification_top_search_constraint",
     "mm_signal_search_lower_fee_path_not_actionable_now",
     "candidate_replay_status",
     "candidate_replay_sample_count",
@@ -861,6 +871,7 @@ def _completion_evidence_required(task_type: str) -> list[str]:
             "mm_signal_search_directive records failure mode and search constraint",
             "repeated low-friction near-miss motif history is preserved when present",
             "distinct-date history or explicit motif invalidation is recorded for repeated near-miss motifs",
+            "motif amplification packet records bottleneck leg and required gross uplift when present",
             (
                 "required gross uplift multiple is reduced by a new candidate "
                 "or removed by train confirmation"
