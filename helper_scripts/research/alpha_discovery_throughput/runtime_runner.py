@@ -89,6 +89,37 @@ def _read_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
     return data, None
 
 
+def _has_low_friction_near_miss_history(payload: dict[str, Any] | None) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    return isinstance(payload.get("low_friction_near_miss_stability"), dict) or (
+        isinstance(payload.get("low_friction_near_miss_motif_stability"), dict)
+    )
+
+
+def _mm_history_scorecard(
+    data_dir: Path,
+    fillsim: dict[str, Any],
+) -> tuple[dict[str, Any] | None, str | None, str | None]:
+    embedded = fillsim.get("history_scorecard")
+    embedded = embedded if isinstance(embedded, dict) else None
+    canonical, canonical_err = _read_json(
+        data_dir / "research" / "fillsim" / "fillsim_history_scorecard.json"
+    )
+    if canonical and (
+        _has_low_friction_near_miss_history(canonical)
+        or not isinstance(embedded, dict)
+    ):
+        return canonical, "canonical_fillsim_history_scorecard", None
+    if embedded:
+        return (
+            embedded,
+            "recorder_fillsim_embedded_history_scorecard",
+            canonical_err,
+        )
+    return None, None, canonical_err
+
+
 def _latest_json_line(
     path: Path,
     *,
@@ -743,6 +774,10 @@ def collect_mm_verdict_arm(
             detail={"note": "mm_verdict_status_missing_or_not_yet_fired"},
         )
     assert status is not None
+    fillsim = status.get("fillsim") if isinstance(status.get("fillsim"), dict) else {}
+    history_scorecard, history_scorecard_source, history_scorecard_error = (
+        _mm_history_scorecard(data_dir, fillsim)
+    )
     ts_utc = status.get("ts_utc")
     fresh, age, freshness_error = _source_fresh(
         ts_utc,
@@ -785,16 +820,16 @@ def collect_mm_verdict_arm(
                     "gross_edge_cost_decomposition"
                 ),
                 "fee_path_feasibility": status.get("fee_path_feasibility"),
-                "history_scorecard": (status.get("fillsim") or {}).get(
-                    "history_scorecard"
-                ),
-                "horizon_scorecard": (status.get("fillsim") or {}).get("horizon_scorecard"),
+                "history_scorecard": history_scorecard,
+                "history_scorecard_source": history_scorecard_source,
+                "history_scorecard_error": history_scorecard_error,
+                "horizon_scorecard": fillsim.get("horizon_scorecard"),
                 "walk_forward_failure_summary": (
-                    ((status.get("fillsim") or {}).get("walk_forward_feature_scorecard") or {})
+                    (fillsim.get("walk_forward_feature_scorecard") or {})
                     .get("failure_summary")
                 ),
                 "low_friction_signal_scorecard": (
-                    (status.get("fillsim") or {}).get("low_friction_signal_scorecard")
+                    fillsim.get("low_friction_signal_scorecard")
                 ),
                 "l1_fill_sim_ready": status.get("l1_fill_sim_ready"),
                 "highvol_day": status.get("highvol_day"),
@@ -819,14 +854,16 @@ def collect_mm_verdict_arm(
             "sample_gated_cost_wall_summary": status.get("sample_gated_cost_wall_summary"),
             "gross_edge_cost_decomposition": status.get("gross_edge_cost_decomposition"),
             "fee_path_feasibility": status.get("fee_path_feasibility"),
-            "history_scorecard": (status.get("fillsim") or {}).get("history_scorecard"),
-            "horizon_scorecard": (status.get("fillsim") or {}).get("horizon_scorecard"),
+            "history_scorecard": history_scorecard,
+            "history_scorecard_source": history_scorecard_source,
+            "history_scorecard_error": history_scorecard_error,
+            "horizon_scorecard": fillsim.get("horizon_scorecard"),
             "walk_forward_failure_summary": (
-                ((status.get("fillsim") or {}).get("walk_forward_feature_scorecard") or {})
+                (fillsim.get("walk_forward_feature_scorecard") or {})
                 .get("failure_summary")
             ),
             "low_friction_signal_scorecard": (
-                (status.get("fillsim") or {}).get("low_friction_signal_scorecard")
+                fillsim.get("low_friction_signal_scorecard")
             ),
             "l1_fill_sim_ready": status.get("l1_fill_sim_ready"),
             "highvol_day": status.get("highvol_day"),

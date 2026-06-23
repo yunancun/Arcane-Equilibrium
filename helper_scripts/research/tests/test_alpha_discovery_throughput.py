@@ -1567,6 +1567,31 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
             "BTCUSDT": {"net_edge_bps": 1.25, "n_maker_fills": 31},
         },
     }) + "\n", encoding="utf-8")
+    (data / "research" / "fillsim").mkdir(parents=True)
+    (data / "research" / "fillsim" / "fillsim_history_scorecard.json").write_text(
+        json.dumps({
+            "status": "HISTORY_LOWER_FEE_ONLY",
+            "lower_fee_break_even_stability": {
+                "status": "LOWER_FEE_BREAK_EVEN_REPEATS_ACROSS_WINDOWS",
+                "lower_fee_break_even_windows": 3,
+                "repeated_key_count": 1,
+            },
+            "low_friction_near_miss_stability": {
+                "status": "LOW_FRICTION_NEAR_MISS_REPEATS_BUT_DATE_INSUFFICIENT",
+                "repeated_key_count": 1,
+            },
+            "low_friction_near_miss_motif_stability": {
+                "status": (
+                    "LOW_FRICTION_NEAR_MISS_MOTIF_REPEATS_BUT_DATE_INSUFFICIENT"
+                ),
+                "repeated_motif_count": 1,
+                "best_repeated_near_miss_motif": {
+                    "motif_key": "low_friction_motif|spread_combo",
+                },
+            },
+        }),
+        encoding="utf-8",
+    )
 
     (data / "order_flow_alpha").mkdir(parents=True)
     (data / "order_flow_alpha" / "vol_event_ledger.json").write_text(json.dumps({
@@ -1681,10 +1706,19 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
     assert raw_arms["mm_verdict_maker_edge"]["detail"]["history_scorecard"]["status"] == (
         "HISTORY_LOWER_FEE_ONLY"
     )
+    assert raw_arms["mm_verdict_maker_edge"]["detail"]["history_scorecard_source"] == (
+        "canonical_fillsim_history_scorecard"
+    )
     assert (
         raw_arms["mm_verdict_maker_edge"]["detail"]["history_scorecard"]
         ["lower_fee_break_even_stability"]["status"]
     ) == "LOWER_FEE_BREAK_EVEN_REPEATS_ACROSS_WINDOWS"
+    assert (
+        raw_arms["mm_verdict_maker_edge"]["detail"]["history_scorecard"][
+            "low_friction_near_miss_motif_stability"
+        ]["status"]
+        == "LOW_FRICTION_NEAR_MISS_MOTIF_REPEATS_BUT_DATE_INSUFFICIENT"
+    )
     assert raw_arms["mm_verdict_maker_edge"]["detail"]["walk_forward_failure_summary"]["status"] == (
         "TRAIN_POSITIVE_HOLDOUT_DECAY"
     )
