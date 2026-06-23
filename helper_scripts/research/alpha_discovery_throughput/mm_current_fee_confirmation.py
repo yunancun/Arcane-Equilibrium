@@ -75,9 +75,12 @@ def _cell_key(source: str, cell: dict[str, Any]) -> str:
     name = _str(cell.get("name") or cell.get("condition") or cell.get("feature"))
     if name:
         return "|".join([source, name])
+    scope = _str(cell.get("scope"))
+    if not scope and source == "edge_scorecard" and _str(cell.get("symbol")):
+        scope = "per_symbol_primary_queue"
     return "|".join([
         source,
-        _str(cell.get("scope") or "global"),
+        scope or "global",
         _str(cell.get("symbol") or "pooled"),
         _str(cell.get("queue_position")),
         _str(cell.get("policy")),
@@ -206,8 +209,18 @@ def _current_fee_positive_cells(
         key = _cell_key(_str(cell.get("source")) or "fillsim", cell)
         cell["key"] = key
         previous = merged.get(key)
-        if previous is None or _cell_rank(cell) > _cell_rank(previous):
+        if previous is None:
             merged[key] = cell
+            continue
+        if _cell_rank(cell) > _cell_rank(previous):
+            primary, secondary = cell, previous
+        else:
+            primary, secondary = previous, cell
+        enriched = dict(primary)
+        for field, value in secondary.items():
+            if enriched.get(field) in (None, "") and value not in (None, ""):
+                enriched[field] = value
+        merged[key] = enriched
     out = list(merged.values())
     out.sort(key=_cell_rank, reverse=True)
     return out

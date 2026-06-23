@@ -67,6 +67,38 @@ def test_current_fee_confirmation_requires_repeat_window_for_single_window_cell(
     assert "SOXLUSDT" in markdown
 
 
+def test_current_fee_confirmation_normalizes_recorder_edge_scorecard_key():
+    packet = build_mm_current_fee_confirmation_packet(
+        fillsim=_fillsim_report(),
+        gross_edge_cost_decomposition={
+            "current_fee_round_trip_bps": 4.0,
+            "current_fee_positive_sample_gated_cell_count": 1,
+            "best_sample_gated_current_fee_cell": {
+                "source": "edge_scorecard",
+                "symbol": "SOXLUSDT",
+                "queue_position": "back",
+                "policy": "informed_skip",
+                "track": "fill_only",
+                "n_fill_only": 43,
+                "edge_before_fees_bps": 4.715,
+                "net_bps": 0.715,
+                "break_even_maker_fee_bps_per_side": 2.3575,
+            },
+        },
+        fillsim_history={
+            "status": "HISTORY_SINGLE_WINDOW_CURRENT_FEE_POSITIVE_NEEDS_CONFIRMATION",
+            "current_fee_sample_gated_positive_windows": 1,
+            "repeated_positive_keys": [],
+        },
+        now_utc=dt.datetime(2026, 6, 23, 18, tzinfo=dt.timezone.utc),
+    )
+
+    assert packet["summary"]["candidate_key"] == (
+        "edge_scorecard|per_symbol_primary_queue|SOXLUSDT|back|informed_skip|fill_only"
+    )
+    assert packet["summary"]["candidate_break_even_maker_fee_bps_per_side"] == 2.3575
+
+
 def test_current_fee_confirmation_requires_oos_after_repeated_key():
     key = "edge_scorecard|per_symbol_primary_queue|SOXLUSDT|back|informed_skip|fill_only"
     packet = build_mm_current_fee_confirmation_packet(
