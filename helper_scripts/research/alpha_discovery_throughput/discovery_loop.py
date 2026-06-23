@@ -3138,6 +3138,30 @@ def classify_profitability_blocker(
                 "profitability_edge_amplification_levers": detail.get(
                     "profitability_edge_amplification_levers"
                 ),
+                "profitability_cost_gate_root_blockers": detail.get(
+                    "profitability_cost_gate_root_blockers"
+                ),
+                "profitability_primary_cost_gate_root_blocker": detail.get(
+                    "profitability_primary_cost_gate_root_blocker"
+                ),
+                "profitability_edge_amplification_backlog": detail.get(
+                    "profitability_edge_amplification_backlog"
+                ),
+                "profitability_next_move_class": detail.get(
+                    "profitability_next_move_class"
+                ),
+                "profitability_next_move_primary_objective": detail.get(
+                    "profitability_next_move_primary_objective"
+                ),
+                "profitability_next_move_recommended_action": detail.get(
+                    "profitability_next_move_recommended_action"
+                ),
+                "profitability_next_move_candidate_key": detail.get(
+                    "profitability_next_move_candidate_key"
+                ),
+                "profitability_next_move_edge_above_cost_bps": detail.get(
+                    "profitability_next_move_edge_above_cost_bps"
+                ),
                 "profitability_cost_gate_escape_method": detail.get(
                     "profitability_cost_gate_escape_method"
                 ),

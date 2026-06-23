@@ -773,6 +773,24 @@ def test_sealed_horizon_preflight_drives_profitability_closure_gates() -> None:
     ][1]
     assert closure["cost_gate_escape_strategy"]["global_cost_gate_lowering"] is False
     assert closure["cost_gate_escape_strategy"]["probe_authority_granted"] is False
+    assert closure["cost_gate_root_blockers"][0]["source"] == (
+        "sealed_horizon_probe_preflight"
+    )
+    assert closure["cost_gate_root_blockers"][0]["gate"] == (
+        "operator_sealed_horizon_review_recorded"
+    )
+    next_move = closure["profitability_next_move"]
+    assert next_move["move_class"] == "operator_reviews_sealed_horizon_edge_before_probe"
+    assert next_move["recommended_action"] == (
+        "operator_review_sealed_horizon_learning_evidence_before_bounded_demo_probe"
+    )
+    assert next_move["edge_snapshot"]["candidate_key"] == "ma_crossover|BTCUSDT|Sell"
+    assert next_move["edge_snapshot"]["edge_above_cost_bps"] == 27.8707
+    assert next_move["runtime_mutation_required"] is False
+    assert next_move["cost_gate_policy"]["global_cost_gate_lowering"] is False
+    assert closure["edge_amplification_backlog"][0]["path_class"] == (
+        "horizon_retiming_or_side_cell_filter"
+    )
     assert scorecard["answers"]["bounded_demo_probe_preflight_present"] is True
     assert scorecard["answers"]["bounded_demo_probe_preflight_ready"] is False
     assert scorecard["artifacts"]["sealed_horizon_probe_preflight"]["present"] is True
@@ -861,6 +879,19 @@ def test_operator_authorization_gates_refine_profitability_closure() -> None:
         "bounded_probe_operator_authorization_active_runtime_order_authority"
     ] is False
     assert closure["status"] == "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_GATES_NOT_READY"
+    assert closure["cost_gate_root_blockers"][0]["source"] == (
+        "bounded_probe_operator_authorization"
+    )
+    assert closure["cost_gate_root_blockers"][0]["gate"] == (
+        "authority_path_patch_readiness_ready"
+    )
+    assert closure["profitability_next_move"]["move_class"] == (
+        "complete_cost_gate_escape_source_gate"
+    )
+    assert closure["profitability_next_move"]["recommended_action"] == (
+        "refresh_bounded_probe_operator_authorization_after_source_gates_pass"
+    )
+    assert closure["profitability_next_move"]["runtime_mutation_required"] is False
     assert "Rust authority-path near-touch Adapter readiness" in closure[
         "proof_gates_remaining"
     ][0]
@@ -1379,3 +1410,5 @@ def test_mm_fee_polymarket_and_gate_b_paths_are_separated() -> None:
     markdown = render_markdown(scorecard)
     assert "Profitability Path Scorecard" in markdown
     assert "mm_low_friction_signal_search" in markdown
+    assert "Profitability Next Move" in markdown
+    assert "Edge Amplification Backlog" in markdown
