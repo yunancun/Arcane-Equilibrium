@@ -254,6 +254,36 @@ _EVIDENCE_KEYS = (
     "sealed_horizon_probe_preflight_probe_authority_granted",
     "sealed_horizon_probe_preflight_main_cost_gate_adjustment",
     "sealed_horizon_probe_preflight_promotion_evidence",
+    "learning_loop_last_bounded_probe_authority_patch_readiness_status",
+    "learning_loop_last_bounded_probe_authority_path_wiring_present",
+    "learning_loop_last_bounded_probe_operator_authorization_status",
+    "learning_loop_last_bounded_probe_operator_authorization_ready_for_review",
+    "learning_loop_last_bounded_probe_operator_authorization_object_emitted",
+    "learning_loop_last_bounded_probe_operator_authorization_active_runtime_order_authority",
+    "bounded_probe_operator_authorization_present",
+    "bounded_probe_operator_authorization_status",
+    "bounded_probe_operator_authorization_reason",
+    "bounded_probe_operator_authorization_decision",
+    "bounded_probe_operator_authorization_next_actions",
+    "bounded_probe_operator_authorization_generated_at_utc",
+    "bounded_probe_operator_authorization_source_ok",
+    "bounded_probe_operator_authorization_source_path",
+    "bounded_probe_operator_authorization_source_error",
+    "bounded_probe_operator_authorization_side_cell_key",
+    "bounded_probe_operator_authorization_outcome_horizon_minutes",
+    "bounded_probe_operator_authorization_source_candidate_max_probe_orders",
+    "bounded_probe_operator_authorization_requested_max_probe_orders",
+    "bounded_probe_operator_authorization_blocking_gate_count",
+    "bounded_probe_operator_authorization_blocking_gates",
+    "bounded_probe_operator_authorization_typed_confirm_expected",
+    "bounded_probe_operator_authorization_ready_for_review",
+    "bounded_probe_operator_authorization_bounded_demo_probe_authorized",
+    "bounded_probe_operator_authorization_object_emitted",
+    "bounded_probe_operator_authorization_active_runtime_order_authority",
+    "bounded_probe_operator_authorization_active_runtime_probe_authority",
+    "bounded_probe_operator_authorization_global_cost_gate_lowering_recommended",
+    "bounded_probe_operator_authorization_main_cost_gate_adjustment",
+    "bounded_probe_operator_authorization_promotion_evidence",
     "bounded_probe_shadow_placement_impact_status",
     "bounded_probe_shadow_placement_impact_reason",
     "bounded_probe_shadow_placement_impact_next_actions",
@@ -445,6 +475,13 @@ def _learning_objective(row: dict[str, Any], task_type: str) -> str:
     if task_type == "promotion_review":
         return "run_formal_aeg_qc_mit_review_before_any_promotion"
     if task_type == "operator_probe_review":
+        operator_auth_status = _str(
+            row.get("bounded_probe_operator_authorization_status")
+        )
+        if operator_auth_status == "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW":
+            return "operator_review_bounded_demo_probe_authorization_packet"
+        if operator_auth_status == "BOUNDED_DEMO_PROBE_AUTHORIZED":
+            return "operator_review_bounded_demo_probe_authorization_object_before_plan_inclusion"
         bounded_review_status = _str(row.get("bounded_probe_result_review_status"))
         if bounded_review_status == "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED":
             return "operator_review_first_bounded_probe_results_before_additional_budget"
@@ -643,6 +680,8 @@ def _completion_evidence_required(task_type: str) -> list[str]:
     if task_type == "operator_probe_review":
         return [
             "operator_authorization_artifact_exists",
+            "bounded_probe_operator_authorization_status records ready/rejected/authorized",
+            "bounded_probe_operator_authorization_active_runtime_order_authority is false before plan inclusion",
             "isolated_probe_preflight_passes",
             "candidate_specific_side_cell_or_candidate_key_evidence_present",
             "horizon_stability_status_and_candidate_horizons_recorded_when_available",

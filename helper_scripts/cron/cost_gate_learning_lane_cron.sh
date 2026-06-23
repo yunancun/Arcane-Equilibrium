@@ -36,6 +36,9 @@ DECISION_PACKET_MD="${OPENCLAW_COST_GATE_PROFIT_LEARNING_DECISION_PACKET_MD:-$LA
 ACTIVATION_PREFLIGHT_JSON="${OPENCLAW_COST_GATE_ACTIVATION_PREFLIGHT_JSON:-$LANE_DIR/activation_preflight_latest.json}"
 SEALED_LEARNING_EVIDENCE_JSON="${OPENCLAW_COST_GATE_SEALED_HORIZON_LEARNING_EVIDENCE_JSON:-$LANE_DIR/sealed_horizon_learning_evidence_latest.json}"
 SEALED_PREFLIGHT_JSON="${OPENCLAW_COST_GATE_BOUNDED_PROBE_PREFLIGHT_JSON:-$LANE_DIR/sealed_horizon_probe_preflight_latest.json}"
+BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_JSON="${OPENCLAW_COST_GATE_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_JSON:-$LANE_DIR/bounded_probe_authority_patch_readiness_latest.json}"
+BOUNDED_PROBE_OPERATOR_AUTHORIZATION_JSON="${OPENCLAW_COST_GATE_BOUNDED_PROBE_OPERATOR_AUTHORIZATION_JSON:-$LANE_DIR/bounded_probe_operator_authorization_latest.json}"
+BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD="${OPENCLAW_COST_GATE_BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD:-$LANE_DIR/bounded_probe_operator_authorization_latest.md}"
 ORDER_TOUCHABILITY_JSON="${OPENCLAW_DEMO_ORDER_TO_FILL_GAP_AUDIT_JSON:-$ORDER_TOUCHABILITY_DIR/demo_order_to_fill_gap_latest.json}"
 ORDER_TOUCHABILITY_MD="${OPENCLAW_DEMO_ORDER_TO_FILL_GAP_AUDIT_MD:-$ORDER_TOUCHABILITY_DIR/demo_order_to_fill_gap_latest.md}"
 
@@ -73,6 +76,8 @@ APPEND_OUTCOMES="${OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES:-1}"
 RECORD_PROBE_OUTCOMES="${OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES:-0}"
 REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT:-1}"
 REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN:-1}"
+REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS:-1}"
+REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION:-1}"
 REFRESH_BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT:-1}"
 REFRESH_BOUNDED_PROBE_RESULT_REVIEW="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_RESULT_REVIEW:-1}"
 REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW:-1}"
@@ -84,6 +89,8 @@ TOUCHABILITY_MAX_INITIAL_PASSIVE_GAP_BPS="${OPENCLAW_COST_GATE_TOUCHABILITY_MAX_
 TOUCHABILITY_MAX_DEEP_NO_TOUCH_GAP_BPS="${OPENCLAW_COST_GATE_TOUCHABILITY_MAX_DEEP_NO_TOUCH_GAP_BPS:-500.0}"
 PLACEMENT_REPAIR_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_PLACEMENT_REPAIR_MAX_ARTIFACT_AGE_HOURS:-24}"
 PLACEMENT_REPAIR_MAX_FRESH_BBO_AGE_MS="${OPENCLAW_COST_GATE_PLACEMENT_REPAIR_MAX_FRESH_BBO_AGE_MS:-1000}"
+AUTHORITY_PATCH_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_AUTHORITY_PATCH_MAX_ARTIFACT_AGE_HOURS:-24}"
+OPERATOR_AUTHORIZATION_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_OPERATOR_AUTHORIZATION_MAX_ARTIFACT_AGE_HOURS:-24}"
 SHADOW_PLACEMENT_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_SHADOW_PLACEMENT_MAX_ARTIFACT_AGE_HOURS:-24}"
 STALE_LOCK_MIN="${OPENCLAW_COST_GATE_LEARNING_STALE_LOCK_MIN:-30}"
 
@@ -164,6 +171,8 @@ validate_bool01 "OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES" "$APPEND_OUTCOMES"
 validate_bool01 "OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES" "$RECORD_PROBE_OUTCOMES"
 validate_bool01 "OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT" "$REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT"
 validate_bool01 "OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN" "$REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN"
+validate_bool01 "OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS" "$REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS"
+validate_bool01 "OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION" "$REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION"
 validate_bool01 "OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT" "$REFRESH_BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT"
 validate_bool01 "OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_RESULT_REVIEW" "$REFRESH_BOUNDED_PROBE_RESULT_REVIEW"
 validate_bool01 "OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW" "$REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW"
@@ -175,6 +184,8 @@ validate_decimal "OPENCLAW_COST_GATE_TOUCHABILITY_MAX_INITIAL_PASSIVE_GAP_BPS" "
 validate_decimal "OPENCLAW_COST_GATE_TOUCHABILITY_MAX_DEEP_NO_TOUCH_GAP_BPS" "$TOUCHABILITY_MAX_DEEP_NO_TOUCH_GAP_BPS"
 validate_int "OPENCLAW_COST_GATE_PLACEMENT_REPAIR_MAX_ARTIFACT_AGE_HOURS" "$PLACEMENT_REPAIR_MAX_ARTIFACT_AGE_HOURS"
 validate_int "OPENCLAW_COST_GATE_PLACEMENT_REPAIR_MAX_FRESH_BBO_AGE_MS" "$PLACEMENT_REPAIR_MAX_FRESH_BBO_AGE_MS"
+validate_int "OPENCLAW_COST_GATE_AUTHORITY_PATCH_MAX_ARTIFACT_AGE_HOURS" "$AUTHORITY_PATCH_MAX_ARTIFACT_AGE_HOURS"
+validate_int "OPENCLAW_COST_GATE_OPERATOR_AUTHORIZATION_MAX_ARTIFACT_AGE_HOURS" "$OPERATOR_AUTHORIZATION_MAX_ARTIFACT_AGE_HOURS"
 validate_int "OPENCLAW_COST_GATE_SHADOW_PLACEMENT_MAX_ARTIFACT_AGE_HOURS" "$SHADOW_PLACEMENT_MAX_ARTIFACT_AGE_HOURS"
 validate_int "OPENCLAW_COST_GATE_LEARNING_STALE_LOCK_MIN" "$STALE_LOCK_MIN"
 
@@ -245,6 +256,14 @@ BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT="${LANE_DIR}/bounded_probe_placement_rep
 BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_MD_OUT="${LANE_DIR}/bounded_probe_placement_repair_plan_${STAMP}.md"
 BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST="${LANE_DIR}/bounded_probe_placement_repair_plan_latest.json"
 BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_MD_LATEST="${LANE_DIR}/bounded_probe_placement_repair_plan_latest.md"
+BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT="${LANE_DIR}/bounded_probe_authority_patch_readiness_${STAMP}.json"
+BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_MD_OUT="${LANE_DIR}/bounded_probe_authority_patch_readiness_${STAMP}.md"
+BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST="$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_JSON"
+BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_MD_LATEST="${LANE_DIR}/bounded_probe_authority_patch_readiness_latest.md"
+BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT="${LANE_DIR}/bounded_probe_operator_authorization_${STAMP}.json"
+BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD_OUT="${LANE_DIR}/bounded_probe_operator_authorization_${STAMP}.md"
+BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST="$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_JSON"
+BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD_LATEST="$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD"
 BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT="${LANE_DIR}/bounded_probe_shadow_placement_impact_${STAMP}.json"
 BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_MD_OUT="${LANE_DIR}/bounded_probe_shadow_placement_impact_${STAMP}.md"
 BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_LATEST="${LANE_DIR}/bounded_probe_shadow_placement_impact_latest.json"
@@ -381,6 +400,26 @@ BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_ARGS=(
     --output "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_MD_OUT"
 )
 
+BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_ARGS=(
+    -m cost_gate_learning_lane.bounded_probe_authority_patch_readiness
+    --placement-repair-plan-json "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT"
+    --repo-root "$BASE"
+    --max-artifact-age-hours "$AUTHORITY_PATCH_MAX_ARTIFACT_AGE_HOURS"
+    --json-output "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT"
+    --output "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_MD_OUT"
+)
+
+BOUNDED_PROBE_OPERATOR_AUTHORIZATION_ARGS=(
+    -m cost_gate_learning_lane.bounded_probe_operator_authorization_cli
+    --preflight-json "$SEALED_PREFLIGHT_JSON"
+    --placement-repair-plan-json "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT"
+    --authority-patch-readiness-json "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT"
+    --decision defer
+    --max-artifact-age-hours "$OPERATOR_AUTHORIZATION_MAX_ARTIFACT_AGE_HOURS"
+    --json-output "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT"
+    --output "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD_OUT"
+)
+
 BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_ARGS=(
     -m cost_gate_learning_lane.bounded_probe_shadow_placement_impact
     --order-to-fill-gap-json "$ORDER_TOUCHABILITY_JSON"
@@ -477,12 +516,16 @@ review_rc=0
 order_touchability_audit_rc=0
 bounded_probe_touchability_preflight_rc=0
 bounded_probe_placement_repair_plan_rc=0
+bounded_probe_authority_patch_readiness_rc=0
+bounded_probe_operator_authorization_rc=0
 bounded_probe_shadow_placement_impact_rc=0
 bounded_probe_result_review_rc=0
 bounded_probe_execution_realism_review_rc=0
 bounded_probe_touchability_preflight_skip_reason=""
 order_touchability_audit_skip_reason=""
 bounded_probe_placement_repair_plan_skip_reason=""
+bounded_probe_authority_patch_readiness_skip_reason=""
+bounded_probe_operator_authorization_skip_reason=""
 bounded_probe_shadow_placement_impact_skip_reason=""
 bounded_probe_result_review_skip_reason=""
 bounded_probe_execution_realism_review_skip_reason=""
@@ -490,6 +533,8 @@ if [[ "$PREINSTALL_REFRESH_ONLY" == "1" ]]; then
     order_touchability_audit_skip_reason="preinstall_refresh_only"
     bounded_probe_touchability_preflight_skip_reason="preinstall_refresh_only"
     bounded_probe_placement_repair_plan_skip_reason="preinstall_refresh_only"
+    bounded_probe_authority_patch_readiness_skip_reason="preinstall_refresh_only"
+    bounded_probe_operator_authorization_skip_reason="preinstall_refresh_only"
     bounded_probe_shadow_placement_impact_skip_reason="preinstall_refresh_only"
     bounded_probe_result_review_skip_reason="preinstall_refresh_only"
     bounded_probe_execution_realism_review_skip_reason="preinstall_refresh_only"
@@ -593,6 +638,42 @@ else
         echo "[$(ts)] SKIP: bounded probe placement repair plan disabled by OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN=0" >> "$LOG"
     fi
 
+    if [[ "$REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS" == "1" ]]; then
+        (
+            cd "$BASE"
+            export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
+            export PYTHONDONTWRITEBYTECODE=1
+            "$PYBIN" "${BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_ARGS[@]}"
+        ) >> "$LOG" 2>&1 || bounded_probe_authority_patch_readiness_rc=$?
+        if [[ -f "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" ]]; then
+            cp "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST"
+            if [[ -f "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_MD_OUT" ]]; then
+                cp "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_MD_OUT" "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_MD_LATEST"
+            fi
+        fi
+    else
+        bounded_probe_authority_patch_readiness_skip_reason="disabled"
+        echo "[$(ts)] SKIP: bounded probe authority patch readiness disabled by OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS=0" >> "$LOG"
+    fi
+
+    if [[ "$REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION" == "1" ]]; then
+        (
+            cd "$BASE"
+            export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
+            export PYTHONDONTWRITEBYTECODE=1
+            "$PYBIN" "${BOUNDED_PROBE_OPERATOR_AUTHORIZATION_ARGS[@]}"
+        ) >> "$LOG" 2>&1 || bounded_probe_operator_authorization_rc=$?
+        if [[ -f "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT" ]]; then
+            cp "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT" "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST"
+            if [[ -f "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD_OUT" ]]; then
+                cp "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD_OUT" "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD_LATEST"
+            fi
+        fi
+    else
+        bounded_probe_operator_authorization_skip_reason="disabled"
+        echo "[$(ts)] SKIP: bounded probe operator authorization packet disabled by OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION=0" >> "$LOG"
+    fi
+
     if [[ "$REFRESH_BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT" == "1" ]]; then
         (
             cd "$BASE"
@@ -681,8 +762,18 @@ export BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_LATEST="$BOUNDED_PROBE_SHADOW_PLACE
 export BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_RC="$bounded_probe_shadow_placement_impact_rc"
 export BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_SKIP_REASON="$bounded_probe_shadow_placement_impact_skip_reason"
 export REFRESH_BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT="$REFRESH_BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT"
+export BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT="$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT"
+export BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST="$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST"
+export BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_RC="$bounded_probe_authority_patch_readiness_rc"
+export BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_SKIP_REASON="$bounded_probe_authority_patch_readiness_skip_reason"
+export REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS="$REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS"
+export BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT="$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT"
+export BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST="$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST"
+export BOUNDED_PROBE_OPERATOR_AUTHORIZATION_RC="$bounded_probe_operator_authorization_rc"
+export BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SKIP_REASON="$bounded_probe_operator_authorization_skip_reason"
+export REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION="$REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION"
 
-STATUS_JSON=$(SCORECARD_JSON_OUT="$SCORECARD_JSON_OUT" SCORECARD_JSON="$SCORECARD_JSON" SCORECARD_RC="$scorecard_rc" REFRESH_SCORECARD="$REFRESH_SCORECARD" DATA_FLOW_JSON_OUT="$DATA_FLOW_JSON_OUT" DATA_FLOW_JSON="$DATA_FLOW_JSON" DATA_FLOW_MONITOR_RC="$data_flow_monitor_rc" REFRESH_DATA_FLOW_MONITOR="$REFRESH_DATA_FLOW_MONITOR" ORDER_TOUCHABILITY_JSON_OUT="$ORDER_TOUCHABILITY_JSON_OUT" ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" ORDER_TOUCHABILITY_AUDIT_RC="$order_touchability_audit_rc" ORDER_TOUCHABILITY_AUDIT_SKIP_REASON="$order_touchability_audit_skip_reason" REFRESH_ORDER_TOUCHABILITY_AUDIT="$REFRESH_ORDER_TOUCHABILITY_AUDIT" DECISION_PACKET_JSON_OUT="$DECISION_PACKET_JSON_OUT" DECISION_PACKET_JSON="$DECISION_PACKET_JSON" DECISION_PACKET_RC="$decision_packet_rc" REFRESH_DECISION_PACKET="$REFRESH_DECISION_PACKET" PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN" PREINSTALL_REFRESH_ONLY="$PREINSTALL_REFRESH_ONLY" HISTORICAL_REVIEW_OUT="$HISTORICAL_REVIEW_OUT" MATERIALIZER_OUT="$MATERIALIZER_OUT" REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" BOUNDED_PROBE_PREFLIGHT_JSON="$SEALED_PREFLIGHT_JSON" ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST" BOUNDED_PROBE_RESULT_REVIEW_OUT="$BOUNDED_PROBE_RESULT_REVIEW_OUT" BOUNDED_PROBE_RESULT_REVIEW_LATEST="$BOUNDED_PROBE_RESULT_REVIEW_LATEST" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST" HISTORICAL_REVIEW_RC="$historical_review_rc" MATERIALIZER_RC="$materializer_rc" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_RC="$bounded_probe_touchability_preflight_rc" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_RC="$bounded_probe_placement_repair_plan_rc" BOUNDED_PROBE_RESULT_REVIEW_RC="$bounded_probe_result_review_rc" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_RC="$bounded_probe_execution_realism_review_rc" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_SKIP_REASON="$bounded_probe_touchability_preflight_skip_reason" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_SKIP_REASON="$bounded_probe_placement_repair_plan_skip_reason" BOUNDED_PROBE_RESULT_REVIEW_SKIP_REASON="$bounded_probe_result_review_skip_reason" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_SKIP_REASON="$bounded_probe_execution_realism_review_skip_reason" REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT="$REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT" REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN="$REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN" REFRESH_BOUNDED_PROBE_RESULT_REVIEW="$REFRESH_BOUNDED_PROBE_RESULT_REVIEW" REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW="$REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW" LEDGER="$LEDGER" MATERIALIZE_REJECTS="$MATERIALIZE_REJECTS" APPEND_MATERIALIZED_REJECTS="$APPEND_MATERIALIZED_REJECTS" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
+STATUS_JSON=$(SCORECARD_JSON_OUT="$SCORECARD_JSON_OUT" SCORECARD_JSON="$SCORECARD_JSON" SCORECARD_RC="$scorecard_rc" REFRESH_SCORECARD="$REFRESH_SCORECARD" DATA_FLOW_JSON_OUT="$DATA_FLOW_JSON_OUT" DATA_FLOW_JSON="$DATA_FLOW_JSON" DATA_FLOW_MONITOR_RC="$data_flow_monitor_rc" REFRESH_DATA_FLOW_MONITOR="$REFRESH_DATA_FLOW_MONITOR" ORDER_TOUCHABILITY_JSON_OUT="$ORDER_TOUCHABILITY_JSON_OUT" ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" ORDER_TOUCHABILITY_AUDIT_RC="$order_touchability_audit_rc" ORDER_TOUCHABILITY_AUDIT_SKIP_REASON="$order_touchability_audit_skip_reason" REFRESH_ORDER_TOUCHABILITY_AUDIT="$REFRESH_ORDER_TOUCHABILITY_AUDIT" DECISION_PACKET_JSON_OUT="$DECISION_PACKET_JSON_OUT" DECISION_PACKET_JSON="$DECISION_PACKET_JSON" DECISION_PACKET_RC="$decision_packet_rc" REFRESH_DECISION_PACKET="$REFRESH_DECISION_PACKET" PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN" PREINSTALL_REFRESH_ONLY="$PREINSTALL_REFRESH_ONLY" HISTORICAL_REVIEW_OUT="$HISTORICAL_REVIEW_OUT" MATERIALIZER_OUT="$MATERIALIZER_OUT" REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" BOUNDED_PROBE_PREFLIGHT_JSON="$SEALED_PREFLIGHT_JSON" ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT="$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST="$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT="$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST="$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST" BOUNDED_PROBE_RESULT_REVIEW_OUT="$BOUNDED_PROBE_RESULT_REVIEW_OUT" BOUNDED_PROBE_RESULT_REVIEW_LATEST="$BOUNDED_PROBE_RESULT_REVIEW_LATEST" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST" HISTORICAL_REVIEW_RC="$historical_review_rc" MATERIALIZER_RC="$materializer_rc" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_RC="$bounded_probe_touchability_preflight_rc" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_RC="$bounded_probe_placement_repair_plan_rc" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_RC="$bounded_probe_authority_patch_readiness_rc" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_RC="$bounded_probe_operator_authorization_rc" BOUNDED_PROBE_RESULT_REVIEW_RC="$bounded_probe_result_review_rc" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_RC="$bounded_probe_execution_realism_review_rc" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_SKIP_REASON="$bounded_probe_touchability_preflight_skip_reason" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_SKIP_REASON="$bounded_probe_placement_repair_plan_skip_reason" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_SKIP_REASON="$bounded_probe_authority_patch_readiness_skip_reason" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SKIP_REASON="$bounded_probe_operator_authorization_skip_reason" BOUNDED_PROBE_RESULT_REVIEW_SKIP_REASON="$bounded_probe_result_review_skip_reason" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_SKIP_REASON="$bounded_probe_execution_realism_review_skip_reason" REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT="$REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT" REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN="$REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN" REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS="$REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS" REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION="$REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION" REFRESH_BOUNDED_PROBE_RESULT_REVIEW="$REFRESH_BOUNDED_PROBE_RESULT_REVIEW" REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW="$REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW" LEDGER="$LEDGER" MATERIALIZE_REJECTS="$MATERIALIZE_REJECTS" APPEND_MATERIALIZED_REJECTS="$APPEND_MATERIALIZED_REJECTS" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
 import datetime
 import hashlib
 import json
@@ -718,6 +809,12 @@ bounded_touchability, bounded_touchability_sha, bounded_touchability_err = load(
 bounded_placement, bounded_placement_sha, bounded_placement_err = load(
     os.environ["BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT"]
 )
+bounded_authority, bounded_authority_sha, bounded_authority_err = load(
+    os.environ["BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT"]
+)
+bounded_operator_auth, bounded_operator_auth_sha, bounded_operator_auth_err = load(
+    os.environ["BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT"]
+)
 bounded_shadow, bounded_shadow_sha, bounded_shadow_err = load(
     os.environ["BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT"]
 )
@@ -746,6 +843,8 @@ status = {
     "review_rc": int(os.environ["REVIEW_RC"]),
     "bounded_probe_touchability_preflight_rc": int(os.environ["BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_RC"]),
     "bounded_probe_placement_repair_plan_rc": int(os.environ["BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_RC"]),
+    "bounded_probe_authority_patch_readiness_rc": int(os.environ["BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_RC"]),
+    "bounded_probe_operator_authorization_rc": int(os.environ["BOUNDED_PROBE_OPERATOR_AUTHORIZATION_RC"]),
     "bounded_probe_shadow_placement_impact_rc": int(os.environ["BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_RC"]),
     "bounded_probe_result_review_rc": int(os.environ["BOUNDED_PROBE_RESULT_REVIEW_RC"]),
     "bounded_probe_execution_realism_review_rc": int(os.environ["BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_RC"]),
@@ -756,6 +855,8 @@ status = {
     "refresh_plan": os.environ["REFRESH_PLAN"] == "1",
     "refresh_bounded_probe_touchability_preflight": os.environ["REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT"] == "1",
     "refresh_bounded_probe_placement_repair_plan": os.environ["REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN"] == "1",
+    "refresh_bounded_probe_authority_patch_readiness": os.environ["REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS"] == "1",
+    "refresh_bounded_probe_operator_authorization": os.environ["REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION"] == "1",
     "refresh_bounded_probe_shadow_placement_impact": os.environ["REFRESH_BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT"] == "1",
     "refresh_bounded_probe_result_review": os.environ["REFRESH_BOUNDED_PROBE_RESULT_REVIEW"] == "1",
     "refresh_bounded_probe_execution_realism_review": os.environ["REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW"] == "1",
@@ -914,6 +1015,50 @@ status = {
         if isinstance(bounded_placement.get("placement_repair_plan"), dict)
         else None
     ),
+    "bounded_probe_authority_patch_readiness_artifact_path": os.environ["BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT"],
+    "bounded_probe_authority_patch_readiness_latest_path": os.environ["BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST"],
+    "bounded_probe_authority_patch_readiness_sha256": bounded_authority_sha,
+    "bounded_probe_authority_patch_readiness_error": bounded_authority_err,
+    "bounded_probe_authority_patch_readiness_skip_reason": os.environ["BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_SKIP_REASON"] or None,
+    "bounded_probe_authority_patch_readiness_status": bounded_authority.get("status"),
+    "bounded_probe_authority_patch_readiness_reason": bounded_authority.get("reason"),
+    "bounded_probe_authority_patch_adapter_present": (
+        (bounded_authority.get("answers") or {}).get("rust_near_touch_authority_adapter_present")
+        if isinstance(bounded_authority.get("answers"), dict)
+        else None
+    ),
+    "bounded_probe_authority_path_wiring_present": (
+        (bounded_authority.get("answers") or {}).get("rust_authority_path_wiring_present")
+        if isinstance(bounded_authority.get("answers"), dict)
+        else None
+    ),
+    "bounded_probe_operator_authorization_artifact_path": os.environ["BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT"],
+    "bounded_probe_operator_authorization_latest_path": os.environ["BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST"],
+    "bounded_probe_operator_authorization_sha256": bounded_operator_auth_sha,
+    "bounded_probe_operator_authorization_error": bounded_operator_auth_err,
+    "bounded_probe_operator_authorization_skip_reason": os.environ["BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SKIP_REASON"] or None,
+    "bounded_probe_operator_authorization_status": bounded_operator_auth.get("status"),
+    "bounded_probe_operator_authorization_reason": bounded_operator_auth.get("reason"),
+    "bounded_probe_operator_authorization_decision": bounded_operator_auth.get("decision"),
+    "bounded_probe_operator_authorization_blocking_gate_count": bounded_operator_auth.get("blocking_gate_count"),
+    "bounded_probe_operator_authorization_blocking_gates": bounded_operator_auth.get("blocking_gates"),
+    "bounded_probe_operator_authorization_ready_for_review": (
+        (bounded_operator_auth.get("answers") or {}).get("ready_for_operator_authorization_review")
+        if isinstance(bounded_operator_auth.get("answers"), dict)
+        else None
+    ),
+    "bounded_probe_operator_authorization_object_emitted": (
+        (bounded_operator_auth.get("answers") or {}).get("operator_authorization_object_emitted")
+        if isinstance(bounded_operator_auth.get("answers"), dict)
+        else None
+    ),
+    "bounded_probe_operator_authorization_active_runtime_order_authority": (
+        (bounded_operator_auth.get("answers") or {}).get("active_runtime_order_authority")
+        if isinstance(bounded_operator_auth.get("answers"), dict)
+        else None
+    ),
+    "bounded_probe_operator_authorization_typed_confirm_expected": bounded_operator_auth.get("typed_confirm_expected"),
+    "bounded_probe_operator_authorization_source_candidate_max_probe_orders": bounded_operator_auth.get("source_candidate_max_probe_orders"),
     "bounded_probe_shadow_placement_impact_artifact_path": os.environ["BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT"],
     "bounded_probe_shadow_placement_impact_latest_path": os.environ["BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_LATEST"],
     "bounded_probe_shadow_placement_impact_sha256": bounded_shadow_sha,
@@ -1022,7 +1167,7 @@ if [[ -n "$STATUS_JSON" ]]; then
     echo "$STATUS_JSON" >> "$STATUS_LOG"
 fi
 
-echo "[$(ts)] === Cost-gate learning lane refresh end scorecard_rc=${scorecard_rc} plan_rc=${plan_rc} historical_review_rc=${historical_review_rc} materializer_rc=${materializer_rc} refresh_rc=${refresh_rc} review_rc=${review_rc} order_touchability_audit_rc=${order_touchability_audit_rc} bounded_probe_touchability_preflight_rc=${bounded_probe_touchability_preflight_rc} bounded_probe_placement_repair_plan_rc=${bounded_probe_placement_repair_plan_rc} bounded_probe_shadow_placement_impact_rc=${bounded_probe_shadow_placement_impact_rc} bounded_probe_result_review_rc=${bounded_probe_result_review_rc} bounded_probe_execution_realism_review_rc=${bounded_probe_execution_realism_review_rc} ===" >> "$LOG"
+echo "[$(ts)] === Cost-gate learning lane refresh end scorecard_rc=${scorecard_rc} plan_rc=${plan_rc} historical_review_rc=${historical_review_rc} materializer_rc=${materializer_rc} refresh_rc=${refresh_rc} review_rc=${review_rc} order_touchability_audit_rc=${order_touchability_audit_rc} bounded_probe_touchability_preflight_rc=${bounded_probe_touchability_preflight_rc} bounded_probe_placement_repair_plan_rc=${bounded_probe_placement_repair_plan_rc} bounded_probe_authority_patch_readiness_rc=${bounded_probe_authority_patch_readiness_rc} bounded_probe_operator_authorization_rc=${bounded_probe_operator_authorization_rc} bounded_probe_shadow_placement_impact_rc=${bounded_probe_shadow_placement_impact_rc} bounded_probe_result_review_rc=${bounded_probe_result_review_rc} bounded_probe_execution_realism_review_rc=${bounded_probe_execution_realism_review_rc} ===" >> "$LOG"
 
 # fail-soft: rc/status are recorded; alpha-discovery reads artifacts and ledger
 # state. Operator action is required for deploy, writer enablement, or probe authority.

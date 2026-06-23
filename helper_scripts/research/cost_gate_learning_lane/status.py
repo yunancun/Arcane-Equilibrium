@@ -816,6 +816,28 @@ def summarize_cost_gate_learning_lane_loop(
     )
     refresh_rc = _int(status_row.get("refresh_rc")) if status_row else None
     review_rc = _int(status_row.get("review_rc")) if status_row else None
+    bounded_authority_patch_readiness_rc = (
+        _int(status_row.get("bounded_probe_authority_patch_readiness_rc"))
+        if status_row
+        else None
+    )
+    bounded_operator_authorization_rc = (
+        _int(status_row.get("bounded_probe_operator_authorization_rc"))
+        if status_row
+        else None
+    )
+    refresh_bounded_authority_patch_readiness_enabled = (
+        status_row.get("refresh_bounded_probe_authority_patch_readiness")
+        if status_row
+        and isinstance(status_row.get("refresh_bounded_probe_authority_patch_readiness"), bool)
+        else None
+    )
+    refresh_bounded_operator_authorization_enabled = (
+        status_row.get("refresh_bounded_probe_operator_authorization")
+        if status_row
+        and isinstance(status_row.get("refresh_bounded_probe_operator_authorization"), bool)
+        else None
+    )
     ledger_row_count = (
         _int(status_row.get("ledger_row_count"))
         if status_row and status_row.get("ledger_row_count") is not None
@@ -917,9 +939,11 @@ def summarize_cost_gate_learning_lane_loop(
             or materializer_rc not in (None, 0)
             or refresh_rc not in (None, 0)
             or review_rc not in (None, 0)
+            or bounded_authority_patch_readiness_rc not in (None, 0)
+            or bounded_operator_authorization_rc not in (None, 0)
         ):
             status = "ERROR"
-            reason = "cost_gate_learning_scorecard_plan_materializer_refresh_or_review_failed"
+            reason = "cost_gate_learning_scorecard_plan_materializer_refresh_review_or_bounded_authorization_failed"
         elif ledger_row_count == 0 and review_status == "NO_BLOCKED_SIGNAL_OUTCOMES":
             status = "RUNNING_NO_LEDGER_ROWS"
             reason = "cost_gate_learning_loop_ran_but_no_ledger_rows"
@@ -1011,6 +1035,42 @@ def summarize_cost_gate_learning_lane_loop(
         "learning_loop_last_materializer_decision_counts": materializer_decision_counts,
         "learning_loop_last_refresh_rc": refresh_rc,
         "learning_loop_last_review_rc": review_rc,
+        "learning_loop_refresh_bounded_probe_authority_patch_readiness_enabled": (
+            refresh_bounded_authority_patch_readiness_enabled
+        ),
+        "learning_loop_last_bounded_probe_authority_patch_readiness_rc": (
+            bounded_authority_patch_readiness_rc
+        ),
+        "learning_loop_last_bounded_probe_authority_patch_readiness_status": (
+            status_row.get("bounded_probe_authority_patch_readiness_status")
+            if status_row else None
+        ),
+        "learning_loop_last_bounded_probe_authority_path_wiring_present": (
+            status_row.get("bounded_probe_authority_path_wiring_present")
+            if status_row else None
+        ),
+        "learning_loop_refresh_bounded_probe_operator_authorization_enabled": (
+            refresh_bounded_operator_authorization_enabled
+        ),
+        "learning_loop_last_bounded_probe_operator_authorization_rc": (
+            bounded_operator_authorization_rc
+        ),
+        "learning_loop_last_bounded_probe_operator_authorization_status": (
+            status_row.get("bounded_probe_operator_authorization_status")
+            if status_row else None
+        ),
+        "learning_loop_last_bounded_probe_operator_authorization_ready_for_review": (
+            status_row.get("bounded_probe_operator_authorization_ready_for_review")
+            if status_row else None
+        ),
+        "learning_loop_last_bounded_probe_operator_authorization_object_emitted": (
+            status_row.get("bounded_probe_operator_authorization_object_emitted")
+            if status_row else None
+        ),
+        "learning_loop_last_bounded_probe_operator_authorization_active_runtime_order_authority": (
+            status_row.get("bounded_probe_operator_authorization_active_runtime_order_authority")
+            if status_row else None
+        ),
         "learning_loop_last_ledger_row_count": ledger_row_count,
         "learning_loop_last_review_status": review_status or None,
         "learning_loop_last_review_next_trigger": review_next_trigger,
