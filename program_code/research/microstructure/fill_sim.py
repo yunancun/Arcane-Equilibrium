@@ -65,7 +65,8 @@ DEFAULT_SKIP_QUANTILE = 0.10
 # maker fee sensitivity grid（per side, bps）。0/negative scenarios model zero-fee / rebate paths
 # for research triage only; they do not change current fee accounting.
 DEFAULT_MAKER_FEE_SENSITIVITY_BPS_PER_SIDE = (2.0, 1.0, 0.5, 0.0, -0.5)
-LOW_FRICTION_LOOKBACKS_S = (10, 30)
+LOW_FRICTION_LOOKBACKS_S = (10, 30, 60)
+LOW_FRICTION_LOOKBACK_SUFFIXES = tuple(f"{int(v)}s" for v in LOW_FRICTION_LOOKBACKS_S)
 # NOTE-A 隊列劑量反應（queue dose-response）：你在 touch 隊列中身前的量 = frac × Q0。
 #   front = 0.0×Q0（隊首,最樂觀,假設你最先 join）
 #   mid   = 0.5×Q0（隊中。L1-only 無多檔深度,無法算真「5bp-of-depth」累積量;
@@ -1913,24 +1914,19 @@ def fill_sim_low_friction_signal_scorecard(
         base["reason"] = "empty_trials"
         return base
 
+    recent_feature_bases = (
+        "side_recent_trade_imbalance",
+        "recent_trade_abs_qty",
+        "recent_trade_count",
+        "recent_l1_update_count",
+        "recent_l1_update_intensity",
+        "side_touch_size_delta_frac",
+        "spread_bps_delta",
+        "side_mid_move_bps",
+    )
     low_feature_cols = [
         col for col in (
-            "side_recent_trade_imbalance_10s",
-            "side_recent_trade_imbalance_30s",
-            "recent_trade_abs_qty_10s",
-            "recent_trade_abs_qty_30s",
-            "recent_trade_count_10s",
-            "recent_trade_count_30s",
-            "recent_l1_update_count_10s",
-            "recent_l1_update_count_30s",
-            "recent_l1_update_intensity_10s",
-            "recent_l1_update_intensity_30s",
-            "side_touch_size_delta_frac_10s",
-            "side_touch_size_delta_frac_30s",
-            "spread_bps_delta_10s",
-            "spread_bps_delta_30s",
-            "side_mid_move_bps_10s",
-            "side_mid_move_bps_30s",
+            *(f"{base}_{suffix}" for suffix in LOW_FRICTION_LOOKBACK_SUFFIXES for base in recent_feature_bases),
             "side_book_imb",
             "q0",
             "q_eff",
@@ -2022,7 +2018,7 @@ def fill_sim_low_friction_signal_scorecard(
     for col in low_feature_cols:
         add_train_quantile_feature(col, register_candidate=True)
     quiet_tape_cols = tuple(
-        col for suffix in ("10s", "30s")
+        col for suffix in LOW_FRICTION_LOOKBACK_SUFFIXES
         for col in (
             f"recent_trade_abs_qty_{suffix}",
             f"recent_trade_count_{suffix}",
@@ -2042,23 +2038,21 @@ def fill_sim_low_friction_signal_scorecard(
 
     combo_specs = []
     for spread_label in ("train_p75", "train_p90"):
+        for suffix in LOW_FRICTION_LOOKBACK_SUFFIXES:
+            for col, labels in (
+                (f"side_recent_trade_imbalance_{suffix}", ("train_p75", "train_p90")),
+                (f"recent_trade_abs_qty_{suffix}", ("train_p10", "train_p25", "train_p50")),
+                (f"recent_trade_count_{suffix}", ("train_p10", "train_p25", "train_p50")),
+                (f"recent_l1_update_count_{suffix}", ("train_p10", "train_p25", "train_p50")),
+                (f"recent_l1_update_intensity_{suffix}", ("train_p10", "train_p25", "train_p50")),
+                (f"side_touch_size_delta_frac_{suffix}", ("train_p75", "train_p90")),
+                (f"spread_bps_delta_{suffix}", ("train_p75", "train_p90")),
+                (f"side_mid_move_bps_{suffix}", ("train_p75", "train_p90")),
+            ):
+                if col in low_feature_cols:
+                    for label in labels:
+                        combo_specs.append(("quoted_half_spread_bps", spread_label, col, label))
         for col, labels in (
-            ("side_recent_trade_imbalance_10s", ("train_p75", "train_p90")),
-            ("side_recent_trade_imbalance_30s", ("train_p75", "train_p90")),
-            ("recent_trade_abs_qty_10s", ("train_p10", "train_p25", "train_p50")),
-            ("recent_trade_abs_qty_30s", ("train_p10", "train_p25", "train_p50")),
-            ("recent_trade_count_10s", ("train_p10", "train_p25", "train_p50")),
-            ("recent_trade_count_30s", ("train_p10", "train_p25", "train_p50")),
-            ("recent_l1_update_count_10s", ("train_p10", "train_p25", "train_p50")),
-            ("recent_l1_update_count_30s", ("train_p10", "train_p25", "train_p50")),
-            ("recent_l1_update_intensity_10s", ("train_p10", "train_p25", "train_p50")),
-            ("recent_l1_update_intensity_30s", ("train_p10", "train_p25", "train_p50")),
-            ("side_touch_size_delta_frac_10s", ("train_p75", "train_p90")),
-            ("side_touch_size_delta_frac_30s", ("train_p75", "train_p90")),
-            ("spread_bps_delta_10s", ("train_p75", "train_p90")),
-            ("spread_bps_delta_30s", ("train_p75", "train_p90")),
-            ("side_mid_move_bps_10s", ("train_p75", "train_p90")),
-            ("side_mid_move_bps_30s", ("train_p75", "train_p90")),
             ("side_book_imb", ("train_p75", "train_p90")),
             ("q0", ("train_p10", "train_p25")),
             ("q_eff", ("train_p10", "train_p25")),
@@ -2070,7 +2064,7 @@ def fill_sim_low_friction_signal_scorecard(
     interaction_specs = []
     queue_interaction_specs = []
     for spread_label in ("train_p75", "train_p90"):
-        for suffix in ("10s", "30s"):
+        for suffix in LOW_FRICTION_LOOKBACK_SUFFIXES:
             quiet_cols = (
                 f"recent_trade_abs_qty_{suffix}",
                 f"recent_trade_count_{suffix}",

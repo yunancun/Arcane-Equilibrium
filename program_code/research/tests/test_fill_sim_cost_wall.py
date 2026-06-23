@@ -639,6 +639,58 @@ def test_low_friction_signal_scorecard_confirms_holdout_current_fee_cell():
     assert scorecard["failure_summary"]["holdout_confirmed_current_fee_count"] >= 1
 
 
+def test_low_friction_signal_scorecard_searches_60s_recent_trade_imbalance_combo():
+    rows = []
+    for _half in range(2):
+        for _ in range(32):
+            rows.append(
+                {
+                    "symbol": "ABCUSDT",
+                    "side": "bid",
+                    "outcome": "fill",
+                    "quoted_half_spread_bps": 6.0,
+                    "side_recent_trade_imbalance_60s": 1.0,
+                    "half_spread_bps": 6.0,
+                    "adverse_sel_bps@15": 1.0,
+                }
+            )
+        for _ in range(8):
+            rows.append(
+                {
+                    "symbol": "ABCUSDT",
+                    "side": "bid",
+                    "outcome": "fill",
+                    "quoted_half_spread_bps": 1.0,
+                    "side_recent_trade_imbalance_60s": -1.0,
+                    "half_spread_bps": 1.0,
+                    "adverse_sel_bps@15": 1.0,
+                }
+            )
+    trials = _conditional_trials(rows)
+    trials["side_recent_trade_imbalance_60s"] = [
+        row["side_recent_trade_imbalance_60s"] for row in rows
+    ]
+    adverse = _conditional_adverse(trials, rows)
+
+    scorecard = fill_sim_low_friction_signal_scorecard(
+        trials,
+        adverse,
+        horizons=(15,),
+        span_hours=1.0,
+        primary_horizon_s=15,
+    )
+
+    assert scorecard["status"] == "LOW_FRICTION_SIGNAL_HOLDOUT_CURRENT_FEE_SAMPLE_GATED"
+    assert any(
+        candidate["name"]
+        == "quoted_half_spread_bps_train_p75_and_side_recent_trade_imbalance_60s_train_p75"
+        for candidate in scorecard["holdout_confirmed_candidates"]
+    )
+    assert scorecard["best_train_confirmed_gross_candidate"][
+        "min_train_holdout_gross_bps"
+    ] >= 4.0
+
+
 def test_low_friction_signal_scorecard_ranks_train_confirmed_gross_below_fee_wall():
     rows = []
     for _half in range(2):
