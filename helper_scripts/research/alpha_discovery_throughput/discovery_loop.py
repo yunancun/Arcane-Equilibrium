@@ -4487,6 +4487,90 @@ def classify_profitability_blocker(
                         **signal_search_extra,
                     },
                 )
+            if escape_scorecard.get("status") in {
+                "CURRENT_FEE_SAMPLE_GATED_CELL_AVAILABLE",
+                "GROSS_EDGE_CLEARS_CURRENT_FEE_NEEDS_WALK_FORWARD_CONFIRMATION",
+            }:
+                return _finish_blocker_row(
+                    row,
+                    blocker_class="current_fee_confirmation",
+                    primary_blocker=(
+                        "current_fee_candidate_lacks_train_holdout_walk_forward_confirmation"
+                    ),
+                    next_trigger=(
+                        escape_scorecard.get("next_trigger")
+                        or "review_current_fee_positive_mm_cell_with_walk_forward_and_aeg_chain"
+                    ),
+                    engineering_actionable=bool(
+                        escape_scorecard.get("engineering_actionable", True)
+                    ),
+                    secondary_blockers=secondary,
+                    extra={
+                        "walk_forward_failure_status": failure_status,
+                        "candidate_count": failure.get("candidate_count"),
+                        "best_train_candidate": failure.get("best_train_candidate"),
+                        "best_holdout_candidate": failure.get("best_holdout_candidate"),
+                        "gross_edge_decomposition_status": gross_status,
+                        "current_fee_positive_sample_gated_cell_count": gross_decomp.get(
+                            "current_fee_positive_sample_gated_cell_count"
+                        ),
+                        "cost_wall_escape_status": escape_scorecard.get("status"),
+                        "cost_wall_escape_reason": escape_scorecard.get("reason"),
+                        "cost_wall_escape_scorecard": escape_scorecard,
+                        "required_current_fee_gross_edge_bps": (
+                            escape_scorecard.get("required_current_fee_gross_edge_bps")
+                        ),
+                        "gross_edge_gap_to_current_fee_bps": (
+                            escape_scorecard.get("gross_edge_gap_to_current_fee_bps")
+                        ),
+                        "gross_edge_multiple_to_clear_current_fee": (
+                            escape_scorecard.get("gross_edge_multiple_to_clear_current_fee")
+                        ),
+                        "best_sample_gated_gross_edge_bps": (
+                            escape_scorecard.get("best_sample_gated_gross_edge_bps")
+                        ),
+                        "best_gross_cell_net_bps": (
+                            escape_scorecard.get("best_gross_cell_net_bps")
+                        ),
+                        "break_even_maker_fee_bps_per_side": (
+                            gross_decomp.get("break_even_maker_fee_bps_per_side")
+                            or _dict(gross_decomp.get("best_sample_gated_current_fee_cell")).get(
+                                "break_even_maker_fee_bps_per_side"
+                            )
+                            or _dict(gross_decomp.get("best_sample_gated_gross_cell")).get(
+                                "break_even_maker_fee_bps_per_side"
+                            )
+                        ),
+                        "best_sample_gated_current_fee_source": (
+                            escape_scorecard.get("best_sample_gated_current_fee_source")
+                        ),
+                        "best_sample_gated_current_fee_cell": (
+                            gross_decomp.get("best_sample_gated_current_fee_cell")
+                        ),
+                        "best_sample_gated_gross_cell": (
+                            gross_decomp.get("best_sample_gated_gross_cell")
+                        ),
+                        "low_friction_gross_stability_status": (
+                            escape_scorecard.get("low_friction_gross_stability_status")
+                        ),
+                        "low_friction_train_confirmed_gross_status": (
+                            escape_scorecard.get(
+                                "low_friction_train_confirmed_gross_status"
+                            )
+                        ),
+                        "low_friction_best_train_confirmed_min_gross_bps": (
+                            escape_scorecard.get(
+                                "low_friction_best_train_confirmed_min_gross_bps"
+                            )
+                        ),
+                        "low_friction_train_confirmed_gap_to_current_fee_bps": (
+                            escape_scorecard.get(
+                                "low_friction_train_confirmed_gap_to_current_fee_bps"
+                            )
+                        ),
+                        **signal_search_extra,
+                    },
+                )
             if gross_status == "GROSS_EDGE_BELOW_CURRENT_FEE_COST_WALL":
                 return _finish_blocker_row(
                     row,

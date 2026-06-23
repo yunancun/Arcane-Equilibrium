@@ -272,6 +272,98 @@ def test_learning_worklist_prioritizes_runtime_reconcile_over_mm_signal_search()
     )
 
 
+def test_learning_worklist_promotes_mm_current_fee_confirmation_task():
+    plan = build_discovery_plan([
+        {
+            "arm_id": "mm_verdict_maker_edge",
+            "gate_status": "CAPTURING",
+            "sample_count": 43,
+            "artifacts_ready": False,
+            "source_ok": True,
+            "detail": {
+                "walk_forward_failure_summary": {
+                    "status": "NO_TRAIN_POSITIVE_CELL",
+                    "candidate_count": 12,
+                },
+                "gross_edge_cost_decomposition": {
+                    "available": True,
+                    "status": "CURRENT_FEE_GROSS_AND_NET_POSITIVE",
+                    "current_fee_round_trip_bps": 4.0,
+                    "current_fee_positive_sample_gated_cell_count": 1,
+                    "best_sample_gated_gross_edge_bps": 4.715,
+                    "best_gross_cell_net_bps": 0.715,
+                    "best_sample_gated_current_fee_cell": {
+                        "source": "edge_scorecard",
+                        "symbol": "SOXLUSDT",
+                        "policy": "informed_skip",
+                        "queue_position": "back",
+                        "track": "fill_only",
+                        "edge_before_fees_bps": 4.715,
+                        "net_bps": 0.715,
+                        "n_fill_only": 43,
+                        "sample_gated": True,
+                        "break_even_maker_fee_bps_per_side": 2.3575,
+                    },
+                    "best_sample_gated_gross_cell": {
+                        "source": "edge_scorecard",
+                        "symbol": "SOXLUSDT",
+                        "policy": "informed_skip",
+                        "queue_position": "back",
+                        "track": "fill_only",
+                        "edge_before_fees_bps": 4.715,
+                        "net_bps": 0.715,
+                        "n_fill_only": 43,
+                        "sample_gated": True,
+                        "break_even_maker_fee_bps_per_side": 2.3575,
+                    },
+                },
+                "sample_gated_cost_wall_summary": {
+                    "current_fee_round_trip_bps": 4.0,
+                },
+                "low_friction_signal_scorecard": {
+                    "failure_summary": {
+                        "sample_starved_current_fee_holdout_count": 0,
+                        "sample_gated_holdout_gross_count": 4,
+                    },
+                    "train_confirmed_gross_scorecard": {
+                        "status": "LOW_FRICTION_TRAIN_CONFIRMED_GROSS_BELOW_CURRENT_FEE",
+                        "best_min_train_holdout_gross_bps": 0.607,
+                        "gap_to_current_fee_round_trip_bps": 3.393,
+                    },
+                },
+            },
+        },
+    ], now_utc=dt.datetime(2026, 6, 23, 18, tzinfo=dt.timezone.utc))
+
+    task = plan["learning_worklist"]["top_task"]
+    assert task["task_type"] == "mm_current_fee_confirmation"
+    assert task["learning_objective"] == (
+        "confirm_sample_gated_current_fee_positive_mm_cell_before_any_authority"
+    )
+    assert task["primary_blocker"] == (
+        "current_fee_candidate_lacks_train_holdout_walk_forward_confirmation"
+    )
+    assert task["next_trigger"] == (
+        "review_current_fee_positive_mm_cell_with_walk_forward_and_aeg_chain"
+    )
+    assert task["completion_gate"] == (
+        "repeat_current_fee_positive_cell_across_independent_windows_and_oos_execution_realism"
+    )
+    assert (
+        "the same current-fee-positive cell repeats across independent windows or is explicitly invalidated"
+        in task["completion_evidence_required"]
+    )
+    assert task["requires_operator_authorization"] is False
+    assert task["runtime_mutation_required"] is False
+    assert task["actionability"] == "engineering_actionable"
+    assert task["evidence"]["current_fee_positive_sample_gated_cell_count"] == 1
+    assert task["evidence"]["best_sample_gated_current_fee_source"] == "edge_scorecard"
+    assert task["evidence"]["best_sample_gated_current_fee_cell"]["symbol"] == "SOXLUSDT"
+    assert task["evidence"]["best_sample_gated_gross_edge_bps"] == 4.715
+    assert task["evidence"]["best_gross_cell_net_bps"] == 0.715
+    assert task["evidence"]["break_even_maker_fee_bps_per_side"] == 2.3575
+
+
 def test_learning_worklist_keeps_promotion_review_ahead_of_replay_history():
     worklist = build_learning_worklist({
         "arms": [

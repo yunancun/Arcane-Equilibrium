@@ -1482,9 +1482,17 @@ def test_mm_train_only_current_fee_positive_requires_walk_forward_confirmation()
     ], now_utc=dt.datetime(2026, 6, 23, 15, 40, tzinfo=dt.timezone.utc))
 
     row = plan["profitability_blocker_scorecard"]["arms"][0]
-    assert row["blocker_class"] == "feature_family_no_edge"
-    assert row["primary_blocker"] == "no_train_positive_walk_forward_feature_cell"
+    assert row["blocker_class"] == "current_fee_confirmation"
+    assert row["primary_blocker"] == (
+        "current_fee_candidate_lacks_train_holdout_walk_forward_confirmation"
+    )
+    assert row["next_trigger"] == (
+        "review_current_fee_positive_mm_cell_with_walk_forward_and_aeg_chain"
+    )
     assert row["cost_wall_escape_status"] == "CURRENT_FEE_SAMPLE_GATED_CELL_AVAILABLE"
+    assert row["current_fee_positive_sample_gated_cell_count"] == 1
+    assert row["best_sample_gated_current_fee_cell"]["edge_before_fees_bps"] == 4.042
+    assert row["best_sample_gated_current_fee_source"] == "low_friction_signal_train"
     assert row["mm_signal_search_status"] == "SEARCH_REQUIRED_WALK_FORWARD_CONFIRMATION"
     assert row["mm_signal_search_failure_mode"] == (
         "current_fee_candidate_lacks_train_holdout_walk_forward_confirmation"
