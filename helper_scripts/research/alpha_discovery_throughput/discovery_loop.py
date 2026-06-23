@@ -1821,6 +1821,178 @@ def _mm_low_friction_gross_stability_scorecard(detail: dict[str, Any]) -> dict[s
     }
 
 
+def _positive_multiple_or_none(
+    required: float | None,
+    observed: float | None,
+) -> float | None:
+    if required is None or observed is None or observed <= 0.0:
+        return None
+    return required / observed
+
+
+def _mm_signal_search_directive(
+    *,
+    escape_status: str,
+    escape_reason: str,
+    next_trigger: str,
+    current_fee_round_trip: float | None,
+    best_gross_edge: float | None,
+    gap: float | None,
+    multiple: float | None,
+    current_fee_positive_count: int,
+    current_fee_confirmed_count: int,
+    best_current_fee_source: str,
+    business_status: str,
+    low_friction_stability: dict[str, Any],
+) -> dict[str, Any]:
+    low_status = str(low_friction_stability.get("status") or "").upper()
+    train_confirmed_status = str(
+        low_friction_stability.get("train_confirmed_gross_status") or ""
+    ).upper()
+    stable_candidate = _dict(
+        low_friction_stability.get("best_train_confirmed_gross_candidate")
+    )
+    stable_min_gross = _float(
+        low_friction_stability.get("best_train_confirmed_min_gross_bps")
+    )
+    stable_gap = _float(
+        low_friction_stability.get("train_confirmed_gap_to_current_fee_bps")
+    )
+    stable_multiple = _positive_multiple_or_none(
+        current_fee_round_trip,
+        stable_min_gross,
+    )
+
+    lower_fee_scale_gated = (
+        business_status == "STANDARD_FEE_TIER_CLEARS_BUT_SCALE_OR_CAPITAL_GATED"
+    )
+    if current_fee_round_trip is None or best_gross_edge is None:
+        status = "SEARCH_BLOCKED_MISSING_COST_INPUTS"
+        failure_mode = "missing_current_fee_or_best_sample_gated_gross_edge"
+        search_focus = "refresh_mm_cost_wall_inputs"
+    elif (
+        current_fee_positive_count > 0
+        and current_fee_confirmed_count <= 0
+        and best_current_fee_source == "low_friction_signal_holdout"
+    ):
+        status = "SEARCH_REQUIRED_TRAIN_CONFIRMATION"
+        failure_mode = "holdout_current_fee_candidate_not_train_confirmed"
+        search_focus = "stabilize_holdout_current_fee_candidate_train_leg"
+    elif gap is not None and gap > 0:
+        status = "SEARCH_REQUIRED_EDGE_UPLIFT"
+        search_focus = "amplify_train_confirmed_low_friction_candidate_shape"
+        if low_status == "LOW_FRICTION_NO_SAMPLE_GATED_HOLDOUT_GROSS_EDGE":
+            failure_mode = (
+                "current_fee_cost_wall_low_friction_no_sample_gated_holdout_edge"
+            )
+        elif low_status == "LOW_FRICTION_HOLDOUT_GROSS_NOT_TRAIN_CONFIRMED":
+            failure_mode = (
+                "current_fee_cost_wall_low_friction_holdout_not_train_confirmed"
+            )
+        elif (
+            train_confirmed_status
+            == "LOW_FRICTION_TRAIN_CONFIRMED_GROSS_BELOW_CURRENT_FEE"
+        ):
+            failure_mode = (
+                "current_fee_cost_wall_train_confirmed_low_friction_gross_below_fee"
+            )
+        else:
+            failure_mode = "sample_gated_gross_edge_below_current_fee"
+        if lower_fee_scale_gated:
+            failure_mode = f"{failure_mode}_lower_fee_path_scale_or_capital_gated"
+    else:
+        status = "SEARCH_NOT_REQUIRED_CONFIRM_CURRENT_FEE_CELL"
+        failure_mode = "gross_edge_clears_current_fee_needs_walk_forward"
+        search_focus = "confirm_current_fee_cell_with_walk_forward_and_aeg_chain"
+
+    return {
+        "schema_version": "mm_signal_search_directive_v1",
+        "status": status,
+        "failure_mode": failure_mode,
+        "escape_status": escape_status,
+        "escape_reason": escape_reason,
+        "success_gate": "train_confirmed_sample_gated_current_fee_gross_edge_found",
+        "recommended_search_constraint": (
+            "require_train_and_holdout_sample_gated_min_gross_ge_current_fee_round_trip"
+        ),
+        "search_focus": search_focus,
+        "next_trigger": next_trigger,
+        "current_fee_round_trip_bps": _round_or_none(current_fee_round_trip),
+        "minimum_required_train_holdout_gross_bps": _round_or_none(
+            current_fee_round_trip
+        ),
+        "best_sample_gated_gross_edge_bps": _round_or_none(best_gross_edge),
+        "best_sample_gated_gross_gap_bps": _round_or_none(
+            max(0.0, gap) if gap is not None else None
+        ),
+        "best_sample_gated_required_uplift_multiple": _round_or_none(
+            multiple if multiple is not None and multiple > 1.0 else None
+        ),
+        "low_friction_gross_stability_status": low_friction_stability.get("status"),
+        "low_friction_train_confirmed_gross_status": (
+            low_friction_stability.get("train_confirmed_gross_status")
+        ),
+        "low_friction_best_train_confirmed_min_gross_bps": (
+            low_friction_stability.get("best_train_confirmed_min_gross_bps")
+        ),
+        "low_friction_train_confirmed_gap_to_current_fee_bps": (
+            low_friction_stability.get("train_confirmed_gap_to_current_fee_bps")
+        ),
+        "low_friction_train_confirmed_required_uplift_multiple": _round_or_none(
+            stable_multiple
+            if stable_multiple is not None and stable_multiple > 1.0
+            else None
+        ),
+        "stable_candidate_shape_name": stable_candidate.get("name"),
+        "stable_candidate_min_train_holdout_gross_bps": stable_candidate.get(
+            "min_train_holdout_gross_bps"
+        ),
+        "unstable_holdout_candidate_name": low_friction_stability.get(
+            "candidate_name"
+        ),
+        "unstable_holdout_candidate_condition": low_friction_stability.get(
+            "candidate_condition"
+        ),
+        "sample_gate_min_fills": low_friction_stability.get("sample_gate_min_fills"),
+        "current_fee_positive_sample_gated_cell_count": current_fee_positive_count,
+        "train_confirmed_current_fee_count": current_fee_confirmed_count,
+        "best_sample_gated_current_fee_source": best_current_fee_source or None,
+        "fee_path_actionability_status": business_status or None,
+        "lower_fee_path_not_actionable_now": lower_fee_scale_gated,
+        "cost_gate_policy": "do_not_lower_global_cost_gate_for_mm_search",
+        "stable_candidate_gap_to_current_fee_bps": _round_or_none(stable_gap),
+    }
+
+
+def _mm_signal_search_directive_row_extra(
+    escape_scorecard: dict[str, Any],
+) -> dict[str, Any]:
+    directive = _dict(escape_scorecard.get("mm_signal_search_directive"))
+    if not directive:
+        return {}
+    return {
+        "mm_signal_search_directive": directive,
+        "mm_signal_search_status": directive.get("status"),
+        "mm_signal_search_failure_mode": directive.get("failure_mode"),
+        "mm_signal_search_success_gate": directive.get("success_gate"),
+        "mm_signal_search_recommended_search_constraint": directive.get(
+            "recommended_search_constraint"
+        ),
+        "mm_signal_search_required_gross_uplift_multiple": directive.get(
+            "best_sample_gated_required_uplift_multiple"
+        ),
+        "mm_signal_search_low_friction_required_gross_uplift_multiple": (
+            directive.get("low_friction_train_confirmed_required_uplift_multiple")
+        ),
+        "mm_signal_search_candidate_shape_name": directive.get(
+            "stable_candidate_shape_name"
+        ),
+        "mm_signal_search_lower_fee_path_not_actionable_now": directive.get(
+            "lower_fee_path_not_actionable_now"
+        ),
+    }
+
+
 def _mm_cost_wall_escape_scorecard(detail: dict[str, Any]) -> dict[str, Any]:
     gross_decomp = _dict(detail.get("gross_edge_cost_decomposition"))
     sample_cost_wall = _dict(detail.get("sample_gated_cost_wall_summary"))
@@ -1842,14 +2014,25 @@ def _mm_cost_wall_escape_scorecard(detail: dict[str, Any]) -> dict[str, Any]:
         else None
     )
 
+    best_current_fee_cell = _dict(
+        gross_decomp.get("best_sample_gated_current_fee_cell")
+    )
     best_gross_edge = _float(gross_decomp.get("best_sample_gated_gross_edge_bps"))
+    if best_gross_edge is None:
+        best_gross_edge = _float(best_current_fee_cell.get("edge_before_fees_bps"))
     best_net = _float(gross_decomp.get("best_gross_cell_net_bps"))
+    if best_net is None:
+        best_net = _float(best_current_fee_cell.get("net_bps"))
     current_fee_round_trip = (
         _float(gross_decomp.get("current_fee_round_trip_bps"))
         if gross_decomp.get("current_fee_round_trip_bps") is not None
         else _float(sample_cost_wall.get("current_fee_round_trip_bps"))
     )
-    if current_fee_round_trip is None and best_gross_edge is not None and best_net is not None:
+    if (
+        current_fee_round_trip is None
+        and best_gross_edge is not None
+        and best_net is not None
+    ):
         current_fee_round_trip = best_gross_edge - best_net
     gap = (
         current_fee_round_trip - best_gross_edge
@@ -1864,8 +2047,9 @@ def _mm_cost_wall_escape_scorecard(detail: dict[str, Any]) -> dict[str, Any]:
     current_fee_positive_count = _int(
         gross_decomp.get("current_fee_positive_sample_gated_cell_count")
     )
-    current_fee_confirmed_count = _int(train_confirmed.get("current_fee_confirmed_count"))
-    best_current_fee_cell = _dict(gross_decomp.get("best_sample_gated_current_fee_cell"))
+    current_fee_confirmed_count = _int(
+        train_confirmed.get("current_fee_confirmed_count")
+    )
     best_current_fee_source = str(best_current_fee_cell.get("source") or "")
     business_status = str(business_actionability.get("status") or "").upper()
     default_low_friction_trigger = (
@@ -1893,7 +2077,10 @@ def _mm_cost_wall_escape_scorecard(detail: dict[str, Any]) -> dict[str, Any]:
         reason = "missing_current_fee_or_best_gross_edge"
         next_trigger = "refresh_mm_cost_wall_inputs_before_strategy_judgment"
         engineering_actionable = True
-    elif gap > 0 and business_status == "STANDARD_FEE_TIER_CLEARS_BUT_SCALE_OR_CAPITAL_GATED":
+    elif (
+        gap > 0
+        and business_status == "STANDARD_FEE_TIER_CLEARS_BUT_SCALE_OR_CAPITAL_GATED"
+    ):
         status = "CURRENT_FEE_GROSS_EDGE_GAP_REQUIRES_NEW_LOW_FRICTION_SIGNAL"
         reason = "lower_fee_path_scale_or_capital_gated_at_current_account_state"
         next_trigger = low_friction_stability_trigger or default_low_friction_trigger
@@ -1908,6 +2095,20 @@ def _mm_cost_wall_escape_scorecard(detail: dict[str, Any]) -> dict[str, Any]:
         reason = "gross_edge_clears_current_fee_but_current_fee_positive_count_absent"
         next_trigger = "run_walk_forward_confirmation_before_any_mm_promotion"
         engineering_actionable = True
+    signal_search_directive = _mm_signal_search_directive(
+        escape_status=status,
+        escape_reason=reason,
+        next_trigger=next_trigger,
+        current_fee_round_trip=current_fee_round_trip,
+        best_gross_edge=best_gross_edge,
+        gap=gap,
+        multiple=multiple,
+        current_fee_positive_count=current_fee_positive_count,
+        current_fee_confirmed_count=current_fee_confirmed_count,
+        best_current_fee_source=best_current_fee_source,
+        business_status=business_status,
+        low_friction_stability=low_friction_stability,
+    )
 
     return {
         "schema_version": "mm_cost_wall_escape_v2",
@@ -1915,6 +2116,7 @@ def _mm_cost_wall_escape_scorecard(detail: dict[str, Any]) -> dict[str, Any]:
         "reason": reason,
         "next_trigger": next_trigger,
         "engineering_actionable": engineering_actionable,
+        "mm_signal_search_directive": signal_search_directive,
         "required_current_fee_gross_edge_bps": _round_or_none(current_fee_round_trip),
         "best_sample_gated_gross_edge_bps": _round_or_none(best_gross_edge),
         "gross_edge_gap_to_current_fee_bps": _round_or_none(
@@ -3808,6 +4010,7 @@ def classify_profitability_blocker(
         )
         cost_shortfall = _float(cost_wall.get("best_fee_round_trip_shortfall_bps"))
         escape_scorecard = _mm_cost_wall_escape_scorecard(detail)
+        signal_search_extra = _mm_signal_search_directive_row_extra(escape_scorecard)
 
         if failure_status == "NO_TRAIN_POSITIVE_CELL":
             if escape_scorecard.get("status") == "CURRENT_FEE_HOLDOUT_GROSS_NOT_TRAIN_CONFIRMED":
@@ -3881,6 +4084,7 @@ def classify_profitability_blocker(
                                 "best_low_friction_signal_holdout_gross_candidate"
                             )
                         ),
+                        **signal_search_extra,
                     },
                 )
             if gross_status == "GROSS_EDGE_BELOW_CURRENT_FEE_COST_WALL":
@@ -3992,6 +4196,7 @@ def classify_profitability_blocker(
                         "best_walk_forward_holdout_gross_candidate": gross_decomp.get(
                             "best_walk_forward_holdout_gross_candidate"
                         ),
+                        **signal_search_extra,
                     },
                 )
             return _finish_blocker_row(
@@ -4052,6 +4257,7 @@ def classify_profitability_blocker(
                     "business_path_operator_action_required": (
                         business_actionability.get("operator_action_required")
                     ),
+                    **signal_search_extra,
                 },
             )
         if cost_shortfall is not None and cost_shortfall > 0:

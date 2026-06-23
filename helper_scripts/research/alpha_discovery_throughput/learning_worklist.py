@@ -60,6 +60,15 @@ _EVIDENCE_KEYS = (
     "low_friction_best_train_confirmed_min_gross_bps",
     "low_friction_train_confirmed_gap_to_current_fee_bps",
     "business_path_actionability_status",
+    "mm_signal_search_directive",
+    "mm_signal_search_status",
+    "mm_signal_search_failure_mode",
+    "mm_signal_search_success_gate",
+    "mm_signal_search_recommended_search_constraint",
+    "mm_signal_search_required_gross_uplift_multiple",
+    "mm_signal_search_low_friction_required_gross_uplift_multiple",
+    "mm_signal_search_candidate_shape_name",
+    "mm_signal_search_lower_fee_path_not_actionable_now",
     "candidate_replay_status",
     "candidate_replay_sample_count",
     "candidate_replay_net_bps_mean",
@@ -624,7 +633,10 @@ def _learning_objective(row: dict[str, Any], task_type: str) -> str:
     if task_type == "bounded_probe_execution_realism":
         return "measure_probe_slippage_timing_and_fill_quality_against_matched_control_edge"
     if task_type == "mm_signal_search":
-        return "find_train_confirmed_low_friction_mm_signal_that_clears_current_fee"
+        return (
+            "find_or_amplify_train_confirmed_low_friction_mm_signal_that_clears_"
+            "current_fee"
+        )
     if task_type == "fee_path_review":
         return "treat_lower_fee_path_as_business_scale_constraint_not_alpha_proof"
     if task_type == "polymarket_execution_realism":
@@ -813,6 +825,11 @@ def _completion_evidence_required(task_type: str) -> list[str]:
         ]
     if task_type == "mm_signal_search":
         return [
+            "mm_signal_search_directive records failure mode and search constraint",
+            (
+                "required gross uplift multiple is reduced by a new candidate "
+                "or removed by train confirmation"
+            ),
             "low_friction_train_confirmed_gross_status shows current_fee_confirmed candidate",
             "train and holdout sample-gated gross edge clear current fee round trip",
             "walk_forward or AEG evidence is generated before promotion review",
