@@ -42,6 +42,12 @@ from cost_gate_learning_lane.false_negative_candidate_packet import (
     build_false_negative_candidate_packet,
     render_false_negative_candidate_packet_markdown,
 )
+from cost_gate_learning_lane.false_negative_operator_review import (
+    APPROVED_FOR_PREFLIGHT_STATUS as FALSE_NEGATIVE_APPROVED_FOR_PREFLIGHT_STATUS,
+    PENDING_OPERATOR_REVIEW_STATUS as FALSE_NEGATIVE_PENDING_OPERATOR_REVIEW_STATUS,
+    build_false_negative_operator_review,
+    expected_false_negative_operator_review_typed_confirm,
+)
 from cost_gate_learning_lane.status import (
     ACTIVATION_PREFLIGHT_SCHEMA_VERSION,
     REQUIRED_SOURCE_RELATIVE_PATHS,
@@ -3639,6 +3645,138 @@ def test_false_negative_candidate_packet_ranks_cost_gate_escape_paths():
     markdown = render_false_negative_candidate_packet_markdown(packet)
     assert "grid_trading|AVAXUSDT|Sell" in markdown
     assert "ma_crossover|ETHUSDT|Sell" in markdown
+
+
+def _false_negative_candidate_packet_fixture() -> dict:
+    scorecard = build_blocked_signal_outcome_review(
+        [
+            {
+                "record_type": "blocked_signal_outcome",
+                "generated_at_utc": "2026-06-21T12:15:00+00:00",
+                "attempt_id": "fn-1",
+                "side_cell_key": "grid_trading|AVAXUSDT|Sell",
+                "strategy_name": "grid_trading",
+                "symbol": "AVAXUSDT",
+                "side": "Sell",
+                "gross_bps": 12.0,
+                "cost_bps": 4.0,
+                "realized_net_bps": 8.0,
+                "horizon_minutes": 60,
+            },
+            {
+                "record_type": "blocked_signal_outcome",
+                "generated_at_utc": "2026-06-21T13:15:00+00:00",
+                "attempt_id": "fn-2",
+                "side_cell_key": "grid_trading|AVAXUSDT|Sell",
+                "strategy_name": "grid_trading",
+                "symbol": "AVAXUSDT",
+                "side": "Sell",
+                "gross_bps": 7.0,
+                "cost_bps": 4.0,
+                "realized_net_bps": 3.0,
+                "horizon_minutes": 60,
+            },
+            {
+                "record_type": "blocked_signal_outcome",
+                "generated_at_utc": "2026-06-21T14:15:00+00:00",
+                "attempt_id": "fn-3",
+                "side_cell_key": "grid_trading|AVAXUSDT|Sell",
+                "strategy_name": "grid_trading",
+                "symbol": "AVAXUSDT",
+                "side": "Sell",
+                "gross_bps": 6.0,
+                "cost_bps": 4.0,
+                "realized_net_bps": 2.0,
+                "horizon_minutes": 60,
+            },
+        ],
+        cfg=BlockedOutcomeReviewConfig(min_outcomes_per_side_cell=3),
+        now_utc=dt.datetime(2026, 6, 21, 15, 0, tzinfo=dt.timezone.utc),
+    )
+    return build_false_negative_candidate_packet(
+        scorecard,
+        now_utc=dt.datetime(2026, 6, 21, 15, 5, tzinfo=dt.timezone.utc),
+    )
+
+
+def test_false_negative_operator_review_defers_without_authority():
+    packet = _false_negative_candidate_packet_fixture()
+    review = build_false_negative_operator_review(
+        false_negative_candidate_packet=packet,
+        now_utc=dt.datetime(2026, 6, 21, 15, 10, tzinfo=dt.timezone.utc),
+    )
+
+    assert review["schema_version"] == "cost_gate_false_negative_operator_review_v1"
+    assert review["status"] == FALSE_NEGATIVE_PENDING_OPERATOR_REVIEW_STATUS
+    assert review["selected_side_cell_key"] == "grid_trading|AVAXUSDT|Sell"
+    assert review["selected_false_negative_rank"] == 1
+    assert review["operator_review_approved_for_preflight"] is False
+    assert review["answers"]["bounded_demo_probe_preflight_approved"] is False
+    assert review["answers"]["review_grants_runtime_authority"] is False
+    assert review["answers"]["bounded_demo_probe_authorized"] is False
+    assert review["answers"]["global_cost_gate_lowering_recommended"] is False
+    assert review["answers"]["probe_authority_granted"] is False
+    assert review["answers"]["order_authority_granted"] is False
+    assert review["answers"]["promotion_evidence"] is False
+    assert review["typed_confirm_expected"] == (
+        "approve_cost_gate_false_negative_preflight:"
+        "grid_trading|AVAXUSDT|Sell:1"
+    )
+    assert all(gate["passed"] for gate in review["gates"][:4])
+
+
+def test_false_negative_operator_review_requires_exact_approval_phrase():
+    packet = _false_negative_candidate_packet_fixture()
+    missing = build_false_negative_operator_review(
+        false_negative_candidate_packet=packet,
+        decision="approve-preflight",
+        operator_id="pm",
+        typed_confirm="wrong",
+        now_utc=dt.datetime(2026, 6, 21, 15, 10, tzinfo=dt.timezone.utc),
+    )
+    assert missing["status"] == "TYPED_CONFIRM_REQUIRED"
+    assert missing["operator_review_approved_for_preflight"] is False
+    assert missing["probe_authority_granted"] is False
+    assert missing["order_authority_granted"] is False
+
+    top = packet["ranked_false_negative_candidates"][0]
+    typed_confirm = expected_false_negative_operator_review_typed_confirm(
+        top["side_cell_key"],
+        top["false_negative_rank"],
+    )
+    approved = build_false_negative_operator_review(
+        false_negative_candidate_packet=packet,
+        decision="approve-preflight",
+        operator_id="pm",
+        typed_confirm=typed_confirm,
+        now_utc=dt.datetime(2026, 6, 21, 15, 10, tzinfo=dt.timezone.utc),
+    )
+    assert approved["status"] == FALSE_NEGATIVE_APPROVED_FOR_PREFLIGHT_STATUS
+    assert approved["operator_review_approved_for_preflight"] is True
+    assert approved["answers"]["bounded_demo_probe_preflight_approved"] is True
+    assert approved["answers"]["review_grants_runtime_authority"] is False
+    assert approved["answers"]["bounded_demo_probe_authorized"] is False
+    assert approved["probe_authority_granted"] is False
+    assert approved["order_authority_granted"] is False
+    assert approved["promotion_evidence"] is False
+    assert approved["next_actions"][0] == (
+        "build_candidate_matched_bounded_demo_probe_preflight_for_approved_false_negative"
+    )
+
+
+def test_false_negative_operator_review_blocks_authority_bearing_input():
+    packet = _false_negative_candidate_packet_fixture()
+    packet["answers"]["probe_authority_granted"] = True
+    review = build_false_negative_operator_review(
+        false_negative_candidate_packet=packet,
+        now_utc=dt.datetime(2026, 6, 21, 15, 10, tzinfo=dt.timezone.utc),
+    )
+
+    assert review["status"] == "AUTHORITY_BOUNDARY_VIOLATION"
+    assert review["blocking_gates"][0] == "authority_boundary_preserved"
+    assert review["operator_review_approved_for_preflight"] is False
+    assert review["answers"]["probe_authority_granted"] is False
+    assert review["answers"]["order_authority_granted"] is False
 
 
 def test_runtime_adapter_outcome_rows_are_idempotent_and_feed_disable():

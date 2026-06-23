@@ -115,6 +115,47 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
         if false_negative_packet_next_actions
         else "refresh_cost_gate_false_negative_candidate_packet"
     )
+    false_negative_operator_review_present = (
+        detail.get("false_negative_operator_review_present") is True
+    )
+    false_negative_operator_review_source_ok = (
+        detail.get("false_negative_operator_review_source_ok") is True
+    )
+    false_negative_operator_review_status = str(
+        detail.get("false_negative_operator_review_status") or ""
+    ).upper()
+    false_negative_operator_review_next_actions = _list(
+        detail.get("false_negative_operator_review_next_actions")
+    )
+    false_negative_operator_review_next_trigger = (
+        str(false_negative_operator_review_next_actions[0])
+        if false_negative_operator_review_next_actions
+        else "refresh_cost_gate_false_negative_operator_review"
+    )
+    false_negative_operator_review_approved = (
+        detail.get("false_negative_operator_review_approved_for_preflight") is True
+        or detail.get(
+            "false_negative_operator_review_bounded_demo_probe_preflight_approved"
+        )
+        is True
+    )
+    false_negative_operator_review_grants_runtime_authority = (
+        detail.get("false_negative_operator_review_review_grants_runtime_authority")
+        is True
+        or detail.get("false_negative_operator_review_probe_authority_granted")
+        is True
+        or detail.get("false_negative_operator_review_order_authority_granted")
+        is True
+        or detail.get(
+            "false_negative_operator_review_global_cost_gate_lowering_recommended"
+        )
+        is True
+        or str(
+            detail.get("false_negative_operator_review_main_cost_gate_adjustment")
+            or "NONE"
+        )
+        != "NONE"
+    )
     historical_review = _dict(detail.get("historical_scorecard_review"))
     historical_review_status = str(
         detail.get("historical_scorecard_review_status")
@@ -737,6 +778,58 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             }
 
     if blocked_review_status == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT":
+        if (
+            false_negative_operator_review_present
+            and not false_negative_operator_review_source_ok
+        ):
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "cost_gate_false_negative_operator_review_stale_or_unreadable",
+                "blocker_class": "source_health",
+                "primary_blocker": (
+                    "cost_gate_false_negative_operator_review_refresh_required"
+                ),
+                "next_trigger": false_negative_operator_review_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if (
+            false_negative_operator_review_source_ok
+            and (
+                false_negative_operator_review_status == "AUTHORITY_BOUNDARY_VIOLATION"
+                or false_negative_operator_review_grants_runtime_authority
+            )
+        ):
+            return {
+                "action": BLOCK,
+                "reason": "cost_gate_false_negative_operator_review_authority_violation",
+                "blocker_class": "source_health",
+                "primary_blocker": (
+                    "cost_gate_false_negative_operator_review_must_not_grant_runtime_authority"
+                ),
+                "next_trigger": (
+                    "remove_false_negative_review_authority_grant_before_preflight"
+                ),
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if (
+            false_negative_operator_review_source_ok
+            and false_negative_operator_review_approved
+        ):
+            return {
+                "action": READY_FOR_PROBE,
+                "reason": (
+                    "cost_gate_false_negative_operator_review_approved_for_preflight"
+                ),
+                "blocker_class": "candidate_review_ready",
+                "primary_blocker": (
+                    "cost_gate_false_negative_bounded_demo_probe_preflight_missing"
+                ),
+                "next_trigger": false_negative_operator_review_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
         if (
             false_negative_packet_status
             == "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW"
@@ -3925,6 +4018,73 @@ def classify_profitability_blocker(
                 ),
                 "false_negative_candidate_packet_promotion_evidence": detail.get(
                     "false_negative_candidate_packet_promotion_evidence"
+                ),
+                "false_negative_operator_review_status": detail.get(
+                    "false_negative_operator_review_status"
+                ),
+                "false_negative_operator_review_reason": detail.get(
+                    "false_negative_operator_review_reason"
+                ),
+                "false_negative_operator_review_decision": detail.get(
+                    "false_negative_operator_review_decision"
+                ),
+                "false_negative_operator_review_next_actions": detail.get(
+                    "false_negative_operator_review_next_actions"
+                ),
+                "false_negative_operator_review_selected_side_cell_key": detail.get(
+                    "false_negative_operator_review_selected_side_cell_key"
+                ),
+                "false_negative_operator_review_selected_rank": detail.get(
+                    "false_negative_operator_review_selected_rank"
+                ),
+                "false_negative_operator_review_blocking_gate_count": detail.get(
+                    "false_negative_operator_review_blocking_gate_count"
+                ),
+                "false_negative_operator_review_blocking_gates": detail.get(
+                    "false_negative_operator_review_blocking_gates"
+                ),
+                "false_negative_operator_review_typed_confirm_expected": detail.get(
+                    "false_negative_operator_review_typed_confirm_expected"
+                ),
+                "false_negative_operator_review_approved_for_preflight": detail.get(
+                    "false_negative_operator_review_approved_for_preflight"
+                ),
+                "false_negative_operator_review_bounded_demo_probe_preflight_approved": (
+                    detail.get(
+                        "false_negative_operator_review_bounded_demo_probe_preflight_approved"
+                    )
+                ),
+                "false_negative_operator_review_review_grants_runtime_authority": (
+                    detail.get(
+                        "false_negative_operator_review_review_grants_runtime_authority"
+                    )
+                ),
+                "false_negative_operator_review_global_cost_gate_lowering_recommended": (
+                    detail.get(
+                        "false_negative_operator_review_global_cost_gate_lowering_recommended"
+                    )
+                ),
+                "false_negative_operator_review_probe_authority_granted": detail.get(
+                    "false_negative_operator_review_probe_authority_granted"
+                ),
+                "false_negative_operator_review_order_authority_granted": detail.get(
+                    "false_negative_operator_review_order_authority_granted"
+                ),
+                "false_negative_operator_review_promotion_evidence": detail.get(
+                    "false_negative_operator_review_promotion_evidence"
+                ),
+                "false_negative_operator_review_candidate_avg_net_bps": detail.get(
+                    "false_negative_operator_review_candidate_avg_net_bps"
+                ),
+                "false_negative_operator_review_candidate_net_cost_cushion_bps": (
+                    detail.get(
+                        "false_negative_operator_review_candidate_net_cost_cushion_bps"
+                    )
+                ),
+                "false_negative_operator_review_candidate_wrongful_block_score": (
+                    detail.get(
+                        "false_negative_operator_review_candidate_wrongful_block_score"
+                    )
                 ),
                 "blocked_signal_outcome_review": blocked_review or None,
                 "profit_learning_decision_packet_status": detail.get(
