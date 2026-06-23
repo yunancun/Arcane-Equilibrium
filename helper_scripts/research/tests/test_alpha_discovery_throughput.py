@@ -712,6 +712,31 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
     assert blockers["mm_verdict_maker_edge"]["cost_wall_escape_scorecard"][
         "schema_version"
     ] == "mm_cost_wall_escape_v2"
+    directive = blockers["mm_verdict_maker_edge"]["mm_signal_search_directive"]
+    assert directive["schema_version"] == "mm_signal_search_directive_v1"
+    assert directive["status"] == "SEARCH_REQUIRED_EDGE_UPLIFT"
+    assert directive["failure_mode"] == (
+        "current_fee_cost_wall_low_friction_holdout_not_train_confirmed_"
+        "lower_fee_path_scale_or_capital_gated"
+    )
+    assert directive["recommended_search_constraint"] == (
+        "require_train_and_holdout_sample_gated_min_gross_ge_current_fee_round_trip"
+    )
+    assert directive["best_sample_gated_required_uplift_multiple"] == 1.7621
+    assert (
+        directive["low_friction_train_confirmed_required_uplift_multiple"]
+        == 6.3492
+    )
+    assert directive["stable_candidate_shape_name"] == (
+        "quoted_half_spread_bps_train_p90_and_recent_trade_count_30s_train_p10"
+    )
+    assert directive["lower_fee_path_not_actionable_now"] is True
+    assert blockers["mm_verdict_maker_edge"]["mm_signal_search_status"] == (
+        "SEARCH_REQUIRED_EDGE_UPLIFT"
+    )
+    assert blockers["mm_verdict_maker_edge"][
+        "mm_signal_search_required_gross_uplift_multiple"
+    ] == 1.7621
     assert blockers["mm_verdict_maker_edge"]["cost_wall_escape_scorecard"][
         "low_friction_signal_status"
     ] == "LOW_FRICTION_SIGNAL_HOLDOUT_GROSS_POSITIVE_BELOW_CURRENT_FEE"
@@ -1210,6 +1235,11 @@ def test_mm_holdout_only_current_fee_positive_is_not_review_ready():
     assert row["blocker_class"] == "feature_family_no_edge"
     assert row["primary_blocker"] == "low_friction_current_fee_holdout_not_train_confirmed"
     assert row["cost_wall_escape_status"] == "CURRENT_FEE_HOLDOUT_GROSS_NOT_TRAIN_CONFIRMED"
+    assert row["mm_signal_search_status"] == "SEARCH_REQUIRED_TRAIN_CONFIRMATION"
+    assert row["mm_signal_search_failure_mode"] == (
+        "holdout_current_fee_candidate_not_train_confirmed"
+    )
+    assert row["mm_signal_search_required_gross_uplift_multiple"] is None
     assert row["best_sample_gated_current_fee_source"] == "low_friction_signal_holdout"
     assert row["low_friction_train_confirmed_current_fee_count"] == 0
     assert row["low_friction_best_train_confirmed_min_gross_bps"] == 1.402

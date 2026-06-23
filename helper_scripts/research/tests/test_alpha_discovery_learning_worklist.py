@@ -92,7 +92,8 @@ def test_learning_worklist_prioritizes_runtime_reconcile_over_mm_signal_search()
     assert mm_task["requires_operator_authorization"] is False
     assert mm_task["actionability"] == "engineering_actionable"
     assert mm_task["learning_objective"] == (
-        "find_train_confirmed_low_friction_mm_signal_that_clears_current_fee"
+        "find_or_amplify_train_confirmed_low_friction_mm_signal_that_clears_"
+        "current_fee"
     )
     assert mm_task["completion_gate"] == (
         "train_confirmed_sample_gated_current_fee_gross_edge_found"
@@ -103,6 +104,23 @@ def test_learning_worklist_prioritizes_runtime_reconcile_over_mm_signal_search()
     )
     assert mm_task["evidence"]["gross_edge_gap_to_current_fee_bps"] == 1.8
     assert mm_task["evidence"]["required_current_fee_gross_edge_bps"] == 4.0
+    assert mm_task["evidence"]["mm_signal_search_status"] == (
+        "SEARCH_REQUIRED_EDGE_UPLIFT"
+    )
+    assert mm_task["evidence"]["mm_signal_search_failure_mode"] == (
+        "sample_gated_gross_edge_below_current_fee_"
+        "lower_fee_path_scale_or_capital_gated"
+    )
+    assert mm_task["evidence"]["mm_signal_search_required_gross_uplift_multiple"] == (
+        1.8182
+    )
+    assert (
+        mm_task["evidence"]["mm_signal_search_lower_fee_path_not_actionable_now"]
+        is True
+    )
+    assert mm_task["evidence"]["mm_signal_search_recommended_search_constraint"] == (
+        "require_train_and_holdout_sample_gated_min_gross_ge_current_fee_round_trip"
+    )
 
 
 def test_learning_worklist_keeps_promotion_review_ahead_of_replay_history():
