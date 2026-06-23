@@ -265,6 +265,7 @@ _EVIDENCE_KEYS = (
     "demo_learning_evidence_order_flow_evidence_status",
     "demo_learning_evidence_order_flow_evidence_starved",
     "ledger_status",
+    "cost_gate_artifact_spine_summary",
     "blocked_signal_outcome_review_schema_version",
     "blocked_signal_outcome_review_status",
     "blocked_signal_outcome_review_reason",

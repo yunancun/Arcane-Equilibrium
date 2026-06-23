@@ -13,6 +13,10 @@ from alpha_discovery_throughput.discovery_loop import build_discovery_plan
 from alpha_discovery_throughput.edge_snapshot_adapter import build_edge_snapshot, row_is_live_grade
 from alpha_discovery_throughput.execution_spine import evaluate_execution_realism
 from alpha_discovery_throughput.flash_dip_ladder import build_flash_dip_ladder_packets
+from alpha_discovery_throughput.artifact_spine import (
+    COST_GATE_ARTIFACT_SPINE_SCHEMA_VERSION,
+    build_cost_gate_artifact_spine,
+)
 from alpha_discovery_throughput.packet import (
     build_candidate_packet,
     build_direct_report_from_packet,
@@ -55,6 +59,241 @@ def test_latest_json_line_handles_oversized_status_line(tmp_path: Path):
     assert err is None
     assert row is not None
     assert row["status"] == "latest"
+
+
+def test_cost_gate_artifact_spine_separates_evidence_from_governance(tmp_path: Path):
+    data_dir = tmp_path / "openclaw"
+    (data_dir / "cost_gate_counterfactual").mkdir(parents=True)
+    (data_dir / "cost_gate_learning_lane").mkdir(parents=True)
+    (data_dir / "alpha_discovery_throughput").mkdir(parents=True)
+    (data_dir / "cost_gate_counterfactual" / "cost_gate_reject_counterfactual_latest.json").write_text(
+        json.dumps({
+            "schema_version": "cost_gate_reject_counterfactual_v1",
+            "status": "LEARNING_LANE_PROBE_CANDIDATES_PRESENT",
+            "generated_at_utc": "2026-06-23T12:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+    (data_dir / "cost_gate_learning_lane" / "probe_ledger.jsonl").write_text(
+        json.dumps({
+            "record_type": "blocked_signal_outcome",
+            "generated_at_utc": "2026-06-23T12:00:00Z",
+            "realized_net_bps": 5.0,
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+    (data_dir / "cost_gate_learning_lane" / "blocked_outcome_review_latest.json").write_text(
+        json.dumps({
+            "schema_version": "cost_gate_demo_learning_lane_blocked_outcome_review_v2",
+            "status": "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT",
+            "generated_at_utc": "2026-06-23T12:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+    (data_dir / "cost_gate_learning_lane" / "false_negative_candidate_packet_latest.json").write_text(
+        json.dumps({
+            "schema_version": "cost_gate_false_negative_candidate_packet_v1",
+            "status": "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW",
+            "generated_at_utc": "2026-06-23T12:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+
+    spine = build_cost_gate_artifact_spine(
+        data_dir=data_dir,
+        detail={
+            "ledger_status": "BLOCKED_SIGNAL_OUTCOMES_PRESENT",
+            "blocked_signal_outcome_review_status": (
+                "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
+            ),
+            "false_negative_candidate_packet_present": True,
+            "false_negative_candidate_packet_source_ok": True,
+            "false_negative_candidate_packet_status": (
+                "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW"
+            ),
+            "false_negative_operator_review_present": True,
+            "false_negative_operator_review_source_ok": False,
+            "false_negative_operator_review_status": "PENDING_OPERATOR_REVIEW",
+            "false_negative_operator_review_source_error": "stale_artifact",
+        },
+    )
+
+    summary = spine["summary"]
+    assert spine["schema_version"] == COST_GATE_ARTIFACT_SPINE_SCHEMA_VERSION
+    assert summary["spine_node_count"] == 7
+    assert summary["alpha_evidence_node_count"] == 4
+    assert "false_negative_operator_review" in (
+        summary["governance_stale_or_unreadable_artifact_ids"]
+    )
+    assert "false_negative_operator_review" not in (
+        summary["alpha_evidence_stale_or_unreadable_artifact_ids"]
+    )
+    assert summary["probe_result_learning_valid"] is False
+    assert summary["proof_gap"] == (
+        "candidate_matched_fill_backed_matched_control_probe_result_missing"
+    )
+    assert summary["global_cost_gate_lowering_recommended"] is False
+    assert summary["probe_authority_granted"] is False
+    assert summary["order_authority_granted"] is False
+    assert summary["promotion_evidence"] is False
+
+
+def test_cost_gate_artifact_spine_requires_complete_bounded_demo_probe_node(
+    tmp_path: Path,
+):
+    data_dir = tmp_path / "openclaw"
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "bounded_probe_result_review_latest.json").write_text(
+        json.dumps({
+            "schema_version": "cost_gate_bounded_probe_result_review_v1",
+            "status": "BOUNDED_PROBE_RESULT_REVIEW_READY",
+            "generated_at_utc": "2026-06-23T12:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+
+    spine = build_cost_gate_artifact_spine(
+        data_dir=data_dir,
+        detail={
+            "bounded_probe_result_review_present": True,
+            "bounded_probe_result_review_source_ok": True,
+            "bounded_probe_result_review_status": "BOUNDED_PROBE_RESULT_REVIEW_READY",
+        },
+        now_utc=dt.datetime(2026, 6, 23, 13, 0, tzinfo=dt.timezone.utc),
+    )
+
+    bounded_node = {
+        node["node_id"]: node for node in spine["spine_nodes"]
+    }["bounded_demo_probe_readiness"]
+    assert bounded_node["node_ready"] is False
+    assert bounded_node["required_present_member_count"] == 1
+    assert "sealed_horizon_probe_preflight" in (
+        bounded_node["missing_required_artifact_ids"]
+    )
+    assert spine["summary"]["ready_alpha_evidence_node_count"] == 0
+
+
+def test_cost_gate_artifact_spine_rejects_empty_ledger_and_stale_json(
+    tmp_path: Path,
+):
+    data_dir = tmp_path / "openclaw"
+    counterfactual_dir = data_dir / "cost_gate_counterfactual"
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    counterfactual_dir.mkdir(parents=True)
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "probe_ledger.jsonl").write_text("", encoding="utf-8")
+    (counterfactual_dir / "cost_gate_reject_counterfactual_latest.json").write_text(
+        json.dumps({
+            "schema_version": "cost_gate_reject_counterfactual_v1",
+            "status": "LEARNING_LANE_PROBE_CANDIDATES_PRESENT",
+            "generated_at_utc": "2026-06-20T12:00:00Z",
+        }),
+        encoding="utf-8",
+    )
+
+    spine = build_cost_gate_artifact_spine(
+        data_dir=data_dir,
+        detail={"ledger_status": "EMPTY"},
+        now_utc=dt.datetime(2026, 6, 23, 13, 0, tzinfo=dt.timezone.utc),
+    )
+
+    artifacts = {
+        artifact["artifact_id"]: artifact
+        for artifact in spine["physical_artifacts"]
+    }
+    assert artifacts["probe_ledger"]["source_ok"] is False
+    assert artifacts["cost_gate_reject_counterfactual"]["source_ok"] is False
+    assert artifacts["cost_gate_reject_counterfactual"]["source_error"] == (
+        "stale_artifact"
+    )
+    assert "probe_ledger" in (
+        spine["summary"]["alpha_evidence_stale_or_unreadable_artifact_ids"]
+    )
+    assert "cost_gate_reject_counterfactual" in (
+        spine["summary"]["alpha_evidence_stale_or_unreadable_artifact_ids"]
+    )
+
+
+def test_discovery_loop_does_not_let_stale_views_mask_false_negative_queue():
+    plan = build_discovery_plan([
+        {
+            "arm_id": "cost_gate_demo_learning_lane",
+            "gate_status": "OPERATOR_REVIEW",
+            "sample_count": 37,
+            "artifacts_ready": False,
+            "source_ok": True,
+            "detail": {
+                "learning_lane_source_activation_ready": True,
+                "profit_learning_decision_packet_present": True,
+                "profit_learning_decision_packet_source_ok": False,
+                "profit_learning_decision_packet_status": "STALE_ARTIFACT",
+                "blocked_signal_outcome_review_status": (
+                    "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
+                ),
+                "false_negative_candidate_packet_status": (
+                    "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW"
+                ),
+                "false_negative_candidate_packet_source_ok": True,
+                "false_negative_candidate_packet_operator_review_ready": True,
+                "false_negative_candidate_packet_next_actions": [
+                    "operator_review_ranked_false_negative_candidates_before_bounded_demo_probe_authority"
+                ],
+                "false_negative_operator_review_present": True,
+                "false_negative_operator_review_source_ok": False,
+                "false_negative_operator_review_status": "PENDING_OPERATOR_REVIEW",
+            },
+        },
+    ], now_utc=dt.datetime(2026, 6, 23, tzinfo=dt.timezone.utc))
+
+    row = plan["arms"][0]
+    assert row["action"] == "READY_FOR_PROBE"
+    assert row["reason"] == "cost_gate_false_negative_candidate_packet_ready"
+    scorecard_row = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert scorecard_row["primary_blocker"] == (
+        "cost_gate_false_negative_candidates_need_operator_review"
+    )
+    assert scorecard_row["next_trigger"] == (
+        "operator_review_ranked_false_negative_candidates_before_bounded_demo_probe_authority"
+    )
+
+
+def test_discovery_loop_refreshes_stale_false_negative_candidate_packet():
+    plan = build_discovery_plan([
+        {
+            "arm_id": "cost_gate_demo_learning_lane",
+            "gate_status": "OPERATOR_REVIEW",
+            "sample_count": 37,
+            "artifacts_ready": False,
+            "source_ok": True,
+            "detail": {
+                "learning_lane_source_activation_ready": True,
+                "blocked_signal_outcome_review_status": (
+                    "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
+                ),
+                "false_negative_candidate_packet_present": True,
+                "false_negative_candidate_packet_source_ok": False,
+                "false_negative_candidate_packet_status": (
+                    "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW"
+                ),
+                "false_negative_candidate_packet_operator_review_ready": True,
+                "false_negative_candidate_packet_next_actions": [
+                    "refresh_cost_gate_false_negative_candidate_packet"
+                ],
+            },
+        },
+    ], now_utc=dt.datetime(2026, 6, 23, tzinfo=dt.timezone.utc))
+
+    row = plan["arms"][0]
+    assert row["action"] == "RUN_READ_ONLY_CAPTURE"
+    assert row["reason"] == (
+        "cost_gate_false_negative_candidate_packet_stale_or_unreadable"
+    )
+    scorecard_row = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert scorecard_row["primary_blocker"] == (
+        "cost_gate_false_negative_candidate_packet_not_fresh"
+    )
 
 
 def test_learning_summary_mirrors_completion_and_top_evidence_fields():
@@ -3443,6 +3682,7 @@ def test_cost_gate_false_negative_packet_drives_ranked_operator_review_task():
             "false_negative_candidate_packet_status": (
                 "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW"
             ),
+            "false_negative_candidate_packet_source_ok": True,
             "false_negative_candidate_packet_next_actions": [
                 (
                     "operator_review_ranked_false_negative_candidates_before_"
