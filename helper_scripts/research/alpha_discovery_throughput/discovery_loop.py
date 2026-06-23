@@ -3162,6 +3162,9 @@ def classify_profitability_blocker(
                 "profitability_next_move_edge_above_cost_bps": detail.get(
                     "profitability_next_move_edge_above_cost_bps"
                 ),
+                "profitability_next_move_runtime_mutation_required": detail.get(
+                    "profitability_next_move_runtime_mutation_required"
+                ),
                 "profitability_cost_gate_escape_method": detail.get(
                     "profitability_cost_gate_escape_method"
                 ),

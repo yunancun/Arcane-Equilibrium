@@ -3230,6 +3230,9 @@ def _profitability_path_summary_from_arms(arms: list[dict[str, Any]]) -> dict[st
         "profitability_next_move_edge_above_cost_bps": detail.get(
             "profitability_next_move_edge_above_cost_bps"
         ),
+        "profitability_next_move_runtime_mutation_required": detail.get(
+            "profitability_next_move_runtime_mutation_required"
+        ),
         "profitability_global_cost_gate_lowering_recommended": detail.get(
             "profitability_global_cost_gate_lowering_recommended"
         ),
@@ -3436,6 +3439,9 @@ def _history_row(killboard: dict[str, Any]) -> dict[str, Any]:
         ),
         "profitability_next_move_edge_above_cost_bps": kb.get(
             "profitability_next_move_edge_above_cost_bps"
+        ),
+        "profitability_next_move_runtime_mutation_required": kb.get(
+            "profitability_next_move_runtime_mutation_required"
         ),
         "profitability_global_cost_gate_lowering_recommended": kb.get(
             "profitability_global_cost_gate_lowering_recommended"

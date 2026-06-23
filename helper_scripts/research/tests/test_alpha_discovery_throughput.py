@@ -1826,6 +1826,7 @@ def _write_profitability_path_scorecard_latest(
     data: Path,
     *,
     generated_at: str = "2026-06-21T18:04:45+00:00",
+    next_move_runtime_mutation_required: bool = False,
 ) -> Path:
     path = (
         data
@@ -1904,7 +1905,7 @@ def _write_profitability_path_scorecard_latest(
                     "cost_threshold_bps": 4.0,
                     "edge_above_cost_bps": 5.0,
                 },
-                "runtime_mutation_required": False,
+                "runtime_mutation_required": next_move_runtime_mutation_required,
             },
             "cost_gate_escape_strategy": {
                 "method": "bounded_side_cell_horizon_probe_after_preflight",
@@ -1966,7 +1967,7 @@ def _write_profitability_path_scorecard_latest(
                 "move_class": "operator_reviews_sealed_horizon_edge_before_probe",
                 "primary_objective": "turn blocked-signal edge into bounded demo probe learning evidence",
                 "recommended_action": "operator_review_sealed_horizon_probe_preflight",
-                "runtime_mutation_required": False,
+                "runtime_mutation_required": next_move_runtime_mutation_required,
             },
             "recommended_engineering_sequence": [
                 "operator_review_sealed_horizon_probe_preflight",
@@ -3130,6 +3131,9 @@ def test_cost_gate_profitability_path_scorecard_reaches_learning_surfaces(tmp_pa
         "operator_review_sealed_horizon_probe_preflight"
     )
     assert arm["detail"]["profitability_next_move_edge_above_cost_bps"] == 5.0
+    assert (
+        arm["detail"]["profitability_next_move_runtime_mutation_required"] is False
+    )
     assert arm["detail"]["profitability_primary_cost_gate_root_blocker"]["gate"] == (
         "operator_sealed_horizon_review_recorded"
     )
@@ -3151,6 +3155,7 @@ def test_cost_gate_profitability_path_scorecard_reaches_learning_surfaces(tmp_pa
     assert blocker["profitability_next_move_recommended_action"] == (
         "operator_review_sealed_horizon_probe_preflight"
     )
+    assert blocker["profitability_next_move_runtime_mutation_required"] is False
     assert blocker["profitability_edge_amplification_backlog"][0][
         "edge_above_cost_bps"
     ] == 5.0
@@ -3170,6 +3175,9 @@ def test_cost_gate_profitability_path_scorecard_reaches_learning_surfaces(tmp_pa
     ] == "SEALED_HORIZON_PREFLIGHT_NOT_READY"
     assert task["evidence"]["profitability_next_move_recommended_action"] == (
         "operator_review_sealed_horizon_probe_preflight"
+    )
+    assert (
+        task["evidence"]["profitability_next_move_runtime_mutation_required"] is False
     )
 
 
@@ -3216,11 +3224,39 @@ def test_runtime_killboard_mirrors_profitability_closure(tmp_path):
     )
     assert kb["profitability_next_move_candidate_key"] == "ma_crossover|BTCUSDT|Sell"
     assert kb["profitability_next_move_edge_above_cost_bps"] == 5.0
+    assert kb["profitability_next_move_runtime_mutation_required"] is False
     assert kb["sealed_horizon_operator_review_status"] == "PENDING_OPERATOR_REVIEW"
     assert kb["sealed_horizon_operator_review_decision"] == "defer"
     assert kb["sealed_horizon_operator_review_approved"] is False
     assert kb["sealed_horizon_operator_review_review_grants_runtime_authority"] is False
     assert kb["sealed_horizon_operator_review_order_authority_granted"] is False
+
+
+def test_runtime_killboard_carries_profitability_runtime_mutation_required(tmp_path):
+    data = tmp_path / "openclaw"
+    repo = _init_clean_source_repo_with_origin(tmp_path)
+    _write_profitability_path_scorecard_latest(
+        data,
+        next_move_runtime_mutation_required=True,
+    )
+
+    killboard = build_runtime_killboard(
+        data_dir=data,
+        repo_root=repo,
+        now_utc=dt.datetime(2026, 6, 21, 18, 5, tzinfo=dt.timezone.utc),
+    )
+
+    kb = killboard["killboard"]
+    tasks = {
+        row["arm_id"]: row
+        for row in killboard["learning_worklist"]["tasks"]
+    }
+    task = tasks["cost_gate_demo_learning_lane"]
+
+    assert kb["profitability_next_move_runtime_mutation_required"] is True
+    assert (
+        task["evidence"]["profitability_next_move_runtime_mutation_required"] is True
+    )
 
 
 def test_cost_gate_profit_packet_sealed_horizon_candidate_reaches_worklist(tmp_path):
