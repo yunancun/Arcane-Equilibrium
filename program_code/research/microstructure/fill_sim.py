@@ -563,6 +563,7 @@ def add_low_friction_microstructure_features(
             f"recent_l1_update_intensity_{suffix}",
             f"side_touch_size_delta_frac_{suffix}",
             f"spread_bps_delta_{suffix}",
+            f"side_mid_move_bps_{suffix}",
         ):
             out[col] = np.nan
 
@@ -603,7 +604,7 @@ def add_low_friction_microstructure_features(
             spread_bps = (ba - bb) / mid * 1e4
         else:
             l1_ts = np.array([], dtype="int64")
-            bid_size = ask_size = spread_bps = np.array([], dtype="float64")
+            bid_size = ask_size = mid = spread_bps = np.array([], dtype="float64")
 
         side_is_bid = out.loc[idx, "side"].astype(str).to_numpy() == "bid"
         q0 = pd.to_numeric(out.loc[idx, "q0"], errors="coerce").to_numpy(dtype="float64")
@@ -611,6 +612,12 @@ def add_low_friction_microstructure_features(
             out.loc[idx, "quoted_half_spread_bps"], errors="coerce"
         ).to_numpy(dtype="float64")
         cur_spread_bps = 2.0 * cur_half_spread
+        if "mid_place" in out:
+            cur_mid = pd.to_numeric(out.loc[idx, "mid_place"], errors="coerce").to_numpy(
+                dtype="float64"
+            )
+        else:
+            cur_mid = np.full(len(idx), np.nan, dtype="float64")
 
         for lookback_s in lookbacks_s:
             look_ns = int(float(lookback_s) * 1e9)
@@ -647,6 +654,7 @@ def add_low_friction_microstructure_features(
                 valid_prev = prev_ix >= 0
                 prev_size = np.full(len(idx), np.nan, dtype="float64")
                 prev_spread = np.full(len(idx), np.nan, dtype="float64")
+                prev_mid = np.full(len(idx), np.nan, dtype="float64")
                 if valid_prev.any():
                     prev_size[valid_prev] = np.where(
                         side_is_bid[valid_prev],
@@ -654,6 +662,7 @@ def add_low_friction_microstructure_features(
                         ask_size[prev_ix[valid_prev]],
                     )
                     prev_spread[valid_prev] = spread_bps[prev_ix[valid_prev]]
+                    prev_mid[valid_prev] = mid[prev_ix[valid_prev]]
                 delta_frac = np.divide(
                     q0 - prev_size,
                     prev_size,
@@ -661,10 +670,18 @@ def add_low_friction_microstructure_features(
                     where=prev_size > 0,
                 )
                 spread_delta = cur_spread_bps - prev_spread
+                mid_move = np.divide(
+                    cur_mid - prev_mid,
+                    prev_mid,
+                    out=np.full(len(idx), np.nan, dtype="float64"),
+                    where=prev_mid > 0,
+                ) * 1e4
+                side_mid_move = np.where(side_is_bid, mid_move, -mid_move)
             else:
                 l1_count = np.zeros(len(idx), dtype="float64")
                 delta_frac = np.full(len(idx), np.nan, dtype="float64")
                 spread_delta = np.full(len(idx), np.nan, dtype="float64")
+                side_mid_move = np.full(len(idx), np.nan, dtype="float64")
 
             out.loc[idx, f"recent_l1_update_count_{suffix}"] = l1_count
             out.loc[idx, f"recent_l1_update_intensity_{suffix}"] = (
@@ -672,6 +689,7 @@ def add_low_friction_microstructure_features(
             )
             out.loc[idx, f"side_touch_size_delta_frac_{suffix}"] = delta_frac
             out.loc[idx, f"spread_bps_delta_{suffix}"] = spread_delta
+            out.loc[idx, f"side_mid_move_bps_{suffix}"] = side_mid_move
 
     return out
 
@@ -1851,6 +1869,8 @@ def fill_sim_low_friction_signal_scorecard(
             "side_touch_size_delta_frac_30s",
             "spread_bps_delta_10s",
             "spread_bps_delta_30s",
+            "side_mid_move_bps_10s",
+            "side_mid_move_bps_30s",
             "side_book_imb",
         )
         if col in trials
@@ -1975,6 +1995,8 @@ def fill_sim_low_friction_signal_scorecard(
             ("side_touch_size_delta_frac_30s", ("train_p75", "train_p90")),
             ("spread_bps_delta_10s", ("train_p75", "train_p90")),
             ("spread_bps_delta_30s", ("train_p75", "train_p90")),
+            ("side_mid_move_bps_10s", ("train_p75", "train_p90")),
+            ("side_mid_move_bps_30s", ("train_p75", "train_p90")),
             ("side_book_imb", ("train_p75", "train_p90")),
         ):
             if col in low_feature_cols:
@@ -1994,6 +2016,7 @@ def fill_sim_low_friction_signal_scorecard(
                 f"side_touch_size_delta_frac_{suffix}",
                 f"side_recent_trade_imbalance_{suffix}",
                 f"spread_bps_delta_{suffix}",
+                f"side_mid_move_bps_{suffix}",
                 "side_book_imb",
             )
             for quiet_col in quiet_cols:
@@ -2046,6 +2069,8 @@ def fill_sim_low_friction_signal_scorecard(
         candidate_shape = (
             "spread_quiet_abs_qty_interaction_v1"
             if b_col.startswith("recent_trade_abs_qty_")
+            else "spread_quiet_mid_support_interaction_v1"
+            if c_col.startswith("side_mid_move_bps_")
             else "spread_quiet_book_imbalance_interaction_v1"
             if c_col == "side_book_imb"
             else "spread_quiet_touch_interaction_v1"

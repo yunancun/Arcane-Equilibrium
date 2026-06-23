@@ -506,6 +506,7 @@ def test_low_friction_feature_enrichment_uses_strictly_prior_windows():
                 "side": "bid",
                 "t_place": t_place,
                 "q0": 12.0,
+                "mid_place": 100.2,
                 "quoted_half_spread_bps": 2.0,
             },
             {
@@ -513,6 +514,7 @@ def test_low_friction_feature_enrichment_uses_strictly_prior_windows():
                 "side": "ask",
                 "t_place": t_place,
                 "q0": 8.0,
+                "mid_place": 100.2,
                 "quoted_half_spread_bps": 2.0,
             },
         ]
@@ -562,6 +564,8 @@ def test_low_friction_feature_enrichment_uses_strictly_prior_windows():
     assert enriched.at[0, "recent_l1_update_count_10s"] == pytest.approx(2.0)
     assert enriched.at[0, "side_touch_size_delta_frac_10s"] == pytest.approx(0.2)
     assert enriched.at[1, "side_touch_size_delta_frac_10s"] == pytest.approx(-1.0 / 9.0)
+    assert enriched.at[0, "side_mid_move_bps_10s"] == pytest.approx(20.0)
+    assert enriched.at[1, "side_mid_move_bps_10s"] == pytest.approx(-20.0)
 
 
 def test_low_friction_signal_scorecard_confirms_holdout_current_fee_cell():
@@ -938,6 +942,70 @@ def test_low_friction_interaction_uses_book_imbalance_support():
     assert best["feature"] == "low_friction_interaction"
     assert best["candidate_shape"] == "spread_quiet_book_imbalance_interaction_v1"
     assert "side_book_imb_train_p75" in best["name"]
+    assert best["min_train_holdout_gross_bps"] >= 4.0
+
+
+def test_low_friction_interaction_uses_side_mid_move_support():
+    rows = []
+    for _half in range(2):
+        for spread, trade_count, mid_move, half_spread in (
+            (6.0, 0.0, 1.0, 8.0),    # only spread + quiet + side mid support clears fee
+            (6.0, 10.0, 1.0, 0.0),   # spread + mid support alone stays below fee
+            (6.0, 0.0, -1.0, 0.0),   # spread + quiet alone stays below fee
+            (1.0, 0.0, 1.0, 0.0),    # quiet + mid support alone stays below fee
+        ):
+            for _ in range(32):
+                rows.append(
+                    {
+                        "symbol": "ABCUSDT",
+                        "side": "bid",
+                        "outcome": "fill",
+                        "quoted_half_spread_bps": spread,
+                        "recent_trade_count_10s": trade_count,
+                        "recent_l1_update_count_10s": trade_count,
+                        "recent_l1_update_intensity_10s": trade_count / 10.0,
+                        "side_mid_move_bps_10s": mid_move,
+                        "side_book_imb": -1.0,
+                        "side_recent_trade_imbalance_10s": -1.0,
+                        "side_touch_size_delta_frac_10s": -1.0,
+                        "spread_bps_delta_10s": -1.0,
+                        "half_spread_bps": half_spread,
+                        "adverse_sel_bps@15": 1.0,
+                    }
+                )
+    trials = _conditional_trials(rows)
+    for col in (
+        "recent_trade_count_10s",
+        "recent_l1_update_count_10s",
+        "recent_l1_update_intensity_10s",
+        "side_mid_move_bps_10s",
+        "side_book_imb",
+        "side_recent_trade_imbalance_10s",
+        "side_touch_size_delta_frac_10s",
+        "spread_bps_delta_10s",
+    ):
+        trials[col] = [row[col] for row in rows]
+    adverse = _conditional_adverse(trials, rows)
+
+    scorecard = fill_sim_low_friction_signal_scorecard(
+        trials,
+        adverse,
+        horizons=(15,),
+        span_hours=1.0,
+        primary_horizon_s=15,
+    )
+
+    train_confirmed = scorecard["train_confirmed_gross_scorecard"]
+    assert train_confirmed["status"] == (
+        "LOW_FRICTION_TRAIN_CONFIRMED_GROSS_CLEARS_CURRENT_FEE"
+    )
+    assert scorecard["interaction_candidate_shape_counts"][
+        "spread_quiet_mid_support_interaction_v1"
+    ] > 0
+    best = scorecard["best_train_confirmed_gross_candidate"]
+    assert best["feature"] == "low_friction_interaction"
+    assert best["candidate_shape"] == "spread_quiet_mid_support_interaction_v1"
+    assert "side_mid_move_bps_10s_train_p75" in best["name"]
     assert best["min_train_holdout_gross_bps"] >= 4.0
 
 
