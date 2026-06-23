@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-23 MM 60s Low-Friction Lookback Search
+
+- `fill_sim_low_friction_signal_scorecard()` now derives low-friction recent-flow/L1-churn features, combos, and interactions from `LOW_FRICTION_LOOKBACKS_S=(10,30,60)`, adding 60s PIT context without changing Cost Gate, sample gates, or authority.
+- Linux artifact refresh at `2026-06-23T17:39:03Z` reports runtime source `SYNCED_CLEAN d4306ea1`; forced fill_sim processed `1,546,849` post-filter L1 rows / `36` symbols and evaluated `1,114` low-friction candidates.
+- PM read: the best latest train-confirmed 60s interaction has train gross `0.778bps`, holdout gross `0.556bps`, min gross `0.556bps`, and still sits `3.444bps` below the current 4bp round-trip fee. This is useful search coverage / negative evidence, not Cost Gate lowering, probe/order authority, or promotion proof.
+
 ## 2026-06-23 MM Motif Frontier Amplification
 
 - `fill_sim_history.py` now emits same-motif low-friction candidate frontiers; `mm_motif_amplification_packet_v1` uses frontier-best min train/holdout gross as the primary uplift baseline while preserving the old best-cell value for provenance.
