@@ -104,10 +104,19 @@ latest_matching_path() {
     done
     printf '%s' "$latest"
 }
-HORIZON_SEALED_REPLAY_JSON="$(latest_matching_path \
+canonical_or_latest_matching_path() {
+    local canonical="$1"
+    shift
+    if [[ -f "$canonical" ]]; then
+        printf '%s' "$canonical"
+        return
+    fi
+    latest_matching_path "$@"
+}
+HORIZON_SEALED_REPLAY_JSON="$(canonical_or_latest_matching_path \
     "$DATA"/cost_gate_learning_lane/horizon_specific_sealed_replay_latest.json \
     "$DATA"/profitability_refresh/*/horizon_specific_sealed_replay/horizon_specific_sealed_replay_latest.json)"
-HORIZON_LEARNING_EVIDENCE_JSON="$(latest_matching_path \
+HORIZON_LEARNING_EVIDENCE_JSON="$(canonical_or_latest_matching_path \
     "$DATA"/cost_gate_learning_lane/sealed_horizon_learning_evidence_latest.json \
     "$DATA"/profitability_refresh/*/sealed_horizon_learning_evidence*/sealed_horizon_learning_evidence_latest.json)"
 SEALED_OPERATOR_REVIEW_DIR="$DATA/cost_gate_learning_lane"

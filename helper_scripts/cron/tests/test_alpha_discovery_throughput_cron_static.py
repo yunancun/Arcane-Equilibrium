@@ -36,6 +36,9 @@ def test_wrapper_refreshes_activation_packet_before_alpha_runner() -> None:
     assert "sealed_horizon_operator_review_latest.json" in src
     assert "sealed_horizon_operator_review_latest.md" in src
     assert "sealed_horizon_operator_review_stdout.json" in src
+    assert "canonical_or_latest_matching_path()" in src
+    assert '"$DATA"/cost_gate_learning_lane/sealed_horizon_learning_evidence_latest.json' in src
+    assert '"$DATA"/cost_gate_learning_lane/horizon_specific_sealed_replay_latest.json' in src
     assert "--sealed-horizon-learning-evidence-json" in src
     assert "--sealed-horizon-operator-review-json" in src
     assert "--decision defer" in src
