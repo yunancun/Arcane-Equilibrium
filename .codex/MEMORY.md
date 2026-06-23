@@ -98,9 +98,11 @@ Known paths:
 - Paper is not active promotion evidence unless an explicit future operator
   decision reopens it.
 - Cost Gate bounded Demo probe source readiness can be reviewed, but this is
-  not authority: as of 2026-06-23 the near-touch Adapter and reject-path
-  placement preview wiring grant no Cost Gate lowering, no probe authority, and
-  no order authority unless the operator separately authorizes it.
+  not authority: as of 2026-06-23 the near-touch Adapter, reject-path placement
+  preview wiring, and `bounded_demo_probe_operator_authorization_v1` contract
+  grant no Cost Gate lowering, no active probe authority, and no order
+  authority unless a future bounded operator authorization object is explicitly
+  supplied and accepted by runtime admission.
 - Do not fake AI calls, trading activity, lineage, fills, healthchecks, or test
   results.
 - Bybit API timeout / nonzero `retCode` fails closed; no hidden trading retry
