@@ -127,6 +127,9 @@ def _score_priority(path: dict[str, Any]) -> tuple[int, float]:
         "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_AUTHORITY_BOUNDARY_VIOLATION": 25,
         "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_AUTHORITY_BOUNDARY_VIOLATION": 25,
         "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_NOT_ALIGNED": 25,
+        "MM_REPEATED_CURRENT_FEE_POSITIVE_NEEDS_EXECUTION_REALISM": 35,
+        "MM_CURRENT_FEE_REPEAT_NEEDS_OOS": 36,
+        "MM_SINGLE_WINDOW_CURRENT_FEE_POSITIVE_NEEDS_CONFIRMATION": 37,
         "LOW_FRICTION_MM_GROSS_EDGE_BELOW_CURRENT_FEE": 40,
         "POLYMARKET_ALPHA_GROSS_BELOW_COST_OR_EXECUTION_UNMEASURED": 50,
         "BOUNDED_DEMO_PROBE_RESULT_FAILED_STOP": 85,
@@ -1726,6 +1729,215 @@ def _mm_signal_path(
     )]
 
 
+def _cell_rank(cell: dict[str, Any]) -> tuple[float, float, int]:
+    return (
+        _float(cell.get("net_bps")) or _float(cell.get("net_bps_at_fee")) or -1e9,
+        _float(cell.get("edge_before_fees_bps")) or -1e9,
+        _int(cell.get("n_fill_only") or cell.get("n")),
+    )
+
+
+def _cell_key_from_fields(source: str, cell: dict[str, Any]) -> str:
+    key = _str(cell.get("key"))
+    if key:
+        return key
+    name = _str(cell.get("name") or cell.get("condition"))
+    if name:
+        return f"{source}|{name}"
+    return "|".join([
+        source,
+        _str(cell.get("scope")),
+        _str(cell.get("symbol") or "pooled"),
+        _str(cell.get("queue_position")),
+        _str(cell.get("policy")),
+        _str(cell.get("track")),
+    ])
+
+
+def _current_fee_positive_cells_from_fillsim(
+    fillsim: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    payload = _dict(fillsim)
+    cells: list[dict[str, Any]] = []
+    sources = [
+        ("edge_scorecard", "positive_fill_only_cells_with_sample_gate", "net_bps"),
+        ("conditional_feature_scorecard", "positive_cells_with_sample_gate", "net_bps"),
+    ]
+    for source, field, net_key in sources:
+        for raw in _list(_dict(payload.get(source)).get(field)):
+            if not isinstance(raw, dict):
+                continue
+            cell = dict(raw)
+            net = _float(cell.get(net_key))
+            if net is None or net <= 0.0:
+                continue
+            cell.setdefault("source", source)
+            cell.setdefault("key", _cell_key_from_fields(source, cell))
+            cells.append(cell)
+    fee = _dict(payload.get("maker_fee_sensitivity_scorecard"))
+    current_fee = _float(fee.get("current_maker_fee_bps_per_side"))
+    best_fee_cell = _dict(fee.get("best_sample_gated_break_even_cell"))
+    best_fee_net = _float(best_fee_cell.get("net_bps") or best_fee_cell.get("net_bps_at_fee"))
+    if best_fee_cell and best_fee_net is not None and best_fee_net > 0.0:
+        source = _str(best_fee_cell.get("source")) or "maker_fee_sensitivity_current_fee"
+        best_fee_cell.setdefault("source", source)
+        best_fee_cell["net_bps"] = best_fee_net
+        best_fee_cell.setdefault("key", _cell_key_from_fields(source, best_fee_cell))
+        cells.append(best_fee_cell)
+    for scenario in _list(fee.get("scenarios")):
+        if not isinstance(scenario, dict):
+            continue
+        scenario_fee = _float(scenario.get("maker_fee_bps_per_side"))
+        if (
+            current_fee is not None
+            and scenario_fee is not None
+            and abs(scenario_fee - current_fee) > 1e-9
+        ):
+            continue
+        for raw in _list(scenario.get("positive_sample_gate_cells")):
+            if not isinstance(raw, dict):
+                continue
+            cell = dict(raw)
+            net = _float(cell.get("net_bps_at_fee"))
+            if net is None or net <= 0.0:
+                continue
+            source = "maker_fee_sensitivity_current_fee"
+            cell.setdefault("source", source)
+            cell["net_bps"] = net
+            cell.setdefault("key", _cell_key_from_fields(source, cell))
+            cells.append(cell)
+    cells.sort(key=_cell_rank, reverse=True)
+    return cells
+
+
+def _best_history_current_fee_cell(
+    fillsim_history: dict[str, Any] | None,
+) -> dict[str, Any]:
+    history = _dict(fillsim_history)
+    repeated = _list(history.get("repeated_positive_keys"))
+    repeated_cells = [
+        _dict(row.get("best_cell"))
+        for row in repeated
+        if isinstance(row, dict) and _dict(row.get("best_cell"))
+    ]
+    if repeated_cells:
+        repeated_cells.sort(key=_cell_rank, reverse=True)
+        return repeated_cells[0]
+    best_window = _dict(history.get("best_sample_gated_break_even_window"))
+    best_cell = _dict(best_window.get("cell") or best_window.get("best_cell"))
+    if (_float(best_cell.get("net_bps")) or 0.0) > 0.0:
+        return best_cell
+    for summary in _list(history.get("window_summaries")):
+        cell = _dict(_dict(summary).get("best_current_fee_positive_cell"))
+        if cell:
+            return cell
+    return {}
+
+
+def _mm_current_fee_confirmation_status(
+    history_status: str,
+    current_fee_positive_windows: int,
+) -> str:
+    if history_status == "HISTORY_REPEAT_HOLDOUT_OR_CURRENT_FEE_POSITIVE":
+        return "MM_REPEATED_CURRENT_FEE_POSITIVE_NEEDS_EXECUTION_REALISM"
+    if history_status == "HISTORY_CURRENT_FEE_REPEAT_IN_WINDOW_NEEDS_OOS":
+        return "MM_CURRENT_FEE_REPEAT_NEEDS_OOS"
+    if current_fee_positive_windows > 1:
+        return "MM_CURRENT_FEE_REPEAT_NEEDS_OOS"
+    return "MM_SINGLE_WINDOW_CURRENT_FEE_POSITIVE_NEEDS_CONFIRMATION"
+
+
+def _mm_current_fee_confirmation_path(
+    fillsim: dict[str, Any] | None,
+    fillsim_history: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    history = _dict(fillsim_history)
+    cells = _current_fee_positive_cells_from_fillsim(fillsim)
+    history_cell = _best_history_current_fee_cell(fillsim_history)
+    if history_cell:
+        cells.append(history_cell)
+    cells = [cell for cell in cells if (_float(cell.get("net_bps")) or 0.0) > 0.0]
+    if not cells:
+        return []
+    cells.sort(key=_cell_rank, reverse=True)
+    cell = cells[0]
+    sensitivity = _dict(_dict(fillsim).get("maker_fee_sensitivity_scorecard"))
+    current_fee_round_trip = (
+        _float(sensitivity.get("current_fee_round_trip_bps"))
+        or (2.0 * (_float(sensitivity.get("current_maker_fee_bps_per_side")) or 2.0))
+    )
+    history_status = _str(history.get("status"))
+    current_fee_positive_windows = _int(
+        history.get("current_fee_sample_gated_positive_windows")
+    )
+    status = _mm_current_fee_confirmation_status(
+        history_status,
+        current_fee_positive_windows,
+    )
+    if status == "MM_REPEATED_CURRENT_FEE_POSITIVE_NEEDS_EXECUTION_REALISM":
+        next_gate = "oos_walk_forward_and_demo_execution_realism_for_repeated_mm_cell"
+        next_action = "confirm_repeated_current_fee_positive_mm_cell_with_oos_and_execution_realism"
+    elif status == "MM_CURRENT_FEE_REPEAT_NEEDS_OOS":
+        next_gate = "oos_walk_forward_holdout_for_repeated_current_fee_mm_cell"
+        next_action = "build_oos_holdout_confirmation_for_repeated_current_fee_positive_mm_cell"
+    else:
+        next_gate = "repeat_current_fee_positive_cell_across_independent_windows_and_oos_execution_realism"
+        next_action = "confirm_mm_current_fee_positive_cell_across_independent_windows_before_any_authority"
+    return [_base_path(
+        path_id="mm_current_fee_cell_confirmation",
+        path_class="mm_current_fee_confirmation",
+        status=status,
+        candidate_key=_cell_key_from_fields(_str(cell.get("source")) or "fillsim", cell),
+        why=(
+            "A sample-gated maker-fill cell is already positive after the current "
+            "round-trip fee in the latest evidence. This can cross the Cost Gate only "
+            "if the same edge repeats across independent windows, survives OOS review, "
+            "and remains capturable under maker execution realism."
+        ),
+        current_edge_bps=cell.get("edge_before_fees_bps"),
+        cost_threshold_bps=current_fee_round_trip,
+        sample_count=cell.get("n_fill_only") or cell.get("n"),
+        required_next_gate=next_gate,
+        next_action=next_action,
+        evidence={
+            "source": cell.get("source"),
+            "symbol": cell.get("symbol"),
+            "scope": cell.get("scope"),
+            "queue_position": cell.get("queue_position"),
+            "policy": cell.get("policy"),
+            "track": cell.get("track"),
+            "n_fill_only": cell.get("n_fill_only") or cell.get("n"),
+            "edge_before_fees_bps": cell.get("edge_before_fees_bps"),
+            "net_bps": cell.get("net_bps"),
+            "break_even_maker_fee_bps_per_side": cell.get(
+                "break_even_maker_fee_bps_per_side"
+            ),
+            "fee_round_trip_shortfall_bps": cell.get(
+                "fee_round_trip_shortfall_bps"
+            ),
+            "history_status": history_status or None,
+            "history_reason": history.get("reason"),
+            "history_current_fee_sample_gated_positive_windows": (
+                current_fee_positive_windows
+            ),
+            "history_repeated_positive_key_count": len(
+                _list(history.get("repeated_positive_keys"))
+            ),
+            "history_valid_windows": history.get("valid_windows"),
+            "history_distinct_window_dates": history.get("distinct_window_dates"),
+            "maker_fee_sensitivity_status": sensitivity.get("status"),
+            "current_maker_fee_bps_per_side": sensitivity.get(
+                "current_maker_fee_bps_per_side"
+            ),
+            "current_fee_round_trip_bps": current_fee_round_trip,
+            "confirmation_boundary": (
+                "current-fee positive candidate only; needs repeated-window, OOS, "
+                "inventory-risk, and execution-realism confirmation before any authority"
+            ),
+        },
+    )]
+
+
 def _fee_or_scale_path(
     fillsim: dict[str, Any] | None,
     fillsim_history: dict[str, Any] | None,
@@ -2170,6 +2382,7 @@ def _edge_amplification_backlog(candidates: list[dict[str, Any]]) -> list[dict[s
     preferred_classes = [
         "horizon_retiming_or_side_cell_filter",
         "bounded_demo_learning_probe",
+        "mm_current_fee_confirmation",
         "low_friction_mm_alpha_search",
         "external_event_leadlag_alpha",
         "event_driven_listing_fade",
@@ -2789,6 +3002,7 @@ def _profitability_engineering_closure(
         "edge_amplification_levers": [
             _lever_status(candidates, "horizon_retiming_or_side_cell_filter"),
             _lever_status(candidates, "bounded_demo_learning_probe"),
+            _lever_status(candidates, "mm_current_fee_confirmation"),
             _lever_status(candidates, "low_friction_mm_alpha_search"),
             _lever_status(candidates, "external_event_leadlag_alpha"),
             _lever_status(candidates, "event_driven_listing_fade"),
@@ -2845,6 +3059,7 @@ def build_profitability_path_scorecard(
         bounded_probe_result_review=bounded_probe_result_review,
         bounded_probe_execution_realism_review=bounded_probe_execution_realism_review,
     ))
+    candidates.extend(_mm_current_fee_confirmation_path(fillsim, fillsim_history))
     candidates.extend(_mm_signal_path(fillsim, fillsim_history))
     candidates.extend(_fee_or_scale_path(fillsim, fillsim_history))
     candidates.extend(_polymarket_path(polymarket_leadlag))
@@ -2878,6 +3093,9 @@ def build_profitability_path_scorecard(
         "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_READY_FOR_OPERATOR_REVIEW",
         "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_OBJECT_REVIEW_REQUIRED",
         "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_REJECTED",
+        "MM_REPEATED_CURRENT_FEE_POSITIVE_NEEDS_EXECUTION_REALISM",
+        "MM_CURRENT_FEE_REPEAT_NEEDS_OOS",
+        "MM_SINGLE_WINDOW_CURRENT_FEE_POSITIVE_NEEDS_CONFIRMATION",
     }]
     if not candidates:
         status = "NO_PROFITABILITY_PATH_ARTIFACTS"
@@ -2920,6 +3138,7 @@ def build_profitability_path_scorecard(
                 p["class"] in {
                     "bounded_demo_learning_probe",
                     "horizon_retiming_or_side_cell_filter",
+                    "mm_current_fee_confirmation",
                     "low_friction_mm_alpha_search",
                     "external_event_leadlag_alpha",
                     "event_driven_listing_fade",
