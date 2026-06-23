@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use crate::bounded_probe_near_touch::BoundedProbePlacementDecision;
 use crate::demo_learning_lane::{
     normalize_reject_reason_code, side_cell_key, AdmissionDecision, RejectEvent,
     ADAPTER_SCHEMA_VERSION,
@@ -18,6 +19,8 @@ pub const CAPTURE_ERROR_LEDGER_RECORD_TYPE: &str = "probe_capture_error";
 pub const CAPTURE_ERROR_DECISION: &str = "ADMISSION_NOT_EVALUATED";
 pub const ADMISSION_LEDGER_BOUNDARY: &str =
     "admission-ledger artifact only; no PG, Bybit, order, config, risk, auth, or runtime mutation";
+pub const BOUNDED_PROBE_PLACEMENT_PREVIEW_BOUNDARY: &str =
+    "bounded-probe placement preview only; no Bybit call, order submission, or authority grant";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AdmissionLedgerEvent {
@@ -45,6 +48,8 @@ pub struct AdmissionLedgerRecord {
     pub side_cell_key: String,
     pub event: AdmissionLedgerEvent,
     pub runtime_state: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bounded_probe_placement: Option<Value>,
     pub reason: String,
     pub boundary: &'static str,
 }
@@ -92,6 +97,15 @@ pub fn build_admission_ledger_record(
     event: &RejectEvent,
     generated_at_utc: DateTime<Utc>,
 ) -> AdmissionLedgerRecord {
+    build_admission_ledger_record_with_placement(decision, event, generated_at_utc, None)
+}
+
+pub fn build_admission_ledger_record_with_placement(
+    decision: &AdmissionDecision,
+    event: &RejectEvent,
+    generated_at_utc: DateTime<Utc>,
+    placement: Option<&BoundedProbePlacementDecision>,
+) -> AdmissionLedgerRecord {
     let ledger_event = build_admission_ledger_event(event);
     let runtime_state = decision
         .runtime_state
@@ -109,6 +123,7 @@ pub fn build_admission_ledger_record(
         side_cell_key: decision.side_cell_key.clone(),
         event: ledger_event,
         runtime_state,
+        bounded_probe_placement: placement.map(bounded_probe_placement_value),
         reason: decision.reason.clone(),
         boundary: ADMISSION_LEDGER_BOUNDARY,
     }
@@ -136,6 +151,32 @@ pub fn build_capture_error_ledger_record(
         capture_error: capture_error.trim().to_string(),
         reason: "runtime_admission_evaluation_failed",
         boundary: ADMISSION_LEDGER_BOUNDARY,
+    }
+}
+
+fn bounded_probe_placement_value(decision: &BoundedProbePlacementDecision) -> Value {
+    match decision {
+        BoundedProbePlacementDecision::Submit(attempt) => json!({
+            "record_type": attempt.record_type,
+            "placement_decision": "would_submit_if_authorized",
+            "order_submission_performed": false,
+            "side_cell_key": attempt.side_cell_key,
+            "limit_price": attempt.limit_price,
+            "touch_gap_bps": attempt.touch_gap_bps,
+            "reference_price": attempt.reference_price,
+            "bbo_age_ms": attempt.bbo_age_ms,
+            "boundary": BOUNDED_PROBE_PLACEMENT_PREVIEW_BOUNDARY,
+        }),
+        BoundedProbePlacementDecision::Skip(block) => json!({
+            "record_type": block.record_type,
+            "placement_decision": "skip",
+            "order_submission_performed": false,
+            "side_cell_key": block.side_cell_key,
+            "reason": block.reason.as_str(),
+            "touch_gap_bps": block.touch_gap_bps,
+            "bbo_age_ms": block.bbo_age_ms,
+            "boundary": BOUNDED_PROBE_PLACEMENT_PREVIEW_BOUNDARY,
+        }),
     }
 }
 

@@ -17,12 +17,13 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
+use crate::bounded_probe_near_touch::BoundedProbePlacementDecision;
 use crate::demo_learning_lane::{
     evaluate_probe_admission, AdmissionConfig, DemoLearningLanePlan, LedgerRecord, RejectEvent,
 };
 use crate::demo_learning_lane_ledger::{
-    attempt_id_for_reject_event, build_admission_ledger_record, build_capture_error_ledger_record,
-    AdmissionLedgerRecord,
+    attempt_id_for_reject_event, build_admission_ledger_record_with_placement,
+    build_capture_error_ledger_record, AdmissionLedgerRecord,
 };
 
 const CHANNEL_CAPACITY: usize = 4096;
@@ -38,6 +39,7 @@ struct WriterMsg {
     event: RejectEvent,
     risk_state: String,
     now_ms: u64,
+    placement_decision: Option<BoundedProbePlacementDecision>,
 }
 
 #[derive(Clone)]
@@ -61,11 +63,22 @@ impl DemoLearningLaneWriterHandle {
     }
 
     pub fn record_reject_event(&self, event: RejectEvent, risk_state: &str, now_ms: u64) {
+        self.record_reject_event_with_placement(event, risk_state, now_ms, None);
+    }
+
+    pub fn record_reject_event_with_placement(
+        &self,
+        event: RejectEvent,
+        risk_state: &str,
+        now_ms: u64,
+        placement_decision: Option<BoundedProbePlacementDecision>,
+    ) {
         if let Some(ref tx) = self.tx {
             let msg = WriterMsg {
                 event,
                 risk_state: risk_state.trim().to_string(),
                 now_ms,
+                placement_decision,
             };
             match tx.try_send(msg) {
                 Ok(()) => {}
@@ -172,6 +185,7 @@ async fn run_writer(
                     &msg.risk_state,
                     msg.now_ms,
                     Utc::now(),
+                    msg.placement_decision.as_ref(),
                 ) {
                     Ok(Some(record)) => {
                         match record.to_json_string() {
@@ -240,6 +254,7 @@ pub(crate) fn build_runtime_admission_record(
     risk_state: &str,
     now_ms: u64,
     generated_at_utc: DateTime<Utc>,
+    placement_decision: Option<&BoundedProbePlacementDecision>,
 ) -> Result<Option<AdmissionLedgerRecord>, String> {
     let ledger_rows = read_ledger_rows(ledger_path)?;
     let attempt_id = attempt_id_for_reject_event(event);
@@ -262,10 +277,11 @@ pub(crate) fn build_runtime_admission_record(
         false,
         risk_state,
     );
-    Ok(Some(build_admission_ledger_record(
+    Ok(Some(build_admission_ledger_record_with_placement(
         &decision,
         event,
         generated_at_utc,
+        placement_decision,
     )))
 }
 
@@ -296,6 +312,9 @@ fn epoch_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bounded_probe_near_touch::{
+        BoundedProbeAttemptPlacement, BoundedProbePlacementDecision,
+    };
     use crate::demo_learning_lane::ELIGIBLE_REJECT_REASON_CODE;
     use crate::demo_learning_lane_ledger::{
         CAPTURE_ERROR_DECISION, CAPTURE_ERROR_LEDGER_RECORD_TYPE,
@@ -370,6 +389,7 @@ mod tests {
             DateTime::parse_from_rfc3339("2026-06-21T10:50:00Z")
                 .unwrap()
                 .with_timezone(&Utc),
+            None,
         )
         .unwrap()
         .expect("first event should build a ledger row");
@@ -400,10 +420,60 @@ mod tests {
             "NORMAL",
             1_782_041_001_000,
             Utc::now(),
+            None,
         )
         .unwrap();
 
         assert!(record.is_none());
+    }
+
+    #[test]
+    fn admission_record_embeds_bounded_probe_placement_preview_without_order() {
+        let tmp = TempDir::new().unwrap();
+        let plan_path = tmp.path().join("plan.json");
+        let ledger_path = tmp.path().join("probe_ledger.jsonl");
+        std::fs::write(&plan_path, plan_json("2026-06-21T10:49:45Z")).unwrap();
+        let placement = BoundedProbePlacementDecision::Submit(BoundedProbeAttemptPlacement {
+            record_type: "bounded_probe_attempt",
+            side_cell_key: "ma_crossover|ETHUSDT|Sell".to_string(),
+            limit_price: 3_499.9,
+            touch_gap_bps: 12.5,
+            reference_price: 3_500.0,
+            bbo_age_ms: 0,
+        });
+
+        let record = build_runtime_admission_record(
+            &plan_path,
+            &ledger_path,
+            &reject_event(),
+            "NORMAL",
+            1_782_041_001_000,
+            DateTime::parse_from_rfc3339("2026-06-21T10:50:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+            Some(&placement),
+        )
+        .unwrap()
+        .expect("first event should build a ledger row");
+
+        assert_eq!(record.decision, "ORDER_AUTHORITY_NOT_GRANTED");
+        assert!(!record.allowed_to_submit_order);
+        let placement = record
+            .bounded_probe_placement
+            .as_ref()
+            .expect("placement preview should be embedded");
+        assert_eq!(
+            placement["record_type"].as_str(),
+            Some("bounded_probe_attempt")
+        );
+        assert_eq!(
+            placement["placement_decision"].as_str(),
+            Some("would_submit_if_authorized")
+        );
+        assert_eq!(
+            placement["order_submission_performed"].as_bool(),
+            Some(false)
+        );
     }
 
     #[test]
@@ -454,6 +524,7 @@ mod tests {
             event: reject_event(),
             risk_state: "NORMAL".to_string(),
             now_ms: 1_782_041_001_000,
+            placement_decision: None,
         })
         .await
         .unwrap();
@@ -493,6 +564,7 @@ mod tests {
             event: reject_event(),
             risk_state: "NORMAL".to_string(),
             now_ms: 1_782_041_001_000,
+            placement_decision: None,
         })
         .await
         .unwrap();

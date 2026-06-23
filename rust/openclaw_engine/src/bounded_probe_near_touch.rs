@@ -7,6 +7,9 @@
 //! 這個 Module 只封裝未來 bounded probe 的近觸碰 post-only 報價數學；
 //! 它不接 runtime、交易所或授權開關，避免把 source readiness 誤判成已可下單。
 
+pub const DEFAULT_MAX_FRESH_BBO_AGE_MS: u64 = 1_000;
+pub const DEFAULT_MAX_INITIAL_PASSIVE_GAP_BPS: f64 = 75.0;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BboSnapshot {
     pub best_bid: f64,
@@ -60,6 +63,18 @@ pub struct BoundedProbePlacementRequest {
     pub is_buy: bool,
     pub now_ms: u64,
     pub bbo: BboSnapshot,
+    pub config: BoundedProbeNearTouchConfig,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoundedProbeOptionalBboPlacementRequest {
+    pub side_cell_key: String,
+    pub is_buy: bool,
+    pub now_ms: u64,
+    pub best_bid: Option<f64>,
+    pub best_ask: Option<f64>,
+    pub tick_size: Option<f64>,
+    pub observed_at_ms: Option<u64>,
     pub config: BoundedProbeNearTouchConfig,
 }
 
@@ -217,14 +232,45 @@ pub fn post_only_near_touch_or_skip(
     })
 }
 
+pub fn post_only_near_touch_from_optional_bbo_or_skip(
+    request: &BoundedProbeOptionalBboPlacementRequest,
+) -> BoundedProbePlacementDecision {
+    let (Some(best_bid), Some(best_ask), Some(tick_size), Some(observed_at_ms)) = (
+        request.best_bid,
+        request.best_ask,
+        request.tick_size,
+        request.observed_at_ms,
+    ) else {
+        return BoundedProbePlacementDecision::Skip(BoundedProbeTouchabilityBlock::new(
+            &request.side_cell_key,
+            BoundedProbePlacementSkipReason::MissingFreshBbo,
+            None,
+            None,
+        ));
+    };
+
+    post_only_near_touch_or_skip(&BoundedProbePlacementRequest {
+        side_cell_key: request.side_cell_key.clone(),
+        is_buy: request.is_buy,
+        now_ms: request.now_ms,
+        bbo: BboSnapshot {
+            best_bid,
+            best_ask,
+            tick_size,
+            observed_at_ms,
+        },
+        config: request.config,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn cfg() -> BoundedProbeNearTouchConfig {
         BoundedProbeNearTouchConfig {
-            max_fresh_bbo_age_ms: 1_000,
-            max_initial_passive_gap_bps: 75.0,
+            max_fresh_bbo_age_ms: DEFAULT_MAX_FRESH_BBO_AGE_MS,
+            max_initial_passive_gap_bps: DEFAULT_MAX_INITIAL_PASSIVE_GAP_BPS,
         }
     }
 
@@ -334,5 +380,51 @@ mod tests {
             panic!("expected skip");
         };
         assert_eq!(block.reason, BoundedProbePlacementSkipReason::InvalidBbo);
+    }
+
+    #[test]
+    fn optional_bbo_missing_quote_records_touchability_block() {
+        let decision = post_only_near_touch_from_optional_bbo_or_skip(
+            &BoundedProbeOptionalBboPlacementRequest {
+                side_cell_key: "ma_crossover|BTCUSDT|Sell".to_string(),
+                is_buy: false,
+                now_ms: 10_500,
+                best_bid: Some(100.0),
+                best_ask: None,
+                tick_size: Some(0.1),
+                observed_at_ms: Some(10_500),
+                config: cfg(),
+            },
+        );
+        let BoundedProbePlacementDecision::Skip(block) = decision else {
+            panic!("expected skip");
+        };
+        assert_eq!(block.record_type, "bounded_probe_touchability_block");
+        assert_eq!(
+            block.reason,
+            BoundedProbePlacementSkipReason::MissingFreshBbo
+        );
+    }
+
+    #[test]
+    fn optional_bbo_complete_routes_to_near_touch_math() {
+        let decision = post_only_near_touch_from_optional_bbo_or_skip(
+            &BoundedProbeOptionalBboPlacementRequest {
+                side_cell_key: "ma_crossover|BTCUSDT|Sell".to_string(),
+                is_buy: false,
+                now_ms: 10_500,
+                best_bid: Some(100.0),
+                best_ask: Some(100.2),
+                tick_size: Some(0.1),
+                observed_at_ms: Some(10_000),
+                config: cfg(),
+            },
+        );
+        let BoundedProbePlacementDecision::Submit(attempt) = decision else {
+            panic!("expected submit");
+        };
+        assert_eq!(attempt.record_type, "bounded_probe_attempt");
+        assert_eq!(attempt.limit_price, 100.2);
+        assert_eq!(attempt.bbo_age_ms, 500);
     }
 }
