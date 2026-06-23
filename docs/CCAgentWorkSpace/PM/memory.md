@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-23 MM Current-Fee Confirmation Path
+
+- `alpha_profitability_path_scorecard_v1` now surfaces sample-gated current-fee-positive MM cells as `mm_current_fee_cell_confirmation` instead of hiding them under fee/scale or low-friction below-fee search.
+- Linux artifact refresh at `2026-06-23T17:58:25Z` on runtime source `SYNCED_CLEAN b0b803ea` ranks the SOXLUSDT informed-skip maker cell #3: gross `4.715bps`, current fee `4.0bps`, net cushion `0.715bps`, sample `43`, break-even maker fee `2.357bp/side`.
+- PM read: this is a concrete Cost Gate crossing lead, but only one current-fee-positive history window with 0 repeated positive keys. Next proof is independent-window repeat + OOS/walk-forward + inventory-risk + maker execution-realism, not Cost Gate lowering, probe/order authority, or promotion proof.
+
 ## 2026-06-23 MM 60s Low-Friction Lookback Search
 
 - `fill_sim_low_friction_signal_scorecard()` now derives low-friction recent-flow/L1-churn features, combos, and interactions from `LOW_FRICTION_LOOKBACKS_S=(10,30,60)`, adding 60s PIT context without changing Cost Gate, sample gates, or authority.
