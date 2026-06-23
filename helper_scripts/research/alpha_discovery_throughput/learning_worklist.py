@@ -262,6 +262,7 @@ _EVIDENCE_KEYS = (
     "profitability_next_move_recommended_action",
     "profitability_next_move_candidate_key",
     "profitability_next_move_edge_above_cost_bps",
+    "profitability_next_move_runtime_mutation_required",
     "profitability_cost_gate_escape_method",
     "profitability_cost_gate_escape_global_cost_gate_lowering",
     "profitability_cost_gate_escape_probe_authority_granted",
