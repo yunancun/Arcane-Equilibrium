@@ -129,58 +129,76 @@ EXISTING_SEAM_CHECKS: tuple[SourceCheck, ...] = (
 PATCH_REQUIREMENT_CHECKS: tuple[SourceCheck, ...] = (
     SourceCheck(
         check_id="bounded_probe_near_touch_adapter",
-        category="required_patch_seam",
+        category="adapter_module_seam",
         description=(
-            "A Rust authority-path Adapter should apply the placement repair "
-            "plan's post_only_near_touch_or_skip rule to the selected side-cell."
+            "A pure Rust Adapter Module should apply the placement repair plan's "
+            "post_only_near_touch_or_skip rule to the selected side-cell."
         ),
-        required_patterns=("post_only_near_touch_or_skip",),
-        paths=("rust/openclaw_engine/src",),
+        required_patterns=(
+            "post_only_near_touch_or_skip",
+            "BoundedProbePlacementDecision",
+        ),
+        paths=("rust/openclaw_engine/src/bounded_probe_near_touch.rs",),
         missing_reason="near_touch_or_skip_adapter_missing_from_rust_authority_path",
     ),
     SourceCheck(
         check_id="fresh_bbo_age_guard",
-        category="required_patch_seam",
+        category="adapter_module_seam",
         description=(
             "The Adapter should fail closed when the BBO snapshot is older than "
             "max_fresh_bbo_age_ms."
         ),
         required_patterns=("max_fresh_bbo_age_ms",),
-        paths=("rust/openclaw_engine/src",),
+        paths=("rust/openclaw_engine/src/bounded_probe_near_touch.rs",),
         missing_reason="fresh_bbo_age_guard_missing_from_rust_authority_path",
     ),
     SourceCheck(
         check_id="max_initial_gap_guard",
-        category="required_patch_seam",
+        category="adapter_module_seam",
         description=(
             "The Adapter should compute initial touch gap bps and skip when it "
             "exceeds max_initial_passive_gap_bps."
         ),
         required_patterns=("max_initial_passive_gap_bps", "touch_gap_bps"),
-        paths=("rust/openclaw_engine/src",),
+        paths=("rust/openclaw_engine/src/bounded_probe_near_touch.rs",),
         missing_reason="initial_touch_gap_guard_missing_from_rust_authority_path",
     ),
     SourceCheck(
         check_id="touchability_skip_record",
-        category="required_patch_seam",
+        category="adapter_module_seam",
         description=(
             "Skipped near-touch attempts should be recorded as "
             "bounded_probe_touchability_block rather than silently lost."
         ),
         required_patterns=("bounded_probe_touchability_block",),
-        paths=("rust/openclaw_engine/src",),
+        paths=("rust/openclaw_engine/src/bounded_probe_near_touch.rs",),
         missing_reason="touchability_skip_record_missing_from_rust_authority_path",
     ),
     SourceCheck(
         check_id="candidate_matched_attempt_lineage",
-        category="required_patch_seam",
+        category="adapter_module_seam",
         description=(
-            "Submitted bounded attempts need candidate-matched lineage so later "
-            "fill/fee/slippage review can compare them with matched blocked controls."
+            "The Adapter output should name bounded_probe_attempt rows and carry "
+            "side_cell_key lineage for later fill/fee/slippage review."
         ),
         required_patterns=("bounded_probe_attempt", "side_cell_key"),
-        paths=("rust/openclaw_engine/src",),
+        paths=("rust/openclaw_engine/src/bounded_probe_near_touch.rs",),
         missing_reason="candidate_matched_attempt_lineage_missing_from_rust_authority_path",
+    ),
+    SourceCheck(
+        check_id="authority_path_wiring",
+        category="authority_path_wiring_seam",
+        description=(
+            "The tick/exchange authority path should call the Adapter before any "
+            "future bounded probe order is submitted."
+        ),
+        required_patterns=(
+            "post_only_near_touch_or_skip",
+            "BoundedProbePlacementRequest",
+            "bounded_probe_attempt",
+        ),
+        paths=("rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs",),
+        missing_reason="authority_path_wiring_missing_from_tick_dispatch",
     ),
 )
 
@@ -411,9 +429,20 @@ def _evaluate_source_check(repo_root: Path, check: SourceCheck) -> dict[str, Any
     }
 
 
+def _check_present(rows: list[dict[str, Any]], check_id: str) -> bool:
+    return any(
+        row.get("check_id") == check_id and row.get("present") is True
+        for row in rows
+    )
+
+
 def _source_readiness(repo_root: Path) -> dict[str, Any]:
-    existing = [_evaluate_source_check(repo_root, check) for check in EXISTING_SEAM_CHECKS]
-    required = [_evaluate_source_check(repo_root, check) for check in PATCH_REQUIREMENT_CHECKS]
+    existing = [
+        _evaluate_source_check(repo_root, check) for check in EXISTING_SEAM_CHECKS
+    ]
+    required = [
+        _evaluate_source_check(repo_root, check) for check in PATCH_REQUIREMENT_CHECKS
+    ]
     missing_existing = [
         row["missing_reason"] for row in existing if row.get("present") is not True
     ]
@@ -426,6 +455,14 @@ def _source_readiness(repo_root: Path) -> dict[str, Any]:
         "required_patch_seams": required,
         "existing_authority_seams_present": not missing_existing,
         "required_patch_seams_present": not missing_required,
+        "adapter_module_present": _check_present(
+            required,
+            "bounded_probe_near_touch_adapter",
+        ),
+        "authority_path_wiring_present": _check_present(
+            required,
+            "authority_path_wiring",
+        ),
         "missing_existing_seams": missing_existing,
         "missing_required_patch_seams": missing_required,
     }
@@ -516,13 +553,23 @@ def _status(
             "required_existing_authority_seams_missing_or_unreadable",
             ["repair_source_scan_or_existing_seam_before_rust_patch"],
         )
-    if source_summary.get("required_patch_seams_present") is not True:
+    if source_summary.get("adapter_module_present") is not True:
         return (
             "RUST_PATCH_REQUIRED_NEAR_TOUCH_PLACEMENT_ADAPTER_MISSING",
             "existing_source_lacks_required_near_touch_or_skip_authority_adapter",
             [
                 "operator_review_existing_rust_authority_path_patch",
                 "implement_bounded_demo_probe_near_touch_or_skip_adapter",
+                "record_skip_and_candidate_matched_attempt_lineage_before_any_order",
+            ],
+        )
+    if source_summary.get("authority_path_wiring_present") is not True:
+        return (
+            "RUST_PATCH_REQUIRED_AUTHORITY_PATH_WIRING_MISSING",
+            "near_touch_adapter_exists_but_tick_dispatch_authority_path_is_not_wired",
+            [
+                "operator_review_tick_dispatch_authority_path_patch",
+                "wire_bounded_demo_probe_adapter_before_any_probe_order_submission",
                 "record_skip_and_candidate_matched_attempt_lineage_before_any_order",
             ],
         )
@@ -583,11 +630,14 @@ def build_bounded_demo_probe_authority_patch_readiness(
             )
             is True,
             "rust_near_touch_authority_adapter_present": source_summary.get(
-                "required_patch_seams_present"
+                "adapter_module_present"
             )
             is True,
-            "rust_patch_required": status
-            == "RUST_PATCH_REQUIRED_NEAR_TOUCH_PLACEMENT_ADAPTER_MISSING",
+            "rust_authority_path_wiring_present": source_summary.get(
+                "authority_path_wiring_present"
+            )
+            is True,
+            "rust_patch_required": status.startswith("RUST_PATCH_REQUIRED_"),
             "runtime_mutation_performed": False,
             "global_cost_gate_lowering_recommended": False,
             "main_cost_gate_adjustment": "NONE",
@@ -612,6 +662,8 @@ def render_markdown(packet: dict[str, Any]) -> str:
         f"- Order mode: `{placement.get('order_mode')}`",
         f"- Existing authority seams present: `{source.get('existing_authority_seams_present')}`",
         f"- Required patch seams present: `{source.get('required_patch_seams_present')}`",
+        f"- Near-touch Adapter present: `{source.get('adapter_module_present')}`",
+        f"- Authority path wiring present: `{source.get('authority_path_wiring_present')}`",
         f"- Missing patch seams: `{source.get('missing_required_patch_seams')}`",
         f"- Boundary: {packet.get('boundary')}",
         "",
