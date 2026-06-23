@@ -110,12 +110,42 @@ HORIZON_SEALED_REPLAY_JSON="$(latest_matching_path \
 HORIZON_LEARNING_EVIDENCE_JSON="$(latest_matching_path \
     "$DATA"/cost_gate_learning_lane/sealed_horizon_learning_evidence_latest.json \
     "$DATA"/profitability_refresh/*/sealed_horizon_learning_evidence*/sealed_horizon_learning_evidence_latest.json)"
+SEALED_OPERATOR_REVIEW_DIR="$DATA/cost_gate_learning_lane"
+SEALED_OPERATOR_REVIEW_JSON="$SEALED_OPERATOR_REVIEW_DIR/sealed_horizon_operator_review_latest.json"
+SEALED_OPERATOR_REVIEW_MD="$SEALED_OPERATOR_REVIEW_DIR/sealed_horizon_operator_review_latest.md"
+SEALED_OPERATOR_REVIEW_STDOUT="$SEALED_OPERATOR_REVIEW_DIR/sealed_horizon_operator_review_stdout.json"
+SEALED_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_SEALED_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS:-24}"
+sealed_operator_review_rc=0
+if [[ -n "$HORIZON_LEARNING_EVIDENCE_JSON" && -f "$HORIZON_LEARNING_EVIDENCE_JSON" ]]; then
+    mkdir -p "$SEALED_OPERATOR_REVIEW_DIR"
+    SEALED_OPERATOR_REVIEW_ARGS=(
+        -m cost_gate_learning_lane.sealed_horizon_operator_review
+        --sealed-horizon-learning-evidence-json "$HORIZON_LEARNING_EVIDENCE_JSON"
+        --decision defer
+        --max-artifact-age-hours "$SEALED_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS"
+        --json-output "$SEALED_OPERATOR_REVIEW_JSON"
+        --output "$SEALED_OPERATOR_REVIEW_MD"
+    )
+    if [[ -f "$DATA/cost_gate_learning_lane/sealed_horizon_probe_preflight_latest.json" ]]; then
+        SEALED_OPERATOR_REVIEW_ARGS+=(
+            --preflight-json "$DATA/cost_gate_learning_lane/sealed_horizon_probe_preflight_latest.json"
+        )
+    fi
+    (
+        cd "$BASE/helper_scripts/research"
+        "$PYBIN" "${SEALED_OPERATOR_REVIEW_ARGS[@]}"
+    ) > "$SEALED_OPERATOR_REVIEW_STDOUT" 2>> "$LOG" || sealed_operator_review_rc=$?
+    echo "[$(ts)] sealed_horizon_operator_review_refresh rc=${sealed_operator_review_rc}" >> "$LOG"
+else
+    echo "[$(ts)] SKIP: sealed horizon operator review refresh missing learning evidence" >> "$LOG"
+fi
 add_profitability_json_arg "--cost-gate-counterfactual-json" "$DATA/cost_gate_counterfactual/cost_gate_reject_counterfactual_latest.json"
 add_profitability_json_arg "--profit-learning-packet-json" "$DATA/cost_gate_learning_lane/profit_learning_decision_packet_latest.json"
 add_profitability_json_arg "--learning-plan-json" "$DATA/cost_gate_learning_lane/demo_learning_lane_plan_latest.json"
 add_profitability_json_arg "--activation-preflight-json" "$DATA/cost_gate_learning_lane/activation_preflight_latest.json"
 add_profitability_json_arg "--horizon-sealed-replay-json" "$HORIZON_SEALED_REPLAY_JSON"
 add_profitability_json_arg "--horizon-learning-evidence-json" "$HORIZON_LEARNING_EVIDENCE_JSON"
+add_profitability_json_arg "--sealed-horizon-operator-review-json" "$SEALED_OPERATOR_REVIEW_JSON"
 add_profitability_json_arg "--sealed-horizon-probe-preflight-json" "$DATA/cost_gate_learning_lane/sealed_horizon_probe_preflight_latest.json"
 add_profitability_json_arg "--bounded-probe-shadow-placement-impact-json" "$DATA/cost_gate_learning_lane/bounded_probe_shadow_placement_impact_latest.json"
 add_profitability_json_arg "--bounded-probe-operator-authorization-json" "$DATA/cost_gate_learning_lane/bounded_probe_operator_authorization_latest.json"

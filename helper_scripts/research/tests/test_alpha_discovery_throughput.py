@@ -2038,6 +2038,56 @@ def _write_sealed_horizon_probe_preflight_latest(
     return path
 
 
+def _write_sealed_horizon_operator_review_latest(
+    data: Path,
+    *,
+    status: str = "PENDING_OPERATOR_REVIEW",
+    decision: str = "defer",
+    generated_at: str = "2026-06-21T18:04:40+00:00",
+) -> Path:
+    path = (
+        data
+        / "cost_gate_learning_lane"
+        / "sealed_horizon_operator_review_latest.json"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": "sealed_horizon_operator_review_v1",
+        "generated_at_utc": generated_at,
+        "status": status,
+        "reason": decision,
+        "decision": decision,
+        "operator_id": None,
+        "review_scope": "preflight_review_only_not_probe_authorization",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "outcome_horizon_minutes": 240,
+        "operator_review_approved": False,
+        "main_cost_gate_adjustment": "NONE",
+        "probe_authority_granted": False,
+        "order_authority_granted": False,
+        "promotion_evidence": False,
+        "blocking_gate_count": 0,
+        "blocking_gates": [],
+        "next_actions": [
+            "operator_review_sealed_horizon_preflight_before_bounded_demo_probe"
+        ],
+        "answers": {
+            "operator_review_approved": False,
+            "sealed_horizon_evidence_ready": True,
+            "sealed_horizon_probe_preflight_aligned": True,
+            "review_grants_runtime_authority": False,
+            "bounded_demo_probe_authorized": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
 def _write_bounded_probe_result_review_latest(
     data: Path,
     *,
@@ -3040,6 +3090,7 @@ def test_cost_gate_profit_packet_probe_candidate_reaches_worklist(tmp_path):
 def test_cost_gate_profitability_path_scorecard_reaches_learning_surfaces(tmp_path):
     data = tmp_path / "openclaw"
     artifact = _write_profitability_path_scorecard_latest(data)
+    review_artifact = _write_sealed_horizon_operator_review_latest(data)
     _write_profit_learning_decision_packet_latest(
         data,
         status="RUN_REJECT_COUNTERFACTUAL",
@@ -3057,6 +3108,18 @@ def test_cost_gate_profitability_path_scorecard_reaches_learning_surfaces(tmp_pa
     assert arm["detail"]["profitability_path_scorecard_status"] == (
         "PROFITABILITY_PATHS_PRESENT_BUT_EXECUTION_EVIDENCE_MISSING"
     )
+    assert arm["detail"]["sealed_horizon_operator_review_source_path"] == str(
+        review_artifact
+    )
+    assert arm["detail"]["sealed_horizon_operator_review_status"] == (
+        "PENDING_OPERATOR_REVIEW"
+    )
+    assert arm["detail"]["sealed_horizon_operator_review_decision"] == "defer"
+    assert arm["detail"]["sealed_horizon_operator_review_approved"] is False
+    assert arm["detail"][
+        "sealed_horizon_operator_review_review_grants_runtime_authority"
+    ] is False
+    assert arm["detail"]["sealed_horizon_operator_review_order_authority_granted"] is False
     assert arm["detail"]["profitability_engineering_closure_status"] == (
         "COST_GATE_ESCAPE_PREFLIGHT_BLOCKED_BY_OPERATOR_REVIEW"
     )
@@ -3114,6 +3177,7 @@ def test_runtime_killboard_mirrors_profitability_closure(tmp_path):
     data = tmp_path / "openclaw"
     repo = _init_clean_source_repo_with_origin(tmp_path)
     _write_profitability_path_scorecard_latest(data)
+    _write_sealed_horizon_operator_review_latest(data)
     _write_profit_learning_decision_packet_latest(
         data,
         status="RUN_REJECT_COUNTERFACTUAL",
@@ -3152,6 +3216,11 @@ def test_runtime_killboard_mirrors_profitability_closure(tmp_path):
     )
     assert kb["profitability_next_move_candidate_key"] == "ma_crossover|BTCUSDT|Sell"
     assert kb["profitability_next_move_edge_above_cost_bps"] == 5.0
+    assert kb["sealed_horizon_operator_review_status"] == "PENDING_OPERATOR_REVIEW"
+    assert kb["sealed_horizon_operator_review_decision"] == "defer"
+    assert kb["sealed_horizon_operator_review_approved"] is False
+    assert kb["sealed_horizon_operator_review_review_grants_runtime_authority"] is False
+    assert kb["sealed_horizon_operator_review_order_authority_granted"] is False
 
 
 def test_cost_gate_profit_packet_sealed_horizon_candidate_reaches_worklist(tmp_path):

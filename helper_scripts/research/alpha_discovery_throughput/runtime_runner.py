@@ -2267,6 +2267,84 @@ def summarize_sealed_horizon_probe_preflight(
     }
 
 
+def summarize_sealed_horizon_operator_review(
+    data_dir: Path,
+    *,
+    now_utc: dt.datetime,
+    max_age_seconds: int = DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS,
+) -> dict[str, Any]:
+    """Summarize sealed horizon operator-review record if present."""
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    path = lane_dir / "sealed_horizon_operator_review_latest.json"
+    payload, err = _read_json(path)
+    if err and err == "missing":
+        fallback = lane_dir / "sealed_horizon_operator_review.json"
+        payload, err = _read_json(fallback)
+        if err is None:
+            path = fallback
+    if err:
+        return {
+            "sealed_horizon_operator_review_present": False,
+            "sealed_horizon_operator_review_source_path": str(path),
+            "sealed_horizon_operator_review_source_error": err,
+        }
+    assert payload is not None
+    generated_at = payload.get("generated_at_utc")
+    fresh, age, freshness_error = _source_fresh(
+        generated_at,
+        now_utc=now_utc,
+        max_age_seconds=max_age_seconds,
+    )
+    answers = payload.get("answers") if isinstance(payload.get("answers"), dict) else {}
+    next_actions = payload.get("next_actions")
+    if not isinstance(next_actions, list):
+        next_actions = []
+    blocking_gates = payload.get("blocking_gates")
+    if not isinstance(blocking_gates, list):
+        blocking_gates = []
+    return {
+        "sealed_horizon_operator_review_present": True,
+        "sealed_horizon_operator_review_status": payload.get("status"),
+        "sealed_horizon_operator_review_decision": payload.get("decision"),
+        "sealed_horizon_operator_review_reason": payload.get("reason"),
+        "sealed_horizon_operator_review_next_actions": next_actions,
+        "sealed_horizon_operator_review_generated_at_utc": generated_at,
+        "sealed_horizon_operator_review_age_seconds": age,
+        "sealed_horizon_operator_review_source_ok": fresh,
+        "sealed_horizon_operator_review_source_path": str(path),
+        "sealed_horizon_operator_review_source_error": freshness_error,
+        "sealed_horizon_operator_review_side_cell_key": payload.get("side_cell_key"),
+        "sealed_horizon_operator_review_outcome_horizon_minutes": payload.get(
+            "outcome_horizon_minutes"
+        ),
+        "sealed_horizon_operator_review_approved": payload.get(
+            "operator_review_approved"
+        ),
+        "sealed_horizon_operator_review_blocking_gate_count": payload.get(
+            "blocking_gate_count"
+        ),
+        "sealed_horizon_operator_review_blocking_gates": blocking_gates,
+        "sealed_horizon_operator_review_review_grants_runtime_authority": answers.get(
+            "review_grants_runtime_authority"
+        ),
+        "sealed_horizon_operator_review_bounded_demo_probe_authorized": answers.get(
+            "bounded_demo_probe_authorized"
+        ),
+        "sealed_horizon_operator_review_order_authority_granted": answers.get(
+            "order_authority_granted"
+        ),
+        "sealed_horizon_operator_review_probe_authority_granted": answers.get(
+            "probe_authority_granted"
+        ),
+        "sealed_horizon_operator_review_main_cost_gate_adjustment": answers.get(
+            "main_cost_gate_adjustment"
+        ),
+        "sealed_horizon_operator_review_promotion_evidence": answers.get(
+            "promotion_evidence"
+        ),
+    }
+
+
 def _bounded_probe_shadow_placement_impact_path(lane_dir: Path) -> Path:
     canonical = lane_dir / "bounded_probe_shadow_placement_impact_latest.json"
     if canonical.exists():
@@ -2860,6 +2938,10 @@ def collect_cost_gate_learning_lane_arm(
         data_dir,
         now_utc=now_utc,
     )
+    sealed_operator_review_summary = summarize_sealed_horizon_operator_review(
+        data_dir,
+        now_utc=now_utc,
+    )
     sealed_probe_preflight_summary = summarize_sealed_horizon_probe_preflight(
         data_dir,
         now_utc=now_utc,
@@ -2936,6 +3018,7 @@ def collect_cost_gate_learning_lane_arm(
                 **stack_dry_run_review_summary,
                 **decision_packet_summary,
                 **profitability_path_scorecard_summary,
+                **sealed_operator_review_summary,
                 **sealed_probe_preflight_summary,
                 **bounded_probe_operator_authorization_summary,
                 **bounded_probe_shadow_placement_impact_summary,
@@ -2989,6 +3072,7 @@ def collect_cost_gate_learning_lane_arm(
             **stack_dry_run_review_summary,
             **decision_packet_summary,
             **profitability_path_scorecard_summary,
+            **sealed_operator_review_summary,
             **sealed_probe_preflight_summary,
             **bounded_probe_operator_authorization_summary,
             **bounded_probe_shadow_placement_impact_summary,
@@ -3154,6 +3238,33 @@ def _profitability_path_summary_from_arms(arms: list[dict[str, Any]]) -> dict[st
         ),
         "profitability_promotion_evidence": detail.get(
             "profitability_promotion_evidence"
+        ),
+        "sealed_horizon_operator_review_present": detail.get(
+            "sealed_horizon_operator_review_present"
+        ),
+        "sealed_horizon_operator_review_status": detail.get(
+            "sealed_horizon_operator_review_status"
+        ),
+        "sealed_horizon_operator_review_decision": detail.get(
+            "sealed_horizon_operator_review_decision"
+        ),
+        "sealed_horizon_operator_review_approved": detail.get(
+            "sealed_horizon_operator_review_approved"
+        ),
+        "sealed_horizon_operator_review_source_ok": detail.get(
+            "sealed_horizon_operator_review_source_ok"
+        ),
+        "sealed_horizon_operator_review_side_cell_key": detail.get(
+            "sealed_horizon_operator_review_side_cell_key"
+        ),
+        "sealed_horizon_operator_review_review_grants_runtime_authority": detail.get(
+            "sealed_horizon_operator_review_review_grants_runtime_authority"
+        ),
+        "sealed_horizon_operator_review_probe_authority_granted": detail.get(
+            "sealed_horizon_operator_review_probe_authority_granted"
+        ),
+        "sealed_horizon_operator_review_order_authority_granted": detail.get(
+            "sealed_horizon_operator_review_order_authority_granted"
         ),
         "profitability_cost_gate_escape_operator_authorization_status": detail.get(
             "profitability_cost_gate_escape_operator_authorization_status"
@@ -3328,6 +3439,12 @@ def _history_row(killboard: dict[str, Any]) -> dict[str, Any]:
         ),
         "profitability_global_cost_gate_lowering_recommended": kb.get(
             "profitability_global_cost_gate_lowering_recommended"
+        ),
+        "sealed_horizon_operator_review_status": kb.get(
+            "sealed_horizon_operator_review_status"
+        ),
+        "sealed_horizon_operator_review_approved": kb.get(
+            "sealed_horizon_operator_review_approved"
         ),
         "learning_worklist_status": kb.get("learning_worklist_status"),
         "learning_task_count": kb.get("learning_task_count"),
