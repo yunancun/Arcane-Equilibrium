@@ -1932,6 +1932,8 @@ def fill_sim_low_friction_signal_scorecard(
             "side_mid_move_bps_10s",
             "side_mid_move_bps_30s",
             "side_book_imb",
+            "q0",
+            "q_eff",
         )
         if col in trials
     ]
@@ -2058,12 +2060,15 @@ def fill_sim_low_friction_signal_scorecard(
             ("side_mid_move_bps_10s", ("train_p75", "train_p90")),
             ("side_mid_move_bps_30s", ("train_p75", "train_p90")),
             ("side_book_imb", ("train_p75", "train_p90")),
+            ("q0", ("train_p10", "train_p25")),
+            ("q_eff", ("train_p10", "train_p25")),
         ):
             if col in low_feature_cols:
                 for label in labels:
                     combo_specs.append(("quoted_half_spread_bps", spread_label, col, label))
 
     interaction_specs = []
+    queue_interaction_specs = []
     for spread_label in ("train_p75", "train_p90"):
         for suffix in ("10s", "30s"):
             quiet_cols = (
@@ -2092,6 +2097,23 @@ def fill_sim_low_friction_signal_scorecard(
                                 spread_label,
                                 quiet_col,
                                 quiet_label,
+                                favorable_col,
+                                favorable_label,
+                            ))
+            queue_cols = ("q0", "q_eff")
+            for queue_col in queue_cols:
+                if queue_col not in low_feature_cols:
+                    continue
+                for queue_label in ("train_p10", "train_p25"):
+                    for favorable_col in favorable_cols:
+                        if favorable_col not in low_feature_cols:
+                            continue
+                        for favorable_label in ("train_p75", "train_p90"):
+                            queue_interaction_specs.append((
+                                "quoted_half_spread_bps",
+                                spread_label,
+                                queue_col,
+                                queue_label,
                                 favorable_col,
                                 favorable_label,
                             ))
@@ -2142,6 +2164,31 @@ def fill_sim_low_friction_signal_scorecard(
             {
                 "feature": "low_friction_interaction",
                 "candidate_shape": candidate_shape,
+                "threshold_source": "train_only",
+                "components": [
+                    {"feature": a_col, "operator": a_op, "quantile": a_label, "threshold": a_thr},
+                    {"feature": b_col, "operator": b_op, "quantile": b_label, "threshold": b_thr},
+                    {"feature": c_col, "operator": c_op, "quantile": c_label, "threshold": c_thr},
+                ],
+            },
+        )
+
+    for a_col, a_label, b_col, b_label, c_col, c_label in queue_interaction_specs:
+        a = thresholds.get((a_col, a_label))
+        b = thresholds.get((b_col, b_label))
+        c = thresholds.get((c_col, c_label))
+        if a is None or b is None or c is None:
+            continue
+        a_mask, a_thr, a_op = a
+        b_mask, b_thr, b_op = b
+        c_mask, c_thr, c_op = c
+        add_candidate(
+            f"{a_col}_{a_label}_and_{b_col}_{b_label}_and_{c_col}_{c_label}",
+            f"{a_col} {a_label} AND {b_col} {b_label} AND {c_col} {c_label}",
+            a_mask & b_mask & c_mask,
+            {
+                "feature": "low_friction_interaction",
+                "candidate_shape": "spread_thin_queue_favorable_interaction_v1",
                 "threshold_source": "train_only",
                 "components": [
                     {"feature": a_col, "operator": a_op, "quantile": a_label, "threshold": a_thr},
