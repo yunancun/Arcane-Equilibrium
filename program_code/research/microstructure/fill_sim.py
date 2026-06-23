@@ -1800,9 +1800,9 @@ def fill_sim_low_friction_signal_scorecard(
 ) -> dict:
     """Search a new low-friction MM surface from recent flow/L1-churn features.
 
-    Unlike the older spread/queue/OFI scorecards, this reducer only uses
-    columns produced by add_low_friction_microstructure_features plus
-    pre-registered high-spread combinations. Thresholds are selected on the
+    Unlike the older spread/queue/OFI scorecards, this reducer uses
+    placement-time recent flow/L1-churn fields plus side-adjusted BBO support
+    and pre-registered high-spread combinations. Thresholds are selected on the
     train time half and replayed on holdout.
     """
     base = {
@@ -1813,6 +1813,7 @@ def fill_sim_low_friction_signal_scorecard(
         "split": None,
         "candidates_evaluated": 0,
         "interaction_candidates_evaluated": 0,
+        "interaction_candidate_shape_counts": {},
         "best_train_candidate": None,
         "best_holdout_current_fee_candidate": None,
         "best_holdout_gross_candidate": None,
@@ -1850,6 +1851,7 @@ def fill_sim_low_friction_signal_scorecard(
             "side_touch_size_delta_frac_30s",
             "spread_bps_delta_10s",
             "spread_bps_delta_30s",
+            "side_book_imb",
         )
         if col in trials
     ]
@@ -1973,6 +1975,7 @@ def fill_sim_low_friction_signal_scorecard(
             ("side_touch_size_delta_frac_30s", ("train_p75", "train_p90")),
             ("spread_bps_delta_10s", ("train_p75", "train_p90")),
             ("spread_bps_delta_30s", ("train_p75", "train_p90")),
+            ("side_book_imb", ("train_p75", "train_p90")),
         ):
             if col in low_feature_cols:
                 for label in labels:
@@ -1991,6 +1994,7 @@ def fill_sim_low_friction_signal_scorecard(
                 f"side_touch_size_delta_frac_{suffix}",
                 f"side_recent_trade_imbalance_{suffix}",
                 f"spread_bps_delta_{suffix}",
+                "side_book_imb",
             )
             for quiet_col in quiet_cols:
                 if quiet_col not in low_feature_cols:
@@ -2042,6 +2046,8 @@ def fill_sim_low_friction_signal_scorecard(
         candidate_shape = (
             "spread_quiet_abs_qty_interaction_v1"
             if b_col.startswith("recent_trade_abs_qty_")
+            else "spread_quiet_book_imbalance_interaction_v1"
+            if c_col == "side_book_imb"
             else "spread_quiet_touch_interaction_v1"
         )
         add_candidate(
@@ -2131,6 +2137,12 @@ def fill_sim_low_friction_signal_scorecard(
     train_confirmed_gross_scorecard = _low_friction_train_confirmed_gross_scorecard(
         ranked
     )
+    shape_counts: dict[str, int] = {}
+    for row in ranked:
+        shape = row.get("candidate_shape")
+        if not shape:
+            continue
+        shape_counts[shape] = shape_counts.get(shape, 0) + 1
 
     if holdout_confirmed:
         status = "LOW_FRICTION_SIGNAL_HOLDOUT_CURRENT_FEE_SAMPLE_GATED"
@@ -2151,6 +2163,7 @@ def fill_sim_low_friction_signal_scorecard(
         "interaction_candidates_evaluated": len([
             r for r in ranked if r.get("feature") == "low_friction_interaction"
         ]),
+        "interaction_candidate_shape_counts": shape_counts,
         "best_train_candidate": ranked[0] if ranked else None,
         "best_holdout_current_fee_candidate": holdout_confirmed[0] if holdout_confirmed else None,
         "best_holdout_gross_candidate": holdout_ranked[0] if holdout_ranked else None,
