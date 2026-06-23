@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-23 Cost Gate Blocked-Outcome Diagnosis
+
+- `cost_gate_demo_learning_lane_blocked_outcome_review_v2` now emits explicit `learning_diagnosis` and `cost_gate_escape_recommendation` fields for blocked-signal outcomes.
+- Source checkpoint `51a1c4ad` routes gross-positive but after-cost-insufficient blocked outcomes to `cost_gate_blocked_signal_edge_amplification_required` / `amplify_edge_or_reduce_friction_for_same_side_cell` instead of `rejected_no_edge`.
+- PM read: this is a learning-loop depth improvement, not authority. It grants no global Cost Gate lowering, no probe/order authority, no runtime mutation, and no promotion proof.
+
 ## 2026-06-23 MM Current-Fee Confirmation Packet
 
 - `mm_current_fee_confirmation_packet_v1` now turns the SOXLUSDT current-fee-positive MM cell into a standalone repeat/OOS/maker-realism confirmation artifact.
