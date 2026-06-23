@@ -1657,6 +1657,7 @@ def _mm_signal_path(
     next_action = "search_regime_or_microstructure_filters_that_raise_train_confirmed_gross_edge"
     if near_miss_lead:
         next_action = "confirm_low_friction_near_miss_with_train_holdout_and_history_stability"
+    near_miss_stability = _dict(history.get("low_friction_near_miss_stability"))
     return [_base_path(
         path_id="mm_low_friction_signal_search",
         path_class="low_friction_mm_alpha_search",
@@ -1695,6 +1696,17 @@ def _mm_signal_path(
             "history_reason": history.get("reason"),
             "history_valid_windows": history.get("valid_windows"),
             "history_distinct_window_dates": history.get("distinct_window_dates"),
+            "history_low_friction_near_miss_stability_status": near_miss_stability.get("status"),
+            "history_low_friction_near_miss_stability_reason": near_miss_stability.get("reason"),
+            "history_low_friction_near_miss_windows": near_miss_stability.get(
+                "sample_gated_near_miss_windows"
+            ),
+            "history_low_friction_near_miss_repeated_key_count": near_miss_stability.get(
+                "repeated_key_count"
+            ),
+            "history_low_friction_near_miss_best_repeated_key": near_miss_stability.get(
+                "best_repeated_near_miss_key"
+            ),
         },
     )]
 
