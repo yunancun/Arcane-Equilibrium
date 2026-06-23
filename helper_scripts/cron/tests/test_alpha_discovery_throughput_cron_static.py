@@ -37,6 +37,7 @@ def test_wrapper_refreshes_activation_packet_before_alpha_runner() -> None:
     assert "profitability_path_scorecard_latest.md" in src
     assert "--cost-gate-counterfactual-json" in src
     assert "--profit-learning-packet-json" in src
+    assert "--bounded-probe-operator-authorization-json" in src
     assert "--bounded-probe-result-review-json" in src
     assert "--bounded-probe-execution-realism-review-json" in src
     assert "--json-output" in src

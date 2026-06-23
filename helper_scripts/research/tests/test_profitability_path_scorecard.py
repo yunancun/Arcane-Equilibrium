@@ -251,6 +251,80 @@ def _sealed_horizon_probe_preflight(
     }
 
 
+def _bounded_probe_operator_authorization(
+    status: str = "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW",
+    *,
+    blocking_gates: list[str] | None = None,
+    ready_for_review: bool | None = None,
+    authorized: bool = False,
+) -> dict:
+    if blocking_gates is None:
+        blocking_gates = []
+    if ready_for_review is None:
+        ready_for_review = status == "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW"
+    operator_authorization = (
+        {
+            "schema_version": "bounded_demo_probe_operator_authorization_v1",
+            "status": "DEMO_LEARNING_PROBE_GRANTED",
+            "side_cell_key": "ma_crossover|BTCUSDT|Sell",
+            "max_authorized_probe_orders": 2,
+            "order_authority_granted": True,
+            "probe_authority_granted": True,
+            "promotion_evidence": False,
+        }
+        if authorized
+        else None
+    )
+    next_action = "operator_may_authorize_bounded_demo_probe_with_exact_typed_confirm"
+    if blocking_gates:
+        next_action = "refresh_bounded_probe_operator_authorization_after_source_gates_pass"
+    if authorized:
+        next_action = "operator_review_plan_inclusion_of_bounded_probe_operator_authorization"
+    return {
+        "schema_version": "bounded_demo_probe_operator_authorization_packet_v1",
+        "generated_at_utc": "2026-06-22T06:20:00+00:00",
+        "status": status,
+        "reason": ";".join(blocking_gates) or "defer",
+        "decision": "authorize" if authorized else "defer",
+        "review_scope": "operator_authorization_artifact_only_not_plan_mutation",
+        "candidate": {
+            "side_cell_key": "ma_crossover|BTCUSDT|Sell",
+            "strategy_name": "ma_crossover",
+            "symbol": "BTCUSDT",
+            "side": "Sell",
+            "outcome_horizon_minutes": 240,
+        },
+        "source_candidate_max_probe_orders": 3,
+        "requested_max_authorized_probe_orders": 2 if authorized else None,
+        "expires_at_utc": "2026-06-22T18:00:00+00:00" if authorized else None,
+        "operator_authorization": operator_authorization,
+        "blocking_gate_count": len(blocking_gates),
+        "blocking_gates": blocking_gates,
+        "next_actions": [next_action],
+        "typed_confirm_expected": (
+            "authorize_bounded_demo_probe:ma_crossover|BTCUSDT|Sell:2:auth-fixture"
+        ),
+        "typed_confirm_provided": authorized,
+        "typed_confirm_matches": authorized,
+        "answers": {
+            "ready_for_operator_authorization_review": ready_for_review,
+            "bounded_demo_probe_authorized": authorized,
+            "operator_authorization_object_emitted": operator_authorization is not None,
+            "plan_mutation_performed": False,
+            "writer_enabled": False,
+            "order_submission_performed": False,
+            "runtime_mutation_performed": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "promotion_evidence": False,
+            "active_runtime_probe_authority": False,
+            "active_runtime_order_authority": False,
+            "probe_authority_granted_in_authorization_object": authorized,
+            "order_authority_granted_in_authorization_object": authorized,
+        },
+    }
+
+
 def _bounded_probe_result_review(
     status: str = "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED",
     *,
@@ -739,6 +813,121 @@ def test_ready_preflight_keeps_authority_separate_from_profitability_closure() -
     assert scorecard["answers"]["order_authority_granted"] is False
     assert scorecard["global_boundaries"]["probe_authority"] == "NOT_GRANTED"
     assert closure["cost_gate_escape_strategy"]["order_authority_granted"] is False
+
+
+def test_operator_authorization_gates_refine_profitability_closure() -> None:
+    scorecard = build_profitability_path_scorecard(
+        cost_gate_counterfactual=_cost_gate_counterfactual(),
+        profit_learning_packet={
+            "status": "OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE",
+            "next_actions": [
+                "operator_may_authorize_minimal_rust_authority_bounded_demo_probe_separately"
+            ],
+            "answers": {
+                "global_cost_gate_lowering_recommended": False,
+                "order_authority_granted": False,
+            },
+            "activation": {"status": "EVIDENCE_STACK_ACTIVE"},
+        },
+        activation_preflight={"status": "EVIDENCE_STACK_ACTIVE"},
+        horizon_sealed_replay=_sealed_horizon_replay(),
+        horizon_learning_evidence=_sealed_horizon_learning_evidence(),
+        sealed_horizon_probe_preflight=_sealed_horizon_probe_preflight(
+            "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+        ),
+        bounded_probe_operator_authorization=_bounded_probe_operator_authorization(
+            "AUTHORITY_PATH_PATCH_NOT_READY",
+            blocking_gates=["authority_path_patch_readiness_ready"],
+            ready_for_review=False,
+        ),
+        now_utc=dt.datetime(2026, 6, 22, 6, 30, tzinfo=dt.timezone.utc),
+    )
+
+    top = scorecard["top_paths"][0]
+    closure = scorecard["profitability_engineering_closure"]
+    strategy = closure["cost_gate_escape_strategy"]
+
+    assert top["status"] == "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_GATES_NOT_READY"
+    assert top["required_next_gate"] == (
+        "complete_bounded_probe_operator_authorization_blocking_gates"
+    )
+    assert top["evidence"]["bounded_probe_operator_authorization_status"] == (
+        "AUTHORITY_PATH_PATCH_NOT_READY"
+    )
+    assert top["evidence"][
+        "bounded_probe_operator_authorization_blocking_gates"
+    ] == ["authority_path_patch_readiness_ready"]
+    assert top["evidence"][
+        "bounded_probe_operator_authorization_active_runtime_order_authority"
+    ] is False
+    assert closure["status"] == "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_GATES_NOT_READY"
+    assert "Rust authority-path near-touch Adapter readiness" in closure[
+        "proof_gates_remaining"
+    ][0]
+    assert strategy["bounded_probe_operator_authorization_status"] == (
+        "AUTHORITY_PATH_PATCH_NOT_READY"
+    )
+    assert strategy["bounded_probe_operator_authorization_ready_for_review"] is False
+    assert strategy["bounded_probe_operator_authorization_object_emitted"] is False
+    assert strategy[
+        "bounded_probe_operator_authorization_active_runtime_order_authority"
+    ] is False
+    assert scorecard["answers"][
+        "bounded_demo_probe_operator_authorization_present"
+    ] is True
+    assert scorecard["answers"][
+        "bounded_demo_probe_operator_authorization_ready_for_review"
+    ] is False
+    assert scorecard["artifacts"]["bounded_probe_operator_authorization"]["present"] is True
+
+
+def test_ready_operator_authorization_packet_does_not_grant_runtime_authority() -> None:
+    scorecard = build_profitability_path_scorecard(
+        cost_gate_counterfactual=_cost_gate_counterfactual(),
+        profit_learning_packet={
+            "status": "OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE",
+            "next_actions": [
+                "operator_may_authorize_minimal_rust_authority_bounded_demo_probe_separately"
+            ],
+            "answers": {
+                "global_cost_gate_lowering_recommended": False,
+                "order_authority_granted": False,
+            },
+            "activation": {"status": "EVIDENCE_STACK_ACTIVE"},
+        },
+        activation_preflight={"status": "EVIDENCE_STACK_ACTIVE"},
+        horizon_sealed_replay=_sealed_horizon_replay(),
+        horizon_learning_evidence=_sealed_horizon_learning_evidence(),
+        sealed_horizon_probe_preflight=_sealed_horizon_probe_preflight(
+            "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+        ),
+        bounded_probe_operator_authorization=_bounded_probe_operator_authorization(),
+        now_utc=dt.datetime(2026, 6, 22, 6, 30, tzinfo=dt.timezone.utc),
+    )
+
+    top = scorecard["top_paths"][0]
+    closure = scorecard["profitability_engineering_closure"]
+    strategy = closure["cost_gate_escape_strategy"]
+
+    assert top["status"] == (
+        "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_READY_FOR_OPERATOR_REVIEW"
+    )
+    assert closure["status"] == (
+        "OPERATOR_CAN_AUTHORIZE_BOUNDED_DEMO_PROBE_WITH_EXACT_CONFIRM"
+    )
+    assert closure["proof_gate_count_remaining"] == 0
+    assert strategy["bounded_probe_operator_authorization_ready_for_review"] is True
+    assert strategy["bounded_probe_operator_authorization_object_emitted"] is False
+    assert strategy["bounded_probe_operator_authorization_active_runtime_probe_authority"] is False
+    assert strategy["bounded_probe_operator_authorization_active_runtime_order_authority"] is False
+    assert scorecard["answers"][
+        "bounded_demo_probe_operator_authorization_ready_for_review"
+    ] is True
+    assert scorecard["answers"][
+        "bounded_demo_probe_operator_authorization_active_runtime_order_authority"
+    ] is False
+    assert scorecard["answers"]["global_cost_gate_lowering_recommended"] is False
+    assert scorecard["answers"]["order_authority_granted"] is False
 
 
 def test_bounded_probe_result_failure_stops_cost_gate_escape_path() -> None:

@@ -2101,6 +2101,34 @@ def summarize_profitability_path_scorecard(
         "profitability_cost_gate_escape_preflight_status": escape.get(
             "sealed_horizon_probe_preflight_status"
         ),
+        "profitability_cost_gate_escape_operator_authorization_status": escape.get(
+            "bounded_probe_operator_authorization_status"
+        ),
+        "profitability_cost_gate_escape_operator_authorization_decision": escape.get(
+            "bounded_probe_operator_authorization_decision"
+        ),
+        "profitability_cost_gate_escape_operator_authorization_blocking_gate_count": (
+            escape.get("bounded_probe_operator_authorization_blocking_gate_count")
+        ),
+        "profitability_cost_gate_escape_operator_authorization_blocking_gates": (
+            escape.get("bounded_probe_operator_authorization_blocking_gates")
+        ),
+        "profitability_cost_gate_escape_operator_authorization_ready_for_review": (
+            escape.get("bounded_probe_operator_authorization_ready_for_review")
+        ),
+        "profitability_cost_gate_escape_operator_authorization_object_emitted": (
+            escape.get("bounded_probe_operator_authorization_object_emitted")
+        ),
+        "profitability_cost_gate_escape_operator_authorization_active_runtime_probe_authority": (
+            escape.get(
+                "bounded_probe_operator_authorization_active_runtime_probe_authority"
+            )
+        ),
+        "profitability_cost_gate_escape_operator_authorization_active_runtime_order_authority": (
+            escape.get(
+                "bounded_probe_operator_authorization_active_runtime_order_authority"
+            )
+        ),
         "profitability_cost_gate_escape_bounded_result_status": escape.get(
             "bounded_probe_result_review_status"
         ),
