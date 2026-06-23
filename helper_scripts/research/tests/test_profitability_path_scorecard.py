@@ -173,6 +173,53 @@ def _sealed_horizon_learning_evidence() -> dict:
     }
 
 
+def _sealed_horizon_operator_review() -> dict:
+    return {
+        "schema_version": "sealed_horizon_operator_review_v1",
+        "generated_at_utc": "2026-06-22T05:40:00+00:00",
+        "status": "PENDING_OPERATOR_REVIEW",
+        "reason": "defer",
+        "decision": "defer",
+        "operator_id": None,
+        "review_scope": "preflight_review_only_not_probe_authorization",
+        "side_cell_key": "ma_crossover|BTCUSDT|Sell",
+        "outcome_horizon_minutes": 240,
+        "source_kind": "horizon_specific_sealed_replay",
+        "blocked_signal_outcome_count": 16515,
+        "avg_gross_bps": 7.0511,
+        "avg_net_bps": 3.0511,
+        "net_positive_pct": 68.5619,
+        "operator_review_approved": False,
+        "main_cost_gate_adjustment": "NONE",
+        "probe_authority_granted": False,
+        "order_authority_granted": False,
+        "promotion_evidence": False,
+        "blocking_gate_count": 0,
+        "blocking_gates": [],
+        "next_actions": [
+            "operator_review_sealed_horizon_preflight_before_bounded_demo_probe"
+        ],
+        "typed_confirm_expected": (
+            "approve_sealed_horizon_preflight:ma_crossover|BTCUSDT|Sell:240"
+        ),
+        "typed_confirm_provided": False,
+        "typed_confirm_matches": False,
+        "answers": {
+            "operator_review_approved": False,
+            "sealed_horizon_evidence_ready": True,
+            "sealed_horizon_probe_preflight_aligned": True,
+            "review_grants_runtime_authority": False,
+            "bounded_demo_probe_authorized": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+        "boundary": "artifact-only sealed horizon operator review",
+    }
+
+
 def _sealed_horizon_probe_preflight(
     status: str = "OPERATOR_REVIEW_AND_PRODUCTION_LEARNING_LANE_REQUIRED",
 ) -> dict:
@@ -717,6 +764,54 @@ def test_sealed_horizon_learning_evidence_advances_path_to_operator_review() -> 
     assert horizon_path["order_authority"] == "NOT_GRANTED"
     assert horizon_path["main_cost_gate_adjustment"] == "NONE"
     assert horizon_path["promotion_evidence"] is False
+
+
+def test_sealed_horizon_operator_review_is_visible_without_authority() -> None:
+    scorecard = build_profitability_path_scorecard(
+        cost_gate_counterfactual=_cost_gate_counterfactual(),
+        profit_learning_packet={
+            "status": "OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE",
+            "next_actions": [
+                "operator_review_sealed_horizon_learning_evidence_before_bounded_demo_probe"
+            ],
+            "answers": {
+                "global_cost_gate_lowering_recommended": False,
+                "order_authority_granted": False,
+            },
+            "activation": {"status": "NOT_ACCUMULATING"},
+        },
+        activation_preflight={"status": "NOT_ACCUMULATING"},
+        horizon_sealed_replay=_sealed_horizon_replay(),
+        horizon_learning_evidence=_sealed_horizon_learning_evidence(),
+        sealed_horizon_operator_review=_sealed_horizon_operator_review(),
+        sealed_horizon_probe_preflight=_sealed_horizon_probe_preflight(
+            status="OPERATOR_REVIEW_REQUIRED"
+        ),
+        now_utc=dt.datetime(2026, 6, 22, 6, tzinfo=dt.timezone.utc),
+    )
+
+    top = scorecard["top_paths"][0]
+
+    assert scorecard["answers"]["sealed_horizon_operator_review_present"] is True
+    assert scorecard["answers"]["sealed_horizon_operator_review_pending"] is True
+    assert scorecard["answers"]["sealed_horizon_operator_review_approved"] is False
+    assert scorecard["answers"][
+        "sealed_horizon_operator_review_grants_runtime_authority"
+    ] is False
+    assert scorecard["artifacts"]["sealed_horizon_operator_review"]["present"] is True
+    assert top["evidence"]["sealed_operator_review_present"] is True
+    assert top["evidence"]["sealed_operator_review_status"] == "PENDING_OPERATOR_REVIEW"
+    assert top["evidence"]["sealed_operator_review_decision"] == "defer"
+    assert top["evidence"]["sealed_operator_review_approved"] is False
+    assert top["evidence"][
+        "sealed_operator_review_review_grants_runtime_authority"
+    ] is False
+    assert top["evidence"]["sealed_operator_review_probe_authority_granted"] is False
+    assert top["evidence"]["sealed_operator_review_order_authority_granted"] is False
+    assert scorecard["answers"]["global_cost_gate_lowering_recommended"] is False
+    assert scorecard["answers"]["order_authority_granted"] is False
+    assert top["order_authority"] == "NOT_GRANTED"
+    assert top["main_cost_gate_adjustment"] == "NONE"
 
 
 def test_sealed_horizon_preflight_drives_profitability_closure_gates() -> None:
