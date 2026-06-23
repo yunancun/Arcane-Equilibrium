@@ -54,6 +54,7 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "demo_order_to_fill_gap_latest.json" in src
     assert "outcome_refresh_latest.json" in src
     assert "blocked_outcome_review_latest.json" in src
+    assert "false_negative_candidate_packet_latest.json" in src
     assert "bounded_probe_touchability_preflight_latest.json" in src
     assert "bounded_probe_placement_repair_plan_latest.json" in src
     assert "bounded_probe_authority_patch_readiness_latest.json" in src
@@ -71,6 +72,7 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "cost_gate_learning_lane.reject_materializer" in src
     assert "cost_gate_learning_lane.outcome_refresh" in src
     assert "cost_gate_learning_lane.outcome_review" in src
+    assert "cost_gate_learning_lane.false_negative_candidate_packet" in src
     assert "cost_gate_learning_lane.bounded_probe_touchability_preflight" in src
     assert "cost_gate_learning_lane.bounded_probe_placement_repair_plan" in src
     assert "cost_gate_learning_lane.bounded_probe_authority_patch_readiness" in src
@@ -103,6 +105,11 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "review_top_net_cost_cushion_bps" in src
     assert "review_top_candidate_side_cell_key" in src
     assert "review_top_candidate_wrongful_block_score" in src
+    assert "false_negative_candidate_packet_status" in src
+    assert "false_negative_candidate_packet_false_negative_count" in src
+    assert "false_negative_candidate_packet_edge_amplification_count" in src
+    assert "false_negative_candidate_packet_operator_review_ready" in src
+    assert "false_negative_candidate_packet_global_cost_gate_lowering_recommended" in src
     assert "bounded_probe_result_review_status" in src
     assert "bounded_probe_result_review_skip_reason" in src
     assert "bounded_probe_result_review_execution_realism_gap" in src
@@ -138,6 +145,7 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "OPENCLAW_COST_GATE_REFRESH_DATA_FLOW_MONITOR" in src
     assert "OPENCLAW_COST_GATE_REFRESH_ORDER_TOUCHABILITY_AUDIT" in src
     assert "OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET" in src
+    assert "OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET" in src
     assert "OPENCLAW_COST_GATE_DATA_FLOW_WINDOW_HOURS" in src
     assert "OPENCLAW_COST_GATE_DATA_FLOW_TOP_LIMIT" in src
     assert "OPENCLAW_DEMO_ORDER_TO_FILL_GAP_ENGINE_MODES" in src
@@ -173,6 +181,7 @@ def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     assert 'REFRESH_DATA_FLOW_MONITOR="${OPENCLAW_COST_GATE_REFRESH_DATA_FLOW_MONITOR:-1}"' in src
     assert 'REFRESH_ORDER_TOUCHABILITY_AUDIT="${OPENCLAW_COST_GATE_REFRESH_ORDER_TOUCHABILITY_AUDIT:-1}"' in src
     assert 'REFRESH_DECISION_PACKET="${OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET:-1}"' in src
+    assert 'REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET="${OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET:-1}"' in src
     assert 'DATA_FLOW_WINDOW_HOURS="${OPENCLAW_COST_GATE_DATA_FLOW_WINDOW_HOURS:-1,4,24}"' in src
     assert 'DATA_FLOW_TOP_LIMIT="${OPENCLAW_COST_GATE_DATA_FLOW_TOP_LIMIT:-10}"' in src
     assert 'ORDER_TOUCHABILITY_ENGINE_MODES="${OPENCLAW_DEMO_ORDER_TO_FILL_GAP_ENGINE_MODES:-demo,live_demo}"' in src
@@ -206,6 +215,7 @@ def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     assert 'REFRESH_BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT:-1}"' in src
     assert 'REFRESH_BOUNDED_PROBE_RESULT_REVIEW="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_RESULT_REVIEW:-1}"' in src
     assert 'REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW:-1}"' in src
+    assert 'validate_bool01 "OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET"' in src
     assert 'REVIEW_MIN_OUTCOMES="${OPENCLAW_COST_GATE_REVIEW_MIN_OUTCOMES_PER_SIDE_CELL:-3}"' in src
     assert 'REVIEW_MIN_AVG_NET_BPS="${OPENCLAW_COST_GATE_REVIEW_MIN_AVG_NET_BPS:-0.0}"' in src
     assert 'REVIEW_MIN_NET_POSITIVE_PCT="${OPENCLAW_COST_GATE_REVIEW_MIN_NET_POSITIVE_PCT:-60.0}"' in src
@@ -407,10 +417,14 @@ def test_wrapper_has_preinstall_refresh_only_cutoff_after_plan_refresh() -> None
     src = _src(WRAPPER)
     assert 'if [[ "$PREINSTALL_REFRESH_ONLY" == "1" ]]' in src
     assert "preinstall refresh-only mode" in src
-    assert "skipped historical/materializer/outcome/review/sealed evidence/bounded-probe stages" in src
+    assert (
+        "skipped historical/materializer/outcome/review/false-negative "
+        "packet/sealed evidence/bounded-probe stages"
+    ) in src
     assert 'PREINSTALL_REFRESH_ONLY="$PREINSTALL_REFRESH_ONLY"' in src
     assert '"preinstall_refresh_only": os.environ["PREINSTALL_REFRESH_ONLY"] == "1"' in src
     assert 'order_touchability_audit_skip_reason="preinstall_refresh_only"' in src
+    assert 'false_negative_candidate_packet_skip_reason="preinstall_refresh_only"' in src
     assert 'sealed_horizon_learning_evidence_skip_reason="preinstall_refresh_only"' in src
     assert 'bounded_probe_touchability_preflight_skip_reason="preinstall_refresh_only"' in src
     assert 'bounded_probe_placement_repair_plan_skip_reason="preinstall_refresh_only"' in src

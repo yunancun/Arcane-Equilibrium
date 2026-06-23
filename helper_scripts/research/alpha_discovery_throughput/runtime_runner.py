@@ -2052,6 +2052,107 @@ def summarize_profit_learning_decision_packet(
     }
 
 
+def summarize_false_negative_candidate_packet(
+    data_dir: Path,
+    *,
+    now_utc: dt.datetime,
+    max_age_seconds: int = DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS,
+) -> dict[str, Any]:
+    """Summarize the Cost Gate false-negative candidate ranking packet."""
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    path = lane_dir / "false_negative_candidate_packet_latest.json"
+    payload, err = _read_json(path)
+    if err:
+        return {
+            "false_negative_candidate_packet_present": False,
+            "false_negative_candidate_packet_source_path": str(path),
+            "false_negative_candidate_packet_source_error": err,
+        }
+    assert payload is not None
+    generated_at = payload.get("generated_at_utc")
+    fresh, age, freshness_error = _source_fresh(
+        generated_at,
+        now_utc=now_utc,
+        max_age_seconds=max_age_seconds,
+    )
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    answers = payload.get("answers") if isinstance(payload.get("answers"), dict) else {}
+    top_false_negative = None
+    false_candidates = payload.get("ranked_false_negative_candidates")
+    if isinstance(false_candidates, list) and false_candidates:
+        first = false_candidates[0]
+        top_false_negative = first if isinstance(first, dict) else None
+    top_edge = None
+    edge_candidates = payload.get("edge_amplification_candidates")
+    if isinstance(edge_candidates, list) and edge_candidates:
+        first = edge_candidates[0]
+        top_edge = first if isinstance(first, dict) else None
+    next_actions = payload.get("next_actions")
+    if not isinstance(next_actions, list):
+        next_actions = []
+    return {
+        "false_negative_candidate_packet_present": True,
+        "false_negative_candidate_packet_status": payload.get("status"),
+        "false_negative_candidate_packet_reason": payload.get("reason"),
+        "false_negative_candidate_packet_next_actions": next_actions,
+        "false_negative_candidate_packet_generated_at_utc": generated_at,
+        "false_negative_candidate_packet_age_seconds": age,
+        "false_negative_candidate_packet_source_ok": fresh,
+        "false_negative_candidate_packet_source_path": str(path),
+        "false_negative_candidate_packet_source_error": freshness_error,
+        "false_negative_candidate_packet_ranked_candidate_count": summary.get(
+            "ranked_candidate_count"
+        ),
+        "false_negative_candidate_packet_false_negative_count": summary.get(
+            "false_negative_candidate_count"
+        ),
+        "false_negative_candidate_packet_edge_amplification_count": summary.get(
+            "edge_amplification_candidate_count"
+        ),
+        "false_negative_candidate_packet_sample_accumulation_count": summary.get(
+            "sample_accumulation_candidate_count"
+        ),
+        "false_negative_candidate_packet_top_side_cell_key": summary.get(
+            "top_false_negative_side_cell_key"
+        ),
+        "false_negative_candidate_packet_top_wrongful_block_score": summary.get(
+            "top_false_negative_wrongful_block_score"
+        ),
+        "false_negative_candidate_packet_top_net_cost_cushion_bps": summary.get(
+            "top_false_negative_net_cost_cushion_bps"
+        ),
+        "false_negative_candidate_packet_top_edge_amplification_side_cell_key": (
+            summary.get("top_edge_amplification_side_cell_key")
+        ),
+        "false_negative_candidate_packet_top_edge_amplification_required_net_uplift_bps": (
+            summary.get("top_edge_amplification_required_net_uplift_bps")
+        ),
+        "false_negative_candidate_packet_operator_review_ready": answers.get(
+            "operator_review_ready"
+        ),
+        "false_negative_candidate_packet_engineering_actionable": answers.get(
+            "engineering_actionable"
+        ),
+        "false_negative_candidate_packet_global_cost_gate_lowering_recommended": (
+            answers.get("global_cost_gate_lowering_recommended")
+        ),
+        "false_negative_candidate_packet_main_cost_gate_adjustment": answers.get(
+            "main_cost_gate_adjustment"
+        ),
+        "false_negative_candidate_packet_probe_authority_granted": answers.get(
+            "probe_authority_granted"
+        ),
+        "false_negative_candidate_packet_order_authority_granted": answers.get(
+            "order_authority_granted"
+        ),
+        "false_negative_candidate_packet_promotion_evidence": answers.get(
+            "promotion_evidence"
+        ),
+        "false_negative_candidate_packet_top_candidate": top_false_negative,
+        "false_negative_candidate_packet_top_edge_candidate": top_edge,
+    }
+
+
 def summarize_profitability_path_scorecard(
     data_dir: Path,
     *,
@@ -3013,6 +3114,10 @@ def collect_cost_gate_learning_lane_arm(
         data_dir,
         now_utc=now_utc,
     )
+    false_negative_packet_summary = summarize_false_negative_candidate_packet(
+        data_dir,
+        now_utc=now_utc,
+    )
     profitability_path_scorecard_summary = summarize_profitability_path_scorecard(
         data_dir,
         now_utc=now_utc,
@@ -3096,6 +3201,7 @@ def collect_cost_gate_learning_lane_arm(
                 **stack_activation_packet_summary,
                 **stack_dry_run_review_summary,
                 **decision_packet_summary,
+                **false_negative_packet_summary,
                 **profitability_path_scorecard_summary,
                 **sealed_operator_review_summary,
                 **sealed_probe_preflight_summary,
@@ -3150,6 +3256,7 @@ def collect_cost_gate_learning_lane_arm(
             **stack_activation_packet_summary,
             **stack_dry_run_review_summary,
             **decision_packet_summary,
+            **false_negative_packet_summary,
             **profitability_path_scorecard_summary,
             **sealed_operator_review_summary,
             **sealed_probe_preflight_summary,
@@ -3341,6 +3448,20 @@ def _learning_summary(worklist: dict[str, Any]) -> dict[str, Any]:
         ),
         "top_learning_task_blocked_signal_top_review_candidate_net_cost_cushion_bps": (
             evidence.get("blocked_signal_top_review_candidate_net_cost_cushion_bps")
+        ),
+        "top_learning_task_false_negative_candidate_packet_status": evidence.get(
+            "false_negative_candidate_packet_status"
+        ),
+        "top_learning_task_false_negative_candidate_packet_top_side_cell_key": (
+            evidence.get("false_negative_candidate_packet_top_side_cell_key")
+        ),
+        "top_learning_task_false_negative_candidate_packet_false_negative_count": (
+            evidence.get("false_negative_candidate_packet_false_negative_count")
+        ),
+        "top_learning_task_false_negative_candidate_packet_global_cost_gate_lowering_recommended": (
+            evidence.get(
+                "false_negative_candidate_packet_global_cost_gate_lowering_recommended"
+            )
         ),
         "top_engineering_learning_task_available": bool(top_engineering_task),
         "top_engineering_learning_task_id": top_engineering_task.get("task_id"),
