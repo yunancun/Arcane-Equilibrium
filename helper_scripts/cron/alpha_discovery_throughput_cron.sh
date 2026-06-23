@@ -125,6 +125,40 @@ SEALED_OPERATOR_REVIEW_MD="$SEALED_OPERATOR_REVIEW_DIR/sealed_horizon_operator_r
 SEALED_OPERATOR_REVIEW_STDOUT="$SEALED_OPERATOR_REVIEW_DIR/sealed_horizon_operator_review_stdout.json"
 SEALED_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_SEALED_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS:-24}"
 SEALED_PREFLIGHT_SCRIPT="$BASE/helper_scripts/cron/sealed_horizon_probe_preflight_cron.sh"
+BOUNDED_REVIEW_CHAIN_DIR="$DATA/cost_gate_learning_lane"
+BOUNDED_REVIEW_CHAIN_STAMP="$(date -u '+%Y%m%dT%H%M%SZ')"
+REFRESH_BOUNDED_REVIEW_CHAIN="${OPENCLAW_ALPHA_REFRESH_BOUNDED_PROBE_REVIEW_CHAIN:-1}"
+ORDER_TOUCHABILITY_JSON="${OPENCLAW_ALPHA_ORDER_TO_FILL_GAP_AUDIT_JSON:-${OPENCLAW_DEMO_ORDER_TO_FILL_GAP_AUDIT_JSON:-$DATA/demo_order_to_fill_gap/demo_order_to_fill_gap_latest.json}}"
+SEALED_PREFLIGHT_JSON="$DATA/cost_gate_learning_lane/sealed_horizon_probe_preflight_latest.json"
+BOUNDED_REVIEW_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_ALPHA_BOUNDED_REVIEW_MAX_ARTIFACT_AGE_HOURS:-24}"
+TOUCHABILITY_MAX_INITIAL_PASSIVE_GAP_BPS="${OPENCLAW_ALPHA_TOUCHABILITY_MAX_INITIAL_PASSIVE_GAP_BPS:-75.0}"
+TOUCHABILITY_MAX_DEEP_NO_TOUCH_GAP_BPS="${OPENCLAW_ALPHA_TOUCHABILITY_MAX_DEEP_NO_TOUCH_GAP_BPS:-500.0}"
+PLACEMENT_REPAIR_MAX_FRESH_BBO_AGE_MS="${OPENCLAW_ALPHA_PLACEMENT_REPAIR_MAX_FRESH_BBO_AGE_MS:-1000}"
+BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_touchability_preflight_${BOUNDED_REVIEW_CHAIN_STAMP}.json"
+BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_MD_OUT="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_touchability_preflight_${BOUNDED_REVIEW_CHAIN_STAMP}.md"
+BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_touchability_preflight_latest.json"
+BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_MD_LATEST="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_touchability_preflight_latest.md"
+BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_STDOUT="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_touchability_preflight_stdout.json"
+BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_placement_repair_plan_${BOUNDED_REVIEW_CHAIN_STAMP}.json"
+BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_MD_OUT="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_placement_repair_plan_${BOUNDED_REVIEW_CHAIN_STAMP}.md"
+BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_placement_repair_plan_latest.json"
+BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_MD_LATEST="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_placement_repair_plan_latest.md"
+BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_STDOUT="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_placement_repair_plan_stdout.json"
+BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_authority_patch_readiness_${BOUNDED_REVIEW_CHAIN_STAMP}.json"
+BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_MD_OUT="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_authority_patch_readiness_${BOUNDED_REVIEW_CHAIN_STAMP}.md"
+BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_authority_patch_readiness_latest.json"
+BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_MD_LATEST="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_authority_patch_readiness_latest.md"
+BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_STDOUT="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_authority_patch_readiness_stdout.json"
+BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_operator_authorization_${BOUNDED_REVIEW_CHAIN_STAMP}.json"
+BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD_OUT="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_operator_authorization_${BOUNDED_REVIEW_CHAIN_STAMP}.md"
+BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_operator_authorization_latest.json"
+BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD_LATEST="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_operator_authorization_latest.md"
+BOUNDED_PROBE_OPERATOR_AUTHORIZATION_STDOUT="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_operator_authorization_stdout.json"
+BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_shadow_placement_impact_${BOUNDED_REVIEW_CHAIN_STAMP}.json"
+BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_MD_OUT="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_shadow_placement_impact_${BOUNDED_REVIEW_CHAIN_STAMP}.md"
+BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_LATEST="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_shadow_placement_impact_latest.json"
+BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_MD_LATEST="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_shadow_placement_impact_latest.md"
+BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_STDOUT="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_shadow_placement_impact_stdout.json"
 sealed_operator_review_rc=0
 if [[ -n "$HORIZON_LEARNING_EVIDENCE_JSON" && -f "$HORIZON_LEARNING_EVIDENCE_JSON" ]]; then
     mkdir -p "$SEALED_OPERATOR_REVIEW_DIR"
@@ -162,6 +196,116 @@ if [[ -x "$SEALED_PREFLIGHT_SCRIPT" && -n "$HORIZON_LEARNING_EVIDENCE_JSON" && -
 else
     echo "[$(ts)] SKIP: sealed horizon probe preflight refresh missing script or learning evidence" >> "$LOG"
 fi
+bounded_probe_touchability_preflight_rc=0
+bounded_probe_placement_repair_plan_rc=0
+bounded_probe_authority_patch_readiness_rc=0
+bounded_probe_operator_authorization_rc=0
+bounded_probe_shadow_placement_impact_rc=0
+if [[ "$REFRESH_BOUNDED_REVIEW_CHAIN" == "1" ]]; then
+    if [[ -f "$SEALED_PREFLIGHT_JSON" && -f "$ORDER_TOUCHABILITY_JSON" ]]; then
+        mkdir -p "$BOUNDED_REVIEW_CHAIN_DIR"
+        (
+            cd "$BASE/helper_scripts/research"
+            "$PYBIN" -m cost_gate_learning_lane.bounded_probe_touchability_preflight \
+                --preflight-json "$SEALED_PREFLIGHT_JSON" \
+                --order-to-fill-gap-json "$ORDER_TOUCHABILITY_JSON" \
+                --max-artifact-age-hours "$BOUNDED_REVIEW_MAX_ARTIFACT_AGE_HOURS" \
+                --max-initial-passive-gap-bps "$TOUCHABILITY_MAX_INITIAL_PASSIVE_GAP_BPS" \
+                --max-deep-no-touch-gap-bps "$TOUCHABILITY_MAX_DEEP_NO_TOUCH_GAP_BPS" \
+                --json-output "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" \
+                --output "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_MD_OUT"
+        ) > "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_STDOUT" 2>> "$LOG" || bounded_probe_touchability_preflight_rc=$?
+        if [[ -f "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" ]]; then
+            cp "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST"
+            if [[ -f "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_MD_OUT" ]]; then
+                cp "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_MD_OUT" "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_MD_LATEST"
+            fi
+        fi
+        echo "[$(ts)] bounded_probe_touchability_preflight_refresh rc=${bounded_probe_touchability_preflight_rc}" >> "$LOG"
+
+        if [[ -f "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" ]]; then
+            (
+                cd "$BASE/helper_scripts/research"
+                "$PYBIN" -m cost_gate_learning_lane.bounded_probe_placement_repair_plan \
+                    --touchability-preflight-json "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" \
+                    --max-artifact-age-hours "$BOUNDED_REVIEW_MAX_ARTIFACT_AGE_HOURS" \
+                    --max-fresh-bbo-age-ms "$PLACEMENT_REPAIR_MAX_FRESH_BBO_AGE_MS" \
+                    --json-output "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" \
+                    --output "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_MD_OUT"
+            ) > "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_STDOUT" 2>> "$LOG" || bounded_probe_placement_repair_plan_rc=$?
+            if [[ -f "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" ]]; then
+                cp "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST"
+                if [[ -f "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_MD_OUT" ]]; then
+                    cp "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_MD_OUT" "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_MD_LATEST"
+                fi
+            fi
+            echo "[$(ts)] bounded_probe_placement_repair_plan_refresh rc=${bounded_probe_placement_repair_plan_rc}" >> "$LOG"
+        else
+            echo "[$(ts)] SKIP: bounded probe placement repair plan missing touchability preflight output" >> "$LOG"
+        fi
+
+        if [[ -f "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" ]]; then
+            (
+                cd "$BASE/helper_scripts/research"
+                "$PYBIN" -m cost_gate_learning_lane.bounded_probe_authority_patch_readiness \
+                    --placement-repair-plan-json "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" \
+                    --repo-root "$BASE" \
+                    --max-artifact-age-hours "$BOUNDED_REVIEW_MAX_ARTIFACT_AGE_HOURS" \
+                    --json-output "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" \
+                    --output "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_MD_OUT"
+            ) > "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_STDOUT" 2>> "$LOG" || bounded_probe_authority_patch_readiness_rc=$?
+            if [[ -f "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" ]]; then
+                cp "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST"
+                if [[ -f "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_MD_OUT" ]]; then
+                    cp "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_MD_OUT" "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_MD_LATEST"
+                fi
+            fi
+            echo "[$(ts)] bounded_probe_authority_patch_readiness_refresh rc=${bounded_probe_authority_patch_readiness_rc}" >> "$LOG"
+
+            (
+                cd "$BASE/helper_scripts/research"
+                "$PYBIN" -m cost_gate_learning_lane.bounded_probe_operator_authorization_cli \
+                    --preflight-json "$SEALED_PREFLIGHT_JSON" \
+                    --placement-repair-plan-json "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" \
+                    --authority-patch-readiness-json "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" \
+                    --decision defer \
+                    --max-artifact-age-hours "$BOUNDED_REVIEW_MAX_ARTIFACT_AGE_HOURS" \
+                    --json-output "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT" \
+                    --output "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD_OUT"
+            ) > "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_STDOUT" 2>> "$LOG" || bounded_probe_operator_authorization_rc=$?
+            if [[ -f "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT" ]]; then
+                cp "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT" "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST"
+                if [[ -f "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD_OUT" ]]; then
+                    cp "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD_OUT" "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD_LATEST"
+                fi
+            fi
+            echo "[$(ts)] bounded_probe_operator_authorization_refresh rc=${bounded_probe_operator_authorization_rc}" >> "$LOG"
+
+            (
+                cd "$BASE/helper_scripts/research"
+                "$PYBIN" -m cost_gate_learning_lane.bounded_probe_shadow_placement_impact \
+                    --order-to-fill-gap-json "$ORDER_TOUCHABILITY_JSON" \
+                    --placement-repair-plan-json "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" \
+                    --max-artifact-age-hours "$BOUNDED_REVIEW_MAX_ARTIFACT_AGE_HOURS" \
+                    --json-output "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT" \
+                    --output "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_MD_OUT"
+            ) > "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_STDOUT" 2>> "$LOG" || bounded_probe_shadow_placement_impact_rc=$?
+            if [[ -f "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT" ]]; then
+                cp "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT" "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_LATEST"
+                if [[ -f "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_MD_OUT" ]]; then
+                    cp "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_MD_OUT" "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_MD_LATEST"
+                fi
+            fi
+            echo "[$(ts)] bounded_probe_shadow_placement_impact_refresh rc=${bounded_probe_shadow_placement_impact_rc}" >> "$LOG"
+        else
+            echo "[$(ts)] SKIP: bounded probe authority/operator/shadow refresh missing placement repair plan output" >> "$LOG"
+        fi
+    else
+        echo "[$(ts)] SKIP: bounded probe review chain missing sealed preflight or order-to-fill audit" >> "$LOG"
+    fi
+else
+    echo "[$(ts)] SKIP: bounded probe review chain disabled by OPENCLAW_ALPHA_REFRESH_BOUNDED_PROBE_REVIEW_CHAIN=${REFRESH_BOUNDED_REVIEW_CHAIN}" >> "$LOG"
+fi
 add_profitability_json_arg "--cost-gate-counterfactual-json" "$DATA/cost_gate_counterfactual/cost_gate_reject_counterfactual_latest.json"
 add_profitability_json_arg "--profit-learning-packet-json" "$DATA/cost_gate_learning_lane/profit_learning_decision_packet_latest.json"
 add_profitability_json_arg "--learning-plan-json" "$DATA/cost_gate_learning_lane/demo_learning_lane_plan_latest.json"
@@ -171,9 +315,9 @@ add_profitability_json_arg "--demo-learning-stack-dry-run-review-json" "$DATA/de
 add_profitability_json_arg "--horizon-sealed-replay-json" "$HORIZON_SEALED_REPLAY_JSON"
 add_profitability_json_arg "--horizon-learning-evidence-json" "$HORIZON_LEARNING_EVIDENCE_JSON"
 add_profitability_json_arg "--sealed-horizon-operator-review-json" "$SEALED_OPERATOR_REVIEW_JSON"
-add_profitability_json_arg "--sealed-horizon-probe-preflight-json" "$DATA/cost_gate_learning_lane/sealed_horizon_probe_preflight_latest.json"
-add_profitability_json_arg "--bounded-probe-shadow-placement-impact-json" "$DATA/cost_gate_learning_lane/bounded_probe_shadow_placement_impact_latest.json"
-add_profitability_json_arg "--bounded-probe-operator-authorization-json" "$DATA/cost_gate_learning_lane/bounded_probe_operator_authorization_latest.json"
+add_profitability_json_arg "--sealed-horizon-probe-preflight-json" "$SEALED_PREFLIGHT_JSON"
+add_profitability_json_arg "--bounded-probe-shadow-placement-impact-json" "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_LATEST"
+add_profitability_json_arg "--bounded-probe-operator-authorization-json" "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST"
 add_profitability_json_arg "--bounded-probe-result-review-json" "$DATA/cost_gate_learning_lane/bounded_probe_result_review_latest.json"
 add_profitability_json_arg "--bounded-probe-execution-realism-review-json" "$DATA/cost_gate_learning_lane/bounded_probe_execution_realism_review_latest.json"
 add_profitability_json_arg "--fillsim-json" "$DATA/research/fillsim/fillsim_report.json"

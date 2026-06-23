@@ -38,6 +38,27 @@ def test_wrapper_refreshes_activation_packet_before_alpha_runner() -> None:
     assert "sealed_horizon_operator_review_stdout.json" in src
     assert "sealed_horizon_probe_preflight_cron.sh" in src
     assert "sealed_horizon_probe_preflight_refresh rc=" in src
+    assert "OPENCLAW_ALPHA_REFRESH_BOUNDED_PROBE_REVIEW_CHAIN" in src
+    assert "OPENCLAW_ALPHA_ORDER_TO_FILL_GAP_AUDIT_JSON" in src
+    assert "demo_order_to_fill_gap_latest.json" in src
+    assert "cost_gate_learning_lane.bounded_probe_touchability_preflight" in src
+    assert "cost_gate_learning_lane.bounded_probe_placement_repair_plan" in src
+    assert "cost_gate_learning_lane.bounded_probe_authority_patch_readiness" in src
+    assert "cost_gate_learning_lane.bounded_probe_operator_authorization_cli" in src
+    assert "cost_gate_learning_lane.bounded_probe_shadow_placement_impact" in src
+    assert "bounded_probe_touchability_preflight_latest.json" in src
+    assert "bounded_probe_placement_repair_plan_latest.json" in src
+    assert "bounded_probe_authority_patch_readiness_latest.json" in src
+    assert "bounded_probe_operator_authorization_latest.json" in src
+    assert "bounded_probe_shadow_placement_impact_latest.json" in src
+    assert "bounded_probe_touchability_preflight_refresh rc=" in src
+    assert "bounded_probe_placement_repair_plan_refresh rc=" in src
+    assert "bounded_probe_authority_patch_readiness_refresh rc=" in src
+    assert "bounded_probe_operator_authorization_refresh rc=" in src
+    assert "bounded_probe_shadow_placement_impact_refresh rc=" in src
+    assert "--order-to-fill-gap-json" in src
+    assert "--placement-repair-plan-json" in src
+    assert "--authority-patch-readiness-json" in src
     assert "canonical_or_latest_matching_path()" in src
     assert '"$DATA"/cost_gate_learning_lane/sealed_horizon_learning_evidence_latest.json' in src
     assert '"$DATA"/cost_gate_learning_lane/horizon_specific_sealed_replay_latest.json' in src
@@ -73,6 +94,21 @@ def test_wrapper_refreshes_activation_packet_before_alpha_runner() -> None:
         "sealed_horizon_probe_preflight_refresh rc="
     )
     assert src.index("sealed_horizon_probe_preflight_refresh rc=") < src.index(
+        "cost_gate_learning_lane.bounded_probe_touchability_preflight"
+    )
+    assert src.index("cost_gate_learning_lane.bounded_probe_touchability_preflight") < src.index(
+        "cost_gate_learning_lane.bounded_probe_placement_repair_plan"
+    )
+    assert src.index("cost_gate_learning_lane.bounded_probe_placement_repair_plan") < src.index(
+        "cost_gate_learning_lane.bounded_probe_authority_patch_readiness"
+    )
+    assert src.index("cost_gate_learning_lane.bounded_probe_authority_patch_readiness") < src.index(
+        "cost_gate_learning_lane.bounded_probe_operator_authorization_cli"
+    )
+    assert src.index("cost_gate_learning_lane.bounded_probe_operator_authorization_cli") < src.index(
+        "cost_gate_learning_lane.bounded_probe_shadow_placement_impact"
+    )
+    assert src.index("bounded_probe_shadow_placement_impact_refresh rc=") < src.index(
         "alpha_discovery_throughput.profitability_path_scorecard"
     )
     assert src.index("alpha_discovery_throughput.profitability_path_scorecard") < src.index(
