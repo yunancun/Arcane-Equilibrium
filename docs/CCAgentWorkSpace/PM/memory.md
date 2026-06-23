@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-23 Cost Gate False-Negative Candidate Packet
+
+- `cost_gate_false_negative_candidate_packet_v1` now turns blocked-outcome diagnosis into a ranked Cost Gate escape packet: false-negative-after-cost candidates for operator review, edge-amplification-required rows for engineering search, sample accumulation, and keep-blocked rows.
+- Linux artifact-only smoke at `2026-06-23T19:12:22Z` on source `b713c672` reports `COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW`, 16 ranked false-negative candidates, top `grid_trading|AVAXUSDT|Sell`, wrongful-block score `146.9126`, and net cost cushion `73.4563bps`.
+- PM read: this is the right profit-learning path for the Cost Gate problem. Do not globally lower the gate; review ranked false negatives, require bounded demo-probe authority before any probe, and require candidate-matched touchability/fill/fee/slippage lineage before any Cost Gate change. No global Cost Gate lowering, probe/order authority, runtime mutation, or promotion proof was granted.
+
 ## 2026-06-23 Cost Gate Blocked-Outcome Diagnosis
 
 - `cost_gate_demo_learning_lane_blocked_outcome_review_v2` now emits explicit `learning_diagnosis` and `cost_gate_escape_recommendation` fields for blocked-signal outcomes.
