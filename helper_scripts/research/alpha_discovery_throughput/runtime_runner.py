@@ -1121,9 +1121,33 @@ def collect_polymarket_leadlag_arm(
             "candidate_replay_history_min_samples": replay_history_summary.get(
                 "min_history_samples"
             ),
+            "candidate_replay_history_days_remaining": replay_history_summary.get(
+                "history_days_remaining"
+            ),
+            "candidate_replay_history_calendar_span_days": replay_history_summary.get(
+                "history_calendar_span_days"
+            ),
+            "candidate_replay_history_date_gap_count": replay_history_summary.get(
+                "history_date_gap_count"
+            ),
+            "candidate_replay_history_earliest_ready_date": replay_history_summary.get(
+                "earliest_history_ready_date"
+            ),
             "candidate_replay_history_net_bps_mean": replay_history_summary.get("net_bps_mean"),
             "candidate_replay_history_holdout_net_bps_mean": replay_history_summary.get(
                 "holdout_net_bps_mean"
+            ),
+            "candidate_replay_history_positive_net_sample_rate": (
+                replay_history_summary.get("positive_net_sample_rate")
+            ),
+            "candidate_replay_history_interim_edge_status": replay_history_summary.get(
+                "interim_edge_status"
+            ),
+            "candidate_replay_history_budget_status": replay_history_summary.get(
+                "history_budget_status"
+            ),
+            "candidate_replay_history_recommended_next_action": replay_history_summary.get(
+                "recommended_next_action"
             ),
             "candidate_replay_history_pbo_day_count": replay_history_summary.get(
                 "pbo_history_day_count"

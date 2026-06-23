@@ -2131,11 +2131,35 @@ def classify_profitability_blocker(
                     "candidate_replay_history_min_samples": detail.get(
                         "candidate_replay_history_min_samples"
                     ),
+                    "candidate_replay_history_days_remaining": detail.get(
+                        "candidate_replay_history_days_remaining"
+                    ),
+                    "candidate_replay_history_calendar_span_days": detail.get(
+                        "candidate_replay_history_calendar_span_days"
+                    ),
+                    "candidate_replay_history_date_gap_count": detail.get(
+                        "candidate_replay_history_date_gap_count"
+                    ),
+                    "candidate_replay_history_earliest_ready_date": detail.get(
+                        "candidate_replay_history_earliest_ready_date"
+                    ),
                     "candidate_replay_history_net_bps_mean": detail.get(
                         "candidate_replay_history_net_bps_mean"
                     ),
                     "candidate_replay_history_holdout_net_bps_mean": detail.get(
                         "candidate_replay_history_holdout_net_bps_mean"
+                    ),
+                    "candidate_replay_history_positive_net_sample_rate": detail.get(
+                        "candidate_replay_history_positive_net_sample_rate"
+                    ),
+                    "candidate_replay_history_interim_edge_status": detail.get(
+                        "candidate_replay_history_interim_edge_status"
+                    ),
+                    "candidate_replay_history_budget_status": detail.get(
+                        "candidate_replay_history_budget_status"
+                    ),
+                    "candidate_replay_history_recommended_next_action": detail.get(
+                        "candidate_replay_history_recommended_next_action"
                     ),
                     "candidate_replay_history_pbo_day_count": detail.get(
                         "candidate_replay_history_pbo_day_count"
@@ -2148,6 +2172,14 @@ def classify_profitability_blocker(
         if arm_id == "polymarket_leadlag_ic":
             replay_status = str(detail.get("candidate_replay_status") or "").upper()
             history_status = str(detail.get("candidate_replay_history_status") or "").upper()
+            history_present = history_status not in {"", "NO_REPLAY_HISTORY"}
+            history_budget_status = str(
+                detail.get("candidate_replay_history_budget_status") or ""
+            ).upper()
+            history_next_action = (
+                detail.get("candidate_replay_history_recommended_next_action")
+                or "collect_more_dated_polymarket_replay_history_before_promotion"
+            )
             history_execution_status = str(
                 detail.get("candidate_replay_history_execution_realism_status") or ""
             ).upper()
@@ -2189,14 +2221,44 @@ def classify_profitability_blocker(
                 "candidate_replay_history_min_samples": detail.get(
                     "candidate_replay_history_min_samples"
                 ),
+                "candidate_replay_history_days_remaining": detail.get(
+                    "candidate_replay_history_days_remaining"
+                ),
+                "candidate_replay_history_calendar_span_days": detail.get(
+                    "candidate_replay_history_calendar_span_days"
+                ),
+                "candidate_replay_history_date_gap_count": detail.get(
+                    "candidate_replay_history_date_gap_count"
+                ),
+                "candidate_replay_history_earliest_ready_date": detail.get(
+                    "candidate_replay_history_earliest_ready_date"
+                ),
                 "candidate_replay_history_pbo_day_count": detail.get(
                     "candidate_replay_history_pbo_day_count"
+                ),
+                "candidate_replay_history_net_bps_mean": detail.get(
+                    "candidate_replay_history_net_bps_mean"
+                ),
+                "candidate_replay_history_holdout_net_bps_mean": detail.get(
+                    "candidate_replay_history_holdout_net_bps_mean"
+                ),
+                "candidate_replay_history_positive_net_sample_rate": detail.get(
+                    "candidate_replay_history_positive_net_sample_rate"
+                ),
+                "candidate_replay_history_interim_edge_status": detail.get(
+                    "candidate_replay_history_interim_edge_status"
+                ),
+                "candidate_replay_history_budget_status": detail.get(
+                    "candidate_replay_history_budget_status"
+                ),
+                "candidate_replay_history_recommended_next_action": detail.get(
+                    "candidate_replay_history_recommended_next_action"
                 ),
                 "candidate_replay_history_execution_realism_status": detail.get(
                     "candidate_replay_history_execution_realism_status"
                 ),
             }
-            if replay_status != "PAPER_REPLAY_BUILT":
+            if replay_status != "PAPER_REPLAY_BUILT" and not history_present:
                 return _finish_blocker_row(
                     row,
                     blocker_class="data_coverage",
@@ -2216,14 +2278,23 @@ def classify_profitability_blocker(
                     engineering_actionable=True,
                     extra=replay_extra,
                 )
+            if history_budget_status == "EARLY_ROTATE_RECOMMENDED":
+                return _finish_blocker_row(
+                    row,
+                    blocker_class="rejected_no_edge",
+                    primary_blocker=(
+                        "polymarket_candidate_replay_history_interim_negative_edge"
+                    ),
+                    next_trigger=str(history_next_action),
+                    engineering_actionable=False,
+                    extra=replay_extra,
+                )
             if history_status != "REPLAY_HISTORY_READY_FOR_AEG_RECHECK":
                 return _finish_blocker_row(
                     row,
                     blocker_class="sample_gate",
                     primary_blocker="polymarket_candidate_replay_history_not_ready",
-                    next_trigger=(
-                        "collect_more_dated_polymarket_replay_history_before_promotion"
-                    ),
+                    next_trigger=str(history_next_action),
                     engineering_actionable=True,
                     extra=replay_extra,
                 )
