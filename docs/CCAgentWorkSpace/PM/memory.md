@@ -1803,3 +1803,9 @@
 - v418 wires `bounded_demo_probe_shadow_placement_impact_v1` into `alpha_discovery_runtime_killboard_v9`, `alpha_learning_worklist_v6`, and `profitability_engineering_closure_v1`.
 - Evidence priority is now result-review/execution-realism first, then shadow placement, then older blocked-review candidate; current shadow sample still proves mechanical touchability only, not candidate alpha.
 - Mac and Linux related suites both passed `107/107`; source commit `f0d422b2` was pushed `[skip ci]` and fast-forwarded on `trade-core` cleanly. No Cost Gate lowering, probe/order authority, deploy/restart, PG write, Bybit private call, or CI run.
+
+## 2026-06-23 Bounded Probe Near-Touch Adapter Module
+
+- v423 adds Rust `openclaw_engine::bounded_probe_near_touch`, a pure no-authority Adapter Module for future bounded Demo post-only near-touch-or-skip placement.
+- Readiness now separates Adapter Module presence from tick-dispatch authority-path wiring; canonical Linux smoke returned `RUST_PATCH_REQUIRED_AUTHORITY_PATH_WIRING_MISSING` with Adapter present true and wiring present false.
+- Verification passed Mac/Linux Python bounded suites `18/18`, Mac/Linux Rust focused Adapter tests `7/7`, and Linux `/tmp/openclaw` artifact smoke. No Cost Gate lowering, probe/order authority, deploy/restart, PG write, Bybit private call, or CI run.
