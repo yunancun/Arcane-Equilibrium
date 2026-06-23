@@ -477,6 +477,22 @@ def _task_id(row: dict[str, Any], task_type: str, index: int) -> str:
     return f"{arm}:{task_type}:{digest}"
 
 
+def _task_primary_blocker(row: dict[str, Any], task_type: str) -> Any:
+    if task_type == "cost_gate_learning_activation":
+        root_blocker = row.get("profitability_primary_cost_gate_root_blocker")
+        if isinstance(root_blocker, dict):
+            root_gate = _str(root_blocker.get("gate"))
+            if root_gate:
+                return root_gate
+        dry_run_status = _str(row.get("demo_learning_stack_dry_run_review_status"))
+        if dry_run_status == "DRY_RUN_PREVIEW_PASSED_OPERATOR_APPLY_REVIEW_REQUIRED":
+            return "demo_learning_stack_operator_apply_required"
+        activation_status = _str(row.get("demo_learning_stack_activation_packet_status"))
+        if activation_status == "READY_FOR_OPERATOR_DRY_RUN":
+            return "demo_learning_stack_activation_packet_dry_run_required"
+    return row.get("primary_blocker")
+
+
 def _classify_task_type(row: dict[str, Any]) -> str:
     arm_id = _str(row.get("arm_id"))
     blocker_class = _str(row.get("blocker_class"))
@@ -1000,7 +1016,7 @@ def build_learning_worklist(
             "completion_status": _completion_status(task_type),
             "completion_evidence_required": _completion_evidence_required(task_type),
             "blocker_class": row.get("blocker_class"),
-            "primary_blocker": row.get("primary_blocker"),
+            "primary_blocker": _task_primary_blocker(row, task_type),
             "next_trigger": _task_next_trigger(row, task_type),
             "priority_score": _priority_score(row, task_type),
             "actionability": _actionability(row, task_type),

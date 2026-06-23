@@ -3210,6 +3210,7 @@ def _learning_summary(worklist: dict[str, Any]) -> dict[str, Any]:
         "top_learning_task_arm_id": top_task.get("arm_id"),
         "top_learning_task_type": top_task.get("task_type"),
         "top_learning_task_objective": top_task.get("learning_objective"),
+        "top_learning_task_primary_blocker": top_task.get("primary_blocker"),
         "top_learning_task_completion_gate": top_task.get("completion_gate"),
         "top_learning_task_completion_status": top_task.get("completion_status"),
         "top_learning_task_completion_evidence_required_count": (
@@ -3292,6 +3293,9 @@ def _learning_summary(worklist: dict[str, Any]) -> dict[str, Any]:
         "top_engineering_learning_task_type": top_engineering_task.get("task_type"),
         "top_engineering_learning_task_objective": top_engineering_task.get(
             "learning_objective"
+        ),
+        "top_engineering_learning_task_primary_blocker": (
+            top_engineering_task.get("primary_blocker")
         ),
         "top_engineering_learning_task_completion_gate": top_engineering_task.get(
             "completion_gate"

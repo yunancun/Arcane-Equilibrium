@@ -3749,6 +3749,9 @@ def test_runtime_killboard_carries_profitability_runtime_mutation_required(tmp_p
     assert kb["top_learning_task_next_trigger"] == (
         "operator_review_dry_run_preview_then_apply_learning_stack_if_accepted"
     )
+    assert kb["top_learning_task_primary_blocker"] == (
+        "demo_learning_stack_operator_apply_required"
+    )
     assert kb["top_learning_task_operator_next_action"] == (
         "operator_review_dry_run_preview_then_apply_learning_stack_if_accepted"
     )
@@ -3773,6 +3776,7 @@ def test_runtime_killboard_carries_profitability_runtime_mutation_required(tmp_p
     assert kb["top_learning_task_order_authority_granted"] is False
     assert kb["top_learning_task_probe_authority_granted"] is False
     assert task["task_type"] == "cost_gate_learning_activation"
+    assert task["primary_blocker"] == "demo_learning_stack_operator_apply_required"
     assert task["requires_operator_authorization"] is True
     assert task["runtime_mutation_required"] is True
     assert task["side_effect_boundary"] == (

@@ -656,6 +656,7 @@ def test_learning_worklist_promotes_profitability_runtime_mutation_next_move():
     assert top["learning_objective"] == (
         "operator_review_learning_stack_dry_run_preview_before_cron_apply"
     )
+    assert top["primary_blocker"] == "demo_learning_stack_operator_apply_required"
     assert top["next_trigger"] == (
         "operator_review_dry_run_preview_then_apply_learning_stack_if_accepted"
     )
