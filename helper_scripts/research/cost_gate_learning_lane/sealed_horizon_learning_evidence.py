@@ -221,6 +221,26 @@ def _candidate_horizon_minutes(
     return default_horizon_minutes
 
 
+def _validate_sealed_horizon_candidate(
+    candidate: dict[str, Any],
+    *,
+    default_horizon_minutes: int,
+) -> dict[str, Any]:
+    side_cell_key = _str(candidate.get("side_cell_key"))
+    if not side_cell_key:
+        raise ValueError("sealed horizon candidate is missing side_cell_key")
+    if candidate.get("source_kind") != "horizon_specific_sealed_replay":
+        raise ValueError(f"{side_cell_key} is not a sealed horizon replay candidate")
+    if not _dict(candidate.get("sealed_horizon_replay")):
+        raise ValueError(f"{side_cell_key} is missing sealed_horizon_replay evidence")
+    if _candidate_horizon_minutes(candidate, default_horizon_minutes) <= 0:
+        raise ValueError(f"{side_cell_key} is missing a candidate outcome horizon")
+    for field in ("strategy_name", "symbol", "side", "reject_reason_code"):
+        if not _str(candidate.get(field)):
+            raise ValueError(f"{side_cell_key} is missing {field}")
+    return candidate
+
+
 def find_sealed_horizon_candidate(
     plan: dict[str, Any],
     side_cell_key: str,
@@ -233,17 +253,29 @@ def find_sealed_horizon_candidate(
             continue
         if _str(candidate.get("side_cell_key")) != side_cell_key:
             continue
-        if candidate.get("source_kind") != "horizon_specific_sealed_replay":
-            raise ValueError(f"{side_cell_key} is not a sealed horizon replay candidate")
-        if not _dict(candidate.get("sealed_horizon_replay")):
-            raise ValueError(f"{side_cell_key} is missing sealed_horizon_replay evidence")
-        if _candidate_horizon_minutes(candidate, default_horizon_minutes) <= 0:
-            raise ValueError(f"{side_cell_key} is missing a candidate outcome horizon")
-        for field in ("strategy_name", "symbol", "side", "reject_reason_code"):
-            if not _str(candidate.get(field)):
-                raise ValueError(f"{side_cell_key} is missing {field}")
-        return candidate
+        return _validate_sealed_horizon_candidate(
+            candidate,
+            default_horizon_minutes=default_horizon_minutes,
+        )
     raise ValueError(f"sealed horizon candidate not found: {side_cell_key}")
+
+
+def select_default_sealed_horizon_candidate(
+    plan: dict[str, Any],
+    *,
+    default_horizon_minutes: int = 60,
+) -> dict[str, Any]:
+    """Return the first sealed replay candidate selected by the learning plan."""
+    for candidate in plan.get("probe_candidates") or []:
+        if not isinstance(candidate, dict):
+            continue
+        if candidate.get("source_kind") != "horizon_specific_sealed_replay":
+            continue
+        return _validate_sealed_horizon_candidate(
+            candidate,
+            default_horizon_minutes=default_horizon_minutes,
+        )
+    raise ValueError("sealed horizon candidate not found")
 
 
 def _side_to_int(side: Any) -> int:
@@ -595,11 +627,17 @@ def _run_from_args(args: argparse.Namespace) -> dict[str, Any]:
     )
     validate_sealed_horizon_evidence_config(cfg)
     plan = _read_json(args.plan)
-    candidate = find_sealed_horizon_candidate(
-        plan,
-        args.side_cell_key,
-        default_horizon_minutes=cfg.default_horizon_minutes,
-    )
+    if args.side_cell_key:
+        candidate = find_sealed_horizon_candidate(
+            plan,
+            args.side_cell_key,
+            default_horizon_minutes=cfg.default_horizon_minutes,
+        )
+    else:
+        candidate = select_default_sealed_horizon_candidate(
+            plan,
+            default_horizon_minutes=cfg.default_horizon_minutes,
+        )
 
     if args.source_rows:
         feature_rows = _read_json_or_jsonl_rows(args.source_rows)
@@ -702,7 +740,7 @@ def _run_from_args(args: argparse.Namespace) -> dict[str, Any]:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", type=Path, required=True)
-    parser.add_argument("--side-cell-key", required=True)
+    parser.add_argument("--side-cell-key")
     parser.add_argument("--ledger", type=Path, required=True)
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--source-pg", action="store_true")

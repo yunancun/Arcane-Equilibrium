@@ -235,6 +235,14 @@ def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     assert 'validate_bool01 "OPENCLAW_COST_GATE_LEARNING_PREINSTALL_REFRESH_ONLY"' in src
     assert 'validate_int "OPENCLAW_COST_GATE_PLAN_MAX_SCORECARD_AGE_HOURS"' in src
     assert 'validate_int "OPENCLAW_COST_GATE_PLAN_MIN_CANDIDATE_SAMPLE"' in src
+    assert 'validate_bool01 "OPENCLAW_COST_GATE_REFRESH_SEALED_HORIZON_LEARNING_EVIDENCE"' in src
+    assert 'validate_bool01 "OPENCLAW_COST_GATE_APPEND_SEALED_HORIZON_LEARNING_EVIDENCE"' in src
+    assert 'validate_int "OPENCLAW_COST_GATE_SEALED_HORIZON_LEARNING_EVIDENCE_LOOKBACK_HOURS"' in src
+    assert 'validate_int "OPENCLAW_COST_GATE_SEALED_HORIZON_LEARNING_EVIDENCE_LIMIT"' in src
+    assert 'validate_int "OPENCLAW_COST_GATE_SEALED_HORIZON_LEARNING_EVIDENCE_MATURITY_BUFFER_MINUTES"' in src
+    assert 'validate_int "OPENCLAW_COST_GATE_SEALED_HORIZON_LEARNING_EVIDENCE_MIN_REVIEW_OUTCOMES_PER_SIDE_CELL"' in src
+    assert 'validate_decimal "OPENCLAW_COST_GATE_SEALED_HORIZON_LEARNING_EVIDENCE_MIN_REVIEW_AVG_NET_BPS"' in src
+    assert 'validate_decimal "OPENCLAW_COST_GATE_SEALED_HORIZON_LEARNING_EVIDENCE_MIN_REVIEW_NET_POSITIVE_PCT"' in src
     assert "OPENCLAW_COST_GATE_SCORECARD_HORIZON_MINUTES_LIST must be comma-separated integers" in src
     assert '^[0-9]+(,[0-9]+)*$' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES"' in src
@@ -268,6 +276,7 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert 'DATA_FLOW_ARGS=(' in src
     assert 'ORDER_TOUCHABILITY_ARGS=(' in src
     assert 'PLAN_ARGS=(' in src
+    assert 'SEALED_LEARNING_EVIDENCE_ARGS=(' in src
     assert 'DECISION_PACKET_ARGS=(' in src
     assert "cost_gate_reject_counterfactual.py" in src
     assert "demo_data_flow_monitor.py" in src
@@ -275,6 +284,8 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert '--horizon-minutes-list "$SCORECARD_HORIZON_MINUTES_LIST"' in src
     assert '--engine-mode "$engine_mode"' in src
     assert "-m cost_gate_learning_lane.policy" in src
+    assert "--horizon-sealed-replay-json" in src
+    assert "-m cost_gate_learning_lane.sealed_horizon_learning_evidence" in src
     assert "-m cost_gate_learning_lane.decision_packet" in src
     assert "-m cost_gate_learning_lane.bounded_probe_touchability_preflight" in src
     assert "-m cost_gate_learning_lane.bounded_probe_placement_repair_plan" in src
@@ -288,6 +299,9 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert 'cp "$ORDER_TOUCHABILITY_JSON_OUT" "$ORDER_TOUCHABILITY_JSON"' in src
     assert 'cp "$PLAN_OUT" "$PLAN_JSON"' in src
     assert 'cp "$DECISION_PACKET_JSON_OUT" "$DECISION_PACKET_JSON"' in src
+    assert 'cp "$SEALED_LEARNING_EVIDENCE_OUT" "$SEALED_LEARNING_EVIDENCE_JSON"' in src
+    assert 'cp "$SEALED_LEARNING_EVIDENCE_REVIEW_OUT" "$SEALED_LEARNING_EVIDENCE_REVIEW_LATEST"' in src
+    assert 'cp "$SEALED_LEARNING_EVIDENCE_SOURCE_ROWS_OUT" "$SEALED_LEARNING_EVIDENCE_SOURCE_ROWS_LATEST"' in src
     assert 'cp "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST"' in src
     assert 'cp "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST"' in src
     assert 'cp "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST"' in src
@@ -300,6 +314,11 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert 'ORDER_TOUCHABILITY_JSON_OUT="$ORDER_TOUCHABILITY_JSON_OUT" ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" ORDER_TOUCHABILITY_AUDIT_RC="$order_touchability_audit_rc"' in src
     assert 'DECISION_PACKET_JSON_OUT="$DECISION_PACKET_JSON_OUT" DECISION_PACKET_JSON="$DECISION_PACKET_JSON" DECISION_PACKET_RC="$decision_packet_rc" REFRESH_DECISION_PACKET="$REFRESH_DECISION_PACKET"' in src
     assert 'PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN"' in src
+    assert 'export SEALED_LEARNING_EVIDENCE_OUT="$SEALED_LEARNING_EVIDENCE_OUT"' in src
+    assert 'export SEALED_HORIZON_LEARNING_EVIDENCE_RC="$sealed_horizon_learning_evidence_rc"' in src
+    assert '"sealed_horizon_learning_evidence_status": sealed_learning.get("status")' in src
+    assert 'sealed_horizon_learning_evidence_skip_reason="horizon_sealed_replay_missing"' in src
+    assert '"horizon_sealed_replay_path": os.environ["HORIZON_SEALED_REPLAY_JSON"] or None' in src
     assert 'ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT"' in src
     assert 'BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST"' in src
     assert 'BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT="$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST="$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST"' in src
@@ -310,6 +329,7 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert "order_touchability_audit_rc=" in src
     assert "decision_packet_rc=" in src
     assert "plan_rc=" in src
+    assert "sealed_horizon_learning_evidence_rc=" in src
     assert "bounded_probe_placement_repair_plan_rc=" in src
     assert "bounded_probe_authority_patch_readiness_rc=" in src
     assert "bounded_probe_operator_authorization_rc=" in src
@@ -321,6 +341,7 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     materializer_index = src.index('"$PYBIN" "${MATERIALIZER_ARGS[@]}"')
     refresh_index = src.index('"$PYBIN" "${REFRESH_ARGS[@]}"')
     review_index = src.index('"$PYBIN" "${REVIEW_ARGS[@]}"')
+    sealed_evidence_index = src.index('"$PYBIN" "${SEALED_LEARNING_EVIDENCE_ARGS[@]}"')
     touchability_index = src.index('"$PYBIN" "${BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_ARGS[@]}"')
     placement_index = src.index('"$PYBIN" "${BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_ARGS[@]}"')
     authority_index = src.index('"$PYBIN" "${BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_ARGS[@]}"')
@@ -332,8 +353,8 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert scorecard_index < plan_index
     assert scorecard_index < data_flow_index < plan_index
     assert plan_index < materializer_index
-    assert materializer_index < refresh_index < review_index
-    assert review_index < order_touchability_index < touchability_index < placement_index < authority_index < operator_auth_index < shadow_index < result_review_index < execution_review_index
+    assert materializer_index < refresh_index < review_index < sealed_evidence_index
+    assert sealed_evidence_index < order_touchability_index < touchability_index < placement_index < authority_index < operator_auth_index < shadow_index < result_review_index < execution_review_index
     assert execution_review_index < decision_packet_index
 
 
@@ -385,10 +406,11 @@ def test_wrapper_has_preinstall_refresh_only_cutoff_after_plan_refresh() -> None
     src = _src(WRAPPER)
     assert 'if [[ "$PREINSTALL_REFRESH_ONLY" == "1" ]]' in src
     assert "preinstall refresh-only mode" in src
-    assert "skipped historical/materializer/outcome/review/bounded-probe stages" in src
+    assert "skipped historical/materializer/outcome/review/sealed evidence/bounded-probe stages" in src
     assert 'PREINSTALL_REFRESH_ONLY="$PREINSTALL_REFRESH_ONLY"' in src
     assert '"preinstall_refresh_only": os.environ["PREINSTALL_REFRESH_ONLY"] == "1"' in src
     assert 'order_touchability_audit_skip_reason="preinstall_refresh_only"' in src
+    assert 'sealed_horizon_learning_evidence_skip_reason="preinstall_refresh_only"' in src
     assert 'bounded_probe_touchability_preflight_skip_reason="preinstall_refresh_only"' in src
     assert 'bounded_probe_placement_repair_plan_skip_reason="preinstall_refresh_only"' in src
     assert 'bounded_probe_authority_patch_readiness_skip_reason="preinstall_refresh_only"' in src
@@ -402,6 +424,7 @@ def test_wrapper_has_preinstall_refresh_only_cutoff_after_plan_refresh() -> None
     materializer_index = src.index('"$PYBIN" "${MATERIALIZER_ARGS[@]}"')
     refresh_index = src.index('"$PYBIN" "${REFRESH_ARGS[@]}"')
     review_index = src.index('"$PYBIN" "${REVIEW_ARGS[@]}"')
+    sealed_evidence_index = src.index('"$PYBIN" "${SEALED_LEARNING_EVIDENCE_ARGS[@]}"')
     order_touchability_index = src.index('"$PYBIN" "${ORDER_TOUCHABILITY_ARGS[@]}"')
     touchability_index = src.index('"$PYBIN" "${BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_ARGS[@]}"')
     placement_index = src.index('"$PYBIN" "${BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_ARGS[@]}"')
@@ -417,6 +440,7 @@ def test_wrapper_has_preinstall_refresh_only_cutoff_after_plan_refresh() -> None
         < materializer_index
         < refresh_index
         < review_index
+        < sealed_evidence_index
         < order_touchability_index
         < touchability_index
         < placement_index

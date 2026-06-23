@@ -60,6 +60,14 @@ REFRESH_PLAN="${OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN:-1}"
 PREINSTALL_REFRESH_ONLY="${OPENCLAW_COST_GATE_LEARNING_PREINSTALL_REFRESH_ONLY:-0}"
 PLAN_MAX_SCORECARD_AGE_HOURS="${OPENCLAW_COST_GATE_PLAN_MAX_SCORECARD_AGE_HOURS:-24}"
 PLAN_MIN_CANDIDATE_SAMPLE="${OPENCLAW_COST_GATE_PLAN_MIN_CANDIDATE_SAMPLE:-100}"
+REFRESH_SEALED_HORIZON_LEARNING_EVIDENCE="${OPENCLAW_COST_GATE_REFRESH_SEALED_HORIZON_LEARNING_EVIDENCE:-1}"
+APPEND_SEALED_HORIZON_LEARNING_EVIDENCE="${OPENCLAW_COST_GATE_APPEND_SEALED_HORIZON_LEARNING_EVIDENCE:-1}"
+SEALED_LEARNING_EVIDENCE_LOOKBACK_HOURS="${OPENCLAW_COST_GATE_SEALED_HORIZON_LEARNING_EVIDENCE_LOOKBACK_HOURS:-72}"
+SEALED_LEARNING_EVIDENCE_LIMIT="${OPENCLAW_COST_GATE_SEALED_HORIZON_LEARNING_EVIDENCE_LIMIT:-50000}"
+SEALED_LEARNING_EVIDENCE_MATURITY_BUFFER_MINUTES="${OPENCLAW_COST_GATE_SEALED_HORIZON_LEARNING_EVIDENCE_MATURITY_BUFFER_MINUTES:-0}"
+SEALED_LEARNING_EVIDENCE_MIN_REVIEW_OUTCOMES="${OPENCLAW_COST_GATE_SEALED_HORIZON_LEARNING_EVIDENCE_MIN_REVIEW_OUTCOMES_PER_SIDE_CELL:-100}"
+SEALED_LEARNING_EVIDENCE_MIN_REVIEW_AVG_NET_BPS="${OPENCLAW_COST_GATE_SEALED_HORIZON_LEARNING_EVIDENCE_MIN_REVIEW_AVG_NET_BPS:-0.0}"
+SEALED_LEARNING_EVIDENCE_MIN_REVIEW_NET_POSITIVE_PCT="${OPENCLAW_COST_GATE_SEALED_HORIZON_LEARNING_EVIDENCE_MIN_REVIEW_NET_POSITIVE_PCT:-60.0}"
 PG_TIMEFRAME="${OPENCLAW_COST_GATE_LEARNING_PG_TIMEFRAME:-1m}"
 OUTCOME_HORIZON_MINUTES="${OPENCLAW_COST_GATE_LEARNING_OUTCOME_HORIZON_MINUTES:-60}"
 SCORECARD_HORIZON_MINUTES_LIST="${OPENCLAW_COST_GATE_SCORECARD_HORIZON_MINUTES_LIST:-15,30,60,120,240}"
@@ -97,6 +105,17 @@ STALE_LOCK_MIN="${OPENCLAW_COST_GATE_LEARNING_STALE_LOCK_MIN:-30}"
 mkdir -p "$LANE_DIR" "$COUNTERFACTUAL_DIR" "$DATA_FLOW_DIR" "$ORDER_TOUCHABILITY_DIR" "$LOG_DIR" "$LOCK_ROOT" "$HEARTBEAT_DIR"
 
 ts() { date -u '+%Y-%m-%d %H:%M:%S'; }
+
+latest_matching_path() {
+    local candidate
+    local latest=""
+    for candidate in "$@"; do
+        if [[ -f "$candidate" ]]; then
+            latest="$candidate"
+        fi
+    done
+    printf '%s' "$latest"
+}
 
 validate_int() {
     local name="$1"
@@ -153,6 +172,14 @@ validate_bool01 "OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN" "$REFRESH_PLAN"
 validate_bool01 "OPENCLAW_COST_GATE_LEARNING_PREINSTALL_REFRESH_ONLY" "$PREINSTALL_REFRESH_ONLY"
 validate_int "OPENCLAW_COST_GATE_PLAN_MAX_SCORECARD_AGE_HOURS" "$PLAN_MAX_SCORECARD_AGE_HOURS"
 validate_int "OPENCLAW_COST_GATE_PLAN_MIN_CANDIDATE_SAMPLE" "$PLAN_MIN_CANDIDATE_SAMPLE"
+validate_bool01 "OPENCLAW_COST_GATE_REFRESH_SEALED_HORIZON_LEARNING_EVIDENCE" "$REFRESH_SEALED_HORIZON_LEARNING_EVIDENCE"
+validate_bool01 "OPENCLAW_COST_GATE_APPEND_SEALED_HORIZON_LEARNING_EVIDENCE" "$APPEND_SEALED_HORIZON_LEARNING_EVIDENCE"
+validate_int "OPENCLAW_COST_GATE_SEALED_HORIZON_LEARNING_EVIDENCE_LOOKBACK_HOURS" "$SEALED_LEARNING_EVIDENCE_LOOKBACK_HOURS"
+validate_int "OPENCLAW_COST_GATE_SEALED_HORIZON_LEARNING_EVIDENCE_LIMIT" "$SEALED_LEARNING_EVIDENCE_LIMIT"
+validate_int "OPENCLAW_COST_GATE_SEALED_HORIZON_LEARNING_EVIDENCE_MATURITY_BUFFER_MINUTES" "$SEALED_LEARNING_EVIDENCE_MATURITY_BUFFER_MINUTES"
+validate_int "OPENCLAW_COST_GATE_SEALED_HORIZON_LEARNING_EVIDENCE_MIN_REVIEW_OUTCOMES_PER_SIDE_CELL" "$SEALED_LEARNING_EVIDENCE_MIN_REVIEW_OUTCOMES"
+validate_decimal "OPENCLAW_COST_GATE_SEALED_HORIZON_LEARNING_EVIDENCE_MIN_REVIEW_AVG_NET_BPS" "$SEALED_LEARNING_EVIDENCE_MIN_REVIEW_AVG_NET_BPS"
+validate_decimal "OPENCLAW_COST_GATE_SEALED_HORIZON_LEARNING_EVIDENCE_MIN_REVIEW_NET_POSITIVE_PCT" "$SEALED_LEARNING_EVIDENCE_MIN_REVIEW_NET_POSITIVE_PCT"
 validate_int "OPENCLAW_COST_GATE_LEARNING_OUTCOME_HORIZON_MINUTES" "$OUTCOME_HORIZON_MINUTES"
 if [[ ! "$SCORECARD_HORIZON_MINUTES_LIST" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
     echo "[$(ts)] FATAL: OPENCLAW_COST_GATE_SCORECARD_HORIZON_MINUTES_LIST must be comma-separated integers: ${SCORECARD_HORIZON_MINUTES_LIST}" | tee -a "$LOG" >&2
@@ -235,6 +262,11 @@ export PGOPTIONS="-c default_transaction_read_only=on"
 export OPENCLAW_BASE_DIR="$BASE"
 export OPENCLAW_DATA_DIR="$DATA"
 
+DEFAULT_HORIZON_SEALED_REPLAY_JSON="$(latest_matching_path \
+    "$DATA"/cost_gate_learning_lane/horizon_specific_sealed_replay_latest.json \
+    "$DATA"/profitability_refresh/*/horizon_specific_sealed_replay/horizon_specific_sealed_replay_latest.json)"
+HORIZON_SEALED_REPLAY_JSON="${OPENCLAW_COST_GATE_HORIZON_SEALED_REPLAY_JSON:-$DEFAULT_HORIZON_SEALED_REPLAY_JSON}"
+
 STAMP="$(date -u '+%Y%m%dT%H%M%SZ')"
 SCORECARD_JSON_OUT="${COUNTERFACTUAL_DIR}/cost_gate_reject_counterfactual_${STAMP}.json"
 SCORECARD_MD_OUT="${COUNTERFACTUAL_DIR}/cost_gate_reject_counterfactual_${STAMP}.md"
@@ -248,6 +280,11 @@ REFRESH_OUT="${LANE_DIR}/outcome_refresh_${STAMP}.json"
 REFRESH_LATEST="${LANE_DIR}/outcome_refresh_latest.json"
 REVIEW_OUT="${LANE_DIR}/blocked_outcome_review_${STAMP}.json"
 REVIEW_LATEST="${LANE_DIR}/blocked_outcome_review_latest.json"
+SEALED_LEARNING_EVIDENCE_OUT="${LANE_DIR}/sealed_horizon_learning_evidence_${STAMP}.json"
+SEALED_LEARNING_EVIDENCE_REVIEW_OUT="${LANE_DIR}/sealed_horizon_learning_evidence_review_${STAMP}.json"
+SEALED_LEARNING_EVIDENCE_REVIEW_LATEST="${LANE_DIR}/sealed_horizon_learning_evidence_review_latest.json"
+SEALED_LEARNING_EVIDENCE_SOURCE_ROWS_OUT="${LANE_DIR}/sealed_horizon_learning_evidence_source_rows_${STAMP}.jsonl"
+SEALED_LEARNING_EVIDENCE_SOURCE_ROWS_LATEST="${LANE_DIR}/sealed_horizon_learning_evidence_source_rows_latest.jsonl"
 BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT="${LANE_DIR}/bounded_probe_touchability_preflight_${STAMP}.json"
 BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_MD_OUT="${LANE_DIR}/bounded_probe_touchability_preflight_${STAMP}.md"
 BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST="${LANE_DIR}/bounded_probe_touchability_preflight_latest.json"
@@ -327,6 +364,9 @@ PLAN_ARGS=(
     --max-scorecard-age-hours "$PLAN_MAX_SCORECARD_AGE_HOURS"
     --min-candidate-sample "$PLAN_MIN_CANDIDATE_SAMPLE"
 )
+if [[ -f "$HORIZON_SEALED_REPLAY_JSON" ]]; then
+    PLAN_ARGS+=(--horizon-sealed-replay-json "$HORIZON_SEALED_REPLAY_JSON")
+fi
 
 HISTORICAL_REVIEW_ARGS=(
     -m cost_gate_learning_lane.historical_review
@@ -379,6 +419,33 @@ REVIEW_ARGS=(
     --min-net-positive-pct "$REVIEW_MIN_NET_POSITIVE_PCT"
     --output "$REVIEW_OUT"
 )
+
+SEALED_LEARNING_EVIDENCE_ARGS=(
+    -m cost_gate_learning_lane.sealed_horizon_learning_evidence
+    --plan "$PLAN_JSON"
+    --ledger "$LEDGER"
+    --source-pg
+    --price-source-pg
+    --engine-mode demo
+    --engine-mode live_demo
+    --lookback-hours "$SEALED_LEARNING_EVIDENCE_LOOKBACK_HOURS"
+    --limit "$SEALED_LEARNING_EVIDENCE_LIMIT"
+    --maturity-buffer-minutes "$SEALED_LEARNING_EVIDENCE_MATURITY_BUFFER_MINUTES"
+    --horizon-minutes "$OUTCOME_HORIZON_MINUTES"
+    --outcome-cost-bps "$OUTCOME_COST_BPS"
+    --max-entry-delay-ms "$MAX_ENTRY_DELAY_MS"
+    --pg-timeframe "$PG_TIMEFRAME"
+    --pg-statement-timeout-ms "$PG_STATEMENT_TIMEOUT_MS"
+    --min-review-outcomes-per-side-cell "$SEALED_LEARNING_EVIDENCE_MIN_REVIEW_OUTCOMES"
+    --min-review-avg-net-bps "$SEALED_LEARNING_EVIDENCE_MIN_REVIEW_AVG_NET_BPS"
+    --min-review-net-positive-pct "$SEALED_LEARNING_EVIDENCE_MIN_REVIEW_NET_POSITIVE_PCT"
+    --output "$SEALED_LEARNING_EVIDENCE_OUT"
+    --review-output "$SEALED_LEARNING_EVIDENCE_REVIEW_OUT"
+    --source-rows-output "$SEALED_LEARNING_EVIDENCE_SOURCE_ROWS_OUT"
+)
+if [[ "$APPEND_SEALED_HORIZON_LEARNING_EVIDENCE" == "1" ]]; then
+    SEALED_LEARNING_EVIDENCE_ARGS+=(--append-ledger)
+fi
 
 BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_ARGS=(
     -m cost_gate_learning_lane.bounded_probe_touchability_preflight
@@ -513,6 +580,7 @@ historical_review_rc=0
 materializer_rc=0
 refresh_rc=0
 review_rc=0
+sealed_horizon_learning_evidence_rc=0
 order_touchability_audit_rc=0
 bounded_probe_touchability_preflight_rc=0
 bounded_probe_placement_repair_plan_rc=0
@@ -522,6 +590,7 @@ bounded_probe_shadow_placement_impact_rc=0
 bounded_probe_result_review_rc=0
 bounded_probe_execution_realism_review_rc=0
 bounded_probe_touchability_preflight_skip_reason=""
+sealed_horizon_learning_evidence_skip_reason=""
 order_touchability_audit_skip_reason=""
 bounded_probe_placement_repair_plan_skip_reason=""
 bounded_probe_authority_patch_readiness_skip_reason=""
@@ -531,6 +600,7 @@ bounded_probe_result_review_skip_reason=""
 bounded_probe_execution_realism_review_skip_reason=""
 if [[ "$PREINSTALL_REFRESH_ONLY" == "1" ]]; then
     order_touchability_audit_skip_reason="preinstall_refresh_only"
+    sealed_horizon_learning_evidence_skip_reason="preinstall_refresh_only"
     bounded_probe_touchability_preflight_skip_reason="preinstall_refresh_only"
     bounded_probe_placement_repair_plan_skip_reason="preinstall_refresh_only"
     bounded_probe_authority_patch_readiness_skip_reason="preinstall_refresh_only"
@@ -538,7 +608,7 @@ if [[ "$PREINSTALL_REFRESH_ONLY" == "1" ]]; then
     bounded_probe_shadow_placement_impact_skip_reason="preinstall_refresh_only"
     bounded_probe_result_review_skip_reason="preinstall_refresh_only"
     bounded_probe_execution_realism_review_skip_reason="preinstall_refresh_only"
-    echo "[$(ts)] SKIP: preinstall refresh-only mode; refreshed scorecard/plan, skipped historical/materializer/outcome/review/bounded-probe stages" >> "$LOG"
+    echo "[$(ts)] SKIP: preinstall refresh-only mode; refreshed scorecard/plan, skipped historical/materializer/outcome/review/sealed evidence/bounded-probe stages" >> "$LOG"
 else
     (
         cd "$BASE"
@@ -582,6 +652,32 @@ else
     ) >> "$LOG" 2>&1 || review_rc=$?
     if [[ -f "$REVIEW_OUT" ]]; then
         cp "$REVIEW_OUT" "$REVIEW_LATEST"
+    fi
+
+    if [[ "$REFRESH_SEALED_HORIZON_LEARNING_EVIDENCE" == "1" ]]; then
+        if [[ -f "$HORIZON_SEALED_REPLAY_JSON" ]]; then
+            (
+                cd "$BASE"
+                export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
+                export PYTHONDONTWRITEBYTECODE=1
+                "$PYBIN" "${SEALED_LEARNING_EVIDENCE_ARGS[@]}"
+            ) >> "$LOG" 2>&1 || sealed_horizon_learning_evidence_rc=$?
+            if [[ -f "$SEALED_LEARNING_EVIDENCE_OUT" ]]; then
+                cp "$SEALED_LEARNING_EVIDENCE_OUT" "$SEALED_LEARNING_EVIDENCE_JSON"
+            fi
+            if [[ -f "$SEALED_LEARNING_EVIDENCE_REVIEW_OUT" ]]; then
+                cp "$SEALED_LEARNING_EVIDENCE_REVIEW_OUT" "$SEALED_LEARNING_EVIDENCE_REVIEW_LATEST"
+            fi
+            if [[ -f "$SEALED_LEARNING_EVIDENCE_SOURCE_ROWS_OUT" ]]; then
+                cp "$SEALED_LEARNING_EVIDENCE_SOURCE_ROWS_OUT" "$SEALED_LEARNING_EVIDENCE_SOURCE_ROWS_LATEST"
+            fi
+        else
+            sealed_horizon_learning_evidence_skip_reason="horizon_sealed_replay_missing"
+            echo "[$(ts)] SKIP: sealed horizon learning evidence refresh missing sealed replay artifact" >> "$LOG"
+        fi
+    else
+        sealed_horizon_learning_evidence_skip_reason="disabled"
+        echo "[$(ts)] SKIP: sealed horizon learning evidence refresh disabled by OPENCLAW_COST_GATE_REFRESH_SEALED_HORIZON_LEARNING_EVIDENCE=0" >> "$LOG"
     fi
 
     if [[ "$REFRESH_ORDER_TOUCHABILITY_AUDIT" == "1" ]]; then
@@ -772,6 +868,17 @@ export BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST="$BOUNDED_PROBE_OPERATOR_AUTH
 export BOUNDED_PROBE_OPERATOR_AUTHORIZATION_RC="$bounded_probe_operator_authorization_rc"
 export BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SKIP_REASON="$bounded_probe_operator_authorization_skip_reason"
 export REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION="$REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION"
+export HORIZON_SEALED_REPLAY_JSON="$HORIZON_SEALED_REPLAY_JSON"
+export SEALED_LEARNING_EVIDENCE_OUT="$SEALED_LEARNING_EVIDENCE_OUT"
+export SEALED_LEARNING_EVIDENCE_JSON="$SEALED_LEARNING_EVIDENCE_JSON"
+export SEALED_LEARNING_EVIDENCE_REVIEW_OUT="$SEALED_LEARNING_EVIDENCE_REVIEW_OUT"
+export SEALED_LEARNING_EVIDENCE_REVIEW_LATEST="$SEALED_LEARNING_EVIDENCE_REVIEW_LATEST"
+export SEALED_LEARNING_EVIDENCE_SOURCE_ROWS_OUT="$SEALED_LEARNING_EVIDENCE_SOURCE_ROWS_OUT"
+export SEALED_LEARNING_EVIDENCE_SOURCE_ROWS_LATEST="$SEALED_LEARNING_EVIDENCE_SOURCE_ROWS_LATEST"
+export SEALED_HORIZON_LEARNING_EVIDENCE_RC="$sealed_horizon_learning_evidence_rc"
+export SEALED_HORIZON_LEARNING_EVIDENCE_SKIP_REASON="$sealed_horizon_learning_evidence_skip_reason"
+export REFRESH_SEALED_HORIZON_LEARNING_EVIDENCE="$REFRESH_SEALED_HORIZON_LEARNING_EVIDENCE"
+export APPEND_SEALED_HORIZON_LEARNING_EVIDENCE="$APPEND_SEALED_HORIZON_LEARNING_EVIDENCE"
 
 STATUS_JSON=$(SCORECARD_JSON_OUT="$SCORECARD_JSON_OUT" SCORECARD_JSON="$SCORECARD_JSON" SCORECARD_RC="$scorecard_rc" REFRESH_SCORECARD="$REFRESH_SCORECARD" DATA_FLOW_JSON_OUT="$DATA_FLOW_JSON_OUT" DATA_FLOW_JSON="$DATA_FLOW_JSON" DATA_FLOW_MONITOR_RC="$data_flow_monitor_rc" REFRESH_DATA_FLOW_MONITOR="$REFRESH_DATA_FLOW_MONITOR" ORDER_TOUCHABILITY_JSON_OUT="$ORDER_TOUCHABILITY_JSON_OUT" ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" ORDER_TOUCHABILITY_AUDIT_RC="$order_touchability_audit_rc" ORDER_TOUCHABILITY_AUDIT_SKIP_REASON="$order_touchability_audit_skip_reason" REFRESH_ORDER_TOUCHABILITY_AUDIT="$REFRESH_ORDER_TOUCHABILITY_AUDIT" DECISION_PACKET_JSON_OUT="$DECISION_PACKET_JSON_OUT" DECISION_PACKET_JSON="$DECISION_PACKET_JSON" DECISION_PACKET_RC="$decision_packet_rc" REFRESH_DECISION_PACKET="$REFRESH_DECISION_PACKET" PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN" PREINSTALL_REFRESH_ONLY="$PREINSTALL_REFRESH_ONLY" HISTORICAL_REVIEW_OUT="$HISTORICAL_REVIEW_OUT" MATERIALIZER_OUT="$MATERIALIZER_OUT" REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" BOUNDED_PROBE_PREFLIGHT_JSON="$SEALED_PREFLIGHT_JSON" ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT="$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST="$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT="$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST="$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST" BOUNDED_PROBE_RESULT_REVIEW_OUT="$BOUNDED_PROBE_RESULT_REVIEW_OUT" BOUNDED_PROBE_RESULT_REVIEW_LATEST="$BOUNDED_PROBE_RESULT_REVIEW_LATEST" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST" HISTORICAL_REVIEW_RC="$historical_review_rc" MATERIALIZER_RC="$materializer_rc" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_RC="$bounded_probe_touchability_preflight_rc" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_RC="$bounded_probe_placement_repair_plan_rc" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_RC="$bounded_probe_authority_patch_readiness_rc" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_RC="$bounded_probe_operator_authorization_rc" BOUNDED_PROBE_RESULT_REVIEW_RC="$bounded_probe_result_review_rc" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_RC="$bounded_probe_execution_realism_review_rc" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_SKIP_REASON="$bounded_probe_touchability_preflight_skip_reason" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_SKIP_REASON="$bounded_probe_placement_repair_plan_skip_reason" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_SKIP_REASON="$bounded_probe_authority_patch_readiness_skip_reason" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SKIP_REASON="$bounded_probe_operator_authorization_skip_reason" BOUNDED_PROBE_RESULT_REVIEW_SKIP_REASON="$bounded_probe_result_review_skip_reason" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_SKIP_REASON="$bounded_probe_execution_realism_review_skip_reason" REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT="$REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT" REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN="$REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN" REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS="$REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS" REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION="$REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION" REFRESH_BOUNDED_PROBE_RESULT_REVIEW="$REFRESH_BOUNDED_PROBE_RESULT_REVIEW" REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW="$REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW" LEDGER="$LEDGER" MATERIALIZE_REJECTS="$MATERIALIZE_REJECTS" APPEND_MATERIALIZED_REJECTS="$APPEND_MATERIALIZED_REJECTS" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
 import datetime
@@ -803,6 +910,9 @@ historical, historical_sha, historical_err = load(os.environ["HISTORICAL_REVIEW_
 materializer, materializer_sha, materializer_err = load(os.environ["MATERIALIZER_OUT"])
 refresh, refresh_sha, refresh_err = load(os.environ["REFRESH_OUT"])
 review, review_sha, review_err = load(os.environ["REVIEW_OUT"])
+sealed_learning, sealed_learning_sha, sealed_learning_err = load(
+    os.environ["SEALED_LEARNING_EVIDENCE_OUT"]
+)
 bounded_touchability, bounded_touchability_sha, bounded_touchability_err = load(
     os.environ["BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT"]
 )
@@ -841,6 +951,7 @@ status = {
     "materializer_rc": int(os.environ["MATERIALIZER_RC"]),
     "refresh_rc": int(os.environ["REFRESH_RC"]),
     "review_rc": int(os.environ["REVIEW_RC"]),
+    "sealed_horizon_learning_evidence_rc": int(os.environ["SEALED_HORIZON_LEARNING_EVIDENCE_RC"]),
     "bounded_probe_touchability_preflight_rc": int(os.environ["BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_RC"]),
     "bounded_probe_placement_repair_plan_rc": int(os.environ["BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_RC"]),
     "bounded_probe_authority_patch_readiness_rc": int(os.environ["BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_RC"]),
@@ -853,6 +964,8 @@ status = {
     "refresh_order_touchability_audit": os.environ["REFRESH_ORDER_TOUCHABILITY_AUDIT"] == "1",
     "refresh_decision_packet": os.environ["REFRESH_DECISION_PACKET"] == "1",
     "refresh_plan": os.environ["REFRESH_PLAN"] == "1",
+    "refresh_sealed_horizon_learning_evidence": os.environ["REFRESH_SEALED_HORIZON_LEARNING_EVIDENCE"] == "1",
+    "append_sealed_horizon_learning_evidence": os.environ["APPEND_SEALED_HORIZON_LEARNING_EVIDENCE"] == "1",
     "refresh_bounded_probe_touchability_preflight": os.environ["REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT"] == "1",
     "refresh_bounded_probe_placement_repair_plan": os.environ["REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN"] == "1",
     "refresh_bounded_probe_authority_patch_readiness": os.environ["REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS"] == "1",
@@ -917,6 +1030,7 @@ status = {
     "plan_policy_status": plan.get("status"),
     "plan_gate_status": plan.get("gate_status"),
     "plan_selected_probe_candidate_count": plan.get("selected_probe_candidate_count"),
+    "horizon_sealed_replay_path": os.environ["HORIZON_SEALED_REPLAY_JSON"] or None,
     "historical_review_artifact_path": os.environ["HISTORICAL_REVIEW_OUT"],
     "historical_review_sha256": historical_sha,
     "historical_review_error": historical_err,
@@ -954,6 +1068,30 @@ status = {
     "review_top_candidate_wrongful_block_score": review.get("top_review_candidate_wrongful_block_score"),
     "review_top_candidate_net_cost_cushion_bps": review.get("top_review_candidate_net_cost_cushion_bps"),
     "blocked_signal_outcome_count": review.get("blocked_signal_outcome_count"),
+    "sealed_horizon_learning_evidence_artifact_path": os.environ["SEALED_LEARNING_EVIDENCE_OUT"],
+    "sealed_horizon_learning_evidence_latest_path": os.environ["SEALED_LEARNING_EVIDENCE_JSON"],
+    "sealed_horizon_learning_evidence_review_artifact_path": os.environ["SEALED_LEARNING_EVIDENCE_REVIEW_OUT"],
+    "sealed_horizon_learning_evidence_review_latest_path": os.environ["SEALED_LEARNING_EVIDENCE_REVIEW_LATEST"],
+    "sealed_horizon_learning_evidence_source_rows_artifact_path": os.environ["SEALED_LEARNING_EVIDENCE_SOURCE_ROWS_OUT"],
+    "sealed_horizon_learning_evidence_source_rows_latest_path": os.environ["SEALED_LEARNING_EVIDENCE_SOURCE_ROWS_LATEST"],
+    "sealed_horizon_learning_evidence_sha256": sealed_learning_sha,
+    "sealed_horizon_learning_evidence_error": sealed_learning_err,
+    "sealed_horizon_learning_evidence_skip_reason": os.environ["SEALED_HORIZON_LEARNING_EVIDENCE_SKIP_REASON"] or None,
+    "sealed_horizon_learning_evidence_status": sealed_learning.get("status"),
+    "sealed_horizon_learning_evidence_reason": sealed_learning.get("reason"),
+    "sealed_horizon_learning_evidence_next_trigger": sealed_learning.get("next_trigger"),
+    "sealed_horizon_learning_evidence_side_cell_key": sealed_learning.get("side_cell_key"),
+    "sealed_horizon_learning_evidence_outcome_horizon_minutes": sealed_learning.get("outcome_horizon_minutes"),
+    "sealed_horizon_learning_evidence_blocked_signal_outcome_count": (
+        (sealed_learning.get("outcomes") or {}).get("blocked_signal_outcome_count")
+        if isinstance(sealed_learning.get("outcomes"), dict)
+        else None
+    ),
+    "sealed_horizon_learning_evidence_candidate_clears_operator_review_gate": (
+        (sealed_learning.get("answers") or {}).get("candidate_clears_operator_review_gate")
+        if isinstance(sealed_learning.get("answers"), dict)
+        else None
+    ),
     "bounded_probe_preflight_path": os.environ["BOUNDED_PROBE_PREFLIGHT_JSON"],
     "order_touchability_audit_path": os.environ["ORDER_TOUCHABILITY_JSON"],
     "bounded_probe_touchability_preflight_artifact_path": os.environ["BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT"],
@@ -1167,7 +1305,7 @@ if [[ -n "$STATUS_JSON" ]]; then
     echo "$STATUS_JSON" >> "$STATUS_LOG"
 fi
 
-echo "[$(ts)] === Cost-gate learning lane refresh end scorecard_rc=${scorecard_rc} plan_rc=${plan_rc} historical_review_rc=${historical_review_rc} materializer_rc=${materializer_rc} refresh_rc=${refresh_rc} review_rc=${review_rc} order_touchability_audit_rc=${order_touchability_audit_rc} bounded_probe_touchability_preflight_rc=${bounded_probe_touchability_preflight_rc} bounded_probe_placement_repair_plan_rc=${bounded_probe_placement_repair_plan_rc} bounded_probe_authority_patch_readiness_rc=${bounded_probe_authority_patch_readiness_rc} bounded_probe_operator_authorization_rc=${bounded_probe_operator_authorization_rc} bounded_probe_shadow_placement_impact_rc=${bounded_probe_shadow_placement_impact_rc} bounded_probe_result_review_rc=${bounded_probe_result_review_rc} bounded_probe_execution_realism_review_rc=${bounded_probe_execution_realism_review_rc} ===" >> "$LOG"
+echo "[$(ts)] === Cost-gate learning lane refresh end scorecard_rc=${scorecard_rc} plan_rc=${plan_rc} historical_review_rc=${historical_review_rc} materializer_rc=${materializer_rc} refresh_rc=${refresh_rc} review_rc=${review_rc} sealed_horizon_learning_evidence_rc=${sealed_horizon_learning_evidence_rc} order_touchability_audit_rc=${order_touchability_audit_rc} bounded_probe_touchability_preflight_rc=${bounded_probe_touchability_preflight_rc} bounded_probe_placement_repair_plan_rc=${bounded_probe_placement_repair_plan_rc} bounded_probe_authority_patch_readiness_rc=${bounded_probe_authority_patch_readiness_rc} bounded_probe_operator_authorization_rc=${bounded_probe_operator_authorization_rc} bounded_probe_shadow_placement_impact_rc=${bounded_probe_shadow_placement_impact_rc} bounded_probe_result_review_rc=${bounded_probe_result_review_rc} bounded_probe_execution_realism_review_rc=${bounded_probe_execution_realism_review_rc} ===" >> "$LOG"
 
 # fail-soft: rc/status are recorded; alpha-discovery reads artifacts and ledger
 # state. Operator action is required for deploy, writer enablement, or probe authority.
