@@ -98,10 +98,14 @@ def _score_priority(path: dict[str, Any]) -> tuple[int, float]:
     status_rank = {
         "SEALED_HORIZON_PREFLIGHT_READY_FOR_OPERATOR_AUTHORIZATION": 6,
         "BOUNDED_DEMO_PROBE_LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED": 5,
+        "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_READY_FOR_OPERATOR_REVIEW": 5,
+        "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_OBJECT_REVIEW_REQUIRED": 5,
         "BOUNDED_DEMO_PROBE_FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED": 6,
         "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_REPAIR_REQUIRED": 6,
         "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_REVIEW_REQUIRED": 6,
         "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_GAP": 6,
+        "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_GATES_NOT_READY": 6,
+        "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_INPUT_REQUIRED": 6,
         "BOUNDED_DEMO_PROBE_PLACEMENT_REPAIR_READY_FOR_OPERATOR_REVIEW": 6,
         "BOUNDED_DEMO_PROBE_PLACEMENT_TOUCHABILITY_REPAIR_SAMPLE_MISMATCH": 6,
         "BOUNDED_DEMO_PROBE_PLACEMENT_PARTIAL_SKIP_REVIEW_REQUIRED": 7,
@@ -121,9 +125,12 @@ def _score_priority(path: dict[str, Any]) -> tuple[int, float]:
         "HORIZON_EDGE_AMPLIFICATION_CANDIDATE": 20,
         "SEALED_HORIZON_PREFLIGHT_NOT_ALIGNED": 25,
         "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_AUTHORITY_BOUNDARY_VIOLATION": 25,
+        "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_AUTHORITY_BOUNDARY_VIOLATION": 25,
+        "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_NOT_ALIGNED": 25,
         "LOW_FRICTION_MM_GROSS_EDGE_BELOW_CURRENT_FEE": 40,
         "POLYMARKET_ALPHA_GROSS_BELOW_COST_OR_EXECUTION_UNMEASURED": 50,
         "BOUNDED_DEMO_PROBE_RESULT_FAILED_STOP": 85,
+        "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_REJECTED": 85,
         "FEE_OR_SCALE_PATH_NOT_SHORT_TERM_ALPHA": 70,
         "GATE_B_ACTIONABLE_WINDOW_REVIEW": 30,
         "EVENT_WAIT_NO_ACTIONABLE_WINDOW": 80,
@@ -304,6 +311,17 @@ def _bounded_probe_shadow_placement_impact_by_key(
 ) -> dict[str, dict[str, Any]]:
     payload = _dict(bounded_probe_shadow_placement_impact)
     key = _str(_dict(payload.get("candidate")).get("side_cell_key"))
+    if not key:
+        return {}
+    return {key: payload}
+
+
+def _bounded_probe_operator_authorization_by_key(
+    bounded_probe_operator_authorization: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    payload = _dict(bounded_probe_operator_authorization)
+    candidate = _dict(payload.get("candidate"))
+    key = _str(candidate.get("side_cell_key") or payload.get("side_cell_key"))
     if not key:
         return {}
     return {key: payload}
@@ -686,6 +704,125 @@ def _bounded_probe_shadow_placement_impact_fields(
     }
 
 
+def _bounded_probe_operator_authorization_boundary_violation(
+    authorization: dict[str, Any] | None,
+) -> bool:
+    answers = _dict(_dict(authorization).get("answers"))
+    return (
+        answers.get("plan_mutation_performed") is True
+        or answers.get("writer_enabled") is True
+        or answers.get("order_submission_performed") is True
+        or answers.get("runtime_mutation_performed") is True
+        or answers.get("global_cost_gate_lowering_recommended") is True
+        or answers.get("promotion_evidence") is True
+        or answers.get("active_runtime_probe_authority") is True
+        or answers.get("active_runtime_order_authority") is True
+        or (
+            _str(answers.get("main_cost_gate_adjustment"))
+            not in {"", "NONE", "None"}
+        )
+    )
+
+
+def _bounded_probe_operator_authorization_fields(
+    authorization: dict[str, Any] | None,
+) -> dict[str, Any]:
+    payload = _dict(authorization)
+    if not payload:
+        return {
+            "bounded_probe_operator_authorization_present": False,
+            "bounded_probe_operator_authorization_status": None,
+            "bounded_probe_operator_authorization_blocking_gate_count": 0,
+            "bounded_probe_operator_authorization_blocking_gates": [],
+            "bounded_probe_operator_authorization_ready_for_review": False,
+            "bounded_probe_operator_authorization_bounded_demo_probe_authorized": False,
+            "bounded_probe_operator_authorization_object_emitted": False,
+            "bounded_probe_operator_authorization_active_runtime_probe_authority": False,
+            "bounded_probe_operator_authorization_active_runtime_order_authority": False,
+        }
+    candidate = _dict(payload.get("candidate"))
+    answers = _dict(payload.get("answers"))
+    operator_authorization = _dict(payload.get("operator_authorization"))
+    return {
+        "bounded_probe_operator_authorization_present": True,
+        "bounded_probe_operator_authorization_schema_version": payload.get(
+            "schema_version"
+        ),
+        "bounded_probe_operator_authorization_status": payload.get("status"),
+        "bounded_probe_operator_authorization_reason": payload.get("reason"),
+        "bounded_probe_operator_authorization_decision": payload.get("decision"),
+        "bounded_probe_operator_authorization_generated_at_utc": payload.get(
+            "generated_at_utc"
+        ),
+        "bounded_probe_operator_authorization_next_actions": _list(
+            payload.get("next_actions")
+        ),
+        "bounded_probe_operator_authorization_side_cell_key": candidate.get(
+            "side_cell_key"
+        ),
+        "bounded_probe_operator_authorization_outcome_horizon_minutes": (
+            candidate.get("outcome_horizon_minutes")
+        ),
+        "bounded_probe_operator_authorization_source_candidate_max_probe_orders": (
+            payload.get("source_candidate_max_probe_orders")
+        ),
+        "bounded_probe_operator_authorization_requested_max_probe_orders": (
+            payload.get("requested_max_authorized_probe_orders")
+        ),
+        "bounded_probe_operator_authorization_expires_at_utc": (
+            payload.get("expires_at_utc")
+        ),
+        "bounded_probe_operator_authorization_blocking_gate_count": _int(
+            payload.get("blocking_gate_count")
+        ),
+        "bounded_probe_operator_authorization_blocking_gates": _list(
+            payload.get("blocking_gates")
+        ),
+        "bounded_probe_operator_authorization_typed_confirm_expected": (
+            payload.get("typed_confirm_expected")
+        ),
+        "bounded_probe_operator_authorization_typed_confirm_matches": (
+            payload.get("typed_confirm_matches") is True
+        ),
+        "bounded_probe_operator_authorization_operator_authorization_status": (
+            operator_authorization.get("status")
+        ),
+        "bounded_probe_operator_authorization_ready_for_review": (
+            answers.get("ready_for_operator_authorization_review") is True
+        ),
+        "bounded_probe_operator_authorization_bounded_demo_probe_authorized": (
+            answers.get("bounded_demo_probe_authorized") is True
+        ),
+        "bounded_probe_operator_authorization_object_emitted": (
+            answers.get("operator_authorization_object_emitted") is True
+        ),
+        "bounded_probe_operator_authorization_active_runtime_probe_authority": (
+            answers.get("active_runtime_probe_authority") is True
+        ),
+        "bounded_probe_operator_authorization_active_runtime_order_authority": (
+            answers.get("active_runtime_order_authority") is True
+        ),
+        "bounded_probe_operator_authorization_global_cost_gate_lowering_recommended": (
+            answers.get("global_cost_gate_lowering_recommended") is True
+        ),
+        "bounded_probe_operator_authorization_main_cost_gate_adjustment": (
+            answers.get("main_cost_gate_adjustment")
+        ),
+        "bounded_probe_operator_authorization_promotion_evidence": (
+            answers.get("promotion_evidence") is True
+        ),
+        "bounded_probe_operator_authorization_probe_authority_granted_in_object": (
+            answers.get("probe_authority_granted_in_authorization_object") is True
+        ),
+        "bounded_probe_operator_authorization_order_authority_granted_in_object": (
+            answers.get("order_authority_granted_in_authorization_object") is True
+        ),
+        "bounded_probe_operator_authorization_authority_boundary_violation": (
+            _bounded_probe_operator_authorization_boundary_violation(payload)
+        ),
+    }
+
+
 def _first_text(items: Any, fallback: str) -> str:
     for item in _list(items):
         text = _str(item)
@@ -1006,6 +1143,92 @@ def _bounded_probe_shadow_placement_path_state(
     return None
 
 
+def _bounded_probe_operator_authorization_path_state(
+    authorization: dict[str, Any] | None,
+) -> tuple[str, str, str] | None:
+    payload = _dict(authorization)
+    status = _str(payload.get("status"))
+    next_actions = payload.get("next_actions")
+    if not status:
+        return None
+    if (
+        status == "AUTHORITY_BOUNDARY_VIOLATION"
+        or _bounded_probe_operator_authorization_boundary_violation(payload)
+    ):
+        return (
+            "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_AUTHORITY_BOUNDARY_VIOLATION",
+            "remove_authority_granting_operator_authorization_input_before_any_review",
+            _first_text(
+                next_actions,
+                "remove_authority_granting_operator_authorization_input_before_any_review",
+            ),
+        )
+    if status == "BOUNDED_DEMO_PROBE_AUTHORIZED":
+        return (
+            "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_OBJECT_REVIEW_REQUIRED",
+            "operator_reviews_plan_inclusion_of_bounded_probe_operator_authorization",
+            _first_text(
+                next_actions,
+                "operator_review_plan_inclusion_of_bounded_probe_operator_authorization",
+            ),
+        )
+    if status == "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW":
+        return (
+            "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_READY_FOR_OPERATOR_REVIEW",
+            "operator_may_authorize_bounded_demo_probe_with_exact_typed_confirm",
+            _first_text(
+                next_actions,
+                "operator_may_authorize_bounded_demo_probe_with_exact_typed_confirm",
+            ),
+        )
+    if status == "REJECTED_FOR_BOUNDED_DEMO_PROBE_AUTHORIZATION":
+        return (
+            "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_REJECTED",
+            "continue_learning_collection_or_refresh_candidate_after_operator_rejection",
+            _first_text(
+                next_actions,
+                "keep_main_cost_gate_unchanged_and_continue_learning_collection",
+            ),
+        )
+    if status in {
+        "AUTHORIZATION_ID_REQUIRED",
+        "OPERATOR_ID_REQUIRED",
+        "PROBE_BUDGET_REQUIRED_OR_EXCEEDS_SOURCE_LIMIT",
+        "AUTHORIZATION_EXPIRY_REQUIRED_OR_INVALID",
+        "TYPED_CONFIRM_REQUIRED",
+    }:
+        return (
+            "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_INPUT_REQUIRED",
+            "complete_explicit_operator_authorization_inputs_before_object_emission",
+            _first_text(
+                next_actions,
+                "complete_explicit_operator_authorization_inputs_before_object_emission",
+            ),
+        )
+    if status in {
+        "SEALED_HORIZON_PREFLIGHT_NOT_READY",
+        "PLACEMENT_REPAIR_PLAN_NOT_READY",
+        "AUTHORITY_PATH_PATCH_NOT_READY",
+        "CANDIDATE_ALIGNMENT_MISMATCH",
+    }:
+        return (
+            "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_GATES_NOT_READY",
+            "complete_bounded_probe_operator_authorization_blocking_gates",
+            _first_text(
+                next_actions,
+                "refresh_bounded_probe_operator_authorization_after_source_gates_pass",
+            ),
+        )
+    return (
+        "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_NOT_ALIGNED",
+        "refresh_bounded_probe_operator_authorization_until_status_is_reviewable",
+        _first_text(
+            next_actions,
+            "refresh_bounded_probe_operator_authorization",
+        ),
+    )
+
+
 def _base_path(
     *,
     path_id: str,
@@ -1057,6 +1280,7 @@ def _cost_gate_candidate_paths(
     horizon_learning_evidence: dict[str, Any] | None,
     sealed_horizon_probe_preflight: dict[str, Any] | None,
     bounded_probe_shadow_placement_impact: dict[str, Any] | None,
+    bounded_probe_operator_authorization: dict[str, Any] | None,
     bounded_probe_result_review: dict[str, Any] | None,
     bounded_probe_execution_realism_review: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
@@ -1083,6 +1307,11 @@ def _cost_gate_candidate_paths(
     bounded_probe_shadow_placement_impact_by_key = (
         _bounded_probe_shadow_placement_impact_by_key(
             bounded_probe_shadow_placement_impact
+        )
+    )
+    bounded_probe_operator_authorization_by_key = (
+        _bounded_probe_operator_authorization_by_key(
+            bounded_probe_operator_authorization
         )
     )
     bounded_probe_result_review_by_key = _bounded_probe_result_review_by_key(
@@ -1155,6 +1384,9 @@ def _cost_gate_candidate_paths(
         bounded_probe_shadow_placement_impact = (
             bounded_probe_shadow_placement_impact_by_key.get(key)
         )
+        bounded_probe_operator_authorization = (
+            bounded_probe_operator_authorization_by_key.get(key)
+        )
         bounded_probe_result_review = bounded_probe_result_review_by_key.get(key)
         bounded_probe_execution_realism_review = (
             bounded_probe_execution_realism_review_by_key.get(key)
@@ -1172,8 +1404,17 @@ def _cost_gate_candidate_paths(
         shadow_placement_path_state = _bounded_probe_shadow_placement_path_state(
             bounded_probe_shadow_placement_impact
         )
+        operator_authorization_path_state = (
+            _bounded_probe_operator_authorization_path_state(
+                bounded_probe_operator_authorization
+            )
+        )
         if result_path_state:
             path_status, required_next_gate, path_next_action = result_path_state
+        elif operator_authorization_path_state:
+            path_status, required_next_gate, path_next_action = (
+                operator_authorization_path_state
+            )
         elif shadow_placement_path_state:
             path_status, required_next_gate, path_next_action = (
                 shadow_placement_path_state
@@ -1207,6 +1448,11 @@ def _cost_gate_candidate_paths(
         sealed_preflight_fields = _sealed_probe_preflight_fields(sealed_probe_preflight)
         shadow_placement_fields = _bounded_probe_shadow_placement_impact_fields(
             bounded_probe_shadow_placement_impact
+        )
+        operator_authorization_fields = (
+            _bounded_probe_operator_authorization_fields(
+                bounded_probe_operator_authorization
+            )
         )
         bounded_probe_result_fields = _bounded_probe_result_review_fields(
             bounded_probe_result_review
@@ -1253,6 +1499,7 @@ def _cost_gate_candidate_paths(
                 **learning_fields,
                 **sealed_preflight_fields,
                 **shadow_placement_fields,
+                **operator_authorization_fields,
                 **bounded_probe_result_fields,
                 **bounded_probe_execution_realism_fields,
             },
@@ -1466,6 +1713,27 @@ def _proof_gate_labels(blocking_gates: list[Any]) -> list[str]:
         "authority_boundary_preserved": (
             "inputs preserve no Cost Gate lowering, no order authority, no promotion proof"
         ),
+        "sealed_horizon_preflight_ready": (
+            "sealed horizon preflight is ready for bounded demo-probe authorization"
+        ),
+        "placement_repair_plan_ready": (
+            "near-touch placement repair plan is ready for operator source review"
+        ),
+        "authority_path_patch_readiness_ready": (
+            "Rust authority-path near-touch Adapter readiness is confirmed"
+        ),
+        "candidate_alignment": (
+            "preflight, placement plan, and source readiness name the same side-cell/horizon"
+        ),
+        "authorization_id_present": "operator supplies a durable authorization id",
+        "operator_id_present": "operator id is present",
+        "probe_budget_valid": (
+            "bounded probe-order budget is positive and within source-plan limit"
+        ),
+        "authorization_expiry_valid": (
+            "authorization expiry is future-dated and inside the TTL cap"
+        ),
+        "typed_confirm_matches": "operator typed-confirm phrase matches exactly",
     }
     out: list[str] = []
     for gate in blocking_gates:
@@ -1507,6 +1775,7 @@ def _profitability_engineering_closure(
     candidates: list[dict[str, Any]],
     sealed_horizon_probe_preflight: dict[str, Any] | None,
     bounded_probe_shadow_placement_impact: dict[str, Any] | None,
+    bounded_probe_operator_authorization: dict[str, Any] | None,
     bounded_probe_result_review: dict[str, Any] | None,
     bounded_probe_execution_realism_review: dict[str, Any] | None,
 ) -> dict[str, Any]:
@@ -1520,6 +1789,23 @@ def _profitability_engineering_closure(
     shadow_summary = _dict(shadow_placement.get("shadow_summary"))
     shadow_answers = _dict(shadow_placement.get("answers"))
     shadow_next_actions = _list(shadow_placement.get("next_actions"))
+    operator_authorization = _dict(bounded_probe_operator_authorization)
+    operator_authorization_status = _str(operator_authorization.get("status"))
+    operator_authorization_answers = _dict(operator_authorization.get("answers"))
+    operator_authorization_next_actions = _list(
+        operator_authorization.get("next_actions")
+    )
+    operator_authorization_blocking_gates = _list(
+        operator_authorization.get("blocking_gates")
+    )
+    operator_authorization_boundary_violation = (
+        _bounded_probe_operator_authorization_boundary_violation(
+            operator_authorization
+        )
+    )
+    operator_authorization_object = _dict(
+        operator_authorization.get("operator_authorization")
+    )
     result_review = _dict(bounded_probe_result_review)
     result_status = _str(result_review.get("status"))
     result_summary = _dict(result_review.get("probe_result_summary"))
@@ -1588,6 +1874,35 @@ def _profitability_engineering_closure(
         status = "BOUNDED_DEMO_PROBE_FIRST_REVIEW_OPERATOR_REQUIRED"
     elif result_status == "COLLECT_MORE_PROBE_OUTCOMES_BEFORE_FIRST_REVIEW":
         status = "BOUNDED_DEMO_PROBE_ACCUMULATING_OUTCOMES_BEFORE_REVIEW"
+    elif (
+        operator_authorization_status == "AUTHORITY_BOUNDARY_VIOLATION"
+        or operator_authorization_boundary_violation
+    ):
+        status = "AUTHORITY_BOUNDARY_VIOLATION_REPAIR_FIRST"
+    elif operator_authorization_status == "BOUNDED_DEMO_PROBE_AUTHORIZED":
+        status = "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_OBJECT_REVIEW_REQUIRED"
+    elif operator_authorization_status == "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW":
+        status = "OPERATOR_CAN_AUTHORIZE_BOUNDED_DEMO_PROBE_WITH_EXACT_CONFIRM"
+    elif (
+        operator_authorization_status
+        == "REJECTED_FOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+    ):
+        status = "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_REJECTED"
+    elif operator_authorization_status in {
+        "AUTHORIZATION_ID_REQUIRED",
+        "OPERATOR_ID_REQUIRED",
+        "PROBE_BUDGET_REQUIRED_OR_EXCEEDS_SOURCE_LIMIT",
+        "AUTHORIZATION_EXPIRY_REQUIRED_OR_INVALID",
+        "TYPED_CONFIRM_REQUIRED",
+    }:
+        status = "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_INPUT_REQUIRED"
+    elif operator_authorization_status in {
+        "SEALED_HORIZON_PREFLIGHT_NOT_READY",
+        "PLACEMENT_REPAIR_PLAN_NOT_READY",
+        "AUTHORITY_PATH_PATCH_NOT_READY",
+        "CANDIDATE_ALIGNMENT_MISMATCH",
+    }:
+        status = "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_GATES_NOT_READY"
     elif shadow_status == "SHADOW_PLACEMENT_TOUCHABILITY_IMPROVED_SAMPLE_MISMATCH":
         status = "BOUNDED_DEMO_PROBE_PLACEMENT_TOUCHABILITY_SAMPLE_MISMATCH"
     elif shadow_status == "SHADOW_PLACEMENT_TOUCHABILITY_REPAIR_EFFECTIVE_FOR_MATCHED_SAMPLE":
@@ -1660,6 +1975,45 @@ def _profitability_engineering_closure(
         remaining = ["operator reviews first bounded probe results before additional probe budget"]
     elif result_status == "COLLECT_MORE_PROBE_OUTCOMES_BEFORE_FIRST_REVIEW":
         remaining = ["complete first-review bounded probe outcome floor"]
+    elif (
+        operator_authorization_status == "AUTHORITY_BOUNDARY_VIOLATION"
+        or operator_authorization_boundary_violation
+    ):
+        remaining = [
+            "remove authority-granting operator-authorization input before continuing"
+        ]
+    elif operator_authorization_status == "BOUNDED_DEMO_PROBE_AUTHORIZED":
+        remaining = [
+            "operator reviews plan inclusion of the bounded demo-probe authorization object"
+        ]
+    elif operator_authorization_status == "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW":
+        remaining = []
+    elif (
+        operator_authorization_status
+        == "REJECTED_FOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+    ):
+        remaining = [
+            "operator rejected this bounded demo-probe authorization; keep Cost Gate unchanged and continue learning collection"
+        ]
+    elif operator_authorization_status in {
+        "AUTHORIZATION_ID_REQUIRED",
+        "OPERATOR_ID_REQUIRED",
+        "PROBE_BUDGET_REQUIRED_OR_EXCEEDS_SOURCE_LIMIT",
+        "AUTHORIZATION_EXPIRY_REQUIRED_OR_INVALID",
+        "TYPED_CONFIRM_REQUIRED",
+    }:
+        remaining = _proof_gate_labels(operator_authorization_blocking_gates) or [
+            "complete explicit operator authorization inputs before object emission"
+        ]
+    elif operator_authorization_status in {
+        "SEALED_HORIZON_PREFLIGHT_NOT_READY",
+        "PLACEMENT_REPAIR_PLAN_NOT_READY",
+        "AUTHORITY_PATH_PATCH_NOT_READY",
+        "CANDIDATE_ALIGNMENT_MISMATCH",
+    }:
+        remaining = _proof_gate_labels(operator_authorization_blocking_gates) or [
+            "complete bounded demo-probe operator-authorization source gates"
+        ]
     elif shadow_status == "SHADOW_PLACEMENT_TOUCHABILITY_IMPROVED_SAMPLE_MISMATCH":
         remaining = [
             "operator reviews mechanical near-touch improvement before any Rust authority-path patch",
@@ -1685,6 +2039,7 @@ def _profitability_engineering_closure(
                 else ""
             ),
             *[str(item) for item in result_next_actions],
+            *[str(item) for item in operator_authorization_next_actions],
             *[str(item) for item in shadow_next_actions],
             *[str(item) for item in preflight_next_actions],
             _str(top.get("next_action")),
@@ -1723,6 +2078,75 @@ def _profitability_engineering_closure(
                 is True
             ),
             "sealed_horizon_probe_preflight_blocking_gates": blocking_gates,
+            "bounded_probe_operator_authorization_status": (
+                operator_authorization_status or None
+            ),
+            "bounded_probe_operator_authorization_reason": (
+                operator_authorization.get("reason")
+            ),
+            "bounded_probe_operator_authorization_decision": (
+                operator_authorization.get("decision")
+            ),
+            "bounded_probe_operator_authorization_blocking_gate_count": (
+                _int(operator_authorization.get("blocking_gate_count"))
+            ),
+            "bounded_probe_operator_authorization_blocking_gates": (
+                operator_authorization_blocking_gates
+            ),
+            "bounded_probe_operator_authorization_ready_for_review": (
+                operator_authorization_answers.get(
+                    "ready_for_operator_authorization_review"
+                )
+                is True
+            ),
+            "bounded_probe_operator_authorization_bounded_demo_probe_authorized": (
+                operator_authorization_answers.get("bounded_demo_probe_authorized")
+                is True
+            ),
+            "bounded_probe_operator_authorization_object_emitted": (
+                operator_authorization_answers.get(
+                    "operator_authorization_object_emitted"
+                )
+                is True
+            ),
+            "bounded_probe_operator_authorization_object_status": (
+                operator_authorization_object.get("status")
+            ),
+            "bounded_probe_operator_authorization_source_candidate_max_probe_orders": (
+                operator_authorization.get("source_candidate_max_probe_orders")
+            ),
+            "bounded_probe_operator_authorization_requested_max_probe_orders": (
+                operator_authorization.get("requested_max_authorized_probe_orders")
+            ),
+            "bounded_probe_operator_authorization_typed_confirm_expected": (
+                operator_authorization.get("typed_confirm_expected")
+            ),
+            "bounded_probe_operator_authorization_typed_confirm_matches": (
+                operator_authorization.get("typed_confirm_matches") is True
+            ),
+            "bounded_probe_operator_authorization_active_runtime_probe_authority": (
+                operator_authorization_answers.get("active_runtime_probe_authority")
+                is True
+            ),
+            "bounded_probe_operator_authorization_active_runtime_order_authority": (
+                operator_authorization_answers.get("active_runtime_order_authority")
+                is True
+            ),
+            "bounded_probe_operator_authorization_probe_authority_granted_in_object": (
+                operator_authorization_answers.get(
+                    "probe_authority_granted_in_authorization_object"
+                )
+                is True
+            ),
+            "bounded_probe_operator_authorization_order_authority_granted_in_object": (
+                operator_authorization_answers.get(
+                    "order_authority_granted_in_authorization_object"
+                )
+                is True
+            ),
+            "bounded_probe_operator_authorization_boundary_violation": (
+                operator_authorization_boundary_violation
+            ),
             "bounded_probe_result_review_status": result_status or None,
             "bounded_probe_result_review_completed_probe_outcomes": (
                 completed_probe_outcomes
@@ -1834,6 +2258,7 @@ def build_profitability_path_scorecard(
     horizon_learning_evidence: dict[str, Any] | None = None,
     sealed_horizon_probe_preflight: dict[str, Any] | None = None,
     bounded_probe_shadow_placement_impact: dict[str, Any] | None = None,
+    bounded_probe_operator_authorization: dict[str, Any] | None = None,
     bounded_probe_result_review: dict[str, Any] | None = None,
     bounded_probe_execution_realism_review: dict[str, Any] | None = None,
     fillsim: dict[str, Any] | None = None,
@@ -1854,6 +2279,7 @@ def build_profitability_path_scorecard(
         horizon_learning_evidence=horizon_learning_evidence,
         sealed_horizon_probe_preflight=sealed_horizon_probe_preflight,
         bounded_probe_shadow_placement_impact=bounded_probe_shadow_placement_impact,
+        bounded_probe_operator_authorization=bounded_probe_operator_authorization,
         bounded_probe_result_review=bounded_probe_result_review,
         bounded_probe_execution_realism_review=bounded_probe_execution_realism_review,
     ))
@@ -1885,6 +2311,11 @@ def build_profitability_path_scorecard(
         "BOUNDED_DEMO_PROBE_PLACEMENT_PARTIAL_SKIP_REVIEW_REQUIRED",
         "BOUNDED_DEMO_PROBE_PLACEMENT_REPAIR_WOULD_SKIP_ALL_ORDERS",
         "BOUNDED_DEMO_PROBE_PLACEMENT_SAMPLE_REQUIRED",
+        "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_GATES_NOT_READY",
+        "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_INPUT_REQUIRED",
+        "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_READY_FOR_OPERATOR_REVIEW",
+        "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_OBJECT_REVIEW_REQUIRED",
+        "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_REJECTED",
     }]
     if not candidates:
         status = "NO_PROFITABILITY_PATH_ARTIFACTS"
@@ -1902,6 +2333,7 @@ def build_profitability_path_scorecard(
             bounded_probe_execution_realism_review
         ),
         bounded_probe_shadow_placement_impact=bounded_probe_shadow_placement_impact,
+        bounded_probe_operator_authorization=bounded_probe_operator_authorization,
     )
     return {
         "schema_version": PROFITABILITY_PATH_SCORECARD_SCHEMA_VERSION,
@@ -1942,6 +2374,33 @@ def build_profitability_path_scorecard(
             ),
             "bounded_demo_probe_result_review_present": bool(
                 _dict(bounded_probe_result_review)
+            ),
+            "bounded_demo_probe_operator_authorization_present": bool(
+                _dict(bounded_probe_operator_authorization)
+            ),
+            "bounded_demo_probe_operator_authorization_ready_for_review": (
+                _dict(
+                    _dict(bounded_probe_operator_authorization).get("answers")
+                ).get("ready_for_operator_authorization_review")
+                is True
+            ),
+            "bounded_demo_probe_operator_authorization_object_emitted": (
+                _dict(
+                    _dict(bounded_probe_operator_authorization).get("answers")
+                ).get("operator_authorization_object_emitted")
+                is True
+            ),
+            "bounded_demo_probe_operator_authorization_active_runtime_order_authority": (
+                _dict(
+                    _dict(bounded_probe_operator_authorization).get("answers")
+                ).get("active_runtime_order_authority")
+                is True
+            ),
+            "bounded_demo_probe_operator_authorization_active_runtime_probe_authority": (
+                _dict(
+                    _dict(bounded_probe_operator_authorization).get("answers")
+                ).get("active_runtime_probe_authority")
+                is True
             ),
             "bounded_demo_probe_shadow_placement_impact_present": bool(
                 _dict(bounded_probe_shadow_placement_impact)
@@ -2036,6 +2495,11 @@ def build_profitability_path_scorecard(
                 "bounded_probe_shadow_placement_impact",
                 input_paths.get("bounded_probe_shadow_placement_impact"),
                 bounded_probe_shadow_placement_impact,
+            ),
+            "bounded_probe_operator_authorization": _artifact_summary(
+                "bounded_probe_operator_authorization",
+                input_paths.get("bounded_probe_operator_authorization"),
+                bounded_probe_operator_authorization,
             ),
             "bounded_probe_execution_realism_review": _artifact_summary(
                 "bounded_probe_execution_realism_review",
@@ -2162,6 +2626,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--horizon-learning-evidence-json", type=Path)
     parser.add_argument("--sealed-horizon-probe-preflight-json", type=Path)
     parser.add_argument("--bounded-probe-shadow-placement-impact-json", type=Path)
+    parser.add_argument("--bounded-probe-operator-authorization-json", type=Path)
     parser.add_argument("--bounded-probe-result-review-json", type=Path)
     parser.add_argument("--bounded-probe-execution-realism-review-json", type=Path)
     parser.add_argument("--fillsim-json", type=Path)
@@ -2187,6 +2652,9 @@ def main() -> int:
         "bounded_probe_shadow_placement_impact": (
             args.bounded_probe_shadow_placement_impact_json
         ),
+        "bounded_probe_operator_authorization": (
+            args.bounded_probe_operator_authorization_json
+        ),
         "bounded_probe_result_review": args.bounded_probe_result_review_json,
         "bounded_probe_execution_realism_review": (
             args.bounded_probe_execution_realism_review_json
@@ -2208,6 +2676,9 @@ def main() -> int:
         ),
         bounded_probe_shadow_placement_impact=_read_json(
             args.bounded_probe_shadow_placement_impact_json
+        ),
+        bounded_probe_operator_authorization=_read_json(
+            args.bounded_probe_operator_authorization_json
         ),
         bounded_probe_result_review=_read_json(args.bounded_probe_result_review_json),
         bounded_probe_execution_realism_review=_read_json(

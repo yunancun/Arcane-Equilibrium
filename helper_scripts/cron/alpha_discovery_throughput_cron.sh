@@ -118,6 +118,7 @@ add_profitability_json_arg "--horizon-sealed-replay-json" "$HORIZON_SEALED_REPLA
 add_profitability_json_arg "--horizon-learning-evidence-json" "$HORIZON_LEARNING_EVIDENCE_JSON"
 add_profitability_json_arg "--sealed-horizon-probe-preflight-json" "$DATA/cost_gate_learning_lane/sealed_horizon_probe_preflight_latest.json"
 add_profitability_json_arg "--bounded-probe-shadow-placement-impact-json" "$DATA/cost_gate_learning_lane/bounded_probe_shadow_placement_impact_latest.json"
+add_profitability_json_arg "--bounded-probe-operator-authorization-json" "$DATA/cost_gate_learning_lane/bounded_probe_operator_authorization_latest.json"
 add_profitability_json_arg "--bounded-probe-result-review-json" "$DATA/cost_gate_learning_lane/bounded_probe_result_review_latest.json"
 add_profitability_json_arg "--bounded-probe-execution-realism-review-json" "$DATA/cost_gate_learning_lane/bounded_probe_execution_realism_review_latest.json"
 add_profitability_json_arg "--fillsim-json" "$DATA/research/fillsim/fillsim_report.json"
