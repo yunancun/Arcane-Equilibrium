@@ -236,6 +236,47 @@ def _break_even_cells_from_report(rep: dict) -> list[dict]:
     return cells
 
 
+def _low_friction_motif_key(cell: dict) -> str:
+    """Build a coarse motif key so threshold variants do not hide recurrence."""
+    text = " ".join(
+        str(cell.get(key) or "")
+        for key in ("candidate_shape", "feature", "name", "condition")
+    )
+    parts = ["low_friction_motif"]
+    if "spread_thin_queue_favorable_interaction_v1" in text:
+        parts.append("spread_thin_queue_favorable")
+    elif "spread_quiet_mid_support_interaction_v1" in text:
+        parts.append("spread_quiet_mid_support")
+    elif "spread_quiet_touch_interaction_v1" in text:
+        parts.append("spread_quiet_touch")
+    elif "spread_quiet_abs_qty_interaction_v1" in text:
+        parts.append("spread_quiet_abs_qty")
+    elif "spread_quiet_book_imbalance_interaction_v1" in text:
+        parts.append("spread_quiet_book_imbalance")
+    elif "low_friction_combo" in text:
+        parts.append("spread_combo")
+    else:
+        parts.append(str(cell.get("candidate_shape") or cell.get("feature") or "unknown"))
+
+    if "q0_" in text or "q_eff_" in text:
+        parts.append("thin_queue")
+    if "side_recent_trade_imbalance" in text:
+        parts.append("recent_trade_imbalance")
+    if "side_touch_size_delta_frac" in text:
+        parts.append("touch_size_delta")
+    if "spread_bps_delta" in text:
+        parts.append("spread_delta")
+    if "side_mid_move_bps" in text:
+        parts.append("side_mid_move")
+    if "side_book_imb" in text:
+        parts.append("book_imbalance")
+    if "recent_l1_update_count" in text or "recent_l1_update_intensity" in text:
+        parts.append("l1_quiet_or_churn")
+    if "recent_trade_count" in text or "recent_trade_abs_qty" in text:
+        parts.append("recent_trade_activity")
+    return "|".join(parts)
+
+
 def _normalize_low_friction_near_miss_cell(source: str, cell: dict, *, current_fee: float) -> dict | None:
     """Normalize a low-friction holdout lead without promoting it to proof."""
     holdout = cell.get("holdout") if isinstance(cell.get("holdout"), dict) else {}
@@ -274,6 +315,7 @@ def _normalize_low_friction_near_miss_cell(source: str, cell: dict, *, current_f
     out = {
         "source": source,
         "key": _cell_key(source, cell),
+        "motif_key": _low_friction_motif_key(cell),
         "name": cell.get("name") or holdout.get("name"),
         "condition": cell.get("condition") or holdout.get("condition"),
         "feature": cell.get("feature") or holdout.get("feature"),
@@ -692,6 +734,57 @@ def build_fill_sim_history_scorecard(
         reverse=True,
     )
 
+    motif_to_low_friction_near_miss_windows: dict[str, list[dict]] = defaultdict(list)
+    for w in low_friction_near_miss_windows:
+        seen_motif_in_window: set[str] = set()
+        for cell in w.get("low_friction_sample_gated_near_miss_cells") or []:
+            motif_key = cell.get("motif_key")
+            if not motif_key or motif_key in seen_motif_in_window:
+                continue
+            seen_motif_in_window.add(motif_key)
+            motif_to_low_friction_near_miss_windows[motif_key].append({
+                "window": w,
+                "cell": cell,
+            })
+
+    repeated_low_friction_near_miss_motifs = []
+    for motif_key, rows in motif_to_low_friction_near_miss_windows.items():
+        if len(rows) < min_repeat_positive_windows:
+            continue
+        best = max(
+            rows,
+            key=lambda r: (
+                _as_float(r["cell"].get("holdout_edge_before_fees_bps")) or -1e9,
+                _as_int(r["cell"].get("holdout_n_fill_only")),
+                _as_float(r["cell"].get("train_edge_before_fees_bps")) or -1e9,
+            ),
+        )["cell"]
+        window_dates = sorted({
+            r["window"].get("window_date")
+            for r in rows
+            if r["window"].get("window_date")
+        })
+        repeated_low_friction_near_miss_motifs.append({
+            "motif_key": motif_key,
+            "windows": len(rows),
+            "distinct_window_dates": window_dates,
+            "best_cell": best,
+            "candidate_keys": sorted({
+                str(r["cell"].get("key"))
+                for r in rows
+                if r["cell"].get("key")
+            }),
+            "window_sources": [r["window"].get("source_path") for r in rows],
+        })
+    repeated_low_friction_near_miss_motifs.sort(
+        key=lambda r: (
+            r["windows"],
+            len(r.get("distinct_window_dates") or []),
+            _as_float((r.get("best_cell") or {}).get("holdout_edge_before_fees_bps")) or -1e9,
+        ),
+        reverse=True,
+    )
+
     sample_starved_current_fee_holdout_windows = [
         w
         for w in valid_windows
@@ -733,6 +826,38 @@ def build_fill_sim_history_scorecard(
             if repeated_low_friction_near_miss_keys else None
         ),
         "top_repeated_near_miss_keys": repeated_low_friction_near_miss_keys[:10],
+    }
+
+    if not low_friction_near_miss_windows and not sample_starved_current_fee_holdout_windows:
+        motif_stability_status = "NO_LOW_FRICTION_NEAR_MISS_MOTIF_WINDOWS"
+        motif_stability_reason = "no_sample_gated_or_current_fee_holdout_near_miss"
+    elif not repeated_low_friction_near_miss_motifs:
+        motif_stability_status = "LOW_FRICTION_NEAR_MISS_MOTIF_ROTATES_OR_DATE_INSUFFICIENT"
+        motif_stability_reason = (
+            "distinct_dates_below_min_and_no_repeated_motif"
+            if len(low_friction_near_miss_dates) < min_distinct_dates
+            else "no_repeated_low_friction_near_miss_motif"
+        )
+    elif len(low_friction_near_miss_dates) < min_distinct_dates:
+        motif_stability_status = "LOW_FRICTION_NEAR_MISS_MOTIF_REPEATS_BUT_DATE_INSUFFICIENT"
+        motif_stability_reason = "repeated_motif_but_distinct_dates_below_min"
+    else:
+        motif_stability_status = "LOW_FRICTION_NEAR_MISS_MOTIF_REPEATS_ACROSS_WINDOWS"
+        motif_stability_reason = "repeated_low_friction_near_miss_motif_across_windows"
+
+    low_friction_near_miss_motif_stability = {
+        "status": motif_stability_status,
+        "reason": motif_stability_reason,
+        "sample_gated_near_miss_windows": len(low_friction_near_miss_windows),
+        "distinct_window_dates": low_friction_near_miss_dates,
+        "repeated_motif_count": len(repeated_low_friction_near_miss_motifs),
+        "min_distinct_dates": int(min_distinct_dates),
+        "min_repeat_positive_windows": int(min_repeat_positive_windows),
+        "best_repeated_near_miss_motif": (
+            repeated_low_friction_near_miss_motifs[0]
+            if repeated_low_friction_near_miss_motifs else None
+        ),
+        "top_repeated_near_miss_motifs": repeated_low_friction_near_miss_motifs[:10],
     }
 
     enough_windows = len(valid_windows) >= min_windows and len(distinct_dates) >= min_distinct_dates
@@ -797,6 +922,9 @@ def build_fill_sim_history_scorecard(
         "repeated_low_friction_near_miss_keys": repeated_low_friction_near_miss_keys[:20],
         "best_low_friction_near_miss_window": best_low_friction_near_miss,
         "low_friction_near_miss_stability": low_friction_near_miss_stability,
+        "low_friction_near_miss_motif_stability": (
+            low_friction_near_miss_motif_stability
+        ),
         "window_summaries": windows,
         "note": (
             "Report-history reducer only. Current-fee repeated positives still need "
@@ -880,6 +1008,13 @@ def main(argv=None) -> int:
         "low_friction_near_miss_windows": scorecard.get("low_friction_near_miss_windows"),
         "repeated_low_friction_near_miss_key_count": len(
             scorecard.get("repeated_low_friction_near_miss_keys") or []
+        ),
+        "low_friction_near_miss_motif_stability_status": (
+            scorecard.get("low_friction_near_miss_motif_stability") or {}
+        ).get("status"),
+        "repeated_low_friction_near_miss_motif_count": (
+            (scorecard.get("low_friction_near_miss_motif_stability") or {})
+            .get("repeated_motif_count")
         ),
         "out": args.out,
     }, indent=2, ensure_ascii=False))
