@@ -120,34 +120,10 @@ def _candidate_record(
     train_gross = _float(cell.get("train_edge_before_fees_bps"))
     holdout_gross = _float(cell.get("holdout_edge_before_fees_bps"))
     gross_values = [value for value in (train_gross, holdout_gross) if value is not None]
-    min_train_holdout_gross = min(gross_values) if gross_values else None
+    best_cell_min_train_holdout_gross = min(gross_values) if gross_values else None
     fee = _current_fee_round_trip_bps(cell, current_fee_round_trip_bps)
-    min_gross_gap = (
-        max(0.0, fee - min_train_holdout_gross)
-        if fee is not None and min_train_holdout_gross is not None
-        else None
-    )
-    required_uplift_multiple = (
-        fee / min_train_holdout_gross
-        if fee is not None
-        and min_train_holdout_gross is not None
-        and min_train_holdout_gross > 0.0
-        else None
-    )
     dates = [str(item) for item in _list(row.get("distinct_window_dates")) if item]
     dates_remaining = max(0, min_distinct_dates - len(set(dates)))
-    if dates_remaining > 0:
-        status = "MOTIF_REPEATS_DISTINCT_DATES_INSUFFICIENT"
-        next_gate = "collect_repeated_motif_distinct_window_history"
-        next_action = "accumulate_distinct_window_history_for_repeated_low_friction_motif"
-    elif min_gross_gap is not None and min_gross_gap > 0.0:
-        status = "MOTIF_REPEATS_EDGE_UPLIFT_REQUIRED"
-        next_gate = "train_holdout_min_gross_edge_clears_current_fee"
-        next_action = "search_same_motif_variants_for_train_holdout_edge_uplift"
-    else:
-        status = "MOTIF_REPEATS_READY_FOR_WALK_FORWARD_REVIEW"
-        next_gate = "walk_forward_and_execution_realism_review"
-        next_action = "run_walk_forward_and_execution_realism_review_for_repeated_motif"
 
     bottleneck = _bottleneck_leg(train_gross, holdout_gross)
     frontier = [
@@ -161,11 +137,41 @@ def _candidate_record(
     frontier_best_min_gross = _float(
         frontier_summary.get("best_min_train_holdout_gross_bps")
     )
+    min_train_holdout_gross = best_cell_min_train_holdout_gross
+    if frontier_best_min_gross is not None and (
+        min_train_holdout_gross is None
+        or frontier_best_min_gross > min_train_holdout_gross
+    ):
+        min_train_holdout_gross = frontier_best_min_gross
+    min_gross_gap = (
+        max(0.0, fee - min_train_holdout_gross)
+        if fee is not None and min_train_holdout_gross is not None
+        else None
+    )
+    required_uplift_multiple = (
+        fee / min_train_holdout_gross
+        if fee is not None
+        and min_train_holdout_gross is not None
+        and min_train_holdout_gross > 0.0
+        else None
+    )
     frontier_gap = (
         max(0.0, fee - frontier_best_min_gross)
         if fee is not None and frontier_best_min_gross is not None
         else None
     )
+    if dates_remaining > 0:
+        status = "MOTIF_REPEATS_DISTINCT_DATES_INSUFFICIENT"
+        next_gate = "collect_repeated_motif_distinct_window_history"
+        next_action = "accumulate_distinct_window_history_for_repeated_low_friction_motif"
+    elif min_gross_gap is not None and min_gross_gap > 0.0:
+        status = "MOTIF_REPEATS_EDGE_UPLIFT_REQUIRED"
+        next_gate = "train_holdout_min_gross_edge_clears_current_fee"
+        next_action = "search_same_motif_variants_for_train_holdout_edge_uplift"
+    else:
+        status = "MOTIF_REPEATS_READY_FOR_WALK_FORWARD_REVIEW"
+        next_gate = "walk_forward_and_execution_realism_review"
+        next_action = "run_walk_forward_and_execution_realism_review_for_repeated_motif"
     frontier_search_plan = {
         "status": (
             "MOTIF_FRONTIER_PRESENT"
@@ -202,6 +208,9 @@ def _candidate_record(
         "threshold_source": cell.get("threshold_source"),
         "train_gross_edge_bps": _round(train_gross),
         "holdout_gross_edge_bps": _round(holdout_gross),
+        "best_cell_min_train_holdout_gross_bps": _round(
+            best_cell_min_train_holdout_gross
+        ),
         "min_train_holdout_gross_bps": _round(min_train_holdout_gross),
         "current_fee_round_trip_bps": _round(fee),
         "min_gross_gap_to_current_fee_bps": _round(min_gross_gap),
