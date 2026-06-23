@@ -1693,7 +1693,8 @@ def test_activation_preflight_treats_plan_refresh_failure_as_loop_error(
     assert preflight["learning_loop"]["learning_loop_status"] == "ERROR"
     assert preflight["learning_loop"]["learning_loop_last_plan_rc"] == 7
     assert preflight["learning_loop"]["learning_loop_reason"] == (
-        "cost_gate_learning_scorecard_plan_materializer_refresh_or_review_failed"
+        "cost_gate_learning_scorecard_plan_materializer_refresh_review_or_"
+        "bounded_authorization_failed"
     )
     assert "cost_gate_learning_lane_cron_health" in preflight["missing_links"]
 
@@ -1743,7 +1744,8 @@ def test_activation_preflight_treats_scorecard_refresh_failure_as_loop_error(
     assert preflight["learning_loop"]["learning_loop_status"] == "ERROR"
     assert preflight["learning_loop"]["learning_loop_last_scorecard_rc"] == 9
     assert preflight["learning_loop"]["learning_loop_reason"] == (
-        "cost_gate_learning_scorecard_plan_materializer_refresh_or_review_failed"
+        "cost_gate_learning_scorecard_plan_materializer_refresh_review_or_"
+        "bounded_authorization_failed"
     )
     assert "cost_gate_learning_lane_cron_health" in preflight["missing_links"]
 
