@@ -1546,6 +1546,27 @@ def test_mm_fee_polymarket_and_gate_b_paths_are_separated() -> None:
                         "holdout_n_fill_only": 74,
                     },
                 },
+                "failure_summary": {
+                    "candidates_evaluated": 728,
+                    "train_current_fee_clearing_count": 2,
+                    "sample_starved_current_fee_holdout_count": 2,
+                    "sample_gated_holdout_gross_count": 295,
+                    "best_sample_gated_holdout_gross_candidate": {
+                        "name": "quoted_half_spread_bps_train_p75_and_q_eff_train_p10_and_spread_bps_delta_10s_train_p90",
+                        "candidate_shape": "spread_thin_queue_favorable_interaction_v1",
+                        "holdout_edge_before_fees_bps": 3.203,
+                        "holdout_n_fill_only": 30,
+                        "holdout_net_bps": -0.797,
+                        "train_edge_before_fees_bps": -0.628,
+                        "train_n_fill_only": 40,
+                        "train_net_bps": -4.628,
+                        "holdout_sample_gated_gross_clears_current_fee": False,
+                        "train_sample_gated_gross_clears_current_fee": False,
+                    },
+                },
+                "interaction_candidate_shape_counts": {
+                    "spread_thin_queue_favorable_interaction_v1": 126,
+                },
             },
             "maker_fee_sensitivity_scorecard": {
                 "status": "LOWER_FEE_SAMPLE_GATED_POSITIVE",
@@ -1619,6 +1640,15 @@ def test_mm_fee_polymarket_and_gate_b_paths_are_separated() -> None:
         "LOW_FRICTION_MM_GROSS_EDGE_BELOW_CURRENT_FEE"
     )
     assert by_class["low_friction_mm_alpha_search"]["current_edge_bps"] == 2.269
+    assert by_class["low_friction_mm_alpha_search"]["next_action"] == (
+        "confirm_low_friction_near_miss_with_train_holdout_and_history_stability"
+    )
+    mm_evidence = by_class["low_friction_mm_alpha_search"]["evidence"]
+    assert mm_evidence["near_miss_lead"]["candidate_shape"] == (
+        "spread_thin_queue_favorable_interaction_v1"
+    )
+    assert mm_evidence["near_miss_lead"]["holdout_n_fill_only"] == 30
+    assert mm_evidence["sample_gated_holdout_gross_count"] == 295
     assert by_class["fee_or_scale"]["status"] == "FEE_OR_SCALE_PATH_NOT_SHORT_TERM_ALPHA"
     assert by_class["external_event_leadlag_alpha"]["status"] == (
         "POLYMARKET_ALPHA_GROSS_BELOW_COST_OR_EXECUTION_UNMEASURED"

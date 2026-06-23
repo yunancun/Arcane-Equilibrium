@@ -1598,9 +1598,15 @@ def _mm_signal_path(
         return []
     low_friction = _dict(fillsim.get("low_friction_signal_scorecard"))
     train_confirmed = _dict(low_friction.get("train_confirmed_gross_scorecard"))
+    failure = _dict(low_friction.get("failure_summary"))
     best = _dict(
         train_confirmed.get("best_train_confirmed_gross_candidate")
         or low_friction.get("best_train_confirmed_gross_candidate")
+    )
+    near_miss = _dict(
+        failure.get("best_sample_gated_holdout_gross_candidate")
+        or failure.get("best_sample_starved_current_fee_holdout_candidate")
+        or failure.get("best_holdout_gross_candidate")
     )
     current_fee = (
         train_confirmed.get("current_fee_round_trip_bps")
@@ -1629,6 +1635,28 @@ def _mm_signal_path(
             next_action="refresh_fill_sim_and_mm_verdict_artifacts",
         )]
     history = _dict(fillsim_history)
+    near_miss_lead = {}
+    if near_miss:
+        near_miss_lead = {
+            "name": near_miss.get("name") or near_miss.get("condition"),
+            "candidate_shape": near_miss.get("candidate_shape"),
+            "holdout_edge_before_fees_bps": near_miss.get("holdout_edge_before_fees_bps"),
+            "holdout_n_fill_only": near_miss.get("holdout_n_fill_only"),
+            "holdout_net_bps": near_miss.get("holdout_net_bps"),
+            "train_edge_before_fees_bps": near_miss.get("train_edge_before_fees_bps"),
+            "train_n_fill_only": near_miss.get("train_n_fill_only"),
+            "train_net_bps": near_miss.get("train_net_bps"),
+            "holdout_sample_gated_gross_clears_current_fee": (
+                near_miss.get("holdout_sample_gated_gross_clears_current_fee") is True
+            ),
+            "train_sample_gated_gross_clears_current_fee": (
+                near_miss.get("train_sample_gated_gross_clears_current_fee") is True
+            ),
+            "next_gate": "train_confirmation_sample_accumulation_and_history_stability",
+        }
+    next_action = "search_regime_or_microstructure_filters_that_raise_train_confirmed_gross_edge"
+    if near_miss_lead:
+        next_action = "confirm_low_friction_near_miss_with_train_holdout_and_history_stability"
     return [_base_path(
         path_id="mm_low_friction_signal_search",
         path_class="low_friction_mm_alpha_search",
@@ -1645,7 +1673,7 @@ def _mm_signal_path(
             _int(best.get("holdout_n_fill_only") or best.get("n_fill_only")),
         ),
         required_next_gate="train_confirmed_gross_edge_ge_current_fee_round_trip_and_history_stability",
-        next_action="search_regime_or_microstructure_filters_that_raise_train_confirmed_gross_edge",
+        next_action=next_action,
         evidence={
             "scorecard_status": train_confirmed.get("status") or low_friction.get("status"),
             "gap_to_current_fee_round_trip_bps": _round(
@@ -1653,6 +1681,16 @@ def _mm_signal_path(
             ),
             "train_edge_before_fees_bps": best.get("train_edge_before_fees_bps"),
             "holdout_edge_before_fees_bps": best.get("holdout_edge_before_fees_bps"),
+            "candidates_evaluated": failure.get("candidates_evaluated"),
+            "train_current_fee_clearing_count": failure.get("train_current_fee_clearing_count"),
+            "sample_starved_current_fee_holdout_count": failure.get(
+                "sample_starved_current_fee_holdout_count"
+            ),
+            "sample_gated_holdout_gross_count": failure.get("sample_gated_holdout_gross_count"),
+            "interaction_candidate_shape_counts": low_friction.get(
+                "interaction_candidate_shape_counts"
+            ),
+            "near_miss_lead": near_miss_lead,
             "history_status": history.get("status"),
             "history_reason": history.get("reason"),
             "history_valid_windows": history.get("valid_windows"),
