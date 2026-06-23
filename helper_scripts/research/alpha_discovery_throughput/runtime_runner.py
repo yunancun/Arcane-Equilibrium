@@ -3161,6 +3161,9 @@ def _learning_summary(worklist: dict[str, Any]) -> dict[str, Any]:
         "top_learning_task_runtime_mutation_required": top_task.get(
             "runtime_mutation_required"
         ),
+        "top_learning_task_side_effect_boundary": top_task.get(
+            "side_effect_boundary"
+        ),
         "top_learning_task_next_trigger": top_task.get("next_trigger"),
         "top_learning_task_evidence_key_count": len(evidence),
         "top_learning_task_evidence": evidence or None,
@@ -3474,6 +3477,9 @@ def _history_row(killboard: dict[str, Any]) -> dict[str, Any]:
         ),
         "top_learning_task_runtime_mutation_required": kb.get(
             "top_learning_task_runtime_mutation_required"
+        ),
+        "top_learning_task_side_effect_boundary": kb.get(
+            "top_learning_task_side_effect_boundary"
         ),
         "top_learning_task_evidence_key_count": kb.get(
             "top_learning_task_evidence_key_count"

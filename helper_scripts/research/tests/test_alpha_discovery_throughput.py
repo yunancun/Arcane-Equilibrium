@@ -83,6 +83,9 @@ def test_learning_summary_mirrors_completion_and_top_evidence_fields():
             "actionability": "operator_required",
             "requires_operator_authorization": True,
             "runtime_mutation_required": False,
+            "side_effect_boundary": (
+                "recommendation_only_no_order_authority_no_runtime_mutation"
+            ),
             "next_trigger": (
                 "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
             ),
@@ -111,6 +114,9 @@ def test_learning_summary_mirrors_completion_and_top_evidence_fields():
     assert summary[
         "top_learning_task_blocked_signal_top_review_candidate_net_cost_cushion_bps"
     ] == 5.166667
+    assert summary["top_learning_task_side_effect_boundary"] == (
+        "recommendation_only_no_order_authority_no_runtime_mutation"
+    )
 
 
 def _signal_spec(**extra):
@@ -1187,6 +1193,9 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
     assert result["killboard"]["top_learning_task_actionability"] == (
         "engineering_actionable"
     )
+    assert result["killboard"]["top_learning_task_side_effect_boundary"] == (
+        "recommendation_only_no_order_authority_no_runtime_mutation"
+    )
     assert result["killboard"]["top_learning_task_evidence_key_count"] > 0
     assert isinstance(result["killboard"]["top_learning_task_evidence"], dict)
     assert result["learning_worklist"]["top_task"]["task_type"] == "promotion_review"
@@ -1235,6 +1244,9 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
     )
     assert history_row["top_learning_task_completion_status"] == "PENDING_EVIDENCE"
     assert history_row["top_learning_task_completion_evidence_required_count"] == 3
+    assert history_row["top_learning_task_side_effect_boundary"] == (
+        "recommendation_only_no_order_authority_no_runtime_mutation"
+    )
     assert history_row["top_learning_task_evidence_key_count"] > 0
 
 
@@ -3285,6 +3297,10 @@ def test_runtime_killboard_carries_profitability_runtime_mutation_required(tmp_p
     task = tasks["cost_gate_demo_learning_lane"]
 
     assert kb["profitability_next_move_runtime_mutation_required"] is True
+    assert kb["top_learning_task_side_effect_boundary"] == (
+        "recommendation_only_operator_runtime_mutation_required_"
+        "no_order_or_probe_authority"
+    )
     assert task["task_type"] == "cost_gate_learning_activation"
     assert task["requires_operator_authorization"] is True
     assert task["runtime_mutation_required"] is True
