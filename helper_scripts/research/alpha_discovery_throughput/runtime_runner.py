@@ -1973,6 +1973,146 @@ def summarize_profit_learning_decision_packet(
     }
 
 
+def summarize_profitability_path_scorecard(
+    data_dir: Path,
+    *,
+    now_utc: dt.datetime,
+    max_age_seconds: int = DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS,
+) -> dict[str, Any]:
+    """Summarize the autonomous profitability-path closure if present."""
+    path = (
+        data_dir
+        / "alpha_discovery_throughput"
+        / "profitability_path_scorecard_latest.json"
+    )
+    payload, err = _read_json(path)
+    if err:
+        return {
+            "profitability_path_scorecard_present": False,
+            "profitability_path_scorecard_source_path": str(path),
+            "profitability_path_scorecard_source_error": err,
+        }
+    assert payload is not None
+    generated_at = payload.get("generated_at_utc")
+    fresh, age, freshness_error = _source_fresh(
+        generated_at,
+        now_utc=now_utc,
+        max_age_seconds=max_age_seconds,
+    )
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    answers = payload.get("answers") if isinstance(payload.get("answers"), dict) else {}
+    closure = (
+        payload.get("profitability_engineering_closure")
+        if isinstance(payload.get("profitability_engineering_closure"), dict)
+        else {}
+    )
+    escape = (
+        closure.get("cost_gate_escape_strategy")
+        if isinstance(closure.get("cost_gate_escape_strategy"), dict)
+        else {}
+    )
+    next_actions = closure.get("next_actions")
+    if not isinstance(next_actions, list):
+        next_actions = []
+    proof_gates = closure.get("proof_gates_remaining")
+    if not isinstance(proof_gates, list):
+        proof_gates = []
+    levers = closure.get("edge_amplification_levers")
+    if not isinstance(levers, list):
+        levers = []
+    operator_read = (
+        payload.get("operator_read")
+        if isinstance(payload.get("operator_read"), dict)
+        else {}
+    )
+    recommended_sequence = operator_read.get("recommended_engineering_sequence")
+    if not isinstance(recommended_sequence, list):
+        recommended_sequence = []
+    return {
+        "profitability_path_scorecard_present": True,
+        "profitability_path_scorecard_status": (
+            payload.get("status") if fresh else "STALE_ARTIFACT"
+        ),
+        "profitability_path_scorecard_raw_status": payload.get("status"),
+        "profitability_path_scorecard_generated_at_utc": generated_at,
+        "profitability_path_scorecard_age_seconds": age,
+        "profitability_path_scorecard_source_ok": fresh,
+        "profitability_path_scorecard_source_path": str(path),
+        "profitability_path_scorecard_source_error": freshness_error,
+        "profitability_path_count": summary.get("path_count"),
+        "profitability_cost_gate_crossing_candidate_count": summary.get(
+            "cost_gate_crossing_candidate_count"
+        ),
+        "profitability_top_path_id": summary.get("top_path_id"),
+        "profitability_top_path_status": summary.get("top_path_status"),
+        "profitability_top_path_next_action": summary.get("top_path_next_action"),
+        "profitability_proven": answers.get("profitability_proven"),
+        "profitability_cost_gate_crossing_candidates_present": answers.get(
+            "cost_gate_crossing_candidates_present"
+        ),
+        "profitability_alpha_or_edge_amplification_paths_present": answers.get(
+            "alpha_or_edge_amplification_paths_present"
+        ),
+        "profitability_autonomous_learning_loop_accumulating": answers.get(
+            "autonomous_learning_loop_accumulating"
+        ),
+        "profitability_bounded_demo_probe_preflight_ready": answers.get(
+            "bounded_demo_probe_preflight_ready"
+        ),
+        "profitability_bounded_demo_probe_shadow_placement_improves_touchability": (
+            answers.get("bounded_demo_probe_shadow_placement_improves_touchability")
+        ),
+        "profitability_global_cost_gate_lowering_recommended": answers.get(
+            "global_cost_gate_lowering_recommended"
+        ),
+        "profitability_order_authority_granted": answers.get(
+            "order_authority_granted"
+        ),
+        "profitability_main_cost_gate_adjustment": answers.get(
+            "main_cost_gate_adjustment"
+        ),
+        "profitability_promotion_evidence": answers.get("promotion_evidence"),
+        "profitability_engineering_closure_status": closure.get("status"),
+        "profitability_engineering_closure_thesis": closure.get("profit_thesis"),
+        "profitability_leading_path_id": closure.get("leading_path_id"),
+        "profitability_leading_path_status": closure.get("leading_path_status"),
+        "profitability_leading_path_class": closure.get("leading_path_class"),
+        "profitability_leading_candidate_key": closure.get("leading_candidate_key"),
+        "profitability_proof_gate_count_remaining": closure.get(
+            "proof_gate_count_remaining"
+        ),
+        "profitability_proof_gates_remaining": proof_gates,
+        "profitability_next_actions": next_actions[:8],
+        "profitability_recommended_engineering_sequence": recommended_sequence[:8],
+        "profitability_edge_amplification_levers": levers,
+        "profitability_cost_gate_escape_method": escape.get("method"),
+        "profitability_cost_gate_escape_global_cost_gate_lowering": escape.get(
+            "global_cost_gate_lowering"
+        ),
+        "profitability_cost_gate_escape_probe_authority_granted": escape.get(
+            "probe_authority_granted"
+        ),
+        "profitability_cost_gate_escape_order_authority_granted": escape.get(
+            "order_authority_granted"
+        ),
+        "profitability_cost_gate_escape_promotion_evidence": escape.get(
+            "promotion_evidence"
+        ),
+        "profitability_cost_gate_escape_preflight_status": escape.get(
+            "sealed_horizon_probe_preflight_status"
+        ),
+        "profitability_cost_gate_escape_bounded_result_status": escape.get(
+            "bounded_probe_result_review_status"
+        ),
+        "profitability_cost_gate_escape_shadow_placement_status": escape.get(
+            "bounded_probe_shadow_placement_status"
+        ),
+        "profitability_cost_gate_escape_execution_realism_status": escape.get(
+            "bounded_probe_execution_realism_review_status"
+        ),
+    }
+
+
 def summarize_sealed_horizon_probe_preflight(
     data_dir: Path,
     *,
@@ -2645,6 +2785,10 @@ def collect_cost_gate_learning_lane_arm(
         data_dir,
         now_utc=now_utc,
     )
+    profitability_path_scorecard_summary = summarize_profitability_path_scorecard(
+        data_dir,
+        now_utc=now_utc,
+    )
     sealed_probe_preflight_summary = summarize_sealed_horizon_probe_preflight(
         data_dir,
         now_utc=now_utc,
@@ -2720,6 +2864,7 @@ def collect_cost_gate_learning_lane_arm(
                 **stack_activation_packet_summary,
                 **stack_dry_run_review_summary,
                 **decision_packet_summary,
+                **profitability_path_scorecard_summary,
                 **sealed_probe_preflight_summary,
                 **bounded_probe_operator_authorization_summary,
                 **bounded_probe_shadow_placement_impact_summary,
@@ -2772,6 +2917,7 @@ def collect_cost_gate_learning_lane_arm(
             **stack_activation_packet_summary,
             **stack_dry_run_review_summary,
             **decision_packet_summary,
+            **profitability_path_scorecard_summary,
             **sealed_probe_preflight_summary,
             **bounded_probe_operator_authorization_summary,
             **bounded_probe_shadow_placement_impact_summary,
@@ -2875,6 +3021,50 @@ def _learning_summary(worklist: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _profitability_path_summary_from_arms(arms: list[dict[str, Any]]) -> dict[str, Any]:
+    detail: dict[str, Any] = {}
+    for arm in arms:
+        if arm.get("arm_id") == "cost_gate_demo_learning_lane":
+            candidate = arm.get("detail")
+            if isinstance(candidate, dict):
+                detail = candidate
+            break
+    return {
+        "profitability_path_scorecard_status": detail.get(
+            "profitability_path_scorecard_status"
+        ),
+        "profitability_engineering_closure_status": detail.get(
+            "profitability_engineering_closure_status"
+        ),
+        "profitability_leading_path_id": detail.get("profitability_leading_path_id"),
+        "profitability_leading_path_class": detail.get(
+            "profitability_leading_path_class"
+        ),
+        "profitability_leading_candidate_key": detail.get(
+            "profitability_leading_candidate_key"
+        ),
+        "profitability_proof_gate_count_remaining": detail.get(
+            "profitability_proof_gate_count_remaining"
+        ),
+        "profitability_proof_gates_remaining": detail.get(
+            "profitability_proof_gates_remaining"
+        ),
+        "profitability_next_actions": detail.get("profitability_next_actions"),
+        "profitability_edge_amplification_levers": detail.get(
+            "profitability_edge_amplification_levers"
+        ),
+        "profitability_global_cost_gate_lowering_recommended": detail.get(
+            "profitability_global_cost_gate_lowering_recommended"
+        ),
+        "profitability_order_authority_granted": detail.get(
+            "profitability_order_authority_granted"
+        ),
+        "profitability_promotion_evidence": detail.get(
+            "profitability_promotion_evidence"
+        ),
+    }
+
+
 def build_runtime_killboard(
     *,
     data_dir: Path,
@@ -2900,6 +3090,7 @@ def build_runtime_killboard(
     counts = _action_counts(plan)
     learning_worklist = _learning_worklist(plan)
     learning_summary = _learning_summary(learning_worklist)
+    profitability_path_summary = _profitability_path_summary_from_arms(arms)
     scorecard = (
         plan.get("profitability_blocker_scorecard")
         if isinstance(plan.get("profitability_blocker_scorecard"), dict)
@@ -2954,6 +3145,7 @@ def build_runtime_killboard(
                 counts.get("READY_FOR_PROBE", 0) > 0
                 and runtime_source_activation_ready
             ),
+            **profitability_path_summary,
             **learning_summary,
         },
         "runtime_source": runtime_source,
@@ -2995,6 +3187,22 @@ def _history_row(killboard: dict[str, Any]) -> dict[str, Any]:
         "run_read_only_capture": kb.get("run_read_only_capture"),
         "wait": kb.get("wait"),
         "block": kb.get("block"),
+        "profitability_path_scorecard_status": kb.get(
+            "profitability_path_scorecard_status"
+        ),
+        "profitability_engineering_closure_status": kb.get(
+            "profitability_engineering_closure_status"
+        ),
+        "profitability_leading_path_id": kb.get("profitability_leading_path_id"),
+        "profitability_leading_candidate_key": kb.get(
+            "profitability_leading_candidate_key"
+        ),
+        "profitability_proof_gate_count_remaining": kb.get(
+            "profitability_proof_gate_count_remaining"
+        ),
+        "profitability_global_cost_gate_lowering_recommended": kb.get(
+            "profitability_global_cost_gate_lowering_recommended"
+        ),
         "learning_worklist_status": kb.get("learning_worklist_status"),
         "learning_task_count": kb.get("learning_task_count"),
         "learning_operator_required_count": kb.get("learning_operator_required_count"),

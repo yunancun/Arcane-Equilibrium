@@ -19,6 +19,7 @@ from alpha_discovery_throughput.packet import (
     daily_returns_from_samples,
 )
 from alpha_discovery_throughput.runtime_runner import (
+    build_runtime_killboard,
     collect_cost_gate_learning_lane_arm,
     collect_flash_dip_execution_realism_arm,
     collect_flash_dip_arm,
@@ -1821,6 +1822,101 @@ def _write_profit_learning_decision_packet_latest(
     return path
 
 
+def _write_profitability_path_scorecard_latest(
+    data: Path,
+    *,
+    generated_at: str = "2026-06-21T18:04:45+00:00",
+) -> Path:
+    path = (
+        data
+        / "alpha_discovery_throughput"
+        / "profitability_path_scorecard_latest.json"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "schema_version": "alpha_profitability_path_scorecard_v1",
+        "generated_at_utc": generated_at,
+        "status": "PROFITABILITY_PATHS_PRESENT_BUT_EXECUTION_EVIDENCE_MISSING",
+        "summary": {
+            "path_count": 4,
+            "cost_gate_crossing_candidate_count": 2,
+            "top_path_id": "horizon_edge_amplification:ma_crossover|BTCUSDT|Sell",
+            "top_path_status": "SEALED_HORIZON_PREFLIGHT_REQUIRES_OPERATOR_REVIEW",
+            "top_path_next_action": "operator_review_sealed_horizon_probe_preflight",
+        },
+        "answers": {
+            "profitability_proven": False,
+            "cost_gate_crossing_candidates_present": True,
+            "alpha_or_edge_amplification_paths_present": True,
+            "autonomous_learning_loop_accumulating": True,
+            "bounded_demo_probe_preflight_ready": False,
+            "bounded_demo_probe_shadow_placement_improves_touchability": True,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+        "profitability_engineering_closure": {
+            "schema_version": "profitability_engineering_closure_v1",
+            "status": "COST_GATE_ESCAPE_PREFLIGHT_BLOCKED_BY_OPERATOR_REVIEW",
+            "profit_thesis": (
+                "Cross Cost Gate with bounded side-cell horizon probes, not a global gate cut."
+            ),
+            "leading_path_id": "horizon_edge_amplification:ma_crossover|BTCUSDT|Sell",
+            "leading_path_status": "SEALED_HORIZON_PREFLIGHT_REQUIRES_OPERATOR_REVIEW",
+            "leading_path_class": "horizon_retiming_or_side_cell_filter",
+            "leading_candidate_key": "ma_crossover|BTCUSDT|Sell",
+            "proof_gates_remaining": [
+                "operator records sealed-horizon review without granting order/probe authority"
+            ],
+            "proof_gate_count_remaining": 1,
+            "next_actions": [
+                "operator_review_sealed_horizon_probe_preflight",
+                "continue_low_friction_mm_and_external_alpha_search",
+            ],
+            "cost_gate_escape_strategy": {
+                "method": "bounded_side_cell_horizon_probe_after_preflight",
+                "global_cost_gate_lowering": False,
+                "main_cost_gate_adjustment": "NONE",
+                "probe_authority_granted": False,
+                "order_authority_granted": False,
+                "promotion_evidence": False,
+                "sealed_horizon_probe_preflight_status": "OPERATOR_REVIEW_REQUIRED",
+                "bounded_probe_result_review_status": "NO_PROBE_OUTCOMES_RECORDED",
+                "bounded_probe_shadow_placement_status": (
+                    "SHADOW_PLACEMENT_TOUCHABILITY_IMPROVED_SAMPLE_MISMATCH"
+                ),
+                "bounded_probe_execution_realism_review_status": (
+                    "NO_EXECUTION_REALISM_GAP_TO_REVIEW"
+                ),
+            },
+            "edge_amplification_levers": [
+                {
+                    "path_class": "horizon_retiming_or_side_cell_filter",
+                    "status": "SEALED_HORIZON_PREFLIGHT_REQUIRES_OPERATOR_REVIEW",
+                    "path_count": 1,
+                    "top_path_id": (
+                        "horizon_edge_amplification:ma_crossover|BTCUSDT|Sell"
+                    ),
+                    "top_candidate_key": "ma_crossover|BTCUSDT|Sell",
+                    "required_next_gate": (
+                        "operator_review_recorded_without_granting_order_or_probe_authority"
+                    ),
+                    "next_action": "operator_review_sealed_horizon_probe_preflight",
+                }
+            ],
+        },
+        "operator_read": {
+            "do_not_lower_global_cost_gate": True,
+            "recommended_engineering_sequence": [
+                "operator_review_sealed_horizon_probe_preflight",
+                "continue_low_friction_mm_and_external_alpha_search",
+            ],
+        },
+    }), encoding="utf-8")
+    return path
+
+
 def _write_sealed_horizon_probe_preflight_latest(
     data: Path,
     *,
@@ -2879,6 +2975,87 @@ def test_cost_gate_profit_packet_probe_candidate_reaches_worklist(tmp_path):
         "ma_crossover|ETHUSDT|Sell"
     )
     assert task["evidence"]["profit_learning_order_authority_granted"] is False
+
+
+def test_cost_gate_profitability_path_scorecard_reaches_learning_surfaces(tmp_path):
+    data = tmp_path / "openclaw"
+    artifact = _write_profitability_path_scorecard_latest(data)
+    _write_profit_learning_decision_packet_latest(
+        data,
+        status="RUN_REJECT_COUNTERFACTUAL",
+        reason="cost_gate_rejects_are_recorded_but_counterfactual_scorecard_missing",
+        next_actions=["run_cost_gate_reject_counterfactual_multi_horizon_scorecard"],
+    )
+
+    now = dt.datetime(2026, 6, 21, 18, 5, tzinfo=dt.timezone.utc)
+    arm = collect_cost_gate_learning_lane_arm(data, now_utc=now)
+    plan = build_discovery_plan([arm], now_utc=now)
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    task = plan["learning_worklist"]["top_task"]
+
+    assert arm["detail"]["profitability_path_scorecard_source_path"] == str(artifact)
+    assert arm["detail"]["profitability_path_scorecard_status"] == (
+        "PROFITABILITY_PATHS_PRESENT_BUT_EXECUTION_EVIDENCE_MISSING"
+    )
+    assert arm["detail"]["profitability_engineering_closure_status"] == (
+        "COST_GATE_ESCAPE_PREFLIGHT_BLOCKED_BY_OPERATOR_REVIEW"
+    )
+    assert arm["detail"]["profitability_global_cost_gate_lowering_recommended"] is False
+    assert arm["detail"]["profitability_order_authority_granted"] is False
+    assert arm["detail"]["profitability_promotion_evidence"] is False
+
+    assert blocker["profitability_leading_candidate_key"] == (
+        "ma_crossover|BTCUSDT|Sell"
+    )
+    assert blocker["profitability_proof_gate_count_remaining"] == 1
+    assert blocker["profitability_global_cost_gate_lowering_recommended"] is False
+    assert blocker["profitability_cost_gate_escape_order_authority_granted"] is False
+    assert blocker["profitability_cost_gate_escape_probe_authority_granted"] is False
+    assert blocker["profitability_cost_gate_escape_promotion_evidence"] is False
+
+    assert task["evidence"]["profitability_engineering_closure_status"] == (
+        "COST_GATE_ESCAPE_PREFLIGHT_BLOCKED_BY_OPERATOR_REVIEW"
+    )
+    assert task["evidence"]["profitability_leading_candidate_key"] == (
+        "ma_crossover|BTCUSDT|Sell"
+    )
+    assert task["evidence"]["profitability_next_actions"][0] == (
+        "operator_review_sealed_horizon_probe_preflight"
+    )
+    assert task["evidence"]["profitability_order_authority_granted"] is False
+
+
+def test_runtime_killboard_mirrors_profitability_closure(tmp_path):
+    data = tmp_path / "openclaw"
+    repo = _init_clean_source_repo_with_origin(tmp_path)
+    _write_profitability_path_scorecard_latest(data)
+    _write_profit_learning_decision_packet_latest(
+        data,
+        status="RUN_REJECT_COUNTERFACTUAL",
+        reason="cost_gate_rejects_are_recorded_but_counterfactual_scorecard_missing",
+        next_actions=["run_cost_gate_reject_counterfactual_multi_horizon_scorecard"],
+    )
+
+    killboard = build_runtime_killboard(
+        data_dir=data,
+        repo_root=repo,
+        now_utc=dt.datetime(2026, 6, 21, 18, 5, tzinfo=dt.timezone.utc),
+    )
+
+    kb = killboard["killboard"]
+    assert kb["profitability_path_scorecard_status"] == (
+        "PROFITABILITY_PATHS_PRESENT_BUT_EXECUTION_EVIDENCE_MISSING"
+    )
+    assert kb["profitability_engineering_closure_status"] == (
+        "COST_GATE_ESCAPE_PREFLIGHT_BLOCKED_BY_OPERATOR_REVIEW"
+    )
+    assert kb["profitability_leading_candidate_key"] == (
+        "ma_crossover|BTCUSDT|Sell"
+    )
+    assert kb["profitability_proof_gate_count_remaining"] == 1
+    assert kb["profitability_global_cost_gate_lowering_recommended"] is False
+    assert kb["profitability_order_authority_granted"] is False
+    assert kb["profitability_promotion_evidence"] is False
 
 
 def test_cost_gate_profit_packet_sealed_horizon_candidate_reaches_worklist(tmp_path):
