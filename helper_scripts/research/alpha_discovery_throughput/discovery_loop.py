@@ -1678,6 +1678,9 @@ def _mm_low_friction_gross_stability_scorecard(detail: dict[str, Any]) -> dict[s
     near_miss_motif_stability = _dict(
         history.get("low_friction_near_miss_motif_stability")
     )
+    motif_amplification = _dict(detail.get("mm_motif_amplification_packet"))
+    motif_amplification_summary = _dict(motif_amplification.get("summary"))
+    motif_amplification_top = _dict(motif_amplification.get("top_candidate"))
     candidate = _dict(
         gross_decomp.get("best_low_friction_signal_holdout_gross_candidate")
     )
@@ -1862,6 +1865,32 @@ def _mm_low_friction_gross_stability_scorecard(detail: dict[str, Any]) -> dict[s
         ),
         "history_low_friction_near_miss_best_repeated_motif": (
             near_miss_motif_stability.get("best_repeated_near_miss_motif")
+        ),
+        "motif_amplification_status": motif_amplification.get("status"),
+        "motif_amplification_next_action": motif_amplification.get("next_action"),
+        "motif_amplification_top_motif_key": (
+            motif_amplification_summary.get("top_motif_key")
+        ),
+        "motif_amplification_top_status": (
+            motif_amplification_summary.get("top_status")
+        ),
+        "motif_amplification_top_bottleneck_leg": (
+            motif_amplification_summary.get("top_bottleneck_leg")
+        ),
+        "motif_amplification_top_min_train_holdout_gross_bps": (
+            motif_amplification_summary.get("top_min_train_holdout_gross_bps")
+        ),
+        "motif_amplification_top_min_gross_gap_to_current_fee_bps": (
+            motif_amplification_summary.get("top_min_gross_gap_to_current_fee_bps")
+        ),
+        "motif_amplification_top_required_uplift_multiple": (
+            motif_amplification_summary.get("top_required_uplift_multiple")
+        ),
+        "motif_amplification_top_distinct_dates_remaining": (
+            motif_amplification_summary.get("top_distinct_dates_remaining")
+        ),
+        "motif_amplification_top_search_constraint": (
+            motif_amplification_top.get("search_constraint")
         ),
         "train_confirmed_gross_count": low_friction_failure.get(
             "train_confirmed_gross_count"
@@ -2078,6 +2107,46 @@ def _mm_signal_search_directive(
             if history_guided_search
             else None
         ),
+        "motif_amplification_status": (
+            low_friction_stability.get("motif_amplification_status")
+        ),
+        "motif_amplification_next_action": (
+            low_friction_stability.get("motif_amplification_next_action")
+        ),
+        "motif_amplification_top_motif_key": (
+            low_friction_stability.get("motif_amplification_top_motif_key")
+        ),
+        "motif_amplification_top_status": (
+            low_friction_stability.get("motif_amplification_top_status")
+        ),
+        "motif_amplification_top_bottleneck_leg": (
+            low_friction_stability.get("motif_amplification_top_bottleneck_leg")
+        ),
+        "motif_amplification_top_min_train_holdout_gross_bps": (
+            low_friction_stability.get(
+                "motif_amplification_top_min_train_holdout_gross_bps"
+            )
+        ),
+        "motif_amplification_top_min_gross_gap_to_current_fee_bps": (
+            low_friction_stability.get(
+                "motif_amplification_top_min_gross_gap_to_current_fee_bps"
+            )
+        ),
+        "motif_amplification_top_required_uplift_multiple": (
+            low_friction_stability.get(
+                "motif_amplification_top_required_uplift_multiple"
+            )
+        ),
+        "motif_amplification_top_distinct_dates_remaining": (
+            low_friction_stability.get(
+                "motif_amplification_top_distinct_dates_remaining"
+            )
+        ),
+        "motif_amplification_top_search_constraint": (
+            low_friction_stability.get(
+                "motif_amplification_top_search_constraint"
+            )
+        ),
         "unstable_holdout_candidate_name": low_friction_stability.get(
             "candidate_name"
         ),
@@ -2164,6 +2233,38 @@ def _mm_signal_search_directive_row_extra(
         ),
         "mm_signal_search_history_guided_next_action": (
             directive.get("history_guided_next_action")
+        ),
+        "mm_signal_search_motif_amplification_status": (
+            directive.get("motif_amplification_status")
+        ),
+        "mm_signal_search_motif_amplification_next_action": (
+            directive.get("motif_amplification_next_action")
+        ),
+        "mm_signal_search_motif_amplification_top_motif_key": (
+            directive.get("motif_amplification_top_motif_key")
+        ),
+        "mm_signal_search_motif_amplification_top_status": (
+            directive.get("motif_amplification_top_status")
+        ),
+        "mm_signal_search_motif_amplification_top_bottleneck_leg": (
+            directive.get("motif_amplification_top_bottleneck_leg")
+        ),
+        "mm_signal_search_motif_amplification_top_min_train_holdout_gross_bps": (
+            directive.get("motif_amplification_top_min_train_holdout_gross_bps")
+        ),
+        "mm_signal_search_motif_amplification_top_min_gross_gap_to_current_fee_bps": (
+            directive.get(
+                "motif_amplification_top_min_gross_gap_to_current_fee_bps"
+            )
+        ),
+        "mm_signal_search_motif_amplification_top_required_uplift_multiple": (
+            directive.get("motif_amplification_top_required_uplift_multiple")
+        ),
+        "mm_signal_search_motif_amplification_top_distinct_dates_remaining": (
+            directive.get("motif_amplification_top_distinct_dates_remaining")
+        ),
+        "mm_signal_search_motif_amplification_top_search_constraint": (
+            directive.get("motif_amplification_top_search_constraint")
         ),
         "mm_signal_search_lower_fee_path_not_actionable_now": directive.get(
             "lower_fee_path_not_actionable_now"
@@ -2364,6 +2465,28 @@ def _mm_cost_wall_escape_scorecard(detail: dict[str, Any]) -> dict[str, Any]:
         "history_low_friction_near_miss_best_repeated_motif": (
             low_friction_stability.get(
                 "history_low_friction_near_miss_best_repeated_motif"
+            )
+        ),
+        "motif_amplification_status": (
+            low_friction_stability.get("motif_amplification_status")
+        ),
+        "motif_amplification_next_action": (
+            low_friction_stability.get("motif_amplification_next_action")
+        ),
+        "motif_amplification_top_motif_key": (
+            low_friction_stability.get("motif_amplification_top_motif_key")
+        ),
+        "motif_amplification_top_bottleneck_leg": (
+            low_friction_stability.get("motif_amplification_top_bottleneck_leg")
+        ),
+        "motif_amplification_top_min_gross_gap_to_current_fee_bps": (
+            low_friction_stability.get(
+                "motif_amplification_top_min_gross_gap_to_current_fee_bps"
+            )
+        ),
+        "motif_amplification_top_required_uplift_multiple": (
+            low_friction_stability.get(
+                "motif_amplification_top_required_uplift_multiple"
             )
         ),
         "low_friction_train_confirmed_gross_status": (

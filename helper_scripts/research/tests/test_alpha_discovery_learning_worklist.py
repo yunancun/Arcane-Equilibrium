@@ -109,6 +109,29 @@ def test_learning_worklist_prioritizes_runtime_reconcile_over_mm_signal_search()
                         },
                     },
                 },
+                "mm_motif_amplification_packet": {
+                    "status": (
+                        "MM_MOTIF_AMPLIFICATION_REQUIRES_DISTINCT_DATE_HISTORY"
+                    ),
+                    "next_action": (
+                        "accumulate_distinct_window_history_for_repeated_low_friction_motif"
+                    ),
+                    "summary": {
+                        "top_motif_key": "low_friction_motif|spread_combo",
+                        "top_status": "MOTIF_REPEATS_DISTINCT_DATES_INSUFFICIENT",
+                        "top_bottleneck_leg": "train",
+                        "top_min_train_holdout_gross_bps": 0.8,
+                        "top_min_gross_gap_to_current_fee_bps": 3.2,
+                        "top_required_uplift_multiple": 5.0,
+                        "top_distinct_dates_remaining": 1,
+                    },
+                    "top_candidate": {
+                        "search_constraint": (
+                            "preserve_repeated_motif_axes_and_require_train_holdout_"
+                            "sample_gated_min_gross_ge_current_fee_round_trip"
+                        ),
+                    },
+                },
             },
         },
     ], now_utc=dt.datetime(2026, 6, 22, tzinfo=dt.timezone.utc))
@@ -205,6 +228,24 @@ def test_learning_worklist_prioritizes_runtime_reconcile_over_mm_signal_search()
     assert mm_task["evidence"]["mm_signal_search_history_guided_search_constraint"] == (
         "prioritize_repeated_low_friction_near_miss_motif_then_require_"
         "distinct_date_train_holdout_confirmation"
+    )
+    assert mm_task["evidence"]["mm_signal_search_motif_amplification_status"] == (
+        "MM_MOTIF_AMPLIFICATION_REQUIRES_DISTINCT_DATE_HISTORY"
+    )
+    assert mm_task["evidence"][
+        "mm_signal_search_motif_amplification_top_motif_key"
+    ] == "low_friction_motif|spread_combo"
+    assert mm_task["evidence"][
+        "mm_signal_search_motif_amplification_top_bottleneck_leg"
+    ] == "train"
+    assert mm_task["evidence"][
+        "mm_signal_search_motif_amplification_top_required_uplift_multiple"
+    ] == 5.0
+    assert mm_task["evidence"][
+        "mm_signal_search_motif_amplification_top_search_constraint"
+    ] == (
+        "preserve_repeated_motif_axes_and_require_train_holdout_"
+        "sample_gated_min_gross_ge_current_fee_round_trip"
     )
     assert (
         mm_task["evidence"]["mm_signal_search_lower_fee_path_not_actionable_now"]
