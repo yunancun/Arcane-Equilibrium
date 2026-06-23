@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-23 MM Current-Fee Confirmation Packet
+
+- `mm_current_fee_confirmation_packet_v1` now turns the SOXLUSDT current-fee-positive MM cell into a standalone repeat/OOS/maker-realism confirmation artifact.
+- Linux canonical refresh at `2026-06-23T18:30:31Z` on source `SYNCED_CLEAN 6221b8f9` reports `MM_CURRENT_FEE_CONFIRMATION_REQUIRES_REPEAT_WINDOW`, candidate `edge_scorecard|per_symbol_primary_queue|SOXLUSDT|back|informed_skip|fill_only`, net `0.715bps`, current-fee candidate count `2`, history positive windows `1`, repeated keys `0`, repeated windows `0`, repeat/OOS false, maker status `NOT_REACHED_REPEAT_WINDOW_REQUIRED`.
+- PM read: this is a Cost Gate crossing lead, not profit proof. The next autonomous MM task is independent-window accumulation/replay for the same cell, then OOS/walk-forward, then maker execution realism; no global Cost Gate lowering, order/probe authority, runtime mutation, or promotion proof was granted.
+
 ## 2026-06-23 MM Current-Fee Confirmation Worklist Task
 
 - `alpha_learning_worklist_v6` now emits `mm_current_fee_confirmation` for sample-gated MM cells that already clear current fees, instead of burying them under generic `mm_signal_search`.
