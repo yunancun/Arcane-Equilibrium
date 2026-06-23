@@ -30,6 +30,7 @@ from .artifact_spine import (
     summarize_cost_gate_artifact_spine,
 )
 from .discovery_loop import build_discovery_plan
+from .learning_chain_contract import build_autonomous_learning_chain_contract
 from .mm_current_fee_confirmation import build_mm_current_fee_confirmation_packet
 from .mm_motif_amplification import build_mm_motif_amplification_packet
 
@@ -3801,6 +3802,15 @@ def build_runtime_killboard(
     cost_gate_artifact_spine_summary = _cost_gate_artifact_spine_summary_from_arms(
         arms
     )
+    autonomous_learning_chain_contract = build_autonomous_learning_chain_contract(
+        runtime_source=runtime_source,
+        arms=arms,
+        discovery_plan=plan,
+        learning_worklist=learning_worklist,
+        learning_summary=learning_summary,
+        cost_gate_artifact_spine_summary=cost_gate_artifact_spine_summary,
+        profitability_path_summary=profitability_path_summary,
+    )
     cost_gate_spine_active_state = (
         cost_gate_artifact_spine_summary.get("active_state")
         if isinstance(cost_gate_artifact_spine_summary.get("active_state"), dict)
@@ -3903,6 +3913,41 @@ def build_runtime_killboard(
                     "blocked_outcome_review_candidate_ready"
                 )
             ),
+            "autonomous_learning_chain_status": (
+                autonomous_learning_chain_contract.get("status")
+            ),
+            "autonomous_learning_chain_data_ingress_ready": (
+                autonomous_learning_chain_contract.get("data_ingress_ready")
+            ),
+            "autonomous_learning_chain_engine_output_ready": (
+                autonomous_learning_chain_contract.get(
+                    "learning_engine_output_ready"
+                )
+            ),
+            "autonomous_learning_chain_runtime_consumer_ready": (
+                autonomous_learning_chain_contract.get("runtime_consumer_ready")
+            ),
+            "autonomous_learning_chain_value_status": (
+                autonomous_learning_chain_contract.get("value_status")
+            ),
+            "autonomous_learning_chain_authority_boundary_status": (
+                autonomous_learning_chain_contract.get("authority_boundary_status")
+            ),
+            "autonomous_learning_agent_route_status": (
+                autonomous_learning_chain_contract.get("agent_route_status")
+            ),
+            "autonomous_learning_agent_task_id": (
+                autonomous_learning_chain_contract.get("agent_task_id")
+            ),
+            "autonomous_learning_agent_task_type": (
+                autonomous_learning_chain_contract.get("agent_task_type")
+            ),
+            "autonomous_learning_agent_next_trigger": (
+                autonomous_learning_chain_contract.get("agent_task_next_trigger")
+            ),
+            "autonomous_learning_agent_completion_gate": (
+                autonomous_learning_chain_contract.get("agent_task_completion_gate")
+            ),
             **profitability_path_summary,
             **learning_summary,
         },
@@ -3910,6 +3955,7 @@ def build_runtime_killboard(
         "discovery_plan": plan,
         "profitability_blocker_scorecard": plan.get("profitability_blocker_scorecard"),
         "cost_gate_artifact_spine_summary": cost_gate_artifact_spine_summary,
+        "autonomous_learning_chain_contract": autonomous_learning_chain_contract,
         "learning_worklist": learning_worklist,
         "arms_raw": arms,
     }
@@ -3968,6 +4014,39 @@ def _history_row(killboard: dict[str, Any]) -> dict[str, Any]:
         ),
         "cost_gate_spine_blocked_outcome_review_candidate_ready": kb.get(
             "cost_gate_spine_blocked_outcome_review_candidate_ready"
+        ),
+        "autonomous_learning_chain_status": kb.get(
+            "autonomous_learning_chain_status"
+        ),
+        "autonomous_learning_chain_data_ingress_ready": kb.get(
+            "autonomous_learning_chain_data_ingress_ready"
+        ),
+        "autonomous_learning_chain_engine_output_ready": kb.get(
+            "autonomous_learning_chain_engine_output_ready"
+        ),
+        "autonomous_learning_chain_runtime_consumer_ready": kb.get(
+            "autonomous_learning_chain_runtime_consumer_ready"
+        ),
+        "autonomous_learning_chain_value_status": kb.get(
+            "autonomous_learning_chain_value_status"
+        ),
+        "autonomous_learning_chain_authority_boundary_status": kb.get(
+            "autonomous_learning_chain_authority_boundary_status"
+        ),
+        "autonomous_learning_agent_route_status": kb.get(
+            "autonomous_learning_agent_route_status"
+        ),
+        "autonomous_learning_agent_task_id": kb.get(
+            "autonomous_learning_agent_task_id"
+        ),
+        "autonomous_learning_agent_task_type": kb.get(
+            "autonomous_learning_agent_task_type"
+        ),
+        "autonomous_learning_agent_next_trigger": kb.get(
+            "autonomous_learning_agent_next_trigger"
+        ),
+        "autonomous_learning_agent_completion_gate": kb.get(
+            "autonomous_learning_agent_completion_gate"
         ),
         "profitability_path_scorecard_status": kb.get(
             "profitability_path_scorecard_status"
