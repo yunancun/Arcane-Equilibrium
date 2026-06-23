@@ -18,6 +18,10 @@ from alpha_discovery_throughput.artifact_spine import (
     COST_GATE_ARTIFACT_SPINE_SCHEMA_VERSION,
     build_cost_gate_artifact_spine,
 )
+from alpha_discovery_throughput.learning_chain_contract import (
+    AUTONOMOUS_LEARNING_CHAIN_CONTRACT_SCHEMA_VERSION,
+    build_autonomous_learning_chain_contract,
+)
 from alpha_discovery_throughput.packet import (
     build_candidate_packet,
     build_direct_report_from_packet,
@@ -374,6 +378,247 @@ def test_discovery_loop_prefers_spine_refresh_over_raw_ready_fields():
     assert row["action"] == "RUN_READ_ONLY_CAPTURE"
     assert row["reason"] == (
         "cost_gate_false_negative_candidate_packet_stale_or_unreadable"
+    )
+
+
+def test_autonomous_learning_chain_contract_routes_cost_gate_operator_review():
+    spine_summary = {
+        "ready_alpha_evidence_node_count": 2,
+        "probe_result_learning_valid": False,
+        "proof_gap": "candidate_matched_fill_backed_matched_control_probe_result_missing",
+        "global_cost_gate_lowering_recommended": False,
+        "probe_authority_granted": False,
+        "order_authority_granted": False,
+        "promotion_evidence": False,
+        "active_state": {
+            "blocked_outcome_review_candidate_ready": True,
+            "false_negative_candidate_packet_present": True,
+            "false_negative_candidate_packet_source_ok": True,
+            "false_negative_candidate_packet_operator_review_ready": True,
+            "false_negative_queue_ready": True,
+            "false_negative_candidate_packet_refresh_required": False,
+        },
+    }
+    arms = [{
+        "arm_id": "cost_gate_demo_learning_lane",
+        "gate_status": "OPERATOR_REVIEW",
+        "sample_count": 37,
+        "artifacts_ready": False,
+        "source_ok": True,
+        "detail": {
+            "learning_lane_source_activation_ready": True,
+            "ledger_status": "BLOCKED_SIGNAL_OUTCOMES_PRESENT",
+            "blocked_signal_outcome_count": 42,
+            "demo_learning_evidence_cost_gate_rejects_recorded_in_pg": True,
+            "false_negative_candidate_packet_present": True,
+            "false_negative_candidate_packet_source_ok": True,
+            "false_negative_candidate_packet_status": (
+                "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW"
+            ),
+            "false_negative_candidate_packet_operator_review_ready": True,
+            "false_negative_candidate_packet_false_negative_count": 3,
+            "false_negative_candidate_packet_next_actions": [
+                "operator_review_ranked_false_negative_candidates_before_bounded_demo_probe_authority"
+            ],
+            "blocked_signal_outcome_review_status": (
+                "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
+            ),
+            "cost_gate_artifact_spine_summary": spine_summary,
+        },
+    }]
+    plan = build_discovery_plan(
+        arms,
+        now_utc=dt.datetime(2026, 6, 23, tzinfo=dt.timezone.utc),
+    )
+    worklist = plan["learning_worklist"]
+    summary = _learning_summary(worklist)
+
+    contract = build_autonomous_learning_chain_contract(
+        runtime_source={
+            "source_activation_ready": True,
+            "source_activation_status": "SYNCED_CLEAN",
+        },
+        arms=arms,
+        discovery_plan=plan,
+        learning_worklist=worklist,
+        learning_summary=summary,
+        cost_gate_artifact_spine_summary=spine_summary,
+        profitability_path_summary={
+            "profitability_global_cost_gate_lowering_recommended": False,
+            "profitability_order_authority_granted": False,
+            "profitability_promotion_evidence": False,
+        },
+    )
+
+    assert contract["schema_version"] == (
+        AUTONOMOUS_LEARNING_CHAIN_CONTRACT_SCHEMA_VERSION
+    )
+    assert contract["status"] == "AUTONOMOUS_LEARNING_CHAIN_ACTIONABLE"
+    assert contract["data_ingress_ready"] is True
+    assert contract["learning_engine_output_ready"] is True
+    assert contract["runtime_consumer_ready"] is True
+    assert contract["value_status"] == "OPERATOR_GATED_LEARNING_OUTPUT"
+    assert contract["authority_boundary_status"] == "PRESERVED"
+    assert contract["agent_route_status"] == "OPERATOR_REVIEW_REQUIRED"
+    assert contract["agent_task_type"] == "operator_probe_review"
+    assert contract["agent_task_completion_gate"] == (
+        "operator_authorization_recorded_and_probe_preflight_passes"
+    )
+
+
+def test_autonomous_learning_chain_contract_prefers_parallel_engineering_task():
+    operator_task = {
+        "task_id": "cost_gate_demo_learning_lane:operator_probe_review:x",
+        "arm_id": "cost_gate_demo_learning_lane",
+        "task_type": "operator_probe_review",
+        "learning_objective": "operator_review_bounded_demo_probe_authorization_packet",
+        "completion_gate": "operator_authorization_recorded_and_probe_preflight_passes",
+        "completion_status": "PENDING_EVIDENCE",
+        "completion_evidence_required": ["operator_authorization_artifact_exists"],
+        "actionability": "operator_required",
+        "requires_operator_authorization": True,
+        "runtime_mutation_required": False,
+        "side_effect_boundary": "recommendation_only_no_order_authority_no_runtime_mutation",
+        "next_trigger": "operator_review_packet",
+        "evidence": {},
+    }
+    engineering_task = {
+        "task_id": "mm_verdict_maker_edge:mm_signal_search:y",
+        "arm_id": "mm_verdict_maker_edge",
+        "task_type": "mm_signal_search",
+        "learning_objective": "find_or_amplify_train_confirmed_low_friction_mm_signal",
+        "completion_gate": "train_confirmed_sample_gated_current_fee_gross_edge_found",
+        "completion_status": "PENDING_EVIDENCE",
+        "completion_evidence_required": [
+            "train and holdout sample-gated gross edge clear current fee round trip",
+        ],
+        "actionability": "engineering_actionable",
+        "requires_operator_authorization": False,
+        "runtime_mutation_required": False,
+        "side_effect_boundary": "recommendation_only_no_order_authority_no_runtime_mutation",
+        "next_trigger": "search_low_friction_mm_signal",
+        "evidence": {"mm_signal_search_status": "SEARCH_REQUIRED_EDGE_UPLIFT"},
+    }
+    worklist = {
+        "schema_version": "alpha_learning_worklist_v6",
+        "status": "OPERATOR_GATED_LEARNING_READY",
+        "task_count": 2,
+        "promotion_ready_count": 0,
+        "operator_required_count": 1,
+        "runtime_mutation_required_count": 0,
+        "engineering_actionable_count": 1,
+        "top_task": operator_task,
+        "tasks": [operator_task, engineering_task],
+    }
+    summary = _learning_summary(worklist)
+
+    contract = build_autonomous_learning_chain_contract(
+        runtime_source={"source_activation_ready": True},
+        arms=[{
+            "arm_id": "cost_gate_demo_learning_lane",
+            "detail": {
+                "ledger_status": "BLOCKED_SIGNAL_OUTCOMES_PRESENT",
+                "blocked_signal_outcome_count": 1,
+            },
+        }],
+        discovery_plan={"learning_worklist": worklist},
+        learning_worklist=worklist,
+        learning_summary=summary,
+        cost_gate_artifact_spine_summary={
+            "ready_alpha_evidence_node_count": 1,
+            "global_cost_gate_lowering_recommended": False,
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+        profitability_path_summary={},
+    )
+
+    assert contract["status"] == "AUTONOMOUS_LEARNING_CHAIN_ACTIONABLE"
+    assert contract["agent_route_status"] == "AUTONOMOUS_ENGINEERING_TASK_READY"
+    assert contract["agent_task_id"] == "mm_verdict_maker_edge:mm_signal_search:y"
+    assert contract["agent_task_next_trigger"] == "search_low_friction_mm_signal"
+
+
+def test_autonomous_learning_chain_contract_blocks_authority_boundary_violation():
+    task = {
+        "task_id": "cost_gate_demo_learning_lane:operator_probe_review:x",
+        "arm_id": "cost_gate_demo_learning_lane",
+        "task_type": "operator_probe_review",
+        "learning_objective": "operator_review_bounded_demo_probe_authorization_packet",
+        "completion_gate": "operator_authorization_recorded_and_probe_preflight_passes",
+        "completion_status": "PENDING_EVIDENCE",
+        "completion_evidence_required": ["operator_authorization_artifact_exists"],
+        "actionability": "operator_required",
+        "requires_operator_authorization": True,
+        "runtime_mutation_required": False,
+        "side_effect_boundary": "recommendation_only_no_order_authority_no_runtime_mutation",
+        "next_trigger": "operator_review_packet",
+        "evidence": {
+            "false_negative_candidate_packet_order_authority_granted": True,
+        },
+    }
+    worklist = {
+        "schema_version": "alpha_learning_worklist_v6",
+        "status": "OPERATOR_GATED_LEARNING_READY",
+        "task_count": 1,
+        "promotion_ready_count": 0,
+        "operator_required_count": 1,
+        "runtime_mutation_required_count": 0,
+        "engineering_actionable_count": 0,
+        "top_task": task,
+        "tasks": [task],
+    }
+    summary = _learning_summary(worklist)
+
+    contract = build_autonomous_learning_chain_contract(
+        runtime_source={"source_activation_ready": True},
+        arms=[{
+            "arm_id": "cost_gate_demo_learning_lane",
+            "detail": {
+                "ledger_status": "BLOCKED_SIGNAL_OUTCOMES_PRESENT",
+                "blocked_signal_outcome_count": 1,
+            },
+        }],
+        discovery_plan={"learning_worklist": worklist},
+        learning_worklist=worklist,
+        learning_summary=summary,
+        cost_gate_artifact_spine_summary={"ready_alpha_evidence_node_count": 1},
+        profitability_path_summary={},
+    )
+
+    assert contract["status"] == (
+        "AUTONOMOUS_LEARNING_CHAIN_AUTHORITY_BOUNDARY_VIOLATION"
+    )
+    assert contract["authority_boundary_status"] == "VIOLATION"
+    assert contract["authority_violations"][0]["field"].endswith(
+        "false_negative_candidate_packet_order_authority_granted"
+    )
+
+
+def test_runtime_killboard_embeds_autonomous_learning_chain_contract(tmp_path: Path):
+    data_dir = tmp_path / "openclaw"
+    data_dir.mkdir()
+
+    result = build_runtime_killboard(
+        data_dir=data_dir,
+        repo_root=tmp_path,
+        now_utc=dt.datetime(2026, 6, 23, tzinfo=dt.timezone.utc),
+    )
+
+    contract = result["autonomous_learning_chain_contract"]
+    assert contract["schema_version"] == (
+        AUTONOMOUS_LEARNING_CHAIN_CONTRACT_SCHEMA_VERSION
+    )
+    assert result["killboard"]["autonomous_learning_chain_status"] == (
+        contract["status"]
+    )
+    assert result["killboard"]["autonomous_learning_chain_data_ingress_ready"] is False
+    assert result["killboard"]["autonomous_learning_chain_runtime_consumer_ready"] == (
+        contract["runtime_consumer_ready"]
+    )
+    assert result["killboard"]["autonomous_learning_agent_route_status"] == (
+        contract["agent_route_status"]
     )
 
 
