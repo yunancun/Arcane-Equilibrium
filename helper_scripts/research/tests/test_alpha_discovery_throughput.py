@@ -3235,10 +3235,41 @@ def test_runtime_killboard_mirrors_profitability_closure(tmp_path):
 def test_runtime_killboard_carries_profitability_runtime_mutation_required(tmp_path):
     data = tmp_path / "openclaw"
     repo = _init_clean_source_repo_with_origin(tmp_path)
-    _write_profitability_path_scorecard_latest(
+    artifact = _write_profitability_path_scorecard_latest(
         data,
         next_move_runtime_mutation_required=True,
     )
+    payload = json.loads(artifact.read_text(encoding="utf-8"))
+    root_blocker = {
+        "source": "demo_learning_stack_dry_run_review",
+        "gate": "demo_learning_stack_operator_apply_required",
+        "status": "DRY_RUN_PREVIEW_PASSED_OPERATOR_APPLY_REVIEW_REQUIRED",
+        "reason": "installer_dry_run_preview_passed_without_crontab_mutation",
+        "next_action": (
+            "operator_review_dry_run_preview_then_apply_learning_stack_if_accepted"
+        ),
+        "runtime_mutation_required": True,
+    }
+    closure = payload["profitability_engineering_closure"]
+    closure["status"] = "DEMO_LEARNING_STACK_ACTIVATION_REQUIRED"
+    closure["cost_gate_root_blockers"] = [root_blocker]
+    closure["primary_cost_gate_root_blocker"] = root_blocker
+    closure["profitability_next_move"]["status"] = (
+        "DEMO_LEARNING_STACK_ACTIVATION_REQUIRED"
+    )
+    closure["profitability_next_move"]["move_class"] = (
+        "activate_sustainable_demo_learning_stack"
+    )
+    closure["profitability_next_move"]["recommended_action"] = (
+        "operator_review_dry_run_preview_then_apply_learning_stack_if_accepted"
+    )
+    operator_next_move = payload["operator_read"]["profitability_next_move"]
+    operator_next_move["status"] = "DEMO_LEARNING_STACK_ACTIVATION_REQUIRED"
+    operator_next_move["move_class"] = "activate_sustainable_demo_learning_stack"
+    operator_next_move["recommended_action"] = (
+        "operator_review_dry_run_preview_then_apply_learning_stack_if_accepted"
+    )
+    artifact.write_text(json.dumps(payload), encoding="utf-8")
 
     killboard = build_runtime_killboard(
         data_dir=data,
@@ -3254,6 +3285,13 @@ def test_runtime_killboard_carries_profitability_runtime_mutation_required(tmp_p
     task = tasks["cost_gate_demo_learning_lane"]
 
     assert kb["profitability_next_move_runtime_mutation_required"] is True
+    assert task["task_type"] == "cost_gate_learning_activation"
+    assert task["requires_operator_authorization"] is True
+    assert task["runtime_mutation_required"] is True
+    assert task["side_effect_boundary"] == (
+        "recommendation_only_operator_runtime_mutation_required_"
+        "no_order_or_probe_authority"
+    )
     assert (
         task["evidence"]["profitability_next_move_runtime_mutation_required"] is True
     )
