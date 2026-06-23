@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-23 MM Current-Fee Confirmation Worklist Task
+
+- `alpha_learning_worklist_v6` now emits `mm_current_fee_confirmation` for sample-gated MM cells that already clear current fees, instead of burying them under generic `mm_signal_search`.
+- Linux artifact refresh at `2026-06-23T18:11:28Z` on runtime source `SYNCED_CLEAN 54183830` reports top engineering task `mm_current_fee_confirmation` for SOXLUSDT: gross `4.715bps`, net `0.715bps`, current-fee-positive count `2`, break-even maker fee `2.3575bp/side`, rank `3`.
+- PM read: this is the right autonomous-learning next task for the MM path: independent-window repeat + OOS/walk-forward + maker execution realism. It still grants no Cost Gate lowering, no probe/order authority, no runtime mutation, and no promotion proof.
+
 ## 2026-06-23 MM Current-Fee Confirmation Path
 
 - `alpha_profitability_path_scorecard_v1` now surfaces sample-gated current-fee-positive MM cells as `mm_current_fee_cell_confirmation` instead of hiding them under fee/scale or low-friction below-fee search.
