@@ -25,6 +25,7 @@ _TASK_PRIORITY = {
     "polymarket_replay_history": 45,
     "polymarket_candidate_replay": 50,
     "candidate_evidence_build": 55,
+    "mm_current_fee_confirmation": 58,
     "mm_signal_search": 60,
     "fee_path_review": 65,
     "data_capture": 70,
@@ -55,8 +56,16 @@ _EVIDENCE_KEYS = (
     "status_reason",
     "gross_edge_gap_to_current_fee_bps",
     "required_current_fee_gross_edge_bps",
+    "current_fee_positive_sample_gated_cell_count",
+    "best_sample_gated_current_fee_source",
+    "best_sample_gated_current_fee_cell",
+    "best_sample_gated_gross_cell",
     "best_sample_gated_gross_edge_bps",
     "best_gross_cell_net_bps",
+    "break_even_maker_fee_bps_per_side",
+    "cost_wall_escape_status",
+    "cost_wall_escape_reason",
+    "gross_edge_decomposition_status",
     "low_friction_gross_stability_status",
     "low_friction_train_confirmed_gross_status",
     "low_friction_best_train_confirmed_min_gross_bps",
@@ -477,6 +486,20 @@ def _bool(value: Any) -> bool:
     return value is True
 
 
+def _int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _as_list(value: Any) -> list[Any]:
     if isinstance(value, list):
         return value
@@ -516,7 +539,41 @@ def _task_primary_blocker(row: dict[str, Any], task_type: str) -> Any:
         activation_status = _str(row.get("demo_learning_stack_activation_packet_status"))
         if activation_status == "READY_FOR_OPERATOR_DRY_RUN":
             return "demo_learning_stack_activation_packet_dry_run_required"
+    if task_type == "mm_current_fee_confirmation":
+        return (
+            row.get("mm_signal_search_failure_mode")
+            or "current_fee_candidate_lacks_independent_window_confirmation"
+        )
     return row.get("primary_blocker")
+
+
+def _is_mm_current_fee_confirmation_row(row: dict[str, Any]) -> bool:
+    if _str(row.get("arm_id")) != "mm_verdict_maker_edge":
+        return False
+    status = _str(row.get("mm_signal_search_status")).upper()
+    failure_mode = _str(row.get("mm_signal_search_failure_mode"))
+    escape_status = _str(row.get("cost_wall_escape_status")).upper()
+    current_fee_count = _int(row.get("current_fee_positive_sample_gated_cell_count"))
+    gross = _float(row.get("best_sample_gated_gross_edge_bps"))
+    required = _float(row.get("required_current_fee_gross_edge_bps"))
+    if failure_mode == "current_fee_candidate_lacks_train_holdout_walk_forward_confirmation":
+        return True
+    if escape_status in {
+        "CURRENT_FEE_SAMPLE_GATED_CELL_AVAILABLE",
+        "GROSS_EDGE_CLEARS_CURRENT_FEE_NEEDS_WALK_FORWARD_CONFIRMATION",
+    }:
+        return True
+    return (
+        status
+        in {
+            "SEARCH_REQUIRED_WALK_FORWARD_CONFIRMATION",
+            "SEARCH_NOT_REQUIRED_CONFIRM_CURRENT_FEE_CELL",
+        }
+        and current_fee_count > 0
+        and gross is not None
+        and required is not None
+        and gross >= required
+    )
 
 
 def _classify_task_type(row: dict[str, Any]) -> str:
@@ -563,6 +620,8 @@ def _classify_task_type(row: dict[str, Any]) -> str:
         ):
             return "cost_gate_learning_activation"
     if arm_id == "mm_verdict_maker_edge":
+        if _is_mm_current_fee_confirmation_row(row):
+            return "mm_current_fee_confirmation"
         if blocker_class == "fee_or_scale":
             return "fee_path_review"
         if blocker_class in {"cost_wall", "feature_family_no_edge"}:
@@ -680,6 +739,11 @@ def _learning_objective(row: dict[str, Any], task_type: str) -> str:
         return "make_bounded_demo_probe_orders_touchable_then_collect_candidate_matched_fill_lineage"
     if task_type == "bounded_probe_execution_realism":
         return "measure_probe_slippage_timing_and_fill_quality_against_matched_control_edge"
+    if task_type == "mm_current_fee_confirmation":
+        return (
+            "confirm_sample_gated_current_fee_positive_mm_cell_before_any_"
+            "authority"
+        )
     if task_type == "mm_signal_search":
         return (
             "find_or_amplify_train_confirmed_low_friction_mm_signal_that_clears_"
@@ -778,6 +842,8 @@ def _completion_gate(task_type: str) -> str:
         return "candidate_matched_near_touch_shadow_or_fill_lineage_recorded"
     if task_type == "bounded_probe_execution_realism":
         return "bounded_probe_execution_realism_gap_pass_or_reject_recorded"
+    if task_type == "mm_current_fee_confirmation":
+        return "repeat_current_fee_positive_cell_across_independent_windows_and_oos_execution_realism"
     if task_type == "mm_signal_search":
         return "train_confirmed_sample_gated_current_fee_gross_edge_found"
     if task_type == "fee_path_review":
@@ -870,6 +936,15 @@ def _completion_evidence_required(task_type: str) -> list[str]:
             "net gross cost_or_slippage and entry-delay gap decomposition is recorded",
             "fill-backed execution coverage is recorded before trusting proxy rows",
             "Cost Gate review remains blocked until probe captures matched-control edge",
+        ]
+    if task_type == "mm_current_fee_confirmation":
+        return [
+            "current_fee_positive_sample_gated_cell_count remains > 0",
+            "best_sample_gated_current_fee_cell or best_sample_gated_gross_cell preserves symbol policy queue track and net_bps",
+            "the same current-fee-positive cell repeats across independent windows or is explicitly invalidated",
+            "walk_forward/OOS review confirms the cell without train-only leakage",
+            "maker execution realism records fill probability, adverse selection, fee, and inventory risk",
+            "order/probe authority remains not granted until a separate operator review",
         ]
     if task_type == "mm_signal_search":
         return [
@@ -998,6 +1073,12 @@ def _task_next_trigger(row: dict[str, Any], task_type: str) -> str | None:
             if value:
                 return value
         return None
+    if task_type == "mm_current_fee_confirmation":
+        directive = row.get("mm_signal_search_directive")
+        if isinstance(directive, dict):
+            value = _str(directive.get("next_trigger"))
+            if value:
+                return value
     return row.get("next_trigger")
 
 
