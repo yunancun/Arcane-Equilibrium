@@ -1856,6 +1856,52 @@ def _merge_cells_by_key(cells: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list(merged.values())
 
 
+def _fill_missing_cell_fields(
+    cell: dict[str, Any],
+    extra: dict[str, Any],
+    *,
+    selected_key: str,
+) -> None:
+    extra_key = _cell_key_from_fields(_str(extra.get("source")) or "fillsim", extra)
+    if extra_key != selected_key:
+        return
+    for field in (
+        "break_even_maker_fee_bps_per_side",
+        "fee_reduction_to_breakeven_bps_per_side",
+        "maker_fee_bps_per_side",
+        "net_bps_at_fee",
+    ):
+        value = extra.get(field)
+        if cell.get(field) in (None, "") and value not in (None, ""):
+            cell[field] = value
+
+
+def _enrich_current_fee_cell(
+    cell: dict[str, Any],
+    *,
+    fillsim: dict[str, Any] | None,
+    fillsim_history: dict[str, Any] | None,
+) -> dict[str, Any]:
+    enriched = dict(cell)
+    selected_key = _cell_key_from_fields(
+        _str(enriched.get("source")) or "fillsim",
+        enriched,
+    )
+    sensitivity = _dict(_dict(fillsim).get("maker_fee_sensitivity_scorecard"))
+    _fill_missing_cell_fields(
+        enriched,
+        _dict(sensitivity.get("best_sample_gated_break_even_cell")),
+        selected_key=selected_key,
+    )
+    history_window = _dict(_dict(fillsim_history).get("best_sample_gated_break_even_window"))
+    _fill_missing_cell_fields(
+        enriched,
+        _dict(history_window.get("cell") or history_window.get("best_cell")),
+        selected_key=selected_key,
+    )
+    return enriched
+
+
 def _mm_current_fee_confirmation_status(
     history_status: str,
     current_fee_positive_windows: int,
@@ -1883,7 +1929,11 @@ def _mm_current_fee_confirmation_path(
         return []
     cells = _merge_cells_by_key(cells)
     cells.sort(key=_cell_rank, reverse=True)
-    cell = cells[0]
+    cell = _enrich_current_fee_cell(
+        cells[0],
+        fillsim=fillsim,
+        fillsim_history=fillsim_history,
+    )
     sensitivity = _dict(_dict(fillsim).get("maker_fee_sensitivity_scorecard"))
     current_fee_round_trip = (
         _float(sensitivity.get("current_fee_round_trip_bps"))
