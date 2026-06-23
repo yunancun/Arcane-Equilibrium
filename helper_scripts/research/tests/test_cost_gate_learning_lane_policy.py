@@ -1009,9 +1009,21 @@ def test_learning_loop_status_falls_back_to_review_artifact_for_top_review_field
                     "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
                 ),
                 "top_side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "top_side_cell_learning_diagnosis": (
+                    "FALSE_NEGATIVE_CANDIDATE_AFTER_COST"
+                ),
+                "top_side_cell_cost_gate_escape_recommendation": (
+                    "operator_review_bounded_probe_authority_without_global_gate_lowering"
+                ),
                 "top_side_cell_wrongful_block_score": 3.444444,
                 "top_side_cell_net_cost_cushion_bps": 5.166667,
                 "top_review_candidate_side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "top_review_candidate_learning_diagnosis": (
+                    "FALSE_NEGATIVE_CANDIDATE_AFTER_COST"
+                ),
+                "top_review_candidate_cost_gate_escape_recommendation": (
+                    "operator_review_bounded_probe_authority_without_global_gate_lowering"
+                ),
                 "top_review_candidate_wrongful_block_score": 3.444444,
                 "top_review_candidate_net_cost_cushion_bps": 5.166667,
             }
@@ -1052,8 +1064,17 @@ def test_learning_loop_status_falls_back_to_review_artifact_for_top_review_field
         "ma_crossover|ETHUSDT|Sell"
     )
     assert detail["learning_loop_last_review_top_wrongful_block_score"] == 3.444444
+    assert detail["learning_loop_last_review_top_learning_diagnosis"] == (
+        "FALSE_NEGATIVE_CANDIDATE_AFTER_COST"
+    )
+    assert detail[
+        "learning_loop_last_review_top_cost_gate_escape_recommendation"
+    ] == "operator_review_bounded_probe_authority_without_global_gate_lowering"
     assert detail["learning_loop_last_review_top_candidate_side_cell_key"] == (
         "ma_crossover|ETHUSDT|Sell"
+    )
+    assert detail["learning_loop_last_review_top_candidate_learning_diagnosis"] == (
+        "FALSE_NEGATIVE_CANDIDATE_AFTER_COST"
     )
 
 
@@ -2477,6 +2498,90 @@ def test_alpha_discovery_blocks_when_blocked_outcome_review_fails_thresholds(
     )
 
 
+def test_alpha_discovery_routes_cost_wall_blocked_outcomes_to_edge_amplification(
+    tmp_path: Path,
+):
+    data_dir = tmp_path
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+    ledger_rows = [
+        {
+            "record_type": "blocked_signal_outcome",
+            "generated_at_utc": "2026-06-21T12:15:00+00:00",
+            "attempt_id": "blocked-1",
+            "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+            "strategy_name": "ma_crossover",
+            "symbol": "ETHUSDT",
+            "side": "Sell",
+            "gross_bps": 3.5,
+            "cost_bps": 4.0,
+            "realized_net_bps": -0.5,
+        },
+        {
+            "record_type": "blocked_signal_outcome",
+            "generated_at_utc": "2026-06-21T13:15:00+00:00",
+            "attempt_id": "blocked-2",
+            "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+            "strategy_name": "ma_crossover",
+            "symbol": "ETHUSDT",
+            "side": "Sell",
+            "gross_bps": 2.5,
+            "cost_bps": 4.0,
+            "realized_net_bps": -1.5,
+        },
+        {
+            "record_type": "blocked_signal_outcome",
+            "generated_at_utc": "2026-06-21T14:15:00+00:00",
+            "attempt_id": "blocked-3",
+            "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+            "strategy_name": "ma_crossover",
+            "symbol": "ETHUSDT",
+            "side": "Sell",
+            "gross_bps": 5.0,
+            "cost_bps": 4.0,
+            "realized_net_bps": 1.0,
+        },
+    ]
+    (lane_dir / "probe_ledger.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in ledger_rows),
+        encoding="utf-8",
+    )
+
+    arm = collect_cost_gate_learning_lane_arm(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 21, 14, 30, tzinfo=dt.timezone.utc),
+    )
+    discovery = build_discovery_plan(
+        [arm],
+        now_utc=dt.datetime(2026, 6, 21, 14, 30, tzinfo=dt.timezone.utc),
+    )
+    row = discovery["profitability_blocker_scorecard"]["arms"][0]
+
+    assert discovery["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
+    assert discovery["arms"][0]["reason"] == (
+        "cost_gate_blocked_outcomes_need_edge_amplification"
+    )
+    assert row["blocker_class"] == "cost_wall"
+    assert row["primary_blocker"] == (
+        "cost_gate_blocked_signal_edge_amplification_required"
+    )
+    assert row["next_trigger"] == "amplify_edge_or_reduce_friction_for_same_side_cell"
+    assert row["engineering_actionable"] is True
+    assert row["operator_actionable"] is False
+    assert row["blocked_signal_top_review_learning_diagnosis"] == (
+        "GROSS_EDGE_POSITIVE_COST_CUSHION_INSUFFICIENT"
+    )
+    assert row["blocked_signal_review_edge_amplification_required_side_cell_count"] == 1
+
+
 def test_alpha_discovery_routes_admission_only_ledger_to_price_observation_builder(
     tmp_path: Path,
 ):
@@ -3289,6 +3394,12 @@ def test_blocked_signal_outcome_review_scorecard_is_conservative():
     assert scorecard["order_authority"] == "NOT_GRANTED"
     side_cell = scorecard["top_side_cells"][0]
     assert side_cell["status"] == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE"
+    assert side_cell["learning_diagnosis"] == "FALSE_NEGATIVE_CANDIDATE_AFTER_COST"
+    assert side_cell["cost_gate_escape_recommendation"] == (
+        "operator_review_bounded_probe_authority_without_global_gate_lowering"
+    )
+    assert side_cell["false_negative_candidate"] is True
+    assert side_cell["edge_amplification_required"] is False
     assert side_cell["outcome_count"] == 3
     assert round(side_cell["avg_net_bps"], 6) == 5.166667
     assert round(side_cell["avg_gross_bps"], 6) == 9.166667
@@ -3305,9 +3416,26 @@ def test_blocked_signal_outcome_review_scorecard_is_conservative():
     assert side_cell["horizon_counts"] == {"60": 3}
     assert side_cell["dominant_horizon_minutes"] == 60
     assert scorecard["top_side_cell_key"] == "ma_crossover|ETHUSDT|Sell"
+    assert scorecard["top_side_cell_learning_diagnosis"] == (
+        "FALSE_NEGATIVE_CANDIDATE_AFTER_COST"
+    )
+    assert scorecard["top_side_cell_cost_gate_escape_recommendation"] == (
+        "operator_review_bounded_probe_authority_without_global_gate_lowering"
+    )
     assert scorecard["top_review_candidate_side_cell_key"] == (
         "ma_crossover|ETHUSDT|Sell"
     )
+    assert scorecard["top_review_candidate_learning_diagnosis"] == (
+        "FALSE_NEGATIVE_CANDIDATE_AFTER_COST"
+    )
+    assert scorecard["false_negative_candidate_count"] == 1
+    assert scorecard["edge_amplification_required_side_cell_count"] == 0
+    assert scorecard["diagnosis_counts"] == {
+        "FALSE_NEGATIVE_CANDIDATE_AFTER_COST": 1
+    }
+    assert scorecard["cost_gate_escape_recommendation_counts"] == {
+        "operator_review_bounded_probe_authority_without_global_gate_lowering": 1
+    }
     assert round(scorecard["top_side_cell_wrongful_block_score"], 6) == 3.444444
     assert round(scorecard["max_wrongful_block_score"], 6) == 3.444444
 
@@ -3323,6 +3451,64 @@ def test_blocked_signal_outcome_review_scorecard_is_conservative():
     )
     assert insufficient["status"] == "COLLECT_MORE_BLOCKED_SIGNAL_OUTCOMES"
     assert insufficient["review_candidate_side_cell_count"] == 0
+    assert insufficient["top_side_cells"][0]["learning_diagnosis"] == (
+        "SAMPLE_INSUFFICIENT"
+    )
+    assert insufficient["top_side_cells"][0]["cost_gate_escape_recommendation"] == (
+        "continue_recording_same_side_cell_blocked_signal_outcomes"
+    )
+
+
+def test_blocked_signal_outcome_review_separates_cost_wall_from_no_edge():
+    scorecard = build_blocked_signal_outcome_review(
+        [
+            {
+                "record_type": "blocked_signal_outcome",
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "strategy_name": "ma_crossover",
+                "symbol": "ETHUSDT",
+                "side": "Sell",
+                "gross_bps": 3.5,
+                "cost_bps": 4.0,
+                "realized_net_bps": -0.5,
+            },
+            {
+                "record_type": "blocked_signal_outcome",
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "strategy_name": "ma_crossover",
+                "symbol": "ETHUSDT",
+                "side": "Sell",
+                "gross_bps": 2.5,
+                "cost_bps": 4.0,
+                "realized_net_bps": -1.5,
+            },
+            {
+                "record_type": "blocked_signal_outcome",
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "strategy_name": "ma_crossover",
+                "symbol": "ETHUSDT",
+                "side": "Sell",
+                "gross_bps": 5.0,
+                "cost_bps": 4.0,
+                "realized_net_bps": 1.0,
+            },
+        ],
+        cfg=BlockedOutcomeReviewConfig(min_outcomes_per_side_cell=3),
+    )
+
+    side_cell = scorecard["top_side_cells"][0]
+    assert scorecard["status"] == "NO_DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE"
+    assert side_cell["status"] == "KEEP_COST_GATE_BLOCKED"
+    assert side_cell["learning_diagnosis"] == (
+        "GROSS_EDGE_POSITIVE_COST_CUSHION_INSUFFICIENT"
+    )
+    assert side_cell["cost_gate_escape_recommendation"] == (
+        "amplify_edge_or_reduce_friction_for_same_side_cell"
+    )
+    assert side_cell["edge_amplification_required"] is True
+    assert side_cell["false_negative_candidate"] is False
+    assert scorecard["edge_amplification_required_side_cell_count"] == 1
+    assert scorecard["false_negative_candidate_count"] == 0
 
 
 def test_runtime_adapter_outcome_rows_are_idempotent_and_feed_disable():

@@ -104,6 +104,67 @@ def _wrongful_block_score(
     return avg_margin * (net_positive_pct / 100.0) * sample_factor
 
 
+def _diagnose_cost_gate_escape(
+    *,
+    outcome_count: int,
+    avg_net_bps: float | None,
+    avg_gross_bps: float | None,
+    net_positive_pct: float | None,
+    review_candidate: bool,
+    cfg: BlockedOutcomeReviewConfig,
+) -> dict[str, Any]:
+    """Classify blocked outcomes into the next profit-learning action."""
+    if outcome_count < cfg.min_outcomes_per_side_cell:
+        return {
+            "learning_diagnosis": "SAMPLE_INSUFFICIENT",
+            "cost_gate_escape_recommendation": (
+                "continue_recording_same_side_cell_blocked_signal_outcomes"
+            ),
+            "edge_amplification_required": False,
+            "false_negative_candidate": False,
+        }
+
+    if review_candidate:
+        return {
+            "learning_diagnosis": "FALSE_NEGATIVE_CANDIDATE_AFTER_COST",
+            "cost_gate_escape_recommendation": (
+                "operator_review_bounded_probe_authority_without_global_gate_lowering"
+            ),
+            "edge_amplification_required": False,
+            "false_negative_candidate": True,
+        }
+
+    avg_net = avg_net_bps if avg_net_bps is not None else 0.0
+    avg_gross = avg_gross_bps if avg_gross_bps is not None else 0.0
+    net_positive = net_positive_pct if net_positive_pct is not None else 0.0
+    if avg_gross > 0.0 and avg_net < cfg.min_avg_net_bps:
+        return {
+            "learning_diagnosis": "GROSS_EDGE_POSITIVE_COST_CUSHION_INSUFFICIENT",
+            "cost_gate_escape_recommendation": (
+                "amplify_edge_or_reduce_friction_for_same_side_cell"
+            ),
+            "edge_amplification_required": True,
+            "false_negative_candidate": False,
+        }
+    if avg_net >= cfg.min_avg_net_bps and net_positive < cfg.min_net_positive_pct:
+        return {
+            "learning_diagnosis": "POSITIVE_EDGE_UNSTABLE_AFTER_COST",
+            "cost_gate_escape_recommendation": (
+                "add_regime_filter_or_matched_controls_before_probe_review"
+            ),
+            "edge_amplification_required": True,
+            "false_negative_candidate": False,
+        }
+    return {
+        "learning_diagnosis": "BLOCK_CONFIRMED_AFTER_COST",
+        "cost_gate_escape_recommendation": (
+            "keep_cost_gate_blocked_or_archive_until_new_evidence"
+        ),
+        "edge_amplification_required": False,
+        "false_negative_candidate": False,
+    }
+
+
 def _review_side_cell_rows(
     side_cell_key: str,
     rows: list[dict[str, Any]],
@@ -200,10 +261,20 @@ def _review_side_cell_rows(
         reason = "blocked_signal_markouts_do_not_clear_review_thresholds"
         review_candidate = False
 
+    diagnosis = _diagnose_cost_gate_escape(
+        outcome_count=outcome_count,
+        avg_net_bps=avg_net,
+        avg_gross_bps=avg_gross,
+        net_positive_pct=net_positive_pct,
+        review_candidate=review_candidate,
+        cfg=cfg,
+    )
+
     return {
         "side_cell_key": side_cell_key,
         "status": status,
         "reason": reason,
+        **diagnosis,
         "review_candidate": review_candidate,
         "outcome_count": outcome_count,
         "positive_outcome_count": positive_count,
@@ -317,6 +388,23 @@ def build_blocked_signal_outcome_review(
         if side_cells
         else 0.0
     )
+    diagnosis_counts: dict[str, int] = {}
+    recommendation_counts: dict[str, int] = {}
+    false_negative_candidate_count = 0
+    edge_amplification_required_side_cell_count = 0
+    for row in side_cells:
+        diagnosis = _str(row.get("learning_diagnosis"))
+        recommendation = _str(row.get("cost_gate_escape_recommendation"))
+        if diagnosis:
+            diagnosis_counts[diagnosis] = diagnosis_counts.get(diagnosis, 0) + 1
+        if recommendation:
+            recommendation_counts[recommendation] = (
+                recommendation_counts.get(recommendation, 0) + 1
+            )
+        if row.get("false_negative_candidate") is True:
+            false_negative_candidate_count += 1
+        if row.get("edge_amplification_required") is True:
+            edge_amplification_required_side_cell_count += 1
 
     if outcome_count == 0:
         status = "NO_BLOCKED_SIGNAL_OUTCOMES"
@@ -354,6 +442,14 @@ def build_blocked_signal_outcome_review(
         "max_wrongful_block_score": max_wrongful_block_score,
         "top_side_cell_key": top_side_cell.get("side_cell_key") if top_side_cell else None,
         "top_side_cell_status": top_side_cell.get("status") if top_side_cell else None,
+        "top_side_cell_learning_diagnosis": (
+            top_side_cell.get("learning_diagnosis") if top_side_cell else None
+        ),
+        "top_side_cell_cost_gate_escape_recommendation": (
+            top_side_cell.get("cost_gate_escape_recommendation")
+            if top_side_cell
+            else None
+        ),
         "top_side_cell_wrongful_block_score": (
             top_side_cell.get("wrongful_block_score") if top_side_cell else None
         ),
@@ -362,6 +458,14 @@ def build_blocked_signal_outcome_review(
         ),
         "top_review_candidate_side_cell_key": (
             top_candidate.get("side_cell_key") if top_candidate else None
+        ),
+        "top_review_candidate_learning_diagnosis": (
+            top_candidate.get("learning_diagnosis") if top_candidate else None
+        ),
+        "top_review_candidate_cost_gate_escape_recommendation": (
+            top_candidate.get("cost_gate_escape_recommendation")
+            if top_candidate
+            else None
         ),
         "top_review_candidate_wrongful_block_score": (
             top_candidate.get("wrongful_block_score") if top_candidate else None
@@ -374,6 +478,17 @@ def build_blocked_signal_outcome_review(
             "min_avg_net_bps": cfg.min_avg_net_bps,
             "min_net_positive_pct": cfg.min_net_positive_pct,
         },
+        "diagnosis_counts": {
+            key: diagnosis_counts[key] for key in sorted(diagnosis_counts)
+        },
+        "cost_gate_escape_recommendation_counts": {
+            key: recommendation_counts[key]
+            for key in sorted(recommendation_counts)
+        },
+        "false_negative_candidate_count": false_negative_candidate_count,
+        "edge_amplification_required_side_cell_count": (
+            edge_amplification_required_side_cell_count
+        ),
         "top_side_cells": side_cells[:16],
         "promotion_evidence": False,
         "order_authority": "NOT_GRANTED",
