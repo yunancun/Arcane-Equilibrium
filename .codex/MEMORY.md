@@ -97,6 +97,10 @@ Known paths:
 - LiveDemo is live-grade control flow against a demo endpoint.
 - Paper is not active promotion evidence unless an explicit future operator
   decision reopens it.
+- Cost Gate bounded Demo probe source readiness can be reviewed, but this is
+  not authority: as of 2026-06-23 the near-touch Adapter and reject-path
+  placement preview wiring grant no Cost Gate lowering, no probe authority, and
+  no order authority unless the operator separately authorizes it.
 - Do not fake AI calls, trading activity, lineage, fills, healthchecks, or test
   results.
 - Bybit API timeout / nonzero `retCode` fails closed; no hidden trading retry
