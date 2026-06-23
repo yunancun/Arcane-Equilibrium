@@ -76,8 +76,19 @@ def _list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
+def _bool_from_mapping(
+    mapping: dict[str, Any],
+    key: str,
+    default: bool,
+) -> bool:
+    value = mapping.get(key)
+    return value if isinstance(value, bool) else default
+
+
 def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
     detail = _dict(arm.get("detail"))
+    spine_summary = _dict(detail.get("cost_gate_artifact_spine_summary"))
+    spine_active_state = _dict(spine_summary.get("active_state"))
     ledger_status = str(detail.get("ledger_status") or "UNKNOWN").upper()
     loop_status = str(detail.get("learning_loop_status") or "UNKNOWN").upper()
     admission_count = _int(detail.get("admission_decision_count"))
@@ -99,16 +110,33 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
         or ""
     )
     false_negative_packet_status = str(
-        detail.get("false_negative_candidate_packet_status") or ""
+        spine_active_state.get("false_negative_candidate_packet_status")
+        or detail.get("false_negative_candidate_packet_status")
+        or ""
     ).upper()
-    false_negative_packet_present = (
+    raw_false_negative_packet_present = (
         detail.get("false_negative_candidate_packet_present") is True
     )
-    false_negative_packet_source_ok = (
+    false_negative_packet_present = _bool_from_mapping(
+        spine_active_state,
+        "false_negative_candidate_packet_present",
+        raw_false_negative_packet_present,
+    )
+    raw_false_negative_packet_source_ok = (
         detail.get("false_negative_candidate_packet_source_ok") is True
     )
+    false_negative_packet_source_ok = _bool_from_mapping(
+        spine_active_state,
+        "false_negative_candidate_packet_source_ok",
+        raw_false_negative_packet_source_ok,
+    )
     false_negative_packet_operator_ready = (
-        detail.get("false_negative_candidate_packet_operator_review_ready") is True
+        _bool_from_mapping(
+            spine_active_state,
+            "false_negative_candidate_packet_operator_review_ready",
+            detail.get("false_negative_candidate_packet_operator_review_ready")
+            is True,
+        )
     )
     false_negative_packet_engineering_actionable = (
         detail.get("false_negative_candidate_packet_engineering_actionable") is True
@@ -349,14 +377,24 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "engineering_actionable": True,
         }
 
-    false_negative_queue_ready = (
+    legacy_false_negative_queue_ready = (
         false_negative_packet_status
         == "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW"
         and false_negative_packet_source_ok
         and false_negative_packet_operator_ready
     )
+    false_negative_queue_ready = _bool_from_mapping(
+        spine_active_state,
+        "false_negative_queue_ready",
+        legacy_false_negative_queue_ready,
+    )
+    false_negative_packet_refresh_required = _bool_from_mapping(
+        spine_active_state,
+        "false_negative_candidate_packet_refresh_required",
+        false_negative_packet_present and not false_negative_packet_source_ok,
+    )
 
-    if false_negative_packet_present and not false_negative_packet_source_ok:
+    if false_negative_packet_refresh_required:
         return {
             "action": RUN_READ_ONLY_CAPTURE,
             "reason": "cost_gate_false_negative_candidate_packet_stale_or_unreadable",
@@ -821,7 +859,16 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
                 "engineering_actionable": True,
             }
 
-    if blocked_review_status == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT":
+    legacy_blocked_review_candidate_ready = (
+        blocked_review_status == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
+    )
+    blocked_review_candidate_ready = _bool_from_mapping(
+        spine_active_state,
+        "blocked_outcome_review_candidate_ready",
+        legacy_blocked_review_candidate_ready,
+    )
+
+    if blocked_review_candidate_ready:
         if (
             false_negative_operator_review_present
             and not false_negative_operator_review_source_ok

@@ -14,6 +14,7 @@ from alpha_discovery_throughput.edge_snapshot_adapter import build_edge_snapshot
 from alpha_discovery_throughput.execution_spine import evaluate_execution_realism
 from alpha_discovery_throughput.flash_dip_ladder import build_flash_dip_ladder_packets
 from alpha_discovery_throughput.artifact_spine import (
+    ACTIVE_STATE_SCHEMA_VERSION,
     COST_GATE_ARTIFACT_SPINE_SCHEMA_VERSION,
     build_cost_gate_artifact_spine,
 )
@@ -112,6 +113,7 @@ def test_cost_gate_artifact_spine_separates_evidence_from_governance(tmp_path: P
             "false_negative_candidate_packet_status": (
                 "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW"
             ),
+            "false_negative_candidate_packet_operator_review_ready": True,
             "false_negative_operator_review_present": True,
             "false_negative_operator_review_source_ok": False,
             "false_negative_operator_review_status": "PENDING_OPERATOR_REVIEW",
@@ -137,6 +139,13 @@ def test_cost_gate_artifact_spine_separates_evidence_from_governance(tmp_path: P
     assert summary["probe_authority_granted"] is False
     assert summary["order_authority_granted"] is False
     assert summary["promotion_evidence"] is False
+    active_state = summary["active_state"]
+    assert active_state["schema_version"] == ACTIVE_STATE_SCHEMA_VERSION
+    assert active_state["blocked_outcome_review_candidate_ready"] is True
+    assert active_state["false_negative_queue_ready"] is True
+    assert active_state["false_negative_candidate_packet_refresh_required"] is False
+    assert active_state["probe_authority_granted"] is False
+    assert active_state["order_authority_granted"] is False
 
 
 def test_cost_gate_artifact_spine_requires_complete_bounded_demo_probe_node(
@@ -293,6 +302,78 @@ def test_discovery_loop_refreshes_stale_false_negative_candidate_packet():
     scorecard_row = plan["profitability_blocker_scorecard"]["arms"][0]
     assert scorecard_row["primary_blocker"] == (
         "cost_gate_false_negative_candidate_packet_not_fresh"
+    )
+
+
+def test_discovery_loop_consumes_spine_active_state_for_false_negative_queue():
+    plan = build_discovery_plan([
+        {
+            "arm_id": "cost_gate_demo_learning_lane",
+            "gate_status": "OPERATOR_REVIEW",
+            "sample_count": 37,
+            "artifacts_ready": False,
+            "source_ok": True,
+            "detail": {
+                "learning_lane_source_activation_ready": True,
+                "false_negative_candidate_packet_next_actions": [
+                    "operator_review_ranked_false_negative_candidates_before_bounded_demo_probe_authority"
+                ],
+                "cost_gate_artifact_spine_summary": {
+                    "active_state": {
+                        "blocked_outcome_review_candidate_ready": True,
+                        "false_negative_queue_ready": True,
+                        "false_negative_candidate_packet_present": True,
+                        "false_negative_candidate_packet_source_ok": True,
+                        "false_negative_candidate_packet_operator_review_ready": True,
+                        "false_negative_candidate_packet_refresh_required": False,
+                    },
+                },
+            },
+        },
+    ], now_utc=dt.datetime(2026, 6, 23, tzinfo=dt.timezone.utc))
+
+    row = plan["arms"][0]
+    assert row["action"] == "READY_FOR_PROBE"
+    assert row["reason"] == "cost_gate_false_negative_candidate_packet_ready"
+
+
+def test_discovery_loop_prefers_spine_refresh_over_raw_ready_fields():
+    plan = build_discovery_plan([
+        {
+            "arm_id": "cost_gate_demo_learning_lane",
+            "gate_status": "OPERATOR_REVIEW",
+            "sample_count": 37,
+            "artifacts_ready": False,
+            "source_ok": True,
+            "detail": {
+                "learning_lane_source_activation_ready": True,
+                "blocked_signal_outcome_review_status": (
+                    "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
+                ),
+                "false_negative_candidate_packet_present": True,
+                "false_negative_candidate_packet_source_ok": True,
+                "false_negative_candidate_packet_status": (
+                    "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW"
+                ),
+                "false_negative_candidate_packet_operator_review_ready": True,
+                "cost_gate_artifact_spine_summary": {
+                    "active_state": {
+                        "blocked_outcome_review_candidate_ready": True,
+                        "false_negative_queue_ready": False,
+                        "false_negative_candidate_packet_present": True,
+                        "false_negative_candidate_packet_source_ok": False,
+                        "false_negative_candidate_packet_operator_review_ready": True,
+                        "false_negative_candidate_packet_refresh_required": True,
+                    },
+                },
+            },
+        },
+    ], now_utc=dt.datetime(2026, 6, 23, tzinfo=dt.timezone.utc))
+
+    row = plan["arms"][0]
+    assert row["action"] == "RUN_READ_ONLY_CAPTURE"
+    assert row["reason"] == (
+        "cost_gate_false_negative_candidate_packet_stale_or_unreadable"
     )
 
 
