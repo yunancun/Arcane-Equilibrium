@@ -1882,6 +1882,18 @@ def _write_profitability_path_scorecard_latest(
                 "order_authority_granted": False,
                 "promotion_evidence": False,
                 "sealed_horizon_probe_preflight_status": "OPERATOR_REVIEW_REQUIRED",
+                "bounded_probe_operator_authorization_status": (
+                    "SEALED_HORIZON_PREFLIGHT_NOT_READY"
+                ),
+                "bounded_probe_operator_authorization_decision": "defer",
+                "bounded_probe_operator_authorization_blocking_gate_count": 1,
+                "bounded_probe_operator_authorization_blocking_gates": [
+                    "sealed_horizon_preflight_ready"
+                ],
+                "bounded_probe_operator_authorization_ready_for_review": False,
+                "bounded_probe_operator_authorization_object_emitted": False,
+                "bounded_probe_operator_authorization_active_runtime_probe_authority": False,
+                "bounded_probe_operator_authorization_active_runtime_order_authority": False,
                 "bounded_probe_result_review_status": "NO_PROBE_OUTCOMES_RECORDED",
                 "bounded_probe_shadow_placement_status": (
                     "SHADOW_PLACEMENT_TOUCHABILITY_IMPROVED_SAMPLE_MISMATCH"
@@ -3012,6 +3024,12 @@ def test_cost_gate_profitability_path_scorecard_reaches_learning_surfaces(tmp_pa
     assert blocker["profitability_cost_gate_escape_order_authority_granted"] is False
     assert blocker["profitability_cost_gate_escape_probe_authority_granted"] is False
     assert blocker["profitability_cost_gate_escape_promotion_evidence"] is False
+    assert blocker[
+        "profitability_cost_gate_escape_operator_authorization_status"
+    ] == "SEALED_HORIZON_PREFLIGHT_NOT_READY"
+    assert blocker[
+        "profitability_cost_gate_escape_operator_authorization_object_emitted"
+    ] is False
 
     assert task["evidence"]["profitability_engineering_closure_status"] == (
         "COST_GATE_ESCAPE_PREFLIGHT_BLOCKED_BY_OPERATOR_REVIEW"
@@ -3023,6 +3041,9 @@ def test_cost_gate_profitability_path_scorecard_reaches_learning_surfaces(tmp_pa
         "operator_review_sealed_horizon_probe_preflight"
     )
     assert task["evidence"]["profitability_order_authority_granted"] is False
+    assert task["evidence"][
+        "profitability_cost_gate_escape_operator_authorization_status"
+    ] == "SEALED_HORIZON_PREFLIGHT_NOT_READY"
 
 
 def test_runtime_killboard_mirrors_profitability_closure(tmp_path):
@@ -3056,6 +3077,12 @@ def test_runtime_killboard_mirrors_profitability_closure(tmp_path):
     assert kb["profitability_global_cost_gate_lowering_recommended"] is False
     assert kb["profitability_order_authority_granted"] is False
     assert kb["profitability_promotion_evidence"] is False
+    assert kb[
+        "profitability_cost_gate_escape_operator_authorization_status"
+    ] == "SEALED_HORIZON_PREFLIGHT_NOT_READY"
+    assert kb[
+        "profitability_cost_gate_escape_operator_authorization_object_emitted"
+    ] is False
 
 
 def test_cost_gate_profit_packet_sealed_horizon_candidate_reaches_worklist(tmp_path):

@@ -3090,6 +3090,30 @@ def _profitability_path_summary_from_arms(arms: list[dict[str, Any]]) -> dict[st
         "profitability_promotion_evidence": detail.get(
             "profitability_promotion_evidence"
         ),
+        "profitability_cost_gate_escape_operator_authorization_status": detail.get(
+            "profitability_cost_gate_escape_operator_authorization_status"
+        ),
+        "profitability_cost_gate_escape_operator_authorization_decision": detail.get(
+            "profitability_cost_gate_escape_operator_authorization_decision"
+        ),
+        "profitability_cost_gate_escape_operator_authorization_blocking_gate_count": detail.get(
+            "profitability_cost_gate_escape_operator_authorization_blocking_gate_count"
+        ),
+        "profitability_cost_gate_escape_operator_authorization_blocking_gates": detail.get(
+            "profitability_cost_gate_escape_operator_authorization_blocking_gates"
+        ),
+        "profitability_cost_gate_escape_operator_authorization_ready_for_review": detail.get(
+            "profitability_cost_gate_escape_operator_authorization_ready_for_review"
+        ),
+        "profitability_cost_gate_escape_operator_authorization_object_emitted": detail.get(
+            "profitability_cost_gate_escape_operator_authorization_object_emitted"
+        ),
+        "profitability_cost_gate_escape_operator_authorization_active_runtime_probe_authority": detail.get(
+            "profitability_cost_gate_escape_operator_authorization_active_runtime_probe_authority"
+        ),
+        "profitability_cost_gate_escape_operator_authorization_active_runtime_order_authority": detail.get(
+            "profitability_cost_gate_escape_operator_authorization_active_runtime_order_authority"
+        ),
     }
 
 
