@@ -955,6 +955,12 @@ def test_replay_history_accumulates_deduped_samples_and_pbo_days(tmp_path):
     assert scorecard["status"] == "REPLAY_HISTORY_READY_FOR_AEG_RECHECK"
     assert summary["sample_count"] == 3
     assert summary["n_days"] == 2
+    assert summary["history_days_remaining"] == 0
+    assert summary["history_budget_status"] == "READY_FOR_AEG_RECHECK"
+    assert summary["interim_edge_status"] == "INTERIM_POSITIVE_NET_AND_HOLDOUT"
+    assert summary["recommended_next_action"] == (
+        "build_polymarket_execution_realism_before_promotion"
+    )
     assert summary["net_bps_mean"] == 4.33333333
     assert summary["pbo_history_cell_count"] == 2
     assert summary["pbo_history_day_count"] == 2
@@ -966,6 +972,64 @@ def test_replay_history_accumulates_deduped_samples_and_pbo_days(tmp_path):
     }
     assert set(evidence["pbo_candidates"]["cell_a"]) == {"2026-06-20", "2026-06-21"}
     assert evidence["source"]["execution_realism_status"] == "UNMEASURED"
+
+
+def test_replay_history_recommends_early_rotation_for_negative_interim_edge(tmp_path):
+    candidate_key = "polymarket_leadlag_ic|event_reg|BTCUSDT|15m"
+    reports = []
+    for offset in range(3):
+        day = dt.date(2026, 6, 20) + dt.timedelta(days=offset)
+        samples = [
+            {
+                "sample_id": f"s{offset}-a",
+                "sample_ts_utc": f"{day.isoformat()}T00:00:00+00:00",
+                "regime": "unsegmented",
+                "independence_bucket": f"BTCUSDT:15m:{offset}:a",
+                "gross_bps": 1.0,
+                "cost_bps": 4.0,
+                "net_bps": -3.0,
+                "is_oos": True,
+            },
+            {
+                "sample_id": f"s{offset}-b",
+                "sample_ts_utc": f"{day.isoformat()}T00:15:00+00:00",
+                "regime": "unsegmented",
+                "independence_bucket": f"BTCUSDT:15m:{offset}:b",
+                "gross_bps": 0.5,
+                "cost_bps": 4.0,
+                "net_bps": -3.5,
+                "is_oos": True,
+            },
+        ]
+        reports.append(_history_report(
+            created_at=f"{day.isoformat()}T01:00:00+00:00",
+            path=tmp_path / f"polymarket_leadlag_{day.strftime('%Y%m%d')}T010000Z.json",
+            candidate_key=candidate_key,
+            samples=samples,
+            pbo_day=day.isoformat(),
+        ))
+
+    scorecard = replay_history.build_history_scorecard(
+        reports=reports,
+        candidate_key=candidate_key,
+        min_days=30,
+        min_samples=3,
+    )
+
+    summary = scorecard["selected_summary"]
+    assert scorecard["status"] == "REPLAY_HISTORY_DAYS_INSUFFICIENT"
+    assert summary["sample_count"] == 6
+    assert summary["n_days"] == 3
+    assert summary["history_days_remaining"] == 27
+    assert summary["earliest_history_ready_date"] == "2026-07-19"
+    assert summary["net_bps_mean"] == -3.25
+    assert summary["holdout_net_bps_mean"] == -3.25
+    assert summary["interim_edge_status"] == "INTERIM_NEGATIVE_NET_AND_HOLDOUT"
+    assert summary["history_budget_status"] == "EARLY_ROTATE_RECOMMENDED"
+    assert summary["recommended_next_action"] == (
+        "rotate_polymarket_leadlag_candidate_or_change_feature_family_"
+        "before_spending_30d_history_budget"
+    )
 
 
 def test_replay_history_writer_outputs_aeg_compatible_evidence(tmp_path):

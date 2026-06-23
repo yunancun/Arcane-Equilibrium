@@ -49,6 +49,7 @@ except ImportError:  # pragma: no cover
 DEFAULT_MIN_HISTORY_DAYS = 30
 DEFAULT_MIN_HISTORY_SAMPLES = 30
 DEFAULT_HISTORY_REPORT_LIMIT = 0
+DEFAULT_MIN_INTERIM_EDGE_DAYS = 3
 PBO_SEED = 20260620
 
 
@@ -301,6 +302,88 @@ def _summary_status(sample_count: int, n_days: int, *, min_days: int, min_sample
     return "REPLAY_HISTORY_READY_FOR_AEG_RECHECK", "deduped replay history meets sample/date floor for AEG recheck"
 
 
+def _history_calendar_fields(days: list[str], *, min_days: int) -> dict[str, Any]:
+    if not days:
+        return {
+            "history_days_remaining": int(min_days),
+            "history_calendar_span_days": 0,
+            "history_date_gap_count": 0,
+            "earliest_history_ready_date": None,
+        }
+    first_day = dt.date.fromisoformat(days[0])
+    last_day = dt.date.fromisoformat(days[-1])
+    span = (last_day - first_day).days + 1
+    ready_day = first_day + dt.timedelta(days=max(0, int(min_days) - 1))
+    return {
+        "history_days_remaining": max(0, int(min_days) - len(days)),
+        "history_calendar_span_days": span,
+        "history_date_gap_count": max(0, span - len(days)),
+        "earliest_history_ready_date": ready_day.isoformat(),
+    }
+
+
+def _interim_edge_fields(
+    *,
+    status: str,
+    sample_count: int,
+    n_days: int,
+    min_samples: int,
+    net_bps_mean: Optional[float],
+    holdout_net_bps_mean: Optional[float],
+) -> dict[str, str]:
+    if sample_count < int(min_samples):
+        edge_status = "INSUFFICIENT_SAMPLES_FOR_INTERIM_EDGE"
+        budget_status = "CONTINUE_HISTORY_ACCUMULATION"
+        action = "continue_polymarket_replay_until_sample_floor"
+    elif (
+        n_days < DEFAULT_MIN_INTERIM_EDGE_DAYS
+        and status != "REPLAY_HISTORY_READY_FOR_AEG_RECHECK"
+    ):
+        edge_status = "INSUFFICIENT_DAYS_FOR_INTERIM_EDGE"
+        budget_status = "CONTINUE_HISTORY_ACCUMULATION"
+        action = "continue_polymarket_replay_until_interim_edge_floor"
+    elif net_bps_mean is not None and holdout_net_bps_mean is not None and (
+        net_bps_mean <= 0 and holdout_net_bps_mean <= 0
+    ):
+        edge_status = "INTERIM_NEGATIVE_NET_AND_HOLDOUT"
+        budget_status = "EARLY_ROTATE_RECOMMENDED"
+        action = (
+            "rotate_polymarket_leadlag_candidate_or_change_feature_family_"
+            "before_spending_30d_history_budget"
+        )
+    elif net_bps_mean is not None and net_bps_mean <= 0:
+        edge_status = "INTERIM_NEGATIVE_NET"
+        budget_status = "REVIEW_BEFORE_MORE_HISTORY_BUDGET"
+        action = "review_polymarket_net_edge_decay_before_more_history_budget"
+    elif holdout_net_bps_mean is not None and holdout_net_bps_mean <= 0:
+        edge_status = "INTERIM_HOLDOUT_NOT_POSITIVE"
+        budget_status = "REVIEW_BEFORE_MORE_HISTORY_BUDGET"
+        action = "review_polymarket_holdout_decay_before_more_history_budget"
+    elif net_bps_mean is not None and holdout_net_bps_mean is not None and (
+        net_bps_mean > 0 and holdout_net_bps_mean > 0
+    ):
+        edge_status = "INTERIM_POSITIVE_NET_AND_HOLDOUT"
+        budget_status = (
+            "READY_FOR_AEG_RECHECK"
+            if status == "REPLAY_HISTORY_READY_FOR_AEG_RECHECK"
+            else "CONTINUE_HISTORY_ACCUMULATION"
+        )
+        action = (
+            "build_polymarket_execution_realism_before_promotion"
+            if status == "REPLAY_HISTORY_READY_FOR_AEG_RECHECK"
+            else "continue_dated_polymarket_replay_history_until_min_days"
+        )
+    else:
+        edge_status = "INTERIM_EDGE_UNDETERMINED"
+        budget_status = "CONTINUE_HISTORY_ACCUMULATION"
+        action = "continue_dated_polymarket_replay_history_until_min_days"
+    return {
+        "interim_edge_status": edge_status,
+        "history_budget_status": budget_status,
+        "recommended_next_action": action,
+    }
+
+
 def _build_candidate_history(
     *,
     candidate_key: str,
@@ -357,6 +440,8 @@ def _build_candidate_history(
         min_samples=min_samples,
     )
     pbo_day_count = len({day for daily in pbo_candidates.values() for day in daily})
+    net_bps_mean = _round_or_none(_mean(clean_net))
+    holdout_net_bps_mean = _round_or_none(_mean(holdout_net))
     summary = {
         "schema_version": CANDIDATE_REPLAY_HISTORY_SUMMARY_SCHEMA_VERSION,
         "runner_version": RUNNER_VERSION,
@@ -377,9 +462,10 @@ def _build_candidate_history(
         "n_days": len(days),
         "min_history_days": int(min_days),
         "min_history_samples": int(min_samples),
+        **_history_calendar_fields(days, min_days=min_days),
         "gross_bps_mean": _round_or_none(_mean(clean_gross)),
         "cost_bps_mean": _round_or_none(_mean(clean_cost)),
-        "net_bps_mean": _round_or_none(_mean(clean_net)),
+        "net_bps_mean": net_bps_mean,
         "net_bps_t_stat_naive": _round_or_none(_t_stat(clean_net)),
         "positive_net_sample_count": sum(1 for value in clean_net if value > 0),
         "positive_net_sample_rate": (
@@ -387,11 +473,19 @@ def _build_candidate_history(
             if clean_net else None
         ),
         "holdout_sample_count": len(holdout_net),
-        "holdout_net_bps_mean": _round_or_none(_mean(holdout_net)),
+        "holdout_net_bps_mean": holdout_net_bps_mean,
         "holdout_net_bps_t_stat_naive": _round_or_none(_t_stat(holdout_net)),
         "pbo_history_cell_count": len(pbo_candidates),
         "pbo_history_day_count": pbo_day_count,
         "pbo_values_merged": pbo_values_merged,
+        **_interim_edge_fields(
+            status=status,
+            sample_count=len(samples),
+            n_days=len(days),
+            min_samples=min_samples,
+            net_bps_mean=net_bps_mean,
+            holdout_net_bps_mean=holdout_net_bps_mean,
+        ),
         "rejected_sample_reasons": dict(sorted(rejected.items())),
         "execution_realism_status": "UNMEASURED",
         "execution_realism_note": "history accumulator only; maker/taker fill and queue realism are not measured",

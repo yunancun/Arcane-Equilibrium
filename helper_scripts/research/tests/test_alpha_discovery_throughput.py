@@ -4295,9 +4295,100 @@ def test_polymarket_leadlag_arm_surfaces_replay_history(tmp_path):
     assert detail["candidate_replay_history_sample_count"] == 2
     assert detail["candidate_replay_history_n_days"] == 2
     assert detail["candidate_replay_history_min_days"] == 30
+    assert detail["candidate_replay_history_days_remaining"] == 28
+    assert detail["candidate_replay_history_earliest_ready_date"] == "2026-07-19"
     assert detail["candidate_replay_history_net_bps_mean"] == 5.0
+    assert detail["candidate_replay_history_interim_edge_status"] == (
+        "INSUFFICIENT_SAMPLES_FOR_INTERIM_EDGE"
+    )
+    assert detail["candidate_replay_history_budget_status"] == (
+        "CONTINUE_HISTORY_ACCUMULATION"
+    )
     assert detail["candidate_replay_history_pbo_day_count"] == 2
     assert detail["candidate_replay_history_execution_realism_status"] == "UNMEASURED"
+
+
+def test_polymarket_leadlag_negative_interim_history_rotates_candidate(tmp_path):
+    data = tmp_path / "openclaw"
+    candidate_key = "polymarket_leadlag_ic|event_reg|BTCUSDT|15m"
+    _write_polymarket_leadlag_latest(data, {
+        "verdict": {
+            "status": "IC_CANDIDATE_REVIEW_REQUIRED",
+            "reason": "candidate",
+            "candidate_count": 1,
+        },
+        "counts": {
+            "max_overlap_adjusted_ic_points": 30,
+        },
+        "ic_results": [{"n_points": 30, "overlap_adjusted_sample_floor": 30}],
+        "candidates": [{
+            "bucket": "event_reg",
+            "symbol": "BTCUSDT",
+            "horizon_minutes": 15,
+        }],
+    })
+    for offset in range(3):
+        day = dt.date(2026, 6, 20) + dt.timedelta(days=offset)
+        samples = []
+        for idx in range(10):
+            samples.append({
+                "sample_id": f"s{offset}-{idx}",
+                "sample_ts_utc": f"{day.isoformat()}T00:{idx:02d}:00+00:00",
+                "regime": "unsegmented",
+                "independence_bucket": f"BTCUSDT:15m:{offset}:{idx}",
+                "gross_bps": 1.0,
+                "cost_bps": 4.0,
+                "net_bps": -3.0,
+                "is_oos": True,
+            })
+        _write_polymarket_replay_report(
+            data,
+            stamp=f"{day.strftime('%Y%m%d')}T010000Z",
+            created_at=f"{day.isoformat()}T01:00:00+00:00",
+            candidate_key=candidate_key,
+            samples=samples,
+        )
+
+    arm = collect_polymarket_leadlag_arm(
+        data,
+        now_utc=dt.datetime(2026, 6, 20, 12, 30, tzinfo=dt.timezone.utc),
+    )
+    plan = build_discovery_plan(
+        [arm],
+        now_utc=dt.datetime(2026, 6, 20, 12, 30, tzinfo=dt.timezone.utc),
+    )
+
+    detail = arm["detail"]
+    assert detail["candidate_replay_history_status"] == (
+        "REPLAY_HISTORY_DAYS_INSUFFICIENT"
+    )
+    assert detail["candidate_replay_history_sample_count"] == 30
+    assert detail["candidate_replay_history_n_days"] == 3
+    assert detail["candidate_replay_history_net_bps_mean"] == -3.0
+    assert detail["candidate_replay_history_holdout_net_bps_mean"] == -3.0
+    assert detail["candidate_replay_history_interim_edge_status"] == (
+        "INTERIM_NEGATIVE_NET_AND_HOLDOUT"
+    )
+    assert detail["candidate_replay_history_budget_status"] == (
+        "EARLY_ROTATE_RECOMMENDED"
+    )
+
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert blocker["blocker_class"] == "rejected_no_edge"
+    assert blocker["primary_blocker"] == (
+        "polymarket_candidate_replay_history_interim_negative_edge"
+    )
+    assert blocker["engineering_actionable"] is False
+    assert blocker["next_trigger"] == (
+        "rotate_polymarket_leadlag_candidate_or_change_feature_family_"
+        "before_spending_30d_history_budget"
+    )
+    task = plan["learning_worklist"]["top_task"]
+    assert task["task_type"] == "reject_or_archive"
+    assert task["actionability"] == "parked"
+    assert task["evidence"]["candidate_replay_history_budget_status"] == (
+        "EARLY_ROTATE_RECOMMENDED"
+    )
 
 
 def test_polymarket_leadlag_arm_blocks_stale_report(tmp_path):
