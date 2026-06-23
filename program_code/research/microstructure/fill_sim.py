@@ -1754,6 +1754,7 @@ def _low_friction_signal_failure_summary(rows: list[dict], holdout_confirmed: li
             "name": row.get("name"),
             "condition": row.get("condition"),
             "feature": row.get("feature"),
+            "candidate_shape": row.get("candidate_shape"),
             "threshold_source": row.get("threshold_source"),
             "train_edge_before_fees_bps": train.get("edge_before_fees_bps"),
             "train_net_bps": train.get("net_bps"),
@@ -1770,11 +1771,54 @@ def _low_friction_signal_failure_summary(rows: list[dict], holdout_confirmed: li
             "holdout_confirmed_current_fee": row.get("holdout_confirmed_current_fee"),
         }
 
+    def _edge(cell: dict | None) -> float | None:
+        if not cell:
+            return None
+        try:
+            value = float(cell.get("edge_before_fees_bps"))
+        except (TypeError, ValueError):
+            return None
+        return value if np.isfinite(value) else None
+
+    def _sample_gated(cell: dict | None) -> bool:
+        if not cell:
+            return False
+        return (
+            int(cell.get("n_fill_only") or 0) >= MIN_FILLS_FOR_SIGNIF
+            and not bool(cell.get("signif_suppressed"))
+        )
+
     holdout_ranked = sorted(
         [r for r in rows if (r.get("holdout") or {}).get("edge_before_fees_bps") is not None],
         key=lambda r: (
             (r.get("holdout") or {}).get("edge_before_fees_bps")
             if (r.get("holdout") or {}).get("edge_before_fees_bps") is not None else -1e9,
+            (r.get("holdout") or {}).get("n_fill_only") or 0,
+        ),
+        reverse=True,
+    )
+    sample_starved_current_fee_holdout = [
+        r for r in holdout_ranked
+        if (_edge(r.get("holdout")) or -1e9) >= MAKER_FEE_ROUND_TRIP_BPS
+        and not _sample_gated(r.get("holdout"))
+    ]
+    sample_gated_holdout_gross = [
+        r for r in holdout_ranked
+        if _cell_sample_gated_positive_gross_edge(r.get("holdout"))
+    ]
+    train_confirmed_gross = [
+        r for r in rows
+        if _cell_sample_gated_positive_gross_edge(r.get("train"))
+        and _cell_sample_gated_positive_gross_edge(r.get("holdout"))
+    ]
+    train_confirmed_gross = sorted(
+        train_confirmed_gross,
+        key=lambda r: (
+            min(
+                _edge(r.get("train")) if _edge(r.get("train")) is not None else -1e9,
+                _edge(r.get("holdout")) if _edge(r.get("holdout")) is not None else -1e9,
+            ),
+            _edge(r.get("holdout")) if _edge(r.get("holdout")) is not None else -1e9,
             (r.get("holdout") or {}).get("n_fill_only") or 0,
         ),
         reverse=True,
@@ -1798,8 +1842,24 @@ def _low_friction_signal_failure_summary(rows: list[dict], holdout_confirmed: li
         "candidates_evaluated": len(rows),
         "train_current_fee_clearing_count": len(train_clearing),
         "holdout_confirmed_current_fee_count": len(holdout_confirmed),
+        "sample_gate_min_fills": MIN_FILLS_FOR_SIGNIF,
+        "sample_starved_current_fee_holdout_count": len(
+            sample_starved_current_fee_holdout
+        ),
+        "sample_gated_holdout_gross_count": len(sample_gated_holdout_gross),
+        "train_confirmed_gross_count": len(train_confirmed_gross),
         "best_train_candidate": _condense(rows[0] if rows else None),
         "best_holdout_gross_candidate": _condense(holdout_ranked[0] if holdout_ranked else None),
+        "best_sample_starved_current_fee_holdout_candidate": _condense(
+            sample_starved_current_fee_holdout[0]
+            if sample_starved_current_fee_holdout else None
+        ),
+        "best_sample_gated_holdout_gross_candidate": _condense(
+            sample_gated_holdout_gross[0] if sample_gated_holdout_gross else None
+        ),
+        "best_train_confirmed_gross_candidate": _condense(
+            train_confirmed_gross[0] if train_confirmed_gross else None
+        ),
         "top_holdout_gross_candidates": [_condense(row) for row in holdout_ranked[:10]],
         "note": (
             "Diagnostic only. Low-friction candidates use placement-time recent flow/L1 "

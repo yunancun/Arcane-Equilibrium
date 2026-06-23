@@ -1671,6 +1671,7 @@ def _mm_low_friction_gross_stability_scorecard(detail: dict[str, Any]) -> dict[s
     gross_decomp = _dict(detail.get("gross_edge_cost_decomposition"))
     sample_cost_wall = _dict(detail.get("sample_gated_cost_wall_summary"))
     low_friction = _dict(detail.get("low_friction_signal_scorecard"))
+    low_friction_failure = _dict(low_friction.get("failure_summary"))
     train_confirmed = _dict(low_friction.get("train_confirmed_gross_scorecard"))
     candidate = _dict(
         gross_decomp.get("best_low_friction_signal_holdout_gross_candidate")
@@ -1818,6 +1819,21 @@ def _mm_low_friction_gross_stability_scorecard(detail: dict[str, Any]) -> dict[s
         "best_train_confirmed_gross_candidate": train_confirmed.get(
             "best_train_confirmed_gross_candidate"
         ),
+        "sample_starved_current_fee_holdout_count": low_friction_failure.get(
+            "sample_starved_current_fee_holdout_count"
+        ),
+        "best_sample_starved_current_fee_holdout_candidate": low_friction_failure.get(
+            "best_sample_starved_current_fee_holdout_candidate"
+        ),
+        "sample_gated_holdout_gross_count": low_friction_failure.get(
+            "sample_gated_holdout_gross_count"
+        ),
+        "best_sample_gated_holdout_gross_candidate": low_friction_failure.get(
+            "best_sample_gated_holdout_gross_candidate"
+        ),
+        "train_confirmed_gross_count": low_friction_failure.get(
+            "train_confirmed_gross_count"
+        ),
     }
 
 
@@ -1909,6 +1925,7 @@ def _mm_signal_search_directive(
         "schema_version": "mm_signal_search_directive_v1",
         "status": status,
         "failure_mode": failure_mode,
+        "status_reason": low_friction_stability.get("reason") or escape_reason,
         "escape_status": escape_status,
         "escape_reason": escape_reason,
         "success_gate": "train_confirmed_sample_gated_current_fee_gross_edge_found",
@@ -1947,6 +1964,20 @@ def _mm_signal_search_directive(
         "stable_candidate_min_train_holdout_gross_bps": stable_candidate.get(
             "min_train_holdout_gross_bps"
         ),
+        "sample_starved_current_fee_holdout_count": low_friction_stability.get(
+            "sample_starved_current_fee_holdout_count"
+        ),
+        "best_sample_starved_current_fee_holdout_candidate": (
+            low_friction_stability.get(
+                "best_sample_starved_current_fee_holdout_candidate"
+            )
+        ),
+        "sample_gated_holdout_gross_count": low_friction_stability.get(
+            "sample_gated_holdout_gross_count"
+        ),
+        "best_sample_gated_holdout_gross_candidate": (
+            low_friction_stability.get("best_sample_gated_holdout_gross_candidate")
+        ),
         "unstable_holdout_candidate_name": low_friction_stability.get(
             "candidate_name"
         ),
@@ -1974,6 +2005,8 @@ def _mm_signal_search_directive_row_extra(
         "mm_signal_search_directive": directive,
         "mm_signal_search_status": directive.get("status"),
         "mm_signal_search_failure_mode": directive.get("failure_mode"),
+        "failure_mode": directive.get("failure_mode"),
+        "status_reason": directive.get("status_reason"),
         "mm_signal_search_success_gate": directive.get("success_gate"),
         "mm_signal_search_recommended_search_constraint": directive.get(
             "recommended_search_constraint"
@@ -1986,6 +2019,18 @@ def _mm_signal_search_directive_row_extra(
         ),
         "mm_signal_search_candidate_shape_name": directive.get(
             "stable_candidate_shape_name"
+        ),
+        "mm_signal_search_sample_starved_current_fee_holdout_count": directive.get(
+            "sample_starved_current_fee_holdout_count"
+        ),
+        "mm_signal_search_best_sample_starved_current_fee_holdout_candidate": (
+            directive.get("best_sample_starved_current_fee_holdout_candidate")
+        ),
+        "mm_signal_search_sample_gated_holdout_gross_count": directive.get(
+            "sample_gated_holdout_gross_count"
+        ),
+        "mm_signal_search_best_sample_gated_holdout_gross_candidate": (
+            directive.get("best_sample_gated_holdout_gross_candidate")
         ),
         "mm_signal_search_lower_fee_path_not_actionable_now": directive.get(
             "lower_fee_path_not_actionable_now"
