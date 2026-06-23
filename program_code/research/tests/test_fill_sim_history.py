@@ -17,6 +17,11 @@ def _report(
     break_even_name: str = "quoted_half_spread_p75_and_side_book_imb_p75",
     break_even_symbol: str | None = None,
     break_even_policy: str | None = None,
+    low_friction_near_miss_name: str | None = None,
+    low_friction_holdout_edge: float = 3.2,
+    low_friction_holdout_n: int = 30,
+    low_friction_train_edge: float = -0.5,
+    low_friction_train_n: int = 40,
     source_path: str | None = None,
 ) -> dict:
     edge_positive = []
@@ -104,6 +109,30 @@ def _report(
             "best_sample_gated_break_even_cell": fee_cell,
             "scenarios": [],
         },
+        "low_friction_signal_scorecard": {
+            "status": "LOW_FRICTION_SIGNAL_TRAIN_ONLY_CURRENT_FEE",
+            "current_fee_round_trip_bps": 4.0,
+            "failure_summary": {
+                "best_sample_gated_holdout_gross_candidate": (
+                    {
+                        "name": low_friction_near_miss_name,
+                        "condition": f"{low_friction_near_miss_name} condition",
+                        "feature": "low_friction_interaction",
+                        "candidate_shape": "spread_thin_queue_favorable_interaction_v1",
+                        "threshold_source": "train_only",
+                        "holdout_edge_before_fees_bps": low_friction_holdout_edge,
+                        "holdout_n_fill_only": low_friction_holdout_n,
+                        "holdout_net_bps": low_friction_holdout_edge - 4.0,
+                        "train_edge_before_fees_bps": low_friction_train_edge,
+                        "train_n_fill_only": low_friction_train_n,
+                        "train_net_bps": low_friction_train_edge - 4.0,
+                    }
+                    if low_friction_near_miss_name is not None
+                    else None
+                ),
+                "top_holdout_gross_candidates": [],
+            },
+        },
     }
     if source_path:
         rep["_source_path"] = source_path
@@ -170,6 +199,63 @@ def test_history_scorecard_requires_distinct_dates_for_repeated_lower_fee_key() 
     assert scorecard["status"] == "HISTORY_INSUFFICIENT_WINDOWS"
     stability = scorecard["lower_fee_break_even_stability"]
     assert stability["status"] == "LOWER_FEE_BREAK_EVEN_REPEATS_BUT_DATE_INSUFFICIENT"
+    assert stability["reason"] == "repeated_key_but_distinct_dates_below_min"
+    assert stability["repeated_key_count"] == 1
+
+
+def test_history_scorecard_tracks_repeated_low_friction_near_miss() -> None:
+    reports = [
+        _report(
+            "2026-06-18",
+            low_friction_near_miss_name=(
+                "quoted_half_spread_bps_train_p75_and_q_eff_train_p10_and_spread_bps_delta_10s_train_p90"
+            ),
+            low_friction_holdout_edge=3.2,
+            low_friction_train_edge=-0.6,
+        ),
+        _report(
+            "2026-06-19",
+            low_friction_near_miss_name=(
+                "quoted_half_spread_bps_train_p75_and_q_eff_train_p10_and_spread_bps_delta_10s_train_p90"
+            ),
+            low_friction_holdout_edge=3.4,
+            low_friction_train_edge=0.2,
+        ),
+        _report(
+            "2026-06-20",
+            low_friction_near_miss_name="rotating_queue_pressure_cell",
+            low_friction_holdout_edge=2.6,
+            low_friction_train_edge=-1.0,
+        ),
+    ]
+
+    scorecard = build_fill_sim_history_scorecard(reports)
+
+    stability = scorecard["low_friction_near_miss_stability"]
+    assert stability["status"] == "LOW_FRICTION_NEAR_MISS_REPEATS_ACROSS_WINDOWS"
+    assert stability["sample_gated_near_miss_windows"] == 3
+    assert stability["repeated_key_count"] == 1
+    best = stability["best_repeated_near_miss_key"]
+    assert best["windows"] == 2
+    assert best["best_cell"]["candidate_shape"] == (
+        "spread_thin_queue_favorable_interaction_v1"
+    )
+    assert best["best_cell"]["holdout_edge_before_fees_bps"] == 3.4
+    assert best["best_cell"]["train_holdout_gross_current_fee_consistent"] is False
+    assert scorecard["status"] == "HISTORY_NO_CURRENT_FEE_SAMPLE_GATED_EDGE"
+
+
+def test_history_scorecard_requires_distinct_dates_for_repeated_low_friction_near_miss() -> None:
+    reports = [
+        _report("2026-06-20", low_friction_near_miss_name="queue_cell", source_path="a.json"),
+        _report("2026-06-20", low_friction_near_miss_name="queue_cell", source_path="b.json"),
+        _report("2026-06-20", low_friction_near_miss_name="queue_cell", source_path="c.json"),
+    ]
+
+    scorecard = build_fill_sim_history_scorecard(reports)
+
+    stability = scorecard["low_friction_near_miss_stability"]
+    assert stability["status"] == "LOW_FRICTION_NEAR_MISS_REPEATS_BUT_DATE_INSUFFICIENT"
     assert stability["reason"] == "repeated_key_but_distinct_dates_below_min"
     assert stability["repeated_key_count"] == 1
 

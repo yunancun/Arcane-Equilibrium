@@ -1600,6 +1600,25 @@ def test_mm_fee_polymarket_and_gate_b_paths_are_separated() -> None:
                     },
                 },
             },
+            "low_friction_near_miss_stability": {
+                "status": "LOW_FRICTION_NEAR_MISS_REPEATS_ACROSS_WINDOWS",
+                "reason": "repeated_low_friction_near_miss_key_across_windows",
+                "sample_gated_near_miss_windows": 3,
+                "repeated_key_count": 1,
+                "best_repeated_near_miss_key": {
+                    "key": (
+                        "low_friction_signal_scorecard_holdout_near_miss|"
+                        "quoted_half_spread_bps_train_p75_and_q_eff_train_p10_and_spread_bps_delta_10s_train_p90"
+                    ),
+                    "windows": 2,
+                    "best_cell": {
+                        "name": "quoted_half_spread_bps_train_p75_and_q_eff_train_p10_and_spread_bps_delta_10s_train_p90",
+                        "candidate_shape": "spread_thin_queue_favorable_interaction_v1",
+                        "holdout_edge_before_fees_bps": 3.4,
+                        "train_edge_before_fees_bps": -0.2,
+                    },
+                },
+            },
         },
         polymarket_leadlag={
             "schema_version": "polymarket.leadlag_report.v0.15",
@@ -1649,6 +1668,10 @@ def test_mm_fee_polymarket_and_gate_b_paths_are_separated() -> None:
     )
     assert mm_evidence["near_miss_lead"]["holdout_n_fill_only"] == 30
     assert mm_evidence["sample_gated_holdout_gross_count"] == 295
+    assert mm_evidence["history_low_friction_near_miss_stability_status"] == (
+        "LOW_FRICTION_NEAR_MISS_REPEATS_ACROSS_WINDOWS"
+    )
+    assert mm_evidence["history_low_friction_near_miss_repeated_key_count"] == 1
     assert by_class["fee_or_scale"]["status"] == "FEE_OR_SCALE_PATH_NOT_SHORT_TERM_ALPHA"
     assert by_class["external_event_leadlag_alpha"]["status"] == (
         "POLYMARKET_ALPHA_GROSS_BELOW_COST_OR_EXECUTION_UNMEASURED"
