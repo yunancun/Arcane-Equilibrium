@@ -39,6 +39,8 @@ use super::super::on_tick_helpers::{
 use super::super::pipeline_helpers::release_decision_lease_for_governance;
 use super::super::*;
 
+const BOUNDED_PROBE_ATTEMPT_RECORD_TYPE: &str = "bounded_probe_attempt";
+
 fn exchange_qty_rounded_to_zero_reason(approved_qty: f64, final_qty: f64) -> String {
     format!(
         "qty_zero: exchange_precision_rounding_to_zero approved_qty={approved_qty:.8} final_qty={final_qty:.8}"
@@ -86,6 +88,32 @@ fn execution_reference(
     } else {
         (None, None)
     }
+}
+
+fn bounded_probe_near_touch_decision_for_reject(
+    side_cell_key: String,
+    is_buy: bool,
+    now_ms: u64,
+    best_bid: Option<f64>,
+    best_ask: Option<f64>,
+    tick_size: Option<f64>,
+) -> crate::bounded_probe_near_touch::BoundedProbePlacementDecision {
+    crate::bounded_probe_near_touch::post_only_near_touch_from_optional_bbo_or_skip(
+        &crate::bounded_probe_near_touch::BoundedProbeOptionalBboPlacementRequest {
+            side_cell_key,
+            is_buy,
+            now_ms,
+            best_bid,
+            best_ask,
+            tick_size,
+            observed_at_ms: Some(now_ms),
+            config: crate::bounded_probe_near_touch::BoundedProbeNearTouchConfig {
+                max_fresh_bbo_age_ms: crate::bounded_probe_near_touch::DEFAULT_MAX_FRESH_BBO_AGE_MS,
+                max_initial_passive_gap_bps:
+                    crate::bounded_probe_near_touch::DEFAULT_MAX_INITIAL_PASSIVE_GAP_BPS,
+            },
+        },
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1000,20 +1028,43 @@ impl TickPipeline {
                                 {
                                     let writer_enabled =
                                         self.demo_learning_lane_writer.is_enabled();
+                                    let side_cell_key = reject_event.side_cell_key();
+                                    let placement_decision =
+                                        bounded_probe_near_touch_decision_for_reject(
+                                            side_cell_key.clone(),
+                                            intent.is_long,
+                                            event.ts_ms,
+                                            best_bid,
+                                            best_ask,
+                                            tick_size,
+                                        );
+                                    let (placement_record_type, placement_reason) =
+                                        match &placement_decision {
+                                            crate::bounded_probe_near_touch::BoundedProbePlacementDecision::Submit(_) => {
+                                                (BOUNDED_PROBE_ATTEMPT_RECORD_TYPE, None)
+                                            }
+                                            crate::bounded_probe_near_touch::BoundedProbePlacementDecision::Skip(block) => {
+                                                (block.record_type, Some(block.reason.as_str()))
+                                            }
+                                        };
                                     tracing::debug!(
                                         target: "demo_learning_lane",
-                                        side_cell_key = %reject_event.side_cell_key(),
+                                        side_cell_key = %side_cell_key,
                                         context_id = %context_id,
                                         signal_id = %signal_id,
                                         writer_enabled,
-                                        "demo-learning lane eligible cost-gate reject recognized; admission ledger writer handle observed / 已識別 demo-learning lane eligible cost-gate reject，已觀測 admission ledger writer handle"
+                                        placement_record_type = %placement_record_type,
+                                        placement_reason = ?placement_reason,
+                                        "demo-learning lane eligible cost-gate reject recognized with bounded probe placement preview; no order submitted / 已識別 demo-learning lane eligible cost-gate reject 並計算 bounded probe placement preview；未送單"
                                     );
                                     let risk_state = self.governance.risk.snapshot_level().as_str();
-                                    self.demo_learning_lane_writer.record_reject_event(
-                                        reject_event,
-                                        risk_state,
-                                        event.ts_ms,
-                                    );
+                                    self.demo_learning_lane_writer
+                                        .record_reject_event_with_placement(
+                                            reject_event,
+                                            risk_state,
+                                            event.ts_ms,
+                                            Some(placement_decision),
+                                        );
                                 }
 
                                 // W-AUDIT-4b-M3 (2026-05-09)：exchange gate reject

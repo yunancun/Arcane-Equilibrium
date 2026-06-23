@@ -4,7 +4,10 @@
 //! 超過 2000 硬上限，比照 event_consumer/dispatch_tests.rs 的 `#[path]` split
 //! 慣例拆出）。測試邏輯零變更：覆蓋 try_clone_panel_snapshot 的 4 條
 //! AlphaSurface fail-soft / 禁合成 neutral / read-guard 釋放 invariant。
-use super::try_clone_panel_snapshot;
+use super::{bounded_probe_near_touch_decision_for_reject, try_clone_panel_snapshot};
+use crate::bounded_probe_near_touch::{
+    BoundedProbePlacementDecision, BoundedProbePlacementSkipReason,
+};
 use openclaw_core::alpha_surface::{AlphaSurface, FundingCurveSnapshot, OIDeltaPanel};
 use std::sync::Arc;
 use tokio::sync::RwLock as TokioRwLock;
@@ -222,4 +225,38 @@ async fn b_rem_1_helper_releases_read_guard_before_return() {
          否則 dispatch hot path 會跨 strategy.on_tick 持鎖"
     );
     drop(write_attempt);
+}
+
+#[test]
+fn bounded_probe_reject_wiring_preview_submits_or_skips_without_order() {
+    let submit = bounded_probe_near_touch_decision_for_reject(
+        "ma_crossover|BTCUSDT|Sell".to_string(),
+        false,
+        10_500,
+        Some(100.0),
+        Some(100.2),
+        Some(0.1),
+    );
+    let BoundedProbePlacementDecision::Submit(attempt) = submit else {
+        panic!("expected submit preview");
+    };
+    assert_eq!(attempt.record_type, "bounded_probe_attempt");
+    assert_eq!(attempt.side_cell_key, "ma_crossover|BTCUSDT|Sell");
+
+    let skip = bounded_probe_near_touch_decision_for_reject(
+        "ma_crossover|BTCUSDT|Sell".to_string(),
+        false,
+        10_500,
+        Some(100.0),
+        None,
+        Some(0.1),
+    );
+    let BoundedProbePlacementDecision::Skip(block) = skip else {
+        panic!("expected skip preview");
+    };
+    assert_eq!(block.record_type, "bounded_probe_touchability_block");
+    assert_eq!(
+        block.reason,
+        BoundedProbePlacementSkipReason::MissingFreshBbo
+    );
 }

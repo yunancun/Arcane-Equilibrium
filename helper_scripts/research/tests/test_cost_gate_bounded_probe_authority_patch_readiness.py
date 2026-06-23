@@ -157,8 +157,8 @@ def _write_authority_path_wiring(repo: Path) -> None:
         """
 fn execution_reference(best_bid: Option<f64>, best_ask: Option<f64>) {}
 fn dispatch(intent: OrderIntent) {
-    let req = BoundedProbePlacementRequest {};
-    let _ = post_only_near_touch_or_skip(&req);
+    let req = BoundedProbeOptionalBboPlacementRequest {};
+    let _ = post_only_near_touch_from_optional_bbo_or_skip(&req);
     let _ = "bounded_probe_attempt";
     let _ = OrderDispatchRequest {
         limit_price: intent.limit_price,

@@ -193,8 +193,8 @@ PATCH_REQUIREMENT_CHECKS: tuple[SourceCheck, ...] = (
             "future bounded probe order is submitted."
         ),
         required_patterns=(
-            "post_only_near_touch_or_skip",
-            "BoundedProbePlacementRequest",
+            "post_only_near_touch_from_optional_bbo_or_skip",
+            "BoundedProbeOptionalBboPlacementRequest",
             "bounded_probe_attempt",
         ),
         paths=("rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs",),
