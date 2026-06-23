@@ -902,6 +902,22 @@ def _side_effect_boundary(runtime_mutation_required: bool) -> str:
     return "recommendation_only_no_order_authority_no_runtime_mutation"
 
 
+def _task_next_trigger(row: dict[str, Any], task_type: str) -> str | None:
+    if task_type == "cost_gate_learning_activation":
+        for key in (
+            "demo_learning_stack_dry_run_review_operator_next_action",
+            "profitability_next_move_recommended_action",
+            "demo_learning_stack_activation_packet_operator_next_action",
+            "demo_learning_stack_healthcheck_next_action",
+            "next_trigger",
+        ):
+            value = _str(row.get(key))
+            if value:
+                return value
+        return None
+    return row.get("next_trigger")
+
+
 def _compact_evidence(row: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for key in _EVIDENCE_KEYS:
@@ -947,7 +963,7 @@ def build_learning_worklist(
             "completion_evidence_required": _completion_evidence_required(task_type),
             "blocker_class": row.get("blocker_class"),
             "primary_blocker": row.get("primary_blocker"),
-            "next_trigger": row.get("next_trigger"),
+            "next_trigger": _task_next_trigger(row, task_type),
             "priority_score": _priority_score(row, task_type),
             "actionability": _actionability(row, task_type),
             "requires_operator_authorization": requires_operator,

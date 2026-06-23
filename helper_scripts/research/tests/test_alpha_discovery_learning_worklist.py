@@ -516,6 +516,9 @@ def test_learning_worklist_carries_demo_learning_stack_dry_run_review_evidence()
     assert task["learning_objective"] == (
         "operator_review_learning_stack_dry_run_preview_before_cron_apply"
     )
+    assert task["next_trigger"] == (
+        "operator_review_dry_run_preview_then_apply_learning_stack_if_accepted"
+    )
     assert task["requires_operator_authorization"] is True
     assert task["runtime_mutation_required"] is True
     assert task["actionability"] == "operator_required"
@@ -589,6 +592,9 @@ def test_learning_worklist_promotes_profitability_runtime_mutation_next_move():
     assert top["task_type"] == "cost_gate_learning_activation"
     assert top["learning_objective"] == (
         "operator_review_learning_stack_dry_run_preview_before_cron_apply"
+    )
+    assert top["next_trigger"] == (
+        "operator_review_dry_run_preview_then_apply_learning_stack_if_accepted"
     )
     assert top["requires_operator_authorization"] is True
     assert top["runtime_mutation_required"] is True

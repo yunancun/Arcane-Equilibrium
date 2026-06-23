@@ -3301,6 +3301,9 @@ def test_runtime_killboard_carries_profitability_runtime_mutation_required(tmp_p
         "recommendation_only_operator_runtime_mutation_required_"
         "no_order_or_probe_authority"
     )
+    assert kb["top_learning_task_next_trigger"] == (
+        "operator_review_dry_run_preview_then_apply_learning_stack_if_accepted"
+    )
     assert task["task_type"] == "cost_gate_learning_activation"
     assert task["requires_operator_authorization"] is True
     assert task["runtime_mutation_required"] is True
