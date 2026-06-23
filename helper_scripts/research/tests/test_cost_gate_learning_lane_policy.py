@@ -2554,13 +2554,52 @@ def _btc_sell_reject_event() -> dict:
     }
 
 
-def _runtime_plan(*, order_authority: str = "NOT_GRANTED") -> dict:
+def _add_runtime_operator_authorization(
+    plan: dict,
+    *,
+    expires_at: str = "2026-06-21T12:00:00+00:00",
+    side_cell_key: str = "ma_crossover|ETHUSDT|Sell",
+    max_authorized_probe_orders: int = 2,
+) -> dict:
+    plan["operator_authorization"] = {
+        "schema_version": "bounded_demo_probe_operator_authorization_v1",
+        "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+        "authorization_id": "auth-demo-runtime-001",
+        "operator_id": "operator-test",
+        "side_cell_key": side_cell_key,
+        "expires_at_utc": expires_at,
+        "authority_path_readiness_status": (
+            "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW"
+        ),
+        "main_cost_gate_adjustment": "NONE",
+        "order_authority": ORDER_AUTHORITY_GRANTED,
+        "max_authorized_probe_orders": max_authorized_probe_orders,
+        "probe_authority_granted": True,
+        "order_authority_granted": True,
+        "promotion_evidence": False,
+    }
+    return plan
+
+
+def _runtime_plan(
+    *,
+    order_authority: str = "NOT_GRANTED",
+    include_operator_authorization: bool | None = None,
+    authorization_expires_at: str = "2026-06-21T12:00:00+00:00",
+) -> dict:
     plan = build_plan_from_payload(
         _scorecard_payload(),
         now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
         cfg=LearningLanePolicyConfig(max_probe_side_cells=2, max_total_probe_orders=4),
     )
     plan["order_authority"] = order_authority
+    should_include = (
+        order_authority == ORDER_AUTHORITY_GRANTED
+        if include_operator_authorization is None
+        else include_operator_authorization
+    )
+    if should_include:
+        _add_runtime_operator_authorization(plan, expires_at=authorization_expires_at)
     return plan
 
 
@@ -2619,6 +2658,33 @@ def test_runtime_adapter_carries_sealed_candidate_summary_into_ledger():
 
 
 def test_runtime_adapter_admits_only_when_plan_and_adapter_explicitly_authorize():
+    missing_authorization = evaluate_probe_admission(
+        _runtime_plan(
+            order_authority=ORDER_AUTHORITY_GRANTED,
+            include_operator_authorization=False,
+        ),
+        _selected_reject_event(),
+        now_utc=dt.datetime(2026, 6, 21, 11, 10, tzinfo=dt.timezone.utc),
+        adapter_enabled=True,
+    )
+    assert missing_authorization["decision"] == "OPERATOR_AUTHORIZATION_INVALID"
+    assert (
+        missing_authorization["reason"]
+        == "operator_authorization_missing_for_order_authority"
+    )
+
+    expired_authorization = evaluate_probe_admission(
+        _runtime_plan(
+            order_authority=ORDER_AUTHORITY_GRANTED,
+            authorization_expires_at="2026-06-21T10:59:00+00:00",
+        ),
+        _selected_reject_event(),
+        now_utc=dt.datetime(2026, 6, 21, 11, 10, tzinfo=dt.timezone.utc),
+        adapter_enabled=True,
+    )
+    assert expired_authorization["decision"] == "OPERATOR_AUTHORIZATION_INVALID"
+    assert expired_authorization["reason"] == "operator_authorization_expired"
+
     decision = evaluate_probe_admission(
         _runtime_plan(order_authority=ORDER_AUTHORITY_GRANTED),
         _selected_reject_event(),

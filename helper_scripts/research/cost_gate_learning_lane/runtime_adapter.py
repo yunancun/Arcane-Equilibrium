@@ -33,6 +33,12 @@ from cost_gate_learning_lane.outcome_writer import (
 )
 from cost_gate_learning_lane.policy import DEMO_LEARNING_LANE_SCHEMA_VERSION
 
+BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SCHEMA_VERSION = (
+    "bounded_demo_probe_operator_authorization_v1"
+)
+BOUNDED_PROBE_AUTHORIZED_STATUS = "BOUNDED_DEMO_PROBE_AUTHORIZED"
+AUTHORITY_PATH_PATCH_READY_STATUS = "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW"
+
 
 @dataclass(frozen=True)
 class RuntimeAdmissionConfig:
@@ -239,6 +245,51 @@ def _valid_candidate_guardrails(candidate: dict[str, Any]) -> tuple[bool, str | 
     if guardrails.get("notional_or_qty_not_granted_by_artifact") is not True:
         return False, "candidate_qty_authority_guardrail_missing"
     return True, None
+
+
+def _valid_operator_authorization(
+    plan: dict[str, Any],
+    candidate: dict[str, Any],
+    side_cell_key_value: str,
+    *,
+    now_utc: dt.datetime,
+) -> tuple[bool, str]:
+    auth = _dict(plan.get("operator_authorization"))
+    if not auth:
+        return False, "operator_authorization_missing_for_order_authority"
+    if auth.get("schema_version") != BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SCHEMA_VERSION:
+        return False, "operator_authorization_schema_mismatch"
+    if auth.get("status") != BOUNDED_PROBE_AUTHORIZED_STATUS:
+        return False, "operator_authorization_status_not_authorized"
+    if not _str(auth.get("authorization_id")):
+        return False, "operator_authorization_id_missing"
+    if not _str(auth.get("operator_id")):
+        return False, "operator_authorization_operator_id_missing"
+    if _str(auth.get("side_cell_key")) != side_cell_key_value:
+        return False, "operator_authorization_side_cell_mismatch"
+    if auth.get("authority_path_readiness_status") != AUTHORITY_PATH_PATCH_READY_STATUS:
+        return False, "operator_authorization_authority_path_not_ready"
+    if auth.get("main_cost_gate_adjustment") != "NONE":
+        return False, "operator_authorization_cost_gate_adjustment_not_none"
+    if auth.get("order_authority") != ORDER_AUTHORITY_GRANTED:
+        return False, "operator_authorization_order_authority_mismatch"
+    max_authorized_probe_orders = _int(auth.get("max_authorized_probe_orders"))
+    if max_authorized_probe_orders <= 0:
+        return False, "operator_authorization_probe_budget_missing"
+    if _candidate_max_orders(candidate) > max_authorized_probe_orders:
+        return False, "operator_authorization_probe_budget_below_candidate_budget"
+    if auth.get("probe_authority_granted") is not True:
+        return False, "operator_authorization_probe_authority_not_granted"
+    if auth.get("order_authority_granted") is not True:
+        return False, "operator_authorization_order_authority_not_granted"
+    if auth.get("promotion_evidence") is not False:
+        return False, "operator_authorization_promotion_boundary_invalid"
+    expires_at = _parse_dt(auth.get("expires_at_utc"))
+    if expires_at is None:
+        return False, "operator_authorization_expiry_missing_or_malformed"
+    if expires_at <= now_utc:
+        return False, "operator_authorization_expired"
+    return True, "operator_authorization_valid"
 
 
 def _candidate_summary(candidate: dict[str, Any] | None) -> dict[str, Any]:
@@ -549,6 +600,23 @@ def evaluate_probe_admission(
         return _decision(
             "ORDER_AUTHORITY_NOT_GRANTED",
             reason="plan_matches_candidate_but_artifact_has_no_order_authority",
+            now_utc=now,
+            event=normalized_event,
+            side_cell_key_value=key,
+            runtime_state=runtime_state,
+            plan=plan,
+            candidate=candidate,
+        )
+    valid_authorization, authorization_reason = _valid_operator_authorization(
+        plan,
+        candidate,
+        key,
+        now_utc=now,
+    )
+    if not valid_authorization:
+        return _decision(
+            "OPERATOR_AUTHORIZATION_INVALID",
+            reason=authorization_reason,
             now_utc=now,
             event=normalized_event,
             side_cell_key_value=key,

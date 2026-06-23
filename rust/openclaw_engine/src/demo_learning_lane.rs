@@ -19,6 +19,11 @@ pub const ADAPTER_SCHEMA_VERSION: &str = "cost_gate_demo_learning_lane_adapter_v
 pub const ORDER_AUTHORITY_GRANTED: &str = "DEMO_LEARNING_PROBE_GRANTED";
 pub const ELIGIBLE_REJECT_REASON_CODE: &str = "cost_gate_js_demo_negative_edge";
 pub const ADMIT_DECISION: &str = "ADMIT_DEMO_LEARNING_PROBE";
+pub const BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SCHEMA_VERSION: &str =
+    "bounded_demo_probe_operator_authorization_v1";
+pub const BOUNDED_PROBE_AUTHORIZED_STATUS: &str = "BOUNDED_DEMO_PROBE_AUTHORIZED";
+pub const AUTHORITY_PATH_PATCH_READY_STATUS: &str =
+    "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AdmissionConfig {
@@ -75,6 +80,8 @@ pub struct DemoLearningLanePlan {
     #[serde(default)]
     pub order_authority: String,
     #[serde(default)]
+    pub operator_authorization: Option<BoundedProbeOperatorAuthorization>,
+    #[serde(default)]
     pub selected_probe_candidate_count: usize,
     #[serde(default)]
     pub probe_candidates: Vec<ProbeCandidate>,
@@ -90,6 +97,36 @@ impl DemoLearningLanePlan {
             .iter()
             .find(|candidate| candidate.side_cell_key == side_cell_key)
     }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct BoundedProbeOperatorAuthorization {
+    #[serde(default)]
+    pub schema_version: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub authorization_id: Option<String>,
+    #[serde(default)]
+    pub operator_id: Option<String>,
+    #[serde(default)]
+    pub side_cell_key: String,
+    #[serde(default)]
+    pub expires_at_utc: Option<String>,
+    #[serde(default)]
+    pub authority_path_readiness_status: String,
+    #[serde(default)]
+    pub main_cost_gate_adjustment: String,
+    #[serde(default)]
+    pub order_authority: String,
+    #[serde(default)]
+    pub max_authorized_probe_orders: Option<u64>,
+    #[serde(default)]
+    pub probe_authority_granted: Option<bool>,
+    #[serde(default)]
+    pub order_authority_granted: Option<bool>,
+    #[serde(default)]
+    pub promotion_evidence: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -364,6 +401,7 @@ pub enum AdmissionDecisionCode {
     CooldownActive,
     RiskStateNotNormal,
     OrderAuthorityNotGranted,
+    OperatorAuthorizationInvalid,
     AdapterDisabled,
 }
 
@@ -388,6 +426,7 @@ impl AdmissionDecisionCode {
             Self::CooldownActive => "COOLDOWN_ACTIVE",
             Self::RiskStateNotNormal => "RISK_STATE_NOT_NORMAL",
             Self::OrderAuthorityNotGranted => "ORDER_AUTHORITY_NOT_GRANTED",
+            Self::OperatorAuthorizationInvalid => "OPERATOR_AUTHORIZATION_INVALID",
             Self::AdapterDisabled => "ADAPTER_DISABLED",
         }
     }
@@ -700,6 +739,17 @@ pub fn evaluate_probe_admission(
             plan,
         );
     }
+    if let Err(reason) =
+        validate_operator_authorization(plan, candidate, &event.side_cell_key, now_ms)
+    {
+        return decision(
+            AdmissionDecisionCode::OperatorAuthorizationInvalid,
+            reason,
+            &event.side_cell_key,
+            Some(runtime_state),
+            plan,
+        );
+    }
     if !adapter_enabled {
         return decision(
             AdmissionDecisionCode::AdapterDisabled,
@@ -716,6 +766,68 @@ pub fn evaluate_probe_admission(
         Some(runtime_state),
         plan,
     )
+}
+
+fn validate_operator_authorization(
+    plan: &DemoLearningLanePlan,
+    candidate: &ProbeCandidate,
+    side_cell_key: &str,
+    now_ms: u64,
+) -> Result<(), &'static str> {
+    let Some(auth) = plan.operator_authorization.as_ref() else {
+        return Err("operator_authorization_missing_for_order_authority");
+    };
+    if auth.schema_version != BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SCHEMA_VERSION {
+        return Err("operator_authorization_schema_mismatch");
+    }
+    if auth.status != BOUNDED_PROBE_AUTHORIZED_STATUS {
+        return Err("operator_authorization_status_not_authorized");
+    }
+    if auth.authorization_id.as_deref().unwrap_or("").trim().is_empty() {
+        return Err("operator_authorization_id_missing");
+    }
+    if auth.operator_id.as_deref().unwrap_or("").trim().is_empty() {
+        return Err("operator_authorization_operator_id_missing");
+    }
+    if auth.side_cell_key.trim() != side_cell_key {
+        return Err("operator_authorization_side_cell_mismatch");
+    }
+    if auth.authority_path_readiness_status != AUTHORITY_PATH_PATCH_READY_STATUS {
+        return Err("operator_authorization_authority_path_not_ready");
+    }
+    if auth.main_cost_gate_adjustment != "NONE" {
+        return Err("operator_authorization_cost_gate_adjustment_not_none");
+    }
+    if auth.order_authority != ORDER_AUTHORITY_GRANTED {
+        return Err("operator_authorization_order_authority_mismatch");
+    }
+    let max_authorized_probe_orders = auth.max_authorized_probe_orders.unwrap_or(0);
+    if max_authorized_probe_orders == 0 {
+        return Err("operator_authorization_probe_budget_missing");
+    }
+    if candidate.max_probe_orders() > max_authorized_probe_orders {
+        return Err("operator_authorization_probe_budget_below_candidate_budget");
+    }
+    if auth.probe_authority_granted != Some(true) {
+        return Err("operator_authorization_probe_authority_not_granted");
+    }
+    if auth.order_authority_granted != Some(true) {
+        return Err("operator_authorization_order_authority_not_granted");
+    }
+    if auth.promotion_evidence != Some(false) {
+        return Err("operator_authorization_promotion_boundary_invalid");
+    }
+    let Some(expires_at_utc) = auth.expires_at_utc.as_deref() else {
+        return Err("operator_authorization_expiry_missing");
+    };
+    let Ok(parsed) = DateTime::parse_from_rfc3339(expires_at_utc) else {
+        return Err("operator_authorization_expiry_malformed");
+    };
+    let expires_ms = parsed.with_timezone(&Utc).timestamp_millis();
+    if expires_ms < 0 || expires_ms as u64 <= now_ms {
+        return Err("operator_authorization_expired");
+    }
+    Ok(())
 }
 
 fn plan_is_stale_or_missing_generated_at(

@@ -5,6 +5,42 @@ use chrono::{TimeZone, Utc};
 const NOW_MS: u64 = 1_782_040_200_000;
 
 fn sample_plan(order_authority: &str) -> DemoLearningLanePlan {
+    sample_plan_with_authorization(
+        order_authority,
+        if order_authority == ORDER_AUTHORITY_GRANTED {
+            Some("2026-06-21T12:00:00+00:00")
+        } else {
+            None
+        },
+    )
+}
+
+fn sample_plan_with_authorization(
+    order_authority: &str,
+    authorization_expires_at_utc: Option<&str>,
+) -> DemoLearningLanePlan {
+    let operator_authorization = authorization_expires_at_utc
+        .map(|expires_at| {
+            format!(
+                r#",
+            "operator_authorization": {{
+                "schema_version": "bounded_demo_probe_operator_authorization_v1",
+                "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+                "authorization_id": "auth-demo-eth-sell-001",
+                "operator_id": "operator-test",
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "expires_at_utc": "{expires_at}",
+                "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+                "main_cost_gate_adjustment": "NONE",
+                "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+                "max_authorized_probe_orders": 2,
+                "probe_authority_granted": true,
+                "order_authority_granted": true,
+                "promotion_evidence": false
+            }}"#
+            )
+        })
+        .unwrap_or_default();
     let json = format!(
         r#"{{
             "schema_version": "cost_gate_demo_learning_lane_plan_v1",
@@ -13,7 +49,7 @@ fn sample_plan(order_authority: &str) -> DemoLearningLanePlan {
             "gate_status": "OPERATOR_REVIEW",
             "main_cost_gate_adjustment": "NONE",
             "learning_gate_adjustment": "SIDE_CELL_DEMO_PROBE_ONLY_AFTER_ADAPTER_WIRING",
-            "order_authority": "{order_authority}",
+            "order_authority": "{order_authority}"{operator_authorization},
             "selected_probe_candidate_count": 1,
             "probe_candidates": [
                 {{
@@ -244,6 +280,45 @@ fn admitted_ledger_record_reenters_runtime_state_cooldown_from_event_ts() {
 
 #[test]
 fn admits_only_with_explicit_authority_and_enable_flag() {
+    let missing_authorization = evaluate_probe_admission(
+        &sample_plan_with_authorization(ORDER_AUTHORITY_GRANTED, None),
+        &selected_event(),
+        &[],
+        NOW_MS,
+        &AdmissionConfig::default(),
+        true,
+        "NORMAL",
+    );
+    assert_eq!(
+        missing_authorization.decision,
+        AdmissionDecisionCode::OperatorAuthorizationInvalid
+    );
+    assert_eq!(
+        missing_authorization.reason,
+        "operator_authorization_missing_for_order_authority"
+    );
+
+    let expired_authorization = evaluate_probe_admission(
+        &sample_plan_with_authorization(
+            ORDER_AUTHORITY_GRANTED,
+            Some("2026-06-21T10:59:00+00:00"),
+        ),
+        &selected_event(),
+        &[],
+        NOW_MS,
+        &AdmissionConfig::default(),
+        true,
+        "NORMAL",
+    );
+    assert_eq!(
+        expired_authorization.decision,
+        AdmissionDecisionCode::OperatorAuthorizationInvalid
+    );
+    assert_eq!(
+        expired_authorization.reason,
+        "operator_authorization_expired"
+    );
+
     let disabled = evaluate_probe_admission(
         &sample_plan(ORDER_AUTHORITY_GRANTED),
         &selected_event(),
