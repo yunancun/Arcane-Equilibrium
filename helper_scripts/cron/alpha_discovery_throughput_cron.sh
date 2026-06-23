@@ -82,6 +82,63 @@ if [[ -f "$DRY_RUN_SCRIPT" ]]; then
 else
     echo "[$(ts)] WARN: dry-run review script not found: $DRY_RUN_SCRIPT" >> "$LOG"
 fi
+PROFITABILITY_DIR="$DATA/alpha_discovery_throughput"
+PROFITABILITY_JSON="$PROFITABILITY_DIR/profitability_path_scorecard_latest.json"
+PROFITABILITY_MD="$PROFITABILITY_DIR/profitability_path_scorecard_latest.md"
+mkdir -p "$PROFITABILITY_DIR"
+PROFITABILITY_ARGS=()
+add_profitability_json_arg() {
+    local flag="$1"
+    local path="$2"
+    if [[ -f "$path" ]]; then
+        PROFITABILITY_ARGS+=("$flag" "$path")
+    fi
+}
+latest_matching_path() {
+    local candidate
+    local latest=""
+    for candidate in "$@"; do
+        if [[ -f "$candidate" ]]; then
+            latest="$candidate"
+        fi
+    done
+    printf '%s' "$latest"
+}
+HORIZON_SEALED_REPLAY_JSON="$(latest_matching_path \
+    "$DATA"/cost_gate_learning_lane/horizon_specific_sealed_replay_latest.json \
+    "$DATA"/profitability_refresh/*/horizon_specific_sealed_replay/horizon_specific_sealed_replay_latest.json)"
+HORIZON_LEARNING_EVIDENCE_JSON="$(latest_matching_path \
+    "$DATA"/cost_gate_learning_lane/sealed_horizon_learning_evidence_latest.json \
+    "$DATA"/profitability_refresh/*/sealed_horizon_learning_evidence*/sealed_horizon_learning_evidence_latest.json)"
+add_profitability_json_arg "--cost-gate-counterfactual-json" "$DATA/cost_gate_counterfactual/cost_gate_reject_counterfactual_latest.json"
+add_profitability_json_arg "--profit-learning-packet-json" "$DATA/cost_gate_learning_lane/profit_learning_decision_packet_latest.json"
+add_profitability_json_arg "--learning-plan-json" "$DATA/cost_gate_learning_lane/demo_learning_lane_plan_latest.json"
+add_profitability_json_arg "--activation-preflight-json" "$DATA/cost_gate_learning_lane/activation_preflight_latest.json"
+add_profitability_json_arg "--horizon-sealed-replay-json" "$HORIZON_SEALED_REPLAY_JSON"
+add_profitability_json_arg "--horizon-learning-evidence-json" "$HORIZON_LEARNING_EVIDENCE_JSON"
+add_profitability_json_arg "--sealed-horizon-probe-preflight-json" "$DATA/cost_gate_learning_lane/sealed_horizon_probe_preflight_latest.json"
+add_profitability_json_arg "--bounded-probe-shadow-placement-impact-json" "$DATA/cost_gate_learning_lane/bounded_probe_shadow_placement_impact_latest.json"
+add_profitability_json_arg "--bounded-probe-result-review-json" "$DATA/cost_gate_learning_lane/bounded_probe_result_review_latest.json"
+add_profitability_json_arg "--bounded-probe-execution-realism-review-json" "$DATA/cost_gate_learning_lane/bounded_probe_execution_realism_review_latest.json"
+add_profitability_json_arg "--fillsim-json" "$DATA/research/fillsim/fillsim_report.json"
+add_profitability_json_arg "--fillsim-history-json" "$DATA/research/fillsim/fillsim_history_scorecard.json"
+add_profitability_json_arg "--polymarket-leadlag-json" "$DATA/research/polymarket_leadlag/polymarket_leadlag_latest.json"
+add_profitability_json_arg "--gate-b-watch-json" "$DATA/gate_b_watch/gate_b_watch_latest.json"
+profitability_rc=0
+(
+    cd "$BASE/helper_scripts/research"
+    if (( ${#PROFITABILITY_ARGS[@]} > 0 )); then
+        "$PYBIN" -m alpha_discovery_throughput.profitability_path_scorecard \
+            "${PROFITABILITY_ARGS[@]}" \
+            --json-output "$PROFITABILITY_JSON" \
+            --output "$PROFITABILITY_MD"
+    else
+        "$PYBIN" -m alpha_discovery_throughput.profitability_path_scorecard \
+            --json-output "$PROFITABILITY_JSON" \
+            --output "$PROFITABILITY_MD"
+    fi
+) > "$PROFITABILITY_DIR/profitability_path_scorecard_stdout.json" 2>> "$LOG" || profitability_rc=$?
+echo "[$(ts)] profitability_path_scorecard_refresh rc=${profitability_rc}" >> "$LOG"
 rc=0
 (
     cd "$BASE/helper_scripts/research"

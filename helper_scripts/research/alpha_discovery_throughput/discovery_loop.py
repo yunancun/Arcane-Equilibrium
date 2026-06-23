@@ -3076,6 +3076,83 @@ def classify_profitability_blocker(
                 "profit_learning_sealed_horizon_top_side_cell_status": detail.get(
                     "profit_learning_sealed_horizon_top_side_cell_status"
                 ),
+                "profitability_path_scorecard_status": detail.get(
+                    "profitability_path_scorecard_status"
+                ),
+                "profitability_path_scorecard_source_ok": detail.get(
+                    "profitability_path_scorecard_source_ok"
+                ),
+                "profitability_path_scorecard_source_path": detail.get(
+                    "profitability_path_scorecard_source_path"
+                ),
+                "profitability_path_count": detail.get("profitability_path_count"),
+                "profitability_cost_gate_crossing_candidate_count": detail.get(
+                    "profitability_cost_gate_crossing_candidate_count"
+                ),
+                "profitability_top_path_id": detail.get("profitability_top_path_id"),
+                "profitability_top_path_status": detail.get(
+                    "profitability_top_path_status"
+                ),
+                "profitability_top_path_next_action": detail.get(
+                    "profitability_top_path_next_action"
+                ),
+                "profitability_cost_gate_crossing_candidates_present": detail.get(
+                    "profitability_cost_gate_crossing_candidates_present"
+                ),
+                "profitability_alpha_or_edge_amplification_paths_present": detail.get(
+                    "profitability_alpha_or_edge_amplification_paths_present"
+                ),
+                "profitability_global_cost_gate_lowering_recommended": detail.get(
+                    "profitability_global_cost_gate_lowering_recommended"
+                ),
+                "profitability_order_authority_granted": detail.get(
+                    "profitability_order_authority_granted"
+                ),
+                "profitability_main_cost_gate_adjustment": detail.get(
+                    "profitability_main_cost_gate_adjustment"
+                ),
+                "profitability_promotion_evidence": detail.get(
+                    "profitability_promotion_evidence"
+                ),
+                "profitability_engineering_closure_status": detail.get(
+                    "profitability_engineering_closure_status"
+                ),
+                "profitability_leading_path_id": detail.get(
+                    "profitability_leading_path_id"
+                ),
+                "profitability_leading_path_class": detail.get(
+                    "profitability_leading_path_class"
+                ),
+                "profitability_leading_candidate_key": detail.get(
+                    "profitability_leading_candidate_key"
+                ),
+                "profitability_proof_gate_count_remaining": detail.get(
+                    "profitability_proof_gate_count_remaining"
+                ),
+                "profitability_proof_gates_remaining": detail.get(
+                    "profitability_proof_gates_remaining"
+                ),
+                "profitability_next_actions": detail.get(
+                    "profitability_next_actions"
+                ),
+                "profitability_edge_amplification_levers": detail.get(
+                    "profitability_edge_amplification_levers"
+                ),
+                "profitability_cost_gate_escape_method": detail.get(
+                    "profitability_cost_gate_escape_method"
+                ),
+                "profitability_cost_gate_escape_global_cost_gate_lowering": detail.get(
+                    "profitability_cost_gate_escape_global_cost_gate_lowering"
+                ),
+                "profitability_cost_gate_escape_probe_authority_granted": detail.get(
+                    "profitability_cost_gate_escape_probe_authority_granted"
+                ),
+                "profitability_cost_gate_escape_order_authority_granted": detail.get(
+                    "profitability_cost_gate_escape_order_authority_granted"
+                ),
+                "profitability_cost_gate_escape_promotion_evidence": detail.get(
+                    "profitability_cost_gate_escape_promotion_evidence"
+                ),
                 "sealed_horizon_probe_preflight_status": detail.get(
                     "sealed_horizon_probe_preflight_status"
                 ),

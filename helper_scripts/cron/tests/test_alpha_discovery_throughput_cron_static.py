@@ -32,14 +32,25 @@ def test_wrapper_refreshes_activation_packet_before_alpha_runner() -> None:
     assert "demo_learning_stack_dry_run_review.py" in src
     assert "demo_learning_stack_dry_run_review_latest.json" in src
     assert "demo_learning_stack_dry_run_review_stdout.json" in src
+    assert "alpha_discovery_throughput.profitability_path_scorecard" in src
+    assert "profitability_path_scorecard_latest.json" in src
+    assert "profitability_path_scorecard_latest.md" in src
+    assert "--cost-gate-counterfactual-json" in src
+    assert "--profit-learning-packet-json" in src
+    assert "--bounded-probe-result-review-json" in src
+    assert "--bounded-probe-execution-realism-review-json" in src
     assert "--json-output" in src
     assert "activation_packet_refresh rc=" in src
     assert "dry_run_review_refresh rc=" in src
+    assert "profitability_path_scorecard_refresh rc=" in src
     assert "alpha_discovery_throughput.runtime_runner" in src
     assert src.index("demo_learning_stack_activation_packet.py") < src.index(
         "demo_learning_stack_dry_run_review.py"
     )
     assert src.index("demo_learning_stack_dry_run_review.py") < src.index(
+        "alpha_discovery_throughput.profitability_path_scorecard"
+    )
+    assert src.index("alpha_discovery_throughput.profitability_path_scorecard") < src.index(
         "alpha_discovery_throughput.runtime_runner"
     )
 
