@@ -331,6 +331,50 @@ def test_learning_worklist_promotes_mm_current_fee_confirmation_task():
                         "gap_to_current_fee_round_trip_bps": 3.393,
                     },
                 },
+                "mm_current_fee_confirmation_packet": {
+                    "status": "MM_CURRENT_FEE_CONFIRMATION_REQUIRES_REPEAT_WINDOW",
+                    "reason": "candidate_not_repeated_across_independent_history_windows",
+                    "next_action": (
+                        "accumulate_or_replay_independent_windows_for_same_current_fee_mm_cell"
+                    ),
+                    "next_gate": (
+                        "same_current_fee_positive_cell_repeats_across_independent_windows"
+                    ),
+                    "summary": {
+                        "candidate_key": (
+                            "edge_scorecard|per_symbol_primary_queue|SOXLUSDT|"
+                            "back|informed_skip|fill_only"
+                        ),
+                        "candidate_source": "edge_scorecard",
+                        "candidate_symbol": "SOXLUSDT",
+                        "candidate_policy": "informed_skip",
+                        "candidate_queue_position": "back",
+                        "candidate_track": "fill_only",
+                        "candidate_net_bps": 0.715,
+                        "candidate_edge_before_fees_bps": 4.715,
+                        "current_fee_round_trip_bps": 4.0,
+                        "history_status": (
+                            "HISTORY_SINGLE_WINDOW_CURRENT_FEE_POSITIVE_NEEDS_CONFIRMATION"
+                        ),
+                        "history_valid_windows": 11,
+                        "history_current_fee_sample_gated_positive_windows": 1,
+                        "history_repeated_positive_key_count": 0,
+                        "candidate_repeated_windows": 0,
+                        "history_walk_forward_holdout_confirmed_windows": 0,
+                        "repeat_window_confirmed": False,
+                        "oos_walk_forward_confirmed": False,
+                        "maker_execution_realism_status": (
+                            "NOT_REACHED_REPEAT_WINDOW_REQUIRED"
+                        ),
+                        "maker_execution_realism_confirmed": False,
+                    },
+                    "answers": {
+                        "global_cost_gate_lowering_recommended": False,
+                        "order_authority_granted": False,
+                        "probe_authority_granted": False,
+                        "promotion_evidence": False,
+                    },
+                },
             },
         },
     ], now_utc=dt.datetime(2026, 6, 23, 18, tzinfo=dt.timezone.utc))
@@ -341,10 +385,10 @@ def test_learning_worklist_promotes_mm_current_fee_confirmation_task():
         "confirm_sample_gated_current_fee_positive_mm_cell_before_any_authority"
     )
     assert task["primary_blocker"] == (
-        "current_fee_candidate_lacks_train_holdout_walk_forward_confirmation"
+        "current_fee_candidate_lacks_independent_window_confirmation"
     )
     assert task["next_trigger"] == (
-        "review_current_fee_positive_mm_cell_with_walk_forward_and_aeg_chain"
+        "accumulate_or_replay_independent_windows_for_same_current_fee_mm_cell"
     )
     assert task["completion_gate"] == (
         "repeat_current_fee_positive_cell_across_independent_windows_and_oos_execution_realism"
@@ -362,6 +406,25 @@ def test_learning_worklist_promotes_mm_current_fee_confirmation_task():
     assert task["evidence"]["best_sample_gated_gross_edge_bps"] == 4.715
     assert task["evidence"]["best_gross_cell_net_bps"] == 0.715
     assert task["evidence"]["break_even_maker_fee_bps_per_side"] == 2.3575
+    assert task["evidence"]["mm_current_fee_confirmation_packet_status"] == (
+        "MM_CURRENT_FEE_CONFIRMATION_REQUIRES_REPEAT_WINDOW"
+    )
+    assert task["evidence"]["mm_current_fee_confirmation_candidate_symbol"] == (
+        "SOXLUSDT"
+    )
+    assert (
+        task["evidence"][
+            "mm_current_fee_confirmation_history_current_fee_sample_gated_positive_windows"
+        ]
+        == 1
+    )
+    assert (
+        task["evidence"]["mm_current_fee_confirmation_repeat_window_confirmed"]
+        is False
+    )
+    assert task["evidence"][
+        "mm_current_fee_confirmation_maker_execution_realism_status"
+    ] == "NOT_REACHED_REPEAT_WINDOW_REQUIRED"
 
 
 def test_learning_worklist_keeps_promotion_review_ahead_of_replay_history():

@@ -63,6 +63,34 @@ _EVIDENCE_KEYS = (
     "best_sample_gated_gross_edge_bps",
     "best_gross_cell_net_bps",
     "break_even_maker_fee_bps_per_side",
+    "mm_current_fee_confirmation_packet_status",
+    "mm_current_fee_confirmation_packet_reason",
+    "mm_current_fee_confirmation_packet_next_action",
+    "mm_current_fee_confirmation_packet_next_gate",
+    "mm_current_fee_confirmation_candidate_key",
+    "mm_current_fee_confirmation_candidate_source",
+    "mm_current_fee_confirmation_candidate_symbol",
+    "mm_current_fee_confirmation_candidate_policy",
+    "mm_current_fee_confirmation_candidate_queue_position",
+    "mm_current_fee_confirmation_candidate_track",
+    "mm_current_fee_confirmation_candidate_net_bps",
+    "mm_current_fee_confirmation_candidate_edge_before_fees_bps",
+    "mm_current_fee_confirmation_current_fee_round_trip_bps",
+    "mm_current_fee_confirmation_history_status",
+    "mm_current_fee_confirmation_history_reason",
+    "mm_current_fee_confirmation_history_valid_windows",
+    "mm_current_fee_confirmation_history_current_fee_sample_gated_positive_windows",
+    "mm_current_fee_confirmation_history_repeated_positive_key_count",
+    "mm_current_fee_confirmation_candidate_repeated_windows",
+    "mm_current_fee_confirmation_history_walk_forward_holdout_confirmed_windows",
+    "mm_current_fee_confirmation_repeat_window_confirmed",
+    "mm_current_fee_confirmation_oos_walk_forward_confirmed",
+    "mm_current_fee_confirmation_maker_execution_realism_status",
+    "mm_current_fee_confirmation_maker_execution_realism_confirmed",
+    "mm_current_fee_confirmation_global_cost_gate_lowering_recommended",
+    "mm_current_fee_confirmation_order_authority_granted",
+    "mm_current_fee_confirmation_probe_authority_granted",
+    "mm_current_fee_confirmation_promotion_evidence",
     "cost_wall_escape_status",
     "cost_wall_escape_reason",
     "gross_edge_decomposition_status",
@@ -540,6 +568,13 @@ def _task_primary_blocker(row: dict[str, Any], task_type: str) -> Any:
         if activation_status == "READY_FOR_OPERATOR_DRY_RUN":
             return "demo_learning_stack_activation_packet_dry_run_required"
     if task_type == "mm_current_fee_confirmation":
+        packet_status = _str(row.get("mm_current_fee_confirmation_packet_status"))
+        if packet_status == "MM_CURRENT_FEE_CONFIRMATION_REQUIRES_REPEAT_WINDOW":
+            return "current_fee_candidate_lacks_independent_window_confirmation"
+        if packet_status == "MM_CURRENT_FEE_CONFIRMATION_REQUIRES_OOS":
+            return "current_fee_candidate_lacks_oos_walk_forward_confirmation"
+        if packet_status == "MM_CURRENT_FEE_CONFIRMATION_REQUIRES_MAKER_EXECUTION_REALISM":
+            return "current_fee_candidate_lacks_maker_execution_realism"
         return (
             row.get("mm_signal_search_failure_mode")
             or "current_fee_candidate_lacks_independent_window_confirmation"
@@ -939,6 +974,7 @@ def _completion_evidence_required(task_type: str) -> list[str]:
         ]
     if task_type == "mm_current_fee_confirmation":
         return [
+            "mm_current_fee_confirmation_packet_status records repeat/OOS/maker-realism gate",
             "current_fee_positive_sample_gated_cell_count remains > 0",
             "best_sample_gated_current_fee_cell or best_sample_gated_gross_cell preserves symbol policy queue track and net_bps",
             "the same current-fee-positive cell repeats across independent windows or is explicitly invalidated",
@@ -1074,6 +1110,9 @@ def _task_next_trigger(row: dict[str, Any], task_type: str) -> str | None:
                 return value
         return None
     if task_type == "mm_current_fee_confirmation":
+        packet_action = _str(row.get("mm_current_fee_confirmation_packet_next_action"))
+        if packet_action:
+            return packet_action
         directive = row.get("mm_signal_search_directive")
         if isinstance(directive, dict):
             value = _str(directive.get("next_trigger"))
