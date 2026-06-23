@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from program_code.research.microstructure.fill_sim import (
+    _low_friction_signal_failure_summary,
     _net_block,
     add_low_friction_microstructure_features,
     fill_sim_conditional_feature_scorecard,
@@ -704,6 +705,75 @@ def test_low_friction_signal_scorecard_ranks_train_confirmed_gross_below_fee_wal
     best = scorecard["best_train_confirmed_gross_candidate"]
     assert best["train_sample_gated_positive_gross"] is True
     assert best["holdout_sample_gated_positive_gross"] is True
+
+
+def test_low_friction_failure_summary_separates_sample_starved_edge_spikes():
+    rows = [
+        {
+            "name": "n1_holdout_spike",
+            "condition": "spread p90 AND quiet p10",
+            "feature": "low_friction_interaction",
+            "candidate_shape": "spread_quiet_touch_interaction_v1",
+            "train": {
+                "edge_before_fees_bps": 1.5,
+                "net_bps": -2.5,
+                "n_fill_only": 35,
+                "signif_suppressed": False,
+            },
+            "holdout": {
+                "edge_before_fees_bps": 7.0,
+                "net_bps": 3.0,
+                "n_fill_only": 1,
+                "signif_suppressed": True,
+            },
+        },
+        {
+            "name": "sample_rich_below_fee",
+            "condition": "spread p90 AND quiet p25",
+            "feature": "low_friction_interaction",
+            "candidate_shape": "spread_quiet_mid_support_interaction_v1",
+            "train": {
+                "edge_before_fees_bps": 1.2,
+                "net_bps": -2.8,
+                "n_fill_only": 40,
+                "signif_suppressed": False,
+            },
+            "holdout": {
+                "edge_before_fees_bps": 0.9,
+                "net_bps": -3.1,
+                "n_fill_only": 42,
+                "signif_suppressed": False,
+            },
+        },
+    ]
+
+    summary = _low_friction_signal_failure_summary(
+        rows,
+        holdout_confirmed=[],
+        train_clearing=[],
+    )
+
+    assert summary["status"] == "LOW_FRICTION_HOLDOUT_GROSS_POSITIVE_BELOW_CURRENT_FEE"
+    assert summary["sample_gate_min_fills"] == 30
+    assert summary["sample_starved_current_fee_holdout_count"] == 1
+    assert summary["sample_gated_holdout_gross_count"] == 1
+    assert summary["train_confirmed_gross_count"] == 1
+    assert (
+        summary["best_sample_starved_current_fee_holdout_candidate"]["name"]
+        == "n1_holdout_spike"
+    )
+    assert (
+        summary["best_sample_starved_current_fee_holdout_candidate"]["holdout_n_fill_only"]
+        == 1
+    )
+    assert (
+        summary["best_sample_gated_holdout_gross_candidate"]["name"]
+        == "sample_rich_below_fee"
+    )
+    assert (
+        summary["best_train_confirmed_gross_candidate"]["candidate_shape"]
+        == "spread_quiet_mid_support_interaction_v1"
+    )
 
 
 def test_low_friction_interaction_finds_train_confirmed_current_fee_cell():

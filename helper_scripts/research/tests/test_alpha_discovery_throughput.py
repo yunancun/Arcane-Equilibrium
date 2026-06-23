@@ -602,6 +602,21 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
                             "min_train_holdout_gross_bps": 0.63,
                         },
                     },
+                    "failure_summary": {
+                        "sample_starved_current_fee_holdout_count": 2,
+                        "sample_gated_holdout_gross_count": 8,
+                        "train_confirmed_gross_count": 4,
+                        "best_sample_starved_current_fee_holdout_candidate": {
+                            "name": "quoted_half_spread_bps_train_p90_and_n1_spike",
+                            "holdout_edge_before_fees_bps": 7.4,
+                            "holdout_n_fill_only": 1,
+                        },
+                        "best_sample_gated_holdout_gross_candidate": {
+                            "name": "quoted_half_spread_bps_train_p75_sample_gated",
+                            "holdout_edge_before_fees_bps": 1.91,
+                            "holdout_n_fill_only": 120,
+                        },
+                    },
                 },
                 "history_scorecard": {
                     "status": "HISTORY_INSUFFICIENT_WINDOWS",
@@ -719,6 +734,15 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
         "current_fee_cost_wall_low_friction_holdout_not_train_confirmed_"
         "lower_fee_path_scale_or_capital_gated"
     )
+    assert directive["status_reason"] == (
+        "holdout_gross_positive_but_train_gross_non_positive"
+    )
+    assert directive["sample_starved_current_fee_holdout_count"] == 2
+    assert (
+        directive["best_sample_starved_current_fee_holdout_candidate"]["name"]
+        == "quoted_half_spread_bps_train_p90_and_n1_spike"
+    )
+    assert directive["sample_gated_holdout_gross_count"] == 8
     assert directive["recommended_search_constraint"] == (
         "require_train_and_holdout_sample_gated_min_gross_ge_current_fee_round_trip"
     )
@@ -734,9 +758,19 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
     assert blockers["mm_verdict_maker_edge"]["mm_signal_search_status"] == (
         "SEARCH_REQUIRED_EDGE_UPLIFT"
     )
+    assert blockers["mm_verdict_maker_edge"]["failure_mode"] == (
+        "current_fee_cost_wall_low_friction_holdout_not_train_confirmed_"
+        "lower_fee_path_scale_or_capital_gated"
+    )
+    assert blockers["mm_verdict_maker_edge"]["status_reason"] == (
+        "holdout_gross_positive_but_train_gross_non_positive"
+    )
     assert blockers["mm_verdict_maker_edge"][
         "mm_signal_search_required_gross_uplift_multiple"
     ] == 1.7621
+    assert blockers["mm_verdict_maker_edge"][
+        "mm_signal_search_sample_starved_current_fee_holdout_count"
+    ] == 2
     assert blockers["mm_verdict_maker_edge"]["cost_wall_escape_scorecard"][
         "low_friction_signal_status"
     ] == "LOW_FRICTION_SIGNAL_HOLDOUT_GROSS_POSITIVE_BELOW_CURRENT_FEE"

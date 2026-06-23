@@ -60,6 +60,27 @@ def test_learning_worklist_prioritizes_runtime_reconcile_over_mm_signal_search()
                         "status": "STANDARD_FEE_TIER_CLEARS_BUT_SCALE_OR_CAPITAL_GATED",
                     },
                 },
+                "low_friction_signal_scorecard": {
+                    "failure_summary": {
+                        "sample_starved_current_fee_holdout_count": 3,
+                        "sample_gated_holdout_gross_count": 5,
+                        "best_sample_starved_current_fee_holdout_candidate": {
+                            "name": "n1_holdout_spike",
+                            "holdout_edge_before_fees_bps": 6.7,
+                            "holdout_n_fill_only": 1,
+                        },
+                        "best_sample_gated_holdout_gross_candidate": {
+                            "name": "sample_gated_below_fee",
+                            "holdout_edge_before_fees_bps": 1.4,
+                            "holdout_n_fill_only": 44,
+                        },
+                    },
+                    "train_confirmed_gross_scorecard": {
+                        "status": "LOW_FRICTION_TRAIN_CONFIRMED_GROSS_BELOW_CURRENT_FEE",
+                        "best_min_train_holdout_gross_bps": 0.8,
+                        "gap_to_current_fee_round_trip_bps": 3.2,
+                    },
+                },
             },
         },
     ], now_utc=dt.datetime(2026, 6, 22, tzinfo=dt.timezone.utc))
@@ -108,11 +129,35 @@ def test_learning_worklist_prioritizes_runtime_reconcile_over_mm_signal_search()
         "SEARCH_REQUIRED_EDGE_UPLIFT"
     )
     assert mm_task["evidence"]["mm_signal_search_failure_mode"] == (
-        "sample_gated_gross_edge_below_current_fee_"
+        "current_fee_cost_wall_train_confirmed_low_friction_gross_below_fee_"
         "lower_fee_path_scale_or_capital_gated"
+    )
+    assert mm_task["evidence"]["failure_mode"] == (
+        "current_fee_cost_wall_train_confirmed_low_friction_gross_below_fee_"
+        "lower_fee_path_scale_or_capital_gated"
+    )
+    assert mm_task["evidence"]["status_reason"] == (
+        "missing_low_friction_holdout_gross_candidate"
     )
     assert mm_task["evidence"]["mm_signal_search_required_gross_uplift_multiple"] == (
         1.8182
+    )
+    assert (
+        mm_task["evidence"]["mm_signal_search_sample_starved_current_fee_holdout_count"]
+        == 3
+    )
+    assert (
+        mm_task["evidence"][
+            "mm_signal_search_best_sample_starved_current_fee_holdout_candidate"
+        ]["name"]
+        == "n1_holdout_spike"
+    )
+    assert mm_task["evidence"]["mm_signal_search_sample_gated_holdout_gross_count"] == 5
+    assert (
+        mm_task["evidence"]["mm_signal_search_best_sample_gated_holdout_gross_candidate"][
+            "name"
+        ]
+        == "sample_gated_below_fee"
     )
     assert (
         mm_task["evidence"]["mm_signal_search_lower_fee_path_not_actionable_now"]
