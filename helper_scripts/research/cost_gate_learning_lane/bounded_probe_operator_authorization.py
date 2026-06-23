@@ -1,0 +1,726 @@
+#!/usr/bin/env python3
+"""Build a bounded Demo probe operator-authorization artifact.
+
+This artifact is the review layer between "source is ready" and any future
+bounded Demo probe plan inclusion. It can emit the exact
+``bounded_demo_probe_operator_authorization_v1`` object consumed by runtime
+admission, but it never edits a plan, enables a writer, submits an order, lowers
+the Cost Gate, or marks promotion evidence.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import math
+from pathlib import Path
+from typing import Any
+
+from cost_gate_learning_lane.bounded_probe_authority_patch_readiness import (
+    PATCH_READINESS_SCHEMA_VERSION,
+)
+from cost_gate_learning_lane.contract import (
+    AUTHORITY_PATH_PATCH_READY_STATUS,
+    BOUNDED_PROBE_AUTHORIZED_STATUS,
+    BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SCHEMA_VERSION,
+    ORDER_AUTHORITY_GRANTED,
+)
+
+
+OPERATOR_AUTHORIZATION_PACKET_SCHEMA_VERSION = (
+    "bounded_demo_probe_operator_authorization_packet_v1"
+)
+PREFLIGHT_SCHEMA_VERSION = "sealed_horizon_bounded_demo_probe_preflight_v1"
+PLACEMENT_REPAIR_PLAN_SCHEMA_VERSION = (
+    "bounded_demo_probe_placement_repair_plan_v1"
+)
+READY_PREFLIGHT_STATUS = "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+READY_PLACEMENT_STATUS = "PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW"
+READY_REVIEW_STATUS = "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW"
+REJECTED_STATUS = "REJECTED_FOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+DEFAULT_MAX_ARTIFACT_AGE_HOURS = 24
+DEFAULT_MAX_AUTHORIZATION_TTL_HOURS = 24
+BOUNDARY = (
+    "artifact-only bounded Demo probe operator authorization review; no plan "
+    "mutation, writer enablement, PG query/write, Bybit call, order, config, "
+    "risk, runtime mutation, main Cost Gate lowering, or promotion proof"
+)
+
+
+def _utc_now() -> dt.datetime:
+    return dt.datetime.now(dt.timezone.utc)
+
+
+def _dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def _str(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _int(value: Any, default: int = 0) -> int:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _float(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def _parse_dt(value: Any) -> dt.datetime | None:
+    text = _str(value)
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = dt.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc)
+
+
+def _age_seconds(value: Any, *, now_utc: dt.datetime) -> float | None:
+    parsed = _parse_dt(value)
+    if parsed is None:
+        return None
+    age = (now_utc - parsed).total_seconds()
+    return age if age >= 0.0 else None
+
+
+def _generated_at(payload: dict[str, Any]) -> Any:
+    return (
+        payload.get("generated_at_utc")
+        or payload.get("generated")
+        or payload.get("ts_utc")
+    )
+
+
+def _artifact_summary(
+    *,
+    name: str,
+    path: Path | None,
+    payload: dict[str, Any] | None,
+    now_utc: dt.datetime,
+    max_age_seconds: int,
+) -> dict[str, Any]:
+    present = isinstance(payload, dict) and bool(payload)
+    generated_at = _generated_at(payload or {}) if present else None
+    age = _age_seconds(generated_at, now_utc=now_utc) if generated_at else None
+    if not present:
+        status = "MISSING"
+    elif age is None:
+        status = "PRESENT_UNKNOWN_AGE"
+    elif age > max_age_seconds:
+        status = "STALE"
+    else:
+        status = "FRESH"
+    return {
+        "name": name,
+        "path": str(path) if path else None,
+        "status": status,
+        "present": present,
+        "generated_at_utc": generated_at,
+        "age_seconds": age,
+        "max_age_seconds": max_age_seconds,
+        "schema_version": (payload or {}).get("schema_version") if present else None,
+    }
+
+
+def _authority_preserved(*payloads: dict[str, Any] | None) -> bool:
+    nested_keys = (
+        "answers",
+        "authority_boundary",
+        "placement_repair_plan",
+        "bounded_demo_probe_design",
+    )
+    stack: list[dict[str, Any]] = [_dict(payload) for payload in payloads]
+    while stack:
+        data = stack.pop()
+        if data.get("global_cost_gate_lowering_recommended") is True:
+            return False
+        if data.get("probe_authority_granted") is True:
+            return False
+        if data.get("order_authority_granted") is True:
+            return False
+        if data.get("promotion_evidence") is True:
+            return False
+        if data.get("promotion_proof") is True:
+            return False
+        if data.get("main_cost_gate_adjustment") not in (None, "", "NONE"):
+            return False
+        for key in nested_keys:
+            nested = data.get(key)
+            if isinstance(nested, dict):
+                stack.append(nested)
+    return True
+
+
+def _candidate_summary(
+    candidate: dict[str, Any],
+    fallback: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    fallback = fallback or {}
+    return {
+        "side_cell_key": candidate.get("side_cell_key") or fallback.get("side_cell_key"),
+        "strategy_name": candidate.get("strategy_name"),
+        "symbol": candidate.get("symbol"),
+        "side": candidate.get("side"),
+        "outcome_horizon_minutes": (
+            candidate.get("outcome_horizon_minutes")
+            or fallback.get("outcome_horizon_minutes")
+        ),
+    }
+
+
+def _candidate_from_preflight(preflight: dict[str, Any] | None) -> dict[str, Any]:
+    payload = _dict(preflight)
+    design = _dict(payload.get("bounded_demo_probe_design"))
+    candidate = _dict(payload.get("candidate")) or _dict(design.get("candidate"))
+    return _candidate_summary(candidate, payload)
+
+
+def _candidate_from_placement(placement: dict[str, Any] | None) -> dict[str, Any]:
+    payload = _dict(placement)
+    plan = _dict(payload.get("placement_repair_plan"))
+    candidate = _dict(plan.get("candidate")) or _dict(payload.get("candidate"))
+    return _candidate_summary(candidate)
+
+
+def _candidate_from_readiness(readiness: dict[str, Any] | None) -> dict[str, Any]:
+    placement = _dict(_dict(readiness).get("placement_repair_plan"))
+    return _candidate_summary(_dict(placement.get("candidate")))
+
+
+def _candidate_key(candidate: dict[str, Any]) -> tuple[Any, Any, Any, Any, Any]:
+    return (
+        candidate.get("side_cell_key"),
+        candidate.get("strategy_name"),
+        candidate.get("symbol"),
+        candidate.get("side"),
+        candidate.get("outcome_horizon_minutes"),
+    )
+
+
+def _candidate_aligned(*candidates: dict[str, Any]) -> bool:
+    keys = [_candidate_key(candidate) for candidate in candidates]
+    if any(not key[0] for key in keys):
+        return False
+    return len(set(keys)) == 1
+
+
+def _preflight_summary(
+    preflight: dict[str, Any] | None,
+    artifact: dict[str, Any],
+) -> dict[str, Any]:
+    payload = _dict(preflight)
+    answers = _dict(payload.get("answers"))
+    design = _dict(payload.get("bounded_demo_probe_design"))
+    limits = _dict(design.get("suggested_initial_probe_limits"))
+    ready = (
+        artifact.get("status") == "FRESH"
+        and artifact.get("schema_version") == PREFLIGHT_SCHEMA_VERSION
+        and payload.get("status") == READY_PREFLIGHT_STATUS
+        and answers.get("ready_for_operator_bounded_demo_probe_authorization") is True
+        and answers.get("probe_authority_granted") is not True
+        and answers.get("order_authority_granted") is not True
+        and answers.get("promotion_evidence") is not True
+    )
+    return {
+        "status": payload.get("status"),
+        "reason": payload.get("reason"),
+        "ready_for_operator_authorization": ready,
+        "candidate": _candidate_from_preflight(payload),
+        "max_probe_intents_before_review": _int(
+            limits.get("max_probe_intents_before_review")
+        ),
+        "max_demo_notional_usdt_per_order": _float(
+            limits.get("max_demo_notional_usdt_per_order")
+        ),
+        "max_total_demo_notional_usdt_before_review": _float(
+            limits.get("max_total_demo_notional_usdt_before_review")
+        ),
+    }
+
+
+def _placement_summary(
+    placement: dict[str, Any] | None,
+    artifact: dict[str, Any],
+) -> dict[str, Any]:
+    payload = _dict(placement)
+    plan = _dict(payload.get("placement_repair_plan"))
+    limits = _dict(plan.get("probe_limits"))
+    ready = (
+        artifact.get("status") == "FRESH"
+        and artifact.get("schema_version") == PLACEMENT_REPAIR_PLAN_SCHEMA_VERSION
+        and payload.get("status") == READY_PLACEMENT_STATUS
+        and plan.get("order_mode") == "post_only_near_touch_or_skip"
+        and plan.get("requires_separate_operator_authorization") is True
+        and plan.get("active") is False
+    )
+    return {
+        "status": payload.get("status"),
+        "reason": payload.get("reason"),
+        "ready_for_operator_authorization": ready,
+        "candidate": _candidate_from_placement(payload),
+        "order_mode": plan.get("order_mode"),
+        "max_fresh_bbo_age_ms": _int(plan.get("max_fresh_bbo_age_ms")),
+        "max_initial_passive_gap_bps": _float(
+            plan.get("max_initial_passive_gap_bps")
+        ),
+        "max_probe_intents_before_review": _int(
+            limits.get("max_probe_intents_before_review")
+        ),
+        "max_demo_notional_usdt_per_order": _float(
+            limits.get("max_demo_notional_usdt_per_order")
+        ),
+    }
+
+
+def _patch_readiness_summary(
+    readiness: dict[str, Any] | None,
+    artifact: dict[str, Any],
+) -> dict[str, Any]:
+    payload = _dict(readiness)
+    answers = _dict(payload.get("answers"))
+    ready = (
+        artifact.get("status") == "FRESH"
+        and artifact.get("schema_version") == PATCH_READINESS_SCHEMA_VERSION
+        and payload.get("status") == AUTHORITY_PATH_PATCH_READY_STATUS
+        and answers.get("rust_near_touch_authority_adapter_present") is True
+        and answers.get("rust_authority_path_wiring_present") is True
+        and answers.get("probe_authority_granted") is not True
+        and answers.get("order_authority_granted") is not True
+        and answers.get("promotion_evidence") is not True
+    )
+    return {
+        "status": payload.get("status"),
+        "reason": payload.get("reason"),
+        "ready_for_operator_authorization": ready,
+        "candidate": _candidate_from_readiness(payload),
+        "rust_near_touch_authority_adapter_present": (
+            answers.get("rust_near_touch_authority_adapter_present") is True
+        ),
+        "rust_authority_path_wiring_present": (
+            answers.get("rust_authority_path_wiring_present") is True
+        ),
+    }
+
+
+def _candidate_budget(
+    preflight: dict[str, Any],
+    placement: dict[str, Any],
+) -> int:
+    candidates = [
+        _int(preflight.get("max_probe_intents_before_review")),
+        _int(placement.get("max_probe_intents_before_review")),
+    ]
+    positives = [value for value in candidates if value > 0]
+    return min(positives) if positives else 0
+
+
+def _normalize_decision(decision: str | None) -> str:
+    text = _str(decision).lower().replace("_", "-")
+    if text in {"authorize", "approve", "approved", "approve-authorization"}:
+        return "authorize"
+    if text in {"reject", "rejected", "decline", "declined"}:
+        return "reject"
+    return "defer"
+
+
+def expected_bounded_demo_probe_operator_authorization_typed_confirm(
+    side_cell_key: Any,
+    max_authorized_probe_orders: Any,
+    authorization_id: Any,
+) -> str:
+    """Return the exact confirmation phrase for bounded probe authorization."""
+    return (
+        "authorize_bounded_demo_probe:"
+        f"{_str(side_cell_key)}:{_int(max_authorized_probe_orders)}:{_str(authorization_id)}"
+    )
+
+
+def _gate(
+    name: str,
+    passed: bool,
+    *,
+    status: str,
+    reason: str,
+    next_actions: list[str] | None = None,
+    evidence: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "name": name,
+        "passed": passed,
+        "status": status,
+        "reason": reason,
+        "next_actions": next_actions or [],
+        "evidence": evidence or {},
+    }
+
+
+def _dedupe(items: list[Any]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        text = _str(item)
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
+
+
+def _status_from_gates(
+    *,
+    decision: str,
+    authorization_requested: bool,
+    failed_gates: list[dict[str, Any]],
+) -> str:
+    failed = {gate["name"] for gate in failed_gates}
+    if "authority_boundary_preserved" in failed:
+        return "AUTHORITY_BOUNDARY_VIOLATION"
+    if "sealed_horizon_preflight_ready" in failed:
+        return "SEALED_HORIZON_PREFLIGHT_NOT_READY"
+    if "placement_repair_plan_ready" in failed:
+        return "PLACEMENT_REPAIR_PLAN_NOT_READY"
+    if "authority_path_patch_readiness_ready" in failed:
+        return "AUTHORITY_PATH_PATCH_NOT_READY"
+    if "candidate_alignment" in failed:
+        return "CANDIDATE_ALIGNMENT_MISMATCH"
+    if decision == "reject":
+        return REJECTED_STATUS
+    if decision != "authorize":
+        return READY_REVIEW_STATUS
+    if "authorization_id_present" in failed:
+        return "AUTHORIZATION_ID_REQUIRED"
+    if "operator_id_present" in failed:
+        return "OPERATOR_ID_REQUIRED"
+    if "probe_budget_valid" in failed:
+        return "PROBE_BUDGET_REQUIRED_OR_EXCEEDS_SOURCE_LIMIT"
+    if "authorization_expiry_valid" in failed:
+        return "AUTHORIZATION_EXPIRY_REQUIRED_OR_INVALID"
+    if "typed_confirm_matches" in failed:
+        return "TYPED_CONFIRM_REQUIRED"
+    if authorization_requested:
+        return BOUNDED_PROBE_AUTHORIZED_STATUS
+    return READY_REVIEW_STATUS
+
+
+def _authorization_object(
+    *,
+    authorization_id: str,
+    operator_id: str,
+    side_cell_key: str,
+    expires_at_utc: str,
+    max_authorized_probe_orders: int,
+) -> dict[str, Any]:
+    return {
+        "schema_version": BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SCHEMA_VERSION,
+        "status": BOUNDED_PROBE_AUTHORIZED_STATUS,
+        "authorization_id": authorization_id,
+        "operator_id": operator_id,
+        "side_cell_key": side_cell_key,
+        "expires_at_utc": expires_at_utc,
+        "authority_path_readiness_status": AUTHORITY_PATH_PATCH_READY_STATUS,
+        "main_cost_gate_adjustment": "NONE",
+        "order_authority": ORDER_AUTHORITY_GRANTED,
+        "max_authorized_probe_orders": max_authorized_probe_orders,
+        "probe_authority_granted": True,
+        "order_authority_granted": True,
+        "promotion_evidence": False,
+    }
+
+
+def build_bounded_demo_probe_operator_authorization(
+    *,
+    preflight: dict[str, Any] | None,
+    placement_repair_plan: dict[str, Any] | None,
+    authority_patch_readiness: dict[str, Any] | None,
+    decision: str = "defer",
+    operator_id: str | None = None,
+    authorization_id: str | None = None,
+    max_authorized_probe_orders: int | None = None,
+    expires_at_utc: str | None = None,
+    typed_confirm: str | None = None,
+    review_note: str | None = None,
+    paths: dict[str, Path | None] | None = None,
+    now_utc: dt.datetime | None = None,
+    max_artifact_age_hours: int = DEFAULT_MAX_ARTIFACT_AGE_HOURS,
+    max_authorization_ttl_hours: int = DEFAULT_MAX_AUTHORIZATION_TTL_HOURS,
+) -> dict[str, Any]:
+    if max_artifact_age_hours < 1 or max_artifact_age_hours > 24 * 14:
+        raise ValueError("max_artifact_age_hours must be in [1, 336]")
+    if max_authorization_ttl_hours < 1 or max_authorization_ttl_hours > 24 * 7:
+        raise ValueError("max_authorization_ttl_hours must be in [1, 168]")
+
+    now = (now_utc or _utc_now()).astimezone(dt.timezone.utc)
+    paths = paths or {}
+    max_age_seconds = max_artifact_age_hours * 3600
+    artifacts = {
+        "sealed_horizon_probe_preflight": _artifact_summary(
+            name="sealed_horizon_probe_preflight",
+            path=paths.get("preflight"),
+            payload=preflight,
+            now_utc=now,
+            max_age_seconds=max_age_seconds,
+        ),
+        "placement_repair_plan": _artifact_summary(
+            name="placement_repair_plan",
+            path=paths.get("placement_repair_plan"),
+            payload=placement_repair_plan,
+            now_utc=now,
+            max_age_seconds=max_age_seconds,
+        ),
+        "authority_patch_readiness": _artifact_summary(
+            name="authority_patch_readiness",
+            path=paths.get("authority_patch_readiness"),
+            payload=authority_patch_readiness,
+            now_utc=now,
+            max_age_seconds=max_age_seconds,
+        ),
+    }
+    preflight_summary = _preflight_summary(
+        preflight,
+        artifacts["sealed_horizon_probe_preflight"],
+    )
+    placement_summary = _placement_summary(
+        placement_repair_plan,
+        artifacts["placement_repair_plan"],
+    )
+    readiness_summary = _patch_readiness_summary(
+        authority_patch_readiness,
+        artifacts["authority_patch_readiness"],
+    )
+    aligned = _candidate_aligned(
+        _dict(preflight_summary.get("candidate")),
+        _dict(placement_summary.get("candidate")),
+        _dict(readiness_summary.get("candidate")),
+    )
+    candidate = _dict(preflight_summary.get("candidate"))
+    side_cell_key = _str(candidate.get("side_cell_key"))
+    candidate_budget = _candidate_budget(preflight_summary, placement_summary)
+    requested_budget = _int(max_authorized_probe_orders)
+    auth_id = _str(authorization_id)
+    operator = _str(operator_id)
+    normalized_decision = _normalize_decision(decision)
+    authorization_requested = normalized_decision == "authorize"
+    expected_confirm = expected_bounded_demo_probe_operator_authorization_typed_confirm(
+        side_cell_key,
+        requested_budget,
+        auth_id,
+    )
+    provided_confirm = _str(typed_confirm)
+    typed_confirm_matches = bool(provided_confirm) and provided_confirm == expected_confirm
+    expires_at = _parse_dt(expires_at_utc)
+    expiry_valid = expires_at is not None and expires_at > now
+    if expiry_valid:
+        max_expires_at = now + dt.timedelta(hours=max_authorization_ttl_hours)
+        expiry_valid = expires_at <= max_expires_at
+    expires_text = expires_at.isoformat() if expires_at is not None else _str(expires_at_utc)
+    budget_valid = (
+        requested_budget > 0
+        and candidate_budget > 0
+        and requested_budget <= candidate_budget
+    )
+    authority_preserved = _authority_preserved(
+        preflight,
+        placement_repair_plan,
+        authority_patch_readiness,
+    )
+
+    gates = [
+        _gate(
+            "authority_boundary_preserved",
+            authority_preserved,
+            status="PRESERVED" if authority_preserved else "VIOLATED",
+            reason="inputs must not already grant Cost Gate lowering, probe/order authority, or promotion proof",
+            next_actions=["remove_authority_granting_input_before_authorization_review"],
+        ),
+        _gate(
+            "sealed_horizon_preflight_ready",
+            preflight_summary["ready_for_operator_authorization"] is True,
+            status=str(preflight_summary.get("status") or "MISSING"),
+            reason="sealed preflight must reach READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION",
+            next_actions=["refresh_or_complete_sealed_horizon_probe_preflight"],
+            evidence=preflight_summary,
+        ),
+        _gate(
+            "placement_repair_plan_ready",
+            placement_summary["ready_for_operator_authorization"] is True,
+            status=str(placement_summary.get("status") or "MISSING"),
+            reason="placement repair plan must be fresh and near-touch-or-skip ready",
+            next_actions=["refresh_bounded_probe_placement_repair_plan"],
+            evidence=placement_summary,
+        ),
+        _gate(
+            "authority_path_patch_readiness_ready",
+            readiness_summary["ready_for_operator_authorization"] is True,
+            status=str(readiness_summary.get("status") or "MISSING"),
+            reason="source readiness must confirm near-touch Adapter and authority-path wiring",
+            next_actions=["refresh_bounded_probe_authority_patch_readiness"],
+            evidence=readiness_summary,
+        ),
+        _gate(
+            "candidate_alignment",
+            aligned,
+            status="ALIGNED" if aligned else "MISMATCH",
+            reason="preflight, placement plan, and source readiness must name the same side-cell/horizon",
+            next_actions=["regenerate_artifacts_for_one_matching_side_cell"],
+            evidence={
+                "preflight_candidate": preflight_summary.get("candidate"),
+                "placement_candidate": placement_summary.get("candidate"),
+                "readiness_candidate": readiness_summary.get("candidate"),
+            },
+        ),
+        _gate(
+            "authorization_id_present",
+            (not authorization_requested) or bool(auth_id),
+            status="PRESENT" if auth_id else "MISSING",
+            reason="authorization requires a durable authorization id",
+            next_actions=["set_authorization_id_before_authorizing_probe"],
+        ),
+        _gate(
+            "operator_id_present",
+            (not authorization_requested) or bool(operator),
+            status="PRESENT" if operator else "MISSING",
+            reason="authorization requires a non-empty operator id",
+            next_actions=["set_operator_id_before_authorizing_probe"],
+        ),
+        _gate(
+            "probe_budget_valid",
+            (not authorization_requested) or budget_valid,
+            status="VALID" if budget_valid else "MISSING_OR_EXCEEDS_SOURCE_LIMIT",
+            reason="authorized probe orders must be positive and no larger than the source plan budget",
+            next_actions=["set_max_authorized_probe_orders_lte_source_budget"],
+            evidence={
+                "requested_max_authorized_probe_orders": requested_budget,
+                "source_candidate_max_probe_orders": candidate_budget,
+            },
+        ),
+        _gate(
+            "authorization_expiry_valid",
+            (not authorization_requested) or expiry_valid,
+            status="VALID" if expiry_valid else "MISSING_OR_INVALID",
+            reason="authorization expiry must be future-dated and within the allowed TTL cap",
+            next_actions=["set_short_future_expires_at_utc_before_authorization"],
+            evidence={
+                "expires_at_utc": expires_text or None,
+                "max_authorization_ttl_hours": max_authorization_ttl_hours,
+            },
+        ),
+        _gate(
+            "typed_confirm_matches",
+            (not authorization_requested) or typed_confirm_matches,
+            status="MATCH" if typed_confirm_matches else "MISSING_OR_MISMATCH",
+            reason="authorization requires the exact typed confirmation phrase",
+            next_actions=["copy_exact_typed_confirm_from_authorization_packet"],
+            evidence={
+                "typed_confirm_expected": expected_confirm,
+                "typed_confirm_provided": bool(provided_confirm),
+                "typed_confirm_matches": typed_confirm_matches,
+            },
+        ),
+    ]
+    failed_gates = [gate for gate in gates if gate["passed"] is not True]
+    status = _status_from_gates(
+        decision=normalized_decision,
+        authorization_requested=authorization_requested,
+        failed_gates=failed_gates,
+    )
+    authorized = status == BOUNDED_PROBE_AUTHORIZED_STATUS
+    operator_authorization = (
+        _authorization_object(
+            authorization_id=auth_id,
+            operator_id=operator,
+            side_cell_key=side_cell_key,
+            expires_at_utc=expires_text,
+            max_authorized_probe_orders=requested_budget,
+        )
+        if authorized
+        else None
+    )
+    if authorized:
+        next_actions = [
+            "operator_review_plan_inclusion_of_bounded_probe_operator_authorization",
+            "keep_main_cost_gate_adjustment_none",
+            "after_probe_refresh_order_to_fill_result_and_execution_realism_reviews",
+        ]
+    elif status == READY_REVIEW_STATUS:
+        next_actions = [
+            "operator_may_authorize_bounded_demo_probe_with_exact_typed_confirm",
+            "do_not_edit_plan_or_enable_writer_until_authorization_artifact_is_reviewed",
+        ]
+    elif status == REJECTED_STATUS:
+        next_actions = [
+            "keep_main_cost_gate_unchanged_and_continue_learning_collection",
+            "do_not_include_operator_authorization_in_any_plan_for_this_review",
+        ]
+    else:
+        next_actions = _dedupe(
+            [
+                action
+                for gate in failed_gates
+                for action in _list(gate.get("next_actions"))
+            ]
+        )
+
+    return {
+        "schema_version": OPERATOR_AUTHORIZATION_PACKET_SCHEMA_VERSION,
+        "generated_at_utc": now.isoformat(),
+        "status": status,
+        "reason": ";".join(gate["name"] for gate in failed_gates)
+        or normalized_decision,
+        "decision": normalized_decision,
+        "review_scope": "operator_authorization_artifact_only_not_plan_mutation",
+        "operator_id": operator or None,
+        "authorization_id": auth_id or None,
+        "review_note": _str(review_note) or None,
+        "candidate": candidate,
+        "source_candidate_max_probe_orders": candidate_budget,
+        "requested_max_authorized_probe_orders": requested_budget or None,
+        "expires_at_utc": expires_text or None,
+        "operator_authorization": operator_authorization,
+        "gates": gates,
+        "blocking_gate_count": len(failed_gates),
+        "blocking_gates": [gate["name"] for gate in failed_gates],
+        "next_actions": next_actions,
+        "typed_confirm_expected": expected_confirm,
+        "typed_confirm_provided": bool(provided_confirm),
+        "typed_confirm_matches": typed_confirm_matches,
+        "answers": {
+            "ready_for_operator_authorization_review": status == READY_REVIEW_STATUS,
+            "bounded_demo_probe_authorized": authorized,
+            "operator_authorization_object_emitted": operator_authorization is not None,
+            "plan_mutation_performed": False,
+            "writer_enabled": False,
+            "order_submission_performed": False,
+            "runtime_mutation_performed": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "promotion_evidence": False,
+            "active_runtime_probe_authority": False,
+            "active_runtime_order_authority": False,
+            "probe_authority_granted_in_authorization_object": authorized,
+            "order_authority_granted_in_authorization_object": authorized,
+        },
+        "artifacts": artifacts,
+        "preflight": preflight_summary,
+        "placement_repair_plan": placement_summary,
+        "authority_patch_readiness": readiness_summary,
+        "boundary": BOUNDARY,
+    }
