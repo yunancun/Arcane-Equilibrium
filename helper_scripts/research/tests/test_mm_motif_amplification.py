@@ -65,10 +65,11 @@ def test_mm_motif_amplification_ranks_repeated_near_miss_motif():
     assert top["motif_key"] == "low_friction_motif|spread_combo|recent_trade_imbalance"
     assert top["status"] == "MOTIF_REPEATS_DISTINCT_DATES_INSUFFICIENT"
     assert top["bottleneck_leg"] == "train"
-    assert top["min_train_holdout_gross_bps"] == 1.032
+    assert top["best_cell_min_train_holdout_gross_bps"] == 1.032
+    assert top["min_train_holdout_gross_bps"] == 1.2
     assert top["current_fee_round_trip_bps"] == 4.0
-    assert top["min_gross_gap_to_current_fee_bps"] == 2.968
-    assert top["required_uplift_multiple"] == 3.876
+    assert top["min_gross_gap_to_current_fee_bps"] == 2.8
+    assert top["required_uplift_multiple"] == 3.3333
     assert top["distinct_dates_remaining"] == 2
     assert top["search_constraint"] == (
         "preserve_repeated_motif_axes_and_require_train_holdout_sample_gated_"
