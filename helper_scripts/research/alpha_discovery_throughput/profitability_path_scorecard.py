@@ -1834,6 +1834,28 @@ def _best_history_current_fee_cell(
     return {}
 
 
+def _merge_cells_by_key(cells: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for raw in cells:
+        cell = dict(raw)
+        key = _cell_key_from_fields(_str(cell.get("source")) or "fillsim", cell)
+        cell.setdefault("key", key)
+        prev = merged.get(key)
+        if prev is None:
+            merged[key] = cell
+            continue
+        if _cell_rank(cell) > _cell_rank(prev):
+            primary, secondary = cell, prev
+        else:
+            primary, secondary = prev, cell
+        enriched = dict(primary)
+        for field, value in secondary.items():
+            if enriched.get(field) in (None, "") and value not in (None, ""):
+                enriched[field] = value
+        merged[key] = enriched
+    return list(merged.values())
+
+
 def _mm_current_fee_confirmation_status(
     history_status: str,
     current_fee_positive_windows: int,
@@ -1859,6 +1881,7 @@ def _mm_current_fee_confirmation_path(
     cells = [cell for cell in cells if (_float(cell.get("net_bps")) or 0.0) > 0.0]
     if not cells:
         return []
+    cells = _merge_cells_by_key(cells)
     cells.sort(key=_cell_rank, reverse=True)
     cell = cells[0]
     sensitivity = _dict(_dict(fillsim).get("maker_fee_sensitivity_scorecard"))

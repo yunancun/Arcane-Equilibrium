@@ -1615,6 +1615,7 @@ def test_mm_current_fee_positive_cell_becomes_confirmation_path() -> None:
     assert top["evidence"]["symbol"] == "SOXLUSDT"
     assert top["evidence"]["policy"] == "informed_skip"
     assert top["evidence"]["net_bps"] == 0.715
+    assert top["evidence"]["break_even_maker_fee_bps_per_side"] == 2.357
     assert top["evidence"]["history_status"] == (
         "HISTORY_SINGLE_WINDOW_CURRENT_FEE_POSITIVE_NEEDS_CONFIRMATION"
     )
