@@ -1894,6 +1894,10 @@ def _mm_signal_search_directive(
         status = "SEARCH_REQUIRED_TRAIN_CONFIRMATION"
         failure_mode = "holdout_current_fee_candidate_not_train_confirmed"
         search_focus = "stabilize_holdout_current_fee_candidate_train_leg"
+    elif current_fee_positive_count > 0:
+        status = "SEARCH_REQUIRED_WALK_FORWARD_CONFIRMATION"
+        failure_mode = "current_fee_candidate_lacks_train_holdout_walk_forward_confirmation"
+        search_focus = "confirm_current_fee_candidate_in_train_holdout_walk_forward"
     elif gap is not None and gap > 0:
         status = "SEARCH_REQUIRED_EDGE_UPLIFT"
         search_focus = "amplify_train_confirmed_low_friction_candidate_shape"
@@ -4256,6 +4260,53 @@ def classify_profitability_blocker(
                     "candidate_count": failure.get("candidate_count"),
                     "best_train_candidate": failure.get("best_train_candidate"),
                     "best_holdout_candidate": failure.get("best_holdout_candidate"),
+                    "gross_edge_decomposition_status": gross_status,
+                    "current_fee_positive_sample_gated_cell_count": gross_decomp.get(
+                        "current_fee_positive_sample_gated_cell_count"
+                    ),
+                    "cost_wall_escape_status": escape_scorecard.get("status"),
+                    "cost_wall_escape_reason": escape_scorecard.get("reason"),
+                    "cost_wall_escape_scorecard": escape_scorecard,
+                    "required_current_fee_gross_edge_bps": (
+                        escape_scorecard.get("required_current_fee_gross_edge_bps")
+                    ),
+                    "gross_edge_gap_to_current_fee_bps": (
+                        escape_scorecard.get("gross_edge_gap_to_current_fee_bps")
+                    ),
+                    "gross_edge_multiple_to_clear_current_fee": (
+                        escape_scorecard.get("gross_edge_multiple_to_clear_current_fee")
+                    ),
+                    "best_sample_gated_gross_edge_bps": (
+                        escape_scorecard.get("best_sample_gated_gross_edge_bps")
+                    ),
+                    "best_gross_cell_net_bps": (
+                        escape_scorecard.get("best_gross_cell_net_bps")
+                    ),
+                    "low_friction_gross_stability_status": (
+                        escape_scorecard.get("low_friction_gross_stability_status")
+                    ),
+                    "low_friction_gross_stability_reason": (
+                        escape_scorecard.get("low_friction_gross_stability_reason")
+                    ),
+                    "low_friction_train_confirmed_gross_status": (
+                        escape_scorecard.get(
+                            "low_friction_train_confirmed_gross_status"
+                        )
+                    ),
+                    "low_friction_best_train_confirmed_min_gross_bps": (
+                        escape_scorecard.get(
+                            "low_friction_best_train_confirmed_min_gross_bps"
+                        )
+                    ),
+                    "low_friction_train_confirmed_gap_to_current_fee_bps": (
+                        escape_scorecard.get(
+                            "low_friction_train_confirmed_gap_to_current_fee_bps"
+                        )
+                    ),
+                    "business_path_actionability_status": business_actionability.get(
+                        "status"
+                    ),
+                    **signal_search_extra,
                 },
             )
         if failure_status == "TRAIN_POSITIVE_HOLDOUT_DECAY":
