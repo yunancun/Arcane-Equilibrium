@@ -321,6 +321,14 @@ def build_healthcheck(
         lane_dir / "bounded_probe_execution_realism_review_latest.json",
         now_utc=now,
     )
+    false_negative_candidate_packet = _artifact_status(
+        lane_dir / "false_negative_candidate_packet_latest.json",
+        now_utc=now,
+    )
+    false_negative_operator_review = _artifact_status(
+        lane_dir / "false_negative_operator_review_latest.json",
+        now_utc=now,
+    )
 
     cost_rcs = [
         cost_status.get("scorecard_rc"),
@@ -328,6 +336,8 @@ def build_healthcheck(
         cost_status.get("materializer_rc"),
         cost_status.get("refresh_rc"),
         cost_status.get("review_rc"),
+        cost_status.get("false_negative_candidate_packet_rc"),
+        cost_status.get("false_negative_operator_review_rc"),
         cost_status.get("bounded_probe_result_review_rc"),
         cost_status.get("bounded_probe_execution_realism_review_rc"),
     ]
@@ -353,6 +363,20 @@ def build_healthcheck(
     )
     bounded_reviews_present = (
         bounded_result_review["present"] and bounded_execution_review["present"]
+    )
+    false_negative_review_chain_present = (
+        false_negative_candidate_packet["present"]
+        and false_negative_operator_review["present"]
+    )
+    false_negative_review_chain_recent = (
+        _is_recent(
+            false_negative_candidate_packet["age_seconds"],
+            max_status_age_seconds,
+        )
+        and _is_recent(
+            false_negative_operator_review["age_seconds"],
+            max_status_age_seconds,
+        )
     )
     ledger_rows = cost_status.get("ledger_row_count")
     blocked_outcomes = (
@@ -407,6 +431,18 @@ def build_healthcheck(
         status = "BOUNDED_PROBE_PREFLIGHT_MISSING"
         reason = "sealed_horizon_probe_preflight_latest_missing_or_unreadable"
         next_action = "refresh_sealed_horizon_probe_preflight_before_bounded_probe_reviews"
+    elif not false_negative_candidate_packet["present"]:
+        status = "FALSE_NEGATIVE_CANDIDATE_PACKET_MISSING"
+        reason = "blocked_outcomes_present_but_false_negative_candidate_packet_missing"
+        next_action = "rerun_cost_gate_learning_lane_cron_to_refresh_false_negative_packet"
+    elif not false_negative_operator_review["present"]:
+        status = "FALSE_NEGATIVE_OPERATOR_REVIEW_MISSING"
+        reason = "false_negative_candidate_packet_present_but_defer_review_missing"
+        next_action = "rerun_cost_gate_learning_lane_cron_to_refresh_false_negative_operator_review"
+    elif not false_negative_review_chain_recent:
+        status = "FALSE_NEGATIVE_REVIEW_CHAIN_STALE"
+        reason = "false_negative_candidate_or_operator_review_artifact_stale"
+        next_action = "rerun_cost_gate_learning_lane_cron_to_refresh_false_negative_review_chain"
     elif not bounded_reviews_present:
         status = "BOUNDED_PROBE_REVIEW_ARTIFACTS_MISSING"
         reason = "bounded_probe_result_or_execution_realism_review_latest_missing_or_unreadable"
@@ -451,6 +487,20 @@ def build_healthcheck(
             "cost_gate_learning_lane_status_recent": cost["latest_status_recent"],
             "latest_artifacts_present": latest_artifacts_present,
             "sealed_horizon_probe_preflight_present": sealed_preflight["present"],
+            "false_negative_review_chain_present": false_negative_review_chain_present,
+            "false_negative_review_chain_recent": false_negative_review_chain_recent,
+            "false_negative_candidate_packet_present": (
+                false_negative_candidate_packet["present"]
+            ),
+            "false_negative_operator_review_present": (
+                false_negative_operator_review["present"]
+            ),
+            "false_negative_candidate_packet_status": (
+                false_negative_candidate_packet["status"]
+            ),
+            "false_negative_operator_review_status": (
+                false_negative_operator_review["status"]
+            ),
             "bounded_probe_reviews_present": bounded_reviews_present,
             "bounded_probe_result_review_present": bounded_result_review["present"],
             "bounded_probe_execution_realism_review_present": (
@@ -480,6 +530,8 @@ def build_healthcheck(
             "sealed_horizon_probe_preflight_cron": sealed_preflight_cron,
             "cost_gate_learning_lane": cost,
             "sealed_horizon_probe_preflight": sealed_preflight,
+            "false_negative_candidate_packet": false_negative_candidate_packet,
+            "false_negative_operator_review": false_negative_operator_review,
             "bounded_probe_result_review": bounded_result_review,
             "bounded_probe_execution_realism_review": bounded_execution_review,
         },

@@ -112,9 +112,16 @@ def normalize_reject_reason_code(value: Any) -> str:
     lowered = text.lower()
     if lowered == ELIGIBLE_REJECT_REASON_CODE:
         return ELIGIBLE_REJECT_REASON_CODE
-    if "cost_gate(js-demo)" in lowered and "negative" in lowered:
+    negative_markers = (
+        "negative" in lowered
+        or "estimated=-" in lowered
+        or "< 0" in lowered
+        or "負估計" in text
+        or "負" in text and "阻擋" in text
+    )
+    if "cost_gate(js-demo)" in lowered and negative_markers:
         return ELIGIBLE_REJECT_REASON_CODE
-    if "cost_gate" in lowered and "js-demo" in lowered and "negative" in lowered:
+    if "cost_gate" in lowered and "js-demo" in lowered and negative_markers:
         return ELIGIBLE_REJECT_REASON_CODE
     return lowered
 

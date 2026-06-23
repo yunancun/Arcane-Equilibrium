@@ -134,11 +134,19 @@ def _populate_active_data(data_dir: Path) -> None:
                 "materializer_rc": 0,
                 "refresh_rc": 0,
                 "review_rc": 0,
+                "false_negative_candidate_packet_rc": 0,
+                "false_negative_operator_review_rc": 0,
                 "bounded_probe_result_review_rc": 0,
                 "bounded_probe_execution_realism_review_rc": 0,
                 "ledger_row_count": 9,
                 "blocked_signal_outcome_count": 4,
                 "review_status": "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT",
+                "false_negative_candidate_packet_status": (
+                    "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW"
+                ),
+                "false_negative_operator_review_status": (
+                    "COST_GATE_FALSE_NEGATIVE_OPERATOR_REVIEW_DEFERRED"
+                ),
             },
             sort_keys=True,
         )
@@ -165,6 +173,27 @@ def _populate_active_data(data_dir: Path) -> None:
                 "schema_version": "sealed_horizon_bounded_demo_probe_preflight_v1",
                 "generated_at_utc": "2026-06-21T23:57:00Z",
                 "status": "OPERATOR_REVIEW_REQUIRED",
+            }
+        ),
+    )
+    _write(
+        data_dir / "cost_gate_learning_lane/false_negative_candidate_packet_latest.json",
+        json.dumps(
+            {
+                "schema_version": "cost_gate_false_negative_candidate_packet_v1",
+                "generated_at_utc": "2026-06-21T23:57:10Z",
+                "status": "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW",
+            }
+        ),
+    )
+    _write(
+        data_dir / "cost_gate_learning_lane/false_negative_operator_review_latest.json",
+        json.dumps(
+            {
+                "schema_version": "cost_gate_false_negative_operator_review_v1",
+                "generated_at_utc": "2026-06-21T23:57:20Z",
+                "status": "COST_GATE_FALSE_NEGATIVE_OPERATOR_REVIEW_DEFERRED",
+                "decision": "defer",
             }
         ),
     )

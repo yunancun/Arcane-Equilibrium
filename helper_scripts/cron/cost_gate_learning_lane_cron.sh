@@ -38,6 +38,7 @@ FALSE_NEGATIVE_CANDIDATE_PACKET_MD="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDIDAT
 FALSE_NEGATIVE_OPERATOR_REVIEW_JSON="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_OPERATOR_REVIEW_JSON:-$LANE_DIR/false_negative_operator_review_latest.json}"
 FALSE_NEGATIVE_OPERATOR_REVIEW_MD="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_OPERATOR_REVIEW_MD:-$LANE_DIR/false_negative_operator_review_latest.md}"
 ACTIVATION_PREFLIGHT_JSON="${OPENCLAW_COST_GATE_ACTIVATION_PREFLIGHT_JSON:-$LANE_DIR/activation_preflight_latest.json}"
+PIPELINE_SNAPSHOT_JSON="${OPENCLAW_COST_GATE_LEARNING_PIPELINE_SNAPSHOT_JSON:-$DATA/pipeline_snapshot.json}"
 SEALED_LEARNING_EVIDENCE_JSON="${OPENCLAW_COST_GATE_SEALED_HORIZON_LEARNING_EVIDENCE_JSON:-$LANE_DIR/sealed_horizon_learning_evidence_latest.json}"
 SEALED_PREFLIGHT_JSON="${OPENCLAW_COST_GATE_BOUNDED_PROBE_PREFLIGHT_JSON:-$LANE_DIR/sealed_horizon_probe_preflight_latest.json}"
 BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_JSON="${OPENCLAW_COST_GATE_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_JSON:-$LANE_DIR/bounded_probe_authority_patch_readiness_latest.json}"
@@ -404,6 +405,7 @@ MATERIALIZER_ARGS=(
     --lookback-hours "$MATERIALIZER_LOOKBACK_HOURS"
     --limit "$MATERIALIZER_LIMIT"
     --pg-statement-timeout-ms "$PG_STATEMENT_TIMEOUT_MS"
+    --snapshot-json "$PIPELINE_SNAPSHOT_JSON"
     --output "$MATERIALIZER_OUT"
 )
 if [[ "$APPEND_MATERIALIZED_REJECTS" == "1" ]]; then
@@ -1142,6 +1144,14 @@ status = {
     "materializer_materialized_record_count": materializer.get("materialized_record_count"),
     "materializer_appended_record_count": materializer.get("appended_record_count"),
     "materializer_decision_counts": materializer.get("decision_counts"),
+    "materializer_source_counts": materializer.get("source_counts"),
+    "materializer_snapshot_json_path": materializer.get("snapshot_json_path"),
+    "materializer_snapshot_json_error": materializer.get("snapshot_json_error"),
+    "materializer_snapshot_input_row_count": (
+        (materializer.get("source_counts") or {}).get("snapshot_input_row_count")
+        if isinstance(materializer.get("source_counts"), dict)
+        else None
+    ),
     "refresh_artifact_path": os.environ["REFRESH_OUT"],
     "refresh_sha256": refresh_sha,
     "refresh_error": refresh_err,

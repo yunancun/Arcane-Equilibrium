@@ -98,11 +98,19 @@ def _populate_active_data(data_dir: Path) -> None:
                 "materializer_rc": 0,
                 "refresh_rc": 0,
                 "review_rc": 0,
+                "false_negative_candidate_packet_rc": 0,
+                "false_negative_operator_review_rc": 0,
                 "bounded_probe_result_review_rc": 0,
                 "bounded_probe_execution_realism_review_rc": 0,
                 "ledger_row_count": 9,
                 "blocked_signal_outcome_count": 4,
                 "review_status": "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT",
+                "false_negative_candidate_packet_status": (
+                    "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW"
+                ),
+                "false_negative_operator_review_status": (
+                    "COST_GATE_FALSE_NEGATIVE_OPERATOR_REVIEW_DEFERRED"
+                ),
                 "bounded_probe_result_review_status": "NO_PROBE_OUTCOMES_RECORDED",
                 "bounded_probe_execution_realism_review_status": "NO_EXECUTION_REALISM_GAP_TO_REVIEW",
             },
@@ -144,6 +152,27 @@ def _populate_active_data(data_dir: Path) -> None:
                 "schema_version": "sealed_horizon_bounded_demo_probe_preflight_v1",
                 "generated_at_utc": "2026-06-21T23:57:00Z",
                 "status": "OPERATOR_REVIEW_REQUIRED",
+            }
+        ),
+    )
+    _write(
+        data_dir / "cost_gate_learning_lane/false_negative_candidate_packet_latest.json",
+        json.dumps(
+            {
+                "schema_version": "cost_gate_false_negative_candidate_packet_v1",
+                "generated_at_utc": "2026-06-21T23:57:10Z",
+                "status": "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW",
+            }
+        ),
+    )
+    _write(
+        data_dir / "cost_gate_learning_lane/false_negative_operator_review_latest.json",
+        json.dumps(
+            {
+                "schema_version": "cost_gate_false_negative_operator_review_v1",
+                "generated_at_utc": "2026-06-21T23:57:20Z",
+                "status": "COST_GATE_FALSE_NEGATIVE_OPERATOR_REVIEW_DEFERRED",
+                "decision": "defer",
             }
         ),
     )
@@ -212,6 +241,10 @@ def test_active_stack_reports_evidence_active(tmp_path: Path) -> None:
     assert payload["answers"]["cost_gate_learning_ledger_rows_present"] is True
     assert payload["answers"]["blocked_signal_outcomes_present"] is True
     assert payload["answers"]["sealed_horizon_probe_preflight_present"] is True
+    assert payload["answers"]["false_negative_review_chain_present"] is True
+    assert payload["answers"]["false_negative_review_chain_recent"] is True
+    assert payload["answers"]["false_negative_candidate_packet_present"] is True
+    assert payload["answers"]["false_negative_operator_review_present"] is True
     assert payload["answers"]["bounded_probe_reviews_present"] is True
     assert payload["answers"]["bounded_probe_result_review_present"] is True
     assert (
@@ -225,6 +258,14 @@ def test_active_stack_reports_evidence_active(tmp_path: Path) -> None:
         "latest_status"
     ]["status"] == "OPERATOR_REVIEW_REQUIRED"
     assert payload["components"]["bounded_probe_result_review"]["present"] is True
+    assert (
+        payload["components"]["false_negative_candidate_packet"]["status"]
+        == "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW"
+    )
+    assert (
+        payload["components"]["false_negative_operator_review"]["status"]
+        == "COST_GATE_FALSE_NEGATIVE_OPERATOR_REVIEW_DEFERRED"
+    )
     assert (
         payload["components"]["bounded_probe_execution_realism_review"]["present"]
         is True
@@ -352,6 +393,82 @@ def test_missing_bounded_probe_reviews_block_active_status(tmp_path: Path) -> No
     )
     assert payload["next_action"] == (
         "rerun_cost_gate_learning_lane_cron_after_sealed_preflight_refresh"
+    )
+
+
+def test_missing_false_negative_candidate_packet_blocks_active_status(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    head = _git_repo(repo)
+    data = tmp_path / "data"
+    _populate_active_data(data)
+    (
+        data
+        / "cost_gate_learning_lane/false_negative_candidate_packet_latest.json"
+    ).unlink()
+
+    payload = _run(tmp_path, data, repo, _active_crontab(), head)
+
+    assert payload["status"] == "FALSE_NEGATIVE_CANDIDATE_PACKET_MISSING"
+    assert payload["answers"]["blocked_signal_outcomes_present"] is True
+    assert payload["answers"]["false_negative_review_chain_present"] is False
+    assert payload["answers"]["false_negative_candidate_packet_present"] is False
+    assert payload["answers"]["false_negative_operator_review_present"] is True
+    assert payload["next_action"] == (
+        "rerun_cost_gate_learning_lane_cron_to_refresh_false_negative_packet"
+    )
+
+
+def test_missing_false_negative_operator_review_blocks_active_status(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    head = _git_repo(repo)
+    data = tmp_path / "data"
+    _populate_active_data(data)
+    (
+        data
+        / "cost_gate_learning_lane/false_negative_operator_review_latest.json"
+    ).unlink()
+
+    payload = _run(tmp_path, data, repo, _active_crontab(), head)
+
+    assert payload["status"] == "FALSE_NEGATIVE_OPERATOR_REVIEW_MISSING"
+    assert payload["answers"]["blocked_signal_outcomes_present"] is True
+    assert payload["answers"]["false_negative_review_chain_present"] is False
+    assert payload["answers"]["false_negative_candidate_packet_present"] is True
+    assert payload["answers"]["false_negative_operator_review_present"] is False
+    assert payload["next_action"] == (
+        "rerun_cost_gate_learning_lane_cron_to_refresh_false_negative_operator_review"
+    )
+
+
+def test_stale_false_negative_candidate_packet_blocks_active_status(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    head = _git_repo(repo)
+    data = tmp_path / "data"
+    _populate_active_data(data)
+    _write(
+        data / "cost_gate_learning_lane/false_negative_candidate_packet_latest.json",
+        json.dumps(
+            {
+                "schema_version": "cost_gate_false_negative_candidate_packet_v1",
+                "generated_at_utc": "2026-06-21T20:00:00Z",
+                "status": "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW",
+            }
+        ),
+    )
+
+    payload = _run(tmp_path, data, repo, _active_crontab(), head)
+
+    assert payload["status"] == "FALSE_NEGATIVE_REVIEW_CHAIN_STALE"
+    assert payload["answers"]["false_negative_review_chain_present"] is True
+    assert payload["answers"]["false_negative_review_chain_recent"] is False
+    assert payload["next_action"] == (
+        "rerun_cost_gate_learning_lane_cron_to_refresh_false_negative_review_chain"
     )
 
 
