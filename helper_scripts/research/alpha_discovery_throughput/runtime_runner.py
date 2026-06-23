@@ -2071,6 +2071,151 @@ def _bounded_probe_shadow_placement_impact_path(lane_dir: Path) -> Path:
     return candidates[0] if candidates else canonical
 
 
+def _bounded_probe_operator_authorization_path(lane_dir: Path) -> Path:
+    canonical = lane_dir / "bounded_probe_operator_authorization_latest.json"
+    if canonical.exists():
+        return canonical
+    candidates = sorted(
+        lane_dir.glob(
+            "bounded_probe_operator_authorization*/"
+            "bounded_probe_operator_authorization_latest.json"
+        ),
+        key=lambda path: str(path),
+        reverse=True,
+    )
+    return candidates[0] if candidates else canonical
+
+
+def summarize_bounded_probe_operator_authorization(
+    data_dir: Path,
+    *,
+    now_utc: dt.datetime,
+    max_age_seconds: int = DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS,
+) -> dict[str, Any]:
+    """Summarize bounded Demo-probe operator authorization packet if present."""
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    path = _bounded_probe_operator_authorization_path(lane_dir)
+    payload, err = _read_json(path)
+    if err:
+        return {
+            "bounded_probe_operator_authorization_present": False,
+            "bounded_probe_operator_authorization_source_path": str(path),
+            "bounded_probe_operator_authorization_source_error": err,
+        }
+    assert payload is not None
+    generated_at = payload.get("generated_at_utc")
+    fresh, age, freshness_error = _source_fresh(
+        generated_at,
+        now_utc=now_utc,
+        max_age_seconds=max_age_seconds,
+    )
+    candidate = payload.get("candidate")
+    if not isinstance(candidate, dict):
+        candidate = {}
+    answers = payload.get("answers")
+    if not isinstance(answers, dict):
+        answers = {}
+    blocking_gates = payload.get("blocking_gates")
+    if not isinstance(blocking_gates, list):
+        blocking_gates = []
+    next_actions = payload.get("next_actions")
+    if not isinstance(next_actions, list):
+        next_actions = []
+    operator_authorization = payload.get("operator_authorization")
+    object_status = (
+        operator_authorization.get("status")
+        if isinstance(operator_authorization, dict)
+        else None
+    )
+    return {
+        "bounded_probe_operator_authorization_present": True,
+        "bounded_probe_operator_authorization_status": payload.get("status"),
+        "bounded_probe_operator_authorization_reason": payload.get("reason"),
+        "bounded_probe_operator_authorization_decision": payload.get("decision"),
+        "bounded_probe_operator_authorization_next_actions": next_actions,
+        "bounded_probe_operator_authorization_generated_at_utc": generated_at,
+        "bounded_probe_operator_authorization_age_seconds": age,
+        "bounded_probe_operator_authorization_source_ok": fresh,
+        "bounded_probe_operator_authorization_source_path": str(path),
+        "bounded_probe_operator_authorization_source_error": freshness_error,
+        "bounded_probe_operator_authorization_side_cell_key": candidate.get(
+            "side_cell_key"
+        ),
+        "bounded_probe_operator_authorization_strategy_name": candidate.get(
+            "strategy_name"
+        ),
+        "bounded_probe_operator_authorization_symbol": candidate.get("symbol"),
+        "bounded_probe_operator_authorization_side": candidate.get("side"),
+        "bounded_probe_operator_authorization_outcome_horizon_minutes": (
+            candidate.get("outcome_horizon_minutes")
+        ),
+        "bounded_probe_operator_authorization_source_candidate_max_probe_orders": (
+            payload.get("source_candidate_max_probe_orders")
+        ),
+        "bounded_probe_operator_authorization_requested_max_probe_orders": (
+            payload.get("requested_max_authorized_probe_orders")
+        ),
+        "bounded_probe_operator_authorization_expires_at_utc": (
+            payload.get("expires_at_utc")
+        ),
+        "bounded_probe_operator_authorization_blocking_gate_count": (
+            payload.get("blocking_gate_count")
+        ),
+        "bounded_probe_operator_authorization_blocking_gates": blocking_gates,
+        "bounded_probe_operator_authorization_typed_confirm_expected": (
+            payload.get("typed_confirm_expected")
+        ),
+        "bounded_probe_operator_authorization_typed_confirm_matches": (
+            payload.get("typed_confirm_matches")
+        ),
+        "bounded_probe_operator_authorization_operator_authorization_status": (
+            object_status
+        ),
+        "bounded_probe_operator_authorization_ready_for_review": answers.get(
+            "ready_for_operator_authorization_review"
+        ),
+        "bounded_probe_operator_authorization_bounded_demo_probe_authorized": (
+            answers.get("bounded_demo_probe_authorized")
+        ),
+        "bounded_probe_operator_authorization_object_emitted": answers.get(
+            "operator_authorization_object_emitted"
+        ),
+        "bounded_probe_operator_authorization_plan_mutation_performed": answers.get(
+            "plan_mutation_performed"
+        ),
+        "bounded_probe_operator_authorization_writer_enabled": answers.get(
+            "writer_enabled"
+        ),
+        "bounded_probe_operator_authorization_order_submission_performed": (
+            answers.get("order_submission_performed")
+        ),
+        "bounded_probe_operator_authorization_runtime_mutation_performed": (
+            answers.get("runtime_mutation_performed")
+        ),
+        "bounded_probe_operator_authorization_global_cost_gate_lowering_recommended": (
+            answers.get("global_cost_gate_lowering_recommended")
+        ),
+        "bounded_probe_operator_authorization_main_cost_gate_adjustment": (
+            answers.get("main_cost_gate_adjustment")
+        ),
+        "bounded_probe_operator_authorization_promotion_evidence": answers.get(
+            "promotion_evidence"
+        ),
+        "bounded_probe_operator_authorization_active_runtime_probe_authority": (
+            answers.get("active_runtime_probe_authority")
+        ),
+        "bounded_probe_operator_authorization_active_runtime_order_authority": (
+            answers.get("active_runtime_order_authority")
+        ),
+        "bounded_probe_operator_authorization_probe_authority_granted_in_object": (
+            answers.get("probe_authority_granted_in_authorization_object")
+        ),
+        "bounded_probe_operator_authorization_order_authority_granted_in_object": (
+            answers.get("order_authority_granted_in_authorization_object")
+        ),
+    }
+
+
 def summarize_bounded_probe_shadow_placement_impact(
     data_dir: Path,
     *,
@@ -2504,6 +2649,12 @@ def collect_cost_gate_learning_lane_arm(
         data_dir,
         now_utc=now_utc,
     )
+    bounded_probe_operator_authorization_summary = (
+        summarize_bounded_probe_operator_authorization(
+            data_dir,
+            now_utc=now_utc,
+        )
+    )
     bounded_probe_shadow_placement_impact_summary = (
         summarize_bounded_probe_shadow_placement_impact(
             data_dir,
@@ -2570,6 +2721,7 @@ def collect_cost_gate_learning_lane_arm(
                 **stack_dry_run_review_summary,
                 **decision_packet_summary,
                 **sealed_probe_preflight_summary,
+                **bounded_probe_operator_authorization_summary,
                 **bounded_probe_shadow_placement_impact_summary,
                 **bounded_probe_result_review_summary,
                 **bounded_probe_execution_realism_review_summary,
@@ -2621,6 +2773,7 @@ def collect_cost_gate_learning_lane_arm(
             **stack_dry_run_review_summary,
             **decision_packet_summary,
             **sealed_probe_preflight_summary,
+            **bounded_probe_operator_authorization_summary,
             **bounded_probe_shadow_placement_impact_summary,
             **bounded_probe_result_review_summary,
             **bounded_probe_execution_realism_review_summary,

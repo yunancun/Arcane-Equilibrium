@@ -183,6 +183,31 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
         if sealed_preflight_next_actions
         else "refresh_sealed_horizon_probe_preflight"
     )
+    operator_auth_present = (
+        detail.get("bounded_probe_operator_authorization_present") is True
+    )
+    operator_auth_source_ok = (
+        detail.get("bounded_probe_operator_authorization_source_ok") is True
+    )
+    operator_auth_status = str(
+        detail.get("bounded_probe_operator_authorization_status") or ""
+    ).upper()
+    operator_auth_next_actions = _list(
+        detail.get("bounded_probe_operator_authorization_next_actions")
+    )
+    operator_auth_next_trigger = (
+        str(operator_auth_next_actions[0])
+        if operator_auth_next_actions
+        else "refresh_bounded_probe_operator_authorization"
+    )
+    operator_auth_active_runtime_authority = (
+        detail.get("bounded_probe_operator_authorization_active_runtime_order_authority")
+        is True
+        or detail.get(
+            "bounded_probe_operator_authorization_active_runtime_probe_authority"
+        )
+        is True
+    )
     shadow_placement_present = (
         detail.get("bounded_probe_shadow_placement_impact_present") is True
     )
@@ -295,6 +320,17 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "engineering_actionable": True,
         }
 
+    if operator_auth_present and not operator_auth_source_ok:
+        return {
+            "action": RUN_READ_ONLY_CAPTURE,
+            "reason": "bounded_probe_operator_authorization_stale_or_unreadable",
+            "blocker_class": "data_coverage",
+            "primary_blocker": "bounded_probe_operator_authorization_not_fresh",
+            "next_trigger": "refresh_bounded_probe_operator_authorization",
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
+
     if shadow_placement_present and not shadow_placement_source_ok:
         return {
             "action": RUN_READ_ONLY_CAPTURE,
@@ -356,6 +392,22 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
                 "bounded_probe_execution_realism_review_authority_boundary_violation"
             ),
             "next_trigger": bounded_execution_review_next_trigger,
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
+
+    if operator_auth_source_ok and (
+        operator_auth_status == "AUTHORITY_BOUNDARY_VIOLATION"
+        or operator_auth_active_runtime_authority
+    ):
+        return {
+            "action": BLOCK,
+            "reason": "bounded_probe_operator_authorization_authority_boundary_violation",
+            "blocker_class": "source_health",
+            "primary_blocker": (
+                "bounded_probe_operator_authorization_authority_boundary_violation"
+            ),
+            "next_trigger": operator_auth_next_trigger,
             "operator_actionable": False,
             "engineering_actionable": True,
         }
@@ -531,6 +583,69 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
                 "next_trigger": bounded_review_next_trigger,
                 "operator_actionable": True,
                 "engineering_actionable": True,
+            }
+
+    if operator_auth_source_ok:
+        if operator_auth_status == "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW":
+            return {
+                "action": READY_FOR_PROBE,
+                "reason": (
+                    "bounded_probe_operator_authorization_ready_for_operator_review"
+                ),
+                "blocker_class": "probe_ready",
+                "primary_blocker": (
+                    "bounded_probe_operator_authorization_ready_for_operator_review"
+                ),
+                "next_trigger": operator_auth_next_trigger,
+                "operator_actionable": True,
+                "engineering_actionable": True,
+            }
+        if operator_auth_status == "BOUNDED_DEMO_PROBE_AUTHORIZED":
+            return {
+                "action": READY_FOR_PROBE,
+                "reason": (
+                    "bounded_probe_operator_authorization_object_review_required"
+                ),
+                "blocker_class": "probe_ready",
+                "primary_blocker": (
+                    "bounded_probe_operator_authorization_object_review_required"
+                ),
+                "next_trigger": operator_auth_next_trigger,
+                "operator_actionable": True,
+                "engineering_actionable": True,
+            }
+        if operator_auth_status in {
+            "SEALED_HORIZON_PREFLIGHT_NOT_READY",
+            "PLACEMENT_REPAIR_PLAN_NOT_READY",
+            "AUTHORITY_PATH_PATCH_NOT_READY",
+            "CANDIDATE_ALIGNMENT_MISMATCH",
+            "AUTHORIZATION_ID_REQUIRED",
+            "OPERATOR_ID_REQUIRED",
+            "PROBE_BUDGET_REQUIRED_OR_EXCEEDS_SOURCE_LIMIT",
+            "AUTHORIZATION_EXPIRY_REQUIRED_OR_INVALID",
+            "TYPED_CONFIRM_REQUIRED",
+        }:
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "bounded_probe_operator_authorization_gates_not_ready",
+                "blocker_class": "data_coverage",
+                "primary_blocker": (
+                    "bounded_probe_operator_authorization_gates_not_ready"
+                ),
+                "next_trigger": operator_auth_next_trigger,
+                "operator_actionable": operator_auth_status in {
+                    "AUTHORIZATION_ID_REQUIRED",
+                    "OPERATOR_ID_REQUIRED",
+                    "PROBE_BUDGET_REQUIRED_OR_EXCEEDS_SOURCE_LIMIT",
+                    "AUTHORIZATION_EXPIRY_REQUIRED_OR_INVALID",
+                    "TYPED_CONFIRM_REQUIRED",
+                },
+                "engineering_actionable": operator_auth_status in {
+                    "SEALED_HORIZON_PREFLIGHT_NOT_READY",
+                    "PLACEMENT_REPAIR_PLAN_NOT_READY",
+                    "AUTHORITY_PATH_PATCH_NOT_READY",
+                    "CANDIDATE_ALIGNMENT_MISMATCH",
+                },
             }
 
     if shadow_placement_source_ok:
@@ -3024,6 +3139,96 @@ def classify_profitability_blocker(
                 ),
                 "sealed_horizon_probe_preflight_promotion_evidence": detail.get(
                     "sealed_horizon_probe_preflight_promotion_evidence"
+                ),
+                "bounded_probe_operator_authorization_present": detail.get(
+                    "bounded_probe_operator_authorization_present"
+                ),
+                "bounded_probe_operator_authorization_status": detail.get(
+                    "bounded_probe_operator_authorization_status"
+                ),
+                "bounded_probe_operator_authorization_reason": detail.get(
+                    "bounded_probe_operator_authorization_reason"
+                ),
+                "bounded_probe_operator_authorization_decision": detail.get(
+                    "bounded_probe_operator_authorization_decision"
+                ),
+                "bounded_probe_operator_authorization_next_actions": detail.get(
+                    "bounded_probe_operator_authorization_next_actions"
+                ),
+                "bounded_probe_operator_authorization_generated_at_utc": detail.get(
+                    "bounded_probe_operator_authorization_generated_at_utc"
+                ),
+                "bounded_probe_operator_authorization_source_ok": detail.get(
+                    "bounded_probe_operator_authorization_source_ok"
+                ),
+                "bounded_probe_operator_authorization_source_path": detail.get(
+                    "bounded_probe_operator_authorization_source_path"
+                ),
+                "bounded_probe_operator_authorization_source_error": detail.get(
+                    "bounded_probe_operator_authorization_source_error"
+                ),
+                "bounded_probe_operator_authorization_side_cell_key": detail.get(
+                    "bounded_probe_operator_authorization_side_cell_key"
+                ),
+                "bounded_probe_operator_authorization_outcome_horizon_minutes": (
+                    detail.get(
+                        "bounded_probe_operator_authorization_outcome_horizon_minutes"
+                    )
+                ),
+                "bounded_probe_operator_authorization_source_candidate_max_probe_orders": (
+                    detail.get(
+                        "bounded_probe_operator_authorization_source_candidate_max_probe_orders"
+                    )
+                ),
+                "bounded_probe_operator_authorization_requested_max_probe_orders": (
+                    detail.get(
+                        "bounded_probe_operator_authorization_requested_max_probe_orders"
+                    )
+                ),
+                "bounded_probe_operator_authorization_blocking_gate_count": detail.get(
+                    "bounded_probe_operator_authorization_blocking_gate_count"
+                ),
+                "bounded_probe_operator_authorization_blocking_gates": detail.get(
+                    "bounded_probe_operator_authorization_blocking_gates"
+                ),
+                "bounded_probe_operator_authorization_typed_confirm_expected": (
+                    detail.get(
+                        "bounded_probe_operator_authorization_typed_confirm_expected"
+                    )
+                ),
+                "bounded_probe_operator_authorization_ready_for_review": detail.get(
+                    "bounded_probe_operator_authorization_ready_for_review"
+                ),
+                "bounded_probe_operator_authorization_bounded_demo_probe_authorized": (
+                    detail.get(
+                        "bounded_probe_operator_authorization_bounded_demo_probe_authorized"
+                    )
+                ),
+                "bounded_probe_operator_authorization_object_emitted": detail.get(
+                    "bounded_probe_operator_authorization_object_emitted"
+                ),
+                "bounded_probe_operator_authorization_active_runtime_order_authority": (
+                    detail.get(
+                        "bounded_probe_operator_authorization_active_runtime_order_authority"
+                    )
+                ),
+                "bounded_probe_operator_authorization_active_runtime_probe_authority": (
+                    detail.get(
+                        "bounded_probe_operator_authorization_active_runtime_probe_authority"
+                    )
+                ),
+                "bounded_probe_operator_authorization_global_cost_gate_lowering_recommended": (
+                    detail.get(
+                        "bounded_probe_operator_authorization_global_cost_gate_lowering_recommended"
+                    )
+                ),
+                "bounded_probe_operator_authorization_main_cost_gate_adjustment": (
+                    detail.get(
+                        "bounded_probe_operator_authorization_main_cost_gate_adjustment"
+                    )
+                ),
+                "bounded_probe_operator_authorization_promotion_evidence": detail.get(
+                    "bounded_probe_operator_authorization_promotion_evidence"
                 ),
                 "bounded_probe_shadow_placement_impact_present": detail.get(
                     "bounded_probe_shadow_placement_impact_present"

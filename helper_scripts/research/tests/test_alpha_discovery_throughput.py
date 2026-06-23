@@ -2175,6 +2175,68 @@ def _write_bounded_probe_shadow_placement_impact_latest(
     return path
 
 
+def _write_bounded_probe_operator_authorization_latest(
+    data: Path,
+    *,
+    status: str = "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW",
+    generated_at: str = "2026-06-21T18:04:40+00:00",
+) -> Path:
+    path = (
+        data
+        / "cost_gate_learning_lane"
+        / "bounded_probe_operator_authorization_latest.json"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": "bounded_demo_probe_operator_authorization_packet_v1",
+        "generated_at_utc": generated_at,
+        "status": status,
+        "reason": "defer",
+        "decision": "defer",
+        "review_scope": "operator_authorization_artifact_only_not_plan_mutation",
+        "candidate": {
+            "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+            "strategy_name": "ma_crossover",
+            "symbol": "ETHUSDT",
+            "side": "Sell",
+            "outcome_horizon_minutes": 240,
+        },
+        "source_candidate_max_probe_orders": 3,
+        "requested_max_authorized_probe_orders": None,
+        "operator_authorization": None,
+        "blocking_gate_count": 0,
+        "blocking_gates": [],
+        "next_actions": [
+            "operator_may_authorize_bounded_demo_probe_with_exact_typed_confirm",
+            "do_not_edit_plan_or_enable_writer_until_authorization_artifact_is_reviewed",
+        ],
+        "typed_confirm_expected": (
+            "authorize_bounded_demo_probe:ma_crossover|ETHUSDT|Sell:0:"
+        ),
+        "typed_confirm_matches": False,
+        "answers": {
+            "ready_for_operator_authorization_review": (
+                status == "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW"
+            ),
+            "bounded_demo_probe_authorized": False,
+            "operator_authorization_object_emitted": False,
+            "plan_mutation_performed": False,
+            "writer_enabled": False,
+            "order_submission_performed": False,
+            "runtime_mutation_performed": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "promotion_evidence": False,
+            "active_runtime_probe_authority": False,
+            "active_runtime_order_authority": False,
+            "probe_authority_granted_in_authorization_object": False,
+            "order_authority_granted_in_authorization_object": False,
+        },
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
 def test_cost_gate_arm_uses_demo_learning_evidence_for_pg_reject_gap(tmp_path):
     data = tmp_path / "openclaw"
     artifact = _write_demo_learning_evidence_latest(
@@ -2912,6 +2974,76 @@ def test_cost_gate_sealed_horizon_probe_preflight_supersedes_packet(tmp_path):
         "sealed_horizon_probe_preflight_production_lane_accumulating"
     ] is False
     assert task["evidence"]["sealed_horizon_probe_preflight_blocking_gate_count"] == 2
+
+
+def test_bounded_probe_operator_authorization_packet_drives_operator_review(tmp_path):
+    data = tmp_path / "openclaw"
+    _write_profit_learning_decision_packet_latest(
+        data,
+        status="OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE",
+        reason="sealed_horizon_learning_evidence_clears_review_thresholds",
+        next_actions=[
+            "operator_review_sealed_horizon_learning_evidence_before_bounded_demo_probe"
+        ],
+        sealed_horizon_candidate=True,
+    )
+    _write_sealed_horizon_probe_preflight_latest(
+        data,
+        status="READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION",
+    )
+    _write_bounded_probe_operator_authorization_latest(data)
+
+    now = dt.datetime(2026, 6, 21, 18, 5, tzinfo=dt.timezone.utc)
+    arm = collect_cost_gate_learning_lane_arm(data, now_utc=now)
+    plan = build_discovery_plan([arm], now_utc=now)
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    task = plan["learning_worklist"]["top_task"]
+
+    assert arm["detail"]["bounded_probe_operator_authorization_present"] is True
+    assert arm["detail"]["bounded_probe_operator_authorization_status"] == (
+        "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW"
+    )
+    assert arm["detail"]["bounded_probe_operator_authorization_object_emitted"] is False
+    assert (
+        arm["detail"][
+            "bounded_probe_operator_authorization_active_runtime_order_authority"
+        ]
+        is False
+    )
+
+    assert blocker["blocker_class"] == "probe_ready"
+    assert blocker["primary_blocker"] == (
+        "bounded_probe_operator_authorization_ready_for_operator_review"
+    )
+    assert blocker["next_trigger"] == (
+        "operator_may_authorize_bounded_demo_probe_with_exact_typed_confirm"
+    )
+    assert blocker["operator_actionable"] is True
+    assert blocker["bounded_probe_operator_authorization_source_candidate_max_probe_orders"] == 3
+    assert blocker["bounded_probe_operator_authorization_object_emitted"] is False
+    assert (
+        blocker["bounded_probe_operator_authorization_active_runtime_order_authority"]
+        is False
+    )
+    assert blocker["bounded_probe_operator_authorization_main_cost_gate_adjustment"] == (
+        "NONE"
+    )
+    assert blocker["bounded_probe_operator_authorization_promotion_evidence"] is False
+
+    assert task["task_type"] == "operator_probe_review"
+    assert task["learning_objective"] == (
+        "operator_review_bounded_demo_probe_authorization_packet"
+    )
+    assert task["requires_operator_authorization"] is True
+    assert task["runtime_mutation_required"] is False
+    assert task["evidence"]["bounded_probe_operator_authorization_ready_for_review"] is True
+    assert task["evidence"]["bounded_probe_operator_authorization_object_emitted"] is False
+    assert (
+        task["evidence"][
+            "bounded_probe_operator_authorization_active_runtime_order_authority"
+        ]
+        is False
+    )
 
 
 def test_cost_gate_bounded_probe_result_review_supersedes_preflight(tmp_path):
