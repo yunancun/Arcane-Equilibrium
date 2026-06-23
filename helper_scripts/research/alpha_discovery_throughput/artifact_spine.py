@@ -16,7 +16,21 @@ from typing import Any
 
 
 COST_GATE_ARTIFACT_SPINE_SCHEMA_VERSION = "cost_gate_artifact_spine_v1"
+ACTIVE_STATE_SCHEMA_VERSION = "cost_gate_artifact_spine_active_state_v1"
 DEFAULT_ARTIFACT_SPINE_MAX_AGE_SECONDS = 36 * 60 * 60
+BLOCKED_OUTCOME_REVIEW_CANDIDATES_STATUS = (
+    "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
+)
+FALSE_NEGATIVE_CANDIDATES_READY_STATUS = (
+    "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW"
+)
+DOWNSTREAM_PROBE_ARTIFACT_IDS = (
+    "sealed_horizon_probe_preflight",
+    "bounded_probe_operator_authorization",
+    "bounded_probe_shadow_placement_impact",
+    "bounded_probe_result_review",
+    "bounded_probe_execution_realism_review",
+)
 _BAD_STATUS_VALUES = {
     "MISSING",
     "EMPTY",
@@ -322,6 +336,10 @@ def _status_is_bad(value: Any) -> bool:
     return str(value or "").strip().upper() in _BAD_STATUS_VALUES
 
 
+def _status_upper(value: Any) -> str:
+    return str(value or "").strip().upper()
+
+
 def _file_present(path: Path) -> bool:
     try:
         return path.exists()
@@ -466,6 +484,80 @@ def _int(value: Any) -> int:
         return 0
 
 
+def _active_state(
+    *,
+    detail: dict[str, Any],
+    by_id: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    false_negative_packet = by_id.get("false_negative_candidate_packet", {})
+    blocked_review = by_id.get("blocked_outcome_review", {})
+    false_negative_packet_status = _status_upper(false_negative_packet.get("status"))
+    false_negative_packet_present = (
+        false_negative_packet.get("present") is True
+    )
+    false_negative_packet_source_ok = (
+        false_negative_packet.get("source_ok") is True
+    )
+    false_negative_operator_ready = (
+        detail.get("false_negative_candidate_packet_operator_review_ready") is True
+    )
+    false_negative_queue_ready = (
+        false_negative_packet_status == FALSE_NEGATIVE_CANDIDATES_READY_STATUS
+        and false_negative_packet_source_ok
+        and false_negative_operator_ready
+    )
+
+    blocked_review_status = _status_upper(blocked_review.get("status"))
+    blocked_review_source_ok = blocked_review.get("source_ok") is True
+    blocked_outcome_review_candidate_ready = (
+        blocked_review_status == BLOCKED_OUTCOME_REVIEW_CANDIDATES_STATUS
+        and blocked_review_source_ok
+    )
+
+    stale_downstream_probe_artifact_ids = [
+        artifact_id
+        for artifact_id in DOWNSTREAM_PROBE_ARTIFACT_IDS
+        if by_id.get(artifact_id, {}).get("present") is True
+        and by_id.get(artifact_id, {}).get("source_ok") is not True
+    ]
+
+    return {
+        "schema_version": ACTIVE_STATE_SCHEMA_VERSION,
+        "interface_role": (
+            "artifact-spine active-loop state consumed by discovery_loop"
+        ),
+        "blocked_outcome_review_candidate_ready": (
+            blocked_outcome_review_candidate_ready
+        ),
+        "blocked_outcome_review_status": blocked_review_status or None,
+        "blocked_outcome_review_source_ok": blocked_review_source_ok,
+        "false_negative_candidate_packet_present": (
+            false_negative_packet_present
+        ),
+        "false_negative_candidate_packet_source_ok": (
+            false_negative_packet_source_ok
+        ),
+        "false_negative_candidate_packet_status": (
+            false_negative_packet_status or None
+        ),
+        "false_negative_candidate_packet_operator_review_ready": (
+            false_negative_operator_ready
+        ),
+        "false_negative_queue_ready": false_negative_queue_ready,
+        "false_negative_candidate_packet_refresh_required": (
+            false_negative_packet_present
+            and not false_negative_packet_source_ok
+        ),
+        "stale_downstream_probe_artifact_ids": (
+            stale_downstream_probe_artifact_ids
+        ),
+        "global_cost_gate_lowering_recommended": False,
+        "probe_authority_granted": False,
+        "order_authority_granted": False,
+        "promotion_evidence": False,
+    }
+
+
 def build_cost_gate_artifact_spine(
     *,
     data_dir: Path,
@@ -486,6 +578,7 @@ def build_cost_gate_artifact_spine(
     ]
     by_id = {entry["artifact_id"]: entry for entry in physical_entries}
     nodes = [_spine_node(spec, by_id=by_id) for spec in SPINE_NODE_SPECS]
+    active_state = _active_state(detail=detail, by_id=by_id)
 
     governance_stale = [
         entry["artifact_id"]
@@ -562,6 +655,7 @@ def build_cost_gate_artifact_spine(
             "alpha_evidence_stale_or_unreadable_artifact_ids": evidence_stale,
             "probe_result_learning_valid": probe_result_learning_valid,
             "proof_gap": proof_gap,
+            "active_state": active_state,
             "global_cost_gate_lowering_recommended": False,
             "probe_authority_granted": False,
             "order_authority_granted": False,
@@ -587,6 +681,7 @@ def summarize_cost_gate_artifact_spine(spine: dict[str, Any] | None) -> dict[str
 
 
 __all__ = [
+    "ACTIVE_STATE_SCHEMA_VERSION",
     "COST_GATE_ARTIFACT_SPINE_SCHEMA_VERSION",
     "build_cost_gate_artifact_spine",
     "summarize_cost_gate_artifact_spine",

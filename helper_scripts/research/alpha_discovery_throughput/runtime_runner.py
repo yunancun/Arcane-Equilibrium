@@ -3801,6 +3801,11 @@ def build_runtime_killboard(
     cost_gate_artifact_spine_summary = _cost_gate_artifact_spine_summary_from_arms(
         arms
     )
+    cost_gate_spine_active_state = (
+        cost_gate_artifact_spine_summary.get("active_state")
+        if isinstance(cost_gate_artifact_spine_summary.get("active_state"), dict)
+        else {}
+    )
     scorecard = (
         plan.get("profitability_blocker_scorecard")
         if isinstance(plan.get("profitability_blocker_scorecard"), dict)
@@ -3885,6 +3890,19 @@ def build_runtime_killboard(
             "cost_gate_spine_proof_gap": cost_gate_artifact_spine_summary.get(
                 "proof_gap"
             ),
+            "cost_gate_spine_false_negative_queue_ready": (
+                cost_gate_spine_active_state.get("false_negative_queue_ready")
+            ),
+            "cost_gate_spine_false_negative_candidate_packet_refresh_required": (
+                cost_gate_spine_active_state.get(
+                    "false_negative_candidate_packet_refresh_required"
+                )
+            ),
+            "cost_gate_spine_blocked_outcome_review_candidate_ready": (
+                cost_gate_spine_active_state.get(
+                    "blocked_outcome_review_candidate_ready"
+                )
+            ),
             **profitability_path_summary,
             **learning_summary,
         },
@@ -3942,6 +3960,15 @@ def _history_row(killboard: dict[str, Any]) -> dict[str, Any]:
             "cost_gate_spine_probe_result_learning_valid"
         ),
         "cost_gate_spine_proof_gap": kb.get("cost_gate_spine_proof_gap"),
+        "cost_gate_spine_false_negative_queue_ready": kb.get(
+            "cost_gate_spine_false_negative_queue_ready"
+        ),
+        "cost_gate_spine_false_negative_candidate_packet_refresh_required": kb.get(
+            "cost_gate_spine_false_negative_candidate_packet_refresh_required"
+        ),
+        "cost_gate_spine_blocked_outcome_review_candidate_ready": kb.get(
+            "cost_gate_spine_blocked_outcome_review_candidate_ready"
+        ),
         "profitability_path_scorecard_status": kb.get(
             "profitability_path_scorecard_status"
         ),
