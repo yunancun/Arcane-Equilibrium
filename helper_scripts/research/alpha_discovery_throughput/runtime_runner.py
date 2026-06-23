@@ -3126,6 +3126,14 @@ def _learning_top_task(worklist: dict[str, Any]) -> dict[str, Any]:
     return top_task if isinstance(top_task, dict) else {}
 
 
+def _first_evidence(evidence: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = evidence.get(key)
+        if value is not None:
+            return value
+    return None
+
+
 def _learning_summary(worklist: dict[str, Any]) -> dict[str, Any]:
     top_task = _learning_top_task(worklist)
     completion_evidence_required = top_task.get("completion_evidence_required")
@@ -3165,6 +3173,55 @@ def _learning_summary(worklist: dict[str, Any]) -> dict[str, Any]:
             "side_effect_boundary"
         ),
         "top_learning_task_next_trigger": top_task.get("next_trigger"),
+        "top_learning_task_operator_next_action": _first_evidence(
+            evidence,
+            "demo_learning_stack_dry_run_review_operator_next_action",
+            "demo_learning_stack_activation_packet_operator_next_action",
+            "demo_learning_stack_healthcheck_next_action",
+        ),
+        "top_learning_task_dry_run_preview_shell": _first_evidence(
+            evidence,
+            "demo_learning_stack_dry_run_review_dry_run_preview_shell",
+            "demo_learning_stack_activation_packet_dry_run_preview_shell",
+        ),
+        "top_learning_task_operator_only_apply_shell": _first_evidence(
+            evidence,
+            "demo_learning_stack_dry_run_review_operator_only_apply_shell",
+            "demo_learning_stack_activation_packet_operator_only_apply_shell",
+        ),
+        "top_learning_task_operator_only_rollback_shell": _first_evidence(
+            evidence,
+            "demo_learning_stack_dry_run_review_operator_only_rollback_shell",
+            "demo_learning_stack_activation_packet_operator_only_rollback_shell",
+        ),
+        "top_learning_task_post_install_verification_shell": _first_evidence(
+            evidence,
+            "demo_learning_stack_activation_packet_post_install_verification_shell",
+        ),
+        "top_learning_task_missing_cron_count": _first_evidence(
+            evidence,
+            "demo_learning_stack_dry_run_review_activation_packet_missing_cron_count",
+            "demo_learning_stack_activation_packet_missing_cron_count",
+        ),
+        "top_learning_task_missing_crons": _first_evidence(
+            evidence,
+            "demo_learning_stack_activation_packet_missing_crons",
+        ),
+        "top_learning_task_global_cost_gate_lowering_recommended": _first_evidence(
+            evidence,
+            "demo_learning_stack_dry_run_review_global_cost_gate_lowering_recommended",
+            "demo_learning_stack_activation_packet_global_cost_gate_lowering_recommended",
+        ),
+        "top_learning_task_order_authority_granted": _first_evidence(
+            evidence,
+            "demo_learning_stack_dry_run_review_order_authority_granted",
+            "demo_learning_stack_activation_packet_order_authority_granted",
+        ),
+        "top_learning_task_probe_authority_granted": _first_evidence(
+            evidence,
+            "demo_learning_stack_dry_run_review_probe_authority_granted",
+            "demo_learning_stack_activation_packet_probe_authority_granted",
+        ),
         "top_learning_task_evidence_key_count": len(evidence),
         "top_learning_task_evidence": evidence or None,
         "top_learning_task_blocked_signal_top_review_candidate_side_cell_key": (
@@ -3480,6 +3537,36 @@ def _history_row(killboard: dict[str, Any]) -> dict[str, Any]:
         ),
         "top_learning_task_side_effect_boundary": kb.get(
             "top_learning_task_side_effect_boundary"
+        ),
+        "top_learning_task_operator_next_action": kb.get(
+            "top_learning_task_operator_next_action"
+        ),
+        "top_learning_task_dry_run_preview_shell": kb.get(
+            "top_learning_task_dry_run_preview_shell"
+        ),
+        "top_learning_task_operator_only_apply_shell": kb.get(
+            "top_learning_task_operator_only_apply_shell"
+        ),
+        "top_learning_task_operator_only_rollback_shell": kb.get(
+            "top_learning_task_operator_only_rollback_shell"
+        ),
+        "top_learning_task_post_install_verification_shell": kb.get(
+            "top_learning_task_post_install_verification_shell"
+        ),
+        "top_learning_task_missing_cron_count": kb.get(
+            "top_learning_task_missing_cron_count"
+        ),
+        "top_learning_task_missing_crons": kb.get(
+            "top_learning_task_missing_crons"
+        ),
+        "top_learning_task_global_cost_gate_lowering_recommended": kb.get(
+            "top_learning_task_global_cost_gate_lowering_recommended"
+        ),
+        "top_learning_task_order_authority_granted": kb.get(
+            "top_learning_task_order_authority_granted"
+        ),
+        "top_learning_task_probe_authority_granted": kb.get(
+            "top_learning_task_probe_authority_granted"
         ),
         "top_learning_task_evidence_key_count": kb.get(
             "top_learning_task_evidence_key_count"
