@@ -95,6 +95,25 @@ def test_learning_summary_mirrors_completion_and_top_evidence_fields():
                 ),
                 "blocked_signal_top_review_candidate_wrongful_block_score": 3.444444,
                 "blocked_signal_top_review_candidate_net_cost_cushion_bps": 5.166667,
+                "demo_learning_stack_dry_run_review_operator_next_action": (
+                    "operator_review_dry_run_preview_then_apply_learning_stack_if_accepted"
+                ),
+                "demo_learning_stack_dry_run_review_dry_run_preview_shell": (
+                    "OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY=0 install_stack"
+                ),
+                "demo_learning_stack_dry_run_review_operator_only_apply_shell": (
+                    "OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY=1 install_stack"
+                ),
+                "demo_learning_stack_dry_run_review_operator_only_rollback_shell": (
+                    "OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY=1 install_stack --remove"
+                ),
+                "demo_learning_stack_activation_packet_post_install_verification_shell": (
+                    "demo_learning_stack_healthcheck.py --fail-on-not-active"
+                ),
+                "demo_learning_stack_dry_run_review_activation_packet_missing_cron_count": 4,
+                "demo_learning_stack_dry_run_review_global_cost_gate_lowering_recommended": False,
+                "demo_learning_stack_dry_run_review_order_authority_granted": False,
+                "demo_learning_stack_dry_run_review_probe_authority_granted": False,
             },
         },
     })
@@ -104,7 +123,7 @@ def test_learning_summary_mirrors_completion_and_top_evidence_fields():
     )
     assert summary["top_learning_task_completion_status"] == "PENDING_EVIDENCE"
     assert summary["top_learning_task_completion_evidence_required_count"] == 3
-    assert summary["top_learning_task_evidence_key_count"] == 3
+    assert summary["top_learning_task_evidence_key_count"] == 12
     assert summary["top_learning_task_blocked_signal_top_review_candidate_side_cell_key"] == (
         "ma_crossover|ETHUSDT|Sell"
     )
@@ -117,6 +136,25 @@ def test_learning_summary_mirrors_completion_and_top_evidence_fields():
     assert summary["top_learning_task_side_effect_boundary"] == (
         "recommendation_only_no_order_authority_no_runtime_mutation"
     )
+    assert summary["top_learning_task_operator_next_action"] == (
+        "operator_review_dry_run_preview_then_apply_learning_stack_if_accepted"
+    )
+    assert summary["top_learning_task_dry_run_preview_shell"] == (
+        "OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY=0 install_stack"
+    )
+    assert summary["top_learning_task_operator_only_apply_shell"] == (
+        "OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY=1 install_stack"
+    )
+    assert summary["top_learning_task_operator_only_rollback_shell"] == (
+        "OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY=1 install_stack --remove"
+    )
+    assert summary["top_learning_task_post_install_verification_shell"] == (
+        "demo_learning_stack_healthcheck.py --fail-on-not-active"
+    )
+    assert summary["top_learning_task_missing_cron_count"] == 4
+    assert summary["top_learning_task_global_cost_gate_lowering_recommended"] is False
+    assert summary["top_learning_task_order_authority_granted"] is False
+    assert summary["top_learning_task_probe_authority_granted"] is False
 
 
 def _signal_spec(**extra):
@@ -3251,6 +3289,22 @@ def test_runtime_killboard_carries_profitability_runtime_mutation_required(tmp_p
         data,
         next_move_runtime_mutation_required=True,
     )
+    _write_demo_learning_stack_activation_packet_latest(
+        data,
+        status="READY_FOR_OPERATOR_DRY_RUN",
+        reason="source_ready_but_one_or_more_stack_crons_missing",
+        operator_next_action=(
+            "run_dry_run_preview_then_apply_only_if_installer_preflight_passes"
+        ),
+    )
+    _write_demo_learning_stack_dry_run_review_latest(
+        data,
+        status="DRY_RUN_PREVIEW_PASSED_OPERATOR_APPLY_REVIEW_REQUIRED",
+        reason="installer_dry_run_preview_passed_without_crontab_mutation",
+        operator_next_action=(
+            "operator_review_dry_run_preview_then_apply_learning_stack_if_accepted"
+        ),
+    )
     payload = json.loads(artifact.read_text(encoding="utf-8"))
     root_blocker = {
         "source": "demo_learning_stack_dry_run_review",
@@ -3304,6 +3358,29 @@ def test_runtime_killboard_carries_profitability_runtime_mutation_required(tmp_p
     assert kb["top_learning_task_next_trigger"] == (
         "operator_review_dry_run_preview_then_apply_learning_stack_if_accepted"
     )
+    assert kb["top_learning_task_operator_next_action"] == (
+        "operator_review_dry_run_preview_then_apply_learning_stack_if_accepted"
+    )
+    assert "OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY=0" in (
+        kb["top_learning_task_dry_run_preview_shell"]
+    )
+    assert "OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY=1" in (
+        kb["top_learning_task_operator_only_apply_shell"]
+    )
+    assert "--remove" in kb["top_learning_task_operator_only_rollback_shell"]
+    assert "demo_learning_stack_healthcheck.py" in (
+        kb["top_learning_task_post_install_verification_shell"]
+    )
+    assert kb["top_learning_task_missing_cron_count"] == 4
+    assert kb["top_learning_task_missing_crons"] == [
+        "demo_learning_evidence",
+        "sealed_horizon_probe_preflight",
+        "cost_gate_learning_lane",
+        "demo_learning_stack_healthcheck",
+    ]
+    assert kb["top_learning_task_global_cost_gate_lowering_recommended"] is False
+    assert kb["top_learning_task_order_authority_granted"] is False
+    assert kb["top_learning_task_probe_authority_granted"] is False
     assert task["task_type"] == "cost_gate_learning_activation"
     assert task["requires_operator_authorization"] is True
     assert task["runtime_mutation_required"] is True
