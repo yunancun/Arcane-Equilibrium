@@ -124,6 +124,7 @@ SEALED_OPERATOR_REVIEW_JSON="$SEALED_OPERATOR_REVIEW_DIR/sealed_horizon_operator
 SEALED_OPERATOR_REVIEW_MD="$SEALED_OPERATOR_REVIEW_DIR/sealed_horizon_operator_review_latest.md"
 SEALED_OPERATOR_REVIEW_STDOUT="$SEALED_OPERATOR_REVIEW_DIR/sealed_horizon_operator_review_stdout.json"
 SEALED_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_SEALED_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS:-24}"
+SEALED_PREFLIGHT_SCRIPT="$BASE/helper_scripts/cron/sealed_horizon_probe_preflight_cron.sh"
 sealed_operator_review_rc=0
 if [[ -n "$HORIZON_LEARNING_EVIDENCE_JSON" && -f "$HORIZON_LEARNING_EVIDENCE_JSON" ]]; then
     mkdir -p "$SEALED_OPERATOR_REVIEW_DIR"
@@ -147,6 +148,19 @@ if [[ -n "$HORIZON_LEARNING_EVIDENCE_JSON" && -f "$HORIZON_LEARNING_EVIDENCE_JSO
     echo "[$(ts)] sealed_horizon_operator_review_refresh rc=${sealed_operator_review_rc}" >> "$LOG"
 else
     echo "[$(ts)] SKIP: sealed horizon operator review refresh missing learning evidence" >> "$LOG"
+fi
+sealed_preflight_rc=0
+if [[ -x "$SEALED_PREFLIGHT_SCRIPT" && -n "$HORIZON_LEARNING_EVIDENCE_JSON" && -f "$HORIZON_LEARNING_EVIDENCE_JSON" ]]; then
+    (
+        cd "$BASE"
+        OPENCLAW_SEALED_HORIZON_LEARNING_EVIDENCE_JSON="$HORIZON_LEARNING_EVIDENCE_JSON" \
+        OPENCLAW_SEALED_HORIZON_OPERATOR_REVIEW_JSON="$SEALED_OPERATOR_REVIEW_JSON" \
+        OPENCLAW_SEALED_HORIZON_DECISION_PACKET_JSON="$DATA/cost_gate_learning_lane/profit_learning_decision_packet_latest.json" \
+        "$SEALED_PREFLIGHT_SCRIPT"
+    ) >> "$LOG" 2>&1 || sealed_preflight_rc=$?
+    echo "[$(ts)] sealed_horizon_probe_preflight_refresh rc=${sealed_preflight_rc}" >> "$LOG"
+else
+    echo "[$(ts)] SKIP: sealed horizon probe preflight refresh missing script or learning evidence" >> "$LOG"
 fi
 add_profitability_json_arg "--cost-gate-counterfactual-json" "$DATA/cost_gate_counterfactual/cost_gate_reject_counterfactual_latest.json"
 add_profitability_json_arg "--profit-learning-packet-json" "$DATA/cost_gate_learning_lane/profit_learning_decision_packet_latest.json"

@@ -36,11 +36,16 @@ def test_wrapper_refreshes_activation_packet_before_alpha_runner() -> None:
     assert "sealed_horizon_operator_review_latest.json" in src
     assert "sealed_horizon_operator_review_latest.md" in src
     assert "sealed_horizon_operator_review_stdout.json" in src
+    assert "sealed_horizon_probe_preflight_cron.sh" in src
+    assert "sealed_horizon_probe_preflight_refresh rc=" in src
     assert "canonical_or_latest_matching_path()" in src
     assert '"$DATA"/cost_gate_learning_lane/sealed_horizon_learning_evidence_latest.json' in src
     assert '"$DATA"/cost_gate_learning_lane/horizon_specific_sealed_replay_latest.json' in src
     assert "--sealed-horizon-learning-evidence-json" in src
     assert "--sealed-horizon-operator-review-json" in src
+    assert "OPENCLAW_SEALED_HORIZON_LEARNING_EVIDENCE_JSON" in src
+    assert "OPENCLAW_SEALED_HORIZON_OPERATOR_REVIEW_JSON" in src
+    assert "OPENCLAW_SEALED_HORIZON_DECISION_PACKET_JSON" in src
     assert "--decision defer" in src
     assert "alpha_discovery_throughput.profitability_path_scorecard" in src
     assert "profitability_path_scorecard_latest.json" in src
@@ -62,7 +67,10 @@ def test_wrapper_refreshes_activation_packet_before_alpha_runner() -> None:
     assert src.index("demo_learning_stack_dry_run_review.py") < src.index(
         "cost_gate_learning_lane.sealed_horizon_operator_review"
     )
-    assert src.index("cost_gate_learning_lane.sealed_horizon_operator_review") < src.index(
+    assert src.index("sealed_horizon_operator_review_refresh rc=") < src.index(
+        "sealed_horizon_probe_preflight_refresh rc="
+    )
+    assert src.index("sealed_horizon_probe_preflight_refresh rc=") < src.index(
         "alpha_discovery_throughput.profitability_path_scorecard"
     )
     assert src.index("alpha_discovery_throughput.profitability_path_scorecard") < src.index(
