@@ -1515,6 +1515,16 @@ def _aeg_review_consumes_arm_candidate(
     return bool(candidate_key and candidate_key == str(aeg_review.get("candidate_key") or ""))
 
 
+def _aeg_candidate_exclusion_reason(arm: dict[str, Any]) -> str | None:
+    detail = _dict(arm.get("detail"))
+    budget_status = str(
+        detail.get("candidate_replay_history_budget_status") or ""
+    ).upper()
+    if budget_status == "EARLY_ROTATE_RECOMMENDED":
+        return "candidate_replay_history_interim_negative_edge"
+    return None
+
+
 def _candidate_artifact_dependency_summary(
     arms: list[dict[str, Any]],
     decisions: list[dict[str, Any]],
@@ -1525,6 +1535,7 @@ def _candidate_artifact_dependency_summary(
     decisions_by_id = {str(row.get("arm_id")): row for row in decisions}
     ready: list[dict[str, Any]] = []
     already_reviewed: list[dict[str, Any]] = []
+    excluded: list[dict[str, Any]] = []
     for arm in arms:
         arm_id = str(arm.get("arm_id") or arm.get("name") or "unknown")
         if arm_id == "aeg_robustness_matrix":
@@ -1534,6 +1545,31 @@ def _candidate_artifact_dependency_summary(
         gate_status = str(arm.get("gate_status") or arm.get("status") or "")
         artifacts_ready = bool(arm.get("artifacts_ready"))
         if action not in {READY_FOR_AEG_CHAIN, READY_FOR_PROBE} and not artifacts_ready:
+            continue
+        exclusion_reason = _aeg_candidate_exclusion_reason(arm)
+        if exclusion_reason:
+            detail = _dict(arm.get("detail"))
+            excluded.append({
+                "arm_id": arm_id,
+                "action": action,
+                "gate_status": gate_status,
+                "sample_count": decision.get("sample_count"),
+                "artifacts_ready": artifacts_ready,
+                "candidate_key": _arm_candidate_key(arm) or None,
+                "exclusion_reason": exclusion_reason,
+                "candidate_replay_history_budget_status": detail.get(
+                    "candidate_replay_history_budget_status"
+                ),
+                "candidate_replay_history_interim_edge_status": detail.get(
+                    "candidate_replay_history_interim_edge_status"
+                ),
+                "candidate_replay_history_net_bps_mean": detail.get(
+                    "candidate_replay_history_net_bps_mean"
+                ),
+                "candidate_replay_history_holdout_net_bps_mean": detail.get(
+                    "candidate_replay_history_holdout_net_bps_mean"
+                ),
+            })
             continue
         if (
             _aeg_review_consumes_arm_candidate(arm, aeg_review)
@@ -1569,6 +1605,11 @@ def _candidate_artifact_dependency_summary(
             "build_candidate_pnl_execution_realism_and_breadth_evidence_before_rerunning_matrix"
         )
         engineering_actionable = True
+    elif excluded:
+        status = "CANDIDATE_ARTIFACTS_EXCLUDED_BY_INTERIM_EDGE"
+        reason = "candidate_artifacts_rejected_or_rotated_before_robustness"
+        next_trigger = "wait_for_new_candidate_after_reject_or_rotate"
+        engineering_actionable = False
     else:
         status = "NO_CANDIDATE_ARTIFACTS_AVAILABLE_FOR_ROBUSTNESS"
         reason = "no_upstream_ready_or_probe_artifacts"
@@ -1584,6 +1625,8 @@ def _candidate_artifact_dependency_summary(
         "candidate_artifacts": ready[:8],
         "already_reviewed_candidate_artifact_count": len(already_reviewed),
         "already_reviewed_candidate_artifacts": already_reviewed[:8],
+        "excluded_candidate_artifact_count": len(excluded),
+        "excluded_candidate_artifacts": excluded[:8],
         "latest_aeg_matrix_review": aeg_review or None,
     }
 
@@ -4382,6 +4425,9 @@ def classify_profitability_blocker(
                 "candidate_artifact_dependency_status": dependency.get("status"),
                 "candidate_artifact_dependency_reason": dependency.get("reason"),
                 "candidate_artifact_count": dependency.get("candidate_artifact_count"),
+                "excluded_candidate_artifact_count": dependency.get(
+                    "excluded_candidate_artifact_count"
+                ),
                 "candidate_artifact_dependency": dependency or None,
             },
         )

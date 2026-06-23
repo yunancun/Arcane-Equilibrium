@@ -834,6 +834,71 @@ def test_aeg_robustness_wait_becomes_actionable_only_with_upstream_candidate_art
     assert aeg["next_trigger"] == "feed_candidate_artifacts_into_robustness_matrix"
 
 
+def test_aeg_robustness_excludes_negative_interim_polymarket_candidate():
+    candidate_key = "polymarket_leadlag_ic|event_reg|BTCUSDT|15m"
+    plan = build_discovery_plan([
+        {
+            "arm_id": "polymarket_leadlag_ic",
+            "gate_status": "READY",
+            "sample_count": 257,
+            "artifacts_ready": True,
+            "source_ok": True,
+            "detail": {
+                "candidate_count": 1,
+                "candidate_key": candidate_key,
+                "candidate_replay_status": "PAPER_REPLAY_BUILT",
+                "candidate_replay_history_status": "REPLAY_HISTORY_DAYS_INSUFFICIENT",
+                "candidate_replay_history_sample_count": 257,
+                "candidate_replay_history_n_days": 4,
+                "candidate_replay_history_min_days": 30,
+                "candidate_replay_history_min_samples": 30,
+                "candidate_replay_history_net_bps_mean": -2.28885355,
+                "candidate_replay_history_holdout_net_bps_mean": -2.35447585,
+                "candidate_replay_history_interim_edge_status": (
+                    "INTERIM_NEGATIVE_NET_AND_HOLDOUT"
+                ),
+                "candidate_replay_history_budget_status": (
+                    "EARLY_ROTATE_RECOMMENDED"
+                ),
+                "candidate_replay_history_recommended_next_action": (
+                    "rotate_polymarket_leadlag_candidate_or_change_feature_family_"
+                    "before_spending_30d_history_budget"
+                ),
+                "candidate_replay_history_execution_realism_status": "UNMEASURED",
+            },
+        },
+        {
+            "arm_id": "aeg_robustness_matrix",
+            "gate_status": "WAIT",
+            "sample_count": 0,
+            "artifacts_ready": False,
+            "source_ok": True,
+        },
+    ], now_utc=dt.datetime(2026, 6, 20, 19, 5, tzinfo=dt.timezone.utc))
+
+    blockers = {
+        row["arm_id"]: row
+        for row in plan["profitability_blocker_scorecard"]["arms"]
+    }
+    assert blockers["polymarket_leadlag_ic"]["blocker_class"] == "rejected_no_edge"
+    assert blockers["polymarket_leadlag_ic"]["primary_blocker"] == (
+        "polymarket_candidate_replay_history_interim_negative_edge"
+    )
+    aeg = blockers["aeg_robustness_matrix"]
+    assert aeg["candidate_artifact_dependency_status"] == (
+        "CANDIDATE_ARTIFACTS_EXCLUDED_BY_INTERIM_EDGE"
+    )
+    assert aeg["candidate_artifact_count"] == 0
+    assert aeg["excluded_candidate_artifact_count"] == 1
+    assert aeg["engineering_actionable"] is False
+    assert aeg["next_trigger"] == "wait_for_new_candidate_after_reject_or_rotate"
+    excluded = aeg["candidate_artifact_dependency"]["excluded_candidate_artifacts"]
+    assert excluded[0]["candidate_key"] == candidate_key
+    assert excluded[0]["exclusion_reason"] == (
+        "candidate_replay_history_interim_negative_edge"
+    )
+
+
 def test_polymarket_ready_candidate_is_downgraded_after_non_durable_aeg_matrix():
     candidate_key = "polymarket_leadlag_ic|price_target|SOLUSDT|15m"
     plan = build_discovery_plan([
