@@ -2331,6 +2331,91 @@ def _mm_signal_search_directive_row_extra(
     }
 
 
+def _mm_current_fee_confirmation_packet_row_extra(
+    detail: dict[str, Any],
+) -> dict[str, Any]:
+    packet = _dict(detail.get("mm_current_fee_confirmation_packet"))
+    if not packet:
+        return {}
+    summary = _dict(packet.get("summary"))
+    return {
+        "mm_current_fee_confirmation_packet_status": packet.get("status"),
+        "mm_current_fee_confirmation_packet_reason": packet.get("reason"),
+        "mm_current_fee_confirmation_packet_next_action": packet.get("next_action"),
+        "mm_current_fee_confirmation_packet_next_gate": packet.get("next_gate"),
+        "mm_current_fee_confirmation_candidate_key": summary.get("candidate_key"),
+        "mm_current_fee_confirmation_candidate_source": summary.get(
+            "candidate_source"
+        ),
+        "mm_current_fee_confirmation_candidate_symbol": summary.get(
+            "candidate_symbol"
+        ),
+        "mm_current_fee_confirmation_candidate_policy": summary.get(
+            "candidate_policy"
+        ),
+        "mm_current_fee_confirmation_candidate_queue_position": summary.get(
+            "candidate_queue_position"
+        ),
+        "mm_current_fee_confirmation_candidate_track": summary.get(
+            "candidate_track"
+        ),
+        "mm_current_fee_confirmation_candidate_net_bps": summary.get(
+            "candidate_net_bps"
+        ),
+        "mm_current_fee_confirmation_candidate_edge_before_fees_bps": (
+            summary.get("candidate_edge_before_fees_bps")
+        ),
+        "mm_current_fee_confirmation_current_fee_round_trip_bps": summary.get(
+            "current_fee_round_trip_bps"
+        ),
+        "mm_current_fee_confirmation_history_status": summary.get(
+            "history_status"
+        ),
+        "mm_current_fee_confirmation_history_reason": summary.get(
+            "history_reason"
+        ),
+        "mm_current_fee_confirmation_history_valid_windows": summary.get(
+            "history_valid_windows"
+        ),
+        "mm_current_fee_confirmation_history_current_fee_sample_gated_positive_windows": (
+            summary.get("history_current_fee_sample_gated_positive_windows")
+        ),
+        "mm_current_fee_confirmation_history_repeated_positive_key_count": (
+            summary.get("history_repeated_positive_key_count")
+        ),
+        "mm_current_fee_confirmation_candidate_repeated_windows": summary.get(
+            "candidate_repeated_windows"
+        ),
+        "mm_current_fee_confirmation_history_walk_forward_holdout_confirmed_windows": (
+            summary.get("history_walk_forward_holdout_confirmed_windows")
+        ),
+        "mm_current_fee_confirmation_repeat_window_confirmed": summary.get(
+            "repeat_window_confirmed"
+        ),
+        "mm_current_fee_confirmation_oos_walk_forward_confirmed": summary.get(
+            "oos_walk_forward_confirmed"
+        ),
+        "mm_current_fee_confirmation_maker_execution_realism_status": (
+            summary.get("maker_execution_realism_status")
+        ),
+        "mm_current_fee_confirmation_maker_execution_realism_confirmed": (
+            summary.get("maker_execution_realism_confirmed")
+        ),
+        "mm_current_fee_confirmation_global_cost_gate_lowering_recommended": (
+            _dict(packet.get("answers")).get("global_cost_gate_lowering_recommended")
+        ),
+        "mm_current_fee_confirmation_order_authority_granted": (
+            _dict(packet.get("answers")).get("order_authority_granted")
+        ),
+        "mm_current_fee_confirmation_probe_authority_granted": (
+            _dict(packet.get("answers")).get("probe_authority_granted")
+        ),
+        "mm_current_fee_confirmation_promotion_evidence": (
+            _dict(packet.get("answers")).get("promotion_evidence")
+        ),
+    }
+
+
 def _mm_cost_wall_escape_scorecard(detail: dict[str, Any]) -> dict[str, Any]:
     gross_decomp = _dict(detail.get("gross_edge_cost_decomposition"))
     sample_cost_wall = _dict(detail.get("sample_gated_cost_wall_summary"))
@@ -4568,6 +4653,7 @@ def classify_profitability_blocker(
                                 "low_friction_train_confirmed_gap_to_current_fee_bps"
                             )
                         ),
+                        **_mm_current_fee_confirmation_packet_row_extra(detail),
                         **signal_search_extra,
                     },
                 )

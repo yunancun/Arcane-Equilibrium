@@ -46,6 +46,11 @@ def test_wrapper_refreshes_activation_packet_before_alpha_runner() -> None:
     assert "cost_gate_learning_lane.bounded_probe_authority_patch_readiness" in src
     assert "cost_gate_learning_lane.bounded_probe_operator_authorization_cli" in src
     assert "cost_gate_learning_lane.bounded_probe_shadow_placement_impact" in src
+    assert "alpha_discovery_throughput.mm_current_fee_confirmation" in src
+    assert "mm_current_fee_confirmation_latest.json" in src
+    assert "mm_current_fee_confirmation_latest.md" in src
+    assert "mm_current_fee_confirmation_stdout.json" in src
+    assert "mm_current_fee_confirmation_refresh rc=" in src
     assert "bounded_probe_touchability_preflight_latest.json" in src
     assert "bounded_probe_placement_repair_plan_latest.json" in src
     assert "bounded_probe_authority_patch_readiness_latest.json" in src
@@ -109,6 +114,9 @@ def test_wrapper_refreshes_activation_packet_before_alpha_runner() -> None:
         "cost_gate_learning_lane.bounded_probe_shadow_placement_impact"
     )
     assert src.index("bounded_probe_shadow_placement_impact_refresh rc=") < src.index(
+        "alpha_discovery_throughput.mm_current_fee_confirmation"
+    )
+    assert src.index("alpha_discovery_throughput.mm_current_fee_confirmation") < src.index(
         "alpha_discovery_throughput.profitability_path_scorecard"
     )
     assert src.index("alpha_discovery_throughput.profitability_path_scorecard") < src.index(

@@ -26,6 +26,7 @@ from polymarket_leadlag import replay_history as polymarket_replay_history
 
 from . import RUNNER_VERSION
 from .discovery_loop import build_discovery_plan
+from .mm_current_fee_confirmation import build_mm_current_fee_confirmation_packet
 from .mm_motif_amplification import build_mm_motif_amplification_packet
 
 RUNTIME_KILLBOARD_SCHEMA_VERSION = "alpha_discovery_runtime_killboard_v10"
@@ -784,6 +785,11 @@ def collect_mm_verdict_arm(
         if history_scorecard
         else None
     )
+    mm_current_fee_confirmation_packet = build_mm_current_fee_confirmation_packet(
+        fillsim=fillsim,
+        fillsim_history=history_scorecard,
+        gross_edge_cost_decomposition=status.get("gross_edge_cost_decomposition"),
+    )
     ts_utc = status.get("ts_utc")
     fresh, age, freshness_error = _source_fresh(
         ts_utc,
@@ -829,6 +835,9 @@ def collect_mm_verdict_arm(
                 "history_scorecard": history_scorecard,
                 "history_scorecard_source": history_scorecard_source,
                 "history_scorecard_error": history_scorecard_error,
+                "mm_current_fee_confirmation_packet": (
+                    mm_current_fee_confirmation_packet
+                ),
                 "mm_motif_amplification_packet": mm_motif_amplification_packet,
                 "horizon_scorecard": fillsim.get("horizon_scorecard"),
                 "walk_forward_failure_summary": (
@@ -864,6 +873,7 @@ def collect_mm_verdict_arm(
             "history_scorecard": history_scorecard,
             "history_scorecard_source": history_scorecard_source,
             "history_scorecard_error": history_scorecard_error,
+            "mm_current_fee_confirmation_packet": mm_current_fee_confirmation_packet,
             "mm_motif_amplification_packet": mm_motif_amplification_packet,
             "horizon_scorecard": fillsim.get("horizon_scorecard"),
             "walk_forward_failure_summary": (

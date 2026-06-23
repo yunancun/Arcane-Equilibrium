@@ -85,6 +85,9 @@ fi
 PROFITABILITY_DIR="$DATA/alpha_discovery_throughput"
 PROFITABILITY_JSON="$PROFITABILITY_DIR/profitability_path_scorecard_latest.json"
 PROFITABILITY_MD="$PROFITABILITY_DIR/profitability_path_scorecard_latest.md"
+MM_CURRENT_FEE_CONFIRMATION_JSON="$PROFITABILITY_DIR/mm_current_fee_confirmation_latest.json"
+MM_CURRENT_FEE_CONFIRMATION_MD="$PROFITABILITY_DIR/mm_current_fee_confirmation_latest.md"
+MM_CURRENT_FEE_CONFIRMATION_STDOUT="$PROFITABILITY_DIR/mm_current_fee_confirmation_stdout.json"
 mkdir -p "$PROFITABILITY_DIR"
 PROFITABILITY_ARGS=()
 add_profitability_json_arg() {
@@ -305,6 +308,30 @@ if [[ "$REFRESH_BOUNDED_REVIEW_CHAIN" == "1" ]]; then
     fi
 else
     echo "[$(ts)] SKIP: bounded probe review chain disabled by OPENCLAW_ALPHA_REFRESH_BOUNDED_PROBE_REVIEW_CHAIN=${REFRESH_BOUNDED_REVIEW_CHAIN}" >> "$LOG"
+fi
+MM_CURRENT_FEE_CONFIRMATION_ARGS=()
+if [[ -f "$DATA/research/fillsim/fillsim_report.json" ]]; then
+    MM_CURRENT_FEE_CONFIRMATION_ARGS+=(
+        --fillsim-json "$DATA/research/fillsim/fillsim_report.json"
+    )
+fi
+if [[ -f "$DATA/research/fillsim/fillsim_history_scorecard.json" ]]; then
+    MM_CURRENT_FEE_CONFIRMATION_ARGS+=(
+        --fillsim-history-json "$DATA/research/fillsim/fillsim_history_scorecard.json"
+    )
+fi
+mm_current_fee_confirmation_rc=0
+if (( ${#MM_CURRENT_FEE_CONFIRMATION_ARGS[@]} > 0 )); then
+    (
+        cd "$BASE/helper_scripts/research"
+        "$PYBIN" -m alpha_discovery_throughput.mm_current_fee_confirmation \
+            "${MM_CURRENT_FEE_CONFIRMATION_ARGS[@]}" \
+            --json-output "$MM_CURRENT_FEE_CONFIRMATION_JSON" \
+            --output "$MM_CURRENT_FEE_CONFIRMATION_MD"
+    ) > "$MM_CURRENT_FEE_CONFIRMATION_STDOUT" 2>> "$LOG" || mm_current_fee_confirmation_rc=$?
+    echo "[$(ts)] mm_current_fee_confirmation_refresh rc=${mm_current_fee_confirmation_rc}" >> "$LOG"
+else
+    echo "[$(ts)] SKIP: mm current-fee confirmation refresh missing fillsim inputs" >> "$LOG"
 fi
 add_profitability_json_arg "--cost-gate-counterfactual-json" "$DATA/cost_gate_counterfactual/cost_gate_reject_counterfactual_latest.json"
 add_profitability_json_arg "--profit-learning-packet-json" "$DATA/cost_gate_learning_lane/profit_learning_decision_packet_latest.json"
