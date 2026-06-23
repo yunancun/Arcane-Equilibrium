@@ -55,6 +55,7 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "outcome_refresh_latest.json" in src
     assert "blocked_outcome_review_latest.json" in src
     assert "false_negative_candidate_packet_latest.json" in src
+    assert "false_negative_operator_review_latest.json" in src
     assert "bounded_probe_touchability_preflight_latest.json" in src
     assert "bounded_probe_placement_repair_plan_latest.json" in src
     assert "bounded_probe_authority_patch_readiness_latest.json" in src
@@ -73,6 +74,7 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "cost_gate_learning_lane.outcome_refresh" in src
     assert "cost_gate_learning_lane.outcome_review" in src
     assert "cost_gate_learning_lane.false_negative_candidate_packet" in src
+    assert "cost_gate_learning_lane.false_negative_operator_review" in src
     assert "cost_gate_learning_lane.bounded_probe_touchability_preflight" in src
     assert "cost_gate_learning_lane.bounded_probe_placement_repair_plan" in src
     assert "cost_gate_learning_lane.bounded_probe_authority_patch_readiness" in src
@@ -110,6 +112,12 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "false_negative_candidate_packet_edge_amplification_count" in src
     assert "false_negative_candidate_packet_operator_review_ready" in src
     assert "false_negative_candidate_packet_global_cost_gate_lowering_recommended" in src
+    assert "false_negative_operator_review_status" in src
+    assert "false_negative_operator_review_decision" in src
+    assert "false_negative_operator_review_approved_for_preflight" in src
+    assert "false_negative_operator_review_bounded_demo_probe_preflight_approved" in src
+    assert "false_negative_operator_review_review_grants_runtime_authority" in src
+    assert "false_negative_operator_review_order_authority_granted" in src
     assert "bounded_probe_result_review_status" in src
     assert "bounded_probe_result_review_skip_reason" in src
     assert "bounded_probe_result_review_execution_realism_gap" in src
@@ -146,6 +154,7 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "OPENCLAW_COST_GATE_REFRESH_ORDER_TOUCHABILITY_AUDIT" in src
     assert "OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET" in src
     assert "OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET" in src
+    assert "OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_OPERATOR_REVIEW" in src
     assert "OPENCLAW_COST_GATE_DATA_FLOW_WINDOW_HOURS" in src
     assert "OPENCLAW_COST_GATE_DATA_FLOW_TOP_LIMIT" in src
     assert "OPENCLAW_DEMO_ORDER_TO_FILL_GAP_ENGINE_MODES" in src
@@ -182,6 +191,7 @@ def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     assert 'REFRESH_ORDER_TOUCHABILITY_AUDIT="${OPENCLAW_COST_GATE_REFRESH_ORDER_TOUCHABILITY_AUDIT:-1}"' in src
     assert 'REFRESH_DECISION_PACKET="${OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET:-1}"' in src
     assert 'REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET="${OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET:-1}"' in src
+    assert 'REFRESH_FALSE_NEGATIVE_OPERATOR_REVIEW="${OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_OPERATOR_REVIEW:-1}"' in src
     assert 'DATA_FLOW_WINDOW_HOURS="${OPENCLAW_COST_GATE_DATA_FLOW_WINDOW_HOURS:-1,4,24}"' in src
     assert 'DATA_FLOW_TOP_LIMIT="${OPENCLAW_COST_GATE_DATA_FLOW_TOP_LIMIT:-10}"' in src
     assert 'ORDER_TOUCHABILITY_ENGINE_MODES="${OPENCLAW_DEMO_ORDER_TO_FILL_GAP_ENGINE_MODES:-demo,live_demo}"' in src
@@ -226,11 +236,13 @@ def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     assert 'PLACEMENT_REPAIR_MAX_FRESH_BBO_AGE_MS="${OPENCLAW_COST_GATE_PLACEMENT_REPAIR_MAX_FRESH_BBO_AGE_MS:-1000}"' in src
     assert 'AUTHORITY_PATCH_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_AUTHORITY_PATCH_MAX_ARTIFACT_AGE_HOURS:-24}"' in src
     assert 'OPERATOR_AUTHORIZATION_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_OPERATOR_AUTHORIZATION_MAX_ARTIFACT_AGE_HOURS:-24}"' in src
+    assert 'FALSE_NEGATIVE_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS:-24}"' in src
     assert 'SHADOW_PLACEMENT_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_SHADOW_PLACEMENT_MAX_ARTIFACT_AGE_HOURS:-24}"' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_LEARNING_REFRESH_SCORECARD"' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_REFRESH_DATA_FLOW_MONITOR"' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_REFRESH_ORDER_TOUCHABILITY_AUDIT"' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET"' in src
+    assert 'validate_bool01 "OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_OPERATOR_REVIEW"' in src
     assert "OPENCLAW_COST_GATE_DATA_FLOW_WINDOW_HOURS must be comma-separated integers" in src
     assert "OPENCLAW_DEMO_ORDER_TO_FILL_GAP_ENGINE_MODES must be comma-separated engine modes" in src
     assert 'validate_int "OPENCLAW_COST_GATE_DATA_FLOW_TOP_LIMIT"' in src
@@ -278,6 +290,7 @@ def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     assert 'validate_int "OPENCLAW_COST_GATE_PLACEMENT_REPAIR_MAX_FRESH_BBO_AGE_MS"' in src
     assert 'validate_int "OPENCLAW_COST_GATE_AUTHORITY_PATCH_MAX_ARTIFACT_AGE_HOURS"' in src
     assert 'validate_int "OPENCLAW_COST_GATE_OPERATOR_AUTHORIZATION_MAX_ARTIFACT_AGE_HOURS"' in src
+    assert 'validate_int "OPENCLAW_COST_GATE_FALSE_NEGATIVE_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS"' in src
     assert 'validate_int "OPENCLAW_COST_GATE_SHADOW_PLACEMENT_MAX_ARTIFACT_AGE_HOURS"' in src
 
 
@@ -289,6 +302,7 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert 'PLAN_ARGS=(' in src
     assert 'SEALED_LEARNING_EVIDENCE_ARGS=(' in src
     assert 'DECISION_PACKET_ARGS=(' in src
+    assert 'FALSE_NEGATIVE_OPERATOR_REVIEW_ARGS=(' in src
     assert "cost_gate_reject_counterfactual.py" in src
     assert "demo_data_flow_monitor.py" in src
     assert "demo_order_to_fill_gap_audit.py" in src
@@ -305,12 +319,16 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert "-m cost_gate_learning_lane.bounded_probe_shadow_placement_impact" in src
     assert "-m cost_gate_learning_lane.bounded_probe_result_review" in src
     assert "-m cost_gate_learning_lane.bounded_probe_execution_realism_review" in src
+    assert "-m cost_gate_learning_lane.false_negative_operator_review" in src
+    assert "--false-negative-candidate-packet-json" in src
+    assert "--decision defer" in src
     assert 'cp "$SCORECARD_JSON_OUT" "$SCORECARD_JSON"' in src
     assert 'cp "$DATA_FLOW_JSON_OUT" "$DATA_FLOW_JSON"' in src
     assert 'cp "$ORDER_TOUCHABILITY_JSON_OUT" "$ORDER_TOUCHABILITY_JSON"' in src
     assert 'cp "$PLAN_OUT" "$PLAN_JSON"' in src
     assert 'cp "$DECISION_PACKET_JSON_OUT" "$DECISION_PACKET_JSON"' in src
     assert 'cp "$SEALED_LEARNING_EVIDENCE_OUT" "$SEALED_LEARNING_EVIDENCE_JSON"' in src
+    assert 'cp "$FALSE_NEGATIVE_OPERATOR_REVIEW_OUT" "$FALSE_NEGATIVE_OPERATOR_REVIEW_LATEST"' in src
     assert 'cp "$SEALED_LEARNING_EVIDENCE_REVIEW_OUT" "$SEALED_LEARNING_EVIDENCE_REVIEW_LATEST"' in src
     assert 'cp "$SEALED_LEARNING_EVIDENCE_SOURCE_ROWS_OUT" "$SEALED_LEARNING_EVIDENCE_SOURCE_ROWS_LATEST"' in src
     assert 'cp "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST"' in src
@@ -327,7 +345,10 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert 'PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN"' in src
     assert 'export SEALED_LEARNING_EVIDENCE_OUT="$SEALED_LEARNING_EVIDENCE_OUT"' in src
     assert 'export SEALED_HORIZON_LEARNING_EVIDENCE_RC="$sealed_horizon_learning_evidence_rc"' in src
+    assert 'export FALSE_NEGATIVE_OPERATOR_REVIEW_OUT="$FALSE_NEGATIVE_OPERATOR_REVIEW_OUT"' in src
+    assert 'export FALSE_NEGATIVE_OPERATOR_REVIEW_RC="$false_negative_operator_review_rc"' in src
     assert '"sealed_horizon_learning_evidence_status": sealed_learning.get("status")' in src
+    assert '"false_negative_operator_review_status": false_negative_operator_review.get("status")' in src
     assert 'sealed_horizon_learning_evidence_skip_reason="horizon_sealed_replay_missing"' in src
     assert '"horizon_sealed_replay_path": os.environ["HORIZON_SEALED_REPLAY_JSON"] or None' in src
     assert 'ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT"' in src
@@ -341,6 +362,7 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert "decision_packet_rc=" in src
     assert "plan_rc=" in src
     assert "sealed_horizon_learning_evidence_rc=" in src
+    assert "false_negative_operator_review_rc=" in src
     assert "bounded_probe_placement_repair_plan_rc=" in src
     assert "bounded_probe_authority_patch_readiness_rc=" in src
     assert "bounded_probe_operator_authorization_rc=" in src
@@ -352,6 +374,12 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     materializer_index = src.index('"$PYBIN" "${MATERIALIZER_ARGS[@]}"')
     refresh_index = src.index('"$PYBIN" "${REFRESH_ARGS[@]}"')
     review_index = src.index('"$PYBIN" "${REVIEW_ARGS[@]}"')
+    false_negative_packet_index = src.index(
+        '"$PYBIN" "${FALSE_NEGATIVE_CANDIDATE_PACKET_ARGS[@]}"'
+    )
+    false_negative_operator_review_index = src.index(
+        '"$PYBIN" "${FALSE_NEGATIVE_OPERATOR_REVIEW_ARGS[@]}"'
+    )
     sealed_evidence_index = src.index('"$PYBIN" "${SEALED_LEARNING_EVIDENCE_ARGS[@]}"')
     touchability_index = src.index('"$PYBIN" "${BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_ARGS[@]}"')
     placement_index = src.index('"$PYBIN" "${BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_ARGS[@]}"')
@@ -364,7 +392,14 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert scorecard_index < plan_index
     assert scorecard_index < data_flow_index < plan_index
     assert plan_index < materializer_index
-    assert materializer_index < refresh_index < review_index < sealed_evidence_index
+    assert (
+        materializer_index
+        < refresh_index
+        < review_index
+        < false_negative_packet_index
+        < false_negative_operator_review_index
+        < sealed_evidence_index
+    )
     assert sealed_evidence_index < order_touchability_index < touchability_index < placement_index < authority_index < operator_auth_index < shadow_index < result_review_index < execution_review_index
     assert execution_review_index < decision_packet_index
 
@@ -419,12 +454,13 @@ def test_wrapper_has_preinstall_refresh_only_cutoff_after_plan_refresh() -> None
     assert "preinstall refresh-only mode" in src
     assert (
         "skipped historical/materializer/outcome/review/false-negative "
-        "packet/sealed evidence/bounded-probe stages"
+        "packet/false-negative operator review/sealed evidence/bounded-probe stages"
     ) in src
     assert 'PREINSTALL_REFRESH_ONLY="$PREINSTALL_REFRESH_ONLY"' in src
     assert '"preinstall_refresh_only": os.environ["PREINSTALL_REFRESH_ONLY"] == "1"' in src
     assert 'order_touchability_audit_skip_reason="preinstall_refresh_only"' in src
     assert 'false_negative_candidate_packet_skip_reason="preinstall_refresh_only"' in src
+    assert 'false_negative_operator_review_skip_reason="preinstall_refresh_only"' in src
     assert 'sealed_horizon_learning_evidence_skip_reason="preinstall_refresh_only"' in src
     assert 'bounded_probe_touchability_preflight_skip_reason="preinstall_refresh_only"' in src
     assert 'bounded_probe_placement_repair_plan_skip_reason="preinstall_refresh_only"' in src
@@ -439,6 +475,12 @@ def test_wrapper_has_preinstall_refresh_only_cutoff_after_plan_refresh() -> None
     materializer_index = src.index('"$PYBIN" "${MATERIALIZER_ARGS[@]}"')
     refresh_index = src.index('"$PYBIN" "${REFRESH_ARGS[@]}"')
     review_index = src.index('"$PYBIN" "${REVIEW_ARGS[@]}"')
+    false_negative_packet_index = src.index(
+        '"$PYBIN" "${FALSE_NEGATIVE_CANDIDATE_PACKET_ARGS[@]}"'
+    )
+    false_negative_operator_review_index = src.index(
+        '"$PYBIN" "${FALSE_NEGATIVE_OPERATOR_REVIEW_ARGS[@]}"'
+    )
     sealed_evidence_index = src.index('"$PYBIN" "${SEALED_LEARNING_EVIDENCE_ARGS[@]}"')
     order_touchability_index = src.index('"$PYBIN" "${ORDER_TOUCHABILITY_ARGS[@]}"')
     touchability_index = src.index('"$PYBIN" "${BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_ARGS[@]}"')
@@ -455,6 +497,8 @@ def test_wrapper_has_preinstall_refresh_only_cutoff_after_plan_refresh() -> None
         < materializer_index
         < refresh_index
         < review_index
+        < false_negative_packet_index
+        < false_negative_operator_review_index
         < sealed_evidence_index
         < order_touchability_index
         < touchability_index

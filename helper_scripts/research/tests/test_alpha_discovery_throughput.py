@@ -3503,6 +3503,99 @@ def test_cost_gate_false_negative_packet_drives_ranked_operator_review_task():
     ] is False
 
 
+def test_cost_gate_false_negative_operator_review_approval_advances_preflight():
+    now = dt.datetime(2026, 6, 23, 20, 30, tzinfo=dt.timezone.utc)
+    arm = {
+        "arm_id": "cost_gate_demo_learning_lane",
+        "gate_status": "OPERATOR_REVIEW",
+        "sample_count": 2,
+        "artifacts_ready": False,
+        "source_ok": True,
+        "source_path": (
+            "/tmp/openclaw/cost_gate_learning_lane/"
+            "demo_learning_lane_plan_latest.json"
+        ),
+        "detail": {
+            "blocked_signal_outcome_count": 45677,
+            "blocked_signal_outcome_review_status": (
+                "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
+            ),
+            "false_negative_candidate_packet_status": (
+                "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW"
+            ),
+            "false_negative_candidate_packet_operator_review_ready": True,
+            "false_negative_candidate_packet_global_cost_gate_lowering_recommended": (
+                False
+            ),
+            "false_negative_candidate_packet_probe_authority_granted": False,
+            "false_negative_candidate_packet_order_authority_granted": False,
+            "false_negative_candidate_packet_promotion_evidence": False,
+            "false_negative_operator_review_present": True,
+            "false_negative_operator_review_source_ok": True,
+            "false_negative_operator_review_status": (
+                "APPROVED_COST_GATE_FALSE_NEGATIVE_FOR_BOUNDED_DEMO_PROBE_PREFLIGHT"
+            ),
+            "false_negative_operator_review_decision": "approve-preflight",
+            "false_negative_operator_review_next_actions": [
+                "build_candidate_matched_bounded_demo_probe_preflight_for_approved_false_negative",
+                "preserve_global_cost_gate_no_lowering",
+            ],
+            "false_negative_operator_review_selected_side_cell_key": (
+                "grid_trading|AVAXUSDT|Sell"
+            ),
+            "false_negative_operator_review_selected_rank": 1,
+            "false_negative_operator_review_typed_confirm_expected": (
+                "approve_cost_gate_false_negative_preflight:"
+                "grid_trading|AVAXUSDT|Sell:1"
+            ),
+            "false_negative_operator_review_approved_for_preflight": True,
+            "false_negative_operator_review_bounded_demo_probe_preflight_approved": (
+                True
+            ),
+            "false_negative_operator_review_review_grants_runtime_authority": False,
+            "false_negative_operator_review_global_cost_gate_lowering_recommended": (
+                False
+            ),
+            "false_negative_operator_review_probe_authority_granted": False,
+            "false_negative_operator_review_order_authority_granted": False,
+            "false_negative_operator_review_promotion_evidence": False,
+            "false_negative_operator_review_candidate_avg_net_bps": 77.4563,
+            "false_negative_operator_review_candidate_net_cost_cushion_bps": (
+                73.4563
+            ),
+            "false_negative_operator_review_candidate_wrongful_block_score": (
+                146.9126
+            ),
+        },
+    }
+
+    plan = build_discovery_plan([arm], now_utc=now)
+
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert blocker["reason"] == (
+        "cost_gate_false_negative_operator_review_approved_for_preflight"
+    )
+    assert blocker["blocker_class"] == "candidate_review_ready"
+    assert blocker["primary_blocker"] == (
+        "cost_gate_false_negative_bounded_demo_probe_preflight_missing"
+    )
+    assert blocker["next_trigger"] == (
+        "build_candidate_matched_bounded_demo_probe_preflight_for_approved_false_negative"
+    )
+    assert blocker["operator_actionable"] is False
+    assert blocker["engineering_actionable"] is True
+    assert blocker["false_negative_operator_review_selected_side_cell_key"] == (
+        "grid_trading|AVAXUSDT|Sell"
+    )
+    assert blocker["false_negative_operator_review_approved_for_preflight"] is True
+    assert blocker["false_negative_operator_review_review_grants_runtime_authority"] is False
+    task = plan["learning_worklist"]["top_task"]
+    assert task["evidence"]["false_negative_operator_review_approved_for_preflight"] is True
+    assert task["evidence"][
+        "false_negative_operator_review_review_grants_runtime_authority"
+    ] is False
+
+
 def test_cost_gate_arm_uses_stack_healthcheck_for_missing_bounded_reviews(tmp_path):
     data = tmp_path / "openclaw"
     artifact = _write_demo_learning_stack_healthcheck_latest(

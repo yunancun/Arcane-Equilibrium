@@ -2153,6 +2153,98 @@ def summarize_false_negative_candidate_packet(
     }
 
 
+def summarize_false_negative_operator_review(
+    data_dir: Path,
+    *,
+    now_utc: dt.datetime,
+    max_age_seconds: int = DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS,
+) -> dict[str, Any]:
+    """Summarize the Cost Gate false-negative operator-review artifact."""
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    path = lane_dir / "false_negative_operator_review_latest.json"
+    payload, err = _read_json(path)
+    if err:
+        return {
+            "false_negative_operator_review_present": False,
+            "false_negative_operator_review_source_path": str(path),
+            "false_negative_operator_review_source_error": err,
+        }
+    assert payload is not None
+    generated_at = payload.get("generated_at_utc")
+    fresh, age, freshness_error = _source_fresh(
+        generated_at,
+        now_utc=now_utc,
+        max_age_seconds=max_age_seconds,
+    )
+    answers = payload.get("answers") if isinstance(payload.get("answers"), dict) else {}
+    candidate = (
+        payload.get("candidate") if isinstance(payload.get("candidate"), dict) else {}
+    )
+    next_actions = payload.get("next_actions")
+    if not isinstance(next_actions, list):
+        next_actions = []
+    return {
+        "false_negative_operator_review_present": True,
+        "false_negative_operator_review_status": payload.get("status"),
+        "false_negative_operator_review_reason": payload.get("reason"),
+        "false_negative_operator_review_decision": payload.get("decision"),
+        "false_negative_operator_review_next_actions": next_actions,
+        "false_negative_operator_review_generated_at_utc": generated_at,
+        "false_negative_operator_review_age_seconds": age,
+        "false_negative_operator_review_source_ok": fresh,
+        "false_negative_operator_review_source_path": str(path),
+        "false_negative_operator_review_source_error": freshness_error,
+        "false_negative_operator_review_selected_side_cell_key": payload.get(
+            "selected_side_cell_key"
+        ),
+        "false_negative_operator_review_selected_rank": payload.get(
+            "selected_false_negative_rank"
+        ),
+        "false_negative_operator_review_blocking_gate_count": payload.get(
+            "blocking_gate_count"
+        ),
+        "false_negative_operator_review_blocking_gates": payload.get(
+            "blocking_gates"
+        ),
+        "false_negative_operator_review_typed_confirm_expected": payload.get(
+            "typed_confirm_expected"
+        ),
+        "false_negative_operator_review_approved_for_preflight": answers.get(
+            "operator_review_approved_for_preflight"
+        ),
+        "false_negative_operator_review_bounded_demo_probe_preflight_approved": (
+            answers.get("bounded_demo_probe_preflight_approved")
+        ),
+        "false_negative_operator_review_review_grants_runtime_authority": answers.get(
+            "review_grants_runtime_authority"
+        ),
+        "false_negative_operator_review_global_cost_gate_lowering_recommended": (
+            answers.get("global_cost_gate_lowering_recommended")
+        ),
+        "false_negative_operator_review_main_cost_gate_adjustment": answers.get(
+            "main_cost_gate_adjustment"
+        ),
+        "false_negative_operator_review_probe_authority_granted": answers.get(
+            "probe_authority_granted"
+        ),
+        "false_negative_operator_review_order_authority_granted": answers.get(
+            "order_authority_granted"
+        ),
+        "false_negative_operator_review_promotion_evidence": answers.get(
+            "promotion_evidence"
+        ),
+        "false_negative_operator_review_candidate_avg_net_bps": candidate.get(
+            "avg_net_bps"
+        ),
+        "false_negative_operator_review_candidate_net_cost_cushion_bps": (
+            candidate.get("net_cost_cushion_bps")
+        ),
+        "false_negative_operator_review_candidate_wrongful_block_score": (
+            candidate.get("wrongful_block_score")
+        ),
+    }
+
+
 def summarize_profitability_path_scorecard(
     data_dir: Path,
     *,
@@ -3118,6 +3210,10 @@ def collect_cost_gate_learning_lane_arm(
         data_dir,
         now_utc=now_utc,
     )
+    false_negative_operator_review_summary = summarize_false_negative_operator_review(
+        data_dir,
+        now_utc=now_utc,
+    )
     profitability_path_scorecard_summary = summarize_profitability_path_scorecard(
         data_dir,
         now_utc=now_utc,
@@ -3202,6 +3298,7 @@ def collect_cost_gate_learning_lane_arm(
                 **stack_dry_run_review_summary,
                 **decision_packet_summary,
                 **false_negative_packet_summary,
+                **false_negative_operator_review_summary,
                 **profitability_path_scorecard_summary,
                 **sealed_operator_review_summary,
                 **sealed_probe_preflight_summary,
@@ -3257,6 +3354,7 @@ def collect_cost_gate_learning_lane_arm(
             **stack_dry_run_review_summary,
             **decision_packet_summary,
             **false_negative_packet_summary,
+            **false_negative_operator_review_summary,
             **profitability_path_scorecard_summary,
             **sealed_operator_review_summary,
             **sealed_probe_preflight_summary,
@@ -3462,6 +3560,21 @@ def _learning_summary(worklist: dict[str, Any]) -> dict[str, Any]:
             evidence.get(
                 "false_negative_candidate_packet_global_cost_gate_lowering_recommended"
             )
+        ),
+        "top_learning_task_false_negative_operator_review_status": evidence.get(
+            "false_negative_operator_review_status"
+        ),
+        "top_learning_task_false_negative_operator_review_selected_side_cell_key": (
+            evidence.get("false_negative_operator_review_selected_side_cell_key")
+        ),
+        "top_learning_task_false_negative_operator_review_approved_for_preflight": (
+            evidence.get("false_negative_operator_review_approved_for_preflight")
+        ),
+        "top_learning_task_false_negative_operator_review_review_grants_runtime_authority": (
+            evidence.get("false_negative_operator_review_review_grants_runtime_authority")
+        ),
+        "top_learning_task_false_negative_operator_review_typed_confirm_expected": (
+            evidence.get("false_negative_operator_review_typed_confirm_expected")
         ),
         "top_engineering_learning_task_available": bool(top_engineering_task),
         "top_engineering_learning_task_id": top_engineering_task.get("task_id"),
