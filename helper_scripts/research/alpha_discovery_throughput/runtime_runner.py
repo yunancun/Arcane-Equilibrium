@@ -27,7 +27,7 @@ from polymarket_leadlag import replay_history as polymarket_replay_history
 from . import RUNNER_VERSION
 from .discovery_loop import build_discovery_plan
 
-RUNTIME_KILLBOARD_SCHEMA_VERSION = "alpha_discovery_runtime_killboard_v9"
+RUNTIME_KILLBOARD_SCHEMA_VERSION = "alpha_discovery_runtime_killboard_v10"
 DEFAULT_MAX_ARTIFACT_AGE_SECONDS = 6 * 60 * 60
 DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS = 36 * 60 * 60
 DEFAULT_POLYMARKET_REPLAY_HISTORY_REPORT_LIMIT = 4096
@@ -3126,6 +3126,34 @@ def _learning_top_task(worklist: dict[str, Any]) -> dict[str, Any]:
     return top_task if isinstance(top_task, dict) else {}
 
 
+def _learning_tasks(worklist: dict[str, Any]) -> list[dict[str, Any]]:
+    tasks = worklist.get("tasks")
+    if not isinstance(tasks, list):
+        return []
+    return [task for task in tasks if isinstance(task, dict)]
+
+
+def _is_engineering_learning_task(task: dict[str, Any]) -> bool:
+    return (
+        task.get("actionability") == "engineering_actionable"
+        and task.get("requires_operator_authorization") is not True
+        and task.get("runtime_mutation_required") is not True
+    )
+
+
+def _top_engineering_learning_task(worklist: dict[str, Any]) -> dict[str, Any]:
+    for task in _learning_tasks(worklist):
+        if _is_engineering_learning_task(task):
+            return task
+    top_task = _learning_top_task(worklist)
+    return top_task if _is_engineering_learning_task(top_task) else {}
+
+
+def _completion_evidence_required_count(task: dict[str, Any]) -> int:
+    evidence_required = task.get("completion_evidence_required")
+    return len(evidence_required) if isinstance(evidence_required, list) else 0
+
+
 def _first_evidence(evidence: dict[str, Any], *keys: str) -> Any:
     for key in keys:
         value = evidence.get(key)
@@ -3136,12 +3164,13 @@ def _first_evidence(evidence: dict[str, Any], *keys: str) -> Any:
 
 def _learning_summary(worklist: dict[str, Any]) -> dict[str, Any]:
     top_task = _learning_top_task(worklist)
-    completion_evidence_required = top_task.get("completion_evidence_required")
-    if not isinstance(completion_evidence_required, list):
-        completion_evidence_required = []
     evidence = top_task.get("evidence")
     if not isinstance(evidence, dict):
         evidence = {}
+    top_engineering_task = _top_engineering_learning_task(worklist)
+    engineering_evidence = top_engineering_task.get("evidence")
+    if not isinstance(engineering_evidence, dict):
+        engineering_evidence = {}
     return {
         "learning_worklist_status": worklist.get("status"),
         "learning_task_count": _int(worklist.get("task_count")),
@@ -3159,8 +3188,8 @@ def _learning_summary(worklist: dict[str, Any]) -> dict[str, Any]:
         "top_learning_task_objective": top_task.get("learning_objective"),
         "top_learning_task_completion_gate": top_task.get("completion_gate"),
         "top_learning_task_completion_status": top_task.get("completion_status"),
-        "top_learning_task_completion_evidence_required_count": len(
-            completion_evidence_required
+        "top_learning_task_completion_evidence_required_count": (
+            _completion_evidence_required_count(top_task)
         ),
         "top_learning_task_actionability": top_task.get("actionability"),
         "top_learning_task_requires_operator_authorization": top_task.get(
@@ -3233,6 +3262,39 @@ def _learning_summary(worklist: dict[str, Any]) -> dict[str, Any]:
         "top_learning_task_blocked_signal_top_review_candidate_net_cost_cushion_bps": (
             evidence.get("blocked_signal_top_review_candidate_net_cost_cushion_bps")
         ),
+        "top_engineering_learning_task_available": bool(top_engineering_task),
+        "top_engineering_learning_task_id": top_engineering_task.get("task_id"),
+        "top_engineering_learning_task_arm_id": top_engineering_task.get("arm_id"),
+        "top_engineering_learning_task_type": top_engineering_task.get("task_type"),
+        "top_engineering_learning_task_objective": top_engineering_task.get(
+            "learning_objective"
+        ),
+        "top_engineering_learning_task_completion_gate": top_engineering_task.get(
+            "completion_gate"
+        ),
+        "top_engineering_learning_task_completion_status": top_engineering_task.get(
+            "completion_status"
+        ),
+        "top_engineering_learning_task_completion_evidence_required_count": (
+            _completion_evidence_required_count(top_engineering_task)
+        ),
+        "top_engineering_learning_task_actionability": top_engineering_task.get(
+            "actionability"
+        ),
+        "top_engineering_learning_task_requires_operator_authorization": (
+            top_engineering_task.get("requires_operator_authorization")
+        ),
+        "top_engineering_learning_task_runtime_mutation_required": (
+            top_engineering_task.get("runtime_mutation_required")
+        ),
+        "top_engineering_learning_task_side_effect_boundary": (
+            top_engineering_task.get("side_effect_boundary")
+        ),
+        "top_engineering_learning_task_next_trigger": top_engineering_task.get(
+            "next_trigger"
+        ),
+        "top_engineering_learning_task_evidence_key_count": len(engineering_evidence),
+        "top_engineering_learning_task_evidence": engineering_evidence or None,
     }
 
 
@@ -3580,6 +3642,48 @@ def _history_row(killboard: dict[str, Any]) -> dict[str, Any]:
         ),
         "top_learning_task_blocked_signal_top_review_candidate_net_cost_cushion_bps": kb.get(
             "top_learning_task_blocked_signal_top_review_candidate_net_cost_cushion_bps"
+        ),
+        "top_engineering_learning_task_available": kb.get(
+            "top_engineering_learning_task_available"
+        ),
+        "top_engineering_learning_task_arm_id": kb.get(
+            "top_engineering_learning_task_arm_id"
+        ),
+        "top_engineering_learning_task_type": kb.get(
+            "top_engineering_learning_task_type"
+        ),
+        "top_engineering_learning_task_objective": kb.get(
+            "top_engineering_learning_task_objective"
+        ),
+        "top_engineering_learning_task_completion_gate": kb.get(
+            "top_engineering_learning_task_completion_gate"
+        ),
+        "top_engineering_learning_task_completion_status": kb.get(
+            "top_engineering_learning_task_completion_status"
+        ),
+        "top_engineering_learning_task_completion_evidence_required_count": kb.get(
+            "top_engineering_learning_task_completion_evidence_required_count"
+        ),
+        "top_engineering_learning_task_actionability": kb.get(
+            "top_engineering_learning_task_actionability"
+        ),
+        "top_engineering_learning_task_requires_operator_authorization": kb.get(
+            "top_engineering_learning_task_requires_operator_authorization"
+        ),
+        "top_engineering_learning_task_runtime_mutation_required": kb.get(
+            "top_engineering_learning_task_runtime_mutation_required"
+        ),
+        "top_engineering_learning_task_side_effect_boundary": kb.get(
+            "top_engineering_learning_task_side_effect_boundary"
+        ),
+        "top_engineering_learning_task_next_trigger": kb.get(
+            "top_engineering_learning_task_next_trigger"
+        ),
+        "top_engineering_learning_task_evidence_key_count": kb.get(
+            "top_engineering_learning_task_evidence_key_count"
+        ),
+        "top_engineering_learning_task_evidence": kb.get(
+            "top_engineering_learning_task_evidence"
         ),
     }
 

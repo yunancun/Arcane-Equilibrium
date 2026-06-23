@@ -155,6 +155,100 @@ def test_learning_summary_mirrors_completion_and_top_evidence_fields():
     assert summary["top_learning_task_global_cost_gate_lowering_recommended"] is False
     assert summary["top_learning_task_order_authority_granted"] is False
     assert summary["top_learning_task_probe_authority_granted"] is False
+    assert summary["top_engineering_learning_task_available"] is False
+    assert summary["top_engineering_learning_task_arm_id"] is None
+
+
+def test_learning_summary_exposes_parallel_engineering_task_when_operator_gate_top():
+    operator_task = {
+        "task_id": "cost_gate_demo_learning_lane:cost_gate_learning_activation:x",
+        "arm_id": "cost_gate_demo_learning_lane",
+        "task_type": "cost_gate_learning_activation",
+        "learning_objective": "operator_review_learning_stack_before_cron_apply",
+        "completion_gate": "learning_lane_ledger_and_blocked_outcomes_accumulating",
+        "completion_status": "PENDING_EVIDENCE",
+        "completion_evidence_required": [
+            "demo_learning_stack_healthcheck_status:EVIDENCE_STACK_ACTIVE",
+        ],
+        "actionability": "operator_required",
+        "requires_operator_authorization": True,
+        "runtime_mutation_required": True,
+        "side_effect_boundary": (
+            "recommendation_only_operator_runtime_mutation_required_"
+            "no_order_or_probe_authority"
+        ),
+        "next_trigger": (
+            "operator_review_dry_run_preview_then_apply_learning_stack_if_accepted"
+        ),
+        "evidence": {
+            "demo_learning_stack_dry_run_review_operator_next_action": (
+                "operator_review_dry_run_preview_then_apply_learning_stack_if_accepted"
+            ),
+        },
+    }
+    engineering_task = {
+        "task_id": "polymarket_leadlag_ic:polymarket_replay_history:y",
+        "arm_id": "polymarket_leadlag_ic",
+        "task_type": "polymarket_replay_history",
+        "learning_objective": "collect_dated_replay_history_for_leadlag_ic",
+        "completion_gate": "dated_replay_history_ready_for_aeg_recheck",
+        "completion_status": "PENDING_EVIDENCE",
+        "completion_evidence_required": [
+            "candidate_replay_history_sample_count",
+            "candidate_replay_history_n_days",
+        ],
+        "actionability": "engineering_actionable",
+        "requires_operator_authorization": False,
+        "runtime_mutation_required": False,
+        "side_effect_boundary": "recommendation_only_no_order_authority_no_runtime_mutation",
+        "next_trigger": "collect_more_dated_polymarket_replay_history_before_promotion",
+        "evidence": {
+            "candidate_replay_history_status": "INSUFFICIENT_HISTORY",
+            "candidate_replay_history_sample_count": 12,
+        },
+    }
+
+    summary = _learning_summary({
+        "status": "OPERATOR_GATED_LEARNING_READY",
+        "task_count": 2,
+        "operator_required_count": 1,
+        "runtime_mutation_required_count": 1,
+        "engineering_actionable_count": 1,
+        "top_task": operator_task,
+        "tasks": [operator_task, engineering_task],
+    })
+
+    assert summary["top_learning_task_arm_id"] == "cost_gate_demo_learning_lane"
+    assert summary["top_learning_task_type"] == "cost_gate_learning_activation"
+    assert summary["top_learning_task_requires_operator_authorization"] is True
+    assert summary["top_learning_task_runtime_mutation_required"] is True
+    assert summary["top_engineering_learning_task_available"] is True
+    assert summary["top_engineering_learning_task_arm_id"] == "polymarket_leadlag_ic"
+    assert summary["top_engineering_learning_task_type"] == "polymarket_replay_history"
+    assert summary["top_engineering_learning_task_completion_gate"] == (
+        "dated_replay_history_ready_for_aeg_recheck"
+    )
+    assert summary[
+        "top_engineering_learning_task_completion_evidence_required_count"
+    ] == 2
+    assert summary["top_engineering_learning_task_actionability"] == (
+        "engineering_actionable"
+    )
+    assert (
+        summary["top_engineering_learning_task_requires_operator_authorization"]
+        is False
+    )
+    assert summary["top_engineering_learning_task_runtime_mutation_required"] is False
+    assert summary["top_engineering_learning_task_side_effect_boundary"] == (
+        "recommendation_only_no_order_authority_no_runtime_mutation"
+    )
+    assert summary["top_engineering_learning_task_next_trigger"] == (
+        "collect_more_dated_polymarket_replay_history_before_promotion"
+    )
+    assert summary["top_engineering_learning_task_evidence_key_count"] == 2
+    assert summary["top_engineering_learning_task_evidence"][
+        "candidate_replay_history_sample_count"
+    ] == 12
 
 
 def _signal_spec(**extra):
@@ -1200,7 +1294,7 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
         now_utc=dt.datetime(2026, 6, 19, 1, 0, tzinfo=dt.timezone.utc),
     )
 
-    assert result["schema_version"] == "alpha_discovery_runtime_killboard_v9"
+    assert result["schema_version"] == "alpha_discovery_runtime_killboard_v10"
     assert result["killboard"]["is_fast_discovery_active"] is True
     assert result["killboard"]["source_present_count"] == 5
     assert result["killboard"]["runtime_source_activation_ready"] is False
@@ -1236,6 +1330,33 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
     )
     assert result["killboard"]["top_learning_task_evidence_key_count"] > 0
     assert isinstance(result["killboard"]["top_learning_task_evidence"], dict)
+    assert result["killboard"]["top_engineering_learning_task_available"] is True
+    assert result["killboard"]["top_engineering_learning_task_arm_id"] == (
+        "mm_verdict_maker_edge"
+    )
+    assert result["killboard"]["top_engineering_learning_task_type"] == (
+        "promotion_review"
+    )
+    assert result["killboard"]["top_engineering_learning_task_completion_gate"] == (
+        "formal_aeg_qc_mit_review_verdict_recorded"
+    )
+    assert result["killboard"]["top_engineering_learning_task_actionability"] == (
+        "engineering_actionable"
+    )
+    assert (
+        result["killboard"][
+            "top_engineering_learning_task_requires_operator_authorization"
+        ]
+        is False
+    )
+    assert (
+        result["killboard"]["top_engineering_learning_task_runtime_mutation_required"]
+        is False
+    )
+    assert result["killboard"]["top_engineering_learning_task_side_effect_boundary"] == (
+        "recommendation_only_no_order_authority_no_runtime_mutation"
+    )
+    assert result["killboard"]["top_engineering_learning_task_evidence_key_count"] > 0
     assert result["learning_worklist"]["top_task"]["task_type"] == "promotion_review"
     latest = Path(result["written"]["latest"])
     assert latest.exists()
@@ -1286,6 +1407,29 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
         "recommendation_only_no_order_authority_no_runtime_mutation"
     )
     assert history_row["top_learning_task_evidence_key_count"] > 0
+    assert history_row["top_engineering_learning_task_available"] is True
+    assert history_row["top_engineering_learning_task_arm_id"] == (
+        "mm_verdict_maker_edge"
+    )
+    assert history_row["top_engineering_learning_task_type"] == "promotion_review"
+    assert history_row["top_engineering_learning_task_completion_gate"] == (
+        "formal_aeg_qc_mit_review_verdict_recorded"
+    )
+    assert history_row["top_engineering_learning_task_actionability"] == (
+        "engineering_actionable"
+    )
+    assert (
+        history_row["top_engineering_learning_task_requires_operator_authorization"]
+        is False
+    )
+    assert (
+        history_row["top_engineering_learning_task_runtime_mutation_required"]
+        is False
+    )
+    assert history_row["top_engineering_learning_task_side_effect_boundary"] == (
+        "recommendation_only_no_order_authority_no_runtime_mutation"
+    )
+    assert history_row["top_engineering_learning_task_evidence_key_count"] > 0
 
 
 def test_runtime_runner_requires_trusted_source_for_actionable_alpha(tmp_path):
