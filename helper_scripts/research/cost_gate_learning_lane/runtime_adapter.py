@@ -22,6 +22,9 @@ from typing import Any
 from cost_gate_learning_lane.contract import (
     ADAPTER_SCHEMA_VERSION,
     ADMIT_DECISION,
+    AUTHORITY_PATH_PATCH_READY_STATUS,
+    BOUNDED_PROBE_AUTHORIZED_STATUS,
+    BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SCHEMA_VERSION,
     ELIGIBLE_REJECT_REASON_CODE,
     ORDER_AUTHORITY_GRANTED,
 )
@@ -32,12 +35,6 @@ from cost_gate_learning_lane.outcome_writer import (
     read_price_observations,
 )
 from cost_gate_learning_lane.policy import DEMO_LEARNING_LANE_SCHEMA_VERSION
-
-BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SCHEMA_VERSION = (
-    "bounded_demo_probe_operator_authorization_v1"
-)
-BOUNDED_PROBE_AUTHORIZED_STATUS = "BOUNDED_DEMO_PROBE_AUTHORIZED"
-AUTHORITY_PATH_PATCH_READY_STATUS = "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW"
 
 
 @dataclass(frozen=True)
