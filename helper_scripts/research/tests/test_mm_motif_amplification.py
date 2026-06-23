@@ -25,6 +25,21 @@ def test_mm_motif_amplification_ranks_repeated_near_miss_motif():
                     "windows": 2,
                     "distinct_window_dates": ["2026-06-20"],
                     "candidate_keys": ["candidate-a"],
+                    "frontier_summary": {
+                        "candidate_count": 2,
+                        "best_min_gross_key": "candidate-b",
+                        "best_min_train_holdout_gross_bps": 1.2,
+                        "best_min_gross_gap_to_current_fee_bps": 2.8,
+                        "best_train_key": "candidate-b",
+                        "best_train_gross_bps": 1.2,
+                        "best_holdout_key": "candidate-a",
+                        "best_holdout_gross_bps": 2.81,
+                    },
+                    "candidate_frontier": [{
+                        "key": "candidate-b",
+                        "min_train_holdout_gross_bps": 1.2,
+                        "gap_to_current_fee_round_trip_bps": 2.8,
+                    }],
                     "best_cell": {
                         "condition": (
                             "quoted_half_spread_bps train_p90 AND "
@@ -58,6 +73,13 @@ def test_mm_motif_amplification_ranks_repeated_near_miss_motif():
     assert top["search_constraint"] == (
         "preserve_repeated_motif_axes_and_require_train_holdout_sample_gated_"
         "min_gross_ge_current_fee_round_trip"
+    )
+    assert packet["summary"]["top_frontier_candidate_count"] == 2
+    assert packet["summary"]["top_frontier_best_min_gross_key"] == "candidate-b"
+    assert packet["summary"]["top_frontier_gap_to_current_fee_bps"] == 2.8
+    assert top["frontier_search_plan"]["status"] == "MOTIF_FRONTIER_PRESENT"
+    assert top["frontier_search_plan"]["experiment_focus"] == (
+        "lift_train_gross_edge_without_destroying_holdout_sample_gate"
     )
 
     markdown = render_markdown(packet)

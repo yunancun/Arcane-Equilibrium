@@ -277,6 +277,127 @@ def _low_friction_motif_key(cell: dict) -> str:
     return "|".join(parts)
 
 
+def _low_friction_bottleneck_leg(train_edge: float | None, holdout_edge: float | None) -> str | None:
+    if train_edge is None and holdout_edge is None:
+        return None
+    if train_edge is None:
+        return "train_missing"
+    if holdout_edge is None:
+        return "holdout_missing"
+    return "train" if train_edge <= holdout_edge else "holdout"
+
+
+def _low_friction_motif_frontier(rows: list[dict], *, current_fee: float) -> tuple[list[dict], dict]:
+    """Rank concrete candidate variants inside a repeated low-friction motif."""
+    by_key: dict[str, list[dict]] = defaultdict(list)
+    for row in rows:
+        cell = row.get("cell") or {}
+        key = cell.get("key")
+        if key:
+            by_key[str(key)].append(row)
+
+    frontier = []
+    for key, key_rows in by_key.items():
+        def rank(row: dict) -> tuple[float, float, float, int, int]:
+            cell = row.get("cell") or {}
+            train = _as_float(cell.get("train_edge_before_fees_bps"))
+            holdout = _as_float(cell.get("holdout_edge_before_fees_bps"))
+            min_gross = min(v for v in (train, holdout) if v is not None) if (
+                train is not None or holdout is not None
+            ) else -1e9
+            return (
+                min_gross,
+                holdout if holdout is not None else -1e9,
+                train if train is not None else -1e9,
+                _as_int(cell.get("holdout_n_fill_only")),
+                _as_int(cell.get("train_n_fill_only")),
+            )
+
+        best_row = max(key_rows, key=rank)
+        cell = best_row.get("cell") or {}
+        train = _as_float(cell.get("train_edge_before_fees_bps"))
+        holdout = _as_float(cell.get("holdout_edge_before_fees_bps"))
+        gross_values = [v for v in (train, holdout) if v is not None]
+        min_gross = min(gross_values) if gross_values else None
+        window_dates = sorted({
+            r.get("window", {}).get("window_date")
+            for r in key_rows
+            if r.get("window", {}).get("window_date")
+        })
+        frontier.append({
+            "key": key,
+            "name": cell.get("name"),
+            "condition": cell.get("condition"),
+            "candidate_shape": cell.get("candidate_shape"),
+            "threshold_source": cell.get("threshold_source"),
+            "windows": len({
+                (
+                    r.get("window", {}).get("source_path"),
+                    r.get("window", {}).get("generated_at"),
+                )
+                for r in key_rows
+            }),
+            "distinct_window_dates": window_dates,
+            "window_sources": [
+                r.get("window", {}).get("source_path")
+                for r in key_rows
+                if r.get("window", {}).get("source_path")
+            ],
+            "train_n_fill_only": _as_int(cell.get("train_n_fill_only")),
+            "holdout_n_fill_only": _as_int(cell.get("holdout_n_fill_only")),
+            "train_edge_before_fees_bps": _r(train, 3),
+            "holdout_edge_before_fees_bps": _r(holdout, 3),
+            "min_train_holdout_gross_bps": _r(min_gross, 3),
+            "gap_to_current_fee_round_trip_bps": (
+                _r(max(0.0, current_fee - min_gross), 3)
+                if min_gross is not None else None
+            ),
+            "bottleneck_leg": _low_friction_bottleneck_leg(train, holdout),
+        })
+
+    def metric(row: dict, key: str) -> float:
+        value = _as_float(row.get(key))
+        return value if value is not None else -1e9
+
+    frontier.sort(
+        key=lambda row: (
+            metric(row, "min_train_holdout_gross_bps"),
+            metric(row, "holdout_edge_before_fees_bps"),
+            metric(row, "train_edge_before_fees_bps"),
+            row.get("windows") or 0,
+        ),
+        reverse=True,
+    )
+    best_min = frontier[0] if frontier else {}
+    best_train = max(
+        frontier,
+        key=lambda row: (
+            metric(row, "train_edge_before_fees_bps"),
+            metric(row, "holdout_edge_before_fees_bps"),
+        ),
+        default={},
+    )
+    best_holdout = max(
+        frontier,
+        key=lambda row: (
+            metric(row, "holdout_edge_before_fees_bps"),
+            metric(row, "train_edge_before_fees_bps"),
+        ),
+        default={},
+    )
+    summary = {
+        "candidate_count": len(frontier),
+        "best_min_gross_key": best_min.get("key"),
+        "best_min_train_holdout_gross_bps": best_min.get("min_train_holdout_gross_bps"),
+        "best_min_gross_gap_to_current_fee_bps": best_min.get("gap_to_current_fee_round_trip_bps"),
+        "best_train_key": best_train.get("key"),
+        "best_train_gross_bps": best_train.get("train_edge_before_fees_bps"),
+        "best_holdout_key": best_holdout.get("key"),
+        "best_holdout_gross_bps": best_holdout.get("holdout_edge_before_fees_bps"),
+    }
+    return frontier[:10], summary
+
+
 def _normalize_low_friction_near_miss_cell(source: str, cell: dict, *, current_fee: float) -> dict | None:
     """Normalize a low-friction holdout lead without promoting it to proof."""
     holdout = cell.get("holdout") if isinstance(cell.get("holdout"), dict) else {}
@@ -735,11 +856,18 @@ def build_fill_sim_history_scorecard(
     )
 
     motif_to_low_friction_near_miss_windows: dict[str, list[dict]] = defaultdict(list)
+    motif_to_low_friction_near_miss_cells: dict[str, list[dict]] = defaultdict(list)
     for w in low_friction_near_miss_windows:
         seen_motif_in_window: set[str] = set()
         for cell in w.get("low_friction_sample_gated_near_miss_cells") or []:
             motif_key = cell.get("motif_key")
-            if not motif_key or motif_key in seen_motif_in_window:
+            if not motif_key:
+                continue
+            motif_to_low_friction_near_miss_cells[motif_key].append({
+                "window": w,
+                "cell": cell,
+            })
+            if motif_key in seen_motif_in_window:
                 continue
             seen_motif_in_window.add(motif_key)
             motif_to_low_friction_near_miss_windows[motif_key].append({
@@ -764,14 +892,20 @@ def build_fill_sim_history_scorecard(
             for r in rows
             if r["window"].get("window_date")
         })
+        candidate_frontier, frontier_summary = _low_friction_motif_frontier(
+            motif_to_low_friction_near_miss_cells.get(motif_key) or rows,
+            current_fee=MAKER_FEE_BPS * 2.0,
+        )
         repeated_low_friction_near_miss_motifs.append({
             "motif_key": motif_key,
             "windows": len(rows),
             "distinct_window_dates": window_dates,
             "best_cell": best,
+            "candidate_frontier": candidate_frontier,
+            "frontier_summary": frontier_summary,
             "candidate_keys": sorted({
                 str(r["cell"].get("key"))
-                for r in rows
+                for r in (motif_to_low_friction_near_miss_cells.get(motif_key) or rows)
                 if r["cell"].get("key")
             }),
             "window_sources": [r["window"].get("source_path") for r in rows],

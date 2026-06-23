@@ -124,6 +124,13 @@ def test_learning_worklist_prioritizes_runtime_reconcile_over_mm_signal_search()
                         "top_min_gross_gap_to_current_fee_bps": 3.2,
                         "top_required_uplift_multiple": 5.0,
                         "top_distinct_dates_remaining": 1,
+                        "top_frontier_candidate_count": 2,
+                        "top_frontier_best_min_gross_key": "frontier-a",
+                        "top_frontier_best_min_train_holdout_gross_bps": 0.9,
+                        "top_frontier_gap_to_current_fee_bps": 3.1,
+                        "top_frontier_experiment_focus": (
+                            "lift_train_gross_edge_without_destroying_holdout_sample_gate"
+                        ),
                     },
                     "top_candidate": {
                         "search_constraint": (
@@ -247,6 +254,15 @@ def test_learning_worklist_prioritizes_runtime_reconcile_over_mm_signal_search()
         "preserve_repeated_motif_axes_and_require_train_holdout_"
         "sample_gated_min_gross_ge_current_fee_round_trip"
     )
+    assert mm_task["evidence"][
+        "mm_signal_search_motif_amplification_top_frontier_candidate_count"
+    ] == 2
+    assert mm_task["evidence"][
+        "mm_signal_search_motif_amplification_top_frontier_best_min_gross_key"
+    ] == "frontier-a"
+    assert mm_task["evidence"][
+        "mm_signal_search_motif_amplification_top_frontier_experiment_focus"
+    ] == "lift_train_gross_edge_without_destroying_holdout_sample_gate"
     assert (
         mm_task["evidence"]["mm_signal_search_lower_fee_path_not_actionable_now"]
         is True

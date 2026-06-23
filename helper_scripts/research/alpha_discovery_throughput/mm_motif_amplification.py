@@ -91,6 +91,16 @@ def _bottleneck_leg(train: float | None, holdout: float | None) -> str | None:
     return "train" if train <= holdout else "holdout"
 
 
+def _frontier_experiment_focus(bottleneck: str | None) -> str:
+    if bottleneck == "train":
+        return "lift_train_gross_edge_without_destroying_holdout_sample_gate"
+    if bottleneck == "holdout":
+        return "lift_holdout_gross_edge_without_overfitting_train_filters"
+    if bottleneck in {"train_missing", "holdout_missing"}:
+        return "restore_missing_train_holdout_leg_before_edge_claim"
+    return "rank_same_motif_variants_by_min_train_holdout_gross"
+
+
 def _motif_axes(motif_key: str) -> list[str]:
     parts = [part for part in motif_key.split("|") if part]
     return parts[1:] if parts[:1] == ["low_friction_motif"] else parts
@@ -140,11 +150,49 @@ def _candidate_record(
         next_action = "run_walk_forward_and_execution_realism_review_for_repeated_motif"
 
     bottleneck = _bottleneck_leg(train_gross, holdout_gross)
+    frontier = [
+        item for item in _list(row.get("candidate_frontier"))
+        if isinstance(item, dict)
+    ][:10]
+    frontier_summary = _dict(row.get("frontier_summary"))
+    frontier_count = int(
+        frontier_summary.get("candidate_count") or len(frontier) or 0
+    )
+    frontier_best_min_gross = _float(
+        frontier_summary.get("best_min_train_holdout_gross_bps")
+    )
+    frontier_gap = (
+        max(0.0, fee - frontier_best_min_gross)
+        if fee is not None and frontier_best_min_gross is not None
+        else None
+    )
+    frontier_search_plan = {
+        "status": (
+            "MOTIF_FRONTIER_PRESENT"
+            if frontier_count > 0 else "MOTIF_FRONTIER_NOT_EMITTED_BY_HISTORY"
+        ),
+        "frontier_candidate_count": frontier_count,
+        "frontier_best_min_gross_key": frontier_summary.get("best_min_gross_key"),
+        "frontier_best_min_train_holdout_gross_bps": _round(frontier_best_min_gross),
+        "frontier_gap_to_current_fee_bps": _round(frontier_gap),
+        "frontier_best_train_key": frontier_summary.get("best_train_key"),
+        "frontier_best_train_gross_bps": _round(
+            frontier_summary.get("best_train_gross_bps")
+        ),
+        "frontier_best_holdout_key": frontier_summary.get("best_holdout_key"),
+        "frontier_best_holdout_gross_bps": _round(
+            frontier_summary.get("best_holdout_gross_bps")
+        ),
+        "experiment_focus": _frontier_experiment_focus(bottleneck),
+    }
     return {
         "motif_key": motif_key,
         "motif_axes": _motif_axes(motif_key),
         "status": status,
         "candidate_keys": row.get("candidate_keys") or [],
+        "candidate_frontier": frontier,
+        "frontier_summary": frontier_summary,
+        "frontier_search_plan": frontier_search_plan,
         "windows": row.get("windows"),
         "distinct_window_dates": dates,
         "min_distinct_dates": min_distinct_dates,
@@ -251,6 +299,25 @@ def build_mm_motif_amplification_packet(
             ),
             "top_required_uplift_multiple": top.get("required_uplift_multiple"),
             "top_distinct_dates_remaining": top.get("distinct_dates_remaining"),
+            "top_frontier_candidate_count": (
+                _dict(top.get("frontier_search_plan")).get("frontier_candidate_count")
+            ),
+            "top_frontier_best_min_gross_key": (
+                _dict(top.get("frontier_search_plan")).get("frontier_best_min_gross_key")
+            ),
+            "top_frontier_best_min_train_holdout_gross_bps": (
+                _dict(top.get("frontier_search_plan")).get(
+                    "frontier_best_min_train_holdout_gross_bps"
+                )
+            ),
+            "top_frontier_gap_to_current_fee_bps": (
+                _dict(top.get("frontier_search_plan")).get(
+                    "frontier_gap_to_current_fee_bps"
+                )
+            ),
+            "top_frontier_experiment_focus": (
+                _dict(top.get("frontier_search_plan")).get("experiment_focus")
+            ),
         },
         "top_candidate": top or None,
         "candidates": candidates,

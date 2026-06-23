@@ -1892,6 +1892,23 @@ def _mm_low_friction_gross_stability_scorecard(detail: dict[str, Any]) -> dict[s
         "motif_amplification_top_search_constraint": (
             motif_amplification_top.get("search_constraint")
         ),
+        "motif_amplification_top_frontier_candidate_count": (
+            motif_amplification_summary.get("top_frontier_candidate_count")
+        ),
+        "motif_amplification_top_frontier_best_min_gross_key": (
+            motif_amplification_summary.get("top_frontier_best_min_gross_key")
+        ),
+        "motif_amplification_top_frontier_best_min_train_holdout_gross_bps": (
+            motif_amplification_summary.get(
+                "top_frontier_best_min_train_holdout_gross_bps"
+            )
+        ),
+        "motif_amplification_top_frontier_gap_to_current_fee_bps": (
+            motif_amplification_summary.get("top_frontier_gap_to_current_fee_bps")
+        ),
+        "motif_amplification_top_frontier_experiment_focus": (
+            motif_amplification_summary.get("top_frontier_experiment_focus")
+        ),
         "train_confirmed_gross_count": low_friction_failure.get(
             "train_confirmed_gross_count"
         ),
@@ -2147,6 +2164,31 @@ def _mm_signal_search_directive(
                 "motif_amplification_top_search_constraint"
             )
         ),
+        "motif_amplification_top_frontier_candidate_count": (
+            low_friction_stability.get(
+                "motif_amplification_top_frontier_candidate_count"
+            )
+        ),
+        "motif_amplification_top_frontier_best_min_gross_key": (
+            low_friction_stability.get(
+                "motif_amplification_top_frontier_best_min_gross_key"
+            )
+        ),
+        "motif_amplification_top_frontier_best_min_train_holdout_gross_bps": (
+            low_friction_stability.get(
+                "motif_amplification_top_frontier_best_min_train_holdout_gross_bps"
+            )
+        ),
+        "motif_amplification_top_frontier_gap_to_current_fee_bps": (
+            low_friction_stability.get(
+                "motif_amplification_top_frontier_gap_to_current_fee_bps"
+            )
+        ),
+        "motif_amplification_top_frontier_experiment_focus": (
+            low_friction_stability.get(
+                "motif_amplification_top_frontier_experiment_focus"
+            )
+        ),
         "unstable_holdout_candidate_name": low_friction_stability.get(
             "candidate_name"
         ),
@@ -2265,6 +2307,23 @@ def _mm_signal_search_directive_row_extra(
         ),
         "mm_signal_search_motif_amplification_top_search_constraint": (
             directive.get("motif_amplification_top_search_constraint")
+        ),
+        "mm_signal_search_motif_amplification_top_frontier_candidate_count": (
+            directive.get("motif_amplification_top_frontier_candidate_count")
+        ),
+        "mm_signal_search_motif_amplification_top_frontier_best_min_gross_key": (
+            directive.get("motif_amplification_top_frontier_best_min_gross_key")
+        ),
+        "mm_signal_search_motif_amplification_top_frontier_best_min_train_holdout_gross_bps": (
+            directive.get(
+                "motif_amplification_top_frontier_best_min_train_holdout_gross_bps"
+            )
+        ),
+        "mm_signal_search_motif_amplification_top_frontier_gap_to_current_fee_bps": (
+            directive.get("motif_amplification_top_frontier_gap_to_current_fee_bps")
+        ),
+        "mm_signal_search_motif_amplification_top_frontier_experiment_focus": (
+            directive.get("motif_amplification_top_frontier_experiment_focus")
         ),
         "mm_signal_search_lower_fee_path_not_actionable_now": directive.get(
             "lower_fee_path_not_actionable_now"
