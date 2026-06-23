@@ -1658,6 +1658,9 @@ def _mm_signal_path(
     if near_miss_lead:
         next_action = "confirm_low_friction_near_miss_with_train_holdout_and_history_stability"
     near_miss_stability = _dict(history.get("low_friction_near_miss_stability"))
+    near_miss_motif_stability = _dict(
+        history.get("low_friction_near_miss_motif_stability")
+    )
     return [_base_path(
         path_id="mm_low_friction_signal_search",
         path_class="low_friction_mm_alpha_search",
@@ -1706,6 +1709,18 @@ def _mm_signal_path(
             ),
             "history_low_friction_near_miss_best_repeated_key": near_miss_stability.get(
                 "best_repeated_near_miss_key"
+            ),
+            "history_low_friction_near_miss_motif_stability_status": (
+                near_miss_motif_stability.get("status")
+            ),
+            "history_low_friction_near_miss_motif_stability_reason": (
+                near_miss_motif_stability.get("reason")
+            ),
+            "history_low_friction_near_miss_repeated_motif_count": (
+                near_miss_motif_stability.get("repeated_motif_count")
+            ),
+            "history_low_friction_near_miss_best_repeated_motif": (
+                near_miss_motif_stability.get("best_repeated_near_miss_motif")
             ),
         },
     )]

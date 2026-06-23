@@ -260,6 +260,50 @@ def test_history_scorecard_requires_distinct_dates_for_repeated_low_friction_nea
     assert stability["repeated_key_count"] == 1
 
 
+def test_history_scorecard_groups_low_friction_near_miss_motifs() -> None:
+    reports = [
+        _report(
+            "2026-06-18",
+            low_friction_near_miss_name=(
+                "quoted_half_spread_bps_train_p75_and_q_eff_train_p10_and_spread_bps_delta_10s_train_p90"
+            ),
+            low_friction_holdout_edge=3.2,
+            low_friction_train_edge=-0.4,
+        ),
+        _report(
+            "2026-06-19",
+            low_friction_near_miss_name=(
+                "quoted_half_spread_bps_train_p75_and_q0_train_p25_and_spread_bps_delta_10s_train_p75"
+            ),
+            low_friction_holdout_edge=3.1,
+            low_friction_train_edge=-0.8,
+        ),
+        _report(
+            "2026-06-20",
+            low_friction_near_miss_name=(
+                "quoted_half_spread_bps_train_p90_and_q_eff_train_p10_and_spread_bps_delta_30s_train_p90"
+            ),
+            low_friction_holdout_edge=3.5,
+            low_friction_train_edge=0.1,
+        ),
+    ]
+
+    scorecard = build_fill_sim_history_scorecard(reports)
+
+    assert scorecard["repeated_low_friction_near_miss_keys"] == []
+    motif = scorecard["low_friction_near_miss_motif_stability"]
+    assert motif["status"] == "LOW_FRICTION_NEAR_MISS_MOTIF_REPEATS_ACROSS_WINDOWS"
+    assert motif["repeated_motif_count"] == 1
+    best = motif["best_repeated_near_miss_motif"]
+    assert best["windows"] == 3
+    assert best["distinct_window_dates"] == ["2026-06-18", "2026-06-19", "2026-06-20"]
+    assert best["best_cell"]["motif_key"] == (
+        "low_friction_motif|spread_thin_queue_favorable|thin_queue|spread_delta"
+    )
+    assert best["best_cell"]["train_holdout_gross_current_fee_consistent"] is False
+    assert scorecard["status"] == "HISTORY_NO_CURRENT_FEE_SAMPLE_GATED_EDGE"
+
+
 def test_history_scorecard_repeated_current_fee_positive_still_requires_oos() -> None:
     reports = [
         _report("2026-06-18", current_positive=True, break_even_fee=2.2),
