@@ -139,12 +139,31 @@ def _write_patch_adapter(repo: Path) -> None:
         repo / "rust/openclaw_engine/src/bounded_probe_near_touch.rs",
         """
 pub fn post_only_near_touch_or_skip() {
+    let decision = BoundedProbePlacementDecision::Submit;
     let max_fresh_bbo_age_ms = 1000;
     let max_initial_passive_gap_bps = 75.0;
     let touch_gap_bps = max_initial_passive_gap_bps;
     let record_type = "bounded_probe_touchability_block";
     let lineage = ("bounded_probe_attempt", "side_cell_key");
-    let _ = (max_fresh_bbo_age_ms, touch_gap_bps, record_type, lineage);
+    let _ = (decision, max_fresh_bbo_age_ms, touch_gap_bps, record_type, lineage);
+}
+""",
+    )
+
+
+def _write_authority_path_wiring(repo: Path) -> None:
+    _write(
+        repo / "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs",
+        """
+fn execution_reference(best_bid: Option<f64>, best_ask: Option<f64>) {}
+fn dispatch(intent: OrderIntent) {
+    let req = BoundedProbePlacementRequest {};
+    let _ = post_only_near_touch_or_skip(&req);
+    let _ = "bounded_probe_attempt";
+    let _ = OrderDispatchRequest {
+        limit_price: intent.limit_price,
+        time_in_force: intent.time_in_force,
+    };
 }
 """,
     )
@@ -191,6 +210,7 @@ def test_full_source_patch_readiness_can_pass_after_adapter_exists(
 ) -> None:
     _write_existing_seams(tmp_path)
     _write_patch_adapter(tmp_path)
+    _write_authority_path_wiring(tmp_path)
 
     packet = build_bounded_demo_probe_authority_patch_readiness(
         placement_repair_plan=_placement_plan(),
@@ -200,8 +220,30 @@ def test_full_source_patch_readiness_can_pass_after_adapter_exists(
 
     assert packet["status"] == "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW"
     assert packet["answers"]["rust_near_touch_authority_adapter_present"] is True
+    assert packet["answers"]["rust_authority_path_wiring_present"] is True
     assert packet["answers"]["rust_patch_required"] is False
     assert packet["source_readiness"]["missing_required_patch_seams"] == []
+
+
+def test_adapter_without_authority_path_wiring_still_requires_patch(
+    tmp_path: Path,
+) -> None:
+    _write_existing_seams(tmp_path)
+    _write_patch_adapter(tmp_path)
+
+    packet = build_bounded_demo_probe_authority_patch_readiness(
+        placement_repair_plan=_placement_plan(),
+        repo_root=tmp_path,
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "RUST_PATCH_REQUIRED_AUTHORITY_PATH_WIRING_MISSING"
+    assert packet["answers"]["rust_near_touch_authority_adapter_present"] is True
+    assert packet["answers"]["rust_authority_path_wiring_present"] is False
+    assert packet["answers"]["rust_patch_required"] is True
+    assert "authority_path_wiring_missing_from_tick_dispatch" in packet[
+        "source_readiness"
+    ]["missing_required_patch_seams"]
 
 
 def test_authority_grant_in_placement_plan_is_rejected(tmp_path: Path) -> None:
