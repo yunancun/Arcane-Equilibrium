@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-23 Profitability Scorecard Operator-Authorization Gate
+
+- `alpha_profitability_path_scorecard_v1` now consumes `bounded_probe_operator_authorization_latest.json`, so the main profitability closure names the concrete Cost Gate escape authority gates instead of stopping at a generic sealed-preflight blocker.
+- Canonical Linux alpha smoke reports closure `BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_GATES_NOT_READY` for `ma_crossover|BTCUSDT|Sell`, with gates `sealed_horizon_preflight_ready`, `placement_repair_plan_ready`, and `authority_path_patch_readiness_ready`.
+- PM read: the profit path is side-cell/horizon edge amplification plus bounded Demo authorization and execution-realism proof, not global Cost Gate lowering; no authorization object, active order/probe authority, or promotion proof was granted.
+
 ## 2026-06-22 Bounded Probe Authority Patch Readiness
 
 - `bounded_demo_probe_authority_patch_readiness_v1` now consumes the placement repair plan and scans Rust authority-path source for the exact near-touch bounded Demo Implementation seams.
