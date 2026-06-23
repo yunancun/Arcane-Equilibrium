@@ -539,3 +539,65 @@ def test_learning_worklist_carries_demo_learning_stack_dry_run_review_evidence()
     assert task["evidence"][
         "demo_learning_stack_dry_run_review_probe_authority_granted"
     ] is False
+
+
+def test_learning_worklist_promotes_profitability_runtime_mutation_next_move():
+    worklist = build_learning_worklist({
+        "arms": [
+            {
+                "arm_id": "aeg_robustness_matrix",
+                "blocker_class": "robustness_wait",
+                "primary_blocker": "aeg_matrix_review_no_durable_candidate_rows",
+                "engineering_actionable": True,
+                "sample_count": 0,
+                "min_samples": 30,
+            },
+            {
+                "arm_id": "cost_gate_demo_learning_lane",
+                "blocker_class": "data_coverage",
+                "primary_blocker": "profitability_execution_evidence_missing",
+                "next_trigger": "continue_data_capture",
+                "engineering_actionable": True,
+                "profitability_engineering_closure_status": (
+                    "DEMO_LEARNING_STACK_ACTIVATION_REQUIRED"
+                ),
+                "profitability_next_move_class": (
+                    "activate_sustainable_demo_learning_stack"
+                ),
+                "profitability_next_move_recommended_action": (
+                    "operator_review_dry_run_preview_then_apply_learning_stack_if_accepted"
+                ),
+                "profitability_next_move_runtime_mutation_required": True,
+                "profitability_primary_cost_gate_root_blocker": {
+                    "gate": "demo_learning_stack_operator_apply_required",
+                    "runtime_mutation_required": True,
+                },
+                "demo_learning_stack_dry_run_review_status": (
+                    "DRY_RUN_PREVIEW_PASSED_OPERATOR_APPLY_REVIEW_REQUIRED"
+                ),
+                "demo_learning_stack_dry_run_review_operator_apply_required": True,
+                "demo_learning_stack_dry_run_review_crontab_mutated": False,
+            },
+        ],
+    })
+
+    top = worklist["top_task"]
+
+    assert worklist["status"] == "OPERATOR_GATED_LEARNING_READY"
+    assert worklist["runtime_mutation_required_count"] == 1
+    assert top["arm_id"] == "cost_gate_demo_learning_lane"
+    assert top["task_type"] == "cost_gate_learning_activation"
+    assert top["learning_objective"] == (
+        "operator_review_learning_stack_dry_run_preview_before_cron_apply"
+    )
+    assert top["requires_operator_authorization"] is True
+    assert top["runtime_mutation_required"] is True
+    assert top["actionability"] == "operator_required"
+    assert top["side_effect_boundary"] == (
+        "recommendation_only_operator_runtime_mutation_required_"
+        "no_order_or_probe_authority"
+    )
+    assert top["evidence"]["profitability_next_move_runtime_mutation_required"] is True
+    assert top["evidence"]["profitability_primary_cost_gate_root_blocker"][
+        "gate"
+    ] == "demo_learning_stack_operator_apply_required"

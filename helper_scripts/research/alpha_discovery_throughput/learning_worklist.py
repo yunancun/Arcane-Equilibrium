@@ -455,6 +455,8 @@ def _classify_task_type(row: dict[str, Any]) -> str:
 
     if _bool(row.get("promotion_ready")):
         return "promotion_review"
+    if _profitability_next_move_requires_learning_activation(row):
+        return "cost_gate_learning_activation"
     if arm_id == "cost_gate_demo_learning_lane" and (
         "demo_learning_stack_dry_run" in primary
         or "demo_learning_stack_activation" in primary
@@ -511,6 +513,26 @@ def _classify_task_type(row: dict[str, Any]) -> str:
     if blocker_class == "source_health":
         return "source_health"
     return "diagnose_blocker"
+
+
+def _profitability_next_move_requires_learning_activation(row: dict[str, Any]) -> bool:
+    if _str(row.get("arm_id")) != "cost_gate_demo_learning_lane":
+        return False
+    closure_status = _str(row.get("profitability_engineering_closure_status"))
+    next_class = _str(row.get("profitability_next_move_class"))
+    root_blocker = row.get("profitability_primary_cost_gate_root_blocker")
+    root_gate = ""
+    if isinstance(root_blocker, dict):
+        root_gate = _str(root_blocker.get("gate"))
+    return (
+        closure_status == "DEMO_LEARNING_STACK_ACTIVATION_REQUIRED"
+        or next_class == "activate_sustainable_demo_learning_stack"
+        or root_gate in {
+            "demo_learning_stack_operator_apply_required",
+            "demo_learning_stack_activation_packet_dry_run_required",
+            "demo_learning_stack_not_installed",
+        }
+    )
 
 
 def _learning_objective(row: dict[str, Any], task_type: str) -> str:
@@ -835,6 +857,8 @@ def _completion_evidence_required(task_type: str) -> list[str]:
 
 
 def _runtime_mutation_required(row: dict[str, Any], task_type: str) -> bool:
+    if row.get("profitability_next_move_runtime_mutation_required") is True:
+        return True
     if task_type in {"runtime_source_reconcile", "cost_gate_learning_activation"}:
         return True
     next_trigger = _str(row.get("next_trigger")).lower()
@@ -843,6 +867,8 @@ def _runtime_mutation_required(row: dict[str, Any], task_type: str) -> bool:
 
 def _operator_authorization_required(row: dict[str, Any], task_type: str) -> bool:
     if _bool(row.get("operator_actionable")):
+        return True
+    if row.get("profitability_next_move_runtime_mutation_required") is True:
         return True
     if task_type in {
         "operator_probe_review",
@@ -865,6 +891,15 @@ def _actionability(row: dict[str, Any], task_type: str) -> str:
     if task_type == "reject_or_archive":
         return "parked"
     return "diagnostic"
+
+
+def _side_effect_boundary(runtime_mutation_required: bool) -> str:
+    if runtime_mutation_required:
+        return (
+            "recommendation_only_operator_runtime_mutation_required_"
+            "no_order_or_probe_authority"
+        )
+    return "recommendation_only_no_order_authority_no_runtime_mutation"
 
 
 def _compact_evidence(row: dict[str, Any]) -> dict[str, Any]:
@@ -920,9 +955,7 @@ def build_learning_worklist(
             "promotion_ready": _bool(row.get("promotion_ready")),
             "operator_actionable": _bool(row.get("operator_actionable")),
             "engineering_actionable": _bool(row.get("engineering_actionable")),
-            "side_effect_boundary": (
-                "recommendation_only_no_order_authority_no_runtime_mutation"
-            ),
+            "side_effect_boundary": _side_effect_boundary(runtime_mutation),
             "evidence": _compact_evidence(row),
         }
         tasks.append(task)
