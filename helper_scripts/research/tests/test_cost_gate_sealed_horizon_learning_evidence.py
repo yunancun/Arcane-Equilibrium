@@ -13,6 +13,7 @@ from cost_gate_learning_lane.sealed_horizon_learning_evidence import (
     build_sealed_horizon_learning_evidence_from_rows,
     build_sealed_horizon_reject_feature_sql,
     find_sealed_horizon_candidate,
+    select_default_sealed_horizon_candidate,
 )
 
 
@@ -102,6 +103,23 @@ def test_sealed_horizon_reject_sql_filters_exact_mature_side_cell() -> None:
     ]
 
 
+def test_default_sealed_horizon_candidate_selects_plan_replay_candidate() -> None:
+    plan = _sealed_plan()
+    plan["probe_candidates"].insert(
+        0,
+        {
+            "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+            "source_kind": "legacy_scorecard_candidate",
+        },
+    )
+
+    candidate = select_default_sealed_horizon_candidate(plan)
+
+    assert candidate["side_cell_key"] == "ma_crossover|BTCUSDT|Sell"
+    assert candidate["source_kind"] == "horizon_specific_sealed_replay"
+    assert candidate["outcome_horizon_minutes"] == 240
+
+
 def test_sealed_horizon_learning_evidence_records_240m_blocked_outcome(tmp_path) -> None:
     plan = _sealed_plan()
     event_ts = int(
@@ -177,3 +195,11 @@ def test_non_sealed_candidate_is_rejected() -> None:
 
     with pytest.raises(ValueError, match="not a sealed horizon replay candidate"):
         find_sealed_horizon_candidate(plan, "ma_crossover|BTCUSDT|Sell")
+
+
+def test_default_sealed_horizon_candidate_requires_sealed_replay() -> None:
+    plan = _sealed_plan()
+    plan["probe_candidates"][0]["source_kind"] = None
+
+    with pytest.raises(ValueError, match="sealed horizon candidate not found"):
+        select_default_sealed_horizon_candidate(plan)
