@@ -1526,6 +1526,116 @@ def test_positive_probe_under_capture_with_execution_review_requires_repair() ->
     ] is True
 
 
+def test_mm_current_fee_positive_cell_becomes_confirmation_path() -> None:
+    current_fee_cell = {
+        "scope": "per_symbol_primary_queue",
+        "symbol": "SOXLUSDT",
+        "queue_position": "back",
+        "policy": "informed_skip",
+        "track": "fill_only",
+        "n_fill_only": 43,
+        "edge_before_fees_bps": 4.715,
+        "net_bps": 0.715,
+        "break_even_maker_fee_bps_per_side": 2.357,
+        "fee_round_trip_shortfall_bps": -0.715,
+    }
+    scorecard = build_profitability_path_scorecard(
+        fillsim={
+            "generated_at": "2026-06-23T17:31:27+00:00",
+            "edge_scorecard": {
+                "status": "CONDITIONAL_POSITIVE_FILL_ONLY_CELL",
+                "positive_fill_only_cells_with_sample_gate_count": 2,
+                "positive_fill_only_cells_with_sample_gate": [current_fee_cell],
+            },
+            "maker_fee_sensitivity_scorecard": {
+                "status": "CURRENT_FEE_SAMPLE_GATED_POSITIVE",
+                "current_maker_fee_bps_per_side": 2.0,
+                "current_fee_round_trip_bps": 4.0,
+                "best_sample_gated_break_even_cell": {
+                    **current_fee_cell,
+                    "source": "edge_scorecard",
+                    "key": (
+                        "edge_scorecard|per_symbol_primary_queue|SOXLUSDT|"
+                        "back|informed_skip|fill_only"
+                    ),
+                },
+            },
+        },
+        fillsim_history={
+            "status": "HISTORY_SINGLE_WINDOW_CURRENT_FEE_POSITIVE_NEEDS_CONFIRMATION",
+            "reason": "current_fee_positive_not_repeated_enough",
+            "valid_windows": 11,
+            "distinct_window_dates": [
+                "2026-06-20",
+                "2026-06-21",
+                "2026-06-22",
+                "2026-06-23",
+            ],
+            "current_fee_sample_gated_positive_windows": 1,
+            "repeated_positive_keys": [],
+            "best_sample_gated_break_even_window": {
+                "source_path": (
+                    "/tmp/openclaw/research/fillsim/history/"
+                    "fillsim_report_20260623T173734Z_1714489.json"
+                ),
+                "window_date": "2026-06-23",
+                "break_even_maker_fee_bps_per_side": 2.357,
+                "cell": {
+                    **current_fee_cell,
+                    "source": "edge_scorecard",
+                    "key": (
+                        "edge_scorecard|per_symbol_primary_queue|SOXLUSDT|"
+                        "back|informed_skip|fill_only"
+                    ),
+                },
+            },
+        },
+        now_utc=dt.datetime(2026, 6, 23, 17, 40, tzinfo=dt.timezone.utc),
+    )
+
+    top = scorecard["top_paths"][0]
+    closure = scorecard["profitability_engineering_closure"]
+
+    assert scorecard["status"] == "PROFITABILITY_PATHS_PRESENT_BUT_EXECUTION_EVIDENCE_MISSING"
+    assert top["path_id"] == "mm_current_fee_cell_confirmation"
+    assert top["class"] == "mm_current_fee_confirmation"
+    assert top["status"] == "MM_SINGLE_WINDOW_CURRENT_FEE_POSITIVE_NEEDS_CONFIRMATION"
+    assert top["candidate_key"] == (
+        "edge_scorecard|per_symbol_primary_queue|SOXLUSDT|back|informed_skip|fill_only"
+    )
+    assert top["current_edge_bps"] == 4.715
+    assert top["cost_threshold_bps"] == 4.0
+    assert top["sample_count"] == 43
+    assert top["required_next_gate"] == (
+        "repeat_current_fee_positive_cell_across_independent_windows_and_oos_execution_realism"
+    )
+    assert top["next_action"] == (
+        "confirm_mm_current_fee_positive_cell_across_independent_windows_before_any_authority"
+    )
+    assert top["evidence"]["symbol"] == "SOXLUSDT"
+    assert top["evidence"]["policy"] == "informed_skip"
+    assert top["evidence"]["net_bps"] == 0.715
+    assert top["evidence"]["history_status"] == (
+        "HISTORY_SINGLE_WINDOW_CURRENT_FEE_POSITIVE_NEEDS_CONFIRMATION"
+    )
+    assert top["evidence"]["history_current_fee_sample_gated_positive_windows"] == 1
+    assert closure["leading_path_id"] == "mm_current_fee_cell_confirmation"
+    assert closure["edge_amplification_backlog"][0]["path_class"] == (
+        "mm_current_fee_confirmation"
+    )
+    assert scorecard["answers"]["alpha_or_edge_amplification_paths_present"] is True
+    assert scorecard["answers"]["cost_gate_crossing_candidates_present"] is False
+    assert scorecard["answers"]["global_cost_gate_lowering_recommended"] is False
+    assert scorecard["answers"]["order_authority_granted"] is False
+    assert top["order_authority"] == "NOT_GRANTED"
+    assert top["main_cost_gate_adjustment"] == "NONE"
+    assert top["promotion_evidence"] is False
+
+    markdown = render_markdown(scorecard)
+    assert "mm_current_fee_cell_confirmation" in markdown
+    assert "MM_SINGLE_WINDOW_CURRENT_FEE_POSITIVE_NEEDS_CONFIRMATION" in markdown
+
+
 def test_mm_fee_polymarket_and_gate_b_paths_are_separated() -> None:
     scorecard = build_profitability_path_scorecard(
         fillsim={
