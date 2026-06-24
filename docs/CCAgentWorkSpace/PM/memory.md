@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-24 False-Negative Runtime Preflight Approval
+
+- Runtime `trade-core` is now synced clean to `6702ac0a`; the selected false-negative candidate `grid_trading|AVAXUSDT|Sell` has an approved no-authority false-negative review and a ready false-negative bounded preflight.
+- Bounded operator authorization remains fail-closed at `PLACEMENT_REPAIR_PLAN_NOT_READY` with gates `placement_repair_plan_ready` and `authority_path_patch_readiness_ready`; no authorization object, active order/probe authority, Cost Gate lowering, Bybit call, or promotion proof was emitted.
+- PM read: do not repeat the source-sync/preflight approval audit. Next useful work is source/runtime gate semantics around fill-flow touchability -> placement/readiness, or outcome review only after a real bounded authorization object and candidate-matched outcomes exist.
+
 ## 2026-06-24 Profit Evidence Quality Operator Checkpoint
 
 - Read-only PM checkpoint found a stronger overhang delta than the prior audit: paged Bybit demo inventory has 35 exchange open orders, including 34 deep PostOnly buys totaling about 8.37k USDT notional and 9 stale >24h orders, plus one SOLUSDT open position while local demo_state is flat.
