@@ -27,10 +27,12 @@ def render_markdown(packet: dict[str, Any]) -> str:
         ("Decision", packet.get("decision")),
         ("Operator", packet.get("operator_id")),
         ("Authorization id", packet.get("authorization_id")),
+        ("Confirmation source", packet.get("authorization_confirmation_source")),
         ("Side-cell", candidate.get("side_cell_key")),
         ("Max authorized probe orders", packet.get("requested_max_authorized_probe_orders")),
         ("Expires at", packet.get("expires_at_utc")),
     ]
+    standing = _dict(packet.get("standing_demo_authorization"))
     lines = [
         "# Bounded Demo Probe Operator Authorization",
         "",
@@ -40,6 +42,14 @@ def render_markdown(packet: dict[str, Any]) -> str:
         "## Authorization Phrase",
         "",
         f"`{packet.get('typed_confirm_expected')}`",
+        "",
+        "## Standing Demo Authorization",
+        "",
+        f"- Present: `{_dict(packet.get('answers')).get('standing_demo_authorization_present')}`",
+        f"- Valid: `{standing.get('valid_for_candidate_scoped_authorization')}`",
+        f"- Standing authorization id: `{standing.get('standing_authorization_id')}`",
+        f"- Demo only: `{standing.get('demo_only')}`",
+        f"- Candidate scoping required: `{standing.get('candidate_scoping_required')}`",
         "",
         "## Gates",
         "",
@@ -71,6 +81,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--preflight-json", type=Path)
     parser.add_argument("--placement-repair-plan-json", type=Path)
     parser.add_argument("--authority-patch-readiness-json", type=Path)
+    parser.add_argument("--standing-demo-authorization-json", type=Path)
     parser.add_argument("--decision", choices=["defer", "reject", "authorize"], default="defer")
     parser.add_argument("--operator-id")
     parser.add_argument("--authorization-id")
@@ -96,6 +107,7 @@ def main() -> int:
         preflight=_read_json(args.preflight_json),
         placement_repair_plan=_read_json(args.placement_repair_plan_json),
         authority_patch_readiness=_read_json(args.authority_patch_readiness_json),
+        standing_demo_authorization=_read_json(args.standing_demo_authorization_json),
         decision=args.decision,
         operator_id=args.operator_id,
         authorization_id=args.authorization_id,
@@ -107,6 +119,7 @@ def main() -> int:
             "preflight": args.preflight_json,
             "placement_repair_plan": args.placement_repair_plan_json,
             "authority_patch_readiness": args.authority_patch_readiness_json,
+            "standing_demo_authorization": args.standing_demo_authorization_json,
         },
         max_artifact_age_hours=args.max_artifact_age_hours,
         max_authorization_ttl_hours=args.max_authorization_ttl_hours,
