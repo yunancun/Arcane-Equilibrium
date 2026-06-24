@@ -17,6 +17,19 @@ Date: 2026-06-24
   - placement repair `PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW`
   - defer-only authorization review-ready，但 `operator_authorization=null`
 
+## Runtime Refresh
+
+Source fix `98e34a90` was pushed and Linux `trade-core` was fast-forwarded clean to it. The runtime `/tmp/openclaw` latest artifacts were refreshed artifact-only:
+
+- false-negative review: `APPROVED_COST_GATE_FALSE_NEGATIVE_FOR_BOUNDED_DEMO_PROBE_PREFLIGHT`
+- false-negative preflight: `READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION`
+- touchability: `TOUCHABILITY_REPAIR_REQUIRED_BEFORE_BOUNDED_DEMO_PROBE`
+- placement: `PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW`
+- authority readiness: `AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW`
+- authorization: `READY_FOR_OPERATOR_AUTHORIZATION_REVIEW`, defer-only, no emitted authorization object
+
+Concern: recurring default-defer false-negative review refresh can overwrite the explicit approval artifact. It fails closed rather than granting authority, but it can erase review progress. The next safe source-only step is to preserve explicit approvals or write defer refreshes to a separate artifact.
+
 ## Live-Portability Boundary
 
 你的 Demo 授權可以讓我們建立 review packets 和 bounded Demo design，但不能被寫成不可重建的隱式 order authority。若要讓 Demo 經驗後續可 apply live，必須保留：
@@ -37,5 +50,7 @@ Date: 2026-06-24
 - cron static tests: `14 passed`
 - adjacent bounded suite: `27 passed`
 - `py_compile` and `git diff --check`: passed
+- Linux focused tests after source sync: `18 passed`
+- Linux alpha/authorization/scorecard: `106 passed`
 
 PM report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-24--candidate_matched_touchability_gate.md`
