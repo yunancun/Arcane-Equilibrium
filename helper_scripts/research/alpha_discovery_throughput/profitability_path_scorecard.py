@@ -21,6 +21,9 @@ from typing import Any
 
 
 PROFITABILITY_PATH_SCORECARD_SCHEMA_VERSION = "alpha_profitability_path_scorecard_v1"
+FALSE_NEGATIVE_BOUNDED_PREFLIGHT_SCHEMA = (
+    "cost_gate_false_negative_bounded_demo_probe_preflight_v1"
+)
 BOUNDARY = (
     "artifact-only profitability path scorecard; no PG query/write, Bybit call, "
     "order, config, risk, auth, runtime mutation, main Cost Gate lowering, "
@@ -274,13 +277,22 @@ def _sealed_learning_evidence_by_key(
     return {key: _dict(horizon_learning_evidence)}
 
 
-def _sealed_probe_preflight_by_key(
-    sealed_horizon_probe_preflight: dict[str, Any] | None,
+def _probe_preflight_by_key(
+    bounded_probe_preflight: dict[str, Any] | None,
 ) -> dict[str, dict[str, Any]]:
-    key = _str(_dict(sealed_horizon_probe_preflight).get("side_cell_key"))
+    key = _str(_dict(bounded_probe_preflight).get("side_cell_key"))
     if not key:
         return {}
-    return {key: _dict(sealed_horizon_probe_preflight)}
+    return {key: _dict(bounded_probe_preflight)}
+
+
+def _bounded_preflight_source_name(
+    bounded_probe_preflight: dict[str, Any] | None,
+) -> str:
+    schema = _str(_dict(bounded_probe_preflight).get("schema_version"))
+    if schema == FALSE_NEGATIVE_BOUNDED_PREFLIGHT_SCHEMA:
+        return "false_negative_bounded_probe_preflight"
+    return "sealed_horizon_probe_preflight"
 
 
 def _sealed_operator_review_by_key(
@@ -1389,6 +1401,7 @@ def _cost_gate_candidate_paths(
     horizon_learning_evidence: dict[str, Any] | None,
     sealed_horizon_operator_review: dict[str, Any] | None,
     sealed_horizon_probe_preflight: dict[str, Any] | None,
+    bounded_probe_preflight: dict[str, Any] | None,
     bounded_probe_shadow_placement_impact: dict[str, Any] | None,
     bounded_probe_operator_authorization: dict[str, Any] | None,
     bounded_probe_result_review: dict[str, Any] | None,
@@ -1411,8 +1424,11 @@ def _cost_gate_candidate_paths(
     learning_evidence_by_key = _sealed_learning_evidence_by_key(
         horizon_learning_evidence
     )
-    sealed_probe_preflight_by_key = _sealed_probe_preflight_by_key(
-        sealed_horizon_probe_preflight
+    active_bounded_probe_preflight = (
+        bounded_probe_preflight or sealed_horizon_probe_preflight
+    )
+    bounded_probe_preflight_by_key = _probe_preflight_by_key(
+        active_bounded_probe_preflight
     )
     sealed_operator_review_by_key = _sealed_operator_review_by_key(
         sealed_horizon_operator_review
@@ -1494,7 +1510,7 @@ def _cost_gate_candidate_paths(
         sealed = sealed_by_key.get(key)
         learning_evidence = learning_evidence_by_key.get(key)
         sealed_operator_review = sealed_operator_review_by_key.get(key)
-        sealed_probe_preflight = sealed_probe_preflight_by_key.get(key)
+        sealed_probe_preflight = bounded_probe_preflight_by_key.get(key)
         bounded_probe_shadow_placement_impact = (
             bounded_probe_shadow_placement_impact_by_key.get(key)
         )
@@ -2324,17 +2340,21 @@ def _cost_gate_root_blockers(
     demo_learning_stack_activation_packet: dict[str, Any] | None,
     demo_learning_stack_dry_run_review: dict[str, Any] | None,
     sealed_horizon_probe_preflight: dict[str, Any] | None,
+    bounded_probe_preflight: dict[str, Any] | None,
     bounded_probe_operator_authorization: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
     # Prefer durable learning-stack gates before preflight/authorization gates.
+    active_bounded_probe_preflight = (
+        bounded_probe_preflight or sealed_horizon_probe_preflight
+    )
     return _dedupe_gate_details([
         *_demo_learning_stack_root_blockers(
             activation_packet=demo_learning_stack_activation_packet,
             dry_run_review=demo_learning_stack_dry_run_review,
         ),
         *_failed_gate_details(
-            sealed_horizon_probe_preflight,
-            source="sealed_horizon_probe_preflight",
+            active_bounded_probe_preflight,
+            source=_bounded_preflight_source_name(active_bounded_probe_preflight),
         ),
         *_failed_gate_details(
             bounded_probe_operator_authorization,
@@ -2585,6 +2605,7 @@ def _profitability_engineering_closure(
     demo_learning_stack_activation_packet: dict[str, Any] | None,
     demo_learning_stack_dry_run_review: dict[str, Any] | None,
     sealed_horizon_probe_preflight: dict[str, Any] | None,
+    bounded_probe_preflight: dict[str, Any] | None,
     bounded_probe_shadow_placement_impact: dict[str, Any] | None,
     bounded_probe_operator_authorization: dict[str, Any] | None,
     bounded_probe_result_review: dict[str, Any] | None,
@@ -2595,8 +2616,13 @@ def _profitability_engineering_closure(
     stack_activation_answers = _dict(stack_activation.get("answers"))
     stack_dry_run = _dict(demo_learning_stack_dry_run_review)
     stack_dry_run_answers = _dict(stack_dry_run.get("answers"))
-    preflight = _dict(sealed_horizon_probe_preflight)
+    active_bounded_probe_preflight = (
+        bounded_probe_preflight or sealed_horizon_probe_preflight
+    )
+    preflight = _dict(active_bounded_probe_preflight)
+    preflight_source = _bounded_preflight_source_name(active_bounded_probe_preflight)
     preflight_status = _str(preflight.get("status"))
+    preflight_schema = _str(preflight.get("schema_version"))
     preflight_answers = _dict(preflight.get("answers"))
     blocking_gates = _list(preflight.get("blocking_gates"))
     shadow_placement = _dict(bounded_probe_shadow_placement_impact)
@@ -2893,6 +2919,7 @@ def _profitability_engineering_closure(
         demo_learning_stack_activation_packet=demo_learning_stack_activation_packet,
         demo_learning_stack_dry_run_review=demo_learning_stack_dry_run_review,
         sealed_horizon_probe_preflight=sealed_horizon_probe_preflight,
+        bounded_probe_preflight=bounded_probe_preflight,
         bounded_probe_operator_authorization=bounded_probe_operator_authorization,
     )
     edge_backlog = _edge_amplification_backlog(candidates)
@@ -2955,6 +2982,31 @@ def _profitability_engineering_closure(
                 is True
             ),
             "sealed_horizon_probe_preflight_blocking_gates": blocking_gates,
+            "bounded_probe_preflight_source": preflight_source,
+            "bounded_probe_preflight_schema_version": preflight_schema or None,
+            "bounded_probe_preflight_status": preflight_status or None,
+            "bounded_probe_preflight_side_cell_key": (
+                preflight.get("side_cell_key") or None
+            ),
+            "bounded_probe_preflight_ready": (
+                preflight_answers.get(
+                    "ready_for_operator_bounded_demo_probe_authorization"
+                )
+                is True
+            ),
+            "bounded_probe_preflight_blocking_gates": blocking_gates,
+            "bounded_probe_preflight_order_authority_granted": (
+                preflight_answers.get("order_authority_granted") is True
+            ),
+            "bounded_probe_preflight_probe_authority_granted": (
+                preflight_answers.get("probe_authority_granted") is True
+            ),
+            "bounded_probe_preflight_main_cost_gate_adjustment": (
+                preflight_answers.get("main_cost_gate_adjustment")
+            ),
+            "bounded_probe_preflight_promotion_evidence": (
+                preflight_answers.get("promotion_evidence") is True
+            ),
             "bounded_probe_operator_authorization_status": (
                 operator_authorization_status or None
             ),
@@ -3138,6 +3190,7 @@ def build_profitability_path_scorecard(
     horizon_learning_evidence: dict[str, Any] | None = None,
     sealed_horizon_operator_review: dict[str, Any] | None = None,
     sealed_horizon_probe_preflight: dict[str, Any] | None = None,
+    bounded_probe_preflight: dict[str, Any] | None = None,
     bounded_probe_shadow_placement_impact: dict[str, Any] | None = None,
     bounded_probe_operator_authorization: dict[str, Any] | None = None,
     bounded_probe_result_review: dict[str, Any] | None = None,
@@ -3160,6 +3213,7 @@ def build_profitability_path_scorecard(
         horizon_learning_evidence=horizon_learning_evidence,
         sealed_horizon_operator_review=sealed_horizon_operator_review,
         sealed_horizon_probe_preflight=sealed_horizon_probe_preflight,
+        bounded_probe_preflight=bounded_probe_preflight,
         bounded_probe_shadow_placement_impact=bounded_probe_shadow_placement_impact,
         bounded_probe_operator_authorization=bounded_probe_operator_authorization,
         bounded_probe_result_review=bounded_probe_result_review,
@@ -3214,11 +3268,18 @@ def build_profitability_path_scorecard(
     sealed_operator_review_answers = _dict(
         _dict(sealed_horizon_operator_review).get("answers")
     )
+    active_bounded_probe_preflight = (
+        bounded_probe_preflight or sealed_horizon_probe_preflight
+    )
+    active_bounded_probe_preflight_answers = _dict(
+        _dict(active_bounded_probe_preflight).get("answers")
+    )
     closure = _profitability_engineering_closure(
         candidates=candidates,
         demo_learning_stack_activation_packet=demo_learning_stack_activation_packet,
         demo_learning_stack_dry_run_review=demo_learning_stack_dry_run_review,
         sealed_horizon_probe_preflight=sealed_horizon_probe_preflight,
+        bounded_probe_preflight=bounded_probe_preflight,
         bounded_probe_result_review=bounded_probe_result_review,
         bounded_probe_execution_realism_review=(
             bounded_probe_execution_realism_review
@@ -3274,7 +3335,7 @@ def build_profitability_path_scorecard(
                 is True
             ),
             "bounded_demo_probe_preflight_present": bool(
-                _dict(sealed_horizon_probe_preflight)
+                _dict(active_bounded_probe_preflight)
             ),
             "sealed_horizon_operator_review_present": bool(
                 _dict(sealed_horizon_operator_review)
@@ -3292,7 +3353,7 @@ def build_profitability_path_scorecard(
                 is True
             ),
             "bounded_demo_probe_preflight_ready": (
-                _dict(_dict(sealed_horizon_probe_preflight).get("answers")).get(
+                active_bounded_probe_preflight_answers.get(
                     "ready_for_operator_bounded_demo_probe_authorization"
                 )
                 is True
@@ -3425,6 +3486,11 @@ def build_profitability_path_scorecard(
                 "sealed_horizon_probe_preflight",
                 input_paths.get("sealed_horizon_probe_preflight"),
                 sealed_horizon_probe_preflight,
+            ),
+            "bounded_probe_preflight": _artifact_summary(
+                "bounded_probe_preflight",
+                input_paths.get("bounded_probe_preflight"),
+                active_bounded_probe_preflight,
             ),
             "bounded_probe_result_review": _artifact_summary(
                 "bounded_probe_result_review",
@@ -3608,6 +3674,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--horizon-learning-evidence-json", type=Path)
     parser.add_argument("--sealed-horizon-operator-review-json", type=Path)
     parser.add_argument("--sealed-horizon-probe-preflight-json", type=Path)
+    parser.add_argument("--bounded-probe-preflight-json", type=Path)
     parser.add_argument("--bounded-probe-shadow-placement-impact-json", type=Path)
     parser.add_argument("--bounded-probe-operator-authorization-json", type=Path)
     parser.add_argument("--bounded-probe-result-review-json", type=Path)
@@ -3639,6 +3706,7 @@ def main() -> int:
         "horizon_learning_evidence": args.horizon_learning_evidence_json,
         "sealed_horizon_operator_review": args.sealed_horizon_operator_review_json,
         "sealed_horizon_probe_preflight": args.sealed_horizon_probe_preflight_json,
+        "bounded_probe_preflight": args.bounded_probe_preflight_json,
         "bounded_probe_shadow_placement_impact": (
             args.bounded_probe_shadow_placement_impact_json
         ),
@@ -3673,6 +3741,7 @@ def main() -> int:
         sealed_horizon_probe_preflight=_read_json(
             args.sealed_horizon_probe_preflight_json
         ),
+        bounded_probe_preflight=_read_json(args.bounded_probe_preflight_json),
         bounded_probe_shadow_placement_impact=_read_json(
             args.bounded_probe_shadow_placement_impact_json
         ),

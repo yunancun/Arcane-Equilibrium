@@ -298,6 +298,52 @@ def _sealed_horizon_probe_preflight(
     }
 
 
+def _false_negative_bounded_probe_preflight(
+    status: str = "OPERATOR_REVIEW_REQUIRED",
+) -> dict:
+    return {
+        "schema_version": "cost_gate_false_negative_bounded_demo_probe_preflight_v1",
+        "generated_at_utc": "2026-06-24T06:00:00+00:00",
+        "status": status,
+        "reason": "false_negative_operator_review_approved_for_preflight missing",
+        "side_cell_key": "ma_crossover|BTCUSDT|Sell",
+        "outcome_horizon_minutes": 240,
+        "blocking_gate_count": 1,
+        "blocking_gates": ["false_negative_operator_review_approved_for_preflight"],
+        "next_actions": [
+            "operator_review_false_negative_preflight_without_granting_authority"
+        ],
+        "answers": {
+            "proposal_ready": True,
+            "false_negative_operator_review_present": True,
+            "selected_candidate_aligned": True,
+            "ready_for_operator_bounded_demo_probe_authorization": (
+                status == "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+            ),
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+        "bounded_demo_probe_design": {
+            "schema_version": "bounded_demo_probe_design_v1",
+            "status": "NOT_READY_FOR_OPERATOR_PROBE_REVIEW",
+            "suggested_initial_probe_limits": {
+                "active": False,
+                "requires_separate_operator_authorization": True,
+                "max_probe_intents_before_review": 3,
+                "max_demo_notional_usdt_per_order": 10,
+                "max_total_demo_notional_usdt_before_review": 30,
+            },
+            "success_criteria": {
+                "min_realized_avg_net_bps": 0.0,
+                "promotion_evidence": False,
+            },
+        },
+    }
+
+
 def _demo_learning_stack_activation_packet() -> dict:
     return {
         "schema_version": "demo_learning_stack_activation_packet_v1",
@@ -957,6 +1003,59 @@ def test_sealed_horizon_preflight_drives_profitability_closure_gates() -> None:
     assert scorecard["answers"]["bounded_demo_probe_preflight_present"] is True
     assert scorecard["answers"]["bounded_demo_probe_preflight_ready"] is False
     assert scorecard["artifacts"]["sealed_horizon_probe_preflight"]["present"] is True
+
+
+def test_false_negative_bounded_preflight_keeps_source_identity() -> None:
+    scorecard = build_profitability_path_scorecard(
+        cost_gate_counterfactual=_cost_gate_counterfactual(),
+        profit_learning_packet={
+            "status": "OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE",
+            "next_actions": [
+                "operator_review_false_negative_preflight_without_granting_authority"
+            ],
+            "answers": {
+                "global_cost_gate_lowering_recommended": False,
+                "order_authority_granted": False,
+            },
+            "activation": {"status": "NOT_ACCUMULATING"},
+        },
+        activation_preflight={"status": "NOT_ACCUMULATING"},
+        horizon_sealed_replay=_sealed_horizon_replay(),
+        horizon_learning_evidence=_sealed_horizon_learning_evidence(),
+        sealed_horizon_probe_preflight=_sealed_horizon_probe_preflight(
+            status="READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+        ),
+        bounded_probe_preflight=_false_negative_bounded_probe_preflight(),
+        now_utc=dt.datetime(2026, 6, 24, 6, tzinfo=dt.timezone.utc),
+    )
+
+    closure = scorecard["profitability_engineering_closure"]
+    strategy = closure["cost_gate_escape_strategy"]
+
+    assert scorecard["answers"]["bounded_demo_probe_preflight_present"] is True
+    assert scorecard["answers"]["bounded_demo_probe_preflight_ready"] is False
+    assert scorecard["artifacts"]["sealed_horizon_probe_preflight"]["present"] is True
+    assert scorecard["artifacts"]["bounded_probe_preflight"]["present"] is True
+    assert strategy["bounded_probe_preflight_source"] == (
+        "false_negative_bounded_probe_preflight"
+    )
+    assert strategy["bounded_probe_preflight_schema_version"] == (
+        "cost_gate_false_negative_bounded_demo_probe_preflight_v1"
+    )
+    assert strategy["bounded_probe_preflight_status"] == "OPERATOR_REVIEW_REQUIRED"
+    assert strategy["bounded_probe_preflight_blocking_gates"] == [
+        "false_negative_operator_review_approved_for_preflight"
+    ]
+    assert strategy["bounded_probe_preflight_order_authority_granted"] is False
+    assert strategy["bounded_probe_preflight_probe_authority_granted"] is False
+    assert strategy["bounded_probe_preflight_main_cost_gate_adjustment"] == "NONE"
+    assert strategy["bounded_probe_preflight_promotion_evidence"] is False
+    assert closure["cost_gate_root_blockers"][0]["source"] == (
+        "false_negative_bounded_probe_preflight"
+    )
+    assert closure["cost_gate_root_blockers"][0]["gate"] == (
+        "false_negative_operator_review_approved_for_preflight"
+    )
 
 
 def test_demo_learning_stack_apply_gate_precedes_operator_probe_review() -> None:

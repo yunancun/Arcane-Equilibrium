@@ -38,6 +38,9 @@ def test_wrapper_refreshes_activation_packet_before_alpha_runner() -> None:
     assert "sealed_horizon_operator_review_stdout.json" in src
     assert "sealed_horizon_probe_preflight_cron.sh" in src
     assert "sealed_horizon_probe_preflight_refresh rc=" in src
+    assert "false_negative_bounded_probe_preflight_latest.json" in src
+    assert "OPENCLAW_ALPHA_BOUNDED_PROBE_PREFLIGHT_JSON" in src
+    assert "BOUNDED_PROBE_PREFLIGHT_JSON" in src
     assert "OPENCLAW_ALPHA_REFRESH_BOUNDED_PROBE_REVIEW_CHAIN" in src
     assert "OPENCLAW_ALPHA_ORDER_TO_FILL_GAP_AUDIT_JSON" in src
     assert "demo_order_to_fill_gap_latest.json" in src
@@ -62,6 +65,7 @@ def test_wrapper_refreshes_activation_packet_before_alpha_runner() -> None:
     assert "bounded_probe_operator_authorization_refresh rc=" in src
     assert "bounded_probe_shadow_placement_impact_refresh rc=" in src
     assert "--order-to-fill-gap-json" in src
+    assert '--preflight-json "$BOUNDED_PROBE_PREFLIGHT_JSON"' in src
     assert "--placement-repair-plan-json" in src
     assert "--authority-patch-readiness-json" in src
     assert "canonical_or_latest_matching_path()" in src
@@ -80,6 +84,8 @@ def test_wrapper_refreshes_activation_packet_before_alpha_runner() -> None:
     assert "--profit-learning-packet-json" in src
     assert "--demo-learning-stack-activation-packet-json" in src
     assert "--demo-learning-stack-dry-run-review-json" in src
+    assert "--sealed-horizon-probe-preflight-json" in src
+    assert "--bounded-probe-preflight-json" in src
     assert "--bounded-probe-operator-authorization-json" in src
     assert "--bounded-probe-result-review-json" in src
     assert "--bounded-probe-execution-realism-review-json" in src
@@ -99,6 +105,9 @@ def test_wrapper_refreshes_activation_packet_before_alpha_runner() -> None:
         "sealed_horizon_probe_preflight_refresh rc="
     )
     assert src.index("sealed_horizon_probe_preflight_refresh rc=") < src.index(
+        "cost_gate_learning_lane.bounded_probe_touchability_preflight"
+    )
+    assert src.index("FALSE_NEGATIVE_BOUNDED_PREFLIGHT_JSON") < src.index(
         "cost_gate_learning_lane.bounded_probe_touchability_preflight"
     )
     assert src.index("cost_gate_learning_lane.bounded_probe_touchability_preflight") < src.index(

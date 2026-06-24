@@ -37,10 +37,17 @@ FALSE_NEGATIVE_CANDIDATE_PACKET_JSON="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDID
 FALSE_NEGATIVE_CANDIDATE_PACKET_MD="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDIDATE_PACKET_MD:-$LANE_DIR/false_negative_candidate_packet_latest.md}"
 FALSE_NEGATIVE_OPERATOR_REVIEW_JSON="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_OPERATOR_REVIEW_JSON:-$LANE_DIR/false_negative_operator_review_latest.json}"
 FALSE_NEGATIVE_OPERATOR_REVIEW_MD="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_OPERATOR_REVIEW_MD:-$LANE_DIR/false_negative_operator_review_latest.md}"
+LEARNING_SSOT_DECISION_JSON="${OPENCLAW_COST_GATE_LEARNING_SSOT_DECISION_JSON:-$LANE_DIR/learning_ssot_decision_latest.json}"
+LEARNING_SSOT_DECISION_MD="${OPENCLAW_COST_GATE_LEARNING_SSOT_DECISION_MD:-$LANE_DIR/learning_ssot_decision_latest.md}"
+AUTONOMOUS_PARAMETER_PROPOSAL_JSON="${OPENCLAW_COST_GATE_AUTONOMOUS_PARAMETER_PROPOSAL_JSON:-$LANE_DIR/autonomous_parameter_proposal_latest.json}"
+AUTONOMOUS_PARAMETER_PROPOSAL_MD="${OPENCLAW_COST_GATE_AUTONOMOUS_PARAMETER_PROPOSAL_MD:-$LANE_DIR/autonomous_parameter_proposal_latest.md}"
+FALSE_NEGATIVE_BOUNDED_PREFLIGHT_JSON="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_BOUNDED_PROBE_PREFLIGHT_JSON:-$LANE_DIR/false_negative_bounded_probe_preflight_latest.json}"
+FALSE_NEGATIVE_BOUNDED_PREFLIGHT_MD="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_BOUNDED_PROBE_PREFLIGHT_MD:-$LANE_DIR/false_negative_bounded_probe_preflight_latest.md}"
 ACTIVATION_PREFLIGHT_JSON="${OPENCLAW_COST_GATE_ACTIVATION_PREFLIGHT_JSON:-$LANE_DIR/activation_preflight_latest.json}"
 PIPELINE_SNAPSHOT_JSON="${OPENCLAW_COST_GATE_LEARNING_PIPELINE_SNAPSHOT_JSON:-$DATA/pipeline_snapshot.json}"
 SEALED_LEARNING_EVIDENCE_JSON="${OPENCLAW_COST_GATE_SEALED_HORIZON_LEARNING_EVIDENCE_JSON:-$LANE_DIR/sealed_horizon_learning_evidence_latest.json}"
-SEALED_PREFLIGHT_JSON="${OPENCLAW_COST_GATE_BOUNDED_PROBE_PREFLIGHT_JSON:-$LANE_DIR/sealed_horizon_probe_preflight_latest.json}"
+SEALED_PREFLIGHT_JSON="${OPENCLAW_COST_GATE_SEALED_HORIZON_BOUNDED_PROBE_PREFLIGHT_JSON:-$LANE_DIR/sealed_horizon_probe_preflight_latest.json}"
+BOUNDED_PROBE_PREFLIGHT_SOURCE_JSON="${OPENCLAW_COST_GATE_BOUNDED_PROBE_PREFLIGHT_JSON:-$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_JSON}"
 BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_JSON="${OPENCLAW_COST_GATE_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_JSON:-$LANE_DIR/bounded_probe_authority_patch_readiness_latest.json}"
 BOUNDED_PROBE_OPERATOR_AUTHORIZATION_JSON="${OPENCLAW_COST_GATE_BOUNDED_PROBE_OPERATOR_AUTHORIZATION_JSON:-$LANE_DIR/bounded_probe_operator_authorization_latest.json}"
 BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD="${OPENCLAW_COST_GATE_BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD:-$LANE_DIR/bounded_probe_operator_authorization_latest.md}"
@@ -53,6 +60,10 @@ REFRESH_ORDER_TOUCHABILITY_AUDIT="${OPENCLAW_COST_GATE_REFRESH_ORDER_TOUCHABILIT
 REFRESH_DECISION_PACKET="${OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET:-1}"
 REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET="${OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET:-1}"
 REFRESH_FALSE_NEGATIVE_OPERATOR_REVIEW="${OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_OPERATOR_REVIEW:-1}"
+REFRESH_LEARNING_SSOT_DECISION="${OPENCLAW_COST_GATE_REFRESH_LEARNING_SSOT_DECISION:-1}"
+REFRESH_AUTONOMOUS_PARAMETER_PROPOSAL="${OPENCLAW_COST_GATE_REFRESH_AUTONOMOUS_PARAMETER_PROPOSAL:-1}"
+REFRESH_FALSE_NEGATIVE_BOUNDED_PROBE_PREFLIGHT="${OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_BOUNDED_PROBE_PREFLIGHT:-1}"
+PROFIT_EVIDENCE_QUALITY_STATUS="${OPENCLAW_COST_GATE_PROFIT_EVIDENCE_QUALITY_STATUS:-DONE_WITH_CONCERNS}"
 DATA_FLOW_WINDOW_HOURS="${OPENCLAW_COST_GATE_DATA_FLOW_WINDOW_HOURS:-1,4,24}"
 DATA_FLOW_TOP_LIMIT="${OPENCLAW_COST_GATE_DATA_FLOW_TOP_LIMIT:-10}"
 ORDER_TOUCHABILITY_ENGINE_MODES="${OPENCLAW_DEMO_ORDER_TO_FILL_GAP_ENGINE_MODES:-demo,live_demo}"
@@ -162,6 +173,13 @@ validate_bool01 "OPENCLAW_COST_GATE_REFRESH_ORDER_TOUCHABILITY_AUDIT" "$REFRESH_
 validate_bool01 "OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET" "$REFRESH_DECISION_PACKET"
 validate_bool01 "OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET" "$REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET"
 validate_bool01 "OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_OPERATOR_REVIEW" "$REFRESH_FALSE_NEGATIVE_OPERATOR_REVIEW"
+validate_bool01 "OPENCLAW_COST_GATE_REFRESH_LEARNING_SSOT_DECISION" "$REFRESH_LEARNING_SSOT_DECISION"
+validate_bool01 "OPENCLAW_COST_GATE_REFRESH_AUTONOMOUS_PARAMETER_PROPOSAL" "$REFRESH_AUTONOMOUS_PARAMETER_PROPOSAL"
+validate_bool01 "OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_BOUNDED_PROBE_PREFLIGHT" "$REFRESH_FALSE_NEGATIVE_BOUNDED_PROBE_PREFLIGHT"
+if [[ ! "$PROFIT_EVIDENCE_QUALITY_STATUS" =~ ^[A-Z0-9_]+$ ]]; then
+    echo "[$(ts)] FATAL: OPENCLAW_COST_GATE_PROFIT_EVIDENCE_QUALITY_STATUS invalid: ${PROFIT_EVIDENCE_QUALITY_STATUS}" | tee -a "$LOG" >&2
+    exit 2
+fi
 if [[ ! "$DATA_FLOW_WINDOW_HOURS" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
     echo "[$(ts)] FATAL: OPENCLAW_COST_GATE_DATA_FLOW_WINDOW_HOURS must be comma-separated integers: ${DATA_FLOW_WINDOW_HOURS}" | tee -a "$LOG" >&2
     exit 2
@@ -299,6 +317,18 @@ FALSE_NEGATIVE_OPERATOR_REVIEW_OUT="${LANE_DIR}/false_negative_operator_review_$
 FALSE_NEGATIVE_OPERATOR_REVIEW_MD_OUT="${LANE_DIR}/false_negative_operator_review_${STAMP}.md"
 FALSE_NEGATIVE_OPERATOR_REVIEW_LATEST="$FALSE_NEGATIVE_OPERATOR_REVIEW_JSON"
 FALSE_NEGATIVE_OPERATOR_REVIEW_MD_LATEST="$FALSE_NEGATIVE_OPERATOR_REVIEW_MD"
+LEARNING_SSOT_DECISION_OUT="${LANE_DIR}/learning_ssot_decision_${STAMP}.json"
+LEARNING_SSOT_DECISION_MD_OUT="${LANE_DIR}/learning_ssot_decision_${STAMP}.md"
+LEARNING_SSOT_DECISION_LATEST="$LEARNING_SSOT_DECISION_JSON"
+LEARNING_SSOT_DECISION_MD_LATEST="$LEARNING_SSOT_DECISION_MD"
+AUTONOMOUS_PARAMETER_PROPOSAL_OUT="${LANE_DIR}/autonomous_parameter_proposal_${STAMP}.json"
+AUTONOMOUS_PARAMETER_PROPOSAL_MD_OUT="${LANE_DIR}/autonomous_parameter_proposal_${STAMP}.md"
+AUTONOMOUS_PARAMETER_PROPOSAL_LATEST="$AUTONOMOUS_PARAMETER_PROPOSAL_JSON"
+AUTONOMOUS_PARAMETER_PROPOSAL_MD_LATEST="$AUTONOMOUS_PARAMETER_PROPOSAL_MD"
+FALSE_NEGATIVE_BOUNDED_PREFLIGHT_OUT="${LANE_DIR}/false_negative_bounded_probe_preflight_${STAMP}.json"
+FALSE_NEGATIVE_BOUNDED_PREFLIGHT_MD_OUT="${LANE_DIR}/false_negative_bounded_probe_preflight_${STAMP}.md"
+FALSE_NEGATIVE_BOUNDED_PREFLIGHT_LATEST="$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_JSON"
+FALSE_NEGATIVE_BOUNDED_PREFLIGHT_MD_LATEST="$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_MD"
 SEALED_LEARNING_EVIDENCE_OUT="${LANE_DIR}/sealed_horizon_learning_evidence_${STAMP}.json"
 SEALED_LEARNING_EVIDENCE_REVIEW_OUT="${LANE_DIR}/sealed_horizon_learning_evidence_review_${STAMP}.json"
 SEALED_LEARNING_EVIDENCE_REVIEW_LATEST="${LANE_DIR}/sealed_horizon_learning_evidence_review_latest.json"
@@ -485,7 +515,7 @@ fi
 
 BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_ARGS=(
     -m cost_gate_learning_lane.bounded_probe_touchability_preflight
-    --preflight-json "$SEALED_PREFLIGHT_JSON"
+    --preflight-json "$BOUNDED_PROBE_PREFLIGHT_SOURCE_JSON"
     --order-to-fill-gap-json "$ORDER_TOUCHABILITY_JSON"
     --max-artifact-age-hours "$TOUCHABILITY_MAX_ARTIFACT_AGE_HOURS"
     --max-initial-passive-gap-bps "$TOUCHABILITY_MAX_INITIAL_PASSIVE_GAP_BPS"
@@ -514,7 +544,7 @@ BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_ARGS=(
 
 BOUNDED_PROBE_OPERATOR_AUTHORIZATION_ARGS=(
     -m cost_gate_learning_lane.bounded_probe_operator_authorization_cli
-    --preflight-json "$SEALED_PREFLIGHT_JSON"
+    --preflight-json "$BOUNDED_PROBE_PREFLIGHT_SOURCE_JSON"
     --placement-repair-plan-json "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT"
     --authority-patch-readiness-json "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT"
     --decision defer
@@ -534,7 +564,7 @@ BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_ARGS=(
 
 BOUNDED_PROBE_RESULT_REVIEW_ARGS=(
     -m cost_gate_learning_lane.bounded_probe_result_review
-    --preflight-json "$SEALED_PREFLIGHT_JSON"
+    --preflight-json "$BOUNDED_PROBE_PREFLIGHT_SOURCE_JSON"
     --ledger "$LEDGER"
     --json-output "$BOUNDED_PROBE_RESULT_REVIEW_OUT"
     --output "$BOUNDED_PROBE_RESULT_REVIEW_MD_OUT"
@@ -618,6 +648,9 @@ refresh_rc=0
 review_rc=0
 false_negative_candidate_packet_rc=0
 false_negative_operator_review_rc=0
+learning_ssot_decision_rc=0
+autonomous_parameter_proposal_rc=0
+false_negative_bounded_preflight_rc=0
 sealed_horizon_learning_evidence_rc=0
 order_touchability_audit_rc=0
 bounded_probe_touchability_preflight_rc=0
@@ -630,6 +663,9 @@ bounded_probe_execution_realism_review_rc=0
 bounded_probe_touchability_preflight_skip_reason=""
 false_negative_candidate_packet_skip_reason=""
 false_negative_operator_review_skip_reason=""
+learning_ssot_decision_skip_reason=""
+autonomous_parameter_proposal_skip_reason=""
+false_negative_bounded_preflight_skip_reason=""
 sealed_horizon_learning_evidence_skip_reason=""
 order_touchability_audit_skip_reason=""
 bounded_probe_placement_repair_plan_skip_reason=""
@@ -642,6 +678,9 @@ if [[ "$PREINSTALL_REFRESH_ONLY" == "1" ]]; then
     order_touchability_audit_skip_reason="preinstall_refresh_only"
     false_negative_candidate_packet_skip_reason="preinstall_refresh_only"
     false_negative_operator_review_skip_reason="preinstall_refresh_only"
+    learning_ssot_decision_skip_reason="preinstall_refresh_only"
+    autonomous_parameter_proposal_skip_reason="preinstall_refresh_only"
+    false_negative_bounded_preflight_skip_reason="preinstall_refresh_only"
     sealed_horizon_learning_evidence_skip_reason="preinstall_refresh_only"
     bounded_probe_touchability_preflight_skip_reason="preinstall_refresh_only"
     bounded_probe_placement_repair_plan_skip_reason="preinstall_refresh_only"
@@ -650,7 +689,7 @@ if [[ "$PREINSTALL_REFRESH_ONLY" == "1" ]]; then
     bounded_probe_shadow_placement_impact_skip_reason="preinstall_refresh_only"
     bounded_probe_result_review_skip_reason="preinstall_refresh_only"
     bounded_probe_execution_realism_review_skip_reason="preinstall_refresh_only"
-    echo "[$(ts)] SKIP: preinstall refresh-only mode; refreshed scorecard/plan, skipped historical/materializer/outcome/review/false-negative packet/false-negative operator review/sealed evidence/bounded-probe stages" >> "$LOG"
+    echo "[$(ts)] SKIP: preinstall refresh-only mode; refreshed scorecard/plan, skipped historical/materializer/outcome/review/false-negative packet/false-negative operator review/learning ssot/autonomous proposal/false-negative preflight/sealed evidence/bounded-probe stages" >> "$LOG"
 else
     (
         cd "$BASE"
@@ -730,6 +769,101 @@ else
     else
         false_negative_operator_review_skip_reason="disabled"
         echo "[$(ts)] SKIP: false-negative operator review disabled by OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_OPERATOR_REVIEW=0" >> "$LOG"
+    fi
+
+    if [[ "$REFRESH_LEARNING_SSOT_DECISION" == "1" ]]; then
+        LEARNING_SSOT_DECISION_ARGS=(
+            -m cost_gate_learning_lane.learning_ssot_decision
+            --activation-preflight-json "$ACTIVATION_PREFLIGHT_JSON"
+            --json-output "$LEARNING_SSOT_DECISION_OUT"
+            --output "$LEARNING_SSOT_DECISION_MD_OUT"
+        )
+        if [[ -f "$BOUNDED_PROBE_RESULT_REVIEW_LATEST" ]]; then
+            LEARNING_SSOT_DECISION_ARGS+=(
+                --bounded-result-review-json "$BOUNDED_PROBE_RESULT_REVIEW_LATEST"
+            )
+        fi
+        (
+            cd "$BASE"
+            export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
+            export PYTHONDONTWRITEBYTECODE=1
+            "$PYBIN" "${LEARNING_SSOT_DECISION_ARGS[@]}"
+        ) >> "$LOG" 2>&1 || learning_ssot_decision_rc=$?
+        if [[ -f "$LEARNING_SSOT_DECISION_OUT" ]]; then
+            cp "$LEARNING_SSOT_DECISION_OUT" "$LEARNING_SSOT_DECISION_LATEST"
+            if [[ -f "$LEARNING_SSOT_DECISION_MD_OUT" ]]; then
+                cp "$LEARNING_SSOT_DECISION_MD_OUT" "$LEARNING_SSOT_DECISION_MD_LATEST"
+            fi
+        fi
+    else
+        learning_ssot_decision_skip_reason="disabled"
+        echo "[$(ts)] SKIP: learning SSOT decision disabled by OPENCLAW_COST_GATE_REFRESH_LEARNING_SSOT_DECISION=0" >> "$LOG"
+    fi
+
+    if [[ "$REFRESH_AUTONOMOUS_PARAMETER_PROPOSAL" == "1" ]]; then
+        selected_side_cell_key="$("$PYBIN" - "$FALSE_NEGATIVE_OPERATOR_REVIEW_OUT" <<'PY' 2>/dev/null || true
+import json
+import sys
+
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as fh:
+        payload = json.load(fh)
+except Exception:
+    payload = {}
+print(str(payload.get("selected_side_cell_key") or "").strip())
+PY
+)"
+        AUTONOMOUS_PARAMETER_PROPOSAL_ARGS=(
+            -m cost_gate_learning_lane.autonomous_parameter_proposal
+            --learning-ssot-decision-json "$LEARNING_SSOT_DECISION_OUT"
+            --false-negative-candidate-packet-json "$FALSE_NEGATIVE_CANDIDATE_PACKET_OUT"
+            --profit-evidence-quality-status "$PROFIT_EVIDENCE_QUALITY_STATUS"
+            --json-output "$AUTONOMOUS_PARAMETER_PROPOSAL_OUT"
+            --output "$AUTONOMOUS_PARAMETER_PROPOSAL_MD_OUT"
+        )
+        if [[ -n "$selected_side_cell_key" ]]; then
+            AUTONOMOUS_PARAMETER_PROPOSAL_ARGS+=(
+                --selected-side-cell-key "$selected_side_cell_key"
+            )
+        fi
+        (
+            cd "$BASE"
+            export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
+            export PYTHONDONTWRITEBYTECODE=1
+            "$PYBIN" "${AUTONOMOUS_PARAMETER_PROPOSAL_ARGS[@]}"
+        ) >> "$LOG" 2>&1 || autonomous_parameter_proposal_rc=$?
+        if [[ -f "$AUTONOMOUS_PARAMETER_PROPOSAL_OUT" ]]; then
+            cp "$AUTONOMOUS_PARAMETER_PROPOSAL_OUT" "$AUTONOMOUS_PARAMETER_PROPOSAL_LATEST"
+            if [[ -f "$AUTONOMOUS_PARAMETER_PROPOSAL_MD_OUT" ]]; then
+                cp "$AUTONOMOUS_PARAMETER_PROPOSAL_MD_OUT" "$AUTONOMOUS_PARAMETER_PROPOSAL_MD_LATEST"
+            fi
+        fi
+    else
+        autonomous_parameter_proposal_skip_reason="disabled"
+        echo "[$(ts)] SKIP: autonomous parameter proposal disabled by OPENCLAW_COST_GATE_REFRESH_AUTONOMOUS_PARAMETER_PROPOSAL=0" >> "$LOG"
+    fi
+
+    if [[ "$REFRESH_FALSE_NEGATIVE_BOUNDED_PROBE_PREFLIGHT" == "1" ]]; then
+        (
+            cd "$BASE"
+            export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
+            export PYTHONDONTWRITEBYTECODE=1
+            "$PYBIN" -m cost_gate_learning_lane.false_negative_bounded_probe_preflight \
+                --autonomous-parameter-proposal-json "$AUTONOMOUS_PARAMETER_PROPOSAL_OUT" \
+                --false-negative-operator-review-json "$FALSE_NEGATIVE_OPERATOR_REVIEW_OUT" \
+                --max-artifact-age-hours "$FALSE_NEGATIVE_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS" \
+                --json-output "$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_OUT" \
+                --output "$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_MD_OUT"
+        ) >> "$LOG" 2>&1 || false_negative_bounded_preflight_rc=$?
+        if [[ -f "$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_OUT" ]]; then
+            cp "$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_OUT" "$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_LATEST"
+            if [[ -f "$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_MD_OUT" ]]; then
+                cp "$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_MD_OUT" "$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_MD_LATEST"
+            fi
+        fi
+    else
+        false_negative_bounded_preflight_skip_reason="disabled"
+        echo "[$(ts)] SKIP: false-negative bounded probe preflight disabled by OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_BOUNDED_PROBE_PREFLIGHT=0" >> "$LOG"
     fi
 
     if [[ "$REFRESH_SEALED_HORIZON_LEARNING_EVIDENCE" == "1" ]]; then
@@ -867,7 +1001,7 @@ else
     fi
 
     if [[ "$REFRESH_BOUNDED_PROBE_RESULT_REVIEW" == "1" ]]; then
-        if [[ -f "$SEALED_PREFLIGHT_JSON" ]]; then
+        if [[ -f "$BOUNDED_PROBE_PREFLIGHT_SOURCE_JSON" ]]; then
             (
                 cd "$BASE"
                 export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
@@ -881,8 +1015,8 @@ else
                 fi
             fi
         else
-            bounded_probe_result_review_skip_reason="sealed_horizon_probe_preflight_missing"
-            echo "[$(ts)] SKIP: bounded probe result review missing sealed preflight: $SEALED_PREFLIGHT_JSON" >> "$LOG"
+            bounded_probe_result_review_skip_reason="bounded_probe_preflight_missing"
+            echo "[$(ts)] SKIP: bounded probe result review missing bounded preflight: $BOUNDED_PROBE_PREFLIGHT_SOURCE_JSON" >> "$LOG"
         fi
     else
         bounded_probe_result_review_skip_reason="disabled"
@@ -941,6 +1075,23 @@ export FALSE_NEGATIVE_OPERATOR_REVIEW_LATEST="$FALSE_NEGATIVE_OPERATOR_REVIEW_LA
 export FALSE_NEGATIVE_OPERATOR_REVIEW_RC="$false_negative_operator_review_rc"
 export FALSE_NEGATIVE_OPERATOR_REVIEW_SKIP_REASON="$false_negative_operator_review_skip_reason"
 export REFRESH_FALSE_NEGATIVE_OPERATOR_REVIEW="$REFRESH_FALSE_NEGATIVE_OPERATOR_REVIEW"
+export LEARNING_SSOT_DECISION_OUT="$LEARNING_SSOT_DECISION_OUT"
+export LEARNING_SSOT_DECISION_LATEST="$LEARNING_SSOT_DECISION_LATEST"
+export LEARNING_SSOT_DECISION_RC="$learning_ssot_decision_rc"
+export LEARNING_SSOT_DECISION_SKIP_REASON="$learning_ssot_decision_skip_reason"
+export REFRESH_LEARNING_SSOT_DECISION="$REFRESH_LEARNING_SSOT_DECISION"
+export AUTONOMOUS_PARAMETER_PROPOSAL_OUT="$AUTONOMOUS_PARAMETER_PROPOSAL_OUT"
+export AUTONOMOUS_PARAMETER_PROPOSAL_LATEST="$AUTONOMOUS_PARAMETER_PROPOSAL_LATEST"
+export AUTONOMOUS_PARAMETER_PROPOSAL_RC="$autonomous_parameter_proposal_rc"
+export AUTONOMOUS_PARAMETER_PROPOSAL_SKIP_REASON="$autonomous_parameter_proposal_skip_reason"
+export REFRESH_AUTONOMOUS_PARAMETER_PROPOSAL="$REFRESH_AUTONOMOUS_PARAMETER_PROPOSAL"
+export PROFIT_EVIDENCE_QUALITY_STATUS="$PROFIT_EVIDENCE_QUALITY_STATUS"
+export FALSE_NEGATIVE_BOUNDED_PREFLIGHT_OUT="$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_OUT"
+export FALSE_NEGATIVE_BOUNDED_PREFLIGHT_LATEST="$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_LATEST"
+export FALSE_NEGATIVE_BOUNDED_PREFLIGHT_RC="$false_negative_bounded_preflight_rc"
+export FALSE_NEGATIVE_BOUNDED_PREFLIGHT_SKIP_REASON="$false_negative_bounded_preflight_skip_reason"
+export REFRESH_FALSE_NEGATIVE_BOUNDED_PROBE_PREFLIGHT="$REFRESH_FALSE_NEGATIVE_BOUNDED_PROBE_PREFLIGHT"
+export BOUNDED_PROBE_PREFLIGHT_SOURCE_JSON="$BOUNDED_PROBE_PREFLIGHT_SOURCE_JSON"
 export BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT="$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT"
 export BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_LATEST="$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_LATEST"
 export BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_RC="$bounded_probe_shadow_placement_impact_rc"
@@ -968,7 +1119,7 @@ export SEALED_HORIZON_LEARNING_EVIDENCE_SKIP_REASON="$sealed_horizon_learning_ev
 export REFRESH_SEALED_HORIZON_LEARNING_EVIDENCE="$REFRESH_SEALED_HORIZON_LEARNING_EVIDENCE"
 export APPEND_SEALED_HORIZON_LEARNING_EVIDENCE="$APPEND_SEALED_HORIZON_LEARNING_EVIDENCE"
 
-STATUS_JSON=$(SCORECARD_JSON_OUT="$SCORECARD_JSON_OUT" SCORECARD_JSON="$SCORECARD_JSON" SCORECARD_RC="$scorecard_rc" REFRESH_SCORECARD="$REFRESH_SCORECARD" DATA_FLOW_JSON_OUT="$DATA_FLOW_JSON_OUT" DATA_FLOW_JSON="$DATA_FLOW_JSON" DATA_FLOW_MONITOR_RC="$data_flow_monitor_rc" REFRESH_DATA_FLOW_MONITOR="$REFRESH_DATA_FLOW_MONITOR" ORDER_TOUCHABILITY_JSON_OUT="$ORDER_TOUCHABILITY_JSON_OUT" ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" ORDER_TOUCHABILITY_AUDIT_RC="$order_touchability_audit_rc" ORDER_TOUCHABILITY_AUDIT_SKIP_REASON="$order_touchability_audit_skip_reason" REFRESH_ORDER_TOUCHABILITY_AUDIT="$REFRESH_ORDER_TOUCHABILITY_AUDIT" DECISION_PACKET_JSON_OUT="$DECISION_PACKET_JSON_OUT" DECISION_PACKET_JSON="$DECISION_PACKET_JSON" DECISION_PACKET_RC="$decision_packet_rc" REFRESH_DECISION_PACKET="$REFRESH_DECISION_PACKET" PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN" PREINSTALL_REFRESH_ONLY="$PREINSTALL_REFRESH_ONLY" HISTORICAL_REVIEW_OUT="$HISTORICAL_REVIEW_OUT" MATERIALIZER_OUT="$MATERIALIZER_OUT" REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" BOUNDED_PROBE_PREFLIGHT_JSON="$SEALED_PREFLIGHT_JSON" ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT="$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST="$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT="$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST="$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST" BOUNDED_PROBE_RESULT_REVIEW_OUT="$BOUNDED_PROBE_RESULT_REVIEW_OUT" BOUNDED_PROBE_RESULT_REVIEW_LATEST="$BOUNDED_PROBE_RESULT_REVIEW_LATEST" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST" HISTORICAL_REVIEW_RC="$historical_review_rc" MATERIALIZER_RC="$materializer_rc" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_RC="$bounded_probe_touchability_preflight_rc" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_RC="$bounded_probe_placement_repair_plan_rc" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_RC="$bounded_probe_authority_patch_readiness_rc" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_RC="$bounded_probe_operator_authorization_rc" BOUNDED_PROBE_RESULT_REVIEW_RC="$bounded_probe_result_review_rc" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_RC="$bounded_probe_execution_realism_review_rc" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_SKIP_REASON="$bounded_probe_touchability_preflight_skip_reason" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_SKIP_REASON="$bounded_probe_placement_repair_plan_skip_reason" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_SKIP_REASON="$bounded_probe_authority_patch_readiness_skip_reason" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SKIP_REASON="$bounded_probe_operator_authorization_skip_reason" BOUNDED_PROBE_RESULT_REVIEW_SKIP_REASON="$bounded_probe_result_review_skip_reason" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_SKIP_REASON="$bounded_probe_execution_realism_review_skip_reason" REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT="$REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT" REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN="$REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN" REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS="$REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS" REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION="$REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION" REFRESH_BOUNDED_PROBE_RESULT_REVIEW="$REFRESH_BOUNDED_PROBE_RESULT_REVIEW" REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW="$REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW" LEDGER="$LEDGER" MATERIALIZE_REJECTS="$MATERIALIZE_REJECTS" APPEND_MATERIALIZED_REJECTS="$APPEND_MATERIALIZED_REJECTS" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
+STATUS_JSON=$(SCORECARD_JSON_OUT="$SCORECARD_JSON_OUT" SCORECARD_JSON="$SCORECARD_JSON" SCORECARD_RC="$scorecard_rc" REFRESH_SCORECARD="$REFRESH_SCORECARD" DATA_FLOW_JSON_OUT="$DATA_FLOW_JSON_OUT" DATA_FLOW_JSON="$DATA_FLOW_JSON" DATA_FLOW_MONITOR_RC="$data_flow_monitor_rc" REFRESH_DATA_FLOW_MONITOR="$REFRESH_DATA_FLOW_MONITOR" ORDER_TOUCHABILITY_JSON_OUT="$ORDER_TOUCHABILITY_JSON_OUT" ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" ORDER_TOUCHABILITY_AUDIT_RC="$order_touchability_audit_rc" ORDER_TOUCHABILITY_AUDIT_SKIP_REASON="$order_touchability_audit_skip_reason" REFRESH_ORDER_TOUCHABILITY_AUDIT="$REFRESH_ORDER_TOUCHABILITY_AUDIT" DECISION_PACKET_JSON_OUT="$DECISION_PACKET_JSON_OUT" DECISION_PACKET_JSON="$DECISION_PACKET_JSON" DECISION_PACKET_RC="$decision_packet_rc" REFRESH_DECISION_PACKET="$REFRESH_DECISION_PACKET" PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN" PREINSTALL_REFRESH_ONLY="$PREINSTALL_REFRESH_ONLY" HISTORICAL_REVIEW_OUT="$HISTORICAL_REVIEW_OUT" MATERIALIZER_OUT="$MATERIALIZER_OUT" REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" BOUNDED_PROBE_PREFLIGHT_JSON="$BOUNDED_PROBE_PREFLIGHT_SOURCE_JSON" ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT="$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST="$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT="$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST="$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST" BOUNDED_PROBE_RESULT_REVIEW_OUT="$BOUNDED_PROBE_RESULT_REVIEW_OUT" BOUNDED_PROBE_RESULT_REVIEW_LATEST="$BOUNDED_PROBE_RESULT_REVIEW_LATEST" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST" HISTORICAL_REVIEW_RC="$historical_review_rc" MATERIALIZER_RC="$materializer_rc" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_RC="$bounded_probe_touchability_preflight_rc" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_RC="$bounded_probe_placement_repair_plan_rc" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_RC="$bounded_probe_authority_patch_readiness_rc" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_RC="$bounded_probe_operator_authorization_rc" BOUNDED_PROBE_RESULT_REVIEW_RC="$bounded_probe_result_review_rc" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_RC="$bounded_probe_execution_realism_review_rc" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_SKIP_REASON="$bounded_probe_touchability_preflight_skip_reason" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_SKIP_REASON="$bounded_probe_placement_repair_plan_skip_reason" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_SKIP_REASON="$bounded_probe_authority_patch_readiness_skip_reason" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SKIP_REASON="$bounded_probe_operator_authorization_skip_reason" BOUNDED_PROBE_RESULT_REVIEW_SKIP_REASON="$bounded_probe_result_review_skip_reason" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_SKIP_REASON="$bounded_probe_execution_realism_review_skip_reason" REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT="$REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT" REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN="$REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN" REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS="$REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS" REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION="$REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION" REFRESH_BOUNDED_PROBE_RESULT_REVIEW="$REFRESH_BOUNDED_PROBE_RESULT_REVIEW" REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW="$REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW" LEDGER="$LEDGER" MATERIALIZE_REJECTS="$MATERIALIZE_REJECTS" APPEND_MATERIALIZED_REJECTS="$APPEND_MATERIALIZED_REJECTS" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
 import datetime
 import hashlib
 import json
@@ -1003,6 +1154,15 @@ false_negative_packet, false_negative_packet_sha, false_negative_packet_err = lo
 )
 false_negative_operator_review, false_negative_operator_review_sha, false_negative_operator_review_err = load(
     os.environ["FALSE_NEGATIVE_OPERATOR_REVIEW_OUT"]
+)
+learning_ssot_decision, learning_ssot_decision_sha, learning_ssot_decision_err = load(
+    os.environ["LEARNING_SSOT_DECISION_OUT"]
+)
+autonomous_parameter_proposal, autonomous_parameter_proposal_sha, autonomous_parameter_proposal_err = load(
+    os.environ["AUTONOMOUS_PARAMETER_PROPOSAL_OUT"]
+)
+false_negative_bounded_preflight, false_negative_bounded_preflight_sha, false_negative_bounded_preflight_err = load(
+    os.environ["FALSE_NEGATIVE_BOUNDED_PREFLIGHT_OUT"]
 )
 sealed_learning, sealed_learning_sha, sealed_learning_err = load(
     os.environ["SEALED_LEARNING_EVIDENCE_OUT"]
@@ -1047,6 +1207,9 @@ status = {
     "review_rc": int(os.environ["REVIEW_RC"]),
     "false_negative_candidate_packet_rc": int(os.environ["FALSE_NEGATIVE_CANDIDATE_PACKET_RC"]),
     "false_negative_operator_review_rc": int(os.environ["FALSE_NEGATIVE_OPERATOR_REVIEW_RC"]),
+    "learning_ssot_decision_rc": int(os.environ["LEARNING_SSOT_DECISION_RC"]),
+    "autonomous_parameter_proposal_rc": int(os.environ["AUTONOMOUS_PARAMETER_PROPOSAL_RC"]),
+    "false_negative_bounded_probe_preflight_rc": int(os.environ["FALSE_NEGATIVE_BOUNDED_PREFLIGHT_RC"]),
     "sealed_horizon_learning_evidence_rc": int(os.environ["SEALED_HORIZON_LEARNING_EVIDENCE_RC"]),
     "bounded_probe_touchability_preflight_rc": int(os.environ["BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_RC"]),
     "bounded_probe_placement_repair_plan_rc": int(os.environ["BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_RC"]),
@@ -1061,6 +1224,10 @@ status = {
     "refresh_decision_packet": os.environ["REFRESH_DECISION_PACKET"] == "1",
     "refresh_false_negative_candidate_packet": os.environ["REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET"] == "1",
     "refresh_false_negative_operator_review": os.environ["REFRESH_FALSE_NEGATIVE_OPERATOR_REVIEW"] == "1",
+    "refresh_learning_ssot_decision": os.environ["REFRESH_LEARNING_SSOT_DECISION"] == "1",
+    "refresh_autonomous_parameter_proposal": os.environ["REFRESH_AUTONOMOUS_PARAMETER_PROPOSAL"] == "1",
+    "refresh_false_negative_bounded_probe_preflight": os.environ["REFRESH_FALSE_NEGATIVE_BOUNDED_PROBE_PREFLIGHT"] == "1",
+    "profit_evidence_quality_status_for_parameter_proposal": os.environ["PROFIT_EVIDENCE_QUALITY_STATUS"],
     "refresh_plan": os.environ["REFRESH_PLAN"] == "1",
     "refresh_sealed_horizon_learning_evidence": os.environ["REFRESH_SEALED_HORIZON_LEARNING_EVIDENCE"] == "1",
     "append_sealed_horizon_learning_evidence": os.environ["APPEND_SEALED_HORIZON_LEARNING_EVIDENCE"] == "1",
@@ -1291,6 +1458,64 @@ status = {
         if isinstance(false_negative_operator_review.get("answers"), dict)
         else None
     ),
+    "learning_ssot_decision_artifact_path": os.environ["LEARNING_SSOT_DECISION_OUT"],
+    "learning_ssot_decision_latest_path": os.environ["LEARNING_SSOT_DECISION_LATEST"],
+    "learning_ssot_decision_sha256": learning_ssot_decision_sha,
+    "learning_ssot_decision_error": learning_ssot_decision_err,
+    "learning_ssot_decision_skip_reason": os.environ["LEARNING_SSOT_DECISION_SKIP_REASON"] or None,
+    "learning_ssot_decision_status": learning_ssot_decision.get("status"),
+    "learning_ssot_decision_current_ssot": learning_ssot_decision.get("current_learning_ssot"),
+    "learning_ssot_decision_target_ssot": learning_ssot_decision.get("target_learning_ssot"),
+    "learning_ssot_decision_pg_backed_cutover_ready": (
+        (learning_ssot_decision.get("ssot_decision") or {}).get("pg_backed_cutover_ready")
+        if isinstance(learning_ssot_decision.get("ssot_decision"), dict)
+        else None
+    ),
+    "learning_ssot_decision_order_authority_granted": (
+        (learning_ssot_decision.get("answers") or {}).get("order_authority_granted")
+        if isinstance(learning_ssot_decision.get("answers"), dict)
+        else None
+    ),
+    "autonomous_parameter_proposal_artifact_path": os.environ["AUTONOMOUS_PARAMETER_PROPOSAL_OUT"],
+    "autonomous_parameter_proposal_latest_path": os.environ["AUTONOMOUS_PARAMETER_PROPOSAL_LATEST"],
+    "autonomous_parameter_proposal_sha256": autonomous_parameter_proposal_sha,
+    "autonomous_parameter_proposal_error": autonomous_parameter_proposal_err,
+    "autonomous_parameter_proposal_skip_reason": os.environ["AUTONOMOUS_PARAMETER_PROPOSAL_SKIP_REASON"] or None,
+    "autonomous_parameter_proposal_status": autonomous_parameter_proposal.get("status"),
+    "autonomous_parameter_proposal_side_cell_key": (
+        (autonomous_parameter_proposal.get("candidate") or {}).get("side_cell_key")
+        if isinstance(autonomous_parameter_proposal.get("candidate"), dict)
+        else None
+    ),
+    "autonomous_parameter_proposal_reviewable": (
+        (autonomous_parameter_proposal.get("answers") or {}).get("reviewable_parameter_proposal_emitted")
+        if isinstance(autonomous_parameter_proposal.get("answers"), dict)
+        else None
+    ),
+    "autonomous_parameter_proposal_order_authority_granted": (
+        (autonomous_parameter_proposal.get("answers") or {}).get("order_authority_granted")
+        if isinstance(autonomous_parameter_proposal.get("answers"), dict)
+        else None
+    ),
+    "false_negative_bounded_probe_preflight_artifact_path": os.environ["FALSE_NEGATIVE_BOUNDED_PREFLIGHT_OUT"],
+    "false_negative_bounded_probe_preflight_latest_path": os.environ["FALSE_NEGATIVE_BOUNDED_PREFLIGHT_LATEST"],
+    "false_negative_bounded_probe_preflight_sha256": false_negative_bounded_preflight_sha,
+    "false_negative_bounded_probe_preflight_error": false_negative_bounded_preflight_err,
+    "false_negative_bounded_probe_preflight_skip_reason": os.environ["FALSE_NEGATIVE_BOUNDED_PREFLIGHT_SKIP_REASON"] or None,
+    "false_negative_bounded_probe_preflight_status": false_negative_bounded_preflight.get("status"),
+    "false_negative_bounded_probe_preflight_side_cell_key": false_negative_bounded_preflight.get("side_cell_key"),
+    "false_negative_bounded_probe_preflight_blocking_gates": false_negative_bounded_preflight.get("blocking_gates"),
+    "false_negative_bounded_probe_preflight_ready": (
+        (false_negative_bounded_preflight.get("answers") or {}).get("ready_for_operator_bounded_demo_probe_authorization")
+        if isinstance(false_negative_bounded_preflight.get("answers"), dict)
+        else None
+    ),
+    "false_negative_bounded_probe_preflight_order_authority_granted": (
+        (false_negative_bounded_preflight.get("answers") or {}).get("order_authority_granted")
+        if isinstance(false_negative_bounded_preflight.get("answers"), dict)
+        else None
+    ),
+    "bounded_probe_preflight_source_path": os.environ["BOUNDED_PROBE_PREFLIGHT_SOURCE_JSON"],
     "sealed_horizon_learning_evidence_artifact_path": os.environ["SEALED_LEARNING_EVIDENCE_OUT"],
     "sealed_horizon_learning_evidence_latest_path": os.environ["SEALED_LEARNING_EVIDENCE_JSON"],
     "sealed_horizon_learning_evidence_review_artifact_path": os.environ["SEALED_LEARNING_EVIDENCE_REVIEW_OUT"],
@@ -1528,7 +1753,7 @@ if [[ -n "$STATUS_JSON" ]]; then
     echo "$STATUS_JSON" >> "$STATUS_LOG"
 fi
 
-echo "[$(ts)] === Cost-gate learning lane refresh end scorecard_rc=${scorecard_rc} plan_rc=${plan_rc} historical_review_rc=${historical_review_rc} materializer_rc=${materializer_rc} refresh_rc=${refresh_rc} review_rc=${review_rc} false_negative_candidate_packet_rc=${false_negative_candidate_packet_rc} false_negative_operator_review_rc=${false_negative_operator_review_rc} sealed_horizon_learning_evidence_rc=${sealed_horizon_learning_evidence_rc} order_touchability_audit_rc=${order_touchability_audit_rc} bounded_probe_touchability_preflight_rc=${bounded_probe_touchability_preflight_rc} bounded_probe_placement_repair_plan_rc=${bounded_probe_placement_repair_plan_rc} bounded_probe_authority_patch_readiness_rc=${bounded_probe_authority_patch_readiness_rc} bounded_probe_operator_authorization_rc=${bounded_probe_operator_authorization_rc} bounded_probe_shadow_placement_impact_rc=${bounded_probe_shadow_placement_impact_rc} bounded_probe_result_review_rc=${bounded_probe_result_review_rc} bounded_probe_execution_realism_review_rc=${bounded_probe_execution_realism_review_rc} ===" >> "$LOG"
+echo "[$(ts)] === Cost-gate learning lane refresh end scorecard_rc=${scorecard_rc} plan_rc=${plan_rc} historical_review_rc=${historical_review_rc} materializer_rc=${materializer_rc} refresh_rc=${refresh_rc} review_rc=${review_rc} false_negative_candidate_packet_rc=${false_negative_candidate_packet_rc} false_negative_operator_review_rc=${false_negative_operator_review_rc} learning_ssot_decision_rc=${learning_ssot_decision_rc} autonomous_parameter_proposal_rc=${autonomous_parameter_proposal_rc} false_negative_bounded_preflight_rc=${false_negative_bounded_preflight_rc} sealed_horizon_learning_evidence_rc=${sealed_horizon_learning_evidence_rc} order_touchability_audit_rc=${order_touchability_audit_rc} bounded_probe_touchability_preflight_rc=${bounded_probe_touchability_preflight_rc} bounded_probe_placement_repair_plan_rc=${bounded_probe_placement_repair_plan_rc} bounded_probe_authority_patch_readiness_rc=${bounded_probe_authority_patch_readiness_rc} bounded_probe_operator_authorization_rc=${bounded_probe_operator_authorization_rc} bounded_probe_shadow_placement_impact_rc=${bounded_probe_shadow_placement_impact_rc} bounded_probe_result_review_rc=${bounded_probe_result_review_rc} bounded_probe_execution_realism_review_rc=${bounded_probe_execution_realism_review_rc} ===" >> "$LOG"
 
 # fail-soft: rc/status are recorded; alpha-discovery reads artifacts and ledger
 # state. Operator action is required for deploy, writer enablement, or probe authority.
