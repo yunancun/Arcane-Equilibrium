@@ -142,7 +142,7 @@ pub(super) async fn handle_exchange_event(
             // cases, and unresolved (TIF=None) degrades to taker (safe).
             // FIX-FEE-POSTONLY-1：hoist matched_key 至 fee 計算前，以便
             // 依 PendingOrder.time_in_force 分流 maker/taker 費率。
-            let matched_key = state
+            let mut matched_key = state
                 .order_id_to_link
                 .get(&exec.order_id)
                 .cloned()
@@ -177,6 +177,19 @@ pub(super) async fn handle_exchange_event(
                         None
                     }
                 });
+            if let Some(key) = matched_key.as_ref() {
+                if !state.pending_orders.contains_key(key) {
+                    state.order_id_to_link.remove(&exec.order_id);
+                    tracing::warn!(
+                        exec_id = %exec.exec_id,
+                        order_id = %exec.order_id,
+                        stale_order_link_id = %key,
+                        "stale order_id mapping hit — falling back to unattributed audit \
+                         / 命中過期 order_id 映射 — 回落 unattributed audit"
+                    );
+                    matched_key = None;
+                }
+            }
 
             // FIX-FEE-POSTONLY-1 (G7-09): look up the matched PendingOrder's
             // TIF so the fee fallback picks maker rate for PostOnly entries.
@@ -372,6 +385,9 @@ pub(super) async fn handle_exchange_event(
                             );
                         }
                         tracing::info!(order_link_id = %key, "pending order fully filled, removing / 待處理訂單完全成交，移除");
+                        state
+                            .order_id_to_link
+                            .retain(|_, link| link.as_str() != key.as_str());
                         state.pending_orders.remove(&key);
                     } else if pending_sweep::tighten_postonly_entry_after_partial(po, exec_ts) {
                         tracing::info!(
@@ -537,6 +553,10 @@ pub(super) async fn handle_exchange_event(
                             reject_category = %reject_label,
                             "pending order failed — removing / 待處理訂單失敗，移除"
                         );
+                        state.order_id_to_link.remove(&order.order_id);
+                        state
+                            .order_id_to_link
+                            .retain(|_, link| link.as_str() != order.order_link_id.as_str());
                         state.pending_orders.remove(&order.order_link_id);
                     }
                 }
@@ -581,11 +601,8 @@ pub(super) async fn handle_exchange_event(
                     .get_position(&pos.symbol)
                     .map(|p| p.is_long)
                     .unwrap_or(is_long);
-                let removed = pipeline.converge_exchange_zero_close(
-                    &pos.symbol,
-                    local_is_long,
-                    now_ms,
-                );
+                let removed =
+                    pipeline.converge_exchange_zero_close(&pos.symbol, local_is_long, now_ms);
                 if removed {
                     tracing::warn!(
                         symbol = %pos.symbol,
@@ -681,6 +698,7 @@ pub(super) async fn handle_exchange_event(
                     count,
                 );
                 state.pending_orders.clear();
+                state.order_id_to_link.clear();
             }
             tracing::warn!(
                 "DCP triggered — exchange cancelled active orders, close-maker fallbacks attempted where safe"

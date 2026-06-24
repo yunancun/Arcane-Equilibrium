@@ -155,6 +155,17 @@ pub struct PendingOrder {
 #[derive(Debug, Clone)]
 pub enum PendingOrderEvent {
     Register(PendingOrder),
+    /// Exchange order id observed from the successful REST create response.
+    /// This closes the fill-before-OrderUpdate race when REST already returned
+    /// the Bybit `orderId` but the private WS order topic has not populated
+    /// `LoopState.order_id_to_link` yet.
+    /// REST create 成功回傳的交易所 orderId。當 REST 已知道 Bybit `orderId`
+    /// 但私有 WS order topic 尚未填入 `LoopState.order_id_to_link` 時，用來縮短
+    /// Fill 早於 OrderUpdate 的 unattributed race。
+    ExchangeOrderIdMapped {
+        order_link_id: String,
+        exchange_order_id: String,
+    },
     /// Terminal release for the decision lease handed off by the router.
     /// Kept on the pending-registration channel so order lifecycle audit and
     /// lease lifecycle audit remain ordered inside one event-consumer loop.

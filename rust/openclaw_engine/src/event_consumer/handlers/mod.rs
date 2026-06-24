@@ -59,6 +59,23 @@ pub fn handle_paper_command(
     snapshot_writer: &mut DualStateWriter,
     pending_orders: &mut HashMap<String, PendingOrder>,
 ) {
+    let mut order_id_to_link = HashMap::new();
+    handle_paper_command_with_order_map(
+        cmd,
+        pipeline,
+        snapshot_writer,
+        pending_orders,
+        &mut order_id_to_link,
+    );
+}
+
+pub(super) fn handle_paper_command_with_order_map(
+    cmd: PipelineCommand,
+    pipeline: &mut TickPipeline,
+    snapshot_writer: &mut DualStateWriter,
+    pending_orders: &mut HashMap<String, PendingOrder>,
+    order_id_to_link: &mut HashMap<String, String>,
+) {
     match cmd {
         PipelineCommand::Pause => lifecycle::handle_pause(pipeline, snapshot_writer),
         PipelineCommand::Resume => lifecycle::handle_resume(pipeline, snapshot_writer),
@@ -88,9 +105,13 @@ pub fn handle_paper_command(
                  / CancelAllOrders 到達同步 facade — 應在 handle_pipeline_command 攔截"
             );
         }
-        PipelineCommand::Reset { new_balance } => {
-            lifecycle::handle_reset(new_balance, pipeline, snapshot_writer, pending_orders)
-        }
+        PipelineCommand::Reset { new_balance } => lifecycle::handle_reset(
+            new_balance,
+            pipeline,
+            snapshot_writer,
+            pending_orders,
+            order_id_to_link,
+        ),
         // P1-5 A2 · Test-only stub. Production path intercepts this variant
         // in event_consumer/mod.rs to run the DB DELETE too.
         // P1-5 A2：測試專用 stub；生產路徑在 mod.rs 攔截並跑 DB DELETE。
