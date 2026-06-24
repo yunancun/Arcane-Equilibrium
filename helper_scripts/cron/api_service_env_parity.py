@@ -43,6 +43,8 @@ DEFAULT_REQUIRED_ENV_KEYS = (
     "OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE",
     "OPENCLAW_STRATEGY_TOGGLE_LIVE_MODE",
 )
+CUTOVER_PLAN_SCHEMA_VERSION = "api_service_runtime_cutover_plan_v1"
+SERVICE_NAME = "openclaw-trading-api.service"
 LOCAL_BOUNDARY_TRUE_KEYS = {
     "env_mutation_performed",
     "environment_mutation_performed",
@@ -65,6 +67,8 @@ LOCAL_BOUNDARY_TRUE_SUFFIXES = (
     "_unit_file_written",
 )
 SECRET_NAME_FRAGMENTS = (
+    "DATABASE_URL",
+    "DSN",
     "SECRET",
     "TOKEN",
     "PASSWORD",
@@ -294,6 +298,7 @@ def _systemd_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
         "active_state": show.get("ActiveState"),
         "sub_state": show.get("SubState"),
         "unit_file_state": show.get("UnitFileState"),
+        "fragment_path": show.get("FragmentPath"),
         "main_pid": _int_or_none(show.get("MainPID")),
         "working_directory": unit.get("WorkingDirectory"),
         "environment": _dict(unit.get("environment")),
@@ -327,6 +332,171 @@ def _env_missing(
         if key in process_env and key not in unit_env:
             missing.append(key)
     return missing
+
+
+def _safe_unit_env_value(key: str, value: Any) -> str | None:
+    text = _str(value)
+    if not text:
+        return None
+    if _is_secret_name(key) and not key.endswith("_FILE"):
+        return None
+    return text
+
+
+def _unit_environment_proposal(
+    *,
+    process_env: dict[str, Any],
+    required_env_keys: tuple[str, ...],
+) -> dict[str, Any]:
+    materialized: dict[str, str] = {}
+    redacted_required: list[str] = []
+    missing_from_process: list[str] = []
+    for key in required_env_keys:
+        if key not in process_env:
+            missing_from_process.append(key)
+            continue
+        safe = _safe_unit_env_value(key, process_env.get(key))
+        if safe is None:
+            redacted_required.append(key)
+            continue
+        materialized[key] = safe
+    return {
+        "materialized_env": materialized,
+        "materialized_environment_lines": [
+            f"Environment={key}={shlex.quote(value)}"
+            for key, value in sorted(materialized.items())
+        ],
+        "redacted_required_env_keys": redacted_required,
+        "missing_required_env_keys_from_process_snapshot": missing_from_process,
+    }
+
+
+def _proposed_exec_start(
+    *,
+    process_command: dict[str, Any],
+    unit_command: dict[str, Any],
+) -> str | None:
+    app = _str(unit_command.get("app")) or _str(process_command.get("app"))
+    host = _str(process_command.get("host"))
+    port = process_command.get("port")
+    workers = process_command.get("workers")
+    if not app or not host or port is None or workers is None:
+        return None
+    unit_prefix = _uvicorn_prefix(unit_command.get("argv"), app)
+    process_prefix = _uvicorn_prefix(process_command.get("argv"), app)
+    prefix = unit_prefix or process_prefix
+    if not prefix:
+        return None
+    return shlex.join(prefix + [
+        "--host",
+        host,
+        "--port",
+        str(port),
+        "--workers",
+        str(workers),
+    ])
+
+
+def _uvicorn_prefix(argv: Any, app: str) -> list[str] | None:
+    if not isinstance(argv, list) or not app:
+        return None
+    try:
+        app_index = argv.index(app)
+    except ValueError:
+        return None
+    prefix = [_str(token) for token in argv[:app_index] if _str(token)]
+    if not prefix:
+        return None
+    if not any(Path(token).name == "uvicorn" or token == "uvicorn" for token in prefix):
+        return None
+    return prefix + [app]
+
+
+def _runtime_cutover_plan(
+    *,
+    process_row: dict[str, Any] | None,
+    process_command: dict[str, Any],
+    systemd: dict[str, Any],
+    required_env_keys: tuple[str, ...],
+    findings: list[dict[str, Any]],
+    evidence_gaps: list[str],
+    authority_signal: str | None,
+) -> dict[str, Any]:
+    process_env = _dict(_dict(process_row).get("selected_env"))
+    unit_command = _dict(systemd.get("command"))
+    env_proposal = _unit_environment_proposal(
+        process_env=process_env,
+        required_env_keys=required_env_keys,
+    )
+    proposed_exec_start = _proposed_exec_start(
+        process_command=process_command,
+        unit_command=unit_command,
+    )
+    blockers = []
+    if authority_signal:
+        blockers.append("authority_or_runtime_mutation_signal_present")
+    if evidence_gaps:
+        blockers.append("evidence_incomplete")
+    if not proposed_exec_start:
+        blockers.append("proposed_exec_start_incomplete")
+    if env_proposal["missing_required_env_keys_from_process_snapshot"]:
+        blockers.append("process_runtime_env_snapshot_incomplete")
+    unit_file_path = _str(systemd.get("fragment_path")) or (
+        "~/.config/systemd/user/openclaw-trading-api.service"
+    )
+    current_pid = _dict(process_row).get("pid")
+    guarded_stop = (
+        "verify pid/cmdline/cwd still match the reviewed snapshot, then send "
+        f"SIGTERM to manual uvicorn master pid {current_pid}"
+        if current_pid
+        else "manual uvicorn pid unavailable; do not cut over"
+    )
+    return {
+        "schema_version": CUTOVER_PLAN_SCHEMA_VERSION,
+        "apply_allowed_by_this_packet": False,
+        "restart_allowed_by_this_packet": False,
+        "requires_e3_review_before_apply": True,
+        "requires_runtime_mutation_checkpoint_before_apply": True,
+        "unit_file_path": unit_file_path,
+        "service_name": SERVICE_NAME,
+        "proposed_exec_start": proposed_exec_start,
+        "proposed_working_directory": _dict(process_row).get("cwd")
+        or systemd.get("working_directory"),
+        "proposed_environment": env_proposal,
+        "plan_blockers": blockers,
+        "preflight_checks": [
+            "confirm current manual uvicorn pid/cmdline/cwd/env keys still match reviewed snapshot",
+            "confirm port 8000 listener is the reviewed manual uvicorn master/workers",
+            "confirm updated unit binds only to the reviewed Tailscale host, not 0.0.0.0 or ::",
+            "confirm required runtime env keys are materialized without copying secret values into reports",
+            "confirm no Cost Gate/probe/order/live/Bybit/PG mutation flags are present",
+        ],
+        "apply_sequence_template": [
+            f"write reviewed unit content to {unit_file_path}",
+            "systemctl --user daemon-reload",
+            guarded_stop,
+            f"systemctl --user start {SERVICE_NAME}",
+            "verify listener, console redirect, authenticated health surface, and service MainPID",
+        ],
+        "rollback_sequence_template": [
+            f"systemctl --user stop {SERVICE_NAME}",
+            "restore the previous unit file from timestamped backup",
+            "systemctl --user daemon-reload",
+            "restart the reviewed manual uvicorn command with the reviewed env file/source",
+            "verify listener and console reachability return to the pre-cutover state",
+        ],
+        "verification_checks": [
+            f"systemctl --user show {SERVICE_NAME} ActiveState MainPID ExecStart Environment",
+            "ss -ltnp sport = :8000",
+            "curl authenticated /api/v1/system/health or existing console smoke with proper auth",
+            "rerun api_service_env_parity packet against fresh post-cutover snapshots",
+        ],
+        "risk_notes": [
+            "manual process and systemd service cannot bind the same host:port simultaneously; a guarded handoff is required",
+            "this packet intentionally does not perform daemon-reload, start, stop, kill, or file writes",
+            "the broad Demo API authorization is not live/mainnet/probe/order authority",
+        ],
+    }
 
 
 def _build_findings(
@@ -462,6 +632,16 @@ def build_api_service_env_parity_packet(
         required_env_keys=required_env_keys,
     )
 
+    cutover_plan = _runtime_cutover_plan(
+        process_row=process_row,
+        process_command=process_command,
+        systemd=systemd,
+        required_env_keys=required_env_keys,
+        findings=findings,
+        evidence_gaps=evidence_gaps,
+        authority_signal=authority_signal,
+    )
+
     if authority_signal:
         status = "API_SERVICE_ENV_PARITY_BOUNDARY_VIOLATION"
         reason = "supplied_snapshot_contains_authority_or_mutation_signal"
@@ -539,6 +719,7 @@ def build_api_service_env_parity_packet(
             "active_state": systemd.get("active_state"),
             "sub_state": systemd.get("sub_state"),
             "unit_file_state": systemd.get("unit_file_state"),
+            "fragment_path": systemd.get("fragment_path"),
             "main_pid": systemd.get("main_pid"),
             "working_directory": systemd.get("working_directory"),
             "command": systemd.get("command"),
@@ -555,6 +736,7 @@ def build_api_service_env_parity_packet(
             "do_not_copy_secret_values_into_reports": True,
             "requires_e3_review_before_apply": True,
         },
+        "runtime_cutover_plan": cutover_plan,
         "next_actions": next_actions,
     }
 
@@ -581,6 +763,12 @@ def render_markdown(packet: dict[str, Any]) -> str:
         f"- unit_file_state: `{packet['systemd_unit'].get('unit_file_state')}`",
         f"- working_directory: `{packet['systemd_unit'].get('working_directory')}`",
         f"- command: `{packet['systemd_unit'].get('command', {}).get('cmdline')}`",
+        "",
+        "## Runtime Cutover Plan",
+        "",
+        f"- apply_allowed_by_this_packet: `{packet['runtime_cutover_plan'].get('apply_allowed_by_this_packet')}`",
+        f"- proposed_exec_start: `{packet['runtime_cutover_plan'].get('proposed_exec_start')}`",
+        f"- plan_blockers: `{packet['runtime_cutover_plan'].get('plan_blockers')}`",
         "",
         "## Findings",
         "",

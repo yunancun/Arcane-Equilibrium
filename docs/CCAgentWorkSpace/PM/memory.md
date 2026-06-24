@@ -1900,3 +1900,9 @@
 - `api_service_env_parity.py` now makes manual uvicorn vs inactive systemd unit drift reviewable from supplied snapshots only; current runtime smoke is `API_SERVICE_ENV_PARITY_DRIFT`.
 - E2/E3/E4 chain passed after PM fixed missing-env false-clean, env/service mutation contamination, and command-line secret/key redaction gaps.
 - Boundary: source/test/docs + supplied `/tmp` snapshot smoke only; no service restart/process/env/crontab mutation, no PG/Bybit call, no Cost Gate change, no probe/order/live authority, and no promotion proof.
+
+## 2026-06-24 API Service Runtime Cutover No-Apply Plan
+
+- `api_service_env_parity.py` now embeds `api_service_runtime_cutover_plan_v1` with proposed ExecStart, safe env materialization, preflight/apply/rollback/verification templates, and hard `apply_allowed=false` / `restart_allowed=false`.
+- E2 found and PM fixed direct `DATABASE_URL`/`DSN` leakage risk and `python -m uvicorn` wrapper reconstruction; E3 no-apply review and E4 regression passed.
+- Boundary: source/test/docs + supplied `/tmp` snapshot smoke only; no systemd apply, daemon-reload, process signal, service restart, API/env/crontab mutation, PG/Bybit call, Cost Gate change, probe/order/live authority, or promotion proof.

@@ -774,3 +774,11 @@ YYYY-MM-DD HH:MM TZ
 - Result: added `helper_scripts/cron/api_service_env_parity.py` and tests. Runtime supplied-snapshot smoke reports `API_SERVICE_ENV_PARITY_DRIFT` for manual uvicorn vs inactive systemd unit; packet remains no-authority/no-restart.
 - Verification: API env-parity + runtime-health hygiene tests `30 passed`, py_compile PASS, `git diff --check` PASS, E2 final redaction review CLOSED, E3 no blocker, E4 regression DONE.
 - Boundary: source/test/docs + supplied `/tmp` snapshot smoke only; no service restart, API process/env/crontab mutation, PG/Bybit call, Cost Gate change, probe/order/live authority, or promotion proof.
+
+# 2026-06-24 — API Service Runtime Cutover No-Apply Plan
+
+- Task: advance `P1-API-SERVICE-OWNERSHIP-RUNTIME-CUTOVER-REVIEW` without applying the systemd cutover.
+- Dispatch chain: `PM(default)` local implementation + `E3(explorer)` no-apply runtime/security review + `E2(explorer)` adversarial review + `E4(explorer)` regression + `PM(default)` integration.
+- Result: `api_service_env_parity.py` now embeds `api_service_runtime_cutover_plan_v1` with proposed ExecStart, safe env materialization, preflight/apply/rollback/verification templates, and hard `apply_allowed=false` / `restart_allowed=false`. Direct `DATABASE_URL`/`DSN` values are redacted; `python -m uvicorn` wrappers are preserved; unknown non-uvicorn prefixes fail closed.
+- Verification: API env-parity + runtime-health hygiene tests `35 passed`, focused E2/E4 tests `13 passed`, py_compile PASS, `git diff --check` PASS, supplied-snapshot CLI smoke PASS.
+- Boundary: source/test/docs + supplied `/tmp` snapshot smoke only; no systemd apply, daemon-reload, process signal, service restart, API/env/crontab mutation, PG/Bybit call, Cost Gate change, probe/order/live authority, or promotion proof.
