@@ -1876,3 +1876,9 @@
 - Bounded result review, execution realism review, learning-lane status, runtime adapter state, artifact spine, scorecard/runtime/discovery/worklist propagation now split raw/proof-eligible/proof-excluded outcomes and fail closed when exclusion is present.
 - Verification: py_compile passed for changed modules; bounded/status/runtime/scorecard tests `112 passed`; alpha discovery/worklist tests `90 passed`; `git diff --check` clean.
 - Boundary: source/test/docs only. No Bybit private call, order cancel/modify/close, PG action, runtime/env/service/cron mutation, Cost Gate lowering, probe/order authority, live promotion, or Rust writer enablement.
+
+## 2026-06-24 Source-Only Fill-Lineage Guard
+
+- Commit `66f063cc` adds Rust event-consumer dispatch-response orderId mapping, stale-map unattributed fallback, and lifecycle cleanup for future fill attribution/reconstructability.
+- Review chain PA/E2/E4/QA passed; focused Rust test `pending_registration_order_type_tests` passed 26/26 and `git diff --check` clean.
+- Boundary: source-only guard, not deployed/runtime lineage closure, candidate selection, bounded-probe proof, Cost Gate proof, or promotion proof; P0 exchange cleanup/quarantine remains operator-gated.

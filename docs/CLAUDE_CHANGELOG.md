@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-24（TODO v455 Profit-first loop active-state sync；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-24（TODO v456 source-only fill-lineage guard；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v456 增量（2026-06-24 source-only fill-lineage guard）**：Added Rust event-consumer source guard `66f063cc` for the fill-before-OrderUpdate attribution race. Successful primary REST dispatch responses can now emit a local `ExchangeOrderIdMapped` event, registration records that dispatch-response mapping only when the pending order is still active, stale map hits remove the map and fall back to unattributed audit, and mapping cleanup covers full fill, terminal OrderUpdate failure, DispatchFailed, ExchangeZeroClose, DCP clear, reset, and periodic sweep. Focused Rust validation passed `cargo test -p openclaw_engine pending_registration_order_type_tests -- --nocapture`（26 passed）and `git diff --check`; PA/E2/E4/QA reviews passed. This is a source-only fill-lineage guard, not deployed/runtime-proven lineage closure, bounded-probe proof, Cost Gate proof, promotion proof, or candidate selection. P0 exchange working-order overhang cleanup/quarantine and runtime fill-lineage reconciliation remain operator-gated.
 
 **v455 增量（2026-06-24 Profit-first loop active-state sync）**：Updated `TODO.md` masthead and §6 operator action row to source checkpoint `ad09a5bd`, preserving the v453 runtime fact that `trade-core` was last read-only verified clean at `c88deea7` while recording the later source-only governance closures. Added PM packet `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-24--todo_v455_profit_loop_state_sync.md`. The active next gate is still P0 operator cleanup/quarantine of exchange working-order overhang and fill-lineage drift before exactly-one bounded Demo candidate review. This was docs-only: no runtime, PG, Bybit, crontab, service, order, probe, live, or Cost Gate mutation.
 
