@@ -651,4 +651,18 @@ impl Strategy for FlashDipBuy {
             self.prior_close.insert(symbol.to_string(), prior_close);
         }
     }
+
+    /// boot DB seed setter：恢復當日已在交易所 Working 的 entry order，防 restart
+    /// 後 producer-side pending cap 低估。
+    fn seed_pending_entry(&mut self, symbol: &str, expiry_ms: u64) {
+        if !self.is_allowed_symbol(symbol) {
+            return;
+        }
+        let now_wall_ms = openclaw_core::now_ms();
+        if expiry_ms <= now_wall_ms {
+            return;
+        }
+        self.pending_entry_expiry
+            .insert(symbol.to_string(), expiry_ms);
+    }
 }

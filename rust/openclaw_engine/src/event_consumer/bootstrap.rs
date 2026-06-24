@@ -1067,6 +1067,47 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
                     total = pilot_symbols.len(),
                     "FLASH-DIP-PILOT 1d prior_close seeded from DB / 已從 DB 注入 pilot 前日收盤"
                 );
+
+                // ── 把當日 Working orders 恢復到 producer-side pending cap ──
+                // trading.orders 是 exchange-accepted Working order 的 DB evidence。
+                // 重啟後策略內存的 pending_entry_expiry 會清空；若不從 DB 恢復，已有
+                // resting PostOnly orders 不會計入 max_concurrent，deploy/restart 後會再掛新單。
+                let day_start_ms = now_ms.saturating_sub(now_ms % DAY_MS);
+                let pending_expiry_ms =
+                    now_ms.saturating_add(DAY_MS.saturating_sub(now_ms % DAY_MS).max(15_000));
+                let pending_rows: Result<Vec<(String,)>, sqlx::Error> = sqlx::query_as(
+                    "SELECT DISTINCT symbol \
+                     FROM trading.orders \
+                     WHERE strategy_name = 'flash_dip_buy' \
+                       AND engine_mode = 'demo' \
+                       AND status = 'Working' \
+                       AND ts >= to_timestamp($1::double precision / 1000.0)",
+                )
+                .bind(day_start_ms as f64)
+                .fetch_all(pool)
+                .await;
+                match pending_rows {
+                    Ok(rows) => {
+                        let mut restored = 0_usize;
+                        for (sym,) in rows {
+                            if let Some(s) =
+                                pipeline.orchestrator.find_strategy_mut("flash_dip_buy")
+                            {
+                                s.seed_pending_entry(&sym, pending_expiry_ms);
+                                restored += 1;
+                            }
+                        }
+                        info!(
+                            restored,
+                            expiry_ms = pending_expiry_ms,
+                            "FLASH-DIP-PILOT working orders restored into pending cap / 已恢復 working order 到 pending cap"
+                        );
+                    }
+                    Err(e) => {
+                        warn!(error = %e,
+                            "FLASH-DIP-PILOT working order restore failed (fail-soft) / working order 恢復失敗（fail-soft）");
+                    }
+                }
             } else {
                 warn!(
                     "FLASH-DIP-PILOT 1d seed skipped — no DB pool / 無 DB pool（fail-safe inert）"

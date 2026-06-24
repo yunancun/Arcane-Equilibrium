@@ -285,6 +285,13 @@ pub trait Strategy: Send {
     fn seed_prior_close(&mut self, _symbol: &str, _prior_close: f64) {
         // Default no-op / 預設無操作
     }
+
+    /// FLASH-DIP-PILOT (2026-06-24)：啟動時恢復未成交 Working order。
+    /// Pending PostOnly orders 不屬於 PaperState position，所以 restart 後必須
+    /// 另外恢復，避免 producer-side max_concurrent 低估並重複掛單。
+    fn seed_pending_entry(&mut self, _symbol: &str, _expiry_ms: u64) {
+        // Default no-op / 預設無操作
+    }
 }
 
 // ── Tests moved verbatim to sibling `tests.rs` to keep mod.rs lean ──
