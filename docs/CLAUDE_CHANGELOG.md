@@ -1,13 +1,17 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-24（TODO v453 demo-learning autonomy audit；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-24（TODO v455 Profit-first loop active-state sync；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v455 增量（2026-06-24 Profit-first loop active-state sync）**：Updated `TODO.md` masthead and §6 operator action row to source checkpoint `ad09a5bd`, preserving the v453 runtime fact that `trade-core` was last read-only verified clean at `c88deea7` while recording the later source-only governance closures. Added PM packet `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-24--todo_v455_profit_loop_state_sync.md`. The active next gate is still P0 operator cleanup/quarantine of exchange working-order overhang and fill-lineage drift before exactly-one bounded Demo candidate review. This was docs-only: no runtime, PG, Bybit, crontab, service, order, probe, live, or Cost Gate mutation.
+
+**v454 增量（2026-06-24 source-only Profit-first loop governance packets）**：After the v453 read-only autonomy audit, source-only follow-ups landed for the proof-exclusion guard (`2026-06-24--profit_evidence_quality_proof_exclusion_guard.md`), learning SSOT decision (`2026-06-24--learning_ssot_decision_packet.md`), autonomous parameter proposal contract (`2026-06-24--autonomous_parameter_proposal_contract.md`), runtime health hygiene packet (`2026-06-24--runtime_health_hygiene_packet.md`), and anti-repeat session-loop packet (`2026-06-24--profit_first_session_loop_state_packet.md`). These close P1 source-only governance gaps and prevent re-running stale blockers without new evidence deltas, but do not grant probe/order/live authority and do not make any fill promotion-proof.
 
 **v453 增量（2026-06-24 demo-learning autonomy PM audit）**：PM dispatched read-only QC/MIT/AI-E/E3/BB/CC/FA/PA audit for the operator question about Demo silence, backend learning, strategy signal generation, and core autonomous-profit maturity. Current Linux runtime is clean at `c88deea7`, demo engine is alive, and PG evidence shows fresh `flash_dip_buy` demo intents/orders/fills; the blanket "Demo has not placed orders" diagnosis is superseded. Cost Gate / demo-learning crons are installed and artifact evidence is accumulating, but Rust hot-path writer remains disabled, the Cost Gate learning ledger is JSONL/artifact-level rather than PG-backed decision impact, bounded probe outcomes are absent, and authority/proof flags remain false (`global_cost_gate_lowering=false`, `probe_authority=false`, `order_authority=false`, `promotion_evidence=false`). AI/model autonomy evidence remains weak: 7d AI invocation / usage / teacher directive / ML parameter suggestion ledgers are zero and strategist rows are mostly metadata/no-op. BB found execution-evidence concerns: deep `Working` order overhang and unattributed fills. PA/FA verdict: system is evidence-active and safety-gated, not autonomous-profit complete. PM reports: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-24--demo-learning-autonomy-pm-current-state-report.md` and Operator mirror `docs/CCAgentWorkSpace/Operator/2026-06-24--demo-learning-autonomy-pm-current-state-report.md`. Commit `fb0976ec` pushed `[skip ci]`; boundary read-only audit/docs only, no runtime, PG, crontab, Bybit, order, risk, auth, Cost Gate, or deploy mutation.
 
