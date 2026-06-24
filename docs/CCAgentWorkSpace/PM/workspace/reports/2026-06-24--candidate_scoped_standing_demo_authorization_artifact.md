@@ -29,7 +29,7 @@ max_authorized_probe_orders=1
 
 Important boundary：this is **not** active runtime order/probe authority. It was intentionally not copied to `bounded_probe_operator_authorization_latest.json`, not included in a plan, not passed to `runtime_adapter`, and not propagated through alpha refresh.
 
-`bounded_probe_operator_authorization_latest.json` remains defer/no-object:
+`bounded_probe_operator_authorization_latest.json` remains defer/no-object. It was unchanged immediately after the artifact-only action, then natural cron refreshed it at `2026-06-24T16:15:04Z` back into the same defer/no-object state:
 
 ```text
 status=READY_FOR_OPERATOR_AUTHORIZATION_REVIEW
@@ -37,7 +37,7 @@ decision=defer
 operator_authorization_object_emitted=false
 active_runtime_probe_authority=false
 active_runtime_order_authority=false
-sha256 unchanged=22ed497452cbad3b7fb29db0d2ecb0ee4e8017391dd661c3fab58e4b995a6ebd
+final sha256=f44abb38b48d93750dcbe3b76a919a6f9e66e9d96d8a4d914c2fe848c8705c12
 ```
 
 ## Session Loop State
@@ -69,7 +69,7 @@ sha256 unchanged=22ed497452cbad3b7fb29db0d2ecb0ee4e8017391dd661c3fab58e4b995a6eb
   "artifact_mtimes": {
     "/tmp/openclaw/cost_gate_learning_lane/standing_demo_authorization_20260624T160930Z.json": "2026-06-24T16:09:30Z",
     "/tmp/openclaw/cost_gate_learning_lane/bounded_probe_operator_authorization_standing_demo_20260624T160930Z.json": "2026-06-24T16:09:30Z",
-    "/tmp/openclaw/cost_gate_learning_lane/bounded_probe_operator_authorization_latest.json": "2026-06-24T16:00:04Z",
+    "/tmp/openclaw/cost_gate_learning_lane/bounded_probe_operator_authorization_latest.json": "2026-06-24T16:15:04Z",
     "/tmp/openclaw/alpha_discovery_throughput/alpha_discovery_latest.json": "2026-06-24T16:00:06Z"
   },
   "operator_action_required": false,
@@ -142,7 +142,9 @@ promotion_evidence=false
 Boundary post-check:
 
 ```text
-latest sha unchanged=true
+latest immediate_post_action_unchanged=true
+latest final_natural_cron_refresh=2026-06-24T16:15:04Z
+latest final_sha=f44abb38b48d93750dcbe3b76a919a6f9e66e9d96d8a4d914c2fe848c8705c12
 latest status=READY_FOR_OPERATOR_AUTHORIZATION_REVIEW
 latest decision=defer
 latest object_emitted=false
