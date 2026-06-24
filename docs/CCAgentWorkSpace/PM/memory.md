@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-24 Candidate-Scoped Standing Demo Authorization Artifact
+
+- Runtime timestamped artifact `/tmp/openclaw/cost_gate_learning_lane/bounded_probe_operator_authorization_standing_demo_20260624T160930Z.json` authorizes exactly `grid_trading|AVAXUSDT|Sell` 60m with cap 1 and 4h TTL via `standing_demo_authorization`.
+- E3 approved only timestamped artifact generation; PM did not overwrite `bounded_probe_operator_authorization_latest.json`, did not refresh alpha, did not run runtime_adapter, and did not include the object in a plan.
+- PM read: next blocker is propagation/admission review. The generated object is useful proof-chain input, but it is not active runtime order/probe authority, not Cost Gate lowering, not live permission, and not promotion proof.
+
 ## 2026-06-24 Standing Demo Authorization Contract
 
 - Source/runtime commit `bdc1e156` lets bounded Demo operator authorization consume a structured `standing_demo_operator_authorization_v1` as an alternative confirmation source, but only to emit a fresh candidate-scoped authorization object.
