@@ -541,6 +541,9 @@ fn test_dispatch_failed_removes_pending_order_and_emits_terminal_state() {
     po.is_close = true;
     let link_id = po.order_link_id.clone();
     state.pending_orders.insert(link_id.clone(), po);
+    state
+        .order_id_to_link
+        .insert("bybit-dispatch-failed".into(), link_id.clone());
 
     handle_pending_registration(
         Some(PendingOrderEvent::DispatchFailed {
@@ -568,10 +571,50 @@ fn test_dispatch_failed_removes_pending_order_and_emits_terminal_state() {
         !state.pending_orders.contains_key(&link_id),
         "dispatch-failed terminal event must remove stale pending order"
     );
+    assert!(
+        !state.order_id_to_link.contains_key("bybit-dispatch-failed"),
+        "dispatch-failed terminal event must remove exchange order id mapping"
+    );
     let (order_id, to_status, reason) = first_order_state_change(&mut rx);
     assert_eq!(order_id, link_id);
     assert_eq!(to_status, "Rejected");
     assert_eq!(reason.as_deref(), Some("dispatch_structural: test"));
+}
+
+#[test]
+fn test_exchange_zero_close_removes_exchange_order_id_mapping() {
+    let mut pipeline = make_test_pipeline();
+    let mut state = make_loop_state();
+
+    let mut po = baseline_pending_order("market", None);
+    po.is_close = true;
+    let link_id = po.order_link_id.clone();
+    state.pending_orders.insert(link_id.clone(), po);
+    state
+        .order_id_to_link
+        .insert("bybit-zero-close".into(), link_id.clone());
+
+    handle_pending_registration(
+        Some(PendingOrderEvent::ExchangeZeroClose {
+            order_link_id: link_id.clone(),
+            symbol: "BTCUSDT".into(),
+            is_long: true,
+            strategy: "ma_crossover".into(),
+            ts_ms: 1_700_000_000_123,
+        }),
+        &mut pipeline,
+        &mut state,
+        None,
+    );
+
+    assert!(
+        !state.pending_orders.contains_key(&link_id),
+        "exchange-zero close terminal event must remove stale pending order"
+    );
+    assert!(
+        !state.order_id_to_link.contains_key("bybit-zero-close"),
+        "exchange-zero close terminal event must remove exchange order id mapping"
+    );
 }
 
 #[test]
@@ -944,6 +987,140 @@ async fn test_ambiguous_fill_before_order_update_emits_unattributed_fill() {
             ..
         } => {
             assert_eq!(fill_id, "unattrib-exec-ambiguous");
+            assert_eq!(strategy_name, "unattributed:bybit_auto");
+        }
+        other => panic!("expected unattributed Fill, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_dispatch_response_order_id_mapping_disambiguates_fill_before_order_update() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    let mut writer = super::make_test_writer();
+    let mut state = make_loop_state();
+    let (tx, mut rx) = mpsc::channel::<TradingMsg>(8);
+
+    let mut po1 = baseline_pending_order("market", None);
+    po1.order_link_id = "oc_mapped_other".into();
+    po1.symbol = "BTCUSDT".into();
+    po1.is_long = true;
+    let mut po2 = baseline_pending_order("market", None);
+    po2.order_link_id = "oc_mapped_target".into();
+    po2.symbol = "BTCUSDT".into();
+    po2.is_long = true;
+    state.pending_orders.insert(po1.order_link_id.clone(), po1);
+    state.pending_orders.insert(po2.order_link_id.clone(), po2);
+
+    handle_pending_registration(
+        Some(PendingOrderEvent::ExchangeOrderIdMapped {
+            order_link_id: "oc_mapped_target".into(),
+            exchange_order_id: "bybit-order-from-rest-response".into(),
+        }),
+        &mut pipeline,
+        &mut state,
+        Some(&tx),
+    );
+
+    let exec = ExecutionUpdate {
+        exec_id: "exec-mapped-before-order-update".into(),
+        order_id: "bybit-order-from-rest-response".into(),
+        symbol: "BTCUSDT".into(),
+        side: "Buy".into(),
+        exec_price: "100.0".into(),
+        exec_qty: "0.01".into(),
+        exec_fee: "0.001".into(),
+        exec_type: "Trade".into(),
+        exec_time: "1700000000123".into(),
+        ..Default::default()
+    };
+
+    handle_exchange_event(
+        Some(ExchangeEvent::Fill(exec)),
+        &mut pipeline,
+        &mut writer,
+        &mut state,
+        Some(&tx),
+    )
+    .await;
+
+    assert!(
+        state.pending_orders.contains_key("oc_mapped_other"),
+        "unmapped same-side pending order must remain untouched"
+    );
+    assert!(
+        !state.pending_orders.contains_key("oc_mapped_target"),
+        "mapped fill should attach to the intended pending order and remove it when fully filled"
+    );
+
+    let (order_id, to_status, reason) = first_order_state_change(&mut rx);
+    assert_eq!(order_id, "oc_mapped_target");
+    assert_eq!(to_status, "Filled");
+    assert_eq!(reason, None);
+    assert!(
+        rx.try_recv().is_err(),
+        "mapped fill must not emit an unattributed audit row"
+    );
+}
+
+#[tokio::test]
+async fn test_stale_exchange_order_id_mapping_falls_back_to_unattributed_audit() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    let mut writer = super::make_test_writer();
+    let mut state = make_loop_state();
+    let (tx, mut rx) = mpsc::channel::<TradingMsg>(8);
+
+    let mut po1 = baseline_pending_order("market", None);
+    po1.order_link_id = "oc_stale_other_1".into();
+    po1.symbol = "BTCUSDT".into();
+    po1.is_long = true;
+    let mut po2 = baseline_pending_order("market", None);
+    po2.order_link_id = "oc_stale_other_2".into();
+    po2.symbol = "BTCUSDT".into();
+    po2.is_long = true;
+    state.pending_orders.insert(po1.order_link_id.clone(), po1);
+    state.pending_orders.insert(po2.order_link_id.clone(), po2);
+    state
+        .order_id_to_link
+        .insert("bybit-stale-map".into(), "oc_already_removed_target".into());
+
+    let exec = ExecutionUpdate {
+        exec_id: "exec-stale-map".into(),
+        order_id: "bybit-stale-map".into(),
+        symbol: "BTCUSDT".into(),
+        side: "Buy".into(),
+        exec_price: "100.0".into(),
+        exec_qty: "0.01".into(),
+        exec_fee: "0.001".into(),
+        exec_type: "Trade".into(),
+        exec_time: "1700000000123".into(),
+        ..Default::default()
+    };
+
+    handle_exchange_event(
+        Some(ExchangeEvent::Fill(exec)),
+        &mut pipeline,
+        &mut writer,
+        &mut state,
+        Some(&tx),
+    )
+    .await;
+
+    assert!(
+        !state.order_id_to_link.contains_key("bybit-stale-map"),
+        "stale mapping must be removed so future fills do not silently drop"
+    );
+    assert_eq!(
+        state.pending_orders.len(),
+        2,
+        "ambiguous fallback after stale map must not attach to an arbitrary pending order"
+    );
+    match rx.try_recv().expect("unattributed fill audit row") {
+        TradingMsg::Fill {
+            fill_id,
+            strategy_name,
+            ..
+        } => {
+            assert_eq!(fill_id, "unattrib-exec-stale-map");
             assert_eq!(strategy_name, "unattributed:bybit_auto");
         }
         other => panic!("expected unattributed Fill, got {other:?}"),

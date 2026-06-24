@@ -877,6 +877,23 @@ pub(super) fn spawn_order_dispatch(
                         attempts = attempts,
                         "order dispatched / 訂單已派發"
                     );
+                    if req.is_primary && !value.order_id.is_empty() && !req.order_link_id.is_empty()
+                    {
+                        if let Err(e) =
+                            pending_reg_tx.send(PendingOrderEvent::ExchangeOrderIdMapped {
+                                order_link_id: req.order_link_id.clone(),
+                                exchange_order_id: value.order_id.clone(),
+                            })
+                        {
+                            warn!(
+                                order_link_id = %req.order_link_id,
+                                exchange_order_id = %value.order_id,
+                                error = %e,
+                                "exchange order id mapping event dropped; OrderUpdate fallback still applies \
+                                 / 交易所 orderId 映射事件丟失；仍可等待 OrderUpdate fallback"
+                            );
+                        }
+                    }
                     send_decision_lease_release(
                         &pending_reg_tx,
                         &req,

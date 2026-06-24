@@ -113,6 +113,7 @@ pub(super) fn handle_reset(
     pipeline: &mut TickPipeline,
     snapshot_writer: &mut DualStateWriter,
     pending_orders: &mut HashMap<String, PendingOrder>,
+    order_id_to_link: &mut HashMap<String, String>,
 ) {
     // P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19)：先抓 halt 狀態做 audit。
     // P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：清 halt + audit forensic。
@@ -140,6 +141,7 @@ pub(super) fn handle_reset(
     // P2-4 fix: Clear pending_close_symbols on reset
     pipeline.clear_all_pending_close();
     pending_orders.clear();
+    order_id_to_link.clear();
     info!(
         balance = format!("{:.2}", new_balance),
         "IPC reset paper state / IPC 重置紙盤狀態"

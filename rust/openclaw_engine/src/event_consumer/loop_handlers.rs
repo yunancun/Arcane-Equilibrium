@@ -385,6 +385,38 @@ pub(super) fn handle_pending_registration(
             );
         }
         state.pending_orders.insert(po.order_link_id.clone(), po);
+    } else if let Some(PendingOrderEvent::ExchangeOrderIdMapped {
+        order_link_id,
+        exchange_order_id,
+    }) = reg
+    {
+        if order_link_id.is_empty() || exchange_order_id.is_empty() {
+            tracing::warn!(
+                order_link_id = %order_link_id,
+                exchange_order_id = %exchange_order_id,
+                "exchange order id mapping ignored because id is empty \
+                 / 交易所 orderId 映射因 id 空值被忽略"
+            );
+            return;
+        }
+        if state.pending_orders.contains_key(&order_link_id) {
+            state
+                .order_id_to_link
+                .insert(exchange_order_id.clone(), order_link_id.clone());
+            tracing::info!(
+                order_link_id = %order_link_id,
+                exchange_order_id = %exchange_order_id,
+                "exchange order id mapping registered from dispatch response \
+                 / 已從 dispatch 回應註冊交易所 orderId 映射"
+            );
+        } else {
+            tracing::warn!(
+                order_link_id = %order_link_id,
+                exchange_order_id = %exchange_order_id,
+                "exchange order id mapping ignored because pending order is gone \
+                 / pending order 已不存在，忽略交易所 orderId 映射"
+            );
+        }
     } else if let Some(PendingOrderEvent::ReleaseDecisionLease {
         order_link_id,
         decision_lease_id,
@@ -427,6 +459,9 @@ pub(super) fn handle_pending_registration(
             pipeline.clear_pending_close(&symbol);
         }
         let removed_po = state.pending_orders.remove(&order_link_id);
+        state
+            .order_id_to_link
+            .retain(|_, link| link.as_str() != order_link_id.as_str());
         let removed = removed_po.is_some();
         let (fallback_reason, rate_limit_scope) =
             dispatch_failed_close_maker_fallback_decision(&reason);
@@ -526,6 +561,9 @@ pub(super) fn handle_pending_registration(
         // 為 flat，斷開「每 tick 重發 close → 110017」自持迴圈。
         // 同步移除 pending_orders 追蹤列（若有），避免 sweep 殘留。
         let removed_pending = state.pending_orders.remove(&order_link_id).is_some();
+        state
+            .order_id_to_link
+            .retain(|_, link| link.as_str() != order_link_id.as_str());
         let removed_position = pipeline.converge_exchange_zero_close(&symbol, is_long, ts_ms);
         tracing::warn!(
             order_link_id = %order_link_id,
@@ -787,11 +825,12 @@ pub(super) async fn handle_pipeline_command(
             .await;
         }
         other => {
-            handlers::handle_paper_command(
+            handlers::handle_paper_command_with_order_map(
                 other,
                 pipeline,
                 snapshot_writer,
                 &mut state.pending_orders,
+                &mut state.order_id_to_link,
             );
         }
     }
@@ -1155,13 +1194,11 @@ pub(super) fn handle_tick_event(
         }
         // Clean stale order_id mappings: only keep those with active pending orders
         // 清理過期 order_id 映射：僅保留有活躍待處理訂單的
-        if state.order_id_to_link.len() > 50 {
-            let active_links: std::collections::HashSet<&String> =
-                state.pending_orders.keys().collect();
-            state
-                .order_id_to_link
-                .retain(|_, link| active_links.contains(link));
-        }
+        let active_links: std::collections::HashSet<&String> =
+            state.pending_orders.keys().collect();
+        state
+            .order_id_to_link
+            .retain(|_, link| active_links.contains(link));
         state.last_pending_check = Instant::now();
         // R-02: Cross-check pipeline pending_close_symbols against open positions.
         // Clears stale flags for symbols whose close fill was already processed.
