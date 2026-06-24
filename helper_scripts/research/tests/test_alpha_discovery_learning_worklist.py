@@ -149,9 +149,12 @@ def test_learning_worklist_prioritizes_runtime_reconcile_over_mm_signal_search()
     worklist = plan["learning_worklist"]
     assert worklist["schema_version"] == "alpha_learning_worklist_v6"
     assert worklist["status"] == "OPERATOR_GATED_LEARNING_READY"
-    assert worklist["task_count"] == 2
+    assert worklist["task_count"] == 3
     assert worklist["operator_required_count"] == 1
     assert worklist["runtime_mutation_required_count"] == 1
+    assert worklist["engineering_actionable_count"] == 2
+    assert worklist["task_type_counts"]["mm_signal_search"] == 1
+    assert worklist["task_type_counts"]["mm_motif_distinct_date_accumulation"] == 1
 
     top = worklist["top_task"]
     assert top["arm_id"] == "cost_gate_demo_learning_lane"
@@ -168,8 +171,10 @@ def test_learning_worklist_prioritizes_runtime_reconcile_over_mm_signal_search()
     )
     assert top["evidence"]["learning_lane_git_behind_count"] == 5
 
-    tasks = {row["arm_id"]: row for row in worklist["tasks"]}
-    mm_task = tasks["mm_verdict_maker_edge"]
+    mm_task = next(
+        row for row in worklist["tasks"]
+        if row["task_type"] == "mm_signal_search"
+    )
     assert mm_task["task_type"] == "mm_signal_search"
     assert mm_task["requires_operator_authorization"] is False
     assert mm_task["actionability"] == "engineering_actionable"
@@ -273,6 +278,44 @@ def test_learning_worklist_prioritizes_runtime_reconcile_over_mm_signal_search()
     assert mm_task["evidence"]["mm_signal_search_recommended_search_constraint"] == (
         "require_train_and_holdout_sample_gated_min_gross_ge_current_fee_round_trip"
     )
+
+    motif_task = next(
+        row for row in worklist["tasks"]
+        if row["task_type"] == "mm_motif_distinct_date_accumulation"
+    )
+    assert motif_task["arm_id"] == "mm_verdict_maker_edge"
+    assert motif_task["requires_operator_authorization"] is False
+    assert motif_task["runtime_mutation_required"] is False
+    assert motif_task["actionability"] == "engineering_actionable"
+    assert motif_task["side_effect_boundary"] == (
+        "recommendation_only_no_order_authority_no_runtime_mutation"
+    )
+    assert motif_task["learning_objective"] == (
+        "accumulate_distinct_date_low_friction_mm_motif_evidence_before_"
+        "walk_forward_review"
+    )
+    assert motif_task["primary_blocker"] == (
+        "low_friction_motif_lacks_distinct_date_confirmation"
+    )
+    assert motif_task["next_trigger"] == (
+        "accumulate_distinct_window_history_for_repeated_low_friction_motif"
+    )
+    assert motif_task["completion_gate"] == (
+        "repeat_low_friction_motif_across_distinct_dates_before_walk_forward_review"
+    )
+    assert (
+        "single-window, artifact-count, and replay-only evidence remain excluded from proof"
+        in motif_task["completion_evidence_required"]
+    )
+    assert motif_task["evidence"][
+        "mm_signal_search_motif_amplification_top_motif_key"
+    ] == "low_friction_motif|spread_combo"
+    assert motif_task["evidence"][
+        "mm_signal_search_motif_amplification_top_distinct_dates_remaining"
+    ] == 1
+    assert motif_task["evidence"][
+        "mm_signal_search_motif_amplification_top_frontier_best_min_gross_key"
+    ] == "frontier-a"
 
 
 def test_learning_worklist_promotes_mm_current_fee_confirmation_task():
