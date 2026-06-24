@@ -3470,6 +3470,115 @@ def _learning_tasks(worklist: dict[str, Any]) -> list[dict[str, Any]]:
     return [task for task in tasks if isinstance(task, dict)]
 
 
+def _authority_flag_true(value: Any, *, suffixes: tuple[str, ...]) -> bool:
+    if not isinstance(value, dict):
+        if isinstance(value, list):
+            return any(_authority_flag_true(item, suffixes=suffixes) for item in value)
+        return False
+    for key, item in value.items():
+        key_text = str(key)
+        if item is True and any(
+            key_text == suffix or key_text.endswith(f"_{suffix}")
+            for suffix in suffixes
+        ):
+            return True
+        if isinstance(item, (dict, list)) and _authority_flag_true(
+            item,
+            suffixes=suffixes,
+        ):
+            return True
+    return False
+
+
+def _cost_gate_mutation_flag_true(value: Any) -> bool:
+    if not isinstance(value, dict):
+        if isinstance(value, list):
+            return any(_cost_gate_mutation_flag_true(item) for item in value)
+        return False
+    for key, item in value.items():
+        key_text = str(key)
+        if (
+            item is True
+            and (
+                key_text == "global_cost_gate_lowering_recommended"
+                or key_text.endswith("_global_cost_gate_lowering_recommended")
+            )
+        ):
+            return True
+        if (
+            (
+                key_text == "main_cost_gate_adjustment"
+                or key_text.endswith("_main_cost_gate_adjustment")
+            )
+            and item not in {None, "", "NONE"}
+        ):
+            return True
+        if isinstance(item, (dict, list)) and _cost_gate_mutation_flag_true(item):
+            return True
+    return False
+
+
+def _probe_authority_boundary_summary(
+    *,
+    worklist: dict[str, Any],
+    profitability_path_summary: dict[str, Any],
+    cost_gate_artifact_spine_summary: dict[str, Any],
+) -> dict[str, Any]:
+    tasks = _learning_tasks(worklist)
+    operator_probe_review_ready_count = sum(
+        1
+        for task in tasks
+        if task.get("task_type") == "operator_probe_review"
+        and task.get("actionability") == "operator_required"
+    )
+    authority_sources: list[Any] = [
+        worklist,
+        profitability_path_summary,
+        cost_gate_artifact_spine_summary,
+    ]
+    runtime_probe_authority_found = any(
+        _authority_flag_true(
+            source,
+            suffixes=(
+                "probe_authority_granted",
+                "active_runtime_probe_authority",
+                "probe_authority_granted_in_authorization_object",
+            ),
+        )
+        for source in authority_sources
+    )
+    runtime_order_authority_found = any(
+        _authority_flag_true(
+            source,
+            suffixes=(
+                "order_authority_granted",
+                "active_runtime_order_authority",
+                "order_authority_granted_in_authorization_object",
+            ),
+        )
+        for source in authority_sources
+    )
+    promotion_evidence_found = any(
+        _authority_flag_true(
+            source,
+            suffixes=("promotion_evidence", "promotion_proof"),
+        )
+        for source in authority_sources
+    )
+    cost_gate_mutation_found = any(
+        _cost_gate_mutation_flag_true(source)
+        for source in authority_sources
+    )
+    return {
+        "operator_probe_review_ready_count": operator_probe_review_ready_count,
+        "operator_probe_review_ready_found": operator_probe_review_ready_count > 0,
+        "runtime_probe_authority_found": runtime_probe_authority_found,
+        "runtime_order_authority_found": runtime_order_authority_found,
+        "promotion_evidence_found": promotion_evidence_found,
+        "cost_gate_mutation_found": cost_gate_mutation_found,
+    }
+
+
 def _is_engineering_learning_task(task: dict[str, Any]) -> bool:
     return (
         task.get("actionability") == "engineering_actionable"
@@ -3832,6 +3941,11 @@ def build_runtime_killboard(
     cost_gate_artifact_spine_summary = _cost_gate_artifact_spine_summary_from_arms(
         arms
     )
+    probe_authority_boundary_summary = _probe_authority_boundary_summary(
+        worklist=learning_worklist,
+        profitability_path_summary=profitability_path_summary,
+        cost_gate_artifact_spine_summary=cost_gate_artifact_spine_summary,
+    )
     autonomous_learning_chain_contract = build_autonomous_learning_chain_contract(
         runtime_source=runtime_source,
         arms=arms,
@@ -3854,6 +3968,13 @@ def build_runtime_killboard(
     promotion_ready_count = _int(scorecard.get("promotion_ready_count"))
     runtime_source_activation_ready = (
         runtime_source.get("source_activation_ready") is True
+    )
+    ready_for_probe_count = counts.get("READY_FOR_PROBE", 0)
+    runtime_probe_authority_found = (
+        probe_authority_boundary_summary.get("runtime_probe_authority_found") is True
+    )
+    runtime_order_authority_found = (
+        probe_authority_boundary_summary.get("runtime_order_authority_found") is True
     )
     source_ok_count = sum(1 for arm in arms if arm.get("source_ok") is True)
     source_present_count = sum(
@@ -3886,10 +4007,42 @@ def build_runtime_killboard(
                 "expected_head_status"
             ),
             "ready_for_aeg_chain": counts.get("READY_FOR_AEG_CHAIN", 0),
-            "ready_for_probe": counts.get("READY_FOR_PROBE", 0),
+            "ready_for_probe": ready_for_probe_count,
             "run_read_only_capture": counts.get("RUN_READ_ONLY_CAPTURE", 0),
             "wait": counts.get("WAIT", 0),
             "block": counts.get("BLOCK", 0),
+            "operator_probe_review_ready_count": (
+                probe_authority_boundary_summary.get(
+                    "operator_probe_review_ready_count"
+                )
+            ),
+            "operator_probe_review_ready_found": (
+                probe_authority_boundary_summary.get(
+                    "operator_probe_review_ready_found"
+                )
+            ),
+            "runtime_probe_authority_found": runtime_probe_authority_found,
+            "runtime_order_authority_found": runtime_order_authority_found,
+            "promotion_evidence_found": (
+                probe_authority_boundary_summary.get("promotion_evidence_found")
+            ),
+            "cost_gate_mutation_found": (
+                probe_authority_boundary_summary.get("cost_gate_mutation_found")
+            ),
+            "probe_review_ready_without_authority": (
+                ready_for_probe_count > 0
+                and not runtime_probe_authority_found
+                and not runtime_order_authority_found
+            ),
+            "actionable_probe_semantics": (
+                "RUNTIME_PROBE_OR_ORDER_AUTHORITY_PRESENT"
+                if (runtime_probe_authority_found or runtime_order_authority_found)
+                else (
+                    "OPERATOR_REVIEW_READY_NO_RUNTIME_AUTHORITY"
+                    if ready_for_probe_count > 0
+                    else "NO_PROBE_REVIEW_READY"
+                )
+            ),
             "promotion_ready_count": promotion_ready_count,
             "promotion_ready_candidate_found": promotion_ready_count > 0,
             "aeg_candidate_artifact_found": counts.get("READY_FOR_AEG_CHAIN", 0) > 0,
@@ -4019,6 +4172,20 @@ def _history_row(killboard: dict[str, Any]) -> dict[str, Any]:
         "aeg_candidate_artifact_found": kb.get("aeg_candidate_artifact_found"),
         "actionable_alpha_found": kb.get("actionable_alpha_found"),
         "actionable_probe_found": kb.get("actionable_probe_found"),
+        "operator_probe_review_ready_count": kb.get(
+            "operator_probe_review_ready_count"
+        ),
+        "operator_probe_review_ready_found": kb.get(
+            "operator_probe_review_ready_found"
+        ),
+        "runtime_probe_authority_found": kb.get("runtime_probe_authority_found"),
+        "runtime_order_authority_found": kb.get("runtime_order_authority_found"),
+        "promotion_evidence_found": kb.get("promotion_evidence_found"),
+        "cost_gate_mutation_found": kb.get("cost_gate_mutation_found"),
+        "probe_review_ready_without_authority": kb.get(
+            "probe_review_ready_without_authority"
+        ),
+        "actionable_probe_semantics": kb.get("actionable_probe_semantics"),
         "run_read_only_capture": kb.get("run_read_only_capture"),
         "wait": kb.get("wait"),
         "block": kb.get("block"),
