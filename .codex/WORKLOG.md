@@ -782,3 +782,12 @@ YYYY-MM-DD HH:MM TZ
 - Result: `api_service_env_parity.py` now embeds `api_service_runtime_cutover_plan_v1` with proposed ExecStart, safe env materialization, preflight/apply/rollback/verification templates, and hard `apply_allowed=false` / `restart_allowed=false`. Direct `DATABASE_URL`/`DSN` values are redacted; `python -m uvicorn` wrappers are preserved; unknown non-uvicorn prefixes fail closed.
 - Verification: API env-parity + runtime-health hygiene tests `35 passed`, focused E2/E4 tests `13 passed`, py_compile PASS, `git diff --check` PASS, supplied-snapshot CLI smoke PASS.
 - Boundary: source/test/docs + supplied `/tmp` snapshot smoke only; no systemd apply, daemon-reload, process signal, service restart, API/env/crontab mutation, PG/Bybit call, Cost Gate change, probe/order/live authority, or promotion proof.
+
+# 2026-06-24 — API Service Runtime Cutover Exact Unit Diff Packet
+
+- Task: advance `P1-API-SERVICE-OWNERSHIP-RUNTIME-CUTOVER-APPLY-REVIEW` without applying the systemd cutover.
+- Dispatch chain: `PM(default)` local source/test/docs + E2/E4 final read-only review requested; E3 prior no-apply condition preserved.
+- Result: `api_service_env_parity.py` now emits exact redacted current/proposed unit content, unified diff, source fragment inventory, drop-in detection, current/proposed SHA256, and a pre-apply revalidation contract SHA. Missing source headers, multiple/drop-in-only fragments, redactions, direct existing secret env values, incomplete ExecStart, and unit/process app mismatch fail closed via plan blockers.
+- Runtime supplied-snapshot smoke: `/tmp/api_service_env_parity_exact_unit_diff_20260624T1148Z.json` returned `API_SERVICE_ENV_PARITY_DRIFT`, `plan_blockers=[]`, single base unit fragment, no drop-ins, no redactions, `apply_allowed=false`, `restart_allowed=false`, `enable_allowed=false`.
+- Verification: API env-parity + runtime-health hygiene tests `44 passed`, py_compile PASS, `git diff --check` PASS, CLI smoke PASS, direct secret-pattern scan PASS.
+- Boundary: source/test/docs + supplied `/tmp` snapshot smoke only; no systemd apply, daemon-reload, process signal, service restart, API/env/crontab mutation, PG/Bybit call, Cost Gate change, probe/order/live authority, Rust writer, or promotion proof.

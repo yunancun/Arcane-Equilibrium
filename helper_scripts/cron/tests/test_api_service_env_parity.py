@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 
 from helper_scripts.cron.api_service_env_parity import (
@@ -144,6 +145,320 @@ def test_api_service_env_parity_emits_no_apply_cutover_plan() -> None:
     )
 
 
+def test_api_service_env_parity_cutover_plan_emits_exact_unit_file_diff() -> None:
+    packet = build_api_service_env_parity_packet(
+        combined_snapshot=_runtime_like_snapshot(),
+        now_utc=dt.datetime(2026, 6, 24, 10, tzinfo=dt.timezone.utc),
+    )
+    unit_file = packet["runtime_cutover_plan"]["proposed_unit_file"]
+    proposed = unit_file["proposed_unit_file_content"]
+    diff = unit_file["unified_diff"]
+
+    assert unit_file["available"] is True
+    assert unit_file["current_unit_file_sha256"]
+    assert unit_file["proposed_unit_file_sha256"]
+    assert unit_file["source_fragments"] == [
+        "/home/ncyu/.config/systemd/user/openclaw-trading-api.service"
+    ]
+    assert unit_file["single_fragment_only"] is True
+    assert unit_file["dropins_detected"] is False
+    assert "WorkingDirectory=/home/ncyu/BybitOpenClaw/srv/program_code" in proposed
+    assert (
+        "ExecStart=/home/ncyu/BybitOpenClaw/srv/program_code/"
+        "exchange_connectors/bybit_connector/control_api_v1/.venv/"
+        "bin/uvicorn app.main:app --host 100.91.109.86 --port 8000 --workers 4"
+    ) in proposed
+    assert "ExecStart=" in proposed
+    assert "--host 0.0.0.0" not in proposed
+    assert "Environment=HOME=/home/ncyu" in proposed
+    assert "Environment=OPENCLAW_IPC_SOCKET=/tmp/openclaw/engine.sock" in proposed
+    assert "-ExecStart=" in diff
+    assert "+ExecStart=" in diff
+    assert "+Environment=OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv" in diff
+    assert "write reviewed unit content" in " ".join(
+        packet["runtime_cutover_plan"]["apply_sequence_template"]
+    )
+    assert packet["runtime_cutover_plan"]["apply_allowed_by_this_packet"] is False
+    assert packet["runtime_cutover_plan"]["restart_allowed_by_this_packet"] is False
+    assert packet["runtime_cutover_plan"]["pre_apply_revalidation_contract"][
+        "expected_current_unit"
+    ]["current_unit_file_sha256"] == unit_file["current_unit_file_sha256"]
+    assert packet["runtime_cutover_plan"]["unit_enablement_review"][
+        "enable_allowed_by_this_packet"
+    ] is False
+
+
+def test_api_service_env_parity_cutover_plan_preserves_safe_current_unit_bytes() -> None:
+    snapshot = _runtime_like_snapshot()
+    unit_body = "\n".join(
+        [
+            "",
+            "[Service]",
+            (
+                "WorkingDirectory=/home/ncyu/BybitOpenClaw/srv/program_code/"
+                "exchange_connectors/bybit_connector/control_api_v1"
+            ),
+            (
+                "ExecStart=/home/ncyu/BybitOpenClaw/srv/program_code/"
+                "exchange_connectors/bybit_connector/control_api_v1/.venv/"
+                "bin/uvicorn app.main:app --host 0.0.0.0 --port 8000"
+            ),
+            "Environment=HOME=/home/ncyu   ",
+            "",
+        ]
+    )
+    snapshot["systemd_cat"]["stdout"] = (
+        "# /home/ncyu/.config/systemd/user/openclaw-trading-api.service\n"
+        + unit_body
+    )
+
+    packet = build_api_service_env_parity_packet(
+        combined_snapshot=snapshot,
+        now_utc=dt.datetime(2026, 6, 24, 10, tzinfo=dt.timezone.utc),
+    )
+    unit_file = packet["runtime_cutover_plan"]["proposed_unit_file"]
+
+    assert unit_file["current_unit_file_content"] == unit_body
+    assert unit_file["current_unit_file_sha256"] == hashlib.sha256(
+        unit_body.encode("utf-8")
+    ).hexdigest()
+
+
+def test_api_service_env_parity_cutover_plan_redacts_existing_unit_direct_secret() -> None:
+    snapshot = _runtime_like_snapshot()
+    snapshot["systemd_cat"]["stdout"] += (
+        "\nEnvironment=OPENCLAW_DATABASE_URL=postgresql://redacted@host/db"
+    )
+
+    packet = build_api_service_env_parity_packet(
+        combined_snapshot=snapshot,
+        now_utc=dt.datetime(2026, 6, 24, 10, tzinfo=dt.timezone.utc),
+    )
+    plan = packet["runtime_cutover_plan"]
+    unit_file = plan["proposed_unit_file"]
+    encoded = json.dumps(unit_file, sort_keys=True)
+
+    assert "existing_unit_direct_secret_env_redacted" in plan["plan_blockers"]
+    assert unit_file["current_content_redaction_applied"] is True
+    assert unit_file["redacted_existing_env_keys"] == ["OPENCLAW_DATABASE_URL"]
+    assert "postgresql://" not in encoded
+    assert "secret@host" not in encoded
+    assert "OPENCLAW_DATABASE_URL=REDACTED" in encoded
+
+
+def test_api_service_env_parity_cutover_plan_redacts_existing_unit_exec_secret() -> None:
+    snapshot = _runtime_like_snapshot()
+    snapshot["systemd_cat"]["stdout"] = "\n".join(
+        [
+            "# /home/ncyu/.config/systemd/user/openclaw-trading-api.service",
+            "[Service]",
+            (
+                "WorkingDirectory=/home/ncyu/BybitOpenClaw/srv/program_code/"
+                "exchange_connectors/bybit_connector/control_api_v1"
+            ),
+            (
+                "ExecStart=/home/ncyu/BybitOpenClaw/srv/program_code/"
+                "exchange_connectors/bybit_connector/control_api_v1/.venv/"
+                "bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 "
+                "--api-key leaked-secret"
+            ),
+        ]
+    )
+
+    packet = build_api_service_env_parity_packet(
+        combined_snapshot=snapshot,
+        now_utc=dt.datetime(2026, 6, 24, 10, tzinfo=dt.timezone.utc),
+    )
+    plan = packet["runtime_cutover_plan"]
+    unit_file = plan["proposed_unit_file"]
+    encoded = json.dumps(unit_file, sort_keys=True)
+
+    assert packet["status"] == "API_SERVICE_ENV_PARITY_CUTOVER_PLAN_BLOCKED"
+    assert "command_source_redaction_present" in plan["plan_blockers"]
+    assert "current_unit_file_redaction_present" in plan["plan_blockers"]
+    assert unit_file["current_content_redaction_applied"] is True
+    assert "leaked-secret" not in encoded
+    assert "--api-key REDACTED" in encoded
+
+
+def test_api_service_env_parity_cutover_plan_blocks_systemd_dropins() -> None:
+    snapshot = _runtime_like_snapshot()
+    snapshot["systemd_cat"]["stdout"] = "\n".join(
+        [
+            "# /home/ncyu/.config/systemd/user/openclaw-trading-api.service",
+            "[Service]",
+            (
+                "WorkingDirectory=/home/ncyu/BybitOpenClaw/srv/program_code/"
+                "exchange_connectors/bybit_connector/control_api_v1"
+            ),
+            (
+                "ExecStart=/home/ncyu/BybitOpenClaw/srv/program_code/"
+                "exchange_connectors/bybit_connector/control_api_v1/.venv/"
+                "bin/uvicorn app.main:app --host 0.0.0.0 --port 8000"
+            ),
+            "# /home/ncyu/.config/systemd/user/openclaw-trading-api.service.d/override.conf",
+            "[Service]",
+            "Environment=OPENCLAW_EXTRA=1",
+        ]
+    )
+
+    packet = build_api_service_env_parity_packet(
+        combined_snapshot=snapshot,
+        now_utc=dt.datetime(2026, 6, 24, 10, tzinfo=dt.timezone.utc),
+    )
+    plan = packet["runtime_cutover_plan"]
+    unit_file = plan["proposed_unit_file"]
+
+    assert packet["status"] == "API_SERVICE_ENV_PARITY_CUTOVER_PLAN_BLOCKED"
+    assert "proposed_unit_file_content_incomplete" in plan["plan_blockers"]
+    assert unit_file["available"] is False
+    assert unit_file["dropins_detected"] is True
+    assert unit_file["single_fragment_only"] is False
+    assert len(unit_file["source_fragments"]) == 2
+
+
+def test_api_service_env_parity_cutover_plan_blocks_dropin_only_fragment() -> None:
+    snapshot = _runtime_like_snapshot()
+    snapshot["systemd_cat"]["stdout"] = "\n".join(
+        [
+            "# /home/ncyu/.config/systemd/user/openclaw-trading-api.service.d/override.conf",
+            "[Service]",
+            (
+                "WorkingDirectory=/home/ncyu/BybitOpenClaw/srv/program_code/"
+                "exchange_connectors/bybit_connector/control_api_v1"
+            ),
+            (
+                "ExecStart=/home/ncyu/BybitOpenClaw/srv/program_code/"
+                "exchange_connectors/bybit_connector/control_api_v1/.venv/"
+                "bin/uvicorn app.main:app --host 100.91.109.86 --port 8000 "
+                "--workers 4"
+            ),
+        ]
+    )
+    snapshot["systemd_show"]["stdout"] = "\n".join(
+        ["MainPID=1859622", "ActiveState=active", "SubState=running"]
+    )
+
+    packet = build_api_service_env_parity_packet(
+        combined_snapshot=snapshot,
+        now_utc=dt.datetime(2026, 6, 24, 10, tzinfo=dt.timezone.utc),
+    )
+    unit_file = packet["runtime_cutover_plan"]["proposed_unit_file"]
+
+    assert packet["status"] == "API_SERVICE_ENV_PARITY_CUTOVER_PLAN_BLOCKED"
+    assert unit_file["available"] is False
+    assert unit_file["dropins_detected"] is True
+    assert unit_file["single_fragment_only"] is False
+    assert unit_file["source_fragments"] == [
+        "/home/ncyu/.config/systemd/user/openclaw-trading-api.service.d/override.conf"
+    ]
+
+
+def test_api_service_env_parity_cutover_plan_blocks_unit_process_app_mismatch() -> None:
+    snapshot = _runtime_like_snapshot()
+    snapshot["systemd_cat"]["stdout"] = "\n".join(
+        [
+            "# /home/ncyu/.config/systemd/user/openclaw-trading-api.service",
+            "[Service]",
+            (
+                "WorkingDirectory=/home/ncyu/BybitOpenClaw/srv/program_code/"
+                "exchange_connectors/bybit_connector/control_api_v1"
+            ),
+            (
+                "ExecStart=/home/ncyu/BybitOpenClaw/srv/program_code/"
+                "exchange_connectors/bybit_connector/control_api_v1/.venv/"
+                "bin/uvicorn wrong.main:app --host 0.0.0.0 --port 8000"
+            ),
+        ]
+    )
+
+    packet = build_api_service_env_parity_packet(
+        combined_snapshot=snapshot,
+        now_utc=dt.datetime(2026, 6, 24, 10, tzinfo=dt.timezone.utc),
+    )
+    plan = packet["runtime_cutover_plan"]
+
+    assert packet["status"] == "API_SERVICE_ENV_PARITY_CUTOVER_PLAN_BLOCKED"
+    assert "unit_process_app_mismatch" in plan["plan_blockers"]
+    assert plan["exec_start_prefix_review"]["unit_app"] == "wrong.main:app"
+    assert plan["exec_start_prefix_review"]["process_app"] == "app.main:app"
+    assert plan["exec_start_prefix_review"]["unit_process_app_mismatch"] is True
+    assert "app.main:app --host 100.91.109.86" in plan["proposed_exec_start"]
+
+
+def test_api_service_env_parity_plan_blocker_prevents_false_clean_status() -> None:
+    snapshot = _runtime_like_snapshot()
+    snapshot["systemd_cat"]["stdout"] = ""
+    snapshot["systemd_show"]["stdout"] = "\n".join(
+        [
+            "MainPID=1859622",
+            "ActiveState=active",
+            "SubState=running",
+            "UnitFileState=enabled",
+            (
+                "FragmentPath=/home/ncyu/.config/systemd/user/"
+                "openclaw-trading-api.service"
+            ),
+            (
+                "WorkingDirectory=/home/ncyu/BybitOpenClaw/srv/program_code/"
+                "exchange_connectors/bybit_connector/control_api_v1"
+            ),
+            (
+                "ExecStart={ path=/home/ncyu/BybitOpenClaw/srv/program_code/"
+                "exchange_connectors/bybit_connector/control_api_v1/.venv/bin/"
+                "uvicorn ; argv[]=/home/ncyu/BybitOpenClaw/srv/program_code/"
+                "exchange_connectors/bybit_connector/control_api_v1/.venv/bin/"
+                "uvicorn app.main:app --host 100.91.109.86 --port 8000 "
+                "--workers 4 ; ignore_errors=no ; start_time=[n/a] ; "
+                "stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }"
+            ),
+            (
+                "Environment=OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv "
+                "OPENCLAW_DATA_DIR=/tmp/openclaw "
+                "OPENCLAW_DATABASE_URL_FILE=/tmp/dburl "
+                "OPENCLAW_IPC_SECRET_FILE=/tmp/ipc_secret "
+                "OPENCLAW_IPC_SOCKET=/tmp/openclaw/engine.sock "
+                "OPENCLAW_LEASE_PYTHON_IPC_ENABLED=1 "
+                "OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE=/tmp/live_key "
+                "OPENCLAW_STRATEGY_TOGGLE_LIVE_MODE=1"
+            ),
+        ]
+    )
+
+    packet = build_api_service_env_parity_packet(
+        combined_snapshot=snapshot,
+        now_utc=dt.datetime(2026, 6, 24, 10, tzinfo=dt.timezone.utc),
+    )
+
+    assert packet["findings"] == []
+    assert packet["status"] == "API_SERVICE_ENV_PARITY_CUTOVER_PLAN_BLOCKED"
+    assert packet["answers"]["operator_action_required"] is True
+    assert packet["answers"]["api_service_cutover_plan_blocked"] is True
+    assert "proposed_unit_file_content_incomplete" in packet["runtime_cutover_plan"][
+        "plan_blockers"
+    ]
+
+
+def test_api_service_env_parity_cutover_plan_blocks_missing_service_section() -> None:
+    snapshot = _runtime_like_snapshot()
+    snapshot["systemd_cat"]["stdout"] = "\n".join(
+        [
+            "# /home/ncyu/.config/systemd/user/openclaw-trading-api.service",
+            "[Unit]",
+            "Description=OpenClaw Trading Control API",
+        ]
+    )
+
+    packet = build_api_service_env_parity_packet(
+        combined_snapshot=snapshot,
+        now_utc=dt.datetime(2026, 6, 24, 10, tzinfo=dt.timezone.utc),
+    )
+    plan = packet["runtime_cutover_plan"]
+
+    assert plan["proposed_unit_file"]["available"] is False
+    assert "proposed_unit_file_content_incomplete" in plan["plan_blockers"]
+
+
 def test_api_service_env_parity_cutover_plan_redacts_non_file_secret_env() -> None:
     snapshot = _runtime_like_snapshot()
     snapshot["api_processes"][0]["selected_env"]["OPENCLAW_INLINE_API_KEY"] = (
@@ -192,6 +507,7 @@ def test_api_service_env_parity_cutover_plan_preserves_python_module_uvicorn_pre
     )
     snapshot["systemd_cat"]["stdout"] = "\n".join(
         [
+            "# /home/ncyu/.config/systemd/user/openclaw-trading-api.service",
             "[Service]",
             (
                 "WorkingDirectory=/home/ncyu/BybitOpenClaw/srv/program_code/"
@@ -222,6 +538,7 @@ def test_api_service_env_parity_cutover_plan_blocks_unrecognized_exec_prefix() -
     )
     snapshot["systemd_cat"]["stdout"] = "\n".join(
         [
+            "# /home/ncyu/.config/systemd/user/openclaw-trading-api.service",
             "[Service]",
             (
                 "WorkingDirectory=/home/ncyu/BybitOpenClaw/srv/program_code/"
@@ -245,6 +562,7 @@ def test_api_service_env_parity_clean_snapshot_is_source_only() -> None:
     snapshot = _runtime_like_snapshot()
     snapshot["systemd_cat"]["stdout"] = "\n".join(
         [
+            "# /home/ncyu/.config/systemd/user/openclaw-trading-api.service",
             "[Service]",
             (
                 "WorkingDirectory=/home/ncyu/BybitOpenClaw/srv/program_code/"
@@ -300,6 +618,7 @@ def test_api_service_env_parity_fails_closed_on_missing_process_env_evidence() -
     snapshot = _runtime_like_snapshot()
     snapshot["systemd_cat"]["stdout"] = "\n".join(
         [
+            "# /home/ncyu/.config/systemd/user/openclaw-trading-api.service",
             "[Service]",
             (
                 "WorkingDirectory=/home/ncyu/BybitOpenClaw/srv/program_code/"
