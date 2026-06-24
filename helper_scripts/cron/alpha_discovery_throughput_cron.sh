@@ -88,6 +88,9 @@ PROFITABILITY_MD="$PROFITABILITY_DIR/profitability_path_scorecard_latest.md"
 MM_CURRENT_FEE_CONFIRMATION_JSON="$PROFITABILITY_DIR/mm_current_fee_confirmation_latest.json"
 MM_CURRENT_FEE_CONFIRMATION_MD="$PROFITABILITY_DIR/mm_current_fee_confirmation_latest.md"
 MM_CURRENT_FEE_CONFIRMATION_STDOUT="$PROFITABILITY_DIR/mm_current_fee_confirmation_stdout.json"
+MM_MOTIF_AMPLIFICATION_JSON="$PROFITABILITY_DIR/mm_motif_amplification_latest.json"
+MM_MOTIF_AMPLIFICATION_MD="$PROFITABILITY_DIR/mm_motif_amplification_latest.md"
+MM_MOTIF_AMPLIFICATION_STDOUT="$PROFITABILITY_DIR/mm_motif_amplification_stdout.json"
 mkdir -p "$PROFITABILITY_DIR"
 PROFITABILITY_ARGS=()
 add_profitability_json_arg() {
@@ -341,6 +344,19 @@ if (( ${#MM_CURRENT_FEE_CONFIRMATION_ARGS[@]} > 0 )); then
     echo "[$(ts)] mm_current_fee_confirmation_refresh rc=${mm_current_fee_confirmation_rc}" >> "$LOG"
 else
     echo "[$(ts)] SKIP: mm current-fee confirmation refresh missing fillsim inputs" >> "$LOG"
+fi
+mm_motif_amplification_rc=0
+if [[ -f "$DATA/research/fillsim/fillsim_history_scorecard.json" ]]; then
+    (
+        cd "$BASE/helper_scripts/research"
+        "$PYBIN" -m alpha_discovery_throughput.mm_motif_amplification \
+            --fillsim-history-json "$DATA/research/fillsim/fillsim_history_scorecard.json" \
+            --json-output "$MM_MOTIF_AMPLIFICATION_JSON" \
+            --output "$MM_MOTIF_AMPLIFICATION_MD"
+    ) > "$MM_MOTIF_AMPLIFICATION_STDOUT" 2>> "$LOG" || mm_motif_amplification_rc=$?
+    echo "[$(ts)] mm_motif_amplification_refresh rc=${mm_motif_amplification_rc}" >> "$LOG"
+else
+    echo "[$(ts)] SKIP: mm motif amplification refresh missing fillsim history scorecard" >> "$LOG"
 fi
 add_profitability_json_arg "--cost-gate-counterfactual-json" "$DATA/cost_gate_counterfactual/cost_gate_reject_counterfactual_latest.json"
 add_profitability_json_arg "--profit-learning-packet-json" "$DATA/cost_gate_learning_lane/profit_learning_decision_packet_latest.json"
