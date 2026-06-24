@@ -55,20 +55,30 @@ FORBIDDEN_TRUE_KEYS = {
     "bounded_demo_probe_authorized",
     "bybit_call_performed",
     "canonical_plan_mutation_performed",
+    "config_mutation_performed",
     "cost_gate_lowering_recommended",
     "global_cost_gate_lowering_recommended",
+    "crontab_mutation_performed",
+    "env_mutation_performed",
+    "environment_mutation_performed",
+    "freshness_gate_lowering_recommended",
     "ledger_append_performed",
     "live_authority_granted",
     "live_promotion_performed",
     "mainnet_authority_granted",
     "operator_authorization_object_emitted",
+    "order_authority",
     "order_authority_granted",
     "order_authority_granted_in_object",
     "order_authority_granted_in_authorization_object",
+    "order_cancel_performed",
+    "order_cancel_modify_performed",
+    "order_modify_performed",
     "order_submission_performed",
     "pg_query_performed",
     "pg_write_performed",
     "plan_mutation_performed",
+    "probe_authority",
     "probe_authority_granted",
     "probe_authority_granted_in_object",
     "probe_authority_granted_in_authorization_object",
@@ -76,13 +86,16 @@ FORBIDDEN_TRUE_KEYS = {
     "promotion_proof",
     "cost_gate_mutation_found",
     "runtime_mutation_performed",
+    "runtime_env_mutation_performed",
     "runtime_order_authority_granted",
     "runtime_order_authority_found",
     "runtime_probe_authority_granted",
     "runtime_probe_authority_found",
     "review_grants_runtime_authority",
+    "risk_mutation_performed",
     "service_restart_performed",
     "writer_enabled",
+    "execution_authority",
 }
 
 
@@ -239,6 +252,23 @@ def _contaminating_value(value: Any) -> bool:
     return True
 
 
+def _authority_enum_contaminating(value: Any) -> bool:
+    if value is None or value is False:
+        return False
+    if isinstance(value, str):
+        return value.strip().upper() not in {
+            "",
+            "0",
+            "FALSE",
+            "NO",
+            "NONE",
+            "NULL",
+            "NOT_GRANTED",
+            "UNSET",
+        }
+    return _contaminating_value(value)
+
+
 def _iter_nodes(value: Any) -> list[Any]:
     out = [value]
     if isinstance(value, dict):
@@ -268,7 +298,16 @@ def _authority_preserved(
                 if (
                     key in FORBIDDEN_TRUE_KEYS
                     and key not in allowed_true_keys
-                    and _contaminating_value(value)
+                    and (
+                        _authority_enum_contaminating(value)
+                        if key
+                        in {
+                            "order_authority",
+                            "probe_authority",
+                            "execution_authority",
+                        }
+                        else _contaminating_value(value)
+                    )
                 ):
                     reasons.append(f"{key}_contaminating")
             if _str(node.get("main_cost_gate_adjustment")).upper() not in ("", "NONE"):

@@ -307,6 +307,33 @@ def test_authority_contamination_fails_closed() -> None:
     assert packet["answers"]["order_submission_performed"] is False
 
 
+def test_order_authority_enum_contamination_fails_closed() -> None:
+    packet = _build(reroute_review=_reroute(order_authority="DEMO_LEARNING_PROBE_GRANTED"))
+
+    assert packet["status"] == "AUTHORITY_BOUNDARY_VIOLATION"
+    assert "order_authority_contaminating" in packet[
+        "authority_contamination_reasons"
+    ]
+
+
+def test_explicit_cancel_modify_and_gate_mutation_flags_fail_closed() -> None:
+    for key in [
+        "order_cancel_performed",
+        "order_cancel_modify_performed",
+        "order_modify_performed",
+        "config_mutation_performed",
+        "crontab_mutation_performed",
+        "runtime_env_mutation_performed",
+        "risk_mutation_performed",
+        "freshness_gate_lowering_recommended",
+    ]:
+        packet = _build(reroute_review=_reroute(**{key: True}))
+        assert packet["status"] == "AUTHORITY_BOUNDARY_VIOLATION"
+        assert f"{key}_contaminating" in packet[
+            "authority_contamination_reasons"
+        ]
+
+
 def test_runtime_authority_found_contamination_fails_closed() -> None:
     packet = _build(reroute_review=_reroute(runtime_probe_authority_found=True))
 
