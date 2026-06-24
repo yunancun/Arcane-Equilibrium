@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-24 API Service Exact Unit Diff Packet
+
+- Source-only `api_service_env_parity.py` now emits exact redacted current/proposed systemd unit content, unified diff, current/proposed SHA256, source fragment inventory, drop-in detection, and `pre_apply_revalidation_contract.contract_sha256`.
+- Fresh packet `/tmp/api_service_env_parity_exact_unit_diff_20260624T1148Z.json` is `API_SERVICE_ENV_PARITY_DRIFT` with `plan_blockers=[]`, single base fragment, no drop-ins/redactions, and `apply/restart/enable=false`.
+- Do not treat this as runtime apply authority. Before any future systemd write/restart, take a fresh snapshot and require the manual pid/cmdline/cwd/env/listener plus current unit SHA/source-fragment fields to match the reviewed contract.
+
 ## 2026-06-24 Runtime Cron Expected-Head Patch
 
 - Runtime `trade-core` remains clean at operational source head `dc1416e5`; four demo-learning cron entries now pin that head, with schedules/wrappers/log paths and Cost Gate flags preserved.

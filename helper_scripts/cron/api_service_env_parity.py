@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import difflib
+import hashlib
 import json
 import re
 import shlex
@@ -269,6 +271,69 @@ def _parse_systemd_cat(text: str | None) -> dict[str, Any]:
     return unit
 
 
+def _systemd_cat_file_content(text: str | None) -> dict[str, Any]:
+    """Return redacted file-like unit content from `systemctl cat` output."""
+    lines: list[str] = []
+    source_fragments: list[str] = []
+    redaction_applied = False
+    raw_text = text if isinstance(text, str) else str(text or "")
+    for raw_line in raw_text.splitlines(keepends=True):
+        line = raw_line.rstrip("\r\n")
+        newline = raw_line[len(line):]
+        if line.startswith("# /") and ".service" in line:
+            source_fragments.append(line[2:].strip())
+            continue
+        redacted_line, redacted = _redacted_unit_line(line)
+        if redacted_line is not None:
+            lines.append(redacted_line + newline)
+            redaction_applied = redaction_applied or redacted
+            continue
+        lines.append(raw_line)
+    dropins_detected = any(".service.d/" in fragment for fragment in source_fragments)
+    single_fragment_only = len(source_fragments) == 1 and not dropins_detected
+    return {
+        "content": "".join(lines),
+        "redaction_applied": redaction_applied,
+        "source_fragments": source_fragments,
+        "single_fragment_only": single_fragment_only,
+        "dropins_detected": dropins_detected,
+    }
+
+
+def _redacted_unit_line(line: str) -> tuple[str, bool] | tuple[None, bool]:
+    stripped = line.strip()
+    if "=" not in stripped:
+        return None, False
+    key, value = stripped.split("=", 1)
+    if key == "Environment":
+        return _redacted_environment_line(line)
+    if key == "ExecStart":
+        argv = _split_cmdline(value)
+        redacted_argv = _redact_argv(argv)
+        if redacted_argv != argv:
+            return f"{key}={shlex.join(redacted_argv)}", True
+    return None, False
+
+
+def _redacted_environment_line(line: str) -> tuple[str, bool]:
+    prefix, value = line.split("=", 1)
+    env = _parse_environment_assignments(value)
+    if not env:
+        return line, False
+    redacted = False
+    safe_env: dict[str, str] = {}
+    for key, env_value in env.items():
+        safe = _safe_unit_env_value(key, env_value)
+        if safe is None:
+            safe_env[key] = "REDACTED"
+            redacted = True
+        else:
+            safe_env[key] = safe
+    if not redacted:
+        return line, False
+    return _environment_line(prefix.strip(), safe_env), redacted
+
+
 def _extract_show_exec_start(value: str | None) -> str | None:
     match = re.search(r"argv\[\]=(.*?) ; ignore_errors=", _str(value))
     if match:
@@ -277,7 +342,8 @@ def _extract_show_exec_start(value: str | None) -> str | None:
 
 
 def _systemd_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
-    cat_stdout = _str(_dict(snapshot.get("systemd_cat")).get("stdout"))
+    raw_cat_stdout = _dict(snapshot.get("systemd_cat")).get("stdout")
+    cat_stdout = _str(raw_cat_stdout)
     show_stdout = _str(_dict(snapshot.get("systemd_show")).get("stdout"))
     unit = _parse_systemd_cat(cat_stdout)
     show = _parse_show_output(show_stdout)
@@ -302,6 +368,7 @@ def _systemd_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
         "main_pid": _int_or_none(show.get("MainPID")),
         "working_directory": unit.get("WorkingDirectory"),
         "environment": _dict(unit.get("environment")),
+        "cat_file_content": _systemd_cat_file_content(raw_cat_stdout),
     }
 
 
@@ -343,6 +410,14 @@ def _safe_unit_env_value(key: str, value: Any) -> str | None:
     return text
 
 
+def _environment_line(prefix: str, env: dict[str, str]) -> str:
+    assignments = [
+        f"{key}={shlex.quote(value)}"
+        for key, value in sorted(env.items())
+    ]
+    return f"{prefix}={' '.join(assignments)}"
+
+
 def _unit_environment_proposal(
     *,
     process_env: dict[str, Any],
@@ -363,7 +438,7 @@ def _unit_environment_proposal(
     return {
         "materialized_env": materialized,
         "materialized_environment_lines": [
-            f"Environment={key}={shlex.quote(value)}"
+            _environment_line("Environment", {key: value})
             for key, value in sorted(materialized.items())
         ],
         "redacted_required_env_keys": redacted_required,
@@ -371,19 +446,44 @@ def _unit_environment_proposal(
     }
 
 
+def _safe_merged_unit_env(
+    *,
+    current_unit_env: dict[str, Any],
+    proposed_env: dict[str, str],
+) -> tuple[dict[str, str], list[str]]:
+    merged: dict[str, str] = {}
+    redacted_existing: list[str] = []
+    for key, value in sorted(current_unit_env.items()):
+        safe = _safe_unit_env_value(key, value)
+        if safe is None:
+            redacted_existing.append(key)
+            continue
+        merged[key] = safe
+    merged.update(proposed_env)
+    return merged, redacted_existing
+
+
 def _proposed_exec_start(
     *,
     process_command: dict[str, Any],
     unit_command: dict[str, Any],
 ) -> str | None:
-    app = _str(unit_command.get("app")) or _str(process_command.get("app"))
+    app = _str(process_command.get("app")) or _str(unit_command.get("app"))
     host = _str(process_command.get("host"))
     port = process_command.get("port")
     workers = process_command.get("workers")
     if not app or not host or port is None or workers is None:
         return None
-    unit_prefix = _uvicorn_prefix(unit_command.get("argv"), app)
-    process_prefix = _uvicorn_prefix(process_command.get("argv"), app)
+    unit_prefix = (
+        None
+        if unit_command.get("redaction_applied")
+        else _uvicorn_prefix(unit_command.get("argv"), app)
+    )
+    process_prefix = (
+        None
+        if process_command.get("redaction_applied")
+        else _uvicorn_prefix(process_command.get("argv"), app)
+    )
     prefix = unit_prefix or process_prefix
     if not prefix:
         return None
@@ -412,6 +512,173 @@ def _uvicorn_prefix(argv: Any, app: str) -> list[str] | None:
     return prefix + [app]
 
 
+def _proposed_unit_file(
+    *,
+    current_unit_content: str,
+    current_unit_redaction_applied: bool,
+    source_fragments: list[str],
+    single_fragment_only: bool,
+    dropins_detected: bool,
+    proposed_working_directory: str | None,
+    proposed_exec_start: str | None,
+    current_unit_env: dict[str, Any],
+    proposed_env: dict[str, str],
+) -> dict[str, Any]:
+    current_sha = (
+        hashlib.sha256(current_unit_content.encode("utf-8")).hexdigest()
+        if current_unit_content
+        else None
+    )
+    if not current_unit_content or not proposed_working_directory or not proposed_exec_start:
+        return {
+            "available": False,
+            "reason": "current_unit_or_proposed_fields_missing",
+            "source_fragments": source_fragments,
+            "single_fragment_only": single_fragment_only,
+            "dropins_detected": dropins_detected,
+            "current_unit_file_sha256": current_sha,
+        }
+    if not single_fragment_only or dropins_detected:
+        return {
+            "available": False,
+            "reason": "multiple_systemd_fragments_present",
+            "current_unit_file_content": current_unit_content,
+            "current_unit_file_sha256": current_sha,
+            "source_fragments": source_fragments,
+            "single_fragment_only": single_fragment_only,
+            "dropins_detected": dropins_detected,
+            "current_content_redaction_applied": current_unit_redaction_applied,
+        }
+
+    merged_env, redacted_existing_env_keys = _safe_merged_unit_env(
+        current_unit_env=current_unit_env,
+        proposed_env=proposed_env,
+    )
+    replacement_lines = [
+        f"WorkingDirectory={proposed_working_directory}",
+        f"ExecStart={proposed_exec_start}",
+    ]
+    replacement_lines.extend(
+        _environment_line("Environment", {key: value})
+        for key, value in sorted(merged_env.items())
+    )
+
+    current_lines = current_unit_content.rstrip("\n").splitlines()
+    proposed_lines: list[str] = []
+    in_service = False
+    service_section_count = 0
+    replacements_inserted = False
+    for raw_line in current_lines:
+        stripped = raw_line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_service = stripped == "[Service]"
+            proposed_lines.append(raw_line)
+            if in_service:
+                service_section_count += 1
+                if service_section_count == 1:
+                    proposed_lines.extend(replacement_lines)
+                    replacements_inserted = True
+            continue
+        if in_service:
+            key = stripped.split("=", 1)[0] if "=" in stripped else ""
+            if key in {"WorkingDirectory", "ExecStart", "Environment"}:
+                continue
+        proposed_lines.append(raw_line)
+
+    if service_section_count != 1 or not replacements_inserted:
+        return {
+            "available": False,
+            "reason": "service_section_missing_or_duplicated",
+            "current_unit_file_content": current_unit_content,
+            "current_unit_file_sha256": current_sha,
+            "source_fragments": source_fragments,
+            "single_fragment_only": single_fragment_only,
+            "dropins_detected": dropins_detected,
+            "service_section_count": service_section_count,
+            "current_content_redaction_applied": current_unit_redaction_applied,
+        }
+
+    proposed_content = "\n".join(proposed_lines).rstrip() + "\n"
+    proposed_contains_redactions = "REDACTED" in proposed_content
+    diff_lines = list(difflib.unified_diff(
+        current_unit_content.rstrip("\n").splitlines(),
+        proposed_content.rstrip("\n").splitlines(),
+        fromfile="current/openclaw-trading-api.service",
+        tofile="proposed/openclaw-trading-api.service",
+        lineterm="",
+    ))
+    return {
+        "available": True,
+        "current_unit_file_content": current_unit_content,
+        "current_unit_file_sha256": current_sha,
+        "proposed_unit_file_content": proposed_content,
+        "proposed_unit_file_sha256": hashlib.sha256(
+            proposed_content.encode("utf-8")
+        ).hexdigest(),
+        "unified_diff": "\n".join(diff_lines) + ("\n" if diff_lines else ""),
+        "source_fragments": source_fragments,
+        "single_fragment_only": single_fragment_only,
+        "dropins_detected": dropins_detected,
+        "current_content_redaction_applied": current_unit_redaction_applied,
+        "proposed_unit_file_contains_redactions": proposed_contains_redactions,
+        "redacted_existing_env_keys": redacted_existing_env_keys,
+    }
+
+
+def _pre_apply_revalidation_contract(
+    *,
+    process_row: dict[str, Any] | None,
+    process_command: dict[str, Any],
+    systemd: dict[str, Any],
+    proposed_unit_file: dict[str, Any],
+) -> dict[str, Any]:
+    process_env = _dict(_dict(process_row).get("selected_env"))
+    contract = {
+        "requires_fresh_snapshot_before_apply": True,
+        "expected_manual_process": {
+            "pid": _dict(process_row).get("pid"),
+            "ppid": _dict(process_row).get("ppid"),
+            "cwd": _dict(process_row).get("cwd"),
+            "cmdline": process_command.get("cmdline"),
+            "cmdline_sha256": hashlib.sha256(
+                _str(process_command.get("cmdline")).encode("utf-8")
+            ).hexdigest(),
+            "command_redaction_applied": bool(process_command.get("redaction_applied")),
+            "selected_env_keys": sorted(process_env.keys()),
+        },
+        "expected_listener": {
+            "host": process_command.get("host"),
+            "port": process_command.get("port"),
+            "workers": process_command.get("workers"),
+        },
+        "expected_current_unit": {
+            "fragment_path": systemd.get("fragment_path"),
+            "unit_file_state": systemd.get("unit_file_state"),
+            "current_unit_file_sha256": proposed_unit_file.get(
+                "current_unit_file_sha256"
+            ),
+            "current_content_redaction_applied": proposed_unit_file.get(
+                "current_content_redaction_applied"
+            ),
+            "source_fragments": proposed_unit_file.get("source_fragments"),
+            "single_fragment_only": proposed_unit_file.get("single_fragment_only"),
+            "dropins_detected": proposed_unit_file.get("dropins_detected"),
+        },
+        "expected_proposed_unit": {
+            "proposed_unit_file_sha256": proposed_unit_file.get(
+                "proposed_unit_file_sha256"
+            ),
+            "proposed_unit_file_contains_redactions": proposed_unit_file.get(
+                "proposed_unit_file_contains_redactions"
+            ),
+        },
+    }
+    contract["contract_sha256"] = hashlib.sha256(
+        json.dumps(contract, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    return contract
+
+
 def _runtime_cutover_plan(
     *,
     process_row: dict[str, Any] | None,
@@ -424,6 +691,7 @@ def _runtime_cutover_plan(
 ) -> dict[str, Any]:
     process_env = _dict(_dict(process_row).get("selected_env"))
     unit_command = _dict(systemd.get("command"))
+    current_unit = _dict(systemd.get("cat_file_content"))
     env_proposal = _unit_environment_proposal(
         process_env=process_env,
         required_env_keys=required_env_keys,
@@ -441,6 +709,38 @@ def _runtime_cutover_plan(
         blockers.append("proposed_exec_start_incomplete")
     if env_proposal["missing_required_env_keys_from_process_snapshot"]:
         blockers.append("process_runtime_env_snapshot_incomplete")
+    proposed_working_directory = _dict(process_row).get("cwd") or systemd.get(
+        "working_directory"
+    )
+    unit_app = _str(unit_command.get("app"))
+    process_app = _str(process_command.get("app"))
+    app_mismatch = bool(unit_app and process_app and unit_app != process_app)
+    current_unit_content = current_unit.get("content")
+    proposed_unit_file = _proposed_unit_file(
+        current_unit_content=(
+            current_unit_content if isinstance(current_unit_content, str) else ""
+        ),
+        current_unit_redaction_applied=bool(current_unit.get("redaction_applied")),
+        source_fragments=list(current_unit.get("source_fragments") or []),
+        single_fragment_only=bool(current_unit.get("single_fragment_only", False)),
+        dropins_detected=bool(current_unit.get("dropins_detected", False)),
+        proposed_working_directory=_str(proposed_working_directory),
+        proposed_exec_start=proposed_exec_start,
+        current_unit_env=_dict(systemd.get("environment")),
+        proposed_env=_dict(env_proposal.get("materialized_env")),
+    )
+    if not proposed_unit_file.get("available"):
+        blockers.append("proposed_unit_file_content_incomplete")
+    if app_mismatch:
+        blockers.append("unit_process_app_mismatch")
+    if unit_command.get("redaction_applied") or process_command.get("redaction_applied"):
+        blockers.append("command_source_redaction_present")
+    if proposed_unit_file.get("current_content_redaction_applied"):
+        blockers.append("current_unit_file_redaction_present")
+    if proposed_unit_file.get("proposed_unit_file_contains_redactions"):
+        blockers.append("proposed_unit_file_redaction_present")
+    if proposed_unit_file.get("redacted_existing_env_keys"):
+        blockers.append("existing_unit_direct_secret_env_redacted")
     unit_file_path = _str(systemd.get("fragment_path")) or (
         "~/.config/systemd/user/openclaw-trading-api.service"
     )
@@ -460,9 +760,40 @@ def _runtime_cutover_plan(
         "unit_file_path": unit_file_path,
         "service_name": SERVICE_NAME,
         "proposed_exec_start": proposed_exec_start,
-        "proposed_working_directory": _dict(process_row).get("cwd")
-        or systemd.get("working_directory"),
+        "proposed_working_directory": proposed_working_directory,
         "proposed_environment": env_proposal,
+        "proposed_unit_file": proposed_unit_file,
+        "pre_apply_revalidation_contract": _pre_apply_revalidation_contract(
+            process_row=process_row,
+            process_command=process_command,
+            systemd=systemd,
+            proposed_unit_file=proposed_unit_file,
+        ),
+        "unit_enablement_review": {
+            "current_unit_file_state": systemd.get("unit_file_state"),
+            "enable_allowed_by_this_packet": False,
+            "requires_e3_review_before_enable": True,
+            "enable_step_template": (
+                f"systemctl --user enable {SERVICE_NAME}"
+                if systemd.get("unit_file_state") == "disabled"
+                else None
+            ),
+            "rollback_step_template": f"systemctl --user disable {SERVICE_NAME}",
+        },
+        "exec_start_prefix_review": {
+            "unit_app": unit_app or None,
+            "process_app": process_app or None,
+            "unit_process_app_mismatch": app_mismatch,
+            "unit_command_redaction_applied": bool(unit_command.get("redaction_applied")),
+            "process_command_redaction_applied": bool(
+                process_command.get("redaction_applied")
+            ),
+            "requires_pm_acceptance_before_apply": True,
+            "note": (
+                "proposed ExecStart may reuse a reviewed systemd uvicorn prefix even "
+                "when the manual process was launched through an equivalent wrapper"
+            ),
+        },
         "plan_blockers": blockers,
         "preflight_checks": [
             "confirm current manual uvicorn pid/cmdline/cwd/env keys still match reviewed snapshot",
@@ -648,6 +979,9 @@ def build_api_service_env_parity_packet(
     elif evidence_gaps:
         status = "API_SERVICE_ENV_PARITY_EVIDENCE_INCOMPLETE"
         reason = "required_snapshot_evidence_missing"
+    elif cutover_plan.get("plan_blockers"):
+        status = "API_SERVICE_ENV_PARITY_CUTOVER_PLAN_BLOCKED"
+        reason = "runtime_cutover_plan_blockers_present"
     elif findings:
         status = "API_SERVICE_ENV_PARITY_DRIFT"
         reason = "manual_process_and_systemd_unit_not_env_equivalent"
@@ -658,11 +992,14 @@ def build_api_service_env_parity_packet(
     drift_present = status == "API_SERVICE_ENV_PARITY_DRIFT"
     boundary_violation = status == "API_SERVICE_ENV_PARITY_BOUNDARY_VIOLATION"
     evidence_incomplete = status == "API_SERVICE_ENV_PARITY_EVIDENCE_INCOMPLETE"
+    plan_blocked = status == "API_SERVICE_ENV_PARITY_CUTOVER_PLAN_BLOCKED"
     next_actions: list[str]
     if boundary_violation:
         next_actions = ["remove_authority_or_mutation_signals_from_supplied_snapshot"]
     elif evidence_incomplete:
         next_actions = ["supply_process_and_systemd_snapshots_no_restart"]
+    elif plan_blocked:
+        next_actions = ["repair_cutover_plan_blockers_before_runtime_apply_review"]
     elif drift_present:
         next_actions = [
             "draft_no_restart_systemd_unit_env_parity_patch",
@@ -686,9 +1023,10 @@ def build_api_service_env_parity_packet(
         "boundary": BOUNDARY,
         "answers": {
             "operator_action_required": bool(
-                boundary_violation or evidence_incomplete or drift_present
+                boundary_violation or evidence_incomplete or plan_blocked or drift_present
             ),
             "api_service_env_parity_drift_present": drift_present,
+            "api_service_cutover_plan_blocked": plan_blocked,
             "authority_boundary_violation_present": boundary_violation,
             "service_restart_performed": False,
             "runtime_mutation_performed": False,
