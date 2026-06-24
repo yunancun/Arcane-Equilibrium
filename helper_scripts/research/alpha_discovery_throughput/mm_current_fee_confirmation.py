@@ -263,6 +263,283 @@ def _matching_repeated_key(
     return {}
 
 
+_AUTHORITY_TRUE_KEYS = {
+    "active_runtime_order_authority",
+    "active_runtime_probe_authority",
+    "auth_mutated",
+    "bybit_call_performed",
+    "crontab_mutated",
+    "deploy_performed",
+    "global_cost_gate_lowering_recommended",
+    "live_promotion",
+    "order_authority_granted",
+    "order_cancelled",
+    "order_modified",
+    "order_submitted",
+    "pg_schema_mutated",
+    "pg_write_performed",
+    "probe_authority_granted",
+    "promotion_evidence",
+    "promotion_proof",
+    "risk_mutated",
+    "runtime_env_mutated",
+    "runtime_mutation_performed",
+    "runtime_mutated",
+    "rust_writer_enabled",
+    "service_restarted",
+    "service_restart_performed",
+    "strategy_mutated",
+}
+
+_AUTHORITY_NON_NONE_KEYS = {
+    "active_authority",
+    "active_runtime_authority",
+    "auth_mutation",
+    "bybit_call",
+    "crontab_mutation",
+    "live_authority",
+    "main_cost_gate_adjustment",
+    "operator_authorization",
+    "order_authority",
+    "order_mutation",
+    "pg_write",
+    "probe_authority",
+    "risk_mutation",
+    "runtime_authority",
+    "runtime_mutation",
+    "rust_writer",
+    "service_mutation",
+    "strategy_mutation",
+}
+
+_AUTHORITY_NONE_VALUES = {
+    "",
+    "0",
+    "ABSENT",
+    "FALSE",
+    "N/A",
+    "NO",
+    "NONE",
+    "NOT_APPLICABLE",
+    "NOT_GRANTED",
+    "NULL",
+}
+
+
+def _authority_value_present(value: Any) -> bool:
+    if value is None or value is False:
+        return False
+    if value is True:
+        return True
+    if isinstance(value, str):
+        return value.strip().upper() not in _AUTHORITY_NONE_VALUES
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value != 0
+    if isinstance(value, dict):
+        return bool(value)
+    if isinstance(value, list):
+        return bool(value)
+    return bool(value)
+
+
+def _contains_authority_signal(value: Any, path: str = "") -> str | None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            key_str = str(key)
+            key_path = f"{path}.{key_str}" if path else key_str
+            key_lower = key_str.lower()
+            if key_lower in _AUTHORITY_TRUE_KEYS and item is True:
+                return key_path
+            if (
+                key_lower in _AUTHORITY_NON_NONE_KEYS
+                and _authority_value_present(item)
+            ):
+                return key_path
+            found = _contains_authority_signal(item, key_path)
+            if found:
+                return found
+    elif isinstance(value, list):
+        for idx, item in enumerate(value):
+            found = _contains_authority_signal(item, f"{path}[{idx}]")
+            if found:
+                return found
+    return None
+
+
+def _history_cell_is_valid_candidate_evidence(
+    cell: dict[str, Any],
+    candidate: dict[str, Any],
+    candidate_key: str,
+) -> bool:
+    if _str(cell.get("key")) != candidate_key:
+        return False
+    if (_float(cell.get("net_bps") or cell.get("net_bps_at_fee")) or 0.0) <= 0.0:
+        return False
+    if _int(cell.get("n_fill_only") or cell.get("n")) <= 0:
+        return False
+    for field in ("source", "scope", "symbol", "queue_position", "policy", "track"):
+        candidate_value = _str(candidate.get(field))
+        if candidate_value and _str(cell.get(field)) != candidate_value:
+            return False
+    return True
+
+
+def _candidate_history_observations(
+    fillsim_history: dict[str, Any] | None,
+    candidate: dict[str, Any],
+    candidate_key: str,
+) -> dict[str, Any]:
+    history = _dict(fillsim_history)
+    summaries = _list(history.get("window_summaries"))
+    observations: list[dict[str, Any]] = []
+    malformed_sources: list[str] = []
+    seen_sources: set[str] = set()
+    for idx, window in enumerate(summaries):
+        if not isinstance(window, dict) or window.get("valid") is not True:
+            continue
+        matched_cell = None
+        malformed_cell = None
+        for cell in _list(window.get("current_fee_sample_gated_positive_cells")):
+            if not isinstance(cell, dict) or _str(cell.get("key")) != candidate_key:
+                continue
+            if _history_cell_is_valid_candidate_evidence(
+                cell,
+                candidate,
+                candidate_key,
+            ):
+                matched_cell = cell
+                break
+            malformed_cell = cell
+        if matched_cell is None:
+            if malformed_cell is not None:
+                malformed_sources.append(
+                    _str(window.get("source_path")) or f"window_index:{idx}"
+                )
+            continue
+        source_path = _str(window.get("source_path"))
+        dedupe_key = source_path or f"window_index:{idx}"
+        if dedupe_key in seen_sources:
+            continue
+        seen_sources.add(dedupe_key)
+        observations.append({
+            "source_path": source_path or None,
+            "generated_at": window.get("generated_at"),
+            "window_date": window.get("window_date"),
+            "net_bps": matched_cell.get("net_bps"),
+            "edge_before_fees_bps": matched_cell.get("edge_before_fees_bps"),
+            "n_fill_only": matched_cell.get("n_fill_only") or matched_cell.get("n"),
+        })
+    distinct_dates = sorted({
+        _str(row.get("window_date"))
+        for row in observations
+        if _str(row.get("window_date"))
+    })
+    return {
+        "history_window_summary_present": bool(summaries),
+        "candidate_observed_windows": len(observations),
+        "candidate_observed_distinct_dates": distinct_dates,
+        "candidate_observed_independent_windows": len(distinct_dates),
+        "candidate_observation_sources": [
+            row.get("source_path")
+            for row in observations
+            if row.get("source_path")
+        ],
+        "candidate_observations": observations[:10],
+        "candidate_malformed_window_cell_count": len(malformed_sources),
+        "candidate_malformed_window_cell_sources": malformed_sources[:10],
+    }
+
+
+def _repeat_window_design(
+    *,
+    candidate_key: str,
+    status: str,
+    history: dict[str, Any],
+    repeated: dict[str, Any],
+    observations: dict[str, Any],
+) -> dict[str, Any]:
+    thresholds = _dict(history.get("thresholds"))
+    min_repeat = max(2, _int(thresholds.get("min_repeat_positive_windows"), 2))
+    observed_independent = _int(observations.get("candidate_observed_independent_windows"))
+    observed_dates = _list(observations.get("candidate_observed_distinct_dates"))
+    reported_repeat_windows = _int(repeated.get("windows"))
+    reported_repeat_confirmed = reported_repeat_windows >= min_repeat
+    observed_repeat_confirmed = observed_independent >= min_repeat
+    if not candidate_key:
+        design_status = "NO_CURRENT_FEE_CANDIDATE"
+        consistency_status = "not_applicable"
+        next_action = "continue_mm_signal_search_for_current_fee_positive_cell"
+    elif not observations.get("history_window_summary_present"):
+        design_status = "HISTORY_WINDOW_SUMMARIES_REQUIRED"
+        consistency_status = "window_summaries_missing"
+        next_action = "rebuild_fill_sim_history_scorecard_with_window_summaries"
+    elif observations.get("candidate_malformed_window_cell_count"):
+        design_status = "HISTORY_WINDOW_SUMMARIES_MALFORMED"
+        consistency_status = "window_summaries_malformed"
+        next_action = "rebuild_or_refresh_fill_sim_history_before_repeat_claim"
+    elif reported_repeat_confirmed != observed_repeat_confirmed:
+        design_status = "HISTORY_REBUILD_REQUIRED"
+        consistency_status = "reported_repeats_disagree_with_window_summaries"
+        next_action = "rebuild_or_refresh_fill_sim_history_before_repeat_claim"
+    elif observed_repeat_confirmed:
+        design_status = "REPEAT_WINDOW_CONFIRMED_ADVANCE_TO_NEXT_GATE"
+        consistency_status = "consistent"
+        next_action = "advance_to_oos_walk_forward_confirmation_without_order_authority"
+    elif status == "MM_CURRENT_FEE_CONFIRMATION_REQUIRES_REPEAT_WINDOW":
+        design_status = "REPEAT_WINDOW_SAFE_TEST_READY"
+        consistency_status = "consistent"
+        next_action = "accumulate_or_replay_independent_windows_for_same_current_fee_mm_cell"
+    else:
+        design_status = "REPEAT_WINDOW_NOT_CURRENT_BLOCKER"
+        consistency_status = "consistent"
+        next_action = "follow_mm_current_fee_confirmation_packet_next_action"
+
+    remaining = max(min_repeat - observed_independent, 0)
+    return {
+        "status": design_status,
+        "consistency_status": consistency_status,
+        "candidate_key": candidate_key or None,
+        "candidate_observed_windows": observations.get("candidate_observed_windows"),
+        "candidate_observed_independent_windows": observed_independent,
+        "candidate_observed_distinct_dates": observed_dates,
+        "candidate_observation_sources": observations.get("candidate_observation_sources"),
+        "candidate_malformed_window_cell_count": (
+            observations.get("candidate_malformed_window_cell_count")
+        ),
+        "candidate_malformed_window_cell_sources": (
+            observations.get("candidate_malformed_window_cell_sources")
+        ),
+        "reported_candidate_repeat_windows": reported_repeat_windows,
+        "required_same_candidate_independent_windows": min_repeat,
+        "same_candidate_independent_windows_remaining": remaining,
+        "required_distinct_dates_for_repeat": min_repeat,
+        "same_candidate_distinct_dates_remaining": remaining,
+        "history_window_summary_present": observations.get("history_window_summary_present"),
+        "fastest_safe_test": (
+            "wait_for_next_valid_fill_sim_refresh_or_run_isolated_read_only_replay_"
+            "for_exact_candidate_key"
+        ),
+        "required_data": [
+            "valid fill_sim report with non-empty fresh L1",
+            "fill_sim_history_scorecard.window_summaries",
+            "exact candidate_key match across independent window dates",
+            "current fee round-trip cost preserved",
+        ],
+        "failure_condition": [
+            "same candidate_key does not repeat across independent dates",
+            "repeat evidence only matches symbol/policy but not exact key",
+            "window_summaries missing or inconsistent with repeated_positive_keys",
+            "exact-key window cell is missing positive net, sample, or identity fields",
+            "future OOS or maker execution realism fails after repeat",
+        ],
+        "authority_required": (
+            "none for read-only repeat-window evidence; operator review required "
+            "before any future probe/order authority"
+        ),
+        "max_safe_next_action": next_action,
+    }
+
+
 def _maker_execution_realism_confirmed(payload: dict[str, Any] | None) -> bool:
     review = _dict(payload)
     answers = _dict(review.get("answers"))
@@ -304,6 +581,15 @@ def build_mm_current_fee_confirmation_packet(
     now_utc: dt.datetime | None = None,
 ) -> dict[str, Any]:
     now = (now_utc or _utc_now()).astimezone(dt.timezone.utc)
+    authority_violation = (
+        _contains_authority_signal(fillsim, "fillsim")
+        or _contains_authority_signal(fillsim_history, "fillsim_history")
+        or _contains_authority_signal(
+            gross_edge_cost_decomposition,
+            "gross_edge_cost_decomposition",
+        )
+        or _contains_authority_signal(maker_execution_realism, "maker_execution_realism")
+    )
     history = _dict(fillsim_history)
     cells = _current_fee_positive_cells(fillsim, gross_edge_cost_decomposition)
     cells.extend(_history_positive_cells(fillsim_history))
@@ -312,9 +598,25 @@ def build_mm_current_fee_confirmation_packet(
     candidate = cells[0] if cells else {}
     candidate_key = _str(candidate.get("key"))
     repeated = _matching_repeated_key(history, candidate_key)
+    observations = _candidate_history_observations(history, candidate, candidate_key)
+    thresholds = _dict(history.get("thresholds"))
+    min_repeat = max(2, _int(thresholds.get("min_repeat_positive_windows"), 2))
     repeated_key_count = len(_list(history.get("repeated_positive_keys")))
     candidate_repeat_windows = _int(
         repeated.get("windows") or candidate.get("history_repeat_windows")
+    )
+    candidate_observed_independent_windows = _int(
+        observations.get("candidate_observed_independent_windows")
+    )
+    reported_repeat_confirmed = candidate_repeat_windows >= min_repeat
+    observed_repeat_confirmed = candidate_observed_independent_windows >= min_repeat
+    repeat_consistency_violation = bool(
+        candidate_key
+        and observations.get("history_window_summary_present")
+        and reported_repeat_confirmed != observed_repeat_confirmed
+    )
+    malformed_window_summaries = bool(
+        candidate_key and observations.get("candidate_malformed_window_cell_count")
     )
     current_fee_positive_windows = _int(
         history.get("current_fee_sample_gated_positive_windows")
@@ -322,7 +624,13 @@ def build_mm_current_fee_confirmation_packet(
     walk_forward_holdout_windows = _int(
         history.get("walk_forward_holdout_confirmed_windows")
     )
-    repeat_confirmed = bool(candidate_key and candidate_repeat_windows > 1)
+    repeat_confirmed = bool(
+        candidate_key
+        and observations.get("history_window_summary_present")
+        and observed_repeat_confirmed
+        and not malformed_window_summaries
+        and not repeat_consistency_violation
+    )
     history_status = _str(history.get("status")).upper()
     oos_confirmed = bool(
         repeat_confirmed
@@ -338,11 +646,31 @@ def build_mm_current_fee_confirmation_packet(
     )
     maker_confirmed = maker_status == "CONFIRMED"
 
-    if not candidate:
+    if authority_violation:
+        status = "AUTHORITY_BOUNDARY_VIOLATION"
+        reason = f"authority_or_proof_signal_in_input:{authority_violation}"
+        next_action = "repair_inputs_remove_authority_bearing_mm_artifacts"
+        next_gate = "no_authority_inputs_before_repeat_window_design"
+    elif not candidate:
         status = "NO_CURRENT_FEE_POSITIVE_MM_CELL"
         reason = "no_current_fee_positive_sample_gated_mm_cell"
         next_action = "continue_mm_signal_search_for_current_fee_positive_cell"
         next_gate = "current_fee_positive_sample_gated_mm_cell"
+    elif malformed_window_summaries:
+        status = "MM_CURRENT_FEE_CONFIRMATION_HISTORY_REBUILD_REQUIRED"
+        reason = "fill_sim_history_window_summaries_malformed_for_candidate"
+        next_action = "rebuild_or_refresh_fill_sim_history_before_repeat_claim"
+        next_gate = "valid_same_candidate_window_summaries"
+    elif repeat_consistency_violation:
+        status = "MM_CURRENT_FEE_CONFIRMATION_HISTORY_REBUILD_REQUIRED"
+        reason = "repeated_positive_keys_disagree_with_window_summaries"
+        next_action = "rebuild_or_refresh_fill_sim_history_before_repeat_claim"
+        next_gate = "consistent_same_candidate_window_summaries"
+    elif candidate_key and not observations.get("history_window_summary_present"):
+        status = "MM_CURRENT_FEE_CONFIRMATION_HISTORY_WINDOW_SUMMARIES_REQUIRED"
+        reason = "fill_sim_history_window_summaries_missing"
+        next_action = "rebuild_fill_sim_history_scorecard_with_window_summaries"
+        next_gate = "same_candidate_window_summary_evidence"
     elif not repeat_confirmed:
         status = "MM_CURRENT_FEE_CONFIRMATION_REQUIRES_REPEAT_WINDOW"
         reason = "candidate_not_repeated_across_independent_history_windows"
@@ -391,6 +719,22 @@ def build_mm_current_fee_confirmation_packet(
         "history_repeated_positive_key_count": repeated_key_count,
         "history_walk_forward_holdout_confirmed_windows": walk_forward_holdout_windows,
         "candidate_repeated_windows": candidate_repeat_windows,
+        "candidate_observed_windows": observations.get("candidate_observed_windows"),
+        "candidate_observed_independent_windows": (
+            candidate_observed_independent_windows
+        ),
+        "candidate_observed_distinct_dates": (
+            observations.get("candidate_observed_distinct_dates")
+        ),
+        "candidate_malformed_window_cell_count": (
+            observations.get("candidate_malformed_window_cell_count")
+        ),
+        "candidate_malformed_window_cell_sources": (
+            observations.get("candidate_malformed_window_cell_sources")
+        ),
+        "repeat_window_design_status": None,
+        "repeat_window_consistency_status": None,
+        "same_candidate_independent_windows_remaining": None,
         "candidate_repeated_window_sources": repeated.get("window_sources"),
         "candidate_distinct_window_dates": (
             repeated.get("distinct_window_dates")
@@ -401,6 +745,20 @@ def build_mm_current_fee_confirmation_packet(
         "maker_execution_realism_status": maker_status,
         "maker_execution_realism_confirmed": maker_confirmed,
     }
+    repeat_window_design = _repeat_window_design(
+        candidate_key=candidate_key,
+        status=status,
+        history=history,
+        repeated=repeated,
+        observations=observations,
+    )
+    summary["repeat_window_design_status"] = repeat_window_design.get("status")
+    summary["repeat_window_consistency_status"] = repeat_window_design.get(
+        "consistency_status"
+    )
+    summary["same_candidate_independent_windows_remaining"] = (
+        repeat_window_design.get("same_candidate_independent_windows_remaining")
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at_utc": now.isoformat(),
@@ -410,6 +768,7 @@ def build_mm_current_fee_confirmation_packet(
         "next_gate": next_gate,
         "summary": summary,
         "candidate": candidate or None,
+        "repeat_window_design": repeat_window_design,
         "top_current_fee_positive_cells": cells[:10],
         "answers": {
             "current_fee_positive_candidate_present": bool(candidate),
