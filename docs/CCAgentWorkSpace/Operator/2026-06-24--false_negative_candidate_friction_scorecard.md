@@ -56,9 +56,15 @@ E2/E4 一開始抓到兩個問題：
 - `py_compile` passed
 - `git diff --check` passed
 - Mac 沒有 runtime artifacts 的 smoke 正確 fail-closed，所有 authority flags 都是 false。
+- Linux source 已同步到 `68aaa896`，Linux canonical `/tmp/openclaw` artifact-only smoke 成功：
+  - status: `FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_READY`
+  - top: `grid_trading|AVAXUSDT|Sell`
+  - next action: `exact_bounded_demo_typed_confirm_required_or_select_next_candidate`
+  - ranked candidates: `11`
+  - all authority / proof flags: false
 
 ## 目前狀態
 
 `P0-BOUNDED-PROBE-AUTHORIZATION` 仍然卡在 exact typed-confirm，沒有被繞過。
 
-這輪狀態是 `DONE_WITH_CONCERNS`：source-only scorecard 完成；commit/push 後還要在 Linux runtime source 上做 canonical artifact-only smoke。
+這輪狀態是 `DONE_WITH_CONCERNS`：source-only scorecard 完成、已 push、已 Linux sync、已 canonical artifact-only smoke；concern 是它必須維持在 triage/review 層，不能接入 runtime admission 或當成 promotion proof。
