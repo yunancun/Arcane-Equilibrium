@@ -3,8 +3,8 @@
 //! MODULE_NOTE：
 //!   模塊用途：flash-crash dip-buy demo pilot 的 TOML 載入結構、Optuna/Agent 可調
 //!     參數聲明，以及策略本體（`mod.rs`）依賴的「無引擎依賴純函式」核心
-//!     （E1-A）：dip level 計算、UTC 日首 tick 判定、N 日 hold 到期判定、
-//!     固定名目 qty 計算。
+//!     （E1-A）：dip level 計算、bounded demo near-touch limit 計算、UTC 日首 tick
+//!     判定、N 日 hold 到期判定、固定名目 qty 計算。
 //!   主要類/函數：FlashDipBuyParams、StrategyParams::param_ranges / validate、
 //!     compute_dip_level / is_first_tick_of_utc_day / hold_expired / fixed_notional_qty。
 //!   依賴：serde、super::ParamRange + StrategyParams trait（透過 `crate::strategies`）。
@@ -54,6 +54,14 @@ pub const DEFAULT_NOTIONAL_FRAC: f64 = 0.02;
 /// nf 硬上限（validate 拒 > 此值）；與 RiskConfig band-external cap 同義 3%。
 pub const MAX_NOTIONAL_FRAC: f64 = 0.03;
 
+/// Demo fill-discovery 模式：PostOnly BUY 掛在當前 last price 下方 `offset_bps`。
+/// 預設 10bps，目標是產生 demo fill/fee/slippage 樣本，而不是繼續掛 15% 深價 no-touch。
+pub const DEFAULT_NEAR_TOUCH_OFFSET_BPS: f64 = 10.0;
+
+/// near-touch offset 的硬範圍：太小容易跨價/吃單，太大又回到 no-touch。
+pub const MIN_NEAR_TOUCH_OFFSET_BPS: f64 = 1.0;
+pub const MAX_NEAR_TOUCH_OFFSET_BPS: f64 = 50.0;
+
 /// PostOnly maker 掛單逾時：日終撤單由 maker_timeout_ms 觸發既有 sweep。
 /// 預設 6h（pilot daily cadence；on_tick 在 emit 時用「距 UTC 日終」精算覆寫）。
 pub const DEFAULT_MAKER_TIMEOUT_MS: u64 = 6 * 60 * 60_000;
@@ -94,6 +102,28 @@ pub fn compute_dip_level(prior_close: f64, k: f64) -> Option<f64> {
     }
     let level = prior_close * (1.0 - k);
     if level.is_finite() && level > 0.0 {
+        Some(level)
+    } else {
+        None
+    }
+}
+
+/// 計算 bounded demo near-touch PostOnly BUY limit。
+///
+/// 不變量：limit 必須嚴格低於當前 last price，避免策略主動跨價；offset 只允許
+/// [1, 50]bps，讓 demo 探針靠近 touch 以收集 fill/fee/slippage，同時保留 maker
+/// 邊界和小額風控。
+pub fn compute_bounded_near_touch_limit(last_price: f64, offset_bps: f64) -> Option<f64> {
+    if !last_price.is_finite() || last_price <= 0.0 {
+        return None;
+    }
+    if !offset_bps.is_finite()
+        || !(MIN_NEAR_TOUCH_OFFSET_BPS..=MAX_NEAR_TOUCH_OFFSET_BPS).contains(&offset_bps)
+    {
+        return None;
+    }
+    let level = last_price * (1.0 - offset_bps / 10_000.0);
+    if level.is_finite() && level > 0.0 && level < last_price {
         Some(level)
     } else {
         None
@@ -181,6 +211,12 @@ pub struct FlashDipBuyParams {
     /// 固定名目佔 equity 比例（nf）；硬上限 MAX_NOTIONAL_FRAC=0.03。
     pub notional_frac: f64,
 
+    /// Demo bounded fill-discovery：用 near-touch PostOnly 代替 15% 深價 no-touch。
+    pub bounded_demo_near_touch: bool,
+
+    /// near-touch 掛單距當前 last price 的 bps offset。
+    pub near_touch_offset_bps: f64,
+
     /// 研究面板 26 survivor universe（pilot 自有 list）。
     pub allowed_symbols: Vec<String>,
 }
@@ -193,6 +229,8 @@ impl Default for FlashDipBuyParams {
             hold_days: DEFAULT_HOLD_DAYS,
             max_concurrent: DEFAULT_MAX_CONCURRENT,
             notional_frac: DEFAULT_NOTIONAL_FRAC,
+            bounded_demo_near_touch: true,
+            near_touch_offset_bps: DEFAULT_NEAR_TOUCH_OFFSET_BPS,
             allowed_symbols: default_allowed_symbols(),
         }
     }
@@ -236,6 +274,14 @@ impl StrategyParams for FlashDipBuyParams {
                 agent_adjustable: true,
                 db_persisted: true,
             },
+            ParamRange {
+                name: "near_touch_offset_bps".into(),
+                min: MIN_NEAR_TOUCH_OFFSET_BPS,
+                max: MAX_NEAR_TOUCH_OFFSET_BPS,
+                step: Some(1.0),
+                agent_adjustable: true,
+                db_persisted: true,
+            },
         ]
     }
 
@@ -268,6 +314,15 @@ impl StrategyParams for FlashDipBuyParams {
         if self.allowed_symbols.is_empty() {
             return Err("allowed_symbols must not be empty".into());
         }
+        if !self.near_touch_offset_bps.is_finite()
+            || !(MIN_NEAR_TOUCH_OFFSET_BPS..=MAX_NEAR_TOUCH_OFFSET_BPS)
+                .contains(&self.near_touch_offset_bps)
+        {
+            return Err(format!(
+                "near_touch_offset_bps={} must be in [{MIN_NEAR_TOUCH_OFFSET_BPS}, {MAX_NEAR_TOUCH_OFFSET_BPS}]",
+                self.near_touch_offset_bps
+            ));
+        }
         Ok(())
     }
 }
@@ -296,6 +351,24 @@ mod tests {
         assert!(compute_dip_level(100.0, 1.0).is_none()); // k>=1 → level<=0
         assert!(compute_dip_level(100.0, -0.1).is_none());
         assert!(compute_dip_level(100.0, f64::INFINITY).is_none());
+    }
+
+    #[test]
+    fn bounded_near_touch_limit_basic_math() {
+        // last 59000, offset 10bps → 58941，且嚴格低於 last。
+        let lvl = compute_bounded_near_touch_limit(59_000.0, 10.0).unwrap();
+        assert!((lvl - 58_941.0).abs() < 1e-9);
+        assert!(lvl < 59_000.0);
+    }
+
+    #[test]
+    fn bounded_near_touch_rejects_bad_inputs() {
+        assert!(compute_bounded_near_touch_limit(0.0, 10.0).is_none());
+        assert!(compute_bounded_near_touch_limit(-1.0, 10.0).is_none());
+        assert!(compute_bounded_near_touch_limit(f64::NAN, 10.0).is_none());
+        assert!(compute_bounded_near_touch_limit(100.0, 0.5).is_none());
+        assert!(compute_bounded_near_touch_limit(100.0, 100.0).is_none());
+        assert!(compute_bounded_near_touch_limit(100.0, f64::NAN).is_none());
     }
 
     // ── 純函式：is_first_tick_of_utc_day（UTC 日邊界 edge）──
@@ -391,6 +464,8 @@ mod tests {
         assert_eq!(p.hold_days, 3);
         assert_eq!(p.max_concurrent, 3);
         assert!((p.notional_frac - 0.02).abs() < 1e-9);
+        assert!(p.bounded_demo_near_touch);
+        assert!((p.near_touch_offset_bps - DEFAULT_NEAR_TOUCH_OFFSET_BPS).abs() < 1e-9);
     }
 
     #[test]
@@ -451,10 +526,38 @@ mod tests {
     }
 
     #[test]
+    fn rejects_near_touch_offset_out_of_range() {
+        assert!(FlashDipBuyParams {
+            near_touch_offset_bps: 0.5,
+            ..Default::default()
+        }
+        .validate()
+        .is_err());
+        assert!(FlashDipBuyParams {
+            near_touch_offset_bps: 51.0,
+            ..Default::default()
+        }
+        .validate()
+        .is_err());
+        assert!(FlashDipBuyParams {
+            near_touch_offset_bps: 10.0,
+            ..Default::default()
+        }
+        .validate()
+        .is_ok());
+    }
+
+    #[test]
     fn param_ranges_well_formed() {
         let ranges = FlashDipBuyParams::param_ranges();
         let names: std::collections::HashSet<_> = ranges.iter().map(|r| r.name.as_str()).collect();
-        for required in ["k_dip", "hold_days", "max_concurrent", "notional_frac"] {
+        for required in [
+            "k_dip",
+            "hold_days",
+            "max_concurrent",
+            "notional_frac",
+            "near_touch_offset_bps",
+        ] {
             assert!(names.contains(required), "missing param: {required}");
         }
         // 控制表面不入 search space。
@@ -471,8 +574,13 @@ mod tests {
         let syms = default_allowed_symbols();
         assert_eq!(syms.len(), 26);
         // 抽查代表性 symbol。
-        for s in ["BTCUSDT", "ETHUSDT", "POLUSDT", "SUIUSDT", "TONUSDT", "INJUSDT"] {
-            assert!(syms.contains(&s.to_string()), "missing survivor symbol: {s}");
+        for s in [
+            "BTCUSDT", "ETHUSDT", "POLUSDT", "SUIUSDT", "TONUSDT", "INJUSDT",
+        ] {
+            assert!(
+                syms.contains(&s.to_string()),
+                "missing survivor symbol: {s}"
+            );
         }
     }
 }

@@ -316,16 +316,18 @@ impl OrderIntent {
         let aligned = self.intent_type.is_earn()
             || matches!(
                 (self.is_long, &self.intent_type),
-                (true, IntentType::OpenLong | IntentType::CloseLong | IntentType::PositionAdjust)
-                    | (false, IntentType::OpenShort | IntentType::CloseShort | IntentType::PositionAdjust)
+                (
+                    true,
+                    IntentType::OpenLong | IntentType::CloseLong | IntentType::PositionAdjust
+                ) | (
+                    false,
+                    IntentType::OpenShort | IntentType::CloseShort | IntentType::PositionAdjust
+                )
             );
         debug_assert!(
             aligned,
             "IntentType direction mismatch: is_long={} intent_type={:?} symbol={} strategy={}",
-            self.is_long,
-            self.intent_type,
-            self.symbol,
-            self.strategy
+            self.is_long, self.intent_type, self.symbol, self.strategy
         );
         // Round 2 finding 6：release path 防線 —— warn telemetry 取代 silent passthrough。
         // 為什麼不 fail-closed reject：本 fn 簽名為 `(&self)` 無返回值，現有 caller
@@ -795,7 +797,10 @@ impl IntentProcessor {
         if is_reducing || strategy != "flash_dip_buy" {
             return None;
         }
-        let pct = self.risk_config.limits.flash_dip_buy_max_notional_pct_equity;
+        let pct = self
+            .risk_config
+            .limits
+            .flash_dip_buy_max_notional_pct_equity;
         // pct <= 0 不可能（validate 守住），但 defense-in-depth：非正即不啟用 cap
         // 反而危險，故 <= 0 視為「最嚴」直接拒（fail-closed）。
         if !(pct > 0.0) || !balance.is_finite() || balance <= 0.0 {
@@ -805,7 +810,12 @@ impl IntentProcessor {
         }
         let order_notional = final_qty * price;
         let max_notional = balance * pct;
-        if order_notional > max_notional {
+        // Bybit / UI / audit strings settle this cap at cent precision. Comparing raw
+        // binary floats would reject display-equivalent sub-cent drift while the
+        // reason itself prints both sides equal to two decimals.
+        let order_notional_cents = (order_notional * 100.0).round() as i64;
+        let max_notional_cents = (max_notional * 100.0).round() as i64;
+        if order_notional_cents > max_notional_cents {
             Some(format!(
                 "flash_dip_buy_notional_cap: order_notional={order_notional:.2} > \
                  {pct:.4} * equity({balance:.2}) = {max_notional:.2} (band-external hard cap)"

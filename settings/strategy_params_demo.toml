@@ -243,9 +243,10 @@ take_profit_pct = 1.5                 # TP at 1.5% mean-revert
 reverse_cascade_ratio = 1.5           # 反向 cascade > 入場時 1.5x → 立即出場
 
 # FLASH-DIP-PILOT (2026-06-18) — flash-crash dip-buy demo pilot（DEMO-ONLY）。
-# daily cadence：UTC 日首 tick 對 25 survivor 大-cap 掛 prior_close*(1-K=0.15) 的
-# PostOnly maker limit BUY；fill 後持有 N=3 日，於 entry_day+3 的 UTC 日首 tick 平倉
-# （day-clustered，對齊研究面板）。Q7 單 tranche K15/N3/C3。
+# daily cadence：UTC 日首 tick 對 25 survivor 大-cap 做 bounded demo near-touch
+# PostOnly maker limit BUY，用真 demo fill/fee/slippage 驗證 no-fill 策略假設；fill 後
+# 持有 N=3 日，於 entry_day+3 的 UTC 日首 tick 平倉（day-clustered，對齊研究面板）。
+# Q7 單 tranche K15/N3/C3 仍保留為 thesis，實際掛單價由 near-touch 實驗覆寫。
 # 三合一 fail-closed gate：env OPENCLAW_FLASH_DIP_PILOT_ENABLED=1 AND active=true AND
 # PipelineKind::Demo——任一不滿足即不註冊不交易。Paper/Live TOML 不含此 block（demo-only）。
 # survival floor 不在此策略：真 floor = 通用 P1 per_trade_risk_pct(2%) + position_size_max_pct
@@ -258,6 +259,8 @@ k_dip = 0.15                          # 靜態深價深度 prior_close*(1-K)
 hold_days = 3                         # N 日 day-clustered hold
 max_concurrent = 3                    # producer-side 軟層；硬層 = per_strategy cap
 notional_frac = 0.02                  # 固定名目佔 equity 比例（硬上限 0.03）
+bounded_demo_near_touch = true        # bounded demo fill-discovery：PostOnly near-touch 或 skip
+near_touch_offset_bps = 10.0          # BUY limit = last_price*(1-10bps)，避免 15% 深價 no-touch
 allowed_symbols = [                   # 25 survivor 大-cap（2yr 連續上市；pilot 自有 list）
   "ADAUSDT", "APTUSDT", "ARBUSDT", "ATOMUSDT", "AVAXUSDT", "BCHUSDT", "BNBUSDT", "BTCUSDT",
   "DOGEUSDT", "DOTUSDT", "ETCUSDT", "ETHUSDT", "FILUSDT", "ICPUSDT", "INJUSDT", "LINKUSDT",

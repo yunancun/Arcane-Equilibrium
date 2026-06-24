@@ -64,7 +64,7 @@ pub fn map_reject_reason_to_code(reason: &str) -> &'static str {
 
     // (1) ATR unavailable 必先於 JS-demo / cost_gate_other
     // V086 SQL: rv.reason ~ 'cost_gate.*ATR unavailable'
-    // RejectionCode: "cost_gate: ATR unavailable (fail-closed, SEC-11)"
+    // RejectionCode: "cost_gate(ATR-warmup): ATR unavailable (indicator warmup, fail-closed, SEC-11)"
     if reason.contains("cost_gate") && reason.contains("ATR unavailable") {
         return "cost_gate_atr_unavailable";
     }
@@ -202,7 +202,9 @@ mod tests {
     fn test_v086_12_reject_enum_mapping_byte_identical() {
         // (1) ATR unavailable
         assert_eq!(
-            map_reject_reason_to_code("cost_gate: ATR unavailable (fail-closed, SEC-11)"),
+            map_reject_reason_to_code(
+                "cost_gate(ATR-warmup): ATR unavailable (indicator warmup, fail-closed, SEC-11)",
+            ),
             "cost_gate_atr_unavailable"
         );
 
@@ -300,16 +302,23 @@ mod tests {
             "reject_other"
         );
         assert_eq!(map_reject_reason_to_code(""), "reject_other");
-        assert_eq!(map_reject_reason_to_code("unknown_format_string"), "reject_other");
+        assert_eq!(
+            map_reject_reason_to_code("unknown_format_string"),
+            "reject_other"
+        );
     }
 
     /// evaluation order 關鍵測試：ATR unavailable 必先於 cost_gate_other（V086 SQL §6 #1
     /// 高風險點）。如果順序錯，"cost_gate: ATR unavailable ..." 會被誤判為 cost_gate_other。
     #[test]
     fn test_evaluation_order_atr_unavailable_precedes_cost_gate_other() {
-        let reason = "cost_gate: ATR unavailable (fail-closed, SEC-11)";
+        let reason =
+            "cost_gate(ATR-warmup): ATR unavailable (indicator warmup, fail-closed, SEC-11)";
         // 必須返回 atr_unavailable，不是 cost_gate_other
-        assert_eq!(map_reject_reason_to_code(reason), "cost_gate_atr_unavailable");
+        assert_eq!(
+            map_reject_reason_to_code(reason),
+            "cost_gate_atr_unavailable"
+        );
     }
 
     /// evaluation order 關鍵測試：JS-demo 必先於 cost_gate_other。
@@ -372,7 +381,9 @@ mod tests {
         ));
 
         // FAIL: 缺 needle
-        assert!(!is_symbol_blocklist_reason("risk_gate: daily_loss_pct exceeded"));
+        assert!(!is_symbol_blocklist_reason(
+            "risk_gate: daily_loss_pct exceeded"
+        ));
         // FAIL: 結構不對（無 .blocked_symbols 後綴）
         assert!(!is_symbol_blocklist_reason(
             "blocked by per_strategy.grid_trading.other_field"
