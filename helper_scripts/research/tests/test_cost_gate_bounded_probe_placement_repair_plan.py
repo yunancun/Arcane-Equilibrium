@@ -154,6 +154,25 @@ def test_fill_path_reconcile_status_blocks_placement_repair_plan() -> None:
     assert packet["answers"]["order_authority_granted"] is False
 
 
+def test_candidate_touchability_data_required_passes_through_without_repair_plan() -> None:
+    packet = build_bounded_demo_probe_placement_repair_plan(
+        touchability_preflight=_touchability_preflight(
+            status="CANDIDATE_TOUCHABILITY_DATA_REQUIRED",
+            order_status="FILL_FLOW_PRESENT",
+            fill_rows=1,
+            deep_no_touch=0,
+        ),
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "CANDIDATE_TOUCHABILITY_DATA_REQUIRED"
+    assert packet["placement_repair_plan"]["status"] == "NOT_ACTIVE_BLOCKED"
+    assert packet["answers"]["placement_repair_plan_ready_for_operator_review"] is False
+    assert packet["answers"]["near_touch_or_skip_required"] is False
+    assert packet["answers"]["probe_authority_granted"] is False
+    assert packet["answers"]["order_authority_granted"] is False
+
+
 def test_authority_grant_in_touchability_preflight_is_rejected() -> None:
     packet = build_bounded_demo_probe_placement_repair_plan(
         touchability_preflight=_touchability_preflight(

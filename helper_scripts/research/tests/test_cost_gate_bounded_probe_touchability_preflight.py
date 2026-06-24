@@ -71,6 +71,7 @@ def _order_touchability_audit(
     touched_no_fill: int = 0,
     no_bbo: int = 0,
     answers: dict[str, object] | None = None,
+    orders: list[dict[str, object]] | None = None,
 ) -> dict:
     merged_answers = {
         "orders_present": True,
@@ -103,14 +104,24 @@ def _order_touchability_audit(
             },
             "answers": merged_answers,
         },
-        "orders": [
+        "orders": orders
+        if orders is not None
+        else [
             {
+                "strategy_name": "ma_crossover",
+                "symbol": "BTCUSDT",
+                "side": "Sell",
+                "fill_count": 0,
                 "classification": {
                     "status": "DAY_TIMEOUT_SELF_CANCEL_NO_TOUCH_DEEP_LIMIT",
                     "best_touch_gap_bps": 1530.6074,
                 }
             },
             {
+                "strategy_name": "ma_crossover",
+                "symbol": "BTCUSDT",
+                "side": "Sell",
+                "fill_count": 0,
                 "classification": {
                     "status": "WORKING_DEEP_PASSIVE_LIMIT_NO_TOUCH",
                     "best_touch_gap_bps": 1156.4221,
@@ -197,6 +208,36 @@ def test_authority_grant_in_input_is_rejected_before_reviewability_checks() -> N
     assert packet["answers"]["order_authority_granted"] is False
 
 
+def test_promotion_proof_in_input_is_rejected_before_touchability_ready() -> None:
+    packet = build_bounded_demo_probe_touchability_preflight(
+        preflight=_preflight(promotion_proof=True),
+        order_to_fill_gap_audit=_order_touchability_audit(
+            status="FILL_FLOW_PRESENT",
+            fill_rows=1,
+            deep_no_touch=0,
+            answers={
+                "fills_present": True,
+                "passive_limits_too_deep": False,
+            },
+            orders=[
+                {
+                    "strategy_name": "ma_crossover",
+                    "symbol": "BTCUSDT",
+                    "side": "Sell",
+                    "fill_count": 1,
+                    "classification": {"status": "FILLED"},
+                }
+            ],
+        ),
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "AUTHORITY_BOUNDARY_VIOLATION"
+    assert packet["bounded_probe_design"]["authority_preserved"] is False
+    assert packet["answers"]["ready_for_operator_touchability_review"] is False
+    assert packet["answers"]["promotion_evidence"] is False
+
+
 def test_fill_flow_present_is_ready_only_for_operator_touchability_review() -> None:
     packet = build_bounded_demo_probe_touchability_preflight(
         preflight=_preflight(),
@@ -208,17 +249,178 @@ def test_fill_flow_present_is_ready_only_for_operator_touchability_review() -> N
                 "fills_present": True,
                 "passive_limits_too_deep": False,
             },
+            orders=[
+                {
+                    "strategy_name": "ma_crossover",
+                    "symbol": "BTCUSDT",
+                    "side": "Sell",
+                    "fill_count": 2,
+                    "classification": {"status": "FILLED"},
+                }
+            ],
         ),
         now_utc=NOW,
     )
 
     assert packet["status"] == "TOUCHABILITY_GATE_READY_FOR_OPERATOR_REVIEW"
+    assert packet["reason"] == "candidate_matched_fill_flow_exists_for_reviewed_Demo_orders"
     assert packet["answers"]["ready_for_operator_touchability_review"] is True
+    assert packet["answers"]["candidate_matched_fill_flow_present"] is True
     assert packet["answers"]["promotion_evidence"] is False
     assert packet["answers"]["main_cost_gate_adjustment"] == "NONE"
     assert packet["next_actions"] == [
-        "review_fill_quality_and_edge_capture_before_any_probe_authorization"
+        "review_candidate_matched_fill_quality_and_edge_capture_before_any_probe_authorization"
     ]
+
+
+def test_candidate_strategy_name_is_required_for_fill_flow_readiness() -> None:
+    preflight = _preflight()
+    preflight["bounded_demo_probe_design"]["candidate"].pop("strategy_name")
+
+    packet = build_bounded_demo_probe_touchability_preflight(
+        preflight=preflight,
+        order_to_fill_gap_audit=_order_touchability_audit(
+            status="FILL_FLOW_PRESENT",
+            fill_rows=1,
+            deep_no_touch=0,
+            answers={
+                "fills_present": True,
+                "passive_limits_too_deep": False,
+            },
+            orders=[
+                {
+                    "strategy_name": "flash_dip_buy",
+                    "symbol": "BTCUSDT",
+                    "side": "Sell",
+                    "fill_count": 1,
+                    "classification": {"status": "FILLED"},
+                }
+            ],
+        ),
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "CANDIDATE_TOUCHABILITY_DATA_REQUIRED"
+    assert packet["answers"]["ready_for_operator_touchability_review"] is False
+    assert packet["answers"]["candidate_matched_fill_flow_present"] is False
+    assert packet["order_touchability"]["candidate_reviewed_orders"] == 0
+    assert packet["order_touchability"]["candidate_fill_rows"] == 0
+
+
+def test_same_symbol_side_wrong_strategy_fill_does_not_satisfy_candidate() -> None:
+    preflight = _preflight()
+    preflight["bounded_demo_probe_design"]["candidate"] = {
+        "side_cell_key": "grid_trading|AVAXUSDT|Sell",
+        "strategy_name": "grid_trading",
+        "symbol": "AVAXUSDT",
+        "side": "Sell",
+        "outcome_horizon_minutes": 60,
+        "source_kind": "cost_gate_false_negative_after_cost",
+    }
+
+    packet = build_bounded_demo_probe_touchability_preflight(
+        preflight=preflight,
+        order_to_fill_gap_audit=_order_touchability_audit(
+            status="FILL_FLOW_PRESENT",
+            fill_rows=1,
+            deep_no_touch=0,
+            answers={
+                "fills_present": True,
+                "passive_limits_too_deep": False,
+            },
+            orders=[
+                {
+                    "strategy_name": "flash_dip_buy",
+                    "symbol": "AVAXUSDT",
+                    "side": "Sell",
+                    "fill_count": 1,
+                    "classification": {"status": "FILLED"},
+                }
+            ],
+        ),
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "CANDIDATE_TOUCHABILITY_DATA_REQUIRED"
+    assert packet["answers"]["ready_for_operator_touchability_review"] is False
+    assert packet["answers"]["candidate_matched_fill_flow_present"] is False
+    assert packet["order_touchability"]["candidate_reviewed_orders"] == 0
+    assert packet["order_touchability"]["candidate_fill_rows"] == 0
+    assert packet["order_touchability"]["non_candidate_fill_rows"] == 1
+
+
+def test_candidate_multi_fill_count_does_not_create_non_candidate_fill() -> None:
+    packet = build_bounded_demo_probe_touchability_preflight(
+        preflight=_preflight(),
+        order_to_fill_gap_audit=_order_touchability_audit(
+            status="FILL_FLOW_PRESENT",
+            fill_rows=2,
+            deep_no_touch=0,
+            answers={
+                "fills_present": True,
+                "passive_limits_too_deep": False,
+            },
+            orders=[
+                {
+                    "strategy_name": "ma_crossover",
+                    "symbol": "BTCUSDT",
+                    "side": "Sell",
+                    "fill_count": 2,
+                    "classification": {"status": "FILLED"},
+                }
+            ],
+        ),
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "TOUCHABILITY_GATE_READY_FOR_OPERATOR_REVIEW"
+    assert packet["order_touchability"]["candidate_fill_rows"] == 2
+    assert packet["order_touchability"]["non_candidate_fill_rows"] == 0
+
+
+def test_non_candidate_fill_flow_does_not_satisfy_candidate_touchability() -> None:
+    packet = build_bounded_demo_probe_touchability_preflight(
+        preflight=_preflight(),
+        order_to_fill_gap_audit=_order_touchability_audit(
+            status="FILL_FLOW_PRESENT",
+            fill_rows=1,
+            deep_no_touch=1,
+            answers={
+                "fills_present": True,
+                "passive_limits_too_deep": True,
+            },
+            orders=[
+                {
+                    "strategy_name": "flash_dip_buy",
+                    "symbol": "XRPUSDT",
+                    "side": "Buy",
+                    "fill_count": 1,
+                    "classification": {"status": "FILLED"},
+                },
+                {
+                    "strategy_name": "flash_dip_buy",
+                    "symbol": "AVAXUSDT",
+                    "side": "Buy",
+                    "fill_count": 0,
+                    "classification": {
+                        "status": "WORKING_DEEP_PASSIVE_LIMIT_NO_TOUCH",
+                        "best_touch_gap_bps": 1668.3432,
+                    },
+                },
+            ],
+        ),
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "TOUCHABILITY_REPAIR_REQUIRED_BEFORE_BOUNDED_DEMO_PROBE"
+    assert packet["reason"] == "non_candidate_fill_flow_cannot_satisfy_bounded_probe_touchability"
+    assert packet["answers"]["ready_for_operator_touchability_review"] is False
+    assert packet["answers"]["candidate_touchability_orders_present"] is False
+    assert packet["answers"]["candidate_matched_fill_flow_present"] is False
+    assert packet["order_touchability"]["candidate_fill_rows"] == 0
+    assert packet["order_touchability"]["non_candidate_fill_rows"] == 1
+    assert packet["answers"]["probe_authority_granted"] is False
+    assert packet["answers"]["order_authority_granted"] is False
 
 
 def test_non_reviewable_bounded_probe_design_fails_closed() -> None:
@@ -251,10 +453,41 @@ def test_false_negative_preflight_schema_is_reviewable_for_touchability() -> Non
 
     packet = build_bounded_demo_probe_touchability_preflight(
         preflight=preflight,
-        order_to_fill_gap_audit=_order_touchability_audit(),
+        order_to_fill_gap_audit=_order_touchability_audit(
+            status="FILL_FLOW_PRESENT",
+            fill_rows=1,
+            deep_no_touch=1,
+            answers={
+                "fills_present": True,
+                "passive_limits_too_deep": True,
+            },
+            orders=[
+                {
+                    "strategy_name": "risk_close",
+                    "symbol": "SOLUSDT",
+                    "side": "Sell",
+                    "fill_count": 1,
+                    "classification": {"status": "FILLED"},
+                },
+                {
+                    "strategy_name": "flash_dip_buy",
+                    "symbol": "AVAXUSDT",
+                    "side": "Buy",
+                    "fill_count": 0,
+                    "classification": {
+                        "status": "WORKING_DEEP_PASSIVE_LIMIT_NO_TOUCH",
+                        "best_touch_gap_bps": 1668.3432,
+                    },
+                },
+            ],
+        ),
         now_utc=NOW,
     )
 
     assert packet["status"] == "TOUCHABILITY_REPAIR_REQUIRED_BEFORE_BOUNDED_DEMO_PROBE"
+    assert packet["reason"] == "non_candidate_fill_flow_cannot_satisfy_bounded_probe_touchability"
     assert packet["bounded_probe_design"]["side_cell_key"] == "grid_trading|AVAXUSDT|Sell"
+    assert packet["order_touchability"]["candidate_reviewed_orders"] == 0
+    assert packet["order_touchability"]["candidate_fill_rows"] == 0
+    assert packet["answers"]["candidate_matched_fill_flow_present"] is False
     assert packet["answers"]["probe_authority_granted"] is False
