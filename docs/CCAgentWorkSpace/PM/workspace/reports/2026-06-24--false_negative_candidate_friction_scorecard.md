@@ -2,7 +2,7 @@
 
 Date: 2026-06-24
 PM status: `DONE_WITH_CONCERNS`
-Source branch / base head: `main` / `b3f183079aece357d015518470ef7a02c4ef5976`
+Source branch / implementation head: `main` / `68aaa896f47192f3814856efa476fe9b1d32027c`
 
 ## Session Loop State
 
@@ -12,13 +12,13 @@ Source branch / base head: `main` / `b3f183079aece357d015518470ef7a02c4ef5976`
 - `completed_blockers`: `P0-PROFIT-EVIDENCE-QUALITY`, `P0-PROFIT-CANDIDATE-SELECTION`, `P1-LEARNING-LOOP-CLOSURE`, `P1-AUTONOMOUS-PARAMETER-PROPOSAL`, `P1-RUNTIME-HEALTH-HYGIENE`
 - `blocked_blockers`: `P0-BOUNDED-PROBE-AUTHORIZATION`, `P0-PROFIT-OUTCOME-REVIEW`
 - `previous_report_paths`: `2026-06-24--bounded_probe_authorization_exact_confirm_gate.md`, `2026-06-24--false_negative_review_approval_durability.md`, `2026-06-24--candidate_matched_touchability_gate.md`
-- `source_head`: `b3f183079aece357d015518470ef7a02c4ef5976` before this source-only patch.
+- `source_head`: implementation `68aaa896f47192f3814856efa476fe9b1d32027c`; base before patch `b3f183079aece357d015518470ef7a02c4ef5976`.
 - `runtime_timestamp`: `2026-06-24T09:11:37+02:00`
 - `pg_snapshot_timestamp`: `2026-06-24 09:11:37.71624+02` via read-only `SELECT now()`.
-- `artifact_mtimes`: runtime latest authorization attempt and bounded artifacts were inspected before this source-only patch; Mac local `/tmp/openclaw` smoke intentionally failed closed because runtime artifacts are not present on the Mac.
+- `artifact_mtimes`: runtime latest authorization attempt and bounded artifacts were inspected before this source-only patch; Linux canonical scorecard smoke wrote `/tmp/openclaw/cost_gate_learning_lane/false_negative_candidate_friction_scorecard_smoke_20260624T0725Z.{json,md}`.
 - `operator_action_required`: false for this source-only scorecard; true remains for any actual bounded Demo probe authorization object.
 - `new_evidence_delta_required`: P0 exact-confirm has no new typed-confirm delta, so the loop must not re-run the same authorization attempt. Source-only progress needs a new scope.
-- `new_evidence_delta_found`: yes. New source-only scope `false_negative_candidate_friction_scorecard_v1` ranks candidates by edge/friction and tightens fail-closed boundaries.
+- `new_evidence_delta_found`: yes. New source-only scope `false_negative_candidate_friction_scorecard_v1` ranks candidates by edge/friction and tightens fail-closed boundaries. Linux canonical smoke produced a READY scorecard over fresh runtime artifacts.
 - `acceptance_criteria`: no global Cost Gate lowering, no live, no Bybit call, no PG write, no crontab/service/runtime mutation, no active runtime order/probe authority, no authorization object, no promotion proof, and no use of this scorecard as bounded-probe authorization.
 - `next_blocker_id`: `P0-BOUNDED-PROBE-AUTHORIZATION` remains blocked by exact typed-confirm; next safe fallback is another source-only aggressive-alpha blocker if no exact-confirm delta appears.
 
@@ -89,7 +89,26 @@ It does not emit an authorization object and is not consumed by runtime admissio
   - `order_authority_granted=false`
   - `promotion_evidence=false`
 
-Linux source sync and canonical runtime smoke are pending the commit/push step.
+- Linux source fast-forwarded clean to `68aaa896f47192f3814856efa476fe9b1d32027c`.
+- Linux bounded helper suite: `67 passed`.
+- Linux alpha/profitability/worklist suite: `108 passed`.
+- Linux `py_compile` and `git diff --check`: passed.
+- Linux canonical artifact-only smoke:
+  - path: `/tmp/openclaw/cost_gate_learning_lane/false_negative_candidate_friction_scorecard_smoke_20260624T0725Z.json`
+  - status: `FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_READY`
+  - reason: `ranked_false_negative_candidates_scored_by_friction`
+  - ranked candidates: `11`
+  - measured active candidate count: `1`
+  - top side-cell: `grid_trading|AVAXUSDT|Sell`
+  - top next action: `exact_bounded_demo_typed_confirm_required_or_select_next_candidate`
+  - active authorization status: `TYPED_CONFIRM_REQUIRED`
+  - `bounded_demo_probe_authorized=false`
+  - `operator_authorization_object_emitted=false`
+  - `global_cost_gate_lowering_recommended=false`
+  - `main_cost_gate_adjustment=NONE`
+  - `probe_authority_granted=false`
+  - `order_authority_granted=false`
+  - `promotion_evidence=false`
 
 ## Constraints Checked
 
@@ -135,4 +154,4 @@ Linux source sync and canonical runtime smoke are pending the commit/push step.
 
 ## Status
 
-`DONE_WITH_CONCERNS`: the source-only scorecard is implemented and locally verified after PA/E2/E4 review. Concern: it is not runtime-synced or canonical-smoked until after commit/push, and it must remain outside runtime admission, plan mutation, Cost Gate settings, and any proof/promotion path.
+`DONE_WITH_CONCERNS`: the source-only scorecard is implemented, pushed, Linux-synced, and canonical artifact-smoked after PA/E2/E4 review. Concern: it must remain outside runtime admission, plan mutation, Cost Gate settings, and any proof/promotion path.
