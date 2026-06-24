@@ -133,6 +133,14 @@ BOUNDED_REVIEW_CHAIN_STAMP="$(date -u '+%Y%m%dT%H%M%SZ')"
 REFRESH_BOUNDED_REVIEW_CHAIN="${OPENCLAW_ALPHA_REFRESH_BOUNDED_PROBE_REVIEW_CHAIN:-1}"
 ORDER_TOUCHABILITY_JSON="${OPENCLAW_ALPHA_ORDER_TO_FILL_GAP_AUDIT_JSON:-${OPENCLAW_DEMO_ORDER_TO_FILL_GAP_AUDIT_JSON:-$DATA/demo_order_to_fill_gap/demo_order_to_fill_gap_latest.json}}"
 SEALED_PREFLIGHT_JSON="$DATA/cost_gate_learning_lane/sealed_horizon_probe_preflight_latest.json"
+FALSE_NEGATIVE_BOUNDED_PREFLIGHT_JSON="$DATA/cost_gate_learning_lane/false_negative_bounded_probe_preflight_latest.json"
+if [[ -n "${OPENCLAW_ALPHA_BOUNDED_PROBE_PREFLIGHT_JSON:-}" ]]; then
+    BOUNDED_PROBE_PREFLIGHT_JSON="$OPENCLAW_ALPHA_BOUNDED_PROBE_PREFLIGHT_JSON"
+elif [[ -f "$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_JSON" ]]; then
+    BOUNDED_PROBE_PREFLIGHT_JSON="$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_JSON"
+else
+    BOUNDED_PROBE_PREFLIGHT_JSON="$SEALED_PREFLIGHT_JSON"
+fi
 BOUNDED_REVIEW_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_ALPHA_BOUNDED_REVIEW_MAX_ARTIFACT_AGE_HOURS:-24}"
 TOUCHABILITY_MAX_INITIAL_PASSIVE_GAP_BPS="${OPENCLAW_ALPHA_TOUCHABILITY_MAX_INITIAL_PASSIVE_GAP_BPS:-75.0}"
 TOUCHABILITY_MAX_DEEP_NO_TOUCH_GAP_BPS="${OPENCLAW_ALPHA_TOUCHABILITY_MAX_DEEP_NO_TOUCH_GAP_BPS:-500.0}"
@@ -205,12 +213,12 @@ bounded_probe_authority_patch_readiness_rc=0
 bounded_probe_operator_authorization_rc=0
 bounded_probe_shadow_placement_impact_rc=0
 if [[ "$REFRESH_BOUNDED_REVIEW_CHAIN" == "1" ]]; then
-    if [[ -f "$SEALED_PREFLIGHT_JSON" && -f "$ORDER_TOUCHABILITY_JSON" ]]; then
+    if [[ -f "$BOUNDED_PROBE_PREFLIGHT_JSON" && -f "$ORDER_TOUCHABILITY_JSON" ]]; then
         mkdir -p "$BOUNDED_REVIEW_CHAIN_DIR"
         (
             cd "$BASE/helper_scripts/research"
             "$PYBIN" -m cost_gate_learning_lane.bounded_probe_touchability_preflight \
-                --preflight-json "$SEALED_PREFLIGHT_JSON" \
+                --preflight-json "$BOUNDED_PROBE_PREFLIGHT_JSON" \
                 --order-to-fill-gap-json "$ORDER_TOUCHABILITY_JSON" \
                 --max-artifact-age-hours "$BOUNDED_REVIEW_MAX_ARTIFACT_AGE_HOURS" \
                 --max-initial-passive-gap-bps "$TOUCHABILITY_MAX_INITIAL_PASSIVE_GAP_BPS" \
@@ -268,7 +276,7 @@ if [[ "$REFRESH_BOUNDED_REVIEW_CHAIN" == "1" ]]; then
             (
                 cd "$BASE/helper_scripts/research"
                 "$PYBIN" -m cost_gate_learning_lane.bounded_probe_operator_authorization_cli \
-                    --preflight-json "$SEALED_PREFLIGHT_JSON" \
+                    --preflight-json "$BOUNDED_PROBE_PREFLIGHT_JSON" \
                     --placement-repair-plan-json "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" \
                     --authority-patch-readiness-json "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" \
                     --decision defer \
@@ -304,7 +312,7 @@ if [[ "$REFRESH_BOUNDED_REVIEW_CHAIN" == "1" ]]; then
             echo "[$(ts)] SKIP: bounded probe authority/operator/shadow refresh missing placement repair plan output" >> "$LOG"
         fi
     else
-        echo "[$(ts)] SKIP: bounded probe review chain missing sealed preflight or order-to-fill audit" >> "$LOG"
+        echo "[$(ts)] SKIP: bounded probe review chain missing bounded preflight (${BOUNDED_PROBE_PREFLIGHT_JSON}) or order-to-fill audit" >> "$LOG"
     fi
 else
     echo "[$(ts)] SKIP: bounded probe review chain disabled by OPENCLAW_ALPHA_REFRESH_BOUNDED_PROBE_REVIEW_CHAIN=${REFRESH_BOUNDED_REVIEW_CHAIN}" >> "$LOG"
@@ -343,6 +351,7 @@ add_profitability_json_arg "--horizon-sealed-replay-json" "$HORIZON_SEALED_REPLA
 add_profitability_json_arg "--horizon-learning-evidence-json" "$HORIZON_LEARNING_EVIDENCE_JSON"
 add_profitability_json_arg "--sealed-horizon-operator-review-json" "$SEALED_OPERATOR_REVIEW_JSON"
 add_profitability_json_arg "--sealed-horizon-probe-preflight-json" "$SEALED_PREFLIGHT_JSON"
+add_profitability_json_arg "--bounded-probe-preflight-json" "$BOUNDED_PROBE_PREFLIGHT_JSON"
 add_profitability_json_arg "--bounded-probe-shadow-placement-impact-json" "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_LATEST"
 add_profitability_json_arg "--bounded-probe-operator-authorization-json" "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST"
 add_profitability_json_arg "--bounded-probe-result-review-json" "$DATA/cost_gate_learning_lane/bounded_probe_result_review_latest.json"
