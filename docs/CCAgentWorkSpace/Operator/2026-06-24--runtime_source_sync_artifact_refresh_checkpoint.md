@@ -30,4 +30,3 @@ What did not happen:
 Next safe blocker: `P1-RUNTIME-HEALTH-HYGIENE-CRON-API-OWNERSHIP`.
 
 The refreshed Demo learning artifacts are designed to be reconstructable and later live-applicable only after separate operator/QC review, matched controls, fee/slippage accounting, and the normal authorization gates.
-
