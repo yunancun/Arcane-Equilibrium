@@ -36,6 +36,12 @@ E2/E4 找到一個初版問題：preserve branch 早於 current packet authority
 - artifact smoke:
   - normal default-defer + fresh existing approval -> approval preserved, no authority
   - authority-bearing current packet + existing approval -> `AUTHORITY_BOUNDARY_VIOLATION`, no preserve
+- Linux source synced clean to `a9078af1de6f837ad00417a39dc63432bfcfa55f`.
+- Linux focused suites passed `7/18/90/98/26` plus py_compile, bash syntax, and diff-check.
+- Linux artifact smoke wrote:
+  - `/tmp/openclaw/cost_gate_learning_lane/false_negative_operator_review_approval_durability_smoke.json`
+  - `/tmp/openclaw/cost_gate_learning_lane/false_negative_bounded_probe_preflight_approval_durability_smoke.json`
+- Runtime smoke result: approval preserved for `grid_trading|AVAXUSDT|Sell` rank 1; downstream preflight is `READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION`; no probe/order authority, no Cost Gate lowering, no promotion proof.
 
 No Bybit call, no PG write, no crontab edit, no service restart, no order/probe authority, no live, no Cost Gate lowering.
 
