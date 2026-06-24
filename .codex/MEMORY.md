@@ -245,3 +245,9 @@ Do not paste long reports or stable architecture into TODO.
 - Move stable overview to `README.md`.
 - Move long evidence to reports/archive.
 - Update `docs/agents/context-loading.md` when source routing changes.
+
+## 2026-06-24 Runtime Adapter No-Order BTC Checkpoint
+
+- `P0-BOUNDED-PROBE-RUNTIME-ADAPTER-ENABLEMENT-DEMO-ONLY-E3-BB-REVIEW` is `DONE_WITH_CONCERNS`: E3/BB found no safe current production flag for actual demo order submission; Rust writer still hard-codes `adapter_enabled=false`.
+- PM generated only timestamped runtime artifacts. Temporary non-ledger plan copy + `runtime_adapter.py --adapter-enabled` reached `ADMIT_DEMO_LEARNING_PROBE`, but no-order placement construction failed closed: BTCUSDT local BBO age `1652ms` > 1000ms gate, and `qty_step=0.001` at limit `60040.2` makes min positive notional `60.0402 USDT`, above the 10 USDT/order cap.
+- Canonical plan sha `624a62d5...` and ledger sha `84624226...` unchanged. No Bybit call/order, no PG write, no ledger append, no canonical plan mutation, no runtime/env/cron/service mutation, no writer, no Cost Gate lowering, no live/mainnet, no promotion proof. Next blocker: `P0-BOUNDED-PROBE-CAP-AND-ORDER-CONSTRUCTION-REPAIR-DEMO-ONLY-SOURCE-PROPOSAL`.
