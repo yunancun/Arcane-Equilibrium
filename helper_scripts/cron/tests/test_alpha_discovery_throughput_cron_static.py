@@ -22,6 +22,13 @@ def _module_command_block(src: str, module: str) -> str:
     return src[start:end]
 
 
+def _module_redirection(src: str, module: str) -> str:
+    start = src.index(f'"$PYBIN" -m {module}')
+    redirect_start = src.index(") >", start)
+    redirect_end = src.index("\n", redirect_start)
+    return src[redirect_start:redirect_end]
+
+
 def test_bash_syntax_ok() -> None:
     if shutil.which("bash") is None:
         pytest.skip("bash not available")
@@ -60,6 +67,11 @@ def test_wrapper_refreshes_activation_packet_before_alpha_runner() -> None:
     assert "mm_current_fee_confirmation_latest.md" in src
     assert "mm_current_fee_confirmation_stdout.json" in src
     assert "mm_current_fee_confirmation_refresh rc=" in src
+    assert "alpha_discovery_throughput.mm_motif_amplification" in src
+    assert "mm_motif_amplification_latest.json" in src
+    assert "mm_motif_amplification_latest.md" in src
+    assert "mm_motif_amplification_stdout.json" in src
+    assert "mm_motif_amplification_refresh rc=" in src
     assert "bounded_probe_touchability_preflight_latest.json" in src
     assert "bounded_probe_placement_repair_plan_latest.json" in src
     assert "bounded_probe_authority_patch_readiness_latest.json" in src
@@ -132,6 +144,9 @@ def test_wrapper_refreshes_activation_packet_before_alpha_runner() -> None:
         "alpha_discovery_throughput.mm_current_fee_confirmation"
     )
     assert src.index("alpha_discovery_throughput.mm_current_fee_confirmation") < src.index(
+        "alpha_discovery_throughput.mm_motif_amplification"
+    )
+    assert src.index("alpha_discovery_throughput.mm_motif_amplification") < src.index(
         "alpha_discovery_throughput.profitability_path_scorecard"
     )
     assert src.index("alpha_discovery_throughput.profitability_path_scorecard") < src.index(
@@ -154,6 +169,28 @@ def test_bounded_shadow_placement_consumes_same_cycle_authority_readiness() -> N
     )
     assert block.index("--authority-patch-readiness-json") < block.index(
         "--max-artifact-age-hours"
+    )
+
+
+def test_mm_motif_amplification_refresh_uses_canonical_history_artifact() -> None:
+    src = _src()
+    block = _module_command_block(src, "alpha_discovery_throughput.mm_motif_amplification")
+    redirection = _module_redirection(
+        src, "alpha_discovery_throughput.mm_motif_amplification"
+    )
+    assert (
+        '--fillsim-history-json "$DATA/research/fillsim/fillsim_history_scorecard.json"'
+        in block
+    )
+    assert '--json-output "$MM_MOTIF_AMPLIFICATION_JSON"' in block
+    assert '--output "$MM_MOTIF_AMPLIFICATION_MD"' in block
+    assert redirection == (
+        ') > "$MM_MOTIF_AMPLIFICATION_STDOUT" 2>> "$LOG" || '
+        "mm_motif_amplification_rc=$?"
+    )
+    assert (
+        'echo "[$(ts)] mm_motif_amplification_refresh rc=${mm_motif_amplification_rc}"'
+        in src
     )
 
 
