@@ -83,8 +83,8 @@ pub(super) enum RejectionCode {
         min_confidence: f64,
     },
 
-    /// Gate 3 · SEC-11: ATR unavailable fail-closed.
-    /// Gate 3 · SEC-11：ATR 不可用失敗關閉。
+    /// Gate 3 · SEC-11: ATR warmup/unavailable fail-closed.
+    /// Gate 3 · SEC-11：ATR warmup / 不可用失敗關閉；不得併入 JS demo 負 edge 學習。
     CostGateAtrUnavailable,
 
     /// Gate 3 cost-gate JS variant — paper mode positive-edge below threshold.
@@ -215,7 +215,8 @@ impl RejectionCode {
             ),
 
             RejectionCode::CostGateAtrUnavailable => {
-                "cost_gate: ATR unavailable (fail-closed, SEC-11)".to_string()
+                "cost_gate(ATR-warmup): ATR unavailable (indicator warmup, fail-closed, SEC-11)"
+                    .to_string()
             }
 
             RejectionCode::CostGateJsPaper {
@@ -515,7 +516,7 @@ mod tests {
     fn cost_gate_atr_unavailable_matches() {
         assert_eq!(
             RejectionCode::CostGateAtrUnavailable.format(),
-            "cost_gate: ATR unavailable (fail-closed, SEC-11)",
+            "cost_gate(ATR-warmup): ATR unavailable (indicator warmup, fail-closed, SEC-11)",
         );
     }
 

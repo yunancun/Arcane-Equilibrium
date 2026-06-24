@@ -1,18 +1,18 @@
 //! flash_dip_buy — flash-crash dip-buy demo pilot 策略（E1-D 本體）。
 //!
 //! MODULE_NOTE：
-//!   模塊用途：在 UTC 日首 tick 對 26 survivor 大-cap 掛 prior_close*(1-K) 的
-//!     PostOnly maker limit BUY；fill 後持有 N=3 日，於 entry_day+N 的 UTC 日首
-//!     tick 平倉（day-clustered，對齊研究面板）。純 demo pilot，flag-OFF +
+//!   模塊用途：在 UTC 日首 tick 對 26 survivor 大-cap 以 bounded demo near-touch
+//!     PostOnly maker limit BUY 取樣 fill/fee/slippage；fill 後持有 N=3 日，於
+//!     entry_day+N 的 UTC 日首 tick 平倉（day-clustered，對齊研究面板）。純 demo pilot，flag-OFF +
 //!     active=false 雙鎖預設、demo-only kind gate（registry.rs:47 create_for_engine）。
 //!   入場條件（ALL true，UTC 日首 tick）：
 //!     1. self.active（TOML active=true，且 env flag 已於 factory gate 守住建構）
 //!     2. symbol ∈ allowed_symbols（26 survivor universe）
 //!     3. 當前 symbol 無本策略持倉（cross-strategy 占用 → skip）
-//!     4. 本策略並發 < max_concurrent（producer-side 軟層；硬層 = per_strategy.
-//!        max_concurrent_positions risk config，agent 不可放寬。硬層真實 enforce 於
-//!        intent_processor/router.rs per_strategy_concurrency_rejection —— 依
-//!        owner_strategy 重數 PaperState 真倉，重啟 under-count 後仍 fail-closed）
+//!     4. 本策略 open + pending working order 並發 < max_concurrent（producer-side
+//!        軟層；硬層 = per_strategy.max_concurrent_positions risk config，agent 不可放寬。
+//!        硬層真實 enforce 於 intent_processor/router.rs per_strategy_concurrency_rejection
+//!        —— 依 owner_strategy 重數 PaperState 真倉，重啟 under-count 後仍 fail-closed）
 //!     5. prior_close 可得（boot 1d REST seed → KlineManager 1d buffer → 本策略 map）
 //!   出場條件：fill 後 entry_day + hold_days 的「UTC 日首 tick」emit Close。
 //!   主要類/函數：FlashDipBuy、on_tick（三分支：entry-arm / hold-exit / cross-skip）、
@@ -60,8 +60,9 @@ mod tests;
 
 pub use params::FlashDipBuyParams;
 use params::{
-    compute_dip_level, hold_expired, is_first_tick_of_utc_day, DEFAULT_HOLD_DAYS, DEFAULT_K_DIP,
-    DEFAULT_MAX_CONCURRENT, DEFAULT_NOTIONAL_FRAC, MS_PER_UTC_DAY,
+    compute_bounded_near_touch_limit, compute_dip_level, hold_expired, is_first_tick_of_utc_day,
+    DEFAULT_HOLD_DAYS, DEFAULT_K_DIP, DEFAULT_MAX_CONCURRENT, DEFAULT_NEAR_TOUCH_OFFSET_BPS,
+    DEFAULT_NOTIONAL_FRAC, MS_PER_UTC_DAY,
 };
 
 /// sentinel qty → 即使有固定名目 sizing，仍走 gate stack 的 Kelly/P1 夾擊。
@@ -93,6 +94,10 @@ pub struct FlashDipBuy {
     pub max_concurrent: u32,
     /// 固定名目佔比 nf（離線分析 / cap 同義；emit 走 sentinel）。
     pub notional_frac: f64,
+    /// Demo bounded fill-discovery：true 時以 near-touch PostOnly 替代深價 no-touch。
+    pub bounded_demo_near_touch: bool,
+    /// near-touch 掛單距當前 last price 的 bps offset。
+    pub near_touch_offset_bps: f64,
     /// 26 survivor universe。
     pub allowed_symbols: Vec<String>,
 
@@ -105,6 +110,13 @@ pub struct FlashDipBuy {
 
     /// 本策略當前持倉的 symbol 集合（producer-side 並發計數 + cross-strategy 盲區補償）。
     open_symbols: HashSet<String>,
+
+    /// 本策略已發出但未成交/未拒絕的 entry working order 到期時間。
+    ///
+    /// 為什麼策略內也要記：router hard cap 只看已成交 PaperState positions，
+    /// 未成交 PostOnly resting order 不會進 open_symbols；若不記 pending，daily
+    /// batch 會在 max_concurrent=3 時同時掛出 26 張 no-fill 單。
+    pending_entry_expiry: HashMap<String, u64>,
 
     /// 本策略自有 entry_ts_ms per symbol（跨重啟保真；持久化到 sidecar）。
     entry_ts: HashMap<String, u64>,
@@ -130,10 +142,13 @@ impl FlashDipBuy {
             hold_days: DEFAULT_HOLD_DAYS,
             max_concurrent: DEFAULT_MAX_CONCURRENT,
             notional_frac: DEFAULT_NOTIONAL_FRAC,
+            bounded_demo_near_touch: true,
+            near_touch_offset_bps: DEFAULT_NEAR_TOUCH_OFFSET_BPS,
             allowed_symbols: params::default_allowed_symbols(),
             prior_close: HashMap::new(),
             last_acted_day: HashMap::new(),
             open_symbols: HashSet::new(),
+            pending_entry_expiry: HashMap::new(),
             entry_ts: HashMap::new(),
             last_exit_day: HashMap::new(),
             conf_scale: 1.0,
@@ -154,9 +169,21 @@ impl FlashDipBuy {
         to_end.max(FLASH_DIP_MAKER_TIMEOUT_FLOOR_MS)
     }
 
+    fn prune_expired_pending_entries(&mut self, now_wall_ms: u64) {
+        self.pending_entry_expiry
+            .retain(|_, expiry_ms| *expiry_ms > now_wall_ms);
+    }
+
+    fn producer_active_entry_count(&self) -> usize {
+        let mut symbols = self.open_symbols.clone();
+        symbols.extend(self.pending_entry_expiry.keys().cloned());
+        symbols.len()
+    }
+
     /// OPENCLAW_DATA_DIR/flash_dip_buy_entry_ts.json 路徑。
     fn checkpoint_path() -> std::path::PathBuf {
-        let dir = std::env::var("OPENCLAW_DATA_DIR").unwrap_or_else(|_| "/tmp/openclaw".to_string());
+        let dir =
+            std::env::var("OPENCLAW_DATA_DIR").unwrap_or_else(|_| "/tmp/openclaw".to_string());
         std::path::PathBuf::from(dir).join(ENTRY_TS_CHECKPOINT_FILE)
     }
 
@@ -233,6 +260,8 @@ impl FlashDipBuy {
         self.hold_days = params.hold_days;
         self.max_concurrent = params.max_concurrent;
         self.notional_frac = params.notional_frac;
+        self.bounded_demo_near_touch = params.bounded_demo_near_touch;
+        self.near_touch_offset_bps = params.near_touch_offset_bps;
         self.allowed_symbols = params.allowed_symbols.clone();
         info!(
             strategy = "flash_dip_buy",
@@ -240,6 +269,8 @@ impl FlashDipBuy {
             k_dip = self.k_dip,
             hold_days = self.hold_days,
             max_concurrent = self.max_concurrent,
+            bounded_demo_near_touch = self.bounded_demo_near_touch,
+            near_touch_offset_bps = self.near_touch_offset_bps,
             "params updated via IPC"
         );
         Ok(())
@@ -253,6 +284,8 @@ impl FlashDipBuy {
             hold_days: self.hold_days,
             max_concurrent: self.max_concurrent,
             notional_frac: self.notional_frac,
+            bounded_demo_near_touch: self.bounded_demo_near_touch,
+            near_touch_offset_bps: self.near_touch_offset_bps,
             allowed_symbols: self.allowed_symbols.clone(),
         }
     }
@@ -271,6 +304,8 @@ pub struct FlashDipBuyUpdateParams {
     pub hold_days: u32,
     pub max_concurrent: u32,
     pub notional_frac: f64,
+    pub bounded_demo_near_touch: bool,
+    pub near_touch_offset_bps: f64,
     pub allowed_symbols: Vec<String>,
 }
 
@@ -283,6 +318,8 @@ impl Default for FlashDipBuyUpdateParams {
             hold_days: p.hold_days,
             max_concurrent: p.max_concurrent,
             notional_frac: p.notional_frac,
+            bounded_demo_near_touch: p.bounded_demo_near_touch,
+            near_touch_offset_bps: p.near_touch_offset_bps,
             allowed_symbols: p.allowed_symbols,
         }
     }
@@ -300,6 +337,8 @@ impl StrategyParams for FlashDipBuyUpdateParams {
             hold_days: self.hold_days,
             max_concurrent: self.max_concurrent,
             notional_frac: self.notional_frac,
+            bounded_demo_near_touch: self.bounded_demo_near_touch,
+            near_touch_offset_bps: self.near_touch_offset_bps,
             allowed_symbols: self.allowed_symbols.clone(),
         };
         mirror.validate()
@@ -348,6 +387,7 @@ impl Strategy for FlashDipBuy {
         // ctx.timestamp_ms = event.ts_ms = WS payload-ts，跨 replay / 非單調 / 可被
         // payload 污染；UTC 日判定必須用 openclaw_core::now_ms()（SystemTime epoch）。
         let now_wall_ms = openclaw_core::now_ms();
+        self.prune_expired_pending_entries(now_wall_ms);
 
         let current_price = ctx.price;
         if !current_price.is_finite() || current_price <= 0.0 {
@@ -396,11 +436,11 @@ impl Strategy for FlashDipBuy {
                     return vec![];
                 }
 
-                // ── 並發 producer-side 軟層（CC 條件 1 軟層；硬層 = per_strategy
-                //    .max_concurrent_positions risk config）──
-                // 為什麼軟層仍保留：fail-fast 早退，少打一次 gate stack；但硬上限
-                // 由風控層守（策略 bug 時並發硬限不靠此 skip）。
-                if self.open_symbols.len() as u32 >= self.max_concurrent {
+                // ── 並發 producer-side 軟層（open positions + pending working orders）──
+                // 為什麼要數 pending：PostOnly resting order 未 fill 前不進 PaperState，
+                // 若只看 open_symbols，day-first batch 會在 max_concurrent=3 時發出
+                // 26 張 pending 單。硬上限仍由風控層守已成交倉位。
+                if self.producer_active_entry_count() as u32 >= self.max_concurrent {
                     return vec![];
                 }
 
@@ -414,14 +454,28 @@ impl Strategy for FlashDipBuy {
                     }
                 };
 
-                // 靜態深價 maker limit = prior_close*(1-K)（禁 compute_post_only_price
-                // at-touch；本策略用研究面板靜態深度）。
-                let limit_price = match compute_dip_level(prior_close, self.k_dip) {
+                // 靜態深價 thesis 仍需可計算；bounded demo 模式只替換「實際掛單價」，
+                // 不把缺 prior_close / 壞 K 的信號當成可交易。
+                let thesis_limit_price = match compute_dip_level(prior_close, self.k_dip) {
                     Some(p) => p,
                     None => {
                         self.last_acted_day.insert(sym.to_string(), today);
                         return vec![];
                     }
+                };
+                let (limit_price, limit_mode) = if self.bounded_demo_near_touch {
+                    match compute_bounded_near_touch_limit(
+                        current_price,
+                        self.near_touch_offset_bps,
+                    ) {
+                        Some(p) => (p, "bounded_demo_near_touch"),
+                        None => {
+                            self.last_acted_day.insert(sym.to_string(), today);
+                            return vec![];
+                        }
+                    }
+                } else {
+                    (thesis_limit_price, "static_dip_thesis")
                 };
 
                 // 當日武裝完成（無論掛單後是否成交，當日後續 tick 不重複武裝）。
@@ -434,13 +488,21 @@ impl Strategy for FlashDipBuy {
                 let confidence = (0.55 * self.conf_scale).clamp(0.0, 1.0);
 
                 let maker_timeout_ms = Self::maker_timeout_to_day_end(now_wall_ms);
+                self.pending_entry_expiry.insert(
+                    sym.to_string(),
+                    now_wall_ms.saturating_add(maker_timeout_ms),
+                );
 
                 info!(
                     strategy = "flash_dip_buy",
                     symbol = sym,
                     prior_close,
                     k_dip = self.k_dip,
+                    thesis_limit_price,
                     limit_price,
+                    limit_mode,
+                    near_touch_offset_bps = self.near_touch_offset_bps,
+                    pending_entry_count = self.pending_entry_expiry.len(),
                     confidence,
                     maker_timeout_ms,
                     "dip-buy maker limit armed (UTC day-first tick)"
@@ -466,8 +528,11 @@ impl Strategy for FlashDipBuy {
     /// rejection：當日已 set last_acted_day，無 cooldown 額外狀態需回滾。
     /// 為什麼不回滾 last_acted_day：被治理 gate 拒 = 當日不再嘗試（daily cadence
     /// 語意），保守且避免同日重發 hot loop。
-    fn on_rejection(&mut self, _intent: &OrderIntent, _reason: &str) {
-        // 無額外狀態回滾（daily cadence 已透過 last_acted_day 防同日重發）。
+    fn on_rejection(&mut self, intent: &OrderIntent, _reason: &str) {
+        if intent.strategy == self.name() {
+            self.pending_entry_expiry.remove(&intent.symbol);
+        }
+        // last_acted_day 不回滾（daily cadence 已透過 last_acted_day 防同日同 symbol 重發）。
     }
 
     /// fill confirmed：記錄真 entry_ts（wall-clock）+ 入開倉集 + 持久化 checkpoint。
@@ -479,6 +544,7 @@ impl Strategy for FlashDipBuy {
             return;
         }
         let sym = &intent.symbol;
+        self.pending_entry_expiry.remove(sym);
         let now_wall_ms = openclaw_core::now_ms();
         self.entry_ts.entry(sym.clone()).or_insert(now_wall_ms);
         self.open_symbols.insert(sym.clone());
@@ -495,6 +561,7 @@ impl Strategy for FlashDipBuy {
         for pos in paper_state.positions() {
             if pos.owner_strategy == self.name() {
                 self.open_symbols.insert(pos.symbol.clone());
+                self.pending_entry_expiry.remove(&pos.symbol);
                 // 優先用 sidecar 真 entry_ts；缺則退回 paper_state（Bybit updated_time，
                 // 保守 hold 可能稍早觸發）。
                 let entry_ts = checkpoint
@@ -519,6 +586,7 @@ impl Strategy for FlashDipBuy {
     /// 本策略 Close 確認 → 清開倉集 + entry_ts + 持久化。
     fn on_close_confirmed(&mut self, symbol: &str, _close_price: f64, _close_ts_ms: u64) {
         self.open_symbols.remove(symbol);
+        self.pending_entry_expiry.remove(symbol);
         self.entry_ts.remove(symbol);
         self.last_exit_day.remove(symbol);
         self.persist_entry_ts();
@@ -527,6 +595,7 @@ impl Strategy for FlashDipBuy {
     /// 風控強平 → 同步清開倉集 + entry_ts。
     fn on_external_close(&mut self, symbol: &str, _close_price: f64, _close_ts_ms: u64) {
         self.open_symbols.remove(symbol);
+        self.pending_entry_expiry.remove(symbol);
         self.entry_ts.remove(symbol);
         self.last_exit_day.remove(symbol);
         self.persist_entry_ts();
@@ -535,6 +604,7 @@ impl Strategy for FlashDipBuy {
     /// Close 被跳過（paper_state 找不到倉位）→ 清開倉集 + entry_ts。
     fn on_close_skipped(&mut self, symbol: &str) {
         self.open_symbols.remove(symbol);
+        self.pending_entry_expiry.remove(symbol);
         self.entry_ts.remove(symbol);
         self.last_exit_day.remove(symbol);
         self.persist_entry_ts();

@@ -76,7 +76,7 @@ fn missing_prior_close_inert_failsafe() {
 }
 
 #[test]
-fn day_first_tick_emits_postonly_dip_limit() {
+fn day_first_tick_emits_postonly_bounded_near_touch_limit() {
     let mut s = active_strategy();
     s.seed_prior_close("BTCUSDT", 60_000.0);
     let ctx = StrategyHarness::new("BTCUSDT").price(59_000.0).build();
@@ -88,16 +88,43 @@ fn day_first_tick_emits_postonly_dip_limit() {
             assert_eq!(intent.symbol, "BTCUSDT");
             assert!(intent.is_long, "dip-buy must be long");
             assert_eq!(intent.order_type, "limit");
-            // 靜態深價 = 60000*(1-0.15) = 51000。
-            assert!((intent.limit_price.unwrap() - 51_000.0).abs() < 1e-6);
+            // bounded demo near-touch = 59000 * (1 - 10bps) = 58941。
+            let limit = intent.limit_price.unwrap();
+            assert!((limit - 58_941.0).abs() < 1e-6);
+            assert!(
+                limit < 59_000.0,
+                "PostOnly BUY limit must stay below last price"
+            );
             // PostOnly maker。
             assert!(matches!(
                 intent.time_in_force,
                 Some(crate::order_manager::TimeInForce::PostOnly)
             ));
             assert!(intent.maker_timeout_ms.is_some());
+            assert!(
+                s.pending_entry_expiry.contains_key("BTCUSDT"),
+                "emitted resting order must count as pending"
+            );
             // 誠實 confidence（非硬設高值；E3 #5）。在 (0, 0.6) 之間。
             assert!(intent.confidence > 0.0 && intent.confidence < 0.6);
+        }
+        _ => panic!("expected Open"),
+    }
+}
+
+#[test]
+fn static_deep_dip_mode_remains_available_when_near_touch_disabled() {
+    let mut s = active_strategy();
+    s.bounded_demo_near_touch = false;
+    s.seed_prior_close("BTCUSDT", 60_000.0);
+    let ctx = StrategyHarness::new("BTCUSDT").price(59_000.0).build();
+    let surface = &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE;
+    let actions = s.on_tick(&ctx, surface);
+    assert_eq!(actions.len(), 1);
+    match &actions[0] {
+        StrategyAction::Open(intent) => {
+            // 靜態深價 = 60000*(1-0.15) = 51000。
+            assert!((intent.limit_price.unwrap() - 51_000.0).abs() < 1e-6);
         }
         _ => panic!("expected Open"),
     }
@@ -144,8 +171,61 @@ fn concurrency_soft_cap_blocks_entry() {
         s.seed_prior_close("BTCUSDT", 60_000.0);
         let ctx = StrategyHarness::new("BTCUSDT").price(59_000.0).build();
         let surface = &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE;
-        assert!(s.on_tick(&ctx, surface).is_empty(), "soft concurrency cap must block 4th");
+        assert!(
+            s.on_tick(&ctx, surface).is_empty(),
+            "soft concurrency cap must block 4th"
+        );
     });
+}
+
+#[test]
+fn pending_working_order_cap_blocks_unfilled_entries() {
+    with_isolated_data_dir("pendingcap", || {
+        let mut s = active_strategy();
+        s.max_concurrent = 1;
+        s.seed_prior_close("BTCUSDT", 60_000.0);
+        s.seed_prior_close("ETHUSDT", 3_000.0);
+        let surface = &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE;
+
+        let btc_ctx = StrategyHarness::new("BTCUSDT").price(59_000.0).build();
+        let btc_actions = s.on_tick(&btc_ctx, surface);
+        assert_eq!(btc_actions.len(), 1);
+        assert!(s.pending_entry_expiry.contains_key("BTCUSDT"));
+        assert_eq!(s.producer_active_entry_count(), 1);
+
+        let eth_ctx = StrategyHarness::new("ETHUSDT").price(2_950.0).build();
+        assert!(
+            s.on_tick(&eth_ctx, surface).is_empty(),
+            "unfilled BTC resting order must consume max_concurrent capacity"
+        );
+
+        let btc_intent = match &btc_actions[0] {
+            StrategyAction::Open(intent) => intent.clone(),
+            _ => panic!("expected Open"),
+        };
+        s.on_rejection(&btc_intent, "cost_gate(JS-demo): edge=-1.00bps < 0");
+        assert!(!s.pending_entry_expiry.contains_key("BTCUSDT"));
+
+        let eth_actions = s.on_tick(&eth_ctx, surface);
+        assert_eq!(
+            eth_actions.len(),
+            1,
+            "after rejection clears pending capacity, another symbol may arm"
+        );
+    });
+}
+
+#[test]
+fn expired_pending_working_order_releases_capacity() {
+    let mut s = active_strategy();
+    s.max_concurrent = 1;
+    s.pending_entry_expiry.insert("BTCUSDT".to_string(), 1);
+    s.seed_prior_close("ETHUSDT", 3_000.0);
+    let ctx = StrategyHarness::new("ETHUSDT").price(2_950.0).build();
+    let surface = &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE;
+    let actions = s.on_tick(&ctx, surface);
+    assert_eq!(actions.len(), 1);
+    assert!(!s.pending_entry_expiry.contains_key("BTCUSDT"));
 }
 
 #[test]
@@ -200,7 +280,8 @@ fn hold_not_expired_holds() {
         let sym = "BTCUSDT";
         // entry_ts 為 1 日前（< N=3 日）→ 持有不平。
         let now = openclaw_core::now_ms();
-        s.entry_ts.insert(sym.to_string(), now - params::MS_PER_UTC_DAY);
+        s.entry_ts
+            .insert(sym.to_string(), now - params::MS_PER_UTC_DAY);
         s.open_symbols.insert(sym.to_string());
         let pos = StrategyHarness::paper_position(sym, true, "flash_dip_buy");
         let ctx = StrategyHarness::new("BTCUSDT")
@@ -229,7 +310,15 @@ fn restart_rebuild_open_set_and_entry_ts_from_checkpoint() {
         // 但其 entry_ts_ms 帶 Bybit updated_time（比真 entry 晚 → 若用它 hold clock 會錯）。
         let mut paper = PaperState::new(10_000.0);
         let bybit_updated_time = openclaw_core::now_ms(); // 「現在」（非真 entry）
-        paper.apply_fill(sym, true, 1.0, 100.0, 0.0, bybit_updated_time, "flash_dip_buy");
+        paper.apply_fill(
+            sym,
+            true,
+            1.0,
+            100.0,
+            0.0,
+            bybit_updated_time,
+            "flash_dip_buy",
+        );
         let mut s2 = active_strategy();
         s2.import_positions(&paper);
         // open set 重建。
@@ -289,7 +378,13 @@ fn on_fill_records_entry_ts_first_write_wins() {
             Some(crate::order_manager::TimeInForce::PostOnly),
             Some(60_000),
         );
+        s.pending_entry_expiry
+            .insert(sym.to_string(), openclaw_core::now_ms() + 60_000);
         s.on_fill(&intent, &make_fill());
+        assert!(
+            !s.pending_entry_expiry.contains_key(sym),
+            "fill must clear pending working order state"
+        );
         let first_ts = *s.entry_ts.get(sym).unwrap();
         // 同向加倉第二次 fill：entry_ts 不被刷新（first-write-wins，防 hold clock 重置）。
         std::thread::sleep(std::time::Duration::from_millis(2));
@@ -303,7 +398,10 @@ fn maker_timeout_floor_enforced() {
     // 接近 UTC 日終時 timeout 不應 < floor（15s）。
     let near_midnight = 5 * params::MS_PER_UTC_DAY - 1; // 距日終 1ms
     let to = FlashDipBuy::maker_timeout_to_day_end(near_midnight);
-    assert!(to >= 15_000, "maker timeout must respect floor near midnight");
+    assert!(
+        to >= 15_000,
+        "maker timeout must respect floor near midnight"
+    );
 }
 
 #[test]
@@ -332,7 +430,8 @@ fn triage_retains_flash_dip_ownership_and_hard_reject_counts_them() {
             let mut s = active_strategy();
             let now = openclaw_core::now_ms();
             for sym in pilot_syms {
-                s.entry_ts.insert(sym.to_string(), now - params::MS_PER_UTC_DAY);
+                s.entry_ts
+                    .insert(sym.to_string(), now - params::MS_PER_UTC_DAY);
                 s.open_symbols.insert(sym.to_string());
             }
             s.persist_entry_ts();
@@ -425,7 +524,13 @@ fn triage_retains_flash_dip_ownership_and_hard_reject_counts_them() {
             None,
             None,
         );
-        let result = proc.process(&intent, &gov, &paper, 2000.0, GovernanceProfile::Exploration);
+        let result = proc.process(
+            &intent,
+            &gov,
+            &paper,
+            2000.0,
+            GovernanceProfile::Exploration,
+        );
         assert!(
             !result.submitted,
             "triage 保歸屬後，第 4 筆 flash_dip_buy 開倉必被並發硬層拒"
@@ -442,9 +547,12 @@ fn triage_retains_flash_dip_ownership_and_hard_reject_counts_them() {
 fn params_json_roundtrip() {
     let mut s = active_strategy();
     s.k_dip = 0.2;
+    s.near_touch_offset_bps = 12.0;
     let json = s.get_params_json();
     let mut s2 = FlashDipBuy::new();
     s2.update_params_json(&json).unwrap();
     assert!((s2.k_dip - 0.2).abs() < 1e-9);
+    assert!(s2.bounded_demo_near_touch);
+    assert!((s2.near_touch_offset_bps - 12.0).abs() < 1e-9);
     assert!(s2.is_active());
 }
