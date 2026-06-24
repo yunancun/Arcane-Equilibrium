@@ -27,7 +27,9 @@ PLACEMENT_REPAIR_PLAN_SCHEMA_VERSION = (
     "bounded_demo_probe_placement_repair_plan_v1"
 )
 ORDER_TOUCHABILITY_SCHEMA_VERSION = "demo_order_to_fill_gap_audit_v1"
+PATCH_READINESS_SCHEMA_VERSION = "bounded_demo_probe_authority_patch_readiness_v1"
 READY_REPAIR_STATUS = "PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW"
+READY_AUTHORITY_PATCH_STATUS = "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW"
 BOUNDARY = (
     "artifact-only bounded Demo shadow placement impact; no PG query/write, "
     "Bybit call, order, config, risk, auth, runtime mutation, Cost Gate lowering, "
@@ -116,25 +118,102 @@ def _artifact_status(
     }
 
 
-def _authority_preserved(placement_repair_plan: dict[str, Any] | None) -> bool:
-    payload = _dict(placement_repair_plan)
-    answers = _dict(payload.get("answers"))
-    plan = _dict(payload.get("placement_repair_plan"))
-    boundary = _dict(plan.get("authority_boundary"))
-    for source in (payload, answers, plan, boundary):
+AUTHORITY_BEARING_TRUE_KEYS = (
+    "active_runtime_order_authority",
+    "active_runtime_probe_authority",
+    "auth_mutation_performed",
+    "bounded_demo_probe_authorized",
+    "bybit_call_performed",
+    "config_mutation_performed",
+    "crontab_mutation_performed",
+    "global_cost_gate_lowering_recommended",
+    "live_promotion_performed",
+    "operator_authorization_object_emitted",
+    "order_authority_granted",
+    "order_cancel_modify_performed",
+    "order_submission_performed",
+    "pg_write_performed",
+    "probe_authority_granted",
+    "promotion_evidence",
+    "promotion_proof",
+    "review_grants_runtime_authority",
+    "risk_mutation_performed",
+    "runtime_env_mutation_performed",
+    "runtime_mutation_performed",
+    "service_enable_performed",
+    "service_restart_performed",
+    "strategy_mutation_performed",
+    "writer_enabled",
+)
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "y",
+            "on",
+            "enabled",
+            "grant",
+            "granted",
+            "authorize",
+            "authorized",
+        }
+    return False
+
+
+def _authority_preserved(*payloads: dict[str, Any] | None) -> bool:
+    stack: list[Any] = list(payloads)
+    while stack:
+        item = stack.pop()
+        if isinstance(item, list):
+            stack.extend(item)
+            continue
+        source = _dict(item)
+        if not source:
+            continue
         if source.get("global_cost_gate_lowering_recommended") is True:
-            return False
-        if source.get("probe_authority_granted") is True:
-            return False
-        if source.get("order_authority_granted") is True:
-            return False
-        if source.get("promotion_evidence") is True:
-            return False
-        if source.get("promotion_proof") is True:
             return False
         if source.get("main_cost_gate_adjustment") not in (None, "", "NONE"):
             return False
+        for key in AUTHORITY_BEARING_TRUE_KEYS:
+            if _truthy(source.get(key)):
+                return False
+        stack.extend(value for value in source.values() if isinstance(value, dict))
+        for value in source.values():
+            if isinstance(value, list):
+                stack.extend(item for item in value if isinstance(item, dict))
     return True
+
+
+def _authority_patch_ready(
+    authority_patch_artifact: dict[str, Any],
+    authority_patch_readiness: dict[str, Any] | None,
+) -> bool:
+    payload = _dict(authority_patch_readiness)
+    answers = _dict(payload.get("answers"))
+    required_true_answers = (
+        "placement_repair_plan_ready",
+        "source_scan_complete",
+        "existing_authority_seams_present",
+        "rust_near_touch_authority_adapter_present",
+        "rust_authority_path_wiring_present",
+    )
+    return (
+        authority_patch_artifact.get("status") == "FRESH"
+        and authority_patch_artifact.get("schema_version")
+        == PATCH_READINESS_SCHEMA_VERSION
+        and payload.get("status") == READY_AUTHORITY_PATCH_STATUS
+        and answers.get("rust_patch_required") is False
+        and all(answers.get(key) is True for key in required_true_answers)
+        and _authority_preserved(payload)
+    )
 
 
 def _candidate(placement_repair_plan: dict[str, Any] | None) -> dict[str, Any]:
@@ -345,14 +424,23 @@ def _status(
     *,
     placement_artifact: dict[str, Any],
     order_artifact: dict[str, Any],
+    authority_patch_artifact: dict[str, Any],
     placement_repair_plan: dict[str, Any] | None,
+    authority_patch_readiness: dict[str, Any] | None,
     authority_preserved: bool,
+    authority_patch_preserved: bool,
     summary: dict[str, Any],
 ) -> tuple[str, str, list[str]]:
     if authority_preserved is not True:
         return (
             "AUTHORITY_BOUNDARY_VIOLATION",
             "placement_repair_plan_contains_authority_granting_fields",
+            ["remove_authority_granting_input_before_shadow_placement_review"],
+        )
+    if authority_patch_preserved is not True:
+        return (
+            "AUTHORITY_BOUNDARY_VIOLATION",
+            "authority_patch_readiness_contains_authority_granting_fields",
             ["remove_authority_granting_input_before_shadow_placement_review"],
         )
     if (
@@ -394,7 +482,20 @@ def _status(
             "near_touch_or_skip_rule_would_skip_all_reviewed_orders",
             ["inspect_bbo_spread_or_max_initial_gap_before_rust_patch"],
         )
+    authority_path_ready = _authority_patch_ready(
+        authority_patch_artifact,
+        authority_patch_readiness,
+    )
     if summary.get("candidate_matched_order_count") == 0:
+        if authority_path_ready:
+            return (
+                "SHADOW_PLACEMENT_TOUCHABILITY_IMPROVED_SAMPLE_MISMATCH",
+                "near_touch_rule_improves_current_order_flow_but_sample_is_not_candidate_matched",
+                [
+                    "collect_candidate_matched_bounded_demo_probe_evidence_after_exact_authorization",
+                    "rerun_shadow_placement_after_candidate_matched_flow",
+                ],
+            )
         return (
             "SHADOW_PLACEMENT_TOUCHABILITY_IMPROVED_SAMPLE_MISMATCH",
             "near_touch_rule_improves_current_order_flow_but_sample_is_not_candidate_matched",
@@ -407,12 +508,30 @@ def _status(
         summary.get("candidate_matched_order_count")
         == summary.get("candidate_matched_submit_count")
     ):
+        if authority_path_ready:
+            return (
+                "SHADOW_PLACEMENT_TOUCHABILITY_REPAIR_EFFECTIVE_FOR_MATCHED_SAMPLE",
+                "near_touch_rule_would_make_candidate_matched_orders_touchable",
+                [
+                    "obtain_exact_bounded_demo_authorization_before_probe",
+                    "refresh_order_to_fill_and_execution_realism_artifacts_after_probe",
+                ],
+            )
         return (
             "SHADOW_PLACEMENT_TOUCHABILITY_REPAIR_EFFECTIVE_FOR_MATCHED_SAMPLE",
             "near_touch_rule_would_make_candidate_matched_orders_touchable",
             [
                 "operator_review_existing_rust_authority_path_patch",
                 "run_bounded_demo_probe_then_refresh_fill_lineage_and_execution_realism",
+            ],
+        )
+    if authority_path_ready:
+        return (
+            "SHADOW_PLACEMENT_PARTIAL_SKIP_REQUIRED",
+            "near_touch_rule_would_submit_only_part_of_candidate_matched_sample",
+            [
+                "review_shadow_skips_before_exact_bounded_demo_authorization",
+                "collect_candidate_matched_bounded_demo_probe_evidence_after_exact_authorization",
             ],
         )
     return (
@@ -426,6 +545,7 @@ def build_bounded_demo_probe_shadow_placement_impact(
     *,
     order_to_fill_gap_audit: dict[str, Any] | None,
     placement_repair_plan: dict[str, Any] | None,
+    authority_patch_readiness: dict[str, Any] | None = None,
     now_utc: dt.datetime | None = None,
     max_artifact_age_hours: int = 24,
 ) -> dict[str, Any]:
@@ -444,7 +564,17 @@ def build_bounded_demo_probe_shadow_placement_impact(
         now_utc=now,
         max_age_seconds=max_age_seconds,
     )
+    authority_patch_artifact = _artifact_status(
+        authority_patch_readiness,
+        now_utc=now,
+        max_age_seconds=max_age_seconds,
+    )
     authority_preserved = _authority_preserved(placement_repair_plan)
+    authority_patch_preserved = _authority_preserved(authority_patch_readiness)
+    authority_path_ready = _authority_patch_ready(
+        authority_patch_artifact,
+        authority_patch_readiness,
+    )
     candidate = _candidate(placement_repair_plan)
     plan = _dict((_dict(placement_repair_plan)).get("placement_repair_plan"))
     max_initial_gap = _float(plan.get("max_initial_passive_gap_bps"))
@@ -461,8 +591,11 @@ def build_bounded_demo_probe_shadow_placement_impact(
     status, reason, next_actions = _status(
         placement_artifact=placement_artifact,
         order_artifact=order_artifact,
+        authority_patch_artifact=authority_patch_artifact,
         placement_repair_plan=placement_repair_plan,
+        authority_patch_readiness=authority_patch_readiness,
         authority_preserved=authority_preserved,
+        authority_patch_preserved=authority_patch_preserved,
         summary=summary,
     )
     return {
@@ -475,6 +608,7 @@ def build_bounded_demo_probe_shadow_placement_impact(
         "artifacts": {
             "placement_repair_plan": placement_artifact,
             "demo_order_to_fill_gap_audit": order_artifact,
+            "authority_patch_readiness": authority_patch_artifact,
         },
         "source_status": {
             "placement_repair_plan_status": (
@@ -484,6 +618,11 @@ def build_bounded_demo_probe_shadow_placement_impact(
                 _dict(_dict(order_to_fill_gap_audit).get("summary")).get("status")
             ),
             "authority_preserved": authority_preserved,
+            "authority_patch_readiness_status": (
+                _dict(authority_patch_readiness).get("status")
+            ),
+            "authority_patch_preserved": authority_patch_preserved,
+            "authority_path_ready_for_operator_review": authority_path_ready,
         },
         "shadow_summary": summary,
         "shadow_orders": shadow_orders,
@@ -495,6 +634,7 @@ def build_bounded_demo_probe_shadow_placement_impact(
             "candidate_matched_runtime_sample_present": (
                 summary.get("candidate_matched_order_count", 0) > 0
             ),
+            "authority_path_ready_for_operator_review": authority_path_ready,
             "candidate_specific_alpha_proof": False,
             "runtime_mutation_performed": False,
             "global_cost_gate_lowering_recommended": False,
@@ -509,6 +649,7 @@ def build_bounded_demo_probe_shadow_placement_impact(
 
 def render_markdown(packet: dict[str, Any]) -> str:
     summary = _dict(packet.get("shadow_summary"))
+    source_status = _dict(packet.get("source_status"))
     lines = [
         "# Bounded Demo Probe Shadow Placement Impact",
         "",
@@ -517,6 +658,7 @@ def render_markdown(packet: dict[str, Any]) -> str:
         f"- Reason: {packet.get('reason')}",
         f"- Candidate: `{_dict(packet.get('candidate')).get('side_cell_key')}`",
         f"- Sample scope: `{summary.get('sample_scope')}`",
+        f"- Authority path ready: `{source_status.get('authority_path_ready_for_operator_review')}`",
         f"- Reviewed orders: `{summary.get('reviewed_order_count')}`",
         f"- Shadow submit count: `{summary.get('shadow_submit_count')}`",
         f"- Candidate-matched orders: `{summary.get('candidate_matched_order_count')}`",
@@ -579,6 +721,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--order-to-fill-gap-json", type=Path)
     parser.add_argument("--placement-repair-plan-json", type=Path)
+    parser.add_argument("--authority-patch-readiness-json", type=Path)
     parser.add_argument("--max-artifact-age-hours", type=int, default=24)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--json-output", type=Path)
@@ -591,6 +734,7 @@ def main() -> int:
     packet = build_bounded_demo_probe_shadow_placement_impact(
         order_to_fill_gap_audit=_read_json(args.order_to_fill_gap_json),
         placement_repair_plan=_read_json(args.placement_repair_plan_json),
+        authority_patch_readiness=_read_json(args.authority_patch_readiness_json),
         max_artifact_age_hours=args.max_artifact_age_hours,
     )
     markdown = render_markdown(packet)
