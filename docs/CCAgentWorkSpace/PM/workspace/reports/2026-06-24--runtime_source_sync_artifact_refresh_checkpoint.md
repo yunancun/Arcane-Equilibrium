@@ -142,4 +142,3 @@ Acceptance for the next blocker:
 ## Why Not Repeating Current Blocker
 
 The current blocker was about source checkout and canonical artifact compatibility. Both are now clean under supplied-snapshot hygiene verification. Repeating the same refresh would only rewrite artifacts without new evidence delta.
-
