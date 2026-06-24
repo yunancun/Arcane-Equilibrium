@@ -103,6 +103,11 @@ Known paths:
   grant no Cost Gate lowering, no active probe authority, and no order
   authority unless a future bounded operator authorization object is explicitly
   supplied and accepted by runtime admission.
+- Demo API operator authorization is not live/mainnet authorization. Control
+  API POSTs require the existing CSRF double-submit cookie/header pair; use a
+  0600 curl config for Bearer auth so tokens do not appear in argv. Demo cleanup
+  close fills and unattributed fills are audit/risk-reduction evidence only,
+  not bounded-probe, Cost Gate, promotion, or risk-adjusted net PnL proof.
 - Do not fake AI calls, trading activity, lineage, fills, healthchecks, or test
   results.
 - Bybit API timeout / nonzero `retCode` fails closed; no hidden trading retry
