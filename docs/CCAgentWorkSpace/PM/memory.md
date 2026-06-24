@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-24 Public Quote Adapter Runtime Ready Preview
+
+- E3/BB approved a bounded runtime route; trade-core fast-forwarded cleanly to `22f5915b`, focused public quote/adapter/construction tests passed `39`, and PM consumed exactly one public quote helper invocation.
+- Runtime artifacts at `2026-06-24T20:50:15Z` reached `PUBLIC_QUOTE_CAPTURE_READY_NO_ORDER` and `CANDIDATE_CONSTRUCTION_PREVIEW_READY_NO_ORDER` for `grid_trading|AVAXUSDT|Sell`: limit `6.359`, qty `1.5`, notional `9.5385 USDT`, effective BBO age `356.104ms`, all authority/proof flags false.
+- PM read: this is the first fresh no-order construction-ready AVAX checkpoint, not order authority. Bounded authorization latest remains `defer`, and the old standing demo authorization expired at `2026-06-24T20:09:30Z`.
+
 ## 2026-06-24 BBO Freshness Runtime Co-Located Runner Review
 
 - E3 approved a bounded PM-only runtime path; trade-core fast-forwarded cleanly `bdc1e156 -> 8e7bc890`, focused runner+preview tests passed, and `bbo_freshness_colocated_runner.py` ran in explicit `--pg-readonly` mode.
