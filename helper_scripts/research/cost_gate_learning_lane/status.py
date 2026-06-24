@@ -837,6 +837,9 @@ def summarize_cost_gate_learning_lane_loop(
     false_negative_operator_review_latest_path = (
         lane_dir / "false_negative_operator_review_latest.json"
     )
+    false_negative_candidate_friction_scorecard_latest_path = (
+        lane_dir / "false_negative_candidate_friction_scorecard_latest.json"
+    )
 
     heartbeat_present, heartbeat_mtime, heartbeat_age = _file_mtime_age(
         heartbeat_path,
@@ -851,6 +854,9 @@ def summarize_cost_gate_learning_lane_loop(
     )
     false_negative_operator_review_payload, false_negative_operator_review_err = (
         _read_json(false_negative_operator_review_latest_path)
+    )
+    false_negative_candidate_friction_scorecard_payload, false_negative_candidate_friction_scorecard_err = (
+        _read_json(false_negative_candidate_friction_scorecard_latest_path)
     )
 
     status_ts = status_row.get("ts_utc") if status_row else None
@@ -890,6 +896,11 @@ def summarize_cost_gate_learning_lane_loop(
         if status_row
         else None
     )
+    false_negative_candidate_friction_scorecard_rc = (
+        _int(status_row.get("false_negative_candidate_friction_scorecard_rc"))
+        if status_row
+        else None
+    )
     bounded_authority_patch_readiness_rc = (
         _int(status_row.get("bounded_probe_authority_patch_readiness_rc"))
         if status_row
@@ -910,6 +921,12 @@ def summarize_cost_gate_learning_lane_loop(
         status_row.get("refresh_bounded_probe_operator_authorization")
         if status_row
         and isinstance(status_row.get("refresh_bounded_probe_operator_authorization"), bool)
+        else None
+    )
+    refresh_false_negative_candidate_friction_scorecard_enabled = (
+        status_row.get("refresh_false_negative_candidate_friction_scorecard")
+        if status_row
+        and isinstance(status_row.get("refresh_false_negative_candidate_friction_scorecard"), bool)
         else None
     )
     ledger_row_count = (
@@ -1035,6 +1052,94 @@ def summarize_cost_gate_learning_lane_loop(
         "top_review_candidate_net_cost_cushion_bps",
     )
 
+    friction_payload = false_negative_candidate_friction_scorecard_payload or {}
+    friction_summary = friction_payload.get("summary")
+    if not isinstance(friction_summary, dict):
+        friction_summary = {}
+    friction_answers = friction_payload.get("answers")
+    if not isinstance(friction_answers, dict):
+        friction_answers = {}
+
+    def _status_or_friction_payload(status_key: str, payload_key: str) -> Any:
+        if status_row:
+            return status_row.get(status_key)
+        return friction_payload.get(payload_key)
+
+    def _status_or_friction_summary(status_key: str, summary_key: str) -> Any:
+        if status_row:
+            return status_row.get(status_key)
+        return friction_summary.get(summary_key)
+
+    def _status_or_friction_answer(status_key: str, answer_key: str) -> Any:
+        if status_row:
+            return status_row.get(status_key)
+        return friction_answers.get(answer_key)
+
+    friction_scorecard_status = _status_or_friction_payload(
+        "false_negative_candidate_friction_scorecard_status",
+        "status",
+    )
+    friction_scorecard_ready = _status_or_friction_answer(
+        "false_negative_candidate_friction_scorecard_ready",
+        "scorecard_ready",
+    )
+    friction_scorecard_ranked_count = _status_or_friction_summary(
+        "false_negative_candidate_friction_scorecard_ranked_count",
+        "ranked_count",
+    )
+    friction_scorecard_candidate_count = _status_or_friction_summary(
+        "false_negative_candidate_friction_scorecard_candidate_count",
+        "candidate_count",
+    )
+    friction_scorecard_measured_active_candidate_count = (
+        _status_or_friction_summary(
+            "false_negative_candidate_friction_scorecard_measured_active_candidate_count",
+            "measured_active_candidate_count",
+        )
+    )
+    friction_scorecard_top_side_cell_key = _status_or_friction_summary(
+        "false_negative_candidate_friction_scorecard_top_side_cell_key",
+        "top_side_cell_key",
+    )
+    friction_scorecard_top_next_action = _status_or_friction_summary(
+        "false_negative_candidate_friction_scorecard_top_next_action",
+        "top_next_action",
+    )
+    friction_scorecard_bounded_demo_probe_authorized = (
+        _status_or_friction_answer(
+            "false_negative_candidate_friction_scorecard_bounded_demo_probe_authorized",
+            "bounded_demo_probe_authorized",
+        )
+    )
+    friction_scorecard_operator_authorization_object_emitted = (
+        _status_or_friction_answer(
+            "false_negative_candidate_friction_scorecard_operator_authorization_object_emitted",
+            "operator_authorization_object_emitted",
+        )
+    )
+    friction_scorecard_global_cost_gate_lowering_recommended = (
+        _status_or_friction_answer(
+            "false_negative_candidate_friction_scorecard_global_cost_gate_lowering_recommended",
+            "global_cost_gate_lowering_recommended",
+        )
+    )
+    friction_scorecard_main_cost_gate_adjustment = _status_or_friction_answer(
+        "false_negative_candidate_friction_scorecard_main_cost_gate_adjustment",
+        "main_cost_gate_adjustment",
+    )
+    friction_scorecard_probe_authority_granted = _status_or_friction_answer(
+        "false_negative_candidate_friction_scorecard_probe_authority_granted",
+        "probe_authority_granted",
+    )
+    friction_scorecard_order_authority_granted = _status_or_friction_answer(
+        "false_negative_candidate_friction_scorecard_order_authority_granted",
+        "order_authority_granted",
+    )
+    friction_scorecard_promotion_evidence = _status_or_friction_answer(
+        "false_negative_candidate_friction_scorecard_promotion_evidence",
+        "promotion_evidence",
+    )
+
     any_artifact_present = any(
         err is None
         for err in (status_err, materializer_err, refresh_err, review_err)
@@ -1053,6 +1158,7 @@ def summarize_cost_gate_learning_lane_loop(
             or review_rc not in (None, 0)
             or false_negative_candidate_packet_rc not in (None, 0)
             or false_negative_operator_review_rc not in (None, 0)
+            or false_negative_candidate_friction_scorecard_rc not in (None, 0)
             or bounded_authority_patch_readiness_rc not in (None, 0)
             or bounded_operator_authorization_rc not in (None, 0)
         ):
@@ -1143,6 +1249,12 @@ def summarize_cost_gate_learning_lane_loop(
         "learning_loop_false_negative_operator_review_latest_error": (
             false_negative_operator_review_err
         ),
+        "learning_loop_false_negative_candidate_friction_scorecard_latest_path": str(
+            false_negative_candidate_friction_scorecard_latest_path
+        ),
+        "learning_loop_false_negative_candidate_friction_scorecard_latest_error": (
+            false_negative_candidate_friction_scorecard_err
+        ),
         "learning_loop_materialize_rejects_enabled": materialize_rejects_enabled,
         "learning_loop_append_materialized_rejects_enabled": (
             append_materialized_rejects_enabled
@@ -1183,6 +1295,54 @@ def summarize_cost_gate_learning_lane_loop(
             status_row.get("false_negative_operator_review_status")
             if status_row
             else (false_negative_operator_review_payload or {}).get("status")
+        ),
+        "learning_loop_refresh_false_negative_candidate_friction_scorecard_enabled": (
+            refresh_false_negative_candidate_friction_scorecard_enabled
+        ),
+        "learning_loop_last_false_negative_candidate_friction_scorecard_rc": (
+            false_negative_candidate_friction_scorecard_rc
+        ),
+        "learning_loop_last_false_negative_candidate_friction_scorecard_status": (
+            friction_scorecard_status
+        ),
+        "learning_loop_last_false_negative_candidate_friction_scorecard_ready": (
+            friction_scorecard_ready
+        ),
+        "learning_loop_last_false_negative_candidate_friction_scorecard_ranked_count": (
+            friction_scorecard_ranked_count
+        ),
+        "learning_loop_last_false_negative_candidate_friction_scorecard_candidate_count": (
+            friction_scorecard_candidate_count
+        ),
+        "learning_loop_last_false_negative_candidate_friction_scorecard_measured_active_candidate_count": (
+            friction_scorecard_measured_active_candidate_count
+        ),
+        "learning_loop_last_false_negative_candidate_friction_scorecard_top_side_cell_key": (
+            friction_scorecard_top_side_cell_key
+        ),
+        "learning_loop_last_false_negative_candidate_friction_scorecard_top_next_action": (
+            friction_scorecard_top_next_action
+        ),
+        "learning_loop_last_false_negative_candidate_friction_scorecard_bounded_demo_probe_authorized": (
+            friction_scorecard_bounded_demo_probe_authorized
+        ),
+        "learning_loop_last_false_negative_candidate_friction_scorecard_operator_authorization_object_emitted": (
+            friction_scorecard_operator_authorization_object_emitted
+        ),
+        "learning_loop_last_false_negative_candidate_friction_scorecard_global_cost_gate_lowering_recommended": (
+            friction_scorecard_global_cost_gate_lowering_recommended
+        ),
+        "learning_loop_last_false_negative_candidate_friction_scorecard_main_cost_gate_adjustment": (
+            friction_scorecard_main_cost_gate_adjustment
+        ),
+        "learning_loop_last_false_negative_candidate_friction_scorecard_probe_authority_granted": (
+            friction_scorecard_probe_authority_granted
+        ),
+        "learning_loop_last_false_negative_candidate_friction_scorecard_order_authority_granted": (
+            friction_scorecard_order_authority_granted
+        ),
+        "learning_loop_last_false_negative_candidate_friction_scorecard_promotion_evidence": (
+            friction_scorecard_promotion_evidence
         ),
         "learning_loop_refresh_bounded_probe_authority_patch_readiness_enabled": (
             refresh_bounded_authority_patch_readiness_enabled

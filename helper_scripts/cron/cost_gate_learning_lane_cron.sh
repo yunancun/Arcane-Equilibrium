@@ -37,6 +37,8 @@ FALSE_NEGATIVE_CANDIDATE_PACKET_JSON="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDID
 FALSE_NEGATIVE_CANDIDATE_PACKET_MD="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDIDATE_PACKET_MD:-$LANE_DIR/false_negative_candidate_packet_latest.md}"
 FALSE_NEGATIVE_OPERATOR_REVIEW_JSON="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_OPERATOR_REVIEW_JSON:-$LANE_DIR/false_negative_operator_review_latest.json}"
 FALSE_NEGATIVE_OPERATOR_REVIEW_MD="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_OPERATOR_REVIEW_MD:-$LANE_DIR/false_negative_operator_review_latest.md}"
+FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_JSON="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_JSON:-$LANE_DIR/false_negative_candidate_friction_scorecard_latest.json}"
+FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MD="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MD:-$LANE_DIR/false_negative_candidate_friction_scorecard_latest.md}"
 LEARNING_SSOT_DECISION_JSON="${OPENCLAW_COST_GATE_LEARNING_SSOT_DECISION_JSON:-$LANE_DIR/learning_ssot_decision_latest.json}"
 LEARNING_SSOT_DECISION_MD="${OPENCLAW_COST_GATE_LEARNING_SSOT_DECISION_MD:-$LANE_DIR/learning_ssot_decision_latest.md}"
 AUTONOMOUS_PARAMETER_PROPOSAL_JSON="${OPENCLAW_COST_GATE_AUTONOMOUS_PARAMETER_PROPOSAL_JSON:-$LANE_DIR/autonomous_parameter_proposal_latest.json}"
@@ -60,6 +62,7 @@ REFRESH_ORDER_TOUCHABILITY_AUDIT="${OPENCLAW_COST_GATE_REFRESH_ORDER_TOUCHABILIT
 REFRESH_DECISION_PACKET="${OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET:-1}"
 REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET="${OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET:-1}"
 REFRESH_FALSE_NEGATIVE_OPERATOR_REVIEW="${OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_OPERATOR_REVIEW:-1}"
+REFRESH_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD="${OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD:-1}"
 REFRESH_LEARNING_SSOT_DECISION="${OPENCLAW_COST_GATE_REFRESH_LEARNING_SSOT_DECISION:-1}"
 REFRESH_AUTONOMOUS_PARAMETER_PROPOSAL="${OPENCLAW_COST_GATE_REFRESH_AUTONOMOUS_PARAMETER_PROPOSAL:-1}"
 REFRESH_FALSE_NEGATIVE_BOUNDED_PROBE_PREFLIGHT="${OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_BOUNDED_PROBE_PREFLIGHT:-1}"
@@ -118,6 +121,8 @@ PLACEMENT_REPAIR_MAX_FRESH_BBO_AGE_MS="${OPENCLAW_COST_GATE_PLACEMENT_REPAIR_MAX
 AUTHORITY_PATCH_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_AUTHORITY_PATCH_MAX_ARTIFACT_AGE_HOURS:-24}"
 OPERATOR_AUTHORIZATION_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_OPERATOR_AUTHORIZATION_MAX_ARTIFACT_AGE_HOURS:-24}"
 FALSE_NEGATIVE_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS:-24}"
+FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MAX_ARTIFACT_AGE_HOURS:-24}"
+FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_TOP_LIMIT="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_TOP_LIMIT:-16}"
 SHADOW_PLACEMENT_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_SHADOW_PLACEMENT_MAX_ARTIFACT_AGE_HOURS:-24}"
 STALE_LOCK_MIN="${OPENCLAW_COST_GATE_LEARNING_STALE_LOCK_MIN:-30}"
 
@@ -173,6 +178,7 @@ validate_bool01 "OPENCLAW_COST_GATE_REFRESH_ORDER_TOUCHABILITY_AUDIT" "$REFRESH_
 validate_bool01 "OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET" "$REFRESH_DECISION_PACKET"
 validate_bool01 "OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET" "$REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET"
 validate_bool01 "OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_OPERATOR_REVIEW" "$REFRESH_FALSE_NEGATIVE_OPERATOR_REVIEW"
+validate_bool01 "OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD" "$REFRESH_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD"
 validate_bool01 "OPENCLAW_COST_GATE_REFRESH_LEARNING_SSOT_DECISION" "$REFRESH_LEARNING_SSOT_DECISION"
 validate_bool01 "OPENCLAW_COST_GATE_REFRESH_AUTONOMOUS_PARAMETER_PROPOSAL" "$REFRESH_AUTONOMOUS_PARAMETER_PROPOSAL"
 validate_bool01 "OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_BOUNDED_PROBE_PREFLIGHT" "$REFRESH_FALSE_NEGATIVE_BOUNDED_PROBE_PREFLIGHT"
@@ -242,6 +248,8 @@ validate_int "OPENCLAW_COST_GATE_PLACEMENT_REPAIR_MAX_FRESH_BBO_AGE_MS" "$PLACEM
 validate_int "OPENCLAW_COST_GATE_AUTHORITY_PATCH_MAX_ARTIFACT_AGE_HOURS" "$AUTHORITY_PATCH_MAX_ARTIFACT_AGE_HOURS"
 validate_int "OPENCLAW_COST_GATE_OPERATOR_AUTHORIZATION_MAX_ARTIFACT_AGE_HOURS" "$OPERATOR_AUTHORIZATION_MAX_ARTIFACT_AGE_HOURS"
 validate_int "OPENCLAW_COST_GATE_FALSE_NEGATIVE_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS" "$FALSE_NEGATIVE_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS"
+validate_int "OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MAX_ARTIFACT_AGE_HOURS" "$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MAX_ARTIFACT_AGE_HOURS"
+validate_int "OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_TOP_LIMIT" "$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_TOP_LIMIT"
 validate_int "OPENCLAW_COST_GATE_SHADOW_PLACEMENT_MAX_ARTIFACT_AGE_HOURS" "$SHADOW_PLACEMENT_MAX_ARTIFACT_AGE_HOURS"
 validate_int "OPENCLAW_COST_GATE_LEARNING_STALE_LOCK_MIN" "$STALE_LOCK_MIN"
 
@@ -317,6 +325,10 @@ FALSE_NEGATIVE_OPERATOR_REVIEW_OUT="${LANE_DIR}/false_negative_operator_review_$
 FALSE_NEGATIVE_OPERATOR_REVIEW_MD_OUT="${LANE_DIR}/false_negative_operator_review_${STAMP}.md"
 FALSE_NEGATIVE_OPERATOR_REVIEW_LATEST="$FALSE_NEGATIVE_OPERATOR_REVIEW_JSON"
 FALSE_NEGATIVE_OPERATOR_REVIEW_MD_LATEST="$FALSE_NEGATIVE_OPERATOR_REVIEW_MD"
+FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_OUT="${LANE_DIR}/false_negative_candidate_friction_scorecard_${STAMP}.json"
+FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MD_OUT="${LANE_DIR}/false_negative_candidate_friction_scorecard_${STAMP}.md"
+FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_LATEST="$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_JSON"
+FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MD_LATEST="$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MD"
 LEARNING_SSOT_DECISION_OUT="${LANE_DIR}/learning_ssot_decision_${STAMP}.json"
 LEARNING_SSOT_DECISION_MD_OUT="${LANE_DIR}/learning_ssot_decision_${STAMP}.md"
 LEARNING_SSOT_DECISION_LATEST="$LEARNING_SSOT_DECISION_JSON"
@@ -554,6 +566,18 @@ BOUNDED_PROBE_OPERATOR_AUTHORIZATION_ARGS=(
     --output "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD_OUT"
 )
 
+FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_ARGS=(
+    -m cost_gate_learning_lane.false_negative_candidate_friction_scorecard
+    --false-negative-candidate-packet-json "$FALSE_NEGATIVE_CANDIDATE_PACKET_OUT"
+    --touchability-preflight-json "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT"
+    --placement-repair-plan-json "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT"
+    --operator-authorization-json "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT"
+    --max-artifact-age-hours "$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MAX_ARTIFACT_AGE_HOURS"
+    --top-limit "$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_TOP_LIMIT"
+    --json-output "$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_OUT"
+    --output "$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MD_OUT"
+)
+
 BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_ARGS=(
     -m cost_gate_learning_lane.bounded_probe_shadow_placement_impact
     --order-to-fill-gap-json "$ORDER_TOUCHABILITY_JSON"
@@ -658,6 +682,7 @@ bounded_probe_touchability_preflight_rc=0
 bounded_probe_placement_repair_plan_rc=0
 bounded_probe_authority_patch_readiness_rc=0
 bounded_probe_operator_authorization_rc=0
+false_negative_candidate_friction_scorecard_rc=0
 bounded_probe_shadow_placement_impact_rc=0
 bounded_probe_result_review_rc=0
 bounded_probe_execution_realism_review_rc=0
@@ -672,6 +697,7 @@ order_touchability_audit_skip_reason=""
 bounded_probe_placement_repair_plan_skip_reason=""
 bounded_probe_authority_patch_readiness_skip_reason=""
 bounded_probe_operator_authorization_skip_reason=""
+false_negative_candidate_friction_scorecard_skip_reason=""
 bounded_probe_shadow_placement_impact_skip_reason=""
 bounded_probe_result_review_skip_reason=""
 bounded_probe_execution_realism_review_skip_reason=""
@@ -687,10 +713,11 @@ if [[ "$PREINSTALL_REFRESH_ONLY" == "1" ]]; then
     bounded_probe_placement_repair_plan_skip_reason="preinstall_refresh_only"
     bounded_probe_authority_patch_readiness_skip_reason="preinstall_refresh_only"
     bounded_probe_operator_authorization_skip_reason="preinstall_refresh_only"
+    false_negative_candidate_friction_scorecard_skip_reason="preinstall_refresh_only"
     bounded_probe_shadow_placement_impact_skip_reason="preinstall_refresh_only"
     bounded_probe_result_review_skip_reason="preinstall_refresh_only"
     bounded_probe_execution_realism_review_skip_reason="preinstall_refresh_only"
-    echo "[$(ts)] SKIP: preinstall refresh-only mode; refreshed scorecard/plan, skipped historical/materializer/outcome/review/false-negative packet/false-negative operator review/learning ssot/autonomous proposal/false-negative preflight/sealed evidence/bounded-probe stages" >> "$LOG"
+    echo "[$(ts)] SKIP: preinstall refresh-only mode; refreshed scorecard/plan, skipped historical/materializer/outcome/review/false-negative packet/false-negative operator review/learning ssot/autonomous proposal/false-negative preflight/sealed evidence/bounded-probe/friction-scorecard stages" >> "$LOG"
 else
     (
         cd "$BASE"
@@ -983,6 +1010,24 @@ PY
         echo "[$(ts)] SKIP: bounded probe operator authorization packet disabled by OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION=0" >> "$LOG"
     fi
 
+    if [[ "$REFRESH_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD" == "1" ]]; then
+        (
+            cd "$BASE"
+            export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
+            export PYTHONDONTWRITEBYTECODE=1
+            "$PYBIN" "${FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_ARGS[@]}"
+        ) >> "$LOG" 2>&1 || false_negative_candidate_friction_scorecard_rc=$?
+        if [[ -f "$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_OUT" ]]; then
+            cp "$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_OUT" "$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_LATEST"
+            if [[ -f "$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MD_OUT" ]]; then
+                cp "$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MD_OUT" "$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MD_LATEST"
+            fi
+        fi
+    else
+        false_negative_candidate_friction_scorecard_skip_reason="disabled"
+        echo "[$(ts)] SKIP: false-negative candidate friction scorecard disabled by OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD=0" >> "$LOG"
+    fi
+
     if [[ "$REFRESH_BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT" == "1" ]]; then
         (
             cd "$BASE"
@@ -1108,6 +1153,11 @@ export BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST="$BOUNDED_PROBE_OPERATOR_AUTH
 export BOUNDED_PROBE_OPERATOR_AUTHORIZATION_RC="$bounded_probe_operator_authorization_rc"
 export BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SKIP_REASON="$bounded_probe_operator_authorization_skip_reason"
 export REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION="$REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION"
+export FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_OUT="$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_OUT"
+export FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_LATEST="$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_LATEST"
+export FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_RC="$false_negative_candidate_friction_scorecard_rc"
+export FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_SKIP_REASON="$false_negative_candidate_friction_scorecard_skip_reason"
+export REFRESH_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD="$REFRESH_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD"
 export HORIZON_SEALED_REPLAY_JSON="$HORIZON_SEALED_REPLAY_JSON"
 export SEALED_LEARNING_EVIDENCE_OUT="$SEALED_LEARNING_EVIDENCE_OUT"
 export SEALED_LEARNING_EVIDENCE_JSON="$SEALED_LEARNING_EVIDENCE_JSON"
@@ -1120,7 +1170,7 @@ export SEALED_HORIZON_LEARNING_EVIDENCE_SKIP_REASON="$sealed_horizon_learning_ev
 export REFRESH_SEALED_HORIZON_LEARNING_EVIDENCE="$REFRESH_SEALED_HORIZON_LEARNING_EVIDENCE"
 export APPEND_SEALED_HORIZON_LEARNING_EVIDENCE="$APPEND_SEALED_HORIZON_LEARNING_EVIDENCE"
 
-STATUS_JSON=$(SCORECARD_JSON_OUT="$SCORECARD_JSON_OUT" SCORECARD_JSON="$SCORECARD_JSON" SCORECARD_RC="$scorecard_rc" REFRESH_SCORECARD="$REFRESH_SCORECARD" DATA_FLOW_JSON_OUT="$DATA_FLOW_JSON_OUT" DATA_FLOW_JSON="$DATA_FLOW_JSON" DATA_FLOW_MONITOR_RC="$data_flow_monitor_rc" REFRESH_DATA_FLOW_MONITOR="$REFRESH_DATA_FLOW_MONITOR" ORDER_TOUCHABILITY_JSON_OUT="$ORDER_TOUCHABILITY_JSON_OUT" ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" ORDER_TOUCHABILITY_AUDIT_RC="$order_touchability_audit_rc" ORDER_TOUCHABILITY_AUDIT_SKIP_REASON="$order_touchability_audit_skip_reason" REFRESH_ORDER_TOUCHABILITY_AUDIT="$REFRESH_ORDER_TOUCHABILITY_AUDIT" DECISION_PACKET_JSON_OUT="$DECISION_PACKET_JSON_OUT" DECISION_PACKET_JSON="$DECISION_PACKET_JSON" DECISION_PACKET_RC="$decision_packet_rc" REFRESH_DECISION_PACKET="$REFRESH_DECISION_PACKET" PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN" PREINSTALL_REFRESH_ONLY="$PREINSTALL_REFRESH_ONLY" HISTORICAL_REVIEW_OUT="$HISTORICAL_REVIEW_OUT" MATERIALIZER_OUT="$MATERIALIZER_OUT" REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" BOUNDED_PROBE_PREFLIGHT_JSON="$BOUNDED_PROBE_PREFLIGHT_SOURCE_JSON" ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT="$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST="$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT="$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST="$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST" BOUNDED_PROBE_RESULT_REVIEW_OUT="$BOUNDED_PROBE_RESULT_REVIEW_OUT" BOUNDED_PROBE_RESULT_REVIEW_LATEST="$BOUNDED_PROBE_RESULT_REVIEW_LATEST" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST" HISTORICAL_REVIEW_RC="$historical_review_rc" MATERIALIZER_RC="$materializer_rc" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_RC="$bounded_probe_touchability_preflight_rc" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_RC="$bounded_probe_placement_repair_plan_rc" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_RC="$bounded_probe_authority_patch_readiness_rc" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_RC="$bounded_probe_operator_authorization_rc" BOUNDED_PROBE_RESULT_REVIEW_RC="$bounded_probe_result_review_rc" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_RC="$bounded_probe_execution_realism_review_rc" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_SKIP_REASON="$bounded_probe_touchability_preflight_skip_reason" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_SKIP_REASON="$bounded_probe_placement_repair_plan_skip_reason" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_SKIP_REASON="$bounded_probe_authority_patch_readiness_skip_reason" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SKIP_REASON="$bounded_probe_operator_authorization_skip_reason" BOUNDED_PROBE_RESULT_REVIEW_SKIP_REASON="$bounded_probe_result_review_skip_reason" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_SKIP_REASON="$bounded_probe_execution_realism_review_skip_reason" REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT="$REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT" REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN="$REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN" REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS="$REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS" REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION="$REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION" REFRESH_BOUNDED_PROBE_RESULT_REVIEW="$REFRESH_BOUNDED_PROBE_RESULT_REVIEW" REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW="$REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW" LEDGER="$LEDGER" MATERIALIZE_REJECTS="$MATERIALIZE_REJECTS" APPEND_MATERIALIZED_REJECTS="$APPEND_MATERIALIZED_REJECTS" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
+STATUS_JSON=$(SCORECARD_JSON_OUT="$SCORECARD_JSON_OUT" SCORECARD_JSON="$SCORECARD_JSON" SCORECARD_RC="$scorecard_rc" REFRESH_SCORECARD="$REFRESH_SCORECARD" DATA_FLOW_JSON_OUT="$DATA_FLOW_JSON_OUT" DATA_FLOW_JSON="$DATA_FLOW_JSON" DATA_FLOW_MONITOR_RC="$data_flow_monitor_rc" REFRESH_DATA_FLOW_MONITOR="$REFRESH_DATA_FLOW_MONITOR" ORDER_TOUCHABILITY_JSON_OUT="$ORDER_TOUCHABILITY_JSON_OUT" ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" ORDER_TOUCHABILITY_AUDIT_RC="$order_touchability_audit_rc" ORDER_TOUCHABILITY_AUDIT_SKIP_REASON="$order_touchability_audit_skip_reason" REFRESH_ORDER_TOUCHABILITY_AUDIT="$REFRESH_ORDER_TOUCHABILITY_AUDIT" DECISION_PACKET_JSON_OUT="$DECISION_PACKET_JSON_OUT" DECISION_PACKET_JSON="$DECISION_PACKET_JSON" DECISION_PACKET_RC="$decision_packet_rc" REFRESH_DECISION_PACKET="$REFRESH_DECISION_PACKET" PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN" PREINSTALL_REFRESH_ONLY="$PREINSTALL_REFRESH_ONLY" HISTORICAL_REVIEW_OUT="$HISTORICAL_REVIEW_OUT" MATERIALIZER_OUT="$MATERIALIZER_OUT" REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" BOUNDED_PROBE_PREFLIGHT_JSON="$BOUNDED_PROBE_PREFLIGHT_SOURCE_JSON" ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT="$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST="$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT="$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST="$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST" FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_OUT="$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_OUT" FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_LATEST="$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_LATEST" BOUNDED_PROBE_RESULT_REVIEW_OUT="$BOUNDED_PROBE_RESULT_REVIEW_OUT" BOUNDED_PROBE_RESULT_REVIEW_LATEST="$BOUNDED_PROBE_RESULT_REVIEW_LATEST" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST" HISTORICAL_REVIEW_RC="$historical_review_rc" MATERIALIZER_RC="$materializer_rc" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_RC="$bounded_probe_touchability_preflight_rc" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_RC="$bounded_probe_placement_repair_plan_rc" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_RC="$bounded_probe_authority_patch_readiness_rc" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_RC="$bounded_probe_operator_authorization_rc" FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_RC="$false_negative_candidate_friction_scorecard_rc" BOUNDED_PROBE_RESULT_REVIEW_RC="$bounded_probe_result_review_rc" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_RC="$bounded_probe_execution_realism_review_rc" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_SKIP_REASON="$bounded_probe_touchability_preflight_skip_reason" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_SKIP_REASON="$bounded_probe_placement_repair_plan_skip_reason" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_SKIP_REASON="$bounded_probe_authority_patch_readiness_skip_reason" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SKIP_REASON="$bounded_probe_operator_authorization_skip_reason" FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_SKIP_REASON="$false_negative_candidate_friction_scorecard_skip_reason" BOUNDED_PROBE_RESULT_REVIEW_SKIP_REASON="$bounded_probe_result_review_skip_reason" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_SKIP_REASON="$bounded_probe_execution_realism_review_skip_reason" REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT="$REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT" REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN="$REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN" REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS="$REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS" REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION="$REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION" REFRESH_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD="$REFRESH_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD" REFRESH_BOUNDED_PROBE_RESULT_REVIEW="$REFRESH_BOUNDED_PROBE_RESULT_REVIEW" REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW="$REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW" LEDGER="$LEDGER" MATERIALIZE_REJECTS="$MATERIALIZE_REJECTS" APPEND_MATERIALIZED_REJECTS="$APPEND_MATERIALIZED_REJECTS" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
 import datetime
 import hashlib
 import json
@@ -1180,6 +1230,9 @@ bounded_authority, bounded_authority_sha, bounded_authority_err = load(
 bounded_operator_auth, bounded_operator_auth_sha, bounded_operator_auth_err = load(
     os.environ["BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT"]
 )
+false_negative_friction, false_negative_friction_sha, false_negative_friction_err = load(
+    os.environ["FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_OUT"]
+)
 bounded_shadow, bounded_shadow_sha, bounded_shadow_err = load(
     os.environ["BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT"]
 )
@@ -1216,6 +1269,7 @@ status = {
     "bounded_probe_placement_repair_plan_rc": int(os.environ["BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_RC"]),
     "bounded_probe_authority_patch_readiness_rc": int(os.environ["BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_RC"]),
     "bounded_probe_operator_authorization_rc": int(os.environ["BOUNDED_PROBE_OPERATOR_AUTHORIZATION_RC"]),
+    "false_negative_candidate_friction_scorecard_rc": int(os.environ["FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_RC"]),
     "bounded_probe_shadow_placement_impact_rc": int(os.environ["BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_RC"]),
     "bounded_probe_result_review_rc": int(os.environ["BOUNDED_PROBE_RESULT_REVIEW_RC"]),
     "bounded_probe_execution_realism_review_rc": int(os.environ["BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_RC"]),
@@ -1236,6 +1290,7 @@ status = {
     "refresh_bounded_probe_placement_repair_plan": os.environ["REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN"] == "1",
     "refresh_bounded_probe_authority_patch_readiness": os.environ["REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS"] == "1",
     "refresh_bounded_probe_operator_authorization": os.environ["REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION"] == "1",
+    "refresh_false_negative_candidate_friction_scorecard": os.environ["REFRESH_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD"] == "1",
     "refresh_bounded_probe_shadow_placement_impact": os.environ["REFRESH_BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT"] == "1",
     "refresh_bounded_probe_result_review": os.environ["REFRESH_BOUNDED_PROBE_RESULT_REVIEW"] == "1",
     "refresh_bounded_probe_execution_realism_review": os.environ["REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW"] == "1",
@@ -1646,6 +1701,78 @@ status = {
     ),
     "bounded_probe_operator_authorization_typed_confirm_expected": bounded_operator_auth.get("typed_confirm_expected"),
     "bounded_probe_operator_authorization_source_candidate_max_probe_orders": bounded_operator_auth.get("source_candidate_max_probe_orders"),
+    "false_negative_candidate_friction_scorecard_artifact_path": os.environ["FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_OUT"],
+    "false_negative_candidate_friction_scorecard_latest_path": os.environ["FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_LATEST"],
+    "false_negative_candidate_friction_scorecard_sha256": false_negative_friction_sha,
+    "false_negative_candidate_friction_scorecard_error": false_negative_friction_err,
+    "false_negative_candidate_friction_scorecard_skip_reason": os.environ["FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_SKIP_REASON"] or None,
+    "false_negative_candidate_friction_scorecard_status": false_negative_friction.get("status"),
+    "false_negative_candidate_friction_scorecard_reason": false_negative_friction.get("reason"),
+    "false_negative_candidate_friction_scorecard_ranked_count": (
+        (false_negative_friction.get("summary") or {}).get("ranked_count")
+        if isinstance(false_negative_friction.get("summary"), dict)
+        else None
+    ),
+    "false_negative_candidate_friction_scorecard_candidate_count": (
+        (false_negative_friction.get("summary") or {}).get("candidate_count")
+        if isinstance(false_negative_friction.get("summary"), dict)
+        else None
+    ),
+    "false_negative_candidate_friction_scorecard_measured_active_candidate_count": (
+        (false_negative_friction.get("summary") or {}).get("measured_active_candidate_count")
+        if isinstance(false_negative_friction.get("summary"), dict)
+        else None
+    ),
+    "false_negative_candidate_friction_scorecard_top_side_cell_key": (
+        (false_negative_friction.get("summary") or {}).get("top_side_cell_key")
+        if isinstance(false_negative_friction.get("summary"), dict)
+        else None
+    ),
+    "false_negative_candidate_friction_scorecard_top_next_action": (
+        (false_negative_friction.get("summary") or {}).get("top_next_action")
+        if isinstance(false_negative_friction.get("summary"), dict)
+        else None
+    ),
+    "false_negative_candidate_friction_scorecard_ready": (
+        (false_negative_friction.get("answers") or {}).get("scorecard_ready")
+        if isinstance(false_negative_friction.get("answers"), dict)
+        else None
+    ),
+    "false_negative_candidate_friction_scorecard_bounded_demo_probe_authorized": (
+        (false_negative_friction.get("answers") or {}).get("bounded_demo_probe_authorized")
+        if isinstance(false_negative_friction.get("answers"), dict)
+        else None
+    ),
+    "false_negative_candidate_friction_scorecard_operator_authorization_object_emitted": (
+        (false_negative_friction.get("answers") or {}).get("operator_authorization_object_emitted")
+        if isinstance(false_negative_friction.get("answers"), dict)
+        else None
+    ),
+    "false_negative_candidate_friction_scorecard_global_cost_gate_lowering_recommended": (
+        (false_negative_friction.get("answers") or {}).get("global_cost_gate_lowering_recommended")
+        if isinstance(false_negative_friction.get("answers"), dict)
+        else None
+    ),
+    "false_negative_candidate_friction_scorecard_main_cost_gate_adjustment": (
+        (false_negative_friction.get("answers") or {}).get("main_cost_gate_adjustment")
+        if isinstance(false_negative_friction.get("answers"), dict)
+        else None
+    ),
+    "false_negative_candidate_friction_scorecard_probe_authority_granted": (
+        (false_negative_friction.get("answers") or {}).get("probe_authority_granted")
+        if isinstance(false_negative_friction.get("answers"), dict)
+        else None
+    ),
+    "false_negative_candidate_friction_scorecard_order_authority_granted": (
+        (false_negative_friction.get("answers") or {}).get("order_authority_granted")
+        if isinstance(false_negative_friction.get("answers"), dict)
+        else None
+    ),
+    "false_negative_candidate_friction_scorecard_promotion_evidence": (
+        (false_negative_friction.get("answers") or {}).get("promotion_evidence")
+        if isinstance(false_negative_friction.get("answers"), dict)
+        else None
+    ),
     "bounded_probe_shadow_placement_impact_artifact_path": os.environ["BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT"],
     "bounded_probe_shadow_placement_impact_latest_path": os.environ["BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_LATEST"],
     "bounded_probe_shadow_placement_impact_sha256": bounded_shadow_sha,
@@ -1754,7 +1881,7 @@ if [[ -n "$STATUS_JSON" ]]; then
     echo "$STATUS_JSON" >> "$STATUS_LOG"
 fi
 
-echo "[$(ts)] === Cost-gate learning lane refresh end scorecard_rc=${scorecard_rc} plan_rc=${plan_rc} historical_review_rc=${historical_review_rc} materializer_rc=${materializer_rc} refresh_rc=${refresh_rc} review_rc=${review_rc} false_negative_candidate_packet_rc=${false_negative_candidate_packet_rc} false_negative_operator_review_rc=${false_negative_operator_review_rc} learning_ssot_decision_rc=${learning_ssot_decision_rc} autonomous_parameter_proposal_rc=${autonomous_parameter_proposal_rc} false_negative_bounded_preflight_rc=${false_negative_bounded_preflight_rc} sealed_horizon_learning_evidence_rc=${sealed_horizon_learning_evidence_rc} order_touchability_audit_rc=${order_touchability_audit_rc} bounded_probe_touchability_preflight_rc=${bounded_probe_touchability_preflight_rc} bounded_probe_placement_repair_plan_rc=${bounded_probe_placement_repair_plan_rc} bounded_probe_authority_patch_readiness_rc=${bounded_probe_authority_patch_readiness_rc} bounded_probe_operator_authorization_rc=${bounded_probe_operator_authorization_rc} bounded_probe_shadow_placement_impact_rc=${bounded_probe_shadow_placement_impact_rc} bounded_probe_result_review_rc=${bounded_probe_result_review_rc} bounded_probe_execution_realism_review_rc=${bounded_probe_execution_realism_review_rc} ===" >> "$LOG"
+echo "[$(ts)] === Cost-gate learning lane refresh end scorecard_rc=${scorecard_rc} plan_rc=${plan_rc} historical_review_rc=${historical_review_rc} materializer_rc=${materializer_rc} refresh_rc=${refresh_rc} review_rc=${review_rc} false_negative_candidate_packet_rc=${false_negative_candidate_packet_rc} false_negative_operator_review_rc=${false_negative_operator_review_rc} learning_ssot_decision_rc=${learning_ssot_decision_rc} autonomous_parameter_proposal_rc=${autonomous_parameter_proposal_rc} false_negative_bounded_preflight_rc=${false_negative_bounded_preflight_rc} sealed_horizon_learning_evidence_rc=${sealed_horizon_learning_evidence_rc} order_touchability_audit_rc=${order_touchability_audit_rc} bounded_probe_touchability_preflight_rc=${bounded_probe_touchability_preflight_rc} bounded_probe_placement_repair_plan_rc=${bounded_probe_placement_repair_plan_rc} bounded_probe_authority_patch_readiness_rc=${bounded_probe_authority_patch_readiness_rc} bounded_probe_operator_authorization_rc=${bounded_probe_operator_authorization_rc} false_negative_candidate_friction_scorecard_rc=${false_negative_candidate_friction_scorecard_rc} bounded_probe_shadow_placement_impact_rc=${bounded_probe_shadow_placement_impact_rc} bounded_probe_result_review_rc=${bounded_probe_result_review_rc} bounded_probe_execution_realism_review_rc=${bounded_probe_execution_realism_review_rc} ===" >> "$LOG"
 
 # fail-soft: rc/status are recorded; alpha-discovery reads artifacts and ledger
 # state. Operator action is required for deploy, writer enablement, or probe authority.

@@ -56,6 +56,7 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "blocked_outcome_review_latest.json" in src
     assert "false_negative_candidate_packet_latest.json" in src
     assert "false_negative_operator_review_latest.json" in src
+    assert "false_negative_candidate_friction_scorecard_latest.json" in src
     assert "learning_ssot_decision_latest.json" in src
     assert "autonomous_parameter_proposal_latest.json" in src
     assert "false_negative_bounded_probe_preflight_latest.json" in src
@@ -79,6 +80,7 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "cost_gate_learning_lane.outcome_review" in src
     assert "cost_gate_learning_lane.false_negative_candidate_packet" in src
     assert "cost_gate_learning_lane.false_negative_operator_review" in src
+    assert "cost_gate_learning_lane.false_negative_candidate_friction_scorecard" in src
     assert "cost_gate_learning_lane.learning_ssot_decision" in src
     assert "cost_gate_learning_lane.autonomous_parameter_proposal" in src
     assert "cost_gate_learning_lane.false_negative_bounded_probe_preflight" in src
@@ -126,6 +128,15 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "false_negative_operator_review_bounded_demo_probe_preflight_approved" in src
     assert "false_negative_operator_review_review_grants_runtime_authority" in src
     assert "false_negative_operator_review_order_authority_granted" in src
+    assert "false_negative_candidate_friction_scorecard_status" in src
+    assert "false_negative_candidate_friction_scorecard_ranked_count" in src
+    assert "false_negative_candidate_friction_scorecard_top_side_cell_key" in src
+    assert "false_negative_candidate_friction_scorecard_top_next_action" in src
+    assert "false_negative_candidate_friction_scorecard_bounded_demo_probe_authorized" in src
+    assert "false_negative_candidate_friction_scorecard_operator_authorization_object_emitted" in src
+    assert "false_negative_candidate_friction_scorecard_probe_authority_granted" in src
+    assert "false_negative_candidate_friction_scorecard_order_authority_granted" in src
+    assert "false_negative_candidate_friction_scorecard_promotion_evidence" in src
     assert "learning_ssot_decision_status" in src
     assert "learning_ssot_decision_current_ssot" in src
     assert "autonomous_parameter_proposal_status" in src
@@ -172,6 +183,9 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET" in src
     assert "OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET" in src
     assert "OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_OPERATOR_REVIEW" in src
+    assert "OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD" in src
+    assert "OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MAX_ARTIFACT_AGE_HOURS" in src
+    assert "OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_TOP_LIMIT" in src
     assert "OPENCLAW_COST_GATE_REFRESH_LEARNING_SSOT_DECISION" in src
     assert "OPENCLAW_COST_GATE_REFRESH_AUTONOMOUS_PARAMETER_PROPOSAL" in src
     assert "OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_BOUNDED_PROBE_PREFLIGHT" in src
@@ -214,6 +228,7 @@ def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     assert 'REFRESH_DECISION_PACKET="${OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET:-1}"' in src
     assert 'REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET="${OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_CANDIDATE_PACKET:-1}"' in src
     assert 'REFRESH_FALSE_NEGATIVE_OPERATOR_REVIEW="${OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_OPERATOR_REVIEW:-1}"' in src
+    assert 'REFRESH_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD="${OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD:-1}"' in src
     assert 'REFRESH_LEARNING_SSOT_DECISION="${OPENCLAW_COST_GATE_REFRESH_LEARNING_SSOT_DECISION:-1}"' in src
     assert 'REFRESH_AUTONOMOUS_PARAMETER_PROPOSAL="${OPENCLAW_COST_GATE_REFRESH_AUTONOMOUS_PARAMETER_PROPOSAL:-1}"' in src
     assert 'REFRESH_FALSE_NEGATIVE_BOUNDED_PROBE_PREFLIGHT="${OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_BOUNDED_PROBE_PREFLIGHT:-1}"' in src
@@ -267,12 +282,15 @@ def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     assert 'AUTHORITY_PATCH_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_AUTHORITY_PATCH_MAX_ARTIFACT_AGE_HOURS:-24}"' in src
     assert 'OPERATOR_AUTHORIZATION_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_OPERATOR_AUTHORIZATION_MAX_ARTIFACT_AGE_HOURS:-24}"' in src
     assert 'FALSE_NEGATIVE_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS:-24}"' in src
+    assert 'FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MAX_ARTIFACT_AGE_HOURS:-24}"' in src
+    assert 'FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_TOP_LIMIT="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_TOP_LIMIT:-16}"' in src
     assert 'SHADOW_PLACEMENT_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_SHADOW_PLACEMENT_MAX_ARTIFACT_AGE_HOURS:-24}"' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_LEARNING_REFRESH_SCORECARD"' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_REFRESH_DATA_FLOW_MONITOR"' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_REFRESH_ORDER_TOUCHABILITY_AUDIT"' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET"' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_OPERATOR_REVIEW"' in src
+    assert 'validate_bool01 "OPENCLAW_COST_GATE_REFRESH_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD"' in src
     assert "OPENCLAW_COST_GATE_DATA_FLOW_WINDOW_HOURS must be comma-separated integers" in src
     assert "OPENCLAW_DEMO_ORDER_TO_FILL_GAP_ENGINE_MODES must be comma-separated engine modes" in src
     assert 'validate_int "OPENCLAW_COST_GATE_DATA_FLOW_TOP_LIMIT"' in src
@@ -321,6 +339,8 @@ def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     assert 'validate_int "OPENCLAW_COST_GATE_AUTHORITY_PATCH_MAX_ARTIFACT_AGE_HOURS"' in src
     assert 'validate_int "OPENCLAW_COST_GATE_OPERATOR_AUTHORIZATION_MAX_ARTIFACT_AGE_HOURS"' in src
     assert 'validate_int "OPENCLAW_COST_GATE_FALSE_NEGATIVE_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS"' in src
+    assert 'validate_int "OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MAX_ARTIFACT_AGE_HOURS"' in src
+    assert 'validate_int "OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_TOP_LIMIT"' in src
     assert 'validate_int "OPENCLAW_COST_GATE_SHADOW_PLACEMENT_MAX_ARTIFACT_AGE_HOURS"' in src
 
 
@@ -333,6 +353,7 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert 'SEALED_LEARNING_EVIDENCE_ARGS=(' in src
     assert 'DECISION_PACKET_ARGS=(' in src
     assert 'FALSE_NEGATIVE_OPERATOR_REVIEW_ARGS=(' in src
+    assert "FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_ARGS=(" in src
     assert "LEARNING_SSOT_DECISION_ARGS=(" in src
     assert "AUTONOMOUS_PARAMETER_PROPOSAL_ARGS=(" in src
     assert "cost_gate_reject_counterfactual.py" in src
@@ -348,6 +369,7 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert "-m cost_gate_learning_lane.bounded_probe_placement_repair_plan" in src
     assert "-m cost_gate_learning_lane.bounded_probe_authority_patch_readiness" in src
     assert "-m cost_gate_learning_lane.bounded_probe_operator_authorization_cli" in src
+    assert "-m cost_gate_learning_lane.false_negative_candidate_friction_scorecard" in src
     assert "-m cost_gate_learning_lane.bounded_probe_shadow_placement_impact" in src
     assert "-m cost_gate_learning_lane.bounded_probe_result_review" in src
     assert "-m cost_gate_learning_lane.bounded_probe_execution_realism_review" in src
@@ -355,7 +377,10 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert "-m cost_gate_learning_lane.learning_ssot_decision" in src
     assert "-m cost_gate_learning_lane.autonomous_parameter_proposal" in src
     assert "-m cost_gate_learning_lane.false_negative_bounded_probe_preflight" in src
-    assert "--false-negative-candidate-packet-json" in src
+    assert '--false-negative-candidate-packet-json "$FALSE_NEGATIVE_CANDIDATE_PACKET_OUT"' in src
+    assert '--touchability-preflight-json "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT"' in src
+    assert '--placement-repair-plan-json "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT"' in src
+    assert '--operator-authorization-json "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT"' in src
     assert "--existing-operator-review-json" in src
     assert "--decision defer" in src
     assert "--learning-ssot-decision-json" in src
@@ -378,6 +403,7 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert 'cp "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST"' in src
     assert 'cp "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST"' in src
     assert 'cp "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT" "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST"' in src
+    assert 'cp "$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_OUT" "$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_LATEST"' in src
     assert 'cp "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT" "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_LATEST"' in src
     assert 'cp "$BOUNDED_PROBE_RESULT_REVIEW_OUT" "$BOUNDED_PROBE_RESULT_REVIEW_LATEST"' in src
     assert 'cp "$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT" "$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST"' in src
@@ -406,6 +432,7 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert 'BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST"' in src
     assert 'BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT="$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST="$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST"' in src
     assert 'BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT="$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST="$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST"' in src
+    assert 'FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_OUT="$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_OUT" FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_LATEST="$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_LATEST"' in src
     assert 'export BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT="$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT"' in src
     assert "scorecard_rc=" in src
     assert "data_flow_monitor_rc=" in src
@@ -420,6 +447,7 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert "bounded_probe_placement_repair_plan_rc=" in src
     assert "bounded_probe_authority_patch_readiness_rc=" in src
     assert "bounded_probe_operator_authorization_rc=" in src
+    assert "false_negative_candidate_friction_scorecard_rc=" in src
     assert "bounded_probe_shadow_placement_impact_rc=" in src
     scorecard_index = src.index('"$PYBIN" "${SCORECARD_ARGS[@]}"')
     data_flow_index = src.index('"$PYBIN" "${DATA_FLOW_ARGS[@]}"')
@@ -446,6 +474,9 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     placement_index = src.index('"$PYBIN" "${BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_ARGS[@]}"')
     authority_index = src.index('"$PYBIN" "${BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_ARGS[@]}"')
     operator_auth_index = src.index('"$PYBIN" "${BOUNDED_PROBE_OPERATOR_AUTHORIZATION_ARGS[@]}"')
+    friction_scorecard_index = src.index(
+        '"$PYBIN" "${FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_ARGS[@]}"'
+    )
     shadow_index = src.index('"$PYBIN" "${BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_ARGS[@]}"')
     result_review_index = src.index('"$PYBIN" "${BOUNDED_PROBE_RESULT_REVIEW_ARGS[@]}"')
     execution_review_index = src.index('"$PYBIN" "${BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_ARGS[@]}"')
@@ -464,7 +495,7 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
         < false_negative_preflight_index
         < sealed_evidence_index
     )
-    assert sealed_evidence_index < order_touchability_index < touchability_index < placement_index < authority_index < operator_auth_index < shadow_index < result_review_index < execution_review_index
+    assert sealed_evidence_index < order_touchability_index < touchability_index < placement_index < authority_index < operator_auth_index < friction_scorecard_index < shadow_index < result_review_index < execution_review_index
     assert execution_review_index < decision_packet_index
 
 
@@ -529,7 +560,7 @@ def test_wrapper_has_preinstall_refresh_only_cutoff_after_plan_refresh() -> None
     assert (
         "skipped historical/materializer/outcome/review/false-negative "
         "packet/false-negative operator review/learning ssot/autonomous proposal/"
-        "false-negative preflight/sealed evidence/bounded-probe stages"
+        "false-negative preflight/sealed evidence/bounded-probe/friction-scorecard stages"
     ) in src
     assert 'PREINSTALL_REFRESH_ONLY="$PREINSTALL_REFRESH_ONLY"' in src
     assert '"preinstall_refresh_only": os.environ["PREINSTALL_REFRESH_ONLY"] == "1"' in src
@@ -544,6 +575,7 @@ def test_wrapper_has_preinstall_refresh_only_cutoff_after_plan_refresh() -> None
     assert 'bounded_probe_placement_repair_plan_skip_reason="preinstall_refresh_only"' in src
     assert 'bounded_probe_authority_patch_readiness_skip_reason="preinstall_refresh_only"' in src
     assert 'bounded_probe_operator_authorization_skip_reason="preinstall_refresh_only"' in src
+    assert 'false_negative_candidate_friction_scorecard_skip_reason="preinstall_refresh_only"' in src
     assert 'bounded_probe_shadow_placement_impact_skip_reason="preinstall_refresh_only"' in src
     assert 'bounded_probe_result_review_skip_reason="preinstall_refresh_only"' in src
     assert 'bounded_probe_execution_realism_review_skip_reason="preinstall_refresh_only"' in src
@@ -572,6 +604,9 @@ def test_wrapper_has_preinstall_refresh_only_cutoff_after_plan_refresh() -> None
     placement_index = src.index('"$PYBIN" "${BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_ARGS[@]}"')
     authority_index = src.index('"$PYBIN" "${BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_ARGS[@]}"')
     operator_auth_index = src.index('"$PYBIN" "${BOUNDED_PROBE_OPERATOR_AUTHORIZATION_ARGS[@]}"')
+    friction_scorecard_index = src.index(
+        '"$PYBIN" "${FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_ARGS[@]}"'
+    )
     shadow_index = src.index('"$PYBIN" "${BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_ARGS[@]}"')
     result_review_index = src.index('"$PYBIN" "${BOUNDED_PROBE_RESULT_REVIEW_ARGS[@]}"')
     execution_review_index = src.index('"$PYBIN" "${BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_ARGS[@]}"')
@@ -593,6 +628,7 @@ def test_wrapper_has_preinstall_refresh_only_cutoff_after_plan_refresh() -> None
         < placement_index
         < authority_index
         < operator_auth_index
+        < friction_scorecard_index
         < shadow_index
         < result_review_index
         < execution_review_index

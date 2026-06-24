@@ -170,6 +170,14 @@ PHYSICAL_ARTIFACT_SPECS: tuple[PhysicalArtifactSpec, ...] = (
         source_error_key="false_negative_operator_review_source_error",
     ),
     PhysicalArtifactSpec(
+        artifact_id="false_negative_candidate_friction_scorecard",
+        rel_path="cost_gate_learning_lane/false_negative_candidate_friction_scorecard_latest.json",
+        artifact_class="diagnostic_view",
+        role="ranked_false_negative_candidate_friction_triage_view",
+        status_key="learning_loop_last_false_negative_candidate_friction_scorecard_status",
+        source_error_key="learning_loop_false_negative_candidate_friction_scorecard_latest_error",
+    ),
+    PhysicalArtifactSpec(
         artifact_id="sealed_horizon_operator_review",
         rel_path="cost_gate_learning_lane/sealed_horizon_operator_review_latest.json",
         artifact_class="governance",

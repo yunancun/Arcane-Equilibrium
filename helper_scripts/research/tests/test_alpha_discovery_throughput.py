@@ -40,7 +40,10 @@ from alpha_discovery_throughput.runtime_runner import (
     _learning_summary,
 )
 from alpha_discovery_throughput.signal_manifest import build_signal_spec, validate_signal_manifest
-from cost_gate_learning_lane.status import REQUIRED_SOURCE_RELATIVE_PATHS
+from cost_gate_learning_lane.status import (
+    REQUIRED_SOURCE_RELATIVE_PATHS,
+    summarize_cost_gate_learning_lane_loop,
+)
 
 
 def test_latest_json_line_handles_oversized_status_line(tmp_path: Path):
@@ -64,6 +67,267 @@ def test_latest_json_line_handles_oversized_status_line(tmp_path: Path):
     assert err is None
     assert row is not None
     assert row["status"] == "latest"
+
+
+def test_cost_gate_learning_loop_status_carries_false_negative_friction_scorecard(
+    tmp_path: Path,
+):
+    data_dir = tmp_path / "openclaw"
+    log_dir = data_dir / "logs"
+    log_dir.mkdir(parents=True)
+    (log_dir / "cost_gate_learning_lane.log").write_text(
+        json.dumps({
+            "ts_utc": "2026-06-24T08:00:00Z",
+            "scorecard_rc": 0,
+            "plan_rc": 0,
+            "materializer_rc": 0,
+            "refresh_rc": 0,
+            "review_rc": 0,
+            "false_negative_candidate_packet_rc": 0,
+            "false_negative_operator_review_rc": 0,
+            "false_negative_candidate_friction_scorecard_rc": 0,
+            "bounded_probe_authority_patch_readiness_rc": 0,
+            "bounded_probe_operator_authorization_rc": 0,
+            "refresh_false_negative_candidate_friction_scorecard": True,
+            "false_negative_candidate_friction_scorecard_status": (
+                "FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_READY"
+            ),
+            "false_negative_candidate_friction_scorecard_ready": True,
+            "false_negative_candidate_friction_scorecard_ranked_count": 11,
+            "false_negative_candidate_friction_scorecard_candidate_count": 11,
+            "false_negative_candidate_friction_scorecard_measured_active_candidate_count": 1,
+            "false_negative_candidate_friction_scorecard_top_side_cell_key": (
+                "grid_trading|AVAXUSDT|Sell"
+            ),
+            "false_negative_candidate_friction_scorecard_top_next_action": (
+                "exact_bounded_demo_typed_confirm_required_or_select_next_candidate"
+            ),
+            "false_negative_candidate_friction_scorecard_bounded_demo_probe_authorized": False,
+            "false_negative_candidate_friction_scorecard_operator_authorization_object_emitted": False,
+            "false_negative_candidate_friction_scorecard_global_cost_gate_lowering_recommended": False,
+            "false_negative_candidate_friction_scorecard_main_cost_gate_adjustment": "NONE",
+            "false_negative_candidate_friction_scorecard_probe_authority_granted": False,
+            "false_negative_candidate_friction_scorecard_order_authority_granted": False,
+            "false_negative_candidate_friction_scorecard_promotion_evidence": False,
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+
+    status = summarize_cost_gate_learning_lane_loop(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 24, 8, 5, tzinfo=dt.timezone.utc),
+    )
+
+    assert status["learning_loop_status"] == "RUNNING"
+    assert (
+        status[
+            "learning_loop_last_false_negative_candidate_friction_scorecard_status"
+        ]
+        == "FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_READY"
+    )
+    assert (
+        status[
+            "learning_loop_last_false_negative_candidate_friction_scorecard_top_side_cell_key"
+        ]
+        == "grid_trading|AVAXUSDT|Sell"
+    )
+    assert (
+        status[
+            "learning_loop_last_false_negative_candidate_friction_scorecard_order_authority_granted"
+        ]
+        is False
+    )
+
+
+def test_cost_gate_learning_loop_status_row_ignores_stale_friction_scorecard_authority(
+    tmp_path: Path,
+):
+    data_dir = tmp_path / "openclaw"
+    log_dir = data_dir / "logs"
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    log_dir.mkdir(parents=True)
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "false_negative_candidate_friction_scorecard_latest.json").write_text(
+        json.dumps({
+            "schema_version": "cost_gate_false_negative_candidate_friction_scorecard_v1",
+            "status": "FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_READY",
+            "summary": {
+                "top_side_cell_key": "stale|BTCUSDT|Buy",
+                "top_next_action": "stale_authority_must_not_surface",
+            },
+            "answers": {
+                "scorecard_ready": True,
+                "bounded_demo_probe_authorized": True,
+                "operator_authorization_object_emitted": True,
+                "global_cost_gate_lowering_recommended": True,
+                "main_cost_gate_adjustment": "LOWER",
+                "probe_authority_granted": True,
+                "order_authority_granted": True,
+                "promotion_evidence": True,
+            },
+        }),
+        encoding="utf-8",
+    )
+    (log_dir / "cost_gate_learning_lane.log").write_text(
+        json.dumps({
+            "ts_utc": "2026-06-24T08:00:00Z",
+            "scorecard_rc": 0,
+            "plan_rc": 0,
+            "materializer_rc": 0,
+            "refresh_rc": 0,
+            "review_rc": 0,
+            "false_negative_candidate_packet_rc": 0,
+            "false_negative_operator_review_rc": 0,
+            "false_negative_candidate_friction_scorecard_rc": 0,
+            "bounded_probe_authority_patch_readiness_rc": 0,
+            "bounded_probe_operator_authorization_rc": 0,
+            "refresh_false_negative_candidate_friction_scorecard": False,
+            "false_negative_candidate_friction_scorecard_status": None,
+            "false_negative_candidate_friction_scorecard_ready": None,
+            "false_negative_candidate_friction_scorecard_top_side_cell_key": None,
+            "false_negative_candidate_friction_scorecard_top_next_action": None,
+            "false_negative_candidate_friction_scorecard_bounded_demo_probe_authorized": None,
+            "false_negative_candidate_friction_scorecard_operator_authorization_object_emitted": None,
+            "false_negative_candidate_friction_scorecard_global_cost_gate_lowering_recommended": None,
+            "false_negative_candidate_friction_scorecard_main_cost_gate_adjustment": None,
+            "false_negative_candidate_friction_scorecard_probe_authority_granted": None,
+            "false_negative_candidate_friction_scorecard_order_authority_granted": None,
+            "false_negative_candidate_friction_scorecard_promotion_evidence": None,
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+
+    status = summarize_cost_gate_learning_lane_loop(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 24, 8, 5, tzinfo=dt.timezone.utc),
+    )
+
+    assert status["learning_loop_status"] == "RUNNING"
+    assert (
+        status[
+            "learning_loop_refresh_false_negative_candidate_friction_scorecard_enabled"
+        ]
+        is False
+    )
+    assert (
+        status[
+            "learning_loop_last_false_negative_candidate_friction_scorecard_status"
+        ]
+        is None
+    )
+    assert (
+        status[
+            "learning_loop_last_false_negative_candidate_friction_scorecard_top_side_cell_key"
+        ]
+        is None
+    )
+    assert (
+        status[
+            "learning_loop_last_false_negative_candidate_friction_scorecard_order_authority_granted"
+        ]
+        is None
+    )
+    assert (
+        status[
+            "learning_loop_last_false_negative_candidate_friction_scorecard_probe_authority_granted"
+        ]
+        is None
+    )
+    assert (
+        status[
+            "learning_loop_last_false_negative_candidate_friction_scorecard_promotion_evidence"
+        ]
+        is None
+    )
+    assert (
+        status[
+            "learning_loop_last_false_negative_candidate_friction_scorecard_main_cost_gate_adjustment"
+        ]
+        is None
+    )
+
+
+def test_cost_gate_learning_loop_friction_scorecard_rc_failure_is_error(
+    tmp_path: Path,
+):
+    data_dir = tmp_path / "openclaw"
+    log_dir = data_dir / "logs"
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    log_dir.mkdir(parents=True)
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "false_negative_candidate_friction_scorecard_latest.json").write_text(
+        json.dumps({
+            "schema_version": "cost_gate_false_negative_candidate_friction_scorecard_v1",
+            "status": "FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_READY",
+            "summary": {"top_side_cell_key": "stale|BTCUSDT|Buy"},
+            "answers": {
+                "order_authority_granted": True,
+                "probe_authority_granted": True,
+                "promotion_evidence": True,
+            },
+        }),
+        encoding="utf-8",
+    )
+    (log_dir / "cost_gate_learning_lane.log").write_text(
+        json.dumps({
+            "ts_utc": "2026-06-24T08:00:00Z",
+            "scorecard_rc": 0,
+            "plan_rc": 0,
+            "materializer_rc": 0,
+            "refresh_rc": 0,
+            "review_rc": 0,
+            "false_negative_candidate_packet_rc": 0,
+            "false_negative_operator_review_rc": 0,
+            "false_negative_candidate_friction_scorecard_rc": 7,
+            "bounded_probe_authority_patch_readiness_rc": 0,
+            "bounded_probe_operator_authorization_rc": 0,
+            "refresh_false_negative_candidate_friction_scorecard": True,
+            "false_negative_candidate_friction_scorecard_status": None,
+            "false_negative_candidate_friction_scorecard_top_side_cell_key": None,
+            "false_negative_candidate_friction_scorecard_order_authority_granted": None,
+            "false_negative_candidate_friction_scorecard_probe_authority_granted": None,
+            "false_negative_candidate_friction_scorecard_promotion_evidence": None,
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+
+    status = summarize_cost_gate_learning_lane_loop(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 24, 8, 5, tzinfo=dt.timezone.utc),
+    )
+
+    assert status["learning_loop_status"] == "ERROR"
+    assert (
+        status["learning_loop_last_false_negative_candidate_friction_scorecard_rc"]
+        == 7
+    )
+    assert (
+        status[
+            "learning_loop_last_false_negative_candidate_friction_scorecard_top_side_cell_key"
+        ]
+        is None
+    )
+    assert (
+        status[
+            "learning_loop_last_false_negative_candidate_friction_scorecard_order_authority_granted"
+        ]
+        is None
+    )
+    assert (
+        status[
+            "learning_loop_last_false_negative_candidate_friction_scorecard_probe_authority_granted"
+        ]
+        is None
+    )
+    assert (
+        status[
+            "learning_loop_last_false_negative_candidate_friction_scorecard_promotion_evidence"
+        ]
+        is None
+    )
 
 
 def test_cost_gate_artifact_spine_separates_evidence_from_governance(tmp_path: Path):
@@ -4031,6 +4295,26 @@ def test_cost_gate_false_negative_packet_drives_ranked_operator_review_task():
             "false_negative_candidate_packet_probe_authority_granted": False,
             "false_negative_candidate_packet_order_authority_granted": False,
             "false_negative_candidate_packet_promotion_evidence": False,
+            "learning_loop_last_false_negative_candidate_friction_scorecard_status": (
+                "FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_READY"
+            ),
+            "learning_loop_last_false_negative_candidate_friction_scorecard_ready": True,
+            "learning_loop_last_false_negative_candidate_friction_scorecard_ranked_count": 11,
+            "learning_loop_last_false_negative_candidate_friction_scorecard_top_side_cell_key": (
+                "grid_trading|AVAXUSDT|Sell"
+            ),
+            "learning_loop_last_false_negative_candidate_friction_scorecard_top_next_action": (
+                "exact_bounded_demo_typed_confirm_required_or_select_next_candidate"
+            ),
+            "learning_loop_last_false_negative_candidate_friction_scorecard_probe_authority_granted": (
+                False
+            ),
+            "learning_loop_last_false_negative_candidate_friction_scorecard_order_authority_granted": (
+                False
+            ),
+            "learning_loop_last_false_negative_candidate_friction_scorecard_promotion_evidence": (
+                False
+            ),
         },
     }
 
@@ -4066,6 +4350,15 @@ def test_cost_gate_false_negative_packet_drives_ranked_operator_review_task():
     )
     assert task["evidence"][
         "false_negative_candidate_packet_order_authority_granted"
+    ] is False
+    assert task["evidence"][
+        "learning_loop_last_false_negative_candidate_friction_scorecard_status"
+    ] == "FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_READY"
+    assert task["evidence"][
+        "learning_loop_last_false_negative_candidate_friction_scorecard_top_side_cell_key"
+    ] == "grid_trading|AVAXUSDT|Sell"
+    assert task["evidence"][
+        "learning_loop_last_false_negative_candidate_friction_scorecard_order_authority_granted"
     ] is False
 
 
