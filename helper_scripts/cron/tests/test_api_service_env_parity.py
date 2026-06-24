@@ -72,6 +72,10 @@ def _runtime_like_snapshot() -> dict:
                     "ActiveState=inactive",
                     "SubState=dead",
                     "UnitFileState=disabled",
+                    (
+                        "FragmentPath=/home/ncyu/.config/systemd/user/"
+                        "openclaw-trading-api.service"
+                    ),
                 ]
             )
         },
@@ -104,6 +108,137 @@ def test_api_service_env_parity_detects_current_runtime_drift_shape() -> None:
         "keep_current_manual_uvicorn_owner_until_parity_acceptance",
     ]
     assert "API_SERVICE_ENV_PARITY_DRIFT" in markdown
+
+
+def test_api_service_env_parity_emits_no_apply_cutover_plan() -> None:
+    packet = build_api_service_env_parity_packet(
+        combined_snapshot=_runtime_like_snapshot(),
+        now_utc=dt.datetime(2026, 6, 24, 10, tzinfo=dt.timezone.utc),
+    )
+    plan = packet["runtime_cutover_plan"]
+    proposed_env = plan["proposed_environment"]
+    encoded = json.dumps(plan, sort_keys=True)
+
+    assert plan["schema_version"] == "api_service_runtime_cutover_plan_v1"
+    assert plan["apply_allowed_by_this_packet"] is False
+    assert plan["restart_allowed_by_this_packet"] is False
+    assert plan["requires_e3_review_before_apply"] is True
+    assert plan["unit_file_path"] == (
+        "/home/ncyu/.config/systemd/user/openclaw-trading-api.service"
+    )
+    assert plan["proposed_exec_start"].endswith(
+        "app.main:app --host 100.91.109.86 --port 8000 --workers 4"
+    )
+    assert plan["proposed_working_directory"].endswith("control_api_v1")
+    assert proposed_env["materialized_env"]["OPENCLAW_IPC_SECRET_FILE"].endswith(
+        "ipc_secret.txt"
+    )
+    assert proposed_env["materialized_env"]["OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE"].endswith(
+        "live_auth_signing_key.txt"
+    )
+    assert "supersecret" not in encoded
+    assert "systemctl --user daemon-reload" in plan["apply_sequence_template"]
+    assert any("manual uvicorn" in step for step in plan["apply_sequence_template"])
+    assert "this packet intentionally does not perform daemon-reload" in " ".join(
+        plan["risk_notes"]
+    )
+
+
+def test_api_service_env_parity_cutover_plan_redacts_non_file_secret_env() -> None:
+    snapshot = _runtime_like_snapshot()
+    snapshot["api_processes"][0]["selected_env"]["OPENCLAW_INLINE_API_KEY"] = (
+        "secret-value"
+    )
+    packet = build_api_service_env_parity_packet(
+        combined_snapshot=snapshot,
+        required_env_keys=(
+            "OPENCLAW_BASE_DIR",
+            "OPENCLAW_INLINE_API_KEY",
+        ),
+        now_utc=dt.datetime(2026, 6, 24, 10, tzinfo=dt.timezone.utc),
+    )
+    proposed_env = packet["runtime_cutover_plan"]["proposed_environment"]
+    encoded = json.dumps(packet["runtime_cutover_plan"], sort_keys=True)
+
+    assert "OPENCLAW_INLINE_API_KEY" in proposed_env["redacted_required_env_keys"]
+    assert "OPENCLAW_INLINE_API_KEY" not in proposed_env["materialized_env"]
+    assert "secret-value" not in encoded
+
+
+def test_api_service_env_parity_cutover_plan_redacts_direct_database_url() -> None:
+    snapshot = _runtime_like_snapshot()
+    snapshot["api_processes"][0]["selected_env"]["OPENCLAW_DATABASE_URL"] = (
+        "postgresql://redacted@host/db"
+    )
+    packet = build_api_service_env_parity_packet(
+        combined_snapshot=snapshot,
+        required_env_keys=("OPENCLAW_DATABASE_URL",),
+        now_utc=dt.datetime(2026, 6, 24, 10, tzinfo=dt.timezone.utc),
+    )
+    proposed_env = packet["runtime_cutover_plan"]["proposed_environment"]
+    encoded = json.dumps(packet["runtime_cutover_plan"], sort_keys=True)
+
+    assert "OPENCLAW_DATABASE_URL" in proposed_env["redacted_required_env_keys"]
+    assert "OPENCLAW_DATABASE_URL" not in proposed_env["materialized_env"]
+    assert "postgresql://" not in encoded
+    assert "secret@host" not in encoded
+
+
+def test_api_service_env_parity_cutover_plan_preserves_python_module_uvicorn_prefix() -> None:
+    snapshot = _runtime_like_snapshot()
+    snapshot["api_processes"][0]["cmdline"] = (
+        "/usr/bin/python3 -m uvicorn app.main:app "
+        "--host 100.91.109.86 --port 8000 --workers 4"
+    )
+    snapshot["systemd_cat"]["stdout"] = "\n".join(
+        [
+            "[Service]",
+            (
+                "WorkingDirectory=/home/ncyu/BybitOpenClaw/srv/program_code/"
+                "exchange_connectors/bybit_connector/control_api_v1"
+            ),
+            (
+                "ExecStart=/usr/bin/python3 -m uvicorn app.main:app "
+                "--host 0.0.0.0 --port 8000"
+            ),
+        ]
+    )
+
+    packet = build_api_service_env_parity_packet(
+        combined_snapshot=snapshot,
+        now_utc=dt.datetime(2026, 6, 24, 10, tzinfo=dt.timezone.utc),
+    )
+
+    assert packet["runtime_cutover_plan"]["proposed_exec_start"] == (
+        "/usr/bin/python3 -m uvicorn app.main:app "
+        "--host 100.91.109.86 --port 8000 --workers 4"
+    )
+
+
+def test_api_service_env_parity_cutover_plan_blocks_unrecognized_exec_prefix() -> None:
+    snapshot = _runtime_like_snapshot()
+    snapshot["api_processes"][0]["cmdline"] = (
+        "/usr/bin/python3 app.main:app --host 100.91.109.86 --port 8000 --workers 4"
+    )
+    snapshot["systemd_cat"]["stdout"] = "\n".join(
+        [
+            "[Service]",
+            (
+                "WorkingDirectory=/home/ncyu/BybitOpenClaw/srv/program_code/"
+                "exchange_connectors/bybit_connector/control_api_v1"
+            ),
+            "ExecStart=/usr/bin/python3 app.main:app --host 0.0.0.0 --port 8000",
+        ]
+    )
+
+    packet = build_api_service_env_parity_packet(
+        combined_snapshot=snapshot,
+        now_utc=dt.datetime(2026, 6, 24, 10, tzinfo=dt.timezone.utc),
+    )
+    plan = packet["runtime_cutover_plan"]
+
+    assert plan["proposed_exec_start"] is None
+    assert "proposed_exec_start_incomplete" in plan["plan_blockers"]
 
 
 def test_api_service_env_parity_clean_snapshot_is_source_only() -> None:
