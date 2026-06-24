@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -192,6 +193,84 @@ def test_mm_motif_amplification_refresh_uses_canonical_history_artifact() -> Non
         'echo "[$(ts)] mm_motif_amplification_refresh rc=${mm_motif_amplification_rc}"'
         in src
     )
+
+
+def test_runtime_runner_receives_expected_head_from_cron_contract() -> None:
+    src = _src()
+    runtime_start = src.index('"$PYBIN" -m alpha_discovery_throughput.runtime_runner')
+    expected_head_start = src.index("EXPECTED_SOURCE_HEAD=")
+    assert expected_head_start < runtime_start
+    assert (
+        'EXPECTED_SOURCE_HEAD="${OPENCLAW_EXPECTED_SOURCE_HEAD:-'
+        "${OPENCLAW_COST_GATE_LEARNING_EXPECTED_HEAD:-"
+        '${OPENCLAW_DEMO_LEARNING_STACK_EXPECTED_HEAD:-}}}"'
+        in src
+    )
+    assert '--expected-head "$EXPECTED_SOURCE_HEAD"' in src
+    assert src.index('--expected-head "$EXPECTED_SOURCE_HEAD"') > runtime_start
+
+
+def test_runtime_runner_expected_head_wrapper_executes_with_empty_and_demo_env(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("bash") is None:
+        pytest.skip("bash not available")
+    base = tmp_path / "srv"
+    data = tmp_path / "data"
+    (base / "helper_scripts" / "research" / "alpha_discovery_throughput").mkdir(
+        parents=True
+    )
+    fake_python = tmp_path / "fake_python.sh"
+    args_log = tmp_path / "fake_python_args.log"
+    fake_python.write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' \"$*\" >> \"$FAKE_PY_ARGS_LOG\"\n",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+
+    def run_wrapper(expected_head: str | None) -> list[str]:
+        args_log.unlink(missing_ok=True)
+        env = os.environ.copy()
+        env.update(
+            {
+                "OPENCLAW_BASE_DIR": str(base),
+                "OPENCLAW_DATA_DIR": str(data),
+                "OPENCLAW_PYTHON_BIN": str(fake_python),
+                "FAKE_PY_ARGS_LOG": str(args_log),
+                "OPENCLAW_ALPHA_REFRESH_BOUNDED_PROBE_REVIEW_CHAIN": "0",
+            }
+        )
+        for name in (
+            "OPENCLAW_EXPECTED_SOURCE_HEAD",
+            "OPENCLAW_COST_GATE_LEARNING_EXPECTED_HEAD",
+            "OPENCLAW_DEMO_LEARNING_STACK_EXPECTED_HEAD",
+        ):
+            env.pop(name, None)
+        if expected_head is not None:
+            env["OPENCLAW_DEMO_LEARNING_STACK_EXPECTED_HEAD"] = expected_head
+        proc = subprocess.run(
+            ["bash", str(WRAPPER)],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode == 0, proc.stderr
+        return args_log.read_text(encoding="utf-8").splitlines()
+
+    no_expected_lines = run_wrapper(None)
+    no_expected_runtime = [
+        line for line in no_expected_lines if "alpha_discovery_throughput.runtime_runner" in line
+    ]
+    assert no_expected_runtime
+    assert all("--expected-head" not in line for line in no_expected_runtime)
+
+    demo_expected_lines = run_wrapper("demo-head")
+    demo_expected_runtime = [
+        line for line in demo_expected_lines if "alpha_discovery_throughput.runtime_runner" in line
+    ]
+    assert demo_expected_runtime
+    assert any("--expected-head demo-head" in line for line in demo_expected_runtime)
 
 
 def test_wrapper_keeps_refresh_artifact_only() -> None:
