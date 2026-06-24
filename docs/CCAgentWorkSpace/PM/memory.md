@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-24 Bounded Probe Authorization Candidate-Scoped Refresh
+
+- E3 approved timestamped-only artifact generation for `grid_trading|AVAXUSDT|Sell`; PM generated standing auth sha `a303f80e` and bounded authorization packet sha `391dbca5`.
+- Packet status is `BOUNDED_DEMO_PROBE_AUTHORIZED`, max orders `1`, expires `2026-06-25T00:04:43Z`, but packet answers keep active runtime probe/order authority false.
+- PM read: this is plan/admission review input only. `bounded_probe_operator_authorization_latest.json` was not overwritten and currently points to non-ready ETHUSDT Buy, so AVAX admission must use a separate reviewed propagation path.
+
 ## 2026-06-24 Public Quote Adapter Runtime Ready Preview
 
 - E3/BB approved a bounded runtime route; trade-core fast-forwarded cleanly to `22f5915b`, focused public quote/adapter/construction tests passed `39`, and PM consumed exactly one public quote helper invocation.
