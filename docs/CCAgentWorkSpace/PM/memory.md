@@ -1924,3 +1924,9 @@
 - `api_service_env_parity.py` now embeds `api_service_runtime_cutover_plan_v1` with proposed ExecStart, safe env materialization, preflight/apply/rollback/verification templates, and hard `apply_allowed=false` / `restart_allowed=false`.
 - E2 found and PM fixed direct `DATABASE_URL`/`DSN` leakage risk and `python -m uvicorn` wrapper reconstruction; E3 no-apply review and E4 regression passed.
 - Boundary: source/test/docs + supplied `/tmp` snapshot smoke only; no systemd apply, daemon-reload, process signal, service restart, API/env/crontab mutation, PG/Bybit call, Cost Gate change, probe/order/live authority, or promotion proof.
+
+## 2026-06-24 API Service Enablement Review
+
+- Fresh read-only enablement review after cutover shows `openclaw-trading-api.service` active/running but disabled; parity is `API_SERVICE_ENV_PARITY_CLEAN_SOURCE_ONLY`, bind is Tailscale-only, health returns `401`, `Linger=yes`, and no default-target wants symlink exists.
+- E3 returned `DONE_WITH_CONCERNS`: future `systemctl --user enable openclaw-trading-api.service` is acceptable only as a separate PM/E3 runtime mutation checkpoint using enable without `--now`; this packet grants no enable authority.
+- Boundary: source/read-only evidence + docs only; no enable/disable/restart/daemon-reload/process signal, no API POST/Bybit/PG write, no Cost Gate change, no probe/order/live authority, no Rust writer, no promotion proof.
