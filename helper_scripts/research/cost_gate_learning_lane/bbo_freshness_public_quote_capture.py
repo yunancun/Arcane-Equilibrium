@@ -15,6 +15,7 @@ import datetime as dt
 import hashlib
 import json
 import math
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -113,6 +114,19 @@ DANGER_KEYS = {
 
 REQUEST_HEADER_ALLOWLIST = {"user-agent"}
 AUTH_HEADER_PREFIXES = ("x-bapi-", "authorization")
+MAX_TRANSPORT_REASON_CHARS = 240
+CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]+")
+COOKIE_FIELD_RE = re.compile(r"(?i)\b(?:cookie|set-cookie)\s*[:=].*")
+SECRET_ASSIGNMENT_RE = re.compile(
+    r"(?i)\b([a-z0-9_-]*"
+    r"(?:authorization|x-bapi-[a-z0-9-]+|api[_-]?key|secret|token|"
+    r"password|passwd|dsn|database[_-]?url|openclaw_database_url)"
+    r"[a-z0-9_-]*"
+    r")\s*[:=]\s*[^\s,;&]+"
+)
+BEARER_TOKEN_RE = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+")
+LOCAL_PATH_RE = re.compile(r"(?<!:)(?:/(?:Users|home|tmp|var|private|etc|opt|usr|Volumes)/[^\s,;)'\"]+)")
+URI_RE = re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s,;)'\"]+")
 
 NowFn = Callable[[], dt.datetime]
 MonotonicFn = Callable[[], float]
@@ -204,6 +218,65 @@ def _sha256_bytes(value: bytes) -> str:
 
 def _json_sha256(value: Any) -> str:
     return _sha256_bytes(_canonical_json_bytes(value))
+
+
+def _sanitize_uri_in_diagnostic(match: re.Match[str]) -> str:
+    url = match.group(0)
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        return "<url-redacted>"
+    host = (parts.hostname or "").lower()
+    if (
+        parts.scheme == "https"
+        and parts.netloc.lower() == host
+        and host == urllib.parse.urlsplit(DEFAULT_BASE_URL).hostname
+        and parts.path in {TIME_PATH, TICKERS_PATH, INSTRUMENTS_PATH}
+    ):
+        return urllib.parse.urlunsplit((parts.scheme, host, parts.path, "", ""))
+    return "<url-redacted>"
+
+
+def _sanitize_transport_reason(value: Any) -> str | None:
+    text = _str(value)
+    if not text:
+        return None
+    if "Traceback (most recent call last)" in text or "\n  File " in text:
+        return "<traceback-redacted>"
+    text = CONTROL_CHARS_RE.sub(" ", text)
+    text = BEARER_TOKEN_RE.sub("Bearer <redacted>", text)
+    text = COOKIE_FIELD_RE.sub("Cookie=<redacted>", text)
+    text = SECRET_ASSIGNMENT_RE.sub(lambda m: f"{m.group(1)}=<redacted>", text)
+    text = URI_RE.sub(_sanitize_uri_in_diagnostic, text)
+    text = LOCAL_PATH_RE.sub("<path-redacted>", text)
+    text = " ".join(text.split())
+    if len(text) > MAX_TRANSPORT_REASON_CHARS:
+        text = text[:MAX_TRANSPORT_REASON_CHARS] + "...<truncated>"
+    return text or None
+
+
+def _errno_from(value: Any) -> int | None:
+    parsed = _int(getattr(value, "errno", None))
+    if parsed is not None:
+        return parsed
+    args = getattr(value, "args", None)
+    if isinstance(args, tuple) and args:
+        return _int(args[0])
+    return None
+
+
+def _transport_error_diagnostics(exc: BaseException) -> dict[str, Any]:
+    reason = getattr(exc, "reason", None)
+    if reason is None:
+        reason = exc
+    return {
+        "transport_error_class": type(exc).__name__,
+        "transport_error_reason_type": type(reason).__name__ if reason is not None else None,
+        "transport_error_reason_sanitized": _sanitize_transport_reason(reason),
+        "transport_error_errno": _errno_from(reason),
+        "transport_error_stage": "opener",
+        "transport_error_sanitized": True,
+    }
 
 
 def _contaminating_value(value: Any) -> bool:
@@ -476,6 +549,12 @@ def _http_get_json(
         "request_end_utc": None,
         "duration_ms": None,
         "error": None,
+        "transport_error_class": None,
+        "transport_error_reason_type": None,
+        "transport_error_reason_sanitized": None,
+        "transport_error_errno": None,
+        "transport_error_stage": None,
+        "transport_error_sanitized": False,
     }
     if not envelope_ok:
         record["error"] = "request_envelope_violation"
@@ -517,6 +596,7 @@ def _http_get_json(
         record["request_end_utc"] = _iso(end_utc)
         record["duration_ms"] = round(max(0.0, end_mono - start_mono) * 1000.0, 3)
         record["error"] = f"transport_error:{type(exc).__name__}"
+        record.update(_transport_error_diagnostics(exc))
         return record
     end_utc = now_fn().astimezone(dt.timezone.utc)
     end_mono = monotonic_fn()
