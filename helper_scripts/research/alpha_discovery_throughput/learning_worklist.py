@@ -26,6 +26,7 @@ _TASK_PRIORITY = {
     "polymarket_candidate_replay": 50,
     "candidate_evidence_build": 55,
     "mm_current_fee_confirmation": 58,
+    "mm_motif_distinct_date_accumulation": 59,
     "mm_signal_search": 60,
     "fee_path_review": 65,
     "data_capture": 70,
@@ -651,6 +652,8 @@ def _task_primary_blocker(row: dict[str, Any], task_type: str) -> Any:
             row.get("mm_signal_search_failure_mode")
             or "current_fee_candidate_lacks_independent_window_confirmation"
         )
+    if task_type == "mm_motif_distinct_date_accumulation":
+        return "low_friction_motif_lacks_distinct_date_confirmation"
     return row.get("primary_blocker")
 
 
@@ -751,6 +754,34 @@ def _classify_task_type(row: dict[str, Any]) -> str:
     if blocker_class == "source_health":
         return "source_health"
     return "diagnose_blocker"
+
+
+def _has_mm_motif_distinct_date_work(row: dict[str, Any]) -> bool:
+    if _str(row.get("arm_id")) != "mm_verdict_maker_edge":
+        return False
+    status = _str(row.get("mm_signal_search_motif_amplification_status")).upper()
+    top_status = _str(
+        row.get("mm_signal_search_motif_amplification_top_status")
+    ).upper()
+    dates_remaining = _int(
+        row.get("mm_signal_search_motif_amplification_top_distinct_dates_remaining")
+    )
+    return (
+        status == "MM_MOTIF_AMPLIFICATION_REQUIRES_DISTINCT_DATE_HISTORY"
+        or top_status == "MOTIF_REPEATS_DISTINCT_DATES_INSUFFICIENT"
+        or dates_remaining > 0
+    )
+
+
+def _task_types_for_row(row: dict[str, Any]) -> list[str]:
+    primary = _classify_task_type(row)
+    task_types = [primary]
+    if (
+        primary != "mm_motif_distinct_date_accumulation"
+        and _has_mm_motif_distinct_date_work(row)
+    ):
+        task_types.append("mm_motif_distinct_date_accumulation")
+    return task_types
 
 
 def _profitability_next_move_requires_learning_activation(row: dict[str, Any]) -> bool:
@@ -876,6 +907,11 @@ def _learning_objective(row: dict[str, Any], task_type: str) -> str:
             "confirm_sample_gated_current_fee_positive_mm_cell_before_any_"
             "authority"
         )
+    if task_type == "mm_motif_distinct_date_accumulation":
+        return (
+            "accumulate_distinct_date_low_friction_mm_motif_evidence_before_"
+            "walk_forward_review"
+        )
     if task_type == "mm_signal_search":
         return (
             "find_or_amplify_train_confirmed_low_friction_mm_signal_that_clears_"
@@ -977,6 +1013,8 @@ def _completion_gate(task_type: str) -> str:
         return "bounded_probe_execution_realism_gap_pass_or_reject_recorded"
     if task_type == "mm_current_fee_confirmation":
         return "repeat_current_fee_positive_cell_across_independent_windows_and_oos_execution_realism"
+    if task_type == "mm_motif_distinct_date_accumulation":
+        return "repeat_low_friction_motif_across_distinct_dates_before_walk_forward_review"
     if task_type == "mm_signal_search":
         return "train_confirmed_sample_gated_current_fee_gross_edge_found"
     if task_type == "fee_path_review":
@@ -1082,6 +1120,16 @@ def _completion_evidence_required(task_type: str) -> list[str]:
             "the same current-fee-positive cell repeats across independent windows or is explicitly invalidated",
             "walk_forward/OOS review confirms the cell without train-only leakage",
             "maker execution realism records fill probability, adverse selection, fee, and inventory risk",
+            "order/probe authority remains not granted until a separate operator review",
+        ]
+    if task_type == "mm_motif_distinct_date_accumulation":
+        return [
+            "mm_signal_search_motif_amplification_status records distinct-date gate",
+            "mm_signal_search_motif_amplification_top_motif_key preserves motif identity",
+            "mm_signal_search_motif_amplification_top_distinct_dates_remaining reaches 0 or motif is explicitly invalidated",
+            "frontier search preserves motif axes instead of rotating to unrelated candidates",
+            "train and holdout sample-gated min gross edge clears current fee after distinct-date gate",
+            "single-window, artifact-count, and replay-only evidence remain excluded from proof",
             "order/probe authority remains not granted until a separate operator review",
         ]
     if task_type == "mm_signal_search":
@@ -1220,6 +1268,12 @@ def _task_next_trigger(row: dict[str, Any], task_type: str) -> str | None:
             value = _str(directive.get("next_trigger"))
             if value:
                 return value
+    if task_type == "mm_motif_distinct_date_accumulation":
+        return (
+            _str(row.get("mm_signal_search_motif_amplification_next_action"))
+            or _str(row.get("mm_signal_search_history_guided_next_action"))
+            or "accumulate_distinct_window_history_for_repeated_low_friction_motif"
+        )
     return row.get("next_trigger")
 
 
@@ -1255,31 +1309,31 @@ def build_learning_worklist(
     ]
     tasks: list[dict[str, Any]] = []
     for index, row in enumerate(rows):
-        task_type = _classify_task_type(row)
-        requires_operator = _operator_authorization_required(row, task_type)
-        runtime_mutation = _runtime_mutation_required(row, task_type)
-        task = {
-            "task_id": _task_id(row, task_type, index),
-            "arm_id": row.get("arm_id"),
-            "task_type": task_type,
-            "learning_objective": _learning_objective(row, task_type),
-            "completion_gate": _completion_gate(task_type),
-            "completion_status": _completion_status(task_type),
-            "completion_evidence_required": _completion_evidence_required(task_type),
-            "blocker_class": row.get("blocker_class"),
-            "primary_blocker": _task_primary_blocker(row, task_type),
-            "next_trigger": _task_next_trigger(row, task_type),
-            "priority_score": _priority_score(row, task_type),
-            "actionability": _actionability(row, task_type),
-            "requires_operator_authorization": requires_operator,
-            "runtime_mutation_required": runtime_mutation,
-            "promotion_ready": _bool(row.get("promotion_ready")),
-            "operator_actionable": _bool(row.get("operator_actionable")),
-            "engineering_actionable": _bool(row.get("engineering_actionable")),
-            "side_effect_boundary": _side_effect_boundary(runtime_mutation),
-            "evidence": _compact_evidence(row),
-        }
-        tasks.append(task)
+        for task_type in _task_types_for_row(row):
+            requires_operator = _operator_authorization_required(row, task_type)
+            runtime_mutation = _runtime_mutation_required(row, task_type)
+            task = {
+                "task_id": _task_id(row, task_type, index),
+                "arm_id": row.get("arm_id"),
+                "task_type": task_type,
+                "learning_objective": _learning_objective(row, task_type),
+                "completion_gate": _completion_gate(task_type),
+                "completion_status": _completion_status(task_type),
+                "completion_evidence_required": _completion_evidence_required(task_type),
+                "blocker_class": row.get("blocker_class"),
+                "primary_blocker": _task_primary_blocker(row, task_type),
+                "next_trigger": _task_next_trigger(row, task_type),
+                "priority_score": _priority_score(row, task_type),
+                "actionability": _actionability(row, task_type),
+                "requires_operator_authorization": requires_operator,
+                "runtime_mutation_required": runtime_mutation,
+                "promotion_ready": _bool(row.get("promotion_ready")),
+                "operator_actionable": _bool(row.get("operator_actionable")),
+                "engineering_actionable": _bool(row.get("engineering_actionable")),
+                "side_effect_boundary": _side_effect_boundary(runtime_mutation),
+                "evidence": _compact_evidence(row),
+            }
+            tasks.append(task)
 
     tasks.sort(key=lambda task: (
         task["priority_score"],
