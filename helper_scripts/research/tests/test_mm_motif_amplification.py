@@ -78,6 +78,28 @@ def test_mm_motif_amplification_ranks_repeated_near_miss_motif():
     assert packet["summary"]["top_frontier_candidate_count"] == 2
     assert packet["summary"]["top_frontier_best_min_gross_key"] == "candidate-b"
     assert packet["summary"]["top_frontier_gap_to_current_fee_bps"] == 2.8
+    assert packet["summary"]["distinct_date_accumulation_design_status"] == (
+        "DISTINCT_DATE_ACCUMULATION_REQUIRED"
+    )
+    assert packet["summary"]["distinct_date_max_safe_next_action"] == (
+        "accumulate_distinct_window_history_for_same_low_friction_motif"
+    )
+    design = packet["distinct_date_accumulation_design"]
+    assert design["status"] == "DISTINCT_DATE_ACCUMULATION_REQUIRED"
+    assert design["motif_axes"] == ["spread_combo", "recent_trade_imbalance"]
+    assert design["observed_distinct_dates"] == ["2026-06-20"]
+    assert design["distinct_dates_remaining"] == 2
+    assert design["frontier_candidate_count"] == 2
+    assert design["fastest_safe_test"] == (
+        "wait_for_next_valid_fill_sim_history_refresh_or_run_isolated_read_only_"
+        "replay_for_same_motif_axes"
+    )
+    assert "fresh fill_sim_history_scorecard.window_summaries" in design["required_data"]
+    assert "single-date or single-window motif positives" in design["proof_exclusion_rule"]
+    assert design["main_cost_gate_adjustment"] == "NONE"
+    assert design["probe_authority_granted"] is False
+    assert design["order_authority_granted"] is False
+    assert design["promotion_evidence"] is False
     assert top["frontier_search_plan"]["status"] == "MOTIF_FRONTIER_PRESENT"
     assert top["frontier_search_plan"]["experiment_focus"] == (
         "lift_train_gross_edge_without_destroying_holdout_sample_gate"
@@ -86,6 +108,11 @@ def test_mm_motif_amplification_ranks_repeated_near_miss_motif():
     markdown = render_markdown(packet)
     assert "MM Motif Amplification Packet" in markdown
     assert "low_friction_motif" in markdown
+    assert "Distinct-Date Accumulation Design" in markdown
+    assert "DISTINCT_DATE_ACCUMULATION_REQUIRED" in markdown
+    assert "wait_for_next_valid_fill_sim_history_refresh" in markdown
+    assert "candidate_scoped_bounded_demo_review_required_before_any_future_probe_or_order" in markdown
+    assert "single-date or single-window motif positives" in markdown
 
 
 def test_mm_motif_amplification_handles_missing_repeated_motifs():
@@ -97,3 +124,56 @@ def test_mm_motif_amplification_handles_missing_repeated_motifs():
     assert packet["status"] == "NO_REPEATED_LOW_FRICTION_MOTIF_FOR_AMPLIFICATION"
     assert packet["summary"]["candidate_count"] == 0
     assert packet["answers"]["motif_amplification_candidate_present"] is False
+    assert packet["distinct_date_accumulation_design"]["status"] == (
+        "NO_MOTIF_CANDIDATE_TO_ACCUMULATE"
+    )
+    assert packet["distinct_date_accumulation_design"]["max_safe_next_action"] == (
+        "continue_source_only_history_accumulation"
+    )
+
+
+def test_mm_motif_amplification_does_not_treat_ready_review_as_profit_proof():
+    packet = build_mm_motif_amplification_packet(
+        fillsim_history={
+            "status": "HISTORY_CURRENT_FEE_POSITIVE_REPEATS_NEEDS_OOS",
+            "valid_windows": 4,
+            "distinct_window_dates": ["2026-06-20", "2026-06-21", "2026-06-22"],
+            "low_friction_near_miss_motif_stability": {
+                "status": "LOW_FRICTION_NEAR_MISS_MOTIF_REPEAT_READY",
+                "reason": "repeated_motif_distinct_dates_ready",
+                "min_distinct_dates": 3,
+                "top_repeated_near_miss_motifs": [{
+                    "motif_key": "low_friction_motif|spread_combo",
+                    "windows": 3,
+                    "distinct_window_dates": [
+                        "2026-06-20",
+                        "2026-06-21",
+                        "2026-06-22",
+                    ],
+                    "frontier_summary": {
+                        "candidate_count": 1,
+                        "best_min_gross_key": "candidate-repeat-ready",
+                        "best_min_train_holdout_gross_bps": 4.2,
+                    },
+                    "best_cell": {
+                        "condition": "quoted_half_spread_bps train_p90",
+                        "train_edge_before_fees_bps": 4.4,
+                        "holdout_edge_before_fees_bps": 4.2,
+                        "gap_to_current_fee_round_trip_bps": 0.0,
+                    },
+                }],
+            },
+        },
+        current_fee_round_trip_bps=4.0,
+        now_utc=dt.datetime(2026, 6, 23, 17, tzinfo=dt.timezone.utc),
+    )
+
+    assert packet["status"] == "MM_MOTIF_AMPLIFICATION_READY_FOR_WALK_FORWARD_REVIEW"
+    assert packet["distinct_date_accumulation_design"]["status"] == (
+        "READY_FOR_WALK_FORWARD_AND_MAKER_REALISM_REVIEW"
+    )
+    assert packet["answers"]["distinct_date_accumulation_design_present"] is True
+    assert packet["answers"]["distinct_date_accumulation_ready_for_review"] is True
+    assert packet["answers"]["motif_current_fee_candidate_ready_for_review"] is True
+    assert packet["answers"]["motif_current_fee_proven"] is False
+    assert packet["answers"]["promotion_evidence"] is False

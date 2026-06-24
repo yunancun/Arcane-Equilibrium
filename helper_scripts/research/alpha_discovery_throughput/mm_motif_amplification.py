@@ -27,6 +27,27 @@ BOUNDARY = (
     "call, order, config, risk, auth, runtime mutation, Cost Gate lowering, "
     "probe authority, or promotion authority"
 )
+DISTINCT_DATE_REQUIRED_DATA = [
+    "fresh fill_sim_history_scorecard.window_summaries",
+    "repeated low_friction motif axes from independent window dates",
+    "train and holdout sample-gated gross edge for each frontier cell",
+    "current maker fee round-trip preserved from the source artifact",
+    "maker adverse-selection and fill-realism review after repeat evidence",
+]
+DISTINCT_DATE_FAILURE_CONDITIONS = [
+    "motif axes fail to repeat across distinct dates",
+    "frontier uplift exists only in train and destroys holdout sample gate",
+    "min train/holdout gross remains below the current fee round trip",
+    "candidate frontier changes motif identity instead of preserving the motif axes",
+    "future OOS, maker execution realism, or bounded Demo candidate matching fails",
+]
+DISTINCT_DATE_PROOF_EXCLUSIONS = [
+    "single-date or single-window motif positives",
+    "sample-starved holdout spikes",
+    "replay-only or artifact-count evidence",
+    "unattributed fills or non-candidate fills",
+    "global Cost Gate lowering as a substitute for net-after-fee edge",
+]
 
 
 def _utc_now() -> dt.datetime:
@@ -235,6 +256,85 @@ def _candidate_record(
     }
 
 
+def _distinct_date_accumulation_design(
+    top: dict[str, Any],
+    *,
+    packet_status: str,
+) -> dict[str, Any]:
+    if not top:
+        return {
+            "status": "NO_MOTIF_CANDIDATE_TO_ACCUMULATE",
+            "fastest_safe_test": "continue_collecting_low_friction_near_miss_history",
+            "required_data": DISTINCT_DATE_REQUIRED_DATA,
+            "failure_condition": ["no repeated low-friction motif candidate is present"],
+            "authority_required": "none_for_research_or_replay",
+            "max_safe_next_action": "continue_source_only_history_accumulation",
+            "proof_exclusion_rule": DISTINCT_DATE_PROOF_EXCLUSIONS,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        }
+
+    dates_remaining = int(top.get("distinct_dates_remaining") or 0)
+    gap = _float(top.get("min_gross_gap_to_current_fee_bps"))
+    if dates_remaining > 0:
+        status = "DISTINCT_DATE_ACCUMULATION_REQUIRED"
+        max_safe_next_action = "accumulate_distinct_window_history_for_same_low_friction_motif"
+        fastest_safe_test = (
+            "wait_for_next_valid_fill_sim_history_refresh_or_run_isolated_read_only_"
+            "replay_for_same_motif_axes"
+        )
+    elif gap is not None and gap > 0.0:
+        status = "EDGE_UPLIFT_REQUIRED_AFTER_DISTINCT_DATE_ACCUMULATION"
+        max_safe_next_action = "search_same_motif_frontier_without_order_or_cost_gate_change"
+        fastest_safe_test = "source_only_frontier_scan_preserving_same_motif_axes"
+    elif packet_status == "MM_MOTIF_AMPLIFICATION_READY_FOR_WALK_FORWARD_REVIEW":
+        status = "READY_FOR_WALK_FORWARD_AND_MAKER_REALISM_REVIEW"
+        max_safe_next_action = "build_walk_forward_and_maker_realism_review_packet"
+        fastest_safe_test = "read_only_walk_forward_and_maker_execution_realism_review"
+    else:
+        status = "MOTIF_ACCUMULATION_REVIEW_REQUIRED"
+        max_safe_next_action = "review_motif_packet_before_any_next_stage"
+        fastest_safe_test = "source_only_packet_review"
+
+    return {
+        "status": status,
+        "motif_key": top.get("motif_key"),
+        "motif_axes": top.get("motif_axes") or [],
+        "observed_distinct_dates": top.get("distinct_window_dates") or [],
+        "min_distinct_dates": top.get("min_distinct_dates"),
+        "distinct_dates_remaining": dates_remaining,
+        "frontier_candidate_count": _dict(top.get("frontier_search_plan")).get(
+            "frontier_candidate_count"
+        ),
+        "frontier_best_min_gross_key": _dict(top.get("frontier_search_plan")).get(
+            "frontier_best_min_gross_key"
+        ),
+        "frontier_gap_to_current_fee_bps": _dict(top.get("frontier_search_plan")).get(
+            "frontier_gap_to_current_fee_bps"
+        ),
+        "min_train_holdout_gross_bps": top.get("min_train_holdout_gross_bps"),
+        "current_fee_round_trip_bps": top.get("current_fee_round_trip_bps"),
+        "min_gross_gap_to_current_fee_bps": top.get("min_gross_gap_to_current_fee_bps"),
+        "required_uplift_multiple": top.get("required_uplift_multiple"),
+        "bottleneck_leg": top.get("bottleneck_leg"),
+        "fastest_safe_test": fastest_safe_test,
+        "required_data": DISTINCT_DATE_REQUIRED_DATA,
+        "failure_condition": DISTINCT_DATE_FAILURE_CONDITIONS,
+        "authority_required": (
+            "none_for_source_only_research; candidate_scoped_bounded_demo_review_"
+            "required_before_any_future_probe_or_order"
+        ),
+        "max_safe_next_action": max_safe_next_action,
+        "proof_exclusion_rule": DISTINCT_DATE_PROOF_EXCLUSIONS,
+        "main_cost_gate_adjustment": "NONE",
+        "probe_authority_granted": False,
+        "order_authority_granted": False,
+        "promotion_evidence": False,
+    }
+
+
 def build_mm_motif_amplification_packet(
     *,
     fillsim_history: dict[str, Any] | None,
@@ -284,6 +384,10 @@ def build_mm_motif_amplification_packet(
         next_action = "run_walk_forward_and_execution_realism_review_for_repeated_motif"
 
     top = candidates[0] if candidates else {}
+    distinct_date_design = _distinct_date_accumulation_design(
+        top,
+        packet_status=status,
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at_utc": now.isoformat(),
@@ -327,16 +431,30 @@ def build_mm_motif_amplification_packet(
             "top_frontier_experiment_focus": (
                 _dict(top.get("frontier_search_plan")).get("experiment_focus")
             ),
+            "distinct_date_accumulation_design_status": (
+                distinct_date_design.get("status")
+            ),
+            "distinct_date_max_safe_next_action": (
+                distinct_date_design.get("max_safe_next_action")
+            ),
         },
+        "distinct_date_accumulation_design": distinct_date_design,
         "top_candidate": top or None,
         "candidates": candidates,
         "answers": {
             "motif_amplification_candidate_present": bool(candidates),
-            "motif_current_fee_proven": bool(
+            "distinct_date_accumulation_design_present": bool(candidates),
+            "distinct_date_accumulation_ready_for_review": bool(
                 candidates
-                and (top.get("min_gross_gap_to_current_fee_bps") in {0, 0.0})
-                and (top.get("distinct_dates_remaining") in {0, None})
+                and distinct_date_design.get("status")
+                == "READY_FOR_WALK_FORWARD_AND_MAKER_REALISM_REVIEW"
             ),
+            "motif_current_fee_candidate_ready_for_review": bool(
+                candidates
+                and distinct_date_design.get("status")
+                == "READY_FOR_WALK_FORWARD_AND_MAKER_REALISM_REVIEW"
+            ),
+            "motif_current_fee_proven": False,
             "global_cost_gate_lowering_recommended": False,
             "main_cost_gate_adjustment": "NONE",
             "order_authority_granted": False,
@@ -373,6 +491,31 @@ def render_markdown(packet: dict[str, Any]) -> str:
     ]
     for key, value in _dict(packet.get("summary")).items():
         lines.append(f"| {key} | `{value}` |")
+
+    design = _dict(packet.get("distinct_date_accumulation_design"))
+    if design:
+        lines.extend([
+            "",
+            "## Distinct-Date Accumulation Design",
+            "",
+            "| field | value |",
+            "|---|---|",
+            f"| status | `{design.get('status')}` |",
+            f"| motif_key | `{cell(design.get('motif_key'))}` |",
+            f"| observed_distinct_dates | `{design.get('observed_distinct_dates')}` |",
+            f"| distinct_dates_remaining | `{design.get('distinct_dates_remaining')}` |",
+            f"| fastest_safe_test | `{design.get('fastest_safe_test')}` |",
+            f"| max_safe_next_action | `{design.get('max_safe_next_action')}` |",
+            f"| authority_required | `{design.get('authority_required')}` |",
+        ])
+        if design.get("failure_condition"):
+            lines.extend(["", "### Failure Conditions", ""])
+            for item in _list(design.get("failure_condition")):
+                lines.append(f"- `{item}`")
+        if design.get("proof_exclusion_rule"):
+            lines.extend(["", "### Proof Exclusions", ""])
+            for item in _list(design.get("proof_exclusion_rule")):
+                lines.append(f"- `{item}`")
 
     lines.extend([
         "",
