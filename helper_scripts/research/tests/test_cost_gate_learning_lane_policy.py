@@ -48,6 +48,10 @@ from cost_gate_learning_lane.false_negative_operator_review import (
     build_false_negative_operator_review,
     expected_false_negative_operator_review_typed_confirm,
 )
+from cost_gate_learning_lane.learning_ssot_decision import (
+    build_learning_ssot_decision,
+    render_markdown as render_learning_ssot_decision_markdown,
+)
 from cost_gate_learning_lane.status import (
     ACTIVATION_PREFLIGHT_SCHEMA_VERSION,
     REQUIRED_SOURCE_RELATIVE_PATHS,
@@ -282,6 +286,51 @@ def _sealed_horizon_replay_packet(*, status: str = "SEALED_HORIZON_REPLAY_READY_
             "main_cost_gate_adjustment": "NONE",
             "runtime_mutation": "NONE",
             "promotion_evidence": False,
+        },
+    }
+
+
+def _activation_preflight_for_ssot(
+    *,
+    ledger_rows: int = 100,
+    blocked_outcomes: int = 40,
+    writer_enabled: bool = False,
+    process_writer_enabled: bool = False,
+) -> dict:
+    return {
+        "schema_version": "cost_gate_demo_learning_lane_activation_preflight_v1",
+        "generated_at_utc": "2026-06-24T04:30:00+00:00",
+        "status": "BLOCKED_OUTCOMES_ACCUMULATING",
+        "reason": "blocked_signal_outcomes_present_but_review_gate_not_cleared",
+        "answers": {
+            "currently_accumulating_evidence": ledger_rows > 0,
+            "runtime_writer_enabled": writer_enabled,
+            "runtime_writer_process_enabled": process_writer_enabled,
+            "activation_ready": True,
+        },
+        "ledger": {
+            "ledger_path": "/tmp/openclaw/cost_gate_learning_lane/probe_ledger.jsonl",
+            "ledger_status": "BLOCKED_SIGNAL_OUTCOMES_PRESENT",
+            "ledger_total_rows": ledger_rows,
+            "admission_decision_count": max(ledger_rows - blocked_outcomes, 0),
+            "captured_reject_count": max(ledger_rows - blocked_outcomes, 0),
+            "blocked_signal_outcome_count": blocked_outcomes,
+            "proof_excluded_probe_outcome_count": 0,
+        },
+        "writer_config": {
+            "writer_config_status": (
+                "WRITER_ENABLED" if writer_enabled else "WRITER_DISABLED_OR_UNSET"
+            ),
+            "writer_enabled": writer_enabled,
+        },
+        "writer_process": {
+            "writer_process_checked": True,
+            "writer_process_status": (
+                "WRITER_ENABLED"
+                if process_writer_enabled
+                else "WRITER_DISABLED_OR_UNSET"
+            ),
+            "writer_process_enabled": process_writer_enabled,
         },
     }
 
@@ -2711,6 +2760,134 @@ def test_learning_lane_status_proof_excludes_unattributed_probe_outcomes(
     assert summary["proof_exclusion_present"] is True
     assert summary["proof_exclusion_reason_counts"]["unattributed_strategy_name"] == 1
     assert summary["avg_probe_outcome_net_bps"] is None
+
+
+def test_learning_ssot_decision_uses_artifact_ledger_as_current_ssot() -> None:
+    packet = build_learning_ssot_decision(
+        activation_preflight=_activation_preflight_for_ssot(),
+        now_utc=dt.datetime(2026, 6, 24, 4, 45, tzinfo=dt.timezone.utc),
+    )
+    markdown = render_learning_ssot_decision_markdown(packet)
+
+    assert packet["schema_version"] == "cost_gate_learning_ssot_decision_v1"
+    assert packet["status"] == "ARTIFACT_LEDGER_CURRENT_SSOT"
+    assert packet["current_learning_ssot"] == "artifact_probe_ledger_jsonl"
+    assert packet["ssot_decision"]["artifact_probe_ledger_is_current_ssot"] is True
+    assert packet["ssot_decision"]["pg_backed_ledger_is_current_ssot"] is False
+    assert packet["migration_gates"]["authority_boundary_preserved"] is True
+    assert packet["migration_gates"]["artifact_ledger_status"] == (
+        "BLOCKED_SIGNAL_OUTCOMES_PRESENT"
+    )
+    assert packet["migration_gates"]["artifact_ledger_path"] == (
+        "/tmp/openclaw/cost_gate_learning_lane/probe_ledger.jsonl"
+    )
+    assert packet["migration_gates"]["pg_backed_cutover_ready"] is False
+    assert packet["migration_gates"]["pg_backed_schema_verified"] is False
+    assert packet["migration_gates"]["pg_backed_writer_idempotency_verified"] is False
+    assert packet["migration_gates"]["pg_backed_reconstruction_verified"] is False
+    assert packet["migration_gates"]["pg_probe_performed"] is False
+    assert packet["answers"]["global_cost_gate_lowering_recommended"] is False
+    assert packet["answers"]["main_cost_gate_adjustment"] == "NONE"
+    assert packet["answers"]["probe_authority_granted"] is False
+    assert packet["answers"]["order_authority_granted"] is False
+    assert packet["answers"]["active_runtime_probe_authority"] is False
+    assert packet["answers"]["active_runtime_order_authority"] is False
+    assert packet["answers"]["operator_authorization_object_emitted"] is False
+    assert packet["answers"]["promotion_evidence"] is False
+    assert packet["answers"]["pg_write_required"] is False
+    assert packet["answers"]["pg_write_performed"] is False
+    assert packet["answers"]["bybit_call_required"] is False
+    assert packet["answers"]["order_submission_performed"] is False
+    assert "Current SSOT" in markdown
+    assert "no PG query/write" in markdown
+
+
+def test_learning_ssot_decision_does_not_treat_writer_flag_as_pg_ready() -> None:
+    packet = build_learning_ssot_decision(
+        activation_preflight=_activation_preflight_for_ssot(
+            writer_enabled=True,
+            process_writer_enabled=True,
+        ),
+        now_utc=dt.datetime(2026, 6, 24, 4, 45, tzinfo=dt.timezone.utc),
+    )
+
+    assert packet["status"] == "PG_BACKED_LEDGER_MIGRATION_REVIEW_REQUIRED"
+    assert packet["current_learning_ssot"] == "artifact_probe_ledger_jsonl"
+    assert packet["ssot_decision"]["pg_backed_ledger_is_current_ssot"] is False
+    assert packet["migration_gates"]["pg_backed_cutover_ready"] is False
+    assert packet["migration_gates"]["pg_backed_learning_ledger_observed"] is False
+    assert packet["migration_gates"]["pg_probe_performed"] is False
+    assert packet["migration_gates"]["runtime_writer_config_enabled"] is True
+    assert packet["migration_gates"]["runtime_writer_process_enabled"] is True
+    assert "operator_review_pg_backed_cost_gate_learning_ledger_contract_before_ssot_cutover" in (
+        packet["next_actions"]
+    )
+
+
+def test_learning_ssot_decision_fails_closed_without_activation_preflight() -> None:
+    packet = build_learning_ssot_decision(
+        activation_preflight=None,
+        now_utc=dt.datetime(2026, 6, 24, 4, 45, tzinfo=dt.timezone.utc),
+    )
+
+    assert packet["status"] == "SSOT_INPUT_MISSING"
+    assert packet["current_learning_ssot"] == "NONE"
+    assert packet["ssot_decision"]["artifact_probe_ledger_is_current_ssot"] is False
+    assert packet["ssot_decision"]["pg_backed_ledger_is_current_ssot"] is False
+    assert packet["answers"]["probe_authority_granted"] is False
+    assert packet["answers"]["order_authority_granted"] is False
+    assert packet["next_actions"] == [
+        "refresh_cost_gate_learning_lane_activation_preflight"
+    ]
+
+
+def test_learning_ssot_decision_fails_closed_on_authority_bearing_input() -> None:
+    activation = _activation_preflight_for_ssot()
+    activation["answers"]["probe_authority_granted"] = True
+
+    packet = build_learning_ssot_decision(
+        activation_preflight=activation,
+        now_utc=dt.datetime(2026, 6, 24, 4, 45, tzinfo=dt.timezone.utc),
+    )
+
+    assert packet["status"] == "AUTHORITY_BOUNDARY_VIOLATION"
+    assert packet["reason"] == "input_artifact_claimed_authority_or_cost_gate_mutation"
+    assert packet["current_learning_ssot"] == "NONE"
+    assert packet["ssot_decision"]["artifact_probe_ledger_is_current_ssot"] is False
+    assert packet["migration_gates"]["authority_boundary_preserved"] is False
+    assert packet["answers"]["probe_authority_granted"] is False
+    assert packet["answers"]["order_authority_granted"] is False
+    assert packet["answers"]["promotion_evidence"] is False
+    assert packet["next_actions"][0] == (
+        "discard_authority_bearing_input_and_rerun_source_only_ssot_decision"
+    )
+
+
+def test_learning_ssot_decision_surfaces_proof_exclusion_before_cutover() -> None:
+    packet = build_learning_ssot_decision(
+        activation_preflight=_activation_preflight_for_ssot(),
+        bounded_result_review={
+            "schema_version": "bounded_demo_probe_result_review_v1",
+            "generated_at_utc": "2026-06-24T04:40:00+00:00",
+            "status": "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED",
+            "probe_result_summary": {
+                "completed_probe_outcome_count": 2,
+                "proof_eligible_probe_outcome_count": 1,
+                "proof_excluded_probe_outcome_count": 1,
+            },
+            "answers": {
+                "proof_exclusion_present": True,
+                "promotion_evidence": False,
+            },
+        },
+        now_utc=dt.datetime(2026, 6, 24, 4, 45, tzinfo=dt.timezone.utc),
+    )
+
+    assert packet["result_review"]["proof_exclusion_present"] is True
+    assert packet["next_actions"][0] == (
+        "repair_or_quarantine_proof_excluded_fill_lineage_before_any_ssot_cutover"
+    )
+    assert packet["answers"]["promotion_evidence"] is False
 
 
 def _selected_reject_event() -> dict:
