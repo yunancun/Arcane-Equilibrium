@@ -1894,3 +1894,9 @@
 - Commit `66f063cc` adds Rust event-consumer dispatch-response orderId mapping, stale-map unattributed fallback, and lifecycle cleanup for future fill attribution/reconstructability.
 - Review chain PA/E2/E4/QA passed; focused Rust test `pending_registration_order_type_tests` passed 26/26 and `git diff --check` clean.
 - Boundary: source-only guard, not deployed/runtime lineage closure, candidate selection, bounded-probe proof, Cost Gate proof, or promotion proof; P0 exchange cleanup/quarantine remains operator-gated.
+
+## 2026-06-24 API Service Env-Parity Packet
+
+- `api_service_env_parity.py` now makes manual uvicorn vs inactive systemd unit drift reviewable from supplied snapshots only; current runtime smoke is `API_SERVICE_ENV_PARITY_DRIFT`.
+- E2/E3/E4 chain passed after PM fixed missing-env false-clean, env/service mutation contamination, and command-line secret/key redaction gaps.
+- Boundary: source/test/docs + supplied `/tmp` snapshot smoke only; no service restart/process/env/crontab mutation, no PG/Bybit call, no Cost Gate change, no probe/order/live authority, and no promotion proof.
