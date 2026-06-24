@@ -113,6 +113,12 @@ Known paths:
   0600 curl config for Bearer auth so tokens do not appear in argv. Demo cleanup
   close fills and unattributed fills are audit/risk-reduction evidence only,
   not bounded-probe, Cost Gate, promotion, or risk-adjusted net PnL proof.
+- Public quote transport diagnostics are evidence-quality tooling only: they
+  may record sanitized failure class/reason/errno/stage, but must redact
+  secrets, cookies, DSNs, local paths, tracebacks, and non-allowlisted URLs;
+  they do not grant repeat exchange calls, runtime-host invocation, order/probe
+  authority, Cost Gate relaxation, or promotion proof without the normal
+  PM->E3->BB gate.
 - Do not fake AI calls, trading activity, lineage, fills, healthchecks, or test
   results.
 - Bybit API timeout / nonzero `retCode` fails closed; no hidden trading retry
