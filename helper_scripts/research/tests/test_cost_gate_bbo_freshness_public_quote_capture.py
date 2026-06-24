@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import socket
 import sys
 import urllib.error
 from pathlib import Path
@@ -260,6 +261,160 @@ def test_http_error_malformed_json_and_retcode_fail_closed() -> None:
             monotonic_fn=opener.clock.monotonic,
         )
         assert packet["status"] == mod.SOURCE_FAILURE_STATUS
+        assert packet["answers"]["order_submission_performed"] is False
+
+
+def test_transport_urlerror_records_sanitized_reason_details() -> None:
+    clock = Clock()
+    reason = (
+        "temporary failure BYBIT_API_KEY=abc123 OPENCLAW_LIVE_PATCH_SECRET=def456 "
+        "X-BAPI-API-KEY=ghi789 Authorization: Bearer deadbeef "
+        "DATABASE_URL=postgres://user:pass@db postgres://bare:dsn@db/app "
+        "/Users/ncyu/Projects/TradeBot/secrets.txt "
+        "/tmp/openclaw/secrets.json /var/log/openclaw/private.log "
+        "https://evil.example/path "
+        "https://api.bybit.com/v5/market/tickers?category=linear&symbol=AVAXUSDT#frag "
+        "https://user:pass@api.bybit.com/v5/market/time"
+    )
+    opener = FakeOpener(
+        clock,
+        exc_by_path={mod.TIME_PATH: urllib.error.URLError(reason)},
+    )
+
+    packet = mod.capture_public_quote(
+        reroute_review=_reroute(),
+        opener=opener,
+        now_fn=clock.now,
+        monotonic_fn=clock.monotonic,
+    )
+    request = packet["requests"][0]
+    sanitized = request["transport_error_reason_sanitized"]
+
+    assert packet["status"] == mod.SOURCE_FAILURE_STATUS
+    assert request["error"] == "transport_error:URLError"
+    assert request["transport_error_class"] == "URLError"
+    assert request["transport_error_reason_type"] == "str"
+    assert request["transport_error_errno"] is None
+    assert request["transport_error_stage"] == "opener"
+    assert request["transport_error_sanitized"] is True
+    assert "abc123" not in sanitized
+    assert "def456" not in sanitized
+    assert "ghi789" not in sanitized
+    assert "deadbeef" not in sanitized
+    assert "user:pass" not in sanitized
+    assert "bare:dsn" not in sanitized
+    assert "/Users/ncyu" not in sanitized
+    assert "/tmp/openclaw" not in sanitized
+    assert "/var/log" not in sanitized
+    assert "evil.example" not in sanitized
+    assert "category=linear" not in sanitized
+    assert "#frag" not in sanitized
+    assert "user:pass@api.bybit.com" not in sanitized
+    assert "<redacted>" in sanitized
+    assert "<path-redacted>" in sanitized
+    assert "<url-redacted>" in sanitized
+    assert len(opener.requests) == 3
+    answers = packet["answers"]
+    for key in [
+        "bybit_private_call_performed",
+        "pg_write_performed",
+        "order_submission_performed",
+        "probe_authority_granted",
+        "order_authority_granted",
+        "live_authority_granted",
+        "promotion_evidence",
+    ]:
+        assert answers[key] is False
+    assert answers["main_cost_gate_adjustment"] == "NONE"
+
+
+def test_transport_cookie_diagnostics_redact_through_line() -> None:
+    clock = Clock()
+    reason = "temporary failure Cookie: session=secret, csrf=tok; Path=/, Set-Cookie: id=abc"
+    opener = FakeOpener(clock, exc_by_path={mod.TIME_PATH: urllib.error.URLError(reason)})
+
+    packet = mod.capture_public_quote(
+        reroute_review=_reroute(),
+        opener=opener,
+        now_fn=clock.now,
+        monotonic_fn=clock.monotonic,
+    )
+    sanitized = packet["requests"][0]["transport_error_reason_sanitized"]
+
+    assert "session=secret" not in sanitized
+    assert "csrf=tok" not in sanitized
+    assert "Path=/" not in sanitized
+    assert "id=abc" not in sanitized
+    assert sanitized == "temporary failure Cookie=<redacted>"
+
+
+def test_transport_url_sanitizer_preserves_only_allowlisted_bybit_public_paths() -> None:
+    clock = Clock()
+    reason = (
+        "url https://api.bybit.com/v5/market/tickers?category=linear&symbol=AVAXUSDT#frag "
+        "bad https://user:pass@api.bybit.com/v5/market/time "
+        "demo https://api-demo.bybit.com/v5/market/tickers?category=linear&symbol=AVAXUSDT "
+        "other https://api.bybit.com/v5/order/create"
+    )
+    opener = FakeOpener(clock, exc_by_path={mod.TIME_PATH: urllib.error.URLError(reason)})
+
+    packet = mod.capture_public_quote(
+        reroute_review=_reroute(),
+        opener=opener,
+        now_fn=clock.now,
+        monotonic_fn=clock.monotonic,
+    )
+    sanitized = packet["requests"][0]["transport_error_reason_sanitized"]
+
+    assert "https://api.bybit.com/v5/market/tickers" in sanitized
+    assert "category=linear" not in sanitized
+    assert "#frag" not in sanitized
+    assert "user:pass" not in sanitized
+    assert "api-demo.bybit.com" not in sanitized
+    assert "/v5/order/create" not in sanitized
+    assert "<url-redacted>" in sanitized
+
+
+def test_transport_exception_reason_shapes_are_structured_and_fail_closed() -> None:
+    cases = [
+        (
+            urllib.error.URLError(socket.timeout("timed out token=secret")),
+            "URLError",
+            {"TimeoutError", "timeout"},
+            None,
+        ),
+        (TimeoutError("timed out password=secret"), "TimeoutError", "TimeoutError", None),
+        (
+            urllib.error.URLError(socket.gaierror(8, "nodename nor servname")),
+            "URLError",
+            "gaierror",
+            8,
+        ),
+        (OSError(12345, "generic failure"), "OSError", "OSError", 12345),
+    ]
+
+    for exc, expected_class, expected_reason_type, expected_errno in cases:
+        clock = Clock()
+        opener = FakeOpener(clock, exc_by_path={mod.TICKERS_PATH: exc})
+        packet = mod.capture_public_quote(
+            reroute_review=_reroute(),
+            opener=opener,
+            now_fn=clock.now,
+            monotonic_fn=clock.monotonic,
+        )
+        request = packet["requests"][1]
+
+        assert packet["status"] == mod.SOURCE_FAILURE_STATUS
+        assert request["error"] == f"transport_error:{expected_class}"
+        assert request["transport_error_class"] == expected_class
+        if isinstance(expected_reason_type, set):
+            assert request["transport_error_reason_type"] in expected_reason_type
+        else:
+            assert request["transport_error_reason_type"] == expected_reason_type
+        assert request["transport_error_errno"] == expected_errno
+        assert request["transport_error_stage"] == "opener"
+        assert request["transport_error_sanitized"] is True
+        assert "secret" not in str(request["transport_error_reason_sanitized"])
         assert packet["answers"]["order_submission_performed"] is False
 
 
