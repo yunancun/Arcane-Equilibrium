@@ -13,7 +13,8 @@
 //!        軟層；硬層 = per_strategy.max_concurrent_positions risk config，agent 不可放寬。
 //!        硬層真實 enforce 於 intent_processor/router.rs per_strategy_concurrency_rejection
 //!        —— 依 owner_strategy 重數 PaperState 真倉，重啟 under-count 後仍 fail-closed）
-//!     5. prior_close 可得（boot 1d REST seed → KlineManager 1d buffer → 本策略 map）
+//!     5. prior_close 可得；或 bounded demo near-touch 模式用 current_price fallback
+//!        只作 thesis/logging，不阻斷 fill-discovery。
 //!   出場條件：fill 後 entry_day + hold_days 的「UTC 日首 tick」emit Close。
 //!   主要類/函數：FlashDipBuy、on_tick（三分支：entry-arm / hold-exit / cross-skip）、
 //!     should_emit_close、import_positions / on_fill / on_close_confirmed override、
@@ -444,9 +445,15 @@ impl Strategy for FlashDipBuy {
                     return vec![];
                 }
 
-                // prior_close（boot 1d seed）；缺則 inert（fail-safe，silent）。
-                let prior_close = match self.prior_close.get(sym).copied() {
-                    Some(pc) => pc,
+                // prior_close（boot 1d seed）；static thesis 缺 seed 則 inert。
+                // bounded demo near-touch 的實際掛單價只依賴 current_price 和 offset，
+                // 因此缺 prior_close 不應再讓 fill-discovery 每日靜默停擺；fallback
+                // 僅用於 thesis_limit_price logging / confidence 說明，不放寬風控。
+                let (prior_close, prior_close_source) = match self.prior_close.get(sym).copied() {
+                    Some(pc) => (pc, "db_1d_seed"),
+                    None if self.bounded_demo_near_touch => {
+                        (current_price, "bounded_near_touch_current_price_fallback")
+                    }
                     None => {
                         // 當日標記已嘗試（避免每 tick 重查），但不入場。
                         self.last_acted_day.insert(sym.to_string(), today);
@@ -497,6 +504,7 @@ impl Strategy for FlashDipBuy {
                     strategy = "flash_dip_buy",
                     symbol = sym,
                     prior_close,
+                    prior_close_source,
                     k_dip = self.k_dip,
                     thesis_limit_price,
                     limit_price,
