@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import datetime as dt
 
-from alpha_discovery_throughput.discovery_loop import build_discovery_plan
+from alpha_discovery_throughput.discovery_loop import (
+    _mm_current_fee_confirmation_packet_row_extra,
+    build_discovery_plan,
+)
 from alpha_discovery_throughput.learning_worklist import build_learning_worklist
 
 
@@ -360,6 +363,14 @@ def test_learning_worklist_promotes_mm_current_fee_confirmation_task():
                         "history_current_fee_sample_gated_positive_windows": 1,
                         "history_repeated_positive_key_count": 0,
                         "candidate_repeated_windows": 0,
+                        "candidate_observed_windows": 1,
+                        "candidate_observed_independent_windows": 1,
+                        "candidate_observed_distinct_dates": ["2026-06-23"],
+                        "repeat_window_design_status": (
+                            "REPEAT_WINDOW_SAFE_TEST_READY"
+                        ),
+                        "repeat_window_consistency_status": "consistent",
+                        "same_candidate_independent_windows_remaining": 1,
                         "history_walk_forward_holdout_confirmed_windows": 0,
                         "repeat_window_confirmed": False,
                         "oos_walk_forward_confirmed": False,
@@ -367,6 +378,13 @@ def test_learning_worklist_promotes_mm_current_fee_confirmation_task():
                             "NOT_REACHED_REPEAT_WINDOW_REQUIRED"
                         ),
                         "maker_execution_realism_confirmed": False,
+                    },
+                    "repeat_window_design": {
+                        "status": "REPEAT_WINDOW_SAFE_TEST_READY",
+                        "consistency_status": "consistent",
+                        "max_safe_next_action": (
+                            "accumulate_or_replay_independent_windows_for_same_current_fee_mm_cell"
+                        ),
                     },
                     "answers": {
                         "global_cost_gate_lowering_recommended": False,
@@ -423,8 +441,36 @@ def test_learning_worklist_promotes_mm_current_fee_confirmation_task():
         is False
     )
     assert task["evidence"][
+        "mm_current_fee_confirmation_candidate_observed_independent_windows"
+    ] == 1
+    assert task["evidence"][
+        "mm_current_fee_confirmation_same_candidate_independent_windows_remaining"
+    ] == 1
+    assert task["evidence"][
+        "mm_current_fee_confirmation_repeat_window_design_status"
+    ] == "REPEAT_WINDOW_SAFE_TEST_READY"
+    assert task["evidence"][
+        "mm_current_fee_confirmation_repeat_window_max_safe_next_action"
+    ] == "accumulate_or_replay_independent_windows_for_same_current_fee_mm_cell"
+    assert task["evidence"][
         "mm_current_fee_confirmation_maker_execution_realism_status"
     ] == "NOT_REACHED_REPEAT_WINDOW_REQUIRED"
+
+
+def test_mm_current_fee_confirmation_row_extra_preserves_zero_remaining():
+    row = _mm_current_fee_confirmation_packet_row_extra({
+        "mm_current_fee_confirmation_packet": {
+            "status": "MM_CURRENT_FEE_CONFIRMATION_REQUIRES_OOS",
+            "summary": {
+                "same_candidate_independent_windows_remaining": 0,
+            },
+        },
+    })
+
+    assert (
+        row["mm_current_fee_confirmation_same_candidate_independent_windows_remaining"]
+        == 0
+    )
 
 
 def test_learning_worklist_keeps_promotion_review_ahead_of_replay_history():

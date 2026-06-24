@@ -2591,6 +2591,10 @@ def _mm_current_fee_confirmation_packet_row_extra(
     if not packet:
         return {}
     summary = _dict(packet.get("summary"))
+    repeat_design = _dict(packet.get("repeat_window_design"))
+    def first_present(primary: Any, fallback: Any) -> Any:
+        return primary if primary is not None else fallback
+
     return {
         "mm_current_fee_confirmation_packet_status": packet.get("status"),
         "mm_current_fee_confirmation_packet_reason": packet.get("reason"),
@@ -2638,6 +2642,32 @@ def _mm_current_fee_confirmation_packet_row_extra(
         ),
         "mm_current_fee_confirmation_candidate_repeated_windows": summary.get(
             "candidate_repeated_windows"
+        ),
+        "mm_current_fee_confirmation_candidate_observed_windows": summary.get(
+            "candidate_observed_windows"
+        ),
+        "mm_current_fee_confirmation_candidate_observed_independent_windows": (
+            summary.get("candidate_observed_independent_windows")
+        ),
+        "mm_current_fee_confirmation_candidate_observed_distinct_dates": (
+            summary.get("candidate_observed_distinct_dates")
+        ),
+        "mm_current_fee_confirmation_repeat_window_design_status": (
+            summary.get("repeat_window_design_status")
+            or repeat_design.get("status")
+        ),
+        "mm_current_fee_confirmation_repeat_window_consistency_status": (
+            summary.get("repeat_window_consistency_status")
+            or repeat_design.get("consistency_status")
+        ),
+        "mm_current_fee_confirmation_same_candidate_independent_windows_remaining": (
+            first_present(
+                summary.get("same_candidate_independent_windows_remaining"),
+                repeat_design.get("same_candidate_independent_windows_remaining"),
+            )
+        ),
+        "mm_current_fee_confirmation_repeat_window_max_safe_next_action": (
+            repeat_design.get("max_safe_next_action")
         ),
         "mm_current_fee_confirmation_history_walk_forward_holdout_confirmed_windows": (
             summary.get("history_walk_forward_holdout_confirmed_windows")
