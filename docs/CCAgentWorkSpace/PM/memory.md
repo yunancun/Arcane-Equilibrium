@@ -1930,3 +1930,12 @@
 - Fresh read-only enablement review after cutover shows `openclaw-trading-api.service` active/running but disabled; parity is `API_SERVICE_ENV_PARITY_CLEAN_SOURCE_ONLY`, bind is Tailscale-only, health returns `401`, `Linger=yes`, and no default-target wants symlink exists.
 - E3 returned `DONE_WITH_CONCERNS`: future `systemctl --user enable openclaw-trading-api.service` is acceptable only as a separate PM/E3 runtime mutation checkpoint using enable without `--now`; this packet grants no enable authority.
 - Boundary: source/read-only evidence + docs only; no enable/disable/restart/daemon-reload/process signal, no API POST/Bybit/PG write, no Cost Gate change, no probe/order/live authority, no Rust writer, no promotion proof.
+
+## 2026-06-24 Shadow Placement Authority-Readiness Next Action
+
+- `P1-BOUNDED-PROBE-SHADOW-PLACEMENT-NEXT-ACTION-RECONCILE` closed as source-only `DONE_WITH_CONCERNS`.
+- Fresh runtime evidence showed shadow placement still emitted `operator_review_mechanical_touchability_before_rust_patch` while authority readiness was already `AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW` and `rust_patch_required=false`.
+- `bounded_probe_shadow_placement_impact.py` now optionally consumes `bounded_demo_probe_authority_patch_readiness_v1` and only moves next actions to exact-authorization/candidate-matched evidence when readiness is fresh, ready, answer-self-consistent, Adapter/wiring present, and no authority/proof/mutation contamination exists.
+- E2 found fail-open risks before commit; PM fixed them by expanding authority-key checks, scanning nested/list inputs, requiring readiness answers to match ready status, and splitting matched-sample next action into authorization-only first action.
+- `cost_gate_learning_lane_cron.sh` now passes same-cycle readiness into shadow placement; runtime copied-artifact smoke produced `authority_path_ready_for_operator_review=true` and next actions `collect_candidate_matched_bounded_demo_probe_evidence_after_exact_authorization` / `rerun_shadow_placement_after_candidate_matched_flow`.
+- Boundary: source/test/docs + copied-artifact smoke only; no Bybit call/order/cancel/modify, no PG write, no crontab/service mutation, no Cost Gate lowering, no probe/order/live authority, no Rust writer, no promotion proof.

@@ -582,6 +582,7 @@ BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_ARGS=(
     -m cost_gate_learning_lane.bounded_probe_shadow_placement_impact
     --order-to-fill-gap-json "$ORDER_TOUCHABILITY_JSON"
     --placement-repair-plan-json "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT"
+    --authority-patch-readiness-json "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT"
     --max-artifact-age-hours "$SHADOW_PLACEMENT_MAX_ARTIFACT_AGE_HOURS"
     --json-output "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT"
     --output "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_MD_OUT"

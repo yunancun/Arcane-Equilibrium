@@ -813,3 +813,11 @@ YYYY-MM-DD HH:MM TZ
 - Dispatch chain: `PM(default)` session-loop state + read-only snapshot/parity + `E3(explorer)` runtime/security review + `PM(default)` integration.
 - Result: fresh parity packet is `API_SERVICE_ENV_PARITY_CLEAN_SOURCE_ONLY`; service is active/running with `UnitFileState=disabled`, `[Install] WantedBy=default.target`, `Linger=yes`, no wants symlink, Tailscale-only listener, and health `401`. E3 says future enablement is acceptable only as a separate PM/E3 checkpoint using enable without `--now`.
 - Boundary: no enable/disable/restart/daemon-reload/process signal, no API POST/Bybit/PG write, no Cost Gate change, no probe/order/live authority, no Rust writer, no promotion proof.
+
+# 2026-06-24 — Shadow Placement Authority-Readiness Next Action
+
+- Task: advance `P1-BOUNDED-PROBE-SHADOW-PLACEMENT-NEXT-ACTION-RECONCILE` so bounded Demo shadow placement no longer points to an obsolete Rust-patch review when authority readiness is already fresh/ready/no-authority.
+- Dispatch chain: `PM(default)` session-loop state + source/test/docs + copied runtime artifact smoke; PA/E1, E2, and E4 read-only reviews requested before commit.
+- Result: `bounded_probe_shadow_placement_impact.py` now accepts optional `--authority-patch-readiness-json`; cron passes same-cycle readiness into shadow placement. Ready/self-consistent/no-authority readiness moves mismatch next actions to `collect_candidate_matched_bounded_demo_probe_evidence_after_exact_authorization` and `rerun_shadow_placement_after_candidate_matched_flow`; matched-sample output uses authorization-only first action before post-authorization evidence refresh.
+- Verification: shadow focused `11 passed`; cron static `15 passed`; profitability/alpha/authorization/readiness `17 passed`; py_compile PASS; cron `bash -n` PASS; diff-check PASS; copied-runtime-artifact smoke PASS.
+- Boundary: source/test/docs + copied-artifact smoke only; no Bybit call/order/cancel/modify, no PG write, no crontab/service mutation, no Cost Gate change, no probe/order/live authority, no Rust writer, no promotion proof.
