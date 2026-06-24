@@ -21,6 +21,8 @@ ts() { date '+%Y-%m-%d %H:%M:%S'; }
 export OPENCLAW_BASE_DIR="${OPENCLAW_BASE_DIR:-$BASE}"
 export OPENCLAW_DATA_DIR="${OPENCLAW_DATA_DIR:-$DATA}"
 
+EXPECTED_SOURCE_HEAD="${OPENCLAW_EXPECTED_SOURCE_HEAD:-${OPENCLAW_COST_GATE_LEARNING_EXPECTED_HEAD:-${OPENCLAW_DEMO_LEARNING_STACK_EXPECTED_HEAD:-}}}"
+
 if [[ -d "$LOCK_DIR" ]] && [[ -n "$(find "$LOCK_DIR" -maxdepth 0 -mmin +20 2>/dev/null)" ]]; then
     echo "[$(ts)] WARN: stale lock (>20min) cleared: $LOCK_DIR" >> "$LOG"
     rmdir "$LOCK_DIR" 2>/dev/null || true
@@ -395,10 +397,18 @@ echo "[$(ts)] profitability_path_scorecard_refresh rc=${profitability_rc}" >> "$
 rc=0
 (
     cd "$BASE/helper_scripts/research"
-    "$PYBIN" -m alpha_discovery_throughput.runtime_runner \
-        --data-dir "$DATA" \
-        --repo-root "$BASE" \
-        --print-json
+    if [[ -n "$EXPECTED_SOURCE_HEAD" ]]; then
+        "$PYBIN" -m alpha_discovery_throughput.runtime_runner \
+            --data-dir "$DATA" \
+            --repo-root "$BASE" \
+            --expected-head "$EXPECTED_SOURCE_HEAD" \
+            --print-json
+    else
+        "$PYBIN" -m alpha_discovery_throughput.runtime_runner \
+            --data-dir "$DATA" \
+            --repo-root "$BASE" \
+            --print-json
+    fi
 ) >> "$LOG" 2>&1 || rc=$?
 echo "[$(ts)] === alpha_discovery_throughput end rc=${rc} ===" >> "$LOG"
 
