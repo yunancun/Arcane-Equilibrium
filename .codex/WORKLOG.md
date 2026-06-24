@@ -791,3 +791,11 @@ YYYY-MM-DD HH:MM TZ
 - Runtime supplied-snapshot smoke: `/tmp/api_service_env_parity_exact_unit_diff_20260624T1148Z.json` returned `API_SERVICE_ENV_PARITY_DRIFT`, `plan_blockers=[]`, single base unit fragment, no drop-ins, no redactions, `apply_allowed=false`, `restart_allowed=false`, `enable_allowed=false`.
 - Verification: API env-parity + runtime-health hygiene tests `44 passed`, py_compile PASS, `git diff --check` PASS, CLI smoke PASS, direct secret-pattern scan PASS.
 - Boundary: source/test/docs + supplied `/tmp` snapshot smoke only; no systemd apply, daemon-reload, process signal, service restart, API/env/crontab mutation, PG/Bybit call, Cost Gate change, probe/order/live authority, Rust writer, or promotion proof.
+
+# 2026-06-24 — API Service Runtime Cutover PM Apply
+
+- Task: advance `P1-API-SERVICE-OWNERSHIP-RUNTIME-CUTOVER-PM-APPLY-REVIEW` through the PM-owned runtime mutation checkpoint.
+- Dispatch chain: `PM(default)` runtime preflight/apply + `E3(explorer)` runtime/security review; BB skipped because no exchange-facing action.
+- Result: E3 approved guarded Demo/API service handoff. PM backed up the user unit, wrote the exact proposed unit SHA `1a1eaff6...`, ran daemon-reload, gracefully stopped manual uvicorn PID `1859622`, and started `openclaw-trading-api.service`.
+- Verification: service active/running with MainPID `2218842`, listener only on `100.91.109.86:8000`, health surface returns `401`, old manual PID absent, runtime source clean at `dc1416e5`, demo engine alive, and post-cutover parity packet is `API_SERVICE_ENV_PARITY_CLEAN_SOURCE_ONLY`.
+- Boundary: no `systemctl --user enable`, no Bybit call, no PG write, no Cost Gate change, no probe/order/live authority, no Rust writer, no promotion proof.

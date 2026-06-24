@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-24 API Service Runtime Cutover PM Apply
+
+- E3 approved and PM executed a guarded Demo/API service ownership handoff from manual uvicorn PID `1859622` to `openclaw-trading-api.service`; post-cutover service is active/running with MainPID `2218842`, bound only to `100.91.109.86:8000`.
+- Post-cutover parity packet `/tmp/api_service_env_parity_packet_post_cutover.json` is `API_SERVICE_ENV_PARITY_CLEAN_SOURCE_ONLY` with no findings, evidence gaps, or plan blockers; demo engine remains alive and runtime source remains clean at `dc1416e5`.
+- `systemctl --user enable` was not run; unit remains disabled and boot-autostart enablement is a separate PM/E3 checkpoint. No Bybit/PG/Cost Gate/probe/order/live/Rust-writer authority changed.
+
 ## 2026-06-24 API Service Exact Unit Diff Packet
 
 - Source-only `api_service_env_parity.py` now emits exact redacted current/proposed systemd unit content, unified diff, current/proposed SHA256, source fragment inventory, drop-in detection, and `pre_apply_revalidation_contract.contract_sha256`.
