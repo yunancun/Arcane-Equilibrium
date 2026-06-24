@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-24 Standing Demo Authorization Contract
+
+- Source/runtime commit `bdc1e156` lets bounded Demo operator authorization consume a structured `standing_demo_operator_authorization_v1` as an alternative confirmation source, but only to emit a fresh candidate-scoped authorization object.
+- Standing auth must be top-level explicit demo/live_demo, bounded-probe scoped, candidate-scoped, capped, short-TTL, operator-aligned, and recursively free of live/runtime/order/probe/PG/Bybit/service/writer/Cost Gate/promotion contamination; truthy strings and `answers` overrides fail closed.
+- PM read: the operator's standing Demo permission no longer needs repeated broad authorization questions, but it still does not grant live/mainnet, active runtime authority, order submission, Cost Gate change, or promotion proof. Demo experience remains live-applicable only through candidate-matched, fee/slippage/lineage-auditable evidence.
+
 ## 2026-06-24 MM Motif Distinct-Date Worklist Surface
 
 - Source commit `52b572ed` makes the learning worklist emit a separate no-authority `mm_motif_distinct_date_accumulation` task for the low-friction MM motif when motif amplification still needs distinct-date history.
