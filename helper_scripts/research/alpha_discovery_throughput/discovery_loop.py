@@ -4107,6 +4107,76 @@ def classify_profitability_blocker(
                 "false_negative_candidate_packet_promotion_evidence": detail.get(
                     "false_negative_candidate_packet_promotion_evidence"
                 ),
+                "learning_loop_last_false_negative_candidate_friction_scorecard_status": (
+                    detail.get(
+                        "learning_loop_last_false_negative_candidate_friction_scorecard_status"
+                    )
+                ),
+                "learning_loop_last_false_negative_candidate_friction_scorecard_ready": (
+                    detail.get(
+                        "learning_loop_last_false_negative_candidate_friction_scorecard_ready"
+                    )
+                ),
+                "learning_loop_last_false_negative_candidate_friction_scorecard_ranked_count": (
+                    detail.get(
+                        "learning_loop_last_false_negative_candidate_friction_scorecard_ranked_count"
+                    )
+                ),
+                "learning_loop_last_false_negative_candidate_friction_scorecard_candidate_count": (
+                    detail.get(
+                        "learning_loop_last_false_negative_candidate_friction_scorecard_candidate_count"
+                    )
+                ),
+                "learning_loop_last_false_negative_candidate_friction_scorecard_measured_active_candidate_count": (
+                    detail.get(
+                        "learning_loop_last_false_negative_candidate_friction_scorecard_measured_active_candidate_count"
+                    )
+                ),
+                "learning_loop_last_false_negative_candidate_friction_scorecard_top_side_cell_key": (
+                    detail.get(
+                        "learning_loop_last_false_negative_candidate_friction_scorecard_top_side_cell_key"
+                    )
+                ),
+                "learning_loop_last_false_negative_candidate_friction_scorecard_top_next_action": (
+                    detail.get(
+                        "learning_loop_last_false_negative_candidate_friction_scorecard_top_next_action"
+                    )
+                ),
+                "learning_loop_last_false_negative_candidate_friction_scorecard_bounded_demo_probe_authorized": (
+                    detail.get(
+                        "learning_loop_last_false_negative_candidate_friction_scorecard_bounded_demo_probe_authorized"
+                    )
+                ),
+                "learning_loop_last_false_negative_candidate_friction_scorecard_operator_authorization_object_emitted": (
+                    detail.get(
+                        "learning_loop_last_false_negative_candidate_friction_scorecard_operator_authorization_object_emitted"
+                    )
+                ),
+                "learning_loop_last_false_negative_candidate_friction_scorecard_global_cost_gate_lowering_recommended": (
+                    detail.get(
+                        "learning_loop_last_false_negative_candidate_friction_scorecard_global_cost_gate_lowering_recommended"
+                    )
+                ),
+                "learning_loop_last_false_negative_candidate_friction_scorecard_main_cost_gate_adjustment": (
+                    detail.get(
+                        "learning_loop_last_false_negative_candidate_friction_scorecard_main_cost_gate_adjustment"
+                    )
+                ),
+                "learning_loop_last_false_negative_candidate_friction_scorecard_probe_authority_granted": (
+                    detail.get(
+                        "learning_loop_last_false_negative_candidate_friction_scorecard_probe_authority_granted"
+                    )
+                ),
+                "learning_loop_last_false_negative_candidate_friction_scorecard_order_authority_granted": (
+                    detail.get(
+                        "learning_loop_last_false_negative_candidate_friction_scorecard_order_authority_granted"
+                    )
+                ),
+                "learning_loop_last_false_negative_candidate_friction_scorecard_promotion_evidence": (
+                    detail.get(
+                        "learning_loop_last_false_negative_candidate_friction_scorecard_promotion_evidence"
+                    )
+                ),
                 "false_negative_operator_review_status": detail.get(
                     "false_negative_operator_review_status"
                 ),
