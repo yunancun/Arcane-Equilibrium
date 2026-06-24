@@ -67,12 +67,31 @@ fn non_allowed_symbol_skipped() {
 }
 
 #[test]
-fn missing_prior_close_inert_failsafe() {
+fn missing_prior_close_inert_failsafe_in_static_mode() {
     let mut s = active_strategy();
-    // 不 seed prior_close → 即使 UTC 日首 tick 也 inert（fail-safe，silent）。
+    s.bounded_demo_near_touch = false;
+    // static 深價模式不 seed prior_close → 即使 UTC 日首 tick 也 inert（fail-safe，silent）。
     let ctx = StrategyHarness::new("BTCUSDT").price(60_000.0).build();
     let surface = &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE;
     assert!(s.on_tick(&ctx, surface).is_empty());
+}
+
+#[test]
+fn bounded_near_touch_missing_prior_close_uses_current_price_fallback() {
+    let mut s = active_strategy();
+    // near-touch fill-discovery 不應被 boot-only 1d seed stale 阻斷；prior_close
+    // fallback 僅用於 thesis logging，實際掛單價仍取 current_price*(1-offset)。
+    let ctx = StrategyHarness::new("BTCUSDT").price(59_000.0).build();
+    let surface = &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE;
+    let actions = s.on_tick(&ctx, surface);
+    assert_eq!(actions.len(), 1);
+    match &actions[0] {
+        StrategyAction::Open(intent) => {
+            assert_eq!(intent.strategy, "flash_dip_buy");
+            assert!((intent.limit_price.unwrap() - 58_941.0).abs() < 1e-6);
+        }
+        _ => panic!("expected Open"),
+    }
 }
 
 #[test]
