@@ -311,3 +311,31 @@ def test_authority_granting_input_fails_closed() -> None:
     assert packet["status"] == "AUTHORITY_BOUNDARY_VIOLATION"
     assert "authority_boundary_preserved" in packet["blocking_gates"]
     assert packet["operator_authorization"] is None
+
+
+def test_false_negative_preflight_schema_can_reach_review_packet() -> None:
+    preflight = _preflight()
+    preflight["schema_version"] = (
+        "cost_gate_false_negative_bounded_demo_probe_preflight_v1"
+    )
+    preflight["candidate"] = {
+        "side_cell_key": SIDE_CELL,
+        "strategy_name": "ma_crossover",
+        "symbol": "BTCUSDT",
+        "side": "Sell",
+        "outcome_horizon_minutes": 240,
+        "source_kind": "cost_gate_false_negative_after_cost",
+    }
+
+    packet = build_bounded_demo_probe_operator_authorization(
+        preflight=preflight,
+        placement_repair_plan=_placement_plan(),
+        authority_patch_readiness=_readiness(),
+        decision="defer",
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == READY_REVIEW_STATUS
+    assert packet["operator_authorization"] is None
+    assert packet["answers"]["bounded_demo_probe_authorized"] is False
+    assert packet["answers"]["active_runtime_order_authority"] is False

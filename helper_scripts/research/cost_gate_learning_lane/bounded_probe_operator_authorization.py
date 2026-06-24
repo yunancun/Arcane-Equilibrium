@@ -30,6 +30,10 @@ OPERATOR_AUTHORIZATION_PACKET_SCHEMA_VERSION = (
     "bounded_demo_probe_operator_authorization_packet_v1"
 )
 PREFLIGHT_SCHEMA_VERSION = "sealed_horizon_bounded_demo_probe_preflight_v1"
+SUPPORTED_PREFLIGHT_SCHEMA_VERSIONS = {
+    PREFLIGHT_SCHEMA_VERSION,
+    "cost_gate_false_negative_bounded_demo_probe_preflight_v1",
+}
 PLACEMENT_REPAIR_PLAN_SCHEMA_VERSION = (
     "bounded_demo_probe_placement_repair_plan_v1"
 )
@@ -233,7 +237,7 @@ def _preflight_summary(
     limits = _dict(design.get("suggested_initial_probe_limits"))
     ready = (
         artifact.get("status") == "FRESH"
-        and artifact.get("schema_version") == PREFLIGHT_SCHEMA_VERSION
+        and artifact.get("schema_version") in SUPPORTED_PREFLIGHT_SCHEMA_VERSIONS
         and payload.get("status") == READY_PREFLIGHT_STATUS
         and answers.get("ready_for_operator_bounded_demo_probe_authorization") is True
         and answers.get("probe_authority_granted") is not True

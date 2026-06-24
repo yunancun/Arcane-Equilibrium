@@ -233,3 +233,28 @@ def test_non_reviewable_bounded_probe_design_fails_closed() -> None:
 
     assert packet["status"] == "BOUNDED_PROBE_DESIGN_NOT_READY"
     assert packet["answers"]["bounded_probe_design_reviewable"] is False
+
+
+def test_false_negative_preflight_schema_is_reviewable_for_touchability() -> None:
+    preflight = _preflight()
+    preflight["schema_version"] = (
+        "cost_gate_false_negative_bounded_demo_probe_preflight_v1"
+    )
+    preflight["bounded_demo_probe_design"]["candidate"] = {
+        "side_cell_key": "grid_trading|AVAXUSDT|Sell",
+        "strategy_name": "grid_trading",
+        "symbol": "AVAXUSDT",
+        "side": "Sell",
+        "outcome_horizon_minutes": 60,
+        "source_kind": "cost_gate_false_negative_after_cost",
+    }
+
+    packet = build_bounded_demo_probe_touchability_preflight(
+        preflight=preflight,
+        order_to_fill_gap_audit=_order_touchability_audit(),
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "TOUCHABILITY_REPAIR_REQUIRED_BEFORE_BOUNDED_DEMO_PROBE"
+    assert packet["bounded_probe_design"]["side_cell_key"] == "grid_trading|AVAXUSDT|Sell"
+    assert packet["answers"]["probe_authority_granted"] is False

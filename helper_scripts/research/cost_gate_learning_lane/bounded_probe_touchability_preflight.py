@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Preflight bounded Demo probe design against order touchability evidence.
 
-This artifact sits after ``sealed_horizon_bounded_demo_probe_preflight_v1`` and
-the Demo order-to-fill gap audit. It converts "orders exist but did not fill"
-into a machine-checkable placement-design gate before any bounded Demo probe is
-even reviewed.
+This artifact sits after a bounded Demo probe preflight packet and the Demo
+order-to-fill gap audit. It converts "orders exist but did not fill" into a
+machine-checkable placement-design gate before any bounded Demo probe is even
+reviewed.
 
 It does not query PG, call Bybit, submit orders, lower the Cost Gate, grant
 probe/order authority, or mutate runtime state.
@@ -21,6 +21,10 @@ from typing import Any
 
 
 TOUCHABILITY_PREFLIGHT_SCHEMA_VERSION = "bounded_demo_probe_touchability_preflight_v1"
+SUPPORTED_BOUNDED_PROBE_PREFLIGHT_SCHEMA_VERSIONS = {
+    "sealed_horizon_bounded_demo_probe_preflight_v1",
+    "cost_gate_false_negative_bounded_demo_probe_preflight_v1",
+}
 BOUNDARY = (
     "artifact-only bounded Demo probe touchability preflight; no PG query/write, "
     "Bybit call, order, config, risk, auth, runtime mutation, Cost Gate lowering, "
@@ -150,7 +154,7 @@ def _design_summary(preflight: dict[str, Any] | None) -> dict[str, Any]:
         ),
         "reviewable": (
             payload.get("schema_version")
-            == "sealed_horizon_bounded_demo_probe_preflight_v1"
+            in SUPPORTED_BOUNDED_PROBE_PREFLIGHT_SCHEMA_VERSIONS
             and design.get("schema_version") == "bounded_demo_probe_design_v1"
             and design.get("status") in DESIGN_REVIEWABLE_STATUSES
             and bool(candidate.get("side_cell_key") or payload.get("side_cell_key"))
