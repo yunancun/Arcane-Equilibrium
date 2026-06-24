@@ -96,7 +96,20 @@ def _outcome(
         "promotion_evidence": False,
     }
     if fill_backed:
-        row["fill_id"] = f"fill-{prefix}-{i}"
+        row.update(
+            {
+                "order_link_id": f"oc_dm_{prefix}_{i}",
+                "order_id": f"bybit-{prefix}-{i}",
+                "exec_id": f"exec-{prefix}-{i}",
+                "fill_id": f"fill-{prefix}-{i}",
+                "intent_id": f"intent-{prefix}-{i}",
+                "risk_verdict": "APPROVED_BY_BOUNDED_DEMO_PROBE",
+                "fee_bps": 2.0,
+                "slippage_bps": max(cost_bps - 2.0, 0.0),
+                "close_state": "CLOSED_AT_HORIZON",
+                "source_artifact_path": f"artifacts/probe/{prefix}-{i}.json",
+            }
+        )
     return row
 
 

@@ -1869,3 +1869,10 @@
 - v423 adds Rust `openclaw_engine::bounded_probe_near_touch`, a pure no-authority Adapter Module for future bounded Demo post-only near-touch-or-skip placement.
 - Readiness now separates Adapter Module presence from tick-dispatch authority-path wiring; canonical Linux smoke returned `RUST_PATCH_REQUIRED_AUTHORITY_PATH_WIRING_MISSING` with Adapter present true and wiring present false.
 - Verification passed Mac/Linux Python bounded suites `18/18`, Mac/Linux Rust focused Adapter tests `7/7`, and Linux `/tmp/openclaw` artifact smoke. No Cost Gate lowering, probe/order authority, deploy/restart, PG write, Bybit private call, or CI run.
+
+## 2026-06-24 Profit Evidence Proof-Exclusion Guard
+
+- Added centralized source-only proof exclusion for unattributed or lineage-incomplete fill-backed rows. Such rows now remain raw audit telemetry but cannot count toward bounded-probe proof, Cost Gate proof, promotion evidence, or risk-adjusted net PnL proof.
+- Bounded result review, execution realism review, learning-lane status, runtime adapter state, artifact spine, scorecard/runtime/discovery/worklist propagation now split raw/proof-eligible/proof-excluded outcomes and fail closed when exclusion is present.
+- Verification: py_compile passed for changed modules; bounded/status/runtime/scorecard tests `112 passed`; alpha discovery/worklist tests `90 passed`; `git diff --check` clean.
+- Boundary: source/test/docs only. No Bybit private call, order cancel/modify/close, PG action, runtime/env/service/cron mutation, Cost Gate lowering, probe/order authority, live promotion, or Rust writer enablement.

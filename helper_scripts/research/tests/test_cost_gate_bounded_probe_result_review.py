@@ -94,8 +94,13 @@ def _admission(i: int) -> dict:
     }
 
 
-def _outcome(i: int, net_bps: float, gross_bps: float | None = None) -> dict:
-    return {
+def _outcome(
+    i: int,
+    net_bps: float,
+    gross_bps: float | None = None,
+    **overrides,
+) -> dict:
+    row = {
         "record_type": PROBE_OUTCOME_RECORD_TYPE,
         "generated_at_utc": f"2026-06-22T12:{i:02d}:00+00:00",
         "attempt_id": f"attempt-{i}",
@@ -103,6 +108,26 @@ def _outcome(i: int, net_bps: float, gross_bps: float | None = None) -> dict:
         "realized_net_bps": net_bps,
         "gross_bps": gross_bps if gross_bps is not None else net_bps + 4.0,
     }
+    row.update(overrides)
+    return row
+
+
+def _fill_backed_outcome(i: int, net_bps: float) -> dict:
+    return _outcome(
+        i,
+        net_bps,
+        strategy_name="ma_crossover",
+        outcome_source="candidate_matched_demo_fill",
+        order_link_id=f"oc_dm_attempt_{i}",
+        order_id=f"bybit-order-{i}",
+        exec_id=f"exec-{i}",
+        intent_id=f"intent-{i}",
+        risk_verdict="APPROVED_BY_BOUNDED_DEMO_PROBE",
+        fee_bps=2.0,
+        slippage_bps=0.25,
+        close_state="CLOSED_AT_HORIZON",
+        source_artifact_path=f"artifacts/probe/fill-{i}.json",
+    )
 
 
 def _control(i: int, net_bps: float, horizon_minutes: int = 240) -> dict:
@@ -175,6 +200,68 @@ def test_first_review_pass_without_control_is_marked_as_anecdote_risk() -> None:
         "record_matched_blocked_signal_outcomes_for_same_side_cell_and_horizon"
     )
     assert "Operator review required" in markdown
+
+
+def test_unattributed_positive_probe_outcomes_are_proof_excluded() -> None:
+    packet = build_bounded_demo_probe_result_review(
+        preflight=_preflight(),
+        ledger_rows=[
+            _outcome(
+                1,
+                12.0,
+                strategy_name="unattributed:bybit_auto",
+                outcome_source="demo_fill_execution",
+                order_id="bybit-unmatched-1",
+                exec_id="exec-unmatched-1",
+            ),
+            _outcome(
+                2,
+                11.0,
+                strategy_name="unattributed:bybit_auto",
+                outcome_source="demo_fill_execution",
+                order_id="bybit-unmatched-2",
+                exec_id="exec-unmatched-2",
+            ),
+            _outcome(
+                3,
+                10.0,
+                strategy_name="unattributed:bybit_auto",
+                outcome_source="demo_fill_execution",
+                order_id="bybit-unmatched-3",
+                exec_id="exec-unmatched-3",
+            ),
+        ],
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "PROBE_OUTCOMES_PROOF_EXCLUDED"
+    assert packet["reason"] == "completed_probe_outcomes_failed_attribution_or_lineage_proof"
+    assert packet["probe_result_summary"]["raw_completed_probe_outcome_count"] == 3
+    assert packet["probe_result_summary"]["completed_probe_outcome_count"] == 0
+    assert packet["probe_result_summary"]["proof_excluded_probe_outcome_count"] == 3
+    assert packet["proof_exclusion"]["reason_counts"]["unattributed_strategy_name"] == 3
+    assert packet["answers"]["operator_review_required"] is True
+    assert packet["answers"]["stop_probe_recommended"] is True
+    assert packet["answers"]["promotion_evidence"] is False
+
+
+def test_lineage_complete_fill_backed_probe_outcomes_remain_countable() -> None:
+    packet = build_bounded_demo_probe_result_review(
+        preflight=_preflight(),
+        ledger_rows=[
+            _fill_backed_outcome(1, 2.0),
+            _fill_backed_outcome(2, 4.0),
+            _fill_backed_outcome(3, 1.0),
+        ],
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED"
+    assert packet["probe_result_summary"]["raw_completed_probe_outcome_count"] == 3
+    assert packet["probe_result_summary"]["completed_probe_outcome_count"] == 3
+    assert packet["probe_result_summary"]["proof_excluded_probe_outcome_count"] == 0
+    assert packet["answers"]["proof_exclusion_present"] is False
+    assert packet["answers"]["promotion_evidence"] is False
 
 
 def test_first_review_pass_with_matched_control_records_relative_edge() -> None:
