@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-24 Killboard Probe Authority Semantics Runtime Sync
+
+- Source commit `7d118e81` makes alpha killboard/history separate operator probe-review readiness from actual runtime probe/order authority; legacy `ready_for_probe/actionable_probe_found` remains compatibility-only.
+- Runtime is clean at `7d118e81`; crontab expected-head pins are synced to that head; direct `runtime_runner` refresh reports `actionable_probe_semantics=OPERATOR_REVIEW_READY_NO_RUNTIME_AUTHORITY`, `runtime_probe_authority_found=false`, `runtime_order_authority_found=false`, promotion/Cost Gate mutation false.
+- PM read: future autonomous consumers must use the `runtime_*_authority_found` and `actionable_probe_semantics` fields for authority decisions; `ready_for_probe=1` means operator review readiness only unless runtime authority fields prove otherwise.
+
 ## 2026-06-24 Bounded Probe Authorization Broad Demo Fail-Closed
 
 - Fresh runtime artifacts are aligned and ready for `grid_trading|AVAXUSDT|Sell`, but the broad Demo/API authorization was not converted into bounded probe/order authority.
