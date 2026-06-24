@@ -4694,10 +4694,36 @@ def classify_profitability_blocker(
                 "bounded_probe_result_review_side_cell_key": detail.get(
                     "bounded_probe_result_review_side_cell_key"
                 ),
+                "bounded_probe_result_review_raw_completed_probe_outcome_count": (
+                    detail.get(
+                        "bounded_probe_result_review_raw_completed_probe_outcome_count"
+                    )
+                ),
                 "bounded_probe_result_review_completed_probe_outcome_count": (
                     detail.get(
                         "bounded_probe_result_review_completed_probe_outcome_count"
                     )
+                ),
+                "bounded_probe_result_review_proof_eligible_probe_outcome_count": (
+                    detail.get(
+                        "bounded_probe_result_review_proof_eligible_probe_outcome_count"
+                    )
+                ),
+                "bounded_probe_result_review_proof_excluded_probe_outcome_count": (
+                    detail.get(
+                        "bounded_probe_result_review_proof_excluded_probe_outcome_count"
+                    )
+                ),
+                "bounded_probe_result_review_proof_excluded_matched_control_outcome_count": (
+                    detail.get(
+                        "bounded_probe_result_review_proof_excluded_matched_control_outcome_count"
+                    )
+                ),
+                "bounded_probe_result_review_proof_exclusion_present": detail.get(
+                    "bounded_probe_result_review_proof_exclusion_present"
+                ),
+                "bounded_probe_result_review_proof_exclusion_reason_counts": detail.get(
+                    "bounded_probe_result_review_proof_exclusion_reason_counts"
                 ),
                 "bounded_probe_result_review_avg_realized_net_bps": detail.get(
                     "bounded_probe_result_review_avg_realized_net_bps"

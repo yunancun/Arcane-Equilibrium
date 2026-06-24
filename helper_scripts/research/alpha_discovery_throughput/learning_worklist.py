@@ -498,7 +498,13 @@ _EVIDENCE_KEYS = (
     "bounded_probe_result_review_source_path",
     "bounded_probe_result_review_source_error",
     "bounded_probe_result_review_side_cell_key",
+    "bounded_probe_result_review_raw_completed_probe_outcome_count",
     "bounded_probe_result_review_completed_probe_outcome_count",
+    "bounded_probe_result_review_proof_eligible_probe_outcome_count",
+    "bounded_probe_result_review_proof_excluded_probe_outcome_count",
+    "bounded_probe_result_review_proof_excluded_matched_control_outcome_count",
+    "bounded_probe_result_review_proof_exclusion_present",
+    "bounded_probe_result_review_proof_exclusion_reason_counts",
     "bounded_probe_result_review_avg_realized_net_bps",
     "bounded_probe_result_review_net_positive_pct",
     "bounded_probe_result_review_operator_review_required",
@@ -762,6 +768,8 @@ def _learning_objective(row: dict[str, Any], task_type: str) -> str:
             return "operator_review_first_bounded_probe_results_before_additional_budget"
         if bounded_review_status == "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED":
             return "operator_review_bounded_probe_learning_results_without_promotion"
+        if bounded_review_status == "PROBE_OUTCOMES_PROOF_EXCLUDED":
+            return "repair_or_quarantine_proof_excluded_fill_lineage_before_cost_gate_review"
         if (
             _str(row.get("arm_id")) == "cost_gate_demo_learning_lane"
             and (
@@ -998,6 +1006,7 @@ def _completion_evidence_required(task_type: str) -> list[str]:
             "horizon_stability_status_and_candidate_horizons_recorded_when_available",
             "sealed_horizon_learning_evidence_review_ready_or_blocked_review_candidate_present",
             "bounded_probe_result_review_status_recorded_when_probe_outcomes_exist",
+            "PROBE_OUTCOMES_PROOF_EXCLUDED routes to fill-lineage repair, not promotion proof",
             "order_authority_boundary_explicitly_recorded",
         ]
     if task_type == "runtime_source_reconcile":

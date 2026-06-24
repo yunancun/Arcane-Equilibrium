@@ -23,6 +23,7 @@ from cost_gate_learning_lane.historical_review import (
     build_historical_scorecard_review_from_file,
 )
 from cost_gate_learning_lane.outcome_review import build_blocked_signal_outcome_review
+from cost_gate_learning_lane.proof_exclusion import proof_exclusion_reasons
 
 
 DEFAULT_COST_GATE_LEARNING_LOOP_MAX_AGE_SECONDS = 3 * 60 * 60
@@ -607,7 +608,12 @@ def summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
         "admit_decision_count": 0,
         "order_authority_not_granted_count": 0,
         "allowed_to_submit_order_count": 0,
+        "raw_probe_outcome_count": 0,
         "probe_outcome_count": 0,
+        "proof_eligible_probe_outcome_count": 0,
+        "proof_excluded_probe_outcome_count": 0,
+        "proof_exclusion_present": False,
+        "proof_exclusion_reason_counts": {},
         "blocked_signal_outcome_count": 0,
         "blocked_signal_positive_outcome_count": 0,
         "latest_record_type": None,
@@ -700,7 +706,19 @@ def summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
             )
         elif record_type == "probe_outcome":
             net_bps = _float(row.get("realized_net_bps"))
+            summary["raw_probe_outcome_count"] += 1
+            reasons = proof_exclusion_reasons(row)
+            if net_bps is None:
+                reasons = [*reasons, "realized_net_bps_missing"]
+            if reasons:
+                summary["proof_excluded_probe_outcome_count"] += 1
+                summary["proof_exclusion_present"] = True
+                reason_counts = summary["proof_exclusion_reason_counts"]
+                for reason in reasons:
+                    reason_counts[reason] = reason_counts.get(reason, 0) + 1
+                continue
             summary["probe_outcome_count"] += 1
+            summary["proof_eligible_probe_outcome_count"] += 1
             if net_bps is not None:
                 probe_net_sum += net_bps
         elif record_type == "blocked_signal_outcome":
@@ -721,6 +739,8 @@ def summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
         summary["ledger_status"] = "BLOCKED_SIGNAL_OUTCOMES_PRESENT"
     elif summary["probe_outcome_count"] > 0:
         summary["ledger_status"] = "PROBE_OUTCOMES_PRESENT"
+    elif summary["raw_probe_outcome_count"] > 0:
+        summary["ledger_status"] = "PROBE_OUTCOMES_PROOF_EXCLUDED"
     elif summary["admission_decision_count"] > 0:
         summary["ledger_status"] = "ADMISSION_ROWS_PRESENT"
     elif summary["capture_error_count"] > 0:
@@ -1576,6 +1596,10 @@ def _activation_decision(
     capture_error_count = _int(ledger.get("capture_error_count"))
     blocked_count = _int(ledger.get("blocked_signal_outcome_count"))
     probe_outcome_count = _int(ledger.get("probe_outcome_count"))
+    raw_probe_outcome_count = _int(ledger.get("raw_probe_outcome_count"))
+    proof_excluded_probe_outcome_count = _int(
+        ledger.get("proof_excluded_probe_outcome_count")
+    )
 
     status = "DATA_ACCUMULATING"
     reason = "cost_gate_learning_lane_has_runtime_evidence"
@@ -1651,6 +1675,20 @@ def _activation_decision(
             "next_actions": [
                 "inspect_probe_capture_error_rows",
                 "refresh_demo_learning_lane_plan_and_verify_writer_paths",
+            ],
+        }
+
+    if (
+        raw_probe_outcome_count > 0
+        and probe_outcome_count == 0
+        and proof_excluded_probe_outcome_count > 0
+    ):
+        return {
+            "status": "PROBE_OUTCOMES_PROOF_EXCLUDED",
+            "reason": "probe_outcome_rows_failed_attribution_or_lineage_proof",
+            "missing_links": ["candidate_matched_fill_fee_slippage_lineage"],
+            "next_actions": [
+                "repair_or_quarantine_proof_excluded_fill_lineage_before_any_cost_gate_or_promotion_review"
             ],
         }
 

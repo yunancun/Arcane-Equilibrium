@@ -35,6 +35,7 @@ from cost_gate_learning_lane.outcome_writer import (
     read_price_observations,
 )
 from cost_gate_learning_lane.policy import DEMO_LEARNING_LANE_SCHEMA_VERSION
+from cost_gate_learning_lane.proof_exclusion import proof_exclusion_reasons
 
 
 @dataclass(frozen=True)
@@ -361,11 +362,27 @@ def summarize_side_cell_runtime_state(
     )
     cooldown_active = cooldown_until is not None and now_ms < cooldown_until
 
-    completed_outcomes = [
-        row for row in matching
+    raw_completed_outcomes = [
+        row
+        for row in matching
         if _str(row.get("record_type")) == "probe_outcome"
-        and _float(row.get("realized_net_bps")) is not None
     ]
+    completed_outcomes: list[dict[str, Any]] = []
+    proof_exclusion_reason_counts: dict[str, int] = {}
+    proof_excluded_completed_outcome_count = 0
+    for row in raw_completed_outcomes:
+        net_bps = _float(row.get("realized_net_bps"))
+        reasons = proof_exclusion_reasons(row)
+        if net_bps is None:
+            reasons = [*reasons, "realized_net_bps_missing"]
+        if reasons:
+            proof_excluded_completed_outcome_count += 1
+            for reason in reasons:
+                proof_exclusion_reason_counts[reason] = (
+                    proof_exclusion_reason_counts.get(reason, 0) + 1
+                )
+            continue
+        completed_outcomes.append(row)
     realized = [_float(row.get("realized_net_bps")) for row in completed_outcomes]
     realized_bps = [value for value in realized if value is not None]
     outcome_count = len(realized_bps)
@@ -409,7 +426,12 @@ def summarize_side_cell_runtime_state(
         "cooldown_ms": cooldown_ms,
         "cooldown_until_ts_ms": cooldown_until,
         "cooldown_active": cooldown_active,
+        "raw_completed_outcome_count": len(raw_completed_outcomes),
         "completed_outcome_count": outcome_count,
+        "proof_eligible_completed_outcome_count": outcome_count,
+        "proof_excluded_completed_outcome_count": proof_excluded_completed_outcome_count,
+        "proof_exclusion_present": proof_excluded_completed_outcome_count > 0,
+        "proof_exclusion_reason_counts": dict(sorted(proof_exclusion_reason_counts.items())),
         "avg_realized_net_bps": avg_net,
         "net_positive_pct": net_positive_pct,
         "disabled": disable_reason is not None,

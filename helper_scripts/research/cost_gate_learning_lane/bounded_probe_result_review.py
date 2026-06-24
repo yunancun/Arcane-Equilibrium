@@ -23,6 +23,7 @@ from cost_gate_learning_lane.contract import (
     PROBE_ADMISSION_DECISION_RECORD_TYPE,
     PROBE_OUTCOME_RECORD_TYPE,
 )
+from cost_gate_learning_lane.proof_exclusion import proof_exclusion_reasons
 from cost_gate_learning_lane.runtime_adapter import read_jsonl_ledger
 
 
@@ -172,13 +173,64 @@ def _horizon_matches(row: dict[str, Any], horizon_minutes: Any) -> bool:
     return expected <= 0 or observed <= 0 or observed == expected
 
 
+def _with_proof_exclusion(row: dict[str, Any]) -> dict[str, Any]:
+    enriched = dict(row)
+    enriched["proof_exclusion_reasons"] = proof_exclusion_reasons(row)
+    return enriched
+
+
+def _proof_exclusion_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "record_type": row.get("record_type"),
+        "attempt_id": row.get("attempt_id"),
+        "side_cell_key": row.get("side_cell_key"),
+        "strategy_name": row.get("strategy_name"),
+        "symbol": row.get("symbol"),
+        "side": row.get("side"),
+        "outcome_source": row.get("outcome_source"),
+        "realized_net_bps": _round(row.get("realized_net_bps")),
+        "proof_exclusion_reasons": _list(row.get("proof_exclusion_reasons")),
+    }
+
+
+def _proof_exclusion_summary(
+    excluded_probe_rows: list[dict[str, Any]],
+    excluded_control_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    reason_counts: dict[str, int] = {}
+    for row in [*excluded_probe_rows, *excluded_control_rows]:
+        for reason in _list(row.get("proof_exclusion_reasons")):
+            key = _str(reason)
+            if key:
+                reason_counts[key] = reason_counts.get(key, 0) + 1
+    return {
+        "schema_version": "bounded_demo_probe_proof_exclusion_v1",
+        "rule": (
+            "unattributed or lineage-incomplete fill-backed rows are excluded "
+            "from bounded-probe, Cost Gate, promotion, and risk-adjusted net "
+            "PnL proof forever"
+        ),
+        "proof_excluded_probe_outcome_count": len(excluded_probe_rows),
+        "proof_excluded_matched_control_outcome_count": len(excluded_control_rows),
+        "reason_counts": dict(sorted(reason_counts.items())),
+        "excluded_probe_outcomes": [
+            _proof_exclusion_row(row) for row in excluded_probe_rows
+        ],
+        "excluded_matched_control_outcomes": [
+            _proof_exclusion_row(row) for row in excluded_control_rows
+        ],
+        "promotion_evidence": False,
+    }
+
+
 def _matching_probe_rows(
     ledger_rows: list[dict[str, Any]],
     *,
     side_cell_key: str,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     admissions = []
     outcomes = []
+    excluded_outcomes = []
     for row in ledger_rows:
         if _str(row.get("side_cell_key")) != side_cell_key:
             continue
@@ -190,8 +242,16 @@ def _matching_probe_rows(
             admissions.append(row)
         elif record_type == PROBE_OUTCOME_RECORD_TYPE:
             if _float(row.get("realized_net_bps")) is not None:
-                outcomes.append(row)
-    return _latest_unique_by_attempt(admissions), _latest_unique_by_attempt(outcomes)
+                enriched = _with_proof_exclusion(row)
+                if enriched["proof_exclusion_reasons"]:
+                    excluded_outcomes.append(enriched)
+                else:
+                    outcomes.append(row)
+    return (
+        _latest_unique_by_attempt(admissions),
+        _latest_unique_by_attempt(outcomes),
+        _latest_unique_by_attempt(excluded_outcomes),
+    )
 
 
 def _matching_control_rows(
@@ -199,8 +259,9 @@ def _matching_control_rows(
     *,
     side_cell_key: str,
     horizon_minutes: Any,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     controls = []
+    excluded_controls = []
     for row in ledger_rows:
         if _str(row.get("side_cell_key")) != side_cell_key:
             continue
@@ -209,8 +270,12 @@ def _matching_control_rows(
         if not _horizon_matches(row, horizon_minutes):
             continue
         if _float(row.get("realized_net_bps")) is not None:
-            controls.append(row)
-    return _latest_unique_by_attempt(controls)
+            enriched = _with_proof_exclusion(row)
+            if enriched["proof_exclusion_reasons"]:
+                excluded_controls.append(enriched)
+            else:
+                controls.append(row)
+    return _latest_unique_by_attempt(controls), _latest_unique_by_attempt(excluded_controls)
 
 
 def _net_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -241,6 +306,7 @@ def _review_status(
     authority_preserved: bool,
     design: dict[str, Any],
     outcome_count: int,
+    excluded_probe_outcome_count: int,
     avg_net_bps: float | None,
     net_positive_pct: float | None,
 ) -> tuple[str, str, list[str]]:
@@ -266,6 +332,12 @@ def _review_status(
             ["refresh_or_operator_review_bounded_probe_design_before_result_review"],
         )
     if outcome_count <= 0:
+        if excluded_probe_outcome_count > 0:
+            return (
+                "PROBE_OUTCOMES_PROOF_EXCLUDED",
+                "completed_probe_outcomes_failed_attribution_or_lineage_proof",
+                ["repair_fill_lineage_before_counting_probe_outcomes"],
+            )
         return (
             "NO_PROBE_OUTCOMES_RECORDED",
             "bounded_demo_probe_has_no_completed_outcomes",
@@ -318,6 +390,7 @@ def _evidence_quality(
     review_status: str,
     probe_summary: dict[str, Any],
     control_summary: dict[str, Any],
+    proof_exclusion: dict[str, Any],
 ) -> tuple[dict[str, Any], list[str]]:
     first_review_n = max(1, _int(design.get("min_filled_probe_outcomes_for_first_review"), 3))
     learning_review_n = max(
@@ -326,6 +399,10 @@ def _evidence_quality(
     )
     probe_count = _int(probe_summary.get("count"))
     control_count = _int(control_summary.get("count"))
+    excluded_probe_count = _int(proof_exclusion.get("proof_excluded_probe_outcome_count"))
+    excluded_control_count = _int(
+        proof_exclusion.get("proof_excluded_matched_control_outcome_count")
+    )
     probe_avg = _float(probe_summary.get("avg_net_bps"))
     control_avg = _float(control_summary.get("avg_net_bps"))
     probe_pct = _float(probe_summary.get("net_positive_pct"))
@@ -359,6 +436,10 @@ def _evidence_quality(
         status = "PREFLIGHT_DESIGN_NOT_USABLE"
         reason = "bounded_probe_design_not_usable_for_evidence_quality_review"
         next_actions = ["refresh_or_operator_review_bounded_probe_design_before_result_review"]
+    elif probe_count <= 0 and excluded_probe_count > 0:
+        status = "PROBE_OUTCOMES_PROOF_EXCLUDED"
+        reason = "completed_probe_outcomes_failed_attribution_or_lineage_proof"
+        next_actions = ["repair_fill_lineage_before_counting_probe_outcomes"]
     elif probe_count <= 0:
         status = "NO_PROBE_OUTCOMES_RECORDED"
         reason = "completed_probe_outcomes_missing"
@@ -405,6 +486,10 @@ def _evidence_quality(
         "matched_control_required": probe_count >= first_review_n,
         "matched_control_present": control_count > 0,
         "matched_control_outcome_count": control_count,
+        "proof_excluded_probe_outcome_count": excluded_probe_count,
+        "proof_excluded_matched_control_outcome_count": excluded_control_count,
+        "proof_exclusion_present": excluded_probe_count > 0 or excluded_control_count > 0,
+        "proof_exclusion_reason_counts": proof_exclusion.get("reason_counts") or {},
         "matched_control_positive_outcome_count": _int(control_summary.get("positive_count")),
         "matched_control_avg_gross_bps": _round(control_summary.get("avg_gross_bps")),
         "matched_control_avg_net_bps": _round(control_avg),
@@ -442,15 +527,23 @@ def build_bounded_demo_probe_result_review(
     now = (now_utc or _utc_now()).astimezone(dt.timezone.utc)
     design = _design_summary(preflight)
     side_cell_key = _str(design.get("side_cell_key") or _side_cell_key_from_preflight(preflight))
-    admissions, outcomes = _matching_probe_rows(ledger_rows, side_cell_key=side_cell_key)
-    controls = _matching_control_rows(
+    admissions, outcomes, excluded_probe_outcomes = _matching_probe_rows(
+        ledger_rows,
+        side_cell_key=side_cell_key,
+    )
+    controls, excluded_control_outcomes = _matching_control_rows(
         ledger_rows,
         side_cell_key=side_cell_key,
         horizon_minutes=design.get("outcome_horizon_minutes"),
     )
+    proof_exclusion = _proof_exclusion_summary(
+        excluded_probe_outcomes,
+        excluded_control_outcomes,
+    )
     probe_summary = _net_summary(outcomes)
     control_summary = _net_summary(controls)
     outcome_count = _int(probe_summary.get("count"))
+    raw_probe_outcome_count = outcome_count + len(excluded_probe_outcomes)
     positive_count = _int(probe_summary.get("positive_count"))
     avg_net = _float(probe_summary.get("avg_net_bps"))
     avg_gross = _float(probe_summary.get("avg_gross_bps"))
@@ -460,6 +553,7 @@ def build_bounded_demo_probe_result_review(
         authority_preserved=authority_ok,
         design=design,
         outcome_count=outcome_count,
+        excluded_probe_outcome_count=len(excluded_probe_outcomes),
         avg_net_bps=avg_net,
         net_positive_pct=net_positive_pct,
     )
@@ -468,6 +562,7 @@ def build_bounded_demo_probe_result_review(
         review_status=status,
         probe_summary=probe_summary,
         control_summary=control_summary,
+        proof_exclusion=proof_exclusion,
     )
     if (
         evidence_quality.get("anecdote_risk") is True
@@ -476,6 +571,17 @@ def build_bounded_demo_probe_result_review(
         next_actions = list(dict.fromkeys([*quality_actions, *next_actions]))
     else:
         next_actions = list(dict.fromkeys([*next_actions, *quality_actions]))
+    if proof_exclusion.get("proof_excluded_probe_outcome_count") or proof_exclusion.get(
+        "proof_excluded_matched_control_outcome_count"
+    ):
+        next_actions = list(
+            dict.fromkeys(
+                [
+                    "repair_or_quarantine_proof_excluded_fill_lineage_before_any_cost_gate_or_promotion_review",
+                    *next_actions,
+                ]
+            )
+        )
     first_review_n = max(1, _int(design.get("min_filled_probe_outcomes_for_first_review"), 3))
     max_outcomes_before_review = max(
         first_review_n,
@@ -486,7 +592,13 @@ def build_bounded_demo_probe_result_review(
         "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED",
         "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED",
         "AUTHORITY_BOUNDARY_VIOLATION",
+        "PROBE_OUTCOMES_PROOF_EXCLUDED",
     }
+    proof_exclusion_present = (
+        proof_exclusion.get("proof_excluded_probe_outcome_count") > 0
+        or proof_exclusion.get("proof_excluded_matched_control_outcome_count") > 0
+    )
+    operator_review_required = operator_review_required or proof_exclusion_present
 
     return {
         "schema_version": BOUNDED_PROBE_RESULT_REVIEW_SCHEMA_VERSION,
@@ -502,7 +614,10 @@ def build_bounded_demo_probe_result_review(
         },
         "probe_result_summary": {
             "admitted_probe_attempt_count": len(admissions),
+            "raw_completed_probe_outcome_count": raw_probe_outcome_count,
             "completed_probe_outcome_count": outcome_count,
+            "proof_eligible_probe_outcome_count": outcome_count,
+            "proof_excluded_probe_outcome_count": len(excluded_probe_outcomes),
             "positive_probe_outcome_count": positive_count,
             "avg_realized_gross_bps": _round(avg_gross),
             "avg_realized_net_bps": _round(avg_net),
@@ -517,12 +632,14 @@ def build_bounded_demo_probe_result_review(
             ),
             "max_filled_probe_outcomes_before_review": max_outcomes_before_review,
         },
+        "proof_exclusion": proof_exclusion,
         "evidence_quality": evidence_quality,
         "answers": {
             "authority_boundary_preserved": authority_ok,
             "operator_review_required": operator_review_required,
             "continue_probe_without_operator_review_allowed": (
                 authority_ok
+                and not proof_exclusion_present
                 and outcome_count < max_outcomes_before_review
                 and status == "COLLECT_MORE_PROBE_OUTCOMES_BEFORE_FIRST_REVIEW"
             ),
@@ -530,6 +647,7 @@ def build_bounded_demo_probe_result_review(
             in {
                 "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED",
                 "AUTHORITY_BOUNDARY_VIOLATION",
+                "PROBE_OUTCOMES_PROOF_EXCLUDED",
             },
             "learning_review_candidate": (
                 status == "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED"
@@ -541,6 +659,9 @@ def build_bounded_demo_probe_result_review(
             "execution_realism_gap": (
                 evidence_quality.get("execution_realism_gap") is True
             ),
+            "proof_exclusion_present": proof_exclusion_present,
+            "proof_excluded_probe_outcome_count": len(excluded_probe_outcomes),
+            "proof_excluded_matched_control_outcome_count": len(excluded_control_outcomes),
             "global_cost_gate_lowering_recommended": False,
             "main_cost_gate_adjustment": "NONE",
             "probe_authority_granted": False,
@@ -556,6 +677,7 @@ def build_bounded_demo_probe_result_review(
 def render_markdown(packet: dict[str, Any]) -> str:
     summary = _dict(packet.get("probe_result_summary"))
     quality = _dict(packet.get("evidence_quality"))
+    proof_exclusion = _dict(packet.get("proof_exclusion"))
     answers = _dict(packet.get("answers"))
     lines = [
         "# Bounded Demo Probe Result Review",
@@ -563,7 +685,9 @@ def render_markdown(packet: dict[str, Any]) -> str:
         f"- Generated: `{packet.get('generated_at_utc')}`",
         f"- Status: `{packet.get('status')}`",
         f"- Side-cell: `{packet.get('side_cell_key')}`",
+        f"- Raw completed outcomes: `{summary.get('raw_completed_probe_outcome_count')}`",
         f"- Completed outcomes: `{summary.get('completed_probe_outcome_count')}`",
+        f"- Proof-excluded probe outcomes: `{proof_exclusion.get('proof_excluded_probe_outcome_count')}`",
         f"- Avg net bps: `{summary.get('avg_realized_net_bps')}`",
         f"- Net-positive pct: `{summary.get('net_positive_pct')}`",
         f"- Evidence quality: `{quality.get('status')}`",

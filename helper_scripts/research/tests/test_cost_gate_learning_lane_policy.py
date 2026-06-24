@@ -53,6 +53,7 @@ from cost_gate_learning_lane.status import (
     REQUIRED_SOURCE_RELATIVE_PATHS,
     build_cost_gate_learning_lane_activation_preflight,
     main as cost_gate_status_main,
+    summarize_cost_gate_learning_lane_ledger,
     summarize_cost_gate_learning_lane_writer_config,
     summarize_cost_gate_learning_lane_writer_process,
     summarize_cost_gate_learning_lane_source,
@@ -83,6 +84,7 @@ from cost_gate_learning_lane.runtime_adapter import (
     normalize_reject_reason_code,
     read_jsonl_ledger,
     append_jsonl_ledger,
+    summarize_side_cell_runtime_state,
 )
 
 
@@ -2677,6 +2679,40 @@ def test_alpha_discovery_routes_admission_only_ledger_to_price_observation_build
     assert row["blocked_signal_outcome_count"] == 0
 
 
+def test_learning_lane_status_proof_excludes_unattributed_probe_outcomes(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "probe_ledger.jsonl"
+    ledger.write_text(
+        json.dumps(
+            {
+                "record_type": "probe_outcome",
+                "generated_at_utc": "2026-06-21T12:00:00+00:00",
+                "attempt_id": "attempt-unattributed-1",
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "strategy_name": "unattributed:bybit_auto",
+                "outcome_source": "demo_fill_execution",
+                "order_id": "bybit-unmatched-1",
+                "exec_id": "exec-unmatched-1",
+                "realized_net_bps": 25.0,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    summary = summarize_cost_gate_learning_lane_ledger(ledger)
+
+    assert summary["ledger_status"] == "PROBE_OUTCOMES_PROOF_EXCLUDED"
+    assert summary["raw_probe_outcome_count"] == 1
+    assert summary["probe_outcome_count"] == 0
+    assert summary["proof_eligible_probe_outcome_count"] == 0
+    assert summary["proof_excluded_probe_outcome_count"] == 1
+    assert summary["proof_exclusion_present"] is True
+    assert summary["proof_exclusion_reason_counts"]["unattributed_strategy_name"] == 1
+    assert summary["avg_probe_outcome_net_bps"] is None
+
+
 def _selected_reject_event() -> dict:
     return {
         "strategy_name": "ma_crossover",
@@ -3854,6 +3890,59 @@ def test_runtime_adapter_outcome_rows_are_idempotent_and_feed_disable():
     )
     assert disabled["decision"] == "REALIZED_PROBE_OUTCOMES_FAIL_LEARNING_THRESHOLD"
     assert disabled["runtime_state"]["completed_outcome_count"] == 1
+
+
+def test_runtime_adapter_excludes_unattributed_outcomes_from_disable() -> None:
+    admitted = evaluate_probe_admission(
+        _runtime_plan(order_authority=ORDER_AUTHORITY_GRANTED),
+        {
+            **_selected_reject_event(),
+            "last_price": 2000.0,
+        },
+        now_utc=dt.datetime(2026, 6, 21, 11, 10, tzinfo=dt.timezone.utc),
+        adapter_enabled=True,
+    )
+    ledger = [build_ledger_record(admitted)]
+    proof_excluded_outcome = {
+        "record_type": "probe_outcome",
+        "generated_at_utc": "2026-06-21T12:11:00+00:00",
+        "attempt_id": _selected_reject_event()["context_id"],
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "strategy_name": "unattributed:bybit_auto",
+        "outcome_source": "demo_fill_execution",
+        "order_id": "bybit-unmatched-1",
+        "exec_id": "exec-unmatched-1",
+        "realized_net_bps": -25.0,
+    }
+
+    runtime_state = summarize_side_cell_runtime_state(
+        {"side_cell_key": "ma_crossover|ETHUSDT|Sell", "max_probe_orders": 2},
+        [*ledger, proof_excluded_outcome],
+        now_ms=1_782_046_800_000,
+        cfg=RuntimeAdmissionConfig(min_failed_outcomes_to_disable=1),
+    )
+    decision = evaluate_probe_admission(
+        _runtime_plan(order_authority=ORDER_AUTHORITY_GRANTED),
+        {
+            **_selected_reject_event(),
+            "context_id": "ctx-demo-ma_crossover-ETHUSDT-1782046800000",
+            "ts_ms": 1_782_046_800_000,
+        },
+        ledger_rows=[*ledger, proof_excluded_outcome],
+        now_utc=dt.datetime(2026, 6, 21, 14, 0, tzinfo=dt.timezone.utc),
+        cfg=RuntimeAdmissionConfig(min_failed_outcomes_to_disable=1),
+        adapter_enabled=True,
+    )
+
+    assert runtime_state["raw_completed_outcome_count"] == 1
+    assert runtime_state["completed_outcome_count"] == 0
+    assert runtime_state["proof_eligible_completed_outcome_count"] == 0
+    assert runtime_state["proof_excluded_completed_outcome_count"] == 1
+    assert runtime_state["proof_exclusion_present"] is True
+    assert runtime_state["proof_exclusion_reason_counts"]["unattributed_strategy_name"] == 1
+    assert decision["decision"] != "REALIZED_PROBE_OUTCOMES_FAIL_LEARNING_THRESHOLD"
+    assert decision["runtime_state"]["completed_outcome_count"] == 0
+    assert decision["runtime_state"]["proof_excluded_completed_outcome_count"] == 1
 
 
 def test_runtime_adapter_normalizes_cost_gate_negative_reason_text():

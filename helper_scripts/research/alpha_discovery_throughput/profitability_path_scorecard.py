@@ -406,7 +406,11 @@ def _bounded_probe_result_review_fields(
         return {
             "bounded_probe_result_review_present": False,
             "bounded_probe_result_review_status": None,
+            "bounded_probe_result_review_raw_completed_probe_outcome_count": 0,
             "bounded_probe_result_review_completed_probe_outcome_count": 0,
+            "bounded_probe_result_review_proof_eligible_probe_outcome_count": 0,
+            "bounded_probe_result_review_proof_excluded_probe_outcome_count": 0,
+            "bounded_probe_result_review_proof_exclusion_present": False,
             "bounded_probe_result_review_operator_review_required": False,
             "bounded_probe_result_review_stop_probe_recommended": False,
             "bounded_probe_result_review_learning_review_candidate": False,
@@ -418,6 +422,7 @@ def _bounded_probe_result_review_fields(
             "bounded_probe_result_review_anecdote_risk": False,
         }
     summary = _dict(payload.get("probe_result_summary"))
+    proof_exclusion = _dict(payload.get("proof_exclusion"))
     quality = _dict(payload.get("evidence_quality"))
     answers = _dict(payload.get("answers"))
     design = _dict(payload.get("design"))
@@ -436,8 +441,36 @@ def _bounded_probe_result_review_fields(
         "bounded_probe_result_review_admitted_probe_attempt_count": summary.get(
             "admitted_probe_attempt_count"
         ),
+        "bounded_probe_result_review_raw_completed_probe_outcome_count": summary.get(
+            "raw_completed_probe_outcome_count"
+        ),
         "bounded_probe_result_review_completed_probe_outcome_count": summary.get(
             "completed_probe_outcome_count"
+        ),
+        "bounded_probe_result_review_proof_eligible_probe_outcome_count": summary.get(
+            "proof_eligible_probe_outcome_count"
+        ),
+        "bounded_probe_result_review_proof_excluded_probe_outcome_count": (
+            proof_exclusion.get("proof_excluded_probe_outcome_count")
+            or summary.get("proof_excluded_probe_outcome_count")
+            or 0
+        ),
+        "bounded_probe_result_review_proof_excluded_matched_control_outcome_count": (
+            proof_exclusion.get("proof_excluded_matched_control_outcome_count")
+            or 0
+        ),
+        "bounded_probe_result_review_proof_exclusion_present": (
+            answers.get("proof_exclusion_present") is True
+            or quality.get("proof_exclusion_present") is True
+            or _int(proof_exclusion.get("proof_excluded_probe_outcome_count")) > 0
+            or _int(
+                proof_exclusion.get("proof_excluded_matched_control_outcome_count")
+            ) > 0
+        ),
+        "bounded_probe_result_review_proof_exclusion_reason_counts": (
+            proof_exclusion.get("reason_counts")
+            or quality.get("proof_exclusion_reason_counts")
+            or {}
         ),
         "bounded_probe_result_review_positive_probe_outcome_count": summary.get(
             "positive_probe_outcome_count"

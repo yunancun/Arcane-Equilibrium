@@ -607,10 +607,14 @@ def build_cost_gate_artifact_spine(
     completed_probe_outcomes = _int(
         detail.get("bounded_probe_result_review_completed_probe_outcome_count")
     )
+    proof_exclusion_present = (
+        detail.get("bounded_probe_result_review_proof_exclusion_present") is True
+    )
     probe_result_learning_valid = (
         fill_backed_available
         and matched_control_present
         and completed_probe_outcomes > 0
+        and not proof_exclusion_present
     )
     proof_gap = None if probe_result_learning_valid else (
         "candidate_matched_fill_backed_matched_control_probe_result_missing"

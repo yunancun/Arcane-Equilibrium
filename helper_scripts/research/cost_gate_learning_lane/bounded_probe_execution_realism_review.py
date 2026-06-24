@@ -21,6 +21,7 @@ from cost_gate_learning_lane.contract import (
     BLOCKED_SIGNAL_OUTCOME_RECORD_TYPE,
     PROBE_OUTCOME_RECORD_TYPE,
 )
+from cost_gate_learning_lane.proof_exclusion import proof_exclusion_reasons
 from cost_gate_learning_lane.runtime_adapter import read_jsonl_ledger
 
 
@@ -132,6 +133,8 @@ def _matching_rows(
         if not _horizon_matches(row, horizon_minutes):
             continue
         if _float(row.get("realized_net_bps")) is None:
+            continue
+        if proof_exclusion_reasons(row):
             continue
         rows.append(row)
     return _latest_unique_by_attempt(rows)
