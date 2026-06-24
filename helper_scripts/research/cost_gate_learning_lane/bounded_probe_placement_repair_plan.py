@@ -41,6 +41,7 @@ PASSTHROUGH_BLOCKING_STATUSES = {
     "ORDER_PRICE_METADATA_REPAIR_REQUIRED",
     "BBO_COVERAGE_REPAIR_REQUIRED",
     "ORDER_TOUCHABILITY_DATA_REQUIRED",
+    "CANDIDATE_TOUCHABILITY_DATA_REQUIRED",
     "TOUCHABILITY_REVIEW_REQUIRED",
 }
 
@@ -145,6 +146,8 @@ def _authority_preserved(touchability_preflight: dict[str, Any] | None) -> bool:
         if source.get("order_authority_granted") is True:
             return False
         if source.get("promotion_evidence") is True:
+            return False
+        if source.get("promotion_proof") is True:
             return False
         if source.get("main_cost_gate_adjustment") not in (None, "", "NONE"):
             return False

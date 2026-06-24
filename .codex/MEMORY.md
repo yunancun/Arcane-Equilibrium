@@ -79,6 +79,11 @@ Known paths:
 
 ## Hard Boundaries
 
+- Bounded Demo proof must be candidate-matched by strategy, symbol, and side.
+  Aggregate Demo fills are health/execution-flow evidence only; they must not
+  satisfy bounded-probe touchability, Cost Gate, or promotion proof for another
+  candidate.
+
 - Bybit is the only exchange target.
 - Rust `openclaw_engine` is the trading, risk, config, and execution authority.
 - Python/FastAPI is control plane / GUI / bridge / replay / agent host, not the

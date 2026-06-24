@@ -71,6 +71,10 @@ def _round(value: Any, ndigits: int = 4) -> float | None:
     return round(parsed, ndigits) if parsed is not None else None
 
 
+def _norm(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
 def _parse_dt(value: Any) -> dt.datetime | None:
     if not value:
         return None
@@ -173,17 +177,69 @@ def _authority_preserved(*sources: dict[str, Any]) -> bool:
             return False
         if source.get("promotion_evidence") is True:
             return False
+        if source.get("promotion_proof") is True:
+            return False
         if source.get("main_cost_gate_adjustment") not in (None, "", "NONE"):
             return False
     return True
 
 
-def _order_touchability_summary(order_audit: dict[str, Any] | None) -> dict[str, Any]:
+def _candidate_matches_order(order: dict[str, Any], candidate: dict[str, Any]) -> bool:
+    candidate_symbol = _norm(candidate.get("symbol"))
+    candidate_side = _norm(candidate.get("side"))
+    candidate_strategy = _norm(candidate.get("strategy_name"))
+    order_symbol = _norm(order.get("symbol"))
+    order_side = _norm(order.get("side"))
+    order_strategy = _norm(order.get("strategy_name") or order.get("strategy"))
+    if not candidate_strategy or not candidate_symbol or not candidate_side:
+        return False
+    if order_symbol != candidate_symbol or order_side != candidate_side:
+        return False
+    if order_strategy != candidate_strategy:
+        return False
+    return True
+
+
+def _order_status(order: dict[str, Any]) -> str:
+    return str(_dict(order.get("classification")).get("status") or "UNKNOWN").upper()
+
+
+def _order_has_fill(order: dict[str, Any]) -> bool:
+    return _int(order.get("fill_count")) > 0 or _order_status(order) == "FILLED"
+
+
+def _order_fill_count(order: dict[str, Any]) -> int:
+    count = _int(order.get("fill_count"))
+    if count > 0:
+        return count
+    return 1 if _order_status(order) == "FILLED" else 0
+
+
+def _order_touchability_summary(
+    order_audit: dict[str, Any] | None,
+    *,
+    candidate: dict[str, Any],
+) -> dict[str, Any]:
     payload = _dict(order_audit)
     summary = _dict(payload.get("summary"))
     counts = _dict(summary.get("counts"))
     answers = _dict(summary.get("answers"))
     orders = [_dict(row) for row in _list(payload.get("orders"))]
+    candidate_orders = [
+        order for order in orders if _candidate_matches_order(order, candidate)
+    ]
+    candidate_statuses = [_order_status(order) for order in candidate_orders]
+    candidate_fill_rows = sum(_order_fill_count(order) for order in candidate_orders)
+    candidate_touched_no_fill = sum(
+        1
+        for status in candidate_statuses
+        if status == "BBO_TOUCHED_NO_FILL_RECONCILE_REQUIRED"
+    )
+    candidate_deep_no_touch = sum(
+        1
+        for status in candidate_statuses
+        if "NO_TOUCH" in status or status == "PASSIVE_LIMITS_NOT_TOUCHED"
+    )
     gaps = [
         value
         for value in (
@@ -224,6 +280,15 @@ def _order_touchability_summary(order_audit: dict[str, Any] | None) -> dict[str,
         "max_best_touch_gap_bps": _round(max(gaps), 4) if gaps else None,
         "min_best_touch_gap_bps": _round(min(gaps), 4) if gaps else None,
         "classification_counts": classifications,
+        "candidate_match_required": True,
+        "candidate_reviewed_orders": len(candidate_orders),
+        "candidate_fill_rows": candidate_fill_rows,
+        "candidate_deep_passive_no_touch_orders": candidate_deep_no_touch,
+        "candidate_bbo_touched_no_fill_orders": candidate_touched_no_fill,
+        "non_candidate_fill_rows": max(
+            0,
+            _int(counts.get("fill_rows")) - candidate_fill_rows,
+        ),
     }
 
 
@@ -291,10 +356,40 @@ def _touchability_status(
             ["continue_demo_data_flow_monitor_until_order_rows_exist"],
         )
     if audit_status == "FILL_FLOW_PRESENT":
+        if _int(touchability.get("candidate_fill_rows")) > 0:
+            return (
+                "TOUCHABILITY_GATE_READY_FOR_OPERATOR_REVIEW",
+                "candidate_matched_fill_flow_exists_for_reviewed_Demo_orders",
+                [
+                    "review_candidate_matched_fill_quality_and_edge_capture_before_any_probe_authorization"
+                ],
+            )
+        if _int(touchability.get("candidate_bbo_touched_no_fill_orders")) > 0:
+            return (
+                "FILL_PATH_RECONCILE_REQUIRED",
+                "candidate_matched_BBO_touch_without_fill_requires_reconcile",
+                [
+                    "reconcile_candidate_matched_exchange_ws_order_fill_path_before_any_probe_authorization"
+                ],
+            )
+        if (
+            _int(touchability.get("candidate_deep_passive_no_touch_orders")) > 0
+            or _int(touchability.get("deep_passive_no_touch_orders")) > 0
+        ):
+            return (
+                "TOUCHABILITY_REPAIR_REQUIRED_BEFORE_BOUNDED_DEMO_PROBE",
+                "non_candidate_fill_flow_cannot_satisfy_bounded_probe_touchability",
+                [
+                    "revise_bounded_demo_probe_design_with_near_touch_or_skip_if_not_touchable_rules",
+                    "rerun_order_to_fill_touchability_audit_after_candidate_matched_design_repair",
+                ],
+            )
         return (
-            "TOUCHABILITY_GATE_READY_FOR_OPERATOR_REVIEW",
-            "fill_flow_exists_for_reviewed_Demo_orders",
-            ["review_fill_quality_and_edge_capture_before_any_probe_authorization"],
+            "CANDIDATE_TOUCHABILITY_DATA_REQUIRED",
+            "fill_flow_exists_only_for_non_candidate_orders",
+            [
+                "collect_candidate_matched_touchability_evidence_or_require_near_touch_repair_before_authorization"
+            ],
         )
     return (
         "TOUCHABILITY_REVIEW_REQUIRED",
@@ -358,7 +453,10 @@ def build_bounded_demo_probe_touchability_preflight(
         max_age_seconds=max_age_seconds,
     )
     design = _design_summary(preflight)
-    touchability = _order_touchability_summary(order_to_fill_gap_audit)
+    touchability = _order_touchability_summary(
+        order_to_fill_gap_audit,
+        candidate=design,
+    )
     status, reason, next_actions = _touchability_status(
         preflight_artifact_status=str(preflight_artifact.get("status")),
         order_artifact_status=str(order_artifact.get("status")),
@@ -400,6 +498,12 @@ def build_bounded_demo_probe_touchability_preflight(
             "ready_for_operator_touchability_review": (
                 status == "TOUCHABILITY_GATE_READY_FOR_OPERATOR_REVIEW"
             ),
+            "candidate_touchability_orders_present": (
+                touchability.get("candidate_reviewed_orders", 0) > 0
+            ),
+            "candidate_matched_fill_flow_present": (
+                touchability.get("candidate_fill_rows", 0) > 0
+            ),
             "global_cost_gate_lowering_recommended": False,
             "main_cost_gate_adjustment": "NONE",
             "probe_authority_granted": False,
@@ -426,6 +530,8 @@ def render_markdown(packet: dict[str, Any]) -> str:
         f"- Candidate: `{_dict(packet.get('candidate')).get('side_cell_key')}`",
         f"- Order-touchability status: `{touch.get('status')}`",
         f"- Reviewed orders: `{touch.get('reviewed_orders')}`",
+        f"- Candidate-matched orders: `{touch.get('candidate_reviewed_orders')}`",
+        f"- Candidate-matched fills: `{touch.get('candidate_fill_rows')}`",
         f"- Deep passive no-touch orders: `{touch.get('deep_passive_no_touch_orders')}`",
         f"- Max observed best-touch gap bps: `{touch.get('max_best_touch_gap_bps')}`",
         f"- Required max initial passive gap bps: `{placement.get('max_initial_passive_gap_bps')}`",
