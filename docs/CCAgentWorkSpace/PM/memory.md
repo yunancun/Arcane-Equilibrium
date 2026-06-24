@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-24 BBO Freshness Runtime Co-Located Runner Review
+
+- E3 approved a bounded PM-only runtime path; trade-core fast-forwarded cleanly `bdc1e156 -> 8e7bc890`, focused runner+preview tests passed, and `bbo_freshness_colocated_runner.py` ran in explicit `--pg-readonly` mode.
+- Runtime artifact `/tmp/openclaw/cost_gate_learning_lane/bbo_freshness_colocated_runner_avax_sell_pg_readonly_20260624T185436Z.json` is `COLOCATED_RUNNER_BBO_STALE_NO_ORDER`: effective BBO age `2476.128ms` still exceeds the 1000ms gate, so no order admission follows.
+- PM read: next useful blocker is public-quote capture E3/BB review; do not rerun PG co-located runner as proof without a new market-data freshness delta, and do not treat READY as order authority even if future quote freshness passes.
+
 ## 2026-06-24 Candidate-Scoped Standing Demo Authorization Artifact
 
 - Runtime timestamped artifact `/tmp/openclaw/cost_gate_learning_lane/bounded_probe_operator_authorization_standing_demo_20260624T160930Z.json` authorizes exactly `grid_trading|AVAXUSDT|Sell` 60m with cap 1 and 4h TTL via `standing_demo_authorization`.
