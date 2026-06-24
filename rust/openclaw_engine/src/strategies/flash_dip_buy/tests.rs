@@ -235,6 +235,20 @@ fn pending_working_order_cap_blocks_unfilled_entries() {
 }
 
 #[test]
+fn restored_working_order_seed_consumes_pending_capacity() {
+    let mut s = active_strategy();
+    s.max_concurrent = 1;
+    s.seed_pending_entry("BTCUSDT", openclaw_core::now_ms() + 60_000);
+    s.seed_prior_close("ETHUSDT", 3_000.0);
+    let eth_ctx = StrategyHarness::new("ETHUSDT").price(2_950.0).build();
+    let surface = &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE;
+    assert!(
+        s.on_tick(&eth_ctx, surface).is_empty(),
+        "restored Working order must consume producer pending capacity after restart"
+    );
+}
+
+#[test]
 fn expired_pending_working_order_releases_capacity() {
     let mut s = active_strategy();
     s.max_concurrent = 1;
