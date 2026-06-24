@@ -221,6 +221,15 @@ def test_full_source_patch_readiness_can_pass_after_adapter_exists(
     assert packet["status"] == "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW"
     assert packet["answers"]["rust_near_touch_authority_adapter_present"] is True
     assert packet["answers"]["rust_authority_path_wiring_present"] is True
+    assert packet["answers"]["active_order_submission_ready"] is False
+    assert packet["answers"]["active_order_submission_authority_granted"] is False
+    assert (
+        packet["active_order_submission_readiness"]["status"]
+        == "ACTIVE_ORDER_SUBMISSION_WIRING_MISSING"
+    )
+    assert "demo_learning_lane_writer_contract_no_order_submission" in packet[
+        "active_order_submission_readiness"
+    ]["blockers"]
     assert packet["answers"]["rust_patch_required"] is False
     assert packet["source_readiness"]["missing_required_patch_seams"] == []
 
@@ -258,6 +267,83 @@ def test_authority_grant_in_placement_plan_is_rejected(tmp_path: Path) -> None:
 
     assert packet["status"] == "AUTHORITY_BOUNDARY_VIOLATION"
     assert packet["placement_repair_plan"]["authority_preserved"] is False
+
+
+def test_current_repo_reports_active_order_submission_not_ready() -> None:
+    packet = build_bounded_demo_probe_authority_patch_readiness(
+        placement_repair_plan=_placement_plan(),
+        repo_root=Path.cwd(),
+        now_utc=NOW,
+    )
+
+    assert packet["answers"]["rust_near_touch_authority_adapter_present"] is True
+    assert packet["answers"]["rust_authority_path_wiring_present"] is True
+    assert packet["answers"]["active_order_submission_ready"] is False
+    blockers = packet["active_order_submission_readiness"]["blockers"]
+    assert "demo_learning_lane_writer_adapter_enabled_false" in blockers
+    assert "tick_dispatch_records_preview_no_order_submitted" in blockers
+
+
+def test_active_order_readiness_fails_closed_when_source_files_missing(
+    tmp_path: Path,
+) -> None:
+    packet = build_bounded_demo_probe_authority_patch_readiness(
+        placement_repair_plan=_placement_plan(),
+        repo_root=tmp_path / "missing-repo",
+        now_utc=NOW,
+    )
+
+    active = packet["active_order_submission_readiness"]
+    assert active["status"] == "ACTIVE_ORDER_SUBMISSION_WIRING_MISSING"
+    assert packet["answers"]["active_order_submission_ready"] is False
+    assert any(
+        blocker.startswith("source_file_missing:")
+        for blocker in active["blockers"]
+    )
+    assert "positive_active_order_submission_evidence_missing" in active["blockers"]
+
+
+def test_active_order_readiness_requires_positive_submission_evidence(
+    tmp_path: Path,
+) -> None:
+    _write(
+        tmp_path / "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
+        """
+pub fn writer() {
+    let _ = "probe_admission_decision";
+}
+""",
+    )
+    _write(
+        tmp_path / "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs",
+        """
+fn dispatch() {
+    let _ = "bounded_probe_attempt";
+}
+""",
+    )
+    _write(
+        tmp_path / "rust/openclaw_engine/src/bounded_probe_near_touch.rs",
+        """
+pub fn post_only_near_touch_or_skip() {}
+""",
+    )
+
+    packet = build_bounded_demo_probe_authority_patch_readiness(
+        placement_repair_plan=_placement_plan(),
+        repo_root=tmp_path,
+        now_utc=NOW,
+    )
+
+    active = packet["active_order_submission_readiness"]
+    assert active["status"] == "ACTIVE_ORDER_SUBMISSION_WIRING_MISSING"
+    assert packet["answers"]["active_order_submission_ready"] is False
+    assert active["evidence"]["missing_positive_active_evidence"] == [
+        "writer_submits_candidate_matched_probe_order",
+        "dispatch_forwards_admitted_bounded_probe_to_exchange",
+        "adapter_enabled_by_runtime_bounded_probe_gate",
+    ]
+    assert "positive_active_order_submission_evidence_missing" in active["blockers"]
     assert packet["answers"]["order_authority_granted"] is False
 
 

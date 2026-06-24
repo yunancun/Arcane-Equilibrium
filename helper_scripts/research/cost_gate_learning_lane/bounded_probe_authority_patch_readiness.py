@@ -15,6 +15,7 @@ import argparse
 import datetime as dt
 import json
 import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -371,6 +372,15 @@ def _read_file(path: Path) -> str | None:
         return None
 
 
+def _read_repo_text(repo_root: Path, rel_path: str) -> str:
+    path = repo_root / rel_path
+    return _read_file(path) or ""
+
+
+def _repo_file_present(repo_root: Path, rel_path: str) -> bool:
+    return (repo_root / rel_path).is_file()
+
+
 def _find_pattern_evidence(
     files: list[tuple[str, str]], patterns: tuple[str, ...]
 ) -> list[dict[str, Any]]:
@@ -465,6 +475,99 @@ def _source_readiness(repo_root: Path) -> dict[str, Any]:
         ),
         "missing_existing_seams": missing_existing,
         "missing_required_patch_seams": missing_required,
+    }
+
+
+def _active_order_submission_readiness(repo_root: Path) -> dict[str, Any]:
+    writer_rel = "rust/openclaw_engine/src/demo_learning_lane_writer.rs"
+    dispatch_rel = "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs"
+    near_touch_rel = "rust/openclaw_engine/src/bounded_probe_near_touch.rs"
+    writer_text = _read_repo_text(
+        repo_root,
+        writer_rel,
+    )
+    dispatch_text = _read_repo_text(
+        repo_root,
+        dispatch_rel,
+    )
+    near_touch_text = _read_repo_text(
+        repo_root,
+        near_touch_rel,
+    )
+    file_presence = {
+        writer_rel: _repo_file_present(repo_root, writer_rel),
+        dispatch_rel: _repo_file_present(repo_root, dispatch_rel),
+        near_touch_rel: _repo_file_present(repo_root, near_touch_rel),
+    }
+    writer_no_order_contract = "does not submit orders" in writer_text
+    dispatch_no_order_contract = "no order submitted" in dispatch_text
+    near_touch_pure_no_order_contract = "submit\n//! orders" in near_touch_text or (
+        "does not read plans, write ledgers, call Bybit, submit" in near_touch_text
+    )
+    adapter_enabled_hardcoded_false = re.search(
+        r"evaluate_probe_admission\([\s\S]*?,\s*false\s*,\s*risk_state\s*,?\s*\)",
+        writer_text,
+    ) is not None
+    positive_active_evidence = {
+        "writer_submits_candidate_matched_probe_order": (
+            "submit_candidate_matched_bounded_probe_order" in writer_text
+            or "active_bounded_probe_order_submission" in writer_text
+        ),
+        "dispatch_forwards_admitted_bounded_probe_to_exchange": (
+            "dispatch_admitted_bounded_probe_order" in dispatch_text
+            or "active_bounded_probe_order_submission" in dispatch_text
+        ),
+        "adapter_enabled_by_runtime_bounded_probe_gate": (
+            "bounded_probe_adapter_enabled" in writer_text
+            or "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED" in writer_text
+        ),
+    }
+    blockers: list[str] = []
+    for rel_path, present in file_presence.items():
+        if not present:
+            blockers.append(f"source_file_missing:{rel_path}")
+    if writer_no_order_contract:
+        blockers.append("demo_learning_lane_writer_contract_no_order_submission")
+    if adapter_enabled_hardcoded_false:
+        blockers.append("demo_learning_lane_writer_adapter_enabled_false")
+    if dispatch_no_order_contract:
+        blockers.append("tick_dispatch_records_preview_no_order_submitted")
+    if near_touch_pure_no_order_contract:
+        blockers.append("near_touch_adapter_contract_pure_no_order_math")
+    missing_positive_evidence = [
+        key for key, present in positive_active_evidence.items() if present is not True
+    ]
+    if missing_positive_evidence:
+        blockers.append("positive_active_order_submission_evidence_missing")
+    active_ready = (
+        all(file_presence.values())
+        and not missing_positive_evidence
+        and not blockers
+    )
+    return {
+        "status": (
+            "ACTIVE_ORDER_SUBMISSION_WIRING_PRESENT"
+            if active_ready
+            else "ACTIVE_ORDER_SUBMISSION_WIRING_MISSING"
+        ),
+        "active_order_submission_ready": active_ready,
+        "blockers": blockers,
+        "evidence": {
+            "file_presence": file_presence,
+            "writer_no_order_contract": writer_no_order_contract,
+            "adapter_enabled_hardcoded_false": adapter_enabled_hardcoded_false,
+            "dispatch_no_order_contract": dispatch_no_order_contract,
+            "near_touch_pure_no_order_contract": near_touch_pure_no_order_contract,
+            "positive_active_evidence": positive_active_evidence,
+            "missing_positive_active_evidence": missing_positive_evidence,
+        },
+        "required_before_order": [
+            "separate_source_patch_to_enable_active_bounded_demo_order_submission",
+            "candidate_matched_attempt_fill_fee_slippage_lineage",
+            "fresh_e3_bb_exchange_facing_order_envelope_review",
+            "guardian_decision_lease_rust_authority_path_preserved",
+        ],
+        "boundary": "source scan only; this packet never grants active order authority",
     }
 
 
@@ -602,6 +705,7 @@ def build_bounded_demo_probe_authority_patch_readiness(
         max_age_seconds=max_artifact_age_hours * 3600,
     )
     source_summary = _source_readiness(repo_root)
+    active_order_summary = _active_order_submission_readiness(repo_root)
     status, reason, next_actions = _status(
         placement_summary=placement_summary,
         source_summary=source_summary,
@@ -615,6 +719,7 @@ def build_bounded_demo_probe_authority_patch_readiness(
         "next_actions": next_actions,
         "placement_repair_plan": placement_summary,
         "source_readiness": source_summary,
+        "active_order_submission_readiness": active_order_summary,
         "profitability_improvement_lanes": lanes,
         "answers": {
             "placement_repair_plan_ready": placement_summary.get(
@@ -637,6 +742,15 @@ def build_bounded_demo_probe_authority_patch_readiness(
                 "authority_path_wiring_present"
             )
             is True,
+            "rust_active_order_submission_wiring_present": active_order_summary.get(
+                "active_order_submission_ready"
+            )
+            is True,
+            "active_order_submission_ready": active_order_summary.get(
+                "active_order_submission_ready"
+            )
+            is True,
+            "active_order_submission_authority_granted": False,
             "rust_patch_required": status.startswith("RUST_PATCH_REQUIRED_"),
             "runtime_mutation_performed": False,
             "global_cost_gate_lowering_recommended": False,
@@ -652,6 +766,7 @@ def build_bounded_demo_probe_authority_patch_readiness(
 def render_markdown(packet: dict[str, Any]) -> str:
     placement = _dict(packet.get("placement_repair_plan"))
     source = _dict(packet.get("source_readiness"))
+    active_order = _dict(packet.get("active_order_submission_readiness"))
     lines = [
         "# Bounded Demo Probe Authority Patch Readiness",
         "",
@@ -664,6 +779,8 @@ def render_markdown(packet: dict[str, Any]) -> str:
         f"- Required patch seams present: `{source.get('required_patch_seams_present')}`",
         f"- Near-touch Adapter present: `{source.get('adapter_module_present')}`",
         f"- Authority path wiring present: `{source.get('authority_path_wiring_present')}`",
+        f"- Active order submission ready: `{active_order.get('active_order_submission_ready')}`",
+        f"- Active order submission blockers: `{active_order.get('blockers')}`",
         f"- Missing patch seams: `{source.get('missing_required_patch_seams')}`",
         f"- Boundary: {packet.get('boundary')}",
         "",
