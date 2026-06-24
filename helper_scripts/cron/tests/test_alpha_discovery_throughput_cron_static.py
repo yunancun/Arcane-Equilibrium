@@ -16,6 +16,12 @@ def _src() -> str:
     return WRAPPER.read_text(encoding="utf-8")
 
 
+def _module_command_block(src: str, module: str) -> str:
+    start = src.index(f'"$PYBIN" -m {module}')
+    end = src.index(") >", start)
+    return src[start:end]
+
+
 def test_bash_syntax_ok() -> None:
     if shutil.which("bash") is None:
         pytest.skip("bash not available")
@@ -130,6 +136,24 @@ def test_wrapper_refreshes_activation_packet_before_alpha_runner() -> None:
     )
     assert src.index("alpha_discovery_throughput.profitability_path_scorecard") < src.index(
         "alpha_discovery_throughput.runtime_runner"
+    )
+
+
+def test_bounded_shadow_placement_consumes_same_cycle_authority_readiness() -> None:
+    src = _src()
+    block = _module_command_block(
+        src, "cost_gate_learning_lane.bounded_probe_shadow_placement_impact"
+    )
+    assert '--placement-repair-plan-json "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT"' in block
+    assert (
+        '--authority-patch-readiness-json "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT"'
+        in block
+    )
+    assert block.index("--placement-repair-plan-json") < block.index(
+        "--authority-patch-readiness-json"
+    )
+    assert block.index("--authority-patch-readiness-json") < block.index(
+        "--max-artifact-age-hours"
     )
 
 
