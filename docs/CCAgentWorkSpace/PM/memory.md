@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-24 MM Motif Distinct-Date Worklist Surface
+
+- Source commit `52b572ed` makes the learning worklist emit a separate no-authority `mm_motif_distinct_date_accumulation` task for the low-friction MM motif when motif amplification still needs distinct-date history.
+- Runtime is clean at `52b572ed`; crontab expected-head pins are synced; alpha refresh at `2026-06-24T15:12:51Z` reports both `mm_current_fee_confirmation=1` and `mm_motif_distinct_date_accumulation=1`, with both tasks operator/runtime false.
+- PM read: this closes a source-only autonomy visibility gap, not an edge proof. The MM path still needs independent distinct dates, repeat windows, OOS/walk-forward evidence, and maker-realism before any bounded Demo review; no probe/order/live authority or promotion proof exists.
+
 ## 2026-06-24 Killboard Probe Authority Semantics Runtime Sync
 
 - Source commit `7d118e81` makes alpha killboard/history separate operator probe-review readiness from actual runtime probe/order authority; legacy `ready_for_probe/actionable_probe_found` remains compatibility-only.
