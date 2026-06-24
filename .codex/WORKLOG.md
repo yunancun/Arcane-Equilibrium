@@ -766,3 +766,11 @@ YYYY-MM-DD HH:MM TZ
 - Result: `w_audit_8c` standalone wrapper now queries raw 5m liquidation `total_bucket_count` and passes it to single/sweep metrics, matching the already-correct alpha_candidate A2 adapter. Added report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-19--stage0r_8c_denominator_and_pm_runtime_verification.md` and advanced TODO to v217.
 - Verification: py_compile PASS; 8c smoke_cli 11/11 PASS; 8c metrics smoke PASS; alpha_candidate smoke PASS; 8b smoke PASS; Linux `/tmp` temp clone true-PG post-fix run produced standalone 8c `RED`/`review_ready=true` with `total_bucket_count=2931` and `missing_denominator=false`.
 - Boundary: source/test + docs/report only; no CI full suite, deploy/rebuild/restart, canonical Linux checkout mutation, DB write, credential/key/secret/runtime/auth/risk/order/trading mutation. E4 review remains open before trusting runner outputs.
+
+# 2026-06-24 — API Service Env-Parity Packet
+
+- Task: advance `P1-API-SERVICE-OWNERSHIP-ENV-PARITY` without restarting or mutating the reachable Trading API process.
+- Dispatch chain: `PM(default)` local implementation + `E2(explorer)` adversarial review + `E3(explorer)` runtime/security review + `E4(worker)` regression + `PM(default)` integration.
+- Result: added `helper_scripts/cron/api_service_env_parity.py` and tests. Runtime supplied-snapshot smoke reports `API_SERVICE_ENV_PARITY_DRIFT` for manual uvicorn vs inactive systemd unit; packet remains no-authority/no-restart.
+- Verification: API env-parity + runtime-health hygiene tests `30 passed`, py_compile PASS, `git diff --check` PASS, E2 final redaction review CLOSED, E3 no blocker, E4 regression DONE.
+- Boundary: source/test/docs + supplied `/tmp` snapshot smoke only; no service restart, API process/env/crontab mutation, PG/Bybit call, Cost Gate change, probe/order/live authority, or promotion proof.
