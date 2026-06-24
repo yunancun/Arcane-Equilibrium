@@ -799,3 +799,10 @@ YYYY-MM-DD HH:MM TZ
 - Result: E3 approved guarded Demo/API service handoff. PM backed up the user unit, wrote the exact proposed unit SHA `1a1eaff6...`, ran daemon-reload, gracefully stopped manual uvicorn PID `1859622`, and started `openclaw-trading-api.service`.
 - Verification: service active/running with MainPID `2218842`, listener only on `100.91.109.86:8000`, health surface returns `401`, old manual PID absent, runtime source clean at `dc1416e5`, demo engine alive, and post-cutover parity packet is `API_SERVICE_ENV_PARITY_CLEAN_SOURCE_ONLY`.
 - Boundary: no `systemctl --user enable`, no Bybit call, no PG write, no Cost Gate change, no probe/order/live authority, no Rust writer, no promotion proof.
+
+# 2026-06-24 — Bounded Probe Authorization Broad Demo Fail-Closed
+
+- Task: advance `P0-BOUNDED-PROBE-AUTHORIZATION` using fresh runtime artifacts without bypassing exact typed-confirm.
+- Evidence: false-negative preflight, placement repair, and authority path readiness are all ready/aligned for `grid_trading|AVAXUSDT|Sell`; authorization latest is ready for operator review.
+- Result: non-latest structured attempt with broad Demo session authorization returned `TYPED_CONFIRM_REQUIRED`, only blocking gate `typed_confirm_matches`, expected phrase `authorize_bounded_demo_probe:grid_trading|AVAXUSDT|Sell:1:bdp-grid-avax-sell-broad-demo-session-20260624T1145Z`, and `operator_authorization=null`.
+- Boundary: no Cost Gate lowering, no Bybit/PG action, no plan mutation, no probe/order/live authority, no Rust writer, no promotion proof.
