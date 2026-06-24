@@ -31,6 +31,12 @@
 - Linux artifact-only smoke at `2026-06-23T19:12:22Z` on source `b713c672` reports `COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW`, 16 ranked false-negative candidates, top `grid_trading|AVAXUSDT|Sell`, wrongful-block score `146.9126`, and net cost cushion `73.4563bps`.
 - PM read: this is the right profit-learning path for the Cost Gate problem. Do not globally lower the gate; review ranked false negatives, require bounded demo-probe authority before any probe, and require candidate-matched touchability/fill/fee/slippage lineage before any Cost Gate change. No global Cost Gate lowering, probe/order authority, runtime mutation, or promotion proof was granted.
 
+## 2026-06-24 Demo-Learning Autonomy Audit
+
+- Runtime is no longer demo-silent: `trade-core` is clean at `c88deea7`, demo engine is alive, and PG shows fresh `flash_dip_buy` demo intents/orders/fills.
+- Current maturity is evidence-active and safety-gated, not autonomous-profit complete: Cost Gate learning artifacts and JSONL rows accumulate, but Rust hot-path writer/PG-backed decision impact, bounded probe outcomes, promotion proof, and material AI/ML parameter evolution remain absent.
+- Next PM posture: clear working-order overhang, fill lineage, and stale cron expected-head health drift before any exact bounded-probe operator review; no global Cost Gate lowering or promotion.
+
 ## 2026-06-23 Cost Gate Blocked-Outcome Diagnosis
 
 - `cost_gate_demo_learning_lane_blocked_outcome_review_v2` now emits explicit `learning_diagnosis` and `cost_gate_escape_recommendation` fields for blocked-signal outcomes.
