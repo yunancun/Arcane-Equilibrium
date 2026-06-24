@@ -32,6 +32,16 @@ MARKET_SNAPSHOT_SCHEMA_VERSION = "bounded_probe_candidate_market_snapshot_v1"
 EXPECTED_MARKET_SNAPSHOT_SOURCE = (
     "read_only_pg:market.market_tickers+market.symbol_universe_snapshots"
 )
+PUBLIC_QUOTE_MARKET_SNAPSHOT_SOURCE = (
+    "bybit_public_quote_capture:bbo_freshness_public_quote_capture_v1"
+)
+PUBLIC_QUOTE_SCHEMA_VERSION = "bounded_probe_bbo_freshness_public_quote_capture_v1"
+PUBLIC_QUOTE_ADAPTER_STATUS = "PUBLIC_QUOTE_MARKET_SNAPSHOT_READY_NO_ORDER"
+ACCEPTED_MARKET_SNAPSHOT_SOURCES = {
+    EXPECTED_MARKET_SNAPSHOT_SOURCE,
+    PUBLIC_QUOTE_MARKET_SNAPSHOT_SOURCE,
+}
+CANONICAL_MAX_FRESH_BBO_AGE_MS = 1000
 
 REROUTE_READY_STATUS = "LOWER_PRICE_REROUTE_READY_FOR_DEMO_CONSTRUCTION_REVIEW"
 READY_STATUS = "CANDIDATE_CONSTRUCTION_PREVIEW_READY_NO_ORDER"
@@ -52,10 +62,13 @@ BOUNDARY = (
 FORBIDDEN_TRUE_KEYS = {
     "active_runtime_order_authority",
     "active_runtime_probe_authority",
+    "auth_headers_present",
     "bounded_demo_probe_authorized",
     "bybit_call_performed",
+    "bybit_private_call_performed",
     "canonical_plan_mutation_performed",
     "config_mutation_performed",
+    "cookie_headers_present",
     "cost_gate_lowering_recommended",
     "global_cost_gate_lowering_recommended",
     "crontab_mutation_performed",
@@ -78,6 +91,7 @@ FORBIDDEN_TRUE_KEYS = {
     "pg_query_performed",
     "pg_write_performed",
     "plan_mutation_performed",
+    "private_endpoint_called",
     "probe_authority",
     "probe_authority_granted",
     "probe_authority_granted_in_object",
@@ -416,6 +430,120 @@ def _market_inputs(market_snapshot: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _is_sha256_hex(value: Any) -> bool:
+    text = _str(value)
+    return len(text) == 64 and all(ch in "0123456789abcdef" for ch in text.lower())
+
+
+def _positive_numbers_equal(left: Any, right: Any, *, tolerance: float = 1e-9) -> bool:
+    parsed_left = _float(left)
+    parsed_right = _float(right)
+    if (
+        parsed_left is None
+        or parsed_right is None
+        or parsed_left <= 0
+        or parsed_right <= 0
+    ):
+        return False
+    return abs(parsed_left - parsed_right) <= tolerance
+
+
+def _public_quote_adapter_provenance_valid(
+    market_snapshot: dict[str, Any] | None,
+) -> tuple[bool, list[str]]:
+    snapshot = _dict(market_snapshot)
+    if _str(snapshot.get("source")) != PUBLIC_QUOTE_MARKET_SNAPSHOT_SOURCE:
+        return True, []
+    reasons: list[str] = []
+    adapter = _dict(snapshot.get("adapter"))
+    public_quote = _dict(snapshot.get("public_quote_artifact"))
+    reroute_review = _dict(snapshot.get("reroute_review_artifact"))
+    risk_limits = _dict(snapshot.get("risk_limits"))
+    if adapter.get("status") != PUBLIC_QUOTE_ADAPTER_STATUS:
+        reasons.append("public_quote_adapter_status")
+    if adapter.get("source_schema_version") != PUBLIC_QUOTE_SCHEMA_VERSION:
+        reasons.append("public_quote_adapter_source_schema")
+    if public_quote.get("schema_version") != PUBLIC_QUOTE_SCHEMA_VERSION:
+        reasons.append("public_quote_provenance_schema")
+    if public_quote.get("status") != "PUBLIC_QUOTE_CAPTURE_READY_NO_ORDER":
+        reasons.append("public_quote_provenance_status")
+    if _str(public_quote.get("path")) == "" or not _is_sha256_hex(public_quote.get("sha256")):
+        reasons.append("public_quote_provenance_path_sha")
+    if not _is_sha256_hex(public_quote.get("artifact_self_hash_sha256")):
+        reasons.append("public_quote_provenance_self_hash")
+    request_count = _float(public_quote.get("request_count"))
+    if request_count is None or request_count <= 0:
+        reasons.append("public_quote_provenance_request_count")
+    if public_quote.get("bybit_public_market_data_call_performed") is not True:
+        reasons.append("public_quote_provenance_public_call")
+    if (
+        reroute_review.get("schema_version")
+        != LOWER_PRICE_REROUTE_REVIEW_SCHEMA_VERSION
+    ):
+        reasons.append("reroute_review_provenance_schema")
+    if reroute_review.get("status") != REROUTE_READY_STATUS:
+        reasons.append("reroute_review_provenance_status")
+    if _str(reroute_review.get("path")) == "" or not _is_sha256_hex(reroute_review.get("sha256")):
+        reasons.append("reroute_review_provenance_path_sha")
+    if (
+        _str(adapter.get("public_quote_path")) == ""
+        or adapter.get("public_quote_path") != public_quote.get("path")
+    ):
+        reasons.append("public_quote_adapter_path_mismatch")
+    if (
+        _str(adapter.get("reroute_review_path")) == ""
+        or adapter.get("reroute_review_path") != reroute_review.get("path")
+    ):
+        reasons.append("reroute_review_adapter_path_mismatch")
+    if adapter.get("public_quote_sha256") != public_quote.get("sha256"):
+        reasons.append("public_quote_adapter_sha_mismatch")
+    if adapter.get("reroute_review_sha256") != reroute_review.get("sha256"):
+        reasons.append("reroute_review_adapter_sha_mismatch")
+    if not (
+        _positive_numbers_equal(risk_limits.get("cap_usdt"), adapter.get("reviewed_cap_usdt"))
+        and _positive_numbers_equal(
+            risk_limits.get("cap_usdt"),
+            reroute_review.get("selected_candidate_current_cap_usdt"),
+        )
+    ):
+        reasons.append("public_quote_adapter_cap_provenance")
+    risk_freshness_gate = _float(risk_limits.get("max_fresh_bbo_age_ms"))
+    if risk_freshness_gate is None or risk_freshness_gate <= 0:
+        reasons.append("public_quote_adapter_freshness_gate_missing")
+    elif risk_freshness_gate > CANONICAL_MAX_FRESH_BBO_AGE_MS:
+        reasons.append("public_quote_adapter_freshness_gate_wider_than_canonical")
+    elif not (
+        _positive_numbers_equal(
+            risk_freshness_gate,
+            adapter.get("source_max_fresh_bbo_age_ms"),
+        )
+        and _positive_numbers_equal(
+            risk_freshness_gate,
+            public_quote.get("source_max_fresh_bbo_age_ms"),
+        )
+    ):
+        reasons.append("public_quote_adapter_freshness_gate_mismatch")
+    return not reasons, reasons
+
+
+def _public_quote_adapter_limits_match_reroute(
+    *,
+    source: str,
+    reroute_review: dict[str, Any] | None,
+    market_snapshot: dict[str, Any] | None,
+) -> tuple[bool, list[str]]:
+    if source != PUBLIC_QUOTE_MARKET_SNAPSHOT_SOURCE:
+        return True, []
+    selected = _dict(_dict(reroute_review).get("selected_candidate"))
+    risk_limits = _dict(_dict(market_snapshot).get("risk_limits"))
+    if not _positive_numbers_equal(
+        risk_limits.get("cap_usdt"),
+        selected.get("current_cap_usdt"),
+    ):
+        return False, ["public_quote_adapter_cap_mismatch_reroute_candidate"]
+    return True, []
+
+
 def _numbers_match(left: Any, right: Any, *, tolerance: float = 1e-9) -> bool:
     if not _present(right):
         return True
@@ -585,8 +713,24 @@ def build_candidate_construction_preview(
     inputs = _market_inputs(market_snapshot)
     placement = _placement_and_sizing(candidate=selected, inputs=inputs)
     selected_symbol = _str(selected.get("symbol"))
+    source = _str(inputs.get("source"))
+    adapter_provenance_valid, adapter_provenance_reasons = (
+        _public_quote_adapter_provenance_valid(market_snapshot)
+    )
+    adapter_limits_valid, adapter_limit_reasons = (
+        _public_quote_adapter_limits_match_reroute(
+            source=source,
+            reroute_review=reroute_review,
+            market_snapshot=market_snapshot,
+        )
+    )
     market_snapshot_source_valid = (
-        _str(inputs.get("source")) == EXPECTED_MARKET_SNAPSHOT_SOURCE
+        source == EXPECTED_MARKET_SNAPSHOT_SOURCE
+        or (
+            source == PUBLIC_QUOTE_MARKET_SNAPSHOT_SOURCE
+            and adapter_provenance_valid
+            and adapter_limits_valid
+        )
     )
     market_snapshot_consistent, consistency_reasons = _snapshot_internal_consistency(
         inputs
@@ -628,6 +772,8 @@ def build_candidate_construction_preview(
         blocking_gates.append("market_snapshot_ready")
     if not market_snapshot_source_valid:
         blocking_gates.append("market_snapshot_read_only_source")
+        blocking_gates.extend(adapter_provenance_reasons)
+        blocking_gates.extend(adapter_limit_reasons)
     if not market_snapshot_consistent:
         blocking_gates.append("market_snapshot_internal_consistency")
         blocking_gates.extend(consistency_reasons)
