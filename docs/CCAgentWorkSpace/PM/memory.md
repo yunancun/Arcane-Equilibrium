@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-24 Runtime Cron Expected-Head Patch
+
+- Runtime `trade-core` remains clean at operational source head `dc1416e5`; four demo-learning cron entries now pin that head, with schedules/wrappers/log paths and Cost Gate flags preserved.
+- Post-check hygiene cleared cron/source/artifact drift and kept all authority/proof flags false; remaining runtime hygiene drift is API process/service ownership only.
+- Do not restart or enable `openclaw-trading-api.service` without an env-parity/runbook blocker: current manual uvicorn has workers/runtime env that the inactive unit does not reproduce.
+
 ## 2026-06-24 False-Negative Runtime Preflight Approval
 
 - Runtime `trade-core` is now synced clean to `6702ac0a`; the selected false-negative candidate `grid_trading|AVAXUSDT|Sell` has an approved no-authority false-negative review and a ready false-negative bounded preflight.
