@@ -12,7 +12,7 @@ Source branch: `main`
 - `completed_blockers`: `P0-PROFIT-EVIDENCE-QUALITY`, `P0-PROFIT-CANDIDATE-SELECTION`, `P1-LEARNING-LOOP-CLOSURE`, `P1-AUTONOMOUS-PARAMETER-PROPOSAL`
 - `blocked_blockers`: `P0-BOUNDED-PROBE-AUTHORIZATION`, `P0-PROFIT-OUTCOME-REVIEW`
 - `previous_report_paths`: `2026-06-24--candidate_matched_touchability_gate.md`, `2026-06-24--runtime_health_hygiene_packet.md`
-- `source_head`: `d694fcac94f6fecb5090a1f4af6479f52e497f98` before this source fix.
+- `source_head`: `d694fcac94f6fecb5090a1f4af6479f52e497f98` before this source fix; implementation commit `a9078af1de6f837ad00417a39dc63432bfcfa55f`.
 - `runtime_timestamp`: `2026-06-24T08:42:08+02:00`
 - `pg_snapshot_timestamp`: `2026-06-24 08:42:51.627196+02` read-only timestamp.
 - `artifact_mtimes`: false-negative review/preflight and bounded chain latest all `1782283089.*` after the v461 refresh.
@@ -56,9 +56,13 @@ Reason: this is a new source-only scope, `false_negative_review_approval_durabil
 - Profitability + alpha runtime tests: `98 passed`
 - Bounded authorization/touchability/placement: `26 passed`
 - `py_compile`, `bash -n`, and `git diff --check`: passed
+- Linux source fast-forwarded clean to `a9078af1de6f837ad00417a39dc63432bfcfa55f`.
+- Linux verification passed the same focused suites: operator-review/preflight `7`, cron static bundle `18`, full policy `90`, profitability+alpha `98`, bounded authorization/touchability/placement `26`, plus py_compile, bash syntax, and diff-check.
 - Artifact smoke:
   - normal default-defer + fresh existing approval -> `APPROVED_COST_GATE_FALSE_NEGATIVE_FOR_BOUNDED_DEMO_PROBE_PREFLIGHT`, `defer_refresh_preserved_existing_approval=true`, no authority flags.
   - authority-bearing current packet + existing approval -> `AUTHORITY_BOUNDARY_VIOLATION`, no preserve, no authority flags.
+  - Linux runtime smoke `/tmp/openclaw/cost_gate_learning_lane/false_negative_operator_review_approval_durability_smoke.json` preserved `grid_trading|AVAXUSDT|Sell` rank 1 with `review_grants_runtime_authority=false`, `bounded_demo_probe_authorized=false`, `probe_authority=false`, `order_authority=false`, `promotion_evidence=false`.
+  - Linux downstream smoke `/tmp/openclaw/cost_gate_learning_lane/false_negative_bounded_probe_preflight_approval_durability_smoke.json` returned `READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION` with no probe/order authority, no Cost Gate lowering, and no promotion evidence.
 
 ## Constraints Checked
 
@@ -101,4 +105,4 @@ Reason: this is a new source-only scope, `false_negative_review_approval_durabil
 
 ## Status
 
-`DONE_WITH_CONCERNS`: source-only approval durability is implemented and locally verified. Remaining concern is runtime sync/artifact smoke after commit; no runtime or exchange mutation is required.
+`DONE_WITH_CONCERNS`: source-only approval durability is implemented, pushed, Linux-synced, and runtime-smoked through the no-authority false-negative preflight path. Remaining concern is the next checkpoint, `P0-BOUNDED-PROBE-AUTHORIZATION`, which must remain a structured bounded Demo review/authorization object before any future order/probe path.
