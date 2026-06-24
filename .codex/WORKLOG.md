@@ -806,3 +806,10 @@ YYYY-MM-DD HH:MM TZ
 - Evidence: false-negative preflight, placement repair, and authority path readiness are all ready/aligned for `grid_trading|AVAXUSDT|Sell`; authorization latest is ready for operator review.
 - Result: non-latest structured attempt with broad Demo session authorization returned `TYPED_CONFIRM_REQUIRED`, only blocking gate `typed_confirm_matches`, expected phrase `authorize_bounded_demo_probe:grid_trading|AVAXUSDT|Sell:1:bdp-grid-avax-sell-broad-demo-session-20260624T1145Z`, and `operator_authorization=null`.
 - Boundary: no Cost Gate lowering, no Bybit/PG action, no plan mutation, no probe/order/live authority, no Rust writer, no promotion proof.
+
+# 2026-06-24 — API Service Enablement Review
+
+- Task: advance `P1-API-SERVICE-OWNERSHIP-ENABLEMENT-REVIEW` after the PM-applied API service cutover without enabling boot autostart.
+- Dispatch chain: `PM(default)` session-loop state + read-only snapshot/parity + `E3(explorer)` runtime/security review + `PM(default)` integration.
+- Result: fresh parity packet is `API_SERVICE_ENV_PARITY_CLEAN_SOURCE_ONLY`; service is active/running with `UnitFileState=disabled`, `[Install] WantedBy=default.target`, `Linger=yes`, no wants symlink, Tailscale-only listener, and health `401`. E3 says future enablement is acceptable only as a separate PM/E3 checkpoint using enable without `--now`.
+- Boundary: no enable/disable/restart/daemon-reload/process signal, no API POST/Bybit/PG write, no Cost Gate change, no probe/order/live authority, no Rust writer, no promotion proof.
