@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-24 Bounded Probe Authorization Broad Demo Fail-Closed
+
+- Fresh runtime artifacts are aligned and ready for `grid_trading|AVAXUSDT|Sell`, but the broad Demo/API authorization was not converted into bounded probe/order authority.
+- Structured attempt `/tmp/openclaw/cost_gate_learning_lane/bounded_probe_operator_authorization_structured_attempt_broad_demo_session_20260624T1145Z.json` returned `TYPED_CONFIRM_REQUIRED`, only blocker `typed_confirm_matches`, and no emitted authorization object.
+- PM read: do not repeat this P0 authorization audit unless exact typed-confirm is new evidence; continue with source-only/runtime-hygiene blockers meanwhile.
+
 ## 2026-06-24 API Service Runtime Cutover PM Apply
 
 - E3 approved and PM executed a guarded Demo/API service ownership handoff from manual uvicorn PID `1859622` to `openclaw-trading-api.service`; post-cutover service is active/running with MainPID `2218842`, bound only to `100.91.109.86:8000`.
