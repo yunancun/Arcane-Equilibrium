@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-24 Profit Evidence Quality Operator Checkpoint
+
+- Read-only PM checkpoint found a stronger overhang delta than the prior audit: paged Bybit demo inventory has 35 exchange open orders, including 34 deep PostOnly buys totaling about 8.37k USDT notional and 9 stale >24h orders, plus one SOLUSDT open position while local demo_state is flat.
+- SOL/ETH unattributed fills are OpenClaw-dispatched orders that failed clean fill matching; they are audit evidence only and must never count toward Cost Gate, bounded-probe, promotion, or risk-adjusted net PnL proof.
+- `P0-PROFIT-EVIDENCE-QUALITY` is blocked by operator action: any cancel/modify/close, PG reconciliation/backfill, cron edit, service restart, or runtime mutation needs explicit authorization before candidate selection.
+
 ## 2026-06-23 Cost Gate False-Negative Candidate Packet
 
 - `cost_gate_false_negative_candidate_packet_v1` now turns blocked-outcome diagnosis into a ranked Cost Gate escape packet: false-negative-after-cost candidates for operator review, edge-amplification-required rows for engineering search, sample accumulation, and keep-blocked rows.
