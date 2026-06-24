@@ -4005,6 +4005,134 @@ def test_false_negative_operator_review_requires_exact_approval_phrase():
     )
 
 
+def test_false_negative_operator_review_defer_preserves_existing_fresh_approval():
+    packet = _false_negative_candidate_packet_fixture()
+    top = packet["ranked_false_negative_candidates"][0]
+    typed_confirm = expected_false_negative_operator_review_typed_confirm(
+        top["side_cell_key"],
+        top["false_negative_rank"],
+    )
+    approved = build_false_negative_operator_review(
+        false_negative_candidate_packet=packet,
+        decision="approve-preflight",
+        operator_id="pm",
+        typed_confirm=typed_confirm,
+        now_utc=dt.datetime(2026, 6, 21, 15, 10, tzinfo=dt.timezone.utc),
+    )
+
+    preserved = build_false_negative_operator_review(
+        false_negative_candidate_packet=packet,
+        existing_operator_review=approved,
+        decision="defer",
+        review_note="cron-default-defer-refresh",
+        now_utc=dt.datetime(2026, 6, 21, 15, 15, tzinfo=dt.timezone.utc),
+    )
+
+    assert preserved["status"] == FALSE_NEGATIVE_APPROVED_FOR_PREFLIGHT_STATUS
+    assert preserved["decision"] == "approve-preflight"
+    assert preserved["operator_review_approved_for_preflight"] is True
+    assert preserved["answers"]["bounded_demo_probe_preflight_approved"] is True
+    assert preserved["answers"]["review_grants_runtime_authority"] is False
+    assert preserved["answers"]["bounded_demo_probe_authorized"] is False
+    assert preserved["answers"]["probe_authority_granted"] is False
+    assert preserved["answers"]["order_authority_granted"] is False
+    assert preserved["answers"]["promotion_evidence"] is False
+    assert preserved["defer_refresh_preserved_existing_approval"] is True
+    assert preserved["defer_refresh_decision"] == "defer"
+    assert preserved["defer_refresh_note"] == "cron-default-defer-refresh"
+
+
+def test_false_negative_operator_review_defer_does_not_preserve_stale_approval():
+    packet = _false_negative_candidate_packet_fixture()
+    top = packet["ranked_false_negative_candidates"][0]
+    typed_confirm = expected_false_negative_operator_review_typed_confirm(
+        top["side_cell_key"],
+        top["false_negative_rank"],
+    )
+    approved = build_false_negative_operator_review(
+        false_negative_candidate_packet=packet,
+        decision="approve-preflight",
+        operator_id="pm",
+        typed_confirm=typed_confirm,
+        now_utc=dt.datetime(2026, 6, 21, 15, 10, tzinfo=dt.timezone.utc),
+    )
+    packet["generated_at_utc"] = "2026-06-22T16:00:00+00:00"
+
+    deferred = build_false_negative_operator_review(
+        false_negative_candidate_packet=packet,
+        existing_operator_review=approved,
+        decision="defer",
+        now_utc=dt.datetime(2026, 6, 22, 16, 11, tzinfo=dt.timezone.utc),
+    )
+
+    assert deferred["status"] == FALSE_NEGATIVE_PENDING_OPERATOR_REVIEW_STATUS
+    assert deferred["operator_review_approved_for_preflight"] is False
+    assert deferred["answers"]["bounded_demo_probe_preflight_approved"] is False
+    assert "defer_refresh_preserved_existing_approval" not in deferred
+
+
+def test_false_negative_operator_review_defer_does_not_mask_current_authority_violation():
+    packet = _false_negative_candidate_packet_fixture()
+    top = packet["ranked_false_negative_candidates"][0]
+    typed_confirm = expected_false_negative_operator_review_typed_confirm(
+        top["side_cell_key"],
+        top["false_negative_rank"],
+    )
+    approved = build_false_negative_operator_review(
+        false_negative_candidate_packet=packet,
+        decision="approve-preflight",
+        operator_id="pm",
+        typed_confirm=typed_confirm,
+        now_utc=dt.datetime(2026, 6, 21, 15, 10, tzinfo=dt.timezone.utc),
+    )
+    packet["answers"]["probe_authority_granted"] = True
+
+    review = build_false_negative_operator_review(
+        false_negative_candidate_packet=packet,
+        existing_operator_review=approved,
+        decision="defer",
+        now_utc=dt.datetime(2026, 6, 21, 15, 15, tzinfo=dt.timezone.utc),
+    )
+
+    assert review["status"] == "AUTHORITY_BOUNDARY_VIOLATION"
+    assert review["blocking_gates"][0] == "authority_boundary_preserved"
+    assert review["operator_review_approved_for_preflight"] is False
+    assert review["answers"]["bounded_demo_probe_preflight_approved"] is False
+    assert review["answers"]["probe_authority_granted"] is False
+    assert review["answers"]["order_authority_granted"] is False
+    assert "defer_refresh_preserved_existing_approval" not in review
+
+
+def test_false_negative_operator_review_defer_does_not_preserve_mismatched_approval():
+    packet = _false_negative_candidate_packet_fixture()
+    top = packet["ranked_false_negative_candidates"][0]
+    typed_confirm = expected_false_negative_operator_review_typed_confirm(
+        top["side_cell_key"],
+        top["false_negative_rank"],
+    )
+    approved = build_false_negative_operator_review(
+        false_negative_candidate_packet=packet,
+        decision="approve-preflight",
+        operator_id="pm",
+        typed_confirm=typed_confirm,
+        now_utc=dt.datetime(2026, 6, 21, 15, 10, tzinfo=dt.timezone.utc),
+    )
+    approved["selected_side_cell_key"] = "grid_trading|ETHUSDT|Sell"
+
+    review = build_false_negative_operator_review(
+        false_negative_candidate_packet=packet,
+        existing_operator_review=approved,
+        decision="defer",
+        now_utc=dt.datetime(2026, 6, 21, 15, 15, tzinfo=dt.timezone.utc),
+    )
+
+    assert review["status"] == FALSE_NEGATIVE_PENDING_OPERATOR_REVIEW_STATUS
+    assert review["operator_review_approved_for_preflight"] is False
+    assert review["answers"]["bounded_demo_probe_preflight_approved"] is False
+    assert review["answers"]["review_grants_runtime_authority"] is False
+    assert "defer_refresh_preserved_existing_approval" not in review
+
+
 def test_false_negative_operator_review_blocks_authority_bearing_input():
     packet = _false_negative_candidate_packet_fixture()
     packet["answers"]["probe_authority_granted"] = True

@@ -356,6 +356,7 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert "-m cost_gate_learning_lane.autonomous_parameter_proposal" in src
     assert "-m cost_gate_learning_lane.false_negative_bounded_probe_preflight" in src
     assert "--false-negative-candidate-packet-json" in src
+    assert "--existing-operator-review-json" in src
     assert "--decision defer" in src
     assert "--learning-ssot-decision-json" in src
     assert "--profit-evidence-quality-status" in src
@@ -511,6 +512,14 @@ def test_wrapper_operator_authorization_stage_is_review_only() -> None:
     assert "bounded_probe_operator_authorization_active_runtime_order_authority" in src
     assert "operator_authorization_object_emitted" in src
     assert "active_runtime_order_authority" in src
+
+
+def test_wrapper_false_negative_default_defer_preserves_existing_review_input() -> None:
+    src = _src(WRAPPER)
+    assert "--existing-operator-review-json" in src
+    assert '--existing-operator-review-json "$FALSE_NEGATIVE_OPERATOR_REVIEW_LATEST"' in src
+    assert "--decision defer" in src
+    assert 'cp "$FALSE_NEGATIVE_OPERATOR_REVIEW_OUT" "$FALSE_NEGATIVE_OPERATOR_REVIEW_LATEST"' in src
 
 
 def test_wrapper_has_preinstall_refresh_only_cutoff_after_plan_refresh() -> None:

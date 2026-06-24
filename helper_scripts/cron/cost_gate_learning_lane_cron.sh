@@ -480,6 +480,7 @@ FALSE_NEGATIVE_CANDIDATE_PACKET_ARGS=(
 FALSE_NEGATIVE_OPERATOR_REVIEW_ARGS=(
     -m cost_gate_learning_lane.false_negative_operator_review
     --false-negative-candidate-packet-json "$FALSE_NEGATIVE_CANDIDATE_PACKET_OUT"
+    --existing-operator-review-json "$FALSE_NEGATIVE_OPERATOR_REVIEW_LATEST"
     --decision defer
     --max-artifact-age-hours "$FALSE_NEGATIVE_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS"
     --json-output "$FALSE_NEGATIVE_OPERATOR_REVIEW_OUT"

@@ -154,6 +154,41 @@ def test_approved_review_reaches_authorization_review_without_order_authority() 
     assert packet["answers"]["order_submission_performed"] is False
 
 
+def test_preserved_approval_review_reaches_preflight_without_runtime_authority() -> None:
+    review = _review(
+        status=APPROVED_FOR_PREFLIGHT_STATUS,
+        decision="approve-preflight",
+        operator_review_approved_for_preflight=True,
+        defer_refresh_preserved_existing_approval=True,
+        defer_refresh_decision="defer",
+        answers={
+            "operator_review_approved_for_preflight": True,
+            "bounded_demo_probe_preflight_approved": True,
+            "review_grants_runtime_authority": False,
+            "bounded_demo_probe_authorized": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+    )
+    packet = build_false_negative_bounded_demo_probe_preflight(
+        autonomous_parameter_proposal=_proposal(),
+        false_negative_operator_review=review,
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+    assert packet["answers"]["ready_for_operator_bounded_demo_probe_authorization"] is True
+    assert packet["answers"]["bounded_demo_probe_authorized"] is False
+    assert packet["answers"]["global_cost_gate_lowering_recommended"] is False
+    assert packet["answers"]["main_cost_gate_adjustment"] == "NONE"
+    assert packet["answers"]["probe_authority_granted"] is False
+    assert packet["answers"]["order_authority_granted"] is False
+    assert packet["answers"]["promotion_evidence"] is False
+
+
 def test_candidate_alignment_mismatch_blocks_preflight() -> None:
     review = _review(
         selected_side_cell_key="grid_trading|ATOMUSDT|Sell",

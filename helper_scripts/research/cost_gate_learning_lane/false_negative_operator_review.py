@@ -286,9 +286,93 @@ def _status_from_gates(
     return PENDING_OPERATOR_REVIEW_STATUS
 
 
+def _existing_review_is_preservable(
+    existing_review: dict[str, Any] | None,
+    *,
+    candidate: dict[str, Any],
+    now_utc: dt.datetime,
+    max_age_seconds: int,
+) -> tuple[bool, str]:
+    review = _dict(existing_review)
+    if not review:
+        return False, "existing_review_missing"
+    if review.get("schema_version") != FALSE_NEGATIVE_OPERATOR_REVIEW_SCHEMA_VERSION:
+        return False, "existing_review_schema_mismatch"
+    if review.get("status") != APPROVED_FOR_PREFLIGHT_STATUS:
+        return False, "existing_review_not_approved_for_preflight"
+    if review.get("decision") != "approve-preflight":
+        return False, "existing_review_decision_not_approve_preflight"
+    if _authority_preserved(review) is not True:
+        return False, "existing_review_authority_boundary_violation"
+    age = _age_seconds(_generated_at(review), now_utc=now_utc)
+    if age is None:
+        return False, "existing_review_unknown_age"
+    if age > max_age_seconds:
+        return False, "existing_review_stale"
+    answers = _dict(review.get("answers"))
+    if answers.get("operator_review_approved_for_preflight") is not True:
+        return False, "existing_review_answer_not_approved"
+    if answers.get("bounded_demo_probe_preflight_approved") is not True:
+        return False, "existing_review_preflight_answer_not_approved"
+    if answers.get("review_grants_runtime_authority") is not False:
+        return False, "existing_review_runtime_authority_not_false"
+    if answers.get("bounded_demo_probe_authorized") is not False:
+        return False, "existing_review_probe_authorized_not_false"
+    if _str(review.get("selected_side_cell_key")) != _str(candidate.get("side_cell_key")):
+        return False, "existing_review_side_cell_mismatch"
+    if _int(review.get("selected_false_negative_rank")) != _int(
+        candidate.get("false_negative_rank")
+    ):
+        return False, "existing_review_rank_mismatch"
+    return True, "existing_approval_preserved_for_default_defer_refresh"
+
+
+def _preserve_existing_review(
+    existing_review: dict[str, Any],
+    *,
+    now_utc: dt.datetime,
+    review_note: str | None,
+) -> dict[str, Any]:
+    preserved = dict(existing_review)
+    answers = dict(_dict(preserved.get("answers")))
+    answers.update(
+        {
+            "operator_review_approved_for_preflight": True,
+            "bounded_demo_probe_preflight_approved": True,
+            "review_grants_runtime_authority": False,
+            "bounded_demo_probe_authorized": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        }
+    )
+    preserved.update(
+        {
+            "defer_refresh_preserved_existing_approval": True,
+            "defer_refresh_generated_at_utc": now_utc.isoformat(),
+            "defer_refresh_decision": "defer",
+            "defer_refresh_reason": (
+                "existing_approve_preflight_review_is_fresh_aligned_and_no_authority"
+            ),
+            "answers": answers,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        }
+    )
+    note = _str(review_note)
+    if note:
+        preserved["defer_refresh_note"] = note
+    return preserved
+
+
 def build_false_negative_operator_review(
     *,
     false_negative_candidate_packet: dict[str, Any] | None,
+    existing_operator_review: dict[str, Any] | None = None,
     source_path: Path | None = None,
     source_error: str | None = None,
     selected_side_cell_key: str | None = None,
@@ -349,6 +433,27 @@ def build_false_negative_operator_review(
         and candidate.get("order_authority_granted") is not True
         and candidate.get("promotion_evidence") is not True
     )
+
+    if (
+        normalized_decision == "defer"
+        and authority_preserved
+        and packet_ready
+        and artifact["status"] == "FRESH"
+        and artifact["schema_version"] == SCHEMA_VERSION
+        and candidate_reviewable
+    ):
+        preserve_existing, _preserve_reason = _existing_review_is_preservable(
+            existing_operator_review,
+            candidate=candidate,
+            now_utc=now,
+            max_age_seconds=max_age_seconds,
+        )
+        if preserve_existing:
+            return _preserve_existing_review(
+                _dict(existing_operator_review),
+                now_utc=now,
+                review_note=review_note,
+            )
 
     gates = [
         _gate(
@@ -558,6 +663,7 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--false-negative-candidate-packet-json", type=Path, required=True)
+    parser.add_argument("--existing-operator-review-json", type=Path)
     parser.add_argument("--selected-side-cell-key")
     parser.add_argument(
         "--decision",
@@ -577,8 +683,10 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = _build_parser().parse_args()
     packet, err = _read_json(args.false_negative_candidate_packet_json)
+    existing_review, _existing_err = _read_json(args.existing_operator_review_json)
     review = build_false_negative_operator_review(
         false_negative_candidate_packet=packet,
+        existing_operator_review=existing_review,
         source_path=args.false_negative_candidate_packet_json,
         source_error=err,
         selected_side_cell_key=args.selected_side_cell_key,
