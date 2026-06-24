@@ -2,8 +2,8 @@
 
 Date: 2026-06-24
 PM status: `DONE_WITH_CONCERNS`
-Runtime source checked: Linux `trade-core` `/home/ncyu/BybitOpenClaw/srv` at `2dd54a37`
-Source change branch: `main`
+Runtime source checked: Linux `trade-core` `/home/ncyu/BybitOpenClaw/srv` synced clean to source fix `98e34a90`
+Source change branch / commit: `main` / `98e34a90`
 
 ## Session Loop State
 
@@ -13,7 +13,7 @@ Source change branch: `main`
 - `completed_blockers`: `P0-PROFIT-EVIDENCE-QUALITY`, `P0-PROFIT-CANDIDATE-SELECTION`, `P1-LEARNING-LOOP-CLOSURE`, `P1-AUTONOMOUS-PARAMETER-PROPOSAL`
 - `blocked_blockers`: `P0-BOUNDED-PROBE-AUTHORIZATION`, `P0-PROFIT-OUTCOME-REVIEW`
 - `previous_report_paths`: `2026-06-24--false_negative_runtime_preflight_approval_checkpoint.md`
-- `source_head`: local/origin `2dd54a37` before this source fix.
+- `source_head`: local/origin `2dd54a37` before this source fix; source fix committed as `98e34a90`.
 - `runtime_timestamp`: `2026-06-24T08:19:03+02:00`
 - `pg_snapshot_timestamp`: `2026-06-24 08:19:03.435815+02` read-only timestamp snapshot.
 - `artifact_mtimes`: false-negative preflight `1782281288.965555`; runtime order-to-fill audit `1782281075`; touchability/placement latest from old source `1782281704.*`.
@@ -21,7 +21,7 @@ Source change branch: `main`
 - `new_evidence_delta_required`: source-only progress scope `false_negative_touchability_candidate_match_gate_v1`.
 - `new_evidence_delta_found`: yes. Runtime artifact smoke showed aggregate `FILL_FLOW_PRESENT` contained 4 non-candidate fills, 0 candidate-matched orders/fills for `grid_trading|AVAXUSDT|Sell`.
 - `acceptance_criteria`: aggregate fills cannot satisfy touchability unless `strategy_name + symbol + side` match the active candidate; promotion-proof inputs are rejected; placement and authorization remain no-authority.
-- `next_blocker_id`: `P0-BOUNDED-PROBE-AUTHORIZATION` once the source fix is synced and a defer-only authorization packet is refreshed.
+- `next_blocker_id`: `P0-BOUNDED-PROBE-AUTHORIZATION` at the structured authorization-object checkpoint; latest packet is review-ready but defer-only.
 
 ## Anti-Repeat Decision
 
@@ -61,6 +61,19 @@ Using copied runtime artifacts under `/tmp/openclaw_candidate_touchability_check
 - new touchability status: `TOUCHABILITY_REPAIR_REQUIRED_BEFORE_BOUNDED_DEMO_PROBE`.
 - new placement status: `PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW`.
 - defer-only authorization packet: `READY_FOR_OPERATOR_AUTHORIZATION_REVIEW`, `operator_authorization=null`, `operator_authorization_object_emitted=false`, no active runtime probe/order authority.
+
+## Runtime Refresh
+
+After commit/push, Linux `trade-core` was fast-forwarded clean to `98e34a90` and the artifact-only chain was refreshed under `/tmp/openclaw`:
+
+- false-negative review: `APPROVED_COST_GATE_FALSE_NEGATIVE_FOR_BOUNDED_DEMO_PROBE_PREFLIGHT`
+- false-negative preflight: `READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION`
+- touchability: `TOUCHABILITY_REPAIR_REQUIRED_BEFORE_BOUNDED_DEMO_PROBE`
+- placement: `PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW`
+- authority readiness: `AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW`
+- authorization: `READY_FOR_OPERATOR_AUTHORIZATION_REVIEW`, decision `defer`, blocking gates `[]`, `operator_authorization=null`
+
+Runtime latest mtimes for the refreshed chain are `1782283089`. A transient drift was observed before the structured approval refresh: the default-defer false-negative review artifact had overwritten approval and made preflight `OPERATOR_REVIEW_REQUIRED`. That is fail-closed, but the next source-only hygiene step should preserve explicit approvals or write defer output separately so cron does not erase operator-reviewed approvals.
 
 ## Verification
 
@@ -114,4 +127,4 @@ Using copied runtime artifacts under `/tmp/openclaw_candidate_touchability_check
 
 ## Status
 
-`DONE_WITH_CONCERNS`: source-only gate is fixed and verified locally. Runtime latest artifacts still need a source sync / artifact-only refresh to replace the previous false-ready latest files, but no runtime/order authority was required or used in this step.
+`DONE_WITH_CONCERNS`: source-only gate is fixed, pushed, synced to Linux, and refreshed into runtime latest artifacts. The remaining concern is approval-artifact durability under recurring default-defer refresh. No runtime/order authority was emitted or used in this step.
