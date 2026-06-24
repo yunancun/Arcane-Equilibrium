@@ -36,6 +36,7 @@ from alpha_discovery_throughput.runtime_runner import (
     collect_polymarket_leadlag_arm,
     collect_runtime_arms,
     run_once,
+    _history_row,
     _latest_json_line,
     _learning_summary,
 )
@@ -3826,6 +3827,8 @@ def _write_bounded_probe_operator_authorization_latest(
     *,
     status: str = "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW",
     generated_at: str = "2026-06-21T18:04:40+00:00",
+    active_runtime_probe_authority: bool = False,
+    active_runtime_order_authority: bool = False,
 ) -> Path:
     path = (
         data
@@ -3873,13 +3876,44 @@ def _write_bounded_probe_operator_authorization_latest(
             "global_cost_gate_lowering_recommended": False,
             "main_cost_gate_adjustment": "NONE",
             "promotion_evidence": False,
-            "active_runtime_probe_authority": False,
-            "active_runtime_order_authority": False,
+            "active_runtime_probe_authority": active_runtime_probe_authority,
+            "active_runtime_order_authority": active_runtime_order_authority,
             "probe_authority_granted_in_authorization_object": False,
             "order_authority_granted_in_authorization_object": False,
         },
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def _write_demo_learning_lane_plan_latest(
+    data: Path,
+    *,
+    generated_at: str = "2026-06-21T18:04:40+00:00",
+) -> Path:
+    path = data / "cost_gate_learning_lane" / "demo_learning_lane_plan_latest.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({
+            "schema_version": "cost_gate_demo_learning_lane_plan_v1",
+            "generated_at_utc": generated_at,
+            "status": "READY_FOR_DEMO_LEARNING_PROBE",
+            "gate_status": "OPERATOR_REVIEW",
+            "selected_probe_candidate_count": 1,
+            "probe_candidate_count": 1,
+            "probe_candidates": [
+                {
+                    "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                    "strategy_name": "ma_crossover",
+                    "symbol": "ETHUSDT",
+                    "side": "Sell",
+                }
+            ],
+            "order_authority": "NOT_GRANTED",
+            "main_cost_gate_adjustment": "NONE",
+        }),
+        encoding="utf-8",
+    )
     return path
 
 
@@ -5101,6 +5135,7 @@ def test_cost_gate_sealed_horizon_probe_preflight_supersedes_packet(tmp_path):
 
 def test_bounded_probe_operator_authorization_packet_drives_operator_review(tmp_path):
     data = tmp_path / "openclaw"
+    repo = _init_clean_source_repo_with_origin(tmp_path)
     _write_profit_learning_decision_packet_latest(
         data,
         status="OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE",
@@ -5114,6 +5149,7 @@ def test_bounded_probe_operator_authorization_packet_drives_operator_review(tmp_
         data,
         status="READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION",
     )
+    _write_demo_learning_lane_plan_latest(data)
     _write_bounded_probe_operator_authorization_latest(data)
 
     now = dt.datetime(2026, 6, 21, 18, 5, tzinfo=dt.timezone.utc)
@@ -5166,6 +5202,84 @@ def test_bounded_probe_operator_authorization_packet_drives_operator_review(tmp_
             "bounded_probe_operator_authorization_active_runtime_order_authority"
         ]
         is False
+    )
+
+    killboard = build_runtime_killboard(
+        data_dir=data,
+        repo_root=repo,
+        now_utc=now,
+    )
+    kb = killboard["killboard"]
+
+    assert kb["ready_for_probe"] == 1
+    assert kb["actionable_probe_found"] is True
+    assert kb["operator_probe_review_ready_count"] == 1
+    assert kb["operator_probe_review_ready_found"] is True
+    assert kb["probe_review_ready_without_authority"] is True
+    assert kb["actionable_probe_semantics"] == (
+        "OPERATOR_REVIEW_READY_NO_RUNTIME_AUTHORITY"
+    )
+    assert kb["runtime_probe_authority_found"] is False
+    assert kb["runtime_order_authority_found"] is False
+    assert kb["promotion_evidence_found"] is False
+    assert kb["cost_gate_mutation_found"] is False
+
+    history = _history_row(killboard)
+    assert history["operator_probe_review_ready_count"] == 1
+    assert history["operator_probe_review_ready_found"] is True
+    assert history["runtime_probe_authority_found"] is False
+    assert history["runtime_order_authority_found"] is False
+    assert history["probe_review_ready_without_authority"] is True
+    assert history["actionable_probe_semantics"] == (
+        "OPERATOR_REVIEW_READY_NO_RUNTIME_AUTHORITY"
+    )
+
+
+def test_runtime_killboard_exposes_runtime_authority_contamination(tmp_path):
+    data = tmp_path / "openclaw"
+    repo = _init_clean_source_repo_with_origin(tmp_path)
+    _write_profit_learning_decision_packet_latest(
+        data,
+        status="OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE",
+        reason="sealed_horizon_learning_evidence_clears_review_thresholds",
+        next_actions=[
+            "operator_review_sealed_horizon_learning_evidence_before_bounded_demo_probe"
+        ],
+        sealed_horizon_candidate=True,
+    )
+    _write_sealed_horizon_probe_preflight_latest(
+        data,
+        status="READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION",
+    )
+    _write_demo_learning_lane_plan_latest(data)
+    _write_bounded_probe_operator_authorization_latest(
+        data,
+        active_runtime_probe_authority=True,
+    )
+
+    killboard = build_runtime_killboard(
+        data_dir=data,
+        repo_root=repo,
+        now_utc=dt.datetime(2026, 6, 21, 18, 5, tzinfo=dt.timezone.utc),
+    )
+    kb = killboard["killboard"]
+
+    assert kb["ready_for_probe"] == 0
+    assert kb["actionable_probe_found"] is False
+    assert kb["runtime_probe_authority_found"] is True
+    assert kb["runtime_order_authority_found"] is False
+    assert kb["probe_review_ready_without_authority"] is False
+    assert kb["actionable_probe_semantics"] == (
+        "RUNTIME_PROBE_OR_ORDER_AUTHORITY_PRESENT"
+    )
+    blocker = next(
+        row
+        for row in killboard["profitability_blocker_scorecard"]["arms"]
+        if row["arm_id"] == "cost_gate_demo_learning_lane"
+    )
+    assert blocker["action"] == "BLOCK"
+    assert blocker["primary_blocker"] == (
+        "bounded_probe_operator_authorization_authority_boundary_violation"
     )
 
 
