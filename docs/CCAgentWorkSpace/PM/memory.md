@@ -1945,3 +1945,13 @@
 - E2 found fail-open risks before commit; PM fixed them by expanding authority-key checks, scanning nested/list inputs, requiring readiness answers to match ready status, and splitting matched-sample next action into authorization-only first action.
 - `cost_gate_learning_lane_cron.sh` now passes same-cycle readiness into shadow placement; runtime copied-artifact smoke produced `authority_path_ready_for_operator_review=true` and next actions `collect_candidate_matched_bounded_demo_probe_evidence_after_exact_authorization` / `rerun_shadow_placement_after_candidate_matched_flow`.
 - Boundary: source/test/docs + copied-artifact smoke only; no Bybit call/order/cancel/modify, no PG write, no crontab/service mutation, no Cost Gate lowering, no probe/order/live authority, no Rust writer, no promotion proof.
+
+## 2026-06-24 Alpha Cron Expected-Head Runtime Closure
+
+- `P1-ALPHA-CRON-RUNTIME-RUNNER-EXPECTED-HEAD-PROPAGATION` closed as `DONE_WITH_CONCERNS`.
+- Source commit `44a337e3` makes `alpha_discovery_throughput_cron.sh` pass expected-head into `runtime_runner` from `OPENCLAW_EXPECTED_SOURCE_HEAD`, `OPENCLAW_COST_GATE_LEARNING_EXPECTED_HEAD`, or `OPENCLAW_DEMO_LEARNING_STACK_EXPECTED_HEAD`.
+- E2 caught the Bash 3.2 `set -u` empty-array regression; final source uses explicit `if/else` and a subprocess wrapper test with fake `PYBIN` for empty-env and demo-stack-env paths.
+- Runtime fast-forwarded cleanly `7d118e81 -> 44a337e3`; demo-learning expected-head pins changed old SHA `10 -> 0` / new SHA `0 -> 10`.
+- E3 separately approved alpha natural cron line 57 adding only `OPENCLAW_EXPECTED_SOURCE_HEAD=44a337e3...`; total crontab lines stayed `70`, new SHA count is `11`, old SHA `0`, and `OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES=0` remains with `=1` absent.
+- Cron-shape alpha wrapper refresh at `2026-06-24T14:52:50Z` reports `expected_head_status=MATCH`, runtime source `SYNCED_CLEAN`, `runtime_probe_authority_found=false`, `runtime_order_authority_found=false`, `promotion_evidence_found=false`, `cost_gate_mutation_found=false`, and `actionable_probe_semantics=OPERATOR_REVIEW_READY_NO_RUNTIME_AUTHORITY`.
+- Anti-repeat note: do not repeat expected-head propagation or killboard authority-semantics refresh without new source/runtime/artifact delta. Legacy `ready_for_probe=1` is review readiness, not authority.
