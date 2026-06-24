@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 from cost_gate_learning_lane.bounded_probe_operator_authorization import (
     OPERATOR_AUTHORIZATION_PACKET_SCHEMA_VERSION,
     READY_REVIEW_STATUS,
+    STANDING_DEMO_AUTHORIZATION_ACTIVE_STATUS,
+    STANDING_DEMO_AUTHORIZATION_SCHEMA_VERSION,
     build_bounded_demo_probe_operator_authorization,
     expected_bounded_demo_probe_operator_authorization_typed_confirm,
 )
@@ -154,6 +161,34 @@ def _readiness(**overrides) -> dict:
     return payload
 
 
+def _standing_demo_authorization(**overrides) -> dict:
+    payload = {
+        "schema_version": STANDING_DEMO_AUTHORIZATION_SCHEMA_VERSION,
+        "generated_at_utc": "2026-06-23T11:58:00+00:00",
+        "status": STANDING_DEMO_AUTHORIZATION_ACTIVE_STATUS,
+        "standing_authorization_id": "standing-demo-session-001",
+        "operator_id": "operator-test",
+        "environment": "demo",
+        "scope": "demo_api_only_bounded_probe",
+        "demo_only": True,
+        "candidate_scoping_required": True,
+        "max_authorized_probe_orders_per_candidate": 2,
+        "expires_at_utc": "2026-06-23T18:00:00+00:00",
+        "answers": {
+            "demo_only": True,
+            "candidate_scoping_required": True,
+            "live_authority_granted": False,
+            "active_runtime_probe_authority": False,
+            "active_runtime_order_authority": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "promotion_evidence": False,
+        },
+    }
+    payload.update(overrides)
+    return payload
+
+
 def test_missing_preflight_fails_closed_without_authorization() -> None:
     packet = build_bounded_demo_probe_operator_authorization(
         preflight=None,
@@ -246,6 +281,325 @@ def test_authorize_emits_runtime_compatible_operator_authorization() -> None:
     assert auth["probe_authority_granted"] is True
     assert auth["order_authority_granted"] is True
     assert auth["promotion_evidence"] is False
+
+
+def test_standing_demo_authorization_emits_candidate_scoped_authorization() -> None:
+    packet = build_bounded_demo_probe_operator_authorization(
+        preflight=_preflight(),
+        placement_repair_plan=_placement_plan(),
+        authority_patch_readiness=_readiness(),
+        standing_demo_authorization=_standing_demo_authorization(),
+        decision="authorize",
+        authorization_id="auth-bounded-probe-standing-001",
+        max_authorized_probe_orders=1,
+        expires_at_utc="2026-06-23T17:00:00+00:00",
+        now_utc=NOW,
+    )
+
+    auth = packet["operator_authorization"]
+
+    assert packet["status"] == BOUNDED_PROBE_AUTHORIZED_STATUS
+    assert packet["typed_confirm_provided"] is False
+    assert packet["typed_confirm_matches"] is False
+    assert packet["authorization_confirmation_source"] == "standing_demo_authorization"
+    assert packet["operator_id"] == "operator-test"
+    assert packet["answers"]["operator_authorization_object_emitted"] is True
+    assert packet["answers"]["active_runtime_probe_authority"] is False
+    assert packet["answers"]["active_runtime_order_authority"] is False
+    assert packet["answers"]["standing_demo_authorization_valid"] is True
+    assert auth["schema_version"] == BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SCHEMA_VERSION
+    assert auth["authorization_id"] == "auth-bounded-probe-standing-001"
+    assert auth["operator_id"] == "operator-test"
+    assert auth["side_cell_key"] == SIDE_CELL
+    assert auth["max_authorized_probe_orders"] == 1
+    assert auth["main_cost_gate_adjustment"] == "NONE"
+    assert auth["promotion_evidence"] is False
+    assert packet["standing_demo_authorization"][
+        "valid_for_candidate_scoped_authorization"
+    ] is True
+
+
+def test_live_contaminated_standing_demo_authorization_fails_closed() -> None:
+    standing = _standing_demo_authorization(
+        environment="live",
+        answers={
+            "demo_only": False,
+            "candidate_scoping_required": True,
+            "live_authority_granted": True,
+            "active_runtime_probe_authority": False,
+            "active_runtime_order_authority": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "promotion_evidence": False,
+        },
+    )
+
+    packet = build_bounded_demo_probe_operator_authorization(
+        preflight=_preflight(),
+        placement_repair_plan=_placement_plan(),
+        authority_patch_readiness=_readiness(),
+        standing_demo_authorization=standing,
+        decision="authorize",
+        authorization_id="auth-bounded-probe-standing-001",
+        max_authorized_probe_orders=1,
+        expires_at_utc="2026-06-23T17:00:00+00:00",
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "AUTHORITY_BOUNDARY_VIOLATION"
+    assert packet["operator_authorization"] is None
+    assert "standing_demo_authorization_safe" in packet["blocking_gates"]
+    assert packet["answers"]["operator_authorization_object_emitted"] is False
+
+
+def test_wrong_typed_confirm_takes_precedence_over_standing_authorization() -> None:
+    packet = build_bounded_demo_probe_operator_authorization(
+        preflight=_preflight(),
+        placement_repair_plan=_placement_plan(),
+        authority_patch_readiness=_readiness(),
+        standing_demo_authorization=_standing_demo_authorization(),
+        decision="authorize",
+        authorization_id="auth-bounded-probe-standing-001",
+        max_authorized_probe_orders=1,
+        expires_at_utc="2026-06-23T17:00:00+00:00",
+        typed_confirm="authorize_bounded_demo_probe:wrong:1:auth-bounded-probe-standing-001",
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "TYPED_CONFIRM_REQUIRED"
+    assert packet["operator_authorization"] is None
+    assert packet["authorization_confirmation_source"] is None
+    assert packet["answers"]["standing_demo_authorization_valid"] is False
+    assert "typed_confirm_matches" in packet["blocking_gates"]
+
+
+def test_standing_demo_operator_mismatch_fails_closed() -> None:
+    packet = build_bounded_demo_probe_operator_authorization(
+        preflight=_preflight(),
+        placement_repair_plan=_placement_plan(),
+        authority_patch_readiness=_readiness(),
+        standing_demo_authorization=_standing_demo_authorization(),
+        decision="authorize",
+        operator_id="different-operator",
+        authorization_id="auth-bounded-probe-standing-001",
+        max_authorized_probe_orders=1,
+        expires_at_utc="2026-06-23T17:00:00+00:00",
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "STANDING_DEMO_AUTHORIZATION_OPERATOR_MISMATCH"
+    assert packet["operator_authorization"] is None
+    assert "standing_demo_operator_matches" in packet["blocking_gates"]
+
+
+def test_standing_demo_scope_must_be_bounded_probe_specific() -> None:
+    packet = build_bounded_demo_probe_operator_authorization(
+        preflight=_preflight(),
+        placement_repair_plan=_placement_plan(),
+        authority_patch_readiness=_readiness(),
+        standing_demo_authorization=_standing_demo_authorization(scope="demo_api_all"),
+        decision="authorize",
+        authorization_id="auth-bounded-probe-standing-001",
+        max_authorized_probe_orders=1,
+        expires_at_utc="2026-06-23T17:00:00+00:00",
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "TYPED_CONFIRM_REQUIRED"
+    assert packet["operator_authorization"] is None
+    assert packet["standing_demo_authorization"]["scope_valid"] is False
+    assert packet["answers"]["standing_demo_authorization_valid"] is False
+
+
+def test_nested_runtime_authority_in_standing_demo_authorization_fails_closed() -> None:
+    standing = _standing_demo_authorization(
+        audit={
+            "nested": [
+                {
+                    "active_runtime_order_authority": True,
+                }
+            ]
+        }
+    )
+
+    packet = build_bounded_demo_probe_operator_authorization(
+        preflight=_preflight(),
+        placement_repair_plan=_placement_plan(),
+        authority_patch_readiness=_readiness(),
+        standing_demo_authorization=standing,
+        decision="authorize",
+        authorization_id="auth-bounded-probe-standing-001",
+        max_authorized_probe_orders=1,
+        expires_at_utc="2026-06-23T17:00:00+00:00",
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "AUTHORITY_BOUNDARY_VIOLATION"
+    assert packet["operator_authorization"] is None
+    assert "authority_boundary_preserved" in packet["blocking_gates"]
+
+
+def test_truthy_authority_string_in_standing_demo_authorization_fails_closed() -> None:
+    standing = _standing_demo_authorization(
+        answers={
+            "demo_only": True,
+            "candidate_scoping_required": True,
+            "live_authority_granted": False,
+            "active_runtime_probe_authority": False,
+            "active_runtime_order_authority": "true",
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "promotion_evidence": False,
+        }
+    )
+
+    packet = build_bounded_demo_probe_operator_authorization(
+        preflight=_preflight(),
+        placement_repair_plan=_placement_plan(),
+        authority_patch_readiness=_readiness(),
+        standing_demo_authorization=standing,
+        decision="authorize",
+        authorization_id="auth-bounded-probe-standing-001",
+        max_authorized_probe_orders=1,
+        expires_at_utc="2026-06-23T17:00:00+00:00",
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "AUTHORITY_BOUNDARY_VIOLATION"
+    assert packet["operator_authorization"] is None
+    assert packet["answers"]["operator_authorization_object_emitted"] is False
+
+
+def test_top_level_standing_demo_flags_cannot_be_overridden_by_answers() -> None:
+    standing = _standing_demo_authorization(
+        demo_only=False,
+        candidate_scoping_required=False,
+        answers={
+            "demo_only": True,
+            "candidate_scoping_required": True,
+            "live_authority_granted": False,
+            "active_runtime_probe_authority": False,
+            "active_runtime_order_authority": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "promotion_evidence": False,
+        },
+    )
+
+    packet = build_bounded_demo_probe_operator_authorization(
+        preflight=_preflight(),
+        placement_repair_plan=_placement_plan(),
+        authority_patch_readiness=_readiness(),
+        standing_demo_authorization=standing,
+        decision="authorize",
+        authorization_id="auth-bounded-probe-standing-001",
+        max_authorized_probe_orders=1,
+        expires_at_utc="2026-06-23T17:00:00+00:00",
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "TYPED_CONFIRM_REQUIRED"
+    assert packet["operator_authorization"] is None
+    assert packet["standing_demo_authorization"]["demo_only"] is False
+    assert packet["standing_demo_authorization"]["candidate_scoping_required"] is False
+    assert packet["answers"]["standing_demo_authorization_valid"] is False
+
+
+def test_top_level_standing_demo_cap_is_required() -> None:
+    standing = _standing_demo_authorization(max_authorized_probe_orders_per_candidate=None)
+    standing["answers"]["max_authorized_probe_orders_per_candidate"] = 2
+
+    packet = build_bounded_demo_probe_operator_authorization(
+        preflight=_preflight(),
+        placement_repair_plan=_placement_plan(),
+        authority_patch_readiness=_readiness(),
+        standing_demo_authorization=standing,
+        decision="authorize",
+        authorization_id="auth-bounded-probe-standing-001",
+        max_authorized_probe_orders=1,
+        expires_at_utc="2026-06-23T17:00:00+00:00",
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "TYPED_CONFIRM_REQUIRED"
+    assert packet["operator_authorization"] is None
+    assert packet["standing_demo_authorization"][
+        "max_authorized_probe_orders_per_candidate"
+    ] is None
+    assert packet["answers"]["standing_demo_authorization_valid"] is False
+
+
+def test_standing_demo_cli_input_emits_authorization(tmp_path) -> None:
+    preflight = tmp_path / "preflight.json"
+    placement = tmp_path / "placement.json"
+    readiness = tmp_path / "readiness.json"
+    standing = tmp_path / "standing.json"
+    out = tmp_path / "out.json"
+    generated_at = (
+        dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=1)
+    ).isoformat()
+    expires_at = (
+        dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=1)
+    ).isoformat()
+    preflight.write_text(
+        json.dumps(_preflight(generated_at_utc=generated_at)),
+        encoding="utf-8",
+    )
+    placement.write_text(
+        json.dumps(_placement_plan(generated_at_utc=generated_at)),
+        encoding="utf-8",
+    )
+    readiness.write_text(
+        json.dumps(_readiness(generated_at_utc=generated_at)),
+        encoding="utf-8",
+    )
+    standing.write_text(
+        json.dumps(
+            _standing_demo_authorization(
+                generated_at_utc=generated_at,
+                expires_at_utc=expires_at,
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "cost_gate_learning_lane.bounded_probe_operator_authorization_cli",
+            "--preflight-json",
+            str(preflight),
+            "--placement-repair-plan-json",
+            str(placement),
+            "--authority-patch-readiness-json",
+            str(readiness),
+            "--standing-demo-authorization-json",
+            str(standing),
+            "--decision",
+            "authorize",
+            "--authorization-id",
+            "auth-bounded-probe-standing-001",
+            "--max-authorized-probe-orders",
+            "1",
+            "--expires-at-utc",
+            expires_at,
+            "--json-output",
+            str(out),
+        ],
+        check=True,
+        cwd=tmp_path,
+        env=env,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    packet = json.loads(out.read_text(encoding="utf-8"))
+    assert packet["status"] == BOUNDED_PROBE_AUTHORIZED_STATUS
+    assert packet["authorization_confirmation_source"] == "standing_demo_authorization"
+    assert packet["artifacts"]["standing_demo_authorization"]["sha256"]
 
 
 def test_excessive_budget_and_expired_authorization_are_blocked() -> None:
