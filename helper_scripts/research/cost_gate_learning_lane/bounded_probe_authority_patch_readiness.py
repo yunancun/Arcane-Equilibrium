@@ -32,6 +32,126 @@ BOUNDARY = (
     "probe authority, order authority, or promotion proof"
 )
 
+AUTHORITY_TRUE_KEYS = {
+    "active_runtime_order_authority",
+    "active_runtime_probe_authority",
+    "adapter_enabled_by_this_packet",
+    "allowed_to_submit_order",
+    "api_call_performed",
+    "auth_mutation_performed",
+    "bybit_call_performed",
+    "bybit_private_call_performed",
+    "bybit_public_market_data_call_performed",
+    "canonical_plan_mutation_performed",
+    "cost_gate_mutation_found",
+    "crontab_edit_performed",
+    "crontab_mutation_performed",
+    "env_mutation_performed",
+    "global_cost_gate_lowering_recommended",
+    "ledger_append_performed",
+    "live_authority_granted",
+    "live_execution_allowed",
+    "order_authority_granted",
+    "order_cancel_modify_performed",
+    "order_cancel_performed",
+    "order_modify_performed",
+    "order_submission_performed",
+    "pg_write_performed",
+    "plan_mutation_performed",
+    "probe_authority_granted",
+    "promotion_evidence",
+    "promotion_evidence_found",
+    "promotion_proof",
+    "risk_mutation_performed",
+    "runtime_config_mutation_performed",
+    "runtime_env_mutation_performed",
+    "runtime_mutation_performed",
+    "runtime_order_authority_found",
+    "runtime_probe_authority_found",
+    "rust_writer_enabled",
+    "service_restart_performed",
+    "service_mutation_performed",
+    "writer_enablement_performed",
+    "writer_enabled",
+}
+AUTHORITY_DENY_KEY_SUBSTRINGS = {
+    "authority_granted",
+    "authority_granted_in_object",
+    "authority_found",
+    "execution_authority",
+    "live_authority",
+    "mainnet_authority",
+    "order_authority",
+    "probe_authority",
+    "bounded_demo_probe_authorized",
+}
+DANGEROUS_STATE_KEY_TOKENS = {
+    "api",
+    "bybit",
+    "cancel",
+    "config",
+    "cost_gate",
+    "crontab",
+    "database",
+    "db",
+    "endpoint",
+    "env",
+    "environment",
+    "live",
+    "mainnet",
+    "modify",
+    "mutation",
+    "order",
+    "pg",
+    "private",
+    "probe",
+    "promotion",
+    "proof",
+    "risk",
+    "runtime",
+    "service",
+    "writer",
+}
+DANGEROUS_ACTION_KEY_TOKENS = {
+    "adjustment",
+    "adjusted",
+    "allowed",
+    "authorized",
+    "called",
+    "call",
+    "enabled",
+    "enable",
+    "evidence",
+    "found",
+    "granted",
+    "lowered",
+    "lowering",
+    "mutated",
+    "mutation",
+    "performed",
+    "proof",
+    "submitted",
+    "write",
+    "written",
+}
+AUTHORITY_ENUM_KEYS = {
+    "execution_authority",
+    "live_authority",
+    "order_authority",
+    "probe_authority",
+}
+AUTHORITY_ENUM_SAFE_VALUES = {
+    None,
+    "",
+    "NONE",
+    "NOT_GRANTED",
+    "FALSE",
+    "NO",
+    "OFF",
+    "DISABLED",
+    False,
+}
+
 
 @dataclass(frozen=True)
 class SourceCheck:
@@ -54,7 +174,7 @@ EXISTING_SEAM_CHECKS: tuple[SourceCheck, ...] = (
         required_patterns=(
             "evaluate_probe_admission",
             "ORDER_AUTHORITY_GRANTED",
-            "demo_learning_lane_must_not_lower_main_cost_gate",
+            "main_cost_gate_adjustment",
         ),
         paths=("rust/openclaw_engine/src/demo_learning_lane.rs",),
         missing_reason="demo_learning_lane_admission_policy_missing",
@@ -78,9 +198,11 @@ EXISTING_SEAM_CHECKS: tuple[SourceCheck, ...] = (
             "without submitting orders."
         ),
         required_patterns=(
-            "probe_admission_decision",
-            "probe_capture_error",
-            "does not submit orders",
+            "ADMISSION_LEDGER_RECORD_TYPE",
+            "CAPTURE_ERROR_LEDGER_RECORD_TYPE",
+            "build_admission_ledger_record_with_placement",
+            "build_capture_error_ledger_record",
+            "allowed_to_submit_order",
         ),
         paths=(
             "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
@@ -171,7 +293,7 @@ PATCH_REQUIREMENT_CHECKS: tuple[SourceCheck, ...] = (
             "Skipped near-touch attempts should be recorded as "
             "bounded_probe_touchability_block rather than silently lost."
         ),
-        required_patterns=("bounded_probe_touchability_block",),
+        required_patterns=("BoundedProbeTouchabilityBlock", "record_type"),
         paths=("rust/openclaw_engine/src/bounded_probe_near_touch.rs",),
         missing_reason="touchability_skip_record_missing_from_rust_authority_path",
     ),
@@ -182,7 +304,7 @@ PATCH_REQUIREMENT_CHECKS: tuple[SourceCheck, ...] = (
             "The Adapter output should name bounded_probe_attempt rows and carry "
             "side_cell_key lineage for later fill/fee/slippage review."
         ),
-        required_patterns=("bounded_probe_attempt", "side_cell_key"),
+        required_patterns=("BoundedProbeAttemptPlacement", "side_cell_key"),
         paths=("rust/openclaw_engine/src/bounded_probe_near_touch.rs",),
         missing_reason="candidate_matched_attempt_lineage_missing_from_rust_authority_path",
     ),
@@ -196,7 +318,7 @@ PATCH_REQUIREMENT_CHECKS: tuple[SourceCheck, ...] = (
         required_patterns=(
             "post_only_near_touch_from_optional_bbo_or_skip",
             "BoundedProbeOptionalBboPlacementRequest",
-            "bounded_probe_attempt",
+            "BOUNDED_PROBE_ATTEMPT_RECORD_TYPE",
         ),
         paths=("rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs",),
         missing_reason="authority_path_wiring_missing_from_tick_dispatch",
@@ -214,6 +336,41 @@ def _dict(value: Any) -> dict[str, Any]:
 
 def _list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value != 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"", "0", "false", "no", "off", "none", "not_granted"}:
+            return False
+        return True
+    return False
+
+
+def _safe_authority_enum(value: Any) -> bool:
+    try:
+        if value in AUTHORITY_ENUM_SAFE_VALUES:
+            return True
+    except TypeError:
+        return False
+    if isinstance(value, str) and value.strip().upper() in AUTHORITY_ENUM_SAFE_VALUES:
+        return True
+    return False
+
+
+def _is_dangerous_truthy_key(key: str) -> bool:
+    normalized = key.strip().lower()
+    if normalized in AUTHORITY_TRUE_KEYS:
+        return True
+    if any(fragment in normalized for fragment in AUTHORITY_DENY_KEY_SUBSTRINGS):
+        return True
+    return any(token in normalized for token in DANGEROUS_STATE_KEY_TOKENS) and any(
+        token in normalized for token in DANGEROUS_ACTION_KEY_TOKENS
+    )
 
 
 def _float(value: Any) -> float | None:
@@ -281,24 +438,25 @@ def _artifact_status(
 
 
 def _authority_preserved(placement_repair_plan: dict[str, Any] | None) -> bool:
-    payload = _dict(placement_repair_plan)
-    answers = _dict(payload.get("answers"))
-    plan = _dict(payload.get("placement_repair_plan"))
-    boundary = _dict(plan.get("authority_boundary"))
-    for source in (payload, answers, plan, boundary):
-        if source.get("global_cost_gate_lowering_recommended") is True:
-            return False
-        if source.get("probe_authority_granted") is True:
-            return False
-        if source.get("order_authority_granted") is True:
-            return False
-        if source.get("promotion_evidence") is True:
-            return False
-        if source.get("promotion_proof") is True:
-            return False
-        if source.get("main_cost_gate_adjustment") not in (None, "", "NONE"):
-            return False
-    return True
+    return _recursive_authority_violation(_dict(placement_repair_plan)) is None
+
+
+def _recursive_authority_violation(payload: Any) -> str | None:
+    stack: list[Any] = [payload]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if _is_dangerous_truthy_key(str(key)) and _truthy(value):
+                    return key
+                if key in AUTHORITY_ENUM_KEYS and not _safe_authority_enum(value):
+                    return key
+                if key == "main_cost_gate_adjustment" and value not in (None, "", "NONE"):
+                    return key
+                stack.append(value)
+        elif isinstance(node, list):
+            stack.extend(node)
+    return None
 
 
 def _placement_plan_summary(
@@ -377,6 +535,138 @@ def _read_repo_text(repo_root: Path, rel_path: str) -> str:
     return _read_file(path) or ""
 
 
+def _strip_rust_comments_and_strings(text: str) -> str:
+    def mask(segment: str) -> str:
+        return "".join("\n" if char == "\n" else " " for char in segment)
+
+    def mask_macro_invocations(code: str) -> str:
+        out: list[str] = []
+        idx = 0
+        open_to_close = {"(": ")", "[": "]", "{": "}"}
+        while idx < len(code):
+            if code[idx].isalpha() or code[idx] == "_":
+                start = idx
+                idx += 1
+                while idx < len(code) and (
+                    code[idx].isalnum() or code[idx] in {"_", ":"}
+                ):
+                    idx += 1
+                after_ident = idx
+                lookahead = idx
+                while lookahead < len(code) and code[lookahead].isspace():
+                    lookahead += 1
+                if lookahead < len(code) and code[lookahead] == "!":
+                    lookahead += 1
+                    while lookahead < len(code) and code[lookahead].isspace():
+                        lookahead += 1
+                    if lookahead < len(code) and code[lookahead] in open_to_close:
+                        opener = code[lookahead]
+                        closer = open_to_close[opener]
+                        depth = 1
+                        idx = lookahead + 1
+                        while idx < len(code) and depth > 0:
+                            if code[idx] == opener:
+                                depth += 1
+                            elif code[idx] == closer:
+                                depth -= 1
+                            idx += 1
+                        out.append(mask(code[start:idx]))
+                        continue
+                out.append(code[start:after_ident])
+                continue
+            out.append(code[idx])
+            idx += 1
+        return "".join(out)
+
+    def raw_string_end(start: int) -> int | None:
+        if start > 0 and (text[start - 1].isalnum() or text[start - 1] == "_"):
+            return None
+        idx = start
+        if idx < len(text) and text[idx] in {"b", "c"}:
+            idx += 1
+        if idx >= len(text) or text[idx] != "r":
+            return None
+        idx += 1
+        hashes_start = idx
+        while idx < len(text) and text[idx] == "#":
+            idx += 1
+        if idx >= len(text) or text[idx] != '"':
+            return None
+        hashes = text[hashes_start:idx]
+        end_marker = '"' + hashes
+        end = text.find(end_marker, idx + 1)
+        return len(text) if end == -1 else end + len(end_marker)
+
+    def quoted_end(start: int, quote: str) -> int:
+        idx = start + 1
+        while idx < len(text):
+            if text[idx] == "\\":
+                idx += 2
+                continue
+            if text[idx] == quote:
+                return idx + 1
+            idx += 1
+        return len(text)
+
+    out: list[str] = []
+    idx = 0
+    while idx < len(text):
+        if text.startswith("//", idx):
+            end = text.find("\n", idx)
+            if end == -1:
+                out.append(mask(text[idx:]))
+                break
+            out.append(mask(text[idx:end]))
+            out.append("\n")
+            idx = end + 1
+            continue
+        if text.startswith("/*", idx):
+            level = 1
+            end = idx + 2
+            while end < len(text) and level > 0:
+                if text.startswith("/*", end):
+                    level += 1
+                    end += 2
+                elif text.startswith("*/", end):
+                    level -= 1
+                    end += 2
+                else:
+                    end += 1
+            out.append(mask(text[idx:end]))
+            idx = end
+            continue
+        raw_end = raw_string_end(idx)
+        if raw_end is not None:
+            out.append(mask(text[idx:raw_end]))
+            idx = raw_end
+            continue
+        if text[idx] in {"b", "c"} and idx + 1 < len(text) and text[idx + 1] == '"':
+            end = quoted_end(idx + 1, '"')
+            out.append(mask(text[idx:end]))
+            idx = end
+            continue
+        if text[idx] == '"':
+            end = quoted_end(idx, '"')
+            out.append(mask(text[idx:end]))
+            idx = end
+            continue
+        if text[idx] == "'" and idx + 2 < len(text):
+            end = quoted_end(idx, "'")
+            if end < len(text) and "\n" not in text[idx:end] and end - idx <= 8:
+                out.append(mask(text[idx:end]))
+                idx = end
+                continue
+        if text[idx] == "b" and idx + 2 < len(text) and text[idx + 1] == "'":
+            end = quoted_end(idx + 1, "'")
+            if end < len(text) and "\n" not in text[idx:end] and end - idx <= 9:
+                out.append(mask(text[idx:end]))
+                idx = end
+                continue
+        out.append(text[idx])
+        idx += 1
+    return mask_macro_invocations("".join(out))
+
+
 def _repo_file_present(repo_root: Path, rel_path: str) -> bool:
     return (repo_root / rel_path).is_file()
 
@@ -405,9 +695,18 @@ def _find_pattern_evidence(
     return evidence
 
 
+def _source_check_requires_code_scan(check: SourceCheck) -> bool:
+    return check.category in {
+        "adapter_module_seam",
+        "authority_path_wiring_seam",
+        "existing_authority_seam",
+    }
+
+
 def _evaluate_source_check(repo_root: Path, check: SourceCheck) -> dict[str, Any]:
     loaded_files: list[tuple[str, str]] = []
     missing_paths: list[str] = []
+    code_scan = _source_check_requires_code_scan(check)
     for rel in check.paths:
         files = _iter_files(repo_root, rel)
         if not files:
@@ -416,7 +715,8 @@ def _evaluate_source_check(repo_root: Path, check: SourceCheck) -> dict[str, Any
         for path in files:
             text = _read_file(path)
             if text is not None:
-                loaded_files.append((path.relative_to(repo_root).as_posix(), text))
+                scan_text = _strip_rust_comments_and_strings(text) if code_scan else text
+                loaded_files.append((path.relative_to(repo_root).as_posix(), scan_text))
     text_by_pattern = {
         pattern: any(pattern in text for _, text in loaded_files)
         for pattern in check.required_patterns
@@ -435,6 +735,7 @@ def _evaluate_source_check(repo_root: Path, check: SourceCheck) -> dict[str, Any
         "missing_patterns": [
             pattern for pattern, found in text_by_pattern.items() if not found
         ],
+        "scan_mode": "code_without_comments_or_strings" if code_scan else "raw_text",
         "evidence": _find_pattern_evidence(loaded_files, check.required_patterns),
     }
 
@@ -494,6 +795,8 @@ def _active_order_submission_readiness(repo_root: Path) -> dict[str, Any]:
         repo_root,
         near_touch_rel,
     )
+    writer_code = _strip_rust_comments_and_strings(writer_text)
+    dispatch_code = _strip_rust_comments_and_strings(dispatch_text)
     file_presence = {
         writer_rel: _repo_file_present(repo_root, writer_rel),
         dispatch_rel: _repo_file_present(repo_root, dispatch_rel),
@@ -506,20 +809,20 @@ def _active_order_submission_readiness(repo_root: Path) -> dict[str, Any]:
     )
     adapter_enabled_hardcoded_false = re.search(
         r"evaluate_probe_admission\([\s\S]*?,\s*false\s*,\s*risk_state\s*,?\s*\)",
-        writer_text,
+        writer_code,
     ) is not None
     positive_active_evidence = {
         "writer_submits_candidate_matched_probe_order": (
-            "submit_candidate_matched_bounded_probe_order" in writer_text
-            or "active_bounded_probe_order_submission" in writer_text
+            "submit_candidate_matched_bounded_probe_order" in writer_code
+            or "active_bounded_probe_order_submission" in writer_code
         ),
         "dispatch_forwards_admitted_bounded_probe_to_exchange": (
-            "dispatch_admitted_bounded_probe_order" in dispatch_text
-            or "active_bounded_probe_order_submission" in dispatch_text
+            "dispatch_admitted_bounded_probe_order" in dispatch_code
+            or "active_bounded_probe_order_submission" in dispatch_code
         ),
         "adapter_enabled_by_runtime_bounded_probe_gate": (
-            "bounded_probe_adapter_enabled" in writer_text
-            or "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED" in writer_text
+            "bounded_probe_adapter_enabled" in writer_code
+            or "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED" in writer_code
         ),
     }
     blockers: list[str] = []
@@ -673,6 +976,16 @@ def _status(
             [
                 "operator_review_tick_dispatch_authority_path_patch",
                 "wire_bounded_demo_probe_adapter_before_any_probe_order_submission",
+                "record_skip_and_candidate_matched_attempt_lineage_before_any_order",
+            ],
+        )
+    if source_summary.get("required_patch_seams_present") is not True:
+        return (
+            "RUST_PATCH_REQUIRED_REQUIRED_SEAMS_MISSING",
+            "adapter_and_dispatch_wiring_exist_but_required_guard_or_lineage_seams_are_missing",
+            [
+                "complete_required_bounded_probe_guard_and_lineage_seams",
+                "rerun_source_readiness_before_any_authority_review",
                 "record_skip_and_candidate_matched_attempt_lineage_before_any_order",
             ],
         )
