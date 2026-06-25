@@ -4,6 +4,8 @@ import datetime as dt
 import json
 import sys
 
+import pytest
+
 from cost_gate_learning_lane.bounded_probe_candidate_construction_preview import (
     CONSTRUCTION_PREVIEW_SCHEMA_VERSION,
     READY_STATUS,
@@ -49,6 +51,30 @@ def _reroute(candidate=None, **overrides) -> dict:
             "bybit_call_performed": False,
             "pg_write_performed": False,
             "global_cost_gate_lowering_recommended": False,
+            "promotion_evidence": False,
+        },
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _preflight(candidate=None, **overrides) -> dict:
+    payload = {
+        "schema_version": "cost_gate_false_negative_bounded_demo_probe_preflight_v1",
+        "generated_at_utc": "2026-06-24T17:40:00+00:00",
+        "status": "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION",
+        "candidate": candidate or _candidate(),
+        "answers": {
+            "bounded_demo_probe_authorized": False,
+            "runtime_mutation_performed": False,
+            "pg_query_performed": False,
+            "pg_write_performed": False,
+            "bybit_call_performed": False,
+            "order_submission_performed": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
             "promotion_evidence": False,
         },
     }
@@ -118,6 +144,266 @@ def _build(**overrides) -> dict:
     }
     args.update(overrides)
     return build_candidate_construction_preview(**args)
+
+
+def test_false_negative_ready_preflight_can_drive_no_order_preview() -> None:
+    candidate = _candidate(
+        side_cell_key="grid_trading|ETHUSDT|Buy",
+        symbol="ETHUSDT",
+        side="Buy",
+    )
+    market = _market(
+        candidate=candidate,
+        ticker={
+            "ts": "2026-06-24T17:39:59.500000+00:00",
+            "symbol": "ETHUSDT",
+            "last_price": 2500.06,
+            "mark_price": 2500.05,
+            "best_bid": 2500.05,
+            "best_ask": 2500.06,
+            "spread_bps": 0.04,
+            "funding_rate": 0.0001,
+        },
+        instrument={
+            "ts": "2026-06-24T17:35:00+00:00",
+            "category": "linear",
+            "symbol": "ETHUSDT",
+            "status": "Trading",
+            "tick_size": 0.01,
+            "qty_step": 0.001,
+            "min_notional": 5.0,
+        },
+        derived={
+            "bbo_age_ms": 500.0,
+            "instrument_status": "Trading",
+            "best_bid": 2500.05,
+            "best_ask": 2500.06,
+            "spread_bps": 0.04,
+            "tick_size": 0.01,
+            "qty_step": 0.001,
+            "min_notional": 5.0,
+        },
+    )
+
+    packet = _build(
+        reroute_review=None,
+        bounded_probe_preflight=_preflight(candidate=candidate),
+        market_snapshot=market,
+    )
+
+    assert packet["status"] == READY_STATUS
+    assert packet["candidate"]["side_cell_key"] == "grid_trading|ETHUSDT|Buy"
+    assert packet["construction"]["placement_mode"] == "buy_near_touch_post_only_at_or_below_best_bid"
+    assert packet["construction"]["limit_price"] == 2500.05
+    assert packet["readiness"]["candidate_source_ready"] is True
+    assert packet["readiness"]["bounded_probe_preflight_ready"] is True
+    assert packet["readiness"]["reroute_review_ready"] is False
+    assert packet["answers"]["order_submission_performed"] is False
+    assert packet["answers"]["probe_authority_granted"] is False
+
+
+def test_unapproved_false_negative_preflight_fails_closed() -> None:
+    candidate = _candidate(
+        side_cell_key="grid_trading|ETHUSDT|Buy",
+        symbol="ETHUSDT",
+        side="Buy",
+    )
+    market = _market(
+        candidate=candidate,
+        ticker={**_market()["ticker"], "symbol": "ETHUSDT"},
+        instrument={**_market()["instrument"], "symbol": "ETHUSDT"},
+    )
+
+    packet = _build(
+        reroute_review=None,
+        bounded_probe_preflight=_preflight(
+            candidate=candidate,
+            status="OPERATOR_REVIEW_REQUIRED",
+        ),
+        market_snapshot=market,
+    )
+
+    assert packet["status"] == "CANDIDATE_CONSTRUCTION_INPUT_REQUIRED"
+    assert "candidate_source_ready" in packet["blocking_gates"]
+    assert "bounded_probe_preflight_ready" in packet["blocking_gates"]
+    assert packet["answers"]["order_submission_performed"] is False
+
+
+def test_wrong_schema_false_negative_preflight_fails_closed() -> None:
+    packet = _build(
+        reroute_review=None,
+        bounded_probe_preflight=_preflight(schema_version="wrong_schema"),
+    )
+
+    assert packet["status"] == "CANDIDATE_CONSTRUCTION_INPUT_REQUIRED"
+    assert "bounded_probe_preflight_ready" in packet["blocking_gates"]
+    assert packet["answers"]["order_submission_performed"] is False
+
+
+def test_stale_false_negative_preflight_fails_closed() -> None:
+    packet = _build(
+        reroute_review=None,
+        bounded_probe_preflight=_preflight(
+            generated_at_utc="2026-06-24T16:30:00+00:00",
+        ),
+        max_artifact_age_hours=1,
+    )
+
+    assert packet["status"] == "CANDIDATE_CONSTRUCTION_INPUT_REQUIRED"
+    assert "bounded_probe_preflight_ready" in packet["blocking_gates"]
+
+
+def test_incomplete_preflight_candidate_identity_fails_closed() -> None:
+    candidate = _candidate(symbol=None)
+
+    packet = _build(
+        reroute_review=None,
+        bounded_probe_preflight=_preflight(candidate=candidate),
+        market_snapshot=_market(candidate=candidate),
+    )
+
+    assert packet["status"] == "CANDIDATE_CONSTRUCTION_CANDIDATE_MISMATCH"
+    assert "candidate_exact_match" in packet["blocking_gates"]
+    assert packet["answers"]["order_submission_performed"] is False
+
+
+def test_preflight_horizon_mismatch_fails_closed() -> None:
+    preflight_candidate = _candidate(
+        side_cell_key="grid_trading|ETHUSDT|Buy",
+        symbol="ETHUSDT",
+        side="Buy",
+        outcome_horizon_minutes=240,
+    )
+    market_candidate = _candidate(
+        side_cell_key="grid_trading|ETHUSDT|Buy",
+        symbol="ETHUSDT",
+        side="Buy",
+        outcome_horizon_minutes=60,
+    )
+
+    packet = _build(
+        reroute_review=None,
+        bounded_probe_preflight=_preflight(candidate=preflight_candidate),
+        market_snapshot=_market(candidate=market_candidate),
+    )
+
+    assert packet["status"] == "CANDIDATE_CONSTRUCTION_CANDIDATE_MISMATCH"
+    assert "candidate_exact_match" in packet["blocking_gates"]
+    assert packet["answers"]["order_submission_performed"] is False
+
+
+def test_multiple_candidate_sources_fail_closed() -> None:
+    packet = _build(bounded_probe_preflight=_preflight())
+
+    assert packet["status"] == "CANDIDATE_CONSTRUCTION_INPUT_REQUIRED"
+    assert "candidate_source_exactly_one" in packet["blocking_gates"]
+    assert "candidate_source_ready" in packet["blocking_gates"]
+    assert packet["answers"]["order_submission_performed"] is False
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "bounded_demo_probe_authorized",
+        "bybit_call_performed",
+        "global_cost_gate_lowering_recommended",
+        "order_authority_granted",
+        "order_submission_performed",
+        "pg_query_performed",
+        "pg_write_performed",
+        "probe_authority_granted",
+        "promotion_evidence",
+        "runtime_mutation_performed",
+    ],
+)
+def test_missing_preflight_authority_field_fails_closed(key: str) -> None:
+    preflight = _preflight()
+    del preflight["answers"][key]
+
+    packet = _build(reroute_review=None, bounded_probe_preflight=preflight)
+
+    assert packet["status"] == "CANDIDATE_CONSTRUCTION_INPUT_REQUIRED"
+    assert (
+        f"bounded_probe_preflight_answers_{key}_not_explicit_false"
+        in packet["blocking_gates"]
+    )
+    assert packet["readiness"]["bounded_probe_preflight_ready"] is False
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "bounded_demo_probe_authorized",
+        "bybit_call_performed",
+        "global_cost_gate_lowering_recommended",
+        "order_authority_granted",
+        "order_submission_performed",
+        "pg_query_performed",
+        "pg_write_performed",
+        "probe_authority_granted",
+        "promotion_evidence",
+        "runtime_mutation_performed",
+    ],
+)
+def test_string_false_preflight_authority_field_fails_closed(key: str) -> None:
+    preflight = _preflight()
+    preflight["answers"][key] = "false"
+
+    packet = _build(reroute_review=None, bounded_probe_preflight=preflight)
+
+    assert packet["status"] == "CANDIDATE_CONSTRUCTION_INPUT_REQUIRED"
+    assert (
+        f"bounded_probe_preflight_answers_{key}_not_explicit_false"
+        in packet["blocking_gates"]
+    )
+    assert packet["authority_preserved"] is True
+
+
+def test_missing_preflight_cost_gate_adjustment_fails_closed() -> None:
+    preflight = _preflight()
+    del preflight["answers"]["main_cost_gate_adjustment"]
+
+    packet = _build(reroute_review=None, bounded_probe_preflight=preflight)
+
+    assert packet["status"] == "CANDIDATE_CONSTRUCTION_INPUT_REQUIRED"
+    assert (
+        "bounded_probe_preflight_answers_main_cost_gate_adjustment_not_none"
+        in packet["blocking_gates"]
+    )
+
+
+def test_non_none_preflight_cost_gate_adjustment_fails_closed() -> None:
+    preflight = _preflight()
+    preflight["answers"]["main_cost_gate_adjustment"] = "LOWER"
+
+    packet = _build(reroute_review=None, bounded_probe_preflight=preflight)
+
+    assert packet["status"] == "AUTHORITY_BOUNDARY_VIOLATION"
+    assert "main_cost_gate_adjustment_not_none" in packet[
+        "authority_contamination_reasons"
+    ]
+
+
+def test_preflight_authority_contamination_fails_closed() -> None:
+    packet = _build(
+        reroute_review=None,
+        bounded_probe_preflight=_preflight(order_authority_granted=True),
+    )
+
+    assert packet["status"] == "AUTHORITY_BOUNDARY_VIOLATION"
+    assert "order_authority_granted_contaminating" in packet[
+        "authority_contamination_reasons"
+    ]
+    assert packet["answers"]["order_submission_performed"] is False
+
+
+def test_no_candidate_source_fails_closed() -> None:
+    packet = _build(reroute_review=None)
+
+    assert packet["status"] == "CANDIDATE_CONSTRUCTION_INPUT_REQUIRED"
+    assert "candidate_source_exactly_one" in packet["blocking_gates"]
+    assert "candidate_source_ready" in packet["blocking_gates"]
+    assert packet["answers"]["order_submission_performed"] is False
 
 
 def test_avax_sell_feasible_under_10_usdt_cap_returns_ready_no_order() -> None:
@@ -388,3 +674,116 @@ def test_cli_records_input_hashes_and_demo_auth_flag(tmp_path, monkeypatch) -> N
     assert packet["artifacts"]["reroute_review"]["sha256"]
     assert packet["artifacts"]["market_snapshot"]["sha256"]
     assert packet["answers"]["demo_operational_authorization_available_from_thread"] is True
+
+
+def test_cli_accepts_false_negative_preflight_candidate_source(tmp_path, monkeypatch) -> None:
+    candidate = _candidate(
+        side_cell_key="grid_trading|ETHUSDT|Buy",
+        symbol="ETHUSDT",
+        side="Buy",
+    )
+    preflight_path = tmp_path / "preflight.json"
+    market_path = tmp_path / "market.json"
+    out_path = tmp_path / "out.json"
+    now = dt.datetime.now(dt.timezone.utc)
+    preflight_path.write_text(
+        json.dumps(_preflight(candidate=candidate, generated_at_utc=now.isoformat())),
+        encoding="utf-8",
+    )
+    market = _market(
+        candidate=candidate,
+        generated_at_utc=now.isoformat(),
+        pg_snapshot_timestamp=now.isoformat(),
+        ticker={
+            **_market()["ticker"],
+            "ts": now.isoformat(),
+            "symbol": "ETHUSDT",
+            "best_bid": 2500.05,
+            "best_ask": 2500.06,
+        },
+        instrument={
+            **_market()["instrument"],
+            "symbol": "ETHUSDT",
+            "tick_size": 0.01,
+            "qty_step": 0.001,
+        },
+        derived={
+            **_market()["derived"],
+            "best_bid": 2500.05,
+            "best_ask": 2500.06,
+            "tick_size": 0.01,
+            "qty_step": 0.001,
+        },
+        risk_limits={"cap_usdt": 10.0, "max_fresh_bbo_age_ms": 10000},
+    )
+    market_path.write_text(json.dumps(market), encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "bounded_probe_candidate_construction_preview",
+            "--bounded-probe-preflight-json",
+            str(preflight_path),
+            "--market-snapshot-json",
+            str(market_path),
+            "--json-output",
+            str(out_path),
+        ],
+    )
+
+    assert main() == 0
+    packet = json.loads(out_path.read_text(encoding="utf-8"))
+
+    assert packet["status"] == READY_STATUS
+    assert packet["artifacts"]["bounded_probe_preflight"]["sha256"]
+    assert packet["answers"]["order_submission_performed"] is False
+
+
+def test_cli_candidate_source_mutual_exclusion(tmp_path, monkeypatch) -> None:
+    reroute_path = tmp_path / "reroute.json"
+    preflight_path = tmp_path / "preflight.json"
+    market_path = tmp_path / "market.json"
+    out_path = tmp_path / "out.json"
+    reroute_path.write_text(json.dumps(_reroute()), encoding="utf-8")
+    preflight_path.write_text(json.dumps(_preflight()), encoding="utf-8")
+    market_path.write_text(json.dumps(_market()), encoding="utf-8")
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "bounded_probe_candidate_construction_preview",
+            "--market-snapshot-json",
+            str(market_path),
+            "--json-output",
+            str(out_path),
+        ],
+    )
+    try:
+        main()
+    except SystemExit as exc:
+        assert exc.code != 0
+    else:
+        raise AssertionError("expected missing candidate source to exit non-zero")
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "bounded_probe_candidate_construction_preview",
+            "--reroute-review-json",
+            str(reroute_path),
+            "--bounded-probe-preflight-json",
+            str(preflight_path),
+            "--market-snapshot-json",
+            str(market_path),
+            "--json-output",
+            str(out_path),
+        ],
+    )
+    try:
+        main()
+    except SystemExit as exc:
+        assert exc.code != 0
+    else:
+        raise AssertionError("expected duplicate candidate source to exit non-zero")

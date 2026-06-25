@@ -322,6 +322,7 @@ def test_stale_repair_packet_is_input_required() -> None:
 
 
 def test_cli_records_input_hashes_and_demo_auth_flag(tmp_path, monkeypatch) -> None:
+    now = dt.datetime.now(dt.timezone.utc)
     paths = {
         "repair": tmp_path / "repair.json",
         "preflight": tmp_path / "preflight.json",
@@ -333,13 +334,13 @@ def test_cli_records_input_hashes_and_demo_auth_flag(tmp_path, monkeypatch) -> N
         "out": tmp_path / "out.json",
     }
     payloads = {
-        "repair": _order_repair(),
-        "preflight": _preflight(),
-        "review": _review(),
-        "placement": _placement(),
-        "authorization": _authorization(),
-        "readiness": _readiness(),
-        "touchability": _touchability(),
+        "repair": _order_repair(generated_at_utc=now.isoformat()),
+        "preflight": _preflight(generated_at_utc=now.isoformat()),
+        "review": _review(generated_at_utc=now.isoformat()),
+        "placement": _placement(generated_at_utc=now.isoformat()),
+        "authorization": _authorization(generated_at_utc=now.isoformat()),
+        "readiness": _readiness(generated_at_utc=now.isoformat()),
+        "touchability": _touchability(generated_at_utc=now.isoformat()),
     }
     for key, payload in payloads.items():
         paths[key].write_text(json.dumps(payload), encoding="utf-8")
