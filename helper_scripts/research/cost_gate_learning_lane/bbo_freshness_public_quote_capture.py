@@ -16,6 +16,7 @@ import hashlib
 import json
 import math
 import re
+import ssl
 import time
 import urllib.error
 import urllib.parse
@@ -144,8 +145,32 @@ class _RedirectRefusedHandler(urllib.request.HTTPRedirectHandler):
         )
 
 
+def _certifi_cafile() -> str | None:
+    try:
+        import certifi  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    where = getattr(certifi, "where", None)
+    if not callable(where):
+        return None
+    path = _str(where())
+    return path or None
+
+
+def _verified_ssl_context() -> ssl.SSLContext:
+    cafile = _certifi_cafile()
+    if cafile:
+        return ssl.create_default_context(cafile=cafile)
+    return ssl.create_default_context()
+
+
+def _no_redirect_opener() -> urllib.request.OpenerDirector:
+    https_handler = urllib.request.HTTPSHandler(context=_verified_ssl_context())
+    return urllib.request.build_opener(_RedirectRefusedHandler, https_handler)
+
+
 def urlopen_no_redirect(req: urllib.request.Request, timeout: float) -> Any:
-    opener = urllib.request.build_opener(_RedirectRefusedHandler)
+    opener = _no_redirect_opener()
     return opener.open(req, timeout=timeout)
 
 

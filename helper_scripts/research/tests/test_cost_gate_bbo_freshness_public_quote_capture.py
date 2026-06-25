@@ -375,6 +375,52 @@ def test_transport_url_sanitizer_preserves_only_allowlisted_bybit_public_paths()
     assert "<url-redacted>" in sanitized
 
 
+def test_no_redirect_opener_uses_verified_certifi_context(monkeypatch) -> None:
+    context = object()
+    create_context_calls = []
+    https_handler_calls = []
+    build_opener_calls = []
+
+    def fake_create_default_context(*, cafile=None):
+        create_context_calls.append(cafile)
+        return context
+
+    def fake_https_handler(*, context=None):
+        https_handler_calls.append(context)
+        return "https_handler"
+
+    def fake_build_opener(*handlers):
+        build_opener_calls.append(handlers)
+        return "opener"
+
+    monkeypatch.setattr(mod, "_certifi_cafile", lambda: "/tmp/certifi.pem")
+    monkeypatch.setattr(mod.ssl, "create_default_context", fake_create_default_context)
+    monkeypatch.setattr(mod.urllib.request, "HTTPSHandler", fake_https_handler)
+    monkeypatch.setattr(mod.urllib.request, "build_opener", fake_build_opener)
+
+    assert mod._no_redirect_opener() == "opener"
+    assert create_context_calls == ["/tmp/certifi.pem"]
+    assert https_handler_calls == [context]
+    assert build_opener_calls == [(mod._RedirectRefusedHandler, "https_handler")]
+
+
+def test_verified_ssl_context_falls_back_to_default_ca_when_certifi_unavailable(
+    monkeypatch,
+) -> None:
+    context = object()
+    create_context_calls = []
+
+    def fake_create_default_context(**kwargs):
+        create_context_calls.append(kwargs)
+        return context
+
+    monkeypatch.setattr(mod, "_certifi_cafile", lambda: None)
+    monkeypatch.setattr(mod.ssl, "create_default_context", fake_create_default_context)
+
+    assert mod._verified_ssl_context() is context
+    assert create_context_calls == [{}]
+
+
 def test_transport_exception_reason_shapes_are_structured_and_fail_closed() -> None:
     cases = [
         (
