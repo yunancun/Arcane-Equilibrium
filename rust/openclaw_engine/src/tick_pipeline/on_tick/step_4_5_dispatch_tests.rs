@@ -6,7 +6,7 @@
 //! AlphaSurface fail-soft / 禁合成 neutral / read-guard 釋放 invariant。
 use super::{
     active_bounded_probe_order_submission, bounded_probe_near_touch_decision_for_reject,
-    try_clone_panel_snapshot,
+    dispatch_admitted_bounded_probe_order, try_clone_panel_snapshot,
 };
 use crate::bounded_probe_active_order::{
     bounded_probe_order_link_id_for_candidate, ActiveBoundedProbeOrderDecision,
@@ -192,6 +192,24 @@ fn active_bounded_probe_submission_skips_without_dispatch_when_not_admitted() {
         ),
         ActiveBoundedProbeOrderDecision::Submit(_)
     ));
+    assert!(rx.try_recv().is_err());
+}
+
+#[test]
+fn active_bounded_probe_dispatch_skips_when_effective_notional_exceeds_cap() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+    let decision = crate::bounded_probe_active_order::candidate_matched_bounded_probe_order(
+        bounded_probe_order_request(),
+    );
+    let ActiveBoundedProbeOrderDecision::Submit(mut draft) = decision else {
+        panic!("expected admitted bounded probe draft");
+    };
+    draft.qty = 0.003;
+
+    let sent = dispatch_admitted_bounded_probe_order(&tx, draft)
+        .expect("cap skip should not touch dispatch channel error path");
+
+    assert!(!sent);
     assert!(rx.try_recv().is_err());
 }
 

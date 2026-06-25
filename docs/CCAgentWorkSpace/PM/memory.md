@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-25 Bounded Probe Active Effective Cap Guard
+
+- Active bounded Demo drafts now share a fail-closed effective-notional cap helper, and the dormant active dispatch seam rechecks cap immediately before `OrderDispatchRequest` send.
+- PA/E2/E4 passed; focused verification was Rust active-order 12, active submission 2, no-send cap dispatch 1, writer helper 1, Python scanner suite 40, and diff-check.
+- Boundary remains source/test/docs only: no runtime sync, no PG/Bybit/order/cancel/modify, no Cost Gate lowering, no active probe/order/live authority, and no promotion proof.
+
 ## 2026-06-25 Bounded Probe Active Candidate-Bound OrderLinkId
 
 - Active bounded Demo draft validation now requires candidate-bound deterministic `orderLinkId` over engine mode, event ts, canonical base36 seq, side-cell, context id, and signal id; generic orderLinkId helper remains unchanged.
