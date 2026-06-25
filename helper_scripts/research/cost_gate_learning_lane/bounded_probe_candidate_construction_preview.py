@@ -44,6 +44,12 @@ ACCEPTED_MARKET_SNAPSHOT_SOURCES = {
 CANONICAL_MAX_FRESH_BBO_AGE_MS = 1000
 
 REROUTE_READY_STATUS = "LOWER_PRICE_REROUTE_READY_FOR_DEMO_CONSTRUCTION_REVIEW"
+FALSE_NEGATIVE_PREFLIGHT_SCHEMA_VERSION = (
+    "cost_gate_false_negative_bounded_demo_probe_preflight_v1"
+)
+FALSE_NEGATIVE_PREFLIGHT_READY_STATUS = (
+    "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+)
 READY_STATUS = "CANDIDATE_CONSTRUCTION_PREVIEW_READY_NO_ORDER"
 INPUT_REQUIRED_STATUS = "CANDIDATE_CONSTRUCTION_INPUT_REQUIRED"
 CANDIDATE_MISMATCH_STATUS = "CANDIDATE_CONSTRUCTION_CANDIDATE_MISMATCH"
@@ -297,11 +303,13 @@ def _iter_nodes(value: Any) -> list[Any]:
 def _authority_preserved(
     *,
     reroute_review: dict[str, Any] | None,
+    bounded_probe_preflight: dict[str, Any] | None,
     market_snapshot: dict[str, Any] | None,
 ) -> tuple[bool, list[str]]:
     reasons: list[str] = []
     payload_rules = [
         (reroute_review, set()),
+        (bounded_probe_preflight, set()),
         (market_snapshot, {"pg_query_performed"}),
     ]
     for payload, allowed_true_keys in payload_rules:
@@ -374,6 +382,38 @@ def _identity_key(candidate: dict[str, Any]) -> tuple[Any, Any, Any, Any, Any]:
 
 def _selected_candidate(reroute_review: dict[str, Any] | None) -> dict[str, Any]:
     return _candidate_identity(_dict(_dict(reroute_review).get("selected_candidate")))
+
+
+def _preflight_candidate(
+    bounded_probe_preflight: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return _candidate_identity(_dict(_dict(bounded_probe_preflight).get("candidate")))
+
+
+def _preflight_authority_fields_explicit(
+    bounded_probe_preflight: dict[str, Any] | None,
+) -> tuple[bool, list[str]]:
+    answers = _dict(_dict(bounded_probe_preflight).get("answers"))
+    required_false_keys = (
+        "bounded_demo_probe_authorized",
+        "bybit_call_performed",
+        "global_cost_gate_lowering_recommended",
+        "order_authority_granted",
+        "order_submission_performed",
+        "pg_query_performed",
+        "pg_write_performed",
+        "probe_authority_granted",
+        "promotion_evidence",
+        "runtime_mutation_performed",
+    )
+    reasons = [
+        f"bounded_probe_preflight_answers_{key}_not_explicit_false"
+        for key in required_false_keys
+        if answers.get(key) is not False
+    ]
+    if answers.get("main_cost_gate_adjustment") != "NONE":
+        reasons.append("bounded_probe_preflight_answers_main_cost_gate_adjustment_not_none")
+    return not reasons, reasons
 
 
 def _snapshot_candidate(market_snapshot: dict[str, Any] | None) -> dict[str, Any]:
@@ -671,7 +711,8 @@ def _placement_and_sizing(
 
 def build_candidate_construction_preview(
     *,
-    reroute_review: dict[str, Any] | None,
+    reroute_review: dict[str, Any] | None = None,
+    bounded_probe_preflight: dict[str, Any] | None = None,
     market_snapshot: dict[str, Any] | None,
     demo_operational_authorization_available: bool = False,
     now_utc: dt.datetime | None = None,
@@ -691,6 +732,13 @@ def build_candidate_construction_preview(
             now_utc=now,
             max_age_seconds=max_age_seconds,
         ),
+        "bounded_probe_preflight": _artifact_summary(
+            name="bounded_probe_preflight",
+            path=paths.get("bounded_probe_preflight"),
+            payload=bounded_probe_preflight,
+            now_utc=now,
+            max_age_seconds=max_age_seconds,
+        ),
         "market_snapshot": _artifact_summary(
             name="market_snapshot",
             path=paths.get("market_snapshot"),
@@ -701,9 +749,19 @@ def build_candidate_construction_preview(
     }
     authority_preserved, contamination_reasons = _authority_preserved(
         reroute_review=reroute_review,
+        bounded_probe_preflight=bounded_probe_preflight,
         market_snapshot=market_snapshot,
     )
-    selected = _selected_candidate(reroute_review)
+    reroute_source_present = bool(_dict(reroute_review))
+    preflight_source_present = bool(_dict(bounded_probe_preflight))
+    candidate_source_exactly_one = (
+        int(reroute_source_present) + int(preflight_source_present) == 1
+    )
+    selected = (
+        _selected_candidate(reroute_review)
+        if reroute_source_present
+        else _preflight_candidate(bounded_probe_preflight)
+    )
     snapshot_candidate = _snapshot_candidate(market_snapshot)
     candidate_match = (
         _identity_complete(selected)
@@ -741,11 +799,27 @@ def build_candidate_construction_preview(
         and _str(inputs.get("instrument_symbol")) == selected_symbol
     )
     reroute_ready = (
-        artifacts["reroute_review"].get("status") == "FRESH"
+        candidate_source_exactly_one
+        and reroute_source_present
+        and artifacts["reroute_review"].get("status") == "FRESH"
         and artifacts["reroute_review"].get("schema_version")
         == LOWER_PRICE_REROUTE_REVIEW_SCHEMA_VERSION
         and _dict(reroute_review).get("status") == REROUTE_READY_STATUS
     )
+    preflight_boundary_explicit, preflight_boundary_reasons = (
+        _preflight_authority_fields_explicit(bounded_probe_preflight)
+    )
+    bounded_probe_preflight_ready = (
+        candidate_source_exactly_one
+        and preflight_source_present
+        and artifacts["bounded_probe_preflight"].get("status") == "FRESH"
+        and artifacts["bounded_probe_preflight"].get("schema_version")
+        == FALSE_NEGATIVE_PREFLIGHT_SCHEMA_VERSION
+        and _dict(bounded_probe_preflight).get("status")
+        == FALSE_NEGATIVE_PREFLIGHT_READY_STATUS
+        and preflight_boundary_explicit
+    )
+    candidate_source_ready = reroute_ready or bounded_probe_preflight_ready
     market_ready = (
         artifacts["market_snapshot"].get("status") == "FRESH"
         and artifacts["market_snapshot"].get("schema_version")
@@ -766,8 +840,15 @@ def build_candidate_construction_preview(
         and effective_bbo_age_ms <= max_fresh_ms
     )
     blocking_gates: list[str] = []
-    if not reroute_ready:
-        blocking_gates.append("reroute_review_ready")
+    if not candidate_source_exactly_one:
+        blocking_gates.append("candidate_source_exactly_one")
+    if not candidate_source_ready:
+        blocking_gates.append("candidate_source_ready")
+        if reroute_source_present and not reroute_ready:
+            blocking_gates.append("reroute_review_ready")
+        if preflight_source_present and not bounded_probe_preflight_ready:
+            blocking_gates.append("bounded_probe_preflight_ready")
+            blocking_gates.extend(preflight_boundary_reasons)
     if not market_ready:
         blocking_gates.append("market_snapshot_ready")
     if not market_snapshot_source_valid:
@@ -794,9 +875,9 @@ def build_candidate_construction_preview(
         status = AUTHORITY_VIOLATION_STATUS
         reason = "input_artifacts_contain_authority_or_mutation_contamination"
         next_actions = ["remove_authority_or_mutation_contamination_before_preview"]
-    elif not reroute_ready or not market_ready:
+    elif not candidate_source_ready or not market_ready:
         status = INPUT_REQUIRED_STATUS
-        reason = "fresh_schema_valid_reroute_review_and_market_snapshot_required"
+        reason = "fresh_schema_valid_candidate_source_and_market_snapshot_required"
         next_actions = ["refresh_missing_or_stale_input_artifacts"]
     elif not candidate_match or not market_data_symbols_match:
         status = CANDIDATE_MISMATCH_STATUS
@@ -859,7 +940,16 @@ def build_candidate_construction_preview(
         },
         "construction": placement,
         "readiness": {
+            "candidate_source_ready": candidate_source_ready,
+            "candidate_source_exactly_one": candidate_source_exactly_one,
             "reroute_review_ready": reroute_ready,
+            "bounded_probe_preflight_ready": bounded_probe_preflight_ready,
+            "bounded_probe_preflight_authority_fields_explicit": (
+                preflight_boundary_explicit
+            ),
+            "bounded_probe_preflight_authority_field_reasons": (
+                preflight_boundary_reasons
+            ),
             "market_snapshot_ready": market_ready,
             "market_snapshot_read_only_source": market_snapshot_source_valid,
             "market_snapshot_internal_consistency": market_snapshot_consistent,
@@ -963,7 +1053,9 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--reroute-review-json", type=Path, required=True)
+    candidate_source = parser.add_mutually_exclusive_group(required=True)
+    candidate_source.add_argument("--reroute-review-json", type=Path)
+    candidate_source.add_argument("--bounded-probe-preflight-json", type=Path)
     parser.add_argument("--market-snapshot-json", type=Path, required=True)
     parser.add_argument("--demo-operational-authorization-available", action="store_true")
     parser.add_argument("--max-artifact-age-hours", type=int, default=24)
@@ -977,10 +1069,12 @@ def main() -> int:
     args = _build_parser().parse_args()
     paths = {
         "reroute_review": args.reroute_review_json,
+        "bounded_probe_preflight": args.bounded_probe_preflight_json,
         "market_snapshot": args.market_snapshot_json,
     }
     packet = build_candidate_construction_preview(
         reroute_review=_read_json(args.reroute_review_json),
+        bounded_probe_preflight=_read_json(args.bounded_probe_preflight_json),
         market_snapshot=_read_json(args.market_snapshot_json),
         demo_operational_authorization_available=(
             args.demo_operational_authorization_available
