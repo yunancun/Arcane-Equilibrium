@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-25 Bounded Probe Production Active Caller Runtime Adapter Gate
+
+- `demo_learning_lane_writer.rs` now has source-ready optional active bounded-probe request admission plumbing and a strict `OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED` gate, but the real writer loop still passes `None`; no order sender is reached.
+- Readiness scanning now requires explicit `1`/`true` parsing plus `active_order_request.is_some()` and rejects env-presence or missing-guard shapes. Current repo can become E3/BB-review-ready while actual runtime/order authority remains false.
+- Verification passed focused readiness `35`, adjacent active/proof/result/execution `35`, Rust writer `10`, Rust active-order `13`, rustfmt check, py_compile, and diff-check. Boundary remains source/test/docs only; no runtime sync, PG/Bybit/order/cancel/modify, Cost Gate lowering, active probe/order/live authority, Rust writer enablement, or promotion proof.
+
 ## 2026-06-25 Bounded Probe Runtime/Admission Propagation Review
 
 - `bounded_probe_authority_patch_readiness.py` now exposes `runtime_admission_propagation_review` plus top-level no-authority answers, including `actual_runtime_admission_enablement_ready=false`, `allowed_to_submit_order=false`, `adapter_enabled_by_this_packet=false`, and Bybit/order/PG/runtime/writer/live/probe authority false.

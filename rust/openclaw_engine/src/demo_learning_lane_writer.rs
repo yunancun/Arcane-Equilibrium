@@ -20,9 +20,8 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 use crate::bounded_probe_active_order::{
-    bounded_probe_order_link_id_for_candidate, candidate_matched_bounded_probe_order,
-    ActiveBoundedProbeOrderDecision, ActiveBoundedProbeOrderDraft, ActiveBoundedProbeOrderRequest,
-    ActiveBoundedProbeRiskLimits,
+    candidate_matched_bounded_probe_order, ActiveBoundedProbeOrderDecision,
+    ActiveBoundedProbeOrderDraft, ActiveBoundedProbeOrderRequest,
 };
 use crate::bounded_probe_near_touch::BoundedProbePlacementDecision;
 use crate::demo_learning_lane::{
@@ -40,6 +39,7 @@ const WARN_THROTTLE_MS: u64 = 1000;
 const ENABLE_WRITER_ENV: &str = "OPENCLAW_DEMO_LEARNING_LANE_WRITER";
 const PLAN_PATH_ENV: &str = "OPENCLAW_DEMO_LEARNING_LANE_PLAN";
 const LEDGER_PATH_ENV: &str = "OPENCLAW_DEMO_LEARNING_LANE_LEDGER";
+const OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED: &str = "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED";
 
 #[derive(Debug, Clone)]
 struct WriterMsg {
@@ -193,6 +193,7 @@ async fn run_writer(
                     msg.now_ms,
                     Utc::now(),
                     msg.placement_decision.as_ref(),
+                    None,
                 ) {
                     Ok(Some(record)) => {
                         match record.to_json_string() {
@@ -262,6 +263,7 @@ pub(crate) fn build_runtime_admission_record(
     now_ms: u64,
     generated_at_utc: DateTime<Utc>,
     placement_decision: Option<&BoundedProbePlacementDecision>,
+    active_order_request: Option<ActiveBoundedProbeOrderRequest>,
 ) -> Result<Option<AdmissionLedgerRecord>, String> {
     let ledger_rows = read_ledger_rows(ledger_path)?;
     let attempt_id = attempt_id_for_reject_event(event);
@@ -275,7 +277,10 @@ pub(crate) fn build_runtime_admission_record(
         .map_err(|err| format!("read plan {} failed: {err}", plan_path.display()))?;
     let plan = DemoLearningLanePlan::from_json_str(&plan_json)
         .map_err(|err| format!("parse plan {} failed: {err}", plan_path.display()))?;
-    let bounded_probe_adapter_enabled = false;
+    let bounded_probe_adapter_enabled = std::env::var(OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED)
+        .map(|value| bounded_probe_adapter_enabled_from_value(&value))
+        .unwrap_or(false)
+        && active_order_request.is_some();
     let decision = evaluate_probe_admission(
         &plan,
         event,
@@ -285,12 +290,33 @@ pub(crate) fn build_runtime_admission_record(
         bounded_probe_adapter_enabled,
         risk_state,
     );
+    if let (Some(order_request), Some(placement_decision)) =
+        (active_order_request, placement_decision.cloned())
+    {
+        let active_order_decision = submit_candidate_matched_bounded_probe_order(
+            &plan,
+            &ledger_rows,
+            event.clone(),
+            placement_decision,
+            risk_state,
+            now_ms,
+            bounded_probe_adapter_enabled,
+            order_request,
+        );
+        let _active_order_draft_preview =
+            active_bounded_probe_order_submission(active_order_decision);
+    }
     Ok(Some(build_admission_ledger_record_with_placement(
         &decision,
         event,
         generated_at_utc,
         placement_decision,
     )))
+}
+
+pub(crate) fn bounded_probe_adapter_enabled_from_value(value: &str) -> bool {
+    let normalized = value.trim();
+    normalized == "1" || normalized.eq_ignore_ascii_case("true")
 }
 
 pub(crate) fn submit_candidate_matched_bounded_probe_order(
@@ -357,6 +383,9 @@ fn epoch_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bounded_probe_active_order::{
+        bounded_probe_order_link_id_for_candidate, ActiveBoundedProbeRiskLimits,
+    };
     use crate::bounded_probe_near_touch::{
         BoundedProbeAttemptPlacement, BoundedProbePlacementDecision,
     };
@@ -473,6 +502,23 @@ mod tests {
     }
 
     #[test]
+    fn bounded_probe_adapter_gate_accepts_only_explicit_true_values() {
+        assert!(bounded_probe_adapter_enabled_from_value("1"));
+        assert!(bounded_probe_adapter_enabled_from_value("true"));
+        assert!(bounded_probe_adapter_enabled_from_value(" TRUE "));
+        assert!(!bounded_probe_adapter_enabled_from_value(""));
+        assert!(!bounded_probe_adapter_enabled_from_value("0"));
+        assert!(!bounded_probe_adapter_enabled_from_value("yes"));
+        assert!(!bounded_probe_adapter_enabled_from_value("enabled"));
+        assert!(bounded_probe_adapter_enabled_from_value("true") && true);
+        assert!(bounded_probe_adapter_enabled_from_value("1") && true);
+        assert!(!(bounded_probe_adapter_enabled_from_value("true") && false));
+        assert!(!Option::<&str>::None
+            .map(bounded_probe_adapter_enabled_from_value)
+            .unwrap_or(false));
+    }
+
+    #[test]
     fn builds_order_authority_not_granted_record_without_order_permission() {
         let tmp = TempDir::new().unwrap();
         let plan_path = tmp.path().join("plan.json");
@@ -488,6 +534,7 @@ mod tests {
             DateTime::parse_from_rfc3339("2026-06-21T10:50:00Z")
                 .unwrap()
                 .with_timezone(&Utc),
+            None,
             None,
         )
         .unwrap()
@@ -520,6 +567,7 @@ mod tests {
             1_782_041_001_000,
             Utc::now(),
             None,
+            None,
         )
         .unwrap();
 
@@ -551,6 +599,7 @@ mod tests {
                 .unwrap()
                 .with_timezone(&Utc),
             Some(&placement),
+            None,
         )
         .unwrap()
         .expect("first event should build a ledger row");
@@ -569,6 +618,79 @@ mod tests {
             placement["placement_decision"].as_str(),
             Some("would_submit_if_authorized")
         );
+        assert_eq!(
+            placement["order_submission_performed"].as_bool(),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn runtime_record_accepts_active_order_request_without_granting_order_authority() {
+        let tmp = TempDir::new().unwrap();
+        let plan_path = tmp.path().join("plan.json");
+        let ledger_path = tmp.path().join("probe_ledger.jsonl");
+        std::fs::write(&plan_path, plan_json("2026-06-21T10:49:45Z")).unwrap();
+        let event = reject_event();
+        let placement = BoundedProbePlacementDecision::Submit(BoundedProbeAttemptPlacement {
+            record_type: "bounded_probe_attempt",
+            side_cell_key: "ma_crossover|ETHUSDT|Sell".to_string(),
+            limit_price: 3_499.9,
+            touch_gap_bps: 12.5,
+            reference_price: 3_500.0,
+            bbo_age_ms: 0,
+        });
+        let plan = DemoLearningLanePlan::from_json_str(&plan_json("2026-06-21T10:49:45Z")).unwrap();
+        let admission_decision = evaluate_probe_admission(
+            &plan,
+            &event,
+            &[],
+            1_782_041_001_000,
+            &AdmissionConfig::default(),
+            false,
+            "NORMAL",
+        );
+        let order_link_id = bounded_probe_order_link_id_for_candidate(
+            &event.engine_mode,
+            event.ts_ms,
+            1,
+            &event.side_cell_key(),
+            event.context_id.as_deref().unwrap(),
+            event.signal_id.as_deref().unwrap(),
+        )
+        .unwrap();
+        let order_request = ActiveBoundedProbeOrderRequest {
+            reject_event: event.clone(),
+            admission_decision,
+            placement_decision: placement.clone(),
+            qty: 0.001,
+            order_link_id,
+            decision_lease_id: Some("lease-demo-1".to_string()),
+            risk_state: "NORMAL".to_string(),
+            limits: ActiveBoundedProbeRiskLimits::default(),
+        };
+
+        let record = build_runtime_admission_record(
+            &plan_path,
+            &ledger_path,
+            &event,
+            "NORMAL",
+            1_782_041_001_000,
+            DateTime::parse_from_rfc3339("2026-06-21T10:50:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+            Some(&placement),
+            Some(order_request),
+        )
+        .unwrap()
+        .expect("first event should build a ledger row");
+
+        assert_eq!(record.record_type, "probe_admission_decision");
+        assert_eq!(record.decision, "ORDER_AUTHORITY_NOT_GRANTED");
+        assert!(!record.allowed_to_submit_order);
+        let placement = record
+            .bounded_probe_placement
+            .as_ref()
+            .expect("placement preview should still be embedded");
         assert_eq!(
             placement["order_submission_performed"].as_bool(),
             Some(false)
