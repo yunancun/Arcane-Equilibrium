@@ -146,6 +146,10 @@ fn active_bounded_probe_submission_forwards_candidate_matched_post_only_limit_re
         req.time_in_force,
         Some(crate::order_manager::TimeInForce::PostOnly)
     );
+    assert_eq!(
+        req.maker_timeout_ms,
+        Some(crate::bounded_probe_active_order::DEFAULT_ACTIVE_BOUNDED_PROBE_MAKER_TIMEOUT_MS)
+    );
     assert_eq!(req.reference_price, Some(3_500.0));
     assert!(rx.try_recv().is_err());
 }

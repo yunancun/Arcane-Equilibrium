@@ -156,7 +156,7 @@ pub(crate) fn dispatch_admitted_bounded_probe_order(
         order_type: "limit".to_string(),
         limit_price: Some(draft.limit_price),
         time_in_force: Some(draft.time_in_force),
-        maker_timeout_ms: None,
+        maker_timeout_ms: Some(draft.maker_timeout_ms),
         close_maker_audit: None,
         reference_price: Some(draft.reference_price),
         reference_ts_ms: Some(draft.paper_fill_ts),
