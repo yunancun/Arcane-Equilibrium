@@ -921,6 +921,176 @@ def _active_order_submission_readiness(repo_root: Path) -> dict[str, Any]:
     }
 
 
+def _call_evidence(code: str, rel_path: str, symbol: str) -> list[dict[str, Any]]:
+    evidence: list[dict[str, Any]] = []
+    call_re = re.compile(rf"\b{re.escape(symbol)}\s*\(")
+    definition_re = re.compile(rf"\bfn\s+{re.escape(symbol)}\s*\(")
+    for idx, line in enumerate(code.splitlines(), start=1):
+        if not call_re.search(line):
+            continue
+        if definition_re.search(line):
+            continue
+        evidence.append(
+            {
+                "path": rel_path,
+                "line": idx,
+                "symbol": symbol,
+            }
+        )
+    return evidence
+
+
+def _function_body(code: str, fn_name: str) -> str:
+    match = re.search(rf"\bfn\s+{re.escape(fn_name)}\s*\(", code)
+    if match is None:
+        return ""
+    brace = code.find("{", match.end())
+    if brace == -1:
+        return ""
+    depth = 1
+    idx = brace + 1
+    while idx < len(code) and depth > 0:
+        if code[idx] == "{":
+            depth += 1
+        elif code[idx] == "}":
+            depth -= 1
+        idx += 1
+    return code[brace:idx] if depth == 0 else code[brace:]
+
+
+def _runtime_adapter_gate_feeds_admission(runtime_body: str) -> bool:
+    if not runtime_body:
+        return False
+    assignment = re.search(
+        r"\blet\s+bounded_probe_adapter_enabled(?:\s*:\s*[^=;]+)?\s*=\s*(?P<rhs>[^;]+);",
+        runtime_body,
+        flags=re.S,
+    )
+    if assignment is None:
+        return False
+    rhs = " ".join(assignment.group("rhs").split())
+    if (
+        re.match(
+            r"^std::env::var\s*\(\s*OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED\s*\)"
+            r"(?:\s*\.[A-Za-z_][A-Za-z0-9_]*\s*\([^{};]*\))*$",
+            rhs,
+        )
+        is None
+    ):
+        return False
+    return (
+        re.search(
+            r"\bevaluate_probe_admission\s*\([^;]*\bbounded_probe_adapter_enabled\b[^;]*\)",
+            runtime_body,
+            flags=re.S,
+        )
+        is not None
+    )
+
+
+def _active_caller_enablement_review(
+    repo_root: Path,
+    active_order_summary: dict[str, Any],
+) -> dict[str, Any]:
+    writer_rel = "rust/openclaw_engine/src/demo_learning_lane_writer.rs"
+    dispatch_rel = "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs"
+    writer_code = _strip_rust_comments_and_strings(
+        _read_repo_text(repo_root, writer_rel)
+    )
+    dispatch_code = _strip_rust_comments_and_strings(
+        _read_repo_text(repo_root, dispatch_rel)
+    )
+    runtime_body = _function_body(writer_code, "build_runtime_admission_record")
+    writer_call_sites = (
+        _call_evidence(
+            runtime_body,
+            writer_rel,
+            "submit_candidate_matched_bounded_probe_order",
+        )
+        + _call_evidence(
+            runtime_body,
+            writer_rel,
+            "active_bounded_probe_order_submission",
+        )
+    )
+    dispatch_call_sites = _call_evidence(
+        dispatch_code,
+        dispatch_rel,
+        "active_bounded_probe_order_submission",
+    )
+    production_active_caller_present = bool(writer_call_sites)
+    runtime_adapter_enablement_gate_present = _runtime_adapter_gate_feeds_admission(
+        runtime_body
+    )
+    runtime_writer_default_adapter_disabled = bool(
+        _dict(active_order_summary.get("evidence")).get(
+            "runtime_writer_default_adapter_disabled"
+        )
+    )
+    source_blockers: list[str] = []
+    if active_order_summary.get("active_order_submission_ready") is not True:
+        source_blockers.append("active_order_submission_source_seam_not_ready")
+    if runtime_writer_default_adapter_disabled:
+        source_blockers.append("runtime_writer_default_adapter_disabled")
+    if not production_active_caller_present:
+        source_blockers.append("production_active_bounded_probe_caller_missing")
+    if not runtime_adapter_enablement_gate_present:
+        source_blockers.append("reviewed_runtime_adapter_enablement_gate_missing")
+    source_ready = (
+        active_order_summary.get("active_order_submission_ready") is True
+        and production_active_caller_present
+        and runtime_adapter_enablement_gate_present
+        and not runtime_writer_default_adapter_disabled
+        and not source_blockers
+    )
+    enablement_blockers = [
+        "runtime_source_sync_not_verified",
+        "post_restart_pending_order_reconciliation_not_proven",
+        "runtime_adapter_enablement_not_performed_source_only_packet",
+    ]
+    if not source_ready:
+        enablement_blockers.insert(0, "active_caller_source_review_not_ready")
+    actual_ready = False
+    blockers = source_blockers + enablement_blockers
+    return {
+        "status": (
+            "ACTIVE_CALLER_SOURCE_READY_FOR_E3_BB_REVIEW"
+            if source_ready
+            else "ACTIVE_CALLER_ENABLEMENT_BLOCKED_SOURCE_ONLY"
+        ),
+        "active_caller_source_ready_for_review": source_ready,
+        "actual_active_caller_enablement_ready": actual_ready,
+        "active_caller_enablement_authority_granted": False,
+        "blockers": blockers,
+        "evidence": {
+            "source_seam_ready": active_order_summary.get(
+                "active_order_submission_ready"
+            )
+            is True,
+            "runtime_writer_default_adapter_disabled": runtime_writer_default_adapter_disabled,
+            "runtime_adapter_enablement_gate_present": runtime_adapter_enablement_gate_present,
+            "production_active_caller_present": production_active_caller_present,
+            "writer_call_sites": writer_call_sites,
+            "tick_dispatch_call_sites": dispatch_call_sites,
+            "runtime_gate_feeds_admission_scan": runtime_adapter_enablement_gate_present,
+            "runtime_source_sync_verified": False,
+            "post_restart_pending_order_reconciliation_proven": False,
+        },
+        "required_before_enablement": [
+            "source_reviewed_production_active_caller",
+            "reviewed_runtime_adapter_enablement_gate",
+            "fresh_e3_bb_exchange_facing_order_envelope_review",
+            "runtime_source_sync_and_readiness_probe",
+            "post_restart_pending_order_reconciliation_review",
+            "candidate_matched_result_and_execution_realism_review_after_probe",
+        ],
+        "boundary": (
+            "source-only caller enablement review; this packet never enables the "
+            "runtime adapter and never grants probe/order authority"
+        ),
+    }
+
+
 def _profitability_improvement_lanes(
     placement_summary: dict[str, Any], source_summary: dict[str, Any]
 ) -> list[dict[str, Any]]:
@@ -1066,6 +1236,10 @@ def build_bounded_demo_probe_authority_patch_readiness(
     )
     source_summary = _source_readiness(repo_root)
     active_order_summary = _active_order_submission_readiness(repo_root)
+    active_caller_summary = _active_caller_enablement_review(
+        repo_root,
+        active_order_summary,
+    )
     status, reason, next_actions = _status(
         placement_summary=placement_summary,
         source_summary=source_summary,
@@ -1080,6 +1254,7 @@ def build_bounded_demo_probe_authority_patch_readiness(
         "placement_repair_plan": placement_summary,
         "source_readiness": source_summary,
         "active_order_submission_readiness": active_order_summary,
+        "active_caller_enablement_review": active_caller_summary,
         "profitability_improvement_lanes": lanes,
         "answers": {
             "placement_repair_plan_ready": placement_summary.get(
@@ -1111,6 +1286,15 @@ def build_bounded_demo_probe_authority_patch_readiness(
             )
             is True,
             "active_order_submission_authority_granted": False,
+            "active_caller_enablement_ready": active_caller_summary.get(
+                "actual_active_caller_enablement_ready"
+            )
+            is True,
+            "active_caller_source_ready_for_review": active_caller_summary.get(
+                "active_caller_source_ready_for_review"
+            )
+            is True,
+            "active_caller_enablement_authority_granted": False,
             "rust_patch_required": status.startswith("RUST_PATCH_REQUIRED_"),
             "runtime_mutation_performed": False,
             "global_cost_gate_lowering_recommended": False,
@@ -1127,6 +1311,7 @@ def render_markdown(packet: dict[str, Any]) -> str:
     placement = _dict(packet.get("placement_repair_plan"))
     source = _dict(packet.get("source_readiness"))
     active_order = _dict(packet.get("active_order_submission_readiness"))
+    active_caller = _dict(packet.get("active_caller_enablement_review"))
     lines = [
         "# Bounded Demo Probe Authority Patch Readiness",
         "",
@@ -1141,6 +1326,9 @@ def render_markdown(packet: dict[str, Any]) -> str:
         f"- Authority path wiring present: `{source.get('authority_path_wiring_present')}`",
         f"- Active order submission ready: `{active_order.get('active_order_submission_ready')}`",
         f"- Active order submission blockers: `{active_order.get('blockers')}`",
+        f"- Active caller source ready for review: `{active_caller.get('active_caller_source_ready_for_review')}`",
+        f"- Actual active caller enablement ready: `{active_caller.get('actual_active_caller_enablement_ready')}`",
+        f"- Active caller enablement blockers: `{active_caller.get('blockers')}`",
         f"- Missing patch seams: `{source.get('missing_required_patch_seams')}`",
         f"- Boundary: {packet.get('boundary')}",
         "",
