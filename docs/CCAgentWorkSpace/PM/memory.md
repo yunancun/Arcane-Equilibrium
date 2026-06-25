@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-25 Bounded Probe Runtime Source Sync Reconciliation E3 Review
+
+- E3 approved only a no-order Linux source checkout sync. PM fast-forwarded `/home/ncyu/BybitOpenClaw/srv` from `f9e4456c` to `b180546c`; post-check showed `HEAD=origin/main=b180546c`, clean worktree, and v513 gate source present.
+- Running engine was not rebuilt/restarted; env still has `OPENCLAW_ALLOW_MAINNET=0` and no `OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED`. Crontab expected-head pins still point to `bdc1e156`, and latest natural authority artifact remains `PLACEMENT_REPAIR_PLAN_NOT_READY`.
+- Read-only PG found no 7d active bounded-probe rows, but broad 2d demo `Working` orders remain `117`; post-restart active bounded-probe reconciliation remains unproven. Boundary: no crontab/env/service mutation, no PG write, no Bybit/order/cancel/modify, no adapter/writer enablement, no Cost Gate change, no probe/order/live authority, no promotion proof.
+
 ## 2026-06-25 Bounded Probe Production Active Caller Runtime Adapter Gate
 
 - `demo_learning_lane_writer.rs` now has source-ready optional active bounded-probe request admission plumbing and a strict `OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED` gate, but the real writer loop still passes `None`; no order sender is reached.
