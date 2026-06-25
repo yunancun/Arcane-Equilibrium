@@ -20,6 +20,10 @@ pub const DEFAULT_MAX_PROBE_INTENTS_BEFORE_REVIEW: u64 = 1;
 pub const DEFAULT_ACTIVE_BOUNDED_PROBE_MAKER_TIMEOUT_MS: u64 = 45_000;
 pub const BYBIT_ORDER_LINK_ID_PREFIX: &str = "oc_";
 pub const BYBIT_ORDER_LINK_ID_MAX_LEN: usize = 36;
+pub const ACTIVE_BOUNDED_PROBE_ORDER_LINK_ID_MAX_SEQ: u64 = 2_176_782_335;
+
+const ACTIVE_BOUNDED_PROBE_LINEAGE_HASH_MOD: u64 = 101_559_956_668_416;
+const ACTIVE_BOUNDED_PROBE_LINEAGE_HASH_LEN: usize = 9;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ActiveBoundedProbeRiskLimits {
@@ -269,10 +273,13 @@ pub fn candidate_matched_bounded_probe_order(
             ActiveBoundedProbeOrderSkipReason::MissingLineage,
         );
     };
-    if !is_bybit_safe_order_link_id_for_engine_mode(
+    if !is_candidate_bound_bounded_probe_order_link_id(
         &request.order_link_id,
         &request.reject_event.engine_mode,
         request.reject_event.ts_ms,
+        &side_cell_key,
+        &context_id,
+        &signal_id,
     ) {
         return skip(
             side_cell_key,
@@ -340,15 +347,141 @@ pub fn is_bybit_safe_order_link_id_for_engine_mode(
     if parts.len() != 4 {
         return false;
     }
-    let [prefix, mode_tag, ts_part, seq_part]: [&str; 4] =
-        [parts[0], parts[1], parts[2], parts[3]];
+    let [prefix, mode_tag, ts_part, seq_part]: [&str; 4] = [parts[0], parts[1], parts[2], parts[3]];
     prefix == "oc"
         && mode_tag == expected_mode_tag
         && ts_part == ts_ms.to_string()
-        && seq_part
-            .parse::<u64>()
-            .map(|seq| seq > 0)
-            .unwrap_or(false)
+        && seq_part.parse::<u64>().map(|seq| seq > 0).unwrap_or(false)
+}
+
+pub fn bounded_probe_order_link_id_for_candidate(
+    engine_mode: &str,
+    ts_ms: u64,
+    seq: u64,
+    side_cell_key: &str,
+    context_id: &str,
+    signal_id: &str,
+) -> Option<String> {
+    let mode_tag = order_link_engine_mode_tag(engine_mode)?;
+    if ts_ms == 0
+        || !(1..=ACTIVE_BOUNDED_PROBE_ORDER_LINK_ID_MAX_SEQ).contains(&seq)
+        || !lineage_component_is_stable(side_cell_key)
+        || !lineage_component_is_stable(context_id)
+        || !lineage_component_is_stable(signal_id)
+    {
+        return None;
+    }
+    let seq_part = to_base36(seq);
+    let lineage_hash = candidate_lineage_hash_tag(side_cell_key, context_id, signal_id)?;
+    let order_link_id = format!("oc_{mode_tag}_{ts_ms}_{seq_part}_{lineage_hash}");
+    is_bybit_safe_order_link_id(&order_link_id).then_some(order_link_id)
+}
+
+pub fn is_candidate_bound_bounded_probe_order_link_id(
+    order_link_id: &str,
+    engine_mode: &str,
+    ts_ms: u64,
+    side_cell_key: &str,
+    context_id: &str,
+    signal_id: &str,
+) -> bool {
+    if !is_bybit_safe_order_link_id(order_link_id) {
+        return false;
+    }
+    let Some(expected_mode_tag) = order_link_engine_mode_tag(engine_mode) else {
+        return false;
+    };
+    let Some(expected_hash) = candidate_lineage_hash_tag(side_cell_key, context_id, signal_id)
+    else {
+        return false;
+    };
+    let parts: Vec<&str> = order_link_id.split('_').collect();
+    if parts.len() != 5 {
+        return false;
+    }
+    let [prefix, mode_tag, ts_part, seq_part, hash_part]: [&str; 5] =
+        [parts[0], parts[1], parts[2], parts[3], parts[4]];
+    let Some(seq) = parse_base36(seq_part) else {
+        return false;
+    };
+    prefix == "oc"
+        && mode_tag == expected_mode_tag
+        && ts_part == ts_ms.to_string()
+        && (1..=ACTIVE_BOUNDED_PROBE_ORDER_LINK_ID_MAX_SEQ).contains(&seq)
+        && seq_part == to_base36(seq)
+        && hash_part == expected_hash
+}
+
+fn order_link_engine_mode_tag(engine_mode: &str) -> Option<&'static str> {
+    match engine_mode.trim().to_ascii_lowercase().as_str() {
+        "demo" => Some("dm"),
+        "live_demo" => Some("ld"),
+        _ => None,
+    }
+}
+
+fn lineage_component_is_stable(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty() && trimmed == value
+}
+
+fn candidate_lineage_hash_tag(
+    side_cell_key: &str,
+    context_id: &str,
+    signal_id: &str,
+) -> Option<String> {
+    if !lineage_component_is_stable(side_cell_key)
+        || !lineage_component_is_stable(context_id)
+        || !lineage_component_is_stable(signal_id)
+    {
+        return None;
+    }
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for byte in side_cell_key
+        .bytes()
+        .chain(std::iter::once(0x1e))
+        .chain(context_id.bytes())
+        .chain(std::iter::once(0x1f))
+        .chain(signal_id.bytes())
+    {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    let mut tag = to_base36(hash % ACTIVE_BOUNDED_PROBE_LINEAGE_HASH_MOD);
+    while tag.len() < ACTIVE_BOUNDED_PROBE_LINEAGE_HASH_LEN {
+        tag.insert(0, '0');
+    }
+    Some(tag)
+}
+
+fn to_base36(mut value: u64) -> String {
+    const DIGITS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    if value == 0 {
+        return "0".to_string();
+    }
+    let mut out = Vec::new();
+    while value > 0 {
+        let idx = (value % 36) as usize;
+        out.push(DIGITS[idx] as char);
+        value /= 36;
+    }
+    out.iter().rev().collect()
+}
+
+fn parse_base36(value: &str) -> Option<u64> {
+    if value.is_empty() || value.len() > 6 {
+        return None;
+    }
+    let mut out = 0u64;
+    for byte in value.bytes() {
+        let digit = match byte {
+            b'0'..=b'9' => (byte - b'0') as u64,
+            b'a'..=b'z' => 10 + (byte - b'a') as u64,
+            _ => return None,
+        };
+        out = out.checked_mul(36)?.checked_add(digit)?;
+    }
+    Some(out)
 }
 
 fn skip(
@@ -449,8 +582,19 @@ mod tests {
     }
 
     fn request() -> ActiveBoundedProbeOrderRequest {
+        let reject_event = event();
+        let side_cell_key = reject_event.side_cell_key();
+        let order_link_id = bounded_probe_order_link_id_for_candidate(
+            &reject_event.engine_mode,
+            reject_event.ts_ms,
+            1,
+            &side_cell_key,
+            reject_event.context_id.as_deref().unwrap(),
+            reject_event.signal_id.as_deref().unwrap(),
+        )
+        .unwrap();
         ActiveBoundedProbeOrderRequest {
-            reject_event: event(),
+            reject_event,
             admission_decision: admitted(),
             placement_decision: BoundedProbePlacementDecision::Submit(
                 crate::bounded_probe_near_touch::BoundedProbeAttemptPlacement {
@@ -463,7 +607,7 @@ mod tests {
                 },
             ),
             qty: 0.001,
-            order_link_id: "oc_ld_1782040200000_1".to_string(),
+            order_link_id,
             decision_lease_id: Some("lease-demo-1".to_string()),
             risk_state: "NORMAL".to_string(),
             limits: ActiveBoundedProbeRiskLimits::default(),
@@ -499,7 +643,14 @@ mod tests {
             draft.lineage.signal_id,
             "sig-demo-ma_crossover-ETHUSDT-1782040200000"
         );
-        assert_eq!(draft.lineage.order_link_id, "oc_ld_1782040200000_1");
+        assert!(is_candidate_bound_bounded_probe_order_link_id(
+            &draft.lineage.order_link_id,
+            "live_demo",
+            NOW_MS,
+            "ma_crossover|ETHUSDT|Sell",
+            "ctx-demo-ma_crossover-ETHUSDT-1782040200000",
+            "sig-demo-ma_crossover-ETHUSDT-1782040200000",
+        ));
         assert_eq!(draft.lineage.fee, None);
         assert_eq!(draft.lineage.exec_fee, None);
         assert_eq!(draft.lineage.slippage_bps, None);
@@ -510,13 +661,28 @@ mod tests {
     fn demo_engine_mode_accepts_matching_dm_order_link_id() {
         let mut request = request();
         request.reject_event.engine_mode = "demo".to_string();
-        request.order_link_id = "oc_dm_1782040200000_1".to_string();
+        request.order_link_id = bounded_probe_order_link_id_for_candidate(
+            "demo",
+            NOW_MS,
+            1,
+            &request.reject_event.side_cell_key(),
+            request.reject_event.context_id.as_deref().unwrap(),
+            request.reject_event.signal_id.as_deref().unwrap(),
+        )
+        .unwrap();
 
         let decision = candidate_matched_bounded_probe_order(request);
         let ActiveBoundedProbeOrderDecision::Submit(draft) = decision else {
             panic!("expected demo active bounded probe order draft");
         };
-        assert_eq!(draft.lineage.order_link_id, "oc_dm_1782040200000_1");
+        assert!(is_candidate_bound_bounded_probe_order_link_id(
+            &draft.lineage.order_link_id,
+            "demo",
+            NOW_MS,
+            "ma_crossover|ETHUSDT|Sell",
+            "ctx-demo-ma_crossover-ETHUSDT-1782040200000",
+            "sig-demo-ma_crossover-ETHUSDT-1782040200000",
+        ));
     }
 
     #[test]
@@ -604,7 +770,23 @@ mod tests {
         );
 
         let mut wrong_mode_request = request();
-        wrong_mode_request.order_link_id = "oc_dm_1782040200000_1".to_string();
+        wrong_mode_request.order_link_id = bounded_probe_order_link_id_for_candidate(
+            "demo",
+            NOW_MS,
+            1,
+            &wrong_mode_request.reject_event.side_cell_key(),
+            wrong_mode_request
+                .reject_event
+                .context_id
+                .as_deref()
+                .unwrap(),
+            wrong_mode_request
+                .reject_event
+                .signal_id
+                .as_deref()
+                .unwrap(),
+        )
+        .unwrap();
         let decision = candidate_matched_bounded_probe_order(wrong_mode_request);
         let ActiveBoundedProbeOrderDecision::Skip(skip) = decision else {
             panic!("expected skip");
@@ -615,7 +797,15 @@ mod tests {
         );
 
         let mut wrong_ts_request = request();
-        wrong_ts_request.order_link_id = "oc_ld_1782040200001_1".to_string();
+        wrong_ts_request.order_link_id = bounded_probe_order_link_id_for_candidate(
+            "live_demo",
+            NOW_MS + 1,
+            1,
+            &wrong_ts_request.reject_event.side_cell_key(),
+            wrong_ts_request.reject_event.context_id.as_deref().unwrap(),
+            wrong_ts_request.reject_event.signal_id.as_deref().unwrap(),
+        )
+        .unwrap();
         let decision = candidate_matched_bounded_probe_order(wrong_ts_request);
         let ActiveBoundedProbeOrderDecision::Skip(skip) = decision else {
             panic!("expected skip");
@@ -626,7 +816,7 @@ mod tests {
         );
 
         let mut zero_seq_request = request();
-        zero_seq_request.order_link_id = "oc_ld_1782040200000_0".to_string();
+        zero_seq_request.order_link_id = "oc_ld_1782040200000_0_000000000".to_string();
         let decision = candidate_matched_bounded_probe_order(zero_seq_request);
         let ActiveBoundedProbeOrderDecision::Skip(skip) = decision else {
             panic!("expected skip");
@@ -646,6 +836,104 @@ mod tests {
             skip.reason,
             ActiveBoundedProbeOrderSkipReason::InvalidOrderLinkId
         );
+    }
+
+    #[test]
+    fn active_probe_order_link_id_is_candidate_bound_and_rejects_lineage_drift() {
+        let event = event();
+        let link_id = bounded_probe_order_link_id_for_candidate(
+            &event.engine_mode,
+            event.ts_ms,
+            36,
+            &event.side_cell_key(),
+            event.context_id.as_deref().unwrap(),
+            event.signal_id.as_deref().unwrap(),
+        )
+        .unwrap();
+
+        assert!(link_id.len() <= BYBIT_ORDER_LINK_ID_MAX_LEN);
+        assert!(is_candidate_bound_bounded_probe_order_link_id(
+            &link_id,
+            &event.engine_mode,
+            event.ts_ms,
+            &event.side_cell_key(),
+            event.context_id.as_deref().unwrap(),
+            event.signal_id.as_deref().unwrap(),
+        ));
+        assert!(!is_candidate_bound_bounded_probe_order_link_id(
+            &link_id,
+            &event.engine_mode,
+            event.ts_ms,
+            "ma_crossover|BTCUSDT|Sell",
+            event.context_id.as_deref().unwrap(),
+            event.signal_id.as_deref().unwrap(),
+        ));
+        assert!(!is_candidate_bound_bounded_probe_order_link_id(
+            &link_id,
+            &event.engine_mode,
+            event.ts_ms,
+            &event.side_cell_key(),
+            "ctx-demo-ma_crossover-BTCUSDT-1782040200000",
+            event.signal_id.as_deref().unwrap(),
+        ));
+        assert!(!is_candidate_bound_bounded_probe_order_link_id(
+            &link_id,
+            &event.engine_mode,
+            event.ts_ms,
+            &event.side_cell_key(),
+            event.context_id.as_deref().unwrap(),
+            "sig-demo-ma_crossover-BTCUSDT-1782040200000",
+        ));
+        let seq_one_link_id = bounded_probe_order_link_id_for_candidate(
+            &event.engine_mode,
+            event.ts_ms,
+            1,
+            &event.side_cell_key(),
+            event.context_id.as_deref().unwrap(),
+            event.signal_id.as_deref().unwrap(),
+        )
+        .unwrap();
+        let leading_zero_seq_link_id = seq_one_link_id.replacen("_1_", "_000001_", 1);
+        assert!(!is_candidate_bound_bounded_probe_order_link_id(
+            &leading_zero_seq_link_id,
+            &event.engine_mode,
+            event.ts_ms,
+            &event.side_cell_key(),
+            event.context_id.as_deref().unwrap(),
+            event.signal_id.as_deref().unwrap(),
+        ));
+        assert_eq!(
+            bounded_probe_order_link_id_for_candidate(
+                &event.engine_mode,
+                event.ts_ms,
+                0,
+                &event.side_cell_key(),
+                event.context_id.as_deref().unwrap(),
+                event.signal_id.as_deref().unwrap(),
+            ),
+            None
+        );
+        assert_eq!(
+            bounded_probe_order_link_id_for_candidate(
+                &event.engine_mode,
+                event.ts_ms,
+                ACTIVE_BOUNDED_PROBE_ORDER_LINK_ID_MAX_SEQ + 1,
+                &event.side_cell_key(),
+                event.context_id.as_deref().unwrap(),
+                event.signal_id.as_deref().unwrap(),
+            ),
+            None
+        );
+        let max_seq_link_id = bounded_probe_order_link_id_for_candidate(
+            &event.engine_mode,
+            event.ts_ms,
+            ACTIVE_BOUNDED_PROBE_ORDER_LINK_ID_MAX_SEQ,
+            &event.side_cell_key(),
+            event.context_id.as_deref().unwrap(),
+            event.signal_id.as_deref().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(max_seq_link_id.len(), BYBIT_ORDER_LINK_ID_MAX_LEN);
     }
 
     #[test]
