@@ -568,6 +568,7 @@ fn test_close_maker_reprice_direction_through_real_chain() {
         qty: req.qty,
         strategy: req.strategy.clone(),
         sent_ts_ms: 1_700_000_060_000,
+        signal_ts_ms: req.paper_fill_ts,
         cum_filled_qty: 0.0,
         is_close: req.is_close,
         context_id: req.context_id.clone(),
@@ -586,6 +587,7 @@ fn test_close_maker_reprice_direction_through_real_chain() {
         spine_verdict_id: None,
         spine_stub_report_id: None,
         intent_id: None,
+        decision_lease_id: req.decision_lease_id.clone(),
     };
 
     // sweep：book 上移（ask 50_000.1 → 50_000.5）。toward-touch 對 SELL =

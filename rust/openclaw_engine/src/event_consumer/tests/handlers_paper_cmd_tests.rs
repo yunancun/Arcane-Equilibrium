@@ -60,6 +60,7 @@ fn test_handle_reset_clears_state_and_pending() {
             qty: 0.05,
             strategy: "ma".into(),
             sent_ts_ms: 0,
+            signal_ts_ms: 0,
             cum_filled_qty: 0.0,
             is_close: false,
             // FILL-CONTEXT-LINKAGE-1: empty id preserves pre-fix behaviour.
@@ -84,6 +85,7 @@ fn test_handle_reset_clears_state_and_pending() {
             // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：Reset 測試只關
             // pending 清空，不讀 intent_id；預設 None 保 fixture 最小化。
             intent_id: None,
+            decision_lease_id: None,
         },
     );
     pipeline.paper_paused = true;

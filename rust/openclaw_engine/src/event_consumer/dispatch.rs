@@ -716,6 +716,7 @@ pub(super) fn spawn_order_dispatch(
                     qty: req.qty,
                     strategy: req.strategy.clone(),
                     sent_ts_ms: now_ms,
+                    signal_ts_ms: req.paper_fill_ts,
                     cum_filled_qty: 0.0,
                     is_close: req.is_close,
                     // FILL-CONTEXT-LINKAGE-1: mirror OrderDispatchRequest.context_id
@@ -756,6 +757,7 @@ pub(super) fn spawn_order_dispatch(
                     // handle_pending_registration 從 PendingOrder.intent_id 讀
                     // 寫入 TradingMsg::Order，再進 trading.orders.intent_id。
                     intent_id: req.intent_id.clone(),
+                    decision_lease_id: req.decision_lease_id.clone(),
                 }));
             }
             let side = if req.is_long {

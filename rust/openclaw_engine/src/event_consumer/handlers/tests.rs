@@ -81,6 +81,7 @@ fn test_reset_clears_all_state() {
             qty: 0.01,
             strategy: "test".into(),
             sent_ts_ms: 1000,
+            signal_ts_ms: 1000,
             cum_filled_qty: 0.0,
             is_close: false,
             // FILL-CONTEXT-LINKAGE-1: empty id preserves pre-fix behaviour.
@@ -105,6 +106,7 @@ fn test_reset_clears_all_state() {
             // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：Reset 測試僅驗
             // pending 清空語意，不讀 intent_id。
             intent_id: None,
+            decision_lease_id: None,
         },
     );
     handle_paper_command(

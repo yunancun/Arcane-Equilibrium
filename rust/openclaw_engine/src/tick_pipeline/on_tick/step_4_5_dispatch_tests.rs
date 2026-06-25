@@ -170,6 +170,10 @@ fn active_bounded_probe_submission_forwards_candidate_matched_post_only_limit_re
         Some(crate::bounded_probe_active_order::DEFAULT_ACTIVE_BOUNDED_PROBE_MAKER_TIMEOUT_MS)
     );
     assert_eq!(req.reference_price, Some(3_500.0));
+    assert_eq!(
+        req.reference_source.as_deref(),
+        Some(crate::bounded_probe_active_order::ACTIVE_BOUNDED_PROBE_REFERENCE_SOURCE)
+    );
     assert!(rx.try_recv().is_err());
 }
 

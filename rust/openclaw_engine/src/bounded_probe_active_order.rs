@@ -18,6 +18,7 @@ use crate::order_manager::{OrderType, TimeInForce};
 pub const DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER: f64 = 10.0;
 pub const DEFAULT_MAX_PROBE_INTENTS_BEFORE_REVIEW: u64 = 1;
 pub const DEFAULT_ACTIVE_BOUNDED_PROBE_MAKER_TIMEOUT_MS: u64 = 45_000;
+pub const ACTIVE_BOUNDED_PROBE_REFERENCE_SOURCE: &str = "bounded_probe_active_near_touch";
 pub const BYBIT_ORDER_LINK_ID_PREFIX: &str = "oc_";
 pub const BYBIT_ORDER_LINK_ID_MAX_LEN: usize = 36;
 pub const ACTIVE_BOUNDED_PROBE_ORDER_LINK_ID_MAX_SEQ: u64 = 2_176_782_335;
@@ -139,6 +140,18 @@ pub struct ActiveBoundedProbeLineage {
     pub matched_blocked_control: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveBoundedProbeProofKey {
+    pub side_cell_key: String,
+    pub engine_mode: String,
+    pub signal_ts_ms: u64,
+    pub context_id: String,
+    pub signal_id: String,
+    pub order_link_id: String,
+    pub decision_lease_id: String,
+    pub reference_source: String,
+}
+
 pub fn bounded_probe_attempt_record_type() -> &'static str {
     "bounded_probe_attempt"
 }
@@ -171,6 +184,61 @@ pub fn active_bounded_probe_effective_notional_within_cap(
     }
     let notional = effective_qty * effective_limit_price;
     notional.is_finite() && notional <= max_demo_notional_usdt_per_order
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn candidate_matched_active_bounded_probe_proof_key(
+    engine_mode: &str,
+    signal_ts_ms: u64,
+    strategy_name: &str,
+    symbol: &str,
+    side: &str,
+    context_id: Option<&str>,
+    signal_id: Option<&str>,
+    order_link_id: &str,
+    decision_lease_id: Option<&str>,
+    reference_source: Option<&str>,
+) -> Option<ActiveBoundedProbeProofKey> {
+    if engine_mode.trim() != engine_mode
+        || !learning_probe_admission_is_demo_only(engine_mode)
+        || signal_ts_ms == 0
+    {
+        return None;
+    }
+    let reference_source = reference_source?;
+    if reference_source != ACTIVE_BOUNDED_PROBE_REFERENCE_SOURCE {
+        return None;
+    }
+    let context_id = context_id?;
+    let signal_id = signal_id?;
+    let decision_lease_id = decision_lease_id?;
+    if !lineage_component_is_stable(context_id)
+        || !lineage_component_is_stable(signal_id)
+        || !lineage_component_is_stable(decision_lease_id)
+    {
+        return None;
+    }
+    let side_cell_key = active_bounded_probe_side_cell_key(strategy_name, symbol, side)?;
+    if !is_candidate_bound_bounded_probe_order_link_id(
+        order_link_id,
+        engine_mode,
+        signal_ts_ms,
+        &side_cell_key,
+        context_id,
+        signal_id,
+    ) {
+        return None;
+    }
+    Some(ActiveBoundedProbeProofKey {
+        side_cell_key,
+        engine_mode: engine_mode.trim().to_ascii_lowercase(),
+        signal_ts_ms,
+        context_id: context_id.to_string(),
+        signal_id: signal_id.to_string(),
+        order_link_id: order_link_id.to_string(),
+        decision_lease_id: decision_lease_id.to_string(),
+        reference_source: reference_source.to_string(),
+    })
 }
 
 pub fn candidate_matched_bounded_probe_order_from_bbo(
@@ -445,6 +513,22 @@ fn order_link_engine_mode_tag(engine_mode: &str) -> Option<&'static str> {
 fn lineage_component_is_stable(value: &str) -> bool {
     let trimmed = value.trim();
     !trimmed.is_empty() && trimmed == value
+}
+
+fn active_bounded_probe_side_cell_key(
+    strategy_name: &str,
+    symbol: &str,
+    side: &str,
+) -> Option<String> {
+    if !lineage_component_is_stable(strategy_name) || !lineage_component_is_stable(symbol) {
+        return None;
+    }
+    let normalized_side = match side {
+        "Buy" | "buy" => "Buy",
+        "Sell" | "sell" => "Sell",
+        _ => return None,
+    };
+    Some(format!("{strategy_name}|{symbol}|{normalized_side}"))
 }
 
 fn candidate_lineage_hash_tag(
@@ -985,6 +1069,125 @@ mod tests {
         )
         .unwrap();
         assert_eq!(max_seq_link_id.len(), BYBIT_ORDER_LINK_ID_MAX_LEN);
+    }
+
+    #[test]
+    fn active_bounded_probe_proof_key_requires_active_source_lease_and_candidate_lineage() {
+        let event = event();
+        let side_cell_key = event.side_cell_key();
+        let context_id = event.context_id.as_deref().unwrap();
+        let signal_id = event.signal_id.as_deref().unwrap();
+        let order_link_id = bounded_probe_order_link_id_for_candidate(
+            &event.engine_mode,
+            event.ts_ms,
+            7,
+            &side_cell_key,
+            context_id,
+            signal_id,
+        )
+        .unwrap();
+
+        let proof = candidate_matched_active_bounded_probe_proof_key(
+            &event.engine_mode,
+            event.ts_ms,
+            &event.strategy_name,
+            &event.symbol,
+            &event.side,
+            Some(context_id),
+            Some(signal_id),
+            &order_link_id,
+            Some("lease-demo-1"),
+            Some(ACTIVE_BOUNDED_PROBE_REFERENCE_SOURCE),
+        )
+        .expect("candidate-matched active proof key");
+
+        assert_eq!(proof.side_cell_key, side_cell_key);
+        assert_eq!(proof.engine_mode, "live_demo");
+        assert_eq!(proof.signal_ts_ms, event.ts_ms);
+        assert_eq!(proof.context_id, context_id);
+        assert_eq!(proof.signal_id, signal_id);
+        assert_eq!(proof.order_link_id, order_link_id);
+        assert_eq!(proof.decision_lease_id, "lease-demo-1");
+        assert_eq!(
+            proof.reference_source,
+            ACTIVE_BOUNDED_PROBE_REFERENCE_SOURCE
+        );
+
+        assert_eq!(
+            candidate_matched_active_bounded_probe_proof_key(
+                &event.engine_mode,
+                event.ts_ms,
+                &event.strategy_name,
+                &event.symbol,
+                &event.side,
+                Some(context_id),
+                Some(signal_id),
+                &order_link_id,
+                Some("lease-demo-1"),
+                Some("bounded_probe_near_touch"),
+            ),
+            None
+        );
+        assert_eq!(
+            candidate_matched_active_bounded_probe_proof_key(
+                &event.engine_mode,
+                event.ts_ms,
+                &event.strategy_name,
+                &event.symbol,
+                &event.side,
+                Some(context_id),
+                Some(signal_id),
+                &order_link_id,
+                None,
+                Some(ACTIVE_BOUNDED_PROBE_REFERENCE_SOURCE),
+            ),
+            None
+        );
+        assert_eq!(
+            candidate_matched_active_bounded_probe_proof_key(
+                &event.engine_mode,
+                event.ts_ms,
+                &event.strategy_name,
+                &event.symbol,
+                &event.side,
+                Some("ctx-demo-ma_crossover-BTCUSDT-1782040200000"),
+                Some(signal_id),
+                &order_link_id,
+                Some("lease-demo-1"),
+                Some(ACTIVE_BOUNDED_PROBE_REFERENCE_SOURCE),
+            ),
+            None
+        );
+        assert_eq!(
+            candidate_matched_active_bounded_probe_proof_key(
+                "paper",
+                event.ts_ms,
+                &event.strategy_name,
+                &event.symbol,
+                &event.side,
+                Some(context_id),
+                Some(signal_id),
+                &order_link_id,
+                Some("lease-demo-1"),
+                Some(ACTIVE_BOUNDED_PROBE_REFERENCE_SOURCE),
+            ),
+            None
+        );
+        assert_eq!(
+            candidate_matched_active_bounded_probe_proof_key(
+                " live_demo ",
+                event.ts_ms,
+                &event.strategy_name,
+                &event.symbol,
+                &event.side,
+                Some(context_id),
+                Some(signal_id),
+                &order_link_id,
+                Some("lease-demo-1"),
+                Some(ACTIVE_BOUNDED_PROBE_REFERENCE_SOURCE),
+            ),
+            None
+        );
     }
 
     #[test]
