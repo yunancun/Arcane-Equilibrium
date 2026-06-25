@@ -109,6 +109,7 @@ fn test_pending_order_clone_preserves_state() {
         qty: 0.01,
         strategy: "ma".into(),
         sent_ts_ms: 1_000,
+        signal_ts_ms: 1_000,
         cum_filled_qty: 0.0,
         is_close: false,
         // FILL-CONTEXT-LINKAGE-1: empty id preserves pre-fix behaviour.
@@ -133,6 +134,7 @@ fn test_pending_order_clone_preserves_state() {
         // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：sentinel clone 測試
         // 帶代表值驗證 derive(Clone) 行為一致。
         intent_id: Some("intent-paper-BTCUSDT-1000".into()),
+        decision_lease_id: None,
     };
     let cloned = po.clone();
     assert_eq!(cloned.order_link_id, "oc_1");

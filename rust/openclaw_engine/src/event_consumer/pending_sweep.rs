@@ -285,6 +285,7 @@ mod tests {
             qty: 0.01,
             strategy: "ma_crossover".into(),
             sent_ts_ms: 0,
+            signal_ts_ms: 0,
             cum_filled_qty: 0.0,
             is_close: false,
             context_id: String::new(),
@@ -307,6 +308,7 @@ mod tests {
             // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：sweep classifier
             // 不讀 intent_id，預設 None 保持 fixture 最小化。
             intent_id: None,
+            decision_lease_id: None,
         }
     }
 
@@ -318,6 +320,7 @@ mod tests {
             qty: 0.1,
             strategy: "grid_trading".into(),
             sent_ts_ms: 0,
+            signal_ts_ms: 0,
             cum_filled_qty: 0.0,
             is_close: false,
             context_id: String::new(),
@@ -340,6 +343,7 @@ mod tests {
             // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：sweep classifier
             // 不讀 intent_id，預設 None 保持 fixture 最小化。
             intent_id: None,
+            decision_lease_id: None,
         }
     }
 

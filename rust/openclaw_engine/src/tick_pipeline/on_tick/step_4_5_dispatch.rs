@@ -170,7 +170,9 @@ pub(crate) fn dispatch_admitted_bounded_probe_order(
         close_maker_audit: None,
         reference_price: Some(draft.reference_price),
         reference_ts_ms: Some(draft.paper_fill_ts),
-        reference_source: Some("bounded_probe_near_touch".to_string()),
+        reference_source: Some(
+            crate::bounded_probe_active_order::ACTIVE_BOUNDED_PROBE_REFERENCE_SOURCE.to_string(),
+        ),
         spine_order_plan_id: None,
         spine_decision_id: None,
         spine_verdict_id: None,

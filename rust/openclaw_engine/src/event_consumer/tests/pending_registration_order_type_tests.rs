@@ -114,6 +114,7 @@ fn baseline_pending_order(order_type: &str, tif: Option<TimeInForce>) -> Pending
         qty: 0.01,
         strategy: "ma_crossover".into(),
         sent_ts_ms: 1_700_000_000_000,
+        signal_ts_ms: 1_700_000_000_000,
         cum_filled_qty: 0.0,
         is_close: false,
         // FILL-CONTEXT-LINKAGE-1 placeholder; Order audit row now projects this.
@@ -143,6 +144,7 @@ fn baseline_pending_order(order_type: &str, tif: Option<TimeInForce>) -> Pending
         // open entry 形狀（is_close=false），故帶代表性 intent_id；新 test
         // 4-A 透過 with_intent_id helper / 直接覆寫驗證 propagation。
         intent_id: Some("intent-demo-BTCUSDT-1700000000000".into()),
+        decision_lease_id: None,
     }
 }
 
@@ -245,6 +247,114 @@ fn test_handle_pending_registration_limit_postonly_emits_limit_audit_row() {
     let details = details.expect("order audit details");
     assert_eq!(details["limit_price"].as_f64(), Some(49_990.0));
     assert_eq!(details["maker_timeout_ms"].as_u64(), Some(45_000));
+}
+
+#[test]
+fn test_active_bounded_probe_registration_emits_reconstructable_proof_key() {
+    let mut pipeline =
+        TickPipeline::with_kind(&["BTCUSDT", "ETHUSDT"], 10_000.0, PipelineKind::Demo);
+    let mut state = make_loop_state();
+    let (tx, mut rx) = mpsc::channel::<TradingMsg>(8);
+
+    let mut po = baseline_pending_order("limit", Some(TimeInForce::PostOnly));
+    po.strategy = "ma_crossover".into();
+    po.symbol = "BTCUSDT".into();
+    po.is_long = true;
+    po.signal_ts_ms = 1_700_000_000_000;
+    po.context_id = "ctx-demo-ma_crossover-BTCUSDT-1700000000000".into();
+    po.intent_id = Some("sig-demo-ma_crossover-BTCUSDT-1700000000000".into());
+    po.decision_lease_id = Some("lease-demo-1".into());
+    po.reference_source =
+        Some(crate::bounded_probe_active_order::ACTIVE_BOUNDED_PROBE_REFERENCE_SOURCE.into());
+    po.order_link_id =
+        crate::bounded_probe_active_order::bounded_probe_order_link_id_for_candidate(
+            "demo",
+            po.signal_ts_ms,
+            9,
+            "ma_crossover|BTCUSDT|Buy",
+            &po.context_id,
+            po.intent_id.as_deref().unwrap(),
+        )
+        .expect("candidate-bound active orderLinkId");
+
+    handle_pending_registration(
+        Some(PendingOrderEvent::Register(po.clone())),
+        &mut pipeline,
+        &mut state,
+        Some(&tx),
+    );
+
+    let (_, _, _, _, details) = first_order_shape(&mut rx);
+    let details = details.expect("order audit details");
+    assert_eq!(details["signal_ts_ms"].as_u64(), Some(1_700_000_000_000));
+    assert_eq!(details["decision_lease_id"].as_str(), Some("lease-demo-1"));
+    let proof = &details["active_bounded_probe_proof_key"];
+    assert_eq!(
+        proof["side_cell_key"].as_str(),
+        Some("ma_crossover|BTCUSDT|Buy")
+    );
+    assert_eq!(proof["engine_mode"].as_str(), Some("demo"));
+    assert_eq!(proof["signal_ts_ms"].as_u64(), Some(1_700_000_000_000));
+    assert_eq!(
+        proof["context_id"].as_str(),
+        Some("ctx-demo-ma_crossover-BTCUSDT-1700000000000")
+    );
+    assert_eq!(
+        proof["signal_id"].as_str(),
+        Some("sig-demo-ma_crossover-BTCUSDT-1700000000000")
+    );
+    assert_eq!(
+        proof["order_link_id"].as_str(),
+        Some(po.order_link_id.as_str())
+    );
+    assert_eq!(proof["decision_lease_id"].as_str(), Some("lease-demo-1"));
+
+    let (tx2, mut rx2) = mpsc::channel::<TradingMsg>(8);
+    let mut generic_po = po;
+    generic_po.reference_source = Some("bounded_probe_near_touch".into());
+    handle_pending_registration(
+        Some(PendingOrderEvent::Register(generic_po)),
+        &mut pipeline,
+        &mut state,
+        Some(&tx2),
+    );
+    let (_, _, _, _, generic_details) = first_order_shape(&mut rx2);
+    assert!(
+        generic_details.expect("generic order details")["active_bounded_probe_proof_key"].is_null()
+    );
+
+    let (tx3, mut rx3) = mpsc::channel::<TradingMsg>(8);
+    let mut close_po = baseline_pending_order("limit", Some(TimeInForce::PostOnly));
+    close_po.strategy = "ma_crossover".into();
+    close_po.symbol = "BTCUSDT".into();
+    close_po.is_long = true;
+    close_po.is_close = true;
+    close_po.signal_ts_ms = 1_700_000_000_000;
+    close_po.context_id = "ctx-demo-ma_crossover-BTCUSDT-1700000000000".into();
+    close_po.intent_id = Some("sig-demo-ma_crossover-BTCUSDT-1700000000000".into());
+    close_po.decision_lease_id = Some("lease-demo-1".into());
+    close_po.reference_source =
+        Some(crate::bounded_probe_active_order::ACTIVE_BOUNDED_PROBE_REFERENCE_SOURCE.into());
+    close_po.order_link_id =
+        crate::bounded_probe_active_order::bounded_probe_order_link_id_for_candidate(
+            "demo",
+            close_po.signal_ts_ms,
+            10,
+            "ma_crossover|BTCUSDT|Buy",
+            &close_po.context_id,
+            close_po.intent_id.as_deref().unwrap(),
+        )
+        .expect("candidate-bound active orderLinkId");
+    handle_pending_registration(
+        Some(PendingOrderEvent::Register(close_po)),
+        &mut pipeline,
+        &mut state,
+        Some(&tx3),
+    );
+    let (_, _, _, _, close_details) = first_order_shape(&mut rx3);
+    assert!(
+        close_details.expect("close order details")["active_bounded_probe_proof_key"].is_null()
+    );
 }
 
 // ───────────────────────────────────────────────────────────────────────────

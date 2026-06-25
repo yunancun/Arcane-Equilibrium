@@ -17,6 +17,8 @@ from cost_gate_learning_lane.contract import (
 
 NOW = dt.datetime(2026, 6, 22, 13, 0, tzinfo=dt.timezone.utc)
 SIDE_CELL = "ma_crossover|BTCUSDT|Sell"
+ACTIVE_HASH_MOD = 101_559_956_668_416
+ACTIVE_HASH_LEN = 9
 
 
 def _preflight(**answer_overrides) -> dict:
@@ -128,6 +130,76 @@ def _fill_backed_outcome(i: int, net_bps: float) -> dict:
         close_state="CLOSED_AT_HORIZON",
         source_artifact_path=f"artifacts/probe/fill-{i}.json",
     )
+
+
+def _to_base36(value: int) -> str:
+    digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+    if value == 0:
+        return "0"
+    out = ""
+    while value > 0:
+        value, idx = divmod(value, 36)
+        out = digits[idx] + out
+    return out
+
+
+def _candidate_hash(side_cell_key: str, context_id: str, signal_id: str) -> str:
+    hash_value = 0xCBF2_9CE4_8422_2325
+    payload = (
+        side_cell_key.encode()
+        + bytes([0x1E])
+        + context_id.encode()
+        + bytes([0x1F])
+        + signal_id.encode()
+    )
+    for byte in payload:
+        hash_value ^= byte
+        hash_value = (hash_value * 0x0000_0100_0000_01B3) & 0xFFFF_FFFF_FFFF_FFFF
+    return _to_base36(hash_value % ACTIVE_HASH_MOD).rjust(ACTIVE_HASH_LEN, "0")
+
+
+def _active_order_link_id(
+    *,
+    signal_ts_ms: int,
+    seq: int,
+    side_cell_key: str,
+    context_id: str,
+    signal_id: str,
+) -> str:
+    return (
+        f"oc_dm_{signal_ts_ms}_{_to_base36(seq)}_"
+        f"{_candidate_hash(side_cell_key, context_id, signal_id)}"
+    )
+
+
+def _active_fill_backed_outcome(i: int, net_bps: float, *, proof_key: bool) -> dict:
+    signal_ts_ms = 1_700_000_000_000 + i
+    context_id = f"ctx-demo-ma_crossover-BTCUSDT-170000000000{i}"
+    signal_id = f"sig-demo-ma_crossover-BTCUSDT-170000000000{i}"
+    order_link_id = _active_order_link_id(
+        signal_ts_ms=signal_ts_ms,
+        seq=i,
+        side_cell_key=SIDE_CELL,
+        context_id=context_id,
+        signal_id=signal_id,
+    )
+    row = _fill_backed_outcome(i, net_bps)
+    row.update(
+        reference_source="bounded_probe_active_near_touch",
+        order_link_id=order_link_id,
+    )
+    if proof_key:
+        row["active_bounded_probe_proof_key"] = {
+            "side_cell_key": SIDE_CELL,
+            "engine_mode": "demo",
+            "signal_ts_ms": signal_ts_ms,
+            "context_id": context_id,
+            "signal_id": signal_id,
+            "order_link_id": order_link_id,
+            "decision_lease_id": f"lease-demo-{i}",
+            "reference_source": "bounded_probe_active_near_touch",
+        }
+    return row
 
 
 def _control(i: int, net_bps: float, horizon_minutes: int = 240) -> dict:
@@ -262,6 +334,78 @@ def test_lineage_complete_fill_backed_probe_outcomes_remain_countable() -> None:
     assert packet["probe_result_summary"]["proof_excluded_probe_outcome_count"] == 0
     assert packet["answers"]["proof_exclusion_present"] is False
     assert packet["answers"]["promotion_evidence"] is False
+
+
+def test_active_fill_backed_probe_outcomes_require_active_proof_key() -> None:
+    packet = build_bounded_demo_probe_result_review(
+        preflight=_preflight(),
+        ledger_rows=[
+            _active_fill_backed_outcome(1, 2.0, proof_key=False),
+            _active_fill_backed_outcome(2, 4.0, proof_key=False),
+            _active_fill_backed_outcome(3, 1.0, proof_key=False),
+        ],
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "PROBE_OUTCOMES_PROOF_EXCLUDED"
+    assert packet["probe_result_summary"]["raw_completed_probe_outcome_count"] == 3
+    assert packet["probe_result_summary"]["completed_probe_outcome_count"] == 0
+    assert packet["proof_exclusion"]["reason_counts"][
+        "active_bounded_probe_proof_key_missing_or_invalid"
+    ] == 3
+
+
+def test_details_active_reference_source_also_requires_active_proof_key() -> None:
+    masked = _active_fill_backed_outcome(1, 2.0, proof_key=False)
+    masked["reference_source"] = "bounded_probe_near_touch"
+    masked["details"] = {"reference_source": "bounded_probe_active_near_touch"}
+    packet = build_bounded_demo_probe_result_review(
+        preflight=_preflight(),
+        ledger_rows=[masked],
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "PROBE_OUTCOMES_PROOF_EXCLUDED"
+    assert packet["proof_exclusion"]["reason_counts"][
+        "active_bounded_probe_proof_key_missing_or_invalid"
+    ] == 1
+
+
+def test_malformed_active_proof_key_is_proof_excluded() -> None:
+    rows = [_active_fill_backed_outcome(i, 2.0, proof_key=True) for i in range(1, 4)]
+    for row in rows:
+        row["active_bounded_probe_proof_key"]["engine_mode"] = "live"
+        row["active_bounded_probe_proof_key"]["signal_ts_ms"] = 0
+
+    packet = build_bounded_demo_probe_result_review(
+        preflight=_preflight(),
+        ledger_rows=rows,
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "PROBE_OUTCOMES_PROOF_EXCLUDED"
+    assert packet["probe_result_summary"]["completed_probe_outcome_count"] == 0
+    assert packet["proof_exclusion"]["reason_counts"][
+        "active_bounded_probe_proof_key_missing_or_invalid"
+    ] == 3
+
+
+def test_active_fill_backed_probe_outcomes_with_active_proof_key_remain_countable() -> None:
+    packet = build_bounded_demo_probe_result_review(
+        preflight=_preflight(),
+        ledger_rows=[
+            _active_fill_backed_outcome(1, 2.0, proof_key=True),
+            _active_fill_backed_outcome(2, 4.0, proof_key=True),
+            _active_fill_backed_outcome(3, 1.0, proof_key=True),
+        ],
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED"
+    assert packet["probe_result_summary"]["raw_completed_probe_outcome_count"] == 3
+    assert packet["probe_result_summary"]["completed_probe_outcome_count"] == 3
+    assert packet["probe_result_summary"]["proof_excluded_probe_outcome_count"] == 0
+    assert packet["answers"]["proof_exclusion_present"] is False
 
 
 def test_first_review_pass_with_matched_control_records_relative_edge() -> None:

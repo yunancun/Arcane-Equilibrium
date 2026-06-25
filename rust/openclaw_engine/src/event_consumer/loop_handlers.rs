@@ -331,16 +331,48 @@ pub(super) fn handle_pending_registration(
         } else {
             Some(po.context_id.clone())
         };
+        let em = pipeline.effective_engine_mode().to_string();
+        let order_side = if po.is_long { "Buy" } else { "Sell" };
+        let active_bounded_probe_proof_key = if !po.is_close {
+            crate::bounded_probe_active_order::candidate_matched_active_bounded_probe_proof_key(
+                &em,
+                po.signal_ts_ms,
+                &po.strategy,
+                &po.symbol,
+                order_side,
+                order_context_id.as_deref(),
+                po.intent_id.as_deref(),
+                &po.order_link_id,
+                po.decision_lease_id.as_deref(),
+                po.reference_source.as_deref(),
+            )
+        } else {
+            None
+        }
+        .map(|key| {
+            serde_json::json!({
+                "side_cell_key": key.side_cell_key,
+                "engine_mode": key.engine_mode,
+                "signal_ts_ms": key.signal_ts_ms,
+                "context_id": key.context_id,
+                "signal_id": key.signal_id,
+                "order_link_id": key.order_link_id,
+                "decision_lease_id": key.decision_lease_id,
+                "reference_source": key.reference_source,
+            })
+        });
         let details = serde_json::json!({
             "limit_price": po.limit_price,
             "maker_timeout_ms": po.maker_timeout_ms,
             "reference_price": po.reference_price,
             "reference_ts_ms": po.reference_ts_ms,
             "reference_source": po.reference_source,
+            "signal_ts_ms": po.signal_ts_ms,
+            "decision_lease_id": po.decision_lease_id,
+            "active_bounded_probe_proof_key": active_bounded_probe_proof_key,
             "is_close": po.is_close,
         });
         if let Some(tx) = order_tx {
-            let em = pipeline.effective_engine_mode().to_string();
             let _ = crate::database::try_send_trading_msg(
                 tx,
                 crate::database::TradingMsg::Order {
@@ -487,6 +519,7 @@ pub(super) fn handle_pending_registration(
                 qty,
                 strategy: strategy.clone(),
                 sent_ts_ms: ts_ms,
+                signal_ts_ms: ts_ms,
                 cum_filled_qty: 0.0,
                 is_close,
                 context_id: context_id.clone(),
@@ -512,6 +545,7 @@ pub(super) fn handle_pending_registration(
                 // dispatch_failed close-maker 重建 PendingOrder 為 fallback
                 // 路徑，非 strategy intent 對應，保 None。
                 intent_id: None,
+                decision_lease_id: None,
             };
             dispatch_close_maker_fallback_from_pending(
                 state,
@@ -1264,6 +1298,7 @@ mod tests {
             qty: 0.1,
             strategy: "strategy_close:grid_close_long".to_string(),
             sent_ts_ms: 1_700_000_000_000,
+            signal_ts_ms: 1_700_000_000_000,
             cum_filled_qty: 0.0,
             is_close: true,
             context_id: "ctx-close-maker".to_string(),
@@ -1290,6 +1325,7 @@ mod tests {
             // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：close fixture
             // 對應 close path，不帶 strategy intent。
             intent_id: None,
+            decision_lease_id: None,
         }
     }
 

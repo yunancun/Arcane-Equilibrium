@@ -61,6 +61,14 @@ pub struct PendingOrder {
     pub strategy: String,
     /// Timestamp when sent / 發送時間戳
     pub sent_ts_ms: u64,
+    /// Signal/intent timestamp mirrored from OrderDispatchRequest.paper_fill_ts.
+    /// For active bounded probes this is the timestamp embedded in the
+    /// candidate-bound orderLinkId and must survive into audit details for
+    /// post-restart reconstruction.
+    /// 從 OrderDispatchRequest.paper_fill_ts 鏡射的訊號/意圖時間戳。active bounded
+    /// probe 會把此值寫入 candidate-bound orderLinkId，必須進入審計 details 以便
+    /// 重啟後重建 proof key。
+    pub signal_ts_ms: u64,
     /// Cumulative filled quantity / 累計成交數量
     pub cum_filled_qty: f64,
     /// Whether this is a close order / 是否為平倉訂單
@@ -146,6 +154,13 @@ pub struct PendingOrder {
     /// TradingMsg::Order 時寫入 trading.orders.intent_id。entry order
     /// = Some(make_intent_id(em, symbol, ts_ms))；close / orphan = None。
     pub intent_id: Option<String>,
+    /// Decision Lease id mirrored from OrderDispatchRequest. It is duplicated
+    /// into trading.orders.details so post-restart bounded-probe outcome review
+    /// can reject fills that cannot prove lease lineage.
+    /// 從 OrderDispatchRequest 鏡射的 Decision Lease id，會寫入
+    /// trading.orders.details，讓重啟後的 bounded-probe outcome review 能拒絕
+    /// 無法證明租約 lineage 的成交。
+    pub decision_lease_id: Option<String>,
 }
 
 /// Pending-order lifecycle messages sent from the dispatch task to the event

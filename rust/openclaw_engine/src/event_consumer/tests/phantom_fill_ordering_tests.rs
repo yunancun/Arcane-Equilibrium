@@ -45,6 +45,7 @@ fn close_pending_order(symbol: &str, is_long: bool, qty: f64) -> PendingOrder {
         qty,
         strategy: "strategy_close:grid_close_short".into(),
         sent_ts_ms: 1_700_000_000_000,
+        signal_ts_ms: 1_700_000_000_000,
         cum_filled_qty: 0.0,
         is_close: true, // ★ reduce-only：本檔的核心旗標
         context_id: "ctx-close".into(),
@@ -65,6 +66,7 @@ fn close_pending_order(symbol: &str, is_long: bool, qty: f64) -> PendingOrder {
         spine_stub_report_id: None,
         // close 路徑無 strategy intent，intent_id 保 None（誠實表述）。
         intent_id: None,
+        decision_lease_id: None,
     }
 }
 
