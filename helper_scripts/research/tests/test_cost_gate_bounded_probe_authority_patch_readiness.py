@@ -80,6 +80,79 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+NO_RUNTIME_AUTHORITY_TRUE_KEYS = {
+    "active_caller_enablement_authority_granted",
+    "active_order_submission_authority_granted",
+    "active_order_submission_ready_is_order_authority",
+    "active_caller_source_ready_for_review_is_order_authority",
+    "active_runtime_order_authority",
+    "active_runtime_probe_authority",
+    "actual_runtime_admission_enablement_ready",
+    "adapter_enablement_performed",
+    "adapter_enabled_by_this_packet",
+    "allowed_to_submit_order",
+    "allowed_to_submit_order_in_current_review",
+    "api_call_performed",
+    "auth_mutation_performed",
+    "bybit_call_performed",
+    "bybit_private_call_performed",
+    "bybit_public_market_data_call_performed",
+    "canonical_plan_mutation_performed",
+    "crontab_edit_performed",
+    "crontab_mutation_performed",
+    "exchange_facing_order_authority_granted",
+    "global_cost_gate_lowering_recommended",
+    "ledger_append_performed",
+    "live_authority_granted",
+    "live_execution_allowed",
+    "order_authority_granted",
+    "order_cancel_modify_performed",
+    "order_submission_performed",
+    "pg_query_performed",
+    "pg_write_performed",
+    "plan_mutation_performed",
+    "probe_authority_granted",
+    "promotion_evidence",
+    "promotion_proof",
+    "risk_mutation_performed",
+    "runtime_adapter_enablement_performed",
+    "runtime_config_mutation_performed",
+    "runtime_env_mutation_performed",
+    "runtime_mutation_performed",
+    "runtime_order_authority_found",
+    "runtime_probe_authority_found",
+    "rust_writer_enabled",
+    "service_mutation_performed",
+    "service_restart_performed",
+    "writer_enablement_performed",
+    "writer_enabled",
+}
+
+
+def _iter_key_values(payload: object, prefix: str = ""):
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            path = f"{prefix}.{key}" if prefix else str(key)
+            yield path, key, value
+            yield from _iter_key_values(value, path)
+    elif isinstance(payload, list):
+        for idx, value in enumerate(payload):
+            yield from _iter_key_values(value, f"{prefix}[{idx}]")
+
+
+def _assert_no_runtime_authority_true(packet: dict) -> None:
+    for path, key, value in _iter_key_values(packet):
+        if key in NO_RUNTIME_AUTHORITY_TRUE_KEYS:
+            assert value is False, f"{path} unexpectedly grants authority/action"
+    assert packet["answers"]["main_cost_gate_adjustment"] == "NONE"
+    assert (
+        packet["runtime_admission_propagation_review"]["answers"][
+            "main_cost_gate_adjustment"
+        ]
+        == "NONE"
+    )
+
+
 def _write_existing_seams(repo: Path) -> None:
     _write(
         repo / "rust/openclaw_engine/src/demo_learning_lane.rs",
@@ -716,6 +789,38 @@ def test_current_repo_reports_active_order_submission_source_ready_without_autho
     assert "reviewed_runtime_adapter_enablement_gate_missing" in caller["blockers"]
     assert "runtime_source_sync_not_verified" in caller["blockers"]
     assert "post_restart_pending_order_reconciliation_not_proven" in caller["blockers"]
+    propagation = packet["runtime_admission_propagation_review"]
+    assert (
+        propagation["status"]
+        == "RUNTIME_ADMISSION_PROPAGATION_BLOCKED_SOURCE_ONLY_NO_RUNTIME_AUTHORITY"
+    )
+    assert (
+        packet["answers"]["runtime_admission_propagation_ready_for_e3_bb_review"]
+        is False
+    )
+    assert (
+        packet["answers"]["source_ready_sufficient_for_e3_bb_enablement_review"]
+        is False
+    )
+    assert (
+        packet["answers"]["active_order_submission_ready_is_order_authority"]
+        is False
+    )
+    assert (
+        packet["answers"][
+            "active_caller_source_ready_for_review_is_order_authority"
+        ]
+        is False
+    )
+    assert packet["answers"]["actual_runtime_admission_enablement_ready"] is False
+    assert packet["answers"]["runtime_source_sync_verified"] is False
+    assert (
+        packet["answers"]["post_restart_pending_order_reconciliation_proven"]
+        is False
+    )
+    assert packet["answers"]["runtime_adapter_enablement_performed"] is False
+    assert "active_caller_source_review_not_ready" in propagation["blockers"]
+    _assert_no_runtime_authority_true(packet)
 
 
 def test_active_order_readiness_fails_closed_when_source_files_missing(
@@ -955,6 +1060,55 @@ fn dispatch(intent: OrderIntent) {
     assert packet["answers"]["runtime_mutation_performed"] is False
     assert "runtime_source_sync_not_verified" in caller["blockers"]
     assert "post_restart_pending_order_reconciliation_not_proven" in caller["blockers"]
+    propagation = packet["runtime_admission_propagation_review"]
+    assert (
+        propagation["status"]
+        == "RUNTIME_ADMISSION_PROPAGATION_SOURCE_READY_FOR_E3_BB_REVIEW_NO_RUNTIME_AUTHORITY"
+    )
+    assert (
+        propagation["runtime_admission_propagation_ready_for_e3_bb_review"]
+        is True
+    )
+    assert (
+        packet["answers"]["runtime_admission_propagation_ready_for_e3_bb_review"]
+        is True
+    )
+    assert (
+        packet["answers"]["source_ready_sufficient_for_e3_bb_enablement_review"]
+        is True
+    )
+    assert (
+        packet["answers"]["active_order_submission_ready_is_order_authority"]
+        is False
+    )
+    assert (
+        packet["answers"][
+            "active_caller_source_ready_for_review_is_order_authority"
+        ]
+        is False
+    )
+    assert packet["answers"]["actual_runtime_admission_enablement_ready"] is False
+    assert packet["answers"]["runtime_source_sync_verified"] is False
+    assert (
+        packet["answers"]["post_restart_pending_order_reconciliation_proven"]
+        is False
+    )
+    assert packet["answers"]["runtime_adapter_enablement_performed"] is False
+    assert packet["answers"]["adapter_enabled_by_this_packet"] is False
+    assert packet["answers"]["allowed_to_submit_order_in_current_review"] is False
+    assert packet["answers"]["exchange_facing_order_authority_granted"] is False
+    assert packet["answers"]["bybit_call_performed"] is False
+    assert packet["answers"]["order_submission_performed"] is False
+    assert "runtime_source_sync_not_verified" in propagation["blockers"]
+    assert "post_restart_pending_order_reconciliation_not_proven" in propagation[
+        "blockers"
+    ]
+    assert (
+        "runtime_adapter_enablement_not_performed_source_only_packet"
+        in propagation["blockers"]
+    )
+    assert "active_caller_source_review_not_ready" not in propagation["blockers"]
+    _assert_no_runtime_authority_true(packet)
 
 
 def test_unused_active_caller_helper_does_not_count_as_reviewed_runtime_path(

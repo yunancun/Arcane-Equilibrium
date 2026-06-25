@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-25 Bounded Probe Runtime/Admission Propagation Review
+
+- `bounded_probe_authority_patch_readiness.py` now exposes `runtime_admission_propagation_review` plus top-level no-authority answers, including `actual_runtime_admission_enablement_ready=false`, `allowed_to_submit_order=false`, `adapter_enabled_by_this_packet=false`, and Bybit/order/PG/runtime/writer/live/probe authority false.
+- Current repo remains source-blocked for active runtime enablement: production active caller, reviewed runtime adapter gate, runtime source sync, adapter enablement, and post-restart reconciliation are not proven.
+- Verification passed focused readiness `33`, adjacent active/proof/result/execution `35`, py_compile, and diff-check. Boundary remains source/test/docs only; no runtime sync, PG/Bybit/order/cancel/modify, Cost Gate lowering, active probe/order/live authority, Rust writer enablement, or promotion proof.
+
 ## 2026-06-25 Bounded Probe Active Effective Cap Guard
 
 - Active bounded Demo drafts now share a fail-closed effective-notional cap helper, and the dormant active dispatch seam rechecks cap immediately before `OrderDispatchRequest` send.

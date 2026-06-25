@@ -35,8 +35,11 @@ BOUNDARY = (
 AUTHORITY_TRUE_KEYS = {
     "active_runtime_order_authority",
     "active_runtime_probe_authority",
+    "actual_runtime_admission_enablement_ready",
+    "adapter_enablement_performed",
     "adapter_enabled_by_this_packet",
     "allowed_to_submit_order",
+    "allowed_to_submit_order_in_current_review",
     "api_call_performed",
     "auth_mutation_performed",
     "bybit_call_performed",
@@ -66,6 +69,8 @@ AUTHORITY_TRUE_KEYS = {
     "runtime_config_mutation_performed",
     "runtime_env_mutation_performed",
     "runtime_mutation_performed",
+    "runtime_adapter_enablement_performed",
+    "runtime_admission_enablement_ready",
     "runtime_order_authority_found",
     "runtime_probe_authority_found",
     "rust_writer_enabled",
@@ -1091,6 +1096,121 @@ def _active_caller_enablement_review(
     }
 
 
+def _runtime_admission_propagation_review(
+    active_order_summary: dict[str, Any],
+    active_caller_summary: dict[str, Any],
+) -> dict[str, Any]:
+    active_order_submission_ready = (
+        active_order_summary.get("active_order_submission_ready") is True
+    )
+    active_caller_source_ready = (
+        active_caller_summary.get("active_caller_source_ready_for_review") is True
+    )
+    review_ready = active_order_submission_ready and active_caller_source_ready
+    runtime_source_sync_verified = False
+    post_restart_pending_order_reconciliation_proven = False
+    adapter_enablement_performed = False
+
+    blockers: list[str] = []
+    if not active_order_submission_ready:
+        blockers.append("active_order_submission_source_seam_not_ready")
+    if not active_caller_source_ready:
+        blockers.append("active_caller_source_review_not_ready")
+    if not runtime_source_sync_verified:
+        blockers.append("runtime_source_sync_not_verified")
+    if not post_restart_pending_order_reconciliation_proven:
+        blockers.append("post_restart_pending_order_reconciliation_not_proven")
+    if not adapter_enablement_performed:
+        blockers.append("runtime_adapter_enablement_not_performed_source_only_packet")
+
+    no_authority = {
+        "actual_runtime_admission_enablement_ready": False,
+        "runtime_source_sync_verified": runtime_source_sync_verified,
+        "post_restart_pending_order_reconciliation_proven": (
+            post_restart_pending_order_reconciliation_proven
+        ),
+        "runtime_adapter_enablement_performed": adapter_enablement_performed,
+        "adapter_enablement_performed": adapter_enablement_performed,
+        "adapter_enabled_by_this_packet": False,
+        "allowed_to_submit_order": False,
+        "allowed_to_submit_order_in_current_review": False,
+        "active_order_submission_ready_is_order_authority": False,
+        "active_caller_source_ready_for_review_is_order_authority": False,
+        "active_runtime_order_authority": False,
+        "active_runtime_probe_authority": False,
+        "exchange_facing_order_authority_granted": False,
+        "probe_authority_granted": False,
+        "order_authority_granted": False,
+        "runtime_order_authority_found": False,
+        "runtime_probe_authority_found": False,
+        "api_call_performed": False,
+        "bybit_call_performed": False,
+        "bybit_private_call_performed": False,
+        "bybit_public_market_data_call_performed": False,
+        "order_submission_performed": False,
+        "order_cancel_modify_performed": False,
+        "ledger_append_performed": False,
+        "canonical_plan_mutation_performed": False,
+        "plan_mutation_performed": False,
+        "pg_write_performed": False,
+        "pg_query_performed": False,
+        "risk_mutation_performed": False,
+        "auth_mutation_performed": False,
+        "runtime_mutation_performed": False,
+        "runtime_env_mutation_performed": False,
+        "runtime_config_mutation_performed": False,
+        "service_restart_performed": False,
+        "service_mutation_performed": False,
+        "crontab_edit_performed": False,
+        "crontab_mutation_performed": False,
+        "rust_writer_enabled": False,
+        "writer_enablement_performed": False,
+        "writer_enabled": False,
+        "live_authority_granted": False,
+        "live_execution_allowed": False,
+        "global_cost_gate_lowering_recommended": False,
+        "main_cost_gate_adjustment": "NONE",
+        "promotion_evidence": False,
+        "promotion_proof": False,
+    }
+    return {
+        "status": (
+            "RUNTIME_ADMISSION_PROPAGATION_SOURCE_READY_FOR_E3_BB_REVIEW_NO_RUNTIME_AUTHORITY"
+            if review_ready
+            else "RUNTIME_ADMISSION_PROPAGATION_BLOCKED_SOURCE_ONLY_NO_RUNTIME_AUTHORITY"
+        ),
+        "runtime_admission_propagation_ready_for_e3_bb_review": review_ready,
+        "source_ready_sufficient_for_e3_bb_enablement_review": review_ready,
+        "blockers": blockers,
+        "evidence": {
+            "active_order_submission_ready": active_order_submission_ready,
+            "active_caller_source_ready_for_review": active_caller_source_ready,
+            **no_authority,
+        },
+        "answers": {
+            "runtime_admission_propagation_ready_for_e3_bb_review": review_ready,
+            "source_ready_sufficient_for_e3_bb_enablement_review": review_ready,
+            **no_authority,
+        },
+        "required_before_runtime_enablement": [
+            "PM_E3_BB_runtime_source_admission_propagation_review_before_any_runtime_enablement",
+            "runtime_source_sync_and_clean_head_verification",
+            "post_restart_pending_order_reconciliation_review",
+            "reviewed_runtime_adapter_enablement_gate",
+            "fresh_candidate_scoped_authorization_and_admission",
+            "separate_exchange_facing_order_envelope_review_before_any_demo_order",
+        ],
+        "max_safe_next_action": (
+            "PM_E3_BB_runtime_source_admission_propagation_review_only"
+        ),
+        "boundary": (
+            "source-only runtime/admission propagation review; source readiness "
+            "is not adapter enablement, probe authority, order authority, or "
+            "runtime/exchange authorization"
+        ),
+    }
+
+
 def _profitability_improvement_lanes(
     placement_summary: dict[str, Any], source_summary: dict[str, Any]
 ) -> list[dict[str, Any]]:
@@ -1210,9 +1330,9 @@ def _status(
         "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
         "source_contains_required_near_touch_authority_adapter_and_evidence_hooks",
         [
-            "operator_review_static_patch_readiness_before_demo_authorization",
-            "run_bounded_demo_probe_only_after_separate_authorization",
-            "refresh_order_to_fill_and_execution_realism_artifacts_after_probe",
+            "PM_E3_BB_runtime_source_admission_propagation_review_before_any_runtime_enablement",
+            "separate_runtime_source_sync_and_post_restart_reconciliation_before_any_adapter_enablement",
+            "separate_exchange_facing_order_envelope_review_before_any_demo_order",
         ],
     )
 
@@ -1240,6 +1360,10 @@ def build_bounded_demo_probe_authority_patch_readiness(
         repo_root,
         active_order_summary,
     )
+    runtime_propagation_summary = _runtime_admission_propagation_review(
+        active_order_summary,
+        active_caller_summary,
+    )
     status, reason, next_actions = _status(
         placement_summary=placement_summary,
         source_summary=source_summary,
@@ -1255,6 +1379,7 @@ def build_bounded_demo_probe_authority_patch_readiness(
         "source_readiness": source_summary,
         "active_order_submission_readiness": active_order_summary,
         "active_caller_enablement_review": active_caller_summary,
+        "runtime_admission_propagation_review": runtime_propagation_summary,
         "profitability_improvement_lanes": lanes,
         "answers": {
             "placement_repair_plan_ready": placement_summary.get(
@@ -1295,8 +1420,44 @@ def build_bounded_demo_probe_authority_patch_readiness(
             )
             is True,
             "active_caller_enablement_authority_granted": False,
+            **_dict(runtime_propagation_summary.get("answers")),
+            "runtime_admission_propagation_ready_for_e3_bb_review": runtime_propagation_summary.get(
+                "runtime_admission_propagation_ready_for_e3_bb_review"
+            )
+            is True,
+            "source_ready_sufficient_for_e3_bb_enablement_review": runtime_propagation_summary.get(
+                "source_ready_sufficient_for_e3_bb_enablement_review"
+            )
+            is True,
+            "actual_runtime_admission_enablement_ready": False,
+            "runtime_source_sync_verified": False,
+            "post_restart_pending_order_reconciliation_proven": False,
+            "runtime_adapter_enablement_performed": False,
+            "adapter_enablement_performed": False,
+            "adapter_enabled_by_this_packet": False,
+            "allowed_to_submit_order": False,
+            "allowed_to_submit_order_in_current_review": False,
+            "active_order_submission_ready_is_order_authority": False,
+            "active_caller_source_ready_for_review_is_order_authority": False,
+            "active_runtime_order_authority": False,
+            "active_runtime_probe_authority": False,
+            "exchange_facing_order_authority_granted": False,
+            "bybit_call_performed": False,
+            "bybit_private_call_performed": False,
+            "bybit_public_market_data_call_performed": False,
+            "order_submission_performed": False,
+            "order_cancel_modify_performed": False,
+            "pg_write_performed": False,
+            "rust_writer_enabled": False,
+            "writer_enablement_performed": False,
+            "live_authority_granted": False,
+            "live_execution_allowed": False,
             "rust_patch_required": status.startswith("RUST_PATCH_REQUIRED_"),
             "runtime_mutation_performed": False,
+            "runtime_env_mutation_performed": False,
+            "runtime_config_mutation_performed": False,
+            "service_restart_performed": False,
+            "crontab_edit_performed": False,
             "global_cost_gate_lowering_recommended": False,
             "main_cost_gate_adjustment": "NONE",
             "probe_authority_granted": False,
@@ -1312,6 +1473,7 @@ def render_markdown(packet: dict[str, Any]) -> str:
     source = _dict(packet.get("source_readiness"))
     active_order = _dict(packet.get("active_order_submission_readiness"))
     active_caller = _dict(packet.get("active_caller_enablement_review"))
+    runtime_propagation = _dict(packet.get("runtime_admission_propagation_review"))
     lines = [
         "# Bounded Demo Probe Authority Patch Readiness",
         "",
@@ -1329,6 +1491,10 @@ def render_markdown(packet: dict[str, Any]) -> str:
         f"- Active caller source ready for review: `{active_caller.get('active_caller_source_ready_for_review')}`",
         f"- Actual active caller enablement ready: `{active_caller.get('actual_active_caller_enablement_ready')}`",
         f"- Active caller enablement blockers: `{active_caller.get('blockers')}`",
+        f"- Runtime/admission propagation review status: `{runtime_propagation.get('status')}`",
+        f"- Runtime/admission propagation ready for E3/BB review: `{runtime_propagation.get('runtime_admission_propagation_ready_for_e3_bb_review')}`",
+        f"- Actual runtime admission enablement ready: `{_dict(runtime_propagation.get('answers')).get('actual_runtime_admission_enablement_ready')}`",
+        f"- Runtime/admission propagation blockers: `{runtime_propagation.get('blockers')}`",
         f"- Missing patch seams: `{source.get('missing_required_patch_seams')}`",
         f"- Boundary: {packet.get('boundary')}",
         "",
