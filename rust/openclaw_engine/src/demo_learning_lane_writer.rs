@@ -20,8 +20,9 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 use crate::bounded_probe_active_order::{
-    candidate_matched_bounded_probe_order, ActiveBoundedProbeOrderDecision,
-    ActiveBoundedProbeOrderDraft, ActiveBoundedProbeOrderRequest, ActiveBoundedProbeRiskLimits,
+    bounded_probe_order_link_id_for_candidate, candidate_matched_bounded_probe_order,
+    ActiveBoundedProbeOrderDecision, ActiveBoundedProbeOrderDraft, ActiveBoundedProbeOrderRequest,
+    ActiveBoundedProbeRiskLimits,
 };
 use crate::bounded_probe_near_touch::BoundedProbePlacementDecision;
 use crate::demo_learning_lane::{
@@ -597,12 +598,21 @@ mod tests {
             true,
             "NORMAL",
         );
+        let order_link_id = bounded_probe_order_link_id_for_candidate(
+            &event.engine_mode,
+            event.ts_ms,
+            1,
+            &event.side_cell_key(),
+            event.context_id.as_deref().unwrap(),
+            event.signal_id.as_deref().unwrap(),
+        )
+        .unwrap();
         let order_request = ActiveBoundedProbeOrderRequest {
             reject_event: event.clone(),
             admission_decision,
             placement_decision: placement.clone(),
             qty: 0.001,
-            order_link_id: "oc_ld_1782041000000_1".to_string(),
+            order_link_id: order_link_id.clone(),
             decision_lease_id: Some("lease-demo-1".to_string()),
             risk_state: "NORMAL".to_string(),
             limits: ActiveBoundedProbeRiskLimits::default(),
@@ -633,7 +643,7 @@ mod tests {
         let draft = active_bounded_probe_order_submission(allowed)
             .expect("enabled adapter and admitted plan should build a draft");
         assert_eq!(draft.lineage.side_cell_key, "ma_crossover|ETHUSDT|Sell");
-        assert_eq!(draft.lineage.order_link_id, "oc_ld_1782041000000_1");
+        assert_eq!(draft.lineage.order_link_id, order_link_id);
         assert_eq!(draft.lineage.bounded_probe_attempt, "bounded_probe_attempt");
     }
 

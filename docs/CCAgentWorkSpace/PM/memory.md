@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-25 Bounded Probe Active Candidate-Bound OrderLinkId
+
+- Active bounded Demo draft validation now requires candidate-bound deterministic `orderLinkId` over engine mode, event ts, canonical base36 seq, side-cell, context id, and signal id; generic orderLinkId helper remains unchanged.
+- PA/E2 concerns were fixed: side-cell is included in the lineage hash, non-canonical leading-zero seq is rejected, and dormant writer helper fixtures use the new helper.
+- Boundary remains source/test/docs only: no runtime sync, no PG/Bybit/order/cancel/modify, no Cost Gate lowering, no active probe/order/live authority, and no promotion proof.
+
 ## 2026-06-24 Bounded Probe Authorization Candidate-Scoped Refresh
 
 - E3 approved timestamped-only artifact generation for `grid_trading|AVAXUSDT|Sell`; PM generated standing auth sha `a303f80e` and bounded authorization packet sha `391dbca5`.

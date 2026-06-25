@@ -9,7 +9,8 @@ use super::{
     try_clone_panel_snapshot,
 };
 use crate::bounded_probe_active_order::{
-    ActiveBoundedProbeOrderDecision, ActiveBoundedProbeOrderRequest, ActiveBoundedProbeRiskLimits,
+    bounded_probe_order_link_id_for_candidate, ActiveBoundedProbeOrderDecision,
+    ActiveBoundedProbeOrderRequest, ActiveBoundedProbeRiskLimits,
 };
 use crate::bounded_probe_near_touch::{
     BoundedProbeAttemptPlacement, BoundedProbePlacementDecision, BoundedProbePlacementSkipReason,
@@ -92,6 +93,15 @@ fn bounded_probe_event() -> RejectEvent {
 
 fn bounded_probe_order_request() -> ActiveBoundedProbeOrderRequest {
     let event = bounded_probe_event();
+    let order_link_id = bounded_probe_order_link_id_for_candidate(
+        &event.engine_mode,
+        event.ts_ms,
+        1,
+        &event.side_cell_key(),
+        event.context_id.as_deref().unwrap(),
+        event.signal_id.as_deref().unwrap(),
+    )
+    .unwrap();
     ActiveBoundedProbeOrderRequest {
         reject_event: event.clone(),
         admission_decision: evaluate_probe_admission(
@@ -112,7 +122,7 @@ fn bounded_probe_order_request() -> ActiveBoundedProbeOrderRequest {
             bbo_age_ms: 0,
         }),
         qty: 0.001,
-        order_link_id: "oc_ld_1782040200000_1".to_string(),
+        order_link_id,
         decision_lease_id: Some("lease-demo-1".to_string()),
         risk_state: "NORMAL".to_string(),
         limits: ActiveBoundedProbeRiskLimits::default(),
@@ -128,9 +138,18 @@ fn active_bounded_probe_submission_forwards_candidate_matched_post_only_limit_re
 
     assert!(result.is_some());
     let req = rx.try_recv().expect("OrderDispatchRequest must be sent");
+    let expected_order_link_id = bounded_probe_order_link_id_for_candidate(
+        "live_demo",
+        BOUNDED_PROBE_NOW_MS,
+        1,
+        "ma_crossover|ETHUSDT|Sell",
+        "ctx-demo-ma_crossover-ETHUSDT-1782040200000",
+        "sig-demo-ma_crossover-ETHUSDT-1782040200000",
+    )
+    .unwrap();
     assert_eq!(req.symbol, "ETHUSDT");
     assert!(!req.is_long);
-    assert_eq!(req.order_link_id, "oc_ld_1782040200000_1");
+    assert_eq!(req.order_link_id, expected_order_link_id);
     assert_eq!(req.decision_lease_id.as_deref(), Some("lease-demo-1"));
     assert_eq!(
         req.context_id,
