@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-25 Bounded Probe Cron Expected-Head Sync
+
+- E3 selected option A: align Linux checkout and crontab expected-head pins to the same source head. PM fast-forwarded `/home/ncyu/BybitOpenClaw/srv` from `b180546c` to docs head `d2971aa5`, then replaced exactly 11 crontab expected-head occurrences `bdc1e156 -> d2971aa5`.
+- Post-check: Linux `HEAD=origin/main=d2971aa5`, clean worktree, crontab still 70 lines, `RECORD_PROBE_OUTCOMES=0` count 1, `=1` count 0, no `OPENCLAW_ALLOW_MAINNET=1`, no `OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED`; running engine env remains `OPENCLAW_ALLOW_MAINNET=0`.
+- Boundary remains no-order/no-authority: no rebuild/restart, no PG write, no Bybit/API/order/cancel/modify, no adapter/writer enablement, no Cost Gate change, no probe/order/live authority, no promotion proof. Latest authority artifact still needs a separate no-order refresh/review.
+
 ## 2026-06-25 Bounded Probe Runtime Source Sync Reconciliation E3 Review
 
 - E3 approved only a no-order Linux source checkout sync. PM fast-forwarded `/home/ncyu/BybitOpenClaw/srv` from `f9e4456c` to `b180546c`; post-check showed `HEAD=origin/main=b180546c`, clean worktree, and v513 gate source present.
