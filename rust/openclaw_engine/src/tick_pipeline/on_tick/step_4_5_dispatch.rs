@@ -125,8 +125,11 @@ pub(crate) fn active_bounded_probe_order_submission(
 > {
     match crate::bounded_probe_active_order::candidate_matched_bounded_probe_order(request) {
         crate::bounded_probe_active_order::ActiveBoundedProbeOrderDecision::Submit(draft) => {
-            dispatch_admitted_bounded_probe_order(tx, draft.clone())?;
-            Ok(Some(draft))
+            if dispatch_admitted_bounded_probe_order(tx, draft.clone())? {
+                Ok(Some(draft))
+            } else {
+                Ok(None)
+            }
         }
         crate::bounded_probe_active_order::ActiveBoundedProbeOrderDecision::Skip(_) => Ok(None),
     }
@@ -135,7 +138,14 @@ pub(crate) fn active_bounded_probe_order_submission(
 pub(crate) fn dispatch_admitted_bounded_probe_order(
     tx: &tokio::sync::mpsc::UnboundedSender<OrderDispatchRequest>,
     draft: crate::bounded_probe_active_order::ActiveBoundedProbeOrderDraft,
-) -> Result<(), tokio::sync::mpsc::error::SendError<OrderDispatchRequest>> {
+) -> Result<bool, tokio::sync::mpsc::error::SendError<OrderDispatchRequest>> {
+    if !crate::bounded_probe_active_order::active_bounded_probe_effective_notional_within_cap(
+        draft.qty,
+        draft.limit_price,
+        draft.max_demo_notional_usdt_per_order,
+    ) {
+        return Ok(false);
+    }
     let order_link_id = draft.lineage.order_link_id.clone();
     let context_id = draft.lineage.context_id.clone();
     let signal_id = draft.lineage.signal_id.clone();
@@ -167,7 +177,8 @@ pub(crate) fn dispatch_admitted_bounded_probe_order(
         spine_stub_report_id: None,
         intent_id: Some(signal_id),
         reprice_count: 0,
-    })
+    })?;
+    Ok(true)
 }
 
 #[allow(clippy::too_many_arguments)]

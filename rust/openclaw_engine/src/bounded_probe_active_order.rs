@@ -154,6 +154,25 @@ pub fn learning_probe_admission_is_live_demo(engine_mode: &str) -> bool {
     engine_mode.trim().eq_ignore_ascii_case("live_demo")
 }
 
+pub fn active_bounded_probe_effective_notional_within_cap(
+    effective_qty: f64,
+    effective_limit_price: f64,
+    max_demo_notional_usdt_per_order: f64,
+) -> bool {
+    if !effective_qty.is_finite()
+        || effective_qty <= 0.0
+        || !effective_limit_price.is_finite()
+        || effective_limit_price <= 0.0
+        || !max_demo_notional_usdt_per_order.is_finite()
+        || max_demo_notional_usdt_per_order <= 0.0
+        || max_demo_notional_usdt_per_order > DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER
+    {
+        return false;
+    }
+    let notional = effective_qty * effective_limit_price;
+    notional.is_finite() && notional <= max_demo_notional_usdt_per_order
+}
+
 pub fn candidate_matched_bounded_probe_order_from_bbo(
     mut request: ActiveBoundedProbeOrderRequest,
     bbo: BboSnapshot,
@@ -244,8 +263,11 @@ pub fn candidate_matched_bounded_probe_order(
     if !request.qty.is_finite() || request.qty <= 0.0 {
         return skip(side_cell_key, ActiveBoundedProbeOrderSkipReason::QtyInvalid);
     }
-    let notional = request.qty * placement.limit_price;
-    if !notional.is_finite() || notional > request.limits.max_demo_notional_usdt_per_order {
+    if !active_bounded_probe_effective_notional_within_cap(
+        request.qty,
+        placement.limit_price,
+        request.limits.max_demo_notional_usdt_per_order,
+    ) {
         return skip(
             side_cell_key,
             ActiveBoundedProbeOrderSkipReason::NotionalLimitExceeded,
@@ -731,6 +753,35 @@ mod tests {
             skip.reason,
             ActiveBoundedProbeOrderSkipReason::RiskLimitsInvalid
         );
+    }
+
+    #[test]
+    fn effective_notional_cap_guard_rejects_post_round_breach_and_invalid_values() {
+        assert!(active_bounded_probe_effective_notional_within_cap(
+            0.002,
+            5_000.0,
+            DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER,
+        ));
+        assert!(!active_bounded_probe_effective_notional_within_cap(
+            0.002_001,
+            5_000.0,
+            DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER,
+        ));
+        assert!(!active_bounded_probe_effective_notional_within_cap(
+            f64::NAN,
+            5_000.0,
+            DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER,
+        ));
+        assert!(!active_bounded_probe_effective_notional_within_cap(
+            0.002,
+            f64::INFINITY,
+            DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER,
+        ));
+        assert!(!active_bounded_probe_effective_notional_within_cap(
+            0.002,
+            5_000.0,
+            DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER + 0.01,
+        ));
     }
 
     #[test]
