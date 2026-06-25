@@ -201,6 +201,12 @@ def test_current_repo_has_active_order_wiring_contract_ready_for_e3_bb_review() 
         packet["active_order_submission_readiness"]["evidence"][
             "runtime_writer_default_adapter_disabled"
         ]
+        is False
+    )
+    assert (
+        packet["active_order_submission_readiness"]["evidence"][
+            "positive_active_evidence"
+        ]["adapter_enabled_by_runtime_bounded_probe_gate"]
         is True
     )
     assert "e3_bb_exchange_facing_review_packet_only_no_order" in markdown

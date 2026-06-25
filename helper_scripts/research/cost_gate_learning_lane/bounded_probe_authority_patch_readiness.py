@@ -916,12 +916,22 @@ def _active_order_submission_readiness(repo_root: Path) -> dict[str, Any]:
             "positive_active_evidence": positive_active_evidence,
             "missing_positive_active_evidence": missing_positive_evidence,
         },
-        "required_before_order": [
-            "separate_source_patch_to_enable_active_bounded_demo_order_submission",
-            "candidate_matched_attempt_fill_fee_slippage_lineage",
-            "fresh_e3_bb_exchange_facing_order_envelope_review",
-            "guardian_decision_lease_rust_authority_path_preserved",
-        ],
+        "required_before_order": (
+            [
+                "runtime_source_sync_and_clean_head_verification",
+                "post_restart_pending_order_reconciliation_review",
+                "fresh_e3_bb_exchange_facing_order_envelope_review",
+                "candidate_matched_attempt_fill_fee_slippage_lineage",
+                "guardian_decision_lease_rust_authority_path_preserved",
+            ]
+            if active_ready
+            else [
+                "separate_source_patch_to_enable_active_bounded_demo_order_submission",
+                "candidate_matched_attempt_fill_fee_slippage_lineage",
+                "fresh_e3_bb_exchange_facing_order_envelope_review",
+                "guardian_decision_lease_rust_authority_path_preserved",
+            ]
+        ),
         "boundary": "source scan only; this packet never grants active order authority",
     }
 
@@ -974,14 +984,14 @@ def _runtime_adapter_gate_feeds_admission(runtime_body: str) -> bool:
     if assignment is None:
         return False
     rhs = " ".join(assignment.group("rhs").split())
-    if (
-        re.match(
-            r"^std::env::var\s*\(\s*OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED\s*\)"
-            r"(?:\s*\.[A-Za-z_][A-Za-z0-9_]*\s*\([^{};]*\))*$",
-            rhs,
-        )
-        is None
-    ):
+    explicit_env_gate = (
+        r"std::env::var\s*\(\s*OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED\s*\)"
+        r"\s*\.map\s*\(\s*\|\s*[A-Za-z_][A-Za-z0-9_]*\s*\|\s*"
+        r"bounded_probe_adapter_enabled_from_value\s*\(\s*&\s*[A-Za-z_][A-Za-z0-9_]*\s*\)"
+        r"\s*\)\s*\.unwrap_or\s*\(\s*false\s*\)"
+        r"\s*&&\s*active_order_request\.is_some\s*\(\s*\)"
+    )
+    if re.match(rf"^{explicit_env_gate}$", rhs) is None:
         return False
     return (
         re.search(

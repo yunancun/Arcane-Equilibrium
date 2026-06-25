@@ -770,6 +770,12 @@ def test_current_repo_reports_active_order_submission_source_ready_without_autho
     assert packet["answers"]["active_order_submission_authority_granted"] is False
     blockers = packet["active_order_submission_readiness"]["blockers"]
     assert blockers == []
+    assert "separate_source_patch_to_enable_active_bounded_demo_order_submission" not in packet[
+        "active_order_submission_readiness"
+    ]["required_before_order"]
+    assert "runtime_source_sync_and_clean_head_verification" in packet[
+        "active_order_submission_readiness"
+    ]["required_before_order"]
     assert (
         packet["active_order_submission_readiness"]["status"]
         == "ACTIVE_ORDER_SUBMISSION_WIRING_PRESENT"
@@ -778,29 +784,31 @@ def test_current_repo_reports_active_order_submission_source_ready_without_autho
         packet["active_order_submission_readiness"]["evidence"][
             "runtime_writer_default_adapter_disabled"
         ]
-        is True
+        is False
     )
     caller = packet["active_caller_enablement_review"]
-    assert caller["status"] == "ACTIVE_CALLER_ENABLEMENT_BLOCKED_SOURCE_ONLY"
+    assert caller["status"] == "ACTIVE_CALLER_SOURCE_READY_FOR_E3_BB_REVIEW"
+    assert caller["active_caller_source_ready_for_review"] is True
+    assert packet["answers"]["active_caller_source_ready_for_review"] is True
     assert packet["answers"]["active_caller_enablement_ready"] is False
     assert packet["answers"]["active_caller_enablement_authority_granted"] is False
-    assert "runtime_writer_default_adapter_disabled" in caller["blockers"]
-    assert "production_active_bounded_probe_caller_missing" in caller["blockers"]
-    assert "reviewed_runtime_adapter_enablement_gate_missing" in caller["blockers"]
+    assert "runtime_writer_default_adapter_disabled" not in caller["blockers"]
+    assert "production_active_bounded_probe_caller_missing" not in caller["blockers"]
+    assert "reviewed_runtime_adapter_enablement_gate_missing" not in caller["blockers"]
     assert "runtime_source_sync_not_verified" in caller["blockers"]
     assert "post_restart_pending_order_reconciliation_not_proven" in caller["blockers"]
     propagation = packet["runtime_admission_propagation_review"]
     assert (
         propagation["status"]
-        == "RUNTIME_ADMISSION_PROPAGATION_BLOCKED_SOURCE_ONLY_NO_RUNTIME_AUTHORITY"
+        == "RUNTIME_ADMISSION_PROPAGATION_SOURCE_READY_FOR_E3_BB_REVIEW_NO_RUNTIME_AUTHORITY"
     )
     assert (
         packet["answers"]["runtime_admission_propagation_ready_for_e3_bb_review"]
-        is False
+        is True
     )
     assert (
         packet["answers"]["source_ready_sufficient_for_e3_bb_enablement_review"]
-        is False
+        is True
     )
     assert (
         packet["answers"]["active_order_submission_ready_is_order_authority"]
@@ -819,7 +827,15 @@ def test_current_repo_reports_active_order_submission_source_ready_without_autho
         is False
     )
     assert packet["answers"]["runtime_adapter_enablement_performed"] is False
-    assert "active_caller_source_review_not_ready" in propagation["blockers"]
+    assert "active_caller_source_review_not_ready" not in propagation["blockers"]
+    assert "runtime_source_sync_not_verified" in propagation["blockers"]
+    assert "post_restart_pending_order_reconciliation_not_proven" in propagation[
+        "blockers"
+    ]
+    assert (
+        "runtime_adapter_enablement_not_performed_source_only_packet"
+        in propagation["blockers"]
+    )
     _assert_no_runtime_authority_true(packet)
 
 
@@ -1013,10 +1029,16 @@ pub fn build_admission_ledger_record_with_placement() {}
 pub fn build_capture_error_ledger_record() {}
 pub fn submit_candidate_matched_bounded_probe_order() -> u8 { 1 }
 pub fn active_bounded_probe_order_submission(_decision: u8) {}
+fn bounded_probe_adapter_enabled_from_value(value: &str) -> bool {
+    value.trim() == "1" || value.trim().eq_ignore_ascii_case("true")
+}
 fn evaluate_probe_admission(_enabled: bool) {}
-fn build_runtime_admission_record() {
+fn build_runtime_admission_record(active_order_request: Option<u8>) {
     let bounded_probe_adapter_enabled =
-        std::env::var(OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED).ok();
+        std::env::var(OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED)
+            .map(|value| bounded_probe_adapter_enabled_from_value(&value))
+            .unwrap_or(false)
+            && active_order_request.is_some();
     let decision = submit_candidate_matched_bounded_probe_order();
     active_bounded_probe_order_submission(decision);
     evaluate_probe_admission(bounded_probe_adapter_enabled);
@@ -1109,6 +1131,90 @@ fn dispatch(intent: OrderIntent) {
     )
     assert "active_caller_source_review_not_ready" not in propagation["blockers"]
     _assert_no_runtime_authority_true(packet)
+
+
+def test_env_gate_without_active_request_guard_does_not_count(
+    tmp_path: Path,
+) -> None:
+    _write_existing_seams(tmp_path)
+    _write_patch_adapter(tmp_path)
+    _write(
+        tmp_path / "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
+        """
+pub const OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED: &str =
+    "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED";
+pub fn build_admission_ledger_record_with_placement() {}
+pub fn build_capture_error_ledger_record() {}
+pub fn submit_candidate_matched_bounded_probe_order() -> u8 { 1 }
+pub fn active_bounded_probe_order_submission(_decision: u8) {}
+fn bounded_probe_adapter_enabled_from_value(value: &str) -> bool {
+    value.trim() == "1" || value.trim().eq_ignore_ascii_case("true")
+}
+fn evaluate_probe_admission(_enabled: bool) {}
+fn build_runtime_admission_record() {
+    let bounded_probe_adapter_enabled =
+        std::env::var(OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED)
+            .map(|value| bounded_probe_adapter_enabled_from_value(&value))
+            .unwrap_or(false);
+    let decision = submit_candidate_matched_bounded_probe_order();
+    active_bounded_probe_order_submission(decision);
+    evaluate_probe_admission(bounded_probe_adapter_enabled);
+}
+""",
+    )
+    _write_authority_path_wiring(tmp_path)
+
+    packet = build_bounded_demo_probe_authority_patch_readiness(
+        placement_repair_plan=_placement_plan(),
+        repo_root=tmp_path,
+        now_utc=NOW,
+    )
+
+    caller = packet["active_caller_enablement_review"]
+    assert caller["evidence"]["production_active_caller_present"] is True
+    assert caller["evidence"]["runtime_adapter_enablement_gate_present"] is False
+    assert caller["active_caller_source_ready_for_review"] is False
+    assert "reviewed_runtime_adapter_enablement_gate_missing" in caller["blockers"]
+
+
+def test_env_presence_gate_does_not_count_even_with_active_request_guard(
+    tmp_path: Path,
+) -> None:
+    _write_existing_seams(tmp_path)
+    _write_patch_adapter(tmp_path)
+    _write(
+        tmp_path / "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
+        """
+pub const OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED: &str =
+    "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED";
+pub fn build_admission_ledger_record_with_placement() {}
+pub fn build_capture_error_ledger_record() {}
+pub fn submit_candidate_matched_bounded_probe_order() -> u8 { 1 }
+pub fn active_bounded_probe_order_submission(_decision: u8) {}
+fn evaluate_probe_admission(_enabled: bool) {}
+fn build_runtime_admission_record(active_order_request: Option<u8>) {
+    let bounded_probe_adapter_enabled =
+        std::env::var(OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED).ok().is_some()
+            && active_order_request.is_some();
+    let decision = submit_candidate_matched_bounded_probe_order();
+    active_bounded_probe_order_submission(decision);
+    evaluate_probe_admission(bounded_probe_adapter_enabled);
+}
+""",
+    )
+    _write_authority_path_wiring(tmp_path)
+
+    packet = build_bounded_demo_probe_authority_patch_readiness(
+        placement_repair_plan=_placement_plan(),
+        repo_root=tmp_path,
+        now_utc=NOW,
+    )
+
+    caller = packet["active_caller_enablement_review"]
+    assert caller["evidence"]["production_active_caller_present"] is True
+    assert caller["evidence"]["runtime_adapter_enablement_gate_present"] is False
+    assert caller["active_caller_source_ready_for_review"] is False
+    assert "reviewed_runtime_adapter_enablement_gate_missing" in caller["blockers"]
 
 
 def test_unused_active_caller_helper_does_not_count_as_reviewed_runtime_path(
