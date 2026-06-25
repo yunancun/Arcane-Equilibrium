@@ -1,9 +1,9 @@
 # 玄衡 TODO — 主動派工佇列
 
-**版本** v520 ｜ **日期** 2026-06-25 ｜ **Repo posture**：source checkpoint includes the CA-safe public quote helper patch; Linux runtime checkout + cron expected-head pins still remain `e0c2a0e1`; no runtime sync, restart, crontab edit, PG write, or Bybit call occurred in v520.
-**當前主線 / 下一閘**：`P0-BOUNDED-PROBE-AVAX-CA-SAFE-PUBLIC-QUOTE-ROUTE-DEMO-ONLY` is source-ready only. Next executable checkpoint is a fresh `PM -> E3 -> BB` no-order review for exactly one AVAX public quote attempt using the verified-TLS helper path.
+**版本** v521 ｜ **日期** 2026-06-25 ｜ **Repo posture**：one E3/BB-approved AVAX public quote attempt succeeded as a timestamped no-order artifact; Linux runtime checkout + cron expected-head pins still remain `e0c2a0e1`; no runtime sync, restart, crontab edit, PG write, `_latest` overwrite, or order action occurred in v521.
+**當前主線 / 下一閘**：`P0-BOUNDED-PROBE-AVAX-FRESH-REROUTE-CHAIN-REFRESH-DEMO-ONLY`. The fresh quote path is proven, but the combined quote->adapter->construction-preview chain is blocked until the reroute-review input chain is refreshed inside the preview helper's 24h artifact-age gate.
 **硬邊界**：No Cost Gate lowering/cap widening, no live/mainnet promotion, no private/auth Bybit endpoint, no order/cancel/modify, no PG write, no `_latest` runtime artifact overwrite, no service/env/crontab mutation, no Rust writer/adapter enablement, no probe/order/live authority, no promotion proof.
-**證據入口**：latest PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-25--avax_ca_safe_public_quote_route_source_patch.md`; previous SSL fail-closed report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-25--avax_public_quote_refresh_ssl_failed_no_order.md`; history log `docs/CLAUDE_CHANGELOG.md`. v519 pre-cleanup TODO remains recoverable from git history at `44c582e2`.
+**證據入口**：latest PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-25--avax_public_quote_ready_reroute_stale_block.md`; source patch report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-25--avax_ca_safe_public_quote_route_source_patch.md`; previous SSL fail-closed report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-25--avax_public_quote_refresh_ssl_failed_no_order.md`; history log `docs/CLAUDE_CHANGELOG.md`.
 
 ---
 
@@ -11,16 +11,16 @@
 
 | 區域 | 當前狀態 | 下一步 |
 |---|---|---|
-| Source / runtime | Local source now has a verified-TLS public quote helper patch. Runtime Linux checkout and cron pins still point to `e0c2a0e1`; v520 was not runtime-synced. | Do not runtime-sync unless a later checkpoint explicitly selects that path through E3/runtime review. |
-| Profit-first loop | Selected fallback remains `grid_trading|AVAXUSDT|Sell`. The prior one-shot quote artifact failed closed on Mac TLS CA verification; v520 fixes the helper source path without rerunning the quote. | Start a fresh `PM -> E3 -> BB` no-order public quote review. A quote attempt is allowed only after that review. |
-| Verification | Focused public-quote tests passed `17`; adjacent no-order adapter/construction-preview tests passed `57`; E4 also ran broader no-order regression `86` twice. | If the next approved quote returns `PUBLIC_QUOTE_CAPTURE_READY_NO_ORDER`, run adapter + construction preview as no-order artifacts only. |
+| Source / runtime | Local source has the verified-TLS public quote helper patch. Runtime Linux checkout and cron pins still point to `e0c2a0e1`; v521 was not runtime-synced. | Do not runtime-sync unless a later checkpoint explicitly selects that path through E3/runtime review. |
+| Profit-first loop | Selected fallback remains `grid_trading|AVAXUSDT|Sell`. v521 quote artifact `/tmp/openclaw/cost_gate_learning_lane/bbo_freshness_public_quote_capture_avax_sell_20260625T223840Z.json` is `PUBLIC_QUOTE_CAPTURE_READY_NO_ORDER`, sha `fe36f2dd...`, bid/ask `6.199/6.2`, effective age `531.382ms`. | Refresh the AVAX reroute-review input chain before any second quote->adapter->preview run. Do not reuse the now-stale quote as construction proof. |
+| Verification | E3/BB approved one quote; PM ran exactly one public quote helper invocation. E3 approved a corrected combined chain command, but BB blocked execution because `bounded_probe_lower_price_reroute_review_latest.json` generated `2026-06-24T17:32:23Z` is stale for preview's 24h gate. | Generate fresh no-authority reroute-review input first; do not widen artifact-age/freshness gates. |
 | TODO hygiene | `TODO.md` is now a compact dispatch queue. Version narratives belong in `docs/CLAUDE_CHANGELOG.md`; long evidence belongs in reports/archive. | Preserve active rows; do not paste report bodies or completed ledgers back into TODO. |
 
 ## §1 P0 主動阻塞項
 
 | ID | 狀態 | Owner chain | 驗收／閘門 | 最新證據 | 下一步 |
 |---|---|---|---|---|---|
-| `P0-PROFIT-DEMO-LEARNING-LOOP` | ACTIVE / no-order / source-ready | PM -> E3 -> BB -> PM | Exactly one candidate remains selected; next proof must be candidate-matched, no-order, no authority, and either fresh READY quote evidence or fail-closed reason. | v520 PM report; helper patch in `helper_scripts/research/cost_gate_learning_lane/bbo_freshness_public_quote_capture.py`; v519 SSL fail-closed artifact sha `e2bc971a...`. | Request fresh E3/BB review for one public quote invocation. No repeat quote under the spent approval. |
+| `P0-PROFIT-DEMO-LEARNING-LOOP` | ACTIVE / no-order / quote-ready, construction-preview blocked | PM -> E3 -> BB -> PM | Next construction proof must be candidate-matched, no-order, no authority, and built from fresh reroute-review + fresh BBO inside the helper gates. | v521 READY quote artifact sha `fe36f2dd...`; BB stale-input block; v520 source patch report. | Start `P0-BOUNDED-PROBE-AVAX-FRESH-REROUTE-CHAIN-REFRESH-DEMO-ONLY`; no second quote until fresh reroute-review input exists and E3/BB approve the combined chain. |
 | `P0-EDGE-1` | ACTIVE | PM -> PA/QC/MIT/BB -> E1 after gate | Close only with >=3 alpha candidates satisfying net/cost/stat gates, or another accepted P0 edge path. Bull-only, stale, survivor-only, narrative-only, replay-only, or artifact-count positives are not promotion proof. | AEG reports under `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-*`; Gate-B watch and alpha discovery evidence summarized in `docs/CLAUDE_CHANGELOG.md`. | Wait for fresh Gate-B actionable window or continue source-only candidate research that improves execution realism/cost after fees. |
 | `P0-LG-3` | ACTIVE / source integrated / runtime undeployed | PM -> E2 -> E4 -> QA -> operator deploy gate | Deploy/rebuild only after review chain and migration/checksum discipline; runtime proof required before closure. | Integrated commits `deb3f3af..0802d52b`; historical runtime notes in changelog. | Re-run review chain before any deploy/rebuild. |
 | `P0-OPS` | ACTIVE / operator-gated tails | Operator + PM/E1/MIT as needed | Restore drill, system-level units, live-auth update, replay manifest feeding, and close-maker max-pending evidence must be explicitly recorded. | Operator rows in §3 and historical changelog. | Wait for named operator windows; no silent runtime mutation. |
@@ -64,7 +64,7 @@
 
 | Hypothesis path | Why it might make money | Fastest safe test | Authority |
 |---|---|---|---|
-| Verified-TLS AVAX quote -> no-order construction preview | Keeps the cap-feasible false-negative candidate moving toward a realistic demo probe without changing risk caps. | After E3/BB, run one public quote; if READY, run adapter + construction preview only. | Public Bybit market-data review required; no order authority. |
+| Fresh AVAX reroute-review chain -> immediate quote/preview | Keeps the cap-feasible false-negative candidate moving toward a realistic demo probe without changing risk caps or freshness gates. | First refresh no-authority reroute-review inputs; then E3/BB-reviewed one-shot quote->adapter->preview chain. | Public Bybit market-data review required only for the quote step; no order authority. |
 | Maker/MM repeat-window filter | Could find fee-aware microstructure cells that survive current fees through maker ratio and adverse-selection control. | Wait for MM sample >=30 and repeat-window confirmation; source-only scorecard hardening is allowed. | No exchange/order authority unless later bounded probe is reviewed. |
 | Regime-specific false-negative subset | Current broad strategy family may be structurally negative, while narrow regimes/horizons survive fees. | Build source-only candidate rows with matched controls and execution realism; no runtime mutation. | Research/source-only until proposal review. |
 
