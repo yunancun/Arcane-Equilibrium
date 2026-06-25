@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-25 AVAX Candidate-Scoped Reroute Source Patch
+
+- `bounded_probe_lower_price_reroute_review.py` now accepts fresh cap-feasible selection wrappers as an alternate candidate source, so AVAX is not forced through a stale order-construction repair packet.
+- E2 found and E1 fixed a stale-selection freshness bug; PA-requested PG evidence scoping was tightened to `cap_feasible_selection.answers.pg_query_performed` only. Verification: focused `18 passed`, adjacent `179 passed`, py_compile/diff-check PASS.
+- PM read: this is source readiness only. Next proof is timestamped no-authority candidate-scoped chain smoke; no quote, runtime write, or authority follows from this patch.
+
 ## 2026-06-25 Bounded Probe Cron Expected-Head Sync
 
 - E3 selected option A: align Linux checkout and crontab expected-head pins to the same source head. PM fast-forwarded `/home/ncyu/BybitOpenClaw/srv` from `b180546c` to docs head `d2971aa5`, then replaced exactly 11 crontab expected-head occurrences `bdc1e156 -> d2971aa5`.
