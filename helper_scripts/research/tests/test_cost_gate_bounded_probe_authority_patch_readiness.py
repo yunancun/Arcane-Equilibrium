@@ -707,6 +707,15 @@ def test_current_repo_reports_active_order_submission_source_ready_without_autho
         ]
         is True
     )
+    caller = packet["active_caller_enablement_review"]
+    assert caller["status"] == "ACTIVE_CALLER_ENABLEMENT_BLOCKED_SOURCE_ONLY"
+    assert packet["answers"]["active_caller_enablement_ready"] is False
+    assert packet["answers"]["active_caller_enablement_authority_granted"] is False
+    assert "runtime_writer_default_adapter_disabled" in caller["blockers"]
+    assert "production_active_bounded_probe_caller_missing" in caller["blockers"]
+    assert "reviewed_runtime_adapter_enablement_gate_missing" in caller["blockers"]
+    assert "runtime_source_sync_not_verified" in caller["blockers"]
+    assert "post_restart_pending_order_reconciliation_not_proven" in caller["blockers"]
 
 
 def test_active_order_readiness_fails_closed_when_source_files_missing(
@@ -816,6 +825,469 @@ pub fn post_only_near_touch_or_skip() {}
         "adapter_enabled_by_runtime_bounded_probe_gate": False,
     }
     assert "positive_active_order_submission_evidence_missing" in active["blockers"]
+    caller = packet["active_caller_enablement_review"]
+    assert caller["evidence"]["production_active_caller_present"] is False
+    assert caller["actual_active_caller_enablement_ready"] is False
+    assert packet["answers"]["active_caller_enablement_authority_granted"] is False
+
+
+def test_cfg_test_active_caller_does_not_count_as_production_enablement(
+    tmp_path: Path,
+) -> None:
+    _write_existing_seams(tmp_path)
+    _write_patch_adapter(tmp_path)
+    _write_authority_path_wiring(tmp_path)
+    _write(
+        tmp_path / "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
+        """
+pub const OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED: &str =
+    "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED";
+pub fn build_admission_ledger_record_with_placement() {}
+pub fn build_capture_error_ledger_record() {}
+pub fn submit_candidate_matched_bounded_probe_order() {}
+pub fn active_bounded_probe_order_submission() {}
+#[cfg(test)]
+mod tests {
+    fn test_only_call() {
+        let decision = submit_candidate_matched_bounded_probe_order();
+        active_bounded_probe_order_submission(decision);
+    }
+}
+fn writer() {
+    let bounded_probe_adapter_enabled =
+        std::env::var(OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED).ok();
+    let _ = bounded_probe_adapter_enabled;
+    let allowed_to_submit_order = false;
+    let _ = allowed_to_submit_order;
+}
+""",
+    )
+    _write(
+        tmp_path / "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs",
+        """
+const BOUNDED_PROBE_ATTEMPT_RECORD_TYPE: &str = "bounded_probe_attempt";
+fn execution_reference(best_bid: Option<f64>, best_ask: Option<f64>) {}
+pub fn active_bounded_probe_order_submission() {}
+pub fn dispatch_admitted_bounded_probe_order() {}
+fn dispatch(intent: OrderIntent) {
+    let req = BoundedProbeOptionalBboPlacementRequest {};
+    let _ = post_only_near_touch_from_optional_bbo_or_skip(&req);
+    let _ = BOUNDED_PROBE_ATTEMPT_RECORD_TYPE;
+    let _ = OrderDispatchRequest {
+        limit_price: intent.limit_price,
+        time_in_force: intent.time_in_force,
+    };
+}
+""",
+    )
+
+    packet = build_bounded_demo_probe_authority_patch_readiness(
+        placement_repair_plan=_placement_plan(),
+        repo_root=tmp_path,
+        now_utc=NOW,
+    )
+
+    caller = packet["active_caller_enablement_review"]
+    assert packet["answers"]["active_order_submission_ready"] is True
+    assert caller["evidence"]["production_active_caller_present"] is False
+    assert "production_active_bounded_probe_caller_missing" in caller["blockers"]
+    assert caller["actual_active_caller_enablement_ready"] is False
+
+
+def test_active_caller_enablement_source_ready_remains_no_authority(
+    tmp_path: Path,
+) -> None:
+    _write_existing_seams(tmp_path)
+    _write_patch_adapter(tmp_path)
+    _write(
+        tmp_path / "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
+        """
+pub const OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED: &str =
+    "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED";
+pub fn build_admission_ledger_record_with_placement() {}
+pub fn build_capture_error_ledger_record() {}
+pub fn submit_candidate_matched_bounded_probe_order() -> u8 { 1 }
+pub fn active_bounded_probe_order_submission(_decision: u8) {}
+fn evaluate_probe_admission(_enabled: bool) {}
+fn build_runtime_admission_record() {
+    let bounded_probe_adapter_enabled =
+        std::env::var(OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED).ok();
+    let decision = submit_candidate_matched_bounded_probe_order();
+    active_bounded_probe_order_submission(decision);
+    evaluate_probe_admission(bounded_probe_adapter_enabled);
+}
+""",
+    )
+    _write(
+        tmp_path / "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs",
+        """
+const BOUNDED_PROBE_ATTEMPT_RECORD_TYPE: &str = "bounded_probe_attempt";
+fn execution_reference(best_bid: Option<f64>, best_ask: Option<f64>) {}
+pub fn active_bounded_probe_order_submission() {}
+pub fn dispatch_admitted_bounded_probe_order() {}
+fn dispatch(intent: OrderIntent) {
+    let req = BoundedProbeOptionalBboPlacementRequest {};
+    let _ = post_only_near_touch_from_optional_bbo_or_skip(&req);
+    let _ = BOUNDED_PROBE_ATTEMPT_RECORD_TYPE;
+    let _ = OrderDispatchRequest {
+        limit_price: intent.limit_price,
+        time_in_force: intent.time_in_force,
+    };
+}
+""",
+    )
+
+    packet = build_bounded_demo_probe_authority_patch_readiness(
+        placement_repair_plan=_placement_plan(),
+        repo_root=tmp_path,
+        now_utc=NOW,
+    )
+
+    caller = packet["active_caller_enablement_review"]
+    assert caller["status"] == "ACTIVE_CALLER_SOURCE_READY_FOR_E3_BB_REVIEW"
+    assert caller["active_caller_source_ready_for_review"] is True
+    assert packet["answers"]["active_caller_source_ready_for_review"] is True
+    assert caller["actual_active_caller_enablement_ready"] is False
+    assert packet["answers"]["active_caller_enablement_ready"] is False
+    assert packet["answers"]["active_caller_enablement_authority_granted"] is False
+    assert packet["answers"]["order_authority_granted"] is False
+    assert packet["answers"]["probe_authority_granted"] is False
+    assert packet["answers"]["runtime_mutation_performed"] is False
+    assert "runtime_source_sync_not_verified" in caller["blockers"]
+    assert "post_restart_pending_order_reconciliation_not_proven" in caller["blockers"]
+
+
+def test_unused_active_caller_helper_does_not_count_as_reviewed_runtime_path(
+    tmp_path: Path,
+) -> None:
+    _write_existing_seams(tmp_path)
+    _write_patch_adapter(tmp_path)
+    _write_authority_path_wiring(tmp_path)
+    _write(
+        tmp_path / "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
+        """
+pub const OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED: &str =
+    "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED";
+pub fn build_admission_ledger_record_with_placement() {}
+pub fn build_capture_error_ledger_record() {}
+pub fn submit_candidate_matched_bounded_probe_order() -> u8 { 1 }
+pub fn active_bounded_probe_order_submission(_decision: u8) {}
+fn evaluate_probe_admission(_enabled: bool) {}
+fn unused_debug_active_caller() {
+    let decision = submit_candidate_matched_bounded_probe_order();
+    active_bounded_probe_order_submission(decision);
+}
+fn build_runtime_admission_record() {
+    let bounded_probe_adapter_enabled =
+        std::env::var(OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED).ok();
+    evaluate_probe_admission(bounded_probe_adapter_enabled.is_some());
+}
+""",
+    )
+
+    packet = build_bounded_demo_probe_authority_patch_readiness(
+        placement_repair_plan=_placement_plan(),
+        repo_root=tmp_path,
+        now_utc=NOW,
+    )
+
+    caller = packet["active_caller_enablement_review"]
+    assert caller["evidence"]["production_active_caller_present"] is False
+    assert caller["active_caller_source_ready_for_review"] is False
+    assert "production_active_bounded_probe_caller_missing" in caller["blockers"]
+
+
+def test_unused_dispatch_active_caller_does_not_count_as_reviewed_runtime_path(
+    tmp_path: Path,
+) -> None:
+    _write_existing_seams(tmp_path)
+    _write_patch_adapter(tmp_path)
+    _write(
+        tmp_path / "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
+        """
+pub const OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED: &str =
+    "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED";
+pub fn build_admission_ledger_record_with_placement() {}
+pub fn build_capture_error_ledger_record() {}
+pub fn submit_candidate_matched_bounded_probe_order() -> u8 { 1 }
+pub fn active_bounded_probe_order_submission(_decision: u8) {}
+fn evaluate_probe_admission(_enabled: bool) {}
+fn build_runtime_admission_record() {
+    let bounded_probe_adapter_enabled =
+        std::env::var(OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED).ok();
+    evaluate_probe_admission(bounded_probe_adapter_enabled);
+}
+""",
+    )
+    _write(
+        tmp_path / "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs",
+        """
+const BOUNDED_PROBE_ATTEMPT_RECORD_TYPE: &str = "bounded_probe_attempt";
+fn execution_reference(best_bid: Option<f64>, best_ask: Option<f64>) {}
+pub fn active_bounded_probe_order_submission() {}
+pub fn dispatch_admitted_bounded_probe_order() {}
+fn unused_dispatch_helper() {
+    active_bounded_probe_order_submission();
+}
+fn dispatch(intent: OrderIntent) {
+    let req = BoundedProbeOptionalBboPlacementRequest {};
+    let _ = post_only_near_touch_from_optional_bbo_or_skip(&req);
+    let _ = BOUNDED_PROBE_ATTEMPT_RECORD_TYPE;
+    let _ = OrderDispatchRequest {
+        limit_price: intent.limit_price,
+        time_in_force: intent.time_in_force,
+    };
+}
+""",
+    )
+
+    packet = build_bounded_demo_probe_authority_patch_readiness(
+        placement_repair_plan=_placement_plan(),
+        repo_root=tmp_path,
+        now_utc=NOW,
+    )
+
+    caller = packet["active_caller_enablement_review"]
+    assert caller["evidence"]["tick_dispatch_call_sites"]
+    assert caller["evidence"]["production_active_caller_present"] is False
+    assert caller["active_caller_source_ready_for_review"] is False
+    assert "production_active_bounded_probe_caller_missing" in caller["blockers"]
+
+
+def test_env_gate_constant_without_runtime_admission_use_does_not_count(
+    tmp_path: Path,
+) -> None:
+    _write_existing_seams(tmp_path)
+    _write_patch_adapter(tmp_path)
+    _write_authority_path_wiring(tmp_path)
+    _write(
+        tmp_path / "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
+        """
+pub const OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED: &str =
+    "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED";
+pub fn build_admission_ledger_record_with_placement() {}
+pub fn build_capture_error_ledger_record() {}
+pub fn submit_candidate_matched_bounded_probe_order() -> u8 { 1 }
+pub fn active_bounded_probe_order_submission(_decision: u8) {}
+fn evaluate_probe_admission(_enabled: bool) {}
+fn build_runtime_admission_record() {
+    let decision = submit_candidate_matched_bounded_probe_order();
+    active_bounded_probe_order_submission(decision);
+    evaluate_probe_admission(true);
+}
+""",
+    )
+
+    packet = build_bounded_demo_probe_authority_patch_readiness(
+        placement_repair_plan=_placement_plan(),
+        repo_root=tmp_path,
+        now_utc=NOW,
+    )
+
+    caller = packet["active_caller_enablement_review"]
+    assert caller["evidence"]["runtime_adapter_enablement_gate_present"] is False
+    assert caller["evidence"]["runtime_gate_feeds_admission_scan"] is False
+    assert caller["active_caller_source_ready_for_review"] is False
+    assert "reviewed_runtime_adapter_enablement_gate_missing" in caller["blockers"]
+
+
+def test_env_read_inside_hardcoded_block_does_not_count(
+    tmp_path: Path,
+) -> None:
+    _write_existing_seams(tmp_path)
+    _write_patch_adapter(tmp_path)
+    _write(
+        tmp_path / "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
+        """
+pub const OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED: &str =
+    "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED";
+pub fn build_admission_ledger_record_with_placement() {}
+pub fn build_capture_error_ledger_record() {}
+pub fn submit_candidate_matched_bounded_probe_order() -> u8 { 1 }
+pub fn active_bounded_probe_order_submission(_decision: u8) {}
+fn evaluate_probe_admission(_enabled: bool) {}
+fn build_runtime_admission_record() {
+    let bounded_probe_adapter_enabled = {
+        let _unused = std::env::var(OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED).ok();
+        true
+    };
+    let decision = submit_candidate_matched_bounded_probe_order();
+    active_bounded_probe_order_submission(decision);
+    evaluate_probe_admission(bounded_probe_adapter_enabled);
+}
+""",
+    )
+    _write_authority_path_wiring(tmp_path)
+
+    packet = build_bounded_demo_probe_authority_patch_readiness(
+        placement_repair_plan=_placement_plan(),
+        repo_root=tmp_path,
+        now_utc=NOW,
+    )
+
+    caller = packet["active_caller_enablement_review"]
+    assert caller["evidence"]["production_active_caller_present"] is True
+    assert caller["evidence"]["runtime_adapter_enablement_gate_present"] is False
+    assert caller["active_caller_source_ready_for_review"] is False
+    assert "reviewed_runtime_adapter_enablement_gate_missing" in caller["blockers"]
+
+
+def test_wrapped_env_read_does_not_count_as_adapter_gate_flow(
+    tmp_path: Path,
+) -> None:
+    _write_existing_seams(tmp_path)
+    _write_patch_adapter(tmp_path)
+    _write(
+        tmp_path / "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
+        """
+pub const OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED: &str =
+    "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED";
+pub fn build_admission_ledger_record_with_placement() {}
+pub fn build_capture_error_ledger_record() {}
+pub fn submit_candidate_matched_bounded_probe_order() -> u8 { 1 }
+pub fn active_bounded_probe_order_submission(_decision: u8) {}
+fn evaluate_probe_admission(_enabled: bool) {}
+fn some_other_runtime_flag(_ignored: Result<String, std::env::VarError>) -> bool { true }
+fn build_runtime_admission_record() {
+    let bounded_probe_adapter_enabled =
+        some_other_runtime_flag(std::env::var(OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED));
+    let decision = submit_candidate_matched_bounded_probe_order();
+    active_bounded_probe_order_submission(decision);
+    evaluate_probe_admission(bounded_probe_adapter_enabled);
+}
+""",
+    )
+    _write_authority_path_wiring(tmp_path)
+
+    packet = build_bounded_demo_probe_authority_patch_readiness(
+        placement_repair_plan=_placement_plan(),
+        repo_root=tmp_path,
+        now_utc=NOW,
+    )
+
+    caller = packet["active_caller_enablement_review"]
+    assert caller["evidence"]["production_active_caller_present"] is True
+    assert caller["evidence"]["runtime_adapter_enablement_gate_present"] is False
+    assert caller["active_caller_source_ready_for_review"] is False
+    assert "reviewed_runtime_adapter_enablement_gate_missing" in caller["blockers"]
+
+
+def test_hardcoded_true_adapter_gate_does_not_count(
+    tmp_path: Path,
+) -> None:
+    _write_existing_seams(tmp_path)
+    _write_patch_adapter(tmp_path)
+    _write(
+        tmp_path / "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
+        """
+pub const OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED: &str =
+    "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED";
+pub fn build_admission_ledger_record_with_placement() {}
+pub fn build_capture_error_ledger_record() {}
+pub fn submit_candidate_matched_bounded_probe_order() -> u8 { 1 }
+pub fn active_bounded_probe_order_submission(_decision: u8) {}
+fn evaluate_probe_admission(_enabled: bool) {}
+fn build_runtime_admission_record() {
+    let _gate_name = OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED;
+    let bounded_probe_adapter_enabled = true;
+    let decision = submit_candidate_matched_bounded_probe_order();
+    active_bounded_probe_order_submission(decision);
+    evaluate_probe_admission(bounded_probe_adapter_enabled);
+}
+""",
+    )
+    _write_authority_path_wiring(tmp_path)
+
+    packet = build_bounded_demo_probe_authority_patch_readiness(
+        placement_repair_plan=_placement_plan(),
+        repo_root=tmp_path,
+        now_utc=NOW,
+    )
+
+    caller = packet["active_caller_enablement_review"]
+    assert caller["evidence"]["production_active_caller_present"] is True
+    assert caller["evidence"]["runtime_adapter_enablement_gate_present"] is False
+    assert caller["active_caller_source_ready_for_review"] is False
+    assert "reviewed_runtime_adapter_enablement_gate_missing" in caller["blockers"]
+
+
+def test_typed_hardcoded_true_adapter_gate_does_not_count(
+    tmp_path: Path,
+) -> None:
+    _write_existing_seams(tmp_path)
+    _write_patch_adapter(tmp_path)
+    _write(
+        tmp_path / "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
+        """
+pub const OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED: &str =
+    "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED";
+pub fn build_admission_ledger_record_with_placement() {}
+pub fn build_capture_error_ledger_record() {}
+pub fn submit_candidate_matched_bounded_probe_order() -> u8 { 1 }
+pub fn active_bounded_probe_order_submission(_decision: u8) {}
+fn evaluate_probe_admission(_enabled: bool) {}
+fn build_runtime_admission_record() {
+    let _gate_name = OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED;
+    let bounded_probe_adapter_enabled: bool = true;
+    let decision = submit_candidate_matched_bounded_probe_order();
+    active_bounded_probe_order_submission(decision);
+    evaluate_probe_admission(bounded_probe_adapter_enabled);
+}
+""",
+    )
+    _write_authority_path_wiring(tmp_path)
+
+    packet = build_bounded_demo_probe_authority_patch_readiness(
+        placement_repair_plan=_placement_plan(),
+        repo_root=tmp_path,
+        now_utc=NOW,
+    )
+
+    caller = packet["active_caller_enablement_review"]
+    assert caller["evidence"]["production_active_caller_present"] is True
+    assert caller["evidence"]["runtime_adapter_enablement_gate_present"] is False
+    assert caller["active_caller_source_ready_for_review"] is False
+    assert "reviewed_runtime_adapter_enablement_gate_missing" in caller["blockers"]
+
+
+def test_unrelated_env_read_does_not_count_as_adapter_gate_flow(
+    tmp_path: Path,
+) -> None:
+    _write_existing_seams(tmp_path)
+    _write_patch_adapter(tmp_path)
+    _write(
+        tmp_path / "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
+        """
+pub const OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED: &str =
+    "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED";
+pub fn build_admission_ledger_record_with_placement() {}
+pub fn build_capture_error_ledger_record() {}
+pub fn submit_candidate_matched_bounded_probe_order() -> u8 { 1 }
+pub fn active_bounded_probe_order_submission(_decision: u8) {}
+fn evaluate_probe_admission(_enabled: bool) {}
+fn some_other_runtime_flag() -> bool { true }
+fn build_runtime_admission_record() {
+    let _unused_env = std::env::var(OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED).ok();
+    let bounded_probe_adapter_enabled = some_other_runtime_flag();
+    let decision = submit_candidate_matched_bounded_probe_order();
+    active_bounded_probe_order_submission(decision);
+    evaluate_probe_admission(bounded_probe_adapter_enabled);
+}
+""",
+    )
+    _write_authority_path_wiring(tmp_path)
+
+    packet = build_bounded_demo_probe_authority_patch_readiness(
+        placement_repair_plan=_placement_plan(),
+        repo_root=tmp_path,
+        now_utc=NOW,
+    )
+
+    caller = packet["active_caller_enablement_review"]
+    assert caller["evidence"]["production_active_caller_present"] is True
+    assert caller["evidence"]["runtime_adapter_enablement_gate_present"] is False
+    assert caller["active_caller_source_ready_for_review"] is False
+    assert "reviewed_runtime_adapter_enablement_gate_missing" in caller["blockers"]
 
 
 def test_missing_existing_authority_seam_blocks_patch_review(tmp_path: Path) -> None:
