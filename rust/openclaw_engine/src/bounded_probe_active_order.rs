@@ -17,6 +17,9 @@ use crate::order_manager::{OrderType, TimeInForce};
 
 pub const DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER: f64 = 10.0;
 pub const DEFAULT_MAX_PROBE_INTENTS_BEFORE_REVIEW: u64 = 1;
+pub const DEFAULT_ACTIVE_BOUNDED_PROBE_MAKER_TIMEOUT_MS: u64 = 45_000;
+pub const BYBIT_ORDER_LINK_ID_PREFIX: &str = "oc_";
+pub const BYBIT_ORDER_LINK_ID_MAX_LEN: usize = 36;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ActiveBoundedProbeRiskLimits {
@@ -27,6 +30,7 @@ pub struct ActiveBoundedProbeRiskLimits {
     pub one_order_per_admitted_attempt: bool,
     pub max_fresh_bbo_age_ms: u64,
     pub max_initial_passive_gap_bps: f64,
+    pub maker_timeout_ms: u64,
 }
 
 impl Default for ActiveBoundedProbeRiskLimits {
@@ -39,6 +43,7 @@ impl Default for ActiveBoundedProbeRiskLimits {
             one_order_per_admitted_attempt: true,
             max_fresh_bbo_age_ms: DEFAULT_MAX_FRESH_BBO_AGE_MS,
             max_initial_passive_gap_bps: DEFAULT_MAX_INITIAL_PASSIVE_GAP_BPS,
+            maker_timeout_ms: DEFAULT_ACTIVE_BOUNDED_PROBE_MAKER_TIMEOUT_MS,
         }
     }
 }
@@ -48,12 +53,13 @@ impl ActiveBoundedProbeRiskLimits {
         self.demo_only
             && self.max_demo_notional_usdt_per_order.is_finite()
             && self.max_demo_notional_usdt_per_order > 0.0
-            && self.max_demo_notional_usdt_per_order <= 1_000.0
+            && self.max_demo_notional_usdt_per_order <= DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER
             && (1..=10).contains(&self.max_probe_intents_before_review)
             && self.one_order_per_admitted_attempt
             && (1..=60_000).contains(&self.max_fresh_bbo_age_ms)
             && self.max_initial_passive_gap_bps.is_finite()
             && (0.0..=10_000.0).contains(&self.max_initial_passive_gap_bps)
+            && (1_000..=60_000).contains(&self.maker_timeout_ms)
     }
 }
 
@@ -83,7 +89,9 @@ pub enum ActiveBoundedProbeOrderSkipReason {
     PlacementSkipped,
     SideCellMismatch,
     QtyInvalid,
+    PlacementInvalid,
     NotionalLimitExceeded,
+    InvalidOrderLinkId,
     MissingLineage,
 }
 
@@ -107,6 +115,7 @@ pub struct ActiveBoundedProbeOrderDraft {
     pub reference_price: f64,
     pub touch_gap_bps: f64,
     pub max_demo_notional_usdt_per_order: f64,
+    pub maker_timeout_ms: u64,
     pub bounded_probe_attempt_id: String,
     pub lineage: ActiveBoundedProbeLineage,
 }
@@ -218,6 +227,16 @@ pub fn candidate_matched_bounded_probe_order(
             ActiveBoundedProbeOrderSkipReason::SideCellMismatch,
         );
     }
+    if !placement.limit_price.is_finite()
+        || placement.limit_price <= 0.0
+        || !placement.reference_price.is_finite()
+        || placement.reference_price <= 0.0
+    {
+        return skip(
+            side_cell_key,
+            ActiveBoundedProbeOrderSkipReason::PlacementInvalid,
+        );
+    }
     if !request.qty.is_finite() || request.qty <= 0.0 {
         return skip(side_cell_key, ActiveBoundedProbeOrderSkipReason::QtyInvalid);
     }
@@ -250,10 +269,14 @@ pub fn candidate_matched_bounded_probe_order(
             ActiveBoundedProbeOrderSkipReason::MissingLineage,
         );
     };
-    if request.order_link_id.trim().is_empty() {
+    if !is_bybit_safe_order_link_id_for_engine_mode(
+        &request.order_link_id,
+        &request.reject_event.engine_mode,
+        request.reject_event.ts_ms,
+    ) {
         return skip(
             side_cell_key,
-            ActiveBoundedProbeOrderSkipReason::MissingLineage,
+            ActiveBoundedProbeOrderSkipReason::InvalidOrderLinkId,
         );
     }
 
@@ -271,6 +294,7 @@ pub fn candidate_matched_bounded_probe_order(
         reference_price: placement.reference_price,
         touch_gap_bps: placement.touch_gap_bps,
         max_demo_notional_usdt_per_order: request.limits.max_demo_notional_usdt_per_order,
+        maker_timeout_ms: request.limits.maker_timeout_ms,
         bounded_probe_attempt_id: context_id.clone(),
         lineage: ActiveBoundedProbeLineage {
             side_cell_key,
@@ -286,6 +310,45 @@ pub fn candidate_matched_bounded_probe_order(
             matched_blocked_control: None,
         },
     })
+}
+
+pub fn is_bybit_safe_order_link_id(order_link_id: &str) -> bool {
+    let trimmed = order_link_id.trim();
+    !trimmed.is_empty()
+        && trimmed == order_link_id
+        && trimmed.starts_with(BYBIT_ORDER_LINK_ID_PREFIX)
+        && trimmed.len() <= BYBIT_ORDER_LINK_ID_MAX_LEN
+        && trimmed
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+}
+
+pub fn is_bybit_safe_order_link_id_for_engine_mode(
+    order_link_id: &str,
+    engine_mode: &str,
+    ts_ms: u64,
+) -> bool {
+    if !is_bybit_safe_order_link_id(order_link_id) {
+        return false;
+    }
+    let expected_mode_tag = match engine_mode.trim().to_ascii_lowercase().as_str() {
+        "demo" => "dm",
+        "live_demo" => "ld",
+        _ => return false,
+    };
+    let parts: Vec<&str> = order_link_id.split('_').collect();
+    if parts.len() != 4 {
+        return false;
+    }
+    let [prefix, mode_tag, ts_part, seq_part]: [&str; 4] =
+        [parts[0], parts[1], parts[2], parts[3]];
+    prefix == "oc"
+        && mode_tag == expected_mode_tag
+        && ts_part == ts_ms.to_string()
+        && seq_part
+            .parse::<u64>()
+            .map(|seq| seq > 0)
+            .unwrap_or(false)
 }
 
 fn skip(
@@ -417,6 +480,14 @@ mod tests {
         assert_eq!(draft.order_type, OrderType::Limit);
         assert_eq!(draft.time_in_force, TimeInForce::PostOnly);
         assert_eq!(draft.limit_price, 3_499.9);
+        assert_eq!(
+            draft.max_demo_notional_usdt_per_order,
+            DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER
+        );
+        assert_eq!(
+            draft.maker_timeout_ms,
+            DEFAULT_ACTIVE_BOUNDED_PROBE_MAKER_TIMEOUT_MS
+        );
         assert_eq!(draft.decision_lease_id, "lease-demo-1");
         assert_eq!(draft.lineage.side_cell_key, "ma_crossover|ETHUSDT|Sell");
         assert_eq!(draft.lineage.bounded_probe_attempt, "bounded_probe_attempt");
@@ -433,6 +504,19 @@ mod tests {
         assert_eq!(draft.lineage.exec_fee, None);
         assert_eq!(draft.lineage.slippage_bps, None);
         assert_eq!(draft.lineage.matched_blocked_control, None);
+    }
+
+    #[test]
+    fn demo_engine_mode_accepts_matching_dm_order_link_id() {
+        let mut request = request();
+        request.reject_event.engine_mode = "demo".to_string();
+        request.order_link_id = "oc_dm_1782040200000_1".to_string();
+
+        let decision = candidate_matched_bounded_probe_order(request);
+        let ActiveBoundedProbeOrderDecision::Submit(draft) = decision else {
+            panic!("expected demo active bounded probe order draft");
+        };
+        assert_eq!(draft.lineage.order_link_id, "oc_dm_1782040200000_1");
     }
 
     #[test]
@@ -468,6 +552,177 @@ mod tests {
     }
 
     #[test]
+    fn caller_cannot_expand_approved_demo_notional_cap() {
+        let mut request = request();
+        request.limits.max_demo_notional_usdt_per_order =
+            DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER + 0.01;
+
+        let decision = candidate_matched_bounded_probe_order(request);
+        let ActiveBoundedProbeOrderDecision::Skip(skip) = decision else {
+            panic!("expected skip");
+        };
+        assert_eq!(
+            skip.reason,
+            ActiveBoundedProbeOrderSkipReason::RiskLimitsInvalid
+        );
+    }
+
+    #[test]
+    fn invalid_bybit_order_link_id_blocks_active_order_draft() {
+        let mut long_id_request = request();
+        long_id_request.order_link_id = "oc_ld_1782040200000_1_with_extra_suffix".to_string();
+
+        let decision = candidate_matched_bounded_probe_order(long_id_request);
+        let ActiveBoundedProbeOrderDecision::Skip(skip) = decision else {
+            panic!("expected skip");
+        };
+        assert_eq!(
+            skip.reason,
+            ActiveBoundedProbeOrderSkipReason::InvalidOrderLinkId
+        );
+
+        let mut wrong_prefix_request = request();
+        wrong_prefix_request.order_link_id = "external_ld_1782040200000_1".to_string();
+        let decision = candidate_matched_bounded_probe_order(wrong_prefix_request);
+        let ActiveBoundedProbeOrderDecision::Skip(skip) = decision else {
+            panic!("expected skip");
+        };
+        assert_eq!(
+            skip.reason,
+            ActiveBoundedProbeOrderSkipReason::InvalidOrderLinkId
+        );
+
+        let mut bare_prefix_request = request();
+        bare_prefix_request.order_link_id = "oc_".to_string();
+        let decision = candidate_matched_bounded_probe_order(bare_prefix_request);
+        let ActiveBoundedProbeOrderDecision::Skip(skip) = decision else {
+            panic!("expected skip");
+        };
+        assert_eq!(
+            skip.reason,
+            ActiveBoundedProbeOrderSkipReason::InvalidOrderLinkId
+        );
+
+        let mut wrong_mode_request = request();
+        wrong_mode_request.order_link_id = "oc_dm_1782040200000_1".to_string();
+        let decision = candidate_matched_bounded_probe_order(wrong_mode_request);
+        let ActiveBoundedProbeOrderDecision::Skip(skip) = decision else {
+            panic!("expected skip");
+        };
+        assert_eq!(
+            skip.reason,
+            ActiveBoundedProbeOrderSkipReason::InvalidOrderLinkId
+        );
+
+        let mut wrong_ts_request = request();
+        wrong_ts_request.order_link_id = "oc_ld_1782040200001_1".to_string();
+        let decision = candidate_matched_bounded_probe_order(wrong_ts_request);
+        let ActiveBoundedProbeOrderDecision::Skip(skip) = decision else {
+            panic!("expected skip");
+        };
+        assert_eq!(
+            skip.reason,
+            ActiveBoundedProbeOrderSkipReason::InvalidOrderLinkId
+        );
+
+        let mut zero_seq_request = request();
+        zero_seq_request.order_link_id = "oc_ld_1782040200000_0".to_string();
+        let decision = candidate_matched_bounded_probe_order(zero_seq_request);
+        let ActiveBoundedProbeOrderDecision::Skip(skip) = decision else {
+            panic!("expected skip");
+        };
+        assert_eq!(
+            skip.reason,
+            ActiveBoundedProbeOrderSkipReason::InvalidOrderLinkId
+        );
+
+        let mut bad_charset_request = request();
+        bad_charset_request.order_link_id = "oc bad id".to_string();
+        let decision = candidate_matched_bounded_probe_order(bad_charset_request);
+        let ActiveBoundedProbeOrderDecision::Skip(skip) = decision else {
+            panic!("expected skip");
+        };
+        assert_eq!(
+            skip.reason,
+            ActiveBoundedProbeOrderSkipReason::InvalidOrderLinkId
+        );
+    }
+
+    #[test]
+    fn nonpositive_limit_price_blocks_active_order_draft() {
+        let mut request = request();
+        request.placement_decision = BoundedProbePlacementDecision::Submit(
+            crate::bounded_probe_near_touch::BoundedProbeAttemptPlacement {
+                record_type: bounded_probe_attempt_record_type(),
+                side_cell_key: "ma_crossover|ETHUSDT|Sell".to_string(),
+                limit_price: 0.0,
+                touch_gap_bps: 0.29,
+                reference_price: 3_500.0,
+                bbo_age_ms: 0,
+            },
+        );
+
+        let decision = candidate_matched_bounded_probe_order(request);
+        let ActiveBoundedProbeOrderDecision::Skip(skip) = decision else {
+            panic!("expected skip");
+        };
+        assert_eq!(
+            skip.reason,
+            ActiveBoundedProbeOrderSkipReason::PlacementInvalid
+        );
+    }
+
+    #[test]
+    fn nonpositive_reference_price_blocks_active_order_draft() {
+        let mut request = request();
+        request.placement_decision = BoundedProbePlacementDecision::Submit(
+            crate::bounded_probe_near_touch::BoundedProbeAttemptPlacement {
+                record_type: bounded_probe_attempt_record_type(),
+                side_cell_key: "ma_crossover|ETHUSDT|Sell".to_string(),
+                limit_price: 3_499.9,
+                touch_gap_bps: 0.29,
+                reference_price: 0.0,
+                bbo_age_ms: 0,
+            },
+        );
+
+        let decision = candidate_matched_bounded_probe_order(request);
+        let ActiveBoundedProbeOrderDecision::Skip(skip) = decision else {
+            panic!("expected skip");
+        };
+        assert_eq!(
+            skip.reason,
+            ActiveBoundedProbeOrderSkipReason::PlacementInvalid
+        );
+    }
+
+    #[test]
+    fn invalid_maker_timeout_blocks_active_order_draft() {
+        let mut zero_timeout_request = request();
+        zero_timeout_request.limits.maker_timeout_ms = 0;
+
+        let decision = candidate_matched_bounded_probe_order(zero_timeout_request);
+        let ActiveBoundedProbeOrderDecision::Skip(skip) = decision else {
+            panic!("expected skip");
+        };
+        assert_eq!(
+            skip.reason,
+            ActiveBoundedProbeOrderSkipReason::RiskLimitsInvalid
+        );
+
+        let mut high_timeout_request = request();
+        high_timeout_request.limits.maker_timeout_ms = 60_001;
+        let decision = candidate_matched_bounded_probe_order(high_timeout_request);
+        let ActiveBoundedProbeOrderDecision::Skip(skip) = decision else {
+            panic!("expected skip");
+        };
+        assert_eq!(
+            skip.reason,
+            ActiveBoundedProbeOrderSkipReason::RiskLimitsInvalid
+        );
+    }
+
+    #[test]
     fn missing_decision_lease_blocks_active_order_draft() {
         let mut request = request();
         request.decision_lease_id = None;
@@ -476,6 +731,9 @@ mod tests {
         let ActiveBoundedProbeOrderDecision::Skip(skip) = decision else {
             panic!("expected skip");
         };
-        assert_eq!(skip.reason, ActiveBoundedProbeOrderSkipReason::MissingLineage);
+        assert_eq!(
+            skip.reason,
+            ActiveBoundedProbeOrderSkipReason::MissingLineage
+        );
     }
 }
