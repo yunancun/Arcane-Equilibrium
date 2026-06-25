@@ -684,7 +684,7 @@ def test_authority_alias_in_placement_plan_is_rejected(tmp_path: Path) -> None:
     assert packet["placement_repair_plan"]["authority_preserved"] is False
 
 
-def test_current_repo_reports_active_order_submission_not_ready() -> None:
+def test_current_repo_reports_active_order_submission_source_ready_without_authority() -> None:
     packet = build_bounded_demo_probe_authority_patch_readiness(
         placement_repair_plan=_placement_plan(),
         repo_root=Path.cwd(),
@@ -693,10 +693,20 @@ def test_current_repo_reports_active_order_submission_not_ready() -> None:
 
     assert packet["answers"]["rust_near_touch_authority_adapter_present"] is True
     assert packet["answers"]["rust_authority_path_wiring_present"] is True
-    assert packet["answers"]["active_order_submission_ready"] is False
+    assert packet["answers"]["active_order_submission_ready"] is True
+    assert packet["answers"]["active_order_submission_authority_granted"] is False
     blockers = packet["active_order_submission_readiness"]["blockers"]
-    assert "demo_learning_lane_writer_adapter_enabled_false" in blockers
-    assert "tick_dispatch_records_preview_no_order_submitted" in blockers
+    assert blockers == []
+    assert (
+        packet["active_order_submission_readiness"]["status"]
+        == "ACTIVE_ORDER_SUBMISSION_WIRING_PRESENT"
+    )
+    assert (
+        packet["active_order_submission_readiness"]["evidence"][
+            "runtime_writer_default_adapter_disabled"
+        ]
+        is True
+    )
 
 
 def test_active_order_readiness_fails_closed_when_source_files_missing(

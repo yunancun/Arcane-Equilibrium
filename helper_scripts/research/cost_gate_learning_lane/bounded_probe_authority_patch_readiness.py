@@ -664,7 +664,49 @@ def _strip_rust_comments_and_strings(text: str) -> str:
                 continue
         out.append(text[idx])
         idx += 1
-    return mask_macro_invocations("".join(out))
+    def mask_cfg_test_items(code: str) -> str:
+        chars = list(code)
+        idx = 0
+        marker = "#[cfg(test)]"
+        while True:
+            start = code.find(marker, idx)
+            if start == -1:
+                break
+            cursor = start + len(marker)
+            while cursor < len(code):
+                while cursor < len(code) and code[cursor].isspace():
+                    cursor += 1
+                if code.startswith("#[", cursor):
+                    end_attr = code.find("]", cursor + 2)
+                    if end_attr == -1:
+                        break
+                    cursor = end_attr + 1
+                    continue
+                break
+            item_end = None
+            brace = code.find("{", cursor)
+            semi = code.find(";", cursor)
+            if brace != -1 and (semi == -1 or brace < semi):
+                depth = 1
+                end = brace + 1
+                while end < len(code) and depth > 0:
+                    if code[end] == "{":
+                        depth += 1
+                    elif code[end] == "}":
+                        depth -= 1
+                    end += 1
+                item_end = end
+            elif semi != -1:
+                item_end = semi + 1
+            if item_end is None:
+                idx = cursor
+                continue
+            masked = mask(code[start:item_end])
+            chars[start:item_end] = masked
+            idx = item_end
+        return "".join(chars)
+
+    return mask_cfg_test_items(mask_macro_invocations("".join(out)))
 
 
 def _repo_file_present(repo_root: Path, rel_path: str) -> bool:
@@ -811,6 +853,10 @@ def _active_order_submission_readiness(repo_root: Path) -> dict[str, Any]:
         r"evaluate_probe_admission\([\s\S]*?,\s*false\s*,\s*risk_state\s*,?\s*\)",
         writer_code,
     ) is not None
+    runtime_writer_default_adapter_disabled = re.search(
+        r"\blet\s+bounded_probe_adapter_enabled\s*=\s*false\s*;",
+        writer_code,
+    ) is not None
     positive_active_evidence = {
         "writer_submits_candidate_matched_probe_order": (
             "submit_candidate_matched_bounded_probe_order" in writer_code
@@ -859,6 +905,7 @@ def _active_order_submission_readiness(repo_root: Path) -> dict[str, Any]:
             "file_presence": file_presence,
             "writer_no_order_contract": writer_no_order_contract,
             "adapter_enabled_hardcoded_false": adapter_enabled_hardcoded_false,
+            "runtime_writer_default_adapter_disabled": runtime_writer_default_adapter_disabled,
             "dispatch_no_order_contract": dispatch_no_order_contract,
             "near_touch_pure_no_order_contract": near_touch_pure_no_order_contract,
             "positive_active_evidence": positive_active_evidence,

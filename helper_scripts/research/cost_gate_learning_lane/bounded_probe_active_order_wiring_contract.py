@@ -477,7 +477,49 @@ def _strip_rust_comments_and_strings(text: str) -> str:
                 continue
         out.append(text[idx])
         idx += 1
-    return mask_macro_invocations("".join(out))
+    def mask_cfg_test_items(code: str) -> str:
+        chars = list(code)
+        idx = 0
+        marker = "#[cfg(test)]"
+        while True:
+            start = code.find(marker, idx)
+            if start == -1:
+                break
+            cursor = start + len(marker)
+            while cursor < len(code):
+                while cursor < len(code) and code[cursor].isspace():
+                    cursor += 1
+                if code.startswith("#[", cursor):
+                    end_attr = code.find("]", cursor + 2)
+                    if end_attr == -1:
+                        break
+                    cursor = end_attr + 1
+                    continue
+                break
+            item_end = None
+            brace = code.find("{", cursor)
+            semi = code.find(";", cursor)
+            if brace != -1 and (semi == -1 or brace < semi):
+                depth = 1
+                end = brace + 1
+                while end < len(code) and depth > 0:
+                    if code[end] == "{":
+                        depth += 1
+                    elif code[end] == "}":
+                        depth -= 1
+                    end += 1
+                item_end = end
+            elif semi != -1:
+                item_end = semi + 1
+            if item_end is None:
+                idx = cursor
+                continue
+            masked = mask(code[start:item_end])
+            chars[start:item_end] = masked
+            idx = item_end
+        return "".join(chars)
+
+    return mask_cfg_test_items(mask_macro_invocations("".join(out)))
 
 
 def _read_file(path: Path) -> str | None:

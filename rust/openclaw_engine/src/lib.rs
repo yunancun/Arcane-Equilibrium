@@ -58,6 +58,7 @@ pub mod bybit_earn_client;
 pub mod bybit_private_ws;
 pub mod bybit_private_ws_status_writer;
 pub mod bybit_rest_client;
+pub mod bounded_probe_active_order;
 pub mod bounded_probe_near_touch;
 pub mod canary_writer;
 pub mod claude_teacher;

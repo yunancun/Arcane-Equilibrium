@@ -181,7 +181,7 @@ pub struct ExecutionInfo { pub fill_id: String, pub exec_fee: f64, pub fee: f64,
     )
 
 
-def test_current_repo_blocks_active_order_wiring_contract() -> None:
+def test_current_repo_has_active_order_wiring_contract_ready_for_e3_bb_review() -> None:
     packet = build_bounded_probe_active_order_wiring_contract(
         repo_root=Path.cwd(),
         candidate=_candidate(),
@@ -190,15 +190,20 @@ def test_current_repo_blocks_active_order_wiring_contract() -> None:
     markdown = render_markdown(packet)
 
     assert packet["schema_version"] == ACTIVE_ORDER_WIRING_CONTRACT_SCHEMA_VERSION
-    assert packet["status"] == PATCH_REQUIRED_STATUS
-    assert packet["answers"]["source_contract_ready_for_e3_bb_review"] is False
+    assert packet["status"] == READY_STATUS
+    assert packet["answers"]["source_contract_ready_for_e3_bb_review"] is True
+    assert packet["answers"]["active_order_submission_ready"] is True
     assert packet["answers"]["order_authority_granted"] is False
     assert packet["answers"]["order_submission_performed"] is False
+    assert packet["answers"]["active_runtime_order_authority"] is False
+    assert packet["source_contract"]["missing_requirements"] == []
     assert (
-        "bounded_probe_active_order_module_missing"
-        in packet["source_contract"]["missing_requirements"]
+        packet["active_order_submission_readiness"]["evidence"][
+            "runtime_writer_default_adapter_disabled"
+        ]
+        is True
     )
-    assert "source_only_rust_patch_for_active_order_wiring" in markdown
+    assert "e3_bb_exchange_facing_review_packet_only_no_order" in markdown
 
 
 def test_missing_repo_fails_closed(tmp_path: Path) -> None:
@@ -307,6 +312,108 @@ pub fn marker_only() {
 }
 """,
         )
+
+    packet = build_bounded_probe_active_order_wiring_contract(
+        repo_root=tmp_path,
+        candidate=_candidate(),
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == PATCH_REQUIRED_STATUS
+    assert packet["source_contract"]["all_requirements_present"] is False
+    assert packet["answers"]["active_order_submission_ready"] is False
+
+
+def test_cfg_test_rust_tokens_do_not_satisfy_active_order_contract(
+    tmp_path: Path,
+) -> None:
+    token_block = """
+#[cfg(test)]
+mod tests {
+    pub struct ActiveBoundedProbeOrderRequest {
+        pub side_cell_key: String,
+        pub context_id: String,
+        pub signal_id: String,
+        pub max_demo_notional_usdt_per_order: f64,
+        pub max_probe_intents_before_review: u64,
+        pub order_link_id: String,
+        pub order_id: Option<String>,
+        pub fill_id: Option<String>,
+        pub fee: f64,
+        pub exec_fee: f64,
+        pub slippage_bps: Option<f64>,
+        pub matched_blocked_control: Option<String>,
+    }
+    pub enum ActiveBoundedProbeOrderDecision { Submit, Skip }
+    pub enum TimeInForce { PostOnly }
+    pub enum OrderType { Limit }
+    pub enum LeaseOutcome { Consumed }
+    pub fn candidate_matched_bounded_probe_order() {
+        let bounded_probe_attempt = 1;
+        let demo_only = true;
+        let live_demo = true;
+        let one_order_per_admitted_attempt = true;
+        let limit_price = 1.0;
+        let max_fresh_bbo_age_ms = 1000;
+        let max_initial_passive_gap_bps = 75.0;
+        let allowed_to_submit_order = true;
+        let order_link_id = "x";
+        let context_id = "ctx";
+        let signal_id = "sig";
+        let order_id = "ord";
+        let fill_id = "fill";
+        let fee = 0.0;
+        let exec_fee = 0.0;
+        let slippage_bps = 0.0;
+        let matched_blocked_control = "ctrl";
+        let risk_state = "NORMAL";
+        let main_cost_gate_adjustment = "NONE";
+        let _ = (
+            bounded_probe_attempt,
+            demo_only,
+            live_demo,
+            one_order_per_admitted_attempt,
+            limit_price,
+            max_fresh_bbo_age_ms,
+            max_initial_passive_gap_bps,
+            allowed_to_submit_order,
+            order_link_id,
+            context_id,
+            signal_id,
+            order_id,
+            fill_id,
+            fee,
+            exec_fee,
+            slippage_bps,
+            matched_blocked_control,
+            risk_state,
+            main_cost_gate_adjustment,
+        );
+        post_only_near_touch_or_skip();
+        evaluate_probe_admission();
+        validate_operator_authorization();
+        dispatch_admitted_bounded_probe_order();
+        let _ = ORDER_AUTHORITY_GRANTED;
+        let _ = TimeInForce::PostOnly;
+        let _ = OrderType::Limit;
+        let _ = LeaseOutcome::Consumed;
+    }
+    pub fn submit_candidate_matched_bounded_probe_order() {}
+    pub fn active_bounded_probe_order_submission() {
+        let bounded_probe_adapter_enabled = true;
+        let _ = bounded_probe_adapter_enabled;
+    }
+}
+"""
+    for rel_path in (
+        "rust/openclaw_engine/src/bounded_probe_active_order.rs",
+        "rust/openclaw_engine/src/bounded_probe_near_touch.rs",
+        "rust/openclaw_engine/src/demo_learning_lane.rs",
+        "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
+        "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs",
+        "rust/openclaw_engine/src/order_manager.rs",
+    ):
+        _write(tmp_path / rel_path, token_block)
 
     packet = build_bounded_probe_active_order_wiring_contract(
         repo_root=tmp_path,
