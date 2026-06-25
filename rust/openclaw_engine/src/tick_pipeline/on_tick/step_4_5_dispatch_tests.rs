@@ -4,13 +4,173 @@
 //! 超過 2000 硬上限，比照 event_consumer/dispatch_tests.rs 的 `#[path]` split
 //! 慣例拆出）。測試邏輯零變更：覆蓋 try_clone_panel_snapshot 的 4 條
 //! AlphaSurface fail-soft / 禁合成 neutral / read-guard 釋放 invariant。
-use super::{bounded_probe_near_touch_decision_for_reject, try_clone_panel_snapshot};
-use crate::bounded_probe_near_touch::{
-    BoundedProbePlacementDecision, BoundedProbePlacementSkipReason,
+use super::{
+    active_bounded_probe_order_submission, bounded_probe_near_touch_decision_for_reject,
+    try_clone_panel_snapshot,
 };
+use crate::bounded_probe_active_order::{
+    ActiveBoundedProbeOrderDecision, ActiveBoundedProbeOrderRequest, ActiveBoundedProbeRiskLimits,
+};
+use crate::bounded_probe_near_touch::{
+    BoundedProbeAttemptPlacement, BoundedProbePlacementDecision, BoundedProbePlacementSkipReason,
+};
+use crate::demo_learning_lane::{
+    evaluate_probe_admission, AdmissionConfig, DemoLearningLanePlan, RejectEvent,
+};
+use crate::tick_pipeline::OrderDispatchRequest;
 use openclaw_core::alpha_surface::{AlphaSurface, FundingCurveSnapshot, OIDeltaPanel};
 use std::sync::Arc;
 use tokio::sync::RwLock as TokioRwLock;
+
+const BOUNDED_PROBE_NOW_MS: u64 = 1_782_040_200_000;
+
+fn bounded_probe_plan() -> DemoLearningLanePlan {
+    DemoLearningLanePlan::from_json_str(
+        r#"{
+            "schema_version": "cost_gate_demo_learning_lane_plan_v1",
+            "generated_at_utc": "2026-06-21T11:00:00+00:00",
+            "status": "READY_FOR_DEMO_LEARNING_PROBE",
+            "gate_status": "OPERATOR_REVIEW",
+            "main_cost_gate_adjustment": "NONE",
+            "learning_gate_adjustment": "SIDE_CELL_DEMO_PROBE_ONLY_AFTER_ADAPTER_WIRING",
+            "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+            "operator_authorization": {
+                "schema_version": "bounded_demo_probe_operator_authorization_v1",
+                "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+                "authorization_id": "auth-demo-eth-sell-001",
+                "operator_id": "operator-test",
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "expires_at_utc": "2026-06-21T12:00:00+00:00",
+                "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+                "main_cost_gate_adjustment": "NONE",
+                "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+                "max_authorized_probe_orders": 1,
+                "probe_authority_granted": true,
+                "order_authority_granted": true,
+                "promotion_evidence": false
+            },
+            "selected_probe_candidate_count": 1,
+            "probe_candidates": [{
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "strategy_name": "ma_crossover",
+                "symbol": "ETHUSDT",
+                "side": "Sell",
+                "reject_reason_code": "cost_gate_js_demo_negative_edge",
+                "probe_proposal": {
+                    "mode": "demo_only_learning_probe",
+                    "max_probe_orders": 1,
+                    "cooldown_minutes": 30,
+                    "requires_runtime_policy_adapter": true,
+                    "requires_probe_attempt_logging": true,
+                    "requires_probe_outcome_logging": true
+                },
+                "guardrails": {
+                    "main_cost_gate_adjustment": "NONE",
+                    "may_bypass_main_live_gate": false,
+                    "demo_only": true,
+                    "paper_not_promotion_evidence": true,
+                    "notional_or_qty_not_granted_by_artifact": true
+                }
+            }]
+        }"#,
+    )
+    .unwrap()
+}
+
+fn bounded_probe_event() -> RejectEvent {
+    RejectEvent {
+        strategy_name: "ma_crossover".to_string(),
+        symbol: "ETHUSDT".to_string(),
+        side: "Sell".to_string(),
+        reject_reason_code: "cost_gate_js_demo_negative_edge".to_string(),
+        engine_mode: "live_demo".to_string(),
+        ts_ms: BOUNDED_PROBE_NOW_MS,
+        context_id: Some("ctx-demo-ma_crossover-ETHUSDT-1782040200000".to_string()),
+        signal_id: Some("sig-demo-ma_crossover-ETHUSDT-1782040200000".to_string()),
+    }
+}
+
+fn bounded_probe_order_request() -> ActiveBoundedProbeOrderRequest {
+    let event = bounded_probe_event();
+    ActiveBoundedProbeOrderRequest {
+        reject_event: event.clone(),
+        admission_decision: evaluate_probe_admission(
+            &bounded_probe_plan(),
+            &event,
+            &[],
+            BOUNDED_PROBE_NOW_MS,
+            &AdmissionConfig::default(),
+            true,
+            "NORMAL",
+        ),
+        placement_decision: BoundedProbePlacementDecision::Submit(BoundedProbeAttemptPlacement {
+            record_type: "bounded_probe_attempt",
+            side_cell_key: "ma_crossover|ETHUSDT|Sell".to_string(),
+            limit_price: 3_499.9,
+            touch_gap_bps: 0.29,
+            reference_price: 3_500.0,
+            bbo_age_ms: 0,
+        }),
+        qty: 0.001,
+        order_link_id: "oc_ld_1782040200000_1".to_string(),
+        decision_lease_id: Some("lease-demo-1".to_string()),
+        risk_state: "NORMAL".to_string(),
+        limits: ActiveBoundedProbeRiskLimits::default(),
+    }
+}
+
+#[test]
+fn active_bounded_probe_submission_forwards_candidate_matched_post_only_limit_request() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+
+    let result = active_bounded_probe_order_submission(&tx, bounded_probe_order_request())
+        .expect("dispatch channel should accept request");
+
+    assert!(result.is_some());
+    let req = rx.try_recv().expect("OrderDispatchRequest must be sent");
+    assert_eq!(req.symbol, "ETHUSDT");
+    assert!(!req.is_long);
+    assert_eq!(req.order_link_id, "oc_ld_1782040200000_1");
+    assert_eq!(req.decision_lease_id.as_deref(), Some("lease-demo-1"));
+    assert_eq!(
+        req.context_id,
+        "ctx-demo-ma_crossover-ETHUSDT-1782040200000"
+    );
+    assert_eq!(
+        req.intent_id.as_deref(),
+        Some("sig-demo-ma_crossover-ETHUSDT-1782040200000")
+    );
+    assert_eq!(req.order_type, "limit");
+    assert_eq!(req.limit_price, Some(3_499.9));
+    assert_eq!(
+        req.time_in_force,
+        Some(crate::order_manager::TimeInForce::PostOnly)
+    );
+    assert_eq!(req.reference_price, Some(3_500.0));
+    assert!(rx.try_recv().is_err());
+}
+
+#[test]
+fn active_bounded_probe_submission_skips_without_dispatch_when_not_admitted() {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+    let mut request = bounded_probe_order_request();
+    request.admission_decision.allowed_to_submit_order = false;
+    request.admission_decision.decision =
+        crate::demo_learning_lane::AdmissionDecisionCode::OrderAuthorityNotGranted;
+    request.admission_decision.no_order_authority = true;
+
+    let result = active_bounded_probe_order_submission(&tx, request)
+        .expect("skip should not touch dispatch channel");
+
+    assert_eq!(result, None);
+    assert!(matches!(
+        crate::bounded_probe_active_order::candidate_matched_bounded_probe_order(
+            bounded_probe_order_request()
+        ),
+        ActiveBoundedProbeOrderDecision::Submit(_)
+    ));
+    assert!(rx.try_recv().is_err());
+}
 
 /// 構造帶實際數據的 FundingCurveSnapshot stub（snapshot_ts_ms 可讀驗證）。
 fn make_funding_snapshot() -> FundingCurveSnapshot {
@@ -49,7 +209,10 @@ async fn b_rem_1_invariant_1_funding_slot_present_surface_some_age_readable() {
     let slot_opt = Some(slot);
 
     let cloned = try_clone_panel_snapshot(slot_opt.as_ref());
-    assert!(cloned.is_some(), "slot 注入且 inner Some → helper 應回 Some");
+    assert!(
+        cloned.is_some(),
+        "slot 注入且 inner Some → helper 應回 Some"
+    );
     let unwrapped = cloned.unwrap();
     assert_eq!(
         unwrapped.snapshot_ts_ms, snap_ts,
@@ -80,12 +243,14 @@ async fn b_rem_1_invariant_1_funding_slot_present_surface_some_age_readable() {
 async fn b_rem_1_invariant_2_oi_slot_present_surface_some_age_readable() {
     let panel = make_oi_panel();
     let panel_ts = panel.snapshot_ts_ms;
-    let slot: Arc<TokioRwLock<Option<OIDeltaPanel>>> =
-        Arc::new(TokioRwLock::new(Some(panel)));
+    let slot: Arc<TokioRwLock<Option<OIDeltaPanel>>> = Arc::new(TokioRwLock::new(Some(panel)));
     let slot_opt = Some(slot);
 
     let cloned = try_clone_panel_snapshot(slot_opt.as_ref());
-    assert!(cloned.is_some(), "oi slot 注入且 inner Some → helper 應回 Some");
+    assert!(
+        cloned.is_some(),
+        "oi slot 注入且 inner Some → helper 應回 Some"
+    );
     let unwrapped = cloned.unwrap();
     assert_eq!(unwrapped.snapshot_ts_ms, panel_ts, "OI age 必須可讀");
 
@@ -186,8 +351,7 @@ async fn b_rem_1_invariant_4_slot_missing_no_synthetic_neutral() {
 // 否則會發出「slot 已 wire 但永遠 None」的 false-positive availability 信號。
 #[tokio::test]
 async fn b_rem_1_slot_present_inner_none_returns_none() {
-    let slot: Arc<TokioRwLock<Option<FundingCurveSnapshot>>> =
-        Arc::new(TokioRwLock::new(None));
+    let slot: Arc<TokioRwLock<Option<FundingCurveSnapshot>>> = Arc::new(TokioRwLock::new(None));
     let slot_opt = Some(slot);
 
     let cloned = try_clone_panel_snapshot(slot_opt.as_ref());

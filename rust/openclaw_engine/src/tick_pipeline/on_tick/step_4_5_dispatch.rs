@@ -116,6 +116,60 @@ fn bounded_probe_near_touch_decision_for_reject(
     )
 }
 
+pub(crate) fn active_bounded_probe_order_submission(
+    tx: &tokio::sync::mpsc::UnboundedSender<OrderDispatchRequest>,
+    request: crate::bounded_probe_active_order::ActiveBoundedProbeOrderRequest,
+) -> Result<
+    Option<crate::bounded_probe_active_order::ActiveBoundedProbeOrderDraft>,
+    tokio::sync::mpsc::error::SendError<OrderDispatchRequest>,
+> {
+    match crate::bounded_probe_active_order::candidate_matched_bounded_probe_order(request) {
+        crate::bounded_probe_active_order::ActiveBoundedProbeOrderDecision::Submit(draft) => {
+            dispatch_admitted_bounded_probe_order(tx, draft.clone())?;
+            Ok(Some(draft))
+        }
+        crate::bounded_probe_active_order::ActiveBoundedProbeOrderDecision::Skip(_) => Ok(None),
+    }
+}
+
+pub(crate) fn dispatch_admitted_bounded_probe_order(
+    tx: &tokio::sync::mpsc::UnboundedSender<OrderDispatchRequest>,
+    draft: crate::bounded_probe_active_order::ActiveBoundedProbeOrderDraft,
+) -> Result<(), tokio::sync::mpsc::error::SendError<OrderDispatchRequest>> {
+    let order_link_id = draft.lineage.order_link_id.clone();
+    let context_id = draft.lineage.context_id.clone();
+    let signal_id = draft.lineage.signal_id.clone();
+    tx.send(OrderDispatchRequest {
+        symbol: draft.symbol,
+        is_long: draft.is_long,
+        qty: draft.qty,
+        price: draft.reference_price,
+        strategy: draft.strategy,
+        paper_fill_ts: draft.paper_fill_ts,
+        is_close: false,
+        order_link_id,
+        decision_lease_id: Some(draft.decision_lease_id),
+        is_primary: true,
+        stop_loss: None,
+        take_profit: None,
+        context_id,
+        order_type: "limit".to_string(),
+        limit_price: Some(draft.limit_price),
+        time_in_force: Some(draft.time_in_force),
+        maker_timeout_ms: None,
+        close_maker_audit: None,
+        reference_price: Some(draft.reference_price),
+        reference_ts_ms: Some(draft.paper_fill_ts),
+        reference_source: Some("bounded_probe_near_touch".to_string()),
+        spine_order_plan_id: None,
+        spine_decision_id: None,
+        spine_verdict_id: None,
+        spine_stub_report_id: None,
+        intent_id: Some(signal_id),
+        reprice_count: 0,
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn record_pre_risk_rejection(
     trading_tx: &Option<tokio::sync::mpsc::Sender<crate::database::TradingMsg>>,
@@ -1055,7 +1109,7 @@ impl TickPipeline {
                                         writer_enabled,
                                         placement_record_type = %placement_record_type,
                                         placement_reason = ?placement_reason,
-                                        "demo-learning lane eligible cost-gate reject recognized with bounded probe placement preview; no order submitted / 已識別 demo-learning lane eligible cost-gate reject 並計算 bounded probe placement preview；未送單"
+                                        "demo-learning lane eligible cost-gate reject recognized with bounded probe placement preview; order path remains inactive / 已識別 demo-learning lane eligible cost-gate reject 並計算 bounded probe placement preview；order path 保持未啟用"
                                     );
                                     let risk_state = self.governance.risk.snapshot_level().as_str();
                                     self.demo_learning_lane_writer

@@ -3,7 +3,9 @@
 //! This module keeps durable learning evidence off the tick hot path. Producers
 //! send a normalized `RejectEvent` through a bounded channel; the writer task
 //! loads the current plan and ledger, evaluates the fail-closed admission policy,
-//! and appends a `probe_admission_decision` row. It does not submit orders.
+//! and appends a `probe_admission_decision` row. Active order helpers are
+//! separate review seams and remain inactive unless a caller supplies an
+//! admitted candidate-matched envelope.
 
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
@@ -17,6 +19,10 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
+use crate::bounded_probe_active_order::{
+    candidate_matched_bounded_probe_order, ActiveBoundedProbeOrderDecision,
+    ActiveBoundedProbeOrderDraft, ActiveBoundedProbeOrderRequest, ActiveBoundedProbeRiskLimits,
+};
 use crate::bounded_probe_near_touch::BoundedProbePlacementDecision;
 use crate::demo_learning_lane::{
     evaluate_probe_admission, AdmissionConfig, DemoLearningLanePlan, LedgerRecord, RejectEvent,
@@ -268,13 +274,14 @@ pub(crate) fn build_runtime_admission_record(
         .map_err(|err| format!("read plan {} failed: {err}", plan_path.display()))?;
     let plan = DemoLearningLanePlan::from_json_str(&plan_json)
         .map_err(|err| format!("parse plan {} failed: {err}", plan_path.display()))?;
+    let bounded_probe_adapter_enabled = false;
     let decision = evaluate_probe_admission(
         &plan,
         event,
         &ledger_rows,
         now_ms,
         &AdmissionConfig::default(),
-        false,
+        bounded_probe_adapter_enabled,
         risk_state,
     );
     Ok(Some(build_admission_ledger_record_with_placement(
@@ -283,6 +290,43 @@ pub(crate) fn build_runtime_admission_record(
         generated_at_utc,
         placement_decision,
     )))
+}
+
+pub(crate) fn submit_candidate_matched_bounded_probe_order(
+    plan: &DemoLearningLanePlan,
+    ledger_rows: &[LedgerRecord],
+    event: RejectEvent,
+    placement_decision: BoundedProbePlacementDecision,
+    risk_state: &str,
+    now_ms: u64,
+    bounded_probe_adapter_enabled: bool,
+    order_request: ActiveBoundedProbeOrderRequest,
+) -> ActiveBoundedProbeOrderDecision {
+    let admission_decision = evaluate_probe_admission(
+        plan,
+        &event,
+        ledger_rows,
+        now_ms,
+        &AdmissionConfig::default(),
+        bounded_probe_adapter_enabled,
+        risk_state,
+    );
+    let request = ActiveBoundedProbeOrderRequest {
+        reject_event: event,
+        admission_decision,
+        placement_decision,
+        ..order_request
+    };
+    candidate_matched_bounded_probe_order(request)
+}
+
+pub(crate) fn active_bounded_probe_order_submission(
+    decision: ActiveBoundedProbeOrderDecision,
+) -> Option<ActiveBoundedProbeOrderDraft> {
+    match decision {
+        ActiveBoundedProbeOrderDecision::Submit(draft) => Some(draft),
+        ActiveBoundedProbeOrderDecision::Skip(_) => None,
+    }
 }
 
 fn read_ledger_rows(path: &Path) -> Result<Vec<LedgerRecord>, String> {
@@ -331,6 +375,60 @@ mod tests {
   "main_cost_gate_adjustment": "NONE",
   "learning_gate_adjustment": "SIDE_CELL_DEMO_PROBE_ONLY_AFTER_ADAPTER_WIRING",
   "order_authority": "NOT_GRANTED",
+  "selected_probe_candidate_count": 1,
+  "probe_candidates": [
+    {{
+      "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+      "strategy_name": "ma_crossover",
+      "symbol": "ETHUSDT",
+      "side": "Sell",
+      "reject_reason_code": "cost_gate_js_demo_negative_edge",
+      "probe_proposal": {{
+        "mode": "demo_only_learning_probe",
+        "max_probe_orders": 2,
+        "cooldown_minutes": 30,
+        "requires_runtime_policy_adapter": true,
+        "requires_probe_attempt_logging": true,
+        "requires_probe_outcome_logging": true
+      }},
+      "guardrails": {{
+        "main_cost_gate_adjustment": "NONE",
+        "may_bypass_main_live_gate": false,
+        "demo_only": true,
+        "paper_not_promotion_evidence": true,
+        "notional_or_qty_not_granted_by_artifact": true
+      }}
+    }}
+  ]
+}}"#
+        )
+    }
+
+    fn authorized_plan_json(generated_at: &str) -> String {
+        format!(
+            r#"{{
+  "schema_version": "cost_gate_demo_learning_lane_plan_v1",
+  "generated_at_utc": "{generated_at}",
+  "status": "READY_FOR_DEMO_LEARNING_PROBE",
+  "gate_status": "OPERATOR_REVIEW",
+  "main_cost_gate_adjustment": "NONE",
+  "learning_gate_adjustment": "SIDE_CELL_DEMO_PROBE_ONLY_AFTER_ADAPTER_WIRING",
+  "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+  "operator_authorization": {{
+    "schema_version": "bounded_demo_probe_operator_authorization_v1",
+    "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+    "authorization_id": "auth-demo-eth-sell-001",
+    "operator_id": "operator-test",
+    "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+    "expires_at_utc": "2026-06-21T11:30:00Z",
+    "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+    "main_cost_gate_adjustment": "NONE",
+    "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+    "max_authorized_probe_orders": 2,
+    "probe_authority_granted": true,
+    "order_authority_granted": true,
+    "promotion_evidence": false
+  }},
   "selected_probe_candidate_count": 1,
   "probe_candidates": [
     {{
@@ -474,6 +572,69 @@ mod tests {
             placement["order_submission_performed"].as_bool(),
             Some(false)
         );
+    }
+
+    #[test]
+    fn writer_active_order_helper_requires_runtime_adapter_enabled() {
+        let plan =
+            DemoLearningLanePlan::from_json_str(&authorized_plan_json("2026-06-21T10:49:45Z"))
+                .unwrap();
+        let event = reject_event();
+        let placement = BoundedProbePlacementDecision::Submit(BoundedProbeAttemptPlacement {
+            record_type: "bounded_probe_attempt",
+            side_cell_key: "ma_crossover|ETHUSDT|Sell".to_string(),
+            limit_price: 3_499.9,
+            touch_gap_bps: 12.5,
+            reference_price: 3_500.0,
+            bbo_age_ms: 0,
+        });
+        let admission_decision = evaluate_probe_admission(
+            &plan,
+            &event,
+            &[],
+            1_782_041_001_000,
+            &AdmissionConfig::default(),
+            true,
+            "NORMAL",
+        );
+        let order_request = ActiveBoundedProbeOrderRequest {
+            reject_event: event.clone(),
+            admission_decision,
+            placement_decision: placement.clone(),
+            qty: 0.001,
+            order_link_id: "oc_ld_1782041000000_1".to_string(),
+            decision_lease_id: Some("lease-demo-1".to_string()),
+            risk_state: "NORMAL".to_string(),
+            limits: ActiveBoundedProbeRiskLimits::default(),
+        };
+
+        let blocked = submit_candidate_matched_bounded_probe_order(
+            &plan,
+            &[],
+            event.clone(),
+            placement.clone(),
+            "NORMAL",
+            1_782_041_001_000,
+            false,
+            order_request.clone(),
+        );
+        assert!(active_bounded_probe_order_submission(blocked).is_none());
+
+        let allowed = submit_candidate_matched_bounded_probe_order(
+            &plan,
+            &[],
+            event,
+            placement,
+            "NORMAL",
+            1_782_041_001_000,
+            true,
+            order_request,
+        );
+        let draft = active_bounded_probe_order_submission(allowed)
+            .expect("enabled adapter and admitted plan should build a draft");
+        assert_eq!(draft.lineage.side_cell_key, "ma_crossover|ETHUSDT|Sell");
+        assert_eq!(draft.lineage.order_link_id, "oc_ld_1782041000000_1");
+        assert_eq!(draft.lineage.bounded_probe_attempt, "bounded_probe_attempt");
     }
 
     #[test]

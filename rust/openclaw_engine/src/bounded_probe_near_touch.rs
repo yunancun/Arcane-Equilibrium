@@ -1,8 +1,8 @@
 //! Bounded Demo probe near-touch placement Adapter.
 //!
 //! This Module is pure placement math for the future Cost Gate learning
-//! authority path. It does not read plans, write ledgers, call Bybit, submit
-//! orders, lower the Cost Gate, or grant probe/order authority.
+//! authority path. It stays free of plan reads, ledger writes, Bybit calls,
+//! Cost Gate mutation, and probe/order authority grants.
 //!
 //! 這個 Module 只封裝未來 bounded probe 的近觸碰 post-only 報價數學；
 //! 它不接 runtime、交易所或授權開關，避免把 source readiness 誤判成已可下單。
