@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-25 AVAX Candidate-Scoped Chain Smoke
+
+- Local timestamped smoke `/tmp/openclaw/local_chain_smoke_20260625T232303Z` proved AVAX can reach reviewable proposal and bounded preflight READY via explicit `grid_trading|AVAXUSDT|Sell`.
+- The first hard blocker is now exact: touchability/placement returned `CANDIDATE_TOUCHABILITY_DATA_REQUIRED` because fill flow exists only for non-candidate AVAX rows; authorization/readiness/reroute remained fail-closed with no authority object.
+- PM read: next safe work is source-only zero-candidate touchability bootstrap design, or stop before any runtime/order/probe authority.
+
 ## 2026-06-25 AVAX Candidate-Scoped Reroute Source Patch
 
 - `bounded_probe_lower_price_reroute_review.py` now accepts fresh cap-feasible selection wrappers as an alternate candidate source, so AVAX is not forced through a stale order-construction repair packet.
