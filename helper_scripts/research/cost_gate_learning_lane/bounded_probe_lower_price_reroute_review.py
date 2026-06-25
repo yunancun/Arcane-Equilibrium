@@ -4,6 +4,8 @@
 This packet consumes the BTC order-construction repair packet and candidate-
 specific false-negative bounded-probe artifacts. It selects exactly one
 cap-feasible lower-price candidate for the next no-order construction review.
+It can also consume a timestamped cap-feasible selection wrapper so a selected
+candidate is not forced back through a stale repair packet.
 
 It never queries or writes PG, calls Bybit, submits orders, mutates plans,
 lowers the Cost Gate, grants probe/order/live authority, appends ledgers, or
@@ -27,6 +29,9 @@ LOWER_PRICE_REROUTE_REVIEW_SCHEMA_VERSION = (
 ORDER_CONSTRUCTION_REPAIR_SCHEMA_VERSION = (
     "bounded_demo_probe_order_construction_repair_v1"
 )
+CAP_FEASIBLE_SELECTION_SCHEMA_VERSION = (
+    "bounded_demo_probe_cap_feasible_candidate_selection_review_v1"
+)
 FALSE_NEGATIVE_PREFLIGHT_SCHEMA_VERSION = (
     "cost_gate_false_negative_bounded_demo_probe_preflight_v1"
 )
@@ -45,6 +50,9 @@ AUTHORITY_PATCH_READINESS_SCHEMA_VERSION = (
 TOUCHABILITY_PREFLIGHT_SCHEMA_VERSION = "bounded_demo_probe_touchability_preflight_v1"
 
 ORDER_CONSTRUCTION_REPAIR_READY_STATUS = "ORDER_CONSTRUCTION_REPAIR_REQUIRED"
+CAP_FEASIBLE_SELECTION_READY_STATUS = (
+    "CAP_FEASIBLE_CANDIDATE_SELECTED_FOR_PREFLIGHT_REVIEW"
+)
 READY_STATUS = "LOWER_PRICE_REROUTE_READY_FOR_DEMO_CONSTRUCTION_REVIEW"
 INPUT_REQUIRED_STATUS = "LOWER_PRICE_REROUTE_INPUT_REQUIRED"
 NOT_FEASIBLE_STATUS = "LOWER_PRICE_REROUTE_CANDIDATE_NOT_FEASIBLE"
@@ -232,18 +240,37 @@ def _iter_nodes(value: Any) -> list[Any]:
     return out
 
 
-def _authority_preserved(*payloads: dict[str, Any] | None) -> tuple[bool, list[str]]:
+def _authority_preserved_named(
+    payloads: dict[str, dict[str, Any] | None],
+) -> tuple[bool, list[str]]:
     reasons: list[str] = []
-    for payload in payloads:
+    for source_name, payload in payloads.items():
+        source_payload = _dict(payload)
+        answers_node = _dict(source_payload.get("answers"))
         for node in _iter_nodes(_dict(payload)):
             if not isinstance(node, dict):
                 continue
             for key, value in node.items():
-                if key in DANGER_KEYS and _contaminating_value(value):
+                allowed_readonly_pg_evidence = (
+                    source_name == "cap_feasible_selection"
+                    and key == "pg_query_performed"
+                    and node is answers_node
+                )
+                if (
+                    key in DANGER_KEYS
+                    and not allowed_readonly_pg_evidence
+                    and _contaminating_value(value)
+                ):
                     reasons.append(f"{key}_contaminating")
             if _str(node.get("main_cost_gate_adjustment")).upper() not in ("", "NONE"):
                 reasons.append("main_cost_gate_adjustment_not_none")
     return not reasons, sorted(set(reasons))
+
+
+def _authority_preserved(*payloads: dict[str, Any] | None) -> tuple[bool, list[str]]:
+    return _authority_preserved_named(
+        {f"payload_{idx}": payload for idx, payload in enumerate(payloads)}
+    )
 
 
 def _candidate_from_packet(packet: dict[str, Any] | None) -> dict[str, Any]:
@@ -326,23 +353,70 @@ def _feasible_candidates(repair_packet: dict[str, Any]) -> list[dict[str, Any]]:
     return [row for row in rows if _candidate_feasible(_dict(row))]
 
 
+def _cap_feasible_selection_candidate(packet: dict[str, Any] | None) -> dict[str, Any]:
+    return _dict(_dict(packet).get("selected_candidate"))
+
+
+def _cap_feasible_selection_ready(
+    packet: dict[str, Any],
+    artifacts: dict[str, dict[str, Any]],
+) -> bool:
+    candidate = _cap_feasible_selection_candidate(packet)
+    return (
+        _artifact_gate(
+            artifacts,
+            "cap_feasible_selection",
+            schema=CAP_FEASIBLE_SELECTION_SCHEMA_VERSION,
+        )
+        and _dict(packet).get("status") == CAP_FEASIBLE_SELECTION_READY_STATUS
+        and _candidate_feasible(candidate)
+    )
+
+
+def _candidate_source_candidates(
+    repair_packet: dict[str, Any],
+    cap_feasible_selection: dict[str, Any] | None,
+) -> tuple[list[dict[str, Any]], str]:
+    cap_candidate = _cap_feasible_selection_candidate(cap_feasible_selection)
+    if cap_candidate:
+        return (
+            [_dict(cap_candidate)] if _candidate_feasible(cap_candidate) else [],
+            "cap_feasible_selection",
+        )
+    return _feasible_candidates(repair_packet), "order_construction_repair"
+
+
 def _select_candidate(
     repair_packet: dict[str, Any],
     *,
+    cap_feasible_selection: dict[str, Any] | None,
     selected_side_cell_key: str | None,
-) -> tuple[dict[str, Any] | None, list[str]]:
-    feasible = [_dict(row) for row in _feasible_candidates(repair_packet)]
+) -> tuple[dict[str, Any] | None, list[str], str, int]:
+    feasible, source = _candidate_source_candidates(
+        repair_packet, cap_feasible_selection
+    )
+    feasible = [_dict(row) for row in feasible]
     if selected_side_cell_key:
         matches = [
             row for row in feasible if _str(row.get("side_cell_key")) == selected_side_cell_key
         ]
         if len(matches) != 1:
-            return None, ["selected_side_cell_key_not_exactly_one_feasible_candidate"]
-        return matches[0], []
+            return (
+                None,
+                ["selected_side_cell_key_not_exactly_one_feasible_candidate"],
+                source,
+                len(feasible),
+            )
+        return matches[0], [], source, len(feasible)
     if len(feasible) < 1:
-        return None, ["no_cap_feasible_lower_price_candidate"]
+        return None, ["no_cap_feasible_lower_price_candidate"], source, len(feasible)
     if len(feasible) > 1:
-        return None, ["explicit_side_cell_key_required_when_multiple_feasible_candidates"]
+        return (
+            None,
+            ["explicit_side_cell_key_required_when_multiple_feasible_candidates"],
+            source,
+            len(feasible),
+        )
     top = feasible[0]
     duplicate_top = [
         row
@@ -350,8 +424,8 @@ def _select_candidate(
         if _str(row.get("side_cell_key")) == _str(top.get("side_cell_key"))
     ]
     if len(duplicate_top) != 1:
-        return None, ["top_side_cell_key_not_unique"]
-    return top, []
+        return None, ["top_side_cell_key_not_unique"], source, len(feasible)
+    return top, [], source, len(feasible)
 
 
 def _artifact_gate(
@@ -384,6 +458,26 @@ def _repair_ready(packet: dict[str, Any], artifacts: dict[str, dict[str, Any]]) 
         is True
         and _dict(lower_option).get("status") == "AVAILABLE"
     )
+
+
+def _candidate_source_ready(
+    *,
+    repair_packet: dict[str, Any],
+    cap_feasible_selection: dict[str, Any] | None,
+    candidate_source: str,
+    artifacts: dict[str, dict[str, Any]],
+) -> tuple[bool, list[str]]:
+    repair_ready = _repair_ready(repair_packet, artifacts)
+    selection_ready = _cap_feasible_selection_ready(
+        _dict(cap_feasible_selection), artifacts
+    )
+    if candidate_source == "cap_feasible_selection":
+        if selection_ready:
+            return True, []
+        return False, ["cap_feasible_candidate_selection_ready"]
+    if repair_ready:
+        return True, []
+    return False, ["order_construction_repair_ready"]
 
 
 def _readiness_gates(
@@ -473,6 +567,7 @@ def _readiness_gates(
 def build_lower_price_reroute_review(
     *,
     order_construction_repair: dict[str, Any] | None,
+    cap_feasible_selection: dict[str, Any] | None = None,
     false_negative_preflight: dict[str, Any] | None = None,
     false_negative_operator_review: dict[str, Any] | None = None,
     placement_repair_plan: dict[str, Any] | None = None,
@@ -492,6 +587,7 @@ def build_lower_price_reroute_review(
     paths = artifact_paths or {}
     inputs = {
         "order_construction_repair": order_construction_repair,
+        "cap_feasible_selection": cap_feasible_selection,
         "false_negative_preflight": false_negative_preflight,
         "false_negative_operator_review": false_negative_operator_review,
         "placement_repair_plan": placement_repair_plan,
@@ -509,14 +605,24 @@ def build_lower_price_reroute_review(
         )
         for name, payload in inputs.items()
     }
-    authority_preserved, contamination_reasons = _authority_preserved(*inputs.values())
+    authority_preserved, contamination_reasons = _authority_preserved_named(inputs)
     repair_packet = _dict(order_construction_repair)
-    selected, selection_reasons = _select_candidate(
+    selected, selection_reasons, candidate_source, feasible_candidate_count = _select_candidate(
         repair_packet,
+        cap_feasible_selection=cap_feasible_selection,
         selected_side_cell_key=_str(selected_side_cell_key) or None,
     )
     feasible = bool(selected) and selected.get("fits_current_cap") is True
     repair_ready = _repair_ready(repair_packet, artifacts)
+    cap_feasible_selection_ready = _cap_feasible_selection_ready(
+        _dict(cap_feasible_selection), artifacts
+    )
+    candidate_source_ready, candidate_source_blockers = _candidate_source_ready(
+        repair_packet=repair_packet,
+        cap_feasible_selection=cap_feasible_selection,
+        candidate_source=candidate_source,
+        artifacts=artifacts,
+    )
     gates = _readiness_gates(
         selected=selected or {},
         artifacts=artifacts,
@@ -532,11 +638,13 @@ def build_lower_price_reroute_review(
         status = AUTHORITY_VIOLATION_STATUS
         reason = "input_artifacts_contain_authority_or_mutation_contamination"
         next_actions = ["remove_authority_or_mutation_contamination_before_reroute_review"]
-    elif not repair_ready:
+    elif not candidate_source_ready:
         status = INPUT_REQUIRED_STATUS
-        reason = "fresh_order_construction_repair_with_available_lower_price_reroute_required"
-        blocking_gates.append("order_construction_repair_ready")
-        next_actions = ["refresh_bounded_probe_order_construction_repair_packet"]
+        reason = "fresh_candidate_source_with_available_lower_price_reroute_required"
+        blocking_gates.extend(candidate_source_blockers)
+        next_actions = [
+            "refresh_bounded_probe_order_construction_repair_or_cap_feasible_selection_packet"
+        ]
     elif not feasible:
         status = NOT_FEASIBLE_STATUS
         reason = "no_exactly_one_cap_feasible_lower_price_candidate_selected"
@@ -582,14 +690,17 @@ def build_lower_price_reroute_review(
         "candidate_selection": {
             "selection_method": "explicit_side_cell_key"
             if selected_side_cell_key
-            else "top_cap_feasible_false_negative_from_order_construction_repair",
+            else f"top_cap_feasible_false_negative_from_{candidate_source}",
+            "candidate_source": candidate_source,
             "requested_side_cell_key": selected_side_cell_key,
             "exactly_one_candidate_selected": bool(selected),
             "selection_reasons": selection_reasons,
-            "feasible_candidate_count": len(_feasible_candidates(repair_packet)),
+            "feasible_candidate_count": feasible_candidate_count,
         },
         "readiness": {
             "repair_ready": repair_ready,
+            "cap_feasible_selection_ready": cap_feasible_selection_ready,
+            "candidate_source_ready": candidate_source_ready,
             **gates,
         },
         "artifacts": artifacts,
@@ -687,6 +798,7 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--order-construction-repair-json", type=Path)
+    parser.add_argument("--cap-feasible-selection-json", type=Path)
     parser.add_argument("--false-negative-preflight-json", type=Path)
     parser.add_argument("--false-negative-operator-review-json", type=Path)
     parser.add_argument("--placement-repair-plan-json", type=Path)
@@ -706,6 +818,7 @@ def main() -> int:
     args = _build_parser().parse_args()
     paths = {
         "order_construction_repair": args.order_construction_repair_json,
+        "cap_feasible_selection": args.cap_feasible_selection_json,
         "false_negative_preflight": args.false_negative_preflight_json,
         "false_negative_operator_review": args.false_negative_operator_review_json,
         "placement_repair_plan": args.placement_repair_plan_json,
@@ -715,6 +828,7 @@ def main() -> int:
     }
     packet = build_lower_price_reroute_review(
         order_construction_repair=_read_json(args.order_construction_repair_json),
+        cap_feasible_selection=_read_json(args.cap_feasible_selection_json),
         false_negative_preflight=_read_json(args.false_negative_preflight_json),
         false_negative_operator_review=_read_json(
             args.false_negative_operator_review_json
