@@ -16,7 +16,13 @@
 
 事實衝突時：runtime/source 新證據優先；governance 以已接受 docs/ADR 優先；修 stale pointer，不重跑空審核。
 
-## 1. Demo Authority
+## 1. Agent Role
+
+Codex/agent 的工作是開發、測試、部署、診斷 TradeBot，讓 TradeBot 自主找機會、驗證、交易、復盤、學習。agent 不手工替系統長期找 alpha。
+
+agent 只在需要定位本地程序錯誤、資料斷點、證據污染、風控誤判、學習薄弱點時做獨立數據分析；分析結果必須落成 code、test、schema、runtime check 或 TODO，不作為人工交易決策。
+
+## 2. Demo Authority
 
 operator 已授權 Demo 內推進、開發、部署、runtime sync、bounded probe。不得再用 generic operator authorization defer。
 
@@ -31,21 +37,21 @@ order-capable action 前必須有 machine-checkable Demo envelope：
 
 若不能執行，狀態只能是：`FAIL_LOSS_LIMIT`、`FAIL_EVIDENCE`、`FAIL_AUTH_SCHEMA`、`FAIL_RUNTIME`、`LIVE_BLOCKED`、`READY`。
 
-## 2. Cycle
+## 3. Cycle
 
 | Phase | 必做 | 禁止 |
 | --- | --- | --- |
-| Baseline | open orders/positions, runtime health, latest evidence, fee/slippage/BBO | 把 cleanup fill 當 profit proof |
-| Search | 找 false-negative, symbol/horizon, maker/MM, regime, entry/exit/stop, allocation, fee route | 用 artifact count/replay/single-window positive 選候選 |
-| Admit | 生成 candidate envelope: id, sizing, BBO, fee/slippage plan, loss cap, Decision Lease, Rust path, kill, review contract | 降 global Cost Gate 或繞過 Rust/Lease |
-| Execute | Demo bounded probe, one candidate/portfolio packet, full lineage | live, untracked mutation, non-Rust order path |
-| Review | candidate-matched net PnL after actual cost, controls, realism, OOS/repeat path | count unattributed or unrelated fills |
-| Learn | observation -> lesson -> hypothesis -> experiment -> verdict -> proposal | learning output 直接 grant order/live/risk authority |
+| Baseline | 實作/修復 open orders, positions, runtime health, fee/slippage/BBO, evidence collectors | 把 cleanup fill 當 profit proof |
+| Discover | 實作 TradeBot 的 false-negative, symbol/horizon, MM, regime, entry/exit, allocation, fee-route discovery | agent 手工長期挑候選替代程序 |
+| Admit | 實作 candidate envelope compiler: id, sizing, BBO, cost plan, loss cap, Decision Lease, Rust path, kill, review contract | 降 global Cost Gate 或繞過 Rust/Lease |
+| Execute | 實作 Demo bounded runner: one candidate/portfolio packet, full lineage, kill/rollback | live, untracked mutation, non-Rust order path |
+| Review | 實作 candidate-matched PnL, actual cost, controls, realism, OOS/repeat evaluator | count unattributed or unrelated fills |
+| Learn | 實作 observation -> lesson -> hypothesis -> experiment -> verdict -> proposal pipeline | learning output 直接 grant order/live/risk authority |
 | Deploy | source fix, tests, runtime sync, health check, rollback | secrets in argv/artifacts, silent runtime mutation |
 
 每輪必須產生狀態轉移：`DONE`、`DONE_WITH_CONCERNS`、`BLOCKED_BY_LOSS_CONTROL`、`BLOCKED_BY_RUNTIME`、`NOOP_NO_DELTA`、`ROTATED`。
 
-## 3. Learning I/O
+## 4. Learning I/O
 
 Learning input packet 必須規範化、append-only、可重建、無 secrets：
 
@@ -94,7 +100,7 @@ Learning output packet 必須只輸出可審核結論或提案：
 - `mutation_allowed=true` 仍只代表當前 Demo envelope 內可執行；不代表 live、risk-envelope expansion、Cost Gate lowering。
 - unattributed fills、cleanup fills、replay-only results 永遠進 `proof_exclusions`。
 
-## 4. L2 Handoff
+## 5. L2 Handoff
 
 只在 L0/L1 無法低成本判斷、或高 upside ambiguity 值得分析時交給 L2。送 compact packet，不送 raw log。
 
@@ -121,7 +127,7 @@ L2 response：
 
 L2 只能做 pattern discovery、anomaly diagnosis、hypothesis generation、experiment design、meta-review。L2 不能下單、改 runtime、降 Cost Gate、批 live、繞 proof。
 
-## 5. Proof
+## 6. Proof
 
 Profit proof 必須同時具備：
 
@@ -135,7 +141,7 @@ Profit proof 必須同時具備：
 
 永遠不是 proof：artifact count、Paper archive、source smoke、replay-only positive、single-window MM positive、`flash_dip_buy` cleanup fill、unattributed fill、residual cleanup fill、stale local `Working` row。
 
-## 6. Anti-Repeat
+## 7. Anti-Repeat
 
 不得把 next action 寫成：全面重審、確認 demo 是否下單、確認 learning 是否在跑、繼續觀察。
 
@@ -147,4 +153,4 @@ Profit proof 必須同時具備：
 - mark loss-control/runtime blocked
 - update stale pointer
 
-每輪還要產出 1-3 個 aggressive profit hypotheses，字段固定：`why_it_might_make_money`、`fastest_safe_test`、`required_data`、`failure_condition`、`authority_required`、`max_safe_next_action`、scores。
+profit hypotheses 應由 TradeBot discovery/learning pipeline 產出。agent 只在工程診斷需要時補 developer hypotheses，字段固定：`program_gap`、`why_it_blocks_autonomy`、`fastest_safe_test`、`required_data`、`failure_condition`、`max_safe_next_action`。
