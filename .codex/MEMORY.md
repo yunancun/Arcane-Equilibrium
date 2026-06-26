@@ -51,6 +51,8 @@ pushback, and clear uncertainty, not blind execution.
 - `README.md`: stable project entry, architecture map, GUI/scripts pointers
 - `TODO.md`: active queue, current blockers, runtime evidence, schedule
 - `docs/agents/context-loading.md`: where to load each kind of context
+- `docs/agents/profit-first-autonomy-loop.md`: stable profit-first autonomous
+  trading loop; current tasks still live in `TODO.md`
 - `docs/agents/role-profile-memory-standard.md`: role profile / memory split
   and hygiene standard
 - `docs/agents/todo-maintenance.md`: TODO lifecycle and formatting standard
@@ -113,6 +115,11 @@ Known paths:
   0600 curl config for Bearer auth so tokens do not appear in argv. Demo cleanup
   close fills and unattributed fills are audit/risk-reduction evidence only,
   not bounded-probe, Cost Gate, promotion, or risk-adjusted net PnL proof.
+- The operator has granted standing Demo operational authorization for the
+  profit-first loop. Treat this as a requirement to build/consume structured,
+  runtime-readable Demo authority envelopes with explicit loss controls and
+  auditability, not as permission to bypass Rust authority, Decision Lease,
+  reconstructability, live gates, or proof rules.
 - Public quote transport diagnostics are evidence-quality tooling only: they
   may record sanitized failure class/reason/errno/stage, but must redact
   secrets, cookies, DSNs, local paths, tracebacks, and non-allowlisted URLs;
