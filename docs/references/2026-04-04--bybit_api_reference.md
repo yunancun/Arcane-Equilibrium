@@ -469,13 +469,17 @@ Bybit V5 `POST /v5/order/create` request body 中 `time_in_force=PostOnly` 與 `
 - **Bybit 路徑**: `GET /v5/order/realtime`
 - **Input**:
   - `category: OrderCategory`
-  - `symbol: Option<&str>` — None = 查詢所有
+  - `symbol: Option<&str>` — `Some(_)` = symbol-scoped query
+  - `symbol=None` full baseline scan：linear 必帶 `settleCoin=USDT`（Bybit 要求 `symbol` / `baseCoin` / `settleCoin` 其一）、`openOnly=0`、`limit=50`，並用 response `nextPageCursor` 迴圈取齊。Bybit 預設單頁 `20`、最大 `50`；缺 cursor 會漏 page2+ open/conditional orders。
 - **Output**: `BybitResult<Vec<OrderInfo>>`
   ```
   OrderInfo { order_id, order_link_id, symbol, side, order_type, price, qty,
               cum_exec_qty, cum_exec_value, avg_price, order_status,
               created_time, updated_time }
   ```
+- **Pagination contract**:
+  - `nextPageCursor` 必須存在且為 string；空字串 = 無下一頁；非空 token 原樣回傳（可能含 `%3A` / `%2C`，HTTP client 不可 double-encode）。
+  - full scan 遇到非 0 retCode / timeout、missing or malformed `result` / `list` / `nextPageCursor`、cursor 不前進、或超過 50 頁仍有 cursor，必須 fail-closed 返回錯誤，不能靜默截斷或把 malformed payload 當 clean inventory。
 - **關聯程式**: `order_manager.rs:504`
 
 ---
@@ -582,8 +586,8 @@ Client 創建：`PositionManager::new(client: Arc<BybitRestClient>)`
                  created_time, updated_time }
   ```
 - **Pagination contract**:
-  - `nextPageCursor` 空字串或缺失 = 無下一頁；非空 token 原樣回傳（可能含 `%3A` / `%2C`，HTTP client 不可 double-encode）。
-  - full scan 遇到非 0 retCode / timeout、cursor 不前進、或超過 50 頁仍有 cursor，必須 fail-closed 返回錯誤，不能靜默截斷 baseline。
+  - `nextPageCursor` 必須存在且為 string；空字串 = 無下一頁；非空 token 原樣回傳（可能含 `%3A` / `%2C`，HTTP client 不可 double-encode）。
+  - full scan 遇到非 0 retCode / timeout、missing or malformed `result` / `list` / `nextPageCursor`、cursor 不前進、或超過 50 頁仍有 cursor，必須 fail-closed 返回錯誤，不能靜默截斷 baseline。
 - **關聯程式**: `position_manager.rs:159`
 
 ---

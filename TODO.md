@@ -1,113 +1,74 @@
 # 玄衡 TODO — Active Dispatch Queue
 
-**版本** v529 ｜ **日期** 2026-06-26
-**Runtime pointer**：Linux checkout remains clean at `d2cd70d092916194043e112eeb402fb92bacb699`; crontab expected-head occurrences are aligned (`d2cd70d0=11`, old `e0c2a0e1=0`); running engine was not rebuilt/restarted.
-**Current mainline**：Demo resting-exposure read-only inventory is closed with concerns. Next active blocker is a separately reviewed Bybit demo private read-only open-order inventory; stop before cancel/modify/order action.
-**Evidence links**：latest report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--demo_resting_exposure_reconciliation_inventory.md`; prior runtime hygiene report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--avax_runtime_source_sync_cron_expected_head_sync.md`; changelog `docs/CLAUDE_CHANGELOG.md`; TODO standard `docs/agents/todo-maintenance.md`.
+**版本** v530 ｜ **日期** 2026-06-26
+**Source / runtime pointer**：Mac `main` is advancing this v530 source/docs checkpoint from `bd0a276d`; Linux runtime checkout remains clean at `d2cd70d092916194043e112eeb402fb92bacb699` and was not restarted/rebuilt/synced in this checkpoint.
+**Current mainline**：Bybit demo open-order read-only inventory is done with concerns. Next blocker is a separate residual exposure cleanup/reconciler plan; candidate selection remains blocked until exchange exposure is clean or explicitly accepted by review.
+**Evidence links**：latest report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--bybit_demo_open_order_read_only_inventory.md`; previous report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--demo_resting_exposure_reconciliation_inventory.md`; changelog `docs/CLAUDE_CHANGELOG.md`; TODO standard `docs/agents/todo-maintenance.md`.
 
 ---
 
-## §0 Runtime Snapshot
+## §0 Current Runtime Facts
 
-| Area | Timestamped fact | Next executable action |
+| Area | Latest verified fact | Dispatch impact |
 |---|---|---|
-| Source / cron | 2026-06-26T00:57Z PM read-only check: Linux repo clean at `d2cd70d0`; crontab expected-head occurrences `d2cd70d0=11`, old `e0c2a0e1=0`; adapter flag count `0`; `OPENCLAW_ALLOW_MAINNET=1` count `0`. | Do not restart/rebuild or enable adapter until exchange-truth reconciliation is separately reviewed. |
-| Demo PG working overhang | 2026-06-26T00:55Z direct read-only PG: 72h demo `Working` orders `30`; `29` are `flash_dip_buy` Limit/PostOnly Buy with `7264.930000 USDT` notional; `1` is `risk_close:phys_lock_gate4_giveback` Market Sell with zero notional/missing price. | Run a separately reviewed Bybit demo private read-only open-order inventory; PG alone is not exchange truth. |
-| Healthcheck [68] | 2026-06-26T00:52:06Z passive healthcheck FAIL: 24h demo `working_n=6`, resting about `691 USDT` (`L684/S7`), divergence critical. | Treat count mismatch as window/semantic difference; do not rerun passive health as a substitute for exchange-truth inventory. |
-| Fill / lineage quality | 2026-06-26T00:54Z read-only evidence: 72h demo fills `72`, unattributed order/context counts `0/0`; audit top-40 has `fill_rows=28`, `bbo_touched_no_fill_orders=6`, `no_bbo_coverage_orders=2`. | This is operational evidence only; not Cost Gate, bounded-probe, promotion, or PnL proof. |
-| AVAX bounded-demo path | 2026-06-26 runtime hygiene is source-ready but exposure/reconciliation is not clean. | AVAX restart/adapter/order path remains blocked behind exposure reconciliation, fresh candidate inputs, and separate order-envelope review. |
+| Runtime source / cron | 2026-06-26T01:04Z read-only check: Linux repo clean at `d2cd70d0`; crontab expected-head occurrences `d2cd70d0=11`, current docs commit `bd0a276d=0`; adapter flag count `0`; `OPENCLAW_ALLOW_MAINNET=1` count `0`. | No runtime sync/restart/rebuild was done. Runtime source updates remain a separate reviewed action. |
+| Bybit demo exchange truth | 2026-06-26T01:17Z cursor-aware private GET-only inventory: `5` exchange open orders, estimated open notional `400.97259600 USDT`; `2` linked PostOnly limit orders (`LINKUSDT`, `ARBUSDT`), `3` unlinked reduce-only conditional market orders (`NEARUSDT`, `FILUSDT`, `ICPUSDT`). Artifact: `/tmp/openclaw/audit/bybit_demo_exchange_inventory/20260626T011756Z_inventory.json` on `trade-core`. | Candidate selection stays blocked. Any cancel/modify/close/order-affecting action needs a separate E3/BB plan. |
+| Demo positions | Same Bybit snapshot: `3` nonzero positions (`FILUSDT`, `ICPUSDT`, `NEARUSDT`), position value `435.14105000 USDT`, unrealised PnL `-21.44009000 USDT`. | Residual exposure must be classified before bounded demo candidate work. |
+| PG reconciliation | 2026-06-26 read-only PG: 72h demo fills `79`; missing order/context/strategy attribution all `0`. 72h effective Working using `order_state_changes`: `2` exchange-linked, `27` stale `flash_dip_buy` not exchange-open, `2` stale zero-notional `risk_close` not exchange-open. | Root cause is not unattributed fills; it is residual exchange exposure plus stale local order-state semantics. |
+| Healthcheck [68] | 2026-06-26 post-inventory passive healthcheck still FAIL: demo `working_n=5`, resting about `408 USDT` (`L401/S7`), divergence critical. | Do not treat inventory as clean-book proof. |
 
-## §1 Selected P0 Dispatch Queue
-
-| ID | Status | Owner chain | Acceptance | Latest evidence | Next action |
-|---|---|---|---|---|---|
-| `P0-PROFIT-EVIDENCE-QUALITY-DEMO-RESTING-EXPOSURE-RECONCILIATION-E3-BB-REVIEW` | DONE_WITH_CONCERNS | PM -> E3 -> BB -> PM | Read-only inventory/classification recorded; proof exclusions explicit; no Bybit/private/cancel/modify/order/PG-write/restart/adapter authority granted. | Report `2026-06-26--demo_resting_exposure_reconciliation_inventory.md`; E3 and BB both `DONE_WITH_CONCERNS`. | No-repeat. Do not rerun this read-only tranche without source/runtime/PG/artifact or authorization delta. |
-| `P0-PROFIT-EVIDENCE-QUALITY-BYBIT-DEMO-OPEN-ORDER-READ-ONLY-INVENTORY-E3-BB-REVIEW` | ACTIVE | PM -> E3 -> BB -> PM | Separately approve and run only a Bybit demo private read-only open-order inventory; reconcile exchange-open orders against PG `Working`, fills, and healthcheck [68]. No cancel/modify/order action in this checkpoint. | 2026-06-26T00:55Z PG shows 30 demo `Working` rows; BB says PG alone is not exchange truth. | Create new `session_loop_state`; get exact E3/BB read-only endpoint review; run inventory only if approved; if cleanup is needed, stop and open a separate cancel/modify plan. |
-
-### Standing P0 Tracks
+## §1 P0 Dispatch Queue
 
 | ID | Status | Owner chain | Acceptance | Latest evidence | Next action |
 |---|---|---|---|---|---|
-| `P0-EDGE-1` | ACTIVE | PM -> QC/MIT/AI-E -> PM | Close only with >=3 alpha candidates satisfying net/cost/stat/execution gates, or another accepted P0 edge path. | Gate-B/alpha evidence remains non-promotable; AVAX is still only a selected bounded-Demo candidate path. | Continue source-only candidate research only when it does not bypass exposure reconciliation. |
-| `P0-LG-3` | ACTIVE | PM -> E2 -> E4 -> QA -> PM | Deploy/rebuild only after review chain and migration/checksum discipline; runtime proof required before closure. | Source integrated in commits `deb3f3af..0802d52b`; runtime remains undeployed. | Re-run review chain before any deploy/rebuild. |
-| `P0-OPS` | ACTIVE | Operator + PM/E3/BB/E1 as needed | Restore drill, system-level units, live-auth update, replay manifest feeding, and close-maker max-pending evidence recorded. | Operator-gated tails remain; historical OPS rows in changelog. | Wait for named operator windows; no silent runtime mutation. |
-
-### Closed No-Repeat Markers
-
-Closed AVAX ladder reports are linked here only to prevent repeat work, not as active queue items:
-
-- `2026-06-25--avax_fresh_reroute_chain_refresh_blocked_todo_hygiene.md`
-- `2026-06-25--avax_candidate_scoped_reroute_source_patch.md`
-- `2026-06-25--avax_candidate_scoped_chain_smoke.md`
-- `2026-06-25--avax_touchability_bootstrap_source_patch.md`
-- `2026-06-26--avax_authority_path_readiness_source_scan.md`
-- `2026-06-26--avax_runtime_admission_e3_bb_review_todo_hygiene.md`
-- `2026-06-26--avax_runtime_source_sync_cron_expected_head_sync.md`
-
-No-repeat rule: do not reopen closed ladder items unless there is a concrete source HEAD, runtime snapshot, PG snapshot, artifact mtime, or operator-authorization delta.
+| `P0-PROFIT-EVIDENCE-QUALITY-BYBIT-DEMO-OPEN-ORDER-READ-ONLY-INVENTORY-E3-BB-REVIEW` | DONE_WITH_CONCERNS | PM -> E3 -> BB -> PM | Cursor-aware Bybit demo private GET inventory completed; PG/fill/healthcheck reconciliation recorded; proof exclusions explicit; no mutation or authority granted. | Report `2026-06-26--bybit_demo_open_order_read_only_inventory.md`; Bybit artifact `/tmp/openclaw/audit/bybit_demo_exchange_inventory/20260626T011756Z_inventory.json`; tests `61 + 5 passed`. | No-repeat. Do not rerun without source/runtime/PG/artifact or authorization delta. |
+| `P0-PROFIT-EVIDENCE-QUALITY-DEMO-RESIDUAL-EXPOSURE-CLEANUP-PLAN-E3-BB-REVIEW` | ACTIVE | PM -> E3 -> BB -> PM | Classify the `3` unlinked reduce-only conditional orders and `3` nonzero positions; decide source/read-only reconciler fix vs separately reviewed exchange cleanup. No cancel/modify/close/order action in this planning checkpoint. | Current exchange snapshot and healthcheck [68] FAIL from §0. | Start next round with `session_loop_state`; first safe work is source/read-only plan and E3/BB review packet. |
+| `P0-PROFIT-CANDIDATE-SELECTION` | BLOCKED | PM -> QC/MIT/BB -> PM | Select exactly one bounded Demo candidate from false-negative / sealed horizon / MM current-fee / clean attributed demo fills only after exposure is clean or explicitly accepted. | Blocked by residual exchange exposure and healthcheck [68] FAIL. | Reopen after residual exposure blocker is DONE/DONE_WITH_CONCERNS with accepted risk posture. |
+| `P0-BOUNDED-PROBE-AUTHORIZATION` | BLOCKED | PM -> E3 -> BB -> Operator -> PM | Requires completed evidence-quality and candidate-selection blockers plus explicit bounded probe approval. | No candidate selected; no authority granted. | No action. |
+| `P0-PROFIT-OUTCOME-REVIEW` | WAITING | PM -> QC/MIT/BB -> PM | Review only candidate-matched fills, net PnL after fees/slippage, matched controls, execution realism, repeat/OOS path. | No authorized bounded probe outcomes exist. | Wait for authorized bounded probe outcomes. |
 
 ## §2 Active P1/P2 Engineering Queue
 
 | ID | P | Status | Owner chain | Acceptance | Latest evidence | Next action |
 |---|---:|---|---|---|---|---|
-| `P1-COST-GATE-SEALED-HORIZON-REVIEW` | 1 | ACTIVE | PM -> QC/MIT/BB -> PM | Sealed evidence becomes a bounded proposal only after operator review, production learning-lane proof, execution-realism review, and separate Rust-authority probe approval. | v500-series scorecard/preflight artifacts in changelog. | Build/review bounded proposal contract only; no probe/order authority. |
-| `P1-LEARNING-LOOP-CLOSURE` | 1 | ACTIVE | PM -> PA/CC -> PM | Decide durable learning SSOT: artifact ledger vs PG-backed Cost Gate learning ledger. | Prior governance packets in changelog. | Source/doc decision only unless PG write is separately reviewed. |
-| `P1-AUTONOMOUS-PARAMETER-PROPOSAL` | 1 | ACTIVE | PM -> PA/E1 -> E2 -> E4 -> PM | Learned candidate may become a reviewable proposal; it must not mutate order/risk/live state. | `autonomous_parameter_proposal.py` supports explicit `--selected-side-cell-key`; AVAX has review-only first-attempt/source-readiness paths. | Revisit after exposure/exchange-truth reconciliation; no direct order/risk/live mutation. |
-| `P1-RUNTIME-HEALTH-HYGIENE` | 1 | ACTIVE | PM -> E3 -> BB -> PM | Reconcile runtime health drift without unreviewed restart/rebuild/env mutation. | Source checkout and cron expected-head pins are aligned at `d2cd70d0`; running engine was not rebuilt/restarted. | Remaining hygiene is health/reconciliation, not source drift. |
-| `P2-RECONCILER-GET-POSITIONS-PAGINATION` | 2 | ACTIVE | PM -> BB/E2/E4 -> PM | Full-scan pagination guard reviewed by BB/E2/E4 and production event proof recorded. | PM report `2026-06-19--reconciler_pagination_focused_review.md`. | Carry with LG-3/reconciler batch review. |
-| `P1-EARN-WAVE-C-FIRST-STAKE-RUNTIME` | 2 | WAITING | Operator + PM -> E3/BB -> PM | OP-1/2/3, review/deploy/restart, and first real stake evidence. | PM report `2026-06-19--earn_first_stake_capability_routing_focused_review.md`. | Wait for OP-1 key update and Earn variant/stake decision. |
+| `P1-LEARNING-LOOP-CLOSURE` | 1 | ACTIVE | PM -> PA/CC -> PM | Decide durable learning SSOT: artifact ledger vs PG-backed Cost Gate learning ledger. | Prior governance packets in changelog; current checkpoint did not change learning authority. | Source/doc decision only unless PG write is separately reviewed. |
+| `P1-AUTONOMOUS-PARAMETER-PROPOSAL` | 1 | ACTIVE | PM -> PA/E1 -> E2 -> E4 -> PM | Learned candidate may become a reviewable proposal; it must not mutate order/risk/live state. | Existing proposal helpers are review-only; no direct authority. | Revisit after residual exposure cleanup and P0 candidate selection. |
+| `P1-RUNTIME-HEALTH-HYGIENE` | 1 | ACTIVE | PM -> E3 -> BB -> PM | Reconcile health/runtime drift without unreviewed restart/rebuild/env mutation. | Linux checkout clean at `d2cd70d0`; healthcheck [68] still FAIL. | Feed residual exposure result into hygiene plan. |
+| `P2-RECONCILER-GET-POSITIONS-PAGINATION` | 2 | ACTIVE | PM -> BB/E2/E4 -> PM | Full-scan pagination guard reviewed and production event proof recorded. | v530 added Bybit REST full-scan methods and focused tests locally; runtime source not synced. | Carry into reconciler/source-sync review if runtime adoption is needed. |
+| `P1-EARN-WAVE-C-FIRST-STAKE-RUNTIME` | 2 | WAITING | Operator + PM -> E3/BB -> PM | OP-1/2/3, review/deploy/restart, and first real stake evidence. | Still blocked by operator/key/runtime windows. | Wait for named operator window. |
 
-## §3 Operator Actions And Passive Waits
+## §3 Operator / Runtime Gates
 
-| Action | Trigger / evidence | Impact / next step |
+| Gate | Trigger | Rule |
 |---|---|---|
-| Bybit demo open-order read-only inventory | PG and healthcheck disagree on current demo working overhang; BB says PG alone is not exchange truth. | Next active checkpoint. Must be separately E3/BB-reviewed and read-only; no cancel/modify/order. |
-| Cancel/modify cleanup plan | Only if the read-only Bybit inventory proves stale exchange-open orders that require cleanup. | Stop and create a separate E3/BB-reviewed plan before any exchange-affecting action. |
-| AVAX bounded Demo construction | Only after exposure reconciliation, post-restart proof if required, adapter-enablement review, fresh BBO, and separate exchange-facing order-envelope approval. | May still be no-order preview first; no proof/order/live authority follows from v529. |
-| OP-1 Bybit mainnet key update | Operator availability. | Blocks Earn Wave C, live-auth update, OPS-2 dry-run, and endpoint-file correction. |
-| Restore drill / system-level service units | Operator low-trading 4h window and sudo availability. | Closes OPS protection gaps beyond user-level watchdog. |
+| Exchange cleanup | Any cancel/modify/close/order-affecting action for the 3 unlinked reduce-only conditionals or positions. | Must be a separate `PM -> E3 -> BB -> PM` plan. Current authorization does not bypass Guardian/risk/Decision Lease/Rust authority. |
+| Runtime source sync | Deploying v530 full-scan helper to Linux checkout. | Requires reviewed runtime/source-sync action; no service restart by default. |
+| Bounded Demo probe | Candidate selected and clean-book posture accepted. | Requires explicit bounded-probe authorization; no live promotion. |
+| Live/mainnet | Any mainnet key/order/path. | Not in scope; no live authority. |
 
 ## §4 Safety Invariants And Proof Exclusions
 
 - Profit is optimized only inside survival, Guardian/risk gates, Decision Lease, Rust authority, authorization gates, auditability, and reconstructability.
-- Operator's broad Demo/API authorization does not override E3/BB runtime chain, Rust authority, Guardian/risk, Decision Lease, or candidate-matched proof requirements.
-- Do not lower global Cost Gate, widen cap/freshness gates, or fake freshness by editing/copying stale artifacts.
-- Unattributed fills never count toward promotion or bounded-probe proof.
-- `flash_dip_buy` demo rows/fills, cleanup/risk-close rows, Paper archive, artifact counts, source smoke, replay-only results, and single-window MM positives cannot prove profitability.
-- Proof must be candidate-matched, reconstructable, fee/slippage-aware, and risk-adjusted net after costs.
+- Do not lower global Cost Gate, widen caps/freshness gates, or fake freshness by editing/copying stale artifacts.
+- Bybit inventory, healthcheck, source smoke, replay-only results, artifact counts, and single-window positives are not profitability proof.
+- `flash_dip_buy` demo rows/fills, cleanup/risk-close rows, and unattributed fills cannot count toward bounded Cost Gate proof, bounded-probe proof, promotion, or risk-adjusted net PnL.
 - Learning output may become a reviewable proposal only; it must not directly mutate order/risk/live state.
 
-## §5 Aggressive Alpha Expansion Backlog
+## §5 Aggressive Alpha Backlog
 
 | Hypothesis path | Why it might make money | Fastest safe test | Authority |
 |---|---|---|---|
-| Candidate-scoped AVAX first-attempt near-touch path | AVAX rank 2 still has strong false-negative net/cost evidence, but it lacks clean exchange/reconciliation proof. | Finish open-order truth inventory first, then no-order artifact refresh/order-envelope review only if gates are fresh. | Review-only now; no order/probe authority. |
-| Maker/MM repeat-window filter | Current-fee-positive microstructure cells may survive fees via maker ratio and adverse-selection filters. | Wait for sample >=30 and independent repeat window; source-only scorecard hardening allowed. | No order/probe authority. |
-| Regime-specific false-negative subset | Broad strategy families may be unprofitable while narrow regime/horizon subsets survive fees. | Build matched-control candidate rows and execution-realism filters from artifacts. | Research/source-only until proposal review. |
+| Candidate-scoped maker re-entry after exposure cleanup | Current linked PostOnly orders prove the maker path can still place passive liquidity; clean book may unblock high-upside candidates. | Finish residual exposure plan, then select exactly one candidate from false-negative / MM / sealed-horizon evidence. | Research/proposal only now. |
+| Reduce-only conditional hygiene | Removing exposure ambiguity can reduce false risk blocks and protect candidate evaluation from contaminated fills. | Source/read-only classify three unlinked conditionals against positions/fills/state changes. | E3/BB needed for any exchange mutation. |
+| Regime-specific false-negative subset | Narrow regimes may clear fees even if broad strategy families are structurally sub-fee. | After clean exposure, build one candidate packet with matched controls and fee/slippage assumptions. | No order/probe authority until bounded-demo review. |
 
-## §6 Deferred / Conditional Rows
-
-| ID | Trigger |
-|---|---|
-| `P2-LIVE-AUTHZ-RUST-DIRECT-SOCKET-FUTURE` | Future architecture decision to move live authz context into Rust. |
-| `P1-COST-GATE-DOUBLE-DEDUCT-TRIGGER` | Activate only if a positive cell or forward PnL proof is released. |
-| `P2-AC19-ALT-BUCKET-FINAL-VERDICT-FOLLOWUP` | Reopen only if PA/QC/operator selects alpha/beta/C follow-up path. |
-| `P1-SPRINT2-STAGE0R-REPLAY-PREFLIGHT-DISPATCH` | Recheck on green Stage0R preflight, operator demo-canary approval, first real AEG-S3 candidate rows, residual flag-on first run, or high-funding A1 regime. |
-| `P3-BB-STRATEGIES-30D-CATCH-UP-CLOCK` | 2026-06-27 sample-size/retire-or-extend decision. |
-| Sprint 4 first Live `$500` | W18-21 after P0-EDGE-1, LG-3, and OPS gates close. |
-
-## §7 Handoff Rules
-
-- Source/bug chain: `PM -> PA/E1 -> E2 -> E4 -> QA/PM`.
-- Quant/data chain: `PM -> QC -> MIT -> AI-E -> PM`.
-- Runtime/exchange/security chain: `PM -> E3 -> BB if exchange-facing -> PM`.
-- Meta-doc updates: commit and push; keep Linux source sync as a separate reviewed runtime action.
+## §6 Handoff Commands
 
 ```bash
 git -C /Users/ncyu/Projects/TradeBot/srv status --short --branch
 ssh trade-core "cd ~/BybitOpenClaw/srv && git status --short --branch"
-ssh trade-core "python3 helper_scripts/canary/engine_watchdog.py --data-dir /tmp/openclaw --status"
 ssh trade-core "cd ~/BybitOpenClaw/srv && PGHOST=localhost PGUSER=trading_admin PGDATABASE=trading_ai bash helper_scripts/db/passive_wait_healthcheck.sh --quiet"
+ssh trade-core "python3 helper_scripts/canary/engine_watchdog.py --data-dir /tmp/openclaw --status"
 ```
 
 **Maintenance contract**：`TODO.md` is the active dispatch queue only. Long evidence, completed ledgers, and version narratives belong in reports/archive/changelog.

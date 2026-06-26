@@ -391,6 +391,49 @@ def test_get_positions_non_empty_preserves_camel_case_fields():
     c.close()
 
 
+def test_get_positions_full_scan_paginates_with_limit_and_settle_coin():
+    """Full-scan positions follow nextPageCursor and request Bybit's max limit."""
+    c = _make_client()
+    pages = [
+        {"list": [{"symbol": "BTCUSDT", "size": "0.01"}], "nextPageCursor": "NEXT"},
+        {"list": [{"symbol": "ETHUSDT", "size": "0.02"}], "nextPageCursor": ""},
+    ]
+    page_iter = iter(pages)
+
+    def _handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_ok_envelope(next(page_iter)))
+
+    recorded = _install_mock_transport(c, _handler)
+    rows = c.get_positions_full_scan("linear")
+    assert [row["symbol"] for row in rows] == ["BTCUSDT", "ETHUSDT"]
+    first_params = dict(recorded[0].url.params)
+    second_params = dict(recorded[1].url.params)
+    assert recorded[0].url.path == "/v5/position/list"
+    assert first_params.get("category") == "linear"
+    assert first_params.get("settleCoin") == "USDT"
+    assert first_params.get("limit") == "200"
+    assert "cursor" not in first_params
+    assert second_params.get("cursor") == "NEXT"
+    c.close()
+
+
+def test_get_positions_full_scan_with_symbol_omits_settle_coin():
+    """Symbol-scoped full-scan positions do not also send settleCoin."""
+    c = _make_client()
+    recorded = _install_mock_transport(
+        c,
+        lambda req: httpx.Response(200, json=_ok_envelope({
+            "list": [],
+            "nextPageCursor": "",
+        })),
+    )
+    c.get_positions_full_scan("linear", symbol="SOLUSDT")
+    params = dict(recorded[0].url.params)
+    assert params.get("symbol") == "SOLUSDT"
+    assert "settleCoin" not in params
+    c.close()
+
+
 # ---------------------------------------------------------------------------
 # get_active_orders
 # ---------------------------------------------------------------------------
@@ -423,6 +466,138 @@ def test_get_active_orders_with_symbol_filters_by_symbol():
     params = dict(recorded[0].url.params)
     assert params.get("symbol") == "BTCUSDT"
     assert "settleCoin" not in params
+    c.close()
+
+
+def test_get_active_orders_full_scan_paginates_with_open_only_limit_and_settle_coin():
+    """Full-scan active orders follow cursor and include openOnly=0."""
+    c = _make_client()
+    pages = [
+        {
+            "list": [{"symbol": "BTCUSDT", "orderId": "OID1"}],
+            "nextPageCursor": "CURSOR2",
+        },
+        {
+            "list": [{"symbol": "ETHUSDT", "orderId": "OID2"}],
+            "nextPageCursor": "",
+        },
+    ]
+    page_iter = iter(pages)
+
+    def _handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_ok_envelope(next(page_iter)))
+
+    recorded = _install_mock_transport(c, _handler)
+    rows = c.get_active_orders_full_scan("linear")
+    assert [row["orderId"] for row in rows] == ["OID1", "OID2"]
+    first_params = dict(recorded[0].url.params)
+    second_params = dict(recorded[1].url.params)
+    assert recorded[0].url.path == "/v5/order/realtime"
+    assert first_params.get("category") == "linear"
+    assert first_params.get("settleCoin") == "USDT"
+    assert first_params.get("openOnly") == "0"
+    assert first_params.get("limit") == "50"
+    assert "cursor" not in first_params
+    assert second_params.get("cursor") == "CURSOR2"
+    c.close()
+
+
+def test_get_active_orders_full_scan_with_symbol_omits_settle_coin():
+    """Symbol-scoped full-scan active orders do not also send settleCoin."""
+    c = _make_client()
+    recorded = _install_mock_transport(
+        c,
+        lambda req: httpx.Response(200, json=_ok_envelope({
+            "list": [],
+            "nextPageCursor": "",
+        })),
+    )
+    c.get_active_orders_full_scan("linear", symbol="SOLUSDT")
+    params = dict(recorded[0].url.params)
+    assert params.get("symbol") == "SOLUSDT"
+    assert "settleCoin" not in params
+    c.close()
+
+
+def test_get_active_orders_full_scan_repeated_cursor_raises():
+    """A repeated cursor is malformed exchange pagination and must fail closed."""
+    c = _make_client()
+    pages = [
+        {"list": [{"orderId": "OID1"}], "nextPageCursor": "SAME"},
+        {"list": [{"orderId": "OID2"}], "nextPageCursor": "SAME"},
+    ]
+    page_iter = iter(pages)
+    _install_mock_transport(
+        c,
+        lambda req: httpx.Response(200, json=_ok_envelope(next(page_iter))),
+    )
+    with pytest.raises(BybitTransportError, match="cursor did not advance"):
+        c.get_active_orders_full_scan("linear")
+    c.close()
+
+
+@pytest.mark.parametrize(
+    "result, message",
+    [
+        (None, "result from /v5/order/realtime is not a JSON object"),
+        ({}, "result.list from /v5/order/realtime is missing"),
+        ({"list": None, "nextPageCursor": ""}, "result.list from /v5/order/realtime is not a list"),
+        ({"list": [], "nextPageCursor": None}, "nextPageCursor from /v5/order/realtime is not a string"),
+        ({"list": [], "nextPageCursor": 0}, "nextPageCursor from /v5/order/realtime is not a string"),
+        ({"list": []}, "nextPageCursor from /v5/order/realtime is missing"),
+        ({"list": [{"orderId": "OID1"}, "bad-row"], "nextPageCursor": ""}, "result.list from /v5/order/realtime contains non-object row"),
+    ],
+)
+def test_get_active_orders_full_scan_malformed_pagination_raises(result, message):
+    """Malformed full-scan envelopes must not become false clean inventory."""
+    c = _make_client()
+    _install_mock_transport(
+        c,
+        lambda req: httpx.Response(200, json={
+            "retCode": 0,
+            "retMsg": "OK",
+            "result": result,
+            "time": 1700000000000,
+        }),
+    )
+    with pytest.raises(BybitTransportError, match=message):
+        c.get_active_orders_full_scan("linear")
+    c.close()
+
+
+def test_get_active_orders_full_scan_max_pages_overflow_raises():
+    """Non-empty nextPageCursor after the page cap must fail closed."""
+    c = _make_client()
+    _install_mock_transport(
+        c,
+        lambda req: httpx.Response(200, json=_ok_envelope({
+            "list": [{"orderId": "OID1"}],
+            "nextPageCursor": "NEXT",
+        })),
+    )
+    with pytest.raises(BybitTransportError, match="exceeded max_pages=1"):
+        c.get_active_orders_full_scan("linear", max_pages=1)
+    c.close()
+
+
+def test_get_active_orders_full_scan_cursor_query_is_not_double_encoded(monkeypatch):
+    """Full-scan cursor reuses signed GET encoding without double escaping."""
+    c = _make_client()
+    monkeypatch.setattr(c, "_timestamp_ms", lambda: "1700000000000")
+    cursor = "5%3A1740208862283%2C5%3A1740208862283"
+    pages = [
+        {"list": [{"orderId": "OID1"}], "nextPageCursor": cursor},
+        {"list": [{"orderId": "OID2"}], "nextPageCursor": ""},
+    ]
+    page_iter = iter(pages)
+    recorded = _install_mock_transport(
+        c,
+        lambda req: httpx.Response(200, json=_ok_envelope(next(page_iter))),
+    )
+    c.get_active_orders_full_scan("linear")
+    query = str(recorded[1].url).split("?", 1)[1]
+    assert "cursor=5%3A1740208862283%2C5%3A1740208862283" in query
+    assert "%253A" not in query
     c.close()
 
 
