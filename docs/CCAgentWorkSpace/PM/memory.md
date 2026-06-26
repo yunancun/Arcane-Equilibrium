@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Evidence-Floor Gap-Closure Design
+
+- PM closed `P1-AGGRESSIVE-ALPHA-EVIDENCE-FLOOR-GAP-CLOSURE-DESIGN-NO-ORDER` as source/test/docs `DONE_WITH_CONCERNS`.
+- Added no-authority helper `false_negative_evidence_floor_gap_closure.py`; smoke on the ranking packet outputs AVAX Sell gap design with `gap_count=9`, lane-separated source-only/read-only-runtime/future-authorization evidence, and probe/order/promotion/proof false.
+- PM read: operator requested pause after this round. On resume, use real P0 auth delta if it exists; otherwise next useful source-only work is `P1-AGGRESSIVE-ALPHA-SOURCE-ONLY-CONTROL-IDENTITY-CONTRACT-NO-ORDER`, not another ranking/gap audit.
+
 ## 2026-06-26 Low-Price False-Negative Evidence-Floor Ranking
 
 - PM closed `P1-AGGRESSIVE-ALPHA-LOW-PRICE-FALSE-NEGATIVE-EVIDENCE-FLOOR-RANKING-NO-ORDER` as source/test/docs `DONE_WITH_CONCERNS`.
