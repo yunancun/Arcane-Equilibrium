@@ -357,6 +357,11 @@ def _cap_feasible_selection_candidate(packet: dict[str, Any] | None) -> dict[str
     return _dict(_dict(packet).get("selected_candidate"))
 
 
+def _current_cap_usdt(candidate: dict[str, Any]) -> Any:
+    current_cap = candidate.get("current_cap_usdt")
+    return candidate.get("cap_usdt") if current_cap is None else current_cap
+
+
 def _cap_feasible_selection_ready(
     packet: dict[str, Any],
     artifacts: dict[str, dict[str, Any]],
@@ -680,7 +685,7 @@ def build_lower_price_reroute_review(
             "avg_net_bps": selected_candidate.get("avg_net_bps"),
             "net_positive_pct": selected_candidate.get("net_positive_pct"),
             "outcome_count": selected_candidate.get("outcome_count"),
-            "current_cap_usdt": selected_candidate.get("current_cap_usdt"),
+            "current_cap_usdt": _current_cap_usdt(selected_candidate),
             "minimum_required_demo_notional_usdt_per_order": selected_candidate.get(
                 "minimum_required_demo_notional_usdt_per_order"
             ),

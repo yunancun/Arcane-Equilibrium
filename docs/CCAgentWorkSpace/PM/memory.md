@@ -25,6 +25,13 @@
 
 ## 近期記錄
 
+## 2026-06-26 Candidate Source Freshness Alignment + Atomic Preview Runner
+
+- PM closed `P1-AGGRESSIVE-ALPHA-CANDIDATE-SOURCE-FRESHNESS-ALIGNMENT-NO-CAPTURE` as `DONE_WITH_CONCERNS`.
+- Source fix maps `cap_usdt` into `current_cap_usdt` for ready lower-price reroute packets while preserving explicit zero; fresh AVAX reroute sha `bc300277...` is ready with `current_cap_usdt=10.0`.
+- Added `atomic_quote_adapter_preview_runner.py`; one E3/BB-reviewed run produced summary sha `98c7d75...` and construction preview sha `f721bc3...`, ready no-order under `1000ms` freshness. QA found no blocker; all grant/order/proof flags remain false.
+- PM read: pause now. Next is still `P0-BOUNDED-PROBE-AUTHORIZATION`, blocked until a candidate-scoped auth object or exact typed confirm passes repo gates; do not repeat quote/runner work without new evidence and E3/BB review.
+
 ## 2026-06-26 Atomic Quote Adapter Preview Runtime Review No-Capture
 
 - PM closed `P1-AGGRESSIVE-ALPHA-ATOMIC-QUOTE-ADAPTER-PREVIEW-RUNTIME-REVIEW` as `DONE_WITH_CONCERNS` without capture.
