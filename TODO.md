@@ -1,9 +1,9 @@
 # Xuanheng TODO - Active Dispatch Queue
 
-**Version** v575 | **Date** 2026-06-26
-**Source/runtime pointer**: source/origin `26a203baf88524d02de294e1840ba74ffb55750f`; runtime `trade-core` clean at `dd22810ee41c353c1d214d9a3217862d7b2bac74` as of `2026-06-26T10:57:23Z`; no runtime/source/crontab/service apply in v575.
-**Current posture**: P0 auth is still blocked by missing candidate-scoped authorization. P1 learning SSOT and autonomous proposal are already DONE/no-repeat; the only source-only next item is runtime-hygiene source-sync review with no apply.
-**Links**: latest PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--antirepeat_todo_runtime_hygiene_reconcile_no_apply.md`; latest Operator note `docs/CCAgentWorkSpace/Operator/2026-06-26--antirepeat_todo_runtime_hygiene_reconcile_no_apply.md`; changelog `docs/CLAUDE_CHANGELOG.md`; TODO standard `docs/agents/todo-maintenance.md`.
+**Version** v576 | **Date** 2026-06-26
+**Source/runtime pointer**: source/origin `beeef498206bb4b4ddc80e957445e56b12688fd0`; runtime `trade-core` clean at `dd22810ee41c353c1d214d9a3217862d7b2bac74` as of `2026-06-26T11:04:00Z`; no runtime/source/crontab/service apply in v576.
+**Current posture**: P0 auth is still blocked by missing candidate-scoped authorization. Runtime source-sync no-apply review is done; future sync is not needed immediately and would require a separate apply checkpoint.
+**Links**: latest PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--runtime_source_sync_review_no_apply.md`; latest Operator note `docs/CCAgentWorkSpace/Operator/2026-06-26--runtime_source_sync_review_no_apply.md`; changelog `docs/CLAUDE_CHANGELOG.md`; TODO standard `docs/agents/todo-maintenance.md`.
 
 ---
 
@@ -11,19 +11,19 @@
 
 | Fact | Value | Dispatch impact |
 |---|---|---|
-| Runtime source/services | `2026-06-26T10:57:23Z`: runtime source clean at `dd22810ee41c353c1d214d9a3217862d7b2bac74`; API MainPID `2218842`. | v575 did not sync runtime, edit crontab, or restart service. |
-| Runtime expected-head pins | `2026-06-26T10:57:23Z`: 11 active cron expected-head literals still pin `dd22810ee41c353c1d214d9a3217862d7b2bac74`. | Runtime is internally consistent, but behind source/origin `26a203b...`; sync requires separate E3 runtime review and no implicit apply. |
-| Bounded authorization | Runtime latest auth sha `c956288b1b5070132cac0223f2806e03dee44eeae0b7a20adfee86542d5aa0df`; status `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED`; AVAX candidate; `decision=defer`; no auth object or active authority. | P0 bounded probe authorization remains blocked. Broad Demo API intent is not a repo-valid order/probe grant. |
+| Runtime source/services | `2026-06-26T11:04:00Z`: runtime source clean at `dd22810ee41c353c1d214d9a3217862d7b2bac74`; API MainPID `2218842`. | v576 did not sync runtime, edit crontab, run cron, or restart service. |
+| Runtime expected-head pins | `2026-06-26T11:04:00Z`: 11 active cron expected-head literals still pin `dd22810ee41c353c1d214d9a3217862d7b2bac74`. | Runtime is internally consistent. If a future sync is opened, source fast-forward and all 11 expected-head pins must move in one reviewed checkpoint. |
+| Bounded authorization | Runtime latest auth sha `167af6133af27fbe2476a55184608c8ae7fb35b8d1aff8bf45fedfab9ad4ebf2`; status `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED`; AVAX candidate; `decision=defer`; no auth object or active authority. | P0 bounded probe authorization remains blocked. Broad Demo API intent is not a repo-valid order/probe grant. |
+| Source/runtime diff | E3 no-apply review: no changed cron/Rust/API/deploy files; changed files are docs/state, manual research helpers, and tests. | No immediate apply needed. Future source sync has no security blocker but must not run manual public quote helpers. |
 | Fresh AVAX source/no-order preview | Reroute sha `bc300277...`; atomic runner summary sha `98c7d75...`; construction preview sha `f721bc3...`. | Evidence-only. Do not repeat quote/preview work without new E3/BB-reviewed evidence delta. |
-| Proof exclusions | Exclude unattributed fills, cleanup/risk-close fills, stale local `Working` rows, `flash_dip_buy`, cross-symbol controls, artifact counts, source-smoke, replay-only results, public quotes, adapter snapshots, and no-order previews. | These never count toward promotion or risk-adjusted net PnL proof. |
 
 ## §1 Active Dispatch Queue
 
 | ID | P | Status | Owner chain | Acceptance | Latest evidence | Next action |
 |---|---:|---|---|---|---|---|
-| `P0-BOUNDED-PROBE-AUTHORIZATION` | 0 | BLOCKED | PM -> E3 -> BB -> PM | Candidate-scoped bounded Demo authorization only; no global Cost Gate lowering; no live; no order/probe authority unless a valid scoped authorization is admitted and E3/BB review passes. | Auth sha `c956288b...` has no authorization object and no active authority. | Resume only on real candidate-scoped auth object, exact typed confirm, or standing-auth delta that passes repo gates. |
+| `P0-BOUNDED-PROBE-AUTHORIZATION` | 0 | BLOCKED | PM -> E3 -> BB -> PM | Candidate-scoped bounded Demo authorization only; no global Cost Gate lowering; no live; no order/probe authority unless a valid scoped authorization is admitted and E3/BB review passes. | Auth sha `167af613...` has no authorization object and no active authority. | Resume only on real candidate-scoped auth object, exact typed confirm, or standing-auth delta that passes repo gates. |
 | `P0-PROFIT-OUTCOME-REVIEW` | 0 | WAITING | PM -> QC/MIT/BB -> PM | Candidate-matched fills with fees/slippage, controls, execution realism, and repeat/OOS path. | No authorized bounded-probe outcomes exist. | Run only after an authorized bounded Demo probe produces candidate-matched outcomes. |
-| `P1-RUNTIME-HEALTH-HYGIENE-SOURCE-SYNC-REVIEW-NO-APPLY` | 1 | READY | PM -> E3 -> PM | Decide whether source/origin `26a203b...` needs runtime source/expected-head sync; produce review only unless a separate apply action is explicitly opened. | Runtime head and cron pins remain `dd22810e`; source/origin is `26a203b...`; v574 helper/report changes are not runtime-applied. | If continuing without auth delta, do E3 no-apply review. Do not git pull runtime, edit crontab, restart service, or run cron in this item. |
+| `P1-RUNTIME-HEALTH-HYGIENE-SOURCE-SYNC-APPLY-REVIEW` | 1 | DEFERRED | PM -> E3 -> PM | If opened, apply exact source sync envelope only: fast-forward runtime source and update all 11 expected-head pins together, then post-check clean head/pin counts/API PID/auth unchanged. | E3 no-apply review found no blocker and no immediate need. | Do not run by default. Open only if operator/PM explicitly decides runtime needs v574/v575/v576 source availability. |
 
 ## §2 Closed Markers To Prevent Rework
 
@@ -33,6 +33,7 @@
 | `P0-PROFIT-CANDIDATE-SELECTION` | DONE_WITH_CONCERNS | AVAX Sell candidate selected; v574 construction preview ready no order. | Reopen only if fresh evidence invalidates AVAX cap feasibility or ranking. |
 | `P1-LEARNING-LOOP-CLOSURE` | DONE_WITH_CONCERNS | `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-24--learning_ssot_decision_packet.md` | No-op already done: artifact `probe_ledger.jsonl` is current SSOT; PG-backed cutover is not current. |
 | `P1-AUTONOMOUS-PARAMETER-PROPOSAL` | DONE_WITH_CONCERNS | `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-24--autonomous_parameter_proposal_contract.md` | No-op already done: learning output becomes inactive review packet only, never direct order/risk/live mutation. |
+| `P1-RUNTIME-HEALTH-HYGIENE-SOURCE-SYNC-REVIEW-NO-APPLY` | DONE_WITH_CONCERNS | `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--runtime_source_sync_review_no_apply.md` | No-op unless a new source/runtime delta appears or an apply checkpoint is explicitly opened. |
 | `P1-AGGRESSIVE-ALPHA-CANDIDATE-SOURCE-FRESHNESS-ALIGNMENT-NO-CAPTURE` | DONE_WITH_CONCERNS | `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--candidate_source_freshness_alignment_atomic_preview_runner.md` | Do not repeat source alignment or public quote runner without new source/runtime/artifact delta and E3/BB review for exchange-facing work. |
 
 ## §3 Hard Gates
@@ -51,10 +52,10 @@
 ```bash
 git -C /Users/ncyu/Projects/TradeBot/srv status --short --branch
 sed -n '1,180p' /Users/ncyu/Projects/TradeBot/srv/TODO.md
-sed -n '1,220p' /Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--antirepeat_todo_runtime_hygiene_reconcile_no_apply.md
-python3 -m json.tool /tmp/openclaw/session_loop_state_20260626T105722Z_antirepeat_todo_runtime_hygiene_reconcile.json
+sed -n '1,220p' /Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--runtime_source_sync_review_no_apply.md
+python3 -m json.tool /tmp/openclaw/session_loop_state_20260626T110400Z_runtime_source_sync_review_no_apply.json
 ssh trade-core 'cd /home/ncyu/BybitOpenClaw/srv && git rev-parse HEAD && git status --short'
 ```
 
 **Maintenance contract**: `TODO.md` is the active dispatch queue only. Long evidence and version narratives belong in reports/archive/changelog.
-**Self-check**: The next PM can identify the next action in under one minute: P0 auth only on real scoped auth delta; otherwise the next safe item is E3 no-apply runtime source-sync review.
+**Self-check**: The next PM can identify the next action in under one minute: P0 auth only on real scoped auth delta; runtime sync apply is deferred and must be a separate reviewed checkpoint.
