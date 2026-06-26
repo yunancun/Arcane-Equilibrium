@@ -11,6 +11,13 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 07:34 CEST
+- closed `P0-PROFIT-CANDIDATE-SELECTION-DELTA-REFRESH-NO-ORDER` as source/test/docs `DONE_WITH_CONCERNS`
+- runtime read-only delta showed latest scorecard/auth chain again pointing at `grid_trading|ETHUSDT|Buy`, while ETH remains infeasible under the current `10 USDT` cap and AVAX remains top current-cap-feasible candidate
+- patched `helper_scripts/cron/cost_gate_learning_lane_cron.sh` so false-negative operator review can prefer explicit/cap-feasible selected side-cell before falling back to top ranked false-negative
+- validation: bash syntax PASS; cron static `15 passed`; bounded auth/preflight `23 passed`; operator-review policy focused `8 passed, 82 deselected`; diff-check PASS
+- boundary: source/test/docs only; no runtime sync, crontab/env/service mutation, PG write, Bybit/API/order/cancel/modify, Cost Gate/cap/risk mutation, writer/adapter enablement, order/probe/live authority, or proof claim
+
 2026-06-26 07:22 CEST
 - closed `P1-AGGRESSIVE-ALPHA-AVAX-SUI-FIL-MATCHED-CONTROL-DESIGN-NO-ORDER` as source-only `DONE_WITH_CONCERNS`
 - existing result-review contract supports same-side-cell controls for AVAX; SUI/FIL cross-symbol controls are research-only and cannot count as AVAX proof/promotion/Cost Gate proof

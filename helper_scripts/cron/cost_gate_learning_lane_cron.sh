@@ -141,6 +141,28 @@ latest_matching_path() {
     printf '%s' "$latest"
 }
 
+json_selected_candidate_side_cell_key() {
+    local path="$1"
+    if [[ -z "$path" || ! -f "$path" ]]; then
+        return 0
+    fi
+    "$PYBIN" - "$path" <<'PY' 2>/dev/null || true
+import json
+import sys
+
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as fh:
+        payload = json.load(fh)
+except Exception:
+    payload = {}
+
+candidate = payload.get("selected_candidate")
+if not isinstance(candidate, dict):
+    candidate = {}
+print(str(candidate.get("side_cell_key") or "").strip())
+PY
+}
+
 validate_int() {
     local name="$1"
     local value="$2"
@@ -303,6 +325,13 @@ DEFAULT_HORIZON_SEALED_REPLAY_JSON="$(latest_matching_path \
     "$DATA"/cost_gate_learning_lane/horizon_specific_sealed_replay_latest.json \
     "$DATA"/profitability_refresh/*/horizon_specific_sealed_replay/horizon_specific_sealed_replay_latest.json)"
 HORIZON_SEALED_REPLAY_JSON="${OPENCLAW_COST_GATE_HORIZON_SEALED_REPLAY_JSON:-$DEFAULT_HORIZON_SEALED_REPLAY_JSON}"
+DEFAULT_CAP_FEASIBLE_CANDIDATE_SELECTION_JSON="$(latest_matching_path \
+    "$LANE_DIR"/cap_feasible_candidate_selection*.json)"
+CAP_FEASIBLE_CANDIDATE_SELECTION_JSON="${OPENCLAW_COST_GATE_CAP_FEASIBLE_CANDIDATE_SELECTION_JSON:-$DEFAULT_CAP_FEASIBLE_CANDIDATE_SELECTION_JSON}"
+FALSE_NEGATIVE_OPERATOR_REVIEW_SELECTED_SIDE_CELL_KEY="${OPENCLAW_COST_GATE_FALSE_NEGATIVE_OPERATOR_REVIEW_SELECTED_SIDE_CELL_KEY:-}"
+if [[ -z "$FALSE_NEGATIVE_OPERATOR_REVIEW_SELECTED_SIDE_CELL_KEY" && -n "$CAP_FEASIBLE_CANDIDATE_SELECTION_JSON" ]]; then
+    FALSE_NEGATIVE_OPERATOR_REVIEW_SELECTED_SIDE_CELL_KEY="$(json_selected_candidate_side_cell_key "$CAP_FEASIBLE_CANDIDATE_SELECTION_JSON")"
+fi
 
 STAMP="$(date -u '+%Y%m%dT%H%M%SZ')"
 SCORECARD_JSON_OUT="${COUNTERFACTUAL_DIR}/cost_gate_reject_counterfactual_${STAMP}.json"
@@ -498,6 +527,11 @@ FALSE_NEGATIVE_OPERATOR_REVIEW_ARGS=(
     --json-output "$FALSE_NEGATIVE_OPERATOR_REVIEW_OUT"
     --output "$FALSE_NEGATIVE_OPERATOR_REVIEW_MD_OUT"
 )
+if [[ -n "$FALSE_NEGATIVE_OPERATOR_REVIEW_SELECTED_SIDE_CELL_KEY" ]]; then
+    FALSE_NEGATIVE_OPERATOR_REVIEW_ARGS+=(
+        --selected-side-cell-key "$FALSE_NEGATIVE_OPERATOR_REVIEW_SELECTED_SIDE_CELL_KEY"
+    )
+fi
 
 SEALED_LEARNING_EVIDENCE_ARGS=(
     -m cost_gate_learning_lane.sealed_horizon_learning_evidence
