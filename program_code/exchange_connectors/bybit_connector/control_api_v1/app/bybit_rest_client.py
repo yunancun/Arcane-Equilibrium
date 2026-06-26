@@ -633,6 +633,40 @@ class BybitClient:
         # 返回原始 Bybit dict — call site 直接讀 markPrice/avgPrice 等 camelCase。
         return [it for it in items if isinstance(it, dict)]
 
+    def get_positions_full_scan(
+        self,
+        category: str = "linear",
+        symbol: Optional[str] = None,
+        settle_coin: Optional[str] = "USDT",
+        limit: int = 200,
+        max_pages: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Return every position row in scope using Bybit V5 cursor pagination.
+        使用 Bybit V5 cursor 分頁返回範圍內所有持倉列。
+
+        This read-only helper is intentionally separate from get_positions() so
+        existing route behavior remains unchanged while reconciliation jobs can
+        require full-scan evidence.
+        此只讀 helper 與 get_positions() 分離，避免改變既有 route 行為，同時讓
+        reconciliation job 可要求 full-scan 證據。
+        """
+        params: dict[str, Any] = {"category": category}
+        if symbol:
+            params["symbol"] = symbol
+        elif settle_coin:
+            params["settleCoin"] = settle_coin
+        else:
+            raise BybitError(
+                "get_positions_full_scan requires symbol or settle_coin"
+            )
+        return self._get_paginated_list(
+            "/v5/position/list",
+            params,
+            limit=limit,
+            max_limit=200,
+            max_pages=max_pages,
+        )
+
     # ------------------------------------------------------------------
     # Active orders — GET /v5/order/realtime
     # 活躍訂單
@@ -659,6 +693,112 @@ class BybitClient:
         result = payload.get("result") or {}
         items = result.get("list") or [] if isinstance(result, dict) else []
         return [it for it in items if isinstance(it, dict)]
+
+    def get_active_orders_full_scan(
+        self,
+        category: str = "linear",
+        symbol: Optional[str] = None,
+        settle_coin: Optional[str] = "USDT",
+        open_only: int = 0,
+        limit: int = 50,
+        max_pages: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Return every realtime-order row in scope using cursor pagination.
+        使用 cursor 分頁返回範圍內所有 realtime-order 列。
+
+        For Bybit V5 `/v5/order/realtime`, `openOnly=0` asks for open orders;
+        callers may override only for reviewed diagnostics.
+        對 Bybit V5 `/v5/order/realtime`，`openOnly=0` 查詢開放掛單；只有經審核
+        的診斷呼叫才應覆寫。
+        """
+        params: dict[str, Any] = {
+            "category": category,
+            "openOnly": int(open_only),
+        }
+        if symbol:
+            params["symbol"] = symbol
+        elif settle_coin:
+            params["settleCoin"] = settle_coin
+        else:
+            raise BybitError(
+                "get_active_orders_full_scan requires symbol or settle_coin"
+            )
+        return self._get_paginated_list(
+            "/v5/order/realtime",
+            params,
+            limit=limit,
+            max_limit=50,
+            max_pages=max_pages,
+        )
+
+    def _get_paginated_list(
+        self,
+        path: str,
+        base_params: dict[str, Any],
+        *,
+        limit: int,
+        max_limit: int,
+        max_pages: int,
+    ) -> list[dict[str, Any]]:
+        """GET a V5 list endpoint until nextPageCursor is exhausted.
+        GET V5 list 端點直到 nextPageCursor 耗盡。
+        """
+        safe_limit = min(max(int(limit), 1), int(max_limit))
+        page_cap = max(int(max_pages), 1)
+        params = dict(base_params)
+        params["limit"] = safe_limit
+
+        rows: list[dict[str, Any]] = []
+        cursor: Optional[str] = None
+        seen_cursors: set[str] = set()
+        for _ in range(page_cap):
+            if cursor:
+                params["cursor"] = cursor
+            else:
+                params.pop("cursor", None)
+            payload = self._get(path, params)
+            result = payload.get("result")
+            if not isinstance(result, dict):
+                raise BybitTransportError(
+                    f"Bybit response result from {path} is not a JSON object"
+                )
+            if "list" not in result:
+                raise BybitTransportError(
+                    f"Bybit response result.list from {path} is missing"
+                )
+            items = result.get("list")
+            if not isinstance(items, list):
+                raise BybitTransportError(
+                    f"Bybit response result.list from {path} is not a list"
+                )
+            for item in items:
+                if not isinstance(item, dict):
+                    raise BybitTransportError(
+                        f"Bybit response result.list from {path} contains non-object row"
+                    )
+                rows.append(item)
+
+            if "nextPageCursor" not in result:
+                raise BybitTransportError(
+                    f"Bybit response nextPageCursor from {path} is missing"
+                )
+            next_cursor = result.get("nextPageCursor")
+            if not isinstance(next_cursor, str):
+                raise BybitTransportError(
+                    f"Bybit response nextPageCursor from {path} is not a string"
+                )
+            if not next_cursor:
+                return rows
+            if next_cursor == cursor or next_cursor in seen_cursors:
+                raise BybitTransportError(
+                    f"Bybit pagination cursor did not advance for {path}"
+                )
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
+
+        raise BybitTransportError(
+            f"Bybit pagination exceeded max_pages={page_cap} for {path}"
+        )
 
     # ------------------------------------------------------------------
     # Cancel order — POST /v5/order/cancel

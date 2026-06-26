@@ -1,7 +1,9 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
-最後更新：2026-06-24。每批詳情見下方對應 `## YYYY-MM-DD` 區塊（per-batch SSOT）；最新數批摘要見「最新補充」段。
+最後更新：2026-06-26。每批詳情見下方對應 `## YYYY-MM-DD` 區塊（per-batch SSOT）；最新數批摘要見「最新補充」段。
+
+最新補充（2026-06-26 Bybit demo exchange inventory read-only full scan）：新增 `bybit/demo_exchange_inventory_readonly.py`，使用 Python Bybit REST client 的 cursor-aware full-scan helper 只讀抓取 demo `/v5/order/realtime` openOnly=0/limit=50 與 `/v5/position/list` limit=200，輸出 timestamped JSON/Markdown inventory packet。它拒絕非 demo base URL，遇到 transport/business/pagination failure fail closed；不 POST、不下單、不 cancel/modify/close、不寫 PG、不改 runtime/service/env/crontab、不啟 adapter/Rust writer、不降低 Cost Gate、不授權 probe/order/live、不作 promotion 或 bounded-probe profit proof。
 
 最新補充（2026-06-24 bounded probe active order wiring contract）：新增 `research/cost_gate_learning_lane/bounded_probe_active_order_wiring_contract.py`，輸出 source-only `bounded_demo_probe_active_order_wiring_contract_v1`。它定義並掃描 active bounded Demo order wiring 的必要 source seam：dedicated Rust active-order module、demo/live_demo one-order bounded limits、post-only near-touch limit-or-skip envelope、Guardian/risk/operator/Decision Lease/Rust authority gates、existing `OrderDispatchRequest` dispatch、candidate-matched attempt/order/fill/fee/slippage/matched-control lineage。Current repo smoke 固定 `ACTIVE_ORDER_WIRING_SOURCE_PATCH_REQUIRED`；READY 只代表可進 E3/BB review，不授權 probe/order/live。Boundary：source/test/docs only；不查/寫 PG，不連 Bybit，不下單，不改 runtime/service/env/crontab，不降低 Cost Gate，不授權 probe/order/live/promotion。
 
