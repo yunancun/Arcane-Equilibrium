@@ -1,9 +1,9 @@
 # Xuanheng TODO - Active Dispatch Queue
 
-**Version** v559 | **Date** 2026-06-26
-**Source/runtime pointer**: local source includes v559 cap-envelope evidence-floor patch; Linux runtime code/crontab pins remain `99d3b8f7ff50439eee1a3d7e8219b805a303520b` until a separate runtime sync review.
-**Current posture**: v559 closed source-only `P1-AGGRESSIVE-ALPHA-CAP-ENVELOPE-EVIDENCE-FLOOR-SOURCE-ONLY`. `P0-BOUNDED-PROBE-AUTHORIZATION` remains blocked; do not rerun read-only auth audit without a real candidate-scoped auth delta.
-**Links**: latest report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--cap_envelope_evidence_floor_source_patch.md`; version changelog `docs/CLAUDE_CHANGELOG.md`; TODO standard `docs/agents/todo-maintenance.md`.
+**Version** v560 | **Date** 2026-06-26
+**Source/runtime pointer**: local/origin and Linux runtime source/crontab expected-head pins are aligned at `dd22810ee41c353c1d214d9a3217862d7b2bac74`.
+**Current posture**: v560 closed `P1-RUNTIME-HEALTH-HYGIENE-CAP-ENVELOPE-PROPOSAL-SYNC-REVIEW`. `P0-BOUNDED-PROBE-AUTHORIZATION` remains blocked; do not rerun read-only auth audit without a real candidate-scoped auth delta.
+**Links**: latest report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--cap_envelope_proposal_runtime_sync.md`; version changelog `docs/CLAUDE_CHANGELOG.md`; TODO standard `docs/agents/todo-maintenance.md`.
 
 ---
 
@@ -11,29 +11,29 @@
 
 | Area | Latest verified fact | Dispatch impact |
 |---|---|---|
-| Runtime source/services | `2026-06-26T07:03:49Z` read-only snapshot: Linux runtime source `99d3b8f7ff50439eee1a3d7e8219b805a303520b`; prior v557 sync left crontab expected-head pins aligned to this code head and API MainPID `2218842`. | Runtime code is intentionally behind docs-only local/origin head. No runtime sync is required for v558 docs/report changes. |
+| Runtime source/services | `2026-06-26T07:30Z` PM/E3 sync put Linux runtime source and crontab expected-head pins at `dd22810ee41c353c1d214d9a3217862d7b2bac74`; crontab old/new literal counts `0/11`, line count `70`; API MainPID `2218842` stayed active. | v559 cap-envelope evidence-floor source is active for future scheduled artifacts. This was not a service restart, manual cron run, `_latest` overwrite, PG/Bybit action, or authority grant. |
 | Artifact SSOT path | Current cost-gate artifacts are under `/tmp/openclaw/cost_gate_learning_lane/`, not `/tmp/openclaw/` root. | Future read-only checks must use the canonical subdirectory or they will falsely report missing latest artifacts. |
-| Authorization latest | `/tmp/openclaw/cost_gate_learning_lane/bounded_probe_operator_authorization_latest.json`, mtime `2026-06-26T07:00:04Z`, sha `c46dcd88...`, status `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED`, candidate `grid_trading|AVAXUSDT|Sell`, decision `defer`, `typed_confirm_matches=false`, no authorization id/object, no probe/order authority. | v557 status clarity is active in scheduled artifacts, but this is not an authorization delta. P0 authorization stays blocked. |
+| Authorization latest | `/tmp/openclaw/cost_gate_learning_lane/bounded_probe_operator_authorization_latest.json`, mtime `2026-06-26T07:15:04Z`, sha `b904d1a6...`, status `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED`, candidate `grid_trading|AVAXUSDT|Sell`, decision `defer`, `typed_confirm_matches=false`, no authorization id/object, no probe/order authority. | Natural latest artifact changed, but this is not an authorization delta. P0 authorization stays blocked. |
 | AVAX bounded candidate | Selected bounded Demo candidate remains `grid_trading|AVAXUSDT|Sell`, 60m, current-cap feasible, modeled `73.5511bps`, `48/48` positive. | Candidate selection is closed. Do not replace AVAX without reopening P0 candidate selection on fresh evidence. |
 | ETH cap staircase | ETH Buy remains top modeled false-negative lead, but current `10 USDT` cap cannot construct it. At recorded `1571.05` limit price and `0.01` qty step, first executable tier is `0.01 ETH = 15.7105 USDT`; second is `0.02 ETH = 31.4210 USDT`; third is `0.03 ETH = 47.1315 USDT`. | ETH is research-only. Any future ETH cap envelope is a separate operator/QC/E3/BB review; no cap mutation now. |
-| Cap-envelope proposal source | v559 source patch adds `cost_gate_cap_envelope_evidence_floor_v1` into `cost_gate_autonomous_parameter_proposal_v1`; all cap-envelope rows are inactive with `mutation_allowed_by_this_packet=false` and `cap_envelope_mutation_allowed=false`. | Learning output can now carry cap-envelope evidence-floor requirements as a review packet only. Runtime scheduled artifacts will not include this until a separate runtime sync review. |
+| Cap-envelope proposal source | v559 source patch adds `cost_gate_cap_envelope_evidence_floor_v1` into `cost_gate_autonomous_parameter_proposal_v1`; all cap-envelope rows are inactive with `mutation_allowed_by_this_packet=false` and `cap_envelope_mutation_allowed=false`. | Runtime source now has this code. Scheduled artifacts will include the new floor after the next natural cron run or a separately reviewed no-order refresh. |
 | Proof exclusions | Exclude `flash_dip_buy`, cleanup/risk-close fills, unattributed fills, local stale `Working` rows, artifact counts, source-smoke, single-window MM positives, and replay-only results. | Never count these for bounded-probe proof, Cost Gate proof, promotion, or risk-adjusted net PnL proof. |
 
 ## §1 Active State Machine
 
 | Field | Value |
 |---|---|
-| `session_loop_state` | `/tmp/openclaw/session_loop_state_20260626T071429Z_cap_envelope_evidence_floor_source_only.json` |
-| `active_blocker_id` | `P1-AGGRESSIVE-ALPHA-CAP-ENVELOPE-EVIDENCE-FLOOR-SOURCE-ONLY` |
-| `blocker_goal` | Define and enforce the source-level evidence floor before high-priced/high-upside learned candidates can become cap-envelope proposals. |
-| `profit_relevance` | Converts high-upside learning output into reviewable proposal criteria without allowing a hidden cap/exposure increase. |
-| `previous_evidence_checked` | v558 ETH cap report; runtime artifact snapshot at `2026-06-26T07:14:29Z`; alpha regime governance audit; P0 cost-wall audit; autonomous proposal/result/proof source contracts. |
-| `new_evidence_delta_required` | P0 auth had no real delta, so only a distinct source-only evidence-floor contract could advance the loop. |
-| `new_evidence_delta_found` | Existing autonomous proposal lacked reusable cap-envelope floor; source patch now emits `cost_gate_cap_envelope_evidence_floor_v1`. |
-| `anti_repeat_decision` | `P0-BOUNDED-PROBE-AUTHORIZATION` = `NO-OP_NO_EVIDENCE_DELTA`; ETH cap sensitivity = `NO-OP_ALREADY_DONE`; source-only evidence-floor patch was distinct. |
+| `session_loop_state` | `/tmp/openclaw/session_loop_state_20260626T072429Z_cap_envelope_proposal_runtime_sync_review.json` |
+| `active_blocker_id` | `P1-RUNTIME-HEALTH-HYGIENE-CAP-ENVELOPE-PROPOSAL-SYNC-REVIEW` |
+| `blocker_goal` | Sync v559 cap-envelope evidence-floor proposal source to Linux runtime and align expected-head pins without service restart, manual cron, PG write, Bybit call, Cost Gate/risk/cap mutation, or authority grant. |
+| `profit_relevance` | Makes scheduled learning/proposal artifacts carry the cap-envelope evidence floor, reducing unsafe high-upside/cap-expansion loops. |
+| `previous_evidence_checked` | v559 source patch report; runtime precheck showing source `99d3b8f7`, target `dd22810e`, crontab old/new `11/0`, API MainPID `2218842`. |
+| `new_evidence_delta_required` | Runtime source/crontab evidence showing v559 was not active on Linux but could be fast-forwarded safely. |
+| `new_evidence_delta_found` | Runtime source was behind local/origin and expected-head pins were stale. |
+| `anti_repeat_decision` | P0 auth still no-delta; v559 source patch already done; runtime sync was distinct and completed. |
 | `loop_status` | `DONE_WITH_CONCERNS` |
-| `next_blocker_id` | `P1-RUNTIME-HEALTH-HYGIENE-CAP-ENVELOPE-PROPOSAL-SYNC-REVIEW` if runtime sync is pursued; otherwise P0 authorization remains blocked until real auth delta. |
-| `why_not_repeating_current_blocker` | The source contract is present and tested; repeating without runtime sync or new evidence is noise. |
+| `next_blocker_id` | `P0-BOUNDED-PROBE-AUTHORIZATION` if real candidate-scoped auth delta appears; otherwise source-only low-price false-negative evidence-floor ranking or wait for natural scheduled artifact refresh. |
+| `why_not_repeating_current_blocker` | Runtime source/pins are now aligned; repeating without drift would be anti-repeat noise. |
 
 ## §2 Active Dispatch Queue
 
@@ -47,7 +47,7 @@
 | `P1-RUNTIME-HEALTH-HYGIENE-AUTH-STATUS-CLARITY-SYNC-REVIEW` | 1 | DONE | `DONE_WITH_CONCERNS` | PM -> E3 -> PM | Sync v556 source to Linux and expected-head pins without service restart, manual cron, PG write, Bybit call, Cost Gate/risk/cap mutation, or authority grant. | `2026-06-26--authorization_gate_status_clarity_runtime_sync.md`; runtime code/crontab aligned to `99d3b8f7`. | No-repeat unless runtime source/crontab drifts again. |
 | `P1-AGGRESSIVE-ALPHA-ETH-CAP-ENVELOPE-SENSITIVITY-NO-ORDER` | 1 | DONE | `DONE_WITH_CONCERNS` | PM -> QC/MIT-equivalent source review -> PM | ETH cap tiers quantified; no cap mutation; no proof/authority claim; TODO normalized. | `2026-06-26--eth_cap_envelope_sensitivity_no_order.md`; first executable tier `15.7105 USDT`. | No-repeat unless ETH price/metadata/cap/evidence changes. |
 | `P1-AGGRESSIVE-ALPHA-CAP-ENVELOPE-EVIDENCE-FLOOR-SOURCE-ONLY` | 1 | DONE | `DONE_WITH_CONCERNS` | PM -> PA/E1 -> E2 -> E4 -> QA/PM | Autonomous proposal emits cap-envelope evidence floor; no cap mutation or authority; focused/adjacent tests pass. | `2026-06-26--cap_envelope_evidence_floor_source_patch.md`; tests `10 passed`, `py_compile`, `git diff --check`. | No-repeat unless source contract requirements change. |
-| `P1-RUNTIME-HEALTH-HYGIENE-CAP-ENVELOPE-PROPOSAL-SYNC-REVIEW` | 1 | DEFERRED | `DEFERRED_RUNTIME_MUTATION_REQUIRES_REVIEW` | PM -> E3 -> PM | If pursued, sync v559 source to Linux and expected-head pins without service restart/manual cron/PG/Bybit/order/authority. | v559 source exists only locally/origin after commit; runtime remains `99d3b8f7`. | Separate runtime sync review only; do not mutate runtime inside source patch checkpoint. |
+| `P1-RUNTIME-HEALTH-HYGIENE-CAP-ENVELOPE-PROPOSAL-SYNC-REVIEW` | 1 | DONE | `DONE_WITH_CONCERNS` | PM -> E3 -> PM | Runtime source/crontab expected-head pins aligned to v559 without service restart/manual cron/PG/Bybit/order/authority. | `2026-06-26--cap_envelope_proposal_runtime_sync.md`; source `dd22810e`, crontab old/new `0/11`, tests `10 passed`, API PID unchanged. | No-repeat unless runtime source/crontab drifts again. |
 
 ## §3 Hard Gates
 
@@ -73,10 +73,11 @@
 ```bash
 git -C /Users/ncyu/Projects/TradeBot/srv status --short --branch
 sed -n '1,220p' /Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--cap_envelope_evidence_floor_source_patch.md
-python3 -m json.tool /tmp/openclaw/session_loop_state_20260626T071429Z_cap_envelope_evidence_floor_source_only.json | sed -n '1,220p'
+sed -n '1,220p' /Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--cap_envelope_proposal_runtime_sync.md
+python3 -m json.tool /tmp/openclaw/session_loop_state_20260626T072429Z_cap_envelope_proposal_runtime_sync_review.json | sed -n '1,220p'
 PYTHONPATH=helper_scripts/research python3 -m pytest -q /Users/ncyu/Projects/TradeBot/srv/helper_scripts/research/tests/test_cost_gate_autonomous_parameter_proposal.py /Users/ncyu/Projects/TradeBot/srv/helper_scripts/research/tests/test_cost_gate_false_negative_bounded_probe_preflight.py
 ssh trade-core 'python3 -m json.tool /tmp/openclaw/cost_gate_learning_lane/bounded_probe_operator_authorization_latest.json | sed -n "1,120p"'
 ```
 
 **Maintenance contract**: `TODO.md` is the active dispatch queue only. Long evidence, completed ledgers, and version narratives belong in reports/archive/changelog.
-**Self-check**: A next PM can identify the next action in under one minute: P0 auth is still blocked/no-repeat; v559 source patch is done/tested; runtime sync is a separate reviewed blocker if needed.
+**Self-check**: A next PM can identify the next action in under one minute: P0 auth is still blocked/no-repeat; v559 source and runtime sync are done/tested; do not rerun runtime sync unless source/crontab drifts.

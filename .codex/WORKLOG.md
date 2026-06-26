@@ -11,6 +11,13 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 09:30 CEST
+- closed `P1-RUNTIME-HEALTH-HYGIENE-CAP-ENVELOPE-PROPOSAL-SYNC-REVIEW` as PM/E3 `DONE_WITH_CONCERNS`
+- runtime source fast-forwarded `99d3b8f7 -> dd22810e`; crontab expected-head old/new `11/0 -> 0/11`; line count remained `70`; API MainPID remained `2218842`
+- runtime focused validation: autonomous proposal + false-negative preflight tests `10 passed`, `py_compile`, `git diff --check`
+- latest bounded auth artifact remains defer/no typed confirm/no authorization id; P0 auth still no-repeat blocked
+- boundary: source fast-forward + expected-head-only crontab mutation + docs only; no restart, manual cron, `_latest` overwrite, PG/Bybit/order action, Cost Gate/cap/risk mutation, authority, or proof claim
+
 2026-06-26 09:24 CEST
 - closed `P1-AGGRESSIVE-ALPHA-CAP-ENVELOPE-EVIDENCE-FLOOR-SOURCE-ONLY` as source/test/docs `DONE_WITH_CONCERNS`
 - anti-repeat: P0 bounded authorization had no new delta; latest auth remains AVAX-scoped `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED`, defer, no typed confirm/object/authority

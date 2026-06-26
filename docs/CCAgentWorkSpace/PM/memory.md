@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Cap Envelope Proposal Runtime Sync
+
+- PM/E3 closed `P1-RUNTIME-HEALTH-HYGIENE-CAP-ENVELOPE-PROPOSAL-SYNC-REVIEW` as `DONE_WITH_CONCERNS`.
+- Linux runtime source fast-forwarded `99d3b8f7 -> dd22810e`; crontab expected-head old/new changed `11/0 -> 0/11`; line count stayed `70`; API MainPID stayed `2218842`; runtime focused tests passed `10`.
+- PM read: this did not run cron or overwrite `_latest`. Natural auth latest is still defer/no typed-confirm/no authority, so P0 authorization remains no-repeat blocked.
+
 ## 2026-06-26 Cap Envelope Evidence Floor Source Patch
 
 - PM closed `P1-AGGRESSIVE-ALPHA-CAP-ENVELOPE-EVIDENCE-FLOOR-SOURCE-ONLY` as source/test/docs `DONE_WITH_CONCERNS`.
