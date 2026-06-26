@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Quote-To-Adapter Freshness Review No-Order
+
+- PM closed `P1-AGGRESSIVE-ALPHA-QUOTE-TO-ADAPTER-FRESHNESS-REVIEW-NO-ORDER` as `DONE_WITH_CONCERNS`.
+- Existing `public_quote_market_snapshot_adapter.py` refused v570 quote sha `4d46d88a...` with `public_quote_stale_at_adapter_generation`; no market snapshot or construction preview was emitted.
+- PM read: do not rerun capture or forge adapter time. Next useful source-only blocker is an atomic quote->adapter->preview no-capture design; future actual capture still requires PM->E3->BB.
+
 ## 2026-06-26 Public Quote Capture Runtime Review
 
 - PM closed `P1-AGGRESSIVE-ALPHA-PUBLIC-QUOTE-CAPTURE-RUNTIME-REVIEW` as `DONE_WITH_CONCERNS` after E3 and BB both cleared exactly one PM-run public/read-only AVAX quote capture.
