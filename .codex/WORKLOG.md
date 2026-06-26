@@ -11,6 +11,13 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 06:08 CEST
+- closed `P1-RUNTIME-HEALTH-HYGIENE-68-RUNTIME-SYNC-REVIEW` as `DONE_WITH_CONCERNS`
+- E3 allowed one source-only Linux fast-forward to `0246b263`; PM synced `trade-core` from `d2cd70d0` to `0246b263` with exact `FETCH_HEAD` verification and `git merge --ff-only`
+- post-sync direct [68] read-only PG check returned `PASS` with demo `resting=0`, `working_n=0`, `local_lineage_residual_n=2`, `local_lineage_residual_notional=398`; Linux no-cache focused/adjacent tests returned `30 passed`
+- what remains: 5 crontab expected-head pins still reference `d2cd70d0`; next blocker is `P1-RUNTIME-HEALTH-HYGIENE-CRON-EXPECTED-HEAD-DRIFT-REVIEW`
+- boundary: source-only fast-forward + read-only PG/source/tests; no restart/rebuild, crontab/env mutation, PG write, Bybit/API call, adapter/writer enablement, Cost Gate change, live/probe/order authority, or proof claim
+
 2026-06-26 05:50 CEST
 - closed `P1-RUNTIME-HEALTH-HYGIENE-LOCAL-LINEAGE-68-STALE-WORKING` as source-only `DONE_WITH_CONCERNS`
 - anti-repeat result: `P1-LEARNING-LOOP-CLOSURE` and `P1-AUTONOMOUS-PARAMETER-PROPOSAL` are already done via 2026-06-24 reports, so they were not rerun

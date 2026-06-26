@@ -26,6 +26,22 @@ Result:
 - outcome, blocker, or next action
 ```
 
+2026-06-26 06:08 CEST
+Task:
+- Close `P1-RUNTIME-HEALTH-HYGIENE-68-RUNTIME-SYNC-REVIEW` with a source-only Linux fast-forward and direct [68] runtime verification.
+
+Chain:
+- PM -> E3(explorer) -> PM
+
+Ownership:
+- PM: create session state, collect runtime preflight, execute exact ff-only source sync, run post-checks, update TODO/report/changelog/worklog/memory.
+- E3(explorer): runtime/security review defining allowed command class, forbidden actions, and required post-checks.
+
+Result:
+- Linux `trade-core` source is clean at `0246b263`.
+- Direct [68] read-only PG check returns `PASS` with local close/risk rows visible as `local_lineage_residual`.
+- Status `DONE_WITH_CONCERNS` because crontab expected-head pins still reference `d2cd70d0`; crontab alignment is a separate E3 checkpoint.
+
 2026-06-26 05:50 CEST
 Task:
 - Close `P1-RUNTIME-HEALTH-HYGIENE-LOCAL-LINEAGE-68-STALE-WORKING` as a source-only health [68] local-lineage residual patch.

@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Health [68] Runtime Source Sync Review
+
+- PM/E3 closed `P1-RUNTIME-HEALTH-HYGIENE-68-RUNTIME-SYNC-REVIEW` as `DONE_WITH_CONCERNS`; Linux `trade-core` source-only fast-forwarded clean to `0246b263`.
+- Direct [68] read-only PG verification now returns `PASS` with demo `resting=0`, `working_n=0`, while preserving visible `local_lineage_residual_n=2/notional=398`.
+- PM read: do not rerun [68] source sync. Remaining runtime hygiene is crontab expected-head drift: 5 pins still point to `d2cd70d0`, requiring separate E3 review before any crontab edit.
+
 ## 2026-06-26 Health [68] Local Lineage Residual Source Patch
 
 - PM/E2/E4 closed `P1-RUNTIME-HEALTH-HYGIENE-LOCAL-LINEAGE-68-STALE-WORKING` as source-only `DONE_WITH_CONCERNS`.
