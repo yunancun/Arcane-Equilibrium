@@ -11,6 +11,13 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 06:44 CEST
+- closed current `P0-BOUNDED-PROBE-AUTHORIZATION` round as `BLOCKED_BY_RUNTIME_AUTHORIZATION`
+- anti-repeat result: runtime latest auth artifact remains defer-only, candidate-mismatched to `grid_trading|ETHUSDT|Buy`, no standing auth/object/runtime authority for selected `grid_trading|AVAXUSDT|Sell`
+- normalized TODO v545 back to active-dispatch shape per `docs/agents/todo-maintenance.md`
+- next after requested pause: source-only `P1-AGGRESSIVE-ALPHA-FALSE-NEGATIVE-SUBSET-MINING-NO-ORDER`
+- boundary: docs/TODO/report only; no Bybit/API/order call, PG read/write, runtime sync, restart/rebuild, crontab/env mutation, Cost Gate change, authority, or proof claim
+
 2026-06-26 06:36 CEST
 - closed `P1-RUNTIME-HEALTH-HYGIENE-CRON-POST-ALIGNMENT-HYGIENE-SNAPSHOT` as `DONE_WITH_CONCERNS`
 - E3 allowed only read-only snapshots and supplied-snapshot `runtime_health_hygiene.py` with target runtime head `0246b263`, not docs head `65fe28ef`

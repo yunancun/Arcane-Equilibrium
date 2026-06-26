@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Bounded Probe Authorization Anti-Repeat TODO Hygiene
+
+- PM closed the current `P0-BOUNDED-PROBE-AUTHORIZATION` round as `BLOCKED_BY_RUNTIME_AUTHORIZATION`; repeated no-authority audit is `NO-OP_NO_EVIDENCE_DELTA`.
+- Runtime latest authorization artifact remains defer-only and candidate-mismatched (`grid_trading|ETHUSDT|Buy`), with no standing auth, emitted object, runtime probe/order authority, or Cost Gate change for selected `grid_trading|AVAXUSDT|Sell`.
+- PM read: do not rerun this authorization blocker without a valid AVAX-scoped auth delta. After operator-requested pause, resume at source-only `P1-AGGRESSIVE-ALPHA-FALSE-NEGATIVE-SUBSET-MINING-NO-ORDER`; no orders/authority.
+
 ## 2026-06-26 Runtime Hygiene Post-Alignment Snapshot
 
 - PM/E3 closed `P1-RUNTIME-HEALTH-HYGIENE-CRON-POST-ALIGNMENT-HYGIENE-SNAPSHOT` as `DONE_WITH_CONCERNS`.
