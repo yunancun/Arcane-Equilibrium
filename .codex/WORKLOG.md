@@ -11,6 +11,13 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 13:26 CEST
+- closed `P1-AGGRESSIVE-ALPHA-MAKER-COST-CUSHION-WORKSHEET-NO-ORDER` as source/test/docs `DONE_WITH_CONCERNS`
+- added `maker_cost_cushion_worksheet.py`; real AVAX no-order smoke is `MAKER_COST_CUSHION_WORKSHEET_READY_NO_ORDER`, sha `074d2e1d...`, maker stress margin `66.9239bps`, taker failure-analysis margin `59.9239bps`
+- latest runtime auth sha `bdaca35f...` remains `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED` / `decision=defer`; no scoped authority admitted
+- normalized `TODO.md` v577 to active-dispatch shape and recorded operator-requested pause after this round
+- boundary: source/test/docs + local `/tmp` smoke + read-only runtime metadata only; no Bybit/order, PG write/query, runtime/crontab/service mutation, Cost Gate change, authority, or proof claim
+
 2026-06-26 09:30 CEST
 - closed `P1-RUNTIME-HEALTH-HYGIENE-CAP-ENVELOPE-PROPOSAL-SYNC-REVIEW` as PM/E3 `DONE_WITH_CONCERNS`
 - runtime source fast-forwarded `99d3b8f7 -> dd22810e`; crontab expected-head old/new `11/0 -> 0/11`; line count remained `70`; API MainPID remained `2218842`
