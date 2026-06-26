@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from cost_gate_learning_lane.bounded_probe_operator_authorization import (
+    FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED_STATUS,
     OPERATOR_AUTHORIZATION_PACKET_SCHEMA_VERSION,
     READY_REVIEW_STATUS,
     STANDING_DEMO_AUTHORIZATION_ACTIVE_STATUS,
@@ -693,3 +694,43 @@ def test_false_negative_preflight_schema_can_reach_review_packet() -> None:
     assert packet["operator_authorization"] is None
     assert packet["answers"]["bounded_demo_probe_authorized"] is False
     assert packet["answers"]["active_runtime_order_authority"] is False
+
+
+def test_false_negative_preflight_operator_review_required_is_labeled() -> None:
+    preflight = _preflight(
+        schema_version="cost_gate_false_negative_bounded_demo_probe_preflight_v1",
+        status="OPERATOR_REVIEW_REQUIRED",
+        reason="false_negative_operator_review_approved_for_preflight missing",
+        blocking_gates=["false_negative_operator_review_approved_for_preflight"],
+        answers={
+            "ready_for_operator_bounded_demo_probe_authorization": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+    )
+
+    packet = build_bounded_demo_probe_operator_authorization(
+        preflight=preflight,
+        placement_repair_plan=_placement_plan(),
+        authority_patch_readiness=_readiness(),
+        decision="defer",
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED_STATUS
+    assert packet["operator_authorization"] is None
+    assert packet["blocking_gates"] == ["false_negative_preflight_ready"]
+    assert packet["preflight"]["schema_version"] == (
+        "cost_gate_false_negative_bounded_demo_probe_preflight_v1"
+    )
+    assert packet["answers"]["operator_authorization_object_emitted"] is False
+    assert packet["answers"]["bounded_demo_probe_authorized"] is False
+    assert packet["answers"]["active_runtime_probe_authority"] is False
+    assert packet["answers"]["active_runtime_order_authority"] is False
+    assert packet["answers"]["global_cost_gate_lowering_recommended"] is False
+    assert packet["next_actions"] == [
+        "operator_review_false_negative_candidate_with_exact_preflight_confirm"
+    ]

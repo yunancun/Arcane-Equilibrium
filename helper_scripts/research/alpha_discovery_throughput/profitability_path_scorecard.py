@@ -24,6 +24,10 @@ PROFITABILITY_PATH_SCORECARD_SCHEMA_VERSION = "alpha_profitability_path_scorecar
 FALSE_NEGATIVE_BOUNDED_PREFLIGHT_SCHEMA = (
     "cost_gate_false_negative_bounded_demo_probe_preflight_v1"
 )
+FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED_STATUS = (
+    "FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED"
+)
+FALSE_NEGATIVE_PREFLIGHT_NOT_READY_STATUS = "FALSE_NEGATIVE_PREFLIGHT_NOT_READY"
 BOUNDARY = (
     "artifact-only profitability path scorecard; no PG query/write, Bybit call, "
     "order, config, risk, auth, runtime mutation, main Cost Gate lowering, "
@@ -1327,6 +1331,8 @@ def _bounded_probe_operator_authorization_path_state(
             ),
         )
     if status in {
+        FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED_STATUS,
+        FALSE_NEGATIVE_PREFLIGHT_NOT_READY_STATUS,
         "SEALED_HORIZON_PREFLIGHT_NOT_READY",
         "PLACEMENT_REPAIR_PLAN_NOT_READY",
         "AUTHORITY_PATH_PATCH_NOT_READY",
@@ -2195,6 +2201,9 @@ def _proof_gate_labels(blocking_gates: list[Any]) -> list[str]:
         "authority_boundary_preserved": (
             "inputs preserve no Cost Gate lowering, no order authority, no promotion proof"
         ),
+        "false_negative_preflight_ready": (
+            "false-negative preflight is operator-reviewed and ready for bounded demo-probe authorization"
+        ),
         "sealed_horizon_preflight_ready": (
             "sealed horizon preflight is ready for bounded demo-probe authorization"
         ),
@@ -2552,6 +2561,9 @@ def _profitability_next_move(
     if primary_gate == "operator_sealed_horizon_review_recorded":
         move_class = "operator_reviews_sealed_horizon_edge_before_probe"
         objective = "turn blocked-signal edge into bounded demo probe learning evidence"
+    elif primary_gate == "false_negative_preflight_ready":
+        move_class = "operator_reviews_false_negative_candidate_before_probe"
+        objective = "turn false-negative Cost Gate edge into bounded demo probe learning evidence"
     elif primary_gate.startswith("demo_learning_stack_"):
         move_class = "activate_sustainable_demo_learning_stack"
         objective = (
@@ -2744,6 +2756,8 @@ def _profitability_engineering_closure(
     }:
         status = "BOUNDED_DEMO_PROBE_OPERATOR_AUTHORIZATION_INPUT_REQUIRED"
     elif operator_authorization_status in {
+        FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED_STATUS,
+        FALSE_NEGATIVE_PREFLIGHT_NOT_READY_STATUS,
         "SEALED_HORIZON_PREFLIGHT_NOT_READY",
         "PLACEMENT_REPAIR_PLAN_NOT_READY",
         "AUTHORITY_PATH_PATCH_NOT_READY",
@@ -2869,6 +2883,8 @@ def _profitability_engineering_closure(
             "complete explicit operator authorization inputs before object emission"
         ]
     elif operator_authorization_status in {
+        FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED_STATUS,
+        FALSE_NEGATIVE_PREFLIGHT_NOT_READY_STATUS,
         "SEALED_HORIZON_PREFLIGHT_NOT_READY",
         "PLACEMENT_REPAIR_PLAN_NOT_READY",
         "AUTHORITY_PATH_PATCH_NOT_READY",

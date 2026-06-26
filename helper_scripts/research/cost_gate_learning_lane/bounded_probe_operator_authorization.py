@@ -47,9 +47,12 @@ TRUTHY_AUTHORITY_STRINGS = {
     "authorized",
 }
 PREFLIGHT_SCHEMA_VERSION = "sealed_horizon_bounded_demo_probe_preflight_v1"
+FALSE_NEGATIVE_PREFLIGHT_SCHEMA_VERSION = (
+    "cost_gate_false_negative_bounded_demo_probe_preflight_v1"
+)
 SUPPORTED_PREFLIGHT_SCHEMA_VERSIONS = {
     PREFLIGHT_SCHEMA_VERSION,
-    "cost_gate_false_negative_bounded_demo_probe_preflight_v1",
+    FALSE_NEGATIVE_PREFLIGHT_SCHEMA_VERSION,
 }
 PLACEMENT_REPAIR_PLAN_SCHEMA_VERSION = (
     "bounded_demo_probe_placement_repair_plan_v1"
@@ -57,6 +60,10 @@ PLACEMENT_REPAIR_PLAN_SCHEMA_VERSION = (
 READY_PREFLIGHT_STATUS = "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
 READY_PLACEMENT_STATUS = "PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW"
 READY_REVIEW_STATUS = "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW"
+FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED_STATUS = (
+    "FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED"
+)
+FALSE_NEGATIVE_PREFLIGHT_NOT_READY_STATUS = "FALSE_NEGATIVE_PREFLIGHT_NOT_READY"
 REJECTED_STATUS = "REJECTED_FOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
 DEFAULT_MAX_ARTIFACT_AGE_HOURS = 24
 DEFAULT_MAX_AUTHORIZATION_TTL_HOURS = 24
@@ -287,6 +294,7 @@ def _preflight_summary(
         and answers.get("promotion_evidence") is not True
     )
     return {
+        "schema_version": artifact.get("schema_version"),
         "status": payload.get("status"),
         "reason": payload.get("reason"),
         "ready_for_operator_authorization": ready,
@@ -530,17 +538,47 @@ def _dedupe(items: list[Any]) -> list[str]:
     return out
 
 
+def _preflight_gate_metadata(preflight_summary: dict[str, Any]) -> dict[str, Any]:
+    schema = preflight_summary.get("schema_version")
+    if schema == FALSE_NEGATIVE_PREFLIGHT_SCHEMA_VERSION:
+        return {
+            "name": "false_negative_preflight_ready",
+            "reason": (
+                "false-negative preflight must reach "
+                "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION after "
+                "operator review"
+            ),
+            "next_actions": [
+                "operator_review_false_negative_candidate_with_exact_preflight_confirm"
+            ],
+        }
+    return {
+        "name": "sealed_horizon_preflight_ready",
+        "reason": (
+            "sealed preflight must reach "
+            "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+        ),
+        "next_actions": ["refresh_or_complete_sealed_horizon_probe_preflight"],
+    }
+
+
 def _status_from_gates(
     *,
     decision: str,
     authorization_requested: bool,
     failed_gates: list[dict[str, Any]],
 ) -> str:
-    failed = {gate["name"] for gate in failed_gates}
+    failed_by_name = {gate["name"]: gate for gate in failed_gates}
+    failed = set(failed_by_name)
     if "authority_boundary_preserved" in failed:
         return "AUTHORITY_BOUNDARY_VIOLATION"
     if "standing_demo_authorization_safe" in failed:
         return "AUTHORITY_BOUNDARY_VIOLATION"
+    if "false_negative_preflight_ready" in failed:
+        gate = failed_by_name["false_negative_preflight_ready"]
+        if gate.get("status") == "OPERATOR_REVIEW_REQUIRED":
+            return FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED_STATUS
+        return FALSE_NEGATIVE_PREFLIGHT_NOT_READY_STATUS
     if "sealed_horizon_preflight_ready" in failed:
         return "SEALED_HORIZON_PREFLIGHT_NOT_READY"
     if "placement_repair_plan_ready" in failed:
@@ -744,6 +782,7 @@ def build_bounded_demo_probe_operator_authorization(
     standing_safe = (
         not standing_present or standing_summary.get("safe") is True
     )
+    preflight_gate_metadata = _preflight_gate_metadata(preflight_summary)
 
     gates = [
         _gate(
@@ -754,11 +793,11 @@ def build_bounded_demo_probe_operator_authorization(
             next_actions=["remove_authority_granting_input_before_authorization_review"],
         ),
         _gate(
-            "sealed_horizon_preflight_ready",
+            preflight_gate_metadata["name"],
             preflight_summary["ready_for_operator_authorization"] is True,
             status=str(preflight_summary.get("status") or "MISSING"),
-            reason="sealed preflight must reach READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION",
-            next_actions=["refresh_or_complete_sealed_horizon_probe_preflight"],
+            reason=preflight_gate_metadata["reason"],
+            next_actions=preflight_gate_metadata["next_actions"],
             evidence=preflight_summary,
         ),
         _gate(
