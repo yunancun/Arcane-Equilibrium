@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -55,6 +56,12 @@ def test_wrapper_refreshes_activation_packet_before_alpha_runner() -> None:
     assert "false_negative_bounded_probe_preflight_latest.json" in src
     assert "OPENCLAW_ALPHA_BOUNDED_PROBE_PREFLIGHT_JSON" in src
     assert "BOUNDED_PROBE_PREFLIGHT_JSON" in src
+    assert "OPENCLAW_ALPHA_CAP_FEASIBLE_CANDIDATE_SELECTION_JSON" in src
+    assert "OPENCLAW_ALPHA_SELECTED_SIDE_CELL_KEY" in src
+    assert "json_side_cell_key()" in src
+    assert "BOUNDED_PROBE_PREFLIGHT_SIDE_CELL_KEY" in src
+    assert "BOUNDED_REVIEW_CHAIN_SKIP_REASON" in src
+    assert "selected_side_cell_mismatch" in src
     assert "OPENCLAW_ALPHA_REFRESH_BOUNDED_PROBE_REVIEW_CHAIN" in src
     assert "OPENCLAW_ALPHA_ORDER_TO_FILL_GAP_AUDIT_JSON" in src
     assert "demo_order_to_fill_gap_latest.json" in src
@@ -129,6 +136,12 @@ def test_wrapper_refreshes_activation_packet_before_alpha_runner() -> None:
     assert src.index("FALSE_NEGATIVE_BOUNDED_PREFLIGHT_JSON") < src.index(
         "cost_gate_learning_lane.bounded_probe_touchability_preflight"
     )
+    assert src.index("BOUNDED_REVIEW_CHAIN_SKIP_REASON") < src.index(
+        "cost_gate_learning_lane.bounded_probe_touchability_preflight"
+    )
+    assert src.index("SKIP: bounded probe review chain") < src.index(
+        "cost_gate_learning_lane.bounded_probe_touchability_preflight"
+    )
     assert src.index("cost_gate_learning_lane.bounded_probe_touchability_preflight") < src.index(
         "cost_gate_learning_lane.bounded_probe_placement_repair_plan"
     )
@@ -152,6 +165,122 @@ def test_wrapper_refreshes_activation_packet_before_alpha_runner() -> None:
     )
     assert src.index("alpha_discovery_throughput.profitability_path_scorecard") < src.index(
         "alpha_discovery_throughput.runtime_runner"
+    )
+
+
+def test_bounded_review_chain_fails_closed_on_selected_side_cell_mismatch() -> None:
+    src = _src()
+    assert (
+        'DEFAULT_CAP_FEASIBLE_CANDIDATE_SELECTION_JSON="$(latest_matching_path '
+        '"$DATA"/cost_gate_learning_lane/cap_feasible_candidate_selection*.json)"'
+        in src
+    )
+    assert (
+        'CAP_FEASIBLE_CANDIDATE_SELECTION_JSON="${OPENCLAW_ALPHA_CAP_FEASIBLE_CANDIDATE_SELECTION_JSON:-'
+        '$DEFAULT_CAP_FEASIBLE_CANDIDATE_SELECTION_JSON}"'
+        in src
+    )
+    assert 'ALPHA_SELECTED_SIDE_CELL_KEY="${OPENCLAW_ALPHA_SELECTED_SIDE_CELL_KEY:-}"' in src
+    assert 'ALPHA_SELECTED_SIDE_CELL_KEY="$(json_side_cell_key "$CAP_FEASIBLE_CANDIDATE_SELECTION_JSON")"' in src
+    assert 'BOUNDED_PROBE_PREFLIGHT_SIDE_CELL_KEY="$(json_side_cell_key "$BOUNDED_PROBE_PREFLIGHT_JSON")"' in src
+    assert (
+        'BOUNDED_REVIEW_CHAIN_SKIP_REASON="selected_side_cell_mismatch:'
+        '${BOUNDED_PROBE_PREFLIGHT_SIDE_CELL_KEY}:expected:${ALPHA_SELECTED_SIDE_CELL_KEY}"'
+        in src
+    )
+    assert 'if [[ -n "$BOUNDED_REVIEW_CHAIN_SKIP_REASON" ]]; then' in src
+    assert (
+        'echo "[$(ts)] SKIP: bounded probe review chain ${BOUNDED_REVIEW_CHAIN_SKIP_REASON}"'
+        in src
+    )
+    assert src.index('if [[ -n "$BOUNDED_REVIEW_CHAIN_SKIP_REASON" ]]; then') < src.index(
+        "cost_gate_learning_lane.bounded_probe_touchability_preflight"
+    )
+    assert 'if [[ -z "$BOUNDED_REVIEW_CHAIN_SKIP_REASON" ]]; then' in src
+    assert (
+        'add_profitability_json_arg "--bounded-probe-preflight-json" '
+        '"$BOUNDED_PROBE_PREFLIGHT_JSON"'
+        in src
+    )
+    assert (
+        'echo "[$(ts)] SKIP: profitability bounded probe inputs '
+        '${BOUNDED_REVIEW_CHAIN_SKIP_REASON}"'
+        in src
+    )
+    assert src.index('if [[ -z "$BOUNDED_REVIEW_CHAIN_SKIP_REASON" ]]; then') < src.index(
+        'add_profitability_json_arg "--bounded-probe-preflight-json"'
+    )
+    assert src.index('SKIP: profitability bounded probe inputs') < src.index(
+        "alpha_discovery_throughput.profitability_path_scorecard"
+    )
+
+
+def test_wrapper_skips_bounded_chain_execution_on_selected_side_cell_mismatch(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("bash") is None:
+        pytest.skip("bash not available")
+
+    base = tmp_path / "srv"
+    data = tmp_path / "data"
+    research_dir = base / "helper_scripts" / "research"
+    (research_dir / "alpha_discovery_throughput").mkdir(parents=True)
+    lane_dir = data / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (data / "demo_order_to_fill_gap").mkdir(parents=True)
+    (lane_dir / "cap_feasible_candidate_selection_20260626T000000Z.json").write_text(
+        '{"selected_candidate":{"side_cell_key":"grid_trading|AVAXUSDT|Sell"}}\n',
+        encoding="utf-8",
+    )
+    (lane_dir / "false_negative_bounded_probe_preflight_latest.json").write_text(
+        '{"candidate":{"side_cell_key":"grid_trading|ETHUSDT|Buy"}}\n',
+        encoding="utf-8",
+    )
+    (data / "demo_order_to_fill_gap" / "demo_order_to_fill_gap_latest.json").write_text(
+        "{}\n",
+        encoding="utf-8",
+    )
+
+    fake_python = tmp_path / "fake_python.sh"
+    args_log = tmp_path / "fake_python_args.log"
+    fake_python.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "$1" == "-" ]]; then\n'
+        f'  exec "{sys.executable}" "$@"\n'
+        "fi\n"
+        'printf "%s\\n" "$*" >> "$FAKE_PY_ARGS_LOG"\n',
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "OPENCLAW_BASE_DIR": str(base),
+            "OPENCLAW_DATA_DIR": str(data),
+            "OPENCLAW_PYTHON_BIN": str(fake_python),
+            "FAKE_PY_ARGS_LOG": str(args_log),
+        }
+    )
+    proc = subprocess.run(["bash", str(WRAPPER)], env=env, capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+
+    py_calls = args_log.read_text(encoding="utf-8").splitlines()
+    assert not any("bounded_probe_touchability_preflight" in line for line in py_calls)
+    assert not any("--bounded-probe-preflight-json" in line for line in py_calls)
+    assert any("alpha_discovery_throughput.profitability_path_scorecard" in line for line in py_calls)
+    cron_log = (data / "logs" / "alpha_discovery_throughput_cron.log").read_text(
+        encoding="utf-8"
+    )
+    assert (
+        "SKIP: bounded probe review chain "
+        "selected_side_cell_mismatch:grid_trading|ETHUSDT|Buy:expected:grid_trading|AVAXUSDT|Sell"
+        in cron_log
+    )
+    assert (
+        "SKIP: profitability bounded probe inputs "
+        "selected_side_cell_mismatch:grid_trading|ETHUSDT|Buy:expected:grid_trading|AVAXUSDT|Sell"
+        in cron_log
     )
 
 
