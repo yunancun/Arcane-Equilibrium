@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 14:10 CEST
+- closed `P0-BOUNDED-PROBE-AUTHORIZATION-TYPED-CONFIRM-GUARD` as source/test/docs `DONE_WITH_CONCERNS`
+- latest runtime auth sha `af337e48...` remains AVAX `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED` / `decision=defer`, no authority; the source fix prevents exact `authorize_bounded_demo_probe:...:0:` phrases before preflight readiness and complete auth fields
+- verification: focused auth `20 passed`, adjacent auth/preflight/friction `34 passed`, scorecard/runtime slice `10 passed, 92 deselected`, py_compile, diff-check, runtime-input local smoke, E4 DONE; E2 first found a leak and PM fixed it
+- boundary: source/test/docs + local `/tmp` smoke only; no runtime source sync, crontab, restart, PG, Bybit/order, Cost Gate, authority, or proof claim
+
 2026-06-26 13:58 CEST
 - closed `P1-RUNTIME-HEALTH-HYGIENE-SOURCE-SYNC-APPLY-REVIEW` as PM/E3 read-only `DONE_WITH_CONCERNS_NO_APPLY`
 - source/origin `370a3d82` vs runtime `dd22810e`; diff is docs/reports/TODO/worklog/changelog/SCRIPT_INDEX plus source-only cost-gate research helpers/tests, with no Rust/FastAPI/cron/canary/deploy/service/migration/Cargo/crontab paths

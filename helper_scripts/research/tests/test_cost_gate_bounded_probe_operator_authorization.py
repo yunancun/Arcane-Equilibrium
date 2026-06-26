@@ -220,8 +220,15 @@ def test_ready_inputs_produce_review_packet_not_authorization() -> None:
     assert packet["operator_authorization"] is None
     assert packet["answers"]["ready_for_operator_authorization_review"] is True
     assert packet["answers"]["bounded_demo_probe_authorized"] is False
+    assert packet["typed_confirm_expected"] is None
+    assert packet["typed_confirm_readiness"] == "MISSING_AUTHORIZATION_FIELDS"
+    assert packet["typed_confirm_template"] == (
+        "authorize_bounded_demo_probe:"
+        "ma_crossover|BTCUSDT|Sell:<max_authorized_probe_orders<=3>:<authorization_id>"
+    )
     assert "Bounded Demo Probe Operator Authorization" in markdown
     assert "authorize_bounded_demo_probe" in markdown
+    assert ":0:" not in markdown
 
 
 def test_wrong_typed_confirm_does_not_emit_authorization() -> None:
@@ -723,6 +730,12 @@ def test_false_negative_preflight_operator_review_required_is_labeled() -> None:
     assert packet["status"] == FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED_STATUS
     assert packet["operator_authorization"] is None
     assert packet["blocking_gates"] == ["false_negative_preflight_ready"]
+    assert packet["typed_confirm_expected"] is None
+    assert packet["typed_confirm_readiness"] == "PREFLIGHT_NOT_READY"
+    assert packet["typed_confirm_template"] == (
+        "authorize_bounded_demo_probe:"
+        "ma_crossover|BTCUSDT|Sell:<max_authorized_probe_orders<=3>:<authorization_id>"
+    )
     assert packet["preflight"]["schema_version"] == (
         "cost_gate_false_negative_bounded_demo_probe_preflight_v1"
     )
@@ -734,3 +747,45 @@ def test_false_negative_preflight_operator_review_required_is_labeled() -> None:
     assert packet["next_actions"] == [
         "operator_review_false_negative_candidate_with_exact_preflight_confirm"
     ]
+
+
+def test_preflight_not_ready_suppresses_exact_typed_confirm_even_with_auth_fields() -> None:
+    preflight = _preflight(
+        schema_version="cost_gate_false_negative_bounded_demo_probe_preflight_v1",
+        status="OPERATOR_REVIEW_REQUIRED",
+        reason="false_negative_operator_review_approved_for_preflight missing",
+        blocking_gates=["false_negative_operator_review_approved_for_preflight"],
+        answers={
+            "ready_for_operator_bounded_demo_probe_authorization": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+    )
+
+    packet = build_bounded_demo_probe_operator_authorization(
+        preflight=preflight,
+        placement_repair_plan=_placement_plan(),
+        authority_patch_readiness=_readiness(),
+        decision="authorize",
+        operator_id="operator-test",
+        authorization_id="auth-bounded-probe-001",
+        max_authorized_probe_orders=2,
+        expires_at_utc="2026-06-23T18:00:00+00:00",
+        typed_confirm=(
+            "authorize_bounded_demo_probe:"
+            "ma_crossover|BTCUSDT|Sell:2:auth-bounded-probe-001"
+        ),
+        now_utc=NOW,
+    )
+    markdown = render_markdown(packet)
+
+    assert packet["status"] == FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED_STATUS
+    assert packet["operator_authorization"] is None
+    assert packet["typed_confirm_expected"] is None
+    assert packet["typed_confirm_matches"] is False
+    assert packet["typed_confirm_readiness"] == "PREFLIGHT_NOT_READY"
+    assert "ma_crossover|BTCUSDT|Sell:2:auth-bounded-probe-001" not in markdown
+    assert "NOT_AVAILABLE_UNTIL_AUTHORIZATION_FIELDS_AND_PREFLIGHT_READY" in markdown
