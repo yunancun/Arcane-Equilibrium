@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Source-Only Control Identity Contract
+
+- PM closed `P1-AGGRESSIVE-ALPHA-SOURCE-ONLY-CONTROL-IDENTITY-CONTRACT-NO-ORDER` as source/test/docs `DONE_WITH_CONCERNS`.
+- Added no-authority helper `source_only_control_identity_contract.py`; smoke requires AVAX future proof rows to exact-match side-cell/strategy/symbol/side/horizon, requires same-side-cell blocked controls, and marks cross-symbol controls research-only/not proof.
+- Runtime auth latest refreshed at `2026-06-26T08:00:05Z` but remains AVAX defer/no-authority. PM read: do not rerun P0 auth on that artifact; if no real auth delta, next source-only work is current-cap staircase/risk worksheet.
+
 ## 2026-06-26 Evidence-Floor Gap-Closure Design
 
 - PM closed `P1-AGGRESSIVE-ALPHA-EVIDENCE-FLOOR-GAP-CLOSURE-DESIGN-NO-ORDER` as source/test/docs `DONE_WITH_CONCERNS`.
