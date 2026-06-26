@@ -11,6 +11,13 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 16:45 CEST
+- classified fresh `P0-BOUNDED-PROBE-AUTHORIZATION` runtime auth delta as `BLOCKED_BY_RUNTIME_AUTHORIZATION`
+- runtime auth latest sha `63aa5382...`, mtime `2026-06-26T14:30:55Z`, remains AVAX `decision=defer`, no `authorization_id`, no exact typed confirm, no standing Demo authorization, no probe/order authority
+- false-negative operator review latest is pending rank `2`, expected preflight confirm `approve_cost_gate_false_negative_preflight:grid_trading|AVAXUSDT|Sell:2`, `typed_confirm_matches=false`
+- TODO v589 updates current evidence and removes the v588 pause row after continuation; no helper/source code change was needed
+- boundary: docs/TODO/changelog/worklog/report + read-only source/runtime artifacts only; no private fee read, Bybit/API/order, PG, runtime/crontab/service mutation, Cost Gate/freshness-gate change, authority, or proof claim
+
 2026-06-26 16:35 CEST
 - closed `P1-AGGRESSIVE-ALPHA-REGIME-OOS-LABEL-CONTRACT-NO-ORDER` as source-only `DONE_WITH_CONCERNS`
 - added `regime_oos_label_contract.py` and tests; smoke `/tmp/openclaw/regime_oos_label_contract_smoke_20260626T1420Z/regime_oos_label_contract.json` returned `REGIME_OOS_LABEL_CONTRACT_READY_NO_AUTHORITY`, sha `739f6842...`
