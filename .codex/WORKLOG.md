@@ -11,6 +11,13 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 15:27 CEST
+- closed `P1-FEE-TIER-PRIVATE-READ-ENVELOPE-DESIGN-NO-READ` as source-only `DONE_WITH_CONCERNS`
+- added `private_fee_tier_read_envelope_design.py` and tests; real artifact smoke `/tmp/openclaw/20260626T130005Z_fee_tier_private_read_envelope_design_no_read/private_fee_tier_read_envelope_design.json` returned `PRIVATE_FEE_TIER_READ_ENVELOPE_READY_NO_READ`, sha `24180d6d...`
+- latest runtime auth sha `71ecf0ff...` is still `decision=defer`, no `authorization_id`, no probe/order authority, so P0 authorization remains blocked
+- E2/E3 concerns fixed: broader alias contamination scan, direct auth-field rejection, source input path minimized to basename+sha; BB concerns folded in: numeric fee rates can include zero/negative maker rebate with labels, fee schedule time is observed/captured unless exchange provides explicit effective timestamp
+- boundary: source/test/docs + local `/tmp` smoke only; no private fee read, credential load, Bybit/order, PG, runtime/crontab/service mutation, Cost Gate change, authority, or proof claim
+
 2026-06-26 14:48 CEST
 - closed `P1-FEE-TIER-MAKER-RATIO-EVIDENCE-DESIGN-NO-ORDER` as source-only `DONE_WITH_CONCERNS`
 - added `fee_tier_maker_ratio_evidence_design.py` and tests; E2 found and PM fixed incomplete candidate identity plus truthy typed-confirm marker gaps; real artifact smoke `/tmp/openclaw/20260626T124030Z_fee_tier_maker_ratio_evidence_design_no_order/fee_tier_maker_ratio_evidence_design.json` returned `FEE_TIER_MAKER_RATIO_EVIDENCE_DESIGN_READY_NO_ORDER`, sha `ce17dffe...`
