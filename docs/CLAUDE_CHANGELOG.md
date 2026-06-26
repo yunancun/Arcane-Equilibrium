@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-26（TODO v553 alpha bounded-chain guard runtime sync）
+> 最後更新：2026-06-26（TODO v554 docs-only pointer correction after alpha guard runtime sync）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v554 增量（2026-06-26 docs-only pointer correction after alpha guard runtime sync）**：Corrected the TODO masthead after committing the v553 report/TODO checkpoint. Local/origin now include docs-only commits above the runtime code checkpoint, while Linux runtime code and crontab expected-head pins intentionally remain aligned at `785a434612f82dae57fbe9bdde0f6d22fb331f0f`. Active blocker/status/next blocker are unchanged. Boundary：docs/TODO/changelog metadata only；no runtime mutation, no PG/Bybit/API call, no restart/rebuild, no crontab/env edit, no Cost Gate change, no authority/proof claim.
 
 **v553 增量（2026-06-26 alpha bounded-chain guard runtime sync）**：PM advanced runtime blocker `P1-RUNTIME-HEALTH-HYGIENE-ALPHA-BOUNDED-CHAIN-STALENESS-GUARD-SYNC-REVIEW` using session state `/tmp/openclaw/session_loop_state_20260626T062035Z_alpha_bounded_chain_guard_runtime_sync_review.json`. New evidence showed repo/origin at `785a4346` with the source guard while Linux runtime still held `b9836224`, crontab expected-head counts `old=11/new=0`, and the natural `08:15:04 CEST` alpha authorization artifact sha `43b0bc5e...` still targeted `grid_trading|ETHUSDT|Buy`, `decision=defer`, with no active probe/order authority. PM/E3 bounded apply fast-forwarded Linux source `b9836224 -> 785a4346` and replaced exactly 11 crontab expected-head literals, preserving line count `70`. Runtime post-check: `HEAD=origin/main=785a4346`, worktree clean, crontab old/new counts `0/11`, focused cron tests `24 passed`, API MainPID `2218842` unchanged, latest auth artifact mtime/sha unchanged from pre-sync. Status `DONE_WITH_CONCERNS`; next blocker `P0-BOUNDED-PROBE-AUTHORIZATION-AVAX-LATEST-CHAIN-REFRESH-REVIEW`, waiting for the first fresh post-guard AVAX-scoped artifact delta. Boundary：runtime source fast-forward + expected-head-only crontab mutation + docs/TODO/report only；no service restart/rebuild, no manual cron run, no `_latest` overwrite, no PG write, no Bybit/API/order/cancel/modify, no Cost Gate/cap/risk mutation, no writer/adapter enablement, no probe/order/live authority, and no proof/promotion claim. PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--alpha_bounded_chain_guard_runtime_sync.md`; Operator note `docs/CCAgentWorkSpace/Operator/2026-06-26--alpha_bounded_chain_guard_runtime_sync.md`.
 

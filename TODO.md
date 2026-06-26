@@ -1,7 +1,7 @@
 # Xuanheng TODO - Active Dispatch Queue
 
-**Version** v553 | **Date** 2026-06-26
-**Repo/runtime pointer**: Source/origin/runtime are aligned at `785a434612f82dae57fbe9bdde0f6d22fb331f0f`; crontab expected-head pins also match this runtime checkpoint.
+**Version** v554 | **Date** 2026-06-26
+**Repo/runtime pointer**: Local/origin include docs-only checkpoints above runtime code head; Linux runtime code and crontab expected-head pins are aligned at `785a434612f82dae57fbe9bdde0f6d22fb331f0f`.
 **Current posture**: `P1-RUNTIME-HEALTH-HYGIENE-ALPHA-BOUNDED-CHAIN-STALENESS-GUARD-SYNC-REVIEW` is closed. Next queue entry is fresh post-guard AVAX latest-chain review; P0 bounded authorization remains blocked until an AVAX-scoped defer/no-authority artifact exists.
 **Links**: latest report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--alpha_bounded_chain_guard_runtime_sync.md`; version changelog `docs/CLAUDE_CHANGELOG.md`; TODO standard `docs/agents/todo-maintenance.md`.
 
