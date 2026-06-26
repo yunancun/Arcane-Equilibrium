@@ -1,7 +1,7 @@
 # Xuanheng TODO - Active Dispatch Queue
 
 **Version** v565 | **Date** 2026-06-26
-**Source/runtime pointer**: v565 source/test/docs checkpoint builds on repo `main` / `origin/main` parent `8d41177521f0de848994023ae280854e4d15dcfe`; Linux runtime source and crontab expected-head pins remain `dd22810ee41c353c1d214d9a3217862d7b2bac74`.
+**Source/runtime pointer**: v565 source-code checkpoint commit `c28d5cf6e0259f911796a46c732e78fc45746b1f` is on `main` / `origin/main`; this TODO lives at current repo HEAD. Linux runtime source and crontab expected-head pins remain `dd22810ee41c353c1d214d9a3217862d7b2bac74`.
 **Current posture**: current-cap staircase/risk worksheet is `DONE_WITH_CONCERNS`; AVAX is constructible under current `10 USDT` cap, but BBO is stale and P0 authorization remains blocked/no-repeat unless a real candidate-scoped auth delta appears.
 **Links**: latest PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--current_cap_staircase_risk_worksheet_no_order.md`; changelog `docs/CLAUDE_CHANGELOG.md`; TODO standard `docs/agents/todo-maintenance.md`.
 
