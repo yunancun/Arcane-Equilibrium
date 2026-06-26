@@ -2057,3 +2057,9 @@
 - `P0-BOUNDED-PROBE-AVAX-RUNTIME-ADMISSION-E3-BB-REVIEW-DEMO-ONLY` closed as read-only `DONE_WITH_CONCERNS`: E3/BB allow only opening the next separate runtime source-sync/post-restart reconciliation/adapter-enablement review checkpoint.
 - TODO v527 now has one selected WAITING next blocker and a compact no-repeat AVAX ladder; `P0-PROFIT-DEMO-LEARNING-LOOP` is no longer an executable active row.
 - Boundary unchanged: no runtime sync, no Bybit call/order/cancel/modify, no PG write, no `_latest` overwrite, no restart/crontab/env mutation, no adapter enablement, no Cost Gate lowering, no probe/order/live authority, no promotion proof.
+
+## 2026-06-26 AVAX Runtime Source + Cron Expected-Head Sync
+
+- Runtime source checkout is now clean at `d2cd70d0`; learning cron expected-head pins also point at `d2cd70d0` after exact 11-token SHA replacement.
+- Engine PID `2432529` and API MainPID `2218842` did not change; no restart/rebuild, no PG/Bybit/order/cancel/modify, no adapter/writer enablement, no Cost Gate lowering, no proof/authority.
+- Next PM read: adapter/restart/order path is blocked by health/reconciliation, especially demo resting exposure `working_n=6` and about `691 USDT`; start with `P0-PROFIT-EVIDENCE-QUALITY-DEMO-RESTING-EXPOSURE-RECONCILIATION-E3-BB-REVIEW`.

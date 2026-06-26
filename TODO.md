@@ -1,9 +1,9 @@
 # 玄衡 TODO — Active Dispatch Queue
 
-**版本** v527 ｜ **日期** 2026-06-26
-**Source pointer**：v527 is a docs-only checkpoint on source-code head `c6fabd96724b7a0249128a6f618cf332129bf906`; Linux runtime checkout remains `e0c2a0e17c8d00883c935d1ceb6897ccd9b9e36c` from the 2026-06-25T23:34Z read-only snapshot.
-**Current mainline**：AVAX runtime/admission E3/BB review closed as no-authority `DONE_WITH_CONCERNS`; next checkpoint is runtime source-sync + post-restart reconciliation + adapter-enablement review, paused until operator resumes.
-**Evidence links**：latest report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--avax_runtime_admission_e3_bb_review_todo_hygiene.md`; prior source-readiness report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--avax_authority_path_readiness_source_scan.md`; changelog `docs/CLAUDE_CHANGELOG.md`; TODO standard `docs/agents/todo-maintenance.md`.
+**版本** v528 ｜ **日期** 2026-06-26
+**Source pointer**：Linux checkout and learning-cron expected-head pins are aligned at `d2cd70d092916194043e112eeb402fb92bacb699`; running engine was not rebuilt/restarted.
+**Current mainline**：AVAX source/cron runtime hygiene closed with concerns. Next active blocker is demo resting exposure / working-order reconciliation before any restart, adapter enablement, or order path.
+**Evidence links**：latest report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--avax_runtime_source_sync_cron_expected_head_sync.md`; prior admission report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--avax_runtime_admission_e3_bb_review_todo_hygiene.md`; changelog `docs/CLAUDE_CHANGELOG.md`; TODO standard `docs/agents/todo-maintenance.md`.
 
 ---
 
@@ -11,10 +11,10 @@
 
 | Area | Timestamped fact | Next executable action |
 |---|---|---|
-| Source/runtime drift | 2026-06-25T23:34Z read-only snapshot: Mac source was ahead; Linux runtime checkout/crons were `e0c2a0e1`. TODO v527 changed docs only and did not touch runtime. | On resume, open the exact runtime review checkpoint before any sync, restart, crontab/env mutation, adapter enablement, PG write, or Bybit call. |
+| Source/runtime drift | 2026-06-26T00:45Z PM checkpoint: Linux checkout clean at `d2cd70d0`; crontab expected-head pins changed by exact SHA replacement `e0c2... 11 -> 0` / `d2cd... 0 -> 11`; engine PID `2432529` and API MainPID `2218842` unchanged. | Do not restart/rebuild or enable adapter until resting exposure reconciliation is proven clean and separately reviewed. |
 | AVAX source readiness | 2026-06-26T00:14Z source/test report: AVAX authority scanner returns `AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW`, missing seams `[]`, authority fields false. | Do not rerun source-readiness unless source seams, placement input, or scanner logic changes. |
-| AVAX runtime/admission review | 2026-06-26 PM -> E3 -> BB review: PASS/DONE_WITH_CONCERNS for moving only to a separate runtime source-sync/reconciliation/adapter-enablement review. | Current review grants no runtime mutation, no adapter enablement, no probe/order authority, and no Bybit private/order endpoint use. |
-| Remaining runtime blockers | 2026-06-26 helper print-json still reports `runtime_source_sync_not_verified`, `post_restart_pending_order_reconciliation_not_proven`, `runtime_adapter_enablement_not_performed_source_only_packet`. | Next checkpoint must address these blockers explicitly and separately. |
+| AVAX runtime/admission review | 2026-06-26 PM -> E3 -> BB review allowed source checkout sync only; BB failed adapter/order path. | Current review grants no adapter enablement, no probe/order authority, and no Bybit private/order endpoint use. |
+| Remaining runtime blockers | 2026-06-26T00:38:13Z passive healthcheck FAIL: demo resting exposure `working_n=6`, resting about `691 USDT`; close-maker reject sample and lease soak checks also fail. | Start demo resting exposure / working-order reconciliation review; no cancel/modify/order-affecting action without E3/BB. |
 | Latest learning chain | 2026-06-25T22:29Z false-negative packet latest has AVAX rank 2, but runtime `_latest` proposal/preflight still select ETH Buy. | Use explicit candidate-scoped AVAX inputs; do not rely on `_latest` for AVAX proof. |
 
 ## §1 Selected P0 Dispatch Queue
@@ -22,7 +22,9 @@
 | ID | Status | Owner chain | Acceptance | Latest evidence | Next action |
 |---|---|---|---|---|---|
 | `P0-BOUNDED-PROBE-AVAX-RUNTIME-ADMISSION-E3-BB-REVIEW-DEMO-ONLY` | DONE_WITH_CONCERNS | PM -> E3 -> BB -> PM | Review may only decide whether to open the next runtime checkpoint. It must not mutate runtime, submit/cancel/modify orders, write PG, enable adapter/writer, or grant probe/order/live authority. | Report `2026-06-26--avax_runtime_admission_e3_bb_review_todo_hygiene.md`; E3 PASS/DONE_WITH_CONCERNS; BB PASS/DONE_WITH_CONCERNS; local readiness print-json confirms all authority fields false. | No-repeat. Do not rerun without source HEAD, runtime snapshot, PG snapshot, artifact mtime, or authorization delta. |
-| `P0-BOUNDED-PROBE-AVAX-RUNTIME-SOURCE-SYNC-POST-RESTART-RECONCILIATION-ADAPTER-ENABLEMENT-E3-BB-REVIEW-DEMO-ONLY` | WAITING | PM -> E3 -> BB -> PM | Decide, in a fresh checkpoint, whether a bounded runtime source sync, post-restart pending-order reconciliation proof, and Demo-only adapter-enablement review path is safe. It still cannot place/cancel/modify orders or grant probe/order/live authority unless a later exact order-envelope checkpoint approves it. | Created by v527 E3/BB review. Known blockers: runtime source sync not verified, post-restart pending-order reconciliation not proven, adapter enablement not performed. | Resume only when operator asks to continue. First action: create a new `session_loop_state`, then run PM -> E3 -> BB review for this exact blocker. |
+| `P0-BOUNDED-PROBE-AVAX-RUNTIME-SOURCE-SYNC-POST-RESTART-RECONCILIATION-ADAPTER-ENABLEMENT-E3-BB-REVIEW-DEMO-ONLY` | DONE_WITH_CONCERNS | PM -> E3 -> BB -> PM | Source checkout sync may proceed only if clean, ff-only, target `d2cd70d0`; adapter/order path must remain blocked if reconciliation is unproven. | Report `2026-06-26--avax_runtime_source_sync_cron_expected_head_sync.md`; Linux checkout now clean at `d2cd70d0`; BB failed adapter/order path. | No-repeat source-sync slice. Post-restart reconciliation and adapter enablement remain blocked by active exposure evidence. |
+| `P0-BOUNDED-PROBE-AVAX-CRON-EXPECTED-HEAD-SYNC-E3-REVIEW-DEMO-ONLY` | DONE_WITH_CONCERNS | PM -> E3 -> PM | Replace only expected-head SHA tokens after source sync; no schedule/env flag/wrapper/log-path changes, no restart. | Report `2026-06-26--avax_runtime_source_sync_cron_expected_head_sync.md`; line count `70`, old SHA count `0`, new SHA count `11`, forbidden enablement counts `0`. | No-repeat unless source HEAD changes again. |
+| `P0-PROFIT-EVIDENCE-QUALITY-DEMO-RESTING-EXPOSURE-RECONCILIATION-E3-BB-REVIEW` | ACTIVE | PM -> E3 -> BB -> PM | Inventory/classify current demo working-order/resting-exposure overhang and define a safe reconciliation path. Unattributed or cleanup fills must not count as bounded-probe proof. Any cancel/modify/order-affecting action requires exact E3/BB approval. | 2026-06-26T00:38:13Z passive healthcheck FAIL: demo `working_n=6`, resting about `691 USDT`, divergence fail. | Create new `session_loop_state`; perform read-only inventory first; stop before any cancel/modify/order-affecting action unless E3/BB approves that exact action. |
 
 ### P0 Standing Tracks
 
@@ -54,7 +56,7 @@ No-repeat rule: do not reopen any closed ladder item unless there is a concrete 
 | `P1-COST-GATE-SEALED-HORIZON-REVIEW` | 1 | ACTIVE | PM -> QC/MIT/BB -> PM | Sealed evidence becomes a bounded proposal only after operator review, production learning-lane proof, execution-realism review, and separate Rust-authority probe approval. | v500-series scorecard/preflight artifacts in changelog. | Build/review bounded proposal contract only; no probe/order authority. |
 | `P1-LEARNING-LOOP-CLOSURE` | 1 | ACTIVE | PM -> PA/CC -> PM | Decide durable learning SSOT: artifact ledger vs PG-backed Cost Gate learning ledger. | Prior governance packets in changelog. | Source/doc decision only unless PG write is separately reviewed. |
 | `P1-AUTONOMOUS-PARAMETER-PROPOSAL` | 1 | ACTIVE | PM -> PA/E1 -> E2 -> E4 -> PM | Learned candidate may become a reviewable proposal; it must not mutate order/risk/live state. | `autonomous_parameter_proposal.py` supports explicit `--selected-side-cell-key`; AVAX has review-only first-attempt and source-readiness paths. | Revisit after the selected runtime review; no direct order/risk/live mutation. |
-| `P1-RUNTIME-HEALTH-HYGIENE` | 1 | ACTIVE | PM -> E3 -> BB -> PM | Reconcile cron expected-head drift and clarify API process vs service ownership. | Linux runtime remains `e0c2a0e1`; local source ahead. | Do not sync/restart here; keep runtime work inside the selected E3/BB checkpoint. |
+| `P1-RUNTIME-HEALTH-HYGIENE` | 1 | ACTIVE | PM -> E3 -> BB -> PM | Reconcile cron expected-head drift and clarify API process vs service ownership. | Source checkout and cron expected-head pins are aligned at `d2cd70d0`; running engine was not rebuilt/restarted. | Remaining hygiene is health/reconciliation, not source drift. Do not restart outside a reviewed checkpoint. |
 | `P1-L2-ADVISORY-MESH-TAILS` | 1 | ACTIVE | PM -> AI-E/E2/E4 -> PM | First non-empty material day, E2E true distillation/model-call evidence, or B3 shadow runtime evidence. | Reports `2026-06-13--l2_v140_pipeline_activation.md`, `--l2_embedding_backfill_activation.md`, `--l2_b3_recall_wiring.md`. | Run only on new material/shadow evidence. |
 | `AEG-S3-CANDIDATE-DIRECT-ROWS` | 1 | ACTIVE | PM -> QC/MIT/AI-E -> PM | Candidate rows satisfy regime, breadth, freshness, survivorship, execution-realism, DSR/PBO, and matched-sample gates. | Current discovery still not promotable. | On fresh Gate-B `ACTIONABLE_*`, run preflight first. |
 | `P2-RECONCILER-GET-POSITIONS-PAGINATION` | 2 | ACTIVE | PM -> BB/E2/E4 -> PM | Full-scan pagination guard reviewed by BB/E2/E4 and production event proof recorded. | PM report `2026-06-19--reconciler_pagination_focused_review.md`. | Carry with LG-3/reconciler batch review. |
@@ -66,8 +68,8 @@ No-repeat rule: do not reopen any closed ladder item unless there is a concrete 
 
 | Action | Trigger / evidence | Impact / next step |
 |---|---|---|
-| Resume AVAX runtime checkpoint | Operator resumes after this requested pause. | Create new `session_loop_state`; run PM -> E3 -> BB for `P0-BOUNDED-PROBE-AVAX-RUNTIME-SOURCE-SYNC-POST-RESTART-RECONCILIATION-ADAPTER-ENABLEMENT-E3-BB-REVIEW-DEMO-ONLY`. |
-| AVAX bounded Demo construction | Only after runtime source sync, post-restart reconciliation, adapter-enablement review, fresh BBO, and a separate exchange-facing order-envelope approval. | May still be no-order preview first; no proof/order/live authority follows from v527. |
+| AVAX exposure reconciliation | Demo resting exposure / working-order overhang is still present. | Run read-only inventory and E3/BB reconciliation review before any restart, adapter enablement, or order path. |
+| AVAX bounded Demo construction | Only after exposure reconciliation, post-restart proof, adapter-enablement review, fresh BBO, and a separate exchange-facing order-envelope approval. | May still be no-order preview first; no proof/order/live authority follows from v528. |
 | S2 Gate-B 24h real capture | Fresh `[GATE-B-WATCH]` alert or latest artifact `ACTIONABLE_START_NOW` / `ACTIONABLE_SCHEDULE`. | Run `aeg_s3_gate_b_preflight.harness` first; full-chain command must be `operator_recommended=true`. |
 | OP-1 Bybit mainnet key update | Operator availability. | Blocks Earn Wave C, live-auth update, OPS-2 dry-run, and endpoint-file correction. |
 | OP-2/OP-3 Earn variant + first Flexible stake | After OP-1. | Establish first `learning.earn_movement_log` evidence. |
@@ -87,7 +89,7 @@ No-repeat rule: do not reopen any closed ladder item unless there is a concrete 
 
 | Hypothesis path | Why it might make money | Fastest safe test | Authority |
 |---|---|---|---|
-| Candidate-scoped AVAX first-attempt near-touch path | AVAX rank 2 still has 73.5511bps avg net and 48/48 positive outcomes; v527 E3/BB found no blocker to opening the runtime review checkpoint. | Resume with runtime source-sync/post-restart reconciliation/adapter-enablement E3/BB review; then no-order construction/order-envelope review only if gates are fresh. | Review-only now; no order/probe authority. |
+| Candidate-scoped AVAX first-attempt near-touch path | AVAX rank 2 still has 73.5511bps avg net and 48/48 positive outcomes; runtime source/crons are now aligned to AVAX-ready source. | Clear demo resting exposure/reconciliation first; then no-order artifact refresh/order-envelope review only if gates are fresh. | Review-only now; no order/probe authority. |
 | Maker/MM repeat-window filter | Current-fee-positive microstructure cells may survive fees via maker ratio and adverse-selection filters. | Wait for sample >=30 and independent repeat window; source-only scorecard hardening allowed. | No order/probe authority. |
 | Regime-specific false-negative subset | Broad strategy families may be unprofitable while narrow regime/horizon subsets survive fees. | Build matched-control candidate rows and execution-realism filters from artifacts. | Research/source-only until proposal review. |
 
