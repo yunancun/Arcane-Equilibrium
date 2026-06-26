@@ -26,6 +26,24 @@ Result:
 - outcome, blocker, or next action
 ```
 
+2026-06-26 05:23 CEST
+Task:
+- Close `P0-PROFIT-CANDIDATE-SELECTION` with exactly one review-only bounded Demo candidate after the clean exchange-book checkpoint.
+
+Chain:
+- PM -> QC(explorer) -> MIT(explorer) -> BB(explorer) -> PM
+
+Ownership:
+- PM: create session state, inventory false-negative/MM/AVAX evidence, select exactly one candidate, update TODO/report/changelog.
+- QC(explorer): statistical/proof-exclusion review and comparison against MM current-fee path.
+- MIT(explorer): lineage, freshness, and overclaim review.
+- BB(explorer): cap/min-notional, execution-realism, and later authority-boundary review.
+
+Result:
+- Selected `grid_trading|AVAXUSDT|Sell` as review-only candidate; status `DONE_WITH_CONCERNS`.
+- No authority was granted. Active bounded probe/order remains blocked by missing candidate-matched touchability.
+- Next safe action after the requested pause is source/read-only first-attempt touchability bootstrap under `P0-BOUNDED-PROBE-AUTHORIZATION`.
+
 2026-06-26 04:56 CEST
 Task:
 - Close `P1-RUNTIME-HEALTH-HYGIENE-CONTROL-API-AUTH-TOKEN-PATH` with a secret-safe runtime-local authenticated read-only control API proof.
