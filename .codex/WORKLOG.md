@@ -907,6 +907,13 @@ YYYY-MM-DD HH:MM TZ
 - Result: Linux checkout fast-forwarded cleanly `0246b263 -> b9836224`; crontab expected-head literals replaced exactly `5` times; `bash -n` passed on runtime; API MainPID remained `2218842`.
 - Boundary: no service restart/rebuild/Linux cargo, no PG write, no Bybit/API/order/cancel/modify, no manual cron run, no `_latest` overwrite, no adapter/writer enablement, no Cost Gate/cap/risk mutation, no probe/order/live authority, no promotion proof. Next blocker needs a post-sync artifact delta before P0 authorization review.
 
+# 2026-06-26 — Authorization Gate Status Clarity Runtime Sync
+
+- Task: sync the false-negative authorization gate status clarity source fix to Linux runtime without expanding runtime/order authority.
+- Dispatch chain: `PM(default)` session-loop state + local `E3` bounded runtime review + `PM(default)` apply; BB skipped because no exchange-facing call occurred.
+- Result: Linux checkout fast-forwarded cleanly `785a4346 -> 99d3b8f7`; crontab expected-head literals replaced exactly `11` times while line count stayed `70`; runtime focused tests passed `19+18+6`; API MainPID remained `2218842`.
+- Boundary: no service restart/rebuild/Linux cargo, no PG write, no Bybit/API/order/cancel/modify, no manual cron run, no `_latest` overwrite, no adapter/writer enablement, no Cost Gate/cap/risk mutation, no probe/order/live authority, no promotion proof. Next blocker remains P0 authorization only on a real scoped auth delta.
+
 # 2026-06-26 — Alpha Bounded-Chain Stale Side-Cell Guard Source Fix
 
 - Task: stop alpha cron from refreshing bounded `_latest` artifacts from a stale ETH bounded preflight while the cap-feasible selected side-cell is AVAX.
