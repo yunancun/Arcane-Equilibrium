@@ -11,6 +11,13 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 14:48 CEST
+- closed `P1-FEE-TIER-MAKER-RATIO-EVIDENCE-DESIGN-NO-ORDER` as source-only `DONE_WITH_CONCERNS`
+- added `fee_tier_maker_ratio_evidence_design.py` and tests; E2 found and PM fixed incomplete candidate identity plus truthy typed-confirm marker gaps; real artifact smoke `/tmp/openclaw/20260626T124030Z_fee_tier_maker_ratio_evidence_design_no_order/fee_tier_maker_ratio_evidence_design.json` returned `FEE_TIER_MAKER_RATIO_EVIDENCE_DESIGN_READY_NO_ORDER`, sha `ce17dffe...`
+- latest runtime auth sha `020b477d...` is still `decision=defer`, no `authorization_id`, no probe/order authority, so P0 authorization remains blocked
+- normalized `TODO.md` v583 to active-queue shape and paused after this round per operator request
+- boundary: source/test/docs + local `/tmp` smoke + read-only auth copy only; no private fee read, Bybit/order, PG, runtime/crontab/service mutation, Cost Gate change, authority, or proof claim
+
 2026-06-26 14:31 CEST
 - closed `P1-RUNTIME-HEALTH-HYGIENE-AUTH-TYPED-CONFIRM-GUARD-RUNTIME-SYNC-APPLY` as `DONE_WITH_CONCERNS`
 - runtime source fast-forwarded `dd22810e -> b224c759`; crontab expected-head old/target `11/0 -> 0/11`; line count stayed `70`; API MainPID `2218842` and watchdog MainPID `1538268` unchanged/active
