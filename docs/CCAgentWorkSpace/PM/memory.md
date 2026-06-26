@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Fresh BBO Read-Only Readiness Path
+
+- PM closed `P1-AGGRESSIVE-ALPHA-FRESH-BBO-READONLY-READINESS-PATH-NO-ORDER` as source/test/docs `DONE_WITH_CONCERNS`.
+- Added no-authority helper `fresh_bbo_readonly_readiness_path.py`; smoke defines future public quote capture requirements for exact AVAX identity, public GET-only allowlist, no auth/private/order paths, `max_fresh_bbo_age_ms=1000`, BBO/instrument sanity, and adapter-backed handoff before construction preview.
+- PM read: this still does not perform quote capture or grant order admission. If no real auth delta appears, next source-only work is maker-first micro-tier placement policy.
+
 ## 2026-06-26 Fee/Slippage/Maker-Taker Schema Contract
 
 - PM closed `P1-AGGRESSIVE-ALPHA-FEE-SLIPPAGE-MAKER-TAKER-SCHEMA-NO-ORDER` as source/test/docs `DONE_WITH_CONCERNS`.
