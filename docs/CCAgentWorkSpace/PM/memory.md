@@ -31,6 +31,12 @@
 - Fresh pre-inventory immediately before action showed demo exposure still drifting (`6` open orders, `5` positions), so candidate selection remains blocked.
 - PM read: next useful checkpoint is runtime-local/authenticated control API token-source path review; do not repeat cleanup POST until new E3/BB envelope and fresh inventory exist.
 
+## 2026-06-26 Demo Residual Cleanup Refresh Clean Exchange
+
+- E3/BB approved a one-time inline runtime-local GET-only full-scan inventory because runtime lacked the repo helper; pre-inventory found 5 reduce-only conditionals and 5 positions inside caps.
+- PM executed exactly one runtime-local CSRF/Bearer `/api/v1/strategy/demo/session/stop`; response was HTTP 200, `closed_all=true`, `partial_failure=false`, and post-action full-scan inventory is exchange-clean.
+- PM read: next is candidate selection, but cleanup/risk-close/unattributed/local-stale [68] rows are proof-excluded; [68] remains a local lineage hygiene residual, not exchange exposure.
+
 ## 2026-06-25 AVAX Candidate-Scoped Chain Smoke
 
 - Local timestamped smoke `/tmp/openclaw/local_chain_smoke_20260625T232303Z` proved AVAX can reach reviewable proposal and bounded preflight READY via explicit `grid_trading|AVAXUSDT|Sell`.
