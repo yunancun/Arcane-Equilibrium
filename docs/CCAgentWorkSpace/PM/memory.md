@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Maker-First Micro-Tier Placement Policy
+
+- PM closed `P1-AGGRESSIVE-ALPHA-MAKER-FIRST-MICRO-TIER-PLACEMENT-POLICY-NO-ORDER` as source/test/docs `DONE_WITH_CONCERNS`.
+- Added no-authority helper `maker_first_micro_tier_policy.py`; smoke selects the smallest current-cap AVAX tier as primary review tier (`0.9 AVAX / 5.4576 USDT`) and fixes post-only maker-first limit-or-skip, spread/cost skip, and taker-fallback fail-closed rules.
+- PM read: this still does not capture quotes, call Bybit, admit orders, or grant authority. Operator asked to pause after this round; on resume, real P0 auth delta takes precedence, otherwise next source-only work is reviewed public quote capture packet design with no capture.
+
 ## 2026-06-26 Fresh BBO Read-Only Readiness Path
 
 - PM closed `P1-AGGRESSIVE-ALPHA-FRESH-BBO-READONLY-READINESS-PATH-NO-ORDER` as source/test/docs `DONE_WITH_CONCERNS`.
