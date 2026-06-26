@@ -101,6 +101,34 @@ def _review(**overrides) -> dict:
     return payload
 
 
+def _standing_demo_authorization(**overrides) -> dict:
+    payload = {
+        "schema_version": "standing_demo_operator_authorization_v1",
+        "generated_at_utc": "2026-06-24T05:12:00+00:00",
+        "status": "STANDING_DEMO_AUTHORIZATION_ACTIVE",
+        "standing_authorization_id": "standing-demo-false-negative-001",
+        "operator_id": "operator-test",
+        "environment": "demo",
+        "scope": "demo_api_only_bounded_probe",
+        "demo_only": True,
+        "candidate_scoping_required": True,
+        "max_authorized_probe_orders_per_candidate": 2,
+        "expires_at_utc": "2026-06-24T12:00:00+00:00",
+        "answers": {
+            "demo_only": True,
+            "candidate_scoping_required": True,
+            "live_authority_granted": False,
+            "active_runtime_probe_authority": False,
+            "active_runtime_order_authority": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "promotion_evidence": False,
+        },
+    }
+    payload.update(overrides)
+    return payload
+
+
 def test_pending_review_emits_no_authority_preflight_design_only() -> None:
     packet = build_false_negative_bounded_demo_probe_preflight(
         autonomous_parameter_proposal=_proposal(),
@@ -152,6 +180,114 @@ def test_approved_review_reaches_authorization_review_without_order_authority() 
     assert packet["answers"]["ready_for_operator_bounded_demo_probe_authorization"] is True
     assert packet["answers"]["bounded_demo_probe_authorized"] is False
     assert packet["answers"]["order_submission_performed"] is False
+
+
+def test_standing_demo_review_reaches_ready_preflight_without_authority() -> None:
+    review = _review(
+        status=APPROVED_FOR_PREFLIGHT_STATUS,
+        decision="approve-preflight",
+        operator_id="operator-test",
+        operator_review_approval_source="standing_demo_authorization",
+        operator_review_approved_for_preflight=True,
+        answers={
+            "operator_review_approved_for_preflight": True,
+            "bounded_demo_probe_preflight_approved": True,
+            "review_grants_runtime_authority": False,
+            "bounded_demo_probe_authorized": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+            "standing_demo_authorization_consumed": True,
+            "operator_review_approval_source": "standing_demo_authorization",
+        },
+    )
+    packet = build_false_negative_bounded_demo_probe_preflight(
+        autonomous_parameter_proposal=_proposal(),
+        false_negative_operator_review=review,
+        standing_demo_authorization=_standing_demo_authorization(),
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+    assert packet["answers"]["standing_demo_authorization_required"] is True
+    assert packet["answers"]["standing_demo_authorization_valid"] is True
+    assert packet["answers"]["operator_review_approval_source"] == (
+        "standing_demo_authorization"
+    )
+    assert packet["answers"]["bounded_demo_probe_authorized"] is False
+    assert packet["answers"]["probe_authority_granted"] is False
+    assert packet["answers"]["order_authority_granted"] is False
+    assert packet["answers"]["order_submission_performed"] is False
+
+
+def test_standing_demo_review_requires_same_valid_envelope_at_preflight() -> None:
+    review = _review(
+        status=APPROVED_FOR_PREFLIGHT_STATUS,
+        decision="approve-preflight",
+        operator_review_approval_source="standing_demo_authorization",
+        operator_review_approved_for_preflight=True,
+        answers={
+            "operator_review_approved_for_preflight": True,
+            "bounded_demo_probe_preflight_approved": True,
+            "review_grants_runtime_authority": False,
+            "bounded_demo_probe_authorized": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+            "standing_demo_authorization_consumed": True,
+        },
+    )
+    packet = build_false_negative_bounded_demo_probe_preflight(
+        autonomous_parameter_proposal=_proposal(),
+        false_negative_operator_review=review,
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "STANDING_DEMO_AUTHORIZATION_INVALID_FOR_PREFLIGHT"
+    assert "standing_demo_authorization_valid_for_preflight" in packet["blocking_gates"]
+    assert packet["answers"]["standing_demo_authorization_required"] is True
+    assert packet["answers"]["standing_demo_authorization_valid"] is False
+    assert packet["answers"]["ready_for_operator_bounded_demo_probe_authorization"] is False
+    assert packet["answers"]["order_authority_granted"] is False
+
+
+def test_scope_mismatched_standing_demo_envelope_blocks_preflight() -> None:
+    review = _review(
+        status=APPROVED_FOR_PREFLIGHT_STATUS,
+        decision="approve-preflight",
+        operator_review_approval_source="standing_demo_authorization",
+        operator_review_approved_for_preflight=True,
+        answers={
+            "operator_review_approved_for_preflight": True,
+            "bounded_demo_probe_preflight_approved": True,
+            "review_grants_runtime_authority": False,
+            "bounded_demo_probe_authorized": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+            "standing_demo_authorization_consumed": True,
+        },
+    )
+    standing = _standing_demo_authorization(
+        candidate={"side_cell_key": "grid_trading|ETHUSDT|Sell"}
+    )
+    packet = build_false_negative_bounded_demo_probe_preflight(
+        autonomous_parameter_proposal=_proposal(),
+        false_negative_operator_review=review,
+        standing_demo_authorization=standing,
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "STANDING_DEMO_AUTHORIZATION_INVALID_FOR_PREFLIGHT"
+    assert packet["standing_demo_authorization"]["candidate_scope_matches"] is False
+    assert packet["answers"]["ready_for_operator_bounded_demo_probe_authorization"] is False
+    assert packet["answers"]["order_authority_granted"] is False
 
 
 def test_preserved_approval_review_reaches_preflight_without_runtime_authority() -> None:

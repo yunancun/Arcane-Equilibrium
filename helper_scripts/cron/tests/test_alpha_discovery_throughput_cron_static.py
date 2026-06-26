@@ -105,8 +105,9 @@ def test_wrapper_refreshes_activation_packet_before_alpha_runner() -> None:
     assert "OPENCLAW_ALPHA_STANDING_DEMO_AUTHORIZATION_JSON" in src
     assert "OPENCLAW_COST_GATE_STANDING_DEMO_AUTHORIZATION_JSON" in src
     assert "OPENCLAW_ALPHA_BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION" in src
-    assert 'BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION="authorize"' in src
     assert 'BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION="defer"' in src
+    assert 'BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION="authorize"' not in src
+    assert 'if [[ -n "$STANDING_DEMO_AUTHORIZATION_JSON" && -f "$STANDING_DEMO_AUTHORIZATION_JSON" ]]; then\n        BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION="authorize"' not in src
     assert '--decision "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION"' in src
     assert "--standing-demo-authorization-json" in src
     assert "alpha_discovery_throughput.profitability_path_scorecard" in src

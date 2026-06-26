@@ -16,6 +16,9 @@ from pathlib import Path
 from typing import Any
 
 from cost_gate_learning_lane.false_negative_candidate_packet import SCHEMA_VERSION
+from cost_gate_learning_lane.standing_demo_authorization import (
+    summarize_standing_demo_authorization,
+)
 
 
 FALSE_NEGATIVE_OPERATOR_REVIEW_SCHEMA_VERSION = (
@@ -30,6 +33,7 @@ REJECTED_FOR_PREFLIGHT_STATUS = (
 PENDING_OPERATOR_REVIEW_STATUS = "PENDING_COST_GATE_FALSE_NEGATIVE_OPERATOR_REVIEW"
 READY_PACKET_STATUS = "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW"
 DEFAULT_MAX_ARTIFACT_AGE_HOURS = 24
+DEFAULT_MAX_STANDING_DEMO_AUTHORIZATION_TTL_HOURS = 24
 BOUNDARY = (
     "artifact-only Cost Gate false-negative operator review; no PG query/write, "
     "Bybit call, order, config, risk, auth, runtime mutation, main Cost Gate "
@@ -267,6 +271,8 @@ def _status_from_gates(
     failed = {gate["name"] for gate in failed_gates}
     if "authority_boundary_preserved" in failed:
         return "AUTHORITY_BOUNDARY_VIOLATION"
+    if "standing_demo_authorization_valid_for_preflight_review" in failed:
+        return "STANDING_DEMO_AUTHORIZATION_INVALID_FOR_PREFLIGHT_REVIEW"
     if "false_negative_candidate_packet_ready" in failed:
         return "FALSE_NEGATIVE_CANDIDATE_PACKET_NOT_READY"
     if "candidate_selected" in failed:
@@ -373,8 +379,11 @@ def build_false_negative_operator_review(
     *,
     false_negative_candidate_packet: dict[str, Any] | None,
     existing_operator_review: dict[str, Any] | None = None,
+    standing_demo_authorization: dict[str, Any] | None = None,
     source_path: Path | None = None,
+    standing_demo_authorization_path: Path | None = None,
     source_error: str | None = None,
+    standing_demo_authorization_error: str | None = None,
     selected_side_cell_key: str | None = None,
     decision: str = "defer",
     operator_id: str | None = None,
@@ -382,19 +391,31 @@ def build_false_negative_operator_review(
     review_note: str | None = None,
     now_utc: dt.datetime | None = None,
     max_artifact_age_hours: int = DEFAULT_MAX_ARTIFACT_AGE_HOURS,
+    max_authorization_ttl_hours: int = DEFAULT_MAX_STANDING_DEMO_AUTHORIZATION_TTL_HOURS,
 ) -> dict[str, Any]:
     """Build a fail-closed operator-review record for a false-negative path."""
     if max_artifact_age_hours < 1 or max_artifact_age_hours > 24 * 14:
         raise ValueError("max_artifact_age_hours must be in [1, 336]")
+    if max_authorization_ttl_hours < 1 or max_authorization_ttl_hours > 24 * 7:
+        raise ValueError("max_authorization_ttl_hours must be in [1, 168]")
 
     now = (now_utc or _utc_now()).astimezone(dt.timezone.utc)
     packet = _dict(false_negative_candidate_packet)
+    standing_payload = _dict(standing_demo_authorization)
     max_age_seconds = max_artifact_age_hours * 3600
     artifact = _artifact_summary(
         name="false_negative_candidate_packet",
         path=source_path,
         payload=packet,
         source_error=source_error,
+        now_utc=now,
+        max_age_seconds=max_age_seconds,
+    )
+    standing_artifact = _artifact_summary(
+        name="standing_demo_authorization",
+        path=standing_demo_authorization_path,
+        payload=standing_payload,
+        source_error=standing_demo_authorization_error,
         now_utc=now,
         max_age_seconds=max_age_seconds,
     )
@@ -411,6 +432,40 @@ def build_false_negative_operator_review(
     )
     typed_confirm_matches = bool(provided_confirm) and provided_confirm == expected_confirm
     approval_requested = normalized_decision == "approve-preflight"
+    standing_input_supplied = (
+        bool(standing_payload)
+        or standing_demo_authorization_path is not None
+        or standing_demo_authorization_error not in (None, "missing_path")
+    )
+    standing_summary = summarize_standing_demo_authorization(
+        standing_payload,
+        standing_artifact,
+        now_utc=now,
+        max_authorization_ttl_hours=max_authorization_ttl_hours,
+        candidate={
+            "side_cell_key": candidate.get("side_cell_key"),
+            "strategy_name": (_list(candidate.get("strategy_names")) or [None])[0],
+            "symbol": (_list(candidate.get("symbols")) or [None])[0],
+            "side": (_list(candidate.get("sides")) or [None])[0],
+            "outcome_horizon_minutes": candidate.get("dominant_horizon_minutes")
+            or (_list(candidate.get("horizon_minutes")) or [None])[0],
+        },
+    )
+    standing_approval_valid = bool(
+        standing_input_supplied
+        and normalized_decision == "defer"
+        and not provided_confirm
+        and standing_summary.get("valid_for_candidate_scoped_authorization") is True
+    )
+    if standing_approval_valid and not operator:
+        operator = _str(standing_summary.get("operator_id"))
+    approval_source = (
+        "exact_typed_confirm"
+        if approval_requested and typed_confirm_matches
+        else "standing_demo_authorization"
+        if standing_approval_valid
+        else None
+    )
     authority_preserved = _authority_preserved(packet)
     packet_ready = (
         artifact["status"] == "FRESH"
@@ -441,6 +496,7 @@ def build_false_negative_operator_review(
         and artifact["status"] == "FRESH"
         and artifact["schema_version"] == SCHEMA_VERSION
         and candidate_reviewable
+        and (not standing_input_supplied or standing_approval_valid)
     ):
         preserve_existing, _preserve_reason = _existing_review_is_preservable(
             existing_operator_review,
@@ -463,48 +519,76 @@ def build_false_negative_operator_review(
             reason="review input must not grant Cost Gate lowering, probe/order authority, or promotion proof",
             next_actions=["remove_authority_granting_input_before_review"],
         ),
-        _gate(
-            "false_negative_candidate_packet_ready",
-            packet_ready,
-            status=str(packet.get("status") or artifact["status"]),
-            reason="candidate packet must be fresh, schema-valid, and ready for operator review",
-            next_actions=["refresh_cost_gate_false_negative_candidate_packet"],
-            evidence={
-                "artifact": artifact,
-                "summary": summary,
-                "answers": {
-                    "operator_review_ready": answers.get("operator_review_ready"),
-                    "global_cost_gate_lowering_recommended": answers.get(
-                        "global_cost_gate_lowering_recommended"
-                    ),
-                    "probe_authority_granted": answers.get("probe_authority_granted"),
-                    "order_authority_granted": answers.get("order_authority_granted"),
-                    "promotion_evidence": answers.get("promotion_evidence"),
+    ]
+    if standing_input_supplied:
+        gates.append(
+            _gate(
+                "standing_demo_authorization_valid_for_preflight_review",
+                standing_approval_valid,
+                status=(
+                    "VALID"
+                    if standing_approval_valid
+                    else str(standing_artifact.get("status") or "MISSING")
+                ),
+                reason=(
+                    "standing Demo envelope must be fresh, Demo-only, scoped for "
+                    "bounded probe review, candidate-scoped, unexpired, and "
+                    "free of runtime/order/Cost Gate/promotion authority"
+                ),
+                next_actions=[
+                    "supply_fresh_valid_standing_demo_authorization_or_remove_invalid_envelope"
+                ],
+                evidence=standing_summary,
+            )
+        )
+    gates.extend(
+        [
+            _gate(
+                "false_negative_candidate_packet_ready",
+                packet_ready,
+                status=str(packet.get("status") or artifact["status"]),
+                reason="candidate packet must be fresh, schema-valid, and ready for operator review",
+                next_actions=["refresh_cost_gate_false_negative_candidate_packet"],
+                evidence={
+                    "artifact": artifact,
+                    "summary": summary,
+                    "answers": {
+                        "operator_review_ready": answers.get("operator_review_ready"),
+                        "global_cost_gate_lowering_recommended": answers.get(
+                            "global_cost_gate_lowering_recommended"
+                        ),
+                        "probe_authority_granted": answers.get("probe_authority_granted"),
+                        "order_authority_granted": answers.get("order_authority_granted"),
+                        "promotion_evidence": answers.get("promotion_evidence"),
+                    },
                 },
-            },
-        ),
-        _gate(
-            "candidate_selected",
-            candidate_selected,
-            status="SELECTED" if candidate_selected else selection_method,
-            reason="review must name a ranked false-negative side-cell candidate",
-            next_actions=["select_ranked_false_negative_side_cell_for_review"],
-            evidence={
-                "selection_method": selection_method,
-                "selected_side_cell_key": selected_side_cell_key,
-            },
-        ),
-        _gate(
-            "candidate_reviewable",
-            candidate_reviewable,
-            status=str(candidate.get("status") or "MISSING"),
-            reason="selected candidate must remain a no-authority false-negative after-cost review row",
-            next_actions=["rebuild_packet_or_select_reviewable_false_negative_candidate"],
-            evidence=candidate,
-        ),
+            ),
+            _gate(
+                "candidate_selected",
+                candidate_selected,
+                status="SELECTED" if candidate_selected else selection_method,
+                reason="review must name a ranked false-negative side-cell candidate",
+                next_actions=["select_ranked_false_negative_side_cell_for_review"],
+                evidence={
+                    "selection_method": selection_method,
+                    "selected_side_cell_key": selected_side_cell_key,
+                },
+            ),
+            _gate(
+                "candidate_reviewable",
+                candidate_reviewable,
+                status=str(candidate.get("status") or "MISSING"),
+                reason="selected candidate must remain a no-authority false-negative after-cost review row",
+                next_actions=["rebuild_packet_or_select_reviewable_false_negative_candidate"],
+                evidence=candidate,
+            ),
+        ]
+    )
+    gates.extend(
+        [
         _gate(
             "operator_id_present",
-            (not approval_requested) or bool(operator),
+            (not approval_requested and not standing_approval_valid) or bool(operator),
             status="PRESENT" if operator else "MISSING",
             reason="approval requires a non-empty operator id",
             next_actions=["record_operator_id_before_approval"],
@@ -512,23 +596,40 @@ def build_false_negative_operator_review(
         _gate(
             "typed_confirm_matches",
             (not approval_requested) or typed_confirm_matches,
-            status="MATCH" if typed_confirm_matches else "MISSING_OR_MISMATCH",
-            reason="approval requires the exact typed confirmation phrase",
+            status=(
+                "MATCH"
+                if typed_confirm_matches
+                else "STANDING_DEMO_AUTHORIZATION"
+                if standing_approval_valid
+                else "MISSING_OR_MISMATCH"
+            ),
+            reason=(
+                "typed-confirm approval requires the exact phrase; standing Demo "
+                "envelope approval is recorded in its separate fail-closed gate"
+            ),
             next_actions=["copy_exact_typed_confirm_from_artifact_before_approval"],
             evidence={
                 "typed_confirm_expected": expected_confirm,
                 "typed_confirm_provided": bool(provided_confirm),
                 "typed_confirm_matches": typed_confirm_matches,
+                "standing_demo_authorization_valid": standing_approval_valid,
             },
         ),
-    ]
+        ]
+    )
     failed_gates = [gate for gate in gates if gate["passed"] is not True]
+    effective_decision = (
+        "approve-preflight" if standing_approval_valid else normalized_decision
+    )
     status = _status_from_gates(
-        decision=normalized_decision,
-        approval_requested=approval_requested,
+        decision=effective_decision,
+        approval_requested=approval_requested or standing_approval_valid,
         failed_gates=failed_gates,
     )
     approved_for_preflight = status == APPROVED_FOR_PREFLIGHT_STATUS
+    recorded_decision = (
+        "approve-preflight" if approved_for_preflight else normalized_decision
+    )
 
     if approved_for_preflight:
         next_actions = [
@@ -559,11 +660,12 @@ def build_false_negative_operator_review(
         "generated_at_utc": now.isoformat(),
         "status": status,
         "reason": ";".join(gate["name"] for gate in failed_gates)
-        or normalized_decision,
-        "decision": normalized_decision,
+        or recorded_decision,
+        "decision": recorded_decision,
         "operator_id": operator or None,
         "review_note": _str(review_note) or None,
         "review_scope": "preflight_review_only_not_probe_authorization",
+        "operator_review_approval_source": approval_source,
         "selection_method": selection_method,
         "selected_side_cell_key": candidate.get("side_cell_key"),
         "selected_false_negative_rank": candidate.get("false_negative_rank"),
@@ -590,8 +692,18 @@ def build_false_negative_operator_review(
             "probe_authority_granted": False,
             "order_authority_granted": False,
             "promotion_evidence": False,
+            "standing_demo_authorization_present": standing_input_supplied,
+            "standing_demo_authorization_valid": standing_approval_valid,
+            "standing_demo_authorization_consumed": (
+                approval_source == "standing_demo_authorization"
+            ),
+            "operator_review_approval_source": approval_source,
         },
-        "artifacts": {"false_negative_candidate_packet": artifact},
+        "artifacts": {
+            "false_negative_candidate_packet": artifact,
+            "standing_demo_authorization": standing_artifact,
+        },
+        "standing_demo_authorization": standing_summary,
         "boundary": BOUNDARY,
     }
 
@@ -664,6 +776,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--false-negative-candidate-packet-json", type=Path, required=True)
     parser.add_argument("--existing-operator-review-json", type=Path)
+    parser.add_argument("--standing-demo-authorization-json", type=Path)
     parser.add_argument("--selected-side-cell-key")
     parser.add_argument(
         "--decision",
@@ -674,6 +787,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--typed-confirm")
     parser.add_argument("--review-note")
     parser.add_argument("--max-artifact-age-hours", type=int, default=24)
+    parser.add_argument(
+        "--max-authorization-ttl-hours",
+        type=int,
+        default=DEFAULT_MAX_STANDING_DEMO_AUTHORIZATION_TTL_HOURS,
+    )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--json-output", type=Path)
     parser.add_argument("--print-json", action="store_true")
@@ -684,17 +802,22 @@ def main() -> int:
     args = _build_parser().parse_args()
     packet, err = _read_json(args.false_negative_candidate_packet_json)
     existing_review, _existing_err = _read_json(args.existing_operator_review_json)
+    standing, standing_err = _read_json(args.standing_demo_authorization_json)
     review = build_false_negative_operator_review(
         false_negative_candidate_packet=packet,
         existing_operator_review=existing_review,
+        standing_demo_authorization=standing,
         source_path=args.false_negative_candidate_packet_json,
+        standing_demo_authorization_path=args.standing_demo_authorization_json,
         source_error=err,
+        standing_demo_authorization_error=standing_err,
         selected_side_cell_key=args.selected_side_cell_key,
         decision=args.decision,
         operator_id=args.operator_id,
         typed_confirm=args.typed_confirm,
         review_note=args.review_note,
         max_artifact_age_hours=args.max_artifact_age_hours,
+        max_authorization_ttl_hours=args.max_authorization_ttl_hours,
     )
     markdown = render_markdown(review)
     if args.output:

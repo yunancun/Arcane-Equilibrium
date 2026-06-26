@@ -3940,6 +3940,34 @@ def _false_negative_candidate_packet_fixture() -> dict:
     )
 
 
+def _standing_demo_authorization_fixture(**overrides) -> dict:
+    payload = {
+        "schema_version": "standing_demo_operator_authorization_v1",
+        "generated_at_utc": "2026-06-21T15:06:00+00:00",
+        "status": "STANDING_DEMO_AUTHORIZATION_ACTIVE",
+        "standing_authorization_id": "standing-demo-fn-review-001",
+        "operator_id": "pm",
+        "environment": "demo",
+        "scope": "demo_api_only_bounded_probe",
+        "demo_only": True,
+        "candidate_scoping_required": True,
+        "max_authorized_probe_orders_per_candidate": 2,
+        "expires_at_utc": "2026-06-21T18:00:00+00:00",
+        "answers": {
+            "demo_only": True,
+            "candidate_scoping_required": True,
+            "live_authority_granted": False,
+            "active_runtime_probe_authority": False,
+            "active_runtime_order_authority": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "promotion_evidence": False,
+        },
+    }
+    payload.update(overrides)
+    return payload
+
+
 def test_false_negative_operator_review_defers_without_authority():
     packet = _false_negative_candidate_packet_fixture()
     review = build_false_negative_operator_review(
@@ -3964,6 +3992,63 @@ def test_false_negative_operator_review_defers_without_authority():
         "grid_trading|AVAXUSDT|Sell:1"
     )
     assert all(gate["passed"] for gate in review["gates"][:4])
+
+
+def test_false_negative_operator_review_consumes_standing_demo_envelope():
+    packet = _false_negative_candidate_packet_fixture()
+    review = build_false_negative_operator_review(
+        false_negative_candidate_packet=packet,
+        standing_demo_authorization=_standing_demo_authorization_fixture(),
+        decision="defer",
+        now_utc=dt.datetime(2026, 6, 21, 15, 10, tzinfo=dt.timezone.utc),
+    )
+
+    assert review["status"] == FALSE_NEGATIVE_APPROVED_FOR_PREFLIGHT_STATUS
+    assert review["decision"] == "approve-preflight"
+    assert review["operator_id"] == "pm"
+    assert review["operator_review_approval_source"] == "standing_demo_authorization"
+    assert review["operator_review_approved_for_preflight"] is True
+    assert review["answers"]["standing_demo_authorization_consumed"] is True
+    assert review["answers"]["standing_demo_authorization_valid"] is True
+    assert review["answers"]["bounded_demo_probe_preflight_approved"] is True
+    assert review["answers"]["review_grants_runtime_authority"] is False
+    assert review["answers"]["bounded_demo_probe_authorized"] is False
+    assert review["answers"]["probe_authority_granted"] is False
+    assert review["answers"]["order_authority_granted"] is False
+    assert review["answers"]["promotion_evidence"] is False
+
+
+def test_false_negative_operator_review_rejects_contaminated_standing_demo_envelope():
+    packet = _false_negative_candidate_packet_fixture()
+    standing = _standing_demo_authorization_fixture(
+        environment="mainnet",
+        demo_only=False,
+        answers={
+            "demo_only": False,
+            "candidate_scoping_required": True,
+            "live_authority_granted": True,
+            "active_runtime_probe_authority": False,
+            "active_runtime_order_authority": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "promotion_evidence": False,
+        },
+    )
+    review = build_false_negative_operator_review(
+        false_negative_candidate_packet=packet,
+        standing_demo_authorization=standing,
+        decision="defer",
+        now_utc=dt.datetime(2026, 6, 21, 15, 10, tzinfo=dt.timezone.utc),
+    )
+
+    assert review["status"] == "STANDING_DEMO_AUTHORIZATION_INVALID_FOR_PREFLIGHT_REVIEW"
+    assert "standing_demo_authorization_valid_for_preflight_review" in review[
+        "blocking_gates"
+    ]
+    assert review["operator_review_approved_for_preflight"] is False
+    assert review["answers"]["standing_demo_authorization_valid"] is False
+    assert review["answers"]["bounded_demo_probe_authorized"] is False
+    assert review["answers"]["order_authority_granted"] is False
 
 
 def test_false_negative_operator_review_requires_exact_approval_phrase():
