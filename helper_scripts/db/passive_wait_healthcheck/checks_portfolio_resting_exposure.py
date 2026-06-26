@@ -117,6 +117,19 @@ PER_SYMBOL_FAIL_RATIO: float = 1.50   # FAIL：resting > 1.5× filled
 # Fallback cap pct（TOML 缺時用，仍保健康檢查可跑）；對齊 demo TOML default
 FALLBACK_CORRELATED_CAP_PCT: float = 65.0
 
+# close/risk order-link prefix 本身不是 entry exposure。當 local DB 仍標
+# Working、但同 symbol 沒有本地 filled position 時，[68] 應把它顯示為
+# lineage residual，而不是當成新的 resting entry overhang。
+CLOSE_RISK_ORDER_PREFIXES: tuple[str, ...] = (
+    "oc_risk_",
+    "oc_close_",
+    "oc_ipc_close_",
+)
+CLOSE_RISK_STRATEGY_PREFIXES: tuple[str, ...] = (
+    "risk_close:",
+    "strategy_close:",
+)
+
 
 # ============================================================
 # §2 helper
@@ -225,6 +238,33 @@ def _read_snapshot(engine: str) -> tuple[dict[str, Any] | None, str]:
         return (None, f"{name} parse 失敗: {type(e).__name__}: {e}")
 
 
+def _side_bucket() -> dict[str, float]:
+    return {"long": 0.0, "short": 0.0}
+
+
+def _bucket_total(bucket: dict[str, float] | None) -> float:
+    data = bucket or {}
+    return float(data.get("long", 0.0) or 0.0) + float(data.get("short", 0.0) or 0.0)
+
+
+def _merge_side_bucket(
+    target: dict[str, dict[str, float]],
+    symbol: str,
+    source: dict[str, float],
+) -> None:
+    bucket = target.setdefault(symbol, _side_bucket())
+    bucket["long"] += float(source.get("long", 0.0) or 0.0)
+    bucket["short"] += float(source.get("short", 0.0) or 0.0)
+
+
+def _is_close_or_risk_working_order(order_id: str, strategy_name: str) -> bool:
+    order = (order_id or "").strip()
+    strategy = (strategy_name or "").strip()
+    return order.startswith(CLOSE_RISK_ORDER_PREFIXES) or strategy.startswith(
+        CLOSE_RISK_STRATEGY_PREFIXES
+    )
+
+
 def _filled_notional_from_snapshot(snap: dict[str, Any]) -> tuple[dict[str, dict[str, float]], float]:
     """從 snapshot 抽 paper_state.positions[*] 計算 per-symbol filled notional + balance。
 
@@ -281,18 +321,27 @@ def _resting_notional_from_pg(
     cur,
     engine: str,
     lookback_hours: int,
-) -> tuple[dict[str, dict[str, float]], int, str]:
+) -> tuple[
+    dict[str, dict[str, float]],
+    dict[str, dict[str, float]],
+    dict[str, int],
+    dict[str, int],
+    str,
+]:
     """從 ``trading.orders`` + ``trading.order_state_changes`` 抽 currently
     Working orders → per (engine_mode, symbol, side) 加總 notional。
 
-    Returns (per_symbol, working_count, diagnostic)：
-      per_symbol = {"BTCUSDT": {"long": 120.0, "short": 0.0}, ...}
-      working_count = 累計 row 數（debugging 用）
+    Returns (entry_per_symbol, close_risk_per_symbol, entry_counts,
+    close_risk_counts, diagnostic)：
+      entry_per_symbol = {"BTCUSDT": {"long": 120.0, "short": 0.0}, ...}
+      close_risk_per_symbol = close/risk Working rows 先分離，讓 caller
+        依同 symbol filled position 判斷它是真 close-side resting exposure
+        還是 local lineage residual。
       diagnostic = "ok" / fail-soft reason
 
     SQL 設計：
       1. 從 ``order_state_changes`` 取每 ``order_id`` 最新 ``to_status``
-      2. JOIN ``orders`` 拿 symbol / side / qty / price / engine_mode
+      2. JOIN ``orders`` 拿 order_id / symbol / side / qty / price / engine_mode
       3. 過濾 ``to_status='Working'`` AND ``engine_mode=%s``
       4. notional = qty × price（price 缺時 fallback 0，這 row 不計）
       5. lookback ts 過濾用 ``orders.ts``（避免拉 30d 全表）
@@ -305,10 +354,10 @@ def _resting_notional_from_pg(
         )
         row = cur.fetchone()
     except Exception as exc:  # noqa: BLE001
-        return ({}, 0, f"trading.orders/order_state_changes 存在性查詢失敗: {type(exc).__name__}")
+        return ({}, {}, {}, {}, f"trading.orders/order_state_changes 存在性查詢失敗: {type(exc).__name__}")
 
     if not row or not row[0] or not row[1]:
-        return ({}, 0, "trading.orders 或 order_state_changes 缺（pre-V003 deploy）")
+        return ({}, {}, {}, {}, "trading.orders 或 order_state_changes 缺（pre-V003 deploy）")
 
     try:
         # latest_state per order_id via DISTINCT ON；JOIN orders 拿 symbol/side/qty/price
@@ -324,42 +373,70 @@ def _resting_notional_from_pg(
                 ORDER BY order_id, ts DESC
             )
             SELECT
+                o.order_id,
                 o.symbol,
                 o.side,
                 SUM(o.qty * COALESCE(o.price, 0.0))::FLOAT AS notional_sum,
-                COUNT(*)::INT AS row_count
+                COUNT(*)::INT AS row_count,
+                COALESCE(o.strategy_name, '') AS strategy_name
             FROM trading.orders o
             JOIN latest_state ls ON o.order_id = ls.order_id
             WHERE ls.to_status = 'Working'
               AND o.engine_mode = %s
               AND o.ts > NOW() - (%s::text || ' hours')::interval
-            GROUP BY o.symbol, o.side
+            GROUP BY o.order_id, o.symbol, o.side, o.strategy_name
             """,
             (lookback_hours, engine, lookback_hours),
         )
         rows = cur.fetchall() or []
     except Exception as exc:  # noqa: BLE001
-        return ({}, 0, f"Working orders aggregate 失敗: {type(exc).__name__}: {exc}")
+        return ({}, {}, {}, {}, f"Working orders aggregate 失敗: {type(exc).__name__}: {exc}")
 
     per_symbol: dict[str, dict[str, float]] = {}
-    total_count = 0
+    close_risk_per_symbol: dict[str, dict[str, float]] = {}
+    per_symbol_counts: dict[str, int] = {}
+    close_risk_counts: dict[str, int] = {}
     for r in rows:
-        symbol, side, notional, count = r[0], r[1], r[2], r[3]
+        if len(r) >= 6:
+            order_id, symbol, side, notional, count, strategy_name = (
+                r[0],
+                r[1],
+                r[2],
+                r[3],
+                r[4],
+                r[5],
+            )
+        else:
+            # 向後相容舊 unit fixtures：它們早於 close/risk lineage split。
+            order_id, symbol, side, notional, count, strategy_name = (
+                "",
+                r[0],
+                r[1],
+                r[2],
+                r[3],
+                "",
+            )
         if not isinstance(symbol, str) or not isinstance(side, str):
             continue
         notional_f = float(notional or 0.0)
         if notional_f <= 0.0 or notional_f != notional_f:
             continue
-        bucket = per_symbol.setdefault(symbol, {"long": 0.0, "short": 0.0})
+        is_close_or_risk = _is_close_or_risk_working_order(
+            str(order_id or ""),
+            str(strategy_name or ""),
+        )
+        bucket_map = close_risk_per_symbol if is_close_or_risk else per_symbol
+        count_map = close_risk_counts if is_close_or_risk else per_symbol_counts
+        bucket = bucket_map.setdefault(symbol, _side_bucket())
         # Bybit side 對應：Buy=long，Sell=short（與 trading_writer.rs:759 對齊）
         if side == "Buy":
             bucket["long"] += notional_f
         elif side == "Sell":
             bucket["short"] += notional_f
         # 其他 side（例外/未知）忽略，不污染 bucket
-        total_count += int(count or 0)
+        count_map[symbol] = count_map.get(symbol, 0) + int(count or 0)
 
-    return (per_symbol, total_count, "ok")
+    return (per_symbol, close_risk_per_symbol, per_symbol_counts, close_risk_counts, "ok")
 
 
 # ============================================================
@@ -407,10 +484,14 @@ def check_68_portfolio_resting_exposure(cur) -> tuple[str, str]:
         filled_per_symbol, balance = _filled_notional_from_snapshot(snap)
 
         # 2. 讀 PG → resting notional per (symbol, side)
-        resting_per_symbol, working_count, resting_diag = _resting_notional_from_pg(
-            cur, engine, lookback_hours
-        )
-        if resting_diag != "ok" and not resting_per_symbol:
+        (
+            resting_per_symbol,
+            close_risk_working_per_symbol,
+            resting_counts,
+            close_risk_counts,
+            resting_diag,
+        ) = _resting_notional_from_pg(cur, engine, lookback_hours)
+        if resting_diag != "ok" and not resting_per_symbol and not close_risk_working_per_symbol:
             # PG 查詢失敗但 snapshot 還在 → 對該 engine WARN 帶診斷
             engine_verdicts.append("WARN")
             engine_evidence.append(f"{engine}=PG_FAIL({resting_diag})")
@@ -422,12 +503,24 @@ def check_68_portfolio_resting_exposure(cur) -> tuple[str, str]:
         cap_abs = (cap_pct / 100.0) * balance if balance > 0 else 0.0
 
         # 4. 聚合 long/short notional（filled + resting）
+        local_lineage_residual_count = 0
+        local_lineage_residual_notional = 0.0
+        close_risk_included_count = 0
+        for sym, close_bucket in close_risk_working_per_symbol.items():
+            if _bucket_total(filled_per_symbol.get(sym)) <= 0.0:
+                local_lineage_residual_count += close_risk_counts.get(sym, 0)
+                local_lineage_residual_notional += _bucket_total(close_bucket)
+                continue
+            _merge_side_bucket(resting_per_symbol, sym, close_bucket)
+            close_risk_included_count += close_risk_counts.get(sym, 0)
+
         total_filled_long = sum(v.get("long", 0.0) for v in filled_per_symbol.values())
         total_filled_short = sum(v.get("short", 0.0) for v in filled_per_symbol.values())
         total_resting_long = sum(v.get("long", 0.0) for v in resting_per_symbol.values())
         total_resting_short = sum(v.get("short", 0.0) for v in resting_per_symbol.values())
         total_filled = total_filled_long + total_filled_short
         total_resting = total_resting_long + total_resting_short
+        working_count = sum(resting_counts.values()) + close_risk_included_count
 
         # 5. divergence_pct = resting / max(filled, 1.0)
         divergence_pct = total_resting / max(total_filled, 1.0)
@@ -509,6 +602,11 @@ def check_68_portfolio_resting_exposure(cur) -> tuple[str, str]:
             f"divergence={divergence_pct:.1%},"
             f"cap={cap_abs:.0f}({cap_pct:.0f}%/{cap_diag})"
         )
+        if local_lineage_residual_count:
+            evidence += (
+                f",local_lineage_residual_n={local_lineage_residual_count},"
+                f"local_lineage_residual_notional={local_lineage_residual_notional:.0f}"
+            )
         if violations:
             evidence += f",violations=[{';'.join(violations[:3])}]"
         evidence += ")"

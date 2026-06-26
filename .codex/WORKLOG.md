@@ -11,6 +11,14 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 05:50 CEST
+- closed `P1-RUNTIME-HEALTH-HYGIENE-LOCAL-LINEAGE-68-STALE-WORKING` as source-only `DONE_WITH_CONCERNS`
+- anti-repeat result: `P1-LEARNING-LOOP-CLOSURE` and `P1-AUTONOMOUS-PARAMETER-PROPOSAL` are already done via 2026-06-24 reports, so they were not rerun
+- source patch: [68] now separates close/risk local `Working` rows without same-symbol local filled position into visible `local_lineage_residual` evidence, while ordinary entry rows and close/risk rows with filled position still count as exposure
+- verification: `py_compile`, focused/adjacent pytest `30 passed`, and `git diff --check` passed; E2 no blocker, E4 concern fixed with extra prefix tests
+- what remains: runtime still runs old source; next checkpoint is `P1-RUNTIME-HEALTH-HYGIENE-68-RUNTIME-SYNC-REVIEW`
+- boundary: source/test/docs only; no runtime sync/restart, PG write, Bybit order/cancel/modify, crontab/env mutation, adapter/writer enablement, Cost Gate change, live/probe/order authority, or proof claim
+
 2026-06-26 05:37 CEST
 - normalized TODO v538 after the AVAX authorization review checkpoint
 - anti-repeat result: `P0-BOUNDED-PROBE-FIRST-ATTEMPT-TOUCHABILITY-BOOTSTRAP-SOURCE-ONLY` is already done via the prior source patch/report, so it was not rerun

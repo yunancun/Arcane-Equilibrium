@@ -26,6 +26,23 @@ Result:
 - outcome, blocker, or next action
 ```
 
+2026-06-26 05:50 CEST
+Task:
+- Close `P1-RUNTIME-HEALTH-HYGIENE-LOCAL-LINEAGE-68-STALE-WORKING` as a source-only health [68] local-lineage residual patch.
+
+Chain:
+- PM -> E2(explorer) -> E4(explorer) -> PM
+
+Ownership:
+- PM: create/check session state, apply anti-repeat, implement the source/test patch, update TODO/report/changelog/worklog/memory.
+- E2(explorer): adversarial source review for exposure-hiding, classifier scope, and fail-closed behavior.
+- E4(explorer): verification review and coverage gap check.
+
+Result:
+- Health [68] now reports close/risk local `Working` rows without same-symbol local filled position as `local_lineage_residual`, not entry resting exposure.
+- Ordinary entry exposure and close/risk rows with filled position still count and fail closed.
+- Status `DONE_WITH_CONCERNS` because the patch has not been synced to Linux runtime; next checkpoint is `P1-RUNTIME-HEALTH-HYGIENE-68-RUNTIME-SYNC-REVIEW`.
+
 2026-06-26 05:37 CEST
 Task:
 - Advance `P0-BOUNDED-PROBE-AUTHORIZATION` to a no-authority AVAX review-ready checkpoint and fix stale TODO next-action state.
