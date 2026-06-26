@@ -252,6 +252,14 @@ Do not paste long reports or stable architecture into TODO.
 - Move long evidence to reports/archive.
 - Update `docs/agents/context-loading.md` when source routing changes.
 
+## 2026-06-25 AVAX Touchability Bootstrap Source Patch
+
+- `P0-BOUNDED-PROBE-AVAX-CANDIDATE-TOUCHABILITY-BOOTSTRAP-SOURCE-ONLY` is `DONE`: zero candidate-matched AVAX orders can now produce `FIRST_ATTEMPT_TOUCHABILITY_BOOTSTRAP_REQUIRED` only as a review-only/no-authority/no-proof first-attempt near-touch-or-skip contract.
+- Touchability now requires candidate identity alignment before reviewability; placement maps the bootstrap to `PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW` with `active=false`, separate authorization required, fresh-BBO/skip constraints, and `first_attempt_bootstrap_is_proof=false`.
+- Recursive authority contamination scanning was broadened to reject runtime order authority, config/env/runtime mutations, order modify/cancel aliases, review-granted runtime authority, Cost Gate mutation, authority enum strings/object payloads, promotion/proof, writer/adapter/service mutation vocabulary.
+- Verification: focused touchability+placement `30 passed`; adjacent bounded-probe suite `106 passed`; changed-helper py_compile PASS; `git diff --check` PASS. Boundary unchanged: no Bybit call/order/cancel/modify, no PG write, no `_latest` overwrite, no runtime/env/service/crontab mutation, no Cost Gate lowering, no Rust writer/adapter enablement, no probe/order/live authority, no promotion proof.
+- Next blocker: `P0-BOUNDED-PROBE-AVAX-AUTHORITY-PATH-READINESS-SOURCE-ONLY`.
+
 ## 2026-06-24 Runtime Adapter No-Order BTC Checkpoint
 
 - `P0-BOUNDED-PROBE-RUNTIME-ADAPTER-ENABLEMENT-DEMO-ONLY-E3-BB-REVIEW` is `DONE_WITH_CONCERNS`: E3/BB found no safe current production flag for actual demo order submission; Rust writer still hard-codes `adapter_enabled=false`.

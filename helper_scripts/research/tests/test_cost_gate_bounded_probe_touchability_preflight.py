@@ -208,6 +208,98 @@ def test_authority_grant_in_input_is_rejected_before_reviewability_checks() -> N
     assert packet["answers"]["order_authority_granted"] is False
 
 
+def test_truthy_nested_authority_grant_in_input_is_rejected() -> None:
+    preflight = _preflight()
+    preflight["bounded_demo_probe_design"]["authority_boundary"][
+        "probe_authority_granted"
+    ] = "true"
+
+    packet = build_bounded_demo_probe_touchability_preflight(
+        preflight=preflight,
+        order_to_fill_gap_audit=_order_touchability_audit(),
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "AUTHORITY_BOUNDARY_VIOLATION"
+    assert packet["bounded_probe_design"]["authority_preserved"] is False
+    assert packet["answers"]["probe_authority_granted"] is False
+    assert packet["answers"]["order_authority_granted"] is False
+
+
+def test_broad_runtime_authority_grant_in_input_is_rejected() -> None:
+    preflight = _preflight()
+    preflight["bounded_demo_probe_design"]["authority_boundary"][
+        "active_runtime_order_authority"
+    ] = True
+
+    packet = build_bounded_demo_probe_touchability_preflight(
+        preflight=preflight,
+        order_to_fill_gap_audit=_order_touchability_audit(),
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "AUTHORITY_BOUNDARY_VIOLATION"
+    assert packet["bounded_probe_design"]["authority_preserved"] is False
+    assert packet["answers"]["probe_authority_granted"] is False
+    assert packet["answers"]["order_authority_granted"] is False
+
+
+def test_known_authority_and_mutation_aliases_are_rejected_recursively() -> None:
+    forbidden_keys = (
+        "runtime_order_authority_granted",
+        "runtime_order_authority_found",
+        "allowed_to_submit_order_in_current_review",
+        "actual_runtime_admission_enablement_ready",
+        "order_authority_granted_in_authorization_object",
+        "config_mutation_performed",
+        "env_mutation_performed",
+        "environment_mutation_performed",
+        "order_modify_performed",
+        "review_grants_runtime_authority",
+        "cost_gate_mutation_found",
+    )
+
+    for key in forbidden_keys:
+        preflight = _preflight()
+        preflight["bounded_demo_probe_design"]["authority_boundary"][
+            "nested_review_packet"
+        ] = {key: "true"}
+
+        packet = build_bounded_demo_probe_touchability_preflight(
+            preflight=preflight,
+            order_to_fill_gap_audit=_order_touchability_audit(),
+            now_utc=NOW,
+        )
+
+        assert packet["status"] == "AUTHORITY_BOUNDARY_VIOLATION", key
+        assert packet["bounded_probe_design"]["authority_preserved"] is False
+
+
+def test_authority_enum_and_object_payloads_are_rejected() -> None:
+    contaminations = (
+        ("runtime_order_authority_granted", "ORDER_AUTHORITY_GRANTED"),
+        ("order_authority", "DEMO_LEARNING_PROBE_GRANTED"),
+        ("execution_authority", "ORDER_AUTHORITY_GRANTED"),
+        ("order_authority_granted", {"status": "granted"}),
+        ("config_mutation_performed", {"status": "performed"}),
+    )
+
+    for key, value in contaminations:
+        preflight = _preflight()
+        preflight["bounded_demo_probe_design"]["authority_boundary"][
+            "nested_review_packet"
+        ] = {key: value}
+
+        packet = build_bounded_demo_probe_touchability_preflight(
+            preflight=preflight,
+            order_to_fill_gap_audit=_order_touchability_audit(),
+            now_utc=NOW,
+        )
+
+        assert packet["status"] == "AUTHORITY_BOUNDARY_VIOLATION", key
+        assert packet["bounded_probe_design"]["authority_preserved"] is False
+
+
 def test_promotion_proof_in_input_is_rejected_before_touchability_ready() -> None:
     packet = build_bounded_demo_probe_touchability_preflight(
         preflight=_preflight(promotion_proof=True),
@@ -300,7 +392,9 @@ def test_candidate_strategy_name_is_required_for_fill_flow_readiness() -> None:
         now_utc=NOW,
     )
 
-    assert packet["status"] == "CANDIDATE_TOUCHABILITY_DATA_REQUIRED"
+    assert packet["status"] == "BOUNDED_PROBE_DESIGN_NOT_READY"
+    assert packet["bounded_probe_design"]["candidate_identity_aligned"] is False
+    assert packet["answers"]["bounded_probe_design_reviewable"] is False
     assert packet["answers"]["ready_for_operator_touchability_review"] is False
     assert packet["answers"]["candidate_matched_fill_flow_present"] is False
     assert packet["order_touchability"]["candidate_reviewed_orders"] == 0
@@ -341,9 +435,16 @@ def test_same_symbol_side_wrong_strategy_fill_does_not_satisfy_candidate() -> No
         now_utc=NOW,
     )
 
-    assert packet["status"] == "CANDIDATE_TOUCHABILITY_DATA_REQUIRED"
+    assert packet["status"] == "FIRST_ATTEMPT_TOUCHABILITY_BOOTSTRAP_REQUIRED"
+    assert (
+        packet["reason"]
+        == "no_candidate_matched_orders_exist_for_first_touchability_attempt"
+    )
     assert packet["answers"]["ready_for_operator_touchability_review"] is False
+    assert packet["answers"]["first_attempt_touchability_bootstrap_required"] is True
     assert packet["answers"]["candidate_matched_fill_flow_present"] is False
+    assert packet["placement_requirements"]["first_attempt_bootstrap"] is True
+    assert packet["placement_requirements"]["first_attempt_bootstrap_is_proof"] is False
     assert packet["order_touchability"]["candidate_reviewed_orders"] == 0
     assert packet["order_touchability"]["candidate_fill_rows"] == 0
     assert packet["order_touchability"]["non_candidate_fill_rows"] == 1
@@ -491,3 +592,135 @@ def test_false_negative_preflight_schema_is_reviewable_for_touchability() -> Non
     assert packet["order_touchability"]["candidate_fill_rows"] == 0
     assert packet["answers"]["candidate_matched_fill_flow_present"] is False
     assert packet["answers"]["probe_authority_granted"] is False
+
+
+def test_zero_candidate_orders_with_non_candidate_fill_enables_first_attempt_bootstrap_only() -> None:
+    preflight = _preflight()
+    preflight["bounded_demo_probe_design"]["candidate"] = {
+        "side_cell_key": "grid_trading|AVAXUSDT|Sell",
+        "strategy_name": "grid_trading",
+        "symbol": "AVAXUSDT",
+        "side": "Sell",
+        "outcome_horizon_minutes": 60,
+        "source_kind": "cost_gate_false_negative_after_cost",
+    }
+
+    packet = build_bounded_demo_probe_touchability_preflight(
+        preflight=preflight,
+        order_to_fill_gap_audit=_order_touchability_audit(
+            status="FILL_FLOW_PRESENT",
+            fill_rows=1,
+            deep_no_touch=0,
+            answers={
+                "fills_present": True,
+                "passive_limits_too_deep": False,
+            },
+            orders=[
+                {
+                    "strategy_name": "risk_close",
+                    "symbol": "AVAXUSDT",
+                    "side": "Sell",
+                    "fill_count": 1,
+                    "classification": {"status": "FILLED"},
+                }
+            ],
+        ),
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "FIRST_ATTEMPT_TOUCHABILITY_BOOTSTRAP_REQUIRED"
+    assert packet["answers"]["touchability_repair_required"] is True
+    assert packet["answers"]["first_attempt_touchability_bootstrap_required"] is True
+    assert packet["answers"]["ready_for_operator_touchability_review"] is False
+    assert packet["answers"]["candidate_touchability_orders_present"] is False
+    assert packet["answers"]["candidate_matched_fill_flow_present"] is False
+    assert packet["placement_requirements"]["active"] is False
+    assert packet["placement_requirements"]["requires_separate_operator_authorization"] is True
+    assert packet["placement_requirements"]["first_attempt_bootstrap"] is True
+    assert packet["placement_requirements"]["first_attempt_bootstrap_is_proof"] is False
+    assert packet["answers"]["probe_authority_granted"] is False
+    assert packet["answers"]["order_authority_granted"] is False
+    assert packet["answers"]["promotion_evidence"] is False
+
+
+def test_inconsistent_candidate_identity_fails_closed_before_first_attempt_bootstrap() -> None:
+    preflight = _preflight()
+    preflight["bounded_demo_probe_design"]["candidate"] = {
+        "side_cell_key": "grid_trading|AVAXUSDT|Sell",
+        "strategy_name": "ma_crossover",
+        "symbol": "BTCUSDT",
+        "side": "Buy",
+        "outcome_horizon_minutes": 60,
+        "source_kind": "cost_gate_false_negative_after_cost",
+    }
+
+    packet = build_bounded_demo_probe_touchability_preflight(
+        preflight=preflight,
+        order_to_fill_gap_audit=_order_touchability_audit(
+            status="FILL_FLOW_PRESENT",
+            fill_rows=1,
+            deep_no_touch=0,
+            answers={
+                "fills_present": True,
+                "passive_limits_too_deep": False,
+            },
+            orders=[
+                {
+                    "strategy_name": "risk_close",
+                    "symbol": "AVAXUSDT",
+                    "side": "Sell",
+                    "fill_count": 1,
+                    "classification": {"status": "FILLED"},
+                }
+            ],
+        ),
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "BOUNDED_PROBE_DESIGN_NOT_READY"
+    assert packet["bounded_probe_design"]["candidate_identity_aligned"] is False
+    assert packet["answers"]["bounded_probe_design_reviewable"] is False
+    assert packet["answers"]["first_attempt_touchability_bootstrap_required"] is False
+    assert packet["answers"]["probe_authority_granted"] is False
+    assert packet["answers"]["order_authority_granted"] is False
+
+
+def test_candidate_order_without_fill_does_not_bootstrap_as_zero_candidate_attempt() -> None:
+    preflight = _preflight()
+
+    packet = build_bounded_demo_probe_touchability_preflight(
+        preflight=preflight,
+        order_to_fill_gap_audit=_order_touchability_audit(
+            status="FILL_FLOW_PRESENT",
+            fill_rows=1,
+            deep_no_touch=0,
+            answers={
+                "fills_present": True,
+                "passive_limits_too_deep": False,
+            },
+            orders=[
+                {
+                    "strategy_name": "flash_dip_buy",
+                    "symbol": "XRPUSDT",
+                    "side": "Buy",
+                    "fill_count": 1,
+                    "classification": {"status": "FILLED"},
+                },
+                {
+                    "strategy_name": "ma_crossover",
+                    "symbol": "BTCUSDT",
+                    "side": "Sell",
+                    "fill_count": 0,
+                    "classification": {"status": "OPEN_UNCLASSIFIED"},
+                },
+            ],
+        ),
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "CANDIDATE_TOUCHABILITY_DATA_REQUIRED"
+    assert packet["answers"]["first_attempt_touchability_bootstrap_required"] is False
+    assert packet["answers"]["candidate_touchability_orders_present"] is True
+    assert packet["order_touchability"]["candidate_reviewed_orders"] == 1
+    assert packet["answers"]["probe_authority_granted"] is False
+    assert packet["answers"]["order_authority_granted"] is False

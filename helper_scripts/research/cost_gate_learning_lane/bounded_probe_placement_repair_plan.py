@@ -31,8 +31,123 @@ BOUNDARY = (
     "Bybit call, order, config, risk, auth, runtime mutation, Cost Gate lowering, "
     "probe authority, order authority, or promotion proof"
 )
+AUTHORITY_BEARING_TRUE_KEYS = {
+    "active_runtime_order_authority",
+    "active_runtime_probe_authority",
+    "adapter_enabled_by_this_packet",
+    "adapter_enablement_performed",
+    "allowed_to_submit_order",
+    "allowed_to_submit_order_in_current_review",
+    "api_call_performed",
+    "auth_headers_present",
+    "auth_mutation_performed",
+    "actual_runtime_admission_enablement_ready",
+    "bounded_demo_probe_authorized",
+    "bybit_call_performed",
+    "bybit_private_call_performed",
+    "bybit_public_market_data_call_performed",
+    "canonical_plan_mutation_performed",
+    "config_mutation_performed",
+    "cookie_headers_present",
+    "cost_gate_lowering_recommended",
+    "cost_gate_mutation_found",
+    "crontab_edit_performed",
+    "crontab_mutation_performed",
+    "env_mutation_performed",
+    "environment_mutation_performed",
+    "execution_authority",
+    "exchange_facing_order_authority_granted",
+    "freshness_gate_lowering_recommended",
+    "global_cost_gate_lowering_recommended",
+    "ledger_append_performed",
+    "live_authority_granted",
+    "live_execution_allowed",
+    "live_promotion_performed",
+    "mainnet_authority_granted",
+    "operator_authorization_object_emitted",
+    "order_authority",
+    "order_authority_granted",
+    "order_authority_granted_in_authorization_object",
+    "order_authority_granted_in_object",
+    "order_cancel_performed",
+    "order_cancel_modify_performed",
+    "order_modify_performed",
+    "order_submission_performed",
+    "pg_write_performed",
+    "plan_mutation_performed",
+    "private_endpoint_called",
+    "probe_authority",
+    "probe_authority_granted",
+    "probe_authority_granted_in_authorization_object",
+    "probe_authority_granted_in_object",
+    "promotion_evidence",
+    "promotion_evidence_found",
+    "promotion_proof",
+    "review_grants_runtime_authority",
+    "risk_mutation_performed",
+    "runtime_adapter_enablement_performed",
+    "runtime_admission_enablement_ready",
+    "runtime_config_mutation_performed",
+    "runtime_env_mutation_performed",
+    "runtime_mutation_performed",
+    "runtime_order_authority_found",
+    "runtime_order_authority_granted",
+    "runtime_probe_authority_found",
+    "runtime_probe_authority_granted",
+    "rust_writer_enabled",
+    "service_mutation_performed",
+    "service_restart_performed",
+    "writer_enablement_performed",
+    "writer_enabled",
+}
+TRUTHY_AUTHORITY_STRINGS = {
+    "1",
+    "true",
+    "yes",
+    "y",
+    "on",
+    "enabled",
+    "grant",
+    "granted",
+    "authorize",
+    "authorized",
+}
+FALSEY_AUTHORITY_STRINGS = {
+    "",
+    "0",
+    "false",
+    "no",
+    "n",
+    "off",
+    "disabled",
+    "none",
+    "null",
+    "absent",
+    "missing",
+    "defer",
+    "deferred",
+    "blocked",
+    "n/a",
+    "not_applicable",
+    "not allowed",
+    "not_allowed",
+    "not authorized",
+    "not_authorized",
+    "not found",
+    "not_found",
+    "not granted",
+    "not_granted",
+    "not performed",
+    "not_performed",
+    "no authority",
+    "no_authority",
+    "authority_not_granted",
+    "order_authority_not_granted",
+    "probe_authority_not_granted",
+}
 
 REPAIR_READY_STATUS = "TOUCHABILITY_REPAIR_REQUIRED_BEFORE_BOUNDED_DEMO_PROBE"
+FIRST_ATTEMPT_BOOTSTRAP_STATUS = "FIRST_ATTEMPT_TOUCHABILITY_BOOTSTRAP_REQUIRED"
 FILL_FLOW_READY_STATUS = "TOUCHABILITY_GATE_READY_FOR_OPERATOR_REVIEW"
 PASSTHROUGH_BLOCKING_STATUSES = {
     "BOUNDED_PROBE_DESIGN_NOT_READY",
@@ -73,6 +188,23 @@ def _float(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return out if math.isfinite(out) else None
+
+
+def _truthy_authority(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value != 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in FALSEY_AUTHORITY_STRINGS:
+            return False
+        return normalized in TRUTHY_AUTHORITY_STRINGS or bool(normalized)
+    if isinstance(value, (dict, list)):
+        return True
+    return bool(value)
 
 
 def _round(value: Any, ndigits: int = 4) -> float | None:
@@ -135,22 +267,20 @@ def _artifact_status(
 
 
 def _authority_preserved(touchability_preflight: dict[str, Any] | None) -> bool:
-    payload = _dict(touchability_preflight)
-    answers = _dict(payload.get("answers"))
-    design = _dict(payload.get("bounded_probe_design"))
-    for source in (payload, answers, design):
-        if source.get("global_cost_gate_lowering_recommended") is True:
+    stack: list[Any] = [_dict(touchability_preflight)]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, list):
+            stack.extend(item)
+            continue
+        if not isinstance(item, dict):
+            continue
+        if item.get("main_cost_gate_adjustment") not in (None, "", "NONE"):
             return False
-        if source.get("probe_authority_granted") is True:
-            return False
-        if source.get("order_authority_granted") is True:
-            return False
-        if source.get("promotion_evidence") is True:
-            return False
-        if source.get("promotion_proof") is True:
-            return False
-        if source.get("main_cost_gate_adjustment") not in (None, "", "NONE"):
-            return False
+        for key in AUTHORITY_BEARING_TRUE_KEYS:
+            if _truthy_authority(item.get(key)):
+                return False
+        stack.extend(value for value in item.values() if isinstance(value, (dict, list)))
     return True
 
 
@@ -203,6 +333,10 @@ def _touchability_summary(
         "max_demo_notional_usdt_per_order": _float(
             placement.get("max_demo_notional_usdt_per_order")
         ),
+        "first_attempt_bootstrap": placement.get("first_attempt_bootstrap") is True,
+        "first_attempt_bootstrap_is_proof": (
+            placement.get("first_attempt_bootstrap_is_proof") is True
+        ),
     }
 
 
@@ -232,14 +366,23 @@ def _status(
     source_status = str(payload.get("status") or "")
     source_reason = str(payload.get("reason") or "")
     source_actions = [str(action) for action in _list(payload.get("next_actions"))]
-    if source_status == REPAIR_READY_STATUS:
+    if source_status in {REPAIR_READY_STATUS, FIRST_ATTEMPT_BOOTSTRAP_STATUS}:
+        bootstrap = source_status == FIRST_ATTEMPT_BOOTSTRAP_STATUS
         return (
             "PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW",
-            "deep_passive_no_touch_requires_near_touch_or_skip_probe_placement",
+            (
+                "first_candidate_attempt_requires_review_only_near_touch_or_skip_probe_placement"
+                if bootstrap
+                else "deep_passive_no_touch_requires_near_touch_or_skip_probe_placement"
+            ),
             [
-                "operator_review_near_touch_or_skip_placement_repair_plan",
+                (
+                    "operator_review_first_attempt_near_touch_or_skip_placement_plan"
+                    if bootstrap
+                    else "operator_review_near_touch_or_skip_placement_repair_plan"
+                ),
                 "only_after_separate_authorization_patch_existing_rust_authority_path",
-                "rerun_order_to_fill_touchability_audit_after_first_repaired_probe",
+                "rerun_order_to_fill_touchability_audit_after_first_candidate_attempt",
             ],
         )
     if source_status == FILL_FLOW_READY_STATUS:
@@ -302,6 +445,8 @@ def _repair_plan(
             "deep_passive_no_touch_orders": summary.get(
                 "deep_passive_no_touch_orders"
             ),
+            "first_attempt_bootstrap": summary.get("first_attempt_bootstrap"),
+            "first_attempt_bootstrap_is_proof": False,
             "max_best_touch_gap_bps": summary.get("max_best_touch_gap_bps"),
             "min_best_touch_gap_bps": summary.get("min_best_touch_gap_bps"),
         },
