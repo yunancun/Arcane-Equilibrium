@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Alpha Bounded-Chain Stale Side-Cell Guard Source Fix
+
+- PM closed `P1-RUNTIME-HEALTH-HYGIENE-ALPHA-BOUNDED-CHAIN-STALENESS-GUARD-SOURCE-FIX` as `DONE_WITH_CONCERNS`.
+- Runtime read-only evidence showed `08:00:05 CEST` alpha bounded auth latest still ETH-scoped while the only cap-feasible selection is AVAX Sell.
+- Source fix: alpha cron now fails closed on selected-side-cell mismatch, skipping bounded review chain refresh and bounded scorecard inputs. Next checkpoint is runtime sync review; do not rerun P0 authorization until fresh AVAX-scoped artifacts exist.
+
 ## 2026-06-26 Cap-Feasible Selector Runtime Sync
 
 - PM/E3 closed `P1-RUNTIME-HEALTH-HYGIENE-CAP-FEASIBLE-SELECTOR-SYNC-REVIEW` as `DONE_WITH_CONCERNS`.

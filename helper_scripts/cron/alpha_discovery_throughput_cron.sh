@@ -121,6 +121,47 @@ canonical_or_latest_matching_path() {
     fi
     latest_matching_path "$@"
 }
+json_side_cell_key() {
+    local path="$1"
+    [[ -z "$path" || ! -f "$path" ]] && return 0
+    "$PYBIN" - "$path" <<'PY' 2>/dev/null || true
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        payload = json.load(fh)
+except Exception:
+    payload = {}
+
+if not isinstance(payload, dict):
+    payload = {}
+
+for key in ("selected_side_cell_key", "side_cell_key"):
+    value = payload.get(key)
+    if value:
+        print(str(value).strip())
+        raise SystemExit
+
+sources = [payload]
+for key in (
+    "selected_candidate",
+    "candidate",
+    "bounded_demo_probe_design",
+    "proposal",
+    "review",
+):
+    value = payload.get(key)
+    sources.append(value)
+    if isinstance(value, dict):
+        sources.append(value.get("candidate"))
+
+for source in sources:
+    if isinstance(source, dict) and source.get("side_cell_key"):
+        print(str(source["side_cell_key"]).strip())
+        break
+PY
+}
 HORIZON_SEALED_REPLAY_JSON="$(canonical_or_latest_matching_path \
     "$DATA"/cost_gate_learning_lane/horizon_specific_sealed_replay_latest.json \
     "$DATA"/profitability_refresh/*/horizon_specific_sealed_replay/horizon_specific_sealed_replay_latest.json)"
@@ -145,6 +186,17 @@ elif [[ -f "$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_JSON" ]]; then
     BOUNDED_PROBE_PREFLIGHT_JSON="$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_JSON"
 else
     BOUNDED_PROBE_PREFLIGHT_JSON="$SEALED_PREFLIGHT_JSON"
+fi
+DEFAULT_CAP_FEASIBLE_CANDIDATE_SELECTION_JSON="$(latest_matching_path "$DATA"/cost_gate_learning_lane/cap_feasible_candidate_selection*.json)"
+CAP_FEASIBLE_CANDIDATE_SELECTION_JSON="${OPENCLAW_ALPHA_CAP_FEASIBLE_CANDIDATE_SELECTION_JSON:-$DEFAULT_CAP_FEASIBLE_CANDIDATE_SELECTION_JSON}"
+ALPHA_SELECTED_SIDE_CELL_KEY="${OPENCLAW_ALPHA_SELECTED_SIDE_CELL_KEY:-}"
+if [[ -z "$ALPHA_SELECTED_SIDE_CELL_KEY" && -n "$CAP_FEASIBLE_CANDIDATE_SELECTION_JSON" && -f "$CAP_FEASIBLE_CANDIDATE_SELECTION_JSON" ]]; then
+    ALPHA_SELECTED_SIDE_CELL_KEY="$(json_side_cell_key "$CAP_FEASIBLE_CANDIDATE_SELECTION_JSON")"
+fi
+BOUNDED_PROBE_PREFLIGHT_SIDE_CELL_KEY="$(json_side_cell_key "$BOUNDED_PROBE_PREFLIGHT_JSON")"
+BOUNDED_REVIEW_CHAIN_SKIP_REASON=""
+if [[ -n "$ALPHA_SELECTED_SIDE_CELL_KEY" && -n "$BOUNDED_PROBE_PREFLIGHT_SIDE_CELL_KEY" && "$BOUNDED_PROBE_PREFLIGHT_SIDE_CELL_KEY" != "$ALPHA_SELECTED_SIDE_CELL_KEY" ]]; then
+    BOUNDED_REVIEW_CHAIN_SKIP_REASON="selected_side_cell_mismatch:${BOUNDED_PROBE_PREFLIGHT_SIDE_CELL_KEY}:expected:${ALPHA_SELECTED_SIDE_CELL_KEY}"
 fi
 BOUNDED_REVIEW_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_ALPHA_BOUNDED_REVIEW_MAX_ARTIFACT_AGE_HOURS:-24}"
 TOUCHABILITY_MAX_INITIAL_PASSIVE_GAP_BPS="${OPENCLAW_ALPHA_TOUCHABILITY_MAX_INITIAL_PASSIVE_GAP_BPS:-75.0}"
@@ -218,7 +270,9 @@ bounded_probe_authority_patch_readiness_rc=0
 bounded_probe_operator_authorization_rc=0
 bounded_probe_shadow_placement_impact_rc=0
 if [[ "$REFRESH_BOUNDED_REVIEW_CHAIN" == "1" ]]; then
-    if [[ -f "$BOUNDED_PROBE_PREFLIGHT_JSON" && -f "$ORDER_TOUCHABILITY_JSON" ]]; then
+    if [[ -n "$BOUNDED_REVIEW_CHAIN_SKIP_REASON" ]]; then
+        echo "[$(ts)] SKIP: bounded probe review chain ${BOUNDED_REVIEW_CHAIN_SKIP_REASON}" >> "$LOG"
+    elif [[ -f "$BOUNDED_PROBE_PREFLIGHT_JSON" && -f "$ORDER_TOUCHABILITY_JSON" ]]; then
         mkdir -p "$BOUNDED_REVIEW_CHAIN_DIR"
         (
             cd "$BASE/helper_scripts/research"
@@ -370,11 +424,15 @@ add_profitability_json_arg "--horizon-sealed-replay-json" "$HORIZON_SEALED_REPLA
 add_profitability_json_arg "--horizon-learning-evidence-json" "$HORIZON_LEARNING_EVIDENCE_JSON"
 add_profitability_json_arg "--sealed-horizon-operator-review-json" "$SEALED_OPERATOR_REVIEW_JSON"
 add_profitability_json_arg "--sealed-horizon-probe-preflight-json" "$SEALED_PREFLIGHT_JSON"
-add_profitability_json_arg "--bounded-probe-preflight-json" "$BOUNDED_PROBE_PREFLIGHT_JSON"
-add_profitability_json_arg "--bounded-probe-shadow-placement-impact-json" "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_LATEST"
-add_profitability_json_arg "--bounded-probe-operator-authorization-json" "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST"
-add_profitability_json_arg "--bounded-probe-result-review-json" "$DATA/cost_gate_learning_lane/bounded_probe_result_review_latest.json"
-add_profitability_json_arg "--bounded-probe-execution-realism-review-json" "$DATA/cost_gate_learning_lane/bounded_probe_execution_realism_review_latest.json"
+if [[ -z "$BOUNDED_REVIEW_CHAIN_SKIP_REASON" ]]; then
+    add_profitability_json_arg "--bounded-probe-preflight-json" "$BOUNDED_PROBE_PREFLIGHT_JSON"
+    add_profitability_json_arg "--bounded-probe-shadow-placement-impact-json" "$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_LATEST"
+    add_profitability_json_arg "--bounded-probe-operator-authorization-json" "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST"
+    add_profitability_json_arg "--bounded-probe-result-review-json" "$DATA/cost_gate_learning_lane/bounded_probe_result_review_latest.json"
+    add_profitability_json_arg "--bounded-probe-execution-realism-review-json" "$DATA/cost_gate_learning_lane/bounded_probe_execution_realism_review_latest.json"
+else
+    echo "[$(ts)] SKIP: profitability bounded probe inputs ${BOUNDED_REVIEW_CHAIN_SKIP_REASON}" >> "$LOG"
+fi
 add_profitability_json_arg "--fillsim-json" "$DATA/research/fillsim/fillsim_report.json"
 add_profitability_json_arg "--fillsim-history-json" "$DATA/research/fillsim/fillsim_history_scorecard.json"
 add_profitability_json_arg "--polymarket-leadlag-json" "$DATA/research/polymarket_leadlag/polymarket_leadlag_latest.json"

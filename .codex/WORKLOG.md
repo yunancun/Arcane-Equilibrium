@@ -907,6 +907,13 @@ YYYY-MM-DD HH:MM TZ
 - Result: Linux checkout fast-forwarded cleanly `0246b263 -> b9836224`; crontab expected-head literals replaced exactly `5` times; `bash -n` passed on runtime; API MainPID remained `2218842`.
 - Boundary: no service restart/rebuild/Linux cargo, no PG write, no Bybit/API/order/cancel/modify, no manual cron run, no `_latest` overwrite, no adapter/writer enablement, no Cost Gate/cap/risk mutation, no probe/order/live authority, no promotion proof. Next blocker needs a post-sync artifact delta before P0 authorization review.
 
+# 2026-06-26 — Alpha Bounded-Chain Stale Side-Cell Guard Source Fix
+
+- Task: stop alpha cron from refreshing bounded `_latest` artifacts from a stale ETH bounded preflight while the cap-feasible selected side-cell is AVAX.
+- Dispatch chain: `PM(default)` source implementation + local `PA/E1` patch + `E2/E4` static/execution tests + `QA/PM` TODO/report compliance; BB skipped because no exchange-facing action occurred.
+- Result: alpha cron now parses selected/preflight side-cells and fail-closes on mismatch, skipping bounded review chain refresh and bounded scorecard inputs; validation `bash -n` PASS, alpha cron tests `9 passed`, cost-gate cron tests `15 passed`.
+- Boundary: source/test/docs only; no runtime sync, no crontab/env/service mutation, no manual cron run, no `_latest` overwrite, no PG write, no Bybit/API/order/cancel/modify, no adapter/writer enablement, no Cost Gate/cap/risk mutation, no probe/order/live authority, no promotion proof.
+
 # 2026-06-24 — API Service Runtime Cutover Exact Unit Diff Packet
 
 - Task: advance `P1-API-SERVICE-OWNERSHIP-RUNTIME-CUTOVER-APPLY-REVIEW` without applying the systemd cutover.
