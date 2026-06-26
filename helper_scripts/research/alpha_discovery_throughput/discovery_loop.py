@@ -764,6 +764,8 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
                 "engineering_actionable": True,
             }
         if operator_auth_status in {
+            "FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED",
+            "FALSE_NEGATIVE_PREFLIGHT_NOT_READY",
             "SEALED_HORIZON_PREFLIGHT_NOT_READY",
             "PLACEMENT_REPAIR_PLAN_NOT_READY",
             "AUTHORITY_PATH_PATCH_NOT_READY",
@@ -783,6 +785,7 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
                 ),
                 "next_trigger": operator_auth_next_trigger,
                 "operator_actionable": operator_auth_status in {
+                    "FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED",
                     "AUTHORIZATION_ID_REQUIRED",
                     "OPERATOR_ID_REQUIRED",
                     "PROBE_BUDGET_REQUIRED_OR_EXCEEDS_SOURCE_LIMIT",
@@ -790,6 +793,7 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
                     "TYPED_CONFIRM_REQUIRED",
                 },
                 "engineering_actionable": operator_auth_status in {
+                    "FALSE_NEGATIVE_PREFLIGHT_NOT_READY",
                     "SEALED_HORIZON_PREFLIGHT_NOT_READY",
                     "PLACEMENT_REPAIR_PLAN_NOT_READY",
                     "AUTHORITY_PATH_PATCH_NOT_READY",

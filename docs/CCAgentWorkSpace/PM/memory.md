@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Authorization Gate Status Clarity Source Fix
+
+- PM closed `P1-AUTHORIZATION-GATE-STATUS-CLARITY-SOURCE-FIX` as source-only `DONE_WITH_CONCERNS`.
+- False-negative bounded preflight blockers now emit `false_negative_preflight_ready` and `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED` / `FALSE_NEGATIVE_PREFLIGHT_NOT_READY` instead of misleading sealed-horizon wording; scorecard/discovery classify the new statuses without granting authority.
+- PM read: v556 is not runtime-synced. After the operator-requested pause, resume at `P1-RUNTIME-HEALTH-HYGIENE-AUTH-STATUS-CLARITY-SYNC-REVIEW`, not another P0 authorization audit.
+
 ## 2026-06-26 Post-Guard AVAX Latest-Chain Review No Authority
 
 - PM closed `P0-BOUNDED-PROBE-AUTHORIZATION-AVAX-LATEST-CHAIN-REFRESH-REVIEW` as `DONE_WITH_CONCERNS`.
