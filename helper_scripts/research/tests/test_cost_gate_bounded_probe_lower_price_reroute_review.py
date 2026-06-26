@@ -278,6 +278,34 @@ def test_ready_reroute_packet_can_use_fresh_cap_feasible_selection() -> None:
     assert packet["authority_preserved"] is True
 
 
+def test_ready_cap_feasible_selection_maps_cap_usdt_for_adapter_handoff() -> None:
+    candidate = _cap_selection()["selected_candidate"]
+    candidate.pop("current_cap_usdt", None)
+    candidate["cap_usdt"] = 10.0
+
+    packet = _build(
+        order_construction_repair=None,
+        cap_feasible_selection=_cap_selection(candidate=candidate),
+    )
+
+    assert packet["status"] == READY_STATUS
+    assert packet["selected_candidate"]["current_cap_usdt"] == 10.0
+
+
+def test_explicit_zero_current_cap_is_preserved_for_downstream_fail_closed() -> None:
+    candidate = _cap_selection()["selected_candidate"]
+    candidate["current_cap_usdt"] = 0
+    candidate["cap_usdt"] = 10.0
+
+    packet = _build(
+        order_construction_repair=None,
+        cap_feasible_selection=_cap_selection(candidate=candidate),
+    )
+
+    assert packet["status"] == READY_STATUS
+    assert packet["selected_candidate"]["current_cap_usdt"] == 0
+
+
 def test_fresh_cap_feasible_selection_replaces_stale_repair_packet() -> None:
     repair = _order_repair(generated_at_utc="2026-06-20T17:18:00+00:00")
 
