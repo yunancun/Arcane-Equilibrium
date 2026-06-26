@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Standing Demo Auth Plumbing Runtime Sync Apply
+
+- PM closed `P1-RUNTIME-HEALTH-HYGIENE-STANDING-DEMO-AUTH-PLUMBING-SYNC-REVIEW` as `DONE_WITH_CONCERNS`.
+- Runtime source and crontab expected-head pins are aligned at `69f6c4b2...`; sync changed no service, order, PG, Cost Gate, adapter, or authority state.
+- Natural artifacts still fail closed at false-negative review/preflight, so the next source-progress blocker is `P0-STANDING-DEMO-FALSE-NEGATIVE-PREFLIGHT-PLUMBING`.
+
 ## 2026-06-26 Standing Demo Authorization Plumbing Source Fix
 
 - PM closed `P0-STANDING-DEMO-AUTHORIZATION-PLUMBING` as source/test/docs `DONE_WITH_CONCERNS`.
