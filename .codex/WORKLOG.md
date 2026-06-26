@@ -11,6 +11,14 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 06:24 CEST
+- closed `P1-RUNTIME-HEALTH-HYGIENE-CRON-EXPECTED-HEAD-DRIFT-REVIEW` as `DONE_WITH_CONCERNS`
+- E3 allowed exact crontab expected-head literal alignment only; PM replaced `d2cd70d0` with runtime code head `0246b263` in 11 literal occurrences on lines `57,67,68,69,70`
+- audit dir `/tmp/openclaw/audit/crontab_expected_head_sync_20260626T041735Z`; post-check old count `0`, new count `11`, line count `70`, mainnet/adapter/probe-outcome authority flags still off
+- correct user-service checks: `openclaw-trading-api.service` active/enabled MainPID `2218842`; `openclaw-watchdog.service` active/running/enabled
+- normalized TODO v543 back to active-queue shape; next blocker is `P1-RUNTIME-HEALTH-HYGIENE-CRON-POST-ALIGNMENT-HYGIENE-SNAPSHOT`, paused until operator resumes
+- boundary: expected-head-only crontab metadata mutation + docs only; no restart/rebuild, daemon-reload, PG write, Bybit/API/order call, source sync to docs head, Cost Gate change, authority, or proof claim
+
 2026-06-26 06:12 CEST
 - corrected TODO source/runtime pointer after the v540 report commit moved Mac/origin to docs checkpoint `367a7cd5`
 - Linux runtime intentionally remains at code checkpoint `0246b263`; `367a7cd5` is TODO/report/changelog evidence only and does not need runtime sync
