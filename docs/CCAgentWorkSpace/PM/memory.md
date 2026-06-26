@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Low-Price False-Negative Evidence-Floor Ranking
+
+- PM closed `P1-AGGRESSIVE-ALPHA-LOW-PRICE-FALSE-NEGATIVE-EVIDENCE-FLOOR-RANKING-NO-ORDER` as source/test/docs `DONE_WITH_CONCERNS`.
+- Added no-authority helper `false_negative_evidence_floor_ranking.py`; smoke on latest runtime artifacts ranks AVAX Sell first as `REVIEW_ONLY_LEADER_NOT_PROOF`, with `floor_satisfied_count=0` and probe/order authority false.
+- PM read: do not rerun ranking on the same artifacts. If no real P0 auth delta appears, next source-only work is evidence-floor gap-closure design.
+
 ## 2026-06-26 TODO Maintenance Compliance Compaction
 
 - PM closed operator-requested `P1-TODO-MAINTENANCE-COMPLIANCE-COMPACTION` as source/doc-only `DONE_WITH_CONCERNS`; `TODO.md` v561 is back to compact active-queue shape.
