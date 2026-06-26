@@ -11,6 +11,13 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 05:23 CEST
+- closed `P0-PROFIT-CANDIDATE-SELECTION` as `DONE_WITH_CONCERNS`
+- selected exactly one review-only candidate: `grid_trading|AVAXUSDT|Sell`, 60m, false-negative after current cost, avg net `73.5511bps`, `48/48` net-positive, cap `10 USDT`, min notional `5 USDT`, no Cost Gate lowering and no authority
+- QC/MIT/BB all approve review-only selection with concerns; hard blocker before active probe/order is `CANDIDATE_TOUCHABILITY_DATA_REQUIRED` with `candidate_reviewed_orders=0` and `candidate_fill_rows=0`
+- what remains: after the requested pause, resume at `P0-BOUNDED-PROBE-AUTHORIZATION` via source/read-only first-attempt touchability bootstrap for exact AVAX side-cell; do not submit orders
+- boundary: docs/read-only review only; no Bybit call, no PG write, no runtime sync/restart, no crontab/env mutation, no adapter/writer, no Cost Gate change, no probe/order/live authority, no proof claim
+
 2026-06-26 05:18 CEST
 - closed `P0-PROFIT-EVIDENCE-QUALITY-DEMO-RESIDUAL-CLEANUP-ACTION-REFRESH-E3-BB` as `DONE_WITH_CONCERNS`
 - evidence: E3/BB approved one-time inline GET-only pre/post Bybit demo full scan because runtime lacked the repo helper; pre-inventory had 5 reduce-only conditionals and 5 positions worth 440.1415 USDT; exactly one runtime-local CSRF/Bearer `POST /api/v1/strategy/demo/session/stop` returned HTTP 200, `closed_all=true`, `partial_failure=false`; post-inventory open orders=0 and nonzero positions=0

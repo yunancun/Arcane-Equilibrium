@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Profit Candidate Selection AVAX Review Packet
+
+- PM/QC/MIT/BB closed `P0-PROFIT-CANDIDATE-SELECTION` as `DONE_WITH_CONCERNS` and selected exactly one review-only candidate: `grid_trading|AVAXUSDT|Sell`, 60m, false-negative after current cost.
+- Evidence is strong enough for review-only selection: avg net `73.5511bps`, `48/48` net-positive, cap `10 USDT`, min notional `5 USDT`, Cost Gate lowering false, probe/order authority false.
+- PM read: do not overclaim. Candidate-matched touchability is still missing (`candidate_reviewed_orders=0`, `candidate_fill_rows=0`), so the next safe action is source/read-only first-attempt touchability bootstrap, not order/probe authority.
+
 ## 2026-06-26 Demo Residual Cleanup Auth Block
 
 - CSRF-safe helper worked through gating, but the one reviewed `/api/v1/strategy/demo/session/stop` POST failed before route execution with HTTP 401 `unauthenticated`; no exchange mutation occurred and no retry was allowed.
