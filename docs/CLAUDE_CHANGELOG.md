@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-26（TODO v554 docs-only pointer correction after alpha guard runtime sync）
+> 最後更新：2026-06-26（TODO v555 post-guard AVAX latest-chain review no authority）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v555 增量（2026-06-26 post-guard AVAX latest-chain review no authority）**：PM advanced `P0-BOUNDED-PROBE-AUTHORIZATION-AVAX-LATEST-CHAIN-REFRESH-REVIEW` using session state `/tmp/openclaw/session_loop_state_20260626T063236Z_post_guard_avax_latest_chain_review.json`. Fresh post-guard artifacts prove the selector/guard route is now AVAX-scoped: `false_negative_operator_review_latest.json` sha `951ab7a9...` is `PENDING_COST_GATE_FALSE_NEGATIVE_OPERATOR_REVIEW`, decision `defer`, candidate `grid_trading|AVAXUSDT|Sell`; `false_negative_bounded_probe_preflight_latest.json` sha `60af69ad...` is `OPERATOR_REVIEW_REQUIRED`; `bounded_probe_operator_authorization_latest.json` sha `4d86859c...` is `SEALED_HORIZON_PREFLIGHT_NOT_READY`, decision `defer`, no authorization id, no emitted authorization object, no active runtime probe/order authority. Required phrases are recorded in artifacts (`approve_cost_gate_false_negative_preflight:grid_trading|AVAXUSDT|Sell:2` and `authorize_bounded_demo_probe:grid_trading|AVAXUSDT|Sell:0:`), but no authorization was generated. Status `DONE_WITH_CONCERNS`; actual `P0-BOUNDED-PROBE-AUTHORIZATION` remains `BLOCKED_BY_OPERATOR_ACTION` / `BLOCKED_BY_RUNTIME_AUTHORIZATION`. Boundary：read-only artifact/log/source review + docs/TODO/report only；no Bybit/API/order/cancel/modify, no PG write, no runtime mutation, no service restart, no manual cron run, no `_latest` overwrite by PM, no Cost Gate/cap/risk mutation, no writer/adapter enablement, no probe/order/live authority, and no proof/promotion claim. PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--post_guard_avax_latest_chain_review_no_authority.md`; Operator note `docs/CCAgentWorkSpace/Operator/2026-06-26--post_guard_avax_latest_chain_review_no_authority.md`.
 
 **v554 增量（2026-06-26 docs-only pointer correction after alpha guard runtime sync）**：Corrected the TODO masthead after committing the v553 report/TODO checkpoint. Local/origin now include docs-only commits above the runtime code checkpoint, while Linux runtime code and crontab expected-head pins intentionally remain aligned at `785a434612f82dae57fbe9bdde0f6d22fb331f0f`. Active blocker/status/next blocker are unchanged. Boundary：docs/TODO/changelog metadata only；no runtime mutation, no PG/Bybit/API call, no restart/rebuild, no crontab/env edit, no Cost Gate change, no authority/proof claim.
 
