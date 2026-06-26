@@ -11,6 +11,11 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 06:12 CEST
+- corrected TODO source/runtime pointer after the v540 report commit moved Mac/origin to docs checkpoint `367a7cd5`
+- Linux runtime intentionally remains at code checkpoint `0246b263`; `367a7cd5` is TODO/report/changelog evidence only and does not need runtime sync
+- boundary: docs/TODO/changelog metadata only; no runtime mutation, PG/Bybit/API call, restart/rebuild, crontab/env edit, Cost Gate change, authority, or proof claim
+
 2026-06-26 06:08 CEST
 - closed `P1-RUNTIME-HEALTH-HYGIENE-68-RUNTIME-SYNC-REVIEW` as `DONE_WITH_CONCERNS`
 - E3 allowed one source-only Linux fast-forward to `0246b263`; PM synced `trade-core` from `d2cd70d0` to `0246b263` with exact `FETCH_HEAD` verification and `git merge --ff-only`
