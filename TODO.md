@@ -1,7 +1,7 @@
 # 玄衡 TODO — Active Dispatch Queue
 
 **版本** v531 ｜ **日期** 2026-06-26
-**Source / runtime pointer**：Mac/origin `main` is at `376b2dea7934824a6f81bd8c56219e4836706c06`; Linux runtime checkout remains clean at `d2cd70d092916194043e112eeb402fb92bacb699` and was not restarted/rebuilt/synced in this checkpoint.
+**Source / runtime pointer**：Mac/origin `main` is at `532486c55c8708a8caaef38d65d8a59c896563d9`; Linux runtime checkout remains clean at `d2cd70d092916194043e112eeb402fb92bacb699` and was not restarted/rebuilt/synced in this checkpoint.
 **Current mainline**：Residual exposure is classified, not cleaned. Next blocker is a separate E3/BB-reviewed demo exchange cleanup action; candidate selection remains blocked.
 **Evidence links**：latest report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--demo_residual_exposure_cleanup_plan.md`; previous report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--bybit_demo_open_order_read_only_inventory.md`; changelog `docs/CLAUDE_CHANGELOG.md`; TODO standard `docs/agents/todo-maintenance.md`.
 
@@ -11,7 +11,7 @@
 
 | Area | Latest verified fact | Dispatch impact |
 |---|---|---|
-| Runtime source / cron | 2026-06-26T01:33Z read-only check: Linux repo clean at `d2cd70d0`; crontab expected-head occurrences `d2cd70d0=5`, current commit `376b2dea=0`; adapter flag count `0`; `OPENCLAW_ALLOW_MAINNET=1` count `0`. | No runtime sync/restart/rebuild was done. Runtime source updates remain a separate reviewed action. |
+| Runtime source / cron | 2026-06-26T01:33Z read-only check: Linux repo clean at `d2cd70d0`; crontab expected-head occurrences `d2cd70d0=5`, source commit `532486c5=0`; adapter flag count `0`; `OPENCLAW_ALLOW_MAINNET=1` count `0`. | No runtime sync/restart/rebuild was done. Runtime source updates remain a separate reviewed action. |
 | Bybit demo exchange truth | 2026-06-26T01:40Z BB-reviewed private GET-only inventory: `5` exchange open orders, estimated open notional `486.24260000 USDT`; `2` linked PostOnly limit entries (`ETCUSDT`, `INJUSDT`), `3` unlinked reduce-only `StopLoss` conditionals (`NEARUSDT`, `FILUSDT`, `ICPUSDT`). Artifact: `/tmp/openclaw/audit/bybit_demo_exchange_inventory_bb_review/20260626T014016Z_bb_inventory.json` on `trade-core`. | Candidate selection stays blocked. Do not cancel protective stops alone while positions remain. |
 | Demo positions | Same Bybit snapshot: `3` nonzero positions (`FILUSDT`, `ICPUSDT`, `NEARUSDT`), position value `435.14105000 USDT`, unrealised PnL `-17.61860000 USDT`; each has an opposite-side protective reduce-only StopLoss. | Cleanup must be position-aware and separately E3/BB reviewed. |
 | PG reconciliation | 2026-06-26T01:34Z read-only PG: 72h demo fills `82`; missing order/context/strategy attribution all `0`. 24h effective Working using `order_state_changes`: exactly `2` linked maker entry orders (`INJUSDT`, `ETCUSDT`). | Root cause is residual exchange exposure / local snapshot divergence, not unattributed fills. |
