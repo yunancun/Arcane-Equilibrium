@@ -25,6 +25,13 @@
 
 ## 近期記錄
 
+## 2026-06-26 Atomic Quote Adapter Preview Design No-Capture
+
+- PM closed `P1-AGGRESSIVE-ALPHA-ATOMIC-QUOTE-ADAPTER-PREVIEW-DESIGN-NO-CAPTURE` as source/test/docs `DONE_WITH_CONCERNS`.
+- Added `atomic_quote_adapter_preview_design.py`; smoke is `ATOMIC_QUOTE_ADAPTER_PREVIEW_DESIGN_READY_NO_CAPTURE_NO_AUTHORITY`, requiring future capture->adapter->no-order-preview to run as one reviewed atomic flow with `1000ms` freshness, adapter provenance, no generated_at override, no raw quote construction, and no order authority.
+- E2 follow-up closed after PM added structured stale-adapter CLI evidence, broader positive authority text detection, and path-resolved runtime output rejection; final E4 verification passed focused `10` and adjacent `73`.
+- PM read: this is still no-capture/no-runtime. Next if continuing is PM->E3->BB runtime review for exactly one atomic public quote capture + immediate local adapter/preview flow.
+
 ## 2026-06-26 Quote-To-Adapter Freshness Review No-Order
 
 - PM closed `P1-AGGRESSIVE-ALPHA-QUOTE-TO-ADAPTER-FRESHNESS-REVIEW-NO-ORDER` as `DONE_WITH_CONCERNS`.
