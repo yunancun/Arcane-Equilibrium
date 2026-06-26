@@ -1,7 +1,7 @@
 # Xuanheng TODO - Active Dispatch Queue
 
 **Version** v564 | **Date** 2026-06-26
-**Source/runtime pointer**: v564 source/test/docs checkpoint builds on repo `main` / `origin/main` parent `2a56640c6fece603efa29b380b1997ac5b42a6ce`; Linux runtime source and crontab expected-head pins remain `dd22810ee41c353c1d214d9a3217862d7b2bac74`.
+**Source/runtime pointer**: v564 source-code checkpoint commit `b5a7018afb716efcf8f2d3294ed8fd1e2a98b4de` is on `main` / `origin/main`; this TODO lives at current repo HEAD. Linux runtime source and crontab expected-head pins remain `dd22810ee41c353c1d214d9a3217862d7b2bac74`.
 **Current posture**: source-only control identity contract is `DONE_WITH_CONCERNS`; P0 authorization remains blocked/no-repeat unless a real candidate-scoped auth delta appears.
 **Links**: latest PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--source_only_control_identity_contract_no_order.md`; changelog `docs/CLAUDE_CHANGELOG.md`; TODO standard `docs/agents/todo-maintenance.md`.
 
