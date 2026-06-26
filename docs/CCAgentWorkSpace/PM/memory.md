@@ -25,6 +25,13 @@
 
 ## 近期記錄
 
+## 2026-06-26 Anti-Repeat TODO + Runtime Hygiene Reconcile
+
+- PM closed `P1-RUNTIME-HEALTH-HYGIENE-ANTI-REPEAT-TODO-RECONCILIATION-NO-APPLY` as docs/state `DONE_WITH_CONCERNS`.
+- TODO v575 now marks `P1-LEARNING-LOOP-CLOSURE` and `P1-AUTONOMOUS-PARAMETER-PROPOSAL` as DONE/no-repeat using the 2026-06-24 reports; do not rerun them.
+- Runtime auth latest sha `c956288b...` remains AVAX defer/no auth object/no active authority; runtime head and cron expected-head pins remain `dd22810e` while source/origin is `26a203b`.
+- PM read: no runtime apply happened. If continuing without auth delta, next safe item is `P1-RUNTIME-HEALTH-HYGIENE-SOURCE-SYNC-REVIEW-NO-APPLY`, not crontab/source sync.
+
 ## 2026-06-26 Candidate Source Freshness Alignment + Atomic Preview Runner
 
 - PM closed `P1-AGGRESSIVE-ALPHA-CANDIDATE-SOURCE-FRESHNESS-ALIGNMENT-NO-CAPTURE` as `DONE_WITH_CONCERNS`.
