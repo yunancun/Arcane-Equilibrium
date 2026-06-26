@@ -267,6 +267,12 @@ Do not paste long reports or stable architecture into TODO.
 - Verification: focused authority readiness `36 passed`; adjacent bounded-probe `107 passed`; E4 bounded-probe family `215 passed` twice; py_compile and diff-check PASS; PA/E2/E4 PASS. Boundary unchanged: no Bybit call/order/cancel/modify, no PG write, no `_latest` overwrite, no runtime/env/service/crontab mutation, no Cost Gate lowering, no Rust writer/adapter enablement, no probe/order/live authority, no promotion proof.
 - Next blocker: `P0-BOUNDED-PROBE-AVAX-RUNTIME-ADMISSION-E3-BB-REVIEW-DEMO-ONLY`.
 
+## 2026-06-26 AVAX Runtime Admission E3/BB Review + TODO Hygiene
+
+- `P0-BOUNDED-PROBE-AVAX-RUNTIME-ADMISSION-E3-BB-REVIEW-DEMO-ONLY` is `DONE_WITH_CONCERNS`: E3 and BB passed only opening the next separate runtime source-sync/post-restart reconciliation/adapter-enablement review checkpoint.
+- Runtime blockers remain explicit: `runtime_source_sync_not_verified`, `post_restart_pending_order_reconciliation_not_proven`, and `runtime_adapter_enablement_not_performed_source_only_packet`; review approval is not runtime mutation, adapter enablement, probe/order authority, or Bybit order permission.
+- `TODO.md` v527 was compressed back to active dispatch format: completed AVAX ladder rows are a compact no-repeat marker, `P0-PROFIT-DEMO-LEARNING-LOOP` is posture rather than an active row, and the next blocker is WAITING per operator pause request.
+
 ## 2026-06-24 Runtime Adapter No-Order BTC Checkpoint
 
 - `P0-BOUNDED-PROBE-RUNTIME-ADAPTER-ENABLEMENT-DEMO-ONLY-E3-BB-REVIEW` is `DONE_WITH_CONCERNS`: E3/BB found no safe current production flag for actual demo order submission; Rust writer still hard-codes `adapter_enabled=false`.
