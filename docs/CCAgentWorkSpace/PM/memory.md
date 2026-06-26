@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-27 Standing Demo False-Negative Preflight Runtime Sync Apply
+
+- PM/E3 closed `P1-RUNTIME-HEALTH-HYGIENE-STANDING-DEMO-FALSE-NEGATIVE-PREFLIGHT-SYNC-REVIEW` as `DONE_WITH_CONCERNS`.
+- Runtime source and crontab expected-head pins are aligned at `e29c96cc...`; sync changed no service, order, PG, Cost Gate, adapter, standing-env, explicit-authorize, or authority state.
+- Natural artifacts still fail closed because no runtime standing envelope is configured; next blocker is `P0-STANDING-DEMO-LOSS-CONTROL-ENVELOPE-RUNTIME-MATERIALIZATION-REVIEW`.
+
 ## 2026-06-27 Standing Demo False-Negative Preflight Source Plumbing
 
 - PM closed `P0-STANDING-DEMO-FALSE-NEGATIVE-PREFLIGHT-PLUMBING` as source/test/docs `DONE_WITH_CONCERNS`.
