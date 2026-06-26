@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Health [68] Local Lineage Residual Source Patch
+
+- PM/E2/E4 closed `P1-RUNTIME-HEALTH-HYGIENE-LOCAL-LINEAGE-68-STALE-WORKING` as source-only `DONE_WITH_CONCERNS`.
+- Anti-repeat: `P1-LEARNING-LOOP-CLOSURE` and `P1-AUTONOMOUS-PARAMETER-PROPOSAL` are already done via 2026-06-24 reports; do not rerun them without new source/runtime/PG/artifact evidence.
+- PM read: [68] now distinguishes exchange-clean local close/risk stale `Working` lineage residuals from real entry resting exposure. This reduces a false blocker but is not synced to Linux runtime and is not profit proof.
+
 ## 2026-06-26 AVAX Authorization Review Ready No-Authority
 
 - PM/E3/BB advanced `P0-BOUNDED-PROBE-AUTHORIZATION` only to a no-authority review checkpoint for `grid_trading|AVAXUSDT|Sell`.

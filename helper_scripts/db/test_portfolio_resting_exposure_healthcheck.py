@@ -282,6 +282,116 @@ class TestPortfolioRestingExposureHealthcheck(unittest.TestCase):
         self.assertIn("breach", msg)
         self.assertIn("resting-only:3500", msg)
 
+    def test_close_risk_working_without_filled_position_is_lineage_residual(self) -> None:
+        """close/risk Working row + 本地無持倉 → 可見 lineage residual，不當 entry exposure。
+
+        這鎖定 2026-06-26 demo cleanup 後的 [68] false-red 形狀：exchange
+        full-scan clean，但 local DB 還有 `oc_risk_*` / `oc_close_*` Working
+        rows。普通 entry resting-only 仍由上一個 test fail；這裡只處理
+        close/risk prefix。
+        """
+        data_dir = Path(self._tmp_data.name)
+        _write_snapshot(
+            data_dir / "pipeline_snapshot_demo.json",
+            balance=10000.0,
+            positions=[],
+        )
+
+        cur = _mock_cursor(
+            [(True, True)],
+            [
+                [
+                    (
+                        "oc_risk_dm_1782442146668_133",
+                        "AVAXUSDT",
+                        "Sell",
+                        250.0,
+                        1,
+                        "risk_close:ipc_close_symbol",
+                    ),
+                    (
+                        "oc_close_mf_fb_dm_1782442166742_135",
+                        "NEARUSDT",
+                        "Buy",
+                        148.0,
+                        1,
+                        "strategy_close:maker_fallback",
+                    ),
+                    (
+                        "oc_ipc_close_dm_1782442166742_137",
+                        "FILUSDT",
+                        "Sell",
+                        10.0,
+                        1,
+                        "",
+                    ),
+                    (
+                        "external-risk-close-link",
+                        "ICPUSDT",
+                        "Buy",
+                        20.0,
+                        1,
+                        "risk_close:trailing_stop",
+                    ),
+                    (
+                        "external-strategy-close-link",
+                        "TRXUSDT",
+                        "Sell",
+                        22.0,
+                        1,
+                        "strategy_close:grid_close_long",
+                    ),
+                ],
+            ],
+        )
+
+        status, msg = check_68_portfolio_resting_exposure(cur)
+
+        self.assertEqual(status, "PASS", msg)
+        self.assertIn("healthy", msg)
+        self.assertIn("resting=0", msg)
+        self.assertIn("working_n=0", msg)
+        self.assertIn("local_lineage_residual_n=5", msg)
+        self.assertIn("local_lineage_residual_notional=450", msg)
+
+    def test_close_risk_working_with_filled_position_still_counts_as_divergence(self) -> None:
+        """close/risk Working row + 本地有同 symbol 持倉 → 仍計入 divergence。
+
+        這防止 source patch 把真 close-side resting divergence 全部藏掉。
+        """
+        data_dir = Path(self._tmp_data.name)
+        _write_snapshot(
+            data_dir / "pipeline_snapshot_demo.json",
+            balance=10000.0,
+            positions=[
+                {"symbol": "BTCUSDT", "is_long": True, "qty": 0.001, "entry_price": 60000.0},
+            ],
+        )
+
+        cur = _mock_cursor(
+            [(True, True)],
+            [
+                [
+                    (
+                        "oc_risk_dm_1782442146668_133",
+                        "BTCUSDT",
+                        "Sell",
+                        100.0,
+                        1,
+                        "risk_close:ipc_close_symbol",
+                    ),
+                ],
+            ],
+        )
+
+        status, msg = check_68_portfolio_resting_exposure(cur)
+
+        self.assertEqual(status, "FAIL", msg)
+        self.assertIn("resting=100", msg)
+        self.assertIn("working_n=1", msg)
+        self.assertIn("divergence=166.7%", msg)
+        self.assertNotIn("local_lineage_residual_n=1", msg)
+
     # ============================================================
     # Edge case 4：REQUIRED env 設定 → WARN 升 FAIL
     # ============================================================
