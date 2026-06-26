@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 ETH Cap Envelope Sensitivity No-Order
+
+- PM closed `P1-AGGRESSIVE-ALPHA-ETH-CAP-ENVELOPE-SENSITIVITY-NO-ORDER` as source-only `DONE_WITH_CONCERNS` and normalized TODO v558 to active-queue shape with an explicit operator-requested pause.
+- Fresh read-only runtime artifact check corrected the active cost-gate artifact path to `/tmp/openclaw/cost_gate_learning_lane/`; latest bounded auth artifact now reports `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED` for AVAX but remains defer/no typed confirm/no authority.
+- ETH Buy remains research-only: current `10 USDT` cap cannot construct it; executable tiers are `15.7105`, `31.4210`, `47.1315 USDT` for `0.01`, `0.02`, `0.03 ETH`. Do not raise cap or open ETH order/probe path without separate operator/QC/E3/BB review.
+
 ## 2026-06-26 Authorization Gate Status Clarity Runtime Sync
 
 - PM/E3 closed `P1-RUNTIME-HEALTH-HYGIENE-AUTH-STATUS-CLARITY-SYNC-REVIEW` as `DONE_WITH_CONCERNS`.
