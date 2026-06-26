@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Candidate Selection Delta Cap-Feasible Selector Source Fix
+
+- PM closed `P0-PROFIT-CANDIDATE-SELECTION-DELTA-REFRESH-NO-ORDER` as `DONE_WITH_CONCERNS`.
+- Runtime read-only delta: latest scorecard/auth chain again targeted `grid_trading|ETHUSDT|Buy`, but ETH remains infeasible under current `10 USDT` cap; AVAX remains the top current-cap-feasible candidate.
+- Source fix: cron false-negative operator review now prefers explicit/cap-feasible selected side-cell before falling back to top ranked false-negative. This is source/test/docs only; runtime sync remains a separate E3-reviewed blocker.
+
 ## 2026-06-26 AVAX/SUI/FIL Matched-Control Design No-Order
 
 - PM closed `P1-AGGRESSIVE-ALPHA-AVAX-SUI-FIL-MATCHED-CONTROL-DESIGN-NO-ORDER` as `DONE_WITH_CONCERNS`.
