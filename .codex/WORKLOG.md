@@ -11,6 +11,13 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 15:50 CEST
+- closed `P1-FEE-TIER-PRIVATE-READ-ENVELOPE-E3-BB-REVIEW-NO-READ` as source-only `DONE_WITH_CONCERNS`
+- E3/BB review found query-minimization, alias/path, standalone-artifact, and strict-parser concerns; PM hardened `private_fee_tier_read_envelope_design.py` and tests
+- hardened smoke `/tmp/openclaw/20260626T133535Z_fee_tier_private_read_envelope_e3_bb_review_no_read/private_fee_tier_read_envelope_design_hardened.json` returned `PRIVATE_FEE_TIER_READ_ENVELOPE_READY_NO_READ`, sha `c1081ff4...`
+- latest runtime auth sha `beb5a74d...` is still `decision=defer`, no `authorization_id`, no probe/order authority, so P0 authorization remains blocked
+- boundary: source/test/docs + local `/tmp` smoke + official docs read only; no private fee read, credential load, Bybit account API call, PG, runtime/crontab/service mutation, Cost Gate change, authority, or proof claim
+
 2026-06-26 15:27 CEST
 - closed `P1-FEE-TIER-PRIVATE-READ-ENVELOPE-DESIGN-NO-READ` as source-only `DONE_WITH_CONCERNS`
 - added `private_fee_tier_read_envelope_design.py` and tests; real artifact smoke `/tmp/openclaw/20260626T130005Z_fee_tier_private_read_envelope_design_no_read/private_fee_tier_read_envelope_design.json` returned `PRIVATE_FEE_TIER_READ_ENVELOPE_READY_NO_READ`, sha `24180d6d...`
