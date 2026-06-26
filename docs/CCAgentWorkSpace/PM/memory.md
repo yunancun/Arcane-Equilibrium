@@ -25,11 +25,17 @@
 
 ## 近期記錄
 
+## 2026-06-27 Aligned ETH Bounded Authorization Review
+
+- PM/E3/BB closed `P0-ALIGNED-ETH-BOUNDED-AUTHORIZATION-REVIEW` as `DONE_WITH_CONCERNS`.
+- Timestamped noncanonical artifact `/tmp/openclaw/aligned_eth_bounded_authorization_review_20260626T234532Z/bounded_probe_operator_authorization_authorize_review.json` emitted a scoped ETHUSDT/Buy auth object with cap `2`, but canonical `_latest` stayed `defer` with no auth object and no active runtime probe/order authority.
+- Next blocker is `P0-ALIGNED-ETH-RUNTIME-ADMISSION-EXECUTION-ENVELOPE-REVIEW`; do not promote `_latest`, include in a plan, enable adapter/writer, or execute before that separate checkpoint.
+
 ## 2026-06-27 Standing Demo Current-Candidate Downstream Alignment Apply
 
 - PM/E3 closed `P0-STANDING-DEMO-CURRENT-CANDIDATE-DOWNSTREAM-ALIGNMENT-REVIEW` as runtime `DONE_WITH_CONCERNS`.
 - Canonical downstream artifacts now align to `grid_trading|ETHUSDT|Buy`; bounded auth latest is `READY_FOR_OPERATOR_AUTHORIZATION_REVIEW`, `decision=defer`, no auth object, no active probe/order authority.
-- Next blocker is a separate `PM -> E3 -> BB -> PM` bounded authorization review for the aligned ETH candidate; do not treat this alignment as execution authority or profit proof.
+- Next blocker at that time was a separate `PM -> E3 -> BB -> PM` bounded authorization review for the aligned ETH candidate; this is now superseded by the 2026-06-27 bounded authorization review entry above.
 
 ## 2026-06-27 Standing Demo Loss-Control Envelope Runtime Materialization Apply
 
