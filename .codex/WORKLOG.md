@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 16:55 CEST
+- refined P0 anti-repeat after cron refreshed auth sha to `310a5ed5...` with the same defer/no-authority semantics
+- TODO v590 now says sha/mtime-only defer refresh is not an actionable P0 delta; reopen only on semantic authority fields changing
+- false-negative review remains pending rank `2`, expected confirm `approve_cost_gate_false_negative_preflight:grid_trading|AVAXUSDT|Sell:2`, match false; preflight remains `OPERATOR_REVIEW_REQUIRED`
+- boundary: docs/TODO/changelog/worklog/report + read-only source/runtime artifacts only; no private fee read, Bybit/API/order, PG, runtime/crontab/service mutation, Cost Gate/freshness-gate change, authority, or proof claim
+
 2026-06-26 16:45 CEST
 - classified fresh `P0-BOUNDED-PROBE-AUTHORIZATION` runtime auth delta as `BLOCKED_BY_RUNTIME_AUTHORIZATION`
 - runtime auth latest sha `63aa5382...`, mtime `2026-06-26T14:30:55Z`, remains AVAX `decision=defer`, no `authorization_id`, no exact typed confirm, no standing Demo authorization, no probe/order authority
