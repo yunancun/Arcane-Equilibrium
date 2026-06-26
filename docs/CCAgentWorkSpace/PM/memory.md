@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 TODO Maintenance Compliance Compaction
+
+- PM closed operator-requested `P1-TODO-MAINTENANCE-COMPLIANCE-COMPACTION` as source/doc-only `DONE_WITH_CONCERNS`; `TODO.md` v561 is back to compact active-queue shape.
+- Fresh natural artifacts show autonomous proposal has `cost_gate_cap_envelope_evidence_floor_v1`, but bounded auth is still AVAX-scoped defer/no authority.
+- PM read: pause now per operator. On resume, do source-only low-price false-negative evidence-floor ranking unless a real P0 auth delta appears first.
+
 ## 2026-06-26 Cap Envelope Proposal Runtime Sync
 
 - PM/E3 closed `P1-RUNTIME-HEALTH-HYGIENE-CAP-ENVELOPE-PROPOSAL-SYNC-REVIEW` as `DONE_WITH_CONCERNS`.
