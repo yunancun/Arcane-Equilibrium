@@ -11,6 +11,13 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 13:58 CEST
+- closed `P1-RUNTIME-HEALTH-HYGIENE-SOURCE-SYNC-APPLY-REVIEW` as PM/E3 read-only `DONE_WITH_CONCERNS_NO_APPLY`
+- source/origin `370a3d82` vs runtime `dd22810e`; diff is docs/reports/TODO/worklog/changelog/SCRIPT_INDEX plus source-only cost-gate research helpers/tests, with no Rust/FastAPI/cron/canary/deploy/service/migration/Cargo/crontab paths
+- runtime pins remain internally consistent at `dd22810e`; no source sync or expected-head crontab edit is justified now
+- latest auth `e7420e21...` remains AVAX defer/no authority; latest shadow placement `265a16...` is sample-mismatch only, 0 candidate-matched orders, no proof/authority/mutation
+- boundary: read-only runtime/source review + docs/TODO only; no runtime mutation, Bybit/order, PG, Cost Gate, authority, or proof claim
+
 2026-06-26 13:45 CEST
 - closed `P1-RUNTIME-HEALTH-HYGIENE-API-PROCESS-OWNERSHIP` as read-only docs/TODO `DONE_WITH_CONCERNS`
 - `systemctl --user` owns the runtime API (`openclaw-trading-api.service`, MainPID `2218842`) and watchdog (`openclaw-watchdog.service`, MainPID `1538268`); API cgroup confirms `app.slice/openclaw-trading-api.service`
