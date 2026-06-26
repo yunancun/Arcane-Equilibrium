@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 14:31 CEST
+- closed `P1-RUNTIME-HEALTH-HYGIENE-AUTH-TYPED-CONFIRM-GUARD-RUNTIME-SYNC-REVIEW` as read-only `DONE_WITH_CONCERNS_NO_APPLY`
+- source/origin `b224c759` vs runtime `dd22810e`; crontab expected-head old/new `11/0`; latest natural auth sha `351bd18b...` still emits stale exact `authorize_bounded_demo_probe:grid_trading|AVAXUSDT|Sell:0:` with no authorization id or authority
+- E3 verdict: future apply is justified only as atomic runtime source sync plus all 11 expected-head replacements; no restart, cron run, PG, Bybit/order, Cost Gate, writer/adapter, or authority change
+- normalized `TODO.md` v581 back to active-dispatch shape and paused per operator request
+
 2026-06-26 14:10 CEST
 - closed `P0-BOUNDED-PROBE-AUTHORIZATION-TYPED-CONFIRM-GUARD` as source/test/docs `DONE_WITH_CONCERNS`
 - latest runtime auth sha `af337e48...` remains AVAX `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED` / `decision=defer`, no authority; the source fix prevents exact `authorize_bounded_demo_probe:...:0:` phrases before preflight readiness and complete auth fields

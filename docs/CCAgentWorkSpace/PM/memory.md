@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Auth Typed-Confirm Guard Runtime Sync Review No-Apply
+
+- PM/E3 closed `P1-RUNTIME-HEALTH-HYGIENE-AUTH-TYPED-CONFIRM-GUARD-RUNTIME-SYNC-REVIEW` as read-only `DONE_WITH_CONCERNS_NO_APPLY` because the operator requested pause after TODO normalization.
+- New runtime delta: source/origin is `b224c759`, runtime remains `dd22810e`, crontab pins old/new `11/0`, and natural auth sha `351bd18b...` still emits stale `authorize_bounded_demo_probe:grid_trading|AVAXUSDT|Sell:0:` with no authorization id or authority.
+- E3 says future apply is justified only as atomic runtime source sync plus all 11 expected-head pin replacements; no restart, cron run, PG, Bybit/order, Cost Gate, writer/adapter, or authority change.
+
 ## 2026-06-26 Auth Typed-Confirm Guard Source Fix
 
 - PM closed `P0-BOUNDED-PROBE-AUTHORIZATION-TYPED-CONFIRM-GUARD` as source/test/docs `DONE_WITH_CONCERNS`.
