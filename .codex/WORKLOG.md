@@ -12,6 +12,12 @@ YYYY-MM-DD HH:MM TZ
 ```
 
 2026-06-26 14:31 CEST
+- closed `P1-RUNTIME-HEALTH-HYGIENE-AUTH-TYPED-CONFIRM-GUARD-RUNTIME-SYNC-APPLY` as `DONE_WITH_CONCERNS`
+- runtime source fast-forwarded `dd22810e -> b224c759`; crontab expected-head old/target `11/0 -> 0/11`; line count stayed `70`; API MainPID `2218842` and watchdog MainPID `1538268` unchanged/active
+- natural auth artifact after sync sha `fb2d05e...` now has `typed_confirm_expected=None`, a bounded-probe typed-confirm template, `typed_confirm_readiness=PREFLIGHT_NOT_READY`, and no authorization/probe/order authority
+- boundary: source ff-only + expected-head-only crontab replacement + docs/TODO/report only; no restart, cron run, PG, Bybit/order, Cost Gate, writer/adapter, authority, or proof claim
+
+2026-06-26 14:31 CEST
 - closed `P1-RUNTIME-HEALTH-HYGIENE-AUTH-TYPED-CONFIRM-GUARD-RUNTIME-SYNC-REVIEW` as read-only `DONE_WITH_CONCERNS_NO_APPLY`
 - source/origin `b224c759` vs runtime `dd22810e`; crontab expected-head old/new `11/0`; latest natural auth sha `351bd18b...` still emits stale exact `authorize_bounded_demo_probe:grid_trading|AVAXUSDT|Sell:0:` with no authorization id or authority
 - E3 verdict: future apply is justified only as atomic runtime source sync plus all 11 expected-head replacements; no restart, cron run, PG, Bybit/order, Cost Gate, writer/adapter, or authority change

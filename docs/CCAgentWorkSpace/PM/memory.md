@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Auth Typed-Confirm Guard Runtime Sync Apply
+
+- PM closed `P1-RUNTIME-HEALTH-HYGIENE-AUTH-TYPED-CONFIRM-GUARD-RUNTIME-SYNC-APPLY` as `DONE_WITH_CONCERNS`.
+- Runtime source fast-forwarded `dd22810e -> b224c759`; crontab expected-head old/target `11/0 -> 0/11`; line count stayed `70`; API MainPID `2218842` and watchdog MainPID `1538268` stayed active/running.
+- Natural auth sha `fb2d05e...` now suppresses exact `typed_confirm_expected` and emits template + `PREFLIGHT_NOT_READY`, but still has no authorization id or probe/order authority. P0 auth remains blocked by missing machine-checkable scoped authorization.
+
 ## 2026-06-26 Auth Typed-Confirm Guard Runtime Sync Review No-Apply
 
 - PM/E3 closed `P1-RUNTIME-HEALTH-HYGIENE-AUTH-TYPED-CONFIRM-GUARD-RUNTIME-SYNC-REVIEW` as read-only `DONE_WITH_CONCERNS_NO_APPLY` because the operator requested pause after TODO normalization.

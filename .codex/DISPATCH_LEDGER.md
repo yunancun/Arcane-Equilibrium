@@ -26,6 +26,23 @@ Result:
 - outcome, blocker, or next action
 ```
 
+2026-06-26 14:31 CEST
+Task:
+- Close `P1-RUNTIME-HEALTH-HYGIENE-AUTH-TYPED-CONFIRM-GUARD-RUNTIME-SYNC-APPLY` with the reviewed runtime source + expected-head sync.
+
+Chain:
+- PM -> E3(explorer, prior review) -> PM
+
+Ownership:
+- PM: create session state, verify anti-repeat delta, execute the exact ff-only runtime source sync and exact expected-head-only crontab replacement, run post-checks, update TODO/report/changelog/worklog/memory.
+- E3(explorer): prior runtime/security review defining the allowed future apply envelope, forbidden actions, and post-checks.
+
+Result:
+- Runtime source fast-forwarded from `dd22810e` to `b224c759`.
+- Crontab expected-head pins changed old/target `11/0 -> 0/11` with line count `70`.
+- Natural auth artifact now suppresses exact typed confirm while preflight/auth fields are incomplete and still grants no authority.
+- Status `DONE_WITH_CONCERNS`; next blocker remains `P0-BOUNDED-PROBE-AUTHORIZATION`, blocked by missing machine-checkable scoped authorization.
+
 2026-06-26 06:36 CEST
 Task:
 - Close `P1-RUNTIME-HEALTH-HYGIENE-CRON-POST-ALIGNMENT-HYGIENE-SNAPSHOT` with a no-mutation supplied-snapshot hygiene packet.
