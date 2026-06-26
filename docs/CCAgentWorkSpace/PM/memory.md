@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Atomic Quote Adapter Preview Runtime Review No-Capture
+
+- PM closed `P1-AGGRESSIVE-ALPHA-ATOMIC-QUOTE-ADAPTER-PREVIEW-RUNTIME-REVIEW` as `DONE_WITH_CONCERNS` without capture.
+- BB found no Bybit-side blocker for the public market-data envelope, but E3 blocked the exact run because `_latest` reroute sha `fcd7f925...` is stale for construction preview's `24h` max artifact age; fresh timestamped reroute sha `97021201...` is `LOWER_PRICE_REROUTE_ALIGNMENT_BLOCKED`.
+- PM read: do not rerun the exact capture envelope. Next if no real auth delta is source/artifact-only candidate-source freshness/alignment; no public quote capture until source alignment is fixed or scope is re-reviewed.
+
 ## 2026-06-26 Atomic Quote Adapter Preview Design No-Capture
 
 - PM closed `P1-AGGRESSIVE-ALPHA-ATOMIC-QUOTE-ADAPTER-PREVIEW-DESIGN-NO-CAPTURE` as source/test/docs `DONE_WITH_CONCERNS`.
