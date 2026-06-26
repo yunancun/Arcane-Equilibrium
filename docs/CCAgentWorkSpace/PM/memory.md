@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 ETH Buy Cap Feasibility No-Order
+
+- PM/QC/MIT closed `P1-AGGRESSIVE-ALPHA-ETH-BUY-CAP-FEASIBILITY-PROPOSAL-NO-ORDER` as `DONE_WITH_CONCERNS`.
+- Decision: do not raise cap or open ETH order/probe path now. ETH Buy remains research-only because current `10 USDT` cap cannot construct it (`15.7105 USDT` min executable notional, rounded qty `0`), evidence is only `7` modeled outcomes, and candidate-matched fills/fees/slippage/controls are absent.
+- PM read: AVAX Sell remains the only current-cap-feasible bounded Demo candidate, still blocked by valid scoped authorization. After operator-requested pause, resume at source-only `P1-AGGRESSIVE-ALPHA-CAP-FEASIBLE-LOW-PRICE-REGIME-FILTER-NO-ORDER`; do not rerun ETH cap feasibility without fresh scorecard/cap/construction or cap-envelope evidence.
+
 ## 2026-06-26 False-Negative Subset Mining ETH Cap-Bound
 
 - PM closed `P1-AGGRESSIVE-ALPHA-FALSE-NEGATIVE-SUBSET-MINING-NO-ORDER` as `DONE_WITH_CONCERNS` with a source-only review packet.

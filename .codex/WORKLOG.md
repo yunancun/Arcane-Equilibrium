@@ -11,6 +11,13 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 07:04 CEST
+- closed `P1-AGGRESSIVE-ALPHA-ETH-BUY-CAP-FEASIBILITY-PROPOSAL-NO-ORDER` as source-only `DONE_WITH_CONCERNS`
+- QC/MIT agree ETH Buy is a high-upside research lead but not execution-eligible: current `10 USDT` cap vs `15.7105 USDT` min executable notional, rounded qty `0`, 7 modeled outcomes, zero candidate-matched fills
+- decision: do not raise cap, do not mutate runtime/risk/order state, keep AVAX Sell as current cap-feasible bounded Demo candidate
+- next after operator-requested pause: `P1-AGGRESSIVE-ALPHA-CAP-FEASIBLE-LOW-PRICE-REGIME-FILTER-NO-ORDER`
+- boundary: runtime read-only hash check + docs/TODO/report/state only; no Bybit order/cancel/modify, PG write, runtime sync, service/crontab/env mutation, Cost Gate change, cap mutation, authority, or proof claim
+
 2026-06-26 06:54 CEST
 - closed `P1-AGGRESSIVE-ALPHA-FALSE-NEGATIVE-SUBSET-MINING-NO-ORDER` as source-only `DONE_WITH_CONCERNS`
 - latest false-negative scorecard ranks `grid_trading|ETHUSDT|Buy` highest (`258.3905bps`, 7/7 positive, friction rank 1), but cap screen excludes it under the current `10 USDT` cap because minimum executable notional is about `15.7318 USDT`
