@@ -273,6 +273,12 @@ Do not paste long reports or stable architecture into TODO.
 - Runtime blockers remain explicit: `runtime_source_sync_not_verified`, `post_restart_pending_order_reconciliation_not_proven`, and `runtime_adapter_enablement_not_performed_source_only_packet`; review approval is not runtime mutation, adapter enablement, probe/order authority, or Bybit order permission.
 - `TODO.md` v527 was compressed back to active dispatch format: completed AVAX ladder rows are a compact no-repeat marker, `P0-PROFIT-DEMO-LEARNING-LOOP` is posture rather than an active row, and the next blocker is WAITING per operator pause request.
 
+## 2026-06-26 AVAX Runtime Source + Cron Expected-Head Sync
+
+- PM synced Linux `/home/ncyu/BybitOpenClaw/srv` cleanly from `e0c2a0e1` to `d2cd70d0` with no restart/rebuild, after E3 allowed ff-only source checkout sync and BB failed only the adapter/order path.
+- E3 approved exactly 11 crontab expected-head SHA replacements; post-check line count stayed `70`, old SHA count `0`, new `d2cd70d0` count `11`, and adapter/mainnet/probe-record forbidden counts stayed `0`.
+- Engine PID `2432529` and API MainPID `2218842` remained unchanged. Adapter/order path remains blocked by passive healthcheck FAIL, especially demo resting exposure `working_n=6` / about `691 USDT`.
+
 ## 2026-06-24 Runtime Adapter No-Order BTC Checkpoint
 
 - `P0-BOUNDED-PROBE-RUNTIME-ADAPTER-ENABLEMENT-DEMO-ONLY-E3-BB-REVIEW` is `DONE_WITH_CONCERNS`: E3/BB found no safe current production flag for actual demo order submission; Rust writer still hard-codes `adapter_enabled=false`.

@@ -783,6 +783,13 @@ YYYY-MM-DD HH:MM TZ
 - Verification: API env-parity + runtime-health hygiene tests `35 passed`, focused E2/E4 tests `13 passed`, py_compile PASS, `git diff --check` PASS, supplied-snapshot CLI smoke PASS.
 - Boundary: source/test/docs + supplied `/tmp` snapshot smoke only; no systemd apply, daemon-reload, process signal, service restart, API/env/crontab mutation, PG/Bybit call, Cost Gate change, probe/order/live authority, or promotion proof.
 
+# 2026-06-26 — AVAX Runtime Source + Cron Expected-Head Sync
+
+- Task: advance AVAX bounded Demo runtime hygiene after source-readiness, without granting adapter/order/probe authority.
+- Dispatch chain: `PM(default)` session-loop states + `E3(explorer)` runtime/security review + `BB(default)` exchange-facing review + `PM(default)` bounded apply.
+- Result: Linux checkout fast-forwarded cleanly `e0c2a0e1 -> d2cd70d0`; crontab expected-head pins replaced exactly old SHA `11 -> 0` / new SHA `0 -> 11`; engine PID and API MainPID unchanged.
+- Boundary: no restart/rebuild/Linux cargo, no PG write, no Bybit call/order/cancel/modify, no `_latest` overwrite, no adapter/writer enablement, no Cost Gate change, no probe/order/live authority, no promotion proof. Next blocker is demo resting exposure reconciliation.
+
 # 2026-06-24 — API Service Runtime Cutover Exact Unit Diff Packet
 
 - Task: advance `P1-API-SERVICE-OWNERSHIP-RUNTIME-CUTOVER-APPLY-REVIEW` without applying the systemd cutover.
