@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 05:18 CEST
+- closed `P0-PROFIT-EVIDENCE-QUALITY-DEMO-RESIDUAL-CLEANUP-ACTION-REFRESH-E3-BB` as `DONE_WITH_CONCERNS`
+- evidence: E3/BB approved one-time inline GET-only pre/post Bybit demo full scan because runtime lacked the repo helper; pre-inventory had 5 reduce-only conditionals and 5 positions worth 440.1415 USDT; exactly one runtime-local CSRF/Bearer `POST /api/v1/strategy/demo/session/stop` returned HTTP 200, `closed_all=true`, `partial_failure=false`; post-inventory open orders=0 and nonzero positions=0
+- what remains: passive health [68] still FAILs from 4 local stale close/risk `Working` rows despite exchange-clean truth; next active blocker is candidate selection with strict proof exclusions
+- boundary: no direct Bybit POST by PM, no second cleanup POST, no PG write, no runtime source sync/restart/rebuild, no crontab/env mutation, no Rust writer/adapter, no Cost Gate change, no probe/order/live authority, no profit proof
+
 2026-06-26 04:56 CEST
 - closed `P1-RUNTIME-HEALTH-HYGIENE-CONTROL-API-AUTH-TOKEN-PATH` as `DONE_WITH_CONCERNS`
 - evidence: E3 approved exactly one runtime-local authenticated read-only GET; `trade-core` used the runtime repo token file through a 0600 temp curl config; `GET /api/v1/backtest/status` returned HTTP 200 with keys `last_result_available/source/stub`; artifacts under `/tmp/openclaw/audit/control_api_auth_token_path/20260626T025405Z_*`

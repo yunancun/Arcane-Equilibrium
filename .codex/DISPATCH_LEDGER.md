@@ -42,6 +42,23 @@ Result:
 - The prior cleanup `401` is narrowed to Mac-vs-runtime token-source alignment.
 - Next action is a fresh `PM -> E3 -> BB -> PM` cleanup envelope plus fresh demo pre-inventory; no cleanup/order authority was granted.
 
+2026-06-26 05:18 CEST
+Task:
+- Close `P0-PROFIT-EVIDENCE-QUALITY-DEMO-RESIDUAL-CLEANUP-ACTION-REFRESH-E3-BB` with one reviewed demo cleanup action and independent post-action exchange inventory.
+
+Chain:
+- PM -> E3(explorer) -> BB(default) -> PM
+
+Ownership:
+- PM: create session state, execute the approved one-shot runtime-local cleanup path, collect pre/post full-scan evidence, update TODO/report/changelog.
+- E3(explorer): security/runtime review for token, CSRF, helper absence, and one-time inline inventory constraints.
+- BB(default): Bybit endpoint/scope review, caps, full-scan pre/post requirements, and proof-exclusion policy.
+
+Result:
+- Pre-inventory was inside caps; one `POST /api/v1/strategy/demo/session/stop` returned HTTP `200`, `closed_all=true`, `partial_failure=false`; independent post-inventory shows open orders `0` and nonzero positions `0`.
+- Cleanup rows remain risk hygiene only, not Cost Gate, bounded-probe, promotion, or PnL proof.
+- Next active blocker is `P0-PROFIT-CANDIDATE-SELECTION`.
+
 2026-06-18 23:42 CEST
 Task:
 - Close `P3-SUB-AGENT-HYGIENE-SOP-CARGO-TEST-AFTER-ATOMIC` by turning the existing sub-agent hygiene SOP into a Codex dispatch-time requirement.
