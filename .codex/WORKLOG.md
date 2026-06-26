@@ -11,6 +11,11 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 16:56 CEST
+- corrected TODO source/origin pointer drift: v590 still pointed at `53568ce5...`, while current source/origin pre-v591 checkpoint is `cafbef04...`
+- P0 authorization remains semantic-no-op: latest bounded auth sha `310a5ed5...` is still `decision=defer`, no `authorization_id`, no typed confirm, no probe/order authority
+- boundary: docs/TODO/changelog/worklog/report + read-only source/runtime artifacts only; no private fee read, Bybit/API/order, PG, runtime/crontab/service mutation, Cost Gate change, authority, or proof claim
+
 2026-06-26 16:55 CEST
 - refined P0 anti-repeat after cron refreshed auth sha to `310a5ed5...` with the same defer/no-authority semantics
 - TODO v590 now says sha/mtime-only defer refresh is not an actionable P0 delta; reopen only on semantic authority fields changing

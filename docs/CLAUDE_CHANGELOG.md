@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-26（TODO v590 P0 auth semantic delta no-op）
+> 最後更新：2026-06-26（TODO v591 source pointer drift correction）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v591 增量（2026-06-26 source pointer drift correction）**：PM resumed the profit-first autonomy loop and created session state `/tmp/openclaw/session_loop_state_20260626T1456Z_todo_source_pointer_drift_correction.json`, sha `eaccee5f4f432367bb5b0cd3d49af798d99bec2c93b10c8b6824a8440ce4f398`. Anti-repeat found no semantic P0 authorization delta: bounded auth latest remains sha `310a5ed51f21460ff673da2474241bc434227fadc8bc8392a8f79f0586279632`, mtime `2026-06-26T14:45:04.954460Z`, `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED` / `decision=defer`, no `authorization_id`, no exact typed confirm, no standing Demo authorization, and no probe/order authority. New source-only evidence delta was TODO v590 masthead drift: it still pointed at source/origin `53568ce5...` while current source/origin pre-v591 checkpoint was `cafbef04...`. TODO v591 corrects the active source pointer and keeps P0 authorization blocked/no-repeat. Boundary：docs/TODO/changelog/worklog/report + read-only source/runtime artifacts only；no private fee read, Bybit/API/order/cancel/modify, PG query/write, runtime/service/env/crontab mutation, Cost Gate lowering, writer/adapter enablement, probe/order/live authority, or proof/profit claim. PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--todo_source_pointer_drift_correction.md`.
 
 **v590 增量（2026-06-26 P0 auth semantic delta no-op）**：PM observed another runtime cron refresh after v589: bounded auth latest sha `310a5ed51f21460ff673da2474241bc434227fadc8bc8392a8f79f0586279632`, mtime `2026-06-26T14:45:04.954460Z`, still `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED` / `decision=defer`, no `authorization_id`, no exact typed confirm, no standing Demo authorization, no emitted authorization object, and no active runtime probe/order authority. Session state `/tmp/openclaw/session_loop_state_20260626T1450Z_p0_auth_semantic_delta_noop_no_authority.json` records the anti-repeat refinement: cron mtime/sha-only defer refresh is not an actionable P0 evidence delta; reopen P0 only on semantic authority fields changing. False-negative review remains pending rank `2` with expected preflight confirm `approve_cost_gate_false_negative_preflight:grid_trading|AVAXUSDT|Sell:2`, match `false`; preflight remains `OPERATOR_REVIEW_REQUIRED`. Boundary：docs/TODO/changelog/worklog/report + read-only source/runtime artifacts only；no private fee read, Bybit/API/order/cancel/modify, PG query/write, runtime/service/env/crontab mutation, Cost Gate lowering, writer/adapter enablement, probe/order/live authority, or proof/profit claim. PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--p0_auth_semantic_delta_noop_no_authority.md`.
 
