@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-26（TODO v541 source/runtime pointer correction after health [68] runtime sync report commit；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-26（TODO v542 self-referential source pointer wording correction；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v542 增量（2026-06-26 self-referential source pointer wording correction）**：Adjusted TODO source/runtime pointer wording to avoid claiming that a committed file contains its own final commit hash. The masthead now records the Mac/origin docs checkpoint immediately before this metadata-only checkpoint (`f71afa45`) and explicitly states that docs/TODO-only deltas above runtime code checkpoint `0246b263` do not need Linux runtime sync. Active blocker/status/next blocker are unchanged. Boundary：docs/TODO/changelog metadata only；no runtime mutation, no PG/Bybit/API call, no restart/rebuild, no crontab/env edit, no Cost Gate change, no authority/proof claim.
 
 **v541 增量（2026-06-26 source/runtime pointer correction after health [68] runtime sync report commit）**：Corrected TODO masthead/source pointer after the v540 report commit was pushed. Mac/origin `main` is now docs checkpoint `367a7cd5`, while Linux runtime intentionally remains at code checkpoint `0246b263` because `367a7cd5` only records TODO/report/changelog evidence and does not need runtime sync. Active state remains `P1-RUNTIME-HEALTH-HYGIENE-68-RUNTIME-SYNC-REVIEW` `DONE_WITH_CONCERNS`, next blocker `P1-RUNTIME-HEALTH-HYGIENE-CRON-EXPECTED-HEAD-DRIFT-REVIEW`. Boundary：docs/TODO/changelog metadata only；no runtime mutation, no PG/Bybit/API call, no restart/rebuild, no crontab/env edit, no Cost Gate change, no authority/proof claim.
 
