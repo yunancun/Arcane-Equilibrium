@@ -25,6 +25,13 @@
 
 ## 近期記錄
 
+## 2026-06-26 Cron Expected-Head Drift Alignment
+
+- PM/E3 closed `P1-RUNTIME-HEALTH-HYGIENE-CRON-EXPECTED-HEAD-DRIFT-REVIEW` as `DONE_WITH_CONCERNS`.
+- Runtime crontab expected-head pins now align to `0246b263`: old `d2cd70d0` count `0`, new count `11`, lines `57,67,68,69,70`, line count `70`.
+- PM read: use `systemctl --user` for canonical API/watchdog checks. `openclaw-trading-api.service` is active/enabled with MainPID `2218842`, and `openclaw-watchdog.service` is active/running/enabled; system-level `openclaw-api`/`openclaw-watchdog` inactive is wrong-scope evidence.
+- TODO v543 is normalized to active queue only. Next blocker is `P1-RUNTIME-HEALTH-HYGIENE-CRON-POST-ALIGNMENT-HYGIENE-SNAPSHOT`, but the operator requested pause after this round.
+
 ## 2026-06-26 Health [68] Runtime Source Sync Review
 
 - PM/E3 closed `P1-RUNTIME-HEALTH-HYGIENE-68-RUNTIME-SYNC-REVIEW` as `DONE_WITH_CONCERNS`; Linux `trade-core` source-only fast-forwarded clean to `0246b263`.

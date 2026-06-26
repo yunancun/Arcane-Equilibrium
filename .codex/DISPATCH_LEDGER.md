@@ -26,6 +26,22 @@ Result:
 - outcome, blocker, or next action
 ```
 
+2026-06-26 06:24 CEST
+Task:
+- Close `P1-RUNTIME-HEALTH-HYGIENE-CRON-EXPECTED-HEAD-DRIFT-REVIEW` and normalize TODO back to the active-dispatch standard.
+
+Chain:
+- PM -> E3(explorer) -> PM
+
+Ownership:
+- PM: create/update session state, collect runtime crontab/source/user-service evidence, apply the reviewed exact expected-head-only crontab replacement, update TODO/report/changelog/worklog/memory.
+- E3(explorer): runtime/security review defining the allowed literal replacement, forbidden actions, rollback condition, and post-checks.
+
+Result:
+- Crontab expected-head pins now align with runtime code head `0246b263`; old literal count `0`, new literal count `11`, line count `70`.
+- User `openclaw-trading-api.service` and `openclaw-watchdog.service` remain active under `systemctl --user`; no restart/rebuild/PG/Bybit/API/Cost Gate/authority/proof action occurred.
+- Status `DONE_WITH_CONCERNS`; next blocker is a read-only post-alignment hygiene snapshot, paused until operator resumes.
+
 2026-06-26 06:08 CEST
 Task:
 - Close `P1-RUNTIME-HEALTH-HYGIENE-68-RUNTIME-SYNC-REVIEW` with a source-only Linux fast-forward and direct [68] runtime verification.
