@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 False-Negative Subset Mining ETH Cap-Bound
+
+- PM closed `P1-AGGRESSIVE-ALPHA-FALSE-NEGATIVE-SUBSET-MINING-NO-ORDER` as `DONE_WITH_CONCERNS` with a source-only review packet.
+- Latest scorecard ranks `grid_trading|ETHUSDT|Buy` highest (`258.3905bps`, 7/7 positive, friction rank 1), but current 10 USDT cap makes it non-constructible because min executable notional is about `15.7318 USDT`.
+- PM read: AVAX Sell remains the current cap-feasible bounded Demo candidate. Next source-only blocker is ETH Buy cap/risk feasibility; no cap mutation, order/probe authority, or Cost Gate change.
+
 ## 2026-06-26 Bounded Probe Authorization Anti-Repeat TODO Hygiene
 
 - PM closed the current `P0-BOUNDED-PROBE-AUTHORIZATION` round as `BLOCKED_BY_RUNTIME_AUTHORIZATION`; repeated no-authority audit is `NO-OP_NO_EVIDENCE_DELTA`.

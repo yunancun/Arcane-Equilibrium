@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 06:54 CEST
+- closed `P1-AGGRESSIVE-ALPHA-FALSE-NEGATIVE-SUBSET-MINING-NO-ORDER` as source-only `DONE_WITH_CONCERNS`
+- latest false-negative scorecard ranks `grid_trading|ETHUSDT|Buy` highest (`258.3905bps`, 7/7 positive, friction rank 1), but cap screen excludes it under the current `10 USDT` cap because minimum executable notional is about `15.7318 USDT`
+- AVAX Sell remains current cap-feasible bounded Demo candidate; next blocker is `P1-AGGRESSIVE-ALPHA-ETH-BUY-CAP-FEASIBILITY-PROPOSAL-NO-ORDER`
+- boundary: read-only artifact inspection + docs/TODO/report only; no Bybit/API/order call, PG write, runtime sync, service/crontab/env mutation, Cost Gate change, cap mutation, authority, or proof claim
+
 2026-06-26 06:44 CEST
 - closed current `P0-BOUNDED-PROBE-AUTHORIZATION` round as `BLOCKED_BY_RUNTIME_AUTHORIZATION`
 - anti-repeat result: runtime latest auth artifact remains defer-only, candidate-mismatched to `grid_trading|ETHUSDT|Buy`, no standing auth/object/runtime authority for selected `grid_trading|AVAXUSDT|Sell`
