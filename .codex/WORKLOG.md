@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 02:59 CEST
+- closed `P0-PROFIT-EVIDENCE-QUALITY-DEMO-RESTING-EXPOSURE-RECONCILIATION-E3-BB-REVIEW` as read-only `DONE_WITH_CONCERNS`
+- evidence: Linux source stayed clean at `d2cd70d0`, crontab expected-head occurrences `11/0`; passive [68] 24h still failed with demo `working_n=6` / ~691 USDT; direct 72h PG inventory showed 30 demo `Working` orders, 29 `flash_dip_buy` totaling 7264.93 USDT plus one zero-notional risk-close row; 72h fills attribution order/context gaps were 0/0; audit top-40 had 6 BBO-touched-no-fill rows
+- E3/BB both allow docs/TODO closure only; next active blocker is separate Bybit demo private read-only open-order inventory, followed by a separate cancel/modify plan only if needed
+- boundary: read-only PG/healthcheck/source/crontab inspection + docs only; no Bybit call, private read, cancel/modify/order, PG write, restart/rebuild, env/crontab mutation, adapter enablement, Cost Gate change, probe/order/live authority, or promotion proof
+
 2026-06-19 03:47 CEST
 - refreshed TODO v227 passive-watch evidence without closing any gate
 - evidence: Mac/origin/Linux aligned at v226 checkpoint `880b82ba`; watchdog `engine_alive=true` with demo snapshot age `7.4s`; Gate-B latest `2026-06-19T01:42:01Z` remains `WATCH_ONLY` (21 total, 0 alertable/start/schedule, 1 watch_only); flash_dip remains zero-sample; L2 cursor still `2026-06-17` with B3 shadow rows=0; D2 `reconcile_ghost_converge` total/semantics rows still 0
