@@ -1,7 +1,7 @@
 # Xuanheng TODO - Active Dispatch Queue
 
 **Version** v563 | **Date** 2026-06-26
-**Source/runtime pointer**: v563 source/test/docs checkpoint builds on repo `main` / `origin/main` parent `b111fe85739d6ea1f99c8739708213608f710eda`; Linux runtime source and crontab expected-head pins remain `dd22810ee41c353c1d214d9a3217862d7b2bac74`.
+**Source/runtime pointer**: v563 source-code checkpoint commit `b79a3c2fdd7cd8792af550d2114858e0362c049f` is on `main` / `origin/main`; this TODO lives at current repo HEAD. Linux runtime source and crontab expected-head pins remain `dd22810ee41c353c1d214d9a3217862d7b2bac74`.
 **Current posture**: evidence-floor gap-closure design is `DONE_WITH_CONCERNS`; operator requested pause after this round. P0 authorization remains blocked/no-repeat unless a real candidate-scoped auth delta appears.
 **Links**: latest PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--evidence_floor_gap_closure_design_no_order.md`; changelog `docs/CLAUDE_CHANGELOG.md`; TODO standard `docs/agents/todo-maintenance.md`.
 
