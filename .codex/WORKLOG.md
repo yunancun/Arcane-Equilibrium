@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 22:44 CEST
+- rebased the long-running loop from repeated P0 authorization no-op polling to a stable profit-first autonomous trading loop
+- added `docs/agents/profit-first-autonomy-loop.md`; TODO v593 now points current work at `P0-STANDING-DEMO-AUTHORIZATION-PLUMBING`
+- operator standing Demo authorization is now treated as input that must become a structured runtime-readable loss-control envelope, not another reason to defer artifacts
+- boundary: docs/TODO/changelog/memory/context-loading/worklog only; no runtime mutation, Bybit/order, PG, Cost Gate change, live authority, or proof claim
+
 2026-06-26 16:56 CEST
 - corrected TODO source/origin pointer drift: v590 still pointed at `53568ce5...`, while current source/origin pre-v591 checkpoint is `cafbef04...`
 - P0 authorization remains semantic-no-op: latest bounded auth sha `310a5ed5...` is still `decision=defer`, no `authorization_id`, no typed confirm, no probe/order authority

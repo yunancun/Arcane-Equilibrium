@@ -12,6 +12,7 @@ TODO.
 | Operating personality, hard boundaries, workflow | `CLAUDE.md` and, for Codex, `.codex/MEMORY.md` |
 | Stable project overview, architecture entry, GUI, scripts | `README.md` |
 | Current active state, blockers, queue, schedules | `TODO.md` |
+| Profit-first autonomous trading loop | `docs/agents/profit-first-autonomy-loop.md`; current tasks still live in `TODO.md` |
 | Domain vocabulary | `CONTEXT.md` and `docs/agents/domain.md` |
 | Accepted architecture decisions | relevant files under `docs/adr/` |
 | Implementation plans / sign-off evidence | linked reports under `docs/CCAgentWorkSpace/*/workspace/reports/` |
@@ -61,6 +62,9 @@ captures the same decision surface or the deletion is explicitly called out.
 ## Update rules
 
 - When changing current state, update `TODO.md`, not README or memory.
+- When changing the stable profit-first autonomy loop, update
+  `docs/agents/profit-first-autonomy-loop.md`; keep current task details in
+  `TODO.md`.
 - When changing stable architecture or project entry points, update `README.md`
   and the relevant architecture/ADR docs.
 - When changing agent behavior, update memory plus the relevant agent startup

@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-26（TODO v592 active queue evidence refresh）
+> 最後更新：2026-06-26（TODO v593 profit-first loop rebase）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v593 增量（2026-06-26 profit-first loop rebase）**：PM integrated the operator's direction that the system should locally close the loop on trading ability, proactively pursue profit, and treat risk controls primarily as loss controls. Added stable loop spec `docs/agents/profit-first-autonomy-loop.md`, routed it from `docs/agents/context-loading.md` and `.codex/MEMORY.md`, and updated TODO v593 so current tasks point to source-of-truth files instead of embedding stale task detail in the loop. The new loop says standing Demo operational authorization must be converted into structured runtime-readable loss-control envelopes; generic defer artifacts caused only by missing operator authorization should become actionable ready/fail states. Current active queue is rebased from repeated P0 auth no-op polling to `P0-STANDING-DEMO-AUTHORIZATION-PLUMBING`; execution/outcome review remains waiting for candidate-matched Demo evidence. Boundary：docs/TODO/changelog/memory/context-loading only；no runtime mutation, no Bybit/API/order/cancel/modify, no PG query/write, no service/crontab/env mutation, no Cost Gate lowering, no writer/adapter enablement, no live authority, and no profit/proof claim.
 
 **v592 增量（2026-06-26 active queue evidence refresh）**：PM completed the current P0 authorization no-op round and verified session state `/tmp/openclaw/session_loop_state_20260626T2023Z_p0_auth_resumed_no_admitted_delta.json`, sha `cc45ea6a161c6178d09a1c5aa6ab033f453245c3390961bd159be41f80abad43`. Latest read-only runtime evidence at `2026-06-26T20:23:02Z` still has no admitted authorization delta: bounded auth sha `fc898e1ae98094c163ec4e30ebb3fd33ebd7e8a62d9fe21d0558af0ef72f25d6`, mtime `2026-06-26T20:15:05.089360Z`, `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED` / `decision=defer`, no `authorization_id`, no exact typed-confirm match, no standing Demo authorization, and no probe/order authority. False-negative review remains pending/defer with expected confirm `approve_cost_gate_false_negative_preflight:grid_trading|AVAXUSDT|Sell:2`; preflight remains `OPERATOR_REVIEW_REQUIRED`. TODO v592 refreshes active evidence pointers and preserves anti-repeat: do not rerun P0 for defer-only cron sha/mtime churn; reopen only on semantic authority delta or separately reviewed runtime/private-read scope. No new PM report was created because this is a compact TODO compliance maintenance checkpoint. Boundary：docs/TODO/changelog + read-only source/runtime/session-state checks only；no private fee read, Bybit/API/order/cancel/modify, PG query/write, runtime/service/env/crontab mutation, Cost Gate lowering, writer/adapter enablement, probe/order/live authority, or proof/profit claim.
 
