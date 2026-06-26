@@ -1,9 +1,9 @@
 # Xuanheng TODO - Active Dispatch Queue
 
-**Version** v588 | **Date** 2026-06-26
-**Source/runtime pointer**: source snapshot before this TODO commit `e590ac2ca0ef51ed23fb98dbccafd135b8381674`; runtime `trade-core` read-only source head `b224c759200d8dfc6fc4a53cbee39b8fb3683118` as of `2026-06-26T14:00:04Z`.
-**Current posture**: P0 bounded Demo authorization remains blocked; current round closed source-only regime/OOS label contract and then pauses by operator request. No private fee read, Bybit order/cancel/modify, PG query/write, runtime/service/env/crontab mutation, Cost Gate lowering, or authority/proof claim was performed.
-**Links**: latest PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--regime_oos_label_contract_no_order.md`; changelog `docs/CLAUDE_CHANGELOG.md`; TODO standard `docs/agents/todo-maintenance.md`.
+**Version** v589 | **Date** 2026-06-26
+**Source/runtime pointer**: source/origin `ac4dd83eb62e73437fa7631097b60a18668ed240`; runtime `trade-core` read-only source head `b224c759200d8dfc6fc4a53cbee39b8fb3683118` as of `2026-06-26T14:35Z`.
+**Current posture**: Fresh runtime P0 auth delta was classified fail-closed: still no machine-checkable candidate-scoped bounded Demo authorization. AVAX source-only ladder remains closed/no-repeat. No private fee read, Bybit order/cancel/modify, PG query/write, runtime/service/env/crontab mutation, Cost Gate lowering, or authority/proof claim was performed.
+**Links**: latest PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--p0_auth_delta_classification_no_authority.md`; previous regime/OOS report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--regime_oos_label_contract_no_order.md`; changelog `docs/CLAUDE_CHANGELOG.md`; TODO standard `docs/agents/todo-maintenance.md`.
 
 ---
 
@@ -11,19 +11,19 @@
 
 | Fact | Value | Dispatch impact |
 |---|---|---|
-| Operator pause | After this round, stop and keep TODO compliant before further loop work. | Do not auto-advance to the next blocker in this session. Resume only on a new operator message. |
-| Runtime source | Runtime checkout read-only pointer remains clean at `b224c759200d8dfc6fc4a53cbee39b8fb3683118` on `2026-06-26T14:00:04Z`. | No runtime source sync is justified by this docs/source-only helper batch. |
-| Bounded authorization artifact | `/tmp/openclaw/cost_gate_learning_lane/bounded_probe_operator_authorization_latest.json`, sha `6d3016328c2673fd3a408b4bfa87c3a4d78f99377f28bee4e6fdb9a52561f52e`, mtime `2026-06-26T14:00:04.637727Z`; status `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED`; candidate `grid_trading|AVAXUSDT|Sell`; `decision=defer`; no `authorization_id`, typed confirm, probe authority, or order authority. | P0 authorization remains blocked. Broad chat approval is not a machine-checkable scoped auth object. |
+| Continuation resume | Goal continuation resumed after v588 pause; this round only classified fresh P0 auth evidence. | Pause row is no longer the active blocker. Continue only from real P0 auth delta or separately reviewed runtime scope. |
+| Runtime source | Runtime checkout read-only pointer remains clean at `b224c759200d8dfc6fc4a53cbee39b8fb3683118` on `2026-06-26T14:35Z`. | No runtime source sync is justified by this docs-only classification batch. |
+| Bounded authorization artifact | Runtime `/tmp/openclaw/cost_gate_learning_lane/bounded_probe_operator_authorization_latest.json`, sha `63aa5382c7cdae4ae1c148d3598f67e46106042cc7468aef0f05557d1a7f87cb`, mtime `2026-06-26T14:30:55.704274Z`; status `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED`; candidate `grid_trading|AVAXUSDT|Sell`; `decision=defer`; no `authorization_id`, typed confirm, standing Demo authorization, probe authority, or order authority. | P0 authorization remains `BLOCKED_BY_RUNTIME_AUTHORIZATION`. The only blocking gate is false-negative preflight approval; broad chat approval is not a machine-checkable scoped auth object. |
+| False-negative operator review | Runtime `false_negative_operator_review_latest.json`, sha `4bedd60e0c8cc090fd57a61faf73126fe85613b13a17415d21d6ee39fae160c3`, status `PENDING_COST_GATE_FALSE_NEGATIVE_OPERATOR_REVIEW`, selected `grid_trading|AVAXUSDT|Sell`, rank `2`, decision `defer`, expected preflight confirm `approve_cost_gate_false_negative_preflight:grid_trading|AVAXUSDT|Sell:2`, `typed_confirm_matches=false`. | Preflight remains `OPERATOR_REVIEW_REQUIRED`; this checkpoint does not supply or synthesize an operator confirm. |
 | Regime/OOS label contract | Source-only smoke `/tmp/openclaw/regime_oos_label_contract_smoke_20260626T1420Z/regime_oos_label_contract.json`, sha `739f684258bf1b21ba26f44b1cf964f54a46eee94a5f31f7b9c949b0c3c8a9a7`, status `REGIME_OOS_LABEL_CONTRACT_READY_NO_AUTHORITY`. | Future AVAX proof must attach leak-free PIT regime, market-anchor/overlay, freshness bucket, recent 90d/180d net fields, survivorship/breadth, repeat/OOS, purge/embargo, `n_independent`, `sample_unit`, verdict/reject labels. This is not proof or order admission. |
-| Session state | `/tmp/openclaw/session_loop_state_20260626T1420Z_regime_oos_label_contract_no_order.json`, sha `de4617f7e0eb6b3860266c1f68d38b3d71f42eb0cc79f7c61698e8a7ddef46f4`. | Current round started with explicit anti-repeat state; P0 had no admitted auth delta, so a source-only unclosed proof gap was selected. |
-| Verification | Focused regime/OOS tests `9 passed`; adjacent gap/control/regime tests `20 passed`; `py_compile` passed; `git diff --check` passed; PA `DONE_WITH_CONCERNS`; E2 re-check `DONE`; E4 final rerun `DONE`. | Source helper is locally verified. |
+| Session state | `/tmp/openclaw/session_loop_state_20260626T1435Z_p0_auth_delta_classification_no_authority.json`, sha `89d5ab1fc73db3e81325693fc5bb14aa73eb3056eb6c35db03f385375daa54f3`. | Current round started with explicit anti-repeat state and ended `BLOCKED_BY_RUNTIME_AUTHORIZATION`. |
+| Verification | Runtime/source checks were read-only; session/auth JSON parse passed; no code changed. | No test suite required beyond docs/diff checks for this checkpoint. |
 
 ## §1 Active Dispatch Queue
 
 | ID | P | Status | Owner chain | Acceptance | Latest evidence | Next action |
 |---|---:|---|---|---|---|---|
-| `PAUSED-AFTER-V588-OPERATOR-REQUEST` | 0 | WAITING | PM | Resume only after operator asks to continue. | Current operator request: run this round, then pause and fix TODO compliance. | Stop after v588 report/commit/push. |
-| `P0-BOUNDED-PROBE-AUTHORIZATION` | 0 | BLOCKED | PM -> E3 -> BB -> PM | Candidate-scoped bounded Demo authorization only; no global Cost Gate lowering; no live; no order/probe authority unless a valid scoped authorization object or valid exact typed confirm is admitted and E3/BB review passes. | Latest runtime auth sha `6d301632...` remains `decision=defer`, no `authorization_id`, no typed confirm, no probe/order authority. | On resume, check for a real candidate-scoped auth delta; otherwise no-op and do not rerun read-only auth audits. |
+| `P0-BOUNDED-PROBE-AUTHORIZATION` | 0 | BLOCKED | PM -> E3 -> BB -> PM | Candidate-scoped bounded Demo authorization only; no global Cost Gate lowering; no live; no order/probe authority unless a valid scoped authorization object or valid exact typed confirm is admitted and E3/BB review passes. | Latest runtime auth sha `63aa5382...` remains `decision=defer`, no `authorization_id`, no typed confirm, no standing Demo authorization, no probe/order authority. | Reopen only on a real candidate-scoped auth object, valid exact typed confirm, or standing-auth delta. Do not rerun read-only P0 audit on the same sha. |
 | `P0-PROFIT-OUTCOME-REVIEW` | 0 | WAITING | PM -> QC/MIT/BB -> PM | Candidate-matched fills with fees/slippage, controls, execution realism, and repeat/OOS path. | No authorized bounded-probe outcomes exist. | Run only after an authorized bounded Demo probe produces candidate-matched outcomes. |
 | `P1-FEE-TIER-PRIVATE-READ-RUNTIME-INVOKE-AUTHORIZATION` | 1 | BLOCKED | PM -> E3 -> BB -> PM | Any actual private fee-rate read requires a fresh one-shot runtime action: exact `AVAXUSDT`, no argv secrets, bounded timeout/no redirects, strict exact-row parser, sanitized artifact only, no PG write, no runtime fee-cache replacement, no proof/authority use. | v585 envelope is READY_NO_READ; no private read has been executed. | Stop unless a later checkpoint explicitly opens and reviews the one-shot private read action. |
 
@@ -56,14 +56,18 @@
 git -C /Users/ncyu/Projects/TradeBot/srv status --short --branch
 git -C /Users/ncyu/Projects/TradeBot/srv rev-parse HEAD
 sed -n '1,180p' /Users/ncyu/Projects/TradeBot/srv/TODO.md
-sed -n '1,240p' /Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--regime_oos_label_contract_no_order.md
-python3 -m json.tool /tmp/openclaw/session_loop_state_20260626T1420Z_regime_oos_label_contract_no_order.json
+sed -n '1,240p' /Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--p0_auth_delta_classification_no_authority.md
+python3 -m json.tool /tmp/openclaw/session_loop_state_20260626T1435Z_p0_auth_delta_classification_no_authority.json
+ssh trade-core 'python3 - <<'"'"'PY'"'"'
+import json, hashlib, os, datetime
+p="/tmp/openclaw/cost_gate_learning_lane/bounded_probe_operator_authorization_latest.json"
+b=open(p,"rb").read(); d=json.loads(b)
+print(hashlib.sha256(b).hexdigest())
+print(datetime.datetime.fromtimestamp(os.path.getmtime(p), datetime.timezone.utc).isoformat())
+print(d.get("status"), d.get("decision"), d.get("candidate"), d.get("authorization_id"), d.get("typed_confirm_expected"), d.get("probe_authority_granted"), d.get("order_authority_granted"))
+PY'
 python3 -m json.tool /tmp/openclaw/regime_oos_label_contract_smoke_20260626T1420Z/regime_oos_label_contract.json | sed -n '1,220p'
-PYTHONPATH=/Users/ncyu/Projects/TradeBot/srv/helper_scripts/research python3 -m pytest -q \
-  /Users/ncyu/Projects/TradeBot/srv/helper_scripts/research/tests/test_cost_gate_regime_oos_label_contract.py \
-  /Users/ncyu/Projects/TradeBot/srv/helper_scripts/research/tests/test_cost_gate_source_only_control_identity_contract.py \
-  /Users/ncyu/Projects/TradeBot/srv/helper_scripts/research/tests/test_cost_gate_false_negative_evidence_floor_gap_closure.py
 ```
 
 **Maintenance contract**: `TODO.md` is the active dispatch queue only. Long evidence and version narratives belong in reports/archive/changelog.
-**Self-check**: The next PM can identify the next action in under one minute: this session is paused; on resume check only for a real P0 auth delta, otherwise do not repeat closed AVAX source-only ladder work.
+**Self-check**: The next PM can identify the next action in under one minute: P0 authorization is blocked on sha `63aa5382...`; reopen only on a real machine-checkable auth delta, otherwise do not repeat closed AVAX source-only ladder work.
