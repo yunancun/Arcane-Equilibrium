@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Public Quote Capture Runtime Review
+
+- PM closed `P1-AGGRESSIVE-ALPHA-PUBLIC-QUOTE-CAPTURE-RUNTIME-REVIEW` as `DONE_WITH_CONCERNS` after E3 and BB both cleared exactly one PM-run public/read-only AVAX quote capture.
+- Capture artifact `/tmp/openclaw/public_quote_capture_runtime_review_20260626T092300Z/public_quote.json` is `PUBLIC_QUOTE_CAPTURE_READY_NO_ORDER`: bid/ask `6.212/6.213`, spread `1.609658bps`, effective BBO age `529.314ms`, instrument `Trading`, tick `0.001`, qty step `0.1`, min notional `5.0`.
+- PM read: this is quote evidence only, not profit proof, order admission, or authority. Do not repeat capture without a new review. Operator asked to pause after this round; next after resume is no-order quote-to-adapter freshness review unless a real AVAX auth delta appears.
+
 ## 2026-06-26 Reviewed Public Quote Capture Packet No-Capture
 
 - PM closed `P1-AGGRESSIVE-ALPHA-REVIEWED-PUBLIC-QUOTE-CAPTURE-PACKET-NO-CAPTURE` as source/test/docs `DONE_WITH_CONCERNS`.

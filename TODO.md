@@ -1,9 +1,9 @@
 # Xuanheng TODO - Active Dispatch Queue
 
-**Version** v569 | **Date** 2026-06-26
-**Source/runtime pointer**: v569 source-code checkpoint commit `d2d97b96df9a82982bbb02325821b9aa7001560f` is on `main`; this TODO lives at current repo HEAD. Linux runtime source and crontab expected-head pins remain `dd22810ee41c353c1d214d9a3217862d7b2bac74`.
-**Current posture**: reviewed public quote capture packet is `DONE_WITH_CONCERNS`; P0 bounded authorization remains blocked/no-repeat because latest AVAX auth is still review-required/no-authority.
-**Links**: latest PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--reviewed_public_quote_capture_packet_no_capture.md`; changelog `docs/CLAUDE_CHANGELOG.md`; TODO standard `docs/agents/todo-maintenance.md`.
+**Version** v570 | **Date** 2026-06-26
+**Source/runtime pointer**: v570 capture used source HEAD `cce761ba43df2799e35368665d704c724c7a818b`; Linux runtime source remains `dd22810ee41c353c1d214d9a3217862d7b2bac74`; this TODO lives at current repo HEAD.
+**Current posture**: `P1-AGGRESSIVE-ALPHA-PUBLIC-QUOTE-CAPTURE-RUNTIME-REVIEW` is `DONE_WITH_CONCERNS`. Operator requested pause after this round.
+**Links**: latest PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--public_quote_capture_runtime_review.md`; latest Operator note `docs/CCAgentWorkSpace/Operator/2026-06-26--public_quote_capture_runtime_review.md`; changelog `docs/CLAUDE_CHANGELOG.md`; TODO standard `docs/agents/todo-maintenance.md`.
 
 ---
 
@@ -11,75 +11,70 @@
 
 | Area | Latest verified fact | Dispatch impact |
 |---|---|---|
-| Runtime source/services | `2026-06-26T09:12:05Z`: Linux runtime source clean at `dd22810ee41c353c1d214d9a3217862d7b2bac74`; user API service `active`, MainPID `2218842`. | Runtime intentionally unchanged by v569. Do not sync/restart unless a separate runtime blocker is opened. |
-| Artifact SSOT path | Current cost-gate artifacts are under `trade-core:/tmp/openclaw/cost_gate_learning_lane/`. | Runtime artifact checks must read this path; local `/tmp` only has source-only smokes. |
-| Authorization latest | `2026-06-26T09:00:04Z`, sha `85c92d10f07f776ee70547bd3fa362856f3f447fcc52e8ac5dbf043d83ea7bda`, status `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED`, decision `defer`, candidate `grid_trading\|AVAXUSDT\|Sell`, no authorization object/authority. | This is an artifact delta but not an authorization delta. P0 bounded probe authorization stays blocked/no-repeat. |
-| Autonomous proposal latest | `2026-06-26T08:29:20Z`, sha `abe948aa9196f1f5569d1118ba00b735817a1878637d6f30d3f5a2b6dce74a1f`, status `REVIEWABLE_PARAMETER_PROPOSAL_READY`, candidate AVAX, no authority/proof. | Proposal remains review-only; no direct order/risk/live mutation. |
-| Friction scorecard latest | `2026-06-26T08:30:47Z`, sha `ed57e0e5c4ce04155450d6dac25e364c0dad2e6324d8a672d68fbf1890f96b71`, status `FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_READY`. | Ranking/candidate selection is already closed; do not rerun without new ranking/cap evidence. |
-| Reviewed public quote packet smoke | `/tmp/openclaw/reviewed_public_quote_capture_packet_smoke_20260626T091205Z/reviewed_public_quote_capture_packet.json`, sha `dc9536ff502a565a3df7568d7d6bc11c215373158839d141b827432b286d0b34`, status `REVIEWED_PUBLIC_QUOTE_CAPTURE_PACKET_READY_NO_CAPTURE_NO_AUTHORITY`. | Future capture is fixed to public GET-only request envelope and PM->E3->BB review; this is not capture, order admission, authority, or proof. |
-| Proof exclusions | Exclude `flash_dip_buy`, cleanup/risk-close fills, unattributed fills, local stale `Working` rows, artifact counts, source-smoke, single-window MM positives, replay-only results, and cross-symbol controls as AVAX proof. | These never count for bounded-probe proof, Cost Gate proof, promotion, or risk-adjusted net PnL proof. |
+| Runtime source/services | `2026-06-26T09:12:05Z`: Linux runtime source clean at `dd22810ee41c353c1d214d9a3217862d7b2bac74`; user API service active, MainPID `2218842`. | Runtime intentionally unchanged by v570. Do not sync/restart unless a separate runtime blocker is opened. |
+| Bounded authorization | `2026-06-26T09:00:04Z`, sha `85c92d10f07f776ee70547bd3fa362856f3f447fcc52e8ac5dbf043d83ea7bda`, status `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED`, decision `defer`, candidate `grid_trading\|AVAXUSDT\|Sell`, no authorization object/authority. | P0 bounded probe authorization remains blocked/no-repeat. |
+| Public quote capture | `/tmp/openclaw/public_quote_capture_runtime_review_20260626T092300Z/public_quote.json`, sha `4d46d88a3ccda4dc108fada2f5ba9b321f774cd5a199ec89d63d3a11c1883de2`, generated `2026-06-26T09:27:22Z`, status `PUBLIC_QUOTE_CAPTURE_READY_NO_ORDER`. | Fresh quote evidence exists, but it is not profit proof, order admission, or authority. |
+| AVAX quote fields | Bid/ask `6.212/6.213`; spread `1.609658bps`; effective BBO age `529.314ms` vs max `1000ms`; instrument `Trading`, tick `0.001`, qty step `0.1`, min notional `5.0`. | Useful for a future no-order quote-to-adapter freshness review only. |
+| Reroute input | Local reroute input sha `fcd7f92563dcb1384f6a35f98b6c38cdc21e612c0920e7e3e618aedb5ac3390b`, generated `2026-06-24T17:32:23Z`, status `LOWER_PRICE_REROUTE_READY_FOR_DEMO_CONSTRUCTION_REVIEW`. | Acceptable as quote-capture identity input only; stale for downstream construction preview until separately reviewed. |
+| Proof exclusions | Exclude `flash_dip_buy`, cleanup/risk-close fills, unattributed fills, local stale `Working` rows, artifact counts, source-smoke, single-window MM positives, replay-only results, cross-symbol controls, and this public quote capture as promotion/profit proof. | These never count for bounded-probe proof, Cost Gate proof, promotion, or risk-adjusted net PnL proof. |
 
 ## §1 Active State Machine
 
 | Field | Value |
 |---|---|
-| `session_loop_state` | `/tmp/openclaw/session_loop_state_20260626T091205Z_reviewed_public_quote_capture_packet_no_capture.json` |
-| `active_blocker_id` | `P1-AGGRESSIVE-ALPHA-REVIEWED-PUBLIC-QUOTE-CAPTURE-PACKET-NO-CAPTURE` |
-| `blocker_goal` | Produce a source-only reviewed public quote capture packet for the selected AVAX candidate, without quote capture, Bybit call, runtime mutation, order admission, or authority. |
-| `profit_relevance` | Future AVAX profitability testing needs reconstructable fresh BBO/spread and instrument filters before maker-first construction can be economically reviewed. |
-| `previous_evidence_checked` | v568 TODO; maker-first policy smoke; fresh BBO readiness smoke; remote auth/proposal/friction artifacts; runtime source/service metadata. |
-| `new_evidence_delta_required` | Completed maker-first policy plus open no-capture quote packet design; no real P0 authorization delta. |
-| `new_evidence_delta_found` | New source helper, focused/adjacent tests, and smoke artifact `REVIEWED_PUBLIC_QUOTE_CAPTURE_PACKET_READY_NO_CAPTURE_NO_AUTHORITY`. |
-| `anti_repeat_decision` | Proceeded with distinct source-only no-capture blocker; do not rerun P0 authorization or no-capture packet on the same artifacts. |
-| `loop_status` | `DONE_WITH_CONCERNS` |
-| `next_blocker_id` | `P1-AGGRESSIVE-ALPHA-PUBLIC-QUOTE-CAPTURE-RUNTIME-REVIEW` unless real P0 auth delta appears first. |
-| `why_not_repeating_current_blocker` | Packet is source-backed, smoke-tested, and adjacent-tested; repeating would add no new evidence. |
-| `operator_action_required` | False for source-only work; any runtime public quote capture must first open a fresh session state and use PM->E3->BB review. |
+| `session_loop_state` | `/tmp/openclaw/session_loop_state_20260626T092300Z_public_quote_capture_runtime_review.json` |
+| `active_blocker_id` | `P1-AGGRESSIVE-ALPHA-PUBLIC-QUOTE-CAPTURE-RUNTIME-REVIEW` |
+| `blocker_goal` | Run PM->E3->BB review, then at most one public/read-only AVAX quote capture with no private/order/auth path, no runtime mutation, no order admission, and no authority. |
+| `profit_relevance` | Fresh AVAX BBO/spread/instrument filters are needed before maker-first micro-tier economics can be reviewed after fees/slippage. |
+| `previous_evidence_checked` | v569 no-capture packet, E3 verdict, BB verdict, auth latest no-authority artifact, stale local reroute input. |
+| `new_evidence_delta_found` | One ready quote artifact: `PUBLIC_QUOTE_CAPTURE_READY_NO_ORDER`, 3 public GETs, `retCode=0`, fresh BBO, no authority/proof/mutation answers. |
+| `anti_repeat_decision` | `DONE_WITH_CONCERNS`; do not repeat capture on the same reviews/artifacts. |
+| `next_blocker_id` | Paused. On resume use `P1-AGGRESSIVE-ALPHA-QUOTE-TO-ADAPTER-FRESHNESS-REVIEW-NO-ORDER`, unless a real AVAX-scoped auth delta appears first. |
+| `why_not_repeating_current_blocker` | The single allowed capture already ran; another capture would add market noise, not governance evidence. |
 
 ## §2 Active Dispatch Queue
 
 | ID | P | Status | Loop decision | Owner chain | Acceptance | Latest evidence | Next action |
 |---|---:|---|---|---|---|---|---|
 | `P0-PROFIT-EVIDENCE-QUALITY` | 0 | DONE | `DONE_WITH_CONCERNS` | PM -> E3/BB/QC -> PM | Demo overhang classified; stale/unattributed/proof-exclusion rules recorded; no unreviewed cancel/modify. | `2026-06-26--demo_residual_cleanup_refresh_action_clean_exchange.md`; §0 proof exclusions. | No-repeat unless exchange inventory, fill attribution, or proof-quality evidence changes. |
-| `P0-PROFIT-CANDIDATE-SELECTION` | 0 | DONE | `DONE_WITH_CONCERNS` | PM -> QC/MIT/BB -> PM | Exactly one review-only candidate selected; no probe/order/live authority. | `2026-06-26--profit_candidate_selection_avax_review_packet.md`; selected `grid_trading\|AVAXUSDT\|Sell`. | No-repeat unless fresh evidence invalidates AVAX cap feasibility or ranking. |
-| `P0-BOUNDED-PROBE-AUTHORIZATION` | 0 | BLOCKED | `BLOCKED_BY_RUNTIME_AUTHORIZATION` | PM -> E3 -> BB -> PM | Candidate-specific bounded Demo auth only; no global Cost Gate lowering; no live; no runtime/order/probe authority unless valid scoped authorization is admitted and E3/BB review passes. | `2026-06-26T09:00:04Z` auth latest sha `85c92d10...`: AVAX-scoped, `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED`, no authority object/grant. | No read-only repeat. Resume only on real candidate-scoped typed-confirm, standing-auth, or authority artifact delta. |
+| `P0-PROFIT-CANDIDATE-SELECTION` | 0 | DONE | `DONE_WITH_CONCERNS` | PM -> QC/MIT/BB -> PM | Exactly one review-only candidate selected; no probe/order/live authority. | `grid_trading\|AVAXUSDT\|Sell`; PM reports in changelog v562-v570. | No-repeat unless fresh evidence invalidates AVAX cap feasibility or ranking. |
+| `P0-BOUNDED-PROBE-AUTHORIZATION` | 0 | BLOCKED | `BLOCKED_BY_RUNTIME_AUTHORIZATION` | PM -> E3 -> BB -> PM | Candidate-specific bounded Demo auth only; no global Cost Gate lowering; no live; no runtime/order/probe authority unless valid scoped authorization is admitted and E3/BB review passes. | Auth latest sha `85c92d10...`: AVAX-scoped, review-required, decision `defer`, no authority object/grant. | Resume only on real candidate-scoped typed-confirm, standing-auth, or authority artifact delta. |
 | `P0-PROFIT-OUTCOME-REVIEW` | 0 | WAITING | `WAITING_FOR_AUTHORIZED_OUTCOMES` | PM -> QC/MIT/BB -> PM | Candidate-matched fills, net PnL after fees/slippage, matched controls, execution realism, repeat/OOS path. | No authorized bounded-probe outcomes exist. | Run only after an authorized bounded Demo probe has candidate-matched outcomes. |
-| `P1-AGGRESSIVE-ALPHA-CURRENT-CAP-STAIRCASE-RISK-WORKSHEET-NO-ORDER` | 1 | DONE | `DONE_WITH_CONCERNS` | PM -> PA/E1 -> E2 -> E4 -> QA/PM | Current-cap tier ladder and risk worksheet exists; no cap/risk mutation, no order admission, no authority/proof claim. | `2026-06-26--current_cap_staircase_risk_worksheet_no_order.md`; smoke `tier_count=8`, BBO refresh required. | No-repeat unless construction preview, cap/risk contract, or auth evidence changes. |
-| `P1-AGGRESSIVE-ALPHA-FEE-SLIPPAGE-MAKER-TAKER-SCHEMA-NO-ORDER` | 1 | DONE | `DONE_WITH_CONCERNS` | PM -> PA/E1 -> E2 -> E4 -> QA/PM | Actual fee/slippage/maker-taker/lineage/net-PnL reconstruction schema exists; fail-closed no-authority answers. | `2026-06-26--fee_slippage_maker_taker_schema_no_order.md`; smoke `FEE_SLIPPAGE_MAKER_TAKER_SCHEMA_READY_NO_AUTHORITY`. | No-repeat unless future outcome schema/proof requirements change. |
-| `P1-AGGRESSIVE-ALPHA-FRESH-BBO-READONLY-READINESS-PATH-NO-ORDER` | 1 | DONE | `DONE_WITH_CONCERNS` | PM -> PA/E1 -> E2 -> E4 -> QA/PM | Source-only public quote/readiness handoff contract exists; no quote capture, no order admission, no authority/proof claim. | `2026-06-26--fresh_bbo_readonly_readiness_path_no_order.md`; smoke `FRESH_BBO_READONLY_READINESS_PATH_READY_NO_AUTHORITY`. | No-repeat unless quote/readiness handoff semantics change. |
-| `P1-AGGRESSIVE-ALPHA-MAKER-FIRST-MICRO-TIER-PLACEMENT-POLICY-NO-ORDER` | 1 | DONE | `DONE_WITH_CONCERNS` | PM -> PA/E1 -> E2 -> E4 -> QA/PM | Maker-first post-only micro-tier placement/skip policy exists; no quote capture, placement call, order admission, authority, or proof claim. | `2026-06-26--maker_first_micro_tier_policy_no_order.md`; smoke `MAKER_FIRST_MICRO_TIER_POLICY_READY_NO_AUTHORITY`. | No-repeat unless tier/placement/cost-skip semantics change. |
-| `P1-AGGRESSIVE-ALPHA-REVIEWED-PUBLIC-QUOTE-CAPTURE-PACKET-NO-CAPTURE` | 1 | DONE | `DONE_WITH_CONCERNS` | PM -> PA/E1 -> E2 -> E4 -> QA/PM | No-capture review packet exists; no network/Bybit call, no capture, no runtime mutation, no order admission, no authority/proof claim. | v569 report; smoke `REVIEWED_PUBLIC_QUOTE_CAPTURE_PACKET_READY_NO_CAPTURE_NO_AUTHORITY`; source checkpoint `d2d97b96df9a82982bbb02325821b9aa7001560f`. | No-repeat unless quote capture review envelope semantics change. |
-| `P1-AGGRESSIVE-ALPHA-PUBLIC-QUOTE-CAPTURE-RUNTIME-REVIEW` | 1 | READY | `READY_RUNTIME_REVIEW` | PM -> E3 -> BB -> PM | Review and, only if gates pass, perform one public/read-only AVAX quote capture artifact; no private/order endpoint, no auth headers, no order/probe/live authority. | v569 no-capture packet and fresh BBO readiness contract. | Open a new session_loop_state; verify no P0 auth delta first; then run PM->E3->BB review before any capture. |
+| `P1-AGGRESSIVE-ALPHA-PUBLIC-QUOTE-CAPTURE-RUNTIME-REVIEW` | 1 | DONE | `DONE_WITH_CONCERNS` | PM -> E3 -> BB -> PM | One public/read-only AVAX quote capture artifact; no private/order endpoint, no auth headers, no order/probe/live authority. | v570 report; capture sha `4d46d88a...`, status `PUBLIC_QUOTE_CAPTURE_READY_NO_ORDER`. | No-repeat. |
+| `P1-AGGRESSIVE-ALPHA-QUOTE-TO-ADAPTER-FRESHNESS-REVIEW-NO-ORDER` | 1 | PAUSED | `OPERATOR_REQUESTED_PAUSE` | PM -> PA/E1 -> E2 -> E4 -> QA/PM | Convert reviewed quote evidence into adapter-backed no-order freshness/construction input without bypassing stale reroute-chain review; no order authority. | v570 quote capture plus stale reroute warning. | After operator resumes, open a new `session_loop_state`; do not use raw quote directly for order construction. |
+| `P1-LEARNING-LOOP-CLOSURE` | 1 | DEFERRED | `WAITING_FOR_PROBE_EVIDENCE_OR_LEDGER_DECISION` | PM -> PA/E1 -> E2 -> E4 -> QA/PM | Decide durable learning SSOT: artifact ledger vs PG-backed Cost Gate learning ledger. | No authorized probe outcomes yet. | Resume after bounded probe authorization/outcomes or explicit ledger-design request. |
+| `P1-AUTONOMOUS-PARAMETER-PROPOSAL` | 1 | DEFERRED | `REVIEW_ONLY_CONTRACT_EXISTS` | PM -> PA/E1 -> E2 -> E4 -> QA/PM | Learning output becomes reviewable proposal only; no direct order/risk/live mutation. | Autonomous proposal latest sha `abe948aa...`, status `REVIEWABLE_PARAMETER_PROPOSAL_READY`. | No action until new proposal delta or post-probe evidence. |
+| `P1-RUNTIME-HEALTH-HYGIENE` | 1 | DEFERRED | `NO_ACTIVE_RUNTIME_CHANGE_REQUEST` | PM -> E3 -> PM | Reconcile cron expected-head drift and API process/service ownership only when runtime change is explicitly opened. | Runtime source/service fact in §0. | No restart, crontab edit, service mutation, or writer enablement. |
 
 ## §3 Hard Gates
 
 | Gate | Rule |
 |---|---|
-| Survival/risk | Profit is optimized only inside survival, Guardian/risk, Decision Lease, Rust authority, authorization, auditability, and reconstructability. |
-| Authorization | Broad Demo API permission is not automatic bounded-probe/order authority. Bounded Demo grant requires candidate-scoped structured auth or exact typed confirm plus E3/BB review. |
-| Runtime/order path | Bybit private/trading calls, adapter/writer enablement, plan mutation, order submission, PG write, crontab/env edit, or service restart require reviewed runtime chain. Public quote capture is read-only but still exchange-facing and must use PM->E3->BB review. |
-| Cost Gate | Global Cost Gate and freshness gate must not be lowered. Proof must be candidate-matched and include fills, actual fees, slippage, lineage, controls, and execution realism. |
-| Candidate selection | AVAX remains the P0 bounded candidate. ETH and other symbols remain research-only unless separate cap/evidence review changes this. |
+| Profit priority | Optimize real risk-adjusted net PnL after fees/slippage only inside survival, Guardian/risk, Decision Lease, Rust authority, authorization, auditability, and reconstructability. |
+| Authorization | Broad Demo API permission is not bounded-probe/order authority. Candidate-scoped bounded Demo grant requires structured auth or exact typed confirm plus E3/BB review. |
+| Runtime/order path | Bybit private/trading calls, adapter/writer enablement, plan mutation, order submission, PG write, crontab/env edit, or service restart require reviewed runtime chain. |
+| Cost Gate | Do not lower global Cost Gate or freshness gate. Proof must be candidate-matched and include actual fills, fees, slippage, lineage, controls, and execution realism. |
+| Quote capture | The v570 public quote artifact is evidence-only. It is not demo fill proof, not profit proof, not Cost Gate proof, not promotion proof, and not order admission. |
 | Live/mainnet | Out of scope; no live/mainnet authority. |
 
-## §4 Aggressive Alpha Backlog
+## §4 Aggressive Profit Hypotheses
 
-| Hypothesis | Score snapshot | Fastest safe test | Authority |
-|---|---|---|---|
-| Public quote runtime capture | upside Medium-High; evidence Medium; realism Medium after capture; time Fast; account risk None; governance Medium; autonomy High | PM->E3->BB-reviewed public GET-only AVAX quote capture artifact. | E3/BB before capture; no order authority. |
-| Adapter-backed construction preview refresh | upside Medium; evidence Medium after quote; realism Medium; cost important; time Medium; account risk None; governance Low-Medium; autonomy High | Convert reviewed quote to candidate market snapshot, then construction preview. | After reviewed capture; no order authority. |
-| Maker spread skip calibration | upside Medium; evidence Medium after quote; realism Medium; cost critical; time Fast; account risk None; governance Low; autonomy High | Evaluate v568/v569 spread-cost skip formula from captured spread only. | Analysis only after reviewed capture; order path still needs bounded auth. |
+| Hypothesis | Why it might make money | Fastest safe test | Required data | Failure condition | Authority required | Max safe next action | Score |
+|---|---|---|---|---|---|---|---|
+| Quote-to-adapter freshness review | Fresh AVAX BBO can remove the stale-BBO blocker and make maker-first construction economics realistic. | No-order adapter-backed snapshot and construction freshness review from the captured quote. | Capture path/sha, bid/ask/size, instrument filters, adapter snapshot, construction math. | Candidate mismatch, stale quote, raw-quote construction bypass, or any order authority claim. | Source/read-only review only. | Open `P1-AGGRESSIVE-ALPHA-QUOTE-TO-ADAPTER-FRESHNESS-REVIEW-NO-ORDER` after pause. | upside Medium-High; evidence Medium-High; realism Medium; cost critical; time Fast; account risk None; governance Low-Medium; autonomy High |
+| Maker spread/cost skip calibration | Captured spread `1.609658bps` may leave enough cushion for a maker-first micro tier after fees/slippage. | Evaluate existing skip formula against captured spread and modeled edge cushion. | Spread, maker fee, slippage buffer, tier notional, edge cushion, cap. | After-cost cushion <= 0 or taker fallback required. | Analysis only. | Produce no-order cost-screen result. | upside Medium; evidence Medium; realism Medium; cost critical; time Fast; account risk None; governance Low; autonomy High |
+| Demo-live applicability guard | Separating public quote evidence from future demo fills avoids false live-applicability conclusions. | Source-only contract that keeps quote evidence separate from actual demo fee/slippage/fill proof. | Capture environment, future fill lineage, actual fee/slippage, maker/taker labels. | Public quote counted as fill/profit/proof. | None for source contract; bounded auth needed for future fills. | Keep quote evidence-only in future proposal contracts. | upside Medium; evidence Medium; realism Medium; cost Medium; time Fast; account risk None; governance Low; autonomy High |
 
 ## §5 Handoff Commands
 
 ```bash
 git -C /Users/ncyu/Projects/TradeBot/srv status --short --branch
 sed -n '1,220p' /Users/ncyu/Projects/TradeBot/srv/TODO.md
-sed -n '1,220p' /Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--reviewed_public_quote_capture_packet_no_capture.md
-python3 -m json.tool /tmp/openclaw/session_loop_state_20260626T091205Z_reviewed_public_quote_capture_packet_no_capture.json | sed -n '1,220p'
-python3 -m json.tool /tmp/openclaw/reviewed_public_quote_capture_packet_smoke_20260626T091205Z/reviewed_public_quote_capture_packet.json | sed -n '1,220p'
-PYTHONPATH=helper_scripts/research python3 -m pytest -q helper_scripts/research/tests/test_cost_gate_reviewed_public_quote_capture_packet.py
+sed -n '1,220p' /Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--public_quote_capture_runtime_review.md
+python3 -m json.tool /tmp/openclaw/session_loop_state_20260626T092300Z_public_quote_capture_runtime_review.json
+python3 -m json.tool /tmp/openclaw/public_quote_capture_runtime_review_20260626T092300Z/public_quote.json
+PYTHONPATH=helper_scripts/research python3 -m pytest -q helper_scripts/research/tests/test_cost_gate_bbo_freshness_public_quote_capture.py
 ```
 
 **Maintenance contract**: `TODO.md` is the active dispatch queue only. Long evidence and version narratives belong in reports/archive/changelog.
-**Self-check**: A next PM can identify the next action in under one minute: real P0 auth delta takes precedence; otherwise open public quote capture runtime review with PM->E3->BB, not another no-capture/source audit.
+**Self-check**: The next PM can identify the next action in under one minute: pause now; on resume, real P0 auth delta takes precedence, otherwise open no-order quote-to-adapter freshness review.
