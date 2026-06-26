@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 16:00 CEST
+- closed operator-requested `P1-TODO-MAINTENANCE-COMPLIANCE-COMPACTION` as docs-only `DONE_WITH_CONCERNS`
+- TODO v586 now records direct current source/runtime pointers, an explicit pause row, latest auth sha `6d301632...`, and no-repeat status for v585 private fee envelope review
+- latest runtime auth remains AVAX `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED` / `decision=defer`, no `authorization_id`, no probe/order authority, no typed confirm; P0 authorization remains blocked/no-op
+- boundary: docs/TODO/changelog/worklog/report + read-only source/runtime/auth snapshot only; no private fee read, Bybit/API/order, PG, runtime/crontab/service mutation, Cost Gate change, authority, or proof claim
+
 2026-06-26 15:50 CEST
 - closed `P1-FEE-TIER-PRIVATE-READ-ENVELOPE-E3-BB-REVIEW-NO-READ` as source-only `DONE_WITH_CONCERNS`
 - E3/BB review found query-minimization, alias/path, standalone-artifact, and strict-parser concerns; PM hardened `private_fee_tier_read_envelope_design.py` and tests
