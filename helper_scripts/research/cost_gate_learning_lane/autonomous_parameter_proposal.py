@@ -37,6 +37,42 @@ BOUNDARY = (
     "query/write, Bybit call, order, config, risk, auth, runtime mutation, "
     "global Cost Gate lowering, probe authority, order authority, or promotion proof"
 )
+CAP_ENVELOPE_EVIDENCE_FLOOR = {
+    "schema_version": "cost_gate_cap_envelope_evidence_floor_v1",
+    "scope": "proposal_only_before_any_cap_or_runtime_mutation",
+    "required_before_cap_envelope_review": [
+        "candidate_side_cell_matches_learning_packet",
+        "candidate_matched_controls_present",
+        "candidate_matched_fee_slippage_and_maker_taker_labels",
+        "fresh_bbo_and_instrument_metadata_for_tick_qty_min_notional",
+        "cap_staircase_with_discrete_exposure_tiers",
+        "portfolio_exposure_and_survival_risk_budget_math",
+        "empirical_execution_realism_or_explicit_research_only_status",
+        "proof_exclusion_scan_for_all_fill_backed_rows",
+        "regime_breadth_freshness_survivorship_labels",
+        "repeat_or_oos_path_before_any_promotion_claim",
+    ],
+    "minimum_execution_realism_thresholds": {
+        "sample_count": ">=30 for empirical execution-realism PASS; below this remains research-only",
+        "maker_fill_rate": ">=0.60 when maker or mixed order style is assumed",
+        "adverse_selection_bps_p95": "<=3.50 when maker or mixed order style is assumed",
+        "latency_ms_p95": "<=2000",
+        "participation_rate_p95": "<=0.05",
+        "capacity_notional_usdt": "> proposed tier notional",
+        "order_availability_status": "PASS",
+    },
+    "forbidden_shortcuts": [
+        "global_cost_gate_lowering",
+        "implicit_cap_mutation",
+        "unattributed_or_lineage_incomplete_fill_proof",
+        "single_window_or_replay_only_profit_claim",
+        "paper_archive_or_artifact_count_profit_claim",
+        "broad_demo_api_permission_as_candidate_authority",
+    ],
+    "max_safe_next_action": (
+        "operator_qc_review_cap_envelope_proposal_after_all_floor_evidence_is_present"
+    ),
+}
 AUTHORITY_BEARING_TRUE_KEYS = {
     "global_cost_gate_lowering_recommended",
     "probe_authority_granted",
@@ -296,17 +332,26 @@ def _proposal_from_candidate(candidate: dict[str, Any] | None) -> dict[str, Any]
                 "proposed_value": "NONE",
                 "mutation_allowed_by_this_packet": False,
             },
+            {
+                "parameter": "bounded_demo_probe_cap_envelope",
+                "current_value": "UNCHANGED",
+                "proposed_value": "REQUIRES_SEPARATE_OPERATOR_QC_E3_BB_REVIEW",
+                "mutation_allowed_by_this_packet": False,
+            },
         ],
         "required_pre_authorization_evidence": [
             "profit_evidence_quality_overhang_resolved_or_operator_quarantined",
             "candidate_matched_touchability_evidence",
             "candidate_matched_fill_fee_slippage_lineage",
             "candidate_matched_blocked_signal_controls",
+            "cap_envelope_evidence_floor_satisfied_if_cap_change_is_requested",
             "bounded_demo_probe_preflight_review_packet",
             "separate_operator_bounded_probe_authorization_object",
         ],
+        "cap_envelope_evidence_floor": CAP_ENVELOPE_EVIDENCE_FLOOR,
         "forbidden_interpretations": [
             "not_a_cost_gate_lowering",
+            "not_a_cap_mutation",
             "not_probe_authority",
             "not_order_authority",
             "not_runtime_config",
@@ -541,6 +586,7 @@ def build_autonomous_parameter_proposal(
             ),
             "bounded_demo_probe_preflight_ready": False,
             "bounded_demo_probe_authorized": False,
+            "cap_envelope_mutation_allowed": False,
             "global_cost_gate_lowering_recommended": False,
             "main_cost_gate_adjustment": "NONE",
             "probe_authority_granted": False,
@@ -577,6 +623,7 @@ def render_markdown(packet: dict[str, Any]) -> str:
         f"- Reviewable proposal emitted: `{answers.get('reviewable_parameter_proposal_emitted')}`",
         f"- Probe authority granted: `{answers.get('probe_authority_granted')}`",
         f"- Order authority granted: `{answers.get('order_authority_granted')}`",
+        f"- Cap envelope mutation allowed: `{answers.get('cap_envelope_mutation_allowed')}`",
         f"- Boundary: {BOUNDARY}.",
         "",
         "## Gates",

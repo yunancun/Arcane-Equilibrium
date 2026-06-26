@@ -11,6 +11,13 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 09:24 CEST
+- closed `P1-AGGRESSIVE-ALPHA-CAP-ENVELOPE-EVIDENCE-FLOOR-SOURCE-ONLY` as source/test/docs `DONE_WITH_CONCERNS`
+- anti-repeat: P0 bounded authorization had no new delta; latest auth remains AVAX-scoped `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED`, defer, no typed confirm/object/authority
+- patched `autonomous_parameter_proposal.py` so reviewable proposals carry `cost_gate_cap_envelope_evidence_floor_v1`, inactive cap-envelope parameter row, and `cap_envelope_mutation_allowed=false`
+- validation: autonomous proposal + false-negative preflight tests `10 passed`, `py_compile`, and `git diff --check`
+- boundary: source/test/docs only; no runtime sync, cron, `_latest` overwrite, PG query/write, Bybit/API/order/cancel/modify, Cost Gate/cap/risk mutation, authority, or proof claim
+
 2026-06-26 09:04 CEST
 - closed `P1-AGGRESSIVE-ALPHA-ETH-CAP-ENVELOPE-SENSITIVITY-NO-ORDER` as source-only `DONE_WITH_CONCERNS`
 - corrected current runtime cost-gate artifact path to `/tmp/openclaw/cost_gate_learning_lane/`; latest bounded auth artifact is now AVAX-scoped with `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED`, but still defer/no typed confirm/no authority

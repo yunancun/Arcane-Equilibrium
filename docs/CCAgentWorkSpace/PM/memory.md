@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Cap Envelope Evidence Floor Source Patch
+
+- PM closed `P1-AGGRESSIVE-ALPHA-CAP-ENVELOPE-EVIDENCE-FLOOR-SOURCE-ONLY` as source/test/docs `DONE_WITH_CONCERNS`.
+- `autonomous_parameter_proposal.py` now emits `cost_gate_cap_envelope_evidence_floor_v1`, inactive cap-envelope proposal row, and `cap_envelope_mutation_allowed=false`; tests passed `10`.
+- PM read: P0 auth still has no delta. Next useful blocker is a separate runtime sync review if scheduled artifacts should emit the new floor; otherwise stop at P0 auth until real candidate-scoped authorization appears.
+
 ## 2026-06-26 ETH Cap Envelope Sensitivity No-Order
 
 - PM closed `P1-AGGRESSIVE-ALPHA-ETH-CAP-ENVELOPE-SENSITIVITY-NO-ORDER` as source-only `DONE_WITH_CONCERNS` and normalized TODO v558 to active-queue shape with an explicit operator-requested pause.
