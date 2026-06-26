@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 16:12 CEST
+- closed `P1-AGGRESSIVE-ALPHA-ANTI-REPEAT-LADDER-RECONCILIATION-NO-NEW-ARTIFACT` as docs-only `DONE_WITH_CONCERNS`
+- TODO v587 removes the stale v586 pause active row after resume and adds a compact no-repeat marker for the completed AVAX source-only ladder from low-price ranking through candidate source freshness / atomic preview
+- latest runtime auth sha `6d301632...` remains AVAX `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED` / `decision=defer`, no `authorization_id`, no typed confirm, no probe/order authority; P0 remains blocked/no-op
+- boundary: docs/TODO/changelog/worklog/report + read-only source/runtime/auth snapshot only; no new research artifact, private fee read, Bybit/API/order, PG, runtime mutation, Cost Gate change, authority, or proof claim
+
 2026-06-26 16:00 CEST
 - closed operator-requested `P1-TODO-MAINTENANCE-COMPLIANCE-COMPACTION` as docs-only `DONE_WITH_CONCERNS`
 - TODO v586 now records direct current source/runtime pointers, an explicit pause row, latest auth sha `6d301632...`, and no-repeat status for v585 private fee envelope review

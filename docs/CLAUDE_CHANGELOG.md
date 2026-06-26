@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-26（TODO v586 maintenance compliance pause）
+> 最後更新：2026-06-26（TODO v587 aggressive alpha anti-repeat ladder reconcile）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v587 增量（2026-06-26 aggressive alpha anti-repeat ladder reconcile no-artifact）**：PM resumed after the v586 pause and created session state `/tmp/openclaw/session_loop_state_20260626T1412Z_aggressive_alpha_antirepeat_ladder_reconcile.json`. Anti-repeat found latest bounded auth sha `6d301632...` still `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED` / `decision=defer`, no `authorization_id`, no typed confirm, no probe/order authority, so P0 authorization remains no-op/no admitted delta. PM did not create a new research artifact; instead TODO v587 removes the stale active pause row and adds a compact no-repeat marker for the completed AVAX aggressive-alpha source-only ladder from low-price ranking through candidate source freshness / atomic quote-adapter-preview. Boundary：docs/TODO/changelog/worklog/report + read-only source/runtime/auth snapshot only；no private fee read, Bybit API/order/cancel/modify, PG query/write, runtime/service/env/crontab mutation, Cost Gate lowering, writer/adapter enablement, probe/order/live authority, or proof/profit claim. PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--aggressive_alpha_antirepeat_ladder_reconcile_no_artifact.md`.
 
 **v586 增量（2026-06-26 TODO maintenance compliance pause）**：PM advanced operator-requested docs-only `P1-TODO-MAINTENANCE-COMPLIANCE-COMPACTION` using session state `/tmp/openclaw/session_loop_state_20260626T140031Z_todo_maintenance_compliance_compaction.json`. Fresh read-only evidence showed local/origin `main` at `75194b408e4f06835f940f45453a9afce8e1d69e`, runtime `trade-core` clean at `b224c759200d8dfc6fc4a53cbee39b8fb3683118`, and latest bounded auth artifact sha `6d3016328c2673fd3a408b4bfa87c3a4d78f99377f28bee4e6fdb9a52561f52e`, mtime `2026-06-26T14:00:04.637727Z`, still AVAX `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED` / `decision=defer`, no `authorization_id`, no probe/order authority, and no exact typed confirm. TODO v586 fixes the masthead to directly record current source/runtime pointers, adds an explicit operator pause row, updates current facts and no-repeat markers, and keeps the private fee-tier read blocked as a separately opened PM -> E3 -> BB runtime checkpoint. Boundary：docs/TODO/changelog/worklog/report + read-only source/runtime/auth snapshot only；no private fee read, Bybit API/order/cancel/modify, PG query/write, runtime/service/env/crontab mutation, Cost Gate lowering, writer/adapter enablement, probe/order/live authority, or proof/profit claim. PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--todo_v586_maintenance_compliance_pause.md`.
 
