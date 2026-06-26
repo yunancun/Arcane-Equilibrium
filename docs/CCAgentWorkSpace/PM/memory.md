@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Authorization Gate Status Clarity Runtime Sync
+
+- PM/E3 closed `P1-RUNTIME-HEALTH-HYGIENE-AUTH-STATUS-CLARITY-SYNC-REVIEW` as `DONE_WITH_CONCERNS`.
+- Linux runtime source fast-forwarded `785a4346 -> 99d3b8f7`; crontab expected-head literals changed old/new `11/0 -> 0/11`; line count stayed `70`; API MainPID stayed `2218842`; runtime focused tests passed `19+18+6`.
+- PM read: this did not run cron or refresh `_latest` artifacts. Next blocker is still `P0-BOUNDED-PROBE-AUTHORIZATION`, but do not rerun read-only auth audit without a real candidate-scoped auth delta.
+
 ## 2026-06-26 Authorization Gate Status Clarity Source Fix
 
 - PM closed `P1-AUTHORIZATION-GATE-STATUS-CLARITY-SOURCE-FIX` as source-only `DONE_WITH_CONCERNS`.
