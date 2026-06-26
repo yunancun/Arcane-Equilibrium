@@ -507,6 +507,21 @@ def expected_bounded_demo_probe_operator_authorization_typed_confirm(
     )
 
 
+def _bounded_demo_probe_operator_authorization_typed_confirm_template(
+    side_cell_key: Any,
+    candidate_budget: int,
+) -> str:
+    max_orders = (
+        f"<max_authorized_probe_orders<=%d>" % candidate_budget
+        if candidate_budget > 0
+        else "<max_authorized_probe_orders>"
+    )
+    return (
+        "authorize_bounded_demo_probe:"
+        f"{_str(side_cell_key)}:{max_orders}:<authorization_id>"
+    )
+
+
 def _gate(
     name: str,
     passed: bool,
@@ -732,13 +747,35 @@ def build_bounded_demo_probe_operator_authorization(
         and bool(standing_operator)
         and provided_operator != standing_operator
     )
-    expected_confirm = expected_bounded_demo_probe_operator_authorization_typed_confirm(
+    preflight_ready_for_auth = preflight_summary["ready_for_operator_authorization"] is True
+    exact_confirm_fields_present = (
+        preflight_ready_for_auth
+        and bool(side_cell_key)
+        and requested_budget > 0
+        and bool(auth_id)
+    )
+    expected_confirm = (
+        expected_bounded_demo_probe_operator_authorization_typed_confirm(
+            side_cell_key,
+            requested_budget,
+            auth_id,
+        )
+        if exact_confirm_fields_present
+        else None
+    )
+    confirm_template = _bounded_demo_probe_operator_authorization_typed_confirm_template(
         side_cell_key,
-        requested_budget,
-        auth_id,
+        candidate_budget,
+    )
+    typed_confirm_readiness = (
+        "READY"
+        if preflight_ready_for_auth and exact_confirm_fields_present
+        else "PREFLIGHT_NOT_READY"
+        if not preflight_ready_for_auth
+        else "MISSING_AUTHORIZATION_FIELDS"
     )
     provided_confirm = _str(typed_confirm)
-    typed_confirm_matches = bool(provided_confirm) and provided_confirm == expected_confirm
+    typed_confirm_matches = bool(provided_confirm) and expected_confirm is not None and provided_confirm == expected_confirm
     standing_authorization_valid = bool(
         authorization_requested
         and not provided_confirm
@@ -911,6 +948,8 @@ def build_bounded_demo_probe_operator_authorization(
             ],
             evidence={
                 "typed_confirm_expected": expected_confirm,
+                "typed_confirm_template": confirm_template,
+                "typed_confirm_readiness": typed_confirm_readiness,
                 "typed_confirm_provided": bool(provided_confirm),
                 "typed_confirm_matches": typed_confirm_matches,
                 "standing_demo_authorization_valid": standing_authorization_valid,
@@ -982,6 +1021,8 @@ def build_bounded_demo_probe_operator_authorization(
         "blocking_gates": [gate["name"] for gate in failed_gates],
         "next_actions": next_actions,
         "typed_confirm_expected": expected_confirm,
+        "typed_confirm_template": confirm_template,
+        "typed_confirm_readiness": typed_confirm_readiness,
         "typed_confirm_provided": bool(provided_confirm),
         "typed_confirm_matches": typed_confirm_matches,
         "authorization_confirmation_source": confirmation_source,

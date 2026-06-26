@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Auth Typed-Confirm Guard Source Fix
+
+- PM closed `P0-BOUNDED-PROBE-AUTHORIZATION-TYPED-CONFIRM-GUARD` as source/test/docs `DONE_WITH_CONCERNS`.
+- Auth packets now suppress exact `typed_confirm_expected` until preflight is ready and positive budget plus authorization id are present; stale/impossible `authorize_bounded_demo_probe:...:0:` strings should not be copied.
+- PM read: latest runtime auth `af337e48...` is still AVAX defer/no authority. The fix improves review safety only; it does not authorize a probe.
+
 ## 2026-06-26 Runtime Source Sync Apply Go/No-Go No-Apply
 
 - PM/E3 closed `P1-RUNTIME-HEALTH-HYGIENE-SOURCE-SYNC-APPLY-REVIEW` as read-only `DONE_WITH_CONCERNS_NO_APPLY`.

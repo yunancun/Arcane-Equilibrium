@@ -21,6 +21,9 @@ def _dict(value: Any) -> dict[str, Any]:
 
 def render_markdown(packet: dict[str, Any]) -> str:
     candidate = _dict(packet.get("candidate"))
+    typed_confirm_expected = packet.get("typed_confirm_expected")
+    typed_confirm_template = packet.get("typed_confirm_template")
+    typed_confirm_readiness = packet.get("typed_confirm_readiness")
     fields = [
         ("Generated", packet.get("generated_at_utc")),
         ("Status", packet.get("status")),
@@ -41,7 +44,14 @@ def render_markdown(packet: dict[str, Any]) -> str:
         "",
         "## Authorization Phrase",
         "",
-        f"`{packet.get('typed_confirm_expected')}`",
+        (
+            f"`{typed_confirm_expected}`"
+            if typed_confirm_expected
+            else "`NOT_AVAILABLE_UNTIL_AUTHORIZATION_FIELDS_AND_PREFLIGHT_READY`"
+        ),
+        "",
+        f"- Template: `{typed_confirm_template}`",
+        f"- Readiness: `{typed_confirm_readiness}`",
         "",
         "## Standing Demo Authorization",
         "",
