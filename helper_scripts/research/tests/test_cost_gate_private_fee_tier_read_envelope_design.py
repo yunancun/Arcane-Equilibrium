@@ -90,17 +90,34 @@ def test_private_fee_tier_read_envelope_ready_without_read_or_authority() -> Non
     scope = packet["envelope"]["future_read_scope"]
     assert scope["allowed_method"] == "GET"
     assert scope["allowed_path"] == "/v5/account/fee-rate"
-    assert scope["allowed_query"] == {"category": "linear"}
+    assert scope["allowed_query"] == {"category": "linear", "symbol": "AVAXUSDT"}
+    assert scope["query_must_be_symbol_minimized"] is True
     assert scope["private_read_allowed_by_this_packet"] is False
     assert scope["requires_separate_runtime_review_before_execution"] is True
 
     response_policy = packet["envelope"]["response_validation_policy"]
     assert response_policy["candidate_symbol_exact_match_required"] == "AVAXUSDT"
     assert response_policy["numeric_fee_rates_required"] is True
+    assert response_policy["strict_candidate_row_parser_required"] is True
+    assert response_policy["missing_or_malformed_fee_rate_policy"].startswith(
+        "fail_closed_no_fee_proof"
+    )
     assert "zero_or_negative_maker_fee_policy" in response_policy
     assert response_policy["freshness_window_required_for_future_proof"] is True
     assert response_policy["demo_unsupported_endpoint_policy"].startswith(
         "record unsupported/no-proof status"
+    )
+    cache_policy = packet["envelope"]["runtime_cache_policy"]
+    assert cache_policy["standalone_fee_proof_artifact_only"] is True
+    assert cache_policy["may_replace_account_manager_fee_cache"] is False
+    assert cache_policy["may_satisfy_live_fee_rate_count_assertion"] is False
+    assert cache_policy["broad_category_refresh_requires_separate_review"] is True
+    redaction_policy = packet["envelope"]["artifact_redaction_policy"]
+    assert redaction_policy["store_ret_code_ret_msg_and_exact_candidate_fee_row"] is True
+    assert redaction_policy["persist_cross_symbol_fee_rows_allowed"] is False
+    proof_policy = packet["envelope"]["proof_attachment_policy"]
+    assert (
+        proof_policy["cross_symbol_fee_rows_are_context_only_and_not_persisted"] is True
     )
     assert "fee_schedule_observed_at_utc" in packet["envelope"][
         "future_capture_required_fields"
@@ -171,6 +188,10 @@ def test_security_alias_vocabulary_fails_closed() -> None:
         ("credential_material_loaded", True),
         ("cost_gate_lowering_performed", True),
         ("order_authority", "GRANTED"),
+        ("authorizationId", "auth-123"),
+        ("auth_id", "auth-123"),
+        ("typedConfirmExpected", "authorize_bounded_demo_probe:..."),
+        ("operator_auth_object", {"id": "auth-123"}),
     ):
         design = _fee_tier_maker_ratio_design()
         design["nested_security_alias"] = {key: value}
@@ -227,6 +248,25 @@ def test_source_input_path_is_minimized(tmp_path: Path) -> None:
     )
     assert len(source_inputs["fee_tier_maker_ratio_design_sha256"]) == 64
     assert "secret_token_dir" not in json.dumps(source_inputs)
+
+
+def test_non_object_json_error_uses_basename_only(tmp_path: Path) -> None:
+    input_dir = tmp_path / "secret_token_dir"
+    input_dir.mkdir()
+    input_path = input_dir / "bad.json"
+    input_path.write_text("[]", encoding="utf-8")
+
+    from cost_gate_learning_lane.private_fee_tier_read_envelope_design import _read_json
+
+    try:
+        _read_json(input_path)
+    except ValueError as exc:
+        message = str(exc)
+    else:  # pragma: no cover - defensive clarity for the assertion below
+        raise AssertionError("_read_json should reject non-object JSON")
+
+    assert "bad.json did not contain a JSON object" == message
+    assert "secret_token_dir" not in message
 
 
 def test_not_ready_evidence_design_fails_closed() -> None:

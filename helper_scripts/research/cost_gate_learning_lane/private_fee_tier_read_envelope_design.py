@@ -107,14 +107,18 @@ FORBIDDEN_TRUE_KEYS = {
 }
 
 FORBIDDEN_ALIAS_RULES = {
+    "authorization_id_alias": ("authorization", "id"),
+    "auth_id_alias": ("auth", "id"),
     "authority_granted_alias": ("authority", "granted"),
     "credential_loaded_alias": ("credential", "loaded"),
     "cost_gate_lowering_alias": ("cost", "gate", "lowering"),
     "cost_gate_proof_alias": ("cost", "gate", "proof"),
+    "operator_auth_object_alias": ("operator", "auth", "object"),
     "order_authority_alias": ("order", "authority"),
     "private_read_allowed_alias": ("private", "read", "allowed"),
     "private_read_performed_alias": ("private", "read", "performed"),
     "signed_request_performed_alias": ("signed", "request", "performed"),
+    "typed_confirm_expected_alias": ("typed", "confirm", "expected"),
 }
 
 FALSE_SAFE_STRINGS = {
@@ -254,7 +258,8 @@ def _build_envelope(candidate: dict[str, Any]) -> dict[str, Any]:
             "purpose": "capture account-specific maker/taker fee rates for after-cost reconstruction",
             "allowed_method": ALLOWED_METHOD,
             "allowed_path": FEE_ENDPOINT,
-            "allowed_query": {"category": FEE_CATEGORY},
+            "allowed_query": {"category": FEE_CATEGORY, "symbol": symbol},
+            "query_must_be_symbol_minimized": True,
             "symbol_filter_required_after_response_parse": symbol,
             "post_put_delete_or_order_paths_allowed": False,
             "wallet_balance_or_position_paths_allowed": False,
@@ -283,6 +288,11 @@ def _build_envelope(candidate: dict[str, Any]) -> dict[str, Any]:
             "symbol_field": "symbol",
             "candidate_symbol_exact_match_required": symbol,
             "numeric_fee_rates_required": True,
+            "missing_or_malformed_fee_rate_policy": (
+                "fail_closed_no_fee_proof; do not coerce missing or malformed "
+                "maker/taker fields to zero"
+            ),
+            "strict_candidate_row_parser_required": True,
             "zero_or_negative_maker_fee_policy": (
                 "allowed as captured account economics if returned by Bybit, but "
                 "must be labeled rebate_or_zero_fee and cannot be extrapolated "
@@ -299,6 +309,12 @@ def _build_envelope(candidate: dict[str, Any]) -> dict[str, Any]:
                 "effective timestamp"
             ),
         },
+        "runtime_cache_policy": {
+            "standalone_fee_proof_artifact_only": True,
+            "may_replace_account_manager_fee_cache": False,
+            "may_satisfy_live_fee_rate_count_assertion": False,
+            "broad_category_refresh_requires_separate_review": True,
+        },
         "artifact_redaction_policy": {
             "store_sanitized_response_only": True,
             "hash_raw_response_before_redaction": True,
@@ -312,7 +328,8 @@ def _build_envelope(candidate: dict[str, Any]) -> dict[str, Any]:
             ],
             "redact_request_signature": True,
             "redact_secret_slot_paths": True,
-            "store_ret_code_ret_msg_and_fee_rows": True,
+            "store_ret_code_ret_msg_and_exact_candidate_fee_row": True,
+            "persist_cross_symbol_fee_rows_allowed": False,
         },
         "proof_attachment_policy": {
             "attaches_only_to_candidate": candidate,
@@ -326,11 +343,14 @@ def _build_envelope(candidate: dict[str, Any]) -> dict[str, Any]:
             ],
             "modeled_or_default_fee_tier_is_not_proof": True,
             "private_read_without_review_is_not_proof": True,
-            "cross_symbol_fee_rows_are_context_only": True,
+            "cross_symbol_fee_rows_are_context_only_and_not_persisted": True,
         },
         "failure_conditions": [
             "private read is performed without a fresh PM/E3/BB review id",
             "response contains no exact candidate symbol fee row",
+            "request omits the exact candidate symbol when the endpoint supports symbol query minimization",
+            "makerFeeRate or takerFeeRate is missing, non-string, non-numeric, NaN, or infinite",
+            "symbol-minimized response is used to replace broad runtime fee cache or live fee-rate count assertions",
             "retCode is nonzero or endpoint unsupported",
             "sanitized artifact lacks raw response hash or capture timestamps",
             "any auth header, signature, cookie, or secret material is persisted",
@@ -463,6 +483,7 @@ def render_markdown(packet: dict[str, Any]) -> str:
         "credential_and_transport_policy",
         "response_validation_policy",
         "artifact_redaction_policy",
+        "runtime_cache_policy",
         "proof_attachment_policy",
         "failure_conditions",
         "max_safe_next_action",
@@ -487,7 +508,7 @@ def _read_json(path: Path | None) -> dict[str, Any] | None:
         return None
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
-        raise ValueError(f"{path} did not contain a JSON object")
+        raise ValueError(f"{path.name} did not contain a JSON object")
     return payload
 
 
