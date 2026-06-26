@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 AVAX Authorization Review Ready No-Authority
+
+- PM/E3/BB advanced `P0-BOUNDED-PROBE-AUTHORIZATION` only to a no-authority review checkpoint for `grid_trading|AVAXUSDT|Sell`.
+- Anti-repeat: do not redo `P0-BOUNDED-PROBE-FIRST-ATTEMPT-TOUCHABILITY-BOOTSTRAP-SOURCE-ONLY`; prior source patch/report already covers the bootstrap and placement plan is review-ready.
+- Fresh packet is defer-only: `READY_FOR_OPERATOR_AUTHORIZATION_REVIEW`, no auth object, no active runtime probe/order authority, no Cost Gate change. Actual grant still requires valid structured standing Demo authorization or exact typed confirm, then fresh E3/BB order-envelope/runtime/reconciliation review.
+
 ## 2026-06-26 Profit Candidate Selection AVAX Review Packet
 
 - PM/QC/MIT/BB closed `P0-PROFIT-CANDIDATE-SELECTION` as `DONE_WITH_CONCERNS` and selected exactly one review-only candidate: `grid_trading|AVAXUSDT|Sell`, 60m, false-negative after current cost.

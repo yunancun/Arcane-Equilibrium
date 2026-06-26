@@ -11,6 +11,13 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 05:37 CEST
+- normalized TODO v538 after the AVAX authorization review checkpoint
+- anti-repeat result: `P0-BOUNDED-PROBE-FIRST-ATTEMPT-TOUCHABILITY-BOOTSTRAP-SOURCE-ONLY` is already done via the prior source patch/report, so it was not rerun
+- fresh no-authority review artifacts: authority readiness `AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW`; operator packet `READY_FOR_OPERATOR_AUTHORIZATION_REVIEW`, decision `defer`, no auth object, no active probe/order authority, no Cost Gate change
+- what remains: actual bounded Demo grant requires valid structured standing Demo authorization or exact typed confirm for `grid_trading|AVAXUSDT|Sell`, max 1, TTL <=4h, then fresh E3/BB order-envelope/runtime/reconciliation review before any order
+- boundary: docs/report/local artifact-only helper outputs; no Bybit call/order/cancel/modify, PG write, runtime sync/restart, crontab/env mutation, adapter/writer enablement, Cost Gate change, live/probe/order authority, or proof claim
+
 2026-06-26 05:23 CEST
 - closed `P0-PROFIT-CANDIDATE-SELECTION` as `DONE_WITH_CONCERNS`
 - selected exactly one review-only candidate: `grid_trading|AVAXUSDT|Sell`, 60m, false-negative after current cost, avg net `73.5511bps`, `48/48` net-positive, cap `10 USDT`, min notional `5 USDT`, no Cost Gate lowering and no authority
