@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Current-Cap Staircase Risk Worksheet
+
+- PM closed `P1-AGGRESSIVE-ALPHA-CURRENT-CAP-STAIRCASE-RISK-WORKSHEET-NO-ORDER` as source/test/docs `DONE_WITH_CONCERNS`.
+- Added no-authority helper `current_cap_staircase_risk_worksheet.py`; smoke shows AVAX Sell constructible under existing `10 USDT` cap with 8 tiers, min `0.9 AVAX / 5.4576 USDT`, max `1.6 AVAX / 9.7024 USDT`, 3-order review reserve `30 USDT`, cap/risk mutation false.
+- PM read: order admission remains false because BBO is stale and there is no bounded auth. If no real auth delta, next source-only work is fee/slippage/maker-taker schema.
+
 ## 2026-06-26 Source-Only Control Identity Contract
 
 - PM closed `P1-AGGRESSIVE-ALPHA-SOURCE-ONLY-CONTROL-IDENTITY-CONTRACT-NO-ORDER` as source/test/docs `DONE_WITH_CONCERNS`.
