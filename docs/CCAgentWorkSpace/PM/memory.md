@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Runtime Source Sync Apply Go/No-Go No-Apply
+
+- PM/E3 closed `P1-RUNTIME-HEALTH-HYGIENE-SOURCE-SYNC-APPLY-REVIEW` as read-only `DONE_WITH_CONCERNS_NO_APPLY`.
+- `dd22810e..370a3d82` drift is docs/reports/TODO/worklog/changelog/SCRIPT_INDEX plus source-only cost-gate research helpers/tests; no Rust/FastAPI/cron/canary/deploy/service/migration/Cargo/crontab paths, and runtime pins remain internally consistent at `dd22810e`.
+- PM read: do not reopen apply review for docs/source-only research drift alone. P0 auth still needs real scoped auth; shadow placement sample mismatch is not proof or authority.
+
 ## 2026-06-26 API Process Ownership Read-Only
 
 - PM closed `P1-RUNTIME-HEALTH-HYGIENE-API-PROCESS-OWNERSHIP` as read-only `DONE_WITH_CONCERNS`.
