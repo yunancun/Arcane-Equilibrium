@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 23:55 CEST
+- closed `P1-RUNTIME-HEALTH-HYGIENE-STANDING-DEMO-AUTH-PLUMBING-SYNC-REVIEW` as `DONE_WITH_CONCERNS`
+- runtime `trade-core` fast-forwarded `b224c759... -> 69f6c4b2...`; crontab expected-head pins old/target `11/0 -> 0/11`; line count stayed `70`; no mainnet, adapter, or probe-outcome-recording expansion
+- Linux verification passed auth `21`, cron static `24`, adjacent alpha/profitability `140`, bash syntax, py_compile, diff-check; API/watchdog stayed active without restart
+- artifacts still fail closed because false-negative review/preflight remains `defer` / `OPERATOR_REVIEW_REQUIRED`; next blocker is `P0-STANDING-DEMO-FALSE-NEGATIVE-PREFLIGHT-PLUMBING`
+
 2026-06-26 23:31 CEST
 - closed `P0-STANDING-DEMO-AUTHORIZATION-PLUMBING` as source/test/docs `DONE_WITH_CONCERNS`
 - `bounded_probe_operator_authorization.py` can now derive candidate-scoped auth id/budget/expiry from valid `standing_demo_operator_authorization_v1`; cost-gate and alpha cron wrappers consume it only through explicit standing JSON env paths and default to `defer`
