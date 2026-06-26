@@ -1,9 +1,9 @@
 # Xuanheng TODO - Active Dispatch Queue
 
-**Version** v554 | **Date** 2026-06-26
+**Version** v555 | **Date** 2026-06-26
 **Repo/runtime pointer**: Local/origin include docs-only checkpoints above runtime code head; Linux runtime code and crontab expected-head pins are aligned at `785a434612f82dae57fbe9bdde0f6d22fb331f0f`.
-**Current posture**: `P1-RUNTIME-HEALTH-HYGIENE-ALPHA-BOUNDED-CHAIN-STALENESS-GUARD-SYNC-REVIEW` is closed. Next queue entry is fresh post-guard AVAX latest-chain review; P0 bounded authorization remains blocked until an AVAX-scoped defer/no-authority artifact exists.
-**Links**: latest report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--alpha_bounded_chain_guard_runtime_sync.md`; version changelog `docs/CLAUDE_CHANGELOG.md`; TODO standard `docs/agents/todo-maintenance.md`.
+**Current posture**: `P0-BOUNDED-PROBE-AUTHORIZATION-AVAX-LATEST-CHAIN-REFRESH-REVIEW` is closed: post-guard chain is AVAX-scoped but defer/no-authority. Actual bounded authorization remains blocked by candidate-scoped typed-confirm/standing-auth gates.
+**Links**: latest report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--post_guard_avax_latest_chain_review_no_authority.md`; version changelog `docs/CLAUDE_CHANGELOG.md`; TODO standard `docs/agents/todo-maintenance.md`.
 
 ---
 
@@ -16,10 +16,10 @@
 | ETH Buy cap feasibility | ETH construction preview sha `f4e36f14...` is `CANDIDATE_CONSTRUCTION_NOT_FEASIBLE_UNDER_CAP`: current cap `10 USDT`, min executable notional `15.7105 USDT`, rounded qty `0`. | Do not raise cap now. No ETH probe/order path unless future QC/operator cap envelope + E3/BB/auth chain exists. |
 | AVAX bounded candidate | AVAX remains selected current P0 candidate: `grid_trading|AVAXUSDT|Sell`, 60m, current-cap feasible, `73.5511bps`, `48/48` positive. | Candidate selection is closed. Do not replace with SUI/FIL without reopening P0 candidate selection. |
 | Candidate delta selector | v551 runtime sync made cost-gate false-negative review prefer the cap-feasible selected side-cell. Runtime still has one cap-feasible selection artifact, `grid_trading|AVAXUSDT|Sell`, `fits_current_cap=true`. | Cost-gate selector remains the desired AVAX route. Do not replace AVAX with ETH or controls without reopening candidate selection. |
-| Alpha bounded-chain staleness | `2026-06-26T06:20:35Z` read-only check found the natural `08:15:04 CEST` alpha downstream auth artifact sha `43b0bc5e...` still targets `grid_trading|ETHUSDT|Buy` because old runtime consumed stale false-negative bounded preflight. | Runtime now has the fail-closed guard. Next proof is a scheduled post-guard artifact delta, not manual cron execution. |
+| Alpha bounded-chain staleness | `2026-06-26T06:32:36Z` post-guard review found the fresh chain is now `grid_trading|AVAXUSDT|Sell`: false-negative review sha `951ab7a9...`, bounded preflight sha `60af69ad...`, bounded auth sha `4d86859c...`. | Routing fix is proven. This is still not authority or profit proof; authorization remains defer/no-authority. |
 | Cap-feasible controls | v548 filter packet keeps SUI/FIL as source-only controls. ETC/APT rejected for incomplete BBO; UNI/XRP/OP rejected for thin cushion/hit-rate/sample/spread. | SUI/FIL may inform research only; they are not AVAX proof and not bounded candidates. |
 | Matched-control proof contract | v549 design packet: future AVAX proof must use same-side-cell blocked controls plus candidate-matched fill lineage. SUI/FIL cross-symbol controls are research-only and cannot count toward bounded-probe proof, Cost Gate proof, promotion, or AVAX PnL proof. | Future outcome review must use existing proof-exclusion/result-review/execution-realism contracts. |
-| Authorization | Latest runtime auth sha `43b0bc5e...`, mtime `2026-06-26 08:15:04 +0200`, remains `READY_FOR_OPERATOR_AUTHORIZATION_REVIEW`, `decision=defer`, candidate `grid_trading|ETHUSDT|Buy`, no emitted object/probe/order authority. | This predates the guard sync and is not AVAX-scoped or executable. P0 authorization remains blocked until a fresh post-guard AVAX-scoped artifact delta exists. |
+| Authorization | Latest runtime auth sha `4d86859c...`, mtime `2026-06-26 08:30:56 +0200`, is AVAX-scoped but `SEALED_HORIZON_PREFLIGHT_NOT_READY`, `decision=defer`, no emitted object/probe/order authority. Required phrases in artifacts: `approve_cost_gate_false_negative_preflight:grid_trading|AVAXUSDT|Sell:2` and `authorize_bounded_demo_probe:grid_trading|AVAXUSDT|Sell:0:`. | This is not executable. P0 authorization is blocked by candidate-scoped typed-confirm/standing-auth gates; do not rerun read-only audit unless authorization evidence changes. |
 | Regime evidence | Current scorecard/cap-screen artifacts contain no leak-free regime labels or markout buckets for the cap-feasible split. | Do not claim regime proof. A future regime split needs a separate data-design blocker after a real evidence delta. |
 | Proof exclusions | `flash_dip_buy`, cleanup/risk-close, unattributed fills, local stale rows, artifact counts, source-smoke, single-window MM positives, replay-only results. | Never count these as bounded-probe proof, Cost Gate proof, promotion evidence, or risk-adjusted net PnL proof. |
 
@@ -27,17 +27,17 @@
 
 | Field | Value |
 |---|---|
-| `session_loop_state` | `/tmp/openclaw/session_loop_state_20260626T062035Z_alpha_bounded_chain_guard_runtime_sync_review.json` |
-| `active_blocker_id` | `P1-RUNTIME-HEALTH-HYGIENE-ALPHA-BOUNDED-CHAIN-STALENESS-GUARD-SYNC-REVIEW` |
-| `blocker_goal` | Sync the validated alpha bounded-chain stale side-cell guard to Linux runtime and align crontab expected-head pins without restart, manual cron run, PG write, Bybit call, artifact overwrite, or authority mutation. |
-| `profit_relevance` | Makes the fail-closed stale-side-cell guard active in scheduled alpha cron so AVAX cap-feasible review is not repeatedly displaced by stale ETH bounded preflight artifacts. |
-| `previous_evidence_checked` | v552 source-fix report; v551 runtime sync report; `08:15 CEST` alpha artifacts; runtime source/crontab state. |
-| `new_evidence_delta_required` | Runtime source/crontab drift from the validated repo guard commit, or fresh alpha artifact evidence proving the stale ETH bounded chain is still active. |
-| `new_evidence_delta_found` | Repo/origin `785a4346`; runtime was still `b9836224`; crontab old/new pin counts were `11/0`; `08:15 CEST` alpha auth remained ETH-scoped. |
-| `anti_repeat_decision` | Proceed with distinct runtime sync review; do not repeat P0 authorization because latest auth artifact is pre-guard ETH defer/no-authority. |
+| `session_loop_state` | `/tmp/openclaw/session_loop_state_20260626T063236Z_post_guard_avax_latest_chain_review.json` |
+| `active_blocker_id` | `P0-BOUNDED-PROBE-AUTHORIZATION-AVAX-LATEST-CHAIN-REFRESH-REVIEW` |
+| `blocker_goal` | Review the first fresh post-guard AVAX-scoped bounded latest-chain artifacts for defer/no-authority semantics and hard-boundary preservation. |
+| `profit_relevance` | Confirms the runtime guard and cap-feasible selector route bounded review toward current-cap-feasible AVAX without granting probe/order authority. |
+| `previous_evidence_checked` | v553 runtime sync report; fresh `08:29/08:30 CEST` AVAX artifacts; source/authorization gate contracts. |
+| `new_evidence_delta_required` | Fresh post-guard artifact mtime/sha delta after runtime guard sync. |
+| `new_evidence_delta_found` | Fresh post-guard chain is AVAX-scoped, but false-negative review remains defer and bounded authorization remains no-authority. |
+| `anti_repeat_decision` | Proceed with artifact review because new AVAX evidence exists; do not rerun runtime sync or stale ETH P0 audit. |
 | `loop_status` | `DONE_WITH_CONCERNS` |
-| `next_blocker_id` | `P0-BOUNDED-PROBE-AUTHORIZATION-AVAX-LATEST-CHAIN-REFRESH-REVIEW` |
-| `why_not_repeating_current_blocker` | Runtime sync is complete and should not be rerun unless source/crontab drift changes; P0 authorization still lacks a fresh AVAX-scoped artifact. |
+| `next_blocker_id` | `P0-BOUNDED-PROBE-AUTHORIZATION` |
+| `why_not_repeating_current_blocker` | AVAX-scoped review is complete and still no-authority; repeating it without typed-confirm/standing-auth evidence would be anti-repeat noise. |
 
 ## §2 Active Dispatch Queue
 
@@ -46,8 +46,8 @@
 | `P0-PROFIT-EVIDENCE-QUALITY` | 0 | DONE | `DONE_WITH_CONCERNS` | PM -> E3/BB/QC -> PM | Demo overhang classified; stale/unattributed/proof-exclusion rules recorded; no unreviewed cancel/modify. | `2026-06-26--demo_residual_cleanup_refresh_action_clean_exchange.md`; proof exclusions carried in §0/§4. | No-repeat unless new exchange inventory, fill attribution, or proof-quality evidence changes. |
 | `P0-PROFIT-CANDIDATE-SELECTION` | 0 | DONE | `DONE_WITH_CONCERNS` | PM -> QC/MIT/BB -> PM | Exactly one review-only candidate selected; no probe/order/live authority. | `2026-06-26--profit_candidate_selection_avax_review_packet.md`; selected `grid_trading|AVAXUSDT|Sell`. | No-repeat unless fresh evidence invalidates AVAX cap feasibility or candidate ranking. |
 | `P0-PROFIT-CANDIDATE-SELECTION-DELTA-REFRESH-NO-ORDER` | 0 | DONE | `DONE_WITH_CONCERNS` | PM -> PA/E1 -> E2 -> E4 -> PM | Fresh artifact delta handled; source selector prevents cap-infeasible top false-negative from overriding cap-feasible selected candidate; no authority. | `2026-06-26--candidate_selection_delta_cap_feasible_selector_source_fix.md`; validation: cron static `15`, auth/preflight `23`, policy focused `8`. | No-repeat unless new scorecard/cap/selector evidence changes. |
-| `P0-BOUNDED-PROBE-AUTHORIZATION` | 0 | BLOCKED | `BLOCKED_BY_RUNTIME_AUTHORIZATION` | PM -> E3 -> BB -> PM | Candidate-specific bounded Demo auth only; no global Cost Gate lowering; no live; no runtime/order/probe authority unless valid authorization is admitted and E3/BB review passes. | Latest auth sha `43b0bc5e...` is pre-guard defer/review-only and still ETH-scoped; no AVAX-scoped authority. | No-repeat until a fresh post-guard AVAX-scoped authorization artifact exists. |
-| `P0-BOUNDED-PROBE-AUTHORIZATION-AVAX-LATEST-CHAIN-REFRESH-REVIEW` | 0 | WAITING | `WAITING_FOR_POST_GUARD_ARTIFACT_DELTA` | PM -> E3 -> BB -> PM if exchange-facing | Review a fresh post-guard AVAX-scoped bounded auth chain for defer/no-authority semantics and hard-boundary preservation; do not grant order/probe authority. | Runtime guard synced at `2026-06-26T06:22:54Z`; latest auth artifact mtime `2026-06-26 08:15:04 +0200` predates the sync and is ETH-scoped. | Scheduled review after the next cost-gate/alpha cron window (`27/30 * * * *`, first expected post-guard chain around `2026-06-26 08:30 CEST`; review around `08:35 CEST`). |
+| `P0-BOUNDED-PROBE-AUTHORIZATION` | 0 | BLOCKED | `BLOCKED_BY_OPERATOR_ACTION` / `BLOCKED_BY_RUNTIME_AUTHORIZATION` | PM -> E3 -> BB -> PM | Candidate-specific bounded Demo auth only; no global Cost Gate lowering; no live; no runtime/order/probe authority unless valid authorization is admitted and E3/BB review passes. | Latest AVAX auth sha `4d86859c...` is defer/no-authority: false-negative preflight confirm missing, standing Demo auth absent, no emitted object. | Stop here unless candidate-scoped typed-confirm/standing-auth evidence changes; do not rerun read-only audit. |
+| `P0-BOUNDED-PROBE-AUTHORIZATION-AVAX-LATEST-CHAIN-REFRESH-REVIEW` | 0 | DONE | `DONE_WITH_CONCERNS` | PM -> E3 -> BB -> PM if exchange-facing | Review a fresh post-guard AVAX-scoped bounded auth chain for defer/no-authority semantics and hard-boundary preservation; do not grant order/probe authority. | `2026-06-26--post_guard_avax_latest_chain_review_no_authority.md`; routing fixed to AVAX; auth blocked by exact typed confirm/standing-auth gates. | No-repeat unless a new authorization artifact changes typed-confirm, standing-auth, or authority fields. |
 | `P0-PROFIT-OUTCOME-REVIEW` | 0 | WAITING | `WAITING_FOR_AUTHORIZED_OUTCOMES` | PM -> QC/MIT/BB -> PM | Candidate-matched fills, net PnL after fees/slippage, matched controls, execution realism, repeat/OOS path. | No authorized bounded-probe outcomes exist. | Wait condition: only after authorized bounded Demo probe with candidate-matched outcomes. |
 | `P1-AGGRESSIVE-ALPHA-ETH-BUY-CAP-FEASIBILITY-PROPOSAL-NO-ORDER` | 1 | DONE | `DONE_WITH_CONCERNS` | PM -> QC -> MIT -> PM | Source-only cap decision recorded; no cap mutation, no order/probe authority. | `2026-06-26--eth_buy_cap_feasibility_no_order.md`; ETH needs `15.7105 USDT` vs current `10 USDT` cap. | No-repeat unless fresh cap envelope, scorecard, construction, or authorization evidence changes. |
 | `P1-AGGRESSIVE-ALPHA-CAP-FEASIBLE-LOW-PRICE-REGIME-FILTER-NO-ORDER` | 1 | DONE | `DONE_WITH_CONCERNS` | PM-local synthesis | One source-only filter proposal; no order/probe authority and no candidate replacement. | `2026-06-26--cap_feasible_low_price_filter_no_order.md`; AVAX champion, SUI/FIL controls. | No-repeat unless fresh scorecard/cap-screen/auth/regime evidence changes. |
@@ -82,8 +82,8 @@
 
 | Hypothesis | Score snapshot | Fastest safe test | Authority |
 |---|---|---|---|
-| AVAX post-guard latest-chain alignment | upside High path-enabler; evidence Medium; realism pending fresh artifact; cost model good; time Fast next cron; account risk None now; governance Low; autonomy High | Review the first post-guard cost-gate/alpha artifact chain for AVAX scope and no-authority fields. | Artifact review only; no order authority. |
-| AVAX alpha bounded-chain stale-side guard | upside High path-enabler; evidence High for bug path; realism runtime-synced; cost model unchanged; time Fast; account risk None now; governance Low; autonomy High | Confirm the next scheduled alpha cycle no longer refreshes stale ETH bounded chain. | Artifact review only; no order authority. |
+| AVAX candidate-scoped authorization admission | upside High path-enabler; evidence High for AVAX route; realism blocked by auth; cost model unchanged; time Fast if valid scoped auth appears; account risk None now; governance Medium; autonomy High | Review only a new candidate-scoped authorization delta; no self-grant. | Requires typed-confirm/standing-auth evidence; no order authority now. |
+| AVAX first-attempt near-touch design | upside Medium-High; evidence Medium; realism pending; cost model good; time Medium; account risk None now; governance Low; autonomy Medium | Source-only review of near-touch/skip placement design after authorization gate is satisfied. | Design/proposal only until auth exists. |
 | ETH high-edge cap-envelope research | upside High if cap envelope exists; evidence Low-Medium; realism Low under current cap; cost model good; time Medium; account risk None now; governance Medium if cap pressure; autonomy Medium | Source-only cap-envelope sensitivity packet; do not route bounded authorization under current `10 USDT` cap. | Research only; future cap change needs QC/operator/E3/BB. |
 
 ## §6 Handoff Commands
@@ -92,8 +92,14 @@
 git -C /Users/ncyu/Projects/TradeBot/srv status --short --branch
 sed -n '1,220p' /Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--alpha_bounded_chain_stale_side_cell_guard_source_fix.md
 sed -n '1,220p' /Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--alpha_bounded_chain_guard_runtime_sync.md
-python3 -m json.tool /tmp/openclaw/session_loop_state_20260626T062035Z_alpha_bounded_chain_guard_runtime_sync_review.json | sed -n '1,220p'
-ssh trade-core 'cd /home/ncyu/BybitOpenClaw/srv && git rev-parse HEAD && git status --short --branch; crontab -l | grep -o 785a434612f82dae57fbe9bdde0f6d22fb331f0f | wc -l; stat -c "%y %n" /tmp/openclaw/cost_gate_learning_lane/bounded_probe_operator_authorization_latest.json'
+sed -n '1,220p' /Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--post_guard_avax_latest_chain_review_no_authority.md
+python3 -m json.tool /tmp/openclaw/session_loop_state_20260626T063236Z_post_guard_avax_latest_chain_review.json | sed -n '1,220p'
+ssh trade-core 'python3 - <<PY
+import json, pathlib
+for p in ["/tmp/openclaw/cost_gate_learning_lane/false_negative_operator_review_latest.json", "/tmp/openclaw/cost_gate_learning_lane/bounded_probe_operator_authorization_latest.json"]:
+    payload=json.loads(pathlib.Path(p).read_text())
+    print(pathlib.Path(p).name, payload.get("status"), payload.get("decision"), payload.get("typed_confirm_expected"), payload.get("active_runtime_probe_authority"), payload.get("active_runtime_order_authority"))
+PY'
 ```
 
 **Maintenance contract**: `TODO.md` is the active dispatch queue only. Long evidence, completed ledgers, and version narratives belong in reports/archive/changelog.
