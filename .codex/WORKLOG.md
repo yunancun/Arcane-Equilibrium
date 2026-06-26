@@ -11,6 +11,13 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 09:04 CEST
+- closed `P1-AGGRESSIVE-ALPHA-ETH-CAP-ENVELOPE-SENSITIVITY-NO-ORDER` as source-only `DONE_WITH_CONCERNS`
+- corrected current runtime cost-gate artifact path to `/tmp/openclaw/cost_gate_learning_lane/`; latest bounded auth artifact is now AVAX-scoped with `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED`, but still defer/no typed confirm/no authority
+- ETH cap staircase: current `10 USDT` cap cannot construct ETH Buy; executable tiers start at `15.7105`, `31.4210`, `47.1315 USDT` for `0.01`, `0.02`, `0.03 ETH`
+- normalized `TODO.md` v558 to active-queue shape and recorded operator-requested pause after this round
+- boundary: read-only artifact inspection + docs/TODO/report/state only; no Bybit/API/order/cancel/modify, PG query/write, runtime sync, service/crontab/env mutation, Cost Gate/cap/risk mutation, authority, or proof claim
+
 2026-06-26 07:34 CEST
 - closed `P0-PROFIT-CANDIDATE-SELECTION-DELTA-REFRESH-NO-ORDER` as source/test/docs `DONE_WITH_CONCERNS`
 - runtime read-only delta showed latest scorecard/auth chain again pointing at `grid_trading|ETHUSDT|Buy`, while ETH remains infeasible under the current `10 USDT` cap and AVAX remains top current-cap-feasible candidate
