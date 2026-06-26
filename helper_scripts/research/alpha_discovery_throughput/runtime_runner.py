@@ -2214,6 +2214,9 @@ def summarize_false_negative_operator_review(
         "false_negative_operator_review_typed_confirm_expected": payload.get(
             "typed_confirm_expected"
         ),
+        "false_negative_operator_review_approval_source": payload.get(
+            "operator_review_approval_source"
+        ),
         "false_negative_operator_review_approved_for_preflight": answers.get(
             "operator_review_approved_for_preflight"
         ),
@@ -2237,6 +2240,15 @@ def summarize_false_negative_operator_review(
         ),
         "false_negative_operator_review_promotion_evidence": answers.get(
             "promotion_evidence"
+        ),
+        "false_negative_operator_review_standing_demo_authorization_present": (
+            answers.get("standing_demo_authorization_present")
+        ),
+        "false_negative_operator_review_standing_demo_authorization_valid": (
+            answers.get("standing_demo_authorization_valid")
+        ),
+        "false_negative_operator_review_standing_demo_authorization_consumed": (
+            answers.get("standing_demo_authorization_consumed")
         ),
         "false_negative_operator_review_candidate_avg_net_bps": candidate.get(
             "avg_net_bps"
@@ -3731,6 +3743,14 @@ def _learning_summary(worklist: dict[str, Any]) -> dict[str, Any]:
         ),
         "top_learning_task_false_negative_operator_review_approved_for_preflight": (
             evidence.get("false_negative_operator_review_approved_for_preflight")
+        ),
+        "top_learning_task_false_negative_operator_review_approval_source": (
+            evidence.get("false_negative_operator_review_approval_source")
+        ),
+        "top_learning_task_false_negative_operator_review_standing_demo_authorization_valid": (
+            evidence.get(
+                "false_negative_operator_review_standing_demo_authorization_valid"
+            )
         ),
         "top_learning_task_false_negative_operator_review_review_grants_runtime_authority": (
             evidence.get("false_negative_operator_review_review_grants_runtime_authority")

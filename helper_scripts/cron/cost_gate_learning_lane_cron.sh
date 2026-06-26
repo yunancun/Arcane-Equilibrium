@@ -272,11 +272,7 @@ validate_int "OPENCLAW_COST_GATE_PLACEMENT_REPAIR_MAX_FRESH_BBO_AGE_MS" "$PLACEM
 validate_int "OPENCLAW_COST_GATE_AUTHORITY_PATCH_MAX_ARTIFACT_AGE_HOURS" "$AUTHORITY_PATCH_MAX_ARTIFACT_AGE_HOURS"
 validate_int "OPENCLAW_COST_GATE_OPERATOR_AUTHORIZATION_MAX_ARTIFACT_AGE_HOURS" "$OPERATOR_AUTHORIZATION_MAX_ARTIFACT_AGE_HOURS"
 if [[ -z "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION" ]]; then
-    if [[ -n "$STANDING_DEMO_AUTHORIZATION_JSON" && -f "$STANDING_DEMO_AUTHORIZATION_JSON" ]]; then
-        BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION="authorize"
-    else
-        BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION="defer"
-    fi
+    BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION="defer"
 fi
 if [[ ! "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION" =~ ^(defer|reject|authorize)$ ]]; then
     echo "[$(ts)] FATAL: OPENCLAW_COST_GATE_BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION invalid: ${BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION}" | tee -a "$LOG" >&2
@@ -543,6 +539,11 @@ FALSE_NEGATIVE_OPERATOR_REVIEW_ARGS=(
 if [[ -n "$FALSE_NEGATIVE_OPERATOR_REVIEW_SELECTED_SIDE_CELL_KEY" ]]; then
     FALSE_NEGATIVE_OPERATOR_REVIEW_ARGS+=(
         --selected-side-cell-key "$FALSE_NEGATIVE_OPERATOR_REVIEW_SELECTED_SIDE_CELL_KEY"
+    )
+fi
+if [[ -n "$STANDING_DEMO_AUTHORIZATION_JSON" && -f "$STANDING_DEMO_AUTHORIZATION_JSON" ]]; then
+    FALSE_NEGATIVE_OPERATOR_REVIEW_ARGS+=(
+        --standing-demo-authorization-json "$STANDING_DEMO_AUTHORIZATION_JSON"
     )
 fi
 
@@ -925,6 +926,12 @@ PY
     fi
 
     if [[ "$REFRESH_FALSE_NEGATIVE_BOUNDED_PROBE_PREFLIGHT" == "1" ]]; then
+        FALSE_NEGATIVE_BOUNDED_PREFLIGHT_EXTRA_ARGS=()
+        if [[ -n "$STANDING_DEMO_AUTHORIZATION_JSON" && -f "$STANDING_DEMO_AUTHORIZATION_JSON" ]]; then
+            FALSE_NEGATIVE_BOUNDED_PREFLIGHT_EXTRA_ARGS+=(
+                --standing-demo-authorization-json "$STANDING_DEMO_AUTHORIZATION_JSON"
+            )
+        fi
         (
             cd "$BASE"
             export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
@@ -934,7 +941,8 @@ PY
                 --false-negative-operator-review-json "$FALSE_NEGATIVE_OPERATOR_REVIEW_OUT" \
                 --max-artifact-age-hours "$FALSE_NEGATIVE_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS" \
                 --json-output "$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_OUT" \
-                --output "$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_MD_OUT"
+                --output "$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_MD_OUT" \
+                "${FALSE_NEGATIVE_BOUNDED_PREFLIGHT_EXTRA_ARGS[@]}"
         ) >> "$LOG" 2>&1 || false_negative_bounded_preflight_rc=$?
         if [[ -f "$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_OUT" ]]; then
             cp "$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_OUT" "$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_LATEST"
@@ -1532,6 +1540,7 @@ status = {
     "false_negative_operator_review_blocking_gate_count": false_negative_operator_review.get("blocking_gate_count"),
     "false_negative_operator_review_blocking_gates": false_negative_operator_review.get("blocking_gates"),
     "false_negative_operator_review_typed_confirm_expected": false_negative_operator_review.get("typed_confirm_expected"),
+    "false_negative_operator_review_approval_source": false_negative_operator_review.get("operator_review_approval_source"),
     "false_negative_operator_review_approved_for_preflight": (
         (false_negative_operator_review.get("answers") or {}).get("operator_review_approved_for_preflight")
         if isinstance(false_negative_operator_review.get("answers"), dict)
@@ -1564,6 +1573,21 @@ status = {
     ),
     "false_negative_operator_review_promotion_evidence": (
         (false_negative_operator_review.get("answers") or {}).get("promotion_evidence")
+        if isinstance(false_negative_operator_review.get("answers"), dict)
+        else None
+    ),
+    "false_negative_operator_review_standing_demo_authorization_present": (
+        (false_negative_operator_review.get("answers") or {}).get("standing_demo_authorization_present")
+        if isinstance(false_negative_operator_review.get("answers"), dict)
+        else None
+    ),
+    "false_negative_operator_review_standing_demo_authorization_valid": (
+        (false_negative_operator_review.get("answers") or {}).get("standing_demo_authorization_valid")
+        if isinstance(false_negative_operator_review.get("answers"), dict)
+        else None
+    ),
+    "false_negative_operator_review_standing_demo_authorization_consumed": (
+        (false_negative_operator_review.get("answers") or {}).get("standing_demo_authorization_consumed")
         if isinstance(false_negative_operator_review.get("answers"), dict)
         else None
     ),
@@ -1616,6 +1640,21 @@ status = {
     "false_negative_bounded_probe_preflight_blocking_gates": false_negative_bounded_preflight.get("blocking_gates"),
     "false_negative_bounded_probe_preflight_ready": (
         (false_negative_bounded_preflight.get("answers") or {}).get("ready_for_operator_bounded_demo_probe_authorization")
+        if isinstance(false_negative_bounded_preflight.get("answers"), dict)
+        else None
+    ),
+    "false_negative_bounded_probe_preflight_operator_review_approval_source": (
+        (false_negative_bounded_preflight.get("answers") or {}).get("operator_review_approval_source")
+        if isinstance(false_negative_bounded_preflight.get("answers"), dict)
+        else None
+    ),
+    "false_negative_bounded_probe_preflight_standing_demo_authorization_required": (
+        (false_negative_bounded_preflight.get("answers") or {}).get("standing_demo_authorization_required")
+        if isinstance(false_negative_bounded_preflight.get("answers"), dict)
+        else None
+    ),
+    "false_negative_bounded_probe_preflight_standing_demo_authorization_valid": (
+        (false_negative_bounded_preflight.get("answers") or {}).get("standing_demo_authorization_valid")
         if isinstance(false_negative_bounded_preflight.get("answers"), dict)
         else None
     ),

@@ -124,10 +124,12 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "false_negative_candidate_packet_global_cost_gate_lowering_recommended" in src
     assert "false_negative_operator_review_status" in src
     assert "false_negative_operator_review_decision" in src
+    assert "false_negative_operator_review_approval_source" in src
     assert "false_negative_operator_review_approved_for_preflight" in src
     assert "false_negative_operator_review_bounded_demo_probe_preflight_approved" in src
     assert "false_negative_operator_review_review_grants_runtime_authority" in src
     assert "false_negative_operator_review_order_authority_granted" in src
+    assert "false_negative_operator_review_standing_demo_authorization_valid" in src
     assert "false_negative_candidate_friction_scorecard_status" in src
     assert "false_negative_candidate_friction_scorecard_ranked_count" in src
     assert "false_negative_candidate_friction_scorecard_top_side_cell_key" in src
@@ -143,6 +145,8 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "autonomous_parameter_proposal_reviewable" in src
     assert "false_negative_bounded_probe_preflight_status" in src
     assert "false_negative_bounded_probe_preflight_side_cell_key" in src
+    assert "false_negative_bounded_probe_preflight_operator_review_approval_source" in src
+    assert "false_negative_bounded_probe_preflight_standing_demo_authorization_valid" in src
     assert "false_negative_bounded_probe_preflight_order_authority_granted" in src
     assert "bounded_probe_preflight_source_path" in src
     assert "bounded_probe_result_review_status" in src
@@ -265,8 +269,9 @@ def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     assert 'REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION:-1}"' in src
     assert 'STANDING_DEMO_AUTHORIZATION_JSON="${OPENCLAW_COST_GATE_STANDING_DEMO_AUTHORIZATION_JSON:-}"' in src
     assert 'BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION="${OPENCLAW_COST_GATE_BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION:-}"' in src
-    assert 'BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION="authorize"' in src
     assert 'BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION="defer"' in src
+    assert 'BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION="authorize"' not in src
+    assert 'if [[ -n "$STANDING_DEMO_AUTHORIZATION_JSON" && -f "$STANDING_DEMO_AUTHORIZATION_JSON" ]]; then\n        BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION="authorize"' not in src
     assert 'REFRESH_BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT:-1}"' in src
     assert 'REFRESH_BOUNDED_PROBE_RESULT_REVIEW="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_RESULT_REVIEW:-1}"' in src
     assert 'REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW:-1}"' in src
@@ -563,6 +568,26 @@ def test_wrapper_false_negative_default_defer_preserves_existing_review_input() 
     assert '--existing-operator-review-json "$FALSE_NEGATIVE_OPERATOR_REVIEW_LATEST"' in src
     assert "--decision defer" in src
     assert 'cp "$FALSE_NEGATIVE_OPERATOR_REVIEW_OUT" "$FALSE_NEGATIVE_OPERATOR_REVIEW_LATEST"' in src
+
+
+def test_wrapper_false_negative_stages_use_standing_env_without_raw_auth_fields() -> None:
+    src = _src(WRAPPER)
+    review_index = src.index("FALSE_NEGATIVE_OPERATOR_REVIEW_ARGS=(")
+    auth_index = src.index("BOUNDED_PROBE_OPERATOR_AUTHORIZATION_ARGS=(")
+    preflight_index = src.index('if [[ "$REFRESH_FALSE_NEGATIVE_BOUNDED_PROBE_PREFLIGHT" == "1" ]]')
+    preflight_end = src.index('cp "$FALSE_NEGATIVE_BOUNDED_PREFLIGHT_OUT"', preflight_index)
+    review_block = src[review_index:auth_index]
+    preflight_block = src[preflight_index:preflight_end]
+
+    assert 'STANDING_DEMO_AUTHORIZATION_JSON="${OPENCLAW_COST_GATE_STANDING_DEMO_AUTHORIZATION_JSON:-}"' in src
+    assert '--standing-demo-authorization-json "$STANDING_DEMO_AUTHORIZATION_JSON"' in review_block
+    assert '--standing-demo-authorization-json "$STANDING_DEMO_AUTHORIZATION_JSON"' in preflight_block
+    assert "--operator-id" not in review_block
+    assert "--authorization-id" not in review_block
+    assert "--typed-confirm" not in review_block
+    assert "--operator-id" not in preflight_block
+    assert "--authorization-id" not in preflight_block
+    assert "--typed-confirm" not in preflight_block
 
 
 def test_wrapper_has_preinstall_refresh_only_cutoff_after_plan_refresh() -> None:

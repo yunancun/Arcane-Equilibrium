@@ -22,6 +22,9 @@ from cost_gate_learning_lane.false_negative_operator_review import (
     APPROVED_FOR_PREFLIGHT_STATUS,
     FALSE_NEGATIVE_OPERATOR_REVIEW_SCHEMA_VERSION,
 )
+from cost_gate_learning_lane.standing_demo_authorization import (
+    summarize_standing_demo_authorization,
+)
 
 
 FALSE_NEGATIVE_BOUNDED_PROBE_PREFLIGHT_SCHEMA_VERSION = (
@@ -34,6 +37,7 @@ READY_PROPOSAL_STATUS = "REVIEWABLE_PARAMETER_PROPOSAL_READY"
 READY_PREFLIGHT_STATUS = "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
 OPERATOR_REVIEW_REQUIRED_STATUS = "OPERATOR_REVIEW_REQUIRED"
 DEFAULT_MAX_ARTIFACT_AGE_HOURS = 24
+DEFAULT_MAX_STANDING_DEMO_AUTHORIZATION_TTL_HOURS = 24
 BOUNDARY = (
     "artifact-only false-negative bounded Demo probe preflight; no PG query/"
     "write, Bybit call, order, config, risk, auth, runtime mutation, global "
@@ -315,6 +319,8 @@ def _status_from_gates(gates: list[dict[str, Any]], review_is_approved: bool) ->
     failed = {gate["name"] for gate in gates if gate.get("passed") is not True}
     if "authority_boundary_preserved" in failed:
         return "AUTHORITY_BOUNDARY_VIOLATION"
+    if "standing_demo_authorization_valid_for_preflight" in failed:
+        return "STANDING_DEMO_AUTHORIZATION_INVALID_FOR_PREFLIGHT"
     if "autonomous_parameter_proposal_ready" in failed:
         return "AUTONOMOUS_PARAMETER_PROPOSAL_NOT_READY"
     if "false_negative_operator_review_present" in failed:
@@ -418,20 +424,27 @@ def build_false_negative_bounded_demo_probe_preflight(
     *,
     autonomous_parameter_proposal: dict[str, Any] | None,
     false_negative_operator_review: dict[str, Any] | None,
+    standing_demo_authorization: dict[str, Any] | None = None,
     autonomous_parameter_proposal_path: Path | None = None,
     false_negative_operator_review_path: Path | None = None,
+    standing_demo_authorization_path: Path | None = None,
     autonomous_parameter_proposal_error: str | None = None,
     false_negative_operator_review_error: str | None = None,
+    standing_demo_authorization_error: str | None = None,
     now_utc: dt.datetime | None = None,
     max_artifact_age_hours: int = DEFAULT_MAX_ARTIFACT_AGE_HOURS,
+    max_authorization_ttl_hours: int = DEFAULT_MAX_STANDING_DEMO_AUTHORIZATION_TTL_HOURS,
 ) -> dict[str, Any]:
     """Build a fail-closed no-authority false-negative preflight packet."""
     if max_artifact_age_hours < 1 or max_artifact_age_hours > 24 * 14:
         raise ValueError("max_artifact_age_hours must be in [1, 336]")
+    if max_authorization_ttl_hours < 1 or max_authorization_ttl_hours > 24 * 7:
+        raise ValueError("max_authorization_ttl_hours must be in [1, 168]")
     now = (now_utc or _utc_now()).astimezone(dt.timezone.utc)
     max_age_seconds = max_artifact_age_hours * 3600
     proposal = _dict(autonomous_parameter_proposal)
     review = _dict(false_negative_operator_review)
+    standing_payload = _dict(standing_demo_authorization)
     artifacts = {
         "autonomous_parameter_proposal": _artifact_summary(
             name="autonomous_parameter_proposal",
@@ -449,6 +462,14 @@ def build_false_negative_bounded_demo_probe_preflight(
             now_utc=now,
             max_age_seconds=max_age_seconds,
         ),
+        "standing_demo_authorization": _artifact_summary(
+            name="standing_demo_authorization",
+            path=standing_demo_authorization_path,
+            payload=standing_payload,
+            source_error=standing_demo_authorization_error,
+            now_utc=now,
+            max_age_seconds=max_age_seconds,
+        ),
     }
     proposal_candidate = _candidate_from_proposal(proposal)
     review_candidate = _candidate_from_review(review)
@@ -456,7 +477,7 @@ def build_false_negative_bounded_demo_probe_preflight(
         bool(proposal_candidate.get("side_cell_key"))
         and _candidate_key(proposal_candidate) == _candidate_key(review_candidate)
     )
-    authority_preserved = _authority_preserved(proposal, review)
+    authority_preserved = _authority_preserved(proposal, review, standing_payload)
     proposal_ready = _proposal_ready(
         proposal,
         artifacts["autonomous_parameter_proposal"],
@@ -466,6 +487,27 @@ def build_false_negative_bounded_demo_probe_preflight(
         artifacts["false_negative_operator_review"],
     )
     review_approved = _review_approved(review)
+    standing_input_supplied = (
+        bool(standing_payload)
+        or standing_demo_authorization_path is not None
+        or standing_demo_authorization_error not in (None, "missing_path")
+    )
+    review_uses_standing = (
+        review.get("operator_review_approval_source") == "standing_demo_authorization"
+        or _dict(review.get("answers")).get("standing_demo_authorization_consumed") is True
+    )
+    standing_summary = summarize_standing_demo_authorization(
+        standing_payload,
+        artifacts["standing_demo_authorization"],
+        now_utc=now,
+        max_authorization_ttl_hours=max_authorization_ttl_hours,
+        candidate=proposal_candidate if proposal_candidate.get("side_cell_key") else review_candidate,
+    )
+    standing_valid_for_preflight = bool(
+        standing_input_supplied
+        and standing_summary.get("valid_for_candidate_scoped_authorization") is True
+    )
+    standing_gate_needed = standing_input_supplied or review_uses_standing
     gates = [
         _gate(
             "authority_boundary_preserved",
@@ -474,6 +516,29 @@ def build_false_negative_bounded_demo_probe_preflight(
             reason="inputs must not grant Cost Gate lowering, probe/order authority, runtime mutation, or promotion proof",
             next_actions=["remove_authority_granting_input_before_preflight"],
         ),
+    ]
+    if standing_gate_needed:
+        gates.append(
+            _gate(
+                "standing_demo_authorization_valid_for_preflight",
+                standing_valid_for_preflight,
+                status=(
+                    "VALID"
+                    if standing_valid_for_preflight
+                    else str(artifacts["standing_demo_authorization"].get("status") or "MISSING")
+                ),
+                reason=(
+                    "standing-sourced false-negative preflight approval must "
+                    "carry the same fresh Demo-only scoped loss-control envelope"
+                ),
+                next_actions=[
+                    "supply_same_valid_standing_demo_authorization_used_for_false_negative_review"
+                ],
+                evidence=standing_summary,
+            )
+        )
+    gates.extend(
+        [
         _gate(
             "autonomous_parameter_proposal_ready",
             proposal_ready,
@@ -518,9 +583,13 @@ def build_false_negative_bounded_demo_probe_preflight(
                 "operator_review_approved_for_preflight": review.get(
                     "operator_review_approved_for_preflight"
                 ),
+                "operator_review_approval_source": review.get(
+                    "operator_review_approval_source"
+                ),
             },
         ),
-    ]
+        ]
+    )
     failed_gates = [gate for gate in gates if gate.get("passed") is not True]
     status = _status_from_gates(gates, review_approved)
     candidate = proposal_candidate if proposal_candidate.get("side_cell_key") else review_candidate
@@ -568,6 +637,12 @@ def build_false_negative_bounded_demo_probe_preflight(
             "autonomous_parameter_proposal_ready": proposal_ready,
             "false_negative_operator_review_present": review_present,
             "false_negative_operator_review_approved_for_preflight": review_approved,
+            "standing_demo_authorization_present": standing_input_supplied,
+            "standing_demo_authorization_required": review_uses_standing,
+            "standing_demo_authorization_valid": standing_valid_for_preflight,
+            "operator_review_approval_source": review.get(
+                "operator_review_approval_source"
+            ),
             "ready_for_operator_bounded_demo_probe_authorization": status == READY_PREFLIGHT_STATUS,
             "bounded_demo_probe_design_ready_for_operator_review": status in {
                 READY_PREFLIGHT_STATUS,
@@ -585,6 +660,7 @@ def build_false_negative_bounded_demo_probe_preflight(
             "bybit_call_performed": False,
             "order_submission_performed": False,
         },
+        "standing_demo_authorization": standing_summary,
         "boundary": BOUNDARY,
     }
 
@@ -654,7 +730,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--autonomous-parameter-proposal-json", type=Path, required=True)
     parser.add_argument("--false-negative-operator-review-json", type=Path, required=True)
+    parser.add_argument("--standing-demo-authorization-json", type=Path)
     parser.add_argument("--max-artifact-age-hours", type=int, default=24)
+    parser.add_argument(
+        "--max-authorization-ttl-hours",
+        type=int,
+        default=DEFAULT_MAX_STANDING_DEMO_AUTHORIZATION_TTL_HOURS,
+    )
     parser.add_argument("--json-output", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--print-json", action="store_true")
@@ -665,14 +747,19 @@ def main() -> int:
     args = _build_parser().parse_args()
     proposal, proposal_err = _read_json(args.autonomous_parameter_proposal_json)
     review, review_err = _read_json(args.false_negative_operator_review_json)
+    standing, standing_err = _read_json(args.standing_demo_authorization_json)
     packet = build_false_negative_bounded_demo_probe_preflight(
         autonomous_parameter_proposal=proposal,
         false_negative_operator_review=review,
+        standing_demo_authorization=standing,
         autonomous_parameter_proposal_path=args.autonomous_parameter_proposal_json,
         false_negative_operator_review_path=args.false_negative_operator_review_json,
+        standing_demo_authorization_path=args.standing_demo_authorization_json,
         autonomous_parameter_proposal_error=proposal_err,
         false_negative_operator_review_error=review_err,
+        standing_demo_authorization_error=standing_err,
         max_artifact_age_hours=args.max_artifact_age_hours,
+        max_authorization_ttl_hours=args.max_authorization_ttl_hours,
     )
     markdown = render_markdown(packet)
     if args.json_output:

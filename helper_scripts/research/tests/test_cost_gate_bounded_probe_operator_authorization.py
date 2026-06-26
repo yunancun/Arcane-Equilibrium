@@ -442,10 +442,38 @@ def test_standing_demo_scope_must_be_bounded_probe_specific() -> None:
         now_utc=NOW,
     )
 
-    assert packet["status"] == "TYPED_CONFIRM_REQUIRED"
+    assert packet["status"] == "STANDING_DEMO_AUTHORIZATION_INVALID"
     assert packet["operator_authorization"] is None
+    assert "standing_demo_authorization_valid_for_candidate_scope" in packet["blocking_gates"]
     assert packet["standing_demo_authorization"]["scope_valid"] is False
     assert packet["answers"]["standing_demo_authorization_valid"] is False
+
+
+def test_candidate_scoped_standing_demo_authorization_must_match_preflight() -> None:
+    standing = _standing_demo_authorization(
+        candidate={
+            "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+            "strategy_name": "ma_crossover",
+            "symbol": "ETHUSDT",
+            "side": "Sell",
+            "outcome_horizon_minutes": 240,
+        }
+    )
+    packet = build_bounded_demo_probe_operator_authorization(
+        preflight=_preflight(),
+        placement_repair_plan=_placement_plan(),
+        authority_patch_readiness=_readiness(),
+        standing_demo_authorization=standing,
+        decision="authorize",
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "STANDING_DEMO_AUTHORIZATION_INVALID"
+    assert packet["operator_authorization"] is None
+    assert "standing_demo_authorization_valid_for_candidate_scope" in packet["blocking_gates"]
+    assert packet["standing_demo_authorization"]["candidate_scope_matches"] is False
+    assert packet["answers"]["standing_demo_authorization_valid"] is False
+    assert packet["answers"]["active_runtime_order_authority"] is False
 
 
 def test_nested_runtime_authority_in_standing_demo_authorization_fails_closed() -> None:
@@ -535,8 +563,9 @@ def test_top_level_standing_demo_flags_cannot_be_overridden_by_answers() -> None
         now_utc=NOW,
     )
 
-    assert packet["status"] == "TYPED_CONFIRM_REQUIRED"
+    assert packet["status"] == "STANDING_DEMO_AUTHORIZATION_INVALID"
     assert packet["operator_authorization"] is None
+    assert "standing_demo_authorization_valid_for_candidate_scope" in packet["blocking_gates"]
     assert packet["standing_demo_authorization"]["demo_only"] is False
     assert packet["standing_demo_authorization"]["candidate_scoping_required"] is False
     assert packet["answers"]["standing_demo_authorization_valid"] is False
@@ -558,8 +587,9 @@ def test_top_level_standing_demo_cap_is_required() -> None:
         now_utc=NOW,
     )
 
-    assert packet["status"] == "TYPED_CONFIRM_REQUIRED"
+    assert packet["status"] == "STANDING_DEMO_AUTHORIZATION_INVALID"
     assert packet["operator_authorization"] is None
+    assert "standing_demo_authorization_valid_for_candidate_scope" in packet["blocking_gates"]
     assert packet["standing_demo_authorization"][
         "max_authorized_probe_orders_per_candidate"
     ] is None

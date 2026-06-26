@@ -27,13 +27,14 @@ from cost_gate_learning_lane.contract import (
     STANDING_DEMO_AUTHORIZATION_ACTIVE_STATUS,
     STANDING_DEMO_AUTHORIZATION_SCHEMA_VERSION,
 )
+from cost_gate_learning_lane.standing_demo_authorization import (
+    summarize_standing_demo_authorization as _standing_demo_authorization_summary,
+)
 
 
 OPERATOR_AUTHORIZATION_PACKET_SCHEMA_VERSION = (
     "bounded_demo_probe_operator_authorization_packet_v1"
 )
-ALLOWED_STANDING_DEMO_SCOPES = {"demo_api_only_bounded_probe"}
-ALLOWED_STANDING_DEMO_ENVIRONMENTS = {"demo", "live_demo"}
 TRUTHY_AUTHORITY_STRINGS = {
     "1",
     "true",
@@ -387,105 +388,6 @@ def _candidate_budget(
     return min(positives) if positives else 0
 
 
-def _standing_demo_authorization_summary(
-    standing_authorization: dict[str, Any] | None,
-    artifact: dict[str, Any],
-    *,
-    now_utc: dt.datetime,
-    max_authorization_ttl_hours: int,
-) -> dict[str, Any]:
-    payload = _dict(standing_authorization)
-    answers = _dict(payload.get("answers"))
-    standing_id = _str(
-        payload.get("standing_authorization_id") or payload.get("authorization_id")
-    )
-    operator_id = _str(payload.get("operator_id"))
-    environment = _str(payload.get("environment")).lower()
-    scope = _str(payload.get("scope") or payload.get("authorization_scope")).lower()
-    expires_at = _parse_dt(payload.get("expires_at_utc"))
-    max_expires_at = now_utc + dt.timedelta(hours=max_authorization_ttl_hours)
-    expiry_valid = (
-        expires_at is not None
-        and expires_at > now_utc
-        and expires_at <= max_expires_at
-    )
-    cap = _int(payload.get("max_authorized_probe_orders_per_candidate"))
-    demo_only = payload.get("demo_only") is True
-    environment_valid = environment in ALLOWED_STANDING_DEMO_ENVIRONMENTS
-    scope_valid = scope in ALLOWED_STANDING_DEMO_SCOPES
-    candidate_scoping_required = payload.get("candidate_scoping_required") is True
-    live_authority_granted = (
-        _truthy_authority(payload.get("live_authority_granted"))
-        or _truthy_authority(answers.get("live_authority_granted"))
-        or environment in {"live", "mainnet"}
-    )
-    runtime_authority_granted = (
-        _truthy_authority(payload.get("active_runtime_probe_authority"))
-        or _truthy_authority(payload.get("active_runtime_order_authority"))
-        or _truthy_authority(answers.get("active_runtime_probe_authority"))
-        or _truthy_authority(answers.get("active_runtime_order_authority"))
-        or _truthy_authority(answers.get("runtime_probe_authority_granted"))
-        or _truthy_authority(answers.get("runtime_order_authority_granted"))
-    )
-    cost_gate_lowering = (
-        _truthy_authority(payload.get("global_cost_gate_lowering_recommended"))
-        or _truthy_authority(answers.get("global_cost_gate_lowering_recommended"))
-        or payload.get("main_cost_gate_adjustment") not in (None, "", "NONE")
-        or answers.get("main_cost_gate_adjustment") not in (None, "", "NONE")
-    )
-    promotion = (
-        _truthy_authority(payload.get("promotion_evidence"))
-        or _truthy_authority(payload.get("promotion_proof"))
-        or _truthy_authority(answers.get("promotion_evidence"))
-        or _truthy_authority(answers.get("promotion_proof"))
-    )
-    safe = not (
-        live_authority_granted
-        or runtime_authority_granted
-        or cost_gate_lowering
-        or promotion
-    )
-    schema_valid = artifact.get("schema_version") == STANDING_DEMO_AUTHORIZATION_SCHEMA_VERSION
-    status_active = payload.get("status") == STANDING_DEMO_AUTHORIZATION_ACTIVE_STATUS
-    valid = (
-        artifact.get("status") == "FRESH"
-        and schema_valid
-        and status_active
-        and safe
-        and demo_only
-        and environment_valid
-        and scope_valid
-        and candidate_scoping_required
-        and bool(standing_id)
-        and bool(operator_id)
-        and expiry_valid
-        and cap > 0
-    )
-    return {
-        "status": payload.get("status"),
-        "standing_authorization_id": standing_id or None,
-        "operator_id": operator_id or None,
-        "environment": environment or None,
-        "scope": scope or None,
-        "demo_only": demo_only,
-        "environment_valid": environment_valid,
-        "scope_valid": scope_valid,
-        "candidate_scoping_required": candidate_scoping_required,
-        "max_authorized_probe_orders_per_candidate": cap or None,
-        "expires_at_utc": expires_at.isoformat() if expires_at else None,
-        "max_authorization_ttl_hours": max_authorization_ttl_hours,
-        "schema_valid": schema_valid,
-        "status_active": status_active,
-        "expiry_valid": expiry_valid,
-        "safe": safe,
-        "valid_for_candidate_scoped_authorization": valid,
-        "live_authority_granted": live_authority_granted,
-        "runtime_authority_granted": runtime_authority_granted,
-        "cost_gate_lowering_recommended": cost_gate_lowering,
-        "promotion_evidence": promotion,
-    }
-
-
 def _normalize_decision(decision: str | None) -> str:
     text = _str(decision).lower().replace("_", "-")
     if text in {"authorize", "approve", "approved", "approve-authorization"}:
@@ -589,6 +491,8 @@ def _status_from_gates(
         return "AUTHORITY_BOUNDARY_VIOLATION"
     if "standing_demo_authorization_safe" in failed:
         return "AUTHORITY_BOUNDARY_VIOLATION"
+    if "standing_demo_authorization_valid_for_candidate_scope" in failed:
+        return "STANDING_DEMO_AUTHORIZATION_INVALID"
     if "false_negative_preflight_ready" in failed:
         gate = failed_by_name["false_negative_preflight_ready"]
         if gate.get("status") == "OPERATOR_REVIEW_REQUIRED":
@@ -735,18 +639,19 @@ def build_bounded_demo_probe_operator_authorization(
         authority_patch_readiness,
         artifacts["authority_patch_readiness"],
     )
+    candidate = _dict(preflight_summary.get("candidate"))
     standing_summary = _standing_demo_authorization_summary(
         standing_demo_authorization,
         artifacts["standing_demo_authorization"],
         now_utc=now,
         max_authorization_ttl_hours=max_authorization_ttl_hours,
+        candidate=candidate,
     )
     aligned = _candidate_aligned(
         _dict(preflight_summary.get("candidate")),
         _dict(placement_summary.get("candidate")),
         _dict(readiness_summary.get("candidate")),
     )
-    candidate = _dict(preflight_summary.get("candidate"))
     side_cell_key = _str(candidate.get("side_cell_key"))
     candidate_budget = _candidate_budget(preflight_summary, placement_summary)
     requested_budget = _int(max_authorized_probe_orders)
@@ -760,6 +665,7 @@ def build_bounded_demo_probe_operator_authorization(
     if authorization_requested and not operator:
         operator = standing_operator
     standing_present = artifacts["standing_demo_authorization"].get("present") is True
+    standing_input_supplied = standing_present or paths.get("standing_demo_authorization") is not None
     standing_operator_matches = not (
         authorization_requested
         and standing_present
@@ -894,6 +800,24 @@ def build_bounded_demo_probe_operator_authorization(
             ),
             next_actions=[
                 "remove_or_reissue_standing_demo_authorization_without_live_runtime_or_promotion_authority"
+            ],
+            evidence=standing_summary,
+        ),
+        _gate(
+            "standing_demo_authorization_valid_for_candidate_scope",
+            (not standing_input_supplied)
+            or standing_summary.get("valid_for_candidate_scoped_authorization") is True,
+            status=(
+                "VALID"
+                if standing_summary.get("valid_for_candidate_scoped_authorization") is True
+                else "INVALID"
+            ),
+            reason=(
+                "supplied standing Demo authorization must be valid for the "
+                "candidate-scoped bounded authorization review"
+            ),
+            next_actions=[
+                "supply_fresh_candidate_scoped_standing_demo_authorization_or_remove_invalid_envelope"
             ],
             evidence=standing_summary,
         ),

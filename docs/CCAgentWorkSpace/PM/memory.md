@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-27 Standing Demo False-Negative Preflight Source Plumbing
+
+- PM closed `P0-STANDING-DEMO-FALSE-NEGATIVE-PREFLIGHT-PLUMBING` as source/test/docs `DONE_WITH_CONCERNS`.
+- False-negative review/preflight can now consume a fresh, scoped `standing_demo_operator_authorization_v1` and fail closed for absent/invalid/stale/live/scope-mismatched envelopes; scheduled cron no longer auto-switches bounded auth to `authorize` just because standing JSON exists.
+- Runtime remains unsynced at `69f6c4b2...`; next blocker is E3-reviewed runtime source/expected-head sync, not execution or profit proof.
+
 ## 2026-06-26 Standing Demo Auth Plumbing Runtime Sync Apply
 
 - PM closed `P1-RUNTIME-HEALTH-HYGIENE-STANDING-DEMO-AUTH-PLUMBING-SYNC-REVIEW` as `DONE_WITH_CONCERNS`.
