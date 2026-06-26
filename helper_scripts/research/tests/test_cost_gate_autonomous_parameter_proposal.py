@@ -118,16 +118,35 @@ def test_parameter_proposal_emits_review_packet_only_after_quality_gate() -> Non
         "proposed_value": "NONE",
         "mutation_allowed_by_this_packet": False,
     }
+    assert proposal["proposed_parameter_changes"][3] == {
+        "parameter": "bounded_demo_probe_cap_envelope",
+        "current_value": "UNCHANGED",
+        "proposed_value": "REQUIRES_SEPARATE_OPERATOR_QC_E3_BB_REVIEW",
+        "mutation_allowed_by_this_packet": False,
+    }
+    assert (
+        "cap_envelope_evidence_floor_satisfied_if_cap_change_is_requested"
+        in proposal["required_pre_authorization_evidence"]
+    )
+    assert (
+        proposal["cap_envelope_evidence_floor"]["schema_version"]
+        == "cost_gate_cap_envelope_evidence_floor_v1"
+    )
+    assert "global_cost_gate_lowering" in proposal["cap_envelope_evidence_floor"][
+        "forbidden_shortcuts"
+    ]
     assert all(
         change["mutation_allowed_by_this_packet"] is False
         for change in proposal["proposed_parameter_changes"]
     )
     assert packet["answers"]["learning_output_converted_to_reviewable_proposal"] is True
     assert packet["answers"]["bounded_demo_probe_authorized"] is False
+    assert packet["answers"]["cap_envelope_mutation_allowed"] is False
     assert packet["answers"]["active_runtime_order_authority"] is False
     assert packet["answers"]["operator_authorization_object_emitted"] is False
     assert packet["answers"]["promotion_evidence"] is False
     assert "review packet only" in markdown
+    assert "Cap envelope mutation allowed: `False`" in markdown
 
 
 def test_parameter_proposal_fails_closed_on_authority_bearing_input() -> None:
