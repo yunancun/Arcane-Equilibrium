@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Demo Residual Cleanup Auth Block
+
+- CSRF-safe helper worked through gating, but the one reviewed `/api/v1/strategy/demo/session/stop` POST failed before route execution with HTTP 401 `unauthenticated`; no exchange mutation occurred and no retry was allowed.
+- Fresh pre-inventory immediately before action showed demo exposure still drifting (`6` open orders, `5` positions), so candidate selection remains blocked.
+- PM read: next useful checkpoint is runtime-local/authenticated control API token-source path review; do not repeat cleanup POST until new E3/BB envelope and fresh inventory exist.
+
 ## 2026-06-25 AVAX Candidate-Scoped Chain Smoke
 
 - Local timestamped smoke `/tmp/openclaw/local_chain_smoke_20260625T232303Z` proved AVAX can reach reviewable proposal and bounded preflight READY via explicit `grid_trading|AVAXUSDT|Sell`.
