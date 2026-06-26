@@ -648,6 +648,25 @@ def _authorization_object(
     }
 
 
+def _standing_demo_candidate_authorization_id(
+    *,
+    standing_authorization_id: str,
+    side_cell_key: str,
+    max_authorized_probe_orders: int,
+    expires_at_utc: str,
+) -> str:
+    seed = "|".join(
+        [
+            standing_authorization_id,
+            side_cell_key,
+            str(max_authorized_probe_orders),
+            expires_at_utc,
+        ]
+    )
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
+    return f"standing-demo-{digest}"
+
+
 def build_bounded_demo_probe_operator_authorization(
     *,
     preflight: dict[str, Any] | None,
@@ -736,6 +755,7 @@ def build_bounded_demo_probe_operator_authorization(
     authorization_requested = normalized_decision == "authorize"
     provided_operator = _str(operator_id)
     standing_operator = _str(standing_summary.get("operator_id"))
+    standing_id = _str(standing_summary.get("standing_authorization_id"))
     operator = provided_operator
     if authorization_requested and not operator:
         operator = standing_operator
@@ -747,6 +767,33 @@ def build_bounded_demo_probe_operator_authorization(
         and bool(standing_operator)
         and provided_operator != standing_operator
     )
+    standing_source_valid = bool(
+        authorization_requested
+        and not _str(typed_confirm)
+        and standing_summary.get("valid_for_candidate_scoped_authorization") is True
+        and standing_operator_matches
+    )
+    if standing_source_valid:
+        standing_cap = _int(
+            standing_summary.get("max_authorized_probe_orders_per_candidate")
+        )
+        if requested_budget <= 0 and candidate_budget > 0 and standing_cap > 0:
+            requested_budget = min(candidate_budget, standing_cap)
+        if not _str(expires_at_utc):
+            expires_at_utc = _str(standing_summary.get("expires_at_utc"))
+        if (
+            not auth_id
+            and standing_id
+            and side_cell_key
+            and requested_budget > 0
+            and _str(expires_at_utc)
+        ):
+            auth_id = _standing_demo_candidate_authorization_id(
+                standing_authorization_id=standing_id,
+                side_cell_key=side_cell_key,
+                max_authorized_probe_orders=requested_budget,
+                expires_at_utc=_str(expires_at_utc),
+            )
     preflight_ready_for_auth = preflight_summary["ready_for_operator_authorization"] is True
     exact_confirm_fields_present = (
         preflight_ready_for_auth

@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 23:31 CEST
+- closed `P0-STANDING-DEMO-AUTHORIZATION-PLUMBING` as source/test/docs `DONE_WITH_CONCERNS`
+- `bounded_probe_operator_authorization.py` can now derive candidate-scoped auth id/budget/expiry from valid `standing_demo_operator_authorization_v1`; cost-gate and alpha cron wrappers consume it only through explicit standing JSON env paths and default to `defer`
+- verification: auth focused `21 passed`, cron static `24 passed`, adjacent alpha/profitability `140 passed`, bash syntax, py_compile, diff-check; local `/tmp` smoke emitted authorized packet with active runtime authority false/false
+- runtime not synced; next blocker is `P1-RUNTIME-HEALTH-HYGIENE-STANDING-DEMO-AUTH-PLUMBING-SYNC-REVIEW`
+
 2026-06-26 22:44 CEST
 - rebased the long-running loop from repeated P0 authorization no-op polling to a stable profit-first autonomous trading loop
 - added `docs/agents/profit-first-autonomy-loop.md`; TODO v593 now points current work at `P0-STANDING-DEMO-AUTHORIZATION-PLUMBING`

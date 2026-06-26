@@ -263,6 +263,10 @@ def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     assert 'REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN:-1}"' in src
     assert 'REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS:-1}"' in src
     assert 'REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION:-1}"' in src
+    assert 'STANDING_DEMO_AUTHORIZATION_JSON="${OPENCLAW_COST_GATE_STANDING_DEMO_AUTHORIZATION_JSON:-}"' in src
+    assert 'BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION="${OPENCLAW_COST_GATE_BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION:-}"' in src
+    assert 'BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION="authorize"' in src
+    assert 'BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION="defer"' in src
     assert 'REFRESH_BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT:-1}"' in src
     assert 'REFRESH_BOUNDED_PROBE_RESULT_REVIEW="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_RESULT_REVIEW:-1}"' in src
     assert 'REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW:-1}"' in src
@@ -338,6 +342,7 @@ def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     assert 'validate_int "OPENCLAW_COST_GATE_PLACEMENT_REPAIR_MAX_FRESH_BBO_AGE_MS"' in src
     assert 'validate_int "OPENCLAW_COST_GATE_AUTHORITY_PATCH_MAX_ARTIFACT_AGE_HOURS"' in src
     assert 'validate_int "OPENCLAW_COST_GATE_OPERATOR_AUTHORIZATION_MAX_ARTIFACT_AGE_HOURS"' in src
+    assert "OPENCLAW_COST_GATE_BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION invalid" in src
     assert 'validate_int "OPENCLAW_COST_GATE_FALSE_NEGATIVE_OPERATOR_REVIEW_MAX_ARTIFACT_AGE_HOURS"' in src
     assert 'validate_int "OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_MAX_ARTIFACT_AGE_HOURS"' in src
     assert 'validate_int "OPENCLAW_COST_GATE_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_TOP_LIMIT"' in src
@@ -386,7 +391,8 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert '--placement-repair-plan-json "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT"' in src
     assert '--operator-authorization-json "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT"' in src
     assert "--existing-operator-review-json" in src
-    assert "--decision defer" in src
+    assert '--decision "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION"' in src
+    assert "--standing-demo-authorization-json" in src
     assert "--learning-ssot-decision-json" in src
     assert "--profit-evidence-quality-status" in src
     assert "--autonomous-parameter-proposal-json" in src
@@ -534,11 +540,13 @@ def test_wrapper_bounded_probe_reviews_use_fresh_result_review_only() -> None:
     assert "BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST" in src
 
 
-def test_wrapper_operator_authorization_stage_is_review_only() -> None:
+def test_wrapper_operator_authorization_stage_uses_standing_env_without_raw_auth_fields() -> None:
     src = _src(WRAPPER)
     assert "BOUNDED_PROBE_OPERATOR_AUTHORIZATION_ARGS=(" in src
     assert "-m cost_gate_learning_lane.bounded_probe_operator_authorization_cli" in src
-    assert "--decision defer" in src
+    assert '--decision "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION"' in src
+    assert 'STANDING_DEMO_AUTHORIZATION_JSON="${OPENCLAW_COST_GATE_STANDING_DEMO_AUTHORIZATION_JSON:-}"' in src
+    assert "--standing-demo-authorization-json" in src
     assert "--operator-id" not in src
     assert "--authorization-id" not in src
     assert "--typed-confirm" not in src

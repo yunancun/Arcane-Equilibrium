@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Standing Demo Authorization Plumbing Source Fix
+
+- PM closed `P0-STANDING-DEMO-AUTHORIZATION-PLUMBING` as source/test/docs `DONE_WITH_CONCERNS`.
+- Standing Demo JSON can now derive candidate-scoped auth id/budget/expiry, and cost-gate/alpha cron wrappers consume it only via explicit env path while defaulting to `defer`.
+- Runtime remains unsynced at `b224c759...`; next blocker is E3-reviewed runtime source/expected-head sync, not bounded execution.
+
 ## 2026-06-26 Auth Typed-Confirm Guard Runtime Sync Apply
 
 - PM closed `P1-RUNTIME-HEALTH-HYGIENE-AUTH-TYPED-CONFIRM-GUARD-RUNTIME-SYNC-APPLY` as `DONE_WITH_CONCERNS`.

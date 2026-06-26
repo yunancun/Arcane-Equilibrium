@@ -222,6 +222,19 @@ BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD_OUT="${BOUNDED_REVIEW_CHAIN_DIR}/bounded
 BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_operator_authorization_latest.json"
 BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD_LATEST="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_operator_authorization_latest.md"
 BOUNDED_PROBE_OPERATOR_AUTHORIZATION_STDOUT="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_operator_authorization_stdout.json"
+STANDING_DEMO_AUTHORIZATION_JSON="${OPENCLAW_ALPHA_STANDING_DEMO_AUTHORIZATION_JSON:-${OPENCLAW_COST_GATE_STANDING_DEMO_AUTHORIZATION_JSON:-}}"
+BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION="${OPENCLAW_ALPHA_BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION:-}"
+if [[ -z "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION" ]]; then
+    if [[ -n "$STANDING_DEMO_AUTHORIZATION_JSON" && -f "$STANDING_DEMO_AUTHORIZATION_JSON" ]]; then
+        BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION="authorize"
+    else
+        BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION="defer"
+    fi
+fi
+if [[ ! "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION" =~ ^(defer|reject|authorize)$ ]]; then
+    echo "[$(ts)] FATAL: OPENCLAW_ALPHA_BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION invalid: ${BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION}" | tee -a "$LOG" >&2
+    exit 2
+fi
 BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_shadow_placement_impact_${BOUNDED_REVIEW_CHAIN_STAMP}.json"
 BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_MD_OUT="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_shadow_placement_impact_${BOUNDED_REVIEW_CHAIN_STAMP}.md"
 BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_LATEST="${BOUNDED_REVIEW_CHAIN_DIR}/bounded_probe_shadow_placement_impact_latest.json"
@@ -334,14 +347,22 @@ if [[ "$REFRESH_BOUNDED_REVIEW_CHAIN" == "1" ]]; then
 
             (
                 cd "$BASE/helper_scripts/research"
-                "$PYBIN" -m cost_gate_learning_lane.bounded_probe_operator_authorization_cli \
-                    --preflight-json "$BOUNDED_PROBE_PREFLIGHT_JSON" \
-                    --placement-repair-plan-json "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" \
-                    --authority-patch-readiness-json "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" \
-                    --decision defer \
-                    --max-artifact-age-hours "$BOUNDED_REVIEW_MAX_ARTIFACT_AGE_HOURS" \
-                    --json-output "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT" \
+                bounded_probe_operator_authorization_args=(
+                    -m cost_gate_learning_lane.bounded_probe_operator_authorization_cli
+                    --preflight-json "$BOUNDED_PROBE_PREFLIGHT_JSON"
+                    --placement-repair-plan-json "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT"
+                    --authority-patch-readiness-json "$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT"
+                    --decision "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION"
+                    --max-artifact-age-hours "$BOUNDED_REVIEW_MAX_ARTIFACT_AGE_HOURS"
+                    --json-output "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT"
                     --output "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_MD_OUT"
+                )
+                if [[ -n "$STANDING_DEMO_AUTHORIZATION_JSON" && -f "$STANDING_DEMO_AUTHORIZATION_JSON" ]]; then
+                    bounded_probe_operator_authorization_args+=(
+                        --standing-demo-authorization-json "$STANDING_DEMO_AUTHORIZATION_JSON"
+                    )
+                fi
+                "$PYBIN" "${bounded_probe_operator_authorization_args[@]}"
             ) > "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_STDOUT" 2>> "$LOG" || bounded_probe_operator_authorization_rc=$?
             if [[ -f "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT" ]]; then
                 cp "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT" "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST"
