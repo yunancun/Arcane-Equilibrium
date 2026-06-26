@@ -11,6 +11,13 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 07:14 CEST
+- closed `P1-AGGRESSIVE-ALPHA-CAP-FEASIBLE-LOW-PRICE-REGIME-FILTER-NO-ORDER` as source-only `DONE_WITH_CONCERNS`
+- clean-BBO/high-cushion/current-cap filter keeps `grid_trading|AVAXUSDT|Sell` as champion/current P0 candidate; SUI/FIL are source-only controls only
+- ETC/APT rejected for incomplete BBO; UNI/XRP/OP rejected for thin cushion/hit-rate/sample/spread; no regime proof because current artifacts lack regime labels/markout buckets
+- next blocker: `P1-AGGRESSIVE-ALPHA-AVAX-SUI-FIL-MATCHED-CONTROL-DESIGN-NO-ORDER`
+- boundary: runtime read-only artifact inspection + docs/TODO/report/state only; no Bybit order/cancel/modify, PG write, runtime sync, service/crontab/env mutation, Cost Gate/cap/risk mutation, authority, or proof claim
+
 2026-06-26 07:04 CEST
 - closed `P1-AGGRESSIVE-ALPHA-ETH-BUY-CAP-FEASIBILITY-PROPOSAL-NO-ORDER` as source-only `DONE_WITH_CONCERNS`
 - QC/MIT agree ETH Buy is a high-upside research lead but not execution-eligible: current `10 USDT` cap vs `15.7105 USDT` min executable notional, rounded qty `0`, 7 modeled outcomes, zero candidate-matched fills
