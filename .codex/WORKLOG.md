@@ -11,6 +11,13 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 16:35 CEST
+- closed `P1-AGGRESSIVE-ALPHA-REGIME-OOS-LABEL-CONTRACT-NO-ORDER` as source-only `DONE_WITH_CONCERNS`
+- added `regime_oos_label_contract.py` and tests; smoke `/tmp/openclaw/regime_oos_label_contract_smoke_20260626T1420Z/regime_oos_label_contract.json` returned `REGIME_OOS_LABEL_CONTRACT_READY_NO_AUTHORITY`, sha `739f6842...`
+- E2 found and PM fixed two HIGH fail-closed gaps: authority/proof aliases and incomplete candidate identity; E2 re-check `DONE`; E4 final rerun `DONE`
+- TODO v588 is compacted back to active dispatch queue shape and records operator pause after this round
+- boundary: source/test/docs + local `/tmp` smoke only; no private fee read, Bybit/API/order, PG, runtime/crontab/service mutation, Cost Gate/freshness-gate change, authority, or proof claim
+
 2026-06-26 16:12 CEST
 - closed `P1-AGGRESSIVE-ALPHA-ANTI-REPEAT-LADDER-RECONCILIATION-NO-NEW-ARTIFACT` as docs-only `DONE_WITH_CONCERNS`
 - TODO v587 removes the stale v586 pause active row after resume and adds a compact no-repeat marker for the completed AVAX source-only ladder from low-price ranking through candidate source freshness / atomic preview
