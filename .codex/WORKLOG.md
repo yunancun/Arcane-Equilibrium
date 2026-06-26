@@ -11,6 +11,14 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 06:36 CEST
+- closed `P1-RUNTIME-HEALTH-HYGIENE-CRON-POST-ALIGNMENT-HYGIENE-SNAPSHOT` as `DONE_WITH_CONCERNS`
+- E3 allowed only read-only snapshots and supplied-snapshot `runtime_health_hygiene.py` with target runtime head `0246b263`, not docs head `65fe28ef`
+- packet `/tmp/openclaw/runtime_health_hygiene_post_alignment_20260626T042802Z/runtime_health_hygiene_post_alignment.json` is `RUNTIME_HEALTH_HYGIENE_CLEAN_SOURCE_ONLY`; source/crontab/API/artifact compatibility all clean and all authority/mutation/proof answers false/NONE
+- natural artifact delta: `mm_current_fee_confirmation_latest` is now `NO_CURRENT_FEE_POSITIVE_MM_CELL`; false-negative friction scorecard remains ready
+- next blocker: `P0-BOUNDED-PROBE-AUTHORIZATION`, still blocked until machine-checkable bounded Demo auth or exact typed confirm plus E3/BB review
+- boundary: read-only snapshots + docs only; no PG/Bybit/API/order call, no restart/rebuild, no crontab/env mutation, no `_latest` overwrite, no Cost Gate change, no authority, no proof claim
+
 2026-06-26 06:24 CEST
 - closed `P1-RUNTIME-HEALTH-HYGIENE-CRON-EXPECTED-HEAD-DRIFT-REVIEW` as `DONE_WITH_CONCERNS`
 - E3 allowed exact crontab expected-head literal alignment only; PM replaced `d2cd70d0` with runtime code head `0246b263` in 11 literal occurrences on lines `57,67,68,69,70`

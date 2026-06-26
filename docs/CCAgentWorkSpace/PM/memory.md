@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Runtime Hygiene Post-Alignment Snapshot
+
+- PM/E3 closed `P1-RUNTIME-HEALTH-HYGIENE-CRON-POST-ALIGNMENT-HYGIENE-SNAPSHOT` as `DONE_WITH_CONCERNS`.
+- Hygiene packet `/tmp/openclaw/runtime_health_hygiene_post_alignment_20260626T042802Z/runtime_health_hygiene_post_alignment.json` is `RUNTIME_HEALTH_HYGIENE_CLEAN_SOURCE_ONLY`: source/crontab/API/artifact compatibility clean, no authority/mutation/proof signals.
+- PM read: target runtime head is `0246b263`, not docs head `65fe28ef`. Natural MM current-fee artifact now says `NO_CURRENT_FEE_POSITIVE_MM_CELL`; false-negative AVAX path remains the main review-only candidate. Next blocker is still machine-checkable bounded Demo authorization.
+
 ## 2026-06-26 Cron Expected-Head Drift Alignment
 
 - PM/E3 closed `P1-RUNTIME-HEALTH-HYGIENE-CRON-EXPECTED-HEAD-DRIFT-REVIEW` as `DONE_WITH_CONCERNS`.
