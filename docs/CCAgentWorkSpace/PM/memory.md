@@ -2051,3 +2051,9 @@
 - `P0-BOUNDED-PROBE-ACTIVE-CALLER-ENABLEMENT-REVIEW-DEMO-ONLY` closed as source-only `DONE_WITH_CONCERNS`. The readiness packet now distinguishes seam readiness from actual enablement: legacy `active_order_submission_ready` may be true, but current repo has `active_caller_source_ready_for_review=false`, `active_caller_enablement_ready=false`, and `active_caller_enablement_authority_granted=false`.
 - Scanner fail-closed coverage now rejects cfg(test)/string-only/unused helper/unused dispatch calls, hardcoded adapter gates including typed bools, unrelated env reads, wrapped env reads, and env-read blocks that return hardcoded booleans. Actual enablement remains false until runtime source sync, reviewed adapter gate, E3/BB envelope, and post-restart pending-order reconciliation evidence exist.
 - Anti-repeat note: do not repeat source/actual readiness split without a new source/runtime/artifact delta. Next distinct blocker is PM->E3/BB runtime-source/admission propagation review, not a Demo order, not adapter enablement, and not promotion proof.
+
+## 2026-06-26 AVAX Runtime Admission E3/BB Review + TODO Hygiene
+
+- `P0-BOUNDED-PROBE-AVAX-RUNTIME-ADMISSION-E3-BB-REVIEW-DEMO-ONLY` closed as read-only `DONE_WITH_CONCERNS`: E3/BB allow only opening the next separate runtime source-sync/post-restart reconciliation/adapter-enablement review checkpoint.
+- TODO v527 now has one selected WAITING next blocker and a compact no-repeat AVAX ladder; `P0-PROFIT-DEMO-LEARNING-LOOP` is no longer an executable active row.
+- Boundary unchanged: no runtime sync, no Bybit call/order/cancel/modify, no PG write, no `_latest` overwrite, no restart/crontab/env mutation, no adapter enablement, no Cost Gate lowering, no probe/order/live authority, no promotion proof.
