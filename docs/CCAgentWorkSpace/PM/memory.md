@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Reviewed Public Quote Capture Packet No-Capture
+
+- PM closed `P1-AGGRESSIVE-ALPHA-REVIEWED-PUBLIC-QUOTE-CAPTURE-PACKET-NO-CAPTURE` as source/test/docs `DONE_WITH_CONCERNS`.
+- Added no-authority helper `reviewed_public_quote_capture_packet.py`; smoke defines exact future public GET-only AVAX quote capture envelope, response hash/timestamp/freshness requirements, adapter handoff, maker-policy spread/cost guard, and PM->E3->BB checklist.
+- PM read: this still does not call Bybit or permit runtime quote capture. Next checkpoint is an exchange-facing public quote capture runtime review; do not run capture without the PM->E3->BB chain and no private/order/auth path checks.
+
 ## 2026-06-26 Maker-First Micro-Tier Placement Policy
 
 - PM closed `P1-AGGRESSIVE-ALPHA-MAKER-FIRST-MICRO-TIER-PLACEMENT-POLICY-NO-ORDER` as source/test/docs `DONE_WITH_CONCERNS`.
