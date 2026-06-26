@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Cap-Feasible Low-Price Filter No-Order
+
+- PM closed `P1-AGGRESSIVE-ALPHA-CAP-FEASIBLE-LOW-PRICE-REGIME-FILTER-NO-ORDER` as `DONE_WITH_CONCERNS` with a source-only filter proposal.
+- Clean-BBO/high-cushion/current-cap filter keeps `grid_trading|AVAXUSDT|Sell` as champion/current P0 candidate; SUI/FIL are source-only controls only. ETC/APT fail incomplete BBO; UNI/XRP/OP fail thin cushion/hit-rate/sample/spread.
+- PM read: current artifacts do not contain regime labels or markout buckets, so do not claim regime proof. Next source-only blocker is `P1-AGGRESSIVE-ALPHA-AVAX-SUI-FIL-MATCHED-CONTROL-DESIGN-NO-ORDER`.
+
 ## 2026-06-26 ETH Buy Cap Feasibility No-Order
 
 - PM/QC/MIT closed `P1-AGGRESSIVE-ALPHA-ETH-BUY-CAP-FEASIBILITY-PROPOSAL-NO-ORDER` as `DONE_WITH_CONCERNS`.
