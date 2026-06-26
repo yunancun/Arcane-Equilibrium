@@ -102,7 +102,13 @@ def test_wrapper_refreshes_activation_packet_before_alpha_runner() -> None:
     assert "OPENCLAW_SEALED_HORIZON_LEARNING_EVIDENCE_JSON" in src
     assert "OPENCLAW_SEALED_HORIZON_OPERATOR_REVIEW_JSON" in src
     assert "OPENCLAW_SEALED_HORIZON_DECISION_PACKET_JSON" in src
-    assert "--decision defer" in src
+    assert "OPENCLAW_ALPHA_STANDING_DEMO_AUTHORIZATION_JSON" in src
+    assert "OPENCLAW_COST_GATE_STANDING_DEMO_AUTHORIZATION_JSON" in src
+    assert "OPENCLAW_ALPHA_BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION" in src
+    assert 'BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION="authorize"' in src
+    assert 'BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION="defer"' in src
+    assert '--decision "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_DECISION"' in src
+    assert "--standing-demo-authorization-json" in src
     assert "alpha_discovery_throughput.profitability_path_scorecard" in src
     assert "profitability_path_scorecard_latest.json" in src
     assert "profitability_path_scorecard_latest.md" in src

@@ -327,6 +327,35 @@ def test_standing_demo_authorization_emits_candidate_scoped_authorization() -> N
     ] is True
 
 
+def test_standing_demo_authorization_derives_candidate_scoped_fields() -> None:
+    packet = build_bounded_demo_probe_operator_authorization(
+        preflight=_preflight(),
+        placement_repair_plan=_placement_plan(),
+        authority_patch_readiness=_readiness(),
+        standing_demo_authorization=_standing_demo_authorization(),
+        decision="authorize",
+        now_utc=NOW,
+    )
+
+    auth = packet["operator_authorization"]
+
+    assert packet["status"] == BOUNDED_PROBE_AUTHORIZED_STATUS
+    assert packet["authorization_confirmation_source"] == "standing_demo_authorization"
+    assert packet["authorization_id"].startswith("standing-demo-")
+    assert packet["operator_id"] == "operator-test"
+    assert packet["requested_max_authorized_probe_orders"] == 2
+    assert packet["expires_at_utc"] == "2026-06-23T18:00:00+00:00"
+    assert packet["answers"]["standing_demo_authorization_valid"] is True
+    assert packet["answers"]["active_runtime_probe_authority"] is False
+    assert packet["answers"]["active_runtime_order_authority"] is False
+    assert auth["authorization_id"] == packet["authorization_id"]
+    assert auth["operator_id"] == "operator-test"
+    assert auth["side_cell_key"] == SIDE_CELL
+    assert auth["max_authorized_probe_orders"] == 2
+    assert auth["main_cost_gate_adjustment"] == "NONE"
+    assert auth["promotion_evidence"] is False
+
+
 def test_live_contaminated_standing_demo_authorization_fails_closed() -> None:
     standing = _standing_demo_authorization(
         environment="live",
@@ -588,12 +617,6 @@ def test_standing_demo_cli_input_emits_authorization(tmp_path) -> None:
             str(standing),
             "--decision",
             "authorize",
-            "--authorization-id",
-            "auth-bounded-probe-standing-001",
-            "--max-authorized-probe-orders",
-            "1",
-            "--expires-at-utc",
-            expires_at,
             "--json-output",
             str(out),
         ],
@@ -607,6 +630,9 @@ def test_standing_demo_cli_input_emits_authorization(tmp_path) -> None:
     packet = json.loads(out.read_text(encoding="utf-8"))
     assert packet["status"] == BOUNDED_PROBE_AUTHORIZED_STATUS
     assert packet["authorization_confirmation_source"] == "standing_demo_authorization"
+    assert packet["authorization_id"].startswith("standing-demo-")
+    assert packet["requested_max_authorized_probe_orders"] == 2
+    assert packet["expires_at_utc"] == expires_at
     assert packet["artifacts"]["standing_demo_authorization"]["sha256"]
 
 
