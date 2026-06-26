@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-26（TODO v540 health [68] runtime source sync review；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-26（TODO v541 source/runtime pointer correction after health [68] runtime sync report commit；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v541 增量（2026-06-26 source/runtime pointer correction after health [68] runtime sync report commit）**：Corrected TODO masthead/source pointer after the v540 report commit was pushed. Mac/origin `main` is now docs checkpoint `367a7cd5`, while Linux runtime intentionally remains at code checkpoint `0246b263` because `367a7cd5` only records TODO/report/changelog evidence and does not need runtime sync. Active state remains `P1-RUNTIME-HEALTH-HYGIENE-68-RUNTIME-SYNC-REVIEW` `DONE_WITH_CONCERNS`, next blocker `P1-RUNTIME-HEALTH-HYGIENE-CRON-EXPECTED-HEAD-DRIFT-REVIEW`. Boundary：docs/TODO/changelog metadata only；no runtime mutation, no PG/Bybit/API call, no restart/rebuild, no crontab/env edit, no Cost Gate change, no authority/proof claim.
 
 **v540 增量（2026-06-26 health [68] runtime source sync review）**：PM advanced `P1-RUNTIME-HEALTH-HYGIENE-68-RUNTIME-SYNC-REVIEW` with session state `/tmp/openclaw/session_loop_state_20260626T035820Z_health68_runtime_sync_review.json`. Anti-repeat classified the local [68] source patch as already done, then proceeded from the runtime/source delta: Mac/origin had `0246b263` while Linux `trade-core` was still clean at `d2cd70d0`. E3 returned `DONE_WITH_CONCERNS` and allowed exactly one source-only fast-forward with no restart/rebuild/crontab/env/PG/Bybit/API/writer/adapter/Cost Gate/authority mutation. Baseline old-runtime [68] failed with demo `working_n=4`, `resting=398`, `filled=0`. PM verified exact `FETCH_HEAD=0246b263` and fast-forwarded Linux source to `0246b263`; post-checks show clean worktree, API MainPID unchanged at `2218842`, process/crontab mainnet and adapter flag counts `0`, and direct [68] invocation inside a PG read-only transaction now returns `PASS` with demo `resting=0`, `working_n=0`, `local_lineage_residual_n=2`, `local_lineage_residual_notional=398`. Linux no-cache focused/adjacent tests returned `30 passed`; `git diff --check` passed. Status `DONE_WITH_CONCERNS` because 5 crontab expected-head pins still reference `d2cd70d0`, requiring separate PM -> E3 review before any crontab edit. Boundary：source-only Linux fast-forward + read-only PG/source/test checks only；no service restart/rebuild, no crontab/env mutation, no PG write, no Bybit/API call, no adapter/Rust writer enablement, no Cost Gate change, no live/probe/order authority, and no promotion/bounded-profit proof. PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--health68_runtime_source_sync_review.md`.
 
