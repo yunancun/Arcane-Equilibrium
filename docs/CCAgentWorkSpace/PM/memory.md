@@ -25,6 +25,13 @@
 
 ## 近期記錄
 
+## 2026-06-26 AVAX/SUI/FIL Matched-Control Design No-Order
+
+- PM closed `P1-AGGRESSIVE-ALPHA-AVAX-SUI-FIL-MATCHED-CONTROL-DESIGN-NO-ORDER` as `DONE_WITH_CONCERNS`.
+- Design decision: future AVAX proof must use candidate-matched AVAX outcomes plus same-side-cell blocked controls and proof-exclusion/result-review/execution-realism contracts. SUI/FIL are research-only cross-symbol controls, not AVAX proof/promotion/Cost Gate evidence.
+- TODO maintenance: v549 separates operational queue `Status` (`DONE/BLOCKED/WAITING/DEFERRED`) from loop/state-machine outcomes in `Loop decision`.
+- PM read: all currently selected source-only aggressive blockers are closed. Next queue entry is `P0-BOUNDED-PROBE-AUTHORIZATION`, still `BLOCKED_BY_RUNTIME_AUTHORIZATION` until valid AVAX-scoped auth or exact typed confirm plus E3/BB review.
+
 ## 2026-06-26 Cap-Feasible Low-Price Filter No-Order
 
 - PM closed `P1-AGGRESSIVE-ALPHA-CAP-FEASIBLE-LOW-PRICE-REGIME-FILTER-NO-ORDER` as `DONE_WITH_CONCERNS` with a source-only filter proposal.
