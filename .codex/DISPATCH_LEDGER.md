@@ -26,6 +26,23 @@ Result:
 - outcome, blocker, or next action
 ```
 
+2026-06-26 05:37 CEST
+Task:
+- Advance `P0-BOUNDED-PROBE-AUTHORIZATION` to a no-authority AVAX review-ready checkpoint and fix stale TODO next-action state.
+
+Chain:
+- PM -> E3(explorer) -> BB(explorer) -> PM
+
+Ownership:
+- PM: create/check session state, apply anti-repeat, generate defer-only local helper artifacts, update TODO/report/changelog/worklog/memory.
+- E3(explorer): runtime/security authority-boundary review for artifact-only candidate-scoped authorization.
+- BB(explorer): exchange/execution-realism authority-boundary review and order-path blockers.
+
+Result:
+- First-attempt touchability/bootstrap source blocker was classified `NO-OP_ALREADY_DONE`.
+- Fresh defer-only authorization packet is review-ready but emits no authorization object and no active probe/order authority.
+- Actual bounded Demo grant remains blocked until a valid structured standing Demo authorization or exact typed confirm exists, followed by fresh E3/BB order-envelope/runtime/reconciliation review.
+
 2026-06-26 05:23 CEST
 Task:
 - Close `P0-PROFIT-CANDIDATE-SELECTION` with exactly one review-only bounded Demo candidate after the clean exchange-book checkpoint.
