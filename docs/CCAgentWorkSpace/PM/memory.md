@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-27 Standing Demo Loss-Control Envelope Runtime Materialization Apply
+
+- PM/E3 closed `P0-STANDING-DEMO-LOSS-CONTROL-ENVELOPE-RUNTIME-MATERIALIZATION-E3-REVIEW` as `DONE_WITH_CONCERNS`.
+- Runtime source/crontab pins are aligned at `9fecf84f...`; a `0600` standing Demo envelope is materialized for current `grid_trading|ETHUSDT|Buy` with cap `2` and no live/mainnet/Cost Gate/order authority.
+- Targeted verification makes false-negative review/preflight ready, but bounded auth remains `defer`/no-object because canonical downstream placement artifacts are still AVAX; next blocker is current-candidate downstream alignment.
+
 ## 2026-06-27 Standing Demo False-Negative Preflight Runtime Sync Apply
 
 - PM/E3 closed `P1-RUNTIME-HEALTH-HYGIENE-STANDING-DEMO-FALSE-NEGATIVE-PREFLIGHT-SYNC-REVIEW` as `DONE_WITH_CONCERNS`.
