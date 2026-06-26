@@ -1,9 +1,9 @@
 # Xuanheng TODO - Active Dispatch Queue
 
-**Version** v583 | **Date** 2026-06-26
-**Source/runtime pointer**: local/origin `main` was `2be43f69061d6af3cc900ef22eec99d581b8b762` before the v583 source/docs commit; final v583 commit is recorded in the PM response. Runtime `trade-core` remains clean at `b224c759200d8dfc6fc4a53cbee39b8fb3683118`.
-**Current posture**: P0 bounded authorization is still blocked by missing machine-checkable scoped authorization. v583 closed a source-only fee-tier/maker-ratio evidence design and paused per operator request.
-**Links**: latest PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--fee_tier_maker_ratio_evidence_design_no_order.md`; latest Operator note `docs/CCAgentWorkSpace/Operator/2026-06-26--fee_tier_maker_ratio_evidence_design_no_order.md`; changelog `docs/CLAUDE_CHANGELOG.md`; TODO standard `docs/agents/todo-maintenance.md`.
+**Version** v584 | **Date** 2026-06-26
+**Source/runtime pointer**: local/origin `main` was `3a535b39ae4526c9e2633505504f1054cbed691d` before the v584 source/docs commit; final v584 commit is recorded in the PM response. Runtime `trade-core` remains clean at `b224c759200d8dfc6fc4a53cbee39b8fb3683118`.
+**Current posture**: P0 bounded authorization is still blocked by missing machine-checkable scoped authorization. v584 closed a source-only private fee-tier read envelope design; no private read was performed.
+**Links**: latest PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--private_fee_tier_read_envelope_design_no_read.md`; latest Operator note `docs/CCAgentWorkSpace/Operator/2026-06-26--private_fee_tier_read_envelope_design_no_read.md`; changelog `docs/CLAUDE_CHANGELOG.md`; TODO standard `docs/agents/todo-maintenance.md`.
 
 ---
 
@@ -11,25 +11,27 @@
 
 | Fact | Value | Dispatch impact |
 |---|---|---|
-| Operator pause | Operator requested: "跑完這輪先暫停一下，整理下todo，現在不符合todo規範". | After v583, do not auto-advance into the next blocker in this session. Resume only on a new operator message. |
-| Runtime source | Latest verified runtime source remains clean at `b224c759200d8dfc6fc4a53cbee39b8fb3683118`; crontab expected-head pins were already aligned in v582 (`0/11` old/target as of `2026-06-26T12:31:33Z`). | Do not repeat runtime sync for v583 source-only research/docs drift. |
-| Bounded authorization artifact | Natural runtime auth artifact sha `020b477d3581b3423cb4bf6dc4b7269eedc11b679d7b5030fb049df330a65602`, mtime `2026-06-26T12:45:04.172027Z`; status `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED`; candidate `grid_trading|AVAXUSDT|Sell`; `decision=defer`; no `authorization_id`, no probe/order authority; `typed_confirm_expected=None`; template `authorize_bounded_demo_probe:grid_trading|AVAXUSDT|Sell:<max_authorized_probe_orders<=3>:<authorization_id>`; readiness `PREFLIGHT_NOT_READY`. | New sha/mtime exists, but no admitted authorization delta. P0 remains blocked. Broad chat approval is not a runtime-scoped auth object. |
+| Operator pause | Prior operator request was honored in v583. The persistent goal resumed automatically; this v584 checkpoint should stop after commit/push unless the operator asks to continue. | Do not auto-advance into a real private read or P0 probe after v584. |
+| Runtime source | Latest verified runtime source remains clean at `b224c759200d8dfc6fc4a53cbee39b8fb3683118`; crontab expected-head pins were already aligned in v582 (`0/11` old/target as of `2026-06-26T12:31:33Z`). | Do not repeat runtime sync for source-only research/docs drift. |
+| Bounded authorization artifact | Natural runtime auth artifact sha `71ecf0fff8c8fe76734f18ffbfd59022ee01ea9a5458d1b653e9e921decd205d`, mtime `2026-06-26T13:00:05.164306Z`; status `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED`; candidate `grid_trading|AVAXUSDT|Sell`; `decision=defer`; no `authorization_id`, no probe/order authority; `typed_confirm_expected=None`; template `authorize_bounded_demo_probe:grid_trading|AVAXUSDT|Sell:<max_authorized_probe_orders<=3>:<authorization_id>`; readiness `PREFLIGHT_NOT_READY`. | New sha/mtime exists, but no admitted authorization delta. P0 remains blocked. Broad chat approval is not a runtime-scoped auth object. |
 | Fee-tier/maker-ratio evidence design | Source-only smoke artifact `/tmp/openclaw/20260626T124030Z_fee_tier_maker_ratio_evidence_design_no_order/fee_tier_maker_ratio_evidence_design.json`, sha `ce17dffeb80a840d023b458580a87d37e4ba963b9dbcc2f8916904e682750375`, status `FEE_TIER_MAKER_RATIO_EVIDENCE_DESIGN_READY_NO_ORDER` for `grid_trading|AVAXUSDT|Sell`. | Future AVAX proof must attach actual fee-tier provenance, maker/taker labels, actual fees/slippage, and candidate-matched lineage. This is not order admission, Cost Gate proof, or profit proof. |
-| Verification | Focused test `8 passed`; adjacent fee/slippage + maker-policy + new helper suite `19 passed`; `py_compile` passed; `git diff --check` passed; real-artifact smoke READY_NO_ORDER with all authority/order/proof flags false. | v583 source helper is locally verified; E2 concerns were fixed and E4 regression passed. |
+| Private fee-tier read envelope design | Source-only smoke artifact `/tmp/openclaw/20260626T130005Z_fee_tier_private_read_envelope_design_no_read/private_fee_tier_read_envelope_design.json`, sha `24180d6d04b11fdaa4163dc9f8dd0c916837ae0365ce9530afd54ab89eba7536`, status `PRIVATE_FEE_TIER_READ_ENVELOPE_READY_NO_READ` for `grid_trading|AVAXUSDT|Sell`. | Future fee-rate read envelope is defined, but no private read is authorized or performed. |
+| Verification | Focused private fee-tier envelope test `9 passed`; adjacent fee-tier evidence suite `28 passed`; `py_compile` passed; `git diff --check` passed; real-artifact smoke READY_NO_READ with all private-read/network/order/proof flags false; E2/E3 final DONE and BB DONE_WITH_CONCERNS. | v584 source helper is locally verified. BB concerns were folded into source policy: numeric fee rates allow zero/negative maker rebates with labels, and observed/captured time is used unless Bybit provides an explicit effective timestamp. |
 
 ## §1 Active Dispatch Queue
 
 | ID | P | Status | Owner chain | Acceptance | Latest evidence | Next action |
 |---|---:|---|---|---|---|---|
-| `P0-BOUNDED-PROBE-AUTHORIZATION` | 0 | BLOCKED | PM -> E3 -> BB -> PM | Candidate-scoped bounded Demo authorization only; no global Cost Gate lowering; no live; no order/probe authority unless a valid scoped authorization object or valid exact typed confirm is admitted and E3/BB review passes. | Latest runtime auth sha `020b477d...` remains `decision=defer`, no `authorization_id`, no standing scoped auth, no probe/order authority. | Resume only on a real candidate-scoped auth object, valid exact typed confirm matching the fixed template, or standing-auth delta that passes repo gates. |
+| `P0-BOUNDED-PROBE-AUTHORIZATION` | 0 | BLOCKED | PM -> E3 -> BB -> PM | Candidate-scoped bounded Demo authorization only; no global Cost Gate lowering; no live; no order/probe authority unless a valid scoped authorization object or valid exact typed confirm is admitted and E3/BB review passes. | Latest runtime auth sha `71ecf0ff...` remains `decision=defer`, no `authorization_id`, no standing scoped auth, no probe/order authority. | Resume only on a real candidate-scoped auth object, valid exact typed confirm matching the fixed template, or standing-auth delta that passes repo gates. |
 | `P0-PROFIT-OUTCOME-REVIEW` | 0 | WAITING | PM -> QC/MIT/BB -> PM | Candidate-matched fills with fees/slippage, controls, execution realism, and repeat/OOS path. | No authorized bounded-probe outcomes exist. | Run only after an authorized bounded Demo probe produces candidate-matched outcomes. |
-| `P1-FEE-TIER-PRIVATE-READ-ENVELOPE-DESIGN-NO-READ` | 1 | DEFERRED | PM -> E3 -> BB -> PM | Source-only envelope defining a future read-only private fee-tier capture: exact endpoint/scope, credential minimization, output redaction, provenance fields, no order authority, no PG write, no Cost Gate lowering, and no proof claim. | v583 evidence design says actual fee-tier provenance is required but was not read. | After operator resumes, use only if P0 auth still has no real delta. Design only; do not perform the private read. |
+| `P1-FEE-TIER-PRIVATE-READ-ENVELOPE-E3-BB-REVIEW-NO-READ` | 1 | DEFERRED | PM -> E3 -> BB -> PM | Separate review of whether to permit exactly one future read-only runtime invocation of `/v5/account/fee-rate?category=linear`; must define one-shot review id, no order path, credential handling, redaction, freshness window, no PG write, no Cost Gate lowering, and no proof/authority. | v584 source-only envelope is READY_NO_READ; BB concerns were folded into source policy; no private read has been executed. | Use only if the operator resumes and P0 auth still has no real delta. Review only; do not perform the private read unless a later checkpoint explicitly opens that action. |
 
 ## §2 Closed Markers To Prevent Rework
 
 | ID | Status | Latest report | No-repeat rule |
 |---|---|---|---|
 | `P1-FEE-TIER-MAKER-RATIO-EVIDENCE-DESIGN-NO-ORDER` | DONE_WITH_CONCERNS | `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--fee_tier_maker_ratio_evidence_design_no_order.md` | No-op already done: helper, tests, SCRIPT_INDEX, smoke artifact sha `ce17dffe...`, and proof-exclusion contract exist. Reopen only if fee schema, maker policy, selected candidate identity, or auth packet contract changes. |
+| `P1-FEE-TIER-PRIVATE-READ-ENVELOPE-DESIGN-NO-READ` | DONE_WITH_CONCERNS | `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--private_fee_tier_read_envelope_design_no_read.md` | No-op already done: source-only envelope helper, tests, SCRIPT_INDEX, smoke artifact sha `24180d6d...`, and E2/E3/BB review exist. Reopen only if Bybit fee-rate endpoint policy, fee-proof requirements, candidate identity, or private-read governance changes. |
 | `P1-RUNTIME-HEALTH-HYGIENE-AUTH-TYPED-CONFIRM-GUARD-RUNTIME-SYNC-APPLY` | DONE_WITH_CONCERNS | `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--auth_typed_confirm_guard_runtime_sync_apply.md` | No-op already done: runtime source is `b224c759`; expected-head pins old/target are `0/11`; natural artifacts confirm fixed typed-confirm display. |
 | `P1-RUNTIME-HEALTH-HYGIENE-AUTH-TYPED-CONFIRM-GUARD-RUNTIME-SYNC-REVIEW` | DONE_WITH_CONCERNS_NO_APPLY | `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--auth_typed_confirm_guard_runtime_sync_review_no_apply.md` | Superseded by v582 apply. Do not repeat read-only review. |
 | `P0-BOUNDED-PROBE-AUTHORIZATION-TYPED-CONFIRM-GUARD` | DONE_WITH_CONCERNS | `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--auth_typed_confirm_guard_source_fix.md` | Do not repeat source fix unless a post-sync bounded auth packet again exposes an exact typed-confirm phrase while preflight is not ready or authorization fields are incomplete. |
@@ -59,9 +61,9 @@
 git -C /Users/ncyu/Projects/TradeBot/srv status --short --branch
 git -C /Users/ncyu/Projects/TradeBot/srv rev-parse HEAD
 sed -n '1,180p' /Users/ncyu/Projects/TradeBot/srv/TODO.md
-sed -n '1,240p' /Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--fee_tier_maker_ratio_evidence_design_no_order.md
-python3 -m json.tool /tmp/openclaw/session_loop_state_20260626T124030Z_fee_tier_maker_ratio_evidence_design_no_order.json
-python3 -m json.tool /tmp/openclaw/20260626T124030Z_fee_tier_maker_ratio_evidence_design_no_order/fee_tier_maker_ratio_evidence_design.json | sed -n '1,160p'
+sed -n '1,240p' /Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-26--private_fee_tier_read_envelope_design_no_read.md
+python3 -m json.tool /tmp/openclaw/session_loop_state_20260626T130005Z_fee_tier_private_read_envelope_design_no_read.json
+python3 -m json.tool /tmp/openclaw/20260626T130005Z_fee_tier_private_read_envelope_design_no_read/private_fee_tier_read_envelope_design.json | sed -n '1,180p'
 ssh trade-core 'git -C /home/ncyu/BybitOpenClaw/srv rev-parse HEAD && git -C /home/ncyu/BybitOpenClaw/srv status --short'
 ssh trade-core 'python3 - <<'"'"'PY'"'"'
 import json, hashlib, os, datetime
@@ -75,4 +77,4 @@ PY'
 ```
 
 **Maintenance contract**: `TODO.md` is the active dispatch queue only. Long evidence and version narratives belong in reports/archive/changelog.
-**Self-check**: The next PM can identify the next action in under one minute: pause is active for this session; P0 authorization is blocked without a machine-checkable auth delta; after resume and absent P0 delta, the next source-only work is private fee-tier read-envelope design without performing the read.
+**Self-check**: The next PM can identify the next action in under one minute: pause is active for this session; P0 authorization is blocked without a machine-checkable auth delta; `P1-FEE-TIER-PRIVATE-READ-ENVELOPE-DESIGN-NO-READ` is already closed/no-repeat; after resume and absent P0 delta, the next safe source-only checkpoint is E3/BB review of the private fee-tier read envelope, still without performing the private read.
