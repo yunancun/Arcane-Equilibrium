@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 API Process Ownership Read-Only
+
+- PM closed `P1-RUNTIME-HEALTH-HYGIENE-API-PROCESS-OWNERSHIP` as read-only `DONE_WITH_CONCERNS`.
+- Runtime API/watchdog ownership is established under `systemctl --user`: API MainPID `2218842`, watchdog MainPID `1538268`, and API cgroup `app.slice/openclaw-trading-api.service`.
+- PM read: do not repeat manual-vs-service ownership audit without unit/PID/cgroup change. P0 auth remains blocked because latest auth sha `e7420e21...` is still AVAX defer/no authority.
+
 ## 2026-06-26 Runtime Source Sync Review No-Apply
 
 - PM/E3 closed `P1-RUNTIME-HEALTH-HYGIENE-SOURCE-SYNC-REVIEW-NO-APPLY` as `DONE_WITH_CONCERNS`.

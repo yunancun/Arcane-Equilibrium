@@ -11,6 +11,13 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 13:45 CEST
+- closed `P1-RUNTIME-HEALTH-HYGIENE-API-PROCESS-OWNERSHIP` as read-only docs/TODO `DONE_WITH_CONCERNS`
+- `systemctl --user` owns the runtime API (`openclaw-trading-api.service`, MainPID `2218842`) and watchdog (`openclaw-watchdog.service`, MainPID `1538268`); API cgroup confirms `app.slice/openclaw-trading-api.service`
+- latest auth sha `e7420e21...` remains AVAX `FALSE_NEGATIVE_PREFLIGHT_OPERATOR_REVIEW_REQUIRED` / `decision=defer`; no scoped authority admitted
+- updated `TODO.md` v578 so API ownership is a no-repeat closed marker; P0 auth is still the only P0 unlock path, and source-sync apply remains deferred
+- boundary: read-only runtime metadata + docs/TODO only; no restart, source sync, crontab edit, PG write/query, Bybit/order action, Cost Gate change, authority, or proof claim
+
 2026-06-26 13:26 CEST
 - closed `P1-AGGRESSIVE-ALPHA-MAKER-COST-CUSHION-WORKSHEET-NO-ORDER` as source/test/docs `DONE_WITH_CONCERNS`
 - added `maker_cost_cushion_worksheet.py`; real AVAX no-order smoke is `MAKER_COST_CUSHION_WORKSHEET_READY_NO_ORDER`, sha `074d2e1d...`, maker stress margin `66.9239bps`, taker failure-analysis margin `59.9239bps`
