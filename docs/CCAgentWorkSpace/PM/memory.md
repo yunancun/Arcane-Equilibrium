@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Fee/Slippage/Maker-Taker Schema Contract
+
+- PM closed `P1-AGGRESSIVE-ALPHA-FEE-SLIPPAGE-MAKER-TAKER-SCHEMA-NO-ORDER` as source/test/docs `DONE_WITH_CONCERNS`.
+- Added no-authority helper `fee_slippage_maker_taker_schema_contract.py`; smoke requires future AVAX proof/control rows to carry actual fee, actual slippage, maker/taker/post-only labels, order/fill lineage, and reconstructable net PnL after fees/slippage.
+- PM read: this is not proof and not order admission. Operator requested pause after this round; on resume, real P0 auth delta takes precedence, otherwise next source-only work is fresh BBO read-only readiness path.
+
 ## 2026-06-26 Current-Cap Staircase Risk Worksheet
 
 - PM closed `P1-AGGRESSIVE-ALPHA-CURRENT-CAP-STAIRCASE-RISK-WORKSHEET-NO-ORDER` as source/test/docs `DONE_WITH_CONCERNS`.
