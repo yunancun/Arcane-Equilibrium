@@ -11,6 +11,14 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 07:22 CEST
+- closed `P1-AGGRESSIVE-ALPHA-AVAX-SUI-FIL-MATCHED-CONTROL-DESIGN-NO-ORDER` as source-only `DONE_WITH_CONCERNS`
+- existing result-review contract supports same-side-cell controls for AVAX; SUI/FIL cross-symbol controls are research-only and cannot count as AVAX proof/promotion/Cost Gate proof
+- future AVAX proof requires candidate-matched admissions/outcomes, same-side-cell controls, real fees/slippage, maker/taker labels, BBO, lineage, and no proof-exclusion reasons
+- normalized `TODO.md` queue statuses to maintenance-standard operational states (`DONE/BLOCKED/WAITING/DEFERRED`) while preserving loop outcomes in a separate `Loop decision` column
+- all currently selected source-only aggressive blockers are closed; next queue entry is `P0-BOUNDED-PROBE-AUTHORIZATION`, still `BLOCKED_BY_RUNTIME_AUTHORIZATION`
+- boundary: source contract inspection + docs/TODO/report/state only; no Bybit order/cancel/modify, PG write, runtime sync, service/crontab/env mutation, Cost Gate/cap/risk mutation, authority, or proof claim
+
 2026-06-26 07:14 CEST
 - closed `P1-AGGRESSIVE-ALPHA-CAP-FEASIBLE-LOW-PRICE-REGIME-FILTER-NO-ORDER` as source-only `DONE_WITH_CONCERNS`
 - clean-BBO/high-cushion/current-cap filter keeps `grid_trading|AVAXUSDT|Sell` as champion/current P0 candidate; SUI/FIL are source-only controls only
