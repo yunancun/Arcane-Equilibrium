@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-27 Standing Demo Current-Candidate Downstream Alignment Apply
+
+- PM/E3 closed `P0-STANDING-DEMO-CURRENT-CANDIDATE-DOWNSTREAM-ALIGNMENT-REVIEW` as runtime `DONE_WITH_CONCERNS`.
+- Canonical downstream artifacts now align to `grid_trading|ETHUSDT|Buy`; bounded auth latest is `READY_FOR_OPERATOR_AUTHORIZATION_REVIEW`, `decision=defer`, no auth object, no active probe/order authority.
+- Next blocker is a separate `PM -> E3 -> BB -> PM` bounded authorization review for the aligned ETH candidate; do not treat this alignment as execution authority or profit proof.
+
 ## 2026-06-27 Standing Demo Loss-Control Envelope Runtime Materialization Apply
 
 - PM/E3 closed `P0-STANDING-DEMO-LOSS-CONTROL-ENVELOPE-RUNTIME-MATERIALIZATION-E3-REVIEW` as `DONE_WITH_CONCERNS`.
