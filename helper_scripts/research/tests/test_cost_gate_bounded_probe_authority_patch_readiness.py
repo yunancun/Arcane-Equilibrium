@@ -339,6 +339,50 @@ def test_full_source_patch_readiness_can_pass_after_adapter_exists(
     assert packet["source_readiness"]["missing_required_patch_seams"] == []
 
 
+def test_order_intent_tif_surface_requires_postonly_on_time_in_force_enum(
+    tmp_path: Path,
+) -> None:
+    _write_existing_seams(tmp_path)
+    _write_patch_adapter(tmp_path)
+    _write_authority_path_wiring(tmp_path)
+    _write(
+        tmp_path / "rust/openclaw_engine/src/intent_processor/mod.rs",
+        """
+pub struct OrderIntent {
+    pub limit_price: Option<f64>,
+    pub time_in_force: Option<TimeInForce>,
+}
+""",
+    )
+    _write(
+        tmp_path / "rust/openclaw_engine/src/order_manager.rs",
+        """
+pub enum TimeInForce { GTC }
+pub enum UnrelatedPlacementMode { PostOnly }
+""",
+    )
+
+    packet = build_bounded_demo_probe_authority_patch_readiness(
+        placement_repair_plan=_placement_plan(),
+        repo_root=tmp_path,
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "SOURCE_SCAN_INCOMPLETE"
+    assert packet["answers"]["existing_authority_seams_present"] is False
+    assert "order_intent_limit_tif_surface_missing" in packet["source_readiness"][
+        "missing_existing_seams"
+    ]
+    check = next(
+        row
+        for row in packet["source_readiness"]["existing_authority_seams"]
+        if row["check_id"] == "order_intent_limit_tif_surface"
+    )
+    assert check["scan_mode"] == "code_without_comments_or_strings_structural"
+    assert check["missing_patterns"] == ["TimeInForce.PostOnly"]
+    _assert_no_runtime_authority_true(packet)
+
+
 def test_adapter_without_authority_path_wiring_still_requires_patch(
     tmp_path: Path,
 ) -> None:
@@ -764,6 +808,9 @@ def test_current_repo_reports_active_order_submission_source_ready_without_autho
         now_utc=NOW,
     )
 
+    assert packet["status"] == "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW"
+    assert packet["answers"]["existing_authority_seams_present"] is True
+    assert packet["source_readiness"]["missing_existing_seams"] == []
     assert packet["answers"]["rust_near_touch_authority_adapter_present"] is True
     assert packet["answers"]["rust_authority_path_wiring_present"] is True
     assert packet["answers"]["active_order_submission_ready"] is True

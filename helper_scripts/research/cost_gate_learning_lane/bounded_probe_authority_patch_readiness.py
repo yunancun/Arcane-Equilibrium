@@ -223,7 +223,7 @@ EXISTING_SEAM_CHECKS: tuple[SourceCheck, ...] = (
             "bounded Adapter can alter placement shape without inventing a new "
             "order object."
         ),
-        required_patterns=("limit_price", "time_in_force", "TimeInForce::PostOnly"),
+        required_patterns=("OrderIntent.limit_price", "OrderIntent.time_in_force", "TimeInForce.PostOnly"),
         paths=(
             "rust/openclaw_engine/src/intent_processor/mod.rs",
             "rust/openclaw_engine/src/order_manager.rs",
@@ -764,6 +764,53 @@ def _evaluate_source_check(repo_root: Path, check: SourceCheck) -> dict[str, Any
             if text is not None:
                 scan_text = _strip_rust_comments_and_strings(text) if code_scan else text
                 loaded_files.append((path.relative_to(repo_root).as_posix(), scan_text))
+    if check.check_id == "order_intent_limit_tif_surface":
+        combined = "\n".join(text for _, text in loaded_files)
+        order_intent_body = _struct_body(combined, "OrderIntent")
+        intent_limit_present = (
+            re.search(r"\bpub\s+limit_price\s*:\s*Option\s*<\s*f64\s*>", order_intent_body)
+            is not None
+        )
+        intent_tif_present = (
+            re.search(
+                r"\bpub\s+time_in_force\s*:\s*Option\s*<\s*(?:crate::order_manager::)?TimeInForce\s*>",
+                order_intent_body,
+            )
+            is not None
+        )
+        tif_body = _enum_body(combined, "TimeInForce")
+        post_only_variant_present = re.search(r"\bPostOnly\b", tif_body) is not None
+        text_by_pattern = {
+            "OrderIntent.limit_price": intent_limit_present,
+            "OrderIntent.time_in_force": intent_tif_present,
+            "TimeInForce.PostOnly": post_only_variant_present,
+        }
+        present = bool(loaded_files) and all(text_by_pattern.values())
+        return {
+            "check_id": check.check_id,
+            "category": check.category,
+            "description": check.description,
+            "present": present,
+            "missing_reason": None if present else check.missing_reason,
+            "paths": list(check.paths),
+            "loaded_file_count": len(loaded_files),
+            "missing_paths": missing_paths,
+            "required_patterns": list(check.required_patterns),
+            "missing_patterns": [
+                pattern for pattern, found in text_by_pattern.items() if not found
+            ],
+            "scan_mode": "code_without_comments_or_strings_structural",
+            "evidence": [
+                {
+                    "pattern": pattern,
+                    "path": None,
+                    "line": None,
+                    "snippet": "structural check present",
+                }
+                for pattern, found in text_by_pattern.items()
+                if found
+            ],
+        }
     text_by_pattern = {
         pattern: any(pattern in text for _, text in loaded_files)
         for pattern in check.required_patterns
@@ -792,6 +839,32 @@ def _check_present(rows: list[dict[str, Any]], check_id: str) -> bool:
         row.get("check_id") == check_id and row.get("present") is True
         for row in rows
     )
+
+
+def _braced_item_body(code: str, *, keyword: str, name: str) -> str:
+    match = re.search(rf"\b{re.escape(keyword)}\s+{re.escape(name)}\b", code)
+    if match is None:
+        return ""
+    brace = code.find("{", match.end())
+    if brace == -1:
+        return ""
+    depth = 1
+    idx = brace + 1
+    while idx < len(code) and depth > 0:
+        if code[idx] == "{":
+            depth += 1
+        elif code[idx] == "}":
+            depth -= 1
+        idx += 1
+    return code[brace:idx] if depth == 0 else code[brace:]
+
+
+def _struct_body(code: str, name: str) -> str:
+    return _braced_item_body(code, keyword="struct", name=name)
+
+
+def _enum_body(code: str, name: str) -> str:
+    return _braced_item_body(code, keyword="enum", name=name)
 
 
 def _source_readiness(repo_root: Path) -> dict[str, Any]:

@@ -260,6 +260,13 @@ Do not paste long reports or stable architecture into TODO.
 - Verification: focused touchability+placement `30 passed`; adjacent bounded-probe suite `106 passed`; changed-helper py_compile PASS; `git diff --check` PASS. Boundary unchanged: no Bybit call/order/cancel/modify, no PG write, no `_latest` overwrite, no runtime/env/service/crontab mutation, no Cost Gate lowering, no Rust writer/adapter enablement, no probe/order/live authority, no promotion proof.
 - Next blocker: `P0-BOUNDED-PROBE-AVAX-AUTHORITY-PATH-READINESS-SOURCE-ONLY`.
 
+## 2026-06-26 AVAX Authority Path Source Readiness
+
+- `P0-BOUNDED-PROBE-AVAX-AUTHORITY-PATH-READINESS-SOURCE-ONLY` is `DONE`: source scan now reports `AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW` for the AVAX first-attempt placement input, while runtime/order authority answers remain false.
+- Fixed a scanner false negative for `order_intent_limit_tif_surface` by structurally checking `OrderIntent.limit_price`, `OrderIntent.time_in_force`, and `TimeInForce.PostOnly`; added regression so unrelated `PostOnly` code cannot satisfy the seam.
+- Verification: focused authority readiness `36 passed`; adjacent bounded-probe `107 passed`; E4 bounded-probe family `215 passed` twice; py_compile and diff-check PASS; PA/E2/E4 PASS. Boundary unchanged: no Bybit call/order/cancel/modify, no PG write, no `_latest` overwrite, no runtime/env/service/crontab mutation, no Cost Gate lowering, no Rust writer/adapter enablement, no probe/order/live authority, no promotion proof.
+- Next blocker: `P0-BOUNDED-PROBE-AVAX-RUNTIME-ADMISSION-E3-BB-REVIEW-DEMO-ONLY`.
+
 ## 2026-06-24 Runtime Adapter No-Order BTC Checkpoint
 
 - `P0-BOUNDED-PROBE-RUNTIME-ADAPTER-ENABLEMENT-DEMO-ONLY-E3-BB-REVIEW` is `DONE_WITH_CONCERNS`: E3/BB found no safe current production flag for actual demo order submission; Rust writer still hard-codes `adapter_enabled=false`.
