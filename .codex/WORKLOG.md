@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-26 04:56 CEST
+- closed `P1-RUNTIME-HEALTH-HYGIENE-CONTROL-API-AUTH-TOKEN-PATH` as `DONE_WITH_CONCERNS`
+- evidence: E3 approved exactly one runtime-local authenticated read-only GET; `trade-core` used the runtime repo token file through a 0600 temp curl config; `GET /api/v1/backtest/status` returned HTTP 200 with keys `last_result_available/source/stub`; artifacts under `/tmp/openclaw/audit/control_api_auth_token_path/20260626T025405Z_*`
+- what remains: the spent Mac-side cleanup envelope must not be reused; next work is a fresh E3/BB cleanup refresh packet plus fresh cursor-aware demo inventory
+- boundary: no cleanup POST, Bybit call, order/cancel/modify/close, PG write, runtime sync/restart/rebuild, crontab/env mutation, Rust writer/adapter, Cost Gate change, probe/order/live authority, or profitability proof
+
 2026-06-26 02:59 CEST
 - closed `P0-PROFIT-EVIDENCE-QUALITY-DEMO-RESTING-EXPOSURE-RECONCILIATION-E3-BB-REVIEW` as read-only `DONE_WITH_CONCERNS`
 - evidence: Linux source stayed clean at `d2cd70d0`, crontab expected-head occurrences `11/0`; passive [68] 24h still failed with demo `working_n=6` / ~691 USDT; direct 72h PG inventory showed 30 demo `Working` orders, 29 `flash_dip_buy` totaling 7264.93 USDT plus one zero-notional risk-close row; 72h fills attribution order/context gaps were 0/0; audit top-40 had 6 BBO-touched-no-fill rows

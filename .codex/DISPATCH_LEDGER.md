@@ -1,6 +1,6 @@
 # Codex Dispatch Ledger
 
-Last updated: 2026-05-16
+Last updated: 2026-06-26
 
 Purpose:
 - keep a durable record of meaningful PM-first dispatch decisions
@@ -25,6 +25,22 @@ Ownership:
 Result:
 - outcome, blocker, or next action
 ```
+
+2026-06-26 04:56 CEST
+Task:
+- Close `P1-RUNTIME-HEALTH-HYGIENE-CONTROL-API-AUTH-TOKEN-PATH` with a secret-safe runtime-local authenticated read-only control API proof.
+
+Chain:
+- PM -> E3(explorer) -> PM
+
+Ownership:
+- PM: create session state, choose a read-only authenticated route, execute the one approved runtime-local probe, record TODO/report/changelog.
+- E3(explorer): review route safety and token-handling constraints.
+
+Result:
+- E3 approved exactly one `GET /api/v1/backtest/status`; runtime-local token-file probe returned HTTP `200` with sanitized artifacts under `/tmp/openclaw/audit/control_api_auth_token_path/20260626T025405Z_*`.
+- The prior cleanup `401` is narrowed to Mac-vs-runtime token-source alignment.
+- Next action is a fresh `PM -> E3 -> BB -> PM` cleanup envelope plus fresh demo pre-inventory; no cleanup/order authority was granted.
 
 2026-06-18 23:42 CEST
 Task:
