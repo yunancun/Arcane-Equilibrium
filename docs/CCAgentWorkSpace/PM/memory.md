@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-26 Cap-Feasible Selector Runtime Sync
+
+- PM/E3 closed `P1-RUNTIME-HEALTH-HYGIENE-CAP-FEASIBLE-SELECTOR-SYNC-REVIEW` as `DONE_WITH_CONCERNS`.
+- Linux runtime source fast-forwarded cleanly `0246b263 -> b9836224`; crontab expected-head literals replaced exactly `5` times; API MainPID stayed `2218842`.
+- No manual cron/artifact refresh was run. Latest auth artifact still predates sync and remains ETH Buy defer/no-authority, so next review needs a post-sync artifact delta.
+
 ## 2026-06-26 Candidate Selection Delta Cap-Feasible Selector Source Fix
 
 - PM closed `P0-PROFIT-CANDIDATE-SELECTION-DELTA-REFRESH-NO-ORDER` as `DONE_WITH_CONCERNS`.

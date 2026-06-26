@@ -900,6 +900,13 @@ YYYY-MM-DD HH:MM TZ
 - Result: Linux checkout fast-forwarded cleanly `e0c2a0e1 -> d2cd70d0`; crontab expected-head pins replaced exactly old SHA `11 -> 0` / new SHA `0 -> 11`; engine PID and API MainPID unchanged.
 - Boundary: no restart/rebuild/Linux cargo, no PG write, no Bybit call/order/cancel/modify, no `_latest` overwrite, no adapter/writer enablement, no Cost Gate change, no probe/order/live authority, no promotion proof. Next blocker is demo resting exposure reconciliation.
 
+# 2026-06-26 — Cap-Feasible Selector Runtime Sync
+
+- Task: land the v550 cap-feasible selector source fix on Linux runtime without expanding runtime or order authority.
+- Dispatch chain: `PM(default)` session-loop state + local `E3` bounded runtime review + `PM(default)` apply; BB skipped because no exchange-facing call occurred.
+- Result: Linux checkout fast-forwarded cleanly `0246b263 -> b9836224`; crontab expected-head literals replaced exactly `5` times; `bash -n` passed on runtime; API MainPID remained `2218842`.
+- Boundary: no service restart/rebuild/Linux cargo, no PG write, no Bybit/API/order/cancel/modify, no manual cron run, no `_latest` overwrite, no adapter/writer enablement, no Cost Gate/cap/risk mutation, no probe/order/live authority, no promotion proof. Next blocker needs a post-sync artifact delta before P0 authorization review.
+
 # 2026-06-24 — API Service Runtime Cutover Exact Unit Diff Packet
 
 - Task: advance `P1-API-SERVICE-OWNERSHIP-RUNTIME-CUTOVER-APPLY-REVIEW` without applying the systemd cutover.
