@@ -24,6 +24,11 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping
 
 
+_SRV_ROOT = Path(__file__).resolve().parents[3]
+if str(_SRV_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SRV_ROOT))
+
+
 SCHEMA_VERSION = "current_candidate_decision_lease_no_order_validation_v1"
 GATE_PACKET_SCHEMA_VERSION = "current_candidate_decision_lease_guardian_gate_evidence_v1"
 SIZING_PROPOSAL_SCHEMA_VERSION = "current_candidate_guardian_adjusted_sizing_proposal_v1"
