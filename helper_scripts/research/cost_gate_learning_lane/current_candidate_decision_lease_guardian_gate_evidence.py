@@ -496,6 +496,22 @@ def _extract_admission_context(admission: dict[str, Any]) -> dict[str, Any]:
             risk_limits.get("position_size_max_pct")
             or risk.get("position_size_max_pct")
         ),
+        "account_equity_usdt": _float(
+            risk_limits.get("account_equity_usdt")
+            or risk.get("account_equity_usdt")
+        ),
+        "per_trade_budget_usdt": _float(
+            risk_limits.get("per_trade_budget_usdt")
+            or risk.get("per_trade_budget_usdt")
+        ),
+        "single_position_budget_usdt": _float(
+            risk_limits.get("single_position_budget_usdt")
+            or risk.get("single_position_budget_usdt")
+        ),
+        "max_order_notional_usdt": _float(
+            risk_limits.get("max_order_notional_usdt")
+            or risk.get("max_order_notional_usdt")
+        ),
     }
 
 

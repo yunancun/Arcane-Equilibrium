@@ -94,6 +94,16 @@ def _float(value: Any) -> float | None:
         return None
 
 
+def _same_float(left: Any, right: Any, tolerance: float = 1e-6) -> bool:
+    left_num = _float(left)
+    right_num = _float(right)
+    return (
+        left_num is not None
+        and right_num is not None
+        and abs(left_num - right_num) <= tolerance
+    )
+
+
 def _parse_dt(value: Any) -> dt.datetime | None:
     text = _str(value)
     if not text:
@@ -270,10 +280,19 @@ def _cap_resolution_reasons(
 ) -> list[str]:
     reasons: list[str] = []
     cap = _float(cap_resolution.get("resolved_cap_usdt"))
+    account_equity = _float(cap_resolution.get("account_equity_usdt"))
     per_trade_fraction = _float(cap_resolution.get("per_trade_risk_pct_fraction"))
     per_trade_display = _float(cap_resolution.get("per_trade_risk_pct_display"))
+    per_trade_budget = _float(cap_resolution.get("per_trade_budget_usdt"))
+    position_size_max_pct = _float(cap_resolution.get("position_size_max_pct"))
+    single_position_budget = _float(
+        cap_resolution.get("single_position_budget_usdt")
+    )
+    max_order_notional = _float(cap_resolution.get("max_order_notional_usdt"))
     if cap is None or cap <= 0:
         reasons.append("resolved_gui_cap_usdt_missing_or_non_positive")
+    if account_equity is None or account_equity <= 0:
+        reasons.append("account_equity_usdt_missing_or_non_positive")
     if cap_resolution.get("risk_source_of_truth") != "GUI-backed Rust RiskConfig":
         reasons.append("risk_source_of_truth_not_gui_backed_rust_risk_config")
     if cap_resolution.get("bounded_probe_local_cap_usdt_is_authority") is not False:
@@ -284,12 +303,56 @@ def _cap_resolution_reasons(
         reasons.append("per_trade_risk_pct_fraction_missing_or_non_positive")
     elif per_trade_fraction > 1:
         reasons.append("per_trade_risk_pct_fraction_not_fraction")
+    if per_trade_budget is None or per_trade_budget <= 0:
+        reasons.append("per_trade_budget_usdt_missing_or_non_positive")
     if (
         per_trade_fraction is not None
         and per_trade_display is not None
         and abs((per_trade_fraction * 100.0) - per_trade_display) > 1e-6
     ):
         reasons.append("per_trade_risk_pct_display_fraction_mismatch")
+    if position_size_max_pct is None or position_size_max_pct <= 0:
+        reasons.append("position_size_max_pct_missing_or_non_positive")
+    if single_position_budget is None or single_position_budget <= 0:
+        reasons.append("single_position_budget_usdt_missing_or_non_positive")
+    if (
+        account_equity is not None
+        and account_equity > 0
+        and per_trade_fraction is not None
+        and 0 < per_trade_fraction <= 1
+        and per_trade_budget is not None
+        and not _same_float(
+            account_equity * per_trade_fraction,
+            per_trade_budget,
+        )
+    ):
+        reasons.append("per_trade_budget_not_equity_times_per_trade_risk_pct")
+    if (
+        account_equity is not None
+        and account_equity > 0
+        and position_size_max_pct is not None
+        and position_size_max_pct > 0
+        and single_position_budget is not None
+        and not _same_float(
+            account_equity * position_size_max_pct / 100.0,
+            single_position_budget,
+        )
+    ):
+        reasons.append("single_position_budget_not_equity_times_position_size_max_pct")
+    cap_candidates = [
+        value
+        for value in (per_trade_budget, single_position_budget, max_order_notional)
+        if value is not None and value > 0
+    ]
+    if cap is not None and cap > 0 and cap_candidates:
+        expected_cap = min(cap_candidates)
+        if not _same_float(cap, expected_cap):
+            reasons.append("resolved_cap_not_min_of_gui_risk_budgets")
+    if summary.get("resolved_cap_usdt") is not None and not _same_float(
+        cap,
+        summary.get("resolved_cap_usdt"),
+    ):
+        reasons.append("summary_resolved_cap_mismatch_cap_resolution")
     return sorted(set(reasons))
 
 
@@ -350,6 +413,7 @@ def _market_snapshot_from_parsed(
     instrument: dict[str, Any] | None,
     freshness: dict[str, Any],
     cap_usdt: float,
+    cap_resolution: dict[str, Any],
     max_fresh_bbo_age_ms: int,
     source_public_quote_sha256: str,
     generated_at_utc: dt.datetime,
@@ -398,6 +462,20 @@ def _market_snapshot_from_parsed(
         "risk_limits": {
             "cap_usdt": cap_usdt,
             "cap_source": "current_candidate_envelope.cap_resolution.resolved_cap_usdt",
+            "effective_single_order_cap_usdt": cap_usdt,
+            "account_equity_usdt": cap_resolution.get("account_equity_usdt"),
+            "per_trade_budget_usdt": cap_resolution.get("per_trade_budget_usdt"),
+            "single_position_budget_usdt": cap_resolution.get(
+                "single_position_budget_usdt"
+            ),
+            "max_order_notional_usdt": cap_resolution.get("max_order_notional_usdt"),
+            "per_trade_risk_pct_fraction": cap_resolution.get(
+                "per_trade_risk_pct_fraction"
+            ),
+            "per_trade_risk_pct_display": cap_resolution.get(
+                "per_trade_risk_pct_display"
+            ),
+            "position_size_max_pct": cap_resolution.get("position_size_max_pct"),
             "max_fresh_bbo_age_ms": max_fresh_bbo_age_ms,
             "gui_risk_config_is_source_of_truth": True,
             "bounded_probe_local_10_usdt_cap_is_authority": False,
@@ -629,6 +707,13 @@ def build_current_candidate_public_quote_construction_refresh(
             "cap_usdt": cap_usdt,
             "cap_source": "current_candidate_envelope.cap_resolution.resolved_cap_usdt",
             "risk_source_of_truth": cap_resolution.get("risk_source_of_truth"),
+            "effective_single_order_cap_usdt": cap_usdt,
+            "account_equity_usdt": cap_resolution.get("account_equity_usdt"),
+            "per_trade_budget_usdt": cap_resolution.get("per_trade_budget_usdt"),
+            "single_position_budget_usdt": cap_resolution.get(
+                "single_position_budget_usdt"
+            ),
+            "max_order_notional_usdt": cap_resolution.get("max_order_notional_usdt"),
             "per_trade_risk_pct_fraction": cap_resolution.get(
                 "per_trade_risk_pct_fraction"
             ),
@@ -682,6 +767,7 @@ def build_current_candidate_public_quote_construction_refresh(
             instrument=instrument,
             freshness=freshness,
             cap_usdt=cap_usdt,
+            cap_resolution=cap_resolution,
             max_fresh_bbo_age_ms=max_fresh_bbo_age_ms,
             source_public_quote_sha256=public_quote["artifact_self_hash_sha256"],
             generated_at_utc=generated_at,
@@ -707,6 +793,15 @@ def build_current_candidate_public_quote_construction_refresh(
             "risk_limits": {
                 "cap_usdt": cap_usdt,
                 "cap_source": "current_candidate_envelope.cap_resolution.resolved_cap_usdt",
+                "effective_single_order_cap_usdt": cap_usdt,
+                "account_equity_usdt": cap_resolution.get("account_equity_usdt"),
+                "per_trade_budget_usdt": cap_resolution.get("per_trade_budget_usdt"),
+                "single_position_budget_usdt": cap_resolution.get(
+                    "single_position_budget_usdt"
+                ),
+                "max_order_notional_usdt": cap_resolution.get(
+                    "max_order_notional_usdt"
+                ),
                 "gui_risk_config_is_source_of_truth": True,
                 "bounded_probe_local_10_usdt_cap_is_authority": False,
             },
@@ -738,6 +833,13 @@ def build_current_candidate_public_quote_construction_refresh(
             "cap_usdt": cap_usdt,
             "cap_source": "current_candidate_envelope.cap_resolution.resolved_cap_usdt",
             "risk_source_of_truth": cap_resolution.get("risk_source_of_truth"),
+            "effective_single_order_cap_usdt": cap_usdt,
+            "account_equity_usdt": cap_resolution.get("account_equity_usdt"),
+            "per_trade_budget_usdt": cap_resolution.get("per_trade_budget_usdt"),
+            "single_position_budget_usdt": cap_resolution.get(
+                "single_position_budget_usdt"
+            ),
+            "max_order_notional_usdt": cap_resolution.get("max_order_notional_usdt"),
             "per_trade_risk_pct_display": cap_resolution.get(
                 "per_trade_risk_pct_display"
             ),
@@ -789,6 +891,14 @@ def build_current_candidate_public_quote_construction_refresh(
             "max_fresh_bbo_age_ms": max_fresh_bbo_age_ms,
             "resolved_cap_usdt": cap_usdt,
             "cap_source": "current_candidate_envelope.cap_resolution.resolved_cap_usdt",
+            "effective_single_order_cap_usdt": cap_usdt,
+            "account_equity_usdt": cap_resolution.get("account_equity_usdt"),
+            "per_trade_budget_usdt": cap_resolution.get("per_trade_budget_usdt"),
+            "single_position_budget_usdt": cap_resolution.get(
+                "single_position_budget_usdt"
+            ),
+            "max_order_notional_usdt": cap_resolution.get("max_order_notional_usdt"),
+            "position_size_max_pct": cap_resolution.get("position_size_max_pct"),
             "gui_risk_config_is_source_of_truth": True,
             "local_10_usdt_cap_is_global_risk_authority": False,
             "construction_constructible": construction.get("constructible") is True,

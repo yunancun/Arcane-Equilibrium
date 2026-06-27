@@ -129,6 +129,14 @@ def _same_float(left: Any, right: Any, tolerance: float = 1e-8) -> bool:
     )
 
 
+def _stale_local_10_cap_mismatch(candidate_cap: Any, envelope_cap: Any) -> bool:
+    return (
+        _same_float(candidate_cap, 10.0, tolerance=1e-9)
+        and _float(envelope_cap) is not None
+        and not _same_float(candidate_cap, envelope_cap, tolerance=1e-6)
+    )
+
+
 def _candidate_identity(candidate: dict[str, Any]) -> dict[str, Any]:
     return {
         "side_cell_key": candidate.get("side_cell_key"),
@@ -286,8 +294,48 @@ def _source_preflight(
     admission_cap = _float(admission_context.get("resolved_cap_usdt"))
     if not _same_float(envelope_cap, gate_cap, tolerance=1e-6):
         reasons.append("current_candidate_envelope_cap_mismatch_gate_packet")
+    if _stale_local_10_cap_mismatch(gate_cap, envelope_cap):
+        reasons.append("gate_packet_stale_local_10_usdt_cap_mismatch_gui_envelope")
     if not _same_float(envelope_cap, admission_cap, tolerance=1e-6):
         reasons.append("admission_review_cap_mismatch_current_candidate_envelope")
+    if _stale_local_10_cap_mismatch(admission_cap, envelope_cap):
+        reasons.append("admission_review_stale_local_10_usdt_cap_mismatch_gui_envelope")
+    if not _same_float(
+        cap_resolution.get("account_equity_usdt"),
+        risk_context.get("account_equity_usdt"),
+        tolerance=1e-6,
+    ):
+        reasons.append("account_equity_usdt_mismatch_gate_packet")
+    if not _same_float(
+        cap_resolution.get("account_equity_usdt"),
+        admission_context.get("account_equity_usdt"),
+        tolerance=1e-6,
+    ):
+        reasons.append("admission_review_account_equity_usdt_mismatch")
+    if not _same_float(
+        cap_resolution.get("per_trade_budget_usdt"),
+        risk_context.get("per_trade_budget_usdt"),
+        tolerance=1e-6,
+    ):
+        reasons.append("per_trade_budget_usdt_mismatch_gate_packet")
+    if not _same_float(
+        cap_resolution.get("per_trade_budget_usdt"),
+        admission_context.get("per_trade_budget_usdt"),
+        tolerance=1e-6,
+    ):
+        reasons.append("admission_review_per_trade_budget_usdt_mismatch")
+    if not _same_float(
+        cap_resolution.get("single_position_budget_usdt"),
+        risk_context.get("single_position_budget_usdt"),
+        tolerance=1e-6,
+    ):
+        reasons.append("single_position_budget_usdt_mismatch_gate_packet")
+    if not _same_float(
+        cap_resolution.get("single_position_budget_usdt"),
+        admission_context.get("single_position_budget_usdt"),
+        tolerance=1e-6,
+    ):
+        reasons.append("admission_review_single_position_budget_usdt_mismatch")
     if not _same_float(
         cap_resolution.get("per_trade_risk_pct_fraction"),
         risk_context.get("per_trade_risk_pct_fraction"),
@@ -619,6 +667,16 @@ def build_current_candidate_actual_admission_bbo_lease_window(
             "max_fresh_bbo_age_ms": quote_summary.get("max_fresh_bbo_age_ms"),
             "resolved_cap_usdt": quote_summary.get("resolved_cap_usdt"),
             "cap_source": quote_summary.get("cap_source"),
+            "effective_single_order_cap_usdt": quote_summary.get(
+                "effective_single_order_cap_usdt"
+            ),
+            "account_equity_usdt": quote_summary.get("account_equity_usdt"),
+            "per_trade_budget_usdt": quote_summary.get("per_trade_budget_usdt"),
+            "single_position_budget_usdt": quote_summary.get(
+                "single_position_budget_usdt"
+            ),
+            "max_order_notional_usdt": quote_summary.get("max_order_notional_usdt"),
+            "position_size_max_pct": quote_summary.get("position_size_max_pct"),
             "gui_risk_config_is_source_of_truth": quote_summary.get(
                 "gui_risk_config_is_source_of_truth"
             ),

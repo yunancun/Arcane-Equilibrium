@@ -237,6 +237,9 @@ def test_gui_percent_can_resolve_above_legacy_ten_usdt_local_probe_cap() -> None
     assert packet["refresh_envelope"]["resolved_gui_risk_cap"][
         "bounded_probe_local_cap_usdt_is_authority"
     ] is False
+    assert packet["refresh_envelope"]["resolved_gui_risk_cap"][
+        "single_position_budget_usdt"
+    ] == 50.0
 
 
 def test_candidate_mismatch_fails_closed_before_refresh_review() -> None:
