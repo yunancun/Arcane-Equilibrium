@@ -23,6 +23,7 @@ import asyncio
 import logging
 import os
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +168,113 @@ async def _ipc_command(method: str, params: dict | None = None) -> dict:
         await client.disconnect()
 
 
+def _positive_float(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _extract_equity_usdt(paper_state: dict[str, Any]) -> float | None:
+    state = paper_state.get("paper_state") if isinstance(paper_state.get("paper_state"), dict) else paper_state
+    for key in (
+        "bybit_sync_balance",
+        "total_equity",
+        "totalEquity",
+        "equity",
+        "balance",
+        "current_balance",
+        "currentBalance",
+    ):
+        equity = _positive_float(state.get(key))
+        if equity is not None:
+            return equity
+    return None
+
+
+def _risk_limits_from_config(risk_config: dict[str, Any]) -> dict[str, Any]:
+    config = risk_config.get("config")
+    if isinstance(config, dict) and isinstance(config.get("limits"), dict):
+        return config["limits"]
+    limits = risk_config.get("limits")
+    return limits if isinstance(limits, dict) else {}
+
+
+def _resolve_gui_rust_single_order_cap_usd(
+    *,
+    risk_config: dict[str, Any],
+    paper_state: dict[str, Any],
+) -> tuple[float | None, dict[str, Any]]:
+    """Resolve paper auth display cap from GUI/Rust RiskConfig plus equity."""
+    limits = _risk_limits_from_config(risk_config)
+    equity = _extract_equity_usdt(paper_state)
+    per_trade_fraction = _positive_float(limits.get("per_trade_risk_pct"))
+    position_size_max_pct = _positive_float(limits.get("position_size_max_pct"))
+    max_order_notional = _positive_float(limits.get("max_order_notional_usdt"))
+    reasons: list[str] = []
+
+    if equity is None:
+        reasons.append("equity_missing_or_non_positive")
+    if per_trade_fraction is None:
+        reasons.append("per_trade_risk_pct_missing_or_non_positive")
+    elif per_trade_fraction > 1:
+        reasons.append("per_trade_risk_pct_not_rust_fraction")
+    if position_size_max_pct is None:
+        reasons.append("position_size_max_pct_missing_or_non_positive")
+    elif position_size_max_pct > 100:
+        reasons.append("position_size_max_pct_above_100")
+
+    per_trade_budget = (
+        equity * per_trade_fraction
+        if equity is not None and per_trade_fraction is not None and per_trade_fraction <= 1
+        else None
+    )
+    single_position_budget = (
+        equity * position_size_max_pct / 100.0
+        if equity is not None and position_size_max_pct is not None and position_size_max_pct <= 100
+        else None
+    )
+    candidates = [
+        value
+        for value in (per_trade_budget, single_position_budget, max_order_notional)
+        if value is not None and value > 0
+    ]
+    cap = min(candidates) if not reasons and candidates else None
+    return cap, {
+        "risk_source_of_truth": "gui_rust_risk_config_plus_equity",
+        "equity_usdt": equity,
+        "per_trade_risk_pct_fraction": per_trade_fraction,
+        "position_size_max_pct": position_size_max_pct,
+        "per_trade_budget_usdt": per_trade_budget,
+        "single_position_budget_usdt": single_position_budget,
+        "max_order_notional_usdt": max_order_notional or 0.0,
+        "effective_single_order_cap_usdt": cap,
+        "local_10_usdt_cap_is_authority": False,
+        "failure_reasons": reasons,
+    }
+
+
+async def _resolve_paper_authorization_max_position_usd() -> tuple[float | None, dict[str, Any]]:
+    lineage: dict[str, Any] = {"risk_source_of_truth": "gui_rust_risk_config_plus_equity"}
+    try:
+        risk_config = await _ipc_command("get_risk_config", {"engine": "paper"})
+    except Exception as exc:
+        lineage["failure_reasons"] = ["risk_config_ipc_failed"]
+        lineage["risk_config_error_type"] = type(exc).__name__
+        return None, lineage
+    try:
+        paper_state = await _ipc_command("get_paper_state", {"engine": "paper"})
+    except Exception as exc:
+        lineage["failure_reasons"] = ["paper_state_ipc_failed"]
+        lineage["paper_state_error_type"] = type(exc).__name__
+        return None, lineage
+    return _resolve_gui_rust_single_order_cap_usd(
+        risk_config=risk_config,
+        paper_state=paper_state,
+    )
+
+
 def _get_demo_summary() -> dict:
     """Get Demo account summary (balance + position count) via httpx BybitClient.
     通過 httpx BybitClient 獲取 Demo 帳戶摘要。
@@ -244,20 +352,22 @@ async def post_session_reauth(
                 "granted": False, "is_authorized": True,
                 "message": "Authorization already active / 授權已有效",
             })
-        # Read max_order_notional_usdt from Rust RiskConfig to avoid hardcoding.
-        # 從 Rust RiskConfig 讀取 max_order_notional_usdt，避免硬編碼。
-        max_pos_usd = 10_000.0
-        try:
-            rc = await _ipc_command("get_risk_config")
-            val = (rc.get("config") or {}).get("limits", {}).get("max_order_notional_usdt", 0.0)
-            if isinstance(val, (int, float)) and val > 0:
-                max_pos_usd = float(val)
-        except Exception:
-            pass  # fall back to default / 回退到預設值
+        # Resolve from GUI/Rust RiskConfig plus paper equity; no fixed USD fallback.
+        # 從 GUI/Rust RiskConfig + paper equity 派生；不可回退為固定 USD。
+        max_pos_usd, risk_cap_lineage = await _resolve_paper_authorization_max_position_usd()
+        if max_pos_usd is None:
+            return _paper_response({
+                "granted": False,
+                "is_authorized": GOV_HUB.is_authorized(),
+                "message": "Paper authorization blocked: GUI/Rust risk cap unavailable / 紙盤授權已阻擋：缺少 GUI/Rust 風控上限",
+                "risk_cap_lineage": risk_cap_lineage,
+            })
         granted = GOV_HUB.grant_paper_authorization(max_position_usd=max_pos_usd)
         return _paper_response({
             "granted": granted,
             "is_authorized": GOV_HUB.is_authorized(),
+            "max_position_usd": max_pos_usd,
+            "risk_cap_lineage": risk_cap_lineage,
             "message": "Paper authorization granted / 紙盤授權已授予" if granted
                        else "grant_paper_authorization() returned False",
         })
