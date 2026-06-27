@@ -644,6 +644,7 @@ def _build_guardian_risk_gate(
     now_utc: dt.datetime,
 ) -> dict[str, Any]:
     blockers = list(status_risk_reasons)
+    constraints = _dict(risk_state.get("constraints"))
     if status.get("enabled") is not True:
         blockers.append("governance_status_not_enabled")
 
@@ -656,18 +657,36 @@ def _build_guardian_risk_gate(
     if status_level and status_level != risk_level:
         blockers.append("governance_status_risk_level_mismatch")
 
-    if risk_state.get("new_entries_allowed") is not True:
+    new_entries_allowed = risk_state.get(
+        "new_entries_allowed", constraints.get("new_entries_allowed")
+    )
+    reduce_only = risk_state.get("reduce_only", constraints.get("reduce_only"))
+    active_de_risking = risk_state.get(
+        "active_de_risking", constraints.get("active_de_risking")
+    )
+    requires_operator = risk_state.get(
+        "requires_operator", constraints.get("requires_operator")
+    )
+    emergency_stops = risk_state.get(
+        "emergency_stops", constraints.get("emergency_stops")
+    )
+    multiplier = _float(
+        risk_state.get("position_size_multiplier")
+        if risk_state.get("position_size_multiplier") is not None
+        else constraints.get("position_size_multiplier")
+    )
+
+    if new_entries_allowed is not True:
         blockers.append("new_entries_not_allowed")
-    if _truthy(risk_state.get("reduce_only")):
+    if _truthy(reduce_only):
         blockers.append("risk_state_reduce_only")
-    if _truthy(risk_state.get("active_de_risking")):
+    if _truthy(active_de_risking):
         blockers.append("risk_state_active_de_risking")
-    if _truthy(risk_state.get("requires_operator")):
+    if _truthy(requires_operator):
         blockers.append("risk_state_requires_operator")
-    if _truthy(risk_state.get("emergency_stops")):
+    if _truthy(emergency_stops):
         blockers.append("risk_state_emergency_stop")
 
-    multiplier = _float(risk_state.get("position_size_multiplier"))
     if multiplier is None:
         multiplier = 1.0 if risk_level == "NORMAL" else None
     if multiplier is None or multiplier <= 0:
@@ -710,11 +729,11 @@ def _build_guardian_risk_gate(
         "candidate": candidate,
         "risk_level": risk_level or None,
         "status_risk_level": status_level or None,
-        "new_entries_allowed": risk_state.get("new_entries_allowed"),
-        "reduce_only": risk_state.get("reduce_only"),
-        "active_de_risking": risk_state.get("active_de_risking"),
-        "requires_operator": risk_state.get("requires_operator"),
-        "emergency_stops": risk_state.get("emergency_stops"),
+        "new_entries_allowed": new_entries_allowed,
+        "reduce_only": reduce_only,
+        "active_de_risking": active_de_risking,
+        "requires_operator": requires_operator,
+        "emergency_stops": emergency_stops,
         "position_size_multiplier": multiplier,
         "effective_position_size_multiplier": effective_multiplier,
         "cap_usdt": adjusted_cap,
