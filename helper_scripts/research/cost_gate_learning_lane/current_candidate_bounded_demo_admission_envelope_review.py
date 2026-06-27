@@ -65,6 +65,17 @@ DEFAULT_MAX_FRESH_BBO_AGE_MS = 1000
 GUI_CAP_SOURCE = "current_candidate_envelope.cap_resolution.resolved_cap_usdt"
 GUI_RISK_SOURCE = "GUI-backed Rust RiskConfig"
 
+ACTUAL_ADMISSION_BBO_WINDOW_SCHEMA_VERSION = (
+    "current_candidate_actual_admission_bbo_lease_window_v1"
+)
+ACTUAL_ADMISSION_BBO_WINDOW_DONE_STATUS = (
+    "CURRENT_CANDIDATE_ACTUAL_ADMISSION_BBO_LEASE_WINDOW_DONE_NO_ORDER"
+)
+ACTUAL_ADMISSION_PUBLIC_QUOTE_READY_STATUS = (
+    "CURRENT_CANDIDATE_PUBLIC_QUOTE_CONSTRUCTION_REFRESH_READY_NO_ORDER"
+)
+GATE_PACKET_READY_STATUS = "CURRENT_CANDIDATE_DECISION_LEASE_GUARDIAN_GATE_READY_NO_ORDER"
+
 AUTHORITY_TRUE_KEYS = {
     "active_runtime_order_authority",
     "active_runtime_probe_authority",
@@ -650,6 +661,275 @@ def _rust_authority_summary(
     }
 
 
+def _actual_admission_bbo_window_summary(
+    payload: dict[str, Any] | None,
+    *,
+    artifact: dict[str, Any],
+    candidate: dict[str, Any],
+    resolved_cap_usdt: float | None,
+    max_fresh_bbo_age_ms: int,
+) -> dict[str, Any]:
+    data = _dict(payload)
+    answers = _dict(data.get("answers"))
+    active = _dict(data.get("active_window"))
+    actual_bbo = _dict(data.get("actual_admission_bbo"))
+    gate = _dict(data.get("active_window_gate_evidence"))
+    lease_gate = _dict(gate.get("decision_lease_gate_artifact"))
+    guardian_gate = _dict(gate.get("guardian_risk_gate_artifact"))
+    guardian_limits = _dict(guardian_gate.get("risk_limits"))
+
+    actual_candidate = _candidate_identity(_dict(data.get("candidate")))
+    gate_candidate = _candidate_identity(_dict(gate.get("candidate")))
+    lease_candidate = _candidate_identity(_dict(lease_gate.get("candidate")))
+    guardian_candidate = _candidate_identity(_dict(guardian_gate.get("candidate")))
+    candidate_matches = _candidate_aligned(
+        candidate,
+        actual_candidate,
+        gate_candidate,
+        lease_candidate,
+        guardian_candidate,
+    )
+
+    bbo_age = _float(actual_bbo.get("bbo_age_ms"))
+    artifact_max_bbo_age = _float(actual_bbo.get("max_fresh_bbo_age_ms"))
+    max_bbo_age = min(
+        value
+        for value in (artifact_max_bbo_age, float(max_fresh_bbo_age_ms))
+        if value is not None
+    )
+    actual_notional = _float(actual_bbo.get("rounded_notional_usdt"))
+    actual_qty = _float(actual_bbo.get("rounded_qty"))
+    gate_notional = _float(guardian_limits.get("rounded_notional_usdt"))
+    gate_qty = _float(guardian_limits.get("rounded_qty"))
+    effective_cap = _float(
+        actual_bbo.get("effective_single_order_cap_usdt")
+        or guardian_limits.get("effective_single_order_cap_usdt")
+        or guardian_limits.get("guardian_adjusted_cap_usdt")
+    )
+    actual_resolved_cap = _float(actual_bbo.get("resolved_cap_usdt"))
+    risk_context = _dict(data.get("risk_context"))
+    risk_context_notional = _float(risk_context.get("proposed_rounded_notional_usdt"))
+    actual_bbo_fresh = bbo_age is not None and 0 <= bbo_age <= max_bbo_age
+    actual_under_cap = (
+        actual_notional is not None
+        and actual_notional > 0
+        and effective_cap is not None
+        and actual_notional <= effective_cap + 1e-8
+        and resolved_cap_usdt is not None
+        and actual_notional <= resolved_cap_usdt + 1e-8
+    )
+    shape_matches_gate = (
+        _same_number(actual_notional, gate_notional)
+        and (gate_qty is None or _same_number(actual_qty, gate_qty))
+    )
+    shape_matches_source_risk_context = (
+        risk_context_notional is None
+        or _same_number(actual_notional, risk_context_notional)
+    )
+
+    source_reasons: list[str] = []
+    loss_reasons: list[str] = []
+    authority_reasons: list[str] = []
+
+    if not data:
+        source_reasons.append("actual_admission_bbo_window_missing")
+    elif artifact.get("status") != "FRESH":
+        source_reasons.append("actual_admission_bbo_window_artifact_not_fresh")
+    if data.get("schema_version") != ACTUAL_ADMISSION_BBO_WINDOW_SCHEMA_VERSION:
+        source_reasons.append("actual_admission_bbo_window_schema_version_invalid")
+    if data.get("status") != ACTUAL_ADMISSION_BBO_WINDOW_DONE_STATUS:
+        source_reasons.append("actual_admission_bbo_window_status_not_done")
+    if _list(data.get("source_blockers")):
+        source_reasons.append("actual_admission_bbo_window_source_blockers_present")
+    if _list(data.get("runtime_blockers")):
+        source_reasons.append("actual_admission_bbo_window_runtime_blockers_present")
+    if _list(data.get("loss_control_blockers")):
+        loss_reasons.append("actual_admission_bbo_window_loss_blockers_present")
+    if _list(data.get("authority_contamination_reasons")):
+        authority_reasons.append(
+            "actual_admission_bbo_window_authority_contamination_present"
+        )
+    if not candidate_matches:
+        source_reasons.append("actual_admission_bbo_window_candidate_mismatch")
+    if active.get("acquire_ok") is not True:
+        loss_reasons.append("actual_admission_decision_lease_not_acquired")
+    if active.get("release_ok") is not True:
+        loss_reasons.append("actual_admission_decision_lease_not_released")
+    if active.get("lease_released_before_artifact") is not True:
+        loss_reasons.append("actual_admission_lease_not_released_before_artifact")
+    if active.get("quote_started_after_lease_acquire") is not True:
+        loss_reasons.append("actual_admission_quote_not_after_lease_acquire")
+    if (
+        active.get("actual_admission_bbo_status_during_active_window")
+        != ACTUAL_ADMISSION_PUBLIC_QUOTE_READY_STATUS
+    ):
+        loss_reasons.append("actual_admission_bbo_status_not_ready_during_window")
+    if active.get("gate_evidence_status_during_active_window") != GATE_PACKET_READY_STATUS:
+        loss_reasons.append("actual_admission_gate_status_not_ready_during_window")
+    if actual_bbo.get("status") != ACTUAL_ADMISSION_PUBLIC_QUOTE_READY_STATUS:
+        loss_reasons.append("actual_admission_bbo_status_not_ready")
+    if actual_bbo.get("cap_source") != GUI_CAP_SOURCE:
+        loss_reasons.append("actual_admission_cap_source_not_gui_resolved_cap")
+    if actual_bbo.get("gui_risk_config_is_source_of_truth") is not True:
+        loss_reasons.append("actual_admission_gui_risk_not_source_of_truth")
+    if actual_bbo.get("local_10_usdt_cap_is_global_risk_authority") is not False:
+        loss_reasons.append("actual_admission_local_10_usdt_marked_authority")
+    if not _same_number(actual_resolved_cap, resolved_cap_usdt):
+        loss_reasons.append("actual_admission_resolved_cap_mismatch_review")
+    if actual_bbo.get("construction_constructible") is not True:
+        loss_reasons.append("actual_admission_construction_not_constructible")
+    if not actual_bbo_fresh:
+        loss_reasons.append("actual_admission_bbo_not_fresh")
+    if not actual_under_cap:
+        loss_reasons.append("actual_admission_order_shape_not_under_gui_cap")
+    if not shape_matches_gate:
+        loss_reasons.append("actual_admission_order_shape_mismatch_active_gate")
+    if not shape_matches_source_risk_context:
+        loss_reasons.append("actual_admission_order_shape_mismatch_source_risk_context")
+
+    active_decision_lease_valid = (
+        gate.get("status") == GATE_PACKET_READY_STATUS
+        and lease_gate.get("schema_version") == DECISION_LEASE_GATE_SCHEMA_VERSION
+        and lease_gate.get("status") == DECISION_LEASE_ACTIVE_STATUS
+        and lease_gate.get("source") == RUNTIME_GOVERNANCE_IPC_SNAPSHOT_SOURCE
+        and lease_gate.get("valid_for_current_candidate") is True
+        and lease_gate.get("demo_only") is True
+        and _str(lease_gate.get("environment")).lower() == "demo"
+    )
+    active_guardian_valid = (
+        gate.get("status") == GATE_PACKET_READY_STATUS
+        and guardian_gate.get("schema_version") == GUARDIAN_RISK_GATE_SCHEMA_VERSION
+        and guardian_gate.get("status") == GUARDIAN_RISK_GATE_PASS_STATUS
+        and guardian_gate.get("source") == RUNTIME_GOVERNANCE_IPC_SNAPSHOT_SOURCE
+        and guardian_gate.get("valid_for_current_candidate") is True
+        and _str(guardian_gate.get("environment")).lower() == "demo"
+        and _str(guardian_gate.get("risk_level")).upper() == "NORMAL"
+        and guardian_gate.get("new_entries_allowed") is True
+        and guardian_gate.get("reduce_only") is not True
+        and guardian_gate.get("active_de_risking") is not True
+        and guardian_gate.get("requires_operator") is not True
+        and guardian_gate.get("emergency_stops") is not True
+        and shape_matches_gate
+        and actual_under_cap
+    )
+
+    allowed_true_keys = {
+        "actual_admission_bbo_refreshed_during_active_lease",
+        "bybit_call_performed",
+        "bybit_public_market_data_call_performed",
+        "decision_lease_acquire_performed",
+        "decision_lease_release_performed",
+        "fresh_actual_admission_bbo_and_gate_ready_during_window",
+        "gate_evidence_ready_during_active_window",
+        "governance_lease_mutation_performed",
+        "lease_released_before_artifact",
+        "public_quote_capture_performed",
+        "review_contract_ready",
+    }
+    forbidden_true_keys = {
+        "active_runtime_order_authority",
+        "active_runtime_probe_authority",
+        "bybit_private_call_performed",
+        "cost_gate_lowering_performed",
+        "global_cost_gate_lowering_recommended",
+        "live_authority_granted",
+        "mainnet_authority_granted",
+        "order_admission_ready",
+        "order_authority_granted",
+        "order_cancel_performed",
+        "order_modify_performed",
+        "order_submission_performed",
+        "pg_query_performed",
+        "pg_write_performed",
+        "probe_authority_granted",
+        "promotion_evidence",
+        "promotion_proof",
+        "runtime_admission_ready",
+        "runtime_admission_ready_after_release",
+        "runtime_mutation_performed",
+        "service_restart_performed",
+    }
+    for key in sorted(forbidden_true_keys):
+        if _truthy(answers.get(key)):
+            authority_reasons.append(f"answers_{key}_true")
+    if answers.get("main_cost_gate_adjustment") not in (None, "", "NONE"):
+        authority_reasons.append("answers_main_cost_gate_adjustment_not_none")
+    for key in sorted(allowed_true_keys):
+        # Keep the allowlist explicit in the summary; missing true values are
+        # handled by the semantic gates above.
+        _ = answers.get(key)
+
+    fresh_bbo_valid = (
+        artifact.get("present") is True
+        and not source_reasons
+        and not authority_reasons
+        and "actual_admission_bbo_not_fresh" not in loss_reasons
+        and "actual_admission_bbo_status_not_ready" not in loss_reasons
+        and "actual_admission_bbo_status_not_ready_during_window" not in loss_reasons
+        and actual_bbo_fresh
+        and candidate_matches
+    )
+    valid_for_review = (
+        fresh_bbo_valid
+        and active_decision_lease_valid
+        and active_guardian_valid
+        and not source_reasons
+        and not loss_reasons
+        and not authority_reasons
+    )
+
+    return {
+        "present": artifact.get("present") is True,
+        "schema_version": data.get("schema_version"),
+        "status": data.get("status"),
+        "candidate": actual_candidate,
+        "candidate_matches": candidate_matches,
+        "source_head": data.get("source_head"),
+        "runtime_head": data.get("runtime_head"),
+        "active_window": {
+            "lease_id": active.get("lease_id"),
+            "acquire_ok": active.get("acquire_ok"),
+            "release_ok": active.get("release_ok"),
+            "lease_released_before_artifact": active.get(
+                "lease_released_before_artifact"
+            ),
+            "quote_started_after_lease_acquire": active.get(
+                "quote_started_after_lease_acquire"
+            ),
+            "actual_admission_bbo_status_during_active_window": active.get(
+                "actual_admission_bbo_status_during_active_window"
+            ),
+            "gate_evidence_status_during_active_window": active.get(
+                "gate_evidence_status_during_active_window"
+            ),
+        },
+        "actual_admission_bbo": {
+            "status": actual_bbo.get("status"),
+            "bbo_age_ms": bbo_age,
+            "max_fresh_bbo_age_ms": max_bbo_age,
+            "resolved_cap_usdt": actual_resolved_cap,
+            "effective_single_order_cap_usdt": effective_cap,
+            "rounded_qty": actual_qty,
+            "rounded_notional_usdt": actual_notional,
+            "gate_rounded_qty": gate_qty,
+            "gate_rounded_notional_usdt": gate_notional,
+            "risk_context_proposed_notional_usdt": risk_context_notional,
+            "actual_order_shape_matches_active_gate": shape_matches_gate,
+            "actual_order_shape_matches_source_risk_context": (
+                shape_matches_source_risk_context
+            ),
+            "actual_order_shape_lte_gui_cap": actual_under_cap,
+        },
+        "fresh_bbo_valid_for_current_candidate": fresh_bbo_valid,
+        "active_decision_lease_valid_during_window": active_decision_lease_valid,
+        "active_guardian_risk_gate_valid_for_actual_order_shape": active_guardian_valid,
+        "valid_for_current_candidate_review": valid_for_review,
+        "source_reasons": sorted(set(source_reasons)),
+        "loss_control_reasons": sorted(set(loss_reasons)),
+        "authority_contamination_reasons": sorted(set(authority_reasons)),
+    }
+
+
 def _gate(name: str, passed: bool, reason: str, evidence: dict[str, Any]) -> dict[str, Any]:
     return {
         "name": name,
@@ -668,6 +948,7 @@ def build_current_candidate_bounded_demo_admission_envelope_review(
     decision_lease: dict[str, Any] | None = None,
     guardian_risk_gate: dict[str, Any] | None = None,
     rust_authority_path: dict[str, Any] | None = None,
+    actual_admission_bbo_window: dict[str, Any] | None = None,
     paths: dict[str, Path | None] | None = None,
     now_utc: dt.datetime | None = None,
     max_artifact_age_seconds: int = DEFAULT_MAX_ARTIFACT_AGE_SECONDS,
@@ -689,6 +970,7 @@ def build_current_candidate_bounded_demo_admission_envelope_review(
     lease_payload = _dict(decision_lease)
     guardian_payload = _dict(guardian_risk_gate)
     rust_payload = _dict(rust_authority_path)
+    actual_admission_payload = _dict(actual_admission_bbo_window)
 
     artifacts = {
         "handoff": _artifact_summary(
@@ -743,6 +1025,14 @@ def build_current_candidate_bounded_demo_admission_envelope_review(
             name="rust_authority_path",
             path=paths.get("rust_authority_path"),
             payload=rust_payload,
+            now_utc=now,
+            max_age_seconds=max_artifact_age_seconds,
+            required=False,
+        ),
+        "actual_admission_bbo_window": _artifact_summary(
+            name="actual_admission_bbo_window",
+            path=paths.get("actual_admission_bbo_window"),
+            payload=actual_admission_payload,
             now_utc=now,
             max_age_seconds=max_artifact_age_seconds,
             required=False,
@@ -823,6 +1113,19 @@ def build_current_candidate_bounded_demo_admission_envelope_review(
         artifact=artifacts["rust_authority_path"],
         candidate=candidate,
     )
+    actual_admission_summary = _actual_admission_bbo_window_summary(
+        actual_admission_payload,
+        artifact=artifacts["actual_admission_bbo_window"],
+        candidate=candidate,
+        resolved_cap_usdt=resolved_cap,
+        max_fresh_bbo_age_ms=max_fresh_bbo_age_ms,
+    )
+    authority_reasons.extend(
+        f"actual_admission_bbo_window.{reason}"
+        for reason in _list(
+            actual_admission_summary.get("authority_contamination_reasons")
+        )
+    )
 
     review_contract_ready = not source_reasons and not authority_reasons
     standing_valid = (
@@ -830,10 +1133,27 @@ def build_current_candidate_bounded_demo_admission_envelope_review(
         or standing_summary.get("valid_for_candidate_scoped_authorization") is True
     )
     bounded_valid = bounded_summary.get("valid_for_current_candidate") is True
-    lease_valid = lease_summary.get("valid_for_current_candidate") is True
-    guardian_valid = guardian_summary.get("valid_for_current_candidate") is True
+    actual_admission_supplied = actual_admission_summary.get("present") is True
+    lease_valid = (
+        lease_summary.get("valid_for_current_candidate") is True
+        or actual_admission_summary.get("active_decision_lease_valid_during_window")
+        is True
+    )
+    guardian_valid = (
+        guardian_summary.get("valid_for_current_candidate") is True
+        or actual_admission_summary.get(
+            "active_guardian_risk_gate_valid_for_actual_order_shape"
+        )
+        is True
+    )
+    if actual_admission_supplied and actual_admission_summary.get(
+        "active_guardian_risk_gate_valid_for_actual_order_shape"
+    ) is not True:
+        guardian_valid = False
     rust_valid = rust_summary.get("valid_for_current_candidate_review") is True
-    fresh_bbo_at_actual_admission = False
+    fresh_bbo_at_actual_admission = (
+        actual_admission_summary.get("fresh_bbo_valid_for_current_candidate") is True
+    )
 
     admission_gates = [
         _gate(
@@ -900,12 +1220,35 @@ def build_current_candidate_bounded_demo_admission_envelope_review(
             "fresh_bbo_refresh_at_actual_admission",
             fresh_bbo_at_actual_admission,
             "public BBO in the handoff is construction evidence only; actual admission must refresh BBO",
-            {
+            actual_admission_summary
+            if actual_admission_supplied
+            else {
                 "bbo_age_ms_at_capture": bbo_age,
                 "max_fresh_bbo_age_ms": max_fresh_bbo_age_ms,
             },
         ),
     ]
+    if actual_admission_supplied:
+        admission_gates.append(
+            _gate(
+                "actual_admission_bbo_window_valid",
+                actual_admission_summary.get("valid_for_current_candidate_review")
+                is True,
+                "actual-admission BBO evidence must be fresh, candidate-matched, released, public-only, and exact-shape reviewed",
+                actual_admission_summary,
+            )
+        )
+        admission_gates.append(
+            _gate(
+                "actual_admission_order_shape_matches_guardian_gate",
+                _dict(
+                    actual_admission_summary.get("actual_admission_bbo")
+                ).get("actual_order_shape_matches_active_gate")
+                is True,
+                "the actual-admission BBO order shape must match the active-window Guardian gate order shape",
+                actual_admission_summary,
+            )
+        )
     blockers = [gate["name"] for gate in admission_gates if gate["passed"] is not True]
     if authority_reasons:
         status = AUTHORITY_BOUNDARY_VIOLATION_STATUS
@@ -1024,6 +1367,7 @@ def build_current_candidate_bounded_demo_admission_envelope_review(
         "decision_lease": lease_summary,
         "guardian_risk_gate": guardian_summary,
         "rust_authority_path": rust_summary,
+        "actual_admission_bbo_window": actual_admission_summary,
         "answers": {
             "review_contract_ready": review_contract_ready,
             "runtime_admission_ready": runtime_admission_ready,
@@ -1094,6 +1438,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--decision-lease-json", type=Path)
     parser.add_argument("--guardian-risk-gate-json", type=Path)
     parser.add_argument("--rust-authority-path-json", type=Path)
+    parser.add_argument("--actual-admission-bbo-window-json", type=Path)
     parser.add_argument("--json-output", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument(
@@ -1127,6 +1472,9 @@ def main() -> int:
         decision_lease=_read_json(args.decision_lease_json),
         guardian_risk_gate=_read_json(args.guardian_risk_gate_json),
         rust_authority_path=_read_json(args.rust_authority_path_json),
+        actual_admission_bbo_window=_read_json(
+            args.actual_admission_bbo_window_json
+        ),
         paths={
             "handoff": args.handoff_json,
             "current_envelope": args.current_envelope_json,
@@ -1135,6 +1483,7 @@ def main() -> int:
             "decision_lease": args.decision_lease_json,
             "guardian_risk_gate": args.guardian_risk_gate_json,
             "rust_authority_path": args.rust_authority_path_json,
+            "actual_admission_bbo_window": args.actual_admission_bbo_window_json,
         },
         max_artifact_age_seconds=args.max_artifact_age_seconds,
         max_authorization_ttl_hours=args.max_authorization_ttl_hours,

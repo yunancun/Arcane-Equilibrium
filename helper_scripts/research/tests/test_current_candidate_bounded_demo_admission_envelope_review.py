@@ -312,6 +312,143 @@ def _rust_authority_path() -> dict:
     }
 
 
+def _actual_admission_bbo_window(
+    *,
+    actual_notional: float = 954.6264,
+    gate_notional: float = 954.6264,
+    actual_qty: float = 145.7,
+    gate_qty: float = 145.7,
+    risk_context_notional: float | None = 954.6264,
+    answers: dict | None = None,
+    active_window: dict | None = None,
+) -> dict:
+    base_answers = {
+        "active_runtime_order_authority": False,
+        "active_runtime_probe_authority": False,
+        "actual_admission_bbo_refreshed_during_active_lease": True,
+        "bybit_call_performed": True,
+        "bybit_private_call_performed": False,
+        "bybit_public_market_data_call_performed": True,
+        "cost_gate_lowering_performed": False,
+        "decision_lease_acquire_performed": True,
+        "decision_lease_emitted": False,
+        "decision_lease_release_performed": True,
+        "fresh_actual_admission_bbo_and_gate_ready_during_window": True,
+        "gate_evidence_ready_during_active_window": True,
+        "global_cost_gate_lowering_recommended": False,
+        "governance_lease_mutation_performed": True,
+        "lease_released_before_artifact": True,
+        "live_authority_granted": False,
+        "main_cost_gate_adjustment": "NONE",
+        "mainnet_authority_granted": False,
+        "order_admission_ready": False,
+        "order_authority_granted": False,
+        "order_cancel_performed": False,
+        "order_modify_performed": False,
+        "order_submission_performed": False,
+        "pg_query_performed": False,
+        "pg_write_performed": False,
+        "probe_authority_granted": False,
+        "promotion_evidence": False,
+        "promotion_proof": False,
+        "public_quote_capture_performed": True,
+        "review_contract_ready": True,
+        "runtime_admission_ready": False,
+        "runtime_admission_ready_after_release": False,
+        "runtime_mutation_performed": False,
+        "service_restart_performed": False,
+    }
+    if answers:
+        base_answers.update(answers)
+    base_active_window = {
+        "acquire_ok": True,
+        "actual_admission_bbo_status_during_active_window": (
+            mod.ACTUAL_ADMISSION_PUBLIC_QUOTE_READY_STATUS
+        ),
+        "gate_evidence_status_during_active_window": mod.GATE_PACKET_READY_STATUS,
+        "lease_id": "lease:actual-bbo",
+        "lease_profile": "Production",
+        "lease_released_before_artifact": True,
+        "lease_scope": "TRADE_ENTRY",
+        "lease_ttl_seconds": 5.0,
+        "quote_started_after_lease_acquire": True,
+        "release_ok": True,
+        "source_stage": "current_candidate_actual_admission_bbo_lease_window",
+    }
+    if active_window:
+        base_active_window.update(active_window)
+    return {
+        "schema_version": mod.ACTUAL_ADMISSION_BBO_WINDOW_SCHEMA_VERSION,
+        "generated_at_utc": GEN.isoformat(),
+        "status": mod.ACTUAL_ADMISSION_BBO_WINDOW_DONE_STATUS,
+        "reason": "actual_admission_bbo_and_gate_validated_during_active_window_no_order",
+        "candidate": _candidate(),
+        "source_blockers": [],
+        "runtime_blockers": [],
+        "loss_control_blockers": [],
+        "authority_contamination_reasons": [],
+        "active_window": base_active_window,
+        "risk_context": {
+            "account_equity_usdt": 9552.43426257,
+            "effective_single_order_cap_usdt": 955.24342626,
+            "guardian_adjusted_cap_usdt": 955.24342626,
+            "gui_resolved_cap_usdt": 955.24342626,
+            "gui_risk_config_is_source_of_truth": True,
+            "max_order_notional_usdt": 0.0,
+            "per_trade_budget_usdt": 955.24342626,
+            "per_trade_risk_pct_display": 10.0,
+            "per_trade_risk_pct_fraction": 0.1,
+            "position_size_max_pct": 25.0,
+            "proposed_rounded_notional_usdt": risk_context_notional,
+            "proposed_rounded_qty": gate_qty,
+            "resolved_cap_usdt": 955.24342626,
+            "single_position_budget_usdt": 2388.10856564,
+        },
+        "actual_admission_bbo": {
+            "account_equity_usdt": 9552.43426257,
+            "bbo_age_ms": 428.726,
+            "cap_source": mod.GUI_CAP_SOURCE,
+            "construction_constructible": True,
+            "effective_single_order_cap_usdt": 955.24342626,
+            "gui_risk_config_is_source_of_truth": True,
+            "limit_price": 6.552,
+            "local_10_usdt_cap_is_global_risk_authority": False,
+            "max_fresh_bbo_age_ms": 1000,
+            "max_order_notional_usdt": 0.0,
+            "per_trade_budget_usdt": 955.24342626,
+            "position_size_max_pct": 25.0,
+            "request_count": 3,
+            "resolved_cap_usdt": 955.24342626,
+            "rounded_notional_usdt": actual_notional,
+            "rounded_qty": actual_qty,
+            "single_position_budget_usdt": 2388.10856564,
+            "status": mod.ACTUAL_ADMISSION_PUBLIC_QUOTE_READY_STATUS,
+        },
+        "active_window_gate_evidence": {
+            "schema_version": (
+                "current_candidate_decision_lease_guardian_gate_evidence_v1"
+            ),
+            "generated_at_utc": GEN.isoformat(),
+            "status": mod.GATE_PACKET_READY_STATUS,
+            "candidate": _candidate(),
+            "decision_lease_gate_artifact": _decision_lease_gate(),
+            "guardian_risk_gate_artifact": _guardian_risk_gate(
+                risk_limits={
+                    "gui_resolved_cap_usdt": 955.24342626,
+                    "guardian_adjusted_cap_usdt": 955.24342626,
+                    "rounded_qty": gate_qty,
+                    "rounded_notional_usdt": gate_notional,
+                    "rounded_notional_lte_guardian_adjusted_cap": True,
+                    "effective_single_order_cap_usdt": 955.24342626,
+                }
+            ),
+            "answers": _answers(runtime_readonly_ipc_call_performed=True),
+            "runtime_admission_blockers": [],
+        },
+        "answers": base_answers,
+    }
+
+
 def test_gui_cap_lineage_ready_but_runtime_admission_blocked_by_loss_controls() -> None:
     review = _review()
 
@@ -450,6 +587,101 @@ def test_schema_gate_evidence_clears_lease_and_guardian_but_fresh_bbo_still_bloc
         "fresh_bbo_refresh_at_actual_admission"
     ]
     assert review["answers"]["runtime_admission_ready"] is False
+    assert review["answers"]["order_admission_ready"] is False
+
+
+def test_actual_admission_window_clears_fresh_bbo_without_granting_authority() -> None:
+    review = _review(
+        bounded_authorization=_bounded_authorization(),
+        rust_authority_path=_rust_authority_path(),
+        actual_admission_bbo_window=_actual_admission_bbo_window(),
+    )
+
+    assert review["status"] == mod.READY_NO_ORDER_STATUS
+    assert review["runtime_admission_blockers"] == []
+    assert review["decision_lease"]["valid_for_current_candidate"] is False
+    assert (
+        review["actual_admission_bbo_window"][
+            "active_decision_lease_valid_during_window"
+        ]
+        is True
+    )
+    assert (
+        review["actual_admission_bbo_window"][
+            "active_guardian_risk_gate_valid_for_actual_order_shape"
+        ]
+        is True
+    )
+    assert (
+        review["actual_admission_bbo_window"][
+            "fresh_bbo_valid_for_current_candidate"
+        ]
+        is True
+    )
+    gate_results = {gate["name"]: gate["passed"] for gate in review["admission_gates"]}
+    assert gate_results["decision_lease_valid"] is True
+    assert gate_results["guardian_risk_gate_valid"] is True
+    assert gate_results["fresh_bbo_refresh_at_actual_admission"] is True
+    assert gate_results["actual_admission_bbo_window_valid"] is True
+    assert gate_results["actual_admission_order_shape_matches_guardian_gate"] is True
+    assert review["answers"]["runtime_admission_ready"] is False
+    assert review["answers"]["order_admission_ready"] is False
+    assert review["answers"]["order_submission_performed"] is False
+
+
+def test_actual_admission_bbo_must_match_active_guardian_order_shape() -> None:
+    review = _review(
+        bounded_authorization=_bounded_authorization(),
+        rust_authority_path=_rust_authority_path(),
+        actual_admission_bbo_window=_actual_admission_bbo_window(
+            actual_notional=954.8208,
+            gate_notional=955.0335,
+            actual_qty=146.4,
+            gate_qty=146.5,
+            risk_context_notional=955.0335,
+        ),
+    )
+
+    assert review["status"] == mod.BLOCKED_BY_LOSS_CONTROL_STATUS
+    assert "guardian_risk_gate_valid" in review["runtime_admission_blockers"]
+    assert (
+        "actual_admission_order_shape_matches_guardian_gate"
+        in review["runtime_admission_blockers"]
+    )
+    assert "fresh_bbo_refresh_at_actual_admission" not in review[
+        "runtime_admission_blockers"
+    ]
+    actual = review["actual_admission_bbo_window"]
+    assert actual["fresh_bbo_valid_for_current_candidate"] is True
+    assert (
+        actual["actual_admission_bbo"]["actual_order_shape_matches_active_gate"]
+        is False
+    )
+    assert (
+        "actual_admission_order_shape_mismatch_active_gate"
+        in actual["loss_control_reasons"]
+    )
+    assert (
+        "actual_admission_order_shape_mismatch_source_risk_context"
+        in actual["loss_control_reasons"]
+    )
+    assert review["answers"]["order_admission_ready"] is False
+
+
+def test_actual_admission_order_submission_signal_is_authority_violation() -> None:
+    review = _review(
+        bounded_authorization=_bounded_authorization(),
+        rust_authority_path=_rust_authority_path(),
+        actual_admission_bbo_window=_actual_admission_bbo_window(
+            answers={"order_submission_performed": True}
+        ),
+    )
+
+    assert review["status"] == mod.AUTHORITY_BOUNDARY_VIOLATION_STATUS
+    assert any(
+        reason.endswith("answers_order_submission_performed_true")
+        for reason in review["authority_contamination_reasons"]
+    )
     assert review["answers"]["order_admission_ready"] is False
 
 
