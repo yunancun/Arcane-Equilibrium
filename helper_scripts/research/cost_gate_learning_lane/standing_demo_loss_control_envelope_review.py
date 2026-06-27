@@ -38,6 +38,7 @@ CANDIDATE_NOT_REVIEWABLE_STATUS = "FALSE_NEGATIVE_CANDIDATE_NOT_REVIEWABLE"
 MATERIALIZATION_PATH_INVALID_STATUS = "MATERIALIZATION_PATH_INVALID"
 MATERIALIZATION_ENV_VAR_INVALID_STATUS = "MATERIALIZATION_ENV_VAR_INVALID"
 LOSS_CONTROL_LIMIT_INVALID_STATUS = "LOSS_CONTROL_LIMIT_INVALID"
+GUI_RISK_CAP_INPUT_REQUIRED_STATUS = "GUI_RISK_CAP_INPUT_REQUIRED"
 OPERATOR_ID_REQUIRED_STATUS = "OPERATOR_ID_REQUIRED"
 AUTHORITY_BOUNDARY_VIOLATION_STATUS = "AUTHORITY_BOUNDARY_VIOLATION"
 GENERATED_ENVELOPE_VALIDATION_FAILED_STATUS = (
@@ -334,6 +335,11 @@ def _candidate_summary(candidate: dict[str, Any] | None) -> dict[str, Any]:
         "probe_authority_granted": row.get("probe_authority_granted") is True,
         "order_authority_granted": row.get("order_authority_granted") is True,
         "promotion_evidence": row.get("promotion_evidence") is True,
+        "risk_cap_lineage": _dict(
+            row.get("risk_cap_lineage")
+            or row.get("risk_semantics")
+            or row.get("cap_resolution")
+        ),
     }
 
 
@@ -383,6 +389,69 @@ def _candidate_reviewable(candidate: dict[str, Any]) -> bool:
         and candidate.get("order_authority_granted") is not True
         and candidate.get("promotion_evidence") is not True
     )
+
+
+def _risk_cap_lineage_summary(candidate: dict[str, Any]) -> dict[str, Any]:
+    lineage = _dict(candidate.get("risk_cap_lineage"))
+    source_of_truth = _str(
+        lineage.get("risk_source_of_truth")
+        or lineage.get("source")
+        or lineage.get("cap_source")
+    )
+    source_text = source_of_truth.lower()
+    resolved_cap = _float(lineage.get("resolved_cap_usdt"))
+    per_trade_fraction = _float(
+        lineage.get("per_trade_risk_pct_fraction")
+        or lineage.get("per_trade_risk_pct")
+    )
+    per_trade_display = _float(
+        lineage.get("per_trade_risk_pct_display")
+        or lineage.get("gui_p1_risk_trade_pct")
+    )
+    local_10_is_authority = _truthy(
+        lineage.get("local_10_usdt_cap_is_global_risk_authority")
+    )
+    bounded_probe_local_cap_is_authority = _truthy(
+        lineage.get("bounded_probe_local_cap_usdt_is_authority")
+    )
+    gui_backed = (
+        ("gui" in source_text and "riskconfig" in source_text)
+        or lineage.get("gui_risk_config_is_source_of_truth") is True
+        or lineage.get("gui_risk_config_is_authority") is True
+    )
+    valid = (
+        bool(lineage)
+        and gui_backed
+        and resolved_cap is not None
+        and resolved_cap > 0.0
+        and per_trade_fraction is not None
+        and 0.0 < per_trade_fraction <= 1.0
+        and per_trade_display is not None
+        and per_trade_display > 0.0
+        and local_10_is_authority is False
+        and bounded_probe_local_cap_is_authority is False
+    )
+    return {
+        "valid": valid,
+        "risk_source_of_truth": source_of_truth or None,
+        "cap_source": lineage.get("cap_source"),
+        "account_equity_usdt": _float(lineage.get("account_equity_usdt")),
+        "per_trade_risk_pct_fraction": per_trade_fraction,
+        "per_trade_risk_pct_display": per_trade_display,
+        "position_size_max_pct": _float(lineage.get("position_size_max_pct")),
+        "single_position_budget_usdt": _float(
+            lineage.get("single_position_budget_usdt")
+        ),
+        "resolved_cap_usdt": resolved_cap,
+        "rounded_notional_usdt": _float(
+            lineage.get("rounded_notional_usdt")
+            or lineage.get("constructed_notional_usdt")
+        ),
+        "local_10_usdt_cap_is_global_risk_authority": local_10_is_authority,
+        "bounded_probe_local_cap_usdt_is_authority": (
+            bounded_probe_local_cap_is_authority
+        ),
+    }
 
 
 def _packet_ready(
@@ -509,6 +578,7 @@ def _build_envelope_preview(
     max_authorized_probe_orders: int,
     expires_at_utc: dt.datetime,
     now_utc: dt.datetime,
+    risk_cap_lineage: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "schema_version": STANDING_DEMO_AUTHORIZATION_SCHEMA_VERSION,
@@ -526,6 +596,7 @@ def _build_envelope_preview(
         "candidate": candidate_scope,
         "max_authorized_probe_orders_per_candidate": max_authorized_probe_orders,
         "expires_at_utc": expires_at_utc.isoformat(),
+        "risk_cap_lineage": risk_cap_lineage,
         "answers": {
             "demo_only": True,
             "candidate_scoping_required": True,
@@ -585,6 +656,8 @@ def _status_from_failed_gates(failed_gates: list[dict[str, Any]]) -> str:
         return SELECTION_REQUIRED_STATUS
     if "candidate_reviewable" in failed or "candidate_scope_complete" in failed:
         return CANDIDATE_NOT_REVIEWABLE_STATUS
+    if "gui_risk_cap_lineage_valid" in failed:
+        return GUI_RISK_CAP_INPUT_REQUIRED_STATUS
     if "standing_demo_authorization_preview_valid" in failed:
         return GENERATED_ENVELOPE_VALIDATION_FAILED_STATUS
     return READY_STATUS
@@ -731,6 +804,8 @@ def build_standing_demo_loss_control_envelope_review(
     candidate_selected = bool(_str(candidate.get("side_cell_key")))
     candidate_reviewable = _candidate_reviewable(candidate)
     candidate_scope_complete = _candidate_scope_complete(candidate_scope)
+    risk_cap_lineage = _risk_cap_lineage_summary(candidate)
+    risk_cap_valid = risk_cap_lineage.get("valid") is True
 
     envelope_preview: dict[str, Any] = {}
     standing_summary: dict[str, Any] = {}
@@ -744,6 +819,7 @@ def build_standing_demo_loss_control_envelope_review(
         and candidate_selected
         and candidate_reviewable
         and candidate_scope_complete
+        and risk_cap_valid
     )
     if can_preview:
         envelope_preview = _build_envelope_preview(
@@ -752,6 +828,7 @@ def build_standing_demo_loss_control_envelope_review(
             max_authorized_probe_orders=max_authorized_probe_orders,
             expires_at_utc=now + dt.timedelta(hours=authorization_ttl_hours),
             now_utc=now,
+            risk_cap_lineage=risk_cap_lineage,
         )
         standing_summary = summarize_standing_demo_authorization(
             envelope_preview,
@@ -852,6 +929,19 @@ def build_standing_demo_loss_control_envelope_review(
             reason="standing envelope must be candidate-scoped by side-cell, strategy, symbol, side, and horizon",
             next_actions=["refresh_candidate_packet_with_complete_candidate_identity"],
             evidence=candidate_scope,
+        ),
+        _gate(
+            "gui_risk_cap_lineage_valid",
+            risk_cap_valid,
+            status="VALID" if risk_cap_valid else "MISSING_OR_INVALID",
+            reason=(
+                "standing envelope preview must carry GUI-backed Rust RiskConfig "
+                "cap lineage; local 10 USDT diagnostics cannot define per-order risk"
+            ),
+            next_actions=[
+                "refresh_candidate_packet_with_gui_risk_cap_lineage"
+            ],
+            evidence=risk_cap_lineage,
         ),
         _gate(
             "standing_demo_authorization_preview_valid",

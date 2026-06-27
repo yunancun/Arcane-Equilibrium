@@ -27,6 +27,7 @@ from cost_gate_learning_lane.contract import (
 
 NOW = dt.datetime(2026, 6, 23, 12, 0, tzinfo=dt.timezone.utc)
 SIDE_CELL = "ma_crossover|BTCUSDT|Sell"
+GUI_RISK_CAP_USDT = 955.24342626
 
 
 def _preflight(**overrides) -> dict:
@@ -57,8 +58,13 @@ def _preflight(**overrides) -> dict:
                 "active": False,
                 "requires_separate_operator_authorization": True,
                 "max_probe_intents_before_review": 3,
-                "max_demo_notional_usdt_per_order": 10,
-                "max_total_demo_notional_usdt_before_review": 30,
+                "max_demo_notional_usdt_per_order": GUI_RISK_CAP_USDT,
+                "max_total_demo_notional_usdt_before_review": GUI_RISK_CAP_USDT * 3,
+                "cap_source": "current_candidate_envelope.cap_resolution.resolved_cap_usdt",
+                "risk_source_of_truth": "GUI-backed Rust RiskConfig",
+                "per_trade_risk_pct_fraction": 0.1,
+                "per_trade_risk_pct_display": 10.0,
+                "local_10_usdt_cap_is_global_risk_authority": False,
             },
             "authority_boundary": {
                 "global_cost_gate_lowering_recommended": False,
@@ -111,7 +117,12 @@ def _placement_plan(**overrides) -> dict:
             },
             "probe_limits": {
                 "max_probe_intents_before_review": 3,
-                "max_demo_notional_usdt_per_order": 10.0,
+                "max_demo_notional_usdt_per_order": GUI_RISK_CAP_USDT,
+                "cap_source": "current_candidate_envelope.cap_resolution.resolved_cap_usdt",
+                "risk_source_of_truth": "GUI-backed Rust RiskConfig",
+                "per_trade_risk_pct_fraction": 0.1,
+                "per_trade_risk_pct_display": 10.0,
+                "local_10_usdt_cap_is_global_risk_authority": False,
             },
             "authority_boundary": {
                 "global_cost_gate_lowering_recommended": False,
@@ -173,8 +184,28 @@ def _standing_demo_authorization(**overrides) -> dict:
         "scope": "demo_api_only_bounded_probe",
         "demo_only": True,
         "candidate_scoping_required": True,
+        "candidate": {
+            "side_cell_key": SIDE_CELL,
+            "strategy_name": "ma_crossover",
+            "symbol": "BTCUSDT",
+            "side": "Sell",
+            "outcome_horizon_minutes": 240,
+        },
         "max_authorized_probe_orders_per_candidate": 2,
         "expires_at_utc": "2026-06-23T18:00:00+00:00",
+        "risk_cap_lineage": {
+            "risk_source_of_truth": "GUI-backed Rust RiskConfig",
+            "cap_source": "current_candidate_envelope.cap_resolution.resolved_cap_usdt",
+            "account_equity_usdt": 9552.43426257,
+            "per_trade_risk_pct_display": 10.0,
+            "per_trade_risk_pct_fraction": 0.1,
+            "position_size_max_pct": 25.0,
+            "resolved_cap_usdt": GUI_RISK_CAP_USDT,
+            "rounded_notional_usdt": 954.6264,
+            "single_position_budget_usdt": 2388.10856564,
+            "bounded_probe_local_cap_usdt_is_authority": False,
+            "local_10_usdt_cap_is_global_risk_authority": False,
+        },
         "answers": {
             "demo_only": True,
             "candidate_scoping_required": True,
@@ -229,6 +260,32 @@ def test_ready_inputs_produce_review_packet_not_authorization() -> None:
     assert "Bounded Demo Probe Operator Authorization" in markdown
     assert "authorize_bounded_demo_probe" in markdown
     assert ":0:" not in markdown
+
+
+def test_stale_local_10_usdt_cap_blocks_authorization_review() -> None:
+    preflight = _preflight()
+    limits = preflight["bounded_demo_probe_design"]["suggested_initial_probe_limits"]
+    limits["max_demo_notional_usdt_per_order"] = 10.0
+    limits["max_total_demo_notional_usdt_before_review"] = 30.0
+    limits["local_10_usdt_cap_is_global_risk_authority"] = True
+    placement = _placement_plan()
+    placement_limits = placement["placement_repair_plan"]["probe_limits"]
+    placement_limits["max_demo_notional_usdt_per_order"] = 10.0
+    placement_limits["local_10_usdt_cap_is_global_risk_authority"] = True
+
+    packet = build_bounded_demo_probe_operator_authorization(
+        preflight=preflight,
+        placement_repair_plan=placement,
+        authority_patch_readiness=_readiness(),
+        decision="defer",
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "GUI_RISK_CAP_INPUT_REQUIRED_FOR_AUTHORIZATION_REVIEW"
+    assert "gui_risk_notional_limit_valid" in packet["blocking_gates"]
+    assert packet["operator_authorization"] is None
+    assert packet["answers"]["ready_for_operator_authorization_review"] is False
+    assert packet["answers"]["bounded_demo_probe_authorized"] is False
 
 
 def test_wrong_typed_confirm_does_not_emit_authorization() -> None:

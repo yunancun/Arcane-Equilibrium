@@ -321,6 +321,8 @@ def _status_from_gates(gates: list[dict[str, Any]], review_is_approved: bool) ->
         return "AUTHORITY_BOUNDARY_VIOLATION"
     if "standing_demo_authorization_valid_for_preflight" in failed:
         return "STANDING_DEMO_AUTHORIZATION_INVALID_FOR_PREFLIGHT"
+    if "gui_risk_cap_lineage_valid_for_preflight" in failed:
+        return "GUI_RISK_CAP_INPUT_REQUIRED_FOR_PREFLIGHT"
     if "autonomous_parameter_proposal_ready" in failed:
         return "AUTONOMOUS_PARAMETER_PROPOSAL_NOT_READY"
     if "false_negative_operator_review_present" in failed:
@@ -339,12 +341,28 @@ def _bounded_demo_probe_design(
     status: str,
     candidate: dict[str, Any],
     proposal: dict[str, Any],
+    standing_summary: dict[str, Any],
 ) -> dict[str, Any]:
     review_ready = status in {
         OPERATOR_REVIEW_REQUIRED_STATUS,
         READY_PREFLIGHT_STATUS,
     }
     thesis = _dict(_dict(proposal.get("proposal")).get("profit_thesis"))
+    risk_cap = _dict(standing_summary.get("risk_cap_lineage"))
+    max_probe_orders = min(
+        value
+        for value in [
+            3,
+            _int(standing_summary.get("max_authorized_probe_orders_per_candidate")),
+        ]
+        if value > 0
+    )
+    resolved_cap = _float(risk_cap.get("resolved_cap_usdt"))
+    max_total_cap = (
+        round(resolved_cap * max_probe_orders, 8)
+        if resolved_cap is not None and max_probe_orders > 0
+        else None
+    )
     return {
         "schema_version": "bounded_demo_probe_design_v1",
         "status": (
@@ -375,11 +393,23 @@ def _bounded_demo_probe_design(
         "suggested_initial_probe_limits": {
             "active": False,
             "requires_separate_operator_authorization": True,
-            "max_probe_intents_before_review": 3,
+            "max_probe_intents_before_review": max_probe_orders,
             "max_filled_probe_outcomes_before_review": 3,
             "max_total_filled_probe_outcomes_before_second_review": 10,
-            "max_demo_notional_usdt_per_order": 10,
-            "max_total_demo_notional_usdt_before_review": 30,
+            "max_demo_notional_usdt_per_order": resolved_cap,
+            "max_total_demo_notional_usdt_before_review": max_total_cap,
+            "cap_source": (
+                risk_cap.get("cap_source")
+                or "standing_demo_authorization.risk_cap_lineage.resolved_cap_usdt"
+            ),
+            "risk_source_of_truth": risk_cap.get("risk_source_of_truth"),
+            "per_trade_risk_pct_fraction": risk_cap.get(
+                "per_trade_risk_pct_fraction"
+            ),
+            "per_trade_risk_pct_display": risk_cap.get(
+                "per_trade_risk_pct_display"
+            ),
+            "local_10_usdt_cap_is_global_risk_authority": False,
             "environment": "demo_or_live_demo_only",
             "execution_path": "existing_rust_authority_path_only",
         },
@@ -508,6 +538,9 @@ def build_false_negative_bounded_demo_probe_preflight(
         and standing_summary.get("valid_for_candidate_scoped_authorization") is True
     )
     standing_gate_needed = standing_input_supplied or review_uses_standing
+    risk_cap_summary = _dict(standing_summary.get("risk_cap_lineage"))
+    gui_risk_cap_valid = bool(risk_cap_summary.get("valid") is True)
+    gui_risk_cap_gate_needed = review_approved
     gates = [
         _gate(
             "authority_boundary_preserved",
@@ -535,6 +568,23 @@ def build_false_negative_bounded_demo_probe_preflight(
                     "supply_same_valid_standing_demo_authorization_used_for_false_negative_review"
                 ],
                 evidence=standing_summary,
+            )
+        )
+    if gui_risk_cap_gate_needed:
+        gates.append(
+            _gate(
+                "gui_risk_cap_lineage_valid_for_preflight",
+                gui_risk_cap_valid,
+                status="VALID" if gui_risk_cap_valid else "MISSING_OR_INVALID",
+                reason=(
+                    "approved bounded Demo probe preflight must source per-order "
+                    "notional from GUI-backed Rust RiskConfig, not a local 10 USDT "
+                    "diagnostic cap"
+                ),
+                next_actions=[
+                    "supply_standing_demo_authorization_with_gui_risk_cap_lineage"
+                ],
+                evidence=risk_cap_summary,
             )
         )
     gates.extend(
@@ -597,6 +647,7 @@ def build_false_negative_bounded_demo_probe_preflight(
         status=status,
         candidate=candidate,
         proposal=proposal,
+        standing_summary=standing_summary,
     )
     if status == READY_PREFLIGHT_STATUS:
         next_actions = [

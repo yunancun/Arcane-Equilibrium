@@ -395,6 +395,8 @@ mod tests {
     };
     use tempfile::TempDir;
 
+    const GUI_RISK_CAP_USDT: f64 = 955.24342626;
+
     fn plan_json(generated_at: &str) -> String {
         format!(
             r#"{{
@@ -666,7 +668,10 @@ mod tests {
             order_link_id,
             decision_lease_id: Some("lease-demo-1".to_string()),
             risk_state: "NORMAL".to_string(),
-            limits: ActiveBoundedProbeRiskLimits::default(),
+            limits: ActiveBoundedProbeRiskLimits {
+                max_demo_notional_usdt_per_order: GUI_RISK_CAP_USDT,
+                ..ActiveBoundedProbeRiskLimits::default()
+            },
         };
 
         let record = build_runtime_admission_record(
@@ -737,7 +742,10 @@ mod tests {
             order_link_id: order_link_id.clone(),
             decision_lease_id: Some("lease-demo-1".to_string()),
             risk_state: "NORMAL".to_string(),
-            limits: ActiveBoundedProbeRiskLimits::default(),
+            limits: ActiveBoundedProbeRiskLimits {
+                max_demo_notional_usdt_per_order: GUI_RISK_CAP_USDT,
+                ..ActiveBoundedProbeRiskLimits::default()
+            },
         };
 
         let blocked = submit_candidate_matched_bounded_probe_order(
