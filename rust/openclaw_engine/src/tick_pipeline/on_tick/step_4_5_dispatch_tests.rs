@@ -5,8 +5,9 @@
 //! 慣例拆出）。測試邏輯零變更：覆蓋 try_clone_panel_snapshot 的 4 條
 //! AlphaSurface fail-soft / 禁合成 neutral / read-guard 釋放 invariant。
 use super::{
-    active_bounded_probe_order_submission, bounded_probe_near_touch_decision_for_reject,
-    dispatch_admitted_bounded_probe_order, try_clone_panel_snapshot,
+    active_bounded_probe_order_submission, bounded_probe_active_order_request_for_reject,
+    bounded_probe_near_touch_decision_for_reject, dispatch_admitted_bounded_probe_order,
+    try_clone_panel_snapshot,
 };
 use crate::bounded_probe_active_order::{
     bounded_probe_order_link_id_for_candidate, ActiveBoundedProbeOrderDecision,
@@ -15,6 +16,7 @@ use crate::bounded_probe_active_order::{
 use crate::bounded_probe_near_touch::{
     BoundedProbeAttemptPlacement, BoundedProbePlacementDecision, BoundedProbePlacementSkipReason,
 };
+use crate::config::risk_config::RiskConfig;
 use crate::demo_learning_lane::{
     evaluate_probe_admission, AdmissionConfig, DemoLearningLanePlan, RejectEvent,
 };
@@ -179,6 +181,91 @@ fn active_bounded_probe_submission_forwards_candidate_matched_post_only_limit_re
         Some(crate::bounded_probe_active_order::ACTIVE_BOUNDED_PROBE_REFERENCE_SOURCE)
     );
     assert!(rx.try_recv().is_err());
+}
+
+#[test]
+fn bounded_probe_active_request_supplier_uses_gui_percent_cap_and_demo_equity() {
+    let mut risk_config = RiskConfig::default();
+    risk_config.limits.per_trade_risk_pct = 0.10;
+    risk_config.limits.position_size_max_pct = 25.0;
+    risk_config.limits.max_order_notional_usdt = 0.0;
+    let event = bounded_probe_event();
+    let placement = BoundedProbePlacementDecision::Submit(BoundedProbeAttemptPlacement {
+        record_type: "bounded_probe_attempt",
+        side_cell_key: "ma_crossover|ETHUSDT|Sell".to_string(),
+        limit_price: 3_499.9,
+        touch_gap_bps: 0.29,
+        reference_price: 3_500.0,
+        bbo_age_ms: 0,
+    });
+    let accepted_demo_equity_usdt = 9_551.369_426;
+
+    let request = bounded_probe_active_order_request_for_reject(
+        &event,
+        &placement,
+        0.2,
+        1,
+        Some("lease-demo-1".to_string()),
+        "NORMAL",
+        &risk_config,
+        Some(accepted_demo_equity_usdt),
+    )
+    .expect("positive qty, active lease, and GUI risk cap should build supplier request");
+
+    let expected_cap = accepted_demo_equity_usdt * 0.10;
+    assert!((request.limits.max_demo_notional_usdt_per_order - expected_cap).abs() < 1e-9);
+    assert!(request.limits.max_demo_notional_usdt_per_order > 10.0);
+    assert_eq!(request.decision_lease_id.as_deref(), Some("lease-demo-1"));
+    assert!(
+        crate::bounded_probe_active_order::is_candidate_bound_bounded_probe_order_link_id(
+            &request.order_link_id,
+            "live_demo",
+            BOUNDED_PROBE_NOW_MS,
+            "ma_crossover|ETHUSDT|Sell",
+            "ctx-demo-ma_crossover-ETHUSDT-1782040200000",
+            "sig-demo-ma_crossover-ETHUSDT-1782040200000",
+        )
+    );
+}
+
+#[test]
+fn bounded_probe_active_request_supplier_fails_closed_without_lease_or_cap_room() {
+    let mut risk_config = RiskConfig::default();
+    risk_config.limits.per_trade_risk_pct = 0.10;
+    risk_config.limits.position_size_max_pct = 25.0;
+    risk_config.limits.max_order_notional_usdt = 0.0;
+    let event = bounded_probe_event();
+    let placement = BoundedProbePlacementDecision::Submit(BoundedProbeAttemptPlacement {
+        record_type: "bounded_probe_attempt",
+        side_cell_key: "ma_crossover|ETHUSDT|Sell".to_string(),
+        limit_price: 3_499.9,
+        touch_gap_bps: 0.29,
+        reference_price: 3_500.0,
+        bbo_age_ms: 0,
+    });
+
+    assert!(bounded_probe_active_order_request_for_reject(
+        &event,
+        &placement,
+        0.2,
+        1,
+        None,
+        "NORMAL",
+        &risk_config,
+        Some(9_551.369_426),
+    )
+    .is_none());
+    assert!(bounded_probe_active_order_request_for_reject(
+        &event,
+        &placement,
+        1.0,
+        1,
+        Some("lease-demo-1".to_string()),
+        "NORMAL",
+        &risk_config,
+        Some(9_551.369_426),
+    )
+    .is_none());
 }
 
 #[test]

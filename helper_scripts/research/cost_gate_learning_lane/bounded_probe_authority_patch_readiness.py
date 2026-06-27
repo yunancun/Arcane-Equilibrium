@@ -1103,10 +1103,13 @@ def _runtime_active_order_request_supplier_review(
     writer_rel: str,
     dispatch_code: str,
     dispatch_rel: str,
+    *,
+    writer_call_scan_code: str | None = None,
 ) -> dict[str, Any]:
     call_rows: list[dict[str, Any]] = []
+    call_scan_code = writer_call_scan_code if writer_call_scan_code is not None else writer_code
     for call in _call_argument_groups(
-        writer_code,
+        call_scan_code,
         writer_rel,
         "build_runtime_admission_record",
     ):
@@ -1255,11 +1258,13 @@ def _active_caller_enablement_review(
 ) -> dict[str, Any]:
     writer_rel = "rust/openclaw_engine/src/demo_learning_lane_writer.rs"
     dispatch_rel = "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs"
+    writer_raw_code = _read_repo_text(repo_root, writer_rel)
+    dispatch_raw_code = _read_repo_text(repo_root, dispatch_rel)
     writer_code = _strip_rust_comments_and_strings(
-        _read_repo_text(repo_root, writer_rel)
+        writer_raw_code
     )
     dispatch_code = _strip_rust_comments_and_strings(
-        _read_repo_text(repo_root, dispatch_rel)
+        dispatch_raw_code
     )
     runtime_body = _function_body(writer_code, "build_runtime_admission_record")
     writer_call_sites = (
@@ -1288,6 +1293,7 @@ def _active_caller_enablement_review(
         writer_rel,
         dispatch_code,
         dispatch_rel,
+        writer_call_scan_code=writer_raw_code,
     )
     runtime_active_order_request_supplier_present = (
         supplier_review.get("runtime_active_order_request_supplier_present") is True
