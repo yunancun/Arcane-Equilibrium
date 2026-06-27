@@ -1046,6 +1046,90 @@ def _function_body(code: str, fn_name: str) -> str:
     return code[brace:idx] if depth == 0 else code[brace:]
 
 
+def _call_argument_groups(code: str, rel_path: str, symbol: str) -> list[dict[str, Any]]:
+    groups: list[dict[str, Any]] = []
+    call_re = re.compile(rf"\b{re.escape(symbol)}\s*\(")
+    for match in call_re.finditer(code):
+        line_start = code.rfind("\n", 0, match.start()) + 1
+        line_prefix = code[line_start : match.start()]
+        if re.search(r"\bfn\s*$", line_prefix):
+            continue
+        paren_start = code.find("(", match.start())
+        if paren_start == -1:
+            continue
+        depth = 1
+        idx = paren_start + 1
+        while idx < len(code) and depth > 0:
+            if code[idx] == "(":
+                depth += 1
+            elif code[idx] == ")":
+                depth -= 1
+            idx += 1
+        if depth != 0:
+            continue
+        groups.append(
+            {
+                "path": rel_path,
+                "line": code.count("\n", 0, match.start()) + 1,
+                "symbol": symbol,
+                "args": code[paren_start + 1 : idx - 1],
+            }
+        )
+    return groups
+
+
+def _split_top_level_args(args: str) -> list[str]:
+    parts: list[str] = []
+    start = 0
+    depth = 0
+    pairs = {"(": ")", "[": "]", "{": "}"}
+    closing = set(pairs.values())
+    for idx, char in enumerate(args):
+        if char in pairs:
+            depth += 1
+        elif char in closing and depth > 0:
+            depth -= 1
+        elif char == "," and depth == 0:
+            parts.append(args[start:idx].strip())
+            start = idx + 1
+    tail = args[start:].strip()
+    if tail:
+        parts.append(tail)
+    return parts
+
+
+def _runtime_active_order_request_supplier_review(
+    writer_code: str,
+    writer_rel: str,
+) -> dict[str, Any]:
+    call_rows: list[dict[str, Any]] = []
+    for call in _call_argument_groups(
+        writer_code,
+        writer_rel,
+        "build_runtime_admission_record",
+    ):
+        split_args = _split_top_level_args(str(call.get("args") or ""))
+        if not split_args:
+            continue
+        active_arg = " ".join(split_args[-1].split())
+        supplier_present = active_arg != "None"
+        call_rows.append(
+            {
+                "path": call["path"],
+                "line": call["line"],
+                "active_order_request_arg": active_arg[:220],
+                "active_order_request_arg_is_not_none": supplier_present,
+            }
+        )
+    supplier_present = any(
+        row.get("active_order_request_arg_is_not_none") is True for row in call_rows
+    )
+    return {
+        "runtime_active_order_request_supplier_present": supplier_present,
+        "runtime_admission_record_call_sites": call_rows,
+    }
+
+
 def _runtime_adapter_gate_feeds_admission(runtime_body: str) -> bool:
     if not runtime_body:
         return False
@@ -1110,6 +1194,13 @@ def _active_caller_enablement_review(
     runtime_adapter_enablement_gate_present = _runtime_adapter_gate_feeds_admission(
         runtime_body
     )
+    supplier_review = _runtime_active_order_request_supplier_review(
+        writer_code,
+        writer_rel,
+    )
+    runtime_active_order_request_supplier_present = (
+        supplier_review.get("runtime_active_order_request_supplier_present") is True
+    )
     runtime_writer_default_adapter_disabled = bool(
         _dict(active_order_summary.get("evidence")).get(
             "runtime_writer_default_adapter_disabled"
@@ -1124,10 +1215,13 @@ def _active_caller_enablement_review(
         source_blockers.append("production_active_bounded_probe_caller_missing")
     if not runtime_adapter_enablement_gate_present:
         source_blockers.append("reviewed_runtime_adapter_enablement_gate_missing")
+    if not runtime_active_order_request_supplier_present:
+        source_blockers.append("runtime_active_order_request_supplier_missing")
     source_ready = (
         active_order_summary.get("active_order_submission_ready") is True
         and production_active_caller_present
         and runtime_adapter_enablement_gate_present
+        and runtime_active_order_request_supplier_present
         and not runtime_writer_default_adapter_disabled
         and not source_blockers
     )
@@ -1157,9 +1251,15 @@ def _active_caller_enablement_review(
             is True,
             "runtime_writer_default_adapter_disabled": runtime_writer_default_adapter_disabled,
             "runtime_adapter_enablement_gate_present": runtime_adapter_enablement_gate_present,
+            "runtime_active_order_request_supplier_present": (
+                runtime_active_order_request_supplier_present
+            ),
             "production_active_caller_present": production_active_caller_present,
             "writer_call_sites": writer_call_sites,
             "tick_dispatch_call_sites": dispatch_call_sites,
+            "runtime_admission_record_call_sites": supplier_review.get(
+                "runtime_admission_record_call_sites"
+            ),
             "runtime_gate_feeds_admission_scan": runtime_adapter_enablement_gate_present,
             "runtime_source_sync_verified": False,
             "post_restart_pending_order_reconciliation_proven": False,
@@ -1167,6 +1267,7 @@ def _active_caller_enablement_review(
         "required_before_enablement": [
             "source_reviewed_production_active_caller",
             "reviewed_runtime_adapter_enablement_gate",
+            "runtime_active_order_request_supplier",
             "fresh_e3_bb_exchange_facing_order_envelope_review",
             "runtime_source_sync_and_readiness_probe",
             "post_restart_pending_order_reconciliation_review",
