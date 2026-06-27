@@ -627,13 +627,15 @@ restart_engine() {
     local record_l1_events l1_max_events_per_sec_per_symbol
     record_l1_events="${OPENCLAW_RECORD_L1_EVENTS:-$(grep '^OPENCLAW_RECORD_L1_EVENTS=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     l1_max_events_per_sec_per_symbol="${OPENCLAW_L1_MAX_EVENTS_PER_SEC_PER_SYMBOL:-$(grep '^OPENCLAW_L1_MAX_EVENTS_PER_SEC_PER_SYMBOL=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
-    # Cost-gate demo-learning writer is disabled by default and must be explicit.
-    # Persist the operator-reviewed writer switch/path overrides across plain
-    # restart_all/watchdog restarts; blank path overrides remain defaults in Rust.
-    local demo_learning_lane_writer demo_learning_lane_plan demo_learning_lane_ledger
+    # Cost-gate demo-learning writer/probe adapter are disabled by default and
+    # must be explicit. Persist the operator-reviewed switches/path overrides
+    # across plain restart_all/watchdog restarts; blank path overrides remain
+    # defaults in Rust.
+    local demo_learning_lane_writer demo_learning_lane_plan demo_learning_lane_ledger bounded_probe_adapter_enabled
     demo_learning_lane_writer="${OPENCLAW_DEMO_LEARNING_LANE_WRITER:-$(grep '^OPENCLAW_DEMO_LEARNING_LANE_WRITER=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     demo_learning_lane_plan="${OPENCLAW_DEMO_LEARNING_LANE_PLAN:-$(grep '^OPENCLAW_DEMO_LEARNING_LANE_PLAN=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     demo_learning_lane_ledger="${OPENCLAW_DEMO_LEARNING_LANE_LEDGER:-$(grep '^OPENCLAW_DEMO_LEARNING_LANE_LEDGER=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+    bounded_probe_adapter_enabled="${OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED:-$(grep '^OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     OPENCLAW_DATA_DIR="$DATA_DIR" OPENCLAW_IPC_SOCKET="$ENGINE_SOCKET" OPENCLAW_CANARY_MODE="${OPENCLAW_CANARY_MODE:-0}" \
         OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
         OPENCLAW_IPC_SECRET_FILE="$OPENCLAW_IPC_SECRET_FILE" \
@@ -657,6 +659,7 @@ restart_engine() {
         OPENCLAW_DEMO_LEARNING_LANE_WRITER="${demo_learning_lane_writer}" \
         OPENCLAW_DEMO_LEARNING_LANE_PLAN="${demo_learning_lane_plan}" \
         OPENCLAW_DEMO_LEARNING_LANE_LEDGER="${demo_learning_lane_ledger}" \
+        OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED="${bounded_probe_adapter_enabled}" \
         OPENCLAW_STRATEGIST_RICH_INPUT="${strategist_rich_input}" \
         OPENCLAW_RISKCONFIG_AGENT_TUNING_ENABLED="${riskconfig_agent_tuning}" \
         OPENCLAW_FLASH_DIP_PILOT_ENABLED="${flash_dip_pilot_enabled}" \
