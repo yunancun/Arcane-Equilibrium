@@ -86,6 +86,7 @@ def _snapshot(
     multiplier: float = 1.0,
     new_entries_allowed: bool = True,
     answers: dict | None = None,
+    nested_constraints: bool = False,
 ) -> dict:
     base_answers = {
         "runtime_readonly_ipc_call_performed": True,
@@ -99,6 +100,27 @@ def _snapshot(
     if answers:
         base_answers.update(answers)
     leases = lease_list if lease_list is not None else []
+    risk_result = {
+        "level": risk_level,
+        "new_entries_allowed": new_entries_allowed,
+        "position_size_multiplier": multiplier,
+        "reduce_only": False,
+        "active_de_risking": False,
+        "emergency_stops": False,
+        "requires_operator": False,
+    }
+    if nested_constraints:
+        risk_result = {
+            "level": risk_level,
+            "constraints": {
+                "new_entries_allowed": new_entries_allowed,
+                "position_size_multiplier": multiplier,
+                "reduce_only": False,
+                "active_de_risking": False,
+                "emergency_stops": False,
+                "requires_operator": False,
+            },
+        }
     return {
         "schema_version": mod.RUNTIME_GOVERNANCE_IPC_SNAPSHOT_SCHEMA_VERSION,
         "generated_at_utc": GEN.isoformat(),
@@ -119,15 +141,7 @@ def _snapshot(
             "governance.list_leases": {"ok": True, "result": leases},
             "governance.get_risk_state": {
                 "ok": True,
-                "result": {
-                    "level": risk_level,
-                    "new_entries_allowed": new_entries_allowed,
-                    "position_size_multiplier": multiplier,
-                    "reduce_only": False,
-                    "active_de_risking": False,
-                    "emergency_stops": False,
-                    "requires_operator": False,
-                },
+                "result": risk_result,
             },
         },
         "answers": base_answers,
@@ -164,6 +178,7 @@ def test_empty_lease_list_and_cautious_risk_blocks_with_adjusted_cap() -> None:
             risk_level="Cautious",
             multiplier=0.7,
             lease_list=[],
+            nested_constraints=True,
         )
     )
 
