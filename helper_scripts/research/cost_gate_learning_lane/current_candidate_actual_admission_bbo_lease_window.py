@@ -392,6 +392,152 @@ def _source_preflight(
     }
 
 
+def _min_positive(*values: Any) -> float | None:
+    parsed = [
+        value
+        for value in (_float(item) for item in values)
+        if value is not None and value > 0
+    ]
+    return min(parsed) if parsed else None
+
+
+def _actual_bbo_sizing_proposal(
+    *,
+    quote_packet: dict[str, Any],
+    base_sizing_proposal: dict[str, Any],
+    candidate: dict[str, Any],
+    generated_at_utc: dt.datetime,
+) -> dict[str, Any]:
+    """Build a no-authority sizing proposal from the actual admission BBO shape."""
+    summary = _dict(quote_packet.get("summary"))
+    construction = _dict(
+        _dict(_dict(quote_packet).get("construction_preview")).get("construction")
+    )
+    base_risk = _dict(base_sizing_proposal.get("risk_context"))
+    base_sizing = _dict(base_sizing_proposal.get("sizing_proposal"))
+
+    resolved_cap = _float(summary.get("resolved_cap_usdt")) or _float(
+        base_risk.get("gui_resolved_cap_usdt")
+    )
+    single_position_budget = _float(
+        summary.get("single_position_budget_usdt")
+    ) or _float(base_risk.get("single_position_budget_usdt"))
+    max_order_notional = _float(summary.get("max_order_notional_usdt"))
+    if max_order_notional is None:
+        max_order_notional = _float(base_risk.get("max_order_notional_usdt"))
+    guardian_adjusted_cap = _float(base_risk.get("guardian_adjusted_cap_usdt"))
+    if guardian_adjusted_cap is None:
+        guardian_adjusted_cap = _float(
+            summary.get("effective_single_order_cap_usdt")
+        ) or resolved_cap
+    effective_cap = _min_positive(
+        resolved_cap,
+        single_position_budget,
+        guardian_adjusted_cap,
+        max_order_notional if max_order_notional and max_order_notional > 0 else None,
+    )
+
+    rounded_qty = _float(construction.get("rounded_qty"))
+    rounded_notional = _float(construction.get("rounded_notional_usdt"))
+    min_notional = _float(construction.get("min_notional"))
+
+    return {
+        "schema_version": gate_evidence.SIZING_PROPOSAL_SCHEMA_VERSION,
+        "generated_at_utc": generated_at_utc.isoformat(),
+        "status": gate_evidence.SIZING_PROPOSAL_READY_STATUS,
+        "candidate": candidate,
+        "source_blockers": [],
+        "authority_contamination_reasons": [],
+        "risk_context": {
+            **base_risk,
+            "sizing_source": "actual_admission_bbo_construction",
+            "gui_risk_config_is_source_of_truth": True,
+            "risk_source_of_truth": summary.get("risk_source_of_truth")
+            or base_risk.get("risk_source_of_truth"),
+            "cap_source": summary.get("cap_source") or base_risk.get("cap_source"),
+            "account_equity_usdt": summary.get("account_equity_usdt")
+            or base_risk.get("account_equity_usdt"),
+            "gui_resolved_cap_usdt": resolved_cap,
+            "per_trade_risk_pct_fraction": summary.get(
+                "per_trade_risk_pct_fraction"
+            )
+            or base_risk.get("per_trade_risk_pct_fraction"),
+            "per_trade_risk_pct_display": summary.get("per_trade_risk_pct_display")
+            or base_risk.get("per_trade_risk_pct_display"),
+            "position_size_max_pct": summary.get("position_size_max_pct")
+            or base_risk.get("position_size_max_pct"),
+            "per_trade_budget_usdt": summary.get("per_trade_budget_usdt")
+            or base_risk.get("per_trade_budget_usdt"),
+            "single_position_budget_usdt": single_position_budget,
+            "max_order_notional_usdt": max_order_notional,
+            "guardian_adjusted_cap_usdt": guardian_adjusted_cap,
+            "original_rounded_qty": base_sizing.get("proposed_rounded_qty")
+            or base_sizing.get("original_rounded_qty"),
+            "original_rounded_notional_usdt": base_sizing.get(
+                "proposed_rounded_notional_usdt"
+            )
+            or base_sizing.get("original_rounded_notional_usdt"),
+            "local_10_usdt_cap_is_global_risk_authority": False,
+        },
+        "sizing_proposal": {
+            "limit_price": construction.get("limit_price"),
+            "qty_step": construction.get("qty_step"),
+            "min_notional": min_notional,
+            "single_position_budget_usdt": single_position_budget,
+            "effective_single_order_cap_usdt": effective_cap,
+            "proposed_rounded_qty": rounded_qty,
+            "proposed_rounded_notional_usdt": rounded_notional,
+            "original_rounded_qty": base_sizing.get("proposed_rounded_qty")
+            or base_sizing.get("original_rounded_qty"),
+            "original_rounded_notional_usdt": base_sizing.get(
+                "proposed_rounded_notional_usdt"
+            )
+            or base_sizing.get("original_rounded_notional_usdt"),
+            "notional_lte_guardian_adjusted_cap": (
+                rounded_notional is not None
+                and guardian_adjusted_cap is not None
+                and rounded_notional <= guardian_adjusted_cap + 1e-8
+            ),
+            "notional_lte_gui_resolved_cap": (
+                rounded_notional is not None
+                and resolved_cap is not None
+                and rounded_notional <= resolved_cap + 1e-8
+            ),
+            "notional_lte_single_position_budget": (
+                rounded_notional is not None
+                and single_position_budget is not None
+                and rounded_notional <= single_position_budget + 1e-8
+            ),
+            "notional_lte_effective_single_order_cap": (
+                rounded_notional is not None
+                and effective_cap is not None
+                and rounded_notional <= effective_cap + 1e-8
+            ),
+            "notional_gte_min_notional": (
+                rounded_notional is not None
+                and min_notional is not None
+                and rounded_notional >= min_notional
+            ),
+            "runtime_admission_ready": False,
+            "order_admission_ready": False,
+        },
+        "answers": {
+            "review_contract_ready": True,
+            "runtime_admission_ready": False,
+            "order_admission_ready": False,
+            "decision_lease_acquire_performed": False,
+            "decision_lease_release_performed": False,
+            "order_submission_performed": False,
+            "runtime_mutation_performed": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "live_authority_granted": False,
+            "promotion_evidence": False,
+            "promotion_proof": False,
+        },
+    }
+
+
 def build_current_candidate_actual_admission_bbo_lease_window(
     *,
     admission_review: dict[str, Any] | None,
@@ -457,6 +603,7 @@ def build_current_candidate_actual_admission_bbo_lease_window(
     quote_packet: dict[str, Any] | None = None
     active_snapshot: dict[str, Any] | None = None
     active_gate_packet: dict[str, Any] | None = None
+    active_gate_sizing_proposal: dict[str, Any] | None = None
     quote_started_after_acquire = False
 
     if not run:
@@ -515,6 +662,14 @@ def build_current_candidate_actual_admission_bbo_lease_window(
                     )
                 )
                 snapshot_now = now_fn().astimezone(dt.timezone.utc)
+                active_gate_sizing_proposal = proposal
+                if quote_packet.get("status") == quote_refresh.READY_STATUS:
+                    active_gate_sizing_proposal = _actual_bbo_sizing_proposal(
+                        quote_packet=quote_packet,
+                        base_sizing_proposal=proposal,
+                        candidate=candidate,
+                        generated_at_utc=snapshot_now,
+                    )
                 active_snapshot, snapshot_reasons = (
                     active_lease_window._build_active_runtime_snapshot(  # noqa: SLF001
                         lease_id=lease_id,
@@ -530,11 +685,11 @@ def build_current_candidate_actual_admission_bbo_lease_window(
                     gate_evidence.build_current_candidate_decision_lease_guardian_gate_evidence(
                         admission_review=admission,
                         runtime_governance_snapshot=active_snapshot,
-                        sizing_proposal=proposal,
+                        sizing_proposal=active_gate_sizing_proposal,
                         paths={
                             "admission_review": paths.get("admission_review"),
                             "runtime_governance_snapshot": None,
-                            "sizing_proposal": paths.get("sizing_proposal"),
+                            "sizing_proposal": None,
                         },
                         now_utc=snapshot_now,
                         max_admission_review_age_seconds=(
@@ -692,6 +847,7 @@ def build_current_candidate_actual_admission_bbo_lease_window(
         },
         "actual_admission_quote_construction_refresh": quote_packet,
         "active_runtime_governance_snapshot": active_snapshot,
+        "active_window_gate_sizing_proposal": active_gate_sizing_proposal,
         "active_window_gate_evidence": active_gate_packet,
         "answers": {
             "review_contract_ready": (
