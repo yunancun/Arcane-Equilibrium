@@ -418,6 +418,13 @@ def _risk_lineage_reasons(
     position_size_max_pct = _dec(
         risk_limits.get("position_size_max_pct") or risk.get("position_size_max_pct")
     )
+    account_equity = _dec(
+        risk_limits.get("account_equity_usdt") or risk.get("account_equity_usdt")
+    )
+    single_position_budget = _dec(
+        risk_limits.get("single_position_budget_usdt")
+        or risk.get("single_position_budget_usdt")
+    )
     if per_trade_fraction is None or per_trade_fraction <= 0:
         reasons.append("per_trade_risk_pct_fraction_missing_or_non_positive")
     elif per_trade_fraction > 1:
@@ -433,6 +440,34 @@ def _risk_lineage_reasons(
         reasons.append("per_trade_risk_pct_display_fraction_mismatch")
     if position_size_max_pct is None or position_size_max_pct <= 0:
         reasons.append("position_size_max_pct_missing_or_non_positive")
+    if account_equity is None or account_equity <= 0:
+        reasons.append("account_equity_usdt_missing_or_non_positive")
+    if single_position_budget is None or single_position_budget <= 0:
+        reasons.append("single_position_budget_usdt_missing_or_non_positive")
+    if (
+        account_equity is not None
+        and account_equity > 0
+        and per_trade_fraction is not None
+        and per_trade_fraction > 0
+        and risk_cap is not None
+    ):
+        expected_cap = account_equity * per_trade_fraction
+        if not _same_decimal(risk_cap, expected_cap):
+            reasons.append("gui_resolved_cap_not_equity_times_per_trade_pct")
+    if (
+        account_equity is not None
+        and account_equity > 0
+        and position_size_max_pct is not None
+        and position_size_max_pct > 0
+        and single_position_budget is not None
+    ):
+        expected_single_position_budget = (
+            account_equity * position_size_max_pct / Decimal("100")
+        )
+        if not _same_decimal(single_position_budget, expected_single_position_budget):
+            reasons.append(
+                "single_position_budget_not_equity_times_position_size_max_pct"
+            )
     return sorted(set(reasons))
 
 
@@ -478,6 +513,9 @@ def _extract_inputs(
         "position_size_max_pct": _dec(
             risk_limits.get("position_size_max_pct") or risk.get("position_size_max_pct")
         ),
+        "account_equity_usdt": _dec(
+            risk_limits.get("account_equity_usdt") or risk.get("account_equity_usdt")
+        ),
         "single_position_budget_usdt": _dec(risk_limits.get("single_position_budget_usdt")),
         "original_limit_price": _dec(order_shape.get("limit_price") or construction.get("limit_price")),
         "original_rounded_qty": _dec(
@@ -498,6 +536,7 @@ def _build_sizing(inputs: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     reasons: list[str] = []
     adjusted_cap = inputs["guardian_adjusted_cap_usdt"]
     gui_cap = inputs["gui_resolved_cap_usdt"]
+    single_position_budget = inputs["single_position_budget_usdt"]
     limit_price = inputs["original_limit_price"]
     qty_step = inputs["qty_step"]
     min_notional = inputs["min_notional"]
@@ -507,6 +546,7 @@ def _build_sizing(inputs: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     for name, value in (
         ("guardian_adjusted_cap_usdt", adjusted_cap),
         ("gui_resolved_cap_usdt", gui_cap),
+        ("single_position_budget_usdt", single_position_budget),
         ("limit_price", limit_price),
         ("qty_step", qty_step),
         ("min_notional", min_notional),
@@ -519,15 +559,26 @@ def _build_sizing(inputs: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         return {}, sorted(set(reasons))
 
     min_qty = _ceil_to_step(min_notional / limit_price, qty_step)
-    max_qty = _floor_to_step(adjusted_cap / limit_price, qty_step)
-    if max_qty < min_qty:
-        reasons.append("guardian_adjusted_cap_below_min_executable_notional")
-    proposed_qty = max_qty
+    max_qty_under_guardian_cap = _floor_to_step(adjusted_cap / limit_price, qty_step)
+    effective_single_order_cap = min(adjusted_cap, gui_cap, single_position_budget)
+    max_qty_under_effective_cap = _floor_to_step(
+        effective_single_order_cap / limit_price,
+        qty_step,
+    )
+    if max_qty_under_effective_cap < min_qty:
+        reasons.append("effective_single_order_cap_below_min_executable_notional")
+        if max_qty_under_guardian_cap < min_qty:
+            reasons.append("guardian_adjusted_cap_below_min_executable_notional")
+    proposed_qty = max_qty_under_effective_cap
     proposed_notional = proposed_qty * limit_price
     if proposed_notional > adjusted_cap:
         reasons.append("proposed_notional_exceeds_guardian_adjusted_cap")
     if proposed_notional > gui_cap:
         reasons.append("proposed_notional_exceeds_gui_resolved_cap")
+    if proposed_notional > single_position_budget:
+        reasons.append("proposed_notional_exceeds_single_position_budget")
+    if proposed_notional > effective_single_order_cap:
+        reasons.append("proposed_notional_exceeds_effective_single_order_cap")
     if proposed_notional < min_notional:
         reasons.append("proposed_notional_below_min_notional")
     if proposed_qty >= original_qty:
@@ -537,12 +588,18 @@ def _build_sizing(inputs: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     notional_delta = proposed_notional - original_notional
     reduction_pct = (Decimal("1") - (proposed_notional / original_notional)) * Decimal("100")
     cap_utilization_pct = (proposed_notional / adjusted_cap) * Decimal("100")
+    effective_cap_utilization_pct = (
+        proposed_notional / effective_single_order_cap
+    ) * Decimal("100")
     return {
         "limit_price": _round_decimal(limit_price),
         "qty_step": _round_decimal(qty_step),
         "min_notional": _round_decimal(min_notional),
         "min_executable_qty": _round_decimal(min_qty),
-        "max_qty_under_guardian_cap": _round_decimal(max_qty),
+        "max_qty_under_guardian_cap": _round_decimal(max_qty_under_guardian_cap),
+        "max_qty_under_effective_cap": _round_decimal(max_qty_under_effective_cap),
+        "single_position_budget_usdt": _round_decimal(single_position_budget),
+        "effective_single_order_cap_usdt": _round_decimal(effective_single_order_cap),
         "proposed_rounded_qty": _round_decimal(proposed_qty),
         "proposed_rounded_notional_usdt": _round_decimal(proposed_notional),
         "original_rounded_qty": _round_decimal(original_qty),
@@ -551,8 +608,13 @@ def _build_sizing(inputs: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         "notional_delta_usdt": _round_decimal(notional_delta),
         "notional_reduction_pct": _round_decimal(reduction_pct),
         "guardian_adjusted_cap_utilization_pct": _round_decimal(cap_utilization_pct),
+        "effective_cap_utilization_pct": _round_decimal(effective_cap_utilization_pct),
         "notional_lte_guardian_adjusted_cap": proposed_notional <= adjusted_cap,
         "notional_lte_gui_resolved_cap": proposed_notional <= gui_cap,
+        "notional_lte_single_position_budget": proposed_notional
+        <= single_position_budget,
+        "notional_lte_effective_single_order_cap": proposed_notional
+        <= effective_single_order_cap,
         "notional_gte_min_notional": proposed_notional >= min_notional,
         "requires_fresh_bbo_before_admission": True,
         "runtime_admission_ready": False,
@@ -665,6 +727,7 @@ def build_current_candidate_guardian_adjusted_sizing_proposal(
             "gui_risk_config_is_source_of_truth": True,
             "risk_source_of_truth": inputs["risk_source_of_truth"],
             "cap_source": inputs["cap_source"],
+            "account_equity_usdt": _round_decimal(inputs["account_equity_usdt"]),
             "gui_resolved_cap_usdt": _round_decimal(inputs["gui_resolved_cap_usdt"]),
             "per_trade_risk_pct_fraction": _round_decimal(
                 inputs["per_trade_risk_pct_fraction"]
@@ -676,6 +739,10 @@ def build_current_candidate_guardian_adjusted_sizing_proposal(
             "position_size_max_pct": _round_decimal(inputs["position_size_max_pct"], 4),
             "single_position_budget_usdt": _round_decimal(
                 inputs["single_position_budget_usdt"]
+            ),
+            "effective_single_order_cap_basis": (
+                "min(gui_per_trade_cap_usdt, gui_max_single_position_budget_usdt, "
+                "guardian_adjusted_cap_usdt)"
             ),
             "guardian_risk_level": inputs["risk_level"],
             "guardian_position_size_multiplier": _round_decimal(
@@ -738,8 +805,10 @@ def render_markdown(packet: dict[str, Any]) -> str:
         f"- Reason: `{packet.get('reason')}`",
         f"- Candidate: `{candidate.get('side_cell_key')}`",
         f"- GUI cap USDT: `{risk.get('gui_resolved_cap_usdt')}`",
+        f"- GUI max-single-position budget USDT: `{risk.get('single_position_budget_usdt')}`",
         f"- Guardian risk level: `{risk.get('guardian_risk_level')}`",
         f"- Guardian adjusted cap USDT: `{risk.get('guardian_adjusted_cap_usdt')}`",
+        f"- Effective single-order cap USDT: `{sizing.get('effective_single_order_cap_usdt')}`",
         f"- Original notional USDT: `{risk.get('original_rounded_notional_usdt')}`",
         f"- Proposed qty: `{sizing.get('proposed_rounded_qty')}`",
         f"- Proposed notional USDT: `{sizing.get('proposed_rounded_notional_usdt')}`",

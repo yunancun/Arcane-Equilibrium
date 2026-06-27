@@ -79,6 +79,69 @@ def _admission_review(**overrides) -> dict:
     return payload
 
 
+def _sizing_proposal(**overrides) -> dict:
+    payload = {
+        "schema_version": mod.SIZING_PROPOSAL_SCHEMA_VERSION,
+        "generated_at_utc": GEN.isoformat(),
+        "status": mod.SIZING_PROPOSAL_READY_STATUS,
+        "candidate": _candidate(),
+        "source_blockers": [],
+        "authority_contamination_reasons": [],
+        "risk_context": {
+            "gui_risk_config_is_source_of_truth": True,
+            "risk_source_of_truth": "GUI-backed Rust RiskConfig",
+            "cap_source": "current_candidate_envelope.cap_resolution.resolved_cap_usdt",
+            "account_equity_usdt": 9552.43426257,
+            "gui_resolved_cap_usdt": 955.24342626,
+            "per_trade_risk_pct_fraction": 0.1,
+            "per_trade_risk_pct_display": 10.0,
+            "position_size_max_pct": 25.0,
+            "single_position_budget_usdt": 2388.10856564,
+            "guardian_risk_level": "CAUTIOUS",
+            "guardian_position_size_multiplier": 0.7,
+            "guardian_adjusted_cap_usdt": 668.67039838,
+            "original_rounded_notional_usdt": 954.6264,
+            "local_10_usdt_cap_is_global_risk_authority": False,
+        },
+        "sizing_proposal": {
+            "limit_price": 6.552,
+            "qty_step": 0.1,
+            "min_notional": 5.0,
+            "max_qty_under_guardian_cap": 102.0,
+            "max_qty_under_effective_cap": 102.0,
+            "single_position_budget_usdt": 2388.10856564,
+            "effective_single_order_cap_usdt": 668.67039838,
+            "proposed_rounded_qty": 102.0,
+            "proposed_rounded_notional_usdt": 668.304,
+            "original_rounded_qty": 145.7,
+            "original_rounded_notional_usdt": 954.6264,
+            "notional_lte_guardian_adjusted_cap": True,
+            "notional_lte_gui_resolved_cap": True,
+            "notional_lte_single_position_budget": True,
+            "notional_lte_effective_single_order_cap": True,
+            "notional_gte_min_notional": True,
+            "runtime_admission_ready": False,
+            "order_admission_ready": False,
+        },
+        "answers": {
+            "review_contract_ready": True,
+            "runtime_admission_ready": False,
+            "order_admission_ready": False,
+            "decision_lease_acquire_performed": False,
+            "decision_lease_release_performed": False,
+            "order_submission_performed": False,
+            "runtime_mutation_performed": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "live_authority_granted": False,
+            "promotion_evidence": False,
+            "promotion_proof": False,
+        },
+    }
+    payload.update(overrides)
+    return payload
+
+
 def _snapshot(
     *,
     risk_level: str = "Normal",
@@ -170,6 +233,41 @@ def _packet(**overrides) -> dict:
     }
     kwargs.update(overrides)
     return mod.build_current_candidate_decision_lease_guardian_gate_evidence(**kwargs)
+
+
+def test_cautious_risk_with_proposed_sizing_removes_notional_breach_only() -> None:
+    packet = _packet(
+        sizing_proposal=_sizing_proposal(),
+        runtime_governance_snapshot=_snapshot(
+            risk_level="Cautious",
+            multiplier=0.7,
+            lease_list=[],
+            nested_constraints=True,
+        ),
+    )
+
+    assert packet["status"] == mod.BLOCKED_BY_LOSS_CONTROL_STATUS
+    assert packet["risk_context"]["sizing_source"] == "guardian_adjusted_sizing_proposal"
+    assert packet["risk_context"]["single_position_budget_usdt"] == 2388.10856564
+    assert packet["risk_context"]["effective_single_order_cap_usdt"] == 668.67039838
+    assert packet["risk_context"]["rounded_qty"] == 102.0
+    assert packet["risk_context"]["rounded_notional_usdt"] == 668.304
+    guardian = packet["guardian_risk_gate_artifact"]
+    assert guardian["sizing_source"] == "guardian_adjusted_sizing_proposal"
+    assert guardian["risk_limits"]["rounded_qty"] == 102.0
+    assert guardian["risk_limits"]["single_position_budget_usdt"] == 2388.10856564
+    assert guardian["risk_limits"]["effective_single_order_cap_usdt"] == 668.67039838
+    assert guardian["risk_limits"]["rounded_notional_usdt"] == 668.304
+    assert guardian["risk_limits"]["original_rounded_notional_usdt"] == 954.6264
+    assert guardian["risk_limits"]["rounded_notional_lte_guardian_adjusted_cap"] is True
+    assert "guardian_risk_state_not_normal" in guardian["blocking_reasons"]
+    assert "rounded_notional_exceeds_guardian_adjusted_cap" not in guardian[
+        "blocking_reasons"
+    ]
+    assert "decision_lease_valid" in packet["runtime_admission_blockers"]
+    assert "guardian_risk_gate_valid" in packet["runtime_admission_blockers"]
+    assert packet["answers"]["decision_lease_acquire_performed"] is False
+    assert packet["answers"]["order_submission_performed"] is False
 
 
 def test_empty_lease_list_and_cautious_risk_blocks_with_adjusted_cap() -> None:

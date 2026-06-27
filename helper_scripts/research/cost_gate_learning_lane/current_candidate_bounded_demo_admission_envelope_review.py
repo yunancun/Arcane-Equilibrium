@@ -547,6 +547,7 @@ def _guardian_risk_summary(
     artifact: dict[str, Any],
     candidate: dict[str, Any],
     resolved_cap_usdt: float | None,
+    expected_rounded_notional_usdt: float | None,
 ) -> dict[str, Any]:
     data = _dict(payload)
     risk_candidate = _candidate_identity(_dict(data.get("candidate")))
@@ -563,6 +564,13 @@ def _guardian_risk_summary(
         and adjusted_cap is not None
         and rounded_notional <= adjusted_cap + 1e-8
     )
+    rounded_matches_admission = _same_number(
+        rounded_notional,
+        expected_rounded_notional_usdt,
+    )
+    blocking_reasons = _list(data.get("blocking_reasons"))
+    if not rounded_matches_admission:
+        blocking_reasons.append("guardian_rounded_notional_mismatch_admission_order_shape")
     valid = (
         artifact.get("status") == "FRESH"
         and data.get("schema_version") == GUARDIAN_RISK_GATE_SCHEMA_VERSION
@@ -578,6 +586,7 @@ def _guardian_risk_summary(
         and data.get("requires_operator") is not True
         and data.get("emergency_stops") is not True
         and rounded_ok
+        and rounded_matches_admission
         and data.get("order_admission_ready") is not True
     )
     return {
@@ -592,10 +601,12 @@ def _guardian_risk_summary(
         "new_entries_allowed": data.get("new_entries_allowed"),
         "cap_usdt": cap,
         "guardian_adjusted_cap_usdt": adjusted_cap,
+        "expected_rounded_notional_usdt": expected_rounded_notional_usdt,
         "rounded_notional_usdt": rounded_notional,
+        "rounded_notional_matches_admission_order_shape": rounded_matches_admission,
         "rounded_notional_lte_guardian_adjusted_cap": rounded_ok,
         "cap_lte_gui_resolved_cap": cap_ok,
-        "blocking_reasons": _list(data.get("blocking_reasons")),
+        "blocking_reasons": sorted(set(blocking_reasons)),
         "valid_for_current_candidate": valid,
     }
 
@@ -805,6 +816,7 @@ def build_current_candidate_bounded_demo_admission_envelope_review(
         artifact=artifacts["guardian_risk_gate"],
         candidate=candidate,
         resolved_cap_usdt=resolved_cap,
+        expected_rounded_notional_usdt=rounded_notional,
     )
     rust_summary = _rust_authority_summary(
         rust_payload,
