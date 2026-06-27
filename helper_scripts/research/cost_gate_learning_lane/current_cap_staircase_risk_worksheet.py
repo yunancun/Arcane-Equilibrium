@@ -422,6 +422,7 @@ def _derive_gui_risk_cap(
         "cap_resolved": resolved is not None,
         "blocking_reasons": sorted(set(reasons)),
         "source": "GUI Risk tab -> Rust RiskConfig limits",
+        "risk_source_of_truth": "GUI-backed Rust RiskConfig",
         "account_equity_usdt": _round_decimal(equity, 8),
         "account_equity_source": equity_resolution.get("source_contract"),
         "account_equity_artifact_accepted": equity_resolution.get("accepted"),
@@ -456,7 +457,13 @@ def _derive_gui_risk_cap(
             "account_equity_usdt * position_size_max_pct / 100, "
             "max_order_notional_usdt when enabled)"
         ),
+        "gui_percent_semantics": (
+            "GUI 10.0% is TOML per_trade_risk_pct=0.1 and must not be "
+            "interpreted as a 10 USDT notional cap"
+        ),
         "construction_cap_is_authority": False,
+        "bounded_probe_local_cap_usdt_is_authority": False,
+        "local_10_usdt_cap_is_global_risk_authority": False,
         "gui_risk_config_is_authority": True,
     }
 
