@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-27 GUI Risk Cap Runtime Cache Reconcile
+
+- PM closed timestamped runtime cache-only reconcile as `DONE_WITH_CONCERNS`: fast-balance GET on `trade-core` returned `rust_snapshot_fast/connected` equity `9552.43426257`; accepted artifact sha `afea4d...`.
+- Worksheet accepted the equity artifact and resolved GUI 10% cap to `955.24342626 USDT`, proving the GUI setting is percent-based, while fail-closing order admission as `CONTROL_IDENTITY_CONTRACT_INPUT_NOT_READY`.
+- Current AVAX construction inputs remain missing/stale; do not reuse 2026-06-24 construction or 2026-06-25 cap-feasible selection as current evidence. Next is runtime source sync or reviewed no-order public quote/current-construction refresh.
+
 ## 2026-06-27 Demo Fast-Balance Equity Artifact Source
 
 - PM closed the source producer sub-checkpoint as `DONE_WITH_CONCERNS`: `demo_fast_balance_equity_artifact.py` now emits `demo_account_equity_artifact_v1` from supplied/captured `/api/v1/strategy/demo/balance?fast=1` `rust_snapshot_fast` payloads.
