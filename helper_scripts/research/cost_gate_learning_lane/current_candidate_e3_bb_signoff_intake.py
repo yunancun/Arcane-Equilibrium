@@ -199,6 +199,106 @@ def _request_summary(packet: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _order_enablement_context(packet: dict[str, Any] | None) -> dict[str, Any]:
+    review = _dict(packet)
+    candidate = _dict(review.get("candidate"))
+    admission = _dict(review.get("admission_review"))
+    requested = _str(candidate.get("requested_side_cell_key"))
+    observed = [
+        _str(item)
+        for item in _list(candidate.get("observed_side_cell_keys"))
+        if _str(item)
+    ]
+    side_cell = requested or _str(admission.get("candidate")) or (observed[0] if observed else "")
+    return {
+        "candidate_side_cell_key": side_cell or None,
+        "candidate_source": (
+            "order_enablement_review.candidate"
+            if requested or observed
+            else "order_enablement_review.admission_review"
+            if side_cell
+            else None
+        ),
+        "observed_side_cell_keys": observed,
+        "risk_context": {
+            "gui_risk_config_is_source_of_truth": admission.get(
+                "gui_risk_config_is_source_of_truth"
+            ),
+            "gui_p1_risk_trade_pct": admission.get("gui_p1_risk_trade_pct"),
+            "per_trade_risk_pct_fraction": admission.get(
+                "per_trade_risk_pct_fraction"
+            ),
+            "per_trade_budget_usdt": admission.get("per_trade_budget_usdt"),
+            "single_position_budget_usdt": admission.get(
+                "single_position_budget_usdt"
+            ),
+            "max_order_notional_usdt": admission.get("max_order_notional_usdt"),
+            "effective_single_order_cap_usdt": admission.get(
+                "effective_single_order_cap_usdt"
+            ),
+            "position_size_max_pct": admission.get("position_size_max_pct"),
+            "local_10_usdt_cap_is_authority": admission.get(
+                "local_10_usdt_cap_is_authority"
+            ),
+        },
+    }
+
+
+def _standing_authorization_summary(
+    *,
+    standing_authorization: dict[str, Any] | None,
+    standing_authorization_path: Path | None,
+    expected_candidate_side_cell_key: str | None,
+    now_utc: dt.datetime,
+) -> dict[str, Any] | None:
+    if standing_authorization is None and standing_authorization_path is None:
+        return None
+
+    packet = _dict(standing_authorization)
+    candidate = _dict(packet.get("candidate"))
+    side_cell = _str(candidate.get("side_cell_key")) or _str(
+        packet.get("candidate_side_cell_key")
+    )
+    expires_at = _parse_dt(
+        packet.get("expires_at_utc")
+        or packet.get("expires_at")
+        or packet.get("expiry_utc")
+    )
+    generated_at = _parse_dt(packet.get("generated_at_utc"))
+    blockers: list[str] = []
+    status = _str(packet.get("status"))
+    if not packet:
+        blockers.append("standing_authorization_missing")
+    if packet and status != "STANDING_DEMO_AUTHORIZATION_ACTIVE":
+        blockers.append("standing_authorization_status_not_active")
+    if expected_candidate_side_cell_key and side_cell != expected_candidate_side_cell_key:
+        blockers.append("standing_authorization_candidate_mismatch")
+    if expires_at is None:
+        blockers.append("standing_authorization_expiry_missing_or_invalid")
+    else:
+        if expires_at <= now_utc:
+            blockers.append("standing_authorization_expired")
+    authority_violation = _recursive_authority_violation(packet)
+    if authority_violation:
+        blockers.append(f"standing_authorization_authority_violation:{authority_violation}")
+
+    seconds_to_expiry = (
+        (expires_at - now_utc).total_seconds() if expires_at is not None else None
+    )
+    return {
+        "path": str(standing_authorization_path) if standing_authorization_path else None,
+        "sha256": _sha256(standing_authorization_path),
+        "status": status or None,
+        "generated_at_utc": generated_at.isoformat() if generated_at else None,
+        "expires_at_utc": expires_at.isoformat() if expires_at else None,
+        "seconds_to_expiry": seconds_to_expiry,
+        "candidate_side_cell_key": side_cell or None,
+        "expected_candidate_side_cell_key": expected_candidate_side_cell_key,
+        "fresh_and_scope_matched": not blockers,
+        "blockers": sorted(set(blockers)),
+    }
+
+
 def _candidate_sort_key(path: Path, payload: dict[str, Any]) -> tuple[str, str]:
     generated = _parse_dt(payload.get("generated_at_utc"))
     if generated is None:
@@ -307,21 +407,38 @@ def build_current_candidate_e3_bb_signoff_intake(
     max_artifact_age_seconds: int = DEFAULT_MAX_ARTIFACT_AGE_SECONDS,
     order_enablement_path: Path | None = None,
     request_path: Path | None = None,
+    standing_authorization: dict[str, Any] | None = None,
+    standing_authorization_path: Path | None = None,
 ) -> dict[str, Any]:
     if max_artifact_age_seconds <= 0 or max_artifact_age_seconds > 14 * 24 * 3600:
         raise ValueError("max_artifact_age_seconds must be in (0, 1209600]")
 
     now = (now_utc or _utc_now()).astimezone(dt.timezone.utc)
     request_review = _request_summary(signoff_request_packet)
+    order_context = _order_enablement_context(order_enablement_review)
+    expected_candidate = _str(request_review.get("candidate_side_cell_key")) or _str(
+        order_context.get("candidate_side_cell_key")
+    )
     expected_review_sha = _str(request_review.get("order_enablement_review_sha256"))
     order_review_sha = _sha256(order_enablement_path)
     blockers = list(_list(request_review.get("blockers")))
+    if expected_candidate and "signoff_request_candidate_missing" in blockers:
+        blockers.remove("signoff_request_candidate_missing")
     if expected_review_sha and order_review_sha and expected_review_sha != order_review_sha:
         blockers.append("order_enablement_review_sha_mismatch")
 
+    standing_summary = _standing_authorization_summary(
+        standing_authorization=standing_authorization,
+        standing_authorization_path=standing_authorization_path,
+        expected_candidate_side_cell_key=expected_candidate or None,
+        now_utc=now,
+    )
+    if standing_summary:
+        blockers.extend(_list(standing_summary.get("blockers")))
+
     located = _locate_signoffs(
         search_paths=search_paths,
-        candidate_side_cell_key=_str(request_review.get("candidate_side_cell_key")) or None,
+        candidate_side_cell_key=expected_candidate or None,
         order_enablement_review_sha256=expected_review_sha or order_review_sha,
     )
     selected_payloads = _dict(located.get("selected_payloads"))
@@ -331,7 +448,7 @@ def build_current_candidate_e3_bb_signoff_intake(
         order_enablement_review=order_enablement_review,
         e3_signoff=selected_payloads.get(contract.E3_ROLE),
         bb_signoff=selected_payloads.get(contract.BB_ROLE),
-        candidate_side_cell_key=_str(request_review.get("candidate_side_cell_key")) or None,
+        candidate_side_cell_key=expected_candidate or None,
         now_utc=now,
         max_artifact_age_seconds=max_artifact_age_seconds,
         order_enablement_path=order_enablement_path,
@@ -372,6 +489,17 @@ def build_current_candidate_e3_bb_signoff_intake(
             "path": str(order_enablement_path) if order_enablement_path else None,
             "sha256": order_review_sha,
         },
+        "candidate": {
+            "side_cell_key": expected_candidate or None,
+            "source": (
+                "signoff_request_packet"
+                if _str(request_review.get("candidate_side_cell_key"))
+                else order_context.get("candidate_source")
+            ),
+            "observed_side_cell_keys": order_context.get("observed_side_cell_keys"),
+        },
+        "risk_context": order_context.get("risk_context"),
+        "standing_authorization": standing_summary,
         "signoff_locator": {
             "searched_paths": located.get("searched_paths"),
             "ignored_file_count": located.get("ignored_file_count"),
@@ -418,18 +546,41 @@ def build_current_candidate_e3_bb_signoff_intake(
 def render_markdown(packet: dict[str, Any]) -> str:
     answers = _dict(packet.get("answers"))
     locator = _dict(packet.get("signoff_locator"))
+    candidate = _dict(packet.get("candidate"))
+    risk = _dict(packet.get("risk_context"))
+    standing = _dict(packet.get("standing_authorization"))
     lines = [
         "# Current Candidate E3/BB Signoff Intake",
         "",
         f"- Generated: `{packet.get('generated_at_utc')}`",
         f"- Status: `{packet.get('status')}`",
         f"- Reason: `{packet.get('reason')}`",
+        f"- Candidate: `{candidate.get('side_cell_key')}`",
+        f"- GUI P1 risk: `{risk.get('gui_p1_risk_trade_pct')}%` -> `{risk.get('per_trade_budget_usdt')} USDT`",
+        f"- Effective single-order cap: `{risk.get('effective_single_order_cap_usdt')}`",
         f"- Signoffs found and validated: `{answers.get('signoffs_found_and_validated')}`",
         f"- Order-capable action allowed: `{answers.get('order_capable_action_allowed')}`",
         f"- Max safe next action: `{packet.get('max_safe_next_action')}`",
         "",
+        "## Standing Authorization",
+    ]
+    if standing:
+        lines.extend(
+            [
+                f"- Status: `{standing.get('status')}`",
+                f"- Candidate: `{standing.get('candidate_side_cell_key')}`",
+                f"- Expires: `{standing.get('expires_at_utc')}`",
+                f"- Seconds to expiry: `{standing.get('seconds_to_expiry')}`",
+                f"- Fresh and scope matched: `{standing.get('fresh_and_scope_matched')}`",
+            ]
+        )
+    else:
+        lines.append("- not supplied")
+    lines.extend([
+        "",
         "## Selected Signoffs",
     ]
+    )
     selected = _dict(locator.get("selected"))
     for role in (contract.E3_ROLE, contract.BB_ROLE):
         item = _dict(selected.get(role))
@@ -463,6 +614,7 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_MAX_ARTIFACT_AGE_SECONDS,
     )
+    parser.add_argument("--standing-authorization-json", type=Path)
     parser.add_argument("--now-utc")
     parser.add_argument("--json-output", type=Path)
     parser.add_argument("--output", type=Path)
@@ -482,6 +634,8 @@ def main() -> int:
         max_artifact_age_seconds=args.max_artifact_age_seconds,
         order_enablement_path=args.order_enable_review_json,
         request_path=args.signoff_request_json,
+        standing_authorization=_read_json(args.standing_authorization_json),
+        standing_authorization_path=args.standing_authorization_json,
     )
     if args.json_output:
         _write_json(args.json_output, packet)
