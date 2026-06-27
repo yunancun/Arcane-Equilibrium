@@ -94,7 +94,10 @@ Known paths:
   truth. GUI `P1 Risk/Trade=10.0%` maps to TOML `per_trade_risk_pct=0.1`; do
   not confuse this with `10 USDT`. The Rust bounded-probe active-order
   `DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER=10.0` is a separate local envelope,
-  not the global single-order exposure cap.
+  not the global single-order exposure cap. Resolving a USDT cap also requires
+  an accepted Demo fast-balance equity artifact (`demo_account_equity_artifact_v1`
+  wrapping `/api/v1/strategy/demo/balance?fast=1` `rust_snapshot_fast` output);
+  a naked `account_equity_usdt` number is not auditable cap evidence.
 - `engine_dead` incident detection is external-watchdog notify-only by design:
   when the engine is dead, in-process Rust C4 senders are unavailable. Do not
   route it through Rust `AllFail`/Defensive without a separately reviewed

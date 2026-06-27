@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, InvalidOperation
 from pathlib import Path
@@ -18,6 +19,7 @@ from typing import Any
 
 
 SCHEMA_VERSION = "cost_gate_current_cap_staircase_risk_worksheet_v1"
+DEMO_ACCOUNT_EQUITY_ARTIFACT_SCHEMA_VERSION = "demo_account_equity_artifact_v1"
 READY_STATUS = "CURRENT_CAP_STAIRCASE_RISK_WORKSHEET_READY_NO_AUTHORITY"
 NOT_CONSTRUCTIBLE_STATUS = "CURRENT_CAP_STAIRCASE_NOT_CONSTRUCTIBLE_NO_AUTHORITY"
 CONTROL_CONTRACT_NOT_READY_STATUS = "CONTROL_IDENTITY_CONTRACT_INPUT_NOT_READY"
@@ -28,6 +30,11 @@ AUTHORITY_BOUNDARY_VIOLATION_STATUS = "AUTHORITY_BOUNDARY_VIOLATION"
 
 CONTROL_CONTRACT_SCHEMA_VERSION = "cost_gate_source_only_control_identity_contract_v1"
 CONTROL_CONTRACT_READY_STATUS = "SOURCE_ONLY_CONTROL_IDENTITY_CONTRACT_READY_NO_AUTHORITY"
+DEMO_BALANCE_FAST_ENDPOINTS = {
+    "/api/v1/strategy/demo/balance?fast=1",
+    "/api/v1/strategy/demo/balance?fast=true",
+}
+DEFAULT_EQUITY_ARTIFACT_MAX_AGE_SECONDS = 15 * 60
 
 BOUNDARY = (
     "artifact-only current-cap staircase/risk worksheet; no PG query/write, "
@@ -117,6 +124,21 @@ def _dec(value: Any) -> Decimal | None:
     return parsed if parsed.is_finite() else None
 
 
+def _parse_utc_timestamp(value: Any) -> dt.datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = dt.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(dt.timezone.utc)
+
+
 def _round_decimal(value: Decimal | None, places: int = 8) -> float | None:
     if value is None:
         return None
@@ -143,6 +165,109 @@ def _authority_preserved(*payloads: dict[str, Any] | None) -> tuple[bool, list[s
                 reasons.append(f"{key}_true")
         stack.extend(value for value in data.values() if isinstance(value, (dict, list)))
     return not reasons, sorted(set(reasons))
+
+
+def _equity_payload_data(artifact: dict[str, Any]) -> dict[str, Any]:
+    payload = (
+        _dict(artifact.get("payload"))
+        or _dict(artifact.get("balance_payload"))
+        or _dict(artifact.get("source_payload"))
+    )
+    if not payload:
+        return {}
+    data = _dict(payload.get("data"))
+    return data or payload
+
+
+def _extract_equity_usdt(data: dict[str, Any]) -> Decimal | None:
+    for key in (
+        "totalEquity",
+        "total_equity",
+        "equity",
+        "balance",
+        "totalWalletBalance",
+        "total_wallet_balance",
+        "walletBalance",
+        "wallet_balance",
+    ):
+        equity = _dec(data.get(key))
+        if equity is not None:
+            return equity
+    return None
+
+
+def _resolve_account_equity_from_artifact(
+    *,
+    account_equity_artifact: dict[str, Any] | None,
+    account_equity_usdt: Any,
+    now_utc: dt.datetime,
+    max_age_seconds: int,
+) -> tuple[Decimal | None, dict[str, Any]]:
+    artifact = _dict(account_equity_artifact)
+    data = _equity_payload_data(artifact)
+    reasons: list[str] = []
+    authority_ok, authority_reasons = _authority_preserved(artifact)
+    if not artifact:
+        reasons.append("account_equity_artifact_required")
+    if (
+        artifact
+        and artifact.get("schema_version")
+        != DEMO_ACCOUNT_EQUITY_ARTIFACT_SCHEMA_VERSION
+    ):
+        reasons.append("account_equity_artifact_schema_version_invalid")
+    environment = _str(artifact.get("environment")).lower()
+    if artifact and environment != "demo":
+        reasons.append("account_equity_artifact_environment_not_demo")
+    source_endpoint = _str(artifact.get("source_endpoint"))
+    if artifact and source_endpoint not in DEMO_BALANCE_FAST_ENDPOINTS:
+        reasons.append("account_equity_source_endpoint_not_demo_fast_balance")
+    if artifact and _str(data.get("read_model")) != "rust_snapshot_fast":
+        reasons.append("account_equity_read_model_not_rust_snapshot_fast")
+    if artifact and _str(data.get("pipeline_status")) != "connected":
+        reasons.append("account_equity_pipeline_status_not_connected")
+    if not authority_ok:
+        reasons.extend(authority_reasons)
+
+    generated_at = _parse_utc_timestamp(artifact.get("generated_at_utc"))
+    age_seconds: float | None = None
+    if artifact and generated_at is None:
+        reasons.append("account_equity_artifact_generated_at_utc_missing_or_invalid")
+    elif generated_at is not None:
+        age_seconds = (now_utc - generated_at).total_seconds()
+        if age_seconds < -60:
+            reasons.append("account_equity_artifact_from_future")
+        elif age_seconds > max_age_seconds:
+            reasons.append("account_equity_artifact_stale")
+
+    equity = _extract_equity_usdt(data)
+    if equity is None or equity <= 0:
+        reasons.append("account_equity_artifact_equity_missing_or_non_positive")
+
+    manual_equity = _dec(account_equity_usdt)
+    if manual_equity is not None and equity is not None and manual_equity != equity:
+        reasons.append("account_equity_usdt_mismatch_artifact")
+
+    accepted = bool(artifact) and not reasons
+    return (equity if accepted else None), {
+        "schema_version": artifact.get("schema_version"),
+        "accepted": bool(accepted),
+        "blocking_reasons": sorted(set(reasons)),
+        "environment": environment or None,
+        "source_endpoint": source_endpoint or None,
+        "read_model": data.get("read_model"),
+        "pipeline_status": data.get("pipeline_status"),
+        "generated_at_utc": generated_at.isoformat() if generated_at else None,
+        "age_seconds": round(age_seconds, 3) if age_seconds is not None else None,
+        "max_age_seconds": max_age_seconds,
+        "equity_usdt": _round_decimal(equity, 8),
+        "manual_account_equity_usdt": _round_decimal(manual_equity, 8),
+        "authority_preserved": authority_ok,
+        "authority_contamination_reasons": authority_reasons,
+        "source_contract": (
+            "demo_account_equity_artifact_v1 wrapping "
+            "/api/v1/strategy/demo/balance?fast=1 rust_snapshot_fast output"
+        ),
+    }
 
 
 def _control_contract_ready(contract: dict[str, Any]) -> bool:
@@ -239,17 +364,20 @@ def _risk_limits(gui_risk_config: dict[str, Any] | None) -> dict[str, Any]:
 def _derive_gui_risk_cap(
     *,
     gui_risk_config: dict[str, Any] | None,
-    account_equity_usdt: Any,
+    account_equity_usdt: Decimal | None,
+    equity_resolution: dict[str, Any],
     source_construction_cap_usdt: Decimal | None,
 ) -> tuple[Decimal | None, dict[str, Any]]:
     limits = _risk_limits(gui_risk_config)
-    equity = _dec(account_equity_usdt)
+    equity = account_equity_usdt
     per_trade_fraction = _dec(limits.get("per_trade_risk_pct"))
     max_single_position_pct = _dec(limits.get("position_size_max_pct"))
     max_order_notional = _dec(limits.get("max_order_notional_usdt"))
     reasons: list[str] = []
     if not limits:
         reasons.append("gui_risk_config_limits_missing")
+    if not equity_resolution.get("accepted"):
+        reasons.extend(_list(equity_resolution.get("blocking_reasons")))
     if equity is None or equity <= 0:
         reasons.append("account_equity_usdt_missing_or_non_positive")
     if per_trade_fraction is None or per_trade_fraction <= 0:
@@ -288,6 +416,18 @@ def _derive_gui_risk_cap(
         "blocking_reasons": sorted(set(reasons)),
         "source": "GUI Risk tab -> Rust RiskConfig limits",
         "account_equity_usdt": _round_decimal(equity, 8),
+        "account_equity_source": equity_resolution.get("source_contract"),
+        "account_equity_artifact_accepted": equity_resolution.get("accepted"),
+        "account_equity_artifact_blocking_reasons": equity_resolution.get(
+            "blocking_reasons"
+        ),
+        "account_equity_artifact_generated_at_utc": equity_resolution.get(
+            "generated_at_utc"
+        ),
+        "account_equity_artifact_age_seconds": equity_resolution.get("age_seconds"),
+        "account_equity_artifact_max_age_seconds": equity_resolution.get(
+            "max_age_seconds"
+        ),
         "per_trade_risk_pct_fraction": _round_decimal(per_trade_fraction, 8),
         "per_trade_risk_pct_display": _round_decimal(
             per_trade_fraction * Decimal("100")
@@ -402,12 +542,17 @@ def build_current_cap_staircase_risk_worksheet(
     control_identity_contract: dict[str, Any] | None,
     construction_preview: dict[str, Any] | None,
     gui_risk_config: dict[str, Any] | None = None,
+    account_equity_artifact: dict[str, Any] | None = None,
     account_equity_usdt: float | None = None,
+    max_account_equity_artifact_age_seconds: int = (
+        DEFAULT_EQUITY_ARTIFACT_MAX_AGE_SECONDS
+    ),
     max_probe_orders_before_review: int = 3,
     max_total_demo_notional_before_review: float | None = None,
     now_utc: dt.datetime | None = None,
     control_identity_contract_path: Path | None = None,
     construction_preview_path: Path | None = None,
+    account_equity_artifact_path: Path | None = None,
 ) -> dict[str, Any]:
     now = (now_utc or _utc_now()).astimezone(dt.timezone.utc)
     contract = _dict(control_identity_contract)
@@ -418,9 +563,16 @@ def build_current_cap_staircase_risk_worksheet(
     construction_candidate = _candidate_from_construction(preview)
     candidate_match = _candidate_matches(control_candidate, construction_candidate)
     inputs = _construction_inputs(preview)
+    equity_usdt, equity_resolution = _resolve_account_equity_from_artifact(
+        account_equity_artifact=account_equity_artifact,
+        account_equity_usdt=account_equity_usdt,
+        now_utc=now,
+        max_age_seconds=max(1, int(max_account_equity_artifact_age_seconds)),
+    )
     resolved_cap_usdt, cap_resolution = _derive_gui_risk_cap(
         gui_risk_config=gui_risk_config,
-        account_equity_usdt=account_equity_usdt,
+        account_equity_usdt=equity_usdt,
+        equity_resolution=equity_resolution,
         source_construction_cap_usdt=inputs.get("cap_usdt"),
     )
     required_inputs = (
@@ -503,6 +655,20 @@ def build_current_cap_staircase_risk_worksheet(
             ),
             "construction_preview_schema_version": preview.get("schema_version"),
             "construction_preview_status": preview.get("status"),
+            "account_equity_artifact_path": (
+                str(account_equity_artifact_path)
+                if account_equity_artifact_path
+                else None
+            ),
+            "account_equity_artifact_sha256": (
+                _sha256_path(account_equity_artifact_path)
+                if account_equity_artifact_path
+                else None
+            ),
+            "account_equity_artifact_accepted": equity_resolution.get("accepted"),
+            "account_equity_artifact_blocking_reasons": equity_resolution.get(
+                "blocking_reasons"
+            ),
             "authority_preserved": authority_ok,
             "authority_contamination_reasons": authority_reasons,
             "candidate_match": candidate_match,
@@ -528,6 +694,7 @@ def build_current_cap_staircase_risk_worksheet(
             "bbo_refresh_required_before_order_admission": bbo_refresh_required,
         },
         "cap_resolution": cap_resolution,
+        "account_equity_resolution": equity_resolution,
         "cap_staircase": {
             "tiers": tiers,
             "summary": tier_summary,
@@ -545,9 +712,9 @@ def build_current_cap_staircase_risk_worksheet(
             "bbo_refresh_required_before_order_admission": bbo_refresh_required,
             "p0_authorization_required_before_probe": True,
             "max_safe_next_action": (
-                "implement_fee_slippage_maker_taker_schema_or_review_real_auth_delta"
+                "open_pm_e3_bb_for_fresh_no_order_bbo_instruments_construction_refresh"
                 if status == READY_STATUS
-                else "provide_gui_risk_config_and_equity_or_refresh_no_order_construction_preview"
+                else "provide_fresh_demo_fast_balance_equity_artifact_and_refresh_no_order_construction_preview"
             ),
         },
         "answers": {
@@ -595,6 +762,8 @@ def render_markdown(packet: dict[str, Any]) -> str:
         f"- Order admission ready: `{summary.get('order_admission_ready')}`",
         f"- BBO refresh required before order admission: `{summary.get('bbo_refresh_required_before_order_admission')}`",
         f"- Resolved cap USDT: `{cap_resolution.get('resolved_cap_usdt')}`",
+        f"- Account equity artifact accepted: `{cap_resolution.get('account_equity_artifact_accepted')}`",
+        f"- Account equity artifact age seconds: `{cap_resolution.get('account_equity_artifact_age_seconds')}`",
         f"- GUI P1 risk/trade: `{cap_resolution.get('per_trade_risk_pct_display')}`%",
         f"- GUI max single position: `{cap_resolution.get('position_size_max_pct')}`%",
         "",
@@ -624,6 +793,12 @@ def _read_json(path: Path | None) -> dict[str, Any] | None:
     return payload
 
 
+def _sha256_path(path: Path | None) -> str | None:
+    if path is None or not path.exists():
+        return None
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def _read_toml(path: Path | None) -> dict[str, Any] | None:
     if path is None or not path.exists():
         return None
@@ -646,7 +821,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--control-identity-contract-json", type=Path, required=True)
     parser.add_argument("--construction-preview-json", type=Path, required=True)
     parser.add_argument("--gui-risk-config-toml", type=Path)
+    parser.add_argument("--account-equity-artifact-json", type=Path)
     parser.add_argument("--account-equity-usdt", type=float)
+    parser.add_argument(
+        "--max-account-equity-artifact-age-seconds",
+        type=int,
+        default=DEFAULT_EQUITY_ARTIFACT_MAX_AGE_SECONDS,
+    )
     parser.add_argument("--max-probe-orders-before-review", type=int, default=3)
     parser.add_argument("--max-total-demo-notional-before-review", type=float)
     parser.add_argument("--json-output", type=Path)
@@ -661,11 +842,14 @@ def main() -> int:
         control_identity_contract=_read_json(args.control_identity_contract_json),
         construction_preview=_read_json(args.construction_preview_json),
         gui_risk_config=_read_toml(args.gui_risk_config_toml),
+        account_equity_artifact=_read_json(args.account_equity_artifact_json),
         account_equity_usdt=args.account_equity_usdt,
+        max_account_equity_artifact_age_seconds=args.max_account_equity_artifact_age_seconds,
         max_probe_orders_before_review=args.max_probe_orders_before_review,
         max_total_demo_notional_before_review=args.max_total_demo_notional_before_review,
         control_identity_contract_path=args.control_identity_contract_json,
         construction_preview_path=args.construction_preview_json,
+        account_equity_artifact_path=args.account_equity_artifact_json,
     )
     markdown = render_markdown(packet)
     if args.json_output:

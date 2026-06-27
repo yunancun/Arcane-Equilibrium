@@ -102,11 +102,57 @@ def _gui_risk_config(**limits_overrides) -> dict:
     return {"limits": limits}
 
 
+def _account_equity_artifact(
+    *,
+    equity: float = 100.0,
+    generated_at: dt.datetime = NOW,
+    payload_overrides: dict | None = None,
+    **overrides,
+) -> dict:
+    payload_data = {
+        "source": "rust_engine",
+        "read_model": "rust_snapshot_fast",
+        "pipeline_status": "connected",
+        "totalEquity": equity,
+        "total_equity": equity,
+        "equity": equity,
+        "balance": equity,
+    }
+    if payload_overrides:
+        payload_data.update(payload_overrides)
+    payload = {
+        "schema_version": "demo_account_equity_artifact_v1",
+        "generated_at_utc": generated_at.isoformat(),
+        "environment": "demo",
+        "source_endpoint": "/api/v1/strategy/demo/balance?fast=1",
+        "payload": {
+            "action_result": "success",
+            "data": payload_data,
+            "is_simulated": True,
+            "data_category": "paper_simulated",
+        },
+        "answers": {
+            "bybit_call_performed": False,
+            "bybit_private_call_performed": False,
+            "pg_query_performed": False,
+            "pg_write_performed": False,
+            "order_submission_performed": False,
+            "runtime_mutation_performed": False,
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+            "promotion_proof": False,
+        },
+    }
+    payload.update(overrides)
+    return payload
+
+
 def _worksheet(**kwargs) -> dict:
     kwargs.setdefault("control_identity_contract", _control_contract())
     kwargs.setdefault("construction_preview", _construction_preview())
     kwargs.setdefault("gui_risk_config", _gui_risk_config())
-    kwargs.setdefault("account_equity_usdt", 100.0)
+    kwargs.setdefault("account_equity_artifact", _account_equity_artifact())
     kwargs.setdefault("now_utc", NOW)
     return build_current_cap_staircase_risk_worksheet(**kwargs)
 
@@ -142,6 +188,7 @@ def test_avax_current_cap_staircase_ready_without_authority() -> None:
     assert cap["per_trade_risk_pct_display"] == 10.0
     assert cap["position_size_max_pct"] == 25.0
     assert cap["account_equity_usdt"] == 100.0
+    assert cap["account_equity_artifact_accepted"] is True
     assert cap["per_trade_budget_usdt"] == 10.0
     assert cap["single_position_budget_usdt"] == 25.0
     assert cap["source_construction_cap_usdt"] == 10.0
@@ -207,7 +254,7 @@ def test_gui_risk_config_and_equity_required_for_cap_resolution() -> None:
         control_identity_contract=_control_contract(),
         construction_preview=_construction_preview(),
         gui_risk_config=None,
-        account_equity_usdt=None,
+        account_equity_artifact=None,
         now_utc=NOW,
     )
 
@@ -217,13 +264,16 @@ def test_gui_risk_config_and_equity_required_for_cap_resolution() -> None:
     assert "gui_risk_config_limits_missing" in packet["cap_resolution"][
         "blocking_reasons"
     ]
+    assert "account_equity_artifact_required" in packet["cap_resolution"][
+        "blocking_reasons"
+    ]
     assert "account_equity_usdt_missing_or_non_positive" in packet[
         "cap_resolution"
     ]["blocking_reasons"]
 
 
 def test_gui_risk_cap_can_exceed_stale_source_construction_cap_without_using_it() -> None:
-    packet = _worksheet(account_equity_usdt=200.0)
+    packet = _worksheet(account_equity_artifact=_account_equity_artifact(equity=200.0))
 
     assert packet["status"] == READY_STATUS
     assert packet["cap_resolution"]["source_construction_cap_usdt"] == 10.0
@@ -231,6 +281,67 @@ def test_gui_risk_cap_can_exceed_stale_source_construction_cap_without_using_it(
     assert packet["risk_worksheet"]["per_order_cap_usdt"] == 20.0
     assert packet["cap_staircase"]["summary"]["max_qty_under_cap"] == 3.2
     assert packet["cap_staircase"]["summary"]["max_notional_under_cap_usdt"] == 19.4048
+
+
+def test_manual_equity_without_artifact_does_not_resolve_cap() -> None:
+    packet = build_current_cap_staircase_risk_worksheet(
+        control_identity_contract=_control_contract(),
+        construction_preview=_construction_preview(),
+        gui_risk_config=_gui_risk_config(),
+        account_equity_artifact=None,
+        account_equity_usdt=100.0,
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == GUI_RISK_CAP_INPUT_REQUIRED_STATUS
+    assert packet["account_equity_resolution"]["accepted"] is False
+    assert "account_equity_artifact_required" in packet["cap_resolution"][
+        "blocking_reasons"
+    ]
+    assert packet["cap_resolution"]["resolved_cap_usdt"] is None
+
+
+def test_stale_equity_artifact_fails_closed() -> None:
+    stale = NOW - dt.timedelta(seconds=901)
+
+    packet = _worksheet(
+        account_equity_artifact=_account_equity_artifact(generated_at=stale)
+    )
+
+    assert packet["status"] == GUI_RISK_CAP_INPUT_REQUIRED_STATUS
+    assert packet["account_equity_resolution"]["accepted"] is False
+    assert "account_equity_artifact_stale" in packet["cap_resolution"][
+        "blocking_reasons"
+    ]
+
+
+def test_slow_or_private_equity_artifact_fails_closed() -> None:
+    artifact = _account_equity_artifact(
+        source_endpoint="/api/v1/strategy/demo/balance",
+        payload_overrides={"read_model": "bybit_rest"},
+    )
+
+    packet = _worksheet(account_equity_artifact=artifact)
+
+    assert packet["status"] == GUI_RISK_CAP_INPUT_REQUIRED_STATUS
+    assert "account_equity_source_endpoint_not_demo_fast_balance" in packet[
+        "cap_resolution"
+    ]["blocking_reasons"]
+    assert "account_equity_read_model_not_rust_snapshot_fast" in packet[
+        "cap_resolution"
+    ]["blocking_reasons"]
+
+
+def test_manual_equity_must_match_artifact_when_both_supplied() -> None:
+    packet = _worksheet(
+        account_equity_artifact=_account_equity_artifact(equity=100.0),
+        account_equity_usdt=99.0,
+    )
+
+    assert packet["status"] == GUI_RISK_CAP_INPUT_REQUIRED_STATUS
+    assert "account_equity_usdt_mismatch_artifact" in packet["cap_resolution"][
+        "blocking_reasons"
+    ]
 
 
 def test_static_no_network_db_or_order_imports() -> None:
