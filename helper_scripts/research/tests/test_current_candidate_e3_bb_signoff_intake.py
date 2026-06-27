@@ -127,6 +127,37 @@ def _signoff(role: str, review_sha: str) -> dict:
     }
 
 
+def _standing_authorization(
+    *, expires_at: dt.datetime | None = None, side_cell: str = SIDE_CELL
+) -> dict:
+    expiry = expires_at or dt.datetime(2026, 6, 27, 15, 0, tzinfo=dt.timezone.utc)
+    return {
+        "schema_version": "standing_demo_operator_authorization_v1",
+        "generated_at_utc": GEN.isoformat(),
+        "expires_at_utc": expiry.isoformat(),
+        "status": "STANDING_DEMO_AUTHORIZATION_ACTIVE",
+        "candidate": {
+            "side_cell_key": side_cell,
+            "strategy_name": "grid_trading",
+            "symbol": "AVAXUSDT",
+            "side": "Sell",
+            "outcome_horizon_minutes": 60,
+        },
+        "answers": {
+            "demo_only": True,
+            "active_runtime_order_authority": False,
+            "active_runtime_probe_authority": False,
+            "order_authority_granted": False,
+            "probe_authority_granted": False,
+            "order_submission_performed": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "live_authority_granted": False,
+            "promotion_proof": False,
+        },
+    }
+
+
 def test_missing_signoffs_remains_no_order_missing(tmp_path) -> None:
     review_path = tmp_path / "order_enablement.json"
     request_path = tmp_path / "request.json"
@@ -143,6 +174,12 @@ def test_missing_signoffs_remains_no_order_missing(tmp_path) -> None:
     )
 
     assert packet["status"] == mod.SIGNOFFS_MISSING_STATUS
+    assert packet["candidate"]["side_cell_key"] == SIDE_CELL
+    assert packet["candidate"]["source"] == "signoff_request_packet"
+    assert packet["risk_context"]["per_trade_budget_usdt"] == 955.1369426
+    assert packet["risk_context"]["single_position_budget_usdt"] == 2387.84235651
+    assert packet["risk_context"]["effective_single_order_cap_usdt"] == 955.1369426
+    assert packet["risk_context"]["local_10_usdt_cap_is_authority"] is False
     assert "e3_signoff_missing" in packet["signoff_blockers"]
     assert "bb_signoff_missing" in packet["signoff_blockers"]
     assert packet["answers"]["signoffs_found_and_validated"] is False
@@ -172,10 +209,65 @@ def test_valid_e3_bb_signoffs_are_located_and_approved_no_order(tmp_path) -> Non
     )
 
     assert packet["status"] == mod.APPROVED_NO_ORDER_STATUS
+    assert packet["candidate"]["side_cell_key"] == SIDE_CELL
     assert packet["signoff_blockers"] == []
     assert packet["answers"]["e3_bb_review_approved_no_order"] is True
     assert packet["answers"]["order_capable_action_allowed"] is False
     assert packet["contract_review"]["status"] == contract.APPROVED_NO_ORDER_STATUS
+
+
+def test_valid_standing_authorization_is_reported_without_granting_order(tmp_path) -> None:
+    review_path = tmp_path / "order_enablement.json"
+    request_path = tmp_path / "request.json"
+    standing_path = tmp_path / "standing.json"
+    standing = _standing_authorization()
+    review_path.write_text(json.dumps(_order_enablement_review()), encoding="utf-8")
+    request_path.write_text(json.dumps(_request_packet(review_path)), encoding="utf-8")
+    standing_path.write_text(json.dumps(standing), encoding="utf-8")
+
+    packet = mod.build_current_candidate_e3_bb_signoff_intake(
+        order_enablement_review=_order_enablement_review(),
+        signoff_request_packet=_request_packet(review_path),
+        search_paths=[tmp_path],
+        now_utc=NOW,
+        order_enablement_path=review_path,
+        request_path=request_path,
+        standing_authorization=standing,
+        standing_authorization_path=standing_path,
+    )
+
+    assert packet["status"] == mod.SIGNOFFS_MISSING_STATUS
+    assert packet["standing_authorization"]["fresh_and_scope_matched"] is True
+    assert packet["standing_authorization"]["candidate_side_cell_key"] == SIDE_CELL
+    assert packet["standing_authorization"]["seconds_to_expiry"] == 4800.0
+    assert packet["answers"]["order_capable_action_allowed"] is False
+
+
+def test_expired_standing_authorization_blocks_intake_inputs(tmp_path) -> None:
+    review_path = tmp_path / "order_enablement.json"
+    request_path = tmp_path / "request.json"
+    standing_path = tmp_path / "standing.json"
+    expired = dt.datetime(2026, 6, 27, 13, 0, tzinfo=dt.timezone.utc)
+    standing = _standing_authorization(expires_at=expired)
+    review_path.write_text(json.dumps(_order_enablement_review()), encoding="utf-8")
+    request_path.write_text(json.dumps(_request_packet(review_path)), encoding="utf-8")
+    standing_path.write_text(json.dumps(standing), encoding="utf-8")
+
+    packet = mod.build_current_candidate_e3_bb_signoff_intake(
+        order_enablement_review=_order_enablement_review(),
+        signoff_request_packet=_request_packet(review_path),
+        search_paths=[tmp_path],
+        now_utc=NOW,
+        order_enablement_path=review_path,
+        request_path=request_path,
+        standing_authorization=standing,
+        standing_authorization_path=standing_path,
+    )
+
+    assert packet["status"] == mod.BLOCKED_BY_LOSS_CONTROL_STATUS
+    assert "standing_authorization_expired" in packet["loss_control_blockers"]
+    assert packet["standing_authorization"]["fresh_and_scope_matched"] is False
+    assert packet["answers"]["order_capable_action_allowed"] is False
 
 
 def test_inert_templates_are_ignored_as_missing_signoffs(tmp_path) -> None:
@@ -199,6 +291,7 @@ def test_inert_templates_are_ignored_as_missing_signoffs(tmp_path) -> None:
     )
 
     assert packet["status"] == mod.SIGNOFFS_MISSING_STATUS
+    assert packet["candidate"]["side_cell_key"] == SIDE_CELL
     assert "e3_signoff_decision_not_approve_no_order" in packet["signoff_blockers"]
     assert "bb_signoff_decision_not_approve_no_order" in packet["signoff_blockers"]
     assert packet["answers"]["order_capable_action_allowed"] is False
@@ -231,10 +324,12 @@ def test_request_claiming_approval_fails_closed(tmp_path) -> None:
 def test_cli_writes_missing_status_artifacts(tmp_path, monkeypatch) -> None:
     review_path = tmp_path / "order_enablement.json"
     request_path = tmp_path / "request.json"
+    standing_path = tmp_path / "standing.json"
     json_output = tmp_path / "intake.json"
     md_output = tmp_path / "intake.md"
     review_path.write_text(json.dumps(_order_enablement_review()), encoding="utf-8")
     request_path.write_text(json.dumps(_request_packet(review_path)), encoding="utf-8")
+    standing_path.write_text(json.dumps(_standing_authorization()), encoding="utf-8")
 
     argv = [
         "current_candidate_e3_bb_signoff_intake",
@@ -244,6 +339,8 @@ def test_cli_writes_missing_status_artifacts(tmp_path, monkeypatch) -> None:
         str(request_path),
         "--signoff-search-path",
         str(tmp_path),
+        "--standing-authorization-json",
+        str(standing_path),
         "--now-utc",
         NOW.isoformat(),
         "--json-output",
@@ -256,6 +353,8 @@ def test_cli_writes_missing_status_artifacts(tmp_path, monkeypatch) -> None:
     assert mod.main() == 1
     packet = json.loads(json_output.read_text(encoding="utf-8"))
     assert packet["status"] == mod.SIGNOFFS_MISSING_STATUS
-    assert "Order-capable action allowed: `False`" in md_output.read_text(
-        encoding="utf-8"
-    )
+    assert packet["candidate"]["side_cell_key"] == SIDE_CELL
+    md_text = md_output.read_text(encoding="utf-8")
+    assert "Order-capable action allowed: `False`" in md_text
+    assert f"Candidate: `{SIDE_CELL}`" in md_text
+    assert "Fresh and scope matched: `True`" in md_text
