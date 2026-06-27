@@ -81,6 +81,7 @@ Known paths:
 - Runtime services are user units. Use `systemctl --user status
   openclaw-trading-api.service openclaw-watchdog.service`; system-level
   `systemctl status openclaw-trading-api.service` is the wrong namespace.
+  `openclaw-engine-watchdog.service` is not the current watchdog unit.
 
 ## Hard Boundaries
 
@@ -102,6 +103,12 @@ Known paths:
   artifact (`demo_account_equity_artifact_v1` wrapping
   `/api/v1/strategy/demo/balance?fast=1` `rust_snapshot_fast` output); a naked
   `account_equity_usdt` number is not auditable cap evidence.
+- Current-candidate Decision Lease / Guardian gate evidence must be generated
+  from read-only runtime governance IPC evidence schemas. Generic hand-written
+  `ACTIVE` lease or `PASS` guardian JSON must not clear admission gates.
+  Runtime `governance.get_risk_state` may expose entry constraints under a
+  nested `constraints` object; Guardian sizing must apply
+  `position_size_multiplier` to the GUI/Rust-resolved cap before admission.
 - `engine_dead` incident detection is external-watchdog notify-only by design:
   when the engine is dead, in-process Rust C4 senders are unavailable. Do not
   route it through Rust `AllFail`/Defensive without a separately reviewed
