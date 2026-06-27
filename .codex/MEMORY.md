@@ -128,6 +128,13 @@ Known paths:
   IPC must carry `OPENCLAW_IPC_SECRET_FILE` (or equivalent secret env) when the
   engine requires `__auth`; missing transport auth is a runtime wiring blocker,
   not a trading permission workaround.
+- Current-candidate Guardian reconciler drift diagnosis is read-only evidence.
+  It may consume runtime `governance.get_status` / `list_leases` /
+  `get_risk_state` snapshots and prove that GUI cap lineage is intact, but a
+  `CAUTIOUS` state, drift-after-recovery tail, multiplier below 1.0, or
+  `lease_live_count=0` remains a loss-control blocker. Do not force Guardian
+  NORMAL, reuse a released validation lease, refresh actual-admission BBO, or
+  grant order authority from a diagnosis packet.
 - `engine_dead` incident detection is external-watchdog notify-only by design:
   when the engine is dead, in-process Rust C4 senders are unavailable. Do not
   route it through Rust `AllFail`/Defensive without a separately reviewed
