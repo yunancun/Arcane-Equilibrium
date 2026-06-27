@@ -4038,6 +4038,61 @@ def test_false_negative_operator_review_consumes_standing_demo_envelope():
     assert review["answers"]["promotion_evidence"] is False
 
 
+def test_false_negative_operator_review_explicit_approval_accepts_standing_demo_envelope():
+    packet = _false_negative_candidate_packet_fixture()
+    review = build_false_negative_operator_review(
+        false_negative_candidate_packet=packet,
+        standing_demo_authorization=_standing_demo_authorization_fixture(),
+        decision="approve-preflight",
+        now_utc=dt.datetime(2026, 6, 21, 15, 10, tzinfo=dt.timezone.utc),
+    )
+
+    assert review["status"] == FALSE_NEGATIVE_APPROVED_FOR_PREFLIGHT_STATUS
+    assert review["decision"] == "approve-preflight"
+    assert review["operator_id"] == "pm"
+    assert review["operator_review_approval_source"] == "standing_demo_authorization"
+    assert review["typed_confirm_provided"] is False
+    assert review["typed_confirm_matches"] is False
+    assert review["operator_review_approved_for_preflight"] is True
+    assert review["answers"]["standing_demo_authorization_valid"] is True
+    assert review["answers"]["standing_demo_authorization_consumed"] is True
+    assert review["answers"]["bounded_demo_probe_preflight_approved"] is True
+    assert review["answers"]["review_grants_runtime_authority"] is False
+    assert review["answers"]["bounded_demo_probe_authorized"] is False
+    assert review["answers"]["probe_authority_granted"] is False
+    assert review["answers"]["order_authority_granted"] is False
+    assert review["answers"]["promotion_evidence"] is False
+    assert review["standing_demo_authorization"]["risk_cap_lineage"]["valid"] is True
+    assert (
+        review["standing_demo_authorization"]["risk_cap_lineage"]["resolved_cap_usdt"]
+        == 955.24342626
+    )
+
+
+def test_false_negative_operator_review_wrong_typed_confirm_overrides_standing_demo_envelope():
+    packet = _false_negative_candidate_packet_fixture()
+    review = build_false_negative_operator_review(
+        false_negative_candidate_packet=packet,
+        standing_demo_authorization=_standing_demo_authorization_fixture(),
+        decision="approve-preflight",
+        typed_confirm="approve_cost_gate_false_negative_preflight:wrong:1",
+        now_utc=dt.datetime(2026, 6, 21, 15, 10, tzinfo=dt.timezone.utc),
+    )
+
+    assert review["status"] == "TYPED_CONFIRM_REQUIRED"
+    assert review["operator_review_approval_source"] is None
+    assert review["operator_review_approved_for_preflight"] is False
+    assert review["answers"]["standing_demo_authorization_valid"] is False
+    assert review["answers"]["standing_demo_authorization_consumed"] is False
+    assert "standing_demo_authorization_valid_for_preflight_review" not in review[
+        "blocking_gates"
+    ]
+    assert "typed_confirm_matches" in review["blocking_gates"]
+    assert review["answers"]["bounded_demo_probe_preflight_approved"] is False
+    assert review["answers"]["bounded_demo_probe_authorized"] is False
+    assert review["answers"]["order_authority_granted"] is False
+
+
 def test_false_negative_operator_review_rejects_contaminated_standing_demo_envelope():
     packet = _false_negative_candidate_packet_fixture()
     standing = _standing_demo_authorization_fixture(
