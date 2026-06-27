@@ -1077,73 +1077,87 @@ def test_active_caller_enablement_source_ready_remains_no_authority(
     _write(
         tmp_path / "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
         """
-	pub const OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED: &str =
-	    "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED";
-	struct RiskConfig { limits: GuiRiskLimits }
-	struct GuiRiskLimits {
-	    per_trade_risk_pct: f64,
-	    position_size_max_pct: f64,
-	    max_order_notional_usdt: f64,
-	}
-	struct AcceptedDemoEquity { equity_usdt: f64 }
-	struct ActiveBoundedProbeOrderRequest {
-	    order_link_id: String,
-	    decision_lease_id: Option<String>,
-	    limits: ActiveBoundedProbeRiskLimits,
-	}
-	struct ActiveBoundedProbeRiskLimits { max_demo_notional_usdt_per_order: f64 }
-	pub fn build_admission_ledger_record_with_placement() {}
-	pub fn build_capture_error_ledger_record() {}
-	pub fn submit_candidate_matched_bounded_probe_order() -> u8 { 1 }
-	pub fn active_bounded_probe_order_submission(_decision: u8) {}
-	fn bounded_probe_order_link_id_for_candidate() -> String { String::new() }
-	fn bounded_probe_adapter_enabled_from_value(value: &str) -> bool {
-	    value.trim() == "1" || value.trim().eq_ignore_ascii_case("true")
-	}
-	fn evaluate_probe_admission(_enabled: bool) {}
-	fn gui_derived_active_order_request_supplier(
-	    risk_config: RiskConfig,
-	    accepted_demo_equity: AcceptedDemoEquity,
-	    decision_lease_id: String,
-	) -> ActiveBoundedProbeOrderRequest {
-	    let per_trade_budget_usdt =
-	        accepted_demo_equity.equity_usdt * risk_config.limits.per_trade_risk_pct;
-	    let single_position_budget_usdt =
-	        accepted_demo_equity.equity_usdt * risk_config.limits.position_size_max_pct / 100.0;
-	    let max_order_notional_usdt = risk_config.limits.max_order_notional_usdt;
-	    let effective_single_order_cap_usdt = per_trade_budget_usdt
-	        .min(single_position_budget_usdt)
-	        .min(max_order_notional_usdt);
-	    let order_link_id = bounded_probe_order_link_id_for_candidate();
-	    let limits = ActiveBoundedProbeRiskLimits {
-	        max_demo_notional_usdt_per_order: effective_single_order_cap_usdt,
-	    };
-	    ActiveBoundedProbeOrderRequest {
-	        order_link_id,
-	        decision_lease_id: Some(decision_lease_id),
-	        limits,
-	    }
-	}
-	fn build_runtime_admission_record(active_order_request: Option<ActiveBoundedProbeOrderRequest>) {
-	    let bounded_probe_adapter_enabled =
-	        std::env::var(OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED)
-	            .map(|value| bounded_probe_adapter_enabled_from_value(&value))
-	            .unwrap_or(false)
-	            && active_order_request.is_some();
+pub const OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED: &str =
+    "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED";
+struct RiskConfig { limits: GuiRiskLimits }
+struct GuiRiskLimits {
+    per_trade_risk_pct: f64,
+    position_size_max_pct: f64,
+    max_order_notional_usdt: f64,
+}
+struct AcceptedDemoEquity { equity_usdt: f64 }
+struct OrderDispatchRequest;
+struct UnboundedSender<T>(T);
+struct ActiveBoundedProbeOrderRequest {
+    order_link_id: String,
+    decision_lease_id: Option<String>,
+    limits: ActiveBoundedProbeRiskLimits,
+}
+struct ActiveBoundedProbeRiskLimits { max_demo_notional_usdt_per_order: f64 }
+pub fn build_admission_ledger_record_with_placement() {}
+pub fn build_capture_error_ledger_record() {}
+pub fn submit_candidate_matched_bounded_probe_order() -> u8 { 1 }
+pub fn active_bounded_probe_order_submission(_decision: u8) -> Option<u8> { Some(1) }
+fn dispatch_active_bounded_probe_order_draft(
+    _tx: UnboundedSender<OrderDispatchRequest>,
+    _active_order_draft: u8,
+) {}
+fn bounded_probe_order_link_id_for_candidate() -> String { String::new() }
+fn bounded_probe_adapter_enabled_from_value(value: &str) -> bool {
+    value.trim() == "1" || value.trim().eq_ignore_ascii_case("true")
+}
+fn evaluate_probe_admission(_enabled: bool) {}
+fn gui_derived_active_order_request_supplier(
+    risk_config: RiskConfig,
+    accepted_demo_equity: AcceptedDemoEquity,
+    decision_lease_id: String,
+) -> ActiveBoundedProbeOrderRequest {
+    let per_trade_budget_usdt =
+        accepted_demo_equity.equity_usdt * risk_config.limits.per_trade_risk_pct;
+    let single_position_budget_usdt =
+        accepted_demo_equity.equity_usdt * risk_config.limits.position_size_max_pct / 100.0;
+    let max_order_notional_usdt = risk_config.limits.max_order_notional_usdt;
+    let effective_single_order_cap_usdt = per_trade_budget_usdt
+        .min(single_position_budget_usdt)
+        .min(max_order_notional_usdt);
+    let order_link_id = bounded_probe_order_link_id_for_candidate();
+    let limits = ActiveBoundedProbeRiskLimits {
+        max_demo_notional_usdt_per_order: effective_single_order_cap_usdt,
+    };
+    ActiveBoundedProbeOrderRequest {
+        order_link_id,
+        decision_lease_id: Some(decision_lease_id),
+        limits,
+    }
+}
+fn build_runtime_admission_result(
+    active_order_request: Option<ActiveBoundedProbeOrderRequest>,
+    active_order_dispatch_channel_available: bool,
+) {
+    let bounded_probe_adapter_env_enabled =
+        std::env::var(OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED)
+            .map(|value| bounded_probe_adapter_enabled_from_value(&value))
+            .unwrap_or(false);
+    let bounded_probe_adapter_enabled = bounded_probe_adapter_env_enabled
+        && active_order_request.is_some()
+        && active_order_dispatch_channel_available;
     let decision = submit_candidate_matched_bounded_probe_order();
-	    active_bounded_probe_order_submission(decision);
-	    evaluate_probe_admission(bounded_probe_adapter_enabled);
-	}
-	fn runtime_caller(risk_config: RiskConfig, accepted_demo_equity: AcceptedDemoEquity, decision_lease_id: String) {
-	    let active_order_request = Some(gui_derived_active_order_request_supplier(
-	        risk_config,
-	        accepted_demo_equity,
-	        decision_lease_id,
-	    ));
-	    build_runtime_admission_record(active_order_request);
-	}
-	""",
-	    )
+    let active_order_draft = active_bounded_probe_order_submission(decision);
+    evaluate_probe_admission(bounded_probe_adapter_enabled);
+    if let Some(draft) = active_order_draft {
+        dispatch_active_bounded_probe_order_draft(UnboundedSender(OrderDispatchRequest), draft);
+    }
+}
+fn runtime_caller(risk_config: RiskConfig, accepted_demo_equity: AcceptedDemoEquity, decision_lease_id: String) {
+    let active_order_request = Some(gui_derived_active_order_request_supplier(
+        risk_config,
+        accepted_demo_equity,
+        decision_lease_id,
+    ));
+    build_runtime_admission_result(active_order_request, true);
+}
+""",
+    )
     _write(
         tmp_path / "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs",
         """
@@ -1151,7 +1165,7 @@ const BOUNDED_PROBE_ATTEMPT_RECORD_TYPE: &str = "bounded_probe_attempt";
 fn execution_reference(best_bid: Option<f64>, best_ask: Option<f64>) {}
 pub fn active_bounded_probe_order_submission() {}
 pub fn dispatch_admitted_bounded_probe_order() {}
-fn dispatch(intent: OrderIntent) {
+fn dispatch(intent: OrderIntent, active_order_request: Option<ActiveBoundedProbeOrderRequest>) {
     let req = BoundedProbeOptionalBboPlacementRequest {};
     let _ = post_only_near_touch_from_optional_bbo_or_skip(&req);
     let _ = BOUNDED_PROBE_ATTEMPT_RECORD_TYPE;
@@ -1159,6 +1173,14 @@ fn dispatch(intent: OrderIntent) {
         limit_price: intent.limit_price,
         time_in_force: intent.time_in_force,
     };
+    writer.record_reject_event_with_placement_active_request_and_order_dispatch(
+        reject_event,
+        risk_state,
+        event_ts_ms,
+        Some(placement_decision),
+        active_order_request,
+        self.order_dispatch_tx.clone(),
+    );
 }
 """,
     )
@@ -1393,6 +1415,57 @@ fn build_runtime_admission_record(active_order_request: Option<u8>) {
     let decision = submit_candidate_matched_bounded_probe_order();
     active_bounded_probe_order_submission(decision);
     evaluate_probe_admission(bounded_probe_adapter_enabled);
+}
+""",
+    )
+    _write_authority_path_wiring(tmp_path)
+
+    packet = build_bounded_demo_probe_authority_patch_readiness(
+        placement_repair_plan=_placement_plan(),
+        repo_root=tmp_path,
+        now_utc=NOW,
+    )
+
+    caller = packet["active_caller_enablement_review"]
+    assert caller["evidence"]["production_active_caller_present"] is True
+    assert caller["evidence"]["runtime_adapter_enablement_gate_present"] is False
+    assert caller["active_caller_source_ready_for_review"] is False
+    assert "reviewed_runtime_adapter_enablement_gate_missing" in caller["blockers"]
+
+
+def test_env_and_active_request_gate_without_dispatch_channel_guard_does_not_count(
+    tmp_path: Path,
+) -> None:
+    _write_existing_seams(tmp_path)
+    _write_patch_adapter(tmp_path)
+    _write(
+        tmp_path / "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
+        """
+pub const OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED: &str =
+    "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED";
+pub fn build_admission_ledger_record_with_placement() {}
+pub fn build_capture_error_ledger_record() {}
+pub fn submit_candidate_matched_bounded_probe_order() -> u8 { 1 }
+pub fn active_bounded_probe_order_submission(_decision: u8) -> Option<u8> { Some(1) }
+fn dispatch_active_bounded_probe_order_draft(_draft: u8) {}
+fn bounded_probe_adapter_enabled_from_value(value: &str) -> bool {
+    value.trim() == "1" || value.trim().eq_ignore_ascii_case("true")
+}
+fn evaluate_probe_admission(_enabled: bool) {}
+fn build_runtime_admission_result(
+    active_order_request: Option<u8>,
+    active_order_dispatch_channel_available: bool,
+) {
+    let bounded_probe_adapter_env_enabled =
+        std::env::var(OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED)
+            .map(|value| bounded_probe_adapter_enabled_from_value(&value))
+            .unwrap_or(false);
+    let bounded_probe_adapter_enabled = bounded_probe_adapter_env_enabled
+        && active_order_request.is_some();
+    let decision = submit_candidate_matched_bounded_probe_order();
+    let active_order_draft = active_bounded_probe_order_submission(decision);
+    evaluate_probe_admission(bounded_probe_adapter_enabled);
+    let _ = (active_order_dispatch_channel_available, active_order_draft);
 }
 """,
     )
