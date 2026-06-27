@@ -31,6 +31,7 @@ use crate::demo_learning_lane_ledger::{
     attempt_id_for_reject_event, build_admission_ledger_record_with_placement,
     build_capture_error_ledger_record, AdmissionLedgerRecord,
 };
+use crate::tick_pipeline::OrderDispatchRequest;
 
 const CHANNEL_CAPACITY: usize = 4096;
 const BUF_WRITER_CAPACITY: usize = 64 * 1024;
@@ -48,6 +49,7 @@ struct WriterMsg {
     now_ms: u64,
     placement_decision: Option<BoundedProbePlacementDecision>,
     active_order_request: Option<ActiveBoundedProbeOrderRequest>,
+    order_dispatch_tx: Option<tokio::sync::mpsc::UnboundedSender<OrderDispatchRequest>>,
 }
 
 #[derive(Clone)]
@@ -98,6 +100,25 @@ impl DemoLearningLaneWriterHandle {
         placement_decision: Option<BoundedProbePlacementDecision>,
         active_order_request: Option<ActiveBoundedProbeOrderRequest>,
     ) {
+        self.record_reject_event_with_placement_active_request_and_order_dispatch(
+            event,
+            risk_state,
+            now_ms,
+            placement_decision,
+            active_order_request,
+            None,
+        );
+    }
+
+    pub fn record_reject_event_with_placement_active_request_and_order_dispatch(
+        &self,
+        event: RejectEvent,
+        risk_state: &str,
+        now_ms: u64,
+        placement_decision: Option<BoundedProbePlacementDecision>,
+        active_order_request: Option<ActiveBoundedProbeOrderRequest>,
+        order_dispatch_tx: Option<tokio::sync::mpsc::UnboundedSender<OrderDispatchRequest>>,
+    ) {
         if let Some(ref tx) = self.tx {
             let msg = WriterMsg {
                 event,
@@ -105,6 +126,7 @@ impl DemoLearningLaneWriterHandle {
                 now_ms,
                 placement_decision,
                 active_order_request,
+                order_dispatch_tx,
             };
             match tx.try_send(msg) {
                 Ok(()) => {}
@@ -204,18 +226,29 @@ async fn run_writer(
             }
             msg = rx.recv() => {
                 let Some(msg) = msg else { break };
-                match build_runtime_admission_record(
+                let WriterMsg {
+                    event,
+                    risk_state,
+                    now_ms,
+                    placement_decision,
+                    active_order_request,
+                    order_dispatch_tx,
+                } = msg;
+                let active_order_dispatch_channel_available = order_dispatch_tx.is_some();
+                match build_runtime_admission_result(
                     &plan_path,
                     &ledger_path,
-                    &msg.event,
-                    &msg.risk_state,
-                    msg.now_ms,
+                    &event,
+                    &risk_state,
+                    now_ms,
                     Utc::now(),
-                    msg.placement_decision.as_ref(),
-                    msg.active_order_request,
+                    placement_decision.as_ref(),
+                    active_order_request,
+                    active_order_dispatch_channel_available,
+                    None,
                 ) {
-                    Ok(Some(record)) => {
-                        match record.to_json_string() {
+                    Ok(Some(result)) => {
+                        match result.record.to_json_string() {
                             Ok(json) => {
                                 if let Err(e) = bw.write_all(json.as_bytes()).and_then(|_| bw.write_all(b"\n")) {
                                     warn!(
@@ -229,6 +262,30 @@ async fn run_writer(
                                         ledger_path = %ledger_path.display(),
                                         "demo-learning lane ledger flush failed / demo-learning lane ledger flush 失敗"
                                     );
+                                } else if let Some(draft) = result.active_order_draft {
+                                    if let Some(ref tx) = order_dispatch_tx {
+                                        match dispatch_active_bounded_probe_order_draft(tx, draft) {
+                                            Ok(true) => {
+                                                info!(
+                                                    ledger_path = %ledger_path.display(),
+                                                    "bounded Demo probe active order dispatched after admission ledger flush / bounded Demo probe active order 已在 admission ledger flush 後派發"
+                                                );
+                                            }
+                                            Ok(false) => {
+                                                warn!(
+                                                    ledger_path = %ledger_path.display(),
+                                                    "bounded Demo probe active order draft failed final notional cap check before dispatch / bounded Demo probe active order draft 在派發前未通過最終 notional cap 檢查"
+                                                );
+                                            }
+                                            Err(e) => {
+                                                warn!(
+                                                    error = %e,
+                                                    ledger_path = %ledger_path.display(),
+                                                    "bounded Demo probe order dispatch channel send failed after admission ledger flush / bounded Demo probe order admission ledger flush 後派發 channel send 失敗"
+                                                );
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             Err(e) => {
@@ -240,9 +297,9 @@ async fn run_writer(
                     Err(e) => {
                         warn!(error = %e, "demo-learning lane admission evaluation failed; writing capture-error row / demo-learning lane admission 評估失敗，寫入 capture-error row");
                         let record = build_capture_error_ledger_record(
-                            &msg.event,
+                            &event,
                             Utc::now(),
-                            &msg.risk_state,
+                            &risk_state,
                             &e,
                         );
                         match record.to_json_string() {
@@ -274,6 +331,7 @@ async fn run_writer(
     info!("demo-learning lane writer stopped / demo-learning lane 寫入器已停止");
 }
 
+#[cfg(test)]
 pub(crate) fn build_runtime_admission_record(
     plan_path: &Path,
     ledger_path: &Path,
@@ -284,6 +342,40 @@ pub(crate) fn build_runtime_admission_record(
     placement_decision: Option<&BoundedProbePlacementDecision>,
     active_order_request: Option<ActiveBoundedProbeOrderRequest>,
 ) -> Result<Option<AdmissionLedgerRecord>, String> {
+    build_runtime_admission_result(
+        plan_path,
+        ledger_path,
+        event,
+        risk_state,
+        now_ms,
+        generated_at_utc,
+        placement_decision,
+        active_order_request,
+        false,
+        None,
+    )
+    .map(|result| result.map(|result| result.record))
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeAdmissionBuildResult {
+    record: AdmissionLedgerRecord,
+    active_order_draft: Option<ActiveBoundedProbeOrderDraft>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_runtime_admission_result(
+    plan_path: &Path,
+    ledger_path: &Path,
+    event: &RejectEvent,
+    risk_state: &str,
+    now_ms: u64,
+    generated_at_utc: DateTime<Utc>,
+    placement_decision: Option<&BoundedProbePlacementDecision>,
+    active_order_request: Option<ActiveBoundedProbeOrderRequest>,
+    active_order_dispatch_channel_available: bool,
+    bounded_probe_adapter_enabled_override: Option<bool>,
+) -> Result<Option<RuntimeAdmissionBuildResult>, String> {
     let ledger_rows = read_ledger_rows(ledger_path)?;
     let attempt_id = attempt_id_for_reject_event(event);
     if ledger_rows
@@ -296,10 +388,15 @@ pub(crate) fn build_runtime_admission_record(
         .map_err(|err| format!("read plan {} failed: {err}", plan_path.display()))?;
     let plan = DemoLearningLanePlan::from_json_str(&plan_json)
         .map_err(|err| format!("parse plan {} failed: {err}", plan_path.display()))?;
-    let bounded_probe_adapter_enabled = std::env::var(OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED)
-        .map(|value| bounded_probe_adapter_enabled_from_value(&value))
-        .unwrap_or(false)
-        && active_order_request.is_some();
+    let bounded_probe_adapter_env_enabled =
+        bounded_probe_adapter_enabled_override.unwrap_or_else(|| {
+            std::env::var(OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED)
+                .map(|value| bounded_probe_adapter_enabled_from_value(&value))
+                .unwrap_or(false)
+        });
+    let bounded_probe_adapter_enabled = bounded_probe_adapter_env_enabled
+        && active_order_request.is_some()
+        && active_order_dispatch_channel_available;
     let decision = evaluate_probe_admission(
         &plan,
         event,
@@ -309,6 +406,7 @@ pub(crate) fn build_runtime_admission_record(
         bounded_probe_adapter_enabled,
         risk_state,
     );
+    let mut active_order_draft = None;
     if let (Some(order_request), Some(placement_decision)) =
         (active_order_request, placement_decision.cloned())
     {
@@ -322,15 +420,17 @@ pub(crate) fn build_runtime_admission_record(
             bounded_probe_adapter_enabled,
             order_request,
         );
-        let _active_order_draft_preview =
-            active_bounded_probe_order_submission(active_order_decision);
+        active_order_draft = active_bounded_probe_order_submission(active_order_decision);
     }
-    Ok(Some(build_admission_ledger_record_with_placement(
-        &decision,
-        event,
-        generated_at_utc,
-        placement_decision,
-    )))
+    Ok(Some(RuntimeAdmissionBuildResult {
+        record: build_admission_ledger_record_with_placement(
+            &decision,
+            event,
+            generated_at_utc,
+            placement_decision,
+        ),
+        active_order_draft,
+    }))
 }
 
 pub(crate) fn bounded_probe_adapter_enabled_from_value(value: &str) -> bool {
@@ -373,6 +473,54 @@ pub(crate) fn active_bounded_probe_order_submission(
         ActiveBoundedProbeOrderDecision::Submit(draft) => Some(draft),
         ActiveBoundedProbeOrderDecision::Skip(_) => None,
     }
+}
+
+pub(crate) fn dispatch_active_bounded_probe_order_draft(
+    tx: &tokio::sync::mpsc::UnboundedSender<OrderDispatchRequest>,
+    draft: ActiveBoundedProbeOrderDraft,
+) -> Result<bool, tokio::sync::mpsc::error::SendError<OrderDispatchRequest>> {
+    if !crate::bounded_probe_active_order::active_bounded_probe_effective_notional_within_cap(
+        draft.qty,
+        draft.limit_price,
+        draft.max_demo_notional_usdt_per_order,
+    ) {
+        return Ok(false);
+    }
+    let order_link_id = draft.lineage.order_link_id.clone();
+    let context_id = draft.lineage.context_id.clone();
+    let signal_id = draft.lineage.signal_id.clone();
+    tx.send(OrderDispatchRequest {
+        symbol: draft.symbol,
+        is_long: draft.is_long,
+        qty: draft.qty,
+        price: draft.reference_price,
+        strategy: draft.strategy,
+        paper_fill_ts: draft.paper_fill_ts,
+        is_close: false,
+        order_link_id,
+        decision_lease_id: Some(draft.decision_lease_id),
+        is_primary: true,
+        stop_loss: None,
+        take_profit: None,
+        context_id,
+        order_type: "limit".to_string(),
+        limit_price: Some(draft.limit_price),
+        time_in_force: Some(draft.time_in_force),
+        maker_timeout_ms: Some(draft.maker_timeout_ms),
+        close_maker_audit: None,
+        reference_price: Some(draft.reference_price),
+        reference_ts_ms: Some(draft.paper_fill_ts),
+        reference_source: Some(
+            crate::bounded_probe_active_order::ACTIVE_BOUNDED_PROBE_REFERENCE_SOURCE.to_string(),
+        ),
+        spine_order_plan_id: None,
+        spine_decision_id: None,
+        spine_verdict_id: None,
+        spine_stub_report_id: None,
+        intent_id: Some(signal_id),
+        reprice_count: 0,
+    })?;
+    Ok(true)
 }
 
 fn read_ledger_rows(path: &Path) -> Result<Vec<LedgerRecord>, String> {
@@ -797,6 +945,132 @@ mod tests {
     }
 
     #[test]
+    fn runtime_admission_dispatch_requires_channel_and_emits_candidate_matched_request() {
+        let tmp = TempDir::new().unwrap();
+        let plan_path = tmp.path().join("plan.json");
+        let ledger_path = tmp.path().join("probe_ledger.jsonl");
+        std::fs::write(&plan_path, authorized_plan_json("2026-06-21T10:49:45Z")).unwrap();
+        let event = reject_event();
+        let placement = BoundedProbePlacementDecision::Submit(BoundedProbeAttemptPlacement {
+            record_type: "bounded_probe_attempt",
+            side_cell_key: "ma_crossover|ETHUSDT|Sell".to_string(),
+            limit_price: 3_499.9,
+            touch_gap_bps: 12.5,
+            reference_price: 3_500.0,
+            bbo_age_ms: 0,
+        });
+        let plan =
+            DemoLearningLanePlan::from_json_str(&authorized_plan_json("2026-06-21T10:49:45Z"))
+                .unwrap();
+        let admission_decision = evaluate_probe_admission(
+            &plan,
+            &event,
+            &[],
+            1_782_041_001_000,
+            &AdmissionConfig::default(),
+            true,
+            "NORMAL",
+        );
+        let order_link_id = bounded_probe_order_link_id_for_candidate(
+            &event.engine_mode,
+            event.ts_ms,
+            1,
+            &event.side_cell_key(),
+            event.context_id.as_deref().unwrap(),
+            event.signal_id.as_deref().unwrap(),
+        )
+        .unwrap();
+        let order_request = ActiveBoundedProbeOrderRequest {
+            reject_event: event.clone(),
+            admission_decision,
+            placement_decision: placement.clone(),
+            qty: 0.001,
+            order_link_id: order_link_id.clone(),
+            decision_lease_id: Some("lease-demo-1".to_string()),
+            risk_state: "NORMAL".to_string(),
+            limits: ActiveBoundedProbeRiskLimits {
+                max_demo_notional_usdt_per_order: GUI_RISK_CAP_USDT,
+                ..ActiveBoundedProbeRiskLimits::default()
+            },
+        };
+
+        let without_channel = build_runtime_admission_result(
+            &plan_path,
+            &ledger_path,
+            &event,
+            "NORMAL",
+            1_782_041_001_000,
+            DateTime::parse_from_rfc3339("2026-06-21T10:50:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+            Some(&placement),
+            Some(order_request.clone()),
+            false,
+            Some(true),
+        )
+        .unwrap()
+        .expect("authorized plan should still write an adapter-disabled row");
+        assert_eq!(without_channel.record.decision, "ADAPTER_DISABLED");
+        assert!(!without_channel.record.allowed_to_submit_order);
+        assert!(without_channel.active_order_draft.is_none());
+
+        let with_channel = build_runtime_admission_result(
+            &plan_path,
+            &ledger_path,
+            &event,
+            "NORMAL",
+            1_782_041_001_000,
+            DateTime::parse_from_rfc3339("2026-06-21T10:50:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+            Some(&placement),
+            Some(order_request),
+            true,
+            Some(true),
+        )
+        .unwrap()
+        .expect("authorized plan and dispatch channel should build an admitted row");
+        assert_eq!(with_channel.record.decision, "ADMIT_DEMO_LEARNING_PROBE");
+        assert!(with_channel.record.allowed_to_submit_order);
+        let draft = with_channel
+            .active_order_draft
+            .expect("admitted bounded probe should produce active order draft");
+        assert_eq!(draft.lineage.order_link_id, order_link_id);
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        assert!(dispatch_active_bounded_probe_order_draft(&tx, draft)
+            .expect("dispatch channel should accept admitted draft"));
+        let req = rx
+            .try_recv()
+            .expect("candidate-matched OrderDispatchRequest should be sent");
+        assert_eq!(req.symbol, "ETHUSDT");
+        assert!(!req.is_long);
+        assert_eq!(req.order_link_id, order_link_id);
+        assert_eq!(req.decision_lease_id.as_deref(), Some("lease-demo-1"));
+        assert_eq!(req.context_id, "ctx-live_demo-ETHUSDT-1782041000000");
+        assert_eq!(
+            req.intent_id.as_deref(),
+            Some("sig-live_demo-ma_crossover-ETHUSDT-1782041000000")
+        );
+        assert_eq!(req.order_type, "limit");
+        assert_eq!(req.limit_price, Some(3_499.9));
+        assert_eq!(
+            req.time_in_force,
+            Some(crate::order_manager::TimeInForce::PostOnly)
+        );
+        assert_eq!(
+            req.maker_timeout_ms,
+            Some(crate::bounded_probe_active_order::DEFAULT_ACTIVE_BOUNDED_PROBE_MAKER_TIMEOUT_MS)
+        );
+        assert_eq!(req.reference_price, Some(3_500.0));
+        assert_eq!(
+            req.reference_source.as_deref(),
+            Some(crate::bounded_probe_active_order::ACTIVE_BOUNDED_PROBE_REFERENCE_SOURCE)
+        );
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
     fn disabled_handle_does_not_accept_events() {
         let handle = DemoLearningLaneWriterHandle::disabled();
         assert!(!handle.is_enabled());
@@ -846,6 +1120,7 @@ mod tests {
             now_ms: 1_782_041_001_000,
             placement_decision: None,
             active_order_request: None,
+            order_dispatch_tx: None,
         })
         .await
         .unwrap();
@@ -887,6 +1162,7 @@ mod tests {
             now_ms: 1_782_041_001_000,
             placement_decision: None,
             active_order_request: None,
+            order_dispatch_tx: None,
         })
         .await
         .unwrap();

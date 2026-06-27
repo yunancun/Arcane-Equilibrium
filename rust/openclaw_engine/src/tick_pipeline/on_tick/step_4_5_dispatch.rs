@@ -199,6 +199,7 @@ fn bounded_probe_active_order_request_for_reject(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn active_bounded_probe_order_submission(
     tx: &tokio::sync::mpsc::UnboundedSender<OrderDispatchRequest>,
     request: crate::bounded_probe_active_order::ActiveBoundedProbeOrderRequest,
@@ -218,6 +219,7 @@ pub(crate) fn active_bounded_probe_order_submission(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn dispatch_admitted_bounded_probe_order(
     tx: &tokio::sync::mpsc::UnboundedSender<OrderDispatchRequest>,
     draft: crate::bounded_probe_active_order::ActiveBoundedProbeOrderDraft,
@@ -1223,12 +1225,13 @@ impl TickPipeline {
                                             self.intent_processor.accepted_demo_equity_usdt(),
                                         );
                                     self.demo_learning_lane_writer
-                                        .record_reject_event_with_placement_and_active_request(
+                                        .record_reject_event_with_placement_active_request_and_order_dispatch(
                                             reject_event,
                                             risk_state,
                                             event.ts_ms,
                                             Some(placement_decision),
                                             active_order_request,
+                                            self.order_dispatch_tx.clone(),
                                         );
                                 }
 
