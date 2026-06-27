@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-27 GUI Risk Cap Source Correction
+
+- PM closed source/test/docs correction as `DONE_WITH_CONCERNS`: GUI/Rust RiskConfig is risk source of truth; GUI `P1 Risk/Trade=10.0%` maps to TOML `per_trade_risk_pct=0.1`, not `10 USDT`.
+- Rust bounded-probe active order `DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER=10.0` is a separate local envelope, not global risk authority. Do not use it as the single-order exposure cap.
+- `current_cap_staircase_risk_worksheet.py` now derives `resolved_cap_usdt` from GUI-backed RiskConfig plus auditable equity; quote/atomic runner no longer default-injects `10.0`; next blocker is GUI-risk cap resolver before any ETH construction refresh/admission.
+
 ## 2026-06-27 Aligned ETH Runtime Admission Review Blocked By Loss Control
 
 - PM/E3/BB closed `P0-ALIGNED-ETH-RUNTIME-ADMISSION-EXECUTION-ENVELOPE-REVIEW` as `BLOCKED_BY_LOSS_CONTROL`.

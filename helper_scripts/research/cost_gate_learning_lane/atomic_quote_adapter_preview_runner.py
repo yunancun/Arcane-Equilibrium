@@ -187,7 +187,7 @@ def run_atomic_quote_adapter_preview(
     output_dir: Path,
     base_url: str = quote_capture.DEFAULT_BASE_URL,
     timeout_seconds: float = 2.0,
-    cap_usdt: float = 10.0,
+    cap_usdt: float | None = None,
     demo_operational_authorization_available: bool = False,
     source_head: str | None = None,
     runtime_head: str | None = None,
@@ -318,7 +318,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--base-url", default=quote_capture.DEFAULT_BASE_URL)
     parser.add_argument("--timeout-seconds", type=float, default=2.0)
-    parser.add_argument("--cap-usdt", type=float, default=10.0)
+    parser.add_argument("--cap-usdt", type=float)
     parser.add_argument("--demo-operational-authorization-available", action="store_true")
     parser.add_argument("--source-head")
     parser.add_argument("--runtime-head")

@@ -36,8 +36,8 @@ STALE_REVIEW_BLOCKER_ID = (
 STALE_REVIEW_NEXT_BLOCKER_ID = (
     "P1-AGGRESSIVE-ALPHA-ATOMIC-QUOTE-ADAPTER-PREVIEW-DESIGN-NO-CAPTURE"
 )
-EXPECTED_CANDIDATE = "grid_trading|AVAXUSDT|Sell"
 CANONICAL_MAX_FRESH_BBO_AGE_MS = 1000
+SYMBOL_RE = re.compile(r"^[A-Z0-9]{3,40}$")
 
 CAPTURE_HELPER = (
     "helper_scripts/research/cost_gate_learning_lane/"
@@ -252,6 +252,37 @@ def _request_specs(reviewed_packet: dict[str, Any]) -> list[dict[str, Any]]:
     return _list(envelope.get("required_requests"))
 
 
+def _normalized_horizon(value: Any) -> int | None:
+    parsed = _float(value)
+    if parsed is None or not parsed.is_integer():
+        return None
+    return int(parsed)
+
+
+def _candidate_identity_reasons(candidate: dict[str, Any]) -> list[str]:
+    side_cell_key = _str(candidate.get("side_cell_key"))
+    strategy = _str(candidate.get("strategy_name"))
+    raw_symbol = _str(candidate.get("symbol"))
+    symbol = raw_symbol.upper()
+    side = _str(candidate.get("side"))
+    horizon = _normalized_horizon(candidate.get("outcome_horizon_minutes"))
+    reasons: list[str] = []
+    if not side_cell_key or not strategy or not raw_symbol or not side or horizon is None:
+        reasons.append("candidate_identity_incomplete")
+    if raw_symbol and raw_symbol != symbol:
+        reasons.append("candidate_symbol_not_uppercase")
+    if symbol and SYMBOL_RE.fullmatch(symbol) is None:
+        reasons.append("candidate_symbol_not_safe")
+    if side and side not in {"Buy", "Sell"}:
+        reasons.append("candidate_side_not_buy_sell")
+    if horizon is not None and horizon <= 0:
+        reasons.append("candidate_horizon_not_positive")
+    if side_cell_key and strategy and symbol and side:
+        if side_cell_key != f"{strategy}|{symbol}|{side}":
+            reasons.append("candidate_side_cell_key_mismatch")
+    return sorted(set(reasons))
+
+
 def _reviewed_packet_reasons(reviewed_packet: dict[str, Any]) -> list[str]:
     reasons: list[str] = []
     if reviewed_packet.get("schema_version") != REVIEWED_PACKET_SCHEMA_VERSION:
@@ -259,8 +290,8 @@ def _reviewed_packet_reasons(reviewed_packet: dict[str, Any]) -> list[str]:
     if reviewed_packet.get("status") != REVIEWED_PACKET_READY_STATUS:
         reasons.append("reviewed_packet_status_not_ready")
     candidate = _dict(reviewed_packet.get("candidate"))
-    if candidate.get("side_cell_key") != EXPECTED_CANDIDATE:
-        reasons.append("candidate_not_expected_avax_side_cell")
+    reasons.extend(_candidate_identity_reasons(candidate))
+    symbol = _str(candidate.get("symbol")).upper()
     summary = _dict(reviewed_packet.get("summary"))
     if summary.get("runtime_capture_allowed_by_this_packet") is not False:
         reasons.append("runtime_capture_allowed_by_reviewed_packet")
@@ -294,10 +325,10 @@ def _reviewed_packet_reasons(reviewed_packet: dict[str, Any]) -> list[str]:
     required = _request_specs(reviewed_packet)
     expected_paths = {
         "server_time": ("/v5/market/time", {}),
-        "ticker": ("/v5/market/tickers", {"category": "linear", "symbol": "AVAXUSDT"}),
+        "ticker": ("/v5/market/tickers", {"category": "linear", "symbol": symbol}),
         "instrument": (
             "/v5/market/instruments-info",
-            {"category": "linear", "symbol": "AVAXUSDT"},
+            {"category": "linear", "symbol": symbol},
         ),
     }
     if len(required) != 3:

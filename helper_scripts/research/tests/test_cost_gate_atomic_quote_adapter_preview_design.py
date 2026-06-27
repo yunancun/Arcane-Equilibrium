@@ -9,6 +9,7 @@ from pathlib import Path
 from cost_gate_learning_lane.atomic_quote_adapter_preview_design import (
     AUTHORITY_BOUNDARY_VIOLATION_STATUS,
     READY_STATUS,
+    REVIEWED_PACKET_NOT_READY_STATUS,
     SCHEMA_VERSION,
     STALE_ADAPTER_EVIDENCE_MISSING_STATUS,
     build_atomic_quote_adapter_preview_design,
@@ -226,6 +227,30 @@ def test_missing_stale_adapter_evidence_fails_closed() -> None:
     assert packet["design"] == {}
     assert "stale_adapter_failure_reason_missing" in packet["readiness"]["blocking_reasons"]
     assert packet["answers"]["public_quote_capture_performed"] is False
+
+
+def test_reviewed_packet_with_unsafe_symbol_fails_closed() -> None:
+    reviewed = _reviewed_packet(
+        candidate={
+            "side_cell_key": "grid_trading|ETH/USDT|Buy",
+            "strategy_name": "grid_trading",
+            "symbol": "ETH/USDT",
+            "side": "Buy",
+            "outcome_horizon_minutes": 60,
+        }
+    )
+
+    packet = build_atomic_quote_adapter_preview_design(
+        reviewed_public_quote_packet=reviewed,
+        stale_adapter_review_session=_stale_session(),
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == REVIEWED_PACKET_NOT_READY_STATUS
+    assert "candidate_symbol_not_safe" in packet["readiness"][
+        "reviewed_packet_reasons"
+    ]
+    assert packet["summary"]["future_capture_required"] is False
 
 
 def test_missing_structured_stale_quote_artifact_fails_closed() -> None:

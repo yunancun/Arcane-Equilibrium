@@ -81,6 +81,10 @@ def _candidate(**overrides) -> dict:
         "outcome_horizon_minutes": 60,
     }
     payload.update(overrides)
+    if "side_cell_key" not in overrides:
+        payload["side_cell_key"] = (
+            f"{payload['strategy_name']}|{payload['symbol']}|{payload['side']}"
+        )
     return payload
 
 
@@ -110,6 +114,15 @@ def _reroute(candidate=None, **overrides) -> dict:
 
 def _payloads(
     *,
+    symbol: str = "AVAXUSDT",
+    bid: str = "6.044",
+    ask: str = "6.045",
+    bid_size: str = "120.0",
+    ask_size: str = "110.0",
+    last_price: str = "6.0445",
+    mark_price: str = "6.0444",
+    qty_step: str = "0.1",
+    min_notional: str = "5",
     ticker_time_ms: int | None = START_MS + 20,
     rows=None,
     instrument_status="Trading",
@@ -117,13 +130,13 @@ def _payloads(
 ) -> dict:
     ticker_rows = rows if rows is not None else [
         {
-            "symbol": "AVAXUSDT",
-            "bid1Price": "6.044",
-            "ask1Price": "6.045",
-            "bid1Size": "120.0",
-            "ask1Size": "110.0",
-            "lastPrice": "6.0445",
-            "markPrice": "6.0444",
+            "symbol": symbol,
+            "bid1Price": bid,
+            "ask1Price": ask,
+            "bid1Size": bid_size,
+            "ask1Size": ask_size,
+            "lastPrice": last_price,
+            "markPrice": mark_price,
         }
     ]
     return {
@@ -146,12 +159,12 @@ def _payloads(
                 "category": "linear",
                 "list": [
                     {
-                        "symbol": "AVAXUSDT",
+                        "symbol": symbol,
                         "status": instrument_status,
                         "priceFilter": {"tickSize": "0.001"},
                         "lotSizeFilter": {
-                            "qtyStep": "0.1",
-                            "minNotionalValue": "5",
+                            "qtyStep": qty_step,
+                            "minNotionalValue": min_notional,
                         },
                     }
                 ],
@@ -188,10 +201,97 @@ def test_happy_path_emits_public_quote_ready_no_order() -> None:
     assert packet["answers"]["bybit_private_call_performed"] is False
     assert packet["answers"]["order_submission_performed"] is False
     assert packet["answers"]["main_cost_gate_adjustment"] == "NONE"
+    assert packet["risk_limits"]["cap_usdt"] == 10.0
+    assert packet["risk_limits"]["reviewed_candidate_cap_usdt"] == 10.0
+    assert (
+        packet["risk_limits"]["cap_source"]
+        == "reroute_review.selected_candidate.current_cap_usdt"
+    )
+    assert packet["risk_limits"]["global_risk_single_order_cap_resolved"] is False
     assert len(opener.requests) == 3
     assert packet["requests"][1]["raw_response_sha256"]
     assert packet["requests"][1]["normalized_response_sha256"]
     assert packet["artifact_self_hash_sha256"]
+
+
+def test_eth_candidate_uses_candidate_scoped_linear_symbol_requests() -> None:
+    candidate = _candidate(symbol="ETHUSDT", side="Buy")
+    packet, opener = _capture(
+        reroute_review=_reroute(candidate=candidate),
+        payloads=_payloads(
+            symbol="ETHUSDT",
+            bid="2500.0",
+            ask="2500.5",
+            last_price="2500.25",
+            mark_price="2500.2",
+            qty_step="0.01",
+        ),
+    )
+
+    assert packet["status"] == mod.READY_STATUS
+    assert packet["candidate"]["side_cell_key"] == "grid_trading|ETHUSDT|Buy"
+    assert packet["endpoint_allowlist"]["symbol"] == "ETHUSDT"
+    assert packet["readiness"]["candidate_identity_valid"] is True
+    assert packet["risk_limits"]["cap_usdt"] == 10.0
+    assert "global risk" in packet["risk_limits"]["cap_semantics"]
+    urls = [request.full_url for request in opener.requests]
+    assert "category=linear&symbol=ETHUSDT" in urls[1]
+    assert "category=linear&symbol=ETHUSDT" in urls[2]
+    assert packet["answers"]["order_submission_performed"] is False
+    assert packet["answers"]["probe_authority_granted"] is False
+
+
+def test_invalid_candidate_identity_blocks_before_public_request() -> None:
+    cases = [
+        (
+            _candidate(
+                symbol="ethusdt",
+                side_cell_key="grid_trading|ethusdt|Buy",
+            ),
+            "candidate_symbol_not_uppercase",
+        ),
+        (_candidate(symbol="ETHUSDT", side="Long"), "candidate_side_not_buy_sell"),
+        (
+            _candidate(
+                symbol="ETHUSDT",
+                side="Buy",
+                side_cell_key="grid_trading|ETHUSDT|Sell",
+            ),
+            "candidate_side_cell_key_mismatch",
+        ),
+        (
+            _candidate(
+                symbol="ETHUSDT",
+                side="Buy",
+                outcome_horizon_minutes=60.5,
+            ),
+            "candidate_identity_incomplete",
+        ),
+    ]
+
+    for candidate, expected_reason in cases:
+        clock = Clock()
+        opener = FakeOpener(clock)
+        packet = mod.capture_public_quote(
+            reroute_review=_reroute(candidate=candidate),
+            opener=opener,
+            now_fn=clock.now,
+            monotonic_fn=clock.monotonic,
+        )
+
+        assert packet["status"] == mod.INPUT_REQUIRED_STATUS
+        assert expected_reason in packet["blocking_gates"]
+        assert packet["answers"]["bybit_call_performed"] is False
+        assert opener.requests == []
+
+
+def test_cap_usdt_is_derived_from_reroute_and_caller_mismatch_blocks() -> None:
+    packet, opener = _capture(reroute_review=_reroute(), cap_usdt=20.0)
+
+    assert packet["status"] == mod.INPUT_REQUIRED_STATUS
+    assert "cap_usdt_mismatch_reviewed_candidate_cap" in packet["blocking_gates"]
+    assert packet["answers"]["bybit_call_performed"] is False
+    assert opener.requests == []
 
 
 def test_redirect_is_refused_and_fails_closed_no_order() -> None:

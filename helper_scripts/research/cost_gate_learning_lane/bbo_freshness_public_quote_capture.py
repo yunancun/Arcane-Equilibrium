@@ -2,10 +2,10 @@
 """Capture a bounded public Bybit BBO quote artifact for one Demo candidate.
 
 This helper is exchange-facing only when its CLI is explicitly run. It is
-restricted to public Bybit market-data GET requests for the current AVAXUSDT
-bounded Demo BBO-freshness blocker. It writes only artifacts; it never writes
-PG, submits/cancels/modifies orders, grants probe/order/live authority, lowers
-the Cost Gate, appends ledgers, or mutates runtime state.
+restricted to public Bybit market-data GET requests for the candidate selected
+by the reviewed reroute packet. It writes only artifacts; it never writes PG,
+submits/cancels/modifies orders, grants probe/order/live authority, lowers the
+Cost Gate, appends ledgers, or mutates runtime state.
 """
 
 from __future__ import annotations
@@ -45,13 +45,7 @@ TICKERS_PATH = "/v5/market/tickers"
 INSTRUMENTS_PATH = "/v5/market/instruments-info"
 USER_AGENT = "openclaw-bbo-public-quote-capture/1.0"
 
-REQUIRED_CANDIDATE = {
-    "side_cell_key": "grid_trading|AVAXUSDT|Sell",
-    "strategy_name": "grid_trading",
-    "symbol": "AVAXUSDT",
-    "side": "Sell",
-    "outcome_horizon_minutes": 60,
-}
+SYMBOL_RE = re.compile(r"^[A-Z0-9]{3,40}$")
 
 BOUNDARY = (
     "public market-data quote capture artifact only; no private/auth endpoint, "
@@ -213,6 +207,16 @@ def _int(value: Any) -> int | None:
 def _round(value: Any, ndigits: int = 6) -> float | None:
     parsed = _float(value)
     return round(parsed, ndigits) if parsed is not None else None
+
+
+def _floats_equal(left: Any, right: Any, *, tolerance: float = 1e-9) -> bool:
+    left_f = _float(left)
+    right_f = _float(right)
+    return (
+        left_f is not None
+        and right_f is not None
+        and abs(left_f - right_f) <= tolerance
+    )
 
 
 def _iso(value: dt.datetime) -> str:
@@ -402,8 +406,46 @@ def _candidate_from_reroute(reroute_review: dict[str, Any] | None) -> dict[str, 
     return _candidate_identity(_dict(_dict(reroute_review).get("selected_candidate")))
 
 
-def _candidate_matches_current_blocker(candidate: dict[str, Any]) -> bool:
-    return _candidate_identity(candidate) == REQUIRED_CANDIDATE
+def _selected_candidate_from_reroute(
+    reroute_review: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return _dict(_dict(reroute_review).get("selected_candidate"))
+
+
+def _reviewed_candidate_cap_usdt(
+    reroute_review: dict[str, Any] | None,
+) -> float | None:
+    candidate = _selected_candidate_from_reroute(reroute_review)
+    return _float(candidate.get("current_cap_usdt"))
+
+
+def _candidate_identity_reasons(candidate: dict[str, Any]) -> list[str]:
+    raw_symbol = _str(candidate.get("symbol"))
+    symbol = raw_symbol.upper()
+    strategy = _str(candidate.get("strategy_name"))
+    side = _str(candidate.get("side"))
+    side_cell_key = _str(candidate.get("side_cell_key"))
+    horizon = _normalized_horizon(candidate.get("outcome_horizon_minutes"))
+    reasons: list[str] = []
+    if not side_cell_key or not strategy or not raw_symbol or not side or horizon is None:
+        reasons.append("candidate_identity_incomplete")
+    if raw_symbol and raw_symbol != symbol:
+        reasons.append("candidate_symbol_not_uppercase")
+    if symbol and SYMBOL_RE.fullmatch(symbol) is None:
+        reasons.append("candidate_symbol_not_safe")
+    if side and side not in {"Buy", "Sell"}:
+        reasons.append("candidate_side_not_buy_sell")
+    if horizon is not None and horizon <= 0:
+        reasons.append("candidate_horizon_not_positive")
+    if side_cell_key and strategy and symbol and side:
+        expected_side_cell = f"{strategy}|{symbol}|{side}"
+        if side_cell_key != expected_side_cell:
+            reasons.append("candidate_side_cell_key_mismatch")
+    return sorted(set(reasons))
+
+
+def _candidate_identity_valid(candidate: dict[str, Any]) -> bool:
+    return not _candidate_identity_reasons(candidate)
 
 
 def _reroute_ready(reroute_review: dict[str, Any] | None) -> tuple[bool, list[str]]:
@@ -413,9 +455,8 @@ def _reroute_ready(reroute_review: dict[str, Any] | None) -> tuple[bool, list[st
         reasons.append("reroute_review_schema_mismatch")
     if payload.get("status") != REROUTE_READY_STATUS:
         reasons.append("reroute_review_not_ready")
-    candidate = _candidate_from_reroute(payload)
-    if not _candidate_matches_current_blocker(candidate):
-        reasons.append("candidate_not_current_avax_sell_blocker")
+    selected_candidate = _dict(payload.get("selected_candidate"))
+    reasons.extend(_candidate_identity_reasons(selected_candidate))
     return not reasons, reasons
 
 
@@ -845,7 +886,7 @@ def capture_public_quote(
     base_url: str = DEFAULT_BASE_URL,
     include_instruments_info: bool = True,
     timeout_seconds: float = 2.0,
-    cap_usdt: float = 10.0,
+    cap_usdt: float | None = None,
     max_fresh_bbo_age_ms: int = 1000,
     opener: Opener | None = None,
     now_fn: NowFn | None = None,
@@ -861,7 +902,10 @@ def capture_public_quote(
     generated_at = now_fn().astimezone(dt.timezone.utc)
     category = "linear"
     candidate = _candidate_from_reroute(reroute_review)
-    symbol = _str(candidate.get("symbol")).upper() or REQUIRED_CANDIDATE["symbol"]
+    selected_candidate = _selected_candidate_from_reroute(reroute_review)
+    reviewed_cap_usdt = _reviewed_candidate_cap_usdt(reroute_review)
+    effective_cap_usdt = cap_usdt if cap_usdt is not None else reviewed_cap_usdt
+    symbol = _str(candidate.get("symbol")).upper()
     base_url_clean = base_url.rstrip("/")
     reroute_ok, reroute_reasons = _reroute_ready(reroute_review)
     authority_ok, authority_reasons = _authority_preserved(
@@ -891,7 +935,11 @@ def capture_public_quote(
         blocking_gates.append("timeout_seconds_out_of_bounds")
     if max_fresh_bbo_age_ms <= 0 or max_fresh_bbo_age_ms > 5000:
         blocking_gates.append("max_fresh_bbo_age_ms_out_of_bounds")
-    if cap_usdt <= 0:
+    if reviewed_cap_usdt is None or reviewed_cap_usdt <= 0:
+        blocking_gates.append("reroute_candidate_current_cap_invalid")
+    elif cap_usdt is not None and not _floats_equal(cap_usdt, reviewed_cap_usdt):
+        blocking_gates.append("cap_usdt_mismatch_reviewed_candidate_cap")
+    if effective_cap_usdt is None or effective_cap_usdt <= 0:
         blocking_gates.append("cap_usdt_not_positive")
 
     requests: list[dict[str, Any]] = []
@@ -910,7 +958,7 @@ def capture_public_quote(
         reason = "input_artifacts_contain_authority_or_mutation_contamination"
     elif blocking_gates:
         status = INPUT_REQUIRED_STATUS
-        reason = "valid_ready_current_avax_reroute_and_public_quote_parameters_required"
+        reason = "valid_ready_candidate_reroute_and_public_quote_parameters_required"
     else:
         time_record = _http_get_json(
             label="server_time",
@@ -1001,8 +1049,12 @@ def capture_public_quote(
         "status": status,
         "reason": reason,
         "candidate": candidate,
-        "required_candidate": REQUIRED_CANDIDATE,
-        "candidate_match": _candidate_matches_current_blocker(candidate),
+        "required_candidate": {
+            "source": "reroute_review.selected_candidate",
+            "identity_rule": "side_cell_key must equal strategy_name|symbol|side and symbol must be uppercase/safe before any request",
+        },
+        "candidate_match": _candidate_identity_valid(selected_candidate),
+        "candidate_identity_valid": _candidate_identity_valid(selected_candidate),
         "source_head": source_head,
         "runtime_head": runtime_head,
         "market_data_environment": {
@@ -1018,13 +1070,28 @@ def capture_public_quote(
             "methods": ["GET"],
             "base_urls": sorted(ALLOWED_BASE_URLS),
             "paths": [TIME_PATH, TICKERS_PATH, INSTRUMENTS_PATH],
-            "symbol": REQUIRED_CANDIDATE["symbol"],
+            "symbol": symbol or None,
             "category": category,
             "orderbook_required": False,
             "private_or_order_paths_allowed": False,
         },
         "risk_limits": {
-            "cap_usdt": cap_usdt,
+            "cap_usdt": effective_cap_usdt,
+            "reviewed_candidate_cap_usdt": reviewed_cap_usdt,
+            "cap_source": (
+                "caller_supplied_must_match_reroute_review.selected_candidate.current_cap_usdt"
+                if cap_usdt is not None
+                else "reroute_review.selected_candidate.current_cap_usdt"
+            ),
+            "cap_semantics": (
+                "reviewed bounded-probe candidate cap only; not the global risk "
+                "single-order exposure source of truth"
+            ),
+            "global_risk_single_order_cap_resolved": False,
+            "global_risk_single_order_cap_note": (
+                "not resolved by public quote capture; order-capable admission "
+                "must bind a machine-checkable global risk cap separately"
+            ),
             "max_fresh_bbo_age_ms": max_fresh_bbo_age_ms,
         },
         "requests": requests,
@@ -1040,7 +1107,8 @@ def capture_public_quote(
         },
         "readiness": {
             "reroute_review_ready": reroute_ok,
-            "candidate_exact_match": _candidate_matches_current_blocker(candidate),
+            "candidate_exact_match": _candidate_identity_valid(selected_candidate),
+            "candidate_identity_valid": _candidate_identity_valid(selected_candidate),
             "authority_preserved": authority_ok,
             "request_count": len(requests),
             "public_quote_capture_ready_no_order": status == READY_STATUS,
@@ -1153,7 +1221,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reroute-review-json", type=Path, required=True)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--timeout-seconds", type=float, default=2.0)
-    parser.add_argument("--cap-usdt", type=float, default=10.0)
+    parser.add_argument("--cap-usdt", type=float)
     parser.add_argument("--max-fresh-bbo-age-ms", type=int, default=1000)
     parser.add_argument("--skip-instruments-info", action="store_true")
     parser.add_argument("--source-head")

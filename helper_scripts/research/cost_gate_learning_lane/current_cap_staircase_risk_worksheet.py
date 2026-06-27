@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Build a source-only current-cap staircase and risk worksheet.
+"""Build a source-only GUI-risk-cap staircase and risk worksheet.
 
-The worksheet uses supplied no-order artifacts to compute executable AVAX
-notional tiers under the current per-order cap. It does not query PG, call
-Bybit, submit orders, change caps/risk, lower Cost Gate, or grant authority.
+The worksheet uses supplied no-order artifacts plus GUI-backed Rust RiskConfig
+limits to compute executable notional tiers under a derived per-order cap. It
+does not query PG, call Bybit, submit orders, change caps/risk, lower Cost Gate,
+or grant authority.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ READY_STATUS = "CURRENT_CAP_STAIRCASE_RISK_WORKSHEET_READY_NO_AUTHORITY"
 NOT_CONSTRUCTIBLE_STATUS = "CURRENT_CAP_STAIRCASE_NOT_CONSTRUCTIBLE_NO_AUTHORITY"
 CONTROL_CONTRACT_NOT_READY_STATUS = "CONTROL_IDENTITY_CONTRACT_INPUT_NOT_READY"
 CONSTRUCTION_INPUT_INCOMPLETE_STATUS = "CONSTRUCTION_INPUT_INCOMPLETE"
+GUI_RISK_CAP_INPUT_REQUIRED_STATUS = "GUI_RISK_CAP_INPUT_REQUIRED_NO_AUTHORITY"
 CANDIDATE_MISMATCH_STATUS = "CANDIDATE_MISMATCH"
 AUTHORITY_BOUNDARY_VIOLATION_STATUS = "AUTHORITY_BOUNDARY_VIOLATION"
 
@@ -214,6 +216,104 @@ def _construction_inputs(preview: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _risk_limits(gui_risk_config: dict[str, Any] | None) -> dict[str, Any]:
+    payload = _dict(gui_risk_config)
+    config = _dict(payload.get("config")) or payload
+    if _dict(config.get("limits")):
+        return _dict(config.get("limits"))
+    global_config = _dict(config.get("global_config")) or _dict(config.get("p1"))
+    if not global_config:
+        return {}
+    p1_pct = _dec(global_config.get("p1_risk_pct"))
+    return {
+        "per_trade_risk_pct": (p1_pct / Decimal("100")) if p1_pct is not None else None,
+        "position_size_max_pct": global_config.get("max_single_position_pct"),
+        "total_exposure_max_pct": global_config.get("max_total_exposure_pct"),
+        "correlated_exposure_max_pct": global_config.get(
+            "max_correlated_exposure_pct"
+        ),
+        "max_order_notional_usdt": global_config.get("max_order_notional_usdt"),
+    }
+
+
+def _derive_gui_risk_cap(
+    *,
+    gui_risk_config: dict[str, Any] | None,
+    account_equity_usdt: Any,
+    source_construction_cap_usdt: Decimal | None,
+) -> tuple[Decimal | None, dict[str, Any]]:
+    limits = _risk_limits(gui_risk_config)
+    equity = _dec(account_equity_usdt)
+    per_trade_fraction = _dec(limits.get("per_trade_risk_pct"))
+    max_single_position_pct = _dec(limits.get("position_size_max_pct"))
+    max_order_notional = _dec(limits.get("max_order_notional_usdt"))
+    reasons: list[str] = []
+    if not limits:
+        reasons.append("gui_risk_config_limits_missing")
+    if equity is None or equity <= 0:
+        reasons.append("account_equity_usdt_missing_or_non_positive")
+    if per_trade_fraction is None or per_trade_fraction <= 0:
+        reasons.append("per_trade_risk_pct_missing_or_non_positive")
+    elif per_trade_fraction > 1:
+        reasons.append("per_trade_risk_pct_not_fraction")
+    if max_single_position_pct is None or max_single_position_pct <= 0:
+        reasons.append("position_size_max_pct_missing_or_non_positive")
+
+    per_trade_budget = (
+        equity * per_trade_fraction
+        if equity is not None
+        and equity > 0
+        and per_trade_fraction is not None
+        and Decimal("0") < per_trade_fraction <= Decimal("1")
+        else None
+    )
+    single_position_budget = (
+        equity * max_single_position_pct / Decimal("100")
+        if equity is not None
+        and equity > 0
+        and max_single_position_pct is not None
+        and max_single_position_pct > 0
+        else None
+    )
+    candidates = [
+        value
+        for value in (per_trade_budget, single_position_budget, max_order_notional)
+        if value is not None and value > 0
+    ]
+    resolved = min(candidates) if not reasons and candidates else None
+    if not candidates:
+        reasons.append("no_positive_gui_risk_cap_candidate")
+    return resolved, {
+        "cap_resolved": resolved is not None,
+        "blocking_reasons": sorted(set(reasons)),
+        "source": "GUI Risk tab -> Rust RiskConfig limits",
+        "account_equity_usdt": _round_decimal(equity, 8),
+        "per_trade_risk_pct_fraction": _round_decimal(per_trade_fraction, 8),
+        "per_trade_risk_pct_display": _round_decimal(
+            per_trade_fraction * Decimal("100")
+            if per_trade_fraction is not None
+            else None,
+            4,
+        ),
+        "position_size_max_pct": _round_decimal(max_single_position_pct, 4),
+        "per_trade_budget_usdt": _round_decimal(per_trade_budget, 8),
+        "single_position_budget_usdt": _round_decimal(single_position_budget, 8),
+        "max_order_notional_usdt": _round_decimal(max_order_notional, 8),
+        "source_construction_cap_usdt": _round_decimal(
+            source_construction_cap_usdt,
+            8,
+        ),
+        "resolved_cap_usdt": _round_decimal(resolved, 8),
+        "resolution_rule": (
+            "min(account_equity_usdt * per_trade_risk_pct, "
+            "account_equity_usdt * position_size_max_pct / 100, "
+            "max_order_notional_usdt when enabled)"
+        ),
+        "construction_cap_is_authority": False,
+        "gui_risk_config_is_authority": True,
+    }
+
+
 def _ceil_to_step(value: Decimal, step: Decimal) -> Decimal:
     return (value / step).to_integral_value(rounding=ROUND_CEILING) * step
 
@@ -257,6 +357,7 @@ def _build_tiers(
         "max_qty_under_cap": _round_decimal(cap_qty, 8),
         "max_notional_under_cap_usdt": _round_decimal(cap_qty * limit_price, 8),
         "tier_count": len(tiers),
+        "fits_gui_risk_cap": bool(tiers),
         "fits_current_cap": bool(tiers),
         "tier_truncated": qty <= cap_qty,
     }
@@ -291,7 +392,7 @@ def _risk_worksheet(
         "fits_existing_total_review_cap": reserved <= max_total_demo_notional_before_review,
         "cap_mutation_required": False,
         "risk_mutation_required": False,
-        "survival_boundary_status": "CURRENT_CAP_BOUNDS_ONLY_NO_AUTHORITY",
+        "survival_boundary_status": "GUI_RISK_CAP_BOUNDS_ONLY_NO_AUTHORITY",
         "authority_required_for_any_change": "operator/QC plus PM->E3->BB for cap/risk mutation or order path",
     }
 
@@ -300,8 +401,10 @@ def build_current_cap_staircase_risk_worksheet(
     *,
     control_identity_contract: dict[str, Any] | None,
     construction_preview: dict[str, Any] | None,
+    gui_risk_config: dict[str, Any] | None = None,
+    account_equity_usdt: float | None = None,
     max_probe_orders_before_review: int = 3,
-    max_total_demo_notional_before_review: float | None = 30.0,
+    max_total_demo_notional_before_review: float | None = None,
     now_utc: dt.datetime | None = None,
     control_identity_contract_path: Path | None = None,
     construction_preview_path: Path | None = None,
@@ -315,11 +418,15 @@ def build_current_cap_staircase_risk_worksheet(
     construction_candidate = _candidate_from_construction(preview)
     candidate_match = _candidate_matches(control_candidate, construction_candidate)
     inputs = _construction_inputs(preview)
+    resolved_cap_usdt, cap_resolution = _derive_gui_risk_cap(
+        gui_risk_config=gui_risk_config,
+        account_equity_usdt=account_equity_usdt,
+        source_construction_cap_usdt=inputs.get("cap_usdt"),
+    )
     required_inputs = (
         inputs.get("limit_price"),
         inputs.get("qty_step"),
         inputs.get("min_notional"),
-        inputs.get("cap_usdt"),
     )
     inputs_complete = all(
         isinstance(value, Decimal) and value > 0 for value in required_inputs
@@ -335,13 +442,16 @@ def build_current_cap_staircase_risk_worksheet(
         reason = "control_contract_candidate_does_not_match_construction_preview"
     elif not inputs_complete:
         status = CONSTRUCTION_INPUT_INCOMPLETE_STATUS
-        reason = "construction_preview_missing_price_qty_step_min_notional_or_cap"
+        reason = "construction_preview_missing_price_qty_step_or_min_notional"
+    elif resolved_cap_usdt is None:
+        status = GUI_RISK_CAP_INPUT_REQUIRED_STATUS
+        reason = "gui_risk_config_and_account_equity_required_for_cap_resolution"
     else:
         tiers, tier_summary = _build_tiers(
             limit_price=inputs["limit_price"],
             qty_step=inputs["qty_step"],
             min_notional=inputs["min_notional"],
-            cap_usdt=inputs["cap_usdt"],
+            cap_usdt=resolved_cap_usdt,
         )
         status = READY_STATUS if tiers else NOT_CONSTRUCTIBLE_STATUS
         reason = (
@@ -353,19 +463,19 @@ def build_current_cap_staircase_risk_worksheet(
     tiers = []
     tier_summary: dict[str, Any] = {}
     risk: dict[str, Any] = {}
-    if status in {READY_STATUS, NOT_CONSTRUCTIBLE_STATUS}:
+    if status in {READY_STATUS, NOT_CONSTRUCTIBLE_STATUS} and resolved_cap_usdt is not None:
         tiers, tier_summary = _build_tiers(
             limit_price=inputs["limit_price"],
             qty_step=inputs["qty_step"],
             min_notional=inputs["min_notional"],
-            cap_usdt=inputs["cap_usdt"],
+            cap_usdt=resolved_cap_usdt,
         )
         max_total = _dec(max_total_demo_notional_before_review)
         if max_total is None or max_total <= 0:
-            max_total = inputs["cap_usdt"] * Decimal(max_probe_orders_before_review)
+            max_total = resolved_cap_usdt * Decimal(max_probe_orders_before_review)
         max_notional = _dec(tier_summary.get("max_notional_under_cap_usdt"))
         risk = _risk_worksheet(
-            cap_usdt=inputs["cap_usdt"],
+            cap_usdt=resolved_cap_usdt,
             max_notional_under_cap=max_notional,
             max_probe_orders_before_review=max(1, int(max_probe_orders_before_review)),
             max_total_demo_notional_before_review=max_total,
@@ -396,6 +506,9 @@ def build_current_cap_staircase_risk_worksheet(
             "authority_preserved": authority_ok,
             "authority_contamination_reasons": authority_reasons,
             "candidate_match": candidate_match,
+            "gui_risk_config_source": cap_resolution.get("source"),
+            "gui_risk_cap_resolved": cap_resolution.get("cap_resolved"),
+            "gui_risk_cap_blocking_reasons": cap_resolution.get("blocking_reasons"),
         },
         "candidate": control_candidate if status not in {CANDIDATE_MISMATCH_STATUS, CONTROL_CONTRACT_NOT_READY_STATUS} else {},
         "construction_inputs": {
@@ -403,7 +516,8 @@ def build_current_cap_staircase_risk_worksheet(
             "reference_price": _round_decimal(inputs.get("reference_price"), 8),
             "qty_step": _round_decimal(inputs.get("qty_step"), 8),
             "min_notional": _round_decimal(inputs.get("min_notional"), 8),
-            "cap_usdt": _round_decimal(inputs.get("cap_usdt"), 8),
+            "source_construction_cap_usdt": _round_decimal(inputs.get("cap_usdt"), 8),
+            "resolved_cap_usdt": _round_decimal(resolved_cap_usdt, 8),
             "tick_size": _round_decimal(inputs.get("tick_size"), 8),
             "instrument_status": inputs.get("instrument_status"),
             "source_constructible": inputs.get("source_constructible"),
@@ -413,14 +527,16 @@ def build_current_cap_staircase_risk_worksheet(
             "max_fresh_bbo_age_ms": _round_decimal(inputs.get("max_fresh_bbo_age_ms"), 4),
             "bbo_refresh_required_before_order_admission": bbo_refresh_required,
         },
+        "cap_resolution": cap_resolution,
         "cap_staircase": {
             "tiers": tiers,
             "summary": tier_summary,
-            "discrete_tier_rule": "qty starts at min_notional rounded up to qty_step and increases by qty_step until existing cap is reached",
+            "discrete_tier_rule": "qty starts at min_notional rounded up to qty_step and increases by qty_step until resolved GUI-risk cap is reached",
         },
         "risk_worksheet": risk,
         "summary": {
             "worksheet_ready": status in {READY_STATUS, NOT_CONSTRUCTIBLE_STATUS},
+            "constructible_under_gui_risk_cap": status == READY_STATUS,
             "constructible_under_current_cap": status == READY_STATUS,
             "tier_count": tier_summary.get("tier_count", 0),
             "cap_mutation_required": False,
@@ -431,7 +547,7 @@ def build_current_cap_staircase_risk_worksheet(
             "max_safe_next_action": (
                 "implement_fee_slippage_maker_taker_schema_or_review_real_auth_delta"
                 if status == READY_STATUS
-                else "refresh_no_order_construction_preview_or_review_cap_risk_separately"
+                else "provide_gui_risk_config_and_equity_or_refresh_no_order_construction_preview"
             ),
         },
         "answers": {
@@ -462,8 +578,9 @@ def build_current_cap_staircase_risk_worksheet(
 def render_markdown(packet: dict[str, Any]) -> str:
     summary = _dict(packet.get("summary"))
     risk = _dict(packet.get("risk_worksheet"))
+    cap_resolution = _dict(packet.get("cap_resolution"))
     lines = [
-        "# Current-Cap Staircase Risk Worksheet",
+        "# GUI-Risk-Cap Staircase Risk Worksheet",
         "",
         f"- Generated: `{packet.get('generated_at_utc')}`",
         f"- Status: `{packet.get('status')}`",
@@ -473,10 +590,13 @@ def render_markdown(packet: dict[str, Any]) -> str:
         "",
         "## Summary",
         "",
-        f"- Constructible under current cap: `{summary.get('constructible_under_current_cap')}`",
+        f"- Constructible under GUI risk cap: `{summary.get('constructible_under_gui_risk_cap')}`",
         f"- Tier count: `{summary.get('tier_count')}`",
         f"- Order admission ready: `{summary.get('order_admission_ready')}`",
         f"- BBO refresh required before order admission: `{summary.get('bbo_refresh_required_before_order_admission')}`",
+        f"- Resolved cap USDT: `{cap_resolution.get('resolved_cap_usdt')}`",
+        f"- GUI P1 risk/trade: `{cap_resolution.get('per_trade_risk_pct_display')}`%",
+        f"- GUI max single position: `{cap_resolution.get('position_size_max_pct')}`%",
         "",
         "## Risk Worksheet",
         "",
@@ -504,12 +624,31 @@ def _read_json(path: Path | None) -> dict[str, Any] | None:
     return payload
 
 
+def _read_toml(path: Path | None) -> dict[str, Any] | None:
+    if path is None or not path.exists():
+        return None
+    try:
+        import tomllib  # type: ignore[import-not-found]
+    except ModuleNotFoundError as exc:  # pragma: no cover - Python < 3.11 fallback path
+        raise RuntimeError(
+            "reading GUI risk TOML requires Python 3.11+ tomllib; use the project "
+            "venv ./venvs/mac_dev/bin/python"
+        ) from exc
+    with path.open("rb") as fh:
+        payload = tomllib.load(fh)
+    if not isinstance(payload, dict):
+        raise ValueError(f"{path} did not contain a TOML table")
+    return payload
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--control-identity-contract-json", type=Path, required=True)
     parser.add_argument("--construction-preview-json", type=Path, required=True)
+    parser.add_argument("--gui-risk-config-toml", type=Path)
+    parser.add_argument("--account-equity-usdt", type=float)
     parser.add_argument("--max-probe-orders-before-review", type=int, default=3)
-    parser.add_argument("--max-total-demo-notional-before-review", type=float, default=30.0)
+    parser.add_argument("--max-total-demo-notional-before-review", type=float)
     parser.add_argument("--json-output", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--print-json", action="store_true")
@@ -521,6 +660,8 @@ def main() -> int:
     packet = build_current_cap_staircase_risk_worksheet(
         control_identity_contract=_read_json(args.control_identity_contract_json),
         construction_preview=_read_json(args.construction_preview_json),
+        gui_risk_config=_read_toml(args.gui_risk_config_toml),
+        account_equity_usdt=args.account_equity_usdt,
         max_probe_orders_before_review=args.max_probe_orders_before_review,
         max_total_demo_notional_before_review=args.max_total_demo_notional_before_review,
         control_identity_contract_path=args.control_identity_contract_json,

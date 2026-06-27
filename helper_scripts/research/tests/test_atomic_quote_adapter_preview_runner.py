@@ -8,7 +8,6 @@ import pytest
 
 from cost_gate_learning_lane import bbo_freshness_public_quote_capture as quote_capture
 from cost_gate_learning_lane.atomic_quote_adapter_preview_runner import (
-    ADAPTER_NOT_READY_STATUS,
     QUOTE_NOT_READY_STATUS,
     READY_STATUS,
     _output_path_allowed,
@@ -55,44 +54,83 @@ class FakeHTTPResponse:
 
 
 class FakeOpener:
-    def __init__(self, clock: Clock, *, retcode: int = 0) -> None:
+    def __init__(
+        self,
+        clock: Clock,
+        *,
+        retcode: int = 0,
+        symbol: str = "AVAXUSDT",
+        bid: str = "6.174",
+        ask: str = "6.175",
+        last_price: str = "6.174",
+        mark_price: str = "6.175",
+        qty_step: str = "0.1",
+        min_notional: str = "5",
+    ) -> None:
         self.clock = clock
         self.retcode = retcode
+        self.symbol = symbol
+        self.bid = bid
+        self.ask = ask
+        self.last_price = last_price
+        self.mark_price = mark_price
+        self.qty_step = qty_step
+        self.min_notional = min_notional
         self.requests = []
 
     def __call__(self, req, timeout=None):
         self.requests.append(req)
         path = __import__("urllib.parse").parse.urlsplit(req.full_url).path
         self.clock.advance(10)
-        return FakeHTTPResponse(_payload_for_path(path, retcode=self.retcode))
+        return FakeHTTPResponse(
+            _payload_for_path(
+                path,
+                retcode=self.retcode,
+                symbol=self.symbol,
+                bid=self.bid,
+                ask=self.ask,
+                last_price=self.last_price,
+                mark_price=self.mark_price,
+                qty_step=self.qty_step,
+                min_notional=self.min_notional,
+            )
+        )
 
 
-def _candidate() -> dict:
-    return {
+def _candidate(**overrides) -> dict:
+    payload = {
         "side_cell_key": SIDE_CELL,
         "strategy_name": "grid_trading",
         "symbol": "AVAXUSDT",
         "side": "Sell",
         "outcome_horizon_minutes": 60,
     }
+    payload.update(overrides)
+    if "side_cell_key" not in overrides:
+        payload["side_cell_key"] = (
+            f"{payload['strategy_name']}|{payload['symbol']}|{payload['side']}"
+        )
+    return payload
 
 
-def _reroute() -> dict:
+def _reroute(candidate: dict | None = None, **overrides) -> dict:
+    payload = {
+        **(candidate or _candidate()),
+        "false_negative_rank": 2,
+        "friction_rank": 2,
+        "avg_net_bps": 73.5511,
+        "net_positive_pct": 100.0,
+        "outcome_count": 48,
+        "current_cap_usdt": 10.0,
+        "minimum_required_demo_notional_usdt_per_order": 5.0,
+        "instrument_status": "Trading",
+    }
+    payload.update(overrides)
     return {
         "schema_version": "bounded_demo_probe_lower_price_reroute_review_v1",
         "generated_at_utc": START.isoformat(),
         "status": "LOWER_PRICE_REROUTE_READY_FOR_DEMO_CONSTRUCTION_REVIEW",
-        "selected_candidate": {
-            **_candidate(),
-            "false_negative_rank": 2,
-            "friction_rank": 2,
-            "avg_net_bps": 73.5511,
-            "net_positive_pct": 100.0,
-            "outcome_count": 48,
-            "current_cap_usdt": 10.0,
-            "minimum_required_demo_notional_usdt_per_order": 5.0,
-            "instrument_status": "Trading",
-        },
+        "selected_candidate": payload,
         "answers": {
             "bybit_call_performed": False,
             "pg_write_performed": False,
@@ -106,7 +144,18 @@ def _reroute() -> dict:
     }
 
 
-def _payload_for_path(path: str, *, retcode: int = 0) -> dict:
+def _payload_for_path(
+    path: str,
+    *,
+    retcode: int = 0,
+    symbol: str = "AVAXUSDT",
+    bid: str = "6.174",
+    ask: str = "6.175",
+    last_price: str = "6.174",
+    mark_price: str = "6.175",
+    qty_step: str = "0.1",
+    min_notional: str = "5",
+) -> dict:
     retmsg = "OK" if retcode == 0 else "bad"
     if path == quote_capture.TIME_PATH:
         return {
@@ -123,13 +172,13 @@ def _payload_for_path(path: str, *, retcode: int = 0) -> dict:
                 "category": "linear",
                 "list": [
                     {
-                        "symbol": "AVAXUSDT",
-                        "bid1Price": "6.174",
-                        "ask1Price": "6.175",
+                        "symbol": symbol,
+                        "bid1Price": bid,
+                        "ask1Price": ask,
                         "bid1Size": "726.5",
                         "ask1Size": "71.4",
-                        "lastPrice": "6.174",
-                        "markPrice": "6.175",
+                        "lastPrice": last_price,
+                        "markPrice": mark_price,
                     }
                 ],
             },
@@ -143,12 +192,12 @@ def _payload_for_path(path: str, *, retcode: int = 0) -> dict:
                 "category": "linear",
                 "list": [
                     {
-                        "symbol": "AVAXUSDT",
+                        "symbol": symbol,
                         "status": "Trading",
                         "priceFilter": {"tickSize": "0.001"},
                         "lotSizeFilter": {
-                            "qtyStep": "0.1",
-                            "minNotionalValue": "5",
+                            "qtyStep": qty_step,
+                            "minNotionalValue": min_notional,
                         },
                     }
                 ],
@@ -204,6 +253,61 @@ def test_atomic_runner_keeps_quote_adapter_preview_inside_freshness_window(tmp_p
     assert (output_dir / "construction_preview.json").exists()
 
 
+def test_atomic_runner_derives_eth_cap_from_reviewed_candidate_without_default_10(
+    tmp_path,
+) -> None:
+    candidate = _candidate(symbol="ETHUSDT", side="Buy")
+    reroute = _reroute(
+        candidate=candidate,
+        current_cap_usdt=20.0,
+        minimum_required_demo_notional_usdt_per_order=5.0,
+    )
+    reroute_path = tmp_path / "reroute.json"
+    output_dir = tmp_path / "atomic"
+    _write_json(reroute_path, reroute)
+    clock = Clock()
+    opener = FakeOpener(
+        clock,
+        symbol="ETHUSDT",
+        bid="2500.0",
+        ask="2500.5",
+        last_price="2500.2",
+        mark_price="2500.2",
+        qty_step="0.001",
+    )
+
+    packet = run_atomic_quote_adapter_preview(
+        reroute_review=reroute,
+        reroute_review_path=reroute_path,
+        output_dir=output_dir,
+        opener=opener,
+        now_fn=clock.now,
+        monotonic_fn=clock.monotonic,
+        demo_operational_authorization_available=True,
+    )
+
+    public_quote = json.loads((output_dir / "public_quote.json").read_text())
+    market_snapshot = json.loads((output_dir / "market_snapshot.json").read_text())
+    preview = json.loads((output_dir / "construction_preview.json").read_text())
+
+    assert packet["status"] == READY_STATUS
+    assert packet["candidate"]["side_cell_key"] == "grid_trading|ETHUSDT|Buy"
+    assert public_quote["risk_limits"]["cap_usdt"] == 20.0
+    assert public_quote["risk_limits"]["reviewed_candidate_cap_usdt"] == 20.0
+    assert (
+        public_quote["risk_limits"]["cap_source"]
+        == "reroute_review.selected_candidate.current_cap_usdt"
+    )
+    assert public_quote["risk_limits"]["global_risk_single_order_cap_resolved"] is False
+    assert market_snapshot["risk_limits"]["cap_usdt"] == 20.0
+    assert preview["construction"]["cap_usdt"] == 20.0
+    urls = [request.full_url for request in opener.requests]
+    assert "category=linear&symbol=ETHUSDT" in urls[1]
+    assert "category=linear&symbol=ETHUSDT" in urls[2]
+    assert packet["answers"]["order_submission_performed"] is False
+    assert packet["answers"]["probe_authority_granted"] is False
+
+
 def test_atomic_runner_stops_after_public_quote_fail_closed(tmp_path) -> None:
     reroute = _reroute()
     reroute_path = tmp_path / "reroute.json"
@@ -248,8 +352,10 @@ def test_atomic_runner_stops_after_adapter_fail_closed(tmp_path) -> None:
         cap_usdt=20.0,
     )
 
-    assert packet["status"] == ADAPTER_NOT_READY_STATUS
-    assert "cap_usdt_mismatch_reviewed_candidate_cap" in packet["adapter_error"]
+    assert packet["status"] == QUOTE_NOT_READY_STATUS
+    assert packet["statuses"]["public_quote"] == quote_capture.INPUT_REQUIRED_STATUS
+    public_quote = json.loads((output_dir / "public_quote.json").read_text())
+    assert "cap_usdt_mismatch_reviewed_candidate_cap" in public_quote["blocking_gates"]
     assert packet["artifacts"]["public_quote"]["exists"] is True
     assert packet["artifacts"]["market_snapshot"]["exists"] is False
     assert packet["artifacts"]["construction_preview"]["exists"] is False
