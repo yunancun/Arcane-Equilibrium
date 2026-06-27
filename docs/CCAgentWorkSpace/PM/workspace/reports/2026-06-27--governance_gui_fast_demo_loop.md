@@ -1,7 +1,10 @@
 # Governance GUI Fast Demo Loop
 
-**Status**: `DONE_WITH_CONCERNS`  
+**Status**: `DONE_WITH_CONCERNS`
+
 **Generated at**: `2026-06-27T19:28:17Z`
+
+**Runtime source sync**: `trade-core` fast-forwarded to `6146a976b6f3b1f86f1ac365992f62e2a2903441` at `2026-06-27T19:31:16Z`; no engine/service restart; engine PID remains `3944810`.
 
 ## Scope
 
@@ -37,10 +40,15 @@ This checkpoint fixes the Governance GUI semantics around Authorization, Decisio
   - passed
 - `git diff --check`
   - passed
+- Runtime `trade-core` targeted verification after source sync:
+  - `python3 -m pytest ...test_governance_demo_probe_admission_gui.py ...test_w_audit_7c_typed_confirm_modal.py::test_w_audit_7c_case01_html_stack_residue_empty ...test_w_audit_7c_typed_confirm_modal.py::test_w_audit_7c_case08_governance_tab_js_real_syntax_check`
+  - `6 passed`
+  - `node --check program_code/exchange_connectors/bybit_connector/control_api_v1/app/static/governance-tab.js`
+  - passed
 
 ## Boundary
 
-No Decision Lease acquire/release, no order submission, no cancel/modify, no Bybit private call, no runtime risk mutation, no Cost Gate lowering, no live/mainnet authority, no writer/adapter enablement, no fill, no PnL, and no profit proof.
+No Decision Lease acquire/release, no order submission, no cancel/modify, no Bybit private call, no runtime risk mutation, no Cost Gate lowering, no live/mainnet authority, no writer/adapter enablement, no fill, no PnL, and no profit proof. Runtime source sync changed static/source files only and did not restart the engine.
 
 ## Next Development
 
