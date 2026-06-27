@@ -424,7 +424,8 @@ def build_false_negative_operator_review(
     answers = _dict(packet.get("answers"))
     summary = _dict(packet.get("summary"))
     normalized_decision = _normalize_decision(decision)
-    operator = _str(operator_id)
+    provided_operator = _str(operator_id)
+    operator = provided_operator
     provided_confirm = _str(typed_confirm)
     expected_confirm = expected_false_negative_operator_review_typed_confirm(
         candidate.get("side_cell_key"),
@@ -451,11 +452,25 @@ def build_false_negative_operator_review(
             or (_list(candidate.get("horizon_minutes")) or [None])[0],
         },
     )
-    standing_approval_valid = bool(
+    standing_operator = _str(standing_summary.get("operator_id"))
+    if approval_requested and not operator:
+        operator = standing_operator
+    standing_operator_matches = not (
+        approval_requested
+        and standing_input_supplied
+        and bool(provided_operator)
+        and bool(standing_operator)
+        and provided_operator != standing_operator
+    )
+    standing_authorization_valid = bool(
         standing_input_supplied
-        and normalized_decision == "defer"
-        and not provided_confirm
         and standing_summary.get("valid_for_candidate_scoped_authorization") is True
+        and standing_operator_matches
+    )
+    standing_approval_valid = bool(
+        standing_authorization_valid
+        and normalized_decision in {"defer", "approve-preflight"}
+        and not provided_confirm
     )
     if standing_approval_valid and not operator:
         operator = _str(standing_summary.get("operator_id"))
@@ -524,10 +539,10 @@ def build_false_negative_operator_review(
         gates.append(
             _gate(
                 "standing_demo_authorization_valid_for_preflight_review",
-                standing_approval_valid,
+                standing_authorization_valid,
                 status=(
                     "VALID"
-                    if standing_approval_valid
+                    if standing_authorization_valid
                     else str(standing_artifact.get("status") or "MISSING")
                 ),
                 reason=(
@@ -595,7 +610,7 @@ def build_false_negative_operator_review(
         ),
         _gate(
             "typed_confirm_matches",
-            (not approval_requested) or typed_confirm_matches,
+            (not approval_requested) or typed_confirm_matches or standing_approval_valid,
             status=(
                 "MATCH"
                 if typed_confirm_matches
@@ -612,6 +627,7 @@ def build_false_negative_operator_review(
                 "typed_confirm_expected": expected_confirm,
                 "typed_confirm_provided": bool(provided_confirm),
                 "typed_confirm_matches": typed_confirm_matches,
+                "standing_demo_authorization_envelope_valid": standing_authorization_valid,
                 "standing_demo_authorization_valid": standing_approval_valid,
             },
         ),
