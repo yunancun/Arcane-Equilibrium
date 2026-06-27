@@ -96,6 +96,8 @@ def _sizing_proposal(**overrides) -> dict:
             "per_trade_risk_pct_fraction": 0.1,
             "per_trade_risk_pct_display": 10.0,
             "position_size_max_pct": 25.0,
+            "per_trade_budget_usdt": 955.24342626,
+            "max_order_notional_usdt": 0.0,
             "single_position_budget_usdt": 2388.10856564,
             "guardian_risk_level": "CAUTIOUS",
             "guardian_position_size_multiplier": 0.7,
@@ -248,14 +250,18 @@ def test_cautious_risk_with_proposed_sizing_removes_notional_breach_only() -> No
 
     assert packet["status"] == mod.BLOCKED_BY_LOSS_CONTROL_STATUS
     assert packet["risk_context"]["sizing_source"] == "guardian_adjusted_sizing_proposal"
+    assert packet["risk_context"]["per_trade_budget_usdt"] == 955.24342626
     assert packet["risk_context"]["single_position_budget_usdt"] == 2388.10856564
+    assert packet["risk_context"]["max_order_notional_usdt"] == 0.0
     assert packet["risk_context"]["effective_single_order_cap_usdt"] == 668.67039838
     assert packet["risk_context"]["rounded_qty"] == 102.0
     assert packet["risk_context"]["rounded_notional_usdt"] == 668.304
     guardian = packet["guardian_risk_gate_artifact"]
     assert guardian["sizing_source"] == "guardian_adjusted_sizing_proposal"
     assert guardian["risk_limits"]["rounded_qty"] == 102.0
+    assert guardian["risk_limits"]["per_trade_budget_usdt"] == 955.24342626
     assert guardian["risk_limits"]["single_position_budget_usdt"] == 2388.10856564
+    assert guardian["risk_limits"]["max_order_notional_usdt"] == 0.0
     assert guardian["risk_limits"]["effective_single_order_cap_usdt"] == 668.67039838
     assert guardian["risk_limits"]["rounded_notional_usdt"] == 668.304
     assert guardian["risk_limits"]["original_rounded_notional_usdt"] == 954.6264

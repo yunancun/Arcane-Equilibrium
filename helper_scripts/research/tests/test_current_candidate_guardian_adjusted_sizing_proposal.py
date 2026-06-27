@@ -56,9 +56,11 @@ def _admission_review(**overrides) -> dict:
                 "cap_source": "current_candidate_envelope.cap_resolution.resolved_cap_usdt",
                 "local_10_usdt_cap_is_global_risk_authority": False,
                 "per_order_cap_usdt": 955.24342626,
+                "per_trade_budget_usdt": 955.24342626,
                 "per_trade_risk_pct_display": 10.0,
                 "per_trade_risk_pct_fraction": 0.1,
                 "position_size_max_pct": 25.0,
+                "max_order_notional_usdt": 0.0,
                 "risk_source_of_truth": "GUI-backed Rust RiskConfig",
                 "single_position_budget_usdt": 2388.10856564,
             },
@@ -214,8 +216,10 @@ def test_ready_proposal_uses_gui_percent_cap_then_guardian_multiplier() -> None:
     assert risk["account_equity_usdt"] == 9552.43426257
     assert risk["per_trade_risk_pct_fraction"] == 0.1
     assert risk["per_trade_risk_pct_display"] == 10.0
+    assert risk["per_trade_budget_usdt"] == 955.24342626
     assert risk["position_size_max_pct"] == 25.0
     assert risk["single_position_budget_usdt"] == 2388.10856564
+    assert risk["max_order_notional_usdt"] == 0.0
     assert (
         risk["effective_single_order_cap_basis"]
         == "min(gui_per_trade_cap_usdt, gui_max_single_position_budget_usdt, guardian_adjusted_cap_usdt)"

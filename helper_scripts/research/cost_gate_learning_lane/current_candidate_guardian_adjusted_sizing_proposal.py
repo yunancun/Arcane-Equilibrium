@@ -129,6 +129,14 @@ def _same_decimal(
     return left is not None and right is not None and abs(left - right) <= tolerance
 
 
+def _first_decimal(*values: Any) -> Decimal | None:
+    for value in values:
+        parsed = _dec(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
 def _floor_to_step(value: Decimal, step: Decimal) -> Decimal:
     return (value / step).to_integral_value(rounding=ROUND_FLOOR) * step
 
@@ -414,23 +422,29 @@ def _risk_lineage_reasons(
     elif risk_cap is not None and adjusted_cap > risk_cap:
         reasons.append("guardian_adjusted_cap_exceeds_gui_resolved_cap")
 
-    per_trade_fraction = _dec(
-        risk_limits.get("per_trade_risk_pct_fraction")
-        or risk.get("per_trade_risk_pct_fraction")
+    per_trade_fraction = _first_decimal(
+        risk_limits.get("per_trade_risk_pct_fraction"),
+        risk.get("per_trade_risk_pct_fraction"),
     )
-    per_trade_display = _dec(
-        risk_limits.get("per_trade_risk_pct_display")
-        or risk.get("gui_p1_risk_trade_pct")
+    per_trade_display = _first_decimal(
+        risk_limits.get("per_trade_risk_pct_display"),
+        risk.get("gui_p1_risk_trade_pct"),
     )
-    position_size_max_pct = _dec(
-        risk_limits.get("position_size_max_pct") or risk.get("position_size_max_pct")
+    position_size_max_pct = _first_decimal(
+        risk_limits.get("position_size_max_pct"),
+        risk.get("position_size_max_pct"),
     )
-    account_equity = _dec(
-        risk_limits.get("account_equity_usdt") or risk.get("account_equity_usdt")
+    account_equity = _first_decimal(
+        risk_limits.get("account_equity_usdt"),
+        risk.get("account_equity_usdt"),
     )
-    single_position_budget = _dec(
-        risk_limits.get("single_position_budget_usdt")
-        or risk.get("single_position_budget_usdt")
+    per_trade_budget = _first_decimal(
+        risk_limits.get("per_trade_budget_usdt"),
+        risk.get("per_trade_budget_usdt"),
+    )
+    single_position_budget = _first_decimal(
+        risk_limits.get("single_position_budget_usdt"),
+        risk.get("single_position_budget_usdt"),
     )
     if per_trade_fraction is None or per_trade_fraction <= 0:
         reasons.append("per_trade_risk_pct_fraction_missing_or_non_positive")
@@ -459,6 +473,10 @@ def _risk_lineage_reasons(
         and risk_cap is not None
     ):
         expected_cap = account_equity * per_trade_fraction
+        if per_trade_budget is not None and not _same_decimal(
+            per_trade_budget, expected_cap
+        ):
+            reasons.append("per_trade_budget_not_equity_times_per_trade_pct")
         if not _same_decimal(risk_cap, expected_cap):
             reasons.append("gui_resolved_cap_not_equity_times_per_trade_pct")
     if (
@@ -490,6 +508,24 @@ def _extract_inputs(
     construction = _dict(construction_preview.get("construction"))
     guardian = _dict(gate_evidence.get("guardian_risk_gate_artifact"))
     guardian_limits = _dict(guardian.get("risk_limits"))
+    account_equity = _first_decimal(
+        risk_limits.get("account_equity_usdt"),
+        risk.get("account_equity_usdt"),
+    )
+    per_trade_fraction = _first_decimal(
+        risk_limits.get("per_trade_risk_pct_fraction"),
+        risk.get("per_trade_risk_pct_fraction"),
+    )
+    per_trade_budget = _first_decimal(
+        risk_limits.get("per_trade_budget_usdt"),
+        risk.get("per_trade_budget_usdt"),
+    )
+    if (
+        per_trade_budget is None
+        and account_equity is not None
+        and per_trade_fraction is not None
+    ):
+        per_trade_budget = account_equity * per_trade_fraction
     return {
         "candidate": _candidate_identity(
             _dict(admission.get("candidate")) or _dict(construction_preview.get("candidate"))
@@ -509,21 +545,25 @@ def _extract_inputs(
         "risk_level": guardian.get("risk_level"),
         "cap_source": risk.get("cap_source") or risk_limits.get("cap_source"),
         "risk_source_of_truth": risk_limits.get("risk_source_of_truth"),
-        "per_trade_risk_pct_fraction": _dec(
-            risk_limits.get("per_trade_risk_pct_fraction")
-            or risk.get("per_trade_risk_pct_fraction")
+        "per_trade_risk_pct_fraction": per_trade_fraction,
+        "per_trade_risk_pct_display": _first_decimal(
+            risk_limits.get("per_trade_risk_pct_display"),
+            risk.get("gui_p1_risk_trade_pct"),
         ),
-        "per_trade_risk_pct_display": _dec(
-            risk_limits.get("per_trade_risk_pct_display")
-            or risk.get("gui_p1_risk_trade_pct")
+        "per_trade_budget_usdt": per_trade_budget,
+        "position_size_max_pct": _first_decimal(
+            risk_limits.get("position_size_max_pct"),
+            risk.get("position_size_max_pct"),
         ),
-        "position_size_max_pct": _dec(
-            risk_limits.get("position_size_max_pct") or risk.get("position_size_max_pct")
+        "account_equity_usdt": account_equity,
+        "max_order_notional_usdt": _first_decimal(
+            risk_limits.get("max_order_notional_usdt"),
+            risk.get("max_order_notional_usdt"),
         ),
-        "account_equity_usdt": _dec(
-            risk_limits.get("account_equity_usdt") or risk.get("account_equity_usdt")
+        "single_position_budget_usdt": _first_decimal(
+            risk_limits.get("single_position_budget_usdt"),
+            risk.get("single_position_budget_usdt"),
         ),
-        "single_position_budget_usdt": _dec(risk_limits.get("single_position_budget_usdt")),
         "original_limit_price": _dec(order_shape.get("limit_price") or construction.get("limit_price")),
         "original_rounded_qty": _dec(
             order_shape.get("rounded_qty") or construction.get("rounded_qty")
@@ -749,9 +789,15 @@ def build_current_candidate_guardian_adjusted_sizing_proposal(
                 inputs["per_trade_risk_pct_display"],
                 4,
             ),
+            "per_trade_budget_usdt": _round_decimal(
+                inputs["per_trade_budget_usdt"]
+            ),
             "position_size_max_pct": _round_decimal(inputs["position_size_max_pct"], 4),
             "single_position_budget_usdt": _round_decimal(
                 inputs["single_position_budget_usdt"]
+            ),
+            "max_order_notional_usdt": _round_decimal(
+                inputs["max_order_notional_usdt"]
             ),
             "effective_single_order_cap_basis": (
                 "min(gui_per_trade_cap_usdt, gui_max_single_position_budget_usdt, "
