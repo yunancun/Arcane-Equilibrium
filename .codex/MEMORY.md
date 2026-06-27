@@ -112,9 +112,15 @@ Known paths:
 - Current-candidate sizing proposals must revalidate GUI cap lineage locally:
   `cap_source` must be `current_candidate_envelope.cap_resolution.resolved_cap_usdt`,
   GUI percent/fraction fields must match, local/bounded `10 USDT` authority
-  flags must be false, and admission/Guardian/construction GUI caps must agree.
+  flags must be false, admission/Guardian/construction GUI caps must agree, and
+  GUI `position_size_max_pct` must be converted to an auditable
+  `single_position_budget_usdt`.
+  Effective single-order cap is the minimum of GUI per-trade cap,
+  GUI max-single-position budget, and Guardian-adjusted cap.
   A reduced sizing proposal is review-only until Decision Lease, Guardian,
   Rust authority, fresh BBO, and audit/reconstructability gates pass.
+  Do not use reduced-sizing Guardian evidence to clear a stale larger
+  admission order shape; the rounded notional must match.
 - `engine_dead` incident detection is external-watchdog notify-only by design:
   when the engine is dead, in-process Rust C4 senders are unavailable. Do not
   route it through Rust `AllFail`/Defensive without a separately reviewed
