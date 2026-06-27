@@ -132,6 +132,13 @@ Known paths:
   IPC must carry `OPENCLAW_IPC_SECRET_FILE` (or equivalent secret env) when the
   engine requires `__auth`; missing transport auth is a runtime wiring blocker,
   not a trading permission workaround.
+- Current-candidate active Decision Lease gate-window evidence is still no-order
+  rehearsal evidence. It may acquire a short Demo lease, read governance while
+  the lease is active, evaluate Decision Lease / Guardian gates, and release in
+  `finally`; post-run `lease_live_count=0` / `list_leases=[]` must be recorded.
+  A passed active-window Decision Lease gate does not persist into final
+  admission after release, and Guardian `CAUTIOUS` remains a loss-control
+  blocker even when the lease gate passes.
 - Current-candidate Guardian reconciler drift diagnosis is read-only evidence.
   It may consume runtime `governance.get_status` / `list_leases` /
   `get_risk_state` snapshots and prove that GUI cap lineage is intact, but a
