@@ -564,6 +564,42 @@ def test_authority_contamination_blocks_before_acquire_or_network() -> None:
     assert calls == []
 
 
+def test_stale_admission_10_usdt_cap_blocks_before_acquire_or_network() -> None:
+    calls: list[str] = []
+    clock = Clock()
+    opener = FakeOpener(clock)
+    admission = _admission_review()
+    admission["admission_envelope_preview"]["risk_limits"]["per_order_cap_usdt"] = 10.0
+
+    async def dispatcher(method: str, params: dict, timeout: float) -> dict:  # noqa: ARG001
+        calls.append(method)
+        raise AssertionError("dispatcher should not be called")
+
+    packet = mod.build_current_candidate_actual_admission_bbo_lease_window(
+        admission_review=admission,
+        gate_packet=_gate_packet(),
+        sizing_proposal=_sizing_proposal(),
+        current_candidate_envelope=_envelope(),
+        run=True,
+        require_env=False,
+        now_fn=clock.now,
+        monotonic_fn=clock.monotonic,
+        dispatcher=dispatcher,
+        opener=opener,
+    )
+
+    assert packet["status"] == mod.SOURCE_NOT_READY_STATUS
+    assert "admission_review_cap_mismatch_current_candidate_envelope" in packet[
+        "source_blockers"
+    ]
+    assert packet["source_preflight"]["admission_context"]["resolved_cap_usdt"] == 10.0
+    assert packet["source_preflight"]["cap_resolution"]["resolved_cap_usdt"] == 955.24342626
+    assert packet["answers"]["decision_lease_acquire_performed"] is False
+    assert packet["answers"]["public_quote_capture_performed"] is False
+    assert opener.requests == []
+    assert calls == []
+
+
 def test_stale_bbo_blocks_loss_control_but_releases_lease() -> None:
     calls: list[str] = []
     clock = Clock()
