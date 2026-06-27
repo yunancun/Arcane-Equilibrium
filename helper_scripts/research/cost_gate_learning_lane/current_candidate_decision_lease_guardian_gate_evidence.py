@@ -530,6 +530,8 @@ def _sizing_proposal_context(proposal: dict[str, Any]) -> dict[str, Any]:
         "single_position_budget_usdt": _float(
             risk.get("single_position_budget_usdt")
         ),
+        "per_trade_budget_usdt": _float(risk.get("per_trade_budget_usdt")),
+        "max_order_notional_usdt": _float(risk.get("max_order_notional_usdt")),
         "effective_single_order_cap_usdt": _float(
             sizing.get("effective_single_order_cap_usdt")
         ),
@@ -991,6 +993,9 @@ def build_current_candidate_decision_lease_guardian_gate_evidence(
                 ],
             }
         )
+        for budget_key in ("per_trade_budget_usdt", "max_order_notional_usdt"):
+            if proposal_context.get(budget_key) is not None:
+                context[budget_key] = proposal_context[budget_key]
     candidate = _candidate_identity(context["candidate"])
     source_reasons: list[str] = []
     if artifacts["admission_review"]["status"] != "FRESH":
@@ -1037,6 +1042,24 @@ def build_current_candidate_decision_lease_guardian_gate_evidence(
     )
     guardian_gate["sizing_source"] = context.get("sizing_source")
     guardian_gate["risk_limits"]["rounded_qty"] = context.get("rounded_qty")
+    guardian_gate["risk_limits"]["account_equity_usdt"] = context.get(
+        "account_equity_usdt"
+    )
+    guardian_gate["risk_limits"]["per_trade_budget_usdt"] = context.get(
+        "per_trade_budget_usdt"
+    )
+    guardian_gate["risk_limits"]["max_order_notional_usdt"] = context.get(
+        "max_order_notional_usdt"
+    )
+    guardian_gate["risk_limits"]["per_trade_risk_pct_fraction"] = context.get(
+        "per_trade_risk_pct_fraction"
+    )
+    guardian_gate["risk_limits"]["per_trade_risk_pct_display"] = context.get(
+        "per_trade_risk_pct_display"
+    )
+    guardian_gate["risk_limits"]["position_size_max_pct"] = context.get(
+        "position_size_max_pct"
+    )
     guardian_gate["risk_limits"]["single_position_budget_usdt"] = context.get(
         "single_position_budget_usdt"
     )
@@ -1089,7 +1112,9 @@ def build_current_candidate_decision_lease_guardian_gate_evidence(
             "sizing_source": context["sizing_source"],
             "account_equity_usdt": context.get("account_equity_usdt"),
             "resolved_cap_usdt": context["resolved_cap_usdt"],
+            "per_trade_budget_usdt": context.get("per_trade_budget_usdt"),
             "single_position_budget_usdt": context.get("single_position_budget_usdt"),
+            "max_order_notional_usdt": context.get("max_order_notional_usdt"),
             "effective_single_order_cap_usdt": context.get(
                 "effective_single_order_cap_usdt"
             ),
@@ -1161,6 +1186,7 @@ def render_markdown(packet: dict[str, Any]) -> str:
         f"- Candidate: `{candidate.get('side_cell_key')}`",
         f"- Sizing source: `{risk.get('sizing_source')}`",
         f"- GUI resolved cap USDT: `{risk.get('resolved_cap_usdt')}`",
+        f"- GUI per-trade budget USDT: `{risk.get('per_trade_budget_usdt')}`",
         f"- GUI max-single-position budget USDT: `{risk.get('single_position_budget_usdt')}`",
         f"- Effective single-order cap USDT: `{risk.get('effective_single_order_cap_usdt')}`",
         f"- Rounded qty: `{risk.get('rounded_qty')}`",
