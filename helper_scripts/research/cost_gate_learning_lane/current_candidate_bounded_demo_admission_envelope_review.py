@@ -1315,9 +1315,13 @@ def build_current_candidate_bounded_demo_admission_envelope_review(
                 "per_trade_risk_pct_display"
             ),
             "position_size_max_pct": cap_resolution.get("position_size_max_pct"),
+            "per_trade_budget_usdt": cap_resolution.get("per_trade_budget_usdt"),
             "single_position_budget_usdt": cap_resolution.get(
                 "single_position_budget_usdt"
             ),
+            "max_order_notional_usdt": cap_resolution.get("max_order_notional_usdt"),
+            "resolved_cap_usdt": resolved_cap,
+            "effective_single_order_cap_usdt": resolved_cap,
             "local_10_usdt_cap_is_global_risk_authority": False,
             "bounded_probe_local_cap_usdt_is_authority": False,
         },

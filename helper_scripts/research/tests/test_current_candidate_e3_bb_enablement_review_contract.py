@@ -36,6 +36,9 @@ def _order_enablement_review(**overrides) -> dict:
             "gui_p1_risk_trade_pct": 10.0,
             "per_trade_risk_pct_fraction": 0.1,
             "per_trade_budget_usdt": 955.1369426,
+            "single_position_budget_usdt": 2387.84235651,
+            "max_order_notional_usdt": 0.0,
+            "effective_single_order_cap_usdt": 955.1369426,
             "position_size_max_pct": 25.0,
             "local_10_usdt_cap_is_authority": False,
             "blockers": [],
@@ -140,6 +143,11 @@ def test_missing_e3_bb_signoffs_requires_signoff_without_order_authority() -> No
     assert packet["required_signoff_contract"]["decision"] == mod.APPROVE_DECISION
     assert packet["order_enablement_review"]["per_trade_risk_pct_fraction"] == 0.1
     assert packet["order_enablement_review"]["per_trade_budget_usdt"] > 10.0
+    assert packet["order_enablement_review"]["single_position_budget_usdt"] > 10.0
+    assert (
+        packet["order_enablement_review"]["effective_single_order_cap_usdt"]
+        <= packet["order_enablement_review"]["single_position_budget_usdt"]
+    )
 
 
 def test_valid_e3_and_bb_signoffs_approve_only_no_order_review(tmp_path) -> None:
@@ -191,6 +199,35 @@ def test_order_enablement_review_must_keep_gui_percent_semantics() -> None:
         "loss_control_blockers"
     ]
     assert "per_trade_budget_not_equity_resolved" in packet["loss_control_blockers"]
+    assert packet["answers"]["order_capable_action_allowed"] is False
+
+
+def test_order_enablement_review_must_carry_gui_single_position_budget() -> None:
+    review = _order_enablement_review()
+    review["admission_review"].pop("single_position_budget_usdt")
+
+    packet = _packet(order_enablement_review=review)
+
+    assert packet["status"] == mod.BLOCKED_BY_LOSS_CONTROL_STATUS
+    assert "single_position_budget_not_equity_resolved" in packet[
+        "loss_control_blockers"
+    ]
+    assert packet["answers"]["order_capable_action_allowed"] is False
+
+
+def test_order_enablement_review_effective_cap_must_not_exceed_gui_budget() -> None:
+    review = _order_enablement_review()
+    review["admission_review"]["effective_single_order_cap_usdt"] = 3000.0
+
+    packet = _packet(order_enablement_review=review)
+
+    assert packet["status"] == mod.BLOCKED_BY_LOSS_CONTROL_STATUS
+    assert "effective_single_order_cap_exceeds_per_trade_budget" in packet[
+        "loss_control_blockers"
+    ]
+    assert "effective_single_order_cap_exceeds_single_position_budget" in packet[
+        "loss_control_blockers"
+    ]
     assert packet["answers"]["order_capable_action_allowed"] is False
 
 
