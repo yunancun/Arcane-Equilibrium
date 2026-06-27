@@ -121,6 +121,13 @@ Known paths:
   Rust authority, fresh BBO, and audit/reconstructability gates pass.
   Do not use reduced-sizing Guardian evidence to clear a stale larger
   admission order shape; the rounded notional must match.
+- Current-candidate no-order Decision Lease validation may only prove the IPC /
+  Rust lease state-machine path. If it acquires a lease, it must immediately
+  release it before writing the artifact; that released lease cannot clear the
+  active Decision Lease admission gate. Runtime direct runs that touch engine
+  IPC must carry `OPENCLAW_IPC_SECRET_FILE` (or equivalent secret env) when the
+  engine requires `__auth`; missing transport auth is a runtime wiring blocker,
+  not a trading permission workaround.
 - `engine_dead` incident detection is external-watchdog notify-only by design:
   when the engine is dead, in-process Rust C4 senders are unavailable. Do not
   route it through Rust `AllFail`/Defensive without a separately reviewed
