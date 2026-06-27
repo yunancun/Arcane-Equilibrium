@@ -245,6 +245,20 @@ fn build_view_map(positions: &[PositionInfo]) -> HashMap<String, PositionView> {
     out
 }
 
+/// Decide whether the reconciler should reseed and skip classification.
+///
+/// Empty baseline + empty current is a clean verification cycle, not a reseed
+/// cycle. Treating it as reseed-only starves `evaluate_actions()` of clean
+/// cycles and can keep Guardian stuck in a reconciler-driven Cautious state
+/// after all positions are flat.
+fn should_reseed_baseline_before_classify(
+    stale: bool,
+    baseline_empty: bool,
+    current_empty: bool,
+) -> bool {
+    stale || (baseline_empty && !current_empty)
+}
+
 /// Fire-and-forget V014 reconcile audit row.
 /// 觸發 V014 對帳審計行（fire-and-forget）。
 fn spawn_reconcile_audit(
@@ -597,7 +611,11 @@ pub async fn run_position_reconciler(
                             && now.saturating_sub(prev_fetch) > STALENESS_THRESHOLD_MS;
                         // Now update to current time.
                         rc_state.last_successful_fetch_ms = now;
-                        if stale || rc_state.baseline.is_empty() {
+                        if should_reseed_baseline_before_classify(
+                            stale,
+                            rc_state.baseline.is_empty(),
+                            current.is_empty(),
+                        ) {
                             // Reseed: adopt current as baseline without classification
                             let n = current.len();
                             rc_state.baseline = current;
