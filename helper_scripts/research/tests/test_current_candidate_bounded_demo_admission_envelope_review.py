@@ -242,6 +242,76 @@ def _bounded_authorization() -> dict:
     }
 
 
+def _decision_lease_gate(**overrides) -> dict:
+    payload = {
+        "schema_version": mod.DECISION_LEASE_GATE_SCHEMA_VERSION,
+        "generated_at_utc": GEN.isoformat(),
+        "status": mod.DECISION_LEASE_ACTIVE_STATUS,
+        "source": mod.RUNTIME_GOVERNANCE_IPC_SNAPSHOT_SOURCE,
+        "environment": "demo",
+        "demo_only": True,
+        "candidate": _candidate(),
+        "lease_id": "lease-current-avax",
+        "decision_lease_id": "lease-current-avax",
+        "expires_at_utc": "2026-06-27T03:20:00+00:00",
+        "blocking_reasons": [],
+        "valid_for_current_candidate": True,
+        "runtime_admission_ready": False,
+        "order_admission_ready": False,
+        "decision_lease_acquire_performed": False,
+        "decision_lease_release_performed": False,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _guardian_risk_gate(**overrides) -> dict:
+    payload = {
+        "schema_version": mod.GUARDIAN_RISK_GATE_SCHEMA_VERSION,
+        "generated_at_utc": GEN.isoformat(),
+        "status": mod.GUARDIAN_RISK_GATE_PASS_STATUS,
+        "source": mod.RUNTIME_GOVERNANCE_IPC_SNAPSHOT_SOURCE,
+        "environment": "demo",
+        "candidate": _candidate(),
+        "risk_level": "NORMAL",
+        "new_entries_allowed": True,
+        "reduce_only": False,
+        "active_de_risking": False,
+        "requires_operator": False,
+        "emergency_stops": False,
+        "position_size_multiplier": 1.0,
+        "effective_position_size_multiplier": 1.0,
+        "cap_usdt": 955.24342626,
+        "risk_limits": {
+            "gui_resolved_cap_usdt": 955.24342626,
+            "guardian_adjusted_cap_usdt": 955.24342626,
+            "rounded_notional_usdt": 954.6264,
+            "rounded_notional_lte_guardian_adjusted_cap": True,
+        },
+        "blocking_reasons": [],
+        "valid_for_current_candidate": True,
+        "runtime_admission_ready": False,
+        "order_admission_ready": False,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _rust_authority_path() -> dict:
+    return {
+        "schema_version": mod.PATCH_READINESS_SCHEMA_VERSION,
+        "generated_at_utc": GEN.isoformat(),
+        "status": mod.AUTHORITY_PATH_PATCH_READY_STATUS,
+        "candidate": _candidate(),
+        "answers": {
+            "rust_near_touch_authority_adapter_present": True,
+            "rust_authority_path_wiring_present": True,
+            "active_runtime_probe_authority": False,
+            "active_runtime_order_authority": False,
+        },
+    }
+
+
 def test_gui_cap_lineage_ready_but_runtime_admission_blocked_by_loss_controls() -> None:
     review = _review()
 
@@ -330,4 +400,54 @@ def test_bounded_authorization_input_does_not_override_missing_runtime_gates() -
     assert "bounded_demo_authorization_object_valid" not in review["runtime_admission_blockers"]
     assert "decision_lease_valid" in review["runtime_admission_blockers"]
     assert review["answers"]["operator_authorization_object_emitted"] is False
+    assert review["answers"]["order_admission_ready"] is False
+
+
+def test_generic_fake_lease_and_guardian_json_do_not_clear_runtime_gates() -> None:
+    review = _review(
+        bounded_authorization=_bounded_authorization(),
+        decision_lease={
+            "generated_at_utc": GEN.isoformat(),
+            "status": "ACTIVE",
+            "lease_id": "fake-lease",
+            "candidate": _candidate(),
+            "demo_only": True,
+            "expires_at_utc": "2026-06-27T03:20:00+00:00",
+            "order_admission_ready": False,
+        },
+        guardian_risk_gate={
+            "generated_at_utc": GEN.isoformat(),
+            "status": "PASS",
+            "environment": "demo",
+            "candidate": _candidate(),
+            "cap_usdt": 955.0,
+            "order_admission_ready": False,
+        },
+    )
+
+    assert review["status"] == mod.BLOCKED_BY_LOSS_CONTROL_STATUS
+    assert "decision_lease_valid" in review["runtime_admission_blockers"]
+    assert "guardian_risk_gate_valid" in review["runtime_admission_blockers"]
+    assert review["decision_lease"]["schema_version"] is None
+    assert review["decision_lease"]["valid_for_current_candidate"] is False
+    assert review["guardian_risk_gate"]["schema_version"] is None
+    assert review["guardian_risk_gate"]["valid_for_current_candidate"] is False
+
+
+def test_schema_gate_evidence_clears_lease_and_guardian_but_fresh_bbo_still_blocks() -> None:
+    review = _review(
+        bounded_authorization=_bounded_authorization(),
+        decision_lease=_decision_lease_gate(),
+        guardian_risk_gate=_guardian_risk_gate(),
+        rust_authority_path=_rust_authority_path(),
+    )
+
+    assert review["status"] == mod.BLOCKED_BY_LOSS_CONTROL_STATUS
+    assert review["decision_lease"]["valid_for_current_candidate"] is True
+    assert review["guardian_risk_gate"]["valid_for_current_candidate"] is True
+    assert review["rust_authority_path"]["valid_for_current_candidate_review"] is True
+    assert review["runtime_admission_blockers"] == [
+        "fresh_bbo_refresh_at_actual_admission"
+    ]
+    assert review["answers"]["runtime_admission_ready"] is False
     assert review["answers"]["order_admission_ready"] is False

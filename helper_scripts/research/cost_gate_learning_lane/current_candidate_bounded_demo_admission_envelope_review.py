@@ -33,6 +33,11 @@ SCHEMA_VERSION = "current_candidate_bounded_demo_admission_envelope_review_v1"
 ADMISSION_ENVELOPE_PREVIEW_SCHEMA_VERSION = (
     "current_candidate_bounded_demo_admission_envelope_preview_v1"
 )
+DECISION_LEASE_GATE_SCHEMA_VERSION = "current_candidate_decision_lease_gate_evidence_v1"
+GUARDIAN_RISK_GATE_SCHEMA_VERSION = "current_candidate_guardian_risk_gate_evidence_v1"
+DECISION_LEASE_ACTIVE_STATUS = "DECISION_LEASE_ACTIVE"
+GUARDIAN_RISK_GATE_PASS_STATUS = "GUARDIAN_RISK_GATE_PASS"
+RUNTIME_GOVERNANCE_IPC_SNAPSHOT_SOURCE = "runtime_governance_ipc_readonly_snapshot"
 
 HANDOFF_SCHEMA_VERSION = "current_candidate_runtime_admission_handoff_review_v1"
 HANDOFF_READY_STATUS = "CURRENT_CANDIDATE_RUNTIME_ADMISSION_HANDOFF_READY_NO_ORDER"
@@ -74,11 +79,15 @@ AUTHORITY_TRUE_KEYS = {
     "cost_gate_lowering_performed",
     "cost_gate_lowering_recommended",
     "crontab_mutation_performed",
+    "decision_lease_acquire_performed",
+    "decision_lease_release_performed",
     "env_mutation_performed",
     "exchange_call_performed",
     "freshness_gate_lowering_recommended",
     "global_cost_gate_lowering_recommended",
     "ledger_append_performed",
+    "lease_acquire_performed",
+    "lease_release_performed",
     "live_authority_granted",
     "live_execution_allowed",
     "live_promotion_performed",
@@ -500,24 +509,34 @@ def _decision_lease_summary(
     lease_candidate = _candidate_identity(_dict(data.get("candidate")))
     candidate_matches = _candidate_aligned(candidate, lease_candidate)
     status = _str(data.get("status")).upper()
+    source = _str(data.get("source"))
     valid = (
         artifact.get("status") == "FRESH"
+        and data.get("schema_version") == DECISION_LEASE_GATE_SCHEMA_VERSION
+        and source == RUNTIME_GOVERNANCE_IPC_SNAPSHOT_SOURCE
         and bool(data.get("lease_id") or data.get("decision_lease_id"))
-        and status in {"ACTIVE", "LEASE_ACTIVE", "DECISION_LEASE_ACTIVE"}
+        and status == DECISION_LEASE_ACTIVE_STATUS
         and expires_at is not None
         and expires_at > now_utc
         and candidate_matches
         and data.get("demo_only") is True
+        and _str(data.get("environment")).lower() == "demo"
+        and data.get("decision_lease_acquire_performed") is not True
+        and data.get("decision_lease_release_performed") is not True
         and data.get("order_admission_ready") is not True
     )
     return {
         "present": artifact.get("present") is True,
         "schema_version": data.get("schema_version"),
         "status": data.get("status"),
+        "source": source or None,
         "lease_id": data.get("lease_id") or data.get("decision_lease_id"),
         "candidate": lease_candidate,
         "candidate_matches": candidate_matches,
+        "environment": data.get("environment"),
+        "demo_only": data.get("demo_only"),
         "expires_at_utc": expires_at.isoformat() if expires_at else None,
+        "blocking_reasons": _list(data.get("blocking_reasons")),
         "valid_for_current_candidate": valid,
     }
 
@@ -533,24 +552,50 @@ def _guardian_risk_summary(
     risk_candidate = _candidate_identity(_dict(data.get("candidate")))
     candidate_matches = _candidate_aligned(candidate, risk_candidate)
     status = _str(data.get("status")).upper()
+    source = _str(data.get("source"))
     cap = _float(data.get("cap_usdt") or _dict(data.get("risk_limits")).get("cap_usdt"))
     cap_ok = cap is not None and resolved_cap_usdt is not None and cap <= resolved_cap_usdt
+    risk_limits = _dict(data.get("risk_limits"))
+    adjusted_cap = _float(risk_limits.get("guardian_adjusted_cap_usdt") or cap)
+    rounded_notional = _float(risk_limits.get("rounded_notional_usdt"))
+    rounded_ok = (
+        rounded_notional is not None
+        and adjusted_cap is not None
+        and rounded_notional <= adjusted_cap + 1e-8
+    )
     valid = (
         artifact.get("status") == "FRESH"
-        and status in {"PASS", "RISK_GATE_PASS", "GUARDIAN_RISK_GATE_PASS"}
+        and data.get("schema_version") == GUARDIAN_RISK_GATE_SCHEMA_VERSION
+        and source == RUNTIME_GOVERNANCE_IPC_SNAPSHOT_SOURCE
+        and status == GUARDIAN_RISK_GATE_PASS_STATUS
         and candidate_matches
         and cap_ok
         and _str(data.get("environment")).lower() == "demo"
+        and _str(data.get("risk_level")).upper() == "NORMAL"
+        and data.get("new_entries_allowed") is True
+        and data.get("reduce_only") is not True
+        and data.get("active_de_risking") is not True
+        and data.get("requires_operator") is not True
+        and data.get("emergency_stops") is not True
+        and rounded_ok
         and data.get("order_admission_ready") is not True
     )
     return {
         "present": artifact.get("present") is True,
         "schema_version": data.get("schema_version"),
         "status": data.get("status"),
+        "source": source or None,
         "candidate": risk_candidate,
         "candidate_matches": candidate_matches,
+        "environment": data.get("environment"),
+        "risk_level": data.get("risk_level"),
+        "new_entries_allowed": data.get("new_entries_allowed"),
         "cap_usdt": cap,
+        "guardian_adjusted_cap_usdt": adjusted_cap,
+        "rounded_notional_usdt": rounded_notional,
+        "rounded_notional_lte_guardian_adjusted_cap": rounded_ok,
         "cap_lte_gui_resolved_cap": cap_ok,
+        "blocking_reasons": _list(data.get("blocking_reasons")),
         "valid_for_current_candidate": valid,
     }
 
