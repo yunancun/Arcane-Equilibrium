@@ -544,6 +544,16 @@ fn normalizes_cost_gate_negative_reason_text() {
         ELIGIBLE_REJECT_REASON_CODE
     );
     assert_eq!(
+        normalize_reject_reason_code("cost_gate(JS-demo): estimated=-7.86bps < 0 — blocked / 負估計阻擋"),
+        ELIGIBLE_REJECT_REASON_CODE
+    );
+    assert_eq!(
+        normalize_reject_reason_code(
+            "cost_gate(JS-demo): edge=2.00bps < threshold=6.50bps (fee=5.00bps, wr=0.50)"
+        ),
+        "cost_gate(js-demo): edge=2.00bps < threshold=6.50bps (fee=5.00bps, wr=0.50)"
+    );
+    assert_eq!(
         side_cell_key("ma_crossover", "ethusdt", "Sell"),
         "ma_crossover|ETHUSDT|Sell"
     );

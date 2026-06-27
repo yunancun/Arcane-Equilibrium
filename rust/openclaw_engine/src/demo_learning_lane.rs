@@ -500,11 +500,13 @@ pub fn normalize_reject_reason_code(value: &str) -> String {
     if lowered == ELIGIBLE_REJECT_REASON_CODE {
         return ELIGIBLE_REJECT_REASON_CODE.to_string();
     }
-    if lowered.contains("cost_gate(js-demo)") && lowered.contains("negative") {
-        return ELIGIBLE_REJECT_REASON_CODE.to_string();
-    }
-    if lowered.contains("cost_gate") && lowered.contains("js-demo") && lowered.contains("negative")
-    {
+    let is_js_demo_cost_gate = lowered.contains("cost_gate(js-demo)")
+        || (lowered.contains("cost_gate") && lowered.contains("js-demo"));
+    let compact: String = lowered.chars().filter(|c| !c.is_whitespace()).collect();
+    let is_negative_estimate = lowered.contains("negative")
+        || lowered.contains("負估計")
+        || (compact.contains("estimated=") && compact.contains("<0"));
+    if is_js_demo_cost_gate && is_negative_estimate {
         return ELIGIBLE_REJECT_REASON_CODE.to_string();
     }
     lowered
