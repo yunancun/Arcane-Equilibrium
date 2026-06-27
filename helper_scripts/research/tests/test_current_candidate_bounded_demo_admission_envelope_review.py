@@ -451,3 +451,29 @@ def test_schema_gate_evidence_clears_lease_and_guardian_but_fresh_bbo_still_bloc
     ]
     assert review["answers"]["runtime_admission_ready"] is False
     assert review["answers"]["order_admission_ready"] is False
+
+
+def test_guardian_gate_notional_must_match_admission_order_shape() -> None:
+    guardian = _guardian_risk_gate()
+    guardian["risk_limits"]["rounded_notional_usdt"] = 668.304
+
+    review = _review(
+        bounded_authorization=_bounded_authorization(),
+        decision_lease=_decision_lease_gate(),
+        guardian_risk_gate=guardian,
+        rust_authority_path=_rust_authority_path(),
+    )
+
+    assert review["status"] == mod.BLOCKED_BY_LOSS_CONTROL_STATUS
+    assert review["guardian_risk_gate"]["valid_for_current_candidate"] is False
+    assert (
+        review["guardian_risk_gate"][
+            "rounded_notional_matches_admission_order_shape"
+        ]
+        is False
+    )
+    assert "guardian_rounded_notional_mismatch_admission_order_shape" in review[
+        "guardian_risk_gate"
+    ]["blocking_reasons"]
+    assert "guardian_risk_gate_valid" in review["runtime_admission_blockers"]
+    assert review["answers"]["order_admission_ready"] is False

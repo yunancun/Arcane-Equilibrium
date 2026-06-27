@@ -211,19 +211,29 @@ def test_ready_proposal_uses_gui_percent_cap_then_guardian_multiplier() -> None:
     assert risk["gui_risk_config_is_source_of_truth"] is True
     assert risk["risk_source_of_truth"] == "GUI-backed Rust RiskConfig"
     assert risk["cap_source"] == "current_candidate_envelope.cap_resolution.resolved_cap_usdt"
+    assert risk["account_equity_usdt"] == 9552.43426257
     assert risk["per_trade_risk_pct_fraction"] == 0.1
     assert risk["per_trade_risk_pct_display"] == 10.0
     assert risk["position_size_max_pct"] == 25.0
     assert risk["single_position_budget_usdt"] == 2388.10856564
+    assert (
+        risk["effective_single_order_cap_basis"]
+        == "min(gui_per_trade_cap_usdt, gui_max_single_position_budget_usdt, guardian_adjusted_cap_usdt)"
+    )
     assert risk["gui_resolved_cap_usdt"] == 955.24342626
     assert risk["guardian_adjusted_cap_usdt"] == 668.67039838
     assert risk["local_10_usdt_cap_is_global_risk_authority"] is False
     assert sizing["original_rounded_qty"] == 145.7
     assert sizing["original_rounded_notional_usdt"] == 954.6264
+    assert sizing["single_position_budget_usdt"] == 2388.10856564
+    assert sizing["effective_single_order_cap_usdt"] == 668.67039838
+    assert sizing["max_qty_under_effective_cap"] == 102.0
     assert sizing["proposed_rounded_qty"] == 102.0
     assert sizing["proposed_rounded_notional_usdt"] == 668.304
     assert sizing["notional_lte_guardian_adjusted_cap"] is True
     assert sizing["notional_lte_gui_resolved_cap"] is True
+    assert sizing["notional_lte_single_position_budget"] is True
+    assert sizing["notional_lte_effective_single_order_cap"] is True
     assert sizing["notional_gte_min_notional"] is True
     assert sizing["runtime_admission_ready"] is False
     assert sizing["order_admission_ready"] is False
@@ -253,6 +263,29 @@ def test_local_ten_usdt_construction_cap_blocks_proposal() -> None:
     assert packet["status"] == mod.NOT_READY_STATUS
     assert "admission_risk_cap_mismatch_construction_cap" in packet["source_blockers"]
     assert packet["answers"]["order_admission_ready"] is False
+
+
+def test_gui_max_single_position_budget_can_be_the_effective_cap() -> None:
+    admission = _admission_review()
+    admission["risk_semantics"]["position_size_max_pct"] = 6.0
+    admission["admission_envelope_preview"]["risk_limits"][
+        "position_size_max_pct"
+    ] = 6.0
+    admission["admission_envelope_preview"]["risk_limits"][
+        "single_position_budget_usdt"
+    ] = 573.14605575
+
+    packet = _packet(admission_review=admission)
+    sizing = packet["sizing_proposal"]
+
+    assert packet["status"] == mod.READY_STATUS
+    assert packet["source_blockers"] == []
+    assert packet["risk_context"]["single_position_budget_usdt"] == 573.14605575
+    assert sizing["effective_single_order_cap_usdt"] == 573.14605575
+    assert sizing["proposed_rounded_qty"] == 87.4
+    assert sizing["proposed_rounded_notional_usdt"] == 572.6448
+    assert sizing["notional_lte_single_position_budget"] is True
+    assert sizing["notional_lte_effective_single_order_cap"] is True
 
 
 def test_gui_risk_fraction_must_not_be_display_percent() -> None:

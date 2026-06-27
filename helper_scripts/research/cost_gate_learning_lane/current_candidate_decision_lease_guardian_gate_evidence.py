@@ -33,6 +33,10 @@ ADMISSION_REVIEW_BLOCKED_STATUS = (
 ADMISSION_REVIEW_READY_STATUS = (
     "CURRENT_CANDIDATE_BOUNDED_DEMO_ADMISSION_ENVELOPE_READY_NO_ORDER"
 )
+SIZING_PROPOSAL_SCHEMA_VERSION = "current_candidate_guardian_adjusted_sizing_proposal_v1"
+SIZING_PROPOSAL_READY_STATUS = (
+    "CURRENT_CANDIDATE_GUARDIAN_ADJUSTED_SIZING_PROPOSAL_READY_NO_ORDER"
+)
 
 READY_NO_ORDER_STATUS = "CURRENT_CANDIDATE_DECISION_LEASE_GUARDIAN_GATE_READY_NO_ORDER"
 BLOCKED_BY_LOSS_CONTROL_STATUS = (
@@ -48,6 +52,7 @@ GUARDIAN_RISK_GATE_NOT_READY_STATUS = "GUARDIAN_RISK_GATE_NOT_READY"
 
 DEFAULT_MAX_ADMISSION_REVIEW_AGE_SECONDS = 6 * 60 * 60
 DEFAULT_MAX_RUNTIME_SNAPSHOT_AGE_SECONDS = 5 * 60
+DEFAULT_MAX_SIZING_PROPOSAL_AGE_SECONDS = 24 * 60 * 60
 RUNTIME_SNAPSHOT_SOURCE = "runtime_governance_ipc_readonly_snapshot"
 
 AUTHORITY_TRUE_KEYS = {
@@ -130,6 +135,16 @@ def _float(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return parsed if math.isfinite(parsed) else None
+
+
+def _same_float(left: Any, right: Any, tolerance: float = 1e-8) -> bool:
+    left_num = _float(left)
+    right_num = _float(right)
+    return (
+        left_num is not None
+        and right_num is not None
+        and abs(left_num - right_num) <= tolerance
+    )
 
 
 def _int(value: Any, default: int = 0) -> int:
@@ -460,9 +475,11 @@ def _extract_admission_context(admission: dict[str, Any]) -> dict[str, Any]:
     )
     return {
         "candidate": candidate,
+        "sizing_source": "admission_review_order_shape",
         "resolved_cap_usdt": _float(
             risk_limits.get("per_order_cap_usdt") or risk.get("resolved_cap_usdt")
         ),
+        "rounded_qty": _float(order_shape.get("rounded_qty")),
         "rounded_notional_usdt": _float(
             order_shape.get("rounded_notional_usdt")
             or risk.get("rounded_notional_usdt")
@@ -480,6 +497,113 @@ def _extract_admission_context(admission: dict[str, Any]) -> dict[str, Any]:
             or risk.get("position_size_max_pct")
         ),
     }
+
+
+def _sizing_proposal_context(proposal: dict[str, Any]) -> dict[str, Any]:
+    risk = _dict(proposal.get("risk_context"))
+    sizing = _dict(proposal.get("sizing_proposal"))
+    return {
+        "candidate": _candidate_identity(_dict(proposal.get("candidate"))),
+        "sizing_source": "guardian_adjusted_sizing_proposal",
+        "resolved_cap_usdt": _float(risk.get("gui_resolved_cap_usdt")),
+        "guardian_adjusted_cap_usdt": _float(risk.get("guardian_adjusted_cap_usdt")),
+        "guardian_risk_level": risk.get("guardian_risk_level"),
+        "rounded_qty": _float(sizing.get("proposed_rounded_qty")),
+        "rounded_notional_usdt": _float(sizing.get("proposed_rounded_notional_usdt")),
+        "account_equity_usdt": _float(risk.get("account_equity_usdt")),
+        "single_position_budget_usdt": _float(
+            risk.get("single_position_budget_usdt")
+        ),
+        "effective_single_order_cap_usdt": _float(
+            sizing.get("effective_single_order_cap_usdt")
+        ),
+        "original_rounded_qty": _float(sizing.get("original_rounded_qty")),
+        "original_rounded_notional_usdt": _float(
+            sizing.get("original_rounded_notional_usdt")
+        ),
+        "per_trade_risk_pct_fraction": _float(risk.get("per_trade_risk_pct_fraction")),
+        "per_trade_risk_pct_display": _float(risk.get("per_trade_risk_pct_display")),
+        "position_size_max_pct": _float(risk.get("position_size_max_pct")),
+    }
+
+
+def _sizing_proposal_reasons(
+    proposal: dict[str, Any],
+    *,
+    admission_context: dict[str, Any],
+) -> list[str]:
+    if not proposal:
+        return []
+    reasons: list[str] = []
+    if proposal.get("schema_version") != SIZING_PROPOSAL_SCHEMA_VERSION:
+        reasons.append("sizing_proposal_schema_version_invalid")
+    if proposal.get("status") != SIZING_PROPOSAL_READY_STATUS:
+        reasons.append("sizing_proposal_status_not_ready")
+    if _list(proposal.get("source_blockers")):
+        reasons.append("sizing_proposal_source_blockers_present")
+    if _list(proposal.get("authority_contamination_reasons")):
+        reasons.append("sizing_proposal_authority_contamination_present")
+
+    proposal_context = _sizing_proposal_context(proposal)
+    if not _candidate_aligned(
+        _dict(admission_context.get("candidate")),
+        _dict(proposal_context.get("candidate")),
+    ):
+        reasons.append("sizing_proposal_candidate_mismatch")
+    if not _same_float(
+        admission_context.get("resolved_cap_usdt"),
+        proposal_context.get("resolved_cap_usdt"),
+    ):
+        reasons.append("sizing_proposal_gui_cap_mismatch_admission_review")
+
+    sizing = _dict(proposal.get("sizing_proposal"))
+    if proposal_context["rounded_qty"] is None or proposal_context["rounded_qty"] <= 0:
+        reasons.append("sizing_proposal_qty_missing_or_non_positive")
+    if (
+        proposal_context["rounded_notional_usdt"] is None
+        or proposal_context["rounded_notional_usdt"] <= 0
+    ):
+        reasons.append("sizing_proposal_notional_missing_or_non_positive")
+    if sizing.get("notional_lte_guardian_adjusted_cap") is not True:
+        reasons.append("sizing_proposal_notional_not_lte_guardian_adjusted_cap")
+    if sizing.get("notional_lte_gui_resolved_cap") is not True:
+        reasons.append("sizing_proposal_notional_not_lte_gui_resolved_cap")
+    if sizing.get("notional_lte_single_position_budget") is not True:
+        reasons.append("sizing_proposal_notional_not_lte_single_position_budget")
+    if sizing.get("notional_lte_effective_single_order_cap") is not True:
+        reasons.append("sizing_proposal_notional_not_lte_effective_single_order_cap")
+    if sizing.get("notional_gte_min_notional") is not True:
+        reasons.append("sizing_proposal_notional_below_min_notional")
+    if (
+        proposal_context["single_position_budget_usdt"] is None
+        or proposal_context["single_position_budget_usdt"] <= 0
+    ):
+        reasons.append("sizing_proposal_single_position_budget_missing_or_non_positive")
+    if (
+        proposal_context["effective_single_order_cap_usdt"] is None
+        or proposal_context["effective_single_order_cap_usdt"] <= 0
+    ):
+        reasons.append("sizing_proposal_effective_cap_missing_or_non_positive")
+    if sizing.get("runtime_admission_ready") is not False:
+        reasons.append("sizing_proposal_runtime_admission_ready_not_false")
+    if sizing.get("order_admission_ready") is not False:
+        reasons.append("sizing_proposal_order_admission_ready_not_false")
+
+    answers = _dict(proposal.get("answers"))
+    for key in (
+        "runtime_admission_ready",
+        "order_admission_ready",
+        "decision_lease_acquire_performed",
+        "decision_lease_release_performed",
+        "order_submission_performed",
+        "runtime_mutation_performed",
+        "live_authority_granted",
+    ):
+        if answers.get(key) is not False:
+            reasons.append(f"sizing_proposal_{key}_not_false")
+    if answers.get("main_cost_gate_adjustment") not in (None, "NONE"):
+        reasons.append("sizing_proposal_main_cost_gate_adjustment_not_none")
+    return sorted(set(reasons))
 
 
 def _lease_candidate(payload: dict[str, Any]) -> dict[str, Any]:
@@ -727,6 +851,7 @@ def _build_guardian_risk_gate(
         "runtime_governance_snapshot_sha256": snapshot_sha256,
         "environment": "demo",
         "candidate": candidate,
+        "sizing_source": None,
         "risk_level": risk_level or None,
         "status_risk_level": status_level or None,
         "new_entries_allowed": new_entries_allowed,
@@ -763,10 +888,12 @@ def build_current_candidate_decision_lease_guardian_gate_evidence(
     *,
     admission_review: dict[str, Any] | None,
     runtime_governance_snapshot: dict[str, Any] | None,
+    sizing_proposal: dict[str, Any] | None = None,
     paths: dict[str, Path | None] | None = None,
     now_utc: dt.datetime | None = None,
     max_admission_review_age_seconds: int = DEFAULT_MAX_ADMISSION_REVIEW_AGE_SECONDS,
     max_runtime_snapshot_age_seconds: int = DEFAULT_MAX_RUNTIME_SNAPSHOT_AGE_SECONDS,
+    max_sizing_proposal_age_seconds: int = DEFAULT_MAX_SIZING_PROPOSAL_AGE_SECONDS,
     source_head: str | None = None,
     runtime_head: str | None = None,
 ) -> dict[str, Any]:
@@ -774,11 +901,14 @@ def build_current_candidate_decision_lease_guardian_gate_evidence(
         raise ValueError("max_admission_review_age_seconds must be in [60, 86400]")
     if max_runtime_snapshot_age_seconds < 30 or max_runtime_snapshot_age_seconds > 3600:
         raise ValueError("max_runtime_snapshot_age_seconds must be in [30, 3600]")
+    if max_sizing_proposal_age_seconds < 60 or max_sizing_proposal_age_seconds > 7 * 24 * 3600:
+        raise ValueError("max_sizing_proposal_age_seconds must be in [60, 604800]")
 
     now = (now_utc or _utc_now()).astimezone(dt.timezone.utc)
     paths = paths or {}
     admission = _dict(admission_review)
     snapshot = _dict(runtime_governance_snapshot)
+    proposal = _dict(sizing_proposal)
     artifacts = {
         "admission_review": _artifact_summary(
             name="admission_review",
@@ -796,14 +926,61 @@ def build_current_candidate_decision_lease_guardian_gate_evidence(
             max_age_seconds=max_runtime_snapshot_age_seconds,
             required=True,
         ),
+        "sizing_proposal": _artifact_summary(
+            name="sizing_proposal",
+            path=paths.get("sizing_proposal"),
+            payload=proposal,
+            now_utc=now,
+            max_age_seconds=max_sizing_proposal_age_seconds,
+            required=bool(proposal),
+        ),
     }
 
     context = _extract_admission_context(admission)
+    sizing_proposal_reasons = _sizing_proposal_reasons(
+        proposal,
+        admission_context=context,
+    )
+    if proposal and artifacts["sizing_proposal"]["status"] != "FRESH":
+        sizing_proposal_reasons.append("sizing_proposal_not_fresh")
+    if proposal and not sizing_proposal_reasons:
+        proposal_context = _sizing_proposal_context(proposal)
+        context.update(
+            {
+                "candidate": proposal_context["candidate"],
+                "sizing_source": proposal_context["sizing_source"],
+                "resolved_cap_usdt": proposal_context["resolved_cap_usdt"],
+                "rounded_qty": proposal_context["rounded_qty"],
+                "rounded_notional_usdt": proposal_context["rounded_notional_usdt"],
+                "per_trade_risk_pct_fraction": proposal_context[
+                    "per_trade_risk_pct_fraction"
+                ],
+                "per_trade_risk_pct_display": proposal_context[
+                    "per_trade_risk_pct_display"
+                ],
+                "position_size_max_pct": proposal_context["position_size_max_pct"],
+                "account_equity_usdt": proposal_context["account_equity_usdt"],
+                "single_position_budget_usdt": proposal_context[
+                    "single_position_budget_usdt"
+                ],
+                "effective_single_order_cap_usdt": proposal_context[
+                    "effective_single_order_cap_usdt"
+                ],
+                "guardian_adjusted_cap_usdt_from_proposal": proposal_context[
+                    "guardian_adjusted_cap_usdt"
+                ],
+                "original_rounded_qty": proposal_context["original_rounded_qty"],
+                "original_rounded_notional_usdt": proposal_context[
+                    "original_rounded_notional_usdt"
+                ],
+            }
+        )
     candidate = _candidate_identity(context["candidate"])
     source_reasons: list[str] = []
     if artifacts["admission_review"]["status"] != "FRESH":
         source_reasons.append("admission_review_not_fresh")
     source_reasons.extend(_admission_source_reasons(admission))
+    source_reasons.extend(sizing_proposal_reasons)
     source_reasons.extend(
         _runtime_snapshot_reasons(snapshot, artifacts["runtime_governance_snapshot"])
     )
@@ -814,6 +991,7 @@ def build_current_candidate_decision_lease_guardian_gate_evidence(
     for name, payload in (
         ("admission_review", admission),
         ("runtime_governance_snapshot", snapshot),
+        ("sizing_proposal", proposal),
     ):
         if payload:
             authority_reasons.extend(
@@ -841,6 +1019,21 @@ def build_current_candidate_decision_lease_guardian_gate_evidence(
         snapshot_sha256=snapshot_sha,
         now_utc=now,
     )
+    guardian_gate["sizing_source"] = context.get("sizing_source")
+    guardian_gate["risk_limits"]["rounded_qty"] = context.get("rounded_qty")
+    guardian_gate["risk_limits"]["single_position_budget_usdt"] = context.get(
+        "single_position_budget_usdt"
+    )
+    guardian_gate["risk_limits"]["effective_single_order_cap_usdt"] = context.get(
+        "effective_single_order_cap_usdt"
+    )
+    if context.get("original_rounded_notional_usdt") is not None:
+        guardian_gate["risk_limits"]["original_rounded_qty"] = context.get(
+            "original_rounded_qty"
+        )
+        guardian_gate["risk_limits"]["original_rounded_notional_usdt"] = context.get(
+            "original_rounded_notional_usdt"
+        )
 
     gate_blockers = []
     if decision_gate["valid_for_current_candidate"] is not True:
@@ -877,8 +1070,22 @@ def build_current_candidate_decision_lease_guardian_gate_evidence(
         "blocking_gate_count": len(set(source_reasons + authority_reasons + gate_blockers)),
         "risk_context": {
             "gui_risk_config_is_source_of_truth": True,
+            "sizing_source": context["sizing_source"],
+            "account_equity_usdt": context.get("account_equity_usdt"),
             "resolved_cap_usdt": context["resolved_cap_usdt"],
+            "single_position_budget_usdt": context.get("single_position_budget_usdt"),
+            "effective_single_order_cap_usdt": context.get(
+                "effective_single_order_cap_usdt"
+            ),
+            "rounded_qty": context.get("rounded_qty"),
             "rounded_notional_usdt": context["rounded_notional_usdt"],
+            "original_rounded_qty": context.get("original_rounded_qty"),
+            "original_rounded_notional_usdt": context.get(
+                "original_rounded_notional_usdt"
+            ),
+            "guardian_adjusted_cap_usdt_from_proposal": context.get(
+                "guardian_adjusted_cap_usdt_from_proposal"
+            ),
             "per_trade_risk_pct_fraction": context["per_trade_risk_pct_fraction"],
             "per_trade_risk_pct_display": context["per_trade_risk_pct_display"],
             "position_size_max_pct": context["position_size_max_pct"],
@@ -936,7 +1143,11 @@ def render_markdown(packet: dict[str, Any]) -> str:
         f"- Status: `{packet.get('status')}`",
         f"- Reason: `{packet.get('reason')}`",
         f"- Candidate: `{candidate.get('side_cell_key')}`",
+        f"- Sizing source: `{risk.get('sizing_source')}`",
         f"- GUI resolved cap USDT: `{risk.get('resolved_cap_usdt')}`",
+        f"- GUI max-single-position budget USDT: `{risk.get('single_position_budget_usdt')}`",
+        f"- Effective single-order cap USDT: `{risk.get('effective_single_order_cap_usdt')}`",
+        f"- Rounded qty: `{risk.get('rounded_qty')}`",
         f"- Rounded notional USDT: `{risk.get('rounded_notional_usdt')}`",
         f"- Decision Lease valid: `{decision.get('valid_for_current_candidate')}`",
         f"- Guardian gate valid: `{guardian.get('valid_for_current_candidate')}`",
@@ -961,6 +1172,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--admission-review-json", type=Path, required=True)
     parser.add_argument("--runtime-governance-snapshot-json", type=Path, required=True)
+    parser.add_argument("--sizing-proposal-json", type=Path)
     parser.add_argument("--json-output", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--decision-lease-gate-json-output", type=Path)
@@ -975,6 +1187,11 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_MAX_RUNTIME_SNAPSHOT_AGE_SECONDS,
     )
+    parser.add_argument(
+        "--max-sizing-proposal-age-seconds",
+        type=int,
+        default=DEFAULT_MAX_SIZING_PROPOSAL_AGE_SECONDS,
+    )
     parser.add_argument("--source-head")
     parser.add_argument("--runtime-head")
     parser.add_argument("--print-json", action="store_true")
@@ -986,12 +1203,15 @@ def main() -> int:
     packet = build_current_candidate_decision_lease_guardian_gate_evidence(
         admission_review=_read_json(args.admission_review_json),
         runtime_governance_snapshot=_read_json(args.runtime_governance_snapshot_json),
+        sizing_proposal=_read_json(args.sizing_proposal_json),
         paths={
             "admission_review": args.admission_review_json,
             "runtime_governance_snapshot": args.runtime_governance_snapshot_json,
+            "sizing_proposal": args.sizing_proposal_json,
         },
         max_admission_review_age_seconds=args.max_admission_review_age_seconds,
         max_runtime_snapshot_age_seconds=args.max_runtime_snapshot_age_seconds,
+        max_sizing_proposal_age_seconds=args.max_sizing_proposal_age_seconds,
         source_head=args.source_head,
         runtime_head=args.runtime_head,
     )
