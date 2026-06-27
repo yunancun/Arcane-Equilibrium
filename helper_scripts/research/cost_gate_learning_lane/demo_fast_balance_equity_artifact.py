@@ -100,6 +100,12 @@ EQUITY_FIELDS = (
     "walletBalance",
     "wallet_balance",
 )
+SNAPSHOT_FILENAMES = (
+    "pipeline_snapshot_demo.json",
+    "pipeline_snapshot.json",
+    "pipeline_snapshot_paper.json",
+)
+DEFAULT_RUNTIME_SNAPSHOT_STALE_SECONDS = 60.0
 
 NowFn = Callable[[], dt.datetime]
 Opener = Callable[..., Any]
@@ -247,6 +253,209 @@ def _validate_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], Decimal 
     return data, equity, equity_field, sorted(set(reasons))
 
 
+def _path_metadata(path: Path, now: dt.datetime) -> dict[str, Any]:
+    try:
+        st = path.stat()
+    except FileNotFoundError:
+        return {"path": str(path), "exists": False}
+    meta: dict[str, Any] = {
+        "path": str(path),
+        "exists": True,
+        "is_file": path.is_file(),
+        "is_dir": path.is_dir(),
+        "mode": oct(stat.S_IMODE(st.st_mode)),
+        "mtime_utc": _iso(dt.datetime.fromtimestamp(st.st_mtime, dt.timezone.utc)),
+        "age_seconds": round(max(0.0, now.timestamp() - st.st_mtime), 3),
+    }
+    return meta
+
+
+def _engine_snapshot_summary(data: dict[str, Any]) -> dict[str, Any]:
+    paper_state = _dict(data.get("paper_state"))
+    return {
+        "source": data.get("source"),
+        "schema_version": data.get("schema_version"),
+        "trading_mode": data.get("trading_mode"),
+        "system_mode": data.get("system_mode"),
+        "paper_paused": data.get("paper_paused"),
+        "paper_state_present": bool(paper_state),
+        "paper_state_balance_present": paper_state.get("balance") is not None,
+        "paper_state_initial_balance_present": (
+            paper_state.get("initial_balance") is not None
+        ),
+        "paper_state_peak_balance_present": paper_state.get("peak_balance") is not None,
+        "paper_state_positions_count": len(_dict(paper_state.get("positions"))),
+    }
+
+
+def _snapshot_metadata(
+    path: Path,
+    *,
+    now: dt.datetime,
+    stale_seconds: float,
+) -> dict[str, Any]:
+    meta = _path_metadata(path, now)
+    meta["stale_seconds"] = stale_seconds
+    meta["stale"] = (
+        meta.get("exists") is True
+        and isinstance(meta.get("age_seconds"), (int, float))
+        and float(meta["age_seconds"]) > stale_seconds
+    )
+    if meta.get("exists") is True and meta.get("is_file") is True:
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            meta["summary"] = _engine_snapshot_summary(_dict(raw))
+        except Exception as exc:
+            meta["read_error"] = f"{type(exc).__name__}: {_str(exc)[:160]}"
+    return meta
+
+
+def _bybit_secret_slot_diagnostics(
+    root: Path | None,
+    *,
+    now: dt.datetime,
+) -> dict[str, Any]:
+    if root is None:
+        return {"provided": False}
+    result: dict[str, Any] = {
+        "provided": True,
+        "root": _path_metadata(root, now),
+        "slot_names": [],
+        "disabled_demo_slot_names": [],
+        "active_demo_slot": None,
+    }
+    if not root.exists() or not root.is_dir():
+        return result
+
+    slot_names = [p.name for p in sorted(root.iterdir(), key=lambda item: item.name)]
+    result["slot_names"] = slot_names
+    result["disabled_demo_slot_names"] = [
+        name
+        for name in slot_names
+        if name.startswith("demo.") or name.startswith("demo_")
+    ]
+
+    demo_slot = root / "demo"
+    active = _path_metadata(demo_slot, now)
+    child_names: list[str] = []
+    children: dict[str, Any] = {}
+    if demo_slot.exists() and demo_slot.is_dir():
+        for child in sorted(demo_slot.iterdir(), key=lambda item: item.name):
+            child_names.append(child.name)
+            children[child.name] = _path_metadata(child, now)
+    active["child_names"] = child_names
+    active["children"] = children
+    active["required_file_names_present"] = {
+        "api_key": "api_key" in child_names,
+        "api_secret": "api_secret" in child_names,
+    }
+    result["active_demo_slot"] = active
+    return result
+
+
+def build_runtime_diagnostics(
+    *,
+    runtime_data_dir: Path | None = None,
+    bybit_secret_root: Path | None = None,
+    snapshot_stale_seconds: float = DEFAULT_RUNTIME_SNAPSHOT_STALE_SECONDS,
+    now_fn: NowFn = _utc_now,
+) -> dict[str, Any]:
+    now = now_fn().astimezone(dt.timezone.utc)
+    stale_seconds = max(0.0, float(snapshot_stale_seconds))
+    diagnostics: dict[str, Any] = {
+        "schema_version": "demo_fast_balance_runtime_diagnostics_v1",
+        "generated_at_utc": _iso(now),
+        "provided": runtime_data_dir is not None or bybit_secret_root is not None,
+        "runtime_data_dir": (
+            _path_metadata(runtime_data_dir, now)
+            if runtime_data_dir is not None
+            else {"provided": False}
+        ),
+        "snapshot_stale_seconds": stale_seconds,
+        "snapshots": {},
+        "bybit_secret_slots": _bybit_secret_slot_diagnostics(
+            bybit_secret_root,
+            now=now,
+        ),
+        "answers": {
+            "secret_values_read": False,
+            "secret_values_written": False,
+            "runtime_mutation_performed": False,
+            "service_restart_performed": False,
+            "bybit_call_performed": False,
+            "order_submission_performed": False,
+        },
+    }
+    if runtime_data_dir is not None:
+        diagnostics["snapshots"] = {
+            name: _snapshot_metadata(
+                runtime_data_dir / name,
+                now=now,
+                stale_seconds=stale_seconds,
+            )
+            for name in SNAPSHOT_FILENAMES
+        }
+    return diagnostics
+
+
+def _runtime_diagnostic_blocking_reasons(
+    runtime_diagnostics: dict[str, Any] | None,
+    validation_reasons: list[str],
+) -> list[str]:
+    diagnostics = _dict(runtime_diagnostics)
+    if diagnostics.get("provided") is not True:
+        return []
+
+    reasons: list[str] = []
+    runtime_dir = _dict(diagnostics.get("runtime_data_dir"))
+    if runtime_dir and runtime_dir.get("provided") is not False:
+        if runtime_dir.get("exists") is False:
+            reasons.append("runtime_data_dir_missing")
+        elif runtime_dir.get("is_dir") is not True:
+            reasons.append("runtime_data_dir_not_directory")
+
+    snapshots = _dict(diagnostics.get("snapshots"))
+    demo_snapshot = _dict(snapshots.get("pipeline_snapshot_demo.json"))
+    if snapshots:
+        if demo_snapshot.get("exists") is False:
+            reasons.append("demo_snapshot_missing")
+        elif demo_snapshot.get("is_file") is not True:
+            reasons.append("demo_snapshot_not_file")
+        else:
+            if demo_snapshot.get("stale") is True:
+                reasons.append("demo_snapshot_stale")
+            if demo_snapshot.get("read_error"):
+                reasons.append("demo_snapshot_unreadable")
+            summary = _dict(demo_snapshot.get("summary"))
+            if not summary.get("paper_state_present"):
+                reasons.append("demo_snapshot_paper_state_missing")
+            if not summary.get("paper_state_balance_present"):
+                reasons.append("demo_snapshot_paper_state_balance_missing")
+            if (
+                "balance_data_pipeline_status_not_connected" in validation_reasons
+                and summary.get("paper_state_balance_present") is True
+            ):
+                reasons.append("api_payload_disconnected_but_demo_snapshot_has_balance")
+
+    secret_slots = _dict(diagnostics.get("bybit_secret_slots"))
+    if secret_slots.get("provided") is True:
+        root = _dict(secret_slots.get("root"))
+        if root.get("exists") is False:
+            reasons.append("bybit_secret_root_missing")
+        elif root.get("is_dir") is not True:
+            reasons.append("bybit_secret_root_not_directory")
+        active = _dict(secret_slots.get("active_demo_slot"))
+        if active.get("exists") is False:
+            reasons.append("active_demo_secret_slot_missing")
+        elif active.get("is_dir") is not True:
+            reasons.append("active_demo_secret_slot_not_directory")
+        else:
+            required = _dict(active.get("required_file_names_present"))
+            if required.get("api_key") is not True or required.get("api_secret") is not True:
+                reasons.append("active_demo_secret_slot_missing_required_files")
+    return sorted(set(reasons))
+
+
 def _build_packet(
     *,
     balance_payload: dict[str, Any] | None,
@@ -254,11 +463,16 @@ def _build_packet(
     api_base: str | None,
     source_transport: dict[str, Any],
     now_fn: NowFn,
+    runtime_diagnostics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     now = now_fn().astimezone(dt.timezone.utc)
     payload = _dict(balance_payload)
     data, equity, equity_field, validation_reasons = _validate_payload(payload)
     authority_ok, authority_reasons = _authority_preserved(payload)
+    runtime_reasons = _runtime_diagnostic_blocking_reasons(
+        runtime_diagnostics,
+        validation_reasons,
+    )
     if not authority_ok:
         status = AUTHORITY_BOUNDARY_VIOLATION_STATUS
         reason = "authority_boundary_violation_in_balance_payload"
@@ -268,14 +482,20 @@ def _build_packet(
     elif not payload:
         status = INPUT_REQUIRED_STATUS
         reason = "demo_fast_balance_payload_required"
-    elif validation_reasons:
+    elif validation_reasons or runtime_reasons:
         status = NOT_READY_STATUS
-        reason = "demo_fast_balance_payload_not_accepted"
+        reason = (
+            "demo_fast_balance_runtime_diagnostics_not_accepted"
+            if runtime_reasons and not validation_reasons
+            else "demo_fast_balance_payload_not_accepted"
+        )
     else:
         status = READY_STATUS
         reason = "demo_fast_balance_equity_artifact_ready"
 
-    blocking_reasons = sorted(set(validation_reasons + authority_reasons))
+    blocking_reasons = sorted(
+        set(validation_reasons + authority_reasons + runtime_reasons)
+    )
     packet = {
         "schema_version": SCHEMA_VERSION,
         "generated_at_utc": _iso(now),
@@ -298,9 +518,11 @@ def _build_packet(
             "pipeline_status": data.get("pipeline_status"),
             "equity_field": equity_field,
             "blocking_reasons": blocking_reasons,
+            "runtime_diagnostic_blocking_reasons": runtime_reasons,
             "authority_preserved": authority_ok,
             "authority_contamination_reasons": authority_reasons,
         },
+        "runtime_diagnostics": runtime_diagnostics or {"provided": False},
         "equity": {
             "equity_usdt": _round_decimal(equity, 8),
             "source_field": equity_field,
@@ -337,6 +559,7 @@ def build_demo_account_equity_artifact(
     *,
     balance_payload: dict[str, Any] | None,
     now_fn: NowFn = _utc_now,
+    runtime_diagnostics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return _build_packet(
         balance_payload=balance_payload,
@@ -344,6 +567,7 @@ def build_demo_account_equity_artifact(
         api_base=None,
         source_transport={"transport_status": "not_performed", "source": "supplied_json"},
         now_fn=now_fn,
+        runtime_diagnostics=runtime_diagnostics,
     )
 
 
@@ -411,6 +635,7 @@ def capture_demo_fast_balance_equity_artifact(
     timeout_seconds: float = 5.0,
     opener: Opener = urlopen_no_redirect,
     now_fn: NowFn = _utc_now,
+    runtime_diagnostics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     try:
         normalized_base = _normalize_api_base_url(api_base)
@@ -428,6 +653,7 @@ def capture_demo_fast_balance_equity_artifact(
                 "error": _str(exc)[:240],
             },
             now_fn=now_fn,
+            runtime_diagnostics=runtime_diagnostics,
         )
     try:
         payload, transport = fetch_demo_fast_balance(
@@ -450,6 +676,7 @@ def capture_demo_fast_balance_equity_artifact(
                 "error": _str(exc)[:240],
             },
             now_fn=now_fn,
+            runtime_diagnostics=runtime_diagnostics,
         )
     return _build_packet(
         balance_payload=payload,
@@ -457,6 +684,7 @@ def capture_demo_fast_balance_equity_artifact(
         api_base=normalized_base,
         source_transport=transport,
         now_fn=now_fn,
+        runtime_diagnostics=runtime_diagnostics,
     )
 
 
@@ -486,6 +714,14 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--api-base", default=DEFAULT_API_BASE)
     parser.add_argument("--token-file", type=Path)
     parser.add_argument("--timeout-seconds", type=float, default=5.0)
+    parser.add_argument("--runtime-data-dir", type=Path)
+    parser.add_argument("--bybit-secret-root", type=Path)
+    parser.add_argument("--runtime-diagnostics-json", type=Path)
+    parser.add_argument(
+        "--runtime-snapshot-stale-seconds",
+        type=float,
+        default=DEFAULT_RUNTIME_SNAPSHOT_STALE_SECONDS,
+    )
     parser.add_argument("--json-output", type=Path)
     parser.add_argument("--print-json", action="store_true")
     return parser
@@ -493,15 +729,26 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _build_parser().parse_args()
+    runtime_diagnostics = _read_json(args.runtime_diagnostics_json)
+    if runtime_diagnostics is None and (
+        args.runtime_data_dir is not None or args.bybit_secret_root is not None
+    ):
+        runtime_diagnostics = build_runtime_diagnostics(
+            runtime_data_dir=args.runtime_data_dir,
+            bybit_secret_root=args.bybit_secret_root,
+            snapshot_stale_seconds=args.runtime_snapshot_stale_seconds,
+        )
     if args.capture:
         packet = capture_demo_fast_balance_equity_artifact(
             api_base=args.api_base,
             token_file=args.token_file,
             timeout_seconds=max(0.1, float(args.timeout_seconds)),
+            runtime_diagnostics=runtime_diagnostics,
         )
     else:
         packet = build_demo_account_equity_artifact(
             balance_payload=_read_json(args.balance_response_json),
+            runtime_diagnostics=runtime_diagnostics,
         )
     _write_outputs(packet, args.json_output, args.print_json)
     return 0
