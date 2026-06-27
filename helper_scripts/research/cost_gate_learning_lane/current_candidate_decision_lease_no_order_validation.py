@@ -279,7 +279,9 @@ def _sizing_context(proposal: dict[str, Any]) -> dict[str, Any]:
         "candidate": _candidate_identity(_dict(proposal.get("candidate"))),
         "account_equity_usdt": _float(risk.get("account_equity_usdt")),
         "gui_resolved_cap_usdt": _float(risk.get("gui_resolved_cap_usdt")),
+        "per_trade_budget_usdt": _float(risk.get("per_trade_budget_usdt")),
         "single_position_budget_usdt": _float(risk.get("single_position_budget_usdt")),
+        "max_order_notional_usdt": _float(risk.get("max_order_notional_usdt")),
         "guardian_adjusted_cap_usdt": _float(risk.get("guardian_adjusted_cap_usdt")),
         "effective_single_order_cap_usdt": _float(
             sizing.get("effective_single_order_cap_usdt")
@@ -647,7 +649,9 @@ def build_current_candidate_decision_lease_no_order_validation(
             "gui_risk_config_is_source_of_truth": True,
             "account_equity_usdt": sizing.get("account_equity_usdt"),
             "gui_resolved_cap_usdt": sizing.get("gui_resolved_cap_usdt"),
+            "per_trade_budget_usdt": sizing.get("per_trade_budget_usdt"),
             "single_position_budget_usdt": sizing.get("single_position_budget_usdt"),
+            "max_order_notional_usdt": sizing.get("max_order_notional_usdt"),
             "guardian_adjusted_cap_usdt": sizing.get("guardian_adjusted_cap_usdt"),
             "effective_single_order_cap_usdt": sizing.get(
                 "effective_single_order_cap_usdt"

@@ -137,6 +137,9 @@ def _envelope(**overrides) -> dict:
             "per_trade_risk_pct_fraction": 0.1,
             "per_trade_risk_pct_display": 10.0,
             "position_size_max_pct": 25.0,
+            "per_trade_budget_usdt": 955.24342626,
+            "single_position_budget_usdt": 2388.10856564,
+            "max_order_notional_usdt": 0.0,
             "resolved_cap_usdt": 955.24342626,
             "bounded_probe_local_cap_usdt_is_authority": False,
             "cap_formula": (
@@ -261,10 +264,25 @@ def test_uses_gui_resolved_percent_cap_for_public_quote_and_construction() -> No
     assert packet["public_quote"]["risk_limits"]["cap_usdt"] == 955.24342626
     assert packet["public_quote"]["risk_limits"]["cap_usdt"] != 10.0
     assert (
+        packet["public_quote"]["risk_limits"]["effective_single_order_cap_usdt"]
+        == 955.24342626
+    )
+    assert (
+        packet["public_quote"]["risk_limits"]["single_position_budget_usdt"]
+        == 2388.10856564
+    )
+    assert (
         packet["public_quote"]["risk_limits"]["cap_source"]
         == "current_candidate_envelope.cap_resolution.resolved_cap_usdt"
     )
     assert packet["market_snapshot"]["risk_limits"]["cap_usdt"] == 955.24342626
+    assert (
+        packet["market_snapshot"]["risk_limits"]["single_position_budget_usdt"]
+        == 2388.10856564
+    )
+    assert packet["summary"]["per_trade_budget_usdt"] == 955.24342626
+    assert packet["summary"]["single_position_budget_usdt"] == 2388.10856564
+    assert packet["summary"]["position_size_max_pct"] == 25.0
     construction = packet["construction_preview"]["construction"]
     assert construction["constructible"] is True
     assert construction["cap_usdt"] == 955.24342626
@@ -274,6 +292,20 @@ def test_uses_gui_resolved_percent_cap_for_public_quote_and_construction() -> No
     assert packet["answers"]["bybit_private_call_performed"] is False
     assert packet["answers"]["order_submission_performed"] is False
     assert len(opener.requests) == 3
+
+
+def test_missing_single_position_budget_blocks_before_network() -> None:
+    envelope = _envelope()
+    envelope["cap_resolution"].pop("single_position_budget_usdt")
+
+    packet, opener = _build(envelope=envelope)
+
+    assert packet["status"] == mod.ENVELOPE_NOT_READY_STATUS
+    assert "single_position_budget_usdt_missing_or_non_positive" in packet[
+        "blocking_gates"
+    ]
+    assert packet["summary"]["network_call_performed"] is False
+    assert len(opener.requests) == 0
 
 
 def test_stale_current_candidate_envelope_blocks_before_network() -> None:

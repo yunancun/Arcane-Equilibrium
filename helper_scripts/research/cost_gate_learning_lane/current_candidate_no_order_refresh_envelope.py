@@ -666,6 +666,11 @@ def _refresh_envelope(
         },
         "resolved_gui_risk_cap": {
             "resolved_cap_usdt": cap_resolution.get("resolved_cap_usdt"),
+            "per_trade_budget_usdt": cap_resolution.get("per_trade_budget_usdt"),
+            "single_position_budget_usdt": cap_resolution.get(
+                "single_position_budget_usdt"
+            ),
+            "max_order_notional_usdt": cap_resolution.get("max_order_notional_usdt"),
             "per_trade_risk_pct_display": cap_resolution.get(
                 "per_trade_risk_pct_display"
             ),
@@ -675,6 +680,7 @@ def _refresh_envelope(
             "position_size_max_pct": cap_resolution.get("position_size_max_pct"),
             "risk_source_of_truth": cap_resolution.get("risk_source_of_truth"),
             "gui_percent_semantics": cap_resolution.get("gui_percent_semantics"),
+            "resolution_rule": cap_resolution.get("resolution_rule"),
             "bounded_probe_local_cap_usdt_is_authority": False,
         },
         "future_public_quote_refresh_review": {
@@ -730,6 +736,7 @@ def _refresh_envelope(
                 "requires_cap_match": True,
                 "requires_public_quote_path_sha": True,
                 "cap_must_match_resolved_gui_risk_cap_usdt": True,
+                "single_position_budget_must_match_gui_position_size_max_pct": True,
             },
             "snapshot_to_construction_preview": {
                 "source_helper": (
@@ -748,6 +755,7 @@ def _refresh_envelope(
         "pm_e3_bb_review_checklist": [
             "confirm current candidate exact-match across review, preflight, and bounded auth if supplied",
             "confirm GUI RiskConfig resolves cap from percent and equity, not from local 10 USDT defaults",
+            "confirm max-single-position is GUI percent-derived exposure budget, not a fixed USDT input",
             "confirm no auth/cookie/private/order endpoint in request envelope",
             "confirm base URL is allowlisted and method is GET for all requests",
             "confirm redirects are refused and timeout remains bounded",
@@ -758,6 +766,7 @@ def _refresh_envelope(
         "failure_conditions": [
             "candidate_identity_mismatch",
             "gui_risk_cap_unresolved_or_not_gui_backed",
+            "gui_max_single_position_budget_missing_or_not_percent_derived",
             "account_equity_artifact_missing_stale_or_not_ready",
             "auth_or_cookie_header_present",
             "private_or_order_endpoint_used",

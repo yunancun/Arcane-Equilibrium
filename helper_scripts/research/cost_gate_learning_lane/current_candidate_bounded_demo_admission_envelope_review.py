@@ -997,6 +997,11 @@ def build_current_candidate_bounded_demo_admission_envelope_review(
             ),
             "position_size_max_pct": cap_resolution.get("position_size_max_pct"),
             "account_equity_usdt": cap_resolution.get("account_equity_usdt"),
+            "per_trade_budget_usdt": cap_resolution.get("per_trade_budget_usdt"),
+            "single_position_budget_usdt": cap_resolution.get(
+                "single_position_budget_usdt"
+            ),
+            "max_order_notional_usdt": cap_resolution.get("max_order_notional_usdt"),
             "resolved_cap_usdt": resolved_cap,
             "cap_source": GUI_CAP_SOURCE,
             "rounded_notional_usdt": rounded_notional,

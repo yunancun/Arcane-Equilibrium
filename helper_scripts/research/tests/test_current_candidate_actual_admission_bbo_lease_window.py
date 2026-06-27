@@ -91,6 +91,10 @@ def _admission_review(**overrides) -> dict:
             "gui_p1_risk_trade_pct": 10.0,
             "per_trade_risk_pct_fraction": 0.1,
             "position_size_max_pct": 25.0,
+            "account_equity_usdt": 9552.43426257,
+            "per_trade_budget_usdt": 955.24342626,
+            "single_position_budget_usdt": 2388.10856564,
+            "max_order_notional_usdt": 0.0,
             "resolved_cap_usdt": 955.24342626,
             "rounded_notional_usdt": 954.9165,
             "local_10_usdt_cap_is_global_risk_authority": False,
@@ -103,6 +107,10 @@ def _admission_review(**overrides) -> dict:
                 "per_trade_risk_pct_fraction": 0.1,
                 "per_trade_risk_pct_display": 10.0,
                 "position_size_max_pct": 25.0,
+                "account_equity_usdt": 9552.43426257,
+                "per_trade_budget_usdt": 955.24342626,
+                "single_position_budget_usdt": 2388.10856564,
+                "max_order_notional_usdt": 0.0,
             },
             "order_shape": {
                 "rounded_notional_usdt": 954.9165,
@@ -149,6 +157,8 @@ def _gate_packet(**overrides) -> dict:
             "resolved_cap_usdt": 955.24342626,
             "single_position_budget_usdt": 2388.10856564,
             "effective_single_order_cap_usdt": 955.24342626,
+            "per_trade_budget_usdt": 955.24342626,
+            "max_order_notional_usdt": 0.0,
             "rounded_qty": 145.5,
             "rounded_notional_usdt": 954.9165,
             "per_trade_risk_pct_fraction": 0.1,
@@ -189,7 +199,9 @@ def _sizing_proposal(**overrides) -> dict:
             "per_trade_risk_pct_fraction": 0.1,
             "per_trade_risk_pct_display": 10.0,
             "position_size_max_pct": 25.0,
+            "per_trade_budget_usdt": 955.24342626,
             "single_position_budget_usdt": 2388.10856564,
+            "max_order_notional_usdt": 0.0,
             "guardian_risk_level": "NORMAL",
             "guardian_position_size_multiplier": 1.0,
             "guardian_adjusted_cap_usdt": 955.24342626,
@@ -289,7 +301,9 @@ def _envelope(**overrides) -> dict:
             "per_trade_risk_pct_fraction": 0.1,
             "per_trade_risk_pct_display": 10.0,
             "position_size_max_pct": 25.0,
+            "per_trade_budget_usdt": 955.24342626,
             "single_position_budget_usdt": 2388.10856564,
+            "max_order_notional_usdt": 0.0,
             "resolved_cap_usdt": 955.24342626,
             "bounded_probe_local_cap_usdt_is_authority": False,
             "cap_formula": (
@@ -507,6 +521,14 @@ def test_explicit_run_refreshes_actual_bbo_and_gate_during_active_window() -> No
     assert packet["answers"]["bybit_private_call_performed"] is False
     assert packet["actual_admission_bbo"]["resolved_cap_usdt"] == 955.24342626
     assert (
+        packet["actual_admission_bbo"]["effective_single_order_cap_usdt"]
+        == 955.24342626
+    )
+    assert (
+        packet["actual_admission_bbo"]["single_position_budget_usdt"]
+        == 2388.10856564
+    )
+    assert (
         packet["actual_admission_bbo"]["local_10_usdt_cap_is_global_risk_authority"]
         is False
     )
@@ -592,8 +614,48 @@ def test_stale_admission_10_usdt_cap_blocks_before_acquire_or_network() -> None:
     assert "admission_review_cap_mismatch_current_candidate_envelope" in packet[
         "source_blockers"
     ]
+    assert (
+        "admission_review_stale_local_10_usdt_cap_mismatch_gui_envelope"
+        in packet["source_blockers"]
+    )
     assert packet["source_preflight"]["admission_context"]["resolved_cap_usdt"] == 10.0
     assert packet["source_preflight"]["cap_resolution"]["resolved_cap_usdt"] == 955.24342626
+    assert packet["answers"]["decision_lease_acquire_performed"] is False
+    assert packet["answers"]["public_quote_capture_performed"] is False
+    assert opener.requests == []
+    assert calls == []
+
+
+def test_admission_single_position_budget_mismatch_blocks_before_acquire_or_network() -> None:
+    calls: list[str] = []
+    clock = Clock()
+    opener = FakeOpener(clock)
+    admission = _admission_review()
+    admission["admission_envelope_preview"]["risk_limits"][
+        "single_position_budget_usdt"
+    ] = 10.0
+
+    async def dispatcher(method: str, params: dict, timeout: float) -> dict:  # noqa: ARG001
+        calls.append(method)
+        raise AssertionError("dispatcher should not be called")
+
+    packet = mod.build_current_candidate_actual_admission_bbo_lease_window(
+        admission_review=admission,
+        gate_packet=_gate_packet(),
+        sizing_proposal=_sizing_proposal(),
+        current_candidate_envelope=_envelope(),
+        run=True,
+        require_env=False,
+        now_fn=clock.now,
+        monotonic_fn=clock.monotonic,
+        dispatcher=dispatcher,
+        opener=opener,
+    )
+
+    assert packet["status"] == mod.SOURCE_NOT_READY_STATUS
+    assert "admission_review_single_position_budget_usdt_mismatch" in packet[
+        "source_blockers"
+    ]
     assert packet["answers"]["decision_lease_acquire_performed"] is False
     assert packet["answers"]["public_quote_capture_performed"] is False
     assert opener.requests == []
