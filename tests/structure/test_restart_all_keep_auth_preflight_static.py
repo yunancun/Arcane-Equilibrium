@@ -113,18 +113,20 @@ def test_record_l1_events_env_is_durable_across_plain_restart() -> None:
     assert resolve_index < launch_index
 
 
-def test_demo_learning_lane_writer_env_is_durable_across_plain_restart() -> None:
-    """Cost-gate learning writer env-file settings must reach the engine process."""
+def test_demo_learning_lane_writer_and_probe_adapter_env_are_durable_across_plain_restart() -> None:
+    """Cost-gate learning writer/adapter env-file settings must reach the engine."""
     text = SCRIPT.read_text(encoding="utf-8")
 
     assert (
-        "local demo_learning_lane_writer demo_learning_lane_plan demo_learning_lane_ledger"
+        "local demo_learning_lane_writer demo_learning_lane_plan "
+        "demo_learning_lane_ledger bounded_probe_adapter_enabled"
         in text
     )
     for env_name, shell_name in (
         ("OPENCLAW_DEMO_LEARNING_LANE_WRITER", "demo_learning_lane_writer"),
         ("OPENCLAW_DEMO_LEARNING_LANE_PLAN", "demo_learning_lane_plan"),
         ("OPENCLAW_DEMO_LEARNING_LANE_LEDGER", "demo_learning_lane_ledger"),
+        ("OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED", "bounded_probe_adapter_enabled"),
     ):
         assert re.search(
             rf'{shell_name}="\$\{{{env_name}:-\$\(grep '
