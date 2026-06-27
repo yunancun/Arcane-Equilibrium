@@ -46,6 +46,19 @@ def _candidate_row(**overrides: object) -> dict[str, object]:
         "reason": "after_cost_edge_survives_current_gate",
         "next_action": "operator_review_ranked_false_negative_candidate",
         "operator_review_required": True,
+        "risk_cap_lineage": {
+            "risk_source_of_truth": "GUI-backed Rust RiskConfig",
+            "cap_source": "current_candidate_envelope.cap_resolution.resolved_cap_usdt",
+            "account_equity_usdt": 9552.43426257,
+            "per_trade_risk_pct_display": 10.0,
+            "per_trade_risk_pct_fraction": 0.1,
+            "position_size_max_pct": 25.0,
+            "resolved_cap_usdt": 955.24342626,
+            "rounded_notional_usdt": 954.6264,
+            "single_position_budget_usdt": 2388.10856564,
+            "bounded_probe_local_cap_usdt_is_authority": False,
+            "local_10_usdt_cap_is_global_risk_authority": False,
+        },
         "global_cost_gate_lowering_recommended": False,
         "probe_authority_granted": False,
         "order_authority_granted": False,
@@ -115,6 +128,13 @@ def test_ready_review_builds_valid_candidate_scoped_envelope_without_runtime_mut
         "outcome_horizon_minutes": 60,
     }
     assert envelope["max_authorized_probe_orders_per_candidate"] == 2
+    assert envelope["risk_cap_lineage"]["per_trade_risk_pct_fraction"] == 0.1
+    assert envelope["risk_cap_lineage"]["per_trade_risk_pct_display"] == 10.0
+    assert envelope["risk_cap_lineage"]["resolved_cap_usdt"] == 955.24342626
+    assert (
+        envelope["risk_cap_lineage"]["local_10_usdt_cap_is_global_risk_authority"]
+        is False
+    )
     assert review["standing_demo_authorization_validation"][
         "valid_for_candidate_scoped_authorization"
     ] is True

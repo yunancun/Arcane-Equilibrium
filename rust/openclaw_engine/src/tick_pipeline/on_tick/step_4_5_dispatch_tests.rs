@@ -24,6 +24,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock as TokioRwLock;
 
 const BOUNDED_PROBE_NOW_MS: u64 = 1_782_040_200_000;
+const GUI_RISK_CAP_USDT: f64 = 955.24342626;
 
 fn bounded_probe_plan() -> DemoLearningLanePlan {
     DemoLearningLanePlan::from_json_str(
@@ -125,7 +126,10 @@ fn bounded_probe_order_request() -> ActiveBoundedProbeOrderRequest {
         order_link_id,
         decision_lease_id: Some("lease-demo-1".to_string()),
         risk_state: "NORMAL".to_string(),
-        limits: ActiveBoundedProbeRiskLimits::default(),
+        limits: ActiveBoundedProbeRiskLimits {
+            max_demo_notional_usdt_per_order: GUI_RISK_CAP_USDT,
+            ..ActiveBoundedProbeRiskLimits::default()
+        },
     }
 }
 
@@ -208,7 +212,7 @@ fn active_bounded_probe_dispatch_skips_when_effective_notional_exceeds_cap() {
     let ActiveBoundedProbeOrderDecision::Submit(mut draft) = decision else {
         panic!("expected admitted bounded probe draft");
     };
-    draft.qty = 0.003;
+    draft.qty = 1.0;
 
     let sent = dispatch_admitted_bounded_probe_order(&tx, draft)
         .expect("cap skip should not touch dispatch channel error path");

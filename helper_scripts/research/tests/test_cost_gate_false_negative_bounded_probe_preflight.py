@@ -112,8 +112,28 @@ def _standing_demo_authorization(**overrides) -> dict:
         "scope": "demo_api_only_bounded_probe",
         "demo_only": True,
         "candidate_scoping_required": True,
+        "candidate": {
+            "side_cell_key": SIDE_CELL,
+            "strategy_name": "grid_trading",
+            "symbol": "AVAXUSDT",
+            "side": "Sell",
+            "outcome_horizon_minutes": 60,
+        },
         "max_authorized_probe_orders_per_candidate": 2,
         "expires_at_utc": "2026-06-24T12:00:00+00:00",
+        "risk_cap_lineage": {
+            "risk_source_of_truth": "GUI-backed Rust RiskConfig",
+            "cap_source": "current_candidate_envelope.cap_resolution.resolved_cap_usdt",
+            "account_equity_usdt": 9552.43426257,
+            "per_trade_risk_pct_display": 10.0,
+            "per_trade_risk_pct_fraction": 0.1,
+            "position_size_max_pct": 25.0,
+            "resolved_cap_usdt": 955.24342626,
+            "rounded_notional_usdt": 954.6264,
+            "single_position_budget_usdt": 2388.10856564,
+            "bounded_probe_local_cap_usdt_is_authority": False,
+            "local_10_usdt_cap_is_global_risk_authority": False,
+        },
         "answers": {
             "demo_only": True,
             "candidate_scoping_required": True,
@@ -150,7 +170,7 @@ def test_pending_review_emits_no_authority_preflight_design_only() -> None:
     assert "False-Negative Bounded Demo Probe Preflight" in markdown
 
 
-def test_approved_review_reaches_authorization_review_without_order_authority() -> None:
+def test_approved_review_without_gui_risk_cap_fails_closed() -> None:
     review = _review(
         status=APPROVED_FOR_PREFLIGHT_STATUS,
         decision="approve-preflight",
@@ -173,11 +193,12 @@ def test_approved_review_reaches_authorization_review_without_order_authority() 
         now_utc=NOW,
     )
 
-    assert packet["status"] == "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+    assert packet["status"] == "GUI_RISK_CAP_INPUT_REQUIRED_FOR_PREFLIGHT"
+    assert "gui_risk_cap_lineage_valid_for_preflight" in packet["blocking_gates"]
     assert packet["bounded_demo_probe_design"]["status"] == (
-        "READY_FOR_SEPARATE_OPERATOR_AUTHORIZATION"
+        "NOT_READY_FOR_OPERATOR_PROBE_REVIEW"
     )
-    assert packet["answers"]["ready_for_operator_bounded_demo_probe_authorization"] is True
+    assert packet["answers"]["ready_for_operator_bounded_demo_probe_authorization"] is False
     assert packet["answers"]["bounded_demo_probe_authorized"] is False
     assert packet["answers"]["order_submission_performed"] is False
 
@@ -216,8 +237,50 @@ def test_standing_demo_review_reaches_ready_preflight_without_authority() -> Non
     assert packet["answers"]["operator_review_approval_source"] == (
         "standing_demo_authorization"
     )
+    limits = packet["bounded_demo_probe_design"]["suggested_initial_probe_limits"]
+    assert limits["max_demo_notional_usdt_per_order"] == 955.24342626
+    assert limits["max_total_demo_notional_usdt_before_review"] == 1910.48685252
+    assert limits["max_probe_intents_before_review"] == 2
+    assert limits["per_trade_risk_pct_fraction"] == 0.1
+    assert limits["per_trade_risk_pct_display"] == 10.0
+    assert limits["local_10_usdt_cap_is_global_risk_authority"] is False
     assert packet["answers"]["bounded_demo_probe_authorized"] is False
     assert packet["answers"]["probe_authority_granted"] is False
+    assert packet["answers"]["order_authority_granted"] is False
+
+
+def test_standing_demo_review_requires_gui_risk_cap_lineage() -> None:
+    review = _review(
+        status=APPROVED_FOR_PREFLIGHT_STATUS,
+        decision="approve-preflight",
+        operator_review_approval_source="standing_demo_authorization",
+        operator_review_approved_for_preflight=True,
+        answers={
+            "operator_review_approved_for_preflight": True,
+            "bounded_demo_probe_preflight_approved": True,
+            "review_grants_runtime_authority": False,
+            "bounded_demo_probe_authorized": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+            "standing_demo_authorization_consumed": True,
+        },
+    )
+    standing = _standing_demo_authorization()
+    standing.pop("risk_cap_lineage")
+    packet = build_false_negative_bounded_demo_probe_preflight(
+        autonomous_parameter_proposal=_proposal(),
+        false_negative_operator_review=review,
+        standing_demo_authorization=standing,
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "STANDING_DEMO_AUTHORIZATION_INVALID_FOR_PREFLIGHT"
+    assert "standing_demo_authorization_valid_for_preflight" in packet["blocking_gates"]
+    assert packet["standing_demo_authorization"]["risk_cap_lineage"]["valid"] is False
+    assert packet["answers"]["ready_for_operator_bounded_demo_probe_authorization"] is False
     assert packet["answers"]["order_authority_granted"] is False
     assert packet["answers"]["order_submission_performed"] is False
 
@@ -315,8 +378,8 @@ def test_preserved_approval_review_reaches_preflight_without_runtime_authority()
         now_utc=NOW,
     )
 
-    assert packet["status"] == "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
-    assert packet["answers"]["ready_for_operator_bounded_demo_probe_authorization"] is True
+    assert packet["status"] == "GUI_RISK_CAP_INPUT_REQUIRED_FOR_PREFLIGHT"
+    assert packet["answers"]["ready_for_operator_bounded_demo_probe_authorization"] is False
     assert packet["answers"]["bounded_demo_probe_authorized"] is False
     assert packet["answers"]["global_cost_gate_lowering_recommended"] is False
     assert packet["answers"]["main_cost_gate_adjustment"] == "NONE"

@@ -309,6 +309,17 @@ def _preflight_summary(
         "max_total_demo_notional_usdt_before_review": _float(
             limits.get("max_total_demo_notional_usdt_before_review")
         ),
+        "cap_source": limits.get("cap_source"),
+        "risk_source_of_truth": limits.get("risk_source_of_truth"),
+        "per_trade_risk_pct_fraction": _float(
+            limits.get("per_trade_risk_pct_fraction")
+        ),
+        "per_trade_risk_pct_display": _float(
+            limits.get("per_trade_risk_pct_display")
+        ),
+        "local_10_usdt_cap_is_global_risk_authority": (
+            limits.get("local_10_usdt_cap_is_global_risk_authority") is True
+        ),
     }
 
 
@@ -342,6 +353,17 @@ def _placement_summary(
         ),
         "max_demo_notional_usdt_per_order": _float(
             limits.get("max_demo_notional_usdt_per_order")
+        ),
+        "cap_source": limits.get("cap_source"),
+        "risk_source_of_truth": limits.get("risk_source_of_truth"),
+        "per_trade_risk_pct_fraction": _float(
+            limits.get("per_trade_risk_pct_fraction")
+        ),
+        "per_trade_risk_pct_display": _float(
+            limits.get("per_trade_risk_pct_display")
+        ),
+        "local_10_usdt_cap_is_global_risk_authority": (
+            limits.get("local_10_usdt_cap_is_global_risk_authority") is True
         ),
     }
 
@@ -386,6 +408,72 @@ def _candidate_budget(
     ]
     positives = [value for value in candidates if value > 0]
     return min(positives) if positives else 0
+
+
+def _nearly_equal(left: float | None, right: float | None) -> bool:
+    return (
+        left is not None
+        and right is not None
+        and abs(left - right) <= max(1e-8, abs(right) * 1e-9)
+    )
+
+
+def _gui_risk_notional_limit_summary(
+    *,
+    preflight: dict[str, Any],
+    placement: dict[str, Any],
+    standing: dict[str, Any],
+    standing_input_supplied: bool,
+) -> dict[str, Any]:
+    preflight_cap = _float(preflight.get("max_demo_notional_usdt_per_order"))
+    placement_cap = _float(placement.get("max_demo_notional_usdt_per_order"))
+    standing_risk = _dict(standing.get("risk_cap_lineage"))
+    standing_cap = _float(standing_risk.get("resolved_cap_usdt"))
+    preflight_source = _str(preflight.get("risk_source_of_truth")).lower()
+    preflight_local_10 = preflight.get("local_10_usdt_cap_is_global_risk_authority") is True
+    placement_local_10 = placement.get("local_10_usdt_cap_is_global_risk_authority") is True
+    if standing_input_supplied:
+        expected_cap = standing_cap
+        source_valid = standing_risk.get("valid") is True
+        preflight_matches = _nearly_equal(preflight_cap, standing_cap)
+        placement_matches = _nearly_equal(placement_cap, standing_cap)
+    else:
+        expected_cap = preflight_cap
+        source_valid = (
+            "gui" in preflight_source
+            and "riskconfig" in preflight_source
+            and preflight_local_10 is False
+        )
+        preflight_matches = preflight_cap is not None and preflight_cap > 0.0
+        placement_matches = _nearly_equal(placement_cap, preflight_cap)
+    valid = (
+        source_valid
+        and preflight_matches
+        and placement_matches
+        and preflight_cap is not None
+        and preflight_cap > 0.0
+        and placement_cap is not None
+        and placement_cap > 0.0
+        and preflight_local_10 is False
+        and placement_local_10 is False
+    )
+    return {
+        "valid": valid,
+        "expected_cap_usdt": expected_cap,
+        "preflight_cap_usdt": preflight_cap,
+        "placement_cap_usdt": placement_cap,
+        "standing_cap_usdt": standing_cap,
+        "standing_input_supplied": standing_input_supplied,
+        "source_valid": source_valid,
+        "preflight_matches_expected_cap": preflight_matches,
+        "placement_matches_expected_cap": placement_matches,
+        "preflight_risk_source_of_truth": preflight.get("risk_source_of_truth"),
+        "placement_risk_source_of_truth": placement.get("risk_source_of_truth"),
+        "preflight_cap_source": preflight.get("cap_source"),
+        "placement_cap_source": placement.get("cap_source"),
+        "preflight_local_10_usdt_cap_is_global_risk_authority": preflight_local_10,
+        "placement_local_10_usdt_cap_is_global_risk_authority": placement_local_10,
+    }
 
 
 def _normalize_decision(decision: str | None) -> str:
@@ -500,6 +588,8 @@ def _status_from_gates(
         return FALSE_NEGATIVE_PREFLIGHT_NOT_READY_STATUS
     if "sealed_horizon_preflight_ready" in failed:
         return "SEALED_HORIZON_PREFLIGHT_NOT_READY"
+    if "gui_risk_notional_limit_valid" in failed:
+        return "GUI_RISK_CAP_INPUT_REQUIRED_FOR_AUTHORIZATION_REVIEW"
     if "placement_repair_plan_ready" in failed:
         return "PLACEMENT_REPAIR_PLAN_NOT_READY"
     if "authority_path_patch_readiness_ready" in failed:
@@ -666,6 +756,12 @@ def build_bounded_demo_probe_operator_authorization(
         operator = standing_operator
     standing_present = artifacts["standing_demo_authorization"].get("present") is True
     standing_input_supplied = standing_present or paths.get("standing_demo_authorization") is not None
+    gui_risk_notional_limit = _gui_risk_notional_limit_summary(
+        preflight=preflight_summary,
+        placement=placement_summary,
+        standing=standing_summary,
+        standing_input_supplied=standing_input_supplied,
+    )
     standing_operator_matches = not (
         authorization_requested
         and standing_present
@@ -820,6 +916,20 @@ def build_bounded_demo_probe_operator_authorization(
                 "supply_fresh_candidate_scoped_standing_demo_authorization_or_remove_invalid_envelope"
             ],
             evidence=standing_summary,
+        ),
+        _gate(
+            "gui_risk_notional_limit_valid",
+            gui_risk_notional_limit["valid"] is True,
+            status="VALID" if gui_risk_notional_limit["valid"] else "MISSING_OR_INVALID",
+            reason=(
+                "preflight and placement per-order notional caps must match "
+                "GUI-backed Rust RiskConfig cap lineage; a local 10 USDT "
+                "diagnostic cap is not authorization-grade risk control"
+            ),
+            next_actions=[
+                "refresh_preflight_and_placement_with_gui_risk_cap_lineage"
+            ],
+            evidence=gui_risk_notional_limit,
         ),
         _gate(
             "placement_repair_plan_ready",

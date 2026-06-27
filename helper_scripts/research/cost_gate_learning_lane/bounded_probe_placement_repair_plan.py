@@ -333,6 +333,17 @@ def _touchability_summary(
         "max_demo_notional_usdt_per_order": _float(
             placement.get("max_demo_notional_usdt_per_order")
         ),
+        "cap_source": placement.get("cap_source"),
+        "risk_source_of_truth": placement.get("risk_source_of_truth"),
+        "per_trade_risk_pct_fraction": _float(
+            placement.get("per_trade_risk_pct_fraction")
+        ),
+        "per_trade_risk_pct_display": _float(
+            placement.get("per_trade_risk_pct_display")
+        ),
+        "local_10_usdt_cap_is_global_risk_authority": (
+            placement.get("local_10_usdt_cap_is_global_risk_authority") is True
+        ),
         "first_attempt_bootstrap": placement.get("first_attempt_bootstrap") is True,
         "first_attempt_bootstrap_is_proof": (
             placement.get("first_attempt_bootstrap_is_proof") is True
@@ -436,6 +447,17 @@ def _repair_plan(
             ),
             "max_demo_notional_usdt_per_order": summary.get(
                 "max_demo_notional_usdt_per_order"
+            ),
+            "cap_source": summary.get("cap_source"),
+            "risk_source_of_truth": summary.get("risk_source_of_truth"),
+            "per_trade_risk_pct_fraction": summary.get(
+                "per_trade_risk_pct_fraction"
+            ),
+            "per_trade_risk_pct_display": summary.get(
+                "per_trade_risk_pct_display"
+            ),
+            "local_10_usdt_cap_is_global_risk_authority": summary.get(
+                "local_10_usdt_cap_is_global_risk_authority"
             ),
         },
         "runtime_touchability_baseline": {

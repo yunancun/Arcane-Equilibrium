@@ -15,7 +15,8 @@ use crate::demo_learning_lane::{
 };
 use crate::order_manager::{OrderType, TimeInForce};
 
-pub const DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER: f64 = 10.0;
+// Fail-closed until the reviewed GUI/RiskConfig cap is supplied by admission.
+pub const DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER: f64 = 0.0;
 pub const DEFAULT_MAX_PROBE_INTENTS_BEFORE_REVIEW: u64 = 1;
 pub const DEFAULT_ACTIVE_BOUNDED_PROBE_MAKER_TIMEOUT_MS: u64 = 45_000;
 pub const ACTIVE_BOUNDED_PROBE_REFERENCE_SOURCE: &str = "bounded_probe_active_near_touch";
@@ -58,7 +59,6 @@ impl ActiveBoundedProbeRiskLimits {
         self.demo_only
             && self.max_demo_notional_usdt_per_order.is_finite()
             && self.max_demo_notional_usdt_per_order > 0.0
-            && self.max_demo_notional_usdt_per_order <= DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER
             && (1..=10).contains(&self.max_probe_intents_before_review)
             && self.one_order_per_admitted_attempt
             && (1..=60_000).contains(&self.max_fresh_bbo_age_ms)
@@ -178,7 +178,6 @@ pub fn active_bounded_probe_effective_notional_within_cap(
         || effective_limit_price <= 0.0
         || !max_demo_notional_usdt_per_order.is_finite()
         || max_demo_notional_usdt_per_order <= 0.0
-        || max_demo_notional_usdt_per_order > DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER
     {
         return false;
     }
@@ -608,6 +607,7 @@ mod tests {
     };
 
     const NOW_MS: u64 = 1_782_040_200_000;
+    const GUI_RISK_CAP_USDT: f64 = 955.24342626;
 
     fn plan() -> DemoLearningLanePlan {
         DemoLearningLanePlan::from_json_str(
@@ -716,7 +716,14 @@ mod tests {
             order_link_id,
             decision_lease_id: Some("lease-demo-1".to_string()),
             risk_state: "NORMAL".to_string(),
-            limits: ActiveBoundedProbeRiskLimits::default(),
+            limits: gui_risk_limits(),
+        }
+    }
+
+    fn gui_risk_limits() -> ActiveBoundedProbeRiskLimits {
+        ActiveBoundedProbeRiskLimits {
+            max_demo_notional_usdt_per_order: GUI_RISK_CAP_USDT,
+            ..ActiveBoundedProbeRiskLimits::default()
         }
     }
 
@@ -730,10 +737,7 @@ mod tests {
         assert_eq!(draft.order_type, OrderType::Limit);
         assert_eq!(draft.time_in_force, TimeInForce::PostOnly);
         assert_eq!(draft.limit_price, 3_499.9);
-        assert_eq!(
-            draft.max_demo_notional_usdt_per_order,
-            DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER
-        );
+        assert_eq!(draft.max_demo_notional_usdt_per_order, GUI_RISK_CAP_USDT);
         assert_eq!(
             draft.maker_timeout_ms,
             DEFAULT_ACTIVE_BOUNDED_PROBE_MAKER_TIMEOUT_MS
@@ -824,10 +828,9 @@ mod tests {
     }
 
     #[test]
-    fn caller_cannot_expand_approved_demo_notional_cap() {
+    fn missing_gui_risk_cap_blocks_active_order() {
         let mut request = request();
-        request.limits.max_demo_notional_usdt_per_order =
-            DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER + 0.01;
+        request.limits.max_demo_notional_usdt_per_order = DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER;
 
         let decision = candidate_matched_bounded_probe_order(request);
         let ActiveBoundedProbeOrderDecision::Skip(skip) = decision else {
@@ -842,29 +845,25 @@ mod tests {
     #[test]
     fn effective_notional_cap_guard_rejects_post_round_breach_and_invalid_values() {
         assert!(active_bounded_probe_effective_notional_within_cap(
-            0.002,
-            5_000.0,
-            DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER,
+            0.2, 5_000.0, 1_000.0,
         ));
         assert!(!active_bounded_probe_effective_notional_within_cap(
-            0.002_001,
-            5_000.0,
-            DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER,
+            0.200_001, 5_000.0, 1_000.0,
         ));
         assert!(!active_bounded_probe_effective_notional_within_cap(
             f64::NAN,
             5_000.0,
-            DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER,
+            1_000.0,
         ));
         assert!(!active_bounded_probe_effective_notional_within_cap(
-            0.002,
+            0.2,
             f64::INFINITY,
-            DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER,
+            1_000.0,
         ));
         assert!(!active_bounded_probe_effective_notional_within_cap(
-            0.002,
+            0.2,
             5_000.0,
-            DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER + 0.01,
+            DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER,
         ));
     }
 

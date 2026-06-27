@@ -64,6 +64,16 @@ def _int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _float(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
 def _truthy_authority(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -113,6 +123,7 @@ def summarize_standing_demo_authorization(
         and expires_at <= max_expires_at
     )
     cap = _int(payload.get("max_authorized_probe_orders_per_candidate"))
+    risk_cap_lineage = _risk_cap_lineage_summary(payload)
     demo_only = payload.get("demo_only") is True
     environment_valid = environment in ALLOWED_STANDING_DEMO_ENVIRONMENTS
     scope_valid = scope in ALLOWED_STANDING_DEMO_SCOPES
@@ -168,6 +179,7 @@ def summarize_standing_demo_authorization(
         and bool(operator_id)
         and expiry_valid
         and cap > 0
+        and risk_cap_lineage["valid"] is True
     )
     return {
         "status": payload.get("status"),
@@ -194,6 +206,72 @@ def summarize_standing_demo_authorization(
         "cost_gate_lowering_recommended": cost_gate_lowering,
         "promotion_evidence": promotion,
         "authority_contamination": authority_contamination,
+        "risk_cap_lineage": risk_cap_lineage,
+    }
+
+
+def _risk_cap_lineage_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    lineage = _dict(payload.get("risk_cap_lineage") or payload.get("risk_semantics"))
+    source_of_truth = _str(
+        lineage.get("risk_source_of_truth")
+        or lineage.get("source")
+        or lineage.get("cap_source")
+    )
+    source_text = source_of_truth.lower()
+    resolved_cap = _float(lineage.get("resolved_cap_usdt"))
+    per_trade_fraction = _float(
+        lineage.get("per_trade_risk_pct_fraction")
+        or lineage.get("per_trade_risk_pct")
+    )
+    per_trade_display = _float(
+        lineage.get("per_trade_risk_pct_display")
+        or lineage.get("gui_p1_risk_trade_pct")
+    )
+    position_size_max_pct = _float(lineage.get("position_size_max_pct"))
+    rounded_notional = _float(
+        lineage.get("rounded_notional_usdt")
+        or lineage.get("constructed_notional_usdt")
+    )
+    local_10_is_authority = _truthy_authority(
+        lineage.get("local_10_usdt_cap_is_global_risk_authority")
+    )
+    bounded_probe_local_cap_is_authority = _truthy_authority(
+        lineage.get("bounded_probe_local_cap_usdt_is_authority")
+    )
+    gui_backed = (
+        ("gui" in source_text and "riskconfig" in source_text)
+        or lineage.get("gui_risk_config_is_source_of_truth") is True
+        or lineage.get("gui_risk_config_is_authority") is True
+    )
+    valid = (
+        bool(lineage)
+        and gui_backed
+        and resolved_cap is not None
+        and resolved_cap > 0.0
+        and per_trade_fraction is not None
+        and 0.0 < per_trade_fraction <= 1.0
+        and per_trade_display is not None
+        and per_trade_display > 0.0
+        and local_10_is_authority is False
+        and bounded_probe_local_cap_is_authority is False
+    )
+    return {
+        "valid": valid,
+        "risk_source_of_truth": source_of_truth or None,
+        "cap_source": lineage.get("cap_source"),
+        "account_equity_usdt": _float(lineage.get("account_equity_usdt")),
+        "per_trade_risk_pct_fraction": per_trade_fraction,
+        "per_trade_risk_pct_display": per_trade_display,
+        "position_size_max_pct": position_size_max_pct,
+        "single_position_budget_usdt": _float(
+            lineage.get("single_position_budget_usdt")
+        ),
+        "resolved_cap_usdt": resolved_cap,
+        "rounded_notional_usdt": rounded_notional,
+        "local_10_usdt_cap_is_global_risk_authority": local_10_is_authority,
+        "bounded_probe_local_cap_usdt_is_authority": (
+            bounded_probe_local_cap_is_authority
+        ),
     }
 
 

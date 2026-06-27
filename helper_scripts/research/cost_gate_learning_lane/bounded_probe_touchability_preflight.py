@@ -307,6 +307,17 @@ def _design_summary(preflight: dict[str, Any] | None) -> dict[str, Any]:
         "max_demo_notional_usdt_per_order": _float(
             limits.get("max_demo_notional_usdt_per_order")
         ),
+        "cap_source": limits.get("cap_source"),
+        "risk_source_of_truth": limits.get("risk_source_of_truth"),
+        "per_trade_risk_pct_fraction": _float(
+            limits.get("per_trade_risk_pct_fraction")
+        ),
+        "per_trade_risk_pct_display": _float(
+            limits.get("per_trade_risk_pct_display")
+        ),
+        "local_10_usdt_cap_is_global_risk_authority": (
+            limits.get("local_10_usdt_cap_is_global_risk_authority") is True
+        ),
         "reviewable": (
             payload.get("schema_version")
             in SUPPORTED_BOUNDED_PROBE_PREFLIGHT_SCHEMA_VERSIONS
@@ -592,6 +603,13 @@ def _placement_requirements(
         "first_attempt_bootstrap_is_proof": False,
         "max_probe_intents_before_review": design.get("max_probe_intents_before_review"),
         "max_demo_notional_usdt_per_order": design.get("max_demo_notional_usdt_per_order"),
+        "cap_source": design.get("cap_source"),
+        "risk_source_of_truth": design.get("risk_source_of_truth"),
+        "per_trade_risk_pct_fraction": design.get("per_trade_risk_pct_fraction"),
+        "per_trade_risk_pct_display": design.get("per_trade_risk_pct_display"),
+        "local_10_usdt_cap_is_global_risk_authority": (
+            design.get("local_10_usdt_cap_is_global_risk_authority") is True
+        ),
         "latest_runtime_max_best_touch_gap_bps": touchability.get("max_best_touch_gap_bps"),
         "latest_runtime_min_best_touch_gap_bps": touchability.get("min_best_touch_gap_bps"),
     }
