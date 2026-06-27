@@ -78,6 +78,9 @@ Known paths:
 - Linux repo: `/home/ncyu/BybitOpenClaw/srv`
 - remote: `git@github.com:yunancun/BybitOpenClaw.git`
 - ssh alias: `trade-core`
+- Runtime services are user units. Use `systemctl --user status
+  openclaw-trading-api.service openclaw-watchdog.service`; system-level
+  `systemctl status openclaw-trading-api.service` is the wrong namespace.
 
 ## Hard Boundaries
 
@@ -91,13 +94,14 @@ Known paths:
 - Python/FastAPI is control plane / GUI / bridge / replay / agent host, not the
   trading truth layer.
 - GUI-backed Rust RiskConfig is the operator-facing risk parameter source of
-  truth. GUI `P1 Risk/Trade=10.0%` maps to TOML `per_trade_risk_pct=0.1`; do
-  not confuse this with `10 USDT`. The Rust bounded-probe active-order
-  `DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER=10.0` is a separate local envelope,
-  not the global single-order exposure cap. Resolving a USDT cap also requires
-  an accepted Demo fast-balance equity artifact (`demo_account_equity_artifact_v1`
-  wrapping `/api/v1/strategy/demo/balance?fast=1` `rust_snapshot_fast` output);
-  a naked `account_equity_usdt` number is not auditable cap evidence.
+  truth. GUI `P1 Risk/Trade=10.0%` maps to Rust/TOML
+  `per_trade_risk_pct=0.1`; GUI `0.5%` maps to `0.005`. Do not confuse GUI
+  `10.0` with `10 USDT`. The active bounded-probe per-order notional default
+  is fail-closed `0.0` until a reviewed GUI/Rust-resolved cap is supplied.
+  Resolving a USDT cap also requires an accepted Demo fast-balance equity
+  artifact (`demo_account_equity_artifact_v1` wrapping
+  `/api/v1/strategy/demo/balance?fast=1` `rust_snapshot_fast` output); a naked
+  `account_equity_usdt` number is not auditable cap evidence.
 - `engine_dead` incident detection is external-watchdog notify-only by design:
   when the engine is dead, in-process Rust C4 senders are unavailable. Do not
   route it through Rust `AllFail`/Defensive without a separately reviewed
@@ -297,12 +301,12 @@ Do not paste long reports or stable architecture into TODO.
 ## 2026-06-24 Runtime Adapter No-Order BTC Checkpoint
 
 - `P0-BOUNDED-PROBE-RUNTIME-ADAPTER-ENABLEMENT-DEMO-ONLY-E3-BB-REVIEW` is `DONE_WITH_CONCERNS`: E3/BB found no safe current production flag for actual demo order submission; Rust writer still hard-codes `adapter_enabled=false`.
-- PM generated only timestamped runtime artifacts. Temporary non-ledger plan copy + `runtime_adapter.py --adapter-enabled` reached `ADMIT_DEMO_LEARNING_PROBE`, but no-order placement construction failed closed: BTCUSDT local BBO age `1652ms` > 1000ms gate, and `qty_step=0.001` at limit `60040.2` makes min positive notional `60.0402 USDT`, above the 10 USDT/order cap.
+- PM generated only timestamped runtime artifacts. Temporary non-ledger plan copy + `runtime_adapter.py --adapter-enabled` reached `ADMIT_DEMO_LEARNING_PROBE`, but no-order placement construction failed closed: BTCUSDT local BBO age `1652ms` > 1000ms gate, and `qty_step=0.001` at limit `60040.2` makes min positive notional `60.0402 USDT`, above the historical bounded-local 10 USDT/order cap at that checkpoint.
 - Canonical plan sha `624a62d5...` and ledger sha `84624226...` unchanged. No Bybit call/order, no PG write, no ledger append, no canonical plan mutation, no runtime/env/cron/service mutation, no writer, no Cost Gate lowering, no live/mainnet, no promotion proof. Next blocker: `P0-BOUNDED-PROBE-CAP-AND-ORDER-CONSTRUCTION-REPAIR-DEMO-ONLY-SOURCE-PROPOSAL`.
 
 ## 2026-06-24 Bounded Probe Order-Construction Repair
 
-- `P0-BOUNDED-PROBE-CAP-AND-ORDER-CONSTRUCTION-REPAIR-DEMO-ONLY-SOURCE-PROPOSAL` is `DONE_WITH_CONCERNS`: BTC remains not executable under current 10 USDT/order cap, but the source-only repair packet is now reviewed and reconstructable.
+- `P0-BOUNDED-PROBE-CAP-AND-ORDER-CONSTRUCTION-REPAIR-DEMO-ONLY-SOURCE-PROPOSAL` is `DONE_WITH_CONCERNS`: BTC remained not executable under the historical bounded-local 10 USDT/order cap, but the source-only repair packet was reviewed and reconstructable.
 - Added `bounded_probe_order_construction_repair.py` and tests. It emits `bounded_demo_probe_order_construction_repair_v1`, fails closed on authority/proof/mutation contamination including non-boolean truthy values, non-empty placement blockers, stale/schema-mismatched candidate universe artifacts, CLI bare-array universe bypass, and non-Trading instruments. CLI records input path/sha.
 - Runtime read-only PG screen found 9 false-negative candidates fitting the existing cap; top is `grid_trading|AVAXUSDT|Sell`, rank 1, avg net `73.5511bps`, 48/48 net-positive 60m outcomes, min executable notional `5.0 USDT`.
 - Latest repair artifact `/tmp/openclaw/cost_gate_learning_lane/bounded_probe_order_construction_repair_latest.json` sha `5a5940cf...`, status `ORDER_CONSTRUCTION_REPAIR_REQUIRED`: BTC cap repair remains review-only, lower-price reroute is available. PA/E1 PASS; E2/E4 PASS; focused helper `11 passed`, adjacent bounded-probe suite `42 passed`, py_compile and diff-check passed.
@@ -318,7 +322,7 @@ Do not paste long reports or stable architecture into TODO.
 
 ## 2026-06-24 Bounded Probe Candidate Construction Preview
 
-- `P0-BOUNDED-PROBE-REROUTE-CANDIDATE-CONSTRUCTION-PREFLIGHT-DEMO-ONLY` is `DONE_WITH_CONCERNS`: AVAXUSDT Sell is constructible under raw instrument filters and the 10 USDT/order cap, but demo order admission remains blocked by BBO freshness.
+- `P0-BOUNDED-PROBE-REROUTE-CANDIDATE-CONSTRUCTION-PREFLIGHT-DEMO-ONLY` is `DONE_WITH_CONCERNS`: AVAXUSDT Sell was constructible under raw instrument filters and the historical bounded-local 10 USDT/order cap, but demo order admission remained blocked by BBO freshness.
 - Added `bounded_probe_candidate_construction_preview.py` and tests. It emits `bounded_demo_probe_candidate_construction_preview_v1`, consumes a ready lower-price reroute review plus a read-only PG market snapshot, uses raw ticker/instrument fields as construction SSOT, requires read-only source, exact candidate/ticker/instrument symbol match, raw/derived consistency, effective BBO age from raw `ticker.ts`, `instrument.status=Trading`, passive near-touch placement, cap/min-notional feasibility, and no-authority/proof/mutation preservation.
 - Runtime latest `/tmp/openclaw/cost_gate_learning_lane/bounded_probe_candidate_construction_preview_avax_sell_latest.json` sha `3d652a3a5f28433adf33944e1dcf63d6a7a05ab176f161efaba3569611237600`, status `CANDIDATE_CONSTRUCTION_BBO_STALE`, only blocking gate `bbo_freshness`. Construction math: limit `6.045`, qty `1.6`, notional `9.672 USDT`, min positive qty notional `0.6045 USDT`, cap `10.0 USDT`; effective BBO age `1229558.906ms` > `1000ms`.
 - PA/E1 PASS and E2/E4 PASS after fixes for nested market identity, effective BBO age, authority danger keys, stale-BBO precedence, raw/derived contradictions, and malformed derived numeric fields. Focused helper `15 passed`, adjacent bounded-probe suite `85 passed`, py_compile and diff-check passed.
