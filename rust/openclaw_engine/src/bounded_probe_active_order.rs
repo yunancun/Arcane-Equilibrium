@@ -10,8 +10,10 @@ use crate::bounded_probe_near_touch::{
     BoundedProbePlacementDecision, BoundedProbePlacementRequest, DEFAULT_MAX_FRESH_BBO_AGE_MS,
     DEFAULT_MAX_INITIAL_PASSIVE_GAP_BPS,
 };
+use crate::config::risk_config::RiskConfig;
 use crate::demo_learning_lane::{
-    AdmissionDecision, AdmissionDecisionCode, RejectEvent, ORDER_AUTHORITY_GRANTED,
+    AdmissionDecision, AdmissionDecisionCode, PlanSummary, RejectEvent, ADAPTER_SCHEMA_VERSION,
+    ORDER_AUTHORITY_GRANTED, PLAN_SCHEMA_VERSION,
 };
 use crate::order_manager::{OrderType, TimeInForce};
 
@@ -183,6 +185,76 @@ pub fn active_bounded_probe_effective_notional_within_cap(
     }
     let notional = effective_qty * effective_limit_price;
     notional.is_finite() && notional <= max_demo_notional_usdt_per_order
+}
+
+pub fn active_bounded_probe_risk_limits_from_gui_risk_config(
+    risk_config: &RiskConfig,
+    accepted_demo_equity_usdt: f64,
+) -> Option<ActiveBoundedProbeRiskLimits> {
+    if !accepted_demo_equity_usdt.is_finite() || accepted_demo_equity_usdt <= 0.0 {
+        return None;
+    }
+    let per_trade_pct = risk_config.limits.per_trade_risk_pct;
+    let position_size_max_pct = risk_config.limits.position_size_max_pct;
+    let max_order_notional_usdt = risk_config.limits.max_order_notional_usdt;
+    if !per_trade_pct.is_finite()
+        || per_trade_pct <= 0.0
+        || !position_size_max_pct.is_finite()
+        || position_size_max_pct <= 0.0
+        || position_size_max_pct > 100.0
+        || !max_order_notional_usdt.is_finite()
+        || max_order_notional_usdt < 0.0
+    {
+        return None;
+    }
+
+    let per_trade_budget_usdt = accepted_demo_equity_usdt * per_trade_pct;
+    let single_position_budget_usdt = accepted_demo_equity_usdt * (position_size_max_pct / 100.0);
+    if !per_trade_budget_usdt.is_finite()
+        || per_trade_budget_usdt <= 0.0
+        || !single_position_budget_usdt.is_finite()
+        || single_position_budget_usdt <= 0.0
+    {
+        return None;
+    }
+
+    let mut effective_single_order_cap_usdt =
+        per_trade_budget_usdt.min(single_position_budget_usdt);
+    if max_order_notional_usdt > 0.0 {
+        effective_single_order_cap_usdt =
+            effective_single_order_cap_usdt.min(max_order_notional_usdt);
+    }
+    if !effective_single_order_cap_usdt.is_finite() || effective_single_order_cap_usdt <= 0.0 {
+        return None;
+    }
+
+    Some(ActiveBoundedProbeRiskLimits {
+        max_demo_notional_usdt_per_order: effective_single_order_cap_usdt,
+        ..ActiveBoundedProbeRiskLimits::default()
+    })
+}
+
+pub fn active_bounded_probe_pending_admission_placeholder(
+    reject_event: &RejectEvent,
+) -> AdmissionDecision {
+    AdmissionDecision {
+        schema_version: ADAPTER_SCHEMA_VERSION,
+        decision: AdmissionDecisionCode::AdapterDisabled,
+        reason: "active_bounded_probe_request_pending_runtime_admission".to_string(),
+        allowed_to_submit_order: false,
+        no_order_authority: true,
+        side_cell_key: reject_event.side_cell_key(),
+        runtime_state: None,
+        plan_summary: PlanSummary {
+            schema_version: PLAN_SCHEMA_VERSION.to_string(),
+            status: String::new(),
+            gate_status: String::new(),
+            main_cost_gate_adjustment: "NONE".to_string(),
+            learning_gate_adjustment: String::new(),
+            order_authority: "NOT_GRANTED".to_string(),
+            selected_probe_candidate_count: 0,
+        },
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -865,6 +937,66 @@ mod tests {
             5_000.0,
             DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER,
         ));
+    }
+
+    #[test]
+    fn gui_risk_config_cap_uses_percent_budget_not_literal_usdt() {
+        let mut risk_config = RiskConfig::default();
+        risk_config.limits.per_trade_risk_pct = 0.10;
+        risk_config.limits.position_size_max_pct = 25.0;
+        risk_config.limits.max_order_notional_usdt = 0.0;
+        let accepted_demo_equity_usdt = 9_551.369_426;
+
+        let limits = active_bounded_probe_risk_limits_from_gui_risk_config(
+            &risk_config,
+            accepted_demo_equity_usdt,
+        )
+        .expect("valid GUI risk config and accepted demo equity should derive a cap");
+
+        let expected_per_trade_budget_usdt = accepted_demo_equity_usdt * 0.10;
+        assert!(
+            (limits.max_demo_notional_usdt_per_order - expected_per_trade_budget_usdt).abs() < 1e-9
+        );
+        assert!(limits.max_demo_notional_usdt_per_order > 10.0);
+    }
+
+    #[test]
+    fn gui_risk_config_cap_respects_single_position_and_absolute_order_ceiling() {
+        let mut risk_config = RiskConfig::default();
+        risk_config.limits.per_trade_risk_pct = 0.20;
+        risk_config.limits.position_size_max_pct = 5.0;
+        risk_config.limits.max_order_notional_usdt = 0.0;
+        let accepted_demo_equity_usdt = 9_551.369_426;
+
+        let position_limited = active_bounded_probe_risk_limits_from_gui_risk_config(
+            &risk_config,
+            accepted_demo_equity_usdt,
+        )
+        .expect("valid GUI risk config should derive position-limited cap");
+        let expected_single_position_budget_usdt = accepted_demo_equity_usdt * 0.05;
+        assert!(
+            (position_limited.max_demo_notional_usdt_per_order
+                - expected_single_position_budget_usdt)
+                .abs()
+                < 1e-9
+        );
+
+        risk_config.limits.max_order_notional_usdt = 250.0;
+        let absolute_limited = active_bounded_probe_risk_limits_from_gui_risk_config(
+            &risk_config,
+            accepted_demo_equity_usdt,
+        )
+        .expect("configured absolute cap should be accepted");
+        assert_eq!(absolute_limited.max_demo_notional_usdt_per_order, 250.0);
+    }
+
+    #[test]
+    fn gui_risk_config_cap_fails_closed_without_positive_demo_equity() {
+        let risk_config = RiskConfig::default();
+        assert!(active_bounded_probe_risk_limits_from_gui_risk_config(&risk_config, 0.0).is_none());
+        assert!(
+            active_bounded_probe_risk_limits_from_gui_risk_config(&risk_config, f64::NAN).is_none()
+        );
     }
 
     #[test]

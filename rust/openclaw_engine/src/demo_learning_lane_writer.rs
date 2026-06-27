@@ -47,6 +47,7 @@ struct WriterMsg {
     risk_state: String,
     now_ms: u64,
     placement_decision: Option<BoundedProbePlacementDecision>,
+    active_order_request: Option<ActiveBoundedProbeOrderRequest>,
 }
 
 #[derive(Clone)]
@@ -80,12 +81,30 @@ impl DemoLearningLaneWriterHandle {
         now_ms: u64,
         placement_decision: Option<BoundedProbePlacementDecision>,
     ) {
+        self.record_reject_event_with_placement_and_active_request(
+            event,
+            risk_state,
+            now_ms,
+            placement_decision,
+            None,
+        );
+    }
+
+    pub fn record_reject_event_with_placement_and_active_request(
+        &self,
+        event: RejectEvent,
+        risk_state: &str,
+        now_ms: u64,
+        placement_decision: Option<BoundedProbePlacementDecision>,
+        active_order_request: Option<ActiveBoundedProbeOrderRequest>,
+    ) {
         if let Some(ref tx) = self.tx {
             let msg = WriterMsg {
                 event,
                 risk_state: risk_state.trim().to_string(),
                 now_ms,
                 placement_decision,
+                active_order_request,
             };
             match tx.try_send(msg) {
                 Ok(()) => {}
@@ -193,7 +212,7 @@ async fn run_writer(
                     msg.now_ms,
                     Utc::now(),
                     msg.placement_decision.as_ref(),
-                    None,
+                    msg.active_order_request,
                 ) {
                     Ok(Some(record)) => {
                         match record.to_json_string() {
@@ -826,6 +845,7 @@ mod tests {
             risk_state: "NORMAL".to_string(),
             now_ms: 1_782_041_001_000,
             placement_decision: None,
+            active_order_request: None,
         })
         .await
         .unwrap();
@@ -866,6 +886,7 @@ mod tests {
             risk_state: "NORMAL".to_string(),
             now_ms: 1_782_041_001_000,
             placement_decision: None,
+            active_order_request: None,
         })
         .await
         .unwrap();

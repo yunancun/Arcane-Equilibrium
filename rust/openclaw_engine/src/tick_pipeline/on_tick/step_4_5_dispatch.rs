@@ -116,6 +116,89 @@ fn bounded_probe_near_touch_decision_for_reject(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
+fn bounded_probe_active_order_request_for_reject(
+    reject_event: &crate::demo_learning_lane::RejectEvent,
+    placement_decision: &crate::bounded_probe_near_touch::BoundedProbePlacementDecision,
+    qty: f64,
+    order_seq: u64,
+    decision_lease_id: Option<String>,
+    risk_state: &str,
+    risk_config: &crate::config::risk_config::RiskConfig,
+    accepted_demo_equity_usdt: Option<f64>,
+) -> Option<crate::bounded_probe_active_order::ActiveBoundedProbeOrderRequest> {
+    if !qty.is_finite() || qty <= 0.0 || !risk_state.trim().eq_ignore_ascii_case("NORMAL") {
+        return None;
+    }
+    let decision_lease_id = decision_lease_id
+        .filter(|lease_id| !lease_id.trim().is_empty() && lease_id.trim() == lease_id)?;
+    let accepted_demo_equity_usdt =
+        accepted_demo_equity_usdt.filter(|equity| equity.is_finite() && *equity > 0.0)?;
+    let limits =
+        crate::bounded_probe_active_order::active_bounded_probe_risk_limits_from_gui_risk_config(
+            risk_config,
+            accepted_demo_equity_usdt,
+        )?;
+    let per_trade_budget_usdt = accepted_demo_equity_usdt * risk_config.limits.per_trade_risk_pct;
+    let single_position_budget_usdt =
+        accepted_demo_equity_usdt * (risk_config.limits.position_size_max_pct / 100.0);
+    let max_order_notional_usdt = risk_config.limits.max_order_notional_usdt;
+    let effective_single_order_cap_usdt = limits.max_demo_notional_usdt_per_order;
+    if !per_trade_budget_usdt.is_finite()
+        || per_trade_budget_usdt <= 0.0
+        || !single_position_budget_usdt.is_finite()
+        || single_position_budget_usdt <= 0.0
+        || effective_single_order_cap_usdt > per_trade_budget_usdt
+        || effective_single_order_cap_usdt > single_position_budget_usdt
+        || (max_order_notional_usdt > 0.0
+            && effective_single_order_cap_usdt > max_order_notional_usdt)
+    {
+        return None;
+    }
+    let placement = match placement_decision {
+        crate::bounded_probe_near_touch::BoundedProbePlacementDecision::Submit(placement) => {
+            placement
+        }
+        crate::bounded_probe_near_touch::BoundedProbePlacementDecision::Skip(_) => return None,
+    };
+    if !crate::bounded_probe_active_order::active_bounded_probe_effective_notional_within_cap(
+        qty,
+        placement.limit_price,
+        effective_single_order_cap_usdt,
+    ) {
+        return None;
+    }
+    let context_id = reject_event.context_id.as_deref()?;
+    let signal_id = reject_event.signal_id.as_deref()?;
+    let side_cell_key = reject_event.side_cell_key();
+    let order_link_id =
+        crate::bounded_probe_active_order::bounded_probe_order_link_id_for_candidate(
+            &reject_event.engine_mode,
+            reject_event.ts_ms,
+            order_seq,
+            &side_cell_key,
+            context_id,
+            signal_id,
+        )?;
+    let active_limits = crate::bounded_probe_active_order::ActiveBoundedProbeRiskLimits {
+        max_demo_notional_usdt_per_order: effective_single_order_cap_usdt,
+        ..limits
+    };
+    Some(crate::bounded_probe_active_order::ActiveBoundedProbeOrderRequest {
+        reject_event: reject_event.clone(),
+        admission_decision:
+            crate::bounded_probe_active_order::active_bounded_probe_pending_admission_placeholder(
+                reject_event,
+            ),
+        placement_decision: placement_decision.clone(),
+        qty,
+        order_link_id,
+        decision_lease_id: Some(decision_lease_id),
+        risk_state: risk_state.trim().to_string(),
+        limits: active_limits,
+    })
+}
+
 pub(crate) fn active_bounded_probe_order_submission(
     tx: &tokio::sync::mpsc::UnboundedSender<OrderDispatchRequest>,
     request: crate::bounded_probe_active_order::ActiveBoundedProbeOrderRequest,
@@ -1125,12 +1208,27 @@ impl TickPipeline {
                                         "demo-learning lane eligible cost-gate reject recognized with bounded probe placement preview; order path remains inactive / 已識別 demo-learning lane eligible cost-gate reject 並計算 bounded probe placement preview；order path 保持未啟用"
                                     );
                                     let risk_state = self.governance.risk.snapshot_level().as_str();
+                                    let active_order_qty = mq.unwrap_or(gate.approved_qty);
+                                    let active_order_seq =
+                                        std::cmp::max(self.exchange_seq.wrapping_add(1), 1);
+                                    let active_order_request =
+                                        bounded_probe_active_order_request_for_reject(
+                                            &reject_event,
+                                            &placement_decision,
+                                            active_order_qty,
+                                            active_order_seq,
+                                            gate.lease_id.clone(),
+                                            risk_state,
+                                            self.intent_processor.risk_config(),
+                                            self.intent_processor.accepted_demo_equity_usdt(),
+                                        );
                                     self.demo_learning_lane_writer
-                                        .record_reject_event_with_placement(
+                                        .record_reject_event_with_placement_and_active_request(
                                             reject_event,
                                             risk_state,
                                             event.ts_ms,
                                             Some(placement_decision),
+                                            active_order_request,
                                         );
                                 }
 

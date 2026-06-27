@@ -939,6 +939,17 @@ impl IntentProcessor {
         &self.risk_config
     }
 
+    /// Accepted Demo USDT equity snapshot for order-cap envelope derivation.
+    /// Returns None until the AccountManager has a positive finite balance.
+    pub fn accepted_demo_equity_usdt(&self) -> Option<f64> {
+        let accepted_demo_equity_usdt = self.account_manager.as_ref()?.usdt_equity();
+        if accepted_demo_equity_usdt.is_finite() && accepted_demo_equity_usdt > 0.0 {
+            Some(accepted_demo_equity_usdt)
+        } else {
+            None
+        }
+    }
+
     /// Scanner/risk pre-gate helper for fresh strategy entries.
     /// scanner/risk 新開倉前置門控 helper。
     pub fn per_strategy_new_entry_rejection(&self, intent: &OrderIntent) -> Option<String> {
