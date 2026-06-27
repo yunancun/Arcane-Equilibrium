@@ -93,6 +93,13 @@ def test_gap_closure_design_maps_avax_gaps_without_authority() -> None:
     assert lanes["source_only_data_design"] == 1
     assert lanes["source_only_validation_design"] == 1
     assert lanes["authorization_required_after_probe"] == 2
+    cap_item = next(
+        item
+        for item in packet["gap_closure_items"]
+        if item["gap_key"] == "cap_staircase_with_discrete_exposure_tiers"
+    )
+    assert "current reviewed GUI-resolved cap" in cap_item["authority_required"]
+    assert "10 USDT cap" not in cap_item["authority_required"]
     assert "Evidence-Floor Gap-Closure Design" in markdown
 
 

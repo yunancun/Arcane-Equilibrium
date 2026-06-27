@@ -125,10 +125,13 @@ def _remap_global_to_rust(flat: dict[str, Any]) -> dict[str, Any]:
     for key, value in flat.items():
         if key in _GLOBAL_TO_RUST:
             section, rust_key = _GLOBAL_TO_RUST[key]
-            # GUI sends p1_risk_pct as percent (e.g. 3.0 = 3%); Rust stores it
-            # as fraction (0.03). Normalise here so the GUI can stay percent-native.
-            # GUI 用百分比（3.0 = 3%），Rust 內部用小數（0.03），此處統一換算。
-            if rust_key == "per_trade_risk_pct" and isinstance(value, (int, float)) and value > 1:
+            # GUI sends p1_risk_pct as percent (e.g. 10.0 = 10%); Rust stores it
+            # as fraction (0.1). Always divide GUI input by 100, including sub-1%
+            # settings such as 0.5%; treating 0.5 as an already-normalized
+            # fraction would silently widen risk to 50%.
+            # GUI 用百分比（10.0 = 10%），Rust 內部用小數（0.1）。即使是 0.5%
+            # 也必須除以 100；否則會被誤存成 50% 風險。
+            if rust_key == "per_trade_risk_pct" and isinstance(value, (int, float)):
                 value = value / 100.0
             nested.setdefault(section, {})[rust_key] = value
         else:
