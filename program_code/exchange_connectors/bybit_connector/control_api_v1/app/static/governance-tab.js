@@ -8,8 +8,8 @@
 
 // ─── Explainers ───────────────────────────────────────────────
 $('explain-governance').innerHTML = ocExplain(
-  '治理系統是玄衡的安全核心，通過 SM-01 授權、SM-02 租約、SM-03 執行和 SM-04 風控管理交易邊界。',
-  '授權 SM (SM-01) 控制操作權限和有效期。租約 SM (SM-02) 管理決策生命周期。執行 SM (SM-03) 管理訂單從建立到成交、取消或失敗的生命周期。風控 SM (SM-04) 動態調整風險等級。對賬引擎 (EX-04) 作為擴展檢查系統記錄與交易所實際狀態是否一致。'
+  '治理系統是玄衡的安全核心：SM-01 批准操作授權，SM-02 顯示短時 Decision Lease，SM-03 管理執行，SM-04 管風控。',
+  '授權 SM (SM-01) 控制操作權限和有效期；Approve 按鈕批准的是 Authorization，不是某一筆 Decision Lease。租約 SM (SM-02) 管理短 TTL 執行窗口，必須由受控 runner 在最終入場窗口申請和釋放。執行 SM (SM-03) 管理訂單從建立到成交、取消或失敗的生命周期。風控 SM (SM-04) 動態調整風險等級。對賬引擎 (EX-04) 作為擴展檢查系統記錄與交易所實際狀態是否一致。'
 );
 
 // ─── State Storage ─────────────────────────────────────────────
@@ -68,9 +68,46 @@ function updateOmsCard() {
 
   ocSetHtml('oms-readiness', ocChip(label, chipType));
   ocSetText('oms-blocker', blocker);
+  updateDemoProbeAdmissionCard();
   if (typeof window.updateQuickStatus === 'function') {
     window.updateQuickStatus(undefined, undefined, undefined, undefined, label);
   }
+}
+
+// ─── Bounded Demo Probe Admission Derived Status / Demo probe 派生狀態 ───
+function updateDemoProbeAdmissionCard() {
+  const statusEl = document.getElementById('demo-probe-status');
+  const detailEl = document.getElementById('demo-probe-runtime-detail');
+  if (!statusEl || !detailEl) return;
+
+  const authState = _currentAuthState || 'UNKNOWN';
+  const riskLevel = _currentRiskLevel;
+  const activeLeases = _currentLeaseActive;
+
+  let label = 'WAITING';
+  let chipType = 'neutral';
+  let detail = '等待治理狀態載入；GUI 只顯示准入姿態，不直接授予下單權限。';
+
+  if (authState !== 'ACTIVE' && authState !== 'RESTRICTED') {
+    label = 'AUTH BLOCKED';
+    chipType = 'neutral';
+    detail = 'SM-01 不是 ACTIVE/RESTRICTED。候選可以繼續 discovery/review，但不能進 final Demo execution window。';
+  } else if (riskLevel != null && riskLevel >= 4) {
+    label = 'RISK BLOCKED';
+    chipType = 'bad';
+    detail = 'SM-04 處於熔斷或人工審查等級。Demo probe 必須等待風控恢復，不得用 GUI 繞過。';
+  } else if (activeLeases != null && activeLeases > 0) {
+    label = 'FINAL WINDOW OPEN';
+    chipType = 'good';
+    detail = '存在活躍 Decision Lease。只有同一窗口內的 candidate、fresh BBO、GUI 風控、Rust authority 和 loss-control envelope 全部匹配時，runner 才能提交 bounded Demo order。';
+  } else if (activeLeases === 0) {
+    label = 'READY FOR RUNNER';
+    chipType = 'info';
+    detail = '目前沒有活躍 lease，這是空閒期的正常狀態。合格 candidate 可由 runner 在 final window 重新申請短 lease 並刷新 BBO；GUI 不手工批准 lease。';
+  }
+
+  ocSetHtml('demo-probe-status', ocChip(label, chipType));
+  ocSetText('demo-probe-runtime-detail', detail);
 }
 
 // ─── Toggle Functions for Collapsible Sections ────────────────

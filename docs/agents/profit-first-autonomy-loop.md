@@ -4,6 +4,8 @@
 
 本文件只定義長期工作流。當前 blocker、候選、證據路徑、命令入口讀 `TODO.md` 和其引用；不要把易過期任務塞回本文件。
 
+加速 candidate 進 Demo 驗證時，使用 `docs/agents/profit-first-fast-demo-promotion-loop.md`。該子循環允許部分達標 candidate 在機器檢查通過後進 bounded Demo probe，用真實 Demo order/fill/fee/slippage 補證據，再回到 learning 和 promotion chain；它不放寬本文件的 survival、loss-control、authorization、Rust authority、Decision Lease、auditability、reconstructability 邊界。
+
 ## 0. Load
 
 每輪先讀：
