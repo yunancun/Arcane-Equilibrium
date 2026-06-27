@@ -70,6 +70,42 @@
     text-transform: uppercase;
   }
   .gov-full-row { margin-bottom: 14px; }
+  .gov-boundary-note {
+    margin: 10px 0 12px;
+    padding: 10px 12px;
+    background: rgba(245, 158, 11, 0.10);
+    border: 1px solid rgba(245, 158, 11, 0.28);
+    border-left: 4px solid #f59e0b;
+    border-radius: 0 6px 6px 0;
+    color: var(--text-dim);
+    font-size: 12px;
+    line-height: 1.65;
+  }
+  .gov-boundary-note strong { color: var(--text); }
+  .demo-admission-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .demo-admission-step {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    min-height: 94px;
+  }
+  .demo-admission-step h4 {
+    margin: 0 0 6px;
+    font-size: 12px;
+    color: var(--text);
+  }
+  .demo-admission-step p {
+    margin: 0;
+    color: var(--text-dim);
+    font-size: 11px;
+    line-height: 1.55;
+  }
 
   /* ── W-AUDIT-9 T5 Graduated Canary section CSS（per AMD-2026-05-09-03 §4.3）── */
   /* 5-stage 視覺合約：5 個 chip 平行排列，scope 文案小字 */
@@ -253,7 +289,7 @@
 
   <!-- Card 1: Authorization (SM-01) -->
   <div class="oc-card gov-sm-card">
-    <h3>&#x1F511; Authorization / 授權 <abbr title="SM-01: 授權状态机。控制谁可以获取授權租約 Lease 執行交易 / Authorization state machine. Controls who can acquire a Lease to execute trades." style="font-size:10px;color:var(--text-dim);cursor:help">SM-01</abbr></h3>
+    <h3>&#x1F511; Authorization / 授權 <abbr title="SM-01: 授權状态机。批准的是操作授權，不是某一筆 Decision Lease / Authorization state machine. This approves operating authorization, not an individual Decision Lease." style="font-size:10px;color:var(--text-dim);cursor:help">SM-01</abbr></h3>
     <div class="subtitle">授權状态和範圍</div>
     <div class="gov-sm-note">SM-01 管理操作授權、有效期和可用範圍。没有有效授權時，系統不得進入真實執行链路。</div>
     <details class="gov-learn">
@@ -289,6 +325,11 @@
     <!-- Auth state description line / 授權状态說明 -->
     <div id="auth-state-desc" style="font-size:11px;color:var(--text-dim);margin-top:4px;margin-bottom:8px"></div>
 
+    <div class="gov-boundary-note" id="auth-lease-boundary-note">
+      <strong>Approve 批准的是 Authorization。</strong>
+      Decision Lease 是程序在最後入場窗口向 Rust Governance 申請的短 TTL 租約，GUI 只顯示，不手動批准單筆 lease。
+    </div>
+
     <div id="auth-pending-indicator" style="display:none;margin-bottom:12px;padding:8px;background:rgba(56,139,253,0.1);border-left:3px solid var(--blue);border-radius:0 6px 6px 0">
       <div style="font-size:12px;color:var(--blue)">Pending Approval / 待批准</div>
     </div>
@@ -298,7 +339,7 @@
     </button>
 
     <button class="oc-btn oc-btn-primary" id="btn-approve" style="width:100%;display:none" onclick="showApprovalModal()">
-      &#x2714; Approve / 批准
+      &#x2714; Approve Authorization / 批准授權
     </button>
   </div>
 
@@ -308,16 +349,21 @@
       <span>&#x1F4DD; Decision Leases / 決策租約 <abbr title="SM-02: 決策租約状态机。每個 AI 交易意圖持有一個有時效的租約，過期自動作废 / Decision lease state machine. Each AI intent holds a time-bounded lease that auto-expires." style="font-size:10px;color:var(--text-dim);cursor:help">SM-02</abbr></span>
       <span id="dl-toggle" style="font-size:10px;color:var(--text-dim)">▶ 展開</span>
     </h3>
-    <div class="subtitle">活跃租約追踪</div>
-    <div class="gov-sm-note">SM-02 把 AI 或策略意圖转换为短時有效的執行租約。租約過期或被釋放后，該意圖不能繼續下單。</div>
+    <div class="subtitle">只讀短租約追踪</div>
+    <div class="gov-sm-note">SM-02 把 AI 或策略意圖转换为短時有效的執行租約。租約只能由受控程序在最後執行窗口申請、使用、釋放；GUI 不提供手動批准 lease 的入口。</div>
     <details class="gov-learn">
       <summary>了解更多 / Learn more</summary>
       <div class="gov-learn-body">
         它将“交易意圖”和“執行許可”分离。每個租約都有 TTL、範圍和状态，确保旧判斷不會在市场條件变化后繼續生效。
+        最終 bounded Demo probe 會在同一窗口刷新 BBO、驗證 GUI 風控、取得短 lease、經 Rust authority path 下單，窗口結束後 lease 應回到 0。
       </div>
     </details>
 
     <div id="dl-body" style="display:none">
+    <div class="gov-boundary-note" id="lease-readonly-boundary-note">
+      <strong>Decision Lease 是執行窗口證據，不是人工審批票。</strong>
+      若這裡顯示 0，代表當前沒有可用短租約；下一次 Demo probe 必須由 runner 重新申請。
+    </div>
     <div class="oc-metrics">
       <div class="oc-metric">
         <div class="oc-metric-label">Active Leases / 活跃租約</div>
@@ -326,6 +372,10 @@
       <div class="oc-metric">
         <div class="oc-metric-label">Total Tracked / 總追踪數</div>
         <div class="oc-metric-val" id="lease-total">--</div>
+      </div>
+      <div class="oc-metric">
+        <div class="oc-metric-label">Manual Approval / 手動批准</div>
+        <div class="oc-metric-val" style="font-size:13px">not_supported</div>
       </div>
     </div>
 
@@ -417,6 +467,55 @@
     </button>
   </div>
 
+</div>
+
+<!-- ═══ Bounded Demo Probe Admission / 有界 Demo 驗證准入 ═══ -->
+<div class="gov-section-label">Demo Probe Admission / Demo 驗證准入</div>
+<div class="oc-card gov-full-row" id="demo-probe-admission-card">
+  <h3>&#x1F9EA; Bounded Demo Probe Admission / 有界 Demo 驗證准入</h3>
+  <div class="subtitle">讓部分達標 candidate 直接進 Demo 核實，但仍受機器檢查和 promotion chain 約束</div>
+  <div class="gov-sm-note">
+    Demo probe 的目的不是人工替策略背書，而是讓 TradeBot 用真實 Demo 訂單、fill、fee、slippage 和 markout 補齊學習證據。
+    Candidate 可以缺盈利證明而進 Demo 核實；但不能缺 loss-control envelope、GUI/Rust 風控、Decision Lease、Rust authority、審計與可重建性。
+  </div>
+
+  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px">
+    <div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Runtime Window / 執行窗口</div>
+      <div id="demo-probe-status">--</div>
+    </div>
+    <div style="flex:1;min-width:260px">
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Current Interpretation / 當前解讀</div>
+      <div id="demo-probe-runtime-detail" style="font-size:12px;color:var(--text-dim);line-height:1.55">--</div>
+    </div>
+  </div>
+
+  <div class="demo-admission-grid" aria-label="Bounded Demo probe machine-checkable gates">
+    <div class="demo-admission-step">
+      <h4>1. Candidate Identity</h4>
+      <p>必須有 side_cell_key、strategy、symbol、side、horizon 和 artifact hash；不可用自由文本候選。</p>
+    </div>
+    <div class="demo-admission-step">
+      <h4>2. GUI RiskConfig</h4>
+      <p>單筆上限以 GUI/Rust 百分比和 fresh equity 推導；裸 10 USDT 不具授權效力。</p>
+    </div>
+    <div class="demo-admission-step">
+      <h4>3. Loss-Control Envelope</h4>
+      <p>必須有 max notional、daily loss、probe count、kill switch 和 proof exclusions。</p>
+    </div>
+    <div class="demo-admission-step">
+      <h4>4. Final Lease Window</h4>
+      <p>Runner 在同一窗口刷新 BBO/instrument、申請短 Decision Lease、驗 Guardian gate。</p>
+    </div>
+    <div class="demo-admission-step">
+      <h4>5. Rust Order Path</h4>
+      <p>訂單只能走 Rust authority 和受控 order supplier；GUI 不直接提交交易所訂單。</p>
+    </div>
+    <div class="demo-admission-step">
+      <h4>6. Promotion Chain</h4>
+      <p>Demo fill 後才進 after-cost review、learning proposal、canary/promotion；不自動授 live。</p>
+    </div>
+  </div>
 </div>
 
 <!-- ═══ Reconciliation (EX-04) / 對帳擴展 ═══ -->
@@ -938,7 +1037,7 @@
   <div class="oc-modal-content">
     <h3>Approve Authorization / 批准授權</h3>
     <p style="font-size:12px;color:var(--text-dim);margin:8px 0 12px 0">
-      Enter your approval reason (1-500 characters)
+      這會批准 SM-01 Authorization，不會批准或建立某一筆 Decision Lease。Decision Lease 仍由 runner 在 final execution window 申請。
     </p>
     <textarea id="approve-note" class="oc-input" style="width:100%;height:80px;resize:vertical;font-family:inherit"
       placeholder="Approval reason / 批准理由..." maxlength="500"></textarea>
