@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-27 Same-Lineage Downstream Refresh
+
+- PM closed the v654 GUI cap mismatch as `DONE_WITH_CONCERNS`: preflight/touchability/placement/auth/admission were rebuilt from standing auth cap `954.93892693 USDT`; local `10 USDT` authority remains false.
+- Bounded auth sha `c66dd527...` is valid for the current candidate, and admission sha `69e905ad...` now blocks only on `decision_lease_valid` and `fresh_bbo_refresh_at_actual_admission`.
+- Next is same-window active Demo Decision Lease plus actual-admission BBO/gate evidence without order submission; do not promote the timestamped auth object by itself.
+
 ## 2026-06-27 Current Candidate Admission With Rust Authority Evidence
 
 - PM advanced the no-order admission review as `BLOCKED_BY_LOSS_CONTROL`: runtime Rust authority readiness sha `d0459cc...` clears `rust_authority_path_valid` for `grid_trading|AVAXUSDT|Sell`.
