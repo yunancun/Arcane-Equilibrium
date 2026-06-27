@@ -82,6 +82,10 @@ Known paths:
   openclaw-trading-api.service openclaw-watchdog.service`; system-level
   `systemctl status openclaw-trading-api.service` is the wrong namespace.
   `openclaw-engine-watchdog.service` is not the current watchdog unit.
+- Position reconciler recovery invariant: empty baseline + empty current is a
+  clean verification cycle, not a reseed-only cycle. Stale baselines and first
+  non-empty current snapshots may reseed, but flat/flat must reach
+  `evaluate_actions()` so Guardian recovery can accumulate clean cycles.
 
 ## Hard Boundaries
 
