@@ -517,6 +517,52 @@ fn phase6_staleness_reseed_triggers_after_long_rest_outage() {
 }
 
 #[test]
+fn phase6_empty_flat_cycle_is_clean_not_reseed() {
+    assert!(
+        !should_reseed_baseline_before_classify(false, true, true),
+        "empty baseline + empty current must reach evaluate_actions so clean-cycle recovery can progress"
+    );
+}
+
+#[test]
+fn phase6_empty_baseline_with_positions_still_reseeds() {
+    assert!(
+        should_reseed_baseline_before_classify(false, true, false),
+        "first non-empty current view against an empty baseline must still reseed to avoid cold-start orphans"
+    );
+}
+
+#[test]
+fn phase6_stale_baseline_reseeds_even_when_current_empty() {
+    assert!(
+        should_reseed_baseline_before_classify(true, true, true),
+        "staleness policy remains authoritative even if both views are empty"
+    );
+}
+
+#[test]
+fn phase6_flat_empty_cycle_allows_cautious_recovery() {
+    let mut state = make_state();
+    state.pre_escalation_level = Some(RiskLevel::Normal);
+    state.clean_cycles_since_last_drift = RECOVERY_CYCLES_CAUTIOUS_TO_NORMAL;
+    state.last_drift_seen_ms = 1_000_000;
+    let now = 1_000_000 + RECOVERY_WALL_CAUTIOUS_TO_NORMAL_MS + 1;
+
+    assert!(!should_reseed_baseline_before_classify(false, true, true));
+    let drifts: Vec<(String, DriftVerdict)> = vec![];
+    let actions = evaluate_actions(&mut state, RiskLevel::Cautious, &drifts, now);
+
+    assert_eq!(actions.len(), 1);
+    assert!(matches!(
+        &actions[0],
+        ReconcilerAction::DeEscalate {
+            target: RiskLevel::Normal,
+            ..
+        }
+    ));
+}
+
+#[test]
 fn phase6_persistent_drift_bypasses_per_symbol_cooldown() {
     // QC audit fix: persistent drift (streak ≥ 3) to Defensive should
     // bypass per-symbol 30min cooldown, only need global 5min cooldown.
