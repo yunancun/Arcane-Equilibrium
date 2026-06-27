@@ -29,7 +29,7 @@ fn builds_reject_event_for_demo_cost_gate_negative_reason() {
     let event = exchange_gate_reject_event(
         &intent("ethusdt", false),
         "Live_Demo",
-        "cost_gate(JS-demo): negative edge -12.7 bps blocked",
+        "cost_gate(JS-demo): estimated=-12.70bps < 0 — blocked / 負估計阻擋",
         1_782_041_000_000,
         "ctx-live_demo-ETHUSDT-1782041000000",
         "sig-live_demo-ma_crossover-ETHUSDT-1782041000000",
