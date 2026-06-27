@@ -20,6 +20,9 @@ from typing import Any
 
 SCHEMA_VERSION = "cost_gate_current_cap_staircase_risk_worksheet_v1"
 DEMO_ACCOUNT_EQUITY_ARTIFACT_SCHEMA_VERSION = "demo_account_equity_artifact_v1"
+DEMO_ACCOUNT_EQUITY_ARTIFACT_READY_STATUS = (
+    "DEMO_FAST_BALANCE_EQUITY_ARTIFACT_READY_NO_AUTHORITY"
+)
 READY_STATUS = "CURRENT_CAP_STAIRCASE_RISK_WORKSHEET_READY_NO_AUTHORITY"
 NOT_CONSTRUCTIBLE_STATUS = "CURRENT_CAP_STAIRCASE_NOT_CONSTRUCTIBLE_NO_AUTHORITY"
 CONTROL_CONTRACT_NOT_READY_STATUS = "CONTROL_IDENTITY_CONTRACT_INPUT_NOT_READY"
@@ -215,6 +218,9 @@ def _resolve_account_equity_from_artifact(
         != DEMO_ACCOUNT_EQUITY_ARTIFACT_SCHEMA_VERSION
     ):
         reasons.append("account_equity_artifact_schema_version_invalid")
+    artifact_status = _str(artifact.get("status"))
+    if artifact and artifact_status != DEMO_ACCOUNT_EQUITY_ARTIFACT_READY_STATUS:
+        reasons.append("account_equity_artifact_status_not_ready")
     environment = _str(artifact.get("environment")).lower()
     if artifact and environment != "demo":
         reasons.append("account_equity_artifact_environment_not_demo")
@@ -250,6 +256,7 @@ def _resolve_account_equity_from_artifact(
     accepted = bool(artifact) and not reasons
     return (equity if accepted else None), {
         "schema_version": artifact.get("schema_version"),
+        "status": artifact_status or None,
         "accepted": bool(accepted),
         "blocking_reasons": sorted(set(reasons)),
         "environment": environment or None,

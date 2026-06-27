@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-27 Demo Fast-Balance Equity Artifact Source
+
+- PM closed the source producer sub-checkpoint as `DONE_WITH_CONCERNS`: `demo_fast_balance_equity_artifact.py` now emits `demo_account_equity_artifact_v1` from supplied/captured `/api/v1/strategy/demo/balance?fast=1` `rust_snapshot_fast` payloads.
+- The worksheet now requires artifact status `DEMO_FAST_BALANCE_EQUITY_ARTIFACT_READY_NO_AUTHORITY`; schema shape alone no longer resolves GUI risk cap. Unit integration confirms GUI 10% over equity `200` resolves `20.0 USDT`, while construction `cap_usdt=10` remains diagnostic-only.
+- No runtime/control API capture, Bybit call, PG, order path, Cost Gate lowering, risk expansion, or authority/proof happened. Next remains PM -> E3 -> BB reviewed cache-only capture plus current-candidate no-order construction refresh/reconcile.
+
 ## 2026-06-27 GUI Risk Cap Equity Artifact Gate Rotated No-Order
 
 - PM advanced the cap resolver blocker as `ROTATED`: runtime `_latest` artifacts observed at `2026-06-27T00:45Z` rotated to `grid_trading|AVAXUSDT|Sell`, so ETH-specific construction refresh is no longer current.
