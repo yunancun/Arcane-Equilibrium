@@ -188,8 +188,18 @@ def _dispatch_ipc_method(
 
     dispatch = dispatcher or ipc_dispatch.one_shot_ipc_call
     try:
+        if dispatcher is None:
+            coro = dispatch(
+                method,
+                params=dict(params or {}),
+                timeout=timeout_seconds,
+                wrap_errors_as_http=False,
+                error_context="active_decision_lease_gate_window",
+            )
+        else:
+            coro = dispatch(method, dict(params or {}), timeout_seconds)
         raw = bridge._run_async_blocking(  # type: ignore[attr-defined]  # noqa: SLF001
-            dispatch(method, dict(params or {}), timeout_seconds),
+            coro,
             timeout=timeout_seconds + 1.0,
         )
     except Exception as exc:  # noqa: BLE001
