@@ -31,6 +31,12 @@
 - Runtime focused cap/equity/quote helper verification passed `66`; API/watchdog PIDs stayed `2218842`/`1538268`; no service restart, cron run, Bybit, PG, order path, Cost Gate lowering, risk expansion, or authority/proof happened.
 - Current AVAX control identity and construction preview latest artifacts remain missing; next is reviewed PM -> E3 -> BB no-order public quote/current-construction refresh, not another sync or equity capture.
 
+## 2026-06-27 GUI Cap Touchability Placement Refresh
+
+- PM closed the no-order GUI-cap placement refresh as `DONE_WITH_CONCERNS`: timestamped placement now carries `955.24342626 USDT` from GUI/Rust RiskConfig instead of stale `10.0`.
+- Bounded auth is `READY_FOR_OPERATOR_AUTHORIZATION_REVIEW`, `decision=defer`, `blocking_gates=[]`, but emits no auth object and grants no active probe/order authority.
+- Next is a separate bounded auth object review from the valid standing Demo authorization; execution remains blocked by Decision Lease, Guardian/Rust admission, fresh BBO, auditability, and reconstructability.
+
 ## 2026-06-27 GUI Risk Cap Runtime Cache Reconcile
 
 - PM closed timestamped runtime cache-only reconcile as `DONE_WITH_CONCERNS`: fast-balance GET on `trade-core` returned `rust_snapshot_fast/connected` equity `9552.43426257`; accepted artifact sha `afea4d...`.
