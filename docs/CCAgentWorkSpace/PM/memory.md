@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-27 Bounded Demo Probe Soak Enabled
+
+- PM closed this loop as `DONE_WITH_CONCERNS`: runtime source is clean at `bb15288b`, engine PID `4136267` runs Demo-only with writer/adapter enabled, and `/proc` binary sha matches disk `d7c80e...`.
+- Soak plan `/tmp/openclaw/cost_gate_learning_lane/bounded_demo_probe_soak_plan.json` sha `91812ebc...` came from plan-inclusion sha `9527fb8e...`; adapter-off dry-run stayed `ADAPTER_DISABLED`, adapter-on hypothetical was `ADMIT_DEMO_LEARNING_PROBE`.
+- Post-restart verification sha `624caaec...` has ticks but `total_intents=0`, `total_fills=0`, and unchanged ledger; no order/fill/fee/slippage/after-cost proof exists yet. Heartbeat monitor `openclaw-bounded-demo-probe-soak-monitor` should refresh auth/plan before expiry or collect fill evidence.
+
 ## 2026-06-27 Same-Lineage Downstream Refresh
 
 - PM closed the v654 GUI cap mismatch as `DONE_WITH_CONCERNS`: preflight/touchability/placement/auth/admission were rebuilt from standing auth cap `954.93892693 USDT`; local `10 USDT` authority remains false.
