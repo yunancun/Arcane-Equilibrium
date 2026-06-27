@@ -431,6 +431,11 @@ Do not paste long reports or stable architecture into TODO.
 - Diagnosis `/tmp/openclaw/current_candidate_final_window_guardian_reconciler_diagnosis_20260627T080325Z/current_candidate_guardian_reconciler_drift_diagnosis.json` sha `edaa2fd9c0d0910d99eab8f014640a3602fdbd12e8630b28f9573b5f8ebb424f` records blockers: active lease missing, Guardian `CAUTIOUS`, multiplier below one, active reconciler drift tail, and drift after recovery. Session state `/tmp/openclaw/session_loop_state_20260627T0804Z_final_window_guardian_cautious_blocked/session_loop_state.json` sha `a0440bfbac73e2da703c042c9326f056b593d8929dfcecfa5426d6358e64a84f` is `BLOCKED_BY_LOSS_CONTROL`.
 - Do not acquire active Decision Lease, refresh actual-admission BBO, enable adapter/writer, or execute while Guardian gate is invalid. Next work is a fresh read-only governance snapshot showing Guardian `NORMAL` and no active drift tail; only then reacquire a fresh bounded Demo lease and rerun gate evidence before actual-admission BBO.
 
+## 2026-06-27 Bounded Demo Probe Capture Normalization
+
+- Source/runtime `5aa5fff0b90239d2fee5ca36fff377f833b0fd3c` fixes demo-learning reject normalization so runtime `cost_gate(JS-demo): estimated=-...bps < 0` rejects are recognized by the hot-path adapter. Local/runtime `demo_learning_lane` and `demo_learning_lane_hot_path` tests passed; release rebuild/restart verified engine PID `4164391` and binary sha `fef422953a221c1d81bf434864ba45968454530238455d90db52bd1eb29ceae0`.
+- Runtime ledger now increments under the Demo-only soak: line count moved `99196 -> 99235`, non-selected rows emit `SIDE_CELL_NOT_SELECTED`, and selected `grid_trading|AVAXUSDT|Sell` rows appear. Selected rows remain `ADAPTER_DISABLED` / `runtime_adapter_enable_flag_is_false` because `active_order_request` is absent; next blocker is runner-owned final-window Decision Lease acquisition and active order request construction. Do not use fake lease ids, bypass Governance, lower Cost Gate, or claim order/fill/profit proof.
+
 ## 2026-06-27 Active Decision Lease Gate Window Guardian NORMAL
 
 - Operator risk correction remains binding: GUI/Rust RiskConfig is source of truth. GUI `P1 Risk/Trade=10.0%` is Rust `per_trade_risk_pct=0.1`, not `10 USDT`; GUI `Max Single Position=25%` resolves from equity as an exposure budget.
