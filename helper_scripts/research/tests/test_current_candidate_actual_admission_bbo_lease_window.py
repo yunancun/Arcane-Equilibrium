@@ -464,7 +464,7 @@ def test_dry_run_validates_source_without_network_or_lease() -> None:
 def test_explicit_run_refreshes_actual_bbo_and_gate_during_active_window() -> None:
     calls: list[str] = []
     clock = Clock()
-    opener = FakeOpener(clock)
+    opener = FakeOpener(clock, _payloads(bid="6.521", ask="6.522"))
 
     async def dispatcher(method: str, params: dict, timeout: float) -> dict | list:  # noqa: ARG001
         calls.append(method)
@@ -532,9 +532,27 @@ def test_explicit_run_refreshes_actual_bbo_and_gate_during_active_window() -> No
         packet["actual_admission_bbo"]["local_10_usdt_cap_is_global_risk_authority"]
         is False
     )
+    assert packet["actual_admission_bbo"]["rounded_qty"] == 146.4
+    assert packet["actual_admission_bbo"]["rounded_notional_usdt"] == 954.8208
     assert packet["actual_admission_bbo"]["rounded_notional_usdt"] <= 955.24342626
+    derived = packet["active_window_gate_sizing_proposal"]
+    assert derived["risk_context"]["sizing_source"] == "actual_admission_bbo_construction"
+    assert derived["sizing_proposal"]["proposed_rounded_qty"] == 146.4
+    assert derived["sizing_proposal"]["proposed_rounded_notional_usdt"] == 954.8208
     nested = packet["active_window_gate_evidence"]
     assert nested["status"] == mod.gate_evidence.READY_NO_ORDER_STATUS
+    assert nested["risk_context"]["sizing_source"] == "actual_admission_bbo_construction"
+    assert nested["risk_context"]["rounded_qty"] == 146.4
+    assert nested["risk_context"]["rounded_notional_usdt"] == 954.8208
+    assert (
+        nested["guardian_risk_gate_artifact"]["risk_limits"]["rounded_qty"] == 146.4
+    )
+    assert (
+        nested["guardian_risk_gate_artifact"]["risk_limits"][
+            "rounded_notional_usdt"
+        ]
+        == 954.8208
+    )
     assert nested["decision_lease_gate_artifact"]["valid_for_current_candidate"] is True
     assert nested["guardian_risk_gate_artifact"]["valid_for_current_candidate"] is True
 

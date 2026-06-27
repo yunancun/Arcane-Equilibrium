@@ -520,7 +520,8 @@ def _sizing_proposal_context(proposal: dict[str, Any]) -> dict[str, Any]:
     sizing = _dict(proposal.get("sizing_proposal"))
     return {
         "candidate": _candidate_identity(_dict(proposal.get("candidate"))),
-        "sizing_source": "guardian_adjusted_sizing_proposal",
+        "sizing_source": risk.get("sizing_source")
+        or "guardian_adjusted_sizing_proposal",
         "resolved_cap_usdt": _float(risk.get("gui_resolved_cap_usdt")),
         "guardian_adjusted_cap_usdt": _float(risk.get("guardian_adjusted_cap_usdt")),
         "guardian_risk_level": risk.get("guardian_risk_level"),
