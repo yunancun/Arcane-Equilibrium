@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-27 Current Candidate Admission With Rust Authority Evidence
+
+- PM advanced the no-order admission review as `BLOCKED_BY_LOSS_CONTROL`: runtime Rust authority readiness sha `d0459cc...` clears `rust_authority_path_valid` for `grid_trading|AVAXUSDT|Sell`.
+- Review sha `5a5b28c...` keeps GUI cap `955.24342626 USDT` and active runtime probe/order authority false; remaining blockers are Decision Lease, Guardian risk gate, and fresh actual-admission BBO.
+- Next is no-order machine-checkable Decision Lease / Guardian evidence; do not execute or refresh actual-admission BBO outside reviewed runtime-admission scope.
+
 ## 2026-06-27 GUI Risk Cap Runtime Source Sync
 
 - PM closed the runtime helper prerequisite as `DONE_WITH_CONCERNS`: `trade-core` fast-forwarded `9fecf84f -> 665b2eef`, and 11 crontab expected-head pins now point to `665b2eef`.
