@@ -675,7 +675,7 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin, GovernanceHubEventHandlersM
     def grant_paper_authorization(
         self,
         ttl_hours: int = 24,
-        max_position_usd: float = 10_000.0,
+        max_position_usd: Optional[float] = None,
     ) -> bool:
         """
         Auto-grant paper trading authorization (DRAFT → PENDING_APPROVAL → ACTIVE).
@@ -690,12 +690,11 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin, GovernanceHubEventHandlersM
 
         Args:
             ttl_hours: Authorization TTL in hours (default 24h) / 授权有效期（小时，默认 24h）
-            max_position_usd: Per-position USD ceiling for this authorization scope.
-                Callers should pass RiskConfig.limits.max_order_notional_usdt (from Rust) when
-                available; falls back to 10 000 USD. Only informational — real enforcement is
-                in the Rust engine.
-                單筆倉位 USD 上限（授权 scope 展示用）。呼叫方應傳入 Rust
-                RiskConfig.limits.max_order_notional_usdt；不可用時回退為 10 000。
+            max_position_usd: GUI/Rust-derived per-position USD ceiling for this
+                authorization scope. Callers must pass a positive value resolved from
+                Rust RiskConfig plus account equity; missing values fail closed.
+                單筆倉位 USD 上限（授权 scope 展示用）。呼叫方必須傳入由
+                Rust RiskConfig + account equity 派生的正數；缺失時 fail-closed。
                 僅供展示，真實執行由 Rust 引擎強制。
 
         Returns:
@@ -706,6 +705,22 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin, GovernanceHubEventHandlersM
         if self._authorization_sm is None or not self._initialized:
             logger.warning(
                 "grant_paper_authorization: hub not ready — skipping / 纸盘授权：Hub 未就绪 — 跳过"
+            )
+            return False
+        try:
+            resolved_max_position_usd = float(max_position_usd)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            logger.warning(
+                "grant_paper_authorization: missing GUI/Rust max_position_usd — skipping "
+                "/ 紙盤授權：缺少 GUI/Rust 單筆上限 — 跳過"
+            )
+            return False
+        if resolved_max_position_usd <= 0:
+            logger.warning(
+                "grant_paper_authorization: non-positive GUI/Rust max_position_usd=%s — skipping "
+                "/ 紙盤授權：GUI/Rust 單筆上限非正數=%s — 跳過",
+                max_position_usd,
+                max_position_usd,
             )
             return False
 
@@ -725,8 +740,9 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin, GovernanceHubEventHandlersM
                 paper_scope = {
                     "mode": "paper_only",
                     "execution": ["paper_submit"],
-                    "max_position_usd": max_position_usd,
+                    "max_position_usd": resolved_max_position_usd,
                     "auto_approved": True,
+                    "risk_source_of_truth": "gui_rust_risk_config_plus_equity",
                 }
                 # expires_at_ms: current time + ttl_hours in milliseconds
                 # 到期时间：当前时间 + ttl_hours（毫秒）

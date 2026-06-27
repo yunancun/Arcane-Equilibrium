@@ -108,6 +108,29 @@ class TestHubInitialization:
 class TestAuthorizationGate:
     """Test is_authorized() H0 gate"""
 
+    def test_grant_paper_authorization_requires_gui_rust_cap(self, tmp_audit_dir):
+        """Paper auto-auth must not invent a fixed USD cap."""
+        hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
+        hub._ensure_initialized()
+
+        assert hub.grant_paper_authorization() is False
+        assert hub._authorization_sm.get_effective() == []
+
+    def test_grant_paper_authorization_records_gui_rust_cap(self, tmp_audit_dir):
+        """Paper auto-auth stores the caller-supplied GUI/Rust-derived cap only."""
+        hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
+        hub._ensure_initialized()
+
+        assert hub.grant_paper_authorization(max_position_usd=955.1369426) is True
+        effective = hub._authorization_sm.get_effective()
+
+        assert len(effective) == 1
+        assert effective[0].scope["max_position_usd"] == pytest.approx(955.1369426)
+        assert (
+            effective[0].scope["risk_source_of_truth"]
+            == "gui_rust_risk_config_plus_equity"
+        )
+
     def test_is_authorized_when_disabled(self, tmp_audit_dir):
         """Hub disabled → is_authorized() returns False"""
         hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=False)

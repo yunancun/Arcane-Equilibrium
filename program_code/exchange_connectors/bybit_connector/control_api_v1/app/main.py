@@ -426,10 +426,13 @@ async def _startup_integrity_check() -> None:
     # 啟動時自動重授權：如果存在活躍 paper session 但 GovernanceHub 無有效授權，自動補授權。
     # Root cause: grant_paper_authorization() is only called on POST /paper/session/start.
     # On server restart, the existing session is loaded from state file without triggering start.
-    # Fix: check session state on startup and re-grant authorization if needed (fail-open).
+    # Fix: check session state on startup. Reauth now requires a GUI/Rust-derived
+    # risk cap, so the synchronous startup path fails closed and leaves explicit
+    # `/paper/session/reauth` to resolve RiskConfig + equity through IPC.
     # 根因：grant_paper_authorization() 只在 POST /paper/session/start 時調用。
     # 服務器重啟後，現有 session 從文件載入，不會重新觸發 start，導致授權缺失。
-    # 修復：啟動時檢查 session 狀態，若需要則補授權（fail-open，不阻斷啟動）。
+    # 修復：啟動時檢查 session 狀態。重新授權現在必須帶 GUI/Rust 派生風控 cap，
+    # 因此同步 startup path fail-closed，由 `/paper/session/reauth` 透過 IPC 解析。
     try:
         from .ipc_state_reader import get_rust_reader as _get_rust_reader
         _rust_reader = _get_rust_reader()
@@ -440,17 +443,11 @@ async def _startup_integrity_check() -> None:
 
         if _is_active and GOV_HUB is not None:
             if not GOV_HUB.is_authorized():
-                _granted = GOV_HUB.grant_paper_authorization()
-                if _granted:
-                    base.logger.info(
-                        "Startup auto-reauth: active paper session detected, paper authorization re-granted "
-                        "/ 啟動自動重授權：檢測到活躍 paper session，已補授 paper 授權"
-                    )
-                else:
-                    base.logger.warning(
-                        "Startup auto-reauth: active paper session but grant_paper_authorization() returned False "
-                        "/ 啟動自動重授權：活躍 session 但 grant_paper_authorization() 返回 False"
-                    )
+                base.logger.warning(
+                    "Startup auto-reauth skipped: active paper session needs explicit GUI/Rust risk cap resolution "
+                    "via /paper/session/reauth / 啟動自動重授權已跳過：活躍 paper session 需透過 "
+                    "/paper/session/reauth 解析 GUI/Rust 風控上限"
+                )
             else:
                 base.logger.info(
                     "Startup auto-reauth: paper authorization already active — no-op "
