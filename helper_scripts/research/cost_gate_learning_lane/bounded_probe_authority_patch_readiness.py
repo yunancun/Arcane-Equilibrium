@@ -935,14 +935,23 @@ def _active_order_submission_readiness(repo_root: Path) -> dict[str, Any]:
         r"\blet\s+bounded_probe_adapter_enabled\s*=\s*false\s*;",
         writer_code,
     ) is not None
+    writer_dispatch_forwards_admitted_probe = (
+        "dispatch_active_bounded_probe_order_draft" in writer_code
+        and "OrderDispatchRequest" in writer_code
+        and "order_dispatch_tx" in writer_code
+        and "active_order_draft" in writer_code
+    )
     positive_active_evidence = {
         "writer_submits_candidate_matched_probe_order": (
             "submit_candidate_matched_bounded_probe_order" in writer_code
             or "active_bounded_probe_order_submission" in writer_code
         ),
         "dispatch_forwards_admitted_bounded_probe_to_exchange": (
+            writer_dispatch_forwards_admitted_probe
+            or (
             "dispatch_admitted_bounded_probe_order" in dispatch_code
             or "active_bounded_probe_order_submission" in dispatch_code
+            )
         ),
         "adapter_enabled_by_runtime_bounded_probe_gate": (
             "bounded_probe_adapter_enabled" in writer_code
@@ -1107,7 +1116,7 @@ def _runtime_active_order_request_supplier_review(
     writer_call_scan_code: str | None = None,
 ) -> dict[str, Any]:
     call_rows: list[dict[str, Any]] = []
-    call_scan_code = writer_call_scan_code if writer_call_scan_code is not None else writer_code
+    call_scan_code = writer_code
     for call in _call_argument_groups(
         call_scan_code,
         writer_rel,
@@ -1123,6 +1132,53 @@ def _runtime_active_order_request_supplier_review(
                 "path": call["path"],
                 "line": call["line"],
                 "active_order_request_arg": active_arg[:220],
+                "active_order_request_arg_is_not_none": supplier_present,
+            }
+        )
+    for call in _call_argument_groups(
+        call_scan_code,
+        writer_rel,
+        "build_runtime_admission_result",
+    ):
+        split_args = _split_top_level_args(str(call.get("args") or ""))
+        if len(split_args) < 4:
+            continue
+        active_arg = " ".join(split_args[-3].split())
+        dispatch_arg = " ".join(split_args[-2].split())
+        supplier_present = active_arg != "None" and dispatch_arg not in {
+            "false",
+            "None",
+        }
+        call_rows.append(
+            {
+                "path": call["path"],
+                "line": call["line"],
+                "active_order_request_arg": active_arg[:220],
+                "active_order_dispatch_channel_arg": dispatch_arg[:220],
+                "active_order_request_arg_is_not_none": supplier_present,
+            }
+        )
+    for call in _call_argument_groups(
+        dispatch_code,
+        dispatch_rel,
+        "record_reject_event_with_placement_active_request_and_order_dispatch",
+    ):
+        split_args = _split_top_level_args(str(call.get("args") or ""))
+        if len(split_args) < 2:
+            continue
+        active_arg = " ".join(split_args[-2].split())
+        dispatch_arg = " ".join(split_args[-1].split())
+        supplier_present = (
+            active_arg != "None"
+            and dispatch_arg != "None"
+            and "order_dispatch" in dispatch_arg
+        )
+        call_rows.append(
+            {
+                "path": call["path"],
+                "line": call["line"],
+                "active_order_request_arg": active_arg[:220],
+                "active_order_dispatch_channel_arg": dispatch_arg[:220],
                 "active_order_request_arg_is_not_none": supplier_present,
             }
         )
@@ -1225,22 +1281,30 @@ def _runtime_active_order_request_supplier_review(
 def _runtime_adapter_gate_feeds_admission(runtime_body: str) -> bool:
     if not runtime_body:
         return False
-    assignment = re.search(
+    explicit_env_gate = re.search(
+        r"std::env::var\s*\(\s*OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED\s*\)"
+        r"[\s\S]*?\.map\s*\(\s*\|\s*[A-Za-z_][A-Za-z0-9_]*\s*\|\s*"
+        r"bounded_probe_adapter_enabled_from_value\s*\(\s*&\s*[A-Za-z_][A-Za-z0-9_]*\s*\)"
+        r"[\s\S]*?\.unwrap_or\s*\(\s*false\s*\)",
+        runtime_body,
+    ) is not None
+    if "bounded_probe_adapter_enabled_override.unwrap_or_else" in runtime_body:
+        explicit_env_gate = explicit_env_gate and "bounded_probe_adapter_env_enabled" in runtime_body
+    enabled_assignment = re.search(
         r"\blet\s+bounded_probe_adapter_enabled(?:\s*:\s*[^=;]+)?\s*=\s*(?P<rhs>[^;]+);",
         runtime_body,
         flags=re.S,
     )
-    if assignment is None:
+    if enabled_assignment is None:
         return False
-    rhs = " ".join(assignment.group("rhs").split())
-    explicit_env_gate = (
-        r"std::env::var\s*\(\s*OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED\s*\)"
-        r"\s*\.map\s*\(\s*\|\s*[A-Za-z_][A-Za-z0-9_]*\s*\|\s*"
-        r"bounded_probe_adapter_enabled_from_value\s*\(\s*&\s*[A-Za-z_][A-Za-z0-9_]*\s*\)"
-        r"\s*\)\s*\.unwrap_or\s*\(\s*false\s*\)"
-        r"\s*&&\s*active_order_request\.is_some\s*\(\s*\)"
-    )
-    if re.match(rf"^{explicit_env_gate}$", rhs) is None:
+    enabled_rhs = " ".join(enabled_assignment.group("rhs").split())
+    has_active_request_guard = "active_order_request.is_some()" in enabled_rhs
+    has_dispatch_channel_guard = "active_order_dispatch_channel_available" in enabled_rhs
+    if not (
+        explicit_env_gate
+        and has_active_request_guard
+        and has_dispatch_channel_guard
+    ):
         return False
     return (
         re.search(
@@ -1266,7 +1330,9 @@ def _active_caller_enablement_review(
     dispatch_code = _strip_rust_comments_and_strings(
         dispatch_raw_code
     )
-    runtime_body = _function_body(writer_code, "build_runtime_admission_record")
+    runtime_body = _function_body(writer_code, "build_runtime_admission_result")
+    if not runtime_body:
+        runtime_body = _function_body(writer_code, "build_runtime_admission_record")
     writer_call_sites = (
         _call_evidence(
             runtime_body,
