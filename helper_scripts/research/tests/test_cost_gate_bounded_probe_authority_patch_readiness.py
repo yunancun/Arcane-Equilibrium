@@ -801,7 +801,7 @@ def test_authority_alias_in_placement_plan_is_rejected(tmp_path: Path) -> None:
     assert packet["placement_repair_plan"]["authority_preserved"] is False
 
 
-def test_current_repo_reports_active_order_submission_source_ready_without_authority() -> None:
+def test_current_repo_reports_active_order_submission_seam_ready_but_runtime_supplier_missing() -> None:
     packet = build_bounded_demo_probe_authority_patch_readiness(
         placement_repair_plan=_placement_plan(),
         repo_root=Path.cwd(),
@@ -834,28 +834,30 @@ def test_current_repo_reports_active_order_submission_source_ready_without_autho
         is False
     )
     caller = packet["active_caller_enablement_review"]
-    assert caller["status"] == "ACTIVE_CALLER_SOURCE_READY_FOR_E3_BB_REVIEW"
-    assert caller["active_caller_source_ready_for_review"] is True
-    assert packet["answers"]["active_caller_source_ready_for_review"] is True
+    assert caller["status"] == "ACTIVE_CALLER_ENABLEMENT_BLOCKED_SOURCE_ONLY"
+    assert caller["active_caller_source_ready_for_review"] is False
+    assert packet["answers"]["active_caller_source_ready_for_review"] is False
     assert packet["answers"]["active_caller_enablement_ready"] is False
     assert packet["answers"]["active_caller_enablement_authority_granted"] is False
+    assert caller["evidence"]["runtime_active_order_request_supplier_present"] is False
     assert "runtime_writer_default_adapter_disabled" not in caller["blockers"]
     assert "production_active_bounded_probe_caller_missing" not in caller["blockers"]
     assert "reviewed_runtime_adapter_enablement_gate_missing" not in caller["blockers"]
+    assert "runtime_active_order_request_supplier_missing" in caller["blockers"]
     assert "runtime_source_sync_not_verified" in caller["blockers"]
     assert "post_restart_pending_order_reconciliation_not_proven" in caller["blockers"]
     propagation = packet["runtime_admission_propagation_review"]
     assert (
         propagation["status"]
-        == "RUNTIME_ADMISSION_PROPAGATION_SOURCE_READY_FOR_E3_BB_REVIEW_NO_RUNTIME_AUTHORITY"
+        == "RUNTIME_ADMISSION_PROPAGATION_BLOCKED_SOURCE_ONLY_NO_RUNTIME_AUTHORITY"
     )
     assert (
         packet["answers"]["runtime_admission_propagation_ready_for_e3_bb_review"]
-        is True
+        is False
     )
     assert (
         packet["answers"]["source_ready_sufficient_for_e3_bb_enablement_review"]
-        is True
+        is False
     )
     assert (
         packet["answers"]["active_order_submission_ready_is_order_authority"]
@@ -874,7 +876,7 @@ def test_current_repo_reports_active_order_submission_source_ready_without_autho
         is False
     )
     assert packet["answers"]["runtime_adapter_enablement_performed"] is False
-    assert "active_caller_source_review_not_ready" not in propagation["blockers"]
+    assert "active_caller_source_review_not_ready" in propagation["blockers"]
     assert "runtime_source_sync_not_verified" in propagation["blockers"]
     assert "post_restart_pending_order_reconciliation_not_proven" in propagation[
         "blockers"
@@ -1089,6 +1091,9 @@ fn build_runtime_admission_record(active_order_request: Option<u8>) {
     let decision = submit_candidate_matched_bounded_probe_order();
     active_bounded_probe_order_submission(decision);
     evaluate_probe_admission(bounded_probe_adapter_enabled);
+}
+fn runtime_caller(active_order_request: Option<u8>) {
+    build_runtime_admission_record(active_order_request);
 }
 """,
     )
