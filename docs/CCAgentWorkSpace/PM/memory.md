@@ -25,11 +25,17 @@
 
 ## 近期記錄
 
+## 2026-06-27 GUI Risk Cap Runtime Source Sync
+
+- PM closed the runtime helper prerequisite as `DONE_WITH_CONCERNS`: `trade-core` fast-forwarded `9fecf84f -> 665b2eef`, and 11 crontab expected-head pins now point to `665b2eef`.
+- Runtime focused cap/equity/quote helper verification passed `66`; API/watchdog PIDs stayed `2218842`/`1538268`; no service restart, cron run, Bybit, PG, order path, Cost Gate lowering, risk expansion, or authority/proof happened.
+- Current AVAX control identity and construction preview latest artifacts remain missing; next is reviewed PM -> E3 -> BB no-order public quote/current-construction refresh, not another sync or equity capture.
+
 ## 2026-06-27 GUI Risk Cap Runtime Cache Reconcile
 
 - PM closed timestamped runtime cache-only reconcile as `DONE_WITH_CONCERNS`: fast-balance GET on `trade-core` returned `rust_snapshot_fast/connected` equity `9552.43426257`; accepted artifact sha `afea4d...`.
 - Worksheet accepted the equity artifact and resolved GUI 10% cap to `955.24342626 USDT`, proving the GUI setting is percent-based, while fail-closing order admission as `CONTROL_IDENTITY_CONTRACT_INPUT_NOT_READY`.
-- Current AVAX construction inputs remain missing/stale; do not reuse 2026-06-24 construction or 2026-06-25 cap-feasible selection as current evidence. Next is runtime source sync or reviewed no-order public quote/current-construction refresh.
+- Current AVAX construction inputs remain missing/stale; do not reuse 2026-06-24 construction or 2026-06-25 cap-feasible selection as current evidence. Runtime source sync is now superseded by the 2026-06-27 source-sync entry above; next is reviewed no-order public quote/current-construction refresh.
 
 ## 2026-06-27 Demo Fast-Balance Equity Artifact Source
 
