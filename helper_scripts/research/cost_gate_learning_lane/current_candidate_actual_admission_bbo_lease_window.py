@@ -203,6 +203,7 @@ def _artifact_summary(path: Path | None, payload: dict[str, Any] | None) -> dict
 
 def _source_preflight(
     *,
+    admission_review: dict[str, Any],
     gate_packet: dict[str, Any],
     sizing_proposal: dict[str, Any],
     current_candidate_envelope: dict[str, Any],
@@ -256,14 +257,37 @@ def _source_preflight(
         reasons.append("current_candidate_envelope_candidate_mismatch")
 
     risk_context = dict(_dict(lease_preflight.get("risk_context")))
+    admission_reasons = (
+        gate_evidence._admission_source_reasons(admission_review)  # noqa: SLF001
+        if admission_review
+        else ["admission_review_missing"]
+    )
+    reasons.extend(admission_reasons)
+    authority_reasons.extend(
+        reason
+        for reason in admission_reasons
+        if "authority" in reason or "mutation" in reason
+    )
+    admission_context = (
+        gate_evidence._extract_admission_context(admission_review)  # noqa: SLF001
+        if admission_review
+        else {}
+    )
+    admission_candidate = _dict(admission_context.get("candidate"))
+    if not _candidate_aligned(candidate, admission_candidate):
+        reasons.append("admission_review_candidate_mismatch")
+
     cap_resolution = _dict(current_candidate_envelope.get("cap_resolution"))
     envelope_cap = _float(cap_resolution.get("resolved_cap_usdt"))
     gate_cap = _float(
         risk_context.get("resolved_cap_usdt")
         or risk_context.get("gui_resolved_cap_usdt")
     )
+    admission_cap = _float(admission_context.get("resolved_cap_usdt"))
     if not _same_float(envelope_cap, gate_cap, tolerance=1e-6):
         reasons.append("current_candidate_envelope_cap_mismatch_gate_packet")
+    if not _same_float(envelope_cap, admission_cap, tolerance=1e-6):
+        reasons.append("admission_review_cap_mismatch_current_candidate_envelope")
     if not _same_float(
         cap_resolution.get("per_trade_risk_pct_fraction"),
         risk_context.get("per_trade_risk_pct_fraction"),
@@ -271,11 +295,29 @@ def _source_preflight(
     ):
         reasons.append("per_trade_risk_pct_fraction_mismatch_gate_packet")
     if not _same_float(
+        cap_resolution.get("per_trade_risk_pct_fraction"),
+        admission_context.get("per_trade_risk_pct_fraction"),
+        tolerance=1e-8,
+    ):
+        reasons.append("admission_review_per_trade_risk_pct_fraction_mismatch")
+    if not _same_float(
+        cap_resolution.get("per_trade_risk_pct_display"),
+        admission_context.get("per_trade_risk_pct_display"),
+        tolerance=1e-8,
+    ):
+        reasons.append("admission_review_per_trade_risk_pct_display_mismatch")
+    if not _same_float(
         cap_resolution.get("position_size_max_pct"),
         risk_context.get("position_size_max_pct"),
         tolerance=1e-8,
     ):
         reasons.append("position_size_max_pct_mismatch_gate_packet")
+    if not _same_float(
+        cap_resolution.get("position_size_max_pct"),
+        admission_context.get("position_size_max_pct"),
+        tolerance=1e-8,
+    ):
+        reasons.append("admission_review_position_size_max_pct_mismatch")
 
     status = (
         AUTHORITY_BOUNDARY_VIOLATION_STATUS
@@ -291,6 +333,8 @@ def _source_preflight(
         "candidate": candidate,
         "lease_preflight_status": lease_preflight.get("status"),
         "lease_preflight": lease_preflight,
+        "admission_review_status": admission_review.get("status"),
+        "admission_context": admission_context,
         "current_candidate_envelope_status": current_candidate_envelope.get("status"),
         "current_candidate_envelope_candidate": envelope_candidate,
         "cap_resolution": cap_resolution,
@@ -340,6 +384,7 @@ def build_current_candidate_actual_admission_bbo_lease_window(
     proposal = _dict(sizing_proposal)
     envelope = _dict(current_candidate_envelope)
     preflight = _source_preflight(
+        admission_review=admission,
         gate_packet=gate,
         sizing_proposal=proposal,
         current_candidate_envelope=envelope,
