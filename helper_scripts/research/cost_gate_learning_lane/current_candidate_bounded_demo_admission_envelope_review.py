@@ -158,6 +158,14 @@ def _float(value: Any) -> float | None:
     return parsed if math.isfinite(parsed) else None
 
 
+def _first_float(*values: Any) -> float | None:
+    for value in values:
+        parsed = _float(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
 def _int(value: Any, default: int = 0) -> int:
     try:
         return int(float(value))
@@ -707,8 +715,25 @@ def _actual_admission_bbo_window_summary(
         or guardian_limits.get("guardian_adjusted_cap_usdt")
     )
     actual_resolved_cap = _float(actual_bbo.get("resolved_cap_usdt"))
-    risk_context = _dict(data.get("risk_context"))
-    risk_context_notional = _float(risk_context.get("proposed_rounded_notional_usdt"))
+    active_sizing = _dict(data.get("active_window_gate_sizing_proposal"))
+    active_sizing_context = _dict(active_sizing.get("risk_context"))
+    active_sizing_proposal = _dict(active_sizing.get("sizing_proposal"))
+    legacy_risk_context = _dict(data.get("risk_context"))
+    source_shape_notional = _first_float(
+        active_sizing_proposal.get("proposed_rounded_notional_usdt"),
+        active_sizing_context.get("proposed_rounded_notional_usdt"),
+        legacy_risk_context.get("proposed_rounded_notional_usdt"),
+    )
+    source_shape_qty = _first_float(
+        active_sizing_proposal.get("proposed_rounded_qty"),
+        active_sizing_context.get("proposed_rounded_qty"),
+        legacy_risk_context.get("proposed_rounded_qty"),
+    )
+    source_shape_source = (
+        "active_window_gate_sizing_proposal"
+        if active_sizing_proposal or active_sizing_context
+        else "legacy_actual_admission_risk_context"
+    )
     actual_bbo_fresh = bbo_age is not None and 0 <= bbo_age <= max_bbo_age
     actual_under_cap = (
         actual_notional is not None
@@ -723,8 +748,15 @@ def _actual_admission_bbo_window_summary(
         and (gate_qty is None or _same_number(actual_qty, gate_qty))
     )
     shape_matches_source_risk_context = (
-        risk_context_notional is None
-        or _same_number(actual_notional, risk_context_notional)
+        source_shape_notional is None
+        or (
+            _same_number(actual_notional, source_shape_notional)
+            and (
+                source_shape_qty is None
+                or actual_qty is None
+                or _same_number(actual_qty, source_shape_qty)
+            )
+        )
     )
 
     source_reasons: list[str] = []
@@ -913,7 +945,9 @@ def _actual_admission_bbo_window_summary(
             "rounded_notional_usdt": actual_notional,
             "gate_rounded_qty": gate_qty,
             "gate_rounded_notional_usdt": gate_notional,
-            "risk_context_proposed_notional_usdt": risk_context_notional,
+            "source_shape_source": source_shape_source,
+            "source_shape_rounded_qty": source_shape_qty,
+            "risk_context_proposed_notional_usdt": source_shape_notional,
             "actual_order_shape_matches_active_gate": shape_matches_gate,
             "actual_order_shape_matches_source_risk_context": (
                 shape_matches_source_risk_context

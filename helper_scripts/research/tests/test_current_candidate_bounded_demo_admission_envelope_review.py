@@ -629,6 +629,50 @@ def test_actual_admission_window_clears_fresh_bbo_without_granting_authority() -
     assert review["answers"]["order_submission_performed"] is False
 
 
+def test_actual_admission_window_uses_active_bbo_sizing_before_legacy_context() -> None:
+    actual_window = _actual_admission_bbo_window(
+        actual_notional=954.8208,
+        gate_notional=954.8208,
+        actual_qty=146.4,
+        gate_qty=146.4,
+        risk_context_notional=955.0335,
+    )
+    actual_window["active_window_gate_sizing_proposal"] = {
+        "schema_version": "current_candidate_guardian_adjusted_sizing_proposal_v1",
+        "generated_at_utc": GEN.isoformat(),
+        "status": "CURRENT_CANDIDATE_GUARDIAN_ADJUSTED_SIZING_PROPOSAL_READY_NO_ORDER",
+        "candidate": _candidate(),
+        "risk_context": {
+            "sizing_source": "actual_admission_bbo_construction",
+            "original_rounded_notional_usdt": 955.0335,
+            "original_rounded_qty": 146.5,
+        },
+        "sizing_proposal": {
+            "proposed_rounded_notional_usdt": 954.8208,
+            "proposed_rounded_qty": 146.4,
+            "effective_single_order_cap_usdt": 955.24342626,
+        },
+        "answers": _answers(),
+    }
+
+    review = _review(
+        bounded_authorization=_bounded_authorization(),
+        rust_authority_path=_rust_authority_path(),
+        actual_admission_bbo_window=actual_window,
+    )
+
+    actual = review["actual_admission_bbo_window"]["actual_admission_bbo"]
+    assert review["status"] == mod.READY_NO_ORDER_STATUS
+    assert actual["source_shape_source"] == "active_window_gate_sizing_proposal"
+    assert actual["risk_context_proposed_notional_usdt"] == 954.8208
+    assert actual["source_shape_rounded_qty"] == 146.4
+    assert actual["actual_order_shape_matches_source_risk_context"] is True
+    assert (
+        "actual_admission_order_shape_mismatch_source_risk_context"
+        not in review["actual_admission_bbo_window"]["loss_control_reasons"]
+    )
+
+
 def test_actual_admission_bbo_must_match_active_guardian_order_shape() -> None:
     review = _review(
         bounded_authorization=_bounded_authorization(),
