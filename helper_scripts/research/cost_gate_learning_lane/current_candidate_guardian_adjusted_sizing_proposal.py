@@ -324,10 +324,17 @@ def _gate_reasons(payload: dict[str, Any]) -> list[str]:
         reasons.append("gate_evidence_status_not_blocked_by_loss_control")
     guardian = _dict(payload.get("guardian_risk_gate_artifact"))
     guardian_reasons = set(_list(guardian.get("blocking_reasons")))
-    if "rounded_notional_exceeds_guardian_adjusted_cap" not in guardian_reasons:
-        reasons.append("guardian_adjusted_cap_breach_not_present")
-    if guardian.get("valid_for_current_candidate") is not False:
-        reasons.append("guardian_gate_not_explicitly_invalid")
+    guardian_valid = guardian.get("valid_for_current_candidate") is True
+    guardian_status = _str(guardian.get("status")).upper()
+    guardian_pass = guardian_valid or guardian_status == "GUARDIAN_RISK_GATE_PASS"
+    if guardian_pass:
+        if guardian_reasons:
+            reasons.append("guardian_gate_pass_has_blocking_reasons")
+    else:
+        if "rounded_notional_exceeds_guardian_adjusted_cap" not in guardian_reasons:
+            reasons.append("guardian_adjusted_cap_breach_not_present")
+        if guardian.get("valid_for_current_candidate") is not False:
+            reasons.append("guardian_gate_not_explicitly_invalid")
     if _dict(payload.get("answers")).get("runtime_admission_ready") is not False:
         reasons.append("gate_evidence_runtime_admission_ready_not_false")
     return sorted(set(reasons))
@@ -569,7 +576,7 @@ def _build_sizing(inputs: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         reasons.append("effective_single_order_cap_below_min_executable_notional")
         if max_qty_under_guardian_cap < min_qty:
             reasons.append("guardian_adjusted_cap_below_min_executable_notional")
-    proposed_qty = max_qty_under_effective_cap
+    proposed_qty = min(original_qty, max_qty_under_effective_cap)
     proposed_notional = proposed_qty * limit_price
     if proposed_notional > adjusted_cap:
         reasons.append("proposed_notional_exceeds_guardian_adjusted_cap")
@@ -581,7 +588,13 @@ def _build_sizing(inputs: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         reasons.append("proposed_notional_exceeds_effective_single_order_cap")
     if proposed_notional < min_notional:
         reasons.append("proposed_notional_below_min_notional")
-    if proposed_qty >= original_qty:
+    original_exceeds_effective_cap = (
+        original_notional > adjusted_cap
+        or original_notional > gui_cap
+        or original_notional > single_position_budget
+        or original_notional > effective_single_order_cap
+    )
+    if original_exceeds_effective_cap and proposed_qty >= original_qty:
         reasons.append("proposed_qty_not_reduced_from_original")
 
     qty_delta = proposed_qty - original_qty

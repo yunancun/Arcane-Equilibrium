@@ -244,6 +244,52 @@ def test_ready_proposal_uses_gui_percent_cap_then_guardian_multiplier() -> None:
     ]
 
 
+def test_normal_guardian_proposal_uses_current_gui_cap_without_forced_reduction() -> None:
+    gate = _gate_evidence(
+        adjusted_cap_usdt=955.24342626,
+        guardian_risk_level="NORMAL",
+    )
+    gate["guardian_risk_gate_artifact"].update(
+        {
+            "status": "GUARDIAN_RISK_GATE_PASS",
+            "risk_level": "NORMAL",
+            "position_size_multiplier": 1.0,
+            "effective_position_size_multiplier": 1.0,
+            "cap_usdt": 955.24342626,
+            "blocking_reasons": [],
+            "valid_for_current_candidate": True,
+        }
+    )
+    gate["guardian_risk_gate_artifact"]["risk_limits"].update(
+        {
+            "guardian_adjusted_cap_usdt": 955.24342626,
+            "rounded_notional_lte_guardian_adjusted_cap": True,
+        }
+    )
+
+    packet = _packet(gate_evidence=gate)
+    sizing = packet["sizing_proposal"]
+    risk = packet["risk_context"]
+
+    assert packet["status"] == mod.READY_STATUS
+    assert packet["blocking_gates"] == []
+    assert risk["guardian_risk_level"] == "NORMAL"
+    assert risk["guardian_position_size_multiplier"] == 1.0
+    assert risk["gui_resolved_cap_usdt"] == 955.24342626
+    assert risk["guardian_adjusted_cap_usdt"] == 955.24342626
+    assert sizing["effective_single_order_cap_usdt"] == 955.24342626
+    assert sizing["proposed_rounded_qty"] == 145.7
+    assert sizing["proposed_rounded_notional_usdt"] == 954.6264
+    assert sizing["qty_delta"] == 0.0
+    assert sizing["notional_delta_usdt"] == 0.0
+    assert sizing["notional_lte_guardian_adjusted_cap"] is True
+    assert sizing["notional_lte_gui_resolved_cap"] is True
+    assert sizing["notional_lte_single_position_budget"] is True
+    assert sizing["notional_lte_effective_single_order_cap"] is True
+    assert packet["answers"]["order_authority_granted"] is False
+    assert packet["answers"]["order_submission_performed"] is False
+
+
 def test_local_ten_usdt_construction_cap_blocks_proposal() -> None:
     construction = _construction_preview(
         construction={
