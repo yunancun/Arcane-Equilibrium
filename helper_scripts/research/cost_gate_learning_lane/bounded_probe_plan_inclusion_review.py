@@ -39,6 +39,12 @@ DEFAULT_MAX_ARTIFACT_AGE_HOURS = 24
 DEFAULT_COOLDOWN_MINUTES = 30
 PREFLIGHT_READY_STATUS = "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
 CONSTRUCTION_READY_STATUS = "CANDIDATE_CONSTRUCTION_PREVIEW_READY_NO_ORDER"
+CURRENT_CANDIDATE_CONSTRUCTION_SCHEMA_VERSION = (
+    "current_candidate_no_order_construction_preview_v1"
+)
+CURRENT_CANDIDATE_CONSTRUCTION_READY_STATUS = (
+    "CURRENT_CANDIDATE_CONSTRUCTION_PREVIEW_READY_NO_ORDER"
+)
 BOUNDARY = (
     "source-only plan inclusion review; no latest overwrite, plan mutation, "
     "ledger append, PG query/write, Bybit call, order/cancel/modify, service/"
@@ -351,13 +357,31 @@ def _preflight_ready(preflight: dict[str, Any]) -> bool:
 def _construction_ready(preview: dict[str, Any]) -> bool:
     answers = _dict(preview.get("answers"))
     construction = _dict(preview.get("construction"))
-    return (
+    if (
         preview.get("schema_version") == "bounded_demo_probe_candidate_construction_preview_v1"
         and preview.get("status") == CONSTRUCTION_READY_STATUS
         and construction.get("constructible") is True
         and not _list(preview.get("blocking_gates"))
         and _no_mutating_answers(preview)
         and answers.get("candidate_construction_preview_ready_no_order") is True
+    ):
+        return True
+    return (
+        preview.get("schema_version") == CURRENT_CANDIDATE_CONSTRUCTION_SCHEMA_VERSION
+        and preview.get("status") == CURRENT_CANDIDATE_CONSTRUCTION_READY_STATUS
+        and construction.get("constructible") is True
+        and not _list(preview.get("blocking_gates"))
+        and _no_mutating_answers(preview)
+        and answers.get("order_admission_ready") is False
+        and answers.get("order_submission_performed") is False
+        and answers.get("order_authority_granted") is False
+        and answers.get("probe_authority_granted") is False
+        and answers.get("pg_write_performed") is False
+        and answers.get("runtime_mutation_performed") is False
+        and answers.get("live_authority_granted") is False
+        and answers.get("private_endpoint_called") is False
+        and answers.get("bybit_private_call_performed") is False
+        and answers.get("public_market_data_only") is True
     )
 
 

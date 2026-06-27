@@ -113,6 +113,46 @@ def _construction_preview(**overrides) -> dict:
     return payload
 
 
+def _current_candidate_construction_preview(**overrides) -> dict:
+    payload = {
+        "schema_version": "current_candidate_no_order_construction_preview_v1",
+        "generated_at_utc": "2026-06-24T21:01:00+00:00",
+        "status": "CURRENT_CANDIDATE_CONSTRUCTION_PREVIEW_READY_NO_ORDER",
+        "candidate": _candidate(),
+        "blocking_gates": [],
+        "construction": {
+            "constructible": True,
+            "limit_price": 6.359,
+            "rounded_qty": 1.5,
+            "rounded_notional_usdt": 9.5385,
+            "cap_usdt": 10.0,
+            "placement_mode": "sell_near_touch_post_only_at_or_above_best_ask",
+        },
+        "answers": {
+            "bounded_probe_local_10_usdt_cap_is_authority": False,
+            "bybit_call_performed": True,
+            "bybit_private_call_performed": False,
+            "bybit_public_market_data_call_performed": True,
+            "global_cost_gate_lowering_recommended": False,
+            "live_authority_granted": False,
+            "main_cost_gate_adjustment": "NONE",
+            "network_call_performed": True,
+            "order_admission_ready": False,
+            "order_authority_granted": False,
+            "order_submission_performed": False,
+            "pg_write_performed": False,
+            "private_endpoint_called": False,
+            "probe_authority_granted": False,
+            "promotion_evidence": False,
+            "public_market_data_only": True,
+            "runtime_mutation_performed": False,
+            "source_only_research_artifact": True,
+        },
+    }
+    payload.update(overrides)
+    return payload
+
+
 def _authorization_packet(**overrides) -> dict:
     candidate = _candidate(source_kind=None)
     auth = {
@@ -187,6 +227,40 @@ def test_builds_inactive_plan_preview_and_blocks_on_adapter_disabled() -> None:
     )
     assert review["hypothetical_only"] is True
     assert not _contains_true_key(review, "allowed_to_submit_order")
+
+
+def test_current_candidate_public_quote_construction_preview_is_accepted() -> None:
+    review = build_plan_inclusion_review(
+        preflight=_preflight(),
+        construction_preview=_current_candidate_construction_preview(),
+        authorization_packet=_authorization_packet(),
+        now_utc=NOW,
+    )
+
+    assert review["status"] == READY_STATUS
+    assert review["plan_preview"]["probe_candidates"][0]["guardrails"][
+        "placement_mode"
+    ] == "sell_near_touch_post_only_at_or_above_best_ask"
+    assert review["inactive_adapter_decision"]["decision"] == "ADAPTER_DISABLED"
+    assert review["hypothetical_adapter_enabled_decision"]["decision"] == ADMIT_DECISION
+    assert review["answers"]["order_submission_performed"] is False
+
+
+def test_current_candidate_private_quote_construction_fails_closed() -> None:
+    preview = _current_candidate_construction_preview()
+    preview["answers"]["private_endpoint_called"] = True
+    preview["answers"]["public_market_data_only"] = False
+
+    review = build_plan_inclusion_review(
+        preflight=_preflight(),
+        construction_preview=preview,
+        authorization_packet=_authorization_packet(),
+        now_utc=NOW,
+    )
+
+    assert review["status"] == "CONSTRUCTION_PREVIEW_NOT_READY"
+    assert review["plan_preview"] is None
+    assert review["answers"]["order_submission_performed"] is False
 
 
 def test_candidate_mismatch_fails_closed() -> None:
