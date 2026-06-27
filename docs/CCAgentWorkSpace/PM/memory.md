@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-27 GUI Risk Cap Equity Artifact Gate Rotated No-Order
+
+- PM advanced the cap resolver blocker as `ROTATED`: runtime `_latest` artifacts observed at `2026-06-27T00:45Z` rotated to `grid_trading|AVAXUSDT|Sell`, so ETH-specific construction refresh is no longer current.
+- `current_cap_staircase_risk_worksheet.py` now requires accepted `demo_account_equity_artifact_v1` from `/api/v1/strategy/demo/balance?fast=1` `rust_snapshot_fast`; naked `account_equity_usdt` fails closed and cannot resolve cap.
+- Next blocker is current-candidate drift reconcile plus audited Demo fast-balance equity artifact capture/review; no runtime sync, Bybit call, PG, order path, Cost Gate lowering, or authority/proof happened.
+
 ## 2026-06-27 GUI Risk Cap Source Correction
 
 - PM closed source/test/docs correction as `DONE_WITH_CONCERNS`: GUI/Rust RiskConfig is risk source of truth; GUI `P1 Risk/Trade=10.0%` maps to TOML `per_trade_risk_pct=0.1`, not `10 USDT`.
