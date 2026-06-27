@@ -5,6 +5,7 @@ from pathlib import Path
 
 from cost_gate_learning_lane.reviewed_public_quote_capture_packet import (
     AUTHORITY_BOUNDARY_VIOLATION_STATUS,
+    CANDIDATE_MISSING_OR_MISMATCH_STATUS,
     READY_STATUS,
     SCHEMA_VERSION,
     build_reviewed_public_quote_capture_packet,
@@ -248,6 +249,26 @@ def test_candidate_mismatch_fails_closed() -> None:
     assert packet["status"] == "CANDIDATE_MISSING_OR_MISMATCH"
     assert packet["review_packet"] == {}
     assert packet["summary"]["reviewed_public_quote_capture_packet_ready"] is False
+
+
+def test_candidate_symbol_must_be_safe_before_review_packet_ready() -> None:
+    bad_candidate = _candidate(
+        symbol="ETH/USDT",
+        side="Buy",
+        side_cell_key="grid_trading|ETH/USDT|Buy",
+    )
+
+    packet = build_reviewed_public_quote_capture_packet(
+        maker_first_policy=_maker_policy(candidate=bad_candidate),
+        fresh_bbo_readiness=_fresh_bbo(candidate=bad_candidate),
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == CANDIDATE_MISSING_OR_MISMATCH_STATUS
+    assert "candidate_symbol_not_safe" in packet["source_inputs"][
+        "candidate_identity_reasons"
+    ]
+    assert packet["summary"]["runtime_capture_allowed_by_this_packet"] is False
 
 
 def test_not_ready_maker_policy_fails_closed() -> None:

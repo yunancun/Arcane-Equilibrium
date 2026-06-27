@@ -8,6 +8,7 @@ from cost_gate_learning_lane.current_cap_staircase_risk_worksheet import (
     CANDIDATE_MISMATCH_STATUS,
     CONSTRUCTION_INPUT_INCOMPLETE_STATUS,
     CONTROL_CONTRACT_NOT_READY_STATUS,
+    GUI_RISK_CAP_INPUT_REQUIRED_STATUS,
     READY_STATUS,
     SCHEMA_VERSION,
     build_current_cap_staircase_risk_worksheet,
@@ -89,17 +90,35 @@ def _construction_preview(**overrides) -> dict:
     return payload
 
 
+def _gui_risk_config(**limits_overrides) -> dict:
+    limits = {
+        "per_trade_risk_pct": 0.1,
+        "position_size_max_pct": 25.0,
+        "total_exposure_max_pct": 150.0,
+        "correlated_exposure_max_pct": 65.0,
+        "max_order_notional_usdt": 0.0,
+    }
+    limits.update(limits_overrides)
+    return {"limits": limits}
+
+
+def _worksheet(**kwargs) -> dict:
+    kwargs.setdefault("control_identity_contract", _control_contract())
+    kwargs.setdefault("construction_preview", _construction_preview())
+    kwargs.setdefault("gui_risk_config", _gui_risk_config())
+    kwargs.setdefault("account_equity_usdt", 100.0)
+    kwargs.setdefault("now_utc", NOW)
+    return build_current_cap_staircase_risk_worksheet(**kwargs)
+
+
 def test_avax_current_cap_staircase_ready_without_authority() -> None:
-    packet = build_current_cap_staircase_risk_worksheet(
-        control_identity_contract=_control_contract(),
-        construction_preview=_construction_preview(),
-        now_utc=NOW,
-    )
+    packet = _worksheet()
     markdown = render_markdown(packet)
 
     assert packet["schema_version"] == SCHEMA_VERSION
     assert packet["status"] == READY_STATUS
     assert packet["summary"]["constructible_under_current_cap"] is True
+    assert packet["summary"]["constructible_under_gui_risk_cap"] is True
     assert packet["summary"]["order_admission_ready"] is False
     assert packet["summary"]["bbo_refresh_required_before_order_admission"] is True
     assert packet["answers"]["probe_authority_granted"] is False
@@ -118,7 +137,20 @@ def test_avax_current_cap_staircase_ready_without_authority() -> None:
     assert risk["worst_case_reserved_notional_usdt"] == 30.0
     assert risk["max_executable_tier_reserved_notional_usdt"] == 29.1072
     assert risk["fits_existing_total_review_cap"] is True
-    assert "Current-Cap Staircase Risk Worksheet" in markdown
+    cap = packet["cap_resolution"]
+    assert cap["source"] == "GUI Risk tab -> Rust RiskConfig limits"
+    assert cap["per_trade_risk_pct_display"] == 10.0
+    assert cap["position_size_max_pct"] == 25.0
+    assert cap["account_equity_usdt"] == 100.0
+    assert cap["per_trade_budget_usdt"] == 10.0
+    assert cap["single_position_budget_usdt"] == 25.0
+    assert cap["source_construction_cap_usdt"] == 10.0
+    assert cap["resolved_cap_usdt"] == 10.0
+    assert cap["construction_cap_is_authority"] is False
+    assert cap["gui_risk_config_is_authority"] is True
+    assert packet["construction_inputs"]["source_construction_cap_usdt"] == 10.0
+    assert packet["construction_inputs"]["resolved_cap_usdt"] == 10.0
+    assert "GUI-Risk-Cap Staircase Risk Worksheet" in markdown
 
 
 def test_authority_bearing_input_fails_closed() -> None:
@@ -129,11 +161,7 @@ def test_authority_bearing_input_fails_closed() -> None:
         }
     )
 
-    packet = build_current_cap_staircase_risk_worksheet(
-        control_identity_contract=_control_contract(),
-        construction_preview=preview,
-        now_utc=NOW,
-    )
+    packet = _worksheet(construction_preview=preview)
 
     assert packet["status"] == AUTHORITY_BOUNDARY_VIOLATION_STATUS
     assert packet["source_inputs"]["authority_preserved"] is False
@@ -141,11 +169,7 @@ def test_authority_bearing_input_fails_closed() -> None:
 
 
 def test_not_ready_control_contract_fails_closed() -> None:
-    packet = build_current_cap_staircase_risk_worksheet(
-        control_identity_contract=_control_contract(status="NOT_READY"),
-        construction_preview=_construction_preview(),
-        now_utc=NOW,
-    )
+    packet = _worksheet(control_identity_contract=_control_contract(status="NOT_READY"))
 
     assert packet["status"] == CONTROL_CONTRACT_NOT_READY_STATUS
     assert packet["summary"]["constructible_under_current_cap"] is False
@@ -163,11 +187,7 @@ def test_candidate_mismatch_fails_closed() -> None:
         }
     )
 
-    packet = build_current_cap_staircase_risk_worksheet(
-        control_identity_contract=_control_contract(),
-        construction_preview=preview,
-        now_utc=NOW,
-    )
+    packet = _worksheet(construction_preview=preview)
 
     assert packet["status"] == CANDIDATE_MISMATCH_STATUS
     assert packet["source_inputs"]["candidate_match"] is False
@@ -176,14 +196,41 @@ def test_candidate_mismatch_fails_closed() -> None:
 def test_incomplete_construction_input_fails_closed() -> None:
     preview = _construction_preview(construction={"cap_usdt": 10.0})
 
-    packet = build_current_cap_staircase_risk_worksheet(
-        control_identity_contract=_control_contract(),
-        construction_preview=preview,
-        now_utc=NOW,
-    )
+    packet = _worksheet(construction_preview=preview)
 
     assert packet["status"] == CONSTRUCTION_INPUT_INCOMPLETE_STATUS
     assert packet["summary"]["worksheet_ready"] is False
+
+
+def test_gui_risk_config_and_equity_required_for_cap_resolution() -> None:
+    packet = build_current_cap_staircase_risk_worksheet(
+        control_identity_contract=_control_contract(),
+        construction_preview=_construction_preview(),
+        gui_risk_config=None,
+        account_equity_usdt=None,
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == GUI_RISK_CAP_INPUT_REQUIRED_STATUS
+    assert packet["summary"]["worksheet_ready"] is False
+    assert packet["cap_resolution"]["cap_resolved"] is False
+    assert "gui_risk_config_limits_missing" in packet["cap_resolution"][
+        "blocking_reasons"
+    ]
+    assert "account_equity_usdt_missing_or_non_positive" in packet[
+        "cap_resolution"
+    ]["blocking_reasons"]
+
+
+def test_gui_risk_cap_can_exceed_stale_source_construction_cap_without_using_it() -> None:
+    packet = _worksheet(account_equity_usdt=200.0)
+
+    assert packet["status"] == READY_STATUS
+    assert packet["cap_resolution"]["source_construction_cap_usdt"] == 10.0
+    assert packet["cap_resolution"]["resolved_cap_usdt"] == 20.0
+    assert packet["risk_worksheet"]["per_order_cap_usdt"] == 20.0
+    assert packet["cap_staircase"]["summary"]["max_qty_under_cap"] == 3.2
+    assert packet["cap_staircase"]["summary"]["max_notional_under_cap_usdt"] == 19.4048
 
 
 def test_static_no_network_db_or_order_imports() -> None:

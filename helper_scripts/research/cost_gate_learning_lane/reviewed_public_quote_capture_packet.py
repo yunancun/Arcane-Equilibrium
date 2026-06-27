@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Build a reviewed public quote capture packet without capturing quotes.
 
-The packet is a source-only review artifact. It binds a future AVAX public BBO
-capture to exact GET-only request envelopes, no auth/private/order paths,
-adapter handoff, and maker-policy economics. It does not call Bybit, query or
-write PG, mutate runtime state, admit orders, lower gates, or grant authority.
+The packet is a source-only review artifact. It binds a future candidate-scoped
+public BBO capture to exact GET-only request envelopes, no auth/private/order
+paths, adapter handoff, and maker-policy economics. It does not call Bybit,
+query or write PG, mutate runtime state, admit orders, lower gates, or grant
+authority.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +47,7 @@ TIME_PATH = "/v5/market/time"
 TICKERS_PATH = "/v5/market/tickers"
 INSTRUMENTS_PATH = "/v5/market/instruments-info"
 USER_AGENT = "openclaw-bbo-public-quote-capture/1.0"
+SYMBOL_RE = re.compile(r"^[A-Z0-9]{3,40}$")
 DEFAULT_TIMEOUT_SECONDS = 2.0
 CANONICAL_MAX_FRESH_BBO_AGE_MS = 1000
 
@@ -188,6 +191,40 @@ def _candidate_match(candidates: list[dict[str, Any]]) -> bool:
         return False
     first = _candidate_key(non_empty[0])
     return all(_candidate_key(candidate) == first for candidate in non_empty[1:])
+
+
+def _normalized_horizon(value: Any) -> int | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not parsed.is_integer():
+        return None
+    return int(parsed)
+
+
+def _candidate_identity_reasons(candidate: dict[str, Any]) -> list[str]:
+    side_cell_key = _str(candidate.get("side_cell_key"))
+    strategy = _str(candidate.get("strategy_name"))
+    raw_symbol = _str(candidate.get("symbol"))
+    symbol = raw_symbol.upper()
+    side = _str(candidate.get("side"))
+    horizon = _normalized_horizon(candidate.get("outcome_horizon_minutes"))
+    reasons: list[str] = []
+    if not side_cell_key or not strategy or not raw_symbol or not side or horizon is None:
+        reasons.append("candidate_identity_incomplete")
+    if raw_symbol and raw_symbol != symbol:
+        reasons.append("candidate_symbol_not_uppercase")
+    if symbol and SYMBOL_RE.fullmatch(symbol) is None:
+        reasons.append("candidate_symbol_not_safe")
+    if side and side not in {"Buy", "Sell"}:
+        reasons.append("candidate_side_not_buy_sell")
+    if horizon is not None and horizon <= 0:
+        reasons.append("candidate_horizon_not_positive")
+    if side_cell_key and strategy and symbol and side:
+        if side_cell_key != f"{strategy}|{symbol}|{side}":
+            reasons.append("candidate_side_cell_key_mismatch")
+    return sorted(set(reasons))
 
 
 def _request_spec(label: str, path: str, query: dict[str, str]) -> dict[str, Any]:
@@ -351,7 +388,7 @@ def _review_packet(
         "pm_e3_bb_review_checklist": [
             "confirm no auth/cookie/private/order endpoint in request envelope",
             "confirm base URL is allowlisted and method is GET for all requests",
-            "confirm exact AVAX linear ticker/instrument queries and server-time request",
+            "confirm exact candidate-scoped linear ticker/instrument queries and server-time request",
             "confirm redirects are refused and timeout remains bounded",
             "confirm output artifact records request/response hashes and timestamps",
             "confirm fresh BBO max age remains 1000ms and is not relaxed",
@@ -396,6 +433,7 @@ def build_reviewed_public_quote_capture_packet(
     candidates = [_candidate(maker_policy), _candidate(bbo_readiness)]
     candidates_match = _candidate_match(candidates)
     candidate = candidates[0] if candidates_match else {}
+    candidate_identity_reasons = _candidate_identity_reasons(candidate)
     if not authority_ok:
         status = AUTHORITY_BOUNDARY_VIOLATION_STATUS
         reason = "authority_boundary_violation_in_inputs"
@@ -405,7 +443,7 @@ def build_reviewed_public_quote_capture_packet(
     elif not bbo_ready:
         status = FRESH_BBO_READINESS_NOT_READY_STATUS
         reason = "fresh_bbo_readiness_input_not_ready"
-    elif not candidates_match:
+    elif not candidates_match or candidate_identity_reasons:
         status = CANDIDATE_MISSING_OR_MISMATCH_STATUS
         reason = "candidate_missing_or_mismatch_across_inputs"
     else:
@@ -440,6 +478,7 @@ def build_reviewed_public_quote_capture_packet(
             "authority_preserved": authority_ok,
             "authority_contamination_reasons": authority_reasons,
             "candidate_match": candidates_match,
+            "candidate_identity_reasons": candidate_identity_reasons,
         },
         "candidate": candidate if status == READY_STATUS else {},
         "review_packet": review_packet,
