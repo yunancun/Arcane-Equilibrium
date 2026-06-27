@@ -1101,6 +1101,8 @@ def _split_top_level_args(args: str) -> list[str]:
 def _runtime_active_order_request_supplier_review(
     writer_code: str,
     writer_rel: str,
+    dispatch_code: str,
+    dispatch_rel: str,
 ) -> dict[str, Any]:
     call_rows: list[dict[str, Any]] = []
     for call in _call_argument_groups(
@@ -1121,12 +1123,99 @@ def _runtime_active_order_request_supplier_review(
                 "active_order_request_arg_is_not_none": supplier_present,
             }
         )
-    supplier_present = any(
+    supplier_argument_present = any(
         row.get("active_order_request_arg_is_not_none") is True for row in call_rows
     )
+    combined_source = "\n".join((writer_code, dispatch_code))
+    suspicious_local_cap_re = re.compile(
+        r"\b(?:cap_usdt|max_demo_notional_usdt_per_order|per_order_cap_usdt|resolved_cap_usdt)"
+        r"\s*[:=]\s*(?:10(?:\.0+)?)\b"
+    )
+    hardcoded_local_10_matches = [
+        {
+            "path": rel_path,
+            "line": idx,
+            "snippet": line.strip()[:220],
+        }
+        for rel_path, source in ((writer_rel, writer_code), (dispatch_rel, dispatch_code))
+        for idx, line in enumerate(source.splitlines(), start=1)
+        if suspicious_local_cap_re.search(line)
+    ]
+    default_zero_cap_matches = [
+        {
+            "path": rel_path,
+            "line": idx,
+            "snippet": line.strip()[:220],
+        }
+        for rel_path, source in ((writer_rel, writer_code), (dispatch_rel, dispatch_code))
+        for idx, line in enumerate(source.splitlines(), start=1)
+        if re.search(
+            r"\bmax_demo_notional_usdt_per_order\s*:\s*"
+            r"DEFAULT_MAX_DEMO_NOTIONAL_USDT_PER_ORDER\b",
+            line,
+        )
+    ]
+    risk_config_source_present = bool(
+        re.search(r"\b(?:RiskConfig|risk_config|risk_store)\b", combined_source)
+    )
+    gui_percent_fields_present = all(
+        token in combined_source
+        for token in (
+            "per_trade_risk_pct",
+            "position_size_max_pct",
+            "max_order_notional_usdt",
+        )
+    )
+    accepted_equity_source_present = (
+        re.search(
+            r"\b(?:accepted_)?(?:demo_)?(?:account_)?equity(?:_usdt)?\b",
+            combined_source,
+        )
+        is not None
+    )
+    effective_cap_source_present = any(
+        token in combined_source
+        for token in (
+            "effective_single_order_cap_usdt",
+            "single_position_budget_usdt",
+            "per_trade_budget_usdt",
+        )
+    )
+    contract_checks = {
+        "supplier_argument_present": supplier_argument_present,
+        "active_order_request_constructed_in_production": (
+            re.search(r"\bActiveBoundedProbeOrderRequest\s*\{", combined_source)
+            is not None
+        ),
+        "active_order_request_limits_constructed_in_production": (
+            re.search(r"\bActiveBoundedProbeRiskLimits\s*\{", combined_source)
+            is not None
+        ),
+        "candidate_bound_order_link_id_present": (
+            "bounded_probe_order_link_id_for_candidate" in combined_source
+        ),
+        "decision_lease_id_carried": (
+            re.search(r"\bdecision_lease_id\s*:", combined_source) is not None
+        ),
+        "gui_riskconfig_source_present": risk_config_source_present,
+        "gui_percent_limit_fields_present": gui_percent_fields_present,
+        "accepted_demo_equity_source_present": accepted_equity_source_present,
+        "effective_single_order_cap_present": effective_cap_source_present,
+        "hardcoded_local_10_usdt_cap_absent": not hardcoded_local_10_matches,
+        "default_zero_cap_not_used_as_supplier_limit": not default_zero_cap_matches,
+    }
+    missing_contract = [
+        key for key, present in contract_checks.items() if present is not True
+    ]
+    supplier_present = not missing_contract
     return {
         "runtime_active_order_request_supplier_present": supplier_present,
+        "runtime_active_order_request_supplier_argument_present": supplier_argument_present,
+        "runtime_active_order_request_supplier_contract_checks": contract_checks,
+        "runtime_active_order_request_supplier_contract_missing": missing_contract,
         "runtime_admission_record_call_sites": call_rows,
+        "suspicious_hardcoded_local_10_usdt_cap_matches": hardcoded_local_10_matches,
+        "default_zero_cap_supplier_limit_matches": default_zero_cap_matches,
     }
 
 
@@ -1197,6 +1286,8 @@ def _active_caller_enablement_review(
     supplier_review = _runtime_active_order_request_supplier_review(
         writer_code,
         writer_rel,
+        dispatch_code,
+        dispatch_rel,
     )
     runtime_active_order_request_supplier_present = (
         supplier_review.get("runtime_active_order_request_supplier_present") is True
@@ -1217,6 +1308,13 @@ def _active_caller_enablement_review(
         source_blockers.append("reviewed_runtime_adapter_enablement_gate_missing")
     if not runtime_active_order_request_supplier_present:
         source_blockers.append("runtime_active_order_request_supplier_missing")
+        source_blockers.extend(
+            f"runtime_active_order_request_supplier_contract_missing:{item}"
+            for item in supplier_review.get(
+                "runtime_active_order_request_supplier_contract_missing"
+            )
+            or []
+        )
     source_ready = (
         active_order_summary.get("active_order_submission_ready") is True
         and production_active_caller_present
@@ -1254,11 +1352,26 @@ def _active_caller_enablement_review(
             "runtime_active_order_request_supplier_present": (
                 runtime_active_order_request_supplier_present
             ),
+            "runtime_active_order_request_supplier_argument_present": supplier_review.get(
+                "runtime_active_order_request_supplier_argument_present"
+            ),
+            "runtime_active_order_request_supplier_contract_checks": supplier_review.get(
+                "runtime_active_order_request_supplier_contract_checks"
+            ),
+            "runtime_active_order_request_supplier_contract_missing": supplier_review.get(
+                "runtime_active_order_request_supplier_contract_missing"
+            ),
             "production_active_caller_present": production_active_caller_present,
             "writer_call_sites": writer_call_sites,
             "tick_dispatch_call_sites": dispatch_call_sites,
             "runtime_admission_record_call_sites": supplier_review.get(
                 "runtime_admission_record_call_sites"
+            ),
+            "suspicious_hardcoded_local_10_usdt_cap_matches": supplier_review.get(
+                "suspicious_hardcoded_local_10_usdt_cap_matches"
+            ),
+            "default_zero_cap_supplier_limit_matches": supplier_review.get(
+                "default_zero_cap_supplier_limit_matches"
             ),
             "runtime_gate_feeds_admission_scan": runtime_adapter_enablement_gate_present,
             "runtime_source_sync_verified": False,
@@ -1267,7 +1380,7 @@ def _active_caller_enablement_review(
         "required_before_enablement": [
             "source_reviewed_production_active_caller",
             "reviewed_runtime_adapter_enablement_gate",
-            "runtime_active_order_request_supplier",
+            "runtime_active_order_request_supplier_with_gui_riskconfig_cap_lineage",
             "fresh_e3_bb_exchange_facing_order_envelope_review",
             "runtime_source_sync_and_readiness_probe",
             "post_restart_pending_order_reconciliation_review",
