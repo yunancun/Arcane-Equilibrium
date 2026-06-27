@@ -8,6 +8,7 @@ from cost_gate_learning_lane.current_cap_staircase_risk_worksheet import (
     CANDIDATE_MISMATCH_STATUS,
     CONSTRUCTION_INPUT_INCOMPLETE_STATUS,
     CONTROL_CONTRACT_NOT_READY_STATUS,
+    DEMO_ACCOUNT_EQUITY_ARTIFACT_READY_STATUS,
     GUI_RISK_CAP_INPUT_REQUIRED_STATUS,
     READY_STATUS,
     SCHEMA_VERSION,
@@ -122,6 +123,7 @@ def _account_equity_artifact(
         payload_data.update(payload_overrides)
     payload = {
         "schema_version": "demo_account_equity_artifact_v1",
+        "status": DEMO_ACCOUNT_EQUITY_ARTIFACT_READY_STATUS,
         "generated_at_utc": generated_at.isoformat(),
         "environment": "demo",
         "source_endpoint": "/api/v1/strategy/demo/balance?fast=1",
@@ -330,6 +332,18 @@ def test_slow_or_private_equity_artifact_fails_closed() -> None:
     assert "account_equity_read_model_not_rust_snapshot_fast" in packet[
         "cap_resolution"
     ]["blocking_reasons"]
+
+
+def test_equity_artifact_status_must_be_ready() -> None:
+    artifact = _account_equity_artifact(status="DEMO_FAST_BALANCE_SOURCE_FAILURE")
+
+    packet = _worksheet(account_equity_artifact=artifact)
+
+    assert packet["status"] == GUI_RISK_CAP_INPUT_REQUIRED_STATUS
+    assert packet["account_equity_resolution"]["accepted"] is False
+    assert "account_equity_artifact_status_not_ready" in packet["cap_resolution"][
+        "blocking_reasons"
+    ]
 
 
 def test_manual_equity_must_match_artifact_when_both_supplied() -> None:
