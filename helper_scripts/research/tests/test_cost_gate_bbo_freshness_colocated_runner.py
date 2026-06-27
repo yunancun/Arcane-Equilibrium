@@ -262,9 +262,11 @@ def test_build_market_snapshot_from_rows_records_read_only_source_and_age() -> N
         },
         pg_snapshot_timestamp=NOW,
         generated_at_utc=NOW,
+        cap_usdt=955.24342626,
     )
 
     assert snapshot["source"] == mod.EXPECTED_SOURCE
+    assert snapshot["risk_limits"]["cap_usdt"] == 955.24342626
     assert snapshot["derived"]["bbo_age_ms"] == 1000.0
     assert snapshot["answers"]["pg_query_performed"] is True
     assert snapshot["answers"]["pg_write_performed"] is False
@@ -339,6 +341,8 @@ def test_cli_pg_readonly_mode_uses_loader_and_writes_market_output(tmp_path, mon
             "--reroute-review-json",
             str(reroute_path),
             "--pg-readonly",
+            "--cap-usdt",
+            "955.24342626",
             "--max-fresh-bbo-age-ms",
             "10000",
             "--market-snapshot-output",
@@ -352,6 +356,8 @@ def test_cli_pg_readonly_mode_uses_loader_and_writes_market_output(tmp_path, mon
     packet = json.loads(runner_out.read_text(encoding="utf-8"))
 
     assert market_out.exists()
+    market = json.loads(market_out.read_text(encoding="utf-8"))
+    assert market["risk_limits"]["cap_usdt"] == 955.24342626
     assert packet["mode"] == "pg_readonly"
     assert packet["answers"]["pg_query_performed"] is True
     assert packet["answers"]["pg_write_performed"] is False
@@ -430,3 +436,35 @@ def test_cli_pg_readonly_requires_market_snapshot_output(tmp_path, monkeypatch) 
         assert str(exc) == "--market-snapshot-output is required with --pg-readonly"
     else:
         raise AssertionError("expected pg-readonly without output to exit")
+
+
+def test_cli_pg_readonly_requires_resolved_gui_cap(tmp_path, monkeypatch) -> None:
+    repair_path = tmp_path / "repair.json"
+    reroute_path = tmp_path / "reroute.json"
+    market_out = tmp_path / "market.json"
+    repair_path.write_text(json.dumps(_repair()), encoding="utf-8")
+    reroute_path.write_text(json.dumps(_reroute()), encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "bbo_freshness_colocated_runner",
+            "--repair-proposal-json",
+            str(repair_path),
+            "--reroute-review-json",
+            str(reroute_path),
+            "--pg-readonly",
+            "--market-snapshot-output",
+            str(market_out),
+        ],
+    )
+
+    try:
+        mod.main()
+    except SystemExit as exc:
+        assert (
+            str(exc)
+            == "--cap-usdt resolved from GUI/Rust RiskConfig is required with --pg-readonly"
+        )
+    else:
+        raise AssertionError("expected pg-readonly without GUI cap to exit")

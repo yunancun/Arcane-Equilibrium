@@ -108,7 +108,10 @@ GAP_DESIGNS: dict[str, dict[str, Any]] = {
             "tier notional ladder",
         ],
         "fastest_safe_test": "compute no-order cap staircase from fresh metadata",
-        "authority_required": "none for current 10 USDT cap; operator/QC/E3/BB for any cap envelope change",
+        "authority_required": (
+            "none for source-only math under the current reviewed GUI-resolved cap; "
+            "operator/QC/E3/BB for any cap envelope change"
+        ),
         "failure_condition": "first executable tier exceeds approved cap or requires cap mutation",
         "max_safe_next_action": "compute no-order current-cap staircase",
     },

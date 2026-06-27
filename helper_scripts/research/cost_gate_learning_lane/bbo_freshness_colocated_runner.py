@@ -282,7 +282,7 @@ def build_market_snapshot_from_rows(
     instrument: dict[str, Any],
     pg_snapshot_timestamp: dt.datetime,
     generated_at_utc: dt.datetime,
-    cap_usdt: float = 10.0,
+    cap_usdt: float,
     max_fresh_bbo_age_ms: int = 1000,
 ) -> dict[str, Any]:
     ticker_ts = _parse_dt(ticker.get("ts"))
@@ -360,7 +360,7 @@ def _load_runtime_pg_env() -> None:
 def load_pg_market_snapshot(
     *,
     candidate: dict[str, Any],
-    cap_usdt: float = 10.0,
+    cap_usdt: float,
     max_fresh_bbo_age_ms: int = 1000,
 ) -> dict[str, Any]:
     import psycopg2  # type: ignore
@@ -599,7 +599,14 @@ def _build_parser() -> argparse.ArgumentParser:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--market-snapshot-json", type=Path)
     mode.add_argument("--pg-readonly", action="store_true")
-    parser.add_argument("--cap-usdt", type=float, default=10.0)
+    parser.add_argument(
+        "--cap-usdt",
+        type=float,
+        help=(
+            "Resolved GUI/Rust RiskConfig per-order cap in USDT. Required with "
+            "--pg-readonly; this helper no longer injects a 10 USDT default."
+        ),
+    )
     parser.add_argument("--max-fresh-bbo-age-ms", type=int, default=1000)
     parser.add_argument("--demo-operational-authorization-available", action="store_true")
     parser.add_argument("--market-snapshot-output", type=Path)
@@ -615,6 +622,12 @@ def main() -> int:
     args = _build_parser().parse_args()
     if args.pg_readonly and args.market_snapshot_output is None:
         raise SystemExit("--market-snapshot-output is required with --pg-readonly")
+    if args.pg_readonly and args.cap_usdt is None:
+        raise SystemExit(
+            "--cap-usdt resolved from GUI/Rust RiskConfig is required with --pg-readonly"
+        )
+    if args.cap_usdt is not None and args.cap_usdt <= 0:
+        raise SystemExit("--cap-usdt must be positive when supplied")
     repair_proposal = _read_json(args.repair_proposal_json)
     reroute_review = _read_json(args.reroute_review_json)
     candidate = _candidate_from_reroute(reroute_review)

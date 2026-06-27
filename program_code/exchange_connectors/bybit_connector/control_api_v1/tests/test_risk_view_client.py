@@ -141,6 +141,51 @@ def test_update_global_config_calls_patch_with_operator(client, fake_ipc):
     assert "get_risk_config" in methods
 
 
+@pytest.mark.parametrize(
+    ("gui_p1_risk_pct", "rust_per_trade_risk_pct"),
+    [
+        (10.0, 0.1),
+        (0.5, 0.005),
+    ],
+)
+def test_update_global_config_treats_p1_risk_as_gui_percent(
+    client,
+    fake_ipc,
+    gui_p1_risk_pct,
+    rust_per_trade_risk_pct,
+):
+    """Risk tab input is percent-native; Rust RiskConfig stores a fraction.
+
+    GUI 10.0 means 10%, not 10 USDT and not fraction 10.0. Sub-1% settings also
+    remain percent-native, so 0.5 means 0.5% -> 0.005 in Rust.
+    """
+    fake_ipc.responses["patch_risk_config"] = {"version": 2}
+    fake_ipc.responses["get_risk_config"] = {
+        "config": {"limits": {"per_trade_risk_pct": rust_per_trade_risk_pct}},
+        "version": 2,
+    }
+
+    _run(
+        client.update_global_config(
+            {
+                "p1_risk_pct": gui_p1_risk_pct,
+                "max_single_position_pct": 25.0,
+            }
+        )
+    )
+
+    patch_call = next(c for c in fake_ipc.calls if c[0] == "patch_risk_config")
+    assert patch_call[1] == {
+        "patch": {
+            "limits": {
+                "per_trade_risk_pct": pytest.approx(rust_per_trade_risk_pct),
+                "position_size_max_pct": 25.0,
+            }
+        },
+        "source": "operator",
+    }
+
+
 def test_update_category_config_wraps_patch(client, fake_ipc):
     """1C-3-C: category overrides also remap flat → Rust CategoryOverride field names."""
     fake_ipc.responses["get_risk_config"] = {"config": {}, "version": 1}
