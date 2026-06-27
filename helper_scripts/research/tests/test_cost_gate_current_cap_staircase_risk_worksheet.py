@@ -18,6 +18,10 @@ from cost_gate_learning_lane.current_cap_staircase_risk_worksheet import (
 
 
 NOW = dt.datetime(2026, 6, 26, 8, 30, tzinfo=dt.timezone.utc)
+CURRENT_DEMO_EQUITY_USDT = 9552.43426257
+CURRENT_GUI_PER_TRADE_CAP_USDT = 955.24342626
+CURRENT_GUI_PER_TRADE_CAP_USDT_4DP = 955.2434
+CURRENT_GUI_MAX_SINGLE_POSITION_BUDGET_USDT = 2388.10856564
 
 
 def _control_contract(**overrides) -> dict:
@@ -187,6 +191,7 @@ def test_avax_current_cap_staircase_ready_without_authority() -> None:
     assert risk["fits_existing_total_review_cap"] is True
     cap = packet["cap_resolution"]
     assert cap["source"] == "GUI Risk tab -> Rust RiskConfig limits"
+    assert cap["risk_source_of_truth"] == "GUI-backed Rust RiskConfig"
     assert cap["per_trade_risk_pct_display"] == 10.0
     assert cap["position_size_max_pct"] == 25.0
     assert cap["account_equity_usdt"] == 100.0
@@ -196,10 +201,48 @@ def test_avax_current_cap_staircase_ready_without_authority() -> None:
     assert cap["source_construction_cap_usdt"] == 10.0
     assert cap["resolved_cap_usdt"] == 10.0
     assert cap["construction_cap_is_authority"] is False
+    assert cap["bounded_probe_local_cap_usdt_is_authority"] is False
+    assert cap["local_10_usdt_cap_is_global_risk_authority"] is False
     assert cap["gui_risk_config_is_authority"] is True
     assert packet["construction_inputs"]["source_construction_cap_usdt"] == 10.0
     assert packet["construction_inputs"]["resolved_cap_usdt"] == 10.0
     assert "GUI-Risk-Cap Staircase Risk Worksheet" in markdown
+
+
+def test_current_demo_gui_ten_percent_cap_is_not_source_ten_usdt() -> None:
+    packet = _worksheet(
+        account_equity_artifact=_account_equity_artifact(
+            equity=CURRENT_DEMO_EQUITY_USDT
+        )
+    )
+
+    assert packet["status"] == READY_STATUS
+    cap = packet["cap_resolution"]
+    assert cap["risk_source_of_truth"] == "GUI-backed Rust RiskConfig"
+    assert cap["per_trade_risk_pct_fraction"] == 0.1
+    assert cap["per_trade_risk_pct_display"] == 10.0
+    assert cap["position_size_max_pct"] == 25.0
+    assert cap["account_equity_usdt"] == CURRENT_DEMO_EQUITY_USDT
+    assert cap["per_trade_budget_usdt"] == CURRENT_GUI_PER_TRADE_CAP_USDT
+    assert (
+        cap["single_position_budget_usdt"]
+        == CURRENT_GUI_MAX_SINGLE_POSITION_BUDGET_USDT
+    )
+    assert cap["source_construction_cap_usdt"] == 10.0
+    assert cap["construction_cap_is_authority"] is False
+    assert cap["bounded_probe_local_cap_usdt_is_authority"] is False
+    assert cap["local_10_usdt_cap_is_global_risk_authority"] is False
+    assert cap["resolved_cap_usdt"] == CURRENT_GUI_PER_TRADE_CAP_USDT
+    assert cap["resolved_cap_usdt"] != cap["source_construction_cap_usdt"]
+
+    risk = packet["risk_worksheet"]
+    assert risk["per_order_cap_usdt"] == CURRENT_GUI_PER_TRADE_CAP_USDT_4DP
+    assert risk["worst_case_reserved_notional_usdt"] == 2865.7303
+    assert packet["construction_inputs"]["resolved_cap_usdt"] == (
+        CURRENT_GUI_PER_TRADE_CAP_USDT
+    )
+    assert packet["cap_staircase"]["summary"]["max_qty_under_cap"] == 157.5
+    assert packet["cap_staircase"]["summary"]["max_notional_under_cap_usdt"] == 955.08
 
 
 def test_authority_bearing_input_fails_closed() -> None:
