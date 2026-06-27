@@ -119,6 +119,14 @@ def _float(value: Any) -> float | None:
     return parsed if math.isfinite(parsed) else None
 
 
+def _first_float(*values: Any) -> float | None:
+    for value in values:
+        parsed = _float(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
 def _truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -340,6 +348,21 @@ def _admission_summary(payload: dict[str, Any] | None) -> dict[str, Any]:
     )
     position_pct = _float(risk.get("position_size_max_pct") or limits.get("position_size_max_pct"))
     per_trade_budget = _float(risk.get("per_trade_budget_usdt") or limits.get("per_trade_budget_usdt"))
+    single_position_budget = _first_float(
+        risk.get("single_position_budget_usdt"),
+        limits.get("single_position_budget_usdt"),
+    )
+    max_order_notional = _first_float(
+        risk.get("max_order_notional_usdt"),
+        limits.get("max_order_notional_usdt"),
+    )
+    effective_cap = _first_float(
+        risk.get("effective_single_order_cap_usdt"),
+        limits.get("effective_single_order_cap_usdt"),
+        risk.get("resolved_cap_usdt"),
+        limits.get("resolved_cap_usdt"),
+        limits.get("per_order_cap_usdt"),
+    )
     local_10_authority = (
         risk.get("local_10_usdt_cap_is_global_risk_authority")
         or risk.get("bounded_probe_local_cap_usdt_is_authority")
@@ -356,6 +379,29 @@ def _admission_summary(payload: dict[str, Any] | None) -> dict[str, Any]:
         blockers.append("position_size_max_pct_not_25")
     if per_trade_budget is None or per_trade_budget <= 10.0:
         blockers.append("per_trade_budget_not_equity_resolved")
+    if single_position_budget is None or single_position_budget <= 10.0:
+        blockers.append("single_position_budget_not_equity_resolved")
+    if effective_cap is None or effective_cap <= 10.0:
+        blockers.append("effective_single_order_cap_not_gui_resolved")
+    if (
+        effective_cap is not None
+        and per_trade_budget is not None
+        and effective_cap > per_trade_budget + 1e-8
+    ):
+        blockers.append("effective_single_order_cap_exceeds_per_trade_budget")
+    if (
+        effective_cap is not None
+        and single_position_budget is not None
+        and effective_cap > single_position_budget + 1e-8
+    ):
+        blockers.append("effective_single_order_cap_exceeds_single_position_budget")
+    if (
+        effective_cap is not None
+        and max_order_notional is not None
+        and max_order_notional > 0.0
+        and effective_cap > max_order_notional + 1e-8
+    ):
+        blockers.append("effective_single_order_cap_exceeds_max_order_notional")
     if local_10_authority is not False:
         blockers.append("local_10_usdt_cap_marked_authority")
 
@@ -367,6 +413,9 @@ def _admission_summary(payload: dict[str, Any] | None) -> dict[str, Any]:
         "gui_p1_risk_trade_pct": pct_display,
         "position_size_max_pct": position_pct,
         "per_trade_budget_usdt": per_trade_budget,
+        "single_position_budget_usdt": single_position_budget,
+        "max_order_notional_usdt": max_order_notional,
+        "effective_single_order_cap_usdt": effective_cap,
         "local_10_usdt_cap_is_authority": local_10_authority,
         "blockers": blockers,
     }
@@ -622,9 +671,19 @@ def render_markdown(packet: dict[str, Any]) -> str:
         f"- E3/BB review ready: `{answers.get('e3_bb_enablement_review_ready')}`",
         f"- Order-capable action allowed: `{answers.get('order_capable_action_allowed')}`",
         f"- Max safe next action: `{packet.get('max_safe_next_action')}`",
-        "",
-        "## Loss-Control Blockers",
     ]
+    admission = _dict(packet.get("admission_review"))
+    if admission:
+        lines.extend(
+            [
+                f"- GUI P1 risk/trade: `{admission.get('gui_p1_risk_trade_pct')}%`",
+                f"- GUI max single position: `{admission.get('position_size_max_pct')}%`",
+                f"- Per-trade budget USDT: `{admission.get('per_trade_budget_usdt')}`",
+                f"- Single-position budget USDT: `{admission.get('single_position_budget_usdt')}`",
+                f"- Effective single-order cap USDT: `{admission.get('effective_single_order_cap_usdt')}`",
+            ]
+        )
+    lines.extend(["", "## Loss-Control Blockers"])
     blockers = _list(packet.get("loss_control_blockers"))
     lines.extend(f"- `{blocker}`" for blocker in blockers) if blockers else lines.append("- none")
     lines.extend(["", "## Required Same-Window Gates Before Order", ""])

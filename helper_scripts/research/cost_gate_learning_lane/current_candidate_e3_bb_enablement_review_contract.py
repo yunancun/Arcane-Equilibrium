@@ -262,8 +262,35 @@ def _validate_order_enablement_review(packet: dict[str, Any] | None) -> dict[str
         blockers.append("gui_p1_risk_trade_not_10_percent")
     if _float(admission.get("position_size_max_pct")) != 25.0:
         blockers.append("position_size_max_pct_not_25")
-    if (_float(admission.get("per_trade_budget_usdt")) or 0.0) <= 10.0:
+    per_trade_budget = _float(admission.get("per_trade_budget_usdt"))
+    single_position_budget = _float(admission.get("single_position_budget_usdt"))
+    max_order_notional = _float(admission.get("max_order_notional_usdt"))
+    effective_cap = _float(admission.get("effective_single_order_cap_usdt"))
+    if (per_trade_budget or 0.0) <= 10.0:
         blockers.append("per_trade_budget_not_equity_resolved")
+    if (single_position_budget or 0.0) <= 10.0:
+        blockers.append("single_position_budget_not_equity_resolved")
+    if (effective_cap or 0.0) <= 10.0:
+        blockers.append("effective_single_order_cap_not_gui_resolved")
+    if (
+        effective_cap is not None
+        and per_trade_budget is not None
+        and effective_cap > per_trade_budget + 1e-8
+    ):
+        blockers.append("effective_single_order_cap_exceeds_per_trade_budget")
+    if (
+        effective_cap is not None
+        and single_position_budget is not None
+        and effective_cap > single_position_budget + 1e-8
+    ):
+        blockers.append("effective_single_order_cap_exceeds_single_position_budget")
+    if (
+        effective_cap is not None
+        and max_order_notional is not None
+        and max_order_notional > 0.0
+        and effective_cap > max_order_notional + 1e-8
+    ):
+        blockers.append("effective_single_order_cap_exceeds_max_order_notional")
     if admission.get("local_10_usdt_cap_is_authority") is not False:
         blockers.append("local_10_usdt_cap_marked_authority")
 
@@ -289,6 +316,9 @@ def _validate_order_enablement_review(packet: dict[str, Any] | None) -> dict[str
         "per_trade_risk_pct_fraction": admission.get("per_trade_risk_pct_fraction"),
         "gui_p1_risk_trade_pct": admission.get("gui_p1_risk_trade_pct"),
         "per_trade_budget_usdt": admission.get("per_trade_budget_usdt"),
+        "single_position_budget_usdt": admission.get("single_position_budget_usdt"),
+        "max_order_notional_usdt": admission.get("max_order_notional_usdt"),
+        "effective_single_order_cap_usdt": admission.get("effective_single_order_cap_usdt"),
         "position_size_max_pct": admission.get("position_size_max_pct"),
         "local_10_usdt_cap_is_authority": admission.get(
             "local_10_usdt_cap_is_authority"

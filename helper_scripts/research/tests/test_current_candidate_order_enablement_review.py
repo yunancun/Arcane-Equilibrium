@@ -72,7 +72,10 @@ def _admission(**overrides) -> dict:
             "per_trade_risk_pct_fraction": 0.1,
             "position_size_max_pct": 25.0,
             "per_trade_budget_usdt": 955.24342626,
+            "single_position_budget_usdt": 2388.10856564,
+            "max_order_notional_usdt": 0.0,
             "resolved_cap_usdt": 955.24342626,
+            "effective_single_order_cap_usdt": 955.24342626,
             "local_10_usdt_cap_is_global_risk_authority": False,
             "bounded_probe_local_cap_usdt_is_authority": False,
         },
@@ -84,6 +87,10 @@ def _admission(**overrides) -> dict:
                 "per_trade_risk_pct_display": 10.0,
                 "position_size_max_pct": 25.0,
                 "per_trade_budget_usdt": 955.24342626,
+                "single_position_budget_usdt": 2388.10856564,
+                "max_order_notional_usdt": 0.0,
+                "resolved_cap_usdt": 955.24342626,
+                "effective_single_order_cap_usdt": 955.24342626,
                 "bounded_probe_local_cap_usdt_is_authority": False,
             },
             "runtime_admission_ready": False,
@@ -185,6 +192,12 @@ def test_ready_packet_is_only_ready_for_e3_bb_review_no_order() -> None:
     assert packet["admission_review"]["per_trade_risk_pct_fraction"] == 0.1
     assert packet["admission_review"]["gui_p1_risk_trade_pct"] == 10.0
     assert packet["admission_review"]["per_trade_budget_usdt"] > 10.0
+    assert packet["admission_review"]["single_position_budget_usdt"] > 10.0
+    assert packet["admission_review"]["effective_single_order_cap_usdt"] == 955.24342626
+    assert (
+        packet["admission_review"]["effective_single_order_cap_usdt"]
+        <= packet["admission_review"]["single_position_budget_usdt"]
+    )
     assert "active_bounded_demo_decision_lease" in packet[
         "required_same_window_gates_before_order_capable_action"
     ]
@@ -221,6 +234,43 @@ def test_gui_ten_percent_must_not_be_treated_as_ten_usdt() -> None:
     assert packet["status"] == mod.BLOCKED_BY_LOSS_CONTROL_STATUS
     assert "per_trade_risk_pct_fraction_not_0_1" in packet["loss_control_blockers"]
     assert "per_trade_budget_not_equity_resolved" in packet["loss_control_blockers"]
+    assert packet["answers"]["order_capable_action_allowed"] is False
+
+
+def test_single_position_budget_must_be_gui_derived() -> None:
+    admission = _admission()
+    admission["risk_semantics"].pop("single_position_budget_usdt")
+    admission["admission_envelope_preview"]["risk_limits"].pop(
+        "single_position_budget_usdt"
+    )
+
+    packet = _packet(admission_review=admission)
+
+    assert packet["status"] == mod.BLOCKED_BY_LOSS_CONTROL_STATUS
+    assert "single_position_budget_not_equity_resolved" in packet[
+        "loss_control_blockers"
+    ]
+    assert packet["answers"]["order_capable_action_allowed"] is False
+
+
+def test_effective_single_order_cap_must_not_exceed_gui_single_position_budget() -> None:
+    admission = _admission()
+    admission["risk_semantics"]["effective_single_order_cap_usdt"] = 3000.0
+    admission["risk_semantics"]["resolved_cap_usdt"] = 3000.0
+    admission["admission_envelope_preview"]["risk_limits"][
+        "effective_single_order_cap_usdt"
+    ] = 3000.0
+    admission["admission_envelope_preview"]["risk_limits"]["resolved_cap_usdt"] = 3000.0
+
+    packet = _packet(admission_review=admission)
+
+    assert packet["status"] == mod.BLOCKED_BY_LOSS_CONTROL_STATUS
+    assert "effective_single_order_cap_exceeds_per_trade_budget" in packet[
+        "loss_control_blockers"
+    ]
+    assert "effective_single_order_cap_exceeds_single_position_budget" in packet[
+        "loss_control_blockers"
+    ]
     assert packet["answers"]["order_capable_action_allowed"] is False
 
 
