@@ -25,11 +25,17 @@
 
 ## 近期記錄
 
+## 2026-06-27 Aligned ETH Runtime Admission Review Blocked By Loss Control
+
+- PM/E3/BB closed `P0-ALIGNED-ETH-RUNTIME-ADMISSION-EXECUTION-ENVELOPE-REVIEW` as `BLOCKED_BY_LOSS_CONTROL`.
+- Timestamped noncanonical plan-inclusion diagnostic `/tmp/openclaw/aligned_eth_runtime_admission_review_20260627T000135Z/bounded_probe_plan_inclusion_review.json` is `CONSTRUCTION_PREVIEW_NOT_READY`; manifest problems `[]`; no latest overwrite, adapter enablement, ledger append, Bybit/PG/order path, Cost Gate lowering, or proof claim.
+- ETH Buy is not constructible under the standing 10 USDT cap (`min_positive_qty_notional_usdt=15.7105`), so next blocker is cap-feasible candidate rotation or fresh ETH no-order construction refresh review without cap/risk expansion.
+
 ## 2026-06-27 Aligned ETH Bounded Authorization Review
 
 - PM/E3/BB closed `P0-ALIGNED-ETH-BOUNDED-AUTHORIZATION-REVIEW` as `DONE_WITH_CONCERNS`.
 - Timestamped noncanonical artifact `/tmp/openclaw/aligned_eth_bounded_authorization_review_20260626T234532Z/bounded_probe_operator_authorization_authorize_review.json` emitted a scoped ETHUSDT/Buy auth object with cap `2`, but canonical `_latest` stayed `defer` with no auth object and no active runtime probe/order authority.
-- Next blocker is `P0-ALIGNED-ETH-RUNTIME-ADMISSION-EXECUTION-ENVELOPE-REVIEW`; do not promote `_latest`, include in a plan, enable adapter/writer, or execute before that separate checkpoint.
+- Next blocker at that time was `P0-ALIGNED-ETH-RUNTIME-ADMISSION-EXECUTION-ENVELOPE-REVIEW`; that checkpoint is now closed as blocked by loss control, so do not promote `_latest`, include in a plan, enable adapter/writer, or execute this ETH path unless a fresh cap-feasible review replaces it.
 
 ## 2026-06-27 Standing Demo Current-Candidate Downstream Alignment Apply
 
