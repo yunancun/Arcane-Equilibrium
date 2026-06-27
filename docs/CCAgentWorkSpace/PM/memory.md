@@ -2423,3 +2423,9 @@
 - Runtime source checkout is now clean at `d2cd70d0`; learning cron expected-head pins also point at `d2cd70d0` after exact 11-token SHA replacement.
 - Engine PID `2432529` and API MainPID `2218842` did not change; no restart/rebuild, no PG/Bybit/order/cancel/modify, no adapter/writer enablement, no Cost Gate lowering, no proof/authority.
 - Next PM read: adapter/restart/order path is blocked by health/reconciliation, especially demo resting exposure `working_n=6` and about `691 USDT`; start with `P0-PROFIT-EVIDENCE-QUALITY-DEMO-RESTING-EXPOSURE-RECONCILIATION-E3-BB-REVIEW`.
+
+## 2026-06-27 Demo Fast-Balance Runtime Diagnostics
+
+- `demo_fast_balance_equity_artifact.py` now has optional runtime diagnostics for snapshot metadata and Bybit Demo secret-slot metadata without reading secret contents; focused/adjacent GUI-cap tests passed.
+- Fresh `trade-core` artifact `/tmp/openclaw/demo_fast_balance_runtime_diagnosis_20260627T091742Z/demo_account_equity_artifact_runtime_diagnosed.json` is READY (`rust_snapshot_fast`, connected, equity `9551.36942603`, no runtime blockers), superseding the stale disconnected artifact.
+- GUI risk remains percentage-authority: `10.0%` resolves to `955.1369426 USDT` at this equity and max-single-position `25%` resolves to `2387.84235651 USDT`; runtime source drift still blocks actual-admission.

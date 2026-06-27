@@ -225,6 +225,84 @@ def test_slow_or_disconnected_balance_payload_is_not_ready() -> None:
     ]
 
 
+def test_runtime_diagnostics_accept_active_demo_snapshot_without_secret_values(tmp_path) -> None:
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir()
+    (runtime_dir / "pipeline_snapshot_demo.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "openclaw_pipeline_snapshot_v1",
+                "source": "rust_engine",
+                "trading_mode": "demo",
+                "paper_state": {
+                    "balance": 100.0,
+                    "initial_balance": 100.0,
+                    "peak_balance": 101.0,
+                    "positions": {},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    secret_root = tmp_path / "secrets" / "bybit"
+    demo_slot = secret_root / "demo"
+    demo_slot.mkdir(parents=True)
+    (demo_slot / "api_key").write_text("never-print-api-key", encoding="utf-8")
+    (demo_slot / "api_secret").write_text("never-print-api-secret", encoding="utf-8")
+
+    diagnostics = mod.build_runtime_diagnostics(
+        runtime_data_dir=runtime_dir,
+        bybit_secret_root=secret_root,
+        now_fn=_now,
+    )
+    artifact = mod.build_demo_account_equity_artifact(
+        balance_payload=_balance_payload(equity=100.0),
+        now_fn=_now,
+        runtime_diagnostics=diagnostics,
+    )
+    rendered = json.dumps(artifact, ensure_ascii=False, sort_keys=True)
+
+    assert artifact["status"] == mod.READY_STATUS
+    assert artifact["payload_checks"]["runtime_diagnostic_blocking_reasons"] == []
+    assert artifact["runtime_diagnostics"]["snapshots"][
+        "pipeline_snapshot_demo.json"
+    ]["summary"]["paper_state_balance_present"] is True
+    assert "never-print-api-key" not in rendered
+    assert "never-print-api-secret" not in rendered
+    assert artifact["runtime_diagnostics"]["answers"]["secret_values_read"] is False
+
+
+def test_runtime_diagnostics_block_missing_snapshot_and_active_demo_slot(tmp_path) -> None:
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir()
+    secret_root = tmp_path / "secrets" / "bybit"
+    disabled_slot = secret_root / "demo.dev_disabled_20260421"
+    disabled_slot.mkdir(parents=True)
+    (disabled_slot / "api_key").write_text("disabled-secret-value", encoding="utf-8")
+
+    diagnostics = mod.build_runtime_diagnostics(
+        runtime_data_dir=runtime_dir,
+        bybit_secret_root=secret_root,
+        now_fn=_now,
+    )
+    artifact = mod.build_demo_account_equity_artifact(
+        balance_payload=_balance_payload(equity=100.0),
+        now_fn=_now,
+        runtime_diagnostics=diagnostics,
+    )
+    blockers = artifact["payload_checks"]["runtime_diagnostic_blocking_reasons"]
+    rendered = json.dumps(artifact, ensure_ascii=False, sort_keys=True)
+
+    assert artifact["status"] == mod.NOT_READY_STATUS
+    assert artifact["reason"] == "demo_fast_balance_runtime_diagnostics_not_accepted"
+    assert "demo_snapshot_missing" in blockers
+    assert "active_demo_secret_slot_missing" in blockers
+    assert "demo.dev_disabled_20260421" in artifact["runtime_diagnostics"][
+        "bybit_secret_slots"
+    ]["disabled_demo_slot_names"]
+    assert "disabled-secret-value" not in rendered
+
+
 def test_authority_contaminated_payload_fails_closed() -> None:
     artifact = mod.build_demo_account_equity_artifact(
         balance_payload=_balance_payload(
