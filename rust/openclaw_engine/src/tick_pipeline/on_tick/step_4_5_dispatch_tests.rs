@@ -6,8 +6,8 @@
 //! AlphaSurface fail-soft / 禁合成 neutral / read-guard 釋放 invariant。
 use super::{
     active_bounded_probe_order_submission, bounded_probe_active_order_request_for_reject,
-    bounded_probe_near_touch_decision_for_reject, dispatch_admitted_bounded_probe_order,
-    try_clone_panel_snapshot,
+    bounded_probe_near_touch_decision_for_reject, bounded_probe_soak_isolation_enabled_from_values,
+    dispatch_admitted_bounded_probe_order, try_clone_panel_snapshot,
 };
 use crate::bounded_probe_active_order::{
     bounded_probe_order_link_id_for_candidate, ActiveBoundedProbeOrderDecision,
@@ -132,6 +132,32 @@ fn bounded_probe_order_request() -> ActiveBoundedProbeOrderRequest {
             max_demo_notional_usdt_per_order: GUI_RISK_CAP_USDT,
             ..ActiveBoundedProbeRiskLimits::default()
         },
+    }
+}
+
+#[test]
+fn bounded_probe_soak_isolation_blocks_only_explicit_demo_adapter_runtime() {
+    assert!(bounded_probe_soak_isolation_enabled_from_values(
+        "demo",
+        Some("1"),
+    ));
+    assert!(bounded_probe_soak_isolation_enabled_from_values(
+        "live_demo",
+        Some(" TRUE "),
+    ));
+
+    for engine_mode in ["paper", "live", "mainnet", "backtest", ""] {
+        assert!(
+            !bounded_probe_soak_isolation_enabled_from_values(engine_mode, Some("1")),
+            "non-demo mode must not be blocked by bounded soak isolation"
+        );
+    }
+
+    for adapter_value in [None, Some(""), Some("0"), Some("false"), Some("yes")] {
+        assert!(
+            !bounded_probe_soak_isolation_enabled_from_values("live_demo", adapter_value),
+            "adapter flag must be explicit true/1"
+        );
     }
 }
 

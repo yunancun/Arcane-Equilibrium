@@ -40,6 +40,27 @@ use super::super::pipeline_helpers::release_decision_lease_for_governance;
 use super::super::*;
 
 const BOUNDED_PROBE_ATTEMPT_RECORD_TYPE: &str = "bounded_probe_attempt";
+const BOUNDED_PROBE_ADAPTER_ENV: &str = "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED";
+const BOUNDED_PROBE_SOAK_ISOLATION_REJECT_REASON: &str =
+    "bounded_probe_soak_isolation:ordinary_demo_entry_blocked";
+
+pub(crate) fn bounded_probe_soak_isolation_enabled_from_values(
+    engine_mode: &str,
+    bounded_probe_adapter_enabled: Option<&str>,
+) -> bool {
+    matches!(engine_mode, "demo" | "live_demo")
+        && bounded_probe_adapter_enabled
+            .map(crate::demo_learning_lane_writer::bounded_probe_adapter_enabled_from_value)
+            .unwrap_or(false)
+}
+
+fn bounded_probe_soak_isolation_enabled(engine_mode: &str) -> bool {
+    let bounded_probe_adapter_enabled = std::env::var(BOUNDED_PROBE_ADAPTER_ENV).ok();
+    bounded_probe_soak_isolation_enabled_from_values(
+        engine_mode,
+        bounded_probe_adapter_enabled.as_deref(),
+    )
+}
 
 fn exchange_qty_rounded_to_zero_reason(approved_qty: f64, final_qty: f64) -> String {
     format!(
@@ -774,6 +795,33 @@ impl TickPipeline {
                                     symbol = %intent.symbol,
                                     reason = %reason,
                                     "SCANNER-RISK-POLICY-GATE: demo/live_demo new entry blocked before risk verdict"
+                                );
+                                continue;
+                            }
+                            if bounded_probe_soak_isolation_enabled(em) {
+                                strategy.on_rejection(
+                                    intent,
+                                    BOUNDED_PROBE_SOAK_ISOLATION_REJECT_REASON,
+                                );
+                                record_pre_risk_rejection(
+                                    &self.trading_tx,
+                                    &mut self.recent_intents,
+                                    em,
+                                    event.ts_ms,
+                                    &signal_id,
+                                    &context_id,
+                                    intent,
+                                    event.last_price,
+                                    scanner_ctx.as_ref(),
+                                    Some(&scanner_gate_audit),
+                                    indicators.and_then(|i| i.hurst.as_ref()),
+                                    BOUNDED_PROBE_SOAK_ISOLATION_REJECT_REASON,
+                                );
+                                tracing::warn!(
+                                    strategy = %intent.strategy,
+                                    symbol = %intent.symbol,
+                                    reason = BOUNDED_PROBE_SOAK_ISOLATION_REJECT_REASON,
+                                    "BOUNDED-PROBE-SOAK-ISOLATION: ordinary demo new entry blocked; bounded probe writer owns order-capable candidate path"
                                 );
                                 continue;
                             }
