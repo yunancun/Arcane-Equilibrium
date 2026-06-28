@@ -1466,7 +1466,7 @@ function _liveFillPnl(f) {
 
 function _liveFillHead(tab) {
   if (tab === 'profit') {
-    return '<tr><th>平倉時間</th><th>Symbol</th><th>策略 / Strategy</th><th>開倉</th><th>平倉</th><th>Qty</th><th>持倉</th><th>收益 / PnL</th></tr>';
+    return '<tr><th>平倉日期時間</th><th>Symbol</th><th>策略 / Strategy</th><th>開倉</th><th>平倉</th><th>Qty</th><th>持倉</th><th>收益 / PnL</th></tr>';
   }
   return '<tr><th>時間 / Time</th><th>Symbol</th><th>策略 / Strategy</th><th>Side</th><th>Qty</th><th>Price</th><th>Exec Value</th><th>Fee</th><th>盈亏 / PnL</th><th>Order ID</th></tr>';
 }
@@ -1545,8 +1545,9 @@ function _liveProfitRow(r) {
   const hold = r.holdMs != null && r.holdMs >= 0 ? (r.holdMs / 60000).toFixed(1) + 'm' : (r.paired ? '--' : 'page edge');
   const pnlCls = r.pnl >= 0 ? 'green' : 'red';
   const sign = r.pnl >= 0 ? '+' : '';
+  const closeTime = ocFillDateTime(r.close.time);
   return '<tr>' +
-    '<td>' + ocFillTime(r.close.time) + '</td>' +
+    '<td class="oc-fill-time" title="' + ocEsc(closeTime) + '">' + ocEsc(closeTime) + '</td>' +
     '<td><strong>' + ocEsc(r.sym) + '</strong></td>' +
     '<td style="font-size:11px">' + (r.strategy ? _ocRenderOwnerStrategy(r.strategy, r) : '--') + '</td>' +
     '<td>' + ocEsc(openText) + '</td>' +
@@ -1590,8 +1591,9 @@ function _liveClosedPnlRow(r) {
     ? '<span class="oc-source-note yellow" title="' + driftLabel + '">&#x26A0; ' + driftLabel + '</span>'
     : '';
   const title = 'exchange-confirmed · orderLinkId=' + orderLinkId + ' · orderId=' + orderId;
+  const closeTime = ocFillDateTime(updated);
   return '<tr>' +
-    '<td>' + ocFillTime(updated) + '</td>' +
+    '<td class="oc-fill-time" title="' + ocEsc(closeTime) + '">' + ocEsc(closeTime) + '</td>' +
     '<td><strong>' + ocEsc(r.symbol || '') + '</strong></td>' +
     '<td style="font-size:11px" title="' + ocEsc(sourceLabel) + '">' +
       '<span class="' + (mutedStrategy ? 'oc-row-muted' : '') + '">' + ocEsc(strategyText) + '</span>' +
@@ -1628,7 +1630,8 @@ function _liveUpdateFillControls(payload, fills) {
   const suffix = isProfitTab
     ? ' · 已預載 ' + _livePnlHistoryState.rows.length + ' 筆 · 每批 ' + LIVE_PNL_PRELOAD_SIZE + ' 筆'
     : ' · offset=' + _liveFillState.offset;
-  ocSetText('live-fills-summary', '本页 ' + fills.length + ' 笔 · source=' + ((payload && payload.source) || '--') + suffix);
+  const more = _liveFillState.hasMore ? ' · 還有更多，按下一页' : ' · 已到最後一页';
+  ocSetText('live-fills-summary', '本页 ' + fills.length + ' 笔 · source=' + ((payload && payload.source) || '--') + suffix + more);
 }
 
 function _liveResetPnlHistory() {
@@ -1657,7 +1660,7 @@ function _liveRenderPnlHistory() {
   _fillsLoaded = true;
   _liveFillState.loading = false;
   _liveUpdateFillControls(payload, rows);
-  if (badge) badge.textContent = _livePnlHistoryState.rows.length ? _livePnlHistoryState.rows.length + ' 筆' : '';
+  if (badge) badge.textContent = _livePnlHistoryState.rows.length ? '收益 ' + _livePnlHistoryState.rows.length + ' 筆' : '';
   if (!rows.length) {
     body.innerHTML = '<tr><td colspan="8" style="color:var(--text-dim);text-align:center;padding:16px">Bybit closed-pnl 暫無平倉收益</td></tr>';
     return;
@@ -1814,7 +1817,7 @@ async function loadFills() {
     _fillsLoaded = true;
     _liveFillState.loading = false;
     _liveUpdateFillControls(payload, arr);
-    if (badge) badge.textContent = arr.length ? arr.length + ' 筆' : '';
+    if (badge) badge.textContent = arr.length ? '本页 ' + arr.length + ' 筆' + (_liveFillState.hasMore ? '+' : '') : '';
     if (arr.length === 0) {
       body.innerHTML = '<tr><td colspan="' + (_liveFillState.tab === 'profit' ? '8' : '10') + '" style="color:var(--text-dim);text-align:center;padding:16px">暫無成交記錄 / No fills</td></tr>';
       return;
