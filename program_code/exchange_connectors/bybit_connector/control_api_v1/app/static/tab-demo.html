@@ -4,11 +4,11 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Demo 演示</title>
-<script src="/static/common-formatters.js?v=20260519.split-p2"></script>
+<script src="/static/common-formatters.js?v=20260628.gui-fills-time"></script>
 <script src="/static/common-mode-badge.js?v=20260519.split-p2"></script>
 <script src="/static/common-modals.js?v=20260519.split-p2"></script>
 <script src="/static/js/fetch_with_csrf.js?v=20260527.ops1"></script>
-<script src="/static/common.js?v=20260527.ops1-csrf"></script>
+<script src="/static/common.js?v=20260628.gui-fills-table"></script>
 </head>
 <body>
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
@@ -159,7 +159,7 @@
   </div>
 
   <!-- Fill History / 成交歷史 -->
-  <details class="oc-collapse">
+  <details class="oc-collapse" id="demo-fills-collapse" ontoggle="onDemoFillsToggle(this)">
     <summary>&#x1F4C4; 成交歷史 / Fill History（分页，每页 50 笔）</summary>
     <div class="oc-collapse-body">
       <div class="oc-fill-toolbar">
@@ -183,7 +183,7 @@
       <div id="demo-stale-banner" class="oc-demo-stale-banner"></div>
       <div class="oc-fill-summary" id="demo-fills-summary">當前只載入本页數據，切页時再拉取下一页。</div>
       <div class="oc-table-wrap">
-        <table class="oc-table">
+        <table class="oc-table oc-fill-table">
           <thead id="demo-fills-head"><tr><th>時間</th><th>交易對</th><th>策略</th><th>品類</th><th>方向</th><th>數量</th><th>價格</th><th>成交金额</th><th>手續費</th><th>盈亏 / PnL</th></tr></thead>
           <tbody id="demo-fills"><tr class="empty-row"><td colspan="10">載入中...</td></tr></tbody>
         </table>
@@ -735,7 +735,7 @@ function _demoExtractClosedPnlRows(data) {
 
 function _demoFillHead(tab) {
   if (tab === 'profit') {
-    return '<tr><th>平倉時間</th><th>交易對</th><th>策略</th><th>開倉</th><th>平倉</th><th>數量</th><th>持倉</th><th>收益 / PnL</th></tr>';
+    return '<tr><th>平倉日期時間</th><th>交易對</th><th>策略</th><th>開倉</th><th>平倉</th><th>數量</th><th>持倉</th><th>收益 / PnL</th></tr>';
   }
   return '<tr><th>時間</th><th>交易對</th><th>策略</th><th>品類</th><th>方向</th><th>數量</th><th>價格</th><th>成交金额</th><th>手續費</th><th>盈亏 / PnL</th></tr>';
 }
@@ -799,8 +799,9 @@ function _demoProfitRow(r) {
     ? '<span class="oc-source-note yellow" title="' + driftLabel + '">&#x26A0; ' + driftLabel + '</span>'
     : '';
   const title = 'exchange-confirmed · orderLinkId=' + orderLinkId + ' · orderId=' + orderId;
+  const closeTime = ocFillDateTime(updated);
   return '<tr>' +
-    '<td>' + ocFillTime(updated) + '</td>' +
+    '<td class="oc-fill-time" title="' + ocEsc(closeTime) + '">' + ocEsc(closeTime) + '</td>' +
     '<td>' + ocEsc(r.symbol || '') + '</td>' +
     '<td style="font-size:11px" title="' + ocEsc(sourceLabel) + '">' +
       '<span class="' + (mutedStrategy ? 'oc-row-muted' : '') + '">' + ocEsc(strategyText) + '</span>' +
@@ -882,11 +883,12 @@ function _demoUpdateFillControls(payload, fills) {
   ocSetText('demo-fills-refresh-label', isProfitTab ? '刷新 Bybit PnL' : '刷新成交');
   const sourceLabel = isProfitTab
     ? 'Bybit closed PnL · source=' + ((payload && payload.source) || '--')
-    : 'PG fills';
+    : 'fills · source=' + ((payload && payload.source) || '--');
   const suffix = isProfitTab
     ? ' · 已預載 ' + _demoPnlHistoryState.rows.length + ' 筆 · 每批 ' + DEMO_PNL_PRELOAD_SIZE + ' 筆'
     : ' · offset=' + _demoFillState.offset;
-  ocSetText('demo-fills-summary', '本页 ' + fills.length + ' 笔 · ' + sourceLabel + suffix);
+  const more = _demoFillState.hasMore ? ' · 還有更多，按下一页' : ' · 已到最後一页';
+  ocSetText('demo-fills-summary', '本页 ' + fills.length + ' 笔 · ' + sourceLabel + suffix + more);
 }
 
 function _demoResetPnlHistory() {
@@ -921,6 +923,11 @@ function _demoRenderPnlHistory() {
     return;
   }
   ocSetHtml('demo-fills', rows.map(_demoProfitRow).join(''));
+}
+
+function onDemoFillsToggle(el) {
+  if (!el || !el.open || _demoFillsLoadedOnce || _demoFillState.loading) return;
+  loadDemoFills();
 }
 
 async function _demoLoadPnlBatch(opts) {
@@ -1057,10 +1064,8 @@ async function loadDemoFills(opts) {
     return;
   }
   const side = (DEMO_FILL_TABS[_demoFillState.tab] || {}).side || '';
-  const fastPrefix = (_demoFillState.tab === 'profit' || forceRefresh) ? '' : 'fast=1&';
-  const qs = '?' + fastPrefix + 'limit=' + _demoFillState.limit + '&offset=' + _demoFillState.offset +
-    (side ? '&side=' + encodeURIComponent(side) : '') +
-    (forceRefresh && _demoFillState.tab === 'profit' ? '&force_refresh=true' : '');
+  const qs = '?limit=' + _demoFillState.limit + '&offset=' + _demoFillState.offset +
+    (side ? '&side=' + encodeURIComponent(side) : '');
   _demoFillState.loading = true;
   _demoUpdateFillControls(null, []);
   ocSetHtml('demo-fills-head', _demoFillHead(_demoFillState.tab));

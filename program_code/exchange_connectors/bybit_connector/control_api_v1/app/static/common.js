@@ -767,6 +767,10 @@ function ocInjectBaseCSS() {
     .oc-fill-tab.active { border-color: var(--blue); color: var(--blue); background: rgba(56,139,253,0.12); }
     .oc-fill-pager { display: inline-flex; align-items: center; gap: 8px; color: var(--text-dim); font-size: 11px; }
     .oc-fill-summary { color: var(--text-dim); font-size: 11px; line-height: 1.4; margin: 4px 0 8px; }
+    .oc-fill-table { min-width: 1080px; }
+    .oc-fill-table th, .oc-fill-table td { white-space: nowrap; }
+    .oc-fill-table th:nth-child(3), .oc-fill-table td:nth-child(3) { white-space: normal; min-width: 140px; }
+    .oc-fill-time { white-space: nowrap; }
 
     /* Buttons */
     .oc-btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border);

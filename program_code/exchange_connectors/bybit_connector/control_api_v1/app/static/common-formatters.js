@@ -116,6 +116,19 @@ function ocFillTime(ts) {
   return p(d.getUTCHours()) + ':' + p(d.getUTCMinutes()) + ' UTC (local: ' + p(d.getHours()) + ':' + p(d.getMinutes()) + (tz ? ' ' + tz : '') + ')';
 }
 
+function ocFillDateTime(ts) {
+  const d = ocDate(ts);
+  if (!d) return '--';
+  const p = n => String(n).padStart(2, '0');
+  const utcDate = d.getUTCFullYear() + '-' + p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate());
+  const localDate = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  let tz = '';
+  try { const t = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(d).find(x => x.type === 'timeZoneName'); tz = t ? t.value : ''; } catch (_) {}
+  return utcDate + ' ' + p(d.getUTCHours()) + ':' + p(d.getUTCMinutes()) +
+    ' UTC (local: ' + localDate + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) +
+    (tz ? ' ' + tz : '') + ')';
+}
+
 function ocPnlClass(v) {
   if (v == null) return '';
   return v >= 0 ? 'green' : 'red';
