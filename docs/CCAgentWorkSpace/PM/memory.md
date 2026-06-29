@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-29 IBKR Stock/ETF Plan Round 3 Launch Certification
+
+- PM integrated CC/FA/PA/E3/E5/QC/MIT/QA third-round launch-certification: all eight roles returned `CERTIFIABLE_IF_GATES_PASS`, `SCOPE=paper_shadow_only`, `FINDINGS=0`.
+- Conditional sign-off wording is `PAPER_SHADOW_LAUNCH_CERTIFIABLE_IF_ALL_GATES_PASS`: only after Phase 0 named contract packet is accepted and Phase 1-5 gates all pass can paper/shadow lane be signed off as complete.
+- Current state remains not launch-ready; live/tiny-live, profitability claims, durable alpha proof, and any promotion beyond paper/shadow stay excluded.
+
 ## 2026-06-29 IBKR Stock/ETF Plan Round 2 Review
 
 - PM integrated CC/FA/PA/E3/E5/QC/MIT/QA second-round adversarial review: every role returned `APPROVE_PHASE0_ONLY`; no role certified no-omission or scheduled full-online readiness.
@@ -2515,3 +2521,10 @@
 - Repair items include source refs, budget/backpressure gates, operator runbook, rollback plan, and `allowed_actions` false for training, ONNX export, registry/PG write, artifact delete, runtime/env/service/cron mutation, serving, Cost Gate change, order/live authority, and promotion proof.
 - Verification passed: py_compile, focused repair tests `5 passed`, health snapshot `7 passed`, registry freshness + repair `14 passed`, ML chain adjacent `48 passed`, and `git diff --check`; a wider wrapper static test still has an existing repo-venv/mock-PATH environment failure outside this helper.
 - Next ML loop item is `P0-LEARN-SERVING-SNAPSHOT`; runtime mutation, PG/registry write, model serving/load, bounded Demo execution, and proof/promotion remain blocked until separate source contracts and gated reviews pass.
+
+## 2026-06-29 Learning Serving Snapshot Source Checkpoint
+
+- PM advanced `P0-LEARN-SERVING-SNAPSHOT` source-only at commit `f1d1a26c`: new `cost_gate_learning_serving_snapshot_v1` consumes training/registry repair, learning health, model registry summary, and optional runtime serving state artifacts.
+- The packet emits immutable candidate/blocked review packets requiring no remaining repair items, registry/ONNX parity, q10/q50/q90 artifact hashes, feature schema hash, stale/legacy artifact exclusion, and runtime loaded-version agreement or explicit visible fallback with hidden ML inference rejected.
+- Verification passed: py_compile, focused serving tests `8 passed`, health snapshot `7 passed`, serving + repair + registry freshness `22 passed`, ML chain adjacent `56 passed`, and `git diff --check`.
+- Next ML loop item is `P0-LEARN-PROOF-PROMOTION-GATE`; runtime sync, model load/serving, registry/PG write, bounded Demo execution, Cost Gate change, and proof/promotion remain blocked until separate gated reviews pass.
