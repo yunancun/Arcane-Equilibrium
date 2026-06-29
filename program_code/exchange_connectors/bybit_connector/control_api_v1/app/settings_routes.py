@@ -12,7 +12,7 @@ MODULE_NOTE (中文):
   安全設計原則：
   1. Write-only from GUI — GET 只返回遮罩 hint，API 永不暴露明文 key
   2. Operator 角色守衛 — 所有端點要求認證；POST 額外要求 Operator 角色
-  3. Slot 白名單 — 只允許 "demo" 和 "live"，防止路徑穿越
+  3. Slot 白名單 — 只允許 "demo"、"live_demo" 和 "live"，防止路徑穿越
   4. 路徑安全 — secrets 目錄通過環境變量配置，fallback 到 ~/BybitOpenClaw/secrets/
   5. 驗證後寫入 — POST 先調 Bybit REST 驗證 key 有效性，驗證通過才寫磁盤
   6. chmod 600 — 寫入後立即收緊文件權限
@@ -25,7 +25,7 @@ MODULE_NOTE (English):
   Security design:
   1. Write-only from GUI — GET only returns masked hint; API never exposes plaintext keys
   2. Operator auth guard — all endpoints require auth; POST additionally requires Operator role
-  3. Slot whitelist — only "demo" and "live" are accepted, prevents path traversal
+  3. Slot whitelist — only "demo", "live_demo", and "live" are accepted, prevents path traversal
   4. Path safety — secrets dir configured via env var, falls back to ~/BybitOpenClaw/secrets/
   5. Validate-then-write — POST validates via Bybit REST before touching disk
   6. chmod 600 — file permissions tightened immediately after write
@@ -46,7 +46,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from . import alert_config as _alert_cfg
@@ -947,6 +947,57 @@ def _validate_bybit_credentials(api_key: str, api_secret: str, slot: str) -> tup
     return False, f"Bybit retCode={ret_code}: {ret_msg}"
 
 
+def _validation_status_from_error(error: str) -> str:
+    """
+    Classify validation failures for UI severity.
+    將驗證失敗分類為 UI 嚴重程度。
+    """
+    if error.startswith(("Network error:", "Unexpected error:")):
+        return "validation_unavailable"
+    return "invalid"
+
+
+def _api_key_validation_state(
+    *,
+    has_key: bool,
+    api_key: str,
+    api_secret: str,
+    slot: str,
+    validate: bool,
+) -> dict[str, Any]:
+    """
+    Build optional validation metadata for API key status responses.
+    建立 API key 狀態回應的可選驗證資訊。
+    """
+    if not has_key:
+        return {
+            "validated": False,
+            "validation_status": "not_configured",
+            "validation_error": "",
+        }
+    if not validate:
+        return {
+            "validated": None,
+            "validation_status": "not_checked",
+            "validation_error": "",
+        }
+
+    is_valid, err_msg = _validate_bybit_credentials(api_key, api_secret, slot)
+    if is_valid:
+        return {
+            "validated": True,
+            "validation_status": "valid",
+            "validation_error": "",
+        }
+
+    safe_err = (err_msg or "Validation failed")[:200]
+    return {
+        "validated": False,
+        "validation_status": _validation_status_from_error(safe_err),
+        "validation_error": safe_err,
+    }
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Auth Dependencies / 認證依賴
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1055,6 +1106,7 @@ class AlertConfigSaveRequest(BaseModel):
 @settings_router.get("/api-key/{slot}")
 async def get_api_key_status(
     slot: str,
+    validate: bool = Query(default=False),
     actor: Any = Depends(_get_auth_actor),
 ) -> dict:
     """
@@ -1063,9 +1115,11 @@ async def get_api_key_status(
 
     Returns masked hint of the stored API key — never returns plaintext.
     Returns has_key=False if no key is stored for this slot.
+    If validate=true, performs the same read-only Bybit credential check used by POST.
 
     返回已存儲 API key 的遮罩 hint，永不返回明文。
     槽位無 key 時 has_key=False。
+    validate=true 時執行與 POST 相同的 Bybit 只讀憑證驗證。
     """
     if slot not in ALLOWED_SLOTS:
         raise HTTPException(status_code=400, detail=f"Invalid slot '{slot}'. Allowed: {sorted(ALLOWED_SLOTS)}")
@@ -1084,11 +1138,20 @@ async def get_api_key_status(
     except OSError:
         pass
 
+    validation_state = _api_key_validation_state(
+        has_key=has_key,
+        api_key=api_key,
+        api_secret=api_secret,
+        slot=slot,
+        validate=validate,
+    )
+
     return {
         "slot": slot,
         "has_key": has_key,
         "key_hint": _mask_key(api_key) if api_key else "",
         "last_modified": last_modified,
+        **validation_state,
     }
 
 

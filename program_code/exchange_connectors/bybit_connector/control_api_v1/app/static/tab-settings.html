@@ -1192,10 +1192,28 @@ const APIKEY_SLOTS = [
 
 let _currentApikeySlot = '';
 
+function apiKeyStatusView(data) {
+  const hasKey = data && data.has_key;
+  const status = (data && data.validation_status) ? data.validation_status : '';
+  if (!hasKey) {
+    return { chipCls: 'oc-chip-warn', chipTxt: '未配置', detail: '', detailColor: '' };
+  }
+  if (status === 'valid') {
+    return { chipCls: 'oc-chip-good', chipTxt: '有效', detail: 'API 驗證通過', detailColor: 'var(--green)' };
+  }
+  if (status === 'invalid') {
+    return { chipCls: 'oc-chip-bad', chipTxt: '失效', detail: 'API 驗證失效', detailColor: '#f87171' };
+  }
+  if (status === 'validation_unavailable') {
+    return { chipCls: 'oc-chip-warn', chipTxt: '待複查', detail: 'API 驗證暫不可用', detailColor: 'var(--yellow,#f0c040)' };
+  }
+  return { chipCls: 'oc-chip-good', chipTxt: '已配置', detail: '', detailColor: '' };
+}
+
 async function loadApiKeyStatus() {
   const grid = document.getElementById('apikey-slots-grid');
   const results = await Promise.allSettled(
-    APIKEY_SLOTS.map(s => ocApi('/api/v1/settings/api-key/' + s.id))
+    APIKEY_SLOTS.map(s => ocApi('/api/v1/settings/api-key/' + s.id + '?validate=1'))
   );
 
   let html = '';
@@ -1207,18 +1225,24 @@ async function loadApiKeyStatus() {
     const hasKey = d && d.has_key;
     const hint = (d && d.key_hint) ? d.key_hint : '（未設置）';
     const lastMod = (d && d.last_modified) ? d.last_modified : '';
+    const validationError = (d && d.validation_error) ? d.validation_error : '';
     const borderColor = slot.warn ? 'rgba(239,68,68,0.3)' : slot.liveDemoNote ? 'rgba(240,192,64,0.3)' : 'rgba(56,139,253,0.2)';
-    const chipCls = hasKey ? 'oc-chip-good' : 'oc-chip-warn';
-    const chipTxt = hasKey ? '已配置' : '未配置';
+    const statusView = apiKeyStatusView(d);
 
     html += '<div style="background:var(--card-bg);border:1px solid ' + borderColor + ';border-radius:8px;padding:14px">';
     html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">';
     html += '<span style="font-size:18px">' + slot.icon + '</span>';
     html += '<span style="font-weight:600;font-size:13px">' + ocEsc(slot.label) + '</span>';
-    html += '<span class="oc-chip ' + chipCls + '" style="margin-left:auto">' + chipTxt + '</span>';
+    html += '<span class="oc-chip ' + statusView.chipCls + '" style="margin-left:auto">' + statusView.chipTxt + '</span>';
     html += '</div>';
     html += '<div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">' + ocEsc(slot.desc) + '</div>';
     html += '<div style="font-family:monospace;font-size:12px;color:var(--text);margin-bottom:6px">Key: <strong id="apikey-hint-' + slot.id + '">' + ocEsc(hint) + '</strong></div>';
+    if (statusView.detail) {
+      html += '<div style="font-size:11px;color:' + statusView.detailColor + ';margin-bottom:8px">';
+      html += ocEsc(statusView.detail);
+      if (validationError) html += ': ' + ocEsc(validationError);
+      html += '</div>';
+    }
     if (lastMod) {
       html += '<div style="font-size:10px;color:var(--text-dim);margin-bottom:10px">最後更新: ' + ocEsc(lastMod) + '</div>';
     }
