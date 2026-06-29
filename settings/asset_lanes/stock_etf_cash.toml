@@ -1,0 +1,45 @@
+# ADR-0048 / AMD-2026-06-29-01 Stock/ETF cash lane contract.
+# Source-controlled defaults only. No secret material, no broker session state.
+
+[lane]
+asset_lane = "stock_etf_cash"
+broker = "ibkr"
+default_asset_lane = "crypto_perp"
+enabled = false
+shadow_only = true
+live_enabled = false
+tiny_live_enabled = false
+margin_enabled = false
+short_enabled = false
+options_enabled = false
+cfd_enabled = false
+transfer_enabled = false
+
+[flags]
+OPENCLAW_STOCK_ETF_LANE_ENABLED = "0"
+OPENCLAW_IBKR_READONLY_ENABLED = "0"
+OPENCLAW_IBKR_PAPER_ENABLED = "0"
+OPENCLAW_ASSET_LANE_DEFAULT = "crypto_perp"
+OPENCLAW_STOCK_ETF_SHADOW_ONLY = "1"
+
+[authority]
+rust_authority_required = true
+python_broker_write_allowed = false
+gui_authorization_allowed = false
+bybit_paper_ipc_reuse_allowed = false
+live_secret_slot_allowed = false
+ibkr_api_call_authorized_by_this_file = false
+
+[allowed_future_secret_slots]
+readonly = "$OPENCLAW_SECRETS_DIR/external/ibkr/readonly/"
+paper = "$OPENCLAW_SECRETS_DIR/external/ibkr/paper/"
+
+[denied_secret_slots]
+live = "$OPENCLAW_SECRETS_DIR/external/ibkr/live/"
+
+[denied_operations]
+live_order_submit = "ibkr_live_not_authorized"
+tiny_live_order_submit = "ibkr_live_not_authorized"
+margin_or_short = "stock_etf_cash_only"
+options_or_cfd = "instrument_kind_denied"
+transfer_or_account_write = "account_write_denied"

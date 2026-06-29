@@ -21,6 +21,9 @@
 | `governance_dev/amendments/2026-06-29--AMD-2026-06-29-01-ibkr-stock-etf-paper-shadow-lane.md` | Phase 0 AMD：把 Bybit-only wording 修正為 active live execution 邊界 + ADR-0048 IBKR paper/shadow 例外；定義 API baseline、secret boundary、runtime/evidence boundary。 |
 | `execution_plan/specs/2026-06-29--stock_etf_cash_phase0_named_contract_packet.md` | Phase 0 named contract packet：列出 broker capability registry、external-surface gate、IBKR session attestation、lane-scoped IPC、paper lifecycle、DDL/evidence、GUI、storage、kill/disable、release packet 等 v1 contract。 |
 | `execution_plan/specs/2026-06-29--stock_etf_cash_phase0_named_contract_packet.manifest.json` | Phase 0 machine-readable manifest：記錄 accepted contract list、global denials、API baseline、phase unlock status；不授權 runtime/API/secret/order。 |
+| `execution_plan/specs/2026-06-29--stock_etf_db_evidence_ddl_v1.source_only.sql` | Phase 1 source-only DDL draft：定義 broker/research/audit stock/ETF evidence tables and constraints；不是 active migration，Linux PG dry-run/double-apply + PM/Operator apply authorization 前不可進 `sql/migrations/`。 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-29--ibkr_stock_etf_phase1_source_foundation_checkpoint.md` | PM Phase 1 checkpoint：closed Rust taxonomy/default-off config/lane-scoped IPC fixture/source-only DDL + denial tests 已落地；不授權 IBKR API/secret/connector/order/migration/GUI/evidence clock。 |
+| `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_phase1_source_foundation_checkpoint.md` | Operator Phase 1 摘要：source foundation done, no runtime authority；下一步仍是 Phase 2 external-surface gate PASS before first IBKR contact。 |
 
 ### 2026-06-22 Shadow placement alpha ingestion
 

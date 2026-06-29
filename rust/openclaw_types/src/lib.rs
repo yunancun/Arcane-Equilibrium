@@ -12,6 +12,7 @@ pub mod intent;
 pub mod price;
 pub mod risk;
 pub mod state;
+pub mod stock_etf_lane;
 
 pub use agent::{AgentMessage, AgentRole, MessageType};
 pub use asset_venue::{AssetClass, Venue, VenueParseError};
@@ -22,6 +23,12 @@ pub use risk::{
     H0CheckResult, H0GateConfig, H0GateHealthSnapshot, H0GateRiskSnapshot, PricingConfig,
 };
 pub use state::{AgentState, GovernanceMode, OmsState, OrderInitiator, RiskInitiator, RiskLevel};
+pub use stock_etf_lane::{
+    evaluate_broker_operation, AssetLane, AuthorityScope, Broker, BrokerCapabilityDecision,
+    BrokerCapabilityRequest, BrokerEnvironment, BrokerOperation, IbkrPaperOrderLifecycleState,
+    InstrumentKind, StockEtfConfigError, StockEtfContractParseError, StockEtfDenialReason,
+    StockEtfFeatureFlags, StockEtfGateInputs, StockEtfReadiness,
+};
 
 // ---------------------------------------------------------------------------
 // Golden schema validation (CI) / 黃金基準驗證（CI 用）
