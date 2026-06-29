@@ -18,6 +18,7 @@ from app.replay_advisory_routes import (  # noqa: E402
     replay_advisory_router,
     rank_replay_advisory_candidates,
     ReplayAdvisoryCandidate,
+    ReplayAdvisoryRankRequest,
 )
 
 
@@ -129,3 +130,16 @@ def test_replay_advisory_compare_route_is_read_only() -> None:
     assert data["applier_path"] == "not_invoked"
     assert data["comparison"]["status"] == "computed"
     assert data["comparison"]["verdict"] == "candidate_better"
+
+
+def test_replay_advisory_openapi_uses_concrete_body_models() -> None:
+    client = _client()
+
+    schema = client.app.openapi()
+
+    assert "/api/v1/replay/advisory/rank" in schema["paths"]
+    assert "/api/v1/replay/advisory/compare" in schema["paths"]
+    assert (
+        ReplayAdvisoryRankRequest.__name__
+        in schema["components"]["schemas"]
+    )

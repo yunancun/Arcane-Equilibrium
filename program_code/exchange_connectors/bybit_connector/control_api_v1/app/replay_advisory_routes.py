@@ -4,8 +4,6 @@ These routes are for ML/Dream exploration support. They do not run replay,
 write advisory rows, call appliers, or mutate live/demo parameters.
 """
 
-from __future__ import annotations
-
 import os
 from typing import Any, Optional
 
