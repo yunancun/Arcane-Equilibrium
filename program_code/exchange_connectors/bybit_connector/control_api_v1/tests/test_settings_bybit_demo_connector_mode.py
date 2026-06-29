@@ -40,6 +40,7 @@ def _write_preflight(
     path: Path,
     *,
     env_file: Path,
+    readiness_blockers: list[str] | None = None,
     answers: dict | None = None,
 ) -> tuple[Path, str]:
     safe_answers = {
@@ -71,6 +72,14 @@ def _write_preflight(
         "settings_api_source": {
             "ready": True,
             "requires_operator_role": True,
+        },
+        "readiness": {
+            "blocking_reasons": readiness_blockers
+            if readiness_blockers is not None
+            else [
+                "connector_mode:bybit_mode_not_demo",
+                "connector_mode:bybit_connector_write_not_enabled",
+            ],
         },
         "connector_env_cutover": {
             "status": "READY",
@@ -190,6 +199,33 @@ def test_bybit_demo_connector_mode_rejects_authority_contamination(
     data = resp.json()
     assert "unsafe or missing answer flags" in data["detail"]
     assert "BYBIT_MODE=read_only" in env_file.read_text(encoding="utf-8")
+
+
+def test_bybit_demo_connector_mode_rejects_uncleared_demo_credential_blocker(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    client, env_file = _client(tmp_path, monkeypatch)
+    env_file.parent.mkdir(parents=True)
+    env_file.write_text("BYBIT_MODE=read_only\n", encoding="utf-8")
+    preflight_path, preflight_sha = _write_preflight(
+        tmp_path / "cutover_preflight.json",
+        env_file=env_file,
+        readiness_blockers=[
+            "demo_api_slot:demo_api_key_expected_value_mismatch",
+            "connector_mode:bybit_mode_not_demo",
+        ],
+    )
+
+    resp = client.post(
+        "/api/v1/settings/bybit-demo-connector-mode",
+        json=_post_body(preflight_path, preflight_sha),
+    )
+
+    assert resp.status_code == 400
+    assert "Demo credential readiness must be green" in resp.json()["detail"]
+    assert "BYBIT_MODE=read_only" in env_file.read_text(encoding="utf-8")
+    assert "BYBIT_CONNECTOR_WRITE_ENABLED=true" not in env_file.read_text(encoding="utf-8")
 
 
 def test_bybit_demo_connector_mode_rejects_wrong_confirmation(

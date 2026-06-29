@@ -158,6 +158,7 @@ def _settings_source_check(path: Path) -> dict[str, Any]:
         "api_key_file_write": '_write_key_file(slot, "api_key"',
         "api_secret_file_write": '_write_key_file(slot, "api_secret"',
         "endpoint_file_write": '_write_key_file(slot, "bybit_endpoint"',
+        "connector_mode_requires_demo_credential_readiness": "_credential_blockers_from_cutover_preflight",
         "slot_whitelist_present": "ALLOWED_SLOTS",
         "demo_slot_allowed": '"demo"',
         "live_demo_slot_allowed": '"live_demo"',
