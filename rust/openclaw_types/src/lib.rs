@@ -24,6 +24,7 @@ pub mod stock_etf_db_evidence_ddl;
 pub mod stock_etf_disable_cleanup_runbook;
 pub mod stock_etf_gui_lane_contract;
 pub mod stock_etf_lane;
+pub mod stock_etf_phase0_manifest;
 pub mod stock_etf_phase3_evidence;
 pub mod stock_etf_release_packet;
 pub mod stock_etf_scorecard_inputs;
@@ -101,6 +102,14 @@ pub use stock_etf_lane::{
     BrokerCapabilityRequest, BrokerEnvironment, BrokerOperation, IbkrPaperOrderLifecycleState,
     InstrumentKind, StockEtfConfigError, StockEtfContractParseError, StockEtfDenialReason,
     StockEtfFeatureFlags, StockEtfGateInputs, StockEtfReadiness,
+};
+pub use stock_etf_phase0_manifest::{
+    required_phase0_contract_ids, StockEtfPhase0ApiBaselineV1, StockEtfPhase0AuthorityV1,
+    StockEtfPhase0ContractPacketManifestV1, StockEtfPhase0GlobalDenialsV1,
+    StockEtfPhase0ManifestBlocker, StockEtfPhase0ManifestVerdict, StockEtfPhase0UnlockTableV1,
+    STOCK_ETF_PHASE0_ADR_PATH, STOCK_ETF_PHASE0_AMD_PATH, STOCK_ETF_PHASE0_GENERATED_AT,
+    STOCK_ETF_PHASE0_MANIFEST_SCHEMA, STOCK_ETF_PHASE0_MANIFEST_SCOPE,
+    STOCK_ETF_PHASE0_MANIFEST_STATUS, STOCK_ETF_PHASE0_PACKET_PATH,
 };
 pub use stock_etf_phase3_evidence::{
     StockEtfAdjustmentMarker, StockEtfDailyDqManifestV1, StockEtfEvidenceClockDayV1,

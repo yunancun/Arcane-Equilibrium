@@ -76,6 +76,14 @@ No `Other(String)`, catch-all broker, catch-all lane, or string-literal venue by
 
 Phase 1 source foundation may start only after the Phase 0 named contract packet exists in repo and is internally consistent with this ADR and AMD-2026-06-29-01.
 
+`stock_etf_phase0_contract_packet_manifest_v1` must be machine-checkable as the
+Phase 0 manifest authority. It must pin schema/status/scope, ADR/AMD/packet
+paths, IBKR loopback paper API baseline, global denials, exact named contract
+list, and phase unlock table, while rejecting prior IBKR contact, live-port
+allowance, missing/duplicate/unknown contracts, missing denials, Phase 2 contact
+unlock, evidence-clock start, GUI runtime enablement, Phase 5 online status,
+tiny-live, and live.
+
 `broker_capability_registry_v1` must be machine-checkable before effect-capable paper-route implementation. It must prove the full operation matrix, Bybit live execution unchanged, Python broker write authority denied, paper writes Rust-owned, read/paper/shadow/scorecard gates present, and live/margin/short/options/CFD/transfer/account-write operations typed-denied.
 
 `stock_etf_kill_switch_and_disable_cleanup_runbook_v1` must be machine-checkable

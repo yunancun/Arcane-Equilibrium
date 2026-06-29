@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-30 IBKR Stock/ETF Phase 0 Manifest Contract
+
+- PM added `stock_etf_phase0_contract_packet_manifest_v1` as a Rust source-only validator for the Phase 0 machine-readable manifest.
+- The contract pins schema/status/scope, ADR/AMD/packet paths, loopback paper API baseline, all global denials, exact named contract list, and fail-closed phase unlocks.
+- This grants no IBKR contact, connector runtime, paper order, DB apply, evidence clock, GUI lane authority, release approval, tiny-live, or live.
+
 ## 2026-06-30 IBKR Stock/ETF Disable-Cleanup Runbook Contract
 
 - PM added `stock_etf_kill_switch_and_disable_cleanup_runbook_v1` as a Rust source-only validator for exact kill flags, collector stop, GUI disabled/hidden posture, live-secret absence, forward-only archive/DB retention, append-only audit, and Bybit live unchanged proof.
