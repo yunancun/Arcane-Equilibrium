@@ -1,0 +1,31 @@
+# ADR-0048 Stock/ETF instrument identity template.
+#
+# This is a blocked, secret-free source template. It does not contact IBKR,
+# create connectors, subscribe to market data, route paper orders, inspect
+# secrets, or change Bybit live execution behavior.
+
+[identity]
+contract_id = ""
+asset_lane = "crypto_perp"
+broker = "bybit"
+instrument_kind = "crypto_perp"
+symbol = ""
+listing_venue = "unknown_denied"
+primary_exchange = "unknown_denied"
+currency = "unknown_denied"
+tradability_status = "unknown_denied"
+priips_kid_status = "unknown_denied"
+fractional_policy_recorded = false
+point_in_time_asof_ms = 0
+market_calendar_id = ""
+market_calendar_hash = ""
+broker_contract_details_hash = ""
+instrument_identity_hash = ""
+corporate_action_adjustment_version_hash = ""
+source_artifact_hash = ""
+bybit_live_execution_unchanged = false
+ibkr_live_denied = false
+margin_short_denied = false
+options_cfd_denied = false
+ibkr_contact_performed = false
+secret_content_serialized = false
