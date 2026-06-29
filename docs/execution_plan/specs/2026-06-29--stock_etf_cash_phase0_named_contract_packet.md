@@ -571,6 +571,17 @@ Negative tests:
 - stock live shows denied/no authorization path
 - existing crypto tabs and Decision Lease/risk behavior do not regress
 
+Source validator: `openclaw_types::stock_etf_gui_lane_contract::StockEtfGuiLaneContractV1`.
+The validator requires `crypto_perp` as the default displayed lane, a GET-only
+`/api/v1/stock-etf/readiness` readiness surface, display-only semantics, client
+lane state treated as untrusted, denied localStorage/query-param/hidden-field
+authority, no login-success selector, no POST/order/secret/contact surfaces,
+paper-order entry hidden, stock live disabled display, CFD hidden or fail-closed,
+route/cache/auth partition evidence, stale-cache cross-lane denial, existing
+crypto tab regression evidence, Decision Lease/risk regression evidence, source
+and test hashes, denied effect operations, `ibkr_contact_performed=false`, and
+`secret_content_serialized=false`.
+
 ## 20. `stock_etf_storage_capacity_v1`
 
 Required estimates before Phase 3:
