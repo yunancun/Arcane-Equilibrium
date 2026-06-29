@@ -7,7 +7,8 @@
 use super::super::*;
 use openclaw_types::{
     evaluate_broker_operation, AssetLane, Broker, BrokerCapabilityRequest, BrokerEnvironment,
-    BrokerOperation, InstrumentKind, StockEtfFeatureFlags, StockEtfGateInputs,
+    BrokerOperation, IbkrExternalSurfaceGateV1, IbkrPhase2PolicyBundleV1, InstrumentKind,
+    StockEtfFeatureFlags, StockEtfGateInputs,
 };
 
 pub(in crate::ipc_server) fn handle_stock_etf_ipc(
@@ -25,16 +26,18 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
             )
         }
     };
+    let phase2 = phase2_precontact_summary();
 
     match method {
         "stock_etf.get_lane_status" => JsonRpcResponse::success(
             id,
             serde_json::json!({
-                "phase": "phase1_source_foundation",
+                "phase": "phase2_precontact_source_fixture",
                 "asset_lane": AssetLane::StockEtfCash,
                 "broker": Broker::Ibkr,
                 "default_asset_lane": flags.asset_lane_default,
                 "flags": flags,
+                "phase2": phase2,
                 "ibkr_live_enabled": false,
                 "ibkr_call_performed": false,
                 "secret_slot_touched": false,
@@ -45,8 +48,9 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
         "stock_etf.get_readiness" => JsonRpcResponse::success(
             id,
             serde_json::json!({
-                "phase": "phase1_source_foundation",
+                "phase": "phase2_precontact_source_fixture",
                 "readiness": flags.readiness(),
+                "phase2": phase2,
                 "ibkr_live_enabled": false,
                 "ibkr_call_performed": false,
                 "secret_slot_touched": false,
@@ -81,6 +85,7 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
                     "decision": decision,
                     "allowed": allowed,
                     "denial_reason": denial_reason,
+                    "phase2": phase2,
                     "ibkr_call_performed": false,
                     "secret_slot_touched": false,
                     "order_routed": false,
@@ -89,6 +94,42 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
             )
         }
     }
+}
+
+fn phase2_precontact_summary() -> serde_json::Value {
+    let policy_bundle = IbkrPhase2PolicyBundleV1::source_template();
+    let policy_verdict = policy_bundle.validate();
+    let policy_flags = policy_bundle.gate_prerequisite_flags();
+    let gate = IbkrExternalSurfaceGateV1 {
+        api_allowlist_present: true,
+        redaction_suite_passed: policy_flags.redaction_suite_passed,
+        rate_limit_policy_present: policy_flags.rate_limit_policy_present,
+        audit_event_policy_present: policy_flags.audit_event_policy_present,
+        paper_attestation_contract_present: policy_flags.paper_attestation_contract_present,
+        python_no_write_guard_present: policy_flags.python_no_write_guard_present,
+        ibkr_call_performed: false,
+        ..IbkrExternalSurfaceGateV1::default()
+    };
+    let gate_verdict = gate.validate();
+
+    serde_json::json!({
+        "external_surface_gate": {
+            "status": gate.status,
+            "ibkr_contact_allowed": gate_verdict.ibkr_contact_allowed,
+            "blockers": gate_verdict.blockers,
+            "ibkr_call_performed": gate.ibkr_call_performed,
+        },
+        "policy_prerequisites": {
+            "bundle_accepted": policy_verdict.accepted,
+            "blockers": policy_verdict.blockers,
+            "flags": policy_flags,
+        },
+        "immutable_pass_artifact_present": false,
+        "first_ibkr_contact_allowed": false,
+        "connector_enabled": false,
+        "secret_slot_touched": false,
+        "order_routed": false,
+    })
 }
 
 fn operation_for_method(method: &str) -> Option<BrokerOperation> {
