@@ -6,6 +6,12 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-06-29 IBKR Stock/ETF paper + shadow feasibility lane
+
+| 文件 | 内容 |
+|------|------|
+| `execution_plan/2026-06-29--ibkr_stock_etf_paper_shadow_development_arrangement.md` | 正式開發安排：在 AE 既有治理、風控、審計、PnL scorecard 上新增隔離 `stock_etf_cash` research lane；先做 IBKR paper/shadow evidence collection，live/non-Bybit execution 仍禁止，開工前需 ADR/治理解鎖。 |
+
 ### 2026-06-22 Shadow placement alpha ingestion
 
 | 文件 | 内容 |
