@@ -61,11 +61,67 @@ pub const EVALUATE_PROMOTION_CRITERIA: IpcMethodSpec = IpcMethodSpec {
     slot: IpcSlotRequirement::None,
 };
 
+pub const STOCK_ETF_GET_LANE_STATUS: IpcMethodSpec = IpcMethodSpec {
+    name: "stock_etf.get_lane_status",
+    readonly: true,
+    slot: IpcSlotRequirement::None,
+};
+
+pub const STOCK_ETF_GET_READINESS: IpcMethodSpec = IpcMethodSpec {
+    name: "stock_etf.get_readiness",
+    readonly: true,
+    slot: IpcSlotRequirement::None,
+};
+
+pub const STOCK_ETF_PREVIEW_PAPER_ORDER: IpcMethodSpec = IpcMethodSpec {
+    name: "stock_etf.preview_paper_order",
+    readonly: true,
+    slot: IpcSlotRequirement::None,
+};
+
+pub const STOCK_ETF_SUBMIT_PAPER_ORDER: IpcMethodSpec = IpcMethodSpec {
+    name: "stock_etf.submit_paper_order",
+    readonly: false,
+    slot: IpcSlotRequirement::None,
+};
+
+pub const STOCK_ETF_CANCEL_PAPER_ORDER: IpcMethodSpec = IpcMethodSpec {
+    name: "stock_etf.cancel_paper_order",
+    readonly: false,
+    slot: IpcSlotRequirement::None,
+};
+
+pub const STOCK_ETF_REPLACE_PAPER_ORDER: IpcMethodSpec = IpcMethodSpec {
+    name: "stock_etf.replace_paper_order",
+    readonly: false,
+    slot: IpcSlotRequirement::None,
+};
+
+pub const STOCK_ETF_IMPORT_PAPER_FILLS: IpcMethodSpec = IpcMethodSpec {
+    name: "stock_etf.import_paper_fills",
+    readonly: true,
+    slot: IpcSlotRequirement::None,
+};
+
+pub const STOCK_ETF_EVALUATE_SHADOW_SIGNAL: IpcMethodSpec = IpcMethodSpec {
+    name: "stock_etf.evaluate_shadow_signal",
+    readonly: true,
+    slot: IpcSlotRequirement::None,
+};
+
 pub const IPC_METHOD_REGISTRY: &[IpcMethodSpec] = &[
     QUERY_FEE_SOURCE,
     GET_AGENT_SPINE_CHANNEL_METRICS,
     PROCESS_EARN_INTENT,
     EVALUATE_PROMOTION_CRITERIA,
+    STOCK_ETF_GET_LANE_STATUS,
+    STOCK_ETF_GET_READINESS,
+    STOCK_ETF_PREVIEW_PAPER_ORDER,
+    STOCK_ETF_SUBMIT_PAPER_ORDER,
+    STOCK_ETF_CANCEL_PAPER_ORDER,
+    STOCK_ETF_REPLACE_PAPER_ORDER,
+    STOCK_ETF_IMPORT_PAPER_FILLS,
+    STOCK_ETF_EVALUATE_SHADOW_SIGNAL,
 ];
 
 pub fn method_spec(name: &str) -> Option<&'static IpcMethodSpec> {
@@ -119,6 +175,31 @@ mod tests {
             !crate::ipc_server::live_authz::LIVE_WRITE_METHODS
                 .contains(&"evaluate_promotion_criteria"),
             "read-only criteria gate must stay token-exempt (NOT a live mutator)"
+        );
+    }
+
+    #[test]
+    fn stock_etf_methods_are_registered_as_lane_scoped_fixtures() {
+        for name in [
+            "stock_etf.get_lane_status",
+            "stock_etf.get_readiness",
+            "stock_etf.preview_paper_order",
+            "stock_etf.submit_paper_order",
+            "stock_etf.cancel_paper_order",
+            "stock_etf.replace_paper_order",
+            "stock_etf.import_paper_fills",
+            "stock_etf.evaluate_shadow_signal",
+        ] {
+            let spec = method_spec(name).expect("stock_etf method registered");
+            assert_eq!(spec.slot, IpcSlotRequirement::None);
+            assert!(
+                !crate::ipc_server::live_authz::LIVE_WRITE_METHODS.contains(&name),
+                "stock_etf fixtures must not enter Bybit live-write token surface"
+            );
+        }
+        assert_ne!(
+            method_spec("stock_etf.submit_paper_order").unwrap().name,
+            "submit_paper_order"
         );
     }
 }

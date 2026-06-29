@@ -1,0 +1,48 @@
+# Stock/ETF paper/shadow risk contract (ADR-0048 Phase 1).
+# Dormant by default. This file is not wired into the Bybit runtime hot path.
+
+[meta]
+version = 1
+asset_lane = "stock_etf_cash"
+broker = "ibkr"
+environment = "paper"
+enabled = false
+shadow_only = true
+
+[limits]
+max_order_notional_usd = 1000.0
+max_position_notional_usd = 5000.0
+max_daily_notional_usd = 10000.0
+max_open_orders = 5
+max_open_positions = 10
+allow_fractional_shares = true
+allow_margin = false
+allow_short = false
+allow_options = false
+allow_cfd = false
+allow_transfer = false
+allow_live = false
+
+[universe]
+instrument_kinds_allowed = ["stock", "etf", "cash"]
+instrument_kinds_denied = ["cfd_reserved", "crypto_perp"]
+requires_frozen_universe_hash = true
+requires_instrument_identity_hash = true
+requires_market_session = true
+
+[cost_model]
+required_before_shadow_fill = true
+required_before_scorecard = true
+commission_schedule_required = true
+spread_estimate_required = true
+slippage_estimate_required = true
+fx_drag_required = true
+conservative_fill_penalty_required = true
+
+[paper_order]
+rust_authority_required = true
+session_attestation_required = true
+decision_lease_required = true
+guardian_required = true
+idempotency_key_required = true
+broker_reconciliation_required = true

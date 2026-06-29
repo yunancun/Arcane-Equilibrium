@@ -1,0 +1,208 @@
+//! ADR-0048 Stock/ETF cash lane acceptance tests.
+//!
+//! These tests pin Phase 1 source-foundation contracts only. They must not
+//! create an IBKR connector, secret slot, broker session, or runtime order path.
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+use openclaw_types::{
+    evaluate_broker_operation, AssetLane, Broker, BrokerCapabilityRequest, BrokerEnvironment,
+    BrokerOperation, IbkrPaperOrderLifecycleState, InstrumentKind, StockEtfDenialReason,
+    StockEtfFeatureFlags, StockEtfGateInputs,
+};
+
+#[test]
+fn taxonomy_serializes_as_closed_snake_case_contract() {
+    assert_eq!(
+        serde_json::to_string(&AssetLane::StockEtfCash).unwrap(),
+        r#""stock_etf_cash""#
+    );
+    assert_eq!(AssetLane::default(), AssetLane::CryptoPerp);
+    assert_eq!(AssetLane::StockEtfCash.to_string(), "stock_etf_cash");
+    assert_eq!(Broker::Ibkr.to_string(), "ibkr");
+    assert_eq!(BrokerEnvironment::ReadOnly.to_string(), "readonly");
+    assert_eq!(InstrumentKind::CfdReserved.to_string(), "cfd_reserved");
+}
+
+#[test]
+fn default_flags_keep_stock_etf_and_ibkr_off() {
+    let flags = StockEtfFeatureFlags::default();
+    assert!(!flags.stock_etf_lane_enabled);
+    assert!(!flags.ibkr_readonly_enabled);
+    assert!(!flags.ibkr_paper_enabled);
+    assert_eq!(flags.asset_lane_default, AssetLane::CryptoPerp);
+    assert!(flags.stock_etf_shadow_only);
+
+    let readiness = flags.readiness();
+    assert!(!readiness.readonly_ready);
+    assert!(!readiness.paper_ready);
+    assert!(readiness.live_denied);
+    assert!(readiness
+        .denial_reasons
+        .contains(&StockEtfDenialReason::LaneDisabled));
+}
+
+#[test]
+fn feature_flags_parse_from_lookup_without_env_side_effects() {
+    let values = HashMap::from([
+        ("OPENCLAW_STOCK_ETF_LANE_ENABLED", "1"),
+        ("OPENCLAW_IBKR_READONLY_ENABLED", "true"),
+        ("OPENCLAW_IBKR_PAPER_ENABLED", "0"),
+        ("OPENCLAW_ASSET_LANE_DEFAULT", "crypto_perp"),
+        ("OPENCLAW_STOCK_ETF_SHADOW_ONLY", "1"),
+    ]);
+    let flags =
+        StockEtfFeatureFlags::from_lookup(|key| values.get(key).map(|value| (*value).to_string()))
+            .expect("valid flags");
+
+    assert!(flags.stock_etf_lane_enabled);
+    assert!(flags.ibkr_readonly_enabled);
+    assert!(!flags.ibkr_paper_enabled);
+    assert_eq!(flags.asset_lane_default, AssetLane::CryptoPerp);
+    assert!(flags.stock_etf_shadow_only);
+}
+
+#[test]
+fn ibkr_live_and_cfd_paths_are_typed_denials() {
+    let flags = StockEtfFeatureFlags {
+        stock_etf_lane_enabled: true,
+        ibkr_readonly_enabled: true,
+        ibkr_paper_enabled: true,
+        stock_etf_shadow_only: false,
+        ..StockEtfFeatureFlags::default()
+    };
+    let gates = StockEtfGateInputs {
+        external_surface_gate_passed: true,
+        session_attested: true,
+        scoped_authorization_present: true,
+        decision_lease_valid: true,
+        guardian_allows: true,
+        risk_config_hash_present: true,
+        instrument_identity_hash_present: true,
+        idempotency_key_present: true,
+        cost_model_present: true,
+        universe_match: true,
+        credential_available: true,
+        connector_available: true,
+        ..StockEtfGateInputs::default()
+    };
+
+    let live = BrokerCapabilityRequest {
+        operation: BrokerOperation::LiveOrderSubmit,
+        ..BrokerCapabilityRequest::stock_etf_ibkr_paper(
+            InstrumentKind::Stock,
+            BrokerOperation::PaperOrderSubmit,
+        )
+    };
+    assert_eq!(
+        evaluate_broker_operation(live, &flags, &gates).denial_reason,
+        Some(StockEtfDenialReason::IbkrLiveNotAuthorized)
+    );
+
+    let cfd = BrokerCapabilityRequest::stock_etf_ibkr_paper(
+        InstrumentKind::CfdReserved,
+        BrokerOperation::PaperOrderSubmit,
+    );
+    assert_eq!(
+        evaluate_broker_operation(cfd, &flags, &gates).denial_reason,
+        Some(StockEtfDenialReason::InstrumentKindDenied)
+    );
+}
+
+#[test]
+fn paper_order_denies_before_any_connector_when_default_off() {
+    let decision = evaluate_broker_operation(
+        BrokerCapabilityRequest::stock_etf_ibkr_paper(
+            InstrumentKind::Stock,
+            BrokerOperation::PaperOrderSubmit,
+        ),
+        &StockEtfFeatureFlags::default(),
+        &StockEtfGateInputs::default(),
+    );
+    assert!(!decision.allowed);
+    assert_eq!(
+        decision.denial_reason,
+        Some(StockEtfDenialReason::LaneDisabled)
+    );
+}
+
+#[test]
+fn paper_order_requires_all_phase2_style_gates_even_when_flags_on() {
+    let flags = StockEtfFeatureFlags {
+        stock_etf_lane_enabled: true,
+        ibkr_readonly_enabled: true,
+        ibkr_paper_enabled: true,
+        stock_etf_shadow_only: false,
+        ..StockEtfFeatureFlags::default()
+    };
+    let request = BrokerCapabilityRequest::stock_etf_ibkr_paper(
+        InstrumentKind::Etf,
+        BrokerOperation::PaperOrderSubmit,
+    );
+    let decision = evaluate_broker_operation(request, &flags, &StockEtfGateInputs::default());
+    assert!(!decision.allowed);
+    assert_eq!(
+        decision.denial_reason,
+        Some(StockEtfDenialReason::CredentialUnavailable)
+    );
+}
+
+#[test]
+fn lifecycle_terminal_states_are_explicit() {
+    assert!(!IbkrPaperOrderLifecycleState::LocalIntentCreated.is_terminal());
+    assert!(!IbkrPaperOrderLifecycleState::StateUnknown.is_terminal());
+    assert!(IbkrPaperOrderLifecycleState::Filled.is_terminal());
+    assert!(IbkrPaperOrderLifecycleState::Cancelled.is_terminal());
+    assert!(IbkrPaperOrderLifecycleState::Rejected.is_terminal());
+    assert!(IbkrPaperOrderLifecycleState::Inactive.is_terminal());
+    assert!(IbkrPaperOrderLifecycleState::ManualReviewRequired.is_terminal());
+}
+
+#[test]
+fn source_controlled_configs_are_default_off_and_secret_free() {
+    let srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..");
+    let lane_raw =
+        std::fs::read_to_string(srv_root.join("settings/asset_lanes/stock_etf_cash.toml"))
+            .expect("read stock_etf lane config");
+    let broker_raw = std::fs::read_to_string(srv_root.join("settings/broker/ibkr_paper.toml"))
+        .expect("read ibkr broker config");
+    let risk_raw = std::fs::read_to_string(
+        srv_root.join("settings/risk_control_rules/risk_config_stock_etf_paper.toml"),
+    )
+    .expect("read stock_etf risk config");
+
+    let lane: toml::Value = toml::from_str(&lane_raw).expect("lane toml parses");
+    let broker: toml::Value = toml::from_str(&broker_raw).expect("broker toml parses");
+    let risk: toml::Value = toml::from_str(&risk_raw).expect("risk toml parses");
+
+    assert_eq!(lane["lane"]["enabled"].as_bool(), Some(false));
+    assert_eq!(lane["lane"]["live_enabled"].as_bool(), Some(false));
+    assert_eq!(
+        lane["flags"]["OPENCLAW_ASSET_LANE_DEFAULT"].as_str(),
+        Some("crypto_perp")
+    );
+    assert_eq!(broker["broker"]["connector_enabled"].as_bool(), Some(false));
+    assert_eq!(
+        broker["broker"]["external_contact_enabled"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        broker["broker"]["live_order_enabled"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(risk["limits"]["allow_margin"].as_bool(), Some(false));
+    assert_eq!(risk["limits"]["allow_short"].as_bool(), Some(false));
+    assert_eq!(risk["limits"]["allow_options"].as_bool(), Some(false));
+    assert_eq!(risk["limits"]["allow_cfd"].as_bool(), Some(false));
+    assert_eq!(risk["limits"]["allow_live"].as_bool(), Some(false));
+
+    for raw in [lane_raw, broker_raw, risk_raw] {
+        let lower = raw.to_ascii_lowercase();
+        assert!(!lower.contains("api_key ="));
+        assert!(!lower.contains("api_secret ="));
+        assert!(!lower.contains("account_id ="));
+    }
+}

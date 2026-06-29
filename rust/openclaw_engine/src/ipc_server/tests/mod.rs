@@ -59,6 +59,7 @@ mod risk;
 mod risk_update;
 mod scanner;
 mod snapshot;
+mod stock_etf;
 mod strategy;
 mod teacher;
 

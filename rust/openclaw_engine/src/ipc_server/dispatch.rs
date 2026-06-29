@@ -457,6 +457,20 @@ pub(crate) async fn dispatch_request(
         "governance.get_status" => handle_get_status(id, cmd_channels).await,
         "governance.list_leases" => handle_list_leases(id, cmd_channels).await,
         "governance.get_risk_state" => handle_get_risk_state(id, cmd_channels).await,
+        "stock_etf.get_lane_status"
+        | "stock_etf.get_readiness"
+        | "stock_etf.preview_paper_order"
+        | "stock_etf.submit_paper_order"
+        | "stock_etf.cancel_paper_order"
+        | "stock_etf.replace_paper_order"
+        | "stock_etf.import_paper_fills"
+        | "stock_etf.evaluate_shadow_signal" => {
+            debug_assert_eq!(
+                method_spec(method).map(|spec| spec.slot),
+                Some(IpcSlotRequirement::None)
+            );
+            handle_stock_etf_ipc(id, method, &req.params)
+        }
         // ARCH-RC1 1C-3-F: External paper-side order submission (shadow_decision_builder etc.)
         "submit_paper_order" => {
             let tx = extract_engine_tx(&req.params, cmd_channels);

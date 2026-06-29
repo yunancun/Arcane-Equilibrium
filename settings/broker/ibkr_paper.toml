@@ -1,0 +1,41 @@
+# IBKR paper/shadow broker contract for ADR-0048 Phase 1.
+# This is not a connector config and does not authorize external contact.
+
+[broker]
+name = "ibkr"
+asset_lane = "stock_etf_cash"
+api_baseline = "ib_gateway_tws_api"
+connector_enabled = false
+external_contact_enabled = false
+paper_order_enabled = false
+live_order_enabled = false
+
+[topology]
+host_policy = "loopback_only"
+paper_port_default_candidate = 4002
+live_ports_denied = true
+client_id_policy = "deterministic_per_lane"
+runtime_owner = "trade-core"
+
+[session_attestation]
+required_before_account_snapshot = true
+required_before_paper_order = true
+live_account_fingerprint_denied = true
+live_secret_absent_or_empty_required = true
+env_var_credential_fallback_allowed = false
+
+[paper_order_gates]
+rust_lane_scoped_ipc_required = true
+scoped_authorization_required = true
+decision_lease_required = true
+guardian_required = true
+risk_config_hash_required = true
+instrument_identity_hash_required = true
+idempotency_key_required = true
+
+[redaction]
+raw_payload_hash_required = true
+account_id_in_logs_allowed = false
+secret_in_logs_allowed = false
+local_path_in_logs_allowed = false
+stack_trace_in_reports_allowed = false
