@@ -16,6 +16,14 @@ Verification:
 - Retrieval CLI and audit CLI passed.
 - `git diff --check` passed.
 
+Linux rebuild + restart:
+- Source commit `523fcb48` was deployed to `trade-core`.
+- First atomic deploy attempt was blocked by an existing `/tmp/openclaw/build_window.lock`; no partial deploy occurred.
+- Second `build_then_restart_atomic.sh` completed with engine PID `877736` and `/proc` SHA verified against binary SHA `c867c89cfbbde8f02a5ef6cf985a629aa8eeb544784dab6d7b883f4435854be0`.
+- API-only reload completed with API PID `878457`.
+- Post-restart focused tests passed (`40 passed`), smoke completed (`2545` chunks), retrieval CLI passed, and audit CLI preserved no-authority flags.
+- Warning: signed live authorization was absent and preserved absent; no authority was created.
+
 Boundary:
 - Advisory-only, no authority.
 - No Bybit, PG/DB, network/API/LLM, runtime IPC, order/cancel/modify, risk/config/env/crontab mutation, Decision Lease acquire/release, writer/adapter enablement, Cost Gate lowering, promotion proof, Stage0/trading approval, or sizing recommendation.

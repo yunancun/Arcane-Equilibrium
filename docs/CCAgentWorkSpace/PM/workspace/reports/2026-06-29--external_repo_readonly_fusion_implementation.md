@@ -47,6 +47,30 @@ Commands run on Mac source checkout:
 - E2: PASS after hardening; no blocking findings. Confirmed malformed JSON, unsafe authority flags, missing source refs, out-of-repo source paths, and invalid numeric args fail closed.
 - E4: PASS after hardening; confirmed deterministic index sha, source containment, snippet hard cap, `/tmp/openclaw` smoke containment, focused tests, CLI checks, and actual smoke.
 - QA: PASS; declared usable, effective, complete, and not orphaned.
+- E3: PASS for deploy/restart; no BB required because this is not exchange-facing and does not change Bybit/order/runtime/risk/config/Decision Lease paths.
+
+## Linux Rebuild + Restart
+
+After commit `523fcb48` was pushed, `trade-core` was fast-forwarded to that SHA and deployed through the repo atomic path:
+
+- Initial `build_then_restart_atomic.sh` attempt failed closed because another atomic build held `/tmp/openclaw/build_window.lock`; no partial deploy occurred.
+- After the lock released, `bash helper_scripts/build_then_restart_atomic.sh` completed:
+  - pre/post build SHA `c867c89cfbbde8f02a5ef6cf985a629aa8eeb544784dab6d7b883f4435854be0`
+  - new engine PID `877736`
+  - `/proc/877736/exe` SHA matched the post-build binary SHA
+  - engine maintenance flag was cleared
+- `bash helper_scripts/restart_all.sh --api-only --keep-auth` completed after the atomic engine restart:
+  - API PID `878457`
+  - API bind `100.91.109.86:8000`
+- Restart warning observed: signed live authorization was missing at `secrets/secret_files/bybit/live/authorization.json`; `--keep-auth` preserved that absence and did not create authority.
+
+Post-restart verification on `trade-core`:
+
+- Source: `523fcb489823fb537c0736a61948df0d8f6a29cc`, clean against `origin/main`.
+- Focused tests: `40 passed`.
+- Smoke: `EXTERNAL_REPO_FUSION_SMOKE_COMPLETE`, `docs_index_chunk_count=2545`, retrieval/audit/authority all true.
+- Retrieval CLI: schema `tradebot.docs_context_retrieval.query.v1`, result count `3`, `order_authority_granted=false`.
+- Audit CLI: schema `tradebot.aeg_report_audit.batch.v1`, status `audit_gap`, input count `1`, `order_authority_granted=false`, `promotion_evidence=false`.
 
 ## Boundary
 
