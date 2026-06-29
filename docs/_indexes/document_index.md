@@ -13,6 +13,8 @@
 | `execution_plan/2026-06-29--ibkr_stock_etf_paper_shadow_development_arrangement.md` | 正式開發安排：在 AE 既有治理、風控、審計、PnL scorecard 上新增隔離 `stock_etf_cash` research lane；先做 IBKR paper/shadow evidence collection，live/non-Bybit execution 仍禁止，開工前需 ADR/治理解鎖。 |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-06-29--ibkr_stock_etf_plan_adversarial_pm_integration.md` | PM 對抗性審查整合：CC/FA/PA/E3/QC/MIT 一致批准 Phase 0 ADR/spec only，Phase 1+ / IBKR API / secret slot / paper order / GUI runtime / evidence clock 均需先補硬 blocker。 |
 | `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_plan_adversarial_pm_integration.md` | Operator 摘要：IBKR `stock_etf_cash` 方案方向有效，但未 implementation-ready；下一步只能開 Phase 0 ADR/spec packet。 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-29--ibkr_stock_etf_plan_round2_pm_integration.md` | PM 第二輪整合：CC/FA/PA/E3/E5/QC/MIT/QA 均為 `APPROVE_PHASE0_ONLY`；Phase 0 擴展為 ADR + interface/security/data/GUI/evidence/QA release packet，不能承諾 scheduled full online。 |
+| `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_plan_round2_pm_integration.md` | Operator 二輪摘要：下一步仍只允許 Phase 0 contract packet；IBKR healthcheck、secret、paper order、GUI runtime、evidence clock、tiny-live/live 仍禁止。 |
 
 ### 2026-06-22 Shadow placement alpha ingestion
 

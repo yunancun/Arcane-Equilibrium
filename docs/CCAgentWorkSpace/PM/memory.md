@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-29 IBKR Stock/ETF Plan Round 2 Review
+
+- PM integrated CC/FA/PA/E3/E5/QC/MIT/QA second-round adversarial review: every role returned `APPROVE_PHASE0_ONLY`; no role certified no-omission or scheduled full-online readiness.
+- Main plan now treats Phase 0 as ADR/AMD plus named contract packet: broker capability registry, external-surface gate, lane IPC, paper lifecycle, DDL/evidence, GUI contract, evidence clock, release packet, storage/capacity, and disable cleanup runbook.
+- Still blocked: Phase 1+ code, IBKR healthcheck/API/secret/fill import/paper order, GUI runtime, evidence clock, tiny-live/live; correct next step is Phase 0 contract packet only.
+
 ## 2026-06-29 IBKR Stock/ETF Plan Adversarial Review
 
 - PM integrated CC/FA/PA/E3/QC/MIT review of the IBKR `stock_etf_cash` paper/shadow plan: direction valid, but Phase 0 ADR/spec only; Phase 1+, IBKR API, secret slots, paper orders, GUI runtime enablement, and evidence clock remain blocked.
