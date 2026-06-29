@@ -2453,3 +2453,4 @@
 - Implemented `docs_context_retrieval`, `aeg_report_audit`, and `external_repo_fusion_smoke` as read-only advisory helpers; retrieval score is relevance-only and audit statuses are advisory-only.
 - Verification: py_compile PASS, focused tests `40 passed`, adjacent AEG `9 passed`, M4 leakage `52 passed`, smoke `EXTERNAL_REPO_FUSION_SMOKE_COMPLETE` with 2544 chunks and authority preserved.
 - Boundary remains no Bybit/DB/network/runtime/order/risk/config/Decision Lease/writer/Cost Gate/promotion/sizing authority; use outputs only as PM/FA/QC/Operator redlines.
+- Linux deploy: `trade-core` fast-forwarded to `523fcb48`, atomic engine rebuild/restart verified PID `877736` with binary SHA `c867c89cfbbde8f02a5ef6cf985a629aa8eeb544784dab6d7b883f4435854be0`, then API-only reload PID `878457`; live authorization was absent and preserved absent.
