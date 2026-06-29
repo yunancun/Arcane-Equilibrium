@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-29（TODO v668 LearningEvent contract source checkpoint）
+> 最後更新：2026-06-29（TODO v669 learning proposal compiler source checkpoint）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v669 增量（2026-06-29 learning proposal compiler source checkpoint）**：Source commit `7cfec46e` adds `helper_scripts/research/cost_gate_learning_lane/learning_proposal_compiler.py` and focused tests for `P0-LEARN-PROPOSAL-COMPILER`, pushed to `origin/main`. The compiler consumes `cost_gate_learning_event_contract_v1`, groups `cost_gate_learning_event_v1` packets deterministically by candidate id, and emits review-only `cost_gate_learning_proposal_compiler_v1` candidates with deterministic proposal ids, evidence windows, event type counts, proof tier counts, source event ids/hashes, quarantine propagation, and authority-contamination fail-closed behavior. `blocked_markout_proxy` stays review/context only (`blocked_markout_proxy_counts_as_fill_backed_proof=false`), fill-backed proof readiness and promotion proof readiness remain false, and all mutation/order/live/Cost Gate authority answers remain false. Verification：py_compile PASS, focused tests `6 passed`, adjacent learning-lane tests `25 passed`, and `git diff --check` PASS. Boundary：source/test/docs only；preserves `artifact_probe_ledger_jsonl` as current SSOT, no PG cutover/query/write, no Bybit call, no order, no runtime/env/service/crontab mutation, no Demo mutation, no Cost Gate lowering, no probe/order/live authority, and no promotion/profit proof. Next active ML loop item：`P0-LEARN-ADJUDICATOR`.
 
 **v668 增量（2026-06-29 LearningEvent contract source checkpoint）**：Source commit `6b93cf2a` adds `helper_scripts/research/cost_gate_learning_lane/learning_event_contract.py` and focused tests for `P0-LEARN-LEDGER-EVENT-CONTRACT`, pushed to `origin/main`. The contract emits `cost_gate_learning_event_contract_v1` and wraps current artifact `probe_ledger.jsonl` plus explicit artifact JSON inputs into deterministic `cost_gate_learning_event_v1` packets with event id/type, candidate id/identity, source generated timestamp, source refs, source/row sha, event packet sha, and proof tier. `blocked_signal_outcome` / `market_markout_proxy_for_blocked_signal` rows are forced to `proof_tier=blocked_markout_proxy`; malformed rows/artifacts and missing identity/timestamp inputs are quarantined; authority-bearing input fails closed as `AUTHORITY_BOUNDARY_VIOLATION` and emits no events. Verification：py_compile PASS, focused tests `7 passed`, adjacent learning-lane tests `19 passed`, and `git diff --check` PASS. Boundary：source/test/docs only；preserves `artifact_probe_ledger_jsonl` as current SSOT, no PG cutover/query/write, no Bybit call, no order, no runtime/env/service/crontab mutation, no Demo mutation, no Cost Gate lowering, no probe/order/live authority, and no promotion/profit proof. Next active ML loop item：`P0-LEARN-PROPOSAL-COMPILER`.
 

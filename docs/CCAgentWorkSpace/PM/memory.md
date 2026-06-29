@@ -2484,3 +2484,11 @@
 - `blocked_signal_outcome` / `market_markout_proxy_for_blocked_signal` rows are explicitly labeled `blocked_markout_proxy`; authority-bearing input fails closed and emits no events.
 - Verification passed: py_compile, focused LearningEvent tests `7 passed`, adjacent learning-lane tests `19 passed`, and `git diff --check`.
 - Next ML loop item is `P0-LEARN-PROPOSAL-COMPILER`; PG cutover, runtime install, Demo mutation, training/registry repair, serving, and proof/promotion remain blocked until their separate source contracts and gated reviews pass.
+
+## 2026-06-29 Learning Proposal Compiler Source Checkpoint
+
+- PM advanced `P0-LEARN-PROPOSAL-COMPILER` source-only at commit `7cfec46e`: new `cost_gate_learning_proposal_compiler_v1` groups `cost_gate_learning_event_v1` events by candidate id and emits deterministic review-only proposal candidates.
+- Candidate proposals carry evidence windows, event/proof-tier counts, source event ids/hashes, upstream quarantine propagation, and authority contamination fail-closed behavior.
+- `blocked_markout_proxy` remains review/context evidence only: `blocked_markout_proxy_counts_as_fill_backed_proof=false`, fill-backed proof readiness false, promotion proof readiness false.
+- Verification passed: py_compile, focused compiler tests `6 passed`, adjacent learning-lane tests `25 passed`, and `git diff --check`.
+- Next ML loop item is `P0-LEARN-ADJUDICATOR`; PG cutover, runtime install, Demo mutation, training/registry repair, serving, and proof/promotion remain blocked until their separate source contracts and gated reviews pass.
