@@ -10,6 +10,15 @@ Manifest: `2026-06-29--stock_etf_cash_phase0_named_contract_packet.manifest.json
 
 This packet is the Phase 0 source of truth for later IBKR Stock/ETF paper/shadow development. It names the contracts that Phase 1-5 must implement and verify.
 
+Machine-readable manifest validator:
+`openclaw_types::stock_etf_phase0_manifest::StockEtfPhase0ContractPacketManifestV1`.
+The validator pins the manifest schema/status/scope, ADR/AMD/packet paths, IBKR
+loopback paper API baseline, global denials, exact contract list, and phase
+unlock table. It rejects prior IBKR contact, live-port allowance, missing or
+duplicated contracts, missing global denials, and any manifest wording that
+unblocks Phase 2 contact, Phase 3 evidence clock, Phase 4 GUI runtime, Phase 5
+online status, tiny-live, or live.
+
 It does not authorize:
 
 - IBKR API calls
