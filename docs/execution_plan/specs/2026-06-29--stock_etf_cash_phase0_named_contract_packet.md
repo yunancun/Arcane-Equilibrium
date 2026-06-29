@@ -642,6 +642,15 @@ Kill actions:
 
 No destructive DB cleanup is allowed as rollback. Data retention is forward-only unless a separate data-correction process is approved.
 
+Source validator:
+`openclaw_types::stock_etf_disable_cleanup_runbook::StockEtfDisableCleanupRunbookV1`.
+The validator requires exact disable env-flag evidence, collector stop proof,
+GUI disabled/hidden proof, live-secret absence proof, forward-only evidence
+archive and DB-retention proof, append-only audit preservation, and Bybit live
+execution unchanged. It rejects IBKR contact, connector runtime, paper order
+routing, secret-slot creation, secret serialization, destructive DB cleanup,
+DB delete/truncate permission, paper-shadow launch authority, tiny-live, and live.
+
 ## 22. `stock_etf_release_packet_v1`
 
 Release packet must include:

@@ -21,6 +21,7 @@ pub mod state;
 pub mod stock_etf_audit_events;
 pub mod stock_etf_broker_capability_registry;
 pub mod stock_etf_db_evidence_ddl;
+pub mod stock_etf_disable_cleanup_runbook;
 pub mod stock_etf_gui_lane_contract;
 pub mod stock_etf_lane;
 pub mod stock_etf_phase3_evidence;
@@ -84,6 +85,12 @@ pub use stock_etf_db_evidence_ddl::{
     StockEtfDbEvidenceDdlBlocker, StockEtfDbEvidenceDdlContractV1,
     StockEtfDbEvidenceDdlVerdict, STOCK_ETF_DB_EVIDENCE_CONTRACT_ID,
     STOCK_ETF_DB_EVIDENCE_DDL_SOURCE_PATH,
+};
+pub use stock_etf_disable_cleanup_runbook::{
+    StockEtfDisableCleanupBlocker, StockEtfDisableCleanupEnvFlagV1,
+    StockEtfDisableCleanupProofKind, StockEtfDisableCleanupProofV1,
+    StockEtfDisableCleanupRunbookV1, StockEtfDisableCleanupVerdict,
+    STOCK_ETF_DISABLE_CLEANUP_RUNBOOK_ID,
 };
 pub use stock_etf_gui_lane_contract::{
     StockEtfGuiLaneBlocker, StockEtfGuiLaneContractV1, StockEtfGuiLaneVerdict,
