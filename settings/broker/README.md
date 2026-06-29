@@ -6,6 +6,6 @@ This directory stores broker capability contracts and default-off runtime postur
 
 `ibkr_phase2_policies.toml` records source policy prerequisites for redaction, rate limiting, audit events, paper attestation, and Python no-write guard. It is not a PASS artifact and does not authorize IBKR contact.
 
-`ibkr_phase2_gate_artifact.template.toml` records the immutable gate artifact shape. It is intentionally empty/BLOCKED and cannot authorize IBKR contact.
+`ibkr_phase2_gate_artifact.template.toml` records the immutable gate artifact shape, including empty secret-slot and API topology evidence sections. It is intentionally empty/BLOCKED and cannot authorize IBKR contact.
 
 `ibkr_phase2_runtime_contracts.toml` records the source evidence shape for secret-slot posture and API session topology. It is intentionally incomplete and cannot authorize IBKR contact.
