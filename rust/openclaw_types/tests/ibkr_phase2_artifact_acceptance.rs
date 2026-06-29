@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use openclaw_types::{
     is_sha256_hex, IbkrExternalSurfaceGateV1, IbkrPhase2GateArtifactBlocker,
-    IbkrPhase2GateArtifactV1, IbkrPhase2PolicyBundleV1,
+    IbkrPhase2GateArtifactV1, IbkrPhase2PolicyBundleV1, IbkrSecretSlotContractV1,
 };
 
 fn accepted_artifact_fixture() -> IbkrPhase2GateArtifactV1 {
@@ -32,6 +32,8 @@ fn accepted_artifact_fixture() -> IbkrPhase2GateArtifactV1 {
         sealed: true,
         gate,
         policy_flags,
+        secret_slot_contract: IbkrSecretSlotContractV1::source_template(),
+        api_session_topology: openclaw_types::IbkrApiSessionTopologyV1::source_template(),
         raw_artifact_hash: "a".repeat(64),
         redacted_summary_hash: "b".repeat(64),
         ..IbkrPhase2GateArtifactV1::default()
@@ -59,6 +61,12 @@ fn default_gate_artifact_blocks_contact() {
     assert!(verdict
         .blockers
         .contains(&IbkrPhase2GateArtifactBlocker::PolicyPrerequisiteFlagsRejected));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPhase2GateArtifactBlocker::SecretSlotContractRejected));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPhase2GateArtifactBlocker::ApiSessionTopologyRejected));
 }
 
 #[test]
@@ -146,6 +154,39 @@ fn artifact_rejects_policy_flag_mismatch() {
 }
 
 #[test]
+fn artifact_rejects_missing_or_mismatched_runtime_evidence() {
+    let missing_runtime = IbkrPhase2GateArtifactV1 {
+        secret_slot_contract: IbkrSecretSlotContractV1::default(),
+        api_session_topology: openclaw_types::IbkrApiSessionTopologyV1::default(),
+        ..accepted_artifact_fixture()
+    };
+    let verdict = missing_runtime.validate();
+    assert!(!verdict.ibkr_contact_allowed);
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPhase2GateArtifactBlocker::SecretSlotContractRejected));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPhase2GateArtifactBlocker::ApiSessionTopologyRejected));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPhase2GateArtifactBlocker::RuntimeGateFlagMismatch));
+
+    let mismatched_gate = IbkrPhase2GateArtifactV1 {
+        gate: IbkrExternalSurfaceGateV1 {
+            secret_contract_present: false,
+            live_secret_absent_or_empty: false,
+            ..accepted_artifact_fixture().gate
+        },
+        ..accepted_artifact_fixture()
+    };
+    assert!(mismatched_gate
+        .validate()
+        .blockers
+        .contains(&IbkrPhase2GateArtifactBlocker::RuntimeGateFlagMismatch));
+}
+
+#[test]
 fn blocked_artifact_template_is_parseable_and_secret_free() {
     let srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -161,6 +202,14 @@ fn blocked_artifact_template_is_parseable_and_secret_free() {
     assert_eq!(parsed["gate"]["ibkr_call_performed"].as_bool(), Some(false));
     assert_eq!(
         parsed["policy_flags"]["python_no_write_guard_present"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        parsed["secret_slot_contract"]["contract_present"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        parsed["api_session_topology"]["topology_present"].as_bool(),
         Some(false)
     );
 

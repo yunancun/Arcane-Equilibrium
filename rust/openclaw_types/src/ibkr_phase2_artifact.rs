@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ibkr_phase2_gate::{IbkrExternalSurfaceGateV1, IBKR_PHASE2_ADR, IBKR_PHASE2_AMD};
 use crate::ibkr_phase2_policies::IbkrPhase2GatePrerequisiteFlags;
+use crate::ibkr_phase2_runtime::{IbkrApiSessionTopologyV1, IbkrSecretSlotContractV1};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IbkrPhase2GateArtifactV1 {
@@ -21,6 +22,8 @@ pub struct IbkrPhase2GateArtifactV1 {
     pub sealed: bool,
     pub gate: IbkrExternalSurfaceGateV1,
     pub policy_flags: IbkrPhase2GatePrerequisiteFlags,
+    pub secret_slot_contract: IbkrSecretSlotContractV1,
+    pub api_session_topology: IbkrApiSessionTopologyV1,
     pub raw_artifact_hash: String,
     pub redacted_summary_hash: String,
     pub supersedes_artifact_id: Option<String>,
@@ -45,6 +48,8 @@ impl Default for IbkrPhase2GateArtifactV1 {
                 paper_attestation_contract_present: false,
                 python_no_write_guard_present: false,
             },
+            secret_slot_contract: IbkrSecretSlotContractV1::default(),
+            api_session_topology: IbkrApiSessionTopologyV1::default(),
             raw_artifact_hash: String::new(),
             redacted_summary_hash: String::new(),
             supersedes_artifact_id: None,
@@ -102,6 +107,17 @@ impl IbkrPhase2GateArtifactV1 {
         if !gate_flags_match_artifact(self) {
             blockers.push(Blocker::PolicyGateFlagMismatch);
         }
+        let secret_verdict = self.secret_slot_contract.validate();
+        if !secret_verdict.accepted {
+            blockers.push(Blocker::SecretSlotContractRejected);
+        }
+        let topology_verdict = self.api_session_topology.validate();
+        if !topology_verdict.accepted {
+            blockers.push(Blocker::ApiSessionTopologyRejected);
+        }
+        if !runtime_contracts_match_gate(self, secret_verdict.accepted, topology_verdict.accepted) {
+            blockers.push(Blocker::RuntimeGateFlagMismatch);
+        }
 
         IbkrPhase2GateArtifactVerdict {
             ibkr_contact_allowed: blockers.is_empty(),
@@ -134,6 +150,9 @@ pub enum IbkrPhase2GateArtifactBlocker {
     IbkrCallAlreadyPerformed,
     PolicyPrerequisiteFlagsRejected,
     PolicyGateFlagMismatch,
+    SecretSlotContractRejected,
+    ApiSessionTopologyRejected,
+    RuntimeGateFlagMismatch,
 }
 
 pub fn is_sha256_hex(value: &str) -> bool {
@@ -166,4 +185,15 @@ fn gate_flags_match_artifact(artifact: &IbkrPhase2GateArtifactV1) -> bool {
             == artifact.policy_flags.paper_attestation_contract_present
         && artifact.gate.python_no_write_guard_present
             == artifact.policy_flags.python_no_write_guard_present
+}
+
+fn runtime_contracts_match_gate(
+    artifact: &IbkrPhase2GateArtifactV1,
+    secret_accepted: bool,
+    topology_accepted: bool,
+) -> bool {
+    artifact.gate.secret_contract_present == secret_accepted
+        && artifact.gate.live_secret_absent_or_empty
+            == artifact.secret_slot_contract.live_secret_absent_or_empty
+        && topology_accepted
 }
