@@ -2465,3 +2465,9 @@
 - PM integrated QC/MIT/AI-E/PA read-only review: DreamEngine is active advisory-only; general learning is partially alive but degraded/core-loop stalled due empty runtime crontab, stale health, ML maintenance error, stale registry, and missing fill-backed proof.
 - Next engineering order is `P0-LEARN-HEALTH-SSOT`, then ledger event contract, proposal compiler, adjudicator, Demo mutation envelope, training/registry repair, serving snapshot, and proof/promotion gate; no runtime mutation or live authority granted.
 - Triple adversarial audit hardened the plan: completion now requires contract versioning/tests, negative authority tests, operations runbook, budget/backpressure gates, and mandatory legacy retirement; learning-engine completion is plausible if these gates pass, but alpha profitability remains empirical proof-gate output.
+
+## 2026-06-29 Learning Stack Health SSOT Source Checkpoint
+
+- PM advanced `P0-LEARN-HEALTH-SSOT` source-only at commit `f2a827c2`: new `learning_stack_health_snapshot_v1` aggregates scheduler, demo-health, ML maintenance, registry/artifact, ledger/parity, and fill-backed proof inputs while keeping all mutation/order/live/Cost Gate authority false.
+- Verification passed: py_compile, focused snapshot tests `7 passed`, adjacent demo-learning healthcheck + snapshot tests `19 passed`, and `git diff --check`.
+- Next ML loop item is `P0-LEARN-LEDGER-EVENT-CONTRACT`; runtime install/cron repair/Demo mutation remains blocked until source contracts and gated reviews pass.
