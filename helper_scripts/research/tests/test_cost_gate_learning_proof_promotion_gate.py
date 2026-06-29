@@ -34,6 +34,48 @@ SNAPSHOT_ID = "learning_serving_snapshot:abc123"
 MODEL_VERSION = "qtrio-20260629T1400Z"
 
 
+def _fill_row(index: int = 0, **overrides) -> dict:
+    row = {
+        "side_cell_key": CANDIDATE_ID,
+        "strategy_name": "grid_trading",
+        "symbol": "ETHUSDT",
+        "side": "Buy",
+        "engine_mode": "demo",
+        "order_link_id": f"oc_demo_order_{index}",
+        "exchange_order_id": f"bybit-order-{index}",
+        "exec_id": f"exec-{index}",
+        "intent_id": f"intent-{index}",
+        "risk_verdict": "APPROVED_BY_GUARDIAN_AND_RUST_AUTHORITY",
+        "fee_bps": 1.2,
+        "slippage_bps": 0.4,
+        "spread_bps": 1.1,
+        "capacity_usdt": 950.0,
+        "notional_usdt": 100.0,
+        "close_state": "closed",
+        "position_closed": True,
+        "exit_order_id": f"exit-order-{index}",
+        "exit_exec_id": f"exit-exec-{index}",
+        "source_artifact": f"/tmp/openclaw/probe/fill-{index}.json",
+        "outcome_source": "candidate_matched_demo_fill",
+        "source_ledger_record_id": f"ledger-{index}",
+        "realized_net_bps": 4.2 + index * 0.1,
+    }
+    row.update(overrides)
+    return row
+
+
+def _control_row(index: int = 0, **overrides) -> dict:
+    row = {
+        "control_id": f"matched-control-{index}",
+        "candidate_id": CANDIDATE_ID,
+        "control_type": "matched_non_trade_baseline",
+        "realized_net_bps": -0.5,
+        "source_artifact": f"/tmp/openclaw/probe/control-{index}.json",
+    }
+    row.update(overrides)
+    return row
+
+
 def _serving(**overrides) -> dict:
     payload = {
         "schema_version": SERVING_SCHEMA_VERSION,
@@ -143,7 +185,9 @@ def _proof_evidence(**overrides) -> dict:
             "matched_control_baseline_present": True,
             "matched_control_count": 3,
             "matched_control_outperformance": True,
+            "rows": [_control_row(0), _control_row(1), _control_row(2)],
         },
+        "candidate_matched_demo_fills": [_fill_row(0), _fill_row(1), _fill_row(2)],
         "proof_exclusion": {
             "proof_exclusion_passed": True,
             "proof_exclusion_present": False,
@@ -163,6 +207,7 @@ def _proof_evidence(**overrides) -> dict:
 
 def test_blocks_when_candidate_matched_demo_fills_are_missing() -> None:
     proof = _proof_evidence(
+        candidate_matched_demo_fills=[],
         fill_evidence={
             "candidate_matched_demo_fill_count": 0,
             "fee_evidence_present": True,
@@ -183,6 +228,9 @@ def test_blocks_when_candidate_matched_demo_fills_are_missing() -> None:
     assert packet["schema_version"] == SCHEMA_VERSION
     assert packet["status"] == BLOCKED_BY_PROOF_STATUS
     assert packet["promotion_verdict"] is None
+    assert "candidate_matched_demo_fill_rows_missing" in packet["proof_gate"][
+        "blockers"
+    ]
     assert "candidate_matched_demo_fills_below_floor" in packet["proof_gate"][
         "blockers"
     ]
@@ -343,6 +391,54 @@ def test_authority_bearing_input_fails_closed() -> None:
     assert packet["summary"]["authority_violation_count"] >= 1
     assert packet["answers"]["promotion_authority_granted"] is False
     assert packet["answers"]["main_cost_gate_adjustment"] == "NONE"
+
+
+def test_summary_counts_without_fill_rows_do_not_clear_proof_gate() -> None:
+    proof = _proof_evidence(candidate_matched_demo_fills=[])
+    proof["fill_evidence"]["candidate_matched_demo_fill_count"] = 12
+    proof["fill_evidence"]["fee_evidence_present"] = True
+    proof["fill_evidence"]["slippage_evidence_present"] = True
+    proof["fill_evidence"]["spread_evidence_present"] = True
+    proof["fill_evidence"]["capacity_evidence_present"] = True
+    proof["fill_evidence"]["net_of_fees_positive"] = True
+
+    packet = build_learning_proof_promotion_gate(
+        serving_snapshot_packet=_serving(),
+        learning_adjudicator_packet=_adjudicator(),
+        proof_evidence_packet=proof,
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == BLOCKED_BY_PROOF_STATUS
+    blockers = packet["proof_gate"]["blockers"]
+    assert "candidate_matched_demo_fill_rows_missing" in blockers
+    assert "candidate_matched_demo_fills_below_floor" in blockers
+    assert packet["proof_gate"]["row_backed"] is False
+    assert packet["promotion_verdict"] is None
+
+
+def test_cleanup_and_replay_rows_are_proof_excluded() -> None:
+    proof = _proof_evidence(
+        candidate_matched_demo_fills=[
+            _fill_row(0, cleanup_fill=True),
+            _fill_row(1, replay_only=True),
+            _fill_row(2, outcome_source="replay_backtest_positive"),
+        ]
+    )
+
+    packet = build_learning_proof_promotion_gate(
+        serving_snapshot_packet=_serving(),
+        learning_adjudicator_packet=_adjudicator(),
+        proof_evidence_packet=proof,
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == BLOCKED_BY_PROOF_EXCLUSION_STATUS
+    gate = packet["proof_gate"]["proof_exclusion_gate"]
+    assert gate["proof_exclusion_present"] is True
+    assert gate["reason_counts"]["cleanup_fill_not_promotion_evidence"] == 1
+    assert gate["reason_counts"]["replay_only_not_promotion_evidence"] == 2
+    assert packet["promotion_verdict"] is None
 
 
 def test_cli_writes_json_output(tmp_path: Path, monkeypatch) -> None:
