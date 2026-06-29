@@ -17,6 +17,10 @@
 | `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_plan_round2_pm_integration.md` | Operator 二輪摘要：下一步仍只允許 Phase 0 contract packet；IBKR healthcheck、secret、paper order、GUI runtime、evidence clock、tiny-live/live 仍禁止。 |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-06-29--ibkr_stock_etf_plan_round3_pm_launch_certification.md` | PM 第三輪 launch-certification：CC/FA/PA/E3/E5/QC/MIT/QA 均為 `CERTIFIABLE_IF_GATES_PASS`，只在 Phase 0 packet accepted 且 Phase 1-5 gates 全通過後可簽核 paper/shadow lane 完整上線。 |
 | `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_plan_round3_pm_launch_certification.md` | Operator 三輪摘要：`paper_shadow_only` 範圍內 all-gates-pass 後可簽核完整上線；仍不代表現在上線、IBKR live/tiny-live、盈利證明或絕對無遺漏。 |
+| `adr/0048-ibkr-stock-etf-paper-shadow-lane.md` | Phase 0 ADR：接受 `stock_etf_cash` IBKR read-only / paper / shadow research lane；保留 Bybit active live execution 唯一性，明確禁止 IBKR live/tiny-live/margin/short/options/CFD/transfer。 |
+| `governance_dev/amendments/2026-06-29--AMD-2026-06-29-01-ibkr-stock-etf-paper-shadow-lane.md` | Phase 0 AMD：把 Bybit-only wording 修正為 active live execution 邊界 + ADR-0048 IBKR paper/shadow 例外；定義 API baseline、secret boundary、runtime/evidence boundary。 |
+| `execution_plan/specs/2026-06-29--stock_etf_cash_phase0_named_contract_packet.md` | Phase 0 named contract packet：列出 broker capability registry、external-surface gate、IBKR session attestation、lane-scoped IPC、paper lifecycle、DDL/evidence、GUI、storage、kill/disable、release packet 等 v1 contract。 |
+| `execution_plan/specs/2026-06-29--stock_etf_cash_phase0_named_contract_packet.manifest.json` | Phase 0 machine-readable manifest：記錄 accepted contract list、global denials、API baseline、phase unlock status；不授權 runtime/API/secret/order。 |
 
 ### 2026-06-22 Shadow placement alpha ingestion
 

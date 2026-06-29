@@ -6,7 +6,7 @@ Agentic trading governance system — 自主扫描 650+ 交易对，智能部署
 **软更名口径（2026-05-06）**：
 - 正式项目名：**玄衡 · Arcane Equilibrium**。
 - **OpenClaw** 保留为控制平面 / Gateway / Console / 通信服务族名称。
-- **Bybit** 为唯一**下单/执行**交易所 adapter / connector；ADR 已批准的非 Bybit **只读行情**例外存在（Binance market-data-only，per ADR-0033/0040）。
+- **Bybit** 仍是唯一 active live execution 交易所 adapter / connector；ADR 已批准的非 Bybit 例外必须逐项限定：Binance market-data-only（per ADR-0033/0040），以及 IBKR `stock_etf_cash` read-only / paper / shadow research lane（per ADR-0048 + AMD-2026-06-29-01）。IBKR live / tiny-live / margin / short / options / CFD / transfer 仍禁止。
 - 短期不改 `openclaw_engine`、`OPENCLAW_*`、`/tmp/openclaw`、GitHub 仓库名、Linux runtime 路径等运行面名称。
 
 ---
@@ -47,7 +47,7 @@ Agentic trading governance system — 自主扫描 650+ 交易对，智能部署
 
 实时面板：[`TODO.md`](TODO.md) — active blockers、P0/P1/P2 queue、runtime evidence、schedule 和 handoff checks 均在那里维护。README 不再镜像动态状态（避免 drift）。
 
-**关键里程碑（2026-05-15 / 2026-05-23 口径收敛）**：Decision Lease 路径 A retrofit 已落地并在 shadow/evidence 语义下运行；`OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1` 不等于真实 live 授权或 Executor order authority。AMD-2026-05-15-01 已冻结 paper promotion；2026-05-23 起 paper engine 口径为长期 Archive / replay infrastructure，Stage 1 改为未来 green Stage 0R 之后的 Demo micro-canary。
+**关键里程碑（2026-05-15 / 2026-05-23 / 2026-06-29 口径收敛）**：Decision Lease 路径 A retrofit 已落地并在 shadow/evidence 语义下运行；`OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1` 不等于真实 live 授权或 Executor order authority。AMD-2026-05-15-01 已冻结 legacy crypto paper promotion；2026-05-23 起 paper engine 口径为长期 Archive / replay infrastructure，Stage 1 改为未来 green Stage 0R 之后的 Demo micro-canary。ADR-0048 / AMD-2026-06-29-01 新增的 IBKR `stock_etf_cash` paper/shadow lane 是隔离 research lane，不是 live/tiny-live 或 durable-alpha promotion lane。
 
 **Context loading**：稳定入口见本 README；当前工作状态见 `TODO.md`；agent 启动路由见 `docs/agents/context-loading.md`；TODO 维护标准见 `docs/agents/todo-maintenance.md`。**领域词汇** → `CONTEXT.md`；**架构决策记录** → `docs/adr/`。
 
@@ -70,7 +70,7 @@ srv/
 ├── TODO.md                        ← ★ Active dispatch queue（實時工作狀態）
 ├── CONTEXT.md                     ← ★ 领域词汇表（domain glossary，2026-05-06 引入）
 ├── docs/
-│   ├── adr/                       ← ★ 架构决策记录系列（ADR 0001-0047；2026-05-06 引入）
+│   ├── adr/                       ← ★ 架构决策记录系列（ADR 0001-0048；2026-05-06 引入）
 │   └── ...                        ← 工程文档（20+ 份日志/审核/设计）
 ├── program_code/
 │   ├── exchange_connectors/

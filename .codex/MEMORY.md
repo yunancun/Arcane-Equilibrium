@@ -94,7 +94,10 @@ Known paths:
   satisfy bounded-probe touchability, Cost Gate, or promotion proof for another
   candidate.
 
-- Bybit is the only exchange target.
+- Bybit remains the only active live execution exchange target. ADR-approved
+  non-Bybit exceptions are explicitly scoped: Binance market-data-only per
+  ADR-0033/0040, and IBKR `stock_etf_cash` read-only/paper/shadow research per
+  ADR-0048 + AMD-2026-06-29-01. IBKR live/tiny-live remains denied.
 - Rust `openclaw_engine` is the trading, risk, config, and execution authority.
 - Python/FastAPI is control plane / GUI / bridge / replay / agent host, not the
   trading truth layer.
@@ -158,8 +161,10 @@ Known paths:
 - Signed live auth must be written only through the approved route, never by
   hand.
 - LiveDemo is live-grade control flow against a demo endpoint.
-- Paper is not active promotion evidence unless an explicit future operator
-  decision reopens it.
+- Legacy crypto Paper is not active promotion evidence unless an explicit
+  future operator decision reopens it. The ADR-0048 IBKR `stock_etf_cash`
+  paper/shadow lane is separate research evidence and cannot auto-promote to
+  tiny-live, live, or durable-alpha proof.
 - Cost Gate bounded Demo probe source readiness can be reviewed, but this is
   not authority: as of 2026-06-23 the near-touch Adapter, reject-path placement
   preview wiring, and `bounded_demo_probe_operator_authorization_v1` contract
