@@ -1,0 +1,16 @@
+# Stock/ETF broker capability registry template.
+# This template is intentionally BLOCKED and source-only. It does not contact
+# IBKR, create secrets, create connectors, route orders, or change Bybit live
+# execution behavior.
+
+registry_id = ""
+asset_lane = "crypto_perp"
+broker = "bybit"
+bybit_live_execution_unchanged = false
+python_broker_write_authority_denied = false
+ibkr_live_denied = false
+cfd_margin_reserved_denied = false
+first_ibkr_contact_performed = false
+secret_content_serialized = false
+required_audit_fields = []
+operations = []
