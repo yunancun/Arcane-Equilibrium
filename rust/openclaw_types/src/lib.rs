@@ -19,6 +19,7 @@ pub mod price;
 pub mod risk;
 pub mod state;
 pub mod stock_etf_audit_events;
+pub mod stock_etf_db_evidence_ddl;
 pub mod stock_etf_gui_lane_contract;
 pub mod stock_etf_lane;
 pub mod stock_etf_phase3_evidence;
@@ -72,6 +73,11 @@ pub use state::{AgentState, GovernanceMode, OmsState, OrderInitiator, RiskInitia
 pub use stock_etf_audit_events::{
     StockEtfAssetLaneEventBlocker, StockEtfAssetLaneEventKind, StockEtfAssetLaneEventV1,
     StockEtfAssetLaneEventVerdict,
+};
+pub use stock_etf_db_evidence_ddl::{
+    StockEtfDbEvidenceDdlBlocker, StockEtfDbEvidenceDdlContractV1,
+    StockEtfDbEvidenceDdlVerdict, STOCK_ETF_DB_EVIDENCE_CONTRACT_ID,
+    STOCK_ETF_DB_EVIDENCE_DDL_SOURCE_PATH,
 };
 pub use stock_etf_gui_lane_contract::{
     StockEtfGuiLaneBlocker, StockEtfGuiLaneContractV1, StockEtfGuiLaneVerdict,
