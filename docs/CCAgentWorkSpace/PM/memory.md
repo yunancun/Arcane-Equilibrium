@@ -2447,3 +2447,9 @@
 - `demo_fast_balance_equity_artifact.py` now has optional runtime diagnostics for snapshot metadata and Bybit Demo secret-slot metadata without reading secret contents; focused/adjacent GUI-cap tests passed.
 - Fresh `trade-core` artifact `/tmp/openclaw/demo_fast_balance_runtime_diagnosis_20260627T091742Z/demo_account_equity_artifact_runtime_diagnosed.json` is READY (`rust_snapshot_fast`, connected, equity `9551.36942603`, no runtime blockers), superseding the stale disconnected artifact.
 - GUI risk remains percentage-authority: `10.0%` resolves to `955.1369426 USDT` at this equity and max-single-position `25%` resolves to `2387.84235651 USDT`; runtime source drift still blocks actual-admission.
+
+## 2026-06-29 External Repo Read-Only Fusion Implementation
+
+- Implemented `docs_context_retrieval`, `aeg_report_audit`, and `external_repo_fusion_smoke` as read-only advisory helpers; retrieval score is relevance-only and audit statuses are advisory-only.
+- Verification: py_compile PASS, focused tests `40 passed`, adjacent AEG `9 passed`, M4 leakage `52 passed`, smoke `EXTERNAL_REPO_FUSION_SMOKE_COMPLETE` with 2544 chunks and authority preserved.
+- Boundary remains no Bybit/DB/network/runtime/order/risk/config/Decision Lease/writer/Cost Gate/promotion/sizing authority; use outputs only as PM/FA/QC/Operator redlines.
