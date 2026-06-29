@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-29 External Repo Integration Review
+
+- PM closed six-subagent evaluation of `xbtlin/ai-berkshire` and `AgriciDaniel/claude-obsidian` as conditional read-only only: both are useful as research/retrieval/report-QA inspiration, not runtime/trading/alpha proof.
+- Approved next step is scratch smoke only (`/tmp/openclaw/...`): BM25-only docs retrieval + report-audit style AEG/PM checks, with zero repo/runtime/DB/network/LLM/order/config mutation.
+- Blocked: direct skill install, Obsidian hooks/MCP/vault SoT, shell `flock` workflows, ContextDistiller prompt injection before ADR-0041 token ledger, and any external narrative/performance claim as alpha evidence.
+
 ## 2026-06-27 Bounded Demo Probe Soak Enabled
 
 - PM closed this loop as `DONE_WITH_CONCERNS`: runtime source is clean at `bb15288b`, engine PID `4136267` runs Demo-only with writer/adapter enabled, and `/proc` binary sha matches disk `d7c80e...`.
