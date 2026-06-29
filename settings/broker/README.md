@@ -11,3 +11,5 @@ This directory stores broker capability contracts and default-off runtime postur
 `ibkr_phase2_runtime_contracts.toml` records the source evidence shape for secret-slot posture and API session topology. It is intentionally incomplete and cannot authorize IBKR contact.
 
 `ibkr_feature_flag_secret_auth_matrix.toml` records the default-blocked feature-flag, secret, and scoped-authorization matrix shape. It does not authorize IBKR contact or paper orders.
+
+`ibkr_paper_order_lifecycle.toml` records the default-blocked paper order lifecycle and append-only event log shape. It does not authorize connector creation or paper orders.
