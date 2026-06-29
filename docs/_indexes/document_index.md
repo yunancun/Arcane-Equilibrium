@@ -26,6 +26,8 @@
 | `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_phase1_source_foundation_checkpoint.md` | Operator Phase 1 摘要：source foundation done, no runtime authority；下一步仍是 Phase 2 external-surface gate PASS before first IBKR contact。 |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-06-29--ibkr_stock_etf_phase2_precontact_gate_source_checkpoint.md` | PM Phase 2 pre-contact source checkpoint：typed external-surface gate / non-Bybit API allowlist / session attestation validator 已落地且 default BLOCKED；仍不授權 IBKR contact。 |
 | `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_phase2_precontact_gate_source_checkpoint.md` | Operator Phase 2 pre-contact 摘要：source gate foundation done；first IBKR read-only healthcheck 仍需 immutable PASS artifact。 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-29--ibkr_stock_etf_phase2_policy_prereq_source_checkpoint.md` | PM Phase 2 policy prerequisite checkpoint：redaction/rate-limit/audit/paper-attestation/Python no-write source contracts 已落地；仍不授權 IBKR contact。 |
+| `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_phase2_policy_prereq_source_checkpoint.md` | Operator Phase 2 policy 摘要：gate prerequisite source policies done；immutable PASS artifact 仍缺，first IBKR contact blocked。 |
 
 ### 2026-06-22 Shadow placement alpha ingestion
 
