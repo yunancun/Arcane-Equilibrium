@@ -2,7 +2,7 @@
 
 ## Summary
 
-本 checkpoint 收緊 bounded Demo credential/mode cutover：`POST /api/v1/settings/bybit-demo-connector-mode` 現在會拒絕仍含 `demo_api_slot:*` credential blocker 的 cutover preflight。這防止 Demo API key 還是舊/錯 slot 時，先把 connector 切成 `BYBIT_MODE=demo` / `BYBIT_CONNECTOR_WRITE_ENABLED=true`。
+本 checkpoint 收緊 bounded Demo credential/mode cutover：`POST /api/v1/settings/bybit-demo-connector-mode` 現在會拒絕仍含 `demo_api_slot:*` credential blocker 的 cutover preflight。這防止 Demo API slot 缺 key、缺 secret、endpoint 錯誤，或 strict expected-key pin 明確不匹配時，先把 connector 切成 `BYBIT_MODE=demo` / `BYBIT_CONNECTOR_WRITE_ENABLED=true`。
 
 狀態轉移：`DONE_WITH_CONCERNS`，bounded Demo execution 仍是 `BLOCKED_BY_RUNTIME`。
 
@@ -31,7 +31,8 @@
   - source check `connector_mode_requires_demo_credential_readiness=true`
 - Runtime dry-run validator:
   - rejected current preflight with HTTP `400`
-  - reason: `demo_api_slot:demo_api_key_expected_value_mismatch`
+  - historical reason: `demo_api_slot:demo_api_key_expected_value_mismatch`
+  - 2026-06-30 correction: this reason came from a stale `BHw4...` expected-key hint; masked `FWkGZX...g53T` is now operator-confirmed as the correct Demo key
   - `trading_services.env` unchanged: `BYBIT_MODE=read_only`, `BYBIT_CONNECTOR_WRITE_ENABLED=false`
 
 ## Verification
@@ -53,4 +54,4 @@ No engine restart, no key/secret output, no secret/env mutation, no private Bybi
 
 ## Remaining Blocker
 
-Demo slot still has key `FWkGZX...g53T` / sha12 `317f982c009f`, not expected prefix `BHw4...`. Enter/validate the new Demo key+secret through approved settings API/GUI first, rerun readiness, then apply connector mode cutover only after credential blockers are gone.
+Correction on 2026-06-30: Demo slot key `FWkGZX...g53T` / sha12 `317f982c009f` is operator-confirmed correct. The remaining blocker is connector mode (`BYBIT_MODE=read_only`, `BYBIT_CONNECTOR_WRITE_ENABLED=false`) plus fresh readiness/final-window gates. Rerun readiness without the stale `BHw4...` expected pin, then apply connector mode cutover only after credential/endpoint checks are green.

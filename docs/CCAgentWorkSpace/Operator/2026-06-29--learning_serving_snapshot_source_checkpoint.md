@@ -29,7 +29,7 @@ Runtime materialization under `/tmp/openclaw/session_loop_state_20260629T_servin
 - training/registry repair `/tmp/openclaw/session_loop_state_20260629T_serving_snapshot/learning_training_registry_repair_after_f1d_sync.json` sha `1a9f72192764fdfed80799e14ca1a005b3d9bf09d322c519867b8a5ca1f2ab7a`
 - serving snapshot `/tmp/openclaw/session_loop_state_20260629T_serving_snapshot/learning_serving_snapshot_after_f1d_sync.json` sha `83ac78520c9739b17378ddc1d88f3150237a36a1e96b87a236cf6eca7bbeb68d`
 
-The runtime serving snapshot status is `LEARNING_SERVING_SNAPSHOT_BLOCKED_BY_TRAINING_REGISTRY_REPAIR_NO_AUTHORITY`. The bounded Demo readiness status remains `BOUNDED_DEMO_RUNTIME_BLOCKED_BY_CREDENTIALS` because the Demo slot key is still `FWkGZX...g53T` / sha12 `317f982c009f` while the expected key prefix is `BHw4...`, and connector config remains `BYBIT_MODE=read_only`, `BYBIT_CONNECTOR_WRITE_ENABLED=false`.
+The runtime serving snapshot status is `LEARNING_SERVING_SNAPSHOT_BLOCKED_BY_TRAINING_REGISTRY_REPAIR_NO_AUTHORITY`. Historical bounded Demo readiness remained `BOUNDED_DEMO_RUNTIME_BLOCKED_BY_CREDENTIALS` because a stale `BHw4...` expected-prefix hint did not match Demo slot key `FWkGZX...g53T` / sha12 `317f982c009f`; 2026-06-30 operator correction confirms that key is the correct Demo Read-Write key. Connector config still remains `BYBIT_MODE=read_only`, `BYBIT_CONNECTOR_WRITE_ENABLED=false`.
 
 ## Verification
 

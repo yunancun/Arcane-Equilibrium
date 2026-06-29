@@ -32,6 +32,7 @@ NOW = dt.datetime(2026, 6, 29, 16, 0, tzinfo=dt.timezone.utc)
 CANDIDATE_ID = "grid_trading|ETHUSDT|Buy"
 SNAPSHOT_ID = "learning_serving_snapshot:abc123"
 MODEL_VERSION = "qtrio-20260629T1400Z"
+OUTCOME_HORIZON_MINUTES = 60
 
 
 def _fill_row(index: int = 0, **overrides) -> dict:
@@ -40,6 +41,7 @@ def _fill_row(index: int = 0, **overrides) -> dict:
         "strategy_name": "grid_trading",
         "symbol": "ETHUSDT",
         "side": "Buy",
+        "outcome_horizon_minutes": OUTCOME_HORIZON_MINUTES,
         "engine_mode": "demo",
         "order_link_id": f"oc_demo_order_{index}",
         "exchange_order_id": f"bybit-order-{index}",
@@ -68,6 +70,11 @@ def _control_row(index: int = 0, **overrides) -> dict:
     row = {
         "control_id": f"matched-control-{index}",
         "candidate_id": CANDIDATE_ID,
+        "side_cell_key": CANDIDATE_ID,
+        "strategy_name": "grid_trading",
+        "symbol": "ETHUSDT",
+        "side": "Buy",
+        "outcome_horizon_minutes": OUTCOME_HORIZON_MINUTES,
         "control_type": "matched_non_trade_baseline",
         "realized_net_bps": -0.5,
         "source_artifact": f"/tmp/openclaw/probe/control-{index}.json",
@@ -157,6 +164,13 @@ def _proof_evidence(**overrides) -> dict:
         "generated_at_utc": NOW.isoformat(),
         "status": "CANDIDATE_PROOF_EVIDENCE_READY",
         "candidate_id": CANDIDATE_ID,
+        "candidate_identity": {
+            "side_cell_key": CANDIDATE_ID,
+            "strategy_name": "grid_trading",
+            "symbol": "ETHUSDT",
+            "side": "Buy",
+            "outcome_horizon_minutes": OUTCOME_HORIZON_MINUTES,
+        },
         "serving_snapshot_id": SNAPSHOT_ID,
         "model_version": MODEL_VERSION,
         "proof_thresholds": {
@@ -266,6 +280,10 @@ def test_row_backed_fill_evidence_can_satisfy_proof_requirements() -> None:
             {
                 "candidate_id": CANDIDATE_ID,
                 "side_cell_key": CANDIDATE_ID,
+                "strategy_name": "grid_trading",
+                "symbol": "ETHUSDT",
+                "side": "Buy",
+                "outcome_horizon_minutes": OUTCOME_HORIZON_MINUTES,
                 "outcome_source": "candidate_matched_demo_fill",
                 "realized_net_bps": 2.0,
                 "order_link_id": "oc_dm_attempt_1",
@@ -283,6 +301,10 @@ def test_row_backed_fill_evidence_can_satisfy_proof_requirements() -> None:
             {
                 "candidate_id": CANDIDATE_ID,
                 "side_cell_key": CANDIDATE_ID,
+                "strategy_name": "grid_trading",
+                "symbol": "ETHUSDT",
+                "side": "Buy",
+                "outcome_horizon_minutes": OUTCOME_HORIZON_MINUTES,
                 "outcome_source": "candidate_matched_demo_fill",
                 "realized_net_bps": 3.0,
                 "order_link_id": "oc_dm_attempt_2",
@@ -302,8 +324,8 @@ def test_row_backed_fill_evidence_can_satisfy_proof_requirements() -> None:
             "matched_control_outperformance": True,
         },
         matched_control_rows=[
-            {"candidate_id": CANDIDATE_ID, "realized_net_bps": 0.5},
-            {"candidate_id": CANDIDATE_ID, "realized_net_bps": 1.0},
+            _control_row(1, realized_net_bps=0.5),
+            _control_row(2, realized_net_bps=1.0),
         ],
     )
 
@@ -318,6 +340,60 @@ def test_row_backed_fill_evidence_can_satisfy_proof_requirements() -> None:
     assert packet["proof_gate"]["row_backed"] is True
     assert packet["proof_gate"]["candidate_matched_demo_fill_count"] == 2
     assert packet["proof_gate"]["proof_exclusion_gate"]["proof_exclusion_present"] is False
+
+
+def test_candidate_identity_mismatch_rows_do_not_clear_proof_gate() -> None:
+    proof = _proof_evidence(
+        candidate_matched_demo_fills=[
+            _fill_row(0, symbol="BTCUSDT"),
+            _fill_row(1, outcome_horizon_minutes=240),
+            _fill_row(2, side="Sell"),
+        ],
+        matched_control_baseline={
+            "matched_control_baseline_present": True,
+            "matched_control_outperformance": True,
+        },
+        matched_control_rows=[
+            _control_row(1, symbol="BTCUSDT"),
+            _control_row(2, outcome_horizon_minutes=240),
+        ],
+    )
+
+    packet = build_learning_proof_promotion_gate(
+        serving_snapshot_packet=_serving(),
+        learning_adjudicator_packet=_adjudicator(),
+        proof_evidence_packet=proof,
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == BLOCKED_BY_PROOF_EXCLUSION_STATUS
+    blockers = packet["proof_gate"]["blockers"]
+    assert "candidate_matched_demo_fill_identity_mismatch_or_excluded" in blockers
+    assert "matched_control_identity_mismatch_or_excluded" in blockers
+    assert packet["proof_gate"]["candidate_matched_demo_fill_count"] == 0
+    reason_counts = packet["proof_gate"]["proof_exclusion_gate"]["reason_counts"]
+    assert reason_counts["candidate_fill_symbol_mismatch"] == 1
+    assert reason_counts["candidate_fill_outcome_horizon_minutes_mismatch"] == 1
+    assert reason_counts["matched_control_symbol_mismatch"] == 1
+
+
+def test_incomplete_candidate_identity_blocks_proof_gate() -> None:
+    proof = _proof_evidence(candidate_identity={"side_cell_key": CANDIDATE_ID})
+
+    packet = build_learning_proof_promotion_gate(
+        serving_snapshot_packet=_serving(),
+        learning_adjudicator_packet=_adjudicator(),
+        proof_evidence_packet=proof,
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == BLOCKED_BY_PROOF_STATUS
+    assert "proof_evidence_candidate_identity_incomplete" in packet["proof_gate"][
+        "blockers"
+    ]
+    assert "outcome_horizon_minutes" in packet["proof_gate"]["candidate_identity_gate"][
+        "missing_fields"
+    ]
 
 
 def test_blocked_serving_snapshot_prevents_promotion_gate() -> None:
@@ -391,6 +467,24 @@ def test_authority_bearing_input_fails_closed() -> None:
     assert packet["summary"]["authority_violation_count"] >= 1
     assert packet["answers"]["promotion_authority_granted"] is False
     assert packet["answers"]["main_cost_gate_adjustment"] == "NONE"
+
+
+def test_allowed_by_this_packet_alias_authority_fails_closed() -> None:
+    proof = _proof_evidence()
+    proof["allowed_actions"] = {"order_allowed_by_this_packet": True}
+
+    packet = build_learning_proof_promotion_gate(
+        serving_snapshot_packet=_serving(),
+        learning_adjudicator_packet=_adjudicator(),
+        proof_evidence_packet=proof,
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == AUTHORITY_BOUNDARY_VIOLATION_STATUS
+    assert any(
+        item["key"] == "order_allowed_by_this_packet"
+        for item in packet["authority_violations"]
+    )
 
 
 def test_summary_counts_without_fill_rows_do_not_clear_proof_gate() -> None:

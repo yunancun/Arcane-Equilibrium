@@ -27,7 +27,7 @@ Key artifact:
 
 Bounded Demo execution is still blocked because:
 
-- Demo API key slot is still `FWkGZX...g53T`, not expected `BHw4...`.
+- 2026-06-30 correction: Demo API key slot `FWkGZX...g53T` is operator-confirmed correct; `BHw4...` was a stale expected hint.
 - Connector mode is still read-only / write-disabled.
 - Serving/proof chain is not ready.
 - There is still no candidate-matched order/fill/fee/slippage/reconstruction evidence.

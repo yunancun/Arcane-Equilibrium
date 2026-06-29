@@ -91,6 +91,9 @@ AUTHORITY_TRUE_KEYS = {
     "serving_snapshot_authority_granted",
     "training_run_performed",
 }
+AUTHORITY_TRUE_KEY_SUFFIXES = (
+    "_allowed_by_this_packet",
+)
 TRUTHY_AUTHORITY_STRINGS = {
     "1",
     "true",
@@ -140,6 +143,13 @@ FILL_IDENTITY_KEYS = (
     "order_link_id",
     "orderLinkId",
     "openclaw_order_link_id",
+)
+CANDIDATE_IDENTITY_FIELDS = (
+    "side_cell_key",
+    "strategy_name",
+    "symbol",
+    "side",
+    "outcome_horizon_minutes",
 )
 
 
@@ -298,7 +308,7 @@ def _authority_violations(payload: Any) -> list[dict[str, Any]]:
                         "reason": "main_cost_gate_adjustment_not_none",
                     }
                 )
-            elif key in AUTHORITY_TRUE_KEYS and _truthy(value):
+            elif _is_authority_true_key(key) and _truthy(value):
                 violations.append(
                     {
                         "path": item_path,
@@ -309,6 +319,13 @@ def _authority_violations(payload: Any) -> list[dict[str, Any]]:
             if isinstance(value, (dict, list)):
                 stack.append((item_path, value))
     return violations
+
+
+def _is_authority_true_key(key: str) -> bool:
+    normalized = str(key or "").strip()
+    return normalized in AUTHORITY_TRUE_KEYS or any(
+        normalized.endswith(suffix) for suffix in AUTHORITY_TRUE_KEY_SUFFIXES
+    )
 
 
 def _source_ref(
@@ -340,6 +357,114 @@ def _candidate_id(payload: dict[str, Any]) -> str:
         or details.get("candidate_id")
         or details.get("side_cell_key")
     )
+
+
+def _candidate_identity(proof_evidence: dict[str, Any], candidate_id: str) -> dict[str, Any]:
+    identity = _dict(proof_evidence.get("candidate_identity"))
+    parsed = _parse_candidate_id(candidate_id)
+    return {
+        "side_cell_key": _str(
+            identity.get("side_cell_key")
+            or proof_evidence.get("side_cell_key")
+            or candidate_id
+        ),
+        "strategy_name": _str(
+            identity.get("strategy_name")
+            or proof_evidence.get("strategy_name")
+            or parsed.get("strategy_name")
+        ),
+        "symbol": _str(
+            identity.get("symbol") or proof_evidence.get("symbol") or parsed.get("symbol")
+        ).upper(),
+        "side": _normalize_side(
+            identity.get("side") or proof_evidence.get("side") or parsed.get("side")
+        ),
+        "outcome_horizon_minutes": _str(
+            identity.get("outcome_horizon_minutes")
+            or identity.get("horizon_minutes")
+            or proof_evidence.get("outcome_horizon_minutes")
+            or proof_evidence.get("horizon_minutes")
+            or parsed.get("outcome_horizon_minutes")
+        ),
+    }
+
+
+def _parse_candidate_id(candidate_id: str) -> dict[str, str]:
+    parts = [part.strip() for part in _str(candidate_id).split("|")]
+    parsed: dict[str, str] = {}
+    if len(parts) >= 3:
+        parsed["strategy_name"] = parts[0]
+        parsed["symbol"] = parts[1]
+        parsed["side"] = parts[2]
+    if len(parts) >= 4:
+        parsed["outcome_horizon_minutes"] = parts[3]
+    return parsed
+
+
+def _normalize_side(value: Any) -> str:
+    text = _str(value)
+    if text.lower() == "buy":
+        return "Buy"
+    if text.lower() == "sell":
+        return "Sell"
+    return text
+
+
+def _row_identity_reasons(
+    row: dict[str, Any],
+    identity: dict[str, Any],
+    *,
+    row_kind: str,
+) -> list[str]:
+    reasons: list[str] = []
+    row_candidate_id = _candidate_id(row)
+    expected_side_cell = _str(identity.get("side_cell_key"))
+    if not row_candidate_id:
+        reasons.append(f"{row_kind}_side_cell_key_missing")
+    elif expected_side_cell and row_candidate_id != expected_side_cell:
+        reasons.append(f"{row_kind}_side_cell_key_mismatch")
+
+    expected_strategy = _str(identity.get("strategy_name"))
+    row_strategy = _str(row.get("strategy_name"))
+    if expected_strategy and not row_strategy:
+        reasons.append(f"{row_kind}_strategy_name_missing")
+    elif expected_strategy and row_strategy != expected_strategy:
+        reasons.append(f"{row_kind}_strategy_name_mismatch")
+
+    expected_symbol = _str(identity.get("symbol")).upper()
+    row_symbol = _str(row.get("symbol")).upper()
+    if expected_symbol and not row_symbol:
+        reasons.append(f"{row_kind}_symbol_missing")
+    elif expected_symbol and row_symbol != expected_symbol:
+        reasons.append(f"{row_kind}_symbol_mismatch")
+
+    expected_side = _normalize_side(identity.get("side"))
+    row_side = _normalize_side(row.get("side"))
+    if expected_side and not row_side:
+        reasons.append(f"{row_kind}_side_missing")
+    elif expected_side and row_side != expected_side:
+        reasons.append(f"{row_kind}_side_mismatch")
+
+    expected_horizon = _str(identity.get("outcome_horizon_minutes"))
+    row_horizon = _str(
+        row.get("outcome_horizon_minutes")
+        or row.get("horizon_minutes")
+        or row.get("outcome_horizon_min")
+    )
+    if expected_horizon and not row_horizon:
+        reasons.append(f"{row_kind}_outcome_horizon_minutes_missing")
+    elif expected_horizon and row_horizon != expected_horizon:
+        reasons.append(f"{row_kind}_outcome_horizon_minutes_mismatch")
+    return reasons
+
+
+def _candidate_identity_gate(identity: dict[str, Any]) -> dict[str, Any]:
+    missing = [field for field in CANDIDATE_IDENTITY_FIELDS if not _str(identity.get(field))]
+    return {
+        "ready": not missing,
+        "identity": identity,
+        "missing_fields": missing,
+    }
 
 
 def _serving_gate(
@@ -450,11 +575,13 @@ def _derived_row_metrics(
     *,
     rows: list[dict[str, Any]],
     controls: list[dict[str, Any]],
+    identity: dict[str, Any],
 ) -> dict[str, Any]:
     excluded_rows = []
     countable_rows = []
     for row in rows:
         reasons = proof_exclusion_reasons(row)
+        reasons.extend(_row_identity_reasons(row, identity, row_kind="candidate_fill"))
         if not _row_has_demo_fill_identity(row):
             reasons.append("candidate_matched_demo_fill_identity_missing")
         reasons.extend(_row_is_cleanup_or_replay_only(row))
@@ -462,18 +589,28 @@ def _derived_row_metrics(
             excluded_rows.append({"row": row, "reasons": reasons})
         else:
             countable_rows.append(row)
+    excluded_controls = []
+    countable_controls = []
+    for row in controls:
+        reasons = _row_identity_reasons(row, identity, row_kind="matched_control")
+        if reasons:
+            excluded_controls.append({"row": row, "reasons": reasons})
+        else:
+            countable_controls.append(row)
     net_values = [
         value
         for value in (_float(row.get("realized_net_bps")) for row in countable_rows)
         if value is not None
     ]
     avg_net = sum(net_values) / len(net_values) if net_values else None
+    exclusion_counts = _reason_counts([*excluded_rows, *excluded_controls])
     return {
         "row_backed": bool(rows),
         "candidate_matched_demo_fill_count": len(countable_rows),
         "raw_candidate_matched_demo_fill_count": len(rows),
         "proof_excluded_row_count": len(excluded_rows),
-        "proof_exclusion_reason_counts": _reason_counts(excluded_rows),
+        "proof_excluded_control_count": len(excluded_controls),
+        "proof_exclusion_reason_counts": exclusion_counts,
         "fee_evidence_present": bool(countable_rows)
         and all(_has_any(row, FEE_KEYS) for row in countable_rows),
         "slippage_evidence_present": bool(countable_rows)
@@ -484,8 +621,9 @@ def _derived_row_metrics(
         and all(_has_any(row, CAPACITY_KEYS) for row in countable_rows),
         "avg_realized_net_bps": avg_net,
         "net_of_fees_positive": avg_net is not None and avg_net > 0.0,
-        "matched_control_baseline_present": bool(controls),
-        "matched_control_count": len(controls),
+        "matched_control_baseline_present": bool(countable_controls),
+        "matched_control_count": len(countable_controls),
+        "raw_matched_control_count": len(controls),
     }
 
 
@@ -507,7 +645,9 @@ def _proof_exclusion_gate(
 ) -> dict[str, Any]:
     proof_exclusion = _dict(proof_evidence.get("proof_exclusion"))
     packets = [proof_exclusion, proof_exclusion_packet]
-    excluded_count = _int(derived.get("proof_excluded_row_count"))
+    excluded_count = _int(derived.get("proof_excluded_row_count")) + _int(
+        derived.get("proof_excluded_control_count")
+    )
     for packet in packets:
         excluded_count += _int(
             packet.get("proof_excluded_probe_outcome_count")
@@ -570,7 +710,9 @@ def _proof_gate(
     ]
     rows = _candidate_rows(proof_evidence, candidate_id)
     control_rows = _matched_control_rows(proof_evidence)
-    derived = _derived_row_metrics(rows=rows, controls=control_rows)
+    identity = _candidate_identity(proof_evidence, candidate_id)
+    identity_gate = _candidate_identity_gate(identity)
+    derived = _derived_row_metrics(rows=rows, controls=control_rows, identity=identity)
     fill_count_sources = [derived, fill, summary, proof_evidence]
     control_count_sources = [derived, controls, summary, proof_evidence]
     net_sources = [derived, fill, summary, proof_evidence]
@@ -630,8 +772,12 @@ def _proof_gate(
         "OK",
     }:
         blockers.append("proof_evidence_status_not_ready")
+    if identity_gate.get("ready") is not True:
+        blockers.append("proof_evidence_candidate_identity_incomplete")
     if derived.get("row_backed") is not True:
         blockers.append("candidate_matched_demo_fill_rows_missing")
+    if _int(derived.get("proof_excluded_row_count")) > 0:
+        blockers.append("candidate_matched_demo_fill_identity_mismatch_or_excluded")
     if fill_count < max(1, min_fill_count):
         blockers.append("candidate_matched_demo_fills_below_floor")
     if derived.get("fee_evidence_present") is not True:
@@ -652,6 +798,8 @@ def _proof_gate(
         blockers.append("repeat_set_validation_missing_or_failed")
     if matched_control_count <= 0 or derived.get("matched_control_baseline_present") is not True:
         blockers.append("matched_control_baseline_missing")
+    if _int(derived.get("proof_excluded_control_count")) > 0:
+        blockers.append("matched_control_identity_mismatch_or_excluded")
     if not _bool_from(
         containers,
         "matched_control_outperformance",
@@ -675,9 +823,14 @@ def _proof_gate(
         "candidate_id": candidate_id or None,
         "serving_snapshot_id": serving_snapshot_id or None,
         "model_version": model_version or None,
+        "candidate_identity_gate": identity_gate,
         "min_candidate_matched_demo_fills": max(1, min_fill_count),
         "candidate_matched_demo_fill_count": fill_count,
         "matched_control_count": matched_control_count,
+        "raw_candidate_matched_demo_fill_count": derived.get(
+            "raw_candidate_matched_demo_fill_count"
+        ),
+        "raw_matched_control_count": derived.get("raw_matched_control_count"),
         "avg_realized_net_bps": avg_net,
         "row_backed": derived.get("row_backed"),
         "proof_exclusion_gate": proof_exclusion_gate,

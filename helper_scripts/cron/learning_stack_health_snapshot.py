@@ -14,6 +14,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -30,6 +31,11 @@ EXPECTED_CRON_MARKERS = {
     "demo_learning_stack_healthcheck": "demo_learning_stack_healthcheck_cron.sh",
     "ml_training_maintenance": "ml_training_maintenance_cron.sh",
 }
+EXPECTED_HEAD_ENV_RE = re.compile(
+    r"\b(?P<name>OPENCLAW_(?:EXPECTED_SOURCE_HEAD|[A-Z0-9_]*EXPECTED_HEAD))="
+    r"(?P<value>[0-9a-fA-F]{7,40})\b"
+)
+SHA_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
 
 
 def _utc_now() -> dt.datetime:
@@ -162,13 +168,106 @@ def _read_crontab(crontab_text_file: Path | None) -> tuple[str, str | None]:
     return proc.stdout, None
 
 
-def _cron_summary(text: str, error: str | None) -> dict[str, Any]:
+def _normalize_expected_head(value: str | None) -> tuple[str | None, str | None]:
+    text = str(value or "").strip()
+    if not text:
+        return None, None
+    if not SHA_RE.fullmatch(text):
+        return text, "expected_head_must_be_7_to_40_hex_chars"
+    return text.lower(), None
+
+
+def _sha_prefix_matches(left: str | None, right: str | None) -> bool | None:
+    left_norm, left_error = _normalize_expected_head(left)
+    right_norm, right_error = _normalize_expected_head(right)
+    if left_error or right_error or not left_norm or not right_norm:
+        return None
+    return left_norm.startswith(right_norm) or right_norm.startswith(left_norm)
+
+
+def _cron_expected_head_pins(
+    active_entries: list[str],
+    expected_head: str | None,
+) -> dict[str, Any]:
+    normalized_expected, expected_error = _normalize_expected_head(expected_head)
+    entries = []
+    missing_components = []
+    invalid_entries = []
+    mismatched_entries = []
+    for component, marker in EXPECTED_CRON_MARKERS.items():
+        matching = [line for line in active_entries if marker in line]
+        if not matching:
+            missing_components.append(component)
+            continue
+        line = matching[0]
+        pins = [
+            {"name": match.group("name"), "value": match.group("value").lower()}
+            for match in EXPECTED_HEAD_ENV_RE.finditer(line)
+        ]
+        if not pins:
+            missing_components.append(component)
+        for pin in pins:
+            validation_error = _normalize_expected_head(pin["value"])[1]
+            if validation_error:
+                invalid_entries.append(
+                    {
+                        "component": component,
+                        "name": pin["name"],
+                        "value": pin["value"],
+                        "validation_error": validation_error,
+                    }
+                )
+                continue
+            if (
+                normalized_expected
+                and _sha_prefix_matches(pin["value"], normalized_expected) is False
+            ):
+                mismatched_entries.append(
+                    {
+                        "component": component,
+                        "name": pin["name"],
+                        "value": pin["value"],
+                        "target_expected_head": normalized_expected,
+                    }
+                )
+        entries.append({"component": component, "pins": pins})
+    if expected_error:
+        status = "INVALID_TARGET_EXPECTED_HEAD"
+    elif not normalized_expected:
+        status = "TARGET_EXPECTED_HEAD_NOT_PROVIDED"
+    elif missing_components:
+        status = "EXPECTED_HEAD_PIN_MISSING"
+    elif invalid_entries:
+        status = "EXPECTED_HEAD_PIN_INVALID"
+    elif mismatched_entries:
+        status = "EXPECTED_HEAD_PIN_MISMATCH"
+    else:
+        status = "EXPECTED_HEAD_PINS_MATCH_TARGET"
+    return {
+        "status": status,
+        "target_expected_head": normalized_expected,
+        "target_expected_head_error": expected_error,
+        "pins_match_target": status
+        in {"EXPECTED_HEAD_PINS_MATCH_TARGET", "TARGET_EXPECTED_HEAD_NOT_PROVIDED"},
+        "entries": entries,
+        "missing_components": missing_components,
+        "invalid_entries": invalid_entries,
+        "mismatched_entries": mismatched_entries,
+    }
+
+
+def _cron_summary(
+    text: str,
+    error: str | None,
+    expected_head: str | None,
+) -> dict[str, Any]:
     entries = [line.strip() for line in text.splitlines() if line.strip()]
     active_entries = [line for line in entries if not line.startswith("#")]
     marker_counts = {
         name: sum(1 for line in active_entries if marker in line)
         for name, marker in EXPECTED_CRON_MARKERS.items()
     }
+    expected_head_pins = _cron_expected_head_pins(active_entries, expected_head)
     return {
         "read_error": error,
         "active_entry_count": len(active_entries),
@@ -182,6 +281,8 @@ def _cron_summary(text: str, error: str | None) -> dict[str, Any]:
         "unique_scheduler_authority": (
             error is None and all(count == 1 for count in marker_counts.values())
         ),
+        "expected_head_pins": expected_head_pins,
+        "expected_head_pins_match_target": expected_head_pins["pins_match_target"],
         "matching_entries": [
             line
             for line in active_entries
@@ -209,15 +310,30 @@ def _source_summary(repo_root: Path, expected_head: str | None) -> dict[str, Any
     head, head_error = _git_cmd(repo_root, ["rev-parse", "HEAD"])
     dirty_text, dirty_error = _git_cmd(repo_root, ["status", "--porcelain"])
     dirty_lines = [line for line in (dirty_text or "").splitlines() if line.strip()]
+    normalized_expected, expected_error = _normalize_expected_head(expected_head)
     expected_head_matches = None
-    if expected_head:
-        expected_head_matches = bool(head and head.startswith(expected_head))
+    if expected_error:
+        expected_status = "INVALID"
+        expected_head_matches = False
+    elif not normalized_expected:
+        expected_status = "NOT_PROVIDED"
+    elif not head:
+        expected_status = "HEAD_UNAVAILABLE"
+        expected_head_matches = False
+    elif _sha_prefix_matches(head, normalized_expected):
+        expected_status = "MATCH"
+        expected_head_matches = True
+    else:
+        expected_status = "MISMATCH"
+        expected_head_matches = False
     return {
         "repo_root": str(repo_root),
         "head": head,
         "head_error": head_error,
-        "expected_head": expected_head or None,
+        "expected_head": normalized_expected or expected_head or None,
+        "expected_head_status": expected_status,
         "expected_head_matches": expected_head_matches,
+        "expected_head_error": expected_error,
         "dirty_error": dirty_error,
         "dirty_path_count": len(dirty_lines),
         "dirty_path_sample": dirty_lines[:20],
@@ -477,7 +593,7 @@ def build_snapshot(
     max_ledger_age_seconds = max_ledger_age_minutes * 60
 
     crontab_text, crontab_error = _read_crontab(crontab_text_file)
-    cron = _cron_summary(crontab_text, crontab_error)
+    cron = _cron_summary(crontab_text, crontab_error, expected_head)
     source = _source_summary(repo_root, expected_head)
     demo_stack = _demo_stack_component(
         demo_stack_health_json,
@@ -531,6 +647,11 @@ def build_snapshot(
     blockers: list[str] = []
     _append_blocker(blockers, source_ready, "source_not_clean_or_expected_head_mismatch")
     _append_blocker(blockers, cron["unique_scheduler_authority"], "scheduler_authority_not_unique_or_missing")
+    _append_blocker(
+        blockers,
+        cron["expected_head_pins_match_target"] is not False,
+        "scheduler_expected_head_pin_mismatch",
+    )
     _append_blocker(blockers, demo_stack["fresh"], "demo_stack_health_snapshot_stale_or_missing")
     _append_blocker(blockers, demo_stack["evidence_stack_active"], "demo_stack_evidence_not_active")
     _append_blocker(blockers, maintenance["fresh"], "ml_training_maintenance_status_stale_or_missing")

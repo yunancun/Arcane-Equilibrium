@@ -132,7 +132,9 @@ def _build(tmp_path: Path, **overrides) -> dict:
     )
 
 
-def test_blocks_on_demo_api_key_mismatch_and_read_only_mode(tmp_path: Path) -> None:
+def test_expected_key_mismatch_is_advisory_unless_strict_and_read_only_mode_blocks(
+    tmp_path: Path,
+) -> None:
     packet = _build(
         tmp_path,
         fixture_overrides={
@@ -142,19 +144,45 @@ def test_blocks_on_demo_api_key_mismatch_and_read_only_mode(tmp_path: Path) -> N
         },
     )
 
-    assert packet["status"] == mod.BLOCKED_BY_CREDENTIALS_STATUS
+    assert packet["status"] == mod.BLOCKED_BY_CONNECTOR_MODE_STATUS
     assert packet["profit_first_state_transition"] == "BLOCKED_BY_RUNTIME"
     assert (
         packet["checks"]["demo_api_slot"]["api_key"]["expected_key_matches_observed"]
         is False
     )
-    assert "demo_api_slot:demo_api_key_expected_value_mismatch" in packet[
+    assert packet["checks"]["demo_api_slot"]["ready"] is True
+    assert "demo_api_key_expected_value_mismatch" in packet["checks"][
+        "demo_api_slot"
+    ]["advisory_reasons"]
+    assert "demo_api_slot:demo_api_key_expected_value_mismatch" not in packet[
         "blocking_reasons"
     ]
     assert "connector_mode:bybit_mode_not_demo" in packet["blocking_reasons"]
     assert "connector_mode:bybit_connector_write_not_enabled" in packet[
         "blocking_reasons"
     ]
+    assert packet["answers"]["expected_demo_api_key_match_required"] is False
+
+
+def test_strict_expected_key_mismatch_blocks_credentials(tmp_path: Path) -> None:
+    packet = _build(
+        tmp_path,
+        fixture_overrides={"api_key": OTHER_KEY},
+        require_expected_demo_api_key_match=True,
+    )
+
+    assert packet["status"] == mod.BLOCKED_BY_CREDENTIALS_STATUS
+    assert (
+        packet["checks"]["demo_api_slot"]["api_key"]["expected_key_matches_observed"]
+        is False
+    )
+    assert packet["checks"]["demo_api_slot"]["api_key"][
+        "expected_key_match_required"
+    ] is True
+    assert "demo_api_slot:demo_api_key_expected_value_mismatch" in packet[
+        "blocking_reasons"
+    ]
+    assert packet["answers"]["expected_demo_api_key_match_required"] is True
 
 
 def test_blocks_on_connector_mode_after_credentials_match(tmp_path: Path) -> None:

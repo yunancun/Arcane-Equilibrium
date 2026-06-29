@@ -37,14 +37,14 @@ def _git_repo(path: Path) -> str:
     ).strip()
 
 
-def _active_crontab() -> str:
+def _active_crontab(head: str) -> str:
     return "\n".join(
         [
-            "7,37 * * * * OPENCLAW_BASE_DIR=/srv /srv/helper_scripts/cron/demo_learning_evidence_audit_cron.sh",
-            "22 * * * * OPENCLAW_BASE_DIR=/srv /srv/helper_scripts/cron/sealed_horizon_probe_preflight_cron.sh",
-            "27 * * * * OPENCLAW_BASE_DIR=/srv /srv/helper_scripts/cron/cost_gate_learning_lane_cron.sh",
-            "32 * * * * OPENCLAW_BASE_DIR=/srv /srv/helper_scripts/cron/demo_learning_stack_healthcheck_cron.sh",
-            "17 3 * * * OPENCLAW_BASE_DIR=/srv /srv/helper_scripts/cron/ml_training_maintenance_cron.sh",
+            f"7,37 * * * * OPENCLAW_EXPECTED_SOURCE_HEAD={head} OPENCLAW_BASE_DIR=/srv /srv/helper_scripts/cron/demo_learning_evidence_audit_cron.sh",
+            f"22 * * * * OPENCLAW_EXPECTED_SOURCE_HEAD={head} OPENCLAW_BASE_DIR=/srv /srv/helper_scripts/cron/sealed_horizon_probe_preflight_cron.sh",
+            f"27 * * * * OPENCLAW_EXPECTED_SOURCE_HEAD={head} OPENCLAW_BASE_DIR=/srv /srv/helper_scripts/cron/cost_gate_learning_lane_cron.sh",
+            f"32 * * * * OPENCLAW_EXPECTED_SOURCE_HEAD={head} OPENCLAW_BASE_DIR=/srv /srv/helper_scripts/cron/demo_learning_stack_healthcheck_cron.sh",
+            f"17 3 * * * OPENCLAW_EXPECTED_SOURCE_HEAD={head} OPENCLAW_BASE_DIR=/srv /srv/helper_scripts/cron/ml_training_maintenance_cron.sh",
         ]
     )
 
@@ -195,7 +195,7 @@ def test_ready_fixture_builds_single_source_health_gate_without_authority(
     data = tmp_path / "data"
     _populate_ready_data(data)
 
-    proc = _run(tmp_path, data, repo, _active_crontab(), head)
+    proc = _run(tmp_path, data, repo, _active_crontab(head), head)
     payload = json.loads(proc.stdout)
 
     assert payload["status"] == "LEARNING_STACK_READY_FOR_SOURCE_ONLY_REVIEW"
@@ -224,7 +224,7 @@ def test_ml_maintenance_error_blocks_ready_even_with_active_demo_stack(
         },
     )
 
-    proc = _run(tmp_path, data, repo, _active_crontab(), head)
+    proc = _run(tmp_path, data, repo, _active_crontab(head), head)
     payload = json.loads(proc.stdout)
 
     assert payload["status"] == "LEARNING_STACK_DEGRADED"
@@ -240,7 +240,7 @@ def test_onnx_newer_than_registry_fails_closed(tmp_path: Path) -> None:
     model_path = data / "models/q50/model.onnx"
     _touch(model_path, 1782734100)  # 2026-06-29T11:55:00Z
 
-    proc = _run(tmp_path, data, repo, _active_crontab(), head)
+    proc = _run(tmp_path, data, repo, _active_crontab(head), head)
     payload = json.loads(proc.stdout)
 
     assert payload["status"] == "LEARNING_STACK_DEGRADED"
@@ -253,7 +253,7 @@ def test_duplicate_scheduler_entries_fail_unique_scheduler(tmp_path: Path) -> No
     head = _git_repo(repo)
     data = tmp_path / "data"
     _populate_ready_data(data)
-    crontab = _active_crontab() + "\n" + (
+    crontab = _active_crontab(head) + "\n" + (
         "47 * * * * OPENCLAW_BASE_DIR=/srv "
         "/srv/helper_scripts/cron/cost_gate_learning_lane_cron.sh"
     )
@@ -265,6 +265,22 @@ def test_duplicate_scheduler_entries_fail_unique_scheduler(tmp_path: Path) -> No
     assert payload["cron"]["expected_marker_counts"]["cost_gate_learning_lane"] == 2
     assert payload["answers"]["unique_scheduler_authority"] is False
     assert "scheduler_authority_not_unique_or_missing" in payload["blockers"]
+
+
+def test_stale_scheduler_expected_head_pin_blocks_health_ready(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    head = _git_repo(repo)
+    data = tmp_path / "data"
+    _populate_ready_data(data)
+    stale_head = "a" * 40
+
+    proc = _run(tmp_path, data, repo, _active_crontab(stale_head), head)
+    payload = json.loads(proc.stdout)
+
+    assert payload["status"] == "LEARNING_STACK_DEGRADED"
+    assert payload["cron"]["expected_head_pins"]["status"] == "EXPECTED_HEAD_PIN_MISMATCH"
+    assert payload["cron"]["expected_head_pins_match_target"] is False
+    assert "scheduler_expected_head_pin_mismatch" in payload["blockers"]
 
 
 def test_json_output_and_fail_on_degraded_contract(tmp_path: Path) -> None:

@@ -30,10 +30,7 @@
 
 ## Blockers
 
-- Demo API key still does not match operator-expected prefix:
-  - observed masked key `FWkGZX...g53T`
-  - observed sha12 `317f982c009f`
-  - expected prefix check `BHw4...` is false
+- 2026-06-30 correction: Demo API key `FWkGZX...g53T` / sha12 `317f982c009f` is operator-confirmed correct; the `BHw4...` expected-prefix check was a stale expected-hint false positive.
 - Connector remains read-only:
   - `BYBIT_MODE=read_only`
   - `BYBIT_CONNECTOR_WRITE_ENABLED=false`
@@ -47,4 +44,4 @@ No runtime source sync/deploy, no engine/API restart, no secret/env mutation, no
 
 `DONE_WITH_CONCERNS` / `BLOCKED_BY_RUNTIME`.
 
-Next executable action: operator enters the expected Demo key+secret through approved settings API/GUI, then rerun bounded Demo readiness. Connector mode cutover must remain fail-closed while any `demo_api_slot:*` blocker remains.
+Next executable action: rerun bounded Demo readiness without the stale `BHw4...` expected pin, or with a current strict expected key if pinning is desired. Connector mode cutover must remain fail-closed while real `demo_api_slot:*` blockers remain.

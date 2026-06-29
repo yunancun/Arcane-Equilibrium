@@ -15,7 +15,7 @@
 bounded Demo 仍卡在 credentials/mode：
 
 - Demo key masked `FWkGZX...g53T`, sha12 `317f982c009f`
-- operator 期望 prefix `BHw4...`，目前不匹配
+- 2026-06-30 correction: `FWkGZX...g53T` 是正確 Demo Read-Write key；`BHw4...` 是 stale expected hint
 - `BYBIT_MODE=read_only`
 - `BYBIT_CONNECTOR_WRITE_ENABLED=false`
 
