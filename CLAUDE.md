@@ -24,8 +24,10 @@ in reports/archive. Do not mirror long status paragraphs here.
 - Formal product: `玄衡 · Arcane Equilibrium`.
 - `OpenClaw` is the control-plane / Gateway / Console / communication service
   family, not the total product name.
-- Bybit is the only EXECUTION exchange; ADR-approved non-Bybit read-only
-  market-data exceptions exist (Binance market-data-only per ADR-0033/0040).
+- Bybit remains the only active live execution exchange. ADR-approved
+  non-Bybit exceptions are explicitly scoped: Binance market-data-only per
+  ADR-0033/0040, and IBKR `stock_etf_cash` read-only/paper/shadow research per
+  ADR-0048 + AMD-2026-06-29-01. IBKR live/tiny-live remains denied.
 - Rust `openclaw_engine` is the trading, risk, strategy-config, and execution
   authority.
 - Python/FastAPI is the control plane, GUI backend, bridge, replay surface, and
@@ -94,9 +96,11 @@ then read `TODO.md` and the linked report/archive needed for the task.
   mutate live parameters without GovernanceHub + Decision Lease approval.
 - Do not fake AI calls, trading activity, fills, lineage, healthcheck evidence,
   or test results.
-- Paper is not an active promotion evidence lane unless a future explicit
-  operator decision reopens it. Stage 1 alpha-bearing promotion is Demo-only
-  after a green Stage 0R replay preflight.
+- Legacy crypto Paper is not an active promotion evidence lane unless a future
+  explicit operator decision reopens it. Stage 1 alpha-bearing promotion is
+  Demo-only after a green Stage 0R replay preflight. The ADR-0048 IBKR
+  `stock_etf_cash` paper/shadow lane is a separate research/evidence lane and
+  still cannot auto-promote to tiny-live, live, or durable-alpha proof.
 
 ## Alpha Evidence Governance
 

@@ -46,7 +46,7 @@ captures the same decision surface or the deletion is explicitly called out.
 
 | Old memory content | Destination |
 |---|---|
-| Product name, OpenClaw positioning, Bybit-only target | `README.md`, `CONTEXT.md`, ADR-0013/0014 |
+| Product name, OpenClaw positioning, active Bybit execution boundary, approved non-Bybit exceptions | `README.md`, `CONTEXT.md`, ADR-0013/0014, ADR-0048 for IBKR `stock_etf_cash` paper/shadow |
 | 16 root principles and live hard boundaries | compact form in memory; full governance in `CLAUDE.md` plus ADR/governance docs |
 | Runtime PID, env, healthcheck timestamps, active blockers | `TODO.md` latest-state sections |
 | Wave / sprint progress and closed work ledgers | `TODO.md` short active markers; full detail in reports/archive |

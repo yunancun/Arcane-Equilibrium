@@ -1,0 +1,65 @@
+{
+  "schema": "stock_etf_phase0_contract_packet_manifest_v1",
+  "generated_at": "2026-06-29",
+  "status": "ACCEPTED_PHASE0_CONTRACT_NO_RUNTIME_AUTHORITY",
+  "asset_lane": "stock_etf_cash",
+  "broker": "ibkr",
+  "scope": "paper_shadow_only",
+  "authority": {
+    "adr": "docs/adr/0048-ibkr-stock-etf-paper-shadow-lane.md",
+    "amd": "docs/governance_dev/amendments/2026-06-29--AMD-2026-06-29-01-ibkr-stock-etf-paper-shadow-lane.md",
+    "contract_packet": "docs/execution_plan/specs/2026-06-29--stock_etf_cash_phase0_named_contract_packet.md"
+  },
+  "api_baseline": {
+    "selected": "ib_gateway_tws_api",
+    "host_policy": "loopback_only",
+    "paper_port_default_candidate": 4002,
+    "live_ports_denied": true,
+    "ibkr_call_performed": false
+  },
+  "global_denials": {
+    "ibkr_live": true,
+    "tiny_live": true,
+    "margin": true,
+    "short": true,
+    "options": true,
+    "cfd": true,
+    "transfer": true,
+    "account_management_writes": true,
+    "python_broker_write_authority": true,
+    "gui_lane_authority": true,
+    "automatic_promotion": true
+  },
+  "contracts": [
+    "asset_lane_taxonomy_v1",
+    "broker_capability_registry_v1",
+    "phase2_ibkr_external_surface_gate_v1",
+    "non_bybit_api_allowlist_v1",
+    "ibkr_api_session_topology_v1",
+    "ibkr_session_attestation_v1",
+    "feature_flag_secret_auth_matrix_v1",
+    "lane_scoped_ipc_v1",
+    "ibkr_paper_order_lifecycle_v1",
+    "broker_lifecycle_event_log_v1",
+    "stock_etf_db_evidence_ddl_v1",
+    "stock_market_data_provenance_v1",
+    "broker_account_portfolio_cash_ledger_v1",
+    "cost_model_version_v1",
+    "benchmark_versions_v1",
+    "stock_shadow_fill_model_v1",
+    "stock_etf_evidence_clock_v1",
+    "gui_lane_contract_v1",
+    "stock_etf_storage_capacity_v1",
+    "stock_etf_kill_switch_and_disable_cleanup_runbook_v1",
+    "stock_etf_release_packet_v1",
+    "tiny_live_adr_eligibility_v1"
+  ],
+  "phase_unlock": {
+    "phase1_type_config_schema_ipc": "ALLOWED_AFTER_THIS_PACKET_WITH_E2_E4_QA",
+    "phase2_ibkr_external_contact": "BLOCKED_UNTIL_PHASE2_EXTERNAL_SURFACE_GATE_PASS",
+    "phase3_evidence_clock": "BLOCKED_UNTIL_DATA_PROVENANCE_EVIDENCE_CONTRACTS_PASS",
+    "phase4_gui_runtime": "BLOCKED_UNTIL_ROUTE_CACHE_AUTH_NEGATIVE_TESTS_PASS",
+    "phase5_paper_shadow_online": "BLOCKED_UNTIL_RELEASE_PACKET_AND_SHAKEDOWN_PASS",
+    "tiny_live_or_live": "BLOCKED_REQUIRES_FUTURE_ADR"
+  }
+}
