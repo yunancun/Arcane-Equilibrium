@@ -15,6 +15,8 @@
 | `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_plan_adversarial_pm_integration.md` | Operator 摘要：IBKR `stock_etf_cash` 方案方向有效，但未 implementation-ready；下一步只能開 Phase 0 ADR/spec packet。 |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-06-29--ibkr_stock_etf_plan_round2_pm_integration.md` | PM 第二輪整合：CC/FA/PA/E3/E5/QC/MIT/QA 均為 `APPROVE_PHASE0_ONLY`；Phase 0 擴展為 ADR + interface/security/data/GUI/evidence/QA release packet，不能承諾 scheduled full online。 |
 | `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_plan_round2_pm_integration.md` | Operator 二輪摘要：下一步仍只允許 Phase 0 contract packet；IBKR healthcheck、secret、paper order、GUI runtime、evidence clock、tiny-live/live 仍禁止。 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-29--ibkr_stock_etf_plan_round3_pm_launch_certification.md` | PM 第三輪 launch-certification：CC/FA/PA/E3/E5/QC/MIT/QA 均為 `CERTIFIABLE_IF_GATES_PASS`，只在 Phase 0 packet accepted 且 Phase 1-5 gates 全通過後可簽核 paper/shadow lane 完整上線。 |
+| `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_plan_round3_pm_launch_certification.md` | Operator 三輪摘要：`paper_shadow_only` 範圍內 all-gates-pass 後可簽核完整上線；仍不代表現在上線、IBKR live/tiny-live、盈利證明或絕對無遺漏。 |
 
 ### 2026-06-22 Shadow placement alpha ingestion
 
