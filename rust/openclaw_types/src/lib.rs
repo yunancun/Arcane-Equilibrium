@@ -18,6 +18,7 @@ pub mod ibkr_phase2_runtime;
 pub mod price;
 pub mod risk;
 pub mod state;
+pub mod stock_etf_phase3_evidence;
 pub mod stock_etf_lane;
 
 pub use agent::{AgentMessage, AgentRole, MessageType};
@@ -64,6 +65,11 @@ pub use risk::{
     H0CheckResult, H0GateConfig, H0GateHealthSnapshot, H0GateRiskSnapshot, PricingConfig,
 };
 pub use state::{AgentState, GovernanceMode, OmsState, OrderInitiator, RiskInitiator, RiskLevel};
+pub use stock_etf_phase3_evidence::{
+    StockEtfAdjustmentMarker, StockEtfDailyDqManifestV1, StockEtfEvidenceClockDayV1,
+    StockEtfEvidenceClockStatus, StockEtfFrozenEvidenceInputsV1, StockEtfPhase3Blocker,
+    StockEtfPhase3Verdict, StockMarketDataProvenanceV1,
+};
 pub use stock_etf_lane::{
     evaluate_broker_operation, AssetLane, AuthorityScope, Broker, BrokerCapabilityDecision,
     BrokerCapabilityRequest, BrokerEnvironment, BrokerOperation, IbkrPaperOrderLifecycleState,

@@ -13,3 +13,5 @@ This directory stores broker capability contracts and default-off runtime postur
 `ibkr_feature_flag_secret_auth_matrix.toml` records the default-blocked feature-flag, secret, and scoped-authorization matrix shape. It does not authorize IBKR contact or paper orders.
 
 `ibkr_paper_order_lifecycle.toml` records the default-blocked paper order lifecycle and append-only event log shape. It does not authorize connector creation or paper orders.
+
+`stock_etf_phase3_evidence_contracts.toml` records the default-blocked market-data provenance, DQ, frozen-input, and evidence-clock checker shape. It does not start the evidence clock.

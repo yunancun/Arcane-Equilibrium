@@ -40,6 +40,8 @@
 | `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_phase2_feature_flag_secret_auth_matrix_checkpoint.md` | Operator Phase 2 feature-flag/secret/auth matrix 摘要：flags alone cannot grant paper/live authority；secret/artifact/session/envelope evidence remains required and first contact blocked。 |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-06-29--ibkr_stock_etf_phase2_paper_lifecycle_event_log_checkpoint.md` | PM Phase 2 paper lifecycle/event-log checkpoint：append-only lifecycle event validation、transition rules、STATE_UNKNOWN recovery、restart recovery classifier 已落地；仍不授權 paper order。 |
 | `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_phase2_paper_lifecycle_event_log_checkpoint.md` | Operator Phase 2 paper lifecycle 摘要：paper order lifecycle evidence shape done；no connector/no paper order/no IBKR contact。 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-29--ibkr_stock_etf_phase3_evidence_contracts_checkpoint.md` | PM Phase 3 evidence checkpoint：market-data provenance、frozen inputs、DQ/quarantine manifest、evidence-clock day checker source contracts 已落地；不啟動 evidence clock。 |
+| `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_phase3_evidence_contracts_checkpoint.md` | Operator Phase 3 evidence 摘要：PASS_DAY/QUARANTINED_DAY/WINDOW_COMPLETE checker semantics done；runtime Phase 3 still blocked。 |
 
 ### 2026-06-22 Shadow placement alpha ingestion
 

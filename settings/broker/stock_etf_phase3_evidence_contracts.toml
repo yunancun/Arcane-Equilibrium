@@ -1,0 +1,39 @@
+# Stock/ETF Phase 3 data provenance, DQ, and evidence-clock checker template.
+# This template is intentionally BLOCKED and does not start the evidence clock.
+
+[market_data_provenance]
+source_vendor_or_broker = ""
+entitlement_tier = ""
+raw_payload_hash = ""
+received_at_ms = 0
+exchange_time_ms = 0
+adjustment_marker = "UNKNOWN"
+corporate_action_adjustment_version_hash = ""
+symbol = ""
+instrument_identity_hash = ""
+calendar_session_id = ""
+
+[frozen_inputs]
+universe_hash = ""
+benchmark_hash = ""
+cost_model_hash = ""
+strategy_hypothesis_hash = ""
+corporate_action_fx_fee_asof_ms = 0
+paper_shadow_divergence_threshold_hash = ""
+gui_evidence_view_available = false
+daily_scorecard_regeneration_passed = false
+
+[dq_manifest]
+trading_day = ""
+calendar_aware_coverage_bps = 0
+symbol_completeness_bps = 0
+latency_dq_passed = false
+quarantine_manifest_hash = ""
+market_data_provenance_accepted = false
+scorecard_regeneration_passed = false
+atomic_fact_input_hash = ""
+
+[evidence_clock_day]
+status = "NOT_STARTED"
+ibkr_readonly_paper_connector_green_5d = false
+shadow_collector_green_5d = false
