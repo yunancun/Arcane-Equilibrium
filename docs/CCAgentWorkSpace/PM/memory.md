@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-30 IBKR Stock/ETF Disable-Cleanup Runbook Contract
+
+- PM added `stock_etf_kill_switch_and_disable_cleanup_runbook_v1` as a Rust source-only validator for exact kill flags, collector stop, GUI disabled/hidden posture, live-secret absence, forward-only archive/DB retention, append-only audit, and Bybit live unchanged proof.
+- The contract rejects IBKR contact, connector runtime, paper order routing, secret-slot creation, secret serialization, destructive DB cleanup, DB delete/truncate permission, release authority, tiny-live, and live authority.
+- This grants no IBKR contact, connector runtime, paper order, DB apply, evidence clock, GUI lane authority, release approval, tiny-live, or live.
+
 ## 2026-06-30 Bounded Demo Connector Mode Cutover
 
 - PM confirmed `BYBIT_MODE=read_only` was a local runtime connector gate, not a Bybit dashboard/API-key permission. Operator-confirmed Demo key remains `FWkGZX...g53T`; mainnet stayed disabled with `OPENCLAW_ALLOW_MAINNET=0`.

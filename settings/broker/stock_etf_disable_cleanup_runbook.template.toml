@@ -1,0 +1,95 @@
+# ADR-0048 Stock/ETF kill-switch and disable-cleanup runbook template.
+#
+# This is a blocked, secret-free source template. It does not stop services,
+# contact IBKR, create secrets, route paper orders, mutate DB state, change
+# Bybit live execution, authorize release, or authorize tiny-live/live.
+
+[runbook]
+runbook_id = ""
+asset_lane = "crypto_perp"
+broker = "bybit"
+source_artifact_hash = ""
+bybit_live_execution_unchanged = false
+ibkr_contact_performed = false
+connector_runtime_started = false
+paper_order_routed = false
+secret_slot_created = false
+secret_content_serialized = false
+destructive_db_cleanup_requested = false
+db_delete_or_truncate_allowed = false
+paper_shadow_launch_authorized = false
+tiny_live_authorized = false
+live_authorized = false
+
+[[env_flags]]
+name = "OPENCLAW_STOCK_ETF_LANE_ENABLED"
+expected_value = "0"
+observed_value = ""
+evidence_hash = ""
+
+[[env_flags]]
+name = "OPENCLAW_IBKR_READONLY_ENABLED"
+expected_value = "0"
+observed_value = ""
+evidence_hash = ""
+
+[[env_flags]]
+name = "OPENCLAW_IBKR_PAPER_ENABLED"
+expected_value = "0"
+observed_value = ""
+evidence_hash = ""
+
+[[env_flags]]
+name = "OPENCLAW_STOCK_ETF_SHADOW_ONLY"
+expected_value = "1"
+observed_value = ""
+evidence_hash = ""
+
+[[proofs]]
+kind = "collector_stopped"
+verified = false
+evidence_hash = ""
+grants_runtime_authority = false
+destructive_cleanup_claimed = false
+
+[[proofs]]
+kind = "gui_stock_views_disabled_or_hidden"
+verified = false
+evidence_hash = ""
+grants_runtime_authority = false
+destructive_cleanup_claimed = false
+
+[[proofs]]
+kind = "live_secret_absence_proven"
+verified = false
+evidence_hash = ""
+grants_runtime_authority = false
+destructive_cleanup_claimed = false
+
+[[proofs]]
+kind = "evidence_archive_forward_only"
+verified = false
+evidence_hash = ""
+grants_runtime_authority = false
+destructive_cleanup_claimed = false
+
+[[proofs]]
+kind = "db_forward_only_retention_preserved"
+verified = false
+evidence_hash = ""
+grants_runtime_authority = false
+destructive_cleanup_claimed = false
+
+[[proofs]]
+kind = "append_only_audit_preserved"
+verified = false
+evidence_hash = ""
+grants_runtime_authority = false
+destructive_cleanup_claimed = false
+
+[[proofs]]
+kind = "bybit_live_execution_unchanged"
+verified = false
+evidence_hash = ""
+grants_runtime_authority = false
+destructive_cleanup_claimed = false
