@@ -2530,3 +2530,11 @@
 - Verification passed: local py_compile, focused serving tests `10 passed`, local adjacent learning/readiness suite `46 passed`, runtime py_compile, runtime adjacent suite `46 passed`, and `git diff --check`.
 - Runtime serving snapshot `/tmp/openclaw/session_loop_state_20260629T_serving_snapshot/learning_serving_snapshot_after_f1d_sync.json` sha `83ac78520c9739b17378ddc1d88f3150237a36a1e96b87a236cf6eca7bbeb68d` is `LEARNING_SERVING_SNAPSHOT_BLOCKED_BY_TRAINING_REGISTRY_REPAIR_NO_AUTHORITY`; readiness sha `8f9da6b...` remains blocked by Demo key/mode.
 - Next ML loop item is `P0-LEARN-PROOF-PROMOTION-GATE`; model load/serving, registry/PG write, bounded Demo execution, Cost Gate change, and proof/promotion remain blocked until separate gated reviews pass.
+
+## 2026-06-29 Learning Proof/Promotion Gate Source Checkpoint
+
+- PM advanced `P0-LEARN-PROOF-PROMOTION-GATE` source-only at commits `ad43b638` and `ed8c3595`: new `cost_gate_learning_proof_promotion_gate_v1` consumes serving snapshot, learning adjudicator, candidate proof-evidence, and optional proof-exclusion artifacts.
+- The gate emits deterministic blocked/ready operator-review verdicts requiring ready serving snapshot, matching adjudicator `REVIEW`, row-backed candidate-matched Demo fills, fee/slippage/spread/capacity/net evidence, execution realism, tail risk, OOS/repeat validation, matched controls/baseline outperformance, serving/model agreement, and proof-exclusion pass.
+- Hardened coverage ensures summary counts alone cannot clear proof and cleanup/replay-only/unattributed/lineage-broken rows stay proof-excluded; outputs never grant promotion, Cost Gate, runtime, model load, serving, registry/PG, order, or live authority.
+- Verification passed: py_compile, focused proof/promotion tests `11 passed`, ML source chain tests `52 passed`, health snapshot tests `7 passed`, and `git diff --check`.
+- ML source contract chain is complete through proof/promotion gate; actual proof remains blocked by serving repair state, Demo credential/mode readiness, and missing row-backed candidate-matched Demo fills.
