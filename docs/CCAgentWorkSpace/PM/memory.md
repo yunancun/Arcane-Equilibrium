@@ -2477,3 +2477,10 @@
 - PM advanced `P0-LEARN-HEALTH-SSOT` source-only at commit `f2a827c2`: new `learning_stack_health_snapshot_v1` aggregates scheduler, demo-health, ML maintenance, registry/artifact, ledger/parity, and fill-backed proof inputs while keeping all mutation/order/live/Cost Gate authority false.
 - Verification passed: py_compile, focused snapshot tests `7 passed`, adjacent demo-learning healthcheck + snapshot tests `19 passed`, and `git diff --check`.
 - Next ML loop item is `P0-LEARN-LEDGER-EVENT-CONTRACT`; runtime install/cron repair/Demo mutation remains blocked until source contracts and gated reviews pass.
+
+## 2026-06-29 LearningEvent Contract Source Checkpoint
+
+- PM advanced `P0-LEARN-LEDGER-EVENT-CONTRACT` source-only at commit `6b93cf2a`: new `cost_gate_learning_event_contract_v1` wraps `probe_ledger.jsonl` and explicit artifact JSON into deterministic `cost_gate_learning_event_v1` packets with event ids, source refs/hashes, candidate identity, generated timestamp, proof tier, and quarantine.
+- `blocked_signal_outcome` / `market_markout_proxy_for_blocked_signal` rows are explicitly labeled `blocked_markout_proxy`; authority-bearing input fails closed and emits no events.
+- Verification passed: py_compile, focused LearningEvent tests `7 passed`, adjacent learning-lane tests `19 passed`, and `git diff --check`.
+- Next ML loop item is `P0-LEARN-PROPOSAL-COMPILER`; PG cutover, runtime install, Demo mutation, training/registry repair, serving, and proof/promotion remain blocked until their separate source contracts and gated reviews pass.
