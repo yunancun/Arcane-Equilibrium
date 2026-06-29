@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-29（TODO v667 runtime docs sync expected-head repin）
+> 最後更新：2026-06-29（TODO v668 LearningEvent contract source checkpoint）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v668 增量（2026-06-29 LearningEvent contract source checkpoint）**：Source commit `6b93cf2a` adds `helper_scripts/research/cost_gate_learning_lane/learning_event_contract.py` and focused tests for `P0-LEARN-LEDGER-EVENT-CONTRACT`, pushed to `origin/main`. The contract emits `cost_gate_learning_event_contract_v1` and wraps current artifact `probe_ledger.jsonl` plus explicit artifact JSON inputs into deterministic `cost_gate_learning_event_v1` packets with event id/type, candidate id/identity, source generated timestamp, source refs, source/row sha, event packet sha, and proof tier. `blocked_signal_outcome` / `market_markout_proxy_for_blocked_signal` rows are forced to `proof_tier=blocked_markout_proxy`; malformed rows/artifacts and missing identity/timestamp inputs are quarantined; authority-bearing input fails closed as `AUTHORITY_BOUNDARY_VIOLATION` and emits no events. Verification：py_compile PASS, focused tests `7 passed`, adjacent learning-lane tests `19 passed`, and `git diff --check` PASS. Boundary：source/test/docs only；preserves `artifact_probe_ledger_jsonl` as current SSOT, no PG cutover/query/write, no Bybit call, no order, no runtime/env/service/crontab mutation, no Demo mutation, no Cost Gate lowering, no probe/order/live authority, and no promotion/profit proof. Next active ML loop item：`P0-LEARN-PROPOSAL-COMPILER`.
 
 **v667 增量（2026-06-29 runtime docs sync expected-head repin）**：After syncing the v666 docs pointer commit to `trade-core`, PM detected that learning cron expected-head pins still referenced the pre-docs source head `f2a827c2...` while runtime checkout had advanced. PM repinned the user crontab expected-head values to the checked-out runtime head and reran the demo-learning stack healthcheck plus the learning health snapshot. Post-repin health snapshot `/tmp/openclaw/session_loop_state_20260629T_runtime_followup/learning_stack_health_snapshot_after_docs_sync_repin.json` sha `2afffa662fa8284b4de2fca2842b95c261707cc9361b13dab5a10a89d5a5d519` remains `LEARNING_STACK_DEGRADED`, but source is clean, expected-head matches, scheduler authority is unique (`5/5` expected markers), demo stack health is fresh, and ledger freshness is true. Remaining blockers are ML maintenance/model registry/artifact parity/fill-backed proof plus the separate bounded Demo credential/mode runtime blocker. Boundary：runtime crontab expected-head repair + read-only health snapshot/docs only；no live/mainnet, no API key/secret output, no private Bybit call, no credential validation request, no Decision Lease acquire/release, no order/cancel/modify, no env/secret/service mutation, no writer/adapter/risk gate bypass, no global Cost Gate lowering, and no promotion/profit proof.
 
