@@ -25,6 +25,18 @@
 
 ## 近期記錄
 
+## 2026-06-30 Bounded Demo Connector Mode Cutover
+
+- PM confirmed `BYBIT_MODE=read_only` was a local runtime connector gate, not a Bybit dashboard/API-key permission. Operator-confirmed Demo key remains `FWkGZX...g53T`; mainnet stayed disabled with `OPENCLAW_ALLOW_MAINNET=0`.
+- Approved settings API cutover persisted `BYBIT_MODE=demo` and `BYBIT_CONNECTOR_WRITE_ENABLED=true`; readiness sha `e4cad133...` is now `BOUNDED_DEMO_RUNTIME_READY_FOR_FINAL_WINDOW_GATES`.
+- Runtime hygiene lesson: `restart_all.sh` manual API launch can fight `openclaw-trading-api.service`; PM reclaimed API under systemd MainPID `1038429`, added restart_all API env pass-through, and verified settings `restart_required=false`. This is not promotion proof; final-window gates and candidate-matched fills still remain.
+
+## 2026-06-30 IBKR Stock/ETF Broker Capability Registry Contract
+
+- PM added `broker_capability_registry_v1` as a Rust source-only validator for the full IBKR Stock/ETF read/paper/shadow/scorecard/denied operation matrix.
+- The contract requires Bybit live unchanged, Python broker write authority denied, Rust-owned paper writes, required gates/audit/source hashes, and exact typed denials for live/margin/short/options/CFD/transfer/account writes.
+- This grants no IBKR contact, connector runtime, paper order, GUI authority, tiny-live, live, or secret access.
+
 ## 2026-06-30 IBKR Stock/ETF DB Evidence DDL Contract
 
 - PM added `stock_etf_db_evidence_ddl_v1` as a Rust source-only validator for broker/research/audit schemas, evidence tables, natural keys, lane/broker/live-denial constraints, paper/shadow separation, Guard A/B/C, and future PG dry-run/double-apply requirements.
