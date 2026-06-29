@@ -1,0 +1,33 @@
+# Stock/ETF asset-lane audit event template.
+# This template is intentionally BLOCKED. It records the shape of immutable
+# event references only and does not write audit rows, contact IBKR, create
+# secrets, apply migrations, or authorize paper/tiny-live/live.
+
+schema_version = "audit.asset_lane_events_v1"
+event_id = ""
+event_kind = "unknown"
+sequence_number = 0
+genesis_event = false
+previous_event_hash = ""
+event_time_ms = 0
+producer_commit = ""
+actor = ""
+source = ""
+asset_lane = "stock_etf_cash"
+broker = "ibkr"
+environment = "read_only"
+operation = "health_read"
+permission_scope = ""
+account_fingerprint_hash = ""
+session_fingerprint_hash = ""
+decision_id = ""
+order_intent_id = ""
+allowed = false
+denial_reason = "lane_disabled"
+payload_hash = ""
+raw_artifact_hash = ""
+redacted_summary_hash = ""
+source_artifact_hash = ""
+input_artifact_hashes = []
+secret_content_serialized = false
+raw_payload_inlined = false
