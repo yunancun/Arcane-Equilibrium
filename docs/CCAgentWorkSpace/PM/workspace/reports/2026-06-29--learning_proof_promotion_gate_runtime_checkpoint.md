@@ -7,7 +7,7 @@ Runtime transition: BLOCKED_BY_RUNTIME
 
 ## Summary
 
-`trade-core` was fast-forwarded to `16f4028313f45dc6af411e81d9eb841ed39878d4` and the learning cron expected-head markers were repinned to that head. The bounded Demo proof/promotion gate was materialized again after sync.
+`trade-core` was fast-forwarded through the current checkpoint and the learning cron expected-head markers were repinned to the runtime head. The bounded Demo proof/promotion gate was materialized again after sync; the artifact filename retains `after_16f_sync` because it was produced before the docs checkpoint commit.
 
 Runtime proof artifact:
 
@@ -21,8 +21,8 @@ The gate remains correctly blocked because the serving snapshot is not ready and
 
 ## Runtime Verification
 
-- Runtime checkout: clean on `main...origin/main` at `16f4028313f45dc6af411e81d9eb841ed39878d4`
-- Learning cron expected-head marker count for `16f4028313f45dc6af411e81d9eb841ed39878d4`: `9`
+- Runtime checkout: clean on `main...origin/main`
+- Learning cron expected-head marker count for runtime HEAD: `9`
 - `python3 -m py_compile helper_scripts/research/cost_gate_learning_lane/learning_proof_promotion_gate.py helper_scripts/research/tests/test_cost_gate_learning_proof_promotion_gate.py`
 - `PYTHONPATH=helper_scripts/research python3 -m pytest -q helper_scripts/research/tests/test_cost_gate_learning_proof_promotion_gate.py` -> `11 passed`
 - Adjacent learning/readiness suite -> `57 passed`
