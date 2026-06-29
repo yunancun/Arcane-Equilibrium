@@ -1,0 +1,31 @@
+# IBKR Phase 2 source runtime contracts for ADR-0048.
+# This file records evidence shape only and does not authorize IBKR contact.
+
+[secret_slot_contract]
+contract_present = false
+readonly_slot_posture = "unknown"
+paper_slot_posture = "unknown"
+live_slot_posture = "unknown"
+secret_slot_fingerprint = ""
+account_fingerprint_hash = ""
+owner_only_permissions = false
+env_var_credential_fallback_denied = false
+secret_content_serialized = false
+account_id_serialized = false
+live_secret_absent_or_empty = false
+
+[api_session_topology]
+topology_present = false
+api_baseline = "ib_gateway_tws_api"
+runtime_owner = "trade-core"
+host = ""
+port = 0
+gateway_mode = "unknown"
+environment = "readonly"
+deterministic_client_id_present = false
+process_identity_recorded = false
+account_fingerprint_hash = ""
+api_server_version_recorded = false
+data_entitlements_recorded = false
+startup_time_recorded = false
+attestation_expiry_recorded = false

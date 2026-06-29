@@ -12,6 +12,7 @@ pub mod intent;
 pub mod ibkr_phase2_artifact;
 pub mod ibkr_phase2_gate;
 pub mod ibkr_phase2_policies;
+pub mod ibkr_phase2_runtime;
 pub mod price;
 pub mod risk;
 pub mod state;
@@ -40,6 +41,11 @@ pub use ibkr_phase2_policies::{
     IbkrPythonWriteGuardPolicyBlocker, IbkrPythonWriteGuardPolicyV1, IbkrRateLimitPolicyBlocker,
     IbkrRateLimitPolicyV1, IbkrRateLimitScope, IbkrRedactionPolicyBlocker,
     IbkrRedactionPolicyV1,
+};
+pub use ibkr_phase2_runtime::{
+    IbkrApiSessionTopologyBlocker, IbkrApiSessionTopologyV1, IbkrApiSessionTopologyVerdict,
+    IbkrGatewayProcessMode, IbkrSecretSlotContractBlocker, IbkrSecretSlotContractV1,
+    IbkrSecretSlotContractVerdict, IbkrSecretSlotPosture,
 };
 pub use intent::{DataQualityLevel, OrderIntent, RiskVerdict, TradeIntent};
 pub use price::{Kline, KlineBar, PriceEvent, PriceEventKind, OHLCV};
