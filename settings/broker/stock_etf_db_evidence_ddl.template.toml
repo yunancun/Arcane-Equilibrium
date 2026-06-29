@@ -1,0 +1,35 @@
+# Stock/ETF DB evidence DDL contract template.
+# This template is intentionally BLOCKED and source-only. It does not apply
+# migrations, open Postgres, register sqlx migrations, contact IBKR, create
+# secrets, route orders, or start an evidence clock.
+
+contract_id = ""
+source_sql_path = "docs/execution_plan/specs/2026-06-29--stock_etf_db_evidence_ddl_v1.source_only.sql"
+source_sql_sha256 = ""
+source_only = false
+migration_file_path = ""
+copied_to_sql_migrations = false
+db_apply_performed = false
+pg_write_performed = false
+sqlx_migration_registered = false
+pm_operator_apply_authorized = false
+e2_review_required = false
+e4_review_required = false
+linux_pg_dry_run_required = false
+pg_double_apply_required = false
+guard_a_existing_table_columns = false
+guard_b_type_sensitive_add_column = false
+guard_c_hot_path_indexes = false
+required_schemas = []
+required_tables = []
+required_natural_keys = []
+stock_tables_asset_lane_check = false
+ibkr_facts_broker_check = false
+live_environment_denied = false
+paper_shadow_separate_tables = false
+synthetic_shadow_check = false
+raw_artifact_hash_required = false
+audit_asset_lane_events_present = false
+forward_only_evidence_retention = false
+destructive_cleanup_as_rollback_denied = false
+secret_content_serialized = false

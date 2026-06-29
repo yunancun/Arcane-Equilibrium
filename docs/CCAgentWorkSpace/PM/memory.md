@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-30 IBKR Stock/ETF DB Evidence DDL Contract
+
+- PM added `stock_etf_db_evidence_ddl_v1` as a Rust source-only validator for broker/research/audit schemas, evidence tables, natural keys, lane/broker/live-denial constraints, paper/shadow separation, Guard A/B/C, and future PG dry-run/double-apply requirements.
+- The blocked template and tests reject migration path promotion, DB apply, PG write, sqlx registration, PM/Operator apply authorization claims, and secret serialization.
+- This does not authorize migration apply, IBKR contact, connector runtime, paper orders, audit writer, evidence clock, GUI lane authority, tiny-live, or live.
+
 ## 2026-06-30 Bounded Demo Key Expected Prefix False Positive
 
 - PM accepted operator correction: masked `FWkGZX...g53T` is the correct Bybit Demo Read-Write key with OpenAPI whitelist `79.117.10.224`; the old `BHw4...` mismatch was a stale expected-prefix hint, not a live/mainnet key issue.

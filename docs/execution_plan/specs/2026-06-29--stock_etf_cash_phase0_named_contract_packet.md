@@ -434,6 +434,17 @@ Migration rules:
 - Linux PG dry-run before apply
 - idempotency double-apply before sign-off
 
+Source validator: `openclaw_types::stock_etf_db_evidence_ddl::StockEtfDbEvidenceDdlContractV1`.
+The validator requires the source-only SQL path, required `broker` / `research`
+/ `audit` schemas, all required tables, natural-key declarations, stock/ETF
+asset-lane checks, IBKR broker checks, live-environment denial, paper/shadow
+table separation, synthetic shadow checks, raw artifact hash retention,
+`audit.asset_lane_events`, forward-only evidence retention, destructive cleanup
+rollback denial, Guard A/B/C requirements, and future E2/E4 + Linux PG
+dry-run + double-apply requirements. It rejects copied migration paths,
+`sql/migrations/` promotion claims, DB apply, PG writes, sqlx registration,
+PM/Operator apply authorization claims, and serialized secret content.
+
 ## 13. `stock_market_data_provenance_v1`
 
 Required on every market-data fact:

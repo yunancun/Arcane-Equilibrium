@@ -76,6 +76,8 @@ No `Other(String)`, catch-all broker, catch-all lane, or string-literal venue by
 
 Phase 1 source foundation may start only after the Phase 0 named contract packet exists in repo and is internally consistent with this ADR and AMD-2026-06-29-01.
 
+`stock_etf_db_evidence_ddl_v1` must remain source-only until separate migration authorization. Its source contract must prove required schemas/tables/natural keys, stock/ETF and IBKR constraints, paper/shadow separation, audit-event storage, Guard A/B/C migration controls, future Linux PG dry-run and double-apply requirements, and no DB apply/sqlx registration/PG write claim.
+
 Phase 2 IBKR external contact may start only after `phase2_ibkr_external_surface_gate_v1` emits an immutable PASS artifact. The first read-only healthcheck is external contact and is not exempt.
 
 Phase 3 evidence clock may start only after `stock_etf_evidence_clock_v1` proves collector stability, frozen universe/benchmark/cost model/strategy hypothesis hashes, corporate-action and FX source contracts, and paper-vs-shadow divergence thresholds. Scorecard inputs must remain source-validated, derived-only, paper/shadow separated, and unable to claim live fills.
