@@ -122,6 +122,13 @@ _PAPER_ENGINE_ENV_KEY = "OPENCLAW_ENABLE_PAPER"
 _DEVELOPMENT_SUPPORT_MODE_ENV_KEY = "OPENCLAW_DEVELOPMENT_SUPPORT_MODE"
 _LEGACY_GUI_DEVELOPMENT_MODE_ENV_KEY = "OPENCLAW_GUI_DEVELOPMENT_MODE"
 _BASIC_SYSTEM_ENV_FILE = "basic_system_services.env"
+_TRADING_SERVICES_ENV_FILE = "trading_services.env"
+_BYBIT_MODE_ENV_KEY = "BYBIT_MODE"
+_BYBIT_CONNECTOR_WRITE_ENABLED_ENV_KEY = "BYBIT_CONNECTOR_WRITE_ENABLED"
+_BYBIT_DEMO_CONNECTOR_MODE_CONFIRM = "enable_demo_connector_mode:bounded_demo_probe:demo_only"
+_CUTOVER_PREFLIGHT_SCHEMA_VERSION = "bounded_demo_credential_mode_cutover_preflight_v1"
+_CUTOVER_PREFLIGHT_READY_STATUS = "BOUNDED_DEMO_CREDENTIAL_MODE_CUTOVER_PREFLIGHT_READY_NO_MUTATION"
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _ENV_TRUTHY = frozenset({"1", "true", "yes", "on", "enabled"})
 _ENV_FALSEY = frozenset({"0", "false", "no", "off", "disabled"})
 _MIGRATION_FILE_RE = re.compile(r"^V(?P<version>\d{3})__(?P<name>.+)\.sql$")
@@ -254,6 +261,17 @@ def _paper_engine_env_file() -> Path:
     return Path.home() / "BybitOpenClaw" / "secrets" / "environment_files" / _BASIC_SYSTEM_ENV_FILE
 
 
+def _trading_services_env_file() -> Path:
+    """Resolve the operator env file read by the Bybit connector service."""
+    explicit = os.environ.get("OPENCLAW_TRADING_SERVICES_ENV_FILE")
+    if explicit:
+        return Path(explicit).expanduser()
+    secrets_root = os.environ.get("OPENCLAW_SECRETS_ROOT")
+    if secrets_root:
+        return Path(secrets_root).expanduser() / "environment_files" / _TRADING_SERVICES_ENV_FILE
+    return Path.home() / "BybitOpenClaw" / "secrets" / "environment_files" / _TRADING_SERVICES_ENV_FILE
+
+
 def _read_env_file_value(path: Path, key: str) -> str | None:
     """Read a KEY=value assignment without sourcing the file. / 不 source 文件讀 KEY=value。"""
     try:
@@ -316,6 +334,130 @@ def _write_env_file_value(path: Path, key: str, value: str) -> None:
     os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)
     tmp.replace(path)
     os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _read_json_object(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise HTTPException(status_code=400, detail="Cutover preflight JSON not found")
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("Invalid cutover preflight JSON %s: %s", path, exc)
+        raise HTTPException(status_code=400, detail="Invalid cutover preflight JSON")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Cutover preflight JSON must be an object")
+    return payload
+
+
+def _require_preflight_false_answers(answers: dict[str, Any]) -> None:
+    required_false = (
+        "secret_write_performed",
+        "env_mutation_performed",
+        "runtime_mutation_performed",
+        "service_restart_performed",
+        "order_capable_action_allowed_by_this_packet",
+        "order_submission_performed",
+        "decision_lease_acquire_performed",
+        "bybit_private_call_performed",
+        "bybit_credential_validation_call_performed",
+        "live_or_mainnet",
+        "live_authority_granted",
+        "global_cost_gate_lowering_recommended",
+        "writer_enabled_by_this_packet",
+        "adapter_enabled_by_this_packet",
+        "promotion_evidence",
+        "promotion_proof",
+    )
+    offenders = [key for key in required_false if answers.get(key) is not False]
+    if offenders:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cutover preflight has unsafe or missing answer flags: {offenders}",
+        )
+    if answers.get("connector_env_cutover_preview_only") is not True:
+        raise HTTPException(
+            status_code=400,
+            detail="Cutover preflight must be preview-only",
+        )
+
+
+def _validate_demo_connector_cutover_preflight(
+    *,
+    preflight_path: Path,
+    expected_sha256: str,
+    target_env_file: Path,
+) -> dict[str, Any]:
+    expected_sha256 = expected_sha256.strip().lower()
+    if not _SHA256_RE.fullmatch(expected_sha256):
+        raise HTTPException(status_code=400, detail="Invalid preflight sha256")
+
+    try:
+        actual_sha256 = _sha256_file(preflight_path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=400, detail="Cutover preflight JSON not found")
+    except OSError as exc:
+        logger.warning("Unable to read cutover preflight JSON %s: %s", preflight_path, exc)
+        raise HTTPException(status_code=400, detail="Unable to read cutover preflight JSON")
+    if not hmac_lib.compare_digest(actual_sha256, expected_sha256):
+        raise HTTPException(status_code=400, detail="Cutover preflight sha256 mismatch")
+
+    payload = _read_json_object(preflight_path)
+    schema_version = payload.get("schema_version") or payload.get("schema")
+    if schema_version != _CUTOVER_PREFLIGHT_SCHEMA_VERSION:
+        raise HTTPException(status_code=400, detail="Unsupported cutover preflight schema")
+    if payload.get("status") != _CUTOVER_PREFLIGHT_READY_STATUS:
+        raise HTTPException(status_code=400, detail="Cutover preflight is not ready")
+
+    answers = payload.get("answers")
+    if not isinstance(answers, dict):
+        raise HTTPException(status_code=400, detail="Cutover preflight missing answers")
+    _require_preflight_false_answers(answers)
+    if answers.get("main_cost_gate_adjustment") not in (None, "NONE"):
+        raise HTTPException(status_code=400, detail="Cutover preflight touches Cost Gate")
+
+    source = payload.get("settings_api_source")
+    if not isinstance(source, dict) or source.get("ready") is not True:
+        raise HTTPException(status_code=400, detail="Cutover preflight settings source is not ready")
+    if source.get("requires_operator_role") is not True:
+        raise HTTPException(status_code=400, detail="Cutover preflight lacks operator-role proof")
+
+    cutover = payload.get("connector_env_cutover")
+    if not isinstance(cutover, dict):
+        raise HTTPException(status_code=400, detail="Cutover preflight missing connector cutover")
+    if cutover.get("ready") is not True or cutover.get("status") != "READY":
+        raise HTTPException(status_code=400, detail="Connector cutover preflight is not ready")
+
+    preflight_env_path = cutover.get("path")
+    if preflight_env_path:
+        left = str(Path(str(preflight_env_path)).expanduser())
+        right = str(target_env_file.expanduser())
+        if left != right:
+            raise HTTPException(status_code=400, detail="Cutover preflight env file mismatch")
+
+    proposed = cutover.get("proposed_demo_only")
+    if not isinstance(proposed, dict):
+        raise HTTPException(status_code=400, detail="Cutover preflight missing proposed Demo env")
+    if str(proposed.get(_BYBIT_MODE_ENV_KEY, "")).lower() != "demo":
+        raise HTTPException(status_code=400, detail="Cutover preflight mode is not Demo")
+    if str(proposed.get(_BYBIT_CONNECTOR_WRITE_ENABLED_ENV_KEY, "")).lower() != "true":
+        raise HTTPException(status_code=400, detail="Cutover preflight write flag is not true")
+
+    return {
+        "path": str(preflight_path),
+        "sha256": actual_sha256,
+        "schema_version": schema_version,
+        "status": payload.get("status"),
+        "connector_env_path": preflight_env_path or "",
+        "public_ipv4_for_bybit_api_allowlist": payload.get("public_ipv4_for_bybit_api_allowlist", ""),
+    }
 
 
 # ── Alert config helpers / 告警配置輔助函數 ──
@@ -824,6 +966,50 @@ def _paper_engine_setting_payload() -> dict[str, Any]:
     }
 
 
+def _bybit_demo_connector_mode_payload() -> dict[str, Any]:
+    """Return persisted/runtime Demo connector mode without exposing secrets."""
+    env_file = _trading_services_env_file()
+    file_mode = _read_env_file_value(env_file, _BYBIT_MODE_ENV_KEY)
+    file_write_raw = _read_env_file_value(env_file, _BYBIT_CONNECTOR_WRITE_ENABLED_ENV_KEY)
+    runtime_mode = os.environ.get(_BYBIT_MODE_ENV_KEY)
+    runtime_write_raw = os.environ.get(_BYBIT_CONNECTOR_WRITE_ENABLED_ENV_KEY)
+
+    configured_ready = (
+        str(file_mode or "").strip().lower() == "demo"
+        and _coerce_env_bool(file_write_raw, default=False)
+    )
+    runtime_ready = (
+        str(runtime_mode or "").strip().lower() == "demo"
+        and _coerce_env_bool(runtime_write_raw, default=False)
+    )
+    return {
+        "enabled": configured_ready,
+        "configured_ready": configured_ready,
+        "runtime_ready": runtime_ready,
+        "restart_required": configured_ready != runtime_ready,
+        "env_file": str(env_file),
+        "env_file_present": env_file.exists(),
+        "configured": {
+            _BYBIT_MODE_ENV_KEY: file_mode,
+            _BYBIT_CONNECTOR_WRITE_ENABLED_ENV_KEY: file_write_raw,
+        },
+        "runtime": {
+            _BYBIT_MODE_ENV_KEY: runtime_mode,
+            _BYBIT_CONNECTOR_WRITE_ENABLED_ENV_KEY: runtime_write_raw,
+        },
+        "scope": "bybit_demo_connector_mode_only",
+        "boundary": {
+            "demo_only": True,
+            "live_or_mainnet": False,
+            "secret_write_performed": False,
+            "service_restart_performed": False,
+            "bybit_private_call_performed": False,
+            "order_capable_action_allowed_by_this_packet": False,
+            "global_cost_gate_lowering_recommended": False,
+        },
+    }
+
+
 def _development_support_mode_payload() -> dict[str, Any]:
     """Return the development support visibility setting payload.
 
@@ -1067,6 +1253,28 @@ class PaperEngineSettingRequest(BaseModel):
     )
 
 
+class BybitDemoConnectorModeRequest(BaseModel):
+    """Request body for POST /api/v1/settings/bybit-demo-connector-mode."""
+    cutover_preflight_json: str = Field(
+        ...,
+        min_length=1,
+        max_length=4096,
+        description="Machine-checkable bounded Demo cutover preflight artifact path",
+    )
+    cutover_preflight_sha256: str = Field(
+        ...,
+        min_length=64,
+        max_length=64,
+        description="Expected sha256 for the cutover preflight artifact",
+    )
+    confirm: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        description="Exact Demo-only connector mode confirmation string",
+    )
+
+
 class DevelopmentSupportSettingRequest(BaseModel):
     """Request body for POST /api/v1/settings/development-mode."""
     enabled: bool = Field(
@@ -1306,6 +1514,81 @@ async def save_paper_engine_setting(
         payload["runtime_enabled"],
         payload["restart_required"],
         getattr(actor, "actor_id", "?"),
+    )
+    return payload
+
+
+@settings_router.get("/bybit-demo-connector-mode")
+async def get_bybit_demo_connector_mode(
+    actor: Any = Depends(_get_auth_actor),
+) -> dict:
+    """
+    GET /api/v1/settings/bybit-demo-connector-mode
+    Return persisted/runtime Bybit Demo connector mode state.
+
+    This endpoint is read-only. It does not inspect or return API key/secret
+    material and does not grant order, lease, risk, live, or Cost Gate authority.
+    """
+    return _bybit_demo_connector_mode_payload()
+
+
+@settings_router.post("/bybit-demo-connector-mode")
+async def save_bybit_demo_connector_mode(
+    body: BybitDemoConnectorModeRequest,
+    actor: Any = Depends(_require_operator_auth),
+) -> dict:
+    """
+    POST /api/v1/settings/bybit-demo-connector-mode
+    Persist the reviewed Demo-only Bybit connector mode cutover.
+
+    Guardrails:
+    - requires Operator auth and an exact confirmation string
+    - requires a machine-checkable cutover preflight JSON with matching sha256
+    - writes only BYBIT_MODE=demo and BYBIT_CONNECTOR_WRITE_ENABLED=true
+    - does not write secrets, restart services, call Bybit, acquire leases, or submit orders
+    """
+    if body.confirm != _BYBIT_DEMO_CONNECTOR_MODE_CONFIRM:
+        raise HTTPException(status_code=400, detail="Invalid Demo connector mode confirmation")
+
+    env_file = _trading_services_env_file()
+    preflight = _validate_demo_connector_cutover_preflight(
+        preflight_path=Path(body.cutover_preflight_json).expanduser(),
+        expected_sha256=body.cutover_preflight_sha256,
+        target_env_file=env_file,
+    )
+
+    try:
+        _write_env_file_value(env_file, _BYBIT_MODE_ENV_KEY, "demo")
+        _write_env_file_value(env_file, _BYBIT_CONNECTOR_WRITE_ENABLED_ENV_KEY, "true")
+    except (OSError, PermissionError, ValueError) as exc:
+        logger.error("Failed to persist Bybit Demo connector mode: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to persist Bybit Demo connector mode")
+
+    payload = _bybit_demo_connector_mode_payload()
+    payload.update(
+        {
+            "saved": True,
+            "cutover_preflight": preflight,
+            "answers": {
+                "secret_write_performed": False,
+                "env_mutation_performed": True,
+                "runtime_mutation_performed": False,
+                "service_restart_performed": False,
+                "bybit_private_call_performed": False,
+                "bybit_credential_validation_call_performed": False,
+                "decision_lease_acquire_performed": False,
+                "order_capable_action_allowed_by_this_packet": False,
+                "order_submission_performed": False,
+                "live_or_mainnet": False,
+                "global_cost_gate_lowering_recommended": False,
+            },
+        }
+    )
+    logger.info(
+        "Bybit Demo connector mode persisted restart_required=%s actor=%s preflight_sha=%s",
+        payload["restart_required"],
+        getattr(actor, "actor_id", "?"),
+        preflight["sha256"],
     )
     return payload
 
