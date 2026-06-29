@@ -30,6 +30,8 @@
 | `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_phase2_policy_prereq_source_checkpoint.md` | Operator Phase 2 policy 摘要：gate prerequisite source policies done；immutable PASS artifact 仍缺，first IBKR contact blocked。 |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-06-29--ibkr_stock_etf_phase2_ipc_precontact_status_checkpoint.md` | PM Phase 2 IPC checkpoint：既有 `stock_etf.*` fixture response 顯示 gate/policy pre-contact status，`first_ibkr_contact_allowed=false`；不新增 IBKR connector/API。 |
 | `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_phase2_ipc_precontact_status_checkpoint.md` | Operator Phase 2 IPC 摘要：stock/ETF readiness/status 可見 blocked gate 與 policy flags；immutable PASS artifact 仍缺。 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-29--ibkr_stock_etf_phase2_gate_artifact_contract_checkpoint.md` | PM Phase 2 artifact checkpoint：immutable gate artifact typed validation 已落地；要求 PM+Operator reviewer、sealed、hash、gate PASS、policy flags 一致；仍未產生 PASS artifact。 |
+| `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_phase2_gate_artifact_contract_checkpoint.md` | Operator Phase 2 artifact 摘要：artifact contract done；real PASS artifact 仍缺，first IBKR contact blocked。 |
 
 ### 2026-06-22 Shadow placement alpha ingestion
 

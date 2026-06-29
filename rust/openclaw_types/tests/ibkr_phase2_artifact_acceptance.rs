@@ -1,0 +1,173 @@
+//! ADR-0048 IBKR Phase 2 immutable gate artifact acceptance tests.
+//!
+//! These tests validate source artifact shape only. They must not create a PASS
+//! artifact, secret slot, broker session, paper order, or external API call.
+
+use std::path::PathBuf;
+
+use openclaw_types::{
+    is_sha256_hex, IbkrExternalSurfaceGateV1, IbkrPhase2GateArtifactBlocker,
+    IbkrPhase2GateArtifactV1, IbkrPhase2PolicyBundleV1,
+};
+
+fn accepted_artifact_fixture() -> IbkrPhase2GateArtifactV1 {
+    let policy_flags = IbkrPhase2PolicyBundleV1::source_template().gate_prerequisite_flags();
+    let gate = IbkrExternalSurfaceGateV1 {
+        redaction_suite_passed: policy_flags.redaction_suite_passed,
+        rate_limit_policy_present: policy_flags.rate_limit_policy_present,
+        audit_event_policy_present: policy_flags.audit_event_policy_present,
+        paper_attestation_contract_present: policy_flags.paper_attestation_contract_present,
+        python_no_write_guard_present: policy_flags.python_no_write_guard_present,
+        ..IbkrExternalSurfaceGateV1::passing_fixture()
+    };
+
+    IbkrPhase2GateArtifactV1 {
+        artifact_id: "phase2_ibkr_external_surface_gate_v1_fixture".to_string(),
+        source_commit: "0123456789abcdef".to_string(),
+        created_at_ms: 1_772_232_000_000,
+        immutable_storage_path:
+            "docs/execution_plan/specs/phase2_ibkr_external_surface_gate_v1.fixture.json"
+                .to_string(),
+        reviewer_roles: vec!["PM".to_string(), "Operator".to_string()],
+        sealed: true,
+        gate,
+        policy_flags,
+        raw_artifact_hash: "a".repeat(64),
+        redacted_summary_hash: "b".repeat(64),
+        ..IbkrPhase2GateArtifactV1::default()
+    }
+}
+
+#[test]
+fn default_gate_artifact_blocks_contact() {
+    let artifact = IbkrPhase2GateArtifactV1::default();
+    let verdict = artifact.validate();
+
+    assert!(!verdict.ibkr_contact_allowed);
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPhase2GateArtifactBlocker::ArtifactIdMissing));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPhase2GateArtifactBlocker::SourceCommitMissing));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPhase2GateArtifactBlocker::ArtifactNotSealed));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPhase2GateArtifactBlocker::ExternalSurfaceGateRejected));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPhase2GateArtifactBlocker::PolicyPrerequisiteFlagsRejected));
+}
+
+#[test]
+fn accepted_fixture_requires_sealed_gate_and_review_metadata() {
+    let artifact = accepted_artifact_fixture();
+    let verdict = artifact.validate();
+
+    assert!(verdict.ibkr_contact_allowed);
+    assert!(verdict.blockers.is_empty());
+    assert!(!artifact.gate.ibkr_call_performed);
+    assert!(is_sha256_hex(&artifact.raw_artifact_hash));
+    assert!(is_sha256_hex(&artifact.redacted_summary_hash));
+}
+
+#[test]
+fn artifact_rejects_blocked_or_retroactive_external_gate() {
+    let blocked_gate = IbkrPhase2GateArtifactV1 {
+        gate: IbkrExternalSurfaceGateV1::default(),
+        ..accepted_artifact_fixture()
+    };
+    assert!(blocked_gate
+        .validate()
+        .blockers
+        .contains(&IbkrPhase2GateArtifactBlocker::ExternalSurfaceGateRejected));
+
+    let retroactive_gate = IbkrPhase2GateArtifactV1 {
+        gate: IbkrExternalSurfaceGateV1 {
+            ibkr_call_performed: true,
+            ..IbkrExternalSurfaceGateV1::passing_fixture()
+        },
+        ..accepted_artifact_fixture()
+    };
+    let verdict = retroactive_gate.validate();
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPhase2GateArtifactBlocker::ExternalSurfaceGateRejected));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPhase2GateArtifactBlocker::IbkrCallAlreadyPerformed));
+}
+
+#[test]
+fn artifact_rejects_missing_review_hash_and_seal_fields() {
+    let artifact = IbkrPhase2GateArtifactV1 {
+        reviewer_roles: vec!["PM".to_string()],
+        sealed: false,
+        raw_artifact_hash: "not-a-hash".to_string(),
+        redacted_summary_hash: "c".repeat(63),
+        immutable_storage_path: String::new(),
+        ..accepted_artifact_fixture()
+    };
+    let verdict = artifact.validate();
+
+    assert!(!verdict.ibkr_contact_allowed);
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPhase2GateArtifactBlocker::OperatorReviewerMissing));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPhase2GateArtifactBlocker::ArtifactNotSealed));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPhase2GateArtifactBlocker::RawArtifactHashInvalid));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPhase2GateArtifactBlocker::RedactedSummaryHashInvalid));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPhase2GateArtifactBlocker::ImmutableStoragePathMissing));
+}
+
+#[test]
+fn artifact_rejects_policy_flag_mismatch() {
+    let mut artifact = accepted_artifact_fixture();
+    artifact.policy_flags.python_no_write_guard_present = false;
+    let verdict = artifact.validate();
+
+    assert!(!verdict.ibkr_contact_allowed);
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPhase2GateArtifactBlocker::PolicyPrerequisiteFlagsRejected));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPhase2GateArtifactBlocker::PolicyGateFlagMismatch));
+}
+
+#[test]
+fn blocked_artifact_template_is_parseable_and_secret_free() {
+    let srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..");
+    let raw = std::fs::read_to_string(
+        srv_root.join("settings/broker/ibkr_phase2_gate_artifact.template.toml"),
+    )
+    .expect("read gate artifact template");
+    let parsed: toml::Value = toml::from_str(&raw).expect("artifact template toml parses");
+
+    assert_eq!(parsed["artifact"]["sealed"].as_bool(), Some(false));
+    assert_eq!(parsed["gate"]["status"].as_str(), Some("BLOCKED"));
+    assert_eq!(parsed["gate"]["ibkr_call_performed"].as_bool(), Some(false));
+    assert_eq!(
+        parsed["policy_flags"]["python_no_write_guard_present"].as_bool(),
+        Some(false)
+    );
+
+    let lower = raw.to_ascii_lowercase();
+    assert!(!lower.contains("api_key ="));
+    assert!(!lower.contains("api_secret ="));
+    assert!(!lower.contains("account_id ="));
+    assert!(!lower.contains("password ="));
+    assert!(!lower.contains("token ="));
+}
