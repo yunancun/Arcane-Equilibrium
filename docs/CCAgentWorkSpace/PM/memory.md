@@ -2500,3 +2500,11 @@
 - `blocked_markout_proxy` remains defer/context evidence only, not fill-backed proof; fill-backed proof readiness, Demo mutation readiness, and promotion proof readiness remain false.
 - Verification passed: py_compile, focused adjudicator tests `6 passed`, adjacent learning-lane tests `31 passed`, post-external-change rerun `19 passed`, and `git diff --check`.
 - Next ML loop item is `P0-LEARN-DEMO-MUTATION-ENVELOPE`; PG cutover, runtime install/mutation, training/registry repair, serving, and proof/promotion remain blocked until their separate source contracts and gated reviews pass.
+
+## 2026-06-29 Learning Demo Mutation Envelope Source Checkpoint
+
+- PM advanced `P0-LEARN-DEMO-MUTATION-ENVELOPE` source-only at commit `ed54bf93`: new `cost_gate_learning_demo_mutation_envelope_v1` consumes adjudicator decisions plus optional bounded Demo runtime readiness and emits deterministic inert operator-gated envelopes.
+- Envelopes preserve operator/runtime gates, credential/mode blockers, standing-auth/final-window requirements, source event ids/hashes, quarantine propagation, and authority contamination fail-closed behavior.
+- `blocked_markout_proxy` remains context/defer evidence only; Demo mutation authority, runtime mutation authority, order authority, Cost Gate change authority, and promotion proof remain false even when runtime readiness is green.
+- Verification passed: py_compile, focused envelope tests `7 passed`, adjacent learning-lane/runtime-readiness tests `31 passed`, wider adjacent learning-lane tests `43 passed`, and `git diff --check`.
+- Next ML loop item is `P0-LEARN-TRAINING-REGISTRY-REPAIR`; runtime mutation, PG cutover/write, serving, bounded Demo execution, and proof/promotion remain blocked until their separate source contracts and gated reviews pass.
