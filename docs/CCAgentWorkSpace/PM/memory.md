@@ -2598,3 +2598,9 @@
 - PM added `stock_etf_pit_universe_contract_v1` as a Rust source-only validator for point-in-time universe id/version/hash/as-of/effective window, bounded constituents, per-constituent identity/tradability/PRIIPs/currency/venue checks, screen/policy hashes, survivorship controls, and evidence-clock freeze state.
 - The contract rejects crypto/CFD/cash constituents, unknown or cash-ledger venues, non-USD v1 currency, untradable constituents, missing PIT/hash/survivorship/freeze evidence, prior IBKR contact, and secret serialization.
 - This grants no IBKR contact, market-data collection, connector runtime, paper order, DB apply, scorecard write, evidence clock, GUI lane authority, release, tiny-live, or live.
+
+## 2026-06-30 IBKR Stock/ETF Strategy Hypothesis Contract
+
+- PM added `stock_etf_strategy_hypothesis_contract_v1` as a Rust source-only validator for preregistered Stock/ETF paper/shadow hypotheses, allowed low/medium-turnover families, daily/weekly timeframe, PIT universe/benchmark/cost/rule/feature/statistical/preregistration hashes, bias controls, and benchmark-relative after-cost metrics.
+- The contract rejects high-frequency/event-driven reserved families, intraday v1 timeframe, missing design controls, over-high turnover, premature profitability claims, live/tiny-live claims, prior IBKR contact, and secret serialization.
+- This grants no IBKR contact, collector runtime, paper order, DB apply, scorecard write, evidence clock, profitability claim, GUI lane authority, release, tiny-live, or live.

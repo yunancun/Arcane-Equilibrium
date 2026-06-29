@@ -30,6 +30,7 @@ pub mod stock_etf_phase3_evidence;
 pub mod stock_etf_pit_universe;
 pub mod stock_etf_release_packet;
 pub mod stock_etf_scorecard_inputs;
+pub mod stock_etf_strategy_hypothesis;
 pub mod stock_etf_tiny_live_eligibility;
 
 pub use agent::{AgentMessage, AgentRole, MessageType};
@@ -136,6 +137,11 @@ pub use stock_etf_scorecard_inputs::{
     BrokerAccountPortfolioCashLedgerV1, StockEtfBenchmarkVersionV1, StockEtfCostModelVersionV1,
     StockEtfOrderSide, StockEtfScorecardInputBlocker, StockEtfScorecardInputBundleV1,
     StockEtfScorecardInputVerdict, StockEtfStorageCapacityV1, StockShadowFillModelV1,
+};
+pub use stock_etf_strategy_hypothesis::{
+    StockEtfStrategyFamily, StockEtfStrategyHypothesisBlocker, StockEtfStrategyHypothesisV1,
+    StockEtfStrategyHypothesisVerdict, StockEtfStrategyInstrumentScope, StockEtfStrategyTimeframe,
+    STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
 };
 pub use stock_etf_tiny_live_eligibility::{
     TinyLiveAdrEligibilityBlocker, TinyLiveAdrEligibilityDecision, TinyLiveAdrEligibilityV1,
