@@ -9,6 +9,7 @@ pub mod agent;
 pub mod asset_venue;
 pub mod cognitive;
 pub mod intent;
+pub mod ibkr_feature_flag_secret_auth;
 pub mod ibkr_phase2_artifact;
 pub mod ibkr_phase2_gate;
 pub mod ibkr_phase2_policies;
@@ -21,6 +22,10 @@ pub mod stock_etf_lane;
 pub use agent::{AgentMessage, AgentRole, MessageType};
 pub use asset_venue::{AssetClass, Venue, VenueParseError};
 pub use cognitive::{CognitiveParams, DreamInsight, RegretSummary, SkippedOpportunity};
+pub use ibkr_feature_flag_secret_auth::{
+    evaluate_feature_flag_secret_auth_matrix, FeatureFlagSecretAuthBlocker,
+    FeatureFlagSecretAuthMatrixV1, FeatureFlagSecretAuthVerdict, StockEtfAuthorizationEnvelopeV1,
+};
 pub use ibkr_phase2_artifact::{
     is_sha256_hex, IbkrPhase2GateArtifactBlocker, IbkrPhase2GateArtifactV1,
     IbkrPhase2GateArtifactVerdict,

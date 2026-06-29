@@ -36,6 +36,8 @@
 | `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_phase2_runtime_contracts_checkpoint.md` | Operator Phase 2 runtime contract 摘要：secret/topology evidence shape done；real evidence + PASS artifact 仍缺。 |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-06-29--ibkr_stock_etf_phase2_artifact_runtime_evidence_checkpoint.md` | PM Phase 2 artifact runtime-evidence checkpoint：immutable gate artifact now embeds and validates secret-slot/topology evidence；missing or mismatched runtime evidence blocks first contact。 |
 | `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_phase2_artifact_runtime_evidence_checkpoint.md` | Operator Phase 2 artifact runtime-evidence 摘要：PASS candidate artifact can no longer rely on gate booleans alone；real evidence + PASS artifact 仍缺。 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-29--ibkr_stock_etf_phase2_feature_flag_secret_auth_matrix_checkpoint.md` | PM Phase 2 feature-flag/secret/auth matrix checkpoint：Rust source contract separates read-only, paper, shadow-only, GUI display, and denied live/account authority；仍不授權 IBKR contact。 |
+| `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_phase2_feature_flag_secret_auth_matrix_checkpoint.md` | Operator Phase 2 feature-flag/secret/auth matrix 摘要：flags alone cannot grant paper/live authority；secret/artifact/session/envelope evidence remains required and first contact blocked。 |
 
 ### 2026-06-22 Shadow placement alpha ingestion
 
