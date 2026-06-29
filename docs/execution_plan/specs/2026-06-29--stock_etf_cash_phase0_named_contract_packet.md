@@ -240,6 +240,44 @@ state, missing PIT/window/hash/survivorship/freeze evidence, oversized v1
 universe bounds, prior IBKR contact, serialized secret content, and any Bybit
 live regression.
 
+## 5C. `stock_etf_strategy_hypothesis_contract_v1`
+
+Strategy hypotheses must be pre-registered and source-artifact backed before
+Phase 3 evidence-clock days, shadow signals, or scorecards can treat a
+`strategy_hypothesis_hash` as meaningful.
+
+Required fields:
+
+- `asset_lane=stock_etf_cash`
+- `broker=ibkr`
+- hypothesis id and version
+- strategy family: daily/weekly momentum, sector rotation, or ETF trend/risk-off
+- primary timeframe: daily or weekly in v1
+- instrument scope
+- PIT universe contract hash and universe hash
+- benchmark version hash
+- cost model version hash
+- entry, exit, risk-rule, feature-set, and data-source-policy hashes
+- statistical design hash
+- hypothesis preregistration hash
+- minimum holding period and maximum monthly turnover
+- maximum constituents used
+- independent-observation target
+- lookahead, survivorship, and multiple-testing controls
+- benchmark-relative and after-cost metrics
+- no options / CFD / margin / short policy
+- paper/shadow-only flag
+- Bybit-live unchanged and IBKR-live denied proof
+
+Source validator:
+`openclaw_types::stock_etf_strategy_hypothesis::StockEtfStrategyHypothesisV1`.
+The validator rejects high-frequency/event-driven reserved families, intraday
+v1 timeframe, malformed ids, missing design hashes, missing preregistration,
+missing bias/multiple-testing controls, missing after-cost/benchmark metrics,
+over-high turnover, premature profitability claims, live/tiny-live authority
+claims, prior IBKR contact, serialized secret content, and any Bybit live
+regression.
+
 ## 6. `ibkr_api_session_topology_v1`
 
 Baseline:
@@ -641,7 +679,7 @@ Clock start requires:
 - accepted `stock_etf_pit_universe_contract_v1` and frozen universe hash
 - frozen benchmark hash
 - frozen cost model hash
-- frozen strategy hypothesis hash
+- accepted `stock_etf_strategy_hypothesis_contract_v1` and frozen strategy hypothesis hash
 - corporate-action/FX/fee source as-of frozen
 - paper-vs-shadow divergence thresholds frozen
 - GUI evidence view available

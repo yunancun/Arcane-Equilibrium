@@ -1,0 +1,42 @@
+# ADR-0048 Stock/ETF strategy hypothesis template.
+#
+# This is a blocked, secret-free source template. It does not contact IBKR,
+# create connectors, collect market data, route paper orders, inspect secrets,
+# write scorecards, claim profitability, or change Bybit live execution behavior.
+
+contract_id = ""
+asset_lane = "crypto_perp"
+broker = "bybit"
+hypothesis_id = ""
+hypothesis_version = ""
+strategy_family = "unknown_denied"
+primary_timeframe = "unknown_denied"
+instrument_scope = "unknown_denied"
+universe_hash = ""
+pit_universe_contract_hash = ""
+benchmark_version_hash = ""
+cost_model_version_hash = ""
+entry_rule_hash = ""
+exit_rule_hash = ""
+risk_rule_hash = ""
+feature_set_hash = ""
+data_source_policy_hash = ""
+statistical_design_hash = ""
+hypothesis_preregistration_hash = ""
+expected_holding_period_days_min = 0
+max_turnover_per_month_bps = 0
+max_constituents_used = 0
+independent_observation_target = 0
+lookahead_bias_controls_present = false
+survivorship_bias_controls_present = false
+multiple_testing_control_present = false
+benchmark_relative_metric_defined = false
+cost_after_metric_defined = false
+no_options_cfd_margin_short = false
+paper_shadow_only = false
+profitability_claimed = false
+live_or_tiny_live_authority_claimed = false
+bybit_live_execution_unchanged = false
+ibkr_live_denied = false
+ibkr_contact_performed = false
+secret_content_serialized = false

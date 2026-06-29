@@ -256,6 +256,7 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
             required_gates: &[
                 "stock_etf_evidence_clock_v1",
                 "stock_etf_pit_universe_contract_v1",
+                "stock_etf_strategy_hypothesis_contract_v1",
                 "frozen_strategy_hypothesis_hash",
                 "frozen_universe_hash",
             ],
@@ -276,6 +277,7 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
                 "benchmark_versions_v1",
                 "stock_shadow_fill_model_v1",
                 "stock_etf_pit_universe_contract_v1",
+                "stock_etf_strategy_hypothesis_contract_v1",
                 "paper_shadow_fill_separation",
             ],
             typed_denial_reason: None,
