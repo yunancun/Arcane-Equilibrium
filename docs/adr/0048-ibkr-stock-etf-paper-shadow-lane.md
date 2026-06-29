@@ -93,6 +93,14 @@ forbidden paper-order IPC strings, direct `ibapi` / `ib_insync` imports, and
 non-GET Stock/ETF/IBKR routes until a later Rust-authority contract explicitly
 revises that boundary.
 
+`instrument_identity_contract_v1` must be machine-checkable before market data,
+contract details, shadow fill reconstruction, or paper order intent consumes a
+symbol. It must prove point-in-time symbol/listing/primary-exchange/currency/
+tradability/PRIIPs/fractional-policy/calendar/corporate-action identity hashes
+while rejecting unknown venues, crypto/CFD instruments, non-USD v1 currency,
+untradable instruments, prior IBKR contact, serialized secrets, and any Bybit
+live regression.
+
 `stock_etf_kill_switch_and_disable_cleanup_runbook_v1` must be machine-checkable
 before any release or evidence-clock completion claim. It must prove exact
 disable flags, collector stop, GUI disabled/hidden posture, live-secret absence,

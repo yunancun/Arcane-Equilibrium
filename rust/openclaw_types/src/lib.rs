@@ -23,6 +23,7 @@ pub mod stock_etf_broker_capability_registry;
 pub mod stock_etf_db_evidence_ddl;
 pub mod stock_etf_disable_cleanup_runbook;
 pub mod stock_etf_gui_lane_contract;
+pub mod stock_etf_instrument_identity;
 pub mod stock_etf_lane;
 pub mod stock_etf_phase0_manifest;
 pub mod stock_etf_phase3_evidence;
@@ -96,6 +97,11 @@ pub use stock_etf_disable_cleanup_runbook::{
 pub use stock_etf_gui_lane_contract::{
     StockEtfGuiLaneBlocker, StockEtfGuiLaneContractV1, StockEtfGuiLaneVerdict,
     STOCK_ETF_GUI_READINESS_ENDPOINT,
+};
+pub use stock_etf_instrument_identity::{
+    StockEtfCurrency, StockEtfInstrumentIdentityBlocker, StockEtfInstrumentIdentityV1,
+    StockEtfInstrumentIdentityVerdict, StockEtfListingVenue, StockEtfPriipsKidStatus,
+    StockEtfTradabilityStatus, STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID,
 };
 pub use stock_etf_lane::{
     evaluate_broker_operation, AssetLane, AuthorityScope, Broker, BrokerCapabilityDecision,

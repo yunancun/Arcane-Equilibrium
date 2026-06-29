@@ -174,6 +174,39 @@ Denied actions:
 
 Raw payloads must be hashed and redacted. Secrets, account ids, local paths, cookies, tokens, and stack traces must not appear in logs or reports.
 
+## 5A. `instrument_identity_contract_v1`
+
+Instrument identity must be point-in-time and source-artifact backed before
+market data, contract details, shadow fill reconstruction, or paper order intent
+can consume a symbol.
+
+Required fields:
+
+- `asset_lane=stock_etf_cash`
+- `broker=ibkr`
+- `instrument_kind`: `stock` | `etf` | `cash`
+- `symbol`
+- `listing_venue`
+- `primary_exchange`
+- `currency`
+- `tradability_status`
+- `priips_kid_status`
+- fractional policy recorded
+- point-in-time as-of timestamp
+- market calendar id and hash
+- broker contract-details hash
+- instrument identity hash
+- corporate-action adjustment version hash
+- source artifact hash
+
+Source validator:
+`openclaw_types::stock_etf_instrument_identity::StockEtfInstrumentIdentityV1`.
+The validator rejects crypto/CFD instruments, unknown venue/exchange, cash-vs-
+noncash venue mismatches, non-USD currency in v1, non-tradable instruments,
+blocked/unknown PRIIPs KID status, missing PIT/hash/calendar/fractional-policy
+evidence, missing Bybit unchanged/live-denied/margin-short-denied/options-CFD-
+denied proof, prior IBKR contact, and serialized secret content.
+
 ## 6. `ibkr_api_session_topology_v1`
 
 Baseline:

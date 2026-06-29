@@ -2586,3 +2586,9 @@
 - Hardened coverage ensures summary counts alone cannot clear proof and cleanup/replay-only/unattributed/lineage-broken rows stay proof-excluded; outputs never grant promotion, Cost Gate, runtime, model load, serving, registry/PG, order, or live authority.
 - Verification passed: py_compile, focused proof/promotion tests `11 passed`, ML source chain tests `52 passed`, health snapshot tests `7 passed`, and `git diff --check`.
 - ML source contract chain is complete through proof/promotion gate; actual proof remains blocked by serving repair state, Demo credential/mode readiness, and missing row-backed candidate-matched Demo fills.
+
+## 2026-06-30 IBKR Stock/ETF Instrument Identity Contract
+
+- PM added `instrument_identity_contract_v1` as a Rust source-only validator for point-in-time Stock/ETF/Cash identity, closed venue/currency/tradability/PRIIPs states, calendar/contract-detail/corporate-action hashes, and Bybit-live-unchanged/live-denied proof.
+- The contract rejects crypto/CFD, unknown venues, non-USD v1 currency, untradable instruments, prior IBKR contact, and secret serialization.
+- This grants no IBKR contact, contract-details call, market-data subscription, connector runtime, paper order, DB apply, evidence clock, GUI lane authority, release, tiny-live, or live.

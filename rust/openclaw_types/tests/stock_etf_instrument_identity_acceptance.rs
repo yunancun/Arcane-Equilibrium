@@ -1,0 +1,267 @@
+//! ADR-0048 Stock/ETF instrument identity acceptance tests.
+//!
+//! These tests validate source-only point-in-time identity contracts. They must
+//! not contact IBKR, inspect secrets, create connectors, subscribe to market
+//! data, route orders, or mutate Bybit behavior.
+
+use std::path::PathBuf;
+
+use openclaw_types::{
+    InstrumentKind, StockEtfCurrency, StockEtfInstrumentIdentityBlocker,
+    StockEtfInstrumentIdentityV1, StockEtfListingVenue, StockEtfPriipsKidStatus,
+    StockEtfTradabilityStatus, STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID,
+};
+
+#[test]
+fn default_instrument_identity_blocks_before_contract_details_can_be_used() {
+    let identity = StockEtfInstrumentIdentityV1::default();
+    let verdict = identity.validate();
+
+    assert!(!verdict.accepted);
+    assert!(has(
+        &verdict.blockers,
+        StockEtfInstrumentIdentityBlocker::ContractIdMismatch
+    ));
+    assert!(has(
+        &verdict.blockers,
+        StockEtfInstrumentIdentityBlocker::WrongAssetLane
+    ));
+    assert!(has(
+        &verdict.blockers,
+        StockEtfInstrumentIdentityBlocker::WrongBroker
+    ));
+    assert!(has(
+        &verdict.blockers,
+        StockEtfInstrumentIdentityBlocker::InstrumentKindDenied
+    ));
+    assert!(has(
+        &verdict.blockers,
+        StockEtfInstrumentIdentityBlocker::SymbolInvalid
+    ));
+    assert!(has(
+        &verdict.blockers,
+        StockEtfInstrumentIdentityBlocker::TradabilityNotTradable
+    ));
+}
+
+#[test]
+fn accepted_fixture_is_point_in_time_ibkr_stock_identity_without_runtime_authority() {
+    let identity = StockEtfInstrumentIdentityV1::accepted_fixture();
+    let verdict = identity.validate();
+
+    assert!(
+        verdict.accepted,
+        "unexpected blockers: {:?}",
+        verdict.blockers
+    );
+    assert_eq!(
+        identity.contract_id,
+        STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID
+    );
+    assert_eq!(identity.symbol, "AMD");
+    assert_eq!(identity.instrument_kind, InstrumentKind::Stock);
+    assert!(identity.bybit_live_execution_unchanged);
+    assert!(identity.ibkr_live_denied);
+    assert!(identity.margin_short_denied);
+    assert!(identity.options_cfd_denied);
+    assert!(!identity.ibkr_contact_performed);
+    assert!(!identity.secret_content_serialized);
+}
+
+#[test]
+fn instrument_identity_rejects_wrong_kind_symbol_venue_and_currency() {
+    let identity = StockEtfInstrumentIdentityV1 {
+        instrument_kind: InstrumentKind::CfdReserved,
+        symbol: "amd us".to_string(),
+        listing_venue: StockEtfListingVenue::UnknownDenied,
+        primary_exchange: StockEtfListingVenue::UnknownDenied,
+        currency: StockEtfCurrency::UnknownDenied,
+        ..StockEtfInstrumentIdentityV1::accepted_fixture()
+    };
+    let blockers = identity.validate().blockers;
+
+    assert!(has(
+        &blockers,
+        StockEtfInstrumentIdentityBlocker::InstrumentKindDenied
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfInstrumentIdentityBlocker::SymbolInvalid
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfInstrumentIdentityBlocker::ListingVenueDenied
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfInstrumentIdentityBlocker::PrimaryExchangeDenied
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfInstrumentIdentityBlocker::CurrencyDenied
+    ));
+}
+
+#[test]
+fn cash_and_non_cash_venue_rules_are_separate() {
+    let cash_wrong = StockEtfInstrumentIdentityV1 {
+        instrument_kind: InstrumentKind::Cash,
+        listing_venue: StockEtfListingVenue::Xnys,
+        primary_exchange: StockEtfListingVenue::Xnys,
+        symbol: "USD".to_string(),
+        ..StockEtfInstrumentIdentityV1::accepted_fixture()
+    };
+    assert!(has(
+        &cash_wrong.validate().blockers,
+        StockEtfInstrumentIdentityBlocker::CashInstrumentVenueMismatch
+    ));
+
+    let stock_wrong = StockEtfInstrumentIdentityV1 {
+        listing_venue: StockEtfListingVenue::CashLedger,
+        primary_exchange: StockEtfListingVenue::CashLedger,
+        ..StockEtfInstrumentIdentityV1::accepted_fixture()
+    };
+    assert!(has(
+        &stock_wrong.validate().blockers,
+        StockEtfInstrumentIdentityBlocker::NonCashInstrumentVenueMismatch
+    ));
+}
+
+#[test]
+fn instrument_identity_rejects_untradable_priips_missing_and_missing_hashes() {
+    let identity = StockEtfInstrumentIdentityV1 {
+        tradability_status: StockEtfTradabilityStatus::Halted,
+        priips_kid_status: StockEtfPriipsKidStatus::MissingBlocked,
+        fractional_policy_recorded: false,
+        point_in_time_asof_ms: 0,
+        market_calendar_id: String::new(),
+        market_calendar_hash: "bad".to_string(),
+        broker_contract_details_hash: String::new(),
+        instrument_identity_hash: "z".repeat(64),
+        corporate_action_adjustment_version_hash: String::new(),
+        source_artifact_hash: String::new(),
+        ..StockEtfInstrumentIdentityV1::accepted_fixture()
+    };
+    let blockers = identity.validate().blockers;
+
+    assert!(has(
+        &blockers,
+        StockEtfInstrumentIdentityBlocker::TradabilityNotTradable
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfInstrumentIdentityBlocker::PriipsKidBlocked
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfInstrumentIdentityBlocker::FractionalPolicyMissing
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfInstrumentIdentityBlocker::PointInTimeAsofMissing
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfInstrumentIdentityBlocker::MarketCalendarIdMissing
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfInstrumentIdentityBlocker::MarketCalendarHashInvalid
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfInstrumentIdentityBlocker::BrokerContractDetailsHashInvalid
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfInstrumentIdentityBlocker::InstrumentIdentityHashInvalid
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfInstrumentIdentityBlocker::CorporateActionAdjustmentHashInvalid
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfInstrumentIdentityBlocker::SourceArtifactHashInvalid
+    ));
+}
+
+#[test]
+fn instrument_identity_rejects_contact_secret_and_boundary_regressions() {
+    let identity = StockEtfInstrumentIdentityV1 {
+        bybit_live_execution_unchanged: false,
+        ibkr_live_denied: false,
+        margin_short_denied: false,
+        options_cfd_denied: false,
+        ibkr_contact_performed: true,
+        secret_content_serialized: true,
+        ..StockEtfInstrumentIdentityV1::accepted_fixture()
+    };
+    let blockers = identity.validate().blockers;
+
+    assert!(has(
+        &blockers,
+        StockEtfInstrumentIdentityBlocker::BybitLiveExecutionNotProtected
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfInstrumentIdentityBlocker::IbkrLiveNotDenied
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfInstrumentIdentityBlocker::MarginShortNotDenied
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfInstrumentIdentityBlocker::OptionsCfdNotDenied
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfInstrumentIdentityBlocker::IbkrContactPerformed
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfInstrumentIdentityBlocker::SecretContentSerialized
+    ));
+}
+
+#[test]
+fn blocked_template_is_parseable_and_secret_free() {
+    let srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..");
+    let raw = std::fs::read_to_string(
+        srv_root.join("settings/broker/stock_etf_instrument_identity.template.toml"),
+    )
+    .expect("read instrument identity template");
+    let parsed: toml::Value = toml::from_str(&raw).expect("instrument identity template parses");
+
+    assert_eq!(parsed["identity"]["contract_id"].as_str(), Some(""));
+    assert_eq!(
+        parsed["identity"]["asset_lane"].as_str(),
+        Some("crypto_perp")
+    );
+    assert_eq!(parsed["identity"]["broker"].as_str(), Some("bybit"));
+    assert_eq!(
+        parsed["identity"]["ibkr_contact_performed"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        parsed["identity"]["secret_content_serialized"].as_bool(),
+        Some(false)
+    );
+
+    let lower = raw.to_ascii_lowercase();
+    assert!(!lower.contains("api_key ="));
+    assert!(!lower.contains("api_secret ="));
+    assert!(!lower.contains("account_id ="));
+    assert!(!lower.contains("password ="));
+    assert!(!lower.contains("token ="));
+}
+
+fn has(
+    blockers: &[StockEtfInstrumentIdentityBlocker],
+    blocker: StockEtfInstrumentIdentityBlocker,
+) -> bool {
+    blockers.contains(&blocker)
+}
