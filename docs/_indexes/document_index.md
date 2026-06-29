@@ -42,6 +42,8 @@
 | `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_phase2_paper_lifecycle_event_log_checkpoint.md` | Operator Phase 2 paper lifecycle 摘要：paper order lifecycle evidence shape done；no connector/no paper order/no IBKR contact。 |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-06-29--ibkr_stock_etf_phase3_evidence_contracts_checkpoint.md` | PM Phase 3 evidence checkpoint：market-data provenance、frozen inputs、DQ/quarantine manifest、evidence-clock day checker source contracts 已落地；不啟動 evidence clock。 |
 | `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_phase3_evidence_contracts_checkpoint.md` | Operator Phase 3 evidence 摘要：PASS_DAY/QUARANTINED_DAY/WINDOW_COMPLETE checker semantics done；runtime Phase 3 still blocked。 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-29--ibkr_stock_etf_phase4_gui_readiness_checkpoint.md` | PM Phase 4 GUI readiness checkpoint：新增 display-only `/api/v1/stock-etf/readiness`、console `Stock/ETF IBKR` tab、`lane crypto_perp` badge；不新增 POST/order/secret/IBKR contact/lane selector。 |
+| `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_phase4_gui_readiness_checkpoint.md` | Operator Phase 4 GUI readiness 摘要：Stock/ETF IBKR 狀態可見，IPC down fail-closed；IBKR runtime、paper order、evidence clock、GUI lane authority 仍 blocked。 |
 
 ### 2026-06-22 Shadow placement alpha ingestion
 

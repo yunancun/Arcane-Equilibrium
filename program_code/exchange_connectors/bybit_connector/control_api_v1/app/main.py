@@ -225,6 +225,12 @@ app.include_router(earn_router)
 from .engine_capabilities_routes import engine_capabilities_router  # noqa: E402
 app.include_router(engine_capabilities_router)
 
+# ── Stock/ETF IBKR Readiness Router / Stock/ETF IBKR 只讀狀態路由（ADR-0048）──
+# Display-only GUI surface. This route can query the local Rust IPC fixture but
+# cannot contact IBKR, touch secret slots, or submit/cancel paper orders.
+from .stock_etf_routes import stock_etf_router  # noqa: E402
+app.include_router(stock_etf_router)
+
 # ── Shadow-fill Consumer Router / Shadow-fill 消費者路由（EDGE-P3-1 Step 7c）──
 from .shadow_fills_routes import shadow_fills_router  # noqa: E402
 app.include_router(shadow_fills_router)

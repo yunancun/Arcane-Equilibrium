@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Stock/ETF IBKR Readiness</title>
+<script src="/static/common-formatters.js?v=20260519.split-p2"></script>
+<script src="/static/common-mode-badge.js?v=20260519.split-p2"></script>
+<script src="/static/common-modals.js?v=20260519.split-p2"></script>
+<script src="/static/js/fetch_with_csrf.js?v=20260527.ops1"></script>
+<script src="/static/common.js?v=20260527.ops1-csrf"></script>
+</head>
+<body>
+<script>ocAuthCheck(); ocInjectBaseCSS();</script>
+
+<style>
+  html, body { min-height:100%; margin:0; overflow-y:auto; background:var(--bg); color:var(--text); }
+  .se-wrap { padding:16px; max-width:1280px; margin:0 auto; }
+  .se-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+  .se-title { margin:0; font-size:18px; line-height:1.25; }
+  .se-sub { margin-top:4px; color:var(--text-dim); font-size:12px; line-height:1.5; }
+  .se-toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .se-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; margin-bottom:14px; }
+  .se-metric {
+    background:var(--card-bg); border:1px solid var(--border); border-radius:8px;
+    padding:10px; min-height:84px;
+  }
+  .se-metric-label { font-size:10px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.3px; }
+  .se-metric-value { margin-top:5px; font-size:16px; font-weight:700; line-height:1.25; overflow-wrap:anywhere; }
+  .se-metric-sub { margin-top:5px; color:var(--text-dim); font-size:11px; line-height:1.35; overflow-wrap:anywhere; }
+  .se-grid { display:grid; grid-template-columns:repeat(2,minmax(280px,1fr)); gap:12px; }
+  .se-panel {
+    background:var(--card-bg); border:1px solid var(--border); border-radius:8px;
+    padding:12px; min-height:132px;
+  }
+  .se-panel-title { display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:13px; font-weight:700; margin-bottom:10px; }
+  .se-kv { width:100%; border-collapse:collapse; font-size:12px; }
+  .se-kv th {
+    text-align:left; width:44%; padding:7px 8px; color:var(--text-dim); font-weight:600;
+    border-bottom:1px solid rgba(139,148,158,0.16);
+  }
+  .se-kv td { padding:7px 8px; border-bottom:1px solid rgba(139,148,158,0.16); vertical-align:top; overflow-wrap:anywhere; }
+  .se-kv tr:last-child th, .se-kv tr:last-child td { border-bottom:none; }
+  .se-chip-row { display:flex; gap:6px; flex-wrap:wrap; }
+  .se-list { display:flex; gap:6px; flex-wrap:wrap; min-height:25px; }
+  .se-muted { color:var(--text-dim); font-size:12px; }
+  .se-code { font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:11px; }
+  .se-bad-line { border-color:rgba(248,81,73,0.36); }
+  .se-warn-line { border-color:rgba(210,153,34,0.36); }
+  @media (max-width: 860px) {
+    .se-grid { grid-template-columns:1fr; }
+    .se-kv th { width:40%; }
+  }
+</style>
+
+<div class="se-wrap">
+  <div class="se-head">
+    <div>
+      <h2 class="se-title">Stock/ETF · IBKR Readiness</h2>
+      <div class="se-sub">ADR-0048 · stock_etf_cash · paper/shadow · Phase 2 first-contact gate</div>
+    </div>
+    <div class="se-toolbar">
+      <button class="oc-btn oc-btn-primary" type="button" onclick="loadReadiness()">刷新 / Refresh</button>
+      <span id="se-updated" class="oc-chip oc-chip-neutral">loading...</span>
+    </div>
+  </div>
+
+  <div class="se-summary">
+    <div class="se-metric">
+      <div class="se-metric-label">Default Lane</div>
+      <div class="se-metric-value" id="se-default-lane">--</div>
+      <div class="se-metric-sub">Console badge source</div>
+    </div>
+    <div class="se-metric">
+      <div class="se-metric-label">Stock/ETF Lane</div>
+      <div class="se-metric-value" id="se-readiness-state">--</div>
+      <div class="se-metric-sub" id="se-readiness-sub"></div>
+    </div>
+    <div class="se-metric">
+      <div class="se-metric-label">IBKR Paper</div>
+      <div class="se-metric-value" id="se-paper-state">--</div>
+      <div class="se-metric-sub" id="se-paper-sub"></div>
+    </div>
+    <div class="se-metric">
+      <div class="se-metric-label">IBKR Live</div>
+      <div class="se-metric-value" id="se-live-state">--</div>
+      <div class="se-metric-sub">live/tiny-live remain denied</div>
+    </div>
+  </div>
+
+  <div class="se-grid">
+    <section class="se-panel" id="se-lane-panel">
+      <div class="se-panel-title">
+        <span>Lane Boundary</span>
+        <span id="se-gui-authority" class="oc-chip oc-chip-neutral">--</span>
+      </div>
+      <table class="se-kv">
+        <tbody id="se-lane-body">
+          <tr><td colspan="2" class="se-muted">Loading...</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="se-panel" id="se-phase2-panel">
+      <div class="se-panel-title">
+        <span>Phase 2 Gate</span>
+        <span id="se-phase2-status" class="oc-chip oc-chip-neutral">--</span>
+      </div>
+      <table class="se-kv">
+        <tbody id="se-phase2-body">
+          <tr><td colspan="2" class="se-muted">Loading...</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="se-panel" id="se-guard-panel">
+      <div class="se-panel-title">
+        <span>Runtime Guard</span>
+        <span id="se-degraded" class="oc-chip oc-chip-neutral">--</span>
+      </div>
+      <table class="se-kv">
+        <tbody id="se-guard-body">
+          <tr><td colspan="2" class="se-muted">Loading...</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="se-panel" id="se-denial-panel">
+      <div class="se-panel-title">
+        <span>Denied Surface</span>
+        <span id="se-denied-count" class="oc-chip oc-chip-neutral">--</span>
+      </div>
+      <div class="se-muted" style="margin-bottom:8px">Configured denials and current blockers</div>
+      <div id="se-denied-list" class="se-list"></div>
+      <div id="se-blocker-list" class="se-list" style="margin-top:10px"></div>
+    </section>
+  </div>
+</div>
+
+<script>
+const READINESS_ENDPOINT = '/api/v1/stock-etf/readiness';
+
+function toneFor(value) {
+  const s = String(value || '').toLowerCase();
+  if (s === 'paper_ready' || s === 'readonly_ready' || s === 'pass' || s === 'false') return 'good';
+  if (s === 'phase2_blocked' || s === 'degraded' || s === 'shadow_only' || s === 'blocked') return 'warn';
+  if (s === 'contract_violation_blocked' || s === 'true' || s === 'denied') return 'bad';
+  return 'neutral';
+}
+
+function boolChip(value, goodWhenFalse) {
+  const flag = value === true;
+  const good = goodWhenFalse ? !flag : flag;
+  return ocChip(flag ? 'true' : 'false', good ? 'good' : 'bad');
+}
+
+function textChip(value) {
+  return ocChip(value == null || value === '' ? '-' : String(value), toneFor(value));
+}
+
+function setChip(id, text, type) {
+  const node = document.getElementById(id);
+  if (!node) return;
+  const safeType = ['good', 'warn', 'bad', 'neutral', 'info'].includes(type) ? type : 'neutral';
+  node.textContent = text == null || text === '' ? '-' : String(text);
+  node.className = 'oc-chip oc-chip-' + safeType;
+}
+
+function kvRow(label, html) {
+  return '<tr><th>' + ocEsc(label) + '</th><td>' + html + '</td></tr>';
+}
+
+function chipList(items, emptyText) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return '<span class="se-muted">' + ocEsc(emptyText || '-') + '</span>';
+  }
+  return items.map(item => ocChip(String(item), toneFor(item))).join('');
+}
+
+function renderFallback() {
+  const data = {
+    default_asset_lane: 'crypto_perp',
+    readiness_state: 'degraded',
+    source_readiness: { denial_reasons: ['api_unavailable'], paper_ready: false, readonly_ready: false, live_denied: true },
+    gui_authority: 'display_only',
+    phase2_gate_status: 'BLOCKED',
+    phase2_gate_blockers: ['api_unavailable'],
+    first_ibkr_contact_allowed: false,
+    immutable_pass_artifact_present: false,
+    connector_enabled: false,
+    ibkr_live_enabled: false,
+    stock_live_disabled: true,
+    paper_order_entry_visible: false,
+    ibkr_call_performed: false,
+    secret_slot_touched: false,
+    order_routed: false,
+    bybit_ipc_reused: false,
+    denied_operations: ['ibkr_api_contact_before_phase2_gate'],
+    degraded: true,
+    reason: 'api_unavailable',
+  };
+  renderReadiness(data);
+}
+
+function renderReadiness(data) {
+  const source = data.source_readiness || {};
+  document.getElementById('se-default-lane').innerHTML = textChip(data.default_asset_lane || 'crypto_perp');
+  document.getElementById('se-readiness-state').innerHTML = textChip(data.readiness_state || 'blocked');
+  document.getElementById('se-readiness-sub').textContent =
+    (source.denial_reasons || []).join(', ') || 'no source denial reasons';
+  document.getElementById('se-paper-state').innerHTML = boolChip(source.paper_ready, false);
+  document.getElementById('se-paper-sub').textContent = source.shadow_only ? 'shadow_only' : 'paper flag path';
+  document.getElementById('se-live-state').innerHTML = boolChip(data.ibkr_live_enabled, true);
+  setChip('se-gui-authority', data.gui_authority || 'display_only', 'neutral');
+  setChip('se-phase2-status', data.phase2_gate_status || 'BLOCKED', toneFor(data.phase2_gate_status || 'blocked'));
+  setChip('se-degraded', data.degraded ? 'degraded' : 'source', data.degraded ? 'warn' : 'good');
+
+  document.getElementById('se-lane-body').innerHTML = [
+    kvRow('asset_lane', textChip(data.asset_lane || 'stock_etf_cash')),
+    kvRow('broker', textChip(data.broker || 'ibkr')),
+    kvRow('default_asset_lane', textChip(data.default_asset_lane || 'crypto_perp')),
+    kvRow('readonly_ready', boolChip(source.readonly_ready, false)),
+    kvRow('paper_ready', boolChip(source.paper_ready, false)),
+    kvRow('paper_order_entry_visible', boolChip(data.paper_order_entry_visible, true)),
+  ].join('');
+
+  document.getElementById('se-phase2-body').innerHTML = [
+    kvRow('immutable_pass_artifact_present', boolChip(data.immutable_pass_artifact_present, false)),
+    kvRow('first_ibkr_contact_allowed', boolChip(data.first_ibkr_contact_allowed, false)),
+    kvRow('connector_enabled', boolChip(data.connector_enabled, false)),
+    kvRow('stock_live_disabled', boolChip(data.stock_live_disabled, false)),
+  ].join('');
+
+  document.getElementById('se-guard-body').innerHTML = [
+    kvRow('ibkr_call_performed', boolChip(data.ibkr_call_performed, true)),
+    kvRow('secret_slot_touched', boolChip(data.secret_slot_touched, true)),
+    kvRow('order_routed', boolChip(data.order_routed, true)),
+    kvRow('bybit_ipc_reused', boolChip(data.bybit_ipc_reused, true)),
+    kvRow('reason', '<span class="se-code">' + ocEsc(data.reason || '-') + '</span>'),
+  ].join('');
+
+  const denied = Array.isArray(data.denied_operations) ? data.denied_operations : [];
+  const blockers = []
+    .concat(source.denial_reasons || [])
+    .concat(data.phase2_gate_blockers || [])
+    .concat(data.contract_violations || []);
+  setChip('se-denied-count', String(denied.length), denied.length ? 'warn' : 'neutral');
+  document.getElementById('se-denied-list').innerHTML = chipList(denied, 'no denied operations');
+  document.getElementById('se-blocker-list').innerHTML = chipList(blockers, 'no current blockers');
+  setChip('se-updated', new Date().toLocaleTimeString(), data.degraded ? 'warn' : 'good');
+
+  document.getElementById('se-phase2-panel').classList.toggle('se-warn-line', data.first_ibkr_contact_allowed !== true);
+  document.getElementById('se-guard-panel').classList.toggle('se-bad-line', (data.contract_violations || []).length > 0);
+}
+
+async function loadReadiness() {
+  const payload = await ocApi(READINESS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false });
+  if (!payload || !payload.data) {
+    renderFallback();
+    return;
+  }
+  renderReadiness(payload.data);
+}
+
+waitForServerUp(loadReadiness);
+</script>
+</body>
+</html>
