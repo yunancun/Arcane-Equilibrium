@@ -1,0 +1,33 @@
+# Stock/ETF tiny-live ADR eligibility template.
+# This template is intentionally BLOCKED. It can only prove that a future ADR
+# discussion may be opened; it never authorizes IBKR tiny-live or live.
+
+contract_id = ""
+adr_path = "docs/adr/0048-ibkr-stock-etf-paper-shadow-lane.md"
+amd_path = "docs/governance_dev/amendments/2026-06-29--AMD-2026-06-29-01-ibkr-stock-etf-paper-shadow-lane.md"
+spec_path = "docs/execution_plan/specs/2026-06-29--stock_etf_cash_phase0_named_contract_packet.md"
+
+phase5_release_packet_hash = ""
+scorecard_manifest_hash = ""
+dq_manifest_hash = ""
+statistical_preregistration_hash = ""
+qc_review_hash = ""
+mit_review_hash = ""
+
+paper_shadow_window_complete = false
+benchmark_relative_after_cost_lcb_bps = 0
+independent_observation_count = 0
+min_independent_observation_count = 0
+conservative_cost_stress_lcb_bps = 0
+paper_shadow_divergence_bps = 0
+max_paper_shadow_divergence_bps = 0
+
+concentration_label_passed = false
+regime_label_passed = false
+freshness_label_passed = false
+qc_review_passed = false
+mit_review_passed = false
+
+decision = "not_eligible"
+secret_content_serialized = false
+sealed = false

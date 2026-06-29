@@ -70,7 +70,7 @@ No `Other(String)`, catch-all broker, catch-all lane, or string-literal venue by
 | Margin / short / options / CFD | Existing Bybit policies where applicable | Denied |
 | Transfer / account-management write | Existing governed policy where applicable | Denied |
 | Shadow fill / scorecard evidence | Existing learning contracts | Allowed as research evidence only |
-| Promotion to live | Existing live gates | Denied; positive paper/shadow may only open a new ADR discussion |
+| Promotion to live | Existing live gates | Denied; positive paper/shadow may only open a new ADR discussion after `tiny_live_adr_eligibility_v1` passes |
 
 ## Mandatory Phase Gates
 
@@ -84,6 +84,8 @@ Phase 4 GUI runtime may expose stock/ETF views only after route/cache/auth negat
 
 Phase 5 may sign off paper/shadow online only after the release packet, immutable artifact manifest, kill/disable cleanup runbook, evidence archive, and engineering shakedown all pass.
 
+`tiny_live_adr_eligibility_v1` is a discussion gate only. It may be evaluated after the paper/shadow window and Phase 5 release evidence are complete, but passing it cannot authorize tiny-live, live, margin, short, options, CFD, transfer, account-management writes, secret creation, or connector runtime.
+
 ## Denied Paths
 
 The following are explicitly not approved:
@@ -95,7 +97,7 @@ The following are explicitly not approved:
 - Treating GUI lane selection, localStorage, query params, or hidden form fields as authorization.
 - Treating IBKR paper fills as live fills.
 - Treating 6-8 weeks of paper/shadow evidence as durable alpha proof by itself.
-- Auto-promoting from paper/shadow to tiny-live or live.
+- Auto-promoting from paper/shadow to tiny-live or live, including via `tiny_live_adr_eligibility_v1`.
 
 ## Consequences
 

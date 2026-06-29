@@ -21,6 +21,7 @@ pub mod state;
 pub mod stock_etf_lane;
 pub mod stock_etf_phase3_evidence;
 pub mod stock_etf_release_packet;
+pub mod stock_etf_tiny_live_eligibility;
 
 pub use agent::{AgentMessage, AgentRole, MessageType};
 pub use asset_venue::{AssetClass, Venue, VenueParseError};
@@ -81,6 +82,11 @@ pub use stock_etf_release_packet::{
     StockEtfReleaseManifestHashV1, StockEtfReleasePacketBlocker, StockEtfReleasePacketV1,
     StockEtfReleaseVerdict, STOCK_ETF_RELEASE_ADR_PATH, STOCK_ETF_RELEASE_AMD_PATH,
     STOCK_ETF_RELEASE_SPEC_PATH,
+};
+pub use stock_etf_tiny_live_eligibility::{
+    TinyLiveAdrEligibilityBlocker, TinyLiveAdrEligibilityDecision, TinyLiveAdrEligibilityV1,
+    TinyLiveAdrEligibilityVerdict, STOCK_ETF_TINY_LIVE_ADR_PATH, STOCK_ETF_TINY_LIVE_AMD_PATH,
+    STOCK_ETF_TINY_LIVE_SPEC_PATH,
 };
 
 // ---------------------------------------------------------------------------

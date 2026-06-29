@@ -46,6 +46,8 @@
 | `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_phase4_gui_readiness_checkpoint.md` | Operator Phase 4 GUI readiness 摘要：Stock/ETF IBKR 狀態可見，IPC down fail-closed；IBKR runtime、paper order、evidence clock、GUI lane authority 仍 blocked。 |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-06-29--ibkr_stock_etf_phase5_release_packet_contract_checkpoint.md` | PM Phase 5 release packet contract checkpoint：新增 `stock_etf_release_packet_v1` typed release/shakedown evidence validator + blocked template；不授權 release/tiny-live/live。 |
 | `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_phase5_release_packet_contract_checkpoint.md` | Operator Phase 5 release packet 摘要：future release evidence 可 machine-check；real release、IBKR contact、paper order、evidence clock 仍 blocked。 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-29--ibkr_stock_etf_tiny_live_adr_eligibility_contract_checkpoint.md` | PM tiny-live ADR eligibility checkpoint：新增 `tiny_live_adr_eligibility_v1` discussion-only validator + blocked template；positive paper/shadow 不能直接授權 tiny-live/live。 |
+| `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_tiny_live_adr_eligibility_contract_checkpoint.md` | Operator tiny-live ADR eligibility 摘要：future ADR discussion gate 可 machine-check；`tiny_live_authorized` / `live_authorized` 仍被拒絕。 |
 
 ### 2026-06-22 Shadow placement alpha ingestion
 
