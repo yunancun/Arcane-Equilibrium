@@ -92,6 +92,15 @@ Matrix:
 
 Every operation must emit an audit event with `asset_lane`, `broker`, `environment`, `operation`, `allowed`, `denial_reason`, and source artifact hash.
 
+Source validator: `openclaw_types::stock_etf_broker_capability_registry::StockEtfBrokerCapabilityRegistryV1`.
+The validator requires the complete operation matrix, `stock_etf_cash` / IBKR
+scope, Bybit live execution unchanged, Python broker write authority denied,
+IBKR live and CFD/margin reserved paths denied, required audit fields, source
+artifact hashes, paper-write Rust ownership, required gates for read / paper /
+shadow / scorecard operations, and exact typed denials for live, margin/short,
+options/CFD, and transfer/account-write operations. It rejects first IBKR contact
+or serialized secret content in the registry artifact.
+
 ## 4. `phase2_ibkr_external_surface_gate_v1`
 
 The first IBKR contact must wait for this immutable PASS artifact.
