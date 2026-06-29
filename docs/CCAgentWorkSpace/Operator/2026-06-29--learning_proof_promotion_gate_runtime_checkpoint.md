@@ -7,7 +7,7 @@ Runtime transition: BLOCKED_BY_RUNTIME
 
 ## What changed
 
-`trade-core` is now source-synced to `16f4028313f45dc6af411e81d9eb841ed39878d4`, and the learning cron expected-head markers were repinned. The proof/promotion gate was run on runtime and correctly failed closed.
+`trade-core` is now source-synced through the current checkpoint, and the learning cron expected-head markers were repinned to runtime HEAD. The proof/promotion gate was run on runtime and correctly failed closed.
 
 Key artifact:
 
