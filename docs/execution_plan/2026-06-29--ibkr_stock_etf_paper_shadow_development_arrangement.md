@@ -11,6 +11,11 @@
 建立一條隔離的 `stock_etf_cash` research lane，先用 IBKR paper account 與
 shadow fill model 收集 6-8 週 after-cost evidence。
 
+2026-06-29 PM 對抗性審查結論：CC/FA/PA/E3/QC/MIT 一致認為方向有效，
+但只批准 Phase 0 ADR/spec。Phase 1+ 實作、IBKR API 呼叫、secret slot 建立、
+paper order rehearsal、GUI runtime enablement、6-8 週 evidence clock 均需先補齊
+第 11 節 blocker。
+
 短期允許的最終狀態只到：
 
 - IBKR read-only account/market-data healthcheck
@@ -78,13 +83,17 @@ GUI 登錄後第一層應明確選擇 asset lane：
 
 ## 3. 新增 / 分路模塊
 
+本節是目標模塊拆分，不是 Phase 1+ 開工授權。對抗性審查後的 PM 判斷：
+以下模塊名還不足以實作，必須先補出 lane-scoped Interface、DB evidence
+contract、feature-flag invariants 與 IBKR API/session 選型。
+
 ### 3.1 Rust types / core
 
 建議新增或擴展：
 
 - `openclaw_types::asset_lane`
   - `AssetLane::{CryptoPerp, StockEtfCash, CfdMargin}`
-  - `BrokerVenue::{Bybit, IbkrPaper, IbkrLiveReserved}`
+  - `Broker::{Bybit, Ibkr}`
   - `BrokerEnvironment::{ReadOnly, Paper, LiveReserved}`
   - `InstrumentKind::{CryptoPerp, Stock, Etf, Cash, CfdReserved}`
 - `openclaw_types::equity_instrument`
@@ -116,6 +125,14 @@ GUI 登錄後第一層應明確選擇 asset lane：
 IBKR live 塞進原 enum。應由新 ADR 決定是 amend M13，還是新增
 `AssetLane` 作為更高層分流。
 
+審查後約束：
+
+- 不使用 `BrokerVenue::{IbkrPaper, IbkrLiveReserved}` 這種混合 broker 與
+  environment 的型別。
+- `IbkrLiveReserved` 若作 serialization reservation，任何 order path 使用時必須
+  typed-deny；不得成為 dormant live toggle。
+- 新 enum 不得有 `Other(String)` / catch-all venue/broker/lane variant。
+
 ### 3.2 Rust engine
 
 新增 engine 內部邊界：
@@ -123,6 +140,9 @@ IBKR live 塞進原 enum。應由新 ADR 決定是 amend M13，還是新增
 - `asset_lane_router`
   - 根據 `AssetLane` 選擇 crypto 或 stock/ETF 流程
   - 初期只允許 `stock_etf_cash` 走 `paper` / `shadow`
+- `lane_scoped_ipc`
+  - 新增 lane-scoped Rust IPC / command contract
+  - 禁止復用既有 Bybit/Paper `submit_paper_order` 作 stock/ETF broker-paper path
 - `broker_order_lifecycle`
   - normalized order intent
   - normalized order state
@@ -138,6 +158,17 @@ IBKR live 塞進原 enum。應由新 ADR 決定是 amend M13，還是新增
 
 任何 order-capable path 都必須仍由 Rust authority 掌握。Python route 只能
 forward operator request 或讀狀態。
+
+Paper order lifecycle 必須先規格化為 `ibkr_paper_order_lifecycle_v1`：
+
+- internal states / allowed transitions / terminal states
+- submit / acknowledge / partial fill / fill / cancel / replace / reject / inactive
+- local id / broker order id / execution id / commission report id / idempotency key
+- restart recovery and stale state policy
+- `STATE_UNKNOWN -> MANUAL_REVIEW_REQUIRED`
+- typed denial reasons：lane disabled、broker disabled、live reserved、market closed、
+  instrument blocked、cost model missing、universe mismatch、credential unavailable、
+  connector unavailable、authorization invalid
 
 ### 3.3 Python / FastAPI control plane
 
@@ -178,6 +209,13 @@ program_code/
 但交易影響邏輯仍不在 Python connector。Python connector 只做 API client、
 healthcheck、fixtures、paper fill import helper。
 
+Python connector 負面約束：
+
+- 不得暴露直接 broker `place_order` / `cancel_order` / `replace_order` 方法。
+- 若未來需要 order rehearsal，Python 只能作 Rust-owned IPC 的 thin caller，
+  不能持有 broker order truth 或自行重試 broker write。
+- 需要 grep/static tests 防止 Python route 直接調用 broker write API。
+
 ### 3.4 Data / DB
 
 新增 schema 建議：
@@ -201,6 +239,10 @@ healthcheck、fixtures、paper fill import helper。
 - shadow fill 必須標記 `synthetic_shadow`，不得與 broker paper fill 混同。
 - IBKR paper fill 不等於 live fill proof。
 - 每筆 scorecard row 必須帶 cost model version、broker、environment、asset lane、instrument identity。
+- Daily scorecard 只能是 derived artifact；atomic facts 才是證據 source of truth。
+- Schema 必須包含 instrument identity、universe version、corporate actions、
+  market-data provenance、FX/cash ledger、cost model version、benchmark version、
+  paper-vs-shadow reconciliation。
 
 若涉及 migration，必須按現有規則做 Linux PG empirical dry-run 與 idempotency double-apply。
 
@@ -221,16 +263,18 @@ settings/broker/ibkr_paper.toml
 | `OPENCLAW_STOCK_ETF_LANE_ENABLED` | `0` | GUI/Control API 顯示 stock lane 的總開關 |
 | `OPENCLAW_IBKR_READONLY_ENABLED` | `0` | 允許 IBKR read-only healthcheck |
 | `OPENCLAW_IBKR_PAPER_ENABLED` | `0` | 允許 IBKR paper order rehearsal |
-| `OPENCLAW_IBKR_LIVE_ENABLED` | `0` | 必須永久 fail-closed，直到另開 live ADR |
 | `OPENCLAW_ASSET_LANE_DEFAULT` | `crypto_perp` | 登錄後默認 lane |
 | `OPENCLAW_STOCK_ETF_SHADOW_ONLY` | `1` | 初期禁止 paper order，僅 shadow |
+
+不設 functional `OPENCLAW_IBKR_LIVE_ENABLED`。若為 GUI 顯示需要保留 live status，
+應命名為 reserved/denied 狀態，且任何 order path 讀到 live intent 都必須 typed-deny。
 
 Secret slot：
 
 ```text
 $OPENCLAW_SECRETS_DIR/external/ibkr/readonly/
 $OPENCLAW_SECRETS_DIR/external/ibkr/paper/
-$OPENCLAW_SECRETS_DIR/external/ibkr/live/        # reserved only; 不創建或保持空
+$OPENCLAW_SECRETS_DIR/external/ibkr/live/        # 不創建；若有 credential material，healthcheck FAIL
 ```
 
 Authorization schema 後續需要新增欄位：
@@ -245,6 +289,17 @@ Authorization schema 後續需要新增欄位：
 但第一階段可以只做 read-only / paper-scoped envelope，不得復用 Bybit live
 authorization。
 
+Phase 0 必須補充：
+
+- exact IBKR API baseline：TWS API / IB Gateway / Client Portal Web API 只能先選一個。
+- broker-reported paper attestation：下單前必須證明 session/account 是 paper，
+  且 account fingerprint、host/port、environment 全部匹配。
+- secret contract：exact filenames、chmod 700/600、fingerprint、rotation、TTL、
+  no-env-fallback、redaction rules。
+- non-Bybit API allowlist：method/action/transport/rate-limit/raw artifact policy。
+- feature flag matrix：所有組合對 allowed action、UI state、route response、
+  Rust authority result 的預期。
+
 ## 5. GUI 更改
 
 ### 5.1 登錄後 lane selector
@@ -257,6 +312,11 @@ authorization。
 
 選擇後進入同一 Control Console，但左側/頂部必須有不可忽略的 lane badge。
 所有 tabs 的資料查詢都必須帶 `asset_lane`。
+
+GUI lane selector 只可作 query/filter state。任何 effect-capable operation 都必須
+由 server/Rust 使用簽名 envelope 重新驗證 `asset_lane`、broker、environment、
+risk config、authorization、Decision Lease、Guardian。localStorage、query param、
+hidden form field 均不得授權交易。
 
 ### 5.2 Stock/ETF 專用視圖
 
@@ -320,13 +380,20 @@ authorization。
 - universe frozen 或版本化
 - scorecard 每日產出成功
 - GUI 能展示 reconstructable evidence
+- `stock_etf_evidence_clock_v1` manifest 完成並帶 hash
+- benchmark version frozen
+- strategy hypothesis hash frozen
+- corporate-action / FX / fee source as-of frozen
+- paper-vs-shadow divergence thresholds frozen
 
 ### 6.1 初始 universe
 
 建議只開兩組：
 
-- US liquid stocks：大市值、高成交量、窄 spread；避免 penny / low liquidity
-- UCITS ETFs：只做低頻/再平衡研究；不做高 turnover
+- `US_LARGE_100_v1`：大市值、高成交量、窄 spread；避免 penny / low liquidity
+- `US_SECTOR_ETF_11_v1` 或 `US_LIQUID_ETF_50_v1`：低頻/再平衡研究
+- UCITS ETFs 作第二批；除非 PRIIPs/KID、TER、domicile、listing currency、
+  withholding/dividend treatment 已有 source contract
 
 暫不開：
 
@@ -342,12 +409,12 @@ authorization。
 
 第一批只做中低 turnover：
 
-- daily/weekly momentum
-- sector rotation
-- mean reversion after overextension
-- earnings drift research-only
-- ETF trend + risk-off rotation
-- opening/closing auction behavior shadow-only
+- 最多 2-3 個 pre-registered hypotheses
+- 每個 hypothesis 必須有 alpha source、half-life、turnover target、benchmark、
+  parameter grid、K count、rejection rule
+- daily/weekly momentum、sector rotation、ETF trend/risk-off rotation 可作第一批候選
+- earnings drift、opening/closing auction behavior 先 research-only，不進第一輪
+  profitability verdict，除非另補事件/auction data contract
 
 不做：
 
@@ -374,15 +441,36 @@ authorization。
 - benchmark excess return
 - conservative fill penalty sensitivity
 - paper-vs-shadow divergence
+- independent observation count by date/symbol/sector cluster
+- benchmark alpha / beta / tracking error / information ratio
+- cost-edge ratio
+- PSR/DSR 或等價 deflated metric
+- concentration by symbol/sector/event/week
 
 Promotion-like 判斷需要：
 
-- after-cost expectancy > 0
-- benchmark excess return > 0
-- conservative fill model 下仍 > 0
+- lower confidence bound for after-cost benchmark excess > 0 under conservative cost
+- benchmark excess return > 0 against pre-registered matched benchmark
+- conservative/punitive fill model 下仍 > 0
+- cost-edge ratio 不得過高；若執行成本吃掉 gross edge 的主要部分，不能判定 positive
 - 不由單一 event / 單一 symbol 驅動
 - 標記 bull-heavy / regime-heavy / stale-window
-- 至少 100+ 筆可重建樣本；低頻策略不足 100 筆時，需 walk-forward + bootstrap 補足統計可信度
+- 至少滿足 pre-registered independent sample threshold；原始 100+ trade rows
+  不等於 100+ independent observations
+- walk-forward / bootstrap 只能量化不確定性，不能補出不存在的獨立樣本
+
+結果標籤：
+
+- `engineering_ready`
+- `research_promising`
+- `profitability_feasible`
+- `insufficient_evidence`
+- `execution_model_invalid`
+- `kill`
+
+6-8 週窗口默認只可作 engineering shakedown + preliminary feasibility screen。
+低頻策略若樣本不足，只能輸出 `research_promising` 或 `insufficient_evidence`，
+不能輸出 durable-alpha proof。
 
 ## 7. 開發階段與派工
 
@@ -396,6 +484,10 @@ Promotion-like 判斷需要：
 - 明確 amend `ADR-0006` 的只讀/紙面例外，不改 live execution
 - 定義 non-Bybit API call policy
 - 定義 per-lane authorization schema
+- 定義 IBKR API/session baseline
+- 定義 `stock_etf_evidence_clock_v1`
+- 定義 `ibkr_paper_order_lifecycle_v1`
+- 定義 DB evidence contract / scorecard formulas / benchmark mapping
 - review chain：`PM -> CC -> FA -> PA -> E3 -> QC -> MIT -> PM`
   - CC：16 根原則 / Bybit-only hard-boundary amend 審查
   - FA/PA：功能邊界與技術拆分
@@ -407,10 +499,18 @@ Promotion-like 判斷需要：
 - ADR accepted 或 operator 明確批准
 - `CLAUDE.md` / `.codex/MEMORY.md` 是否需要同步由 PM 判斷；未接受前不改
 - `TODO.md` active implementation row 只能在 Phase 0 通過後新增
+- 不允許 chat-only approval 代替 ADR/AMD；operator approval 必須落入治理文檔
 
 ### Phase 1: Type / config / schema foundation
 
 目標：讓系統能表達 asset lane、broker、instrument、environment、cost model。
+
+對抗性審查後拆成：
+
+- Phase 1A：Rust type reservation + denial tests only
+- Phase 1B：flag/readiness parser + status contract，全部 default OFF
+- Phase 1C：DB migration source design + Linux dry-run packet
+- Phase 1D：lane-scoped Rust IPC/order-lifecycle Interface；不接 IBKR
 
 工作：
 
@@ -429,6 +529,9 @@ Promotion-like 判斷需要：
 ### Phase 2: IBKR read-only + paper connector
 
 目標：建立可測試、可重建、fail-closed 的 IBKR paper 接口。
+
+Phase 2 不得啟動，除非 Phase 0 已選定 IBKR API baseline，並完成 E3
+secret/runtime topology 審查。
 
 工作：
 
@@ -449,6 +552,10 @@ Promotion-like 判斷需要：
 
 目標：每日產出 after-cost evidence。
 
+Phase 3 不得啟動，除非 market-data vendor/tier、PIT universe、corporate-action
+adjustment set、FX/cost model、benchmark、statistical validation design 均已
+machine-checkable。
+
 工作：
 
 - universe builder
@@ -467,6 +574,10 @@ Promotion-like 判斷需要：
 ### Phase 4: GUI lane selector + stock views
 
 目標：operator 能在 GUI 上清楚區分 crypto 與 stock/ETF。
+
+第一個 GUI slice 應是 lane badge/readiness page，而不是立即把 login-success
+selector 作為主流程。只有後端 Interface 與 fail-closed gates 穩定後才做完整
+lane selector。
 
 工作：
 
@@ -555,3 +666,42 @@ Promotion-like 判斷需要：
 5. 是否接受工程前置中位 4-5 週 + evidence 6-8 週的總周期。
 
 PM 建議：先批准 Phase 0。Phase 0 只產出 ADR/spec，不寫 runtime，不觸碰 IBKR API，不改 live 邊界。
+
+## 11. 對抗性審查後硬 blocker
+
+2026-06-29 PM 派發 `CC/FA/PA/E3/QC/MIT` 六角色對抗性審查。共識如下：
+
+- 方向有效：`stock_etf_cash` 作為 IBKR paper/shadow research lane 是值得探索的。
+- 工程方案尚未 implementation-ready。
+- 唯一可立即前進的是 Phase 0 ADR/spec。
+- 所有 Phase 1+、IBKR API、secret slot、paper order、GUI runtime activation、
+  evidence clock 均 BLOCKED。
+
+Phase 1 前必須完成：
+
+1. 接受的新 ADR/AMD，明確只批准 `stock_etf_cash` read-only/paper/shadow
+   research；不批准 IBKR live、margin、short、options、CFD、transfer。
+2. IBKR API baseline：TWS API / IB Gateway / Client Portal Web API 三者選一，
+   並定義 runtime process owner、host/port、session lifecycle、market data tier。
+3. Rust lane-scoped IPC/order Interface；不得重用現有 Bybit/Paper
+   `submit_paper_order`。
+4. `ibkr_paper_order_lifecycle_v1` 狀態機與 reconciliation contract。
+5. DB evidence contract：instrument identity、PIT universe、corporate actions、
+   market data provenance、FX/cash ledger、cost model、benchmark、paper/shadow links。
+6. Feature flag matrix 和 secret invariant matrix，包含 live slot absent/empty
+   enforcement。
+7. Python connector no-write structural guard。
+8. GUI lane selector display/filter-only contract。
+
+Phase 3 / evidence clock 前必須完成：
+
+1. `stock_etf_evidence_clock_v1` manifest。
+2. Frozen universe hash、benchmark hash、cost model hash、strategy hypothesis hash。
+3. Corporate-action / FX / fee / tax source as-of records。
+4. Pre-registered sample-size / independent observation rules。
+5. Paper-vs-shadow divergence thresholds and quarantine action。
+6. Strategy-specific benchmark and matched-control definitions。
+7. Regime / breadth / freshness / survivorship / execution-realism labels per ADR-0047。
+8. Scorecard formula appendix with CI / PSR / DSR or equivalent deflation。
+
+PM 判定：當前方案「有效但未可開工」。有效性只限於 Phase 0。

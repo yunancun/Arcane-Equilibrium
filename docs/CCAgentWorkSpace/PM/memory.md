@@ -25,6 +25,11 @@
 
 ## 近期記錄
 
+## 2026-06-29 IBKR Stock/ETF Plan Adversarial Review
+
+- PM integrated CC/FA/PA/E3/QC/MIT review of the IBKR `stock_etf_cash` paper/shadow plan: direction valid, but Phase 0 ADR/spec only; Phase 1+, IBKR API, secret slots, paper orders, GUI runtime enablement, and evidence clock remain blocked.
+- Main blockers added back to the plan: IBKR API/session baseline, broker-paper attestation, Rust lane-scoped IPC/order lifecycle, Python no-write connector boundary, DB evidence contract, flag/secret invariants, GUI display-only lane selector, and pre-registered QC/MIT evidence gates.
+
 ## 2026-06-29 External Repo Integration Review
 
 - PM closed six-subagent evaluation of `xbtlin/ai-berkshire` and `AgriciDaniel/claude-obsidian` as conditional read-only only: both are useful as research/retrieval/report-QA inspiration, not runtime/trading/alpha proof.
