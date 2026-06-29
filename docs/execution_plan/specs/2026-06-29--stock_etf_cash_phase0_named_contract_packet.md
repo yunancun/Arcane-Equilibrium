@@ -207,6 +207,39 @@ blocked/unknown PRIIPs KID status, missing PIT/hash/calendar/fractional-policy
 evidence, missing Bybit unchanged/live-denied/margin-short-denied/options-CFD-
 denied proof, prior IBKR contact, and serialized secret content.
 
+## 5B. `stock_etf_pit_universe_contract_v1`
+
+Point-in-time universe membership must be machine-checkable before Phase 3
+evidence-clock days, stock shadow signals, or scorecard derivation can rely on a
+`universe_hash`.
+
+Required fields:
+
+- `asset_lane=stock_etf_cash`
+- `broker=ibkr`
+- universe id, version, and hash
+- point-in-time as-of timestamp
+- effective membership window
+- constituent count and v1 maximum bound
+- per-constituent symbol, instrument kind, instrument identity hash, listing
+  venue, primary exchange, currency, tradability, and PRIIPs status
+- inclusion, exclusion, liquidity, tradability, PRIIPs, and delisted/inactive
+  policy hashes
+- corporate-action adjustment version hash
+- market-calendar hash
+- source artifact hash
+- evidence-clock freeze flag
+- survivorship-bias controls
+- Bybit-live unchanged and IBKR-live denied proof
+
+Source validator:
+`openclaw_types::stock_etf_pit_universe::StockEtfPitUniverseV1`.
+The validator rejects crypto/CFD/cash constituents, unknown or cash-ledger
+venues, non-USD v1 currency, untradable constituents, blocked/unknown PRIIPs
+state, missing PIT/window/hash/survivorship/freeze evidence, oversized v1
+universe bounds, prior IBKR contact, serialized secret content, and any Bybit
+live regression.
+
 ## 6. `ibkr_api_session_topology_v1`
 
 Baseline:
@@ -605,7 +638,7 @@ Clock start requires:
 
 - IBKR read-only/paper connector green for 5 trading days
 - shadow collector green for 5 trading days
-- frozen universe hash
+- accepted `stock_etf_pit_universe_contract_v1` and frozen universe hash
 - frozen benchmark hash
 - frozen cost model hash
 - frozen strategy hypothesis hash

@@ -27,6 +27,7 @@ pub mod stock_etf_instrument_identity;
 pub mod stock_etf_lane;
 pub mod stock_etf_phase0_manifest;
 pub mod stock_etf_phase3_evidence;
+pub mod stock_etf_pit_universe;
 pub mod stock_etf_release_packet;
 pub mod stock_etf_scorecard_inputs;
 pub mod stock_etf_tiny_live_eligibility;
@@ -84,9 +85,8 @@ pub use stock_etf_broker_capability_registry::{
     STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID,
 };
 pub use stock_etf_db_evidence_ddl::{
-    StockEtfDbEvidenceDdlBlocker, StockEtfDbEvidenceDdlContractV1,
-    StockEtfDbEvidenceDdlVerdict, STOCK_ETF_DB_EVIDENCE_CONTRACT_ID,
-    STOCK_ETF_DB_EVIDENCE_DDL_SOURCE_PATH,
+    StockEtfDbEvidenceDdlBlocker, StockEtfDbEvidenceDdlContractV1, StockEtfDbEvidenceDdlVerdict,
+    STOCK_ETF_DB_EVIDENCE_CONTRACT_ID, STOCK_ETF_DB_EVIDENCE_DDL_SOURCE_PATH,
 };
 pub use stock_etf_disable_cleanup_runbook::{
     StockEtfDisableCleanupBlocker, StockEtfDisableCleanupEnvFlagV1,
@@ -121,6 +121,10 @@ pub use stock_etf_phase3_evidence::{
     StockEtfAdjustmentMarker, StockEtfDailyDqManifestV1, StockEtfEvidenceClockDayV1,
     StockEtfEvidenceClockStatus, StockEtfFrozenEvidenceInputsV1, StockEtfPhase3Blocker,
     StockEtfPhase3Verdict, StockMarketDataProvenanceV1,
+};
+pub use stock_etf_pit_universe::{
+    StockEtfPitUniverseBlocker, StockEtfPitUniverseConstituentV1, StockEtfPitUniverseV1,
+    StockEtfPitUniverseVerdict, STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
 };
 pub use stock_etf_release_packet::{
     StockEtfKillDisableCleanupProofV1, StockEtfPgMigrationEvidenceV1,

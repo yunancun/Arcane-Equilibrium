@@ -1,0 +1,33 @@
+# ADR-0048 Stock/ETF point-in-time universe template.
+#
+# This is a blocked, secret-free source template. It does not contact IBKR,
+# create connectors, collect market data, route paper orders, inspect secrets,
+# write scorecards, or change Bybit live execution behavior.
+
+contract_id = ""
+asset_lane = "crypto_perp"
+broker = "bybit"
+universe_id = ""
+universe_version = ""
+universe_hash = ""
+point_in_time_asof_ms = 0
+effective_from_ms = 0
+effective_to_ms = 0
+constituent_count = 0
+max_constituents = 0
+constituents = []
+inclusion_rule_hash = ""
+exclusion_rule_hash = ""
+liquidity_screen_hash = ""
+tradability_screen_hash = ""
+priips_screen_hash = ""
+delisted_or_inactive_policy_hash = ""
+corporate_action_adjustment_version_hash = ""
+market_calendar_hash = ""
+source_artifact_hash = ""
+frozen_for_evidence_clock = false
+survivorship_bias_controls_present = false
+bybit_live_execution_unchanged = false
+ibkr_live_denied = false
+ibkr_contact_performed = false
+secret_content_serialized = false

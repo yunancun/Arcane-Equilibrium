@@ -24,6 +24,7 @@ const REQUIRED_CONTRACTS: &[&str] = &[
     "phase2_ibkr_external_surface_gate_v1",
     "non_bybit_api_allowlist_v1",
     "instrument_identity_contract_v1",
+    "stock_etf_pit_universe_contract_v1",
     "ibkr_api_session_topology_v1",
     "ibkr_session_attestation_v1",
     "feature_flag_secret_auth_matrix_v1",
