@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-30 IBKR Stock/ETF Python No-Write Static Guard
+
+- PM added `test_stock_etf_python_no_write_static_guard.py` as an AST/static guard for Stock/ETF/IBKR Python surfaces and future `program_code/broker_connectors/ibkr_connector/` files.
+- The guard rejects direct broker write functions/calls, forbidden paper-order IPC method strings, direct `ibapi` / `ib_insync` imports, and non-GET Stock/ETF/IBKR routes while intentionally excluding existing Bybit modules.
+- This grants no IBKR contact, connector runtime, paper order, DB apply, evidence clock, GUI lane authority, release approval, tiny-live, or live.
+
 ## 2026-06-30 IBKR Stock/ETF Phase 0 Manifest Contract
 
 - PM added `stock_etf_phase0_contract_packet_manifest_v1` as a Rust source-only validator for the Phase 0 machine-readable manifest.
