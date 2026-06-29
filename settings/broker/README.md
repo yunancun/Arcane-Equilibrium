@@ -17,3 +17,5 @@ This directory stores broker capability contracts and default-off runtime postur
 `stock_etf_phase3_evidence_contracts.toml` records the default-blocked market-data provenance, DQ, frozen-input, and evidence-clock checker shape. It does not start the evidence clock.
 
 `stock_etf_release_packet.template.toml` records the default-blocked Phase 5 release packet shape. It is secret-free and does not authorize IBKR contact, paper orders, GUI lane authority, tiny-live, or live.
+
+`stock_etf_tiny_live_adr_eligibility.template.toml` records the default-blocked future ADR discussion eligibility shape. It is secret-free and cannot authorize IBKR tiny-live or live even if a future paper/shadow scorecard is positive.

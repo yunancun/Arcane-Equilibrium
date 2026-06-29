@@ -570,6 +570,11 @@ Release packet must include:
 
 Eligibility to discuss tiny-live requires:
 
+- Phase 5 release packet hash
+- scorecard manifest hash
+- DQ manifest hash
+- statistical preregistration hash
+- QC/MIT review hashes
 - paper/shadow window complete
 - benchmark-relative after-cost lower confidence bound > 0
 - independent-observation threshold met
@@ -577,8 +582,11 @@ Eligibility to discuss tiny-live requires:
 - paper-vs-shadow divergence inside threshold
 - concentration/regime/freshness labels pass
 - QC/MIT review pass
+- decision value exactly `adr_discussion_only`
+- no serialized secret content
+- sealed source artifact
 
-Passing this contract does not authorize tiny-live. It only allows a new ADR discussion.
+Passing this contract does not authorize tiny-live. It only allows a new ADR discussion, and any `tiny_live_authorized` or `live_authorized` decision value must fail validation.
 
 ## 24. Phase Unlock Table
 
