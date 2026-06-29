@@ -101,6 +101,15 @@ while rejecting unknown venues, crypto/CFD instruments, non-USD v1 currency,
 untradable instruments, prior IBKR contact, serialized secrets, and any Bybit
 live regression.
 
+`stock_etf_pit_universe_contract_v1` must be machine-checkable before evidence
+clock days, stock shadow signals, or scorecard derivation rely on a universe
+hash. It must prove point-in-time universe id/version/hash, effective window,
+bounded constituents, per-constituent identity/tradability/PRIIPs/currency/
+venue checks, inclusion/exclusion/liquidity/tradability/PRIIPs policy hashes,
+delisted/inactive survivorship controls, corporate-action/calendar/source
+hashes, Bybit-live unchanged proof, and IBKR-live denial, while rejecting prior
+IBKR contact and serialized secrets.
+
 `stock_etf_kill_switch_and_disable_cleanup_runbook_v1` must be machine-checkable
 before any release or evidence-clock completion claim. It must prove exact
 disable flags, collector stop, GUI disabled/hidden posture, live-secret absence,
@@ -113,7 +122,7 @@ paper-shadow launch authority, tiny-live, and live.
 
 Phase 2 IBKR external contact may start only after `phase2_ibkr_external_surface_gate_v1` emits an immutable PASS artifact. The first read-only healthcheck is external contact and is not exempt.
 
-Phase 3 evidence clock may start only after `stock_etf_evidence_clock_v1` proves collector stability, frozen universe/benchmark/cost model/strategy hypothesis hashes, corporate-action and FX source contracts, and paper-vs-shadow divergence thresholds. Scorecard inputs must remain source-validated, derived-only, paper/shadow separated, and unable to claim live fills.
+Phase 3 evidence clock may start only after `stock_etf_evidence_clock_v1` proves collector stability, accepted PIT universe contract plus frozen universe/benchmark/cost model/strategy hypothesis hashes, corporate-action and FX source contracts, and paper-vs-shadow divergence thresholds. Scorecard inputs must remain source-validated, derived-only, paper/shadow separated, and unable to claim live fills.
 
 Cross-phase `stock_etf_cash` evidence must be referable through `audit.asset_lane_events_v1` immutable event references. These references require lane/broker/environment/operation fields, hash-chain continuity, producer/source metadata, artifact hashes, and redaction boundaries; they do not write audit rows or authorize runtime actions by themselves.
 

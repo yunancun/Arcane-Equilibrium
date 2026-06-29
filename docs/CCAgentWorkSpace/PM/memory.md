@@ -2592,3 +2592,9 @@
 - PM added `instrument_identity_contract_v1` as a Rust source-only validator for point-in-time Stock/ETF/Cash identity, closed venue/currency/tradability/PRIIPs states, calendar/contract-detail/corporate-action hashes, and Bybit-live-unchanged/live-denied proof.
 - The contract rejects crypto/CFD, unknown venues, non-USD v1 currency, untradable instruments, prior IBKR contact, and secret serialization.
 - This grants no IBKR contact, contract-details call, market-data subscription, connector runtime, paper order, DB apply, evidence clock, GUI lane authority, release, tiny-live, or live.
+
+## 2026-06-30 IBKR Stock/ETF PIT Universe Contract
+
+- PM added `stock_etf_pit_universe_contract_v1` as a Rust source-only validator for point-in-time universe id/version/hash/as-of/effective window, bounded constituents, per-constituent identity/tradability/PRIIPs/currency/venue checks, screen/policy hashes, survivorship controls, and evidence-clock freeze state.
+- The contract rejects crypto/CFD/cash constituents, unknown or cash-ledger venues, non-USD v1 currency, untradable constituents, missing PIT/hash/survivorship/freeze evidence, prior IBKR contact, and secret serialization.
+- This grants no IBKR contact, market-data collection, connector runtime, paper order, DB apply, scorecard write, evidence clock, GUI lane authority, release, tiny-live, or live.
