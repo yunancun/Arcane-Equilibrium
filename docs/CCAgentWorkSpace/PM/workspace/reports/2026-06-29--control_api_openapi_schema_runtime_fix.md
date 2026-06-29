@@ -39,9 +39,9 @@ Only `openclaw-trading-api.service` was restarted to load the source fix. Engine
 
 The API schema/runtime hygiene blocker is resolved, but bounded Demo execution remains blocked by:
 
-- Demo API slot prefix mismatch: current `FWkGZX...`, expected `BHw4...`
+- 2026-06-30 correction: Demo API slot `FWkGZX...` is operator-confirmed correct; `BHw4...` was a stale expected hint
 - `BYBIT_MODE=read_only` and `BYBIT_CONNECTOR_WRITE_ENABLED=false`
 - serving/proof chain not ready
 - no candidate-matched order/fill/fee/slippage/reconstruction evidence
 
-Next step remains secure operator Demo key/secret entry through `/api/v1/settings/api-key/{slot}` with slot `demo`, plus reviewed Demo-only connector mode cutover, then a fresh readiness/final-window gate run.
+Next step remains fresh readiness without the stale `BHw4...` expected pin, plus reviewed Demo-only connector mode cutover if credential/endpoint checks are green, then a fresh readiness/final-window gate run.

@@ -334,6 +334,26 @@ def test_authority_bearing_input_fails_closed() -> None:
     assert packet["answers"]["promotion_proof"] is False
 
 
+def test_allowed_by_this_packet_alias_authority_fails_closed() -> None:
+    runtime = _runtime()
+    runtime["allowed_actions"] = {"production_slot_write_allowed_by_this_packet": True}
+
+    packet = build_learning_serving_snapshot(
+        training_registry_repair_packet=_repair(),
+        learning_stack_health_snapshot=_health(),
+        model_registry_summary=_registry(),
+        runtime_serving_state=runtime,
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == AUTHORITY_BOUNDARY_VIOLATION_STATUS
+    assert packet["serving_snapshot_candidate"] is None
+    assert any(
+        item["key"] == "production_slot_write_allowed_by_this_packet"
+        for item in packet["authority_violations"]
+    )
+
+
 def test_cli_writes_json_output(tmp_path: Path, monkeypatch) -> None:
     repair = tmp_path / "training_registry_repair.json"
     health = tmp_path / "learning_stack_health_snapshot.json"

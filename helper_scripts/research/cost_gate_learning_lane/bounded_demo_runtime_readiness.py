@@ -250,6 +250,7 @@ def _api_key_summary(
     path: Path,
     expected_sha256: str | None,
     expected_prefix: str | None,
+    require_expected_match: bool,
 ) -> dict[str, Any]:
     value, error = _read_text_secret(path)
     value_hash = _sha256_text(value) if value else None
@@ -291,6 +292,7 @@ def _api_key_summary(
         "expected_prefix_len": len(expected_prefix_text) if expected_prefix_text else None,
         "expected_prefix_sha256_12": expected_prefix_hash,
         "expected_key_matches_observed": expected_match,
+        "expected_key_match_required": require_expected_match,
     }
 
 
@@ -300,12 +302,14 @@ def _demo_slot_check(
     slot: str,
     expected_sha256: str | None,
     expected_prefix: str | None,
+    require_expected_match: bool,
 ) -> dict[str, Any]:
     slot_dir = secrets_dir / slot
     api_key = _api_key_summary(
         path=slot_dir / "api_key",
         expected_sha256=expected_sha256,
         expected_prefix=expected_prefix,
+        require_expected_match=require_expected_match,
     )
     api_secret = _secret_presence_summary(slot_dir / "api_secret")
     endpoint_value, endpoint_error = _read_text_secret(slot_dir / "bybit_endpoint")
@@ -317,7 +321,10 @@ def _demo_slot_check(
         blockers.append("demo_api_secret_missing_or_empty")
     if endpoint != "demo":
         blockers.append("demo_endpoint_not_demo")
+    advisory_reasons: list[str] = []
     if api_key["expected_key_matches_observed"] is False:
+        advisory_reasons.append("demo_api_key_expected_value_mismatch")
+    if api_key["expected_key_matches_observed"] is False and require_expected_match:
         blockers.append("demo_api_key_expected_value_mismatch")
     ready = not blockers
     return {
@@ -337,6 +344,7 @@ def _demo_slot_check(
             if endpoint_value is not None
             else None,
         },
+        "advisory_reasons": advisory_reasons,
         "blocking_reasons": blockers,
         "ready": ready,
     }
@@ -606,6 +614,7 @@ def build_bounded_demo_runtime_readiness(
     candidate_side_cell_key: str | None = None,
     expected_demo_api_key_sha256: str | None = None,
     expected_demo_api_key_prefix: str | None = None,
+    require_expected_demo_api_key_match: bool = False,
     engine_environ_file: Path | None = None,
     require_engine_env: bool = False,
     now_utc: dt.datetime | None = None,
@@ -641,6 +650,7 @@ def build_bounded_demo_runtime_readiness(
             slot=slot,
             expected_sha256=expected_demo_api_key_sha256,
             expected_prefix=expected_demo_api_key_prefix,
+            require_expected_match=require_expected_demo_api_key_match,
         ),
         "connector_mode": _connector_mode_check(connector_env_file),
         "plan": plan_check,
@@ -665,15 +675,23 @@ def build_bounded_demo_runtime_readiness(
         "checks": checks,
         "blocking_reasons": blocking_reasons,
         "next_actions": _next_actions(status),
-        "answers": _answers(final_window_ready=final_window_ready),
+        "answers": _answers(
+            final_window_ready=final_window_ready,
+            require_expected_demo_api_key_match=require_expected_demo_api_key_match,
+        ),
         "boundary": BOUNDARY,
     }
 
 
-def _answers(*, final_window_ready: bool) -> dict[str, Any]:
+def _answers(
+    *,
+    final_window_ready: bool,
+    require_expected_demo_api_key_match: bool = False,
+) -> dict[str, Any]:
     return {
         "bounded_demo_runtime_readiness_inspected": True,
         "bounded_demo_final_window_prerequisites_ready": final_window_ready,
+        "expected_demo_api_key_match_required": require_expected_demo_api_key_match,
         "order_capable_action_allowed_by_this_packet": False,
         "decision_lease_acquire_performed": False,
         "runtime_mutation_performed": False,
@@ -743,6 +761,15 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--candidate-side-cell-key")
     parser.add_argument("--expected-demo-api-key-sha256")
     parser.add_argument("--expected-demo-api-key-prefix")
+    parser.add_argument(
+        "--require-expected-demo-api-key-match",
+        action="store_true",
+        help=(
+            "Treat expected Demo API key sha/prefix mismatch as a blocker. Without "
+            "this, expected key mismatch is advisory so stale operator hints do not "
+            "block an otherwise present Demo slot."
+        ),
+    )
     parser.add_argument("--engine-environ-file", type=Path)
     parser.add_argument("--require-engine-env", action="store_true")
     parser.add_argument("--json-output", type=Path)
@@ -761,6 +788,7 @@ def main(argv: list[str] | None = None) -> int:
         candidate_side_cell_key=args.candidate_side_cell_key,
         expected_demo_api_key_sha256=args.expected_demo_api_key_sha256,
         expected_demo_api_key_prefix=args.expected_demo_api_key_prefix,
+        require_expected_demo_api_key_match=args.require_expected_demo_api_key_match,
         engine_environ_file=args.engine_environ_file,
         require_engine_env=args.require_engine_env,
     )

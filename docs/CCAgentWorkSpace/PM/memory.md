@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-30 Bounded Demo Key Expected Prefix False Positive
+
+- PM accepted operator correction: masked `FWkGZX...g53T` is the correct Bybit Demo Read-Write key with OpenAPI whitelist `79.117.10.224`; the old `BHw4...` mismatch was a stale expected-prefix hint, not a live/mainnet key issue.
+- `bounded_demo_runtime_readiness.py` now treats expected Demo key sha/prefix mismatch as advisory unless `--require-expected-demo-api-key-match` is explicit. Runtime still blocks on connector mode (`BYBIT_MODE=read_only`, write disabled), serving/proof repair, and missing candidate-matched fills.
+- PM read: next path is fresh readiness without stale expected pin, reviewed Demo-only connector cutover if green, then final-window gates; do not rewrite secrets or infer promotion proof from the key correction.
+
 ## 2026-06-29 IBKR Stock/ETF Plan Round 3 Launch Certification
 
 - PM integrated CC/FA/PA/E3/E5/QC/MIT/QA third-round launch-certification: all eight roles returned `CERTIFIABLE_IF_GATES_PASS`, `SCOPE=paper_shadow_only`, `FINDINGS=0`.
@@ -2530,6 +2536,12 @@
 - Verification passed: local py_compile, focused serving tests `10 passed`, local adjacent learning/readiness suite `46 passed`, runtime py_compile, runtime adjacent suite `46 passed`, and `git diff --check`.
 - Runtime serving snapshot `/tmp/openclaw/session_loop_state_20260629T_serving_snapshot/learning_serving_snapshot_after_f1d_sync.json` sha `83ac78520c9739b17378ddc1d88f3150237a36a1e96b87a236cf6eca7bbeb68d` is `LEARNING_SERVING_SNAPSHOT_BLOCKED_BY_TRAINING_REGISTRY_REPAIR_NO_AUTHORITY`; readiness sha `8f9da6b...` remains blocked by Demo key/mode.
 - Next ML loop item is `P0-LEARN-PROOF-PROMOTION-GATE`; model load/serving, registry/PG write, bounded Demo execution, Cost Gate change, and proof/promotion remain blocked until separate gated reviews pass.
+
+## 2026-06-29 IBKR Phase 0 Contract Packet
+
+- PM materialized ADR-0048, AMD-2026-06-29-01, and `stock_etf_cash_phase0_named_contract_packet_v1` for IBKR read-only / paper / shadow research only.
+- Stable boundary wording now preserves Bybit as the only active live execution venue while adding IBKR `stock_etf_cash` as an ADR-gated paper/shadow exception; IBKR live/tiny-live/margin/short/options/CFD/transfer remain denied.
+- Next allowed work is Phase 1 source foundation only: closed type/config/schema/IPC reservations, default-OFF readiness parsing, source-only DDL, fixture lifecycle, and denial tests; no IBKR API/secret/connector/runtime/evidence clock.
 
 ## 2026-06-29 Learning Proof/Promotion Gate Source Checkpoint
 

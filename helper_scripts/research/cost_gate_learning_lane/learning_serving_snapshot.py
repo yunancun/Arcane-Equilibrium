@@ -75,6 +75,9 @@ AUTHORITY_TRUE_KEYS = {
     "serving_snapshot_ready",
     "training_run_performed",
 }
+AUTHORITY_TRUE_KEY_SUFFIXES = (
+    "_allowed_by_this_packet",
+)
 TRUTHY_AUTHORITY_STRINGS = {
     "1",
     "true",
@@ -156,7 +159,7 @@ def _authority_violations(payload: Any) -> list[dict[str, Any]]:
                         "reason": "main_cost_gate_adjustment_not_none",
                     }
                 )
-            elif key in AUTHORITY_TRUE_KEYS and _truthy_authority(value):
+            elif _is_authority_true_key(key) and _truthy_authority(value):
                 violations.append(
                     {
                         "path": item_path,
@@ -167,6 +170,13 @@ def _authority_violations(payload: Any) -> list[dict[str, Any]]:
             if isinstance(value, (dict, list)):
                 stack.append((item_path, value))
     return violations
+
+
+def _is_authority_true_key(key: str) -> bool:
+    normalized = str(key or "").strip()
+    return normalized in AUTHORITY_TRUE_KEYS or any(
+        normalized.endswith(suffix) for suffix in AUTHORITY_TRUE_KEY_SUFFIXES
+    )
 
 
 def _source_ref(

@@ -42,7 +42,7 @@ The gate remains correctly blocked because the serving snapshot is not ready and
 
 ## Remaining Blockers
 
-- Demo API slot still shows key prefix `FWkGZX...g53T`, while the expected operator-provided prefix is `BHw4...`.
+- 2026-06-30 correction: Demo API slot prefix `FWkGZX...g53T` is operator-confirmed correct; the `BHw4...` expected prefix was stale expected-hint evidence.
 - `trading_services.env` remains `BYBIT_MODE=read_only` and `BYBIT_CONNECTOR_WRITE_ENABLED=false`.
 - Serving snapshot remains blocked by training/registry repair state.
 - Strict candidate evidence scan still has no candidate-matched actual order/fill/fee/slippage/reconstruction evidence.
@@ -51,4 +51,4 @@ The gate remains correctly blocked because the serving snapshot is not ready and
 
 No engine restart, secret write, env mutation, private Bybit call, Decision Lease acquire/release, order/cancel/modify, registry/PG write, model load, serving slot write, Cost Gate lowering, live/mainnet authority, promotion authority, or profit proof occurred. The only runtime mutation was API process ownership recovery for the existing control API user unit.
 
-Next executable step is secure Demo key/secret entry through the approved settings API/GUI path plus reviewed Demo-only connector mode cutover, then rerun readiness and final-window BBO/Decision Lease/Guardian/Rust authority/GUI cap gates.
+Next executable step is fresh readiness without the stale expected-key hint plus reviewed Demo-only connector mode cutover, then rerun readiness and final-window BBO/Decision Lease/Guardian/Rust authority/GUI cap gates.

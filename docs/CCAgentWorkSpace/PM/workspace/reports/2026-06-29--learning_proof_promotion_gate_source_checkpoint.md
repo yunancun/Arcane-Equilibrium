@@ -46,4 +46,4 @@ Runtime remains last verified at `f1d1a26c19954a79d28014f75451c4a882f8d450`. The
 
 ## Next
 
-ML source contract chain is complete through proof/promotion gate. Actual proof and promotion remain blocked until serving repair closes, Demo credential/mode readiness is corrected, final-window execution gates pass, and row-backed candidate-matched Demo fills with full fee/slippage/control evidence exist.
+ML source contract chain is complete through proof/promotion gate. Actual proof and promotion remain blocked until serving repair closes, Demo readiness and connector mode are green, final-window execution gates pass, and row-backed candidate-matched Demo fills with full fee/slippage/control evidence exist.
