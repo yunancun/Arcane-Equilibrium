@@ -1,0 +1,48 @@
+# IBKR Phase 2 external-surface gate source template for ADR-0048.
+# This file is intentionally BLOCKED and does not authorize external contact.
+
+[gate]
+status = "BLOCKED"
+adr = "ADR-0048"
+amd = "AMD-2026-06-29-01"
+api_baseline = "ib_gateway_tws_api"
+host_policy = "loopback_only"
+port_policy = "paper_gateway_port_only"
+live_ports_denied = false
+secret_contract_present = false
+live_secret_absent_or_empty = false
+api_allowlist_present = false
+redaction_suite_passed = false
+rate_limit_policy_present = false
+audit_event_policy_present = false
+paper_attestation_contract_present = false
+python_no_write_guard_present = false
+ibkr_call_performed = false
+
+[allowlist.read_after_external_gate]
+server_time = true
+connection_health = true
+account_summary_snapshot_requires_session_attestation = true
+portfolio_positions_snapshot_requires_session_attestation = true
+contract_details = true
+market_data_snapshot_or_subscription_within_entitlements = true
+historical_bars_for_approved_universe = true
+open_paper_orders_requires_session_attestation = true
+paper_executions_commissions_requires_session_attestation = true
+
+[allowlist.paper_write_after_paper_order_gates]
+submit_paper_order = true
+cancel_paper_order = true
+replace_paper_order = true
+
+[allowlist.denied]
+live_order = true
+live_account_query_using_live_fingerprint = true
+account_transfer = true
+margin_enablement = true
+short_borrow = true
+options = true
+cfd = true
+market_data_entitlement_purchase = true
+account_management_write = true
+client_portal_web_api = true

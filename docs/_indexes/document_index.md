@@ -24,6 +24,8 @@
 | `execution_plan/specs/2026-06-29--stock_etf_db_evidence_ddl_v1.source_only.sql` | Phase 1 source-only DDL draft：定義 broker/research/audit stock/ETF evidence tables and constraints；不是 active migration，Linux PG dry-run/double-apply + PM/Operator apply authorization 前不可進 `sql/migrations/`。 |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-06-29--ibkr_stock_etf_phase1_source_foundation_checkpoint.md` | PM Phase 1 checkpoint：closed Rust taxonomy/default-off config/lane-scoped IPC fixture/source-only DDL + denial tests 已落地；不授權 IBKR API/secret/connector/order/migration/GUI/evidence clock。 |
 | `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_phase1_source_foundation_checkpoint.md` | Operator Phase 1 摘要：source foundation done, no runtime authority；下一步仍是 Phase 2 external-surface gate PASS before first IBKR contact。 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-29--ibkr_stock_etf_phase2_precontact_gate_source_checkpoint.md` | PM Phase 2 pre-contact source checkpoint：typed external-surface gate / non-Bybit API allowlist / session attestation validator 已落地且 default BLOCKED；仍不授權 IBKR contact。 |
+| `CCAgentWorkSpace/Operator/2026-06-29--ibkr_stock_etf_phase2_precontact_gate_source_checkpoint.md` | Operator Phase 2 pre-contact 摘要：source gate foundation done；first IBKR read-only healthcheck 仍需 immutable PASS artifact。 |
 
 ### 2026-06-22 Shadow placement alpha ingestion
 
