@@ -142,3 +142,28 @@ def test_demo_learning_lane_writer_and_probe_adapter_env_are_durable_across_plai
         'OPENCLAW_DEMO_LEARNING_LANE_WRITER="${demo_learning_lane_writer}"'
     )
     assert resolve_index < launch_index
+
+
+def test_bybit_demo_connector_mode_env_reaches_api_process() -> None:
+    """Reviewed Demo connector mode must be visible to the settings API after restart."""
+    text = SCRIPT.read_text(encoding="utf-8")
+
+    assert "local bybit_mode_api bybit_connector_write_enabled_api" in text
+    assert re.search(
+        r'bybit_mode_api="\$\{BYBIT_MODE:-\$\(grep '
+        r"'\^BYBIT_MODE=' "
+        r'"\$SECRETS_ROOT/environment_files/trading_services\.env"',
+        text,
+    )
+    assert re.search(
+        r'bybit_connector_write_enabled_api="\$\{BYBIT_CONNECTOR_WRITE_ENABLED:-\$\(grep '
+        r"'\^BYBIT_CONNECTOR_WRITE_ENABLED=' "
+        r'"\$SECRETS_ROOT/environment_files/trading_services\.env"',
+        text,
+    )
+    assert 'BYBIT_MODE="${bybit_mode_api}"' in text
+    assert 'BYBIT_CONNECTOR_WRITE_ENABLED="${bybit_connector_write_enabled_api}"' in text
+
+    resolve_index = text.index("bybit_mode_api=")
+    launch_index = text.index('BYBIT_MODE="${bybit_mode_api}"')
+    assert resolve_index < launch_index

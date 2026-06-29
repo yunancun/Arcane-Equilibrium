@@ -826,6 +826,13 @@ restart_api() {
     local sm_ipc_canary_enabled sm_canary_interval_secs
     sm_ipc_canary_enabled="${OPENCLAW_SM_IPC_CANARY_ENABLED:-$(grep '^OPENCLAW_SM_IPC_CANARY_ENABLED=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     sm_canary_interval_secs="${OPENCLAW_SM_CANARY_INTERVAL_SECS:-$(grep '^OPENCLAW_SM_CANARY_INTERVAL_SECS=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+    # Bounded Demo connector mode lives in trading_services.env rather than
+    # basic_system_services.env. The settings route compares persisted values
+    # against process env, so plain restart_all must pass these through or the
+    # GUI/API will keep reporting restart_required after a reviewed cutover.
+    local bybit_mode_api bybit_connector_write_enabled_api
+    bybit_mode_api="${BYBIT_MODE:-$(grep '^BYBIT_MODE=' "$SECRETS_ROOT/environment_files/trading_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+    bybit_connector_write_enabled_api="${BYBIT_CONNECTOR_WRITE_ENABLED:-$(grep '^BYBIT_CONNECTOR_WRITE_ENABLED=' "$SECRETS_ROOT/environment_files/trading_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     # POLICY-2 + Phase 2 旗標（API 側，default-OFF fail-closed，鏡像 sm_ipc_canary pattern）：
     # STRATEGY_TOGGLE_LIVE_MODE = live 策略啟停 5-gate 模式總開關（strategy_write_routes）；
     # STRATEGIST_PROMOTION_ENABLED = demo→live 人工促升總開關（strategist_promote_routes）。
@@ -852,6 +859,8 @@ restart_api() {
         OPENCLAW_LEASE_PYTHON_IPC_ENABLED="${lease_python_ipc_enabled}" \
         OPENCLAW_SM_IPC_CANARY_ENABLED="${sm_ipc_canary_enabled}" \
         OPENCLAW_SM_CANARY_INTERVAL_SECS="${sm_canary_interval_secs}" \
+        BYBIT_MODE="${bybit_mode_api}" \
+        BYBIT_CONNECTOR_WRITE_ENABLED="${bybit_connector_write_enabled_api}" \
         OPENCLAW_STRATEGY_TOGGLE_LIVE_MODE="${strategy_toggle_live_mode}" \
         OPENCLAW_STRATEGIST_PROMOTION_ENABLED="${strategist_promotion_enabled}" \
         ANTHROPIC_API_KEY="${anthropic_api_key}" \
