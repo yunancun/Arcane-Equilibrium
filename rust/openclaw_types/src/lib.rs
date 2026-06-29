@@ -19,6 +19,7 @@ pub mod price;
 pub mod risk;
 pub mod state;
 pub mod stock_etf_audit_events;
+pub mod stock_etf_gui_lane_contract;
 pub mod stock_etf_lane;
 pub mod stock_etf_phase3_evidence;
 pub mod stock_etf_release_packet;
@@ -71,6 +72,10 @@ pub use state::{AgentState, GovernanceMode, OmsState, OrderInitiator, RiskInitia
 pub use stock_etf_audit_events::{
     StockEtfAssetLaneEventBlocker, StockEtfAssetLaneEventKind, StockEtfAssetLaneEventV1,
     StockEtfAssetLaneEventVerdict,
+};
+pub use stock_etf_gui_lane_contract::{
+    StockEtfGuiLaneBlocker, StockEtfGuiLaneContractV1, StockEtfGuiLaneVerdict,
+    STOCK_ETF_GUI_READINESS_ENDPOINT,
 };
 pub use stock_etf_lane::{
     evaluate_broker_operation, AssetLane, AuthorityScope, Broker, BrokerCapabilityDecision,

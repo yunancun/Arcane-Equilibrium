@@ -1,0 +1,33 @@
+# Stock/ETF GUI lane contract template.
+# This template is intentionally BLOCKED and source-only. It does not serve
+# pages, contact IBKR, create secrets, route orders, or authorize lane selection.
+
+contract_id = ""
+default_asset_lane = "crypto_perp"
+stock_etf_tab_registered = false
+readiness_endpoint = "/api/v1/stock-etf/readiness"
+readiness_endpoint_get_only = false
+display_only = false
+client_lane_state_untrusted = false
+local_storage_authority_denied = false
+query_param_authority_denied = false
+hidden_field_authority_denied = false
+no_login_success_selector = false
+no_post_routes = false
+no_order_widgets = false
+no_secret_widgets = false
+no_ibkr_contact_on_render = false
+paper_order_entry_hidden = false
+stock_live_disabled_display = false
+cfd_surface_hidden_or_fail_closed = false
+route_cache_partition_required = false
+auth_partition_required = false
+stale_cache_cross_lane_denied = false
+crypto_tabs_regression_passed = false
+decision_lease_risk_regression_passed = false
+static_source_hash = ""
+route_test_hash = ""
+crypto_regression_hash = ""
+denied_effect_operations = []
+ibkr_contact_performed = false
+secret_content_serialized = false

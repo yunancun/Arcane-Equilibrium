@@ -82,7 +82,7 @@ Phase 3 evidence clock may start only after `stock_etf_evidence_clock_v1` proves
 
 Cross-phase `stock_etf_cash` evidence must be referable through `audit.asset_lane_events_v1` immutable event references. These references require lane/broker/environment/operation fields, hash-chain continuity, producer/source metadata, artifact hashes, and redaction boundaries; they do not write audit rows or authorize runtime actions by themselves.
 
-Phase 4 GUI runtime may expose stock/ETF views only after route/cache/auth negative tests prove client lane state cannot authorize any effect-capable action.
+Phase 4 GUI runtime may expose stock/ETF views only after route/cache/auth negative tests prove client lane state cannot authorize any effect-capable action. `gui_lane_contract_v1` artifacts must prove GET-only display, client state untrusted, no effect-capable surfaces, route/cache/auth partition, stale-cache cross-lane denial, and crypto Decision Lease/risk regression before fuller views or selector discussion.
 
 Phase 5 may sign off paper/shadow online only after the release packet, immutable artifact manifest, kill/disable cleanup runbook, evidence archive, and engineering shakedown all pass.
 
