@@ -2464,3 +2464,4 @@
 
 - PM integrated QC/MIT/AI-E/PA read-only review: DreamEngine is active advisory-only; general learning is partially alive but degraded/core-loop stalled due empty runtime crontab, stale health, ML maintenance error, stale registry, and missing fill-backed proof.
 - Next engineering order is `P0-LEARN-HEALTH-SSOT`, then ledger event contract, proposal compiler, adjudicator, Demo mutation envelope, training/registry repair, serving snapshot, and proof/promotion gate; no runtime mutation or live authority granted.
+- Triple adversarial audit hardened the plan: completion now requires contract versioning/tests, negative authority tests, operations runbook, budget/backpressure gates, and mandatory legacy retirement; learning-engine completion is plausible if these gates pass, but alpha profitability remains empirical proof-gate output.
