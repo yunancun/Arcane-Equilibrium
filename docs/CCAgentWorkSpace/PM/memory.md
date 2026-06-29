@@ -2492,3 +2492,11 @@
 - `blocked_markout_proxy` remains review/context evidence only: `blocked_markout_proxy_counts_as_fill_backed_proof=false`, fill-backed proof readiness false, promotion proof readiness false.
 - Verification passed: py_compile, focused compiler tests `6 passed`, adjacent learning-lane tests `25 passed`, and `git diff --check`.
 - Next ML loop item is `P0-LEARN-ADJUDICATOR`; PG cutover, runtime install, Demo mutation, training/registry repair, serving, and proof/promotion remain blocked until their separate source contracts and gated reviews pass.
+
+## 2026-06-29 Learning Adjudicator Source Checkpoint
+
+- PM advanced `P0-LEARN-ADJUDICATOR` source-only at commit `300ee0af`: new `cost_gate_learning_adjudicator_v1` consumes compiled proposal candidates and emits deterministic review-only decisions.
+- Decision packets carry deterministic decision ids, rank, labels `REVIEW` / `DEFER` / `REJECT`, proof-tier eligibility gates, source event hashes, upstream quarantine propagation, and authority contamination fail-closed behavior.
+- `blocked_markout_proxy` remains defer/context evidence only, not fill-backed proof; fill-backed proof readiness, Demo mutation readiness, and promotion proof readiness remain false.
+- Verification passed: py_compile, focused adjudicator tests `6 passed`, adjacent learning-lane tests `31 passed`, post-external-change rerun `19 passed`, and `git diff --check`.
+- Next ML loop item is `P0-LEARN-DEMO-MUTATION-ENVELOPE`; PG cutover, runtime install/mutation, training/registry repair, serving, and proof/promotion remain blocked until their separate source contracts and gated reviews pass.

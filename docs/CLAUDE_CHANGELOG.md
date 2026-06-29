@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-29（TODO v669 learning proposal compiler source checkpoint）
+> 最後更新：2026-06-29（TODO v670 learning adjudicator source checkpoint）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v670 增量（2026-06-29 learning adjudicator source checkpoint）**：Source commit `300ee0af` adds `helper_scripts/research/cost_gate_learning_lane/learning_adjudicator.py` and focused tests for `P0-LEARN-ADJUDICATOR`, pushed to `origin/main`. The adjudicator consumes `cost_gate_learning_proposal_compiler_v1`, deterministically ranks review-only proposal candidates, and emits `cost_gate_learning_adjudicator_v1` decisions with deterministic decision ids, labels `REVIEW` / `DEFER` / `REJECT`, proof-tier eligibility gates, source event hashes, quarantine propagation, and authority-contamination fail-closed behavior. `blocked_markout_proxy` remains defer/context evidence only, fill-backed proof readiness and promotion proof readiness remain false, and Demo mutation readiness remains false. Verification：py_compile PASS, focused tests `6 passed`, adjacent learning-lane tests `31 passed`, post-external-change rerun `19 passed`, and `git diff --check` PASS. Boundary：source/test/docs only；preserves `artifact_probe_ledger_jsonl` as current SSOT, no PG cutover/query/write, no Bybit call, no order, no runtime/env/service/crontab mutation, no Demo mutation, no Cost Gate lowering, no probe/order/live authority, and no promotion/profit proof. Next active ML loop item：`P0-LEARN-DEMO-MUTATION-ENVELOPE`.
 
 **v669 增量（2026-06-29 learning proposal compiler source checkpoint）**：Source commit `7cfec46e` adds `helper_scripts/research/cost_gate_learning_lane/learning_proposal_compiler.py` and focused tests for `P0-LEARN-PROPOSAL-COMPILER`, pushed to `origin/main`. The compiler consumes `cost_gate_learning_event_contract_v1`, groups `cost_gate_learning_event_v1` packets deterministically by candidate id, and emits review-only `cost_gate_learning_proposal_compiler_v1` candidates with deterministic proposal ids, evidence windows, event type counts, proof tier counts, source event ids/hashes, quarantine propagation, and authority-contamination fail-closed behavior. `blocked_markout_proxy` stays review/context only (`blocked_markout_proxy_counts_as_fill_backed_proof=false`), fill-backed proof readiness and promotion proof readiness remain false, and all mutation/order/live/Cost Gate authority answers remain false. Verification：py_compile PASS, focused tests `6 passed`, adjacent learning-lane tests `25 passed`, and `git diff --check` PASS. Boundary：source/test/docs only；preserves `artifact_probe_ledger_jsonl` as current SSOT, no PG cutover/query/write, no Bybit call, no order, no runtime/env/service/crontab mutation, no Demo mutation, no Cost Gate lowering, no probe/order/live authority, and no promotion/profit proof. Next active ML loop item：`P0-LEARN-ADJUDICATOR`.
 
