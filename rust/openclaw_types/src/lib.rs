@@ -9,6 +9,7 @@ pub mod agent;
 pub mod asset_venue;
 pub mod cognitive;
 pub mod intent;
+pub mod ibkr_phase2_gate;
 pub mod price;
 pub mod risk;
 pub mod state;
@@ -17,6 +18,15 @@ pub mod stock_etf_lane;
 pub use agent::{AgentMessage, AgentRole, MessageType};
 pub use asset_venue::{AssetClass, Venue, VenueParseError};
 pub use cognitive::{CognitiveParams, DreamInsight, RegretSummary, SkippedOpportunity};
+pub use ibkr_phase2_gate::{
+    classify_non_bybit_api_action, is_loopback_or_unix_local_host, IbkrApiBaseline,
+    IbkrExternalSurfaceGateBlocker, IbkrExternalSurfaceGateStatus, IbkrExternalSurfaceGateV1,
+    IbkrExternalSurfaceGateVerdict, IbkrGatewayMode, IbkrHostPolicy, IbkrPortPolicy,
+    IbkrSecretSlotMode, IbkrSessionAttestationBlocker, IbkrSessionAttestationStatus,
+    IbkrSessionAttestationV1, IbkrSessionAttestationVerdict, NonBybitApiAction,
+    NonBybitApiAllowlistDecision, NonBybitApiDenialReason, IBKR_LIVE_GATEWAY_PORT,
+    IBKR_LIVE_TWS_PORT, IBKR_PAPER_GATEWAY_DEFAULT_PORT, IBKR_PHASE2_ADR, IBKR_PHASE2_AMD,
+};
 pub use intent::{DataQualityLevel, OrderIntent, RiskVerdict, TradeIntent};
 pub use price::{Kline, KlineBar, PriceEvent, PriceEventKind, OHLCV};
 pub use risk::{

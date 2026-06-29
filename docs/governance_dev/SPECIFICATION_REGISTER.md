@@ -1,7 +1,7 @@
 # Governance Specification Register / 治理規範註冊表
 
 **Project:** 玄衡 · Arcane Equilibrium
-**Last Updated:** 2026-06-29 (ADR-0048 + AMD-2026-06-29-01 IBKR stock/ETF Phase 1 source foundation)
+**Last Updated:** 2026-06-29 (ADR-0048 + AMD-2026-06-29-01 IBKR stock/ETF Phase 2 pre-contact source gate)
 **Maintained By:** R4 (Document Auditor) · TW catch-up（2026-04-29）· FA Sign-off path A（2026-05-02 AMD-2026-05-02-01）
 
 ---
@@ -147,7 +147,7 @@
 | ADR-0045 | M4 Hypothesis Discovery Governance | docs/adr/0045-m4-hypothesis-discovery-governance.md | ✅ Active | Sprint 1A-ε |
 | ADR-0046 | funding_arb V3 Redesign Slot (Basis Observation vs Execution Split) | docs/adr/0046-funding-arb-v3-redesign-slot.md | 🟠 Proposed | Sprint 1A-δ/ε（revive-gate placeholder per AMD-2026-05-26-01；decision TBD，未 Accepted） |
 | ADR-0047 | Alpha-Edge Regime Evidence Governance | docs/adr/0047-alpha-edge-regime-evidence-governance.md | ✅ Active | Alpha-Edge S1-Sx evidence governance（bull data labeling / local trend-state classifier / narrative side-evidence boundary） |
-| ADR-0048 | IBKR Stock/ETF Paper + Shadow Lane | docs/adr/0048-ibkr-stock-etf-paper-shadow-lane.md | ✅ Active | Accepts `stock_etf_cash` as an isolated IBKR read-only / paper / shadow research lane under Phase 0 named contracts; Phase 1 source foundation now covers closed type/config/IPC fixture/source-only DDL with denial tests. Bybit remains the only active live execution venue; IBKR live/tiny-live/margin/short/options/CFD/transfer remain denied. |
+| ADR-0048 | IBKR Stock/ETF Paper + Shadow Lane | docs/adr/0048-ibkr-stock-etf-paper-shadow-lane.md | ✅ Active | Accepts `stock_etf_cash` as an isolated IBKR read-only / paper / shadow research lane under Phase 0 named contracts; Phase 1 source foundation covers closed type/config/IPC fixture/source-only DDL, and Phase 2 pre-contact source gate covers typed external-surface gate / allowlist / session attestation validator. Bybit remains the only active live execution venue; IBKR contact still requires immutable PASS artifact; IBKR live/tiny-live/margin/short/options/CFD/transfer remain denied. |
 
 ### v5.8 13-Module Thesis (M1 ~ M13)
 
