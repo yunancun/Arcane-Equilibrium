@@ -2508,3 +2508,10 @@
 - `blocked_markout_proxy` remains context/defer evidence only; Demo mutation authority, runtime mutation authority, order authority, Cost Gate change authority, and promotion proof remain false even when runtime readiness is green.
 - Verification passed: py_compile, focused envelope tests `7 passed`, adjacent learning-lane/runtime-readiness tests `31 passed`, wider adjacent learning-lane tests `43 passed`, and `git diff --check`.
 - Next ML loop item is `P0-LEARN-TRAINING-REGISTRY-REPAIR`; runtime mutation, PG cutover/write, serving, bounded Demo execution, and proof/promotion remain blocked until their separate source contracts and gated reviews pass.
+
+## 2026-06-29 Learning Training/Registry Repair Source Checkpoint
+
+- PM advanced `P0-LEARN-TRAINING-REGISTRY-REPAIR` source-only at commit `1a8cedb3`: new `cost_gate_learning_training_registry_repair_v1` consumes `learning_stack_health_snapshot_v1` and emits deterministic repair items for ML maintenance, model registry, ONNX/registry freshness, artifact/PG parity, and legacy artifact retirement.
+- Repair items include source refs, budget/backpressure gates, operator runbook, rollback plan, and `allowed_actions` false for training, ONNX export, registry/PG write, artifact delete, runtime/env/service/cron mutation, serving, Cost Gate change, order/live authority, and promotion proof.
+- Verification passed: py_compile, focused repair tests `5 passed`, health snapshot `7 passed`, registry freshness + repair `14 passed`, ML chain adjacent `48 passed`, and `git diff --check`; a wider wrapper static test still has an existing repo-venv/mock-PATH environment failure outside this helper.
+- Next ML loop item is `P0-LEARN-SERVING-SNAPSHOT`; runtime mutation, PG/registry write, model serving/load, bounded Demo execution, and proof/promotion remain blocked until separate source contracts and gated reviews pass.
