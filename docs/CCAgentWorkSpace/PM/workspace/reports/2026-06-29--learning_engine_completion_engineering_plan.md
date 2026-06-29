@@ -12,6 +12,8 @@ Dispatch chain:
 
 PM SIGN-OFF: **DONE_WITH_CONCERNS / ENGINEERING PLAN APPROVED, RUNTIME MUTATION BLOCKED**.
 
+Triple adversarial audit addendum: **PASSED AFTER HARDENING**. The plan is sufficient to complete the learning-engine Module chain if every phase and hardening gate below is completed. This is an engineering-completion claim, not a guarantee that future market alpha exists or stays profitable.
+
 ## Executive Verdict
 
 Current state is not a complete learning engine.
@@ -70,6 +72,11 @@ The required architecture is a deeper Module chain with explicit Interfaces. The
 | Training Ledger | `TrainingRunManifest` | Record dataset query/hash, time window, schema hash, split manifest, purge/embargo/CPCV, metrics, artifact hashes, and verdict. |
 | Model Registry/Reloader | `ModelServingSnapshot` | Registry row, q10/q50/q90 trio completeness, feature schema hash, artifact hash, loaded runtime version, edge snapshot freshness, and fallback reason. |
 | Proof/Promotion | `ProofPacket -> PromotionVerdict` | Candidate-matched fills, after-cost performance, controls, OOS/repeat, DSR/PBO, tail/capacity, and proof exclusions. |
+| Contract Versioning | `LearningContractVersion` | Version every learning Interface, schema, artifact, and proposal packet so migration is explicit and old writers cannot silently keep running. |
+| Contract Test Harness | `LearningContractTestSuite` | Exercise every external Seam with golden fixtures, negative authority tests, replay fixtures, schema compatibility, and fail-closed cases. |
+| Operations Control | `LearningRunbookSnapshot` | Define install, rollback, restart, alert, backfill, retention, and recovery drills for the learning stack. |
+| Budget/Backpressure | `LearningBudgetGuard` | Bound training, AI, scheduler, DB, disk, and runtime load; fail closed when budget or queue pressure is exceeded. |
+| Legacy Retirement | `LegacyRetirementPacket` | Prove old schedulers, writers, readers, artifacts, and bypass paths are either archived read-only or deleted after the new Interface passes parity. |
 
 This gives better Leverage and Locality: each producer can improve independently, while proposal, mutation, registry, and promotion rules remain centralized and auditable.
 
@@ -219,6 +226,70 @@ Required chain:
 - Separate operator envelope for any effect-capable Demo mutation.
 - No live applicability without GovernanceHub, Decision Lease, Guardian/Rust authority, and the five live gates.
 
+### Phase 10: Debt Closure and Legacy Retirement
+
+No phase is complete while an old path can still produce authority-like learning evidence outside the new Interfaces.
+
+Required work:
+
+- Add `LearningContractVersion` to proposal packets, ledger events, training manifests, registry rows, serving snapshots, proof packets, and application results.
+- Add `LearningContractTestSuite` to CI with golden fixtures for success, stale, malformed, duplicate, empty patch, blocked proxy, replay-only, no-fill, schema mismatch, and authority-bypass cases.
+- Add negative tests and static scans proving Python ML/Dream/AI code cannot submit orders, lower Cost Gate, write live params, bypass Decision Lease, or call effect-capable Bybit paths.
+- Add migration/backfill/parity checks before any PG-first cutover; old JSONL/artifact paths remain read-only until parity is proven and then are archived or deleted.
+- Add runbook evidence: install, rollback, restart, scheduler repair, registry rebuild, artifact rebuild, DB retention, and recovery drills.
+- Add backpressure behavior for training, AI calls, scheduler queue, DB write volume, artifact size, and disk retention.
+- Add explicit deletion tests for every new Module. If deleting a Module only removes pass-through code and does not reintroduce complexity at callers, it is too shallow and must be collapsed.
+
+Acceptance evidence:
+
+- No duplicate scheduler SSOT.
+- No duplicate ledger/proof SSOT after cutover.
+- No producer writes a legacy recommendation/proof shape that bypasses `AdvisoryProposal` or `ProofPacket`.
+- No applier consumes raw recommendations directly after `DemoMutationEnvelope` is active.
+- No model artifact is accepted without `TrainingRunManifest`, registry row, serving snapshot, and contract version.
+- Contract tests run on Mac dev and Linux runtime-compatible paths.
+- The old path retirement list is empty or every remaining item is explicitly archived read-only with an owner and retirement date.
+
+Done means the learning engine is not merely working; its old shallow paths have been retired or contained.
+
+## Triple Adversarial Audit
+
+### Round 1: Completion Attack
+
+Attack: If the phases are completed, does the system still have a missing link that prevents a real learning loop?
+
+Verdict: **No known missing link remains after Phase 10 is added**. The chain covers health, immutable event capture, attribution, proposal, deterministic adjudication, governed Demo mutation, training/registry, runtime serving status, fill-backed proof, promotion verdict, runtime installation, and old-path retirement.
+
+Residual truth: this completes the learning engine as an engineering system. It does not guarantee profitable alpha. Profit remains an empirical output of the proof/promotion gate.
+
+### Round 2: Omission Attack
+
+Attack: Are there omitted concerns that would later force rework or create parallel Implementation debt?
+
+Original omissions found:
+
+- Interface/schema versioning was implicit.
+- Contract tests and negative authority tests were implicit.
+- Legacy path retirement was implicit.
+- Operations runbook and rollback drills were implicit.
+- Cost, AI budget, scheduler pressure, DB pressure, and disk retention were implicit.
+
+Resolution: these are now promoted into explicit Modules, Phase 10 work, acceptance gates, and backlog tickets. The plan is no longer just "add a new learning path"; it requires retiring or containing old paths before completion can be claimed.
+
+### Round 3: Technical Debt Attack
+
+Attack: Does the design create shallow Modules, speculative Seams, or permanent DESIGN-only debt?
+
+Verdict: **Acceptable with hard constraints**.
+
+- The main Seams have real Adapters: multiple advisory producers feed `AdvisoryProposal`; JSONL legacy and PG mirror/cutover paths feed `LearningEvent`; Python registry and Rust/edge loader feed `ModelServingSnapshot`.
+- Any new Seam with only one Adapter must stay internal until a second Adapter or clear test seam exists.
+- Every Module must pass the deletion test. If removing it reduces complexity rather than concentrating it, it must be collapsed.
+- Stub or reserved Interfaces must have retirement criteria. This aligns with ADR-0035's explicit retirement discipline for online learning reservation.
+- Completion is not allowed while legacy writers or readers remain able to create authority-like evidence outside the new Interface chain.
+
+Conclusion: the plan is reasonable and effective if implemented as a deepening refactor, not as an additive layer. The "perfect" engineering standard here is no hidden bypass path, no duplicate SSOT, no unversioned packet, no untested Interface, and no legacy path left with write authority.
+
 ## Acceptance Gates
 
 Runtime gate:
@@ -263,6 +334,29 @@ Governance gate:
 - Demo mutation requires a bounded envelope.
 - Live mutation/order authority requires GovernanceHub, Decision Lease, Guardian/Rust, operator review, and live gates.
 
+Contract/debt gate:
+
+- Every learning Interface has a contract version, golden fixtures, malformed-input fixtures, and fail-closed fixtures.
+- Old artifact, recommendation, applier, registry, and proof paths are retired, archived read-only, or wrapped by the new Interface.
+- No raw producer output can bypass `AdvisoryProposal`.
+- No raw recommendation can bypass `DemoMutationEnvelope`.
+- No proof-like artifact can bypass `ProofPacket`.
+
+Authority/security gate:
+
+- Static and runtime negative tests prove ML/Dream/AI cannot call order submission, cancel/replace, live parameter mutation, Cost Gate lowering, Decision Lease activation, or Bybit effect paths.
+- Every fail-open condition is represented as a test fixture.
+
+Operations gate:
+
+- Install, rollback, restart, registry rebuild, scheduler repair, artifact rebuild, and retention drills have operator-readable evidence.
+- Health, alerting, and backpressure states are visible before any effect-capable Demo mutation.
+
+Budget/backpressure gate:
+
+- Training, AI calls, scheduler queue, DB writes, artifact size, disk retention, and runtime inference load have hard limits.
+- Budget or pressure failure disables mutation and promotion, not observation.
+
 ## Backlog
 
 | Priority | Ticket | Outcome |
@@ -276,6 +370,10 @@ Governance gate:
 | P1 | `P1-LEARN-MODEL-SERVING-SNAPSHOT` | Registry/Rust/edge loader expose loaded version, fallback reason, and schema/hash status. |
 | P1 | `P1-LEARN-PROOF-PROMOTION-GATE` | Fill-backed proof packets produce explicit promotion verdicts. |
 | P1 | `P1-LEARN-RUNTIME-INSTALL-REVIEW` | Cron/service/runtime repair is separately reviewed by E3/BB after source/read-only acceptance. |
+| P0 | `P0-LEARN-CONTRACT-TEST-SUITE` | Every learning Interface has versioned fixtures, negative authority tests, and fail-closed CI coverage. |
+| P0 | `P0-LEARN-LEGACY-RETIREMENT` | Old JSONL/artifact/recommendation/applier/proof paths are archived read-only, wrapped, or deleted after parity. |
+| P1 | `P1-LEARN-OPERATIONS-RUNBOOK` | Install, rollback, restart, repair, rebuild, retention, alert, and recovery drills are documented and tested. |
+| P1 | `P1-LEARN-BUDGET-BACKPRESSURE` | Training, AI, DB, scheduler, disk, and inference pressure fail closed for mutation/promotion. |
 
 ## Do Not Do Yet
 
@@ -287,11 +385,15 @@ Governance gate:
 - Do not count replay, paper-only, cleanup, or unattributed fills as promotion proof.
 - Do not prioritize ONNX live inference before registry/reloader status and fail-closed behavior are visible.
 - Do not let AI or DreamEngine validate alpha, approve proposals, or bypass deterministic gates.
+- Do not leave a parallel legacy writer/reader active after the replacement Interface is accepted.
+- Do not call a phase complete without contract tests, negative authority tests, rollback evidence, and a retirement decision for replaced paths.
 
 ## PM Conclusion
 
 To complete all learning engines, the work must move from scattered advisory scripts to a governed learning pipeline:
 
-`Health -> Event -> Attribution -> Proposal -> Adjudication -> Demo Mutation -> Training/Registry -> Serving Snapshot -> Proof -> Promotion`.
+`Health -> Contract Version -> Event -> Attribution -> Proposal -> Adjudication -> Demo Mutation -> Training/Registry -> Serving Snapshot -> Proof -> Promotion -> Legacy Retirement`.
 
-Today, the observation/advisory side has life. The effective-learning side is not complete. The next engineering move is `P0-LEARN-HEALTH-SSOT`, followed by ledger/proposal/adjudicator work. Runtime installation, cron repair, bounded Demo mutation, and any future live applicability must be separate gated dispatches.
+Today, the observation/advisory side has life. The effective-learning side is not complete. The next engineering move is `P0-LEARN-HEALTH-SSOT`, followed immediately by contract versioning and contract tests, then ledger/proposal/adjudicator work. Runtime installation, cron repair, bounded Demo mutation, and any future live applicability must be separate gated dispatches.
+
+After the triple adversarial audit, PM confirms the method is reasonable and effective for completing the learning engine without known technical-debt accumulation, provided Phase 10 is treated as mandatory rather than optional cleanup.
