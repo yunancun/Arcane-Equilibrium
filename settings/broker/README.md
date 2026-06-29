@@ -15,3 +15,5 @@ This directory stores broker capability contracts and default-off runtime postur
 `ibkr_paper_order_lifecycle.toml` records the default-blocked paper order lifecycle and append-only event log shape. It does not authorize connector creation or paper orders.
 
 `stock_etf_phase3_evidence_contracts.toml` records the default-blocked market-data provenance, DQ, frozen-input, and evidence-clock checker shape. It does not start the evidence clock.
+
+`stock_etf_release_packet.template.toml` records the default-blocked Phase 5 release packet shape. It is secret-free and does not authorize IBKR contact, paper orders, GUI lane authority, tiny-live, or live.

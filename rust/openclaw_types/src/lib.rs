@@ -8,18 +8,19 @@
 pub mod agent;
 pub mod asset_venue;
 pub mod cognitive;
-pub mod intent;
 pub mod ibkr_feature_flag_secret_auth;
 pub mod ibkr_paper_lifecycle;
 pub mod ibkr_phase2_artifact;
 pub mod ibkr_phase2_gate;
 pub mod ibkr_phase2_policies;
 pub mod ibkr_phase2_runtime;
+pub mod intent;
 pub mod price;
 pub mod risk;
 pub mod state;
-pub mod stock_etf_phase3_evidence;
 pub mod stock_etf_lane;
+pub mod stock_etf_phase3_evidence;
+pub mod stock_etf_release_packet;
 
 pub use agent::{AgentMessage, AgentRole, MessageType};
 pub use asset_venue::{AssetClass, Venue, VenueParseError};
@@ -30,8 +31,8 @@ pub use ibkr_feature_flag_secret_auth::{
 };
 pub use ibkr_paper_lifecycle::{
     classify_ibkr_paper_restart_recovery, is_transition_allowed, BrokerLifecycleEventLogV1,
-    IbkrPaperLifecycleEventBlocker, IbkrPaperLifecycleEventVerdict,
-    IbkrPaperRestartRecoveryAction, IbkrPaperRestartRecoveryInputV1,
+    IbkrPaperLifecycleEventBlocker, IbkrPaperLifecycleEventVerdict, IbkrPaperRestartRecoveryAction,
+    IbkrPaperRestartRecoveryInputV1,
 };
 pub use ibkr_phase2_artifact::{
     is_sha256_hex, IbkrPhase2GateArtifactBlocker, IbkrPhase2GateArtifactV1,
@@ -48,11 +49,10 @@ pub use ibkr_phase2_gate::{
 };
 pub use ibkr_phase2_policies::{
     IbkrAuditEventPolicyBlocker, IbkrAuditEventPolicyV1, IbkrPaperAttestationPolicyBlocker,
-    IbkrPaperAttestationPolicyV1, IbkrPhase2GatePrerequisiteFlags,
-    IbkrPhase2PolicyBundleBlocker, IbkrPhase2PolicyBundleV1, IbkrPolicyVerdict,
-    IbkrPythonWriteGuardPolicyBlocker, IbkrPythonWriteGuardPolicyV1, IbkrRateLimitPolicyBlocker,
-    IbkrRateLimitPolicyV1, IbkrRateLimitScope, IbkrRedactionPolicyBlocker,
-    IbkrRedactionPolicyV1,
+    IbkrPaperAttestationPolicyV1, IbkrPhase2GatePrerequisiteFlags, IbkrPhase2PolicyBundleBlocker,
+    IbkrPhase2PolicyBundleV1, IbkrPolicyVerdict, IbkrPythonWriteGuardPolicyBlocker,
+    IbkrPythonWriteGuardPolicyV1, IbkrRateLimitPolicyBlocker, IbkrRateLimitPolicyV1,
+    IbkrRateLimitScope, IbkrRedactionPolicyBlocker, IbkrRedactionPolicyV1,
 };
 pub use ibkr_phase2_runtime::{
     IbkrApiSessionTopologyBlocker, IbkrApiSessionTopologyV1, IbkrApiSessionTopologyVerdict,
@@ -65,16 +65,22 @@ pub use risk::{
     H0CheckResult, H0GateConfig, H0GateHealthSnapshot, H0GateRiskSnapshot, PricingConfig,
 };
 pub use state::{AgentState, GovernanceMode, OmsState, OrderInitiator, RiskInitiator, RiskLevel};
-pub use stock_etf_phase3_evidence::{
-    StockEtfAdjustmentMarker, StockEtfDailyDqManifestV1, StockEtfEvidenceClockDayV1,
-    StockEtfEvidenceClockStatus, StockEtfFrozenEvidenceInputsV1, StockEtfPhase3Blocker,
-    StockEtfPhase3Verdict, StockMarketDataProvenanceV1,
-};
 pub use stock_etf_lane::{
     evaluate_broker_operation, AssetLane, AuthorityScope, Broker, BrokerCapabilityDecision,
     BrokerCapabilityRequest, BrokerEnvironment, BrokerOperation, IbkrPaperOrderLifecycleState,
     InstrumentKind, StockEtfConfigError, StockEtfContractParseError, StockEtfDenialReason,
     StockEtfFeatureFlags, StockEtfGateInputs, StockEtfReadiness,
+};
+pub use stock_etf_phase3_evidence::{
+    StockEtfAdjustmentMarker, StockEtfDailyDqManifestV1, StockEtfEvidenceClockDayV1,
+    StockEtfEvidenceClockStatus, StockEtfFrozenEvidenceInputsV1, StockEtfPhase3Blocker,
+    StockEtfPhase3Verdict, StockMarketDataProvenanceV1,
+};
+pub use stock_etf_release_packet::{
+    StockEtfKillDisableCleanupProofV1, StockEtfPgMigrationEvidenceV1,
+    StockEtfReleaseManifestHashV1, StockEtfReleasePacketBlocker, StockEtfReleasePacketV1,
+    StockEtfReleaseVerdict, STOCK_ETF_RELEASE_ADR_PATH, STOCK_ETF_RELEASE_AMD_PATH,
+    STOCK_ETF_RELEASE_SPEC_PATH,
 };
 
 // ---------------------------------------------------------------------------

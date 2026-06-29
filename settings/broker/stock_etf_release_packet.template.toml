@@ -1,0 +1,51 @@
+# ADR-0048 Stock/ETF release packet template.
+#
+# This is a blocked, secret-free source template. It does not complete Phase 5,
+# does not authorize IBKR contact, and does not authorize tiny-live/live.
+
+[release_packet]
+packet_id = ""
+adr_path = "docs/adr/0048-ibkr-stock-etf-paper-shadow-lane.md"
+amd_path = "docs/governance_dev/amendments/2026-06-29--AMD-2026-06-29-01-ibkr-stock-etf-paper-shadow-lane.md"
+spec_path = "docs/execution_plan/specs/2026-06-29--stock_etf_cash_phase0_named_contract_packet.md"
+source_commit = ""
+created_at_ms = 0
+reviewer_roles = []
+role_report_paths = []
+e2_log_hash = ""
+e3_redaction_log_hash = ""
+e4_log_hash = ""
+qa_log_hash = ""
+redaction_fixture_hash = ""
+gui_screenshot_hashes = []
+dq_manifest_hashes = []
+scorecard_regeneration_hashes = []
+evidence_archive_pointer = ""
+evidence_archive_hash = ""
+paper_shadow_window_complete = false
+engineering_shakedown_complete = false
+secret_content_serialized = false
+ibkr_live_or_tiny_live_authorized = false
+sealed = false
+
+[[manifest_hashes]]
+label = ""
+sha256 = ""
+
+[pg_migration_evidence]
+migrations_declared = false
+migration_manifest_hash = ""
+pg_dry_run_log_hash = ""
+pg_double_apply_log_hash = ""
+
+[kill_disable_cleanup_proof]
+stock_etf_lane_enabled_false = false
+ibkr_readonly_enabled_false = false
+ibkr_paper_enabled_false = false
+stock_etf_shadow_only_true = false
+collector_stopped = false
+gui_stock_views_disabled_or_hidden = false
+live_secret_absence_proven = false
+evidence_archive_forward_only = false
+destructive_db_cleanup_requested = false
+proof_hash = ""
