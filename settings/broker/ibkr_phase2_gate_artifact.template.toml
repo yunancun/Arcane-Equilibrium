@@ -1,0 +1,40 @@
+# IBKR Phase 2 immutable gate artifact template for ADR-0048.
+# This template is intentionally BLOCKED and does not authorize IBKR contact.
+
+[artifact]
+artifact_id = ""
+adr = "ADR-0048"
+amd = "AMD-2026-06-29-01"
+source_commit = ""
+created_at_ms = 0
+immutable_storage_path = ""
+reviewer_roles = []
+sealed = false
+raw_artifact_hash = ""
+redacted_summary_hash = ""
+supersedes_artifact_id = ""
+
+[gate]
+status = "BLOCKED"
+adr = "ADR-0048"
+amd = "AMD-2026-06-29-01"
+api_baseline = "ib_gateway_tws_api"
+host_policy = "loopback_only"
+port_policy = "paper_gateway_port_only"
+live_ports_denied = false
+secret_contract_present = false
+live_secret_absent_or_empty = false
+api_allowlist_present = false
+redaction_suite_passed = false
+rate_limit_policy_present = false
+audit_event_policy_present = false
+paper_attestation_contract_present = false
+python_no_write_guard_present = false
+ibkr_call_performed = false
+
+[policy_flags]
+redaction_suite_passed = false
+rate_limit_policy_present = false
+audit_event_policy_present = false
+paper_attestation_contract_present = false
+python_no_write_guard_present = false

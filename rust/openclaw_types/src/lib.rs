@@ -9,6 +9,7 @@ pub mod agent;
 pub mod asset_venue;
 pub mod cognitive;
 pub mod intent;
+pub mod ibkr_phase2_artifact;
 pub mod ibkr_phase2_gate;
 pub mod ibkr_phase2_policies;
 pub mod price;
@@ -19,6 +20,10 @@ pub mod stock_etf_lane;
 pub use agent::{AgentMessage, AgentRole, MessageType};
 pub use asset_venue::{AssetClass, Venue, VenueParseError};
 pub use cognitive::{CognitiveParams, DreamInsight, RegretSummary, SkippedOpportunity};
+pub use ibkr_phase2_artifact::{
+    is_sha256_hex, IbkrPhase2GateArtifactBlocker, IbkrPhase2GateArtifactV1,
+    IbkrPhase2GateArtifactVerdict,
+};
 pub use ibkr_phase2_gate::{
     classify_non_bybit_api_action, is_loopback_or_unix_local_host, IbkrApiBaseline,
     IbkrExternalSurfaceGateBlocker, IbkrExternalSurfaceGateStatus, IbkrExternalSurfaceGateV1,
