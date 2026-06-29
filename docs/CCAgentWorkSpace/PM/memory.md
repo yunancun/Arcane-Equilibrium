@@ -2459,3 +2459,8 @@
 - Verification: py_compile PASS, focused tests `40 passed`, adjacent AEG `9 passed`, M4 leakage `52 passed`, smoke `EXTERNAL_REPO_FUSION_SMOKE_COMPLETE` with 2544 chunks and authority preserved.
 - Boundary remains no Bybit/DB/network/runtime/order/risk/config/Decision Lease/writer/Cost Gate/promotion/sizing authority; use outputs only as PM/FA/QC/Operator redlines.
 - Linux deploy: `trade-core` fast-forwarded to `523fcb48`, atomic engine rebuild/restart verified PID `877736` with binary SHA `c867c89cfbbde8f02a5ef6cf985a629aa8eeb544784dab6d7b883f4435854be0`, then API-only reload PID `878457`; live authorization was absent and preserved absent.
+
+## 2026-06-29 Learning Engine Completion Engineering Plan
+
+- PM integrated QC/MIT/AI-E/PA read-only review: DreamEngine is active advisory-only; general learning is partially alive but degraded/core-loop stalled due empty runtime crontab, stale health, ML maintenance error, stale registry, and missing fill-backed proof.
+- Next engineering order is `P0-LEARN-HEALTH-SSOT`, then ledger event contract, proposal compiler, adjudicator, Demo mutation envelope, training/registry repair, serving snapshot, and proof/promotion gate; no runtime mutation or live authority granted.
