@@ -80,6 +80,8 @@ Phase 2 IBKR external contact may start only after `phase2_ibkr_external_surface
 
 Phase 3 evidence clock may start only after `stock_etf_evidence_clock_v1` proves collector stability, frozen universe/benchmark/cost model/strategy hypothesis hashes, corporate-action and FX source contracts, and paper-vs-shadow divergence thresholds. Scorecard inputs must remain source-validated, derived-only, paper/shadow separated, and unable to claim live fills.
 
+Cross-phase `stock_etf_cash` evidence must be referable through `audit.asset_lane_events_v1` immutable event references. These references require lane/broker/environment/operation fields, hash-chain continuity, producer/source metadata, artifact hashes, and redaction boundaries; they do not write audit rows or authorize runtime actions by themselves.
+
 Phase 4 GUI runtime may expose stock/ETF views only after route/cache/auth negative tests prove client lane state cannot authorize any effect-capable action.
 
 Phase 5 may sign off paper/shadow online only after the release packet, immutable artifact manifest, kill/disable cleanup runbook, evidence archive, and engineering shakedown all pass.

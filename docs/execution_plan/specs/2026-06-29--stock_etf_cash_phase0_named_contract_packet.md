@@ -352,6 +352,41 @@ Append-only event fields:
 
 Lifecycle events are atomic evidence. Daily summaries and scorecards are derived artifacts only.
 
+### 11A. `audit.asset_lane_events_v1`
+
+Immutable event references must cover cross-phase stock/ETF lane evidence, not
+only order lifecycle events. Required fields:
+
+- schema version
+- event id and event kind
+- sequence number
+- genesis marker or previous event hash
+- event time
+- producer commit
+- actor and source
+- `asset_lane`, `broker`, `environment`, `operation`, and permission scope
+- account and session fingerprint hashes only
+- decision id and order intent id, using explicit not-applicable markers when absent
+- allowed flag and denial reason invariant
+- payload hash
+- raw artifact hash
+- redacted summary hash
+- source artifact hash
+- input artifact hashes
+
+Rules:
+
+- `asset_lane` must be `stock_etf_cash`.
+- `broker` must be `ibkr`.
+- live environment is denied.
+- non-genesis events require a valid previous event hash.
+- allowed events must not carry denial reason.
+- denied events must carry denial reason.
+- raw payloads and secret contents must never be serialized inline.
+
+Source validator: `openclaw_types::stock_etf_audit_events::StockEtfAssetLaneEventV1`.
+This validator writes no audit row and does not apply the DDL.
+
 ## 12. `stock_etf_db_evidence_ddl_v1`
 
 Required schemas:
