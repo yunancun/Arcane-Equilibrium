@@ -69,6 +69,9 @@ def _require_operator_auth():
 def _validate_bybit_credentials():
     pass
 
+def _credential_blockers_from_cutover_preflight(payload):
+    pass
+
 @settings_router.post("/api-key/{slot}")
 async def save_api_key(slot, body, actor = Depends(_require_operator_auth)):
     _validate_bybit_credentials()

@@ -389,6 +389,21 @@ def _require_preflight_false_answers(answers: dict[str, Any]) -> None:
         )
 
 
+def _credential_blockers_from_cutover_preflight(payload: dict[str, Any]) -> list[str]:
+    """返回 connector mode cutover 前必須先清掉的 Demo credential blockers。"""
+    readiness = payload.get("readiness")
+    if not isinstance(readiness, dict):
+        raise HTTPException(status_code=400, detail="Cutover preflight missing readiness")
+    blockers = readiness.get("blocking_reasons")
+    if not isinstance(blockers, list):
+        raise HTTPException(status_code=400, detail="Cutover preflight missing readiness blockers")
+    return [
+        str(reason)
+        for reason in blockers
+        if str(reason).startswith("demo_api_slot:")
+    ]
+
+
 def _validate_demo_connector_cutover_preflight(
     *,
     preflight_path: Path,
@@ -422,6 +437,15 @@ def _validate_demo_connector_cutover_preflight(
     _require_preflight_false_answers(answers)
     if answers.get("main_cost_gate_adjustment") not in (None, "NONE"):
         raise HTTPException(status_code=400, detail="Cutover preflight touches Cost Gate")
+    credential_blockers = _credential_blockers_from_cutover_preflight(payload)
+    if credential_blockers:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Demo credential readiness must be green before connector mode "
+                f"cutover: {credential_blockers}"
+            ),
+        )
 
     source = payload.get("settings_api_source")
     if not isinstance(source, dict) or source.get("ready") is not True:
