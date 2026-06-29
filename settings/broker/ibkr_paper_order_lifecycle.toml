@@ -1,0 +1,29 @@
+# IBKR paper order lifecycle and append-only event log template.
+# This template is intentionally BLOCKED and does not authorize paper orders.
+
+[event]
+event_id = ""
+event_time_ms = 0
+asset_lane = "stock_etf_cash"
+broker = "ibkr"
+environment = "paper"
+operation = "paper_order_submit"
+order_local_id = ""
+idempotency_key = ""
+broker_order_id = ""
+execution_id = ""
+commission_report_id = ""
+reconciliation_run_id = ""
+previous_state = "LOCAL_INTENT_CREATED"
+next_state = "STATE_UNKNOWN"
+allowed = false
+denial_reason = "authorization_invalid"
+raw_artifact_hash = ""
+redacted_summary_hash = ""
+
+[restart_recovery]
+last_local_state = "STATE_UNKNOWN"
+broker_state_known = false
+broker_order_id = ""
+idempotency_key = ""
+terminal_evidence_hash = ""
