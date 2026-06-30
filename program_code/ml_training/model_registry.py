@@ -101,11 +101,21 @@ def _connect(dsn: Optional[str] = None):
     回 None（psycopg 缺或連線失敗）時 graceful degrade；registry 純審計，
     寫失敗不擋訓練。
     """
+    driver = None
     try:
-        import psycopg
+        import psycopg  # type: ignore
+
+        driver = psycopg
     except ImportError:
-        logger.info("model_registry: psycopg not installed; skipping DB write")
-        return None
+        try:
+            import psycopg2  # type: ignore
+
+            driver = psycopg2
+        except ImportError:
+            logger.info(
+                "model_registry: psycopg/psycopg2 not installed; skipping DB write"
+            )
+            return None
     try:
         # DSN resolution mirrors parquet_etl._get_pg_conn so all ml_training
         # callers share identical DB wiring (OPENCLAW_DATABASE_URL first, then
@@ -130,7 +140,7 @@ def _connect(dsn: Optional[str] = None):
                 "model_registry: no DSN (OPENCLAW_DATABASE_URL / DSN / POSTGRES_* all unset); skipping"
             )
             return None
-        return psycopg.connect(conninfo)
+        return driver.connect(conninfo)
     except Exception as e:  # noqa: BLE001 — any connect error → skip
         logger.warning("model_registry: connect failed: %s", e)
         return None

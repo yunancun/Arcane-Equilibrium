@@ -18,6 +18,8 @@ import hashlib
 import os
 import tempfile
 from pathlib import Path
+import sys
+import types
 from unittest.mock import patch
 
 import pytest
@@ -33,6 +35,7 @@ from program_code.ml_training.model_registry import (
     VERDICT_SHADOW_ONLY,
     VERDICT_SHOULD_SHIP,
     _file_size_and_sha256,
+    _connect,
     register_model,
     transition_canary_status,
     has_required_persistence_artifact,
@@ -104,6 +107,24 @@ def test_check_db_connectivity_true_with_fake_conn():
     with patch("program_code.ml_training.model_registry._connect",
                return_value=FakeConn()):
         assert check_db_connectivity() is True
+
+
+def test_connect_falls_back_to_psycopg2_when_psycopg_missing(monkeypatch):
+    """Runtime venv may have psycopg2 but not psycopg; registry must still write."""
+    calls = []
+
+    class FakePsycopg2(types.SimpleNamespace):
+        def connect(self, conninfo):
+            calls.append(conninfo)
+            return object()
+
+    monkeypatch.setitem(sys.modules, "psycopg", None)
+    monkeypatch.setitem(sys.modules, "psycopg2", FakePsycopg2())
+
+    conn = _connect("postgresql://user:pass@127.0.0.1:5432/db")
+
+    assert conn is not None
+    assert calls == ["postgresql://user:pass@127.0.0.1:5432/db"]
 
 
 def test_registry_persistence_error_is_runtime_error():

@@ -84,6 +84,9 @@ def test_f08_runner_pins_the_five_audit_jobs() -> None:
         wrapper_src = inspect.getsource(getattr(runner, f"_run_{job}"))
         assert gate_token in wrapper_src, f"{job} wrapper 缺 flag gate {gate_token}"
     assert runner._expected_training_skip("insufficient samples: 10 < 200")
+    assert runner._expected_training_skip(
+        "quantile training failed: degenerate split: train=32, holdout=1812"
+    )
     assert not runner._expected_training_skip("lightgbm not installed")
 
 

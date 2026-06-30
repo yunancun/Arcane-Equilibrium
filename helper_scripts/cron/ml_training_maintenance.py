@@ -122,7 +122,9 @@ def _elapsed_ms(start: float) -> int:
 
 def _expected_training_skip(error: str) -> bool:
     lowered = (error or "").lower()
-    return lowered.startswith("insufficient samples")
+    return lowered.startswith("insufficient samples") or (
+        "quantile training failed: degenerate split" in lowered
+    )
 
 
 def _weekly_audit_due(args: argparse.Namespace) -> bool:
