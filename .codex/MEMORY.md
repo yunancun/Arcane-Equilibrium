@@ -687,3 +687,9 @@ Do not paste long reports or stable architecture into TODO.
 - Source-only Python refactor splits the overgrown Stock/ETF FastAPI status normalizers out of `stock_etf_routes.py` into shared/common plus readiness, evidence, universe, shadow, and paper normalizer modules; the route file now keeps only authenticated GET handlers, no-store header handling, and IPC query helpers.
 - `stock_etf_routes.py` drops from `1550` lines to `257` lines, and every new Stock/ETF status normalizer module is below the `800` review-attention threshold; `test_stock_etf_routes.py` remains `1736` lines and should be fixture-split before the next route-test expansion.
 - Verification passed: Stock/ETF route/normalizer/test `py_compile`; focused FastAPI/static no-write pytest `42 passed`; `git diff --check` PASS. This grants no new endpoint, response-contract change, IBKR contact, secret access, connector runtime, paper order, fill import, DB apply, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Route Test Split
+
+- Source-only Python test refactor splits `test_stock_etf_routes.py` into a shared `stock_etf_route_fixtures.py` helper plus endpoint-scoped lane/readiness/evidence/universe/shadow/paper route-test modules; the original route test now covers auth, OpenAPI GET-only shape, redirect, static GUI registration, and display-only checks.
+- `test_stock_etf_routes.py` drops from `1736` lines to `144` lines; every Stock/ETF route-test module is now below the `800` review-attention threshold.
+- Verification passed: split Stock/ETF route-test `py_compile`; focused FastAPI/static no-write pytest `42 passed`; `git diff --check` PASS. This grants no production-code change, endpoint change, IBKR contact, secret access, connector runtime, paper order, fill import, DB apply, tiny-live, live, or Bybit behavior change.
