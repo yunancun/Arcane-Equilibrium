@@ -2,6 +2,8 @@
 # This file records evidence shape only and does not authorize IBKR contact.
 
 [secret_slot_contract]
+contract_id = ""
+source_version = 0
 contract_present = false
 readonly_slot_posture = "unknown"
 paper_slot_posture = "unknown"

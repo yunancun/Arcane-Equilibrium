@@ -2,6 +2,8 @@
 # This template is intentionally BLOCKED and does not authorize IBKR contact.
 
 [artifact]
+contract_id = ""
+source_version = 0
 artifact_id = ""
 adr = "ADR-0048"
 amd = "AMD-2026-06-29-01"
@@ -15,6 +17,8 @@ redacted_summary_hash = ""
 supersedes_artifact_id = ""
 
 [gate]
+contract_id = ""
+source_version = 0
 status = "BLOCKED"
 adr = "ADR-0048"
 amd = "AMD-2026-06-29-01"
@@ -40,6 +44,8 @@ paper_attestation_contract_present = false
 python_no_write_guard_present = false
 
 [secret_slot_contract]
+contract_id = ""
+source_version = 0
 contract_present = false
 readonly_slot_posture = "unknown"
 paper_slot_posture = "unknown"
@@ -53,6 +59,8 @@ account_id_serialized = false
 live_secret_absent_or_empty = false
 
 [api_session_topology]
+contract_id = ""
+source_version = 0
 topology_present = false
 api_baseline = "ib_gateway_tws_api"
 runtime_owner = "trade-core"

@@ -120,6 +120,7 @@ Required fields:
 
 - `contract_id=phase2_ibkr_external_surface_gate_v1`
 - `source_version=1`
+- immutable artifact `artifact_id`
 - `status`: `PASS` | `BLOCKED`
 - `adr`: `ADR-0048`
 - `amd`: `AMD-2026-06-29-01`
@@ -408,6 +409,16 @@ Allowed secret slots:
 
 - `$OPENCLAW_SECRETS_DIR/external/ibkr/readonly/`
 - `$OPENCLAW_SECRETS_DIR/external/ibkr/paper/`
+
+Secret-slot source contract fields:
+
+- `contract_id=ibkr_secret_slot_contract_v1`
+- `source_version=1`
+- readonly/paper slot posture is hashed or missing according to scope
+- live slot is absent or empty
+- secret slot and account fingerprints are hashes only
+- env-var credential fallback denied
+- secret content and account id serialization denied
 
 Denied secret slot:
 

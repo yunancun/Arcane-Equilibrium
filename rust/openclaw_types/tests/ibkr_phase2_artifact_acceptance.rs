@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use openclaw_types::{
     is_sha256_hex, IbkrExternalSurfaceGateV1, IbkrPhase2GateArtifactBlocker,
     IbkrPhase2GateArtifactV1, IbkrPhase2PolicyBundleV1, IbkrSecretSlotContractV1,
+    IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
 };
 
 fn accepted_artifact_fixture() -> IbkrPhase2GateArtifactV1 {
@@ -22,6 +23,8 @@ fn accepted_artifact_fixture() -> IbkrPhase2GateArtifactV1 {
     };
 
     IbkrPhase2GateArtifactV1 {
+        contract_id: IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID.to_string(),
+        source_version: 1,
         artifact_id: "phase2_ibkr_external_surface_gate_v1_fixture".to_string(),
         source_commit: "0123456789abcdef".to_string(),
         created_at_ms: 1_772_232_000_000,
@@ -46,6 +49,12 @@ fn default_gate_artifact_blocks_contact() {
     let verdict = artifact.validate();
 
     assert!(!verdict.ibkr_contact_allowed);
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPhase2GateArtifactBlocker::ContractIdMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPhase2GateArtifactBlocker::SourceVersionMismatch));
     assert!(verdict
         .blockers
         .contains(&IbkrPhase2GateArtifactBlocker::ArtifactIdMissing));
@@ -76,9 +85,29 @@ fn accepted_fixture_requires_sealed_gate_and_review_metadata() {
 
     assert!(verdict.ibkr_contact_allowed);
     assert!(verdict.blockers.is_empty());
+    assert_eq!(artifact.contract_id, IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID);
+    assert_eq!(artifact.source_version, 1);
     assert!(!artifact.gate.ibkr_call_performed);
     assert!(is_sha256_hex(&artifact.raw_artifact_hash));
     assert!(is_sha256_hex(&artifact.redacted_summary_hash));
+}
+
+#[test]
+fn artifact_requires_exact_contract_id_and_source_version() {
+    let artifact = IbkrPhase2GateArtifactV1 {
+        contract_id: "phase2_ibkr_external_surface_gate_v1_fixture".to_string(),
+        source_version: 2,
+        ..accepted_artifact_fixture()
+    };
+    let verdict = artifact.validate();
+
+    assert!(!verdict.ibkr_contact_allowed);
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPhase2GateArtifactBlocker::ContractIdMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPhase2GateArtifactBlocker::SourceVersionMismatch));
 }
 
 #[test]
@@ -198,6 +227,10 @@ fn blocked_artifact_template_is_parseable_and_secret_free() {
     let parsed: toml::Value = toml::from_str(&raw).expect("artifact template toml parses");
 
     assert_eq!(parsed["artifact"]["sealed"].as_bool(), Some(false));
+    assert_eq!(parsed["artifact"]["contract_id"].as_str(), Some(""));
+    assert_eq!(parsed["artifact"]["source_version"].as_integer(), Some(0));
+    assert_eq!(parsed["gate"]["contract_id"].as_str(), Some(""));
+    assert_eq!(parsed["gate"]["source_version"].as_integer(), Some(0));
     assert_eq!(parsed["gate"]["status"].as_str(), Some("BLOCKED"));
     assert_eq!(parsed["gate"]["ibkr_call_performed"].as_bool(), Some(false));
     assert_eq!(
@@ -205,8 +238,24 @@ fn blocked_artifact_template_is_parseable_and_secret_free() {
         Some(false)
     );
     assert_eq!(
+        parsed["secret_slot_contract"]["contract_id"].as_str(),
+        Some("")
+    );
+    assert_eq!(
+        parsed["secret_slot_contract"]["source_version"].as_integer(),
+        Some(0)
+    );
+    assert_eq!(
         parsed["secret_slot_contract"]["contract_present"].as_bool(),
         Some(false)
+    );
+    assert_eq!(
+        parsed["api_session_topology"]["contract_id"].as_str(),
+        Some("")
+    );
+    assert_eq!(
+        parsed["api_session_topology"]["source_version"].as_integer(),
+        Some(0)
     );
     assert_eq!(
         parsed["api_session_topology"]["topology_present"].as_bool(),

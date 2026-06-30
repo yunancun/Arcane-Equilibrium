@@ -12,6 +12,7 @@ use openclaw_types::{
     IbkrPhase2GateArtifactV1, IbkrPhase2PolicyBundleV1, IbkrSecretSlotContractV1,
     IbkrSessionAttestationV1, InstrumentKind, StockEtfAuthorizationEnvelopeV1,
     StockEtfFeatureFlags, FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID,
+    IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
 };
 
 const NOW_MS: u64 = 1_772_233_000_000;
@@ -31,6 +32,8 @@ fn accepted_artifact_fixture(secret: &IbkrSecretSlotContractV1) -> IbkrPhase2Gat
     topology.account_fingerprint_hash = secret.account_fingerprint_hash.clone();
 
     IbkrPhase2GateArtifactV1 {
+        contract_id: IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID.to_string(),
+        source_version: 1,
         artifact_id: "phase2_ibkr_external_surface_gate_v1_matrix_fixture".to_string(),
         source_commit: "0123456789abcdef".to_string(),
         created_at_ms: NOW_MS,

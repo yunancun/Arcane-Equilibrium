@@ -6,12 +6,17 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ibkr_phase2_gate::{IbkrExternalSurfaceGateV1, IBKR_PHASE2_ADR, IBKR_PHASE2_AMD};
+use crate::ibkr_phase2_gate::{
+    IbkrExternalSurfaceGateV1, IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID, IBKR_PHASE2_ADR,
+    IBKR_PHASE2_AMD,
+};
 use crate::ibkr_phase2_policies::IbkrPhase2GatePrerequisiteFlags;
 use crate::ibkr_phase2_runtime::{IbkrApiSessionTopologyV1, IbkrSecretSlotContractV1};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IbkrPhase2GateArtifactV1 {
+    pub contract_id: String,
+    pub source_version: u32,
     pub artifact_id: String,
     pub adr: String,
     pub amd: String,
@@ -32,6 +37,8 @@ pub struct IbkrPhase2GateArtifactV1 {
 impl Default for IbkrPhase2GateArtifactV1 {
     fn default() -> Self {
         Self {
+            contract_id: String::new(),
+            source_version: 0,
             artifact_id: String::new(),
             adr: IBKR_PHASE2_ADR.to_string(),
             amd: IBKR_PHASE2_AMD.to_string(),
@@ -62,6 +69,12 @@ impl IbkrPhase2GateArtifactV1 {
         use IbkrPhase2GateArtifactBlocker as Blocker;
 
         let mut blockers = Vec::new();
+        if self.contract_id != IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID {
+            blockers.push(Blocker::ContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
+        }
         if self.artifact_id.trim().is_empty() {
             blockers.push(Blocker::ArtifactIdMissing);
         }
@@ -135,6 +148,8 @@ pub struct IbkrPhase2GateArtifactVerdict {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrPhase2GateArtifactBlocker {
+    ContractIdMismatch,
+    SourceVersionMismatch,
     ArtifactIdMissing,
     AdrMismatch,
     AmdMismatch,
