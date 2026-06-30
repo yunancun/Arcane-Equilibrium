@@ -97,6 +97,15 @@ FORBIDDEN_SECRET_ENV_MODULE_PREFIXES = (
     "getpass",
     "keyring",
 )
+FORBIDDEN_RUNTIME_SIDE_EFFECT_MODULE_PREFIXES = (
+    "asyncio",
+    "concurrent",
+    "datetime",
+    "multiprocessing",
+    "subprocess",
+    "threading",
+    "time",
+)
 FORBIDDEN_IBKR_CONNECTOR_RUNTIME_IMPORT_PREFIXES = (
     "broker_connectors.ibkr_connector",
     "ibkr_connector",
@@ -121,6 +130,21 @@ FORBIDDEN_FILE_WRITE_METHOD_NAMES = {
     "unlink",
     "write_bytes",
     "write_text",
+}
+FORBIDDEN_RUNTIME_SIDE_EFFECT_CALL_NAMES = {
+    "Thread",
+    "Popen",
+    "Process",
+    "create_task",
+    "fromtimestamp",
+    "monotonic",
+    "now",
+    "perf_counter",
+    "run",
+    "sleep",
+    "time",
+    "to_thread",
+    "utcnow",
 }
 FORBIDDEN_STATIC_GUI_SNIPPETS = {
     "ocPost(",
@@ -306,6 +330,23 @@ def test_stock_etf_ibkr_python_surface_has_no_secret_or_env_material_access() ->
                 _record_forbidden_secret_env_call(path, node, violations)
             elif isinstance(node, (ast.Attribute, ast.Subscript)):
                 _record_forbidden_os_environ_access(path, node, violations)
+
+    assert violations == []
+
+
+def test_stock_etf_ibkr_python_surface_has_no_clock_or_concurrency_side_effects() -> None:
+    files = _candidate_stock_etf_ibkr_python_files()
+    assert files, "expected at least the display-only stock_etf_routes.py surface"
+
+    violations: list[str] = []
+    for path in files:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                _record_forbidden_runtime_side_effect_import(path, node, violations)
+            elif isinstance(node, ast.Call):
+                _record_forbidden_runtime_side_effect_dynamic_import(path, node, violations)
+                _record_forbidden_runtime_side_effect_call(path, node, violations)
 
     assert violations == []
 
@@ -754,6 +795,32 @@ def _record_forbidden_secret_env_call(
         violations.append(f"{path}: accesses forbidden os.environ material")
     if _is_path_home_call(node.func):
         violations.append(f"{path}: calls forbidden Path.home() material locator")
+
+
+def _record_forbidden_runtime_side_effect_import(
+    path: Path, node: ast.Import | ast.ImportFrom, violations: list[str]
+) -> None:
+    for module in _imported_module_names(node):
+        if _is_forbidden_module(module, FORBIDDEN_RUNTIME_SIDE_EFFECT_MODULE_PREFIXES):
+            violations.append(f"{path}: imports forbidden runtime side-effect module {module}")
+
+
+def _record_forbidden_runtime_side_effect_dynamic_import(
+    path: Path, node: ast.Call, violations: list[str]
+) -> None:
+    module = _literal_dynamic_import_module(node)
+    if module is None:
+        return
+    if _is_forbidden_module(module, FORBIDDEN_RUNTIME_SIDE_EFFECT_MODULE_PREFIXES):
+        violations.append(f"{path}: dynamically imports forbidden runtime side-effect module {module}")
+
+
+def _record_forbidden_runtime_side_effect_call(
+    path: Path, node: ast.Call, violations: list[str]
+) -> None:
+    call_name = _call_name(node.func)
+    if call_name in FORBIDDEN_RUNTIME_SIDE_EFFECT_CALL_NAMES:
+        violations.append(f"{path}: calls forbidden runtime side-effect function {call_name}()")
 
 
 def _record_forbidden_os_environ_access(
