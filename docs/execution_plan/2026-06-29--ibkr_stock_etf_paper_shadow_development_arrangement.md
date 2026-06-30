@@ -2111,7 +2111,7 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 
 新增 checkpoint：
 
-- 主計畫 PM session checkpoint 現在從 14 到 79 連續遞增，無重複編號。
+- 主計畫 PM session checkpoint 現在從 14 到 80 連續遞增，無重複編號。
 - 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
   lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
   connector skeleton / readonly-probe / broker read gate / policy display / operation
@@ -3590,6 +3590,44 @@ sendBeacon、XHR 或 high-frequency timing，保護 control-api/browser runtime 
   `20 passed`。
 - `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
   `119 passed`。
+- `python3 -B -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
+  `2 passed`。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 80. 2026-07-01 PM session source checkpoint：GUI One-Shot Fanout Budget Guard
+
+本 checkpoint 將 Stock/ETF static GUI 的一次性 GET fanout budget 固定為 static
+guard。這不是 GUI runtime activation，不新增 endpoint，不改 API call shape；目標是
+避免 display-only Stock/ETF tab 在未批准前增加額外 API fanout、提高 timeout budget
+或重複 loader，防止拖慢 control-api/browser runtime。
+
+已完成：
+
+- 更新 `test_stock_etf_python_no_write_static_guard.py`：
+  - 新增 `STOCK_ETF_STATIC_GUI_ONE_SHOT_GET_FANOUT = 16`。
+  - 新增 `STOCK_ETF_STATIC_GUI_TIMEOUT_MS = 5000`。
+  - 新增 `test_stock_etf_static_gui_one_shot_get_fanout_stays_bounded`。
+  - Guard 要求 `tab-stock-etf.js` 只有一個 `Promise.all(`、一個
+    `waitForServerUp(loadReadiness)`，且正好 16 個 `ocApi(`。
+  - 每個 `ocApi` 必須是 `method: 'GET'`、`timeoutMs: 5000`、
+    `toastOnError: false`。
+- 本 checkpoint 不改 production behavior、不改 endpoint、不改 IPC method、不改 Bybit
+  path、不啟動任何 IBKR 或 connector runtime。
+
+驗證：
+
+- `python3 -B -m py_compile program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_python_no_write_static_guard.py`：
+  PASS。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_python_no_write_static_guard.py`：
+  `21 passed`。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  `120 passed`。
 - `python3 -B -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
   `2 passed`。
 - `git diff --check`：PASS。

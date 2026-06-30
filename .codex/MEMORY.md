@@ -1194,3 +1194,10 @@ Do not paste long reports or stable architecture into TODO.
 - The guard scans `tab-stock-etf*.js` and `tab-stock-etf.html`, blocking `setInterval`, `setTimeout`, animation/idle callbacks, WebSocket, EventSource, Worker/SharedWorker, BroadcastChannel, XMLHttpRequest, sendBeacon, `performance.now`, and `Date.now`.
 - Existing one-shot authenticated GET loading remains allowed; `new Date().toLocaleTimeString()` remains display-only and does not start background work.
 - Verification passed: Python no-write static guard `20 passed`; full Stock/ETF FastAPI/static `119 passed`; docs trace guard `2 passed`; `git diff --check` PASS. This grants no endpoint/IPC method change, client input change, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, paper order/cancel/replace, fill import, DB/evidence writer, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF GUI One-Shot Fanout Budget Guard
+
+- PM added a static GUI guard proving `tab-stock-etf.js` keeps exactly one one-shot load path: one `Promise.all`, one `waitForServerUp(loadReadiness)`, and 16 `ocApi` calls.
+- Every Stock/ETF GUI `ocApi` call must be GET-only with `timeoutMs: 5000` and `toastOnError: false`.
+- This prevents future display-only GUI drift into extra API fanout, longer timeout budgets, or repeated loaders before runtime approval.
+- Verification passed: Python no-write static guard `21 passed`; full Stock/ETF FastAPI/static `120 passed`; docs trace guard `2 passed`; `git diff --check` PASS. This grants no endpoint/IPC method change, client input change, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, paper order/cancel/replace, fill import, DB/evidence writer, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
