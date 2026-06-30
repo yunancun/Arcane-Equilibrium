@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-30 IBKR Stock/ETF Paper-Shadow Reconciliation Contract
+
+- PM added source-only `stock_etf_paper_shadow_reconciliation_v1` for paper lifecycle/fill facts, synthetic shadow fill linkage, frozen divergence thresholds, and unmatched-fill reconciliation checks.
+- Phase0 manifest/count is now 32; Rust/FastAPI reconciliation status surfaces expose the contract id, accepted/blockers, paper-shadow link hash, imported/synthetic markers, and side-effect flags while staying default blocked.
+- Verification passed: reconciliation acceptance `5`, Phase0 manifest `6`, FastAPI Phase0/reconciliation `9`, engine reconciliation focused `1`, engine Stock/ETF `27`, workspace cargo check PASS. This grants no IBKR contact, connector runtime, fill import, shadow fill generation, reconciliation/scorecard writer, DB apply, tiny-live, live, or Bybit behavior change.
+
 ## 2026-06-30 IBKR Stock/ETF Authorization Status
 
 - PM added source-only `stock_etf.get_authorization_status`, FastAPI `GET /api/v1/stock-etf/authorization-status`, and GUI `Authorization Status` / `Authorization Gate` display.

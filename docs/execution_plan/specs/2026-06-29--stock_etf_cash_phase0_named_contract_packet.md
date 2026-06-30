@@ -1039,6 +1039,41 @@ The validator requires exact `stock_shadow_fill_model_v1` contract id, source
 version `1`, `synthetic_shadow=true`, rejects broker-paper/live fill links, and
 requires conservative fill or explicit rejection evidence.
 
+## 17A. `stock_etf_paper_shadow_reconciliation_v1`
+
+Required fields:
+
+- reconciliation run id
+- paper order local id
+- broker order id
+- execution id
+- commission report id
+- shadow signal id
+- lifecycle, event-log, paper-fill import, shadow-signal, shadow-fill,
+  cost-model, market-data provenance, divergence-threshold, paper-shadow link,
+  raw artifact, redacted summary, and source artifact hashes
+- append-only event readiness
+- paper-fill imported marker
+- synthetic shadow-fill marker
+- divergence bps and frozen divergence threshold bps
+- unmatched paper-fill and unmatched shadow-fill counts
+
+Accepted reconciliation requires imported paper-fill facts and synthetic
+shadow-fill facts to share explicit hashes, stay within the frozen divergence
+threshold, and leave no unmatched fills. It is a fact-linking and threshold
+contract only; it must not start a reconciliation writer, import fills, generate
+shadow fills, write scorecards, apply DB changes, contact IBKR, inspect secrets,
+route orders, request margin/short/options/CFD, or reuse a Bybit execution path.
+
+Source validator:
+`openclaw_types::stock_etf_paper_shadow_reconciliation::StockEtfPaperShadowReconciliationV1`.
+The validator requires exact `stock_etf_paper_shadow_reconciliation_v1` contract
+id, source version `1`, `stock_etf_cash` / IBKR / `paper_shadow` scope,
+read-only authority, effect-capable false posture, required identity/source
+hashes, append-only event readiness, imported paper-fill marker, synthetic
+shadow-fill marker, positive threshold, divergence within threshold, zero
+unmatched fills, and all side-effect flags false.
+
 ## 18. `stock_etf_evidence_clock_v1`
 
 Clock start requires:

@@ -261,6 +261,43 @@ Verification 已過：
 沒有 DB apply、沒有 evidence clock、沒有 scorecard writer、沒有 Linux runtime
 sync/restart，也沒有改動 Bybit live execution 行為。
 
+## 2026-06-30 Operator Update — Paper-Shadow Reconciliation Contract
+
+本 session 已完成下一個 source-only checkpoint：
+`stock_etf_paper_shadow_reconciliation_v1`。
+
+這次不是 reconciliation writer、不是 fill importer、不是 shadow fill generator，
+也不是 scorecard writer。變更只在 Rust contract、blocked template、Phase0 manifest/count、
+reconciliation status fixture 與 FastAPI normalizer/tests：
+
+- 新增 paper lifecycle/fill facts 與 synthetic shadow fill 之間的 typed
+  reconciliation contract。
+- Contract 要求 reconciliation/order/execution/commission/shadow-signal identity，
+  lifecycle/event-log/paper-fill import/shadow-signal/shadow-fill/cost-model/
+  market-data/divergence-threshold/paper-shadow-link/source hashes。
+- Accepted shape 必須 paper fill imported、shadow fill synthetic、divergence 在 frozen
+  threshold 內，且 unmatched paper/shadow fills 都是 0。
+- Phase0 contract count 從 31 更新為 32，包含
+  `stock_etf_paper_shadow_reconciliation_v1`。
+- Reconciliation status 現在會顯示這個 contract 的 id、accepted/blockers、
+  paper-shadow link hash、paper fill imported、shadow fill synthetic 與 writer/
+  side-effect flags；default 仍是 blocked false。
+
+Verification 已過：
+
+- Reconciliation acceptance：`5 passed`
+- Phase0 manifest：`6 passed`
+- FastAPI Phase0/reconciliation focused：`9 passed`
+- Engine reconciliation status focused：`1 passed`
+- Engine Stock/ETF：`27 passed`
+- Workspace `cargo check`：PASS
+- `rustfmt --check` / `git diff --check`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 secret access/creation、沒有 connector runtime、
+沒有 reconciliation writer、沒有 fill import、沒有 shadow fill generation、沒有
+scorecard writer、沒有 DB apply、沒有 paper order/cancel/replace、沒有 evidence clock、
+沒有 Linux runtime sync/restart，也沒有改動 Bybit live execution 行為。
+
 ## 2026-06-30 Operator Update — Shadow Signal Request Contract + IPC Binding
 
 本 session 已完成下一個 source-only checkpoint：

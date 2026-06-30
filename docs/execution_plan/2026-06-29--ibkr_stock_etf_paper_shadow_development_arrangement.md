@@ -1267,6 +1267,60 @@ PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 
 scorecard writer、不做 Linux runtime sync/restart、不啟動 paper-shadow launch、不授權
 tiny-live/live 或任何 Bybit behavior change。
 
+## 24. 2026-06-30 PM session source checkpoint：Paper-Shadow Reconciliation Contract
+
+本 session 繼續補 Phase 3 前置的 source-only contract：新增
+`stock_etf_paper_shadow_reconciliation_v1`。這是 paper fill fact、synthetic shadow
+fill fact 與 divergence threshold 的 typed reconciliation contract，不是
+reconciliation writer、fill importer、shadow fill generator 或 scorecard writer。
+
+新增 checkpoint：
+
+- Rust `openclaw_types` 新增
+  `StockEtfPaperShadowReconciliationV1`，固定 `stock_etf_cash`、IBKR、
+  `paper_shadow` scope、read-only authority 與 effect-capable false posture。
+- Validator 要求 reconciliation run、paper local order、broker order、execution、
+  commission report、shadow signal id，以及 lifecycle/event-log/paper-fill import/
+  shadow-signal/shadow-fill/cost-model/market-data/divergence-threshold/
+  paper-shadow-link/raw/redacted/source hashes。
+- Accepted fixture 必須有 append-only event readiness、paper fill imported marker、
+  synthetic shadow fill marker、正數 threshold、divergence <= threshold、unmatched
+  paper/shadow fills 都為 0。
+- Validator 拒絕 IBKR contact、connector runtime、secret serialization、fill import
+  side effect、shadow fill generation、reconciliation writer、scorecard writer、DB apply、
+  order routing、Bybit path reuse、tiny-live/live、margin/short/options/CFD 與 Python
+  direct broker write。
+- Phase0 manifest source + repository JSON 增加
+  `stock_etf_paper_shadow_reconciliation_v1`，contract count 從 31 更新為 32；FastAPI
+  Phase0 normalizer、fixtures/tests、reconciliation normalizer/tests 與 Phase0 packet
+  spec 同步。
+- Rust `stock_etf.get_reconciliation_status` status fixture 現在顯示 reconciliation
+  contract id、accepted/blockers、paper-shadow link hash、paper fill imported、
+  synthetic shadow fill 與 writer/side-effect flags，全部保持 default blocked false。
+
+驗證：
+
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_paper_shadow_reconciliation_acceptance -- --nocapture`：
+  reconciliation acceptance `5 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_phase0_manifest_acceptance -- --nocapture`：
+  Phase0 manifest acceptance `6 passed`。
+- `python3 -m pytest -q ...test_stock_etf_phase0_status_routes.py ...test_stock_etf_reconciliation_status_routes.py`：
+  FastAPI Phase0/reconciliation focused `9 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf_reconciliation_status -- --nocapture`：
+  focused reconciliation status `1 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
+  Stock/ETF engine filter `27 passed`（既有 warnings only）。
+- `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
+- `rustfmt --edition 2021 --check ...`：PASS。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 connector runtime、
+不啟動 Phase 1/2/3/4/5 runtime、不啟動 reconciliation writer、不匯入 fill、不生成
+shadow fill、不啟動 scorecard writer、不做 DB migration/apply、不做 Postgres dry-run、
+不啟動 evidence clock、不送 paper order、不做 cancel/replace、不做 Linux runtime
+sync/restart、不啟動 paper-shadow launch、不授權 tiny-live/live 或任何 Bybit behavior
+change。
+
 ## 29. 2026-06-30 PM session source checkpoint：Shadow Signal Request Contract + IPC Binding
 
 本 session 繼續 Phase 1D/3 邊界，但仍是 source-only contract + IPC gate。此
