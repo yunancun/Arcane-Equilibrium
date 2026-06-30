@@ -174,6 +174,21 @@ async fn stock_etf_readiness_exposes_phase2_precontact_blockers_without_ibkr_con
         &phase2["external_surface_gate"]["blockers"],
         "secret_contract_missing"
     ));
+    assert_eq!(
+        phase2["api_allowlist"]["contract_id"],
+        "non_bybit_api_allowlist_v1"
+    );
+    assert_eq!(phase2["api_allowlist"]["source_version"], 1);
+    assert_eq!(phase2["api_allowlist"]["accepted"], true);
+    assert_eq!(phase2["api_allowlist"]["read_action_count"], 10);
+    assert_eq!(phase2["api_allowlist"]["paper_write_action_count"], 3);
+    assert_eq!(phase2["api_allowlist"]["denied_action_count"], 10);
+    assert_eq!(phase2["api_allowlist"]["ibkr_contact_performed"], false);
+    assert_eq!(phase2["api_allowlist"]["secret_content_serialized"], false);
+    assert_eq!(
+        phase2["api_allowlist"]["bybit_live_execution_protected"],
+        true
+    );
     assert_eq!(phase2["policy_prerequisites"]["bundle_accepted"], true);
     assert_eq!(
         phase2["policy_prerequisites"]["flags"]["redaction_suite_passed"],

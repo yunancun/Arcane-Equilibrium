@@ -8,7 +8,7 @@ use super::super::*;
 use openclaw_types::{
     evaluate_broker_operation, AssetLane, Broker, BrokerCapabilityRequest, BrokerEnvironment,
     BrokerOperation, IbkrExternalSurfaceGateV1, IbkrPhase2PolicyBundleV1, InstrumentKind,
-    StockEtfFeatureFlags, StockEtfGateInputs,
+    NonBybitApiAllowlistV1, StockEtfFeatureFlags, StockEtfGateInputs,
 };
 
 pub(in crate::ipc_server) fn handle_stock_etf_ipc(
@@ -97,11 +97,13 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
 }
 
 fn phase2_precontact_summary() -> serde_json::Value {
+    let api_allowlist = NonBybitApiAllowlistV1::accepted_fixture();
+    let api_allowlist_verdict = api_allowlist.validate();
     let policy_bundle = IbkrPhase2PolicyBundleV1::source_template();
     let policy_verdict = policy_bundle.validate();
     let policy_flags = policy_bundle.gate_prerequisite_flags();
     let gate = IbkrExternalSurfaceGateV1 {
-        api_allowlist_present: true,
+        api_allowlist_present: api_allowlist_verdict.accepted,
         redaction_suite_passed: policy_flags.redaction_suite_passed,
         rate_limit_policy_present: policy_flags.rate_limit_policy_present,
         audit_event_policy_present: policy_flags.audit_event_policy_present,
@@ -118,6 +120,18 @@ fn phase2_precontact_summary() -> serde_json::Value {
             "ibkr_contact_allowed": gate_verdict.ibkr_contact_allowed,
             "blockers": gate_verdict.blockers,
             "ibkr_call_performed": gate.ibkr_call_performed,
+        },
+        "api_allowlist": {
+            "contract_id": api_allowlist.contract_id,
+            "source_version": api_allowlist.source_version,
+            "accepted": api_allowlist_verdict.accepted,
+            "blockers": api_allowlist_verdict.blockers,
+            "read_action_count": api_allowlist.read_actions.len(),
+            "paper_write_action_count": api_allowlist.paper_write_actions.len(),
+            "denied_action_count": api_allowlist.denied_actions.len(),
+            "ibkr_contact_performed": api_allowlist.ibkr_contact_performed,
+            "secret_content_serialized": api_allowlist.secret_content_serialized,
+            "bybit_live_execution_protected": api_allowlist.bybit_live_execution_protected,
         },
         "policy_prerequisites": {
             "bundle_accepted": policy_verdict.accepted,
