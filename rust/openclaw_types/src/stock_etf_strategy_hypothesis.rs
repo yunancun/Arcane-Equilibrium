@@ -17,6 +17,7 @@ pub const STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID: &str =
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StockEtfStrategyHypothesisV1 {
     pub contract_id: String,
+    pub source_version: u32,
     pub asset_lane: AssetLane,
     pub broker: Broker,
     pub hypothesis_id: String,
@@ -58,6 +59,7 @@ impl Default for StockEtfStrategyHypothesisV1 {
     fn default() -> Self {
         Self {
             contract_id: String::new(),
+            source_version: 0,
             asset_lane: AssetLane::CryptoPerp,
             broker: Broker::Bybit,
             hypothesis_id: String::new(),
@@ -101,6 +103,7 @@ impl StockEtfStrategyHypothesisV1 {
     pub fn accepted_fixture() -> Self {
         Self {
             contract_id: STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID.to_string(),
+            source_version: 1,
             asset_lane: AssetLane::StockEtfCash,
             broker: Broker::Ibkr,
             hypothesis_id: "stock_etf_daily_momentum_us_large_100_v1".to_string(),
@@ -145,6 +148,9 @@ impl StockEtfStrategyHypothesisV1 {
 
         if self.contract_id != STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID {
             blockers.push(Blocker::ContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
         }
         if self.asset_lane != AssetLane::StockEtfCash {
             blockers.push(Blocker::WrongAssetLane);
@@ -233,6 +239,7 @@ impl<B> StockEtfStrategyHypothesisVerdict<B> {
 #[serde(rename_all = "snake_case")]
 pub enum StockEtfStrategyHypothesisBlocker {
     ContractIdMismatch,
+    SourceVersionMismatch,
     WrongAssetLane,
     WrongBroker,
     HypothesisIdInvalid,

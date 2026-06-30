@@ -16,6 +16,7 @@ use crate::stock_etf_phase3_evidence::STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID;
 use crate::stock_etf_pit_universe::STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID;
 use crate::stock_etf_risk_policy::STOCK_ETF_RISK_POLICY_CONTRACT_ID;
 use crate::stock_etf_scorecard_inputs::STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID;
+use crate::stock_etf_strategy_hypothesis::STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID;
 
 pub const STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID: &str = "lane_scoped_ipc_v1";
 pub const STOCK_ETF_SCOPED_AUTHORIZATION_CONTRACT_ID: &str = "stock_etf_scoped_authorization_v1";
@@ -118,7 +119,7 @@ const PREVIEW_GATES: &[&str] = &[
 const SHADOW_GATES: &[&str] = &[
     STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
     STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
-    "stock_etf_strategy_hypothesis_contract_v1",
+    STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
     STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID,
     "audit.asset_lane_events_v1",
 ];

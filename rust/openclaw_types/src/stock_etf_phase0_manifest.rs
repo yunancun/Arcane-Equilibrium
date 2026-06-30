@@ -20,6 +20,7 @@ use crate::stock_etf_scorecard_inputs::{
     STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID, STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID,
     STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
 };
+use crate::stock_etf_strategy_hypothesis::STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID;
 use crate::stock_etf_tiny_live_eligibility::STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID;
 
 pub const STOCK_ETF_PHASE0_MANIFEST_SCHEMA: &str = "stock_etf_phase0_contract_packet_manifest_v1";
@@ -39,7 +40,7 @@ const REQUIRED_CONTRACTS: &[&str] = &[
     "non_bybit_api_allowlist_v1",
     STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID,
     STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
-    "stock_etf_strategy_hypothesis_contract_v1",
+    STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
     "stock_etf_risk_policy_v1",
     "stock_etf_reference_data_sources_v1",
     "ibkr_api_session_topology_v1",

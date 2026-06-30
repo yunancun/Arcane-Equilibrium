@@ -24,6 +24,10 @@ fn default_strategy_hypothesis_blocks_before_evidence_clock_can_use_hash() {
     ));
     assert!(has(
         &verdict.blockers,
+        StockEtfStrategyHypothesisBlocker::SourceVersionMismatch
+    ));
+    assert!(has(
+        &verdict.blockers,
         StockEtfStrategyHypothesisBlocker::WrongAssetLane
     ));
     assert!(has(
@@ -58,6 +62,7 @@ fn accepted_fixture_is_preregistered_paper_shadow_hypothesis_without_authority()
         hypothesis.contract_id,
         STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID
     );
+    assert_eq!(hypothesis.source_version, 1);
     assert_eq!(hypothesis.asset_lane, AssetLane::StockEtfCash);
     assert_eq!(hypothesis.broker, Broker::Ibkr);
     assert!(hypothesis.paper_shadow_only);
@@ -67,6 +72,25 @@ fn accepted_fixture_is_preregistered_paper_shadow_hypothesis_without_authority()
     assert!(hypothesis.ibkr_live_denied);
     assert!(!hypothesis.ibkr_contact_performed);
     assert!(!hypothesis.secret_content_serialized);
+}
+
+#[test]
+fn strategy_hypothesis_requires_exact_contract_id_and_source_version() {
+    let hypothesis = StockEtfStrategyHypothesisV1 {
+        contract_id: "stock_etf_strategy_hypothesis_contract_v1_fixture".to_string(),
+        source_version: 2,
+        ..StockEtfStrategyHypothesisV1::accepted_fixture()
+    };
+    let blockers = hypothesis.validate().blockers;
+
+    assert!(has(
+        &blockers,
+        StockEtfStrategyHypothesisBlocker::ContractIdMismatch
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfStrategyHypothesisBlocker::SourceVersionMismatch
+    ));
 }
 
 #[test]
@@ -248,6 +272,8 @@ fn blocked_template_is_parseable_and_secret_free() {
     let parsed: StockEtfStrategyHypothesisV1 =
         toml::from_str(&raw).expect("strategy hypothesis template parses");
 
+    assert_eq!(parsed.contract_id, "");
+    assert_eq!(parsed.source_version, 0);
     assert_eq!(parsed.asset_lane, AssetLane::CryptoPerp);
     assert_eq!(parsed.broker, Broker::Bybit);
     assert!(!parsed.validate().accepted);

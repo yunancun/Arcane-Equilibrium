@@ -524,3 +524,9 @@ Do not paste long reports or stable architecture into TODO.
 - Source checkpoint hardens `stock_etf_pit_universe_contract_v1`: PIT universe artifacts now require exact `contract_id == stock_etf_pit_universe_contract_v1` plus `source_version=1`.
 - The Phase 0 manifest validator, broker capability shadow/scorecard gates, and `lane_scoped_ipc_v1` preview/shadow gates consume the shared PIT universe constant; the blocked template exposes `source_version=0`; regression tests reject fixture-like PIT universe ids and wrong source versions.
 - Verification passed: focused linked openclaw_types tests `30 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `182` integration/acceptance + `0` doc-tests. This grants no IBKR contact, connector runtime, market-data collection, IPC runtime, paper order, evidence clock, scorecard writer, DB apply, GUI authority, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Strategy Hypothesis Hardening
+
+- Source checkpoint hardens `stock_etf_strategy_hypothesis_contract_v1`: strategy hypothesis artifacts now require exact `contract_id == stock_etf_strategy_hypothesis_contract_v1` plus `source_version=1`.
+- The Phase 0 manifest validator, broker capability shadow/scorecard gates, and `lane_scoped_ipc_v1` shadow gates consume the shared strategy hypothesis constant; the blocked template exposes `source_version=0`; regression tests reject fixture-like strategy ids and wrong source versions.
+- Verification passed: focused linked openclaw_types tests `30 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `183` integration/acceptance + `0` doc-tests. This grants no IBKR contact, connector runtime, market-data collection, IPC runtime, paper order, evidence clock, scorecard writer, DB apply, GUI authority, profitability claim, tiny-live, live, or Bybit behavior change.
