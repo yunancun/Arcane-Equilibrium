@@ -589,47 +589,6 @@ function paperFallback(reason) {
   };
 }
 
-function reconciliationFallback(reason) {
-  const why = reason || 'api_unavailable';
-  return {
-    reconciliation_status_state: 'degraded',
-    phase: 'phase3_reconciliation_status_source_fixture',
-    phase3_started: false,
-    gui_authority: 'display_only',
-    matching: {
-      lifecycle_event_accepted: false,
-      shadow_fill_model_accepted: false,
-      lifecycle_blockers: [why],
-      shadow_blockers: [why],
-      append_only_event_ready: false,
-      paper_order_id_present: false,
-      broker_order_id_present: false,
-      execution_id_present: false,
-      commission_report_id_present: false,
-      shadow_signal_id_present: false,
-      shadow_fill_price_present: false,
-      paper_shadow_link_present: false,
-      divergence_bps: 0,
-      divergence_threshold_bps: 0,
-      divergence_within_threshold: false,
-      unmatched_paper_fill_count: 0,
-      unmatched_shadow_fill_count: 0,
-      reconciliation_run_id_present: false,
-      raw_artifact_hash_present: false,
-      redacted_summary_hash_present: false,
-    },
-    paper_shadow_reconciliation_started: false,
-    paper_orders_ready: false,
-    paper_fills_ready: false,
-    shadow_fills_ready: false,
-    scorecard_writer_started: false,
-    db_apply_performed: false,
-    contract_violations: [],
-    degraded: true,
-    reason: why,
-  };
-}
-
 function scorecardFallback(reason) {
   const why = reason || 'api_unavailable';
   return {
@@ -1571,69 +1530,6 @@ function renderPaperStatus(data) {
     kvRow('reason', '<span class="se-code">' + ocEsc(status.reason || '-') + '</span>'),
   ].join('');
   document.getElementById('se-paper-panel').classList.toggle(
-    'se-bad-line',
-    (status.contract_violations || []).length > 0
-  );
-}
-
-function renderReconciliationStatus(data) {
-  const status = data || reconciliationFallback('api_unavailable');
-  const matching = status.matching || {};
-  const state = status.reconciliation_status_state || 'blocked';
-  const reconciliationBlockers = []
-    .concat(matching.lifecycle_blockers || [])
-    .concat(matching.shadow_blockers || [])
-    .concat(status.phase2_gate_blockers || [])
-    .concat(status.contract_violations || []);
-  document.getElementById('se-reconciliation-state').innerHTML = textChip(state);
-  document.getElementById('se-reconciliation-sub').textContent =
-    matching.paper_shadow_link_present ? 'paper/shadow linked' : 'reconciliation blocked';
-  setChip('se-reconciliation-status', state, toneFor(state));
-  document.getElementById('se-reconciliation-body').innerHTML = [
-    kvRow('phase', textChip(status.phase || '-')),
-    kvRow('phase3_started', boolChip(status.phase3_started, true)),
-    kvRow('reconciliation_started', boolChip(status.paper_shadow_reconciliation_started, true)),
-    kvRow('paper_orders_ready', boolChip(status.paper_orders_ready, true)),
-    kvRow('paper_fills_ready', boolChip(status.paper_fills_ready, true)),
-    kvRow('shadow_fills_ready', boolChip(status.shadow_fills_ready, true)),
-    kvRow('lifecycle_event_accepted', boolChip(matching.lifecycle_event_accepted, true)),
-    kvRow('shadow_fill_model_accepted', boolChip(matching.shadow_fill_model_accepted, true)),
-    kvRow('append_only_event_ready', boolChip(matching.append_only_event_ready, true)),
-    kvRow('paper_order_id_present', boolChip(matching.paper_order_id_present, true)),
-    kvRow('broker_order_id_present', boolChip(matching.broker_order_id_present, true)),
-    kvRow('execution_id_present', boolChip(matching.execution_id_present, true)),
-    kvRow('commission_report_id_present', boolChip(matching.commission_report_id_present, true)),
-    kvRow('shadow_signal_id_present', boolChip(matching.shadow_signal_id_present, true)),
-    kvRow('shadow_fill_price_present', boolChip(matching.shadow_fill_price_present, true)),
-    kvRow('paper_shadow_link_present', boolChip(matching.paper_shadow_link_present, true)),
-    kvRow(
-      'divergence',
-      '<span class="se-code">' +
-        ocEsc(
-          'bps=' + String(matching.divergence_bps || 0) +
-          ' threshold=' + String(matching.divergence_threshold_bps || 0) +
-          ' within=' + String(matching.divergence_within_threshold === true)
-        ) +
-      '</span>'
-    ),
-    kvRow(
-      'unmatched_counts',
-      '<span class="se-code">' +
-        ocEsc(
-          'paper=' + String(matching.unmatched_paper_fill_count || 0) +
-          ' shadow=' + String(matching.unmatched_shadow_fill_count || 0)
-        ) +
-      '</span>'
-    ),
-    kvRow('reconciliation_run_id_present', boolChip(matching.reconciliation_run_id_present, true)),
-    kvRow('raw_artifact_hash_present', boolChip(matching.raw_artifact_hash_present, true)),
-    kvRow('redacted_summary_hash_present', boolChip(matching.redacted_summary_hash_present, true)),
-    kvRow('scorecard_writer_started', boolChip(status.scorecard_writer_started, true)),
-    kvRow('db_apply_performed', boolChip(status.db_apply_performed, true)),
-    kvRow('blockers', chipList(reconciliationBlockers, 'none')),
-    kvRow('reason', '<span class="se-code">' + ocEsc(status.reason || '-') + '</span>'),
-  ].join('');
-  document.getElementById('se-reconciliation-panel').classList.toggle(
     'se-bad-line',
     (status.contract_violations || []).length > 0
   );

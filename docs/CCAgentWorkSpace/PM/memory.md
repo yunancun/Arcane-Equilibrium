@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-30 IBKR Stock/ETF Reconciliation GUI Contract Display
+
+- PM split Stock/ETF reconciliation rendering into `tab-stock-etf-reconciliation.js`; main `tab-stock-etf.js` is now 1847 lines, below the 2000-line cap.
+- The GUI now displays `stock_etf_paper_shadow_reconciliation_v1` contract id/acceptance/blockers, paper-shadow link hash, imported/synthetic markers, and reconciliation side-effect flags; the new JS is covered by route/static and no-write guards.
+- Verification passed: Node syntax, GUI line counts, focused route/static/no-write `13`, and full Stock/ETF Python route/static `90`. This grants no IBKR contact, connector runtime, fill import, shadow fill generation, reconciliation/scorecard writer, DB apply, tiny-live, live, or Bybit behavior change.
+
 ## 2026-06-30 IBKR Stock/ETF Paper-Shadow Reconciliation Contract
 
 - PM added source-only `stock_etf_paper_shadow_reconciliation_v1` for paper lifecycle/fill facts, synthetic shadow fill linkage, frozen divergence thresholds, and unmatched-fill reconciliation checks.

@@ -454,6 +454,37 @@ start、fill import、shadow fill generation、DB apply、Postgres dry-run、pap
 replace、evidence clock、scorecard writer、tiny-live、live、Linux runtime sync/restart 或
 Bybit behavior change。
 
+## 2026-06-30 PM Session Checkpoint — Reconciliation GUI Contract Display
+
+PM 已在本 session 追加 display-only checkpoint：Stock/ETF Reconciliation GUI
+contract display hardening。這是 GUI 抽檔與顯示欄位同步，不是 runtime reconciliation。
+
+已完成：
+
+- 新增 `/static/tab-stock-etf-reconciliation.js`，從主 `tab-stock-etf.js` 抽出
+  reconciliation fallback/render；主 JS 從 1951 行降到 1847 行。
+- Reconciliation panel 顯示 `stock_etf_paper_shadow_reconciliation_v1` 的 expected/
+  actual contract id、accepted/blockers、contract reconciliation run id、paper-shadow
+  link hash、paper fill imported、shadow fill synthetic，以及 reconciliation writer /
+  IBKR contact / connector runtime / secret serialization / fill import / shadow fill
+  generation flags。
+- HTML 載入新檔；static route contract test 與 Stock/ETF no-write static guard
+  都把新檔納入掃描。
+
+Verification：
+
+- Node syntax check PASS for `tab-stock-etf-reconciliation.js` and main
+  `tab-stock-etf.js`。
+- GUI line counts PASS：HTML 396、main JS 1847、reconciliation JS 177、phase0 JS 149、
+  release-packet JS 138、disable-cleanup JS 132。
+- Focused route/static/no-write pytest `13 passed`。
+- Full Stock/ETF Python route/static suite `90 passed`。
+
+PM 判定：checkpoint 可接受，但仍不是 runtime reconciliation approval。未批准 IBKR
+contact、secret、connector runtime、reconciliation writer、fill import、shadow fill
+generation、scorecard writer、DB apply、paper order/cancel/replace、evidence clock、
+tiny-live、live、Linux runtime sync/restart 或 Bybit behavior change。
+
 ## 2026-06-30 PM Session Checkpoint — Shadow Signal Request Contract + IPC Binding
 
 PM 已在本 session 追加 source-only checkpoint：

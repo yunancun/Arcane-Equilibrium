@@ -147,6 +147,9 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     disable_cleanup_js = (STATIC_DIR / "tab-stock-etf-disable-cleanup.js").read_text(
         encoding="utf-8"
     )
+    reconciliation_js = (STATIC_DIR / "tab-stock-etf-reconciliation.js").read_text(
+        encoding="utf-8"
+    )
     js_source = (STATIC_DIR / "tab-stock-etf.js").read_text(encoding="utf-8")
     source = (
         html_source
@@ -156,6 +159,8 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
         + release_packet_js
         + "\n"
         + disable_cleanup_js
+        + "\n"
+        + reconciliation_js
         + "\n"
         + js_source
     )
@@ -178,6 +183,7 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     assert "tab-stock-etf-phase0.js" in html_source
     assert "tab-stock-etf-release-packet.js" in html_source
     assert "tab-stock-etf-disable-cleanup.js" in html_source
+    assert "tab-stock-etf-reconciliation.js" in html_source
     assert "tab-stock-etf.js" in html_source
     assert "se-evidence-status" in source
     assert "se-evidence-body" in source
@@ -195,6 +201,12 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     assert "se-paper-body" in source
     assert "se-reconciliation-status" in source
     assert "se-reconciliation-body" in source
+    assert "stock_etf_paper_shadow_reconciliation_v1" in source
+    assert "expected_reconciliation_contract_id" in source
+    assert "paper_shadow_link_hash_present" in source
+    assert "reconciliation_writer_started" in source
+    assert "fill_import_performed" in source
+    assert "shadow_fill_generated" in source
     assert "se-scorecard-status" in source
     assert "se-scorecard-body" in source
     assert "se-launch-status" in source

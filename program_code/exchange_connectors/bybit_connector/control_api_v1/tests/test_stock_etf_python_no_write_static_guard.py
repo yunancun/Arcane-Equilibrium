@@ -87,6 +87,7 @@ def _candidate_stock_etf_static_gui_files() -> list[Path]:
         static_dir / "tab-stock-etf-phase0.js",
         static_dir / "tab-stock-etf-release-packet.js",
         static_dir / "tab-stock-etf-disable-cleanup.js",
+        static_dir / "tab-stock-etf-reconciliation.js",
         static_dir / "tab-stock-etf.js",
     }
     return sorted(path for path in files if path.exists())

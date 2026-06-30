@@ -849,3 +849,9 @@ Do not paste long reports or stable architecture into TODO.
 - Phase 3 source-only checkpoint adds `stock_etf_paper_shadow_reconciliation_v1`, a typed contract linking paper lifecycle/fill facts, synthetic shadow-fill facts, frozen divergence threshold, and zero unmatched-fill checks before any reconciliation writer can exist.
 - Phase0 manifest source, repository manifest JSON, FastAPI Phase0 count, reconciliation normalizers/tests, settings README, and Phase0 packet spec now include 32 contracts.
 - Verification passed: reconciliation acceptance `5 passed`; Phase0 manifest `6 passed`; FastAPI Phase0/reconciliation focused `9 passed`; engine reconciliation focused `1 passed`; engine `stock_etf` filter `27 passed`; workspace `cargo check` PASS; scoped rustfmt check PASS; `git diff --check` PASS. This grants no IBKR contact, connector runtime, secret access/creation, fill import, shadow fill generation, reconciliation/scorecard writer, DB apply, paper order/cancel/replace, evidence clock, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Reconciliation GUI Contract Display
+
+- Display-only checkpoint splits Stock/ETF reconciliation rendering into `tab-stock-etf-reconciliation.js`, keeping main `tab-stock-etf.js` at 1847 lines and under the hard cap.
+- The Reconciliation panel now renders `stock_etf_paper_shadow_reconciliation_v1` id/acceptance/blockers, paper-shadow link hash, imported/synthetic markers, and side-effect flags; the new JS is included in route/static and no-write guards.
+- Verification passed: Node syntax PASS, GUI line counts PASS, focused route/static/no-write `13 passed`, full Stock/ETF Python route/static `90 passed`. This grants no IBKR contact, connector runtime, fill import, shadow fill generation, reconciliation/scorecard writer, DB apply, tiny-live, live, or Bybit behavior change.
