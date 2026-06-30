@@ -908,3 +908,28 @@ persistence approval。未批准 IBKR contact、IBKR SDK import、socket/HTTP、
 connector runtime、Phase 1/2/3/4/5 runtime start、paper order/cancel/replace、
 fill import、scorecard writer、DB apply、evidence clock、tiny-live、live、Linux runtime
 sync/restart 或 Bybit behavior change。
+
+## 2026-06-30 PM Session Checkpoint — ADR/Register Lineage Catch-up
+
+PM 已補治理索引與 ADR/AMD，使 governance source of truth 反映本 session 最新
+source gates。
+
+已完成：
+
+- `SPECIFICATION_REGISTER.md` Last Updated 改為 lineage + connector-skeleton
+  hardening。
+- 新增 ADR-0048 Addendum E：scorecard derivation/verdict/reconciliation/tiny-live
+  lineage。
+- 新增 ADR-0048 Addendum F：IBKR connector skeleton inert boundary。
+- ADR-0048 與 AMD-2026-06-29-01 同步補明 tiny-live discussion lineage 與 Python
+  skeleton denied paths。
+
+Verification：
+
+- Register/ADR/AMD `rg` check PASS。
+- `git diff --check` PASS。
+
+PM 判定：checkpoint 可接受，但只是 governance catch-up。未批准 IBKR contact、
+IBKR SDK import、socket/HTTP、secret、connector runtime、Phase 1/2/3/4/5 runtime
+start、paper order/cancel/replace、fill import、scorecard writer、DB apply、
+evidence clock、tiny-live、live、Linux runtime sync/restart 或 Bybit behavior change。

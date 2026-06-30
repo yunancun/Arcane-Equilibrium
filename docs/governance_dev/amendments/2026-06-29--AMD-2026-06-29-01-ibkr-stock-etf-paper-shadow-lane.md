@@ -58,6 +58,8 @@ If a live IBKR credential material is found, healthcheck must fail closed and em
 
 Rust remains the trading, risk, strategy-config, and execution authority. Python/FastAPI may expose read-only status, fixtures, and a thin Rust IPC caller only after the accepted lane-scoped IPC contract exists. Python must not own broker order truth, retry broker writes, or expose direct `place_order`, `cancel_order`, or `replace_order` APIs.
 
+The current `program_code/broker_connectors/ibkr_connector/` package is an inert source-only skeleton. It may model blocked readiness/previews and fixtures only; it must not import IBKR SDKs, open sockets or HTTP sessions, read secrets, expose broker write methods, import fills, write DB rows, or imply connector runtime approval.
+
 ## Evidence Boundary
 
 IBKR paper fills and shadow fills are evidence inputs, not live proof. Promotion-like language requires:
@@ -71,6 +73,8 @@ IBKR paper fills and shadow fills are evidence inputs, not live proof. Promotion
 - paper-vs-shadow divergence checks
 
 Positive paper/shadow evidence may only trigger a new `tiny_live_adr_eligibility_v1` discussion. It cannot auto-promote to tiny-live or live.
+
+That future discussion gate must carry scorecard derivation, scorecard verdict, scorecard manifest, paper-shadow reconciliation, DQ/statistical preregistration, and QC/MIT/QA lineage. Passing it remains discussion-only and cannot authorize connector runtime, tiny-live, live, account-management writes, or secret creation.
 
 ## Required Source-of-Truth Updates
 
