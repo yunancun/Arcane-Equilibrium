@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::stock_etf_audit_events::STOCK_ETF_ASSET_LANE_EVENTS_CONTRACT_ID;
 use crate::stock_etf_gui_lane_contract::STOCK_ETF_GUI_LANE_CONTRACT_ID;
 use crate::stock_etf_lane::{AssetLane, Broker};
 use crate::stock_etf_phase3_evidence::STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID;
@@ -43,7 +44,7 @@ const REQUIRED_CONTRACTS: &[&str] = &[
     "lane_scoped_ipc_v1",
     "ibkr_paper_order_lifecycle_v1",
     "broker_lifecycle_event_log_v1",
-    "audit.asset_lane_events_v1",
+    STOCK_ETF_ASSET_LANE_EVENTS_CONTRACT_ID,
     "stock_etf_db_evidence_ddl_v1",
     "stock_market_data_provenance_v1",
     BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID,

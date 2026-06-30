@@ -11,6 +11,8 @@ use crate::stock_etf_lane::{
     AssetLane, Broker, BrokerEnvironment, BrokerOperation, StockEtfDenialReason,
 };
 
+pub const STOCK_ETF_ASSET_LANE_EVENTS_CONTRACT_ID: &str = "audit.asset_lane_events_v1";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StockEtfAssetLaneEventKind {
@@ -36,6 +38,7 @@ impl Default for StockEtfAssetLaneEventKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StockEtfAssetLaneEventV1 {
     pub schema_version: String,
+    pub source_version: u32,
     pub event_id: String,
     pub event_kind: StockEtfAssetLaneEventKind,
     pub sequence_number: u64,
@@ -68,7 +71,8 @@ pub struct StockEtfAssetLaneEventV1 {
 impl Default for StockEtfAssetLaneEventV1 {
     fn default() -> Self {
         Self {
-            schema_version: "audit.asset_lane_events_v1".to_string(),
+            schema_version: STOCK_ETF_ASSET_LANE_EVENTS_CONTRACT_ID.to_string(),
+            source_version: 0,
             event_id: String::new(),
             event_kind: StockEtfAssetLaneEventKind::Unknown,
             sequence_number: 0,
@@ -103,6 +107,7 @@ impl Default for StockEtfAssetLaneEventV1 {
 impl StockEtfAssetLaneEventV1 {
     pub fn accepted_genesis_fixture() -> Self {
         Self {
+            source_version: 1,
             event_id: "stock-etf-audit-event-0001".to_string(),
             event_kind: StockEtfAssetLaneEventKind::GateCheck,
             sequence_number: 1,
@@ -133,6 +138,7 @@ impl StockEtfAssetLaneEventV1 {
 
     pub fn accepted_chained_fixture() -> Self {
         Self {
+            source_version: 1,
             event_id: "stock-etf-audit-event-0002".to_string(),
             event_kind: StockEtfAssetLaneEventKind::ScorecardInputRef,
             sequence_number: 2,
@@ -165,8 +171,11 @@ impl StockEtfAssetLaneEventV1 {
         use StockEtfAssetLaneEventBlocker as Blocker;
 
         let mut blockers = Vec::new();
-        if self.schema_version != "audit.asset_lane_events_v1" {
+        if self.schema_version != STOCK_ETF_ASSET_LANE_EVENTS_CONTRACT_ID {
             blockers.push(Blocker::SchemaVersionMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
         }
         if self.event_id.trim().is_empty() {
             blockers.push(Blocker::EventIdMissing);
@@ -281,6 +290,7 @@ impl<B> StockEtfAssetLaneEventVerdict<B> {
 #[serde(rename_all = "snake_case")]
 pub enum StockEtfAssetLaneEventBlocker {
     SchemaVersionMismatch,
+    SourceVersionMismatch,
     EventIdMissing,
     EventKindUnknown,
     SequenceNumberMissing,

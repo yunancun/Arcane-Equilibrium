@@ -4,6 +4,7 @@
 # secrets, apply migrations, or authorize paper/tiny-live/live.
 
 schema_version = "audit.asset_lane_events_v1"
+source_version = 0
 event_id = ""
 event_kind = "unknown"
 sequence_number = 0

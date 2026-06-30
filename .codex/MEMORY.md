@@ -494,3 +494,9 @@ Do not paste long reports or stable architecture into TODO.
 - Source checkpoint hardens `gui_lane_contract_v1`: GUI lane contract artifacts now require exact `contract_id == gui_lane_contract_v1` plus `source_version=1`.
 - The Phase 0 manifest validator consumes the shared GUI lane contract constant; the blocked template exposes `source_version=0`; regression tests reject the old `_fixture` id and wrong source versions.
 - Verification passed: focused linked openclaw_types tests `14 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `177` integration/acceptance + `0` doc-tests. This grants no GUI runtime authority, IBKR contact, connector runtime, DB apply, evidence clock, paper order, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Asset-Lane Audit Event Hardening
+
+- Source checkpoint hardens `audit.asset_lane_events_v1`: asset-lane event references now require exact `schema_version == audit.asset_lane_events_v1` plus `source_version=1`.
+- The Phase 0 manifest validator consumes the shared audit event contract constant; the blocked template exposes `source_version=0`; regression tests reject fixture-like schema ids and wrong source versions.
+- Verification passed: focused linked openclaw_types tests `15 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `178` integration/acceptance + `0` doc-tests. This grants no audit writer, DB apply, IBKR contact, connector runtime, evidence clock, paper order, GUI authority, tiny-live, live, or Bybit behavior change.
