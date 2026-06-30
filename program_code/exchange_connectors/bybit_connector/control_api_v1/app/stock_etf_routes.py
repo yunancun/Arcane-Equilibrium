@@ -19,6 +19,7 @@ from .ipc_client import EngineIPCClient
 from .stock_etf_status_normalizers import (
     _NO_STORE_HEADERS,
     _normalize_account_status,
+    _normalize_data_foundation_status,
     _normalize_evidence_status,
     _normalize_lane_status,
     _normalize_launch_status,
@@ -40,6 +41,7 @@ stock_etf_router = APIRouter(
 _IPC_CLIENT: EngineIPCClient | None = None
 _LANE_STATUS_METHOD = "stock_etf.get_lane_status"
 _READINESS_METHOD = "stock_etf.get_readiness"
+_DATA_FOUNDATION_STATUS_METHOD = "stock_etf.get_data_foundation_status"
 _ACCOUNT_STATUS_METHOD = "stock_etf.get_account_status"
 _EVIDENCE_STATUS_METHOD = "stock_etf.get_evidence_status"
 _UNIVERSE_STATUS_METHOD = "stock_etf.get_universe_status"
@@ -106,6 +108,19 @@ async def _query_stock_etf_account_status(
         raw = await ipc.call(_ACCOUNT_STATUS_METHOD, params={})
     except Exception as exc:
         logger.warning("stock_etf: %s failed: %s", _ACCOUNT_STATUS_METHOD, exc)
+        return ({}, f"ipc_error:{type(exc).__name__}")
+    return (raw if isinstance(raw, dict) else {}, None)
+
+
+async def _query_stock_etf_data_foundation_status(
+    ipc: EngineIPCClient | None,
+) -> tuple[dict[str, Any], str | None]:
+    if ipc is None:
+        return ({}, "ipc_unavailable")
+    try:
+        raw = await ipc.call(_DATA_FOUNDATION_STATUS_METHOD, params={})
+    except Exception as exc:
+        logger.warning("stock_etf: %s failed: %s", _DATA_FOUNDATION_STATUS_METHOD, exc)
         return ({}, f"ipc_error:{type(exc).__name__}")
     return (raw if isinstance(raw, dict) else {}, None)
 
@@ -234,6 +249,24 @@ async def get_stock_etf_readiness(
         "data": _normalize_readiness(raw, reason),
         "is_simulated": False,
         "data_category": "stock_etf_readiness",
+    }
+
+
+@stock_etf_router.get("/data-foundation-status")
+async def get_stock_etf_data_foundation_status(
+    response: Response,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    """Read-only Stock/ETF instrument/reference-data foundation status surface."""
+    del actor
+    _apply_no_store_headers(response)
+    ipc = await _get_ipc()
+    raw, reason = await _query_stock_etf_data_foundation_status(ipc)
+    return {
+        "ok": True,
+        "data": _normalize_data_foundation_status(raw, reason),
+        "is_simulated": False,
+        "data_category": "stock_etf_data_foundation_status",
     }
 
 

@@ -453,6 +453,119 @@ async fn stock_etf_universe_status_is_blocked_source_fixture_without_side_effect
 }
 
 #[tokio::test]
+async fn stock_etf_data_foundation_status_is_blocked_source_fixture_without_side_effects() {
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let req = r#"{"jsonrpc":"2.0","method":"stock_etf.get_data_foundation_status","params":{},"id":4814}"#;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
+    )
+    .await;
+
+    assert!(resp.error.is_none());
+    let result = resp
+        .result
+        .expect("stock_etf data foundation status result");
+    assert_eq!(
+        result["phase"],
+        "phase2_data_foundation_status_source_fixture"
+    );
+    assert_eq!(result["asset_lane"], "stock_etf_cash");
+    assert_eq!(result["broker"], "ibkr");
+    assert_eq!(result["environment"], "paper");
+    assert_eq!(result["data_foundation_status_state"], "blocked");
+    assert_eq!(result["phase2_started"], false);
+    assert_eq!(result["phase3_started"], false);
+    assert_eq!(result["contract_details_request_started"], false);
+    assert_eq!(result["reference_data_collection_started"], false);
+    assert_eq!(result["collector_started"], false);
+    assert_eq!(result["market_data_ingestion_started"], false);
+    assert_eq!(result["connector_runtime_started"], false);
+    assert_eq!(result["db_apply_performed"], false);
+    assert_eq!(result["evidence_clock_started"], false);
+    assert_eq!(result["scorecard_writer_started"], false);
+    assert_eq!(result["ibkr_call_performed"], false);
+    assert_eq!(result["secret_slot_touched"], false);
+    assert_eq!(result["order_routed"], false);
+    assert_eq!(result["bybit_ipc_reused"], false);
+
+    let identity = &result["instrument_identity"];
+    assert_eq!(
+        identity["expected_contract_id"],
+        "instrument_identity_contract_v1"
+    );
+    assert_eq!(identity["contract_id"], "");
+    assert_eq!(identity["source_version"], 0);
+    assert_eq!(identity["accepted"], false);
+    assert!(json_array_contains(
+        &identity["blockers"],
+        "contract_id_mismatch"
+    ));
+    assert!(json_array_contains(
+        &identity["blockers"],
+        "source_version_mismatch"
+    ));
+    assert_eq!(identity["instrument_kind"], "stock");
+    assert_eq!(identity["symbol"], "");
+    assert_eq!(identity["market_calendar_hash_present"], false);
+    assert_eq!(identity["broker_contract_details_hash_present"], false);
+    assert_eq!(identity["instrument_identity_hash_present"], false);
+    assert_eq!(identity["bybit_live_execution_unchanged"], true);
+    assert_eq!(identity["ibkr_live_denied"], true);
+    assert_eq!(identity["margin_short_denied"], true);
+    assert_eq!(identity["options_cfd_denied"], true);
+    assert_eq!(identity["ibkr_contact_performed"], false);
+    assert_eq!(identity["secret_content_serialized"], false);
+
+    let reference = &result["reference_data_sources"];
+    assert_eq!(
+        reference["expected_contract_id"],
+        "stock_etf_reference_data_sources_v1"
+    );
+    assert_eq!(reference["contract_id"], "");
+    assert_eq!(reference["source_version"], 0);
+    assert_eq!(reference["accepted"], false);
+    assert!(json_array_contains(
+        &reference["blockers"],
+        "contract_id_mismatch"
+    ));
+    assert!(json_array_contains(
+        &reference["blockers"],
+        "source_version_mismatch"
+    ));
+    assert_eq!(reference["environment"], "paper");
+    assert_eq!(reference["frozen_for_evidence_clock"], false);
+    assert_eq!(reference["corporate_action_raw_hash_present"], false);
+    assert_eq!(reference["fx_rate_snapshot_hash_present"], false);
+    assert_eq!(reference["commission_schedule_hash_present"], false);
+    assert_eq!(reference["bybit_live_execution_unchanged"], true);
+    assert_eq!(reference["ibkr_contact_performed"], false);
+    assert_eq!(reference["connector_runtime_started"], false);
+    assert_eq!(reference["secret_content_serialized"], false);
+    assert_eq!(reference["live_or_tiny_live_authorized"], false);
+
+    assert_eq!(result["phase2"]["first_ibkr_contact_allowed"], false);
+    assert_eq!(result["phase2"]["connector_enabled"], false);
+}
+
+#[tokio::test]
 async fn stock_etf_shadow_status_is_blocked_source_fixture_without_side_effects() {
     let config = make_test_config();
     let dd = make_test_data_dir();

@@ -639,7 +639,7 @@ lane selector。
 工作順序：
 
 - Phase 4A：default `crypto_perp` lane badge / readiness / status page
-- Phase 4B：stock read-only overview / universe / shadow / evidence / paper /
+- Phase 4B：stock read-only overview / data foundation / universe / shadow / evidence / paper /
   reconciliation / account / scorecard / launch-release status views
 - Phase 4C：完整 login-success lane selector；只能在 route/cache/auth negative tests PASS 後討論
 - disabled CFD surface first slice 不顯示，只保留 fail-closed status / denial tests
@@ -822,7 +822,8 @@ Phase 0 追加 mandatory outputs：
 5. `stock_etf_storage_capacity_v1`：universe size、row volume、retention、compression、
    index budget、query SLO、raw payload hash retention。
 6. `gui_lane_contract_v1`：badge/readiness-first、client lane untrusted、exact
-   display-only GET status endpoints、route/cache/auth negative tests、crypto
+   display-only GET status endpoints（包含 data foundation、account、evidence、
+   universe、shadow、paper、reconciliation、scorecard、launch）、route/cache/auth negative tests、crypto
    regression、disabled CFD/live no-write tests。
 7. `stock_etf_release_packet_v1`：role reports、commands、hashes、screenshots、DQ manifests、
    redaction fixtures、PG logs、scorecard regeneration outputs。

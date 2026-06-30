@@ -2,6 +2,9 @@ from __future__ import annotations
 
 """Public aggregation point for Stock/ETF status normalizers."""
 
+from .stock_etf_data_foundation_normalizers import (
+    _normalize_data_foundation_status,
+)
 from .stock_etf_evidence_normalizers import _normalize_evidence_status
 from .stock_etf_paper_normalizers import _normalize_paper_status
 from .stock_etf_readiness_normalizers import (
