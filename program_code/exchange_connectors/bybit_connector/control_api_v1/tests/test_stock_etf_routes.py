@@ -344,6 +344,9 @@ def test_stock_etf_router_registered_in_main_app() -> None:
 def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     source = (STATIC_DIR / "tab-stock-etf.html").read_text(encoding="utf-8")
     assert "/api/v1/stock-etf/readiness" in source
+    assert "api_allowlist" in source
+    assert "se-api-allowlist-status" in source
+    assert "se-api-allowlist-body" in source
     assert "ocPost(" not in source
     assert "method: 'POST'" not in source
     assert "method: \"POST\"" not in source
