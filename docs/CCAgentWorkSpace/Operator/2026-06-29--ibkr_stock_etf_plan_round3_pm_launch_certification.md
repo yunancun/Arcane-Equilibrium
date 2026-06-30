@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 71 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 72 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -1371,6 +1371,37 @@ Verification 已過：
 - `py_compile`：PASS
 - Route/no-write focused tests：`24 passed`
 - Full Stock/ETF FastAPI/static：`105 passed`
+- IBKR timeline + trace-title structure guard：`2 passed`
+- `git diff --check`：PASS
+
+邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 client input、沒有 IBKR
+contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation、沒有
+connector runtime、沒有 read probe execution、沒有 paper order/cancel/replace、沒有 fill
+import、沒有 evidence writer、沒有 DB apply、沒有 evidence clock、沒有 tiny-live/live
+authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — IBKR Connector Preview Payload Guard
+
+這次不是 IBKR contact、不是 connector runtime、不是 read probe，也不是 paper/fill
+writer。變更只收緊 inert Python connector skeleton 的 preview payload：
+
+- `IbkrReadOnlyClient.connection_plan()` 現在和其他 skeleton preview 一樣明確
+  fail-closed：`surface_id`、`accepted=false`、`status=blocked_source_only`、
+  `phase2_gate_not_accepted`、`connection_plan_blocked`。
+- 新增 exact payload-shape regression，覆蓋 connection plan、readiness、account
+  snapshot、market data、contract details、paper lifecycle、fill import 和 static
+  fixture previews。
+- 測試固定所有 preview payload 的 no-network、no-secret、no-paper-channel、no-live、
+  no-write、no-DB-apply、no-Bybit-reuse posture。
+- 這讓未來 connector 實作前的 source-only skeleton 不會被 display/API 消費者誤判為
+  已可連線或可操作。
+
+Verification 已過：
+
+- Python compile：PASS
+- Connector skeleton focused tests：`5 passed`
+- Python no-write static guard：`17 passed`
+- Full Stock/ETF FastAPI/static：`113 passed`
 - IBKR timeline + trace-title structure guard：`2 passed`
 - `git diff --check`：PASS
 

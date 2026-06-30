@@ -2111,7 +2111,7 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 
 新增 checkpoint：
 
-- 主計畫 PM session checkpoint 現在從 14 到 71 連續遞增，無重複編號。
+- 主計畫 PM session checkpoint 現在從 14 到 72 連續遞增，無重複編號。
 - 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
   lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
   connector skeleton / readonly-probe / broker read gate / policy display / operation
@@ -3247,6 +3247,51 @@ sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
 註：`cargo fmt --manifest-path rust/Cargo.toml --all -- --check` 仍會因既有、非本
 checkpoint 的 Rust workspace formatting drift 失敗；本 checkpoint 已用 file-scoped
 `rustfmt --check` 驗證修改檔案。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 72. 2026-07-01 PM session source checkpoint：IBKR Connector Preview Payload Guard
+
+本 checkpoint 收緊 inert IBKR connector skeleton 的 display-only preview payload
+contract。這不是 connector runtime，不導入 IBKR SDK，不開 network，不讀 secret，
+也不新增 FastAPI endpoint 或 IPC method；目標是讓所有 skeleton preview 都明確
+fail-closed，避免後續實作前被誤判為可連線或可操作。
+
+已完成：
+
+- 更新 `IbkrReadOnlyClient.connection_plan()`：
+  - 補上 `surface_id=ibkr_stock_etf_readonly_connector_skeleton_v1`。
+  - 補上 `accepted=false` 與 `status=blocked_source_only`。
+  - 補上 `phase2_gate_not_accepted` 與 `connection_plan_blocked` blockers。
+  - 保留 non-secret loopback descriptor 與所有 no-contact/no-secret/no-paper/no-live/
+    no-Bybit-reuse flags。
+- 更新 `test_stock_etf_ibkr_connector_skeleton.py`：
+  - 新增 exact payload-shape regression。
+  - 覆蓋 connection plan、readiness、account snapshot、market data、contract details、
+    paper lifecycle、fill import 與 static fixture previews。
+  - 固定所有 preview payload 為 secret-free、no network、no paper channel、no live、
+    no broker write、no DB apply、no Bybit path reuse。
+  - 驗證 blockers 去重，且所有 payload 保留 `phase2_gate_not_accepted`。
+- 本 checkpoint 不改 Bybit path、不改 FastAPI Stock/ETF route、不改 Rust IPC、不啟動
+  任何 IBKR/read-probe/paper/fill/evidence runtime。
+
+驗證：
+
+- `python3 -B -m py_compile program_code/broker_connectors/ibkr_connector/readonly_client.py program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_ibkr_connector_skeleton.py`：
+  PASS。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_ibkr_connector_skeleton.py`：
+  `5 passed`。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_python_no_write_static_guard.py`：
+  `17 passed`。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  `113 passed`。
+- `python3 -B -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
+  `2 passed`。
+- `git diff --check`：PASS。
 
 PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
 connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
