@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 45 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 46 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -949,6 +949,31 @@ Verification 已過：
 
 - Stock/ETF route tests：`11 passed`
 - Full Stock/ETF FastAPI/static：`96 passed`
+- IBKR timeline + trace-title structure guard：`2 passed`
+- `git diff --check`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
+access/creation、沒有 connector runtime、沒有 read probe execution、沒有 paper
+order/cancel/replace、沒有 fill import、沒有 evidence writer、沒有 DB apply、沒有
+evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-06-30 Operator Update — GUI Static Endpoint Template Consistency Guard
+
+本 session 已加固 Stock/ETF static GUI bundle 與 GUI lane contract template 的
+endpoint 一致性：
+
+- 新增 static guard：GUI bundle 中出現的 `/api/v1/stock-etf...` endpoint set
+  必須精確等於 `settings/broker/stock_etf_gui_lane_contract.template.toml` 的
+  `*_endpoint` set。
+- 這補上 checkpoint 45 的另一半：OpenAPI ↔ template 已對齊，現在 GUI source ↔
+  template 也對齊。
+- guard 只掃 `tab-stock-etf*` static source，不新增 endpoint、不改 route handler、
+  不啟動 GUI runtime authority。
+
+Verification 已過：
+
+- Python no-write static guard：`5 passed`
+- Full Stock/ETF FastAPI/static：`97 passed`
 - IBKR timeline + trace-title structure guard：`2 passed`
 - `git diff --check`：PASS
 

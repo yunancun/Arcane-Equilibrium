@@ -9,6 +9,7 @@ Python surfaces and future IBKR connector paths, not the existing Bybit modules.
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 
@@ -104,6 +105,15 @@ def _candidate_stock_etf_static_gui_files() -> list[Path]:
     return sorted(path for path in files if path.exists())
 
 
+def _stock_etf_gui_lane_template_endpoints() -> set[str]:
+    template_source = (
+        SRV_ROOT / "settings" / "broker" / "stock_etf_gui_lane_contract.template.toml"
+    ).read_text(encoding="utf-8")
+    return set(
+        re.findall(r'^[a-z0-9_]+_endpoint = "([^"]+)"', template_source, re.MULTILINE)
+    )
+
+
 def test_stock_etf_ibkr_python_surface_has_no_direct_broker_write_api() -> None:
     files = _candidate_stock_etf_ibkr_python_files()
     assert files, "expected at least the display-only stock_etf_routes.py surface"
@@ -156,6 +166,18 @@ def test_stock_etf_ibkr_python_routes_remain_get_only_until_rust_authority_contr
                         )
 
     assert violations == []
+
+
+def test_stock_etf_static_gui_endpoint_set_matches_gui_lane_contract_template() -> None:
+    files = _candidate_stock_etf_static_gui_files()
+    assert files, "expected Stock/ETF static GUI surface"
+
+    combined_source = "\n".join(path.read_text(encoding="utf-8") for path in files)
+    gui_endpoints = set(
+        re.findall(r"/api/v1/stock-etf(?:/[a-z0-9-]+)?", combined_source)
+    )
+
+    assert gui_endpoints == _stock_etf_gui_lane_template_endpoints()
 
 
 def test_stock_etf_static_gui_surface_remains_display_only() -> None:
