@@ -2111,7 +2111,7 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 
 新增 checkpoint：
 
-- 主計畫 PM session checkpoint 現在從 14 到 72 連續遞增，無重複編號。
+- 主計畫 PM session checkpoint 現在從 14 到 73 連續遞增，無重複編號。
 - 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
   lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
   connector skeleton / readonly-probe / broker read gate / policy display / operation
@@ -3289,6 +3289,49 @@ fail-closed，避免後續實作前被誤判為可連線或可操作。
   `17 passed`。
 - `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
   `113 passed`。
+- `python3 -B -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
+  `2 passed`。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 73. 2026-07-01 PM session source checkpoint：IBKR Connector Bybit Import Separation Guard
+
+本 checkpoint 將 IBKR connector skeleton 與 Bybit/control-api runtime 的隔離變成
+source guard。這不是 connector runtime，不改任何 Bybit module，不改 FastAPI route，
+也不新增 endpoint/IPC method；目標是防止未來在
+`program_code/broker_connectors/ibkr_connector/` 直接 import Bybit connector 或
+control-api `app` 模組。
+
+已完成：
+
+- 更新 `test_stock_etf_ibkr_connector_skeleton.py`：
+  - 新增 `test_ibkr_connector_skeleton_does_not_import_bybit_or_control_api_modules`。
+  - 掃描 `program_code/broker_connectors/ibkr_connector/**/*.py`。
+  - 禁止 direct import `app`、`bybit_connector`、
+    `exchange_connectors.bybit_connector`、
+    `program_code.exchange_connectors.bybit_connector`。
+  - 禁止 literal dynamic import 透過 `__import__` 或
+    `importlib.import_module` 載入上述 Bybit/control-api module prefix。
+- Guard 保留 payload 欄位 `bybit_path_reused=false`，但禁止以 import 形式重用
+  Bybit runtime/control-api code path。
+- 本 checkpoint 不改 production behavior、不改 endpoint、不改 IPC method、不改 Bybit
+  path、不啟動任何 IBKR 或 Bybit runtime。
+
+驗證：
+
+- `python3 -B -m py_compile program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_ibkr_connector_skeleton.py`：
+  PASS。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_ibkr_connector_skeleton.py`：
+  `6 passed`。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_python_no_write_static_guard.py`：
+  `17 passed`。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  `114 passed`。
 - `python3 -B -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
   `2 passed`。
 - `git diff --check`：PASS。

@@ -945,7 +945,7 @@ Do not paste long reports or stable architecture into TODO.
 
 ## 2026-06-30 IBKR Stock/ETF Plan Timeline Checkpoint Guard
 
-- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 72, aligned to the PM memory / Operator source timeline.
+- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 73, aligned to the PM memory / Operator source timeline.
 - Added a structure test that reads the main plan Markdown and fails if PM session checkpoint numbers become duplicated, skipped, or out of order.
 - Verification passed: focused IBKR timeline structure test `1 passed`; section-body compare against `HEAD` PASS; `git diff --check` PASS. The full structure test file still has pre-existing docs README index drift failures unrelated to this guard. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
 
@@ -1145,3 +1145,10 @@ Do not paste long reports or stable architecture into TODO.
 - PM added an exact payload-shape regression for the inert IBKR connector skeleton covering connection plan, readiness, account snapshot, market data, contract details, paper lifecycle, fill import, and static fixture previews.
 - The guard fixes all preview payloads to secret-free/no-network/no-paper-channel/no-live/no-write/no-Bybit-reuse posture while preserving the existing source-only connector boundary.
 - Verification passed: connector skeleton tests `5 passed`; Python no-write static guard `17 passed`; full Stock/ETF FastAPI/static `113 passed`; docs trace guard `2 passed`; `git diff --check` PASS. This grants no endpoint, IPC method, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, paper order, fill import, DB/evidence writer, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF Connector Bybit Import Separation Guard
+
+- PM added an AST guard proving the inert IBKR connector skeleton does not import Bybit connector, control-api `app`, or `program_code.exchange_connectors.bybit_connector` modules.
+- The guard scans direct imports and literal dynamic imports via `__import__` / `importlib.import_module` across `program_code/broker_connectors/ibkr_connector/*.py`.
+- This keeps the IBKR skeleton isolated under `program_code/broker_connectors/ibkr_connector/` and prevents accidental reuse of Bybit runtime/control-api code while preserving the existing `bybit_path_reused=false` payload field.
+- Verification passed: connector skeleton tests `6 passed`; Python no-write static guard `17 passed`; full Stock/ETF FastAPI/static `114 passed`; docs trace guard `2 passed`; `git diff --check` PASS. This grants no endpoint, IPC method, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, paper order, fill import, DB/evidence writer, tiny-live/live, or Bybit behavior change.
