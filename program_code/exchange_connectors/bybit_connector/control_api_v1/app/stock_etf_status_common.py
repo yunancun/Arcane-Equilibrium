@@ -16,6 +16,7 @@ _SHADOW_FILL_MODEL_CONTRACT_ID = "stock_shadow_fill_model_v1"
 _STRATEGY_HYPOTHESIS_CONTRACT_ID = "stock_etf_strategy_hypothesis_contract_v1"
 _PAPER_LIFECYCLE_CONTRACT_ID = "ibkr_paper_order_lifecycle_v1"
 _BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID = "broker_lifecycle_event_log_v1"
+_PAPER_ORDER_REQUEST_CONTRACT_ID = "stock_etf_paper_order_request_v1"
 _ACCOUNT_CASH_LEDGER_CONTRACT_ID = "broker_account_portfolio_cash_ledger_v1"
 _SESSION_ATTESTATION_CONTRACT_ID = "ibkr_session_attestation_v1"
 _PAPER_ATTESTATION_CONTRACT_ID = "ibkr_paper_attestation_v1"
@@ -240,6 +241,8 @@ def _paper_lifecycle_event_fail_closed(reason: str) -> dict[str, Any]:
         "lifecycle_contract_id": "",
         "expected_event_log_contract_id": _BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
         "event_log_contract_id": "",
+        "expected_request_contract_id": _PAPER_ORDER_REQUEST_CONTRACT_ID,
+        "request_contract_id": "",
         "source_version": 0,
         "accepted": False,
         "blockers": [reason],
@@ -249,7 +252,16 @@ def _paper_lifecycle_event_fail_closed(reason: str) -> dict[str, Any]:
         "allowed": False,
         "denial_reason": "",
         "event_id_present": False,
+        "event_sequence": 0,
+        "event_sequence_present": False,
+        "genesis_event": False,
         "event_time_ms": 0,
+        "previous_event_hash_present": False,
+        "event_hash_present": False,
+        "request_envelope_hash_present": False,
+        "stale_state_policy": "",
+        "stale_state_policy_present": False,
+        "state_machine_contract_fields_present": True,
         "order_local_id_present": False,
         "idempotency_key_present": False,
         "broker_order_id_present": False,
@@ -264,6 +276,9 @@ def _paper_lifecycle_event_fail_closed(reason: str) -> dict[str, Any]:
 def _paper_reconstructability_fail_closed() -> dict[str, Any]:
     return {
         "append_only_event_ready": False,
+        "event_hash_chain_ready": False,
+        "request_envelope_linked": False,
+        "stale_state_policy_present": False,
         "broker_order_id_present": False,
         "execution_id_present": False,
         "commission_report_id_present": False,

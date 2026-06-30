@@ -8,6 +8,7 @@ from .stock_etf_status_common import (
     _BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
     _DENIED_OPERATIONS,
     _PAPER_LIFECYCLE_CONTRACT_ID,
+    _PAPER_ORDER_REQUEST_CONTRACT_ID,
     _SAFETY_FALSE_FIELDS,
     _api_allowlist_contract_violations,
     _as_bool,
@@ -19,6 +20,19 @@ from .stock_etf_status_common import (
     _paper_lifecycle_event_fail_closed,
     _paper_reconstructability_fail_closed,
     _phase2_fail_closed,
+)
+
+_LIFECYCLE_STATE_MACHINE_KEYS: tuple[str, ...] = (
+    "expected_request_contract_id",
+    "request_contract_id",
+    "event_sequence",
+    "event_sequence_present",
+    "genesis_event",
+    "previous_event_hash_present",
+    "event_hash_present",
+    "request_envelope_hash_present",
+    "stale_state_policy",
+    "stale_state_policy_present",
 )
 
 def _normalize_paper_lifecycle_event(value: Any, reason: str | None) -> dict[str, Any]:
@@ -37,6 +51,11 @@ def _normalize_paper_lifecycle_event(value: Any, reason: str | None) -> dict[str
             _BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
         ),
         "event_log_contract_id": _as_str(source.get("event_log_contract_id"), ""),
+        "expected_request_contract_id": _as_str(
+            source.get("expected_request_contract_id"),
+            "",
+        ),
+        "request_contract_id": _as_str(source.get("request_contract_id"), ""),
         "source_version": _as_int(source.get("source_version")),
         "accepted": _as_bool(source.get("accepted")),
         "blockers": [str(item) for item in _as_list(source.get("blockers"))],
@@ -46,7 +65,24 @@ def _normalize_paper_lifecycle_event(value: Any, reason: str | None) -> dict[str
         "allowed": _as_bool(source.get("allowed")),
         "denial_reason": _as_str(source.get("denial_reason"), ""),
         "event_id_present": _as_bool(source.get("event_id_present")),
+        "event_sequence": _as_int(source.get("event_sequence")),
+        "event_sequence_present": _as_bool(source.get("event_sequence_present")),
+        "genesis_event": _as_bool(source.get("genesis_event")),
         "event_time_ms": _as_int(source.get("event_time_ms")),
+        "previous_event_hash_present": _as_bool(
+            source.get("previous_event_hash_present")
+        ),
+        "event_hash_present": _as_bool(source.get("event_hash_present")),
+        "request_envelope_hash_present": _as_bool(
+            source.get("request_envelope_hash_present")
+        ),
+        "stale_state_policy": _as_str(source.get("stale_state_policy"), ""),
+        "stale_state_policy_present": _as_bool(
+            source.get("stale_state_policy_present")
+        ),
+        "state_machine_contract_fields_present": all(
+            key in source for key in _LIFECYCLE_STATE_MACHINE_KEYS
+        ),
         "order_local_id_present": _as_bool(source.get("order_local_id_present")),
         "idempotency_key_present": _as_bool(source.get("idempotency_key_present")),
         "broker_order_id_present": _as_bool(source.get("broker_order_id_present")),
@@ -70,6 +106,11 @@ def _normalize_paper_reconstructability(value: Any) -> dict[str, Any]:
         return _paper_reconstructability_fail_closed()
     return {
         "append_only_event_ready": _as_bool(source.get("append_only_event_ready")),
+        "event_hash_chain_ready": _as_bool(source.get("event_hash_chain_ready")),
+        "request_envelope_linked": _as_bool(source.get("request_envelope_linked")),
+        "stale_state_policy_present": _as_bool(
+            source.get("stale_state_policy_present")
+        ),
         "broker_order_id_present": _as_bool(source.get("broker_order_id_present")),
         "execution_id_present": _as_bool(source.get("execution_id_present")),
         "commission_report_id_present": _as_bool(
@@ -123,12 +164,27 @@ def _paper_status_contract_violations(
         != _BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID
     ):
         violations.append("paper_event_log_expected_contract_id_mismatch")
+    if (
+        _as_str(lifecycle_event.get("expected_request_contract_id"), "")
+        != _PAPER_ORDER_REQUEST_CONTRACT_ID
+    ):
+        violations.append("paper_request_expected_contract_id_mismatch")
+    if reason is None and not _as_bool(
+        lifecycle_event.get("state_machine_contract_fields_present")
+    ):
+        violations.append("paper_lifecycle_state_machine_fields_missing")
     if _as_bool(lifecycle_event.get("accepted")):
         violations.append("paper_lifecycle_event_accepted_before_gate")
     if _as_bool(lifecycle_event.get("allowed")):
         violations.append("paper_lifecycle_event_allowed_before_gate")
     for key in (
         "event_id_present",
+        "event_sequence_present",
+        "genesis_event",
+        "previous_event_hash_present",
+        "event_hash_present",
+        "request_envelope_hash_present",
+        "stale_state_policy_present",
         "order_local_id_present",
         "idempotency_key_present",
         "broker_order_id_present",
@@ -140,8 +196,13 @@ def _paper_status_contract_violations(
     ):
         if _as_bool(lifecycle_event.get(key)):
             violations.append(f"paper_lifecycle_{key}")
+    if _as_str(lifecycle_event.get("request_contract_id"), ""):
+        violations.append("paper_lifecycle_request_contract_id_present")
     for key in (
         "append_only_event_ready",
+        "event_hash_chain_ready",
+        "request_envelope_linked",
+        "stale_state_policy_present",
         "broker_order_id_present",
         "execution_id_present",
         "commission_report_id_present",
