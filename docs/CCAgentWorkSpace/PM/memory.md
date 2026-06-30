@@ -2780,3 +2780,9 @@
 - PM added a source-only route-method negative-test checkpoint asserting the Stock/ETF OpenAPI surface exposes only `GET /api/v1/stock-etf/readiness`.
 - Runtime negative tests assert `POST`, `PUT`, `PATCH`, and `DELETE` return `405` for both `/api/v1/stock-etf` and `/api/v1/stock-etf/readiness`; the existing static no-write guard remains in force.
 - Verification passed: route test `py_compile`, focused FastAPI/static no-write pytest `16 passed`, and `git diff --check`. This grants no IBKR contact, connector runtime, secret access, paper order, fill import, DB apply, GUI/lane selector authority, Phase 2 start, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF FastAPI Lane Status Read-Only Surface
+
+- PM added display-only `GET /api/v1/stock-etf/lane-status`, calling only Rust IPC `stock_etf.get_lane_status` with empty params and no-store/private cache headers.
+- Lane-status normalization fail-closes to default `crypto_perp`, Stock/ETF/IBKR display identity, `display_only` GUI authority, no paper-order entry, no IBKR live, and no first-contact allowance; route tests prove query/header lane/paper/contact claims are ignored.
+- Verification passed: route/test `py_compile`, focused FastAPI/static no-write pytest `21 passed`, and `git diff --check`. This grants no IBKR contact, connector runtime, secret access, paper order, fill import, DB apply, GUI/lane selector authority, Phase 2 start, tiny-live, live, or Bybit behavior change.
