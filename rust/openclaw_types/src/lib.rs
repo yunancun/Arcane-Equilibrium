@@ -114,7 +114,8 @@ pub use stock_etf_gui_lane_contract::{
     StockEtfGuiLaneBlocker, StockEtfGuiLaneContractV1, StockEtfGuiLaneVerdict,
     STOCK_ETF_GUI_EVIDENCE_STATUS_ENDPOINT, STOCK_ETF_GUI_LANE_CONTRACT_ID,
     STOCK_ETF_GUI_LANE_STATUS_ENDPOINT, STOCK_ETF_GUI_READINESS_ENDPOINT,
-    STOCK_ETF_GUI_SHADOW_STATUS_ENDPOINT, STOCK_ETF_GUI_UNIVERSE_STATUS_ENDPOINT,
+    STOCK_ETF_GUI_PAPER_STATUS_ENDPOINT, STOCK_ETF_GUI_SHADOW_STATUS_ENDPOINT,
+    STOCK_ETF_GUI_UNIVERSE_STATUS_ENDPOINT,
 };
 pub use stock_etf_instrument_identity::{
     StockEtfCurrency, StockEtfInstrumentIdentityBlocker, StockEtfInstrumentIdentityV1,

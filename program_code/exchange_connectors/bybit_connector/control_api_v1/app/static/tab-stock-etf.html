@@ -82,6 +82,11 @@
       <div class="se-metric-sub" id="se-paper-sub"></div>
     </div>
     <div class="se-metric">
+      <div class="se-metric-label">Paper Lifecycle</div>
+      <div class="se-metric-value" id="se-paper-lifecycle-state">--</div>
+      <div class="se-metric-sub" id="se-paper-lifecycle-sub"></div>
+    </div>
+    <div class="se-metric">
       <div class="se-metric-label">IBKR Live</div>
       <div class="se-metric-value" id="se-live-state">--</div>
       <div class="se-metric-sub">live/tiny-live remain denied</div>
@@ -188,6 +193,18 @@
       </table>
     </section>
 
+    <section class="se-panel" id="se-paper-panel">
+      <div class="se-panel-title">
+        <span>Paper Status</span>
+        <span id="se-paper-status" class="oc-chip oc-chip-neutral">--</span>
+      </div>
+      <table class="se-kv">
+        <tbody id="se-paper-body">
+          <tr><td colspan="2" class="se-muted">Loading...</td></tr>
+        </tbody>
+      </table>
+    </section>
+
     <section class="se-panel" id="se-denial-panel">
       <div class="se-panel-title">
         <span>Denied Surface</span>
@@ -206,6 +223,7 @@ const READINESS_ENDPOINT = '/api/v1/stock-etf/readiness';
 const EVIDENCE_STATUS_ENDPOINT = '/api/v1/stock-etf/evidence-status';
 const UNIVERSE_STATUS_ENDPOINT = '/api/v1/stock-etf/universe-status';
 const SHADOW_STATUS_ENDPOINT = '/api/v1/stock-etf/shadow-status';
+const PAPER_STATUS_ENDPOINT = '/api/v1/stock-etf/paper-status';
 
 function toneFor(value) {
   const s = String(value || '').toLowerCase();
@@ -368,6 +386,53 @@ function shadowFallback(reason) {
   };
 }
 
+function paperFallback(reason) {
+  const why = reason || 'api_unavailable';
+  return {
+    paper_status_state: 'degraded',
+    phase: 'phase2_paper_status_source_fixture',
+    phase2_started: false,
+    gui_authority: 'display_only',
+    lifecycle_event: {
+      accepted: false,
+      blockers: [why],
+      operation: 'paper_order_submit',
+      previous_state: 'local_intent_created',
+      next_state: 'local_intent_created',
+      allowed: false,
+      event_id_present: false,
+      order_local_id_present: false,
+      idempotency_key_present: false,
+      broker_order_id_present: false,
+      execution_id_present: false,
+      commission_report_id_present: false,
+      reconciliation_run_id_present: false,
+      raw_artifact_hash_present: false,
+      redacted_summary_hash_present: false,
+    },
+    reconstructability: {
+      append_only_event_ready: false,
+      broker_order_id_present: false,
+      execution_id_present: false,
+      commission_report_id_present: false,
+      raw_artifact_hash_present: false,
+      redacted_summary_hash_present: false,
+      restart_recovery_required: false,
+      manual_review_required: false,
+    },
+    paper_lifecycle_started: false,
+    paper_order_submitted: false,
+    paper_fill_imported: false,
+    paper_reconciliation_started: false,
+    paper_account_snapshot_present: false,
+    broker_paper_attestation_present: false,
+    db_apply_performed: false,
+    contract_violations: [],
+    degraded: true,
+    reason: why,
+  };
+}
+
 function renderFallback() {
   const data = {
     default_asset_lane: 'crypto_perp',
@@ -406,6 +471,7 @@ function renderFallback() {
   renderEvidenceStatus(evidenceFallback('api_unavailable'));
   renderUniverseStatus(universeFallback('api_unavailable'));
   renderShadowStatus(shadowFallback('api_unavailable'));
+  renderPaperStatus(paperFallback('api_unavailable'));
 }
 
 function renderReadiness(data, laneStatus) {
@@ -649,13 +715,61 @@ function renderShadowStatus(data) {
   );
 }
 
+function renderPaperStatus(data) {
+  const status = data || paperFallback('api_unavailable');
+  const lifecycle = status.lifecycle_event || {};
+  const reconstructability = status.reconstructability || {};
+  const state = status.paper_status_state || 'blocked';
+  const paperBlockers = []
+    .concat(lifecycle.blockers || [])
+    .concat(status.phase2_gate_blockers || [])
+    .concat(status.contract_violations || []);
+  document.getElementById('se-paper-lifecycle-state').innerHTML = textChip(state);
+  document.getElementById('se-paper-lifecycle-sub').textContent =
+    lifecycle.accepted ? 'append-only event ready' : 'paper lifecycle blocked';
+  setChip('se-paper-status', state, toneFor(state));
+  document.getElementById('se-paper-body').innerHTML = [
+    kvRow('phase', textChip(status.phase || '-')),
+    kvRow('phase2_started', boolChip(status.phase2_started, true)),
+    kvRow('paper_lifecycle_started', boolChip(status.paper_lifecycle_started, true)),
+    kvRow('paper_order_submitted', boolChip(status.paper_order_submitted, true)),
+    kvRow('paper_fill_imported', boolChip(status.paper_fill_imported, true)),
+    kvRow('paper_reconciliation_started', boolChip(status.paper_reconciliation_started, true)),
+    kvRow('paper_account_snapshot_present', boolChip(status.paper_account_snapshot_present, true)),
+    kvRow('broker_paper_attestation_present', boolChip(status.broker_paper_attestation_present, true)),
+    kvRow('lifecycle.accepted', boolChip(lifecycle.accepted, false)),
+    kvRow('lifecycle.operation', textChip(lifecycle.operation || 'paper_order_submit')),
+    kvRow('lifecycle.previous_state', textChip(lifecycle.previous_state || '-')),
+    kvRow('lifecycle.next_state', textChip(lifecycle.next_state || '-')),
+    kvRow('lifecycle.allowed', boolChip(lifecycle.allowed, true)),
+    kvRow('broker_order_id_present', boolChip(lifecycle.broker_order_id_present, true)),
+    kvRow('execution_id_present', boolChip(lifecycle.execution_id_present, true)),
+    kvRow('commission_report_id_present', boolChip(lifecycle.commission_report_id_present, true)),
+    kvRow('idempotency_key_present', boolChip(lifecycle.idempotency_key_present, true)),
+    kvRow('reconciliation_run_id_present', boolChip(lifecycle.reconciliation_run_id_present, true)),
+    kvRow('raw_artifact_hash_present', boolChip(lifecycle.raw_artifact_hash_present, true)),
+    kvRow('redacted_summary_hash_present', boolChip(lifecycle.redacted_summary_hash_present, true)),
+    kvRow('append_only_event_ready', boolChip(reconstructability.append_only_event_ready, true)),
+    kvRow('restart_recovery_required', boolChip(reconstructability.restart_recovery_required, true)),
+    kvRow('manual_review_required', boolChip(reconstructability.manual_review_required, true)),
+    kvRow('db_apply_performed', boolChip(status.db_apply_performed, true)),
+    kvRow('blockers', chipList(paperBlockers, 'none')),
+    kvRow('reason', '<span class="se-code">' + ocEsc(status.reason || '-') + '</span>'),
+  ].join('');
+  document.getElementById('se-paper-panel').classList.toggle(
+    'se-bad-line',
+    (status.contract_violations || []).length > 0
+  );
+}
+
 async function loadReadiness() {
-  const [lanePayload, readinessPayload, evidencePayload, universePayload, shadowPayload] = await Promise.all([
+  const [lanePayload, readinessPayload, evidencePayload, universePayload, shadowPayload, paperPayload] = await Promise.all([
     ocApi(LANE_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(READINESS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(EVIDENCE_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(UNIVERSE_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(SHADOW_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
+    ocApi(PAPER_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
   ]);
   if (!readinessPayload || !readinessPayload.data) {
     renderFallback();
@@ -665,6 +779,7 @@ async function loadReadiness() {
   renderEvidenceStatus(evidencePayload && evidencePayload.data ? evidencePayload.data : evidenceFallback('api_unavailable'));
   renderUniverseStatus(universePayload && universePayload.data ? universePayload.data : universeFallback('api_unavailable'));
   renderShadowStatus(shadowPayload && shadowPayload.data ? shadowPayload.data : shadowFallback('api_unavailable'));
+  renderPaperStatus(paperPayload && paperPayload.data ? paperPayload.data : paperFallback('api_unavailable'));
 }
 
 waitForServerUp(loadReadiness);

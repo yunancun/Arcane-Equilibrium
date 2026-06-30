@@ -7,10 +7,11 @@
 use super::super::*;
 use openclaw_types::{
     evaluate_broker_operation, AssetLane, Broker, BrokerCapabilityRequest, BrokerEnvironment,
-    BrokerOperation, IbkrExternalSurfaceGateV1, IbkrPhase2PolicyBundleV1, InstrumentKind,
-    NonBybitApiAllowlistV1, StockEtfEvidenceClockDayV1, StockEtfFeatureFlags, StockEtfGateInputs,
-    StockEtfPitUniverseV1, StockEtfStrategyHypothesisV1, StockMarketDataProvenanceV1,
-    StockShadowFillModelV1, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
+    BrokerLifecycleEventLogV1, BrokerOperation, IbkrExternalSurfaceGateV1,
+    IbkrPhase2PolicyBundleV1, InstrumentKind, NonBybitApiAllowlistV1, StockEtfEvidenceClockDayV1,
+    StockEtfFeatureFlags, StockEtfGateInputs, StockEtfPitUniverseV1, StockEtfStrategyHypothesisV1,
+    StockMarketDataProvenanceV1, StockShadowFillModelV1, BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
+    IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
     STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID, STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
     STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID, STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
 };
@@ -71,6 +72,7 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
         "stock_etf.get_shadow_status" => {
             JsonRpcResponse::success(id, shadow_status_summary(phase2))
         }
+        "stock_etf.get_paper_status" => JsonRpcResponse::success(id, paper_status_summary(phase2)),
         _ => {
             let operation = match operation_for_method(method) {
                 Some(op) => op,
@@ -107,6 +109,67 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
             )
         }
     }
+}
+
+fn paper_status_summary(phase2: serde_json::Value) -> serde_json::Value {
+    let lifecycle_event = BrokerLifecycleEventLogV1::default();
+    let lifecycle_verdict = lifecycle_event.validate();
+
+    serde_json::json!({
+        "phase": "phase2_paper_status_source_fixture",
+        "asset_lane": AssetLane::StockEtfCash,
+        "broker": Broker::Ibkr,
+        "environment": BrokerEnvironment::Paper,
+        "paper_status_state": "blocked",
+        "phase2_started": false,
+        "paper_lifecycle_started": false,
+        "paper_order_submitted": false,
+        "paper_fill_imported": false,
+        "paper_reconciliation_started": false,
+        "paper_account_snapshot_present": false,
+        "broker_paper_attestation_present": false,
+        "lifecycle_event": {
+            "expected_lifecycle_contract_id": IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
+            "lifecycle_contract_id": lifecycle_event.lifecycle_contract_id,
+            "expected_event_log_contract_id": BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
+            "event_log_contract_id": lifecycle_event.event_log_contract_id,
+            "source_version": lifecycle_event.source_version,
+            "accepted": lifecycle_verdict.accepted,
+            "blockers": lifecycle_verdict.blockers,
+            "operation": lifecycle_event.operation,
+            "previous_state": lifecycle_event.previous_state,
+            "next_state": lifecycle_event.next_state,
+            "allowed": lifecycle_event.allowed,
+            "denial_reason": lifecycle_event.denial_reason,
+            "event_id_present": !lifecycle_event.event_id.is_empty(),
+            "event_time_ms": lifecycle_event.event_time_ms,
+            "order_local_id_present": !lifecycle_event.order_local_id.is_empty(),
+            "idempotency_key_present": !lifecycle_event.idempotency_key.is_empty(),
+            "broker_order_id_present": !lifecycle_event.broker_order_id.is_empty(),
+            "execution_id_present": !lifecycle_event.execution_id.is_empty(),
+            "commission_report_id_present": !lifecycle_event.commission_report_id.is_empty(),
+            "reconciliation_run_id_present": !lifecycle_event.reconciliation_run_id.is_empty(),
+            "raw_artifact_hash_present": !lifecycle_event.raw_artifact_hash.is_empty(),
+            "redacted_summary_hash_present": !lifecycle_event.redacted_summary_hash.is_empty(),
+        },
+        "reconstructability": {
+            "append_only_event_ready": lifecycle_verdict.accepted,
+            "broker_order_id_present": !lifecycle_event.broker_order_id.is_empty(),
+            "execution_id_present": !lifecycle_event.execution_id.is_empty(),
+            "commission_report_id_present": !lifecycle_event.commission_report_id.is_empty(),
+            "raw_artifact_hash_present": !lifecycle_event.raw_artifact_hash.is_empty(),
+            "redacted_summary_hash_present": !lifecycle_event.redacted_summary_hash.is_empty(),
+            "restart_recovery_required": false,
+            "manual_review_required": false,
+        },
+        "phase2": phase2,
+        "ibkr_live_enabled": false,
+        "ibkr_call_performed": false,
+        "secret_slot_touched": false,
+        "order_routed": false,
+        "bybit_ipc_reused": false,
+        "db_apply_performed": false,
+    })
 }
 
 fn shadow_status_summary(phase2: serde_json::Value) -> serde_json::Value {

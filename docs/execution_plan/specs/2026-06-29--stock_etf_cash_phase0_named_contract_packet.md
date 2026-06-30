@@ -478,6 +478,7 @@ Rust IPC commands must be lane-scoped and separate from existing Bybit paper com
 
 - `stock_etf.get_lane_status`
 - `stock_etf.get_readiness`
+- `stock_etf.get_paper_status`
 - `stock_etf.preview_paper_order`
 - `stock_etf.submit_paper_order`
 - `stock_etf.cancel_paper_order`
@@ -921,7 +922,8 @@ The validator requires exact `gui_lane_contract_v1` contract id, source version
 `1`, `crypto_perp` as the default displayed lane, GET-only
 `/api/v1/stock-etf/readiness`, `/api/v1/stock-etf/lane-status`,
 `/api/v1/stock-etf/evidence-status`, `/api/v1/stock-etf/universe-status`, and
-`/api/v1/stock-etf/shadow-status` surfaces, display-only semantics, client lane
+`/api/v1/stock-etf/shadow-status`, and `/api/v1/stock-etf/paper-status`
+surfaces, display-only semantics, client lane
 state treated as untrusted, denied localStorage/query-param/hidden-field
 authority, no login-success selector, no POST/order/secret/contact surfaces,
 paper-order entry hidden, stock live disabled display, CFD hidden or fail-closed,
