@@ -1055,6 +1055,7 @@ def _valid_scorecard_status() -> dict[str, Any]:
             "cost_model_version_hash_present": False,
             "strategy_hypothesis_hash_present": False,
             "reference_data_sources_hash_present": False,
+            "paper_shadow_reconciliation_hash_present": False,
             "scorecard_manifest_hash_present": False,
             "verdict_rationale_hash_present": False,
             "paper_shadow_window_trading_days": 0,

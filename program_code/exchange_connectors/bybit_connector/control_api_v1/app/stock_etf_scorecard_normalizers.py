@@ -36,6 +36,7 @@ def _scorecard_verdict_fail_closed(reason: str) -> dict[str, Any]:
         "cost_model_version_hash_present": False,
         "strategy_hypothesis_hash_present": False,
         "reference_data_sources_hash_present": False,
+        "paper_shadow_reconciliation_hash_present": False,
         "scorecard_manifest_hash_present": False,
         "verdict_rationale_hash_present": False,
         "paper_shadow_window_trading_days": 0,
@@ -118,6 +119,9 @@ def _normalize_scorecard_verdict(value: Any, reason: str | None) -> dict[str, An
         ),
         "reference_data_sources_hash_present": _as_bool(
             source.get("reference_data_sources_hash_present")
+        ),
+        "paper_shadow_reconciliation_hash_present": _as_bool(
+            source.get("paper_shadow_reconciliation_hash_present")
         ),
         "scorecard_manifest_hash_present": _as_bool(
             source.get("scorecard_manifest_hash_present")
@@ -236,6 +240,7 @@ def _scorecard_status_contract_violations(
         "cost_model_version_hash_present",
         "strategy_hypothesis_hash_present",
         "reference_data_sources_hash_present",
+        "paper_shadow_reconciliation_hash_present",
         "scorecard_manifest_hash_present",
         "verdict_rationale_hash_present",
         "concentration_label_passed",

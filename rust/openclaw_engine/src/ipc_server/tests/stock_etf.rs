@@ -1783,6 +1783,7 @@ async fn stock_etf_scorecard_status_is_blocked_source_fixture_without_side_effec
     assert_eq!(scorecard["scorecard_input_bundle_hash_present"], false);
     assert_eq!(scorecard["formula_appendix_hash_present"], false);
     assert_eq!(scorecard["statistical_preregistration_hash_present"], false);
+    assert_eq!(scorecard["paper_shadow_reconciliation_hash_present"], false);
     assert_eq!(scorecard["scorecard_manifest_hash_present"], false);
     assert_eq!(scorecard["paper_shadow_window_trading_days"], 0);
     assert_eq!(scorecard["min_independent_observation_count"], 0);

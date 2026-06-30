@@ -36,6 +36,9 @@ fn default_scorecard_verdict_blocks_unsealed_unknown_artifact() {
         .contains(&StockEtfScorecardVerdictBlocker::StatisticalPreregistrationHashInvalid));
     assert!(verdict
         .blockers
+        .contains(&StockEtfScorecardVerdictBlocker::PaperShadowReconciliationHashInvalid));
+    assert!(verdict
+        .blockers
         .contains(&StockEtfScorecardVerdictBlocker::ScorecardNotDerivedOnly));
     assert!(verdict
         .blockers
@@ -81,6 +84,7 @@ fn scorecard_verdict_requires_formula_preregistration_and_manifest_hashes() {
     candidate.scorecard_input_bundle_hash.clear();
     candidate.formula_appendix_hash = "not-a-sha".to_string();
     candidate.statistical_preregistration_hash.clear();
+    candidate.paper_shadow_reconciliation_hash.clear();
     candidate.scorecard_manifest_hash.clear();
     candidate.verdict_rationale_hash.clear();
 
@@ -99,6 +103,9 @@ fn scorecard_verdict_requires_formula_preregistration_and_manifest_hashes() {
     assert!(verdict
         .blockers
         .contains(&StockEtfScorecardVerdictBlocker::StatisticalPreregistrationHashInvalid));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardVerdictBlocker::PaperShadowReconciliationHashInvalid));
     assert!(verdict
         .blockers
         .contains(&StockEtfScorecardVerdictBlocker::ScorecardManifestHashInvalid));

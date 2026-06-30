@@ -207,6 +207,7 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     assert "reconciliation_writer_started" in source
     assert "fill_import_performed" in source
     assert "shadow_fill_generated" in source
+    assert "paper_shadow_reconciliation_hash_present" in source
     assert "se-scorecard-status" in source
     assert "se-scorecard-body" in source
     assert "se-launch-status" in source

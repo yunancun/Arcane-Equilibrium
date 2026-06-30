@@ -855,3 +855,9 @@ Do not paste long reports or stable architecture into TODO.
 - Display-only checkpoint splits Stock/ETF reconciliation rendering into `tab-stock-etf-reconciliation.js`, keeping main `tab-stock-etf.js` at 1847 lines and under the hard cap.
 - The Reconciliation panel now renders `stock_etf_paper_shadow_reconciliation_v1` id/acceptance/blockers, paper-shadow link hash, imported/synthetic markers, and side-effect flags; the new JS is included in route/static and no-write guards.
 - Verification passed: Node syntax PASS, GUI line counts PASS, focused route/static/no-write `13 passed`, full Stock/ETF Python route/static `90 passed`. This grants no IBKR contact, connector runtime, fill import, shadow fill generation, reconciliation/scorecard writer, DB apply, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Scorecard Reconciliation Lineage Gate
+
+- Phase 3 source/status/display-only checkpoint adds `paper_shadow_reconciliation_hash` to `stock_etf_scorecard_verdict_v1`, with a dedicated `PaperShadowReconciliationHashInvalid` blocker.
+- Rust `stock_etf.get_scorecard_status`, FastAPI normalization, fixtures/tests, and the Stock/ETF GUI now expose `paper_shadow_reconciliation_hash_present=false`; pre-gate truthy claims are blocked as contract violations.
+- Verification passed: scorecard verdict acceptance `8 passed`; focused FastAPI/static `15 passed`; full Stock/ETF FastAPI/static `90 passed`; engine `stock_etf` filter `27 passed`; full openclaw_types `35` unit/golden + `236` integration/acceptance + `0` doc-tests; workspace `cargo check` PASS; rustfmt and Node syntax checks PASS. This grants no IBKR contact, connector runtime, secret access/creation, fill import, shadow fill generation, reconciliation writer, scorecard writer, DB apply, evidence clock, paper order/cancel/replace, tiny-live, live, or Bybit behavior change.

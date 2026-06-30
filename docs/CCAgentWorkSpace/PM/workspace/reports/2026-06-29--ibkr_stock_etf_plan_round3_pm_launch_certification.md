@@ -759,3 +759,40 @@ approval。未批准 IBKR contact、secret、connector runtime、Phase 1/2/3/4/5
 start、paper order/cancel/replace、fill import、DB apply、Postgres dry-run、
 evidence clock、scorecard writer、tiny-live、live、Linux runtime sync/restart 或
 Bybit behavior change。
+
+## 2026-06-30 PM Session Checkpoint — Scorecard Reconciliation Lineage Gate
+
+PM 已在本 session 追加 Phase 3 source/status/display-only checkpoint：
+`stock_etf_scorecard_verdict_v1` reconciliation lineage gate。這是 scorecard
+contract/status/GUI hardening，不是 scorecard writer。
+
+已完成：
+
+- Scorecard verdict contract 新增 `paper_shadow_reconciliation_hash`，並以
+  SHA-256 hex validator 作為硬 gate。
+- Default verdict 與 blocked template 均保持 fail closed；positive fixture 必須攜帶
+  reconciliation hash 才能通過。
+- Rust `stock_etf.get_scorecard_status` 回報
+  `paper_shadow_reconciliation_hash_present=false`，維持 source-only blocked status。
+- FastAPI normalizer/tests 會阻擋 pre-gate payload 宣稱 reconciliation hash present。
+- GUI scorecard panel 顯示 reconciliation hash gate，避免 Operator 將 scorecard
+  readiness 與 paper-shadow reconciliation 脫鉤。
+
+Verification：
+
+- Scorecard verdict acceptance `8 passed`。
+- Focused FastAPI/static tests `15 passed`。
+- Full Stock/ETF FastAPI/static tests `90 passed`。
+- Engine Stock/ETF cargo filter `27 passed`（既有 warnings only）。
+- Full openclaw_types PASS：`35` unit/golden + `236` integration/acceptance +
+  `0` doc-tests。
+- Workspace `cargo check` PASS。
+- `rustfmt --check` PASS。
+- `node --check` PASS。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 3 evidence clock approval、reconciliation
+writer approval、scorecard writer approval 或 paper-shadow launch approval。未批准 IBKR
+contact、secret、connector runtime、Phase 1/2/3/4/5 runtime start、paper order/cancel/
+replace、fill import、shadow fill generation、reconciliation writer、scorecard writer、
+DB apply、Postgres dry-run、evidence clock、tiny-live、live、Linux runtime sync/restart
+或 Bybit behavior change。

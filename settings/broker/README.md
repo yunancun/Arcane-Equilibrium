@@ -46,7 +46,7 @@ This directory stores broker capability contracts and default-off runtime postur
 
 `stock_etf_scorecard_inputs.template.toml` records the default-blocked cash ledger, cost model, benchmark, shadow fill, and storage capacity named input contracts plus cross-contract hashes for future stock/ETF scorecards. It denies IBKR contact, connector runtime, broker fill import, scorecard writing, DB apply, evidence-clock start, secret serialization, tiny-live/live authority, and Bybit live regression.
 
-`stock_etf_scorecard_verdict.template.toml` records the default-blocked statistical scorecard verdict shape with formula appendix, preregistration, manifest hashes, CI/PSR/DSR-style thresholds, paper-vs-shadow divergence, regime/breadth/freshness/survivorship/execution-realism labels, and review hashes. It can seal positive or negative verdict labels without authorizing IBKR contact, scorecard writing, tiny-live/live, or Bybit changes.
+`stock_etf_scorecard_verdict.template.toml` records the default-blocked statistical scorecard verdict shape with formula appendix, preregistration, manifest hashes, paper-shadow reconciliation hash, CI/PSR/DSR-style thresholds, paper-vs-shadow divergence, regime/breadth/freshness/survivorship/execution-realism labels, and review hashes. It can seal positive or negative verdict labels without authorizing IBKR contact, scorecard writing, tiny-live/live, or Bybit changes.
 
 `stock_etf_release_packet.template.toml` records the default-blocked Phase 5 release packet shape with exact `stock_etf_release_packet_v1` / source-version fields. It is secret-free and does not authorize IBKR contact, paper orders, GUI lane authority, tiny-live, or live.
 
