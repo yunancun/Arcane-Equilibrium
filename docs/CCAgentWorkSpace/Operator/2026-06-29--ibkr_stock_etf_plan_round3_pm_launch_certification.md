@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 65 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 66 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -1456,6 +1456,36 @@ Verification 已過：
 - Stock/ETF JS `node --check`：PASS
 - Route/no-write focused tests：`27 passed`
 - Full Stock/ETF FastAPI/static：`108 passed`
+- IBKR timeline + trace-title structure guard：`2 passed`
+- `git diff --check`：PASS
+
+邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 client input、沒有 IBKR
+contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation、沒有
+connector runtime、沒有 read probe execution、沒有 paper order/cancel/replace、沒有 fill
+import、沒有 evidence writer、沒有 DB apply、沒有 evidence clock、沒有 tiny-live/live
+authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — GUI Evidence/Paper Renderer Split Guard
+
+本 session 已把 Evidence / Universe / Shadow / Paper panel renderer 從主
+Stock/ETF GUI bundle 拆出：
+
+- 新增 `tab-stock-etf-evidence-paper.js`，承載 `renderEvidenceStatus`、
+  `renderUniverseStatus`、`renderShadowStatus` 與 `renderPaperStatus`。
+- `tab-stock-etf.js` 從 `798` 行降到 `583` 行。
+- 新 evidence/paper 模組為 `265` 行，並以 `window.renderEvidenceStatus` /
+  `window.renderUniverseStatus` / `window.renderShadowStatus` /
+  `window.renderPaperStatus` 暴露給主 loader。
+- HTML 在 auth/account module 後、主 loader 前載入 evidence/paper module。
+- Static no-write guard 現在掃描新模組，並確認 evidence/paper renderers 不回流主
+  bundle：`tab-stock-etf.js <= 650`、
+  `tab-stock-etf-evidence-paper.js <= 500`。
+
+Verification 已過：
+
+- Stock/ETF JS `node --check`：PASS
+- Route/no-write focused tests：`28 passed`
+- Full Stock/ETF FastAPI/static：`109 passed`
 - IBKR timeline + trace-title structure guard：`2 passed`
 - `git diff --check`：PASS
 

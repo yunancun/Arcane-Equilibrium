@@ -3080,7 +3080,7 @@
 
 ## 2026-06-30 IBKR Stock/ETF Plan Timeline Checkpoint Guard
 
-- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 65, aligned to the PM memory / Operator source timeline.
+- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 66, aligned to the PM memory / Operator source timeline.
 - Added a structure test that reads the main plan Markdown and fails if PM session checkpoint numbers become duplicated, skipped, or out of order.
 - Verification passed: focused IBKR timeline structure test `1 passed`; section-body compare against `HEAD` PASS; `git diff --check` PASS. The full structure test file still has pre-existing docs README index drift failures unrelated to this guard. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
 
@@ -3246,3 +3246,9 @@
 - PM established session loop state sha `cd9c99b4b73c8f63dc62e1f0b2a5a4e2b1012fd34de62145f19add992c946c71`; E3 and BB both returned `DONE_WITH_CONCERNS` for PM-supervised no-order canonical materialization.
 - Canonical plan `/tmp/openclaw/cost_gate_learning_lane/bounded_demo_probe_soak_plan.json` moved from sha `80ba57285f0a7f9d20ea0f4621660d1c917245f8b1bc33f95b534568a74b86a6` to sha `30056993b5cae70a0fcad0503221e12bd74dae4e42a29d0d2c88423c64739823`; manifest sha `7971510fe89e3ef14eb7a46893e3368a588ae695b2409639720d94186c045f30`; post no-order verification sha `044b50a6738bc17b55e80dd0785104b8a77e28aeade4121148f852aefeae7706`; ledger sha unchanged `086f5eb30bb4213cdff9e348d47dd98cc93b7daafd82059cfa9adb0ae18045c1`.
 - Boundary: no `_latest` overwrite, no ledger append, no service/env mutation, no exchange/private/order call, no Cost Gate change, no live/mainnet, no fill/PnL/proof. Next blocker is `P0-CURRENT-CANDIDATE-FRESH-INVOCATION-WINDOW-LEASE-BBO-ORDER-SHAPE-GATE`.
+
+## 2026-07-01 IBKR Stock/ETF GUI Evidence/Paper Renderer Split Guard
+
+- PM moved Evidence, Universe, Shadow, and Paper display renderers into `tab-stock-etf-evidence-paper.js`, reducing the Stock/ETF main GUI bundle from `798` to `583` lines.
+- Verification passed: Stock/ETF JS `node --check`; route/no-write focused tests `28 passed`; full Stock/ETF FastAPI/static `109 passed`; IBKR timeline + trace-title guard `2 passed`; `git diff --check` PASS.
+- Boundary unchanged: no endpoint/IPC/client-input change, no IBKR contact, no connector/runtime/secret/read-probe/paper-order/evidence/DB/tiny-live/live change, and no Bybit behavior change.

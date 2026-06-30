@@ -143,6 +143,13 @@ STOCK_ETF_STATIC_GUI_AUTH_ACCOUNT_RENDERERS = {
     "renderAuthorizationStatus",
 }
 
+STOCK_ETF_STATIC_GUI_EVIDENCE_PAPER_RENDERERS = {
+    "renderEvidenceStatus",
+    "renderPaperStatus",
+    "renderShadowStatus",
+    "renderUniverseStatus",
+}
+
 
 def _candidate_stock_etf_ibkr_python_files() -> list[Path]:
     app_dir = CONTROL_API_DIR / "app"
@@ -172,6 +179,7 @@ def _candidate_stock_etf_static_gui_files() -> list[Path]:
         static_dir / "tab-stock-etf-data-policy.js",
         static_dir / "tab-stock-etf-fallbacks.js",
         static_dir / "tab-stock-etf-auth-account.js",
+        static_dir / "tab-stock-etf-evidence-paper.js",
         static_dir / "tab-stock-etf.js",
     }
     return sorted(path for path in files if path.exists())
@@ -509,6 +517,34 @@ def test_stock_etf_static_gui_auth_account_renderers_remain_split() -> None:
     assert "window.renderAccountStatus" in main_source
     assert len(main_source.splitlines()) <= 900
     assert len(auth_account_source.splitlines()) <= 400
+
+
+def test_stock_etf_static_gui_evidence_paper_renderers_remain_split() -> None:
+    static_dir = CONTROL_API_DIR / "app" / "static"
+    main_path = static_dir / "tab-stock-etf.js"
+    evidence_paper_path = static_dir / "tab-stock-etf-evidence-paper.js"
+    main_source = main_path.read_text(encoding="utf-8")
+    evidence_paper_source = evidence_paper_path.read_text(encoding="utf-8")
+
+    missing_renderers = [
+        name
+        for name in sorted(STOCK_ETF_STATIC_GUI_EVIDENCE_PAPER_RENDERERS)
+        if f"function {name}(data)" not in evidence_paper_source
+    ]
+    main_definitions = [
+        name
+        for name in sorted(STOCK_ETF_STATIC_GUI_EVIDENCE_PAPER_RENDERERS)
+        if f"function {name}(data)" in main_source
+    ]
+
+    assert missing_renderers == []
+    assert main_definitions == []
+    assert "window.renderEvidenceStatus" in main_source
+    assert "window.renderUniverseStatus" in main_source
+    assert "window.renderShadowStatus" in main_source
+    assert "window.renderPaperStatus" in main_source
+    assert len(main_source.splitlines()) <= 650
+    assert len(evidence_paper_source.splitlines()) <= 500
 
 
 def _record_forbidden_call(path: Path, node: ast.Call, violations: list[str]) -> None:
