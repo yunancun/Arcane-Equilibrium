@@ -202,4 +202,46 @@ mod tests {
             "submit_paper_order"
         );
     }
+
+    #[test]
+    fn stock_etf_registry_keeps_readonly_and_write_fixture_boundaries_explicit() {
+        for name in [
+            "stock_etf.get_lane_status",
+            "stock_etf.get_readiness",
+            "stock_etf.preview_paper_order",
+            "stock_etf.import_paper_fills",
+            "stock_etf.evaluate_shadow_signal",
+        ] {
+            let spec = method_spec(name).expect("stock_etf read fixture registered");
+            assert!(spec.readonly, "{name} must remain a read-only fixture");
+        }
+
+        for name in [
+            "stock_etf.submit_paper_order",
+            "stock_etf.cancel_paper_order",
+            "stock_etf.replace_paper_order",
+        ] {
+            let spec = method_spec(name).expect("stock_etf paper-write fixture registered");
+            assert!(
+                !spec.readonly,
+                "{name} must stay visibly non-readonly until a separate Rust authority contract allows it"
+            );
+            assert_eq!(spec.slot, IpcSlotRequirement::None);
+            assert!(
+                !crate::ipc_server::live_authz::LIVE_WRITE_METHODS.contains(&name),
+                "{name} must not enter the Bybit live-write token surface"
+            );
+        }
+
+        for legacy_name in [
+            "submit_paper_order",
+            "cancel_paper_order",
+            "replace_paper_order",
+        ] {
+            assert!(
+                method_spec(legacy_name).is_none(),
+                "{legacy_name} must not alias a Stock/ETF fixture"
+            );
+        }
+    }
 }
