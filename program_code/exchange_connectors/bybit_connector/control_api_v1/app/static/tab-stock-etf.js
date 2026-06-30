@@ -596,6 +596,26 @@ function scorecardFallback(reason) {
     phase: 'phase3_scorecard_status_source_fixture',
     phase3_started: false,
     gui_authority: 'display_only',
+    scorecard_derivation: {
+      expected_contract_id: 'stock_etf_scorecard_derivation_v1',
+      contract_id: '',
+      source_version: 0,
+      accepted: false,
+      blockers: [why],
+      derivation_run_id_present: false,
+      scorecard_input_bundle_hash_present: false,
+      paper_shadow_reconciliation_hash_present: false,
+      scorecard_verdict_hash_present: false,
+      output_artifact_hash_present: false,
+      derived_from_atomic_facts_only: false,
+      idempotent_replay_proven: false,
+      paper_and_shadow_fills_separate: false,
+      bybit_live_execution_unchanged: false,
+      reconciliation_writer_started: false,
+      scorecard_writer_started: false,
+      db_apply_performed: false,
+      sealed: false,
+    },
     scorecard: {
       expected_contract_id: 'stock_etf_scorecard_verdict_v1',
       contract_id: '',
@@ -1538,9 +1558,11 @@ function renderPaperStatus(data) {
 
 function renderScorecardStatus(data) {
   const status = data || scorecardFallback('api_unavailable');
+  const derivation = status.scorecard_derivation || {};
   const scorecard = status.scorecard || {};
   const state = status.scorecard_status_state || 'blocked';
   const scorecardBlockers = []
+    .concat(derivation.blockers || [])
     .concat(scorecard.blockers || [])
     .concat(status.phase2_gate_blockers || [])
     .concat(status.contract_violations || []);
@@ -1551,6 +1573,17 @@ function renderScorecardStatus(data) {
   document.getElementById('se-scorecard-body').innerHTML = [
     kvRow('phase', textChip(status.phase || '-')),
     kvRow('phase3_started', boolChip(status.phase3_started, true)),
+    kvRow('derivation.accepted', boolChip(derivation.accepted, false)),
+    kvRow('derivation.contract_id', textChip(derivation.contract_id || '-')),
+    kvRow('derivation.expected_contract_id', textChip(derivation.expected_contract_id || '-')),
+    kvRow('derivation.run_id_present', boolChip(derivation.derivation_run_id_present, false)),
+    kvRow('derivation.input_bundle_hash_present', boolChip(derivation.scorecard_input_bundle_hash_present, false)),
+    kvRow('derivation.paper_shadow_reconciliation_hash_present', boolChip(derivation.paper_shadow_reconciliation_hash_present, false)),
+    kvRow('derivation.verdict_hash_present', boolChip(derivation.scorecard_verdict_hash_present, false)),
+    kvRow('derivation.output_artifact_hash_present', boolChip(derivation.output_artifact_hash_present, false)),
+    kvRow('derivation.atomic_facts_only', boolChip(derivation.derived_from_atomic_facts_only, false)),
+    kvRow('derivation.idempotent_replay_proven', boolChip(derivation.idempotent_replay_proven, false)),
+    kvRow('derivation.reconciliation_writer_started', boolChip(derivation.reconciliation_writer_started, true)),
     kvRow('contract.accepted', boolChip(scorecard.accepted, false)),
     kvRow('contract_id', textChip(scorecard.contract_id || '-')),
     kvRow('expected_contract_id', textChip(scorecard.expected_contract_id || '-')),

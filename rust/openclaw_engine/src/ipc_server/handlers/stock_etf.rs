@@ -16,9 +16,9 @@ use openclaw_types::{
     StockEtfInstrumentIdentityV1, StockEtfLaneScopedIpcMethod, StockEtfPaperFillImportRequestV1,
     StockEtfPaperOrderRequestEnvelopeV1, StockEtfPaperShadowReconciliationV1,
     StockEtfPhase0ContractPacketManifestV1, StockEtfPitUniverseV1, StockEtfReferenceDataSourcesV1,
-    StockEtfReleasePacketV1, StockEtfRiskPolicyV1, StockEtfScorecardVerdictV1,
-    StockEtfShadowSignalRequestV1, StockEtfStrategyHypothesisV1, StockMarketDataProvenanceV1,
-    StockShadowFillModelV1, TinyLiveAdrEligibilityV1,
+    StockEtfReleasePacketV1, StockEtfRiskPolicyV1, StockEtfScorecardDerivationV1,
+    StockEtfScorecardVerdictV1, StockEtfShadowSignalRequestV1, StockEtfStrategyHypothesisV1,
+    StockMarketDataProvenanceV1, StockShadowFillModelV1, TinyLiveAdrEligibilityV1,
     BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID, BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
     FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID, IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
     IBKR_PAPER_ATTESTATION_CONTRACT_ID, IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
@@ -28,10 +28,10 @@ use openclaw_types::{
     STOCK_ETF_PAPER_FILL_IMPORT_REQUEST_CONTRACT_ID, STOCK_ETF_PAPER_ORDER_REQUEST_CONTRACT_ID,
     STOCK_ETF_PAPER_SHADOW_RECONCILIATION_CONTRACT_ID, STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
     STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID, STOCK_ETF_RELEASE_PACKET_CONTRACT_ID,
-    STOCK_ETF_RISK_POLICY_CONTRACT_ID, STOCK_ETF_SCORECARD_VERDICT_CONTRACT_ID,
-    STOCK_ETF_SHADOW_SIGNAL_REQUEST_CONTRACT_ID, STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
-    STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
-    STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
+    STOCK_ETF_RISK_POLICY_CONTRACT_ID, STOCK_ETF_SCORECARD_DERIVATION_CONTRACT_ID,
+    STOCK_ETF_SCORECARD_VERDICT_CONTRACT_ID, STOCK_ETF_SHADOW_SIGNAL_REQUEST_CONTRACT_ID,
+    STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID, STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID,
+    STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID, STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
 };
 
 pub(in crate::ipc_server) fn handle_stock_etf_ipc(
@@ -850,8 +850,41 @@ fn reconciliation_status_summary(phase2: serde_json::Value) -> serde_json::Value
 }
 
 fn scorecard_status_summary(phase2: serde_json::Value) -> serde_json::Value {
+    let derivation = StockEtfScorecardDerivationV1::default();
+    let derivation_verdict = derivation.validate();
     let verdict = StockEtfScorecardVerdictV1::default();
     let scorecard_verdict = verdict.validate();
+    let derivation = serde_json::json!({
+        "expected_contract_id": STOCK_ETF_SCORECARD_DERIVATION_CONTRACT_ID,
+        "contract_id": &derivation.contract_id,
+        "source_version": derivation.source_version,
+        "accepted": derivation_verdict.accepted,
+        "blockers": derivation_verdict.blockers,
+        "derivation_run_id_present": !derivation.derivation_run_id.is_empty(),
+        "strategy_id_present": !derivation.strategy_id.is_empty(),
+        "universe_version_present": !derivation.universe_version.is_empty(),
+        "benchmark_version_present": !derivation.benchmark_version.is_empty(),
+        "as_of_date_present": !derivation.as_of_date.is_empty(),
+        "scorecard_input_bundle_hash_present": !derivation.scorecard_input_bundle_hash.is_empty(),
+        "paper_shadow_reconciliation_hash_present": !derivation.paper_shadow_reconciliation_hash.is_empty(),
+        "scorecard_verdict_hash_present": !derivation.scorecard_verdict_hash.is_empty(),
+        "output_artifact_hash_present": !derivation.output_artifact_hash.is_empty(),
+        "derived_from_atomic_facts_only": derivation.derived_from_atomic_facts_only,
+        "idempotent_replay_proven": derivation.idempotent_replay_proven,
+        "paper_and_shadow_fills_separate": derivation.paper_and_shadow_fills_separate,
+        "bybit_live_execution_unchanged": derivation.bybit_live_execution_unchanged,
+        "ibkr_contact_performed": derivation.ibkr_contact_performed,
+        "connector_runtime_started": derivation.connector_runtime_started,
+        "broker_fill_import_performed": derivation.broker_fill_import_performed,
+        "shadow_fill_generated": derivation.shadow_fill_generated,
+        "reconciliation_writer_started": derivation.reconciliation_writer_started,
+        "scorecard_writer_started": derivation.scorecard_writer_started,
+        "db_apply_performed": derivation.db_apply_performed,
+        "evidence_clock_started": derivation.evidence_clock_started,
+        "secret_content_serialized": derivation.secret_content_serialized,
+        "live_or_tiny_live_authorized": derivation.live_or_tiny_live_authorized,
+        "sealed": derivation.sealed,
+    });
     let mut scorecard = serde_json::Map::new();
     macro_rules! put_scorecard {
         ($key:literal, $value:expr) => {
@@ -1005,6 +1038,7 @@ fn scorecard_status_summary(phase2: serde_json::Value) -> serde_json::Value {
         "db_apply_performed": false,
         "evidence_clock_started": false,
         "paper_shadow_window_complete": false,
+        "scorecard_derivation": derivation,
         "scorecard": scorecard,
         "phase2": phase2,
         "ibkr_live_enabled": false,

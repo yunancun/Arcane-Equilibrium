@@ -1,0 +1,44 @@
+# ADR-0048 Stock/ETF scorecard derivation template.
+# Source-only, secret-free, default-blocked. This file must not contact IBKR,
+# import fills, generate shadow fills, start writers, apply DB changes, start an
+# evidence clock, authorize live/tiny-live, or change Bybit behavior.
+
+contract_id = ""
+source_version = 0
+asset_lane = "crypto_perp"
+broker = "bybit"
+environment = "live_reserved_denied"
+derivation_run_id = ""
+strategy_id = ""
+universe_version = ""
+benchmark_version = ""
+as_of_date = ""
+scorecard_input_bundle_hash = ""
+evidence_clock_manifest_hash = ""
+dq_manifest_hash = ""
+paper_shadow_reconciliation_hash = ""
+formula_appendix_hash = ""
+statistical_preregistration_hash = ""
+scorecard_manifest_hash = ""
+scorecard_verdict_hash = ""
+source_commit_hash = ""
+derivation_code_hash = ""
+output_artifact_hash = ""
+qc_review_hash = ""
+mit_review_hash = ""
+qa_review_hash = ""
+derived_from_atomic_facts_only = false
+idempotent_replay_proven = false
+paper_and_shadow_fills_separate = false
+bybit_live_execution_unchanged = false
+ibkr_contact_performed = false
+connector_runtime_started = false
+broker_fill_import_performed = false
+shadow_fill_generated = false
+reconciliation_writer_started = false
+scorecard_writer_started = false
+db_apply_performed = false
+evidence_clock_started = false
+secret_content_serialized = false
+live_or_tiny_live_authorized = false
+sealed = false
