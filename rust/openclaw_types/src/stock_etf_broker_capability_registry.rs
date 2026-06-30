@@ -12,6 +12,10 @@ use crate::stock_etf_lane::{
 use crate::stock_etf_phase3_evidence::STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID;
 use crate::stock_etf_reference_data_sources::STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID;
 use crate::stock_etf_risk_policy::STOCK_ETF_RISK_POLICY_CONTRACT_ID;
+use crate::stock_etf_scorecard_inputs::{
+    BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID, STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID,
+    STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID, STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
+};
 
 pub const STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID: &str = "broker_capability_registry_v1";
 
@@ -274,7 +278,7 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
             required_gates: &[
                 STOCK_ETF_RISK_POLICY_CONTRACT_ID,
                 STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID,
-                "cost_model_version_v1",
+                STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID,
                 STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
             ],
             typed_denial_reason: None,
@@ -283,13 +287,13 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
         Op::ScorecardDerive => ExpectedCapability {
             authority_scope: Scope::ReadOnly,
             required_gates: &[
-                "broker_account_portfolio_cash_ledger_v1",
+                BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID,
                 STOCK_ETF_RISK_POLICY_CONTRACT_ID,
                 STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID,
                 STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
-                "cost_model_version_v1",
-                "benchmark_versions_v1",
-                "stock_shadow_fill_model_v1",
+                STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID,
+                STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID,
+                STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
                 "stock_etf_pit_universe_contract_v1",
                 "stock_etf_strategy_hypothesis_contract_v1",
                 "paper_shadow_fill_separation",

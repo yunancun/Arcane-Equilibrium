@@ -713,8 +713,10 @@ Cash ledger fields:
 This is paper evidence only and cannot be used as live account proof.
 
 Source validator: `openclaw_types::stock_etf_scorecard_inputs::BrokerAccountPortfolioCashLedgerV1`.
-The validator rejects non-`stock_etf_cash`, non-IBKR, live-denied environments,
-missing source hashes, and missing as-of/currency fields.
+The validator requires exact `broker_account_portfolio_cash_ledger_v1` contract
+id and source version `1`, and rejects non-`stock_etf_cash`, non-IBKR,
+live-denied environments, missing source hashes, and missing as-of/currency
+fields.
 
 ## 15. `cost_model_version_v1`
 
@@ -731,8 +733,9 @@ Required components:
 Cost model version hash must be frozen before evidence clock starts.
 
 Source validator: `openclaw_types::stock_etf_scorecard_inputs::StockEtfCostModelVersionV1`.
-The validator requires commission, exchange/regulatory fee, spread, slippage,
-FX drag, tax/fee placeholder, version hash, and conservative penalty inputs.
+The validator requires exact `cost_model_version_v1` contract id, source
+version `1`, commission, exchange/regulatory fee, spread, slippage, FX drag,
+tax/fee placeholder, version hash, and conservative penalty inputs.
 
 ## 16. `benchmark_versions_v1`
 
@@ -749,7 +752,8 @@ Each hypothesis must name:
 Benchmark version hash must be frozen before evidence clock starts.
 
 Source validator: `openclaw_types::stock_etf_scorecard_inputs::StockEtfBenchmarkVersionV1`.
-The validator requires source, construction, rebalance, currency, corporate-action,
+The validator requires exact `benchmark_versions_v1` contract id, source
+version `1`, source, construction, rebalance, currency, corporate-action,
 matched-control, and version hashes.
 
 ## 17. `stock_shadow_fill_model_v1`
@@ -770,8 +774,9 @@ Required fields:
 Shadow fills must be clearly separate from broker paper fills and must never be counted as live fills.
 
 Source validator: `openclaw_types::stock_etf_scorecard_inputs::StockShadowFillModelV1`.
-The validator requires `synthetic_shadow=true`, rejects broker-paper/live fill links,
-and requires conservative fill or explicit rejection evidence.
+The validator requires exact `stock_shadow_fill_model_v1` contract id, source
+version `1`, `synthetic_shadow=true`, rejects broker-paper/live fill links, and
+requires conservative fill or explicit rejection evidence.
 
 ## 18. `stock_etf_evidence_clock_v1`
 
@@ -845,14 +850,19 @@ Required estimates before Phase 3:
 Capacity breach blocks evidence clock.
 
 Source validator: `openclaw_types::stock_etf_scorecard_inputs::StockEtfStorageCapacityV1`.
-The validator requires non-zero capacity estimates, archive path, capacity-plan hash,
-and an explicit policy that capacity breach blocks the evidence clock.
+The validator requires exact `stock_etf_storage_capacity_v1` contract id, source
+version `1`, non-zero capacity estimates, archive path, capacity-plan hash, and
+an explicit policy that capacity breach blocks the evidence clock.
 
 Scorecard bundle validator:
 `openclaw_types::stock_etf_scorecard_inputs::StockEtfScorecardInputBundleV1`
 requires cash ledger, cost model, benchmark, shadow fill, storage capacity,
-atomic fact hash, source commit, derived-only scorecard status, paper/shadow fill
-separation, and `live_fill_claimed=false`.
+market-data provenance contract hash, reference-data source contract hash,
+risk-policy contract hash, atomic fact hash, source commit, derived-only
+scorecard status, paper/shadow fill separation, Bybit-live unchanged proof, and
+`live_fill_claimed=false`. It rejects IBKR contact, connector runtime, broker
+fill import, scorecard writer, DB apply, evidence-clock start, serialized
+secret content, and tiny-live/live authority.
 
 ## 21. `stock_etf_kill_switch_and_disable_cleanup_runbook_v1`
 

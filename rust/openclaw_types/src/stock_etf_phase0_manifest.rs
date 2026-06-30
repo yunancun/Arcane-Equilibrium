@@ -7,6 +7,11 @@
 use serde::{Deserialize, Serialize};
 
 use crate::stock_etf_lane::{AssetLane, Broker};
+use crate::stock_etf_scorecard_inputs::{
+    BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID, STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID,
+    STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID, STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID,
+    STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
+};
 
 pub const STOCK_ETF_PHASE0_MANIFEST_SCHEMA: &str = "stock_etf_phase0_contract_packet_manifest_v1";
 pub const STOCK_ETF_PHASE0_MANIFEST_STATUS: &str = "ACCEPTED_PHASE0_CONTRACT_NO_RUNTIME_AUTHORITY";
@@ -37,13 +42,13 @@ const REQUIRED_CONTRACTS: &[&str] = &[
     "audit.asset_lane_events_v1",
     "stock_etf_db_evidence_ddl_v1",
     "stock_market_data_provenance_v1",
-    "broker_account_portfolio_cash_ledger_v1",
-    "cost_model_version_v1",
-    "benchmark_versions_v1",
-    "stock_shadow_fill_model_v1",
+    BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID,
+    STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID,
+    STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID,
+    STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
     "stock_etf_evidence_clock_v1",
     "gui_lane_contract_v1",
-    "stock_etf_storage_capacity_v1",
+    STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID,
     "stock_etf_kill_switch_and_disable_cleanup_runbook_v1",
     "stock_etf_release_packet_v1",
     "tiny_live_adr_eligibility_v1",

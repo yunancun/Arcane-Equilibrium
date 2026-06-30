@@ -468,3 +468,10 @@ Do not paste long reports or stable architecture into TODO.
 - Source checkpoint hardens `stock_market_data_provenance_v1` inside the Phase 3 evidence contract surface for lane/broker/environment, vendor/entitlement, payload/source hashes, timestamps, adjustment marker, instrument identity, and calendar session provenance.
 - The validator now rejects Bybit-live regression, IBKR contact, connector runtime, serialized secrets, and tiny-live/live authority; broker capability gates require it for market-data read, shadow-fill reconstruction, and scorecard derivation.
 - Verification passed: focused linked openclaw_types tests `25 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `171` integration/acceptance + `0` doc-tests. This grants no IBKR contact, connector runtime, collector, market-data ingestion, evidence clock, scorecard writer, DB apply, GUI lane authority, tiny-live, or live.
+
+## 2026-06-30 IBKR Stock/ETF Scorecard Input Contract Hardening
+
+- Source checkpoint hardens Phase 3 scorecard input contracts: cash ledger, cost model, benchmark, shadow fill, and storage capacity now require exact named `contract_id` values and `source_version=1`.
+- `StockEtfScorecardInputBundleV1` now requires market-data provenance, reference-data source, and risk-policy contract hashes, preserves Bybit-live unchanged proof, and rejects IBKR contact, connector runtime, broker fill import, scorecard writer, DB apply, evidence-clock start, serialized secrets, and tiny-live/live authority.
+- Broker capability registry and lane-scoped IPC now consume shared scorecard contract constants for relevant gates; default-blocked scorecard input template exposes these fields and remains secret-free.
+- Verification passed: focused linked openclaw_types tests `30 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `173` integration/acceptance + `0` doc-tests. This grants no IBKR contact, connector runtime, fill import, scorecard writer, DB apply, evidence clock, GUI lane authority, paper order, tiny-live, or live.

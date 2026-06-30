@@ -11,6 +11,7 @@ use crate::stock_etf_lane::{
     AssetLane, AuthorityScope, Broker, BrokerOperation, StockEtfDenialReason,
 };
 use crate::stock_etf_risk_policy::STOCK_ETF_RISK_POLICY_CONTRACT_ID;
+use crate::stock_etf_scorecard_inputs::STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID;
 
 pub const STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID: &str = "lane_scoped_ipc_v1";
 pub const STOCK_ETF_SCOPED_AUTHORIZATION_CONTRACT_ID: &str = "stock_etf_scoped_authorization_v1";
@@ -107,14 +108,14 @@ const PREVIEW_GATES: &[&str] = &[
     STOCK_ETF_RISK_POLICY_CONTRACT_ID,
     "instrument_identity_contract_v1",
     "stock_etf_pit_universe_contract_v1",
-    "cost_model_version_v1",
+    STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID,
     "broker_capability_registry_v1",
 ];
 const SHADOW_GATES: &[&str] = &[
     "stock_etf_evidence_clock_v1",
     "stock_etf_pit_universe_contract_v1",
     "stock_etf_strategy_hypothesis_contract_v1",
-    "cost_model_version_v1",
+    STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID,
     "audit.asset_lane_events_v1",
 ];
 

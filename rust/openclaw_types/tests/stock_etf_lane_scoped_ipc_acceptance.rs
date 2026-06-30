@@ -9,8 +9,8 @@ use std::path::PathBuf;
 use openclaw_types::{
     AssetLane, AuthorityScope, Broker, BrokerOperation, StockEtfDenialReason,
     StockEtfLaneScopedIpcBlocker, StockEtfLaneScopedIpcContractV1, StockEtfLaneScopedIpcMethod,
-    STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID, STOCK_ETF_RISK_POLICY_CONTRACT_ID,
-    STOCK_ETF_SCOPED_AUTHORIZATION_CONTRACT_ID,
+    STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID, STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID,
+    STOCK_ETF_RISK_POLICY_CONTRACT_ID, STOCK_ETF_SCOPED_AUTHORIZATION_CONTRACT_ID,
 };
 
 #[test]
@@ -83,6 +83,24 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
     assert!(submit
         .required_request_fields
         .contains(&"decision_lease_id".to_string()));
+
+    let preview = contract
+        .commands
+        .iter()
+        .find(|command| command.method == StockEtfLaneScopedIpcMethod::PreviewPaperOrder)
+        .expect("preview method exists");
+    assert!(preview
+        .required_gates
+        .contains(&STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID.to_string()));
+
+    let shadow = contract
+        .commands
+        .iter()
+        .find(|command| command.method == StockEtfLaneScopedIpcMethod::EvaluateShadowSignal)
+        .expect("shadow method exists");
+    assert!(shadow
+        .required_gates
+        .contains(&STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID.to_string()));
 }
 
 #[test]
