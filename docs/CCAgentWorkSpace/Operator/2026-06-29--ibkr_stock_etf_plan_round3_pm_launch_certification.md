@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 57 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 58 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -1233,3 +1233,32 @@ Verification 已過：
 沒有 secret access/creation、沒有 connector runtime、沒有 read probe execution、沒有
 paper order/cancel/replace、沒有 fill import、沒有 evidence writer、沒有 DB apply、沒有
 evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-06-30 Operator Update — Rust IPC Handler Split Guard
+
+本 session 已降低 Stock/ETF Rust IPC handler 檔案的結構風險：
+
+- 將 tail status summary builders 從
+  `rust/openclaw_engine/src/ipc_server/handlers/stock_etf.rs` 拆到
+  `rust/openclaw_engine/src/ipc_server/handlers/stock_etf/status_summaries.rs`。
+- 父檔 `stock_etf.rs` 從 `2217` 行降到 `1292` 行；子檔為 `934` 行。
+- 父檔仍保留 IPC 入口、readiness/phase2 precontact 與 request envelope parsing。
+- 新增 handler split guard，要求 Stock/ETF Rust IPC handler 父檔與子檔都低於
+  2000 行 governance cap。
+- Guard 同時確認 moved builder functions 在子模組，並阻止子模組引入 IBKR SDK
+  或 socket/HTTP client token。
+
+Verification 已過：
+
+- `rustfmt`：PASS
+- Engine `stock_etf` filter：`31 passed`
+- Rust IPC handler/test split static guards：`4 passed`
+- Full Stock/ETF FastAPI/static：`105 passed`
+- IBKR timeline + trace-title structure guard：`2 passed`
+- `git diff --check`：PASS
+
+邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 IBKR contact、沒有 SDK import、
+沒有 socket/HTTP、沒有 secret access/creation、沒有 connector runtime、沒有 read probe
+execution、沒有 paper order/cancel/replace、沒有 fill import、沒有 evidence writer、沒有
+DB apply、沒有 evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live
+execution 行為。
