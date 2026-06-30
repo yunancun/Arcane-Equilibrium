@@ -456,6 +456,7 @@ pub(crate) async fn dispatch_request(
         "stock_etf.get_lane_status"
         | "stock_etf.get_readiness"
         | "stock_etf.get_data_foundation_status"
+        | "stock_etf.get_policy_status"
         | "stock_etf.get_account_status"
         | "stock_etf.get_evidence_status"
         | "stock_etf.get_universe_status"

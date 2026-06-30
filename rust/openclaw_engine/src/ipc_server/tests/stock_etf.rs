@@ -566,6 +566,116 @@ async fn stock_etf_data_foundation_status_is_blocked_source_fixture_without_side
 }
 
 #[tokio::test]
+async fn stock_etf_policy_status_is_blocked_source_fixture_without_side_effects() {
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let req = r#"{"jsonrpc":"2.0","method":"stock_etf.get_policy_status","params":{},"id":4815}"#;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
+    )
+    .await;
+
+    assert!(resp.error.is_none());
+    let result = resp.result.expect("stock_etf policy status result");
+    assert_eq!(result["phase"], "phase2_policy_status_source_fixture");
+    assert_eq!(result["asset_lane"], "stock_etf_cash");
+    assert_eq!(result["broker"], "ibkr");
+    assert_eq!(result["environment"], "paper");
+    assert_eq!(result["policy_status_state"], "blocked");
+    assert_eq!(result["phase2_started"], false);
+    assert_eq!(result["phase3_started"], false);
+    assert_eq!(result["risk_runtime_started"], false);
+    assert_eq!(result["paper_order_rehearsal_started"], false);
+    assert_eq!(result["paper_order_submitted"], false);
+    assert_eq!(result["connector_runtime_started"], false);
+    assert_eq!(result["db_apply_performed"], false);
+    assert_eq!(result["evidence_clock_started"], false);
+    assert_eq!(result["scorecard_writer_started"], false);
+    assert_eq!(result["ibkr_live_enabled"], false);
+    assert_eq!(result["paper_order_entry_visible"], false);
+    assert_eq!(result["ibkr_call_performed"], false);
+    assert_eq!(result["secret_slot_touched"], false);
+    assert_eq!(result["order_routed"], false);
+    assert_eq!(result["bybit_ipc_reused"], false);
+
+    let risk = &result["risk_policy"];
+    assert_eq!(risk["expected_contract_id"], "stock_etf_risk_policy_v1");
+    assert_eq!(risk["contract_id"], "");
+    assert_eq!(risk["source_version"], 0);
+    assert_eq!(risk["config_version"], 0);
+    assert_eq!(risk["accepted"], false);
+    assert!(json_array_contains(
+        &risk["blockers"],
+        "contract_id_mismatch"
+    ));
+    assert!(json_array_contains(
+        &risk["blockers"],
+        "source_version_mismatch"
+    ));
+    assert_eq!(risk["environment"], "paper");
+    assert_eq!(risk["enabled"], false);
+    assert_eq!(risk["shadow_only"], true);
+    assert_eq!(risk["allow_margin"], false);
+    assert_eq!(risk["allow_short"], false);
+    assert_eq!(risk["allow_options"], false);
+    assert_eq!(risk["allow_cfd"], false);
+    assert_eq!(risk["allow_transfer"], false);
+    assert_eq!(risk["allow_live"], false);
+    assert_eq!(risk["bybit_live_execution_unchanged"], true);
+    assert_eq!(risk["ibkr_contact_performed"], false);
+    assert_eq!(risk["connector_runtime_started"], false);
+    assert_eq!(risk["secret_content_serialized"], false);
+
+    let registry = &result["broker_capability_registry"];
+    assert_eq!(
+        registry["expected_registry_id"],
+        "broker_capability_registry_v1"
+    );
+    assert_eq!(registry["registry_id"], "");
+    assert_eq!(registry["source_version"], 0);
+    assert_eq!(registry["accepted"], false);
+    assert!(json_array_contains(
+        &registry["blockers"],
+        "registry_id_mismatch"
+    ));
+    assert!(json_array_contains(
+        &registry["blockers"],
+        "source_version_mismatch"
+    ));
+    assert_eq!(registry["operation_count"], 0);
+    assert_eq!(registry["required_audit_field_count"], 0);
+    assert_eq!(registry["read_operation_count"], 0);
+    assert_eq!(registry["paper_operation_count"], 0);
+    assert_eq!(registry["denied_operation_count"], 0);
+    assert_eq!(registry["bybit_live_execution_unchanged"], true);
+    assert_eq!(registry["python_broker_write_authority_denied"], true);
+    assert_eq!(registry["ibkr_live_denied"], true);
+    assert_eq!(registry["cfd_margin_reserved_denied"], true);
+    assert_eq!(registry["first_ibkr_contact_performed"], false);
+    assert_eq!(registry["secret_content_serialized"], false);
+
+    assert_eq!(result["phase2"]["first_ibkr_contact_allowed"], false);
+    assert_eq!(result["phase2"]["connector_enabled"], false);
+}
+
+#[tokio::test]
 async fn stock_etf_shadow_status_is_blocked_source_fixture_without_side_effects() {
     let config = make_test_config();
     let dd = make_test_data_dir();

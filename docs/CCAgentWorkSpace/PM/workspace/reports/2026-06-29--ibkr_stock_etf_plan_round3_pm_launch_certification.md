@@ -104,3 +104,31 @@ PM must not say:
 - 絕對無遺漏。
 
 下一步仍是 Phase 0 ADR/AMD + named contract packet，不是 connector implementation。
+
+## 2026-06-30 PM Session Checkpoint
+
+PM 已在本 session 追加一個 source-only checkpoint：Policy / Capability Status
+read-only surface。
+
+已完成：
+
+- Rust IPC：`stock_etf.get_policy_status` fixture，來源為
+  `stock_etf_risk_policy_v1` + `broker_capability_registry_v1` blocked/default posture。
+- FastAPI：authenticated/no-store
+  `GET /api/v1/stock-etf/policy-status`，只 read IPC、fail-closed normalize。
+- GUI：`Policy Gate` metric 與 `Policy / Capability Status` panel。
+- Contracts：`lane_scoped_ipc_v1` 增加 `GetPolicyStatus`；
+  `gui_lane_contract_v1` 增加 exact GET-only policy-status endpoint。
+
+Verification：
+
+- Python compile PASS；Node inline parser PASS。
+- Focused FastAPI/static pytest `18 passed`。
+- Full Stock/ETF FastAPI/static pytest `72 passed`。
+- Engine Stock/ETF cargo filter `17 passed`。
+- GUI/lane IPC acceptance `17 passed`。
+- Full openclaw_types `35` unit/golden + `206` integration/acceptance + `0` doc-tests。
+
+PM 判定：checkpoint 可接受，但仍不是 launch approval。未批准 IBKR contact、secret、
+connector runtime、paper order rehearsal/submit、fill import、evidence clock、scorecard
+writer、DB apply、GUI lane authority、tiny-live、live 或 Bybit behavior change。

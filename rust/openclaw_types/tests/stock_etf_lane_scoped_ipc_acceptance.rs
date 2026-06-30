@@ -70,7 +70,7 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
     assert!(!contract.ibkr_contact_performed);
     assert!(!contract.connector_runtime_started);
     assert!(!contract.secret_content_serialized);
-    assert_eq!(contract.commands.len(), 14);
+    assert_eq!(contract.commands.len(), 15);
 
     let submit = contract
         .commands
@@ -144,6 +144,16 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
     );
     assert!(!data_foundation_status.effect_capable);
     assert!(!data_foundation_status.rust_owned);
+
+    let policy_status = contract
+        .commands
+        .iter()
+        .find(|command| command.method == StockEtfLaneScopedIpcMethod::GetPolicyStatus)
+        .expect("policy-status method exists");
+    assert_eq!(policy_status.operation, BrokerOperation::HealthRead);
+    assert_eq!(policy_status.authority_scope, AuthorityScope::DisplayOnly);
+    assert!(!policy_status.effect_capable);
+    assert!(!policy_status.rust_owned);
 
     let reconciliation_status = contract
         .commands

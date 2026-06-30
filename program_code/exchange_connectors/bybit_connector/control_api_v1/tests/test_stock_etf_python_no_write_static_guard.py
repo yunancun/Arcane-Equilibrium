@@ -146,6 +146,8 @@ def test_stock_etf_static_gui_surface_remains_display_only() -> None:
             violations.append(f"{path}: missing read-only Stock/ETF launch-status endpoint")
         if "/api/v1/stock-etf/paper-status" not in source:
             violations.append(f"{path}: missing read-only Stock/ETF paper-status endpoint")
+        if "/api/v1/stock-etf/policy-status" not in source:
+            violations.append(f"{path}: missing read-only Stock/ETF policy-status endpoint")
         if "/api/v1/stock-etf/readiness" not in source:
             violations.append(f"{path}: missing read-only Stock/ETF readiness endpoint")
         if "/api/v1/stock-etf/reconciliation-status" not in source:
