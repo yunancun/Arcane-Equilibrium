@@ -40,6 +40,27 @@ FORBIDDEN_IPC_METHOD_STRINGS = {
 
 FORBIDDEN_HTTP_ROUTE_METHODS = {"post", "put", "patch", "delete"}
 FORBIDDEN_BROKER_MODULE_PREFIXES = ("ibapi", "ib_insync")
+FORBIDDEN_STATIC_GUI_SNIPPETS = {
+    "ocPost(",
+    "fetch(",
+    "method: 'POST'",
+    'method: "POST"',
+    "method:'POST'",
+    'method:"POST"',
+    "method: 'PUT'",
+    'method: "PUT"',
+    "method: 'PATCH'",
+    'method: "PATCH"',
+    "method: 'DELETE'",
+    'method: "DELETE"',
+    "<form",
+    "localStorage",
+    "sessionStorage",
+    "ibkr.place_order",
+    "ibkr.submit_order",
+    "ibkr.cancel_order",
+    "ibkr.replace_order",
+}
 
 
 def _candidate_stock_etf_ibkr_python_files() -> list[Path]:
@@ -56,6 +77,12 @@ def _candidate_stock_etf_ibkr_python_files() -> list[Path]:
     if ibkr_connector_dir.exists():
         files.update(ibkr_connector_dir.rglob("*.py"))
 
+    return sorted(path for path in files if path.exists())
+
+
+def _candidate_stock_etf_static_gui_files() -> list[Path]:
+    static_dir = CONTROL_API_DIR / "app" / "static"
+    files = {static_dir / "tab-stock-etf.html"}
     return sorted(path for path in files if path.exists())
 
 
@@ -93,6 +120,23 @@ def test_stock_etf_ibkr_python_routes_remain_get_only_until_rust_authority_contr
                         violations.append(
                             f"{path}: {node.name}() exposes forbidden @{route_method} route"
                         )
+
+    assert violations == []
+
+
+def test_stock_etf_static_gui_surface_remains_display_only() -> None:
+    files = _candidate_stock_etf_static_gui_files()
+    assert files, "expected Stock/ETF static GUI surface"
+
+    violations: list[str] = []
+    forbidden_snippets = FORBIDDEN_STATIC_GUI_SNIPPETS | FORBIDDEN_IPC_METHOD_STRINGS
+    for path in files:
+        source = path.read_text(encoding="utf-8")
+        if "/api/v1/stock-etf/readiness" not in source:
+            violations.append(f"{path}: missing read-only Stock/ETF readiness endpoint")
+        for snippet in sorted(forbidden_snippets):
+            if snippet in source:
+                violations.append(f"{path}: contains forbidden display-only snippet {snippet!r}")
 
     assert violations == []
 
