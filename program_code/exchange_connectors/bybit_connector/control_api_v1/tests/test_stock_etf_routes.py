@@ -250,6 +250,9 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     auth_account_js = (STATIC_DIR / "tab-stock-etf-auth-account.js").read_text(
         encoding="utf-8"
     )
+    evidence_paper_js = (STATIC_DIR / "tab-stock-etf-evidence-paper.js").read_text(
+        encoding="utf-8"
+    )
     js_source = (STATIC_DIR / "tab-stock-etf.js").read_text(encoding="utf-8")
     source = (
         html_source
@@ -267,6 +270,8 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
         + fallback_js
         + "\n"
         + auth_account_js
+        + "\n"
+        + evidence_paper_js
         + "\n"
         + js_source
     )
@@ -293,6 +298,7 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     assert "tab-stock-etf-data-policy.js" in html_source
     assert "tab-stock-etf-fallbacks.js" in html_source
     assert "tab-stock-etf-auth-account.js" in html_source
+    assert "tab-stock-etf-evidence-paper.js" in html_source
     assert "tab-stock-etf.js" in html_source
     assert "se-evidence-status" in source
     assert "se-evidence-body" in source
