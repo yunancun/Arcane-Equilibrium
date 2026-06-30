@@ -12,7 +12,7 @@ This directory stores broker capability contracts and default-off runtime postur
 
 `ibkr_feature_flag_secret_auth_matrix.toml` records the default-blocked feature-flag, secret, and scoped-authorization matrix shape with exact `feature_flag_secret_auth_matrix_v1` / source-version fields. It does not authorize IBKR contact or paper orders.
 
-`ibkr_paper_order_lifecycle.toml` records the default-blocked paper order lifecycle and append-only event log shape with exact `ibkr_paper_order_lifecycle_v1` / `broker_lifecycle_event_log_v1` / source-version fields. It does not authorize connector creation or paper orders.
+`ibkr_paper_order_lifecycle.toml` records the default-blocked paper order lifecycle and append-only event log shape with exact `ibkr_paper_order_lifecycle_v1` / `broker_lifecycle_event_log_v1` / `stock_etf_paper_order_request_v1` / source-version fields, event sequencing, event-hash chaining, request-envelope hash linkage, and stale-state policy placeholders. It does not authorize connector creation, lifecycle writer startup, fill import, or paper orders.
 
 `stock_etf_broker_capability_registry.template.toml` records the default-blocked broker capability registry contract shape with exact `broker_capability_registry_v1` / source-version fields. It is source-only and does not contact IBKR, create secrets, create connectors, route orders, or change Bybit live execution behavior.
 

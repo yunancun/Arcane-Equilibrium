@@ -1267,6 +1267,58 @@ PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 
 scorecard writer、不做 Linux runtime sync/restart、不啟動 paper-shadow launch、不授權
 tiny-live/live 或任何 Bybit behavior change。
 
+## 24. 2026-06-30 PM session source checkpoint：Paper Lifecycle State-Machine Contract Hardening
+
+本 session 繼續 Phase 1D，但仍停留在 source-only lifecycle contract。上一個
+checkpoint 補上 lane IPC 與 paper lifecycle 之間的 typed request envelope；本
+checkpoint 補強 `ibkr_paper_order_lifecycle_v1` / `broker_lifecycle_event_log_v1`
+本身，避免後續 runtime 只檢查單筆 transition 而缺少 append-only lineage、
+operation-state 對映或 request-envelope linkage。
+
+新增 checkpoint：
+
+- `BrokerLifecycleEventLogV1` 新增 event sequence、genesis marker、previous event
+  hash、event hash、`stock_etf_paper_order_request_v1` request contract id、
+  request envelope hash 與 stale-state policy。
+- Lifecycle validator 要求非 genesis event 必須有 valid previous event hash；
+  genesis event 必須 sequence `1` 且不能帶 previous hash；所有 event 都必須有
+  valid event hash 與 request envelope hash。
+- Validator 現在要求 lifecycle event environment 必須 exact `paper`，不再只拒絕
+  `live_reserved_denied`。
+- Validator 新增 operation-bound transition matrix：submit/cancel/replace/fill-import
+  只能覆蓋各自允許的 state transitions；submit 不可冒充 fill，cancel 不可冒充
+  replace，replace 不可冒充 fill/cancel。
+- Denied event 不得推進 active broker state；`STATE_UNKNOWN` recovery 必須帶對應
+  stale-state policy，manual-review 與 reconciled terminal state 分開檢查。
+- Blocked template `settings/broker/ibkr_paper_order_lifecycle.toml` 同步新增
+  default-blocked 欄位；Phase 0 contract packet spec 同步記錄新欄位與 operation
+  transition policy。
+
+驗證：
+
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test ibkr_paper_lifecycle_acceptance -- --nocapture`：
+  lifecycle acceptance `12 passed`。
+- Linked Rust acceptance：
+  `ibkr_paper_lifecycle_acceptance` `12 passed` +
+  `stock_etf_paper_order_request_acceptance` `8 passed` +
+  `stock_etf_lane_scoped_ipc_acceptance` `9 passed` +
+  `stock_etf_phase0_manifest_acceptance` `6 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
+  Stock/ETF engine filter `21 passed`（既有 warnings only）。
+- Full `cargo test --manifest-path rust/Cargo.toml -p openclaw_types`：
+  `35` unit/golden + `221` integration/acceptance + `0` doc-tests。
+- `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
+- `rustfmt --edition 2021 --check` for changed lifecycle Rust files：PASS。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 connector runtime、
+不啟動 lifecycle writer、不啟動 Phase 1/2/3/4/5 runtime、不送 paper order、不做
+cancel/replace、不匯入 fill、不做 DB migration/apply、不做 Postgres dry-run、不啟動
+evidence clock、不啟動 scorecard writer、不做 Linux runtime sync/restart、不啟動
+paper-shadow launch、不授權 tiny-live/live 或任何 Bybit behavior change。因本 turn
+tool policy 僅允許在 operator 明確要求 subagent 時 spawn，PM 未派 E1/E2/E4
+subagent；已用 focused/full Mac regression 取代本地驗證。
+
 ## 23. 2026-06-30 PM session source checkpoint：Paper Request Envelope Contract
 
 本 session 繼續 Phase 1D，但仍停留在 source-only contract。上一個 checkpoint 固定

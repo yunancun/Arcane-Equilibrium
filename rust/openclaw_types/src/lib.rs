@@ -53,10 +53,10 @@ pub use ibkr_non_bybit_api_allowlist::{
     NonBybitApiAllowlistVerdict, NonBybitApiDenialReason, NON_BYBIT_API_ALLOWLIST_CONTRACT_ID,
 };
 pub use ibkr_paper_lifecycle::{
-    classify_ibkr_paper_restart_recovery, is_transition_allowed, BrokerLifecycleEventLogV1,
-    IbkrPaperLifecycleEventBlocker, IbkrPaperLifecycleEventVerdict, IbkrPaperRestartRecoveryAction,
-    IbkrPaperRestartRecoveryInputV1, BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
-    IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
+    classify_ibkr_paper_restart_recovery, is_operation_transition_allowed, is_transition_allowed,
+    BrokerLifecycleEventLogV1, IbkrPaperLifecycleEventBlocker, IbkrPaperLifecycleEventVerdict,
+    IbkrPaperRestartRecoveryAction, IbkrPaperRestartRecoveryInputV1, IbkrPaperStaleStatePolicy,
+    BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID, IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
 };
 pub use ibkr_phase2_artifact::{
     is_sha256_hex, IbkrPhase2GateArtifactBlocker, IbkrPhase2GateArtifactV1,

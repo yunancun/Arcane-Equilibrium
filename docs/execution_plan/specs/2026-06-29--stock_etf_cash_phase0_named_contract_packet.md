@@ -608,7 +608,14 @@ Required fields:
 
 - `lifecycle_contract_id=ibkr_paper_order_lifecycle_v1`
 - `event_log_contract_id=broker_lifecycle_event_log_v1`
+- `request_contract_id=stock_etf_paper_order_request_v1`
 - `source_version=1`
+- `event_sequence`
+- `genesis_event`
+- `previous_event_hash`
+- `event_hash`
+- `request_envelope_hash`
+- `stale_state_policy`
 
 States:
 
@@ -651,6 +658,22 @@ Restart recovery:
 - unknown broker state maps to `STATE_UNKNOWN`
 - `STATE_UNKNOWN` must transition only to `MANUAL_REVIEW_REQUIRED` or a reconciled terminal state with evidence
 
+Operation-bound transition policy:
+
+- submit operations may only cover local intent, Rust authority acceptance,
+  broker submit request, broker acknowledgement, submit rejection, submit
+  unknown-state, or manual-review transitions.
+- cancel operations may only cover cancel request, cancel acknowledgement,
+  cancel unknown-state, or manual-review transitions.
+- replace operations may only cover replace request, replacement
+  acknowledgement/rejection, replacement unknown-state, or manual-review
+  transitions.
+- fill-import operations may only cover partial/full fill, inactive state, or
+  reconciled terminal-state transitions.
+- denied events may not advance an order into an active broker state.
+- non-genesis lifecycle events require a valid previous event hash; genesis
+  events must be sequence `1` and have no previous event hash.
+
 ## 11. `broker_lifecycle_event_log_v1`
 
 Append-only event fields:
@@ -659,7 +682,13 @@ Append-only event fields:
 - `event_log_contract_id`
 - `source_version`
 - `event_id`
+- `event_sequence`
+- `genesis_event`
 - `event_time`
+- `previous_event_hash`
+- `event_hash`
+- `request_contract_id`
+- `request_envelope_hash`
 - `asset_lane`
 - `broker`
 - `environment`
@@ -672,6 +701,7 @@ Append-only event fields:
 - `next_state`
 - `allowed`
 - `denial_reason`
+- `stale_state_policy`
 - `raw_artifact_hash`
 - `redacted_summary_hash`
 
