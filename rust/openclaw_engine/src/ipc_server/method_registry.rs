@@ -85,6 +85,12 @@ pub const STOCK_ETF_GET_UNIVERSE_STATUS: IpcMethodSpec = IpcMethodSpec {
     slot: IpcSlotRequirement::None,
 };
 
+pub const STOCK_ETF_GET_SHADOW_STATUS: IpcMethodSpec = IpcMethodSpec {
+    name: "stock_etf.get_shadow_status",
+    readonly: true,
+    slot: IpcSlotRequirement::None,
+};
+
 pub const STOCK_ETF_PREVIEW_PAPER_ORDER: IpcMethodSpec = IpcMethodSpec {
     name: "stock_etf.preview_paper_order",
     readonly: true,
@@ -130,6 +136,7 @@ pub const IPC_METHOD_REGISTRY: &[IpcMethodSpec] = &[
     STOCK_ETF_GET_READINESS,
     STOCK_ETF_GET_EVIDENCE_STATUS,
     STOCK_ETF_GET_UNIVERSE_STATUS,
+    STOCK_ETF_GET_SHADOW_STATUS,
     STOCK_ETF_PREVIEW_PAPER_ORDER,
     STOCK_ETF_SUBMIT_PAPER_ORDER,
     STOCK_ETF_CANCEL_PAPER_ORDER,
@@ -199,6 +206,7 @@ mod tests {
             "stock_etf.get_readiness",
             "stock_etf.get_evidence_status",
             "stock_etf.get_universe_status",
+            "stock_etf.get_shadow_status",
             "stock_etf.preview_paper_order",
             "stock_etf.submit_paper_order",
             "stock_etf.cancel_paper_order",
@@ -226,6 +234,7 @@ mod tests {
             "stock_etf.get_readiness",
             "stock_etf.get_evidence_status",
             "stock_etf.get_universe_status",
+            "stock_etf.get_shadow_status",
             "stock_etf.preview_paper_order",
             "stock_etf.import_paper_fills",
             "stock_etf.evaluate_shadow_signal",

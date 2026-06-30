@@ -138,6 +138,8 @@ def test_stock_etf_static_gui_surface_remains_display_only() -> None:
             violations.append(f"{path}: missing read-only Stock/ETF lane-status endpoint")
         if "/api/v1/stock-etf/readiness" not in source:
             violations.append(f"{path}: missing read-only Stock/ETF readiness endpoint")
+        if "/api/v1/stock-etf/shadow-status" not in source:
+            violations.append(f"{path}: missing read-only Stock/ETF shadow-status endpoint")
         if "/api/v1/stock-etf/universe-status" not in source:
             violations.append(f"{path}: missing read-only Stock/ETF universe-status endpoint")
         for snippet in sorted(forbidden_snippets):
