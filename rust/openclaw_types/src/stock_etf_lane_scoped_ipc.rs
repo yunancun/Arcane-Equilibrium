@@ -7,13 +7,20 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::ibkr_non_bybit_api_allowlist::NON_BYBIT_API_ALLOWLIST_CONTRACT_ID;
 use crate::ibkr_paper_lifecycle::{
     BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID, IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
 };
 use crate::ibkr_phase2_gate::{
     IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
 };
-use crate::ibkr_phase2_policies::IBKR_REDACTION_POLICY_CONTRACT_ID;
+use crate::ibkr_phase2_policies::{
+    IBKR_AUDIT_EVENT_POLICY_CONTRACT_ID, IBKR_RATE_LIMIT_POLICY_CONTRACT_ID,
+    IBKR_REDACTION_POLICY_CONTRACT_ID,
+};
+use crate::ibkr_phase2_runtime::{
+    IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID, IBKR_SECRET_SLOT_CONTRACT_ID,
+};
 use crate::stock_etf_audit_events::STOCK_ETF_ASSET_LANE_EVENTS_CONTRACT_ID;
 use crate::stock_etf_broker_capability_registry::STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID;
 use crate::stock_etf_instrument_identity::STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID;
@@ -49,6 +56,7 @@ const REQUIRED_METHODS: &[StockEtfLaneScopedIpcMethod] = &[
     StockEtfLaneScopedIpcMethod::ReplacePaperOrder,
     StockEtfLaneScopedIpcMethod::ImportPaperFills,
     StockEtfLaneScopedIpcMethod::EvaluateShadowSignal,
+    StockEtfLaneScopedIpcMethod::PreviewReadonlyProbe,
 ];
 
 const STATUS_FIELDS: &[&str] = &["asset_lane", "broker", "request_id"];
@@ -166,6 +174,27 @@ const SHADOW_FIELDS: &[&str] = &[
     "cost_model_version_hash",
     "source_artifact_hash",
 ];
+const READONLY_PROBE_FIELDS: &[&str] = &[
+    "asset_lane",
+    "broker",
+    "environment",
+    "operation",
+    "probe_kind",
+    "api_action",
+    "request_id",
+    "probe_id",
+    "phase2_gate_artifact_hash",
+    "api_allowlist_hash",
+    "secret_slot_contract_hash",
+    "api_session_topology_hash",
+    "session_attestation_hash",
+    "redaction_policy_hash",
+    "rate_limit_policy_hash",
+    "audit_event_policy_hash",
+    "source_artifact_hash",
+    "raw_artifact_hash",
+    "redacted_summary_hash",
+];
 
 const PAPER_EFFECT_GATES: &[&str] = &[
     IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
@@ -202,6 +231,16 @@ const SHADOW_GATES: &[&str] = &[
     STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
     STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID,
     STOCK_ETF_ASSET_LANE_EVENTS_CONTRACT_ID,
+];
+const READONLY_PROBE_GATES: &[&str] = &[
+    IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
+    NON_BYBIT_API_ALLOWLIST_CONTRACT_ID,
+    IBKR_SECRET_SLOT_CONTRACT_ID,
+    IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID,
+    IBKR_SESSION_ATTESTATION_CONTRACT_ID,
+    IBKR_REDACTION_POLICY_CONTRACT_ID,
+    IBKR_RATE_LIMIT_POLICY_CONTRACT_ID,
+    IBKR_AUDIT_EVENT_POLICY_CONTRACT_ID,
 ];
 
 const REQUIRED_DENIALS: &[StockEtfDenialReason] = &[
@@ -421,6 +460,7 @@ pub enum StockEtfLaneScopedIpcMethod {
     ReplacePaperOrder,
     ImportPaperFills,
     EvaluateShadowSignal,
+    PreviewReadonlyProbe,
     BybitSubmitPaperOrderDenied,
     UnknownDenied,
 }
@@ -577,6 +617,14 @@ fn expected_method(method: StockEtfLaneScopedIpcMethod) -> ExpectedMethod {
             rust_owned: false,
             required_gates: SHADOW_GATES,
             required_request_fields: SHADOW_FIELDS,
+        },
+        Method::PreviewReadonlyProbe => ExpectedMethod {
+            operation: Op::HealthRead,
+            authority_scope: Scope::ReadOnly,
+            effect_capable: false,
+            rust_owned: true,
+            required_gates: READONLY_PROBE_GATES,
+            required_request_fields: READONLY_PROBE_FIELDS,
         },
         Method::BybitSubmitPaperOrderDenied | Method::UnknownDenied => ExpectedMethod {
             operation: Op::TransferOrAccountWrite,

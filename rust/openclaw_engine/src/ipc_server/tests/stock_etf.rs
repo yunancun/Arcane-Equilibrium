@@ -6,8 +6,8 @@ use super::{
     empty_h_state_cache_slot, empty_teacher_slot, make_test_config, make_test_data_dir,
 };
 use openclaw_types::{
-    StockEtfPaperFillImportRequestV1, StockEtfPaperOrderRequestEnvelopeV1,
-    StockEtfShadowSignalRequestV1,
+    StockEtfIbkrReadonlyProbeRequestV1, StockEtfPaperFillImportRequestV1,
+    StockEtfPaperOrderRequestEnvelopeV1, StockEtfShadowSignalRequestV1,
 };
 
 #[tokio::test]
@@ -430,6 +430,195 @@ async fn stock_etf_evaluate_shadow_signal_rejects_stale_or_minimal_params() {
         false
     );
     assert_eq!(result["shadow_signal_request"]["db_apply_performed"], false);
+}
+
+#[tokio::test]
+async fn stock_etf_preview_readonly_probe_validates_request_without_runtime_authority() {
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let params = serde_json::to_string(&StockEtfIbkrReadonlyProbeRequestV1::accepted_fixture())
+        .expect("readonly probe request json");
+    let req = format!(
+        r#"{{"jsonrpc":"2.0","method":"stock_etf.preview_readonly_probe","params":{params},"id":48017}}"#
+    );
+    let resp = dispatch_request(
+        &req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
+    )
+    .await;
+
+    assert!(resp.error.is_none());
+    let result = resp.result.expect("stock_etf result");
+    assert_eq!(result["allowed"], false);
+    assert_eq!(result["runtime_authority_denied"], true);
+    assert_eq!(result["ibkr_call_performed"], false);
+    assert_eq!(result["secret_slot_touched"], false);
+    assert_eq!(result["order_routed"], false);
+    assert_eq!(result["bybit_ipc_reused"], false);
+    assert_eq!(
+        result["readonly_probe_request"]["expected_contract_id"],
+        "stock_etf_ibkr_readonly_probe_request_v1"
+    );
+    assert_eq!(result["readonly_probe_request"]["parse_ok"], true);
+    assert_eq!(result["readonly_probe_request"]["accepted"], true);
+    assert_eq!(
+        result["readonly_probe_request"]["expected_request_method"],
+        "preview_readonly_probe"
+    );
+    assert_eq!(result["readonly_probe_request"]["accepted_for_ipc"], true);
+    assert_eq!(result["readonly_probe_request_accepted_for_ipc"], true);
+    assert_eq!(
+        result["readonly_probe_request"]["probe_kind"],
+        "connection_health"
+    );
+    assert_eq!(
+        result["readonly_probe_request"]["api_action"],
+        "connection_health_read"
+    );
+    assert_eq!(result["readonly_probe_request"]["operation"], "health_read");
+    assert_eq!(
+        result["readonly_probe_request"]["authority_scope"],
+        "read_only"
+    );
+    assert_eq!(result["readonly_probe_request"]["effect_capable"], false);
+    assert_eq!(result["readonly_probe_request"]["request_id_present"], true);
+    assert_eq!(result["readonly_probe_request"]["probe_id_present"], true);
+    assert_eq!(
+        result["readonly_probe_request"]["phase2_gate_artifact_hash_present"],
+        true
+    );
+    assert_eq!(
+        result["readonly_probe_request"]["api_allowlist_hash_present"],
+        true
+    );
+    assert_eq!(
+        result["readonly_probe_request"]["read_probe_executed"],
+        false
+    );
+    assert_eq!(
+        result["readonly_probe_request"]["ibkr_contact_performed"],
+        false
+    );
+    assert_eq!(
+        result["readonly_probe_request"]["connector_runtime_started"],
+        false
+    );
+    assert_eq!(
+        result["readonly_probe_request"]["secret_content_serialized"],
+        false
+    );
+    assert_eq!(result["readonly_probe_request"]["order_routed"], false);
+    assert_eq!(
+        result["readonly_probe_request"]["paper_order_submitted"],
+        false
+    );
+    assert_eq!(
+        result["readonly_probe_request"]["db_apply_performed"],
+        false
+    );
+    assert_eq!(
+        result["readonly_probe_request"]["evidence_clock_started"],
+        false
+    );
+    assert_eq!(result["readonly_probe_request"]["bybit_path_reused"], false);
+    assert_eq!(
+        result["readonly_probe_request"]["live_or_tiny_live_authorized"],
+        false
+    );
+    assert_eq!(
+        result["phase2"]["external_surface_gate"]["ibkr_contact_allowed"],
+        false
+    );
+}
+
+#[tokio::test]
+async fn stock_etf_preview_readonly_probe_rejects_minimal_params() {
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let req =
+        r#"{"jsonrpc":"2.0","method":"stock_etf.preview_readonly_probe","params":{},"id":48018}"#;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
+    )
+    .await;
+
+    assert!(resp.error.is_none());
+    let result = resp.result.expect("stock_etf result");
+    assert_eq!(result["allowed"], false);
+    assert_eq!(result["ibkr_call_performed"], false);
+    assert_eq!(result["secret_slot_touched"], false);
+    assert_eq!(result["order_routed"], false);
+    assert_eq!(result["bybit_ipc_reused"], false);
+    assert_eq!(result["readonly_probe_request"]["parse_ok"], false);
+    assert_eq!(result["readonly_probe_request"]["accepted"], false);
+    assert_eq!(
+        result["readonly_probe_request"]["blockers"][0],
+        "readonly_probe_request_parse_failed"
+    );
+    assert_eq!(result["readonly_probe_request"]["accepted_for_ipc"], false);
+    assert_eq!(result["readonly_probe_request_accepted_for_ipc"], false);
+    assert_eq!(
+        result["readonly_probe_request"]["read_probe_executed"],
+        false
+    );
+    assert_eq!(
+        result["readonly_probe_request"]["ibkr_contact_performed"],
+        false
+    );
+    assert_eq!(
+        result["readonly_probe_request"]["connector_runtime_started"],
+        false
+    );
+    assert_eq!(
+        result["readonly_probe_request"]["secret_content_serialized"],
+        false
+    );
+    assert_eq!(result["readonly_probe_request"]["order_routed"], false);
+    assert_eq!(
+        result["readonly_probe_request"]["paper_order_submitted"],
+        false
+    );
+    assert_eq!(
+        result["readonly_probe_request"]["db_apply_performed"],
+        false
+    );
+    assert_eq!(
+        result["readonly_probe_request"]["evidence_clock_started"],
+        false
+    );
 }
 
 #[tokio::test]

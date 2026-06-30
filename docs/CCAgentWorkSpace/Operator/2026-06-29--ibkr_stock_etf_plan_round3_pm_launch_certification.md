@@ -586,6 +586,40 @@ Verification 已過：
 clock、沒有 scorecard writer、沒有 Linux runtime sync/restart，也沒有改動 Bybit live
 execution 行為。
 
+## 2026-06-30 Operator Update — Read-Only Probe IPC Binding
+
+本 session 已完成下一個 source-only checkpoint：
+`stock_etf.preview_readonly_probe`。
+
+這次不是 IBKR read probe，也不是 connector runtime。變更只在 Rust IPC contract、
+method registry、dispatch、handler/test 與 source spec/template：
+
+- `stock_etf.preview_readonly_probe` 會把 params 解析成
+  `stock_etf_ibkr_readonly_probe_request_v1`，回傳 typed verdict。
+- valid envelope 只能證明 request shape 可接受；top-level `allowed` 仍因 Phase 2
+  gate/default flags 維持 false。
+- minimal/空 params 會 fail closed：`readonly_probe_request_parse_failed`。
+- `lane_scoped_ipc_v1` 現在要求這個 method 是 readonly/slot-none，並帶 Phase 2
+  gate、API allowlist、secret-slot/topology/session、redaction/rate-limit/audit
+  lineage。
+
+Verification 已過：
+
+- Rust format：PASS
+- Lane-scoped IPC acceptance：`9 passed`
+- Readonly-probe IPC focused：`2 passed`
+- Registry boundary focused：`1 passed`
+- Full openclaw_types：`35` unit/golden + `247` integration/acceptance + `0` doc-tests
+- Engine Stock/ETF：`29 passed`
+- Workspace `cargo check`：PASS
+- `git diff --check`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 secret access/creation、沒有 connector runtime、
+沒有 IBKR SDK import、沒有 socket/HTTP、沒有 read probe execution、沒有 Phase
+1/2/3/4/5 runtime start、沒有 paper order/cancel/replace、沒有 fill import、沒有 DB
+apply、沒有 evidence clock、沒有 scorecard writer、沒有 Linux runtime sync/restart，
+也沒有改動 Bybit live execution 行為。
+
 ## 2026-06-30 Operator Update — Tiny-Live Eligibility Lineage Gate
 
 本 session 已完成下一個 source/status/display-only checkpoint：
