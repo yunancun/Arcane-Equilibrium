@@ -2111,7 +2111,7 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 
 新增 checkpoint：
 
-- 主計畫 PM session checkpoint 現在從 14 到 54 連續遞增，無重複編號。
+- 主計畫 PM session checkpoint 現在從 14 到 55 連續遞增，無重複編號。
 - 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
   lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
   connector skeleton / readonly-probe / broker read gate / policy display / operation
@@ -2522,6 +2522,42 @@ sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
 - `rustfmt --edition 2021 rust/openclaw_engine/src/ipc_server/tests/stock_etf.rs`：PASS。
 - `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf_status_methods_ignore_untrusted_params -- --nocapture`：
   `1 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
+  `31 passed`。
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  `104 passed`。
+- `python3 -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
+  `2 passed`。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 55. 2026-06-30 PM session source checkpoint：Rust Dispatch Registry Routing Guard
+
+本 checkpoint 消除 Rust IPC Stock/ETF routing 的 duplicated method list。前面
+`method_registry.rs` 已經記錄 Stock/ETF fixture metadata；但 `dispatch.rs` 仍有另一份
+手寫 match list，未來新增/改名 method 時可能造成 registry、dispatch 與 live-token
+exclusion drift。這次把 dispatch 路由改為 registry-driven。
+
+已完成：
+
+- 新增 `is_stock_etf_fixture_method(name)` registry helper。
+- Helper 要求 method 必須是 registered `stock_etf.` method，且 `slot=None`。
+- `dispatch.rs` 的 Stock/ETF arm 從 duplicated literal list 改為
+  `method if is_stock_etf_fixture_method(method)`。
+- 既有 debug assertion 仍檢查 slot 為 `None`。
+- Registry tests 同步要求每個 Stock/ETF method 都被 helper 接受，且 legacy
+  `submit_paper_order` / unknown method 不會被 helper 接受。
+- 本 checkpoint 不新增 IPC method、不改 Stock/ETF handler、不改 legacy Bybit
+  `submit_paper_order` path、不啟動 runtime，只降低 method routing drift。
+
+驗證：
+
+- `rustfmt --edition 2021 rust/openclaw_engine/src/ipc_server/dispatch.rs rust/openclaw_engine/src/ipc_server/method_registry.rs`：PASS。
 - `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
   `31 passed`。
 - `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：

@@ -93,6 +93,7 @@ def test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles() -> None
         "Python Persistence Static Guard",
         "OpenAPI Client Input Surface Guard",
         "Rust Status IPC Untrusted Params Guard",
+        "Rust Dispatch Registry Routing Guard",
     )
     plan_source = IBKR_STOCK_ETF_PLAN.read_text()
     operator_source = IBKR_STOCK_ETF_OPERATOR.read_text()
