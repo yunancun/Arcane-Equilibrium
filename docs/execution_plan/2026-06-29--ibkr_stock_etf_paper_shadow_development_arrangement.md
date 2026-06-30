@@ -2111,7 +2111,7 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 
 新增 checkpoint：
 
-- 主計畫 PM session checkpoint 現在從 14 到 53 連續遞增，無重複編號。
+- 主計畫 PM session checkpoint 現在從 14 到 54 連續遞增，無重複編號。
 - 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
   lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
   connector skeleton / readonly-probe / broker read gate / policy display / operation
@@ -2486,6 +2486,44 @@ GET/status surface 不宣告 request body、query/path/cookie/client header inpu
 
 - `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_routes.py`：
   `14 passed`。
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  `104 passed`。
+- `python3 -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
+  `2 passed`。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 54. 2026-06-30 PM session source checkpoint：Rust Status IPC Untrusted Params Guard
+
+本 checkpoint 把 client-state-untrusted 邊界往 Rust IPC status/readiness fixture 層
+下沉。前面 FastAPI 已經鎖住 handler signature、OpenAPI input surface 與 `params={}`；
+這次證明即使 direct IPC caller 帶入惡意非空 params，Stock/ETF status/readiness methods
+也不會改變 output。
+
+已完成：
+
+- 新增 `stock_etf_status_methods_ignore_untrusted_params`。
+- 覆蓋 16 個 Stock/ETF status/readiness methods。
+- 每個 method 分別用 `{}` params 與惡意非空 params 呼叫。
+- 惡意 params 宣稱 `asset_lane=crypto_perp`、`broker=bybit`、`environment=live`、
+  `method=stock_etf.submit_paper_order`、IBKR contact、secret touch、order routing、
+  Bybit IPC reuse。
+- 兩次 result 必須完全一致，防止 direct IPC params 影響 status/readiness fixture。
+- 本 guard 不改 handler runtime behavior、不新增 IPC method、不啟動 runtime，只防
+  Rust status fixture 受 client params 污染。
+
+驗證：
+
+- `rustfmt --edition 2021 rust/openclaw_engine/src/ipc_server/tests/stock_etf.rs`：PASS。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf_status_methods_ignore_untrusted_params -- --nocapture`：
+  `1 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
+  `31 passed`。
 - `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
   `104 passed`。
 - `python3 -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
