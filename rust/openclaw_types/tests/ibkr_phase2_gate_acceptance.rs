@@ -6,12 +6,14 @@
 use std::path::PathBuf;
 
 use openclaw_types::{
-    classify_non_bybit_api_action, BrokerEnvironment, IbkrApiBaseline,
-    IbkrExternalSurfaceGateBlocker, IbkrExternalSurfaceGateStatus, IbkrExternalSurfaceGateV1,
-    IbkrGatewayMode, IbkrHostPolicy, IbkrPortPolicy, IbkrSecretSlotMode,
+    classify_non_bybit_api_action, required_non_bybit_api_actions, BrokerEnvironment,
+    IbkrApiBaseline, IbkrExternalSurfaceGateBlocker, IbkrExternalSurfaceGateStatus,
+    IbkrExternalSurfaceGateV1, IbkrGatewayMode, IbkrHostPolicy, IbkrPortPolicy, IbkrSecretSlotMode,
     IbkrSessionAttestationBlocker, IbkrSessionAttestationV1, NonBybitApiAction,
-    NonBybitApiDenialReason, IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID, IBKR_LIVE_GATEWAY_PORT,
+    NonBybitApiAllowlistBlocker, NonBybitApiAllowlistV1, NonBybitApiDenialReason,
+    IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID, IBKR_LIVE_GATEWAY_PORT,
     IBKR_PAPER_GATEWAY_DEFAULT_PORT, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
+    NON_BYBIT_API_ALLOWLIST_CONTRACT_ID,
 };
 
 #[test]
@@ -146,6 +148,111 @@ fn non_bybit_api_allowlist_separates_reads_paper_writes_and_denials() {
         client_portal.denial_reason,
         Some(NonBybitApiDenialReason::ClientPortalWebApiDenied)
     );
+}
+
+#[test]
+fn non_bybit_api_allowlist_contract_pins_complete_action_matrix() {
+    let allowlist = NonBybitApiAllowlistV1::accepted_fixture();
+    let verdict = allowlist.validate();
+
+    assert!(verdict.accepted);
+    assert!(verdict.blockers.is_empty());
+    assert_eq!(allowlist.contract_id, NON_BYBIT_API_ALLOWLIST_CONTRACT_ID);
+    assert_eq!(allowlist.source_version, 1);
+    assert_eq!(
+        allowlist.read_actions.len()
+            + allowlist.paper_write_actions.len()
+            + allowlist.denied_actions.len(),
+        required_non_bybit_api_actions().len()
+    );
+    assert!(!allowlist.ibkr_contact_performed);
+    assert!(!allowlist.secret_content_serialized);
+    assert!(allowlist.bybit_live_execution_protected);
+}
+
+#[test]
+fn non_bybit_api_allowlist_contract_rejects_identity_and_matrix_drift() {
+    let default = NonBybitApiAllowlistV1::default().validate();
+    assert!(!default.accepted);
+    assert!(default
+        .blockers
+        .contains(&NonBybitApiAllowlistBlocker::ContractIdMismatch));
+    assert!(default
+        .blockers
+        .contains(&NonBybitApiAllowlistBlocker::SourceVersionMismatch));
+    assert!(default
+        .blockers
+        .contains(&NonBybitApiAllowlistBlocker::ActionMissing));
+
+    let mut drifted = NonBybitApiAllowlistV1 {
+        contract_id: "non_bybit_api_allowlist_v1_fixture".to_string(),
+        source_version: 2,
+        api_baseline: IbkrApiBaseline::ClientPortalWebApiDenied,
+        client_portal_web_api_denied: false,
+        live_order_denied: false,
+        account_transfer_denied: false,
+        margin_short_options_cfd_denied: false,
+        market_data_entitlement_purchase_denied: false,
+        account_management_write_denied: false,
+        ibkr_contact_performed: true,
+        secret_content_serialized: true,
+        bybit_live_execution_protected: false,
+        ..NonBybitApiAllowlistV1::accepted_fixture()
+    };
+    drifted
+        .read_actions
+        .push(NonBybitApiAction::PaperOrderSubmit);
+    drifted
+        .denied_actions
+        .retain(|action| *action != NonBybitApiAction::LiveOrderSubmit);
+    let verdict = drifted.validate();
+
+    assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&NonBybitApiAllowlistBlocker::ContractIdMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&NonBybitApiAllowlistBlocker::SourceVersionMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&NonBybitApiAllowlistBlocker::ApiBaselineMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&NonBybitApiAllowlistBlocker::ActionMissing));
+    assert!(verdict
+        .blockers
+        .contains(&NonBybitApiAllowlistBlocker::ActionDuplicated));
+    assert!(verdict
+        .blockers
+        .contains(&NonBybitApiAllowlistBlocker::ActionInWrongBucket));
+    assert!(verdict
+        .blockers
+        .contains(&NonBybitApiAllowlistBlocker::ClientPortalWebApiNotDenied));
+    assert!(verdict
+        .blockers
+        .contains(&NonBybitApiAllowlistBlocker::LiveOrderNotDenied));
+    assert!(verdict
+        .blockers
+        .contains(&NonBybitApiAllowlistBlocker::AccountTransferNotDenied));
+    assert!(verdict
+        .blockers
+        .contains(&NonBybitApiAllowlistBlocker::MarginShortOptionsCfdNotDenied));
+    assert!(verdict
+        .blockers
+        .contains(&NonBybitApiAllowlistBlocker::MarketDataEntitlementPurchaseNotDenied));
+    assert!(verdict
+        .blockers
+        .contains(&NonBybitApiAllowlistBlocker::AccountManagementWriteNotDenied));
+    assert!(verdict
+        .blockers
+        .contains(&NonBybitApiAllowlistBlocker::IbkrContactPerformed));
+    assert!(verdict
+        .blockers
+        .contains(&NonBybitApiAllowlistBlocker::SecretContentSerialized));
+    assert!(verdict
+        .blockers
+        .contains(&NonBybitApiAllowlistBlocker::BybitLiveExecutionNotProtected));
 }
 
 #[test]
@@ -285,6 +392,8 @@ fn source_gate_template_is_blocked_and_secret_free() {
         parsed["allowlist"]["denied"]["live_order"].as_bool(),
         Some(true)
     );
+    assert_eq!(parsed["allowlist"]["contract_id"].as_str(), Some(""));
+    assert_eq!(parsed["allowlist"]["source_version"].as_integer(), Some(0));
     assert_eq!(
         parsed["allowlist"]["denied"]["client_portal_web_api"].as_bool(),
         Some(true)

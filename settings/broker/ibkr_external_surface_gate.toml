@@ -21,6 +21,14 @@ paper_attestation_contract_present = false
 python_no_write_guard_present = false
 ibkr_call_performed = false
 
+[allowlist]
+contract_id = ""
+source_version = 0
+api_baseline = "ib_gateway_tws_api"
+ibkr_contact_performed = false
+secret_content_serialized = false
+bybit_live_execution_protected = true
+
 [allowlist.read_after_external_gate]
 server_time = true
 connection_health = true

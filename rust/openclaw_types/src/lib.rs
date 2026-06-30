@@ -9,6 +9,7 @@ pub mod agent;
 pub mod asset_venue;
 pub mod cognitive;
 pub mod ibkr_feature_flag_secret_auth;
+pub mod ibkr_non_bybit_api_allowlist;
 pub mod ibkr_paper_lifecycle;
 pub mod ibkr_phase2_artifact;
 pub mod ibkr_phase2_gate;
@@ -44,6 +45,11 @@ pub use ibkr_feature_flag_secret_auth::{
     FeatureFlagSecretAuthMatrixV1, FeatureFlagSecretAuthVerdict, StockEtfAuthorizationEnvelopeV1,
     FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID,
 };
+pub use ibkr_non_bybit_api_allowlist::{
+    classify_non_bybit_api_action, required_non_bybit_api_actions, NonBybitApiAction,
+    NonBybitApiAllowlistBlocker, NonBybitApiAllowlistDecision, NonBybitApiAllowlistV1,
+    NonBybitApiAllowlistVerdict, NonBybitApiDenialReason, NON_BYBIT_API_ALLOWLIST_CONTRACT_ID,
+};
 pub use ibkr_paper_lifecycle::{
     classify_ibkr_paper_restart_recovery, is_transition_allowed, BrokerLifecycleEventLogV1,
     IbkrPaperLifecycleEventBlocker, IbkrPaperLifecycleEventVerdict, IbkrPaperRestartRecoveryAction,
@@ -55,15 +61,13 @@ pub use ibkr_phase2_artifact::{
     IbkrPhase2GateArtifactVerdict,
 };
 pub use ibkr_phase2_gate::{
-    classify_non_bybit_api_action, is_loopback_or_unix_local_host, IbkrApiBaseline,
-    IbkrExternalSurfaceGateBlocker, IbkrExternalSurfaceGateStatus, IbkrExternalSurfaceGateV1,
-    IbkrExternalSurfaceGateVerdict, IbkrGatewayMode, IbkrHostPolicy, IbkrPortPolicy,
-    IbkrSecretSlotMode, IbkrSessionAttestationBlocker, IbkrSessionAttestationStatus,
-    IbkrSessionAttestationV1, IbkrSessionAttestationVerdict, NonBybitApiAction,
-    NonBybitApiAllowlistDecision, NonBybitApiDenialReason, IBKR_LIVE_GATEWAY_PORT,
-    IBKR_LIVE_TWS_PORT, IBKR_PAPER_GATEWAY_DEFAULT_PORT, IBKR_PHASE2_ADR, IBKR_PHASE2_AMD,
-    IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
-    NON_BYBIT_API_ALLOWLIST_CONTRACT_ID,
+    is_loopback_or_unix_local_host, IbkrApiBaseline, IbkrExternalSurfaceGateBlocker,
+    IbkrExternalSurfaceGateStatus, IbkrExternalSurfaceGateV1, IbkrExternalSurfaceGateVerdict,
+    IbkrGatewayMode, IbkrHostPolicy, IbkrPortPolicy, IbkrSecretSlotMode,
+    IbkrSessionAttestationBlocker, IbkrSessionAttestationStatus, IbkrSessionAttestationV1,
+    IbkrSessionAttestationVerdict, IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
+    IBKR_LIVE_GATEWAY_PORT, IBKR_LIVE_TWS_PORT, IBKR_PAPER_GATEWAY_DEFAULT_PORT, IBKR_PHASE2_ADR,
+    IBKR_PHASE2_AMD, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
 };
 pub use ibkr_phase2_policies::{
     IbkrAuditEventPolicyBlocker, IbkrAuditEventPolicyV1, IbkrPaperAttestationPolicyBlocker,
