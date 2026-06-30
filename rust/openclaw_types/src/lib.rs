@@ -25,6 +25,7 @@ pub mod stock_etf_disable_cleanup_runbook;
 pub mod stock_etf_gui_lane_contract;
 pub mod stock_etf_instrument_identity;
 pub mod stock_etf_lane;
+pub mod stock_etf_lane_scoped_ipc;
 pub mod stock_etf_phase0_manifest;
 pub mod stock_etf_phase3_evidence;
 pub mod stock_etf_pit_universe;
@@ -109,6 +110,11 @@ pub use stock_etf_lane::{
     BrokerCapabilityRequest, BrokerEnvironment, BrokerOperation, IbkrPaperOrderLifecycleState,
     InstrumentKind, StockEtfConfigError, StockEtfContractParseError, StockEtfDenialReason,
     StockEtfFeatureFlags, StockEtfGateInputs, StockEtfReadiness,
+};
+pub use stock_etf_lane_scoped_ipc::{
+    StockEtfLaneScopedIpcBlocker, StockEtfLaneScopedIpcCommandV1, StockEtfLaneScopedIpcContractV1,
+    StockEtfLaneScopedIpcMethod, StockEtfLaneScopedIpcVerdict,
+    STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID, STOCK_ETF_SCOPED_AUTHORIZATION_CONTRACT_ID,
 };
 pub use stock_etf_phase0_manifest::{
     required_phase0_contract_ids, StockEtfPhase0ApiBaselineV1, StockEtfPhase0AuthorityV1,
