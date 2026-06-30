@@ -462,7 +462,8 @@ Denied reasons:
 
 Source validator:
 `openclaw_types::stock_etf_lane_scoped_ipc::StockEtfLaneScopedIpcContractV1`.
-The validator pins the exact Stock/ETF IPC method matrix, required gates,
+The validator requires exact `contract_id == lane_scoped_ipc_v1`,
+`source_version == 1`, the exact Stock/ETF IPC method matrix, required gates,
 request fields, typed denials, and Rust ownership. Paper submit/cancel/replace
 must require `phase2_ibkr_external_surface_gate_v1`,
 `ibkr_session_attestation_v1`, `stock_etf_scoped_authorization_v1`,

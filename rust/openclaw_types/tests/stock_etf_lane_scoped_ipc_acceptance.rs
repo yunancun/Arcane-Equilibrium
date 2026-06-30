@@ -25,6 +25,10 @@ fn default_lane_scoped_ipc_contract_blocks_all_authority() {
     ));
     assert!(has(
         &verdict.blockers,
+        StockEtfLaneScopedIpcBlocker::SourceVersionMismatch
+    ));
+    assert!(has(
+        &verdict.blockers,
         StockEtfLaneScopedIpcBlocker::WrongAssetLane
     ));
     assert!(has(
@@ -52,6 +56,7 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
         verdict.blockers
     );
     assert_eq!(contract.contract_id, STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID);
+    assert_eq!(contract.source_version, 1);
     assert_eq!(contract.asset_lane, AssetLane::StockEtfCash);
     assert_eq!(contract.broker, Broker::Ibkr);
     assert!(contract.rust_authority_owner);
@@ -105,6 +110,25 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
     assert!(shadow
         .required_gates
         .contains(&STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID.to_string()));
+}
+
+#[test]
+fn lane_scoped_ipc_requires_exact_contract_id_and_source_version() {
+    let contract = StockEtfLaneScopedIpcContractV1 {
+        contract_id: "lane_scoped_ipc_v1_fixture".to_string(),
+        source_version: 2,
+        ..StockEtfLaneScopedIpcContractV1::accepted_fixture()
+    };
+    let blockers = contract.validate().blockers;
+
+    assert!(has(
+        &blockers,
+        StockEtfLaneScopedIpcBlocker::ContractIdMismatch
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfLaneScopedIpcBlocker::SourceVersionMismatch
+    ));
 }
 
 #[test]
@@ -262,6 +286,8 @@ fn blocked_template_is_parseable_and_secret_free() {
     let parsed: StockEtfLaneScopedIpcContractV1 =
         toml::from_str(&raw).expect("lane-scoped IPC template parses");
 
+    assert_eq!(parsed.contract_id, "");
+    assert_eq!(parsed.source_version, 0);
     assert_eq!(parsed.asset_lane, AssetLane::CryptoPerp);
     assert_eq!(parsed.broker, Broker::Bybit);
     assert!(!parsed.validate().accepted);
