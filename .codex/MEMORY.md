@@ -945,7 +945,7 @@ Do not paste long reports or stable architecture into TODO.
 
 ## 2026-06-30 IBKR Stock/ETF Plan Timeline Checkpoint Guard
 
-- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 52, aligned to the PM memory / Operator source timeline.
+- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 53, aligned to the PM memory / Operator source timeline.
 - Added a structure test that reads the main plan Markdown and fails if PM session checkpoint numbers become duplicated, skipped, or out of order.
 - Verification passed: focused IBKR timeline structure test `1 passed`; section-body compare against `HEAD` PASS; `git diff --check` PASS. The full structure test file still has pre-existing docs README index drift failures unrelated to this guard. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
 
@@ -1008,3 +1008,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only AST guard proving Stock/ETF / IBKR Python surfaces do not import persistence, DB, object-store, or local evidence-writer modules.
 - The guard also blocks dynamic persistence imports and explicit file-writer calls such as write_text/write_bytes/open-write/os.replace in the scoped Stock/ETF/IBKR Python surface.
 - Verification passed: Python no-write static guard `9 passed`; full Stock/ETF FastAPI/static `103 passed`; focused IBKR timeline + trace-title structure tests `2 passed`; `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF OpenAPI Client Input Surface Guard
+
+- PM added a route/OpenAPI guard proving Stock/ETF GET operations expose no request body and no client-state parameters beyond the optional `Authorization` header from existing auth.
+- The guard blocks future query/path/header/cookie/body inputs from appearing in the public Stock/ETF OpenAPI contract.
+- Verification passed: Stock/ETF route tests `14 passed`; full Stock/ETF FastAPI/static `104 passed`; focused IBKR timeline + trace-title structure tests `2 passed`; `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.

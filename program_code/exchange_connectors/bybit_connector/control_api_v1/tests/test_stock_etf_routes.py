@@ -111,6 +111,32 @@ def test_stock_etf_openapi_paths_match_gui_lane_contract_template(
     assert stock_get_paths == template_endpoints
 
 
+def test_stock_etf_openapi_exposes_no_client_state_inputs(
+    client_fail_closed: TestClient,
+) -> None:
+    schema = client_fail_closed.get("/openapi.json").json()
+
+    checked_paths = 0
+    violations: list[str] = []
+    for path, methods in schema["paths"].items():
+        if not path.startswith("/api/v1/stock-etf"):
+            continue
+        checked_paths += 1
+        operation = methods.get("get", {})
+        if "requestBody" in operation:
+            violations.append(f"{path}: exposes requestBody")
+        for parameter in operation.get("parameters", []):
+            name = str(parameter.get("name", "")).lower()
+            location = parameter.get("in")
+            required = bool(parameter.get("required", False))
+            if location == "header" and name == "authorization" and not required:
+                continue
+            violations.append(f"{path}: exposes client-state parameter {parameter!r}")
+
+    assert checked_paths == 16
+    assert violations == []
+
+
 def test_stock_etf_all_registered_get_routes_require_auth(
     client_fail_closed: TestClient,
 ) -> None:
