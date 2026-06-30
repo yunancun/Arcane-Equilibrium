@@ -71,6 +71,35 @@ FORBIDDEN_NETWORK_MODULE_PREFIXES = (
     "websocket",
     "websockets",
 )
+FORBIDDEN_PERSISTENCE_MODULE_PREFIXES = (
+    "asyncpg",
+    "boto3",
+    "duckdb",
+    "mysql",
+    "pymongo",
+    "psycopg",
+    "psycopg2",
+    "redis",
+    "sqlalchemy",
+    "sqlite3",
+)
+FORBIDDEN_LOCAL_PERSISTENCE_MODULES = {
+    "agent_event_store",
+    "agent_spine_client",
+    "audit_persistence",
+    "db_pool",
+    "l2_call_ledger_writer",
+    "openclaw_proposal_store",
+    "state_store",
+}
+FORBIDDEN_FILE_WRITE_METHOD_NAMES = {
+    "mkdir",
+    "rename",
+    "touch",
+    "unlink",
+    "write_bytes",
+    "write_text",
+}
 FORBIDDEN_STATIC_GUI_SNIPPETS = {
     "ocPost(",
     "fetch(",
@@ -167,6 +196,23 @@ def test_stock_etf_ibkr_python_surface_has_no_network_client_imports() -> None:
                 _record_forbidden_import(path, node, violations)
             elif isinstance(node, ast.Call):
                 _record_forbidden_dynamic_import(path, node, violations)
+
+    assert violations == []
+
+
+def test_stock_etf_ibkr_python_surface_has_no_persistence_or_file_writers() -> None:
+    files = _candidate_stock_etf_ibkr_python_files()
+    assert files, "expected at least the display-only stock_etf_routes.py surface"
+
+    violations: list[str] = []
+    for path in files:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                _record_forbidden_persistence_import(path, node, violations)
+            elif isinstance(node, ast.Call):
+                _record_forbidden_persistence_dynamic_import(path, node, violations)
+                _record_forbidden_file_write_call(path, node, violations)
 
     assert violations == []
 
@@ -369,8 +415,77 @@ def _record_forbidden_dynamic_import(path: Path, node: ast.Call, violations: lis
         violations.append(f"{path}: dynamically imports forbidden network client module {module}")
 
 
+def _record_forbidden_persistence_import(
+    path: Path, node: ast.Import | ast.ImportFrom, violations: list[str]
+) -> None:
+    for module in _imported_module_names(node):
+        if _is_forbidden_module(module, FORBIDDEN_PERSISTENCE_MODULE_PREFIXES):
+            violations.append(f"{path}: imports forbidden persistence module {module}")
+        if _is_forbidden_local_persistence_module(module):
+            violations.append(f"{path}: imports forbidden local persistence module {module}")
+
+
+def _record_forbidden_persistence_dynamic_import(
+    path: Path, node: ast.Call, violations: list[str]
+) -> None:
+    call_name = _call_name(node.func)
+    if call_name not in {"__import__", "import_module"} or not node.args:
+        return
+    first_arg = node.args[0]
+    if not isinstance(first_arg, ast.Constant) or not isinstance(first_arg.value, str):
+        return
+    module = first_arg.value
+    if _is_forbidden_module(module, FORBIDDEN_PERSISTENCE_MODULE_PREFIXES):
+        violations.append(f"{path}: dynamically imports forbidden persistence module {module}")
+    if _is_forbidden_local_persistence_module(module):
+        violations.append(f"{path}: dynamically imports forbidden local persistence module {module}")
+
+
+def _record_forbidden_file_write_call(path: Path, node: ast.Call, violations: list[str]) -> None:
+    call_name = _call_name(node.func)
+    if call_name in FORBIDDEN_FILE_WRITE_METHOD_NAMES:
+        violations.append(f"{path}: calls forbidden file writer {call_name}()")
+        return
+    if call_name == "open" and _open_call_uses_write_mode(node):
+        violations.append(f"{path}: opens a file in write/append/create mode")
+        return
+    if (
+        isinstance(node.func, ast.Attribute)
+        and node.func.attr == "replace"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "os"
+    ):
+        violations.append(f"{path}: calls forbidden file writer os.replace()")
+
+
 def _is_forbidden_module(module: str, prefixes: tuple[str, ...]) -> bool:
     return any(module == prefix or module.startswith(f"{prefix}.") for prefix in prefixes)
+
+
+def _is_forbidden_local_persistence_module(module: str) -> bool:
+    return module.split(".", 1)[0] in FORBIDDEN_LOCAL_PERSISTENCE_MODULES
+
+
+def _imported_module_names(node: ast.Import | ast.ImportFrom) -> list[str]:
+    module_names: list[str] = []
+    if isinstance(node, ast.Import):
+        module_names.extend(alias.name for alias in node.names)
+    elif node.module:
+        module_names.append(node.module)
+        module_names.extend(f"{node.module}.{alias.name}" for alias in node.names)
+    return module_names
+
+
+def _open_call_uses_write_mode(node: ast.Call) -> bool:
+    mode: str | None = None
+    if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant):
+        if isinstance(node.args[1].value, str):
+            mode = node.args[1].value
+    for keyword in node.keywords:
+        if keyword.arg == "mode" and isinstance(keyword.value, ast.Constant):
+            if isinstance(keyword.value.value, str):
+                mode = keyword.value.value
+    return mode is not None and any(flag in mode for flag in ("w", "a", "x", "+"))
 
 
 def _decorated_http_method(decorator: ast.expr) -> str | None:

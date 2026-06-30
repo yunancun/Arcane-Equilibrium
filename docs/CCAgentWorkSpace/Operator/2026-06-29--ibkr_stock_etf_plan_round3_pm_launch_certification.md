@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 51 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 52 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -1081,6 +1081,30 @@ Verification 已過：
 
 - Python no-write static guard：`8 passed`
 - Full Stock/ETF FastAPI/static：`102 passed`
+- IBKR timeline + trace-title structure guard：`2 passed`
+- `git diff --check`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
+access/creation、沒有 connector runtime、沒有 read probe execution、沒有 paper
+order/cancel/replace、沒有 fill import、沒有 evidence writer、沒有 DB apply、沒有
+evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-06-30 Operator Update — Python Persistence Static Guard
+
+本 session 已加固 Stock/ETF / IBKR Python source surface 的 persistence/no-writer 邊界：
+
+- 新增 AST guard，掃描 scoped Stock/ETF / IBKR Python files。
+- 禁止匯入 DB/persistence/object-store modules，例如 psycopg/psycopg2/sqlalchemy/
+  sqlite3/asyncpg/duckdb/redis/boto3。
+- 禁止匯入 local persistence/evidence-writer modules，例如 `db_pool`、
+  `audit_persistence`、`state_store`、`agent_event_store`。
+- 禁止 dynamic persistence imports 與明確 file writer calls：`write_text`、
+  `write_bytes`、write-mode `open(...)`、`os.replace(...)` 等。
+
+Verification 已過：
+
+- Python no-write static guard：`9 passed`
+- Full Stock/ETF FastAPI/static：`103 passed`
 - IBKR timeline + trace-title structure guard：`2 passed`
 - `git diff --check`：PASS
 
