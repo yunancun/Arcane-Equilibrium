@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::stock_etf_audit_events::STOCK_ETF_ASSET_LANE_EVENTS_CONTRACT_ID;
 use crate::stock_etf_broker_capability_registry::STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID;
 use crate::stock_etf_gui_lane_contract::STOCK_ETF_GUI_LANE_CONTRACT_ID;
+use crate::stock_etf_instrument_identity::STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID;
 use crate::stock_etf_lane::{AssetLane, Broker};
 use crate::stock_etf_lane_scoped_ipc::STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID;
 use crate::stock_etf_phase3_evidence::STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID;
@@ -35,7 +36,7 @@ const REQUIRED_CONTRACTS: &[&str] = &[
     STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID,
     "phase2_ibkr_external_surface_gate_v1",
     "non_bybit_api_allowlist_v1",
-    "instrument_identity_contract_v1",
+    STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID,
     "stock_etf_pit_universe_contract_v1",
     "stock_etf_strategy_hypothesis_contract_v1",
     "stock_etf_risk_policy_v1",

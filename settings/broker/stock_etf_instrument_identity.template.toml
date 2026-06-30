@@ -6,6 +6,7 @@
 
 [identity]
 contract_id = ""
+source_version = 0
 asset_lane = "crypto_perp"
 broker = "bybit"
 instrument_kind = "crypto_perp"

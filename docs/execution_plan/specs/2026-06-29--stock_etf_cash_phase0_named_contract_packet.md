@@ -184,6 +184,8 @@ can consume a symbol.
 
 Required fields:
 
+- `contract_id=instrument_identity_contract_v1`
+- `source_version=1`
 - `asset_lane=stock_etf_cash`
 - `broker=ibkr`
 - `instrument_kind`: `stock` | `etf` | `cash`
