@@ -11,6 +11,7 @@ SRV_ROOT = Path(__file__).resolve().parents[5]
 if str(SRV_ROOT) not in sys.path:
     sys.path.insert(0, str(SRV_ROOT))
 
+import program_code.broker_connectors.ibkr_connector as ibkr_connector  # noqa: E402
 from program_code.broker_connectors.ibkr_connector import (  # noqa: E402
     IBKR_CONNECTOR_SURFACE_ID,
     IbkrPaperClientBoundary,
@@ -114,6 +115,25 @@ SIDE_EFFECT_FALSE_KEYS = {
     "python_import_side_effects",
     "secret_content_loaded",
 }
+EXPECTED_CONNECTOR_EXPORTS = (
+    "IBKR_CONNECTOR_SURFACE_ID",
+    "IbkrPaperClientBoundary",
+    "IbkrReadOnlyClient",
+    "IbkrReadOnlyEndpointConfig",
+    "IbkrReadOnlySurfaceStatus",
+)
+EXPECTED_READONLY_CLIENT_PUBLIC_SURFACE = {
+    "account_snapshot_preview",
+    "config",
+    "connection_plan",
+    "contract_details_preview",
+    "market_data_preview",
+    "readiness",
+}
+EXPECTED_PAPER_CLIENT_PUBLIC_SURFACE = {
+    "fill_import_readiness",
+    "lifecycle_readiness",
+}
 
 
 def _ibkr_connector_python_files() -> list[Path]:
@@ -148,9 +168,24 @@ def _call_name(func: ast.AST) -> str:
     return ""
 
 
+def _declared_public_surface(cls: type) -> set[str]:
+    return {name for name in vars(cls) if not name.startswith("_")}
+
+
+def test_ibkr_connector_package_exports_only_source_boundary_types() -> None:
+    assert tuple(ibkr_connector.__all__) == EXPECTED_CONNECTOR_EXPORTS
+    for name in EXPECTED_CONNECTOR_EXPORTS:
+        assert getattr(ibkr_connector, name) is not None
+
+
 def test_ibkr_connector_skeleton_has_no_python_broker_write_methods() -> None:
     for cls in (IbkrReadOnlyClient, IbkrPaperClientBoundary):
         assert sorted(FORBIDDEN_WRITE_METHODS.intersection(dir(cls))) == []
+
+
+def test_ibkr_connector_client_public_surfaces_are_frozen_source_only() -> None:
+    assert _declared_public_surface(IbkrReadOnlyClient) == EXPECTED_READONLY_CLIENT_PUBLIC_SURFACE
+    assert _declared_public_surface(IbkrPaperClientBoundary) == EXPECTED_PAPER_CLIENT_PUBLIC_SURFACE
 
 
 def test_ibkr_connector_skeleton_does_not_import_bybit_or_control_api_modules() -> None:

@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 75 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 76 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -1494,6 +1494,33 @@ Verification 已過：
 access/creation、沒有 connector runtime、沒有 read probe execution、沒有 paper
 order/cancel/replace、沒有 fill import、沒有 evidence writer、沒有 DB apply、沒有
 evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — IBKR Connector Public API Freeze Guard
+
+這次不是 connector runtime，也不是把 Python skeleton 變成 IBKR client。變更只凍結
+IBKR connector skeleton 的 public package/class API：
+
+- `ibkr_connector.__all__` 只能 export surface id、read-only client、paper boundary
+  client、endpoint config、surface status。
+- `IbkrReadOnlyClient` public surface 只能是 read-only/display preview methods。
+- `IbkrPaperClientBoundary` public surface 只能是 lifecycle/fill-import readiness
+  descriptors。
+- 既有 forbidden write method guard 保留；新增 exact public surface freeze，防止
+  未批准前加出 runtime start、order write、secret/network 或 Bybit reuse 入口。
+
+Verification 已過：
+
+- Connector skeleton focused tests：`8 passed`
+- Python no-write static guard：`18 passed`
+- Full Stock/ETF FastAPI/static：`117 passed`
+- IBKR timeline + trace-title structure guard：`2 passed`
+- `git diff --check`：PASS
+
+邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 client input、沒有 IBKR
+contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation、沒有
+connector runtime、沒有 read probe execution、沒有 paper order/cancel/replace、沒有 fill
+import、沒有 evidence writer、沒有 DB apply、沒有 evidence clock、沒有 tiny-live/live
+authority，也沒有改動 Bybit live execution 行為。
 
 ## 2026-07-01 Operator Update — Rust IPC Secret/Env Material Static Guard
 

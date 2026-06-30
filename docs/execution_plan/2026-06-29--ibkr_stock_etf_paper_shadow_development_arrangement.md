@@ -2111,7 +2111,7 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 
 新增 checkpoint：
 
-- 主計畫 PM session checkpoint 現在從 14 到 75 連續遞增，無重複編號。
+- 主計畫 PM session checkpoint 現在從 14 到 76 連續遞增，無重複編號。
 - 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
   lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
   connector skeleton / readonly-probe / broker read gate / policy display / operation
@@ -3421,6 +3421,49 @@ state runtime。
   `10 passed`。
 - `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
   `115 passed`。
+- `python3 -B -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
+  `2 passed`。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 76. 2026-07-01 PM session source checkpoint：IBKR Connector Public API Freeze Guard
+
+本 checkpoint 將 Python IBKR connector skeleton 的 package/class public surface 固定為
+source-only API。這不是 connector runtime，不新增 IBKR call，不改 FastAPI route；目標是
+避免未批准前在 skeleton package 上新增 runtime start、order write、secret/network 或
+Bybit reuse 入口。
+
+已完成：
+
+- 更新 `test_stock_etf_ibkr_connector_skeleton.py`：
+  - Import package module 本身，檢查 `ibkr_connector.__all__` exact order/content。
+  - 新增 `EXPECTED_CONNECTOR_EXPORTS`，只允許 surface id、read-only client、
+    paper boundary client、endpoint config、surface status。
+  - 新增 `EXPECTED_READONLY_CLIENT_PUBLIC_SURFACE`，只允許 `config`、
+    `readiness()`、`connection_plan()`、`account_snapshot_preview()`、
+    `market_data_preview()`、`contract_details_preview()`。
+  - 新增 `EXPECTED_PAPER_CLIENT_PUBLIC_SURFACE`，只允許
+    `lifecycle_readiness()` 與 `fill_import_readiness()`。
+  - 保留既有 forbidden write method guard；新增 exact public surface freeze，防止
+    future write-like method 以不同名字進入 public class surface。
+- 本 checkpoint 不改 production behavior、不改 endpoint、不改 IPC method、不改 Bybit
+  path、不啟動任何 IBKR 或 connector runtime。
+
+驗證：
+
+- `python3 -B -m py_compile program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_ibkr_connector_skeleton.py`：
+  PASS。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_ibkr_connector_skeleton.py`：
+  `8 passed`。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_python_no_write_static_guard.py`：
+  `18 passed`。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  `117 passed`。
 - `python3 -B -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
   `2 passed`。
 - `git diff --check`：PASS。
