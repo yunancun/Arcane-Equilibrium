@@ -506,3 +506,9 @@ Do not paste long reports or stable architecture into TODO.
 - Source checkpoint hardens `broker_capability_registry_v1`: registry artifacts now require exact `registry_id == broker_capability_registry_v1` plus `source_version=1`.
 - The Phase 0 manifest validator and `lane_scoped_ipc_v1` paper/preview gates consume the shared broker registry contract constant; the blocked template exposes `source_version=0`; regression tests reject fixture-like registry ids and wrong source versions.
 - Verification passed: focused linked openclaw_types tests `22 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `179` integration/acceptance + `0` doc-tests. This grants no IBKR contact, connector runtime, paper order, evidence clock, scorecard writer, DB apply, GUI authority, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Lane-Scoped IPC Hardening
+
+- Source checkpoint hardens `lane_scoped_ipc_v1`: IPC contract artifacts now require exact `contract_id == lane_scoped_ipc_v1` plus `source_version=1`.
+- The Phase 0 manifest validator and IPC paper-effect self-gates consume the shared lane-scoped IPC contract constant; the blocked template exposes `source_version=0`; regression tests reject fixture-like IPC ids and wrong source versions.
+- Verification passed: focused linked openclaw_types tests `14 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `180` integration/acceptance + `0` doc-tests. This grants no IPC runtime, IBKR contact, connector runtime, paper order, evidence clock, scorecard writer, DB apply, GUI authority, tiny-live, live, or Bybit behavior change.

@@ -10,6 +10,7 @@ use crate::stock_etf_audit_events::STOCK_ETF_ASSET_LANE_EVENTS_CONTRACT_ID;
 use crate::stock_etf_broker_capability_registry::STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID;
 use crate::stock_etf_gui_lane_contract::STOCK_ETF_GUI_LANE_CONTRACT_ID;
 use crate::stock_etf_lane::{AssetLane, Broker};
+use crate::stock_etf_lane_scoped_ipc::STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID;
 use crate::stock_etf_phase3_evidence::STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID;
 use crate::stock_etf_release_packet::STOCK_ETF_RELEASE_PACKET_CONTRACT_ID;
 use crate::stock_etf_scorecard_inputs::{
@@ -42,7 +43,7 @@ const REQUIRED_CONTRACTS: &[&str] = &[
     "ibkr_api_session_topology_v1",
     "ibkr_session_attestation_v1",
     "feature_flag_secret_auth_matrix_v1",
-    "lane_scoped_ipc_v1",
+    STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID,
     "ibkr_paper_order_lifecycle_v1",
     "broker_lifecycle_event_log_v1",
     STOCK_ETF_ASSET_LANE_EVENTS_CONTRACT_ID,

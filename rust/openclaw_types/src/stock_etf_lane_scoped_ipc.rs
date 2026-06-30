@@ -94,7 +94,7 @@ const PAPER_EFFECT_GATES: &[&str] = &[
     "risk_config_hash",
     "instrument_identity_contract_v1",
     "idempotency_key",
-    "lane_scoped_ipc_v1",
+    STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID,
     "ibkr_paper_order_lifecycle_v1",
     STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID,
     "audit.asset_lane_events_v1",
@@ -140,6 +140,7 @@ const REQUIRED_DENIALS: &[StockEtfDenialReason] = &[
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StockEtfLaneScopedIpcContractV1 {
     pub contract_id: String,
+    pub source_version: u32,
     pub asset_lane: AssetLane,
     pub broker: Broker,
     pub rust_authority_owner: bool,
@@ -159,6 +160,7 @@ impl Default for StockEtfLaneScopedIpcContractV1 {
     fn default() -> Self {
         Self {
             contract_id: String::new(),
+            source_version: 0,
             asset_lane: AssetLane::CryptoPerp,
             broker: Broker::Bybit,
             rust_authority_owner: false,
@@ -180,6 +182,7 @@ impl StockEtfLaneScopedIpcContractV1 {
     pub fn accepted_fixture() -> Self {
         Self {
             contract_id: STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID.to_string(),
+            source_version: 1,
             asset_lane: AssetLane::StockEtfCash,
             broker: Broker::Ibkr,
             rust_authority_owner: true,
@@ -206,6 +209,9 @@ impl StockEtfLaneScopedIpcContractV1 {
 
         if self.contract_id != STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID {
             blockers.push(Blocker::ContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
         }
         if self.asset_lane != AssetLane::StockEtfCash {
             blockers.push(Blocker::WrongAssetLane);
@@ -473,6 +479,7 @@ impl<B> StockEtfLaneScopedIpcVerdict<B> {
 #[serde(rename_all = "snake_case")]
 pub enum StockEtfLaneScopedIpcBlocker {
     ContractIdMismatch,
+    SourceVersionMismatch,
     WrongAssetLane,
     WrongBroker,
     RustAuthorityOwnerMissing,
