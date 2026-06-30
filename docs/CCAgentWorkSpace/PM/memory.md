@@ -3031,3 +3031,9 @@
 
 - PM corrected high-level plan/report/operator status text: Phase 0 ADR/AMD/named contracts now exist in source, and Phase 1-5 source/status/display hardening is in progress; runtime launch remains blocked.
 - Verification passed: `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, paper order/cancel/replace, fill import, scorecard writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Rust Connector Skeleton Readiness Source
+
+- PM made Rust IPC `stock_etf.get_readiness` emit the same fail-closed `connector_skeleton` block already normalized and displayed by FastAPI/GUI, so the IBKR connector skeleton boundary is source-owned by Rust readiness instead of only Python fallback.
+- The block remains source/status-only: `ibkr_stock_etf_readonly_connector_skeleton_v1`, `accepted=false`, `status=blocked_source_only`, `phase2_gate_not_accepted`, and all contact/secret/paper/live/write/Bybit-reuse flags false.
+- Verification passed: `rustfmt`, focused engine readiness `1 passed`, engine `stock_etf` filter `27 passed`, Python compile PASS, focused readiness/skeleton/no-write `13 passed`, full Stock/ETF FastAPI/static `94 passed`, Node syntax PASS, workspace `cargo check` PASS, and `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, paper order/cancel/replace, fill import, scorecard writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.

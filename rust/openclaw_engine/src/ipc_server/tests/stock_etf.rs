@@ -538,6 +538,24 @@ async fn stock_etf_readiness_exposes_phase2_precontact_blockers_without_ibkr_con
     assert_eq!(result["order_routed"], false);
     assert_eq!(result["bybit_ipc_reused"], false);
 
+    let connector_skeleton = &result["connector_skeleton"];
+    assert_eq!(
+        connector_skeleton["surface_id"],
+        "ibkr_stock_etf_readonly_connector_skeleton_v1"
+    );
+    assert_eq!(connector_skeleton["accepted"], false);
+    assert_eq!(connector_skeleton["status"], "blocked_source_only");
+    assert!(json_array_contains(
+        &connector_skeleton["blockers"],
+        "phase2_gate_not_accepted"
+    ));
+    assert_eq!(connector_skeleton["network_contact_performed"], false);
+    assert_eq!(connector_skeleton["secret_content_loaded"], false);
+    assert_eq!(connector_skeleton["paper_channel_exposed"], false);
+    assert_eq!(connector_skeleton["live_channel_exposed"], false);
+    assert_eq!(connector_skeleton["order_write_method_present"], false);
+    assert_eq!(connector_skeleton["bybit_path_reused"], false);
+
     let phase2 = &result["phase2"];
     assert_eq!(phase2["immutable_pass_artifact_present"], false);
     assert_eq!(phase2["first_ibkr_contact_allowed"], false);

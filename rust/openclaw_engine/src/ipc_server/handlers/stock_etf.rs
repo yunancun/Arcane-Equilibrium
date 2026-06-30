@@ -77,6 +77,7 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
                 "phase": "phase2_precontact_source_fixture",
                 "readiness": flags.readiness(),
                 "phase2": phase2,
+                "connector_skeleton": connector_skeleton_summary(),
                 "ibkr_live_enabled": false,
                 "ibkr_call_performed": false,
                 "secret_slot_touched": false,
@@ -1668,6 +1669,21 @@ fn phase2_precontact_summary() -> serde_json::Value {
         "connector_enabled": false,
         "secret_slot_touched": false,
         "order_routed": false,
+    })
+}
+
+fn connector_skeleton_summary() -> serde_json::Value {
+    serde_json::json!({
+        "surface_id": "ibkr_stock_etf_readonly_connector_skeleton_v1",
+        "accepted": false,
+        "status": "blocked_source_only",
+        "blockers": ["phase2_gate_not_accepted"],
+        "network_contact_performed": false,
+        "secret_content_loaded": false,
+        "paper_channel_exposed": false,
+        "live_channel_exposed": false,
+        "order_write_method_present": false,
+        "bybit_path_reused": false,
     })
 }
 
