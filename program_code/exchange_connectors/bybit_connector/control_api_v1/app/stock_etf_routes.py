@@ -11,7 +11,7 @@ contacts IBKR, or exposes paper/live order actions.
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from fastapi.responses import RedirectResponse
 
 from . import main_legacy as base
@@ -40,6 +40,12 @@ _DENIED_OPERATIONS: tuple[str, ...] = (
     "ibkr_secret_slot_creation",
     "ibkr_api_contact_before_phase2_gate",
 )
+_NO_STORE_HEADERS: dict[str, str] = {
+    "Cache-Control": "no-cache, no-store, private, max-age=0, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+    "Vary": "Authorization",
+}
 _SAFETY_FALSE_FIELDS: tuple[str, ...] = (
     "ibkr_live_enabled",
     "ibkr_call_performed",
@@ -47,6 +53,11 @@ _SAFETY_FALSE_FIELDS: tuple[str, ...] = (
     "order_routed",
     "bybit_ipc_reused",
 )
+
+
+def _apply_no_store_headers(response: Response) -> None:
+    for key, value in _NO_STORE_HEADERS.items():
+        response.headers[key] = value
 
 
 def _phase2_fail_closed() -> dict[str, Any]:
@@ -265,10 +276,12 @@ async def _query_stock_etf_readiness(
 
 @stock_etf_router.get("/readiness")
 async def get_stock_etf_readiness(
+    response: Response,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ) -> dict[str, Any]:
     """Read-only Stock/ETF IBKR readiness surface for the GUI."""
     del actor
+    _apply_no_store_headers(response)
     ipc = await _get_ipc()
     raw, reason = await _query_stock_etf_readiness(ipc)
     return {
@@ -281,4 +294,4 @@ async def get_stock_etf_readiness(
 
 @stock_etf_router.get("", include_in_schema=False)
 async def stock_etf_tab_redirect() -> RedirectResponse:
-    return RedirectResponse(url="/static/tab-stock-etf.html")
+    return RedirectResponse(url="/static/tab-stock-etf.html", headers=_NO_STORE_HEADERS)

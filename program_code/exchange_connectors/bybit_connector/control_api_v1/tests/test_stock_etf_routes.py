@@ -76,6 +76,11 @@ def _valid_api_allowlist() -> dict[str, Any]:
 def test_stock_etf_readiness_returns_200_when_ipc_down(client_fail_closed: TestClient) -> None:
     resp = client_fail_closed.get("/api/v1/stock-etf/readiness")
     assert resp.status_code == 200
+    assert "no-store" in resp.headers["cache-control"]
+    assert "private" in resp.headers["cache-control"]
+    assert resp.headers["pragma"] == "no-cache"
+    assert resp.headers["expires"] == "0"
+    assert resp.headers["vary"] == "Authorization"
     body = resp.json()
     data = body["data"]
     assert body["ok"] is True
@@ -163,6 +168,66 @@ def test_stock_etf_readiness_uses_only_readonly_fixture_method() -> None:
     assert data["api_allowlist"]["denied_action_count"] == 10
     assert "ibkr_live_order_submit" in data["denied_operations"]
     assert "ibkr_secret_slot_creation" in data["denied_operations"]
+    fake_ipc.call.assert_awaited_once()
+
+
+def test_stock_etf_readiness_does_not_trust_client_lane_state() -> None:
+    async def _fake_call(method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        assert method == "stock_etf.get_readiness"
+        assert params == {}
+        return {
+            "readiness": {
+                "asset_lane": "stock_etf_cash",
+                "broker": "ibkr",
+                "default_asset_lane": "crypto_perp",
+                "readonly_ready": True,
+                "paper_ready": False,
+                "shadow_only": True,
+                "live_denied": True,
+                "denial_reasons": ["shadow_only"],
+            },
+            "phase2": {
+                "external_surface_gate": {
+                    "status": "BLOCKED",
+                    "ibkr_contact_allowed": False,
+                    "blockers": ["status_not_pass"],
+                    "ibkr_call_performed": False,
+                },
+                "api_allowlist": _valid_api_allowlist(),
+                "immutable_pass_artifact_present": False,
+                "first_ibkr_contact_allowed": False,
+                "connector_enabled": False,
+            },
+            "ibkr_live_enabled": False,
+            "ibkr_call_performed": False,
+            "secret_slot_touched": False,
+            "order_routed": False,
+            "bybit_ipc_reused": False,
+        }
+
+    fake_ipc = AsyncMock()
+    fake_ipc.call = AsyncMock(side_effect=_fake_call)
+    client = _make_client_with_ipc(fake_ipc)
+    try:
+        resp = client.get(
+            "/api/v1/stock-etf/readiness",
+            params={
+                "default_asset_lane": "stock_etf_cash",
+                "paper_ready": "true",
+                "first_ibkr_contact_allowed": "true",
+            },
+            headers={"X-Asset-Lane": "stock_etf_cash", "X-Ibkr-Paper-Ready": "true"},
+        )
+        data = resp.json()["data"]
+    finally:
+        client._stock_etf_patcher.stop()  # type: ignore[attr-defined]
+
+    assert "no-store" in resp.headers["cache-control"]
+    assert data["default_asset_lane"] == "crypto_perp"
+    assert data["source_readiness"]["paper_ready"] is False
+    assert data["first_ibkr_contact_allowed"] is False
+    assert data["paper_order_entry_visible"] is False
+    assert data["ibkr_live_enabled"] is False
     fake_ipc.call.assert_awaited_once()
 
 
@@ -323,6 +388,8 @@ def test_stock_etf_redirect_to_static_tab(client_fail_closed: TestClient) -> Non
     resp = client_fail_closed.get("/api/v1/stock-etf", follow_redirects=False)
     assert resp.status_code in (302, 307)
     assert "/static/tab-stock-etf.html" in resp.headers.get("location", "")
+    assert "no-store" in resp.headers["cache-control"]
+    assert resp.headers["vary"] == "Authorization"
 
 
 def test_stock_etf_console_tab_registered() -> None:
