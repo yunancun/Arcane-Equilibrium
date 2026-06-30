@@ -218,6 +218,8 @@ STOCK_ETF_STATIC_GUI_SCORECARD_LAUNCH_RENDERERS = {
 }
 
 STOCK_ETF_STATIC_GUI_READINESS_RENDERER = "renderReadiness"
+STOCK_ETF_STATIC_GUI_ONE_SHOT_GET_FANOUT = 16
+STOCK_ETF_STATIC_GUI_TIMEOUT_MS = 5000
 
 
 def _candidate_stock_etf_ibkr_python_files() -> list[Path]:
@@ -590,6 +592,21 @@ def test_stock_etf_static_gui_has_no_background_polling_or_push_channels() -> No
                 violations.append(f"{path}: contains forbidden background work snippet {snippet!r}")
 
     assert violations == []
+
+
+def test_stock_etf_static_gui_one_shot_get_fanout_stays_bounded() -> None:
+    static_dir = CONTROL_API_DIR / "app" / "static"
+    main_source = (static_dir / "tab-stock-etf.js").read_text(encoding="utf-8")
+
+    assert main_source.count("Promise.all(") == 1
+    assert main_source.count("waitForServerUp(loadReadiness)") == 1
+    assert main_source.count("ocApi(") == STOCK_ETF_STATIC_GUI_ONE_SHOT_GET_FANOUT
+    assert main_source.count("method: 'GET'") == STOCK_ETF_STATIC_GUI_ONE_SHOT_GET_FANOUT
+    assert main_source.count("toastOnError: false") == STOCK_ETF_STATIC_GUI_ONE_SHOT_GET_FANOUT
+    assert (
+        main_source.count(f"timeoutMs: {STOCK_ETF_STATIC_GUI_TIMEOUT_MS}")
+        == STOCK_ETF_STATIC_GUI_ONE_SHOT_GET_FANOUT
+    )
 
 
 def test_stock_etf_static_gui_files_stay_below_line_cap() -> None:
