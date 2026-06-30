@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 70 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 71 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -1399,6 +1399,34 @@ Verification 已過：
 - IBKR timeline + trace-title structure guard：`2 passed`
 - Full Stock/ETF FastAPI/static：`112 passed`
 - `git diff --check`：PASS
+
+邊界不變：沒有 Rust runtime behavior change、沒有新增 endpoint、沒有新增 IPC method、
+沒有 client input、沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
+access/creation、沒有 connector runtime、沒有 read probe execution、沒有 paper
+order/cancel/replace、沒有 fill import、沒有 evidence writer、沒有 DB apply、沒有
+evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Rust Feature Flag Env Allowlist Guard
+
+本 session 已補上 Stock/ETF Rust feature flag env lookup allowlist 守衛：
+
+- 新 test 記錄 `StockEtfFeatureFlags::from_lookup` 實際查詢的 key order。
+- Exact allowlist 只有五個非 secret feature flag key：
+  lane enabled、IBKR readonly enabled、IBKR paper enabled、asset-lane default、
+  Stock/ETF shadow-only。
+- 全部 key absent 時必須回到 default-off `StockEtfFeatureFlags::default()`。
+- Allowlist key 不可包含 `secret`、`token`、`password`、`account`、`key`。
+
+Verification 已過：
+
+- File-scoped `rustfmt --check`：PASS
+- `stock_etf_lane_acceptance`：`9 passed`
+- IBKR timeline + trace-title structure guard：`2 passed`
+- Full Stock/ETF FastAPI/static：`112 passed`
+- `git diff --check`：PASS
+
+註：workspace-wide `cargo fmt --all -- --check` 仍因既有 unrelated Rust formatting
+drift 失敗；本 checkpoint 未修改那些檔案。
 
 邊界不變：沒有 Rust runtime behavior change、沒有新增 endpoint、沒有新增 IPC method、
 沒有 client input、沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret

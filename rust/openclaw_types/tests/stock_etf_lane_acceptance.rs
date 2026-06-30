@@ -3,6 +3,7 @@
 //! These tests pin Phase 1 source-foundation contracts only. They must not
 //! create an IBKR connector, secret slot, broker session, or runtime order path.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -61,6 +62,36 @@ fn feature_flags_parse_from_lookup_without_env_side_effects() {
     assert!(!flags.ibkr_paper_enabled);
     assert_eq!(flags.asset_lane_default, AssetLane::CryptoPerp);
     assert!(flags.stock_etf_shadow_only);
+}
+
+#[test]
+fn feature_flag_lookup_uses_exact_non_secret_env_allowlist() {
+    let seen = RefCell::new(Vec::new());
+    let flags = StockEtfFeatureFlags::from_lookup(|key| {
+        seen.borrow_mut().push(key.to_string());
+        None
+    })
+    .expect("absent feature flags fall back to defaults");
+
+    let expected = vec![
+        "OPENCLAW_STOCK_ETF_LANE_ENABLED".to_string(),
+        "OPENCLAW_IBKR_READONLY_ENABLED".to_string(),
+        "OPENCLAW_IBKR_PAPER_ENABLED".to_string(),
+        "OPENCLAW_ASSET_LANE_DEFAULT".to_string(),
+        "OPENCLAW_STOCK_ETF_SHADOW_ONLY".to_string(),
+    ];
+
+    assert_eq!(seen.into_inner(), expected);
+    assert_eq!(flags, StockEtfFeatureFlags::default());
+
+    for key in expected {
+        let lower = key.to_ascii_lowercase();
+        assert!(!lower.contains("secret"));
+        assert!(!lower.contains("token"));
+        assert!(!lower.contains("password"));
+        assert!(!lower.contains("account"));
+        assert!(!lower.contains("key"));
+    }
 }
 
 #[test]
