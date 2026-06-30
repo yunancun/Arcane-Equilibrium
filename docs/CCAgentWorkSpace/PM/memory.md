@@ -3080,7 +3080,7 @@
 
 ## 2026-06-30 IBKR Stock/ETF Plan Timeline Checkpoint Guard
 
-- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 49, aligned to the PM memory / Operator source timeline.
+- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 50, aligned to the PM memory / Operator source timeline.
 - Added a structure test that reads the main plan Markdown and fails if PM session checkpoint numbers become duplicated, skipped, or out of order.
 - Verification passed: focused IBKR timeline structure test `1 passed`; section-body compare against `HEAD` PASS; `git diff --check` PASS. The full structure test file still has pre-existing docs README index drift failures unrelated to this guard. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
 
@@ -3125,3 +3125,9 @@
 - PM added an AST guard proving every `stock_etf_routes.py` IPC status read uses a literal `params={}`, so query/header/client lane claims cannot be forwarded into Rust IPC.
 - The guard counts the Stock/ETF IPC calls and fails if any call omits `params` or passes non-empty/non-literal params.
 - Verification passed: Python no-write static guard `6 passed`; full Stock/ETF FastAPI/static `100 passed`; focused IBKR timeline + trace-title structure tests `2 passed`; `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF FastAPI Handler Client-State Guard
+
+- PM added an AST guard proving every `@stock_etf_router.get` handler accepts only `response` and/or authenticated `actor`, with `actor` wired through `Depends(base.current_actor)`.
+- The guard blocks future route handlers from accepting Request/Header/Query/Body/Cookie/Form-style client state before Rust IPC/status normalization.
+- Verification passed: Python no-write static guard `7 passed`; full Stock/ETF FastAPI/static `101 passed`; focused IBKR timeline + trace-title structure tests `2 passed`; `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.

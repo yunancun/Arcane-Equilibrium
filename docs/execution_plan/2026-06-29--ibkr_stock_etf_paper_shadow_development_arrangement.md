@@ -2111,7 +2111,7 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 
 新增 checkpoint：
 
-- 主計畫 PM session checkpoint 現在從 14 到 49 連續遞增，無重複編號。
+- 主計畫 PM session checkpoint 現在從 14 到 50 連續遞增，無重複編號。
 - 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
   lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
   connector skeleton / readonly-probe / broker read gate / policy display / operation
@@ -2353,6 +2353,40 @@ sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
   `6 passed`。
 - `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
   `100 passed`。
+- `python3 -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
+  `2 passed`。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 50. 2026-06-30 PM session source checkpoint：FastAPI Handler Client-State Guard
+
+本 checkpoint 強化 Stock/ETF FastAPI route handler 的 client-state-untrusted 邊界。
+前一個 guard 已鎖住 IPC calls 必須使用 `params={}`；這次往上一層鎖住
+`stock_etf_routes.py` 的 route handler signature，避免未來把 Request/Header/Query/
+Body/Cookie/Form 類 client state 帶進 status handler，再間接影響 Rust IPC/status
+normalization。
+
+已完成：
+
+- 新增 `test_stock_etf_get_route_handlers_accept_only_response_and_authenticated_actor`。
+- 掃描每個 `@stock_etf_router.get` handler。
+- handler 只允許接收 `response` 與/或 authenticated `actor`。
+- `actor` 必須以 `Depends(base.current_actor)` 注入。
+- 禁止 variadic / keyword-only route args，防止繞過 signature guard。
+- 本 guard 不改 route behavior、不新增 endpoint、不改 IPC method、不啟動 runtime，只防
+  client-state-bearing handler inputs 進入 Stock/ETF status surface。
+
+驗證：
+
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_python_no_write_static_guard.py`：
+  `7 passed`。
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  `101 passed`。
 - `python3 -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
   `2 passed`。
 - `git diff --check`：PASS。
