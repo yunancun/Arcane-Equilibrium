@@ -150,6 +150,11 @@ STOCK_ETF_STATIC_GUI_EVIDENCE_PAPER_RENDERERS = {
     "renderUniverseStatus",
 }
 
+STOCK_ETF_STATIC_GUI_SCORECARD_LAUNCH_RENDERERS = {
+    "renderLaunchStatus",
+    "renderScorecardStatus",
+}
+
 
 def _candidate_stock_etf_ibkr_python_files() -> list[Path]:
     app_dir = CONTROL_API_DIR / "app"
@@ -180,6 +185,7 @@ def _candidate_stock_etf_static_gui_files() -> list[Path]:
         static_dir / "tab-stock-etf-fallbacks.js",
         static_dir / "tab-stock-etf-auth-account.js",
         static_dir / "tab-stock-etf-evidence-paper.js",
+        static_dir / "tab-stock-etf-scorecard-launch.js",
         static_dir / "tab-stock-etf.js",
     }
     return sorted(path for path in files if path.exists())
@@ -545,6 +551,32 @@ def test_stock_etf_static_gui_evidence_paper_renderers_remain_split() -> None:
     assert "window.renderPaperStatus" in main_source
     assert len(main_source.splitlines()) <= 650
     assert len(evidence_paper_source.splitlines()) <= 500
+
+
+def test_stock_etf_static_gui_scorecard_launch_renderers_remain_split() -> None:
+    static_dir = CONTROL_API_DIR / "app" / "static"
+    main_path = static_dir / "tab-stock-etf.js"
+    scorecard_launch_path = static_dir / "tab-stock-etf-scorecard-launch.js"
+    main_source = main_path.read_text(encoding="utf-8")
+    scorecard_launch_source = scorecard_launch_path.read_text(encoding="utf-8")
+
+    missing_renderers = [
+        name
+        for name in sorted(STOCK_ETF_STATIC_GUI_SCORECARD_LAUNCH_RENDERERS)
+        if f"function {name}(data)" not in scorecard_launch_source
+    ]
+    main_definitions = [
+        name
+        for name in sorted(STOCK_ETF_STATIC_GUI_SCORECARD_LAUNCH_RENDERERS)
+        if f"function {name}(data)" in main_source
+    ]
+
+    assert missing_renderers == []
+    assert main_definitions == []
+    assert "window.renderScorecardStatus" in main_source
+    assert "window.renderLaunchStatus" in main_source
+    assert len(main_source.splitlines()) <= 400
+    assert len(scorecard_launch_source.splitlines()) <= 500
 
 
 def _record_forbidden_call(path: Path, node: ast.Call, violations: list[str]) -> None:
