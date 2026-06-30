@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 53 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 54 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -1125,6 +1125,31 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 Verification 已過：
 
 - Stock/ETF route tests：`14 passed`
+- Full Stock/ETF FastAPI/static：`104 passed`
+- IBKR timeline + trace-title structure guard：`2 passed`
+- `git diff --check`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
+access/creation、沒有 connector runtime、沒有 read probe execution、沒有 paper
+order/cancel/replace、沒有 fill import、沒有 evidence writer、沒有 DB apply、沒有
+evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-06-30 Operator Update — Rust Status IPC Untrusted Params Guard
+
+本 session 已加固 Rust IPC 層 Stock/ETF status/readiness method 的 params 邊界：
+
+- 新增 Rust IPC regression，覆蓋所有 Stock/ETF status/readiness methods。
+- 每個 method 用 `{}` params 與惡意非空 params 各呼叫一次。
+- 惡意 params 宣稱 live、Bybit、paper submit、IBKR contact、secret touch、
+  order routing、Bybit IPC reuse。
+- 兩次 result 必須完全一致，證明 direct IPC caller 無法用 params 影響 status/readiness
+  fixture output。
+
+Verification 已過：
+
+- `rustfmt`：PASS
+- Focused engine test：`1 passed`
+- Engine `stock_etf` filter：`31 passed`
 - Full Stock/ETF FastAPI/static：`104 passed`
 - IBKR timeline + trace-title structure guard：`2 passed`
 - `git diff --check`：PASS
