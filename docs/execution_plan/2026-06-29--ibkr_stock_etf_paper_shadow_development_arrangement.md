@@ -781,7 +781,9 @@ Phase 3 / evidence clock 前必須完成：
 5. Paper-vs-shadow divergence thresholds and quarantine action。
 6. Strategy-specific benchmark and matched-control definitions。
 7. Regime / breadth / freshness / survivorship / execution-realism labels per ADR-0047。
-8. Scorecard formula appendix with CI / PSR / DSR or equivalent deflation。
+8. Scorecard formula appendix with CI / PSR / DSR or equivalent deflation，並以
+   `stock_etf_scorecard_verdict_v1` 封存正面或負面 scorecard verdict；此契約不得
+   授權 IBKR contact、scorecard writer、tiny-live/live 或 Bybit gate 變更。
 
 PM 判定：第一輪後方案「有效但未可開工」。有效性只限於 Phase 0。
 

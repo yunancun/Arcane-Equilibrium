@@ -34,6 +34,7 @@ pub mod stock_etf_reference_data_sources;
 pub mod stock_etf_release_packet;
 pub mod stock_etf_risk_policy;
 pub mod stock_etf_scorecard_inputs;
+pub mod stock_etf_scorecard_verdict;
 pub mod stock_etf_strategy_hypothesis;
 pub mod stock_etf_tiny_live_eligibility;
 
@@ -177,6 +178,10 @@ pub use stock_etf_scorecard_inputs::{
     BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID,
     STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID, STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID,
     STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID, STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
+};
+pub use stock_etf_scorecard_verdict::{
+    StockEtfScorecardVerdict, StockEtfScorecardVerdictBlocker, StockEtfScorecardVerdictLabel,
+    StockEtfScorecardVerdictV1, STOCK_ETF_SCORECARD_VERDICT_CONTRACT_ID,
 };
 pub use stock_etf_strategy_hypothesis::{
     StockEtfStrategyFamily, StockEtfStrategyHypothesisBlocker, StockEtfStrategyHypothesisV1,
