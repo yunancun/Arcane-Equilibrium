@@ -24,14 +24,15 @@ use openclaw_types::{
     IBKR_PAPER_ATTESTATION_CONTRACT_ID, IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
     IBKR_SECRET_SLOT_CONTRACT_ID, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
     STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID, STOCK_ETF_DISABLE_CLEANUP_RUNBOOK_ID,
-    STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID, STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID,
-    STOCK_ETF_PAPER_FILL_IMPORT_REQUEST_CONTRACT_ID, STOCK_ETF_PAPER_ORDER_REQUEST_CONTRACT_ID,
-    STOCK_ETF_PAPER_SHADOW_RECONCILIATION_CONTRACT_ID, STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
-    STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID, STOCK_ETF_RELEASE_PACKET_CONTRACT_ID,
-    STOCK_ETF_RISK_POLICY_CONTRACT_ID, STOCK_ETF_SCORECARD_DERIVATION_CONTRACT_ID,
-    STOCK_ETF_SCORECARD_VERDICT_CONTRACT_ID, STOCK_ETF_SHADOW_SIGNAL_REQUEST_CONTRACT_ID,
-    STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID, STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID,
-    STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID, STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
+    STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID, STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID,
+    STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID, STOCK_ETF_PAPER_FILL_IMPORT_REQUEST_CONTRACT_ID,
+    STOCK_ETF_PAPER_ORDER_REQUEST_CONTRACT_ID, STOCK_ETF_PAPER_SHADOW_RECONCILIATION_CONTRACT_ID,
+    STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID, STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID,
+    STOCK_ETF_RELEASE_PACKET_CONTRACT_ID, STOCK_ETF_RISK_POLICY_CONTRACT_ID,
+    STOCK_ETF_SCORECARD_DERIVATION_CONTRACT_ID, STOCK_ETF_SCORECARD_VERDICT_CONTRACT_ID,
+    STOCK_ETF_SHADOW_SIGNAL_REQUEST_CONTRACT_ID, STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
+    STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
+    STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
 };
 
 pub(in crate::ipc_server) fn handle_stock_etf_ipc(
@@ -1664,11 +1665,33 @@ fn phase2_precontact_summary() -> serde_json::Value {
             "blockers": policy_verdict.blockers,
             "flags": policy_flags,
         },
+        "readonly_probe_request": readonly_probe_request_summary(),
         "immutable_pass_artifact_present": false,
         "first_ibkr_contact_allowed": false,
         "connector_enabled": false,
         "secret_slot_touched": false,
         "order_routed": false,
+    })
+}
+
+fn readonly_probe_request_summary() -> serde_json::Value {
+    serde_json::json!({
+        "contract_id": STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID,
+        "source_version": 1,
+        "request_artifact_present": false,
+        "request_validated": false,
+        "accepted_for_contact": false,
+        "status": "blocked_no_request_artifact",
+        "blockers": ["phase2_gate_not_accepted", "probe_request_artifact_missing"],
+        "ibkr_contact_performed": false,
+        "connector_runtime_started": false,
+        "secret_content_serialized": false,
+        "order_routed": false,
+        "paper_order_submitted": false,
+        "db_apply_performed": false,
+        "evidence_clock_started": false,
+        "bybit_path_reused": false,
+        "live_or_tiny_live_authorized": false,
     })
 }
 

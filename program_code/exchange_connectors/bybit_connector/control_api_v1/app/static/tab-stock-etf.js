@@ -800,6 +800,24 @@ function renderFallback() {
     first_ibkr_contact_allowed: false,
     immutable_pass_artifact_present: false,
     connector_enabled: false,
+    readonly_probe_request: {
+      contract_id: 'stock_etf_ibkr_readonly_probe_request_v1',
+      source_version: 1,
+      request_artifact_present: false,
+      request_validated: false,
+      accepted_for_contact: false,
+      status: 'blocked_no_request_artifact',
+      blockers: ['api_unavailable', 'probe_request_artifact_missing'],
+      ibkr_contact_performed: false,
+      connector_runtime_started: false,
+      secret_content_serialized: false,
+      order_routed: false,
+      paper_order_submitted: false,
+      db_apply_performed: false,
+      evidence_clock_started: false,
+      bybit_path_reused: false,
+      live_or_tiny_live_authorized: false,
+    },
     connector_skeleton: {
       surface_id: 'ibkr_stock_etf_readonly_connector_skeleton_v1',
       accepted: false,
@@ -849,6 +867,7 @@ function renderFallback() {
 function renderReadiness(data, laneStatus) {
   const source = data.source_readiness || {};
   const apiAllowlist = data.api_allowlist || {};
+  const readonlyProbe = data.readonly_probe_request || {};
   const connectorSkeleton = data.connector_skeleton || {};
   const lane = laneStatus || {};
   const flags = lane.flags || {};
@@ -887,6 +906,10 @@ function renderReadiness(data, laneStatus) {
     kvRow('immutable_pass_artifact_present', boolChip(data.immutable_pass_artifact_present, false)),
     kvRow('first_ibkr_contact_allowed', boolChip(data.first_ibkr_contact_allowed, false)),
     kvRow('connector_enabled', boolChip(data.connector_enabled, false)),
+    kvRow('readonly_probe.contract_id', textChip(readonlyProbe.contract_id || '-')),
+    kvRow('readonly_probe.source_version', textChip(readonlyProbe.source_version || 0)),
+    kvRow('readonly_probe.status', textChip(readonlyProbe.status || 'blocked_no_request_artifact')),
+    kvRow('readonly_probe.accepted_for_contact', boolChip(readonlyProbe.accepted_for_contact, false)),
     kvRow('connector_skeleton.surface_id', textChip(connectorSkeleton.surface_id || '-')),
     kvRow('connector_skeleton.accepted', boolChip(connectorSkeleton.accepted, false)),
     kvRow('connector_skeleton.status', textChip(connectorSkeleton.status || 'blocked_source_only')),
@@ -918,6 +941,18 @@ function renderReadiness(data, laneStatus) {
     kvRow('secret_slot_touched', boolChip(data.secret_slot_touched, true)),
     kvRow('order_routed', boolChip(data.order_routed, true)),
     kvRow('bybit_ipc_reused', boolChip(data.bybit_ipc_reused, true)),
+    kvRow('readonly_probe.request_artifact_present', boolChip(readonlyProbe.request_artifact_present, true)),
+    kvRow('readonly_probe.request_validated', boolChip(readonlyProbe.request_validated, true)),
+    kvRow('readonly_probe.ibkr_contact_performed', boolChip(readonlyProbe.ibkr_contact_performed, true)),
+    kvRow('readonly_probe.connector_runtime_started', boolChip(readonlyProbe.connector_runtime_started, true)),
+    kvRow('readonly_probe.secret_content_serialized', boolChip(readonlyProbe.secret_content_serialized, true)),
+    kvRow('readonly_probe.order_routed', boolChip(readonlyProbe.order_routed, true)),
+    kvRow('readonly_probe.paper_order_submitted', boolChip(readonlyProbe.paper_order_submitted, true)),
+    kvRow('readonly_probe.db_apply_performed', boolChip(readonlyProbe.db_apply_performed, true)),
+    kvRow('readonly_probe.evidence_clock_started', boolChip(readonlyProbe.evidence_clock_started, true)),
+    kvRow('readonly_probe.bybit_path_reused', boolChip(readonlyProbe.bybit_path_reused, true)),
+    kvRow('readonly_probe.live_or_tiny_live_authorized', boolChip(readonlyProbe.live_or_tiny_live_authorized, true)),
+    kvRow('readonly_probe.blockers', chipList(readonlyProbe.blockers, 'none')),
     kvRow('connector_skeleton.network_contact_performed', boolChip(connectorSkeleton.network_contact_performed, true)),
     kvRow('connector_skeleton.secret_content_loaded', boolChip(connectorSkeleton.secret_content_loaded, true)),
     kvRow('connector_skeleton.paper_channel_exposed', boolChip(connectorSkeleton.paper_channel_exposed, true)),
@@ -932,6 +967,7 @@ function renderReadiness(data, laneStatus) {
   const blockers = []
     .concat(source.denial_reasons || [])
     .concat(data.phase2_gate_blockers || [])
+    .concat(readonlyProbe.blockers || [])
     .concat(apiAllowlist.blockers || [])
     .concat(data.contract_violations || []);
   setChip('se-denied-count', String(denied.length), denied.length ? 'warn' : 'neutral');

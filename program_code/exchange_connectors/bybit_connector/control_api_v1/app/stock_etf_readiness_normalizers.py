@@ -44,6 +44,29 @@ def _connector_skeleton_fail_closed(reason: str = "phase2_gate_not_accepted") ->
     }
 
 
+def _readonly_probe_request_fail_closed(
+    reason: str = "phase2_gate_not_accepted",
+) -> dict[str, Any]:
+    return {
+        "contract_id": "stock_etf_ibkr_readonly_probe_request_v1",
+        "source_version": 1,
+        "request_artifact_present": False,
+        "request_validated": False,
+        "accepted_for_contact": False,
+        "status": "blocked_no_request_artifact",
+        "blockers": [reason, "probe_request_artifact_missing"],
+        "ibkr_contact_performed": False,
+        "connector_runtime_started": False,
+        "secret_content_serialized": False,
+        "order_routed": False,
+        "paper_order_submitted": False,
+        "db_apply_performed": False,
+        "evidence_clock_started": False,
+        "bybit_path_reused": False,
+        "live_or_tiny_live_authorized": False,
+    }
+
+
 def _normalize_connector_skeleton(value: Any) -> dict[str, Any]:
     source = _as_dict(value)
     fallback = _connector_skeleton_fail_closed()
@@ -62,12 +85,43 @@ def _normalize_connector_skeleton(value: Any) -> dict[str, Any]:
     }
 
 
+def _normalize_readonly_probe_request(value: Any) -> dict[str, Any]:
+    source = _as_dict(value)
+    fallback = _readonly_probe_request_fail_closed()
+    return {
+        "contract_id": _as_str(source.get("contract_id"), fallback["contract_id"]),
+        "source_version": _as_int(source.get("source_version"))
+        if source
+        else fallback["source_version"],
+        "request_artifact_present": _as_bool(source.get("request_artifact_present")),
+        "request_validated": _as_bool(source.get("request_validated")),
+        "accepted_for_contact": _as_bool(source.get("accepted_for_contact")),
+        "status": _as_str(source.get("status"), fallback["status"]),
+        "blockers": [str(item) for item in _as_list(source.get("blockers"))]
+        or list(fallback["blockers"]),
+        "ibkr_contact_performed": _as_bool(source.get("ibkr_contact_performed")),
+        "connector_runtime_started": _as_bool(source.get("connector_runtime_started")),
+        "secret_content_serialized": _as_bool(source.get("secret_content_serialized")),
+        "order_routed": _as_bool(source.get("order_routed")),
+        "paper_order_submitted": _as_bool(source.get("paper_order_submitted")),
+        "db_apply_performed": _as_bool(source.get("db_apply_performed")),
+        "evidence_clock_started": _as_bool(source.get("evidence_clock_started")),
+        "bybit_path_reused": _as_bool(source.get("bybit_path_reused")),
+        "live_or_tiny_live_authorized": _as_bool(
+            source.get("live_or_tiny_live_authorized")
+        ),
+    }
+
+
 def _normalize_readiness(raw: Any, reason: str | None) -> dict[str, Any]:
     source = _as_dict(raw)
     readiness = _as_dict(source.get("readiness")) or _readiness_fail_closed()
     phase2 = _as_dict(source.get("phase2")) or _phase2_fail_closed()
     external_surface_gate = _as_dict(phase2.get("external_surface_gate"))
     api_allowlist = _normalize_api_allowlist(phase2.get("api_allowlist"))
+    readonly_probe_request = _normalize_readonly_probe_request(
+        phase2.get("readonly_probe_request")
+    )
     connector_skeleton = _normalize_connector_skeleton(source.get("connector_skeleton"))
 
     contract_violations = [
@@ -77,6 +131,12 @@ def _normalize_readiness(raw: Any, reason: str | None) -> dict[str, Any]:
         contract_violations.append("connector_skeleton_accepted")
     if connector_skeleton["status"] != "blocked_source_only":
         contract_violations.append("connector_skeleton_status_not_blocked")
+    if readonly_probe_request["contract_id"] != "stock_etf_ibkr_readonly_probe_request_v1":
+        contract_violations.append("readonly_probe_request_contract_id_mismatch")
+    if readonly_probe_request["source_version"] != 1:
+        contract_violations.append("readonly_probe_request_source_version_mismatch")
+    if readonly_probe_request["status"] != "blocked_no_request_artifact":
+        contract_violations.append("readonly_probe_request_status_not_blocked")
     for key in (
         "network_contact_performed",
         "secret_content_loaded",
@@ -87,6 +147,22 @@ def _normalize_readiness(raw: Any, reason: str | None) -> dict[str, Any]:
     ):
         if connector_skeleton[key]:
             contract_violations.append(f"connector_skeleton_{key}")
+    for key in (
+        "request_artifact_present",
+        "request_validated",
+        "accepted_for_contact",
+        "ibkr_contact_performed",
+        "connector_runtime_started",
+        "secret_content_serialized",
+        "order_routed",
+        "paper_order_submitted",
+        "db_apply_performed",
+        "evidence_clock_started",
+        "bybit_path_reused",
+        "live_or_tiny_live_authorized",
+    ):
+        if readonly_probe_request[key]:
+            contract_violations.append(f"readonly_probe_request_{key}")
     if reason is None:
         contract_violations.extend(_api_allowlist_contract_violations(api_allowlist))
     first_contact_allowed = _as_bool(phase2.get("first_ibkr_contact_allowed"))
@@ -137,6 +213,7 @@ def _normalize_readiness(raw: Any, reason: str | None) -> dict[str, Any]:
         "first_ibkr_contact_allowed": first_contact_allowed,
         "immutable_pass_artifact_present": immutable_artifact,
         "connector_enabled": connector_enabled,
+        "readonly_probe_request": readonly_probe_request,
         "connector_skeleton": connector_skeleton,
         "ibkr_live_enabled": False,
         "stock_live_disabled": True,

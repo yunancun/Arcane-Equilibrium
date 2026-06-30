@@ -13,6 +13,27 @@ from stock_etf_route_fixtures import (
     client_fail_closed,
 )
 
+def _valid_readonly_probe_request() -> dict[str, Any]:
+    return {
+        "contract_id": "stock_etf_ibkr_readonly_probe_request_v1",
+        "source_version": 1,
+        "request_artifact_present": False,
+        "request_validated": False,
+        "accepted_for_contact": False,
+        "status": "blocked_no_request_artifact",
+        "blockers": ["phase2_gate_not_accepted", "probe_request_artifact_missing"],
+        "ibkr_contact_performed": False,
+        "connector_runtime_started": False,
+        "secret_content_serialized": False,
+        "order_routed": False,
+        "paper_order_submitted": False,
+        "db_apply_performed": False,
+        "evidence_clock_started": False,
+        "bybit_path_reused": False,
+        "live_or_tiny_live_authorized": False,
+    }
+
+
 def test_stock_etf_readiness_returns_200_when_ipc_down(client_fail_closed: TestClient) -> None:
     resp = client_fail_closed.get("/api/v1/stock-etf/readiness")
     assert resp.status_code == 200
@@ -36,6 +57,12 @@ def test_stock_etf_readiness_returns_200_when_ipc_down(client_fail_closed: TestC
     assert data["first_ibkr_contact_allowed"] is False
     assert data["immutable_pass_artifact_present"] is False
     assert data["connector_enabled"] is False
+    assert data["readonly_probe_request"]["contract_id"] == (
+        "stock_etf_ibkr_readonly_probe_request_v1"
+    )
+    assert data["readonly_probe_request"]["status"] == "blocked_no_request_artifact"
+    assert data["readonly_probe_request"]["accepted_for_contact"] is False
+    assert data["readonly_probe_request"]["ibkr_contact_performed"] is False
     assert data["connector_skeleton"]["surface_id"] == (
         "ibkr_stock_etf_readonly_connector_skeleton_v1"
     )
@@ -74,6 +101,7 @@ def test_stock_etf_readiness_uses_only_readonly_fixture_method() -> None:
                     "ibkr_call_performed": False,
                 },
                 "api_allowlist": _valid_api_allowlist(),
+                "readonly_probe_request": _valid_readonly_probe_request(),
                 "policy_prerequisites": {
                     "bundle_accepted": True,
                     "blockers": [],
@@ -125,6 +153,14 @@ def test_stock_etf_readiness_uses_only_readonly_fixture_method() -> None:
     assert data["api_allowlist"]["read_action_count"] == 10
     assert data["api_allowlist"]["paper_write_action_count"] == 3
     assert data["api_allowlist"]["denied_action_count"] == 10
+    assert data["readonly_probe_request"]["contract_id"] == (
+        "stock_etf_ibkr_readonly_probe_request_v1"
+    )
+    assert data["readonly_probe_request"]["source_version"] == 1
+    assert data["readonly_probe_request"]["status"] == "blocked_no_request_artifact"
+    assert data["readonly_probe_request"]["request_artifact_present"] is False
+    assert data["readonly_probe_request"]["request_validated"] is False
+    assert data["readonly_probe_request"]["accepted_for_contact"] is False
     assert data["connector_skeleton"]["status"] == "blocked_source_only"
     assert data["connector_skeleton"]["accepted"] is False
     assert "ibkr_live_order_submit" in data["denied_operations"]
@@ -213,6 +249,24 @@ def test_stock_etf_readiness_blocks_contract_violation() -> None:
                     "blockers": [],
                 },
                 "api_allowlist": _valid_api_allowlist(),
+                "readonly_probe_request": {
+                    **_valid_readonly_probe_request(),
+                    "contract_id": "wrong",
+                    "source_version": 2,
+                    "request_artifact_present": True,
+                    "request_validated": True,
+                    "accepted_for_contact": True,
+                    "status": "ready",
+                    "ibkr_contact_performed": True,
+                    "connector_runtime_started": True,
+                    "secret_content_serialized": True,
+                    "order_routed": True,
+                    "paper_order_submitted": True,
+                    "db_apply_performed": True,
+                    "evidence_clock_started": True,
+                    "bybit_path_reused": True,
+                    "live_or_tiny_live_authorized": True,
+                },
                 "immutable_pass_artifact_present": True,
                 "first_ibkr_contact_allowed": True,
                 "connector_enabled": True,
@@ -248,6 +302,21 @@ def test_stock_etf_readiness_blocks_contract_violation() -> None:
         "secret_slot_touched",
         "order_routed",
         "bybit_ipc_reused",
+        "readonly_probe_request_contract_id_mismatch",
+        "readonly_probe_request_source_version_mismatch",
+        "readonly_probe_request_status_not_blocked",
+        "readonly_probe_request_request_artifact_present",
+        "readonly_probe_request_request_validated",
+        "readonly_probe_request_accepted_for_contact",
+        "readonly_probe_request_ibkr_contact_performed",
+        "readonly_probe_request_connector_runtime_started",
+        "readonly_probe_request_secret_content_serialized",
+        "readonly_probe_request_order_routed",
+        "readonly_probe_request_paper_order_submitted",
+        "readonly_probe_request_db_apply_performed",
+        "readonly_probe_request_evidence_clock_started",
+        "readonly_probe_request_bybit_path_reused",
+        "readonly_probe_request_live_or_tiny_live_authorized",
         "connector_skeleton_accepted",
         "connector_skeleton_status_not_blocked",
         "connector_skeleton_network_contact_performed",
