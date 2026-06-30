@@ -547,6 +547,17 @@ def test_stock_etf_lane_status_requires_auth() -> None:
     assert resp.status_code == 401
 
 
+def test_stock_etf_redirect_requires_auth() -> None:
+    route_module._IPC_CLIENT = None
+    app = FastAPI()
+    app.include_router(stock_etf_router)
+    client = TestClient(app)
+
+    resp = client.get("/api/v1/stock-etf", follow_redirects=False)
+
+    assert resp.status_code == 401
+
+
 def test_stock_etf_openapi_exposes_stock_etf_get_only(client_fail_closed: TestClient) -> None:
     schema = client_fail_closed.get("/openapi.json").json()
     stock_paths = {
