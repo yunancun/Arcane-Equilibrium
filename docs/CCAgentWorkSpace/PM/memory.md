@@ -3080,7 +3080,7 @@
 
 ## 2026-06-30 IBKR Stock/ETF Plan Timeline Checkpoint Guard
 
-- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 73, aligned to the PM memory / Operator source timeline.
+- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 74, aligned to the PM memory / Operator source timeline.
 - Added a structure test that reads the main plan Markdown and fails if PM session checkpoint numbers become duplicated, skipped, or out of order.
 - Verification passed: focused IBKR timeline structure test `1 passed`; section-body compare against `HEAD` PASS; `git diff --check` PASS. The full structure test file still has pre-existing docs README index drift failures unrelated to this guard. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
 
@@ -3307,4 +3307,12 @@
 - The guard scans direct imports and literal dynamic imports via `__import__` / `importlib.import_module` across `program_code/broker_connectors/ibkr_connector/*.py`.
 - This keeps the IBKR skeleton isolated under `program_code/broker_connectors/ibkr_connector/` and prevents accidental reuse of Bybit runtime/control-api code while preserving the existing `bybit_path_reused=false` payload field.
 - Verification passed: connector skeleton tests `6 passed`; Python no-write static guard `17 passed`; full Stock/ETF FastAPI/static `114 passed`; docs trace guard `2 passed`; `git diff --check` PASS.
+- Boundary unchanged: no endpoint/IPC method change, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, paper order, fill import, DB/evidence writer, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF FastAPI IBKR Connector Runtime Wiring Guard
+
+- PM added a production-surface AST guard proving Stock/ETF/control-api Python files do not import the inert IBKR connector skeleton before runtime approval.
+- The guard scans `control_api_v1/app` Stock/ETF/IBKR files only, while allowing dedicated skeleton tests to import the package.
+- Literal dynamic imports are also checked through the shared dynamic import helper, including `importlib.import_module`.
+- Verification passed: Python no-write static guard `18 passed`; connector skeleton tests `6 passed`; full Stock/ETF FastAPI/static `115 passed`; docs trace guard `2 passed`; `git diff --check` PASS.
 - Boundary unchanged: no endpoint/IPC method change, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, paper order, fill import, DB/evidence writer, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

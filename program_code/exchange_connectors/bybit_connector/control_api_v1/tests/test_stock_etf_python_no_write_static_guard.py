@@ -97,6 +97,11 @@ FORBIDDEN_SECRET_ENV_MODULE_PREFIXES = (
     "getpass",
     "keyring",
 )
+FORBIDDEN_IBKR_CONNECTOR_RUNTIME_IMPORT_PREFIXES = (
+    "broker_connectors.ibkr_connector",
+    "ibkr_connector",
+    "program_code.broker_connectors.ibkr_connector",
+)
 FORBIDDEN_SECRET_ENV_IMPORT_ROOTS = {"os"}
 FORBIDDEN_SECRET_ENV_CALL_NAMES = {
     "getenv",
@@ -189,6 +194,18 @@ def _candidate_stock_etf_ibkr_python_files() -> list[Path]:
     if ibkr_connector_dir.exists():
         files.update(ibkr_connector_dir.rglob("*.py"))
 
+    return sorted(path for path in files if path.exists())
+
+
+def _candidate_stock_etf_control_api_python_files() -> list[Path]:
+    app_dir = CONTROL_API_DIR / "app"
+    files = {
+        app_dir / "stock_etf_routes.py",
+        app_dir / "asset_lane_routes.py",
+        app_dir / "ibkr_paper_routes.py",
+    }
+    files.update(app_dir.glob("*stock_etf*.py"))
+    files.update(app_dir.glob("*ibkr*.py"))
     return sorted(path for path in files if path.exists())
 
 
@@ -289,6 +306,34 @@ def test_stock_etf_ibkr_python_surface_has_no_secret_or_env_material_access() ->
                 _record_forbidden_secret_env_call(path, node, violations)
             elif isinstance(node, (ast.Attribute, ast.Subscript)):
                 _record_forbidden_os_environ_access(path, node, violations)
+
+    assert violations == []
+
+
+def test_stock_etf_control_api_surface_does_not_import_ibkr_connector_runtime_skeleton() -> None:
+    files = _candidate_stock_etf_control_api_python_files()
+    assert files, "expected Stock/ETF control-api Python surface files"
+
+    violations: list[str] = []
+    for path in files:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                for module in _imported_module_names(node):
+                    if _is_forbidden_module(
+                        module, FORBIDDEN_IBKR_CONNECTOR_RUNTIME_IMPORT_PREFIXES
+                    ):
+                        violations.append(
+                            f"{path}:{node.lineno}: imports connector runtime skeleton {module}"
+                        )
+            elif isinstance(node, ast.Call):
+                module = _literal_dynamic_import_module(node)
+                if module and _is_forbidden_module(
+                    module, FORBIDDEN_IBKR_CONNECTOR_RUNTIME_IMPORT_PREFIXES
+                ):
+                    violations.append(
+                        f"{path}:{node.lineno}: dynamically imports connector runtime skeleton {module}"
+                    )
 
     assert violations == []
 
@@ -656,13 +701,9 @@ def _record_forbidden_import(path: Path, node: ast.Import | ast.ImportFrom, viol
 
 
 def _record_forbidden_dynamic_import(path: Path, node: ast.Call, violations: list[str]) -> None:
-    call_name = _call_name(node.func)
-    if call_name not in {"__import__", "import_module"} or not node.args:
+    module = _literal_dynamic_import_module(node)
+    if module is None:
         return
-    first_arg = node.args[0]
-    if not isinstance(first_arg, ast.Constant) or not isinstance(first_arg.value, str):
-        return
-    module = first_arg.value
     if _is_forbidden_module(module, FORBIDDEN_BROKER_MODULE_PREFIXES):
         violations.append(f"{path}: dynamically imports forbidden direct IBKR broker module {module}")
     if _is_forbidden_module(module, FORBIDDEN_NETWORK_MODULE_PREFIXES):
@@ -682,13 +723,9 @@ def _record_forbidden_persistence_import(
 def _record_forbidden_persistence_dynamic_import(
     path: Path, node: ast.Call, violations: list[str]
 ) -> None:
-    call_name = _call_name(node.func)
-    if call_name not in {"__import__", "import_module"} or not node.args:
+    module = _literal_dynamic_import_module(node)
+    if module is None:
         return
-    first_arg = node.args[0]
-    if not isinstance(first_arg, ast.Constant) or not isinstance(first_arg.value, str):
-        return
-    module = first_arg.value
     if _is_forbidden_module(module, FORBIDDEN_PERSISTENCE_MODULE_PREFIXES):
         violations.append(f"{path}: dynamically imports forbidden persistence module {module}")
     if _is_forbidden_local_persistence_module(module):
@@ -749,6 +786,18 @@ def _is_forbidden_module(module: str, prefixes: tuple[str, ...]) -> bool:
 
 def _is_forbidden_local_persistence_module(module: str) -> bool:
     return module.split(".", 1)[0] in FORBIDDEN_LOCAL_PERSISTENCE_MODULES
+
+
+def _literal_dynamic_import_module(node: ast.Call) -> str | None:
+    call_name = _call_name(node.func)
+    if call_name not in {"__import__", "import_module", "importlib.import_module"}:
+        return None
+    if not node.args:
+        return None
+    first_arg = node.args[0]
+    if not isinstance(first_arg, ast.Constant) or not isinstance(first_arg.value, str):
+        return None
+    return first_arg.value
 
 
 def _is_os_environ_access(node: ast.AST) -> bool:

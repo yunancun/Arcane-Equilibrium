@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 73 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 74 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -1430,6 +1430,33 @@ Verification 已過：
 - Connector skeleton focused tests：`6 passed`
 - Python no-write static guard：`17 passed`
 - Full Stock/ETF FastAPI/static：`114 passed`
+- IBKR timeline + trace-title structure guard：`2 passed`
+- `git diff --check`：PASS
+
+邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 client input、沒有 IBKR
+contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation、沒有
+connector runtime、沒有 read probe execution、沒有 paper order/cancel/replace、沒有 fill
+import、沒有 evidence writer、沒有 DB apply、沒有 evidence clock、沒有 tiny-live/live
+authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — FastAPI IBKR Connector Runtime Wiring Guard
+
+這次不是 connector runtime，也不是把 Python skeleton 接到 FastAPI。變更只新增
+source guard，防止未批准前接線：
+
+- `control_api_v1/app` 的 Stock/ETF / IBKR production Python surface 不得 import
+  `program_code.broker_connectors.ibkr_connector`。
+- Guard 同時禁止 bare `ibkr_connector`、`broker_connectors.ibkr_connector` 與
+  literal dynamic import。
+- Dedicated skeleton tests 仍可 import skeleton package；production route/normalizer
+  path 不可。
+- Shared dynamic import helper 現在也識別 `importlib.import_module`。
+
+Verification 已過：
+
+- Python no-write static guard：`18 passed`
+- Connector skeleton focused tests：`6 passed`
+- Full Stock/ETF FastAPI/static：`115 passed`
 - IBKR timeline + trace-title structure guard：`2 passed`
 - `git diff --check`：PASS
 

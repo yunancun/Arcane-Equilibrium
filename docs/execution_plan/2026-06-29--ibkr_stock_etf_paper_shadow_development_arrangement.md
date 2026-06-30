@@ -2111,7 +2111,7 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 
 新增 checkpoint：
 
-- 主計畫 PM session checkpoint 現在從 14 到 73 連續遞增，無重複編號。
+- 主計畫 PM session checkpoint 現在從 14 到 74 連續遞增，無重複編號。
 - 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
   lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
   connector skeleton / readonly-probe / broker read gate / policy display / operation
@@ -3332,6 +3332,50 @@ control-api `app` 模組。
   `17 passed`。
 - `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
   `114 passed`。
+- `python3 -B -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
+  `2 passed`。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 74. 2026-07-01 PM session source checkpoint：FastAPI IBKR Connector Runtime Wiring Guard
+
+本 checkpoint 把未批准前「FastAPI/control-api 不得 wire/import IBKR connector
+skeleton」固定為 source guard。這不是 connector runtime，不改 FastAPI route，不改
+normalizer payload，不改 Bybit runtime；目標是防止 source-only connector skeleton
+被提前接入 control-api startup path，避免不必要 coupling 與 runtime overhead。
+
+已完成：
+
+- 更新 `test_stock_etf_python_no_write_static_guard.py`：
+  - 新增 `test_stock_etf_control_api_surface_does_not_import_ibkr_connector_runtime_skeleton`。
+  - 新增 `_candidate_stock_etf_control_api_python_files()`，只掃描
+    `control_api_v1/app` 下 Stock/ETF / IBKR production surface。
+  - 禁止 production surface import
+    `program_code.broker_connectors.ibkr_connector`、
+    `broker_connectors.ibkr_connector` 或 bare `ibkr_connector`。
+  - 禁止 literal dynamic import 透過 `__import__`、`import_module` 或
+    `importlib.import_module` 載入 connector skeleton。
+  - 保留 dedicated skeleton tests 對 package 的 import 權限。
+- Shared dynamic import helper 現在同時支援 `importlib.import_module`，讓既有
+  network/persistence guards 也覆蓋此形式。
+- 本 checkpoint 不改 production behavior、不改 endpoint、不改 IPC method、不改 Bybit
+  path、不啟動任何 IBKR 或 connector runtime。
+
+驗證：
+
+- `python3 -B -m py_compile program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_python_no_write_static_guard.py`：
+  PASS。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_python_no_write_static_guard.py`：
+  `18 passed`。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_ibkr_connector_skeleton.py`：
+  `6 passed`。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  `115 passed`。
 - `python3 -B -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
   `2 passed`。
 - `git diff --check`：PASS。
