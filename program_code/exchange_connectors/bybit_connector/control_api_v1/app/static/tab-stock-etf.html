@@ -96,6 +96,11 @@
       <div class="se-metric-value" id="se-universe-state">--</div>
       <div class="se-metric-sub" id="se-universe-sub"></div>
     </div>
+    <div class="se-metric">
+      <div class="se-metric-label">Shadow</div>
+      <div class="se-metric-value" id="se-shadow-state">--</div>
+      <div class="se-metric-sub" id="se-shadow-sub"></div>
+    </div>
   </div>
 
   <div class="se-grid">
@@ -171,6 +176,18 @@
       </table>
     </section>
 
+    <section class="se-panel" id="se-shadow-panel">
+      <div class="se-panel-title">
+        <span>Shadow Status</span>
+        <span id="se-shadow-status" class="oc-chip oc-chip-neutral">--</span>
+      </div>
+      <table class="se-kv">
+        <tbody id="se-shadow-body">
+          <tr><td colspan="2" class="se-muted">Loading...</td></tr>
+        </tbody>
+      </table>
+    </section>
+
     <section class="se-panel" id="se-denial-panel">
       <div class="se-panel-title">
         <span>Denied Surface</span>
@@ -188,6 +205,7 @@ const LANE_STATUS_ENDPOINT = '/api/v1/stock-etf/lane-status';
 const READINESS_ENDPOINT = '/api/v1/stock-etf/readiness';
 const EVIDENCE_STATUS_ENDPOINT = '/api/v1/stock-etf/evidence-status';
 const UNIVERSE_STATUS_ENDPOINT = '/api/v1/stock-etf/universe-status';
+const SHADOW_STATUS_ENDPOINT = '/api/v1/stock-etf/shadow-status';
 
 function toneFor(value) {
   const s = String(value || '').toLowerCase();
@@ -309,6 +327,47 @@ function universeFallback(reason) {
   };
 }
 
+function shadowFallback(reason) {
+  const why = reason || 'api_unavailable';
+  return {
+    shadow_status_state: 'degraded',
+    phase: 'phase3_shadow_status_source_fixture',
+    phase3_started: false,
+    gui_authority: 'display_only',
+    shadow_fill_model: {
+      accepted: false,
+      blockers: [why],
+      side: 'unknown',
+      intended_notional_minor_units: 0,
+      synthetic_shadow: false,
+      broker_paper_fill_linked: false,
+      live_fill_linked: false,
+    },
+    strategy_hypothesis: {
+      accepted: false,
+      blockers: [why],
+      strategy_family: 'unknown_denied',
+      primary_timeframe: 'unknown_denied',
+      instrument_scope: 'unknown_denied',
+      paper_shadow_only: true,
+      profitability_claimed: false,
+      live_or_tiny_live_authority_claimed: false,
+      bybit_live_execution_unchanged: true,
+      ibkr_live_denied: true,
+      ibkr_contact_performed: false,
+      secret_content_serialized: false,
+    },
+    shadow_collector_started: false,
+    shadow_signal_emitted: false,
+    shadow_fill_generated: false,
+    scorecard_writer_started: false,
+    db_apply_performed: false,
+    contract_violations: [],
+    degraded: true,
+    reason: why,
+  };
+}
+
 function renderFallback() {
   const data = {
     default_asset_lane: 'crypto_perp',
@@ -346,6 +405,7 @@ function renderFallback() {
   renderReadiness(data, null);
   renderEvidenceStatus(evidenceFallback('api_unavailable'));
   renderUniverseStatus(universeFallback('api_unavailable'));
+  renderShadowStatus(shadowFallback('api_unavailable'));
 }
 
 function renderReadiness(data, laneStatus) {
@@ -534,12 +594,68 @@ function renderUniverseStatus(data) {
   );
 }
 
+function renderShadowStatus(data) {
+  const status = data || shadowFallback('api_unavailable');
+  const shadow = status.shadow_fill_model || {};
+  const strategy = status.strategy_hypothesis || {};
+  const state = status.shadow_status_state || 'blocked';
+  const shadowBlockers = []
+    .concat(shadow.blockers || [])
+    .concat(strategy.blockers || [])
+    .concat(status.phase2_gate_blockers || [])
+    .concat(status.contract_violations || []);
+  document.getElementById('se-shadow-state').innerHTML = textChip(state);
+  document.getElementById('se-shadow-sub').textContent =
+    strategy.accepted ? (strategy.hypothesis_id || 'source_ready') : 'shadow model blocked';
+  setChip('se-shadow-status', state, toneFor(state));
+  document.getElementById('se-shadow-body').innerHTML = [
+    kvRow('phase', textChip(status.phase || '-')),
+    kvRow('phase3_started', boolChip(status.phase3_started, true)),
+    kvRow('shadow_fill_model.accepted', boolChip(shadow.accepted, false)),
+    kvRow('shadow_fill_model.contract_id', textChip(shadow.contract_id || '-')),
+    kvRow('shadow_fill_model.source_version', textChip(shadow.source_version)),
+    kvRow('shadow_fill_model.synthetic_shadow', boolChip(shadow.synthetic_shadow, false)),
+    kvRow('broker_paper_fill_linked', boolChip(shadow.broker_paper_fill_linked, true)),
+    kvRow('live_fill_linked', boolChip(shadow.live_fill_linked, true)),
+    kvRow(
+      'shadow_cost_bps',
+      '<span class="se-code">' +
+        ocEsc(
+          'spread=' + String(shadow.spread_bps || 0) +
+          ' slip=' + String(shadow.slippage_bps || 0) +
+          ' cost=' + String(shadow.cost_bps || 0)
+        ) +
+      '</span>'
+    ),
+    kvRow('strategy.accepted', boolChip(strategy.accepted, false)),
+    kvRow('strategy.contract_id', textChip(strategy.contract_id || '-')),
+    kvRow('strategy_family', textChip(strategy.strategy_family || 'unknown_denied')),
+    kvRow('primary_timeframe', textChip(strategy.primary_timeframe || 'unknown_denied')),
+    kvRow('instrument_scope', textChip(strategy.instrument_scope || 'unknown_denied')),
+    kvRow('paper_shadow_only', boolChip(strategy.paper_shadow_only, false)),
+    kvRow('profitability_claimed', boolChip(strategy.profitability_claimed, true)),
+    kvRow('live_or_tiny_live_authority_claimed', boolChip(strategy.live_or_tiny_live_authority_claimed, true)),
+    kvRow('shadow_collector_started', boolChip(status.shadow_collector_started, true)),
+    kvRow('shadow_signal_emitted', boolChip(status.shadow_signal_emitted, true)),
+    kvRow('shadow_fill_generated', boolChip(status.shadow_fill_generated, true)),
+    kvRow('scorecard_writer_started', boolChip(status.scorecard_writer_started, true)),
+    kvRow('db_apply_performed', boolChip(status.db_apply_performed, true)),
+    kvRow('blockers', chipList(shadowBlockers, 'none')),
+    kvRow('reason', '<span class="se-code">' + ocEsc(status.reason || '-') + '</span>'),
+  ].join('');
+  document.getElementById('se-shadow-panel').classList.toggle(
+    'se-bad-line',
+    (status.contract_violations || []).length > 0
+  );
+}
+
 async function loadReadiness() {
-  const [lanePayload, readinessPayload, evidencePayload, universePayload] = await Promise.all([
+  const [lanePayload, readinessPayload, evidencePayload, universePayload, shadowPayload] = await Promise.all([
     ocApi(LANE_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(READINESS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(EVIDENCE_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(UNIVERSE_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
+    ocApi(SHADOW_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
   ]);
   if (!readinessPayload || !readinessPayload.data) {
     renderFallback();
@@ -548,6 +664,7 @@ async function loadReadiness() {
   renderReadiness(readinessPayload.data, lanePayload && lanePayload.data ? lanePayload.data : null);
   renderEvidenceStatus(evidencePayload && evidencePayload.data ? evidencePayload.data : evidenceFallback('api_unavailable'));
   renderUniverseStatus(universePayload && universePayload.data ? universePayload.data : universeFallback('api_unavailable'));
+  renderShadowStatus(shadowPayload && shadowPayload.data ? shadowPayload.data : shadowFallback('api_unavailable'));
 }
 
 waitForServerUp(loadReadiness);

@@ -457,6 +457,7 @@ pub(crate) async fn dispatch_request(
         | "stock_etf.get_readiness"
         | "stock_etf.get_evidence_status"
         | "stock_etf.get_universe_status"
+        | "stock_etf.get_shadow_status"
         | "stock_etf.preview_paper_order"
         | "stock_etf.submit_paper_order"
         | "stock_etf.cancel_paper_order"

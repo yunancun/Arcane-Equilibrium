@@ -452,6 +452,100 @@ async fn stock_etf_universe_status_is_blocked_source_fixture_without_side_effect
     assert_eq!(result["phase2"]["connector_enabled"], false);
 }
 
+#[tokio::test]
+async fn stock_etf_shadow_status_is_blocked_source_fixture_without_side_effects() {
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let req = r#"{"jsonrpc":"2.0","method":"stock_etf.get_shadow_status","params":{},"id":4808}"#;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
+    )
+    .await;
+
+    assert!(resp.error.is_none());
+    let result = resp.result.expect("stock_etf shadow status result");
+    assert_eq!(result["phase"], "phase3_shadow_status_source_fixture");
+    assert_eq!(result["asset_lane"], "stock_etf_cash");
+    assert_eq!(result["broker"], "ibkr");
+    assert_eq!(result["environment"], "shadow");
+    assert_eq!(result["shadow_status_state"], "blocked");
+    assert_eq!(result["phase3_started"], false);
+    assert_eq!(result["shadow_collector_started"], false);
+    assert_eq!(result["shadow_signal_emitted"], false);
+    assert_eq!(result["shadow_fill_generated"], false);
+    assert_eq!(result["scorecard_writer_started"], false);
+    assert_eq!(result["db_apply_performed"], false);
+    assert_eq!(result["ibkr_call_performed"], false);
+    assert_eq!(result["secret_slot_touched"], false);
+    assert_eq!(result["order_routed"], false);
+    assert_eq!(result["bybit_ipc_reused"], false);
+
+    let shadow = &result["shadow_fill_model"];
+    assert_eq!(shadow["expected_contract_id"], "stock_shadow_fill_model_v1");
+    assert_eq!(shadow["contract_id"], "");
+    assert_eq!(shadow["source_version"], 0);
+    assert_eq!(shadow["accepted"], false);
+    assert!(json_array_contains(
+        &shadow["blockers"],
+        "contract_id_mismatch"
+    ));
+    assert!(json_array_contains(
+        &shadow["blockers"],
+        "source_version_mismatch"
+    ));
+    assert!(json_array_contains(
+        &shadow["blockers"],
+        "signal_id_missing"
+    ));
+    assert_eq!(shadow["synthetic_shadow"], false);
+    assert_eq!(shadow["broker_paper_fill_linked"], false);
+    assert_eq!(shadow["live_fill_linked"], false);
+
+    let strategy = &result["strategy_hypothesis"];
+    assert_eq!(
+        strategy["expected_contract_id"],
+        "stock_etf_strategy_hypothesis_contract_v1"
+    );
+    assert_eq!(strategy["contract_id"], "");
+    assert_eq!(strategy["source_version"], 0);
+    assert_eq!(strategy["accepted"], false);
+    assert!(json_array_contains(
+        &strategy["blockers"],
+        "contract_id_mismatch"
+    ));
+    assert!(json_array_contains(
+        &strategy["blockers"],
+        "source_version_mismatch"
+    ));
+    assert_eq!(strategy["paper_shadow_only"], true);
+    assert_eq!(strategy["profitability_claimed"], false);
+    assert_eq!(strategy["live_or_tiny_live_authority_claimed"], false);
+    assert_eq!(strategy["bybit_live_execution_unchanged"], true);
+    assert_eq!(strategy["ibkr_live_denied"], true);
+    assert_eq!(strategy["ibkr_contact_performed"], false);
+    assert_eq!(strategy["secret_content_serialized"], false);
+
+    assert_eq!(result["phase2"]["first_ibkr_contact_allowed"], false);
+    assert_eq!(result["phase2"]["connector_enabled"], false);
+}
+
 fn json_array_contains(value: &serde_json::Value, expected: &str) -> bool {
     value
         .as_array()

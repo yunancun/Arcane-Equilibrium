@@ -2835,3 +2835,9 @@
 - PM added display-only `GET /api/v1/stock-etf/universe-status` backed by Rust IPC fixture `stock_etf.get_universe_status`, exposing blocked PIT universe contract status from local source types only.
 - GUI and `gui_lane_contract_v1` now require the universe-status GET-only surface alongside readiness/lane/evidence; static guards still reject write routes, direct broker writes, browser storage authority, and Stock/ETF paper-order IPC strings.
 - Verification passed: openclaw_engine `stock_etf` `9 passed`, FastAPI/static pytest `32 passed`, Node inline scripts `2`, full `openclaw_types` `35` unit/golden + `198` integration/acceptance + `0` doc-tests, and `git diff --check`. This grants no IBKR contact, connector runtime, secret access, collector/evidence clock, scorecard writer, DB apply, paper order, fill import, GUI/lane selector authority, Phase 2/3 start, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Shadow Status Read-Only Surface
+
+- PM added display-only `GET /api/v1/stock-etf/shadow-status` backed by Rust IPC fixture `stock_etf.get_shadow_status`, exposing blocked shadow-fill-model and strategy-hypothesis contract status from local source types only.
+- GUI and `gui_lane_contract_v1` now require the shadow-status GET-only surface alongside readiness/lane/evidence/universe; static guards still reject write routes, direct broker writes, browser storage authority, and Stock/ETF paper-order IPC strings.
+- Verification passed: openclaw_engine `stock_etf` `10 passed`, FastAPI/static pytest `37 passed`, Node inline scripts `2`, full `openclaw_types` `35` unit/golden + `198` integration/acceptance + `0` doc-tests, and `git diff --check`. This grants no IBKR contact, connector runtime, secret access, shadow collector, shadow signal/fill generation, evidence clock, scorecard writer, DB apply, paper order, fill import, GUI/lane selector authority, Phase 2/3 start, tiny-live, live, or Bybit behavior change.

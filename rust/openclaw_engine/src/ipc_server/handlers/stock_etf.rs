@@ -9,8 +9,10 @@ use openclaw_types::{
     evaluate_broker_operation, AssetLane, Broker, BrokerCapabilityRequest, BrokerEnvironment,
     BrokerOperation, IbkrExternalSurfaceGateV1, IbkrPhase2PolicyBundleV1, InstrumentKind,
     NonBybitApiAllowlistV1, StockEtfEvidenceClockDayV1, StockEtfFeatureFlags, StockEtfGateInputs,
-    StockEtfPitUniverseV1, StockMarketDataProvenanceV1, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
-    STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
+    StockEtfPitUniverseV1, StockEtfStrategyHypothesisV1, StockMarketDataProvenanceV1,
+    StockShadowFillModelV1, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
+    STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID, STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
+    STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID, STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
 };
 
 pub(in crate::ipc_server) fn handle_stock_etf_ipc(
@@ -66,6 +68,9 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
         "stock_etf.get_universe_status" => {
             JsonRpcResponse::success(id, universe_status_summary(phase2))
         }
+        "stock_etf.get_shadow_status" => {
+            JsonRpcResponse::success(id, shadow_status_summary(phase2))
+        }
         _ => {
             let operation = match operation_for_method(method) {
                 Some(op) => op,
@@ -102,6 +107,80 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
             )
         }
     }
+}
+
+fn shadow_status_summary(phase2: serde_json::Value) -> serde_json::Value {
+    let shadow_fill_model = StockShadowFillModelV1::default();
+    let shadow_fill_verdict = shadow_fill_model.validate();
+    let strategy_hypothesis = StockEtfStrategyHypothesisV1 {
+        asset_lane: AssetLane::StockEtfCash,
+        broker: Broker::Ibkr,
+        no_options_cfd_margin_short: true,
+        paper_shadow_only: true,
+        bybit_live_execution_unchanged: true,
+        ibkr_live_denied: true,
+        ..StockEtfStrategyHypothesisV1::default()
+    };
+    let strategy_hypothesis_verdict = strategy_hypothesis.validate();
+
+    serde_json::json!({
+        "phase": "phase3_shadow_status_source_fixture",
+        "asset_lane": AssetLane::StockEtfCash,
+        "broker": Broker::Ibkr,
+        "environment": BrokerEnvironment::Shadow,
+        "shadow_status_state": "blocked",
+        "phase3_started": false,
+        "shadow_fill_model": {
+            "expected_contract_id": STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
+            "contract_id": shadow_fill_model.contract_id,
+            "source_version": shadow_fill_model.source_version,
+            "accepted": shadow_fill_verdict.accepted,
+            "blockers": shadow_fill_verdict.blockers,
+            "signal_id": shadow_fill_model.signal_id,
+            "side": shadow_fill_model.side,
+            "intended_notional_minor_units": shadow_fill_model.intended_notional_minor_units,
+            "market_session_id": shadow_fill_model.market_session_id,
+            "quote_or_bar_source_hash_present": !shadow_fill_model.quote_or_bar_source_hash.is_empty(),
+            "conservative_fill_price_micros": shadow_fill_model.conservative_fill_price_micros,
+            "spread_bps": shadow_fill_model.spread_bps,
+            "slippage_bps": shadow_fill_model.slippage_bps,
+            "cost_bps": shadow_fill_model.cost_bps,
+            "rejection_reason": shadow_fill_model.rejection_reason,
+            "synthetic_shadow": shadow_fill_model.synthetic_shadow,
+            "broker_paper_fill_linked": shadow_fill_model.broker_paper_fill_linked,
+            "live_fill_linked": shadow_fill_model.live_fill_linked,
+        },
+        "strategy_hypothesis": {
+            "expected_contract_id": STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
+            "contract_id": strategy_hypothesis.contract_id,
+            "source_version": strategy_hypothesis.source_version,
+            "accepted": strategy_hypothesis_verdict.accepted,
+            "blockers": strategy_hypothesis_verdict.blockers,
+            "hypothesis_id": strategy_hypothesis.hypothesis_id,
+            "hypothesis_version": strategy_hypothesis.hypothesis_version,
+            "strategy_family": strategy_hypothesis.strategy_family,
+            "primary_timeframe": strategy_hypothesis.primary_timeframe,
+            "instrument_scope": strategy_hypothesis.instrument_scope,
+            "paper_shadow_only": strategy_hypothesis.paper_shadow_only,
+            "profitability_claimed": strategy_hypothesis.profitability_claimed,
+            "live_or_tiny_live_authority_claimed": strategy_hypothesis.live_or_tiny_live_authority_claimed,
+            "bybit_live_execution_unchanged": strategy_hypothesis.bybit_live_execution_unchanged,
+            "ibkr_live_denied": strategy_hypothesis.ibkr_live_denied,
+            "ibkr_contact_performed": strategy_hypothesis.ibkr_contact_performed,
+            "secret_content_serialized": strategy_hypothesis.secret_content_serialized,
+        },
+        "phase2": phase2,
+        "shadow_collector_started": false,
+        "shadow_signal_emitted": false,
+        "shadow_fill_generated": false,
+        "scorecard_writer_started": false,
+        "db_apply_performed": false,
+        "ibkr_live_enabled": false,
+        "ibkr_call_performed": false,
+        "secret_slot_touched": false,
+        "order_routed": false,
+        "bybit_ipc_reused": false,
+    })
 }
 
 fn universe_status_summary(phase2: serde_json::Value) -> serde_json::Value {
