@@ -2774,3 +2774,9 @@
 - PM made Stock/ETF readiness and tab redirect responses emit no-store/private cache headers plus `Vary: Authorization`.
 - Route tests prove query/header supplied lane, paper-ready, and first-contact claims are ignored: the API still calls only `stock_etf.get_readiness` with empty params and trusts the Rust IPC payload.
 - Verification passed: route/test `py_compile`, focused FastAPI/static no-write pytest `14 passed`, and `git diff --check`. This grants no IBKR contact, connector runtime, secret access, paper order, fill import, DB apply, GUI/lane selector authority, Phase 2 start, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF FastAPI Route Method Partition
+
+- PM added a source-only route-method negative-test checkpoint asserting the Stock/ETF OpenAPI surface exposes only `GET /api/v1/stock-etf/readiness`.
+- Runtime negative tests assert `POST`, `PUT`, `PATCH`, and `DELETE` return `405` for both `/api/v1/stock-etf` and `/api/v1/stock-etf/readiness`; the existing static no-write guard remains in force.
+- Verification passed: route test `py_compile`, focused FastAPI/static no-write pytest `16 passed`, and `git diff --check`. This grants no IBKR contact, connector runtime, secret access, paper order, fill import, DB apply, GUI/lane selector authority, Phase 2 start, tiny-live, live, or Bybit behavior change.
