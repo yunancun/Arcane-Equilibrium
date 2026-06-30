@@ -3316,3 +3316,11 @@
 - Literal dynamic imports are also checked through the shared dynamic import helper, including `importlib.import_module`.
 - Verification passed: Python no-write static guard `18 passed`; connector skeleton tests `6 passed`; full Stock/ETF FastAPI/static `115 passed`; docs trace guard `2 passed`; `git diff --check` PASS.
 - Boundary unchanged: no endpoint/IPC method change, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, paper order, fill import, DB/evidence writer, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF Rust IPC Bybit Runtime Separation Guard
+
+- PM added Rust split structure guards proving Stock/ETF IPC handler/test source does not import or call Bybit REST/WS/Earn clients, order manager/router, paper state, bounded-probe active-order module, legacy paper submit handler, or direct order method call tokens.
+- The handler guard scans `stock_etf.rs`, `request_summaries.rs`, and `status_summaries.rs`; the fixture guard scans parent `stock_etf.rs`, `request_contracts.rs`, and `status_fixtures.rs`.
+- Contract-level negative posture fields such as `bybit_ipc_reused=false`, `bybit_path_reused=false`, and legacy Bybit channel regression text remain allowed; the guard blocks runtime code-path coupling.
+- Verification passed: Rust IPC split static guards `10 passed`; full Stock/ETF FastAPI/static `115 passed`; docs trace guard `2 passed`; `git diff --check` PASS.
+- Boundary unchanged: no Rust runtime behavior change, endpoint/IPC method change, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, paper order/cancel/replace, fill import, DB/evidence writer, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

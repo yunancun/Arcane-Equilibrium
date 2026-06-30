@@ -35,6 +35,63 @@ FORBIDDEN_RUNTIME_MATERIAL_TOKENS = (
     "ibapi",
     "IBApi",
 )
+FORBIDDEN_BYBIT_RUNTIME_TOKENS = (
+    "crate::bybit_",
+    "openclaw_engine::bybit_",
+    "crate::bybit_rest_client",
+    "crate::bybit_private_ws",
+    "crate::bybit_private_ws_status_writer",
+    "crate::bybit_earn_client",
+    "openclaw_engine::bybit_rest_client",
+    "openclaw_engine::bybit_private_ws",
+    "openclaw_engine::bybit_private_ws_status_writer",
+    "openclaw_engine::bybit_earn_client",
+    "bybit_rest_client::",
+    "bybit_private_ws::",
+    "bybit_private_ws_status_writer::",
+    "bybit_earn_client::",
+    "BybitRestClient",
+    "BybitPrivateWs",
+    "BybitEnvironment",
+    "BybitApiError",
+    "BybitResult",
+    "BybitEarn",
+    "crate::order_manager",
+    "openclaw_engine::order_manager",
+    "order_manager::",
+    "OrderManager",
+    "CreateOrderRequest",
+    "OrderResponse",
+    "crate::order_router",
+    "openclaw_engine::order_router",
+    "order_router::",
+    "crate::paper_state",
+    "openclaw_engine::paper_state",
+    "paper_state::",
+    "crate::bounded_probe_active_order",
+    "openclaw_engine::bounded_probe_active_order",
+    "crate::platform_client",
+    "openclaw_engine::platform_client",
+    "platform_client::",
+    "PlatformClient",
+    "crate::event_consumer",
+    "openclaw_engine::event_consumer",
+    "event_consumer::",
+    "crate::execution_listener",
+    "openclaw_engine::execution_listener",
+    "execution_listener::",
+    "crate::database::rest_poller",
+    "openclaw_engine::database::rest_poller",
+    "RestPoller",
+    "handle_submit_paper_order",
+    ".place_order(",
+    ".cancel_order(",
+    ".cancel_order_by_link_id(",
+    ".submit_order(",
+    ".replace_order(",
+    ".modify_order(",
+    ".create_order(",
+)
 
 
 def _loc(path: Path) -> int:
@@ -69,6 +126,22 @@ def test_stock_etf_ipc_handler_files_have_no_runtime_material_readers() -> None:
         for token in FORBIDDEN_RUNTIME_MATERIAL_TOKENS:
             if token in source:
                 violations.append(f"{path}: contains forbidden runtime material token {token!r}")
+
+    assert violations == []
+
+
+def test_stock_etf_ipc_handler_files_do_not_import_or_call_bybit_runtime_paths() -> None:
+    sources = {
+        STOCK_ETF_HANDLER: STOCK_ETF_HANDLER.read_text(encoding="utf-8"),
+        REQUEST_SUMMARIES: REQUEST_SUMMARIES.read_text(encoding="utf-8"),
+        STATUS_SUMMARIES: STATUS_SUMMARIES.read_text(encoding="utf-8"),
+    }
+
+    violations = []
+    for path, source in sources.items():
+        for token in FORBIDDEN_BYBIT_RUNTIME_TOKENS:
+            if token in source:
+                violations.append(f"{path}: contains forbidden Bybit runtime token {token!r}")
 
     assert violations == []
 
