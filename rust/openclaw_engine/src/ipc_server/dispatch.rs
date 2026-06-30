@@ -446,12 +446,8 @@ pub(crate) async fn dispatch_request(
         // 3 個 lease method 的 request/response 契約與 lease_ipc_schema.py 完全一致
         // （E1 親驗：method 名 + param 鍵 + response 形狀）。4 個唯讀投影 method 的
         // 契約由 handlers/governance.rs 各 handler doc 定義，並行 Python work 對齊。
-        "governance.acquire_lease" => {
-            handle_acquire_lease(id, cmd_channels, &req.params).await
-        }
-        "governance.release_lease" => {
-            handle_release_lease(id, cmd_channels, &req.params).await
-        }
+        "governance.acquire_lease" => handle_acquire_lease(id, cmd_channels, &req.params).await,
+        "governance.release_lease" => handle_release_lease(id, cmd_channels, &req.params).await,
         "governance.get_lease" => handle_get_lease(id, cmd_channels, &req.params).await,
         "governance.is_authorized" => handle_is_authorized(id, cmd_channels).await,
         "governance.get_status" => handle_get_status(id, cmd_channels).await,
@@ -459,6 +455,7 @@ pub(crate) async fn dispatch_request(
         "governance.get_risk_state" => handle_get_risk_state(id, cmd_channels).await,
         "stock_etf.get_lane_status"
         | "stock_etf.get_readiness"
+        | "stock_etf.get_evidence_status"
         | "stock_etf.preview_paper_order"
         | "stock_etf.submit_paper_order"
         | "stock_etf.cancel_paper_order"
@@ -637,9 +634,7 @@ pub(crate) async fn dispatch_request(
         // token 豁免（不送 cmd / 不改 ConfigStore / 不改 EdgeEstimates，純讀
         // live edge snapshot + 跑純函數判定 + 回 verdict）。Python promote route
         // 在 5-gate 前以此閘廉價拒不合格促升（§2.2 順序 ④）。
-        "evaluate_promotion_criteria" => {
-            handle_evaluate_promotion_criteria(id, &req.params)
-        }
+        "evaluate_promotion_criteria" => handle_evaluate_promotion_criteria(id, &req.params),
         _ => JsonRpcResponse::error(
             id,
             ERR_METHOD_NOT_FOUND,
@@ -1028,10 +1023,10 @@ fn handle_evaluate_promotion_criteria(
         .get("fee_bps_round_trip")
         .and_then(|v| v.as_f64())
         .unwrap_or(PROMOTION_FALLBACK_FEE_BPS); // 缺 → 無限成本牆 → 任何 cell 不過（fail-closed）
-    // fallback 對齊 risk_config_live.toml SSOT（Fix 6/7）：safety_multiplier=1.3 /
-    // win_rate_floor=0.3，與 [slippage] live 值一致。route 在 Option A 下永遠送真值
-    // （見下方契約），這些 fallback 是 defensive-only：若 route 漏送某欄，cost wall 仍以
-    // live SSOT buffer 量測，不會比 live cost_gate 寬鬆（避免 silent drift）。
+                                                // fallback 對齊 risk_config_live.toml SSOT（Fix 6/7）：safety_multiplier=1.3 /
+                                                // win_rate_floor=0.3，與 [slippage] live 值一致。route 在 Option A 下永遠送真值
+                                                // （見下方契約），這些 fallback 是 defensive-only：若 route 漏送某欄，cost wall 仍以
+                                                // live SSOT buffer 量測，不會比 live cost_gate 寬鬆（避免 silent drift）。
     let cost_gate_safety_multiplier = params
         .get("cost_gate_safety_multiplier")
         .and_then(|v| v.as_f64())

@@ -8,7 +8,9 @@ use super::super::*;
 use openclaw_types::{
     evaluate_broker_operation, AssetLane, Broker, BrokerCapabilityRequest, BrokerEnvironment,
     BrokerOperation, IbkrExternalSurfaceGateV1, IbkrPhase2PolicyBundleV1, InstrumentKind,
-    NonBybitApiAllowlistV1, StockEtfFeatureFlags, StockEtfGateInputs,
+    NonBybitApiAllowlistV1, StockEtfEvidenceClockDayV1, StockEtfFeatureFlags, StockEtfGateInputs,
+    StockMarketDataProvenanceV1, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
+    STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
 };
 
 pub(in crate::ipc_server) fn handle_stock_etf_ipc(
@@ -58,6 +60,9 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
                 "bybit_ipc_reused": false,
             }),
         ),
+        "stock_etf.get_evidence_status" => {
+            JsonRpcResponse::success(id, evidence_status_summary(phase2))
+        }
         _ => {
             let operation = match operation_for_method(method) {
                 Some(op) => op,
@@ -94,6 +99,86 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
             )
         }
     }
+}
+
+fn evidence_status_summary(phase2: serde_json::Value) -> serde_json::Value {
+    let market_data_provenance = StockMarketDataProvenanceV1::default();
+    let market_data_verdict = market_data_provenance.validate();
+    let evidence_clock_day = StockEtfEvidenceClockDayV1::default();
+    let evidence_clock_verdict = evidence_clock_day.validate();
+    let frozen_inputs_verdict = evidence_clock_day.frozen_inputs.validate();
+    let dq_shape_verdict = evidence_clock_day.dq_manifest.validates_shape();
+
+    serde_json::json!({
+        "phase": "phase3_evidence_status_source_fixture",
+        "asset_lane": AssetLane::StockEtfCash,
+        "broker": Broker::Ibkr,
+        "environment": BrokerEnvironment::Paper,
+        "evidence_status_state": "blocked",
+        "phase3_started": false,
+        "market_data_provenance": {
+            "expected_contract_id": STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
+            "contract_id": market_data_provenance.contract_id,
+            "source_version": market_data_provenance.source_version,
+            "accepted": market_data_verdict.accepted,
+            "blockers": market_data_verdict.blockers,
+            "ibkr_contact_performed": market_data_provenance.ibkr_contact_performed,
+            "connector_runtime_started": market_data_provenance.connector_runtime_started,
+            "secret_content_serialized": market_data_provenance.secret_content_serialized,
+            "live_or_tiny_live_authorized": market_data_provenance.live_or_tiny_live_authorized,
+        },
+        "evidence_clock": {
+            "expected_contract_id": STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
+            "contract_id": evidence_clock_day.contract_id,
+            "source_version": evidence_clock_day.source_version,
+            "status": evidence_clock_day.status,
+            "accepted": evidence_clock_verdict.accepted,
+            "blockers": evidence_clock_verdict.blockers,
+            "checker_contacted_ibkr": evidence_clock_day.checker_contacted_ibkr,
+            "checker_started_connector_runtime": evidence_clock_day.checker_started_connector_runtime,
+            "checker_started_evidence_clock": evidence_clock_day.checker_started_evidence_clock,
+            "checker_wrote_scorecard": evidence_clock_day.checker_wrote_scorecard,
+            "checker_applied_db": evidence_clock_day.checker_applied_db,
+            "secret_content_serialized": evidence_clock_day.secret_content_serialized,
+            "live_or_tiny_live_authorized": evidence_clock_day.live_or_tiny_live_authorized,
+            "ibkr_readonly_paper_connector_green_5d": evidence_clock_day.ibkr_readonly_paper_connector_green_5d,
+            "shadow_collector_green_5d": evidence_clock_day.shadow_collector_green_5d,
+        },
+        "frozen_inputs": {
+            "accepted": frozen_inputs_verdict.accepted,
+            "blockers": frozen_inputs_verdict.blockers,
+            "universe_hash_present": !evidence_clock_day.frozen_inputs.universe_hash.is_empty(),
+            "benchmark_hash_present": !evidence_clock_day.frozen_inputs.benchmark_hash.is_empty(),
+            "cost_model_hash_present": !evidence_clock_day.frozen_inputs.cost_model_hash.is_empty(),
+            "strategy_hypothesis_hash_present": !evidence_clock_day.frozen_inputs.strategy_hypothesis_hash.is_empty(),
+            "reference_data_sources_contract_hash_present": !evidence_clock_day.frozen_inputs.reference_data_sources_contract_hash.is_empty(),
+            "paper_shadow_divergence_threshold_hash_present": !evidence_clock_day.frozen_inputs.paper_shadow_divergence_threshold_hash.is_empty(),
+            "gui_evidence_view_available": evidence_clock_day.frozen_inputs.gui_evidence_view_available,
+            "daily_scorecard_regeneration_passed": evidence_clock_day.frozen_inputs.daily_scorecard_regeneration_passed,
+        },
+        "dq_manifest": {
+            "shape_accepted": dq_shape_verdict.accepted,
+            "shape_blockers": dq_shape_verdict.blockers,
+            "passes_day_quality": evidence_clock_day.dq_manifest.passes_day_quality(),
+            "trading_day": evidence_clock_day.dq_manifest.trading_day,
+            "calendar_aware_coverage_bps": evidence_clock_day.dq_manifest.calendar_aware_coverage_bps,
+            "symbol_completeness_bps": evidence_clock_day.dq_manifest.symbol_completeness_bps,
+            "latency_dq_passed": evidence_clock_day.dq_manifest.latency_dq_passed,
+            "market_data_provenance_accepted": evidence_clock_day.dq_manifest.market_data_provenance_accepted,
+            "scorecard_regeneration_passed": evidence_clock_day.dq_manifest.scorecard_regeneration_passed,
+        },
+        "scorecard": {
+            "writer_started": evidence_clock_day.checker_wrote_scorecard,
+            "db_apply_performed": evidence_clock_day.checker_applied_db,
+            "daily_scorecard_regeneration_passed": evidence_clock_day.frozen_inputs.daily_scorecard_regeneration_passed,
+        },
+        "phase2": phase2,
+        "ibkr_live_enabled": false,
+        "ibkr_call_performed": false,
+        "secret_slot_touched": false,
+        "order_routed": false,
+        "bybit_ipc_reused": false,
+    })
 }
 
 fn phase2_precontact_summary() -> serde_json::Value {

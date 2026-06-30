@@ -86,6 +86,11 @@
       <div class="se-metric-value" id="se-live-state">--</div>
       <div class="se-metric-sub">live/tiny-live remain denied</div>
     </div>
+    <div class="se-metric">
+      <div class="se-metric-label">Evidence Clock</div>
+      <div class="se-metric-value" id="se-evidence-state">--</div>
+      <div class="se-metric-sub" id="se-evidence-sub"></div>
+    </div>
   </div>
 
   <div class="se-grid">
@@ -137,6 +142,18 @@
       </table>
     </section>
 
+    <section class="se-panel" id="se-evidence-panel">
+      <div class="se-panel-title">
+        <span>Evidence Status</span>
+        <span id="se-evidence-status" class="oc-chip oc-chip-neutral">--</span>
+      </div>
+      <table class="se-kv">
+        <tbody id="se-evidence-body">
+          <tr><td colspan="2" class="se-muted">Loading...</td></tr>
+        </tbody>
+      </table>
+    </section>
+
     <section class="se-panel" id="se-denial-panel">
       <div class="se-panel-title">
         <span>Denied Surface</span>
@@ -152,11 +169,12 @@
 <script>
 const LANE_STATUS_ENDPOINT = '/api/v1/stock-etf/lane-status';
 const READINESS_ENDPOINT = '/api/v1/stock-etf/readiness';
+const EVIDENCE_STATUS_ENDPOINT = '/api/v1/stock-etf/evidence-status';
 
 function toneFor(value) {
   const s = String(value || '').toLowerCase();
-  if (s === 'paper_ready' || s === 'readonly_ready' || s === 'pass' || s === 'false') return 'good';
-  if (s === 'phase2_blocked' || s === 'degraded' || s === 'shadow_only' || s === 'blocked') return 'warn';
+  if (s === 'paper_ready' || s === 'readonly_ready' || s === 'pass' || s === 'false' || s === 'source') return 'good';
+  if (s === 'phase2_blocked' || s === 'degraded' || s === 'shadow_only' || s === 'blocked' || s === 'not_started') return 'warn';
   if (s === 'contract_violation_blocked' || s === 'true' || s === 'denied') return 'bad';
   return 'neutral';
 }
@@ -188,6 +206,59 @@ function chipList(items, emptyText) {
     return '<span class="se-muted">' + ocEsc(emptyText || '-') + '</span>';
   }
   return items.map(item => ocChip(String(item), toneFor(item))).join('');
+}
+
+function evidenceFallback(reason) {
+  const why = reason || 'api_unavailable';
+  return {
+    evidence_status_state: 'degraded',
+    phase: 'phase3_evidence_status_source_fixture',
+    phase3_started: false,
+    gui_authority: 'display_only',
+    market_data_provenance: {
+      accepted: false,
+      blockers: [why],
+      ibkr_contact_performed: false,
+      connector_runtime_started: false,
+      secret_content_serialized: false,
+      live_or_tiny_live_authorized: false,
+    },
+    evidence_clock: {
+      status: 'NOT_STARTED',
+      accepted: false,
+      blockers: [why],
+      checker_started_evidence_clock: false,
+      checker_wrote_scorecard: false,
+      checker_applied_db: false,
+      secret_content_serialized: false,
+      live_or_tiny_live_authorized: false,
+    },
+    frozen_inputs: {
+      accepted: false,
+      gui_evidence_view_available: false,
+      daily_scorecard_regeneration_passed: false,
+    },
+    dq_manifest: {
+      shape_accepted: false,
+      passes_day_quality: false,
+      calendar_aware_coverage_bps: 0,
+      symbol_completeness_bps: 0,
+      latency_dq_passed: false,
+      market_data_provenance_accepted: false,
+      scorecard_regeneration_passed: false,
+    },
+    scorecard: {
+      writer_started: false,
+      db_apply_performed: false,
+      daily_scorecard_regeneration_passed: false,
+    },
+    evidence_clock_started: false,
+    scorecard_writer_started: false,
+    db_apply_performed: false,
+    contract_violations: [],
+    degraded: true,
+    reason: why,
+  };
 }
 
 function renderFallback() {
@@ -225,6 +296,7 @@ function renderFallback() {
     reason: 'api_unavailable',
   };
   renderReadiness(data, null);
+  renderEvidenceStatus(evidenceFallback('api_unavailable'));
 }
 
 function renderReadiness(data, laneStatus) {
@@ -314,16 +386,71 @@ function renderReadiness(data, laneStatus) {
   document.getElementById('se-guard-panel').classList.toggle('se-bad-line', (data.contract_violations || []).length > 0);
 }
 
+function renderEvidenceStatus(data) {
+  const evidence = data || evidenceFallback('api_unavailable');
+  const marketData = evidence.market_data_provenance || {};
+  const clock = evidence.evidence_clock || {};
+  const frozen = evidence.frozen_inputs || {};
+  const dq = evidence.dq_manifest || {};
+  const scorecard = evidence.scorecard || {};
+  const evidenceBlockers = []
+    .concat(marketData.blockers || [])
+    .concat(clock.blockers || [])
+    .concat(frozen.blockers || [])
+    .concat(dq.shape_blockers || [])
+    .concat(evidence.contract_violations || []);
+  const state = evidence.evidence_status_state || 'blocked';
+  document.getElementById('se-evidence-state').innerHTML = textChip(state);
+  document.getElementById('se-evidence-sub').textContent =
+    clock.status || (evidence.degraded ? 'degraded' : 'NOT_STARTED');
+  setChip('se-evidence-status', state, toneFor(state));
+  document.getElementById('se-evidence-body').innerHTML = [
+    kvRow('phase', textChip(evidence.phase || '-')),
+    kvRow('phase3_started', boolChip(evidence.phase3_started, true)),
+    kvRow('market_data_provenance.accepted', boolChip(marketData.accepted, false)),
+    kvRow('market_data_provenance.ibkr_contact_performed', boolChip(marketData.ibkr_contact_performed, true)),
+    kvRow('market_data_provenance.connector_runtime_started', boolChip(marketData.connector_runtime_started, true)),
+    kvRow('evidence_clock.status', textChip(clock.status || 'NOT_STARTED')),
+    kvRow('evidence_clock.accepted', boolChip(clock.accepted, false)),
+    kvRow('evidence_clock.started', boolChip(evidence.evidence_clock_started, true)),
+    kvRow('scorecard.writer_started', boolChip(evidence.scorecard_writer_started, true)),
+    kvRow('scorecard.db_apply_performed', boolChip(evidence.db_apply_performed, true)),
+    kvRow('frozen_inputs.accepted', boolChip(frozen.accepted, false)),
+    kvRow('frozen_inputs.gui_evidence_view_available', boolChip(frozen.gui_evidence_view_available, false)),
+    kvRow('dq.shape_accepted', boolChip(dq.shape_accepted, false)),
+    kvRow(
+      'dq.coverage_bps',
+      '<span class="se-code">' +
+        ocEsc(
+          'calendar=' + String(dq.calendar_aware_coverage_bps || 0) +
+          ' symbol=' + String(dq.symbol_completeness_bps || 0)
+        ) +
+      '</span>'
+    ),
+    kvRow('dq.latency_dq_passed', boolChip(dq.latency_dq_passed, false)),
+    kvRow('dq.market_data_provenance_accepted', boolChip(dq.market_data_provenance_accepted, false)),
+    kvRow('scorecard.daily_regeneration_passed', boolChip(scorecard.daily_scorecard_regeneration_passed, false)),
+    kvRow('blockers', chipList(evidenceBlockers, 'none')),
+    kvRow('reason', '<span class="se-code">' + ocEsc(evidence.reason || '-') + '</span>'),
+  ].join('');
+  document.getElementById('se-evidence-panel').classList.toggle(
+    'se-bad-line',
+    (evidence.contract_violations || []).length > 0
+  );
+}
+
 async function loadReadiness() {
-  const [lanePayload, readinessPayload] = await Promise.all([
+  const [lanePayload, readinessPayload, evidencePayload] = await Promise.all([
     ocApi(LANE_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(READINESS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
+    ocApi(EVIDENCE_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
   ]);
   if (!readinessPayload || !readinessPayload.data) {
     renderFallback();
     return;
   }
   renderReadiness(readinessPayload.data, lanePayload && lanePayload.data ? lanePayload.data : null);
+  renderEvidenceStatus(evidencePayload && evidencePayload.data ? evidencePayload.data : evidenceFallback('api_unavailable'));
 }
 
 waitForServerUp(loadReadiness);
