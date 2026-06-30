@@ -1768,6 +1768,34 @@ order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evi
 不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何
 Bybit behavior change。
 
+## 34. 2026-06-30 PM session governance checkpoint：ADR/Register Lineage Catch-up
+
+本 checkpoint 只補治理索引與 ADR/AMD 文字，不改程式碼：
+
+- `docs/governance_dev/SPECIFICATION_REGISTER.md` 的 Last Updated 已改為
+  ADR-0048 lineage + connector-skeleton hardening。
+- 新增 ADR-0048 Addendum E，登記 scorecard derivation / verdict /
+  paper-shadow reconciliation / tiny-live eligibility lineage。
+- 新增 ADR-0048 Addendum F，登記
+  `program_code/broker_connectors/ibkr_connector/` 是 inert source-only skeleton。
+- ADR-0048 與 AMD-2026-06-29-01 已補明：
+  tiny-live discussion gate 需要 derivation/verdict/manifest/reconciliation/DQ/
+  preregistration/QC/MIT/QA lineage，但仍只可開新 ADR discussion。
+- ADR-0048 與 AMD 已補明：Python IBKR skeleton 不得導入 SDK、開 network、
+  讀 secret、暴露 broker write、匯入 fills 或寫 DB。
+
+驗證：
+
+- `rg` 檢查 register/ADR/AMD 中 `ibkr_connector`、`scorecard_derivation`、
+  `paper_shadow_reconciliation`、`tiny_live_adr` 均有最新登記。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不啟動 Phase 1/2/3/4/5 runtime、不送 paper
+order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence clock、
+不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何
+Bybit behavior change。
+
 ## 32. 2026-06-30 PM session source checkpoint：Tiny-Live Eligibility Lineage Gate
 
 本 checkpoint harden Phase 5 之後「是否可以拿去開 ADR 討論 tiny-live」的

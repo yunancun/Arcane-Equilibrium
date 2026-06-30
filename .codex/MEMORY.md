@@ -879,3 +879,8 @@ Do not paste long reports or stable architecture into TODO.
 - Source-only checkpoint adds inert `program_code/broker_connectors/ibkr_connector/` outside the Bybit connector tree, with typed blocked readiness/previews and no IBKR SDK import, network contact, secret access, order methods, fill side effects, or DB writes.
 - The existing Stock/ETF Python no-write static guard now scans the real connector skeleton, and dedicated skeleton tests assert the package stays blocked/source-only.
 - Verification passed: Python compile PASS; connector skeleton + no-write static guard `7 passed`; full Stock/ETF FastAPI/static `94 passed`. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, paper order/cancel/replace, fill import, scorecard writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF ADR/Register Lineage Catch-up
+
+- Governance checkpoint updates `SPECIFICATION_REGISTER.md`, ADR-0048, and AMD-2026-06-29-01 so governance docs now record the scorecard derivation/verdict/reconciliation/tiny-live lineage gates and the inert IBKR connector skeleton boundary.
+- Verification passed: register/ADR/AMD `rg` check PASS; `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, paper order/cancel/replace, fill import, scorecard writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.

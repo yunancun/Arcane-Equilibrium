@@ -192,6 +192,10 @@ Phase 5 may sign off paper/shadow online only after the release packet, immutabl
 
 `tiny_live_adr_eligibility_v1` is a discussion gate only. It may be evaluated after the paper/shadow window and Phase 5 release evidence are complete, but passing it cannot authorize tiny-live, live, margin, short, options, CFD, transfer, account-management writes, secret creation, or connector runtime.
 
+The tiny-live discussion gate must carry scorecard derivation, scorecard verdict, scorecard manifest, paper-shadow reconciliation, DQ/statistical preregistration, and QC/MIT/QA lineage. Missing or pre-gate truthy lineage claims remain fail-closed; this lineage only determines whether a new ADR discussion may start.
+
+The Python IBKR package at `program_code/broker_connectors/ibkr_connector/` is currently an inert source-only skeleton outside the Bybit connector tree. It may expose blocked readiness/previews and secret-free fixtures only; it must not import IBKR SDKs, open sockets or HTTP sessions, read secrets, expose broker write methods, import fills, or write DB rows.
+
 ## Denied Paths
 
 The following are explicitly not approved:

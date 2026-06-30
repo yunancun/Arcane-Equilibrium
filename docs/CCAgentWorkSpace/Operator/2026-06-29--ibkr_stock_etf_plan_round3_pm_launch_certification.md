@@ -647,6 +647,28 @@ Verification 已過：
 order/cancel/replace、沒有 fill import、沒有 DB apply、沒有 evidence clock、沒有
 scorecard writer、沒有 Linux runtime sync/restart，也沒有改動 Bybit live execution 行為。
 
+## 2026-06-30 Operator Update — ADR/Register Lineage Catch-up
+
+本 session 已完成 governance catch-up：
+
+- `SPECIFICATION_REGISTER.md` 已登記最新 tiny-live lineage gate。
+- ADR-0048 已補明：future tiny-live discussion 必須帶 scorecard derivation、
+  verdict、manifest、paper-shadow reconciliation、DQ/preregistration、QC/MIT/QA
+  lineage。
+- ADR-0048 已補明：`program_code/broker_connectors/ibkr_connector/` 現在只是
+  inert source-only skeleton，不是 runtime connector。
+- AMD-2026-06-29-01 也同步補上同樣邊界。
+
+Verification 已過：
+
+- Register/ADR/AMD `rg` check：PASS
+- `git diff --check`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 secret access/creation、沒有 connector runtime、
+沒有 IBKR SDK import、沒有 Phase 1/2/3/4/5 runtime start、沒有 paper
+order/cancel/replace、沒有 fill import、沒有 DB apply、沒有 evidence clock、沒有
+scorecard writer、沒有 Linux runtime sync/restart，也沒有改動 Bybit live execution 行為。
+
 ## 2026-06-30 Operator Update — Scorecard Derivation Contract
 
 本 session 已完成下一個 source/status/display-only checkpoint：
