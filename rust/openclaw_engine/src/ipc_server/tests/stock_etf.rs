@@ -588,6 +588,33 @@ async fn stock_etf_readiness_exposes_phase2_precontact_blockers_without_ibkr_con
         phase2["api_allowlist"]["bybit_live_execution_protected"],
         true
     );
+    let readonly_probe = &phase2["readonly_probe_request"];
+    assert_eq!(
+        readonly_probe["contract_id"],
+        "stock_etf_ibkr_readonly_probe_request_v1"
+    );
+    assert_eq!(readonly_probe["source_version"], 1);
+    assert_eq!(readonly_probe["request_artifact_present"], false);
+    assert_eq!(readonly_probe["request_validated"], false);
+    assert_eq!(readonly_probe["accepted_for_contact"], false);
+    assert_eq!(readonly_probe["status"], "blocked_no_request_artifact");
+    assert!(json_array_contains(
+        &readonly_probe["blockers"],
+        "phase2_gate_not_accepted"
+    ));
+    assert!(json_array_contains(
+        &readonly_probe["blockers"],
+        "probe_request_artifact_missing"
+    ));
+    assert_eq!(readonly_probe["ibkr_contact_performed"], false);
+    assert_eq!(readonly_probe["connector_runtime_started"], false);
+    assert_eq!(readonly_probe["secret_content_serialized"], false);
+    assert_eq!(readonly_probe["order_routed"], false);
+    assert_eq!(readonly_probe["paper_order_submitted"], false);
+    assert_eq!(readonly_probe["db_apply_performed"], false);
+    assert_eq!(readonly_probe["evidence_clock_started"], false);
+    assert_eq!(readonly_probe["bybit_path_reused"], false);
+    assert_eq!(readonly_probe["live_or_tiny_live_authorized"], false);
     assert_eq!(phase2["policy_prerequisites"]["bundle_accepted"], true);
     assert_eq!(
         phase2["policy_prerequisites"]["flags"]["redaction_suite_passed"],
