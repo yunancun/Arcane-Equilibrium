@@ -2111,7 +2111,7 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 
 新增 checkpoint：
 
-- 主計畫 PM session checkpoint 現在從 14 到 70 連續遞增，無重複編號。
+- 主計畫 PM session checkpoint 現在從 14 到 71 連續遞增，無重複編號。
 - 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
   lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
   connector skeleton / readonly-probe / broker read gate / policy display / operation
@@ -3203,6 +3203,50 @@ files 中加入 direct env bypass、secret file read、network/socket client 或
 - `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
   `112 passed`。
 - `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 71. 2026-07-01 PM session source checkpoint：Rust Feature Flag Env Allowlist Guard
+
+本 checkpoint 鎖定 `StockEtfFeatureFlags::from_lookup` 的 env lookup contract。這不是
+啟動 runtime，也不是新增 env 讀取；它只證明 typed feature flag reader 只查詢
+允許的五個非 secret feature flag key，且全部 absent 時保持 default-off。
+
+已完成：
+
+- 更新 `rust/openclaw_types/tests/stock_etf_lane_acceptance.rs`：
+  - 新增 `feature_flag_lookup_uses_exact_non_secret_env_allowlist`。
+  - 用 `RefCell` 記錄 `from_lookup` 實際查詢的 key order。
+  - 要求 exact allowlist：
+    `OPENCLAW_STOCK_ETF_LANE_ENABLED`、
+    `OPENCLAW_IBKR_READONLY_ENABLED`、
+    `OPENCLAW_IBKR_PAPER_ENABLED`、
+    `OPENCLAW_ASSET_LANE_DEFAULT`、
+    `OPENCLAW_STOCK_ETF_SHADOW_ONLY`。
+  - 驗證全部 key absent 時回到 `StockEtfFeatureFlags::default()`。
+  - 驗證 allowlist key 不含 `secret`、`token`、`password`、`account`、`key`。
+- 本 checkpoint 不改 production Rust code、不改 endpoint、不改 IPC method、不改
+  Bybit path、不啟動任何 IBKR 或 secret runtime。
+
+驗證：
+
+- `rustfmt --edition 2021 rust/openclaw_types/tests/stock_etf_lane_acceptance.rs --check`：
+  PASS。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_lane_acceptance -- --nocapture`：
+  `9 passed`。
+- `python3 -B -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
+  `2 passed`。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  `112 passed`。
+- `git diff --check`：PASS。
+
+註：`cargo fmt --manifest-path rust/Cargo.toml --all -- --check` 仍會因既有、非本
+checkpoint 的 Rust workspace formatting drift 失敗；本 checkpoint 已用 file-scoped
+`rustfmt --check` 驗證修改檔案。
 
 PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
 connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
