@@ -27,6 +27,7 @@ pub mod stock_etf_gui_lane_contract;
 pub mod stock_etf_instrument_identity;
 pub mod stock_etf_lane;
 pub mod stock_etf_lane_scoped_ipc;
+pub mod stock_etf_paper_fill_import_request;
 pub mod stock_etf_paper_order_request;
 pub mod stock_etf_phase0_manifest;
 pub mod stock_etf_phase3_evidence;
@@ -142,6 +143,10 @@ pub use stock_etf_lane_scoped_ipc::{
     StockEtfLaneScopedIpcBlocker, StockEtfLaneScopedIpcCommandV1, StockEtfLaneScopedIpcContractV1,
     StockEtfLaneScopedIpcMethod, StockEtfLaneScopedIpcVerdict,
     STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID, STOCK_ETF_SCOPED_AUTHORIZATION_CONTRACT_ID,
+};
+pub use stock_etf_paper_fill_import_request::{
+    StockEtfPaperFillImportBlocker, StockEtfPaperFillImportRequestV1,
+    StockEtfPaperFillImportVerdict, STOCK_ETF_PAPER_FILL_IMPORT_REQUEST_CONTRACT_ID,
 };
 pub use stock_etf_paper_order_request::{
     StockEtfLimitPricePolicy, StockEtfPaperOrderRequestBlocker,

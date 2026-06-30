@@ -602,6 +602,47 @@ margin/short/options/CFD requests, and Python direct broker writes.
 This contract creates no order and only defines the typed request envelope that
 future runtime code must satisfy before reaching the paper lifecycle.
 
+## 9B. `stock_etf_paper_fill_import_request_v1`
+
+Required fields:
+
+- exact contract id `stock_etf_paper_fill_import_request_v1`
+- `source_version=1`
+- `asset_lane=stock_etf_cash`
+- `broker=ibkr`
+- `environment=paper`
+- `request_method=import_paper_fills`
+- `operation=paper_order_fill_import`
+- `authority_scope=readonly`
+- `effect_capable=false`
+- request id
+- session attestation hash
+- lifecycle contract id/hash
+- event log contract id/hash
+- redaction policy contract id/hash
+- source artifact hash
+- reconciliation run id
+- broker order id
+- execution id
+- commission report id
+- import idempotency key
+- observed order state
+- stale-state policy
+- raw artifact hash
+- redacted summary hash
+
+Source validator:
+`openclaw_types::stock_etf_paper_fill_import_request::StockEtfPaperFillImportRequestV1`.
+The validator rejects wrong lane/broker/environment, method/operation/scope/
+effect mismatches, missing lifecycle/event-log/redaction lineage, missing broker
+order/execution/commission ids, missing import idempotency, missing observed
+state, missing stale-state policy, duplicate imports, stale unknown state without
+policy, IBKR contact, connector runtime, serialized secrets, fill import side
+effects, DB apply, routed orders, Bybit path reuse, live/tiny-live authority,
+margin/short/options/CFD requests, and Python direct broker writes. This contract
+does not import fills; it defines the evidence-safe request shape future fill
+import code must satisfy before lifecycle reconstruction or DB persistence.
+
 ## 10. `ibkr_paper_order_lifecycle_v1`
 
 Required fields:

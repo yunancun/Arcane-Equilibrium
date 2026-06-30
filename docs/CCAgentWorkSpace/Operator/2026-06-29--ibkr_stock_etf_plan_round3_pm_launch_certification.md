@@ -355,6 +355,36 @@ Verification 已過：
 replace、沒有 fill import、沒有 DB apply、沒有 evidence clock、沒有 scorecard
 writer、沒有 Linux runtime sync/restart，也沒有改動 Bybit live execution 行為。
 
+## 2026-06-30 Operator Update — Paper Fill Import Request Contract
+
+本 session 已完成下一個 source-only checkpoint：
+`stock_etf_paper_fill_import_request_v1`。
+
+這次不是 fill importer，也不是 DB persistence。變更只在 Rust contract、blocked
+template、Phase0 manifest/count 與 tests：
+
+- 新增 future `stock_etf.import_paper_fills` 的 typed request contract。
+- Contract 要求 read-only fill-import posture、session/lifecycle/event-log/redaction
+  hashes、broker order/execution/commission ids、import idempotency、observed order
+  state、stale-state policy、raw/redacted artifact hashes。
+- Duplicate import、沒有 stale-state policy 的 unknown state、IBKR contact、connector
+  runtime、secret serialization、fill import side effect、DB apply、Bybit path reuse 都會被拒絕。
+- Phase0 contract count 現在是 30。
+
+Verification 已過：
+
+- Fill import request acceptance：`6 passed`
+- Phase0 manifest：`6 passed`
+- FastAPI Phase0/StockETF focused：`14 passed`
+- Full openclaw_types：`35 + 227 + 0 doc-tests`
+- Engine Stock/ETF：`23 passed`
+- Workspace `cargo check`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 secret access/creation、沒有 connector runtime、
+沒有 lifecycle writer、沒有 Phase 1/2/3/4/5 runtime start、沒有 fill import、沒有
+DB apply、沒有 paper order/cancel/replace、沒有 evidence clock、沒有 scorecard
+writer、沒有 Linux runtime sync/restart，也沒有改動 Bybit live execution 行為。
+
 ## 2026-06-30 Operator Update — Paper Request Envelope Contract
 
 本 session 已完成下一個 source-only checkpoint：

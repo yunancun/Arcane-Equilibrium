@@ -2953,3 +2953,12 @@
 - Tests now prove stale/minimal params fail envelope parsing without using the Bybit paper channel, valid preview envelope validation stays no-runtime, and a valid submit envelope cannot be accepted under the cancel IPC method.
 - Verification passed: Rust format check PASS; openclaw_engine `stock_etf` filter `23 passed`; openclaw_types paper request acceptance `8 passed`; workspace `cargo check` PASS.
 - PM boundary unchanged: no IBKR contact, no secret access/creation, no connector runtime, no lifecycle writer, no Phase 1/2/3/4/5 runtime start, no paper order/cancel/replace, no fill import, no DB apply, no evidence clock, no scorecard writer, no Linux runtime sync/restart, no tiny-live/live authority, and no Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Paper Fill Import Request Contract
+
+- PM added source-only `stock_etf_paper_fill_import_request_v1` for the future `stock_etf.import_paper_fills` path. It is a type/config/test checkpoint only, not a fill importer.
+- The validator requires exact Stock/ETF/IBKR/paper identity, read-only `PaperOrderFillImport` semantics, session/lifecycle/event-log/redaction/source hashes, reconciliation run id, broker order/execution/commission ids, import idempotency, observed order state, stale-state policy, and raw/redacted artifact hashes.
+- It rejects duplicate imports, stale unknown state without policy, IBKR contact, connector runtime, secret serialization, fill import side effects, DB apply, order routing, Bybit path reuse, live/tiny-live authority, margin/short/options/CFD requests, and Python direct broker writes.
+- Phase0 manifest source, repository manifest JSON, FastAPI Phase0 count, route fixtures/tests, and Phase0 packet spec now include 30 contracts.
+- Verification passed: new fill import acceptance `6 passed`; Phase0 manifest acceptance `6 passed`; FastAPI Phase0/StockETF focused `14 passed`; full openclaw_types `35` unit/golden + `227` integration/acceptance + `0` doc-tests; openclaw_engine `stock_etf` filter `23 passed`; workspace `cargo check` PASS.
+- PM boundary unchanged: no IBKR contact, no secret access/creation, no connector runtime, no lifecycle writer, no Phase 1/2/3/4/5 runtime start, no fill import, no DB apply, no paper order/cancel/replace, no evidence clock, no scorecard writer, no Linux runtime sync/restart, no tiny-live/live authority, and no Bybit behavior change.
