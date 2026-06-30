@@ -650,3 +650,9 @@ Do not paste long reports or stable architecture into TODO.
 - Phase 4 auth checkpoint makes `GET /api/v1/stock-etf` tab redirect require the same authenticated actor dependency as the Stock/ETF read APIs.
 - Added a negative test proving unauthenticated redirect access returns `401`; existing method tests still prove Stock/ETF API routes are GET-only and reject POST/PUT/PATCH/DELETE.
 - Verification passed: route/test `py_compile`, focused FastAPI/static no-write pytest `22 passed`, and `git diff --check`. This grants no IBKR contact, connector runtime, secret access, paper order, fill import, DB apply, GUI/lane selector authority, Phase 2 start, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF IPC Method Registry Boundary
+
+- Source-only Rust method-registry checkpoint makes Stock/ETF IPC fixture boundaries explicit: lane-status/readiness/preview/import/shadow methods remain read-only fixtures.
+- Stock/ETF submit/cancel/replace paper methods stay visibly non-readonly, require no global IPC slot, do not enter the Bybit live-write token surface, and do not alias legacy paper method names.
+- Verification passed: `rustfmt --edition 2021`, focused registry cargo test `1 passed`, filtered `openclaw_engine stock_etf` cargo test `7 passed`, and `git diff --check`. This grants no IBKR contact, connector runtime, secret access, paper order, fill import, DB apply, GUI/lane selector authority, Phase 2 start, tiny-live, live, or Bybit behavior change.
