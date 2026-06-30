@@ -18,6 +18,7 @@ universe_hash = ""
 benchmark_hash = ""
 cost_model_hash = ""
 strategy_hypothesis_hash = ""
+reference_data_sources_contract_hash = ""
 corporate_action_fx_fee_asof_ms = 0
 paper_shadow_divergence_threshold_hash = ""
 gui_evidence_view_available = false

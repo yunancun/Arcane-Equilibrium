@@ -152,7 +152,19 @@ session attestation, Decision Lease, Guardian, idempotency, broker
 reconciliation, Bybit-live unchanged proof, and no IBKR contact, connector
 runtime, or secret serialization.
 
-Phase 3 evidence clock may start only after `stock_etf_evidence_clock_v1` proves collector stability, accepted PIT universe and strategy hypothesis contracts plus frozen universe/benchmark/cost model/strategy hypothesis hashes, corporate-action and FX source contracts, and paper-vs-shadow divergence thresholds. Scorecard inputs must remain source-validated, derived-only, paper/shadow separated, and unable to claim live fills.
+`stock_etf_reference_data_sources_v1` must be machine-checkable before Phase 3
+evidence-clock days, shadow-fill reconstruction, or scorecards can consume
+corporate-action, FX, fee, tax/FTT, or withholding-treatment hashes. It must
+prove frozen source names, as-of timestamps, source artifact hashes, USD v1
+currency treatment, Bybit-live unchanged proof, and no IBKR contact, connector
+runtime, serialized secrets, tiny-live, or live authority.
+
+Phase 3 evidence clock may start only after `stock_etf_evidence_clock_v1`
+proves collector stability, accepted PIT universe, strategy hypothesis, and
+reference-data source contracts plus frozen universe/benchmark/cost/strategy
+hypothesis/reference-data hashes and paper-vs-shadow divergence thresholds.
+Scorecard inputs must remain source-validated, derived-only, paper/shadow
+separated, and unable to claim live fills.
 
 Cross-phase `stock_etf_cash` evidence must be referable through `audit.asset_lane_events_v1` immutable event references. These references require lane/broker/environment/operation fields, hash-chain continuity, producer/source metadata, artifact hashes, and redaction boundaries; they do not write audit rows or authorize runtime actions by themselves.
 

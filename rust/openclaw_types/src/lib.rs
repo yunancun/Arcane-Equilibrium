@@ -29,6 +29,7 @@ pub mod stock_etf_lane_scoped_ipc;
 pub mod stock_etf_phase0_manifest;
 pub mod stock_etf_phase3_evidence;
 pub mod stock_etf_pit_universe;
+pub mod stock_etf_reference_data_sources;
 pub mod stock_etf_release_packet;
 pub mod stock_etf_risk_policy;
 pub mod stock_etf_scorecard_inputs;
@@ -133,6 +134,10 @@ pub use stock_etf_phase3_evidence::{
 pub use stock_etf_pit_universe::{
     StockEtfPitUniverseBlocker, StockEtfPitUniverseConstituentV1, StockEtfPitUniverseV1,
     StockEtfPitUniverseVerdict, STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
+};
+pub use stock_etf_reference_data_sources::{
+    StockEtfReferenceDataSourcesBlocker, StockEtfReferenceDataSourcesV1,
+    StockEtfReferenceDataSourcesVerdict, STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID,
 };
 pub use stock_etf_release_packet::{
     StockEtfKillDisableCleanupProofV1, StockEtfPgMigrationEvidenceV1,

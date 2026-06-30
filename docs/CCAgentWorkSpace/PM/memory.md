@@ -31,6 +31,12 @@
 - The guard rejects direct broker write functions/calls, forbidden paper-order IPC method strings, direct `ibapi` / `ib_insync` imports, and non-GET Stock/ETF/IBKR routes while intentionally excluding existing Bybit modules.
 - This grants no IBKR contact, connector runtime, paper order, DB apply, evidence clock, GUI lane authority, release approval, tiny-live, or live.
 
+## 2026-06-30 IBKR Stock/ETF Reference Data Sources Contract
+
+- PM added `stock_etf_reference_data_sources_v1` as a Rust source-only validator for corporate-action, FX, fee, tax/FTT, and withholding-treatment source-as-of records.
+- The contract is wired into the Phase 0 manifest, Phase 3 frozen inputs, and broker capability shadow-fill / scorecard gates; blocked template and acceptance tests are included.
+- Verification passed: focused linked openclaw_types tests `28 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `168` integration/acceptance + `0` doc-tests. This grants no IBKR contact, connector runtime, collector, scorecard writer, DB apply, GUI lane authority, tiny-live, or live.
+
 ## 2026-06-30 IBKR Stock/ETF Phase 0 Manifest Contract
 
 - PM added `stock_etf_phase0_contract_packet_manifest_v1` as a Rust source-only validator for the Phase 0 machine-readable manifest.
