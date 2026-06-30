@@ -9,7 +9,7 @@ use openclaw_types::{
     BrokerEnvironment, IbkrApiSessionTopologyBlocker, IbkrApiSessionTopologyV1,
     IbkrGatewayProcessMode, IbkrSecretSlotContractBlocker, IbkrSecretSlotContractV1,
     IbkrSecretSlotPosture, IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID, IBKR_LIVE_GATEWAY_PORT,
-    IBKR_PAPER_GATEWAY_DEFAULT_PORT,
+    IBKR_PAPER_GATEWAY_DEFAULT_PORT, IBKR_SECRET_SLOT_CONTRACT_ID,
 };
 
 #[test]
@@ -18,6 +18,12 @@ fn default_secret_slot_contract_blocks_gate_prerequisites() {
     let verdict = contract.validate();
 
     assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&IbkrSecretSlotContractBlocker::ContractIdMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrSecretSlotContractBlocker::SourceVersionMismatch));
     assert!(verdict
         .blockers
         .contains(&IbkrSecretSlotContractBlocker::ContractMissing));
@@ -42,6 +48,8 @@ fn source_secret_slot_contract_accepts_only_hashed_paper_and_absent_live() {
 
     assert!(verdict.accepted);
     assert!(verdict.blockers.is_empty());
+    assert_eq!(contract.contract_id, IBKR_SECRET_SLOT_CONTRACT_ID);
+    assert_eq!(contract.source_version, 1);
     assert_eq!(
         contract.paper_slot_posture,
         IbkrSecretSlotPosture::PresentHashed
@@ -57,6 +65,8 @@ fn source_secret_slot_contract_accepts_only_hashed_paper_and_absent_live() {
 #[test]
 fn secret_slot_contract_rejects_live_secret_and_serialized_sensitive_fields() {
     let contract = IbkrSecretSlotContractV1 {
+        contract_id: "ibkr_secret_slot_contract_v1_fixture".to_string(),
+        source_version: 2,
         readonly_slot_posture: IbkrSecretSlotPosture::LivePresentDenied,
         paper_slot_posture: IbkrSecretSlotPosture::Missing,
         live_slot_posture: IbkrSecretSlotPosture::LivePresentDenied,
@@ -72,6 +82,12 @@ fn secret_slot_contract_rejects_live_secret_and_serialized_sensitive_fields() {
     let verdict = contract.validate();
 
     assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&IbkrSecretSlotContractBlocker::ContractIdMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrSecretSlotContractBlocker::SourceVersionMismatch));
     assert!(verdict
         .blockers
         .contains(&IbkrSecretSlotContractBlocker::ReadonlySlotPostureInvalid));
@@ -209,6 +225,14 @@ fn runtime_contract_template_is_blocked_and_secret_free() {
     .expect("read ibkr runtime contract template");
     let parsed: toml::Value = toml::from_str(&raw).expect("runtime contract toml parses");
 
+    assert_eq!(
+        parsed["secret_slot_contract"]["contract_id"].as_str(),
+        Some("")
+    );
+    assert_eq!(
+        parsed["secret_slot_contract"]["source_version"].as_integer(),
+        Some(0)
+    );
     assert_eq!(
         parsed["secret_slot_contract"]["contract_present"].as_bool(),
         Some(false)

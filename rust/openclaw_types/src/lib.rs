@@ -79,6 +79,7 @@ pub use ibkr_phase2_runtime::{
     IbkrApiSessionTopologyBlocker, IbkrApiSessionTopologyV1, IbkrApiSessionTopologyVerdict,
     IbkrGatewayProcessMode, IbkrSecretSlotContractBlocker, IbkrSecretSlotContractV1,
     IbkrSecretSlotContractVerdict, IbkrSecretSlotPosture, IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID,
+    IBKR_SECRET_SLOT_CONTRACT_ID,
 };
 pub use intent::{DataQualityLevel, OrderIntent, RiskVerdict, TradeIntent};
 pub use price::{Kline, KlineBar, PriceEvent, PriceEventKind, OHLCV};

@@ -12,6 +12,7 @@ use crate::ibkr_phase2_gate::{
 };
 use crate::stock_etf_lane::BrokerEnvironment;
 
+pub const IBKR_SECRET_SLOT_CONTRACT_ID: &str = "ibkr_secret_slot_contract_v1";
 pub const IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID: &str = "ibkr_api_session_topology_v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -32,6 +33,8 @@ impl Default for IbkrSecretSlotPosture {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IbkrSecretSlotContractV1 {
+    pub contract_id: String,
+    pub source_version: u32,
     pub contract_present: bool,
     pub readonly_slot_posture: IbkrSecretSlotPosture,
     pub paper_slot_posture: IbkrSecretSlotPosture,
@@ -48,6 +51,8 @@ pub struct IbkrSecretSlotContractV1 {
 impl Default for IbkrSecretSlotContractV1 {
     fn default() -> Self {
         Self {
+            contract_id: String::new(),
+            source_version: 0,
             contract_present: false,
             readonly_slot_posture: IbkrSecretSlotPosture::Unknown,
             paper_slot_posture: IbkrSecretSlotPosture::Unknown,
@@ -66,6 +71,8 @@ impl Default for IbkrSecretSlotContractV1 {
 impl IbkrSecretSlotContractV1 {
     pub fn source_template() -> Self {
         Self {
+            contract_id: IBKR_SECRET_SLOT_CONTRACT_ID.to_string(),
+            source_version: 1,
             contract_present: true,
             readonly_slot_posture: IbkrSecretSlotPosture::PresentHashed,
             paper_slot_posture: IbkrSecretSlotPosture::PresentHashed,
@@ -84,6 +91,12 @@ impl IbkrSecretSlotContractV1 {
         use IbkrSecretSlotContractBlocker as Blocker;
 
         let mut blockers = Vec::new();
+        if self.contract_id != IBKR_SECRET_SLOT_CONTRACT_ID {
+            blockers.push(Blocker::ContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
+        }
         if !self.contract_present {
             blockers.push(Blocker::ContractMissing);
         }
@@ -137,6 +150,8 @@ pub struct IbkrSecretSlotContractVerdict {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrSecretSlotContractBlocker {
+    ContractIdMismatch,
+    SourceVersionMismatch,
     ContractMissing,
     ReadonlySlotPostureInvalid,
     PaperSlotMissingOrUnhashed,
