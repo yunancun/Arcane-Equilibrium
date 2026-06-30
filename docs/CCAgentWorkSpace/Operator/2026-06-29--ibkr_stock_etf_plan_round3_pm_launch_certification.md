@@ -200,3 +200,29 @@ Verification 已過：
 沒有 secret access/creation、沒有 connector runtime、沒有 Phase 1/2/3/4/5 runtime
 start、沒有 paper order、沒有 fill import、沒有 evidence clock、沒有 scorecard
 writer、沒有 Linux runtime sync/restart，也沒有改動 Bybit live execution 行為。
+
+## 2026-06-30 Operator Update — DB Evidence DDL Source Contract Hardening
+
+本 session 已完成下一個 source-only checkpoint：
+DB evidence DDL source contract hardening。
+
+這次仍不是 DB 部署。變更只在 source draft 與 Rust auditor：
+
+- DDL draft 現在有 Guard B type checks 與 Guard C index drift checks。
+- DDL draft 補上 instrument/order/fill/commission/shadow lineage FKs。
+- Scorecard source table 補 cost model、market-data provenance、corporate actions、
+  FX/cash ledger、paper-vs-shadow reconciliation hashes。
+- Hypertable/retention 只新增 promotion plan；未來要進 V### migration 前，還要先把
+  primary/unique constraints 改成 Timescale partition-safe。
+
+Verification 已過：
+
+- DB evidence DDL acceptance：`10 passed`
+- Full openclaw_types：`35` unit/golden + `208` integration/acceptance + `0` doc-tests
+- Workspace `cargo check`：PASS
+
+邊界不變：沒有 DB migration/apply、沒有 Postgres dry-run、沒有 sqlx migration
+registration、沒有 IBKR contact、沒有 secret access/creation、沒有 connector runtime、
+沒有 Phase 1/2/3/4/5 runtime start、沒有 paper order、沒有 fill import、沒有
+evidence clock、沒有 scorecard writer、沒有 Linux runtime sync/restart，也沒有改動
+Bybit live execution 行為。

@@ -1175,3 +1175,46 @@ PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 
 scorecard writer、不啟動 evidence clock、不送 paper order、不匯入 fill、不做 Linux
 runtime sync/restart、不啟動 paper-shadow launch、不授權 tiny-live/live 或任何 Bybit
 behavior change。
+
+## 21. 2026-06-30 PM session source checkpoint：DB Evidence DDL Source Contract Hardening
+
+本 session 繼續 Phase 1C，但仍停留在 source-only DDL contract。上一個 checkpoint
+讓 source SQL 有 auditor；本 checkpoint 補足計劃中要求但尚未 machine-check 的
+FK、Guard B/C、scorecard lineage 與 hypertable/retention promotion plan。
+
+新增 checkpoint：
+
+- `stock_etf_db_evidence_ddl_v1.source_only.sql` 新增 Guard B type-sensitive
+  checks，覆蓋 paper order/fill、shadow fill、scorecard JSON、audit event time/boolean
+  欄位，避免既有 table shape drift 被 `CREATE TABLE IF NOT EXISTS` 靜默跳過。
+- Source draft 新增 Guard C hot-path index drift check，使用 `pg_get_indexdef`
+  驗 paper order、paper fill、shadow signals、scorecard、asset lane events indexes。
+- Source draft 補 FK lineage：instrument listing/order/fill 指回
+  `broker.instruments`，fill 指回 paper order，commission 指回 fill，shadow fill
+  指回 signal；同時補 `research.stock_shadow_fills.broker/strategy_id`。
+- `research.stock_etf_scorecard` 補 broker/environment、`cost_model_version`、
+  `market_data_provenance_hash`、`corporate_actions_hash`、
+  `fx_cash_ledger_hash`、`paper_shadow_reconciliation_hash`，讓 scorecard 仍是
+  derived artifact，但可追溯到 atomic evidence source。
+- Source draft 新增 TimescaleDB hypertable/retention promotion plan，但沒有執行
+  `create_hypertable` 或 `add_retention_policy`；它明確要求未來 V### promotion 前
+  必須先把所有被 promotion 的 table 改成 partition-safe primary/unique constraints。
+- Rust auditor 新增 blockers：`GuardBBlockMissing`、`GuardCBlockMissing`、
+  `MigrationDryRunPlanMissing`、`RequiredForeignKeyMissing`、
+  `HypertableRetentionPlanMissing`，並追蹤 `foreign_key_count`。
+
+驗證：
+
+- Rust format checks：PASS（`lib.rs` 使用 `skip_children=true`）。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_db_evidence_ddl_acceptance -- --nocapture`：
+  DB evidence DDL acceptance `10 passed`。
+- Full `cargo test --manifest-path rust/Cargo.toml -p openclaw_types`：
+  `35` unit/golden + `208` integration/acceptance + `0` doc-tests。
+- `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
+
+PM 邊界不變：此 checkpoint 不把 source draft 複製到 `sql/migrations/`，不做 DB
+migration/apply，不做 Postgres dry-run 或 double apply，不註冊 sqlx migration，不呼叫
+IBKR、不讀/建 secret、不啟動 connector runtime、不啟動 Phase 1/2/3/4/5 runtime、不啟動
+scorecard writer、不啟動 evidence clock、不送 paper order、不匯入 fill、不做 Linux
+runtime sync/restart、不啟動 paper-shadow launch、不授權 tiny-live/live 或任何 Bybit
+behavior change。

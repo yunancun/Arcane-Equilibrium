@@ -291,6 +291,18 @@ pub fn audit_stock_etf_db_evidence_source_sql(raw: &str) -> StockEtfDbEvidenceDd
     if !sql.contains("guard a") || !sql.contains("information_schema.columns") {
         blockers.push(Blocker::GuardABlockMissing);
     }
+    if !sql.contains("guard b") || !sql.contains("data_type") {
+        blockers.push(Blocker::GuardBBlockMissing);
+    }
+    if !sql.contains("guard c") || !sql.contains("pg_get_indexdef") {
+        blockers.push(Blocker::GuardCBlockMissing);
+    }
+    if !sql.contains("linux postgres dry-run")
+        || !sql.contains("idempotency double-apply proof")
+        || !sql.contains("pm/operator migration apply authorization")
+    {
+        blockers.push(Blocker::MigrationDryRunPlanMissing);
+    }
 
     let mut table_count = 0usize;
     for table in REQUIRED_TABLES {
@@ -318,6 +330,12 @@ pub fn audit_stock_etf_db_evidence_source_sql(raw: &str) -> StockEtfDbEvidenceDd
         let expected = natural_key_unique_fragment(key);
         if !sql.contains(&expected) {
             blockers.push(Blocker::RequiredNaturalKeyMissing);
+            break;
+        }
+    }
+    for foreign_key in required_foreign_key_fragments() {
+        if !sql.contains(foreign_key) {
+            blockers.push(Blocker::RequiredForeignKeyMissing);
             break;
         }
     }
@@ -353,17 +371,29 @@ pub fn audit_stock_etf_db_evidence_source_sql(raw: &str) -> StockEtfDbEvidenceDd
     if !sql.contains("append-only asset lane audit event contract") {
         blockers.push(Blocker::ForwardOnlyAuditCommentMissing);
     }
+    if !sql.contains("hypertable/retention promotion plan")
+        || !sql.contains("create_hypertable")
+        || !sql.contains("add_retention_policy")
+        || !sql.contains("if_not_exists => true")
+        || !sql.contains("primary key")
+        || !sql.contains("unique constraint")
+        || !sql.contains("partition column")
+    {
+        blockers.push(Blocker::HypertableRetentionPlanMissing);
+    }
 
     let index_count = sql.matches("create index if not exists").count();
     if index_count < 6 {
         blockers.push(Blocker::HotPathIndexMissing);
     }
+    let foreign_key_count = sql.matches("foreign key").count();
 
     StockEtfDbEvidenceDdlSourceAudit {
         accepted: blockers.is_empty(),
         blockers,
         table_count,
         index_count,
+        foreign_key_count,
     }
 }
 
@@ -447,6 +477,8 @@ fn required_source_table_columns() -> &'static [(&'static str, &'static [&'stati
         (
             "research.stock_shadow_fills",
             &[
+                "broker",
+                "strategy_id",
                 "signal_id",
                 "instrument_identity_hash",
                 "synthetic_shadow",
@@ -457,11 +489,18 @@ fn required_source_table_columns() -> &'static [(&'static str, &'static [&'stati
         (
             "research.stock_etf_scorecard",
             &[
+                "broker",
+                "environment",
                 "strategy_id",
                 "universe_version",
                 "benchmark_version",
                 "as_of_date",
+                "cost_model_version",
                 "scorecard_hash",
+                "market_data_provenance_hash",
+                "corporate_actions_hash",
+                "fx_cash_ledger_hash",
+                "paper_shadow_reconciliation_hash",
                 "metrics_json",
             ],
         ),
@@ -478,6 +517,15 @@ fn required_source_table_columns() -> &'static [(&'static str, &'static [&'stati
                 "denial_reason",
             ],
         ),
+    ]
+}
+
+fn required_foreign_key_fragments() -> &'static [&'static str] {
+    &[
+        "foreign key (asset_lane, broker, instrument_identity_hash) references broker.instruments (asset_lane, broker, instrument_identity_hash)",
+        "foreign key (asset_lane, broker, environment, broker_order_id) references broker.paper_orders (asset_lane, broker, environment, broker_order_id)",
+        "foreign key (asset_lane, broker, environment, broker_order_id, execution_id) references broker.paper_fills (asset_lane, broker, environment, broker_order_id, execution_id)",
+        "foreign key (asset_lane, strategy_id, signal_id) references research.stock_shadow_signals (asset_lane, strategy_id, signal_id)",
     ]
 }
 
@@ -502,6 +550,7 @@ pub struct StockEtfDbEvidenceDdlSourceAudit {
     pub blockers: Vec<StockEtfDbEvidenceDdlSourceBlocker>,
     pub table_count: usize,
     pub index_count: usize,
+    pub foreign_key_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -563,9 +612,13 @@ pub enum StockEtfDbEvidenceDdlSourceBlocker {
     ForbiddenDestructiveOrMigrationStatement,
     RequiredSchemaMissing,
     GuardABlockMissing,
+    GuardBBlockMissing,
+    GuardCBlockMissing,
+    MigrationDryRunPlanMissing,
     RequiredTableMissing,
     RequiredTableColumnMissing,
     RequiredNaturalKeyMissing,
+    RequiredForeignKeyMissing,
     StockAssetLaneCheckMissing,
     IbkrBrokerCheckMissing,
     PaperEnvironmentCheckMissing,
@@ -574,5 +627,6 @@ pub enum StockEtfDbEvidenceDdlSourceBlocker {
     RawArtifactHashRequirementMissing,
     AuditAssetLaneEventsMissing,
     ForwardOnlyAuditCommentMissing,
+    HypertableRetentionPlanMissing,
     HotPathIndexMissing,
 }

@@ -334,3 +334,36 @@ migration/apply、Postgres dry-run、double apply、IBKR contact、secret、conn
 runtime、Phase 1/2/3/4/5 runtime start、paper order、fill import、evidence clock、
 scorecard writer、tiny-live、live、Linux runtime sync/restart 或 Bybit behavior
 change。
+
+## 2026-06-30 PM Session Checkpoint — DB Evidence DDL Source Contract Hardening
+
+PM 已在本 session 追加 Phase 1C source-only checkpoint：DB evidence DDL contract
+hardening。這是在上一個 source auditor 之上補 DB contract 面，不是 DB deployment。
+
+已完成：
+
+- Source SQL：新增 Guard B type-sensitive checks 與 Guard C
+  `pg_get_indexdef` hot-path index drift checks。
+- Source SQL：新增 FK lineage，覆蓋 instrument listing/order/fill/commission/shadow
+  signal/fill chain，並補 shadow fill 的 `broker` / `strategy_id` 欄位。
+- Source SQL：新增 scorecard lineage 欄位：broker/environment、cost model version、
+  market-data provenance hash、corporate-actions hash、FX/cash-ledger hash、paper-vs-shadow
+  reconciliation hash。
+- Source SQL：新增 TimescaleDB hypertable/retention promotion plan，但明確不執行；
+  未來 V### promotion 前必須先設計 partition-safe primary/unique constraints。
+- Rust auditor：新增 Guard B/C、dry-run plan、required FK、hypertable/retention plan
+  blockers，並追蹤 source SQL `foreign_key_count`。
+
+Verification：
+
+- Rust format checks PASS（`lib.rs` with `skip_children=true`）。
+- DB evidence DDL acceptance `10 passed`。
+- Full openclaw_types PASS：`35` unit/golden + `208` integration/acceptance +
+  `0` doc-tests。
+- Workspace `cargo check` PASS。
+
+PM 判定：checkpoint 可接受，但仍不是 DB deployment approval。未批准 DB
+migration/apply、Postgres dry-run、double apply、sqlx migration registration、IBKR
+contact、secret、connector runtime、Phase 1/2/3/4/5 runtime start、paper order、
+fill import、evidence clock、scorecard writer、tiny-live、live、Linux runtime
+sync/restart 或 Bybit behavior change。
