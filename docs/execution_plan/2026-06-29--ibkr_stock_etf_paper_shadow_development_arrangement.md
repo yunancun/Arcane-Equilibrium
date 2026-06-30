@@ -917,3 +917,49 @@ PM 邊界不變：此 checkpoint 不批准 IBKR contact、secret access/creation
 connector runtime、contract-details request、account snapshot、paper order rehearsal/submit、
 paper fill import、evidence clock、scorecard writer、DB apply、GUI lane authority、
 Phase 2/3/5 start、tiny-live、live 或任何 Bybit behavior change。
+
+## 15. 2026-06-30 PM session source checkpoint：Authorization Status
+
+本 session 繼續按第三輪 PM 簽核語義推進，但仍停留在 source-only /
+display-only authorization gate hardening。此 checkpoint 不讀取 secret、不建立
+secret slot、不呼叫 IBKR、不啟動 connector runtime，也不給 GUI 或 Python 任何
+paper-order 權限。
+
+新增 checkpoint：
+
+- Rust IPC fixture 新增 `stock_etf.get_authorization_status`，輸出
+  `phase2_authorization_status_source_fixture`，只反映
+  `feature_flag_secret_auth_matrix_v1`、`ibkr_secret_slot_contract_v1`、
+  `phase2_ibkr_external_surface_gate_v1`、`ibkr_session_attestation_v1` 與
+  authorization envelope 的 blocked/default source posture。
+- FastAPI 新增 authenticated/no-store
+  `GET /api/v1/stock-etf/authorization-status`，只呼叫上述 IPC method 且 params
+  為 `{}`；normalizer fail-closes IPC unavailable、拒絕 client-supplied state，
+  並把 authorization/contact/secret/session/envelope/order/DB/Bybit reuse drift
+  轉為 `contract_violation_blocked`。
+- GUI 新增 `Authorization Gate` metric 與 `Authorization Status` panel，只顯示
+  auth matrix、secret-slot、Phase 2 gate artifact、session attestation、authorization
+  envelope 與 blockers；未新增表單、POST、broker write、order widget 或
+  browser-storage authority。
+- `lane_scoped_ipc_v1` 新增 `GetAuthorizationStatus`
+  display-only/non-effect-capable method；`gui_lane_contract_v1` 新增 exact
+  GET-only `/api/v1/stock-etf/authorization-status` endpoint。
+
+驗證：
+
+- Python route/normalizer/test `py_compile`：PASS。
+- Node inline parser for `tab-stock-etf.html`：PASS（7 inline scripts）。
+- Full Stock/ETF FastAPI/static pytest：`77 passed`。
+- Rust format checks：PASS（含 `lib.rs` with `skip_children=true`）。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf`：
+  `18 passed` focused Stock/ETF tests。
+- GUI/lane IPC acceptance：`17 passed`。
+- Full `cargo test --manifest-path rust/Cargo.toml -p openclaw_types`：
+  `35` unit/golden + `206` integration/acceptance + `0` doc-tests。
+- `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
+
+PM 邊界不變：此 checkpoint 不批准 IBKR contact、secret access/creation、
+connector runtime、contract-details request、account snapshot、risk runtime、
+paper-order rehearsal/submit、paper fill import、evidence clock、scorecard writer、
+DB apply、GUI lane authority、Phase 2/3/5 start、tiny-live、live 或任何 Bybit
+behavior change。

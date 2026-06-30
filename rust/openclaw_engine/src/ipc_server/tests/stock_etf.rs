@@ -676,6 +676,115 @@ async fn stock_etf_policy_status_is_blocked_source_fixture_without_side_effects(
 }
 
 #[tokio::test]
+async fn stock_etf_authorization_status_is_blocked_source_fixture_without_side_effects() {
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let req =
+        r#"{"jsonrpc":"2.0","method":"stock_etf.get_authorization_status","params":{},"id":4816}"#;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
+    )
+    .await;
+
+    assert!(resp.error.is_none());
+    let result = resp.result.expect("stock_etf authorization status result");
+    assert_eq!(
+        result["phase"],
+        "phase2_authorization_status_source_fixture"
+    );
+    assert_eq!(result["asset_lane"], "stock_etf_cash");
+    assert_eq!(result["broker"], "ibkr");
+    assert_eq!(result["environment"], "paper");
+    assert_eq!(result["authorization_status_state"], "blocked");
+    assert_eq!(result["phase2_started"], false);
+    assert_eq!(result["paper_order_authority_present"], false);
+    assert_eq!(result["scoped_authorization_present"], false);
+    assert_eq!(result["decision_lease_valid"], false);
+    assert_eq!(result["guardian_allows"], false);
+    assert_eq!(result["paper_order_submitted"], false);
+    assert_eq!(result["connector_runtime_started"], false);
+    assert_eq!(result["db_apply_performed"], false);
+    assert_eq!(result["ibkr_call_performed"], false);
+    assert_eq!(result["secret_slot_touched"], false);
+    assert_eq!(result["order_routed"], false);
+    assert_eq!(result["bybit_ipc_reused"], false);
+
+    let matrix = &result["authorization_matrix"];
+    assert_eq!(
+        matrix["expected_contract_id"],
+        "feature_flag_secret_auth_matrix_v1"
+    );
+    assert_eq!(matrix["contract_id"], "");
+    assert_eq!(matrix["source_version"], 0);
+    assert_eq!(matrix["request_asset_lane"], "stock_etf_cash");
+    assert_eq!(matrix["request_broker"], "ibkr");
+    assert_eq!(matrix["request_environment"], "paper");
+    assert_eq!(matrix["request_instrument_kind"], "stock");
+    assert_eq!(matrix["request_operation"], "paper_order_submit");
+    assert_eq!(matrix["request_allowed"], false);
+    assert_eq!(matrix["effective_authority_scope"], "denied");
+    assert_eq!(matrix["gui_lane_state_override_denied"], true);
+    assert_eq!(matrix["server_rust_matrix_authoritative"], true);
+    assert!(json_array_contains(
+        &matrix["blockers"],
+        "contract_id_mismatch"
+    ));
+    assert!(json_array_contains(
+        &matrix["blockers"],
+        "source_version_mismatch"
+    ));
+
+    let secret = &result["secret_slot_contract"];
+    assert_eq!(
+        secret["expected_contract_id"],
+        "ibkr_secret_slot_contract_v1"
+    );
+    assert_eq!(secret["accepted"], false);
+    assert_eq!(secret["contract_present"], false);
+    assert_eq!(secret["secret_content_serialized"], false);
+    assert_eq!(secret["account_id_serialized"], false);
+
+    let artifact = &result["phase2_gate_artifact"];
+    assert_eq!(
+        artifact["expected_contract_id"],
+        "phase2_ibkr_external_surface_gate_v1"
+    );
+    assert_eq!(artifact["ibkr_contact_allowed"], false);
+    assert_eq!(artifact["sealed"], false);
+
+    let session = &result["session_attestation"];
+    assert_eq!(
+        session["expected_contract_id"],
+        "ibkr_session_attestation_v1"
+    );
+    assert_eq!(session["attestation_accepted"], false);
+    assert_eq!(session["account_fingerprint_is_live"], false);
+
+    let envelope = &result["authorization_envelope"];
+    assert_eq!(envelope["permission_scope"], "denied");
+    assert_eq!(envelope["expires_at_ms"], 0);
+    assert_eq!(result["phase2"]["first_ibkr_contact_allowed"], false);
+    assert_eq!(result["phase2"]["connector_enabled"], false);
+}
+
+#[tokio::test]
 async fn stock_etf_shadow_status_is_blocked_source_fixture_without_side_effects() {
     let config = make_test_config();
     let dd = make_test_data_dir();

@@ -6,18 +6,20 @@
 
 use super::super::*;
 use openclaw_types::{
-    evaluate_broker_operation, AssetLane, AuthorityScope, Broker,
-    BrokerAccountPortfolioCashLedgerV1, BrokerCapabilityRequest, BrokerEnvironment,
-    BrokerLifecycleEventLogV1, BrokerOperation, IbkrExternalSurfaceGateV1,
-    IbkrPaperAttestationPolicyV1, IbkrPhase2PolicyBundleV1, IbkrSessionAttestationV1,
-    InstrumentKind, NonBybitApiAllowlistV1, StockEtfBrokerCapabilityRegistryV1,
-    StockEtfDisableCleanupRunbookV1, StockEtfEvidenceClockDayV1, StockEtfFeatureFlags,
-    StockEtfGateInputs, StockEtfInstrumentIdentityV1, StockEtfPitUniverseV1,
-    StockEtfReferenceDataSourcesV1, StockEtfReleasePacketV1, StockEtfRiskPolicyV1,
-    StockEtfScorecardVerdictV1, StockEtfStrategyHypothesisV1, StockMarketDataProvenanceV1,
-    StockShadowFillModelV1, TinyLiveAdrEligibilityV1,
-    BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID, BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
-    IBKR_PAPER_ATTESTATION_CONTRACT_ID, IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
+    evaluate_broker_operation, evaluate_feature_flag_secret_auth_matrix, AssetLane, AuthorityScope,
+    Broker, BrokerAccountPortfolioCashLedgerV1, BrokerCapabilityRequest, BrokerEnvironment,
+    BrokerLifecycleEventLogV1, BrokerOperation, FeatureFlagSecretAuthMatrixV1,
+    IbkrExternalSurfaceGateV1, IbkrPaperAttestationPolicyV1, IbkrPhase2PolicyBundleV1,
+    IbkrSessionAttestationV1, InstrumentKind, NonBybitApiAllowlistV1,
+    StockEtfBrokerCapabilityRegistryV1, StockEtfDisableCleanupRunbookV1,
+    StockEtfEvidenceClockDayV1, StockEtfFeatureFlags, StockEtfGateInputs,
+    StockEtfInstrumentIdentityV1, StockEtfPitUniverseV1, StockEtfReferenceDataSourcesV1,
+    StockEtfReleasePacketV1, StockEtfRiskPolicyV1, StockEtfScorecardVerdictV1,
+    StockEtfStrategyHypothesisV1, StockMarketDataProvenanceV1, StockShadowFillModelV1,
+    TinyLiveAdrEligibilityV1, BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID,
+    BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID, FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID,
+    IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID, IBKR_PAPER_ATTESTATION_CONTRACT_ID,
+    IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID, IBKR_SECRET_SLOT_CONTRACT_ID,
     IBKR_SESSION_ATTESTATION_CONTRACT_ID, STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID,
     STOCK_ETF_DISABLE_CLEANUP_RUNBOOK_ID, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
     STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID, STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
@@ -79,6 +81,9 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
         }
         "stock_etf.get_policy_status" => {
             JsonRpcResponse::success(id, policy_status_summary(phase2))
+        }
+        "stock_etf.get_authorization_status" => {
+            JsonRpcResponse::success(id, authorization_status_summary(phase2, flags.clone()))
         }
         "stock_etf.get_account_status" => {
             JsonRpcResponse::success(id, account_status_summary(phase2))
@@ -445,6 +450,131 @@ fn policy_status_summary(phase2: serde_json::Value) -> serde_json::Value {
         "scorecard_writer_started": false,
         "risk_policy": risk,
         "broker_capability_registry": capability_registry,
+        "phase2": phase2,
+        "ibkr_live_enabled": false,
+        "stock_live_disabled": true,
+        "paper_order_entry_visible": false,
+        "ibkr_call_performed": false,
+        "secret_slot_touched": false,
+        "order_routed": false,
+        "bybit_ipc_reused": false,
+    })
+}
+
+fn authorization_status_summary(
+    phase2: serde_json::Value,
+    flags: StockEtfFeatureFlags,
+) -> serde_json::Value {
+    let matrix = FeatureFlagSecretAuthMatrixV1 {
+        flags,
+        gui_lane_state_override_denied: true,
+        server_rust_matrix_authoritative: true,
+        ..FeatureFlagSecretAuthMatrixV1::default()
+    };
+    let request = BrokerCapabilityRequest::stock_etf_ibkr_paper(
+        InstrumentKind::Stock,
+        BrokerOperation::PaperOrderSubmit,
+    );
+    let auth_verdict = evaluate_feature_flag_secret_auth_matrix(&matrix, request, 0);
+    let secret_verdict = matrix.secret_slot_contract.validate();
+    let artifact_verdict = matrix.phase2_gate_artifact.validate();
+    let session_verdict = matrix.session_attestation.validate(0);
+    let envelope = &matrix.authorization_envelope;
+
+    serde_json::json!({
+        "phase": "phase2_authorization_status_source_fixture",
+        "asset_lane": AssetLane::StockEtfCash,
+        "broker": Broker::Ibkr,
+        "environment": BrokerEnvironment::Paper,
+        "authorization_status_state": "blocked",
+        "phase2_started": false,
+        "phase3_started": false,
+        "risk_runtime_started": false,
+        "paper_order_rehearsal_started": false,
+        "paper_order_submitted": false,
+        "connector_runtime_started": false,
+        "db_apply_performed": false,
+        "evidence_clock_started": false,
+        "scorecard_writer_started": false,
+        "paper_order_authority_present": false,
+        "scoped_authorization_present": false,
+        "decision_lease_valid": false,
+        "guardian_allows": false,
+        "authorization_matrix": {
+            "expected_contract_id": FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID,
+            "contract_id": &matrix.contract_id,
+            "source_version": matrix.source_version,
+            "gui_lane_state_override_denied": matrix.gui_lane_state_override_denied,
+            "server_rust_matrix_authoritative": matrix.server_rust_matrix_authoritative,
+            "request_asset_lane": request.asset_lane,
+            "request_broker": request.broker,
+            "request_environment": request.environment,
+            "request_instrument_kind": request.instrument_kind,
+            "request_operation": request.operation,
+            "request_allowed": auth_verdict.allowed,
+            "effective_authority_scope": auth_verdict.effective_authority_scope,
+            "blockers": auth_verdict.blockers,
+        },
+        "feature_flags": {
+            "stock_etf_lane_enabled": matrix.flags.stock_etf_lane_enabled,
+            "ibkr_readonly_enabled": matrix.flags.ibkr_readonly_enabled,
+            "ibkr_paper_enabled": matrix.flags.ibkr_paper_enabled,
+            "asset_lane_default": matrix.flags.asset_lane_default,
+            "stock_etf_shadow_only": matrix.flags.stock_etf_shadow_only,
+        },
+        "secret_slot_contract": {
+            "expected_contract_id": IBKR_SECRET_SLOT_CONTRACT_ID,
+            "contract_id": &matrix.secret_slot_contract.contract_id,
+            "source_version": matrix.secret_slot_contract.source_version,
+            "accepted": secret_verdict.accepted,
+            "blockers": secret_verdict.blockers,
+            "contract_present": matrix.secret_slot_contract.contract_present,
+            "readonly_slot_posture": matrix.secret_slot_contract.readonly_slot_posture,
+            "paper_slot_posture": matrix.secret_slot_contract.paper_slot_posture,
+            "live_slot_posture": matrix.secret_slot_contract.live_slot_posture,
+            "owner_only_permissions": matrix.secret_slot_contract.owner_only_permissions,
+            "env_var_credential_fallback_denied": matrix.secret_slot_contract.env_var_credential_fallback_denied,
+            "live_secret_absent_or_empty": matrix.secret_slot_contract.live_secret_absent_or_empty,
+            "secret_slot_fingerprint_present": !matrix.secret_slot_contract.secret_slot_fingerprint.is_empty(),
+            "account_fingerprint_hash_present": !matrix.secret_slot_contract.account_fingerprint_hash.is_empty(),
+            "secret_content_serialized": matrix.secret_slot_contract.secret_content_serialized,
+            "account_id_serialized": matrix.secret_slot_contract.account_id_serialized,
+        },
+        "phase2_gate_artifact": {
+            "expected_contract_id": IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
+            "contract_id": &matrix.phase2_gate_artifact.contract_id,
+            "source_version": matrix.phase2_gate_artifact.source_version,
+            "ibkr_contact_allowed": artifact_verdict.ibkr_contact_allowed,
+            "blockers": artifact_verdict.blockers,
+            "artifact_id_present": !matrix.phase2_gate_artifact.artifact_id.is_empty(),
+            "sealed": matrix.phase2_gate_artifact.sealed,
+            "raw_artifact_hash_present": !matrix.phase2_gate_artifact.raw_artifact_hash.is_empty(),
+            "redacted_summary_hash_present": !matrix.phase2_gate_artifact.redacted_summary_hash.is_empty(),
+        },
+        "session_attestation": {
+            "expected_contract_id": IBKR_SESSION_ATTESTATION_CONTRACT_ID,
+            "contract_id": &matrix.session_attestation.contract_id,
+            "source_version": matrix.session_attestation.source_version,
+            "status": matrix.session_attestation.status,
+            "attestation_accepted": session_verdict.attestation_accepted,
+            "blockers": session_verdict.blockers,
+            "environment": matrix.session_attestation.environment,
+            "account_fingerprint_present": !matrix.session_attestation.account_fingerprint.is_empty(),
+            "account_fingerprint_is_live": matrix.session_attestation.account_fingerprint_is_live,
+            "secret_slot_fingerprint_present": !matrix.session_attestation.secret_slot_fingerprint.is_empty(),
+            "api_server_version_present": !matrix.session_attestation.api_server_version.is_empty(),
+            "raw_artifact_hash_present": !matrix.session_attestation.raw_artifact_hash.is_empty(),
+        },
+        "authorization_envelope": {
+            "asset_lane": envelope.asset_lane,
+            "broker": envelope.broker,
+            "environment": envelope.environment,
+            "permission_scope": envelope.permission_scope,
+            "secret_slot_fingerprint_present": !envelope.secret_slot_fingerprint.is_empty(),
+            "account_fingerprint_hash_present": !envelope.account_fingerprint_hash.is_empty(),
+            "risk_config_hash_present": !envelope.risk_config_hash.is_empty(),
+            "expires_at_ms": envelope.expires_at_ms,
+        },
         "phase2": phase2,
         "ibkr_live_enabled": false,
         "stock_live_disabled": true,

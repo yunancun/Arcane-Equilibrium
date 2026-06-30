@@ -34,7 +34,7 @@ This directory stores broker capability contracts and default-off runtime postur
 
 `stock_etf_asset_lane_events.template.toml` records the default-blocked immutable asset-lane audit event reference shape with exact `audit.asset_lane_events_v1` / source-version fields. It does not write audit rows, apply migrations, contact IBKR, create secrets, or authorize paper/tiny-live/live.
 
-`stock_etf_gui_lane_contract.template.toml` records the default-blocked GUI lane contract shape with exact `gui_lane_contract_v1` / source-version fields. It pins the current Stock/ETF display-only GET surfaces for readiness, lane, data-foundation, policy/capability, evidence, universe, shadow, paper, reconciliation, account, scorecard, and launch status. It is source-only and does not serve pages, contact IBKR, create secrets, route orders, or authorize lane selection.
+`stock_etf_gui_lane_contract.template.toml` records the default-blocked GUI lane contract shape with exact `gui_lane_contract_v1` / source-version fields. It pins the current Stock/ETF display-only GET surfaces for readiness, lane, data-foundation, policy/capability, authorization, evidence, universe, shadow, paper, reconciliation, account, scorecard, and launch status. It is source-only and does not serve pages, contact IBKR, create secrets, route orders, or authorize lane selection.
 
 `stock_etf_phase3_evidence_contracts.toml` records the default-blocked market-data provenance, DQ, frozen-input, and evidence-clock checker shape. It requires named contract fields and checker-side side-effect denials for the evidence-clock day shape and does not start the evidence clock.
 

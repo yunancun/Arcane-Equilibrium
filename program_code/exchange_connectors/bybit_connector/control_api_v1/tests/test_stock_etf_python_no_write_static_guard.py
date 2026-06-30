@@ -134,6 +134,10 @@ def test_stock_etf_static_gui_surface_remains_display_only() -> None:
         source = path.read_text(encoding="utf-8")
         if "/api/v1/stock-etf/account-status" not in source:
             violations.append(f"{path}: missing read-only Stock/ETF account-status endpoint")
+        if "/api/v1/stock-etf/authorization-status" not in source:
+            violations.append(
+                f"{path}: missing read-only Stock/ETF authorization-status endpoint"
+            )
         if "/api/v1/stock-etf/data-foundation-status" not in source:
             violations.append(
                 f"{path}: missing read-only Stock/ETF data-foundation-status endpoint"

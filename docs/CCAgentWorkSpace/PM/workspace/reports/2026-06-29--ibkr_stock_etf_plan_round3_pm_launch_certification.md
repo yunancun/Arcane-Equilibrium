@@ -132,3 +132,35 @@ Verification：
 PM 判定：checkpoint 可接受，但仍不是 launch approval。未批准 IBKR contact、secret、
 connector runtime、paper order rehearsal/submit、fill import、evidence clock、scorecard
 writer、DB apply、GUI lane authority、tiny-live、live 或 Bybit behavior change。
+
+## 2026-06-30 PM Session Checkpoint — Authorization Status
+
+PM 已在本 session 追加下一個 source-only checkpoint：Authorization Status
+read-only surface。
+
+已完成：
+
+- Rust IPC：`stock_etf.get_authorization_status` fixture，來源為
+  `feature_flag_secret_auth_matrix_v1`、`ibkr_secret_slot_contract_v1`、
+  `phase2_ibkr_external_surface_gate_v1`、`ibkr_session_attestation_v1` 與
+  authorization envelope 的 blocked/default posture。
+- FastAPI：authenticated/no-store
+  `GET /api/v1/stock-etf/authorization-status`，只 read IPC、fail-closed normalize，
+  並拒絕 client-supplied authorization state。
+- GUI：`Authorization Gate` metric 與 `Authorization Status` panel。
+- Contracts：`lane_scoped_ipc_v1` 增加 `GetAuthorizationStatus`；
+  `gui_lane_contract_v1` 增加 exact GET-only authorization-status endpoint。
+
+Verification：
+
+- Python compile PASS；Node inline parser PASS（7 inline scripts）。
+- Full Stock/ETF FastAPI/static pytest `77 passed`。
+- Engine Stock/ETF cargo filter `18 passed`。
+- GUI/lane IPC acceptance `17 passed`。
+- Full openclaw_types `35` unit/golden + `206` integration/acceptance + `0` doc-tests。
+- Workspace `cargo check` PASS。
+
+PM 判定：checkpoint 可接受，但仍不是 launch approval。未批准 IBKR contact、secret、
+connector runtime、paper order rehearsal/submit、fill import、evidence clock、scorecard
+writer、DB apply、GUI lane authority、Phase 2/3/5 start、tiny-live、live 或 Bybit
+behavior change。
