@@ -26,6 +26,11 @@ stock_etf_router = APIRouter(
 
 _IPC_CLIENT: EngineIPCClient | None = None
 _READINESS_METHOD = "stock_etf.get_readiness"
+_API_ALLOWLIST_CONTRACT_ID = "non_bybit_api_allowlist_v1"
+_API_ALLOWLIST_SOURCE_VERSION = 1
+_API_ALLOWLIST_READ_ACTION_COUNT = 10
+_API_ALLOWLIST_PAPER_WRITE_ACTION_COUNT = 3
+_API_ALLOWLIST_DENIED_ACTION_COUNT = 10
 _DENIED_OPERATIONS: tuple[str, ...] = (
     "ibkr_live_order_submit",
     "ibkr_tiny_live",
@@ -51,6 +56,18 @@ def _phase2_fail_closed() -> dict[str, Any]:
             "ibkr_contact_allowed": False,
             "blockers": ["ipc_unavailable"],
             "ibkr_call_performed": False,
+        },
+        "api_allowlist": {
+            "contract_id": "",
+            "source_version": 0,
+            "accepted": False,
+            "blockers": ["ipc_unavailable"],
+            "read_action_count": 0,
+            "paper_write_action_count": 0,
+            "denied_action_count": 0,
+            "ibkr_contact_performed": False,
+            "secret_content_serialized": False,
+            "bybit_live_execution_protected": False,
         },
         "policy_prerequisites": {
             "bundle_accepted": False,
@@ -110,15 +127,66 @@ def _as_bool(value: Any) -> bool:
     return value is True
 
 
+def _as_int(value: Any) -> int:
+    return value if type(value) is int else 0
+
+
+def _normalize_api_allowlist(value: Any) -> dict[str, Any]:
+    source = _as_dict(value)
+    return {
+        "contract_id": _as_str(source.get("contract_id"), ""),
+        "source_version": _as_int(source.get("source_version")),
+        "accepted": _as_bool(source.get("accepted")),
+        "blockers": [str(item) for item in _as_list(source.get("blockers"))],
+        "read_action_count": _as_int(source.get("read_action_count")),
+        "paper_write_action_count": _as_int(source.get("paper_write_action_count")),
+        "denied_action_count": _as_int(source.get("denied_action_count")),
+        "ibkr_contact_performed": _as_bool(source.get("ibkr_contact_performed")),
+        "secret_content_serialized": _as_bool(source.get("secret_content_serialized")),
+        "bybit_live_execution_protected": _as_bool(
+            source.get("bybit_live_execution_protected")
+        ),
+    }
+
+
+def _api_allowlist_contract_violations(api_allowlist: dict[str, Any]) -> list[str]:
+    violations: list[str] = []
+    if not _as_bool(api_allowlist.get("accepted")):
+        violations.append("api_allowlist_not_accepted")
+    if _as_str(api_allowlist.get("contract_id"), "") != _API_ALLOWLIST_CONTRACT_ID:
+        violations.append("api_allowlist_contract_id_mismatch")
+    if _as_int(api_allowlist.get("source_version")) != _API_ALLOWLIST_SOURCE_VERSION:
+        violations.append("api_allowlist_source_version_mismatch")
+    if _as_int(api_allowlist.get("read_action_count")) != _API_ALLOWLIST_READ_ACTION_COUNT:
+        violations.append("api_allowlist_read_action_count_mismatch")
+    if (
+        _as_int(api_allowlist.get("paper_write_action_count"))
+        != _API_ALLOWLIST_PAPER_WRITE_ACTION_COUNT
+    ):
+        violations.append("api_allowlist_paper_write_action_count_mismatch")
+    if _as_int(api_allowlist.get("denied_action_count")) != _API_ALLOWLIST_DENIED_ACTION_COUNT:
+        violations.append("api_allowlist_denied_action_count_mismatch")
+    if _as_bool(api_allowlist.get("ibkr_contact_performed")):
+        violations.append("api_allowlist_ibkr_contact_performed")
+    if _as_bool(api_allowlist.get("secret_content_serialized")):
+        violations.append("api_allowlist_secret_content_serialized")
+    if not _as_bool(api_allowlist.get("bybit_live_execution_protected")):
+        violations.append("api_allowlist_bybit_live_not_protected")
+    return violations
+
+
 def _normalize_readiness(raw: Any, reason: str | None) -> dict[str, Any]:
     source = _as_dict(raw)
     readiness = _as_dict(source.get("readiness")) or _readiness_fail_closed()
     phase2 = _as_dict(source.get("phase2")) or _phase2_fail_closed()
     external_surface_gate = _as_dict(phase2.get("external_surface_gate"))
+    api_allowlist = _normalize_api_allowlist(phase2.get("api_allowlist"))
 
     contract_violations = [
         field for field in _SAFETY_FALSE_FIELDS if _as_bool(source.get(field))
     ]
+    if reason is None:
+        contract_violations.extend(_api_allowlist_contract_violations(api_allowlist))
     first_contact_allowed = _as_bool(phase2.get("first_ibkr_contact_allowed"))
     immutable_artifact = _as_bool(phase2.get("immutable_pass_artifact_present"))
     connector_enabled = _as_bool(phase2.get("connector_enabled"))
@@ -161,6 +229,7 @@ def _normalize_readiness(raw: Any, reason: str | None) -> dict[str, Any]:
             "denial_reasons": denial_reasons,
         },
         "phase2": phase2,
+        "api_allowlist": api_allowlist,
         "phase2_gate_status": _as_str(external_surface_gate.get("status"), "BLOCKED"),
         "phase2_gate_blockers": blockers,
         "first_ibkr_contact_allowed": first_contact_allowed,
