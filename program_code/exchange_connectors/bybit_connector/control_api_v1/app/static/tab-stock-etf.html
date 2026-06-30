@@ -97,6 +97,11 @@
       <div class="se-metric-sub" id="se-reconciliation-sub"></div>
     </div>
     <div class="se-metric">
+      <div class="se-metric-label">Scorecard</div>
+      <div class="se-metric-value" id="se-scorecard-state">--</div>
+      <div class="se-metric-sub" id="se-scorecard-sub"></div>
+    </div>
+    <div class="se-metric">
       <div class="se-metric-label">IBKR Live</div>
       <div class="se-metric-value" id="se-live-state">--</div>
       <div class="se-metric-sub">live/tiny-live remain denied</div>
@@ -239,6 +244,18 @@
       </table>
     </section>
 
+    <section class="se-panel" id="se-scorecard-panel">
+      <div class="se-panel-title">
+        <span>Scorecard Status</span>
+        <span id="se-scorecard-status" class="oc-chip oc-chip-neutral">--</span>
+      </div>
+      <table class="se-kv">
+        <tbody id="se-scorecard-body">
+          <tr><td colspan="2" class="se-muted">Loading...</td></tr>
+        </tbody>
+      </table>
+    </section>
+
     <section class="se-panel" id="se-denial-panel">
       <div class="se-panel-title">
         <span>Denied Surface</span>
@@ -260,6 +277,7 @@ const UNIVERSE_STATUS_ENDPOINT = '/api/v1/stock-etf/universe-status';
 const SHADOW_STATUS_ENDPOINT = '/api/v1/stock-etf/shadow-status';
 const PAPER_STATUS_ENDPOINT = '/api/v1/stock-etf/paper-status';
 const RECONCILIATION_STATUS_ENDPOINT = '/api/v1/stock-etf/reconciliation-status';
+const SCORECARD_STATUS_ENDPOINT = '/api/v1/stock-etf/scorecard-status';
 
 function toneFor(value) {
   const s = String(value || '').toLowerCase();
@@ -594,6 +612,78 @@ function reconciliationFallback(reason) {
   };
 }
 
+function scorecardFallback(reason) {
+  const why = reason || 'api_unavailable';
+  return {
+    scorecard_status_state: 'degraded',
+    phase: 'phase3_scorecard_status_source_fixture',
+    phase3_started: false,
+    gui_authority: 'display_only',
+    scorecard: {
+      expected_contract_id: 'stock_etf_scorecard_verdict_v1',
+      contract_id: '',
+      source_version: 0,
+      accepted: false,
+      blockers: [why],
+      verdict_label: 'insufficient_evidence',
+      scorecard_input_bundle_hash_present: false,
+      evidence_clock_manifest_hash_present: false,
+      dq_manifest_hash_present: false,
+      formula_appendix_hash_present: false,
+      statistical_preregistration_hash_present: false,
+      benchmark_version_hash_present: false,
+      cost_model_version_hash_present: false,
+      strategy_hypothesis_hash_present: false,
+      reference_data_sources_hash_present: false,
+      scorecard_manifest_hash_present: false,
+      verdict_rationale_hash_present: false,
+      paper_shadow_window_trading_days: 0,
+      min_window_trading_days: 0,
+      independent_observation_count: 0,
+      min_independent_observation_count: 0,
+      gross_pnl_minor_units: 0,
+      net_pnl_minor_units: 0,
+      commission_minor_units: 0,
+      spread_slippage_minor_units: 0,
+      fx_drag_minor_units: 0,
+      tax_drag_minor_units: 0,
+      benchmark_excess_lcb_bps: 0,
+      conservative_cost_stress_lcb_bps: 0,
+      paper_shadow_divergence_bps: 0,
+      max_paper_shadow_divergence_bps: 0,
+      psr_bps: 0,
+      min_psr_bps: 0,
+      dsr_bps: 0,
+      min_dsr_bps: 0,
+      concentration_label_passed: false,
+      regime_label_passed: false,
+      breadth_label_passed: false,
+      freshness_label_passed: false,
+      survivorship_label_passed: false,
+      execution_realism_label_passed: false,
+      qc_review_hash_present: false,
+      mit_review_hash_present: false,
+      qa_review_hash_present: false,
+      qc_review_passed: false,
+      mit_review_passed: false,
+      qa_review_passed: false,
+      scorecard_is_derived_only: false,
+      paper_and_shadow_fills_separate: false,
+      live_fill_claimed: false,
+      bybit_live_execution_unchanged: false,
+      sealed: false,
+    },
+    scorecard_writer_started: false,
+    db_apply_performed: false,
+    evidence_clock_started: false,
+    paper_shadow_window_complete: false,
+    live_or_tiny_live_authorized: false,
+    contract_violations: [],
+    degraded: true,
+    reason: why,
+  };
+}
+
 function renderFallback() {
   const data = {
     default_asset_lane: 'crypto_perp',
@@ -635,6 +725,7 @@ function renderFallback() {
   renderShadowStatus(shadowFallback('api_unavailable'));
   renderPaperStatus(paperFallback('api_unavailable'));
   renderReconciliationStatus(reconciliationFallback('api_unavailable'));
+  renderScorecardStatus(scorecardFallback('api_unavailable'));
 }
 
 function renderReadiness(data, laneStatus) {
@@ -1071,6 +1162,108 @@ function renderReconciliationStatus(data) {
   );
 }
 
+function renderScorecardStatus(data) {
+  const status = data || scorecardFallback('api_unavailable');
+  const scorecard = status.scorecard || {};
+  const state = status.scorecard_status_state || 'blocked';
+  const scorecardBlockers = []
+    .concat(scorecard.blockers || [])
+    .concat(status.phase2_gate_blockers || [])
+    .concat(status.contract_violations || []);
+  document.getElementById('se-scorecard-state').innerHTML = textChip(state);
+  document.getElementById('se-scorecard-sub').textContent =
+    scorecard.accepted ? (scorecard.verdict_label || 'source_ready') : 'scorecard verdict blocked';
+  setChip('se-scorecard-status', state, toneFor(state));
+  document.getElementById('se-scorecard-body').innerHTML = [
+    kvRow('phase', textChip(status.phase || '-')),
+    kvRow('phase3_started', boolChip(status.phase3_started, true)),
+    kvRow('contract.accepted', boolChip(scorecard.accepted, false)),
+    kvRow('contract_id', textChip(scorecard.contract_id || '-')),
+    kvRow('expected_contract_id', textChip(scorecard.expected_contract_id || '-')),
+    kvRow('source_version', textChip(scorecard.source_version)),
+    kvRow('verdict_label', textChip(scorecard.verdict_label || 'insufficient_evidence')),
+    kvRow('scorecard_input_bundle_hash_present', boolChip(scorecard.scorecard_input_bundle_hash_present, false)),
+    kvRow('formula_appendix_hash_present', boolChip(scorecard.formula_appendix_hash_present, false)),
+    kvRow('statistical_preregistration_hash_present', boolChip(scorecard.statistical_preregistration_hash_present, false)),
+    kvRow('scorecard_manifest_hash_present', boolChip(scorecard.scorecard_manifest_hash_present, false)),
+    kvRow(
+      'sample_window',
+      '<span class="se-code">' +
+        ocEsc(
+          'days=' + String(scorecard.paper_shadow_window_trading_days || 0) +
+          ' min_days=' + String(scorecard.min_window_trading_days || 0) +
+          ' obs=' + String(scorecard.independent_observation_count || 0) +
+          ' min_obs=' + String(scorecard.min_independent_observation_count || 0)
+        ) +
+      '</span>'
+    ),
+    kvRow(
+      'net_costs_minor_units',
+      '<span class="se-code">' +
+        ocEsc(
+          'gross=' + String(scorecard.gross_pnl_minor_units || 0) +
+          ' net=' + String(scorecard.net_pnl_minor_units || 0) +
+          ' comm=' + String(scorecard.commission_minor_units || 0) +
+          ' spread_slip=' + String(scorecard.spread_slippage_minor_units || 0)
+        ) +
+      '</span>'
+    ),
+    kvRow(
+      'lcbs_bps',
+      '<span class="se-code">' +
+        ocEsc(
+          'benchmark=' + String(scorecard.benchmark_excess_lcb_bps || 0) +
+          ' cost_stress=' + String(scorecard.conservative_cost_stress_lcb_bps || 0)
+        ) +
+      '</span>'
+    ),
+    kvRow(
+      'paper_shadow_divergence',
+      '<span class="se-code">' +
+        ocEsc(
+          'bps=' + String(scorecard.paper_shadow_divergence_bps || 0) +
+          ' max=' + String(scorecard.max_paper_shadow_divergence_bps || 0)
+        ) +
+      '</span>'
+    ),
+    kvRow(
+      'psr_dsr_bps',
+      '<span class="se-code">' +
+        ocEsc(
+          'psr=' + String(scorecard.psr_bps || 0) +
+          ' min_psr=' + String(scorecard.min_psr_bps || 0) +
+          ' dsr=' + String(scorecard.dsr_bps || 0) +
+          ' min_dsr=' + String(scorecard.min_dsr_bps || 0)
+        ) +
+      '</span>'
+    ),
+    kvRow('label.concentration', boolChip(scorecard.concentration_label_passed, false)),
+    kvRow('label.regime', boolChip(scorecard.regime_label_passed, false)),
+    kvRow('label.breadth', boolChip(scorecard.breadth_label_passed, false)),
+    kvRow('label.freshness', boolChip(scorecard.freshness_label_passed, false)),
+    kvRow('label.survivorship', boolChip(scorecard.survivorship_label_passed, false)),
+    kvRow('label.execution_realism', boolChip(scorecard.execution_realism_label_passed, false)),
+    kvRow('review.qc_hash_present', boolChip(scorecard.qc_review_hash_present, false)),
+    kvRow('review.mit_hash_present', boolChip(scorecard.mit_review_hash_present, false)),
+    kvRow('review.qa_hash_present', boolChip(scorecard.qa_review_hash_present, false)),
+    kvRow('scorecard_is_derived_only', boolChip(scorecard.scorecard_is_derived_only, false)),
+    kvRow('paper_and_shadow_fills_separate', boolChip(scorecard.paper_and_shadow_fills_separate, false)),
+    kvRow('live_fill_claimed', boolChip(scorecard.live_fill_claimed, true)),
+    kvRow('bybit_live_execution_unchanged', boolChip(scorecard.bybit_live_execution_unchanged, false)),
+    kvRow('sealed', boolChip(scorecard.sealed, false)),
+    kvRow('scorecard_writer_started', boolChip(status.scorecard_writer_started, true)),
+    kvRow('db_apply_performed', boolChip(status.db_apply_performed, true)),
+    kvRow('evidence_clock_started', boolChip(status.evidence_clock_started, true)),
+    kvRow('live_or_tiny_live_authorized', boolChip(status.live_or_tiny_live_authorized, true)),
+    kvRow('blockers', chipList(scorecardBlockers, 'none')),
+    kvRow('reason', '<span class="se-code">' + ocEsc(status.reason || '-') + '</span>'),
+  ].join('');
+  document.getElementById('se-scorecard-panel').classList.toggle(
+    'se-bad-line',
+    (status.contract_violations || []).length > 0
+  );
+}
+
 async function loadReadiness() {
   const [
     lanePayload,
@@ -1081,6 +1274,7 @@ async function loadReadiness() {
     shadowPayload,
     paperPayload,
     reconciliationPayload,
+    scorecardPayload,
   ] = await Promise.all([
     ocApi(LANE_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(READINESS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
@@ -1090,6 +1284,7 @@ async function loadReadiness() {
     ocApi(SHADOW_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(PAPER_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(RECONCILIATION_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
+    ocApi(SCORECARD_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
   ]);
   if (!readinessPayload || !readinessPayload.data) {
     renderFallback();
@@ -1105,6 +1300,11 @@ async function loadReadiness() {
     reconciliationPayload && reconciliationPayload.data
       ? reconciliationPayload.data
       : reconciliationFallback('api_unavailable')
+  );
+  renderScorecardStatus(
+    scorecardPayload && scorecardPayload.data
+      ? scorecardPayload.data
+      : scorecardFallback('api_unavailable')
   );
 }
 

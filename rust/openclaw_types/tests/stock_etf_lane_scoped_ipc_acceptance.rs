@@ -70,7 +70,7 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
     assert!(!contract.ibkr_contact_performed);
     assert!(!contract.connector_runtime_started);
     assert!(!contract.secret_content_serialized);
-    assert_eq!(contract.commands.len(), 11);
+    assert_eq!(contract.commands.len(), 12);
 
     let submit = contract
         .commands
@@ -141,6 +141,19 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
     );
     assert!(!reconciliation_status.effect_capable);
     assert!(!reconciliation_status.rust_owned);
+
+    let scorecard_status = contract
+        .commands
+        .iter()
+        .find(|command| command.method == StockEtfLaneScopedIpcMethod::GetScorecardStatus)
+        .expect("scorecard-status method exists");
+    assert_eq!(scorecard_status.operation, BrokerOperation::HealthRead);
+    assert_eq!(
+        scorecard_status.authority_scope,
+        AuthorityScope::DisplayOnly
+    );
+    assert!(!scorecard_status.effect_capable);
+    assert!(!scorecard_status.rust_owned);
 
     let shadow = contract
         .commands
