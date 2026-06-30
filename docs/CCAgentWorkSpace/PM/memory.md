@@ -3080,7 +3080,7 @@
 
 ## 2026-06-30 IBKR Stock/ETF Plan Timeline Checkpoint Guard
 
-- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 46, aligned to the PM memory / Operator source timeline.
+- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 47, aligned to the PM memory / Operator source timeline.
 - Added a structure test that reads the main plan Markdown and fails if PM session checkpoint numbers become duplicated, skipped, or out of order.
 - Verification passed: focused IBKR timeline structure test `1 passed`; section-body compare against `HEAD` PASS; `git diff --check` PASS. The full structure test file still has pre-existing docs README index drift failures unrelated to this guard. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
 
@@ -3107,3 +3107,9 @@
 - PM added a source-only static GUI guard requiring the Stock/ETF GUI bundle endpoint set to match `settings/broker/stock_etf_gui_lane_contract.template.toml` endpoint declarations exactly.
 - The guard scans static `tab-stock-etf*` sources for `/api/v1/stock-etf...` strings, preventing future GUI/template drift or accidental extra Stock/ETF API surfaces.
 - Verification passed: Python no-write static guard `5 passed`; full Stock/ETF FastAPI/static `97 passed`; focused IBKR timeline + trace-title structure tests `2 passed`; `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF FastAPI Route Auth Coverage Guard
+
+- PM added a route-level auth coverage guard that derives every Stock/ETF GET path from OpenAPI, adds the authenticated root redirect, and verifies each route returns `401` without `current_actor`.
+- This prevents future display-only Stock/ETF endpoints from being added without auth while preserving the existing GET-only, no-write route boundary.
+- Verification passed: Stock/ETF route tests `12 passed`; full Stock/ETF FastAPI/static `98 passed`; focused IBKR timeline + trace-title structure tests `2 passed`; `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
