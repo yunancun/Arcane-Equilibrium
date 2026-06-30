@@ -44,6 +44,13 @@
 - Verification passed: Stock/ETF FastAPI/static `81`, engine Stock/ETF `19`, openclaw_types `stock_etf` filter PASS, Node checks, inline parser, and line caps 359/1895/132.
 - Boundary unchanged: no IBKR contact, secret access/creation, connector runtime, collector stop, GUI hide, archive, DB cleanup/apply, paper order, fill import, evidence clock, scorecard writer, Linux runtime sync/restart, paper-shadow launch, tiny-live/live, or Bybit behavior change.
 
+## 2026-06-30 IBKR Stock/ETF Release Packet Status
+
+- PM added source-only `stock_etf.get_release_packet_status`, FastAPI `GET /api/v1/stock-etf/release-packet-status`, and GUI `Release Packet Status` / `Release Packet` display.
+- The surface shows only the `stock_etf_release_packet_v1` source fixture plus disable-cleanup proof summary while runtime launch, writer, DB, evidence-clock, order, secret, contact, and Bybit-reuse fields remain blocked false; `tab-stock-etf-release-packet.js` keeps the main Stock/ETF JS below the 2000-line cap.
+- Verification passed: Stock/ETF FastAPI/static `85`, engine Stock/ETF `20`, full openclaw_types PASS, workspace cargo check PASS, Node checks, and inline parser.
+- Boundary unchanged: no IBKR contact, secret access/creation, connector runtime, release packet materialization, paper-shadow launch, paper order, fill import, evidence clock, scorecard writer, Linux runtime sync/restart, Phase 2/3/5 start, tiny-live/live, or Bybit behavior change.
+
 ## 2026-06-30 IBKR Stock/ETF Market-Data Provenance Contract
 
 - PM hardened `stock_market_data_provenance_v1` inside the Phase 3 evidence contract surface for lane/broker/environment, vendor/entitlement, payload/source hashes, timestamps, adjustment marker, instrument identity, and calendar session provenance.

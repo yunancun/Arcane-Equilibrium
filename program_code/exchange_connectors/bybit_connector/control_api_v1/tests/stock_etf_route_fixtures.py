@@ -1100,6 +1100,101 @@ def _valid_launch_status() -> dict[str, Any]:
     }
 
 
+def _valid_release_packet_status() -> dict[str, Any]:
+    return {
+        "phase": "phase5_release_packet_status_source_fixture",
+        "asset_lane": "stock_etf_cash",
+        "broker": "ibkr",
+        "environment": "paper_shadow",
+        "release_packet_status_state": "source_ready_runtime_blocked",
+        "phase3_started": False,
+        "phase5_started": False,
+        "release_packet": {
+            "expected_contract_id": "stock_etf_release_packet_v1",
+            "packet_id": "stock_etf_release_packet_v1",
+            "source_version": 1,
+            "accepted": True,
+            "blockers": [],
+            "adr_path": "docs/adr/0048-ibkr-stock-etf-paper-shadow-lane.md",
+            "amd_path": (
+                "docs/governance_dev/amendments/"
+                "2026-06-29--AMD-2026-06-29-01-ibkr-stock-etf-paper-shadow-lane.md"
+            ),
+            "spec_path": (
+                "docs/execution_plan/specs/"
+                "2026-06-29--stock_etf_cash_phase0_named_contract_packet.md"
+            ),
+            "source_commit_present": True,
+            "created_at_ms": 1782800000000,
+            "reviewer_role_count": 8,
+            "reviewer_roles": ["PM", "Operator", "E2", "E3", "E4", "QA", "QC", "MIT"],
+            "role_report_count": 2,
+            "e2_log_hash_present": True,
+            "e3_redaction_log_hash_present": True,
+            "e4_log_hash_present": True,
+            "qa_log_hash_present": True,
+            "manifest_hash_count": 2,
+            "manifest_hashes": [
+                {"label": "release_manifest", "hash_present": True},
+                {"label": "artifact_manifest", "hash_present": True},
+            ],
+            "pg_migrations_declared": False,
+            "pg_migration_manifest_hash_present": False,
+            "pg_dry_run_log_hash_present": False,
+            "pg_double_apply_log_hash_present": False,
+            "redaction_fixture_hash_present": True,
+            "gui_screenshot_hash_count": 1,
+            "dq_manifest_hash_count": 1,
+            "scorecard_regeneration_hash_count": 1,
+            "evidence_archive_pointer_present": True,
+            "evidence_archive_hash_present": True,
+            "paper_shadow_window_complete": True,
+            "engineering_shakedown_complete": True,
+            "secret_content_serialized": False,
+            "ibkr_live_or_tiny_live_authorized": False,
+            "sealed": True,
+            "kill_disable_cleanup_proof": {
+                "stock_etf_lane_enabled_false": True,
+                "ibkr_readonly_enabled_false": True,
+                "ibkr_paper_enabled_false": True,
+                "stock_etf_shadow_only_true": True,
+                "collector_stopped": True,
+                "gui_stock_views_disabled_or_hidden": True,
+                "live_secret_absence_proven": True,
+                "evidence_archive_forward_only": True,
+                "destructive_db_cleanup_requested": False,
+                "proof_hash_present": True,
+                "blockers": [],
+            },
+        },
+        "phase2": {
+            "external_surface_gate": {
+                "status": "BLOCKED",
+                "ibkr_contact_allowed": False,
+                "blockers": ["status_not_pass"],
+                "ibkr_call_performed": False,
+            },
+            "api_allowlist": _valid_api_allowlist(),
+            "immutable_pass_artifact_present": False,
+            "first_ibkr_contact_allowed": False,
+            "connector_enabled": False,
+            "secret_slot_touched": False,
+            "order_routed": False,
+        },
+        "ibkr_live_enabled": False,
+        "paper_shadow_launch_authorized": False,
+        "tiny_live_or_live_authorized": False,
+        "connector_runtime_started": False,
+        "scorecard_writer_started": False,
+        "db_apply_performed": False,
+        "evidence_clock_started": False,
+        "ibkr_call_performed": False,
+        "secret_slot_touched": False,
+        "order_routed": False,
+        "bybit_ipc_reused": False,
+    }
+
+
 def _valid_disable_cleanup_status() -> dict[str, Any]:
     return {
         "phase": "phase5_disable_cleanup_status_source_fixture",

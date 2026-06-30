@@ -13,8 +13,8 @@ use openclaw_types::{
     STOCK_ETF_GUI_LANE_STATUS_ENDPOINT, STOCK_ETF_GUI_LAUNCH_STATUS_ENDPOINT,
     STOCK_ETF_GUI_PAPER_STATUS_ENDPOINT, STOCK_ETF_GUI_POLICY_STATUS_ENDPOINT,
     STOCK_ETF_GUI_READINESS_ENDPOINT, STOCK_ETF_GUI_RECONCILIATION_STATUS_ENDPOINT,
-    STOCK_ETF_GUI_SCORECARD_STATUS_ENDPOINT, STOCK_ETF_GUI_SHADOW_STATUS_ENDPOINT,
-    STOCK_ETF_GUI_UNIVERSE_STATUS_ENDPOINT,
+    STOCK_ETF_GUI_RELEASE_PACKET_STATUS_ENDPOINT, STOCK_ETF_GUI_SCORECARD_STATUS_ENDPOINT,
+    STOCK_ETF_GUI_SHADOW_STATUS_ENDPOINT, STOCK_ETF_GUI_UNIVERSE_STATUS_ENDPOINT,
 };
 
 #[test]
@@ -105,6 +105,10 @@ fn accepted_fixture_is_display_only_get_only_and_crypto_default() {
         STOCK_ETF_GUI_LAUNCH_STATUS_ENDPOINT
     );
     assert_eq!(
+        contract.release_packet_status_endpoint,
+        STOCK_ETF_GUI_RELEASE_PACKET_STATUS_ENDPOINT
+    );
+    assert_eq!(
         contract.disable_cleanup_status_endpoint,
         STOCK_ETF_GUI_DISABLE_CLEANUP_STATUS_ENDPOINT
     );
@@ -121,6 +125,7 @@ fn accepted_fixture_is_display_only_get_only_and_crypto_default() {
     assert!(contract.reconciliation_status_endpoint_get_only);
     assert!(contract.scorecard_status_endpoint_get_only);
     assert!(contract.launch_status_endpoint_get_only);
+    assert!(contract.release_packet_status_endpoint_get_only);
     assert!(contract.disable_cleanup_status_endpoint_get_only);
     assert!(contract.display_only);
     assert!(!contract.ibkr_contact_performed);
@@ -173,6 +178,8 @@ fn gui_lane_contract_requires_all_stock_etf_readonly_get_endpoints() {
     contract.scorecard_status_endpoint_get_only = false;
     contract.launch_status_endpoint = "/api/v1/stock-etf/launch".to_string();
     contract.launch_status_endpoint_get_only = false;
+    contract.release_packet_status_endpoint = "/api/v1/stock-etf/release".to_string();
+    contract.release_packet_status_endpoint_get_only = false;
     contract.disable_cleanup_status_endpoint = "/api/v1/stock-etf/disable".to_string();
     contract.disable_cleanup_status_endpoint_get_only = false;
 
@@ -257,6 +264,12 @@ fn gui_lane_contract_requires_all_stock_etf_readonly_get_endpoints() {
     assert!(verdict
         .blockers
         .contains(&StockEtfGuiLaneBlocker::LaunchStatusEndpointNotGetOnly));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfGuiLaneBlocker::ReleasePacketStatusEndpointMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfGuiLaneBlocker::ReleasePacketStatusEndpointNotGetOnly));
     assert!(verdict
         .blockers
         .contains(&StockEtfGuiLaneBlocker::DisableCleanupStatusEndpointMismatch));
@@ -413,6 +426,10 @@ fn blocked_template_is_parseable_and_secret_free() {
     assert_eq!(
         parsed.scorecard_status_endpoint,
         STOCK_ETF_GUI_SCORECARD_STATUS_ENDPOINT
+    );
+    assert_eq!(
+        parsed.release_packet_status_endpoint,
+        STOCK_ETF_GUI_RELEASE_PACKET_STATUS_ENDPOINT
     );
     assert_eq!(
         parsed.disable_cleanup_status_endpoint,

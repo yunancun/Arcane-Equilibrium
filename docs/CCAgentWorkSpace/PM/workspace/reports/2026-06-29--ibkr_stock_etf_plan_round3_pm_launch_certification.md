@@ -225,3 +225,40 @@ connector runtime、collector stop、GUI hide、evidence archive、DB cleanup/ap
 paper order rehearsal/submit、fill import、evidence clock、scorecard writer、Phase 2/3/5
 start、paper-shadow launch、tiny-live、live、Linux runtime sync/restart 或 Bybit behavior
 change。
+
+## 2026-06-30 PM Session Checkpoint — Release Packet Status
+
+PM 已在本 session 追加下一個 source-only checkpoint：
+`release-packet-status` read-only surface。
+
+已完成：
+
+- Rust IPC：`stock_etf.get_release_packet_status` fixture，來源為
+  `stock_etf_release_packet_v1` accepted source fixture 與
+  `stock_etf_kill_switch_and_disable_cleanup_runbook_v1` proof 摘要；runtime launch
+  fields 全部 blocked false。
+- Rust dispatch/registry：method 為 readonly、slot none，且不進 Bybit live-write token
+  surface；`lane_scoped_ipc_v1` 增加 `GetReleasePacketStatus`。
+- FastAPI：authenticated/no-store
+  `GET /api/v1/stock-etf/release-packet-status`，只 read IPC、fail-closed normalize，
+  並拒絕 client-supplied launch/live state。
+- GUI：`Release Packet` metric 與 `Release Packet Status` panel；render hook 拆入
+  `/static/tab-stock-etf-release-packet.js`，主 Stock/ETF JS 仍低於 2000 行。
+- Contracts：`gui_lane_contract_v1` 增加 exact GET-only release-packet-status
+  endpoint；blocked template 同步更新。
+
+Verification：
+
+- Python compile PASS。
+- Full Stock/ETF FastAPI/static pytest `85 passed`。
+- Node check PASS for `tab-stock-etf.js`、`tab-stock-etf-release-packet.js`、
+  `tab-stock-etf-disable-cleanup.js`。
+- HTML inline parser PASS（1 inline script）。
+- Engine Stock/ETF cargo filter `20 passed`。
+- Full openclaw_types PASS。
+- Workspace `cargo check` PASS。
+
+PM 判定：checkpoint 可接受，但仍不是 launch approval。未批准 IBKR contact、secret、
+connector runtime、release packet materialization、paper-shadow launch、paper order、
+fill import、evidence clock、scorecard writer、DB apply、Phase 2/3/5 start、
+tiny-live、live、Linux runtime sync/restart 或 Bybit behavior change。

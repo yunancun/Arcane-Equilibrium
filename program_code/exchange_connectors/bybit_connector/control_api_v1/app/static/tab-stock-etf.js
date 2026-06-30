@@ -815,6 +815,9 @@ function renderFallback() {
   renderReconciliationStatus(reconciliationFallback('api_unavailable'));
   renderScorecardStatus(scorecardFallback('api_unavailable'));
   renderLaunchStatus(launchFallback('api_unavailable'));
+  if (window.renderReleasePacketStatus && window.releasePacketFallback) {
+    window.renderReleasePacketStatus(window.releasePacketFallback('api_unavailable'));
+  }
   if (window.renderDisableCleanupStatus && window.disableCleanupFallback) {
     window.renderDisableCleanupStatus(window.disableCleanupFallback('api_unavailable'));
   }
@@ -1830,6 +1833,7 @@ async function loadReadiness() {
     reconciliationPayload,
     scorecardPayload,
     launchPayload,
+    releasePacketPayload,
     disableCleanupPayload,
   ] = await Promise.all([
     ocApi(LANE_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
@@ -1845,6 +1849,7 @@ async function loadReadiness() {
     ocApi(RECONCILIATION_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(SCORECARD_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(LAUNCH_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
+    ocApi(window.STOCK_ETF_RELEASE_PACKET_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(window.STOCK_ETF_DISABLE_CLEANUP_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
   ]);
   if (!readinessPayload || !readinessPayload.data) {
@@ -1883,6 +1888,13 @@ async function loadReadiness() {
       ? launchPayload.data
       : launchFallback('api_unavailable')
   );
+  if (window.renderReleasePacketStatus && window.releasePacketFallback) {
+    window.renderReleasePacketStatus(
+      releasePacketPayload && releasePacketPayload.data
+        ? releasePacketPayload.data
+        : window.releasePacketFallback('api_unavailable')
+    );
+  }
   if (window.renderDisableCleanupStatus && window.disableCleanupFallback) {
     window.renderDisableCleanupStatus(
       disableCleanupPayload && disableCleanupPayload.data

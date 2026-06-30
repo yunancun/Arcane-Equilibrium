@@ -29,6 +29,7 @@ from .stock_etf_status_normalizers import (
     _normalize_policy_status,
     _normalize_readiness,
     _normalize_reconciliation_status,
+    _normalize_release_packet_status,
     _normalize_scorecard_status,
     _normalize_shadow_status,
     _normalize_universe_status,
@@ -55,6 +56,7 @@ _PAPER_STATUS_METHOD = "stock_etf.get_paper_status"
 _RECONCILIATION_STATUS_METHOD = "stock_etf.get_reconciliation_status"
 _SCORECARD_STATUS_METHOD = "stock_etf.get_scorecard_status"
 _LAUNCH_STATUS_METHOD = "stock_etf.get_launch_status"
+_RELEASE_PACKET_STATUS_METHOD = "stock_etf.get_release_packet_status"
 _DISABLE_CLEANUP_STATUS_METHOD = "stock_etf.get_disable_cleanup_status"
 
 
@@ -244,6 +246,19 @@ async def _query_stock_etf_launch_status(
         raw = await ipc.call(_LAUNCH_STATUS_METHOD, params={})
     except Exception as exc:
         logger.warning("stock_etf: %s failed: %s", _LAUNCH_STATUS_METHOD, exc)
+        return ({}, f"ipc_error:{type(exc).__name__}")
+    return (raw if isinstance(raw, dict) else {}, None)
+
+
+async def _query_stock_etf_release_packet_status(
+    ipc: EngineIPCClient | None,
+) -> tuple[dict[str, Any], str | None]:
+    if ipc is None:
+        return ({}, "ipc_unavailable")
+    try:
+        raw = await ipc.call(_RELEASE_PACKET_STATUS_METHOD, params={})
+    except Exception as exc:
+        logger.warning("stock_etf: %s failed: %s", _RELEASE_PACKET_STATUS_METHOD, exc)
         return ({}, f"ipc_error:{type(exc).__name__}")
     return (raw if isinstance(raw, dict) else {}, None)
 
@@ -492,6 +507,24 @@ async def get_stock_etf_launch_status(
         "data": _normalize_launch_status(raw, reason),
         "is_simulated": False,
         "data_category": "stock_etf_launch_status",
+    }
+
+
+@stock_etf_router.get("/release-packet-status")
+async def get_stock_etf_release_packet_status(
+    response: Response,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    """Read-only Stock/ETF release-packet evidence status surface for the GUI."""
+    del actor
+    _apply_no_store_headers(response)
+    ipc = await _get_ipc()
+    raw, reason = await _query_stock_etf_release_packet_status(ipc)
+    return {
+        "ok": True,
+        "data": _normalize_release_packet_status(raw, reason),
+        "is_simulated": False,
+        "data_category": "stock_etf_release_packet_status",
     }
 
 
