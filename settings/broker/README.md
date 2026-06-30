@@ -2,7 +2,7 @@
 
 This directory stores broker capability contracts and default-off runtime posture. It must not contain API keys, account ids, cookies, tokens, local IBKR session details, or live credential paths.
 
-`ibkr_external_surface_gate.toml` is a Phase 2 source template only. It carries the exact `phase2_ibkr_external_surface_gate_v1` / source-version fields, is intentionally `BLOCKED`, and cannot authorize IBKR contact until an immutable PASS artifact is produced under the ADR-0048 gate process.
+`ibkr_external_surface_gate.toml` is a Phase 2 source template only. It carries the exact `phase2_ibkr_external_surface_gate_v1` and `non_bybit_api_allowlist_v1` / source-version fields, is intentionally `BLOCKED`, and cannot authorize IBKR contact until an immutable PASS artifact is produced under the ADR-0048 gate process.
 
 `ibkr_phase2_policies.toml` records source policy prerequisites for redaction, rate limiting, audit events, paper attestation, and Python no-write guard with exact policy contract ids and source-version fields. It is not a PASS artifact and does not authorize IBKR contact.
 

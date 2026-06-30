@@ -147,6 +147,18 @@ Any missing field blocks all IBKR contact.
 
 ## 5. `non_bybit_api_allowlist_v1`
 
+Required fields:
+
+- `contract_id=non_bybit_api_allowlist_v1`
+- `source_version=1`
+- `api_baseline=ib_gateway_tws_api`
+- complete read / paper-write / denied action buckets matching the source classifier
+- `client_portal_web_api_denied=true`
+- live order, transfer, margin, short, options, CFD, entitlement-purchase, and account-management writes denied
+- `ibkr_contact_performed=false`
+- `secret_content_serialized=false`
+- `bybit_live_execution_protected=true`
+
 Initial transport baseline:
 
 - IBKR IB Gateway using TWS API protocol
@@ -183,6 +195,14 @@ Denied actions:
 - account-management write
 
 Raw payloads must be hashed and redacted. Secrets, account ids, local paths, cookies, tokens, and stack traces must not appear in logs or reports.
+
+Source validator:
+`openclaw_types::ibkr_non_bybit_api_allowlist::NonBybitApiAllowlistV1`.
+The validator requires exact `contract_id == non_bybit_api_allowlist_v1`,
+`source_version == 1`, exact action coverage once, and bucket consistency with
+`classify_non_bybit_api_action`. It rejects Client Portal Web API use, live
+orders, account writes, margin/short/options/CFD, entitlement purchases, IBKR
+contact, serialized secrets, and Bybit-live regression.
 
 ## 5A. `instrument_identity_contract_v1`
 

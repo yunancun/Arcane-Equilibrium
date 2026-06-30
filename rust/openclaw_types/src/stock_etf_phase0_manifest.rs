@@ -7,12 +7,12 @@
 use serde::{Deserialize, Serialize};
 
 use crate::ibkr_feature_flag_secret_auth::FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID;
+use crate::ibkr_non_bybit_api_allowlist::NON_BYBIT_API_ALLOWLIST_CONTRACT_ID;
 use crate::ibkr_paper_lifecycle::{
     BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID, IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
 };
 use crate::ibkr_phase2_gate::{
     IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
-    NON_BYBIT_API_ALLOWLIST_CONTRACT_ID,
 };
 use crate::ibkr_phase2_runtime::IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID;
 use crate::stock_etf_audit_events::STOCK_ETF_ASSET_LANE_EVENTS_CONTRACT_ID;
