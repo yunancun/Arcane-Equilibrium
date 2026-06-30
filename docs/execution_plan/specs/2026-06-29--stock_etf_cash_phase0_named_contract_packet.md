@@ -1279,22 +1279,29 @@ Eligibility to discuss tiny-live requires:
 - exact contract id `tiny_live_adr_eligibility_v1`
 - source version `1`
 - Phase 5 release packet hash
+- scorecard derivation hash
+- scorecard verdict hash
 - scorecard manifest hash
+- paper-shadow reconciliation hash
 - DQ manifest hash
 - statistical preregistration hash
-- QC/MIT review hashes
+- QC/MIT/QA review hashes
 - paper/shadow window complete
 - benchmark-relative after-cost lower confidence bound > 0
 - independent-observation threshold met
 - conservative cost stress still positive
 - paper-vs-shadow divergence inside threshold
 - concentration/regime/freshness labels pass
-- QC/MIT review pass
+- QC/MIT/QA review pass
 - decision value exactly `adr_discussion_only`
 - no serialized secret content
 - sealed source artifact
 
 Passing this contract does not authorize tiny-live. It only allows a new ADR discussion, and any `tiny_live_authorized` or `live_authorized` decision value must fail validation.
+
+The read-only launch-status surface may expose only hash-presence booleans for these
+lineage inputs. Default source fixtures must keep them false, and any pre-gate
+truthy lineage or review-pass claim must be treated as `contract_violation_blocked`.
 
 ## 24. Phase Unlock Table
 

@@ -78,6 +78,15 @@ def _tiny_live_fail_closed(reason: str) -> dict[str, Any]:
         "accepted": False,
         "blockers": [reason],
         "decision": "not_eligible",
+        "scorecard_derivation_hash_present": False,
+        "scorecard_verdict_hash_present": False,
+        "scorecard_manifest_hash_present": False,
+        "paper_shadow_reconciliation_hash_present": False,
+        "dq_manifest_hash_present": False,
+        "statistical_preregistration_hash_present": False,
+        "qc_review_hash_present": False,
+        "mit_review_hash_present": False,
+        "qa_review_hash_present": False,
         "paper_shadow_window_complete": False,
         "benchmark_relative_after_cost_lcb_bps": 0,
         "independent_observation_count": 0,
@@ -90,6 +99,7 @@ def _tiny_live_fail_closed(reason: str) -> dict[str, Any]:
         "freshness_label_passed": False,
         "qc_review_passed": False,
         "mit_review_passed": False,
+        "qa_review_passed": False,
         "secret_content_serialized": False,
         "sealed": False,
     }
@@ -203,6 +213,25 @@ def _normalize_tiny_live_adr_eligibility(
         "accepted": _as_bool(source.get("accepted")),
         "blockers": [str(item) for item in _as_list(source.get("blockers"))],
         "decision": _as_str(source.get("decision"), "not_eligible"),
+        "scorecard_derivation_hash_present": _as_bool(
+            source.get("scorecard_derivation_hash_present")
+        ),
+        "scorecard_verdict_hash_present": _as_bool(
+            source.get("scorecard_verdict_hash_present")
+        ),
+        "scorecard_manifest_hash_present": _as_bool(
+            source.get("scorecard_manifest_hash_present")
+        ),
+        "paper_shadow_reconciliation_hash_present": _as_bool(
+            source.get("paper_shadow_reconciliation_hash_present")
+        ),
+        "dq_manifest_hash_present": _as_bool(source.get("dq_manifest_hash_present")),
+        "statistical_preregistration_hash_present": _as_bool(
+            source.get("statistical_preregistration_hash_present")
+        ),
+        "qc_review_hash_present": _as_bool(source.get("qc_review_hash_present")),
+        "mit_review_hash_present": _as_bool(source.get("mit_review_hash_present")),
+        "qa_review_hash_present": _as_bool(source.get("qa_review_hash_present")),
         "paper_shadow_window_complete": _as_bool(
             source.get("paper_shadow_window_complete")
         ),
@@ -231,6 +260,7 @@ def _normalize_tiny_live_adr_eligibility(
         "freshness_label_passed": _as_bool(source.get("freshness_label_passed")),
         "qc_review_passed": _as_bool(source.get("qc_review_passed")),
         "mit_review_passed": _as_bool(source.get("mit_review_passed")),
+        "qa_review_passed": _as_bool(source.get("qa_review_passed")),
         "secret_content_serialized": _as_bool(source.get("secret_content_serialized")),
         "sealed": _as_bool(source.get("sealed")),
     }
@@ -322,11 +352,21 @@ def _launch_status_contract_violations(
             tiny_live,
             (
                 "paper_shadow_window_complete",
+                "scorecard_derivation_hash_present",
+                "scorecard_verdict_hash_present",
+                "scorecard_manifest_hash_present",
+                "paper_shadow_reconciliation_hash_present",
+                "dq_manifest_hash_present",
+                "statistical_preregistration_hash_present",
+                "qc_review_hash_present",
+                "mit_review_hash_present",
+                "qa_review_hash_present",
                 "concentration_label_passed",
                 "regime_label_passed",
                 "freshness_label_passed",
                 "qc_review_passed",
                 "mit_review_passed",
+                "qa_review_passed",
                 "secret_content_serialized",
                 "sealed",
             ),

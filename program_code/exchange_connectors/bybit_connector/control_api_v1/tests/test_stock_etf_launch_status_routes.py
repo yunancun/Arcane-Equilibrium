@@ -97,6 +97,17 @@ def test_stock_etf_launch_status_uses_only_readonly_fixture_method() -> None:
     )
     assert data["tiny_live_adr_eligibility"]["accepted"] is False
     assert data["tiny_live_adr_eligibility"]["decision"] == "not_eligible"
+    assert (
+        data["tiny_live_adr_eligibility"]["scorecard_derivation_hash_present"]
+        is False
+    )
+    assert data["tiny_live_adr_eligibility"]["scorecard_verdict_hash_present"] is False
+    assert (
+        data["tiny_live_adr_eligibility"]["paper_shadow_reconciliation_hash_present"]
+        is False
+    )
+    assert data["tiny_live_adr_eligibility"]["qa_review_hash_present"] is False
+    assert data["tiny_live_adr_eligibility"]["qa_review_passed"] is False
     assert data["allowed_gui_actions"] == ["refresh_launch_status"]
     assert data["api_allowlist"]["contract_id"] == "non_bybit_api_allowlist_v1"
     assert data["paper_shadow_launch_authorized"] is False
@@ -216,12 +227,22 @@ def test_stock_etf_launch_status_blocks_contract_violation() -> None:
     tiny_live["accepted"] = True
     tiny_live["decision"] = "adr_discussion_only"
     for key in (
+        "scorecard_derivation_hash_present",
+        "scorecard_verdict_hash_present",
+        "scorecard_manifest_hash_present",
+        "paper_shadow_reconciliation_hash_present",
+        "dq_manifest_hash_present",
+        "statistical_preregistration_hash_present",
+        "qc_review_hash_present",
+        "mit_review_hash_present",
+        "qa_review_hash_present",
         "paper_shadow_window_complete",
         "concentration_label_passed",
         "regime_label_passed",
         "freshness_label_passed",
         "qc_review_passed",
         "mit_review_passed",
+        "qa_review_passed",
         "secret_content_serialized",
         "sealed",
     ):
@@ -276,8 +297,13 @@ def test_stock_etf_launch_status_blocks_contract_violation() -> None:
         "runbook_env_flag_count_present",
         "tiny_live_expected_contract_id_mismatch",
         "tiny_live_eligibility_accepted_before_launch_audit",
+        "tiny_live_scorecard_derivation_hash_present",
+        "tiny_live_scorecard_verdict_hash_present",
+        "tiny_live_paper_shadow_reconciliation_hash_present",
+        "tiny_live_qa_review_hash_present",
         "tiny_live_paper_shadow_window_complete",
         "tiny_live_concentration_label_passed",
+        "tiny_live_qa_review_passed",
         "tiny_live_decision_not_blocked",
         "tiny_live_independent_observation_count_present",
     }.issubset(set(data["contract_violations"]))

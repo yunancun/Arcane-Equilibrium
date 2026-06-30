@@ -9,11 +9,15 @@ amd_path = "docs/governance_dev/amendments/2026-06-29--AMD-2026-06-29-01-ibkr-st
 spec_path = "docs/execution_plan/specs/2026-06-29--stock_etf_cash_phase0_named_contract_packet.md"
 
 phase5_release_packet_hash = ""
+scorecard_derivation_hash = ""
+scorecard_verdict_hash = ""
 scorecard_manifest_hash = ""
+paper_shadow_reconciliation_hash = ""
 dq_manifest_hash = ""
 statistical_preregistration_hash = ""
 qc_review_hash = ""
 mit_review_hash = ""
+qa_review_hash = ""
 
 paper_shadow_window_complete = false
 benchmark_relative_after_cost_lcb_bps = 0
@@ -28,6 +32,7 @@ regime_label_passed = false
 freshness_label_passed = false
 qc_review_passed = false
 mit_review_passed = false
+qa_review_passed = false
 
 decision = "not_eligible"
 secret_content_serialized = false
