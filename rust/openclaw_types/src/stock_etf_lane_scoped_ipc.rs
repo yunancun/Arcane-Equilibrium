@@ -58,13 +58,21 @@ const PREVIEW_FIELDS: &[&str] = &[
     "environment",
     "operation",
     "request_id",
+    "account_fingerprint_hash",
     "instrument_identity_hash",
+    "symbol",
+    "instrument_kind",
+    "side",
+    "order_type",
+    "quantity",
+    "limit_price_policy",
+    "time_in_force",
     "risk_config_hash",
     "cost_model_version_hash",
     "pit_universe_contract_hash",
     "source_artifact_hash",
 ];
-const PAPER_EFFECT_FIELDS: &[&str] = &[
+const SUBMIT_PAPER_ORDER_FIELDS: &[&str] = &[
     "asset_lane",
     "broker",
     "environment",
@@ -74,9 +82,62 @@ const PAPER_EFFECT_FIELDS: &[&str] = &[
     "scoped_authorization_hash",
     "decision_lease_id",
     "guardian_state_hash",
+    "account_fingerprint_hash",
     "risk_config_hash",
     "instrument_identity_hash",
+    "symbol",
+    "instrument_kind",
+    "side",
+    "order_type",
+    "quantity",
+    "limit_price_policy",
+    "time_in_force",
+    "order_local_id",
     "idempotency_key",
+    "lifecycle_contract_hash",
+    "broker_capability_registry_hash",
+    "audit_event_id",
+];
+const CANCEL_PAPER_ORDER_FIELDS: &[&str] = &[
+    "asset_lane",
+    "broker",
+    "environment",
+    "operation",
+    "request_id",
+    "session_attestation_hash",
+    "scoped_authorization_hash",
+    "decision_lease_id",
+    "guardian_state_hash",
+    "account_fingerprint_hash",
+    "order_local_id",
+    "broker_order_id",
+    "cancel_reason",
+    "idempotency_key",
+    "lifecycle_contract_hash",
+    "broker_capability_registry_hash",
+    "audit_event_id",
+];
+const REPLACE_PAPER_ORDER_FIELDS: &[&str] = &[
+    "asset_lane",
+    "broker",
+    "environment",
+    "operation",
+    "request_id",
+    "session_attestation_hash",
+    "scoped_authorization_hash",
+    "decision_lease_id",
+    "guardian_state_hash",
+    "account_fingerprint_hash",
+    "order_local_id",
+    "broker_order_id",
+    "instrument_identity_hash",
+    "symbol",
+    "side",
+    "replacement_idempotency_key",
+    "replacement_quantity",
+    "replacement_limit_price_policy",
+    "replacement_time_in_force",
+    "replace_reason",
     "lifecycle_contract_hash",
     "broker_capability_registry_hash",
     "audit_event_id",
@@ -492,9 +553,15 @@ fn expected_method(method: StockEtfLaneScopedIpcMethod) -> ExpectedMethod {
             required_gates: PREVIEW_GATES,
             required_request_fields: PREVIEW_FIELDS,
         },
-        Method::SubmitPaperOrder => paper_effect_method(Op::PaperOrderSubmit),
-        Method::CancelPaperOrder => paper_effect_method(Op::PaperOrderCancel),
-        Method::ReplacePaperOrder => paper_effect_method(Op::PaperOrderReplace),
+        Method::SubmitPaperOrder => {
+            paper_effect_method(Op::PaperOrderSubmit, SUBMIT_PAPER_ORDER_FIELDS)
+        }
+        Method::CancelPaperOrder => {
+            paper_effect_method(Op::PaperOrderCancel, CANCEL_PAPER_ORDER_FIELDS)
+        }
+        Method::ReplacePaperOrder => {
+            paper_effect_method(Op::PaperOrderReplace, REPLACE_PAPER_ORDER_FIELDS)
+        }
         Method::ImportPaperFills => ExpectedMethod {
             operation: Op::PaperOrderFillImport,
             authority_scope: Scope::ReadOnly,
@@ -522,14 +589,17 @@ fn expected_method(method: StockEtfLaneScopedIpcMethod) -> ExpectedMethod {
     }
 }
 
-const fn paper_effect_method(operation: BrokerOperation) -> ExpectedMethod {
+fn paper_effect_method(
+    operation: BrokerOperation,
+    required_request_fields: &'static [&'static str],
+) -> ExpectedMethod {
     ExpectedMethod {
         operation,
         authority_scope: AuthorityScope::PaperRehearsal,
         effect_capable: true,
         rust_owned: true,
         required_gates: PAPER_EFFECT_GATES,
-        required_request_fields: PAPER_EFFECT_FIELDS,
+        required_request_fields,
     }
 }
 

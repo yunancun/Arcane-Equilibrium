@@ -226,3 +226,37 @@ registration、沒有 IBKR contact、沒有 secret access/creation、沒有 conn
 沒有 Phase 1/2/3/4/5 runtime start、沒有 paper order、沒有 fill import、沒有
 evidence clock、沒有 scorecard writer、沒有 Linux runtime sync/restart，也沒有改動
 Bybit live execution 行為。
+
+## 2026-06-30 Operator Update — Paper IPC Request Shape Hardening
+
+本 session 已完成下一個 source-only checkpoint：
+paper IPC request shape hardening。
+
+這次不是 paper order runtime。變更只在 Rust `lane_scoped_ipc_v1` contract 與
+acceptance tests：
+
+- Preview/submit 現在要求完整 order intent 欄位：symbol、instrument kind、side、
+  order type、quantity、`limit_price_policy`、time in force、account/instrument hashes。
+- Submit 另要求 `order_local_id`、idempotency、session/scoped authorization、
+  guardian、risk、lifecycle、capability、audit 欄位。
+- Cancel 只走撤單 envelope：`order_local_id`、`broker_order_id`、
+  `cancel_reason`、idempotency、lifecycle/capability/audit。
+- Replace 只走改單 envelope：replacement idempotency、replacement quantity、
+  replacement limit-price policy、replacement time in force、`replace_reason`，
+  加上原 order/broker ids 與 audit lineage。
+- Tests 會拒絕 submit/cancel/replace 欄位混接，避免未來 runtime 把三種 request
+  schema 混用。
+
+Verification 已過：
+
+- Lane IPC acceptance：`9 passed`
+- Lane IPC + Phase0 manifest：`15 passed`
+- Full openclaw_types：`35` unit/golden + `209` integration/acceptance + `0` doc-tests
+- Engine Stock/ETF：`21 passed`
+- Workspace `cargo check`：PASS
+- `git diff --check`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 secret access/creation、沒有 connector runtime、
+沒有 Phase 1/2/3/4/5 runtime start、沒有 paper order/cancel/replace、沒有 fill import、
+沒有 DB apply、沒有 evidence clock、沒有 scorecard writer、沒有 Linux runtime
+sync/restart，也沒有改動 Bybit live execution 行為。
