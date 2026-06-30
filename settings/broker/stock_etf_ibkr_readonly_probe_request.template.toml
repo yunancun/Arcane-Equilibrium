@@ -1,0 +1,51 @@
+# ADR-0048 Stock/ETF IBKR read-only probe request template.
+#
+# This is a blocked, secret-free source template. It does not contact IBKR,
+# import an SDK, create connectors, inspect secrets, route orders, write
+# evidence, apply DB changes, or change Bybit live execution behavior.
+
+contract_id = ""
+source_version = 0
+asset_lane = "crypto_perp"
+broker = "bybit"
+environment = "live_reserved_denied"
+probe_kind = "connection_health"
+api_action = "client_portal_web_api_use"
+operation = "transfer_or_account_write"
+authority_scope = "denied"
+effect_capable = false
+request_id = ""
+probe_id = ""
+external_surface_gate_contract_id = ""
+phase2_gate_artifact_hash = ""
+api_allowlist_contract_id = ""
+api_allowlist_hash = ""
+secret_slot_contract_id = ""
+secret_slot_contract_hash = ""
+api_session_topology_contract_id = ""
+api_session_topology_hash = ""
+session_attestation_contract_id = ""
+session_attestation_hash = ""
+redaction_policy_contract_id = ""
+redaction_policy_hash = ""
+rate_limit_policy_contract_id = ""
+rate_limit_policy_hash = ""
+audit_event_policy_contract_id = ""
+audit_event_policy_hash = ""
+source_artifact_hash = ""
+raw_artifact_hash = ""
+redacted_summary_hash = ""
+ibkr_contact_performed = false
+connector_runtime_started = false
+secret_content_serialized = false
+order_routed = false
+paper_order_submitted = false
+db_apply_performed = false
+evidence_clock_started = false
+bybit_path_reused = false
+live_or_tiny_live_authorized = false
+margin_short_options_cfd_requested = false
+account_write_requested = false
+market_data_entitlement_purchase_requested = false
+client_portal_web_api_requested = false
+python_direct_broker_write_requested = false

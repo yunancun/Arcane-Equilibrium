@@ -10,6 +10,8 @@ This directory stores broker capability contracts and default-off runtime postur
 
 `ibkr_phase2_runtime_contracts.toml` records the source evidence shape for secret-slot posture and API session topology with exact `ibkr_secret_slot_contract_v1` / `ibkr_api_session_topology_v1` / source-version fields. It is intentionally incomplete and cannot authorize IBKR contact.
 
+`stock_etf_ibkr_readonly_probe_request.template.toml` records the default-blocked pre-contact request envelope for future IBKR health/account/contract-details/market-data read probes with exact `stock_etf_ibkr_readonly_probe_request_v1` / source-version fields plus Phase 2 gate, allowlist, secret-slot, topology, session-attestation, redaction, rate-limit, and audit-policy lineage hashes. It is secret-free and cannot contact IBKR, start a connector, route orders, write evidence, apply DB changes, or authorize live/tiny-live.
+
 `ibkr_feature_flag_secret_auth_matrix.toml` records the default-blocked feature-flag, secret, and scoped-authorization matrix shape with exact `feature_flag_secret_auth_matrix_v1` / source-version fields. It does not authorize IBKR contact or paper orders.
 
 `ibkr_paper_order_lifecycle.toml` records the default-blocked paper order lifecycle and append-only event log shape with exact `ibkr_paper_order_lifecycle_v1` / `broker_lifecycle_event_log_v1` / `stock_etf_paper_order_request_v1` / source-version fields, event sequencing, event-hash chaining, request-envelope hash linkage, and stale-state policy placeholders. It does not authorize connector creation, lifecycle writer startup, fill import, or paper orders.

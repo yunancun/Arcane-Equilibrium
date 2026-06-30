@@ -38,6 +38,8 @@ The first broker baseline is:
 - runtime topology: loopback-only session on `trade-core`
 - initial paper port policy: paper gateway port only; live gateway/TWS ports are denied unless a future ADR supersedes this amendment
 - first contact must be gated by `phase2_ibkr_external_surface_gate_v1`
+- future health/account/contract-details/market-data read probes must also
+  satisfy `stock_etf_ibkr_readonly_probe_request_v1` before any contact attempt
 
 This baseline is a contract choice only. No IBKR process is started and no IBKR API call is authorized by this amendment.
 

@@ -103,6 +103,17 @@ forbidden paper-order IPC strings, direct `ibapi` / `ib_insync` imports, and
 non-GET Stock/ETF/IBKR routes until a later Rust-authority contract explicitly
 revises that boundary.
 
+`stock_etf_ibkr_readonly_probe_request_v1` must be machine-checkable before any
+future IBKR health, account, contract-details, or market-data read probe can be
+considered. It must bind the probe kind to an allowed read action and broker
+operation, require Phase 2 gate/allowlist/secret-slot/topology/session/
+redaction/rate-limit/audit lineage hashes, and reject prior contact, connector
+runtime, secret serialization, order routing, paper submission, DB apply,
+evidence-clock start, Bybit path reuse, entitlement purchase, Client Portal Web
+API use, Python direct broker writes, and tiny-live/live or
+margin/short/options/CFD authority. Passing this source contract performs no
+probe and does not authorize IBKR contact by itself.
+
 `instrument_identity_contract_v1` must be machine-checkable before market data,
 contract details, shadow fill reconstruction, or paper order intent consumes a
 symbol. It must prove point-in-time symbol/listing/primary-exchange/currency/

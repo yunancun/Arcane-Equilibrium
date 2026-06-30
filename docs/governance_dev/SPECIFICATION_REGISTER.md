@@ -1,7 +1,7 @@
 # Governance Specification Register / 治理規範註冊表
 
 **Project:** 玄衡 · Arcane Equilibrium
-**Last Updated:** 2026-06-30 (ADR-0048 + AMD-2026-06-29-01 IBKR Stock/ETF lineage and connector-skeleton hardening)
+**Last Updated:** 2026-06-30 (ADR-0048 + AMD-2026-06-29-01 IBKR Stock/ETF lineage, connector-skeleton, and readonly-probe request hardening)
 **Maintained By:** R4 (Document Auditor) · TW catch-up（2026-04-29）· FA Sign-off path A（2026-05-02 AMD-2026-05-02-01）
 
 ---
@@ -97,6 +97,20 @@ IBKR SDK, performs no socket/HTTP network contact, reads no secrets, exposes no
 broker write methods, imports no fills, writes no DB rows, and grants no
 connector runtime, paper-order, tiny-live, or live authority. The Stock/ETF
 Python no-write static guard now scans this real skeleton.
+
+### ADR-0048 2026-06-30 Addendum G
+
+`stock_etf_ibkr_readonly_probe_request_v1` is now part of the ADR-0048 named
+contract packet. It source-validates the pre-contact request envelope for future
+IBKR health, account, contract-details, and market-data read probes. The
+contract requires the Phase 2 gate artifact, non-Bybit API allowlist, secret
+slot, API topology, session attestation, redaction, rate-limit, and audit-policy
+lineage hashes before any probe request shape can validate. It rejects prior
+IBKR contact, connector runtime, secret serialization, order routing, paper
+order submission, DB apply, evidence-clock start, Bybit path reuse, entitlement
+purchase, Client Portal Web API use, Python direct broker writes, and all
+tiny-live/live or margin/short/options/CFD authority. It performs no probe and
+does not authorize IBKR contact by itself.
 
 ## Active Specifications / 活躍規範
 
