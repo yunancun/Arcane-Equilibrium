@@ -72,6 +72,11 @@
       <div class="se-metric-sub">Console badge source</div>
     </div>
     <div class="se-metric">
+      <div class="se-metric-label">Phase 0 Packet</div>
+      <div class="se-metric-value" id="se-phase0-state">--</div>
+      <div class="se-metric-sub" id="se-phase0-sub"></div>
+    </div>
+    <div class="se-metric">
       <div class="se-metric-label">Stock/ETF Lane</div>
       <div class="se-metric-value" id="se-readiness-state">--</div>
       <div class="se-metric-sub" id="se-readiness-sub"></div>
@@ -161,6 +166,18 @@
       </div>
       <table class="se-kv">
         <tbody id="se-lane-body">
+          <tr><td colspan="2" class="se-muted">Loading...</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="se-panel" id="se-phase0-panel">
+      <div class="se-panel-title">
+        <span>Phase 0 Packet Status</span>
+        <span id="se-phase0-status" class="oc-chip oc-chip-neutral">--</span>
+      </div>
+      <table class="se-kv">
+        <tbody id="se-phase0-body">
           <tr><td colspan="2" class="se-muted">Loading...</td></tr>
         </tbody>
       </table>
@@ -370,6 +387,7 @@
   </div>
 </div>
 
+<script src="/static/tab-stock-etf-phase0.js?v=20260630.phase0"></script>
 <script src="/static/tab-stock-etf-release-packet.js?v=20260630.release-packet"></script>
 <script src="/static/tab-stock-etf-disable-cleanup.js?v=20260630.disable-cleanup"></script>
 <script src="/static/tab-stock-etf.js?v=20260630.split"></script>

@@ -201,6 +201,78 @@ async fn stock_etf_readiness_exposes_phase2_precontact_blockers_without_ibkr_con
 }
 
 #[tokio::test]
+async fn stock_etf_phase0_status_exposes_accepted_source_manifest_without_runtime_authority() {
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let req = r#"{"jsonrpc":"2.0","method":"stock_etf.get_phase0_status","params":{},"id":48041}"#;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
+    )
+    .await;
+
+    assert!(resp.error.is_none());
+    let result = resp.result.expect("stock_etf phase0 status result");
+    assert_eq!(
+        result["phase"],
+        "phase0_contract_packet_status_source_fixture"
+    );
+    assert_eq!(result["asset_lane"], "stock_etf_cash");
+    assert_eq!(result["broker"], "ibkr");
+    assert_eq!(
+        result["phase0_status_state"],
+        "accepted_no_runtime_authority"
+    );
+    assert_eq!(result["phase0_accepted"], true);
+    assert_eq!(result["phase0_blockers"].as_array().unwrap().len(), 0);
+    assert_eq!(result["contract_count"], 28);
+    assert_eq!(
+        result["manifest"]["schema"],
+        "stock_etf_phase0_contract_packet_manifest_v1"
+    );
+    assert_eq!(
+        result["manifest"]["status"],
+        "ACCEPTED_PHASE0_CONTRACT_NO_RUNTIME_AUTHORITY"
+    );
+    assert_eq!(result["api_baseline"]["live_ports_denied"], true);
+    assert_eq!(result["api_baseline"]["ibkr_call_performed"], false);
+    assert_eq!(result["global_denials"]["ibkr_live"], true);
+    assert_eq!(result["global_denials"]["tiny_live"], true);
+    assert_eq!(result["global_denials"]["gui_lane_authority"], true);
+    assert_eq!(result["phase1_runtime_started"], false);
+    assert_eq!(result["phase2_started"], false);
+    assert_eq!(result["phase3_started"], false);
+    assert_eq!(result["phase4_runtime_started"], false);
+    assert_eq!(result["phase5_started"], false);
+    assert_eq!(result["paper_shadow_launch_authorized"], false);
+    assert_eq!(result["tiny_live_or_live_authorized"], false);
+    assert_eq!(result["connector_runtime_started"], false);
+    assert_eq!(result["db_apply_performed"], false);
+    assert_eq!(result["evidence_clock_started"], false);
+    assert_eq!(result["scorecard_writer_started"], false);
+    assert_eq!(result["ibkr_call_performed"], false);
+    assert_eq!(result["secret_slot_touched"], false);
+    assert_eq!(result["order_routed"], false);
+    assert_eq!(result["bybit_ipc_reused"], false);
+}
+
+#[tokio::test]
 async fn stock_etf_lane_status_exposes_flags_without_ibkr_contact() {
     let config = make_test_config();
     let dd = make_test_data_dir();

@@ -84,6 +84,7 @@ def _candidate_stock_etf_static_gui_files() -> list[Path]:
     static_dir = CONTROL_API_DIR / "app" / "static"
     files = {
         static_dir / "tab-stock-etf.html",
+        static_dir / "tab-stock-etf-phase0.js",
         static_dir / "tab-stock-etf-release-packet.js",
         static_dir / "tab-stock-etf-disable-cleanup.js",
         static_dir / "tab-stock-etf.js",
@@ -146,6 +147,7 @@ def test_stock_etf_static_gui_surface_remains_display_only() -> None:
         "/api/v1/stock-etf/lane-status": "lane-status",
         "/api/v1/stock-etf/launch-status": "launch-status",
         "/api/v1/stock-etf/paper-status": "paper-status",
+        "/api/v1/stock-etf/phase0-status": "phase0-status",
         "/api/v1/stock-etf/policy-status": "policy-status",
         "/api/v1/stock-etf/readiness": "readiness",
         "/api/v1/stock-etf/reconciliation-status": "reconciliation-status",

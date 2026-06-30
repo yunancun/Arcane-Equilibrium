@@ -924,6 +924,7 @@ display surfaces:
 
 - `/api/v1/stock-etf/readiness`
 - `/api/v1/stock-etf/lane-status`
+- `/api/v1/stock-etf/phase0-status`
 - `/api/v1/stock-etf/data-foundation-status`
 - `/api/v1/stock-etf/policy-status`
 - `/api/v1/stock-etf/authorization-status`

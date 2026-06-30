@@ -70,7 +70,17 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
     assert!(!contract.ibkr_contact_performed);
     assert!(!contract.connector_runtime_started);
     assert!(!contract.secret_content_serialized);
-    assert_eq!(contract.commands.len(), 18);
+    assert_eq!(contract.commands.len(), 19);
+
+    let phase0_status = contract
+        .commands
+        .iter()
+        .find(|command| command.method == StockEtfLaneScopedIpcMethod::GetPhase0Status)
+        .expect("phase0-status method exists");
+    assert_eq!(phase0_status.operation, BrokerOperation::HealthRead);
+    assert_eq!(phase0_status.authority_scope, AuthorityScope::DisplayOnly);
+    assert!(!phase0_status.effect_capable);
+    assert!(!phase0_status.rust_owned);
 
     let submit = contract
         .commands

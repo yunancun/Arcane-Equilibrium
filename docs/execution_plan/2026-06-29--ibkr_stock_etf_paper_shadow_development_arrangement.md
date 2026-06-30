@@ -1083,3 +1083,54 @@ PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 
 不物化 release packet、不啟動 scorecard writer、不啟動 evidence clock、不做 DB apply、
 不送 paper order、不匯入 fill、不做 Linux runtime sync/restart、不啟動 paper-shadow
 launch、不啟動 Phase 2/3/5、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 19. 2026-06-30 PM session source checkpoint：Phase 0 Packet Status
+
+本 session 繼續按第三輪 PM 簽核語義推進，但新增的是 Phase 0 named contract
+packet 的 source-only / display-only visibility。此 checkpoint 只展示
+`stock_etf_phase0_contract_packet_manifest_v1` accepted source manifest；不代表
+Phase 1+ runtime 已啟動，也不授權 IBKR contact、secret slot、paper/shadow launch
+或任何 writer。
+
+新增 checkpoint：
+
+- Rust IPC fixture 新增 `stock_etf.get_phase0_status`，輸出
+  `phase0_contract_packet_status_source_fixture`。它只展示
+  `StockEtfPhase0ContractPacketManifestV1::accepted_fixture()` 的 schema/status/
+  scope/contract count、API baseline、global denials 與 phase unlock 語義；top-level
+  Phase 1/2/3/4/5 runtime、paper-shadow launch、connector、scorecard writer、DB、
+  evidence clock、order、secret、IBKR contact、Bybit reuse 欄位均為 false。
+- Rust dispatch/method registry 將該 method 註冊為 readonly、slot none，並保持不在
+  Bybit live-write token surface；`lane_scoped_ipc_v1` 新增
+  `GetPhase0Status` display-only/non-effect-capable method。
+- FastAPI 新增 authenticated/no-store
+  `GET /api/v1/stock-etf/phase0-status`，只呼叫上述 IPC method 且 params 為 `{}`；
+  normalizer fail-closes IPC unavailable、拒絕 client-supplied Phase 0/launch/live
+  state，並把 manifest drift、runtime side-effect drift、IBKR contact、secret、order、
+  DB、writer、evidence clock、Bybit reuse drift 轉為 `contract_violation_blocked`。
+- GUI 新增 `Phase 0 Packet` metric 與 `Phase 0 Packet Status` panel。為維持
+  repo 2000 行硬上限，Phase 0 render hook 放入獨立
+  `tab-stock-etf-phase0.js`；主 `tab-stock-etf.js` 只新增 GET 與 render hook。
+- `gui_lane_contract_v1` 新增 exact GET-only
+  `/api/v1/stock-etf/phase0-status` endpoint；blocked template 同步加入
+  disabled/default 欄位；Phase 0 named contract packet 的 GUI endpoint 清單同步更新。
+
+驗證：
+
+- Python route/normalizer/test `py_compile`：PASS。
+- Full Stock/ETF FastAPI/static pytest：`89 passed`。
+- `node --check tab-stock-etf.js`、`tab-stock-etf-phase0.js`、
+  `tab-stock-etf-release-packet.js` 與 `tab-stock-etf-disable-cleanup.js`：PASS。
+- HTML inline parser：PASS（1 inline script）。
+- Rust format checks：PASS（含 `lib.rs` with `skip_children=true`）。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf`：
+  `21 passed` focused Stock/ETF tests。
+- Full `cargo test --manifest-path rust/Cargo.toml -p openclaw_types`：
+  `35` unit/golden + `206` integration/acceptance + `0` doc-tests。
+- `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 connector runtime、
+不啟動 Phase 1/2/3/4/5 runtime、不物化 release packet、不啟動 scorecard writer、
+不啟動 evidence clock、不做 DB apply、不送 paper order、不匯入 fill、不做 Linux
+runtime sync/restart、不啟動 paper-shadow launch、不授權 tiny-live/live 或任何 Bybit
+behavior change。

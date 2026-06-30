@@ -12,6 +12,7 @@ use crate::stock_etf_lane::AssetLane;
 pub const STOCK_ETF_GUI_LANE_CONTRACT_ID: &str = "gui_lane_contract_v1";
 pub const STOCK_ETF_GUI_READINESS_ENDPOINT: &str = "/api/v1/stock-etf/readiness";
 pub const STOCK_ETF_GUI_LANE_STATUS_ENDPOINT: &str = "/api/v1/stock-etf/lane-status";
+pub const STOCK_ETF_GUI_PHASE0_STATUS_ENDPOINT: &str = "/api/v1/stock-etf/phase0-status";
 pub const STOCK_ETF_GUI_DATA_FOUNDATION_STATUS_ENDPOINT: &str =
     "/api/v1/stock-etf/data-foundation-status";
 pub const STOCK_ETF_GUI_POLICY_STATUS_ENDPOINT: &str = "/api/v1/stock-etf/policy-status";
@@ -41,6 +42,8 @@ pub struct StockEtfGuiLaneContractV1 {
     pub readiness_endpoint_get_only: bool,
     pub lane_status_endpoint: String,
     pub lane_status_endpoint_get_only: bool,
+    pub phase0_status_endpoint: String,
+    pub phase0_status_endpoint_get_only: bool,
     pub data_foundation_status_endpoint: String,
     pub data_foundation_status_endpoint_get_only: bool,
     pub policy_status_endpoint: String,
@@ -104,6 +107,8 @@ impl Default for StockEtfGuiLaneContractV1 {
             readiness_endpoint_get_only: false,
             lane_status_endpoint: String::new(),
             lane_status_endpoint_get_only: false,
+            phase0_status_endpoint: String::new(),
+            phase0_status_endpoint_get_only: false,
             data_foundation_status_endpoint: String::new(),
             data_foundation_status_endpoint_get_only: false,
             policy_status_endpoint: String::new(),
@@ -169,6 +174,8 @@ impl StockEtfGuiLaneContractV1 {
             readiness_endpoint_get_only: true,
             lane_status_endpoint: STOCK_ETF_GUI_LANE_STATUS_ENDPOINT.to_string(),
             lane_status_endpoint_get_only: true,
+            phase0_status_endpoint: STOCK_ETF_GUI_PHASE0_STATUS_ENDPOINT.to_string(),
+            phase0_status_endpoint_get_only: true,
             data_foundation_status_endpoint: STOCK_ETF_GUI_DATA_FOUNDATION_STATUS_ENDPOINT
                 .to_string(),
             data_foundation_status_endpoint_get_only: true,
@@ -260,6 +267,12 @@ impl StockEtfGuiLaneContractV1 {
         }
         if !self.lane_status_endpoint_get_only {
             blockers.push(Blocker::LaneStatusEndpointNotGetOnly);
+        }
+        if self.phase0_status_endpoint != STOCK_ETF_GUI_PHASE0_STATUS_ENDPOINT {
+            blockers.push(Blocker::Phase0StatusEndpointMismatch);
+        }
+        if !self.phase0_status_endpoint_get_only {
+            blockers.push(Blocker::Phase0StatusEndpointNotGetOnly);
         }
         if self.data_foundation_status_endpoint != STOCK_ETF_GUI_DATA_FOUNDATION_STATUS_ENDPOINT {
             blockers.push(Blocker::DataFoundationStatusEndpointMismatch);
@@ -456,6 +469,8 @@ pub enum StockEtfGuiLaneBlocker {
     ReadinessEndpointNotGetOnly,
     LaneStatusEndpointMismatch,
     LaneStatusEndpointNotGetOnly,
+    Phase0StatusEndpointMismatch,
+    Phase0StatusEndpointNotGetOnly,
     DataFoundationStatusEndpointMismatch,
     DataFoundationStatusEndpointNotGetOnly,
     PolicyStatusEndpointMismatch,
