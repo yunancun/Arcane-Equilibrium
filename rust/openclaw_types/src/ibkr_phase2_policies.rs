@@ -6,6 +6,9 @@
 
 use serde::{Deserialize, Serialize};
 
+pub const IBKR_REDACTION_POLICY_CONTRACT_ID: &str = "ibkr_redaction_policy_v1";
+pub const IBKR_PAPER_ATTESTATION_CONTRACT_ID: &str = "ibkr_paper_attestation_v1";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IbkrPolicyVerdict<B> {
     pub accepted: bool,

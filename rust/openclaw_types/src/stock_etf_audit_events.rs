@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::ibkr_phase2_artifact::is_sha256_hex;
+use crate::ibkr_phase2_gate::IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID;
 use crate::stock_etf_lane::{
     AssetLane, Broker, BrokerEnvironment, BrokerOperation, StockEtfDenialReason,
 };
@@ -116,7 +117,7 @@ impl StockEtfAssetLaneEventV1 {
             event_time_ms: 1_772_233_000_000,
             producer_commit: "2855d529".to_string(),
             actor: "PM".to_string(),
-            source: "phase2_ibkr_external_surface_gate_v1".to_string(),
+            source: IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID.to_string(),
             operation: BrokerOperation::HealthRead,
             permission_scope: "readonly_gate_check".to_string(),
             account_fingerprint_hash: "1".repeat(64),

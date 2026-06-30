@@ -6,13 +6,22 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::ibkr_feature_flag_secret_auth::FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID;
+use crate::ibkr_paper_lifecycle::{
+    BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID, IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
+};
+use crate::ibkr_phase2_gate::{
+    IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
+    NON_BYBIT_API_ALLOWLIST_CONTRACT_ID,
+};
+use crate::ibkr_phase2_runtime::IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID;
 use crate::stock_etf_audit_events::STOCK_ETF_ASSET_LANE_EVENTS_CONTRACT_ID;
 use crate::stock_etf_broker_capability_registry::STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID;
 use crate::stock_etf_db_evidence_ddl::STOCK_ETF_DB_EVIDENCE_CONTRACT_ID;
 use crate::stock_etf_disable_cleanup_runbook::STOCK_ETF_DISABLE_CLEANUP_RUNBOOK_ID;
 use crate::stock_etf_gui_lane_contract::STOCK_ETF_GUI_LANE_CONTRACT_ID;
 use crate::stock_etf_instrument_identity::STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID;
-use crate::stock_etf_lane::{AssetLane, Broker};
+use crate::stock_etf_lane::{AssetLane, Broker, STOCK_ETF_ASSET_LANE_TAXONOMY_CONTRACT_ID};
 use crate::stock_etf_lane_scoped_ipc::STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID;
 use crate::stock_etf_phase3_evidence::{
     STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
@@ -40,21 +49,21 @@ pub const STOCK_ETF_PHASE0_PACKET_PATH: &str =
     "docs/execution_plan/specs/2026-06-29--stock_etf_cash_phase0_named_contract_packet.md";
 
 const REQUIRED_CONTRACTS: &[&str] = &[
-    "asset_lane_taxonomy_v1",
+    STOCK_ETF_ASSET_LANE_TAXONOMY_CONTRACT_ID,
     STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID,
-    "phase2_ibkr_external_surface_gate_v1",
-    "non_bybit_api_allowlist_v1",
+    IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
+    NON_BYBIT_API_ALLOWLIST_CONTRACT_ID,
     STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID,
     STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
     STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
     STOCK_ETF_RISK_POLICY_CONTRACT_ID,
     STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID,
-    "ibkr_api_session_topology_v1",
-    "ibkr_session_attestation_v1",
-    "feature_flag_secret_auth_matrix_v1",
+    IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID,
+    IBKR_SESSION_ATTESTATION_CONTRACT_ID,
+    FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID,
     STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID,
-    "ibkr_paper_order_lifecycle_v1",
-    "broker_lifecycle_event_log_v1",
+    IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
+    BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
     STOCK_ETF_ASSET_LANE_EVENTS_CONTRACT_ID,
     STOCK_ETF_DB_EVIDENCE_CONTRACT_ID,
     STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,

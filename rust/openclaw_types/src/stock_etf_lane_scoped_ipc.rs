@@ -7,6 +7,14 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::ibkr_paper_lifecycle::{
+    BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID, IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
+};
+use crate::ibkr_phase2_gate::{
+    IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
+};
+use crate::ibkr_phase2_policies::IBKR_REDACTION_POLICY_CONTRACT_ID;
+use crate::stock_etf_audit_events::STOCK_ETF_ASSET_LANE_EVENTS_CONTRACT_ID;
 use crate::stock_etf_broker_capability_registry::STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID;
 use crate::stock_etf_instrument_identity::STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID;
 use crate::stock_etf_lane::{
@@ -88,8 +96,8 @@ const SHADOW_FIELDS: &[&str] = &[
 ];
 
 const PAPER_EFFECT_GATES: &[&str] = &[
-    "phase2_ibkr_external_surface_gate_v1",
-    "ibkr_session_attestation_v1",
+    IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
+    IBKR_SESSION_ATTESTATION_CONTRACT_ID,
     STOCK_ETF_SCOPED_AUTHORIZATION_CONTRACT_ID,
     "decision_lease_valid",
     "guardian_allows",
@@ -98,16 +106,16 @@ const PAPER_EFFECT_GATES: &[&str] = &[
     STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID,
     "idempotency_key",
     STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID,
-    "ibkr_paper_order_lifecycle_v1",
+    IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
     STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID,
-    "audit.asset_lane_events_v1",
+    STOCK_ETF_ASSET_LANE_EVENTS_CONTRACT_ID,
 ];
 const FILL_IMPORT_GATES: &[&str] = &[
-    "phase2_ibkr_external_surface_gate_v1",
-    "ibkr_session_attestation_v1",
-    "ibkr_paper_order_lifecycle_v1",
-    "broker_lifecycle_event_log_v1",
-    "ibkr_redaction_policy_v1",
+    IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
+    IBKR_SESSION_ATTESTATION_CONTRACT_ID,
+    IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
+    BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
+    IBKR_REDACTION_POLICY_CONTRACT_ID,
 ];
 const PREVIEW_GATES: &[&str] = &[
     STOCK_ETF_RISK_POLICY_CONTRACT_ID,
@@ -121,7 +129,7 @@ const SHADOW_GATES: &[&str] = &[
     STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
     STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
     STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID,
-    "audit.asset_lane_events_v1",
+    STOCK_ETF_ASSET_LANE_EVENTS_CONTRACT_ID,
 ];
 
 const REQUIRED_DENIALS: &[StockEtfDenialReason] = &[

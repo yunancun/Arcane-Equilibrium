@@ -6,6 +6,11 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::ibkr_paper_lifecycle::IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID;
+use crate::ibkr_phase2_gate::{
+    IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
+};
+use crate::ibkr_phase2_policies::IBKR_PAPER_ATTESTATION_CONTRACT_ID;
 use crate::stock_etf_instrument_identity::STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID;
 use crate::stock_etf_lane::{
     AssetLane, AuthorityScope, Broker, BrokerOperation, StockEtfDenialReason,
@@ -216,15 +221,15 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
     match operation {
         Op::HealthRead => ExpectedCapability {
             authority_scope: Scope::ReadOnly,
-            required_gates: &["phase2_ibkr_external_surface_gate_v1"],
+            required_gates: &[IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID],
             typed_denial_reason: None,
             rust_owned: false,
         },
         Op::AccountSnapshotRead => ExpectedCapability {
             authority_scope: Scope::ReadOnly,
             required_gates: &[
-                "phase2_ibkr_external_surface_gate_v1",
-                "ibkr_session_attestation_v1",
+                IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
+                IBKR_SESSION_ATTESTATION_CONTRACT_ID,
             ],
             typed_denial_reason: None,
             rust_owned: false,
@@ -232,7 +237,7 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
         Op::MarketDataRead => ExpectedCapability {
             authority_scope: Scope::ReadOnly,
             required_gates: &[
-                "phase2_ibkr_external_surface_gate_v1",
+                IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
                 STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
             ],
             typed_denial_reason: None,
@@ -241,7 +246,7 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
         Op::ContractDetailsRead => ExpectedCapability {
             authority_scope: Scope::ReadOnly,
             required_gates: &[
-                "phase2_ibkr_external_surface_gate_v1",
+                IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
                 STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID,
             ],
             typed_denial_reason: None,
@@ -250,14 +255,14 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
         Op::PaperOrderSubmit | Op::PaperOrderCancel | Op::PaperOrderReplace => ExpectedCapability {
             authority_scope: Scope::PaperRehearsal,
             required_gates: &[
-                "phase2_ibkr_external_surface_gate_v1",
-                "ibkr_paper_attestation_v1",
+                IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
+                IBKR_PAPER_ATTESTATION_CONTRACT_ID,
                 "lane_scoped_ipc_v1",
                 "stock_etf_scoped_authorization_v1",
                 STOCK_ETF_RISK_POLICY_CONTRACT_ID,
                 "decision_lease_valid",
                 "guardian_allows",
-                "ibkr_paper_order_lifecycle_v1",
+                IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
             ],
             typed_denial_reason: None,
             rust_owned: true,
@@ -265,8 +270,8 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
         Op::PaperOrderFillImport => ExpectedCapability {
             authority_scope: Scope::ReadOnly,
             required_gates: &[
-                "ibkr_session_attestation_v1",
-                "ibkr_paper_order_lifecycle_v1",
+                IBKR_SESSION_ATTESTATION_CONTRACT_ID,
+                IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
             ],
             typed_denial_reason: None,
             rust_owned: false,

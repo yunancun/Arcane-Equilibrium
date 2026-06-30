@@ -2714,3 +2714,9 @@
 - PM hardened `stock_market_data_provenance_v1` so market-data provenance artifacts require exact `contract_id == stock_market_data_provenance_v1` plus `source_version=1`.
 - The Phase 0 manifest validator now consumes the shared market-data provenance contract constant; the blocked template exposes and tests `source_version=0`; regression tests reject fixture-like provenance ids and wrong source versions.
 - Verification passed: focused linked openclaw_types tests `19 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `188` integration/acceptance + `0` doc-tests. This grants no IBKR contact, connector runtime, collector start, market-data ingestion, scorecard writer, DB apply, evidence clock, GUI authority, paper order, release, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Phase2 Contract Constants Hardening
+
+- PM converged remaining Phase 0 / Phase 2 named contract ids into shared Rust constants for asset-lane taxonomy, external surface gate, non-Bybit API allowlist, API session topology, session attestation, feature-flag/secret/auth matrix, paper lifecycle, lifecycle event log, paper attestation, and redaction policy.
+- Phase 0 manifest, broker capability registry gates, lane-scoped IPC gates, and audit event fixtures now consume shared constants where this does not create reverse module coupling; validation semantics are unchanged.
+- Verification passed: focused linked openclaw_types tests `63 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `188` integration/acceptance + `0` doc-tests. This grants no IBKR contact, connector runtime, collector start, market-data/reference-data ingestion, scorecard writer, DB apply, evidence clock, GUI authority, paper order, release, tiny-live, live, or Bybit behavior change.

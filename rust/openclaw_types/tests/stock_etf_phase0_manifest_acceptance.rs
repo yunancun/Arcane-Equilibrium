@@ -10,7 +10,11 @@ use openclaw_types::{
     required_phase0_contract_ids, StockEtfPhase0ApiBaselineV1,
     StockEtfPhase0ContractPacketManifestV1, StockEtfPhase0GlobalDenialsV1,
     StockEtfPhase0ManifestBlocker, StockEtfPhase0UnlockTableV1,
-    BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID, STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID,
+    BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID, BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
+    FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID, IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID,
+    IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID, IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
+    IBKR_SESSION_ATTESTATION_CONTRACT_ID, NON_BYBIT_API_ALLOWLIST_CONTRACT_ID,
+    STOCK_ETF_ASSET_LANE_TAXONOMY_CONTRACT_ID, STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID,
     STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID, STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID,
     STOCK_ETF_DB_EVIDENCE_CONTRACT_ID, STOCK_ETF_DISABLE_CLEANUP_RUNBOOK_ID,
     STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID, STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID,
@@ -78,7 +82,31 @@ fn accepted_fixture_validates_phase0_packet_without_runtime_authority() {
     assert!(manifest.global_denials.automatic_promotion);
     assert!(manifest
         .contracts
+        .contains(&STOCK_ETF_ASSET_LANE_TAXONOMY_CONTRACT_ID.to_string()));
+    assert!(manifest
+        .contracts
         .contains(&STOCK_ETF_RISK_POLICY_CONTRACT_ID.to_string()));
+    assert!(manifest
+        .contracts
+        .contains(&IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID.to_string()));
+    assert!(manifest
+        .contracts
+        .contains(&NON_BYBIT_API_ALLOWLIST_CONTRACT_ID.to_string()));
+    assert!(manifest
+        .contracts
+        .contains(&IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID.to_string()));
+    assert!(manifest
+        .contracts
+        .contains(&IBKR_SESSION_ATTESTATION_CONTRACT_ID.to_string()));
+    assert!(manifest
+        .contracts
+        .contains(&FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID.to_string()));
+    assert!(manifest
+        .contracts
+        .contains(&IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID.to_string()));
+    assert!(manifest
+        .contracts
+        .contains(&BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID.to_string()));
     assert!(manifest
         .contracts
         .contains(&STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID.to_string()));

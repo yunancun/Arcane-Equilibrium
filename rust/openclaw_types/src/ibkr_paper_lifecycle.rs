@@ -11,6 +11,9 @@ use crate::stock_etf_lane::{
     StockEtfDenialReason,
 };
 
+pub const IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID: &str = "ibkr_paper_order_lifecycle_v1";
+pub const BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID: &str = "broker_lifecycle_event_log_v1";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BrokerLifecycleEventLogV1 {
     pub event_id: String,
