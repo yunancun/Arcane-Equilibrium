@@ -22,6 +22,9 @@ fn default_market_data_provenance_blocks_scorecard_readiness() {
         .contains(&StockEtfPhase3Blocker::MarketDataProvenanceContractIdMismatch));
     assert!(verdict
         .blockers
+        .contains(&StockEtfPhase3Blocker::MarketDataProvenanceVersionMismatch));
+    assert!(verdict
+        .blockers
         .contains(&StockEtfPhase3Blocker::MarketDataProvenanceWrongAssetLane));
     assert!(verdict
         .blockers
@@ -42,10 +45,28 @@ fn default_market_data_provenance_blocks_scorecard_readiness() {
 
 #[test]
 fn source_market_data_provenance_has_required_hashes_and_calendar_session() {
-    let verdict = StockMarketDataProvenanceV1::source_fixture().validate();
+    let provenance = StockMarketDataProvenanceV1::source_fixture();
+    let verdict = provenance.validate();
 
     assert!(verdict.accepted);
     assert!(verdict.blockers.is_empty());
+    assert_eq!(
+        provenance.contract_id,
+        STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID
+    );
+    assert_eq!(provenance.source_version, 1);
+}
+
+#[test]
+fn market_data_provenance_requires_exact_contract_id_and_source_version() {
+    let mut provenance = StockMarketDataProvenanceV1::source_fixture();
+    provenance.contract_id = "stock_market_data_provenance_v1_fixture".to_string();
+    provenance.source_version = 2;
+
+    let blockers = provenance.validate().blockers;
+
+    assert!(blockers.contains(&StockEtfPhase3Blocker::MarketDataProvenanceContractIdMismatch));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::MarketDataProvenanceVersionMismatch));
 }
 
 #[test]
@@ -87,6 +108,7 @@ fn market_data_provenance_template_is_blocked_parseable_and_secret_free() {
         toml::from_str(&raw).expect("market data provenance template parses");
 
     assert_eq!(parsed.contract_id, "");
+    assert_eq!(parsed.source_version, 0);
     assert_eq!(parsed.asset_lane, AssetLane::CryptoPerp);
     assert_eq!(parsed.broker, Broker::Bybit);
     assert_eq!(parsed.environment, BrokerEnvironment::LiveReservedDenied);

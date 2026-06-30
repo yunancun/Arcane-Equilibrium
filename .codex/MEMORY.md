@@ -554,3 +554,9 @@ Do not paste long reports or stable architecture into TODO.
 - Source checkpoint hardens `stock_etf_reference_data_sources_v1`: reference-data artifacts now require exact `contract_id == stock_etf_reference_data_sources_v1` plus `source_version=1`; the blocker is now explicit `SourceVersionMismatch`.
 - The Phase 0 manifest validator consumes the shared reference-data contract constant; the blocked template exposes and tests `source_version=0`; regression tests reject fixture-like reference-data ids and wrong source versions.
 - Verification passed: focused linked openclaw_types tests `12 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `187` integration/acceptance + `0` doc-tests. This grants no IBKR contact, connector runtime, reference-data ingestion, scorecard writer, DB apply, evidence clock, GUI authority, paper order, release, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Market Data Provenance Hardening
+
+- Source checkpoint hardens `stock_market_data_provenance_v1`: market-data provenance artifacts now require exact `contract_id == stock_market_data_provenance_v1` plus `source_version=1`.
+- The Phase 0 manifest validator consumes the shared market-data provenance contract constant; the blocked template exposes and tests `source_version=0`; regression tests reject fixture-like provenance ids and wrong source versions.
+- Verification passed: focused linked openclaw_types tests `19 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `188` integration/acceptance + `0` doc-tests. This grants no IBKR contact, connector runtime, collector start, market-data ingestion, scorecard writer, DB apply, evidence clock, GUI authority, paper order, release, tiny-live, live, or Bybit behavior change.

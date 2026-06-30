@@ -22,7 +22,7 @@ This directory stores broker capability contracts and default-off runtime postur
 
 `stock_etf_reference_data_sources.template.toml` records the default-blocked corporate-action, FX, fee, and tax/FTT source-as-of contract shape with exact `stock_etf_reference_data_sources_v1` / source-version fields. It does not contact IBKR, create connectors, ingest market/reference data, write scorecards, apply migrations, inspect secrets, or change Bybit live execution behavior.
 
-`stock_market_data_provenance.template.toml` records the default-blocked market-data provenance contract shape. It does not contact IBKR, start connectors or collectors, ingest market data, write scorecards, inspect secrets, authorize GUI lane state, or change Bybit live execution behavior.
+`stock_market_data_provenance.template.toml` records the default-blocked market-data provenance contract shape with exact `stock_market_data_provenance_v1` / source-version fields. It does not contact IBKR, start connectors or collectors, ingest market data, write scorecards, inspect secrets, authorize GUI lane state, or change Bybit live execution behavior.
 
 `stock_etf_db_evidence_ddl.template.toml` records the default-blocked source-only DB evidence DDL contract shape with exact `stock_etf_db_evidence_ddl_v1` / source-version fields. It does not copy SQL into migrations, open Postgres, register sqlx migrations, apply DDL, contact IBKR, create secrets, route orders, or start an evidence clock.
 
