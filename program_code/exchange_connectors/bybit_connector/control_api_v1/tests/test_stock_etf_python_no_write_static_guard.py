@@ -190,6 +190,45 @@ def test_stock_etf_routes_call_ipc_with_empty_params_only() -> None:
     assert violations == []
 
 
+def test_stock_etf_get_route_handlers_accept_only_response_and_authenticated_actor() -> None:
+    path = CONTROL_API_DIR / "app" / "stock_etf_routes.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+    route_count = 0
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if not any(_is_stock_etf_get_route_decorator(decorator) for decorator in node.decorator_list):
+            continue
+        route_count += 1
+        arg_names = [arg.arg for arg in node.args.args]
+        if not set(arg_names).issubset({"response", "actor"}):
+            violations.append(
+                f"{path}:{node.lineno}: {node.name}() accepts client-state args {arg_names!r}"
+            )
+        if node.args.vararg or node.args.kwarg or node.args.kwonlyargs:
+            violations.append(
+                f"{path}:{node.lineno}: {node.name}() uses variadic or keyword-only route args"
+            )
+        if "actor" not in arg_names:
+            violations.append(f"{path}:{node.lineno}: {node.name}() lacks authenticated actor")
+            continue
+        actor_index = arg_names.index("actor")
+        first_default_index = len(arg_names) - len(node.args.defaults)
+        if actor_index < first_default_index:
+            violations.append(f"{path}:{node.lineno}: {node.name}() actor lacks default Depends")
+            continue
+        actor_default = node.args.defaults[actor_index - first_default_index]
+        if not _is_current_actor_dependency(actor_default):
+            violations.append(
+                f"{path}:{node.lineno}: {node.name}() actor is not Depends(base.current_actor)"
+            )
+
+    assert route_count == 17
+    assert violations == []
+
+
 def test_stock_etf_static_gui_endpoint_set_matches_gui_lane_contract_template() -> None:
     files = _candidate_stock_etf_static_gui_files()
     assert files, "expected Stock/ETF static GUI surface"
@@ -289,6 +328,32 @@ def _decorated_http_method(decorator: ast.expr) -> str | None:
 
 def _is_empty_dict(value: ast.expr) -> bool:
     return isinstance(value, ast.Dict) and value.keys == [] and value.values == []
+
+
+def _is_stock_etf_get_route_decorator(decorator: ast.expr) -> bool:
+    if not isinstance(decorator, ast.Call):
+        return False
+    func = decorator.func
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr == "get"
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "stock_etf_router"
+    )
+
+
+def _is_current_actor_dependency(value: ast.expr) -> bool:
+    if not isinstance(value, ast.Call):
+        return False
+    if _call_name(value.func) != "Depends" or len(value.args) != 1:
+        return False
+    dependency = value.args[0]
+    return (
+        isinstance(dependency, ast.Attribute)
+        and dependency.attr == "current_actor"
+        and isinstance(dependency.value, ast.Name)
+        and dependency.value.id == "base"
+    )
 
 
 def _call_name(func: ast.expr) -> str | None:
