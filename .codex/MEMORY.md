@@ -1180,3 +1180,10 @@ Do not paste long reports or stable architecture into TODO.
 - The guard bans `time`, `datetime`, `asyncio`, `threading`, `multiprocessing`, `subprocess`, and `concurrent` imports plus `sleep`, `time`, `monotonic`, `perf_counter`, `now`, `utcnow`, `fromtimestamp`, `Thread`, `Process`, `Popen`, `run`, `create_task`, and `to_thread` calls in the scoped surface.
 - Scope remains only Stock/ETF FastAPI routes/normalizers and the inert IBKR connector skeleton, preserving existing Bybit runtime modules.
 - Verification passed: Python no-write static guard `19 passed`; connector skeleton tests `8 passed`; full Stock/ETF FastAPI/static `118 passed`; docs trace guard `2 passed`; `git diff --check` PASS. This grants no endpoint/IPC method change, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, paper order/cancel/replace, fill import, DB/evidence writer, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF Rust IPC Runtime Side-Effect Static Guard
+
+- PM added Rust split structure guards proving Stock/ETF IPC handler/test source does not import or call clock/thread/task/process side-effect primitives.
+- The guard bans `std::time`, `SystemTime`, `Instant`, `chrono`, `Utc::now`, `Local::now`, `std::thread`, `thread::spawn`, `tokio::spawn`, `tokio::task`, `tokio::time`, `sleep(`, `std::process`, `process::Command`, `Command::new`, and `.spawn(` in scoped handler/test files.
+- Scope remains only Stock/ETF IPC handler parent/children and Stock/ETF IPC fixture test parent/children.
+- Verification passed: Rust IPC split static guards `12 passed`; full Stock/ETF FastAPI/static `118 passed`; docs trace guard `2 passed`; `git diff --check` PASS. This grants no Rust runtime behavior change, endpoint/IPC method change, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, paper order/cancel/replace, fill import, DB/evidence writer, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

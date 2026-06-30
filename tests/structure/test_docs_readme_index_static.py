@@ -116,6 +116,7 @@ def test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles() -> None
         "Rust IPC Bybit Runtime Separation Guard",
         "IBKR Connector Public API Freeze Guard",
         "Python Runtime Side-Effect Static Guard",
+        "Rust IPC Runtime Side-Effect Static Guard",
     )
     plan_source = IBKR_STOCK_ETF_PLAN.read_text()
     operator_source = IBKR_STOCK_ETF_OPERATOR.read_text()
