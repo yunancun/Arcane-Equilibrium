@@ -1916,6 +1916,11 @@ async fn stock_etf_launch_status_is_blocked_source_fixture_without_side_effects(
     );
     assert_eq!(tiny_live["accepted"], false);
     assert_eq!(tiny_live["decision"], "not_eligible");
+    assert_eq!(tiny_live["scorecard_derivation_hash_present"], false);
+    assert_eq!(tiny_live["scorecard_verdict_hash_present"], false);
+    assert_eq!(tiny_live["scorecard_manifest_hash_present"], false);
+    assert_eq!(tiny_live["paper_shadow_reconciliation_hash_present"], false);
+    assert_eq!(tiny_live["qa_review_hash_present"], false);
     assert_eq!(tiny_live["paper_shadow_window_complete"], false);
     assert_eq!(tiny_live["benchmark_relative_after_cost_lcb_bps"], 0);
     assert_eq!(tiny_live["independent_observation_count"], 0);
@@ -1923,6 +1928,7 @@ async fn stock_etf_launch_status_is_blocked_source_fixture_without_side_effects(
     assert_eq!(tiny_live["conservative_cost_stress_lcb_bps"], 0);
     assert_eq!(tiny_live["paper_shadow_divergence_bps"], 0);
     assert_eq!(tiny_live["max_paper_shadow_divergence_bps"], 0);
+    assert_eq!(tiny_live["qa_review_passed"], false);
     assert_eq!(tiny_live["secret_content_serialized"], false);
     assert_eq!(tiny_live["sealed"], false);
 

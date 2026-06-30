@@ -1731,6 +1731,58 @@ migration/apply、不做 Postgres dry-run、不啟動 evidence clock、不做 Li
 sync/restart、不啟動 paper-shadow launch、不授權 tiny-live/live 或任何 Bybit behavior
 change。
 
+## 32. 2026-06-30 PM session source checkpoint：Tiny-Live Eligibility Lineage Gate
+
+本 checkpoint harden Phase 5 之後「是否可以拿去開 ADR 討論 tiny-live」的
+source-only gate。它不是 tiny-live approval，也不是 live/tiny-live runtime；它只把
+前面已建立的 scorecard derivation、scorecard verdict、paper-shadow reconciliation
+與 QA lineage 接入 `tiny_live_adr_eligibility_v1`。
+
+新增 checkpoint：
+
+- `TinyLiveAdrEligibilityV1` 新增 `scorecard_derivation_hash`、
+  `scorecard_verdict_hash`、`paper_shadow_reconciliation_hash`、`qa_review_hash`
+  與 `qa_review_passed`。
+- Validator 新增對應 SHA-256 hash blockers：
+  `ScorecardDerivationHashInvalid`、`ScorecardVerdictHashInvalid`、
+  `PaperShadowReconciliationHashInvalid`、`QaReviewHashInvalid`，以及
+  `QaReviewMissing`。
+- Blocked template
+  `settings/broker/stock_etf_tiny_live_adr_eligibility.template.toml` 同步新增欄位，
+  預設仍全部 fail closed。
+- Rust `stock_etf.get_launch_status`、FastAPI launch normalizer/fixtures/tests 與 GUI
+  launch panel 新增 display-only lineage hash-present rows；pre-gate truthy lineage
+  或 QA pass claims 會被 `contract_violation_blocked` 擋下。
+- Phase0 packet spec 與 broker README 已更新，明確 tiny-live ADR discussion gate
+  需要 derivation/verdict/reconciliation/QA lineage。
+
+驗證：
+
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_tiny_live_eligibility_acceptance -- --nocapture`：
+  tiny-live eligibility acceptance `7 passed`。
+- `python3 -m py_compile ...stock_etf_launch_normalizers.py ...test_stock_etf_launch_status_routes.py ...stock_etf_route_fixtures.py`：PASS。
+- `python3 -m pytest -q ...test_stock_etf_launch_status_routes.py ...test_stock_etf_routes.py`：
+  focused FastAPI/static `15 passed`。
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  full Stock/ETF FastAPI/static `90 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf_launch_status -- --nocapture`：
+  engine launch-status focused `1 passed`（既有 warnings only）。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
+  Stock/ETF engine filter `27 passed`（既有 warnings only）。
+- Full `cargo test --manifest-path rust/Cargo.toml -p openclaw_types`：
+  `35` unit/golden + `241` integration/acceptance + `0` doc-tests。
+- `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
+- `rustfmt --edition 2021 --check ...`：PASS。
+- `node --check .../tab-stock-etf.js`：PASS。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 connector runtime、
+不啟動 Phase 1/2/3/4/5 runtime、不送 paper order、不做 cancel/replace、不匯入 fill、
+不產生 shadow fill、不啟動 reconciliation writer、不啟動 scorecard writer、不做 DB
+migration/apply、不做 Postgres dry-run、不啟動 evidence clock、不做 Linux runtime
+sync/restart、不啟動 paper-shadow launch、不授權 tiny-live/live 或任何 Bybit behavior
+change。
+
 ## 31. 2026-06-30 PM session source checkpoint：Scorecard Derivation Contract
 
 本 checkpoint 補上 Phase 3 `scorecard_derive` 的 source-only artifact gate。

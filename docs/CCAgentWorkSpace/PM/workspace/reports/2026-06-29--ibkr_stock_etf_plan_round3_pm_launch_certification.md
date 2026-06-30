@@ -836,3 +836,44 @@ approval。未批准 IBKR contact、secret、connector runtime、Phase 1/2/3/4/5
 start、paper order/cancel/replace、fill import、shadow fill generation、reconciliation
 writer、scorecard writer、DB apply、Postgres dry-run、evidence clock、tiny-live、live、
 Linux runtime sync/restart 或 Bybit behavior change。
+
+## 2026-06-30 PM Session Checkpoint — Tiny-Live Eligibility Lineage Gate
+
+PM 已在本 session 追加 Phase 5 ADR-discussion gate hardening：
+`tiny_live_adr_eligibility_v1` 現在必須帶 scorecard derivation、scorecard verdict、
+paper-shadow reconciliation 與 QA lineage。這是 source/status/display-only hardening，
+不是 tiny-live approval。
+
+已完成：
+
+- Rust tiny-live eligibility contract 新增 `scorecard_derivation_hash`、
+  `scorecard_verdict_hash`、`paper_shadow_reconciliation_hash`、`qa_review_hash`
+  與 `qa_review_passed`。
+- Validator 新增 derivation/verdict/reconciliation/QA hash blockers 與
+  `QaReviewMissing`；default/template 仍 fail closed。
+- Rust `stock_etf.get_launch_status`、FastAPI normalizer/tests/fixtures 與 GUI launch
+  panel 顯示 blocked lineage-present booleans。
+- FastAPI launch-status guard 會阻擋 pre-gate truthy lineage 或 QA review pass claims。
+- Phase0 packet spec 與 broker README 已同步。
+
+Verification：
+
+- Tiny-live eligibility acceptance `7 passed`。
+- Python compile PASS for launch normalizer/test/fixtures。
+- Focused FastAPI/static tests `15 passed`。
+- Full Stock/ETF FastAPI/static tests `90 passed`。
+- Engine launch-status focused `1 passed`（既有 warnings only）。
+- Engine Stock/ETF cargo filter `27 passed`（既有 warnings only）。
+- Full openclaw_types PASS：`35` unit/golden + `241` integration/acceptance +
+  `0` doc-tests。
+- Workspace `cargo check` PASS。
+- `rustfmt --check` PASS。
+- `node --check` PASS。
+- `git diff --check` PASS。
+
+PM 判定：checkpoint 可接受，但仍不是 ADR approval、tiny-live approval、live approval、
+Phase 5 release approval 或 runtime approval。未批准 IBKR contact、secret、
+connector runtime、Phase 1/2/3/4/5 runtime start、paper order/cancel/replace、
+fill import、shadow fill generation、reconciliation writer、scorecard writer、DB apply、
+Postgres dry-run、evidence clock、tiny-live、live、Linux runtime sync/restart 或 Bybit
+behavior change。

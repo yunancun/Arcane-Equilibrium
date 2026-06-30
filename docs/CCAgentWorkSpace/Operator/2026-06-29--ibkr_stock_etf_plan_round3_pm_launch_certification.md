@@ -585,6 +585,42 @@ Verification 已過：
 clock、沒有 scorecard writer、沒有 Linux runtime sync/restart，也沒有改動 Bybit live
 execution 行為。
 
+## 2026-06-30 Operator Update — Tiny-Live Eligibility Lineage Gate
+
+本 session 已完成下一個 source/status/display-only checkpoint：
+`tiny_live_adr_eligibility_v1` lineage gate。
+
+這次不是 tiny-live approval，也不是 live approval。變更只在 Rust contract、blocked
+template、read-only launch status、FastAPI normalizer/tests 與 GUI：
+
+- 未來若要進入 ADR tiny-live 討論，eligibility artifact 必須帶 scorecard derivation、
+  scorecard verdict、scorecard manifest、paper-shadow reconciliation、DQ/statistical
+  preregistration、QC/MIT/QA review hashes。
+- QA review 現在也是 hard gate：缺 `qa_review_hash` 或 `qa_review_passed=false`
+  都會 fail closed。
+- `/api/v1/stock-etf/launch-status` 和 GUI launch panel 現在顯示 blocked
+  lineage-present booleans。
+- 如果 pre-gate payload 宣稱 derivation/verdict/reconciliation/QA lineage present，
+  或宣稱 QA review passed，FastAPI 會以 `contract_violation_blocked` 擋下。
+
+Verification 已過：
+
+- Tiny-live eligibility acceptance：`7 passed`
+- Python compile：PASS
+- Focused FastAPI/static：`15 passed`
+- Full Stock/ETF FastAPI/static：`90 passed`
+- Engine launch-status focused：`1 passed`
+- Engine Stock/ETF：`27 passed`
+- Full openclaw_types：`35` unit/golden + `241` integration/acceptance + `0` doc-tests
+- Workspace `cargo check`：PASS
+- `rustfmt --check` / `node --check` / `git diff --check`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 secret access/creation、沒有 connector runtime、
+沒有 Phase 1/2/3/4/5 runtime start、沒有 paper order/cancel/replace、沒有 fill import、
+沒有 shadow fill generation、沒有 reconciliation writer、沒有 DB apply、沒有 evidence
+clock、沒有 scorecard writer、沒有 Linux runtime sync/restart，沒有 tiny-live/live
+authority，也沒有改動 Bybit live execution 行為。
+
 ## 2026-06-30 Operator Update — Scorecard Derivation Contract
 
 本 session 已完成下一個 source/status/display-only checkpoint：

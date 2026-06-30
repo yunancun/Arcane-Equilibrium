@@ -39,11 +39,15 @@ pub struct TinyLiveAdrEligibilityV1 {
     pub amd_path: String,
     pub spec_path: String,
     pub phase5_release_packet_hash: String,
+    pub scorecard_derivation_hash: String,
+    pub scorecard_verdict_hash: String,
     pub scorecard_manifest_hash: String,
+    pub paper_shadow_reconciliation_hash: String,
     pub dq_manifest_hash: String,
     pub statistical_preregistration_hash: String,
     pub qc_review_hash: String,
     pub mit_review_hash: String,
+    pub qa_review_hash: String,
     pub paper_shadow_window_complete: bool,
     pub benchmark_relative_after_cost_lcb_bps: i32,
     pub independent_observation_count: u32,
@@ -56,6 +60,7 @@ pub struct TinyLiveAdrEligibilityV1 {
     pub freshness_label_passed: bool,
     pub qc_review_passed: bool,
     pub mit_review_passed: bool,
+    pub qa_review_passed: bool,
     pub decision: TinyLiveAdrEligibilityDecision,
     pub secret_content_serialized: bool,
     pub sealed: bool,
@@ -70,11 +75,15 @@ impl Default for TinyLiveAdrEligibilityV1 {
             amd_path: STOCK_ETF_TINY_LIVE_AMD_PATH.to_string(),
             spec_path: STOCK_ETF_TINY_LIVE_SPEC_PATH.to_string(),
             phase5_release_packet_hash: String::new(),
+            scorecard_derivation_hash: String::new(),
+            scorecard_verdict_hash: String::new(),
             scorecard_manifest_hash: String::new(),
+            paper_shadow_reconciliation_hash: String::new(),
             dq_manifest_hash: String::new(),
             statistical_preregistration_hash: String::new(),
             qc_review_hash: String::new(),
             mit_review_hash: String::new(),
+            qa_review_hash: String::new(),
             paper_shadow_window_complete: false,
             benchmark_relative_after_cost_lcb_bps: 0,
             independent_observation_count: 0,
@@ -87,6 +96,7 @@ impl Default for TinyLiveAdrEligibilityV1 {
             freshness_label_passed: false,
             qc_review_passed: false,
             mit_review_passed: false,
+            qa_review_passed: false,
             decision: TinyLiveAdrEligibilityDecision::NotEligible,
             secret_content_serialized: false,
             sealed: false,
@@ -100,11 +110,15 @@ impl TinyLiveAdrEligibilityV1 {
             contract_id: STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID.to_string(),
             source_version: 1,
             phase5_release_packet_hash: "1".repeat(64),
-            scorecard_manifest_hash: "2".repeat(64),
-            dq_manifest_hash: "3".repeat(64),
-            statistical_preregistration_hash: "4".repeat(64),
-            qc_review_hash: "5".repeat(64),
-            mit_review_hash: "6".repeat(64),
+            scorecard_derivation_hash: "2".repeat(64),
+            scorecard_verdict_hash: "3".repeat(64),
+            scorecard_manifest_hash: "4".repeat(64),
+            paper_shadow_reconciliation_hash: "5".repeat(64),
+            dq_manifest_hash: "6".repeat(64),
+            statistical_preregistration_hash: "7".repeat(64),
+            qc_review_hash: "8".repeat(64),
+            mit_review_hash: "9".repeat(64),
+            qa_review_hash: "a".repeat(64),
             paper_shadow_window_complete: true,
             benchmark_relative_after_cost_lcb_bps: 11,
             independent_observation_count: 80,
@@ -117,6 +131,7 @@ impl TinyLiveAdrEligibilityV1 {
             freshness_label_passed: true,
             qc_review_passed: true,
             mit_review_passed: true,
+            qa_review_passed: true,
             decision: TinyLiveAdrEligibilityDecision::AdrDiscussionOnly,
             secret_content_serialized: false,
             sealed: true,
@@ -149,8 +164,17 @@ impl TinyLiveAdrEligibilityV1 {
         if !is_sha256_hex(&self.phase5_release_packet_hash) {
             blockers.push(Blocker::Phase5ReleasePacketHashInvalid);
         }
+        if !is_sha256_hex(&self.scorecard_derivation_hash) {
+            blockers.push(Blocker::ScorecardDerivationHashInvalid);
+        }
+        if !is_sha256_hex(&self.scorecard_verdict_hash) {
+            blockers.push(Blocker::ScorecardVerdictHashInvalid);
+        }
         if !is_sha256_hex(&self.scorecard_manifest_hash) {
             blockers.push(Blocker::ScorecardManifestHashInvalid);
+        }
+        if !is_sha256_hex(&self.paper_shadow_reconciliation_hash) {
+            blockers.push(Blocker::PaperShadowReconciliationHashInvalid);
         }
         if !is_sha256_hex(&self.dq_manifest_hash) {
             blockers.push(Blocker::DqManifestHashInvalid);
@@ -163,6 +187,9 @@ impl TinyLiveAdrEligibilityV1 {
         }
         if !is_sha256_hex(&self.mit_review_hash) {
             blockers.push(Blocker::MitReviewHashInvalid);
+        }
+        if !is_sha256_hex(&self.qa_review_hash) {
+            blockers.push(Blocker::QaReviewHashInvalid);
         }
         if !self.paper_shadow_window_complete {
             blockers.push(Blocker::PaperShadowWindowIncomplete);
@@ -201,6 +228,9 @@ impl TinyLiveAdrEligibilityV1 {
         }
         if !self.mit_review_passed {
             blockers.push(Blocker::MitReviewMissing);
+        }
+        if !self.qa_review_passed {
+            blockers.push(Blocker::QaReviewMissing);
         }
         match self.decision {
             Decision::AdrDiscussionOnly => {}
@@ -244,11 +274,15 @@ pub enum TinyLiveAdrEligibilityBlocker {
     AmdPathMismatch,
     SpecPathMismatch,
     Phase5ReleasePacketHashInvalid,
+    ScorecardDerivationHashInvalid,
+    ScorecardVerdictHashInvalid,
     ScorecardManifestHashInvalid,
+    PaperShadowReconciliationHashInvalid,
     DqManifestHashInvalid,
     StatisticalPreregistrationHashInvalid,
     QcReviewHashInvalid,
     MitReviewHashInvalid,
+    QaReviewHashInvalid,
     PaperShadowWindowIncomplete,
     BenchmarkAfterCostLcbNotPositive,
     MinIndependentObservationMissing,
@@ -261,6 +295,7 @@ pub enum TinyLiveAdrEligibilityBlocker {
     FreshnessLabelRejected,
     QcReviewMissing,
     MitReviewMissing,
+    QaReviewMissing,
     DecisionNotAdrDiscussionOnly,
     TinyLiveAuthorizationRequested,
     LiveAuthorizationRequested,

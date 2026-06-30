@@ -26,6 +26,15 @@ fn default_tiny_live_eligibility_blocks_discussion() {
         .contains(&TinyLiveAdrEligibilityBlocker::Phase5ReleasePacketHashInvalid));
     assert!(verdict
         .blockers
+        .contains(&TinyLiveAdrEligibilityBlocker::ScorecardDerivationHashInvalid));
+    assert!(verdict
+        .blockers
+        .contains(&TinyLiveAdrEligibilityBlocker::ScorecardVerdictHashInvalid));
+    assert!(verdict
+        .blockers
+        .contains(&TinyLiveAdrEligibilityBlocker::PaperShadowReconciliationHashInvalid));
+    assert!(verdict
+        .blockers
         .contains(&TinyLiveAdrEligibilityBlocker::PaperShadowWindowIncomplete));
     assert!(verdict
         .blockers
@@ -76,7 +85,12 @@ fn positive_scorecard_still_requires_window_reviews_and_hashes() {
     let mut candidate = TinyLiveAdrEligibilityV1::adr_discussion_fixture();
     candidate.paper_shadow_window_complete = false;
     candidate.qc_review_passed = false;
+    candidate.qa_review_passed = false;
+    candidate.scorecard_derivation_hash.clear();
+    candidate.scorecard_verdict_hash.clear();
     candidate.scorecard_manifest_hash.clear();
+    candidate.paper_shadow_reconciliation_hash.clear();
+    candidate.qa_review_hash.clear();
 
     let verdict = candidate.validate();
 
@@ -89,7 +103,22 @@ fn positive_scorecard_still_requires_window_reviews_and_hashes() {
         .contains(&TinyLiveAdrEligibilityBlocker::QcReviewMissing));
     assert!(verdict
         .blockers
+        .contains(&TinyLiveAdrEligibilityBlocker::QaReviewMissing));
+    assert!(verdict
+        .blockers
+        .contains(&TinyLiveAdrEligibilityBlocker::ScorecardDerivationHashInvalid));
+    assert!(verdict
+        .blockers
+        .contains(&TinyLiveAdrEligibilityBlocker::ScorecardVerdictHashInvalid));
+    assert!(verdict
+        .blockers
         .contains(&TinyLiveAdrEligibilityBlocker::ScorecardManifestHashInvalid));
+    assert!(verdict
+        .blockers
+        .contains(&TinyLiveAdrEligibilityBlocker::PaperShadowReconciliationHashInvalid));
+    assert!(verdict
+        .blockers
+        .contains(&TinyLiveAdrEligibilityBlocker::QaReviewHashInvalid));
 }
 
 #[test]
