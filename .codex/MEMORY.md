@@ -928,3 +928,10 @@ Do not paste long reports or stable architecture into TODO.
 - Validator/tests reject read rows missing the typed IPC and readonly-probe request gates; paper-write rows now consume the shared lane-scoped IPC contract constant instead of a hard-coded id.
 - Phase0 packet spec, broker settings README, and the blocked broker capability template now document the same read-row prerequisite.
 - Verification passed: `rustfmt`; broker capability acceptance `10 passed`; full openclaw_types `35` unit/golden + `248` integration/acceptance + `0` doc-tests; workspace `cargo check` PASS; `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Policy Status Read-Row Gate Display
+
+- Source/status/display-only checkpoint exposes broker read-row probe gates through Rust `stock_etf.get_policy_status`, FastAPI normalization/fallback, and the Stock/ETF policy GUI panel.
+- Policy status now carries `lane_scoped_ipc_contract_id`, `readonly_probe_request_contract_id`, `read_rows_require_lane_scoped_ipc`, and `read_rows_require_readonly_probe_request` under `broker_capability_registry`.
+- FastAPI treats an accepted broker capability registry that omits or mismatches those read-row gate claims as `contract_violation_blocked`.
+- Verification passed: Python compile PASS; Node syntax PASS; focused policy/static `15 passed`; focused engine policy-status `1 passed`; full Stock/ETF FastAPI/static `94 passed`; engine `stock_etf` filter `29 passed`; workspace `cargo check` PASS; `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.

@@ -89,6 +89,13 @@ def test_stock_etf_policy_status_uses_only_readonly_fixture_method() -> None:
     assert risk["bybit_live_execution_unchanged"] is True
     assert registry["expected_registry_id"] == "broker_capability_registry_v1"
     assert registry["accepted"] is False
+    assert registry["lane_scoped_ipc_contract_id"] == "lane_scoped_ipc_v1"
+    assert (
+        registry["readonly_probe_request_contract_id"]
+        == "stock_etf_ibkr_readonly_probe_request_v1"
+    )
+    assert registry["read_rows_require_lane_scoped_ipc"] is False
+    assert registry["read_rows_require_readonly_probe_request"] is False
     assert registry["python_broker_write_authority_denied"] is True
     assert registry["ibkr_live_denied"] is True
     assert registry["cfd_margin_reserved_denied"] is True
@@ -226,6 +233,8 @@ def test_stock_etf_policy_status_blocks_contract_violation() -> None:
         "risk_policy_bybit_live_not_protected",
         "risk_policy_accepted_without_source_proofs",
         "registry_expected_id_mismatch",
+        "registry_read_rows_missing_lane_scoped_ipc",
+        "registry_read_rows_missing_readonly_probe_request",
         "registry_first_ibkr_contact_performed",
         "registry_secret_content_serialized",
         "registry_bybit_live_not_protected",

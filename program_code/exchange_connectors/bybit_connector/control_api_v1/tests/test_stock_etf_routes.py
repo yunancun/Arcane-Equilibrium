@@ -193,6 +193,10 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     assert "se-data-foundation-body" in source
     assert "se-policy-status" in source
     assert "se-policy-body" in source
+    assert "lane_scoped_ipc_contract_id" in source
+    assert "readonly_probe_request_contract_id" in source
+    assert "read_rows_require_lane_scoped_ipc" in source
+    assert "read_rows_require_readonly_probe_request" in source
     assert "se-authorization-status" in source
     assert "se-authorization-body" in source
     assert "se-shadow-status" in source

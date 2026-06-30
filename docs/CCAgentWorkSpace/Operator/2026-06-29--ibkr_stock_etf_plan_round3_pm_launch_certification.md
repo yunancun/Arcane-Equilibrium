@@ -799,3 +799,35 @@ Verification 已過：
 access/creation、沒有 connector runtime、沒有 read probe execution、沒有 paper
 order/cancel/replace、沒有 fill import、沒有 evidence writer、沒有 DB apply、沒有
 evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-06-30 Operator Update — Policy Status Read-Row Gate Display
+
+本 session 已把上一個 broker read capability hardening 顯示到
+`/api/v1/stock-etf/policy-status` 和 Stock/ETF GUI policy panel。
+
+新增顯示/檢查：
+
+- `registry.lane_scoped_ipc_contract_id`
+- `registry.readonly_probe_request_contract_id`
+- `registry.read_rows_require_lane_scoped_ipc`
+- `registry.read_rows_require_readonly_probe_request`
+
+如果未來 IPC payload 宣稱 `broker_capability_registry.accepted=true`，但沒有證明 read
+rows 要求 lane-scoped IPC 和 readonly-probe request，FastAPI 會降成
+`contract_violation_blocked`，並列出明確 violation。
+
+Verification 已過：
+
+- Python compile：PASS
+- Node syntax：PASS
+- Focused policy/static：`15 passed`
+- Engine policy-status focused：`1 passed`
+- Full Stock/ETF FastAPI/static：`94 passed`
+- Engine Stock/ETF filter：`29 passed`
+- Workspace `cargo check`：PASS
+- `git diff --check`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
+access/creation、沒有 connector runtime、沒有 read probe execution、沒有 paper
+order/cancel/replace、沒有 fill import、沒有 evidence writer、沒有 DB apply、沒有
+evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live execution 行為。

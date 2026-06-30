@@ -1365,6 +1365,16 @@ async fn stock_etf_policy_status_is_blocked_source_fixture_without_side_effects(
     assert_eq!(registry["operation_count"], 0);
     assert_eq!(registry["required_audit_field_count"], 0);
     assert_eq!(registry["read_operation_count"], 0);
+    assert_eq!(
+        registry["lane_scoped_ipc_contract_id"],
+        "lane_scoped_ipc_v1"
+    );
+    assert_eq!(
+        registry["readonly_probe_request_contract_id"],
+        "stock_etf_ibkr_readonly_probe_request_v1"
+    );
+    assert_eq!(registry["read_rows_require_lane_scoped_ipc"], false);
+    assert_eq!(registry["read_rows_require_readonly_probe_request"], false);
     assert_eq!(registry["paper_operation_count"], 0);
     assert_eq!(registry["denied_operation_count"], 0);
     assert_eq!(registry["bybit_live_execution_unchanged"], true);

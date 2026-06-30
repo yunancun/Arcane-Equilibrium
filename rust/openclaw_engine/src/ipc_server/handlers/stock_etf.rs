@@ -26,14 +26,14 @@ use openclaw_types::{
     IBKR_SECRET_SLOT_CONTRACT_ID, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
     STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID, STOCK_ETF_DISABLE_CLEANUP_RUNBOOK_ID,
     STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID, STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID,
-    STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID, STOCK_ETF_PAPER_FILL_IMPORT_REQUEST_CONTRACT_ID,
-    STOCK_ETF_PAPER_ORDER_REQUEST_CONTRACT_ID, STOCK_ETF_PAPER_SHADOW_RECONCILIATION_CONTRACT_ID,
-    STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID, STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID,
-    STOCK_ETF_RELEASE_PACKET_CONTRACT_ID, STOCK_ETF_RISK_POLICY_CONTRACT_ID,
-    STOCK_ETF_SCORECARD_DERIVATION_CONTRACT_ID, STOCK_ETF_SCORECARD_VERDICT_CONTRACT_ID,
-    STOCK_ETF_SHADOW_SIGNAL_REQUEST_CONTRACT_ID, STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
-    STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
-    STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
+    STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID, STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID,
+    STOCK_ETF_PAPER_FILL_IMPORT_REQUEST_CONTRACT_ID, STOCK_ETF_PAPER_ORDER_REQUEST_CONTRACT_ID,
+    STOCK_ETF_PAPER_SHADOW_RECONCILIATION_CONTRACT_ID, STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
+    STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID, STOCK_ETF_RELEASE_PACKET_CONTRACT_ID,
+    STOCK_ETF_RISK_POLICY_CONTRACT_ID, STOCK_ETF_SCORECARD_DERIVATION_CONTRACT_ID,
+    STOCK_ETF_SCORECARD_VERDICT_CONTRACT_ID, STOCK_ETF_SHADOW_SIGNAL_REQUEST_CONTRACT_ID,
+    STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID, STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID,
+    STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID, STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
 };
 
 pub(in crate::ipc_server) fn handle_stock_etf_ipc(
@@ -413,6 +413,25 @@ fn policy_status_summary(phase2: serde_json::Value) -> serde_json::Value {
         .iter()
         .filter(|entry| entry.authority_scope == AuthorityScope::Denied)
         .count();
+    let read_rows: Vec<_> = registry
+        .operations
+        .iter()
+        .filter(|entry| entry.authority_scope == AuthorityScope::ReadOnly)
+        .collect();
+    let read_rows_require_lane_scoped_ipc = read_rows.len() == 4
+        && read_rows.iter().all(|entry| {
+            entry
+                .required_gates
+                .iter()
+                .any(|gate| gate.as_str() == STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID)
+        });
+    let read_rows_require_readonly_probe_request = read_rows.len() == 4
+        && read_rows.iter().all(|entry| {
+            entry
+                .required_gates
+                .iter()
+                .any(|gate| gate.as_str() == STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID)
+        });
 
     let mut risk = serde_json::Map::new();
     macro_rules! put_risk {
@@ -536,6 +555,10 @@ fn policy_status_summary(phase2: serde_json::Value) -> serde_json::Value {
         "operation_count": registry.operations.len(),
         "required_audit_field_count": registry.required_audit_fields.len(),
         "read_operation_count": read_operation_count,
+        "lane_scoped_ipc_contract_id": STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID,
+        "readonly_probe_request_contract_id": STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID,
+        "read_rows_require_lane_scoped_ipc": read_rows_require_lane_scoped_ipc,
+        "read_rows_require_readonly_probe_request": read_rows_require_readonly_probe_request,
         "paper_operation_count": paper_operation_count,
         "denied_operation_count": denied_operation_count,
         "bybit_live_execution_unchanged": registry.bybit_live_execution_unchanged,

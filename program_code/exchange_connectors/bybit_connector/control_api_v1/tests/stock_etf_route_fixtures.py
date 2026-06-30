@@ -377,6 +377,12 @@ def _valid_policy_status() -> dict[str, Any]:
             "operation_count": 0,
             "required_audit_field_count": 0,
             "read_operation_count": 0,
+            "lane_scoped_ipc_contract_id": "lane_scoped_ipc_v1",
+            "readonly_probe_request_contract_id": (
+                "stock_etf_ibkr_readonly_probe_request_v1"
+            ),
+            "read_rows_require_lane_scoped_ipc": False,
+            "read_rows_require_readonly_probe_request": False,
             "paper_operation_count": 0,
             "denied_operation_count": 0,
             "bybit_live_execution_unchanged": True,
