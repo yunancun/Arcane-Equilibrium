@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 68 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 69 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -1371,6 +1371,32 @@ Verification 已過：
 - `py_compile`：PASS
 - Route/no-write focused tests：`24 passed`
 - Full Stock/ETF FastAPI/static：`105 passed`
+- IBKR timeline + trace-title structure guard：`2 passed`
+- `git diff --check`：PASS
+
+邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 client input、沒有 IBKR
+contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation、沒有
+connector runtime、沒有 read probe execution、沒有 paper order/cancel/replace、沒有 fill
+import、沒有 evidence writer、沒有 DB apply、沒有 evidence clock、沒有 tiny-live/live
+authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Python Secret/Env Access Static Guard
+
+本 session 已補上 Stock/ETF / IBKR Python secret/env material access 靜態守衛：
+
+- 新增 AST guard 掃描 Stock/ETF FastAPI routes、normalizers 與
+  `program_code/broker_connectors/ibkr_connector/`。
+- Guard 禁止 `os`、`dotenv`、`getpass`、`keyring` 這類 env/secret helper import。
+- Guard 禁止 `os.environ`、`getenv` / `os.getenv`、`Path.home`、
+  `expanduser`、`read_text`、`read_bytes` 與任意 `open()` call。
+- 現有 `secret_slot_contract` 仍只是 display-only blocked schema normalization；
+  不代表可讀取 secret material。
+
+Verification 已過：
+
+- Python no-write static guard：`17 passed`
+- Route/no-write focused tests：`31 passed`
+- Full Stock/ETF FastAPI/static：`112 passed`
 - IBKR timeline + trace-title structure guard：`2 passed`
 - `git diff --check`：PASS
 

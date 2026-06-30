@@ -945,7 +945,7 @@ Do not paste long reports or stable architecture into TODO.
 
 ## 2026-06-30 IBKR Stock/ETF Plan Timeline Checkpoint Guard
 
-- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 68, aligned to the PM memory / Operator source timeline.
+- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 69, aligned to the PM memory / Operator source timeline.
 - Added a structure test that reads the main plan Markdown and fails if PM session checkpoint numbers become duplicated, skipped, or out of order.
 - Verification passed: focused IBKR timeline structure test `1 passed`; section-body compare against `HEAD` PASS; `git diff --check` PASS. The full structure test file still has pre-existing docs README index drift failures unrelated to this guard. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
 
@@ -1120,3 +1120,9 @@ Do not paste long reports or stable architecture into TODO.
 - Dry-run sha `148deaecd3e7423d1ecf207c5d8f715e48f6773e95f676500e1e05299237e6b6` is `CURRENT_CANDIDATE_ACTUAL_ADMISSION_BBO_LEASE_WINDOW_SOURCE_NOT_READY`; source blockers are stale current-candidate envelope plus missing/mismatched pre-active sizing-aware gate evidence.
 - E3 returned `BLOCKED`; BB accepted public Bybit market-data GET scope in principle but also blocked `--run` until source inputs dry-run ready. Boundary: no lease, public quote, Bybit call, order/cancel/modify, PG access, runtime mutation, service restart, Cost Gate change, live/mainnet, fill/PnL, or proof.
 - TODO v688 active blocker is `P0-CURRENT-CANDIDATE-FRESH-INVOCATION-WINDOW-SOURCE-INPUT-REFRESH-GATE`.
+
+## 2026-07-01 IBKR Stock/ETF Python Secret/Env Access Static Guard
+
+- PM added a source-only AST guard proving Stock/ETF / IBKR Python surfaces do not import env/secret helper modules or read secret/environment material.
+- The guard blocks `os` imports, `dotenv`/`getpass`/`keyring`, `os.environ`, `getenv`/`os.getenv`, `Path.home`, `expanduser`, `read_text`, `read_bytes`, and any `open()` call in the scoped surface while preserving display-only secret-slot schema normalization.
+- Verification passed: Python no-write static guard `17 passed`; route/no-write focused tests `31 passed`; full Stock/ETF FastAPI/static `112 passed`; IBKR timeline + trace-title guard `2 passed`; `git diff --check` PASS. This grants no new endpoint, IPC method, client input, IBKR contact, SDK import, socket/HTTP, connector runtime, secret access, read probe execution, paper order, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
