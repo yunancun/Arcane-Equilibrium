@@ -2111,7 +2111,7 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 
 新增 checkpoint：
 
-- 主計畫 PM session checkpoint 現在從 14 到 78 連續遞增，無重複編號。
+- 主計畫 PM session checkpoint 現在從 14 到 79 連續遞增，無重複編號。
 - 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
   lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
   connector skeleton / readonly-probe / broker read gate / policy display / operation
@@ -3550,6 +3550,46 @@ thread/task spawn 或 subprocess。
   `12 passed`。
 - `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
   `118 passed`。
+- `python3 -B -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
+  `2 passed`。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 79. 2026-07-01 PM session source checkpoint：GUI Background Work Static Guard
+
+本 checkpoint 將 Stock/ETF static GUI 的 no-background-work posture 固定為 static
+guard。這不是 GUI runtime activation，不新增 endpoint，不改 API call shape；目標是
+避免 display-only Stock/ETF tab 在未批准前引入 polling、push channel、worker、
+sendBeacon、XHR 或 high-frequency timing，保護 control-api/browser runtime 效率。
+
+已完成：
+
+- 更新 `test_stock_etf_python_no_write_static_guard.py`：
+  - 新增 `FORBIDDEN_STATIC_GUI_BACKGROUND_SNIPPETS`。
+  - 新增 `test_stock_etf_static_gui_has_no_background_polling_or_push_channels`。
+  - 掃描 `tab-stock-etf*.js` 與 `tab-stock-etf.html`。
+  - 禁止 `setInterval(`、`setTimeout(`、`requestAnimationFrame(`、
+    `requestIdleCallback(`、`WebSocket(`、`EventSource(`、`new Worker(`、
+    `new SharedWorker(`、`BroadcastChannel(`、`XMLHttpRequest`、
+    `navigator.sendBeacon`、`performance.now(`、`Date.now(`。
+  - 保留現有一次性 authenticated GET load path；現有 `new Date().toLocaleTimeString()`
+    只作顯示時間，不啟動 background work。
+- 本 checkpoint 不改 production behavior、不改 endpoint、不改 IPC method、不改 Bybit
+  path、不啟動任何 IBKR 或 connector runtime。
+
+驗證：
+
+- `python3 -B -m py_compile program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_python_no_write_static_guard.py`：
+  PASS。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_python_no_write_static_guard.py`：
+  `20 passed`。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  `119 passed`。
 - `python3 -B -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
   `2 passed`。
 - `git diff --check`：PASS。

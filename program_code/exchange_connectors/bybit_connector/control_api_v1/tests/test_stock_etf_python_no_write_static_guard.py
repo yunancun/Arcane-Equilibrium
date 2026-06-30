@@ -167,6 +167,22 @@ FORBIDDEN_STATIC_GUI_SNIPPETS = {
     "ibkr.cancel_order",
     "ibkr.replace_order",
 }
+FORBIDDEN_STATIC_GUI_BACKGROUND_SNIPPETS = {
+    "BroadcastChannel(",
+    "Date.now(",
+    "EventSource(",
+    "WebSocket(",
+    "XMLHttpRequest",
+    "cancelAnimationFrame(",
+    "navigator.sendBeacon",
+    "new SharedWorker(",
+    "new Worker(",
+    "performance.now(",
+    "requestAnimationFrame(",
+    "requestIdleCallback(",
+    "setInterval(",
+    "setTimeout(",
+}
 
 STOCK_ETF_STATIC_GUI_FALLBACK_BUILDERS = {
     "accountFallback",
@@ -558,6 +574,20 @@ def test_stock_etf_static_gui_surface_remains_display_only() -> None:
         for snippet in sorted(forbidden_snippets):
             if snippet in source:
                 violations.append(f"{path}: contains forbidden display-only snippet {snippet!r}")
+
+    assert violations == []
+
+
+def test_stock_etf_static_gui_has_no_background_polling_or_push_channels() -> None:
+    files = _candidate_stock_etf_static_gui_files()
+    assert files, "expected Stock/ETF static GUI surface"
+
+    violations: list[str] = []
+    for path in files:
+        source = path.read_text(encoding="utf-8")
+        for snippet in sorted(FORBIDDEN_STATIC_GUI_BACKGROUND_SNIPPETS):
+            if snippet in source:
+                violations.append(f"{path}: contains forbidden background work snippet {snippet!r}")
 
     assert violations == []
 
