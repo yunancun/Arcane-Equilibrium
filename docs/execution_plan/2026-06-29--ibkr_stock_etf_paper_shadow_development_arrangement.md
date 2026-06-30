@@ -2110,7 +2110,7 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 
 新增 checkpoint：
 
-- 主計畫 PM session checkpoint 現在從 14 到 43 連續遞增，無重複編號。
+- 主計畫 PM session checkpoint 現在從 14 到 44 連續遞增，無重複編號。
 - 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
   lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
   connector skeleton / readonly-probe / broker read gate / policy display / operation
@@ -2157,6 +2157,41 @@ sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
 
 驗證：
 
+- `python3 -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
+  `2 passed`。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 44. 2026-06-30 PM session source checkpoint：Python Connector Network Static Guard
+
+本 checkpoint 強化 Stock/ETF / IBKR Python source-only boundary。前面已經有
+`test_stock_etf_python_no_write_static_guard.py` 禁止 Python broker write method、
+direct IBKR SDK import、非 GET route、GUI write snippets 與 Stock/ETF paper IPC
+write string；這次補上 network-client import / dynamic import guard，避免未來在
+`program_code/broker_connectors/ibkr_connector/` 或 Stock/ETF FastAPI surface 中
+繞過 inert skeleton，直接導入 socket/HTTP/WebSocket client。
+
+已完成：
+
+- 新增 forbidden network module prefix guard：
+  `socket`、`http.client`、`requests`、`httpx`、`urllib`、`urllib3`、
+  `aiohttp`、`websocket`、`websockets`。
+- 同一 guard 檢查 `__import__()` / `import_module()` 對 IBKR SDK 或 network
+  module 的動態導入。
+- 掃描範圍仍只限 Stock/ETF / IBKR Python surface 與 IBKR connector skeleton，
+  不掃既有 Bybit connector，避免改變 Bybit behavior。
+- `Python Connector Network Static Guard` 已加入主計畫與 Operator 摘要 trace，
+  防止 hardening checkpoint 只留在測試而沒有 PM/Operator 可審計紀錄。
+
+驗證：
+
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_python_no_write_static_guard.py`：
+  `4 passed`。
 - `python3 -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
   `2 passed`。
 - `git diff --check`：PASS。

@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 43 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 44 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -817,6 +817,33 @@ Verification 已過：
 
 註：完整 `tests/structure/test_docs_readme_index_static.py` 仍有既有 docs README index drift
 失敗；這不是本次 IBKR timeline guard 新增造成。
+
+邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
+access/creation、沒有 connector runtime、沒有 read probe execution、沒有 paper
+order/cancel/replace、沒有 fill import、沒有 evidence writer、沒有 DB apply、沒有
+evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-06-30 Operator Update — Python Connector Network Static Guard
+
+本 session 已加固 Stock/ETF / IBKR Python static guard：
+
+- `test_stock_etf_python_no_write_static_guard.py` 現在不只禁止 Python broker write
+  methods、direct IBKR SDK import、非 GET route、GUI write snippets；也禁止
+  Stock/ETF / IBKR Python surface 導入 socket/HTTP/WebSocket network client module。
+- 禁止清單包含 `socket`、`http.client`、`requests`、`httpx`、`urllib`、`urllib3`、
+  `aiohttp`、`websocket`、`websockets`。
+- 同一 guard 也檢查 `__import__()` / `import_module()` 對 IBKR SDK 或 network
+  module 的動態導入。
+- 掃描範圍只限 Stock/ETF / IBKR Python surface 與 IBKR connector skeleton；
+  不掃既有 Bybit connector，不改 Bybit 行為。
+
+這次不是 IBKR contact、不是 connector runtime、不是 read probe，也不是 paper order。
+
+Verification 已過：
+
+- Python no-write static guard：`4 passed`
+- IBKR timeline + trace-title structure guard：`2 passed`
+- `git diff --check`：PASS
 
 邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
 access/creation、沒有 connector runtime、沒有 read probe execution、沒有 paper

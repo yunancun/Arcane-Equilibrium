@@ -40,6 +40,17 @@ FORBIDDEN_IPC_METHOD_STRINGS = {
 
 FORBIDDEN_HTTP_ROUTE_METHODS = {"post", "put", "patch", "delete"}
 FORBIDDEN_BROKER_MODULE_PREFIXES = ("ibapi", "ib_insync")
+FORBIDDEN_NETWORK_MODULE_PREFIXES = (
+    "aiohttp",
+    "http.client",
+    "httpx",
+    "requests",
+    "socket",
+    "urllib",
+    "urllib3",
+    "websocket",
+    "websockets",
+)
 FORBIDDEN_STATIC_GUI_SNIPPETS = {
     "ocPost(",
     "fetch(",
@@ -115,6 +126,22 @@ def test_stock_etf_ibkr_python_surface_has_no_direct_broker_write_api() -> None:
     assert violations == []
 
 
+def test_stock_etf_ibkr_python_surface_has_no_network_client_imports() -> None:
+    files = _candidate_stock_etf_ibkr_python_files()
+    assert files, "expected at least the display-only stock_etf_routes.py surface"
+
+    violations: list[str] = []
+    for path in files:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                _record_forbidden_import(path, node, violations)
+            elif isinstance(node, ast.Call):
+                _record_forbidden_dynamic_import(path, node, violations)
+
+    assert violations == []
+
+
 def test_stock_etf_ibkr_python_routes_remain_get_only_until_rust_authority_contract_changes() -> None:
     violations: list[str] = []
     for path in _candidate_stock_etf_ibkr_python_files():
@@ -183,10 +210,31 @@ def _record_forbidden_import(path: Path, node: ast.Import | ast.ImportFrom, viol
         module_names.extend(alias.name for alias in node.names)
     elif node.module:
         module_names.append(node.module)
+        module_names.extend(f"{node.module}.{alias.name}" for alias in node.names)
 
     for module in module_names:
-        if module == "ibapi" or module == "ib_insync" or module.startswith(FORBIDDEN_BROKER_MODULE_PREFIXES):
+        if _is_forbidden_module(module, FORBIDDEN_BROKER_MODULE_PREFIXES):
             violations.append(f"{path}: imports forbidden direct IBKR broker module {module}")
+        if _is_forbidden_module(module, FORBIDDEN_NETWORK_MODULE_PREFIXES):
+            violations.append(f"{path}: imports forbidden network client module {module}")
+
+
+def _record_forbidden_dynamic_import(path: Path, node: ast.Call, violations: list[str]) -> None:
+    call_name = _call_name(node.func)
+    if call_name not in {"__import__", "import_module"} or not node.args:
+        return
+    first_arg = node.args[0]
+    if not isinstance(first_arg, ast.Constant) or not isinstance(first_arg.value, str):
+        return
+    module = first_arg.value
+    if _is_forbidden_module(module, FORBIDDEN_BROKER_MODULE_PREFIXES):
+        violations.append(f"{path}: dynamically imports forbidden direct IBKR broker module {module}")
+    if _is_forbidden_module(module, FORBIDDEN_NETWORK_MODULE_PREFIXES):
+        violations.append(f"{path}: dynamically imports forbidden network client module {module}")
+
+
+def _is_forbidden_module(module: str, prefixes: tuple[str, ...]) -> bool:
+    return any(module == prefix or module.startswith(f"{prefix}.") for prefix in prefixes)
 
 
 def _decorated_http_method(decorator: ast.expr) -> str | None:
