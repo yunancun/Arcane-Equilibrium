@@ -102,6 +102,11 @@
       <div class="se-metric-sub" id="se-scorecard-sub"></div>
     </div>
     <div class="se-metric">
+      <div class="se-metric-label">Launch Gate</div>
+      <div class="se-metric-value" id="se-launch-state">--</div>
+      <div class="se-metric-sub" id="se-launch-sub"></div>
+    </div>
+    <div class="se-metric">
       <div class="se-metric-label">IBKR Live</div>
       <div class="se-metric-value" id="se-live-state">--</div>
       <div class="se-metric-sub">live/tiny-live remain denied</div>
@@ -256,6 +261,18 @@
       </table>
     </section>
 
+    <section class="se-panel" id="se-launch-panel">
+      <div class="se-panel-title">
+        <span>Launch / Release Status</span>
+        <span id="se-launch-status" class="oc-chip oc-chip-neutral">--</span>
+      </div>
+      <table class="se-kv">
+        <tbody id="se-launch-body">
+          <tr><td colspan="2" class="se-muted">Loading...</td></tr>
+        </tbody>
+      </table>
+    </section>
+
     <section class="se-panel" id="se-denial-panel">
       <div class="se-panel-title">
         <span>Denied Surface</span>
@@ -278,6 +295,7 @@ const SHADOW_STATUS_ENDPOINT = '/api/v1/stock-etf/shadow-status';
 const PAPER_STATUS_ENDPOINT = '/api/v1/stock-etf/paper-status';
 const RECONCILIATION_STATUS_ENDPOINT = '/api/v1/stock-etf/reconciliation-status';
 const SCORECARD_STATUS_ENDPOINT = '/api/v1/stock-etf/scorecard-status';
+const LAUNCH_STATUS_ENDPOINT = '/api/v1/stock-etf/launch-status';
 
 function toneFor(value) {
   const s = String(value || '').toLowerCase();
@@ -684,6 +702,91 @@ function scorecardFallback(reason) {
   };
 }
 
+function launchFallback(reason) {
+  const why = reason || 'api_unavailable';
+  return {
+    launch_status_state: 'degraded',
+    phase: 'phase5_launch_status_source_fixture',
+    phase3_started: false,
+    phase5_started: false,
+    gui_authority: 'display_only',
+    release_packet: {
+      expected_contract_id: 'stock_etf_release_packet_v1',
+      packet_id: '',
+      source_version: 0,
+      accepted: false,
+      blockers: [why],
+      paper_shadow_window_complete: false,
+      engineering_shakedown_complete: false,
+      role_report_count: 0,
+      manifest_hash_count: 0,
+      gui_screenshot_hash_count: 0,
+      dq_manifest_hash_count: 0,
+      scorecard_regeneration_hash_count: 0,
+      pg_migrations_declared: false,
+      pg_dry_run_log_hash_present: false,
+      pg_double_apply_log_hash_present: false,
+      redaction_fixture_hash_present: false,
+      evidence_archive_pointer_present: false,
+      evidence_archive_hash_present: false,
+      secret_content_serialized: false,
+      ibkr_live_or_tiny_live_authorized: false,
+      sealed: false,
+    },
+    disable_cleanup_runbook: {
+      expected_runbook_id: 'stock_etf_kill_switch_and_disable_cleanup_runbook_v1',
+      runbook_id: '',
+      source_version: 0,
+      accepted: false,
+      blockers: [why],
+      bybit_live_execution_unchanged: false,
+      env_flag_count: 0,
+      proof_count: 0,
+      ibkr_contact_performed: false,
+      connector_runtime_started: false,
+      paper_order_routed: false,
+      secret_slot_created: false,
+      secret_content_serialized: false,
+      destructive_db_cleanup_requested: false,
+      db_delete_or_truncate_allowed: false,
+      paper_shadow_launch_authorized: false,
+      tiny_live_authorized: false,
+      live_authorized: false,
+    },
+    tiny_live_adr_eligibility: {
+      expected_contract_id: 'tiny_live_adr_eligibility_v1',
+      contract_id: '',
+      source_version: 0,
+      accepted: false,
+      blockers: [why],
+      decision: 'not_eligible',
+      paper_shadow_window_complete: false,
+      benchmark_relative_after_cost_lcb_bps: 0,
+      independent_observation_count: 0,
+      min_independent_observation_count: 0,
+      conservative_cost_stress_lcb_bps: 0,
+      paper_shadow_divergence_bps: 0,
+      max_paper_shadow_divergence_bps: 0,
+      concentration_label_passed: false,
+      regime_label_passed: false,
+      freshness_label_passed: false,
+      qc_review_passed: false,
+      mit_review_passed: false,
+      secret_content_serialized: false,
+      sealed: false,
+    },
+    paper_shadow_launch_authorized: false,
+    tiny_live_or_live_authorized: false,
+    connector_runtime_started: false,
+    scorecard_writer_started: false,
+    db_apply_performed: false,
+    evidence_clock_started: false,
+    contract_violations: [],
+    degraded: true,
+    reason: why,
+  };
+}
+
 function renderFallback() {
   const data = {
     default_asset_lane: 'crypto_perp',
@@ -726,6 +829,7 @@ function renderFallback() {
   renderPaperStatus(paperFallback('api_unavailable'));
   renderReconciliationStatus(reconciliationFallback('api_unavailable'));
   renderScorecardStatus(scorecardFallback('api_unavailable'));
+  renderLaunchStatus(launchFallback('api_unavailable'));
 }
 
 function renderReadiness(data, laneStatus) {
@@ -1264,6 +1368,118 @@ function renderScorecardStatus(data) {
   );
 }
 
+function renderLaunchStatus(data) {
+  const status = data || launchFallback('api_unavailable');
+  const release = status.release_packet || {};
+  const runbook = status.disable_cleanup_runbook || {};
+  const tinyLive = status.tiny_live_adr_eligibility || {};
+  const state = status.launch_status_state || 'blocked';
+  const launchBlockers = []
+    .concat(release.blockers || [])
+    .concat(runbook.blockers || [])
+    .concat(tinyLive.blockers || [])
+    .concat(status.phase2_gate_blockers || [])
+    .concat(status.contract_violations || []);
+  document.getElementById('se-launch-state').innerHTML = textChip(state);
+  document.getElementById('se-launch-sub').textContent =
+    release.accepted && runbook.accepted && tinyLive.accepted ? 'release packet accepted' : 'launch blocked';
+  setChip('se-launch-status', state, toneFor(state));
+  document.getElementById('se-launch-body').innerHTML = [
+    kvRow('phase', textChip(status.phase || '-')),
+    kvRow('phase3_started', boolChip(status.phase3_started, true)),
+    kvRow('phase5_started', boolChip(status.phase5_started, true)),
+    kvRow('release.expected_contract_id', textChip(release.expected_contract_id || '-')),
+    kvRow('release.packet_id', textChip(release.packet_id || '-')),
+    kvRow('release.source_version', textChip(release.source_version)),
+    kvRow('release.accepted', boolChip(release.accepted, false)),
+    kvRow('release.paper_shadow_window_complete', boolChip(release.paper_shadow_window_complete, false)),
+    kvRow('release.engineering_shakedown_complete', boolChip(release.engineering_shakedown_complete, false)),
+    kvRow(
+      'release.counts',
+      '<span class="se-code">' +
+        ocEsc(
+          'roles=' + String(release.role_report_count || 0) +
+          ' manifests=' + String(release.manifest_hash_count || 0) +
+          ' screenshots=' + String(release.gui_screenshot_hash_count || 0) +
+          ' dq=' + String(release.dq_manifest_hash_count || 0) +
+          ' regen=' + String(release.scorecard_regeneration_hash_count || 0)
+        ) +
+      '</span>'
+    ),
+    kvRow('release.pg_migrations_declared', boolChip(release.pg_migrations_declared, true)),
+    kvRow('release.pg_dry_run_log_hash_present', boolChip(release.pg_dry_run_log_hash_present, false)),
+    kvRow('release.pg_double_apply_log_hash_present', boolChip(release.pg_double_apply_log_hash_present, false)),
+    kvRow('release.redaction_fixture_hash_present', boolChip(release.redaction_fixture_hash_present, false)),
+    kvRow('release.evidence_archive_pointer_present', boolChip(release.evidence_archive_pointer_present, false)),
+    kvRow('release.evidence_archive_hash_present', boolChip(release.evidence_archive_hash_present, false)),
+    kvRow('release.secret_content_serialized', boolChip(release.secret_content_serialized, true)),
+    kvRow('release.ibkr_live_or_tiny_live_authorized', boolChip(release.ibkr_live_or_tiny_live_authorized, true)),
+    kvRow('release.sealed', boolChip(release.sealed, false)),
+    kvRow('runbook.expected_runbook_id', textChip(runbook.expected_runbook_id || '-')),
+    kvRow('runbook.runbook_id', textChip(runbook.runbook_id || '-')),
+    kvRow('runbook.source_version', textChip(runbook.source_version)),
+    kvRow('runbook.accepted', boolChip(runbook.accepted, false)),
+    kvRow('runbook.bybit_live_execution_unchanged', boolChip(runbook.bybit_live_execution_unchanged, false)),
+    kvRow(
+      'runbook.counts',
+      '<span class="se-code">' +
+        ocEsc(
+          'env_flags=' + String(runbook.env_flag_count || 0) +
+          ' proofs=' + String(runbook.proof_count || 0)
+        ) +
+      '</span>'
+    ),
+    kvRow('runbook.ibkr_contact_performed', boolChip(runbook.ibkr_contact_performed, true)),
+    kvRow('runbook.connector_runtime_started', boolChip(runbook.connector_runtime_started, true)),
+    kvRow('runbook.paper_order_routed', boolChip(runbook.paper_order_routed, true)),
+    kvRow('runbook.secret_slot_created', boolChip(runbook.secret_slot_created, true)),
+    kvRow('runbook.secret_content_serialized', boolChip(runbook.secret_content_serialized, true)),
+    kvRow('runbook.destructive_db_cleanup_requested', boolChip(runbook.destructive_db_cleanup_requested, true)),
+    kvRow('runbook.db_delete_or_truncate_allowed', boolChip(runbook.db_delete_or_truncate_allowed, true)),
+    kvRow('runbook.paper_shadow_launch_authorized', boolChip(runbook.paper_shadow_launch_authorized, true)),
+    kvRow('runbook.tiny_live_authorized', boolChip(runbook.tiny_live_authorized, true)),
+    kvRow('runbook.live_authorized', boolChip(runbook.live_authorized, true)),
+    kvRow('tiny_live.expected_contract_id', textChip(tinyLive.expected_contract_id || '-')),
+    kvRow('tiny_live.contract_id', textChip(tinyLive.contract_id || '-')),
+    kvRow('tiny_live.source_version', textChip(tinyLive.source_version)),
+    kvRow('tiny_live.accepted', boolChip(tinyLive.accepted, false)),
+    kvRow('tiny_live.decision', textChip(tinyLive.decision || 'not_eligible')),
+    kvRow('tiny_live.paper_shadow_window_complete', boolChip(tinyLive.paper_shadow_window_complete, false)),
+    kvRow(
+      'tiny_live.thresholds',
+      '<span class="se-code">' +
+        ocEsc(
+          'lcb=' + String(tinyLive.benchmark_relative_after_cost_lcb_bps || 0) +
+          ' obs=' + String(tinyLive.independent_observation_count || 0) +
+          ' min_obs=' + String(tinyLive.min_independent_observation_count || 0) +
+          ' cost_lcb=' + String(tinyLive.conservative_cost_stress_lcb_bps || 0) +
+          ' div=' + String(tinyLive.paper_shadow_divergence_bps || 0) +
+          ' max_div=' + String(tinyLive.max_paper_shadow_divergence_bps || 0)
+        ) +
+      '</span>'
+    ),
+    kvRow('tiny_live.concentration_label_passed', boolChip(tinyLive.concentration_label_passed, false)),
+    kvRow('tiny_live.regime_label_passed', boolChip(tinyLive.regime_label_passed, false)),
+    kvRow('tiny_live.freshness_label_passed', boolChip(tinyLive.freshness_label_passed, false)),
+    kvRow('tiny_live.qc_review_passed', boolChip(tinyLive.qc_review_passed, false)),
+    kvRow('tiny_live.mit_review_passed', boolChip(tinyLive.mit_review_passed, false)),
+    kvRow('tiny_live.secret_content_serialized', boolChip(tinyLive.secret_content_serialized, true)),
+    kvRow('tiny_live.sealed', boolChip(tinyLive.sealed, false)),
+    kvRow('paper_shadow_launch_authorized', boolChip(status.paper_shadow_launch_authorized, true)),
+    kvRow('tiny_live_or_live_authorized', boolChip(status.tiny_live_or_live_authorized, true)),
+    kvRow('connector_runtime_started', boolChip(status.connector_runtime_started, true)),
+    kvRow('scorecard_writer_started', boolChip(status.scorecard_writer_started, true)),
+    kvRow('db_apply_performed', boolChip(status.db_apply_performed, true)),
+    kvRow('evidence_clock_started', boolChip(status.evidence_clock_started, true)),
+    kvRow('blockers', chipList(launchBlockers, 'none')),
+    kvRow('reason', '<span class="se-code">' + ocEsc(status.reason || '-') + '</span>'),
+  ].join('');
+  document.getElementById('se-launch-panel').classList.toggle(
+    'se-bad-line',
+    (status.contract_violations || []).length > 0
+  );
+}
+
 async function loadReadiness() {
   const [
     lanePayload,
@@ -1275,6 +1491,7 @@ async function loadReadiness() {
     paperPayload,
     reconciliationPayload,
     scorecardPayload,
+    launchPayload,
   ] = await Promise.all([
     ocApi(LANE_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(READINESS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
@@ -1285,6 +1502,7 @@ async function loadReadiness() {
     ocApi(PAPER_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(RECONCILIATION_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(SCORECARD_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
+    ocApi(LAUNCH_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
   ]);
   if (!readinessPayload || !readinessPayload.data) {
     renderFallback();
@@ -1305,6 +1523,11 @@ async function loadReadiness() {
     scorecardPayload && scorecardPayload.data
       ? scorecardPayload.data
       : scorecardFallback('api_unavailable')
+  );
+  renderLaunchStatus(
+    launchPayload && launchPayload.data
+      ? launchPayload.data
+      : launchFallback('api_unavailable')
   );
 }
 

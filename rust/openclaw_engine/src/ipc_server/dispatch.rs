@@ -462,6 +462,7 @@ pub(crate) async fn dispatch_request(
         | "stock_etf.get_paper_status"
         | "stock_etf.get_reconciliation_status"
         | "stock_etf.get_scorecard_status"
+        | "stock_etf.get_launch_status"
         | "stock_etf.preview_paper_order"
         | "stock_etf.submit_paper_order"
         | "stock_etf.cancel_paper_order"

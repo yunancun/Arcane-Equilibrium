@@ -640,7 +640,7 @@ lane selector。
 
 - Phase 4A：default `crypto_perp` lane badge / readiness / status page
 - Phase 4B：stock read-only overview / universe / shadow / evidence / paper /
-  reconciliation / account / scorecard status views
+  reconciliation / account / scorecard / launch-release status views
 - Phase 4C：完整 login-success lane selector；只能在 route/cache/auth negative tests PASS 後討論
 - disabled CFD surface first slice 不顯示，只保留 fail-closed status / denial tests
 

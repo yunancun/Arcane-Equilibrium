@@ -9,14 +9,17 @@ use openclaw_types::{
     evaluate_broker_operation, AssetLane, Broker, BrokerAccountPortfolioCashLedgerV1,
     BrokerCapabilityRequest, BrokerEnvironment, BrokerLifecycleEventLogV1, BrokerOperation,
     IbkrExternalSurfaceGateV1, IbkrPaperAttestationPolicyV1, IbkrPhase2PolicyBundleV1,
-    IbkrSessionAttestationV1, InstrumentKind, NonBybitApiAllowlistV1, StockEtfEvidenceClockDayV1,
-    StockEtfFeatureFlags, StockEtfGateInputs, StockEtfPitUniverseV1, StockEtfScorecardVerdictV1,
+    IbkrSessionAttestationV1, InstrumentKind, NonBybitApiAllowlistV1,
+    StockEtfDisableCleanupRunbookV1, StockEtfEvidenceClockDayV1, StockEtfFeatureFlags,
+    StockEtfGateInputs, StockEtfPitUniverseV1, StockEtfReleasePacketV1, StockEtfScorecardVerdictV1,
     StockEtfStrategyHypothesisV1, StockMarketDataProvenanceV1, StockShadowFillModelV1,
-    BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID, BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
-    IBKR_PAPER_ATTESTATION_CONTRACT_ID, IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
-    IBKR_SESSION_ATTESTATION_CONTRACT_ID, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
-    STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID, STOCK_ETF_SCORECARD_VERDICT_CONTRACT_ID,
-    STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
+    TinyLiveAdrEligibilityV1, BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID,
+    BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID, IBKR_PAPER_ATTESTATION_CONTRACT_ID,
+    IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
+    STOCK_ETF_DISABLE_CLEANUP_RUNBOOK_ID, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
+    STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID, STOCK_ETF_RELEASE_PACKET_CONTRACT_ID,
+    STOCK_ETF_SCORECARD_VERDICT_CONTRACT_ID, STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
+    STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
     STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
 };
 
@@ -85,6 +88,9 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
         }
         "stock_etf.get_scorecard_status" => {
             JsonRpcResponse::success(id, scorecard_status_summary(phase2))
+        }
+        "stock_etf.get_launch_status" => {
+            JsonRpcResponse::success(id, launch_status_summary(phase2))
         }
         _ => {
             let operation = match operation_for_method(method) {
@@ -428,6 +434,102 @@ fn scorecard_status_summary(phase2: serde_json::Value) -> serde_json::Value {
         "order_routed": false,
         "bybit_ipc_reused": false,
         "live_or_tiny_live_authorized": false,
+    })
+}
+
+fn launch_status_summary(phase2: serde_json::Value) -> serde_json::Value {
+    let release_packet = StockEtfReleasePacketV1::default();
+    let release_verdict = release_packet.validate();
+    let disable_cleanup = StockEtfDisableCleanupRunbookV1::default();
+    let disable_verdict = disable_cleanup.validate();
+    let tiny_live = TinyLiveAdrEligibilityV1::default();
+    let tiny_live_verdict = tiny_live.validate();
+
+    serde_json::json!({
+        "phase": "phase5_launch_status_source_fixture",
+        "asset_lane": AssetLane::StockEtfCash,
+        "broker": Broker::Ibkr,
+        "environment": "paper_shadow",
+        "launch_status_state": "blocked",
+        "phase3_started": false,
+        "phase5_started": false,
+        "release_packet": {
+            "expected_contract_id": STOCK_ETF_RELEASE_PACKET_CONTRACT_ID,
+            "packet_id": release_packet.packet_id,
+            "source_version": release_packet.source_version,
+            "accepted": release_verdict.accepted,
+            "blockers": release_verdict.blockers,
+            "paper_shadow_window_complete": release_packet.paper_shadow_window_complete,
+            "engineering_shakedown_complete": release_packet.engineering_shakedown_complete,
+            "role_report_count": release_packet.role_report_paths.len(),
+            "manifest_hash_count": release_packet.manifest_hashes.len(),
+            "gui_screenshot_hash_count": release_packet.gui_screenshot_hashes.len(),
+            "dq_manifest_hash_count": release_packet.dq_manifest_hashes.len(),
+            "scorecard_regeneration_hash_count": release_packet.scorecard_regeneration_hashes.len(),
+            "pg_migrations_declared": release_packet.pg_migration_evidence.migrations_declared,
+            "pg_dry_run_log_hash_present": !release_packet.pg_migration_evidence.pg_dry_run_log_hash.is_empty(),
+            "pg_double_apply_log_hash_present": !release_packet.pg_migration_evidence.pg_double_apply_log_hash.is_empty(),
+            "redaction_fixture_hash_present": !release_packet.redaction_fixture_hash.is_empty(),
+            "evidence_archive_pointer_present": !release_packet.evidence_archive_pointer.is_empty(),
+            "evidence_archive_hash_present": !release_packet.evidence_archive_hash.is_empty(),
+            "secret_content_serialized": release_packet.secret_content_serialized,
+            "ibkr_live_or_tiny_live_authorized": release_packet.ibkr_live_or_tiny_live_authorized,
+            "sealed": release_packet.sealed,
+        },
+        "disable_cleanup_runbook": {
+            "expected_runbook_id": STOCK_ETF_DISABLE_CLEANUP_RUNBOOK_ID,
+            "runbook_id": disable_cleanup.runbook_id,
+            "source_version": disable_cleanup.source_version,
+            "accepted": disable_verdict.accepted,
+            "blockers": disable_verdict.blockers,
+            "bybit_live_execution_unchanged": disable_cleanup.bybit_live_execution_unchanged,
+            "env_flag_count": disable_cleanup.env_flags.len(),
+            "proof_count": disable_cleanup.proofs.len(),
+            "ibkr_contact_performed": disable_cleanup.ibkr_contact_performed,
+            "connector_runtime_started": disable_cleanup.connector_runtime_started,
+            "paper_order_routed": disable_cleanup.paper_order_routed,
+            "secret_slot_created": disable_cleanup.secret_slot_created,
+            "secret_content_serialized": disable_cleanup.secret_content_serialized,
+            "destructive_db_cleanup_requested": disable_cleanup.destructive_db_cleanup_requested,
+            "db_delete_or_truncate_allowed": disable_cleanup.db_delete_or_truncate_allowed,
+            "paper_shadow_launch_authorized": disable_cleanup.paper_shadow_launch_authorized,
+            "tiny_live_authorized": disable_cleanup.tiny_live_authorized,
+            "live_authorized": disable_cleanup.live_authorized,
+        },
+        "tiny_live_adr_eligibility": {
+            "expected_contract_id": STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID,
+            "contract_id": tiny_live.contract_id,
+            "source_version": tiny_live.source_version,
+            "accepted": tiny_live_verdict.accepted,
+            "blockers": tiny_live_verdict.blockers,
+            "decision": tiny_live.decision,
+            "paper_shadow_window_complete": tiny_live.paper_shadow_window_complete,
+            "benchmark_relative_after_cost_lcb_bps": tiny_live.benchmark_relative_after_cost_lcb_bps,
+            "independent_observation_count": tiny_live.independent_observation_count,
+            "min_independent_observation_count": tiny_live.min_independent_observation_count,
+            "conservative_cost_stress_lcb_bps": tiny_live.conservative_cost_stress_lcb_bps,
+            "paper_shadow_divergence_bps": tiny_live.paper_shadow_divergence_bps,
+            "max_paper_shadow_divergence_bps": tiny_live.max_paper_shadow_divergence_bps,
+            "concentration_label_passed": tiny_live.concentration_label_passed,
+            "regime_label_passed": tiny_live.regime_label_passed,
+            "freshness_label_passed": tiny_live.freshness_label_passed,
+            "qc_review_passed": tiny_live.qc_review_passed,
+            "mit_review_passed": tiny_live.mit_review_passed,
+            "secret_content_serialized": tiny_live.secret_content_serialized,
+            "sealed": tiny_live.sealed,
+        },
+        "phase2": phase2,
+        "ibkr_live_enabled": false,
+        "paper_shadow_launch_authorized": false,
+        "tiny_live_or_live_authorized": false,
+        "connector_runtime_started": false,
+        "scorecard_writer_started": false,
+        "db_apply_performed": false,
+        "evidence_clock_started": false,
+        "ibkr_call_performed": false,
+        "secret_slot_touched": false,
+        "order_routed": false,
+        "bybit_ipc_reused": false,
     })
 }
 
