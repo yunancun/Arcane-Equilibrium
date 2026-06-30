@@ -7,7 +7,8 @@
 use std::path::PathBuf;
 
 use openclaw_types::{
-    StockEtfDbEvidenceDdlBlocker, StockEtfDbEvidenceDdlContractV1,
+    audit_stock_etf_db_evidence_source_sql, StockEtfDbEvidenceDdlBlocker,
+    StockEtfDbEvidenceDdlContractV1, StockEtfDbEvidenceDdlSourceBlocker,
     STOCK_ETF_DB_EVIDENCE_CONTRACT_ID, STOCK_ETF_DB_EVIDENCE_DDL_SOURCE_PATH,
 };
 
@@ -238,22 +239,47 @@ fn source_sql_draft_remains_source_only_and_contains_contract_ddl() {
         .join("..");
     let source_path = srv_root.join(STOCK_ETF_DB_EVIDENCE_DDL_SOURCE_PATH);
     let raw = std::fs::read_to_string(&source_path).expect("read source-only DDL draft");
+    let audit = audit_stock_etf_db_evidence_source_sql(&raw);
 
+    assert!(audit.accepted, "source SQL blockers: {:?}", audit.blockers);
+    assert_eq!(audit.table_count, 13);
+    assert!(audit.index_count >= 6);
     assert!(!source_path.to_string_lossy().contains("sql/migrations"));
-    assert!(raw.contains("SOURCE-ONLY DDL DRAFT"));
-    assert!(raw.contains("CREATE SCHEMA IF NOT EXISTS broker;"));
-    assert!(raw.contains("CREATE SCHEMA IF NOT EXISTS research;"));
-    assert!(raw.contains("CREATE SCHEMA IF NOT EXISTS audit;"));
-    assert!(raw.contains("Guard A"));
-    assert!(raw.contains("CREATE TABLE IF NOT EXISTS broker.paper_orders"));
-    assert!(raw.contains("environment TEXT NOT NULL DEFAULT 'paper' CHECK (environment = 'paper')"));
-    assert!(raw.contains("CREATE TABLE IF NOT EXISTS research.stock_shadow_fills"));
-    assert!(raw.contains(
-        "synthetic_shadow BOOLEAN NOT NULL DEFAULT TRUE CHECK (synthetic_shadow = TRUE)"
+}
+
+#[test]
+fn source_sql_audit_rejects_contract_drift_and_migration_promotion() {
+    let srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..");
+    let source_path = srv_root.join(STOCK_ETF_DB_EVIDENCE_DDL_SOURCE_PATH);
+    let raw = std::fs::read_to_string(&source_path).expect("read source-only DDL draft");
+
+    let missing_column = raw.replace("idempotency_key TEXT NOT NULL,\n", "");
+    assert_ne!(missing_column, raw);
+    let missing_column_audit = audit_stock_etf_db_evidence_source_sql(&missing_column);
+    assert!(has_source_blocker(
+        &missing_column_audit.blockers,
+        StockEtfDbEvidenceDdlSourceBlocker::RequiredTableColumnMissing
     ));
-    assert!(raw.contains("CREATE TABLE IF NOT EXISTS audit.asset_lane_events"));
-    assert!(raw.contains("CREATE INDEX IF NOT EXISTS idx_asset_lane_events_lane_time"));
-    assert!(raw.contains("Do not copy into sql/migrations/ or apply to any database"));
+
+    let missing_shadow_check = raw.replace(
+        "synthetic_shadow BOOLEAN NOT NULL DEFAULT TRUE CHECK (synthetic_shadow = TRUE)",
+        "synthetic_shadow BOOLEAN NOT NULL DEFAULT TRUE",
+    );
+    assert_ne!(missing_shadow_check, raw);
+    let missing_shadow_audit = audit_stock_etf_db_evidence_source_sql(&missing_shadow_check);
+    assert!(has_source_blocker(
+        &missing_shadow_audit.blockers,
+        StockEtfDbEvidenceDdlSourceBlocker::SyntheticShadowCheckMissing
+    ));
+
+    let destructive = format!("{raw}\nDROP TABLE broker.paper_orders;\n");
+    let destructive_audit = audit_stock_etf_db_evidence_source_sql(&destructive);
+    assert!(has_source_blocker(
+        &destructive_audit.blockers,
+        StockEtfDbEvidenceDdlSourceBlocker::ForbiddenDestructiveOrMigrationStatement
+    ));
 }
 
 #[test]
@@ -290,5 +316,12 @@ fn blocked_template_is_parseable_and_secret_free() {
 }
 
 fn has(blockers: &[StockEtfDbEvidenceDdlBlocker], blocker: StockEtfDbEvidenceDdlBlocker) -> bool {
+    blockers.contains(&blocker)
+}
+
+fn has_source_blocker(
+    blockers: &[StockEtfDbEvidenceDdlSourceBlocker],
+    blocker: StockEtfDbEvidenceDdlSourceBlocker,
+) -> bool {
     blockers.contains(&blocker)
 }

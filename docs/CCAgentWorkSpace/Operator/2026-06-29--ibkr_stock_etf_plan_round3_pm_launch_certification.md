@@ -177,3 +177,26 @@ Verification 已過：
 沒有 Phase 1/2/3/4/5 runtime start、沒有 paper order、沒有 fill import、沒有
 evidence clock、沒有 scorecard writer、沒有 DB apply、沒有 Linux runtime sync/restart，
 也沒有改動 Bybit live execution 行為。
+
+## 2026-06-30 Operator Update — DB Evidence DDL Source Audit
+
+本 session 已完成下一個 source-only checkpoint：
+`stock_etf_db_evidence_ddl_v1.source_only.sql` auditor hardening。
+
+這次不是 DB 部署。新增的是 Rust source auditor，會檢查 DDL draft 是否仍是
+source-only、是否明確禁止 migration/apply、是否包含 required schemas/tables、
+Guard A、欄位宣告、natural keys、stock/IBKR/paper checks、live denial、
+synthetic shadow fill separation、raw artifact hash、append-only audit posture 與
+hot-path indexes。
+
+Verification 已過：
+
+- Focused source SQL audit：`2 passed`
+- DB evidence DDL acceptance：`9 passed`
+- Full openclaw_types：`35` unit/golden + `207` integration/acceptance + `0` doc-tests
+- Workspace `cargo check`：PASS
+
+邊界不變：沒有 DB migration/apply、沒有 Postgres dry-run、沒有 IBKR contact、
+沒有 secret access/creation、沒有 connector runtime、沒有 Phase 1/2/3/4/5 runtime
+start、沒有 paper order、沒有 fill import、沒有 evidence clock、沒有 scorecard
+writer、沒有 Linux runtime sync/restart，也沒有改動 Bybit live execution 行為。
