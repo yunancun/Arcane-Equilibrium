@@ -918,8 +918,9 @@ Negative tests:
 
 Source validator: `openclaw_types::stock_etf_gui_lane_contract::StockEtfGuiLaneContractV1`.
 The validator requires exact `gui_lane_contract_v1` contract id, source version
-`1`, `crypto_perp` as the default displayed lane, a GET-only
-`/api/v1/stock-etf/readiness` readiness surface, display-only semantics, client
+`1`, `crypto_perp` as the default displayed lane, GET-only
+`/api/v1/stock-etf/readiness`, `/api/v1/stock-etf/lane-status`, and
+`/api/v1/stock-etf/evidence-status` surfaces, display-only semantics, client
 lane state treated as untrusted, denied localStorage/query-param/hidden-field
 authority, no login-success selector, no POST/order/secret/contact surfaces,
 paper-order entry hidden, stock live disabled display, CFD hidden or fail-closed,

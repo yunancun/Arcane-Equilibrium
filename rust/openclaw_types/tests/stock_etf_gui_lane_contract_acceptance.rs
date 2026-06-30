@@ -6,8 +6,9 @@
 use std::path::PathBuf;
 
 use openclaw_types::{
-    AssetLane, StockEtfGuiLaneBlocker, StockEtfGuiLaneContractV1, STOCK_ETF_GUI_LANE_CONTRACT_ID,
-    STOCK_ETF_GUI_READINESS_ENDPOINT,
+    AssetLane, StockEtfGuiLaneBlocker, StockEtfGuiLaneContractV1,
+    STOCK_ETF_GUI_EVIDENCE_STATUS_ENDPOINT, STOCK_ETF_GUI_LANE_CONTRACT_ID,
+    STOCK_ETF_GUI_LANE_STATUS_ENDPOINT, STOCK_ETF_GUI_READINESS_ENDPOINT,
 };
 
 #[test]
@@ -49,7 +50,17 @@ fn accepted_fixture_is_display_only_get_only_and_crypto_default() {
         contract.readiness_endpoint,
         STOCK_ETF_GUI_READINESS_ENDPOINT
     );
+    assert_eq!(
+        contract.lane_status_endpoint,
+        STOCK_ETF_GUI_LANE_STATUS_ENDPOINT
+    );
+    assert_eq!(
+        contract.evidence_status_endpoint,
+        STOCK_ETF_GUI_EVIDENCE_STATUS_ENDPOINT
+    );
     assert!(contract.readiness_endpoint_get_only);
+    assert!(contract.lane_status_endpoint_get_only);
+    assert!(contract.evidence_status_endpoint_get_only);
     assert!(contract.display_only);
     assert!(!contract.ibkr_contact_performed);
 }
@@ -70,6 +81,39 @@ fn gui_lane_contract_requires_exact_contract_id_and_source_version() {
     assert!(verdict
         .blockers
         .contains(&StockEtfGuiLaneBlocker::SourceVersionMismatch));
+}
+
+#[test]
+fn gui_lane_contract_requires_all_stock_etf_readonly_get_endpoints() {
+    let mut contract = StockEtfGuiLaneContractV1::accepted_fixture();
+    contract.readiness_endpoint = "/api/v1/stock-etf/readiness?lane=stock".to_string();
+    contract.readiness_endpoint_get_only = false;
+    contract.lane_status_endpoint = "/api/v1/stock-etf/status".to_string();
+    contract.lane_status_endpoint_get_only = false;
+    contract.evidence_status_endpoint = "/api/v1/stock-etf/evidence".to_string();
+    contract.evidence_status_endpoint_get_only = false;
+
+    let verdict = contract.validate();
+
+    assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfGuiLaneBlocker::ReadinessEndpointMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfGuiLaneBlocker::ReadinessEndpointNotGetOnly));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfGuiLaneBlocker::LaneStatusEndpointMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfGuiLaneBlocker::LaneStatusEndpointNotGetOnly));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfGuiLaneBlocker::EvidenceStatusEndpointMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfGuiLaneBlocker::EvidenceStatusEndpointNotGetOnly));
 }
 
 #[test]
@@ -193,6 +237,14 @@ fn blocked_template_is_parseable_and_secret_free() {
     assert_eq!(parsed.default_asset_lane, AssetLane::CryptoPerp);
     assert_eq!(parsed.source_version, 0);
     assert_eq!(parsed.readiness_endpoint, STOCK_ETF_GUI_READINESS_ENDPOINT);
+    assert_eq!(
+        parsed.lane_status_endpoint,
+        STOCK_ETF_GUI_LANE_STATUS_ENDPOINT
+    );
+    assert_eq!(
+        parsed.evidence_status_endpoint,
+        STOCK_ETF_GUI_EVIDENCE_STATUS_ENDPOINT
+    );
     assert!(!parsed.ibkr_contact_performed);
     assert!(!parsed.secret_content_serialized);
     assert!(!parsed.validate().accepted);
