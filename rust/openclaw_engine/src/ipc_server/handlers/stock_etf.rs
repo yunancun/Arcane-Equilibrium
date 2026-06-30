@@ -13,21 +13,22 @@ use openclaw_types::{
     IbkrSessionAttestationV1, InstrumentKind, NonBybitApiAllowlistV1,
     StockEtfBrokerCapabilityRegistryV1, StockEtfDisableCleanupRunbookV1,
     StockEtfEvidenceClockDayV1, StockEtfFeatureFlags, StockEtfGateInputs,
-    StockEtfInstrumentIdentityV1, StockEtfPhase0ContractPacketManifestV1, StockEtfPitUniverseV1,
-    StockEtfReferenceDataSourcesV1, StockEtfReleasePacketV1, StockEtfRiskPolicyV1,
-    StockEtfScorecardVerdictV1, StockEtfStrategyHypothesisV1, StockMarketDataProvenanceV1,
-    StockShadowFillModelV1, TinyLiveAdrEligibilityV1,
-    BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID, BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
-    FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID, IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
-    IBKR_PAPER_ATTESTATION_CONTRACT_ID, IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
-    IBKR_SECRET_SLOT_CONTRACT_ID, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
-    STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID, STOCK_ETF_DISABLE_CLEANUP_RUNBOOK_ID,
-    STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID, STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID,
-    STOCK_ETF_PAPER_ORDER_REQUEST_CONTRACT_ID, STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
-    STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID, STOCK_ETF_RELEASE_PACKET_CONTRACT_ID,
-    STOCK_ETF_RISK_POLICY_CONTRACT_ID, STOCK_ETF_SCORECARD_VERDICT_CONTRACT_ID,
-    STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID, STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID,
-    STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID, STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
+    StockEtfInstrumentIdentityV1, StockEtfLaneScopedIpcMethod, StockEtfPaperOrderRequestEnvelopeV1,
+    StockEtfPhase0ContractPacketManifestV1, StockEtfPitUniverseV1, StockEtfReferenceDataSourcesV1,
+    StockEtfReleasePacketV1, StockEtfRiskPolicyV1, StockEtfScorecardVerdictV1,
+    StockEtfStrategyHypothesisV1, StockMarketDataProvenanceV1, StockShadowFillModelV1,
+    TinyLiveAdrEligibilityV1, BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID,
+    BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID, FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID,
+    IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID, IBKR_PAPER_ATTESTATION_CONTRACT_ID,
+    IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID, IBKR_SECRET_SLOT_CONTRACT_ID,
+    IBKR_SESSION_ATTESTATION_CONTRACT_ID, STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID,
+    STOCK_ETF_DISABLE_CLEANUP_RUNBOOK_ID, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
+    STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID, STOCK_ETF_PAPER_ORDER_REQUEST_CONTRACT_ID,
+    STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID, STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID,
+    STOCK_ETF_RELEASE_PACKET_CONTRACT_ID, STOCK_ETF_RISK_POLICY_CONTRACT_ID,
+    STOCK_ETF_SCORECARD_VERDICT_CONTRACT_ID, STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
+    STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
+    STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
 };
 
 pub(in crate::ipc_server) fn handle_stock_etf_ipc(
@@ -134,7 +135,12 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
             };
             let gates = StockEtfGateInputs::default();
             let decision = evaluate_broker_operation(request, &flags, &gates);
-            let allowed = decision.allowed;
+            let paper_request = paper_request_envelope_summary(method, params);
+            let request_envelope_accepted_for_ipc = paper_request
+                .as_ref()
+                .map(|(_, accepted)| *accepted)
+                .unwrap_or(true);
+            let allowed = decision.allowed && request_envelope_accepted_for_ipc;
             let denial_reason = decision.denial_reason;
             JsonRpcResponse::success(
                 id,
@@ -144,6 +150,9 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
                     "decision": decision,
                     "allowed": allowed,
                     "denial_reason": denial_reason,
+                    "request_envelope": paper_request.map(|(summary, _)| summary),
+                    "request_envelope_accepted_for_ipc": request_envelope_accepted_for_ipc,
+                    "runtime_authority_denied": true,
                     "phase2": phase2,
                     "ibkr_call_performed": false,
                     "secret_slot_touched": false,
@@ -1587,6 +1596,107 @@ fn operation_for_method(method: &str) -> Option<BrokerOperation> {
         "stock_etf.evaluate_shadow_signal" => Some(BrokerOperation::ShadowSignalEmit),
         _ => None,
     }
+}
+
+fn paper_request_method_for_ipc(method: &str) -> Option<StockEtfLaneScopedIpcMethod> {
+    match method {
+        "stock_etf.preview_paper_order" => Some(StockEtfLaneScopedIpcMethod::PreviewPaperOrder),
+        "stock_etf.submit_paper_order" => Some(StockEtfLaneScopedIpcMethod::SubmitPaperOrder),
+        "stock_etf.cancel_paper_order" => Some(StockEtfLaneScopedIpcMethod::CancelPaperOrder),
+        "stock_etf.replace_paper_order" => Some(StockEtfLaneScopedIpcMethod::ReplacePaperOrder),
+        _ => None,
+    }
+}
+
+fn paper_request_envelope_summary(
+    method: &str,
+    params: &serde_json::Value,
+) -> Option<(serde_json::Value, bool)> {
+    let expected_request_method = paper_request_method_for_ipc(method)?;
+    let parsed = serde_json::from_value::<StockEtfPaperOrderRequestEnvelopeV1>(params.clone());
+
+    Some(match parsed {
+        Ok(envelope) => {
+            let verdict = envelope.validate();
+            let ipc_method_matches = envelope.request_method == expected_request_method;
+            let ipc_binding_blockers: Vec<&str> = if ipc_method_matches {
+                Vec::new()
+            } else {
+                vec!["ipc_method_mismatch"]
+            };
+            let accepted_for_ipc = verdict.accepted && ipc_method_matches;
+            (
+                serde_json::json!({
+                    "expected_contract_id": STOCK_ETF_PAPER_ORDER_REQUEST_CONTRACT_ID,
+                    "contract_id": envelope.contract_id,
+                    "source_version": envelope.source_version,
+                    "parse_ok": true,
+                    "accepted": verdict.accepted,
+                    "blockers": verdict.blockers,
+                    "expected_request_method": expected_request_method,
+                    "request_method": envelope.request_method,
+                    "ipc_method_matches": ipc_method_matches,
+                    "ipc_binding_blockers": ipc_binding_blockers,
+                    "accepted_for_ipc": accepted_for_ipc,
+                    "operation": envelope.operation,
+                    "authority_scope": envelope.authority_scope,
+                    "effect_capable": envelope.effect_capable,
+                    "request_id_present": !envelope.request_id.is_empty(),
+                    "account_fingerprint_hash_present": !envelope.account_fingerprint_hash.is_empty(),
+                    "session_attestation_hash_present": !envelope.session_attestation_hash.is_empty(),
+                    "scoped_authorization_hash_present": !envelope.scoped_authorization_hash.is_empty(),
+                    "decision_lease_id_present": !envelope.decision_lease_id.is_empty(),
+                    "guardian_state_hash_present": !envelope.guardian_state_hash.is_empty(),
+                    "risk_config_hash_present": !envelope.risk_config_hash.is_empty(),
+                    "instrument_identity_hash_present": !envelope.instrument_identity_hash.is_empty(),
+                    "lifecycle_contract_hash_present": !envelope.lifecycle_contract_hash.is_empty(),
+                    "broker_capability_registry_hash_present": !envelope.broker_capability_registry_hash.is_empty(),
+                    "audit_event_id_present": !envelope.audit_event_id.is_empty(),
+                    "order_local_id_present": !envelope.order_local_id.is_empty(),
+                    "idempotency_key_present": !envelope.idempotency_key.is_empty(),
+                    "broker_order_id_present": !envelope.broker_order_id.is_empty(),
+                    "cancel_reason_present": !envelope.cancel_reason.is_empty(),
+                    "replacement_idempotency_key_present": !envelope.replacement_idempotency_key.is_empty(),
+                    "replace_reason_present": !envelope.replace_reason.is_empty(),
+                    "ibkr_contact_performed": envelope.ibkr_contact_performed,
+                    "connector_runtime_started": envelope.connector_runtime_started,
+                    "secret_content_serialized": envelope.secret_content_serialized,
+                    "order_routed": envelope.order_routed,
+                    "bybit_path_reused": envelope.bybit_path_reused,
+                    "live_or_tiny_live_authorized": envelope.live_or_tiny_live_authorized,
+                    "margin_short_options_cfd_requested": envelope.margin_short_options_cfd_requested,
+                    "python_direct_broker_write_requested": envelope.python_direct_broker_write_requested,
+                }),
+                accepted_for_ipc,
+            )
+        }
+        Err(e) => (
+            serde_json::json!({
+                "expected_contract_id": STOCK_ETF_PAPER_ORDER_REQUEST_CONTRACT_ID,
+                "contract_id": "",
+                "source_version": 0,
+                "parse_ok": false,
+                "accepted": false,
+                "blockers": ["request_envelope_parse_failed"],
+                "expected_request_method": expected_request_method,
+                "request_method": serde_json::Value::Null,
+                "ipc_method_matches": false,
+                "ipc_binding_blockers": ["request_envelope_parse_failed"],
+                "accepted_for_ipc": false,
+                "parse_error": e.to_string(),
+                "request_id_present": false,
+                "ibkr_contact_performed": false,
+                "connector_runtime_started": false,
+                "secret_content_serialized": false,
+                "order_routed": false,
+                "bybit_path_reused": false,
+                "live_or_tiny_live_authorized": false,
+                "margin_short_options_cfd_requested": false,
+                "python_direct_broker_write_requested": false,
+            }),
+            false,
+        ),
+    })
 }
 
 fn request_from_params(

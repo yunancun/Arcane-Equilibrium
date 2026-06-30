@@ -1366,6 +1366,44 @@ cancel/replace、不匯入 fill、不做 DB migration/apply、不做 Postgres dr
 evidence clock、不啟動 scorecard writer、不做 Linux runtime sync/restart、不啟動
 paper-shadow launch、不授權 tiny-live/live 或任何 Bybit behavior change。
 
+## 26. 2026-06-30 PM session source checkpoint：Paper IPC Request Envelope Binding
+
+本 session 繼續 Phase 1D source-only IPC hardening。前面已建立
+`stock_etf_paper_order_request_v1` typed envelope 與 paper lifecycle contract；
+本 checkpoint 把 Rust IPC effect-capable skeleton 綁到該 envelope validator，避免
+未來 runtime 在 `preview/submit/cancel/replace` 入口處繞過 typed request shape。
+
+新增 checkpoint：
+
+- `stock_etf.preview_paper_order`、`stock_etf.submit_paper_order`、
+  `stock_etf.cancel_paper_order`、`stock_etf.replace_paper_order` 會嘗試把 params
+  解析成 `StockEtfPaperOrderRequestEnvelopeV1`。
+- Response 新增 `request_envelope` 子物件，回報 expected contract id、parse status、
+  expected/request method、IPC method match、validator blockers、authority scope、
+  effect-capable flag、lineage field presence 與 side-effect boundary flags。
+- Minimal/stale params 會被標記為 `request_envelope_parse_failed`，但仍不需要或觸碰
+  legacy Bybit paper channel。
+- Valid envelope 只代表 typed request shape 通過；top-level fixture 仍保留
+  `runtime_authority_denied=true`，且 `ibkr_call_performed=false`、
+  `secret_slot_touched=false`、`order_routed=false`、`bybit_ipc_reused=false`。
+- Handler 會檢查 envelope request method 與實際 IPC method 一致；valid submit
+  envelope 送到 cancel IPC 會得到 `ipc_method_mismatch`，不能成為 accepted-for-IPC。
+
+驗證：
+
+- `rustfmt --edition 2021 --check rust/openclaw_engine/src/ipc_server/handlers/stock_etf.rs rust/openclaw_engine/src/ipc_server/tests/stock_etf.rs`：PASS。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
+  Stock/ETF engine filter `23 passed`（既有 warnings only）。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_paper_order_request_acceptance -- --nocapture`：
+  paper request acceptance `8 passed`。
+- `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 connector runtime、
+不啟動 lifecycle writer、不啟動 Phase 1/2/3/4/5 runtime、不送 paper order、不做
+cancel/replace、不匯入 fill、不做 DB migration/apply、不做 Postgres dry-run、不啟動
+evidence clock、不啟動 scorecard writer、不做 Linux runtime sync/restart、不啟動
+paper-shadow launch、不授權 tiny-live/live 或任何 Bybit behavior change。
+
 ## 23. 2026-06-30 PM session source checkpoint：Paper Request Envelope Contract
 
 本 session 繼續 Phase 1D，但仍停留在 source-only contract。上一個 checkpoint 固定

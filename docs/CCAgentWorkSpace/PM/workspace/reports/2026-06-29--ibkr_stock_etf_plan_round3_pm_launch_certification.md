@@ -487,6 +487,39 @@ Phase 1/2/3/4/5 runtime start、paper order/cancel/replace、fill import、DB ap
 Postgres dry-run、evidence clock、scorecard writer、tiny-live、live、Linux runtime
 sync/restart 或 Bybit behavior change。
 
+## 2026-06-30 PM Session Checkpoint — Paper IPC Request Envelope Binding
+
+PM 已在本 session 追加 Phase 1D source-only checkpoint：Rust IPC paper request
+envelope binding。這是 handler/test hardening，不是 paper order runtime。
+
+已完成：
+
+- `stock_etf.preview_paper_order` / `submit_paper_order` / `cancel_paper_order` /
+  `replace_paper_order` 現在會嘗試解析 params 為
+  `StockEtfPaperOrderRequestEnvelopeV1`。
+- Response 新增 `request_envelope` verdict，包含 parse status、expected/request
+  method、IPC method match、validator blockers、authority/effect posture、lineage
+  field presence、boundary flags。
+- Minimal/stale params 會顯示 `request_envelope_parse_failed`，但不觸碰 legacy
+  Bybit paper channel。
+- Valid preview envelope 可通過 typed validator，但仍保留
+  `runtime_authority_denied=true`，不產生 IBKR contact、secret touch 或 order routing。
+- Valid submit envelope 若送到 cancel IPC method，會被 IPC binding 擋成
+  `ipc_method_mismatch`，不能 accepted-for-IPC。
+
+Verification：
+
+- Rust format check PASS。
+- Engine Stock/ETF cargo filter `23 passed`（既有 warnings only）。
+- Paper request acceptance `8 passed`。
+- Workspace `cargo check` PASS。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 1 runtime approval、lifecycle writer
+approval 或 paper-order approval。未批准 IBKR contact、secret、connector runtime、
+Phase 1/2/3/4/5 runtime start、paper order/cancel/replace、fill import、DB apply、
+Postgres dry-run、evidence clock、scorecard writer、tiny-live、live、Linux runtime
+sync/restart 或 Bybit behavior change。
+
 ## 2026-06-30 PM Session Checkpoint — Paper Request Envelope Contract
 
 PM 已在本 session 追加 Phase 1D source-only checkpoint：
