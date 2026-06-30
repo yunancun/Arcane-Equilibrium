@@ -1134,3 +1134,44 @@ PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 
 不啟動 evidence clock、不做 DB apply、不送 paper order、不匯入 fill、不做 Linux
 runtime sync/restart、不啟動 paper-shadow launch、不授權 tiny-live/live 或任何 Bybit
 behavior change。
+
+## 20. 2026-06-30 PM session source checkpoint：DB Evidence DDL Source Audit
+
+本 session 進入 Phase 1C 的 source DDL audit hardening，但仍只停留在
+`stock_etf_db_evidence_ddl_v1.source_only.sql` 的 source-only validation。此
+checkpoint 不把 draft 複製到 `sql/migrations/`，不執行 Postgres dry-run，不做 double
+apply，也不表示任何 DB schema 已部署。
+
+新增 checkpoint：
+
+- Rust `openclaw_types` 新增 exported auditor
+  `audit_stock_etf_db_evidence_source_sql`，直接檢查 source-only DDL draft。
+- Auditor machine-checks：source-only banner、migration/apply denial、禁止
+  destructive/migration-promotion SQL、required schemas/tables、Guard A、key table
+  column declarations、natural keys、stock/IBKR/paper checks、live denial、
+  synthetic shadow fill separation、raw artifact hash、append-only audit event table
+  與 hot-path indexes。
+- Acceptance tests 不再只做弱 substring 檢查；現在會讀取實際 source SQL 並驗證
+  `accepted=true`、13 張 required table、至少 6 個 index，同時故意刪除 required
+  column、刪除 synthetic shadow check、追加 `DROP TABLE` 來證明 contract drift 與
+  migration promotion 都會被拒絕。
+- 欄位檢查使用 column declaration pattern，避免欄名出現在同表 `UNIQUE(...)`
+  constraint 時被誤判為欄位仍存在。
+
+驗證：
+
+- Rust format checks：PASS（`lib.rs` 使用 `skip_children=true` 避免 unrelated module
+  traversal）。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types source_sql -- --nocapture`：
+  focused source SQL audit `2 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_db_evidence_ddl_acceptance -- --nocapture`：
+  DB evidence DDL acceptance `9 passed`。
+- Full `cargo test --manifest-path rust/Cargo.toml -p openclaw_types`：
+  `35` unit/golden + `207` integration/acceptance + `0` doc-tests。
+- `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 connector runtime、
+不做 DB migration/apply、不中繼 PG dry-run、不啟動 Phase 1/2/3/4/5 runtime、不啟動
+scorecard writer、不啟動 evidence clock、不送 paper order、不匯入 fill、不做 Linux
+runtime sync/restart、不啟動 paper-shadow launch、不授權 tiny-live/live 或任何 Bybit
+behavior change。

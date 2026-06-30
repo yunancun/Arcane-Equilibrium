@@ -301,3 +301,36 @@ connector runtime、Phase 1/2/3/4/5 runtime start、release packet materializati
 paper-shadow launch、paper order、fill import、evidence clock、scorecard writer、
 DB apply、GUI lane authority、tiny-live、live、Linux runtime sync/restart 或 Bybit
 behavior change。
+
+## 2026-06-30 PM Session Checkpoint — DB Evidence DDL Source Audit
+
+PM 已在本 session 追加 Phase 1C source-only checkpoint：
+`stock_etf_db_evidence_ddl_v1.source_only.sql` auditor hardening。
+
+已完成：
+
+- Rust `openclaw_types`：新增 exported
+  `audit_stock_etf_db_evidence_source_sql`，對 source-only DDL draft 做 machine
+  audit。
+- Audit coverage：source-only banner、migration/apply denial、destructive SQL
+  denial、required schemas/tables、Guard A、key table column declarations、natural
+  keys、stock/IBKR/paper checks、live denial、synthetic shadow fill separation、
+  raw artifact hash、audit append-only posture 與 hot-path indexes。
+- Acceptance：實際 source SQL 現在必須 audit accepted、13 required tables、至少 6
+  indexes；drift tests 會刪欄位宣告、刪 synthetic shadow check、追加 `DROP TABLE`
+  並確認 fail-closed。
+
+Verification：
+
+- Rust format checks PASS（`lib.rs` with `skip_children=true`）。
+- Focused source SQL audit `2 passed`。
+- DB evidence DDL acceptance `9 passed`。
+- Full openclaw_types PASS：`35` unit/golden + `207` integration/acceptance +
+  `0` doc-tests。
+- Workspace `cargo check` PASS。
+
+PM 判定：checkpoint 可接受，但仍不是 DB deployment approval。未批准 DB
+migration/apply、Postgres dry-run、double apply、IBKR contact、secret、connector
+runtime、Phase 1/2/3/4/5 runtime start、paper order、fill import、evidence clock、
+scorecard writer、tiny-live、live、Linux runtime sync/restart 或 Bybit behavior
+change。

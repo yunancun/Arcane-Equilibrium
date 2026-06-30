@@ -259,10 +259,249 @@ impl StockEtfDbEvidenceDdlContractV1 {
     }
 }
 
+pub fn audit_stock_etf_db_evidence_source_sql(raw: &str) -> StockEtfDbEvidenceDdlSourceAudit {
+    use StockEtfDbEvidenceDdlSourceBlocker as Blocker;
+    let sql = normalize_sql(raw);
+    let mut blockers = Vec::new();
+
+    if !sql.contains("source-only ddl draft") {
+        blockers.push(Blocker::SourceOnlyBannerMissing);
+    }
+    if !sql.contains("do not copy into sql/migrations/ or apply to any database") {
+        blockers.push(Blocker::MigrationApplyDenialMissing);
+    }
+    for forbidden in [
+        "drop table",
+        "drop schema",
+        "truncate table",
+        "delete from",
+        "insert into _sqlx_migrations",
+    ] {
+        if sql.contains(forbidden) {
+            blockers.push(Blocker::ForbiddenDestructiveOrMigrationStatement);
+            break;
+        }
+    }
+    for schema in REQUIRED_SCHEMAS {
+        if !sql.contains(&format!("create schema if not exists {schema};")) {
+            blockers.push(Blocker::RequiredSchemaMissing);
+            break;
+        }
+    }
+    if !sql.contains("guard a") || !sql.contains("information_schema.columns") {
+        blockers.push(Blocker::GuardABlockMissing);
+    }
+
+    let mut table_count = 0usize;
+    for table in REQUIRED_TABLES {
+        if extract_table_block(&sql, table).is_some() {
+            table_count += 1;
+        } else {
+            blockers.push(Blocker::RequiredTableMissing);
+            break;
+        }
+    }
+
+    for (table, columns) in required_source_table_columns() {
+        let Some(block) = extract_table_block(&sql, table) else {
+            continue;
+        };
+        for column in *columns {
+            if !table_block_has_column_declaration(&block, column) {
+                blockers.push(Blocker::RequiredTableColumnMissing);
+                break;
+            }
+        }
+    }
+
+    for key in REQUIRED_NATURAL_KEYS {
+        let expected = natural_key_unique_fragment(key);
+        if !sql.contains(&expected) {
+            blockers.push(Blocker::RequiredNaturalKeyMissing);
+            break;
+        }
+    }
+    if sql.matches("check (asset_lane = 'stock_etf_cash')").count() < 12 {
+        blockers.push(Blocker::StockAssetLaneCheckMissing);
+    }
+    if sql.matches("check (broker = 'ibkr')").count() < 8 {
+        blockers.push(Blocker::IbkrBrokerCheckMissing);
+    }
+    if !sql.contains("check (environment = 'paper')") {
+        blockers.push(Blocker::PaperEnvironmentCheckMissing);
+    }
+    if sql.contains("'live'") || sql.contains("environment = 'live'") {
+        blockers.push(Blocker::LiveEnvironmentNotDenied);
+    }
+    if !sql.contains("create table if not exists research.stock_shadow_fills")
+        || !sql.contains(
+            "synthetic_shadow boolean not null default true check (synthetic_shadow = true)",
+        )
+    {
+        blockers.push(Blocker::SyntheticShadowCheckMissing);
+    }
+    if sql.matches("raw_artifact_hash").count() < 12
+        || !sql.contains(
+            "raw_artifact_hash text not null check (raw_artifact_hash ~ '^[0-9a-f]{64}$')",
+        )
+    {
+        blockers.push(Blocker::RawArtifactHashRequirementMissing);
+    }
+    if !sql.contains("create table if not exists audit.asset_lane_events") {
+        blockers.push(Blocker::AuditAssetLaneEventsMissing);
+    }
+    if !sql.contains("append-only asset lane audit event contract") {
+        blockers.push(Blocker::ForwardOnlyAuditCommentMissing);
+    }
+
+    let index_count = sql.matches("create index if not exists").count();
+    if index_count < 6 {
+        blockers.push(Blocker::HotPathIndexMissing);
+    }
+
+    StockEtfDbEvidenceDdlSourceAudit {
+        accepted: blockers.is_empty(),
+        blockers,
+        table_count,
+        index_count,
+    }
+}
+
+fn normalize_sql(raw: &str) -> String {
+    raw.to_ascii_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn extract_table_block(sql: &str, table: &str) -> Option<String> {
+    let marker = format!("create table if not exists {}", table.to_ascii_lowercase());
+    let start = sql.find(&marker)?;
+    let rest = &sql[start..];
+    let mut end = rest.len();
+    for next in [
+        " create table if not exists ",
+        " create index if not exists ",
+        " comment on table ",
+    ] {
+        if let Some(pos) = rest[marker.len()..].find(next) {
+            end = end.min(marker.len() + pos);
+        }
+    }
+    Some(rest[..end].to_string())
+}
+
+fn table_block_has_column_declaration(block: &str, column: &str) -> bool {
+    block.contains(&format!(" {column} "))
+        || block.contains(&format!("({column} "))
+        || block.contains(&format!(", {column} "))
+}
+
+fn required_source_table_columns() -> &'static [(&'static str, &'static [&'static str])] {
+    &[
+        (
+            "broker.instruments",
+            &[
+                "asset_lane",
+                "broker",
+                "symbol",
+                "listing_venue",
+                "currency",
+                "primary_exchange",
+                "instrument_kind",
+                "instrument_identity_hash",
+            ],
+        ),
+        (
+            "broker.paper_orders",
+            &[
+                "environment",
+                "account_fingerprint",
+                "local_order_id",
+                "idempotency_key",
+                "broker_order_id",
+                "order_state",
+            ],
+        ),
+        (
+            "broker.paper_fills",
+            &[
+                "environment",
+                "broker_order_id",
+                "execution_id",
+                "quantity",
+                "fill_price",
+            ],
+        ),
+        (
+            "research.stock_shadow_signals",
+            &[
+                "strategy_id",
+                "signal_id",
+                "instrument_identity_hash",
+                "universe_version",
+                "benchmark_version",
+                "signal_time",
+            ],
+        ),
+        (
+            "research.stock_shadow_fills",
+            &[
+                "signal_id",
+                "instrument_identity_hash",
+                "synthetic_shadow",
+                "conservative_fill_price",
+                "rejection_reason",
+            ],
+        ),
+        (
+            "research.stock_etf_scorecard",
+            &[
+                "strategy_id",
+                "universe_version",
+                "benchmark_version",
+                "as_of_date",
+                "scorecard_hash",
+                "metrics_json",
+            ],
+        ),
+        (
+            "audit.asset_lane_events",
+            &[
+                "event_id",
+                "event_time",
+                "asset_lane",
+                "broker",
+                "environment",
+                "operation",
+                "allowed",
+                "denial_reason",
+            ],
+        ),
+    ]
+}
+
+fn natural_key_unique_fragment(key: &str) -> String {
+    let columns = key
+        .split_once(':')
+        .map(|(_, columns)| columns)
+        .unwrap_or(key)
+        .replace(',', ", ");
+    format!("unique ({columns})")
+}
+
 fn contains_all(actual: &[String], required: &[&str]) -> bool {
     required
         .iter()
         .all(|expected| actual.iter().any(|item| item == expected))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StockEtfDbEvidenceDdlSourceAudit {
+    pub accepted: bool,
+    pub blockers: Vec<StockEtfDbEvidenceDdlSourceBlocker>,
+    pub table_count: usize,
+    pub index_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -314,4 +553,26 @@ pub enum StockEtfDbEvidenceDdlBlocker {
     ForwardOnlyEvidenceRetentionMissing,
     DestructiveCleanupRollbackNotDenied,
     SecretContentSerialized,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StockEtfDbEvidenceDdlSourceBlocker {
+    SourceOnlyBannerMissing,
+    MigrationApplyDenialMissing,
+    ForbiddenDestructiveOrMigrationStatement,
+    RequiredSchemaMissing,
+    GuardABlockMissing,
+    RequiredTableMissing,
+    RequiredTableColumnMissing,
+    RequiredNaturalKeyMissing,
+    StockAssetLaneCheckMissing,
+    IbkrBrokerCheckMissing,
+    PaperEnvironmentCheckMissing,
+    LiveEnvironmentNotDenied,
+    SyntheticShadowCheckMissing,
+    RawArtifactHashRequirementMissing,
+    AuditAssetLaneEventsMissing,
+    ForwardOnlyAuditCommentMissing,
+    HotPathIndexMissing,
 }

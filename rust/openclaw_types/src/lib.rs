@@ -102,7 +102,9 @@ pub use stock_etf_broker_capability_registry::{
     STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID,
 };
 pub use stock_etf_db_evidence_ddl::{
-    StockEtfDbEvidenceDdlBlocker, StockEtfDbEvidenceDdlContractV1, StockEtfDbEvidenceDdlVerdict,
+    audit_stock_etf_db_evidence_source_sql, StockEtfDbEvidenceDdlBlocker,
+    StockEtfDbEvidenceDdlContractV1, StockEtfDbEvidenceDdlSourceAudit,
+    StockEtfDbEvidenceDdlSourceBlocker, StockEtfDbEvidenceDdlVerdict,
     STOCK_ETF_DB_EVIDENCE_CONTRACT_ID, STOCK_ETF_DB_EVIDENCE_DDL_SOURCE_PATH,
 };
 pub use stock_etf_disable_cleanup_runbook::{
