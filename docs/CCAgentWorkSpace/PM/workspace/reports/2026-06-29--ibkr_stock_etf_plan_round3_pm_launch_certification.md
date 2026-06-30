@@ -80,8 +80,12 @@ Only after all six conditions are true can PM sign off paper/shadow launch.
 
 Current state remains not launch-ready:
 
-- Phase 0 packet does not yet exist as accepted artifacts.
-- Phase 1-5 implementation and verification artifacts do not yet exist.
+- Phase 0 ADR/AMD/named contract packet now exists in source and has source
+  validation coverage, but it does not unlock runtime by itself.
+- Multiple Phase 1-5 source/status/display-only checkpoints now exist. Runtime
+  artifacts for first contact, secret-slot materialization, connector runtime,
+  paper order rehearsal, fill import, DB apply, evidence clock, scorecard writer,
+  paper-shadow launch, and release remain blocked.
 - IBKR API call, secret slot, paper order rehearsal, GUI runtime activation, and
   evidence clock remain blocked.
 - Profitability is unproven; 6-8 weeks can provide engineering shakedown and

@@ -1,7 +1,7 @@
 # IBKR Stock/ETF Paper + Shadow Evidence Lane 開發安排
 
 日期：2026-06-29
-狀態：設計提案 / 尚未開工 / 不授權任何非 Bybit 實盤交易
+狀態：ADR-0048 / AMD / Phase0 named contracts 已 source-materialized；Phase 1-5 source/status/display hardening 進行中；不授權任何非 Bybit 實盤交易
 目標窗口：實作前置 2-4 週；證據收集 6-8 週，從 collector 穩定運行後起算
 
 ## 0. PM 結論
@@ -29,6 +29,12 @@ E1 在實作中現場發明 broker、IPC、DB、GUI 或 evidence contract。
 每個 gate 以 machine-checkable artifact 全部通過，PM 可簽核
 `stock_etf_cash` paper/shadow lane 完整上線。它不表示目前可上線，不授權
 IBKR live/tiny-live，也不證明盈利或 durable alpha。
+
+2026-06-30 目前狀態：Phase 0 ADR/AMD/named contract packet 已在 source 中落地；
+Phase 1-5 多個 source/status/display-only checkpoints 已完成並逐一推送。這仍不
+代表 runtime launch：IBKR API contact、secret slot、connector runtime、paper
+order、fill import、DB apply、evidence clock、scorecard writer、paper-shadow launch、
+tiny-live/live 全部仍須按 gate 另行通過。
 
 短期允許的最終狀態只到：
 
