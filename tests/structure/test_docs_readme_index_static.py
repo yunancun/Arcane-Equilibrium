@@ -12,6 +12,13 @@ IBKR_STOCK_ETF_PLAN = (
     / "execution_plan"
     / "2026-06-29--ibkr_stock_etf_paper_shadow_development_arrangement.md"
 )
+IBKR_STOCK_ETF_OPERATOR = (
+    ROOT
+    / "docs"
+    / "CCAgentWorkSpace"
+    / "Operator"
+    / "2026-06-29--ibkr_stock_etf_plan_round3_pm_launch_certification.md"
+)
 
 
 def test_docs_agents_section_and_files_are_indexed() -> None:
@@ -67,3 +74,18 @@ def test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear() -> None:
     assert checkpoint_numbers
     expected = list(range(checkpoint_numbers[0], checkpoint_numbers[-1] + 1))
     assert checkpoint_numbers == expected
+
+
+def test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles() -> None:
+    required_titles = (
+        "Source Posture Header Catch-up",
+        "Rust Connector Skeleton Readiness Source",
+        "Read-Only Probe Request Contract",
+        "Read-Only Probe Readiness Gate",
+    )
+    plan_source = IBKR_STOCK_ETF_PLAN.read_text()
+    operator_source = IBKR_STOCK_ETF_OPERATOR.read_text()
+
+    for title in required_titles:
+        assert title in plan_source
+        assert title in operator_source
