@@ -945,7 +945,7 @@ Do not paste long reports or stable architecture into TODO.
 
 ## 2026-06-30 IBKR Stock/ETF Plan Timeline Checkpoint Guard
 
-- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 63, aligned to the PM memory / Operator source timeline.
+- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 64, aligned to the PM memory / Operator source timeline.
 - Added a structure test that reads the main plan Markdown and fails if PM session checkpoint numbers become duplicated, skipped, or out of order.
 - Verification passed: focused IBKR timeline structure test `1 passed`; section-body compare against `HEAD` PASS; `git diff --check` PASS. The full structure test file still has pre-existing docs README index drift failures unrelated to this guard. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
 
@@ -1078,3 +1078,10 @@ Do not paste long reports or stable architecture into TODO.
 - The main Stock/ETF GUI bundle is reduced from `1805` to `1244` lines; the new fallback module is `563` lines, loaded before the main loader, and all endpoint/rendering semantics remain display-only.
 - The static no-write guard now scans the new fallback module and proves the large fallback builders stay out of the main bundle, with `tab-stock-etf.js <= 1400` and `tab-stock-etf-fallbacks.js <= 800`.
 - Verification passed: Stock/ETF JS `node --check`; route/no-write focused tests `25 passed`; full Stock/ETF FastAPI/static `106 passed`; focused IBKR timeline + trace-title structure tests `2 passed`; `git diff --check` PASS. This grants no new endpoint, IPC method, client input, IBKR contact, SDK import, socket/HTTP, connector runtime, secret access, read probe execution, paper order, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF GUI Data/Policy Renderer Split Guard
+
+- PM moved the Data Foundation and Policy panel renderers from `tab-stock-etf.js` into the existing `tab-stock-etf-data-policy.js` display-only module, keeping the fallback payloads and renderers together.
+- The main Stock/ETF GUI bundle is reduced from `1244` to `985` lines; `tab-stock-etf-data-policy.js` grows from `170` to `469` lines with local UI helpers consistent with the other split Stock/ETF modules.
+- The static no-write guard now proves `renderDataFoundationStatus` and `renderPolicyStatus` stay out of the main bundle, with `tab-stock-etf.js <= 1100` and `tab-stock-etf-data-policy.js <= 700`.
+- Verification passed: Stock/ETF JS `node --check`; route/no-write focused tests `26 passed`; full Stock/ETF FastAPI/static `107 passed`; focused IBKR timeline + trace-title structure tests `2 passed`; `git diff --check` PASS. This grants no new endpoint, IPC method, client input, IBKR contact, SDK import, socket/HTTP, connector runtime, secret access, read probe execution, paper order, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.

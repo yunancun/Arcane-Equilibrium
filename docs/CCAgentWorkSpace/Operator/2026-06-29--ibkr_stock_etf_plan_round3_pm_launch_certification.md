@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 63 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 64 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -1401,6 +1401,33 @@ Verification 已過：
 - Stock/ETF JS `node --check`：PASS
 - Route/no-write focused tests：`25 passed`
 - Full Stock/ETF FastAPI/static：`106 passed`
+- IBKR timeline + trace-title structure guard：`2 passed`
+- `git diff --check`：PASS
+
+邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 client input、沒有 IBKR
+contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation、沒有
+connector runtime、沒有 read probe execution、沒有 paper order/cancel/replace、沒有 fill
+import、沒有 evidence writer、沒有 DB apply、沒有 evidence clock、沒有 tiny-live/live
+authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — GUI Data/Policy Renderer Split Guard
+
+本 session 已把 Data Foundation / Policy panel renderer 也納入既有 data-policy 子模組：
+
+- 將 `renderDataFoundationStatus` 與 `renderPolicyStatus` 從
+  `tab-stock-etf.js` 搬到 `tab-stock-etf-data-policy.js`。
+- `tab-stock-etf.js` 從 `1244` 行降到 `985` 行。
+- `tab-stock-etf-data-policy.js` 從 `170` 行增至 `469` 行，仍低於 700 行。
+- Data-policy 子模組現在同時擁有 fallback payload builders 與 renderers，並保留
+  與其他 Stock/ETF split modules 一致的本地 UI helper。
+- Static no-write guard 現在確認 data/policy renderers 不回流主 bundle：
+  `tab-stock-etf.js <= 1100`、`tab-stock-etf-data-policy.js <= 700`。
+
+Verification 已過：
+
+- Stock/ETF JS `node --check`：PASS
+- Route/no-write focused tests：`26 passed`
+- Full Stock/ETF FastAPI/static：`107 passed`
 - IBKR timeline + trace-title structure guard：`2 passed`
 - `git diff --check`：PASS
 
