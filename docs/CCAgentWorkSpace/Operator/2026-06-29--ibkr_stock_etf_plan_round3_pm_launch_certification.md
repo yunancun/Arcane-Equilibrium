@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 72 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 73 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -1402,6 +1402,34 @@ Verification 已過：
 - Connector skeleton focused tests：`5 passed`
 - Python no-write static guard：`17 passed`
 - Full Stock/ETF FastAPI/static：`113 passed`
+- IBKR timeline + trace-title structure guard：`2 passed`
+- `git diff --check`：PASS
+
+邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 client input、沒有 IBKR
+contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation、沒有
+connector runtime、沒有 read probe execution、沒有 paper order/cancel/replace、沒有 fill
+import、沒有 evidence writer、沒有 DB apply、沒有 evidence clock、沒有 tiny-live/live
+authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — IBKR Connector Bybit Import Separation Guard
+
+這次不是 IBKR contact、不是 connector runtime、不是 Bybit runtime refactor。變更只
+加一條 source-only separation guard：
+
+- IBKR connector skeleton 現在有 AST test，禁止 import Bybit connector、
+  control-api `app`、`exchange_connectors.bybit_connector` 或
+  `program_code.exchange_connectors.bybit_connector`。
+- Guard 也掃 literal dynamic import：`__import__` 與 `importlib.import_module`。
+- 這保留現有 `bybit_path_reused=false` display 欄位，但防止未來直接重用 Bybit
+  runtime/control-api path。
+- Scope 僅限 `program_code/broker_connectors/ibkr_connector/**/*.py` 與 tests。
+
+Verification 已過：
+
+- Python compile：PASS
+- Connector skeleton focused tests：`6 passed`
+- Python no-write static guard：`17 passed`
+- Full Stock/ETF FastAPI/static：`114 passed`
 - IBKR timeline + trace-title structure guard：`2 passed`
 - `git diff --check`：PASS
 

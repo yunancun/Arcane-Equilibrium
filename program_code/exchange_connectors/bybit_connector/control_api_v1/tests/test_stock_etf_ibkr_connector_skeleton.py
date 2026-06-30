@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import sys
 from pathlib import Path
 
@@ -33,6 +34,15 @@ FORBIDDEN_WRITE_METHODS = {
     "modify_order",
     "create_order",
 }
+
+IBKR_CONNECTOR_DIR = SRV_ROOT / "program_code" / "broker_connectors" / "ibkr_connector"
+
+FORBIDDEN_BYBIT_IMPORT_PREFIXES = (
+    "app",
+    "bybit_connector",
+    "exchange_connectors.bybit_connector",
+    "program_code.exchange_connectors.bybit_connector",
+)
 
 READONLY_SURFACE_KEYS = {
     "accepted",
@@ -106,9 +116,66 @@ SIDE_EFFECT_FALSE_KEYS = {
 }
 
 
+def _ibkr_connector_python_files() -> list[Path]:
+    return sorted(
+        path
+        for path in IBKR_CONNECTOR_DIR.rglob("*.py")
+        if "__pycache__" not in path.parts
+    )
+
+
+def _imported_module_names(node: ast.Import | ast.ImportFrom) -> list[str]:
+    if isinstance(node, ast.Import):
+        return [alias.name for alias in node.names]
+    if node.module is None:
+        return []
+    return [node.module]
+
+
+def _is_forbidden_bybit_import(module: str) -> bool:
+    return any(
+        module == prefix or module.startswith(f"{prefix}.")
+        for prefix in FORBIDDEN_BYBIT_IMPORT_PREFIXES
+    )
+
+
+def _call_name(func: ast.AST) -> str:
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        parent = _call_name(func.value)
+        return f"{parent}.{func.attr}" if parent else func.attr
+    return ""
+
+
 def test_ibkr_connector_skeleton_has_no_python_broker_write_methods() -> None:
     for cls in (IbkrReadOnlyClient, IbkrPaperClientBoundary):
         assert sorted(FORBIDDEN_WRITE_METHODS.intersection(dir(cls))) == []
+
+
+def test_ibkr_connector_skeleton_does_not_import_bybit_or_control_api_modules() -> None:
+    files = _ibkr_connector_python_files()
+    assert files, "expected source-only IBKR connector package files"
+
+    violations: list[str] = []
+    for path in files:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                for module in _imported_module_names(node):
+                    if _is_forbidden_bybit_import(module):
+                        violations.append(f"{path}:{node.lineno}: forbidden import {module!r}")
+            elif isinstance(node, ast.Call):
+                name = _call_name(node.func)
+                if name in {"__import__", "importlib.import_module"} and node.args:
+                    arg = node.args[0]
+                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                        if _is_forbidden_bybit_import(arg.value):
+                            violations.append(
+                                f"{path}:{node.lineno}: forbidden dynamic import {arg.value!r}"
+                            )
+
+    assert violations == []
 
 
 def test_ibkr_readonly_client_is_blocked_without_network_or_secret_side_effects() -> None:
