@@ -261,6 +261,39 @@ Verification 已過：
 沒有 DB apply、沒有 evidence clock、沒有 scorecard writer、沒有 Linux runtime
 sync/restart，也沒有改動 Bybit live execution 行為。
 
+## 2026-06-30 Operator Update — Paper Lifecycle State Machine
+
+本 session 已完成下一個 source-only checkpoint：
+`ibkr_paper_order_lifecycle_v1` / `broker_lifecycle_event_log_v1`
+state-machine contract hardening。
+
+這次不是 paper order runtime，也不是 lifecycle writer。變更只在 Rust contract、
+tests、blocked template 與 Phase0 spec：
+
+- Lifecycle event 現在要帶 event sequence、genesis marker、previous event hash、
+  event hash、request contract id、request envelope hash 與 stale-state policy。
+- Non-genesis event 必須接上 previous event hash；genesis event 必須 sequence `1`
+  且 previous hash empty。
+- Lifecycle event 必須是 exact paper environment。
+- Submit / cancel / replace / fill-import 各自只能覆蓋自己的 state transition；
+  不能用 submit 冒充 fill，也不能用 replace 冒充 fill/cancel。
+- Denied event 不能把 order 推進 active broker state。
+- `STATE_UNKNOWN` recovery 要分清 manual review 與 terminal reconciliation。
+
+Verification 已過：
+
+- Lifecycle acceptance：`12 passed`
+- Linked acceptance：`12 + 8 + 9 + 6 passed`
+- Engine Stock/ETF：`21 passed`
+- Full openclaw_types：`35` unit/golden + `221` integration/acceptance + `0` doc-tests
+- Workspace `cargo check`：PASS
+- `rustfmt --check` / `git diff --check`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 secret access/creation、沒有 connector runtime、
+沒有 lifecycle writer、沒有 Phase 1/2/3/4/5 runtime start、沒有 paper order/cancel/
+replace、沒有 fill import、沒有 DB apply、沒有 evidence clock、沒有 scorecard
+writer、沒有 Linux runtime sync/restart，也沒有改動 Bybit live execution 行為。
+
 ## 2026-06-30 Operator Update — Paper Request Envelope Contract
 
 本 session 已完成下一個 source-only checkpoint：
