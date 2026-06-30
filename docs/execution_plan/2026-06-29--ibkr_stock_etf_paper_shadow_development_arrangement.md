@@ -1273,182 +1273,59 @@ PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 
 scorecard writer、不做 Linux runtime sync/restart、不啟動 paper-shadow launch、不授權
 tiny-live/live 或任何 Bybit behavior change。
 
-## 24. 2026-06-30 PM session source checkpoint：Paper-Shadow Reconciliation Contract
+## 23. 2026-06-30 PM session source checkpoint：Paper Request Envelope Contract
 
-本 session 繼續補 Phase 3 前置的 source-only contract：新增
-`stock_etf_paper_shadow_reconciliation_v1`。這是 paper fill fact、synthetic shadow
-fill fact 與 divergence threshold 的 typed reconciliation contract，不是
-reconciliation writer、fill importer、shadow fill generator 或 scorecard writer。
+本 session 繼續 Phase 1D，但仍停留在 source-only contract。上一個 checkpoint 固定
+lane-scoped IPC 欄位矩陣；本 checkpoint 補上 typed request envelope，讓後續 runtime
+不能自行解讀 submit/cancel/replace schema。
 
 新增 checkpoint：
 
-- Rust `openclaw_types` 新增
-  `StockEtfPaperShadowReconciliationV1`，固定 `stock_etf_cash`、IBKR、
-  `paper_shadow` scope、read-only authority 與 effect-capable false posture。
-- Validator 要求 reconciliation run、paper local order、broker order、execution、
-  commission report、shadow signal id，以及 lifecycle/event-log/paper-fill import/
-  shadow-signal/shadow-fill/cost-model/market-data/divergence-threshold/
-  paper-shadow-link/raw/redacted/source hashes。
-- Accepted fixture 必須有 append-only event readiness、paper fill imported marker、
-  synthetic shadow fill marker、正數 threshold、divergence <= threshold、unmatched
-  paper/shadow fills 都為 0。
-- Validator 拒絕 IBKR contact、connector runtime、secret serialization、fill import
-  side effect、shadow fill generation、reconciliation writer、scorecard writer、DB apply、
-  order routing、Bybit path reuse、tiny-live/live、margin/short/options/CFD 與 Python
-  direct broker write。
+- Rust `openclaw_types` 新增 `stock_etf_paper_order_request_v1`，位於
+  `stock_etf_paper_order_request.rs`，作為 `lane_scoped_ipc_v1` 到
+  `ibkr_paper_order_lifecycle_v1` 之間的 typed request envelope。
+- Envelope 驗證 preview/submit/cancel/replace 的 exact method / operation /
+  authority scope / effect-capable 對映，且固定 `asset_lane=stock_etf_cash`、
+  `broker=ibkr`、`environment=paper`。
+- Preview/submit 驗證 normalized symbol、stock/ETF instrument kind、buy/sell side、
+  market/limit order type、positive decimal quantity、explicit limit-price policy、
+  day/GTC time-in-force。Market order 必須沒有 limit price；limit order 必須有正數
+  limit price。
+- Submit 驗證 session attestation、scoped authorization、Decision Lease、Guardian、
+  risk config、instrument identity、local order id、idempotency、lifecycle、
+  broker capability registry、audit event lineage，且 submit 前不能帶 broker order id。
+- Cancel 驗證 local order id、broker order id、cancel reason、idempotency、
+  lifecycle/capability/audit lineage，並拒絕 submit order-shape pollution。
+- Replace 驗證 local/broker order id、instrument identity、symbol/side、
+  replacement idempotency、replacement quantity、replacement limit-price policy、
+  replacement time in force、replace reason，並拒絕 original mutable fields pollution。
 - Phase0 manifest source + repository JSON 增加
-  `stock_etf_paper_shadow_reconciliation_v1`，contract count 從 31 更新為 32；FastAPI
-  Phase0 normalizer、fixtures/tests、reconciliation normalizer/tests 與 Phase0 packet
-  spec 同步。
-- Rust `stock_etf.get_reconciliation_status` status fixture 現在顯示 reconciliation
-  contract id、accepted/blockers、paper-shadow link hash、paper fill imported、
-  synthetic shadow fill 與 writer/side-effect flags，全部保持 default blocked false。
+  `stock_etf_paper_order_request_v1`，contract count 從 28 更新為 29；FastAPI
+  Phase0 normalizer 與 tests 同步，避免 display surface 接受 stale count。
+- 新增 blocked template：
+  `settings/broker/stock_etf_paper_order_request.template.toml`。
 
 驗證：
 
-- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_paper_shadow_reconciliation_acceptance -- --nocapture`：
-  reconciliation acceptance `5 passed`。
-- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_phase0_manifest_acceptance -- --nocapture`：
-  Phase0 manifest acceptance `6 passed`。
-- `python3 -m pytest -q ...test_stock_etf_phase0_status_routes.py ...test_stock_etf_reconciliation_status_routes.py`：
-  FastAPI Phase0/reconciliation focused `9 passed`。
-- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf_reconciliation_status -- --nocapture`：
-  focused reconciliation status `1 passed`。
+- `python3 -m py_compile ...stock_etf_phase0_normalizers.py ...test_stock_etf_phase0_status_routes.py ...stock_etf_route_fixtures.py`：PASS。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_paper_order_request_acceptance --test stock_etf_phase0_manifest_acceptance -- --nocapture`：
+  paper request `8 passed` + Phase0 manifest `6 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_lane_scoped_ipc_acceptance -- --nocapture`：
+  lane IPC `9 passed`。
+- `python3 -m pytest -q ...test_stock_etf_phase0_status_routes.py ...test_stock_etf_routes.py`：
+  FastAPI focused `14 passed`。
 - `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
-  Stock/ETF engine filter `27 passed`（既有 warnings only）。
+  Stock/ETF engine filter `21 passed`（既有 warnings only）。
+- Full `cargo test --manifest-path rust/Cargo.toml -p openclaw_types`：
+  `35` unit/golden + `217` integration/acceptance + `0` doc-tests。
 - `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
 - `rustfmt --edition 2021 --check ...`：PASS。
 - `git diff --check`：PASS。
 
 PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 connector runtime、
-不啟動 Phase 1/2/3/4/5 runtime、不啟動 reconciliation writer、不匯入 fill、不生成
-shadow fill、不啟動 scorecard writer、不做 DB migration/apply、不做 Postgres dry-run、
-不啟動 evidence clock、不送 paper order、不做 cancel/replace、不做 Linux runtime
-sync/restart、不啟動 paper-shadow launch、不授權 tiny-live/live 或任何 Bybit behavior
-change。
-
-## 25. 2026-06-30 PM session source checkpoint：Reconciliation GUI Contract Display
-
-本 session 完成純 GUI display-only hardening，把
-`stock_etf_paper_shadow_reconciliation_v1` 的 contract summary 顯示到 Stock/ETF
-Reconciliation panel。這不是 runtime reconciliation，也不是任何 writer / importer。
-
-新增 checkpoint：
-
-- 新增 `/static/tab-stock-etf-reconciliation.js`，從主
-  `tab-stock-etf.js` 抽出 reconciliation fallback/render，讓主 JS 從 1951 行降到
-  1847 行，保持低於 2000 行上限。
-- Reconciliation panel 現在顯示 expected/actual reconciliation contract id、
-  reconciliation accepted/blockers、contract reconciliation run id、paper-shadow link
-  hash、paper fill imported、shadow fill synthetic、reconciliation writer、IBKR contact、
-  connector runtime、secret serialization、fill import、shadow fill generation 等欄位。
-- HTML 載入新檔，static route contract test 與 no-write static guard 都把新 JS
-  納入掃描。
-
-驗證：
-
-- `node --check tab-stock-etf-reconciliation.js` + `tab-stock-etf.js`：PASS。
-- GUI line counts：HTML 396、main JS 1847、reconciliation JS 177、phase0 JS 149、
-  release-packet JS 138、disable-cleanup JS 132。
-- Focused route/static/no-write pytest `13 passed`。
-- Full Stock/ETF Python route/static suite `90 passed`。
-
-PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 connector runtime、
-不啟動 reconciliation writer、不匯入 fill、不生成 shadow fill、不啟動 scorecard writer、
-不做 DB apply、不送 paper order、不做 cancel/replace、不做 Linux runtime sync/restart、
-不授權 tiny-live/live 或任何 Bybit behavior change。
-
-## 29. 2026-06-30 PM session source checkpoint：Shadow Signal Request Contract + IPC Binding
-
-本 session 繼續 Phase 1D/3 邊界，但仍是 source-only contract + IPC gate。此
-checkpoint 讓未來 `stock_etf.evaluate_shadow_signal` 不再只有 generic params，而必須
-先滿足 typed shadow request contract。
-
-新增 checkpoint：
-
-- Rust `openclaw_types` 新增 `stock_etf_shadow_signal_request_v1`，位於
-  `stock_etf_shadow_signal_request.rs`。
-- Contract 固定 `asset_lane=stock_etf_cash`、`broker=ibkr`、
-  `environment=shadow`、`request_method=evaluate_shadow_signal`、
-  `operation=shadow_signal_emit`、`authority_scope=shadow_only`、
-  `effect_capable=false`。
-- Validator 要求 request id、evaluation run id、shadow signal id、evidence clock hash、
-  PIT universe hash、strategy hypothesis hash、instrument identity hash、market-data
-  provenance hash、cost model version hash、asset-lane event hash、source artifact hash。
-- Validator 拒絕 IBKR contact、connector runtime、secret serialization、shadow signal
-  emission、shadow fill generation、scorecard writer、DB apply、order routing、Bybit path
-  reuse、live/tiny-live authority、margin/short/options/CFD、Python direct broker write。
-- 新增 blocked secret-free template
-  `settings/broker/stock_etf_shadow_signal_request.template.toml`。
-- Phase0 manifest source、repository manifest JSON、FastAPI Phase0 count、route fixtures/tests
-  與 Phase0 packet spec 同步；contract count 從 30 更新為 31。
-- Rust IPC handler 現在對 `stock_etf.evaluate_shadow_signal` 回傳
-  `shadow_signal_request` verdict，並把 top-level `allowed` 綁到
-  `shadow_signal_request_accepted_for_ipc`。
-
-驗證：
-
-- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_shadow_signal_request_acceptance -- --nocapture`：
-  shadow signal request acceptance `5 passed`。
-- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_phase0_manifest_acceptance -- --nocapture`：
-  Phase0 manifest acceptance `6 passed`。
-- `python3 -m pytest -q ...test_stock_etf_phase0_status_routes.py`：
-  Phase0 route `4 passed`。
-- `python3 -m pytest -q ...test_stock_etf_routes.py ...test_stock_etf_phase0_status_routes.py`：
-  FastAPI StockETF focused `14 passed`。
-- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf_evaluate_shadow_signal -- --nocapture`：
-  shadow-signal IPC focused `2 passed`。
-- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
-  Stock/ETF engine filter `27 passed`（既有 warnings only）。
-- `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
-- `rustfmt --edition 2021 --check --config skip_children=true ...`：PASS。
-- `git diff --check`：PASS。
-
-PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 connector runtime、
-不啟動 shadow collector、不 emit shadow signal、不 generate shadow fill、不啟動
-Phase 1/2/3/4/5 runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB
-migration/apply、不做 Postgres dry-run、不啟動 evidence clock、不啟動 scorecard writer、
-不做 Linux runtime sync/restart、不啟動 paper-shadow launch、不授權 tiny-live/live 或任何
-Bybit behavior change。
-
-## 28. 2026-06-30 PM session source checkpoint：Paper Fill Import IPC Binding
-
-本 session 繼續 Phase 1D source-only IPC hardening。上一個 checkpoint 已新增
-`stock_etf_paper_fill_import_request_v1`；本 checkpoint 把
-`stock_etf.import_paper_fills` Rust IPC skeleton 綁到該 typed validator，確保未來
-fill import runtime 不能繞過 request contract。
-
-新增 checkpoint：
-
-- `stock_etf.import_paper_fills` 會嘗試把 params 解析成
-  `StockEtfPaperFillImportRequestV1`。
-- Response 新增 `fill_import_request` verdict，包含 expected contract id、parse
-  status、expected/request method、IPC method match、validator blockers、
-  read-only authority posture、lineage field presence 與 side-effect boundary flags。
-- Minimal/stale params 會得到 `fill_import_request_parse_failed`，且 top-level
-  `fill_import_request_accepted_for_ipc=false`。
-- Valid fill-import request 只代表 typed request shape 通過；top-level fixture 仍保留
-  `runtime_authority_denied=true`，且 `ibkr_call_performed=false`、
-  `secret_slot_touched=false`、`order_routed=false`、`bybit_ipc_reused=false`。
-- Handler 的 `allowed` 現在同時要求 broker capability decision、paper request
-  envelope verdict 與 fill-import request verdict 全部 accepted-for-IPC。
-
-驗證：
-
-- `rustfmt --edition 2021 --check rust/openclaw_engine/src/ipc_server/handlers/stock_etf.rs rust/openclaw_engine/src/ipc_server/tests/stock_etf.rs`：PASS。
-- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf_import_paper_fills -- --nocapture`：
-  fill-import IPC focused `2 passed`。
-- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_paper_fill_import_request_acceptance -- --nocapture`：
-  fill import request acceptance `6 passed`。
-- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
-  Stock/ETF engine filter `25 passed`（既有 warnings only）。
-- `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
-- `git diff --check`：PASS。
-
-PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 connector runtime、
-不啟動 lifecycle writer、不啟動 Phase 1/2/3/4/5 runtime、不匯入 fill、不做 DB
-migration/apply、不做 Postgres dry-run、不啟動 evidence clock、不啟動 scorecard writer、
-不做 Linux runtime sync/restart、不送 paper order、不做 cancel/replace、不授權
+不啟動 Phase 1/2/3/4/5 runtime、不送 paper order、不做 cancel/replace、不匯入 fill、
+不做 DB migration/apply、不做 Postgres dry-run、不啟動 evidence clock、不啟動
+scorecard writer、不做 Linux runtime sync/restart、不啟動 paper-shadow launch、不授權
 tiny-live/live 或任何 Bybit behavior change。
 
 ## 24. 2026-06-30 PM session source checkpoint：Paper Lifecycle State-Machine Contract Hardening
@@ -1635,62 +1512,185 @@ migration/apply、不做 Postgres dry-run、不啟動 evidence clock、不啟動
 不做 Linux runtime sync/restart、不送 paper order、不做 cancel/replace、不授權
 tiny-live/live 或任何 Bybit behavior change。
 
-## 23. 2026-06-30 PM session source checkpoint：Paper Request Envelope Contract
+## 28. 2026-06-30 PM session source checkpoint：Paper Fill Import IPC Binding
 
-本 session 繼續 Phase 1D，但仍停留在 source-only contract。上一個 checkpoint 固定
-lane-scoped IPC 欄位矩陣；本 checkpoint 補上 typed request envelope，讓後續 runtime
-不能自行解讀 submit/cancel/replace schema。
+本 session 繼續 Phase 1D source-only IPC hardening。上一個 checkpoint 已新增
+`stock_etf_paper_fill_import_request_v1`；本 checkpoint 把
+`stock_etf.import_paper_fills` Rust IPC skeleton 綁到該 typed validator，確保未來
+fill import runtime 不能繞過 request contract。
 
 新增 checkpoint：
 
-- Rust `openclaw_types` 新增 `stock_etf_paper_order_request_v1`，位於
-  `stock_etf_paper_order_request.rs`，作為 `lane_scoped_ipc_v1` 到
-  `ibkr_paper_order_lifecycle_v1` 之間的 typed request envelope。
-- Envelope 驗證 preview/submit/cancel/replace 的 exact method / operation /
-  authority scope / effect-capable 對映，且固定 `asset_lane=stock_etf_cash`、
-  `broker=ibkr`、`environment=paper`。
-- Preview/submit 驗證 normalized symbol、stock/ETF instrument kind、buy/sell side、
-  market/limit order type、positive decimal quantity、explicit limit-price policy、
-  day/GTC time-in-force。Market order 必須沒有 limit price；limit order 必須有正數
-  limit price。
-- Submit 驗證 session attestation、scoped authorization、Decision Lease、Guardian、
-  risk config、instrument identity、local order id、idempotency、lifecycle、
-  broker capability registry、audit event lineage，且 submit 前不能帶 broker order id。
-- Cancel 驗證 local order id、broker order id、cancel reason、idempotency、
-  lifecycle/capability/audit lineage，並拒絕 submit order-shape pollution。
-- Replace 驗證 local/broker order id、instrument identity、symbol/side、
-  replacement idempotency、replacement quantity、replacement limit-price policy、
-  replacement time in force、replace reason，並拒絕 original mutable fields pollution。
-- Phase0 manifest source + repository JSON 增加
-  `stock_etf_paper_order_request_v1`，contract count 從 28 更新為 29；FastAPI
-  Phase0 normalizer 與 tests 同步，避免 display surface 接受 stale count。
-- 新增 blocked template：
-  `settings/broker/stock_etf_paper_order_request.template.toml`。
+- `stock_etf.import_paper_fills` 會嘗試把 params 解析成
+  `StockEtfPaperFillImportRequestV1`。
+- Response 新增 `fill_import_request` verdict，包含 expected contract id、parse
+  status、expected/request method、IPC method match、validator blockers、
+  read-only authority posture、lineage field presence 與 side-effect boundary flags。
+- Minimal/stale params 會得到 `fill_import_request_parse_failed`，且 top-level
+  `fill_import_request_accepted_for_ipc=false`。
+- Valid fill-import request 只代表 typed request shape 通過；top-level fixture 仍保留
+  `runtime_authority_denied=true`，且 `ibkr_call_performed=false`、
+  `secret_slot_touched=false`、`order_routed=false`、`bybit_ipc_reused=false`。
+- Handler 的 `allowed` 現在同時要求 broker capability decision、paper request
+  envelope verdict 與 fill-import request verdict 全部 accepted-for-IPC。
 
 驗證：
 
-- `python3 -m py_compile ...stock_etf_phase0_normalizers.py ...test_stock_etf_phase0_status_routes.py ...stock_etf_route_fixtures.py`：PASS。
-- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_paper_order_request_acceptance --test stock_etf_phase0_manifest_acceptance -- --nocapture`：
-  paper request `8 passed` + Phase0 manifest `6 passed`。
-- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_lane_scoped_ipc_acceptance -- --nocapture`：
-  lane IPC `9 passed`。
-- `python3 -m pytest -q ...test_stock_etf_phase0_status_routes.py ...test_stock_etf_routes.py`：
-  FastAPI focused `14 passed`。
+- `rustfmt --edition 2021 --check rust/openclaw_engine/src/ipc_server/handlers/stock_etf.rs rust/openclaw_engine/src/ipc_server/tests/stock_etf.rs`：PASS。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf_import_paper_fills -- --nocapture`：
+  fill-import IPC focused `2 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_paper_fill_import_request_acceptance -- --nocapture`：
+  fill import request acceptance `6 passed`。
 - `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
-  Stock/ETF engine filter `21 passed`（既有 warnings only）。
-- Full `cargo test --manifest-path rust/Cargo.toml -p openclaw_types`：
-  `35` unit/golden + `217` integration/acceptance + `0` doc-tests。
+  Stock/ETF engine filter `25 passed`（既有 warnings only）。
+- `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 connector runtime、
+不啟動 lifecycle writer、不啟動 Phase 1/2/3/4/5 runtime、不匯入 fill、不做 DB
+migration/apply、不做 Postgres dry-run、不啟動 evidence clock、不啟動 scorecard writer、
+不做 Linux runtime sync/restart、不送 paper order、不做 cancel/replace、不授權
+tiny-live/live 或任何 Bybit behavior change。
+
+## 29. 2026-06-30 PM session source checkpoint：Shadow Signal Request Contract + IPC Binding
+
+本 session 繼續 Phase 1D/3 邊界，但仍是 source-only contract + IPC gate。此
+checkpoint 讓未來 `stock_etf.evaluate_shadow_signal` 不再只有 generic params，而必須
+先滿足 typed shadow request contract。
+
+新增 checkpoint：
+
+- Rust `openclaw_types` 新增 `stock_etf_shadow_signal_request_v1`，位於
+  `stock_etf_shadow_signal_request.rs`。
+- Contract 固定 `asset_lane=stock_etf_cash`、`broker=ibkr`、
+  `environment=shadow`、`request_method=evaluate_shadow_signal`、
+  `operation=shadow_signal_emit`、`authority_scope=shadow_only`、
+  `effect_capable=false`。
+- Validator 要求 request id、evaluation run id、shadow signal id、evidence clock hash、
+  PIT universe hash、strategy hypothesis hash、instrument identity hash、market-data
+  provenance hash、cost model version hash、asset-lane event hash、source artifact hash。
+- Validator 拒絕 IBKR contact、connector runtime、secret serialization、shadow signal
+  emission、shadow fill generation、scorecard writer、DB apply、order routing、Bybit path
+  reuse、live/tiny-live authority、margin/short/options/CFD、Python direct broker write。
+- 新增 blocked secret-free template
+  `settings/broker/stock_etf_shadow_signal_request.template.toml`。
+- Phase0 manifest source、repository manifest JSON、FastAPI Phase0 count、route fixtures/tests
+  與 Phase0 packet spec 同步；contract count 從 30 更新為 31。
+- Rust IPC handler 現在對 `stock_etf.evaluate_shadow_signal` 回傳
+  `shadow_signal_request` verdict，並把 top-level `allowed` 綁到
+  `shadow_signal_request_accepted_for_ipc`。
+
+驗證：
+
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_shadow_signal_request_acceptance -- --nocapture`：
+  shadow signal request acceptance `5 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_phase0_manifest_acceptance -- --nocapture`：
+  Phase0 manifest acceptance `6 passed`。
+- `python3 -m pytest -q ...test_stock_etf_phase0_status_routes.py`：
+  Phase0 route `4 passed`。
+- `python3 -m pytest -q ...test_stock_etf_routes.py ...test_stock_etf_phase0_status_routes.py`：
+  FastAPI StockETF focused `14 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf_evaluate_shadow_signal -- --nocapture`：
+  shadow-signal IPC focused `2 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
+  Stock/ETF engine filter `27 passed`（既有 warnings only）。
+- `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
+- `rustfmt --edition 2021 --check --config skip_children=true ...`：PASS。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 connector runtime、
+不啟動 shadow collector、不 emit shadow signal、不 generate shadow fill、不啟動
+Phase 1/2/3/4/5 runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB
+migration/apply、不做 Postgres dry-run、不啟動 evidence clock、不啟動 scorecard writer、
+不做 Linux runtime sync/restart、不啟動 paper-shadow launch、不授權 tiny-live/live 或任何
+Bybit behavior change。
+
+## 30. 2026-06-30 PM session source checkpoint：Paper-Shadow Reconciliation Contract
+
+本 session 繼續補 Phase 3 前置的 source-only contract：新增
+`stock_etf_paper_shadow_reconciliation_v1`。這是 paper fill fact、synthetic shadow
+fill fact 與 divergence threshold 的 typed reconciliation contract，不是
+reconciliation writer、fill importer、shadow fill generator 或 scorecard writer。
+
+新增 checkpoint：
+
+- Rust `openclaw_types` 新增
+  `StockEtfPaperShadowReconciliationV1`，固定 `stock_etf_cash`、IBKR、
+  `paper_shadow` scope、read-only authority 與 effect-capable false posture。
+- Validator 要求 reconciliation run、paper local order、broker order、execution、
+  commission report、shadow signal id，以及 lifecycle/event-log/paper-fill import/
+  shadow-signal/shadow-fill/cost-model/market-data/divergence-threshold/
+  paper-shadow-link/raw/redacted/source hashes。
+- Accepted fixture 必須有 append-only event readiness、paper fill imported marker、
+  synthetic shadow fill marker、正數 threshold、divergence <= threshold、unmatched
+  paper/shadow fills 都為 0。
+- Validator 拒絕 IBKR contact、connector runtime、secret serialization、fill import
+  side effect、shadow fill generation、reconciliation writer、scorecard writer、DB apply、
+  order routing、Bybit path reuse、tiny-live/live、margin/short/options/CFD 與 Python
+  direct broker write。
+- Phase0 manifest source + repository JSON 增加
+  `stock_etf_paper_shadow_reconciliation_v1`，contract count 從 31 更新為 32；FastAPI
+  Phase0 normalizer、fixtures/tests、reconciliation normalizer/tests 與 Phase0 packet
+  spec 同步。
+- Rust `stock_etf.get_reconciliation_status` status fixture 現在顯示 reconciliation
+  contract id、accepted/blockers、paper-shadow link hash、paper fill imported、
+  synthetic shadow fill 與 writer/side-effect flags，全部保持 default blocked false。
+
+驗證：
+
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_paper_shadow_reconciliation_acceptance -- --nocapture`：
+  reconciliation acceptance `5 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_phase0_manifest_acceptance -- --nocapture`：
+  Phase0 manifest acceptance `6 passed`。
+- `python3 -m pytest -q ...test_stock_etf_phase0_status_routes.py ...test_stock_etf_reconciliation_status_routes.py`：
+  FastAPI Phase0/reconciliation focused `9 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf_reconciliation_status -- --nocapture`：
+  focused reconciliation status `1 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
+  Stock/ETF engine filter `27 passed`（既有 warnings only）。
 - `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
 - `rustfmt --edition 2021 --check ...`：PASS。
 - `git diff --check`：PASS。
 
 PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 connector runtime、
-不啟動 Phase 1/2/3/4/5 runtime、不送 paper order、不做 cancel/replace、不匯入 fill、
-不做 DB migration/apply、不做 Postgres dry-run、不啟動 evidence clock、不啟動
-scorecard writer、不做 Linux runtime sync/restart、不啟動 paper-shadow launch、不授權
-tiny-live/live 或任何 Bybit behavior change。
+不啟動 Phase 1/2/3/4/5 runtime、不啟動 reconciliation writer、不匯入 fill、不生成
+shadow fill、不啟動 scorecard writer、不做 DB migration/apply、不做 Postgres dry-run、
+不啟動 evidence clock、不送 paper order、不做 cancel/replace、不做 Linux runtime
+sync/restart、不啟動 paper-shadow launch、不授權 tiny-live/live 或任何 Bybit behavior
+change。
 
-## 30. 2026-06-30 PM session source checkpoint：Scorecard Reconciliation Lineage Gate
+## 31. 2026-06-30 PM session source checkpoint：Reconciliation GUI Contract Display
+
+本 session 完成純 GUI display-only hardening，把
+`stock_etf_paper_shadow_reconciliation_v1` 的 contract summary 顯示到 Stock/ETF
+Reconciliation panel。這不是 runtime reconciliation，也不是任何 writer / importer。
+
+新增 checkpoint：
+
+- 新增 `/static/tab-stock-etf-reconciliation.js`，從主
+  `tab-stock-etf.js` 抽出 reconciliation fallback/render，讓主 JS 從 1951 行降到
+  1847 行，保持低於 2000 行上限。
+- Reconciliation panel 現在顯示 expected/actual reconciliation contract id、
+  reconciliation accepted/blockers、contract reconciliation run id、paper-shadow link
+  hash、paper fill imported、shadow fill synthetic、reconciliation writer、IBKR contact、
+  connector runtime、secret serialization、fill import、shadow fill generation 等欄位。
+- HTML 載入新檔，static route contract test 與 no-write static guard 都把新 JS
+  納入掃描。
+
+驗證：
+
+- `node --check tab-stock-etf-reconciliation.js` + `tab-stock-etf.js`：PASS。
+- GUI line counts：HTML 396、main JS 1847、reconciliation JS 177、phase0 JS 149、
+  release-packet JS 138、disable-cleanup JS 132。
+- Focused route/static/no-write pytest `13 passed`。
+- Full Stock/ETF Python route/static suite `90 passed`。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 connector runtime、
+不啟動 reconciliation writer、不匯入 fill、不生成 shadow fill、不啟動 scorecard writer、
+不做 DB apply、不送 paper order、不做 cancel/replace、不做 Linux runtime sync/restart、
+不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 32. 2026-06-30 PM session source checkpoint：Scorecard Reconciliation Lineage Gate
 
 本 session 繼續 Phase 3 scorecard source-only hardening。前面已建立
 `stock_etf_paper_shadow_reconciliation_v1` 以及 display-only reconciliation panel；
@@ -1737,157 +1737,7 @@ migration/apply、不做 Postgres dry-run、不啟動 evidence clock、不做 Li
 sync/restart、不啟動 paper-shadow launch、不授權 tiny-live/live 或任何 Bybit behavior
 change。
 
-## 33. 2026-06-30 PM session source checkpoint：IBKR Read-Only Connector Skeleton Boundary
-
-本 checkpoint 建立計劃第 3.3 節指定的隔離 Python package：
-`program_code/broker_connectors/ibkr_connector/`。這不是 runtime connector，
-不導入 `ibapi` / `ib_insync`，不開 network，不讀 secret，不提供任何 broker write
-method；用途是把未來 IBKR read-only / paper surface 的 Python 邊界先固定在
-Bybit 目錄外，且讓 no-write guard 對實際目錄生效。
-
-新增 checkpoint：
-
-- 新增 `program_code/broker_connectors/ibkr_connector` package 與 README。
-- `models.py` 定義 non-secret loopback endpoint descriptor 與 blocked
-  read-only surface status。
-- `readonly_client.py` 只提供 blocked readiness / account snapshot / market data /
-  contract details preview，所有 payload 都保持 `network_contact_performed=false`、
-  `secret_content_loaded=false`、`order_write_method_present=false`。
-- `paper_client.py` 只提供 paper lifecycle / fill-import readiness previews，
-  明確 `python_broker_write_authority=false`。
-- `fixtures/readonly.py` 提供 secret-free blocked fixture。
-- 新增 `test_stock_etf_ibkr_connector_skeleton.py`，並由既有
-  `test_stock_etf_python_no_write_static_guard.py` 自動掃描新 connector package。
-- Phase0 packet spec 已更新，說明 no-write guard 現在掃描實際 IBKR skeleton。
-
-驗證：
-
-- `python3 -m py_compile program_code/broker_connectors/... test_stock_etf_ibkr_connector_skeleton.py`：PASS。
-- `python3 -m pytest -q ...test_stock_etf_ibkr_connector_skeleton.py ...test_stock_etf_python_no_write_static_guard.py`：
-  connector skeleton + no-write guard `7 passed`。
-- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
-  full Stock/ETF FastAPI/static `94 passed`。
-
-PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
-connector runtime、不開 socket/HTTP、不啟動 Phase 1/2/3/4/5 runtime、不送 paper
-order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence clock、
-不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何
-Bybit behavior change。
-
-## 35. 2026-06-30 PM session display checkpoint：Connector Skeleton Readiness Gate
-
-本 checkpoint 把 inert IBKR connector skeleton boundary 顯示到現有
-`/api/v1/stock-etf/readiness`，但不 import connector package、不啟動 runtime、
-不新增 endpoint，也不新增任何 effect-capable action。
-
-新增 checkpoint：
-
-- FastAPI readiness normalizer 新增 `connector_skeleton` block，預設為
-  `ibkr_stock_etf_readonly_connector_skeleton_v1` / `blocked_source_only`。
-- 若 upstream payload 宣稱 connector skeleton `accepted=true`、status 非 blocked、
-  network contact、secret loaded、paper/live channel exposed、write method present、
-  或 Bybit path reused，readiness 會轉為 `contract_violation_blocked`。
-- GUI readiness panel 現在顯示 connector skeleton surface/status，以及所有
-  side-effect flags。
-- Route tests 覆蓋 fallback false、正常 blocked display、與 truthy claims 被拒。
-
-驗證：
-
-- `python3 -m py_compile ...stock_etf_readiness_normalizers.py ...test_stock_etf_readiness_routes.py`：PASS。
-- `python3 -m pytest -q ...test_stock_etf_readiness_routes.py ...test_stock_etf_python_no_write_static_guard.py`：
-  focused readiness/no-write `9 passed`。
-- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
-  full Stock/ETF FastAPI/static `94 passed`。
-- `node --check .../tab-stock-etf.js`：PASS。
-- `git diff --check`：PASS。
-
-PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
-connector runtime、不開 socket/HTTP、不啟動 Phase 1/2/3/4/5 runtime、不送 paper
-order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence clock、
-不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何
-Bybit behavior change。
-
-## 34. 2026-06-30 PM session governance checkpoint：ADR/Register Lineage Catch-up
-
-本 checkpoint 只補治理索引與 ADR/AMD 文字，不改程式碼：
-
-- `docs/governance_dev/SPECIFICATION_REGISTER.md` 的 Last Updated 已改為
-  ADR-0048 lineage + connector-skeleton hardening。
-- 新增 ADR-0048 Addendum E，登記 scorecard derivation / verdict /
-  paper-shadow reconciliation / tiny-live eligibility lineage。
-- 新增 ADR-0048 Addendum F，登記
-  `program_code/broker_connectors/ibkr_connector/` 是 inert source-only skeleton。
-- ADR-0048 與 AMD-2026-06-29-01 已補明：
-  tiny-live discussion gate 需要 derivation/verdict/manifest/reconciliation/DQ/
-  preregistration/QC/MIT/QA lineage，但仍只可開新 ADR discussion。
-- ADR-0048 與 AMD 已補明：Python IBKR skeleton 不得導入 SDK、開 network、
-  讀 secret、暴露 broker write、匯入 fills 或寫 DB。
-
-驗證：
-
-- `rg` 檢查 register/ADR/AMD 中 `ibkr_connector`、`scorecard_derivation`、
-  `paper_shadow_reconciliation`、`tiny_live_adr` 均有最新登記。
-- `git diff --check`：PASS。
-
-PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
-connector runtime、不開 socket/HTTP、不啟動 Phase 1/2/3/4/5 runtime、不送 paper
-order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence clock、
-不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何
-Bybit behavior change。
-
-## 32. 2026-06-30 PM session source checkpoint：Tiny-Live Eligibility Lineage Gate
-
-本 checkpoint harden Phase 5 之後「是否可以拿去開 ADR 討論 tiny-live」的
-source-only gate。它不是 tiny-live approval，也不是 live/tiny-live runtime；它只把
-前面已建立的 scorecard derivation、scorecard verdict、paper-shadow reconciliation
-與 QA lineage 接入 `tiny_live_adr_eligibility_v1`。
-
-新增 checkpoint：
-
-- `TinyLiveAdrEligibilityV1` 新增 `scorecard_derivation_hash`、
-  `scorecard_verdict_hash`、`paper_shadow_reconciliation_hash`、`qa_review_hash`
-  與 `qa_review_passed`。
-- Validator 新增對應 SHA-256 hash blockers：
-  `ScorecardDerivationHashInvalid`、`ScorecardVerdictHashInvalid`、
-  `PaperShadowReconciliationHashInvalid`、`QaReviewHashInvalid`，以及
-  `QaReviewMissing`。
-- Blocked template
-  `settings/broker/stock_etf_tiny_live_adr_eligibility.template.toml` 同步新增欄位，
-  預設仍全部 fail closed。
-- Rust `stock_etf.get_launch_status`、FastAPI launch normalizer/fixtures/tests 與 GUI
-  launch panel 新增 display-only lineage hash-present rows；pre-gate truthy lineage
-  或 QA pass claims 會被 `contract_violation_blocked` 擋下。
-- Phase0 packet spec 與 broker README 已更新，明確 tiny-live ADR discussion gate
-  需要 derivation/verdict/reconciliation/QA lineage。
-
-驗證：
-
-- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_tiny_live_eligibility_acceptance -- --nocapture`：
-  tiny-live eligibility acceptance `7 passed`。
-- `python3 -m py_compile ...stock_etf_launch_normalizers.py ...test_stock_etf_launch_status_routes.py ...stock_etf_route_fixtures.py`：PASS。
-- `python3 -m pytest -q ...test_stock_etf_launch_status_routes.py ...test_stock_etf_routes.py`：
-  focused FastAPI/static `15 passed`。
-- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
-  full Stock/ETF FastAPI/static `90 passed`。
-- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf_launch_status -- --nocapture`：
-  engine launch-status focused `1 passed`（既有 warnings only）。
-- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
-  Stock/ETF engine filter `27 passed`（既有 warnings only）。
-- Full `cargo test --manifest-path rust/Cargo.toml -p openclaw_types`：
-  `35` unit/golden + `241` integration/acceptance + `0` doc-tests。
-- `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
-- `rustfmt --edition 2021 --check ...`：PASS。
-- `node --check .../tab-stock-etf.js`：PASS。
-- `git diff --check`：PASS。
-
-PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 connector runtime、
-不啟動 Phase 1/2/3/4/5 runtime、不送 paper order、不做 cancel/replace、不匯入 fill、
-不產生 shadow fill、不啟動 reconciliation writer、不啟動 scorecard writer、不做 DB
-migration/apply、不做 Postgres dry-run、不啟動 evidence clock、不做 Linux runtime
-sync/restart、不啟動 paper-shadow launch、不授權 tiny-live/live 或任何 Bybit behavior
-change。
-
-## 31. 2026-06-30 PM session source checkpoint：Scorecard Derivation Contract
+## 33. 2026-06-30 PM session source checkpoint：Scorecard Derivation Contract
 
 本 checkpoint 補上 Phase 3 `scorecard_derive` 的 source-only artifact gate。
 前面已有 scorecard inputs、paper-shadow reconciliation 與 verdict；這次新增的是
@@ -1942,7 +1792,157 @@ migration/apply、不做 Postgres dry-run、不啟動 evidence clock、不做 Li
 sync/restart、不啟動 paper-shadow launch、不授權 tiny-live/live 或任何 Bybit behavior
 change。
 
-## 36. 2026-06-30 PM session source checkpoint：Read-Only Probe IPC Binding
+## 34. 2026-06-30 PM session source checkpoint：Tiny-Live Eligibility Lineage Gate
+
+本 checkpoint harden Phase 5 之後「是否可以拿去開 ADR 討論 tiny-live」的
+source-only gate。它不是 tiny-live approval，也不是 live/tiny-live runtime；它只把
+前面已建立的 scorecard derivation、scorecard verdict、paper-shadow reconciliation
+與 QA lineage 接入 `tiny_live_adr_eligibility_v1`。
+
+新增 checkpoint：
+
+- `TinyLiveAdrEligibilityV1` 新增 `scorecard_derivation_hash`、
+  `scorecard_verdict_hash`、`paper_shadow_reconciliation_hash`、`qa_review_hash`
+  與 `qa_review_passed`。
+- Validator 新增對應 SHA-256 hash blockers：
+  `ScorecardDerivationHashInvalid`、`ScorecardVerdictHashInvalid`、
+  `PaperShadowReconciliationHashInvalid`、`QaReviewHashInvalid`，以及
+  `QaReviewMissing`。
+- Blocked template
+  `settings/broker/stock_etf_tiny_live_adr_eligibility.template.toml` 同步新增欄位，
+  預設仍全部 fail closed。
+- Rust `stock_etf.get_launch_status`、FastAPI launch normalizer/fixtures/tests 與 GUI
+  launch panel 新增 display-only lineage hash-present rows；pre-gate truthy lineage
+  或 QA pass claims 會被 `contract_violation_blocked` 擋下。
+- Phase0 packet spec 與 broker README 已更新，明確 tiny-live ADR discussion gate
+  需要 derivation/verdict/reconciliation/QA lineage。
+
+驗證：
+
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_tiny_live_eligibility_acceptance -- --nocapture`：
+  tiny-live eligibility acceptance `7 passed`。
+- `python3 -m py_compile ...stock_etf_launch_normalizers.py ...test_stock_etf_launch_status_routes.py ...stock_etf_route_fixtures.py`：PASS。
+- `python3 -m pytest -q ...test_stock_etf_launch_status_routes.py ...test_stock_etf_routes.py`：
+  focused FastAPI/static `15 passed`。
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  full Stock/ETF FastAPI/static `90 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf_launch_status -- --nocapture`：
+  engine launch-status focused `1 passed`（既有 warnings only）。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
+  Stock/ETF engine filter `27 passed`（既有 warnings only）。
+- Full `cargo test --manifest-path rust/Cargo.toml -p openclaw_types`：
+  `35` unit/golden + `241` integration/acceptance + `0` doc-tests。
+- `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
+- `rustfmt --edition 2021 --check ...`：PASS。
+- `node --check .../tab-stock-etf.js`：PASS。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 connector runtime、
+不啟動 Phase 1/2/3/4/5 runtime、不送 paper order、不做 cancel/replace、不匯入 fill、
+不產生 shadow fill、不啟動 reconciliation writer、不啟動 scorecard writer、不做 DB
+migration/apply、不做 Postgres dry-run、不啟動 evidence clock、不做 Linux runtime
+sync/restart、不啟動 paper-shadow launch、不授權 tiny-live/live 或任何 Bybit behavior
+change。
+
+## 35. 2026-06-30 PM session source checkpoint：IBKR Read-Only Connector Skeleton Boundary
+
+本 checkpoint 建立計劃第 3.3 節指定的隔離 Python package：
+`program_code/broker_connectors/ibkr_connector/`。這不是 runtime connector，
+不導入 `ibapi` / `ib_insync`，不開 network，不讀 secret，不提供任何 broker write
+method；用途是把未來 IBKR read-only / paper surface 的 Python 邊界先固定在
+Bybit 目錄外，且讓 no-write guard 對實際目錄生效。
+
+新增 checkpoint：
+
+- 新增 `program_code/broker_connectors/ibkr_connector` package 與 README。
+- `models.py` 定義 non-secret loopback endpoint descriptor 與 blocked
+  read-only surface status。
+- `readonly_client.py` 只提供 blocked readiness / account snapshot / market data /
+  contract details preview，所有 payload 都保持 `network_contact_performed=false`、
+  `secret_content_loaded=false`、`order_write_method_present=false`。
+- `paper_client.py` 只提供 paper lifecycle / fill-import readiness previews，
+  明確 `python_broker_write_authority=false`。
+- `fixtures/readonly.py` 提供 secret-free blocked fixture。
+- 新增 `test_stock_etf_ibkr_connector_skeleton.py`，並由既有
+  `test_stock_etf_python_no_write_static_guard.py` 自動掃描新 connector package。
+- Phase0 packet spec 已更新，說明 no-write guard 現在掃描實際 IBKR skeleton。
+
+驗證：
+
+- `python3 -m py_compile program_code/broker_connectors/... test_stock_etf_ibkr_connector_skeleton.py`：PASS。
+- `python3 -m pytest -q ...test_stock_etf_ibkr_connector_skeleton.py ...test_stock_etf_python_no_write_static_guard.py`：
+  connector skeleton + no-write guard `7 passed`。
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  full Stock/ETF FastAPI/static `94 passed`。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不啟動 Phase 1/2/3/4/5 runtime、不送 paper
+order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence clock、
+不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何
+Bybit behavior change。
+
+## 36. 2026-06-30 PM session governance checkpoint：ADR/Register Lineage Catch-up
+
+本 checkpoint 只補治理索引與 ADR/AMD 文字，不改程式碼：
+
+- `docs/governance_dev/SPECIFICATION_REGISTER.md` 的 Last Updated 已改為
+  ADR-0048 lineage + connector-skeleton hardening。
+- 新增 ADR-0048 Addendum E，登記 scorecard derivation / verdict /
+  paper-shadow reconciliation / tiny-live eligibility lineage。
+- 新增 ADR-0048 Addendum F，登記
+  `program_code/broker_connectors/ibkr_connector/` 是 inert source-only skeleton。
+- ADR-0048 與 AMD-2026-06-29-01 已補明：
+  tiny-live discussion gate 需要 derivation/verdict/manifest/reconciliation/DQ/
+  preregistration/QC/MIT/QA lineage，但仍只可開新 ADR discussion。
+- ADR-0048 與 AMD 已補明：Python IBKR skeleton 不得導入 SDK、開 network、
+  讀 secret、暴露 broker write、匯入 fills 或寫 DB。
+
+驗證：
+
+- `rg` 檢查 register/ADR/AMD 中 `ibkr_connector`、`scorecard_derivation`、
+  `paper_shadow_reconciliation`、`tiny_live_adr` 均有最新登記。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不啟動 Phase 1/2/3/4/5 runtime、不送 paper
+order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence clock、
+不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何
+Bybit behavior change。
+
+## 37. 2026-06-30 PM session display checkpoint：Connector Skeleton Readiness Gate
+
+本 checkpoint 把 inert IBKR connector skeleton boundary 顯示到現有
+`/api/v1/stock-etf/readiness`，但不 import connector package、不啟動 runtime、
+不新增 endpoint，也不新增任何 effect-capable action。
+
+新增 checkpoint：
+
+- FastAPI readiness normalizer 新增 `connector_skeleton` block，預設為
+  `ibkr_stock_etf_readonly_connector_skeleton_v1` / `blocked_source_only`。
+- 若 upstream payload 宣稱 connector skeleton `accepted=true`、status 非 blocked、
+  network contact、secret loaded、paper/live channel exposed、write method present、
+  或 Bybit path reused，readiness 會轉為 `contract_violation_blocked`。
+- GUI readiness panel 現在顯示 connector skeleton surface/status，以及所有
+  side-effect flags。
+- Route tests 覆蓋 fallback false、正常 blocked display、與 truthy claims 被拒。
+
+驗證：
+
+- `python3 -m py_compile ...stock_etf_readiness_normalizers.py ...test_stock_etf_readiness_routes.py`：PASS。
+- `python3 -m pytest -q ...test_stock_etf_readiness_routes.py ...test_stock_etf_python_no_write_static_guard.py`：
+  focused readiness/no-write `9 passed`。
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  full Stock/ETF FastAPI/static `94 passed`。
+- `node --check .../tab-stock-etf.js`：PASS。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不啟動 Phase 1/2/3/4/5 runtime、不送 paper
+order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence clock、
+不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何
+Bybit behavior change。
+
+## 38. 2026-06-30 PM session source checkpoint：Read-Only Probe IPC Binding
 
 本 checkpoint 把前面新增的 `stock_etf_ibkr_readonly_probe_request_v1` 接到 Rust
 IPC validation-only method：`stock_etf.preview_readonly_probe`。這不是 IBKR
@@ -1987,7 +1987,7 @@ runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 D
 evidence clock、不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權
 tiny-live/live 或任何 Bybit behavior change。
 
-## 37. 2026-06-30 PM session source checkpoint：Broker Read Capability Probe Gate
+## 39. 2026-06-30 PM session source checkpoint：Broker Read Capability Probe Gate
 
 本 checkpoint 強化 `broker_capability_registry_v1` 的 read rows。前面已經完成
 `stock_etf_ibkr_readonly_probe_request_v1` 和 `stock_etf.preview_readonly_probe`
@@ -2027,10 +2027,9 @@ connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 
 runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
 evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
 sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+## 40. 2026-06-30 PM session source/status/display checkpoint：Policy Status Read-Row Gate Display
 
-## 38. 2026-06-30 PM session source/status/display checkpoint：Policy Status Read-Row Gate Display
-
-本 checkpoint 把 checkpoint 37 的 broker read-row gate hardening 顯示到
+本 checkpoint 把 checkpoint 39 的 broker read-row gate hardening 顯示到
 `stock_etf.get_policy_status`、FastAPI `/api/v1/stock-etf/policy-status` 和 Stock/ETF
 GUI policy panel。這不是 read probe execution，也不是 Phase 2 start；它只是讓
 Operator 能在 policy/capability status 看到 broker registry read rows 是否已綁到
@@ -2069,7 +2068,7 @@ runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 D
 evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
 sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
 
-## 39. 2026-06-30 PM session source checkpoint：Read-Only Probe Request Operation Binding
+## 41. 2026-06-30 PM session source checkpoint：Read-Only Probe Request Operation Binding
 
 本 checkpoint 修正 `stock_etf.preview_readonly_probe` 的 source-only IPC semantics。
 前面已經把 readonly-probe request 接到 IPC 並顯示在 readiness/policy；這次確保
@@ -2097,6 +2096,38 @@ readonly probe 都固定顯示為 method fallback `health_read`。
   Stock/ETF engine filter `30 passed`（既有 warnings only）。
 - `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
 - `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+## 42. 2026-06-30 PM session governance checkpoint：Plan Timeline Checkpoint Guard
+
+本 checkpoint 修正主計畫內 PM session checkpoint 編號/順序漂移，並新增 structure
+test 防止同類漂移再次進入 repo。這是文檔治理 guard，不是 runtime 開發、不是 IBKR
+contact，也不改 Stock/ETF 或 Bybit 行為。
+
+新增 checkpoint：
+
+- 主計畫 PM session checkpoint 現在從 14 到 42 連續遞增，無重複編號。
+- 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
+  lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
+  connector skeleton / readonly-probe / broker read gate / policy display / operation
+  binding。
+- Section-body 對比確認每個 checkpoint 正文未遺失；除了 policy display 內部引用從
+  `checkpoint 37` 改為新的 `checkpoint 39` 外，正文內容保持一致。
+- 新增 `tests/structure/test_docs_readme_index_static.py` 的 IBKR 主計畫 timeline guard，
+  要求 PM session checkpoint 編號連續且唯一。
+
+驗證：
+
+- `python3 -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear`：
+  `1 passed`。
+- Section-body compare against `HEAD`：PASS。
+- `git diff --check`：PASS。
+- 註：`python3 -m pytest -q tests/structure/test_docs_readme_index_static.py` 仍有既有
+  docs README index drift 失敗；與本 checkpoint 新增的 IBKR timeline guard 無關。
 
 PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
 connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5

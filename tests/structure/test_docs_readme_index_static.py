@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCS_README = ROOT / "docs" / "README.md"
+IBKR_STOCK_ETF_PLAN = (
+    ROOT
+    / "docs"
+    / "execution_plan"
+    / "2026-06-29--ibkr_stock_etf_paper_shadow_development_arrangement.md"
+)
 
 
 def test_docs_agents_section_and_files_are_indexed() -> None:
@@ -44,3 +51,19 @@ def test_mit_bb_workspace_readmes_exist_at_workspace_level() -> None:
         "docs/CCAgentWorkSpace/BB/workspace/README.md",
     ):
         assert (ROOT / rel).exists()
+
+
+def test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear() -> None:
+    source = IBKR_STOCK_ETF_PLAN.read_text()
+    checkpoint_numbers = [
+        int(match.group(1))
+        for match in re.finditer(
+            r"^## (\d+)\. 2026-06-30 PM session .*checkpoint",
+            source,
+            re.MULTILINE,
+        )
+    ]
+
+    assert checkpoint_numbers
+    expected = list(range(checkpoint_numbers[0], checkpoint_numbers[-1] + 1))
+    assert checkpoint_numbers == expected
