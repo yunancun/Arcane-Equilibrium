@@ -68,6 +68,7 @@ def test_stock_etf_openapi_exposes_stock_etf_get_only(client_fail_closed: TestCl
     }
 
     assert stock_paths == {
+        "/api/v1/stock-etf/account-status": {"get"},
         "/api/v1/stock-etf/evidence-status": {"get"},
         "/api/v1/stock-etf/lane-status": {"get"},
         "/api/v1/stock-etf/paper-status": {"get"},
@@ -81,6 +82,7 @@ def test_stock_etf_openapi_exposes_stock_etf_get_only(client_fail_closed: TestCl
 def test_stock_etf_runtime_rejects_write_methods(client_fail_closed: TestClient) -> None:
     for path in (
         "/api/v1/stock-etf",
+        "/api/v1/stock-etf/account-status",
         "/api/v1/stock-etf/evidence-status",
         "/api/v1/stock-etf/lane-status",
         "/api/v1/stock-etf/paper-status",
@@ -120,6 +122,7 @@ def test_stock_etf_router_registered_in_main_app() -> None:
 
 def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     source = (STATIC_DIR / "tab-stock-etf.html").read_text(encoding="utf-8")
+    assert "/api/v1/stock-etf/account-status" in source
     assert "/api/v1/stock-etf/evidence-status" in source
     assert "/api/v1/stock-etf/lane-status" in source
     assert "/api/v1/stock-etf/paper-status" in source
@@ -129,6 +132,8 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     assert "/api/v1/stock-etf/universe-status" in source
     assert "se-evidence-status" in source
     assert "se-evidence-body" in source
+    assert "se-account-status" in source
+    assert "se-account-body" in source
     assert "se-shadow-status" in source
     assert "se-shadow-body" in source
     assert "se-paper-status" in source

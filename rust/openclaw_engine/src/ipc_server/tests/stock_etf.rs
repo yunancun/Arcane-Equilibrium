@@ -647,6 +647,146 @@ async fn stock_etf_paper_status_is_blocked_source_fixture_without_side_effects()
 }
 
 #[tokio::test]
+async fn stock_etf_account_status_is_blocked_source_fixture_without_side_effects() {
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let req = r#"{"jsonrpc":"2.0","method":"stock_etf.get_account_status","params":{},"id":4811}"#;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
+    )
+    .await;
+
+    assert!(resp.error.is_none());
+    let result = resp.result.expect("stock_etf account status result");
+    assert_eq!(result["phase"], "phase2_account_status_source_fixture");
+    assert_eq!(result["asset_lane"], "stock_etf_cash");
+    assert_eq!(result["broker"], "ibkr");
+    assert_eq!(result["environment"], "paper_readonly");
+    assert_eq!(result["account_status_state"], "blocked");
+    assert_eq!(result["phase2_started"], false);
+    assert_eq!(result["readonly_account_snapshot_started"], false);
+    assert_eq!(result["paper_account_snapshot_started"], false);
+    assert_eq!(result["account_snapshot_present"], false);
+    assert_eq!(result["portfolio_positions_snapshot_present"], false);
+    assert_eq!(result["cash_ledger_present"], false);
+    assert_eq!(result["paper_account_attestation_present"], false);
+    assert_eq!(result["session_attestation_present"], false);
+    assert_eq!(result["connector_runtime_started"], false);
+    assert_eq!(result["gateway_socket_open"], false);
+    assert_eq!(result["ibkr_live_enabled"], false);
+    assert_eq!(result["ibkr_call_performed"], false);
+    assert_eq!(result["secret_slot_touched"], false);
+    assert_eq!(result["order_routed"], false);
+    assert_eq!(result["bybit_ipc_reused"], false);
+    assert_eq!(result["db_apply_performed"], false);
+
+    let account = &result["account_snapshot"];
+    assert_eq!(
+        account["expected_contract_id"],
+        "broker_account_portfolio_cash_ledger_v1"
+    );
+    assert_eq!(account["contract_id"], "");
+    assert_eq!(account["source_version"], 0);
+    assert_eq!(account["accepted"], false);
+    assert!(json_array_contains(
+        &account["blockers"],
+        "contract_id_mismatch"
+    ));
+    assert!(json_array_contains(
+        &account["blockers"],
+        "source_version_mismatch"
+    ));
+    assert!(json_array_contains(
+        &account["blockers"],
+        "wrong_asset_lane"
+    ));
+    assert_eq!(account["account_fingerprint_hash_present"], false);
+    assert_eq!(account["account_snapshot_hash_present"], false);
+    assert_eq!(account["portfolio_positions_hash_present"], false);
+    assert_eq!(account["currency"], "");
+    assert_eq!(account["cash_balance_minor_units"], 0);
+    assert_eq!(account["buying_power_minor_units"], 0);
+    assert_eq!(account["as_of_ms"], 0);
+    assert_eq!(account["source_report_hash_present"], false);
+
+    let session = &result["session_attestation"];
+    assert_eq!(
+        session["expected_contract_id"],
+        "ibkr_session_attestation_v1"
+    );
+    assert_eq!(session["contract_id"], "");
+    assert_eq!(session["source_version"], 0);
+    assert_eq!(session["status"], "BLOCKED");
+    assert_eq!(session["accepted"], false);
+    assert!(json_array_contains(
+        &session["blockers"],
+        "contract_id_mismatch"
+    ));
+    assert!(json_array_contains(
+        &session["blockers"],
+        "source_version_mismatch"
+    ));
+    assert!(json_array_contains(&session["blockers"], "status_blocked"));
+    assert_eq!(session["account_fingerprint_present"], false);
+    assert_eq!(session["account_fingerprint_is_live"], false);
+    assert_eq!(session["environment"], "read_only");
+    assert_eq!(session["host"], "");
+    assert_eq!(session["port"], 0);
+    assert_eq!(session["process_identity_present"], false);
+    assert_eq!(session["gateway_mode"], "unknown");
+    assert_eq!(session["secret_slot_fingerprint_present"], false);
+    assert_eq!(session["secret_slot_mode"], "unknown");
+    assert_eq!(session["secret_world_readable"], false);
+    assert_eq!(session["live_secret_absent_or_empty"], false);
+    assert_eq!(session["env_var_credential_fallback_used"], false);
+    assert_eq!(session["api_server_version_present"], false);
+    assert_eq!(session["attested_at_ms"], 0);
+    assert_eq!(session["expires_at_ms"], 0);
+    assert_eq!(session["raw_artifact_hash_present"], false);
+
+    let paper_policy = &result["paper_attestation_policy"];
+    assert_eq!(
+        paper_policy["expected_contract_id"],
+        "ibkr_paper_attestation_v1"
+    );
+    assert_eq!(paper_policy["contract_id"], "ibkr_paper_attestation_v1");
+    assert_eq!(paper_policy["source_version"], 1);
+    assert_eq!(paper_policy["accepted"], true);
+    assert_eq!(paper_policy["external_surface_gate_required"], true);
+    assert_eq!(paper_policy["session_attestation_required"], true);
+    assert_eq!(paper_policy["rust_lane_scoped_ipc_required"], true);
+    assert_eq!(paper_policy["decision_lease_required"], true);
+    assert_eq!(paper_policy["guardian_required"], true);
+    assert_eq!(paper_policy["paper_environment_only"], true);
+    assert_eq!(paper_policy["live_account_fingerprint_denied"], true);
+    assert_eq!(paper_policy["margin_short_options_cfd_denied"], true);
+
+    assert_eq!(result["phase2"]["first_ibkr_contact_allowed"], false);
+    assert_eq!(result["phase2"]["connector_enabled"], false);
+    assert_eq!(
+        result["phase2"]["external_surface_gate"]["status"],
+        "BLOCKED"
+    );
+}
+
+#[tokio::test]
 async fn stock_etf_reconciliation_status_is_blocked_source_fixture_without_side_effects() {
     let config = make_test_config();
     let dd = make_test_data_dir();

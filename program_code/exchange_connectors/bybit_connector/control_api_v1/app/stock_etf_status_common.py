@@ -16,6 +16,9 @@ _SHADOW_FILL_MODEL_CONTRACT_ID = "stock_shadow_fill_model_v1"
 _STRATEGY_HYPOTHESIS_CONTRACT_ID = "stock_etf_strategy_hypothesis_contract_v1"
 _PAPER_LIFECYCLE_CONTRACT_ID = "ibkr_paper_order_lifecycle_v1"
 _BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID = "broker_lifecycle_event_log_v1"
+_ACCOUNT_CASH_LEDGER_CONTRACT_ID = "broker_account_portfolio_cash_ledger_v1"
+_SESSION_ATTESTATION_CONTRACT_ID = "ibkr_session_attestation_v1"
+_PAPER_ATTESTATION_CONTRACT_ID = "ibkr_paper_attestation_v1"
 _DENIED_OPERATIONS: tuple[str, ...] = (
     "ibkr_live_order_submit",
     "ibkr_tiny_live",
@@ -264,6 +267,69 @@ def _paper_reconstructability_fail_closed() -> dict[str, Any]:
         "redacted_summary_hash_present": False,
         "restart_recovery_required": False,
         "manual_review_required": False,
+    }
+
+
+def _account_snapshot_fail_closed(reason: str) -> dict[str, Any]:
+    return {
+        "expected_contract_id": _ACCOUNT_CASH_LEDGER_CONTRACT_ID,
+        "contract_id": "",
+        "source_version": 0,
+        "accepted": False,
+        "blockers": [reason],
+        "account_fingerprint_hash_present": False,
+        "account_snapshot_hash_present": False,
+        "portfolio_positions_hash_present": False,
+        "currency": "",
+        "cash_balance_minor_units": 0,
+        "buying_power_minor_units": 0,
+        "as_of_ms": 0,
+        "source_report_hash_present": False,
+    }
+
+
+def _session_attestation_fail_closed(reason: str) -> dict[str, Any]:
+    return {
+        "expected_contract_id": _SESSION_ATTESTATION_CONTRACT_ID,
+        "contract_id": "",
+        "source_version": 0,
+        "status": "BLOCKED",
+        "accepted": False,
+        "blockers": [reason],
+        "account_fingerprint_present": False,
+        "account_fingerprint_is_live": False,
+        "environment": "read_only",
+        "host": "",
+        "port": 0,
+        "process_identity_present": False,
+        "gateway_mode": "unknown",
+        "secret_slot_fingerprint_present": False,
+        "secret_slot_mode": "unknown",
+        "secret_world_readable": False,
+        "live_secret_absent_or_empty": False,
+        "env_var_credential_fallback_used": False,
+        "api_server_version_present": False,
+        "attested_at_ms": 0,
+        "expires_at_ms": 0,
+        "raw_artifact_hash_present": False,
+    }
+
+
+def _paper_attestation_policy_fail_closed(reason: str) -> dict[str, Any]:
+    return {
+        "expected_contract_id": _PAPER_ATTESTATION_CONTRACT_ID,
+        "contract_id": "",
+        "source_version": 0,
+        "accepted": False,
+        "blockers": [reason],
+        "external_surface_gate_required": False,
+        "session_attestation_required": False,
+        "rust_lane_scoped_ipc_required": False,
+        "decision_lease_required": False,
+        "guardian_required": False,
+        "paper_environment_only": False,
+        "live_account_fingerprint_denied": False,
+        "margin_short_options_cfd_denied": False,
     }
 
 

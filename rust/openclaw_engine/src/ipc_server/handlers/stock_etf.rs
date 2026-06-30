@@ -6,12 +6,15 @@
 
 use super::super::*;
 use openclaw_types::{
-    evaluate_broker_operation, AssetLane, Broker, BrokerCapabilityRequest, BrokerEnvironment,
-    BrokerLifecycleEventLogV1, BrokerOperation, IbkrExternalSurfaceGateV1,
-    IbkrPhase2PolicyBundleV1, InstrumentKind, NonBybitApiAllowlistV1, StockEtfEvidenceClockDayV1,
+    evaluate_broker_operation, AssetLane, Broker, BrokerAccountPortfolioCashLedgerV1,
+    BrokerCapabilityRequest, BrokerEnvironment, BrokerLifecycleEventLogV1, BrokerOperation,
+    IbkrExternalSurfaceGateV1, IbkrPaperAttestationPolicyV1, IbkrPhase2PolicyBundleV1,
+    IbkrSessionAttestationV1, InstrumentKind, NonBybitApiAllowlistV1, StockEtfEvidenceClockDayV1,
     StockEtfFeatureFlags, StockEtfGateInputs, StockEtfPitUniverseV1, StockEtfStrategyHypothesisV1,
-    StockMarketDataProvenanceV1, StockShadowFillModelV1, BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
-    IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
+    StockMarketDataProvenanceV1, StockShadowFillModelV1,
+    BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID, BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
+    IBKR_PAPER_ATTESTATION_CONTRACT_ID, IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
+    IBKR_SESSION_ATTESTATION_CONTRACT_ID, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
     STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID, STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
     STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID, STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
 };
@@ -63,6 +66,9 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
                 "bybit_ipc_reused": false,
             }),
         ),
+        "stock_etf.get_account_status" => {
+            JsonRpcResponse::success(id, account_status_summary(phase2))
+        }
         "stock_etf.get_evidence_status" => {
             JsonRpcResponse::success(id, evidence_status_summary(phase2))
         }
@@ -112,6 +118,94 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
             )
         }
     }
+}
+
+fn account_status_summary(phase2: serde_json::Value) -> serde_json::Value {
+    let cash_ledger = BrokerAccountPortfolioCashLedgerV1::default();
+    let cash_ledger_verdict = cash_ledger.validate();
+    let session_attestation = IbkrSessionAttestationV1::default();
+    let session_attestation_verdict = session_attestation.validate(0);
+    let paper_attestation_policy = IbkrPaperAttestationPolicyV1::source_template();
+    let paper_attestation_policy_verdict = paper_attestation_policy.validate();
+
+    serde_json::json!({
+        "phase": "phase2_account_status_source_fixture",
+        "asset_lane": AssetLane::StockEtfCash,
+        "broker": Broker::Ibkr,
+        "environment": "paper_readonly",
+        "account_status_state": "blocked",
+        "phase2_started": false,
+        "readonly_account_snapshot_started": false,
+        "paper_account_snapshot_started": false,
+        "account_snapshot_present": false,
+        "portfolio_positions_snapshot_present": false,
+        "cash_ledger_present": false,
+        "paper_account_attestation_present": false,
+        "session_attestation_present": false,
+        "connector_runtime_started": false,
+        "gateway_socket_open": false,
+        "account_snapshot": {
+            "expected_contract_id": BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID,
+            "contract_id": cash_ledger.contract_id,
+            "source_version": cash_ledger.source_version,
+            "accepted": cash_ledger_verdict.accepted,
+            "blockers": cash_ledger_verdict.blockers,
+            "account_fingerprint_hash_present": !cash_ledger.account_fingerprint_hash.is_empty(),
+            "account_snapshot_hash_present": !cash_ledger.account_snapshot_hash.is_empty(),
+            "portfolio_positions_hash_present": !cash_ledger.portfolio_positions_hash.is_empty(),
+            "currency": cash_ledger.currency,
+            "cash_balance_minor_units": cash_ledger.cash_balance_minor_units,
+            "buying_power_minor_units": cash_ledger.buying_power_minor_units,
+            "as_of_ms": cash_ledger.as_of_ms,
+            "source_report_hash_present": !cash_ledger.source_report_hash.is_empty(),
+        },
+        "session_attestation": {
+            "expected_contract_id": IBKR_SESSION_ATTESTATION_CONTRACT_ID,
+            "contract_id": session_attestation.contract_id,
+            "source_version": session_attestation.source_version,
+            "status": session_attestation.status,
+            "accepted": session_attestation_verdict.attestation_accepted,
+            "blockers": session_attestation_verdict.blockers,
+            "account_fingerprint_present": !session_attestation.account_fingerprint.is_empty(),
+            "account_fingerprint_is_live": session_attestation.account_fingerprint_is_live,
+            "environment": session_attestation.environment,
+            "host": session_attestation.host,
+            "port": session_attestation.port,
+            "process_identity_present": !session_attestation.process_identity.is_empty(),
+            "gateway_mode": session_attestation.gateway_mode,
+            "secret_slot_fingerprint_present": !session_attestation.secret_slot_fingerprint.is_empty(),
+            "secret_slot_mode": session_attestation.secret_slot_mode,
+            "secret_world_readable": session_attestation.secret_world_readable,
+            "live_secret_absent_or_empty": session_attestation.live_secret_absent_or_empty,
+            "env_var_credential_fallback_used": session_attestation.env_var_credential_fallback_used,
+            "api_server_version_present": !session_attestation.api_server_version.is_empty(),
+            "attested_at_ms": session_attestation.attested_at_ms,
+            "expires_at_ms": session_attestation.expires_at_ms,
+            "raw_artifact_hash_present": !session_attestation.raw_artifact_hash.is_empty(),
+        },
+        "paper_attestation_policy": {
+            "expected_contract_id": IBKR_PAPER_ATTESTATION_CONTRACT_ID,
+            "contract_id": paper_attestation_policy.contract_id,
+            "source_version": paper_attestation_policy.source_version,
+            "accepted": paper_attestation_policy_verdict.accepted,
+            "blockers": paper_attestation_policy_verdict.blockers,
+            "external_surface_gate_required": paper_attestation_policy.external_surface_gate_required,
+            "session_attestation_required": paper_attestation_policy.session_attestation_required,
+            "rust_lane_scoped_ipc_required": paper_attestation_policy.rust_lane_scoped_ipc_required,
+            "decision_lease_required": paper_attestation_policy.decision_lease_required,
+            "guardian_required": paper_attestation_policy.guardian_required,
+            "paper_environment_only": paper_attestation_policy.paper_environment_only,
+            "live_account_fingerprint_denied": paper_attestation_policy.live_account_fingerprint_denied,
+            "margin_short_options_cfd_denied": paper_attestation_policy.margin_short_options_cfd_denied,
+        },
+        "phase2": phase2,
+        "ibkr_live_enabled": false,
+        "ibkr_call_performed": false,
+        "secret_slot_touched": false,
+        "order_routed": false,
+        "bybit_ipc_reused": false,
+        "db_apply_performed": false,
+    })
 }
 
 fn reconciliation_status_summary(phase2: serde_json::Value) -> serde_json::Value {
