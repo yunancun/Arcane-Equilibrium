@@ -1768,6 +1768,39 @@ order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evi
 不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何
 Bybit behavior change。
 
+## 35. 2026-06-30 PM session display checkpoint：Connector Skeleton Readiness Gate
+
+本 checkpoint 把 inert IBKR connector skeleton boundary 顯示到現有
+`/api/v1/stock-etf/readiness`，但不 import connector package、不啟動 runtime、
+不新增 endpoint，也不新增任何 effect-capable action。
+
+新增 checkpoint：
+
+- FastAPI readiness normalizer 新增 `connector_skeleton` block，預設為
+  `ibkr_stock_etf_readonly_connector_skeleton_v1` / `blocked_source_only`。
+- 若 upstream payload 宣稱 connector skeleton `accepted=true`、status 非 blocked、
+  network contact、secret loaded、paper/live channel exposed、write method present、
+  或 Bybit path reused，readiness 會轉為 `contract_violation_blocked`。
+- GUI readiness panel 現在顯示 connector skeleton surface/status，以及所有
+  side-effect flags。
+- Route tests 覆蓋 fallback false、正常 blocked display、與 truthy claims 被拒。
+
+驗證：
+
+- `python3 -m py_compile ...stock_etf_readiness_normalizers.py ...test_stock_etf_readiness_routes.py`：PASS。
+- `python3 -m pytest -q ...test_stock_etf_readiness_routes.py ...test_stock_etf_python_no_write_static_guard.py`：
+  focused readiness/no-write `9 passed`。
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  full Stock/ETF FastAPI/static `94 passed`。
+- `node --check .../tab-stock-etf.js`：PASS。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不啟動 Phase 1/2/3/4/5 runtime、不送 paper
+order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence clock、
+不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何
+Bybit behavior change。
+
 ## 34. 2026-06-30 PM session governance checkpoint：ADR/Register Lineage Catch-up
 
 本 checkpoint 只補治理索引與 ADR/AMD 文字，不改程式碼：

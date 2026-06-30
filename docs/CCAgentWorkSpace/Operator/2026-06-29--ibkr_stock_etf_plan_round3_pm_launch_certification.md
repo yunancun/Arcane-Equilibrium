@@ -647,6 +647,31 @@ Verification 已過：
 order/cancel/replace、沒有 fill import、沒有 DB apply、沒有 evidence clock、沒有
 scorecard writer、沒有 Linux runtime sync/restart，也沒有改動 Bybit live execution 行為。
 
+## 2026-06-30 Operator Update — Connector Skeleton Readiness Gate
+
+本 session 已把 IBKR connector skeleton 的 blocked boundary 顯示到
+`/api/v1/stock-etf/readiness` 和 GUI readiness panel。
+
+這次不是 connector runtime：
+
+- GUI 現在會顯示 connector skeleton surface/status。
+- network contact、secret loaded、paper/live channel、write method、Bybit path reuse
+  都會顯示為 false。
+- 如果 pre-gate payload 宣稱任何上述 flag 為 true，FastAPI 會
+  `contract_violation_blocked`。
+
+Verification 已過：
+
+- Python compile：PASS
+- Focused readiness/no-write：`9 passed`
+- Full Stock/ETF FastAPI/static：`94 passed`
+- `node --check` / `git diff --check`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 secret access/creation、沒有 connector runtime、
+沒有 IBKR SDK import、沒有 Phase 1/2/3/4/5 runtime start、沒有 paper
+order/cancel/replace、沒有 fill import、沒有 DB apply、沒有 evidence clock、沒有
+scorecard writer、沒有 Linux runtime sync/restart，也沒有改動 Bybit live execution 行為。
+
 ## 2026-06-30 Operator Update — ADR/Register Lineage Catch-up
 
 本 session 已完成 governance catch-up：

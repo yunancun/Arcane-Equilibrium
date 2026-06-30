@@ -800,6 +800,18 @@ function renderFallback() {
     first_ibkr_contact_allowed: false,
     immutable_pass_artifact_present: false,
     connector_enabled: false,
+    connector_skeleton: {
+      surface_id: 'ibkr_stock_etf_readonly_connector_skeleton_v1',
+      accepted: false,
+      status: 'blocked_source_only',
+      blockers: ['api_unavailable'],
+      network_contact_performed: false,
+      secret_content_loaded: false,
+      paper_channel_exposed: false,
+      live_channel_exposed: false,
+      order_write_method_present: false,
+      bybit_path_reused: false,
+    },
     ibkr_live_enabled: false,
     stock_live_disabled: true,
     paper_order_entry_visible: false,
@@ -837,6 +849,7 @@ function renderFallback() {
 function renderReadiness(data, laneStatus) {
   const source = data.source_readiness || {};
   const apiAllowlist = data.api_allowlist || {};
+  const connectorSkeleton = data.connector_skeleton || {};
   const lane = laneStatus || {};
   const flags = lane.flags || {};
   const defaultLane = lane.default_asset_lane || data.default_asset_lane || 'crypto_perp';
@@ -874,6 +887,9 @@ function renderReadiness(data, laneStatus) {
     kvRow('immutable_pass_artifact_present', boolChip(data.immutable_pass_artifact_present, false)),
     kvRow('first_ibkr_contact_allowed', boolChip(data.first_ibkr_contact_allowed, false)),
     kvRow('connector_enabled', boolChip(data.connector_enabled, false)),
+    kvRow('connector_skeleton.surface_id', textChip(connectorSkeleton.surface_id || '-')),
+    kvRow('connector_skeleton.accepted', boolChip(connectorSkeleton.accepted, false)),
+    kvRow('connector_skeleton.status', textChip(connectorSkeleton.status || 'blocked_source_only')),
     kvRow('stock_live_disabled', boolChip(data.stock_live_disabled, false)),
   ].join('');
 
@@ -902,6 +918,13 @@ function renderReadiness(data, laneStatus) {
     kvRow('secret_slot_touched', boolChip(data.secret_slot_touched, true)),
     kvRow('order_routed', boolChip(data.order_routed, true)),
     kvRow('bybit_ipc_reused', boolChip(data.bybit_ipc_reused, true)),
+    kvRow('connector_skeleton.network_contact_performed', boolChip(connectorSkeleton.network_contact_performed, true)),
+    kvRow('connector_skeleton.secret_content_loaded', boolChip(connectorSkeleton.secret_content_loaded, true)),
+    kvRow('connector_skeleton.paper_channel_exposed', boolChip(connectorSkeleton.paper_channel_exposed, true)),
+    kvRow('connector_skeleton.live_channel_exposed', boolChip(connectorSkeleton.live_channel_exposed, true)),
+    kvRow('connector_skeleton.order_write_method_present', boolChip(connectorSkeleton.order_write_method_present, true)),
+    kvRow('connector_skeleton.bybit_path_reused', boolChip(connectorSkeleton.bybit_path_reused, true)),
+    kvRow('connector_skeleton.blockers', chipList(connectorSkeleton.blockers, 'none')),
     kvRow('reason', '<span class="se-code">' + ocEsc(data.reason || '-') + '</span>'),
   ].join('');
 
