@@ -945,8 +945,14 @@ Capacity breach blocks evidence clock.
 
 Source validator: `openclaw_types::stock_etf_scorecard_inputs::StockEtfStorageCapacityV1`.
 The validator requires exact `stock_etf_storage_capacity_v1` contract id, source
-version `1`, non-zero capacity estimates, archive path, capacity-plan hash, and
-an explicit policy that capacity breach blocks the evidence clock.
+version `1`, non-zero capacity estimates, lane-scoped relative archive path,
+capacity-plan hash, and an explicit policy that capacity breach blocks the
+evidence clock. The source validator also caps the initial paper/shadow evidence
+plan to at most `1,000` instruments, `5,000,000` rows/day, `8,192` MB index
+budget, and `5,000` ms query SLO; raw payload hashes must be retained at least
+`365` days, compressed retention must not be shorter than raw-hash retention,
+and compressed retention must not exceed `3,650` days without a new reviewed
+source version.
 
 Scorecard bundle validator:
 `openclaw_types::stock_etf_scorecard_inputs::StockEtfScorecardInputBundleV1`

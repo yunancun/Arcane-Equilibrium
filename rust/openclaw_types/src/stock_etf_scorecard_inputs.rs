@@ -15,6 +15,13 @@ pub const STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID: &str = "cost_model_version_v
 pub const STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID: &str = "benchmark_versions_v1";
 pub const STOCK_SHADOW_FILL_MODEL_CONTRACT_ID: &str = "stock_shadow_fill_model_v1";
 pub const STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID: &str = "stock_etf_storage_capacity_v1";
+pub const STOCK_ETF_STORAGE_MAX_UNIVERSE_SIZE: u32 = 1_000;
+pub const STOCK_ETF_STORAGE_MAX_ROWS_PER_DAY_ESTIMATE: u64 = 5_000_000;
+pub const STOCK_ETF_STORAGE_MIN_RAW_PAYLOAD_HASH_RETENTION_DAYS: u32 = 365;
+pub const STOCK_ETF_STORAGE_MAX_COMPRESSED_RETENTION_DAYS: u32 = 3_650;
+pub const STOCK_ETF_STORAGE_MAX_INDEX_BUDGET_MB: u32 = 8_192;
+pub const STOCK_ETF_STORAGE_MAX_QUERY_SLO_MS: u32 = 5_000;
+pub const STOCK_ETF_STORAGE_ARCHIVE_PATH_PREFIX: &str = "evidence/stock_etf_cash/";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -466,24 +473,42 @@ impl StockEtfStorageCapacityV1 {
         }
         if self.universe_size == 0 {
             blockers.push(Blocker::UniverseSizeMissing);
+        } else if self.universe_size > STOCK_ETF_STORAGE_MAX_UNIVERSE_SIZE {
+            blockers.push(Blocker::UniverseSizeExceedsCapacityPlan);
         }
         if self.rows_per_day_estimate == 0 {
             blockers.push(Blocker::RowsPerDayEstimateMissing);
+        } else if self.rows_per_day_estimate > STOCK_ETF_STORAGE_MAX_ROWS_PER_DAY_ESTIMATE {
+            blockers.push(Blocker::RowsPerDayEstimateExceedsCapacityPlan);
         }
         if self.raw_payload_hash_retention_days == 0 {
             blockers.push(Blocker::RawPayloadRetentionMissing);
+        } else if self.raw_payload_hash_retention_days
+            < STOCK_ETF_STORAGE_MIN_RAW_PAYLOAD_HASH_RETENTION_DAYS
+        {
+            blockers.push(Blocker::RawPayloadRetentionTooShort);
         }
         if self.compressed_retention_days == 0 {
             blockers.push(Blocker::CompressedRetentionMissing);
+        } else if self.compressed_retention_days < self.raw_payload_hash_retention_days {
+            blockers.push(Blocker::CompressedRetentionShorterThanRawPayloadHashRetention);
+        } else if self.compressed_retention_days > STOCK_ETF_STORAGE_MAX_COMPRESSED_RETENTION_DAYS {
+            blockers.push(Blocker::CompressedRetentionExceedsCapacityPlan);
         }
         if self.index_budget_mb == 0 {
             blockers.push(Blocker::IndexBudgetMissing);
+        } else if self.index_budget_mb > STOCK_ETF_STORAGE_MAX_INDEX_BUDGET_MB {
+            blockers.push(Blocker::IndexBudgetExceedsCapacityPlan);
         }
         if self.query_slo_ms == 0 {
             blockers.push(Blocker::QuerySloMissing);
+        } else if self.query_slo_ms > STOCK_ETF_STORAGE_MAX_QUERY_SLO_MS {
+            blockers.push(Blocker::QuerySloExceedsCapacityPlan);
         }
         if self.archive_path.trim().is_empty() {
             blockers.push(Blocker::ArchivePathMissing);
+        } else if !is_safe_stock_etf_archive_path(&self.archive_path) {
+            blockers.push(Blocker::ArchivePathUnsafe);
         }
         if !is_sha256_hex(&self.capacity_plan_hash) {
             blockers.push(Blocker::CapacityPlanHashInvalid);
@@ -493,6 +518,15 @@ impl StockEtfStorageCapacityV1 {
         }
         StockEtfScorecardInputVerdict::new(blockers)
     }
+}
+
+fn is_safe_stock_etf_archive_path(path: &str) -> bool {
+    let trimmed = path.trim();
+    trimmed.starts_with(STOCK_ETF_STORAGE_ARCHIVE_PATH_PREFIX)
+        && trimmed.len() > STOCK_ETF_STORAGE_ARCHIVE_PATH_PREFIX.len()
+        && !trimmed.starts_with('/')
+        && !trimmed.contains("..")
+        && !trimmed.contains("//")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -707,12 +741,20 @@ pub enum StockEtfScorecardInputBlocker {
     ShadowFillLinkedToBrokerPaperFill,
     ShadowFillLinkedToLiveFill,
     UniverseSizeMissing,
+    UniverseSizeExceedsCapacityPlan,
     RowsPerDayEstimateMissing,
+    RowsPerDayEstimateExceedsCapacityPlan,
     RawPayloadRetentionMissing,
+    RawPayloadRetentionTooShort,
     CompressedRetentionMissing,
+    CompressedRetentionShorterThanRawPayloadHashRetention,
+    CompressedRetentionExceedsCapacityPlan,
     IndexBudgetMissing,
+    IndexBudgetExceedsCapacityPlan,
     QuerySloMissing,
+    QuerySloExceedsCapacityPlan,
     ArchivePathMissing,
+    ArchivePathUnsafe,
     CapacityPlanHashInvalid,
     CapacityBreachPolicyMissing,
     CashLedgerRejected,
