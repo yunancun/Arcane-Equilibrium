@@ -3080,7 +3080,7 @@
 
 ## 2026-06-30 IBKR Stock/ETF Plan Timeline Checkpoint Guard
 
-- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 60, aligned to the PM memory / Operator source timeline.
+- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 61, aligned to the PM memory / Operator source timeline.
 - Added a structure test that reads the main plan Markdown and fails if PM session checkpoint numbers become duplicated, skipped, or out of order.
 - Verification passed: focused IBKR timeline structure test `1 passed`; section-body compare against `HEAD` PASS; `git diff --check` PASS. The full structure test file still has pre-existing docs README index drift failures unrelated to this guard. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
 
@@ -3193,6 +3193,13 @@
 - The Rust IPC test parent is reduced from `1852` to `1110` lines; `request_contracts.rs` is `745` lines and `status_fixtures.rs` remains `685` lines.
 - The Rust IPC split structure guard now requires exactly `request_contracts.rs` and `status_fixtures.rs`, caps each parent/child test file at `1200` lines, and keeps both child modules free of network/IBKR SDK tokens.
 - Verification passed: `rustfmt`; engine `stock_etf` filter `31 passed`; Rust IPC test split static guard `3 passed`; full Stock/ETF FastAPI/static `105 passed`; focused IBKR timeline + trace-title structure tests `2 passed`; `git diff --check` PASS. This grants no new endpoint, IPC method, IBKR contact, SDK import, socket/HTTP, connector runtime, secret access, read probe execution, paper order, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Rust IPC Handler Request Summary Split Guard
+
+- PM split Stock/ETF Rust IPC request parsing and source-only paper/fill/shadow/readonly-probe summary helpers from `rust/openclaw_engine/src/ipc_server/handlers/stock_etf.rs` into `rust/openclaw_engine/src/ipc_server/handlers/stock_etf/request_summaries.rs`.
+- The production handler parent is reduced from `1292` to `823` lines; `request_summaries.rs` is `477` lines and `status_summaries.rs` remains `934` lines.
+- The handler split structure guard now requires exactly `request_summaries.rs` and `status_summaries.rs`, caps parent/child handler files at `1200` lines, and keeps both child modules free of network/IBKR SDK tokens.
+- Verification passed: `rustfmt --check`; engine `stock_etf` filter `31 passed`; Rust IPC handler/test split static guards `6 passed`; full Stock/ETF FastAPI/static `105 passed`; focused IBKR timeline + trace-title structure tests `2 passed`; `git diff --check` PASS. This grants no new endpoint, IPC method, dispatch route, IBKR contact, SDK import, socket/HTTP, connector runtime, secret access, read probe execution, paper order, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
 
 ## 2026-06-30 Standing Demo Authorization Refresh Guardrail
 
