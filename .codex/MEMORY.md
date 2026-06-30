@@ -945,7 +945,7 @@ Do not paste long reports or stable architecture into TODO.
 
 ## 2026-06-30 IBKR Stock/ETF Plan Timeline Checkpoint Guard
 
-- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 69, aligned to the PM memory / Operator source timeline.
+- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 70, aligned to the PM memory / Operator source timeline.
 - Added a structure test that reads the main plan Markdown and fails if PM session checkpoint numbers become duplicated, skipped, or out of order.
 - Verification passed: focused IBKR timeline structure test `1 passed`; section-body compare against `HEAD` PASS; `git diff --check` PASS. The full structure test file still has pre-existing docs README index drift failures unrelated to this guard. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
 
@@ -1126,3 +1126,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only AST guard proving Stock/ETF / IBKR Python surfaces do not import env/secret helper modules or read secret/environment material.
 - The guard blocks `os` imports, `dotenv`/`getpass`/`keyring`, `os.environ`, `getenv`/`os.getenv`, `Path.home`, `expanduser`, `read_text`, `read_bytes`, and any `open()` call in the scoped surface while preserving display-only secret-slot schema normalization.
 - Verification passed: Python no-write static guard `17 passed`; route/no-write focused tests `31 passed`; full Stock/ETF FastAPI/static `112 passed`; IBKR timeline + trace-title guard `2 passed`; `git diff --check` PASS. This grants no new endpoint, IPC method, client input, IBKR contact, SDK import, socket/HTTP, connector runtime, secret access, read probe execution, paper order, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF Rust IPC Secret/Env Material Static Guard
+
+- PM added Rust split structure guards proving Stock/ETF IPC handler/test files do not introduce direct `std::env`/`env::var`, secret-file/material readers, network/socket clients, or direct IBKR SDK tokens.
+- The handler guard explicitly preserves exactly one typed `StockEtfFeatureFlags::from_env()` path in the parent handler while forbidding bypass reads in `stock_etf.rs`, `request_summaries.rs`, and `status_summaries.rs`.
+- Verification passed: Rust IPC split static guards `8 passed`; docs trace guard `2 passed`; full Stock/ETF FastAPI/static `112 passed`; `git diff --check` PASS. This grants no Rust runtime behavior change, no endpoint/IPC method change, no IBKR contact, no SDK import, no socket/HTTP, no secret access, no read probe execution, no paper order, no DB/evidence writer, no tiny-live/live, and no Bybit behavior change.

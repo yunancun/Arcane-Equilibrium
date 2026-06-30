@@ -2111,7 +2111,7 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 
 新增 checkpoint：
 
-- 主計畫 PM session checkpoint 現在從 14 到 69 連續遞增，無重複編號。
+- 主計畫 PM session checkpoint 現在從 14 到 70 連續遞增，無重複編號。
 - 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
   lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
   connector skeleton / readonly-probe / broker read gate / policy display / operation
@@ -3160,6 +3160,48 @@ read 或 path material locator。
   `112 passed`。
 - `python3 -B -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
   `2 passed`。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 70. 2026-07-01 PM session source checkpoint：Rust IPC Secret/Env Material Static Guard
+
+本 checkpoint 將 Python secret/env material guard 的同級治理補到 Rust
+Stock/ETF IPC source split files。這不是 Rust runtime behavior change，不改
+handler output，不新增 IPC method；目標是防止未來在 Stock/ETF IPC handler/test
+files 中加入 direct env bypass、secret file read、network/socket client 或 IBKR SDK。
+
+已完成：
+
+- 更新 `tests/structure/test_stock_etf_ipc_handler_split_static.py`：
+  - 新增 `test_stock_etf_ipc_handler_files_have_no_runtime_material_readers`。
+  - 掃描 `stock_etf.rs`、`request_summaries.rs`、`status_summaries.rs`。
+  - 明確保留 parent handler 中唯一合法的
+    `StockEtfFeatureFlags::from_env()` typed feature-flag path。
+  - 禁止 `std::env` / `env::var`、`std::fs`、`File::open`、
+    `read_to_string`、`include_str!` / `include_bytes!`、`std::net`、
+    `TcpStream` / `UdpSocket`、`tokio::net`、`reqwest`、`hyper::`、`ureq`、
+    `ibapi` / `ib_insync` / `IBApi`。
+- 更新 `tests/structure/test_stock_etf_ipc_tests_split_static.py`：
+  - 新增同級 runtime material reader guard，掃描 Rust parent IPC test 與
+    `request_contracts.rs`、`status_fixtures.rs`。
+- 本 checkpoint 不改 Rust production code、不改 endpoint、不改 IPC method、不改
+  Bybit path、不啟動任何 IBKR 或 secret runtime。
+
+驗證：
+
+- `python3 -B -m py_compile tests/structure/test_stock_etf_ipc_handler_split_static.py tests/structure/test_stock_etf_ipc_tests_split_static.py`：
+  PASS。
+- `python3 -B -m pytest -q tests/structure/test_stock_etf_ipc_handler_split_static.py tests/structure/test_stock_etf_ipc_tests_split_static.py`：
+  `8 passed`。
+- `python3 -B -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
+  `2 passed`。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  `112 passed`。
 - `git diff --check`：PASS。
 
 PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動

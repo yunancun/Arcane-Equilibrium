@@ -7,6 +7,31 @@ STOCK_ETF_PARENT = IPC_TEST_ROOT / "stock_etf.rs"
 STOCK_ETF_SPLIT_DIR = IPC_TEST_ROOT / "stock_etf"
 MAX_LINES = 1200
 EXPECTED_MODULES = {"request_contracts.rs", "status_fixtures.rs"}
+FORBIDDEN_RUNTIME_MATERIAL_TOKENS = (
+    "std::env",
+    "env::var",
+    "var_os",
+    "vars_os",
+    "std::fs",
+    "std::path::Path",
+    "File::open",
+    "OpenOptions",
+    "read_to_string",
+    "read_to_end",
+    "read_exact",
+    "include_str!",
+    "include_bytes!",
+    "std::net",
+    "TcpStream",
+    "UdpSocket",
+    "tokio::net",
+    "reqwest",
+    "hyper::",
+    "ureq",
+    "ib_insync",
+    "ibapi",
+    "IBApi",
+)
 
 
 def _loc(path: Path) -> int:
@@ -25,6 +50,26 @@ def test_stock_etf_ipc_fixture_tests_are_split_under_governance_cap() -> None:
     assert set(modules) == EXPECTED_MODULES
     assert _loc(STOCK_ETF_PARENT) <= MAX_LINES
     assert all(loc <= MAX_LINES for loc in modules.values())
+
+
+def test_stock_etf_ipc_fixture_tests_have_no_runtime_material_readers() -> None:
+    sources = {
+        STOCK_ETF_PARENT: STOCK_ETF_PARENT.read_text(encoding="utf-8"),
+        STOCK_ETF_SPLIT_DIR / "request_contracts.rs": (
+            STOCK_ETF_SPLIT_DIR / "request_contracts.rs"
+        ).read_text(encoding="utf-8"),
+        STOCK_ETF_SPLIT_DIR / "status_fixtures.rs": (
+            STOCK_ETF_SPLIT_DIR / "status_fixtures.rs"
+        ).read_text(encoding="utf-8"),
+    }
+
+    violations = []
+    for path, source in sources.items():
+        for token in FORBIDDEN_RUNTIME_MATERIAL_TOKENS:
+            if token in source:
+                violations.append(f"{path}: contains forbidden runtime material token {token!r}")
+
+    assert violations == []
 
 
 def test_stock_etf_request_contract_fixtures_remain_source_only_tests() -> None:

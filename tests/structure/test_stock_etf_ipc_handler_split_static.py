@@ -10,6 +10,31 @@ REQUEST_SUMMARIES = STOCK_ETF_SPLIT_DIR / "request_summaries.rs"
 STATUS_SUMMARIES = STOCK_ETF_SPLIT_DIR / "status_summaries.rs"
 MAX_LINES = 1200
 EXPECTED_MODULES = {"request_summaries.rs", "status_summaries.rs"}
+FORBIDDEN_RUNTIME_MATERIAL_TOKENS = (
+    "std::env",
+    "env::var",
+    "var_os",
+    "vars_os",
+    "std::fs",
+    "std::path::Path",
+    "File::open",
+    "OpenOptions",
+    "read_to_string",
+    "read_to_end",
+    "read_exact",
+    "include_str!",
+    "include_bytes!",
+    "std::net",
+    "TcpStream",
+    "UdpSocket",
+    "tokio::net",
+    "reqwest",
+    "hyper::",
+    "ureq",
+    "ib_insync",
+    "ibapi",
+    "IBApi",
+)
 
 
 def _loc(path: Path) -> int:
@@ -28,6 +53,24 @@ def test_stock_etf_ipc_handler_files_stay_below_governance_cap() -> None:
     assert set(modules) == EXPECTED_MODULES
     assert _loc(STOCK_ETF_HANDLER) <= MAX_LINES
     assert all(loc <= MAX_LINES for loc in modules.values())
+
+
+def test_stock_etf_ipc_handler_files_have_no_runtime_material_readers() -> None:
+    sources = {
+        STOCK_ETF_HANDLER: STOCK_ETF_HANDLER.read_text(encoding="utf-8"),
+        REQUEST_SUMMARIES: REQUEST_SUMMARIES.read_text(encoding="utf-8"),
+        STATUS_SUMMARIES: STATUS_SUMMARIES.read_text(encoding="utf-8"),
+    }
+
+    assert sources[STOCK_ETF_HANDLER].count("StockEtfFeatureFlags::from_env()") == 1
+
+    violations = []
+    for path, source in sources.items():
+        for token in FORBIDDEN_RUNTIME_MATERIAL_TOKENS:
+            if token in source:
+                violations.append(f"{path}: contains forbidden runtime material token {token!r}")
+
+    assert violations == []
 
 
 def test_stock_etf_request_summary_helpers_are_in_child_module() -> None:
