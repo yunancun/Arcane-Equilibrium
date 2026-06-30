@@ -2027,3 +2027,44 @@ connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 
 runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
 evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
 sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 38. 2026-06-30 PM session source/status/display checkpoint：Policy Status Read-Row Gate Display
+
+本 checkpoint 把 checkpoint 37 的 broker read-row gate hardening 顯示到
+`stock_etf.get_policy_status`、FastAPI `/api/v1/stock-etf/policy-status` 和 Stock/ETF
+GUI policy panel。這不是 read probe execution，也不是 Phase 2 start；它只是讓
+Operator 能在 policy/capability status 看到 broker registry read rows 是否已綁到
+typed IPC / readonly-probe request gate。
+
+新增 checkpoint：
+
+- Rust policy-status payload 在 `broker_capability_registry` 下新增
+  `lane_scoped_ipc_contract_id`、`readonly_probe_request_contract_id`、
+  `read_rows_require_lane_scoped_ipc`、
+  `read_rows_require_readonly_probe_request`。
+- FastAPI normalizer/fallback 保留同樣欄位；若 registry 宣稱 accepted 但缺少或
+  mismatch 這些 read-row gate claims，會回傳 `contract_violation_blocked`。
+- GUI policy panel 顯示兩個 contract id 和兩個 read-row gate booleans。
+- Tests 覆蓋 route normalization、contract violation、static GUI contract 和 Rust IPC
+  policy-status fixture。
+
+驗證：
+
+- `python3 -m py_compile ...stock_etf_policy_normalizers.py ...stock_etf_route_fixtures.py ...test_stock_etf_policy_status_routes.py ...test_stock_etf_routes.py`：PASS。
+- `node --check program_code/exchange_connectors/bybit_connector/control_api_v1/app/static/tab-stock-etf.js`：PASS。
+- `python3 -m pytest -q ...test_stock_etf_policy_status_routes.py ...test_stock_etf_routes.py`：
+  focused policy/static `15 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf_policy_status -- --nocapture`：
+  engine policy-status focused `1 passed`（既有 warnings only）。
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  full Stock/ETF FastAPI/static `94 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
+  Stock/ETF engine filter `29 passed`（既有 warnings only）。
+- `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。

@@ -194,6 +194,10 @@ function policyFallback(reason) {
       operation_count: 0,
       required_audit_field_count: 0,
       read_operation_count: 0,
+      lane_scoped_ipc_contract_id: 'lane_scoped_ipc_v1',
+      readonly_probe_request_contract_id: 'stock_etf_ibkr_readonly_probe_request_v1',
+      read_rows_require_lane_scoped_ipc: false,
+      read_rows_require_readonly_probe_request: false,
       paper_operation_count: 0,
       denied_operation_count: 0,
       bybit_live_execution_unchanged: true,
@@ -1192,6 +1196,22 @@ function renderPolicyStatus(data) {
     kvRow('registry.registry_id', textChip(registry.registry_id || '-')),
     kvRow('registry.source_version', textChip(registry.source_version)),
     kvRow('registry.accepted', boolChip(registry.accepted, false)),
+    kvRow(
+      'registry.lane_scoped_ipc_contract_id',
+      textChip(registry.lane_scoped_ipc_contract_id || '-')
+    ),
+    kvRow(
+      'registry.readonly_probe_request_contract_id',
+      textChip(registry.readonly_probe_request_contract_id || '-')
+    ),
+    kvRow(
+      'registry.read_rows_require_lane_scoped_ipc',
+      boolChip(registry.read_rows_require_lane_scoped_ipc, false)
+    ),
+    kvRow(
+      'registry.read_rows_require_readonly_probe_request',
+      boolChip(registry.read_rows_require_readonly_probe_request, false)
+    ),
     kvRow(
       'registry.counts',
       '<span class="se-code">' +

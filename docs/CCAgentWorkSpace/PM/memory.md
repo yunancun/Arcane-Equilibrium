@@ -3064,3 +3064,10 @@
 - Missing typed IPC / readonly-probe request gates now produce `OperationRequiredGateMissing`; paper-write rows now use the shared lane-scoped IPC contract constant instead of a hard-coded id.
 - Phase0 packet spec, broker settings README, and the blocked broker capability template now document the same prerequisite.
 - Verification passed: `rustfmt`; broker capability acceptance `10 passed`; full openclaw_types `35` unit/golden + `248` integration/acceptance + `0` doc-tests; workspace `cargo check` PASS; `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Policy Status Read-Row Gate Display
+
+- PM exposed the broker capability read-row probe gate state through Rust `stock_etf.get_policy_status`, FastAPI normalization/fallback, and the Stock/ETF policy GUI panel.
+- `broker_capability_registry` status now includes the lane-scoped IPC contract id, readonly-probe request contract id, and two booleans showing whether read rows require both gates.
+- Accepted broker capability registry payloads that omit/mismatch those gate claims now fail closed as `contract_violation_blocked` with explicit read-row gate violations.
+- Verification passed: Python compile PASS; Node syntax PASS; focused policy/static `15 passed`; focused engine policy-status `1 passed`; full Stock/ETF FastAPI/static `94 passed`; engine `stock_etf` filter `29 passed`; workspace `cargo check` PASS; `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.

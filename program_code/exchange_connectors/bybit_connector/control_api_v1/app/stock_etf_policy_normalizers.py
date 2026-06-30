@@ -19,6 +19,8 @@ from .stock_etf_status_common import (
 
 _RISK_POLICY_CONTRACT_ID = "stock_etf_risk_policy_v1"
 _BROKER_CAPABILITY_REGISTRY_ID = "broker_capability_registry_v1"
+_LANE_SCOPED_IPC_CONTRACT_ID = "lane_scoped_ipc_v1"
+_READONLY_PROBE_REQUEST_CONTRACT_ID = "stock_etf_ibkr_readonly_probe_request_v1"
 
 
 def _as_number(value: Any) -> int | float:
@@ -83,6 +85,10 @@ def _capability_registry_fail_closed(reason: str) -> dict[str, Any]:
         "operation_count": 0,
         "required_audit_field_count": 0,
         "read_operation_count": 0,
+        "lane_scoped_ipc_contract_id": _LANE_SCOPED_IPC_CONTRACT_ID,
+        "readonly_probe_request_contract_id": _READONLY_PROBE_REQUEST_CONTRACT_ID,
+        "read_rows_require_lane_scoped_ipc": False,
+        "read_rows_require_readonly_probe_request": False,
         "paper_operation_count": 0,
         "denied_operation_count": 0,
         "bybit_live_execution_unchanged": True,
@@ -194,6 +200,20 @@ def _normalize_capability_registry(value: Any, reason: str | None) -> dict[str, 
             source.get("required_audit_field_count")
         ),
         "read_operation_count": _as_int(source.get("read_operation_count")),
+        "lane_scoped_ipc_contract_id": _as_str(
+            source.get("lane_scoped_ipc_contract_id"),
+            _LANE_SCOPED_IPC_CONTRACT_ID,
+        ),
+        "readonly_probe_request_contract_id": _as_str(
+            source.get("readonly_probe_request_contract_id"),
+            _READONLY_PROBE_REQUEST_CONTRACT_ID,
+        ),
+        "read_rows_require_lane_scoped_ipc": _as_bool(
+            source.get("read_rows_require_lane_scoped_ipc")
+        ),
+        "read_rows_require_readonly_probe_request": _as_bool(
+            source.get("read_rows_require_readonly_probe_request")
+        ),
         "paper_operation_count": _as_int(source.get("paper_operation_count")),
         "denied_operation_count": _as_int(source.get("denied_operation_count")),
         "bybit_live_execution_unchanged": _as_bool(
@@ -270,7 +290,13 @@ def _registry_has_required_source_proofs(registry: dict[str, Any]) -> bool:
         and _as_int(registry.get("source_version")) == 1
         and _as_int(registry.get("operation_count")) >= 15
         and _as_int(registry.get("required_audit_field_count")) >= 7
-        and _as_int(registry.get("read_operation_count")) >= 1
+        and _as_int(registry.get("read_operation_count")) >= 4
+        and _as_str(registry.get("lane_scoped_ipc_contract_id"), "")
+        == _LANE_SCOPED_IPC_CONTRACT_ID
+        and _as_str(registry.get("readonly_probe_request_contract_id"), "")
+        == _READONLY_PROBE_REQUEST_CONTRACT_ID
+        and _as_bool(registry.get("read_rows_require_lane_scoped_ipc"))
+        and _as_bool(registry.get("read_rows_require_readonly_probe_request"))
         and _as_int(registry.get("paper_operation_count")) >= 3
         and _as_int(registry.get("denied_operation_count")) >= 4
         and _as_bool(registry.get("bybit_live_execution_unchanged"))
@@ -320,6 +346,21 @@ def _policy_status_contract_violations(
         != _BROKER_CAPABILITY_REGISTRY_ID
     ):
         violations.append("registry_expected_id_mismatch")
+    if _as_bool(registry.get("accepted")):
+        if (
+            _as_str(registry.get("lane_scoped_ipc_contract_id"), "")
+            != _LANE_SCOPED_IPC_CONTRACT_ID
+        ):
+            violations.append("registry_lane_scoped_ipc_contract_id_mismatch")
+        if (
+            _as_str(registry.get("readonly_probe_request_contract_id"), "")
+            != _READONLY_PROBE_REQUEST_CONTRACT_ID
+        ):
+            violations.append("registry_readonly_probe_request_contract_id_mismatch")
+        if not _as_bool(registry.get("read_rows_require_lane_scoped_ipc")):
+            violations.append("registry_read_rows_missing_lane_scoped_ipc")
+        if not _as_bool(registry.get("read_rows_require_readonly_probe_request")):
+            violations.append("registry_read_rows_missing_readonly_probe_request")
     if _as_bool(risk.get("enabled")):
         violations.append("risk_policy_runtime_enabled")
     for key in (
