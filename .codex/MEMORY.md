@@ -945,7 +945,7 @@ Do not paste long reports or stable architecture into TODO.
 
 ## 2026-06-30 IBKR Stock/ETF Plan Timeline Checkpoint Guard
 
-- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 61, aligned to the PM memory / Operator source timeline.
+- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 62, aligned to the PM memory / Operator source timeline.
 - Added a structure test that reads the main plan Markdown and fails if PM session checkpoint numbers become duplicated, skipped, or out of order.
 - Verification passed: focused IBKR timeline structure test `1 passed`; section-body compare against `HEAD` PASS; `git diff --check` PASS. The full structure test file still has pre-existing docs README index drift failures unrelated to this guard. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
 
@@ -1065,3 +1065,9 @@ Do not paste long reports or stable architecture into TODO.
 - The production handler parent is reduced from `1292` to `823` lines; `request_summaries.rs` is `477` lines and `status_summaries.rs` remains `934` lines.
 - The handler split structure guard now requires exactly `request_summaries.rs` and `status_summaries.rs`, caps parent/child handler files at `1200` lines, and keeps both child modules free of network/IBKR SDK tokens.
 - Verification passed: `rustfmt --check`; engine `stock_etf` filter `31 passed`; Rust IPC handler/test split static guards `6 passed`; full Stock/ETF FastAPI/static `105 passed`; focused IBKR timeline + trace-title structure tests `2 passed`; `git diff --check` PASS. This grants no new endpoint, IPC method, dispatch route, IBKR contact, SDK import, socket/HTTP, connector runtime, secret access, read probe execution, paper order, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF FastAPI Route IPC Query Helper Guard
+
+- PM collapsed 16 duplicated `stock_etf_routes.py` IPC status query helpers into one central `_query_stock_etf_status(ipc, method)` helper while preserving every endpoint, method constant, normalizer, response envelope, and auth/no-store behavior.
+- `stock_etf_routes.py` is reduced from `587` to `393` lines; the Python no-write static guard now proves there is exactly one `ipc.call(method, params={})` site and that all 16 route handlers invoke it only with allowlisted readonly Stock/ETF method constants.
+- Verification passed: route/no-write focused tests `24 passed`; full Stock/ETF FastAPI/static `105 passed`; focused IBKR timeline + trace-title structure tests `2 passed`; `git diff --check` PASS. This grants no new endpoint, IPC method, client input, IBKR contact, SDK import, socket/HTTP, connector runtime, secret access, read probe execution, paper order, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.

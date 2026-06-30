@@ -83,210 +83,16 @@ async def _get_ipc() -> EngineIPCClient | None:
     return _IPC_CLIENT
 
 
-async def _query_stock_etf_lane_status(
+async def _query_stock_etf_status(
     ipc: EngineIPCClient | None,
+    method: str,
 ) -> tuple[dict[str, Any], str | None]:
     if ipc is None:
         return ({}, "ipc_unavailable")
     try:
-        raw = await ipc.call(_LANE_STATUS_METHOD, params={})
+        raw = await ipc.call(method, params={})
     except Exception as exc:
-        logger.warning("stock_etf: %s failed: %s", _LANE_STATUS_METHOD, exc)
-        return ({}, f"ipc_error:{type(exc).__name__}")
-    return (raw if isinstance(raw, dict) else {}, None)
-
-
-async def _query_stock_etf_phase0_status(
-    ipc: EngineIPCClient | None,
-) -> tuple[dict[str, Any], str | None]:
-    if ipc is None:
-        return ({}, "ipc_unavailable")
-    try:
-        raw = await ipc.call(_PHASE0_STATUS_METHOD, params={})
-    except Exception as exc:
-        logger.warning("stock_etf: %s failed: %s", _PHASE0_STATUS_METHOD, exc)
-        return ({}, f"ipc_error:{type(exc).__name__}")
-    return (raw if isinstance(raw, dict) else {}, None)
-
-
-async def _query_stock_etf_readiness(
-    ipc: EngineIPCClient | None,
-) -> tuple[dict[str, Any], str | None]:
-    if ipc is None:
-        return ({}, "ipc_unavailable")
-    try:
-        raw = await ipc.call(_READINESS_METHOD, params={})
-    except Exception as exc:
-        logger.warning("stock_etf: %s failed: %s", _READINESS_METHOD, exc)
-        return ({}, f"ipc_error:{type(exc).__name__}")
-    return (raw if isinstance(raw, dict) else {}, None)
-
-
-async def _query_stock_etf_account_status(
-    ipc: EngineIPCClient | None,
-) -> tuple[dict[str, Any], str | None]:
-    if ipc is None:
-        return ({}, "ipc_unavailable")
-    try:
-        raw = await ipc.call(_ACCOUNT_STATUS_METHOD, params={})
-    except Exception as exc:
-        logger.warning("stock_etf: %s failed: %s", _ACCOUNT_STATUS_METHOD, exc)
-        return ({}, f"ipc_error:{type(exc).__name__}")
-    return (raw if isinstance(raw, dict) else {}, None)
-
-
-async def _query_stock_etf_data_foundation_status(
-    ipc: EngineIPCClient | None,
-) -> tuple[dict[str, Any], str | None]:
-    if ipc is None:
-        return ({}, "ipc_unavailable")
-    try:
-        raw = await ipc.call(_DATA_FOUNDATION_STATUS_METHOD, params={})
-    except Exception as exc:
-        logger.warning("stock_etf: %s failed: %s", _DATA_FOUNDATION_STATUS_METHOD, exc)
-        return ({}, f"ipc_error:{type(exc).__name__}")
-    return (raw if isinstance(raw, dict) else {}, None)
-
-
-async def _query_stock_etf_policy_status(
-    ipc: EngineIPCClient | None,
-) -> tuple[dict[str, Any], str | None]:
-    if ipc is None:
-        return ({}, "ipc_unavailable")
-    try:
-        raw = await ipc.call(_POLICY_STATUS_METHOD, params={})
-    except Exception as exc:
-        logger.warning("stock_etf: %s failed: %s", _POLICY_STATUS_METHOD, exc)
-        return ({}, f"ipc_error:{type(exc).__name__}")
-    return (raw if isinstance(raw, dict) else {}, None)
-
-
-async def _query_stock_etf_authorization_status(
-    ipc: EngineIPCClient | None,
-) -> tuple[dict[str, Any], str | None]:
-    if ipc is None:
-        return ({}, "ipc_unavailable")
-    try:
-        raw = await ipc.call(_AUTHORIZATION_STATUS_METHOD, params={})
-    except Exception as exc:
-        logger.warning("stock_etf: %s failed: %s", _AUTHORIZATION_STATUS_METHOD, exc)
-        return ({}, f"ipc_error:{type(exc).__name__}")
-    return (raw if isinstance(raw, dict) else {}, None)
-
-
-async def _query_stock_etf_evidence_status(
-    ipc: EngineIPCClient | None,
-) -> tuple[dict[str, Any], str | None]:
-    if ipc is None:
-        return ({}, "ipc_unavailable")
-    try:
-        raw = await ipc.call(_EVIDENCE_STATUS_METHOD, params={})
-    except Exception as exc:
-        logger.warning("stock_etf: %s failed: %s", _EVIDENCE_STATUS_METHOD, exc)
-        return ({}, f"ipc_error:{type(exc).__name__}")
-    return (raw if isinstance(raw, dict) else {}, None)
-
-
-async def _query_stock_etf_universe_status(
-    ipc: EngineIPCClient | None,
-) -> tuple[dict[str, Any], str | None]:
-    if ipc is None:
-        return ({}, "ipc_unavailable")
-    try:
-        raw = await ipc.call(_UNIVERSE_STATUS_METHOD, params={})
-    except Exception as exc:
-        logger.warning("stock_etf: %s failed: %s", _UNIVERSE_STATUS_METHOD, exc)
-        return ({}, f"ipc_error:{type(exc).__name__}")
-    return (raw if isinstance(raw, dict) else {}, None)
-
-
-async def _query_stock_etf_shadow_status(
-    ipc: EngineIPCClient | None,
-) -> tuple[dict[str, Any], str | None]:
-    if ipc is None:
-        return ({}, "ipc_unavailable")
-    try:
-        raw = await ipc.call(_SHADOW_STATUS_METHOD, params={})
-    except Exception as exc:
-        logger.warning("stock_etf: %s failed: %s", _SHADOW_STATUS_METHOD, exc)
-        return ({}, f"ipc_error:{type(exc).__name__}")
-    return (raw if isinstance(raw, dict) else {}, None)
-
-
-async def _query_stock_etf_paper_status(
-    ipc: EngineIPCClient | None,
-) -> tuple[dict[str, Any], str | None]:
-    if ipc is None:
-        return ({}, "ipc_unavailable")
-    try:
-        raw = await ipc.call(_PAPER_STATUS_METHOD, params={})
-    except Exception as exc:
-        logger.warning("stock_etf: %s failed: %s", _PAPER_STATUS_METHOD, exc)
-        return ({}, f"ipc_error:{type(exc).__name__}")
-    return (raw if isinstance(raw, dict) else {}, None)
-
-
-async def _query_stock_etf_reconciliation_status(
-    ipc: EngineIPCClient | None,
-) -> tuple[dict[str, Any], str | None]:
-    if ipc is None:
-        return ({}, "ipc_unavailable")
-    try:
-        raw = await ipc.call(_RECONCILIATION_STATUS_METHOD, params={})
-    except Exception as exc:
-        logger.warning("stock_etf: %s failed: %s", _RECONCILIATION_STATUS_METHOD, exc)
-        return ({}, f"ipc_error:{type(exc).__name__}")
-    return (raw if isinstance(raw, dict) else {}, None)
-
-
-async def _query_stock_etf_scorecard_status(
-    ipc: EngineIPCClient | None,
-) -> tuple[dict[str, Any], str | None]:
-    if ipc is None:
-        return ({}, "ipc_unavailable")
-    try:
-        raw = await ipc.call(_SCORECARD_STATUS_METHOD, params={})
-    except Exception as exc:
-        logger.warning("stock_etf: %s failed: %s", _SCORECARD_STATUS_METHOD, exc)
-        return ({}, f"ipc_error:{type(exc).__name__}")
-    return (raw if isinstance(raw, dict) else {}, None)
-
-
-async def _query_stock_etf_launch_status(
-    ipc: EngineIPCClient | None,
-) -> tuple[dict[str, Any], str | None]:
-    if ipc is None:
-        return ({}, "ipc_unavailable")
-    try:
-        raw = await ipc.call(_LAUNCH_STATUS_METHOD, params={})
-    except Exception as exc:
-        logger.warning("stock_etf: %s failed: %s", _LAUNCH_STATUS_METHOD, exc)
-        return ({}, f"ipc_error:{type(exc).__name__}")
-    return (raw if isinstance(raw, dict) else {}, None)
-
-
-async def _query_stock_etf_release_packet_status(
-    ipc: EngineIPCClient | None,
-) -> tuple[dict[str, Any], str | None]:
-    if ipc is None:
-        return ({}, "ipc_unavailable")
-    try:
-        raw = await ipc.call(_RELEASE_PACKET_STATUS_METHOD, params={})
-    except Exception as exc:
-        logger.warning("stock_etf: %s failed: %s", _RELEASE_PACKET_STATUS_METHOD, exc)
-        return ({}, f"ipc_error:{type(exc).__name__}")
-    return (raw if isinstance(raw, dict) else {}, None)
-
-
-async def _query_stock_etf_disable_cleanup_status(
-    ipc: EngineIPCClient | None,
-) -> tuple[dict[str, Any], str | None]:
-    if ipc is None:
-        return ({}, "ipc_unavailable")
-    try:
-        raw = await ipc.call(_DISABLE_CLEANUP_STATUS_METHOD, params={})
-    except Exception as exc:
-        logger.warning("stock_etf: %s failed: %s", _DISABLE_CLEANUP_STATUS_METHOD, exc)
+        logger.warning("stock_etf: %s failed: %s", method, exc)
         return ({}, f"ipc_error:{type(exc).__name__}")
     return (raw if isinstance(raw, dict) else {}, None)
 
@@ -300,7 +106,7 @@ async def get_stock_etf_lane_status(
     del actor
     _apply_no_store_headers(response)
     ipc = await _get_ipc()
-    raw, reason = await _query_stock_etf_lane_status(ipc)
+    raw, reason = await _query_stock_etf_status(ipc, _LANE_STATUS_METHOD)
     return {
         "ok": True,
         "data": _normalize_lane_status(raw, reason),
@@ -318,7 +124,7 @@ async def get_stock_etf_phase0_status(
     del actor
     _apply_no_store_headers(response)
     ipc = await _get_ipc()
-    raw, reason = await _query_stock_etf_phase0_status(ipc)
+    raw, reason = await _query_stock_etf_status(ipc, _PHASE0_STATUS_METHOD)
     return {
         "ok": True,
         "data": _normalize_phase0_status(raw, reason),
@@ -336,7 +142,7 @@ async def get_stock_etf_readiness(
     del actor
     _apply_no_store_headers(response)
     ipc = await _get_ipc()
-    raw, reason = await _query_stock_etf_readiness(ipc)
+    raw, reason = await _query_stock_etf_status(ipc, _READINESS_METHOD)
     return {
         "ok": True,
         "data": _normalize_readiness(raw, reason),
@@ -354,7 +160,7 @@ async def get_stock_etf_data_foundation_status(
     del actor
     _apply_no_store_headers(response)
     ipc = await _get_ipc()
-    raw, reason = await _query_stock_etf_data_foundation_status(ipc)
+    raw, reason = await _query_stock_etf_status(ipc, _DATA_FOUNDATION_STATUS_METHOD)
     return {
         "ok": True,
         "data": _normalize_data_foundation_status(raw, reason),
@@ -372,7 +178,7 @@ async def get_stock_etf_policy_status(
     del actor
     _apply_no_store_headers(response)
     ipc = await _get_ipc()
-    raw, reason = await _query_stock_etf_policy_status(ipc)
+    raw, reason = await _query_stock_etf_status(ipc, _POLICY_STATUS_METHOD)
     return {
         "ok": True,
         "data": _normalize_policy_status(raw, reason),
@@ -390,7 +196,7 @@ async def get_stock_etf_authorization_status(
     del actor
     _apply_no_store_headers(response)
     ipc = await _get_ipc()
-    raw, reason = await _query_stock_etf_authorization_status(ipc)
+    raw, reason = await _query_stock_etf_status(ipc, _AUTHORIZATION_STATUS_METHOD)
     return {
         "ok": True,
         "data": _normalize_authorization_status(raw, reason),
@@ -408,7 +214,7 @@ async def get_stock_etf_account_status(
     del actor
     _apply_no_store_headers(response)
     ipc = await _get_ipc()
-    raw, reason = await _query_stock_etf_account_status(ipc)
+    raw, reason = await _query_stock_etf_status(ipc, _ACCOUNT_STATUS_METHOD)
     return {
         "ok": True,
         "data": _normalize_account_status(raw, reason),
@@ -426,7 +232,7 @@ async def get_stock_etf_evidence_status(
     del actor
     _apply_no_store_headers(response)
     ipc = await _get_ipc()
-    raw, reason = await _query_stock_etf_evidence_status(ipc)
+    raw, reason = await _query_stock_etf_status(ipc, _EVIDENCE_STATUS_METHOD)
     return {
         "ok": True,
         "data": _normalize_evidence_status(raw, reason),
@@ -444,7 +250,7 @@ async def get_stock_etf_universe_status(
     del actor
     _apply_no_store_headers(response)
     ipc = await _get_ipc()
-    raw, reason = await _query_stock_etf_universe_status(ipc)
+    raw, reason = await _query_stock_etf_status(ipc, _UNIVERSE_STATUS_METHOD)
     return {
         "ok": True,
         "data": _normalize_universe_status(raw, reason),
@@ -462,7 +268,7 @@ async def get_stock_etf_shadow_status(
     del actor
     _apply_no_store_headers(response)
     ipc = await _get_ipc()
-    raw, reason = await _query_stock_etf_shadow_status(ipc)
+    raw, reason = await _query_stock_etf_status(ipc, _SHADOW_STATUS_METHOD)
     return {
         "ok": True,
         "data": _normalize_shadow_status(raw, reason),
@@ -480,7 +286,7 @@ async def get_stock_etf_paper_status(
     del actor
     _apply_no_store_headers(response)
     ipc = await _get_ipc()
-    raw, reason = await _query_stock_etf_paper_status(ipc)
+    raw, reason = await _query_stock_etf_status(ipc, _PAPER_STATUS_METHOD)
     return {
         "ok": True,
         "data": _normalize_paper_status(raw, reason),
@@ -498,7 +304,7 @@ async def get_stock_etf_reconciliation_status(
     del actor
     _apply_no_store_headers(response)
     ipc = await _get_ipc()
-    raw, reason = await _query_stock_etf_reconciliation_status(ipc)
+    raw, reason = await _query_stock_etf_status(ipc, _RECONCILIATION_STATUS_METHOD)
     return {
         "ok": True,
         "data": _normalize_reconciliation_status(raw, reason),
@@ -516,7 +322,7 @@ async def get_stock_etf_scorecard_status(
     del actor
     _apply_no_store_headers(response)
     ipc = await _get_ipc()
-    raw, reason = await _query_stock_etf_scorecard_status(ipc)
+    raw, reason = await _query_stock_etf_status(ipc, _SCORECARD_STATUS_METHOD)
     return {
         "ok": True,
         "data": _normalize_scorecard_status(raw, reason),
@@ -534,7 +340,7 @@ async def get_stock_etf_launch_status(
     del actor
     _apply_no_store_headers(response)
     ipc = await _get_ipc()
-    raw, reason = await _query_stock_etf_launch_status(ipc)
+    raw, reason = await _query_stock_etf_status(ipc, _LAUNCH_STATUS_METHOD)
     return {
         "ok": True,
         "data": _normalize_launch_status(raw, reason),
@@ -552,7 +358,7 @@ async def get_stock_etf_release_packet_status(
     del actor
     _apply_no_store_headers(response)
     ipc = await _get_ipc()
-    raw, reason = await _query_stock_etf_release_packet_status(ipc)
+    raw, reason = await _query_stock_etf_status(ipc, _RELEASE_PACKET_STATUS_METHOD)
     return {
         "ok": True,
         "data": _normalize_release_packet_status(raw, reason),
@@ -570,7 +376,7 @@ async def get_stock_etf_disable_cleanup_status(
     del actor
     _apply_no_store_headers(response)
     ipc = await _get_ipc()
-    raw, reason = await _query_stock_etf_disable_cleanup_status(ipc)
+    raw, reason = await _query_stock_etf_status(ipc, _DISABLE_CLEANUP_STATUS_METHOD)
     return {
         "ok": True,
         "data": _normalize_disable_cleanup_status(raw, reason),
