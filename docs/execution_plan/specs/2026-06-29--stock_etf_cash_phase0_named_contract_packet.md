@@ -204,7 +204,59 @@ The validator requires exact `contract_id == non_bybit_api_allowlist_v1`,
 orders, account writes, margin/short/options/CFD, entitlement purchases, IBKR
 contact, serialized secrets, and Bybit-live regression.
 
-## 5A. `instrument_identity_contract_v1`
+## 5A. `stock_etf_ibkr_readonly_probe_request_v1`
+
+This contract pins the source-only request envelope that must exist before any
+future IBKR health, account, contract-details, or market-data read probe. It is
+stricter than the raw allowlist: every probe request must carry the Phase 2 gate
+artifact, allowlist, secret-slot, topology, session-attestation, redaction,
+rate-limit, and audit-policy hashes before contact can be considered.
+
+Required fields:
+
+- exact contract id `stock_etf_ibkr_readonly_probe_request_v1`
+- `source_version=1`
+- `asset_lane=stock_etf_cash`
+- `broker=ibkr`
+- `environment=readonly`
+- probe kind mapped to one approved read action
+- broker operation mapped to `health_read`, `account_snapshot_read`,
+  `contract_details_read`, or `market_data_read`
+- `authority_scope=readonly`
+- `effect_capable=false`
+- request/probe ids
+- Phase 2 gate artifact hash
+- `non_bybit_api_allowlist_v1` id/hash
+- `ibkr_secret_slot_contract_v1` id/hash
+- `ibkr_api_session_topology_v1` id/hash
+- `ibkr_session_attestation_v1` id/hash
+- redaction, rate-limit, and audit-event policy id/hash fields
+- raw/source/redacted artifact hashes
+
+Denied before runtime:
+
+- IBKR contact already performed
+- connector runtime started
+- secret content serialization
+- order routing or paper order submission
+- DB apply or evidence-clock start
+- Bybit path reuse
+- tiny-live/live authority
+- margin/short/options/CFD or account-write requests
+- market-data entitlement purchase
+- Client Portal Web API use
+- Python direct broker writes
+
+Source validator:
+`openclaw_types::stock_etf_ibkr_readonly_probe_request::StockEtfIbkrReadonlyProbeRequestV1`.
+The validator requires exact contract identity/source version, Stock/ETF IBKR
+readonly identity, allowlisted read action/operation mapping, full pre-contact
+lineage hashes, and side-effect denials. It rejects paper-write/denied actions,
+runtime/contact/write evidence, entitlement purchase, Client Portal Web API use,
+secret serialization, and Bybit path reuse. This contract performs no probe and
+does not authorize any IBKR contact by itself.
+
+## 5B. `instrument_identity_contract_v1`
 
 Instrument identity must be point-in-time and source-artifact backed before
 market data, contract details, shadow fill reconstruction, or paper order intent

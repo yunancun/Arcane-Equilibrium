@@ -20,6 +20,7 @@ use crate::stock_etf_broker_capability_registry::STOCK_ETF_BROKER_CAPABILITY_REG
 use crate::stock_etf_db_evidence_ddl::STOCK_ETF_DB_EVIDENCE_CONTRACT_ID;
 use crate::stock_etf_disable_cleanup_runbook::STOCK_ETF_DISABLE_CLEANUP_RUNBOOK_ID;
 use crate::stock_etf_gui_lane_contract::STOCK_ETF_GUI_LANE_CONTRACT_ID;
+use crate::stock_etf_ibkr_readonly_probe_request::STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID;
 use crate::stock_etf_instrument_identity::STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID;
 use crate::stock_etf_lane::{AssetLane, Broker, STOCK_ETF_ASSET_LANE_TAXONOMY_CONTRACT_ID};
 use crate::stock_etf_lane_scoped_ipc::STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID;
@@ -57,6 +58,7 @@ const REQUIRED_CONTRACTS: &[&str] = &[
     STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID,
     IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
     NON_BYBIT_API_ALLOWLIST_CONTRACT_ID,
+    STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID,
     STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID,
     STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
     STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,

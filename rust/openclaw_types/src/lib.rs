@@ -24,6 +24,7 @@ pub mod stock_etf_broker_capability_registry;
 pub mod stock_etf_db_evidence_ddl;
 pub mod stock_etf_disable_cleanup_runbook;
 pub mod stock_etf_gui_lane_contract;
+pub mod stock_etf_ibkr_readonly_probe_request;
 pub mod stock_etf_instrument_identity;
 pub mod stock_etf_lane;
 pub mod stock_etf_lane_scoped_ipc;
@@ -129,6 +130,11 @@ pub use stock_etf_gui_lane_contract::{
     STOCK_ETF_GUI_RECONCILIATION_STATUS_ENDPOINT, STOCK_ETF_GUI_RELEASE_PACKET_STATUS_ENDPOINT,
     STOCK_ETF_GUI_SCORECARD_STATUS_ENDPOINT, STOCK_ETF_GUI_SHADOW_STATUS_ENDPOINT,
     STOCK_ETF_GUI_UNIVERSE_STATUS_ENDPOINT,
+};
+pub use stock_etf_ibkr_readonly_probe_request::{
+    StockEtfIbkrReadonlyProbeBlocker, StockEtfIbkrReadonlyProbeKind,
+    StockEtfIbkrReadonlyProbeRequestV1, StockEtfIbkrReadonlyProbeVerdict,
+    STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID,
 };
 pub use stock_etf_instrument_identity::{
     StockEtfCurrency, StockEtfInstrumentIdentityBlocker, StockEtfInstrumentIdentityV1,

@@ -35,6 +35,7 @@
     "broker_capability_registry_v1",
     "phase2_ibkr_external_surface_gate_v1",
     "non_bybit_api_allowlist_v1",
+    "stock_etf_ibkr_readonly_probe_request_v1",
     "instrument_identity_contract_v1",
     "stock_etf_pit_universe_contract_v1",
     "stock_etf_strategy_hypothesis_contract_v1",
