@@ -1267,6 +1267,46 @@ PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 
 scorecard writer、不做 Linux runtime sync/restart、不啟動 paper-shadow launch、不授權
 tiny-live/live 或任何 Bybit behavior change。
 
+## 28. 2026-06-30 PM session source checkpoint：Paper Fill Import IPC Binding
+
+本 session 繼續 Phase 1D source-only IPC hardening。上一個 checkpoint 已新增
+`stock_etf_paper_fill_import_request_v1`；本 checkpoint 把
+`stock_etf.import_paper_fills` Rust IPC skeleton 綁到該 typed validator，確保未來
+fill import runtime 不能繞過 request contract。
+
+新增 checkpoint：
+
+- `stock_etf.import_paper_fills` 會嘗試把 params 解析成
+  `StockEtfPaperFillImportRequestV1`。
+- Response 新增 `fill_import_request` verdict，包含 expected contract id、parse
+  status、expected/request method、IPC method match、validator blockers、
+  read-only authority posture、lineage field presence 與 side-effect boundary flags。
+- Minimal/stale params 會得到 `fill_import_request_parse_failed`，且 top-level
+  `fill_import_request_accepted_for_ipc=false`。
+- Valid fill-import request 只代表 typed request shape 通過；top-level fixture 仍保留
+  `runtime_authority_denied=true`，且 `ibkr_call_performed=false`、
+  `secret_slot_touched=false`、`order_routed=false`、`bybit_ipc_reused=false`。
+- Handler 的 `allowed` 現在同時要求 broker capability decision、paper request
+  envelope verdict 與 fill-import request verdict 全部 accepted-for-IPC。
+
+驗證：
+
+- `rustfmt --edition 2021 --check rust/openclaw_engine/src/ipc_server/handlers/stock_etf.rs rust/openclaw_engine/src/ipc_server/tests/stock_etf.rs`：PASS。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf_import_paper_fills -- --nocapture`：
+  fill-import IPC focused `2 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_paper_fill_import_request_acceptance -- --nocapture`：
+  fill import request acceptance `6 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
+  Stock/ETF engine filter `25 passed`（既有 warnings only）。
+- `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 connector runtime、
+不啟動 lifecycle writer、不啟動 Phase 1/2/3/4/5 runtime、不匯入 fill、不做 DB
+migration/apply、不做 Postgres dry-run、不啟動 evidence clock、不啟動 scorecard writer、
+不做 Linux runtime sync/restart、不送 paper order、不做 cancel/replace、不授權
+tiny-live/live 或任何 Bybit behavior change。
+
 ## 24. 2026-06-30 PM session source checkpoint：Paper Lifecycle State-Machine Contract Hardening
 
 本 session 繼續 Phase 1D，但仍停留在 source-only lifecycle contract。上一個

@@ -5,7 +5,7 @@ use super::{
     empty_account_manager_slot, empty_budget_slot, empty_cost_edge_advisor_slot,
     empty_h_state_cache_slot, empty_teacher_slot, make_test_config, make_test_data_dir,
 };
-use openclaw_types::StockEtfPaperOrderRequestEnvelopeV1;
+use openclaw_types::{StockEtfPaperFillImportRequestV1, StockEtfPaperOrderRequestEnvelopeV1};
 
 #[tokio::test]
 async fn stock_etf_submit_denies_without_paper_channel_or_ibkr_call() {
@@ -178,6 +178,125 @@ async fn stock_etf_paper_request_envelope_rejects_ipc_method_mismatch() {
     );
     assert_eq!(result["request_envelope"]["accepted_for_ipc"], false);
     assert_eq!(result["request_envelope_accepted_for_ipc"], false);
+}
+
+#[tokio::test]
+async fn stock_etf_import_paper_fills_validates_fill_import_request_without_runtime_authority() {
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let params = serde_json::to_string(&StockEtfPaperFillImportRequestV1::accepted_fixture())
+        .expect("fill import request json");
+    let req = format!(
+        r#"{{"jsonrpc":"2.0","method":"stock_etf.import_paper_fills","params":{params},"id":48013}}"#
+    );
+    let resp = dispatch_request(
+        &req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
+    )
+    .await;
+
+    assert!(resp.error.is_none());
+    let result = resp.result.expect("stock_etf result");
+    assert_eq!(result["allowed"], false);
+    assert_eq!(result["runtime_authority_denied"], true);
+    assert_eq!(result["ibkr_call_performed"], false);
+    assert_eq!(result["secret_slot_touched"], false);
+    assert_eq!(result["order_routed"], false);
+    assert_eq!(result["bybit_ipc_reused"], false);
+    assert_eq!(result["fill_import_request"]["parse_ok"], true);
+    assert_eq!(result["fill_import_request"]["accepted"], true);
+    assert_eq!(
+        result["fill_import_request"]["expected_request_method"],
+        "import_paper_fills"
+    );
+    assert_eq!(
+        result["fill_import_request"]["request_method"],
+        "import_paper_fills"
+    );
+    assert_eq!(result["fill_import_request"]["ipc_method_matches"], true);
+    assert_eq!(result["fill_import_request"]["accepted_for_ipc"], true);
+    assert_eq!(result["fill_import_request_accepted_for_ipc"], true);
+    assert_eq!(result["fill_import_request"]["effect_capable"], false);
+    assert_eq!(
+        result["fill_import_request"]["reconciliation_run_id_present"],
+        true
+    );
+    assert_eq!(result["fill_import_request"]["execution_id_present"], true);
+    assert_eq!(
+        result["fill_import_request"]["raw_artifact_hash_present"],
+        true
+    );
+    assert_eq!(
+        result["fill_import_request"]["fill_import_performed"],
+        false
+    );
+    assert_eq!(result["fill_import_request"]["db_apply_performed"], false);
+    assert_eq!(result["phase2"]["first_ibkr_contact_allowed"], false);
+}
+
+#[tokio::test]
+async fn stock_etf_import_paper_fills_rejects_stale_or_minimal_params() {
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let req = r#"{"jsonrpc":"2.0","method":"stock_etf.import_paper_fills","params":{},"id":48014}"#;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
+    )
+    .await;
+
+    assert!(resp.error.is_none());
+    let result = resp.result.expect("stock_etf result");
+    assert_eq!(result["allowed"], false);
+    assert_eq!(result["ibkr_call_performed"], false);
+    assert_eq!(result["secret_slot_touched"], false);
+    assert_eq!(result["order_routed"], false);
+    assert_eq!(result["bybit_ipc_reused"], false);
+    assert_eq!(result["fill_import_request"]["parse_ok"], false);
+    assert_eq!(result["fill_import_request"]["accepted"], false);
+    assert_eq!(
+        result["fill_import_request"]["blockers"][0],
+        "fill_import_request_parse_failed"
+    );
+    assert_eq!(result["fill_import_request"]["accepted_for_ipc"], false);
+    assert_eq!(result["fill_import_request_accepted_for_ipc"], false);
+    assert_eq!(
+        result["fill_import_request"]["fill_import_performed"],
+        false
+    );
+    assert_eq!(result["fill_import_request"]["db_apply_performed"], false);
 }
 
 #[tokio::test]

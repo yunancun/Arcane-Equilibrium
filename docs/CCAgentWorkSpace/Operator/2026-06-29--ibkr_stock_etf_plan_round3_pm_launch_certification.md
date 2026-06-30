@@ -261,6 +261,36 @@ Verification 已過：
 沒有 DB apply、沒有 evidence clock、沒有 scorecard writer、沒有 Linux runtime
 sync/restart，也沒有改動 Bybit live execution 行為。
 
+## 2026-06-30 Operator Update — Paper Fill Import IPC Binding
+
+本 session 已完成下一個 source-only checkpoint：
+`stock_etf.import_paper_fills` typed IPC binding。
+
+這次仍不是 fill importer，也不是 DB persistence。變更只在 Rust IPC handler 與
+engine tests：
+
+- `stock_etf.import_paper_fills` 現在會嘗試解析 params 為
+  `stock_etf_paper_fill_import_request_v1`。
+- Response 會回傳 `fill_import_request` verdict：parse status、expected/request
+  method、IPC method match、validator blockers、read-only authority posture、lineage
+  fields、side-effect boundary flags。
+- Minimal/stale params 會顯示 `fill_import_request_parse_failed`。
+- Valid fill-import request 可以通過 typed validator，但仍是 no-runtime fixture；
+  不會匯入 fill、不寫 DB、不碰 IBKR、不碰 secret，也不重用 Bybit path。
+
+Verification 已過：
+
+- Engine fill-import IPC focused：`2 passed`
+- Fill import request acceptance：`6 passed`
+- Engine Stock/ETF：`25 passed`
+- Workspace `cargo check`：PASS
+- Rust format check / `git diff --check`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 secret access/creation、沒有 connector runtime、
+沒有 lifecycle writer、沒有 Phase 1/2/3/4/5 runtime start、沒有 fill import、沒有
+DB apply、沒有 paper order/cancel/replace、沒有 evidence clock、沒有 scorecard
+writer、沒有 Linux runtime sync/restart，也沒有改動 Bybit live execution 行為。
+
 ## 2026-06-30 Operator Update — Paper Lifecycle State Machine
 
 本 session 已完成下一個 source-only checkpoint：
