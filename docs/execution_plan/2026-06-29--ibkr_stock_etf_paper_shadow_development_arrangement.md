@@ -2111,7 +2111,7 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 
 新增 checkpoint：
 
-- 主計畫 PM session checkpoint 現在從 14 到 58 連續遞增，無重複編號。
+- 主計畫 PM session checkpoint 現在從 14 到 59 連續遞增，無重複編號。
 - 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
   lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
   connector skeleton / readonly-probe / broker read gate / policy display / operation
@@ -2672,6 +2672,48 @@ sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
   `31 passed`。
 - `python3 -m pytest -q tests/structure/test_stock_etf_ipc_handler_split_static.py tests/structure/test_stock_etf_ipc_tests_split_static.py`：
   `4 passed`。
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  `105 passed`。
+- `python3 -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
+  `2 passed`。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 59. 2026-06-30 PM session source checkpoint：Route Fixture Split Guard
+
+本 checkpoint 降低 Stock/ETF FastAPI route fixture 的結構風險。前一輪 route
+tests 拆分後，共用 fixture helper 已重新成長到 1525 行；這次只拆 test
+fixture payload，不改 production route、不改 endpoint、不改 IPC method、不啟動
+runtime。
+
+已完成：
+
+- 移除 legacy flat helper
+  `program_code/exchange_connectors/bybit_connector/control_api_v1/tests/stock_etf_route_fixtures.py`。
+- 新增同名 package
+  `program_code/exchange_connectors/bybit_connector/control_api_v1/tests/stock_etf_route_fixtures/`。
+- 依責任切分為 `app.py`、`phase2_payloads.py`、`phase3_payloads.py`、
+  `phase5_payloads.py`，由 `__init__.py` 維持原有 re-export surface。
+- 既有 tests 的 `from stock_etf_route_fixtures import ...` import surface 不變。
+- 拆分後模組行數為 `57`、`63`、`482`、`629`、`364`，全部低於 800 行
+  review-attention threshold。
+- 新增 `tests/structure/test_stock_etf_route_fixtures_split_static.py`，要求 legacy
+  flat helper 保持移除、package module/export surface 穩定，並阻止 payload fixture
+  模組引入 network / IBKR SDK / file-write token。
+- 本 checkpoint 不改 runtime behavior、不改 Bybit path、不改 IBKR boundary，只做
+  FastAPI route test fixture structure hygiene。
+
+驗證：
+
+- `python3 -m py_compile program_code/exchange_connectors/bybit_connector/control_api_v1/tests/stock_etf_route_fixtures/*.py`：
+  PASS。
+- `python3 -m pytest -q tests/structure/test_stock_etf_route_fixtures_split_static.py`：
+  `3 passed`。
 - `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
   `105 passed`。
 - `python3 -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
