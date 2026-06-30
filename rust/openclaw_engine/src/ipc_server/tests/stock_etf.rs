@@ -5,6 +5,7 @@ use super::{
     empty_account_manager_slot, empty_budget_slot, empty_cost_edge_advisor_slot,
     empty_h_state_cache_slot, empty_teacher_slot, make_test_config, make_test_data_dir,
 };
+use openclaw_types::StockEtfPaperOrderRequestEnvelopeV1;
 
 #[tokio::test]
 async fn stock_etf_submit_denies_without_paper_channel_or_ibkr_call() {
@@ -44,11 +45,139 @@ async fn stock_etf_submit_denies_without_paper_channel_or_ibkr_call() {
     assert_eq!(result["secret_slot_touched"], false);
     assert_eq!(result["order_routed"], false);
     assert_eq!(result["bybit_ipc_reused"], false);
+    assert_eq!(
+        result["request_envelope"]["expected_contract_id"],
+        "stock_etf_paper_order_request_v1"
+    );
+    assert_eq!(result["request_envelope"]["parse_ok"], false);
+    assert_eq!(result["request_envelope"]["accepted"], false);
+    assert_eq!(
+        result["request_envelope"]["blockers"][0],
+        "request_envelope_parse_failed"
+    );
+    assert_eq!(result["request_envelope_accepted_for_ipc"], false);
     assert_eq!(result["phase2"]["first_ibkr_contact_allowed"], false);
     assert_eq!(
         result["phase2"]["external_surface_gate"]["ibkr_contact_allowed"],
         false
     );
+}
+
+#[tokio::test]
+async fn stock_etf_preview_validates_paper_request_envelope_without_runtime_authority() {
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let params =
+        serde_json::to_string(&StockEtfPaperOrderRequestEnvelopeV1::accepted_preview_fixture())
+            .expect("preview envelope json");
+    let req = format!(
+        r#"{{"jsonrpc":"2.0","method":"stock_etf.preview_paper_order","params":{params},"id":48011}}"#
+    );
+    let resp = dispatch_request(
+        &req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
+    )
+    .await;
+
+    assert!(resp.error.is_none());
+    let result = resp.result.expect("stock_etf result");
+    assert_eq!(result["allowed"], false);
+    assert_eq!(result["runtime_authority_denied"], true);
+    assert_eq!(result["ibkr_call_performed"], false);
+    assert_eq!(result["secret_slot_touched"], false);
+    assert_eq!(result["order_routed"], false);
+    assert_eq!(result["bybit_ipc_reused"], false);
+    assert_eq!(result["request_envelope"]["parse_ok"], true);
+    assert_eq!(result["request_envelope"]["accepted"], true);
+    assert_eq!(
+        result["request_envelope"]["expected_request_method"],
+        "preview_paper_order"
+    );
+    assert_eq!(
+        result["request_envelope"]["request_method"],
+        "preview_paper_order"
+    );
+    assert_eq!(result["request_envelope"]["ipc_method_matches"], true);
+    assert_eq!(result["request_envelope"]["accepted_for_ipc"], true);
+    assert_eq!(result["request_envelope_accepted_for_ipc"], true);
+    assert_eq!(result["request_envelope"]["effect_capable"], false);
+    assert_eq!(result["request_envelope"]["request_id_present"], true);
+    assert_eq!(
+        result["request_envelope"]["account_fingerprint_hash_present"],
+        true
+    );
+}
+
+#[tokio::test]
+async fn stock_etf_paper_request_envelope_rejects_ipc_method_mismatch() {
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let params =
+        serde_json::to_string(&StockEtfPaperOrderRequestEnvelopeV1::accepted_submit_fixture())
+            .expect("submit envelope json");
+    let req = format!(
+        r#"{{"jsonrpc":"2.0","method":"stock_etf.cancel_paper_order","params":{params},"id":48012}}"#
+    );
+    let resp = dispatch_request(
+        &req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
+    )
+    .await;
+
+    assert!(resp.error.is_none());
+    let result = resp.result.expect("stock_etf result");
+    assert_eq!(result["allowed"], false);
+    assert_eq!(result["ibkr_call_performed"], false);
+    assert_eq!(result["order_routed"], false);
+    assert_eq!(result["request_envelope"]["parse_ok"], true);
+    assert_eq!(result["request_envelope"]["accepted"], true);
+    assert_eq!(
+        result["request_envelope"]["expected_request_method"],
+        "cancel_paper_order"
+    );
+    assert_eq!(
+        result["request_envelope"]["request_method"],
+        "submit_paper_order"
+    );
+    assert_eq!(result["request_envelope"]["ipc_method_matches"], false);
+    assert_eq!(
+        result["request_envelope"]["ipc_binding_blockers"][0],
+        "ipc_method_mismatch"
+    );
+    assert_eq!(result["request_envelope"]["accepted_for_ipc"], false);
+    assert_eq!(result["request_envelope_accepted_for_ipc"], false);
 }
 
 #[tokio::test]

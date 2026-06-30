@@ -2945,3 +2945,11 @@
 - The FastAPI guard now blocks stale lifecycle payload shapes and any pre-gate event-chain/request-envelope/stale-policy readiness claim as `contract_violation_blocked`; fallback paths stay display-only and preserve `order_routed=false`.
 - Verification passed: Python compile PASS; focused paper-status pytest `6 passed`; wider Stock/ETF FastAPI/static pytest `19 passed`; JS syntax PASS; Rust format check PASS; engine `stock_etf_paper_status` focused PASS; engine `stock_etf` filter `21 passed`; workspace `cargo check` PASS.
 - PM boundary unchanged: no IBKR contact, no secret access/creation, no connector runtime, no lifecycle writer, no Phase 1/2/3/4/5 runtime start, no paper order/cancel/replace, no fill import, no DB apply, no evidence clock, no scorecard writer, no Linux runtime sync/restart, no tiny-live/live authority, and no Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Paper IPC Request Envelope Binding
+
+- PM hardened the Phase 1D Rust IPC fixture so `stock_etf.preview_paper_order`, `stock_etf.submit_paper_order`, `stock_etf.cancel_paper_order`, and `stock_etf.replace_paper_order` parse their params as `stock_etf_paper_order_request_v1` when present and return a typed request-envelope verdict.
+- The additive response surface reports parse status, expected/request method, IPC method binding, validator blockers, authority/effect posture, lineage field presence, and boundary flags; it keeps top-level IBKR/secret/routing/Bybit side-effect fields false.
+- Tests now prove stale/minimal params fail envelope parsing without using the Bybit paper channel, valid preview envelope validation stays no-runtime, and a valid submit envelope cannot be accepted under the cancel IPC method.
+- Verification passed: Rust format check PASS; openclaw_engine `stock_etf` filter `23 passed`; openclaw_types paper request acceptance `8 passed`; workspace `cargo check` PASS.
+- PM boundary unchanged: no IBKR contact, no secret access/creation, no connector runtime, no lifecycle writer, no Phase 1/2/3/4/5 runtime start, no paper order/cancel/replace, no fill import, no DB apply, no evidence clock, no scorecard writer, no Linux runtime sync/restart, no tiny-live/live authority, and no Bybit behavior change.

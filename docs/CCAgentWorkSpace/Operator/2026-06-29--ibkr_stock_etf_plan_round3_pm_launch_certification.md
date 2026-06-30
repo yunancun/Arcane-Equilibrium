@@ -327,6 +327,34 @@ Verification 已過：
 replace、沒有 fill import、沒有 DB apply、沒有 evidence clock、沒有 scorecard
 writer、沒有 Linux runtime sync/restart，也沒有改動 Bybit live execution 行為。
 
+## 2026-06-30 Operator Update — Paper IPC Request Envelope Binding
+
+本 session 已完成下一個 source-only checkpoint：paper IPC request envelope binding。
+
+這次不是 paper order runtime。變更只在 Rust `stock_etf.preview/submit/cancel/
+replace_paper_order` fixture：
+
+- IPC handler 現在會嘗試解析 params 為 `stock_etf_paper_order_request_v1` envelope。
+- Response 會回傳 `request_envelope` verdict：parse status、expected/request method、
+  IPC method match、validator blockers、authority/effect posture、lineage fields、
+  side-effect boundary flags。
+- 舊的 minimal/stale params 會顯示 `request_envelope_parse_failed`，但仍不需要
+  Bybit paper command channel，也不會觸碰 IBKR。
+- Valid preview envelope 可以通過 typed validator，但仍是 no-runtime fixture。
+- Valid submit envelope 若送到 cancel IPC method，會被擋成 `ipc_method_mismatch`。
+
+Verification 已過：
+
+- Engine Stock/ETF：`23 passed`
+- Paper request acceptance：`8 passed`
+- Workspace `cargo check`：PASS
+- Rust format check：PASS
+
+邊界不變：沒有 IBKR contact、沒有 secret access/creation、沒有 connector runtime、
+沒有 lifecycle writer、沒有 Phase 1/2/3/4/5 runtime start、沒有 paper order/cancel/
+replace、沒有 fill import、沒有 DB apply、沒有 evidence clock、沒有 scorecard
+writer、沒有 Linux runtime sync/restart，也沒有改動 Bybit live execution 行為。
+
 ## 2026-06-30 Operator Update — Paper Request Envelope Contract
 
 本 session 已完成下一個 source-only checkpoint：
