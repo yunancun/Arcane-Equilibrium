@@ -164,3 +164,28 @@ PM 判定：checkpoint 可接受，但仍不是 launch approval。未批准 IBKR
 connector runtime、paper order rehearsal/submit、fill import、evidence clock、scorecard
 writer、DB apply、GUI lane authority、Phase 2/3/5 start、tiny-live、live 或 Bybit
 behavior change。
+
+## 2026-06-30 PM Session Hygiene Checkpoint — Stock/ETF GUI Split
+
+Authorization Status 落地後，`tab-stock-etf.html` 累積到 2225 行，已超過 repo
+2000 行硬上限。PM 先完成純 GUI 拆檔，避免後續每個 read-only surface 都擴大
+維護風險。
+
+已完成：
+
+- 將大段 Stock/ETF inline JS 原樣抽出為 `/static/tab-stock-etf.js`。
+- `tab-stock-etf.html` 降至 341 行；`tab-stock-etf.js` 為 1883 行。
+- Static no-write guard 改為掃 HTML+JS bundle，保留 endpoint presence 與 forbidden
+  write snippet 檢查。
+
+Verification：
+
+- `python3 -m py_compile` for changed route/static tests：PASS。
+- `node --check tab-stock-etf.js`：PASS。
+- HTML inline parser：PASS（1 inline script）。
+- Full Stock/ETF FastAPI/static pytest `77 passed`。
+- `git diff --check` PASS。
+
+PM 判定：checkpoint 可接受。這是純拆檔 hygiene；未新增 endpoint、未改 IPC/contract、
+未批准 IBKR contact、secret、connector runtime、paper order、DB apply、Linux runtime
+sync/restart、tiny-live/live 或 Bybit behavior change。

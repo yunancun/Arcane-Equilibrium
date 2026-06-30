@@ -31,6 +31,12 @@
 - Verification passed: Stock/ETF FastAPI/static `77`, engine Stock/ETF `18`, GUI/lane IPC `17`, openclaw_types `35 + 206 + 0 doc-tests`, workspace cargo check PASS.
 - Boundary unchanged: no IBKR contact, secret access, connector runtime, paper order, DB apply, evidence clock, Linux runtime sync/restart, tiny-live/live, or Bybit behavior change.
 
+## 2026-06-30 IBKR Stock/ETF GUI Split Hygiene
+
+- PM split accumulated Stock/ETF tab inline JS from `tab-stock-etf.html` into `tab-stock-etf.js`; line counts are now 341 and 1883, both below the 2000-line hard cap.
+- Static no-write guards now scan the HTML+JS bundle; verification passed with JS syntax check, inline parser, Stock/ETF FastAPI/static `77`, and diff-check.
+- Boundary unchanged: no new endpoint, IBKR contact, secret, connector runtime, paper order, DB apply, Linux runtime sync/restart, or Bybit behavior change.
+
 ## 2026-06-30 IBKR Stock/ETF Market-Data Provenance Contract
 
 - PM hardened `stock_market_data_provenance_v1` inside the Phase 3 evidence contract surface for lane/broker/environment, vendor/entitlement, payload/source hashes, timestamps, adjustment marker, instrument identity, and calendar session provenance.
