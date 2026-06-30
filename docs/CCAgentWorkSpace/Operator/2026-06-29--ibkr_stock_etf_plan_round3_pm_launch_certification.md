@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 44 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 45 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -924,6 +924,32 @@ Verification 已過：
 - Readonly-probe IPC focused：`3 passed`
 - Engine Stock/ETF filter：`30 passed`
 - Workspace `cargo check`：PASS
+- `git diff --check`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
+access/creation、沒有 connector runtime、沒有 read probe execution、沒有 paper
+order/cancel/replace、沒有 fill import、沒有 evidence writer、沒有 DB apply、沒有
+evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-06-30 Operator Update — GUI Endpoint Template Consistency Guard
+
+本 session 已加固 Stock/ETF GUI / FastAPI endpoint 一致性：
+
+- 新增 `test_stock_etf_openapi_paths_match_gui_lane_contract_template`。
+- FastAPI OpenAPI 暴露的 Stock/ETF GET endpoint set 必須等於
+  `settings/broker/stock_etf_gui_lane_contract.template.toml` 的 `*_endpoint` set。
+- 測試排除 root redirect `/api/v1/stock-etf`，因它是 authenticated redirect，不是
+  GUI lane contract status endpoint。
+- parser 覆蓋含數字的 key，例如 `phase0_status_endpoint`。
+
+這次不是新增 endpoint、不是 GUI runtime activation、不是 IBKR contact、不是
+connector runtime，也不是 paper order。
+
+Verification 已過：
+
+- Stock/ETF route tests：`11 passed`
+- Full Stock/ETF FastAPI/static：`96 passed`
+- IBKR timeline + trace-title structure guard：`2 passed`
 - `git diff --check`：PASS
 
 邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
