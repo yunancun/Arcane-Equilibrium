@@ -2962,3 +2962,11 @@
 - Phase0 manifest source, repository manifest JSON, FastAPI Phase0 count, route fixtures/tests, and Phase0 packet spec now include 30 contracts.
 - Verification passed: new fill import acceptance `6 passed`; Phase0 manifest acceptance `6 passed`; FastAPI Phase0/StockETF focused `14 passed`; full openclaw_types `35` unit/golden + `227` integration/acceptance + `0` doc-tests; openclaw_engine `stock_etf` filter `23 passed`; workspace `cargo check` PASS.
 - PM boundary unchanged: no IBKR contact, no secret access/creation, no connector runtime, no lifecycle writer, no Phase 1/2/3/4/5 runtime start, no fill import, no DB apply, no paper order/cancel/replace, no evidence clock, no scorecard writer, no Linux runtime sync/restart, no tiny-live/live authority, and no Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Paper Fill Import IPC Binding
+
+- PM bound Rust IPC `stock_etf.import_paper_fills` to `StockEtfPaperFillImportRequestV1` parsing/validation and added an additive `fill_import_request` verdict to the handler response.
+- Valid fill-import request params can validate as typed/read-only but remain no-runtime: `runtime_authority_denied=true`, no IBKR contact, no secret touch, no order routing, no Bybit path reuse, no fill import, and no DB apply.
+- Minimal/stale import params now fail closed as `fill_import_request_parse_failed`, and top-level `allowed` also requires `fill_import_request_accepted_for_ipc`.
+- Verification passed: Rust format check PASS; engine fill-import IPC focused `2 passed`; openclaw_types fill-import request acceptance `6 passed`; openclaw_engine `stock_etf` filter `25 passed`; workspace `cargo check` PASS; `git diff --check` PASS.
+- PM boundary unchanged: no IBKR contact, no secret access/creation, no connector runtime, no lifecycle writer, no Phase 1/2/3/4/5 runtime start, no fill import, no DB apply, no paper order/cancel/replace, no evidence clock, no scorecard writer, no Linux runtime sync/restart, no tiny-live/live authority, and no Bybit behavior change.
