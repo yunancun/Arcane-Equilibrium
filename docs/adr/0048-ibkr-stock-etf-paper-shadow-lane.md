@@ -169,6 +169,12 @@ scorecards can consume quote/bar source hashes; it must prove lane/broker/
 environment, vendor/entitlement, timestamps, adjustment marker, instrument and
 calendar hashes, source artifact hash, Bybit-live unchanged proof, and no IBKR
 contact, connector runtime, serialized secrets, tiny-live, or live authority.
+`stock_etf_evidence_clock_v1` day evidence must also machine-check exact
+contract id/source version, lane/broker/environment, source artifact hash,
+market-data provenance and scorecard input hashes, Bybit-live unchanged proof,
+and checker-side denials for IBKR contact, connector runtime, runtime clock
+start, scorecard writer, DB apply, serialized secrets, and tiny-live/live
+authority. `WINDOW_COMPLETE` cannot be asserted by the source checker alone.
 Scorecard inputs must remain source-validated, derived-only, paper/shadow
 separated, and unable to claim live fills. The scorecard input source contracts
 must machine-check exact contract ids and source versions for cash ledger, cost

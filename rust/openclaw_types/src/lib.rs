@@ -129,7 +129,7 @@ pub use stock_etf_phase0_manifest::{
 pub use stock_etf_phase3_evidence::{
     StockEtfAdjustmentMarker, StockEtfDailyDqManifestV1, StockEtfEvidenceClockDayV1,
     StockEtfEvidenceClockStatus, StockEtfFrozenEvidenceInputsV1, StockEtfPhase3Blocker,
-    StockEtfPhase3Verdict, StockMarketDataProvenanceV1,
+    StockEtfPhase3Verdict, StockMarketDataProvenanceV1, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
     STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
 };
 pub use stock_etf_pit_universe::{

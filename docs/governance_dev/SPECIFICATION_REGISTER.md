@@ -1,7 +1,7 @@
 # Governance Specification Register / 治理規範註冊表
 
 **Project:** 玄衡 · Arcane Equilibrium
-**Last Updated:** 2026-06-30 (ADR-0048 + AMD-2026-06-29-01 IBKR Stock/ETF scorecard input contract hardening)
+**Last Updated:** 2026-06-30 (ADR-0048 + AMD-2026-06-29-01 IBKR Stock/ETF evidence-clock contract hardening)
 **Maintained By:** R4 (Document Auditor) · TW catch-up（2026-04-29）· FA Sign-off path A（2026-05-02 AMD-2026-05-02-01）
 
 ---
@@ -63,6 +63,17 @@ requires market-data provenance, reference-data source, and risk-policy
 contract hashes, preserves Bybit live execution, and rejects IBKR contact,
 connector runtime, broker fill import, scorecard writer, DB apply,
 evidence-clock start, serialized secrets, and tiny-live/live authority.
+
+### ADR-0048 2026-06-30 Addendum D
+
+`stock_etf_evidence_clock_v1` is now hardened as a machine-checkable source
+validator for Phase 3 day evidence. It validates contract id/version,
+`stock_etf_cash` / IBKR lane binding, read-only/paper/shadow environment,
+source artifact hash, market-data provenance contract hash, scorecard input
+bundle hash, frozen inputs, DQ manifest shape, Bybit-live unchanged proof, and
+checker-side denials for IBKR contact, connector runtime, runtime evidence-clock
+start, scorecard writer, DB apply, serialized secrets, and tiny-live/live
+authority. `WINDOW_COMPLETE` remains rejected by the source checker alone.
 
 ## Active Specifications / 活躍規範
 

@@ -475,3 +475,10 @@ Do not paste long reports or stable architecture into TODO.
 - `StockEtfScorecardInputBundleV1` now requires market-data provenance, reference-data source, and risk-policy contract hashes, preserves Bybit-live unchanged proof, and rejects IBKR contact, connector runtime, broker fill import, scorecard writer, DB apply, evidence-clock start, serialized secrets, and tiny-live/live authority.
 - Broker capability registry and lane-scoped IPC now consume shared scorecard contract constants for relevant gates; default-blocked scorecard input template exposes these fields and remains secret-free.
 - Verification passed: focused linked openclaw_types tests `30 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `173` integration/acceptance + `0` doc-tests. This grants no IBKR contact, connector runtime, fill import, scorecard writer, DB apply, evidence clock, GUI lane authority, paper order, tiny-live, or live.
+
+## 2026-06-30 IBKR Stock/ETF Evidence-Clock Contract Hardening
+
+- Source checkpoint hardens `stock_etf_evidence_clock_v1` day evidence: it now requires exact contract id/source version, `stock_etf_cash` / IBKR lane binding, read-only/paper/shadow environment, source artifact hash, market-data provenance contract hash, and scorecard input bundle hash.
+- The checker preserves Bybit-live unchanged proof and rejects checker-side IBKR contact, connector runtime, runtime evidence-clock start, scorecard writer, DB apply, serialized secrets, and tiny-live/live authority. `WINDOW_COMPLETE` remains rejected by the source checker alone.
+- Broker capability registry, lane-scoped IPC, Phase 0 manifest, exports, and the default-blocked Phase 3 template now use the shared evidence-clock contract constant.
+- Verification passed: focused linked openclaw_types tests `33 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `174` integration/acceptance + `0` doc-tests. This grants no IBKR contact, connector runtime, evidence clock, collector, scorecard writer, DB apply, GUI lane authority, paper order, tiny-live, or live.

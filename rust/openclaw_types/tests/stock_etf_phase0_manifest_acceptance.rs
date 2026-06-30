@@ -11,9 +11,10 @@ use openclaw_types::{
     StockEtfPhase0ContractPacketManifestV1, StockEtfPhase0GlobalDenialsV1,
     StockEtfPhase0ManifestBlocker, StockEtfPhase0UnlockTableV1,
     BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID, STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID,
-    STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID, STOCK_ETF_PHASE0_MANIFEST_SCHEMA,
-    STOCK_ETF_PHASE0_MANIFEST_STATUS, STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID,
-    STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID, STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
+    STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
+    STOCK_ETF_PHASE0_MANIFEST_SCHEMA, STOCK_ETF_PHASE0_MANIFEST_STATUS,
+    STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
+    STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
 };
 
 #[test]
@@ -92,6 +93,9 @@ fn accepted_fixture_validates_phase0_packet_without_runtime_authority() {
     assert!(manifest
         .contracts
         .contains(&STOCK_SHADOW_FILL_MODEL_CONTRACT_ID.to_string()));
+    assert!(manifest
+        .contracts
+        .contains(&STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID.to_string()));
     assert!(manifest
         .contracts
         .contains(&STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID.to_string()));

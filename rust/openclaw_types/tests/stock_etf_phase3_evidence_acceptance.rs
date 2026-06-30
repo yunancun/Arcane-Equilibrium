@@ -8,7 +8,8 @@ use std::path::PathBuf;
 use openclaw_types::{
     AssetLane, Broker, BrokerEnvironment, StockEtfDailyDqManifestV1, StockEtfEvidenceClockDayV1,
     StockEtfEvidenceClockStatus, StockEtfFrozenEvidenceInputsV1, StockEtfPhase3Blocker,
-    StockMarketDataProvenanceV1, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
+    StockMarketDataProvenanceV1, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
+    STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
 };
 
 #[test]
@@ -121,6 +122,33 @@ fn default_evidence_clock_day_is_not_a_pass_day() {
     assert!(!verdict.accepted);
     assert!(verdict
         .blockers
+        .contains(&StockEtfPhase3Blocker::EvidenceClockContractIdMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::EvidenceClockVersionMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::EvidenceClockWrongAssetLane));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::EvidenceClockWrongBroker));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::EvidenceClockEnvironmentDenied));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::EvidenceClockSourceArtifactHashInvalid));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::EvidenceClockMarketDataProvenanceHashInvalid));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::EvidenceClockScorecardInputHashInvalid));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::BybitLiveExecutionNotProtected));
+    assert!(verdict
+        .blockers
         .contains(&StockEtfPhase3Blocker::IbkrConnectorNotGreenFiveDays));
     assert!(verdict
         .blockers
@@ -137,6 +165,19 @@ fn default_evidence_clock_day_is_not_a_pass_day() {
 fn pass_day_requires_green_dependencies_frozen_inputs_and_dq_quality() {
     let pass = StockEtfEvidenceClockDayV1::pass_day_fixture();
     assert!(pass.validate().accepted);
+    assert_eq!(pass.contract_id, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID);
+    assert_eq!(pass.source_version, 1);
+    assert_eq!(pass.asset_lane, AssetLane::StockEtfCash);
+    assert_eq!(pass.broker, Broker::Ibkr);
+    assert_eq!(pass.environment, BrokerEnvironment::Paper);
+    assert!(pass.bybit_live_execution_unchanged);
+    assert!(!pass.checker_contacted_ibkr);
+    assert!(!pass.checker_started_connector_runtime);
+    assert!(!pass.checker_started_evidence_clock);
+    assert!(!pass.checker_wrote_scorecard);
+    assert!(!pass.checker_applied_db);
+    assert!(!pass.secret_content_serialized);
+    assert!(!pass.live_or_tiny_live_authorized);
     assert!(pass.dq_manifest.passes_day_quality());
 
     let mut missing_connector = pass.clone();
@@ -154,6 +195,46 @@ fn pass_day_requires_green_dependencies_frozen_inputs_and_dq_quality() {
     assert!(weak_verdict
         .blockers
         .contains(&StockEtfPhase3Blocker::PassDayQualityRejected));
+}
+
+#[test]
+fn evidence_clock_day_rejects_contract_drift_and_checker_side_effects() {
+    let mut day = StockEtfEvidenceClockDayV1::pass_day_fixture();
+    day.contract_id = "stock_etf_evidence_clock_v2".to_string();
+    day.source_version = 2;
+    day.asset_lane = AssetLane::CryptoPerp;
+    day.broker = Broker::Bybit;
+    day.environment = BrokerEnvironment::LiveReservedDenied;
+    day.source_artifact_hash.clear();
+    day.market_data_provenance_contract_hash.clear();
+    day.scorecard_input_bundle_hash.clear();
+    day.bybit_live_execution_unchanged = false;
+    day.checker_contacted_ibkr = true;
+    day.checker_started_connector_runtime = true;
+    day.checker_started_evidence_clock = true;
+    day.checker_wrote_scorecard = true;
+    day.checker_applied_db = true;
+    day.secret_content_serialized = true;
+    day.live_or_tiny_live_authorized = true;
+
+    let blockers = day.validate().blockers;
+
+    assert!(blockers.contains(&StockEtfPhase3Blocker::EvidenceClockContractIdMismatch));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::EvidenceClockVersionMismatch));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::EvidenceClockWrongAssetLane));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::EvidenceClockWrongBroker));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::EvidenceClockEnvironmentDenied));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::EvidenceClockSourceArtifactHashInvalid));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::EvidenceClockMarketDataProvenanceHashInvalid));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::EvidenceClockScorecardInputHashInvalid));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::BybitLiveExecutionNotProtected));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::IbkrContactPerformed));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::ConnectorRuntimeStarted));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::EvidenceClockRuntimeStarted));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::ScorecardWriterStarted));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::DbApplyPerformed));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::SecretContentSerialized));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::LiveOrTinyLiveAuthorized));
 }
 
 #[test]
@@ -237,6 +318,58 @@ fn phase3_evidence_template_is_default_blocked_and_secret_free() {
     assert_eq!(
         parsed["evidence_clock_day"]["status"].as_str(),
         Some("NOT_STARTED")
+    );
+    assert_eq!(
+        parsed["evidence_clock_day"]["contract_id"].as_str(),
+        Some("")
+    );
+    assert_eq!(
+        parsed["evidence_clock_day"]["source_version"].as_integer(),
+        Some(0)
+    );
+    assert_eq!(
+        parsed["evidence_clock_day"]["asset_lane"].as_str(),
+        Some("crypto_perp")
+    );
+    assert_eq!(
+        parsed["evidence_clock_day"]["broker"].as_str(),
+        Some("bybit")
+    );
+    assert_eq!(
+        parsed["evidence_clock_day"]["environment"].as_str(),
+        Some("live_reserved_denied")
+    );
+    assert_eq!(
+        parsed["evidence_clock_day"]["source_artifact_hash"].as_str(),
+        Some("")
+    );
+    assert_eq!(
+        parsed["evidence_clock_day"]["market_data_provenance_contract_hash"].as_str(),
+        Some("")
+    );
+    assert_eq!(
+        parsed["evidence_clock_day"]["scorecard_input_bundle_hash"].as_str(),
+        Some("")
+    );
+    assert_eq!(
+        parsed["evidence_clock_day"]["bybit_live_execution_unchanged"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        parsed["evidence_clock_day"]["checker_started_evidence_clock"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        parsed["evidence_clock_day"]["checker_wrote_scorecard"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        parsed["evidence_clock_day"]["checker_applied_db"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
+        "stock_etf_evidence_clock_v1"
     );
     assert_eq!(
         parsed["evidence_clock_day"]["ibkr_readonly_paper_connector_green_5d"].as_bool(),

@@ -46,6 +46,22 @@ scorecard_regeneration_passed = false
 atomic_fact_input_hash = ""
 
 [evidence_clock_day]
+contract_id = ""
+source_version = 0
+asset_lane = "crypto_perp"
+broker = "bybit"
+environment = "live_reserved_denied"
+source_artifact_hash = ""
+market_data_provenance_contract_hash = ""
+scorecard_input_bundle_hash = ""
+bybit_live_execution_unchanged = false
+checker_contacted_ibkr = false
+checker_started_connector_runtime = false
+checker_started_evidence_clock = false
+checker_wrote_scorecard = false
+checker_applied_db = false
+secret_content_serialized = false
+live_or_tiny_live_authorized = false
 status = "NOT_STARTED"
 ibkr_readonly_paper_connector_green_5d = false
 shadow_collector_green_5d = false
