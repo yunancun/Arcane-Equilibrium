@@ -234,6 +234,7 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
             required_gates: &[
                 "phase2_ibkr_external_surface_gate_v1",
                 "ibkr_paper_attestation_v1",
+                "lane_scoped_ipc_v1",
                 "stock_etf_scoped_authorization_v1",
                 "decision_lease_valid",
                 "guardian_allows",

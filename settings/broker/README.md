@@ -16,6 +16,8 @@ This directory stores broker capability contracts and default-off runtime postur
 
 `stock_etf_broker_capability_registry.template.toml` records the default-blocked broker capability registry contract shape. It is source-only and does not contact IBKR, create secrets, create connectors, route orders, or change Bybit live execution behavior.
 
+`stock_etf_lane_scoped_ipc.template.toml` records the default-blocked lane-scoped IPC method matrix contract shape. It does not start IPC, contact IBKR, create connectors, route paper orders, inspect secrets, or change Bybit live execution behavior.
+
 `stock_etf_db_evidence_ddl.template.toml` records the default-blocked source-only DB evidence DDL contract shape. It does not copy SQL into migrations, open Postgres, register sqlx migrations, apply DDL, contact IBKR, create secrets, route orders, or start an evidence clock.
 
 `stock_etf_instrument_identity.template.toml` records the default-blocked point-in-time instrument identity contract shape. It does not contact IBKR, create connectors, subscribe to market data, route paper orders, inspect secrets, or change Bybit live execution behavior.

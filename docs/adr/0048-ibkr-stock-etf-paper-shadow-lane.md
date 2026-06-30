@@ -86,6 +86,16 @@ tiny-live, and live.
 
 `broker_capability_registry_v1` must be machine-checkable before effect-capable paper-route implementation. It must prove the full operation matrix, Bybit live execution unchanged, Python broker write authority denied, paper writes Rust-owned, read/paper/shadow/scorecard gates present, and live/margin/short/options/CFD/transfer/account-write operations typed-denied.
 
+`lane_scoped_ipc_v1` must be machine-checkable before any Stock/ETF paper IPC
+route, Python bridge, or agent handoff can reach Rust authority. It must prove
+the exact `stock_etf.*` method matrix, required gates, request fields, typed
+denial reasons, Rust ownership for preview/submit/cancel/replace, and explicit
+separation from existing Bybit paper IPC paths. It rejects unknown/Bybit IPC
+methods, direct Python broker write authority, existing Bybit paper-path reuse,
+IBKR contact, connector runtime, serialized secrets, live environment, and
+Bybit-live regression. Passing this source contract starts no IPC server and
+does not authorize paper orders.
+
 The Python no-write static guard must pass before any IBKR Python surface is
 accepted. It must AST-scan Stock/ETF/IBKR route and future connector files while
 excluding existing Bybit modules, reject direct Python broker write methods,

@@ -1,0 +1,20 @@
+# ADR-0048 Stock/ETF lane-scoped IPC contract template.
+#
+# This is a blocked, secret-free source template. It does not start IPC,
+# contact IBKR, create connectors, route paper orders, inspect secrets, or
+# change Bybit live execution behavior.
+
+contract_id = ""
+asset_lane = "crypto_perp"
+broker = "bybit"
+rust_authority_owner = false
+python_forward_only = false
+python_direct_broker_write_denied = false
+bybit_ipc_reuse_denied = false
+existing_bybit_paper_path_denied = false
+live_environment_denied = false
+bybit_live_execution_unchanged = false
+ibkr_contact_performed = false
+connector_runtime_started = false
+secret_content_serialized = false
+commands = []

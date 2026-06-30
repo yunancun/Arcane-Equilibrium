@@ -418,6 +418,20 @@ Denied reasons:
 - `decision_lease_invalid`
 - `guardian_denied`
 
+Source validator:
+`openclaw_types::stock_etf_lane_scoped_ipc::StockEtfLaneScopedIpcContractV1`.
+The validator pins the exact Stock/ETF IPC method matrix, required gates,
+request fields, typed denials, and Rust ownership. Paper submit/cancel/replace
+must require `phase2_ibkr_external_surface_gate_v1`,
+`ibkr_session_attestation_v1`, `stock_etf_scoped_authorization_v1`,
+Decision Lease, Guardian, risk-config hash, instrument identity,
+idempotency, `ibkr_paper_order_lifecycle_v1`,
+`broker_capability_registry_v1`, and `audit.asset_lane_events_v1`. It rejects
+missing or duplicate methods, unknown/Bybit paper methods, direct Python broker
+write authority, reuse of existing Bybit paper IPC paths, IBKR contact,
+connector runtime, serialized secrets, live environment, and Bybit-live
+regressions. This contract starts no IPC server and authorizes no paper order.
+
 ## 10. `ibkr_paper_order_lifecycle_v1`
 
 States:

@@ -2604,3 +2604,9 @@
 - PM added `stock_etf_strategy_hypothesis_contract_v1` as a Rust source-only validator for preregistered Stock/ETF paper/shadow hypotheses, allowed low/medium-turnover families, daily/weekly timeframe, PIT universe/benchmark/cost/rule/feature/statistical/preregistration hashes, bias controls, and benchmark-relative after-cost metrics.
 - The contract rejects high-frequency/event-driven reserved families, intraday v1 timeframe, missing design controls, over-high turnover, premature profitability claims, live/tiny-live claims, prior IBKR contact, and secret serialization.
 - This grants no IBKR contact, collector runtime, paper order, DB apply, scorecard write, evidence clock, profitability claim, GUI lane authority, release, tiny-live, or live.
+
+## 2026-06-30 IBKR Stock/ETF Lane-Scoped IPC Contract
+
+- PM added `lane_scoped_ipc_v1` as a Rust source-only validator for the exact `stock_etf.*` IPC method matrix, required paper-effect gates, request fields, typed denials, and Rust ownership.
+- The contract rejects unknown/Bybit paper IPC methods, direct Python broker write authority, existing Bybit paper path reuse, missing gates/fields/denials, prior IBKR contact, connector runtime, and secret serialization.
+- This grants no IPC runtime, IBKR contact, connector runtime, paper order, DB apply, scorecard write, evidence clock, GUI lane authority, release, tiny-live, or live.
