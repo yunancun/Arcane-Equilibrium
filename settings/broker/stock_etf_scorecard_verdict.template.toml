@@ -1,0 +1,74 @@
+# Stock/ETF scorecard verdict contract template.
+# This template is intentionally BLOCKED and does not contact IBKR, start
+# connectors, import broker fills, write scorecards, apply migrations, read
+# secrets, or authorize tiny-live/live.
+
+contract_id = ""
+source_version = 0
+asset_lane = "crypto_perp"
+broker = "bybit"
+environment = "live_reserved_denied"
+
+scorecard_input_bundle_hash = ""
+evidence_clock_manifest_hash = ""
+dq_manifest_hash = ""
+formula_appendix_hash = ""
+statistical_preregistration_hash = ""
+benchmark_version_hash = ""
+cost_model_version_hash = ""
+strategy_hypothesis_hash = ""
+reference_data_sources_hash = ""
+scorecard_manifest_hash = ""
+verdict_rationale_hash = ""
+
+paper_shadow_window_trading_days = 0
+min_window_trading_days = 0
+independent_observation_count = 0
+min_independent_observation_count = 0
+
+gross_pnl_minor_units = 0
+commission_minor_units = 0
+spread_slippage_minor_units = 0
+fx_drag_minor_units = 0
+tax_drag_minor_units = 0
+net_pnl_minor_units = 0
+benchmark_excess_lcb_bps = 0
+conservative_cost_stress_lcb_bps = 0
+paper_shadow_divergence_bps = 0
+max_paper_shadow_divergence_bps = 0
+information_ratio_bps = 0
+tracking_error_bps = 0
+cost_edge_ratio_bps = 0
+psr_bps = 0
+min_psr_bps = 0
+dsr_bps = 0
+min_dsr_bps = 0
+
+concentration_label_passed = false
+regime_label_passed = false
+breadth_label_passed = false
+freshness_label_passed = false
+survivorship_label_passed = false
+execution_realism_label_passed = false
+
+qc_review_hash = ""
+mit_review_hash = ""
+qa_review_hash = ""
+qc_review_passed = false
+mit_review_passed = false
+qa_review_passed = false
+
+verdict_label = "insufficient_evidence"
+scorecard_is_derived_only = false
+paper_and_shadow_fills_separate = false
+live_fill_claimed = false
+bybit_live_execution_unchanged = false
+ibkr_contact_performed = false
+connector_runtime_started = false
+broker_fill_import_performed = false
+scorecard_writer_started = false
+db_apply_performed = false
+evidence_clock_started = false
+secret_content_serialized = false
+live_or_tiny_live_authorized = false
+sealed = false
