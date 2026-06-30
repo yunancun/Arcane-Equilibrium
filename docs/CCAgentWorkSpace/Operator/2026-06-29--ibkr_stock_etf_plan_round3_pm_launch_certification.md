@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 64 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 65 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -1428,6 +1428,34 @@ Verification 已過：
 - Stock/ETF JS `node --check`：PASS
 - Route/no-write focused tests：`26 passed`
 - Full Stock/ETF FastAPI/static：`107 passed`
+- IBKR timeline + trace-title structure guard：`2 passed`
+- `git diff --check`：PASS
+
+邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 client input、沒有 IBKR
+contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation、沒有
+connector runtime、沒有 read probe execution、沒有 paper order/cancel/replace、沒有 fill
+import、沒有 evidence writer、沒有 DB apply、沒有 evidence clock、沒有 tiny-live/live
+authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — GUI Authorization/Account Renderer Split Guard
+
+本 session 已把 Authorization / Account panel renderer 從主 Stock/ETF GUI bundle 拆出：
+
+- 新增 `tab-stock-etf-auth-account.js`，承載 `renderAuthorizationStatus` 與
+  `renderAccountStatus`。
+- `tab-stock-etf.js` 從 `985` 行降到 `798` 行。
+- 新 auth/account 模組為 `235` 行，並以 `window.renderAuthorizationStatus` /
+  `window.renderAccountStatus` 暴露給主 loader。
+- HTML 在 fallback module 後、主 loader 前載入 auth/account module。
+- Static no-write guard 現在掃描新模組，並確認 auth/account renderers 不回流主
+  bundle：`tab-stock-etf.js <= 900`、
+  `tab-stock-etf-auth-account.js <= 400`。
+
+Verification 已過：
+
+- Stock/ETF JS `node --check`：PASS
+- Route/no-write focused tests：`27 passed`
+- Full Stock/ETF FastAPI/static：`108 passed`
 - IBKR timeline + trace-title structure guard：`2 passed`
 - `git diff --check`：PASS
 
