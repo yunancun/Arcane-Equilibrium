@@ -632,3 +632,9 @@ Do not paste long reports or stable architecture into TODO.
 - Phase 4 API checkpoint adds display-only `GET /api/v1/stock-etf/lane-status`, calling only Rust IPC `stock_etf.get_lane_status` with empty params and no-store/private cache headers.
 - Lane-status normalization fail-closes to default `crypto_perp`, Stock/ETF/IBKR display identity, `display_only` GUI authority, no paper-order entry, no IBKR live, and no first-contact allowance; route tests prove query/header lane/paper/contact claims are ignored.
 - Verification passed: route/test `py_compile`, focused FastAPI/static no-write pytest `21 passed`, and `git diff --check`. This grants no IBKR contact, connector runtime, secret access, paper order, fill import, DB apply, GUI/lane selector authority, Phase 2 start, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF GUI Lane Status Read-Only Render
+
+- Phase 4 static GUI checkpoint makes `tab-stock-etf.html` consume display-only `GET /api/v1/stock-etf/lane-status` alongside readiness and render lane-status state plus feature flags in the Lane Boundary panel.
+- Static guards now require both read-only endpoints while continuing to reject direct `fetch`, POST/PUT/PATCH/DELETE snippets, forms, browser storage lane authority, broker-write strings, and Stock/ETF write IPC strings.
+- Verification passed: GUI guard `py_compile`, focused FastAPI/static no-write pytest `21 passed`, Node inline-script syntax check `2` scripts, and `git diff --check`. This grants no login-success lane selector, GUI/lane authority, IBKR contact, connector runtime, secret access, paper order, fill import, DB apply, Phase 2 start, tiny-live, live, or Bybit behavior change.

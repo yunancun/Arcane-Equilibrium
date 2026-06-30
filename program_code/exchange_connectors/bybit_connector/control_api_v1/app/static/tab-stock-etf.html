@@ -150,6 +150,7 @@
 </div>
 
 <script>
+const LANE_STATUS_ENDPOINT = '/api/v1/stock-etf/lane-status';
 const READINESS_ENDPOINT = '/api/v1/stock-etf/readiness';
 
 function toneFor(value) {
@@ -223,13 +224,16 @@ function renderFallback() {
     degraded: true,
     reason: 'api_unavailable',
   };
-  renderReadiness(data);
+  renderReadiness(data, null);
 }
 
-function renderReadiness(data) {
+function renderReadiness(data, laneStatus) {
   const source = data.source_readiness || {};
   const apiAllowlist = data.api_allowlist || {};
-  document.getElementById('se-default-lane').innerHTML = textChip(data.default_asset_lane || 'crypto_perp');
+  const lane = laneStatus || {};
+  const flags = lane.flags || {};
+  const defaultLane = lane.default_asset_lane || data.default_asset_lane || 'crypto_perp';
+  document.getElementById('se-default-lane').innerHTML = textChip(defaultLane);
   document.getElementById('se-readiness-state').innerHTML = textChip(data.readiness_state || 'blocked');
   document.getElementById('se-readiness-sub').textContent =
     (source.denial_reasons || []).join(', ') || 'no source denial reasons';
@@ -248,7 +252,12 @@ function renderReadiness(data) {
   document.getElementById('se-lane-body').innerHTML = [
     kvRow('asset_lane', textChip(data.asset_lane || 'stock_etf_cash')),
     kvRow('broker', textChip(data.broker || 'ibkr')),
-    kvRow('default_asset_lane', textChip(data.default_asset_lane || 'crypto_perp')),
+    kvRow('default_asset_lane', textChip(defaultLane)),
+    kvRow('lane_status_state', textChip(lane.lane_status_state || '-')),
+    kvRow('flag.stock_etf_lane_enabled', boolChip(flags.stock_etf_lane_enabled, false)),
+    kvRow('flag.ibkr_readonly_enabled', boolChip(flags.ibkr_readonly_enabled, false)),
+    kvRow('flag.ibkr_paper_enabled', boolChip(flags.ibkr_paper_enabled, false)),
+    kvRow('flag.stock_etf_shadow_only', boolChip(flags.stock_etf_shadow_only, false)),
     kvRow('readonly_ready', boolChip(source.readonly_ready, false)),
     kvRow('paper_ready', boolChip(source.paper_ready, false)),
     kvRow('paper_order_entry_visible', boolChip(data.paper_order_entry_visible, true)),
@@ -306,12 +315,15 @@ function renderReadiness(data) {
 }
 
 async function loadReadiness() {
-  const payload = await ocApi(READINESS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false });
-  if (!payload || !payload.data) {
+  const [lanePayload, readinessPayload] = await Promise.all([
+    ocApi(LANE_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
+    ocApi(READINESS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
+  ]);
+  if (!readinessPayload || !readinessPayload.data) {
     renderFallback();
     return;
   }
-  renderReadiness(payload.data);
+  renderReadiness(readinessPayload.data, lanePayload && lanePayload.data ? lanePayload.data : null);
 }
 
 waitForServerUp(loadReadiness);
