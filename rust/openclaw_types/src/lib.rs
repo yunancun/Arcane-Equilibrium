@@ -29,6 +29,7 @@ pub mod stock_etf_lane;
 pub mod stock_etf_lane_scoped_ipc;
 pub mod stock_etf_paper_fill_import_request;
 pub mod stock_etf_paper_order_request;
+pub mod stock_etf_paper_shadow_reconciliation;
 pub mod stock_etf_phase0_manifest;
 pub mod stock_etf_phase3_evidence;
 pub mod stock_etf_pit_universe;
@@ -153,6 +154,11 @@ pub use stock_etf_paper_order_request::{
     StockEtfLimitPricePolicy, StockEtfPaperOrderRequestBlocker,
     StockEtfPaperOrderRequestEnvelopeV1, StockEtfPaperOrderRequestVerdict, StockEtfPaperOrderType,
     StockEtfPaperTimeInForce, STOCK_ETF_PAPER_ORDER_REQUEST_CONTRACT_ID,
+};
+pub use stock_etf_paper_shadow_reconciliation::{
+    StockEtfPaperShadowReconciliationBlocker, StockEtfPaperShadowReconciliationV1,
+    StockEtfPaperShadowReconciliationVerdict, STOCK_ETF_PAPER_SHADOW_RECONCILIATION_CONTRACT_ID,
+    STOCK_ETF_PAPER_SHADOW_RECONCILIATION_SCOPE,
 };
 pub use stock_etf_phase0_manifest::{
     required_phase0_contract_ids, StockEtfPhase0ApiBaselineV1, StockEtfPhase0AuthorityV1,

@@ -622,7 +622,7 @@ async fn stock_etf_phase0_status_exposes_accepted_source_manifest_without_runtim
     );
     assert_eq!(result["phase0_accepted"], true);
     assert_eq!(result["phase0_blockers"].as_array().unwrap().len(), 0);
-    assert_eq!(result["contract_count"], 31);
+    assert_eq!(result["contract_count"], 32);
     assert!(json_array_contains(
         &result["contracts"],
         "stock_etf_paper_fill_import_request_v1"
@@ -630,6 +630,10 @@ async fn stock_etf_phase0_status_exposes_accepted_source_manifest_without_runtim
     assert!(json_array_contains(
         &result["contracts"],
         "stock_etf_shadow_signal_request_v1"
+    ));
+    assert!(json_array_contains(
+        &result["contracts"],
+        "stock_etf_paper_shadow_reconciliation_v1"
     ));
     assert_eq!(
         result["manifest"]["schema"],
@@ -1661,8 +1665,14 @@ async fn stock_etf_reconciliation_status_is_blocked_source_fixture_without_side_
         "stock_shadow_fill_model_v1"
     );
     assert_eq!(matching["shadow_contract_id"], "");
+    assert_eq!(
+        matching["expected_reconciliation_contract_id"],
+        "stock_etf_paper_shadow_reconciliation_v1"
+    );
+    assert_eq!(matching["reconciliation_contract_id"], "");
     assert_eq!(matching["lifecycle_event_accepted"], false);
     assert_eq!(matching["shadow_fill_model_accepted"], false);
+    assert_eq!(matching["reconciliation_accepted"], false);
     assert!(json_array_contains(
         &matching["lifecycle_blockers"],
         "lifecycle_contract_id_mismatch"
@@ -1671,14 +1681,20 @@ async fn stock_etf_reconciliation_status_is_blocked_source_fixture_without_side_
         &matching["shadow_blockers"],
         "contract_id_mismatch"
     ));
+    assert!(json_array_contains(
+        &matching["reconciliation_blockers"],
+        "contract_id_mismatch"
+    ));
     assert_eq!(matching["append_only_event_ready"], false);
     assert_eq!(matching["paper_order_id_present"], false);
     assert_eq!(matching["broker_order_id_present"], false);
     assert_eq!(matching["execution_id_present"], false);
     assert_eq!(matching["commission_report_id_present"], false);
+    assert_eq!(matching["contract_reconciliation_run_id_present"], false);
     assert_eq!(matching["shadow_signal_id_present"], false);
     assert_eq!(matching["shadow_fill_price_present"], false);
     assert_eq!(matching["paper_shadow_link_present"], false);
+    assert_eq!(matching["paper_shadow_link_hash_present"], false);
     assert_eq!(matching["divergence_bps"], 0);
     assert_eq!(matching["divergence_threshold_bps"], 0);
     assert_eq!(matching["divergence_within_threshold"], false);
@@ -1687,6 +1703,14 @@ async fn stock_etf_reconciliation_status_is_blocked_source_fixture_without_side_
     assert_eq!(matching["reconciliation_run_id_present"], false);
     assert_eq!(matching["raw_artifact_hash_present"], false);
     assert_eq!(matching["redacted_summary_hash_present"], false);
+    assert_eq!(matching["paper_fill_imported"], false);
+    assert_eq!(matching["shadow_fill_synthetic"], false);
+    assert_eq!(matching["reconciliation_writer_started"], false);
+    assert_eq!(matching["ibkr_contact_performed"], false);
+    assert_eq!(matching["connector_runtime_started"], false);
+    assert_eq!(matching["secret_content_serialized"], false);
+    assert_eq!(matching["fill_import_performed"], false);
+    assert_eq!(matching["shadow_fill_generated"], false);
 
     assert_eq!(result["phase2"]["first_ibkr_contact_allowed"], false);
     assert_eq!(result["phase2"]["connector_enabled"], false);

@@ -8,6 +8,7 @@ from .stock_etf_status_common import (
     _BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
     _DENIED_OPERATIONS,
     _PAPER_LIFECYCLE_CONTRACT_ID,
+    _PAPER_SHADOW_RECONCILIATION_CONTRACT_ID,
     _SAFETY_FALSE_FIELDS,
     _SHADOW_FILL_MODEL_CONTRACT_ID,
     _api_allowlist_contract_violations,
@@ -29,6 +30,10 @@ def _matching_fail_closed(reason: str) -> dict[str, Any]:
         "event_log_contract_id": "",
         "expected_shadow_contract_id": _SHADOW_FILL_MODEL_CONTRACT_ID,
         "shadow_contract_id": "",
+        "expected_reconciliation_contract_id": _PAPER_SHADOW_RECONCILIATION_CONTRACT_ID,
+        "reconciliation_contract_id": "",
+        "reconciliation_accepted": False,
+        "reconciliation_blockers": [reason],
         "lifecycle_event_accepted": False,
         "shadow_fill_model_accepted": False,
         "lifecycle_blockers": [reason],
@@ -47,8 +52,18 @@ def _matching_fail_closed(reason: str) -> dict[str, Any]:
         "unmatched_paper_fill_count": 0,
         "unmatched_shadow_fill_count": 0,
         "reconciliation_run_id_present": False,
+        "contract_reconciliation_run_id_present": False,
+        "paper_shadow_link_hash_present": False,
+        "paper_fill_imported": False,
+        "shadow_fill_synthetic": False,
         "raw_artifact_hash_present": False,
         "redacted_summary_hash_present": False,
+        "reconciliation_writer_started": False,
+        "ibkr_contact_performed": False,
+        "connector_runtime_started": False,
+        "secret_content_serialized": False,
+        "fill_import_performed": False,
+        "shadow_fill_generated": False,
     }
 
 
@@ -73,6 +88,17 @@ def _normalize_matching(value: Any, reason: str | None) -> dict[str, Any]:
             _SHADOW_FILL_MODEL_CONTRACT_ID,
         ),
         "shadow_contract_id": _as_str(source.get("shadow_contract_id"), ""),
+        "expected_reconciliation_contract_id": _as_str(
+            source.get("expected_reconciliation_contract_id"),
+            _PAPER_SHADOW_RECONCILIATION_CONTRACT_ID,
+        ),
+        "reconciliation_contract_id": _as_str(
+            source.get("reconciliation_contract_id"), ""
+        ),
+        "reconciliation_accepted": _as_bool(source.get("reconciliation_accepted")),
+        "reconciliation_blockers": [
+            str(item) for item in _as_list(source.get("reconciliation_blockers"))
+        ],
         "lifecycle_event_accepted": _as_bool(source.get("lifecycle_event_accepted")),
         "shadow_fill_model_accepted": _as_bool(
             source.get("shadow_fill_model_accepted")
@@ -107,10 +133,30 @@ def _normalize_matching(value: Any, reason: str | None) -> dict[str, Any]:
         "reconciliation_run_id_present": _as_bool(
             source.get("reconciliation_run_id_present")
         ),
+        "contract_reconciliation_run_id_present": _as_bool(
+            source.get("contract_reconciliation_run_id_present")
+        ),
+        "paper_shadow_link_hash_present": _as_bool(
+            source.get("paper_shadow_link_hash_present")
+        ),
+        "paper_fill_imported": _as_bool(source.get("paper_fill_imported")),
+        "shadow_fill_synthetic": _as_bool(source.get("shadow_fill_synthetic")),
         "raw_artifact_hash_present": _as_bool(source.get("raw_artifact_hash_present")),
         "redacted_summary_hash_present": _as_bool(
             source.get("redacted_summary_hash_present")
         ),
+        "reconciliation_writer_started": _as_bool(
+            source.get("reconciliation_writer_started")
+        ),
+        "ibkr_contact_performed": _as_bool(source.get("ibkr_contact_performed")),
+        "connector_runtime_started": _as_bool(
+            source.get("connector_runtime_started")
+        ),
+        "secret_content_serialized": _as_bool(
+            source.get("secret_content_serialized")
+        ),
+        "fill_import_performed": _as_bool(source.get("fill_import_performed")),
+        "shadow_fill_generated": _as_bool(source.get("shadow_fill_generated")),
     }
 
 
@@ -155,7 +201,13 @@ def _reconciliation_contract_violations(
         != _SHADOW_FILL_MODEL_CONTRACT_ID
     ):
         violations.append("reconciliation_shadow_expected_contract_id_mismatch")
+    if (
+        _as_str(matching.get("expected_reconciliation_contract_id"), "")
+        != _PAPER_SHADOW_RECONCILIATION_CONTRACT_ID
+    ):
+        violations.append("reconciliation_expected_contract_id_mismatch")
     for key in (
+        "reconciliation_accepted",
         "lifecycle_event_accepted",
         "shadow_fill_model_accepted",
         "append_only_event_ready",
@@ -168,8 +220,18 @@ def _reconciliation_contract_violations(
         "paper_shadow_link_present",
         "divergence_within_threshold",
         "reconciliation_run_id_present",
+        "contract_reconciliation_run_id_present",
+        "paper_shadow_link_hash_present",
+        "paper_fill_imported",
+        "shadow_fill_synthetic",
         "raw_artifact_hash_present",
         "redacted_summary_hash_present",
+        "reconciliation_writer_started",
+        "ibkr_contact_performed",
+        "connector_runtime_started",
+        "secret_content_serialized",
+        "fill_import_performed",
+        "shadow_fill_generated",
     ):
         if _as_bool(matching.get(key)):
             violations.append(f"reconciliation_{key}")

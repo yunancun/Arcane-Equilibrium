@@ -1,0 +1,52 @@
+# ADR-0048 Stock/ETF paper-shadow reconciliation template.
+#
+# This is a blocked, secret-free source template. It does not contact IBKR,
+# create connectors, import fills, generate shadow fills, write reconciliation
+# rows, write scorecards, inspect secrets, apply DB changes, route orders, or
+# change Bybit live execution behavior.
+
+contract_id = ""
+source_version = 0
+asset_lane = "crypto_perp"
+broker = "bybit"
+scope = ""
+authority_scope = "denied"
+effect_capable = false
+reconciliation_run_id = ""
+paper_order_local_id = ""
+broker_order_id = ""
+execution_id = ""
+commission_report_id = ""
+shadow_signal_id = ""
+lifecycle_contract_hash = ""
+event_log_contract_hash = ""
+paper_fill_import_request_hash = ""
+shadow_signal_request_hash = ""
+shadow_fill_model_hash = ""
+cost_model_version_hash = ""
+market_data_provenance_hash = ""
+paper_shadow_divergence_threshold_hash = ""
+paper_shadow_link_hash = ""
+raw_artifact_hash = ""
+redacted_summary_hash = ""
+source_artifact_hash = ""
+append_only_event_ready = false
+paper_fill_imported = false
+shadow_fill_synthetic = false
+divergence_bps = 0
+divergence_threshold_bps = 0
+unmatched_paper_fill_count = 0
+unmatched_shadow_fill_count = 0
+ibkr_contact_performed = false
+connector_runtime_started = false
+secret_content_serialized = false
+fill_import_performed = false
+shadow_fill_generated = false
+reconciliation_writer_started = false
+scorecard_writer_started = false
+db_apply_performed = false
+order_routed = false
+bybit_path_reused = false
+live_or_tiny_live_authorized = false
+margin_short_options_cfd_requested = false
+python_direct_broker_write_requested = false

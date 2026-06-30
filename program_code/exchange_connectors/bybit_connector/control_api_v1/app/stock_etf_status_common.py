@@ -13,6 +13,9 @@ _MARKET_DATA_PROVENANCE_CONTRACT_ID = "stock_market_data_provenance_v1"
 _EVIDENCE_CLOCK_CONTRACT_ID = "stock_etf_evidence_clock_v1"
 _PIT_UNIVERSE_CONTRACT_ID = "stock_etf_pit_universe_contract_v1"
 _SHADOW_FILL_MODEL_CONTRACT_ID = "stock_shadow_fill_model_v1"
+_PAPER_SHADOW_RECONCILIATION_CONTRACT_ID = (
+    "stock_etf_paper_shadow_reconciliation_v1"
+)
 _STRATEGY_HYPOTHESIS_CONTRACT_ID = "stock_etf_strategy_hypothesis_contract_v1"
 _PAPER_LIFECYCLE_CONTRACT_ID = "ibkr_paper_order_lifecycle_v1"
 _BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID = "broker_lifecycle_event_log_v1"
