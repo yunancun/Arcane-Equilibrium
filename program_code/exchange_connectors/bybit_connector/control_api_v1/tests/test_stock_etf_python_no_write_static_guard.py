@@ -39,6 +39,25 @@ FORBIDDEN_IPC_METHOD_STRINGS = {
     "ibkr.replace_order",
 }
 
+ALLOWED_STOCK_ETF_STATUS_IPC_METHODS = {
+    "stock_etf.get_account_status",
+    "stock_etf.get_authorization_status",
+    "stock_etf.get_data_foundation_status",
+    "stock_etf.get_disable_cleanup_status",
+    "stock_etf.get_evidence_status",
+    "stock_etf.get_lane_status",
+    "stock_etf.get_launch_status",
+    "stock_etf.get_paper_status",
+    "stock_etf.get_phase0_status",
+    "stock_etf.get_policy_status",
+    "stock_etf.get_readiness",
+    "stock_etf.get_reconciliation_status",
+    "stock_etf.get_release_packet_status",
+    "stock_etf.get_scorecard_status",
+    "stock_etf.get_shadow_status",
+    "stock_etf.get_universe_status",
+}
+
 FORBIDDEN_HTTP_ROUTE_METHODS = {"post", "put", "patch", "delete"}
 FORBIDDEN_BROKER_MODULE_PREFIXES = ("ibapi", "ib_insync")
 FORBIDDEN_NETWORK_MODULE_PREFIXES = (
@@ -190,6 +209,40 @@ def test_stock_etf_routes_call_ipc_with_empty_params_only() -> None:
     assert violations == []
 
 
+def test_stock_etf_routes_call_only_readonly_status_ipc_methods() -> None:
+    path = CONTROL_API_DIR / "app" / "stock_etf_routes.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    method_constants = _stock_etf_route_method_constants(tree)
+
+    used_methods: set[str] = set()
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Attribute) or node.func.attr != "call":
+            continue
+        if not node.args or not isinstance(node.args[0], ast.Name):
+            violations.append(
+                f"{path}:{node.lineno}: Stock/ETF IPC call must use a named method constant"
+            )
+            continue
+        constant_name = node.args[0].id
+        method = method_constants.get(constant_name)
+        if method is None:
+            violations.append(
+                f"{path}:{node.lineno}: Stock/ETF IPC call uses unknown method constant {constant_name}"
+            )
+            continue
+        used_methods.add(method)
+        if method not in ALLOWED_STOCK_ETF_STATUS_IPC_METHODS:
+            violations.append(
+                f"{path}:{node.lineno}: Stock/ETF IPC method {method!r} is not readonly status"
+            )
+
+    assert used_methods == ALLOWED_STOCK_ETF_STATUS_IPC_METHODS
+    assert violations == []
+
+
 def test_stock_etf_get_route_handlers_accept_only_response_and_authenticated_actor() -> None:
     path = CONTROL_API_DIR / "app" / "stock_etf_routes.py"
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -328,6 +381,21 @@ def _decorated_http_method(decorator: ast.expr) -> str | None:
 
 def _is_empty_dict(value: ast.expr) -> bool:
     return isinstance(value, ast.Dict) and value.keys == [] and value.values == []
+
+
+def _stock_etf_route_method_constants(tree: ast.AST) -> dict[str, str]:
+    method_constants: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
+            continue
+        name = node.targets[0].id
+        if not name.endswith("_METHOD"):
+            continue
+        if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            method_constants[name] = node.value.value
+    return method_constants
 
 
 def _is_stock_etf_get_route_decorator(decorator: ast.expr) -> bool:
