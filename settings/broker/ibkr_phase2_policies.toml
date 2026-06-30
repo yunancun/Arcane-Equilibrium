@@ -2,6 +2,8 @@
 # This file is not an immutable PASS artifact and does not authorize contact.
 
 [redaction]
+contract_id = "ibkr_redaction_policy_v1"
+source_version = 1
 policy_present = true
 raw_payload_hash_required = true
 redacted_summary_hash_required = true
@@ -14,6 +16,8 @@ raw_payload_in_logs_allowed = false
 stack_trace_in_reports_allowed = false
 
 [rate_limit]
+contract_id = "ibkr_rate_limit_policy_v1"
+source_version = 1
 policy_present = true
 scope = "global_and_per_action"
 min_request_spacing_ms = 100
@@ -25,6 +29,8 @@ market_data_subscription_budget_present = true
 paper_order_write_budget_present = true
 
 [audit_event]
+contract_id = "ibkr_audit_event_policy_v1"
+source_version = 1
 policy_present = true
 append_only_required = true
 asset_lane_required = true
@@ -40,6 +46,8 @@ account_fingerprint_hash_only = true
 raw_payload_storage_allowed = false
 
 [paper_attestation]
+contract_id = "ibkr_paper_attestation_v1"
+source_version = 1
 policy_present = true
 external_surface_gate_required = true
 session_attestation_required = true
@@ -58,6 +66,8 @@ margin_short_options_cfd_denied = true
 max_paper_notional_required = true
 
 [python_write_guard]
+contract_id = "ibkr_python_write_guard_policy_v1"
+source_version = 1
 policy_present = true
 python_broker_write_authority_denied = true
 python_can_read_display_import = true

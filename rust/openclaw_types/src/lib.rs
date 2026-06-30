@@ -71,7 +71,9 @@ pub use ibkr_phase2_policies::{
     IbkrPhase2PolicyBundleV1, IbkrPolicyVerdict, IbkrPythonWriteGuardPolicyBlocker,
     IbkrPythonWriteGuardPolicyV1, IbkrRateLimitPolicyBlocker, IbkrRateLimitPolicyV1,
     IbkrRateLimitScope, IbkrRedactionPolicyBlocker, IbkrRedactionPolicyV1,
-    IBKR_PAPER_ATTESTATION_CONTRACT_ID, IBKR_REDACTION_POLICY_CONTRACT_ID,
+    IBKR_AUDIT_EVENT_POLICY_CONTRACT_ID, IBKR_PAPER_ATTESTATION_CONTRACT_ID,
+    IBKR_PYTHON_WRITE_GUARD_POLICY_CONTRACT_ID, IBKR_RATE_LIMIT_POLICY_CONTRACT_ID,
+    IBKR_REDACTION_POLICY_CONTRACT_ID,
 };
 pub use ibkr_phase2_runtime::{
     IbkrApiSessionTopologyBlocker, IbkrApiSessionTopologyV1, IbkrApiSessionTopologyVerdict,

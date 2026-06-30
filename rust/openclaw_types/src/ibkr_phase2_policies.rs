@@ -7,7 +7,10 @@
 use serde::{Deserialize, Serialize};
 
 pub const IBKR_REDACTION_POLICY_CONTRACT_ID: &str = "ibkr_redaction_policy_v1";
+pub const IBKR_RATE_LIMIT_POLICY_CONTRACT_ID: &str = "ibkr_rate_limit_policy_v1";
+pub const IBKR_AUDIT_EVENT_POLICY_CONTRACT_ID: &str = "ibkr_audit_event_policy_v1";
 pub const IBKR_PAPER_ATTESTATION_CONTRACT_ID: &str = "ibkr_paper_attestation_v1";
+pub const IBKR_PYTHON_WRITE_GUARD_POLICY_CONTRACT_ID: &str = "ibkr_python_write_guard_policy_v1";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IbkrPolicyVerdict<B> {
@@ -31,8 +34,10 @@ impl<B> IbkrPolicyVerdict<B> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IbkrRedactionPolicyV1 {
+    pub contract_id: String,
+    pub source_version: u32,
     pub policy_present: bool,
     pub raw_payload_hash_required: bool,
     pub redacted_summary_hash_required: bool,
@@ -48,6 +53,8 @@ pub struct IbkrRedactionPolicyV1 {
 impl Default for IbkrRedactionPolicyV1 {
     fn default() -> Self {
         Self {
+            contract_id: String::new(),
+            source_version: 0,
             policy_present: false,
             raw_payload_hash_required: false,
             redacted_summary_hash_required: false,
@@ -65,6 +72,8 @@ impl Default for IbkrRedactionPolicyV1 {
 impl IbkrRedactionPolicyV1 {
     pub fn source_template() -> Self {
         Self {
+            contract_id: IBKR_REDACTION_POLICY_CONTRACT_ID.to_string(),
+            source_version: 1,
             policy_present: true,
             raw_payload_hash_required: true,
             redacted_summary_hash_required: true,
@@ -82,6 +91,12 @@ impl IbkrRedactionPolicyV1 {
         use IbkrRedactionPolicyBlocker as Blocker;
 
         let mut blockers = Vec::new();
+        if self.contract_id != IBKR_REDACTION_POLICY_CONTRACT_ID {
+            blockers.push(Blocker::ContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
+        }
         if !self.policy_present {
             blockers.push(Blocker::PolicyMissing);
         }
@@ -120,6 +135,8 @@ impl IbkrRedactionPolicyV1 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrRedactionPolicyBlocker {
+    ContractIdMismatch,
+    SourceVersionMismatch,
     PolicyMissing,
     RawPayloadHashNotRequired,
     RedactedSummaryHashNotRequired,
@@ -147,8 +164,10 @@ impl Default for IbkrRateLimitScope {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IbkrRateLimitPolicyV1 {
+    pub contract_id: String,
+    pub source_version: u32,
     pub policy_present: bool,
     pub scope: IbkrRateLimitScope,
     pub min_request_spacing_ms: u64,
@@ -163,6 +182,8 @@ pub struct IbkrRateLimitPolicyV1 {
 impl Default for IbkrRateLimitPolicyV1 {
     fn default() -> Self {
         Self {
+            contract_id: String::new(),
+            source_version: 0,
             policy_present: false,
             scope: IbkrRateLimitScope::Unknown,
             min_request_spacing_ms: 0,
@@ -179,6 +200,8 @@ impl Default for IbkrRateLimitPolicyV1 {
 impl IbkrRateLimitPolicyV1 {
     pub fn source_template() -> Self {
         Self {
+            contract_id: IBKR_RATE_LIMIT_POLICY_CONTRACT_ID.to_string(),
+            source_version: 1,
             policy_present: true,
             scope: IbkrRateLimitScope::GlobalAndPerAction,
             min_request_spacing_ms: 100,
@@ -195,6 +218,12 @@ impl IbkrRateLimitPolicyV1 {
         use IbkrRateLimitPolicyBlocker as Blocker;
 
         let mut blockers = Vec::new();
+        if self.contract_id != IBKR_RATE_LIMIT_POLICY_CONTRACT_ID {
+            blockers.push(Blocker::ContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
+        }
         if !self.policy_present {
             blockers.push(Blocker::PolicyMissing);
         }
@@ -230,6 +259,8 @@ impl IbkrRateLimitPolicyV1 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrRateLimitPolicyBlocker {
+    ContractIdMismatch,
+    SourceVersionMismatch,
     PolicyMissing,
     ScopeNotPerAction,
     RequestSpacingMissing,
@@ -241,8 +272,10 @@ pub enum IbkrRateLimitPolicyBlocker {
     PaperOrderWriteBudgetMissing,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IbkrAuditEventPolicyV1 {
+    pub contract_id: String,
+    pub source_version: u32,
     pub policy_present: bool,
     pub append_only_required: bool,
     pub asset_lane_required: bool,
@@ -261,6 +294,8 @@ pub struct IbkrAuditEventPolicyV1 {
 impl Default for IbkrAuditEventPolicyV1 {
     fn default() -> Self {
         Self {
+            contract_id: String::new(),
+            source_version: 0,
             policy_present: false,
             append_only_required: false,
             asset_lane_required: false,
@@ -281,6 +316,8 @@ impl Default for IbkrAuditEventPolicyV1 {
 impl IbkrAuditEventPolicyV1 {
     pub fn source_template() -> Self {
         Self {
+            contract_id: IBKR_AUDIT_EVENT_POLICY_CONTRACT_ID.to_string(),
+            source_version: 1,
             policy_present: true,
             append_only_required: true,
             asset_lane_required: true,
@@ -301,6 +338,12 @@ impl IbkrAuditEventPolicyV1 {
         use IbkrAuditEventPolicyBlocker as Blocker;
 
         let mut blockers = Vec::new();
+        if self.contract_id != IBKR_AUDIT_EVENT_POLICY_CONTRACT_ID {
+            blockers.push(Blocker::ContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
+        }
         if !self.policy_present {
             blockers.push(Blocker::PolicyMissing);
         }
@@ -348,6 +391,8 @@ impl IbkrAuditEventPolicyV1 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrAuditEventPolicyBlocker {
+    ContractIdMismatch,
+    SourceVersionMismatch,
     PolicyMissing,
     AppendOnlyMissing,
     AssetLaneMissing,
@@ -363,8 +408,10 @@ pub enum IbkrAuditEventPolicyBlocker {
     RawPayloadStorageAllowed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IbkrPaperAttestationPolicyV1 {
+    pub contract_id: String,
+    pub source_version: u32,
     pub policy_present: bool,
     pub external_surface_gate_required: bool,
     pub session_attestation_required: bool,
@@ -386,6 +433,8 @@ pub struct IbkrPaperAttestationPolicyV1 {
 impl Default for IbkrPaperAttestationPolicyV1 {
     fn default() -> Self {
         Self {
+            contract_id: String::new(),
+            source_version: 0,
             policy_present: false,
             external_surface_gate_required: false,
             session_attestation_required: false,
@@ -409,6 +458,8 @@ impl Default for IbkrPaperAttestationPolicyV1 {
 impl IbkrPaperAttestationPolicyV1 {
     pub fn source_template() -> Self {
         Self {
+            contract_id: IBKR_PAPER_ATTESTATION_CONTRACT_ID.to_string(),
+            source_version: 1,
             policy_present: true,
             external_surface_gate_required: true,
             session_attestation_required: true,
@@ -432,6 +483,12 @@ impl IbkrPaperAttestationPolicyV1 {
         use IbkrPaperAttestationPolicyBlocker as Blocker;
 
         let mut blockers = Vec::new();
+        if self.contract_id != IBKR_PAPER_ATTESTATION_CONTRACT_ID {
+            blockers.push(Blocker::ContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
+        }
         if !self.policy_present {
             blockers.push(Blocker::PolicyMissing);
         }
@@ -488,6 +545,8 @@ impl IbkrPaperAttestationPolicyV1 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrPaperAttestationPolicyBlocker {
+    ContractIdMismatch,
+    SourceVersionMismatch,
     PolicyMissing,
     ExternalSurfaceGateMissing,
     SessionAttestationMissing,
@@ -506,8 +565,10 @@ pub enum IbkrPaperAttestationPolicyBlocker {
     MaxPaperNotionalMissing,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IbkrPythonWriteGuardPolicyV1 {
+    pub contract_id: String,
+    pub source_version: u32,
     pub policy_present: bool,
     pub python_broker_write_authority_denied: bool,
     pub python_can_read_display_import: bool,
@@ -521,6 +582,8 @@ pub struct IbkrPythonWriteGuardPolicyV1 {
 impl Default for IbkrPythonWriteGuardPolicyV1 {
     fn default() -> Self {
         Self {
+            contract_id: String::new(),
+            source_version: 0,
             policy_present: false,
             python_broker_write_authority_denied: false,
             python_can_read_display_import: false,
@@ -536,6 +599,8 @@ impl Default for IbkrPythonWriteGuardPolicyV1 {
 impl IbkrPythonWriteGuardPolicyV1 {
     pub fn source_template() -> Self {
         Self {
+            contract_id: IBKR_PYTHON_WRITE_GUARD_POLICY_CONTRACT_ID.to_string(),
+            source_version: 1,
             policy_present: true,
             python_broker_write_authority_denied: true,
             python_can_read_display_import: true,
@@ -551,6 +616,12 @@ impl IbkrPythonWriteGuardPolicyV1 {
         use IbkrPythonWriteGuardPolicyBlocker as Blocker;
 
         let mut blockers = Vec::new();
+        if self.contract_id != IBKR_PYTHON_WRITE_GUARD_POLICY_CONTRACT_ID {
+            blockers.push(Blocker::ContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
+        }
         if !self.policy_present {
             blockers.push(Blocker::PolicyMissing);
         }
@@ -583,6 +654,8 @@ impl IbkrPythonWriteGuardPolicyV1 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrPythonWriteGuardPolicyBlocker {
+    ContractIdMismatch,
+    SourceVersionMismatch,
     PolicyMissing,
     PythonBrokerWriteAuthorityNotDenied,
     PythonReadDisplayImportMissing,
@@ -602,7 +675,7 @@ pub struct IbkrPhase2GatePrerequisiteFlags {
     pub python_no_write_guard_present: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IbkrPhase2PolicyBundleV1 {
     pub redaction: IbkrRedactionPolicyV1,
     pub rate_limit: IbkrRateLimitPolicyV1,

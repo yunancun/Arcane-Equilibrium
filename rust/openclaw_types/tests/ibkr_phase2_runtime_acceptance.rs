@@ -8,7 +8,8 @@ use std::path::PathBuf;
 use openclaw_types::{
     BrokerEnvironment, IbkrApiSessionTopologyBlocker, IbkrApiSessionTopologyV1,
     IbkrGatewayProcessMode, IbkrSecretSlotContractBlocker, IbkrSecretSlotContractV1,
-    IbkrSecretSlotPosture, IBKR_LIVE_GATEWAY_PORT, IBKR_PAPER_GATEWAY_DEFAULT_PORT,
+    IbkrSecretSlotPosture, IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID, IBKR_LIVE_GATEWAY_PORT,
+    IBKR_PAPER_GATEWAY_DEFAULT_PORT,
 };
 
 #[test]
@@ -108,6 +109,12 @@ fn default_api_session_topology_blocks_before_gateway_contact() {
     assert!(!verdict.accepted);
     assert!(verdict
         .blockers
+        .contains(&IbkrApiSessionTopologyBlocker::ContractIdMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrApiSessionTopologyBlocker::SourceVersionMismatch));
+    assert!(verdict
+        .blockers
         .contains(&IbkrApiSessionTopologyBlocker::TopologyMissing));
     assert!(verdict
         .blockers
@@ -130,6 +137,8 @@ fn source_api_session_topology_accepts_loopback_paper_gateway_only() {
 
     assert!(verdict.accepted);
     assert!(verdict.blockers.is_empty());
+    assert_eq!(topology.contract_id, IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID);
+    assert_eq!(topology.source_version, 1);
     assert_eq!(topology.host, "127.0.0.1");
     assert_eq!(topology.port, IBKR_PAPER_GATEWAY_DEFAULT_PORT);
     assert_eq!(topology.gateway_mode, IbkrGatewayProcessMode::PaperGateway);
@@ -139,6 +148,8 @@ fn source_api_session_topology_accepts_loopback_paper_gateway_only() {
 #[test]
 fn topology_rejects_network_host_live_port_and_live_mode() {
     let topology = IbkrApiSessionTopologyV1 {
+        contract_id: "ibkr_api_session_topology_v1_fixture".to_string(),
+        source_version: 2,
         host: "192.0.2.10".to_string(),
         port: IBKR_LIVE_GATEWAY_PORT,
         gateway_mode: IbkrGatewayProcessMode::LiveDenied,
@@ -155,6 +166,12 @@ fn topology_rejects_network_host_live_port_and_live_mode() {
     let verdict = topology.validate();
 
     assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&IbkrApiSessionTopologyBlocker::ContractIdMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrApiSessionTopologyBlocker::SourceVersionMismatch));
     assert!(verdict
         .blockers
         .contains(&IbkrApiSessionTopologyBlocker::HostNotLoopback));
@@ -203,6 +220,14 @@ fn runtime_contract_template_is_blocked_and_secret_free() {
     assert_eq!(
         parsed["api_session_topology"]["topology_present"].as_bool(),
         Some(false)
+    );
+    assert_eq!(
+        parsed["api_session_topology"]["contract_id"].as_str(),
+        Some("")
+    );
+    assert_eq!(
+        parsed["api_session_topology"]["source_version"].as_integer(),
+        Some(0)
     );
     assert_eq!(
         parsed["api_session_topology"]["api_baseline"].as_str(),

@@ -10,7 +10,8 @@ use openclaw_types::{
     IbkrExternalSurfaceGateBlocker, IbkrExternalSurfaceGateStatus, IbkrExternalSurfaceGateV1,
     IbkrGatewayMode, IbkrHostPolicy, IbkrPortPolicy, IbkrSecretSlotMode,
     IbkrSessionAttestationBlocker, IbkrSessionAttestationV1, NonBybitApiAction,
-    NonBybitApiDenialReason, IBKR_LIVE_GATEWAY_PORT, IBKR_PAPER_GATEWAY_DEFAULT_PORT,
+    NonBybitApiDenialReason, IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID, IBKR_LIVE_GATEWAY_PORT,
+    IBKR_PAPER_GATEWAY_DEFAULT_PORT, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
 };
 
 #[test]
@@ -21,6 +22,12 @@ fn external_surface_gate_default_blocks_before_any_ibkr_contact() {
     assert_eq!(gate.status, IbkrExternalSurfaceGateStatus::Blocked);
     assert!(!gate.ibkr_call_performed);
     assert!(!verdict.ibkr_contact_allowed);
+    assert!(verdict
+        .blockers
+        .contains(&IbkrExternalSurfaceGateBlocker::ContractIdMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrExternalSurfaceGateBlocker::SourceVersionMismatch));
     assert!(verdict
         .blockers
         .contains(&IbkrExternalSurfaceGateBlocker::StatusNotPass));
@@ -44,7 +51,14 @@ fn external_surface_gate_pass_fixture_allows_contact_without_call_side_effect() 
     assert!(verdict.ibkr_contact_allowed);
     assert!(verdict.blockers.is_empty());
     assert!(gate.can_contact_ibkr());
+    assert_eq!(gate.contract_id, IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID);
+    assert_eq!(gate.source_version, 1);
     assert_eq!(serialized["status"], "PASS");
+    assert_eq!(
+        serialized["contract_id"],
+        IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID
+    );
+    assert_eq!(serialized["source_version"], 1);
     assert_eq!(serialized["api_baseline"], "ib_gateway_tws_api");
     assert_eq!(serialized["host_policy"], "loopback_only");
     assert_eq!(serialized["port_policy"], "paper_gateway_port_only");
@@ -53,6 +67,19 @@ fn external_surface_gate_pass_fixture_allows_contact_without_call_side_effect() 
 
 #[test]
 fn external_surface_gate_rejects_retroactive_or_wrong_surface_pass() {
+    let wrong_identity = IbkrExternalSurfaceGateV1 {
+        contract_id: "phase2_ibkr_external_surface_gate_v1_fixture".to_string(),
+        source_version: 2,
+        ..IbkrExternalSurfaceGateV1::passing_fixture()
+    };
+    let identity_verdict = wrong_identity.validate();
+    assert!(identity_verdict
+        .blockers
+        .contains(&IbkrExternalSurfaceGateBlocker::ContractIdMismatch));
+    assert!(identity_verdict
+        .blockers
+        .contains(&IbkrExternalSurfaceGateBlocker::SourceVersionMismatch));
+
     let retroactive = IbkrExternalSurfaceGateV1 {
         ibkr_call_performed: true,
         ..IbkrExternalSurfaceGateV1::passing_fixture()
@@ -129,6 +156,12 @@ fn session_attestation_default_blocks_without_secret_or_socket() {
     assert!(!verdict.attestation_accepted);
     assert!(verdict
         .blockers
+        .contains(&IbkrSessionAttestationBlocker::ContractIdMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrSessionAttestationBlocker::SourceVersionMismatch));
+    assert!(verdict
+        .blockers
         .contains(&IbkrSessionAttestationBlocker::StatusBlocked));
     assert!(verdict
         .blockers
@@ -151,8 +184,26 @@ fn paper_session_attestation_accepts_only_loopback_paper_gateway() {
 
     assert!(verdict.attestation_accepted);
     assert!(verdict.blockers.is_empty());
+    assert_eq!(
+        attestation.contract_id,
+        IBKR_SESSION_ATTESTATION_CONTRACT_ID
+    );
+    assert_eq!(attestation.source_version, 1);
     assert_eq!(attestation.host, "127.0.0.1");
     assert_eq!(attestation.port, IBKR_PAPER_GATEWAY_DEFAULT_PORT);
+
+    let wrong_identity = IbkrSessionAttestationV1 {
+        contract_id: "ibkr_session_attestation_v1_fixture".to_string(),
+        source_version: 2,
+        ..IbkrSessionAttestationV1::paper_fixture()
+    };
+    let verdict = wrong_identity.validate(wrong_identity.attested_at_ms + 1);
+    assert!(verdict
+        .blockers
+        .contains(&IbkrSessionAttestationBlocker::ContractIdMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrSessionAttestationBlocker::SourceVersionMismatch));
 
     let network_host = IbkrSessionAttestationV1 {
         host: "192.0.2.10".to_string(),
@@ -222,6 +273,8 @@ fn source_gate_template_is_blocked_and_secret_free() {
     let parsed: toml::Value = toml::from_str(&raw).expect("gate toml parses");
 
     assert_eq!(parsed["gate"]["status"].as_str(), Some("BLOCKED"));
+    assert_eq!(parsed["gate"]["contract_id"].as_str(), Some(""));
+    assert_eq!(parsed["gate"]["source_version"].as_integer(), Some(0));
     assert_eq!(
         parsed["gate"]["api_baseline"].as_str(),
         Some("ib_gateway_tws_api")

@@ -59,6 +59,8 @@ impl StockEtfAuthorizationEnvelopeV1 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FeatureFlagSecretAuthMatrixV1 {
+    pub contract_id: String,
+    pub source_version: u32,
     pub flags: StockEtfFeatureFlags,
     pub secret_slot_contract: IbkrSecretSlotContractV1,
     pub phase2_gate_artifact: IbkrPhase2GateArtifactV1,
@@ -71,6 +73,8 @@ pub struct FeatureFlagSecretAuthMatrixV1 {
 impl Default for FeatureFlagSecretAuthMatrixV1 {
     fn default() -> Self {
         Self {
+            contract_id: String::new(),
+            source_version: 0,
             flags: StockEtfFeatureFlags::default(),
             secret_slot_contract: IbkrSecretSlotContractV1::default(),
             phase2_gate_artifact: IbkrPhase2GateArtifactV1::default(),
@@ -92,6 +96,12 @@ impl FeatureFlagSecretAuthMatrixV1 {
 
         let mut blockers = Vec::new();
 
+        if self.contract_id != FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID {
+            blockers.push(Blocker::ContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
+        }
         if !self.server_rust_matrix_authoritative {
             blockers.push(Blocker::ServerRustMatrixNotAuthoritative);
         }
@@ -226,6 +236,8 @@ pub struct FeatureFlagSecretAuthVerdict {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FeatureFlagSecretAuthBlocker {
+    ContractIdMismatch,
+    SourceVersionMismatch,
     ServerRustMatrixNotAuthoritative,
     GuiLaneStateOverrideNotDenied,
     WrongAssetLane,

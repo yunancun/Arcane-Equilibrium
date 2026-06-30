@@ -11,7 +11,7 @@ use openclaw_types::{
     FeatureFlagSecretAuthMatrixV1, IbkrApiSessionTopologyV1, IbkrExternalSurfaceGateV1,
     IbkrPhase2GateArtifactV1, IbkrPhase2PolicyBundleV1, IbkrSecretSlotContractV1,
     IbkrSessionAttestationV1, InstrumentKind, StockEtfAuthorizationEnvelopeV1,
-    StockEtfFeatureFlags,
+    StockEtfFeatureFlags, FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID,
 };
 
 const NOW_MS: u64 = 1_772_233_000_000;
@@ -64,6 +64,8 @@ fn accepted_matrix(
 ) -> FeatureFlagSecretAuthMatrixV1 {
     let secret = IbkrSecretSlotContractV1::source_template();
     FeatureFlagSecretAuthMatrixV1 {
+        contract_id: FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID.to_string(),
+        source_version: 1,
         flags: StockEtfFeatureFlags {
             stock_etf_lane_enabled: true,
             ibkr_readonly_enabled: true,
@@ -97,6 +99,12 @@ fn default_feature_flag_secret_auth_matrix_blocks_contact() {
 
     assert!(!verdict.allowed);
     assert_eq!(verdict.effective_authority_scope, AuthorityScope::Denied);
+    assert!(verdict
+        .blockers
+        .contains(&FeatureFlagSecretAuthBlocker::ContractIdMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&FeatureFlagSecretAuthBlocker::SourceVersionMismatch));
     assert!(verdict
         .blockers
         .contains(&FeatureFlagSecretAuthBlocker::LaneFlagDisabled));
@@ -174,6 +182,11 @@ fn accepted_paper_matrix_requires_matching_secret_artifact_session_and_envelope(
 
     assert!(verdict.allowed);
     assert_eq!(
+        matrix.contract_id,
+        FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID
+    );
+    assert_eq!(matrix.source_version, 1);
+    assert_eq!(
         verdict.effective_authority_scope,
         AuthorityScope::PaperRehearsal
     );
@@ -186,6 +199,24 @@ fn accepted_paper_matrix_requires_matching_secret_artifact_session_and_envelope(
     assert!(mismatch_verdict
         .blockers
         .contains(&FeatureFlagSecretAuthBlocker::AccountFingerprintMismatch));
+}
+
+#[test]
+fn feature_flag_secret_auth_matrix_requires_exact_contract_id_and_version() {
+    let matrix = FeatureFlagSecretAuthMatrixV1 {
+        contract_id: "feature_flag_secret_auth_matrix_v1_fixture".to_string(),
+        source_version: 2,
+        ..accepted_matrix(true, false)
+    };
+    let verdict = evaluate_feature_flag_secret_auth_matrix(&matrix, paper_submit_request(), NOW_MS);
+
+    assert!(!verdict.allowed);
+    assert!(verdict
+        .blockers
+        .contains(&FeatureFlagSecretAuthBlocker::ContractIdMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&FeatureFlagSecretAuthBlocker::SourceVersionMismatch));
 }
 
 #[test]
@@ -216,6 +247,8 @@ fn source_auth_matrix_template_is_default_blocked_and_secret_free() {
         parsed["authorization_envelope"]["permission_scope"].as_str(),
         Some("denied")
     );
+    assert_eq!(parsed["matrix"]["contract_id"].as_str(), Some(""));
+    assert_eq!(parsed["matrix"]["source_version"].as_integer(), Some(0));
     assert_eq!(
         parsed["matrix"]["server_rust_matrix_authoritative"].as_bool(),
         Some(false)
