@@ -884,3 +884,9 @@ Do not paste long reports or stable architecture into TODO.
 
 - Governance checkpoint updates `SPECIFICATION_REGISTER.md`, ADR-0048, and AMD-2026-06-29-01 so governance docs now record the scorecard derivation/verdict/reconciliation/tiny-live lineage gates and the inert IBKR connector skeleton boundary.
 - Verification passed: register/ADR/AMD `rg` check PASS; `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, paper order/cancel/replace, fill import, scorecard writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Connector Skeleton Readiness Gate
+
+- Display-only checkpoint exposes a fail-closed `connector_skeleton` block through the Stock/ETF readiness normalizer and GUI, without importing the connector package or adding endpoints/actions.
+- Pre-gate truthy claims for skeleton acceptance, non-blocked status, network contact, secret loading, paper/live channel exposure, write method presence, or Bybit path reuse now become readiness contract violations.
+- Verification passed: Python compile PASS; focused readiness/no-write `9 passed`; full Stock/ETF FastAPI/static `94 passed`; Node syntax PASS; diff check PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, paper order/cancel/replace, fill import, scorecard writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.

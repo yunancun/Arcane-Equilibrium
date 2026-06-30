@@ -36,6 +36,13 @@ def test_stock_etf_readiness_returns_200_when_ipc_down(client_fail_closed: TestC
     assert data["first_ibkr_contact_allowed"] is False
     assert data["immutable_pass_artifact_present"] is False
     assert data["connector_enabled"] is False
+    assert data["connector_skeleton"]["surface_id"] == (
+        "ibkr_stock_etf_readonly_connector_skeleton_v1"
+    )
+    assert data["connector_skeleton"]["accepted"] is False
+    assert data["connector_skeleton"]["network_contact_performed"] is False
+    assert data["connector_skeleton"]["secret_content_loaded"] is False
+    assert data["connector_skeleton"]["order_write_method_present"] is False
     assert data["paper_order_entry_visible"] is False
     assert data["ibkr_call_performed"] is False
     assert data["secret_slot_touched"] is False
@@ -78,6 +85,18 @@ def test_stock_etf_readiness_uses_only_readonly_fixture_method() -> None:
                 "secret_slot_touched": False,
                 "order_routed": False,
             },
+            "connector_skeleton": {
+                "surface_id": "ibkr_stock_etf_readonly_connector_skeleton_v1",
+                "accepted": False,
+                "status": "blocked_source_only",
+                "blockers": ["phase2_gate_not_accepted"],
+                "network_contact_performed": False,
+                "secret_content_loaded": False,
+                "paper_channel_exposed": False,
+                "live_channel_exposed": False,
+                "order_write_method_present": False,
+                "bybit_path_reused": False,
+            },
             "ibkr_live_enabled": False,
             "ibkr_call_performed": False,
             "secret_slot_touched": False,
@@ -106,6 +125,8 @@ def test_stock_etf_readiness_uses_only_readonly_fixture_method() -> None:
     assert data["api_allowlist"]["read_action_count"] == 10
     assert data["api_allowlist"]["paper_write_action_count"] == 3
     assert data["api_allowlist"]["denied_action_count"] == 10
+    assert data["connector_skeleton"]["status"] == "blocked_source_only"
+    assert data["connector_skeleton"]["accepted"] is False
     assert "ibkr_live_order_submit" in data["denied_operations"]
     assert "ibkr_secret_slot_creation" in data["denied_operations"]
     fake_ipc.call.assert_awaited_once()
@@ -196,6 +217,18 @@ def test_stock_etf_readiness_blocks_contract_violation() -> None:
                 "first_ibkr_contact_allowed": True,
                 "connector_enabled": True,
             },
+            "connector_skeleton": {
+                "surface_id": "ibkr_stock_etf_readonly_connector_skeleton_v1",
+                "accepted": True,
+                "status": "ready",
+                "blockers": [],
+                "network_contact_performed": True,
+                "secret_content_loaded": True,
+                "paper_channel_exposed": True,
+                "live_channel_exposed": True,
+                "order_write_method_present": True,
+                "bybit_path_reused": True,
+            },
             "ibkr_call_performed": True,
             "secret_slot_touched": True,
             "order_routed": True,
@@ -215,6 +248,14 @@ def test_stock_etf_readiness_blocks_contract_violation() -> None:
         "secret_slot_touched",
         "order_routed",
         "bybit_ipc_reused",
+        "connector_skeleton_accepted",
+        "connector_skeleton_status_not_blocked",
+        "connector_skeleton_network_contact_performed",
+        "connector_skeleton_secret_content_loaded",
+        "connector_skeleton_paper_channel_exposed",
+        "connector_skeleton_live_channel_exposed",
+        "connector_skeleton_order_write_method_present",
+        "connector_skeleton_bybit_path_reused",
     }
     assert data["ibkr_live_enabled"] is False
     assert data["stock_live_disabled"] is True

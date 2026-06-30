@@ -933,3 +933,30 @@ PM 判定：checkpoint 可接受，但只是 governance catch-up。未批准 IBK
 IBKR SDK import、socket/HTTP、secret、connector runtime、Phase 1/2/3/4/5 runtime
 start、paper order/cancel/replace、fill import、scorecard writer、DB apply、
 evidence clock、tiny-live、live、Linux runtime sync/restart 或 Bybit behavior change。
+
+## 2026-06-30 PM Session Checkpoint — Connector Skeleton Readiness Gate
+
+PM 已把 inert IBKR connector skeleton boundary 接入 display-only readiness surface。
+這不是 connector runtime，也沒有 import 新 connector package。
+
+已完成：
+
+- FastAPI readiness normalizer 新增 fail-closed `connector_skeleton` block。
+- Pre-gate truthy claims：accepted、non-blocked status、network contact、secret load、
+  paper/live channel、write method、Bybit path reuse，全部會被
+  `contract_violation_blocked` 擋下。
+- GUI readiness panel 顯示 connector skeleton surface/status 與 side-effect flags。
+- Route tests 覆蓋 fallback、正常 blocked display、truthy violation。
+
+Verification：
+
+- Python compile PASS。
+- Focused readiness/no-write tests `9 passed`。
+- Full Stock/ETF FastAPI/static tests `94 passed`。
+- `node --check` PASS。
+- `git diff --check` PASS。
+
+PM 判定：checkpoint 可接受，但只是 display hardening。未批准 IBKR contact、
+IBKR SDK import、socket/HTTP、secret、connector runtime、Phase 1/2/3/4/5 runtime
+start、paper order/cancel/replace、fill import、scorecard writer、DB apply、
+evidence clock、tiny-live、live、Linux runtime sync/restart 或 Bybit behavior change。

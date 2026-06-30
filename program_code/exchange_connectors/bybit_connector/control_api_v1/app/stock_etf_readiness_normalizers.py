@@ -29,16 +29,64 @@ def _normalize_feature_flags(value: Any) -> dict[str, Any]:
     }
 
 
+def _connector_skeleton_fail_closed(reason: str = "phase2_gate_not_accepted") -> dict[str, Any]:
+    return {
+        "surface_id": "ibkr_stock_etf_readonly_connector_skeleton_v1",
+        "accepted": False,
+        "status": "blocked_source_only",
+        "blockers": [reason],
+        "network_contact_performed": False,
+        "secret_content_loaded": False,
+        "paper_channel_exposed": False,
+        "live_channel_exposed": False,
+        "order_write_method_present": False,
+        "bybit_path_reused": False,
+    }
+
+
+def _normalize_connector_skeleton(value: Any) -> dict[str, Any]:
+    source = _as_dict(value)
+    fallback = _connector_skeleton_fail_closed()
+    return {
+        "surface_id": _as_str(source.get("surface_id"), fallback["surface_id"]),
+        "accepted": _as_bool(source.get("accepted")),
+        "status": _as_str(source.get("status"), fallback["status"]),
+        "blockers": [str(item) for item in _as_list(source.get("blockers"))]
+        or list(fallback["blockers"]),
+        "network_contact_performed": _as_bool(source.get("network_contact_performed")),
+        "secret_content_loaded": _as_bool(source.get("secret_content_loaded")),
+        "paper_channel_exposed": _as_bool(source.get("paper_channel_exposed")),
+        "live_channel_exposed": _as_bool(source.get("live_channel_exposed")),
+        "order_write_method_present": _as_bool(source.get("order_write_method_present")),
+        "bybit_path_reused": _as_bool(source.get("bybit_path_reused")),
+    }
+
+
 def _normalize_readiness(raw: Any, reason: str | None) -> dict[str, Any]:
     source = _as_dict(raw)
     readiness = _as_dict(source.get("readiness")) or _readiness_fail_closed()
     phase2 = _as_dict(source.get("phase2")) or _phase2_fail_closed()
     external_surface_gate = _as_dict(phase2.get("external_surface_gate"))
     api_allowlist = _normalize_api_allowlist(phase2.get("api_allowlist"))
+    connector_skeleton = _normalize_connector_skeleton(source.get("connector_skeleton"))
 
     contract_violations = [
         field for field in _SAFETY_FALSE_FIELDS if _as_bool(source.get(field))
     ]
+    if connector_skeleton["accepted"]:
+        contract_violations.append("connector_skeleton_accepted")
+    if connector_skeleton["status"] != "blocked_source_only":
+        contract_violations.append("connector_skeleton_status_not_blocked")
+    for key in (
+        "network_contact_performed",
+        "secret_content_loaded",
+        "paper_channel_exposed",
+        "live_channel_exposed",
+        "order_write_method_present",
+        "bybit_path_reused",
+    ):
+        if connector_skeleton[key]:
+            contract_violations.append(f"connector_skeleton_{key}")
     if reason is None:
         contract_violations.extend(_api_allowlist_contract_violations(api_allowlist))
     first_contact_allowed = _as_bool(phase2.get("first_ibkr_contact_allowed"))
@@ -89,6 +137,7 @@ def _normalize_readiness(raw: Any, reason: str | None) -> dict[str, Any]:
         "first_ibkr_contact_allowed": first_contact_allowed,
         "immutable_pass_artifact_present": immutable_artifact,
         "connector_enabled": connector_enabled,
+        "connector_skeleton": connector_skeleton,
         "ibkr_live_enabled": False,
         "stock_live_disabled": True,
         "paper_order_entry_visible": False,
