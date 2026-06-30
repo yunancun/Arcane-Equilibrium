@@ -2111,7 +2111,7 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 
 新增 checkpoint：
 
-- 主計畫 PM session checkpoint 現在從 14 到 77 連續遞增，無重複編號。
+- 主計畫 PM session checkpoint 現在從 14 到 78 連續遞增，無重複編號。
 - 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
   lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
   connector skeleton / readonly-probe / broker read gate / policy display / operation
@@ -3506,6 +3506,48 @@ async task、subprocess 或 background work。
   `19 passed`。
 - `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_ibkr_connector_skeleton.py`：
   `8 passed`。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  `118 passed`。
+- `python3 -B -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
+  `2 passed`。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 78. 2026-07-01 PM session source checkpoint：Rust IPC Runtime Side-Effect Static Guard
+
+本 checkpoint 將 Stock/ETF Rust IPC handler/test split files 的 clock、thread/task、
+process side-effect boundary 固定為 structure guard。這不是 Rust runtime behavior
+改動，也不是 IBKR connector wiring；目標是讓 Stock/ETF IPC source-only fixtures
+維持 deterministic/no-background-work posture，避免未批准前引入 timer、sleep、
+thread/task spawn 或 subprocess。
+
+已完成：
+
+- 更新 `tests/structure/test_stock_etf_ipc_handler_split_static.py`：
+  - 新增 `FORBIDDEN_RUNTIME_SIDE_EFFECT_TOKENS`。
+  - 新增 handler guard，掃描 `stock_etf.rs`、`request_summaries.rs`、
+    `status_summaries.rs`。
+  - 禁止 `std::time`、`SystemTime`、`Instant`、`chrono`、`Utc::now`、
+    `Local::now`、`std::thread`、`thread::spawn`、`tokio::spawn`、
+    `tokio::task`、`tokio::time`、`sleep(`、`std::process`、`Command::new`、
+    `.spawn(` 等 side-effect tokens。
+- 更新 `tests/structure/test_stock_etf_ipc_tests_split_static.py`：
+  - 同步禁止 Rust IPC fixture tests 引入 clock/thread/task/process side effects。
+  - 掃描 parent `stock_etf.rs`、`request_contracts.rs`、`status_fixtures.rs`。
+- 本 checkpoint 不改 production behavior、不改 endpoint、不改 IPC method、不改 Bybit
+  path、不啟動任何 IBKR 或 connector runtime。
+
+驗證：
+
+- `python3 -B -m py_compile tests/structure/test_stock_etf_ipc_handler_split_static.py tests/structure/test_stock_etf_ipc_tests_split_static.py`：
+  PASS。
+- `python3 -B -m pytest -q tests/structure/test_stock_etf_ipc_handler_split_static.py tests/structure/test_stock_etf_ipc_tests_split_static.py`：
+  `12 passed`。
 - `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
   `118 passed`。
 - `python3 -B -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：

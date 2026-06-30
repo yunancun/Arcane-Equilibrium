@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 77 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 78 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -1550,6 +1550,33 @@ contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation
 connector runtime、沒有 read probe execution、沒有 paper order/cancel/replace、沒有 fill
 import、沒有 evidence writer、沒有 DB apply、沒有 evidence clock、沒有 tiny-live/live
 authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Rust IPC Runtime Side-Effect Static Guard
+
+這次不是 Rust runtime behavior change，也不是 IBKR connector wiring。變更只新增
+Stock/ETF Rust IPC split source 的 structure guard：
+
+- Handler guard 掃描 `stock_etf.rs`、`request_summaries.rs`、
+  `status_summaries.rs`。
+- Test guard 掃描 parent IPC test、`request_contracts.rs`、
+  `status_fixtures.rs`。
+- 禁止 `std::time`、`SystemTime`、`Instant`、`chrono`、`Utc::now`、
+  `Local::now`、`std::thread`、`thread::spawn`、`tokio::spawn`、
+  `tokio::task`、`tokio::time`、`sleep(`、`std::process`、`Command::new`、
+  `.spawn(` 等 clock/thread/task/process side-effect token。
+
+Verification 已過：
+
+- Rust IPC split static guards：`12 passed`
+- Full Stock/ETF FastAPI/static：`118 passed`
+- IBKR timeline + trace-title structure guard：`2 passed`
+- `git diff --check`：PASS
+
+邊界不變：沒有 Rust runtime behavior change、沒有新增 endpoint、沒有新增 IPC method、
+沒有 client input、沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
+access/creation、沒有 connector runtime、沒有 read probe execution、沒有 paper
+order/cancel/replace、沒有 fill import、沒有 evidence writer、沒有 DB apply、沒有
+evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
 
 ## 2026-07-01 Operator Update — Rust IPC Secret/Env Material Static Guard
 

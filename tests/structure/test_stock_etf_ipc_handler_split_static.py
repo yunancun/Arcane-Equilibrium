@@ -92,6 +92,24 @@ FORBIDDEN_BYBIT_RUNTIME_TOKENS = (
     ".modify_order(",
     ".create_order(",
 )
+FORBIDDEN_RUNTIME_SIDE_EFFECT_TOKENS = (
+    "std::time",
+    "SystemTime",
+    "Instant",
+    "chrono",
+    "Utc::now",
+    "Local::now",
+    "std::thread",
+    "thread::spawn",
+    "tokio::spawn",
+    "tokio::task",
+    "tokio::time",
+    "sleep(",
+    "std::process",
+    "process::Command",
+    "Command::new",
+    ".spawn(",
+)
 
 
 def _loc(path: Path) -> int:
@@ -142,6 +160,22 @@ def test_stock_etf_ipc_handler_files_do_not_import_or_call_bybit_runtime_paths()
         for token in FORBIDDEN_BYBIT_RUNTIME_TOKENS:
             if token in source:
                 violations.append(f"{path}: contains forbidden Bybit runtime token {token!r}")
+
+    assert violations == []
+
+
+def test_stock_etf_ipc_handler_files_have_no_clock_thread_or_process_side_effects() -> None:
+    sources = {
+        STOCK_ETF_HANDLER: STOCK_ETF_HANDLER.read_text(encoding="utf-8"),
+        REQUEST_SUMMARIES: REQUEST_SUMMARIES.read_text(encoding="utf-8"),
+        STATUS_SUMMARIES: STATUS_SUMMARIES.read_text(encoding="utf-8"),
+    }
+
+    violations = []
+    for path, source in sources.items():
+        for token in FORBIDDEN_RUNTIME_SIDE_EFFECT_TOKENS:
+            if token in source:
+                violations.append(f"{path}: contains forbidden runtime side-effect token {token!r}")
 
     assert violations == []
 
