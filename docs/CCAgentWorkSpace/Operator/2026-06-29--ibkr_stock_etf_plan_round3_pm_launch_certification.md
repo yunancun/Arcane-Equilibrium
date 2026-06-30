@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 59 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 60 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -1283,6 +1283,36 @@ Verification 已過：
 
 - Route fixture `py_compile`：PASS
 - Route fixture split static guard：`3 passed`
+- Full Stock/ETF FastAPI/static：`105 passed`
+- IBKR timeline + trace-title structure guard：`2 passed`
+- `git diff --check`：PASS
+
+邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 IBKR contact、沒有 SDK import、
+沒有 socket/HTTP、沒有 secret access/creation、沒有 connector runtime、沒有 read probe
+execution、沒有 paper order/cancel/replace、沒有 fill import、沒有 evidence writer、沒有
+DB apply、沒有 evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live
+execution 行為。
+
+## 2026-06-30 Operator Update — Rust IPC Request Contract Test Split Guard
+
+本 session 已進一步降低 Stock/ETF Rust IPC 測試父檔的結構風險：
+
+- 將 paper/fill/shadow/readonly-probe request contract tests 從
+  `rust/openclaw_engine/src/ipc_server/tests/stock_etf.rs` 拆到
+  `rust/openclaw_engine/src/ipc_server/tests/stock_etf/request_contracts.rs`。
+- 父檔 `stock_etf.rs` 從 `1852` 行降到 `1110` 行。
+- 新子檔 `request_contracts.rs` 為 `745` 行；既有 `status_fixtures.rs` 保持
+  `685` 行。
+- Rust IPC test split guard 現在要求子模組集合固定為 `request_contracts.rs` 與
+  `status_fixtures.rs`，並把父/子測試檔 line cap 收緊到 `1200`。
+- Guard 同時確認 request-contract 子模組保留 paper / fill import / shadow /
+  readonly-probe method 覆蓋，並阻止引入 IBKR SDK 或 socket/HTTP client token。
+
+Verification 已過：
+
+- `rustfmt`：PASS
+- Engine `stock_etf` filter：`31 passed`
+- Rust IPC test split static guard：`3 passed`
 - Full Stock/ETF FastAPI/static：`105 passed`
 - IBKR timeline + trace-title structure guard：`2 passed`
 - `git diff --check`：PASS
