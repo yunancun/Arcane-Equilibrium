@@ -33,6 +33,7 @@ const REQUIRED_PROOFS: &[StockEtfDisableCleanupProofKind] = &[
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StockEtfDisableCleanupRunbookV1 {
     pub runbook_id: String,
+    pub source_version: u32,
     pub asset_lane: AssetLane,
     pub broker: Broker,
     pub source_artifact_hash: String,
@@ -55,6 +56,7 @@ impl Default for StockEtfDisableCleanupRunbookV1 {
     fn default() -> Self {
         Self {
             runbook_id: String::new(),
+            source_version: 0,
             asset_lane: AssetLane::CryptoPerp,
             broker: Broker::Bybit,
             source_artifact_hash: String::new(),
@@ -79,6 +81,7 @@ impl StockEtfDisableCleanupRunbookV1 {
     pub fn accepted_fixture() -> Self {
         Self {
             runbook_id: STOCK_ETF_DISABLE_CLEANUP_RUNBOOK_ID.to_string(),
+            source_version: 1,
             asset_lane: AssetLane::StockEtfCash,
             broker: Broker::Ibkr,
             source_artifact_hash: hash('1'),
@@ -114,6 +117,9 @@ impl StockEtfDisableCleanupRunbookV1 {
 
         if self.runbook_id != STOCK_ETF_DISABLE_CLEANUP_RUNBOOK_ID {
             blockers.push(Blocker::RunbookIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
         }
         if self.asset_lane != AssetLane::StockEtfCash {
             blockers.push(Blocker::WrongAssetLane);
@@ -236,6 +242,7 @@ impl<B> StockEtfDisableCleanupVerdict<B> {
 #[serde(rename_all = "snake_case")]
 pub enum StockEtfDisableCleanupBlocker {
     RunbookIdMismatch,
+    SourceVersionMismatch,
     WrongAssetLane,
     WrongBroker,
     SourceArtifactHashInvalid,

@@ -901,6 +901,11 @@ secret content, and tiny-live/live authority.
 
 ## 21. `stock_etf_kill_switch_and_disable_cleanup_runbook_v1`
 
+Required fields:
+
+- `runbook_id=stock_etf_kill_switch_and_disable_cleanup_runbook_v1`
+- `source_version=1`
+
 Kill actions:
 
 - set `OPENCLAW_STOCK_ETF_LANE_ENABLED=0`
@@ -916,12 +921,14 @@ No destructive DB cleanup is allowed as rollback. Data retention is forward-only
 
 Source validator:
 `openclaw_types::stock_etf_disable_cleanup_runbook::StockEtfDisableCleanupRunbookV1`.
-The validator requires exact disable env-flag evidence, collector stop proof,
-GUI disabled/hidden proof, live-secret absence proof, forward-only evidence
-archive and DB-retention proof, append-only audit preservation, and Bybit live
-execution unchanged. It rejects IBKR contact, connector runtime, paper order
-routing, secret-slot creation, secret serialization, destructive DB cleanup,
-DB delete/truncate permission, paper-shadow launch authority, tiny-live, and live.
+The validator requires exact
+`stock_etf_kill_switch_and_disable_cleanup_runbook_v1` runbook id, source
+version `1`, exact disable env-flag evidence, collector stop proof, GUI
+disabled/hidden proof, live-secret absence proof, forward-only evidence archive
+and DB-retention proof, append-only audit preservation, and Bybit live execution
+unchanged. It rejects IBKR contact, connector runtime, paper order routing,
+secret-slot creation, secret serialization, destructive DB cleanup, DB
+delete/truncate permission, paper-shadow launch authority, tiny-live, and live.
 
 ## 22. `stock_etf_release_packet_v1`
 

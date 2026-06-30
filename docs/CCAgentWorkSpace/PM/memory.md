@@ -2696,3 +2696,9 @@
 - PM hardened `stock_etf_db_evidence_ddl_v1` so DB evidence DDL artifacts require exact `contract_id == stock_etf_db_evidence_ddl_v1` plus `source_version=1`.
 - The Phase 0 manifest validator now consumes the shared DB evidence DDL contract constant; the blocked template exposes `source_version=0`; regression tests reject fixture-like DB DDL ids and wrong source versions.
 - Verification passed: focused linked openclaw_types tests `14 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `185` integration/acceptance + `0` doc-tests. This grants no DB apply, PG write, sqlx migration registration, migration authorization, IBKR contact, connector runtime, evidence clock, scorecard writer, GUI authority, paper order, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Disable Cleanup Runbook Hardening
+
+- PM hardened `stock_etf_kill_switch_and_disable_cleanup_runbook_v1` so disable/cleanup runbook artifacts require exact `runbook_id == stock_etf_kill_switch_and_disable_cleanup_runbook_v1` plus `source_version=1`.
+- The Phase 0 manifest validator now consumes the shared disable/cleanup runbook constant; the blocked template exposes `source_version=0`; regression tests reject fixture-like runbook ids and wrong source versions.
+- Verification passed: focused linked openclaw_types tests `13 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `186` integration/acceptance + `0` doc-tests. This grants no service stop, DB mutation, destructive cleanup, secret-slot creation, IBKR contact, connector runtime, paper order, evidence clock, GUI authority, release, tiny-live, live, or Bybit behavior change.

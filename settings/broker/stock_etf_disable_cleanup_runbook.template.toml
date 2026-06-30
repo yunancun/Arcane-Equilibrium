@@ -6,6 +6,7 @@
 
 [runbook]
 runbook_id = ""
+source_version = 0
 asset_lane = "crypto_perp"
 broker = "bybit"
 source_artifact_hash = ""
