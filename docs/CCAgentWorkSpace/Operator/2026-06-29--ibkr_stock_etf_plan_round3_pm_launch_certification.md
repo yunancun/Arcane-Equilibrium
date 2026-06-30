@@ -83,3 +83,16 @@ Verification 已過：
 邊界不變：沒有 IBKR contact、沒有 secret access、沒有 connector runtime、沒有
 paper order、沒有 DB apply、沒有 evidence clock、沒有 Linux runtime sync/restart，
 也沒有改動 Bybit live execution 行為。
+
+## 2026-06-30 Operator Update — GUI Split Hygiene
+
+`authorization-status` 完成後，我把 Stock/ETF GUI 做了純拆檔：原本
+`tab-stock-etf.html` 已到 2225 行，超過 repo 2000 行硬上限；現在 HTML 是 341 行，
+主要 JS 移到 `tab-stock-etf.js`，1883 行。
+
+Verification 已過：`node --check`、HTML inline parser、Full Stock/ETF
+FastAPI/static `77 passed`、`git diff --check`。
+
+這只是維護性拆檔：沒有新增 endpoint、沒有 IBKR contact、沒有 secret、沒有
+connector runtime、沒有 paper order、沒有 DB apply、沒有 Linux runtime sync/restart，
+也沒有改動 Bybit live execution 行為。

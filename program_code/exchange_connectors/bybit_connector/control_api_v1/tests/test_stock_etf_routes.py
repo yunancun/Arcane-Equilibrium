@@ -131,7 +131,9 @@ def test_stock_etf_router_registered_in_main_app() -> None:
 
 
 def test_stock_etf_static_tab_is_readonly_display_only() -> None:
-    source = (STATIC_DIR / "tab-stock-etf.html").read_text(encoding="utf-8")
+    html_source = (STATIC_DIR / "tab-stock-etf.html").read_text(encoding="utf-8")
+    js_source = (STATIC_DIR / "tab-stock-etf.js").read_text(encoding="utf-8")
+    source = html_source + "\n" + js_source
     assert "/api/v1/stock-etf/account-status" in source
     assert "/api/v1/stock-etf/authorization-status" in source
     assert "/api/v1/stock-etf/data-foundation-status" in source
@@ -145,6 +147,7 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     assert "/api/v1/stock-etf/scorecard-status" in source
     assert "/api/v1/stock-etf/shadow-status" in source
     assert "/api/v1/stock-etf/universe-status" in source
+    assert "tab-stock-etf.js" in html_source
     assert "se-evidence-status" in source
     assert "se-evidence-body" in source
     assert "se-account-status" in source

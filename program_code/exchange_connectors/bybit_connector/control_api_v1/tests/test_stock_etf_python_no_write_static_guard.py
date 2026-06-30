@@ -82,7 +82,10 @@ def _candidate_stock_etf_ibkr_python_files() -> list[Path]:
 
 def _candidate_stock_etf_static_gui_files() -> list[Path]:
     static_dir = CONTROL_API_DIR / "app" / "static"
-    files = {static_dir / "tab-stock-etf.html"}
+    files = {
+        static_dir / "tab-stock-etf.html",
+        static_dir / "tab-stock-etf.js",
+    }
     return sorted(path for path in files if path.exists())
 
 
@@ -130,40 +133,30 @@ def test_stock_etf_static_gui_surface_remains_display_only() -> None:
 
     violations: list[str] = []
     forbidden_snippets = FORBIDDEN_STATIC_GUI_SNIPPETS | FORBIDDEN_IPC_METHOD_STRINGS
+    sources = {path: path.read_text(encoding="utf-8") for path in files}
+    combined_source = "\n".join(sources.values())
+    endpoint_requirements = {
+        "/api/v1/stock-etf/account-status": "account-status",
+        "/api/v1/stock-etf/authorization-status": "authorization-status",
+        "/api/v1/stock-etf/data-foundation-status": "data-foundation-status",
+        "/api/v1/stock-etf/evidence-status": "evidence-status",
+        "/api/v1/stock-etf/lane-status": "lane-status",
+        "/api/v1/stock-etf/launch-status": "launch-status",
+        "/api/v1/stock-etf/paper-status": "paper-status",
+        "/api/v1/stock-etf/policy-status": "policy-status",
+        "/api/v1/stock-etf/readiness": "readiness",
+        "/api/v1/stock-etf/reconciliation-status": "reconciliation-status",
+        "/api/v1/stock-etf/scorecard-status": "scorecard-status",
+        "/api/v1/stock-etf/shadow-status": "shadow-status",
+        "/api/v1/stock-etf/universe-status": "universe-status",
+    }
+    for endpoint, label in endpoint_requirements.items():
+        if endpoint not in combined_source:
+            violations.append(
+                f"Stock/ETF static GUI bundle: missing read-only Stock/ETF {label} endpoint"
+            )
     for path in files:
-        source = path.read_text(encoding="utf-8")
-        if "/api/v1/stock-etf/account-status" not in source:
-            violations.append(f"{path}: missing read-only Stock/ETF account-status endpoint")
-        if "/api/v1/stock-etf/authorization-status" not in source:
-            violations.append(
-                f"{path}: missing read-only Stock/ETF authorization-status endpoint"
-            )
-        if "/api/v1/stock-etf/data-foundation-status" not in source:
-            violations.append(
-                f"{path}: missing read-only Stock/ETF data-foundation-status endpoint"
-            )
-        if "/api/v1/stock-etf/evidence-status" not in source:
-            violations.append(f"{path}: missing read-only Stock/ETF evidence-status endpoint")
-        if "/api/v1/stock-etf/lane-status" not in source:
-            violations.append(f"{path}: missing read-only Stock/ETF lane-status endpoint")
-        if "/api/v1/stock-etf/launch-status" not in source:
-            violations.append(f"{path}: missing read-only Stock/ETF launch-status endpoint")
-        if "/api/v1/stock-etf/paper-status" not in source:
-            violations.append(f"{path}: missing read-only Stock/ETF paper-status endpoint")
-        if "/api/v1/stock-etf/policy-status" not in source:
-            violations.append(f"{path}: missing read-only Stock/ETF policy-status endpoint")
-        if "/api/v1/stock-etf/readiness" not in source:
-            violations.append(f"{path}: missing read-only Stock/ETF readiness endpoint")
-        if "/api/v1/stock-etf/reconciliation-status" not in source:
-            violations.append(
-                f"{path}: missing read-only Stock/ETF reconciliation-status endpoint"
-            )
-        if "/api/v1/stock-etf/scorecard-status" not in source:
-            violations.append(f"{path}: missing read-only Stock/ETF scorecard-status endpoint")
-        if "/api/v1/stock-etf/shadow-status" not in source:
-            violations.append(f"{path}: missing read-only Stock/ETF shadow-status endpoint")
-        if "/api/v1/stock-etf/universe-status" not in source:
-            violations.append(f"{path}: missing read-only Stock/ETF universe-status endpoint")
+        source = sources[path]
         for snippet in sorted(forbidden_snippets):
             if snippet in source:
                 violations.append(f"{path}: contains forbidden display-only snippet {snippet!r}")
