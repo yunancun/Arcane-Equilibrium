@@ -11,6 +11,7 @@ use openclaw_types::{
     StockEtfBrokerCapabilityRegistryV1, StockEtfDenialReason, StockEtfFeatureFlags,
     StockEtfGateInputs, STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID,
     STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID, STOCK_ETF_RISK_POLICY_CONTRACT_ID,
+    STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
 };
 
 #[test]
@@ -71,6 +72,12 @@ fn accepted_registry_contains_full_stock_etf_ibkr_operation_matrix() {
             .required_gates
             .contains(&STOCK_ETF_RISK_POLICY_CONTRACT_ID.to_string())));
     assert!(registry.operations.iter().any(|entry| {
+        entry.operation == BrokerOperation::MarketDataRead
+            && entry
+                .required_gates
+                .contains(&STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID.to_string())
+    }));
+    assert!(registry.operations.iter().any(|entry| {
         entry.operation == BrokerOperation::ScorecardDerive
             && entry
                 .required_gates
@@ -78,12 +85,18 @@ fn accepted_registry_contains_full_stock_etf_ibkr_operation_matrix() {
             && entry
                 .required_gates
                 .contains(&STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID.to_string())
+            && entry
+                .required_gates
+                .contains(&STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID.to_string())
     }));
     assert!(registry.operations.iter().any(|entry| {
         entry.operation == BrokerOperation::ShadowFillReconstruct
             && entry
                 .required_gates
                 .contains(&STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID.to_string())
+            && entry
+                .required_gates
+                .contains(&STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID.to_string())
     }));
     assert!(registry
         .operations

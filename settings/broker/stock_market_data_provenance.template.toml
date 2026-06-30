@@ -1,0 +1,26 @@
+# ADR-0048 Stock/ETF market-data provenance contract template.
+# This is a blocked, secret-free source template. It does not contact IBKR,
+# start connectors or collectors, ingest market data, write scorecards, inspect
+# secrets, authorize GUI lane state, or change Bybit live execution behavior.
+
+contract_id = ""
+source_version = 0
+asset_lane = "crypto_perp"
+broker = "bybit"
+environment = "live_reserved_denied"
+source_vendor_or_broker = ""
+entitlement_tier = ""
+raw_payload_hash = ""
+received_at_ms = 0
+exchange_time_ms = 0
+adjustment_marker = "unknown"
+corporate_action_adjustment_version_hash = ""
+symbol = ""
+instrument_identity_hash = ""
+calendar_session_id = ""
+source_artifact_hash = ""
+bybit_live_execution_unchanged = false
+ibkr_contact_performed = false
+connector_runtime_started = false
+secret_content_serialized = false
+live_or_tiny_live_authorized = false
