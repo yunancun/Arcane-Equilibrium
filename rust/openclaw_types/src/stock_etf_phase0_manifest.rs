@@ -27,6 +27,7 @@ const REQUIRED_CONTRACTS: &[&str] = &[
     "stock_etf_pit_universe_contract_v1",
     "stock_etf_strategy_hypothesis_contract_v1",
     "stock_etf_risk_policy_v1",
+    "stock_etf_reference_data_sources_v1",
     "ibkr_api_session_topology_v1",
     "ibkr_session_attestation_v1",
     "feature_flag_secret_auth_matrix_v1",

@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::stock_etf_lane::{
     AssetLane, AuthorityScope, Broker, BrokerOperation, StockEtfDenialReason,
 };
+use crate::stock_etf_reference_data_sources::STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID;
 use crate::stock_etf_risk_policy::STOCK_ETF_RISK_POLICY_CONTRACT_ID;
 
 pub const STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID: &str = "broker_capability_registry_v1";
@@ -271,6 +272,7 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
             authority_scope: Scope::ShadowOnly,
             required_gates: &[
                 STOCK_ETF_RISK_POLICY_CONTRACT_ID,
+                STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID,
                 "cost_model_version_v1",
                 "stock_market_data_provenance_v1",
             ],
@@ -282,6 +284,7 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
             required_gates: &[
                 "broker_account_portfolio_cash_ledger_v1",
                 STOCK_ETF_RISK_POLICY_CONTRACT_ID,
+                STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID,
                 "cost_model_version_v1",
                 "benchmark_versions_v1",
                 "stock_shadow_fill_model_v1",

@@ -648,6 +648,38 @@ Required on every market-data fact:
 
 Unknown provenance blocks scorecard readiness.
 
+## 13A. `stock_etf_reference_data_sources_v1`
+
+Corporate-action, FX, fee, and tax/FTT source records must be
+machine-checkable before Phase 3 evidence-clock days, shadow-fill
+reconstruction, or scorecards can consume their hashes.
+
+Required fields:
+
+- `asset_lane=stock_etf_cash`
+- `broker=ibkr`
+- read-only, paper, or shadow environment only
+- source version 1
+- evidence-clock freeze flag
+- corporate-action source name, as-of timestamp, raw payload hash,
+  adjustment-version hash, policy hash, and dividend-treatment hash
+- FX rate source name, as-of timestamp, USD base/quote currency pair in v1,
+  FX snapshot hash, and FX drag model hash
+- fee schedule source name, as-of timestamp, commission schedule hash,
+  exchange/regulatory fee hash, tax/FTT placeholder hash, and withholding-tax
+  treatment hash
+- source artifact hash
+- Bybit-live unchanged proof
+- no IBKR contact, connector runtime, serialized secret content, tiny-live, or
+  live authorization claim
+
+Source validator:
+`openclaw_types::stock_etf_reference_data_sources::StockEtfReferenceDataSourcesV1`.
+The validator rejects missing source names, zero as-of timestamps, malformed
+hashes, non-USD v1 currency treatment, missing evidence-clock freeze, live
+environment, live/tiny-live authority, prior IBKR contact, connector runtime,
+serialized secrets, and any Bybit live regression.
+
 ## 14. `broker_account_portfolio_cash_ledger_v1`
 
 Cash ledger fields:
@@ -735,7 +767,8 @@ Clock start requires:
 - frozen benchmark hash
 - frozen cost model hash
 - accepted `stock_etf_strategy_hypothesis_contract_v1` and frozen strategy hypothesis hash
-- corporate-action/FX/fee source as-of frozen
+- accepted `stock_etf_reference_data_sources_v1` and frozen corporate-action /
+  FX / fee / tax source-as-of hash
 - paper-vs-shadow divergence thresholds frozen
 - GUI evidence view available
 - daily scorecard regeneration pass

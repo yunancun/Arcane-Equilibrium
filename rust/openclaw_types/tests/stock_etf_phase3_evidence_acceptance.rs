@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use openclaw_types::{
     StockEtfDailyDqManifestV1, StockEtfEvidenceClockDayV1, StockEtfEvidenceClockStatus,
-    StockEtfPhase3Blocker, StockMarketDataProvenanceV1,
+    StockEtfFrozenEvidenceInputsV1, StockEtfPhase3Blocker, StockMarketDataProvenanceV1,
 };
 
 #[test]
@@ -35,6 +35,21 @@ fn source_market_data_provenance_has_required_hashes_and_calendar_session() {
 
     assert!(verdict.accepted);
     assert!(verdict.blockers.is_empty());
+}
+
+#[test]
+fn frozen_inputs_require_reference_data_sources_contract_hash() {
+    let accepted = StockEtfFrozenEvidenceInputsV1::source_fixture();
+    assert!(accepted.validate().accepted);
+
+    let mut missing = accepted;
+    missing.reference_data_sources_contract_hash.clear();
+    let verdict = missing.validate();
+
+    assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::ReferenceDataSourcesHashInvalid));
 }
 
 #[test]
@@ -144,6 +159,10 @@ fn phase3_evidence_template_is_default_blocked_and_secret_free() {
     assert_eq!(
         parsed["frozen_inputs"]["gui_evidence_view_available"].as_bool(),
         Some(false)
+    );
+    assert_eq!(
+        parsed["frozen_inputs"]["reference_data_sources_contract_hash"].as_str(),
+        Some("")
     );
     assert_eq!(
         parsed["dq_manifest"]["calendar_aware_coverage_bps"].as_integer(),

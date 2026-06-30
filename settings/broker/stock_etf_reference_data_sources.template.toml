@@ -1,0 +1,36 @@
+# ADR-0048 Stock/ETF reference-data source contract template.
+#
+# This is a blocked, secret-free source template. It does not contact IBKR,
+# create connectors, ingest market/reference data, write scorecards, apply DB
+# migrations, inspect secrets, or change Bybit live execution behavior.
+
+contract_id = ""
+source_version = 0
+asset_lane = "crypto_perp"
+broker = "bybit"
+environment = "live_reserved_denied"
+frozen_for_evidence_clock = false
+corporate_action_source_name = ""
+corporate_action_asof_ms = 0
+corporate_action_raw_hash = ""
+corporate_action_adjustment_version_hash = ""
+corporate_action_policy_hash = ""
+dividend_treatment_hash = ""
+fx_rate_source_name = ""
+fx_rate_asof_ms = 0
+base_currency = "unknown_denied"
+quote_currency = "unknown_denied"
+fx_rate_snapshot_hash = ""
+fx_drag_model_hash = ""
+fee_schedule_source_name = ""
+fee_schedule_asof_ms = 0
+commission_schedule_hash = ""
+exchange_regulatory_fee_hash = ""
+tax_ftt_placeholder_hash = ""
+withholding_tax_treatment_hash = ""
+source_artifact_hash = ""
+bybit_live_execution_unchanged = false
+ibkr_contact_performed = false
+connector_runtime_started = false
+secret_content_serialized = false
+live_or_tiny_live_authorized = true

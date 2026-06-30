@@ -71,6 +71,9 @@ fn accepted_fixture_validates_phase0_packet_without_runtime_authority() {
     assert!(manifest
         .contracts
         .contains(&"stock_etf_risk_policy_v1".to_string()));
+    assert!(manifest
+        .contracts
+        .contains(&"stock_etf_reference_data_sources_v1".to_string()));
 }
 
 #[test]

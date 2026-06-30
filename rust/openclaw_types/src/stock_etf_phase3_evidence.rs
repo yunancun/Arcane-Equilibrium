@@ -110,6 +110,7 @@ pub struct StockEtfFrozenEvidenceInputsV1 {
     pub benchmark_hash: String,
     pub cost_model_hash: String,
     pub strategy_hypothesis_hash: String,
+    pub reference_data_sources_contract_hash: String,
     pub corporate_action_fx_fee_asof_ms: u64,
     pub paper_shadow_divergence_threshold_hash: String,
     pub gui_evidence_view_available: bool,
@@ -123,6 +124,7 @@ impl Default for StockEtfFrozenEvidenceInputsV1 {
             benchmark_hash: String::new(),
             cost_model_hash: String::new(),
             strategy_hypothesis_hash: String::new(),
+            reference_data_sources_contract_hash: String::new(),
             corporate_action_fx_fee_asof_ms: 0,
             paper_shadow_divergence_threshold_hash: String::new(),
             gui_evidence_view_available: false,
@@ -138,6 +140,7 @@ impl StockEtfFrozenEvidenceInputsV1 {
             benchmark_hash: "e".repeat(64),
             cost_model_hash: "f".repeat(64),
             strategy_hypothesis_hash: "1".repeat(64),
+            reference_data_sources_contract_hash: "c".repeat(64),
             corporate_action_fx_fee_asof_ms: 1_772_233_000_000,
             paper_shadow_divergence_threshold_hash: "2".repeat(64),
             gui_evidence_view_available: true,
@@ -160,6 +163,9 @@ impl StockEtfFrozenEvidenceInputsV1 {
         }
         if !is_sha256_hex(&self.strategy_hypothesis_hash) {
             blockers.push(Blocker::StrategyHypothesisHashInvalid);
+        }
+        if !is_sha256_hex(&self.reference_data_sources_contract_hash) {
+            blockers.push(Blocker::ReferenceDataSourcesHashInvalid);
         }
         if self.corporate_action_fx_fee_asof_ms == 0 {
             blockers.push(Blocker::CorporateActionFxFeeAsOfMissing);
@@ -365,6 +371,7 @@ pub enum StockEtfPhase3Blocker {
     BenchmarkHashInvalid,
     CostModelHashInvalid,
     StrategyHypothesisHashInvalid,
+    ReferenceDataSourcesHashInvalid,
     CorporateActionFxFeeAsOfMissing,
     DivergenceThresholdHashInvalid,
     GuiEvidenceViewMissing,
