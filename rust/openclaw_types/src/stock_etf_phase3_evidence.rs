@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::ibkr_phase2_artifact::is_sha256_hex;
 use crate::stock_etf_lane::{AssetLane, Broker, BrokerEnvironment};
 
+pub const STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID: &str = "stock_etf_evidence_clock_v1";
 pub const STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID: &str = "stock_market_data_provenance_v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -345,6 +346,22 @@ impl Default for StockEtfEvidenceClockStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StockEtfEvidenceClockDayV1 {
+    pub contract_id: String,
+    pub source_version: u32,
+    pub asset_lane: AssetLane,
+    pub broker: Broker,
+    pub environment: BrokerEnvironment,
+    pub source_artifact_hash: String,
+    pub market_data_provenance_contract_hash: String,
+    pub scorecard_input_bundle_hash: String,
+    pub bybit_live_execution_unchanged: bool,
+    pub checker_contacted_ibkr: bool,
+    pub checker_started_connector_runtime: bool,
+    pub checker_started_evidence_clock: bool,
+    pub checker_wrote_scorecard: bool,
+    pub checker_applied_db: bool,
+    pub secret_content_serialized: bool,
+    pub live_or_tiny_live_authorized: bool,
     pub status: StockEtfEvidenceClockStatus,
     pub ibkr_readonly_paper_connector_green_5d: bool,
     pub shadow_collector_green_5d: bool,
@@ -355,6 +372,22 @@ pub struct StockEtfEvidenceClockDayV1 {
 impl Default for StockEtfEvidenceClockDayV1 {
     fn default() -> Self {
         Self {
+            contract_id: String::new(),
+            source_version: 0,
+            asset_lane: AssetLane::CryptoPerp,
+            broker: Broker::Bybit,
+            environment: BrokerEnvironment::LiveReservedDenied,
+            source_artifact_hash: String::new(),
+            market_data_provenance_contract_hash: String::new(),
+            scorecard_input_bundle_hash: String::new(),
+            bybit_live_execution_unchanged: false,
+            checker_contacted_ibkr: false,
+            checker_started_connector_runtime: false,
+            checker_started_evidence_clock: false,
+            checker_wrote_scorecard: false,
+            checker_applied_db: false,
+            secret_content_serialized: false,
+            live_or_tiny_live_authorized: false,
             status: StockEtfEvidenceClockStatus::NotStarted,
             ibkr_readonly_paper_connector_green_5d: false,
             shadow_collector_green_5d: false,
@@ -367,6 +400,22 @@ impl Default for StockEtfEvidenceClockDayV1 {
 impl StockEtfEvidenceClockDayV1 {
     pub fn pass_day_fixture() -> Self {
         Self {
+            contract_id: STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID.to_string(),
+            source_version: 1,
+            asset_lane: AssetLane::StockEtfCash,
+            broker: Broker::Ibkr,
+            environment: BrokerEnvironment::Paper,
+            source_artifact_hash: "5".repeat(64),
+            market_data_provenance_contract_hash: "6".repeat(64),
+            scorecard_input_bundle_hash: "7".repeat(64),
+            bybit_live_execution_unchanged: true,
+            checker_contacted_ibkr: false,
+            checker_started_connector_runtime: false,
+            checker_started_evidence_clock: false,
+            checker_wrote_scorecard: false,
+            checker_applied_db: false,
+            secret_content_serialized: false,
+            live_or_tiny_live_authorized: false,
             status: StockEtfEvidenceClockStatus::PassDay,
             ibkr_readonly_paper_connector_green_5d: true,
             shadow_collector_green_5d: true,
@@ -380,6 +429,57 @@ impl StockEtfEvidenceClockDayV1 {
         use StockEtfPhase3Blocker as Blocker;
 
         let mut blockers = Vec::new();
+        if self.contract_id != STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID {
+            blockers.push(Blocker::EvidenceClockContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::EvidenceClockVersionMismatch);
+        }
+        if self.asset_lane != AssetLane::StockEtfCash {
+            blockers.push(Blocker::EvidenceClockWrongAssetLane);
+        }
+        if self.broker != Broker::Ibkr {
+            blockers.push(Blocker::EvidenceClockWrongBroker);
+        }
+        if !matches!(
+            self.environment,
+            BrokerEnvironment::ReadOnly | BrokerEnvironment::Paper | BrokerEnvironment::Shadow
+        ) {
+            blockers.push(Blocker::EvidenceClockEnvironmentDenied);
+        }
+        if !is_sha256_hex(&self.source_artifact_hash) {
+            blockers.push(Blocker::EvidenceClockSourceArtifactHashInvalid);
+        }
+        if !is_sha256_hex(&self.market_data_provenance_contract_hash) {
+            blockers.push(Blocker::EvidenceClockMarketDataProvenanceHashInvalid);
+        }
+        if !is_sha256_hex(&self.scorecard_input_bundle_hash) {
+            blockers.push(Blocker::EvidenceClockScorecardInputHashInvalid);
+        }
+        if !self.bybit_live_execution_unchanged {
+            blockers.push(Blocker::BybitLiveExecutionNotProtected);
+        }
+        if self.checker_contacted_ibkr {
+            blockers.push(Blocker::IbkrContactPerformed);
+        }
+        if self.checker_started_connector_runtime {
+            blockers.push(Blocker::ConnectorRuntimeStarted);
+        }
+        if self.checker_started_evidence_clock {
+            blockers.push(Blocker::EvidenceClockRuntimeStarted);
+        }
+        if self.checker_wrote_scorecard {
+            blockers.push(Blocker::ScorecardWriterStarted);
+        }
+        if self.checker_applied_db {
+            blockers.push(Blocker::DbApplyPerformed);
+        }
+        if self.secret_content_serialized {
+            blockers.push(Blocker::SecretContentSerialized);
+        }
+        if self.live_or_tiny_live_authorized {
+            blockers.push(Blocker::LiveOrTinyLiveAuthorized);
+        }
         if !self.ibkr_readonly_paper_connector_green_5d {
             blockers.push(Blocker::IbkrConnectorNotGreenFiveDays);
         }
@@ -465,6 +565,17 @@ pub enum StockEtfPhase3Blocker {
     AtomicFactInputHashInvalid,
     IbkrConnectorNotGreenFiveDays,
     ShadowCollectorNotGreenFiveDays,
+    EvidenceClockContractIdMismatch,
+    EvidenceClockVersionMismatch,
+    EvidenceClockWrongAssetLane,
+    EvidenceClockWrongBroker,
+    EvidenceClockEnvironmentDenied,
+    EvidenceClockSourceArtifactHashInvalid,
+    EvidenceClockMarketDataProvenanceHashInvalid,
+    EvidenceClockScorecardInputHashInvalid,
+    EvidenceClockRuntimeStarted,
+    ScorecardWriterStarted,
+    DbApplyPerformed,
     FrozenInputsRejected,
     DqManifestShapeRejected,
     PassDayQualityRejected,

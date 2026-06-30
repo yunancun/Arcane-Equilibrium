@@ -11,9 +11,9 @@ use openclaw_types::{
     StockEtfBrokerCapabilityRegistryV1, StockEtfDenialReason, StockEtfFeatureFlags,
     StockEtfGateInputs, BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID,
     STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID, STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID,
-    STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID, STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID,
-    STOCK_ETF_RISK_POLICY_CONTRACT_ID, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
-    STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
+    STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
+    STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID, STOCK_ETF_RISK_POLICY_CONTRACT_ID,
+    STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID, STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
 };
 
 #[test]
@@ -78,6 +78,12 @@ fn accepted_registry_contains_full_stock_etf_ibkr_operation_matrix() {
             && entry
                 .required_gates
                 .contains(&STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID.to_string())
+    }));
+    assert!(registry.operations.iter().any(|entry| {
+        entry.operation == BrokerOperation::ShadowSignalEmit
+            && entry
+                .required_gates
+                .contains(&STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID.to_string())
     }));
     assert!(registry.operations.iter().any(|entry| {
         entry.operation == BrokerOperation::ScorecardDerive

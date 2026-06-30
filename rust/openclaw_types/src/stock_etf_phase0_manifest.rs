@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::stock_etf_lane::{AssetLane, Broker};
+use crate::stock_etf_phase3_evidence::STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID;
 use crate::stock_etf_scorecard_inputs::{
     BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID, STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID,
     STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID, STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID,
@@ -46,7 +47,7 @@ const REQUIRED_CONTRACTS: &[&str] = &[
     STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID,
     STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID,
     STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
-    "stock_etf_evidence_clock_v1",
+    STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
     "gui_lane_contract_v1",
     STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID,
     "stock_etf_kill_switch_and_disable_cleanup_runbook_v1",
