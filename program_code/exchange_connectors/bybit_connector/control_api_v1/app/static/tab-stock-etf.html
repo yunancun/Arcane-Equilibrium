@@ -122,6 +122,11 @@
       <div class="se-metric-sub" id="se-launch-sub"></div>
     </div>
     <div class="se-metric">
+      <div class="se-metric-label">Release Packet</div>
+      <div class="se-metric-value" id="se-release-packet-state">--</div>
+      <div class="se-metric-sub" id="se-release-packet-sub"></div>
+    </div>
+    <div class="se-metric">
       <div class="se-metric-label">Disable Cleanup</div>
       <div class="se-metric-value" id="se-disable-cleanup-state">--</div>
       <div class="se-metric-sub" id="se-disable-cleanup-sub"></div>
@@ -329,6 +334,18 @@
       </table>
     </section>
 
+    <section class="se-panel" id="se-release-packet-panel">
+      <div class="se-panel-title">
+        <span>Release Packet Status</span>
+        <span id="se-release-packet-status" class="oc-chip oc-chip-neutral">--</span>
+      </div>
+      <table class="se-kv">
+        <tbody id="se-release-packet-body">
+          <tr><td colspan="2" class="se-muted">Loading...</td></tr>
+        </tbody>
+      </table>
+    </section>
+
     <section class="se-panel" id="se-disable-cleanup-panel">
       <div class="se-panel-title">
         <span>Disable / Cleanup Status</span>
@@ -353,6 +370,7 @@
   </div>
 </div>
 
+<script src="/static/tab-stock-etf-release-packet.js?v=20260630.release-packet"></script>
 <script src="/static/tab-stock-etf-disable-cleanup.js?v=20260630.disable-cleanup"></script>
 <script src="/static/tab-stock-etf.js?v=20260630.split"></script>
 </body>

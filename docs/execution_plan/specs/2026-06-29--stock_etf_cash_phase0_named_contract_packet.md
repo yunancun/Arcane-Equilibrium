@@ -924,6 +924,9 @@ display surfaces:
 
 - `/api/v1/stock-etf/readiness`
 - `/api/v1/stock-etf/lane-status`
+- `/api/v1/stock-etf/data-foundation-status`
+- `/api/v1/stock-etf/policy-status`
+- `/api/v1/stock-etf/authorization-status`
 - `/api/v1/stock-etf/evidence-status`
 - `/api/v1/stock-etf/universe-status`
 - `/api/v1/stock-etf/shadow-status`
@@ -932,6 +935,8 @@ display surfaces:
 - `/api/v1/stock-etf/account-status`
 - `/api/v1/stock-etf/scorecard-status`
 - `/api/v1/stock-etf/launch-status`
+- `/api/v1/stock-etf/release-packet-status`
+- `/api/v1/stock-etf/disable-cleanup-status`
 
 The validator also requires display-only semantics, client lane
 state treated as untrusted, denied localStorage/query-param/hidden-field

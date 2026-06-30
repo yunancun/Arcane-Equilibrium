@@ -123,3 +123,29 @@ Verification 已過：
 沒有 paper order、沒有 fill import、沒有 evidence clock、沒有 scorecard writer、
 沒有 DB apply/cleanup、沒有 Linux runtime sync/restart，也沒有改動 Bybit live
 execution 行為。
+
+## 2026-06-30 Operator Update — Release Packet Status
+
+本 session 已完成下一個 source-only checkpoint：`release-packet-status`。
+
+你現在會在 Stock/ETF GUI 看到新的 `Release Packet` 指標與
+`Release Packet Status` 面板；後端是
+`GET /api/v1/stock-etf/release-packet-status`，Rust IPC 是
+`stock_etf.get_release_packet_status`。
+
+這只是顯示 `stock_etf_release_packet_v1` 的 source fixture 與 disable-cleanup proof
+摘要；不是 release packet 物化、不是 Phase 5 start、不是 paper/shadow launch、
+不是 connector runtime，也不是任何 order/write path。
+
+Verification 已過：
+
+- Full Stock/ETF FastAPI/static：`85 passed`
+- Engine Stock/ETF：`20 passed`
+- Full openclaw_types：PASS
+- Workspace `cargo check`：PASS
+- Node check：`tab-stock-etf.js` + `tab-stock-etf-release-packet.js` +
+  `tab-stock-etf-disable-cleanup.js` PASS
+
+邊界不變：沒有 IBKR contact、沒有 secret access/creation、沒有 connector runtime、
+沒有 paper order、沒有 fill import、沒有 evidence clock、沒有 scorecard writer、
+沒有 DB apply、沒有 Linux runtime sync/restart，也沒有改動 Bybit live execution 行為。

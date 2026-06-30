@@ -107,6 +107,9 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
         "stock_etf.get_launch_status" => {
             JsonRpcResponse::success(id, launch_status_summary(phase2))
         }
+        "stock_etf.get_release_packet_status" => {
+            JsonRpcResponse::success(id, release_packet_status_summary(phase2))
+        }
         "stock_etf.get_disable_cleanup_status" => {
             JsonRpcResponse::success(id, disable_cleanup_status_summary(phase2))
         }
@@ -1056,6 +1059,94 @@ fn disable_cleanup_status_summary(phase2: serde_json::Value) -> serde_json::Valu
             "tiny_live_authorized": runbook.tiny_live_authorized,
             "live_authorized": runbook.live_authorized,
         },
+        "phase2": phase2,
+        "ibkr_live_enabled": false,
+        "paper_shadow_launch_authorized": false,
+        "tiny_live_or_live_authorized": false,
+        "connector_runtime_started": false,
+        "scorecard_writer_started": false,
+        "db_apply_performed": false,
+        "evidence_clock_started": false,
+        "ibkr_call_performed": false,
+        "secret_slot_touched": false,
+        "order_routed": false,
+        "bybit_ipc_reused": false,
+    })
+}
+
+fn release_packet_status_summary(phase2: serde_json::Value) -> serde_json::Value {
+    let packet = StockEtfReleasePacketV1::accepted_fixture();
+    let verdict = packet.validate();
+    let manifest_hashes: Vec<serde_json::Value> = packet
+        .manifest_hashes
+        .iter()
+        .map(|entry| {
+            serde_json::json!({
+                "label": entry.label,
+                "hash_present": !entry.sha256.is_empty(),
+            })
+        })
+        .collect();
+    let kill = &packet.kill_disable_cleanup_proof;
+    let kill_disable_cleanup_proof = serde_json::json!({
+        "stock_etf_lane_enabled_false": kill.stock_etf_lane_enabled_false,
+        "ibkr_readonly_enabled_false": kill.ibkr_readonly_enabled_false,
+        "ibkr_paper_enabled_false": kill.ibkr_paper_enabled_false,
+        "stock_etf_shadow_only_true": kill.stock_etf_shadow_only_true,
+        "collector_stopped": kill.collector_stopped,
+        "gui_stock_views_disabled_or_hidden": kill.gui_stock_views_disabled_or_hidden,
+        "live_secret_absence_proven": kill.live_secret_absence_proven,
+        "evidence_archive_forward_only": kill.evidence_archive_forward_only,
+        "destructive_db_cleanup_requested": kill.destructive_db_cleanup_requested,
+        "proof_hash_present": !kill.proof_hash.is_empty(),
+    });
+    let release_packet = serde_json::json!({
+        "expected_contract_id": STOCK_ETF_RELEASE_PACKET_CONTRACT_ID,
+        "packet_id": &packet.packet_id,
+        "source_version": packet.source_version,
+        "accepted": verdict.accepted,
+        "blockers": &verdict.blockers,
+        "adr_path": &packet.adr_path,
+        "amd_path": &packet.amd_path,
+        "spec_path": &packet.spec_path,
+        "source_commit_present": !packet.source_commit.is_empty(),
+        "created_at_ms": packet.created_at_ms,
+        "reviewer_role_count": packet.reviewer_roles.len(),
+        "reviewer_roles": &packet.reviewer_roles,
+        "role_report_count": packet.role_report_paths.len(),
+        "e2_log_hash_present": !packet.e2_log_hash.is_empty(),
+        "e3_redaction_log_hash_present": !packet.e3_redaction_log_hash.is_empty(),
+        "e4_log_hash_present": !packet.e4_log_hash.is_empty(),
+        "qa_log_hash_present": !packet.qa_log_hash.is_empty(),
+        "manifest_hash_count": packet.manifest_hashes.len(),
+        "manifest_hashes": manifest_hashes,
+        "pg_migrations_declared": packet.pg_migration_evidence.migrations_declared,
+        "pg_migration_manifest_hash_present": !packet.pg_migration_evidence.migration_manifest_hash.is_empty(),
+        "pg_dry_run_log_hash_present": !packet.pg_migration_evidence.pg_dry_run_log_hash.is_empty(),
+        "pg_double_apply_log_hash_present": !packet.pg_migration_evidence.pg_double_apply_log_hash.is_empty(),
+        "redaction_fixture_hash_present": !packet.redaction_fixture_hash.is_empty(),
+        "gui_screenshot_hash_count": packet.gui_screenshot_hashes.len(),
+        "dq_manifest_hash_count": packet.dq_manifest_hashes.len(),
+        "scorecard_regeneration_hash_count": packet.scorecard_regeneration_hashes.len(),
+        "evidence_archive_pointer_present": !packet.evidence_archive_pointer.is_empty(),
+        "evidence_archive_hash_present": !packet.evidence_archive_hash.is_empty(),
+        "paper_shadow_window_complete": packet.paper_shadow_window_complete,
+        "engineering_shakedown_complete": packet.engineering_shakedown_complete,
+        "secret_content_serialized": packet.secret_content_serialized,
+        "ibkr_live_or_tiny_live_authorized": packet.ibkr_live_or_tiny_live_authorized,
+        "sealed": packet.sealed,
+        "kill_disable_cleanup_proof": kill_disable_cleanup_proof,
+    });
+
+    serde_json::json!({
+        "phase": "phase5_release_packet_status_source_fixture",
+        "asset_lane": AssetLane::StockEtfCash,
+        "broker": Broker::Ibkr,
+        "environment": "paper_shadow",
+        "release_packet_status_state": "source_ready_runtime_blocked",
+        "phase3_started": false,
+        "phase5_started": false,
+        "release_packet": release_packet,
         "phase2": phase2,
         "ibkr_live_enabled": false,
         "paper_shadow_launch_authorized": false,

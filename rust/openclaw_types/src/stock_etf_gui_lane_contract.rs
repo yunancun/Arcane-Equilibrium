@@ -26,6 +26,8 @@ pub const STOCK_ETF_GUI_RECONCILIATION_STATUS_ENDPOINT: &str =
     "/api/v1/stock-etf/reconciliation-status";
 pub const STOCK_ETF_GUI_SCORECARD_STATUS_ENDPOINT: &str = "/api/v1/stock-etf/scorecard-status";
 pub const STOCK_ETF_GUI_LAUNCH_STATUS_ENDPOINT: &str = "/api/v1/stock-etf/launch-status";
+pub const STOCK_ETF_GUI_RELEASE_PACKET_STATUS_ENDPOINT: &str =
+    "/api/v1/stock-etf/release-packet-status";
 pub const STOCK_ETF_GUI_DISABLE_CLEANUP_STATUS_ENDPOINT: &str =
     "/api/v1/stock-etf/disable-cleanup-status";
 
@@ -61,6 +63,8 @@ pub struct StockEtfGuiLaneContractV1 {
     pub scorecard_status_endpoint_get_only: bool,
     pub launch_status_endpoint: String,
     pub launch_status_endpoint_get_only: bool,
+    pub release_packet_status_endpoint: String,
+    pub release_packet_status_endpoint_get_only: bool,
     pub disable_cleanup_status_endpoint: String,
     pub disable_cleanup_status_endpoint_get_only: bool,
     pub display_only: bool,
@@ -122,6 +126,8 @@ impl Default for StockEtfGuiLaneContractV1 {
             scorecard_status_endpoint_get_only: false,
             launch_status_endpoint: String::new(),
             launch_status_endpoint_get_only: false,
+            release_packet_status_endpoint: String::new(),
+            release_packet_status_endpoint_get_only: false,
             disable_cleanup_status_endpoint: String::new(),
             disable_cleanup_status_endpoint_get_only: false,
             display_only: false,
@@ -187,6 +193,9 @@ impl StockEtfGuiLaneContractV1 {
             scorecard_status_endpoint_get_only: true,
             launch_status_endpoint: STOCK_ETF_GUI_LAUNCH_STATUS_ENDPOINT.to_string(),
             launch_status_endpoint_get_only: true,
+            release_packet_status_endpoint: STOCK_ETF_GUI_RELEASE_PACKET_STATUS_ENDPOINT
+                .to_string(),
+            release_packet_status_endpoint_get_only: true,
             disable_cleanup_status_endpoint: STOCK_ETF_GUI_DISABLE_CLEANUP_STATUS_ENDPOINT
                 .to_string(),
             disable_cleanup_status_endpoint_get_only: true,
@@ -317,6 +326,12 @@ impl StockEtfGuiLaneContractV1 {
         }
         if !self.launch_status_endpoint_get_only {
             blockers.push(Blocker::LaunchStatusEndpointNotGetOnly);
+        }
+        if self.release_packet_status_endpoint != STOCK_ETF_GUI_RELEASE_PACKET_STATUS_ENDPOINT {
+            blockers.push(Blocker::ReleasePacketStatusEndpointMismatch);
+        }
+        if !self.release_packet_status_endpoint_get_only {
+            blockers.push(Blocker::ReleasePacketStatusEndpointNotGetOnly);
         }
         if self.disable_cleanup_status_endpoint != STOCK_ETF_GUI_DISABLE_CLEANUP_STATUS_ENDPOINT {
             blockers.push(Blocker::DisableCleanupStatusEndpointMismatch);
@@ -463,6 +478,8 @@ pub enum StockEtfGuiLaneBlocker {
     ScorecardStatusEndpointNotGetOnly,
     LaunchStatusEndpointMismatch,
     LaunchStatusEndpointNotGetOnly,
+    ReleasePacketStatusEndpointMismatch,
+    ReleasePacketStatusEndpointNotGetOnly,
     DisableCleanupStatusEndpointMismatch,
     DisableCleanupStatusEndpointNotGetOnly,
     DisplayOnlyMissing,

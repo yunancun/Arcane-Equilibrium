@@ -79,6 +79,7 @@ def test_stock_etf_openapi_exposes_stock_etf_get_only(client_fail_closed: TestCl
         "/api/v1/stock-etf/policy-status": {"get"},
         "/api/v1/stock-etf/readiness": {"get"},
         "/api/v1/stock-etf/reconciliation-status": {"get"},
+        "/api/v1/stock-etf/release-packet-status": {"get"},
         "/api/v1/stock-etf/scorecard-status": {"get"},
         "/api/v1/stock-etf/shadow-status": {"get"},
         "/api/v1/stock-etf/universe-status": {"get"},
@@ -99,6 +100,7 @@ def test_stock_etf_runtime_rejects_write_methods(client_fail_closed: TestClient)
         "/api/v1/stock-etf/policy-status",
         "/api/v1/stock-etf/readiness",
         "/api/v1/stock-etf/reconciliation-status",
+        "/api/v1/stock-etf/release-packet-status",
         "/api/v1/stock-etf/scorecard-status",
         "/api/v1/stock-etf/shadow-status",
         "/api/v1/stock-etf/universe-status",
@@ -134,11 +136,14 @@ def test_stock_etf_router_registered_in_main_app() -> None:
 
 def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     html_source = (STATIC_DIR / "tab-stock-etf.html").read_text(encoding="utf-8")
+    release_packet_js = (STATIC_DIR / "tab-stock-etf-release-packet.js").read_text(
+        encoding="utf-8"
+    )
     disable_cleanup_js = (STATIC_DIR / "tab-stock-etf-disable-cleanup.js").read_text(
         encoding="utf-8"
     )
     js_source = (STATIC_DIR / "tab-stock-etf.js").read_text(encoding="utf-8")
-    source = html_source + "\n" + disable_cleanup_js + "\n" + js_source
+    source = html_source + "\n" + release_packet_js + "\n" + disable_cleanup_js + "\n" + js_source
     assert "/api/v1/stock-etf/account-status" in source
     assert "/api/v1/stock-etf/authorization-status" in source
     assert "/api/v1/stock-etf/data-foundation-status" in source
@@ -150,9 +155,11 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     assert "/api/v1/stock-etf/policy-status" in source
     assert "/api/v1/stock-etf/readiness" in source
     assert "/api/v1/stock-etf/reconciliation-status" in source
+    assert "/api/v1/stock-etf/release-packet-status" in source
     assert "/api/v1/stock-etf/scorecard-status" in source
     assert "/api/v1/stock-etf/shadow-status" in source
     assert "/api/v1/stock-etf/universe-status" in source
+    assert "tab-stock-etf-release-packet.js" in html_source
     assert "tab-stock-etf-disable-cleanup.js" in html_source
     assert "tab-stock-etf.js" in html_source
     assert "se-evidence-status" in source
@@ -175,6 +182,8 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     assert "se-scorecard-body" in source
     assert "se-launch-status" in source
     assert "se-launch-body" in source
+    assert "se-release-packet-status" in source
+    assert "se-release-packet-body" in source
     assert "se-disable-cleanup-status" in source
     assert "se-disable-cleanup-body" in source
     assert "se-universe-status" in source
