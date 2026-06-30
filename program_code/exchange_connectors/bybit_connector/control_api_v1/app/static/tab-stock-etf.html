@@ -113,6 +113,18 @@
       </table>
     </section>
 
+    <section class="se-panel" id="se-api-allowlist-panel">
+      <div class="se-panel-title">
+        <span>API Allowlist</span>
+        <span id="se-api-allowlist-status" class="oc-chip oc-chip-neutral">--</span>
+      </div>
+      <table class="se-kv">
+        <tbody id="se-api-allowlist-body">
+          <tr><td colspan="2" class="se-muted">Loading...</td></tr>
+        </tbody>
+      </table>
+    </section>
+
     <section class="se-panel" id="se-guard-panel">
       <div class="se-panel-title">
         <span>Runtime Guard</span>
@@ -185,6 +197,18 @@ function renderFallback() {
     gui_authority: 'display_only',
     phase2_gate_status: 'BLOCKED',
     phase2_gate_blockers: ['api_unavailable'],
+    api_allowlist: {
+      contract_id: '',
+      source_version: 0,
+      accepted: false,
+      blockers: ['api_unavailable'],
+      read_action_count: 0,
+      paper_write_action_count: 0,
+      denied_action_count: 0,
+      ibkr_contact_performed: false,
+      secret_content_serialized: false,
+      bybit_live_execution_protected: false,
+    },
     first_ibkr_contact_allowed: false,
     immutable_pass_artifact_present: false,
     connector_enabled: false,
@@ -204,6 +228,7 @@ function renderFallback() {
 
 function renderReadiness(data) {
   const source = data.source_readiness || {};
+  const apiAllowlist = data.api_allowlist || {};
   document.getElementById('se-default-lane').innerHTML = textChip(data.default_asset_lane || 'crypto_perp');
   document.getElementById('se-readiness-state').innerHTML = textChip(data.readiness_state || 'blocked');
   document.getElementById('se-readiness-sub').textContent =
@@ -213,6 +238,11 @@ function renderReadiness(data) {
   document.getElementById('se-live-state').innerHTML = boolChip(data.ibkr_live_enabled, true);
   setChip('se-gui-authority', data.gui_authority || 'display_only', 'neutral');
   setChip('se-phase2-status', data.phase2_gate_status || 'BLOCKED', toneFor(data.phase2_gate_status || 'blocked'));
+  setChip(
+    'se-api-allowlist-status',
+    apiAllowlist.accepted ? 'accepted' : 'blocked',
+    apiAllowlist.accepted ? 'good' : 'bad'
+  );
   setChip('se-degraded', data.degraded ? 'degraded' : 'source', data.degraded ? 'warn' : 'good');
 
   document.getElementById('se-lane-body').innerHTML = [
@@ -231,6 +261,26 @@ function renderReadiness(data) {
     kvRow('stock_live_disabled', boolChip(data.stock_live_disabled, false)),
   ].join('');
 
+  document.getElementById('se-api-allowlist-body').innerHTML = [
+    kvRow('contract_id', textChip(apiAllowlist.contract_id || '-')),
+    kvRow('source_version', textChip(apiAllowlist.source_version)),
+    kvRow('accepted', boolChip(apiAllowlist.accepted, false)),
+    kvRow(
+      'action_counts',
+      '<span class="se-code">' +
+        ocEsc(
+          'read=' + String(apiAllowlist.read_action_count || 0) +
+          ' paper_write=' + String(apiAllowlist.paper_write_action_count || 0) +
+          ' denied=' + String(apiAllowlist.denied_action_count || 0)
+        ) +
+      '</span>'
+    ),
+    kvRow('ibkr_contact_performed', boolChip(apiAllowlist.ibkr_contact_performed, true)),
+    kvRow('secret_content_serialized', boolChip(apiAllowlist.secret_content_serialized, true)),
+    kvRow('bybit_live_execution_protected', boolChip(apiAllowlist.bybit_live_execution_protected, false)),
+    kvRow('blockers', chipList(apiAllowlist.blockers, 'none')),
+  ].join('');
+
   document.getElementById('se-guard-body').innerHTML = [
     kvRow('ibkr_call_performed', boolChip(data.ibkr_call_performed, true)),
     kvRow('secret_slot_touched', boolChip(data.secret_slot_touched, true)),
@@ -243,6 +293,7 @@ function renderReadiness(data) {
   const blockers = []
     .concat(source.denial_reasons || [])
     .concat(data.phase2_gate_blockers || [])
+    .concat(apiAllowlist.blockers || [])
     .concat(data.contract_violations || []);
   setChip('se-denied-count', String(denied.length), denied.length ? 'warn' : 'neutral');
   document.getElementById('se-denied-list').innerHTML = chipList(denied, 'no denied operations');
@@ -250,6 +301,7 @@ function renderReadiness(data) {
   setChip('se-updated', new Date().toLocaleTimeString(), data.degraded ? 'warn' : 'good');
 
   document.getElementById('se-phase2-panel').classList.toggle('se-warn-line', data.first_ibkr_contact_allowed !== true);
+  document.getElementById('se-api-allowlist-panel').classList.toggle('se-bad-line', apiAllowlist.accepted !== true);
   document.getElementById('se-guard-panel').classList.toggle('se-bad-line', (data.contract_violations || []).length > 0);
 }
 

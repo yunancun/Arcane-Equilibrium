@@ -2756,3 +2756,9 @@
 - PM made the Stock/ETF FastAPI readiness route normalize `phase2.api_allowlist` into top-level `api_allowlist` and fail closed on missing/mismatched `non_bybit_api_allowlist_v1` id, source version, action counts, contact/secret flags, or missing Bybit-live protection proof.
 - IPC unavailable remains the existing degraded/fail-closed state rather than being reclassified as an IPC payload contract violation; integer contract fields reject boolean values.
 - Verification passed: `python3 -m py_compile` for the route/test files and focused FastAPI/no-write pytest `12 passed`. This grants no IBKR contact, connector runtime, secret access, paper order, fill import, DB apply, GUI authority, Phase 2 start, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF GUI Allowlist Readiness Trace
+
+- PM made the display-only Stock/ETF GUI tab render the normalized `api_allowlist` readiness payload: accepted/blocked status, contract id/source version, action counts, no-contact/no-secret flags, Bybit-live protection proof, and allowlist blockers.
+- Allowlist blockers are merged into the existing denied/blocker surface; static tests assert the tab consumes `api_allowlist` while preserving no POST, no paper order method, and no local/session storage authority.
+- Verification passed: route test `py_compile`, focused FastAPI/no-write pytest `12 passed`, Node inline-script syntax check `2` scripts, and `git diff --check`. This grants no IBKR contact, connector runtime, secret access, paper order, fill import, DB apply, GUI/lane selector authority, Phase 2 start, tiny-live, live, or Bybit behavior change.
