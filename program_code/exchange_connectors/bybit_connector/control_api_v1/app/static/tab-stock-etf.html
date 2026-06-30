@@ -92,6 +92,11 @@
       <div class="se-metric-sub" id="se-policy-sub"></div>
     </div>
     <div class="se-metric">
+      <div class="se-metric-label">Authorization Gate</div>
+      <div class="se-metric-value" id="se-authorization-state">--</div>
+      <div class="se-metric-sub" id="se-authorization-sub"></div>
+    </div>
+    <div class="se-metric">
       <div class="se-metric-label">IBKR Account</div>
       <div class="se-metric-value" id="se-account-state">--</div>
       <div class="se-metric-sub" id="se-account-sub"></div>
@@ -182,6 +187,18 @@
       </div>
       <table class="se-kv">
         <tbody id="se-policy-body">
+          <tr><td colspan="2" class="se-muted">Loading...</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="se-panel" id="se-authorization-panel">
+      <div class="se-panel-title">
+        <span>Authorization Status</span>
+        <span id="se-authorization-status" class="oc-chip oc-chip-neutral">--</span>
+      </div>
+      <table class="se-kv">
+        <tbody id="se-authorization-body">
           <tr><td colspan="2" class="se-muted">Loading...</td></tr>
         </tbody>
       </table>
@@ -324,6 +341,7 @@ const LANE_STATUS_ENDPOINT = '/api/v1/stock-etf/lane-status';
 const READINESS_ENDPOINT = '/api/v1/stock-etf/readiness';
 const DATA_FOUNDATION_STATUS_ENDPOINT = '/api/v1/stock-etf/data-foundation-status';
 const POLICY_STATUS_ENDPOINT = '/api/v1/stock-etf/policy-status';
+const AUTHORIZATION_STATUS_ENDPOINT = '/api/v1/stock-etf/authorization-status';
 const ACCOUNT_STATUS_ENDPOINT = '/api/v1/stock-etf/account-status';
 const EVIDENCE_STATUS_ENDPOINT = '/api/v1/stock-etf/evidence-status';
 const UNIVERSE_STATUS_ENDPOINT = '/api/v1/stock-etf/universe-status';
@@ -524,6 +542,106 @@ function policyFallback(reason) {
       first_ibkr_contact_performed: false,
       secret_content_serialized: false,
     },
+    risk_runtime_started: false,
+    paper_order_rehearsal_started: false,
+    paper_order_submitted: false,
+    connector_runtime_started: false,
+    db_apply_performed: false,
+    evidence_clock_started: false,
+    scorecard_writer_started: false,
+    contract_violations: [],
+    degraded: true,
+    reason: why,
+  };
+}
+
+function authorizationFallback(reason) {
+  const why = reason || 'api_unavailable';
+  return {
+    authorization_status_state: 'degraded',
+    phase: 'phase2_authorization_status_source_fixture',
+    phase2_started: false,
+    phase3_started: false,
+    gui_authority: 'display_only',
+    authorization_matrix: {
+      expected_contract_id: 'feature_flag_secret_auth_matrix_v1',
+      contract_id: '',
+      source_version: 0,
+      gui_lane_state_override_denied: true,
+      server_rust_matrix_authoritative: true,
+      request_asset_lane: 'stock_etf_cash',
+      request_broker: 'ibkr',
+      request_environment: 'paper',
+      request_instrument_kind: 'stock',
+      request_operation: 'paper_order_submit',
+      request_allowed: false,
+      effective_authority_scope: 'denied',
+      blockers: [why],
+    },
+    feature_flags: {
+      stock_etf_lane_enabled: false,
+      ibkr_readonly_enabled: false,
+      ibkr_paper_enabled: false,
+      asset_lane_default: 'crypto_perp',
+      stock_etf_shadow_only: true,
+    },
+    secret_slot_contract: {
+      expected_contract_id: 'ibkr_secret_slot_contract_v1',
+      contract_id: '',
+      source_version: 0,
+      accepted: false,
+      blockers: [why],
+      contract_present: false,
+      readonly_slot_posture: 'unknown',
+      paper_slot_posture: 'unknown',
+      live_slot_posture: 'unknown',
+      owner_only_permissions: false,
+      env_var_credential_fallback_denied: false,
+      live_secret_absent_or_empty: false,
+      secret_slot_fingerprint_present: false,
+      account_fingerprint_hash_present: false,
+      secret_content_serialized: false,
+      account_id_serialized: false,
+    },
+    phase2_gate_artifact: {
+      expected_contract_id: 'phase2_ibkr_external_surface_gate_v1',
+      contract_id: '',
+      source_version: 0,
+      ibkr_contact_allowed: false,
+      blockers: [why],
+      artifact_id_present: false,
+      sealed: false,
+      raw_artifact_hash_present: false,
+      redacted_summary_hash_present: false,
+    },
+    session_attestation: {
+      expected_contract_id: 'ibkr_session_attestation_v1',
+      contract_id: '',
+      source_version: 0,
+      status: 'BLOCKED',
+      attestation_accepted: false,
+      blockers: [why],
+      environment: 'read_only',
+      account_fingerprint_present: false,
+      account_fingerprint_is_live: false,
+      secret_slot_fingerprint_present: false,
+      api_server_version_present: false,
+      raw_artifact_hash_present: false,
+    },
+    authorization_envelope: {
+      asset_lane: 'stock_etf_cash',
+      broker: 'ibkr',
+      environment: 'paper',
+      permission_scope: 'denied',
+      secret_slot_fingerprint_present: false,
+      account_fingerprint_hash_present: false,
+      risk_config_hash_present: false,
+      expires_at_ms: 0,
+    },
+    paper_order_authority_present: false,
+    scoped_authorization_present: false,
+    decision_lease_valid: false,
+    guardian_allows: false,
     risk_runtime_started: false,
     paper_order_rehearsal_started: false,
     paper_order_submitted: false,
@@ -1027,6 +1145,7 @@ function renderFallback() {
   renderReadiness(data, null);
   renderDataFoundationStatus(dataFoundationFallback('api_unavailable'));
   renderPolicyStatus(policyFallback('api_unavailable'));
+  renderAuthorizationStatus(authorizationFallback('api_unavailable'));
   renderAccountStatus(accountFallback('api_unavailable'));
   renderEvidenceStatus(evidenceFallback('api_unavailable'));
   renderUniverseStatus(universeFallback('api_unavailable'));
@@ -1362,6 +1481,110 @@ function renderPolicyStatus(data) {
     kvRow('reason', '<span class="se-code">' + ocEsc(status.reason || '-') + '</span>'),
   ].join('');
   document.getElementById('se-policy-panel').classList.toggle(
+    'se-bad-line',
+    (status.contract_violations || []).length > 0
+  );
+}
+
+function renderAuthorizationStatus(data) {
+  const status = data || authorizationFallback('api_unavailable');
+  const matrix = status.authorization_matrix || {};
+  const flags = status.feature_flags || {};
+  const secret = status.secret_slot_contract || {};
+  const artifact = status.phase2_gate_artifact || {};
+  const session = status.session_attestation || {};
+  const envelope = status.authorization_envelope || {};
+  const state = status.authorization_status_state || 'blocked';
+  const blockers = []
+    .concat(matrix.blockers || [])
+    .concat(secret.blockers || [])
+    .concat(artifact.blockers || [])
+    .concat(session.blockers || [])
+    .concat(status.phase2_gate_blockers || [])
+    .concat(status.contract_violations || []);
+  document.getElementById('se-authorization-state').innerHTML = textChip(state);
+  document.getElementById('se-authorization-sub').textContent =
+    matrix.request_allowed ? 'paper authority claimed' : 'authority blocked';
+  setChip('se-authorization-status', state, toneFor(state));
+  document.getElementById('se-authorization-body').innerHTML = [
+    kvRow('phase', textChip(status.phase || '-')),
+    kvRow('environment', textChip(status.environment || 'paper')),
+    kvRow('phase2_started', boolChip(status.phase2_started, true)),
+    kvRow('phase3_started', boolChip(status.phase3_started, true)),
+    kvRow('paper_order_authority_present', boolChip(status.paper_order_authority_present, true)),
+    kvRow('scoped_authorization_present', boolChip(status.scoped_authorization_present, true)),
+    kvRow('decision_lease_valid', boolChip(status.decision_lease_valid, true)),
+    kvRow('guardian_allows', boolChip(status.guardian_allows, true)),
+    kvRow('matrix.expected_contract_id', textChip(matrix.expected_contract_id || '-')),
+    kvRow('matrix.contract_id', textChip(matrix.contract_id || '-')),
+    kvRow('matrix.source_version', textChip(matrix.source_version)),
+    kvRow('matrix.request_allowed', boolChip(matrix.request_allowed, true)),
+    kvRow('matrix.effective_scope', textChip(matrix.effective_authority_scope || 'denied')),
+    kvRow('matrix.gui_override_denied', boolChip(matrix.gui_lane_state_override_denied, false)),
+    kvRow('matrix.server_rust_authoritative', boolChip(matrix.server_rust_matrix_authoritative, false)),
+    kvRow(
+      'matrix.request',
+      '<span class="se-code">' +
+        ocEsc(
+          'lane=' + String(matrix.request_asset_lane || '-') +
+          ' broker=' + String(matrix.request_broker || '-') +
+          ' env=' + String(matrix.request_environment || '-') +
+          ' kind=' + String(matrix.request_instrument_kind || '-') +
+          ' op=' + String(matrix.request_operation || '-')
+        ) +
+      '</span>'
+    ),
+    kvRow(
+      'flags',
+      '<span class="se-code">' +
+        ocEsc(
+          'lane=' + String(flags.stock_etf_lane_enabled === true) +
+          ' readonly=' + String(flags.ibkr_readonly_enabled === true) +
+          ' paper=' + String(flags.ibkr_paper_enabled === true) +
+          ' default=' + String(flags.asset_lane_default || '-') +
+          ' shadow_only=' + String(flags.stock_etf_shadow_only !== false)
+        ) +
+      '</span>'
+    ),
+    kvRow('secret.expected_contract_id', textChip(secret.expected_contract_id || '-')),
+    kvRow('secret.contract_id', textChip(secret.contract_id || '-')),
+    kvRow('secret.accepted', boolChip(secret.accepted, false)),
+    kvRow('secret.contract_present', boolChip(secret.contract_present, false)),
+    kvRow('secret.readonly_slot_posture', textChip(secret.readonly_slot_posture || 'unknown')),
+    kvRow('secret.paper_slot_posture', textChip(secret.paper_slot_posture || 'unknown')),
+    kvRow('secret.live_slot_posture', textChip(secret.live_slot_posture || 'unknown')),
+    kvRow('secret.owner_only_permissions', boolChip(secret.owner_only_permissions, false)),
+    kvRow('secret.env_fallback_denied', boolChip(secret.env_var_credential_fallback_denied, false)),
+    kvRow('secret.live_absent_or_empty', boolChip(secret.live_secret_absent_or_empty, false)),
+    kvRow('secret.fingerprint_present', boolChip(secret.secret_slot_fingerprint_present, false)),
+    kvRow('secret.account_hash_present', boolChip(secret.account_fingerprint_hash_present, false)),
+    kvRow('secret.secret_content_serialized', boolChip(secret.secret_content_serialized, true)),
+    kvRow('secret.account_id_serialized', boolChip(secret.account_id_serialized, true)),
+    kvRow('phase2_artifact.expected_contract_id', textChip(artifact.expected_contract_id || '-')),
+    kvRow('phase2_artifact.contract_id', textChip(artifact.contract_id || '-')),
+    kvRow('phase2_artifact.contact_allowed', boolChip(artifact.ibkr_contact_allowed, true)),
+    kvRow('phase2_artifact.sealed', boolChip(artifact.sealed, false)),
+    kvRow('phase2_artifact.raw_hash_present', boolChip(artifact.raw_artifact_hash_present, false)),
+    kvRow('phase2_artifact.redacted_hash_present', boolChip(artifact.redacted_summary_hash_present, false)),
+    kvRow('session.expected_contract_id', textChip(session.expected_contract_id || '-')),
+    kvRow('session.contract_id', textChip(session.contract_id || '-')),
+    kvRow('session.status', textChip(session.status || 'BLOCKED')),
+    kvRow('session.attestation_accepted', boolChip(session.attestation_accepted, true)),
+    kvRow('session.environment', textChip(session.environment || 'read_only')),
+    kvRow('session.account_live', boolChip(session.account_fingerprint_is_live, true)),
+    kvRow('session.raw_hash_present', boolChip(session.raw_artifact_hash_present, false)),
+    kvRow('envelope.permission_scope', textChip(envelope.permission_scope || 'denied')),
+    kvRow('envelope.secret_fingerprint_present', boolChip(envelope.secret_slot_fingerprint_present, false)),
+    kvRow('envelope.account_hash_present', boolChip(envelope.account_fingerprint_hash_present, false)),
+    kvRow('envelope.risk_hash_present', boolChip(envelope.risk_config_hash_present, false)),
+    kvRow('envelope.expires_at_ms', textChip(envelope.expires_at_ms || 0)),
+    kvRow('paper_order_submitted', boolChip(status.paper_order_submitted, true)),
+    kvRow('connector_runtime_started', boolChip(status.connector_runtime_started, true)),
+    kvRow('db_apply_performed', boolChip(status.db_apply_performed, true)),
+    kvRow('blockers', chipList(blockers, 'none')),
+    kvRow('reason', '<span class="se-code">' + ocEsc(status.reason || '-') + '</span>'),
+  ].join('');
+  document.getElementById('se-authorization-panel').classList.toggle(
     'se-bad-line',
     (status.contract_violations || []).length > 0
   );
@@ -1934,6 +2157,7 @@ async function loadReadiness() {
     readinessPayload,
     dataFoundationPayload,
     policyPayload,
+    authorizationPayload,
     accountPayload,
     evidencePayload,
     universePayload,
@@ -1947,6 +2171,7 @@ async function loadReadiness() {
     ocApi(READINESS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(DATA_FOUNDATION_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(POLICY_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
+    ocApi(AUTHORIZATION_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(ACCOUNT_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(EVIDENCE_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(UNIVERSE_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
@@ -1967,6 +2192,11 @@ async function loadReadiness() {
       : dataFoundationFallback('api_unavailable')
   );
   renderPolicyStatus(policyPayload && policyPayload.data ? policyPayload.data : policyFallback('api_unavailable'));
+  renderAuthorizationStatus(
+    authorizationPayload && authorizationPayload.data
+      ? authorizationPayload.data
+      : authorizationFallback('api_unavailable')
+  );
   renderAccountStatus(accountPayload && accountPayload.data ? accountPayload.data : accountFallback('api_unavailable'));
   renderEvidenceStatus(evidencePayload && evidencePayload.data ? evidencePayload.data : evidenceFallback('api_unavailable'));
   renderUniverseStatus(universePayload && universePayload.data ? universePayload.data : universeFallback('api_unavailable'));

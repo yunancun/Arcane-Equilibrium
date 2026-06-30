@@ -15,6 +15,8 @@ pub const STOCK_ETF_GUI_LANE_STATUS_ENDPOINT: &str = "/api/v1/stock-etf/lane-sta
 pub const STOCK_ETF_GUI_DATA_FOUNDATION_STATUS_ENDPOINT: &str =
     "/api/v1/stock-etf/data-foundation-status";
 pub const STOCK_ETF_GUI_POLICY_STATUS_ENDPOINT: &str = "/api/v1/stock-etf/policy-status";
+pub const STOCK_ETF_GUI_AUTHORIZATION_STATUS_ENDPOINT: &str =
+    "/api/v1/stock-etf/authorization-status";
 pub const STOCK_ETF_GUI_ACCOUNT_STATUS_ENDPOINT: &str = "/api/v1/stock-etf/account-status";
 pub const STOCK_ETF_GUI_EVIDENCE_STATUS_ENDPOINT: &str = "/api/v1/stock-etf/evidence-status";
 pub const STOCK_ETF_GUI_UNIVERSE_STATUS_ENDPOINT: &str = "/api/v1/stock-etf/universe-status";
@@ -39,6 +41,8 @@ pub struct StockEtfGuiLaneContractV1 {
     pub data_foundation_status_endpoint_get_only: bool,
     pub policy_status_endpoint: String,
     pub policy_status_endpoint_get_only: bool,
+    pub authorization_status_endpoint: String,
+    pub authorization_status_endpoint_get_only: bool,
     pub account_status_endpoint: String,
     pub account_status_endpoint_get_only: bool,
     pub evidence_status_endpoint: String,
@@ -96,6 +100,8 @@ impl Default for StockEtfGuiLaneContractV1 {
             data_foundation_status_endpoint_get_only: false,
             policy_status_endpoint: String::new(),
             policy_status_endpoint_get_only: false,
+            authorization_status_endpoint: String::new(),
+            authorization_status_endpoint_get_only: false,
             account_status_endpoint: String::new(),
             account_status_endpoint_get_only: false,
             evidence_status_endpoint: String::new(),
@@ -156,6 +162,8 @@ impl StockEtfGuiLaneContractV1 {
             data_foundation_status_endpoint_get_only: true,
             policy_status_endpoint: STOCK_ETF_GUI_POLICY_STATUS_ENDPOINT.to_string(),
             policy_status_endpoint_get_only: true,
+            authorization_status_endpoint: STOCK_ETF_GUI_AUTHORIZATION_STATUS_ENDPOINT.to_string(),
+            authorization_status_endpoint_get_only: true,
             account_status_endpoint: STOCK_ETF_GUI_ACCOUNT_STATUS_ENDPOINT.to_string(),
             account_status_endpoint_get_only: true,
             evidence_status_endpoint: STOCK_ETF_GUI_EVIDENCE_STATUS_ENDPOINT.to_string(),
@@ -246,6 +254,12 @@ impl StockEtfGuiLaneContractV1 {
         }
         if !self.policy_status_endpoint_get_only {
             blockers.push(Blocker::PolicyStatusEndpointNotGetOnly);
+        }
+        if self.authorization_status_endpoint != STOCK_ETF_GUI_AUTHORIZATION_STATUS_ENDPOINT {
+            blockers.push(Blocker::AuthorizationStatusEndpointMismatch);
+        }
+        if !self.authorization_status_endpoint_get_only {
+            blockers.push(Blocker::AuthorizationStatusEndpointNotGetOnly);
         }
         if self.account_status_endpoint != STOCK_ETF_GUI_ACCOUNT_STATUS_ENDPOINT {
             blockers.push(Blocker::AccountStatusEndpointMismatch);
@@ -416,6 +430,8 @@ pub enum StockEtfGuiLaneBlocker {
     DataFoundationStatusEndpointNotGetOnly,
     PolicyStatusEndpointMismatch,
     PolicyStatusEndpointNotGetOnly,
+    AuthorizationStatusEndpointMismatch,
+    AuthorizationStatusEndpointNotGetOnly,
     AccountStatusEndpointMismatch,
     AccountStatusEndpointNotGetOnly,
     EvidenceStatusEndpointMismatch,
