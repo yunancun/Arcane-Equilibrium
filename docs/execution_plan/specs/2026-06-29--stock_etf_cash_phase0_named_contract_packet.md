@@ -83,10 +83,10 @@ Matrix:
 
 | Operation | `stock_etf_cash` authority | Required gates |
 |---|---|---|
-| `health_read` | Allowed after gate | `phase2_ibkr_external_surface_gate_v1` |
-| `account_snapshot_read` | Allowed after gate | external gate + session attestation |
-| `market_data_read` | Allowed after gate | external gate + provenance contract |
-| `contract_details_read` | Allowed after gate | external gate + instrument identity contract |
+| `health_read` | Allowed after gate | external gate + lane-scoped IPC + readonly probe request |
+| `account_snapshot_read` | Allowed after gate | external gate + lane-scoped IPC + readonly probe request + session attestation |
+| `market_data_read` | Allowed after gate | external gate + lane-scoped IPC + readonly probe request + provenance contract |
+| `contract_details_read` | Allowed after gate | external gate + lane-scoped IPC + readonly probe request + instrument identity contract |
 | `paper_order_submit` | Paper-only, Rust-owned | external gate + paper attestation + scoped auth + risk policy + Decision Lease + Guardian |
 | `paper_order_cancel` | Paper-only, Rust-owned | same as submit + lifecycle idempotency |
 | `paper_order_replace` | Paper-only, Rust-owned | same as submit + replace state machine |
@@ -107,10 +107,12 @@ The validator requires exact `registry_id == broker_capability_registry_v1`,
 scope, Bybit live execution unchanged, Python broker write authority denied,
 IBKR live and CFD/margin reserved paths denied, required audit fields, source
 artifact hashes, paper-write Rust ownership, required gates for read / paper /
-shadow / scorecard operations including `stock_etf_risk_policy_v1`, and exact
-typed denials for live, margin/short, options/CFD, and transfer/account-write
-operations. It rejects first IBKR contact or serialized secret content in the
-registry artifact.
+shadow / scorecard operations including `stock_etf_risk_policy_v1`; read
+operations must include `lane_scoped_ipc_v1` and
+`stock_etf_ibkr_readonly_probe_request_v1` before any future read can be
+represented as available capability. It also requires exact typed denials for
+live, margin/short, options/CFD, and transfer/account-write operations. It
+rejects first IBKR contact or serialized secret content in the registry artifact.
 
 ## 4. `phase2_ibkr_external_surface_gate_v1`
 

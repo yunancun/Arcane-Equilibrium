@@ -3057,3 +3057,10 @@
 - `lane_scoped_ipc_v1`, method registry, and dispatch now include the method as readonly/slot-none with Phase 2 gate, API allowlist, secret-slot/topology/session, redaction, rate-limit, and audit-policy lineage requirements.
 - A valid envelope can validate as typed/read-only, but top-level `allowed` remains false under current default flags/gates; empty/minimal params fail closed as `readonly_probe_request_parse_failed`.
 - Verification passed: `rustfmt`; lane-scoped IPC acceptance `9 passed`; readonly-probe IPC focused `2 passed`; registry boundary focused `1 passed`; full openclaw_types `35` unit/golden + `247` integration/acceptance + `0` doc-tests; engine `stock_etf` filter `29 passed`; workspace `cargo check` PASS; `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Broker Read Capability Probe Gate
+
+- PM hardened `broker_capability_registry_v1` so `health_read`, `account_snapshot_read`, `market_data_read`, and `contract_details_read` require `lane_scoped_ipc_v1` plus `stock_etf_ibkr_readonly_probe_request_v1` before a read capability row can validate.
+- Missing typed IPC / readonly-probe request gates now produce `OperationRequiredGateMissing`; paper-write rows now use the shared lane-scoped IPC contract constant instead of a hard-coded id.
+- Phase0 packet spec, broker settings README, and the blocked broker capability template now document the same prerequisite.
+- Verification passed: `rustfmt`; broker capability acceptance `10 passed`; full openclaw_types `35` unit/golden + `248` integration/acceptance + `0` doc-tests; workspace `cargo check` PASS; `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.

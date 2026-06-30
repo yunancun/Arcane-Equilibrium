@@ -765,3 +765,37 @@ Verification 已過：
 沒有 shadow fill generation、沒有 reconciliation writer、沒有 DB apply、沒有 evidence
 clock、沒有 scorecard writer、沒有 Linux runtime sync/restart，也沒有改動 Bybit live
 execution 行為。
+
+## 2026-06-30 Operator Update — Broker Read Capability Probe Gate
+
+本 session 已完成 source-only hardening：`broker_capability_registry_v1` 的四個
+read rows 不再只靠外部 gate / operation-specific gate。
+
+新增邊界：
+
+- `health_read`
+- `account_snapshot_read`
+- `market_data_read`
+- `contract_details_read`
+
+上述 read rows 現在必須同時要求 `lane_scoped_ipc_v1` 和
+`stock_etf_ibkr_readonly_probe_request_v1`，再加上原有 session/provenance/
+instrument identity 等 per-operation gates，才會通過 registry validator。
+
+這次不是 read probe execution、不是 IBKR connector、不是 first contact。它只是把
+broker capability registry 綁到前面已完成的 typed IPC / readonly-probe request
+邊界，避免未來只看 capability row 就繞過 typed request。
+
+Verification 已過：
+
+- `rustfmt`：PASS
+- Broker capability acceptance：`10 passed`
+- Full openclaw_types：`35` unit/golden + `248` integration/acceptance + `0`
+  doc-tests
+- Workspace `cargo check`：PASS
+- `git diff --check`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
+access/creation、沒有 connector runtime、沒有 read probe execution、沒有 paper
+order/cancel/replace、沒有 fill import、沒有 evidence writer、沒有 DB apply、沒有
+evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
