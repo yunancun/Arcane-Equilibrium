@@ -81,12 +81,26 @@ def test_stock_etf_paper_status_uses_only_readonly_fixture_method() -> None:
     assert data["lifecycle_event"]["expected_event_log_contract_id"] == (
         "broker_lifecycle_event_log_v1"
     )
+    assert data["lifecycle_event"]["expected_request_contract_id"] == (
+        "stock_etf_paper_order_request_v1"
+    )
     assert data["lifecycle_event"]["accepted"] is False
     assert data["lifecycle_event"]["operation"] == "paper_order_submit"
+    assert data["lifecycle_event"]["event_sequence"] == 0
+    assert data["lifecycle_event"]["event_sequence_present"] is False
+    assert data["lifecycle_event"]["genesis_event"] is False
+    assert data["lifecycle_event"]["previous_event_hash_present"] is False
+    assert data["lifecycle_event"]["event_hash_present"] is False
+    assert data["lifecycle_event"]["request_envelope_hash_present"] is False
+    assert data["lifecycle_event"]["stale_state_policy_present"] is False
+    assert data["lifecycle_event"]["state_machine_contract_fields_present"] is True
     assert data["lifecycle_event"]["broker_order_id_present"] is False
     assert data["lifecycle_event"]["execution_id_present"] is False
     assert data["lifecycle_event"]["commission_report_id_present"] is False
     assert data["reconstructability"]["append_only_event_ready"] is False
+    assert data["reconstructability"]["event_hash_chain_ready"] is False
+    assert data["reconstructability"]["request_envelope_linked"] is False
+    assert data["reconstructability"]["stale_state_policy_present"] is False
     assert data["reconstructability"]["raw_artifact_hash_present"] is False
     assert data["allowed_gui_actions"] == ["refresh_paper_status"]
     assert data["api_allowlist"]["contract_id"] == "non_bybit_api_allowlist_v1"
@@ -155,9 +169,18 @@ def test_stock_etf_paper_status_blocks_contract_violation() -> None:
     payload["db_apply_performed"] = True
     payload["lifecycle_event"]["expected_lifecycle_contract_id"] = "wrong"
     payload["lifecycle_event"]["expected_event_log_contract_id"] = "wrong"
+    payload["lifecycle_event"]["expected_request_contract_id"] = "wrong"
+    payload["lifecycle_event"]["request_contract_id"] = "stock_etf_paper_order_request_v1"
     payload["lifecycle_event"]["accepted"] = True
     payload["lifecycle_event"]["allowed"] = True
     payload["lifecycle_event"]["event_id_present"] = True
+    payload["lifecycle_event"]["event_sequence"] = 1
+    payload["lifecycle_event"]["event_sequence_present"] = True
+    payload["lifecycle_event"]["genesis_event"] = True
+    payload["lifecycle_event"]["previous_event_hash_present"] = True
+    payload["lifecycle_event"]["event_hash_present"] = True
+    payload["lifecycle_event"]["request_envelope_hash_present"] = True
+    payload["lifecycle_event"]["stale_state_policy_present"] = True
     payload["lifecycle_event"]["order_local_id_present"] = True
     payload["lifecycle_event"]["idempotency_key_present"] = True
     payload["lifecycle_event"]["broker_order_id_present"] = True
@@ -167,6 +190,9 @@ def test_stock_etf_paper_status_blocks_contract_violation() -> None:
     payload["lifecycle_event"]["raw_artifact_hash_present"] = True
     payload["lifecycle_event"]["redacted_summary_hash_present"] = True
     payload["reconstructability"]["append_only_event_ready"] = True
+    payload["reconstructability"]["event_hash_chain_ready"] = True
+    payload["reconstructability"]["request_envelope_linked"] = True
+    payload["reconstructability"]["stale_state_policy_present"] = True
     payload["reconstructability"]["restart_recovery_required"] = True
     payload["reconstructability"]["manual_review_required"] = True
     fake_ipc = AsyncMock()
@@ -197,12 +223,23 @@ def test_stock_etf_paper_status_blocks_contract_violation() -> None:
         "broker_paper_attestation_present",
         "paper_lifecycle_expected_contract_id_mismatch",
         "paper_event_log_expected_contract_id_mismatch",
+        "paper_request_expected_contract_id_mismatch",
         "paper_lifecycle_event_accepted_before_gate",
         "paper_lifecycle_event_allowed_before_gate",
+        "paper_lifecycle_event_sequence_present",
+        "paper_lifecycle_genesis_event",
+        "paper_lifecycle_previous_event_hash_present",
+        "paper_lifecycle_event_hash_present",
+        "paper_lifecycle_request_envelope_hash_present",
+        "paper_lifecycle_stale_state_policy_present",
+        "paper_lifecycle_request_contract_id_present",
         "paper_lifecycle_broker_order_id_present",
         "paper_lifecycle_execution_id_present",
         "paper_lifecycle_commission_report_id_present",
         "paper_reconstructability_append_only_event_ready",
+        "paper_reconstructability_event_hash_chain_ready",
+        "paper_reconstructability_request_envelope_linked",
+        "paper_reconstructability_stale_state_policy_present",
         "paper_reconstructability_restart_recovery_required",
         "paper_reconstructability_manual_review_required",
     }.issubset(set(data["contract_violations"]))
@@ -221,6 +258,38 @@ def test_stock_etf_paper_status_blocks_contract_violation() -> None:
     assert data["order_routed"] is False
     assert data["bybit_ipc_reused"] is False
     assert data["db_apply_performed"] is False
+
+
+def test_stock_etf_paper_status_rejects_stale_lifecycle_shape() -> None:
+    payload = _valid_paper_status()
+    for key in (
+        "expected_request_contract_id",
+        "request_contract_id",
+        "event_sequence",
+        "event_sequence_present",
+        "genesis_event",
+        "previous_event_hash_present",
+        "event_hash_present",
+        "request_envelope_hash_present",
+        "stale_state_policy",
+        "stale_state_policy_present",
+    ):
+        payload["lifecycle_event"].pop(key, None)
+
+    fake_ipc = AsyncMock()
+    fake_ipc.call = AsyncMock(return_value=payload)
+    client = _make_client_with_ipc(fake_ipc)
+    try:
+        data = client.get("/api/v1/stock-etf/paper-status").json()["data"]
+    finally:
+        client._stock_etf_patcher.stop()  # type: ignore[attr-defined]
+
+    assert data["paper_status_state"] == "contract_violation_blocked"
+    assert data["lifecycle_event"]["state_machine_contract_fields_present"] is False
+    assert "paper_lifecycle_state_machine_fields_missing" in data["contract_violations"]
+    assert "paper_request_expected_contract_id_mismatch" in data["contract_violations"]
+    assert data["paper_order_entry_visible"] is False
+    assert data["order_routed"] is False
 
 
 def test_stock_etf_paper_status_requires_auth() -> None:

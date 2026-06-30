@@ -450,6 +450,43 @@ sync/restart 或 Bybit behavior change。本 turn 因可用 multi-agent tool pol
 限制「必須 operator 明確要求 subagent 才能 spawn」，未派 E1/E2/E4 subagent；PM
 用本地 focused/full regression 完成 verification。
 
+## 2026-06-30 PM Session Checkpoint — Paper Status Lifecycle Surface
+
+PM 已在本 session 追加 source-only checkpoint：paper-status lifecycle surface
+hardening。這是 Rust IPC read-only fixture、FastAPI normalizer/route guard、GUI
+display 與 tests 的收斂，不是 lifecycle writer 或 paper-order runtime。
+
+已完成：
+
+- `stock_etf.get_paper_status` 現在輸出 lifecycle request contract id、event
+  sequence、genesis marker、previous/event hash presence、request-envelope hash
+  presence、stale-state policy presence。
+- FastAPI paper-status normalizer 現在 machine-checks 這些 state-machine 欄位；
+  stale lifecycle shape 會被標記為 `paper_lifecycle_state_machine_fields_missing`
+  並 fail-closed。
+- Pre-gate event-chain/request-envelope/stale-policy readiness claim 會被轉成
+  `contract_violation_blocked`；`paper_order_entry_visible` 與 `order_routed` 保持
+  false。
+- GUI paper lifecycle panel 顯示 request contract、sequence/hash/stale-policy 與
+  reconstructability 欄位，fallback shape 也同步保持 display-only blocked。
+
+Verification：
+
+- Python compile PASS for changed paper-status common/normalizer/fixture/test files。
+- Focused paper-status route tests `6 passed`。
+- Wider Stock/ETF FastAPI/static tests `19 passed`。
+- JS syntax check PASS。
+- Rust format check PASS。
+- Engine `stock_etf_paper_status` focused test PASS。
+- Engine Stock/ETF cargo filter `21 passed`（既有 warnings only）。
+- Workspace `cargo check` PASS。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 1 runtime approval、lifecycle writer
+approval 或 paper-order approval。未批准 IBKR contact、secret、connector runtime、
+Phase 1/2/3/4/5 runtime start、paper order/cancel/replace、fill import、DB apply、
+Postgres dry-run、evidence clock、scorecard writer、tiny-live、live、Linux runtime
+sync/restart 或 Bybit behavior change。
+
 ## 2026-06-30 PM Session Checkpoint — Paper Request Envelope Contract
 
 PM 已在本 session 追加 Phase 1D source-only checkpoint：

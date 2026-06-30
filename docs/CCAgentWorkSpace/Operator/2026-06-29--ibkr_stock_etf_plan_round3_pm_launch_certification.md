@@ -294,6 +294,39 @@ Verification 已過：
 replace、沒有 fill import、沒有 DB apply、沒有 evidence clock、沒有 scorecard
 writer、沒有 Linux runtime sync/restart，也沒有改動 Bybit live execution 行為。
 
+## 2026-06-30 Operator Update — Paper Status Lifecycle Surface
+
+本 session 已完成下一個 source-only checkpoint：paper-status lifecycle surface
+hardening。
+
+這次不是 paper order runtime，也不是 lifecycle writer。你現在在 Stock/ETF GUI 的
+paper lifecycle panel 會看到更完整的 state-machine 狀態：
+
+- request contract id
+- event sequence / genesis marker
+- previous/event hash presence
+- request-envelope hash presence
+- stale-state policy
+- event hash chain / request-envelope reconstructability
+
+後端也已同步：Rust `stock_etf.get_paper_status`、FastAPI normalizer、route tests 與
+GUI fallback 都採用同一個 blocked/default shape。缺少新 lifecycle 欄位的舊 payload
+會被擋成 `contract_violation_blocked`，不會被當成可下單狀態。
+
+Verification 已過：
+
+- Focused paper-status FastAPI：`6 passed`
+- Wider Stock/ETF FastAPI/static：`19 passed`
+- JS syntax：PASS
+- Engine `stock_etf_paper_status` focused：PASS
+- Engine Stock/ETF：`21 passed`
+- Workspace `cargo check`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 secret access/creation、沒有 connector runtime、
+沒有 lifecycle writer、沒有 Phase 1/2/3/4/5 runtime start、沒有 paper order/cancel/
+replace、沒有 fill import、沒有 DB apply、沒有 evidence clock、沒有 scorecard
+writer、沒有 Linux runtime sync/restart，也沒有改動 Bybit live execution 行為。
+
 ## 2026-06-30 Operator Update — Paper Request Envelope Contract
 
 本 session 已完成下一個 source-only checkpoint：

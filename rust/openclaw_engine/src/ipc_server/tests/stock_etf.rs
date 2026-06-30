@@ -1008,6 +1008,11 @@ async fn stock_etf_paper_status_is_blocked_source_fixture_without_side_effects()
         "broker_lifecycle_event_log_v1"
     );
     assert_eq!(lifecycle["event_log_contract_id"], "");
+    assert_eq!(
+        lifecycle["expected_request_contract_id"],
+        "stock_etf_paper_order_request_v1"
+    );
+    assert_eq!(lifecycle["request_contract_id"], "");
     assert_eq!(lifecycle["source_version"], 0);
     assert_eq!(lifecycle["accepted"], false);
     assert!(json_array_contains(
@@ -1027,6 +1032,14 @@ async fn stock_etf_paper_status_is_blocked_source_fixture_without_side_effects()
     assert_eq!(lifecycle["next_state"], "LOCAL_INTENT_CREATED");
     assert_eq!(lifecycle["allowed"], false);
     assert_eq!(lifecycle["event_id_present"], false);
+    assert_eq!(lifecycle["event_sequence"], 0);
+    assert_eq!(lifecycle["event_sequence_present"], false);
+    assert_eq!(lifecycle["genesis_event"], false);
+    assert_eq!(lifecycle["previous_event_hash_present"], false);
+    assert_eq!(lifecycle["event_hash_present"], false);
+    assert_eq!(lifecycle["request_envelope_hash_present"], false);
+    assert_eq!(lifecycle["stale_state_policy"], serde_json::Value::Null);
+    assert_eq!(lifecycle["stale_state_policy_present"], false);
     assert_eq!(lifecycle["order_local_id_present"], false);
     assert_eq!(lifecycle["idempotency_key_present"], false);
     assert_eq!(lifecycle["broker_order_id_present"], false);
@@ -1038,6 +1051,9 @@ async fn stock_etf_paper_status_is_blocked_source_fixture_without_side_effects()
 
     let reconstructability = &result["reconstructability"];
     assert_eq!(reconstructability["append_only_event_ready"], false);
+    assert_eq!(reconstructability["event_hash_chain_ready"], false);
+    assert_eq!(reconstructability["request_envelope_linked"], false);
+    assert_eq!(reconstructability["stale_state_policy_present"], false);
     assert_eq!(reconstructability["broker_order_id_present"], false);
     assert_eq!(reconstructability["execution_id_present"], false);
     assert_eq!(reconstructability["commission_report_id_present"], false);
