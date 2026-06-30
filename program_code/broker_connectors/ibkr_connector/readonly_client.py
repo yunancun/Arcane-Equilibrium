@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .models import (
+    IBKR_CONNECTOR_SURFACE_ID,
     IbkrReadOnlyEndpointConfig,
     IbkrReadOnlySurfaceStatus,
     blocked_readonly_status,
@@ -23,7 +24,14 @@ class IbkrReadOnlyClient:
         return blocked_readonly_status(config=self._config)
 
     def connection_plan(self) -> dict[str, object]:
+        status = blocked_readonly_status(
+            "connection_plan_blocked",
+            config=self._config,
+        )
         return {
+            "surface_id": IBKR_CONNECTOR_SURFACE_ID,
+            "accepted": False,
+            "status": "blocked_source_only",
             "asset_lane": self._config.asset_lane,
             "broker": self._config.broker,
             "environment": self._config.environment,
@@ -37,7 +45,7 @@ class IbkrReadOnlyClient:
             "paper_channel_exposed": False,
             "live_channel_exposed": False,
             "bybit_path_reused": False,
-            "blockers": list(self._config.validate_source_boundary()),
+            "blockers": list(status.blockers),
         }
 
     def account_snapshot_preview(self) -> dict[str, object]:

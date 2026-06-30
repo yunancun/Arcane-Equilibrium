@@ -3080,7 +3080,7 @@
 
 ## 2026-06-30 IBKR Stock/ETF Plan Timeline Checkpoint Guard
 
-- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 71, aligned to the PM memory / Operator source timeline.
+- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 72, aligned to the PM memory / Operator source timeline.
 - Added a structure test that reads the main plan Markdown and fails if PM session checkpoint numbers become duplicated, skipped, or out of order.
 - Verification passed: focused IBKR timeline structure test `1 passed`; section-body compare against `HEAD` PASS; `git diff --check` PASS. The full structure test file still has pre-existing docs README index drift failures unrelated to this guard. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
 
@@ -3292,3 +3292,11 @@
 - The allowed keys are lane enabled, IBKR readonly enabled, IBKR paper enabled, asset-lane default, and stock/ETF shadow-only; the test rejects secret/token/password/account/key-bearing names.
 - Verification passed: file `rustfmt --check`; `stock_etf_lane_acceptance` `9 passed`; docs trace guard `2 passed`; full Stock/ETF FastAPI/static `112 passed`; `git diff --check` PASS.
 - Boundary unchanged: no Rust runtime behavior change, endpoint/IPC method change, IBKR contact, connector/runtime/secret/read-probe/paper-order/evidence/DB/tiny-live/live change, or Bybit behavior change. Workspace-wide `cargo fmt --all -- --check` remains blocked by pre-existing unrelated Rust formatting drift outside this IBKR slice.
+
+## 2026-07-01 IBKR Stock/ETF Connector Preview Payload Guard
+
+- PM made `IbkrReadOnlyClient.connection_plan()` explicitly fail closed with `surface_id`, `accepted=false`, `status=blocked_source_only`, `phase2_gate_not_accepted`, and `connection_plan_blocked`.
+- PM added an exact payload-shape regression for the inert IBKR connector skeleton covering connection plan, readiness, account snapshot, market data, contract details, paper lifecycle, fill import, and static fixture previews.
+- The guard fixes all preview payloads to secret-free/no-network/no-paper-channel/no-live/no-write/no-Bybit-reuse posture while preserving the existing source-only connector boundary.
+- Verification passed: connector skeleton tests `5 passed`; Python no-write static guard `17 passed`; full Stock/ETF FastAPI/static `113 passed`; docs trace guard `2 passed`; `git diff --check` PASS.
+- Boundary unchanged: no endpoint/IPC method change, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, paper order, fill import, DB/evidence writer, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

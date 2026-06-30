@@ -34,6 +34,77 @@ FORBIDDEN_WRITE_METHODS = {
     "create_order",
 }
 
+READONLY_SURFACE_KEYS = {
+    "accepted",
+    "account_snapshot_loaded",
+    "asset_lane",
+    "blockers",
+    "broker",
+    "bybit_path_reused",
+    "contract_details_loaded",
+    "environment",
+    "live_channel_exposed",
+    "market_data_loaded",
+    "network_contact_performed",
+    "order_write_method_present",
+    "paper_channel_exposed",
+    "secret_content_loaded",
+    "status",
+    "surface_id",
+}
+
+CONNECTION_PLAN_KEYS = {
+    "accepted",
+    "asset_lane",
+    "blockers",
+    "broker",
+    "bybit_path_reused",
+    "client_id",
+    "environment",
+    "host",
+    "live_channel_exposed",
+    "network_contact_allowed",
+    "network_contact_performed",
+    "paper_channel_exposed",
+    "port",
+    "secret_content_loaded",
+    "status",
+    "surface_id",
+    "transport",
+}
+
+PAPER_LIFECYCLE_KEYS = READONLY_SURFACE_KEYS | {
+    "paper_lifecycle_readiness",
+    "python_broker_write_authority",
+    "rust_authority_required",
+}
+
+FILL_IMPORT_KEYS = READONLY_SURFACE_KEYS | {
+    "broker_write_authority",
+    "db_apply_authority",
+    "fill_import_readiness",
+    "python_import_side_effects",
+}
+
+SIDE_EFFECT_FALSE_KEYS = {
+    "account_snapshot_loaded",
+    "broker_write_authority",
+    "bybit_path_reused",
+    "contract_details_loaded",
+    "db_apply_authority",
+    "fill_import_readiness",
+    "live_channel_exposed",
+    "market_data_loaded",
+    "network_contact_allowed",
+    "network_contact_performed",
+    "order_write_method_present",
+    "paper_channel_exposed",
+    "paper_lifecycle_readiness",
+    "python_broker_write_authority",
+    "python_import_side_effects",
+    "secret_content_loaded",
+}
+
 
 def test_ibkr_connector_skeleton_has_no_python_broker_write_methods() -> None:
     for cls in (IbkrReadOnlyClient, IbkrPaperClientBoundary):
@@ -102,3 +173,49 @@ def test_ibkr_connector_previews_remain_display_only() -> None:
         assert payload.get("secret_content_loaded") is False
         assert payload.get("bybit_path_reused") is False
         assert payload.get("order_write_method_present", False) is False
+
+
+def test_ibkr_connector_preview_payload_shapes_are_fail_closed() -> None:
+    client = IbkrReadOnlyClient()
+    paper = IbkrPaperClientBoundary()
+    payloads = {
+        "connection_plan": (client.connection_plan(), CONNECTION_PLAN_KEYS),
+        "readiness": (client.readiness().to_dict(), READONLY_SURFACE_KEYS),
+        "account_snapshot": (
+            client.account_snapshot_preview(),
+            READONLY_SURFACE_KEYS,
+        ),
+        "market_data": (client.market_data_preview(), READONLY_SURFACE_KEYS),
+        "contract_details": (
+            client.contract_details_preview(),
+            READONLY_SURFACE_KEYS,
+        ),
+        "paper_lifecycle": (paper.lifecycle_readiness(), PAPER_LIFECYCLE_KEYS),
+        "fill_import": (paper.fill_import_readiness(), FILL_IMPORT_KEYS),
+        "fixture": (blocked_readonly_fixture(), READONLY_SURFACE_KEYS),
+    }
+
+    for name, (payload, expected_keys) in payloads.items():
+        assert set(payload) == expected_keys, name
+        assert payload["surface_id"] == IBKR_CONNECTOR_SURFACE_ID
+        assert payload["accepted"] is False
+        assert payload["status"] == "blocked_source_only"
+        assert payload["asset_lane"] == "stock_etf_cash"
+        assert payload["broker"] == "ibkr"
+        assert "phase2_gate_not_accepted" in payload["blockers"]
+        assert len(payload["blockers"]) == len(set(payload["blockers"]))
+        for key in SIDE_EFFECT_FALSE_KEYS.intersection(payload):
+            assert payload[key] is False, f"{name}.{key}"
+
+    assert "connection_plan_blocked" in payloads["connection_plan"][0]["blockers"]
+    assert "account_snapshot_blocked" in payloads["account_snapshot"][0]["blockers"]
+    assert "market_data_blocked" in payloads["market_data"][0]["blockers"]
+    assert "contract_details_blocked" in payloads["contract_details"][0]["blockers"]
+    assert "paper_lifecycle_runtime_blocked" in payloads["paper_lifecycle"][0]["blockers"]
+    assert "rust_authority_required" in payloads["paper_lifecycle"][0]["blockers"]
+    assert payloads["paper_lifecycle"][0]["rust_authority_required"] is True
+    assert "fill_import_runtime_blocked" in payloads["fill_import"][0]["blockers"]
+    assert (
+        "stock_etf_paper_fill_import_request_required"
+        in payloads["fill_import"][0]["blockers"]
+    )
