@@ -6,6 +6,10 @@
 
 use std::path::PathBuf;
 
+use openclaw_types::stock_etf_scorecard_inputs::{
+    STOCK_ETF_STORAGE_MAX_INDEX_BUDGET_MB, STOCK_ETF_STORAGE_MAX_QUERY_SLO_MS,
+    STOCK_ETF_STORAGE_MAX_ROWS_PER_DAY_ESTIMATE, STOCK_ETF_STORAGE_MAX_UNIVERSE_SIZE,
+};
 use openclaw_types::{
     BrokerAccountPortfolioCashLedgerV1, BrokerEnvironment, StockEtfBenchmarkVersionV1,
     StockEtfCostModelVersionV1, StockEtfScorecardInputBlocker, StockEtfScorecardInputBundleV1,
@@ -192,6 +196,69 @@ fn storage_capacity_requires_forward_capacity_policy_before_evidence_clock() {
     assert!(verdict
         .blockers
         .contains(&StockEtfScorecardInputBlocker::RowsPerDayEstimateMissing));
+}
+
+#[test]
+fn storage_capacity_rejects_unbounded_volume_and_slow_query_plan() {
+    let mut storage = StockEtfStorageCapacityV1::accepted_fixture();
+    storage.universe_size = STOCK_ETF_STORAGE_MAX_UNIVERSE_SIZE + 1;
+    storage.rows_per_day_estimate = STOCK_ETF_STORAGE_MAX_ROWS_PER_DAY_ESTIMATE + 1;
+    storage.index_budget_mb = STOCK_ETF_STORAGE_MAX_INDEX_BUDGET_MB + 1;
+    storage.query_slo_ms = STOCK_ETF_STORAGE_MAX_QUERY_SLO_MS + 1;
+
+    let verdict = storage.validate();
+
+    assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::UniverseSizeExceedsCapacityPlan));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::RowsPerDayEstimateExceedsCapacityPlan));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::IndexBudgetExceedsCapacityPlan));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::QuerySloExceedsCapacityPlan));
+}
+
+#[test]
+fn storage_capacity_requires_retention_order_for_evidence_window() {
+    let mut storage = StockEtfStorageCapacityV1::accepted_fixture();
+    storage.raw_payload_hash_retention_days = 30;
+    storage.compressed_retention_days = 29;
+
+    let verdict = storage.validate();
+
+    assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::RawPayloadRetentionTooShort));
+    assert!(verdict.blockers.contains(
+        &StockEtfScorecardInputBlocker::CompressedRetentionShorterThanRawPayloadHashRetention
+    ));
+}
+
+#[test]
+fn storage_capacity_archive_path_must_be_lane_scoped_relative_path() {
+    for unsafe_path in [
+        "/tmp/openclaw/stock_etf",
+        "../evidence/stock_etf_cash/archive",
+        "evidence/crypto_perp/archive",
+        "evidence/stock_etf_cash/../secrets",
+        "evidence/stock_etf_cash//archive",
+    ] {
+        let mut storage = StockEtfStorageCapacityV1::accepted_fixture();
+        storage.archive_path = unsafe_path.to_string();
+
+        let verdict = storage.validate();
+
+        assert!(!verdict.accepted, "{unsafe_path} should be rejected");
+        assert!(verdict
+            .blockers
+            .contains(&StockEtfScorecardInputBlocker::ArchivePathUnsafe));
+    }
 }
 
 #[test]
