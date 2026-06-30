@@ -551,3 +551,36 @@ Verification 已過：
 沒有 Phase 1/2/3/4/5 runtime start、沒有 paper order/cancel/replace、沒有 fill import、
 沒有 DB apply、沒有 evidence clock、沒有 scorecard writer、沒有 Linux runtime
 sync/restart，也沒有改動 Bybit live execution 行為。
+
+## 2026-06-30 Operator Update — Scorecard Reconciliation Lineage Gate
+
+本 session 已完成下一個 source/status/display-only checkpoint：
+scorecard reconciliation lineage gate。
+
+這次不是 scorecard writer，也不是 reconciliation runtime。變更只在 Rust scorecard
+contract、blocked template、read-only scorecard status、FastAPI normalizer/tests 與 GUI：
+
+- `stock_etf_scorecard_verdict_v1` 現在必須帶
+  `paper_shadow_reconciliation_hash`，否則 validator 會 fail closed。
+- `/api/v1/stock-etf/scorecard-status` 會顯示
+  `paper_shadow_reconciliation_hash_present=false`。
+- 如果 pre-gate payload 宣稱該 hash present，FastAPI 會以
+  `contract_violation_blocked` 阻擋。
+- GUI scorecard panel 會顯示這個 gate，避免將 scorecard readiness 和
+  paper-vs-shadow reconciliation 脫鉤。
+
+Verification 已過：
+
+- Scorecard verdict acceptance：`8 passed`
+- Focused FastAPI/static：`15 passed`
+- Full Stock/ETF FastAPI/static：`90 passed`
+- Engine Stock/ETF：`27 passed`
+- Full openclaw_types：`35` unit/golden + `236` integration/acceptance + `0` doc-tests
+- Workspace `cargo check`：PASS
+- `rustfmt --check` / `node --check`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 secret access/creation、沒有 connector runtime、
+沒有 Phase 1/2/3/4/5 runtime start、沒有 paper order/cancel/replace、沒有 fill import、
+沒有 shadow fill generation、沒有 reconciliation writer、沒有 DB apply、沒有 evidence
+clock、沒有 scorecard writer、沒有 Linux runtime sync/restart，也沒有改動 Bybit live
+execution 行為。

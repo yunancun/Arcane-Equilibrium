@@ -79,6 +79,7 @@ def test_stock_etf_scorecard_status_uses_only_readonly_fixture_method() -> None:
     assert data["scorecard"]["scorecard_input_bundle_hash_present"] is False
     assert data["scorecard"]["formula_appendix_hash_present"] is False
     assert data["scorecard"]["statistical_preregistration_hash_present"] is False
+    assert data["scorecard"]["paper_shadow_reconciliation_hash_present"] is False
     assert data["scorecard"]["scorecard_manifest_hash_present"] is False
     assert data["scorecard"]["paper_shadow_window_trading_days"] == 0
     assert data["scorecard"]["independent_observation_count"] == 0
@@ -156,6 +157,7 @@ def test_stock_etf_scorecard_status_blocks_contract_violation() -> None:
         "scorecard_input_bundle_hash_present",
         "formula_appendix_hash_present",
         "statistical_preregistration_hash_present",
+        "paper_shadow_reconciliation_hash_present",
         "scorecard_manifest_hash_present",
         "verdict_rationale_hash_present",
         "concentration_label_passed",
@@ -206,6 +208,7 @@ def test_stock_etf_scorecard_status_blocks_contract_violation() -> None:
         "scorecard_scorecard_input_bundle_hash_present",
         "scorecard_formula_appendix_hash_present",
         "scorecard_statistical_preregistration_hash_present",
+        "scorecard_paper_shadow_reconciliation_hash_present",
         "scorecard_scorecard_manifest_hash_present",
         "scorecard_verdict_rationale_hash_present",
         "scorecard_concentration_label_passed",

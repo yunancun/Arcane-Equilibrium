@@ -45,6 +45,7 @@ pub struct StockEtfScorecardVerdictV1 {
     pub cost_model_version_hash: String,
     pub strategy_hypothesis_hash: String,
     pub reference_data_sources_hash: String,
+    pub paper_shadow_reconciliation_hash: String,
     pub scorecard_manifest_hash: String,
     pub verdict_rationale_hash: String,
     pub paper_shadow_window_trading_days: u32,
@@ -113,6 +114,7 @@ impl Default for StockEtfScorecardVerdictV1 {
             cost_model_version_hash: String::new(),
             strategy_hypothesis_hash: String::new(),
             reference_data_sources_hash: String::new(),
+            paper_shadow_reconciliation_hash: String::new(),
             scorecard_manifest_hash: String::new(),
             verdict_rationale_hash: String::new(),
             paper_shadow_window_trading_days: 0,
@@ -183,8 +185,9 @@ impl StockEtfScorecardVerdictV1 {
             cost_model_version_hash: "7".repeat(64),
             strategy_hypothesis_hash: "8".repeat(64),
             reference_data_sources_hash: "9".repeat(64),
-            scorecard_manifest_hash: "a".repeat(64),
-            verdict_rationale_hash: "b".repeat(64),
+            paper_shadow_reconciliation_hash: "a".repeat(64),
+            scorecard_manifest_hash: "b".repeat(64),
+            verdict_rationale_hash: "c".repeat(64),
             paper_shadow_window_trading_days: 42,
             min_window_trading_days: 30,
             independent_observation_count: 85,
@@ -212,9 +215,9 @@ impl StockEtfScorecardVerdictV1 {
             freshness_label_passed: true,
             survivorship_label_passed: true,
             execution_realism_label_passed: true,
-            qc_review_hash: "c".repeat(64),
-            mit_review_hash: "d".repeat(64),
-            qa_review_hash: "e".repeat(64),
+            qc_review_hash: "d".repeat(64),
+            mit_review_hash: "e".repeat(64),
+            qa_review_hash: "f".repeat(64),
             qc_review_passed: true,
             mit_review_passed: true,
             qa_review_passed: true,
@@ -312,6 +315,7 @@ pub enum StockEtfScorecardVerdictBlocker {
     CostModelVersionHashInvalid,
     StrategyHypothesisHashInvalid,
     ReferenceDataSourcesHashInvalid,
+    PaperShadowReconciliationHashInvalid,
     ScorecardManifestHashInvalid,
     VerdictRationaleHashInvalid,
     WindowThresholdMissing,
@@ -415,6 +419,9 @@ fn validate_hashes(
     }
     if !is_sha256_hex(&candidate.reference_data_sources_hash) {
         blockers.push(Blocker::ReferenceDataSourcesHashInvalid);
+    }
+    if !is_sha256_hex(&candidate.paper_shadow_reconciliation_hash) {
+        blockers.push(Blocker::PaperShadowReconciliationHashInvalid);
     }
     if !is_sha256_hex(&candidate.scorecard_manifest_hash) {
         blockers.push(Blocker::ScorecardManifestHashInvalid);

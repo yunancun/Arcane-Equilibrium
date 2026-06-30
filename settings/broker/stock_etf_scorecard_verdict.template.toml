@@ -18,6 +18,7 @@ benchmark_version_hash = ""
 cost_model_version_hash = ""
 strategy_hypothesis_hash = ""
 reference_data_sources_hash = ""
+paper_shadow_reconciliation_hash = ""
 scorecard_manifest_hash = ""
 verdict_rationale_hash = ""
 

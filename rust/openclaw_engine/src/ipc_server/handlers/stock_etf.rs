@@ -904,6 +904,10 @@ fn scorecard_status_summary(phase2: serde_json::Value) -> serde_json::Value {
         !verdict.reference_data_sources_hash.is_empty()
     );
     put_scorecard!(
+        "paper_shadow_reconciliation_hash_present",
+        !verdict.paper_shadow_reconciliation_hash.is_empty()
+    );
+    put_scorecard!(
         "scorecard_manifest_hash_present",
         !verdict.scorecard_manifest_hash.is_empty()
     );

@@ -2991,3 +2991,9 @@
 - Phase0 manifest source, repository manifest JSON, FastAPI Phase0 count, route fixtures/tests, settings README, and Phase0 packet spec now include 31 contracts.
 - Verification passed: shadow request acceptance `5 passed`; Phase0 manifest `6 passed`; FastAPI Phase0 route `4 passed`; FastAPI StockETF focused `14 passed`; engine shadow-signal IPC focused `2 passed`; openclaw_engine `stock_etf` filter `27 passed`; workspace `cargo check` PASS; scoped rustfmt check PASS; `git diff --check` PASS.
 - PM boundary unchanged: no IBKR contact, no secret access/creation, no connector runtime, no shadow collector, no shadow signal emission, no shadow fill generation, no Phase 1/2/3/4/5 runtime start, no fill import, no DB apply, no paper order/cancel/replace, no evidence clock, no scorecard writer, no Linux runtime sync/restart, no tiny-live/live authority, and no Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Scorecard Reconciliation Lineage Gate
+
+- PM added `paper_shadow_reconciliation_hash` to `stock_etf_scorecard_verdict_v1`, with a dedicated `PaperShadowReconciliationHashInvalid` blocker.
+- Rust `stock_etf.get_scorecard_status`, FastAPI normalization, fixtures/tests, and the Stock/ETF GUI now expose `paper_shadow_reconciliation_hash_present=false`; pre-gate truthy claims are blocked as contract violations.
+- Verification passed: scorecard verdict acceptance `8 passed`; focused FastAPI/static `15 passed`; full Stock/ETF FastAPI/static `90 passed`; engine `stock_etf` filter `27 passed`; full openclaw_types `35` unit/golden + `236` integration/acceptance + `0` doc-tests; workspace `cargo check` PASS; rustfmt and Node syntax checks PASS. This grants no IBKR contact, connector runtime, secret access/creation, fill import, shadow fill generation, reconciliation writer, scorecard writer, DB apply, evidence clock, paper order/cancel/replace, tiny-live, live, or Bybit behavior change.

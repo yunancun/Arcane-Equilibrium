@@ -1683,3 +1683,50 @@ PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 
 不做 DB migration/apply、不做 Postgres dry-run、不啟動 evidence clock、不啟動
 scorecard writer、不做 Linux runtime sync/restart、不啟動 paper-shadow launch、不授權
 tiny-live/live 或任何 Bybit behavior change。
+
+## 30. 2026-06-30 PM session source checkpoint：Scorecard Reconciliation Lineage Gate
+
+本 session 繼續 Phase 3 scorecard source-only hardening。前面已建立
+`stock_etf_paper_shadow_reconciliation_v1` 以及 display-only reconciliation panel；
+本 checkpoint 把該 reconciliation lineage 明確接入
+`stock_etf_scorecard_verdict_v1`，避免未來 scorecard verdict 在沒有 paper-vs-shadow
+reconciliation hash 的情況下被誤讀為完整。
+
+新增 checkpoint：
+
+- `StockEtfScorecardVerdictV1` 新增
+  `paper_shadow_reconciliation_hash`，並要求為 SHA-256 hex。
+- Validator 新增 `PaperShadowReconciliationHashInvalid` blocker；default verdict
+  會 fail closed，positive fixture 必須帶 reconciliation hash 才能通過。
+- Blocked template
+  `settings/broker/stock_etf_scorecard_verdict.template.toml` 同步新增欄位。
+- Rust IPC `stock_etf.get_scorecard_status` 現在回報
+  `paper_shadow_reconciliation_hash_present=false`，保持 blocked source fixture。
+- FastAPI scorecard normalizer、route tests、fixtures 與 GUI scorecard panel 同步顯示
+  reconciliation hash gate；pre-gate payload 若宣稱該 hash present 會被
+  `contract_violation_blocked` 擋下。
+- Phase0 packet spec 與 broker README 已更新，說明 scorecard verdict 必須攜帶
+  paper-shadow reconciliation hash。
+
+驗證：
+
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_scorecard_verdict_acceptance -- --nocapture`：
+  scorecard verdict acceptance `8 passed`。
+- `python3 -m pytest -q ...test_stock_etf_scorecard_status_routes.py ...test_stock_etf_routes.py`：
+  focused FastAPI/static `15 passed`。
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  full Stock/ETF FastAPI/static `90 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
+  Stock/ETF engine filter `27 passed`（既有 warnings only）。
+- Full `cargo test --manifest-path rust/Cargo.toml -p openclaw_types`：
+  `35` unit/golden + `236` integration/acceptance + `0` doc-tests。
+- `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
+- `rustfmt --edition 2021 --check ...`：PASS。
+- `node --check .../tab-stock-etf.js`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 connector runtime、
+不啟動 Phase 1/2/3/4/5 runtime、不送 paper order、不做 cancel/replace、不匯入 fill、
+不產生 shadow fill、不啟動 reconciliation writer、不啟動 scorecard writer、不做 DB
+migration/apply、不做 Postgres dry-run、不啟動 evidence clock、不做 Linux runtime
+sync/restart、不啟動 paper-shadow launch、不授權 tiny-live/live 或任何 Bybit behavior
+change。

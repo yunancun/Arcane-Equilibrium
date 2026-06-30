@@ -612,6 +612,7 @@ function scorecardFallback(reason) {
       cost_model_version_hash_present: false,
       strategy_hypothesis_hash_present: false,
       reference_data_sources_hash_present: false,
+      paper_shadow_reconciliation_hash_present: false,
       scorecard_manifest_hash_present: false,
       verdict_rationale_hash_present: false,
       paper_shadow_window_trading_days: 0,
@@ -1558,6 +1559,7 @@ function renderScorecardStatus(data) {
     kvRow('scorecard_input_bundle_hash_present', boolChip(scorecard.scorecard_input_bundle_hash_present, false)),
     kvRow('formula_appendix_hash_present', boolChip(scorecard.formula_appendix_hash_present, false)),
     kvRow('statistical_preregistration_hash_present', boolChip(scorecard.statistical_preregistration_hash_present, false)),
+    kvRow('paper_shadow_reconciliation_hash_present', boolChip(scorecard.paper_shadow_reconciliation_hash_present, false)),
     kvRow('scorecard_manifest_hash_present', boolChip(scorecard.scorecard_manifest_hash_present, false)),
     kvRow(
       'sample_window',

@@ -1201,14 +1201,14 @@ Downstream Phase 3 verdict validator:
 `openclaw_types::stock_etf_scorecard_verdict::StockEtfScorecardVerdictV1`
 requires exact `stock_etf_scorecard_verdict_v1` contract id, source version `1`,
 formula appendix hash, statistical preregistration hash, scorecard/input/DQ
-manifest hashes, pre-registered window and independent-observation thresholds,
-paper-vs-shadow divergence threshold, benchmark/cost lower-confidence-bound
-metrics, PSR/DSR-style thresholds, regime/breadth/freshness/survivorship/
-execution-realism labels, and QC/MIT/QA review hashes. It can seal positive
-or negative verdict labels, but it rejects IBKR contact, connector runtime,
-broker fill import, scorecard writer side effects, DB apply, evidence-clock
-start, secret serialization, tiny-live/live authority, and Bybit-live
-regression.
+manifest hashes, paper-shadow reconciliation hash, pre-registered window and
+independent-observation thresholds, paper-vs-shadow divergence threshold,
+benchmark/cost lower-confidence-bound metrics, PSR/DSR-style thresholds,
+regime/breadth/freshness/survivorship/execution-realism labels, and QC/MIT/QA
+review hashes. It can seal positive or negative verdict labels, but it rejects
+IBKR contact, connector runtime, broker fill import, scorecard writer side
+effects, DB apply, evidence-clock start, secret serialization, tiny-live/live
+authority, and Bybit-live regression.
 
 ## 21. `stock_etf_kill_switch_and_disable_cleanup_runbook_v1`
 
