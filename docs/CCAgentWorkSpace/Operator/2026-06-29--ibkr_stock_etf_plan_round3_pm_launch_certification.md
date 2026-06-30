@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 47 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 48 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -995,6 +995,28 @@ Verification 已過：
 
 - Stock/ETF route tests：`12 passed`
 - Full Stock/ETF FastAPI/static：`98 passed`
+- IBKR timeline + trace-title structure guard：`2 passed`
+- `git diff --check`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
+access/creation、沒有 connector runtime、沒有 read probe execution、沒有 paper
+order/cancel/replace、沒有 fill import、沒有 evidence writer、沒有 DB apply、沒有
+evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-06-30 Operator Update — FastAPI Route Cache Header Coverage Guard
+
+本 session 已加固 Stock/ETF FastAPI route cache/auth partition：
+
+- 新增 route-level guard，從 OpenAPI 自動取得所有 Stock/ETF GET route。
+- 另加入 root redirect `/api/v1/stock-etf`。
+- 每條 route 都必須帶 private/no-store cache headers，且 `Vary: Authorization`。
+- 這防止未來 display-only Stock/ETF endpoint 漏掉 cache partition，造成 stale /
+  cross-actor status 泄漏。
+
+Verification 已過：
+
+- Stock/ETF route tests：`13 passed`
+- Full Stock/ETF FastAPI/static：`99 passed`
 - IBKR timeline + trace-title structure guard：`2 passed`
 - `git diff --check`：PASS
 

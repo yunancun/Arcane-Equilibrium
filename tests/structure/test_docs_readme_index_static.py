@@ -86,6 +86,7 @@ def test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles() -> None
         "GUI Endpoint Template Consistency Guard",
         "GUI Static Endpoint Template Consistency Guard",
         "FastAPI Route Auth Coverage Guard",
+        "FastAPI Route Cache Header Coverage Guard",
     )
     plan_source = IBKR_STOCK_ETF_PLAN.read_text()
     operator_source = IBKR_STOCK_ETF_OPERATOR.read_text()

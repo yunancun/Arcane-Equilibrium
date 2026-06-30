@@ -132,6 +132,26 @@ def test_stock_etf_all_registered_get_routes_require_auth(
         assert resp.status_code == 401, f"{path} returned {resp.status_code}"
 
 
+def test_stock_etf_all_registered_get_routes_are_private_no_store(
+    client_fail_closed: TestClient,
+) -> None:
+    schema = client_fail_closed.get("/openapi.json").json()
+    stock_get_paths = {
+        path
+        for path, methods in schema["paths"].items()
+        if path.startswith("/api/v1/stock-etf") and set(methods) == {"get"}
+    }
+    stock_get_paths.add("/api/v1/stock-etf")
+
+    for path in sorted(stock_get_paths):
+        resp = client_fail_closed.get(path, follow_redirects=False)
+        assert "no-store" in resp.headers["cache-control"], path
+        assert "private" in resp.headers["cache-control"], path
+        assert resp.headers["pragma"] == "no-cache", path
+        assert resp.headers["expires"] == "0", path
+        assert resp.headers["vary"] == "Authorization", path
+
+
 def test_stock_etf_runtime_rejects_write_methods(client_fail_closed: TestClient) -> None:
     for path in (
         "/api/v1/stock-etf",
