@@ -2,6 +2,8 @@
 # This file is intentionally BLOCKED and does not authorize external contact.
 
 [gate]
+contract_id = ""
+source_version = 0
 status = "BLOCKED"
 adr = "ADR-0048"
 amd = "AMD-2026-06-29-01"

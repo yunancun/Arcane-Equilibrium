@@ -118,6 +118,8 @@ The first IBKR contact must wait for this immutable PASS artifact.
 
 Required fields:
 
+- `contract_id=phase2_ibkr_external_surface_gate_v1`
+- `source_version=1`
 - `status`: `PASS` | `BLOCKED`
 - `adr`: `ADR-0048`
 - `amd`: `AMD-2026-06-29-01`
@@ -134,6 +136,11 @@ Required fields:
 - `paper_attestation_contract_present`: true
 - `python_no_write_guard_present`: true
 - `ibkr_call_performed`: false for the gate itself
+
+Prerequisite policy sources must also carry exact contract identities and
+`source_version=1`: `ibkr_redaction_policy_v1`,
+`ibkr_rate_limit_policy_v1`, `ibkr_audit_event_policy_v1`,
+`ibkr_paper_attestation_v1`, and `ibkr_python_write_guard_policy_v1`.
 
 Any missing field blocks all IBKR contact.
 
@@ -331,6 +338,8 @@ contact, connector runtime, serialized secrets, and any Bybit live regression.
 
 Baseline:
 
+- `contract_id=ibkr_api_session_topology_v1`
+- `source_version=1`
 - `api_baseline = ib_gateway_tws_api`
 - runtime owner: Linux `trade-core`
 - host: `127.0.0.1` or Unix-local equivalent only
@@ -354,6 +363,8 @@ The topology contract must record:
 
 Required before any read-only account snapshot or paper lifecycle rehearsal:
 
+- `contract_id=ibkr_session_attestation_v1`
+- `source_version=1`
 - `status`: `PAPER_ATTESTED` | `READONLY_ATTESTED` | `BLOCKED`
 - `account_fingerprint`
 - `environment`: `paper` or `readonly`
@@ -379,6 +390,11 @@ Blockers:
 - stale attestation
 
 ## 8. `feature_flag_secret_auth_matrix_v1`
+
+Required fields:
+
+- `contract_id=feature_flag_secret_auth_matrix_v1`
+- `source_version=1`
 
 Flags:
 

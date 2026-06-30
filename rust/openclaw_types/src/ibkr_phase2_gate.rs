@@ -70,6 +70,8 @@ impl Default for IbkrPortPolicy {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IbkrExternalSurfaceGateV1 {
+    pub contract_id: String,
+    pub source_version: u32,
     pub status: IbkrExternalSurfaceGateStatus,
     pub adr: String,
     pub amd: String,
@@ -91,6 +93,8 @@ pub struct IbkrExternalSurfaceGateV1 {
 impl Default for IbkrExternalSurfaceGateV1 {
     fn default() -> Self {
         Self {
+            contract_id: String::new(),
+            source_version: 0,
             status: IbkrExternalSurfaceGateStatus::Blocked,
             adr: IBKR_PHASE2_ADR.to_string(),
             amd: IBKR_PHASE2_AMD.to_string(),
@@ -114,6 +118,8 @@ impl Default for IbkrExternalSurfaceGateV1 {
 impl IbkrExternalSurfaceGateV1 {
     pub fn passing_fixture() -> Self {
         Self {
+            contract_id: IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID.to_string(),
+            source_version: 1,
             status: IbkrExternalSurfaceGateStatus::Pass,
             live_ports_denied: true,
             secret_contract_present: true,
@@ -134,6 +140,12 @@ impl IbkrExternalSurfaceGateV1 {
 
         let mut blockers = Vec::new();
 
+        if self.contract_id != IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID {
+            blockers.push(Blocker::ContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
+        }
         if self.status != IbkrExternalSurfaceGateStatus::Pass {
             blockers.push(Blocker::StatusNotPass);
         }
@@ -198,6 +210,8 @@ impl IbkrExternalSurfaceGateV1 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrExternalSurfaceGateBlocker {
+    ContractIdMismatch,
+    SourceVersionMismatch,
     StatusNotPass,
     AdrMismatch,
     AmdMismatch,
@@ -412,6 +426,8 @@ impl Default for IbkrSecretSlotMode {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IbkrSessionAttestationV1 {
+    pub contract_id: String,
+    pub source_version: u32,
     pub status: IbkrSessionAttestationStatus,
     pub account_fingerprint: String,
     pub account_fingerprint_is_live: bool,
@@ -434,6 +450,8 @@ pub struct IbkrSessionAttestationV1 {
 impl Default for IbkrSessionAttestationV1 {
     fn default() -> Self {
         Self {
+            contract_id: String::new(),
+            source_version: 0,
             status: IbkrSessionAttestationStatus::Blocked,
             account_fingerprint: String::new(),
             account_fingerprint_is_live: false,
@@ -458,6 +476,8 @@ impl Default for IbkrSessionAttestationV1 {
 impl IbkrSessionAttestationV1 {
     pub fn paper_fixture() -> Self {
         Self {
+            contract_id: IBKR_SESSION_ATTESTATION_CONTRACT_ID.to_string(),
+            source_version: 1,
             status: IbkrSessionAttestationStatus::PaperAttested,
             account_fingerprint: "paper_account_fingerprint_hash".to_string(),
             account_fingerprint_is_live: false,
@@ -483,6 +503,12 @@ impl IbkrSessionAttestationV1 {
 
         let mut blockers = Vec::new();
 
+        if self.contract_id != IBKR_SESSION_ATTESTATION_CONTRACT_ID {
+            blockers.push(Blocker::ContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
+        }
         match self.status {
             IbkrSessionAttestationStatus::PaperAttested
             | IbkrSessionAttestationStatus::ReadonlyAttested => {}
@@ -563,6 +589,8 @@ impl IbkrSessionAttestationV1 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrSessionAttestationBlocker {
+    ContractIdMismatch,
+    SourceVersionMismatch,
     StatusBlocked,
     EnvironmentDenied,
     HostNotLoopback,

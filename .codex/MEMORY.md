@@ -572,3 +572,9 @@ Do not paste long reports or stable architecture into TODO.
 - Source checkpoint hardens paper lifecycle evidence: `BrokerLifecycleEventLogV1` now requires exact `lifecycle_contract_id == ibkr_paper_order_lifecycle_v1`, exact `event_log_contract_id == broker_lifecycle_event_log_v1`, and `source_version=1`.
 - The blocked lifecycle template exposes empty ids plus `source_version=0`; regression tests reject fixture-like lifecycle/event-log ids and wrong source versions while preserving state-transition and append-only evidence checks.
 - Verification passed: focused linked openclaw_types tests `32 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `189` integration/acceptance + `0` doc-tests. This grants no IBKR contact, connector runtime, IPC runtime, paper order, fill import, audit writer, DB apply, evidence clock, GUI authority, release, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Phase 2 Pre-Contact Identity Hardening
+
+- Source checkpoint hardens Phase 2 pre-contact contracts: external-surface gate, API session topology, session attestation, feature-flag/secret/auth matrix, and prerequisite policies now require exact named contract ids plus `source_version=1`.
+- Blocked external-surface/runtime/auth templates expose empty ids plus `source_version=0`; policy prerequisite templates carry exact policy ids/source versions but remain non-authorizing source prerequisites, not PASS artifacts.
+- Verification passed: focused Phase 2 openclaw_types tests `32 passed`; linked tests `62 passed`; full `cargo test --manifest-path rust/Cargo.toml -p openclaw_types` `35` unit/golden + `191` integration/acceptance + `0` doc-tests; `cargo check --manifest-path rust/Cargo.toml --workspace` passed. This grants no IBKR contact, secret-slot creation, connector runtime, paper order, fill import, audit writer, DB apply, evidence clock, GUI authority, release, tiny-live, live, or Bybit behavior change.

@@ -11,7 +11,9 @@ use openclaw_types::{
     IbkrPaperAttestationPolicyBlocker, IbkrPaperAttestationPolicyV1, IbkrPhase2PolicyBundleBlocker,
     IbkrPhase2PolicyBundleV1, IbkrPythonWriteGuardPolicyBlocker, IbkrPythonWriteGuardPolicyV1,
     IbkrRateLimitPolicyBlocker, IbkrRateLimitPolicyV1, IbkrRateLimitScope,
-    IbkrRedactionPolicyBlocker, IbkrRedactionPolicyV1,
+    IbkrRedactionPolicyBlocker, IbkrRedactionPolicyV1, IBKR_AUDIT_EVENT_POLICY_CONTRACT_ID,
+    IBKR_PAPER_ATTESTATION_CONTRACT_ID, IBKR_PYTHON_WRITE_GUARD_POLICY_CONTRACT_ID,
+    IBKR_RATE_LIMIT_POLICY_CONTRACT_ID, IBKR_REDACTION_POLICY_CONTRACT_ID,
 };
 
 #[test]
@@ -57,6 +59,31 @@ fn source_policy_bundle_satisfies_gate_prerequisites_without_contact() {
     assert!(flags.audit_event_policy_present);
     assert!(flags.paper_attestation_contract_present);
     assert!(flags.python_no_write_guard_present);
+    assert_eq!(
+        bundle.redaction.contract_id,
+        IBKR_REDACTION_POLICY_CONTRACT_ID
+    );
+    assert_eq!(bundle.redaction.source_version, 1);
+    assert_eq!(
+        bundle.rate_limit.contract_id,
+        IBKR_RATE_LIMIT_POLICY_CONTRACT_ID
+    );
+    assert_eq!(bundle.rate_limit.source_version, 1);
+    assert_eq!(
+        bundle.audit_event.contract_id,
+        IBKR_AUDIT_EVENT_POLICY_CONTRACT_ID
+    );
+    assert_eq!(bundle.audit_event.source_version, 1);
+    assert_eq!(
+        bundle.paper_attestation.contract_id,
+        IBKR_PAPER_ATTESTATION_CONTRACT_ID
+    );
+    assert_eq!(bundle.paper_attestation.source_version, 1);
+    assert_eq!(
+        bundle.python_write_guard.contract_id,
+        IBKR_PYTHON_WRITE_GUARD_POLICY_CONTRACT_ID
+    );
+    assert_eq!(bundle.python_write_guard.source_version, 1);
 
     let gate = IbkrExternalSurfaceGateV1 {
         redaction_suite_passed: flags.redaction_suite_passed,
@@ -67,6 +94,79 @@ fn source_policy_bundle_satisfies_gate_prerequisites_without_contact() {
         ..IbkrExternalSurfaceGateV1::passing_fixture()
     };
     assert!(gate.can_contact_ibkr());
+}
+
+#[test]
+fn source_policies_require_exact_contract_ids_and_versions() {
+    let redaction = IbkrRedactionPolicyV1 {
+        contract_id: "ibkr_redaction_policy_v1_fixture".to_string(),
+        source_version: 2,
+        ..IbkrRedactionPolicyV1::source_template()
+    };
+    let verdict = redaction.validate();
+    assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&IbkrRedactionPolicyBlocker::ContractIdMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrRedactionPolicyBlocker::SourceVersionMismatch));
+
+    let rate_limit = IbkrRateLimitPolicyV1 {
+        contract_id: "ibkr_rate_limit_policy_v1_fixture".to_string(),
+        source_version: 2,
+        ..IbkrRateLimitPolicyV1::source_template()
+    };
+    let verdict = rate_limit.validate();
+    assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&IbkrRateLimitPolicyBlocker::ContractIdMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrRateLimitPolicyBlocker::SourceVersionMismatch));
+
+    let audit_event = IbkrAuditEventPolicyV1 {
+        contract_id: "ibkr_audit_event_policy_v1_fixture".to_string(),
+        source_version: 2,
+        ..IbkrAuditEventPolicyV1::source_template()
+    };
+    let verdict = audit_event.validate();
+    assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&IbkrAuditEventPolicyBlocker::ContractIdMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrAuditEventPolicyBlocker::SourceVersionMismatch));
+
+    let paper_attestation = IbkrPaperAttestationPolicyV1 {
+        contract_id: "ibkr_paper_attestation_v1_fixture".to_string(),
+        source_version: 2,
+        ..IbkrPaperAttestationPolicyV1::source_template()
+    };
+    let verdict = paper_attestation.validate();
+    assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPaperAttestationPolicyBlocker::ContractIdMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPaperAttestationPolicyBlocker::SourceVersionMismatch));
+
+    let python_write_guard = IbkrPythonWriteGuardPolicyV1 {
+        contract_id: "ibkr_python_write_guard_policy_v1_fixture".to_string(),
+        source_version: 2,
+        ..IbkrPythonWriteGuardPolicyV1::source_template()
+    };
+    let verdict = python_write_guard.validate();
+    assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPythonWriteGuardPolicyBlocker::ContractIdMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPythonWriteGuardPolicyBlocker::SourceVersionMismatch));
 }
 
 #[test]
@@ -307,6 +407,11 @@ fn source_policy_template_is_parseable_and_secret_free() {
     let parsed: toml::Value = toml::from_str(&raw).expect("policy toml parses");
 
     assert_eq!(
+        parsed["redaction"]["contract_id"].as_str(),
+        Some(IBKR_REDACTION_POLICY_CONTRACT_ID)
+    );
+    assert_eq!(parsed["redaction"]["source_version"].as_integer(), Some(1));
+    assert_eq!(
         parsed["redaction"]["raw_payload_hash_required"].as_bool(),
         Some(true)
     );
@@ -315,16 +420,45 @@ fn source_policy_template_is_parseable_and_secret_free() {
         Some(false)
     );
     assert_eq!(
+        parsed["rate_limit"]["contract_id"].as_str(),
+        Some(IBKR_RATE_LIMIT_POLICY_CONTRACT_ID)
+    );
+    assert_eq!(parsed["rate_limit"]["source_version"].as_integer(), Some(1));
+    assert_eq!(
         parsed["rate_limit"]["scope"].as_str(),
         Some("global_and_per_action")
+    );
+    assert_eq!(
+        parsed["audit_event"]["contract_id"].as_str(),
+        Some(IBKR_AUDIT_EVENT_POLICY_CONTRACT_ID)
+    );
+    assert_eq!(
+        parsed["audit_event"]["source_version"].as_integer(),
+        Some(1)
     );
     assert_eq!(
         parsed["audit_event"]["account_fingerprint_hash_only"].as_bool(),
         Some(true)
     );
     assert_eq!(
+        parsed["paper_attestation"]["contract_id"].as_str(),
+        Some(IBKR_PAPER_ATTESTATION_CONTRACT_ID)
+    );
+    assert_eq!(
+        parsed["paper_attestation"]["source_version"].as_integer(),
+        Some(1)
+    );
+    assert_eq!(
         parsed["paper_attestation"]["rust_lane_scoped_ipc_required"].as_bool(),
         Some(true)
+    );
+    assert_eq!(
+        parsed["python_write_guard"]["contract_id"].as_str(),
+        Some(IBKR_PYTHON_WRITE_GUARD_POLICY_CONTRACT_ID)
+    );
+    assert_eq!(
+        parsed["python_write_guard"]["source_version"].as_integer(),
+        Some(1)
     );
     assert_eq!(
         parsed["python_write_guard"]["bybit_paths_unmodified"].as_bool(),

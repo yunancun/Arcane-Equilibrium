@@ -167,6 +167,8 @@ impl Default for IbkrGatewayProcessMode {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IbkrApiSessionTopologyV1 {
+    pub contract_id: String,
+    pub source_version: u32,
     pub topology_present: bool,
     pub api_baseline: String,
     pub runtime_owner: String,
@@ -186,6 +188,8 @@ pub struct IbkrApiSessionTopologyV1 {
 impl Default for IbkrApiSessionTopologyV1 {
     fn default() -> Self {
         Self {
+            contract_id: String::new(),
+            source_version: 0,
             topology_present: false,
             api_baseline: String::new(),
             runtime_owner: String::new(),
@@ -207,6 +211,8 @@ impl Default for IbkrApiSessionTopologyV1 {
 impl IbkrApiSessionTopologyV1 {
     pub fn source_template() -> Self {
         Self {
+            contract_id: IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID.to_string(),
+            source_version: 1,
             topology_present: true,
             api_baseline: "ib_gateway_tws_api".to_string(),
             runtime_owner: "trade-core".to_string(),
@@ -228,6 +234,12 @@ impl IbkrApiSessionTopologyV1 {
         use IbkrApiSessionTopologyBlocker as Blocker;
 
         let mut blockers = Vec::new();
+        if self.contract_id != IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID {
+            blockers.push(Blocker::ContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
+        }
         if !self.topology_present {
             blockers.push(Blocker::TopologyMissing);
         }
@@ -290,6 +302,8 @@ pub struct IbkrApiSessionTopologyVerdict {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrApiSessionTopologyBlocker {
+    ContractIdMismatch,
+    SourceVersionMismatch,
     TopologyMissing,
     ApiBaselineMismatch,
     RuntimeOwnerMismatch,
