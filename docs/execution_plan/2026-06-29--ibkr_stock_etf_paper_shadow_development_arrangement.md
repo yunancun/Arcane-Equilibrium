@@ -1731,6 +1731,43 @@ migration/apply、不做 Postgres dry-run、不啟動 evidence clock、不做 Li
 sync/restart、不啟動 paper-shadow launch、不授權 tiny-live/live 或任何 Bybit behavior
 change。
 
+## 33. 2026-06-30 PM session source checkpoint：IBKR Read-Only Connector Skeleton Boundary
+
+本 checkpoint 建立計劃第 3.3 節指定的隔離 Python package：
+`program_code/broker_connectors/ibkr_connector/`。這不是 runtime connector，
+不導入 `ibapi` / `ib_insync`，不開 network，不讀 secret，不提供任何 broker write
+method；用途是把未來 IBKR read-only / paper surface 的 Python 邊界先固定在
+Bybit 目錄外，且讓 no-write guard 對實際目錄生效。
+
+新增 checkpoint：
+
+- 新增 `program_code/broker_connectors/ibkr_connector` package 與 README。
+- `models.py` 定義 non-secret loopback endpoint descriptor 與 blocked
+  read-only surface status。
+- `readonly_client.py` 只提供 blocked readiness / account snapshot / market data /
+  contract details preview，所有 payload 都保持 `network_contact_performed=false`、
+  `secret_content_loaded=false`、`order_write_method_present=false`。
+- `paper_client.py` 只提供 paper lifecycle / fill-import readiness previews，
+  明確 `python_broker_write_authority=false`。
+- `fixtures/readonly.py` 提供 secret-free blocked fixture。
+- 新增 `test_stock_etf_ibkr_connector_skeleton.py`，並由既有
+  `test_stock_etf_python_no_write_static_guard.py` 自動掃描新 connector package。
+- Phase0 packet spec 已更新，說明 no-write guard 現在掃描實際 IBKR skeleton。
+
+驗證：
+
+- `python3 -m py_compile program_code/broker_connectors/... test_stock_etf_ibkr_connector_skeleton.py`：PASS。
+- `python3 -m pytest -q ...test_stock_etf_ibkr_connector_skeleton.py ...test_stock_etf_python_no_write_static_guard.py`：
+  connector skeleton + no-write guard `7 passed`。
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  full Stock/ETF FastAPI/static `94 passed`。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不啟動 Phase 1/2/3/4/5 runtime、不送 paper
+order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence clock、
+不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何
+Bybit behavior change。
+
 ## 32. 2026-06-30 PM session source checkpoint：Tiny-Live Eligibility Lineage Gate
 
 本 checkpoint harden Phase 5 之後「是否可以拿去開 ADR 討論 tiny-live」的

@@ -464,13 +464,14 @@ Rules:
 
 Static Python guard:
 `program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_python_no_write_static_guard.py`.
-The guard parses Stock/ETF/IBKR Python surfaces and future
-`program_code/broker_connectors/ibkr_connector/` files with `ast`, while
+The guard parses Stock/ETF/IBKR Python surfaces and the
+`program_code/broker_connectors/ibkr_connector/` skeleton with `ast`, while
 intentionally excluding existing Bybit modules. It rejects direct Python broker
 write methods or calls such as `place_order`, `cancel_order`, `replace_order`,
 forbidden Stock/ETF paper-order IPC method strings, direct `ibapi` / `ib_insync`
 imports, and non-GET Stock/ETF/IBKR routes until a later Rust-authority contract
-revision explicitly changes this surface.
+revision explicitly changes this surface. The current connector skeleton is
+source-only and exposes no SDK import, socket, secret, order, or DB-write path.
 
 ## 9. `lane_scoped_ipc_v1`
 
