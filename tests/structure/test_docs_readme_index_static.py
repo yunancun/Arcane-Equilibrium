@@ -95,6 +95,7 @@ def test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles() -> None
         "Rust Status IPC Untrusted Params Guard",
         "Rust Dispatch Registry Routing Guard",
         "GUI Data/Policy Fallback Split Guard",
+        "Rust IPC Test Split Guard",
     )
     plan_source = IBKR_STOCK_ETF_PLAN.read_text()
     operator_source = IBKR_STOCK_ETF_OPERATOR.read_text()

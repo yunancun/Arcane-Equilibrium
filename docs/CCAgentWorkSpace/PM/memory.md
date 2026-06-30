@@ -3080,7 +3080,7 @@
 
 ## 2026-06-30 IBKR Stock/ETF Plan Timeline Checkpoint Guard
 
-- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 56, aligned to the PM memory / Operator source timeline.
+- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 57, aligned to the PM memory / Operator source timeline.
 - Added a structure test that reads the main plan Markdown and fails if PM session checkpoint numbers become duplicated, skipped, or out of order.
 - Verification passed: focused IBKR timeline structure test `1 passed`; section-body compare against `HEAD` PASS; `git diff --check` PASS. The full structure test file still has pre-existing docs README index drift failures unrelated to this guard. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
 
@@ -3167,6 +3167,12 @@
 - PM split the large Data Foundation / Policy fallback payloads out of the main Stock/ETF GUI bundle into `tab-stock-etf-data-policy.js`, reducing `tab-stock-etf.js` from `1976` to `1805` lines and keeping every Stock/ETF GUI bundle file below the 2000-line governance cap.
 - The static no-write guard now scans the new data/policy JS file and includes a line-cap regression for the Stock/ETF GUI bundle; the HTML loads the split before the main loader so existing display-only rendering semantics stay unchanged.
 - Verification passed: Stock/ETF JS `node --check`; Python no-write/static guard `10 passed`; full Stock/ETF FastAPI/static `105 passed`; focused IBKR timeline + trace-title structure tests `2 passed`; `git diff --check` PASS. This grants no new endpoint, IBKR contact, SDK import, socket/HTTP, connector runtime, secret access, paper order, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Rust IPC Test Split Guard
+
+- PM split the tail Stock/ETF Rust IPC status fixture tests into `rust/openclaw_engine/src/ipc_server/tests/stock_etf/status_fixtures.rs`, reducing the parent `stock_etf.rs` from `2532` lines to `1852` lines while keeping the child at `685` lines.
+- Added a structure guard requiring the Stock/ETF Rust IPC parent and child fixture test files to stay below the 2000-line governance cap, with source-only checks for the moved status fixture methods and forbidden network/IBKR SDK tokens.
+- Verification passed: `rustfmt`; engine `stock_etf` filter `31 passed`; Rust IPC split static guard `2 passed`; full Stock/ETF FastAPI/static `105 passed`; focused IBKR timeline + trace-title structure tests `2 passed`; `git diff --check` PASS. This grants no new endpoint, IBKR contact, SDK import, socket/HTTP, connector runtime, secret access, read probe execution, paper order, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
 
 ## 2026-06-30 Standing Demo Authorization Refresh Guardrail
 

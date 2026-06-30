@@ -2111,7 +2111,7 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 
 新增 checkpoint：
 
-- 主計畫 PM session checkpoint 現在從 14 到 56 連續遞增，無重複編號。
+- 主計畫 PM session checkpoint 現在從 14 到 57 連續遞增，無重複編號。
 - 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
   lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
   connector skeleton / readonly-probe / broker read gate / policy display / operation
@@ -2596,6 +2596,43 @@ load flow。
 - `node --check` on Stock/ETF JS bundle：PASS。
 - `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_python_no_write_static_guard.py`：
   `10 passed`。
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  `105 passed`。
+- `python3 -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
+  `2 passed`。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 57. 2026-06-30 PM session source checkpoint：Rust IPC Test Split Guard
+
+本 checkpoint 降低 Stock/ETF Rust IPC 測試檔的結構風險。`stock_etf.rs` 已超過
+2000 行 governance cap；這次只拆測試模組，把尾端 status fixture regressions 放到
+子模組，不改 handler、不改 dispatch、不新增 IPC method、不啟動 runtime。
+
+已完成：
+
+- 新增 `rust/openclaw_engine/src/ipc_server/tests/stock_etf/status_fixtures.rs`。
+- 搬移 Account/Reconciliation/Scorecard/Launch/Release/Disable status fixture tests。
+- 父檔 `stock_etf.rs` 從 `2532` 行降到 `1852` 行；子檔為 `685` 行。
+- 父檔只新增 `mod status_fixtures;`，保留既有 helper 與 source-only fixture
+  assertions。
+- 新增 `tests/structure/test_stock_etf_ipc_tests_split_static.py`，要求父檔與子檔都不超過
+  2000 行，並確認 moved fixture 不引入 IBKR SDK 或 socket/HTTP client token。
+- 本 checkpoint 不改 runtime behavior、不改 Bybit path、不改 IBKR boundary，只做
+  Rust test structure hygiene。
+
+驗證：
+
+- `rustfmt --edition 2021 rust/openclaw_engine/src/ipc_server/tests/stock_etf.rs rust/openclaw_engine/src/ipc_server/tests/stock_etf/status_fixtures.rs`：PASS。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
+  `31 passed`。
+- `python3 -m pytest -q tests/structure/test_stock_etf_ipc_tests_split_static.py`：
+  `2 passed`。
 - `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
   `105 passed`。
 - `python3 -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
