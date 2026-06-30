@@ -4,6 +4,7 @@
 # secrets, route orders, or start an evidence clock.
 
 contract_id = ""
+source_version = 0
 source_sql_path = "docs/execution_plan/specs/2026-06-29--stock_etf_db_evidence_ddl_v1.source_only.sql"
 source_sql_sha256 = ""
 source_only = false

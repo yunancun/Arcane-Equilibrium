@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use openclaw_types::{
     StockEtfDbEvidenceDdlBlocker, StockEtfDbEvidenceDdlContractV1,
-    STOCK_ETF_DB_EVIDENCE_DDL_SOURCE_PATH,
+    STOCK_ETF_DB_EVIDENCE_CONTRACT_ID, STOCK_ETF_DB_EVIDENCE_DDL_SOURCE_PATH,
 };
 
 #[test]
@@ -19,6 +19,10 @@ fn default_db_evidence_ddl_contract_blocks_migration_authority() {
     assert!(has(
         &verdict.blockers,
         StockEtfDbEvidenceDdlBlocker::ContractIdMismatch
+    ));
+    assert!(has(
+        &verdict.blockers,
+        StockEtfDbEvidenceDdlBlocker::SourceVersionMismatch
     ));
     assert!(has(
         &verdict.blockers,
@@ -44,6 +48,8 @@ fn accepted_fixture_is_source_only_and_has_expected_schema_surface() {
         "unexpected blockers: {:?}",
         verdict.blockers
     );
+    assert_eq!(contract.contract_id, STOCK_ETF_DB_EVIDENCE_CONTRACT_ID);
+    assert_eq!(contract.source_version, 1);
     assert_eq!(
         contract.source_sql_path,
         STOCK_ETF_DB_EVIDENCE_DDL_SOURCE_PATH
@@ -67,6 +73,24 @@ fn accepted_fixture_is_source_only_and_has_expected_schema_surface() {
     assert!(contract
         .required_tables
         .contains(&"audit.asset_lane_events".to_string()));
+}
+
+#[test]
+fn db_evidence_ddl_requires_exact_contract_id_and_source_version() {
+    let mut contract = StockEtfDbEvidenceDdlContractV1::accepted_fixture();
+    contract.contract_id = "stock_etf_db_evidence_ddl_v1_fixture".to_string();
+    contract.source_version = 2;
+
+    let blockers = contract.validate().blockers;
+
+    assert!(has(
+        &blockers,
+        StockEtfDbEvidenceDdlBlocker::ContractIdMismatch
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfDbEvidenceDdlBlocker::SourceVersionMismatch
+    ));
 }
 
 #[test]
@@ -244,6 +268,8 @@ fn blocked_template_is_parseable_and_secret_free() {
     let parsed: StockEtfDbEvidenceDdlContractV1 =
         toml::from_str(&raw).expect("DB evidence DDL template parses");
 
+    assert_eq!(parsed.contract_id, "");
+    assert_eq!(parsed.source_version, 0);
     assert_eq!(
         parsed.source_sql_path,
         STOCK_ETF_DB_EVIDENCE_DDL_SOURCE_PATH

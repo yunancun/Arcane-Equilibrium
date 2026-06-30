@@ -41,6 +41,7 @@ const REQUIRED_NATURAL_KEYS: &[&str] = &[
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StockEtfDbEvidenceDdlContractV1 {
     pub contract_id: String,
+    pub source_version: u32,
     pub source_sql_path: String,
     pub source_sql_sha256: String,
     pub source_only: bool,
@@ -76,6 +77,7 @@ impl Default for StockEtfDbEvidenceDdlContractV1 {
     fn default() -> Self {
         Self {
             contract_id: String::new(),
+            source_version: 0,
             source_sql_path: STOCK_ETF_DB_EVIDENCE_DDL_SOURCE_PATH.to_string(),
             source_sql_sha256: String::new(),
             source_only: false,
@@ -113,6 +115,7 @@ impl StockEtfDbEvidenceDdlContractV1 {
     pub fn accepted_fixture() -> Self {
         Self {
             contract_id: STOCK_ETF_DB_EVIDENCE_CONTRACT_ID.to_string(),
+            source_version: 1,
             source_sql_path: STOCK_ETF_DB_EVIDENCE_DDL_SOURCE_PATH.to_string(),
             source_sql_sha256: "1".repeat(64),
             source_only: true,
@@ -160,6 +163,9 @@ impl StockEtfDbEvidenceDdlContractV1 {
 
         if self.contract_id != STOCK_ETF_DB_EVIDENCE_CONTRACT_ID {
             blockers.push(Blocker::ContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
         }
         if self.source_sql_path != STOCK_ETF_DB_EVIDENCE_DDL_SOURCE_PATH {
             blockers.push(Blocker::SourceSqlPathMismatch);
@@ -278,6 +284,7 @@ impl<B> StockEtfDbEvidenceDdlVerdict<B> {
 #[serde(rename_all = "snake_case")]
 pub enum StockEtfDbEvidenceDdlBlocker {
     ContractIdMismatch,
+    SourceVersionMismatch,
     SourceSqlPathMismatch,
     SourceSqlHashInvalid,
     SourceOnlyFlagMissing,

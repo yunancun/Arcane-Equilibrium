@@ -2690,3 +2690,9 @@
 - PM hardened `stock_etf_risk_policy_v1` so risk-policy artifacts require exact `contract_id == stock_etf_risk_policy_v1` plus `source_version=1`; dormant source-config conversion emits source version 1 while preserving config version.
 - The Phase 0 manifest validator now consumes the shared risk policy constant; the blocked template exposes `source_version=0`; regression tests reject fixture-like risk-policy ids and wrong source versions.
 - Verification passed: focused linked openclaw_types tests `31 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `184` integration/acceptance + `0` doc-tests. This grants no IBKR contact, connector runtime, IPC runtime, paper order, market-data collection, evidence clock, scorecard writer, DB apply, GUI authority, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF DB Evidence DDL Hardening
+
+- PM hardened `stock_etf_db_evidence_ddl_v1` so DB evidence DDL artifacts require exact `contract_id == stock_etf_db_evidence_ddl_v1` plus `source_version=1`.
+- The Phase 0 manifest validator now consumes the shared DB evidence DDL contract constant; the blocked template exposes `source_version=0`; regression tests reject fixture-like DB DDL ids and wrong source versions.
+- Verification passed: focused linked openclaw_types tests `14 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `185` integration/acceptance + `0` doc-tests. This grants no DB apply, PG write, sqlx migration registration, migration authorization, IBKR contact, connector runtime, evidence clock, scorecard writer, GUI authority, paper order, tiny-live, live, or Bybit behavior change.
