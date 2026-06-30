@@ -25,6 +25,7 @@ stock_etf_router = APIRouter(
 )
 
 _IPC_CLIENT: EngineIPCClient | None = None
+_LANE_STATUS_METHOD = "stock_etf.get_lane_status"
 _READINESS_METHOD = "stock_etf.get_readiness"
 _API_ALLOWLIST_CONTRACT_ID = "non_bybit_api_allowlist_v1"
 _API_ALLOWLIST_SOURCE_VERSION = 1
@@ -140,6 +141,17 @@ def _as_bool(value: Any) -> bool:
 
 def _as_int(value: Any) -> int:
     return value if type(value) is int else 0
+
+
+def _normalize_feature_flags(value: Any) -> dict[str, Any]:
+    source = _as_dict(value)
+    return {
+        "stock_etf_lane_enabled": _as_bool(source.get("stock_etf_lane_enabled")),
+        "ibkr_readonly_enabled": _as_bool(source.get("ibkr_readonly_enabled")),
+        "ibkr_paper_enabled": _as_bool(source.get("ibkr_paper_enabled")),
+        "asset_lane_default": _as_str(source.get("asset_lane_default"), "crypto_perp"),
+        "stock_etf_shadow_only": source.get("stock_etf_shadow_only") is not False,
+    }
 
 
 def _normalize_api_allowlist(value: Any) -> dict[str, Any]:
@@ -261,6 +273,84 @@ def _normalize_readiness(raw: Any, reason: str | None) -> dict[str, Any]:
     }
 
 
+def _normalize_lane_status(raw: Any, reason: str | None) -> dict[str, Any]:
+    source = _as_dict(raw)
+    phase2 = _as_dict(source.get("phase2")) or _phase2_fail_closed()
+    external_surface_gate = _as_dict(phase2.get("external_surface_gate"))
+    api_allowlist = _normalize_api_allowlist(phase2.get("api_allowlist"))
+    flags = _normalize_feature_flags(source.get("flags"))
+
+    contract_violations = [
+        field for field in _SAFETY_FALSE_FIELDS if _as_bool(source.get(field))
+    ]
+    if _as_str(source.get("asset_lane"), "stock_etf_cash") != "stock_etf_cash":
+        contract_violations.append("asset_lane_mismatch")
+    if _as_str(source.get("broker"), "ibkr") != "ibkr":
+        contract_violations.append("broker_mismatch")
+    if reason is None:
+        contract_violations.extend(_api_allowlist_contract_violations(api_allowlist))
+
+    blockers = [
+        str(item) for item in _as_list(external_surface_gate.get("blockers"))
+    ]
+    if reason is not None and reason not in blockers:
+        blockers.append(reason)
+
+    status_state = "phase2_blocked"
+    if contract_violations:
+        status_state = "contract_violation_blocked"
+    elif reason is not None:
+        status_state = "degraded"
+
+    first_contact_allowed = _as_bool(phase2.get("first_ibkr_contact_allowed"))
+    immutable_artifact = _as_bool(phase2.get("immutable_pass_artifact_present"))
+    connector_enabled = _as_bool(phase2.get("connector_enabled"))
+
+    return {
+        "api_version": "v1",
+        "asset_lane": "stock_etf_cash",
+        "broker": "ibkr",
+        "default_asset_lane": _as_str(
+            source.get("default_asset_lane"), flags["asset_lane_default"]
+        ),
+        "gui_authority": "display_only",
+        "lane_status_state": status_state,
+        "flags": flags,
+        "phase2": phase2,
+        "api_allowlist": api_allowlist,
+        "phase2_gate_status": _as_str(external_surface_gate.get("status"), "BLOCKED"),
+        "phase2_gate_blockers": blockers,
+        "first_ibkr_contact_allowed": first_contact_allowed,
+        "immutable_pass_artifact_present": immutable_artifact,
+        "connector_enabled": connector_enabled,
+        "ibkr_live_enabled": False,
+        "stock_live_disabled": True,
+        "paper_order_entry_visible": False,
+        "allowed_gui_actions": ["refresh_lane_status", "refresh_readiness"],
+        "denied_operations": list(_DENIED_OPERATIONS),
+        "ibkr_call_performed": _as_bool(source.get("ibkr_call_performed")),
+        "secret_slot_touched": _as_bool(source.get("secret_slot_touched")),
+        "order_routed": _as_bool(source.get("order_routed")),
+        "bybit_ipc_reused": _as_bool(source.get("bybit_ipc_reused")),
+        "contract_violations": contract_violations,
+        "degraded": reason is not None or bool(contract_violations),
+        "reason": reason,
+    }
+
+
+async def _query_stock_etf_lane_status(
+    ipc: EngineIPCClient | None,
+) -> tuple[dict[str, Any], str | None]:
+    if ipc is None:
+        return ({}, "ipc_unavailable")
+    try:
+        raw = await ipc.call(_LANE_STATUS_METHOD, params={})
+    except Exception as exc:
+        logger.warning("stock_etf: %s failed: %s", _LANE_STATUS_METHOD, exc)
+        return ({}, f"ipc_error:{type(exc).__name__}")
+    return (raw if isinstance(raw, dict) else {}, None)
+
+
 async def _query_stock_etf_readiness(
     ipc: EngineIPCClient | None,
 ) -> tuple[dict[str, Any], str | None]:
@@ -272,6 +362,24 @@ async def _query_stock_etf_readiness(
         logger.warning("stock_etf: %s failed: %s", _READINESS_METHOD, exc)
         return ({}, f"ipc_error:{type(exc).__name__}")
     return (raw if isinstance(raw, dict) else {}, None)
+
+
+@stock_etf_router.get("/lane-status")
+async def get_stock_etf_lane_status(
+    response: Response,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    """Read-only Stock/ETF lane-status surface for the GUI."""
+    del actor
+    _apply_no_store_headers(response)
+    ipc = await _get_ipc()
+    raw, reason = await _query_stock_etf_lane_status(ipc)
+    return {
+        "ok": True,
+        "data": _normalize_lane_status(raw, reason),
+        "is_simulated": False,
+        "data_category": "stock_etf_lane_status",
+    }
 
 
 @stock_etf_router.get("/readiness")
