@@ -2028,6 +2028,41 @@ runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 D
 evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
 sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
 
+## 39. 2026-06-30 PM session source checkpoint：Read-Only Probe Request Operation Binding
+
+本 checkpoint 修正 `stock_etf.preview_readonly_probe` 的 source-only IPC semantics。
+前面已經把 readonly-probe request 接到 IPC 並顯示在 readiness/policy；這次確保
+top-level broker decision 的 operation 跟 valid request envelope 一致，而不是所有
+readonly probe 都固定顯示為 method fallback `health_read`。
+
+新增 checkpoint：
+
+- `stock_etf.preview_readonly_probe` 會先嘗試解析
+  `StockEtfIbkrReadonlyProbeRequestV1`。
+- 只有 `validate().accepted=true` 的 readonly-probe request 才能派生 top-level
+  `BrokerOperation`。
+- Invalid 或 parse-failed payload 不被信任；仍 fallback 到 method-level
+  `HealthRead` fixture boundary。
+- 新增 market-data readonly-probe IPC test：valid `market_data_snapshot` request 會讓
+  top-level `decision.operation=market_data_read`，同時 `allowed=false` 並且沒有任何
+  contact/routing side effect。
+
+驗證：
+
+- `rustfmt --edition 2021 rust/openclaw_engine/src/ipc_server/handlers/stock_etf.rs rust/openclaw_engine/src/ipc_server/tests/stock_etf.rs`：PASS。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf_preview_readonly_probe -- --nocapture`：
+  readonly-probe IPC focused `3 passed`（既有 warnings only）。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
+  Stock/ETF engine filter `30 passed`（既有 warnings only）。
+- `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
 ## 38. 2026-06-30 PM session source/status/display checkpoint：Policy Status Read-Row Gate Display
 
 本 checkpoint 把 checkpoint 37 的 broker read-row gate hardening 顯示到

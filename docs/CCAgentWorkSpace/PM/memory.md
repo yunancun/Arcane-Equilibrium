@@ -3071,3 +3071,9 @@
 - `broker_capability_registry` status now includes the lane-scoped IPC contract id, readonly-probe request contract id, and two booleans showing whether read rows require both gates.
 - Accepted broker capability registry payloads that omit/mismatch those gate claims now fail closed as `contract_violation_blocked` with explicit read-row gate violations.
 - Verification passed: Python compile PASS; Node syntax PASS; focused policy/static `15 passed`; focused engine policy-status `1 passed`; full Stock/ETF FastAPI/static `94 passed`; engine `stock_etf` filter `29 passed`; workspace `cargo check` PASS; `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Read-Only Probe Request Operation Binding
+
+- PM corrected `stock_etf.preview_readonly_probe` source semantics so accepted readonly-probe envelopes drive the top-level broker decision operation; market-data/account/contract-details probes no longer inherit the method fallback `health_read` decision operation.
+- Invalid or parse-failed readonly-probe payloads are not trusted for operation selection and remain on the method-level fail-closed fixture boundary.
+- Verification passed: `rustfmt`; readonly-probe IPC focused `3 passed`; engine `stock_etf` filter `30 passed`; workspace `cargo check` PASS; `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.

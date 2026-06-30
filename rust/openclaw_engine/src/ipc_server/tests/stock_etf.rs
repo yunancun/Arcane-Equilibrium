@@ -6,6 +6,7 @@ use super::{
     empty_h_state_cache_slot, empty_teacher_slot, make_test_config, make_test_data_dir,
 };
 use openclaw_types::{
+    BrokerOperation, NonBybitApiAction, StockEtfIbkrReadonlyProbeKind,
     StockEtfIbkrReadonlyProbeRequestV1, StockEtfPaperFillImportRequestV1,
     StockEtfPaperOrderRequestEnvelopeV1, StockEtfShadowSignalRequestV1,
 };
@@ -545,6 +546,61 @@ async fn stock_etf_preview_readonly_probe_validates_request_without_runtime_auth
         result["phase2"]["external_surface_gate"]["ibkr_contact_allowed"],
         false
     );
+}
+
+#[tokio::test]
+async fn stock_etf_preview_readonly_probe_decision_uses_request_operation() {
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let mut request = StockEtfIbkrReadonlyProbeRequestV1::accepted_fixture();
+    request.probe_kind = StockEtfIbkrReadonlyProbeKind::MarketDataSnapshot;
+    request.api_action = NonBybitApiAction::MarketDataSnapshotRead;
+    request.operation = BrokerOperation::MarketDataRead;
+    let params = serde_json::to_string(&request).expect("readonly probe request json");
+    let req = format!(
+        r#"{{"jsonrpc":"2.0","method":"stock_etf.preview_readonly_probe","params":{params},"id":48019}}"#
+    );
+    let resp = dispatch_request(
+        &req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
+    )
+    .await;
+
+    assert!(resp.error.is_none());
+    let result = resp.result.expect("stock_etf result");
+    assert_eq!(result["allowed"], false);
+    assert_eq!(result["decision"]["operation"], "market_data_read");
+    assert_eq!(
+        result["readonly_probe_request"]["probe_kind"],
+        "market_data_snapshot"
+    );
+    assert_eq!(
+        result["readonly_probe_request"]["api_action"],
+        "market_data_snapshot_read"
+    );
+    assert_eq!(
+        result["readonly_probe_request"]["operation"],
+        "market_data_read"
+    );
+    assert_eq!(result["readonly_probe_request_accepted_for_ipc"], true);
+    assert_eq!(result["ibkr_call_performed"], false);
+    assert_eq!(result["order_routed"], false);
 }
 
 #[tokio::test]
