@@ -15,6 +15,7 @@ import hashlib
 import inspect
 import json
 import math
+import os
 import sys
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping
@@ -301,17 +302,36 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout-seconds", type=float, default=5.0)
     parser.add_argument("--source-head")
     parser.add_argument("--runtime-head")
+    parser.add_argument(
+        "--ipc-secret-file",
+        type=Path,
+        help=(
+            "Path to the runtime IPC HMAC secret file. The helper passes only "
+            "the path through OPENCLAW_IPC_SECRET_FILE; the secret value is "
+            "read by the existing IPC auth layer and is never serialized."
+        ),
+    )
     parser.add_argument("--print-json", action="store_true")
     return parser
 
 
-def main() -> int:
-    args = _build_parser().parse_args()
-    packet = build_runtime_governance_ipc_readonly_snapshot(
-        timeout_seconds=args.timeout_seconds,
-        source_head=args.source_head,
-        runtime_head=args.runtime_head,
-    )
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
+    previous_ipc_secret_file = os.environ.get("OPENCLAW_IPC_SECRET_FILE")
+    if args.ipc_secret_file is not None:
+        os.environ["OPENCLAW_IPC_SECRET_FILE"] = str(args.ipc_secret_file)
+    try:
+        packet = build_runtime_governance_ipc_readonly_snapshot(
+            timeout_seconds=args.timeout_seconds,
+            source_head=args.source_head,
+            runtime_head=args.runtime_head,
+        )
+    finally:
+        if args.ipc_secret_file is not None:
+            if previous_ipc_secret_file is None:
+                os.environ.pop("OPENCLAW_IPC_SECRET_FILE", None)
+            else:
+                os.environ["OPENCLAW_IPC_SECRET_FILE"] = previous_ipc_secret_file
     if args.json_output:
         _write_json(args.json_output, packet)
     if args.output:

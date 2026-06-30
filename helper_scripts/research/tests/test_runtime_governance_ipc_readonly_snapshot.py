@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
+from pathlib import Path
 
 from cost_gate_learning_lane import runtime_governance_ipc_readonly_snapshot as mod
 
@@ -78,3 +80,79 @@ def test_build_snapshot_blocks_when_any_runtime_method_fails() -> None:
     assert packet["summary"] is None
     assert packet["runtime_blockers"] == ["governance.list_leases_not_ok"]
     assert packet["methods"]["governance.list_leases"]["ok"] is False
+
+
+def test_cli_sets_ipc_secret_file_env_without_serializing_secret(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    secret_file = tmp_path / "ipc_secret"
+    secret_file.write_text("test-secret-do-not-print\n", encoding="utf-8")
+    seen: dict[str, str | None] = {}
+
+    def fake_build(**kwargs):
+        seen["ipc_secret_file"] = os.environ.get("OPENCLAW_IPC_SECRET_FILE")
+        return {
+            "status": mod.READY_STATUS,
+            "schema_version": mod.SCHEMA_VERSION,
+            "generated_at_utc": NOW.isoformat(),
+            "runtime_blockers": [],
+            "summary": {},
+            "methods": {},
+            "answers": {},
+            "boundary": mod.BOUNDARY,
+            "source": "runtime_governance_ipc_readonly_snapshot",
+        }
+
+    monkeypatch.delenv("OPENCLAW_IPC_SECRET", raising=False)
+    monkeypatch.delenv("OPENCLAW_IPC_SECRET_FILE", raising=False)
+    monkeypatch.setattr(mod, "build_runtime_governance_ipc_readonly_snapshot", fake_build)
+
+    assert mod.main([
+        "--ipc-secret-file",
+        str(secret_file),
+        "--print-json",
+    ]) == 0
+
+    captured = capsys.readouterr()
+    assert seen["ipc_secret_file"] == str(secret_file)
+    assert os.environ.get("OPENCLAW_IPC_SECRET_FILE") is None
+    assert "test-secret-do-not-print" not in captured.out
+    assert "test-secret-do-not-print" not in captured.err
+
+
+def test_cli_restores_existing_ipc_secret_file_env(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    secret_file = tmp_path / "new_ipc_secret"
+    secret_file.write_text("new-secret-do-not-print\n", encoding="utf-8")
+    existing_secret_file = tmp_path / "existing_ipc_secret"
+    existing_secret_file.write_text("existing-secret-do-not-print\n", encoding="utf-8")
+    seen: dict[str, str | None] = {}
+
+    def fake_build(**kwargs):
+        seen["ipc_secret_file"] = os.environ.get("OPENCLAW_IPC_SECRET_FILE")
+        return {
+            "status": mod.READY_STATUS,
+            "schema_version": mod.SCHEMA_VERSION,
+            "generated_at_utc": NOW.isoformat(),
+            "runtime_blockers": [],
+            "summary": {},
+            "methods": {},
+            "answers": {},
+            "boundary": mod.BOUNDARY,
+            "source": "runtime_governance_ipc_readonly_snapshot",
+        }
+
+    monkeypatch.setenv("OPENCLAW_IPC_SECRET_FILE", str(existing_secret_file))
+    monkeypatch.setattr(mod, "build_runtime_governance_ipc_readonly_snapshot", fake_build)
+
+    assert mod.main([
+        "--ipc-secret-file",
+        str(secret_file),
+    ]) == 0
+
+    assert seen["ipc_secret_file"] == str(secret_file)
+    assert os.environ.get("OPENCLAW_IPC_SECRET_FILE") == str(existing_secret_file)
