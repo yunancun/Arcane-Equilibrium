@@ -155,6 +155,8 @@ STOCK_ETF_STATIC_GUI_SCORECARD_LAUNCH_RENDERERS = {
     "renderScorecardStatus",
 }
 
+STOCK_ETF_STATIC_GUI_READINESS_RENDERER = "renderReadiness"
+
 
 def _candidate_stock_etf_ibkr_python_files() -> list[Path]:
     app_dir = CONTROL_API_DIR / "app"
@@ -181,6 +183,7 @@ def _candidate_stock_etf_static_gui_files() -> list[Path]:
         static_dir / "tab-stock-etf-release-packet.js",
         static_dir / "tab-stock-etf-disable-cleanup.js",
         static_dir / "tab-stock-etf-reconciliation.js",
+        static_dir / "tab-stock-etf-readiness.js",
         static_dir / "tab-stock-etf-data-policy.js",
         static_dir / "tab-stock-etf-fallbacks.js",
         static_dir / "tab-stock-etf-auth-account.js",
@@ -577,6 +580,23 @@ def test_stock_etf_static_gui_scorecard_launch_renderers_remain_split() -> None:
     assert "window.renderLaunchStatus" in main_source
     assert len(main_source.splitlines()) <= 400
     assert len(scorecard_launch_source.splitlines()) <= 500
+
+
+def test_stock_etf_static_gui_readiness_renderer_remains_split() -> None:
+    static_dir = CONTROL_API_DIR / "app" / "static"
+    main_path = static_dir / "tab-stock-etf.js"
+    readiness_path = static_dir / "tab-stock-etf-readiness.js"
+    main_source = main_path.read_text(encoding="utf-8")
+    readiness_source = readiness_path.read_text(encoding="utf-8")
+
+    readiness_definition = f"function {STOCK_ETF_STATIC_GUI_READINESS_RENDERER}(data, laneStatus)"
+    assert readiness_definition in readiness_source
+    assert readiness_definition not in main_source
+    assert "window.renderReadiness" in main_source
+    assert "function toneFor(value)" not in main_source
+    assert "function kvRow(label, html)" not in main_source
+    assert len(main_source.splitlines()) <= 250
+    assert len(readiness_source.splitlines()) <= 250
 
 
 def _record_forbidden_call(path: Path, node: ast.Call, violations: list[str]) -> None:

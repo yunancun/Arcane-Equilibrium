@@ -241,6 +241,9 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     reconciliation_js = (STATIC_DIR / "tab-stock-etf-reconciliation.js").read_text(
         encoding="utf-8"
     )
+    readiness_js = (STATIC_DIR / "tab-stock-etf-readiness.js").read_text(
+        encoding="utf-8"
+    )
     data_policy_js = (STATIC_DIR / "tab-stock-etf-data-policy.js").read_text(
         encoding="utf-8"
     )
@@ -267,6 +270,8 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
         + disable_cleanup_js
         + "\n"
         + reconciliation_js
+        + "\n"
+        + readiness_js
         + "\n"
         + data_policy_js
         + "\n"
@@ -300,6 +305,7 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     assert "tab-stock-etf-release-packet.js" in html_source
     assert "tab-stock-etf-disable-cleanup.js" in html_source
     assert "tab-stock-etf-reconciliation.js" in html_source
+    assert "tab-stock-etf-readiness.js" in html_source
     assert "tab-stock-etf-data-policy.js" in html_source
     assert "tab-stock-etf-fallbacks.js" in html_source
     assert "tab-stock-etf-auth-account.js" in html_source
