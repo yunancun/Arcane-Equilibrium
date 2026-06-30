@@ -133,6 +133,11 @@ STOCK_ETF_STATIC_GUI_FALLBACK_BUILDERS = {
     "universeFallback",
 }
 
+STOCK_ETF_STATIC_GUI_DATA_POLICY_RENDERERS = {
+    "renderDataFoundationStatus",
+    "renderPolicyStatus",
+}
+
 
 def _candidate_stock_etf_ibkr_python_files() -> list[Path]:
     app_dir = CONTROL_API_DIR / "app"
@@ -448,6 +453,30 @@ def test_stock_etf_static_gui_payload_builders_remain_split() -> None:
     assert main_definitions == []
     assert len(main_source.splitlines()) <= 1400
     assert len(fallback_source.splitlines()) <= 800
+
+
+def test_stock_etf_static_gui_data_policy_renderers_remain_split() -> None:
+    static_dir = CONTROL_API_DIR / "app" / "static"
+    main_path = static_dir / "tab-stock-etf.js"
+    data_policy_path = static_dir / "tab-stock-etf-data-policy.js"
+    main_source = main_path.read_text(encoding="utf-8")
+    data_policy_source = data_policy_path.read_text(encoding="utf-8")
+
+    missing_renderers = [
+        name
+        for name in sorted(STOCK_ETF_STATIC_GUI_DATA_POLICY_RENDERERS)
+        if f"function {name}(data)" not in data_policy_source
+    ]
+    main_definitions = [
+        name
+        for name in sorted(STOCK_ETF_STATIC_GUI_DATA_POLICY_RENDERERS)
+        if f"function {name}(data)" in main_source
+    ]
+
+    assert missing_renderers == []
+    assert main_definitions == []
+    assert len(main_source.splitlines()) <= 1100
+    assert len(data_policy_source.splitlines()) <= 700
 
 
 def _record_forbidden_call(path: Path, node: ast.Call, violations: list[str]) -> None:
