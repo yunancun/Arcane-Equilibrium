@@ -138,6 +138,11 @@ STOCK_ETF_STATIC_GUI_DATA_POLICY_RENDERERS = {
     "renderPolicyStatus",
 }
 
+STOCK_ETF_STATIC_GUI_AUTH_ACCOUNT_RENDERERS = {
+    "renderAccountStatus",
+    "renderAuthorizationStatus",
+}
+
 
 def _candidate_stock_etf_ibkr_python_files() -> list[Path]:
     app_dir = CONTROL_API_DIR / "app"
@@ -166,6 +171,7 @@ def _candidate_stock_etf_static_gui_files() -> list[Path]:
         static_dir / "tab-stock-etf-reconciliation.js",
         static_dir / "tab-stock-etf-data-policy.js",
         static_dir / "tab-stock-etf-fallbacks.js",
+        static_dir / "tab-stock-etf-auth-account.js",
         static_dir / "tab-stock-etf.js",
     }
     return sorted(path for path in files if path.exists())
@@ -477,6 +483,32 @@ def test_stock_etf_static_gui_data_policy_renderers_remain_split() -> None:
     assert main_definitions == []
     assert len(main_source.splitlines()) <= 1100
     assert len(data_policy_source.splitlines()) <= 700
+
+
+def test_stock_etf_static_gui_auth_account_renderers_remain_split() -> None:
+    static_dir = CONTROL_API_DIR / "app" / "static"
+    main_path = static_dir / "tab-stock-etf.js"
+    auth_account_path = static_dir / "tab-stock-etf-auth-account.js"
+    main_source = main_path.read_text(encoding="utf-8")
+    auth_account_source = auth_account_path.read_text(encoding="utf-8")
+
+    missing_renderers = [
+        name
+        for name in sorted(STOCK_ETF_STATIC_GUI_AUTH_ACCOUNT_RENDERERS)
+        if f"function {name}(data)" not in auth_account_source
+    ]
+    main_definitions = [
+        name
+        for name in sorted(STOCK_ETF_STATIC_GUI_AUTH_ACCOUNT_RENDERERS)
+        if f"function {name}(data)" in main_source
+    ]
+
+    assert missing_renderers == []
+    assert main_definitions == []
+    assert "window.renderAuthorizationStatus" in main_source
+    assert "window.renderAccountStatus" in main_source
+    assert len(main_source.splitlines()) <= 900
+    assert len(auth_account_source.splitlines()) <= 400
 
 
 def _record_forbidden_call(path: Path, node: ast.Call, violations: list[str]) -> None:
