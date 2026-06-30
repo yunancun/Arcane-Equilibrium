@@ -1,7 +1,7 @@
 # Governance Specification Register / 治理規範註冊表
 
 **Project:** 玄衡 · Arcane Equilibrium
-**Last Updated:** 2026-06-30 (ADR-0048 + AMD-2026-06-29-01 IBKR Stock/ETF market-data provenance contract hardening)
+**Last Updated:** 2026-06-30 (ADR-0048 + AMD-2026-06-29-01 IBKR Stock/ETF scorecard input contract hardening)
 **Maintained By:** R4 (Document Auditor) · TW catch-up（2026-04-29）· FA Sign-off path A（2026-05-02 AMD-2026-05-02-01）
 
 ---
@@ -52,6 +52,17 @@ calendar session id, Bybit-live unchanged proof, and no IBKR contact /
 connector runtime / secret serialization / tiny-live / live authority. Broker
 capability gates now require this contract for market-data read, shadow-fill
 reconstruction, and scorecard derivation.
+
+### ADR-0048 2026-06-30 Addendum C
+
+The Phase 3 scorecard input source contracts now machine-check exact contract
+ids and source versions for `broker_account_portfolio_cash_ledger_v1`,
+`cost_model_version_v1`, `benchmark_versions_v1`,
+`stock_shadow_fill_model_v1`, and `stock_etf_storage_capacity_v1`. The bundle
+requires market-data provenance, reference-data source, and risk-policy
+contract hashes, preserves Bybit live execution, and rejects IBKR contact,
+connector runtime, broker fill import, scorecard writer, DB apply,
+evidence-clock start, serialized secrets, and tiny-live/live authority.
 
 ## Active Specifications / 活躍規範
 

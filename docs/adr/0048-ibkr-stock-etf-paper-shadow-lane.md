@@ -170,7 +170,13 @@ environment, vendor/entitlement, timestamps, adjustment marker, instrument and
 calendar hashes, source artifact hash, Bybit-live unchanged proof, and no IBKR
 contact, connector runtime, serialized secrets, tiny-live, or live authority.
 Scorecard inputs must remain source-validated, derived-only, paper/shadow
-separated, and unable to claim live fills.
+separated, and unable to claim live fills. The scorecard input source contracts
+must machine-check exact contract ids and source versions for cash ledger, cost
+model, benchmark, shadow fill, and storage capacity inputs. The bundle must
+carry accepted market-data provenance, reference-data source, and risk-policy
+contract hashes while rejecting IBKR contact, connector runtime, broker fill
+import, scorecard writer, DB apply, evidence-clock start, serialized secrets,
+and tiny-live/live authority.
 
 Cross-phase `stock_etf_cash` evidence must be referable through `audit.asset_lane_events_v1` immutable event references. These references require lane/broker/environment/operation fields, hash-chain continuity, producer/source metadata, artifact hashes, and redaction boundaries; they do not write audit rows or authorize runtime actions by themselves.
 

@@ -9,6 +9,13 @@ use serde::{Deserialize, Serialize};
 use crate::ibkr_phase2_artifact::is_sha256_hex;
 use crate::stock_etf_lane::{AssetLane, Broker, BrokerEnvironment};
 
+pub const BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID: &str =
+    "broker_account_portfolio_cash_ledger_v1";
+pub const STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID: &str = "cost_model_version_v1";
+pub const STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID: &str = "benchmark_versions_v1";
+pub const STOCK_SHADOW_FILL_MODEL_CONTRACT_ID: &str = "stock_shadow_fill_model_v1";
+pub const STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID: &str = "stock_etf_storage_capacity_v1";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StockEtfOrderSide {
@@ -25,6 +32,8 @@ impl Default for StockEtfOrderSide {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BrokerAccountPortfolioCashLedgerV1 {
+    pub contract_id: String,
+    pub source_version: u32,
     pub asset_lane: AssetLane,
     pub broker: Broker,
     pub environment: BrokerEnvironment,
@@ -41,6 +50,8 @@ pub struct BrokerAccountPortfolioCashLedgerV1 {
 impl Default for BrokerAccountPortfolioCashLedgerV1 {
     fn default() -> Self {
         Self {
+            contract_id: String::new(),
+            source_version: 0,
             asset_lane: AssetLane::CryptoPerp,
             broker: Broker::Bybit,
             environment: BrokerEnvironment::LiveReservedDenied,
@@ -59,6 +70,8 @@ impl Default for BrokerAccountPortfolioCashLedgerV1 {
 impl BrokerAccountPortfolioCashLedgerV1 {
     pub fn accepted_fixture() -> Self {
         Self {
+            contract_id: BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID.to_string(),
+            source_version: 1,
             asset_lane: AssetLane::StockEtfCash,
             broker: Broker::Ibkr,
             environment: BrokerEnvironment::Paper,
@@ -76,6 +89,12 @@ impl BrokerAccountPortfolioCashLedgerV1 {
     pub fn validate(&self) -> StockEtfScorecardInputVerdict<StockEtfScorecardInputBlocker> {
         use StockEtfScorecardInputBlocker as Blocker;
         let mut blockers = Vec::new();
+        if self.contract_id != BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID {
+            blockers.push(Blocker::ContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
+        }
         if self.asset_lane != AssetLane::StockEtfCash {
             blockers.push(Blocker::WrongAssetLane);
         }
@@ -112,6 +131,8 @@ impl BrokerAccountPortfolioCashLedgerV1 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StockEtfCostModelVersionV1 {
+    pub contract_id: String,
+    pub source_version: u32,
     pub version_hash: String,
     pub commission_schedule_hash: String,
     pub exchange_reg_fee_hash: String,
@@ -125,6 +146,8 @@ pub struct StockEtfCostModelVersionV1 {
 impl Default for StockEtfCostModelVersionV1 {
     fn default() -> Self {
         Self {
+            contract_id: String::new(),
+            source_version: 0,
             version_hash: String::new(),
             commission_schedule_hash: String::new(),
             exchange_reg_fee_hash: String::new(),
@@ -140,6 +163,8 @@ impl Default for StockEtfCostModelVersionV1 {
 impl StockEtfCostModelVersionV1 {
     pub fn accepted_fixture() -> Self {
         Self {
+            contract_id: STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID.to_string(),
+            source_version: 1,
             version_hash: "5".repeat(64),
             commission_schedule_hash: "6".repeat(64),
             exchange_reg_fee_hash: "7".repeat(64),
@@ -154,6 +179,12 @@ impl StockEtfCostModelVersionV1 {
     pub fn validate(&self) -> StockEtfScorecardInputVerdict<StockEtfScorecardInputBlocker> {
         use StockEtfScorecardInputBlocker as Blocker;
         let mut blockers = Vec::new();
+        if self.contract_id != STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID {
+            blockers.push(Blocker::ContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
+        }
         if !is_sha256_hex(&self.version_hash) {
             blockers.push(Blocker::CostModelVersionHashInvalid);
         }
@@ -184,6 +215,8 @@ impl StockEtfCostModelVersionV1 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StockEtfBenchmarkVersionV1 {
+    pub contract_id: String,
+    pub source_version: u32,
     pub benchmark_id: String,
     pub data_source_hash: String,
     pub construction_version_hash: String,
@@ -197,6 +230,8 @@ pub struct StockEtfBenchmarkVersionV1 {
 impl Default for StockEtfBenchmarkVersionV1 {
     fn default() -> Self {
         Self {
+            contract_id: String::new(),
+            source_version: 0,
             benchmark_id: String::new(),
             data_source_hash: String::new(),
             construction_version_hash: String::new(),
@@ -212,6 +247,8 @@ impl Default for StockEtfBenchmarkVersionV1 {
 impl StockEtfBenchmarkVersionV1 {
     pub fn accepted_fixture() -> Self {
         Self {
+            contract_id: STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID.to_string(),
+            source_version: 1,
             benchmark_id: "SPY_total_return_matched_control_v1".to_string(),
             data_source_hash: "c".repeat(64),
             construction_version_hash: "d".repeat(64),
@@ -226,6 +263,12 @@ impl StockEtfBenchmarkVersionV1 {
     pub fn validate(&self) -> StockEtfScorecardInputVerdict<StockEtfScorecardInputBlocker> {
         use StockEtfScorecardInputBlocker as Blocker;
         let mut blockers = Vec::new();
+        if self.contract_id != STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID {
+            blockers.push(Blocker::ContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
+        }
         if self.benchmark_id.trim().is_empty() {
             blockers.push(Blocker::BenchmarkIdMissing);
         }
@@ -256,6 +299,8 @@ impl StockEtfBenchmarkVersionV1 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StockShadowFillModelV1 {
+    pub contract_id: String,
+    pub source_version: u32,
     pub signal_id: String,
     pub instrument_identity_hash: String,
     pub side: StockEtfOrderSide,
@@ -275,6 +320,8 @@ pub struct StockShadowFillModelV1 {
 impl Default for StockShadowFillModelV1 {
     fn default() -> Self {
         Self {
+            contract_id: String::new(),
+            source_version: 0,
             signal_id: String::new(),
             instrument_identity_hash: String::new(),
             side: StockEtfOrderSide::Unknown,
@@ -296,6 +343,8 @@ impl Default for StockShadowFillModelV1 {
 impl StockShadowFillModelV1 {
     pub fn accepted_fill_fixture() -> Self {
         Self {
+            contract_id: STOCK_SHADOW_FILL_MODEL_CONTRACT_ID.to_string(),
+            source_version: 1,
             signal_id: "shadow-signal-20260301-SPY-buy-001".to_string(),
             instrument_identity_hash: "4".repeat(64),
             side: StockEtfOrderSide::Buy,
@@ -316,6 +365,12 @@ impl StockShadowFillModelV1 {
     pub fn validate(&self) -> StockEtfScorecardInputVerdict<StockEtfScorecardInputBlocker> {
         use StockEtfScorecardInputBlocker as Blocker;
         let mut blockers = Vec::new();
+        if self.contract_id != STOCK_SHADOW_FILL_MODEL_CONTRACT_ID {
+            blockers.push(Blocker::ContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
+        }
         if self.signal_id.trim().is_empty() {
             blockers.push(Blocker::SignalIdMissing);
         }
@@ -352,6 +407,8 @@ impl StockShadowFillModelV1 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StockEtfStorageCapacityV1 {
+    pub contract_id: String,
+    pub source_version: u32,
     pub universe_size: u32,
     pub rows_per_day_estimate: u64,
     pub raw_payload_hash_retention_days: u32,
@@ -366,6 +423,8 @@ pub struct StockEtfStorageCapacityV1 {
 impl Default for StockEtfStorageCapacityV1 {
     fn default() -> Self {
         Self {
+            contract_id: String::new(),
+            source_version: 0,
             universe_size: 0,
             rows_per_day_estimate: 0,
             raw_payload_hash_retention_days: 0,
@@ -382,6 +441,8 @@ impl Default for StockEtfStorageCapacityV1 {
 impl StockEtfStorageCapacityV1 {
     pub fn accepted_fixture() -> Self {
         Self {
+            contract_id: STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID.to_string(),
+            source_version: 1,
             universe_size: 100,
             rows_per_day_estimate: 25_000,
             raw_payload_hash_retention_days: 365,
@@ -397,6 +458,12 @@ impl StockEtfStorageCapacityV1 {
     pub fn validate(&self) -> StockEtfScorecardInputVerdict<StockEtfScorecardInputBlocker> {
         use StockEtfScorecardInputBlocker as Blocker;
         let mut blockers = Vec::new();
+        if self.contract_id != STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID {
+            blockers.push(Blocker::ContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
+        }
         if self.universe_size == 0 {
             blockers.push(Blocker::UniverseSizeMissing);
         }
@@ -435,11 +502,23 @@ pub struct StockEtfScorecardInputBundleV1 {
     pub benchmark: StockEtfBenchmarkVersionV1,
     pub shadow_fill_model: StockShadowFillModelV1,
     pub storage_capacity: StockEtfStorageCapacityV1,
+    pub market_data_provenance_contract_hash: String,
+    pub reference_data_sources_contract_hash: String,
+    pub risk_policy_contract_hash: String,
     pub atomic_fact_input_hash: String,
     pub source_commit: String,
     pub scorecard_is_derived_only: bool,
     pub paper_and_shadow_fills_separate: bool,
     pub live_fill_claimed: bool,
+    pub bybit_live_execution_unchanged: bool,
+    pub ibkr_contact_performed: bool,
+    pub connector_runtime_started: bool,
+    pub broker_fill_import_performed: bool,
+    pub scorecard_writer_started: bool,
+    pub db_apply_performed: bool,
+    pub evidence_clock_started: bool,
+    pub secret_content_serialized: bool,
+    pub live_or_tiny_live_authorized: bool,
 }
 
 impl Default for StockEtfScorecardInputBundleV1 {
@@ -450,11 +529,23 @@ impl Default for StockEtfScorecardInputBundleV1 {
             benchmark: StockEtfBenchmarkVersionV1::default(),
             shadow_fill_model: StockShadowFillModelV1::default(),
             storage_capacity: StockEtfStorageCapacityV1::default(),
+            market_data_provenance_contract_hash: String::new(),
+            reference_data_sources_contract_hash: String::new(),
+            risk_policy_contract_hash: String::new(),
             atomic_fact_input_hash: String::new(),
             source_commit: String::new(),
             scorecard_is_derived_only: false,
             paper_and_shadow_fills_separate: false,
             live_fill_claimed: false,
+            bybit_live_execution_unchanged: false,
+            ibkr_contact_performed: false,
+            connector_runtime_started: false,
+            broker_fill_import_performed: false,
+            scorecard_writer_started: false,
+            db_apply_performed: false,
+            evidence_clock_started: false,
+            secret_content_serialized: false,
+            live_or_tiny_live_authorized: false,
         }
     }
 }
@@ -467,11 +558,23 @@ impl StockEtfScorecardInputBundleV1 {
             benchmark: StockEtfBenchmarkVersionV1::accepted_fixture(),
             shadow_fill_model: StockShadowFillModelV1::accepted_fill_fixture(),
             storage_capacity: StockEtfStorageCapacityV1::accepted_fixture(),
+            market_data_provenance_contract_hash: "8".repeat(64),
+            reference_data_sources_contract_hash: "9".repeat(64),
+            risk_policy_contract_hash: "a".repeat(64),
             atomic_fact_input_hash: "7".repeat(64),
             source_commit: "535019c9".to_string(),
             scorecard_is_derived_only: true,
             paper_and_shadow_fills_separate: true,
             live_fill_claimed: false,
+            bybit_live_execution_unchanged: true,
+            ibkr_contact_performed: false,
+            connector_runtime_started: false,
+            broker_fill_import_performed: false,
+            scorecard_writer_started: false,
+            db_apply_performed: false,
+            evidence_clock_started: false,
+            secret_content_serialized: false,
+            live_or_tiny_live_authorized: false,
         }
     }
 
@@ -493,6 +596,15 @@ impl StockEtfScorecardInputBundleV1 {
         if !self.storage_capacity.validate().accepted {
             blockers.push(Blocker::StorageCapacityRejected);
         }
+        if !is_sha256_hex(&self.market_data_provenance_contract_hash) {
+            blockers.push(Blocker::MarketDataProvenanceContractHashInvalid);
+        }
+        if !is_sha256_hex(&self.reference_data_sources_contract_hash) {
+            blockers.push(Blocker::ReferenceDataSourcesContractHashInvalid);
+        }
+        if !is_sha256_hex(&self.risk_policy_contract_hash) {
+            blockers.push(Blocker::RiskPolicyContractHashInvalid);
+        }
         if !is_sha256_hex(&self.atomic_fact_input_hash) {
             blockers.push(Blocker::AtomicFactInputHashInvalid);
         }
@@ -507,6 +619,33 @@ impl StockEtfScorecardInputBundleV1 {
         }
         if self.live_fill_claimed {
             blockers.push(Blocker::LiveFillClaimed);
+        }
+        if !self.bybit_live_execution_unchanged {
+            blockers.push(Blocker::BybitLiveExecutionNotProtected);
+        }
+        if self.ibkr_contact_performed {
+            blockers.push(Blocker::IbkrContactPerformed);
+        }
+        if self.connector_runtime_started {
+            blockers.push(Blocker::ConnectorRuntimeStarted);
+        }
+        if self.broker_fill_import_performed {
+            blockers.push(Blocker::BrokerFillImportPerformed);
+        }
+        if self.scorecard_writer_started {
+            blockers.push(Blocker::ScorecardWriterStarted);
+        }
+        if self.db_apply_performed {
+            blockers.push(Blocker::DbApplyPerformed);
+        }
+        if self.evidence_clock_started {
+            blockers.push(Blocker::EvidenceClockStarted);
+        }
+        if self.secret_content_serialized {
+            blockers.push(Blocker::SecretContentSerialized);
+        }
+        if self.live_or_tiny_live_authorized {
+            blockers.push(Blocker::LiveOrTinyLiveAuthorized);
         }
         StockEtfScorecardInputVerdict::new(blockers)
     }
@@ -530,6 +669,8 @@ impl<B> StockEtfScorecardInputVerdict<B> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StockEtfScorecardInputBlocker {
+    ContractIdMismatch,
+    SourceVersionMismatch,
     WrongAssetLane,
     WrongBroker,
     CashLedgerEnvironmentDenied,
@@ -579,9 +720,21 @@ pub enum StockEtfScorecardInputBlocker {
     BenchmarkRejected,
     ShadowFillModelRejected,
     StorageCapacityRejected,
+    MarketDataProvenanceContractHashInvalid,
+    ReferenceDataSourcesContractHashInvalid,
+    RiskPolicyContractHashInvalid,
     AtomicFactInputHashInvalid,
     SourceCommitMissing,
     ScorecardNotDerivedOnly,
     PaperShadowFillSeparationMissing,
     LiveFillClaimed,
+    BybitLiveExecutionNotProtected,
+    IbkrContactPerformed,
+    ConnectorRuntimeStarted,
+    BrokerFillImportPerformed,
+    ScorecardWriterStarted,
+    DbApplyPerformed,
+    EvidenceClockStarted,
+    SecretContentSerialized,
+    LiveOrTinyLiveAuthorized,
 }

@@ -2,13 +2,27 @@
 # This template is intentionally BLOCKED and does not import broker fills,
 # derive scorecards, apply migrations, contact IBKR, or start an evidence clock.
 
+market_data_provenance_contract_hash = ""
+reference_data_sources_contract_hash = ""
+risk_policy_contract_hash = ""
 atomic_fact_input_hash = ""
 source_commit = ""
 scorecard_is_derived_only = false
 paper_and_shadow_fills_separate = false
 live_fill_claimed = false
+bybit_live_execution_unchanged = false
+ibkr_contact_performed = false
+connector_runtime_started = false
+broker_fill_import_performed = false
+scorecard_writer_started = false
+db_apply_performed = false
+evidence_clock_started = false
+secret_content_serialized = false
+live_or_tiny_live_authorized = false
 
 [cash_ledger]
+contract_id = ""
+source_version = 0
 asset_lane = "crypto_perp"
 broker = "bybit"
 environment = "live_reserved_denied"
@@ -22,6 +36,8 @@ as_of_ms = 0
 source_report_hash = ""
 
 [cost_model]
+contract_id = ""
+source_version = 0
 version_hash = ""
 commission_schedule_hash = ""
 exchange_reg_fee_hash = ""
@@ -32,6 +48,8 @@ tax_fee_placeholder_hash = ""
 conservative_fill_penalty_bps = 0
 
 [benchmark]
+contract_id = ""
+source_version = 0
 benchmark_id = ""
 data_source_hash = ""
 construction_version_hash = ""
@@ -42,6 +60,8 @@ matched_control_rule_hash = ""
 version_hash = ""
 
 [shadow_fill_model]
+contract_id = ""
+source_version = 0
 signal_id = ""
 instrument_identity_hash = ""
 side = "unknown"
@@ -58,6 +78,8 @@ broker_paper_fill_linked = false
 live_fill_linked = false
 
 [storage_capacity]
+contract_id = ""
+source_version = 0
 universe_size = 0
 rows_per_day_estimate = 0
 raw_payload_hash_retention_days = 0

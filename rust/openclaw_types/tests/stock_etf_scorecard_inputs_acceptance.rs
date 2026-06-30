@@ -7,8 +7,12 @@
 use std::path::PathBuf;
 
 use openclaw_types::{
-    BrokerAccountPortfolioCashLedgerV1, BrokerEnvironment, StockEtfScorecardInputBlocker,
-    StockEtfScorecardInputBundleV1, StockEtfStorageCapacityV1, StockShadowFillModelV1,
+    BrokerAccountPortfolioCashLedgerV1, BrokerEnvironment, StockEtfBenchmarkVersionV1,
+    StockEtfCostModelVersionV1, StockEtfScorecardInputBlocker, StockEtfScorecardInputBundleV1,
+    StockEtfStorageCapacityV1, StockShadowFillModelV1,
+    BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID, STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID,
+    STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID, STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID,
+    STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
 };
 
 #[test]
@@ -33,7 +37,19 @@ fn default_scorecard_bundle_blocks_all_atomic_inputs() {
         .contains(&StockEtfScorecardInputBlocker::StorageCapacityRejected));
     assert!(verdict
         .blockers
+        .contains(&StockEtfScorecardInputBlocker::MarketDataProvenanceContractHashInvalid));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::ReferenceDataSourcesContractHashInvalid));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::RiskPolicyContractHashInvalid));
+    assert!(verdict
+        .blockers
         .contains(&StockEtfScorecardInputBlocker::ScorecardNotDerivedOnly));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::BybitLiveExecutionNotProtected));
 }
 
 #[test]
@@ -46,6 +62,77 @@ fn accepted_fixture_keeps_scorecard_derived_and_live_separate() {
     assert!(bundle.scorecard_is_derived_only);
     assert!(bundle.paper_and_shadow_fills_separate);
     assert!(!bundle.live_fill_claimed);
+    assert_eq!(
+        bundle.cash_ledger.contract_id,
+        BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID
+    );
+    assert_eq!(
+        bundle.cost_model.contract_id,
+        STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID
+    );
+    assert_eq!(
+        bundle.benchmark.contract_id,
+        STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID
+    );
+    assert_eq!(
+        bundle.shadow_fill_model.contract_id,
+        STOCK_SHADOW_FILL_MODEL_CONTRACT_ID
+    );
+    assert_eq!(
+        bundle.storage_capacity.contract_id,
+        STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID
+    );
+    assert_eq!(bundle.cash_ledger.source_version, 1);
+    assert_eq!(bundle.cost_model.source_version, 1);
+    assert_eq!(bundle.benchmark.source_version, 1);
+    assert_eq!(bundle.shadow_fill_model.source_version, 1);
+    assert_eq!(bundle.storage_capacity.source_version, 1);
+    assert_eq!(bundle.market_data_provenance_contract_hash.len(), 64);
+    assert_eq!(bundle.reference_data_sources_contract_hash.len(), 64);
+    assert_eq!(bundle.risk_policy_contract_hash.len(), 64);
+    assert!(bundle.bybit_live_execution_unchanged);
+    assert!(!bundle.ibkr_contact_performed);
+    assert!(!bundle.connector_runtime_started);
+    assert!(!bundle.broker_fill_import_performed);
+    assert!(!bundle.scorecard_writer_started);
+    assert!(!bundle.db_apply_performed);
+    assert!(!bundle.evidence_clock_started);
+    assert!(!bundle.secret_content_serialized);
+    assert!(!bundle.live_or_tiny_live_authorized);
+}
+
+#[test]
+fn scorecard_subcontracts_require_named_contract_ids_and_source_versions() {
+    let mut ledger = BrokerAccountPortfolioCashLedgerV1::accepted_fixture();
+    ledger.contract_id = "wrong_cash_ledger_v1".to_string();
+    ledger.source_version = 2;
+
+    let mut cost = StockEtfCostModelVersionV1::accepted_fixture();
+    cost.contract_id.clear();
+    cost.source_version = 0;
+
+    let mut benchmark = StockEtfBenchmarkVersionV1::accepted_fixture();
+    benchmark.contract_id = "benchmark_versions_v2".to_string();
+    benchmark.source_version = 2;
+
+    let mut shadow = StockShadowFillModelV1::accepted_fill_fixture();
+    shadow.contract_id.clear();
+    shadow.source_version = 3;
+
+    let mut storage = StockEtfStorageCapacityV1::accepted_fixture();
+    storage.contract_id = "stock_etf_storage_capacity_v2".to_string();
+    storage.source_version = 2;
+
+    for blockers in [
+        ledger.validate().blockers,
+        cost.validate().blockers,
+        benchmark.validate().blockers,
+        shadow.validate().blockers,
+        storage.validate().blockers,
+    ] {
+        assert!(blockers.contains(&StockEtfScorecardInputBlocker::ContractIdMismatch));
+        assert!(blockers.contains(&StockEtfScorecardInputBlocker::SourceVersionMismatch));
+    }
 }
 
 #[test]
@@ -129,6 +216,63 @@ fn scorecard_bundle_rejects_live_fill_claim_and_missing_separation() {
 }
 
 #[test]
+fn scorecard_bundle_rejects_missing_cross_contract_hashes_and_runtime_side_effects() {
+    let mut bundle = StockEtfScorecardInputBundleV1::accepted_fixture();
+    bundle.market_data_provenance_contract_hash.clear();
+    bundle.reference_data_sources_contract_hash.clear();
+    bundle.risk_policy_contract_hash.clear();
+    bundle.bybit_live_execution_unchanged = false;
+    bundle.ibkr_contact_performed = true;
+    bundle.connector_runtime_started = true;
+    bundle.broker_fill_import_performed = true;
+    bundle.scorecard_writer_started = true;
+    bundle.db_apply_performed = true;
+    bundle.evidence_clock_started = true;
+    bundle.secret_content_serialized = true;
+    bundle.live_or_tiny_live_authorized = true;
+
+    let verdict = bundle.validate();
+
+    assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::MarketDataProvenanceContractHashInvalid));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::ReferenceDataSourcesContractHashInvalid));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::RiskPolicyContractHashInvalid));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::BybitLiveExecutionNotProtected));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::IbkrContactPerformed));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::ConnectorRuntimeStarted));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::BrokerFillImportPerformed));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::ScorecardWriterStarted));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::DbApplyPerformed));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::EvidenceClockStarted));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::SecretContentSerialized));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::LiveOrTinyLiveAuthorized));
+}
+
+#[test]
 fn blocked_template_is_parseable_and_secret_free() {
     let srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -142,6 +286,28 @@ fn blocked_template_is_parseable_and_secret_free() {
 
     assert!(!parsed.scorecard_is_derived_only);
     assert!(!parsed.paper_and_shadow_fills_separate);
+    assert!(!parsed.bybit_live_execution_unchanged);
+    assert!(!parsed.ibkr_contact_performed);
+    assert!(!parsed.connector_runtime_started);
+    assert!(!parsed.broker_fill_import_performed);
+    assert!(!parsed.scorecard_writer_started);
+    assert!(!parsed.db_apply_performed);
+    assert!(!parsed.evidence_clock_started);
+    assert!(!parsed.secret_content_serialized);
+    assert!(!parsed.live_or_tiny_live_authorized);
+    assert!(parsed.market_data_provenance_contract_hash.is_empty());
+    assert!(parsed.reference_data_sources_contract_hash.is_empty());
+    assert!(parsed.risk_policy_contract_hash.is_empty());
+    assert!(parsed.cash_ledger.contract_id.is_empty());
+    assert_eq!(parsed.cash_ledger.source_version, 0);
+    assert!(parsed.cost_model.contract_id.is_empty());
+    assert_eq!(parsed.cost_model.source_version, 0);
+    assert!(parsed.benchmark.contract_id.is_empty());
+    assert_eq!(parsed.benchmark.source_version, 0);
+    assert!(parsed.shadow_fill_model.contract_id.is_empty());
+    assert_eq!(parsed.shadow_fill_model.source_version, 0);
+    assert!(parsed.storage_capacity.contract_id.is_empty());
+    assert_eq!(parsed.storage_capacity.source_version, 0);
     assert!(!parsed.validate().accepted);
 
     let lower = raw.to_ascii_lowercase();

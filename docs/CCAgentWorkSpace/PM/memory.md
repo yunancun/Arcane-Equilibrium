@@ -2622,3 +2622,10 @@
 - PM added `lane_scoped_ipc_v1` as a Rust source-only validator for the exact `stock_etf.*` IPC method matrix, required paper-effect gates, request fields, typed denials, and Rust ownership.
 - The contract rejects unknown/Bybit paper IPC methods, direct Python broker write authority, existing Bybit paper path reuse, missing gates/fields/denials, prior IBKR contact, connector runtime, and secret serialization.
 - This grants no IPC runtime, IBKR contact, connector runtime, paper order, DB apply, scorecard write, evidence clock, GUI lane authority, release, tiny-live, or live.
+
+## 2026-06-30 IBKR Stock/ETF Scorecard Input Contract Hardening
+
+- PM hardened Phase 3 scorecard input source contracts so cash ledger, cost model, benchmark, shadow fill, and storage capacity require exact named `contract_id` values plus `source_version=1`.
+- The derived-only bundle now requires market-data provenance, reference-data source, and risk-policy contract hashes, preserves Bybit-live unchanged proof, and rejects IBKR contact, connector runtime, broker fill import, scorecard writer, DB apply, evidence-clock start, serialized secrets, and tiny-live/live authority.
+- Broker capability registry and lane-scoped IPC now use shared scorecard contract constants for relevant gates; the blocked template is expanded and remains secret-free.
+- Verification passed: focused linked openclaw_types tests `30 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `173` integration/acceptance + `0` doc-tests. This grants no IBKR contact, connector runtime, fill import, scorecard writer, DB apply, evidence clock, GUI lane authority, paper order, tiny-live, or live.

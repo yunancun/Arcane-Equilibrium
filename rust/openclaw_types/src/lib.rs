@@ -157,6 +157,9 @@ pub use stock_etf_scorecard_inputs::{
     BrokerAccountPortfolioCashLedgerV1, StockEtfBenchmarkVersionV1, StockEtfCostModelVersionV1,
     StockEtfOrderSide, StockEtfScorecardInputBlocker, StockEtfScorecardInputBundleV1,
     StockEtfScorecardInputVerdict, StockEtfStorageCapacityV1, StockShadowFillModelV1,
+    BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID,
+    STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID, STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID,
+    STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID, STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
 };
 pub use stock_etf_strategy_hypothesis::{
     StockEtfStrategyFamily, StockEtfStrategyHypothesisBlocker, StockEtfStrategyHypothesisV1,
