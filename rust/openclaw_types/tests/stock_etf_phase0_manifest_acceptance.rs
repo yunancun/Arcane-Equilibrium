@@ -68,6 +68,9 @@ fn accepted_fixture_validates_phase0_packet_without_runtime_authority() {
     assert!(manifest.global_denials.python_broker_write_authority);
     assert!(manifest.global_denials.gui_lane_authority);
     assert!(manifest.global_denials.automatic_promotion);
+    assert!(manifest
+        .contracts
+        .contains(&"stock_etf_risk_policy_v1".to_string()));
 }
 
 #[test]

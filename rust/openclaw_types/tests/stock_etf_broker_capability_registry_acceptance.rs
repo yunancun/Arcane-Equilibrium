@@ -9,7 +9,7 @@ use openclaw_types::{
     evaluate_broker_operation, AssetLane, AuthorityScope, Broker, BrokerCapabilityRequest,
     BrokerEnvironment, BrokerOperation, InstrumentKind, StockEtfBrokerCapabilityBlocker,
     StockEtfBrokerCapabilityRegistryV1, StockEtfDenialReason, StockEtfFeatureFlags,
-    StockEtfGateInputs, STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID,
+    StockEtfGateInputs, STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID, STOCK_ETF_RISK_POLICY_CONTRACT_ID,
 };
 
 #[test]
@@ -62,12 +62,19 @@ fn accepted_registry_contains_full_stock_etf_ibkr_operation_matrix() {
     assert!(!registry.first_ibkr_contact_performed);
     assert!(!registry.secret_content_serialized);
     assert_eq!(registry.operations.len(), 15);
-    assert!(registry
-        .operations
-        .iter()
-        .any(|entry| entry.operation == BrokerOperation::PaperOrderSubmit
-            && entry.authority_scope == AuthorityScope::PaperRehearsal
-            && entry.rust_owned));
+    assert!(registry.operations.iter().any(|entry| entry.operation
+        == BrokerOperation::PaperOrderSubmit
+        && entry.authority_scope == AuthorityScope::PaperRehearsal
+        && entry.rust_owned
+        && entry
+            .required_gates
+            .contains(&STOCK_ETF_RISK_POLICY_CONTRACT_ID.to_string())));
+    assert!(registry.operations.iter().any(|entry| {
+        entry.operation == BrokerOperation::ScorecardDerive
+            && entry
+                .required_gates
+                .contains(&STOCK_ETF_RISK_POLICY_CONTRACT_ID.to_string())
+    }));
     assert!(registry
         .operations
         .iter()

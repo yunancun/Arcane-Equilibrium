@@ -30,6 +30,7 @@ pub mod stock_etf_phase0_manifest;
 pub mod stock_etf_phase3_evidence;
 pub mod stock_etf_pit_universe;
 pub mod stock_etf_release_packet;
+pub mod stock_etf_risk_policy;
 pub mod stock_etf_scorecard_inputs;
 pub mod stock_etf_strategy_hypothesis;
 pub mod stock_etf_tiny_live_eligibility;
@@ -138,6 +139,13 @@ pub use stock_etf_release_packet::{
     StockEtfReleaseManifestHashV1, StockEtfReleasePacketBlocker, StockEtfReleasePacketV1,
     StockEtfReleaseVerdict, STOCK_ETF_RELEASE_ADR_PATH, STOCK_ETF_RELEASE_AMD_PATH,
     STOCK_ETF_RELEASE_SPEC_PATH,
+};
+pub use stock_etf_risk_policy::{
+    StockEtfRiskPolicyBlocker, StockEtfRiskPolicySourceConfigV1,
+    StockEtfRiskPolicySourceCostModelV1, StockEtfRiskPolicySourceLimitsV1,
+    StockEtfRiskPolicySourceMetaV1, StockEtfRiskPolicySourcePaperOrderV1,
+    StockEtfRiskPolicySourceUniverseV1, StockEtfRiskPolicyV1, StockEtfRiskPolicyVerdict,
+    STOCK_ETF_RISK_POLICY_CONTRACT_ID,
 };
 pub use stock_etf_scorecard_inputs::{
     BrokerAccountPortfolioCashLedgerV1, StockEtfBenchmarkVersionV1, StockEtfCostModelVersionV1,
