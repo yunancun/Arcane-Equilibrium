@@ -11,7 +11,8 @@ use openclaw_types::{
     StockEtfLaneScopedIpcBlocker, StockEtfLaneScopedIpcContractV1, StockEtfLaneScopedIpcMethod,
     STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
     STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID, STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID,
-    STOCK_ETF_RISK_POLICY_CONTRACT_ID, STOCK_ETF_SCOPED_AUTHORIZATION_CONTRACT_ID,
+    STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID, STOCK_ETF_RISK_POLICY_CONTRACT_ID,
+    STOCK_ETF_SCOPED_AUTHORIZATION_CONTRACT_ID,
 };
 
 #[test]
@@ -103,6 +104,9 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
         .contains(&STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID.to_string()));
     assert!(preview
         .required_gates
+        .contains(&STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID.to_string()));
+    assert!(preview
+        .required_gates
         .contains(&STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID.to_string()));
 
     let shadow = contract
@@ -116,6 +120,9 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
     assert!(shadow
         .required_gates
         .contains(&STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID.to_string()));
+    assert!(shadow
+        .required_gates
+        .contains(&STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID.to_string()));
 }
 
 #[test]

@@ -13,6 +13,7 @@ use crate::stock_etf_lane::{
 use crate::stock_etf_phase3_evidence::{
     STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
 };
+use crate::stock_etf_pit_universe::STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID;
 use crate::stock_etf_reference_data_sources::STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID;
 use crate::stock_etf_risk_policy::STOCK_ETF_RISK_POLICY_CONTRACT_ID;
 use crate::stock_etf_scorecard_inputs::{
@@ -274,7 +275,7 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
             required_gates: &[
                 STOCK_ETF_RISK_POLICY_CONTRACT_ID,
                 STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
-                "stock_etf_pit_universe_contract_v1",
+                STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
                 "stock_etf_strategy_hypothesis_contract_v1",
                 "frozen_strategy_hypothesis_hash",
                 "frozen_universe_hash",
@@ -303,7 +304,7 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
                 STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID,
                 STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID,
                 STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
-                "stock_etf_pit_universe_contract_v1",
+                STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
                 "stock_etf_strategy_hypothesis_contract_v1",
                 "paper_shadow_fill_separation",
             ],

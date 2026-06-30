@@ -219,6 +219,8 @@ evidence-clock days, stock shadow signals, or scorecard derivation can rely on a
 
 Required fields:
 
+- `contract_id=stock_etf_pit_universe_contract_v1`
+- `source_version=1`
 - `asset_lane=stock_etf_cash`
 - `broker=ibkr`
 - universe id, version, and hash

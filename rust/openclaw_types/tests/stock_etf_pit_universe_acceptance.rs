@@ -24,6 +24,10 @@ fn default_pit_universe_blocks_before_evidence_clock_can_use_universe_hash() {
     ));
     assert!(has(
         &verdict.blockers,
+        StockEtfPitUniverseBlocker::SourceVersionMismatch
+    ));
+    assert!(has(
+        &verdict.blockers,
         StockEtfPitUniverseBlocker::WrongAssetLane
     ));
     assert!(has(
@@ -55,6 +59,7 @@ fn accepted_fixture_is_frozen_pit_universe_without_runtime_authority() {
         verdict.blockers
     );
     assert_eq!(universe.contract_id, STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID);
+    assert_eq!(universe.source_version, 1);
     assert_eq!(universe.asset_lane, AssetLane::StockEtfCash);
     assert_eq!(universe.broker, Broker::Ibkr);
     assert_eq!(
@@ -67,6 +72,25 @@ fn accepted_fixture_is_frozen_pit_universe_without_runtime_authority() {
     assert!(universe.ibkr_live_denied);
     assert!(!universe.ibkr_contact_performed);
     assert!(!universe.secret_content_serialized);
+}
+
+#[test]
+fn pit_universe_requires_exact_contract_id_and_source_version() {
+    let universe = StockEtfPitUniverseV1 {
+        contract_id: "stock_etf_pit_universe_contract_v1_fixture".to_string(),
+        source_version: 2,
+        ..StockEtfPitUniverseV1::accepted_fixture()
+    };
+    let blockers = universe.validate().blockers;
+
+    assert!(has(
+        &blockers,
+        StockEtfPitUniverseBlocker::ContractIdMismatch
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfPitUniverseBlocker::SourceVersionMismatch
+    ));
 }
 
 #[test]
@@ -256,6 +280,8 @@ fn blocked_template_is_parseable_and_secret_free() {
     .expect("read PIT universe template");
     let parsed: StockEtfPitUniverseV1 = toml::from_str(&raw).expect("PIT universe template parses");
 
+    assert_eq!(parsed.contract_id, "");
+    assert_eq!(parsed.source_version, 0);
     assert_eq!(parsed.asset_lane, AssetLane::CryptoPerp);
     assert_eq!(parsed.broker, Broker::Bybit);
     assert!(parsed.constituents.is_empty());
