@@ -384,6 +384,24 @@ def test_stock_etf_readiness_requires_auth() -> None:
     assert resp.status_code == 401
 
 
+def test_stock_etf_openapi_exposes_readiness_get_only(client_fail_closed: TestClient) -> None:
+    schema = client_fail_closed.get("/openapi.json").json()
+    stock_paths = {
+        path: set(methods)
+        for path, methods in schema["paths"].items()
+        if path.startswith("/api/v1/stock-etf")
+    }
+
+    assert stock_paths == {"/api/v1/stock-etf/readiness": {"get"}}
+
+
+def test_stock_etf_runtime_rejects_write_methods(client_fail_closed: TestClient) -> None:
+    for path in ("/api/v1/stock-etf", "/api/v1/stock-etf/readiness"):
+        for method in ("post", "put", "patch", "delete"):
+            resp = getattr(client_fail_closed, method)(path)
+            assert resp.status_code == 405, f"{method.upper()} {path} returned {resp.status_code}"
+
+
 def test_stock_etf_redirect_to_static_tab(client_fail_closed: TestClient) -> None:
     resp = client_fail_closed.get("/api/v1/stock-etf", follow_redirects=False)
     assert resp.status_code in (302, 307)
