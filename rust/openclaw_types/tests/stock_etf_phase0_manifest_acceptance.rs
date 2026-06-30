@@ -15,8 +15,9 @@ use openclaw_types::{
     STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID, STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID,
     STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID, STOCK_ETF_PHASE0_MANIFEST_SCHEMA,
     STOCK_ETF_PHASE0_MANIFEST_STATUS, STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
-    STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID, STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
-    STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID, STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
+    STOCK_ETF_RISK_POLICY_CONTRACT_ID, STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID,
+    STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
+    STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
 };
 
 #[test]
@@ -76,7 +77,7 @@ fn accepted_fixture_validates_phase0_packet_without_runtime_authority() {
     assert!(manifest.global_denials.automatic_promotion);
     assert!(manifest
         .contracts
-        .contains(&"stock_etf_risk_policy_v1".to_string()));
+        .contains(&STOCK_ETF_RISK_POLICY_CONTRACT_ID.to_string()));
     assert!(manifest
         .contracts
         .contains(&"stock_etf_reference_data_sources_v1".to_string()));

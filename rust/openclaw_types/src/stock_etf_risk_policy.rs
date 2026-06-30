@@ -26,6 +26,7 @@ const FORBIDDEN_ALLOWED_KINDS: &[InstrumentKind] =
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StockEtfRiskPolicyV1 {
     pub contract_id: String,
+    pub source_version: u32,
     pub config_version: u16,
     pub asset_lane: AssetLane,
     pub broker: Broker,
@@ -72,6 +73,7 @@ impl Default for StockEtfRiskPolicyV1 {
     fn default() -> Self {
         Self {
             contract_id: String::new(),
+            source_version: 0,
             config_version: 0,
             asset_lane: AssetLane::CryptoPerp,
             broker: Broker::Bybit,
@@ -120,6 +122,7 @@ impl StockEtfRiskPolicyV1 {
     pub fn accepted_fixture() -> Self {
         Self {
             contract_id: STOCK_ETF_RISK_POLICY_CONTRACT_ID.to_string(),
+            source_version: 1,
             config_version: 1,
             asset_lane: AssetLane::StockEtfCash,
             broker: Broker::Ibkr,
@@ -166,6 +169,7 @@ impl StockEtfRiskPolicyV1 {
     pub fn from_source_config(source: &StockEtfRiskPolicySourceConfigV1) -> Self {
         Self {
             contract_id: STOCK_ETF_RISK_POLICY_CONTRACT_ID.to_string(),
+            source_version: 1,
             config_version: source.meta.version,
             asset_lane: source.meta.asset_lane,
             broker: source.meta.broker,
@@ -217,6 +221,9 @@ impl StockEtfRiskPolicyV1 {
 
         if self.contract_id != STOCK_ETF_RISK_POLICY_CONTRACT_ID {
             blockers.push(Blocker::ContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
         }
         if self.config_version != 1 {
             blockers.push(Blocker::VersionMismatch);
@@ -504,6 +511,7 @@ impl<B> StockEtfRiskPolicyVerdict<B> {
 #[serde(rename_all = "snake_case")]
 pub enum StockEtfRiskPolicyBlocker {
     ContractIdMismatch,
+    SourceVersionMismatch,
     VersionMismatch,
     WrongAssetLane,
     WrongBroker,

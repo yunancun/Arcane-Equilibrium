@@ -5,6 +5,7 @@
 # inspect secrets, or change Bybit live execution behavior.
 
 contract_id = ""
+source_version = 0
 config_version = 0
 asset_lane = "crypto_perp"
 broker = "bybit"
