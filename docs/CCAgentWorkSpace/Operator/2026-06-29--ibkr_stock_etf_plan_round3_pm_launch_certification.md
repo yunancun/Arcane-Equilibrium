@@ -32,8 +32,9 @@ Phase 1-5 所有 gates 都按主計劃完成、通過、落下 immutable artifac
 ## PM 判斷
 
 第二輪把缺口全部前移成 hard gates；第三輪確認：只要這些 gates 按計劃全部
-通過，paper/shadow 上線 scope 就完整。下一步仍是 Phase 0 ADR/AMD + named
-contract packet，不是直接寫 IBKR connector。
+通過，paper/shadow 上線 scope 就完整。2026-06-30 目前 Phase 0 ADR/AMD +
+named contract packet 已在 source 中落地，後續仍必須逐 gate 完成 source/runtime
+hardening；這不是直接打開 IBKR connector runtime。
 
 ## 2026-06-30 Operator Update
 

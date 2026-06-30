@@ -890,3 +890,8 @@ Do not paste long reports or stable architecture into TODO.
 - Display-only checkpoint exposes a fail-closed `connector_skeleton` block through the Stock/ETF readiness normalizer and GUI, without importing the connector package or adding endpoints/actions.
 - Pre-gate truthy claims for skeleton acceptance, non-blocked status, network contact, secret loading, paper/live channel exposure, write method presence, or Bybit path reuse now become readiness contract violations.
 - Verification passed: Python compile PASS; focused readiness/no-write `9 passed`; full Stock/ETF FastAPI/static `94 passed`; Node syntax PASS; diff check PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, paper order/cancel/replace, fill import, scorecard writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Source Posture Header Catch-up
+
+- Governance/status text now says Phase 0 ADR/AMD/named contracts exist in source and Phase 1-5 source/status/display hardening is in progress; runtime launch remains blocked.
+- Verification passed: `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, paper order/cancel/replace, fill import, scorecard writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
