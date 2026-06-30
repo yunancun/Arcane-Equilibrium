@@ -2111,7 +2111,7 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 
 新增 checkpoint：
 
-- 主計畫 PM session checkpoint 現在從 14 到 55 連續遞增，無重複編號。
+- 主計畫 PM session checkpoint 現在從 14 到 56 連續遞增，無重複編號。
 - 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
   lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
   connector skeleton / readonly-probe / broker read gate / policy display / operation
@@ -2562,6 +2562,42 @@ exclusion drift。這次把 dispatch 路由改為 registry-driven。
   `31 passed`。
 - `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
   `104 passed`。
+- `python3 -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
+  `2 passed`。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 56. 2026-06-30 PM session source checkpoint：GUI Data/Policy Fallback Split Guard
+
+本 checkpoint 降低 Stock/ETF GUI 主 bundle 的結構風險。`tab-stock-etf.js` 已接近
+repo 2000 行 hard cap（1976 行），後續新增狀態面板很容易再次違反治理線；這次只拆
+Data Foundation / Policy 的大型 fallback payload，不改 endpoint、不改 renderer、不改
+load flow。
+
+已完成：
+
+- 新增 `tab-stock-etf-data-policy.js`，承載 `dataFoundationFallback(...)` 與
+  `policyFallback(...)`。
+- `tab-stock-etf.html` 在主 `tab-stock-etf.js` 前載入 data/policy split。
+- `tab-stock-etf.js` 從 `1976` 行降到 `1805` 行；新增檔為 `170` 行。
+- 更新 Stock/ETF static no-write guard，掃描新 JS 檔。
+- 新增 `test_stock_etf_static_gui_files_stay_below_line_cap`，要求 Stock/ETF GUI
+  bundle 每個檔案都不超過 2000 行。
+- 本 checkpoint 不新增 API endpoint、不新增 IPC method、不改 Rust/FastAPI status
+  contract，只做 display-only GUI bundle hygiene。
+
+驗證：
+
+- `node --check` on Stock/ETF JS bundle：PASS。
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_python_no_write_static_guard.py`：
+  `10 passed`。
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  `105 passed`。
 - `python3 -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
   `2 passed`。
 - `git diff --check`：PASS。

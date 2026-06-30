@@ -148,6 +148,7 @@ def _candidate_stock_etf_static_gui_files() -> list[Path]:
         static_dir / "tab-stock-etf-release-packet.js",
         static_dir / "tab-stock-etf-disable-cleanup.js",
         static_dir / "tab-stock-etf-reconciliation.js",
+        static_dir / "tab-stock-etf-data-policy.js",
         static_dir / "tab-stock-etf.js",
     }
     return sorted(path for path in files if path.exists())
@@ -378,6 +379,19 @@ def test_stock_etf_static_gui_surface_remains_display_only() -> None:
                 violations.append(f"{path}: contains forbidden display-only snippet {snippet!r}")
 
     assert violations == []
+
+
+def test_stock_etf_static_gui_files_stay_below_line_cap() -> None:
+    files = _candidate_stock_etf_static_gui_files()
+    assert files, "expected Stock/ETF static GUI surface"
+
+    oversized = []
+    for path in files:
+        line_count = len(path.read_text(encoding="utf-8").splitlines())
+        if line_count > 2000:
+            oversized.append(f"{path}:{line_count}")
+
+    assert oversized == []
 
 
 def _record_forbidden_call(path: Path, node: ast.Call, violations: list[str]) -> None:
