@@ -160,9 +160,15 @@ currency treatment, Bybit-live unchanged proof, and no IBKR contact, connector
 runtime, serialized secrets, tiny-live, or live authority.
 
 Phase 3 evidence clock may start only after `stock_etf_evidence_clock_v1`
-proves collector stability, accepted PIT universe, strategy hypothesis, and
-reference-data source contracts plus frozen universe/benchmark/cost/strategy
-hypothesis/reference-data hashes and paper-vs-shadow divergence thresholds.
+proves collector stability, accepted PIT universe, strategy hypothesis,
+market-data provenance, and reference-data source contracts plus frozen
+universe/benchmark/cost/strategy hypothesis/reference-data hashes and
+paper-vs-shadow divergence thresholds. `stock_market_data_provenance_v1` must
+be machine-checkable before market-data facts, shadow-fill reconstruction, or
+scorecards can consume quote/bar source hashes; it must prove lane/broker/
+environment, vendor/entitlement, timestamps, adjustment marker, instrument and
+calendar hashes, source artifact hash, Bybit-live unchanged proof, and no IBKR
+contact, connector runtime, serialized secrets, tiny-live, or live authority.
 Scorecard inputs must remain source-validated, derived-only, paper/shadow
 separated, and unable to claim live fills.
 

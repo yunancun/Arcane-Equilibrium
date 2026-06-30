@@ -636,6 +636,11 @@ PM/Operator apply authorization claims, and serialized secret content.
 
 Required on every market-data fact:
 
+- `contract_id=stock_market_data_provenance_v1`
+- `asset_lane=stock_etf_cash`
+- `broker=ibkr`
+- read-only, paper, or shadow environment only
+- source version 1
 - source vendor/broker
 - entitlement tier
 - raw payload hash
@@ -645,8 +650,19 @@ Required on every market-data fact:
 - corporate-action adjustment version
 - symbol and instrument identity hash
 - calendar session id
+- source artifact hash
+- Bybit-live unchanged proof
+- no IBKR contact, connector runtime, serialized secret content, tiny-live, or
+  live authorization claim
 
 Unknown provenance blocks scorecard readiness.
+
+Source validator:
+`openclaw_types::stock_etf_phase3_evidence::StockMarketDataProvenanceV1`.
+The validator rejects missing contract id/version, wrong lane/broker/environment,
+missing vendor/entitlement/timestamps/symbol/calendar/hash evidence, unknown
+adjustment marker, missing source artifact hash, Bybit-live regression, IBKR
+contact, connector runtime, serialized secrets, and tiny-live/live authority.
 
 ## 13A. `stock_etf_reference_data_sources_v1`
 

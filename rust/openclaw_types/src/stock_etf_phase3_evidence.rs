@@ -6,6 +6,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::ibkr_phase2_artifact::is_sha256_hex;
+use crate::stock_etf_lane::{AssetLane, Broker, BrokerEnvironment};
+
+pub const STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID: &str = "stock_market_data_provenance_v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -23,6 +26,11 @@ impl Default for StockEtfAdjustmentMarker {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StockMarketDataProvenanceV1 {
+    pub contract_id: String,
+    pub source_version: u32,
+    pub asset_lane: AssetLane,
+    pub broker: Broker,
+    pub environment: BrokerEnvironment,
     pub source_vendor_or_broker: String,
     pub entitlement_tier: String,
     pub raw_payload_hash: String,
@@ -33,11 +41,22 @@ pub struct StockMarketDataProvenanceV1 {
     pub symbol: String,
     pub instrument_identity_hash: String,
     pub calendar_session_id: String,
+    pub source_artifact_hash: String,
+    pub bybit_live_execution_unchanged: bool,
+    pub ibkr_contact_performed: bool,
+    pub connector_runtime_started: bool,
+    pub secret_content_serialized: bool,
+    pub live_or_tiny_live_authorized: bool,
 }
 
 impl Default for StockMarketDataProvenanceV1 {
     fn default() -> Self {
         Self {
+            contract_id: String::new(),
+            source_version: 0,
+            asset_lane: AssetLane::CryptoPerp,
+            broker: Broker::Bybit,
+            environment: BrokerEnvironment::LiveReservedDenied,
             source_vendor_or_broker: String::new(),
             entitlement_tier: String::new(),
             raw_payload_hash: String::new(),
@@ -48,6 +67,12 @@ impl Default for StockMarketDataProvenanceV1 {
             symbol: String::new(),
             instrument_identity_hash: String::new(),
             calendar_session_id: String::new(),
+            source_artifact_hash: String::new(),
+            bybit_live_execution_unchanged: false,
+            ibkr_contact_performed: false,
+            connector_runtime_started: false,
+            secret_content_serialized: false,
+            live_or_tiny_live_authorized: false,
         }
     }
 }
@@ -55,6 +80,11 @@ impl Default for StockMarketDataProvenanceV1 {
 impl StockMarketDataProvenanceV1 {
     pub fn source_fixture() -> Self {
         Self {
+            contract_id: STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID.to_string(),
+            source_version: 1,
+            asset_lane: AssetLane::StockEtfCash,
+            broker: Broker::Ibkr,
+            environment: BrokerEnvironment::Paper,
             source_vendor_or_broker: "ibkr_paper_market_data".to_string(),
             entitlement_tier: "paper_delayed_or_snapshot_fixture".to_string(),
             raw_payload_hash: "a".repeat(64),
@@ -65,6 +95,12 @@ impl StockMarketDataProvenanceV1 {
             symbol: "SPY".to_string(),
             instrument_identity_hash: "c".repeat(64),
             calendar_session_id: "XNYS-2026-03-01-regular".to_string(),
+            source_artifact_hash: "d".repeat(64),
+            bybit_live_execution_unchanged: true,
+            ibkr_contact_performed: false,
+            connector_runtime_started: false,
+            secret_content_serialized: false,
+            live_or_tiny_live_authorized: false,
         }
     }
 
@@ -72,6 +108,24 @@ impl StockMarketDataProvenanceV1 {
         use StockEtfPhase3Blocker as Blocker;
 
         let mut blockers = Vec::new();
+        if self.contract_id != STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID {
+            blockers.push(Blocker::MarketDataProvenanceContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::MarketDataProvenanceVersionMismatch);
+        }
+        if self.asset_lane != AssetLane::StockEtfCash {
+            blockers.push(Blocker::MarketDataProvenanceWrongAssetLane);
+        }
+        if self.broker != Broker::Ibkr {
+            blockers.push(Blocker::MarketDataProvenanceWrongBroker);
+        }
+        if !matches!(
+            self.environment,
+            BrokerEnvironment::ReadOnly | BrokerEnvironment::Paper | BrokerEnvironment::Shadow
+        ) {
+            blockers.push(Blocker::MarketDataProvenanceEnvironmentDenied);
+        }
         if self.source_vendor_or_broker.trim().is_empty() {
             blockers.push(Blocker::SourceMissing);
         }
@@ -98,6 +152,24 @@ impl StockMarketDataProvenanceV1 {
         }
         if self.calendar_session_id.trim().is_empty() {
             blockers.push(Blocker::CalendarSessionMissing);
+        }
+        if !is_sha256_hex(&self.source_artifact_hash) {
+            blockers.push(Blocker::SourceArtifactHashInvalid);
+        }
+        if !self.bybit_live_execution_unchanged {
+            blockers.push(Blocker::BybitLiveExecutionNotProtected);
+        }
+        if self.ibkr_contact_performed {
+            blockers.push(Blocker::IbkrContactPerformed);
+        }
+        if self.connector_runtime_started {
+            blockers.push(Blocker::ConnectorRuntimeStarted);
+        }
+        if self.secret_content_serialized {
+            blockers.push(Blocker::SecretContentSerialized);
+        }
+        if self.live_or_tiny_live_authorized {
+            blockers.push(Blocker::LiveOrTinyLiveAuthorized);
         }
 
         StockEtfPhase3Verdict::new(blockers)
@@ -358,6 +430,11 @@ impl<B> StockEtfPhase3Verdict<B> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StockEtfPhase3Blocker {
+    MarketDataProvenanceContractIdMismatch,
+    MarketDataProvenanceVersionMismatch,
+    MarketDataProvenanceWrongAssetLane,
+    MarketDataProvenanceWrongBroker,
+    MarketDataProvenanceEnvironmentDenied,
     SourceMissing,
     EntitlementTierMissing,
     RawPayloadHashInvalid,
@@ -367,6 +444,12 @@ pub enum StockEtfPhase3Blocker {
     SymbolMissing,
     InstrumentIdentityHashInvalid,
     CalendarSessionMissing,
+    SourceArtifactHashInvalid,
+    BybitLiveExecutionNotProtected,
+    IbkrContactPerformed,
+    ConnectorRuntimeStarted,
+    SecretContentSerialized,
+    LiveOrTinyLiveAuthorized,
     UniverseHashInvalid,
     BenchmarkHashInvalid,
     CostModelHashInvalid,

@@ -10,7 +10,7 @@ use openclaw_types::{
     required_phase0_contract_ids, StockEtfPhase0ApiBaselineV1,
     StockEtfPhase0ContractPacketManifestV1, StockEtfPhase0GlobalDenialsV1,
     StockEtfPhase0ManifestBlocker, StockEtfPhase0UnlockTableV1, STOCK_ETF_PHASE0_MANIFEST_SCHEMA,
-    STOCK_ETF_PHASE0_MANIFEST_STATUS,
+    STOCK_ETF_PHASE0_MANIFEST_STATUS, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
 };
 
 #[test]
@@ -74,6 +74,9 @@ fn accepted_fixture_validates_phase0_packet_without_runtime_authority() {
     assert!(manifest
         .contracts
         .contains(&"stock_etf_reference_data_sources_v1".to_string()));
+    assert!(manifest
+        .contracts
+        .contains(&STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID.to_string()));
 }
 
 #[test]

@@ -130,6 +130,7 @@ pub use stock_etf_phase3_evidence::{
     StockEtfAdjustmentMarker, StockEtfDailyDqManifestV1, StockEtfEvidenceClockDayV1,
     StockEtfEvidenceClockStatus, StockEtfFrozenEvidenceInputsV1, StockEtfPhase3Blocker,
     StockEtfPhase3Verdict, StockMarketDataProvenanceV1,
+    STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
 };
 pub use stock_etf_pit_universe::{
     StockEtfPitUniverseBlocker, StockEtfPitUniverseConstituentV1, StockEtfPitUniverseV1,

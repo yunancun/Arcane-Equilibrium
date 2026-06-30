@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-30 IBKR Stock/ETF Market-Data Provenance Contract
+
+- PM hardened `stock_market_data_provenance_v1` inside the Phase 3 evidence contract surface for lane/broker/environment, vendor/entitlement, payload/source hashes, timestamps, adjustment marker, instrument identity, and calendar session provenance.
+- The validator rejects Bybit-live regression, IBKR contact, connector runtime, serialized secrets, and tiny-live/live authority; broker capability gates now require it for market-data read, shadow-fill reconstruction, and scorecard derivation.
+- Verification passed: focused linked openclaw_types tests `25 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `171` integration/acceptance + `0` doc-tests. This grants no IBKR contact, connector runtime, collector, market-data ingestion, evidence clock, scorecard writer, DB apply, GUI lane authority, tiny-live, or live.
+
 ## 2026-06-30 IBKR Stock/ETF Python No-Write Static Guard
 
 - PM added `test_stock_etf_python_no_write_static_guard.py` as an AST/static guard for Stock/ETF/IBKR Python surfaces and future `program_code/broker_connectors/ibkr_connector/` files.

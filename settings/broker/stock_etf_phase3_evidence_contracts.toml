@@ -2,16 +2,27 @@
 # This template is intentionally BLOCKED and does not start the evidence clock.
 
 [market_data_provenance]
+contract_id = ""
+source_version = 0
+asset_lane = "crypto_perp"
+broker = "bybit"
+environment = "live_reserved_denied"
 source_vendor_or_broker = ""
 entitlement_tier = ""
 raw_payload_hash = ""
 received_at_ms = 0
 exchange_time_ms = 0
-adjustment_marker = "UNKNOWN"
+adjustment_marker = "unknown"
 corporate_action_adjustment_version_hash = ""
 symbol = ""
 instrument_identity_hash = ""
 calendar_session_id = ""
+source_artifact_hash = ""
+bybit_live_execution_unchanged = false
+ibkr_contact_performed = false
+connector_runtime_started = false
+secret_content_serialized = false
+live_or_tiny_live_authorized = false
 
 [frozen_inputs]
 universe_hash = ""

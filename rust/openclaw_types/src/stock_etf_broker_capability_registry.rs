@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::stock_etf_lane::{
     AssetLane, AuthorityScope, Broker, BrokerOperation, StockEtfDenialReason,
 };
+use crate::stock_etf_phase3_evidence::STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID;
 use crate::stock_etf_reference_data_sources::STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID;
 use crate::stock_etf_risk_policy::STOCK_ETF_RISK_POLICY_CONTRACT_ID;
 
@@ -217,7 +218,7 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
             authority_scope: Scope::ReadOnly,
             required_gates: &[
                 "phase2_ibkr_external_surface_gate_v1",
-                "stock_market_data_provenance_v1",
+                STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
             ],
             typed_denial_reason: None,
             rust_owned: false,
@@ -274,7 +275,7 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
                 STOCK_ETF_RISK_POLICY_CONTRACT_ID,
                 STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID,
                 "cost_model_version_v1",
-                "stock_market_data_provenance_v1",
+                STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
             ],
             typed_denial_reason: None,
             rust_owned: false,
@@ -285,6 +286,7 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
                 "broker_account_portfolio_cash_ledger_v1",
                 STOCK_ETF_RISK_POLICY_CONTRACT_ID,
                 STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID,
+                STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
                 "cost_model_version_v1",
                 "benchmark_versions_v1",
                 "stock_shadow_fill_model_v1",

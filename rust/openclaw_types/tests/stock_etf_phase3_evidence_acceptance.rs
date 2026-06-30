@@ -6,8 +6,9 @@
 use std::path::PathBuf;
 
 use openclaw_types::{
-    StockEtfDailyDqManifestV1, StockEtfEvidenceClockDayV1, StockEtfEvidenceClockStatus,
-    StockEtfFrozenEvidenceInputsV1, StockEtfPhase3Blocker, StockMarketDataProvenanceV1,
+    AssetLane, Broker, BrokerEnvironment, StockEtfDailyDqManifestV1, StockEtfEvidenceClockDayV1,
+    StockEtfEvidenceClockStatus, StockEtfFrozenEvidenceInputsV1, StockEtfPhase3Blocker,
+    StockMarketDataProvenanceV1, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
 };
 
 #[test]
@@ -15,6 +16,15 @@ fn default_market_data_provenance_blocks_scorecard_readiness() {
     let verdict = StockMarketDataProvenanceV1::default().validate();
 
     assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::MarketDataProvenanceContractIdMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::MarketDataProvenanceWrongAssetLane));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::MarketDataProvenanceWrongBroker));
     assert!(verdict
         .blockers
         .contains(&StockEtfPhase3Blocker::SourceMissing));
@@ -35,6 +45,58 @@ fn source_market_data_provenance_has_required_hashes_and_calendar_session() {
 
     assert!(verdict.accepted);
     assert!(verdict.blockers.is_empty());
+}
+
+#[test]
+fn market_data_provenance_rejects_boundary_regressions() {
+    let mut provenance = StockMarketDataProvenanceV1::source_fixture();
+    provenance.asset_lane = AssetLane::CryptoPerp;
+    provenance.broker = Broker::Bybit;
+    provenance.environment = BrokerEnvironment::LiveReservedDenied;
+    provenance.source_artifact_hash.clear();
+    provenance.bybit_live_execution_unchanged = false;
+    provenance.ibkr_contact_performed = true;
+    provenance.connector_runtime_started = true;
+    provenance.secret_content_serialized = true;
+    provenance.live_or_tiny_live_authorized = true;
+
+    let blockers = provenance.validate().blockers;
+
+    assert!(blockers.contains(&StockEtfPhase3Blocker::MarketDataProvenanceWrongAssetLane));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::MarketDataProvenanceWrongBroker));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::MarketDataProvenanceEnvironmentDenied));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::SourceArtifactHashInvalid));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::BybitLiveExecutionNotProtected));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::IbkrContactPerformed));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::ConnectorRuntimeStarted));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::SecretContentSerialized));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::LiveOrTinyLiveAuthorized));
+}
+
+#[test]
+fn market_data_provenance_template_is_blocked_parseable_and_secret_free() {
+    let srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..");
+    let raw = std::fs::read_to_string(
+        srv_root.join("settings/broker/stock_market_data_provenance.template.toml"),
+    )
+    .expect("read market data provenance template");
+    let parsed: StockMarketDataProvenanceV1 =
+        toml::from_str(&raw).expect("market data provenance template parses");
+
+    assert_eq!(parsed.contract_id, "");
+    assert_eq!(parsed.asset_lane, AssetLane::CryptoPerp);
+    assert_eq!(parsed.broker, Broker::Bybit);
+    assert_eq!(parsed.environment, BrokerEnvironment::LiveReservedDenied);
+    assert!(!parsed.validate().accepted);
+
+    let lower = raw.to_ascii_lowercase();
+    assert!(!lower.contains("api_key ="));
+    assert!(!lower.contains("api_secret ="));
+    assert!(!lower.contains("account_id ="));
+    assert!(!lower.contains("password ="));
+    assert!(!lower.contains("token ="));
 }
 
 #[test]
@@ -148,6 +210,30 @@ fn phase3_evidence_template_is_default_blocked_and_secret_free() {
     .expect("read phase3 evidence template");
     let parsed: toml::Value = toml::from_str(&raw).expect("phase3 evidence template toml parses");
 
+    assert_eq!(
+        parsed["market_data_provenance"]["contract_id"].as_str(),
+        Some("")
+    );
+    assert_eq!(
+        parsed["market_data_provenance"]["source_version"].as_integer(),
+        Some(0)
+    );
+    assert_eq!(
+        parsed["market_data_provenance"]["bybit_live_execution_unchanged"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        parsed["market_data_provenance"]["ibkr_contact_performed"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        parsed["market_data_provenance"]["live_or_tiny_live_authorized"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
+        "stock_market_data_provenance_v1"
+    );
     assert_eq!(
         parsed["evidence_clock_day"]["status"].as_str(),
         Some("NOT_STARTED")

@@ -462,3 +462,9 @@ Do not paste long reports or stable architecture into TODO.
 - `stock_etf_reference_data_sources_v1` is now listed in the Phase 0 manifest contract list, required by Phase 3 frozen inputs, and required by broker capability shadow-fill / scorecard rows. Added blocked template `settings/broker/stock_etf_reference_data_sources.template.toml` and acceptance tests.
 - Verification passed: focused linked openclaw_types tests `28 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `168` integration/acceptance + `0` doc-tests; targeted touched-file `rustfmt --check` passed.
 - Boundary unchanged: no IBKR contact/healthcheck, no secret read/create/serialization, no connector runtime, no reference-data ingestion, no evidence clock, no scorecard writer, no DB apply, no GUI lane authority, no tiny-live/live, and no Bybit live execution behavior change. First IBKR contact remains blocked until real secret/topology evidence and immutable `phase2_ibkr_external_surface_gate_v1` PASS artifact exist.
+
+## 2026-06-30 IBKR Stock/ETF Market-Data Provenance Contract
+
+- Source checkpoint hardens `stock_market_data_provenance_v1` inside the Phase 3 evidence contract surface for lane/broker/environment, vendor/entitlement, payload/source hashes, timestamps, adjustment marker, instrument identity, and calendar session provenance.
+- The validator now rejects Bybit-live regression, IBKR contact, connector runtime, serialized secrets, and tiny-live/live authority; broker capability gates require it for market-data read, shadow-fill reconstruction, and scorecard derivation.
+- Verification passed: focused linked openclaw_types tests `25 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `171` integration/acceptance + `0` doc-tests. This grants no IBKR contact, connector runtime, collector, market-data ingestion, evidence clock, scorecard writer, DB apply, GUI lane authority, tiny-live, or live.
