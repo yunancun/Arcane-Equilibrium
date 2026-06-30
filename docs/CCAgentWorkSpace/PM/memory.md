@@ -2829,3 +2829,9 @@
 - PM updated `gui_lane_contract_v1` to require three exact display-only GET surfaces: `/api/v1/stock-etf/readiness`, `/api/v1/stock-etf/lane-status`, and `/api/v1/stock-etf/evidence-status`.
 - Added lane-status/evidence-status constants, GET-only fields, endpoint mismatch blockers, blocked template fields, and acceptance coverage; the Phase 0 named contract packet now documents the three-endpoint GUI surface.
 - Verification passed: `rustfmt --edition 2021` on GUI contract source/test, GUI contract `9 passed`, Phase0 manifest `6 passed`, FastAPI/static guard pytest `27 passed`, full `cargo test --manifest-path rust/Cargo.toml -p openclaw_types` `35` unit/golden + `182` integration/acceptance + `0` doc-tests, and `git diff --check`. This grants no IBKR contact, connector runtime, secret access, evidence clock runtime, scorecard writer, DB apply, paper order, fill import, GUI/lane selector authority, Phase 2 start, Phase 3 start, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Universe Status Read-Only Surface
+
+- PM added display-only `GET /api/v1/stock-etf/universe-status` backed by Rust IPC fixture `stock_etf.get_universe_status`, exposing blocked PIT universe contract status from local source types only.
+- GUI and `gui_lane_contract_v1` now require the universe-status GET-only surface alongside readiness/lane/evidence; static guards still reject write routes, direct broker writes, browser storage authority, and Stock/ETF paper-order IPC strings.
+- Verification passed: openclaw_engine `stock_etf` `9 passed`, FastAPI/static pytest `32 passed`, Node inline scripts `2`, full `openclaw_types` `35` unit/golden + `198` integration/acceptance + `0` doc-tests, and `git diff --check`. This grants no IBKR contact, connector runtime, secret access, collector/evidence clock, scorecard writer, DB apply, paper order, fill import, GUI/lane selector authority, Phase 2/3 start, tiny-live, live, or Bybit behavior change.

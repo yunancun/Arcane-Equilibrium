@@ -9,8 +9,8 @@ use openclaw_types::{
     evaluate_broker_operation, AssetLane, Broker, BrokerCapabilityRequest, BrokerEnvironment,
     BrokerOperation, IbkrExternalSurfaceGateV1, IbkrPhase2PolicyBundleV1, InstrumentKind,
     NonBybitApiAllowlistV1, StockEtfEvidenceClockDayV1, StockEtfFeatureFlags, StockEtfGateInputs,
-    StockMarketDataProvenanceV1, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
-    STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
+    StockEtfPitUniverseV1, StockMarketDataProvenanceV1, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
+    STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
 };
 
 pub(in crate::ipc_server) fn handle_stock_etf_ipc(
@@ -63,6 +63,9 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
         "stock_etf.get_evidence_status" => {
             JsonRpcResponse::success(id, evidence_status_summary(phase2))
         }
+        "stock_etf.get_universe_status" => {
+            JsonRpcResponse::success(id, universe_status_summary(phase2))
+        }
         _ => {
             let operation = match operation_for_method(method) {
                 Some(op) => op,
@@ -99,6 +102,74 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
             )
         }
     }
+}
+
+fn universe_status_summary(phase2: serde_json::Value) -> serde_json::Value {
+    let universe = StockEtfPitUniverseV1 {
+        asset_lane: AssetLane::StockEtfCash,
+        broker: Broker::Ibkr,
+        bybit_live_execution_unchanged: true,
+        ibkr_live_denied: true,
+        ..StockEtfPitUniverseV1::default()
+    };
+    let universe_verdict = universe.validate();
+    let constituents: Vec<serde_json::Value> = universe
+        .constituents
+        .iter()
+        .take(10)
+        .map(|constituent| {
+            serde_json::json!({
+                "symbol": constituent.symbol,
+                "instrument_kind": constituent.instrument_kind,
+                "listing_venue": constituent.listing_venue,
+                "primary_exchange": constituent.primary_exchange,
+                "currency": constituent.currency,
+                "tradability_status": constituent.tradability_status,
+                "priips_kid_status": constituent.priips_kid_status,
+                "included": constituent.included,
+            })
+        })
+        .collect();
+
+    serde_json::json!({
+        "phase": "phase3_universe_status_source_fixture",
+        "asset_lane": AssetLane::StockEtfCash,
+        "broker": Broker::Ibkr,
+        "environment": BrokerEnvironment::Paper,
+        "universe_status_state": "blocked",
+        "phase3_started": false,
+        "universe": {
+            "expected_contract_id": STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
+            "contract_id": universe.contract_id,
+            "source_version": universe.source_version,
+            "accepted": universe_verdict.accepted,
+            "blockers": universe_verdict.blockers,
+            "universe_id": universe.universe_id,
+            "universe_version": universe.universe_version,
+            "universe_hash_present": !universe.universe_hash.is_empty(),
+            "point_in_time_asof_ms": universe.point_in_time_asof_ms,
+            "effective_from_ms": universe.effective_from_ms,
+            "effective_to_ms": universe.effective_to_ms,
+            "constituent_count": universe.constituent_count,
+            "max_constituents": universe.max_constituents,
+            "sample_constituents": constituents,
+            "frozen_for_evidence_clock": universe.frozen_for_evidence_clock,
+            "survivorship_bias_controls_present": universe.survivorship_bias_controls_present,
+            "bybit_live_execution_unchanged": universe.bybit_live_execution_unchanged,
+            "ibkr_live_denied": universe.ibkr_live_denied,
+            "ibkr_contact_performed": universe.ibkr_contact_performed,
+            "secret_content_serialized": universe.secret_content_serialized,
+        },
+        "phase2": phase2,
+        "collector_started": false,
+        "market_data_ingestion_started": false,
+        "db_apply_performed": false,
+        "ibkr_live_enabled": false,
+        "ibkr_call_performed": false,
+        "secret_slot_touched": false,
+        "order_routed": false,
+        "bybit_ipc_reused": false,
+    })
 }
 
 fn evidence_status_summary(phase2: serde_json::Value) -> serde_json::Value {

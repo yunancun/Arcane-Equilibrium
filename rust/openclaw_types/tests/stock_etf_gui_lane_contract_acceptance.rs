@@ -9,6 +9,7 @@ use openclaw_types::{
     AssetLane, StockEtfGuiLaneBlocker, StockEtfGuiLaneContractV1,
     STOCK_ETF_GUI_EVIDENCE_STATUS_ENDPOINT, STOCK_ETF_GUI_LANE_CONTRACT_ID,
     STOCK_ETF_GUI_LANE_STATUS_ENDPOINT, STOCK_ETF_GUI_READINESS_ENDPOINT,
+    STOCK_ETF_GUI_UNIVERSE_STATUS_ENDPOINT,
 };
 
 #[test]
@@ -58,9 +59,14 @@ fn accepted_fixture_is_display_only_get_only_and_crypto_default() {
         contract.evidence_status_endpoint,
         STOCK_ETF_GUI_EVIDENCE_STATUS_ENDPOINT
     );
+    assert_eq!(
+        contract.universe_status_endpoint,
+        STOCK_ETF_GUI_UNIVERSE_STATUS_ENDPOINT
+    );
     assert!(contract.readiness_endpoint_get_only);
     assert!(contract.lane_status_endpoint_get_only);
     assert!(contract.evidence_status_endpoint_get_only);
+    assert!(contract.universe_status_endpoint_get_only);
     assert!(contract.display_only);
     assert!(!contract.ibkr_contact_performed);
 }
@@ -92,6 +98,8 @@ fn gui_lane_contract_requires_all_stock_etf_readonly_get_endpoints() {
     contract.lane_status_endpoint_get_only = false;
     contract.evidence_status_endpoint = "/api/v1/stock-etf/evidence".to_string();
     contract.evidence_status_endpoint_get_only = false;
+    contract.universe_status_endpoint = "/api/v1/stock-etf/universe".to_string();
+    contract.universe_status_endpoint_get_only = false;
 
     let verdict = contract.validate();
 
@@ -114,6 +122,12 @@ fn gui_lane_contract_requires_all_stock_etf_readonly_get_endpoints() {
     assert!(verdict
         .blockers
         .contains(&StockEtfGuiLaneBlocker::EvidenceStatusEndpointNotGetOnly));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfGuiLaneBlocker::UniverseStatusEndpointMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfGuiLaneBlocker::UniverseStatusEndpointNotGetOnly));
 }
 
 #[test]
@@ -244,6 +258,10 @@ fn blocked_template_is_parseable_and_secret_free() {
     assert_eq!(
         parsed.evidence_status_endpoint,
         STOCK_ETF_GUI_EVIDENCE_STATUS_ENDPOINT
+    );
+    assert_eq!(
+        parsed.universe_status_endpoint,
+        STOCK_ETF_GUI_UNIVERSE_STATUS_ENDPOINT
     );
     assert!(!parsed.ibkr_contact_performed);
     assert!(!parsed.secret_content_serialized);
