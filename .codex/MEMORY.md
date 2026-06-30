@@ -482,3 +482,9 @@ Do not paste long reports or stable architecture into TODO.
 - The checker preserves Bybit-live unchanged proof and rejects checker-side IBKR contact, connector runtime, runtime evidence-clock start, scorecard writer, DB apply, serialized secrets, and tiny-live/live authority. `WINDOW_COMPLETE` remains rejected by the source checker alone.
 - Broker capability registry, lane-scoped IPC, Phase 0 manifest, exports, and the default-blocked Phase 3 template now use the shared evidence-clock contract constant.
 - Verification passed: focused linked openclaw_types tests `33 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `174` integration/acceptance + `0` doc-tests. This grants no IBKR contact, connector runtime, evidence clock, collector, scorecard writer, DB apply, GUI lane authority, paper order, tiny-live, or live.
+
+## 2026-06-30 IBKR Stock/ETF Release/Tiny-Live Contract Hardening
+
+- Source checkpoint hardens `stock_etf_release_packet_v1` and `tiny_live_adr_eligibility_v1`: release packets now require exact `packet_id == stock_etf_release_packet_v1` plus `source_version=1`, and tiny-live ADR eligibility now requires exact `contract_id == tiny_live_adr_eligibility_v1` plus `source_version=1`.
+- The Phase 0 manifest validator consumes shared release/tiny-live contract constants; blocked templates expose `source_version=0`; regression tests reject old `_fixture` ids and wrong source versions.
+- Verification passed: focused linked openclaw_types tests `21 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `176` integration/acceptance + `0` doc-tests. This grants no IBKR contact, connector runtime, evidence clock, scorecard writer, DB apply, GUI lane authority, paper order, ADR start, tiny-live, or live.

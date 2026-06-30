@@ -14,6 +14,7 @@ use crate::stock_etf_release_packet::{
 pub const STOCK_ETF_TINY_LIVE_ADR_PATH: &str = STOCK_ETF_RELEASE_ADR_PATH;
 pub const STOCK_ETF_TINY_LIVE_AMD_PATH: &str = STOCK_ETF_RELEASE_AMD_PATH;
 pub const STOCK_ETF_TINY_LIVE_SPEC_PATH: &str = STOCK_ETF_RELEASE_SPEC_PATH;
+pub const STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID: &str = "tiny_live_adr_eligibility_v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -33,6 +34,7 @@ impl Default for TinyLiveAdrEligibilityDecision {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TinyLiveAdrEligibilityV1 {
     pub contract_id: String,
+    pub source_version: u32,
     pub adr_path: String,
     pub amd_path: String,
     pub spec_path: String,
@@ -63,6 +65,7 @@ impl Default for TinyLiveAdrEligibilityV1 {
     fn default() -> Self {
         Self {
             contract_id: String::new(),
+            source_version: 0,
             adr_path: STOCK_ETF_TINY_LIVE_ADR_PATH.to_string(),
             amd_path: STOCK_ETF_TINY_LIVE_AMD_PATH.to_string(),
             spec_path: STOCK_ETF_TINY_LIVE_SPEC_PATH.to_string(),
@@ -94,7 +97,8 @@ impl Default for TinyLiveAdrEligibilityV1 {
 impl TinyLiveAdrEligibilityV1 {
     pub fn adr_discussion_fixture() -> Self {
         Self {
-            contract_id: "tiny_live_adr_eligibility_v1_fixture".to_string(),
+            contract_id: STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID.to_string(),
+            source_version: 1,
             phase5_release_packet_hash: "1".repeat(64),
             scorecard_manifest_hash: "2".repeat(64),
             dq_manifest_hash: "3".repeat(64),
@@ -127,6 +131,11 @@ impl TinyLiveAdrEligibilityV1 {
         let mut blockers = Vec::new();
         if self.contract_id.trim().is_empty() {
             blockers.push(Blocker::ContractIdMissing);
+        } else if self.contract_id != STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID {
+            blockers.push(Blocker::ContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
         }
         if self.adr_path != STOCK_ETF_TINY_LIVE_ADR_PATH {
             blockers.push(Blocker::AdrPathMismatch);
@@ -229,6 +238,8 @@ impl<B> TinyLiveAdrEligibilityVerdict<B> {
 #[serde(rename_all = "snake_case")]
 pub enum TinyLiveAdrEligibilityBlocker {
     ContractIdMissing,
+    ContractIdMismatch,
+    SourceVersionMismatch,
     AdrPathMismatch,
     AmdPathMismatch,
     SpecPathMismatch,

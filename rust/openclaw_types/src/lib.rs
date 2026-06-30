@@ -144,7 +144,7 @@ pub use stock_etf_release_packet::{
     StockEtfKillDisableCleanupProofV1, StockEtfPgMigrationEvidenceV1,
     StockEtfReleaseManifestHashV1, StockEtfReleasePacketBlocker, StockEtfReleasePacketV1,
     StockEtfReleaseVerdict, STOCK_ETF_RELEASE_ADR_PATH, STOCK_ETF_RELEASE_AMD_PATH,
-    STOCK_ETF_RELEASE_SPEC_PATH,
+    STOCK_ETF_RELEASE_PACKET_CONTRACT_ID, STOCK_ETF_RELEASE_SPEC_PATH,
 };
 pub use stock_etf_risk_policy::{
     StockEtfRiskPolicyBlocker, StockEtfRiskPolicySourceConfigV1,
@@ -168,8 +168,8 @@ pub use stock_etf_strategy_hypothesis::{
 };
 pub use stock_etf_tiny_live_eligibility::{
     TinyLiveAdrEligibilityBlocker, TinyLiveAdrEligibilityDecision, TinyLiveAdrEligibilityV1,
-    TinyLiveAdrEligibilityVerdict, STOCK_ETF_TINY_LIVE_ADR_PATH, STOCK_ETF_TINY_LIVE_AMD_PATH,
-    STOCK_ETF_TINY_LIVE_SPEC_PATH,
+    TinyLiveAdrEligibilityVerdict, STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID,
+    STOCK_ETF_TINY_LIVE_ADR_PATH, STOCK_ETF_TINY_LIVE_AMD_PATH, STOCK_ETF_TINY_LIVE_SPEC_PATH,
 };
 
 // ---------------------------------------------------------------------------

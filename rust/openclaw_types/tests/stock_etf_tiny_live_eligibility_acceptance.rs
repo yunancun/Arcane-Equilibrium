@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 use openclaw_types::{
     TinyLiveAdrEligibilityBlocker, TinyLiveAdrEligibilityDecision, TinyLiveAdrEligibilityV1,
+    STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID,
 };
 
 #[test]
@@ -17,6 +18,9 @@ fn default_tiny_live_eligibility_blocks_discussion() {
     assert!(verdict
         .blockers
         .contains(&TinyLiveAdrEligibilityBlocker::ContractIdMissing));
+    assert!(verdict
+        .blockers
+        .contains(&TinyLiveAdrEligibilityBlocker::SourceVersionMismatch));
     assert!(verdict
         .blockers
         .contains(&TinyLiveAdrEligibilityBlocker::Phase5ReleasePacketHashInvalid));
@@ -39,9 +43,32 @@ fn accepted_fixture_allows_only_future_adr_discussion() {
     assert!(verdict.accepted);
     assert!(verdict.blockers.is_empty());
     assert_eq!(
+        candidate.contract_id,
+        STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID
+    );
+    assert_eq!(candidate.source_version, 1);
+    assert_eq!(
         candidate.decision,
         TinyLiveAdrEligibilityDecision::AdrDiscussionOnly
     );
+}
+
+#[test]
+fn tiny_live_eligibility_requires_exact_contract_id_and_source_version() {
+    let candidate = TinyLiveAdrEligibilityV1 {
+        contract_id: "tiny_live_adr_eligibility_v1_fixture".to_string(),
+        source_version: 2,
+        ..TinyLiveAdrEligibilityV1::adr_discussion_fixture()
+    };
+    let verdict = candidate.validate();
+
+    assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&TinyLiveAdrEligibilityBlocker::ContractIdMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&TinyLiveAdrEligibilityBlocker::SourceVersionMismatch));
 }
 
 #[test]
@@ -128,6 +155,7 @@ fn blocked_template_is_parseable_and_secret_free() {
         toml::from_str(&raw).expect("tiny-live ADR eligibility template parses");
 
     assert_eq!(parsed.decision, TinyLiveAdrEligibilityDecision::NotEligible);
+    assert_eq!(parsed.source_version, 0);
     assert!(!parsed.paper_shadow_window_complete);
     assert!(!parsed.sealed);
     assert!(!parsed.validate().accepted);

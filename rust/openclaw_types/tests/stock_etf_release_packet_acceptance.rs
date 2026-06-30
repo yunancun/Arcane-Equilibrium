@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use openclaw_types::{
     StockEtfKillDisableCleanupProofV1, StockEtfPgMigrationEvidenceV1, StockEtfReleasePacketBlocker,
-    StockEtfReleasePacketV1,
+    StockEtfReleasePacketV1, STOCK_ETF_RELEASE_PACKET_CONTRACT_ID,
 };
 
 #[test]
@@ -20,6 +20,10 @@ fn default_release_packet_blocks_launch() {
     assert!(has(
         &verdict.blockers,
         StockEtfReleasePacketBlocker::PacketIdMissing
+    ));
+    assert!(has(
+        &verdict.blockers,
+        StockEtfReleasePacketBlocker::SourceVersionMismatch
     ));
     assert!(has(
         &verdict.blockers,
@@ -59,8 +63,29 @@ fn accepted_fixture_completes_paper_shadow_release_without_live_authority() {
     );
     assert!(!packet.secret_content_serialized);
     assert!(!packet.ibkr_live_or_tiny_live_authorized);
+    assert_eq!(packet.packet_id, STOCK_ETF_RELEASE_PACKET_CONTRACT_ID);
+    assert_eq!(packet.source_version, 1);
     assert!(packet.paper_shadow_window_complete);
     assert!(packet.engineering_shakedown_complete);
+}
+
+#[test]
+fn release_packet_requires_exact_contract_id_and_source_version() {
+    let packet = StockEtfReleasePacketV1 {
+        packet_id: "stock_etf_release_packet_v1_fixture".to_string(),
+        source_version: 2,
+        ..StockEtfReleasePacketV1::accepted_fixture()
+    };
+    let blockers = packet.validate().blockers;
+
+    assert!(has(
+        &blockers,
+        StockEtfReleasePacketBlocker::PacketIdMismatch
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfReleasePacketBlocker::SourceVersionMismatch
+    ));
 }
 
 #[test]
@@ -220,6 +245,10 @@ fn blocked_release_packet_template_is_parseable_and_secret_free() {
     let parsed: toml::Value = toml::from_str(&raw).expect("release packet template parses");
 
     assert_eq!(parsed["release_packet"]["sealed"].as_bool(), Some(false));
+    assert_eq!(
+        parsed["release_packet"]["source_version"].as_integer(),
+        Some(0)
+    );
     assert_eq!(
         parsed["release_packet"]["paper_shadow_window_complete"].as_bool(),
         Some(false)
