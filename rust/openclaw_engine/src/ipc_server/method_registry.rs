@@ -73,6 +73,12 @@ pub const STOCK_ETF_GET_READINESS: IpcMethodSpec = IpcMethodSpec {
     slot: IpcSlotRequirement::None,
 };
 
+pub const STOCK_ETF_GET_DATA_FOUNDATION_STATUS: IpcMethodSpec = IpcMethodSpec {
+    name: "stock_etf.get_data_foundation_status",
+    readonly: true,
+    slot: IpcSlotRequirement::None,
+};
+
 pub const STOCK_ETF_GET_ACCOUNT_STATUS: IpcMethodSpec = IpcMethodSpec {
     name: "stock_etf.get_account_status",
     readonly: true,
@@ -164,6 +170,7 @@ pub const IPC_METHOD_REGISTRY: &[IpcMethodSpec] = &[
     EVALUATE_PROMOTION_CRITERIA,
     STOCK_ETF_GET_LANE_STATUS,
     STOCK_ETF_GET_READINESS,
+    STOCK_ETF_GET_DATA_FOUNDATION_STATUS,
     STOCK_ETF_GET_ACCOUNT_STATUS,
     STOCK_ETF_GET_EVIDENCE_STATUS,
     STOCK_ETF_GET_UNIVERSE_STATUS,
@@ -239,6 +246,7 @@ mod tests {
         for name in [
             "stock_etf.get_lane_status",
             "stock_etf.get_readiness",
+            "stock_etf.get_data_foundation_status",
             "stock_etf.get_account_status",
             "stock_etf.get_evidence_status",
             "stock_etf.get_universe_status",

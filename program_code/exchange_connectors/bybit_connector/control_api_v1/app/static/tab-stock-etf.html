@@ -82,6 +82,11 @@
       <div class="se-metric-sub" id="se-paper-sub"></div>
     </div>
     <div class="se-metric">
+      <div class="se-metric-label">Data Foundation</div>
+      <div class="se-metric-value" id="se-data-foundation-state">--</div>
+      <div class="se-metric-sub" id="se-data-foundation-sub"></div>
+    </div>
+    <div class="se-metric">
       <div class="se-metric-label">IBKR Account</div>
       <div class="se-metric-value" id="se-account-state">--</div>
       <div class="se-metric-sub" id="se-account-sub"></div>
@@ -148,6 +153,18 @@
       </div>
       <table class="se-kv">
         <tbody id="se-phase2-body">
+          <tr><td colspan="2" class="se-muted">Loading...</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="se-panel" id="se-data-foundation-panel">
+      <div class="se-panel-title">
+        <span>Data Foundation Status</span>
+        <span id="se-data-foundation-status" class="oc-chip oc-chip-neutral">--</span>
+      </div>
+      <table class="se-kv">
+        <tbody id="se-data-foundation-body">
           <tr><td colspan="2" class="se-muted">Loading...</td></tr>
         </tbody>
       </table>
@@ -288,6 +305,7 @@
 <script>
 const LANE_STATUS_ENDPOINT = '/api/v1/stock-etf/lane-status';
 const READINESS_ENDPOINT = '/api/v1/stock-etf/readiness';
+const DATA_FOUNDATION_STATUS_ENDPOINT = '/api/v1/stock-etf/data-foundation-status';
 const ACCOUNT_STATUS_ENDPOINT = '/api/v1/stock-etf/account-status';
 const EVIDENCE_STATUS_ENDPOINT = '/api/v1/stock-etf/evidence-status';
 const UNIVERSE_STATUS_ENDPOINT = '/api/v1/stock-etf/universe-status';
@@ -332,6 +350,89 @@ function chipList(items, emptyText) {
     return '<span class="se-muted">' + ocEsc(emptyText || '-') + '</span>';
   }
   return items.map(item => ocChip(String(item), toneFor(item))).join('');
+}
+
+function dataFoundationFallback(reason) {
+  const why = reason || 'api_unavailable';
+  return {
+    data_foundation_status_state: 'degraded',
+    phase: 'phase2_data_foundation_status_source_fixture',
+    phase2_started: false,
+    phase3_started: false,
+    gui_authority: 'display_only',
+    instrument_identity: {
+      expected_contract_id: 'instrument_identity_contract_v1',
+      contract_id: '',
+      source_version: 0,
+      accepted: false,
+      blockers: [why],
+      symbol: '',
+      instrument_kind: 'stock',
+      listing_venue: 'unknown_denied',
+      primary_exchange: 'unknown_denied',
+      currency: 'unknown_denied',
+      tradability_status: 'unknown_denied',
+      priips_kid_status: 'unknown_denied',
+      fractional_policy_recorded: false,
+      point_in_time_asof_ms: 0,
+      market_calendar_id_present: false,
+      market_calendar_hash_present: false,
+      broker_contract_details_hash_present: false,
+      instrument_identity_hash_present: false,
+      corporate_action_adjustment_version_hash_present: false,
+      source_artifact_hash_present: false,
+      bybit_live_execution_unchanged: true,
+      ibkr_live_denied: true,
+      margin_short_denied: true,
+      options_cfd_denied: true,
+      ibkr_contact_performed: false,
+      secret_content_serialized: false,
+    },
+    reference_data_sources: {
+      expected_contract_id: 'stock_etf_reference_data_sources_v1',
+      contract_id: '',
+      source_version: 0,
+      accepted: false,
+      blockers: [why],
+      environment: 'paper',
+      frozen_for_evidence_clock: false,
+      corporate_action_source_name: '',
+      corporate_action_asof_ms: 0,
+      corporate_action_raw_hash_present: false,
+      corporate_action_adjustment_version_hash_present: false,
+      corporate_action_policy_hash_present: false,
+      dividend_treatment_hash_present: false,
+      fx_rate_source_name: '',
+      fx_rate_asof_ms: 0,
+      base_currency: 'unknown_denied',
+      quote_currency: 'unknown_denied',
+      fx_rate_snapshot_hash_present: false,
+      fx_drag_model_hash_present: false,
+      fee_schedule_source_name: '',
+      fee_schedule_asof_ms: 0,
+      commission_schedule_hash_present: false,
+      exchange_regulatory_fee_hash_present: false,
+      tax_ftt_placeholder_hash_present: false,
+      withholding_tax_treatment_hash_present: false,
+      source_artifact_hash_present: false,
+      bybit_live_execution_unchanged: true,
+      ibkr_contact_performed: false,
+      connector_runtime_started: false,
+      secret_content_serialized: false,
+      live_or_tiny_live_authorized: false,
+    },
+    contract_details_request_started: false,
+    reference_data_collection_started: false,
+    collector_started: false,
+    market_data_ingestion_started: false,
+    connector_runtime_started: false,
+    db_apply_performed: false,
+    evidence_clock_started: false,
+    scorecard_writer_started: false,
+    contract_violations: [],
+    degraded: true,
+    reason: why,
+  };
 }
 
 function accountFallback(reason) {
@@ -822,6 +923,7 @@ function renderFallback() {
     reason: 'api_unavailable',
   };
   renderReadiness(data, null);
+  renderDataFoundationStatus(dataFoundationFallback('api_unavailable'));
   renderAccountStatus(accountFallback('api_unavailable'));
   renderEvidenceStatus(evidenceFallback('api_unavailable'));
   renderUniverseStatus(universeFallback('api_unavailable'));
@@ -917,6 +1019,130 @@ function renderReadiness(data, laneStatus) {
   document.getElementById('se-phase2-panel').classList.toggle('se-warn-line', data.first_ibkr_contact_allowed !== true);
   document.getElementById('se-api-allowlist-panel').classList.toggle('se-bad-line', apiAllowlist.accepted !== true);
   document.getElementById('se-guard-panel').classList.toggle('se-bad-line', (data.contract_violations || []).length > 0);
+}
+
+function renderDataFoundationStatus(data) {
+  const status = data || dataFoundationFallback('api_unavailable');
+  const identity = status.instrument_identity || {};
+  const reference = status.reference_data_sources || {};
+  const state = status.data_foundation_status_state || 'blocked';
+  const dataBlockers = []
+    .concat(identity.blockers || [])
+    .concat(reference.blockers || [])
+    .concat(status.phase2_gate_blockers || [])
+    .concat(status.contract_violations || []);
+  document.getElementById('se-data-foundation-state').innerHTML = textChip(state);
+  document.getElementById('se-data-foundation-sub').textContent =
+    identity.accepted && reference.accepted ? 'source_ready' : 'identity/reference blocked';
+  setChip('se-data-foundation-status', state, toneFor(state));
+  document.getElementById('se-data-foundation-body').innerHTML = [
+    kvRow('phase', textChip(status.phase || '-')),
+    kvRow('environment', textChip(status.environment || 'paper')),
+    kvRow('phase2_started', boolChip(status.phase2_started, true)),
+    kvRow('phase3_started', boolChip(status.phase3_started, true)),
+    kvRow('contract_details_request_started', boolChip(status.contract_details_request_started, true)),
+    kvRow('reference_data_collection_started', boolChip(status.reference_data_collection_started, true)),
+    kvRow('instrument.accepted', boolChip(identity.accepted, false)),
+    kvRow('instrument.expected_contract_id', textChip(identity.expected_contract_id || '-')),
+    kvRow('instrument.contract_id', textChip(identity.contract_id || '-')),
+    kvRow('instrument.source_version', textChip(identity.source_version)),
+    kvRow(
+      'instrument.identity',
+      '<span class="se-code">' +
+        ocEsc(
+          'symbol=' + String(identity.symbol || '-') +
+          ' kind=' + String(identity.instrument_kind || '-') +
+          ' venue=' + String(identity.listing_venue || '-') +
+          ' primary=' + String(identity.primary_exchange || '-')
+        ) +
+      '</span>'
+    ),
+    kvRow(
+      'instrument.tradeability',
+      '<span class="se-code">' +
+        ocEsc(
+          'ccy=' + String(identity.currency || '-') +
+          ' tradability=' + String(identity.tradability_status || '-') +
+          ' priips=' + String(identity.priips_kid_status || '-')
+        ) +
+      '</span>'
+    ),
+    kvRow('instrument.fractional_policy_recorded', boolChip(identity.fractional_policy_recorded, false)),
+    kvRow('instrument.point_in_time_asof_ms', textChip(identity.point_in_time_asof_ms || 0)),
+    kvRow('instrument.market_calendar_id_present', boolChip(identity.market_calendar_id_present, false)),
+    kvRow('instrument.market_calendar_hash_present', boolChip(identity.market_calendar_hash_present, false)),
+    kvRow('instrument.contract_details_hash_present', boolChip(identity.broker_contract_details_hash_present, false)),
+    kvRow('instrument.identity_hash_present', boolChip(identity.instrument_identity_hash_present, false)),
+    kvRow('instrument.corporate_action_hash_present', boolChip(identity.corporate_action_adjustment_version_hash_present, false)),
+    kvRow('instrument.source_artifact_hash_present', boolChip(identity.source_artifact_hash_present, false)),
+    kvRow('instrument.bybit_live_execution_unchanged', boolChip(identity.bybit_live_execution_unchanged, false)),
+    kvRow('instrument.ibkr_live_denied', boolChip(identity.ibkr_live_denied, false)),
+    kvRow('instrument.margin_short_denied', boolChip(identity.margin_short_denied, false)),
+    kvRow('instrument.options_cfd_denied', boolChip(identity.options_cfd_denied, false)),
+    kvRow('instrument.ibkr_contact_performed', boolChip(identity.ibkr_contact_performed, true)),
+    kvRow('instrument.secret_content_serialized', boolChip(identity.secret_content_serialized, true)),
+    kvRow('reference.accepted', boolChip(reference.accepted, false)),
+    kvRow('reference.expected_contract_id', textChip(reference.expected_contract_id || '-')),
+    kvRow('reference.contract_id', textChip(reference.contract_id || '-')),
+    kvRow('reference.source_version', textChip(reference.source_version)),
+    kvRow('reference.frozen_for_evidence_clock', boolChip(reference.frozen_for_evidence_clock, false)),
+    kvRow(
+      'reference.sources',
+      '<span class="se-code">' +
+        ocEsc(
+          'corp=' + String(reference.corporate_action_source_name || '-') +
+          ' fx=' + String(reference.fx_rate_source_name || '-') +
+          ' fee=' + String(reference.fee_schedule_source_name || '-')
+        ) +
+      '</span>'
+    ),
+    kvRow(
+      'reference.asof_ms',
+      '<span class="se-code">' +
+        ocEsc(
+          'corp=' + String(reference.corporate_action_asof_ms || 0) +
+          ' fx=' + String(reference.fx_rate_asof_ms || 0) +
+          ' fee=' + String(reference.fee_schedule_asof_ms || 0)
+        ) +
+      '</span>'
+    ),
+    kvRow(
+      'reference.currencies',
+      '<span class="se-code">' +
+        ocEsc(
+          'base=' + String(reference.base_currency || '-') +
+          ' quote=' + String(reference.quote_currency || '-')
+        ) +
+      '</span>'
+    ),
+    kvRow('reference.corporate_action_raw_hash_present', boolChip(reference.corporate_action_raw_hash_present, false)),
+    kvRow('reference.corporate_action_policy_hash_present', boolChip(reference.corporate_action_policy_hash_present, false)),
+    kvRow('reference.dividend_treatment_hash_present', boolChip(reference.dividend_treatment_hash_present, false)),
+    kvRow('reference.fx_rate_snapshot_hash_present', boolChip(reference.fx_rate_snapshot_hash_present, false)),
+    kvRow('reference.fx_drag_model_hash_present', boolChip(reference.fx_drag_model_hash_present, false)),
+    kvRow('reference.commission_schedule_hash_present', boolChip(reference.commission_schedule_hash_present, false)),
+    kvRow('reference.exchange_regulatory_fee_hash_present', boolChip(reference.exchange_regulatory_fee_hash_present, false)),
+    kvRow('reference.tax_ftt_placeholder_hash_present', boolChip(reference.tax_ftt_placeholder_hash_present, false)),
+    kvRow('reference.withholding_tax_treatment_hash_present', boolChip(reference.withholding_tax_treatment_hash_present, false)),
+    kvRow('reference.source_artifact_hash_present', boolChip(reference.source_artifact_hash_present, false)),
+    kvRow('reference.bybit_live_execution_unchanged', boolChip(reference.bybit_live_execution_unchanged, false)),
+    kvRow('reference.ibkr_contact_performed', boolChip(reference.ibkr_contact_performed, true)),
+    kvRow('reference.connector_runtime_started', boolChip(reference.connector_runtime_started, true)),
+    kvRow('reference.secret_content_serialized', boolChip(reference.secret_content_serialized, true)),
+    kvRow('reference.live_or_tiny_live_authorized', boolChip(reference.live_or_tiny_live_authorized, true)),
+    kvRow('collector_started', boolChip(status.collector_started, true)),
+    kvRow('market_data_ingestion_started', boolChip(status.market_data_ingestion_started, true)),
+    kvRow('connector_runtime_started', boolChip(status.connector_runtime_started, true)),
+    kvRow('db_apply_performed', boolChip(status.db_apply_performed, true)),
+    kvRow('evidence_clock_started', boolChip(status.evidence_clock_started, true)),
+    kvRow('scorecard_writer_started', boolChip(status.scorecard_writer_started, true)),
+    kvRow('blockers', chipList(dataBlockers, 'none')),
+    kvRow('reason', '<span class="se-code">' + ocEsc(status.reason || '-') + '</span>'),
+  ].join('');
+  document.getElementById('se-data-foundation-panel').classList.toggle(
+    'se-bad-line',
+    (status.contract_violations || []).length > 0
+  );
 }
 
 function renderAccountStatus(data) {
@@ -1484,6 +1710,7 @@ async function loadReadiness() {
   const [
     lanePayload,
     readinessPayload,
+    dataFoundationPayload,
     accountPayload,
     evidencePayload,
     universePayload,
@@ -1495,6 +1722,7 @@ async function loadReadiness() {
   ] = await Promise.all([
     ocApi(LANE_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(READINESS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
+    ocApi(DATA_FOUNDATION_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(ACCOUNT_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(EVIDENCE_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(UNIVERSE_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
@@ -1509,6 +1737,11 @@ async function loadReadiness() {
     return;
   }
   renderReadiness(readinessPayload.data, lanePayload && lanePayload.data ? lanePayload.data : null);
+  renderDataFoundationStatus(
+    dataFoundationPayload && dataFoundationPayload.data
+      ? dataFoundationPayload.data
+      : dataFoundationFallback('api_unavailable')
+  );
   renderAccountStatus(accountPayload && accountPayload.data ? accountPayload.data : accountFallback('api_unavailable'));
   renderEvidenceStatus(evidencePayload && evidencePayload.data ? evidencePayload.data : evidenceFallback('api_unavailable'));
   renderUniverseStatus(universePayload && universePayload.data ? universePayload.data : universeFallback('api_unavailable'));

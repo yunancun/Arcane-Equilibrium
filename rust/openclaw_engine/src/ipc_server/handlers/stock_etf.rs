@@ -11,13 +11,15 @@ use openclaw_types::{
     IbkrExternalSurfaceGateV1, IbkrPaperAttestationPolicyV1, IbkrPhase2PolicyBundleV1,
     IbkrSessionAttestationV1, InstrumentKind, NonBybitApiAllowlistV1,
     StockEtfDisableCleanupRunbookV1, StockEtfEvidenceClockDayV1, StockEtfFeatureFlags,
-    StockEtfGateInputs, StockEtfPitUniverseV1, StockEtfReleasePacketV1, StockEtfScorecardVerdictV1,
+    StockEtfGateInputs, StockEtfInstrumentIdentityV1, StockEtfPitUniverseV1,
+    StockEtfReferenceDataSourcesV1, StockEtfReleasePacketV1, StockEtfScorecardVerdictV1,
     StockEtfStrategyHypothesisV1, StockMarketDataProvenanceV1, StockShadowFillModelV1,
     TinyLiveAdrEligibilityV1, BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID,
     BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID, IBKR_PAPER_ATTESTATION_CONTRACT_ID,
     IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
     STOCK_ETF_DISABLE_CLEANUP_RUNBOOK_ID, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
-    STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID, STOCK_ETF_RELEASE_PACKET_CONTRACT_ID,
+    STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID, STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
+    STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID, STOCK_ETF_RELEASE_PACKET_CONTRACT_ID,
     STOCK_ETF_SCORECARD_VERDICT_CONTRACT_ID, STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
     STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
     STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
@@ -70,6 +72,9 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
                 "bybit_ipc_reused": false,
             }),
         ),
+        "stock_etf.get_data_foundation_status" => {
+            JsonRpcResponse::success(id, data_foundation_status_summary(phase2))
+        }
         "stock_etf.get_account_status" => {
             JsonRpcResponse::success(id, account_status_summary(phase2))
         }
@@ -128,6 +133,119 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
             )
         }
     }
+}
+
+fn data_foundation_status_summary(phase2: serde_json::Value) -> serde_json::Value {
+    let instrument_identity = StockEtfInstrumentIdentityV1 {
+        asset_lane: AssetLane::StockEtfCash,
+        broker: Broker::Ibkr,
+        instrument_kind: InstrumentKind::Stock,
+        bybit_live_execution_unchanged: true,
+        ibkr_live_denied: true,
+        margin_short_denied: true,
+        options_cfd_denied: true,
+        ..StockEtfInstrumentIdentityV1::default()
+    };
+    let instrument_verdict = instrument_identity.validate();
+    let reference_sources = StockEtfReferenceDataSourcesV1 {
+        asset_lane: AssetLane::StockEtfCash,
+        broker: Broker::Ibkr,
+        environment: BrokerEnvironment::Paper,
+        bybit_live_execution_unchanged: true,
+        live_or_tiny_live_authorized: false,
+        ..StockEtfReferenceDataSourcesV1::default()
+    };
+    let reference_verdict = reference_sources.validate();
+
+    let identity = serde_json::json!({
+        "expected_contract_id": STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID,
+        "contract_id": instrument_identity.contract_id,
+        "source_version": instrument_identity.source_version,
+        "accepted": instrument_verdict.accepted,
+        "blockers": instrument_verdict.blockers,
+        "symbol": instrument_identity.symbol,
+        "instrument_kind": instrument_identity.instrument_kind,
+        "listing_venue": instrument_identity.listing_venue,
+        "primary_exchange": instrument_identity.primary_exchange,
+        "currency": instrument_identity.currency,
+        "tradability_status": instrument_identity.tradability_status,
+        "priips_kid_status": instrument_identity.priips_kid_status,
+        "fractional_policy_recorded": instrument_identity.fractional_policy_recorded,
+        "point_in_time_asof_ms": instrument_identity.point_in_time_asof_ms,
+        "market_calendar_id_present": !instrument_identity.market_calendar_id.is_empty(),
+        "market_calendar_hash_present": !instrument_identity.market_calendar_hash.is_empty(),
+        "broker_contract_details_hash_present": !instrument_identity.broker_contract_details_hash.is_empty(),
+        "instrument_identity_hash_present": !instrument_identity.instrument_identity_hash.is_empty(),
+        "corporate_action_adjustment_version_hash_present": !instrument_identity.corporate_action_adjustment_version_hash.is_empty(),
+        "source_artifact_hash_present": !instrument_identity.source_artifact_hash.is_empty(),
+        "bybit_live_execution_unchanged": instrument_identity.bybit_live_execution_unchanged,
+        "ibkr_live_denied": instrument_identity.ibkr_live_denied,
+        "margin_short_denied": instrument_identity.margin_short_denied,
+        "options_cfd_denied": instrument_identity.options_cfd_denied,
+        "ibkr_contact_performed": instrument_identity.ibkr_contact_performed,
+        "secret_content_serialized": instrument_identity.secret_content_serialized,
+    });
+    let reference = serde_json::json!({
+        "expected_contract_id": STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID,
+        "contract_id": reference_sources.contract_id,
+        "source_version": reference_sources.source_version,
+        "accepted": reference_verdict.accepted,
+        "blockers": reference_verdict.blockers,
+        "environment": reference_sources.environment,
+        "frozen_for_evidence_clock": reference_sources.frozen_for_evidence_clock,
+        "corporate_action_source_name": reference_sources.corporate_action_source_name,
+        "corporate_action_asof_ms": reference_sources.corporate_action_asof_ms,
+        "corporate_action_raw_hash_present": !reference_sources.corporate_action_raw_hash.is_empty(),
+        "corporate_action_adjustment_version_hash_present": !reference_sources.corporate_action_adjustment_version_hash.is_empty(),
+        "corporate_action_policy_hash_present": !reference_sources.corporate_action_policy_hash.is_empty(),
+        "dividend_treatment_hash_present": !reference_sources.dividend_treatment_hash.is_empty(),
+        "fx_rate_source_name": reference_sources.fx_rate_source_name,
+        "fx_rate_asof_ms": reference_sources.fx_rate_asof_ms,
+        "base_currency": reference_sources.base_currency,
+        "quote_currency": reference_sources.quote_currency,
+        "fx_rate_snapshot_hash_present": !reference_sources.fx_rate_snapshot_hash.is_empty(),
+        "fx_drag_model_hash_present": !reference_sources.fx_drag_model_hash.is_empty(),
+        "fee_schedule_source_name": reference_sources.fee_schedule_source_name,
+        "fee_schedule_asof_ms": reference_sources.fee_schedule_asof_ms,
+        "commission_schedule_hash_present": !reference_sources.commission_schedule_hash.is_empty(),
+        "exchange_regulatory_fee_hash_present": !reference_sources.exchange_regulatory_fee_hash.is_empty(),
+        "tax_ftt_placeholder_hash_present": !reference_sources.tax_ftt_placeholder_hash.is_empty(),
+        "withholding_tax_treatment_hash_present": !reference_sources.withholding_tax_treatment_hash.is_empty(),
+        "source_artifact_hash_present": !reference_sources.source_artifact_hash.is_empty(),
+        "bybit_live_execution_unchanged": reference_sources.bybit_live_execution_unchanged,
+        "ibkr_contact_performed": reference_sources.ibkr_contact_performed,
+        "connector_runtime_started": reference_sources.connector_runtime_started,
+        "secret_content_serialized": reference_sources.secret_content_serialized,
+        "live_or_tiny_live_authorized": reference_sources.live_or_tiny_live_authorized,
+    });
+
+    serde_json::json!({
+        "phase": "phase2_data_foundation_status_source_fixture",
+        "asset_lane": AssetLane::StockEtfCash,
+        "broker": Broker::Ibkr,
+        "environment": BrokerEnvironment::Paper,
+        "data_foundation_status_state": "blocked",
+        "phase2_started": false,
+        "phase3_started": false,
+        "contract_details_request_started": false,
+        "reference_data_collection_started": false,
+        "collector_started": false,
+        "market_data_ingestion_started": false,
+        "connector_runtime_started": false,
+        "db_apply_performed": false,
+        "evidence_clock_started": false,
+        "scorecard_writer_started": false,
+        "instrument_identity": identity,
+        "reference_data_sources": reference,
+        "phase2": phase2,
+        "ibkr_live_enabled": false,
+        "stock_live_disabled": true,
+        "paper_order_entry_visible": false,
+        "ibkr_call_performed": false,
+        "secret_slot_touched": false,
+        "order_routed": false,
+        "bybit_ipc_reused": false,
+    })
 }
 
 fn account_status_summary(phase2: serde_json::Value) -> serde_json::Value {
