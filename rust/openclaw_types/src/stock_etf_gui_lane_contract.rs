@@ -12,6 +12,7 @@ use crate::stock_etf_lane::AssetLane;
 pub const STOCK_ETF_GUI_LANE_CONTRACT_ID: &str = "gui_lane_contract_v1";
 pub const STOCK_ETF_GUI_READINESS_ENDPOINT: &str = "/api/v1/stock-etf/readiness";
 pub const STOCK_ETF_GUI_LANE_STATUS_ENDPOINT: &str = "/api/v1/stock-etf/lane-status";
+pub const STOCK_ETF_GUI_ACCOUNT_STATUS_ENDPOINT: &str = "/api/v1/stock-etf/account-status";
 pub const STOCK_ETF_GUI_EVIDENCE_STATUS_ENDPOINT: &str = "/api/v1/stock-etf/evidence-status";
 pub const STOCK_ETF_GUI_UNIVERSE_STATUS_ENDPOINT: &str = "/api/v1/stock-etf/universe-status";
 pub const STOCK_ETF_GUI_SHADOW_STATUS_ENDPOINT: &str = "/api/v1/stock-etf/shadow-status";
@@ -29,6 +30,8 @@ pub struct StockEtfGuiLaneContractV1 {
     pub readiness_endpoint_get_only: bool,
     pub lane_status_endpoint: String,
     pub lane_status_endpoint_get_only: bool,
+    pub account_status_endpoint: String,
+    pub account_status_endpoint_get_only: bool,
     pub evidence_status_endpoint: String,
     pub evidence_status_endpoint_get_only: bool,
     pub universe_status_endpoint: String,
@@ -76,6 +79,8 @@ impl Default for StockEtfGuiLaneContractV1 {
             readiness_endpoint_get_only: false,
             lane_status_endpoint: String::new(),
             lane_status_endpoint_get_only: false,
+            account_status_endpoint: String::new(),
+            account_status_endpoint_get_only: false,
             evidence_status_endpoint: String::new(),
             evidence_status_endpoint_get_only: false,
             universe_status_endpoint: String::new(),
@@ -125,6 +130,8 @@ impl StockEtfGuiLaneContractV1 {
             readiness_endpoint_get_only: true,
             lane_status_endpoint: STOCK_ETF_GUI_LANE_STATUS_ENDPOINT.to_string(),
             lane_status_endpoint_get_only: true,
+            account_status_endpoint: STOCK_ETF_GUI_ACCOUNT_STATUS_ENDPOINT.to_string(),
+            account_status_endpoint_get_only: true,
             evidence_status_endpoint: STOCK_ETF_GUI_EVIDENCE_STATUS_ENDPOINT.to_string(),
             evidence_status_endpoint_get_only: true,
             universe_status_endpoint: STOCK_ETF_GUI_UNIVERSE_STATUS_ENDPOINT.to_string(),
@@ -197,6 +204,12 @@ impl StockEtfGuiLaneContractV1 {
         }
         if !self.lane_status_endpoint_get_only {
             blockers.push(Blocker::LaneStatusEndpointNotGetOnly);
+        }
+        if self.account_status_endpoint != STOCK_ETF_GUI_ACCOUNT_STATUS_ENDPOINT {
+            blockers.push(Blocker::AccountStatusEndpointMismatch);
+        }
+        if !self.account_status_endpoint_get_only {
+            blockers.push(Blocker::AccountStatusEndpointNotGetOnly);
         }
         if self.evidence_status_endpoint != STOCK_ETF_GUI_EVIDENCE_STATUS_ENDPOINT {
             blockers.push(Blocker::EvidenceStatusEndpointMismatch);
@@ -345,6 +358,8 @@ pub enum StockEtfGuiLaneBlocker {
     ReadinessEndpointNotGetOnly,
     LaneStatusEndpointMismatch,
     LaneStatusEndpointNotGetOnly,
+    AccountStatusEndpointMismatch,
+    AccountStatusEndpointNotGetOnly,
     EvidenceStatusEndpointMismatch,
     EvidenceStatusEndpointNotGetOnly,
     UniverseStatusEndpointMismatch,

@@ -32,6 +32,7 @@ pub const STOCK_ETF_SCOPED_AUTHORIZATION_CONTRACT_ID: &str = "stock_etf_scoped_a
 const REQUIRED_METHODS: &[StockEtfLaneScopedIpcMethod] = &[
     StockEtfLaneScopedIpcMethod::GetLaneStatus,
     StockEtfLaneScopedIpcMethod::GetReadiness,
+    StockEtfLaneScopedIpcMethod::GetAccountStatus,
     StockEtfLaneScopedIpcMethod::GetPaperStatus,
     StockEtfLaneScopedIpcMethod::GetReconciliationStatus,
     StockEtfLaneScopedIpcMethod::PreviewPaperOrder,
@@ -334,6 +335,7 @@ impl StockEtfLaneScopedIpcCommandV1 {
 pub enum StockEtfLaneScopedIpcMethod {
     GetLaneStatus,
     GetReadiness,
+    GetAccountStatus,
     GetPaperStatus,
     GetReconciliationStatus,
     PreviewPaperOrder,
@@ -371,6 +373,14 @@ fn expected_method(method: StockEtfLaneScopedIpcMethod) -> ExpectedMethod {
             required_request_fields: STATUS_FIELDS,
         },
         Method::GetReadiness => ExpectedMethod {
+            operation: Op::HealthRead,
+            authority_scope: Scope::DisplayOnly,
+            effect_capable: false,
+            rust_owned: false,
+            required_gates: &[],
+            required_request_fields: STATUS_FIELDS,
+        },
+        Method::GetAccountStatus => ExpectedMethod {
             operation: Op::HealthRead,
             authority_scope: Scope::DisplayOnly,
             effect_capable: false,
