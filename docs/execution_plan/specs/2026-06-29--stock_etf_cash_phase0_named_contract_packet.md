@@ -87,7 +87,7 @@ Matrix:
 | `account_snapshot_read` | Allowed after gate | external gate + session attestation |
 | `market_data_read` | Allowed after gate | external gate + provenance contract |
 | `contract_details_read` | Allowed after gate | external gate + instrument identity contract |
-| `paper_order_submit` | Paper-only, Rust-owned | external gate + paper attestation + scoped auth + Decision Lease + Guardian |
+| `paper_order_submit` | Paper-only, Rust-owned | external gate + paper attestation + scoped auth + risk policy + Decision Lease + Guardian |
 | `paper_order_cancel` | Paper-only, Rust-owned | same as submit + lifecycle idempotency |
 | `paper_order_replace` | Paper-only, Rust-owned | same as submit + replace state machine |
 | `paper_order_fill_import` | Read/import only | session attestation + idempotency |
@@ -106,9 +106,10 @@ The validator requires the complete operation matrix, `stock_etf_cash` / IBKR
 scope, Bybit live execution unchanged, Python broker write authority denied,
 IBKR live and CFD/margin reserved paths denied, required audit fields, source
 artifact hashes, paper-write Rust ownership, required gates for read / paper /
-shadow / scorecard operations, and exact typed denials for live, margin/short,
-options/CFD, and transfer/account-write operations. It rejects first IBKR contact
-or serialized secret content in the registry artifact.
+shadow / scorecard operations including `stock_etf_risk_policy_v1`, and exact
+typed denials for live, margin/short, options/CFD, and transfer/account-write
+operations. It rejects first IBKR contact or serialized secret content in the
+registry artifact.
 
 ## 4. `phase2_ibkr_external_surface_gate_v1`
 
@@ -278,6 +279,45 @@ over-high turnover, premature profitability claims, live/tiny-live authority
 claims, prior IBKR contact, serialized secret content, and any Bybit live
 regression.
 
+## 5D. `stock_etf_risk_policy_v1`
+
+The Stock/ETF risk policy contract makes the dormant paper/shadow risk config
+machine-checkable before future paper orders, shadow fills, or scorecards can
+trust a `risk_config_hash`.
+
+Required fields:
+
+- `asset_lane=stock_etf_cash`
+- `broker=ibkr`
+- `environment=paper` or `environment=shadow`
+- config version 1
+- source posture remains `enabled=false` and `shadow_only=true` until a later
+  release packet explicitly changes runtime authority
+- finite positive max order, max position, and max daily notional caps
+- order cap less than or equal to position cap, and position cap less than or
+  equal to daily cap
+- bounded open-order and open-position limits
+- cash-only controls denying margin, short, options, CFD, transfers, and live
+- instrument kinds allowed exactly for stock, ETF, and cash usage; crypto perp
+  and CFD reserved kinds must remain denied
+- frozen universe hash, instrument identity hash, and market session required
+- commission, spread, slippage, FX drag, and conservative fill penalty required
+  before shadow fills or scorecards
+- Rust authority, session attestation, Decision Lease, Guardian, idempotency,
+  and broker reconciliation required before paper-order rehearsal
+- Bybit live unchanged proof and no IBKR contact / connector runtime / secret
+  serialization claim
+
+Source validator:
+`openclaw_types::stock_etf_risk_policy::StockEtfRiskPolicyV1`.
+The validator parses the existing dormant
+`settings/risk_control_rules/risk_config_stock_etf_paper.toml` through
+`StockEtfRiskPolicySourceConfigV1` and rejects runtime enablement, missing
+shadow-only posture, non-finite or inverted caps, over-high open-order or
+open-position limits, any margin/short/options/CFD/transfer/live allowance,
+missing universe or cost model prerequisites, missing paper-order gates, IBKR
+contact, connector runtime, serialized secrets, and any Bybit live regression.
+
 ## 6. `ibkr_api_session_topology_v1`
 
 Baseline:
@@ -398,6 +438,7 @@ Every effect-capable command requires:
 - scoped authorization
 - Decision Lease id
 - Guardian state
+- `stock_etf_risk_policy_v1`
 - risk config hash
 - instrument identity hash
 - idempotency key
@@ -424,8 +465,8 @@ The validator pins the exact Stock/ETF IPC method matrix, required gates,
 request fields, typed denials, and Rust ownership. Paper submit/cancel/replace
 must require `phase2_ibkr_external_surface_gate_v1`,
 `ibkr_session_attestation_v1`, `stock_etf_scoped_authorization_v1`,
-Decision Lease, Guardian, risk-config hash, instrument identity,
-idempotency, `ibkr_paper_order_lifecycle_v1`,
+Decision Lease, Guardian, `stock_etf_risk_policy_v1`, risk-config hash,
+instrument identity, idempotency, `ibkr_paper_order_lifecycle_v1`,
 `broker_capability_registry_v1`, and `audit.asset_lane_events_v1`. It rejects
 missing or duplicate methods, unknown/Bybit paper methods, direct Python broker
 write authority, reuse of existing Bybit paper IPC paths, IBKR contact,

@@ -1,0 +1,47 @@
+# ADR-0048 Stock/ETF risk-policy contract template.
+#
+# This is a blocked, secret-free source template. It does not contact IBKR,
+# create connectors, route paper orders, start collectors, write scorecards,
+# inspect secrets, or change Bybit live execution behavior.
+
+contract_id = ""
+config_version = 0
+asset_lane = "crypto_perp"
+broker = "bybit"
+environment = "live_reserved_denied"
+enabled = true
+shadow_only = false
+max_order_notional_usd = 0.0
+max_position_notional_usd = 0.0
+max_daily_notional_usd = 0.0
+max_open_orders = 0
+max_open_positions = 0
+allow_fractional_shares = false
+allow_margin = true
+allow_short = true
+allow_options = true
+allow_cfd = true
+allow_transfer = true
+allow_live = true
+instrument_kinds_allowed = []
+instrument_kinds_denied = []
+requires_frozen_universe_hash = false
+requires_instrument_identity_hash = false
+requires_market_session = false
+cost_model_required_before_shadow_fill = false
+cost_model_required_before_scorecard = false
+commission_schedule_required = false
+spread_estimate_required = false
+slippage_estimate_required = false
+fx_drag_required = false
+conservative_fill_penalty_required = false
+rust_authority_required = false
+session_attestation_required = false
+decision_lease_required = false
+guardian_required = false
+idempotency_key_required = false
+broker_reconciliation_required = false
+bybit_live_execution_unchanged = false
+ibkr_contact_performed = false
+connector_runtime_started = false
+secret_content_serialized = false

@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::stock_etf_lane::{
     AssetLane, AuthorityScope, Broker, BrokerOperation, StockEtfDenialReason,
 };
+use crate::stock_etf_risk_policy::STOCK_ETF_RISK_POLICY_CONTRACT_ID;
 
 pub const STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID: &str = "broker_capability_registry_v1";
 
@@ -236,6 +237,7 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
                 "ibkr_paper_attestation_v1",
                 "lane_scoped_ipc_v1",
                 "stock_etf_scoped_authorization_v1",
+                STOCK_ETF_RISK_POLICY_CONTRACT_ID,
                 "decision_lease_valid",
                 "guardian_allows",
                 "ibkr_paper_order_lifecycle_v1",
@@ -255,6 +257,7 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
         Op::ShadowSignalEmit => ExpectedCapability {
             authority_scope: Scope::ShadowOnly,
             required_gates: &[
+                STOCK_ETF_RISK_POLICY_CONTRACT_ID,
                 "stock_etf_evidence_clock_v1",
                 "stock_etf_pit_universe_contract_v1",
                 "stock_etf_strategy_hypothesis_contract_v1",
@@ -266,7 +269,11 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
         },
         Op::ShadowFillReconstruct => ExpectedCapability {
             authority_scope: Scope::ShadowOnly,
-            required_gates: &["cost_model_version_v1", "stock_market_data_provenance_v1"],
+            required_gates: &[
+                STOCK_ETF_RISK_POLICY_CONTRACT_ID,
+                "cost_model_version_v1",
+                "stock_market_data_provenance_v1",
+            ],
             typed_denial_reason: None,
             rust_owned: false,
         },
@@ -274,6 +281,7 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
             authority_scope: Scope::ReadOnly,
             required_gates: &[
                 "broker_account_portfolio_cash_ledger_v1",
+                STOCK_ETF_RISK_POLICY_CONTRACT_ID,
                 "cost_model_version_v1",
                 "benchmark_versions_v1",
                 "stock_shadow_fill_model_v1",

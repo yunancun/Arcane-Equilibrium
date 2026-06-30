@@ -142,6 +142,16 @@ paper-shadow launch authority, tiny-live, and live.
 
 Phase 2 IBKR external contact may start only after `phase2_ibkr_external_surface_gate_v1` emits an immutable PASS artifact. The first read-only healthcheck is external contact and is not exempt.
 
+`stock_etf_risk_policy_v1` must be machine-checkable before any paper-order
+rehearsal, shadow-fill reconstruction, or scorecard can rely on a
+`risk_config_hash`. It must prove the dormant paper/shadow source posture,
+finite ordered notional caps, bounded open-order/open-position limits,
+cash-only no-margin/no-short/no-options/no-CFD/no-transfer/no-live rules,
+instrument universe requirements, cost model prerequisites, Rust authority,
+session attestation, Decision Lease, Guardian, idempotency, broker
+reconciliation, Bybit-live unchanged proof, and no IBKR contact, connector
+runtime, or secret serialization.
+
 Phase 3 evidence clock may start only after `stock_etf_evidence_clock_v1` proves collector stability, accepted PIT universe and strategy hypothesis contracts plus frozen universe/benchmark/cost model/strategy hypothesis hashes, corporate-action and FX source contracts, and paper-vs-shadow divergence thresholds. Scorecard inputs must remain source-validated, derived-only, paper/shadow separated, and unable to claim live fills.
 
 Cross-phase `stock_etf_cash` evidence must be referable through `audit.asset_lane_events_v1` immutable event references. These references require lane/broker/environment/operation fields, hash-chain continuity, producer/source metadata, artifact hashes, and redaction boundaries; they do not write audit rows or authorize runtime actions by themselves.

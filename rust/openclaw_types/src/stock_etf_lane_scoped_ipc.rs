@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::stock_etf_lane::{
     AssetLane, AuthorityScope, Broker, BrokerOperation, StockEtfDenialReason,
 };
+use crate::stock_etf_risk_policy::STOCK_ETF_RISK_POLICY_CONTRACT_ID;
 
 pub const STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID: &str = "lane_scoped_ipc_v1";
 pub const STOCK_ETF_SCOPED_AUTHORIZATION_CONTRACT_ID: &str = "stock_etf_scoped_authorization_v1";
@@ -86,6 +87,7 @@ const PAPER_EFFECT_GATES: &[&str] = &[
     STOCK_ETF_SCOPED_AUTHORIZATION_CONTRACT_ID,
     "decision_lease_valid",
     "guardian_allows",
+    STOCK_ETF_RISK_POLICY_CONTRACT_ID,
     "risk_config_hash",
     "instrument_identity_contract_v1",
     "idempotency_key",
@@ -102,6 +104,7 @@ const FILL_IMPORT_GATES: &[&str] = &[
     "ibkr_redaction_policy_v1",
 ];
 const PREVIEW_GATES: &[&str] = &[
+    STOCK_ETF_RISK_POLICY_CONTRACT_ID,
     "instrument_identity_contract_v1",
     "stock_etf_pit_universe_contract_v1",
     "cost_model_version_v1",
