@@ -2111,7 +2111,7 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 
 新增 checkpoint：
 
-- 主計畫 PM session checkpoint 現在從 14 到 61 連續遞增，無重複編號。
+- 主計畫 PM session checkpoint 現在從 14 到 62 連續遞增，無重複編號。
 - 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
   lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
   connector skeleton / readonly-probe / broker read gate / policy display / operation
@@ -2804,6 +2804,46 @@ payload、不啟動 runtime。
   `31 passed`。
 - `python3 -B -m pytest -q tests/structure/test_stock_etf_ipc_handler_split_static.py tests/structure/test_stock_etf_ipc_tests_split_static.py`：
   `6 passed`。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  `105 passed`。
+- `python3 -B -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
+  `2 passed`。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 62. 2026-06-30 PM session source checkpoint：FastAPI Route IPC Query Helper Guard
+
+本 checkpoint 降低 Stock/ETF FastAPI route IPC query 重複邏輯風險。這是行為不變的
+source hygiene：不新增 endpoint、不新增 IPC method、不改 normalizer、不引入
+client-state input、不啟動 runtime。
+
+已完成：
+
+- 將 `stock_etf_routes.py` 內 16 個重複的 `_query_stock_etf_*` IPC status helper
+  收斂為單一 `_query_stock_etf_status(ipc, method)`。
+- 既有 endpoint、auth dependency、no-store headers、method constants、normalizer、
+  response envelope 與 OpenAPI GET-only surface 不變。
+- `stock_etf_routes.py` 從 `587` 行降到 `393` 行。
+- 更新 `test_stock_etf_python_no_write_static_guard.py`：
+  - 確認只有一個 `ipc.call(method, params={})` 呼叫點。
+  - 確認 16 個 route handler 只能以 allowlisted readonly Stock/ETF method
+    constant 呼叫 central helper。
+  - 繼續禁止 write IPC method、IBKR SDK import、network client、persistence、
+    file writer、client-state route args。
+- 本 checkpoint 不改 runtime behavior、不改 Bybit path、不改 IBKR boundary，只做
+  FastAPI route query structure hygiene。
+
+驗證：
+
+- `python3 -B -m py_compile program_code/exchange_connectors/bybit_connector/control_api_v1/app/stock_etf_routes.py program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_python_no_write_static_guard.py`：
+  PASS。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_routes.py program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_python_no_write_static_guard.py`：
+  `24 passed`。
 - `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
   `105 passed`。
 - `python3 -B -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：

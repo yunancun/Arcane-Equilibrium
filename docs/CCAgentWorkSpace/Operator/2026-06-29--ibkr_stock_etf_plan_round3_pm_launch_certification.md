@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 61 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 62 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -1349,6 +1349,33 @@ Verification 已過：
 
 邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有新增 dispatch route、沒有
 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation、沒有
+connector runtime、沒有 read probe execution、沒有 paper order/cancel/replace、沒有 fill
+import、沒有 evidence writer、沒有 DB apply、沒有 evidence clock、沒有 tiny-live/live
+authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-06-30 Operator Update — FastAPI Route IPC Query Helper Guard
+
+本 session 已降低 Stock/ETF FastAPI route IPC query 重複邏輯風險：
+
+- 將 `stock_etf_routes.py` 內 16 個重複的 `_query_stock_etf_*` IPC status helper
+  收斂為單一 `_query_stock_etf_status(ipc, method)`。
+- 既有 endpoint、auth dependency、no-store headers、method constants、normalizer、
+  response envelope 與 OpenAPI GET-only surface 不變。
+- `stock_etf_routes.py` 從 `587` 行降到 `393` 行。
+- Python no-write static guard 現在確認只有一個 `ipc.call(method, params={})`
+  呼叫點，且 16 個 route handler 只能以 allowlisted readonly Stock/ETF method
+  constant 呼叫 central helper。
+
+Verification 已過：
+
+- `py_compile`：PASS
+- Route/no-write focused tests：`24 passed`
+- Full Stock/ETF FastAPI/static：`105 passed`
+- IBKR timeline + trace-title structure guard：`2 passed`
+- `git diff --check`：PASS
+
+邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 client input、沒有 IBKR
+contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation、沒有
 connector runtime、沒有 read probe execution、沒有 paper order/cancel/replace、沒有 fill
 import、沒有 evidence writer、沒有 DB apply、沒有 evidence clock、沒有 tiny-live/live
 authority，也沒有改動 Bybit live execution 行為。

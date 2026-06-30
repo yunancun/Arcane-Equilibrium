@@ -238,21 +238,28 @@ def test_stock_etf_routes_call_ipc_with_empty_params_only() -> None:
     path = CONTROL_API_DIR / "app" / "stock_etf_routes.py"
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
-    ipc_call_count = 0
+    ipc_calls: list[tuple[str, ast.Call]] = []
     violations: list[str] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        if not isinstance(node.func, ast.Attribute) or node.func.attr != "call":
-            continue
-        ipc_call_count += 1
-        params_keywords = [keyword for keyword in node.keywords if keyword.arg == "params"]
-        if len(params_keywords) != 1 or not _is_empty_dict(params_keywords[0].value):
-            violations.append(
-                f"{path}:{node.lineno}: Stock/ETF IPC call must use literal params={{}}"
-            )
+        for node in ast.walk(function):
+            if not isinstance(node, ast.Call):
+                continue
+            if not isinstance(node.func, ast.Attribute) or node.func.attr != "call":
+                continue
+            ipc_calls.append((function.name, node))
+            params_keywords = [keyword for keyword in node.keywords if keyword.arg == "params"]
+            if len(params_keywords) != 1 or not _is_empty_dict(params_keywords[0].value):
+                violations.append(
+                    f"{path}:{node.lineno}: Stock/ETF IPC call must use literal params={{}}"
+                )
+            if not node.args or not isinstance(node.args[0], ast.Name) or node.args[0].id != "method":
+                violations.append(
+                    f"{path}:{node.lineno}: Stock/ETF IPC call must use central method arg"
+                )
 
-    assert ipc_call_count >= 16
+    assert [function_name for function_name, _ in ipc_calls] == ["_query_stock_etf_status"]
     assert violations == []
 
 
@@ -262,30 +269,43 @@ def test_stock_etf_routes_call_only_readonly_status_ipc_methods() -> None:
     method_constants = _stock_etf_route_method_constants(tree)
 
     used_methods: set[str] = set()
+    helper_call_count = 0
     violations: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        if not isinstance(node.func, ast.Attribute) or node.func.attr != "call":
+        if _call_name(node.func) != "_query_stock_etf_status":
             continue
-        if not node.args or not isinstance(node.args[0], ast.Name):
+        helper_call_count += 1
+        if len(node.args) != 2:
             violations.append(
-                f"{path}:{node.lineno}: Stock/ETF IPC call must use a named method constant"
+                f"{path}:{node.lineno}: Stock/ETF route query helper must receive ipc and method"
             )
             continue
-        constant_name = node.args[0].id
+        if not isinstance(node.args[0], ast.Name) or node.args[0].id != "ipc":
+            violations.append(
+                f"{path}:{node.lineno}: Stock/ETF route query helper must receive local ipc"
+            )
+            continue
+        if not isinstance(node.args[1], ast.Name):
+            violations.append(
+                f"{path}:{node.lineno}: Stock/ETF route query helper must use a named method constant"
+            )
+            continue
+        constant_name = node.args[1].id
         method = method_constants.get(constant_name)
         if method is None:
             violations.append(
-                f"{path}:{node.lineno}: Stock/ETF IPC call uses unknown method constant {constant_name}"
+                f"{path}:{node.lineno}: Stock/ETF route query uses unknown method constant {constant_name}"
             )
             continue
         used_methods.add(method)
         if method not in ALLOWED_STOCK_ETF_STATUS_IPC_METHODS:
             violations.append(
-                f"{path}:{node.lineno}: Stock/ETF IPC method {method!r} is not readonly status"
+                f"{path}:{node.lineno}: Stock/ETF route query method {method!r} is not readonly status"
             )
 
+    assert helper_call_count == len(ALLOWED_STOCK_ETF_STATUS_IPC_METHODS)
     assert used_methods == ALLOWED_STOCK_ETF_STATUS_IPC_METHODS
     assert violations == []
 
