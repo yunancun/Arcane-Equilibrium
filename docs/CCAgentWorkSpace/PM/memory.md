@@ -2744,3 +2744,9 @@
 - PM added `NonBybitApiAllowlistV1` in `ibkr_non_bybit_api_allowlist`: exact `contract_id == non_bybit_api_allowlist_v1`, `source_version=1`, and complete read / paper-write / denied coverage for all 23 IBKR non-Bybit API actions.
 - The validator ties bucket membership to `classify_non_bybit_api_action`, rejects Client Portal/live/account-write/margin/short/options/CFD/entitlement/contact/secret/Bybit-regression drift, keeps the blocked template at empty id plus `source_version=0`, and splits allowlist code out of the Phase 2 gate module.
 - Verification passed: focused gate `10 passed`; linked IBKR/Phase0 `65 passed`; full `cargo test --manifest-path rust/Cargo.toml -p openclaw_types` `35` unit/golden + `194` integration/acceptance + `0` doc-tests; `cargo check --manifest-path rust/Cargo.toml --workspace` passed. This grants no IBKR contact, connector runtime, secret access, paper order, fill import, audit writer, DB apply, evidence clock, GUI authority, release, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF IPC Readiness Allowlist Trace
+
+- PM wired Stock/ETF engine IPC readiness to expose `phase2.api_allowlist` with exact `non_bybit_api_allowlist_v1` id/version, accepted verdict, action counts, no-contact/no-secret flags, and Bybit-live protected proof.
+- The external-surface gate remains blocked because there is still no immutable PASS artifact, no real secret/topology evidence, and no first-contact authorization; legacy `submit_paper_order` behavior remains on the existing channel path.
+- Verification passed: engine IPC focused `4 passed`; engine `stock_etf` filtered `5 passed`; linked openclaw_types `18 passed`; `cargo check --manifest-path rust/Cargo.toml --workspace` passed. This grants no IBKR contact, connector runtime, secret access, paper order, fill import, DB apply, GUI authority, Phase 2 start, tiny-live, live, or Bybit behavior change.
