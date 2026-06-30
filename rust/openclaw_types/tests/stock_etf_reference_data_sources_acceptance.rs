@@ -22,7 +22,7 @@ fn default_reference_data_sources_block_phase3_usage() {
     ));
     assert!(has(
         &verdict.blockers,
-        StockEtfReferenceDataSourcesBlocker::VersionMismatch
+        StockEtfReferenceDataSourcesBlocker::SourceVersionMismatch
     ));
     assert!(has(
         &verdict.blockers,
@@ -72,6 +72,7 @@ fn accepted_fixture_pins_reference_sources_without_runtime_authority() {
         sources.contract_id,
         STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID
     );
+    assert_eq!(sources.source_version, 1);
     assert_eq!(sources.asset_lane, AssetLane::StockEtfCash);
     assert_eq!(sources.broker, Broker::Ibkr);
     assert_eq!(sources.environment, BrokerEnvironment::Paper);
@@ -83,6 +84,24 @@ fn accepted_fixture_pins_reference_sources_without_runtime_authority() {
     assert!(!sources.connector_runtime_started);
     assert!(!sources.secret_content_serialized);
     assert!(!sources.live_or_tiny_live_authorized);
+}
+
+#[test]
+fn reference_sources_require_exact_contract_id_and_source_version() {
+    let mut sources = StockEtfReferenceDataSourcesV1::accepted_fixture();
+    sources.contract_id = "stock_etf_reference_data_sources_v1_fixture".to_string();
+    sources.source_version = 2;
+
+    let blockers = sources.validate().blockers;
+
+    assert!(has(
+        &blockers,
+        StockEtfReferenceDataSourcesBlocker::ContractIdMismatch
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfReferenceDataSourcesBlocker::SourceVersionMismatch
+    ));
 }
 
 #[test]
@@ -213,6 +232,8 @@ fn blocked_template_is_parseable_and_secret_free() {
     let parsed: StockEtfReferenceDataSourcesV1 =
         toml::from_str(&raw).expect("reference-data source template parses");
 
+    assert_eq!(parsed.contract_id, "");
+    assert_eq!(parsed.source_version, 0);
     assert_eq!(parsed.asset_lane, AssetLane::CryptoPerp);
     assert_eq!(parsed.broker, Broker::Bybit);
     assert!(!parsed.validate().accepted);

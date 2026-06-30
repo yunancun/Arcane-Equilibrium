@@ -695,10 +695,11 @@ reconstruction, or scorecards can consume their hashes.
 
 Required fields:
 
+- `contract_id=stock_etf_reference_data_sources_v1`
+- `source_version=1`
 - `asset_lane=stock_etf_cash`
 - `broker=ibkr`
 - read-only, paper, or shadow environment only
-- source version 1
 - evidence-clock freeze flag
 - corporate-action source name, as-of timestamp, raw payload hash,
   adjustment-version hash, policy hash, and dividend-treatment hash
@@ -714,10 +715,11 @@ Required fields:
 
 Source validator:
 `openclaw_types::stock_etf_reference_data_sources::StockEtfReferenceDataSourcesV1`.
-The validator rejects missing source names, zero as-of timestamps, malformed
-hashes, non-USD v1 currency treatment, missing evidence-clock freeze, live
-environment, live/tiny-live authority, prior IBKR contact, connector runtime,
-serialized secrets, and any Bybit live regression.
+The validator requires exact `stock_etf_reference_data_sources_v1` contract id
+and source version `1`. It rejects missing source names, zero as-of timestamps,
+malformed hashes, non-USD v1 currency treatment, missing evidence-clock freeze,
+live environment, live/tiny-live authority, prior IBKR contact, connector
+runtime, serialized secrets, and any Bybit live regression.
 
 ## 14. `broker_account_portfolio_cash_ledger_v1`
 

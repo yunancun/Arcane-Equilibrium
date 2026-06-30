@@ -132,7 +132,7 @@ impl StockEtfReferenceDataSourcesV1 {
             blockers.push(Blocker::ContractIdMismatch);
         }
         if self.source_version != 1 {
-            blockers.push(Blocker::VersionMismatch);
+            blockers.push(Blocker::SourceVersionMismatch);
         }
         if self.asset_lane != AssetLane::StockEtfCash {
             blockers.push(Blocker::WrongAssetLane);
@@ -277,7 +277,7 @@ impl<B> StockEtfReferenceDataSourcesVerdict<B> {
 #[serde(rename_all = "snake_case")]
 pub enum StockEtfReferenceDataSourcesBlocker {
     ContractIdMismatch,
-    VersionMismatch,
+    SourceVersionMismatch,
     WrongAssetLane,
     WrongBroker,
     EnvironmentDenied,
