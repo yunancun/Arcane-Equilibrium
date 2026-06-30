@@ -766,6 +766,13 @@ submit paper orders, apply DB changes, start the evidence clock, reuse the Bybit
 path, authorize live/tiny-live, buy market-data entitlements, use Client Portal
 Web API, or grant Python direct broker writes.
 
+For accepted readonly-probe envelopes, the top-level broker decision operation
+must be derived from the typed request's validated read operation
+(`health_read`, `account_snapshot_read`, `contract_details_read`, or
+`market_data_read`) rather than from a fixed method fallback. Invalid or
+parse-failed envelopes are not trusted for operation selection and remain on the
+method-level fail-closed fixture boundary.
+
 ## 10. `ibkr_paper_order_lifecycle_v1`
 
 Required fields:
