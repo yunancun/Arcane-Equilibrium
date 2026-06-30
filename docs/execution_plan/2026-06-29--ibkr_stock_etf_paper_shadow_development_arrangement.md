@@ -1218,3 +1218,51 @@ IBKR、不讀/建 secret、不啟動 connector runtime、不啟動 Phase 1/2/3/4
 scorecard writer、不啟動 evidence clock、不送 paper order、不匯入 fill、不做 Linux
 runtime sync/restart、不啟動 paper-shadow launch、不授權 tiny-live/live 或任何 Bybit
 behavior change。
+
+## 22. 2026-06-30 PM session source checkpoint：Paper IPC Request Shape Hardening
+
+本 session 進入 Phase 1D 的 lane-scoped IPC/order-lifecycle fixture hardening，但仍是
+source-only contract。此 checkpoint 不啟動 IPC server、不接 IBKR、不送 paper order、
+不做 cancel/replace、不啟動 connector runtime，也不重用既有 Bybit
+`submit_paper_order` path。
+
+新增 checkpoint：
+
+- `lane_scoped_ipc_v1` 將 `PreviewPaperOrder`、`SubmitPaperOrder`、
+  `CancelPaperOrder`、`ReplacePaperOrder` 的 request fields 明確拆分；submit、
+  cancel、replace 不再共用一個 generic `PAPER_EFFECT_FIELDS`。
+- Preview/submit 現在 pin 住 account fingerprint hash、instrument identity、symbol、
+  instrument kind、side、order type、quantity、`limit_price_policy`、time in force；
+  submit 另 pin `order_local_id`、idempotency、session/scoped authorization/guardian/
+  lifecycle/audit hashes。
+- Cancel 現在只 pin 撤單 envelope：`order_local_id`、`broker_order_id`、
+  `cancel_reason`、idempotency、lifecycle/capability/audit fields；它不要求 submit
+  的 quantity/order_type/limit-price fields。
+- Replace 現在 pin 改單 envelope：`order_local_id`、`broker_order_id`、instrument
+  identity、symbol、side、`replacement_idempotency_key`、`replacement_quantity`、
+  `replacement_limit_price_policy`、`replacement_time_in_force`、`replace_reason`、
+  lifecycle/capability/audit fields。
+- Acceptance tests 新增 cross-wire regression：把 cancel 誤接 submit fields、replace
+  誤接 cancel fields、submit 誤接 cancel fields 都會得到
+  `CommandRequestFieldMissing`，避免未來 runtime 實作混用 request schema。
+
+驗證：
+
+- Rust format checks：PASS。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_lane_scoped_ipc_acceptance -- --nocapture`：
+  lane IPC acceptance `9 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_lane_scoped_ipc_acceptance --test stock_etf_phase0_manifest_acceptance -- --nocapture`：
+  lane IPC + Phase0 manifest `15 passed`。
+- Full `cargo test --manifest-path rust/Cargo.toml -p openclaw_types`：
+  `35` unit/golden + `209` integration/acceptance + `0` doc-tests。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
+  Stock/ETF engine filter `21 passed`；legacy `submit_paper_order` 仍走既有 channel
+  path，未被 stock/ETF IPC alias。
+- `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 connector runtime、
+不啟動 Phase 1/2/3/4/5 runtime、不送 paper order、不做 cancel/replace、不匯入 fill、
+不做 DB migration/apply、不做 Postgres dry-run、不啟動 evidence clock、不啟動
+scorecard writer、不做 Linux runtime sync/restart、不啟動 paper-shadow launch、不授權
+tiny-live/live 或任何 Bybit behavior change。

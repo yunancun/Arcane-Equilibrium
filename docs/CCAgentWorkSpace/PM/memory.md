@@ -2918,3 +2918,10 @@
 - The source draft now includes a TimescaleDB hypertable/retention promotion plan, but explicitly defers executable V### conversion until partition-safe primary/unique constraints are designed.
 - The Rust auditor rejects missing Guard B/C, dry-run plan, FK lineage, scorecard lineage, and hypertable/retention plan drift.
 - Verification passed: DB evidence DDL acceptance `10 passed`; full openclaw_types `35` unit/golden + `208` integration/acceptance + `0` doc-tests; workspace `cargo check` PASS. Linux runtime was not synced/restarted. This grants no DB migration/apply, PG dry-run, sqlx registration, IBKR contact, connector runtime, secret access, Phase 1 runtime start, paper order, fill import, evidence clock, scorecard writer, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Paper IPC Request Shape Hardening
+
+- PM hardened Phase 1D `lane_scoped_ipc_v1` so paper preview/submit/cancel/replace carry distinct request-shape contracts instead of one shared paper-effect field list.
+- Submit pins full order intent fields (`symbol`, `instrument_kind`, `side`, `order_type`, `quantity`, `limit_price_policy`, `time_in_force`, `order_local_id`, idempotency, account/instrument hashes); cancel pins `order_local_id`, `broker_order_id`, `cancel_reason`, and idempotency; replace pins replacement idempotency/quantity/limit-price-policy/time-in-force plus `replace_reason`.
+- Acceptance tests now reject submit/cancel/replace field-set cross-wiring, preserving the Rust-owned IBKR stock/ETF lane boundary and keeping legacy Bybit paper order routing separate.
+- Verification passed: lane IPC `9 passed`; lane IPC + Phase0 manifest `15 passed`; full openclaw_types `35` unit/golden + `209` integration/acceptance + `0` doc-tests; openclaw_engine `stock_etf` `21 passed`; workspace `cargo check` PASS; `git diff --check` PASS. This grants no IBKR contact, secret access, connector runtime, Phase 1 runtime start, paper order/cancel/replace, fill import, DB apply, evidence clock, scorecard writer, tiny-live, live, or Bybit behavior change.

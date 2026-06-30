@@ -8,11 +8,12 @@ use std::path::PathBuf;
 
 use openclaw_types::{
     AssetLane, AuthorityScope, Broker, BrokerOperation, StockEtfDenialReason,
-    StockEtfLaneScopedIpcBlocker, StockEtfLaneScopedIpcContractV1, StockEtfLaneScopedIpcMethod,
-    STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
-    STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID, STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID,
-    STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID, STOCK_ETF_RISK_POLICY_CONTRACT_ID,
-    STOCK_ETF_SCOPED_AUTHORIZATION_CONTRACT_ID, STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
+    StockEtfLaneScopedIpcBlocker, StockEtfLaneScopedIpcCommandV1, StockEtfLaneScopedIpcContractV1,
+    StockEtfLaneScopedIpcMethod, STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID,
+    STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID, STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID,
+    STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID, STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
+    STOCK_ETF_RISK_POLICY_CONTRACT_ID, STOCK_ETF_SCOPED_AUTHORIZATION_CONTRACT_ID,
+    STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
 };
 
 #[test]
@@ -103,6 +104,22 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
     assert!(submit
         .required_request_fields
         .contains(&"decision_lease_id".to_string()));
+    assert_fields(
+        submit,
+        &[
+            "account_fingerprint_hash",
+            "instrument_identity_hash",
+            "symbol",
+            "instrument_kind",
+            "side",
+            "order_type",
+            "quantity",
+            "limit_price_policy",
+            "time_in_force",
+            "order_local_id",
+            "idempotency_key",
+        ],
+    );
 
     let preview = contract
         .commands
@@ -118,6 +135,22 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
     assert!(preview
         .required_gates
         .contains(&STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID.to_string()));
+    assert!(!preview.effect_capable);
+    assert_eq!(preview.authority_scope, AuthorityScope::ReadOnly);
+    assert_fields(
+        preview,
+        &[
+            "account_fingerprint_hash",
+            "instrument_identity_hash",
+            "symbol",
+            "instrument_kind",
+            "side",
+            "order_type",
+            "quantity",
+            "limit_price_policy",
+            "time_in_force",
+        ],
+    );
 
     let paper_status = contract
         .commands
@@ -260,6 +293,133 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
     assert!(shadow
         .required_gates
         .contains(&STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID.to_string()));
+}
+
+#[test]
+fn paper_order_request_shapes_are_method_specific_and_not_cross_wireable() {
+    let contract = StockEtfLaneScopedIpcContractV1::accepted_fixture();
+    let submit = command(&contract, StockEtfLaneScopedIpcMethod::SubmitPaperOrder);
+    let cancel = command(&contract, StockEtfLaneScopedIpcMethod::CancelPaperOrder);
+    let replace = command(&contract, StockEtfLaneScopedIpcMethod::ReplacePaperOrder);
+
+    assert_ne!(
+        submit.required_request_fields,
+        cancel.required_request_fields
+    );
+    assert_ne!(
+        submit.required_request_fields,
+        replace.required_request_fields
+    );
+    assert_ne!(
+        cancel.required_request_fields,
+        replace.required_request_fields
+    );
+
+    assert_fields(
+        cancel,
+        &[
+            "account_fingerprint_hash",
+            "order_local_id",
+            "broker_order_id",
+            "cancel_reason",
+            "idempotency_key",
+            "lifecycle_contract_hash",
+            "broker_capability_registry_hash",
+            "audit_event_id",
+        ],
+    );
+    assert_lacks_fields(
+        cancel,
+        &[
+            "symbol",
+            "instrument_kind",
+            "side",
+            "order_type",
+            "quantity",
+            "limit_price_policy",
+            "time_in_force",
+        ],
+    );
+
+    assert_fields(
+        replace,
+        &[
+            "account_fingerprint_hash",
+            "order_local_id",
+            "broker_order_id",
+            "instrument_identity_hash",
+            "symbol",
+            "side",
+            "replacement_idempotency_key",
+            "replacement_quantity",
+            "replacement_limit_price_policy",
+            "replacement_time_in_force",
+            "replace_reason",
+            "lifecycle_contract_hash",
+            "broker_capability_registry_hash",
+            "audit_event_id",
+        ],
+    );
+    assert_lacks_fields(
+        replace,
+        &[
+            "order_type",
+            "quantity",
+            "limit_price_policy",
+            "time_in_force",
+        ],
+    );
+
+    let mut cancel_cross_wired_as_submit = StockEtfLaneScopedIpcContractV1::accepted_fixture();
+    let submit_fields = command(
+        &cancel_cross_wired_as_submit,
+        StockEtfLaneScopedIpcMethod::SubmitPaperOrder,
+    )
+    .required_request_fields
+    .clone();
+    command_mut(
+        &mut cancel_cross_wired_as_submit,
+        StockEtfLaneScopedIpcMethod::CancelPaperOrder,
+    )
+    .required_request_fields = submit_fields;
+    assert!(has(
+        &cancel_cross_wired_as_submit.validate().blockers,
+        StockEtfLaneScopedIpcBlocker::CommandRequestFieldMissing
+    ));
+
+    let mut replace_cross_wired_as_cancel = StockEtfLaneScopedIpcContractV1::accepted_fixture();
+    let cancel_fields = command(
+        &replace_cross_wired_as_cancel,
+        StockEtfLaneScopedIpcMethod::CancelPaperOrder,
+    )
+    .required_request_fields
+    .clone();
+    command_mut(
+        &mut replace_cross_wired_as_cancel,
+        StockEtfLaneScopedIpcMethod::ReplacePaperOrder,
+    )
+    .required_request_fields = cancel_fields;
+    assert!(has(
+        &replace_cross_wired_as_cancel.validate().blockers,
+        StockEtfLaneScopedIpcBlocker::CommandRequestFieldMissing
+    ));
+
+    let mut submit_cross_wired_as_cancel = StockEtfLaneScopedIpcContractV1::accepted_fixture();
+    let cancel_fields = command(
+        &submit_cross_wired_as_cancel,
+        StockEtfLaneScopedIpcMethod::CancelPaperOrder,
+    )
+    .required_request_fields
+    .clone();
+    command_mut(
+        &mut submit_cross_wired_as_cancel,
+        StockEtfLaneScopedIpcMethod::SubmitPaperOrder,
+    )
+    .required_request_fields = cancel_fields;
+    assert!(has(
+        &submit_cross_wired_as_cancel.validate().blockers,
+        StockEtfLaneScopedIpcBlocker::CommandRequestFieldMissing
+    ));
 }
 
 #[test]
@@ -456,4 +616,46 @@ fn blocked_template_is_parseable_and_secret_free() {
 
 fn has(blockers: &[StockEtfLaneScopedIpcBlocker], blocker: StockEtfLaneScopedIpcBlocker) -> bool {
     blockers.contains(&blocker)
+}
+
+fn command(
+    contract: &StockEtfLaneScopedIpcContractV1,
+    method: StockEtfLaneScopedIpcMethod,
+) -> &StockEtfLaneScopedIpcCommandV1 {
+    contract
+        .commands
+        .iter()
+        .find(|command| command.method == method)
+        .expect("stock/ETF IPC method exists")
+}
+
+fn command_mut(
+    contract: &mut StockEtfLaneScopedIpcContractV1,
+    method: StockEtfLaneScopedIpcMethod,
+) -> &mut StockEtfLaneScopedIpcCommandV1 {
+    contract
+        .commands
+        .iter_mut()
+        .find(|command| command.method == method)
+        .expect("stock/ETF IPC method exists")
+}
+
+fn assert_fields(command: &StockEtfLaneScopedIpcCommandV1, fields: &[&str]) {
+    for field in fields {
+        assert!(
+            command.required_request_fields.contains(&field.to_string()),
+            "{:?} missing required request field {field}",
+            command.method
+        );
+    }
+}
+
+fn assert_lacks_fields(command: &StockEtfLaneScopedIpcCommandV1, fields: &[&str]) {
+    for field in fields {
+        assert!(
+            !command.required_request_fields.contains(&field.to_string()),
+            "{:?} unexpectedly requires request field {field}",
+            command.method
+        );
+    }
 }
