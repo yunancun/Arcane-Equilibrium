@@ -139,6 +139,12 @@ pub const STOCK_ETF_GET_LAUNCH_STATUS: IpcMethodSpec = IpcMethodSpec {
     slot: IpcSlotRequirement::None,
 };
 
+pub const STOCK_ETF_GET_DISABLE_CLEANUP_STATUS: IpcMethodSpec = IpcMethodSpec {
+    name: "stock_etf.get_disable_cleanup_status",
+    readonly: true,
+    slot: IpcSlotRequirement::None,
+};
+
 pub const STOCK_ETF_PREVIEW_PAPER_ORDER: IpcMethodSpec = IpcMethodSpec {
     name: "stock_etf.preview_paper_order",
     readonly: true,
@@ -193,6 +199,7 @@ pub const IPC_METHOD_REGISTRY: &[IpcMethodSpec] = &[
     STOCK_ETF_GET_RECONCILIATION_STATUS,
     STOCK_ETF_GET_SCORECARD_STATUS,
     STOCK_ETF_GET_LAUNCH_STATUS,
+    STOCK_ETF_GET_DISABLE_CLEANUP_STATUS,
     STOCK_ETF_PREVIEW_PAPER_ORDER,
     STOCK_ETF_SUBMIT_PAPER_ORDER,
     STOCK_ETF_CANCEL_PAPER_ORDER,
@@ -271,6 +278,7 @@ mod tests {
             "stock_etf.get_reconciliation_status",
             "stock_etf.get_scorecard_status",
             "stock_etf.get_launch_status",
+            "stock_etf.get_disable_cleanup_status",
             "stock_etf.preview_paper_order",
             "stock_etf.submit_paper_order",
             "stock_etf.cancel_paper_order",
@@ -304,6 +312,7 @@ mod tests {
             "stock_etf.get_reconciliation_status",
             "stock_etf.get_scorecard_status",
             "stock_etf.get_launch_status",
+            "stock_etf.get_disable_cleanup_status",
             "stock_etf.preview_paper_order",
             "stock_etf.import_paper_fills",
             "stock_etf.evaluate_shadow_signal",

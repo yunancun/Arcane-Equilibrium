@@ -107,6 +107,9 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
         "stock_etf.get_launch_status" => {
             JsonRpcResponse::success(id, launch_status_summary(phase2))
         }
+        "stock_etf.get_disable_cleanup_status" => {
+            JsonRpcResponse::success(id, disable_cleanup_status_summary(phase2))
+        }
         _ => {
             let operation = match operation_for_method(method) {
                 Some(op) => op,
@@ -973,6 +976,85 @@ fn launch_status_summary(phase2: serde_json::Value) -> serde_json::Value {
             "mit_review_passed": tiny_live.mit_review_passed,
             "secret_content_serialized": tiny_live.secret_content_serialized,
             "sealed": tiny_live.sealed,
+        },
+        "phase2": phase2,
+        "ibkr_live_enabled": false,
+        "paper_shadow_launch_authorized": false,
+        "tiny_live_or_live_authorized": false,
+        "connector_runtime_started": false,
+        "scorecard_writer_started": false,
+        "db_apply_performed": false,
+        "evidence_clock_started": false,
+        "ibkr_call_performed": false,
+        "secret_slot_touched": false,
+        "order_routed": false,
+        "bybit_ipc_reused": false,
+    })
+}
+
+fn disable_cleanup_status_summary(phase2: serde_json::Value) -> serde_json::Value {
+    let runbook = StockEtfDisableCleanupRunbookV1::accepted_fixture();
+    let verdict = runbook.validate();
+    let env_flags: Vec<serde_json::Value> = runbook
+        .env_flags
+        .iter()
+        .map(|flag| {
+            serde_json::json!({
+                "name": flag.name,
+                "expected_value": flag.expected_value,
+                "observed_value": flag.observed_value,
+                "evidence_hash_present": !flag.evidence_hash.is_empty(),
+            })
+        })
+        .collect();
+    let proofs: Vec<serde_json::Value> = runbook
+        .proofs
+        .iter()
+        .map(|proof| {
+            serde_json::json!({
+                "kind": proof.kind,
+                "verified": proof.verified,
+                "evidence_hash_present": !proof.evidence_hash.is_empty(),
+                "grants_runtime_authority": proof.grants_runtime_authority,
+                "destructive_cleanup_claimed": proof.destructive_cleanup_claimed,
+            })
+        })
+        .collect();
+
+    serde_json::json!({
+        "phase": "phase5_disable_cleanup_status_source_fixture",
+        "asset_lane": AssetLane::StockEtfCash,
+        "broker": Broker::Ibkr,
+        "environment": "paper_shadow",
+        "disable_cleanup_status_state": "source_ready_runtime_blocked",
+        "phase3_started": false,
+        "phase5_started": false,
+        "collector_stop_requested": false,
+        "gui_disable_requested": false,
+        "evidence_archive_requested": false,
+        "db_cleanup_requested": false,
+        "runbook": {
+            "expected_runbook_id": STOCK_ETF_DISABLE_CLEANUP_RUNBOOK_ID,
+            "runbook_id": runbook.runbook_id,
+            "source_version": runbook.source_version,
+            "accepted": verdict.accepted,
+            "blockers": verdict.blockers,
+            "source_artifact_hash_present": !runbook.source_artifact_hash.is_empty(),
+            "bybit_live_execution_unchanged": runbook.bybit_live_execution_unchanged,
+            "env_flag_count": runbook.env_flags.len(),
+            "proof_count": runbook.proofs.len(),
+            "env_flags": env_flags,
+            "proofs": proofs,
+            "ibkr_contact_performed": runbook.ibkr_contact_performed,
+            "connector_runtime_started": runbook.connector_runtime_started,
+            "paper_order_routed": runbook.paper_order_routed,
+            "secret_slot_created": runbook.secret_slot_created,
+            "secret_content_serialized": runbook.secret_content_serialized,
+            "destructive_db_cleanup_requested": runbook.destructive_db_cleanup_requested,
+            "db_delete_or_truncate_allowed": runbook.db_delete_or_truncate_allowed,
+            "paper_shadow_launch_authorized": runbook.paper_shadow_launch_authorized,
+            "tiny_live_authorized": runbook.tiny_live_authorized,
+            "live_authorized": runbook.live_authorized,
         },
         "phase2": phase2,
         "ibkr_live_enabled": false,

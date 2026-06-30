@@ -26,6 +26,8 @@ pub const STOCK_ETF_GUI_RECONCILIATION_STATUS_ENDPOINT: &str =
     "/api/v1/stock-etf/reconciliation-status";
 pub const STOCK_ETF_GUI_SCORECARD_STATUS_ENDPOINT: &str = "/api/v1/stock-etf/scorecard-status";
 pub const STOCK_ETF_GUI_LAUNCH_STATUS_ENDPOINT: &str = "/api/v1/stock-etf/launch-status";
+pub const STOCK_ETF_GUI_DISABLE_CLEANUP_STATUS_ENDPOINT: &str =
+    "/api/v1/stock-etf/disable-cleanup-status";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StockEtfGuiLaneContractV1 {
@@ -59,6 +61,8 @@ pub struct StockEtfGuiLaneContractV1 {
     pub scorecard_status_endpoint_get_only: bool,
     pub launch_status_endpoint: String,
     pub launch_status_endpoint_get_only: bool,
+    pub disable_cleanup_status_endpoint: String,
+    pub disable_cleanup_status_endpoint_get_only: bool,
     pub display_only: bool,
     pub client_lane_state_untrusted: bool,
     pub local_storage_authority_denied: bool,
@@ -118,6 +122,8 @@ impl Default for StockEtfGuiLaneContractV1 {
             scorecard_status_endpoint_get_only: false,
             launch_status_endpoint: String::new(),
             launch_status_endpoint_get_only: false,
+            disable_cleanup_status_endpoint: String::new(),
+            disable_cleanup_status_endpoint_get_only: false,
             display_only: false,
             client_lane_state_untrusted: false,
             local_storage_authority_denied: false,
@@ -181,6 +187,9 @@ impl StockEtfGuiLaneContractV1 {
             scorecard_status_endpoint_get_only: true,
             launch_status_endpoint: STOCK_ETF_GUI_LAUNCH_STATUS_ENDPOINT.to_string(),
             launch_status_endpoint_get_only: true,
+            disable_cleanup_status_endpoint: STOCK_ETF_GUI_DISABLE_CLEANUP_STATUS_ENDPOINT
+                .to_string(),
+            disable_cleanup_status_endpoint_get_only: true,
             display_only: true,
             client_lane_state_untrusted: true,
             local_storage_authority_denied: true,
@@ -308,6 +317,12 @@ impl StockEtfGuiLaneContractV1 {
         }
         if !self.launch_status_endpoint_get_only {
             blockers.push(Blocker::LaunchStatusEndpointNotGetOnly);
+        }
+        if self.disable_cleanup_status_endpoint != STOCK_ETF_GUI_DISABLE_CLEANUP_STATUS_ENDPOINT {
+            blockers.push(Blocker::DisableCleanupStatusEndpointMismatch);
+        }
+        if !self.disable_cleanup_status_endpoint_get_only {
+            blockers.push(Blocker::DisableCleanupStatusEndpointNotGetOnly);
         }
         if !self.display_only {
             blockers.push(Blocker::DisplayOnlyMissing);
@@ -448,6 +463,8 @@ pub enum StockEtfGuiLaneBlocker {
     ScorecardStatusEndpointNotGetOnly,
     LaunchStatusEndpointMismatch,
     LaunchStatusEndpointNotGetOnly,
+    DisableCleanupStatusEndpointMismatch,
+    DisableCleanupStatusEndpointNotGetOnly,
     DisplayOnlyMissing,
     ClientLaneStateTrusted,
     LocalStorageAuthorityNotDenied,

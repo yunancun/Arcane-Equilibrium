@@ -37,6 +37,13 @@
 - Static no-write guards now scan the HTML+JS bundle; verification passed with JS syntax check, inline parser, Stock/ETF FastAPI/static `77`, and diff-check.
 - Boundary unchanged: no new endpoint, IBKR contact, secret, connector runtime, paper order, DB apply, Linux runtime sync/restart, or Bybit behavior change.
 
+## 2026-06-30 IBKR Stock/ETF Disable Cleanup Status
+
+- PM added source-only `stock_etf.get_disable_cleanup_status`, FastAPI `GET /api/v1/stock-etf/disable-cleanup-status`, and GUI `Disable / Cleanup Status` / `Disable Cleanup` display.
+- The surface shows only the `stock_etf_kill_switch_and_disable_cleanup_runbook_v1` source-ready shape while runtime cleanup/launch fields remain blocked false; `tab-stock-etf-disable-cleanup.js` keeps the main Stock/ETF JS below the 2000-line cap.
+- Verification passed: Stock/ETF FastAPI/static `81`, engine Stock/ETF `19`, openclaw_types `stock_etf` filter PASS, Node checks, inline parser, and line caps 359/1895/132.
+- Boundary unchanged: no IBKR contact, secret access/creation, connector runtime, collector stop, GUI hide, archive, DB cleanup/apply, paper order, fill import, evidence clock, scorecard writer, Linux runtime sync/restart, paper-shadow launch, tiny-live/live, or Bybit behavior change.
+
 ## 2026-06-30 IBKR Stock/ETF Market-Data Provenance Contract
 
 - PM hardened `stock_market_data_provenance_v1` inside the Phase 3 evidence contract surface for lane/broker/environment, vendor/entitlement, payload/source hashes, timestamps, adjustment marker, instrument identity, and calendar session provenance.
