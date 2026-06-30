@@ -22,6 +22,10 @@ fn default_risk_policy_blocks_runtime_authority() {
     ));
     assert!(has(
         &verdict.blockers,
+        StockEtfRiskPolicyBlocker::SourceVersionMismatch
+    ));
+    assert!(has(
+        &verdict.blockers,
         StockEtfRiskPolicyBlocker::VersionMismatch
     ));
     assert!(has(
@@ -65,6 +69,7 @@ fn accepted_fixture_pins_cash_only_shadow_risk_policy() {
         verdict.blockers
     );
     assert_eq!(policy.contract_id, STOCK_ETF_RISK_POLICY_CONTRACT_ID);
+    assert_eq!(policy.source_version, 1);
     assert_eq!(policy.asset_lane, AssetLane::StockEtfCash);
     assert_eq!(policy.broker, Broker::Ibkr);
     assert_eq!(policy.environment, BrokerEnvironment::Paper);
@@ -119,10 +124,29 @@ fn repository_dormant_risk_config_parses_and_validates_as_source_policy() {
         "repository risk config blockers: {:?}",
         verdict.blockers
     );
+    assert_eq!(policy.source_version, 1);
     assert!(!policy.enabled);
     assert!(policy.shadow_only);
     assert_eq!(policy.max_open_orders, 5);
     assert_eq!(policy.max_open_positions, 10);
+}
+
+#[test]
+fn risk_policy_requires_exact_contract_id_and_source_version() {
+    let mut policy = StockEtfRiskPolicyV1::accepted_fixture();
+    policy.contract_id = "stock_etf_risk_policy_v1_fixture".to_string();
+    policy.source_version = 2;
+
+    let blockers = policy.validate().blockers;
+
+    assert!(has(
+        &blockers,
+        StockEtfRiskPolicyBlocker::ContractIdMismatch
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfRiskPolicyBlocker::SourceVersionMismatch
+    ));
 }
 
 #[test]
@@ -273,6 +297,8 @@ fn blocked_template_is_parseable_and_secret_free() {
     .expect("read risk-policy template");
     let parsed: StockEtfRiskPolicyV1 = toml::from_str(&raw).expect("risk-policy template parses");
 
+    assert_eq!(parsed.contract_id, "");
+    assert_eq!(parsed.source_version, 0);
     assert_eq!(parsed.asset_lane, AssetLane::CryptoPerp);
     assert_eq!(parsed.broker, Broker::Bybit);
     assert!(!parsed.validate().accepted);

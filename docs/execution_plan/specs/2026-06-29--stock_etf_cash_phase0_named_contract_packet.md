@@ -294,6 +294,8 @@ trust a `risk_config_hash`.
 
 Required fields:
 
+- `contract_id=stock_etf_risk_policy_v1`
+- `source_version=1`
 - `asset_lane=stock_etf_cash`
 - `broker=ibkr`
 - `environment=paper` or `environment=shadow`
