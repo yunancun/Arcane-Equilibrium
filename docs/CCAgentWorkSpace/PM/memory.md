@@ -3324,3 +3324,11 @@
 - Contract-level negative posture fields such as `bybit_ipc_reused=false`, `bybit_path_reused=false`, and legacy Bybit channel regression text remain allowed; the guard blocks runtime code-path coupling.
 - Verification passed: Rust IPC split static guards `10 passed`; full Stock/ETF FastAPI/static `115 passed`; docs trace guard `2 passed`; `git diff --check` PASS.
 - Boundary unchanged: no Rust runtime behavior change, endpoint/IPC method change, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, paper order/cancel/replace, fill import, DB/evidence writer, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF Connector Public API Freeze Guard
+
+- PM added exact package/class public-surface guards for the inert IBKR connector skeleton.
+- The package `__all__` is frozen to the source-only surface id, read-only client, paper boundary client, endpoint config, and surface status; the read-only client public surface is limited to config/readiness/preview methods; the paper boundary public surface is limited to lifecycle and fill-import readiness descriptors.
+- This supplements the existing forbidden write-method guard by preventing future runtime-start, order-write, secret/network, or Bybit-reuse entrypoints from appearing under alternative public method names.
+- Verification passed: connector skeleton tests `8 passed`; Python no-write static guard `18 passed`; full Stock/ETF FastAPI/static `117 passed`; docs trace guard `2 passed`; `git diff --check` PASS.
+- Boundary unchanged: no endpoint/IPC method change, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, paper order/cancel/replace, fill import, DB/evidence writer, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
