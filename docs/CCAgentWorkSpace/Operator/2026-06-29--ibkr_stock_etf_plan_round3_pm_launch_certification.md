@@ -621,6 +621,32 @@ Verification 已過：
 clock、沒有 scorecard writer、沒有 Linux runtime sync/restart，沒有 tiny-live/live
 authority，也沒有改動 Bybit live execution 行為。
 
+## 2026-06-30 Operator Update — IBKR Read-Only Connector Skeleton Boundary
+
+本 session 已完成下一個 source-only checkpoint：
+`program_code/broker_connectors/ibkr_connector/`。
+
+這次不是 IBKR connector runtime。新增的是隔離 package 和測試邊界：
+
+- package 不在既有 Bybit connector tree 下。
+- 不導入 `ibapi` / `ib_insync`。
+- 不開 socket/HTTP、不讀 secret、不接 broker。
+- 不提供 order/cancel/replace/write method。
+- 只回傳 blocked readiness / preview payload，供後續 read-only/paper gate 實作前先
+  固定 Python 邊界。
+- 既有 no-write static guard 現在會掃描這個實際 package。
+
+Verification 已過：
+
+- Python compile：PASS
+- Connector skeleton + no-write static guard：`7 passed`
+- Full Stock/ETF FastAPI/static：`94 passed`
+
+邊界不變：沒有 IBKR contact、沒有 secret access/creation、沒有 connector runtime、
+沒有 IBKR SDK import、沒有 Phase 1/2/3/4/5 runtime start、沒有 paper
+order/cancel/replace、沒有 fill import、沒有 DB apply、沒有 evidence clock、沒有
+scorecard writer、沒有 Linux runtime sync/restart，也沒有改動 Bybit live execution 行為。
+
 ## 2026-06-30 Operator Update — Scorecard Derivation Contract
 
 本 session 已完成下一個 source/status/display-only checkpoint：
