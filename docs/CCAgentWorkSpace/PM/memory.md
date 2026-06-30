@@ -3080,7 +3080,7 @@
 
 ## 2026-06-30 IBKR Stock/ETF Plan Timeline Checkpoint Guard
 
-- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 68, aligned to the PM memory / Operator source timeline.
+- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 69, aligned to the PM memory / Operator source timeline.
 - Added a structure test that reads the main plan Markdown and fails if PM session checkpoint numbers become duplicated, skipped, or out of order.
 - Verification passed: focused IBKR timeline structure test `1 passed`; section-body compare against `HEAD` PASS; `git diff --check` PASS. The full structure test file still has pre-existing docs README index drift failures unrelated to this guard. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
 
@@ -3271,3 +3271,10 @@
 - Dry-run sha `148deaecd3e7423d1ecf207c5d8f715e48f6773e95f676500e1e05299237e6b6` returned `CURRENT_CANDIDATE_ACTUAL_ADMISSION_BBO_LEASE_WINDOW_SOURCE_NOT_READY` because the current-candidate envelope is stale and the gate/sizing packet is not the required pre-active sizing-aware loss-control packet.
 - E3 blocked the proposed `--run`; BB accepted public market-data GET scope in principle but also blocked `--run` until source inputs dry-run ready. No lease, public quote, Bybit call, order/cancel/modify, PG access, runtime mutation, service restart, Cost Gate change, live/mainnet, fill/PnL, or proof occurred.
 - Next blocker: `P0-CURRENT-CANDIDATE-FRESH-INVOCATION-WINDOW-SOURCE-INPUT-REFRESH-GATE`.
+
+## 2026-07-01 IBKR Stock/ETF Python Secret/Env Access Static Guard
+
+- PM added a source-only AST guard proving Stock/ETF / IBKR Python surfaces do not import env/secret helper modules or read secret/environment material.
+- The guard blocks `os` imports, `dotenv`/`getpass`/`keyring`, `os.environ`, `getenv`/`os.getenv`, `Path.home`, `expanduser`, `read_text`, `read_bytes`, and any `open()` call in the scoped surface while preserving display-only secret-slot schema normalization.
+- Verification passed: Python no-write static guard `17 passed`; route/no-write focused tests `31 passed`; full Stock/ETF FastAPI/static `112 passed`; IBKR timeline + trace-title guard `2 passed`; `git diff --check` PASS.
+- Boundary unchanged: no endpoint/IPC/client-input change, no IBKR contact, no connector/runtime/secret/read-probe/paper-order/evidence/DB/tiny-live/live change, and no Bybit behavior change.

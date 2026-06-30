@@ -92,6 +92,23 @@ FORBIDDEN_LOCAL_PERSISTENCE_MODULES = {
     "openclaw_proposal_store",
     "state_store",
 }
+FORBIDDEN_SECRET_ENV_MODULE_PREFIXES = (
+    "dotenv",
+    "getpass",
+    "keyring",
+)
+FORBIDDEN_SECRET_ENV_IMPORT_ROOTS = {"os"}
+FORBIDDEN_SECRET_ENV_CALL_NAMES = {
+    "getenv",
+    "getpass",
+    "load_dotenv",
+}
+FORBIDDEN_SECRET_FILE_READ_CALL_NAMES = {
+    "expanduser",
+    "open",
+    "read_bytes",
+    "read_text",
+}
 FORBIDDEN_FILE_WRITE_METHOD_NAMES = {
     "mkdir",
     "rename",
@@ -254,6 +271,24 @@ def test_stock_etf_ibkr_python_surface_has_no_persistence_or_file_writers() -> N
             elif isinstance(node, ast.Call):
                 _record_forbidden_persistence_dynamic_import(path, node, violations)
                 _record_forbidden_file_write_call(path, node, violations)
+
+    assert violations == []
+
+
+def test_stock_etf_ibkr_python_surface_has_no_secret_or_env_material_access() -> None:
+    files = _candidate_stock_etf_ibkr_python_files()
+    assert files, "expected at least the display-only stock_etf_routes.py surface"
+
+    violations: list[str] = []
+    for path in files:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                _record_forbidden_secret_env_import(path, node, violations)
+            elif isinstance(node, ast.Call):
+                _record_forbidden_secret_env_call(path, node, violations)
+            elif isinstance(node, (ast.Attribute, ast.Subscript)):
+                _record_forbidden_os_environ_access(path, node, violations)
 
     assert violations == []
 
@@ -660,6 +695,37 @@ def _record_forbidden_persistence_dynamic_import(
         violations.append(f"{path}: dynamically imports forbidden local persistence module {module}")
 
 
+def _record_forbidden_secret_env_import(
+    path: Path, node: ast.Import | ast.ImportFrom, violations: list[str]
+) -> None:
+    for module in _imported_module_names(node):
+        if module.split(".", 1)[0] in FORBIDDEN_SECRET_ENV_IMPORT_ROOTS:
+            violations.append(f"{path}: imports forbidden env/material module {module}")
+        if _is_forbidden_module(module, FORBIDDEN_SECRET_ENV_MODULE_PREFIXES):
+            violations.append(f"{path}: imports forbidden secret helper module {module}")
+
+
+def _record_forbidden_secret_env_call(
+    path: Path, node: ast.Call, violations: list[str]
+) -> None:
+    call_name = _call_name(node.func)
+    if call_name in FORBIDDEN_SECRET_ENV_CALL_NAMES:
+        violations.append(f"{path}: calls forbidden secret/env accessor {call_name}()")
+    if call_name in FORBIDDEN_SECRET_FILE_READ_CALL_NAMES:
+        violations.append(f"{path}: calls forbidden secret/file material reader {call_name}()")
+    if _is_os_environ_access(node.func):
+        violations.append(f"{path}: accesses forbidden os.environ material")
+    if _is_path_home_call(node.func):
+        violations.append(f"{path}: calls forbidden Path.home() material locator")
+
+
+def _record_forbidden_os_environ_access(
+    path: Path, node: ast.Attribute | ast.Subscript, violations: list[str]
+) -> None:
+    if _is_os_environ_access(node):
+        violations.append(f"{path}: accesses forbidden os.environ material")
+
+
 def _record_forbidden_file_write_call(path: Path, node: ast.Call, violations: list[str]) -> None:
     call_name = _call_name(node.func)
     if call_name in FORBIDDEN_FILE_WRITE_METHOD_NAMES:
@@ -683,6 +749,29 @@ def _is_forbidden_module(module: str, prefixes: tuple[str, ...]) -> bool:
 
 def _is_forbidden_local_persistence_module(module: str) -> bool:
     return module.split(".", 1)[0] in FORBIDDEN_LOCAL_PERSISTENCE_MODULES
+
+
+def _is_os_environ_access(node: ast.AST) -> bool:
+    if isinstance(node, ast.Attribute):
+        if (
+            node.attr == "environ"
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "os"
+        ):
+            return True
+        return _is_os_environ_access(node.value)
+    if isinstance(node, ast.Subscript):
+        return _is_os_environ_access(node.value)
+    return False
+
+
+def _is_path_home_call(func: ast.expr) -> bool:
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr == "home"
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "Path"
+    )
 
 
 def _imported_module_names(node: ast.Import | ast.ImportFrom) -> list[str]:

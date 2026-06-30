@@ -2111,7 +2111,7 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 
 新增 checkpoint：
 
-- 主計畫 PM session checkpoint 現在從 14 到 68 連續遞增，無重複編號。
+- 主計畫 PM session checkpoint 現在從 14 到 69 連續遞增，無重複編號。
 - 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
   lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
   connector skeleton / readonly-probe / broker read gate / policy display / operation
@@ -3115,6 +3115,49 @@ readiness payload、不引入 client-state input、不啟動 runtime。
   `30 passed`。
 - `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
   `111 passed`。
+- `python3 -B -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
+  `2 passed`。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 69. 2026-07-01 PM session source checkpoint：Python Secret/Env Access Static Guard
+
+本 checkpoint 將 Stock/ETF / IBKR Python source-only boundary 補上 secret/env
+material access 的 AST 守衛。這不是 connector runtime，也不是 IBKR read probe；
+目標是防止未來有人在 Python display/readiness surface 加入 env fallback、secret file
+read 或 path material locator。
+
+已完成：
+
+- 更新 `test_stock_etf_python_no_write_static_guard.py`，新增
+  `test_stock_etf_ibkr_python_surface_has_no_secret_or_env_material_access`。
+- Guard 掃描 scoped Stock/ETF / IBKR Python files，包括 FastAPI Stock/ETF routes、
+  Stock/ETF normalizers，以及 `program_code/broker_connectors/ibkr_connector/`。
+- Guard 禁止 import `os`、`dotenv`、`getpass`、`keyring` 等 env/secret helper
+  surface。
+- Guard 禁止 `os.environ`、`getenv` / `os.getenv`、`getpass`、
+  `load_dotenv`、`Path.home`、`expanduser`、`read_text`、`read_bytes` 與任意
+  `open()` call。
+- Guard 保留現有 display-only `secret_slot_contract` schema normalization；它可顯示
+  blocked/serialized=false 欄位，但不可讀取 secret material。
+- 本 checkpoint 不改 runtime behavior、不改 endpoint、不改 IPC method、不改 Bybit
+  path、不啟動任何 IBKR 或 secret runtime。
+
+驗證：
+
+- `python3 -B -m py_compile program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_python_no_write_static_guard.py`：
+  PASS。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_python_no_write_static_guard.py`：
+  `17 passed`。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_routes.py program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_python_no_write_static_guard.py`：
+  `31 passed`。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  `112 passed`。
 - `python3 -B -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
   `2 passed`。
 - `git diff --check`：PASS。
