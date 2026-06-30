@@ -46,6 +46,7 @@
     "lane_scoped_ipc_v1",
     "stock_etf_paper_order_request_v1",
     "stock_etf_paper_fill_import_request_v1",
+    "stock_etf_shadow_signal_request_v1",
     "ibkr_paper_order_lifecycle_v1",
     "broker_lifecycle_event_log_v1",
     "audit.asset_lane_events_v1",

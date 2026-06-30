@@ -643,6 +643,42 @@ margin/short/options/CFD requests, and Python direct broker writes. This contrac
 does not import fills; it defines the evidence-safe request shape future fill
 import code must satisfy before lifecycle reconstruction or DB persistence.
 
+## 9C. `stock_etf_shadow_signal_request_v1`
+
+Required fields:
+
+- exact contract id `stock_etf_shadow_signal_request_v1`
+- `source_version=1`
+- `asset_lane=stock_etf_cash`
+- `broker=ibkr`
+- `environment=shadow`
+- `request_method=evaluate_shadow_signal`
+- `operation=shadow_signal_emit`
+- `authority_scope=shadow_only`
+- `effect_capable=false`
+- request id
+- evaluation run id
+- shadow signal id
+- evidence clock hash
+- PIT universe contract hash
+- strategy hypothesis hash
+- instrument identity hash
+- market-data provenance hash
+- cost model version hash
+- asset-lane event contract hash
+- source artifact hash
+
+Source validator:
+`openclaw_types::stock_etf_shadow_signal_request::StockEtfShadowSignalRequestV1`.
+The validator rejects wrong lane/broker/environment, method/operation/scope/
+effect mismatches, missing signal identity, missing lineage hashes, IBKR
+contact, connector runtime, serialized secrets, shadow signal emission, shadow
+fill generation, scorecard writer startup, DB apply, routed orders, Bybit path
+reuse, live/tiny-live authority, margin/short/options/CFD requests, and Python
+direct broker writes. This contract does not emit a shadow signal or generate a
+fill; it defines the evidence-safe request shape future shadow evaluation code
+must satisfy before any collector or scorecard path can exist.
+
 ## 10. `ibkr_paper_order_lifecycle_v1`
 
 Required fields:

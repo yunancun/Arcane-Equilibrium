@@ -1,0 +1,39 @@
+# ADR-0048 Stock/ETF shadow signal request template.
+#
+# This is a blocked, secret-free source template. It does not start IPC,
+# contact IBKR, create connectors, emit shadow signals, generate shadow fills,
+# write scorecards, route orders, inspect secrets, apply DB changes, or change
+# Bybit live execution behavior.
+
+contract_id = ""
+source_version = 0
+asset_lane = "crypto_perp"
+broker = "bybit"
+environment = "live_reserved_denied"
+request_method = "unknown_denied"
+operation = "transfer_or_account_write"
+authority_scope = "denied"
+effect_capable = false
+request_id = ""
+evaluation_run_id = ""
+shadow_signal_id = ""
+evidence_clock_hash = ""
+pit_universe_contract_hash = ""
+strategy_hypothesis_hash = ""
+instrument_identity_hash = ""
+market_data_provenance_hash = ""
+cost_model_version_hash = ""
+asset_lane_events_contract_hash = ""
+source_artifact_hash = ""
+ibkr_contact_performed = false
+connector_runtime_started = false
+secret_content_serialized = false
+shadow_signal_emitted = false
+shadow_fill_generated = false
+scorecard_writer_started = false
+db_apply_performed = false
+order_routed = false
+bybit_path_reused = false
+live_or_tiny_live_authorized = false
+margin_short_options_cfd_requested = false
+python_direct_broker_write_requested = false

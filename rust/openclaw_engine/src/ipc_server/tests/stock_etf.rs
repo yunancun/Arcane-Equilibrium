@@ -5,7 +5,10 @@ use super::{
     empty_account_manager_slot, empty_budget_slot, empty_cost_edge_advisor_slot,
     empty_h_state_cache_slot, empty_teacher_slot, make_test_config, make_test_data_dir,
 };
-use openclaw_types::{StockEtfPaperFillImportRequestV1, StockEtfPaperOrderRequestEnvelopeV1};
+use openclaw_types::{
+    StockEtfPaperFillImportRequestV1, StockEtfPaperOrderRequestEnvelopeV1,
+    StockEtfShadowSignalRequestV1,
+};
 
 #[tokio::test]
 async fn stock_etf_submit_denies_without_paper_channel_or_ibkr_call() {
@@ -300,6 +303,136 @@ async fn stock_etf_import_paper_fills_rejects_stale_or_minimal_params() {
 }
 
 #[tokio::test]
+async fn stock_etf_evaluate_shadow_signal_validates_request_without_runtime_authority() {
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let params = serde_json::to_string(&StockEtfShadowSignalRequestV1::accepted_fixture())
+        .expect("shadow signal request json");
+    let req = format!(
+        r#"{{"jsonrpc":"2.0","method":"stock_etf.evaluate_shadow_signal","params":{params},"id":48015}}"#
+    );
+    let resp = dispatch_request(
+        &req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
+    )
+    .await;
+
+    assert!(resp.error.is_none());
+    let result = resp.result.expect("stock_etf result");
+    assert_eq!(result["allowed"], false);
+    assert_eq!(result["runtime_authority_denied"], true);
+    assert_eq!(result["ibkr_call_performed"], false);
+    assert_eq!(result["secret_slot_touched"], false);
+    assert_eq!(result["order_routed"], false);
+    assert_eq!(result["bybit_ipc_reused"], false);
+    assert_eq!(result["shadow_signal_request"]["parse_ok"], true);
+    assert_eq!(result["shadow_signal_request"]["accepted"], true);
+    assert_eq!(
+        result["shadow_signal_request"]["expected_request_method"],
+        "evaluate_shadow_signal"
+    );
+    assert_eq!(
+        result["shadow_signal_request"]["request_method"],
+        "evaluate_shadow_signal"
+    );
+    assert_eq!(result["shadow_signal_request"]["ipc_method_matches"], true);
+    assert_eq!(result["shadow_signal_request"]["accepted_for_ipc"], true);
+    assert_eq!(result["shadow_signal_request_accepted_for_ipc"], true);
+    assert_eq!(result["shadow_signal_request"]["effect_capable"], false);
+    assert_eq!(
+        result["shadow_signal_request"]["shadow_signal_id_present"],
+        true
+    );
+    assert_eq!(
+        result["shadow_signal_request"]["evidence_clock_hash_present"],
+        true
+    );
+    assert_eq!(
+        result["shadow_signal_request"]["cost_model_version_hash_present"],
+        true
+    );
+    assert_eq!(
+        result["shadow_signal_request"]["shadow_signal_emitted"],
+        false
+    );
+    assert_eq!(
+        result["shadow_signal_request"]["shadow_fill_generated"],
+        false
+    );
+    assert_eq!(
+        result["shadow_signal_request"]["scorecard_writer_started"],
+        false
+    );
+    assert_eq!(result["shadow_signal_request"]["db_apply_performed"], false);
+}
+
+#[tokio::test]
+async fn stock_etf_evaluate_shadow_signal_rejects_stale_or_minimal_params() {
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let req =
+        r#"{"jsonrpc":"2.0","method":"stock_etf.evaluate_shadow_signal","params":{},"id":48016}"#;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
+    )
+    .await;
+
+    assert!(resp.error.is_none());
+    let result = resp.result.expect("stock_etf result");
+    assert_eq!(result["allowed"], false);
+    assert_eq!(result["ibkr_call_performed"], false);
+    assert_eq!(result["secret_slot_touched"], false);
+    assert_eq!(result["order_routed"], false);
+    assert_eq!(result["bybit_ipc_reused"], false);
+    assert_eq!(result["shadow_signal_request"]["parse_ok"], false);
+    assert_eq!(result["shadow_signal_request"]["accepted"], false);
+    assert_eq!(
+        result["shadow_signal_request"]["blockers"][0],
+        "shadow_signal_request_parse_failed"
+    );
+    assert_eq!(result["shadow_signal_request"]["accepted_for_ipc"], false);
+    assert_eq!(result["shadow_signal_request_accepted_for_ipc"], false);
+    assert_eq!(
+        result["shadow_signal_request"]["shadow_signal_emitted"],
+        false
+    );
+    assert_eq!(result["shadow_signal_request"]["db_apply_performed"], false);
+}
+
+#[tokio::test]
 async fn legacy_submit_paper_order_still_uses_existing_channel_path() {
     let config = make_test_config();
     let dd = make_test_data_dir();
@@ -489,10 +622,14 @@ async fn stock_etf_phase0_status_exposes_accepted_source_manifest_without_runtim
     );
     assert_eq!(result["phase0_accepted"], true);
     assert_eq!(result["phase0_blockers"].as_array().unwrap().len(), 0);
-    assert_eq!(result["contract_count"], 30);
+    assert_eq!(result["contract_count"], 31);
     assert!(json_array_contains(
         &result["contracts"],
         "stock_etf_paper_fill_import_request_v1"
+    ));
+    assert!(json_array_contains(
+        &result["contracts"],
+        "stock_etf_shadow_signal_request_v1"
     ));
     assert_eq!(
         result["manifest"]["schema"],
