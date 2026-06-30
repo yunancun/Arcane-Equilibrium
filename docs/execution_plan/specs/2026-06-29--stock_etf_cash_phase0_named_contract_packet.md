@@ -485,6 +485,12 @@ regressions. This contract starts no IPC server and authorizes no paper order.
 
 ## 10. `ibkr_paper_order_lifecycle_v1`
 
+Required fields:
+
+- `lifecycle_contract_id=ibkr_paper_order_lifecycle_v1`
+- `event_log_contract_id=broker_lifecycle_event_log_v1`
+- `source_version=1`
+
 States:
 
 - `LOCAL_INTENT_CREATED`
@@ -530,6 +536,9 @@ Restart recovery:
 
 Append-only event fields:
 
+- `lifecycle_contract_id`
+- `event_log_contract_id`
+- `source_version`
 - `event_id`
 - `event_time`
 - `asset_lane`
