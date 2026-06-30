@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 76 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 77 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -1513,6 +1513,35 @@ Verification 已過：
 - Connector skeleton focused tests：`8 passed`
 - Python no-write static guard：`18 passed`
 - Full Stock/ETF FastAPI/static：`117 passed`
+- IBKR timeline + trace-title structure guard：`2 passed`
+- `git diff --check`：PASS
+
+邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 client input、沒有 IBKR
+contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation、沒有
+connector runtime、沒有 read probe execution、沒有 paper order/cancel/replace、沒有 fill
+import、沒有 evidence writer、沒有 DB apply、沒有 evidence clock、沒有 tiny-live/live
+authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Python Runtime Side-Effect Static Guard
+
+這次不是 runtime behavior change，也不是 IBKR connector wiring。變更只新增
+Stock/ETF / IBKR Python scoped surface 的 AST guard：
+
+- 禁止 scoped Stock/ETF/IBKR Python surface import `time`、`datetime`、`asyncio`、
+  `threading`、`multiprocessing`、`subprocess`、`concurrent`。
+- 禁止 timing/concurrency/subprocess calls，例如 `sleep()`、`time()`、
+  `monotonic()`、`perf_counter()`、`now()`、`Thread()`、`Process()`、`Popen()`、
+  `asyncio.run()`、`create_task()`、`to_thread()`。
+- Scope 只包含 Stock/ETF FastAPI routes/normalizers 和 inert IBKR connector
+  skeleton；不掃既有 Bybit runtime modules。
+- 目的：保持 display/source-only deterministic，不引入 background work、timer、
+  thread 或 subprocess overhead。
+
+Verification 已過：
+
+- Python no-write static guard：`19 passed`
+- Connector skeleton focused tests：`8 passed`
+- Full Stock/ETF FastAPI/static：`118 passed`
 - IBKR timeline + trace-title structure guard：`2 passed`
 - `git diff --check`：PASS
 

@@ -3332,3 +3332,11 @@
 - This supplements the existing forbidden write-method guard by preventing future runtime-start, order-write, secret/network, or Bybit-reuse entrypoints from appearing under alternative public method names.
 - Verification passed: connector skeleton tests `8 passed`; Python no-write static guard `18 passed`; full Stock/ETF FastAPI/static `117 passed`; docs trace guard `2 passed`; `git diff --check` PASS.
 - Boundary unchanged: no endpoint/IPC method change, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, paper order/cancel/replace, fill import, DB/evidence writer, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF Python Runtime Side-Effect Static Guard
+
+- PM added an AST guard proving the scoped Stock/ETF / IBKR Python surface does not import clock/concurrency/subprocess modules or call timing/background-work primitives.
+- The guard bans `time`, `datetime`, `asyncio`, `threading`, `multiprocessing`, `subprocess`, and `concurrent` imports plus `sleep`, `time`, `monotonic`, `perf_counter`, `now`, `utcnow`, `fromtimestamp`, `Thread`, `Process`, `Popen`, `run`, `create_task`, and `to_thread` calls in the scoped surface.
+- Scope remains only Stock/ETF FastAPI routes/normalizers and the inert IBKR connector skeleton, preserving existing Bybit runtime modules.
+- Verification passed: Python no-write static guard `19 passed`; connector skeleton tests `8 passed`; full Stock/ETF FastAPI/static `118 passed`; docs trace guard `2 passed`; `git diff --check` PASS.
+- Boundary unchanged: no endpoint/IPC method change, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, paper order/cancel/replace, fill import, DB/evidence writer, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
