@@ -608,3 +608,9 @@ Do not paste long reports or stable architecture into TODO.
 - Phase 4 display-only GUI checkpoint makes `tab-stock-etf.html` render the normalized `api_allowlist` readiness payload: accepted/blocked status, contract id/source version, action counts, no-contact/no-secret flags, Bybit-live protection proof, and allowlist blockers.
 - Allowlist blockers are merged into the existing denied/blocker surface; static tests assert the tab consumes `api_allowlist` while preserving no POST, no paper order method, and no local/session storage authority.
 - Verification passed: route test `py_compile`, focused FastAPI/no-write pytest `12 passed`, Node inline-script syntax check `2` scripts, and `git diff --check`. This grants no IBKR contact, connector runtime, secret access, paper order, fill import, DB apply, GUI/lane selector authority, Phase 2 start, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Static GUI No-Write Guard
+
+- Source-only test checkpoint extends the Stock/ETF IBKR no-write guard to the static GUI tab, requiring `/api/v1/stock-etf/readiness` and rejecting POST/PUT/PATCH/DELETE snippets, `ocPost`, direct `fetch`, forms, browser storage lane authority, IBKR broker-write strings, and Stock/ETF write IPC strings.
+- The guard is intentionally scoped to `tab-stock-etf.html` so existing Bybit paper/live GUI surfaces are not reclassified as IBKR violations.
+- Verification passed: guard test `py_compile`, focused FastAPI/static no-write pytest `13 passed`, and `git diff --check`. This grants no IBKR contact, connector runtime, secret access, paper order, fill import, DB apply, GUI/lane selector authority, Phase 2 start, tiny-live, live, or Bybit behavior change.
