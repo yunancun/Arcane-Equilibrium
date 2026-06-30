@@ -193,6 +193,12 @@ pub const STOCK_ETF_EVALUATE_SHADOW_SIGNAL: IpcMethodSpec = IpcMethodSpec {
     slot: IpcSlotRequirement::None,
 };
 
+pub const STOCK_ETF_PREVIEW_READONLY_PROBE: IpcMethodSpec = IpcMethodSpec {
+    name: "stock_etf.preview_readonly_probe",
+    readonly: true,
+    slot: IpcSlotRequirement::None,
+};
+
 pub const IPC_METHOD_REGISTRY: &[IpcMethodSpec] = &[
     QUERY_FEE_SOURCE,
     GET_AGENT_SPINE_CHANNEL_METRICS,
@@ -220,6 +226,7 @@ pub const IPC_METHOD_REGISTRY: &[IpcMethodSpec] = &[
     STOCK_ETF_REPLACE_PAPER_ORDER,
     STOCK_ETF_IMPORT_PAPER_FILLS,
     STOCK_ETF_EVALUATE_SHADOW_SIGNAL,
+    STOCK_ETF_PREVIEW_READONLY_PROBE,
 ];
 
 pub fn method_spec(name: &str) -> Option<&'static IpcMethodSpec> {
@@ -301,6 +308,7 @@ mod tests {
             "stock_etf.replace_paper_order",
             "stock_etf.import_paper_fills",
             "stock_etf.evaluate_shadow_signal",
+            "stock_etf.preview_readonly_probe",
         ] {
             let spec = method_spec(name).expect("stock_etf method registered");
             assert_eq!(spec.slot, IpcSlotRequirement::None);
@@ -334,6 +342,7 @@ mod tests {
             "stock_etf.preview_paper_order",
             "stock_etf.import_paper_fills",
             "stock_etf.evaluate_shadow_signal",
+            "stock_etf.preview_readonly_probe",
         ] {
             let spec = method_spec(name).expect("stock_etf read fixture registered");
             assert!(spec.readonly, "{name} must remain a read-only fixture");

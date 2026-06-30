@@ -1941,3 +1941,48 @@ PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 
 migration/apply、不做 Postgres dry-run、不啟動 evidence clock、不做 Linux runtime
 sync/restart、不啟動 paper-shadow launch、不授權 tiny-live/live 或任何 Bybit behavior
 change。
+
+## 36. 2026-06-30 PM session source checkpoint：Read-Only Probe IPC Binding
+
+本 checkpoint 把前面新增的 `stock_etf_ibkr_readonly_probe_request_v1` 接到 Rust
+IPC validation-only method：`stock_etf.preview_readonly_probe`。這不是 IBKR
+healthcheck、不是 connector runtime，也不是首次 contact；它只讓 future first-contact
+read probe request 在 Rust fixture 層先有 typed parse/validation verdict。
+
+新增 checkpoint：
+
+- `lane_scoped_ipc_v1` 新增 `PreviewReadonlyProbe` required method。
+- Method gate/field matrix 要求 Phase 2 external-surface gate、non-Bybit API
+  allowlist、secret-slot、API topology、session attestation、redaction、rate-limit、
+  audit-policy lineage，以及 request/probe/source/raw/redacted artifact hashes。
+- Rust method registry 新增 `stock_etf.preview_readonly_probe`，標記
+  readonly、slot none，且不進 Bybit live-write token surface。
+- Rust dispatch 將 method 送入 Stock/ETF fixture handler；handler 將 params 解析成
+  `StockEtfIbkrReadonlyProbeRequestV1`，回傳 `readonly_probe_request` verdict 與
+  `readonly_probe_request_accepted_for_ipc`。
+- Valid envelope 可以 typed/read-only validate，但 top-level `allowed` 仍會因 default
+  flags/gates 維持 false；minimal params fail closed 為
+  `readonly_probe_request_parse_failed`。
+- Phase0 packet spec 與 broker template README 已同步此 method binding。
+
+驗證：
+
+- `rustfmt`：PASS。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_lane_scoped_ipc_acceptance -- --nocapture`：
+  lane-scoped IPC acceptance `9 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf_preview_readonly_probe -- --nocapture`：
+  readonly-probe IPC focused `2 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf_registry -- --nocapture`：
+  registry boundary focused `1 passed`。
+- Full `cargo test --manifest-path rust/Cargo.toml -p openclaw_types`：
+  `35` unit/golden + `247` integration/acceptance + `0` doc-tests。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
+  Stock/ETF engine filter `29 passed`（既有 warnings only）。
+- `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence clock、不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權
+tiny-live/live 或任何 Bybit behavior change。

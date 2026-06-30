@@ -9,7 +9,11 @@ use std::path::PathBuf;
 use openclaw_types::{
     AssetLane, AuthorityScope, Broker, BrokerOperation, StockEtfDenialReason,
     StockEtfLaneScopedIpcBlocker, StockEtfLaneScopedIpcCommandV1, StockEtfLaneScopedIpcContractV1,
-    StockEtfLaneScopedIpcMethod, STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID,
+    StockEtfLaneScopedIpcMethod, IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID,
+    IBKR_AUDIT_EVENT_POLICY_CONTRACT_ID, IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
+    IBKR_RATE_LIMIT_POLICY_CONTRACT_ID, IBKR_REDACTION_POLICY_CONTRACT_ID,
+    IBKR_SECRET_SLOT_CONTRACT_ID, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
+    NON_BYBIT_API_ALLOWLIST_CONTRACT_ID, STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID,
     STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID, STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID,
     STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID, STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
     STOCK_ETF_RISK_POLICY_CONTRACT_ID, STOCK_ETF_SCOPED_AUTHORIZATION_CONTRACT_ID,
@@ -71,7 +75,7 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
     assert!(!contract.ibkr_contact_performed);
     assert!(!contract.connector_runtime_started);
     assert!(!contract.secret_content_serialized);
-    assert_eq!(contract.commands.len(), 19);
+    assert_eq!(contract.commands.len(), 20);
 
     let phase0_status = contract
         .commands
@@ -293,6 +297,51 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
     assert!(shadow
         .required_gates
         .contains(&STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID.to_string()));
+
+    let readonly_probe = contract
+        .commands
+        .iter()
+        .find(|command| command.method == StockEtfLaneScopedIpcMethod::PreviewReadonlyProbe)
+        .expect("readonly-probe preview method exists");
+    assert_eq!(readonly_probe.operation, BrokerOperation::HealthRead);
+    assert_eq!(readonly_probe.authority_scope, AuthorityScope::ReadOnly);
+    assert!(!readonly_probe.effect_capable);
+    assert!(readonly_probe.rust_owned);
+    for gate in [
+        IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
+        NON_BYBIT_API_ALLOWLIST_CONTRACT_ID,
+        IBKR_SECRET_SLOT_CONTRACT_ID,
+        IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID,
+        IBKR_SESSION_ATTESTATION_CONTRACT_ID,
+        IBKR_REDACTION_POLICY_CONTRACT_ID,
+        IBKR_RATE_LIMIT_POLICY_CONTRACT_ID,
+        IBKR_AUDIT_EVENT_POLICY_CONTRACT_ID,
+    ] {
+        assert!(
+            readonly_probe.required_gates.contains(&gate.to_string()),
+            "readonly probe method missing gate {gate}"
+        );
+    }
+    assert_fields(
+        readonly_probe,
+        &[
+            "probe_kind",
+            "api_action",
+            "request_id",
+            "probe_id",
+            "phase2_gate_artifact_hash",
+            "api_allowlist_hash",
+            "secret_slot_contract_hash",
+            "api_session_topology_hash",
+            "session_attestation_hash",
+            "redaction_policy_hash",
+            "rate_limit_policy_hash",
+            "audit_event_policy_hash",
+            "source_artifact_hash",
+            "raw_artifact_hash",
+            "redacted_summary_hash",
+        ],
+    );
 }
 
 #[test]

@@ -538,6 +538,7 @@ Rust IPC commands must be lane-scoped and separate from existing Bybit paper com
 - `stock_etf.replace_paper_order`
 - `stock_etf.import_paper_fills`
 - `stock_etf.evaluate_shadow_signal`
+- `stock_etf.preview_readonly_probe`
 
 Every effect-capable command requires:
 
@@ -583,6 +584,10 @@ missing or duplicate methods, unknown/Bybit paper methods, direct Python broker
 write authority, reuse of existing Bybit paper IPC paths, IBKR contact,
 connector runtime, serialized secrets, live environment, and Bybit-live
 regressions. This contract starts no IPC server and authorizes no paper order.
+The read-only probe preview method is validation-only: it requires the external
+surface gate, API allowlist, secret-slot/topology/session, redaction, rate-limit,
+and audit-policy lineage fields, but it still performs no IBKR contact and
+cannot start a connector.
 
 ## 9A. `stock_etf_paper_order_request_v1`
 
@@ -731,6 +736,33 @@ reuse, live/tiny-live authority, margin/short/options/CFD requests, and Python
 direct broker writes. This contract does not emit a shadow signal or generate a
 fill; it defines the evidence-safe request shape future shadow evaluation code
 must satisfy before any collector or scorecard path can exist.
+
+## 9D. `stock_etf_ibkr_readonly_probe_request_v1` IPC binding
+
+`stock_etf.preview_readonly_probe` parses params as
+`StockEtfIbkrReadonlyProbeRequestV1` and returns a validation verdict before any
+future IBKR read probe can be considered.
+
+Required fields include:
+
+- exact contract id `stock_etf_ibkr_readonly_probe_request_v1`
+- `source_version=1`
+- `asset_lane=stock_etf_cash`
+- `broker=ibkr`
+- `environment=readonly`
+- probe kind, allowlisted API action, and matching broker read operation
+- `authority_scope=readonly`
+- `effect_capable=false`
+- request id and probe id
+- Phase 2 gate artifact, API allowlist, secret-slot, topology, session
+  attestation, redaction, rate-limit, and audit-policy hashes
+- source, raw, and redacted artifact hashes
+
+The IPC binding accepts only the typed envelope verdict. It does not perform the
+probe, contact IBKR, read secret content, start a connector, route orders,
+submit paper orders, apply DB changes, start the evidence clock, reuse the Bybit
+path, authorize live/tiny-live, buy market-data entitlements, use Client Portal
+Web API, or grant Python direct broker writes.
 
 ## 10. `ibkr_paper_order_lifecycle_v1`
 

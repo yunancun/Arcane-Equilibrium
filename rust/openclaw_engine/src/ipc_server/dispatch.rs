@@ -474,7 +474,8 @@ pub(crate) async fn dispatch_request(
         | "stock_etf.cancel_paper_order"
         | "stock_etf.replace_paper_order"
         | "stock_etf.import_paper_fills"
-        | "stock_etf.evaluate_shadow_signal" => {
+        | "stock_etf.evaluate_shadow_signal"
+        | "stock_etf.preview_readonly_probe" => {
             debug_assert_eq!(
                 method_spec(method).map(|spec| spec.slot),
                 Some(IpcSlotRequirement::None)

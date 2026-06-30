@@ -13,12 +13,13 @@ use openclaw_types::{
     IbkrSessionAttestationV1, InstrumentKind, NonBybitApiAllowlistV1,
     StockEtfBrokerCapabilityRegistryV1, StockEtfDisableCleanupRunbookV1,
     StockEtfEvidenceClockDayV1, StockEtfFeatureFlags, StockEtfGateInputs,
-    StockEtfInstrumentIdentityV1, StockEtfLaneScopedIpcMethod, StockEtfPaperFillImportRequestV1,
-    StockEtfPaperOrderRequestEnvelopeV1, StockEtfPaperShadowReconciliationV1,
-    StockEtfPhase0ContractPacketManifestV1, StockEtfPitUniverseV1, StockEtfReferenceDataSourcesV1,
-    StockEtfReleasePacketV1, StockEtfRiskPolicyV1, StockEtfScorecardDerivationV1,
-    StockEtfScorecardVerdictV1, StockEtfShadowSignalRequestV1, StockEtfStrategyHypothesisV1,
-    StockMarketDataProvenanceV1, StockShadowFillModelV1, TinyLiveAdrEligibilityV1,
+    StockEtfIbkrReadonlyProbeRequestV1, StockEtfInstrumentIdentityV1, StockEtfLaneScopedIpcMethod,
+    StockEtfPaperFillImportRequestV1, StockEtfPaperOrderRequestEnvelopeV1,
+    StockEtfPaperShadowReconciliationV1, StockEtfPhase0ContractPacketManifestV1,
+    StockEtfPitUniverseV1, StockEtfReferenceDataSourcesV1, StockEtfReleasePacketV1,
+    StockEtfRiskPolicyV1, StockEtfScorecardDerivationV1, StockEtfScorecardVerdictV1,
+    StockEtfShadowSignalRequestV1, StockEtfStrategyHypothesisV1, StockMarketDataProvenanceV1,
+    StockShadowFillModelV1, TinyLiveAdrEligibilityV1,
     BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID, BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
     FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID, IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
     IBKR_PAPER_ATTESTATION_CONTRACT_ID, IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
@@ -155,10 +156,16 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
                 .as_ref()
                 .map(|(_, accepted)| *accepted)
                 .unwrap_or(true);
+            let readonly_probe_request = readonly_probe_request_ipc_summary(method, params);
+            let readonly_probe_request_accepted_for_ipc = readonly_probe_request
+                .as_ref()
+                .map(|(_, accepted)| *accepted)
+                .unwrap_or(true);
             let allowed = decision.allowed
                 && request_envelope_accepted_for_ipc
                 && fill_import_request_accepted_for_ipc
-                && shadow_signal_request_accepted_for_ipc;
+                && shadow_signal_request_accepted_for_ipc
+                && readonly_probe_request_accepted_for_ipc;
             let denial_reason = decision.denial_reason;
             JsonRpcResponse::success(
                 id,
@@ -174,6 +181,8 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
                     "fill_import_request_accepted_for_ipc": fill_import_request_accepted_for_ipc,
                     "shadow_signal_request": shadow_signal_request.map(|(summary, _)| summary),
                     "shadow_signal_request_accepted_for_ipc": shadow_signal_request_accepted_for_ipc,
+                    "readonly_probe_request": readonly_probe_request.map(|(summary, _)| summary),
+                    "readonly_probe_request_accepted_for_ipc": readonly_probe_request_accepted_for_ipc,
                     "runtime_authority_denied": true,
                     "phase2": phase2,
                     "ibkr_call_performed": false,
@@ -1718,6 +1727,7 @@ fn operation_for_method(method: &str) -> Option<BrokerOperation> {
         "stock_etf.replace_paper_order" => Some(BrokerOperation::PaperOrderReplace),
         "stock_etf.import_paper_fills" => Some(BrokerOperation::PaperOrderFillImport),
         "stock_etf.evaluate_shadow_signal" => Some(BrokerOperation::ShadowSignalEmit),
+        "stock_etf.preview_readonly_probe" => Some(BrokerOperation::HealthRead),
         _ => None,
     }
 }
@@ -1743,6 +1753,15 @@ fn shadow_signal_request_method_for_ipc(method: &str) -> Option<StockEtfLaneScop
     match method {
         "stock_etf.evaluate_shadow_signal" => {
             Some(StockEtfLaneScopedIpcMethod::EvaluateShadowSignal)
+        }
+        _ => None,
+    }
+}
+
+fn readonly_probe_request_method_for_ipc(method: &str) -> Option<StockEtfLaneScopedIpcMethod> {
+    match method {
+        "stock_etf.preview_readonly_probe" => {
+            Some(StockEtfLaneScopedIpcMethod::PreviewReadonlyProbe)
         }
         _ => None,
     }
@@ -2022,6 +2041,98 @@ fn shadow_signal_request_summary(
                 "bybit_path_reused": false,
                 "live_or_tiny_live_authorized": false,
                 "margin_short_options_cfd_requested": false,
+                "python_direct_broker_write_requested": false,
+            }),
+            false,
+        ),
+    })
+}
+
+fn readonly_probe_request_ipc_summary(
+    method: &str,
+    params: &serde_json::Value,
+) -> Option<(serde_json::Value, bool)> {
+    let expected_request_method = readonly_probe_request_method_for_ipc(method)?;
+    let parsed = serde_json::from_value::<StockEtfIbkrReadonlyProbeRequestV1>(params.clone());
+
+    Some(match parsed {
+        Ok(request) => {
+            let verdict = request.validate();
+            let accepted_for_ipc = verdict.accepted;
+            (
+                serde_json::json!({
+                    "expected_contract_id": STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID,
+                    "contract_id": request.contract_id,
+                    "source_version": request.source_version,
+                    "parse_ok": true,
+                    "accepted": verdict.accepted,
+                    "blockers": verdict.blockers,
+                    "expected_request_method": expected_request_method,
+                    "accepted_for_ipc": accepted_for_ipc,
+                    "probe_kind": request.probe_kind,
+                    "api_action": request.api_action,
+                    "operation": request.operation,
+                    "authority_scope": request.authority_scope,
+                    "effect_capable": request.effect_capable,
+                    "request_id_present": !request.request_id.is_empty(),
+                    "probe_id_present": !request.probe_id.is_empty(),
+                    "phase2_gate_artifact_hash_present": !request.phase2_gate_artifact_hash.is_empty(),
+                    "api_allowlist_hash_present": !request.api_allowlist_hash.is_empty(),
+                    "secret_slot_contract_hash_present": !request.secret_slot_contract_hash.is_empty(),
+                    "api_session_topology_hash_present": !request.api_session_topology_hash.is_empty(),
+                    "session_attestation_hash_present": !request.session_attestation_hash.is_empty(),
+                    "redaction_policy_hash_present": !request.redaction_policy_hash.is_empty(),
+                    "rate_limit_policy_hash_present": !request.rate_limit_policy_hash.is_empty(),
+                    "audit_event_policy_hash_present": !request.audit_event_policy_hash.is_empty(),
+                    "source_artifact_hash_present": !request.source_artifact_hash.is_empty(),
+                    "raw_artifact_hash_present": !request.raw_artifact_hash.is_empty(),
+                    "redacted_summary_hash_present": !request.redacted_summary_hash.is_empty(),
+                    "read_probe_executed": false,
+                    "ibkr_contact_performed": request.ibkr_contact_performed,
+                    "connector_runtime_started": request.connector_runtime_started,
+                    "secret_content_serialized": request.secret_content_serialized,
+                    "order_routed": request.order_routed,
+                    "paper_order_submitted": request.paper_order_submitted,
+                    "db_apply_performed": request.db_apply_performed,
+                    "evidence_clock_started": request.evidence_clock_started,
+                    "bybit_path_reused": request.bybit_path_reused,
+                    "live_or_tiny_live_authorized": request.live_or_tiny_live_authorized,
+                    "margin_short_options_cfd_requested": request.margin_short_options_cfd_requested,
+                    "account_write_requested": request.account_write_requested,
+                    "market_data_entitlement_purchase_requested": request.market_data_entitlement_purchase_requested,
+                    "client_portal_web_api_requested": request.client_portal_web_api_requested,
+                    "python_direct_broker_write_requested": request.python_direct_broker_write_requested,
+                }),
+                accepted_for_ipc,
+            )
+        }
+        Err(e) => (
+            serde_json::json!({
+                "expected_contract_id": STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID,
+                "contract_id": "",
+                "source_version": 0,
+                "parse_ok": false,
+                "accepted": false,
+                "blockers": ["readonly_probe_request_parse_failed"],
+                "expected_request_method": expected_request_method,
+                "accepted_for_ipc": false,
+                "parse_error": e.to_string(),
+                "request_id_present": false,
+                "probe_id_present": false,
+                "read_probe_executed": false,
+                "ibkr_contact_performed": false,
+                "connector_runtime_started": false,
+                "secret_content_serialized": false,
+                "order_routed": false,
+                "paper_order_submitted": false,
+                "db_apply_performed": false,
+                "evidence_clock_started": false,
+                "bybit_path_reused": false,
+                "live_or_tiny_live_authorized": false,
+                "margin_short_options_cfd_requested": false,
+                "account_write_requested": false,
+                "market_data_entitlement_purchase_requested": false,
+                "client_portal_web_api_requested": false,
                 "python_direct_broker_write_requested": false,
             }),
             false,

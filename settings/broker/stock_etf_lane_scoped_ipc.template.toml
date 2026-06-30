@@ -3,6 +3,10 @@
 # This is a blocked, secret-free source template. It does not start IPC,
 # contact IBKR, create connectors, route paper orders, inspect secrets, or
 # change Bybit live execution behavior.
+#
+# The accepted source contract matrix includes read-only validation fixtures
+# such as stock_etf.preview_readonly_probe, but this template stays empty and
+# blocked until a governed artifact is produced.
 
 contract_id = ""
 source_version = 0
