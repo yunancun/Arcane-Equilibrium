@@ -2111,7 +2111,7 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 
 新增 checkpoint：
 
-- 主計畫 PM session checkpoint 現在從 14 到 52 連續遞增，無重複編號。
+- 主計畫 PM session checkpoint 現在從 14 到 53 連續遞增，無重複編號。
 - 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
   lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
   connector skeleton / readonly-probe / broker read gate / policy display / operation
@@ -2457,6 +2457,37 @@ writer 或文件寫入 API。
   `9 passed`。
 - `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
   `103 passed`。
+- `python3 -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
+  `2 passed`。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 53. 2026-06-30 PM session source checkpoint：OpenAPI Client Input Surface Guard
+
+本 checkpoint 強化 Stock/ETF public OpenAPI contract 的 client-input 邊界。前面已經
+鎖住 handler signature、IPC params 與 IPC method；這次把外部 schema 也鎖住，確保
+GET/status surface 不宣告 request body、query/path/cookie/client header inputs。
+
+已完成：
+
+- 新增 `test_stock_etf_openapi_exposes_no_client_state_inputs`。
+- 掃描所有 `/api/v1/stock-etf...` OpenAPI GET operations。
+- 不允許 `requestBody`。
+- parameters 只允許既有 auth 的 optional `Authorization` header。
+- 本 guard 不改 route behavior、不新增 endpoint、不改 auth 實作、不啟動 runtime，只防
+  public OpenAPI contract 出現 client-state-bearing inputs。
+
+驗證：
+
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_routes.py`：
+  `14 passed`。
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  `104 passed`。
 - `python3 -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
   `2 passed`。
 - `git diff --check`：PASS。
