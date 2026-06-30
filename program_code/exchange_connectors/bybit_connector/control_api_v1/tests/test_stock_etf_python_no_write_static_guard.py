@@ -168,6 +168,28 @@ def test_stock_etf_ibkr_python_routes_remain_get_only_until_rust_authority_contr
     assert violations == []
 
 
+def test_stock_etf_routes_call_ipc_with_empty_params_only() -> None:
+    path = CONTROL_API_DIR / "app" / "stock_etf_routes.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+    ipc_call_count = 0
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Attribute) or node.func.attr != "call":
+            continue
+        ipc_call_count += 1
+        params_keywords = [keyword for keyword in node.keywords if keyword.arg == "params"]
+        if len(params_keywords) != 1 or not _is_empty_dict(params_keywords[0].value):
+            violations.append(
+                f"{path}:{node.lineno}: Stock/ETF IPC call must use literal params={{}}"
+            )
+
+    assert ipc_call_count >= 16
+    assert violations == []
+
+
 def test_stock_etf_static_gui_endpoint_set_matches_gui_lane_contract_template() -> None:
     files = _candidate_stock_etf_static_gui_files()
     assert files, "expected Stock/ETF static GUI surface"
@@ -263,6 +285,10 @@ def _decorated_http_method(decorator: ast.expr) -> str | None:
     if isinstance(decorator, ast.Call):
         return _call_name(decorator.func)
     return _call_name(decorator)
+
+
+def _is_empty_dict(value: ast.expr) -> bool:
+    return isinstance(value, ast.Dict) and value.keys == [] and value.values == []
 
 
 def _call_name(func: ast.expr) -> str | None:
