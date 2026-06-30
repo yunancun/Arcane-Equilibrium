@@ -34,3 +34,27 @@ Phase 1-5 所有 gates 都按主計劃完成、通過、落下 immutable artifac
 第二輪把缺口全部前移成 hard gates；第三輪確認：只要這些 gates 按計劃全部
 通過，paper/shadow 上線 scope 就完整。下一步仍是 Phase 0 ADR/AMD + named
 contract packet，不是直接寫 IBKR connector。
+
+## 2026-06-30 Operator Update
+
+本 session 已完成下一個 source-only checkpoint：`policy-status`。
+
+你現在會在 Stock/ETF GUI 看到新的 `Policy Gate` 與
+`Policy / Capability Status` 面板；後端是
+`GET /api/v1/stock-etf/policy-status`，Rust IPC 是
+`stock_etf.get_policy_status`。
+
+這只是顯示 blocked/default 的 risk policy 與 broker capability registry 狀態，
+不是 IBKR 連線、不是 paper order、不是 Phase 2 start。
+
+Verification 已過：
+
+- Focused FastAPI/static：`18 passed`
+- Full Stock/ETF FastAPI/static：`72 passed`
+- Engine Stock/ETF：`17 passed`
+- GUI/lane IPC acceptance：`17 passed`
+- Full openclaw_types：`35 + 206 + 0 doc-tests`
+
+邊界不變：沒有 IBKR contact、沒有 secret、沒有 connector runtime、沒有 paper order、
+沒有 DB apply、沒有 evidence clock、沒有 Linux runtime sync/restart，也沒有改動 Bybit
+live execution 行為。

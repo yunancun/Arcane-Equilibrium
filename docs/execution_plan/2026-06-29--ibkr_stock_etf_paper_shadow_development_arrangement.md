@@ -877,3 +877,43 @@ PM 判定：
 - 本結論明確排除 IBKR live、tiny-live、margin、short、options、CFD、資金劃轉、
   transfer/account-management writes、盈利保證、durable alpha proof，以及任何自動
   promotion beyond paper/shadow。
+
+## 14. 2026-06-30 PM session source checkpoint：Policy / Capability Status
+
+本 session 依第三輪 PM 簽核語義繼續執行，但仍限定於 source-only /
+display-only gate hardening；未啟動 IBKR contact、secret、connector runtime、
+paper order、evidence clock、DB apply 或 Linux runtime sync。
+
+新增 checkpoint：
+
+- Rust IPC fixture 新增 `stock_etf.get_policy_status`，輸出
+  `phase2_policy_status_source_fixture`，只反映 `stock_etf_risk_policy_v1` 與
+  `broker_capability_registry_v1` 的 blocked/default source posture。
+- FastAPI 新增 authenticated/no-store
+  `GET /api/v1/stock-etf/policy-status`，只呼叫上述 IPC method 且 params 為 `{}`；
+  normalizer fail-closes IPC unavailable，並把 risk/capability/contact/secret/order/DB/
+  Bybit reuse drift 轉為 `contract_violation_blocked`。
+- GUI 新增 `Policy Gate` metric 與 `Policy / Capability Status` panel，只顯示
+  risk/capability blocker、required gate posture 與 side-effect denial；未新增表單、
+  POST、broker write、order widget 或 browser-storage authority。
+- `lane_scoped_ipc_v1` 新增 `GetPolicyStatus` display-only/non-effect-capable method；
+  `gui_lane_contract_v1` 新增 exact GET-only
+  `/api/v1/stock-etf/policy-status` endpoint。
+
+驗證：
+
+- Python route/normalizer/test `py_compile`：PASS。
+- Node inline parser for `tab-stock-etf.html`：PASS（2 inline scripts）。
+- Focused FastAPI/static pytest：`18 passed`。
+- Full Stock/ETF FastAPI/static pytest：`72 passed`。
+- Rust format checks：PASS（含 `lib.rs` with `skip_children=true`）。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf`：
+  `17 passed` focused Stock/ETF tests。
+- GUI/lane IPC acceptance：`17 passed`。
+- Full `cargo test --manifest-path rust/Cargo.toml -p openclaw_types`：
+  `35` unit/golden + `206` integration/acceptance + `0` doc-tests。
+
+PM 邊界不變：此 checkpoint 不批准 IBKR contact、secret access/creation、
+connector runtime、contract-details request、account snapshot、paper order rehearsal/submit、
+paper fill import、evidence clock、scorecard writer、DB apply、GUI lane authority、
+Phase 2/3/5 start、tiny-live、live 或任何 Bybit behavior change。

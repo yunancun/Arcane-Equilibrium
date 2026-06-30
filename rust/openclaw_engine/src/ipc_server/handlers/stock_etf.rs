@@ -6,23 +6,25 @@
 
 use super::super::*;
 use openclaw_types::{
-    evaluate_broker_operation, AssetLane, Broker, BrokerAccountPortfolioCashLedgerV1,
-    BrokerCapabilityRequest, BrokerEnvironment, BrokerLifecycleEventLogV1, BrokerOperation,
-    IbkrExternalSurfaceGateV1, IbkrPaperAttestationPolicyV1, IbkrPhase2PolicyBundleV1,
-    IbkrSessionAttestationV1, InstrumentKind, NonBybitApiAllowlistV1,
+    evaluate_broker_operation, AssetLane, AuthorityScope, Broker,
+    BrokerAccountPortfolioCashLedgerV1, BrokerCapabilityRequest, BrokerEnvironment,
+    BrokerLifecycleEventLogV1, BrokerOperation, IbkrExternalSurfaceGateV1,
+    IbkrPaperAttestationPolicyV1, IbkrPhase2PolicyBundleV1, IbkrSessionAttestationV1,
+    InstrumentKind, NonBybitApiAllowlistV1, StockEtfBrokerCapabilityRegistryV1,
     StockEtfDisableCleanupRunbookV1, StockEtfEvidenceClockDayV1, StockEtfFeatureFlags,
     StockEtfGateInputs, StockEtfInstrumentIdentityV1, StockEtfPitUniverseV1,
-    StockEtfReferenceDataSourcesV1, StockEtfReleasePacketV1, StockEtfScorecardVerdictV1,
-    StockEtfStrategyHypothesisV1, StockMarketDataProvenanceV1, StockShadowFillModelV1,
-    TinyLiveAdrEligibilityV1, BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID,
-    BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID, IBKR_PAPER_ATTESTATION_CONTRACT_ID,
-    IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
+    StockEtfReferenceDataSourcesV1, StockEtfReleasePacketV1, StockEtfRiskPolicyV1,
+    StockEtfScorecardVerdictV1, StockEtfStrategyHypothesisV1, StockMarketDataProvenanceV1,
+    StockShadowFillModelV1, TinyLiveAdrEligibilityV1,
+    BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID, BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
+    IBKR_PAPER_ATTESTATION_CONTRACT_ID, IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
+    IBKR_SESSION_ATTESTATION_CONTRACT_ID, STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID,
     STOCK_ETF_DISABLE_CLEANUP_RUNBOOK_ID, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
     STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID, STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
     STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID, STOCK_ETF_RELEASE_PACKET_CONTRACT_ID,
-    STOCK_ETF_SCORECARD_VERDICT_CONTRACT_ID, STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
-    STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
-    STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
+    STOCK_ETF_RISK_POLICY_CONTRACT_ID, STOCK_ETF_SCORECARD_VERDICT_CONTRACT_ID,
+    STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID, STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID,
+    STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID, STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
 };
 
 pub(in crate::ipc_server) fn handle_stock_etf_ipc(
@@ -74,6 +76,9 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
         ),
         "stock_etf.get_data_foundation_status" => {
             JsonRpcResponse::success(id, data_foundation_status_summary(phase2))
+        }
+        "stock_etf.get_policy_status" => {
+            JsonRpcResponse::success(id, policy_status_summary(phase2))
         }
         "stock_etf.get_account_status" => {
             JsonRpcResponse::success(id, account_status_summary(phase2))
@@ -237,6 +242,209 @@ fn data_foundation_status_summary(phase2: serde_json::Value) -> serde_json::Valu
         "scorecard_writer_started": false,
         "instrument_identity": identity,
         "reference_data_sources": reference,
+        "phase2": phase2,
+        "ibkr_live_enabled": false,
+        "stock_live_disabled": true,
+        "paper_order_entry_visible": false,
+        "ibkr_call_performed": false,
+        "secret_slot_touched": false,
+        "order_routed": false,
+        "bybit_ipc_reused": false,
+    })
+}
+
+fn policy_status_summary(phase2: serde_json::Value) -> serde_json::Value {
+    let risk_policy = StockEtfRiskPolicyV1 {
+        asset_lane: AssetLane::StockEtfCash,
+        broker: Broker::Ibkr,
+        environment: BrokerEnvironment::Paper,
+        enabled: false,
+        shadow_only: true,
+        allow_margin: false,
+        allow_short: false,
+        allow_options: false,
+        allow_cfd: false,
+        allow_transfer: false,
+        allow_live: false,
+        bybit_live_execution_unchanged: true,
+        ..StockEtfRiskPolicyV1::default()
+    };
+    let risk_verdict = risk_policy.validate();
+    let registry = StockEtfBrokerCapabilityRegistryV1 {
+        asset_lane: AssetLane::StockEtfCash,
+        broker: Broker::Ibkr,
+        bybit_live_execution_unchanged: true,
+        python_broker_write_authority_denied: true,
+        ibkr_live_denied: true,
+        cfd_margin_reserved_denied: true,
+        ..StockEtfBrokerCapabilityRegistryV1::default()
+    };
+    let registry_verdict = registry.validate();
+    let read_operation_count = registry
+        .operations
+        .iter()
+        .filter(|entry| entry.authority_scope == AuthorityScope::ReadOnly)
+        .count();
+    let paper_operation_count = registry
+        .operations
+        .iter()
+        .filter(|entry| entry.authority_scope == AuthorityScope::PaperRehearsal)
+        .count();
+    let denied_operation_count = registry
+        .operations
+        .iter()
+        .filter(|entry| entry.authority_scope == AuthorityScope::Denied)
+        .count();
+
+    let mut risk = serde_json::Map::new();
+    macro_rules! put_risk {
+        ($key:literal, $value:expr) => {
+            risk.insert($key.to_string(), serde_json::json!($value));
+        };
+    }
+    put_risk!("expected_contract_id", STOCK_ETF_RISK_POLICY_CONTRACT_ID);
+    put_risk!("contract_id", &risk_policy.contract_id);
+    put_risk!("source_version", risk_policy.source_version);
+    put_risk!("config_version", risk_policy.config_version);
+    put_risk!("accepted", risk_verdict.accepted);
+    put_risk!("blockers", &risk_verdict.blockers);
+    put_risk!("environment", risk_policy.environment);
+    put_risk!("enabled", risk_policy.enabled);
+    put_risk!("shadow_only", risk_policy.shadow_only);
+    put_risk!("max_order_notional_usd", risk_policy.max_order_notional_usd);
+    put_risk!(
+        "max_position_notional_usd",
+        risk_policy.max_position_notional_usd
+    );
+    put_risk!("max_daily_notional_usd", risk_policy.max_daily_notional_usd);
+    put_risk!("max_open_orders", risk_policy.max_open_orders);
+    put_risk!("max_open_positions", risk_policy.max_open_positions);
+    put_risk!(
+        "allow_fractional_shares",
+        risk_policy.allow_fractional_shares
+    );
+    put_risk!("allow_margin", risk_policy.allow_margin);
+    put_risk!("allow_short", risk_policy.allow_short);
+    put_risk!("allow_options", risk_policy.allow_options);
+    put_risk!("allow_cfd", risk_policy.allow_cfd);
+    put_risk!("allow_transfer", risk_policy.allow_transfer);
+    put_risk!("allow_live", risk_policy.allow_live);
+    put_risk!(
+        "allowed_kind_count",
+        risk_policy.instrument_kinds_allowed.len()
+    );
+    put_risk!(
+        "denied_kind_count",
+        risk_policy.instrument_kinds_denied.len()
+    );
+    put_risk!(
+        "requires_frozen_universe_hash",
+        risk_policy.requires_frozen_universe_hash
+    );
+    put_risk!(
+        "requires_instrument_identity_hash",
+        risk_policy.requires_instrument_identity_hash
+    );
+    put_risk!(
+        "requires_market_session",
+        risk_policy.requires_market_session
+    );
+    put_risk!(
+        "cost_model_required_before_shadow_fill",
+        risk_policy.cost_model_required_before_shadow_fill
+    );
+    put_risk!(
+        "cost_model_required_before_scorecard",
+        risk_policy.cost_model_required_before_scorecard
+    );
+    put_risk!(
+        "commission_schedule_required",
+        risk_policy.commission_schedule_required
+    );
+    put_risk!(
+        "spread_estimate_required",
+        risk_policy.spread_estimate_required
+    );
+    put_risk!(
+        "slippage_estimate_required",
+        risk_policy.slippage_estimate_required
+    );
+    put_risk!("fx_drag_required", risk_policy.fx_drag_required);
+    put_risk!(
+        "conservative_fill_penalty_required",
+        risk_policy.conservative_fill_penalty_required
+    );
+    put_risk!(
+        "rust_authority_required",
+        risk_policy.rust_authority_required
+    );
+    put_risk!(
+        "session_attestation_required",
+        risk_policy.session_attestation_required
+    );
+    put_risk!(
+        "decision_lease_required",
+        risk_policy.decision_lease_required
+    );
+    put_risk!("guardian_required", risk_policy.guardian_required);
+    put_risk!(
+        "idempotency_key_required",
+        risk_policy.idempotency_key_required
+    );
+    put_risk!(
+        "broker_reconciliation_required",
+        risk_policy.broker_reconciliation_required
+    );
+    put_risk!(
+        "bybit_live_execution_unchanged",
+        risk_policy.bybit_live_execution_unchanged
+    );
+    put_risk!("ibkr_contact_performed", risk_policy.ibkr_contact_performed);
+    put_risk!(
+        "connector_runtime_started",
+        risk_policy.connector_runtime_started
+    );
+    put_risk!(
+        "secret_content_serialized",
+        risk_policy.secret_content_serialized
+    );
+    let risk = serde_json::Value::Object(risk);
+    let capability_registry = serde_json::json!({
+        "expected_registry_id": STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID,
+        "registry_id": registry.registry_id,
+        "source_version": registry.source_version,
+        "accepted": registry_verdict.accepted,
+        "blockers": registry_verdict.blockers,
+        "operation_count": registry.operations.len(),
+        "required_audit_field_count": registry.required_audit_fields.len(),
+        "read_operation_count": read_operation_count,
+        "paper_operation_count": paper_operation_count,
+        "denied_operation_count": denied_operation_count,
+        "bybit_live_execution_unchanged": registry.bybit_live_execution_unchanged,
+        "python_broker_write_authority_denied": registry.python_broker_write_authority_denied,
+        "ibkr_live_denied": registry.ibkr_live_denied,
+        "cfd_margin_reserved_denied": registry.cfd_margin_reserved_denied,
+        "first_ibkr_contact_performed": registry.first_ibkr_contact_performed,
+        "secret_content_serialized": registry.secret_content_serialized,
+    });
+
+    serde_json::json!({
+        "phase": "phase2_policy_status_source_fixture",
+        "asset_lane": AssetLane::StockEtfCash,
+        "broker": Broker::Ibkr,
+        "environment": BrokerEnvironment::Paper,
+        "policy_status_state": "blocked",
+        "phase2_started": false,
+        "phase3_started": false,
+        "risk_runtime_started": false,
+        "paper_order_rehearsal_started": false,
+        "paper_order_submitted": false,
+        "connector_runtime_started": false,
+        "db_apply_performed": false,
+        "evidence_clock_started": false,
+        "scorecard_writer_started": false,
+        "risk_policy": risk,
+        "broker_capability_registry": capability_registry,
         "phase2": phase2,
         "ibkr_live_enabled": false,
         "stock_live_disabled": true,

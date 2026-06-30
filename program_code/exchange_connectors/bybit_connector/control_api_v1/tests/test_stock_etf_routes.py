@@ -74,6 +74,7 @@ def test_stock_etf_openapi_exposes_stock_etf_get_only(client_fail_closed: TestCl
         "/api/v1/stock-etf/lane-status": {"get"},
         "/api/v1/stock-etf/launch-status": {"get"},
         "/api/v1/stock-etf/paper-status": {"get"},
+        "/api/v1/stock-etf/policy-status": {"get"},
         "/api/v1/stock-etf/readiness": {"get"},
         "/api/v1/stock-etf/reconciliation-status": {"get"},
         "/api/v1/stock-etf/scorecard-status": {"get"},
@@ -91,6 +92,7 @@ def test_stock_etf_runtime_rejects_write_methods(client_fail_closed: TestClient)
         "/api/v1/stock-etf/lane-status",
         "/api/v1/stock-etf/launch-status",
         "/api/v1/stock-etf/paper-status",
+        "/api/v1/stock-etf/policy-status",
         "/api/v1/stock-etf/readiness",
         "/api/v1/stock-etf/reconciliation-status",
         "/api/v1/stock-etf/scorecard-status",
@@ -134,6 +136,7 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     assert "/api/v1/stock-etf/lane-status" in source
     assert "/api/v1/stock-etf/launch-status" in source
     assert "/api/v1/stock-etf/paper-status" in source
+    assert "/api/v1/stock-etf/policy-status" in source
     assert "/api/v1/stock-etf/readiness" in source
     assert "/api/v1/stock-etf/reconciliation-status" in source
     assert "/api/v1/stock-etf/scorecard-status" in source
@@ -145,6 +148,8 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     assert "se-account-body" in source
     assert "se-data-foundation-status" in source
     assert "se-data-foundation-body" in source
+    assert "se-policy-status" in source
+    assert "se-policy-body" in source
     assert "se-shadow-status" in source
     assert "se-shadow-body" in source
     assert "se-paper-status" in source

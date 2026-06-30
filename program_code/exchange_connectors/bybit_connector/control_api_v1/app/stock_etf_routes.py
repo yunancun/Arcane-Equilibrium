@@ -24,6 +24,7 @@ from .stock_etf_status_normalizers import (
     _normalize_lane_status,
     _normalize_launch_status,
     _normalize_paper_status,
+    _normalize_policy_status,
     _normalize_readiness,
     _normalize_reconciliation_status,
     _normalize_scorecard_status,
@@ -42,6 +43,7 @@ _IPC_CLIENT: EngineIPCClient | None = None
 _LANE_STATUS_METHOD = "stock_etf.get_lane_status"
 _READINESS_METHOD = "stock_etf.get_readiness"
 _DATA_FOUNDATION_STATUS_METHOD = "stock_etf.get_data_foundation_status"
+_POLICY_STATUS_METHOD = "stock_etf.get_policy_status"
 _ACCOUNT_STATUS_METHOD = "stock_etf.get_account_status"
 _EVIDENCE_STATUS_METHOD = "stock_etf.get_evidence_status"
 _UNIVERSE_STATUS_METHOD = "stock_etf.get_universe_status"
@@ -121,6 +123,19 @@ async def _query_stock_etf_data_foundation_status(
         raw = await ipc.call(_DATA_FOUNDATION_STATUS_METHOD, params={})
     except Exception as exc:
         logger.warning("stock_etf: %s failed: %s", _DATA_FOUNDATION_STATUS_METHOD, exc)
+        return ({}, f"ipc_error:{type(exc).__name__}")
+    return (raw if isinstance(raw, dict) else {}, None)
+
+
+async def _query_stock_etf_policy_status(
+    ipc: EngineIPCClient | None,
+) -> tuple[dict[str, Any], str | None]:
+    if ipc is None:
+        return ({}, "ipc_unavailable")
+    try:
+        raw = await ipc.call(_POLICY_STATUS_METHOD, params={})
+    except Exception as exc:
+        logger.warning("stock_etf: %s failed: %s", _POLICY_STATUS_METHOD, exc)
         return ({}, f"ipc_error:{type(exc).__name__}")
     return (raw if isinstance(raw, dict) else {}, None)
 
@@ -267,6 +282,24 @@ async def get_stock_etf_data_foundation_status(
         "data": _normalize_data_foundation_status(raw, reason),
         "is_simulated": False,
         "data_category": "stock_etf_data_foundation_status",
+    }
+
+
+@stock_etf_router.get("/policy-status")
+async def get_stock_etf_policy_status(
+    response: Response,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    """Read-only Stock/ETF risk policy and broker-capability status surface."""
+    del actor
+    _apply_no_store_headers(response)
+    ipc = await _get_ipc()
+    raw, reason = await _query_stock_etf_policy_status(ipc)
+    return {
+        "ok": True,
+        "data": _normalize_policy_status(raw, reason),
+        "is_simulated": False,
+        "data_category": "stock_etf_policy_status",
     }
 
 
