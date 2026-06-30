@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use openclaw_types::{
     BrokerEnvironment, StockEtfAssetLaneEventBlocker, StockEtfAssetLaneEventKind,
-    StockEtfAssetLaneEventV1, StockEtfDenialReason,
+    StockEtfAssetLaneEventV1, StockEtfDenialReason, STOCK_ETF_ASSET_LANE_EVENTS_CONTRACT_ID,
 };
 
 #[test]
@@ -15,6 +15,9 @@ fn default_asset_lane_event_is_blocked() {
     let verdict = StockEtfAssetLaneEventV1::default().validate();
 
     assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfAssetLaneEventBlocker::SourceVersionMismatch));
     assert!(verdict
         .blockers
         .contains(&StockEtfAssetLaneEventBlocker::EventIdMissing));
@@ -39,9 +42,32 @@ fn genesis_asset_lane_event_allows_empty_previous_hash_only_for_sequence_one() {
 
     assert!(verdict.accepted);
     assert!(verdict.blockers.is_empty());
+    assert_eq!(
+        event.schema_version,
+        STOCK_ETF_ASSET_LANE_EVENTS_CONTRACT_ID
+    );
+    assert_eq!(event.source_version, 1);
     assert!(event.genesis_event);
     assert_eq!(event.sequence_number, 1);
     assert!(event.previous_event_hash.is_empty());
+}
+
+#[test]
+fn asset_lane_event_requires_exact_schema_and_source_version() {
+    let event = StockEtfAssetLaneEventV1 {
+        schema_version: "audit.asset_lane_events_v1_fixture".to_string(),
+        source_version: 2,
+        ..StockEtfAssetLaneEventV1::accepted_genesis_fixture()
+    };
+    let verdict = event.validate();
+
+    assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfAssetLaneEventBlocker::SchemaVersionMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfAssetLaneEventBlocker::SourceVersionMismatch));
 }
 
 #[test]
@@ -147,6 +173,7 @@ fn blocked_template_is_parseable_and_secret_free() {
         toml::from_str(&raw).expect("asset-lane event template parses");
 
     assert_eq!(parsed.event_kind, StockEtfAssetLaneEventKind::Unknown);
+    assert_eq!(parsed.source_version, 0);
     assert!(!parsed.raw_payload_inlined);
     assert!(!parsed.secret_content_serialized);
     assert!(!parsed.validate().accepted);

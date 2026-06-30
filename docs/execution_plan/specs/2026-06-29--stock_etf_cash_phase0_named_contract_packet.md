@@ -545,6 +545,7 @@ Immutable event references must cover cross-phase stock/ETF lane evidence, not
 only order lifecycle events. Required fields:
 
 - schema version
+- source version
 - event id and event kind
 - sequence number
 - genesis marker or previous event hash
@@ -563,6 +564,8 @@ only order lifecycle events. Required fields:
 
 Rules:
 
+- schema version must be exactly `audit.asset_lane_events_v1`.
+- source version must be `1`.
 - `asset_lane` must be `stock_etf_cash`.
 - `broker` must be `ibkr`.
 - live environment is denied.
@@ -572,7 +575,10 @@ Rules:
 - raw payloads and secret contents must never be serialized inline.
 
 Source validator: `openclaw_types::stock_etf_audit_events::StockEtfAssetLaneEventV1`.
-This validator writes no audit row and does not apply the DDL.
+The validator requires exact `audit.asset_lane_events_v1` schema version,
+source version `1`, immutable hash-chain shape, lane/broker/environment
+binding, artifact hashes, allowed/denied denial-reason invariants, and redaction
+boundaries. This validator writes no audit row and does not apply the DDL.
 
 ## 12. `stock_etf_db_evidence_ddl_v1`
 

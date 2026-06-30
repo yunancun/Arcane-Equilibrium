@@ -81,7 +81,7 @@ pub use risk::{
 pub use state::{AgentState, GovernanceMode, OmsState, OrderInitiator, RiskInitiator, RiskLevel};
 pub use stock_etf_audit_events::{
     StockEtfAssetLaneEventBlocker, StockEtfAssetLaneEventKind, StockEtfAssetLaneEventV1,
-    StockEtfAssetLaneEventVerdict,
+    StockEtfAssetLaneEventVerdict, STOCK_ETF_ASSET_LANE_EVENTS_CONTRACT_ID,
 };
 pub use stock_etf_broker_capability_registry::{
     StockEtfBrokerCapabilityBlocker, StockEtfBrokerCapabilityEntryV1,
