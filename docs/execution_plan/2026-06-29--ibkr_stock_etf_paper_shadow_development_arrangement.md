@@ -2111,7 +2111,7 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 
 新增 checkpoint：
 
-- 主計畫 PM session checkpoint 現在從 14 到 62 連續遞增，無重複編號。
+- 主計畫 PM session checkpoint 現在從 14 到 63 連續遞增，無重複編號。
 - 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
   lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
   connector skeleton / readonly-probe / broker read gate / policy display / operation
@@ -2846,6 +2846,49 @@ client-state input、不啟動 runtime。
   `24 passed`。
 - `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
   `105 passed`。
+- `python3 -B -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
+  `2 passed`。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 63. 2026-07-01 PM session source checkpoint：GUI Fallback Payload Split Guard
+
+本 checkpoint 降低 Stock/ETF 靜態 GUI 主 bundle 的結構風險。這是顯示層 source
+hygiene：不新增 endpoint、不新增 IPC method、不改 renderer、不引入 client-state
+input、不啟動 runtime。
+
+已完成：
+
+- 新增 `tab-stock-etf-fallbacks.js`。
+- 將 authorization、account、evidence、universe、shadow、paper、scorecard、launch
+  fallback payload builders 從 `tab-stock-etf.js` 搬到新 fallback 模組。
+- `tab-stock-etf.js` 從 `1805` 行降到 `1244` 行。
+- 新 fallback 模組為 `563` 行，且 HTML 在主 loader 前載入它。
+- 既有 endpoint constants、renderer、`ocApi(... GET ...)` 載入流程、auth/no-store
+  route 行為、display-only fallback payload 字段不變。
+- 更新 `test_stock_etf_python_no_write_static_guard.py`：
+  - 新 fallback 模組納入 Stock/ETF static GUI no-write 掃描。
+  - 確認大型 fallback builders 只存在於新模組，不回流主 bundle。
+  - 將 `tab-stock-etf.js` cap 收緊為 `<= 1400`，新 fallback 模組 cap 為 `<= 800`。
+- 更新 `test_stock_etf_routes.py`，讓 readonly display test 拼接 data-policy 與
+  fallback 子模組，避免分檔後漏掃 scorecard / launch evidence tokens。
+- 本 checkpoint 不改 runtime behavior、不改 Bybit path、不改 IBKR boundary，只做
+  Stock/ETF GUI fallback payload structure hygiene。
+
+驗證：
+
+- `node --check` on Stock/ETF GUI JS modules：PASS。
+- `python3 -B -m py_compile program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_routes.py program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_python_no_write_static_guard.py`：
+  PASS。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_routes.py program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_python_no_write_static_guard.py`：
+  `25 passed`。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  `106 passed`。
 - `python3 -B -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
   `2 passed`。
 - `git diff --check`：PASS。

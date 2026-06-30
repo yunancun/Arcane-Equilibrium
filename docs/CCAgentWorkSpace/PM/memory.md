@@ -3080,7 +3080,7 @@
 
 ## 2026-06-30 IBKR Stock/ETF Plan Timeline Checkpoint Guard
 
-- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 62, aligned to the PM memory / Operator source timeline.
+- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 63, aligned to the PM memory / Operator source timeline.
 - Added a structure test that reads the main plan Markdown and fails if PM session checkpoint numbers become duplicated, skipped, or out of order.
 - Verification passed: focused IBKR timeline structure test `1 passed`; section-body compare against `HEAD` PASS; `git diff --check` PASS. The full structure test file still has pre-existing docs README index drift failures unrelated to this guard. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
 
@@ -3206,6 +3206,13 @@
 - PM collapsed 16 duplicated `stock_etf_routes.py` IPC status query helpers into one central `_query_stock_etf_status(ipc, method)` helper while preserving every endpoint, method constant, normalizer, response envelope, and auth/no-store behavior.
 - `stock_etf_routes.py` is reduced from `587` to `393` lines; the Python no-write static guard now proves there is exactly one `ipc.call(method, params={})` site and that all 16 route handlers invoke it only with allowlisted readonly Stock/ETF method constants.
 - Verification passed: route/no-write focused tests `24 passed`; full Stock/ETF FastAPI/static `105 passed`; focused IBKR timeline + trace-title structure tests `2 passed`; `git diff --check` PASS. This grants no new endpoint, IPC method, client input, IBKR contact, SDK import, socket/HTTP, connector runtime, secret access, read probe execution, paper order, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF GUI Fallback Payload Split Guard
+
+- PM split the remaining large display-only fallback payload builders out of `tab-stock-etf.js` into `tab-stock-etf-fallbacks.js`: authorization, account, evidence, universe, shadow, paper, scorecard, and launch.
+- The main Stock/ETF GUI bundle is reduced from `1805` to `1244` lines; the new fallback module is `563` lines, loaded before the main loader, and all endpoint/rendering semantics remain display-only.
+- The static no-write guard now scans the new fallback module and proves the large fallback builders stay out of the main bundle, with `tab-stock-etf.js <= 1400` and `tab-stock-etf-fallbacks.js <= 800`.
+- Verification passed: Stock/ETF JS `node --check`; route/no-write focused tests `25 passed`; full Stock/ETF FastAPI/static `106 passed`; focused IBKR timeline + trace-title structure tests `2 passed`; `git diff --check` PASS. This grants no new endpoint, IPC method, client input, IBKR contact, SDK import, socket/HTTP, connector runtime, secret access, read probe execution, paper order, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
 
 ## 2026-06-30 Standing Demo Authorization Refresh Guardrail
 

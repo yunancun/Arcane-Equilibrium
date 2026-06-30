@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 62 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 63 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -1371,6 +1371,36 @@ Verification 已過：
 - `py_compile`：PASS
 - Route/no-write focused tests：`24 passed`
 - Full Stock/ETF FastAPI/static：`105 passed`
+- IBKR timeline + trace-title structure guard：`2 passed`
+- `git diff --check`：PASS
+
+邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 client input、沒有 IBKR
+contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation、沒有
+connector runtime、沒有 read probe execution、沒有 paper order/cancel/replace、沒有 fill
+import、沒有 evidence writer、沒有 DB apply、沒有 evidence clock、沒有 tiny-live/live
+authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — GUI Fallback Payload Split Guard
+
+本 session 已進一步降低 Stock/ETF 靜態 GUI 主 bundle 的審查面：
+
+- 將 authorization、account、evidence、universe、shadow、paper、scorecard、launch
+  fallback payload builders 從 `tab-stock-etf.js` 拆到
+  `tab-stock-etf-fallbacks.js`。
+- `tab-stock-etf.js` 從 `1805` 行降到 `1244` 行；新 fallback 模組為 `563` 行。
+- HTML 在主 loader 前載入 fallback 模組，既有 endpoint、renderer、GET-only、
+  display-only 語義不變。
+- Static no-write guard 現在掃描新 fallback 模組，並確認大型 fallback builders
+  不回流主 bundle：`tab-stock-etf.js <= 1400`、
+  `tab-stock-etf-fallbacks.js <= 800`。
+- Route readonly display test 也已納入 data-policy / fallback 子模組，避免分檔後漏掃
+  scorecard 或 launch evidence tokens。
+
+Verification 已過：
+
+- Stock/ETF JS `node --check`：PASS
+- Route/no-write focused tests：`25 passed`
+- Full Stock/ETF FastAPI/static：`106 passed`
 - IBKR timeline + trace-title structure guard：`2 passed`
 - `git diff --check`：PASS
 

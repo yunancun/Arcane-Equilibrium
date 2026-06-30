@@ -122,6 +122,17 @@ FORBIDDEN_STATIC_GUI_SNIPPETS = {
     "ibkr.replace_order",
 }
 
+STOCK_ETF_STATIC_GUI_FALLBACK_BUILDERS = {
+    "accountFallback",
+    "authorizationFallback",
+    "evidenceFallback",
+    "launchFallback",
+    "paperFallback",
+    "scorecardFallback",
+    "shadowFallback",
+    "universeFallback",
+}
+
 
 def _candidate_stock_etf_ibkr_python_files() -> list[Path]:
     app_dir = CONTROL_API_DIR / "app"
@@ -149,6 +160,7 @@ def _candidate_stock_etf_static_gui_files() -> list[Path]:
         static_dir / "tab-stock-etf-disable-cleanup.js",
         static_dir / "tab-stock-etf-reconciliation.js",
         static_dir / "tab-stock-etf-data-policy.js",
+        static_dir / "tab-stock-etf-fallbacks.js",
         static_dir / "tab-stock-etf.js",
     }
     return sorted(path for path in files if path.exists())
@@ -412,6 +424,30 @@ def test_stock_etf_static_gui_files_stay_below_line_cap() -> None:
             oversized.append(f"{path}:{line_count}")
 
     assert oversized == []
+
+
+def test_stock_etf_static_gui_payload_builders_remain_split() -> None:
+    static_dir = CONTROL_API_DIR / "app" / "static"
+    main_path = static_dir / "tab-stock-etf.js"
+    fallback_path = static_dir / "tab-stock-etf-fallbacks.js"
+    main_source = main_path.read_text(encoding="utf-8")
+    fallback_source = fallback_path.read_text(encoding="utf-8")
+
+    missing_fallbacks = [
+        name
+        for name in sorted(STOCK_ETF_STATIC_GUI_FALLBACK_BUILDERS)
+        if f"function {name}(reason)" not in fallback_source
+    ]
+    main_definitions = [
+        name
+        for name in sorted(STOCK_ETF_STATIC_GUI_FALLBACK_BUILDERS)
+        if f"function {name}(reason)" in main_source
+    ]
+
+    assert missing_fallbacks == []
+    assert main_definitions == []
+    assert len(main_source.splitlines()) <= 1400
+    assert len(fallback_source.splitlines()) <= 800
 
 
 def _record_forbidden_call(path: Path, node: ast.Call, violations: list[str]) -> None:

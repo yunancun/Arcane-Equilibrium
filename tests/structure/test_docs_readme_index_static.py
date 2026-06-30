@@ -65,7 +65,7 @@ def test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear() -> None:
     checkpoint_numbers = [
         int(match.group(1))
         for match in re.finditer(
-            r"^## (\d+)\. 2026-06-30 PM session .*checkpoint",
+            r"^## (\d+)\. 2026-\d{2}-\d{2} PM session .*checkpoint",
             source,
             re.MULTILINE,
         )
@@ -101,6 +101,7 @@ def test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles() -> None
         "Rust IPC Request Contract Test Split Guard",
         "Rust IPC Handler Request Summary Split Guard",
         "FastAPI Route IPC Query Helper Guard",
+        "GUI Fallback Payload Split Guard",
     )
     plan_source = IBKR_STOCK_ETF_PLAN.read_text()
     operator_source = IBKR_STOCK_ETF_OPERATOR.read_text()
