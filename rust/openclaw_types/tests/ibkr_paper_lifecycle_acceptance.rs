@@ -9,6 +9,7 @@ use openclaw_types::{
     classify_ibkr_paper_restart_recovery, BrokerEnvironment, BrokerLifecycleEventLogV1,
     BrokerOperation, IbkrPaperLifecycleEventBlocker, IbkrPaperOrderLifecycleState,
     IbkrPaperRestartRecoveryAction, IbkrPaperRestartRecoveryInputV1, StockEtfDenialReason,
+    BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID, IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
 };
 
 #[test]
@@ -18,6 +19,15 @@ fn accepted_ack_lifecycle_event_is_append_only_evidence() {
 
     assert!(verdict.accepted);
     assert!(verdict.blockers.is_empty());
+    assert_eq!(
+        event.lifecycle_contract_id,
+        IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID
+    );
+    assert_eq!(
+        event.event_log_contract_id,
+        BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID
+    );
+    assert_eq!(event.source_version, 1);
 }
 
 #[test]
@@ -25,6 +35,15 @@ fn default_lifecycle_event_is_blocked_and_incomplete() {
     let verdict = BrokerLifecycleEventLogV1::default().validate();
 
     assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPaperLifecycleEventBlocker::LifecycleContractIdMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPaperLifecycleEventBlocker::EventLogContractIdMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrPaperLifecycleEventBlocker::SourceVersionMismatch));
     assert!(verdict
         .blockers
         .contains(&IbkrPaperLifecycleEventBlocker::EventIdMissing));
@@ -40,6 +59,21 @@ fn default_lifecycle_event_is_blocked_and_incomplete() {
     assert!(verdict
         .blockers
         .contains(&IbkrPaperLifecycleEventBlocker::RawArtifactHashInvalid));
+}
+
+#[test]
+fn lifecycle_event_requires_exact_contract_ids_and_source_version() {
+    let event = BrokerLifecycleEventLogV1 {
+        lifecycle_contract_id: "ibkr_paper_order_lifecycle_v1_fixture".to_string(),
+        event_log_contract_id: "broker_lifecycle_event_log_v1_fixture".to_string(),
+        source_version: 2,
+        ..BrokerLifecycleEventLogV1::accepted_ack_fixture()
+    };
+    let blockers = event.validate().blockers;
+
+    assert!(blockers.contains(&IbkrPaperLifecycleEventBlocker::LifecycleContractIdMismatch));
+    assert!(blockers.contains(&IbkrPaperLifecycleEventBlocker::EventLogContractIdMismatch));
+    assert!(blockers.contains(&IbkrPaperLifecycleEventBlocker::SourceVersionMismatch));
 }
 
 #[test]
@@ -165,6 +199,9 @@ fn lifecycle_template_is_default_blocked_and_secret_free() {
             .expect("read paper lifecycle template");
     let parsed: toml::Value = toml::from_str(&raw).expect("paper lifecycle template toml parses");
 
+    assert_eq!(parsed["event"]["lifecycle_contract_id"].as_str(), Some(""));
+    assert_eq!(parsed["event"]["event_log_contract_id"].as_str(), Some(""));
+    assert_eq!(parsed["event"]["source_version"].as_integer(), Some(0));
     assert_eq!(parsed["event"]["allowed"].as_bool(), Some(false));
     assert_eq!(
         parsed["event"]["next_state"].as_str(),

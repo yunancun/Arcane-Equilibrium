@@ -16,6 +16,9 @@ pub const BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID: &str = "broker_lifecycle_event
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BrokerLifecycleEventLogV1 {
+    pub lifecycle_contract_id: String,
+    pub event_log_contract_id: String,
+    pub source_version: u32,
     pub event_id: String,
     pub event_time_ms: u64,
     pub asset_lane: AssetLane,
@@ -39,6 +42,9 @@ pub struct BrokerLifecycleEventLogV1 {
 impl Default for BrokerLifecycleEventLogV1 {
     fn default() -> Self {
         Self {
+            lifecycle_contract_id: String::new(),
+            event_log_contract_id: String::new(),
+            source_version: 0,
             event_id: String::new(),
             event_time_ms: 0,
             asset_lane: AssetLane::StockEtfCash,
@@ -64,6 +70,9 @@ impl Default for BrokerLifecycleEventLogV1 {
 impl BrokerLifecycleEventLogV1 {
     pub fn accepted_ack_fixture() -> Self {
         Self {
+            lifecycle_contract_id: IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID.to_string(),
+            event_log_contract_id: BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID.to_string(),
+            source_version: 1,
             event_id: "lifecycle_event_0001".to_string(),
             event_time_ms: 1_772_233_000_000,
             operation: BrokerOperation::PaperOrderSubmit,
@@ -84,6 +93,15 @@ impl BrokerLifecycleEventLogV1 {
         use IbkrPaperLifecycleEventBlocker as Blocker;
 
         let mut blockers = Vec::new();
+        if self.lifecycle_contract_id != IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID {
+            blockers.push(Blocker::LifecycleContractIdMismatch);
+        }
+        if self.event_log_contract_id != BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID {
+            blockers.push(Blocker::EventLogContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
+        }
         if self.event_id.trim().is_empty() {
             blockers.push(Blocker::EventIdMissing);
         }
@@ -168,6 +186,9 @@ pub struct IbkrPaperLifecycleEventVerdict {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrPaperLifecycleEventBlocker {
+    LifecycleContractIdMismatch,
+    EventLogContractIdMismatch,
+    SourceVersionMismatch,
     EventIdMissing,
     EventTimeMissing,
     WrongAssetLane,

@@ -2,6 +2,9 @@
 # This template is intentionally BLOCKED and does not authorize paper orders.
 
 [event]
+lifecycle_contract_id = ""
+event_log_contract_id = ""
+source_version = 0
 event_id = ""
 event_time_ms = 0
 asset_lane = "stock_etf_cash"

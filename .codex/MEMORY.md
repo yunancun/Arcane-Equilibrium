@@ -566,3 +566,9 @@ Do not paste long reports or stable architecture into TODO.
 - Source checkpoint converges remaining Phase 0 / Phase 2 named contract ids into shared Rust constants for asset-lane taxonomy, external surface gate, non-Bybit API allowlist, API session topology, session attestation, feature-flag/secret/auth matrix, paper lifecycle, lifecycle event log, paper attestation, and redaction policy.
 - Phase 0 manifest, broker capability registry gates, lane-scoped IPC gates, and audit event fixtures now consume shared constants where this does not create reverse module coupling; validation semantics are unchanged.
 - Verification passed: focused linked openclaw_types tests `63 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `188` integration/acceptance + `0` doc-tests. This grants no IBKR contact, connector runtime, collector start, market-data/reference-data ingestion, scorecard writer, DB apply, evidence clock, GUI authority, paper order, release, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Paper Lifecycle Hardening
+
+- Source checkpoint hardens paper lifecycle evidence: `BrokerLifecycleEventLogV1` now requires exact `lifecycle_contract_id == ibkr_paper_order_lifecycle_v1`, exact `event_log_contract_id == broker_lifecycle_event_log_v1`, and `source_version=1`.
+- The blocked lifecycle template exposes empty ids plus `source_version=0`; regression tests reject fixture-like lifecycle/event-log ids and wrong source versions while preserving state-transition and append-only evidence checks.
+- Verification passed: focused linked openclaw_types tests `32 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `189` integration/acceptance + `0` doc-tests. This grants no IBKR contact, connector runtime, IPC runtime, paper order, fill import, audit writer, DB apply, evidence clock, GUI authority, release, tiny-live, live, or Bybit behavior change.
