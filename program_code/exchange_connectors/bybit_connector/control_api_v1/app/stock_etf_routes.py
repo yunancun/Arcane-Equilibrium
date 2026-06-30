@@ -401,5 +401,8 @@ async def get_stock_etf_readiness(
 
 
 @stock_etf_router.get("", include_in_schema=False)
-async def stock_etf_tab_redirect() -> RedirectResponse:
+async def stock_etf_tab_redirect(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> RedirectResponse:
+    del actor
     return RedirectResponse(url="/static/tab-stock-etf.html", headers=_NO_STORE_HEADERS)
