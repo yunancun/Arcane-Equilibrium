@@ -147,6 +147,7 @@ def test_f08_wrapper_invokes_runner_with_all_jobs(tmp_path: Path) -> None:
         "HOME": str(tmp_path),
         "PATH": f"{mock_bin}:/usr/bin:/bin",
         "OPENCLAW_BASE_DIR": str(_SRV_ROOT),
+        "OPENCLAW_PYTHON": str(mock_python),
         "OPENCLAW_DATA_DIR": str(tmp_path / "data"),
         "OPENCLAW_SECRETS_ROOT": str(secrets_root),
     }
@@ -182,3 +183,4 @@ def test_f08_wrapper_invokes_runner_with_all_jobs(tmp_path: Path) -> None:
         "weekly_report_generator",
     ):
         assert token in log_text
+    assert "--status-log-jsonl" in log_text

@@ -925,6 +925,34 @@ def _write_status(path: str | None, payload: dict[str, Any]) -> None:
     tmp.replace(target)
 
 
+def _append_status_history(path: str | None, payload: dict[str, Any]) -> None:
+    if not path:
+        return
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "runner": payload.get("runner"),
+        "ts_utc": payload.get("ts_utc"),
+        "status": payload.get("status"),
+        "dry_run": payload.get("dry_run"),
+        "job_statuses": {
+            str(row.get("job")): row.get("status")
+            for row in payload.get("results", [])
+            if isinstance(row, dict) and row.get("job")
+        },
+    }
+    with target.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+
+def _epoch_to_utc_iso(epoch: float) -> str:
+    return (
+        datetime.fromtimestamp(epoch, tz=timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
 def _parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="F-08 ML training maintenance runner")
     parser.add_argument("--base-dir", default=str(_repo_root_from_file()))
@@ -1077,6 +1105,10 @@ def _parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--status-json", default=None)
     parser.add_argument(
+        "--status-log-jsonl",
+        default=os.environ.get("OPENCLAW_ML_CRON_STATUS_LOG_JSONL", None),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         default=_env_bool("OPENCLAW_ML_CRON_DRY_RUN", False),
@@ -1115,15 +1147,23 @@ def main(argv: Iterable[str] | None = None) -> int:
     dsn = _resolve_dsn(args.dsn)
     started = time.time()
     results = [_run_job(job, dsn, args) for job in args.jobs]
+    finished = time.time()
+    result_rows = [asdict(result) for result in results]
     payload = {
         "runner": "ml_training_maintenance",
         "started_epoch": started,
-        "finished_epoch": time.time(),
+        "finished_epoch": finished,
+        "started_at_utc": _epoch_to_utc_iso(started),
+        "finished_at_utc": _epoch_to_utc_iso(finished),
+        "generated_at_utc": _epoch_to_utc_iso(finished),
+        "ts_utc": _epoch_to_utc_iso(finished),
         "dry_run": args.dry_run,
-        "jobs": [asdict(result) for result in results],
+        "jobs": result_rows,
+        "results": result_rows,
     }
     payload["status"] = "error" if any(r.status == "error" for r in results) else "ok"
     _write_status(args.status_json, payload)
+    _append_status_history(args.status_log_jsonl, payload)
     print(json.dumps(payload, indent=2, sort_keys=True))
     return 1 if payload["status"] == "error" else 0
 

@@ -18,6 +18,7 @@ LOG_DIR="${DATA}/logs"
 LOG="${LOG_DIR}/ml_training_maintenance_cron.log"
 STATUS_DIR="${DATA}/status"
 STATUS_JSON="${STATUS_DIR}/ml_training_maintenance_status.json"
+STATUS_LOG_JSONL="${LOG_DIR}/ml_training_maintenance_status.log"
 LOCK_ROOT="${DATA}/locks"
 LOCK_DIR="${LOCK_ROOT}/ml_training_maintenance_cron.lock.d"
 
@@ -121,11 +122,12 @@ if "$PYTHON_BIN" helper_scripts/cron/ml_training_maintenance.py \
         --output-dir "$OUTPUT_DIR" \
         --onnx-validate-samples "$ONNX_VALIDATE_SAMPLES" \
         --status-json "$STATUS_JSON" \
+        --status-log-jsonl "$STATUS_LOG_JSONL" \
         ${DRY_RUN_ARGS[@]+"${DRY_RUN_ARGS[@]}"} >> "$LOG" 2>&1; then
     echo "[$(ts)] === ML training maintenance end OK ===" >> "$LOG"
     exit 0
+else
+    rc=$?
+    echo "[$(ts)] === ML training maintenance end FAIL rc=${rc} ===" >> "$LOG"
+    exit "$rc"
 fi
-
-rc=$?
-echo "[$(ts)] === ML training maintenance end FAIL rc=${rc} ===" >> "$LOG"
-exit "$rc"
