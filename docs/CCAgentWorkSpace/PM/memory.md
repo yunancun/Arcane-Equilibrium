@@ -3161,3 +3161,9 @@
 - PM moved Rust dispatch for Stock/ETF fixture methods from a duplicated hand-written match arm list to registry-driven `is_stock_etf_fixture_method`.
 - The registry helper requires a `stock_etf.` registered method with `slot=None`, keeping Stock/ETF IPC routing tied to the same source of truth that already records readonly/write-fixture metadata and live-token exclusion.
 - Verification passed: `rustfmt`; engine `stock_etf` filter `31 passed`; full Stock/ETF FastAPI/static `104 passed`; focused IBKR timeline + trace-title structure tests `2 passed`; `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 Standing Demo Authorization Refresh Guardrail
+
+- PM added and ran a source-only standing Demo authorization refresh guardrail for current candidate `grid_trading|ETHUSDT|Buy`; source commit `04ec9c55d73226149c2221df51d7ab1881abf796`.
+- Runtime materialized refreshed standing auth sha `a26666e71462b2fb6d11b1eedbdb9006e6b549393719e1e6933c4f348da3e4d3`, expiry `2026-07-01T09:02:17.250395+00:00`, cap `954.18759777 USDT`, max probe orders `2`, mode `0600`; validator sha `8dce62a676c3c5370579fd1e2687b0e9c0a64af7fa095e91fb6504cfc820c944` and readiness-after-refresh sha `ee46a2ae8f84acdb1ebcd7c50ca50de59f76c1a2ae1535d12907dda073a2e1ac` passed.
+- Verification passed: source `py_compile`, focused guardrail tests `6 passed`, adjacent auth/equity/no-order suite `52 passed`, runtime post-refresh validator/readiness. Boundary: no Decision Lease, no order/cancel/modify, no Bybit private/order call, no env/service/crontab mutation, no Cost Gate change, no live/mainnet, no proof. Next blocker is downstream bounded auth/admission refresh because old plan/order-shape evidence is stale under the refreshed cap.
