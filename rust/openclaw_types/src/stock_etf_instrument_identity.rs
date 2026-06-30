@@ -16,6 +16,7 @@ pub const STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID: &str = "instrument_identity
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StockEtfInstrumentIdentityV1 {
     pub contract_id: String,
+    pub source_version: u32,
     pub asset_lane: AssetLane,
     pub broker: Broker,
     pub instrument_kind: InstrumentKind,
@@ -45,6 +46,7 @@ impl Default for StockEtfInstrumentIdentityV1 {
     fn default() -> Self {
         Self {
             contract_id: String::new(),
+            source_version: 0,
             asset_lane: AssetLane::CryptoPerp,
             broker: Broker::Bybit,
             instrument_kind: InstrumentKind::CryptoPerp,
@@ -76,6 +78,7 @@ impl StockEtfInstrumentIdentityV1 {
     pub fn accepted_fixture() -> Self {
         Self {
             contract_id: STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID.to_string(),
+            source_version: 1,
             asset_lane: AssetLane::StockEtfCash,
             broker: Broker::Ibkr,
             instrument_kind: InstrumentKind::Stock,
@@ -108,6 +111,9 @@ impl StockEtfInstrumentIdentityV1 {
 
         if self.contract_id != STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID {
             blockers.push(Blocker::ContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
         }
         if self.asset_lane != AssetLane::StockEtfCash {
             blockers.push(Blocker::WrongAssetLane);
@@ -251,6 +257,7 @@ impl<B> StockEtfInstrumentIdentityVerdict<B> {
 #[serde(rename_all = "snake_case")]
 pub enum StockEtfInstrumentIdentityBlocker {
     ContractIdMismatch,
+    SourceVersionMismatch,
     WrongAssetLane,
     WrongBroker,
     InstrumentKindDenied,

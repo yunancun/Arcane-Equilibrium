@@ -24,6 +24,10 @@ fn default_instrument_identity_blocks_before_contract_details_can_be_used() {
     ));
     assert!(has(
         &verdict.blockers,
+        StockEtfInstrumentIdentityBlocker::SourceVersionMismatch
+    ));
+    assert!(has(
+        &verdict.blockers,
         StockEtfInstrumentIdentityBlocker::WrongAssetLane
     ));
     assert!(has(
@@ -58,6 +62,7 @@ fn accepted_fixture_is_point_in_time_ibkr_stock_identity_without_runtime_authori
         identity.contract_id,
         STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID
     );
+    assert_eq!(identity.source_version, 1);
     assert_eq!(identity.symbol, "AMD");
     assert_eq!(identity.instrument_kind, InstrumentKind::Stock);
     assert!(identity.bybit_live_execution_unchanged);
@@ -66,6 +71,25 @@ fn accepted_fixture_is_point_in_time_ibkr_stock_identity_without_runtime_authori
     assert!(identity.options_cfd_denied);
     assert!(!identity.ibkr_contact_performed);
     assert!(!identity.secret_content_serialized);
+}
+
+#[test]
+fn instrument_identity_requires_exact_contract_id_and_source_version() {
+    let identity = StockEtfInstrumentIdentityV1 {
+        contract_id: "instrument_identity_contract_v1_fixture".to_string(),
+        source_version: 2,
+        ..StockEtfInstrumentIdentityV1::accepted_fixture()
+    };
+    let blockers = identity.validate().blockers;
+
+    assert!(has(
+        &blockers,
+        StockEtfInstrumentIdentityBlocker::ContractIdMismatch
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfInstrumentIdentityBlocker::SourceVersionMismatch
+    ));
 }
 
 #[test]
@@ -237,6 +261,7 @@ fn blocked_template_is_parseable_and_secret_free() {
     let parsed: toml::Value = toml::from_str(&raw).expect("instrument identity template parses");
 
     assert_eq!(parsed["identity"]["contract_id"].as_str(), Some(""));
+    assert_eq!(parsed["identity"]["source_version"].as_integer(), Some(0));
     assert_eq!(
         parsed["identity"]["asset_lane"].as_str(),
         Some("crypto_perp")

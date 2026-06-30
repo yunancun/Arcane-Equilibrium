@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::stock_etf_instrument_identity::STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID;
 use crate::stock_etf_lane::{
     AssetLane, AuthorityScope, Broker, BrokerOperation, StockEtfDenialReason,
 };
@@ -239,7 +240,7 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
             authority_scope: Scope::ReadOnly,
             required_gates: &[
                 "phase2_ibkr_external_surface_gate_v1",
-                "instrument_identity_contract_v1",
+                STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID,
             ],
             typed_denial_reason: None,
             rust_owned: false,

@@ -10,8 +10,8 @@ use openclaw_types::{
     AssetLane, AuthorityScope, Broker, BrokerOperation, StockEtfDenialReason,
     StockEtfLaneScopedIpcBlocker, StockEtfLaneScopedIpcContractV1, StockEtfLaneScopedIpcMethod,
     STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
-    STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID, STOCK_ETF_RISK_POLICY_CONTRACT_ID,
-    STOCK_ETF_SCOPED_AUTHORIZATION_CONTRACT_ID,
+    STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID, STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID,
+    STOCK_ETF_RISK_POLICY_CONTRACT_ID, STOCK_ETF_SCOPED_AUTHORIZATION_CONTRACT_ID,
 };
 
 #[test]
@@ -87,6 +87,9 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
         .required_gates
         .contains(&STOCK_ETF_RISK_POLICY_CONTRACT_ID.to_string()));
     assert!(submit
+        .required_gates
+        .contains(&STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID.to_string()));
+    assert!(submit
         .required_request_fields
         .contains(&"decision_lease_id".to_string()));
 
@@ -95,6 +98,9 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
         .iter()
         .find(|command| command.method == StockEtfLaneScopedIpcMethod::PreviewPaperOrder)
         .expect("preview method exists");
+    assert!(preview
+        .required_gates
+        .contains(&STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID.to_string()));
     assert!(preview
         .required_gates
         .contains(&STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID.to_string()));
