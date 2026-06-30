@@ -298,6 +298,34 @@ Verification 已過：
 scorecard writer、沒有 DB apply、沒有 paper order/cancel/replace、沒有 evidence clock、
 沒有 Linux runtime sync/restart，也沒有改動 Bybit live execution 行為。
 
+## 2026-06-30 Operator Update — Reconciliation GUI Contract Display
+
+本 session 已完成下一個 display-only checkpoint：Stock/ETF Reconciliation GUI
+contract display。
+
+這次不是 runtime reconciliation。變更是 GUI 抽檔與顯示同步：
+
+- 新增 `tab-stock-etf-reconciliation.js`，主 `tab-stock-etf.js` 從 1951 行降到
+  1847 行，低於 2000 行硬上限。
+- Reconciliation panel 現在會顯示
+  `stock_etf_paper_shadow_reconciliation_v1` 的 expected/actual contract id、
+  accepted/blockers、paper-shadow link hash、paper fill imported、shadow fill synthetic，
+  以及 writer / IBKR contact / connector / secret / fill import / shadow-fill side-effect
+  flags。
+- 新檔已納入 static route contract test 與 Stock/ETF no-write static guard。
+
+Verification 已過：
+
+- Node syntax：PASS
+- GUI line counts：396 / 1847 / 177 / 149 / 138 / 132
+- Focused route/static/no-write：`13 passed`
+- Full Stock/ETF Python route/static：`90 passed`
+
+邊界不變：沒有 IBKR contact、沒有 secret access/creation、沒有 connector runtime、
+沒有 reconciliation writer、沒有 fill import、沒有 shadow fill generation、沒有
+scorecard writer、沒有 DB apply、沒有 paper order/cancel/replace、沒有 evidence clock、
+沒有 Linux runtime sync/restart，也沒有改動 Bybit live execution 行為。
+
 ## 2026-06-30 Operator Update — Shadow Signal Request Contract + IPC Binding
 
 本 session 已完成下一個 source-only checkpoint：
