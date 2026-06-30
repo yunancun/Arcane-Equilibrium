@@ -100,7 +100,7 @@ pub use stock_etf_disable_cleanup_runbook::{
 };
 pub use stock_etf_gui_lane_contract::{
     StockEtfGuiLaneBlocker, StockEtfGuiLaneContractV1, StockEtfGuiLaneVerdict,
-    STOCK_ETF_GUI_READINESS_ENDPOINT,
+    STOCK_ETF_GUI_LANE_CONTRACT_ID, STOCK_ETF_GUI_READINESS_ENDPOINT,
 };
 pub use stock_etf_instrument_identity::{
     StockEtfCurrency, StockEtfInstrumentIdentityBlocker, StockEtfInstrumentIdentityV1,
