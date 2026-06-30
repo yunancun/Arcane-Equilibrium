@@ -2111,7 +2111,7 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 
 新增 checkpoint：
 
-- 主計畫 PM session checkpoint 現在從 14 到 46 連續遞增，無重複編號。
+- 主計畫 PM session checkpoint 現在從 14 到 47 連續遞增，無重複編號。
 - 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
   lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
   connector skeleton / readonly-probe / broker read gate / policy display / operation
@@ -2259,6 +2259,36 @@ contract。
   `5 passed`。
 - `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
   `97 passed`。
+- `python3 -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
+  `2 passed`。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 47. 2026-06-30 PM session source checkpoint：FastAPI Route Auth Coverage Guard
+
+本 checkpoint 強化 Stock/ETF FastAPI route auth coverage。前面已有個別 route 的
+requires-auth 測試，但缺少一個會隨 OpenAPI endpoint set 自動擴展的全域 guard；
+這次把所有 Stock/ETF GET route 與 root redirect 都納入未登入 401 檢查。
+
+已完成：
+
+- 新增 `test_stock_etf_all_registered_get_routes_require_auth`。
+- 測試從 OpenAPI 取得所有 `/api/v1/stock-etf...` GET paths。
+- 另加入 include-in-schema=false 的 root redirect `/api/v1/stock-etf`。
+- 未提供 `current_actor` dependency override 時，每個 route 都必須回 `401`。
+- 本 guard 不新增 endpoint、不改 auth 實作、不啟動 runtime，只防未來 route 漏 auth。
+
+驗證：
+
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_routes.py`：
+  `12 passed`。
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  `98 passed`。
 - `python3 -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
   `2 passed`。
 - `git diff --check`：PASS。

@@ -111,6 +111,27 @@ def test_stock_etf_openapi_paths_match_gui_lane_contract_template(
     assert stock_get_paths == template_endpoints
 
 
+def test_stock_etf_all_registered_get_routes_require_auth(
+    client_fail_closed: TestClient,
+) -> None:
+    schema = client_fail_closed.get("/openapi.json").json()
+    stock_get_paths = {
+        path
+        for path, methods in schema["paths"].items()
+        if path.startswith("/api/v1/stock-etf") and set(methods) == {"get"}
+    }
+    stock_get_paths.add("/api/v1/stock-etf")
+
+    route_module._IPC_CLIENT = None
+    app = FastAPI()
+    app.include_router(stock_etf_router)
+    unauthenticated_client = TestClient(app)
+
+    for path in sorted(stock_get_paths):
+        resp = unauthenticated_client.get(path, follow_redirects=False)
+        assert resp.status_code == 401, f"{path} returned {resp.status_code}"
+
+
 def test_stock_etf_runtime_rejects_write_methods(client_fail_closed: TestClient) -> None:
     for path in (
         "/api/v1/stock-etf",
