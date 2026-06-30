@@ -4,6 +4,7 @@
 # execution behavior.
 
 registry_id = ""
+source_version = 0
 asset_lane = "crypto_perp"
 broker = "bybit"
 bybit_live_execution_unchanged = false

@@ -11,10 +11,10 @@ use openclaw_types::{
     StockEtfPhase0ContractPacketManifestV1, StockEtfPhase0GlobalDenialsV1,
     StockEtfPhase0ManifestBlocker, StockEtfPhase0UnlockTableV1,
     BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID, STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID,
-    STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
-    STOCK_ETF_PHASE0_MANIFEST_SCHEMA, STOCK_ETF_PHASE0_MANIFEST_STATUS,
-    STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
-    STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
+    STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID, STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID,
+    STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID, STOCK_ETF_PHASE0_MANIFEST_SCHEMA,
+    STOCK_ETF_PHASE0_MANIFEST_STATUS, STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID,
+    STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID, STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
 };
 
 #[test]
@@ -130,7 +130,7 @@ fn manifest_contracts_must_be_complete_unique_and_known() {
         .retain(|contract| contract != "stock_etf_release_packet_v1");
     manifest
         .contracts
-        .push("broker_capability_registry_v1".to_string());
+        .push(STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID.to_string());
     manifest
         .contracts
         .push("surprise_runtime_contract_v1".to_string());

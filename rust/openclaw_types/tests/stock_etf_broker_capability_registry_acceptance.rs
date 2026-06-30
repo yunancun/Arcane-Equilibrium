@@ -27,6 +27,10 @@ fn default_registry_blocks_without_matrix_or_boundaries() {
     ));
     assert!(has(
         &verdict.blockers,
+        StockEtfBrokerCapabilityBlocker::SourceVersionMismatch
+    ));
+    assert!(has(
+        &verdict.blockers,
         StockEtfBrokerCapabilityBlocker::WrongAssetLane
     ));
     assert!(has(
@@ -57,6 +61,7 @@ fn accepted_registry_contains_full_stock_etf_ibkr_operation_matrix() {
         registry.registry_id,
         STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID
     );
+    assert_eq!(registry.source_version, 1);
     assert_eq!(registry.asset_lane, AssetLane::StockEtfCash);
     assert_eq!(registry.broker, Broker::Ibkr);
     assert!(registry.bybit_live_execution_unchanged);
@@ -127,6 +132,24 @@ fn accepted_registry_contains_full_stock_etf_ibkr_operation_matrix() {
         .any(|entry| entry.operation == BrokerOperation::LiveOrderSubmit
             && entry.authority_scope == AuthorityScope::Denied
             && entry.typed_denial_reason == Some(StockEtfDenialReason::IbkrLiveNotAuthorized)));
+}
+
+#[test]
+fn registry_requires_exact_id_and_source_version() {
+    let mut registry = StockEtfBrokerCapabilityRegistryV1::accepted_fixture();
+    registry.registry_id = "broker_capability_registry_v1_fixture".to_string();
+    registry.source_version = 2;
+
+    let blockers = registry.validate().blockers;
+
+    assert!(has(
+        &blockers,
+        StockEtfBrokerCapabilityBlocker::RegistryIdMismatch
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfBrokerCapabilityBlocker::SourceVersionMismatch
+    ));
 }
 
 #[test]
@@ -325,6 +348,8 @@ fn blocked_template_is_parseable_and_secret_free() {
     let parsed: StockEtfBrokerCapabilityRegistryV1 =
         toml::from_str(&raw).expect("broker capability registry template parses");
 
+    assert_eq!(parsed.registry_id, "");
+    assert_eq!(parsed.source_version, 0);
     assert_eq!(parsed.asset_lane, AssetLane::CryptoPerp);
     assert_eq!(parsed.broker, Broker::Bybit);
     assert!(!parsed.bybit_live_execution_unchanged);
