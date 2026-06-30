@@ -1267,6 +1267,59 @@ PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 
 scorecard writer、不做 Linux runtime sync/restart、不啟動 paper-shadow launch、不授權
 tiny-live/live 或任何 Bybit behavior change。
 
+## 29. 2026-06-30 PM session source checkpoint：Shadow Signal Request Contract + IPC Binding
+
+本 session 繼續 Phase 1D/3 邊界，但仍是 source-only contract + IPC gate。此
+checkpoint 讓未來 `stock_etf.evaluate_shadow_signal` 不再只有 generic params，而必須
+先滿足 typed shadow request contract。
+
+新增 checkpoint：
+
+- Rust `openclaw_types` 新增 `stock_etf_shadow_signal_request_v1`，位於
+  `stock_etf_shadow_signal_request.rs`。
+- Contract 固定 `asset_lane=stock_etf_cash`、`broker=ibkr`、
+  `environment=shadow`、`request_method=evaluate_shadow_signal`、
+  `operation=shadow_signal_emit`、`authority_scope=shadow_only`、
+  `effect_capable=false`。
+- Validator 要求 request id、evaluation run id、shadow signal id、evidence clock hash、
+  PIT universe hash、strategy hypothesis hash、instrument identity hash、market-data
+  provenance hash、cost model version hash、asset-lane event hash、source artifact hash。
+- Validator 拒絕 IBKR contact、connector runtime、secret serialization、shadow signal
+  emission、shadow fill generation、scorecard writer、DB apply、order routing、Bybit path
+  reuse、live/tiny-live authority、margin/short/options/CFD、Python direct broker write。
+- 新增 blocked secret-free template
+  `settings/broker/stock_etf_shadow_signal_request.template.toml`。
+- Phase0 manifest source、repository manifest JSON、FastAPI Phase0 count、route fixtures/tests
+  與 Phase0 packet spec 同步；contract count 從 30 更新為 31。
+- Rust IPC handler 現在對 `stock_etf.evaluate_shadow_signal` 回傳
+  `shadow_signal_request` verdict，並把 top-level `allowed` 綁到
+  `shadow_signal_request_accepted_for_ipc`。
+
+驗證：
+
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_shadow_signal_request_acceptance -- --nocapture`：
+  shadow signal request acceptance `5 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_phase0_manifest_acceptance -- --nocapture`：
+  Phase0 manifest acceptance `6 passed`。
+- `python3 -m pytest -q ...test_stock_etf_phase0_status_routes.py`：
+  Phase0 route `4 passed`。
+- `python3 -m pytest -q ...test_stock_etf_routes.py ...test_stock_etf_phase0_status_routes.py`：
+  FastAPI StockETF focused `14 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf_evaluate_shadow_signal -- --nocapture`：
+  shadow-signal IPC focused `2 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
+  Stock/ETF engine filter `27 passed`（既有 warnings only）。
+- `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
+- `rustfmt --edition 2021 --check --config skip_children=true ...`：PASS。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 connector runtime、
+不啟動 shadow collector、不 emit shadow signal、不 generate shadow fill、不啟動
+Phase 1/2/3/4/5 runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB
+migration/apply、不做 Postgres dry-run、不啟動 evidence clock、不啟動 scorecard writer、
+不做 Linux runtime sync/restart、不啟動 paper-shadow launch、不授權 tiny-live/live 或任何
+Bybit behavior change。
+
 ## 28. 2026-06-30 PM session source checkpoint：Paper Fill Import IPC Binding
 
 本 session 繼續 Phase 1D source-only IPC hardening。上一個 checkpoint 已新增

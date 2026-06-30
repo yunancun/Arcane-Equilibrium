@@ -261,6 +261,42 @@ Verification 已過：
 沒有 DB apply、沒有 evidence clock、沒有 scorecard writer、沒有 Linux runtime
 sync/restart，也沒有改動 Bybit live execution 行為。
 
+## 2026-06-30 Operator Update — Shadow Signal Request Contract + IPC Binding
+
+本 session 已完成下一個 source-only checkpoint：
+`stock_etf_shadow_signal_request_v1`，並把 `stock_etf.evaluate_shadow_signal`
+綁到這個 typed request。
+
+這次不是 shadow collector，也不是 signal emission。變更只在 Rust contract、blocked
+template、Phase0 manifest/count、IPC handler verdict 與 tests：
+
+- 新增 future shadow signal evaluation 的 typed request contract。
+- Contract 要求 `shadow` environment、`shadow_only` authority、signal/evaluation ids，
+  以及 evidence clock、PIT universe、strategy hypothesis、instrument identity、
+  market-data provenance、cost model、asset-lane event、source artifact hashes。
+- IBKR contact、connector runtime、secret serialization、shadow signal emitted、
+  shadow fill generated、scorecard writer、DB apply、order routing、Bybit path reuse 都會被拒絕。
+- `stock_etf.evaluate_shadow_signal` response 現在會包含 `shadow_signal_request`
+  verdict；minimal/stale params 會 fail closed。
+- Phase0 contract count 現在是 31。
+
+Verification 已過：
+
+- Shadow signal request acceptance：`5 passed`
+- Phase0 manifest：`6 passed`
+- FastAPI Phase0 route：`4 passed`
+- FastAPI StockETF focused：`14 passed`
+- Engine shadow-signal IPC focused：`2 passed`
+- Engine Stock/ETF：`27 passed`
+- Workspace `cargo check`：PASS
+- `rustfmt --check` / `git diff --check`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 secret access/creation、沒有 connector runtime、
+沒有 shadow collector、沒有 shadow signal emission、沒有 shadow fill generation、
+沒有 Phase 1/2/3/4/5 runtime start、沒有 fill import、沒有 DB apply、沒有 paper
+order/cancel/replace、沒有 evidence clock、沒有 scorecard writer、沒有 Linux runtime
+sync/restart，也沒有改動 Bybit live execution 行為。
+
 ## 2026-06-30 Operator Update — Paper Fill Import IPC Binding
 
 本 session 已完成下一個 source-only checkpoint：

@@ -37,6 +37,7 @@ pub mod stock_etf_release_packet;
 pub mod stock_etf_risk_policy;
 pub mod stock_etf_scorecard_inputs;
 pub mod stock_etf_scorecard_verdict;
+pub mod stock_etf_shadow_signal_request;
 pub mod stock_etf_strategy_hypothesis;
 pub mod stock_etf_tiny_live_eligibility;
 
@@ -199,6 +200,10 @@ pub use stock_etf_scorecard_inputs::{
 pub use stock_etf_scorecard_verdict::{
     StockEtfScorecardVerdict, StockEtfScorecardVerdictBlocker, StockEtfScorecardVerdictLabel,
     StockEtfScorecardVerdictV1, STOCK_ETF_SCORECARD_VERDICT_CONTRACT_ID,
+};
+pub use stock_etf_shadow_signal_request::{
+    StockEtfShadowSignalRequestBlocker, StockEtfShadowSignalRequestV1,
+    StockEtfShadowSignalRequestVerdict, STOCK_ETF_SHADOW_SIGNAL_REQUEST_CONTRACT_ID,
 };
 pub use stock_etf_strategy_hypothesis::{
     StockEtfStrategyFamily, StockEtfStrategyHypothesisBlocker, StockEtfStrategyHypothesisV1,
