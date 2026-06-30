@@ -1187,3 +1187,10 @@ Do not paste long reports or stable architecture into TODO.
 - The guard bans `std::time`, `SystemTime`, `Instant`, `chrono`, `Utc::now`, `Local::now`, `std::thread`, `thread::spawn`, `tokio::spawn`, `tokio::task`, `tokio::time`, `sleep(`, `std::process`, `process::Command`, `Command::new`, and `.spawn(` in scoped handler/test files.
 - Scope remains only Stock/ETF IPC handler parent/children and Stock/ETF IPC fixture test parent/children.
 - Verification passed: Rust IPC split static guards `12 passed`; full Stock/ETF FastAPI/static `118 passed`; docs trace guard `2 passed`; `git diff --check` PASS. This grants no Rust runtime behavior change, endpoint/IPC method change, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, paper order/cancel/replace, fill import, DB/evidence writer, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF GUI Background Work Static Guard
+
+- PM added a static GUI guard proving Stock/ETF display files do not introduce polling, push channels, workers, XHR/sendBeacon, or high-frequency timing primitives.
+- The guard scans `tab-stock-etf*.js` and `tab-stock-etf.html`, blocking `setInterval`, `setTimeout`, animation/idle callbacks, WebSocket, EventSource, Worker/SharedWorker, BroadcastChannel, XMLHttpRequest, sendBeacon, `performance.now`, and `Date.now`.
+- Existing one-shot authenticated GET loading remains allowed; `new Date().toLocaleTimeString()` remains display-only and does not start background work.
+- Verification passed: Python no-write static guard `20 passed`; full Stock/ETF FastAPI/static `119 passed`; docs trace guard `2 passed`; `git diff --check` PASS. This grants no endpoint/IPC method change, client input change, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, paper order/cancel/replace, fill import, DB/evidence writer, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

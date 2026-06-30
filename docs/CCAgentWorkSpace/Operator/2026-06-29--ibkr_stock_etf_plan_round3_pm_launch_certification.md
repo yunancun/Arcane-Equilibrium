@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 78 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 79 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -1577,6 +1577,32 @@ Verification 已過：
 access/creation、沒有 connector runtime、沒有 read probe execution、沒有 paper
 order/cancel/replace、沒有 fill import、沒有 evidence writer、沒有 DB apply、沒有
 evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — GUI Background Work Static Guard
+
+這次不是 GUI runtime activation，也不是自動刷新。變更只新增 Stock/ETF static GUI
+no-background-work guard：
+
+- 掃描 `tab-stock-etf*.js` 與 `tab-stock-etf.html`。
+- 禁止 `setInterval`、`setTimeout`、`requestAnimationFrame`、
+  `requestIdleCallback`、WebSocket、SSE `EventSource`、Worker、SharedWorker、
+  BroadcastChannel、XHR、sendBeacon、`performance.now`、`Date.now`。
+- 既有一次性 authenticated GET load path 保留；`new Date().toLocaleTimeString()`
+  只顯示更新時間，不啟動 background work。
+- 目的：避免 display-only Stock/ETF tab 在未批准前產生 polling/push/worker overhead。
+
+Verification 已過：
+
+- Python no-write static guard：`20 passed`
+- Full Stock/ETF FastAPI/static：`119 passed`
+- IBKR timeline + trace-title structure guard：`2 passed`
+- `git diff --check`：PASS
+
+邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 client input、沒有 IBKR
+contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation、沒有
+connector runtime、沒有 read probe execution、沒有 paper order/cancel/replace、沒有 fill
+import、沒有 evidence writer、沒有 DB apply、沒有 evidence clock、沒有 tiny-live/live
+authority，也沒有改動 Bybit live execution 行為。
 
 ## 2026-07-01 Operator Update — Rust IPC Secret/Env Material Static Guard
 
