@@ -1197,6 +1197,19 @@ scorecard status, paper/shadow fill separation, Bybit-live unchanged proof, and
 fill import, scorecard writer, DB apply, evidence-clock start, serialized
 secret content, and tiny-live/live authority.
 
+Downstream Phase 3 derivation validator:
+`openclaw_types::stock_etf_scorecard_derivation::StockEtfScorecardDerivationV1`
+requires exact `stock_etf_scorecard_derivation_v1` contract id, source version
+`1`, Stock/ETF + IBKR + paper identity, derivation run id, strategy/universe/
+benchmark/as-of identity, scorecard input bundle hash, evidence-clock and DQ
+manifest hashes, paper-shadow reconciliation hash, formula/preregistration
+hashes, scorecard manifest hash, scorecard verdict hash, source commit/code/
+output artifact hashes, idempotent replay proof, paper/shadow fill separation,
+and QC/MIT/QA review hashes. It rejects IBKR contact, connector runtime, broker
+fill import, shadow fill generation, reconciliation writer, scorecard writer,
+DB apply, evidence-clock start, secret serialization, tiny-live/live authority,
+and Bybit-live regression.
+
 Downstream Phase 3 verdict validator:
 `openclaw_types::stock_etf_scorecard_verdict::StockEtfScorecardVerdictV1`
 requires exact `stock_etf_scorecard_verdict_v1` contract id, source version `1`,

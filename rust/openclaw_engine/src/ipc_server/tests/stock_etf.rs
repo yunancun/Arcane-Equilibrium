@@ -1763,6 +1763,37 @@ async fn stock_etf_scorecard_status_is_blocked_source_fixture_without_side_effec
     assert_eq!(result["bybit_ipc_reused"], false);
     assert_eq!(result["live_or_tiny_live_authorized"], false);
 
+    let derivation = &result["scorecard_derivation"];
+    assert_eq!(
+        derivation["expected_contract_id"],
+        "stock_etf_scorecard_derivation_v1"
+    );
+    assert_eq!(derivation["contract_id"], "");
+    assert_eq!(derivation["source_version"], 0);
+    assert_eq!(derivation["accepted"], false);
+    assert!(json_array_contains(
+        &derivation["blockers"],
+        "contract_id_missing"
+    ));
+    assert_eq!(derivation["derivation_run_id_present"], false);
+    assert_eq!(
+        derivation["paper_shadow_reconciliation_hash_present"],
+        false
+    );
+    assert_eq!(derivation["scorecard_verdict_hash_present"], false);
+    assert_eq!(derivation["output_artifact_hash_present"], false);
+    assert_eq!(derivation["derived_from_atomic_facts_only"], false);
+    assert_eq!(derivation["idempotent_replay_proven"], false);
+    assert_eq!(derivation["paper_and_shadow_fills_separate"], false);
+    assert_eq!(derivation["bybit_live_execution_unchanged"], false);
+    assert_eq!(derivation["ibkr_contact_performed"], false);
+    assert_eq!(derivation["shadow_fill_generated"], false);
+    assert_eq!(derivation["reconciliation_writer_started"], false);
+    assert_eq!(derivation["scorecard_writer_started"], false);
+    assert_eq!(derivation["db_apply_performed"], false);
+    assert_eq!(derivation["live_or_tiny_live_authorized"], false);
+    assert_eq!(derivation["sealed"], false);
+
     let scorecard = &result["scorecard"];
     assert_eq!(
         scorecard["expected_contract_id"],

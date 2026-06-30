@@ -796,3 +796,43 @@ contact、secret、connector runtime、Phase 1/2/3/4/5 runtime start、paper ord
 replace、fill import、shadow fill generation、reconciliation writer、scorecard writer、
 DB apply、Postgres dry-run、evidence clock、tiny-live、live、Linux runtime sync/restart
 或 Bybit behavior change。
+
+## 2026-06-30 PM Session Checkpoint — Scorecard Derivation Contract
+
+PM 已在本 session 追加 Phase 3 source/status/display-only checkpoint：
+`stock_etf_scorecard_derivation_v1`。這是 scorecard derivation artifact contract 與
+display hardening，不是 scorecard writer。
+
+已完成：
+
+- Rust `openclaw_types` 新增 `StockEtfScorecardDerivationV1` 與 blocked template。
+- Contract pins input bundle、evidence-clock/DQ manifest、paper-shadow reconciliation、
+  formula/preregistration、scorecard manifest、verdict、source commit/code/output
+  artifact、QC/MIT/QA review hashes。
+- Validator 要求 derived-only、idempotent replay、paper/shadow fill separation、
+  Bybit live unchanged、sealed；拒絕 IBKR contact、connector runtime、fill import、
+  shadow fill generation、reconciliation writer、scorecard writer、DB/evidence clock、
+  secret serialization、tiny-live/live authority。
+- Rust/FastAPI/GUI scorecard status 現在顯示 blocked `scorecard_derivation` block，
+  並阻擋 pre-gate truthy derivation claims。
+
+Verification：
+
+- Scorecard derivation acceptance `5 passed`。
+- Python compile PASS for scorecard normalizer/status common/tests/fixtures。
+- Focused FastAPI/static tests `15 passed`。
+- Full Stock/ETF FastAPI/static tests `90 passed`。
+- Engine scorecard focused `1 passed`。
+- Engine Stock/ETF cargo filter `27 passed`（既有 warnings only）。
+- Full openclaw_types PASS：`35` unit/golden + `241` integration/acceptance +
+  `0` doc-tests。
+- Workspace `cargo check` PASS。
+- `rustfmt --check` PASS。
+- `node --check` PASS。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 3 evidence clock approval、reconciliation
+writer approval、scorecard writer approval、DB persistence approval 或 paper-shadow launch
+approval。未批准 IBKR contact、secret、connector runtime、Phase 1/2/3/4/5 runtime
+start、paper order/cancel/replace、fill import、shadow fill generation、reconciliation
+writer、scorecard writer、DB apply、Postgres dry-run、evidence clock、tiny-live、live、
+Linux runtime sync/restart 或 Bybit behavior change。

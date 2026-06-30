@@ -52,6 +52,7 @@ def test_stock_etf_scorecard_status_returns_200_when_ipc_down(
     assert data["secret_slot_touched"] is False
     assert data["order_routed"] is False
     assert data["bybit_ipc_reused"] is False
+    assert data["scorecard_derivation"]["blockers"] == ["ipc_unavailable"]
     assert data["scorecard"]["blockers"] == ["ipc_unavailable"]
 
 
@@ -73,6 +74,22 @@ def test_stock_etf_scorecard_status_uses_only_readonly_fixture_method() -> None:
     assert data["scorecard_status_state"] == "blocked"
     assert data["phase"] == "phase3_scorecard_status_source_fixture"
     assert data["phase3_started"] is False
+    derivation = data["scorecard_derivation"]
+    assert (
+        derivation["expected_contract_id"]
+        == "stock_etf_scorecard_derivation_v1"
+    )
+    assert derivation["accepted"] is False
+    assert derivation["derivation_run_id_present"] is False
+    assert derivation["paper_shadow_reconciliation_hash_present"] is False
+    assert derivation["scorecard_verdict_hash_present"] is False
+    assert derivation["output_artifact_hash_present"] is False
+    assert derivation["derived_from_atomic_facts_only"] is False
+    assert derivation["idempotent_replay_proven"] is False
+    assert derivation["reconciliation_writer_started"] is False
+    assert derivation["scorecard_writer_started"] is False
+    assert derivation["db_apply_performed"] is False
+    assert derivation["sealed"] is False
     assert data["scorecard"]["expected_contract_id"] == "stock_etf_scorecard_verdict_v1"
     assert data["scorecard"]["accepted"] is False
     assert data["scorecard"]["verdict_label"] == "insufficient_evidence"
@@ -150,6 +167,28 @@ def test_stock_etf_scorecard_status_blocks_contract_violation() -> None:
     payload["order_routed"] = True
     payload["bybit_ipc_reused"] = True
     payload["live_or_tiny_live_authorized"] = True
+    derivation = payload["scorecard_derivation"]
+    derivation["expected_contract_id"] = "wrong"
+    derivation["accepted"] = True
+    for key in (
+        "derivation_run_id_present",
+        "scorecard_input_bundle_hash_present",
+        "paper_shadow_reconciliation_hash_present",
+        "scorecard_verdict_hash_present",
+        "output_artifact_hash_present",
+        "derived_from_atomic_facts_only",
+        "idempotent_replay_proven",
+        "paper_and_shadow_fills_separate",
+        "bybit_live_execution_unchanged",
+        "sealed",
+        "ibkr_contact_performed",
+        "shadow_fill_generated",
+        "reconciliation_writer_started",
+        "scorecard_writer_started",
+        "db_apply_performed",
+        "live_or_tiny_live_authorized",
+    ):
+        derivation[key] = True
     scorecard = payload["scorecard"]
     scorecard["expected_contract_id"] = "wrong"
     scorecard["accepted"] = True
@@ -203,6 +242,18 @@ def test_stock_etf_scorecard_status_blocks_contract_violation() -> None:
         "db_apply_performed",
         "evidence_clock_started",
         "paper_shadow_window_complete",
+        "derivation_expected_contract_id_mismatch",
+        "derivation_accepted_before_writer",
+        "derivation_derivation_run_id_present",
+        "derivation_paper_shadow_reconciliation_hash_present",
+        "derivation_scorecard_verdict_hash_present",
+        "derivation_output_artifact_hash_present",
+        "derivation_derived_from_atomic_facts_only",
+        "derivation_idempotent_replay_proven",
+        "derivation_reconciliation_writer_started",
+        "derivation_scorecard_writer_started",
+        "derivation_db_apply_performed",
+        "derivation_live_or_tiny_live_authorized",
         "scorecard_expected_contract_id_mismatch",
         "scorecard_accepted_before_writer",
         "scorecard_scorecard_input_bundle_hash_present",

@@ -1730,3 +1730,58 @@ PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 
 migration/apply、不做 Postgres dry-run、不啟動 evidence clock、不做 Linux runtime
 sync/restart、不啟動 paper-shadow launch、不授權 tiny-live/live 或任何 Bybit behavior
 change。
+
+## 31. 2026-06-30 PM session source checkpoint：Scorecard Derivation Contract
+
+本 checkpoint 補上 Phase 3 `scorecard_derive` 的 source-only artifact gate。
+前面已有 scorecard inputs、paper-shadow reconciliation 與 verdict；這次新增的是
+「derivation artifact 自身」的 lineage contract，避免未來 scorecard writer 或 daily
+regeneration 在未證明 input/reconciliation/verdict/output hashes 時被誤視為完整。
+
+新增 checkpoint：
+
+- Rust `openclaw_types` 新增 `stock_etf_scorecard_derivation_v1`，位於
+  `stock_etf_scorecard_derivation.rs`。
+- Contract 要求 exact Stock/ETF + IBKR + paper identity、derivation run id、strategy /
+  universe / benchmark / as-of identity、scorecard input bundle hash、evidence-clock /
+  DQ manifest hashes、paper-shadow reconciliation hash、formula/preregistration hashes、
+  scorecard manifest hash、scorecard verdict hash、source commit/code/output artifact
+  hashes、QC/MIT/QA review hashes。
+- Validator 要求 `derived_from_atomic_facts_only=true`、
+  `idempotent_replay_proven=true`、paper/shadow fills separated、Bybit live execution
+  unchanged、sealed；拒絕 IBKR contact、connector runtime、broker fill import、
+  shadow fill generation、reconciliation writer、scorecard writer、DB apply、
+  evidence-clock start、secret serialization、tiny-live/live authority。
+- 新增 blocked secret-free template
+  `settings/broker/stock_etf_scorecard_derivation.template.toml`。
+- Rust `stock_etf.get_scorecard_status`、FastAPI normalizer/fixtures/tests 與 GUI
+  scorecard panel 新增 display-only `scorecard_derivation` block；pre-gate derivation
+  truthy claims 會被 `contract_violation_blocked` 擋下。
+- Phase0 packet spec 與 broker README 已更新，說明 derivation contract 是 writer 前置
+  gate；本 checkpoint 不改 Phase0 required-contract count。
+
+驗證：
+
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_scorecard_derivation_acceptance -- --nocapture`：
+  derivation acceptance `5 passed`。
+- `python3 -m py_compile ...stock_etf_scorecard_normalizers.py ...stock_etf_status_common.py ...test_stock_etf_scorecard_status_routes.py ...stock_etf_route_fixtures.py`：PASS。
+- `python3 -m pytest -q ...test_stock_etf_scorecard_status_routes.py ...test_stock_etf_routes.py`：
+  focused FastAPI/static `15 passed`。
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  full Stock/ETF FastAPI/static `90 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf_scorecard_status -- --nocapture`：
+  engine scorecard focused `1 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
+  Stock/ETF engine filter `27 passed`（既有 warnings only）。
+- Full `cargo test --manifest-path rust/Cargo.toml -p openclaw_types`：
+  `35` unit/golden + `241` integration/acceptance + `0` doc-tests。
+- `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
+- `rustfmt --edition 2021 --check ...`：PASS。
+- `node --check .../tab-stock-etf.js`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 connector runtime、
+不啟動 Phase 1/2/3/4/5 runtime、不送 paper order、不做 cancel/replace、不匯入 fill、
+不產生 shadow fill、不啟動 reconciliation writer、不啟動 scorecard writer、不做 DB
+migration/apply、不做 Postgres dry-run、不啟動 evidence clock、不做 Linux runtime
+sync/restart、不啟動 paper-shadow launch、不授權 tiny-live/live 或任何 Bybit behavior
+change。

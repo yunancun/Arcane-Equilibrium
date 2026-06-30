@@ -7,6 +7,7 @@ from typing import Any
 from .stock_etf_status_common import (
     _DENIED_OPERATIONS,
     _SAFETY_FALSE_FIELDS,
+    _SCORECARD_DERIVATION_CONTRACT_ID,
     _SCORECARD_VERDICT_CONTRACT_ID,
     _api_allowlist_contract_violations,
     _as_bool,
@@ -17,6 +18,117 @@ from .stock_etf_status_common import (
     _normalize_api_allowlist,
     _phase2_fail_closed,
 )
+
+
+def _scorecard_derivation_fail_closed(reason: str) -> dict[str, Any]:
+    return {
+        "expected_contract_id": _SCORECARD_DERIVATION_CONTRACT_ID,
+        "contract_id": "",
+        "source_version": 0,
+        "accepted": False,
+        "blockers": [reason],
+        "derivation_run_id_present": False,
+        "strategy_id_present": False,
+        "universe_version_present": False,
+        "benchmark_version_present": False,
+        "as_of_date_present": False,
+        "scorecard_input_bundle_hash_present": False,
+        "paper_shadow_reconciliation_hash_present": False,
+        "scorecard_verdict_hash_present": False,
+        "output_artifact_hash_present": False,
+        "derived_from_atomic_facts_only": False,
+        "idempotent_replay_proven": False,
+        "paper_and_shadow_fills_separate": False,
+        "bybit_live_execution_unchanged": False,
+        "ibkr_contact_performed": False,
+        "connector_runtime_started": False,
+        "broker_fill_import_performed": False,
+        "shadow_fill_generated": False,
+        "reconciliation_writer_started": False,
+        "scorecard_writer_started": False,
+        "db_apply_performed": False,
+        "evidence_clock_started": False,
+        "secret_content_serialized": False,
+        "live_or_tiny_live_authorized": False,
+        "sealed": False,
+    }
+
+
+def _normalize_scorecard_derivation(value: Any, reason: str | None) -> dict[str, Any]:
+    fallback = _scorecard_derivation_fail_closed(
+        reason or "missing_scorecard_derivation"
+    )
+    source = _as_dict(value)
+    if not source:
+        return fallback
+    return {
+        "expected_contract_id": _as_str(
+            source.get("expected_contract_id"),
+            _SCORECARD_DERIVATION_CONTRACT_ID,
+        ),
+        "contract_id": _as_str(source.get("contract_id"), ""),
+        "source_version": _as_int(source.get("source_version")),
+        "accepted": _as_bool(source.get("accepted")),
+        "blockers": [str(item) for item in _as_list(source.get("blockers"))],
+        "derivation_run_id_present": _as_bool(
+            source.get("derivation_run_id_present")
+        ),
+        "strategy_id_present": _as_bool(source.get("strategy_id_present")),
+        "universe_version_present": _as_bool(
+            source.get("universe_version_present")
+        ),
+        "benchmark_version_present": _as_bool(
+            source.get("benchmark_version_present")
+        ),
+        "as_of_date_present": _as_bool(source.get("as_of_date_present")),
+        "scorecard_input_bundle_hash_present": _as_bool(
+            source.get("scorecard_input_bundle_hash_present")
+        ),
+        "paper_shadow_reconciliation_hash_present": _as_bool(
+            source.get("paper_shadow_reconciliation_hash_present")
+        ),
+        "scorecard_verdict_hash_present": _as_bool(
+            source.get("scorecard_verdict_hash_present")
+        ),
+        "output_artifact_hash_present": _as_bool(
+            source.get("output_artifact_hash_present")
+        ),
+        "derived_from_atomic_facts_only": _as_bool(
+            source.get("derived_from_atomic_facts_only")
+        ),
+        "idempotent_replay_proven": _as_bool(
+            source.get("idempotent_replay_proven")
+        ),
+        "paper_and_shadow_fills_separate": _as_bool(
+            source.get("paper_and_shadow_fills_separate")
+        ),
+        "bybit_live_execution_unchanged": _as_bool(
+            source.get("bybit_live_execution_unchanged")
+        ),
+        "ibkr_contact_performed": _as_bool(source.get("ibkr_contact_performed")),
+        "connector_runtime_started": _as_bool(
+            source.get("connector_runtime_started")
+        ),
+        "broker_fill_import_performed": _as_bool(
+            source.get("broker_fill_import_performed")
+        ),
+        "shadow_fill_generated": _as_bool(source.get("shadow_fill_generated")),
+        "reconciliation_writer_started": _as_bool(
+            source.get("reconciliation_writer_started")
+        ),
+        "scorecard_writer_started": _as_bool(
+            source.get("scorecard_writer_started")
+        ),
+        "db_apply_performed": _as_bool(source.get("db_apply_performed")),
+        "evidence_clock_started": _as_bool(source.get("evidence_clock_started")),
+        "secret_content_serialized": _as_bool(
+            source.get("secret_content_serialized")
+        ),
+        "live_or_tiny_live_authorized": _as_bool(
+            source.get("live_or_tiny_live_authorized")
+        ),
+        "sealed": _as_bool(source.get("sealed")),
+    }
 
 
 def _scorecard_verdict_fail_closed(reason: str) -> dict[str, Any]:
@@ -198,6 +310,7 @@ def _normalize_scorecard_verdict(value: Any, reason: str | None) -> dict[str, An
 def _scorecard_status_contract_violations(
     source: dict[str, Any],
     phase2: dict[str, Any],
+    derivation: dict[str, Any],
     scorecard: dict[str, Any],
     reason: str | None,
 ) -> list[str]:
@@ -223,6 +336,45 @@ def _scorecard_status_contract_violations(
         violations.append("broker_mismatch")
     if _as_str(source.get("environment"), "paper_shadow") != "paper_shadow":
         violations.append("environment_mismatch")
+    if (
+        _as_str(derivation.get("expected_contract_id"), "")
+        != _SCORECARD_DERIVATION_CONTRACT_ID
+    ):
+        violations.append("derivation_expected_contract_id_mismatch")
+    if _as_bool(derivation.get("accepted")):
+        violations.append("derivation_accepted_before_writer")
+    for key in (
+        "derivation_run_id_present",
+        "strategy_id_present",
+        "universe_version_present",
+        "benchmark_version_present",
+        "as_of_date_present",
+        "scorecard_input_bundle_hash_present",
+        "paper_shadow_reconciliation_hash_present",
+        "scorecard_verdict_hash_present",
+        "output_artifact_hash_present",
+        "derived_from_atomic_facts_only",
+        "idempotent_replay_proven",
+        "paper_and_shadow_fills_separate",
+        "bybit_live_execution_unchanged",
+        "sealed",
+    ):
+        if _as_bool(derivation.get(key)):
+            violations.append(f"derivation_{key}")
+    for key in (
+        "ibkr_contact_performed",
+        "connector_runtime_started",
+        "broker_fill_import_performed",
+        "shadow_fill_generated",
+        "reconciliation_writer_started",
+        "scorecard_writer_started",
+        "db_apply_performed",
+        "evidence_clock_started",
+        "secret_content_serialized",
+        "live_or_tiny_live_authorized",
+    ):
+        if _as_bool(derivation.get(key)):
+            violations.append(f"derivation_{key}")
     if (
         _as_str(scorecard.get("expected_contract_id"), "")
         != _SCORECARD_VERDICT_CONTRACT_ID
@@ -296,11 +448,16 @@ def _normalize_scorecard_status(raw: Any, reason: str | None) -> dict[str, Any]:
     phase2 = _as_dict(source.get("phase2")) or _phase2_fail_closed()
     external_surface_gate = _as_dict(phase2.get("external_surface_gate"))
     api_allowlist = _normalize_api_allowlist(phase2.get("api_allowlist"))
+    derivation = _normalize_scorecard_derivation(
+        source.get("scorecard_derivation"),
+        reason,
+    )
     scorecard = _normalize_scorecard_verdict(source.get("scorecard"), reason)
 
     contract_violations = _scorecard_status_contract_violations(
         source,
         phase2,
+        derivation,
         scorecard,
         reason,
     )
@@ -339,6 +496,7 @@ def _normalize_scorecard_status(raw: Any, reason: str | None) -> dict[str, Any]:
         "first_ibkr_contact_allowed": first_contact_allowed,
         "immutable_pass_artifact_present": immutable_artifact,
         "connector_enabled": connector_enabled,
+        "scorecard_derivation": derivation,
         "scorecard": scorecard,
         "ibkr_live_enabled": False,
         "stock_live_disabled": True,

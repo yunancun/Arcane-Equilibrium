@@ -584,3 +584,40 @@ Verification 已過：
 沒有 shadow fill generation、沒有 reconciliation writer、沒有 DB apply、沒有 evidence
 clock、沒有 scorecard writer、沒有 Linux runtime sync/restart，也沒有改動 Bybit live
 execution 行為。
+
+## 2026-06-30 Operator Update — Scorecard Derivation Contract
+
+本 session 已完成下一個 source/status/display-only checkpoint：
+`stock_etf_scorecard_derivation_v1`。
+
+這次不是 scorecard writer，也不是 DB persistence。變更只在 Rust contract、blocked
+template、read-only scorecard status、FastAPI normalizer/tests 與 GUI：
+
+- Derivation contract 要求 input bundle、paper-shadow reconciliation、verdict、
+  formula/preregistration、output artifact、QC/MIT/QA review hashes。
+- Contract 要求 derived-only、idempotent replay、paper/shadow fill separation、
+  Bybit live unchanged、sealed。
+- IBKR contact、connector runtime、fill import、shadow fill generation、
+  reconciliation writer、scorecard writer、DB apply、evidence clock、secret
+  serialization、tiny-live/live authority 都會被拒絕。
+- `/api/v1/stock-etf/scorecard-status` 和 GUI 現在顯示 blocked
+  `scorecard_derivation` block；pre-gate truthy derivation claims 會被
+  `contract_violation_blocked` 擋下。
+
+Verification 已過：
+
+- Scorecard derivation acceptance：`5 passed`
+- Python compile：PASS
+- Focused FastAPI/static：`15 passed`
+- Full Stock/ETF FastAPI/static：`90 passed`
+- Engine scorecard focused：`1 passed`
+- Engine Stock/ETF：`27 passed`
+- Full openclaw_types：`35` unit/golden + `241` integration/acceptance + `0` doc-tests
+- Workspace `cargo check`：PASS
+- `rustfmt --check` / `node --check`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 secret access/creation、沒有 connector runtime、
+沒有 Phase 1/2/3/4/5 runtime start、沒有 paper order/cancel/replace、沒有 fill import、
+沒有 shadow fill generation、沒有 reconciliation writer、沒有 DB apply、沒有 evidence
+clock、沒有 scorecard writer、沒有 Linux runtime sync/restart，也沒有改動 Bybit live
+execution 行為。
