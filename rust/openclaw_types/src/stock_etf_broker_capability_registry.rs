@@ -11,10 +11,12 @@ use crate::ibkr_phase2_gate::{
     IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
 };
 use crate::ibkr_phase2_policies::IBKR_PAPER_ATTESTATION_CONTRACT_ID;
+use crate::stock_etf_ibkr_readonly_probe_request::STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID;
 use crate::stock_etf_instrument_identity::STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID;
 use crate::stock_etf_lane::{
     AssetLane, AuthorityScope, Broker, BrokerOperation, StockEtfDenialReason,
 };
+use crate::stock_etf_lane_scoped_ipc::STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID;
 use crate::stock_etf_phase3_evidence::{
     STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
 };
@@ -221,7 +223,11 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
     match operation {
         Op::HealthRead => ExpectedCapability {
             authority_scope: Scope::ReadOnly,
-            required_gates: &[IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID],
+            required_gates: &[
+                IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
+                STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID,
+                STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID,
+            ],
             typed_denial_reason: None,
             rust_owned: false,
         },
@@ -229,6 +235,8 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
             authority_scope: Scope::ReadOnly,
             required_gates: &[
                 IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
+                STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID,
+                STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID,
                 IBKR_SESSION_ATTESTATION_CONTRACT_ID,
             ],
             typed_denial_reason: None,
@@ -238,6 +246,8 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
             authority_scope: Scope::ReadOnly,
             required_gates: &[
                 IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
+                STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID,
+                STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID,
                 STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
             ],
             typed_denial_reason: None,
@@ -247,6 +257,8 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
             authority_scope: Scope::ReadOnly,
             required_gates: &[
                 IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
+                STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID,
+                STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID,
                 STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID,
             ],
             typed_denial_reason: None,
@@ -257,7 +269,7 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
             required_gates: &[
                 IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
                 IBKR_PAPER_ATTESTATION_CONTRACT_ID,
-                "lane_scoped_ipc_v1",
+                STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID,
                 "stock_etf_scoped_authorization_v1",
                 STOCK_ETF_RISK_POLICY_CONTRACT_ID,
                 "decision_lease_valid",

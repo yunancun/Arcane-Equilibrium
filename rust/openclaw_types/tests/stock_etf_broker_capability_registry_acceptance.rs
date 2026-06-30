@@ -12,7 +12,8 @@ use openclaw_types::{
     StockEtfGateInputs, BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID,
     STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID, STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID,
     STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
-    STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID, STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
+    STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID, STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID,
+    STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID, STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
     STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID, STOCK_ETF_RISK_POLICY_CONTRACT_ID,
     STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
     STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
@@ -81,13 +82,43 @@ fn accepted_registry_contains_full_stock_etf_ibkr_operation_matrix() {
             .required_gates
             .contains(&STOCK_ETF_RISK_POLICY_CONTRACT_ID.to_string())));
     assert!(registry.operations.iter().any(|entry| {
+        entry.operation == BrokerOperation::HealthRead
+            && entry
+                .required_gates
+                .contains(&STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID.to_string())
+            && entry
+                .required_gates
+                .contains(&STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID.to_string())
+    }));
+    assert!(registry.operations.iter().any(|entry| {
+        entry.operation == BrokerOperation::AccountSnapshotRead
+            && entry
+                .required_gates
+                .contains(&STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID.to_string())
+            && entry
+                .required_gates
+                .contains(&STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID.to_string())
+    }));
+    assert!(registry.operations.iter().any(|entry| {
         entry.operation == BrokerOperation::MarketDataRead
+            && entry
+                .required_gates
+                .contains(&STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID.to_string())
+            && entry
+                .required_gates
+                .contains(&STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID.to_string())
             && entry
                 .required_gates
                 .contains(&STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID.to_string())
     }));
     assert!(registry.operations.iter().any(|entry| {
         entry.operation == BrokerOperation::ContractDetailsRead
+            && entry
+                .required_gates
+                .contains(&STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID.to_string())
+            && entry
+                .required_gates
+                .contains(&STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID.to_string())
             && entry
                 .required_gates
                 .contains(&STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID.to_string())
@@ -152,6 +183,34 @@ fn accepted_registry_contains_full_stock_etf_ibkr_operation_matrix() {
         .any(|entry| entry.operation == BrokerOperation::LiveOrderSubmit
             && entry.authority_scope == AuthorityScope::Denied
             && entry.typed_denial_reason == Some(StockEtfDenialReason::IbkrLiveNotAuthorized)));
+}
+
+#[test]
+fn readonly_rows_require_lane_scoped_ipc_and_probe_request_gate() {
+    let mut registry = StockEtfBrokerCapabilityRegistryV1::accepted_fixture();
+    for operation in [
+        BrokerOperation::HealthRead,
+        BrokerOperation::AccountSnapshotRead,
+        BrokerOperation::MarketDataRead,
+        BrokerOperation::ContractDetailsRead,
+    ] {
+        let row = registry
+            .operations
+            .iter_mut()
+            .find(|entry| entry.operation == operation)
+            .expect("read row");
+        row.required_gates.retain(|gate| {
+            gate != STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID
+                && gate != STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID
+        });
+    }
+
+    let blockers = registry.validate().blockers;
+
+    assert!(has(
+        &blockers,
+        StockEtfBrokerCapabilityBlocker::OperationRequiredGateMissing
+    ));
 }
 
 #[test]

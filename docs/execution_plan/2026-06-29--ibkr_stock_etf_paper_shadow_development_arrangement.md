@@ -1986,3 +1986,44 @@ connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 
 runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
 evidence clock、不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權
 tiny-live/live 或任何 Bybit behavior change。
+
+## 37. 2026-06-30 PM session source checkpoint：Broker Read Capability Probe Gate
+
+本 checkpoint 強化 `broker_capability_registry_v1` 的 read rows。前面已經完成
+`stock_etf_ibkr_readonly_probe_request_v1` 和 `stock_etf.preview_readonly_probe`
+validation-only IPC；這次把 broker capability registry 的「read capability 可用」
+條件綁回這兩個 typed gate，避免未來只憑 capability row 表示可讀而繞過 request /
+IPC 邊界。
+
+新增 checkpoint：
+
+- `health_read` 現在要求 external surface gate + `lane_scoped_ipc_v1` +
+  `stock_etf_ibkr_readonly_probe_request_v1`。
+- `account_snapshot_read` 現在要求 external surface gate + lane-scoped IPC +
+  readonly-probe request + session attestation。
+- `market_data_read` 現在要求 external surface gate + lane-scoped IPC +
+  readonly-probe request + market-data provenance。
+- `contract_details_read` 現在要求 external surface gate + lane-scoped IPC +
+  readonly-probe request + instrument identity。
+- Validator acceptance 新增缺失 gate 的 negative test；缺少 typed IPC /
+  readonly-probe request 會產生 `OperationRequiredGateMissing`。
+- Paper-write rows 改用共享 `STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID`，避免同一
+  contract id 在 registry 內硬編碼漂移。
+- Phase0 packet spec、broker settings README、blocked broker capability template
+  已同步上述 read-row prerequisite。
+
+驗證：
+
+- `rustfmt --edition 2021 rust/openclaw_types/src/stock_etf_broker_capability_registry.rs rust/openclaw_types/tests/stock_etf_broker_capability_registry_acceptance.rs`：PASS。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_broker_capability_registry_acceptance -- --nocapture`：
+  broker capability acceptance `10 passed`。
+- Full `cargo test --manifest-path rust/Cargo.toml -p openclaw_types`：
+  `35` unit/golden + `248` integration/acceptance + `0` doc-tests。
+- `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
