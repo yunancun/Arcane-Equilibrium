@@ -614,3 +614,9 @@ Do not paste long reports or stable architecture into TODO.
 - Source-only test checkpoint extends the Stock/ETF IBKR no-write guard to the static GUI tab, requiring `/api/v1/stock-etf/readiness` and rejecting POST/PUT/PATCH/DELETE snippets, `ocPost`, direct `fetch`, forms, browser storage lane authority, IBKR broker-write strings, and Stock/ETF write IPC strings.
 - The guard is intentionally scoped to `tab-stock-etf.html` so existing Bybit paper/live GUI surfaces are not reclassified as IBKR violations.
 - Verification passed: guard test `py_compile`, focused FastAPI/static no-write pytest `13 passed`, and `git diff --check`. This grants no IBKR contact, connector runtime, secret access, paper order, fill import, DB apply, GUI/lane selector authority, Phase 2 start, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF FastAPI Route Cache Auth Partition
+
+- Phase 4 route/cache/auth checkpoint makes Stock/ETF readiness and tab redirect responses emit no-store/private cache headers plus `Vary: Authorization`.
+- Route tests prove query/header supplied lane, paper-ready, and first-contact claims are ignored: the API still calls only `stock_etf.get_readiness` with empty params and trusts the Rust IPC payload.
+- Verification passed: route/test `py_compile`, focused FastAPI/static no-write pytest `14 passed`, and `git diff --check`. This grants no IBKR contact, connector runtime, secret access, paper order, fill import, DB apply, GUI/lane selector authority, Phase 2 start, tiny-live, live, or Bybit behavior change.
