@@ -663,7 +663,7 @@ Required on every market-data fact:
 - `asset_lane=stock_etf_cash`
 - `broker=ibkr`
 - read-only, paper, or shadow environment only
-- source version 1
+- `source_version=1`
 - source vendor/broker
 - entitlement tier
 - raw payload hash
@@ -682,10 +682,11 @@ Unknown provenance blocks scorecard readiness.
 
 Source validator:
 `openclaw_types::stock_etf_phase3_evidence::StockMarketDataProvenanceV1`.
-The validator rejects missing contract id/version, wrong lane/broker/environment,
-missing vendor/entitlement/timestamps/symbol/calendar/hash evidence, unknown
-adjustment marker, missing source artifact hash, Bybit-live regression, IBKR
-contact, connector runtime, serialized secrets, and tiny-live/live authority.
+The validator requires exact `stock_market_data_provenance_v1` contract id and
+source version `1`. It rejects wrong lane/broker/environment, missing
+vendor/entitlement/timestamps/symbol/calendar/hash evidence, unknown adjustment
+marker, missing source artifact hash, Bybit-live regression, IBKR contact,
+connector runtime, serialized secrets, and tiny-live/live authority.
 
 ## 13A. `stock_etf_reference_data_sources_v1`
 

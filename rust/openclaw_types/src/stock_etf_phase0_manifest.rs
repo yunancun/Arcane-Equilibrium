@@ -14,7 +14,9 @@ use crate::stock_etf_gui_lane_contract::STOCK_ETF_GUI_LANE_CONTRACT_ID;
 use crate::stock_etf_instrument_identity::STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID;
 use crate::stock_etf_lane::{AssetLane, Broker};
 use crate::stock_etf_lane_scoped_ipc::STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID;
-use crate::stock_etf_phase3_evidence::STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID;
+use crate::stock_etf_phase3_evidence::{
+    STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
+};
 use crate::stock_etf_pit_universe::STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID;
 use crate::stock_etf_reference_data_sources::STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID;
 use crate::stock_etf_release_packet::STOCK_ETF_RELEASE_PACKET_CONTRACT_ID;
@@ -55,7 +57,7 @@ const REQUIRED_CONTRACTS: &[&str] = &[
     "broker_lifecycle_event_log_v1",
     STOCK_ETF_ASSET_LANE_EVENTS_CONTRACT_ID,
     STOCK_ETF_DB_EVIDENCE_CONTRACT_ID,
-    "stock_market_data_provenance_v1",
+    STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
     BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID,
     STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID,
     STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID,
