@@ -1,6 +1,6 @@
 # Profit-First Autonomy Loop
 
-目標：本地自動閉環進化交易能力。最高優化目標是 true risk-adjusted net PnL after fees/slippage，但永遠低於 survival、Guardian/risk gates、Decision Lease、Rust authority、authorization gates、auditability、reconstructability。
+目標：構建本地化、可審計、可重建、可持續自我進化的 multi-agent auto trading bot。TradeBot 必須在 operator 定義的 survival、loss-control、authorization、Rust authority、Decision Lease、auditability、reconstructability 邊界內，自主發現機會、自主判斷、自主設計實驗、自主執行 Demo bounded probes、自主復盤 after-cost outcome、自主學習、自主調整策略參數，並草擬新策略或策略變體。最高優化目標是真實 risk-adjusted net PnL after fees/slippage；任何不能遷移到未來 live 審查的 Demo 經驗都不算有效進展。
 
 本文件只定義長期工作流。當前 blocker、候選、證據路徑、命令入口讀 `TODO.md` 和其引用；不要把易過期任務塞回本文件。
 
