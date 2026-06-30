@@ -12,6 +12,8 @@ use crate::ibkr_phase2_gate::{
 };
 use crate::stock_etf_lane::BrokerEnvironment;
 
+pub const IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID: &str = "ibkr_api_session_topology_v1";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrSecretSlotPosture {

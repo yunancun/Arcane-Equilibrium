@@ -14,6 +14,8 @@ use crate::stock_etf_lane::{
     StockEtfFeatureFlags,
 };
 
+pub const FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID: &str = "feature_flag_secret_auth_matrix_v1";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StockEtfAuthorizationEnvelopeV1 {
     pub asset_lane: AssetLane,

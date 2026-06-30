@@ -9,6 +9,9 @@ use crate::stock_etf_lane::BrokerEnvironment;
 
 pub const IBKR_PHASE2_ADR: &str = "ADR-0048";
 pub const IBKR_PHASE2_AMD: &str = "AMD-2026-06-29-01";
+pub const IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID: &str = "phase2_ibkr_external_surface_gate_v1";
+pub const NON_BYBIT_API_ALLOWLIST_CONTRACT_ID: &str = "non_bybit_api_allowlist_v1";
+pub const IBKR_SESSION_ATTESTATION_CONTRACT_ID: &str = "ibkr_session_attestation_v1";
 pub const IBKR_PAPER_GATEWAY_DEFAULT_PORT: u16 = 4002;
 pub const IBKR_LIVE_GATEWAY_PORT: u16 = 4001;
 pub const IBKR_LIVE_TWS_PORT: u16 = 7496;

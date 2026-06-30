@@ -42,11 +42,13 @@ pub use cognitive::{CognitiveParams, DreamInsight, RegretSummary, SkippedOpportu
 pub use ibkr_feature_flag_secret_auth::{
     evaluate_feature_flag_secret_auth_matrix, FeatureFlagSecretAuthBlocker,
     FeatureFlagSecretAuthMatrixV1, FeatureFlagSecretAuthVerdict, StockEtfAuthorizationEnvelopeV1,
+    FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID,
 };
 pub use ibkr_paper_lifecycle::{
     classify_ibkr_paper_restart_recovery, is_transition_allowed, BrokerLifecycleEventLogV1,
     IbkrPaperLifecycleEventBlocker, IbkrPaperLifecycleEventVerdict, IbkrPaperRestartRecoveryAction,
-    IbkrPaperRestartRecoveryInputV1,
+    IbkrPaperRestartRecoveryInputV1, BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
+    IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
 };
 pub use ibkr_phase2_artifact::{
     is_sha256_hex, IbkrPhase2GateArtifactBlocker, IbkrPhase2GateArtifactV1,
@@ -60,6 +62,8 @@ pub use ibkr_phase2_gate::{
     IbkrSessionAttestationV1, IbkrSessionAttestationVerdict, NonBybitApiAction,
     NonBybitApiAllowlistDecision, NonBybitApiDenialReason, IBKR_LIVE_GATEWAY_PORT,
     IBKR_LIVE_TWS_PORT, IBKR_PAPER_GATEWAY_DEFAULT_PORT, IBKR_PHASE2_ADR, IBKR_PHASE2_AMD,
+    IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
+    NON_BYBIT_API_ALLOWLIST_CONTRACT_ID,
 };
 pub use ibkr_phase2_policies::{
     IbkrAuditEventPolicyBlocker, IbkrAuditEventPolicyV1, IbkrPaperAttestationPolicyBlocker,
@@ -67,11 +71,12 @@ pub use ibkr_phase2_policies::{
     IbkrPhase2PolicyBundleV1, IbkrPolicyVerdict, IbkrPythonWriteGuardPolicyBlocker,
     IbkrPythonWriteGuardPolicyV1, IbkrRateLimitPolicyBlocker, IbkrRateLimitPolicyV1,
     IbkrRateLimitScope, IbkrRedactionPolicyBlocker, IbkrRedactionPolicyV1,
+    IBKR_PAPER_ATTESTATION_CONTRACT_ID, IBKR_REDACTION_POLICY_CONTRACT_ID,
 };
 pub use ibkr_phase2_runtime::{
     IbkrApiSessionTopologyBlocker, IbkrApiSessionTopologyV1, IbkrApiSessionTopologyVerdict,
     IbkrGatewayProcessMode, IbkrSecretSlotContractBlocker, IbkrSecretSlotContractV1,
-    IbkrSecretSlotContractVerdict, IbkrSecretSlotPosture,
+    IbkrSecretSlotContractVerdict, IbkrSecretSlotPosture, IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID,
 };
 pub use intent::{DataQualityLevel, OrderIntent, RiskVerdict, TradeIntent};
 pub use price::{Kline, KlineBar, PriceEvent, PriceEventKind, OHLCV};
@@ -112,6 +117,7 @@ pub use stock_etf_lane::{
     BrokerCapabilityRequest, BrokerEnvironment, BrokerOperation, IbkrPaperOrderLifecycleState,
     InstrumentKind, StockEtfConfigError, StockEtfContractParseError, StockEtfDenialReason,
     StockEtfFeatureFlags, StockEtfGateInputs, StockEtfReadiness,
+    STOCK_ETF_ASSET_LANE_TAXONOMY_CONTRACT_ID,
 };
 pub use stock_etf_lane_scoped_ipc::{
     StockEtfLaneScopedIpcBlocker, StockEtfLaneScopedIpcCommandV1, StockEtfLaneScopedIpcContractV1,

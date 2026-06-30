@@ -7,6 +7,8 @@
 use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr};
 
+pub const STOCK_ETF_ASSET_LANE_TAXONOMY_CONTRACT_ID: &str = "asset_lane_taxonomy_v1";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AssetLane {
