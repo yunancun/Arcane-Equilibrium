@@ -3077,3 +3077,9 @@
 - PM corrected `stock_etf.preview_readonly_probe` source semantics so accepted readonly-probe envelopes drive the top-level broker decision operation; market-data/account/contract-details probes no longer inherit the method fallback `health_read` decision operation.
 - Invalid or parse-failed readonly-probe payloads are not trusted for operation selection and remain on the method-level fail-closed fixture boundary.
 - Verification passed: `rustfmt`; readonly-probe IPC focused `3 passed`; engine `stock_etf` filter `30 passed`; workspace `cargo check` PASS; `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Plan Timeline Checkpoint Guard
+
+- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 42, aligned to the PM memory / Operator source timeline.
+- Added a structure test that reads the main plan Markdown and fails if PM session checkpoint numbers become duplicated, skipped, or out of order.
+- Verification passed: focused IBKR timeline structure test `1 passed`; section-body compare against `HEAD` PASS; `git diff --check` PASS. The full structure test file still has pre-existing docs README index drift failures unrelated to this guard. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.

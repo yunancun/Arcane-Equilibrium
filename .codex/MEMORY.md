@@ -942,3 +942,9 @@ Do not paste long reports or stable architecture into TODO.
 - Invalid or parse-failed readonly-probe payloads are not trusted for operation selection and still fall back to the method-level `HealthRead` fixture boundary.
 - Added a market-data readonly-probe IPC test proving a valid `market_data_snapshot` request yields top-level `decision.operation=market_data_read` while remaining `allowed=false` with no contact or routing side effects.
 - Verification passed: `rustfmt`; readonly-probe IPC focused `3 passed`; engine `stock_etf` filter `30 passed`; workspace `cargo check` PASS; `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Plan Timeline Checkpoint Guard
+
+- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 42, aligned to the PM memory / Operator source timeline.
+- Added a structure test that reads the main plan Markdown and fails if PM session checkpoint numbers become duplicated, skipped, or out of order.
+- Verification passed: focused IBKR timeline structure test `1 passed`; section-body compare against `HEAD` PASS; `git diff --check` PASS. The full structure test file still has pre-existing docs README index drift failures unrelated to this guard. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
