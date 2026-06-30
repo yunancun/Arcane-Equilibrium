@@ -99,6 +99,7 @@ def test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles() -> None
         "Rust IPC Handler Split Guard",
         "Route Fixture Split Guard",
         "Rust IPC Request Contract Test Split Guard",
+        "Rust IPC Handler Request Summary Split Guard",
     )
     plan_source = IBKR_STOCK_ETF_PLAN.read_text()
     operator_source = IBKR_STOCK_ETF_OPERATOR.read_text()
