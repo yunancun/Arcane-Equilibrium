@@ -233,6 +233,16 @@ pub fn method_spec(name: &str) -> Option<&'static IpcMethodSpec> {
     IPC_METHOD_REGISTRY.iter().find(|spec| spec.name == name)
 }
 
+pub fn is_stock_etf_fixture_method(name: &str) -> bool {
+    if !name.starts_with("stock_etf.") {
+        return false;
+    }
+
+    method_spec(name)
+        .map(|spec| spec.slot == IpcSlotRequirement::None)
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,6 +321,7 @@ mod tests {
             "stock_etf.preview_readonly_probe",
         ] {
             let spec = method_spec(name).expect("stock_etf method registered");
+            assert!(is_stock_etf_fixture_method(name));
             assert_eq!(spec.slot, IpcSlotRequirement::None);
             assert!(
                 !crate::ipc_server::live_authz::LIVE_WRITE_METHODS.contains(&name),
@@ -321,6 +332,8 @@ mod tests {
             method_spec("stock_etf.submit_paper_order").unwrap().name,
             "submit_paper_order"
         );
+        assert!(!is_stock_etf_fixture_method("submit_paper_order"));
+        assert!(!is_stock_etf_fixture_method("not_a_real_method"));
     }
 
     #[test]

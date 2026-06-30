@@ -35,7 +35,7 @@
 use super::engine_routing::{extract_engine_tx, EngineCommandChannels};
 use super::handlers::*;
 use super::handlers_config::{handle_get_config, handle_patch_config};
-use super::method_registry::{method_spec, IpcSlotRequirement};
+use super::method_registry::{is_stock_etf_fixture_method, method_spec, IpcSlotRequirement};
 use super::protocol::{
     JsonRpcRequest, JsonRpcResponse, ERR_INTERNAL, ERR_INVALID_REQUEST, ERR_METHOD_NOT_FOUND,
 };
@@ -453,29 +453,7 @@ pub(crate) async fn dispatch_request(
         "governance.get_status" => handle_get_status(id, cmd_channels).await,
         "governance.list_leases" => handle_list_leases(id, cmd_channels).await,
         "governance.get_risk_state" => handle_get_risk_state(id, cmd_channels).await,
-        "stock_etf.get_lane_status"
-        | "stock_etf.get_phase0_status"
-        | "stock_etf.get_readiness"
-        | "stock_etf.get_data_foundation_status"
-        | "stock_etf.get_policy_status"
-        | "stock_etf.get_authorization_status"
-        | "stock_etf.get_account_status"
-        | "stock_etf.get_evidence_status"
-        | "stock_etf.get_universe_status"
-        | "stock_etf.get_shadow_status"
-        | "stock_etf.get_paper_status"
-        | "stock_etf.get_reconciliation_status"
-        | "stock_etf.get_scorecard_status"
-        | "stock_etf.get_launch_status"
-        | "stock_etf.get_release_packet_status"
-        | "stock_etf.get_disable_cleanup_status"
-        | "stock_etf.preview_paper_order"
-        | "stock_etf.submit_paper_order"
-        | "stock_etf.cancel_paper_order"
-        | "stock_etf.replace_paper_order"
-        | "stock_etf.import_paper_fills"
-        | "stock_etf.evaluate_shadow_signal"
-        | "stock_etf.preview_readonly_probe" => {
+        method if is_stock_etf_fixture_method(method) => {
             debug_assert_eq!(
                 method_spec(method).map(|spec| spec.slot),
                 Some(IpcSlotRequirement::None)
