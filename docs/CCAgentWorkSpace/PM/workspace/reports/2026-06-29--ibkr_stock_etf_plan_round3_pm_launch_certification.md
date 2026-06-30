@@ -189,3 +189,39 @@ Verification：
 PM 判定：checkpoint 可接受。這是純拆檔 hygiene；未新增 endpoint、未改 IPC/contract、
 未批准 IBKR contact、secret、connector runtime、paper order、DB apply、Linux runtime
 sync/restart、tiny-live/live 或 Bybit behavior change。
+
+## 2026-06-30 PM Session Checkpoint — Disable Cleanup Status
+
+PM 已在本 session 追加下一個 source-only checkpoint：
+`disable-cleanup-status` read-only surface。
+
+已完成：
+
+- Rust IPC：`stock_etf.get_disable_cleanup_status` fixture，來源為
+  `stock_etf_kill_switch_and_disable_cleanup_runbook_v1` source-ready runbook shape，
+  但 runtime posture 仍為 blocked；collector/gui/archive/DB cleanup request 全部 false。
+- Rust dispatch/registry：method 為 readonly、slot none，且不進 Bybit live-write token
+  surface；`lane_scoped_ipc_v1` 增加 `GetDisableCleanupStatus`。
+- FastAPI：authenticated/no-store
+  `GET /api/v1/stock-etf/disable-cleanup-status`，只 read IPC、fail-closed normalize，
+  並拒絕 client-supplied cleanup/launch/live state。
+- GUI：`Disable Cleanup` metric 與 `Disable / Cleanup Status` panel；render hook 拆入
+  `/static/tab-stock-etf-disable-cleanup.js`，主 Stock/ETF JS 仍低於 2000 行。
+- Contracts：`gui_lane_contract_v1` 增加 exact GET-only disable-cleanup-status
+  endpoint；blocked template 同步更新。
+
+Verification：
+
+- Python compile PASS。
+- Full Stock/ETF FastAPI/static pytest `81 passed`。
+- Node check PASS for `tab-stock-etf.js` and `tab-stock-etf-disable-cleanup.js`。
+- HTML inline parser PASS（1 inline script）。
+- GUI line caps PASS：HTML 359、main JS 1895、disable-cleanup JS 132。
+- Engine Stock/ETF cargo filter `19 passed`。
+- openclaw_types `stock_etf` filter PASS。
+
+PM 判定：checkpoint 可接受，但仍不是 launch approval。未批准 IBKR contact、secret、
+connector runtime、collector stop、GUI hide、evidence archive、DB cleanup/apply、
+paper order rehearsal/submit、fill import、evidence clock、scorecard writer、Phase 2/3/5
+start、paper-shadow launch、tiny-live、live、Linux runtime sync/restart 或 Bybit behavior
+change。

@@ -6,6 +6,7 @@ from .stock_etf_authorization_normalizers import _normalize_authorization_status
 from .stock_etf_data_foundation_normalizers import (
     _normalize_data_foundation_status,
 )
+from .stock_etf_disable_cleanup_normalizers import _normalize_disable_cleanup_status
 from .stock_etf_evidence_normalizers import _normalize_evidence_status
 from .stock_etf_paper_normalizers import _normalize_paper_status
 from .stock_etf_policy_normalizers import _normalize_policy_status

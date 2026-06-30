@@ -990,3 +990,49 @@ repo 2000 行硬上限。PM 先做純 GUI 拆檔 hygiene，再繼續新增任何
 PM 邊界不變：此 checkpoint 不新增 endpoint、不改 IPC/contract、不呼叫 IBKR、
 不讀 secret、不啟動 connector/runtime、不送 paper order、不做 DB apply、不做 Linux
 runtime sync/restart，也不改變 Bybit behavior。
+
+## 17. 2026-06-30 PM session source checkpoint：Disable Cleanup Status
+
+本 session 繼續按第三輪 PM 簽核語義推進，但仍停留在 source-only /
+display-only disable-cleanup runbook visibility。此 checkpoint 不執行 collector stop、
+GUI hide、secret absence proof、archive、DB cleanup，不啟動 Phase 5，也不授權
+paper/shadow launch。
+
+新增 checkpoint：
+
+- Rust IPC fixture 新增 `stock_etf.get_disable_cleanup_status`，輸出
+  `phase5_disable_cleanup_status_source_fixture`。它只展示
+  `stock_etf_kill_switch_and_disable_cleanup_runbook_v1` 的 source-ready runbook
+  shape 與 runtime-blocked posture；top-level collector/gui/archive/DB cleanup
+  request 均為 false。
+- Rust dispatch/method registry 將該 method 註冊為 readonly、slot none，並保持不在
+  Bybit live-write token surface；`lane_scoped_ipc_v1` 新增
+  `GetDisableCleanupStatus` display-only/non-effect-capable method。
+- FastAPI 新增 authenticated/no-store
+  `GET /api/v1/stock-etf/disable-cleanup-status`，只呼叫上述 IPC method 且 params
+  為 `{}`；normalizer fail-closes IPC unavailable、拒絕 client-supplied cleanup/
+  launch/live state，並把 contact/secret/order/destructive cleanup/DB/Bybit reuse drift
+  轉為 `contract_violation_blocked`。
+- GUI 新增 `Disable Cleanup` metric 與 `Disable / Cleanup Status` panel。為維持
+  repo 2000 行硬上限，runbook render hook 放入獨立
+  `tab-stock-etf-disable-cleanup.js`；主 `tab-stock-etf.js` 只新增 GET 與 render hook。
+- `gui_lane_contract_v1` 新增 exact GET-only
+  `/api/v1/stock-etf/disable-cleanup-status` endpoint；blocked template 同步加入
+  disabled/default 欄位。
+
+驗證：
+
+- Python route/normalizer/test `py_compile`：PASS。
+- Full Stock/ETF FastAPI/static pytest：`81 passed`。
+- `node --check tab-stock-etf.js` 與 `tab-stock-etf-disable-cleanup.js`：PASS。
+- HTML inline parser：PASS（1 inline script）。
+- GUI line caps：`tab-stock-etf.html` 359 行、`tab-stock-etf.js` 1895 行、
+  `tab-stock-etf-disable-cleanup.js` 132 行。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf`：
+  `19 passed` focused Stock/ETF tests。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types stock_etf`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 connector runtime、
+不執行 collector stop、GUI hide、archive、DB cleanup、DB apply、paper order、
+paper fill import、evidence clock、scorecard writer、Linux runtime sync/restart、
+paper-shadow launch、Phase 2/3/5 start、tiny-live、live 或任何 Bybit behavior change。

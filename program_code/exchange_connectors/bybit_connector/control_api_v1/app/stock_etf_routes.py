@@ -21,6 +21,7 @@ from .stock_etf_status_normalizers import (
     _normalize_account_status,
     _normalize_authorization_status,
     _normalize_data_foundation_status,
+    _normalize_disable_cleanup_status,
     _normalize_evidence_status,
     _normalize_lane_status,
     _normalize_launch_status,
@@ -54,6 +55,7 @@ _PAPER_STATUS_METHOD = "stock_etf.get_paper_status"
 _RECONCILIATION_STATUS_METHOD = "stock_etf.get_reconciliation_status"
 _SCORECARD_STATUS_METHOD = "stock_etf.get_scorecard_status"
 _LAUNCH_STATUS_METHOD = "stock_etf.get_launch_status"
+_DISABLE_CLEANUP_STATUS_METHOD = "stock_etf.get_disable_cleanup_status"
 
 
 def _apply_no_store_headers(response: Response) -> None:
@@ -242,6 +244,19 @@ async def _query_stock_etf_launch_status(
         raw = await ipc.call(_LAUNCH_STATUS_METHOD, params={})
     except Exception as exc:
         logger.warning("stock_etf: %s failed: %s", _LAUNCH_STATUS_METHOD, exc)
+        return ({}, f"ipc_error:{type(exc).__name__}")
+    return (raw if isinstance(raw, dict) else {}, None)
+
+
+async def _query_stock_etf_disable_cleanup_status(
+    ipc: EngineIPCClient | None,
+) -> tuple[dict[str, Any], str | None]:
+    if ipc is None:
+        return ({}, "ipc_unavailable")
+    try:
+        raw = await ipc.call(_DISABLE_CLEANUP_STATUS_METHOD, params={})
+    except Exception as exc:
+        logger.warning("stock_etf: %s failed: %s", _DISABLE_CLEANUP_STATUS_METHOD, exc)
         return ({}, f"ipc_error:{type(exc).__name__}")
     return (raw if isinstance(raw, dict) else {}, None)
 
@@ -477,6 +492,24 @@ async def get_stock_etf_launch_status(
         "data": _normalize_launch_status(raw, reason),
         "is_simulated": False,
         "data_category": "stock_etf_launch_status",
+    }
+
+
+@stock_etf_router.get("/disable-cleanup-status")
+async def get_stock_etf_disable_cleanup_status(
+    response: Response,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    """Read-only Stock/ETF disable-cleanup runbook status surface for the GUI."""
+    del actor
+    _apply_no_store_headers(response)
+    ipc = await _get_ipc()
+    raw, reason = await _query_stock_etf_disable_cleanup_status(ipc)
+    return {
+        "ok": True,
+        "data": _normalize_disable_cleanup_status(raw, reason),
+        "is_simulated": False,
+        "data_category": "stock_etf_disable_cleanup_status",
     }
 
 

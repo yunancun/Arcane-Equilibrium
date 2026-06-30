@@ -96,3 +96,30 @@ FastAPI/static `77 passed`、`git diff --check`。
 這只是維護性拆檔：沒有新增 endpoint、沒有 IBKR contact、沒有 secret、沒有
 connector runtime、沒有 paper order、沒有 DB apply、沒有 Linux runtime sync/restart，
 也沒有改動 Bybit live execution 行為。
+
+## 2026-06-30 Operator Update — Disable Cleanup Status
+
+本 session 已完成下一個 source-only checkpoint：`disable-cleanup-status`。
+
+你現在會在 Stock/ETF GUI 看到新的 `Disable Cleanup` 指標與
+`Disable / Cleanup Status` 面板；後端是
+`GET /api/v1/stock-etf/disable-cleanup-status`，Rust IPC 是
+`stock_etf.get_disable_cleanup_status`。
+
+這只是顯示 kill-switch / disable-cleanup runbook 的 source-ready shape 與
+runtime-blocked 狀態；不是 collector stop、不是 GUI hide、不是 secret absence
+proof 執行、不是 archive、不是 DB cleanup、不是 Phase 5 start，也不是
+paper/shadow launch。
+
+Verification 已過：
+
+- Full Stock/ETF FastAPI/static：`81 passed`
+- Engine Stock/ETF：`19 passed`
+- Node check：`tab-stock-etf.js` + `tab-stock-etf-disable-cleanup.js` PASS
+- HTML inline parser：PASS
+- GUI line caps：359 / 1895 / 132
+
+邊界不變：沒有 IBKR contact、沒有 secret access/creation、沒有 connector runtime、
+沒有 paper order、沒有 fill import、沒有 evidence clock、沒有 scorecard writer、
+沒有 DB apply/cleanup、沒有 Linux runtime sync/restart，也沒有改動 Bybit live
+execution 行為。

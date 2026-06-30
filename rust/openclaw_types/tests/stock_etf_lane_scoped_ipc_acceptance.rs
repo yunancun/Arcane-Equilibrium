@@ -70,7 +70,7 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
     assert!(!contract.ibkr_contact_performed);
     assert!(!contract.connector_runtime_started);
     assert!(!contract.secret_content_serialized);
-    assert_eq!(contract.commands.len(), 16);
+    assert_eq!(contract.commands.len(), 17);
 
     let submit = contract
         .commands
@@ -203,6 +203,22 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
     assert_eq!(launch_status.authority_scope, AuthorityScope::DisplayOnly);
     assert!(!launch_status.effect_capable);
     assert!(!launch_status.rust_owned);
+
+    let disable_cleanup_status = contract
+        .commands
+        .iter()
+        .find(|command| command.method == StockEtfLaneScopedIpcMethod::GetDisableCleanupStatus)
+        .expect("disable-cleanup-status method exists");
+    assert_eq!(
+        disable_cleanup_status.operation,
+        BrokerOperation::HealthRead
+    );
+    assert_eq!(
+        disable_cleanup_status.authority_scope,
+        AuthorityScope::DisplayOnly
+    );
+    assert!(!disable_cleanup_status.effect_capable);
+    assert!(!disable_cleanup_status.rust_owned);
 
     let shadow = contract
         .commands

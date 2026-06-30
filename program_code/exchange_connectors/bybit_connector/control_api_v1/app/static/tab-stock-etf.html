@@ -122,6 +122,11 @@
       <div class="se-metric-sub" id="se-launch-sub"></div>
     </div>
     <div class="se-metric">
+      <div class="se-metric-label">Disable Cleanup</div>
+      <div class="se-metric-value" id="se-disable-cleanup-state">--</div>
+      <div class="se-metric-sub" id="se-disable-cleanup-sub"></div>
+    </div>
+    <div class="se-metric">
       <div class="se-metric-label">IBKR Live</div>
       <div class="se-metric-value" id="se-live-state">--</div>
       <div class="se-metric-sub">live/tiny-live remain denied</div>
@@ -324,6 +329,18 @@
       </table>
     </section>
 
+    <section class="se-panel" id="se-disable-cleanup-panel">
+      <div class="se-panel-title">
+        <span>Disable / Cleanup Status</span>
+        <span id="se-disable-cleanup-status" class="oc-chip oc-chip-neutral">--</span>
+      </div>
+      <table class="se-kv">
+        <tbody id="se-disable-cleanup-body">
+          <tr><td colspan="2" class="se-muted">Loading...</td></tr>
+        </tbody>
+      </table>
+    </section>
+
     <section class="se-panel" id="se-denial-panel">
       <div class="se-panel-title">
         <span>Denied Surface</span>
@@ -336,6 +353,7 @@
   </div>
 </div>
 
+<script src="/static/tab-stock-etf-disable-cleanup.js?v=20260630.disable-cleanup"></script>
 <script src="/static/tab-stock-etf.js?v=20260630.split"></script>
 </body>
 </html>

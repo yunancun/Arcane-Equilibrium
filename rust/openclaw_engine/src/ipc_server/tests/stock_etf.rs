@@ -1407,6 +1407,98 @@ async fn stock_etf_launch_status_is_blocked_source_fixture_without_side_effects(
     assert_eq!(result["phase2"]["connector_enabled"], false);
 }
 
+#[tokio::test]
+async fn stock_etf_disable_cleanup_status_is_display_only_source_fixture() {
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let req = r#"{"jsonrpc":"2.0","method":"stock_etf.get_disable_cleanup_status","params":{},"id":4817}"#;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
+    )
+    .await;
+
+    assert!(resp.error.is_none());
+    let result = resp
+        .result
+        .expect("stock_etf disable cleanup status result");
+    assert_eq!(
+        result["phase"],
+        "phase5_disable_cleanup_status_source_fixture"
+    );
+    assert_eq!(result["asset_lane"], "stock_etf_cash");
+    assert_eq!(result["broker"], "ibkr");
+    assert_eq!(result["environment"], "paper_shadow");
+    assert_eq!(
+        result["disable_cleanup_status_state"],
+        "source_ready_runtime_blocked"
+    );
+    assert_eq!(result["phase3_started"], false);
+    assert_eq!(result["phase5_started"], false);
+    assert_eq!(result["collector_stop_requested"], false);
+    assert_eq!(result["gui_disable_requested"], false);
+    assert_eq!(result["evidence_archive_requested"], false);
+    assert_eq!(result["db_cleanup_requested"], false);
+
+    let runbook = &result["runbook"];
+    assert_eq!(
+        runbook["expected_runbook_id"],
+        "stock_etf_kill_switch_and_disable_cleanup_runbook_v1"
+    );
+    assert_eq!(
+        runbook["runbook_id"],
+        "stock_etf_kill_switch_and_disable_cleanup_runbook_v1"
+    );
+    assert_eq!(runbook["source_version"], 1);
+    assert_eq!(runbook["accepted"], true);
+    assert_eq!(runbook["blockers"].as_array().unwrap().len(), 0);
+    assert_eq!(runbook["source_artifact_hash_present"], true);
+    assert_eq!(runbook["bybit_live_execution_unchanged"], true);
+    assert_eq!(runbook["env_flag_count"], 4);
+    assert_eq!(runbook["proof_count"], 7);
+    assert_eq!(runbook["env_flags"].as_array().unwrap().len(), 4);
+    assert_eq!(runbook["proofs"].as_array().unwrap().len(), 7);
+    assert_eq!(runbook["ibkr_contact_performed"], false);
+    assert_eq!(runbook["connector_runtime_started"], false);
+    assert_eq!(runbook["paper_order_routed"], false);
+    assert_eq!(runbook["secret_slot_created"], false);
+    assert_eq!(runbook["secret_content_serialized"], false);
+    assert_eq!(runbook["destructive_db_cleanup_requested"], false);
+    assert_eq!(runbook["db_delete_or_truncate_allowed"], false);
+    assert_eq!(runbook["paper_shadow_launch_authorized"], false);
+    assert_eq!(runbook["tiny_live_authorized"], false);
+    assert_eq!(runbook["live_authorized"], false);
+
+    assert_eq!(result["paper_shadow_launch_authorized"], false);
+    assert_eq!(result["tiny_live_or_live_authorized"], false);
+    assert_eq!(result["connector_runtime_started"], false);
+    assert_eq!(result["scorecard_writer_started"], false);
+    assert_eq!(result["db_apply_performed"], false);
+    assert_eq!(result["evidence_clock_started"], false);
+    assert_eq!(result["ibkr_call_performed"], false);
+    assert_eq!(result["secret_slot_touched"], false);
+    assert_eq!(result["order_routed"], false);
+    assert_eq!(result["bybit_ipc_reused"], false);
+    assert_eq!(result["phase2"]["first_ibkr_contact_allowed"], false);
+    assert_eq!(result["phase2"]["connector_enabled"], false);
+}
+
 fn json_array_contains(value: &serde_json::Value, expected: &str) -> bool {
     value
         .as_array()

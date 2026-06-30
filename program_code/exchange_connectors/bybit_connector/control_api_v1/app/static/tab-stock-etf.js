@@ -15,7 +15,7 @@ const LAUNCH_STATUS_ENDPOINT = '/api/v1/stock-etf/launch-status';
 function toneFor(value) {
   const s = String(value || '').toLowerCase();
   if (s === 'paper_ready' || s === 'readonly_ready' || s === 'source_ready' || s === 'pass' || s === 'false' || s === 'source') return 'good';
-  if (s === 'phase2_blocked' || s === 'degraded' || s === 'shadow_only' || s === 'blocked' || s === 'not_started') return 'warn';
+  if (s === 'phase2_blocked' || s === 'degraded' || s === 'shadow_only' || s === 'blocked' || s === 'not_started' || s === 'source_ready_runtime_blocked') return 'warn';
   if (s === 'contract_violation_blocked' || s === 'true' || s === 'denied') return 'bad';
   return 'neutral';
 }
@@ -815,6 +815,9 @@ function renderFallback() {
   renderReconciliationStatus(reconciliationFallback('api_unavailable'));
   renderScorecardStatus(scorecardFallback('api_unavailable'));
   renderLaunchStatus(launchFallback('api_unavailable'));
+  if (window.renderDisableCleanupStatus && window.disableCleanupFallback) {
+    window.renderDisableCleanupStatus(window.disableCleanupFallback('api_unavailable'));
+  }
 }
 
 function renderReadiness(data, laneStatus) {
@@ -1827,6 +1830,7 @@ async function loadReadiness() {
     reconciliationPayload,
     scorecardPayload,
     launchPayload,
+    disableCleanupPayload,
   ] = await Promise.all([
     ocApi(LANE_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(READINESS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
@@ -1841,6 +1845,7 @@ async function loadReadiness() {
     ocApi(RECONCILIATION_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(SCORECARD_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(LAUNCH_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
+    ocApi(window.STOCK_ETF_DISABLE_CLEANUP_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
   ]);
   if (!readinessPayload || !readinessPayload.data) {
     renderFallback();
@@ -1878,6 +1883,13 @@ async function loadReadiness() {
       ? launchPayload.data
       : launchFallback('api_unavailable')
   );
+  if (window.renderDisableCleanupStatus && window.disableCleanupFallback) {
+    window.renderDisableCleanupStatus(
+      disableCleanupPayload && disableCleanupPayload.data
+        ? disableCleanupPayload.data
+        : window.disableCleanupFallback('api_unavailable')
+    );
+  }
 }
 
 waitForServerUp(loadReadiness);
