@@ -2750,3 +2750,9 @@
 - PM wired Stock/ETF engine IPC readiness to expose `phase2.api_allowlist` with exact `non_bybit_api_allowlist_v1` id/version, accepted verdict, action counts, no-contact/no-secret flags, and Bybit-live protected proof.
 - The external-surface gate remains blocked because there is still no immutable PASS artifact, no real secret/topology evidence, and no first-contact authorization; legacy `submit_paper_order` behavior remains on the existing channel path.
 - Verification passed: engine IPC focused `4 passed`; engine `stock_etf` filtered `5 passed`; linked openclaw_types `18 passed`; `cargo check --manifest-path rust/Cargo.toml --workspace` passed. This grants no IBKR contact, connector runtime, secret access, paper order, fill import, DB apply, GUI authority, Phase 2 start, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF FastAPI Readiness Allowlist Gate
+
+- PM made the Stock/ETF FastAPI readiness route normalize `phase2.api_allowlist` into top-level `api_allowlist` and fail closed on missing/mismatched `non_bybit_api_allowlist_v1` id, source version, action counts, contact/secret flags, or missing Bybit-live protection proof.
+- IPC unavailable remains the existing degraded/fail-closed state rather than being reclassified as an IPC payload contract violation; integer contract fields reject boolean values.
+- Verification passed: `python3 -m py_compile` for the route/test files and focused FastAPI/no-write pytest `12 passed`. This grants no IBKR contact, connector runtime, secret access, paper order, fill import, DB apply, GUI authority, Phase 2 start, tiny-live, live, or Bybit behavior change.
