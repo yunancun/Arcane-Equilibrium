@@ -15,6 +15,7 @@ pub const STOCK_ETF_GUI_LANE_STATUS_ENDPOINT: &str = "/api/v1/stock-etf/lane-sta
 pub const STOCK_ETF_GUI_EVIDENCE_STATUS_ENDPOINT: &str = "/api/v1/stock-etf/evidence-status";
 pub const STOCK_ETF_GUI_UNIVERSE_STATUS_ENDPOINT: &str = "/api/v1/stock-etf/universe-status";
 pub const STOCK_ETF_GUI_SHADOW_STATUS_ENDPOINT: &str = "/api/v1/stock-etf/shadow-status";
+pub const STOCK_ETF_GUI_PAPER_STATUS_ENDPOINT: &str = "/api/v1/stock-etf/paper-status";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StockEtfGuiLaneContractV1 {
@@ -32,6 +33,8 @@ pub struct StockEtfGuiLaneContractV1 {
     pub universe_status_endpoint_get_only: bool,
     pub shadow_status_endpoint: String,
     pub shadow_status_endpoint_get_only: bool,
+    pub paper_status_endpoint: String,
+    pub paper_status_endpoint_get_only: bool,
     pub display_only: bool,
     pub client_lane_state_untrusted: bool,
     pub local_storage_authority_denied: bool,
@@ -75,6 +78,8 @@ impl Default for StockEtfGuiLaneContractV1 {
             universe_status_endpoint_get_only: false,
             shadow_status_endpoint: String::new(),
             shadow_status_endpoint_get_only: false,
+            paper_status_endpoint: String::new(),
+            paper_status_endpoint_get_only: false,
             display_only: false,
             client_lane_state_untrusted: false,
             local_storage_authority_denied: false,
@@ -120,6 +125,8 @@ impl StockEtfGuiLaneContractV1 {
             universe_status_endpoint_get_only: true,
             shadow_status_endpoint: STOCK_ETF_GUI_SHADOW_STATUS_ENDPOINT.to_string(),
             shadow_status_endpoint_get_only: true,
+            paper_status_endpoint: STOCK_ETF_GUI_PAPER_STATUS_ENDPOINT.to_string(),
+            paper_status_endpoint_get_only: true,
             display_only: true,
             client_lane_state_untrusted: true,
             local_storage_authority_denied: true,
@@ -199,6 +206,12 @@ impl StockEtfGuiLaneContractV1 {
         }
         if !self.shadow_status_endpoint_get_only {
             blockers.push(Blocker::ShadowStatusEndpointNotGetOnly);
+        }
+        if self.paper_status_endpoint != STOCK_ETF_GUI_PAPER_STATUS_ENDPOINT {
+            blockers.push(Blocker::PaperStatusEndpointMismatch);
+        }
+        if !self.paper_status_endpoint_get_only {
+            blockers.push(Blocker::PaperStatusEndpointNotGetOnly);
         }
         if !self.display_only {
             blockers.push(Blocker::DisplayOnlyMissing);
@@ -323,6 +336,8 @@ pub enum StockEtfGuiLaneBlocker {
     UniverseStatusEndpointNotGetOnly,
     ShadowStatusEndpointMismatch,
     ShadowStatusEndpointNotGetOnly,
+    PaperStatusEndpointMismatch,
+    PaperStatusEndpointNotGetOnly,
     DisplayOnlyMissing,
     ClientLaneStateTrusted,
     LocalStorageAuthorityNotDenied,

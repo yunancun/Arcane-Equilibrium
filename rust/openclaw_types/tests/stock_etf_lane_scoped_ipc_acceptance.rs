@@ -70,7 +70,7 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
     assert!(!contract.ibkr_contact_performed);
     assert!(!contract.connector_runtime_started);
     assert!(!contract.secret_content_serialized);
-    assert_eq!(contract.commands.len(), 8);
+    assert_eq!(contract.commands.len(), 9);
 
     let submit = contract
         .commands
@@ -108,6 +108,16 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
     assert!(preview
         .required_gates
         .contains(&STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID.to_string()));
+
+    let paper_status = contract
+        .commands
+        .iter()
+        .find(|command| command.method == StockEtfLaneScopedIpcMethod::GetPaperStatus)
+        .expect("paper-status method exists");
+    assert_eq!(paper_status.operation, BrokerOperation::HealthRead);
+    assert_eq!(paper_status.authority_scope, AuthorityScope::DisplayOnly);
+    assert!(!paper_status.effect_capable);
+    assert!(!paper_status.rust_owned);
 
     let shadow = contract
         .commands

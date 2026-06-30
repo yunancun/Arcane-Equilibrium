@@ -30,6 +30,7 @@ _READINESS_METHOD = "stock_etf.get_readiness"
 _EVIDENCE_STATUS_METHOD = "stock_etf.get_evidence_status"
 _UNIVERSE_STATUS_METHOD = "stock_etf.get_universe_status"
 _SHADOW_STATUS_METHOD = "stock_etf.get_shadow_status"
+_PAPER_STATUS_METHOD = "stock_etf.get_paper_status"
 _API_ALLOWLIST_CONTRACT_ID = "non_bybit_api_allowlist_v1"
 _API_ALLOWLIST_SOURCE_VERSION = 1
 _API_ALLOWLIST_READ_ACTION_COUNT = 10
@@ -40,6 +41,8 @@ _EVIDENCE_CLOCK_CONTRACT_ID = "stock_etf_evidence_clock_v1"
 _PIT_UNIVERSE_CONTRACT_ID = "stock_etf_pit_universe_contract_v1"
 _SHADOW_FILL_MODEL_CONTRACT_ID = "stock_shadow_fill_model_v1"
 _STRATEGY_HYPOTHESIS_CONTRACT_ID = "stock_etf_strategy_hypothesis_contract_v1"
+_PAPER_LIFECYCLE_CONTRACT_ID = "ibkr_paper_order_lifecycle_v1"
+_BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID = "broker_lifecycle_event_log_v1"
 _DENIED_OPERATIONS: tuple[str, ...] = (
     "ibkr_live_order_submit",
     "ibkr_tiny_live",
@@ -253,6 +256,46 @@ def _strategy_hypothesis_fail_closed(reason: str) -> dict[str, Any]:
         "ibkr_live_denied": True,
         "ibkr_contact_performed": False,
         "secret_content_serialized": False,
+    }
+
+
+def _paper_lifecycle_event_fail_closed(reason: str) -> dict[str, Any]:
+    return {
+        "expected_lifecycle_contract_id": _PAPER_LIFECYCLE_CONTRACT_ID,
+        "lifecycle_contract_id": "",
+        "expected_event_log_contract_id": _BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
+        "event_log_contract_id": "",
+        "source_version": 0,
+        "accepted": False,
+        "blockers": [reason],
+        "operation": "paper_order_submit",
+        "previous_state": "local_intent_created",
+        "next_state": "local_intent_created",
+        "allowed": False,
+        "denial_reason": "",
+        "event_id_present": False,
+        "event_time_ms": 0,
+        "order_local_id_present": False,
+        "idempotency_key_present": False,
+        "broker_order_id_present": False,
+        "execution_id_present": False,
+        "commission_report_id_present": False,
+        "reconciliation_run_id_present": False,
+        "raw_artifact_hash_present": False,
+        "redacted_summary_hash_present": False,
+    }
+
+
+def _paper_reconstructability_fail_closed() -> dict[str, Any]:
+    return {
+        "append_only_event_ready": False,
+        "broker_order_id_present": False,
+        "execution_id_present": False,
+        "commission_report_id_present": False,
+        "raw_artifact_hash_present": False,
+        "redacted_summary_hash_present": False,
+        "restart_recovery_required": False,
+        "manual_review_required": False,
     }
 
 
@@ -547,6 +590,69 @@ def _normalize_strategy_hypothesis(value: Any, reason: str | None) -> dict[str, 
         "ibkr_live_denied": source.get("ibkr_live_denied") is not False,
         "ibkr_contact_performed": _as_bool(source.get("ibkr_contact_performed")),
         "secret_content_serialized": _as_bool(source.get("secret_content_serialized")),
+    }
+
+
+def _normalize_paper_lifecycle_event(value: Any, reason: str | None) -> dict[str, Any]:
+    fallback = _paper_lifecycle_event_fail_closed(reason or "missing_lifecycle_event")
+    source = _as_dict(value)
+    if not source:
+        return fallback
+    return {
+        "expected_lifecycle_contract_id": _as_str(
+            source.get("expected_lifecycle_contract_id"),
+            _PAPER_LIFECYCLE_CONTRACT_ID,
+        ),
+        "lifecycle_contract_id": _as_str(source.get("lifecycle_contract_id"), ""),
+        "expected_event_log_contract_id": _as_str(
+            source.get("expected_event_log_contract_id"),
+            _BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
+        ),
+        "event_log_contract_id": _as_str(source.get("event_log_contract_id"), ""),
+        "source_version": _as_int(source.get("source_version")),
+        "accepted": _as_bool(source.get("accepted")),
+        "blockers": [str(item) for item in _as_list(source.get("blockers"))],
+        "operation": _as_str(source.get("operation"), "paper_order_submit"),
+        "previous_state": _as_str(source.get("previous_state"), "local_intent_created"),
+        "next_state": _as_str(source.get("next_state"), "local_intent_created"),
+        "allowed": _as_bool(source.get("allowed")),
+        "denial_reason": _as_str(source.get("denial_reason"), ""),
+        "event_id_present": _as_bool(source.get("event_id_present")),
+        "event_time_ms": _as_int(source.get("event_time_ms")),
+        "order_local_id_present": _as_bool(source.get("order_local_id_present")),
+        "idempotency_key_present": _as_bool(source.get("idempotency_key_present")),
+        "broker_order_id_present": _as_bool(source.get("broker_order_id_present")),
+        "execution_id_present": _as_bool(source.get("execution_id_present")),
+        "commission_report_id_present": _as_bool(
+            source.get("commission_report_id_present")
+        ),
+        "reconciliation_run_id_present": _as_bool(
+            source.get("reconciliation_run_id_present")
+        ),
+        "raw_artifact_hash_present": _as_bool(source.get("raw_artifact_hash_present")),
+        "redacted_summary_hash_present": _as_bool(
+            source.get("redacted_summary_hash_present")
+        ),
+    }
+
+
+def _normalize_paper_reconstructability(value: Any) -> dict[str, Any]:
+    source = _as_dict(value)
+    if not source:
+        return _paper_reconstructability_fail_closed()
+    return {
+        "append_only_event_ready": _as_bool(source.get("append_only_event_ready")),
+        "broker_order_id_present": _as_bool(source.get("broker_order_id_present")),
+        "execution_id_present": _as_bool(source.get("execution_id_present")),
+        "commission_report_id_present": _as_bool(
+            source.get("commission_report_id_present")
+        ),
+        "raw_artifact_hash_present": _as_bool(source.get("raw_artifact_hash_present")),
+        "redacted_summary_hash_present": _as_bool(
+            source.get("redacted_summary_hash_present")
+        ),
+        "restart_recovery_required": _as_bool(source.get("restart_recovery_required")),
+        "manual_review_required": _as_bool(source.get("manual_review_required")),
     }
 
 
@@ -1100,6 +1206,156 @@ def _normalize_shadow_status(raw: Any, reason: str | None) -> dict[str, Any]:
     }
 
 
+def _paper_status_contract_violations(
+    source: dict[str, Any],
+    phase2: dict[str, Any],
+    lifecycle_event: dict[str, Any],
+    reconstructability: dict[str, Any],
+    reason: str | None,
+) -> list[str]:
+    violations = [
+        field for field in _SAFETY_FALSE_FIELDS if _as_bool(source.get(field))
+    ]
+    if _as_bool(source.get("db_apply_performed")):
+        violations.append("db_apply_performed")
+    if _as_str(source.get("asset_lane"), "stock_etf_cash") != "stock_etf_cash":
+        violations.append("asset_lane_mismatch")
+    if _as_str(source.get("broker"), "ibkr") != "ibkr":
+        violations.append("broker_mismatch")
+    if _as_str(source.get("environment"), "paper") != "paper":
+        violations.append("environment_mismatch")
+    for key in (
+        "phase2_started",
+        "paper_lifecycle_started",
+        "paper_order_submitted",
+        "paper_fill_imported",
+        "paper_reconciliation_started",
+        "paper_account_snapshot_present",
+        "broker_paper_attestation_present",
+    ):
+        if _as_bool(source.get(key)):
+            violations.append(key)
+    if (
+        _as_str(lifecycle_event.get("expected_lifecycle_contract_id"), "")
+        != _PAPER_LIFECYCLE_CONTRACT_ID
+    ):
+        violations.append("paper_lifecycle_expected_contract_id_mismatch")
+    if (
+        _as_str(lifecycle_event.get("expected_event_log_contract_id"), "")
+        != _BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID
+    ):
+        violations.append("paper_event_log_expected_contract_id_mismatch")
+    if _as_bool(lifecycle_event.get("accepted")):
+        violations.append("paper_lifecycle_event_accepted_before_gate")
+    if _as_bool(lifecycle_event.get("allowed")):
+        violations.append("paper_lifecycle_event_allowed_before_gate")
+    for key in (
+        "event_id_present",
+        "order_local_id_present",
+        "idempotency_key_present",
+        "broker_order_id_present",
+        "execution_id_present",
+        "commission_report_id_present",
+        "reconciliation_run_id_present",
+        "raw_artifact_hash_present",
+        "redacted_summary_hash_present",
+    ):
+        if _as_bool(lifecycle_event.get(key)):
+            violations.append(f"paper_lifecycle_{key}")
+    for key in (
+        "append_only_event_ready",
+        "broker_order_id_present",
+        "execution_id_present",
+        "commission_report_id_present",
+        "raw_artifact_hash_present",
+        "redacted_summary_hash_present",
+        "restart_recovery_required",
+        "manual_review_required",
+    ):
+        if _as_bool(reconstructability.get(key)):
+            violations.append(f"paper_reconstructability_{key}")
+    if reason is None:
+        api_allowlist = _normalize_api_allowlist(phase2.get("api_allowlist"))
+        violations.extend(_api_allowlist_contract_violations(api_allowlist))
+    return violations
+
+
+def _normalize_paper_status(raw: Any, reason: str | None) -> dict[str, Any]:
+    source = _as_dict(raw)
+    phase2 = _as_dict(source.get("phase2")) or _phase2_fail_closed()
+    external_surface_gate = _as_dict(phase2.get("external_surface_gate"))
+    api_allowlist = _normalize_api_allowlist(phase2.get("api_allowlist"))
+    lifecycle_event = _normalize_paper_lifecycle_event(
+        source.get("lifecycle_event"),
+        reason,
+    )
+    reconstructability = _normalize_paper_reconstructability(
+        source.get("reconstructability")
+    )
+
+    contract_violations = _paper_status_contract_violations(
+        source,
+        phase2,
+        lifecycle_event,
+        reconstructability,
+        reason,
+    )
+    blockers = [
+        str(item) for item in _as_list(external_surface_gate.get("blockers"))
+    ]
+    if reason is not None and reason not in blockers:
+        blockers.append(reason)
+
+    status_state = "blocked"
+    if contract_violations:
+        status_state = "contract_violation_blocked"
+    elif reason is not None:
+        status_state = "degraded"
+
+    first_contact_allowed = _as_bool(phase2.get("first_ibkr_contact_allowed"))
+    immutable_artifact = _as_bool(phase2.get("immutable_pass_artifact_present"))
+    connector_enabled = _as_bool(phase2.get("connector_enabled"))
+
+    return {
+        "api_version": "v1",
+        "asset_lane": "stock_etf_cash",
+        "broker": "ibkr",
+        "environment": "paper",
+        "gui_authority": "display_only",
+        "paper_status_state": status_state,
+        "phase": _as_str(source.get("phase"), "phase2_paper_status_source_fixture"),
+        "phase2_started": False,
+        "phase2": phase2,
+        "api_allowlist": api_allowlist,
+        "phase2_gate_status": _as_str(external_surface_gate.get("status"), "BLOCKED"),
+        "phase2_gate_blockers": blockers,
+        "first_ibkr_contact_allowed": first_contact_allowed,
+        "immutable_pass_artifact_present": immutable_artifact,
+        "connector_enabled": connector_enabled,
+        "lifecycle_event": lifecycle_event,
+        "reconstructability": reconstructability,
+        "ibkr_live_enabled": False,
+        "stock_live_disabled": True,
+        "paper_order_entry_visible": False,
+        "allowed_gui_actions": ["refresh_paper_status"],
+        "denied_operations": list(_DENIED_OPERATIONS),
+        "paper_lifecycle_started": False,
+        "paper_order_submitted": False,
+        "paper_fill_imported": False,
+        "paper_reconciliation_started": False,
+        "paper_account_snapshot_present": False,
+        "broker_paper_attestation_present": False,
+        "ibkr_call_performed": False,
+        "secret_slot_touched": False,
+        "order_routed": False,
+        "bybit_ipc_reused": False,
+        "db_apply_performed": False,
+        "contract_violations": contract_violations,
+        "degraded": reason is not None or bool(contract_violations),
+        "reason": reason,
+    }
+
+
 async def _query_stock_etf_lane_status(
     ipc: EngineIPCClient | None,
 ) -> tuple[dict[str, Any], str | None]:
@@ -1161,6 +1417,19 @@ async def _query_stock_etf_shadow_status(
         raw = await ipc.call(_SHADOW_STATUS_METHOD, params={})
     except Exception as exc:
         logger.warning("stock_etf: %s failed: %s", _SHADOW_STATUS_METHOD, exc)
+        return ({}, f"ipc_error:{type(exc).__name__}")
+    return (raw if isinstance(raw, dict) else {}, None)
+
+
+async def _query_stock_etf_paper_status(
+    ipc: EngineIPCClient | None,
+) -> tuple[dict[str, Any], str | None]:
+    if ipc is None:
+        return ({}, "ipc_unavailable")
+    try:
+        raw = await ipc.call(_PAPER_STATUS_METHOD, params={})
+    except Exception as exc:
+        logger.warning("stock_etf: %s failed: %s", _PAPER_STATUS_METHOD, exc)
         return ({}, f"ipc_error:{type(exc).__name__}")
     return (raw if isinstance(raw, dict) else {}, None)
 
@@ -1252,6 +1521,24 @@ async def get_stock_etf_shadow_status(
         "data": _normalize_shadow_status(raw, reason),
         "is_simulated": False,
         "data_category": "stock_etf_shadow_status",
+    }
+
+
+@stock_etf_router.get("/paper-status")
+async def get_stock_etf_paper_status(
+    response: Response,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    """Read-only Stock/ETF paper-lifecycle status surface for the GUI."""
+    del actor
+    _apply_no_store_headers(response)
+    ipc = await _get_ipc()
+    raw, reason = await _query_stock_etf_paper_status(ipc)
+    return {
+        "ok": True,
+        "data": _normalize_paper_status(raw, reason),
+        "is_simulated": False,
+        "data_category": "stock_etf_paper_status",
     }
 
 

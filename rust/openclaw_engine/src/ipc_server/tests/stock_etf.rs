@@ -546,6 +546,106 @@ async fn stock_etf_shadow_status_is_blocked_source_fixture_without_side_effects(
     assert_eq!(result["phase2"]["connector_enabled"], false);
 }
 
+#[tokio::test]
+async fn stock_etf_paper_status_is_blocked_source_fixture_without_side_effects() {
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let req = r#"{"jsonrpc":"2.0","method":"stock_etf.get_paper_status","params":{},"id":4809}"#;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
+    )
+    .await;
+
+    assert!(resp.error.is_none());
+    let result = resp.result.expect("stock_etf paper status result");
+    assert_eq!(result["phase"], "phase2_paper_status_source_fixture");
+    assert_eq!(result["asset_lane"], "stock_etf_cash");
+    assert_eq!(result["broker"], "ibkr");
+    assert_eq!(result["environment"], "paper");
+    assert_eq!(result["paper_status_state"], "blocked");
+    assert_eq!(result["phase2_started"], false);
+    assert_eq!(result["paper_lifecycle_started"], false);
+    assert_eq!(result["paper_order_submitted"], false);
+    assert_eq!(result["paper_fill_imported"], false);
+    assert_eq!(result["paper_reconciliation_started"], false);
+    assert_eq!(result["paper_account_snapshot_present"], false);
+    assert_eq!(result["broker_paper_attestation_present"], false);
+    assert_eq!(result["ibkr_call_performed"], false);
+    assert_eq!(result["secret_slot_touched"], false);
+    assert_eq!(result["order_routed"], false);
+    assert_eq!(result["bybit_ipc_reused"], false);
+    assert_eq!(result["db_apply_performed"], false);
+
+    let lifecycle = &result["lifecycle_event"];
+    assert_eq!(
+        lifecycle["expected_lifecycle_contract_id"],
+        "ibkr_paper_order_lifecycle_v1"
+    );
+    assert_eq!(lifecycle["lifecycle_contract_id"], "");
+    assert_eq!(
+        lifecycle["expected_event_log_contract_id"],
+        "broker_lifecycle_event_log_v1"
+    );
+    assert_eq!(lifecycle["event_log_contract_id"], "");
+    assert_eq!(lifecycle["source_version"], 0);
+    assert_eq!(lifecycle["accepted"], false);
+    assert!(json_array_contains(
+        &lifecycle["blockers"],
+        "lifecycle_contract_id_mismatch"
+    ));
+    assert!(json_array_contains(
+        &lifecycle["blockers"],
+        "event_log_contract_id_mismatch"
+    ));
+    assert!(json_array_contains(
+        &lifecycle["blockers"],
+        "source_version_mismatch"
+    ));
+    assert_eq!(lifecycle["operation"], "paper_order_submit");
+    assert_eq!(lifecycle["previous_state"], "LOCAL_INTENT_CREATED");
+    assert_eq!(lifecycle["next_state"], "LOCAL_INTENT_CREATED");
+    assert_eq!(lifecycle["allowed"], false);
+    assert_eq!(lifecycle["event_id_present"], false);
+    assert_eq!(lifecycle["order_local_id_present"], false);
+    assert_eq!(lifecycle["idempotency_key_present"], false);
+    assert_eq!(lifecycle["broker_order_id_present"], false);
+    assert_eq!(lifecycle["execution_id_present"], false);
+    assert_eq!(lifecycle["commission_report_id_present"], false);
+    assert_eq!(lifecycle["reconciliation_run_id_present"], false);
+    assert_eq!(lifecycle["raw_artifact_hash_present"], false);
+    assert_eq!(lifecycle["redacted_summary_hash_present"], false);
+
+    let reconstructability = &result["reconstructability"];
+    assert_eq!(reconstructability["append_only_event_ready"], false);
+    assert_eq!(reconstructability["broker_order_id_present"], false);
+    assert_eq!(reconstructability["execution_id_present"], false);
+    assert_eq!(reconstructability["commission_report_id_present"], false);
+    assert_eq!(reconstructability["raw_artifact_hash_present"], false);
+    assert_eq!(reconstructability["redacted_summary_hash_present"], false);
+    assert_eq!(reconstructability["restart_recovery_required"], false);
+    assert_eq!(reconstructability["manual_review_required"], false);
+
+    assert_eq!(result["phase2"]["first_ibkr_contact_allowed"], false);
+    assert_eq!(result["phase2"]["connector_enabled"], false);
+}
+
 fn json_array_contains(value: &serde_json::Value, expected: &str) -> bool {
     value
         .as_array()
