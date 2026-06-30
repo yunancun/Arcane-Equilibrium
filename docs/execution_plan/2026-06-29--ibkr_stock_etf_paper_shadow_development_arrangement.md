@@ -2111,7 +2111,7 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 
 新增 checkpoint：
 
-- 主計畫 PM session checkpoint 現在從 14 到 45 連續遞增，無重複編號。
+- 主計畫 PM session checkpoint 現在從 14 到 46 連續遞增，無重複編號。
 - 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
   lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
   connector skeleton / readonly-probe / broker read gate / policy display / operation
@@ -2226,6 +2226,39 @@ Stock/ETF GET endpoint set 與
   `11 passed`。
 - `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
   `96 passed`。
+- `python3 -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
+  `2 passed`。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 46. 2026-06-30 PM session source checkpoint：GUI Static Endpoint Template Consistency Guard
+
+本 checkpoint 補上 checkpoint 45 的 static GUI 端一致性 guard。前一個 checkpoint
+已要求 FastAPI OpenAPI Stock/ETF GET endpoint set 等於 GUI lane contract template；
+這次要求 `tab-stock-etf*` static GUI bundle 中出現的 Stock/ETF API endpoint set
+也必須等於同一 template，避免未來 GUI source 自行增刪 endpoint 而沒有同步 source
+contract。
+
+已完成：
+
+- 新增 `test_stock_etf_static_gui_endpoint_set_matches_gui_lane_contract_template`。
+- 測試掃描 static GUI bundle 的 `/api/v1/stock-etf...` endpoint 字串。
+- 掃描結果必須精確等於
+  `settings/broker/stock_etf_gui_lane_contract.template.toml` 的 `*_endpoint` set。
+- 本 guard 不新增 endpoint、不改 route handler、不改 GUI runtime，只防 static
+  GUI/template drift 與 accidental extra Stock/ETF API surface。
+
+驗證：
+
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_python_no_write_static_guard.py`：
+  `5 passed`。
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  `97 passed`。
 - `python3 -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
   `2 passed`。
 - `git diff --check`：PASS。
