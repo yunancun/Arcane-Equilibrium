@@ -14,3 +14,4 @@ from .stock_etf_scorecard_normalizers import _normalize_scorecard_status
 from .stock_etf_shadow_normalizers import _normalize_shadow_status
 from .stock_etf_status_common import _NO_STORE_HEADERS
 from .stock_etf_universe_normalizers import _normalize_universe_status
+from .stock_etf_launch_normalizers import _normalize_launch_status

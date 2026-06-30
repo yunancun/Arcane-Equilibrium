@@ -20,6 +20,9 @@ _ACCOUNT_CASH_LEDGER_CONTRACT_ID = "broker_account_portfolio_cash_ledger_v1"
 _SESSION_ATTESTATION_CONTRACT_ID = "ibkr_session_attestation_v1"
 _PAPER_ATTESTATION_CONTRACT_ID = "ibkr_paper_attestation_v1"
 _SCORECARD_VERDICT_CONTRACT_ID = "stock_etf_scorecard_verdict_v1"
+_RELEASE_PACKET_CONTRACT_ID = "stock_etf_release_packet_v1"
+_DISABLE_CLEANUP_RUNBOOK_ID = "stock_etf_kill_switch_and_disable_cleanup_runbook_v1"
+_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID = "tiny_live_adr_eligibility_v1"
 _DENIED_OPERATIONS: tuple[str, ...] = (
     "ibkr_live_order_submit",
     "ibkr_tiny_live",
