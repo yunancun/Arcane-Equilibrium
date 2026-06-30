@@ -379,6 +379,79 @@ async fn stock_etf_evidence_status_is_blocked_source_fixture_without_side_effect
     assert_eq!(result["phase2"]["connector_enabled"], false);
 }
 
+#[tokio::test]
+async fn stock_etf_universe_status_is_blocked_source_fixture_without_side_effects() {
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let req = r#"{"jsonrpc":"2.0","method":"stock_etf.get_universe_status","params":{},"id":4807}"#;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
+    )
+    .await;
+
+    assert!(resp.error.is_none());
+    let result = resp.result.expect("stock_etf universe status result");
+    assert_eq!(result["phase"], "phase3_universe_status_source_fixture");
+    assert_eq!(result["asset_lane"], "stock_etf_cash");
+    assert_eq!(result["broker"], "ibkr");
+    assert_eq!(result["environment"], "paper");
+    assert_eq!(result["universe_status_state"], "blocked");
+    assert_eq!(result["phase3_started"], false);
+    assert_eq!(result["collector_started"], false);
+    assert_eq!(result["market_data_ingestion_started"], false);
+    assert_eq!(result["db_apply_performed"], false);
+    assert_eq!(result["ibkr_call_performed"], false);
+    assert_eq!(result["secret_slot_touched"], false);
+    assert_eq!(result["order_routed"], false);
+    assert_eq!(result["bybit_ipc_reused"], false);
+
+    let universe = &result["universe"];
+    assert_eq!(
+        universe["expected_contract_id"],
+        "stock_etf_pit_universe_contract_v1"
+    );
+    assert_eq!(universe["contract_id"], "");
+    assert_eq!(universe["source_version"], 0);
+    assert_eq!(universe["accepted"], false);
+    assert!(json_array_contains(
+        &universe["blockers"],
+        "contract_id_mismatch"
+    ));
+    assert!(json_array_contains(
+        &universe["blockers"],
+        "source_version_mismatch"
+    ));
+    assert_eq!(universe["universe_hash_present"], false);
+    assert_eq!(universe["constituent_count"], 0);
+    assert_eq!(universe["sample_constituents"].as_array().unwrap().len(), 0);
+    assert_eq!(universe["frozen_for_evidence_clock"], false);
+    assert_eq!(universe["survivorship_bias_controls_present"], false);
+    assert_eq!(universe["bybit_live_execution_unchanged"], true);
+    assert_eq!(universe["ibkr_live_denied"], true);
+    assert_eq!(universe["ibkr_contact_performed"], false);
+    assert_eq!(universe["secret_content_serialized"], false);
+
+    assert_eq!(result["phase2"]["first_ibkr_contact_allowed"], false);
+    assert_eq!(result["phase2"]["connector_enabled"], false);
+}
+
 fn json_array_contains(value: &serde_json::Value, expected: &str) -> bool {
     value
         .as_array()

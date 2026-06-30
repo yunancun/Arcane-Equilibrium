@@ -91,6 +91,11 @@
       <div class="se-metric-value" id="se-evidence-state">--</div>
       <div class="se-metric-sub" id="se-evidence-sub"></div>
     </div>
+    <div class="se-metric">
+      <div class="se-metric-label">Universe</div>
+      <div class="se-metric-value" id="se-universe-state">--</div>
+      <div class="se-metric-sub" id="se-universe-sub"></div>
+    </div>
   </div>
 
   <div class="se-grid">
@@ -154,6 +159,18 @@
       </table>
     </section>
 
+    <section class="se-panel" id="se-universe-panel">
+      <div class="se-panel-title">
+        <span>Universe Status</span>
+        <span id="se-universe-status" class="oc-chip oc-chip-neutral">--</span>
+      </div>
+      <table class="se-kv">
+        <tbody id="se-universe-body">
+          <tr><td colspan="2" class="se-muted">Loading...</td></tr>
+        </tbody>
+      </table>
+    </section>
+
     <section class="se-panel" id="se-denial-panel">
       <div class="se-panel-title">
         <span>Denied Surface</span>
@@ -170,10 +187,11 @@
 const LANE_STATUS_ENDPOINT = '/api/v1/stock-etf/lane-status';
 const READINESS_ENDPOINT = '/api/v1/stock-etf/readiness';
 const EVIDENCE_STATUS_ENDPOINT = '/api/v1/stock-etf/evidence-status';
+const UNIVERSE_STATUS_ENDPOINT = '/api/v1/stock-etf/universe-status';
 
 function toneFor(value) {
   const s = String(value || '').toLowerCase();
-  if (s === 'paper_ready' || s === 'readonly_ready' || s === 'pass' || s === 'false' || s === 'source') return 'good';
+  if (s === 'paper_ready' || s === 'readonly_ready' || s === 'source_ready' || s === 'pass' || s === 'false' || s === 'source') return 'good';
   if (s === 'phase2_blocked' || s === 'degraded' || s === 'shadow_only' || s === 'blocked' || s === 'not_started') return 'warn';
   if (s === 'contract_violation_blocked' || s === 'true' || s === 'denied') return 'bad';
   return 'neutral';
@@ -261,6 +279,36 @@ function evidenceFallback(reason) {
   };
 }
 
+function universeFallback(reason) {
+  const why = reason || 'api_unavailable';
+  return {
+    universe_status_state: 'degraded',
+    phase: 'phase3_universe_status_source_fixture',
+    phase3_started: false,
+    gui_authority: 'display_only',
+    universe: {
+      accepted: false,
+      blockers: [why],
+      universe_hash_present: false,
+      constituent_count: 0,
+      max_constituents: 0,
+      sample_constituents: [],
+      frozen_for_evidence_clock: false,
+      survivorship_bias_controls_present: false,
+      bybit_live_execution_unchanged: true,
+      ibkr_live_denied: true,
+      ibkr_contact_performed: false,
+      secret_content_serialized: false,
+    },
+    collector_started: false,
+    market_data_ingestion_started: false,
+    db_apply_performed: false,
+    contract_violations: [],
+    degraded: true,
+    reason: why,
+  };
+}
+
 function renderFallback() {
   const data = {
     default_asset_lane: 'crypto_perp',
@@ -297,6 +345,7 @@ function renderFallback() {
   };
   renderReadiness(data, null);
   renderEvidenceStatus(evidenceFallback('api_unavailable'));
+  renderUniverseStatus(universeFallback('api_unavailable'));
 }
 
 function renderReadiness(data, laneStatus) {
@@ -439,11 +488,58 @@ function renderEvidenceStatus(data) {
   );
 }
 
+function renderUniverseStatus(data) {
+  const status = data || universeFallback('api_unavailable');
+  const universe = status.universe || {};
+  const state = status.universe_status_state || 'blocked';
+  const universeBlockers = []
+    .concat(universe.blockers || [])
+    .concat(status.phase2_gate_blockers || [])
+    .concat(status.contract_violations || []);
+  document.getElementById('se-universe-state').innerHTML = textChip(state);
+  document.getElementById('se-universe-sub').textContent =
+    universe.accepted ? (universe.universe_id || 'source_ready') : 'PIT universe blocked';
+  setChip('se-universe-status', state, toneFor(state));
+  document.getElementById('se-universe-body').innerHTML = [
+    kvRow('phase', textChip(status.phase || '-')),
+    kvRow('phase3_started', boolChip(status.phase3_started, true)),
+    kvRow('contract.accepted', boolChip(universe.accepted, false)),
+    kvRow('contract_id', textChip(universe.contract_id || '-')),
+    kvRow('source_version', textChip(universe.source_version)),
+    kvRow('universe_id', textChip(universe.universe_id || '-')),
+    kvRow('universe_version', textChip(universe.universe_version || '-')),
+    kvRow('universe_hash_present', boolChip(universe.universe_hash_present, false)),
+    kvRow(
+      'constituents',
+      '<span class="se-code">' +
+        ocEsc(
+          'count=' + String(universe.constituent_count || 0) +
+          ' max=' + String(universe.max_constituents || 0)
+        ) +
+      '</span>'
+    ),
+    kvRow('frozen_for_evidence_clock', boolChip(universe.frozen_for_evidence_clock, false)),
+    kvRow('survivorship_controls', boolChip(universe.survivorship_bias_controls_present, false)),
+    kvRow('ibkr_contact_performed', boolChip(universe.ibkr_contact_performed, true)),
+    kvRow('secret_content_serialized', boolChip(universe.secret_content_serialized, true)),
+    kvRow('collector_started', boolChip(status.collector_started, true)),
+    kvRow('market_data_ingestion_started', boolChip(status.market_data_ingestion_started, true)),
+    kvRow('db_apply_performed', boolChip(status.db_apply_performed, true)),
+    kvRow('blockers', chipList(universeBlockers, 'none')),
+    kvRow('reason', '<span class="se-code">' + ocEsc(status.reason || '-') + '</span>'),
+  ].join('');
+  document.getElementById('se-universe-panel').classList.toggle(
+    'se-bad-line',
+    (status.contract_violations || []).length > 0
+  );
+}
+
 async function loadReadiness() {
-  const [lanePayload, readinessPayload, evidencePayload] = await Promise.all([
+  const [lanePayload, readinessPayload, evidencePayload, universePayload] = await Promise.all([
     ocApi(LANE_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(READINESS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(EVIDENCE_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
+    ocApi(UNIVERSE_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
   ]);
   if (!readinessPayload || !readinessPayload.data) {
     renderFallback();
@@ -451,6 +547,7 @@ async function loadReadiness() {
   }
   renderReadiness(readinessPayload.data, lanePayload && lanePayload.data ? lanePayload.data : null);
   renderEvidenceStatus(evidencePayload && evidencePayload.data ? evidencePayload.data : evidenceFallback('api_unavailable'));
+  renderUniverseStatus(universePayload && universePayload.data ? universePayload.data : universeFallback('api_unavailable'));
 }
 
 waitForServerUp(loadReadiness);
