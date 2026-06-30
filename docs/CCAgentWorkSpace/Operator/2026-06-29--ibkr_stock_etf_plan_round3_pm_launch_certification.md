@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 42 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 43 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -817,6 +817,28 @@ Verification 已過：
 
 註：完整 `tests/structure/test_docs_readme_index_static.py` 仍有既有 docs README index drift
 失敗；這不是本次 IBKR timeline guard 新增造成。
+
+邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
+access/creation、沒有 connector runtime、沒有 read probe execution、沒有 paper
+order/cancel/replace、沒有 fill import、沒有 evidence writer、沒有 DB apply、沒有
+evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-06-30 Operator Update — PM Memory Traceability Backfill
+
+本 session 已補齊 PM memory 已記錄、但主計畫與 Operator 摘要沒有明確 title trace 的
+中間 checkpoint。這是審計線 backfill，不是新增 runtime 能力。
+
+回補 title：
+
+- `Source Posture Header Catch-up`
+- `Rust Connector Skeleton Readiness Source`
+- `Read-Only Probe Request Contract`
+- `Read-Only Probe Readiness Gate`
+
+Verification 已過：
+
+- IBKR timeline + traceability focused structure tests：`2 passed`
+- `git diff --check`：PASS
 
 邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
 access/creation、沒有 connector runtime、沒有 read probe execution、沒有 paper

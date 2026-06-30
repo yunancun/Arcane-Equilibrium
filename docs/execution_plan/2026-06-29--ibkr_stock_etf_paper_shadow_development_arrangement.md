@@ -2110,7 +2110,7 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 
 新增 checkpoint：
 
-- 主計畫 PM session checkpoint 現在從 14 到 42 連續遞增，無重複編號。
+- 主計畫 PM session checkpoint 現在從 14 到 43 連續遞增，無重複編號。
 - 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
   lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
   connector skeleton / readonly-probe / broker read gate / policy display / operation
@@ -2128,6 +2128,38 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 - `git diff --check`：PASS。
 - 註：`python3 -m pytest -q tests/structure/test_docs_readme_index_static.py` 仍有既有
   docs README index drift 失敗；與本 checkpoint 新增的 IBKR timeline guard 無關。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 43. 2026-06-30 PM session governance checkpoint：PM Memory Traceability Backfill
+
+本 checkpoint 補齊 PM memory 已記錄、但主計畫與 Operator 摘要沒有明確 title trace 的
+中間 source/status checkpoint。這不是新增 runtime 能力，也不是重做既有 source
+工作；它只把審計線補成可機器檢查。
+
+回補 title：
+
+- `Source Posture Header Catch-up`
+- `Rust Connector Skeleton Readiness Source`
+- `Read-Only Probe Request Contract`
+- `Read-Only Probe Readiness Gate`
+
+治理 guard：
+
+- 新增 structure test 要求上述 PM memory trace titles 同時出現在主計畫與 Operator
+  摘要中。
+- 這四項已由 PM memory / `.codex/MEMORY.md` 記錄為 source/status/display-only
+  checkpoint；本 checkpoint 不聲稱它們授權 IBKR contact 或 runtime launch。
+
+驗證：
+
+- `python3 -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
+  `2 passed`。
+- `git diff --check`：PASS。
 
 PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
 connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
