@@ -3080,7 +3080,7 @@
 
 ## 2026-06-30 IBKR Stock/ETF Plan Timeline Checkpoint Guard
 
-- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 66, aligned to the PM memory / Operator source timeline.
+- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 67, aligned to the PM memory / Operator source timeline.
 - Added a structure test that reads the main plan Markdown and fails if PM session checkpoint numbers become duplicated, skipped, or out of order.
 - Verification passed: focused IBKR timeline structure test `1 passed`; section-body compare against `HEAD` PASS; `git diff --check` PASS. The full structure test file still has pre-existing docs README index drift failures unrelated to this guard. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
 
@@ -3251,4 +3251,10 @@
 
 - PM moved Evidence, Universe, Shadow, and Paper display renderers into `tab-stock-etf-evidence-paper.js`, reducing the Stock/ETF main GUI bundle from `798` to `583` lines.
 - Verification passed: Stock/ETF JS `node --check`; route/no-write focused tests `28 passed`; full Stock/ETF FastAPI/static `109 passed`; IBKR timeline + trace-title guard `2 passed`; `git diff --check` PASS.
+- Boundary unchanged: no endpoint/IPC/client-input change, no IBKR contact, no connector/runtime/secret/read-probe/paper-order/evidence/DB/tiny-live/live change, and no Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF GUI Scorecard/Launch Renderer Split Guard
+
+- PM moved Scorecard and Launch display renderers into `tab-stock-etf-scorecard-launch.js`, reducing the Stock/ETF main GUI bundle from `583` to `350` lines.
+- Verification passed: Stock/ETF JS `node --check`; route/no-write focused tests `29 passed`; full Stock/ETF FastAPI/static `110 passed`; IBKR timeline + trace-title guard `2 passed`; `git diff --check` PASS.
 - Boundary unchanged: no endpoint/IPC/client-input change, no IBKR contact, no connector/runtime/secret/read-probe/paper-order/evidence/DB/tiny-live/live change, and no Bybit behavior change.
