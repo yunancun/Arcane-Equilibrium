@@ -260,3 +260,39 @@ Verification 已過：
 沒有 Phase 1/2/3/4/5 runtime start、沒有 paper order/cancel/replace、沒有 fill import、
 沒有 DB apply、沒有 evidence clock、沒有 scorecard writer、沒有 Linux runtime
 sync/restart，也沒有改動 Bybit live execution 行為。
+
+## 2026-06-30 Operator Update — Paper Request Envelope Contract
+
+本 session 已完成下一個 source-only checkpoint：
+`stock_etf_paper_order_request_v1` typed request envelope。
+
+這次不是 paper order runtime。變更只在 Rust contract、tests、Phase0 manifest 與
+顯示面 count：
+
+- 新增 typed envelope，放在 lane-scoped IPC 和 IBKR paper lifecycle 之間。
+- Preview/submit 會檢查 symbol、stock/ETF instrument kind、side、market/limit
+  order type、positive decimal quantity、explicit limit-price policy、time in force。
+- Submit 要求 session/scoped authorization、Decision Lease、Guardian、risk、
+  instrument、lifecycle、capability、audit lineage，以及 local order/idempotency。
+- Cancel 要求 local order id、broker order id、cancel reason、idempotency，並拒絕
+  submit order-shape pollution。
+- Replace 要求 replacement idempotency/quantity/limit-price-policy/time-in-force、
+  replace reason，並拒絕 original mutable fields pollution。
+- Phase0 contract count 從 28 更新為 29，包含
+  `stock_etf_paper_order_request_v1`；FastAPI normalizer/tests 同步。
+
+Verification 已過：
+
+- Paper request acceptance：`8 passed`
+- Phase0 manifest：`6 passed`
+- Lane IPC：`9 passed`
+- FastAPI Phase0/StockETF focused：`14 passed`
+- Engine Stock/ETF：`21 passed`
+- Full openclaw_types：`35` unit/golden + `217` integration/acceptance + `0` doc-tests
+- Workspace `cargo check`：PASS
+- `rustfmt --check` / `git diff --check`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 secret access/creation、沒有 connector runtime、
+沒有 Phase 1/2/3/4/5 runtime start、沒有 paper order/cancel/replace、沒有 fill import、
+沒有 DB apply、沒有 evidence clock、沒有 scorecard writer、沒有 Linux runtime
+sync/restart，也沒有改動 Bybit live execution 行為。

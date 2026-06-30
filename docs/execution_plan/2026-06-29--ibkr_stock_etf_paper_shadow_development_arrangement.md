@@ -1266,3 +1266,58 @@ PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 
 不做 DB migration/apply、不做 Postgres dry-run、不啟動 evidence clock、不啟動
 scorecard writer、不做 Linux runtime sync/restart、不啟動 paper-shadow launch、不授權
 tiny-live/live 或任何 Bybit behavior change。
+
+## 23. 2026-06-30 PM session source checkpoint：Paper Request Envelope Contract
+
+本 session 繼續 Phase 1D，但仍停留在 source-only contract。上一個 checkpoint 固定
+lane-scoped IPC 欄位矩陣；本 checkpoint 補上 typed request envelope，讓後續 runtime
+不能自行解讀 submit/cancel/replace schema。
+
+新增 checkpoint：
+
+- Rust `openclaw_types` 新增 `stock_etf_paper_order_request_v1`，位於
+  `stock_etf_paper_order_request.rs`，作為 `lane_scoped_ipc_v1` 到
+  `ibkr_paper_order_lifecycle_v1` 之間的 typed request envelope。
+- Envelope 驗證 preview/submit/cancel/replace 的 exact method / operation /
+  authority scope / effect-capable 對映，且固定 `asset_lane=stock_etf_cash`、
+  `broker=ibkr`、`environment=paper`。
+- Preview/submit 驗證 normalized symbol、stock/ETF instrument kind、buy/sell side、
+  market/limit order type、positive decimal quantity、explicit limit-price policy、
+  day/GTC time-in-force。Market order 必須沒有 limit price；limit order 必須有正數
+  limit price。
+- Submit 驗證 session attestation、scoped authorization、Decision Lease、Guardian、
+  risk config、instrument identity、local order id、idempotency、lifecycle、
+  broker capability registry、audit event lineage，且 submit 前不能帶 broker order id。
+- Cancel 驗證 local order id、broker order id、cancel reason、idempotency、
+  lifecycle/capability/audit lineage，並拒絕 submit order-shape pollution。
+- Replace 驗證 local/broker order id、instrument identity、symbol/side、
+  replacement idempotency、replacement quantity、replacement limit-price policy、
+  replacement time in force、replace reason，並拒絕 original mutable fields pollution。
+- Phase0 manifest source + repository JSON 增加
+  `stock_etf_paper_order_request_v1`，contract count 從 28 更新為 29；FastAPI
+  Phase0 normalizer 與 tests 同步，避免 display surface 接受 stale count。
+- 新增 blocked template：
+  `settings/broker/stock_etf_paper_order_request.template.toml`。
+
+驗證：
+
+- `python3 -m py_compile ...stock_etf_phase0_normalizers.py ...test_stock_etf_phase0_status_routes.py ...stock_etf_route_fixtures.py`：PASS。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_paper_order_request_acceptance --test stock_etf_phase0_manifest_acceptance -- --nocapture`：
+  paper request `8 passed` + Phase0 manifest `6 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_lane_scoped_ipc_acceptance -- --nocapture`：
+  lane IPC `9 passed`。
+- `python3 -m pytest -q ...test_stock_etf_phase0_status_routes.py ...test_stock_etf_routes.py`：
+  FastAPI focused `14 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
+  Stock/ETF engine filter `21 passed`（既有 warnings only）。
+- Full `cargo test --manifest-path rust/Cargo.toml -p openclaw_types`：
+  `35` unit/golden + `217` integration/acceptance + `0` doc-tests。
+- `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
+- `rustfmt --edition 2021 --check ...`：PASS。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 connector runtime、
+不啟動 Phase 1/2/3/4/5 runtime、不送 paper order、不做 cancel/replace、不匯入 fill、
+不做 DB migration/apply、不做 Postgres dry-run、不啟動 evidence clock、不啟動
+scorecard writer、不做 Linux runtime sync/restart、不啟動 paper-shadow launch、不授權
+tiny-live/live 或任何 Bybit behavior change。

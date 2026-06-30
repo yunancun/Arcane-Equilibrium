@@ -18,6 +18,8 @@ This directory stores broker capability contracts and default-off runtime postur
 
 `stock_etf_lane_scoped_ipc.template.toml` records the default-blocked lane-scoped IPC method matrix contract shape with exact `lane_scoped_ipc_v1` / source-version fields. It does not start IPC, contact IBKR, create connectors, route paper orders, inspect secrets, or change Bybit live execution behavior.
 
+`stock_etf_paper_order_request.template.toml` records the default-blocked typed request envelope for stock/ETF paper preview, submit, cancel, and replace methods with exact `stock_etf_paper_order_request_v1` / source-version fields. It does not start IPC, contact IBKR, create connectors, route paper orders, inspect secrets, apply DB changes, or change Bybit live execution behavior.
+
 `stock_etf_risk_policy.template.toml` records the default-blocked Stock/ETF cash risk-policy contract shape with exact `stock_etf_risk_policy_v1` / source-version fields. It does not contact IBKR, create connectors, route paper orders, start collectors, write scorecards, inspect secrets, or change Bybit live execution behavior.
 
 `stock_etf_reference_data_sources.template.toml` records the default-blocked corporate-action, FX, fee, and tax/FTT source-as-of contract shape with exact `stock_etf_reference_data_sources_v1` / source-version fields. It does not contact IBKR, create connectors, ingest market/reference data, write scorecards, apply migrations, inspect secrets, or change Bybit live execution behavior.
