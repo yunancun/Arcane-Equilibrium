@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -13,6 +14,8 @@ from stock_etf_route_fixtures import (
     route_module,
     stock_etf_router,
 )
+
+SRV_ROOT = Path(__file__).resolve().parents[5]
 
 
 def test_stock_etf_evidence_status_requires_auth() -> None:
@@ -85,6 +88,27 @@ def test_stock_etf_openapi_exposes_stock_etf_get_only(client_fail_closed: TestCl
         "/api/v1/stock-etf/shadow-status": {"get"},
         "/api/v1/stock-etf/universe-status": {"get"},
     }
+
+
+def test_stock_etf_openapi_paths_match_gui_lane_contract_template(
+    client_fail_closed: TestClient,
+) -> None:
+    schema = client_fail_closed.get("/openapi.json").json()
+    stock_get_paths = {
+        path
+        for path, methods in schema["paths"].items()
+        if path.startswith("/api/v1/stock-etf")
+        and path != "/api/v1/stock-etf"
+        and set(methods) == {"get"}
+    }
+    template_source = (
+        SRV_ROOT / "settings" / "broker" / "stock_etf_gui_lane_contract.template.toml"
+    ).read_text(encoding="utf-8")
+    template_endpoints = set(
+        re.findall(r'^[a-z0-9_]+_endpoint = "([^"]+)"', template_source, re.MULTILINE)
+    )
+
+    assert stock_get_paths == template_endpoints
 
 
 def test_stock_etf_runtime_rejects_write_methods(client_fail_closed: TestClient) -> None:
