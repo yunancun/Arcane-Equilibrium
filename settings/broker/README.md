@@ -30,7 +30,7 @@ This directory stores broker capability contracts and default-off runtime postur
 
 `stock_etf_pit_universe.template.toml` records the default-blocked point-in-time universe contract shape with exact `stock_etf_pit_universe_contract_v1` / source-version fields. It does not contact IBKR, create connectors, collect market data, route paper orders, inspect secrets, write scorecards, or change Bybit live execution behavior.
 
-`stock_etf_strategy_hypothesis.template.toml` records the default-blocked strategy hypothesis preregistration contract shape. It does not contact IBKR, create connectors, collect market data, route paper orders, inspect secrets, write scorecards, claim profitability, or change Bybit live execution behavior.
+`stock_etf_strategy_hypothesis.template.toml` records the default-blocked strategy hypothesis preregistration contract shape with exact `stock_etf_strategy_hypothesis_contract_v1` / source-version fields. It does not contact IBKR, create connectors, collect market data, route paper orders, inspect secrets, write scorecards, claim profitability, or change Bybit live execution behavior.
 
 `stock_etf_asset_lane_events.template.toml` records the default-blocked immutable asset-lane audit event reference shape with exact `audit.asset_lane_events_v1` / source-version fields. It does not write audit rows, apply migrations, contact IBKR, create secrets, or authorize paper/tiny-live/live.
 

@@ -20,6 +20,7 @@ use crate::stock_etf_scorecard_inputs::{
     BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID, STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID,
     STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID, STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
 };
+use crate::stock_etf_strategy_hypothesis::STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID;
 
 pub const STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID: &str = "broker_capability_registry_v1";
 
@@ -276,7 +277,7 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
                 STOCK_ETF_RISK_POLICY_CONTRACT_ID,
                 STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
                 STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
-                "stock_etf_strategy_hypothesis_contract_v1",
+                STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
                 "frozen_strategy_hypothesis_hash",
                 "frozen_universe_hash",
             ],
@@ -305,7 +306,7 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
                 STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID,
                 STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
                 STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
-                "stock_etf_strategy_hypothesis_contract_v1",
+                STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
                 "paper_shadow_fill_separation",
             ],
             typed_denial_reason: None,

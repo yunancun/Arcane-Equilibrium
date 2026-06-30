@@ -254,6 +254,8 @@ Phase 3 evidence-clock days, shadow signals, or scorecards can treat a
 
 Required fields:
 
+- `contract_id=stock_etf_strategy_hypothesis_contract_v1`
+- `source_version=1`
 - `asset_lane=stock_etf_cash`
 - `broker=ibkr`
 - hypothesis id and version
