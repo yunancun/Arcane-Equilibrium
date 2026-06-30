@@ -2642,3 +2642,9 @@
 - PM hardened `stock_etf_release_packet_v1` and `tiny_live_adr_eligibility_v1` so release packets require exact `packet_id == stock_etf_release_packet_v1` plus `source_version=1`, and tiny-live ADR eligibility requires exact `contract_id == tiny_live_adr_eligibility_v1` plus `source_version=1`.
 - The Phase 0 manifest validator now consumes shared release/tiny-live contract constants; blocked templates expose `source_version=0`; regression tests reject old `_fixture` ids and wrong source versions.
 - Verification passed: focused linked openclaw_types tests `21 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `176` integration/acceptance + `0` doc-tests. This grants no IBKR contact, connector runtime, evidence clock, scorecard writer, DB apply, GUI lane authority, paper order, ADR start, tiny-live, or live.
+
+## 2026-06-30 IBKR Stock/ETF GUI Lane Contract Hardening
+
+- PM hardened `gui_lane_contract_v1` so GUI lane contract artifacts require exact `contract_id == gui_lane_contract_v1` plus `source_version=1`.
+- The Phase 0 manifest validator now consumes the shared GUI lane contract constant; the blocked template exposes `source_version=0`; regression tests reject the old `_fixture` id and wrong source versions.
+- Verification passed: focused linked openclaw_types tests `14 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `177` integration/acceptance + `0` doc-tests. This grants no GUI runtime authority, IBKR contact, connector runtime, DB apply, evidence clock, paper order, tiny-live, live, or Bybit behavior change.

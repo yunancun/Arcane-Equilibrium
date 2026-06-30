@@ -6,7 +6,8 @@
 use std::path::PathBuf;
 
 use openclaw_types::{
-    AssetLane, StockEtfGuiLaneBlocker, StockEtfGuiLaneContractV1, STOCK_ETF_GUI_READINESS_ENDPOINT,
+    AssetLane, StockEtfGuiLaneBlocker, StockEtfGuiLaneContractV1, STOCK_ETF_GUI_LANE_CONTRACT_ID,
+    STOCK_ETF_GUI_READINESS_ENDPOINT,
 };
 
 #[test]
@@ -17,6 +18,9 @@ fn default_gui_lane_contract_blocks_gui_authority() {
     assert!(verdict
         .blockers
         .contains(&StockEtfGuiLaneBlocker::ContractIdMissing));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfGuiLaneBlocker::SourceVersionMismatch));
     assert!(verdict
         .blockers
         .contains(&StockEtfGuiLaneBlocker::StockEtfTabMissing));
@@ -38,6 +42,8 @@ fn accepted_fixture_is_display_only_get_only_and_crypto_default() {
 
     assert!(verdict.accepted);
     assert!(verdict.blockers.is_empty());
+    assert_eq!(contract.contract_id, STOCK_ETF_GUI_LANE_CONTRACT_ID);
+    assert_eq!(contract.source_version, 1);
     assert_eq!(contract.default_asset_lane, AssetLane::CryptoPerp);
     assert_eq!(
         contract.readiness_endpoint,
@@ -46,6 +52,24 @@ fn accepted_fixture_is_display_only_get_only_and_crypto_default() {
     assert!(contract.readiness_endpoint_get_only);
     assert!(contract.display_only);
     assert!(!contract.ibkr_contact_performed);
+}
+
+#[test]
+fn gui_lane_contract_requires_exact_contract_id_and_source_version() {
+    let contract = StockEtfGuiLaneContractV1 {
+        contract_id: "gui_lane_contract_v1_fixture".to_string(),
+        source_version: 2,
+        ..StockEtfGuiLaneContractV1::accepted_fixture()
+    };
+    let verdict = contract.validate();
+
+    assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfGuiLaneBlocker::ContractIdMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfGuiLaneBlocker::SourceVersionMismatch));
 }
 
 #[test]
@@ -167,6 +191,7 @@ fn blocked_template_is_parseable_and_secret_free() {
         toml::from_str(&raw).expect("GUI lane contract template parses");
 
     assert_eq!(parsed.default_asset_lane, AssetLane::CryptoPerp);
+    assert_eq!(parsed.source_version, 0);
     assert_eq!(parsed.readiness_endpoint, STOCK_ETF_GUI_READINESS_ENDPOINT);
     assert!(!parsed.ibkr_contact_performed);
     assert!(!parsed.secret_content_serialized);

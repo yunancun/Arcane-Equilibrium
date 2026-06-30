@@ -835,7 +835,8 @@ Negative tests:
 - existing crypto tabs and Decision Lease/risk behavior do not regress
 
 Source validator: `openclaw_types::stock_etf_gui_lane_contract::StockEtfGuiLaneContractV1`.
-The validator requires `crypto_perp` as the default displayed lane, a GET-only
+The validator requires exact `gui_lane_contract_v1` contract id, source version
+`1`, `crypto_perp` as the default displayed lane, a GET-only
 `/api/v1/stock-etf/readiness` readiness surface, display-only semantics, client
 lane state treated as untrusted, denied localStorage/query-param/hidden-field
 authority, no login-success selector, no POST/order/secret/contact surfaces,

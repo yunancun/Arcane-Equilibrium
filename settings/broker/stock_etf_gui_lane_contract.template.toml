@@ -3,6 +3,7 @@
 # pages, contact IBKR, create secrets, route orders, or authorize lane selection.
 
 contract_id = ""
+source_version = 0
 default_asset_lane = "crypto_perp"
 stock_etf_tab_registered = false
 readiness_endpoint = "/api/v1/stock-etf/readiness"

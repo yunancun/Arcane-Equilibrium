@@ -9,11 +9,13 @@ use serde::{Deserialize, Serialize};
 use crate::ibkr_phase2_artifact::is_sha256_hex;
 use crate::stock_etf_lane::AssetLane;
 
+pub const STOCK_ETF_GUI_LANE_CONTRACT_ID: &str = "gui_lane_contract_v1";
 pub const STOCK_ETF_GUI_READINESS_ENDPOINT: &str = "/api/v1/stock-etf/readiness";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StockEtfGuiLaneContractV1 {
     pub contract_id: String,
+    pub source_version: u32,
     pub default_asset_lane: AssetLane,
     pub stock_etf_tab_registered: bool,
     pub readiness_endpoint: String,
@@ -48,6 +50,7 @@ impl Default for StockEtfGuiLaneContractV1 {
     fn default() -> Self {
         Self {
             contract_id: String::new(),
+            source_version: 0,
             default_asset_lane: AssetLane::CryptoPerp,
             stock_etf_tab_registered: false,
             readiness_endpoint: String::new(),
@@ -83,7 +86,8 @@ impl Default for StockEtfGuiLaneContractV1 {
 impl StockEtfGuiLaneContractV1 {
     pub fn accepted_fixture() -> Self {
         Self {
-            contract_id: "gui_lane_contract_v1_fixture".to_string(),
+            contract_id: STOCK_ETF_GUI_LANE_CONTRACT_ID.to_string(),
+            source_version: 1,
             default_asset_lane: AssetLane::CryptoPerp,
             stock_etf_tab_registered: true,
             readiness_endpoint: STOCK_ETF_GUI_READINESS_ENDPOINT.to_string(),
@@ -126,6 +130,11 @@ impl StockEtfGuiLaneContractV1 {
         let mut blockers = Vec::new();
         if self.contract_id.trim().is_empty() {
             blockers.push(Blocker::ContractIdMissing);
+        } else if self.contract_id != STOCK_ETF_GUI_LANE_CONTRACT_ID {
+            blockers.push(Blocker::ContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
         }
         if self.default_asset_lane != AssetLane::CryptoPerp {
             blockers.push(Blocker::DefaultLaneNotCryptoPerp);
@@ -248,6 +257,8 @@ impl<B> StockEtfGuiLaneVerdict<B> {
 #[serde(rename_all = "snake_case")]
 pub enum StockEtfGuiLaneBlocker {
     ContractIdMissing,
+    ContractIdMismatch,
+    SourceVersionMismatch,
     DefaultLaneNotCryptoPerp,
     StockEtfTabMissing,
     ReadinessEndpointMismatch,
