@@ -2672,3 +2672,9 @@
 - PM hardened `instrument_identity_contract_v1` so instrument identity artifacts require exact `contract_id == instrument_identity_contract_v1` plus `source_version=1`.
 - The Phase 0 manifest validator, broker capability contract-details gate, and `lane_scoped_ipc_v1` paper/preview gates now consume the shared instrument identity constant; the blocked template exposes `source_version=0`; regression tests reject fixture-like identity ids and wrong source versions.
 - Verification passed: focused linked openclaw_types tests `31 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `181` integration/acceptance + `0` doc-tests. This grants no IBKR contract-details call, market-data subscription, connector runtime, IPC runtime, paper order, evidence clock, scorecard writer, DB apply, GUI authority, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF PIT Universe Hardening
+
+- PM hardened `stock_etf_pit_universe_contract_v1` so PIT universe artifacts require exact `contract_id == stock_etf_pit_universe_contract_v1` plus `source_version=1`.
+- The Phase 0 manifest validator, broker capability shadow/scorecard gates, and `lane_scoped_ipc_v1` preview/shadow gates now consume the shared PIT universe constant; the blocked template exposes `source_version=0`; regression tests reject fixture-like PIT universe ids and wrong source versions.
+- Verification passed: focused linked openclaw_types tests `30 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `182` integration/acceptance + `0` doc-tests. This grants no IBKR contact, connector runtime, market-data collection, IPC runtime, paper order, evidence clock, scorecard writer, DB apply, GUI authority, tiny-live, live, or Bybit behavior change.
