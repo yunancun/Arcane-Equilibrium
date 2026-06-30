@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 55 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 56 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -1181,4 +1181,29 @@ Verification 已過：
 邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
 access/creation、沒有 connector runtime、沒有 read probe execution、沒有 paper
 order/cancel/replace、沒有 fill import、沒有 evidence writer、沒有 DB apply、沒有
+evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-06-30 Operator Update — GUI Data/Policy Fallback Split Guard
+
+本 session 已降低 Stock/ETF GUI 主 bundle 的維護風險：
+
+- 將 Data Foundation / Policy 的大型 fallback payload 從 `tab-stock-etf.js`
+  拆到 `tab-stock-etf-data-policy.js`。
+- `tab-stock-etf.js` 從 `1976` 行降到 `1805` 行；所有 Stock/ETF GUI bundle
+  檔案都低於 2000 行 governance cap。
+- HTML 在主 loader 前載入 data/policy split，既有 display-only 渲染與 endpoint
+  呼叫流程不變。
+- 靜態 no-write guard 現在掃描新 JS 檔，並新增 GUI bundle line-cap regression。
+
+Verification 已過：
+
+- Stock/ETF JS `node --check`：PASS
+- Python no-write/static guard：`10 passed`
+- Full Stock/ETF FastAPI/static：`105 passed`
+- IBKR timeline + trace-title structure guard：`2 passed`
+- `git diff --check`：PASS
+
+邊界不變：沒有新增 endpoint、沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、
+沒有 secret access/creation、沒有 connector runtime、沒有 read probe execution、沒有
+paper order/cancel/replace、沒有 fill import、沒有 evidence writer、沒有 DB apply、沒有
 evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
