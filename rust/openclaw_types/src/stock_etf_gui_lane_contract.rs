@@ -11,6 +11,8 @@ use crate::stock_etf_lane::AssetLane;
 
 pub const STOCK_ETF_GUI_LANE_CONTRACT_ID: &str = "gui_lane_contract_v1";
 pub const STOCK_ETF_GUI_READINESS_ENDPOINT: &str = "/api/v1/stock-etf/readiness";
+pub const STOCK_ETF_GUI_LANE_STATUS_ENDPOINT: &str = "/api/v1/stock-etf/lane-status";
+pub const STOCK_ETF_GUI_EVIDENCE_STATUS_ENDPOINT: &str = "/api/v1/stock-etf/evidence-status";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StockEtfGuiLaneContractV1 {
@@ -20,6 +22,10 @@ pub struct StockEtfGuiLaneContractV1 {
     pub stock_etf_tab_registered: bool,
     pub readiness_endpoint: String,
     pub readiness_endpoint_get_only: bool,
+    pub lane_status_endpoint: String,
+    pub lane_status_endpoint_get_only: bool,
+    pub evidence_status_endpoint: String,
+    pub evidence_status_endpoint_get_only: bool,
     pub display_only: bool,
     pub client_lane_state_untrusted: bool,
     pub local_storage_authority_denied: bool,
@@ -55,6 +61,10 @@ impl Default for StockEtfGuiLaneContractV1 {
             stock_etf_tab_registered: false,
             readiness_endpoint: String::new(),
             readiness_endpoint_get_only: false,
+            lane_status_endpoint: String::new(),
+            lane_status_endpoint_get_only: false,
+            evidence_status_endpoint: String::new(),
+            evidence_status_endpoint_get_only: false,
             display_only: false,
             client_lane_state_untrusted: false,
             local_storage_authority_denied: false,
@@ -92,6 +102,10 @@ impl StockEtfGuiLaneContractV1 {
             stock_etf_tab_registered: true,
             readiness_endpoint: STOCK_ETF_GUI_READINESS_ENDPOINT.to_string(),
             readiness_endpoint_get_only: true,
+            lane_status_endpoint: STOCK_ETF_GUI_LANE_STATUS_ENDPOINT.to_string(),
+            lane_status_endpoint_get_only: true,
+            evidence_status_endpoint: STOCK_ETF_GUI_EVIDENCE_STATUS_ENDPOINT.to_string(),
+            evidence_status_endpoint_get_only: true,
             display_only: true,
             client_lane_state_untrusted: true,
             local_storage_authority_denied: true,
@@ -147,6 +161,18 @@ impl StockEtfGuiLaneContractV1 {
         }
         if !self.readiness_endpoint_get_only {
             blockers.push(Blocker::ReadinessEndpointNotGetOnly);
+        }
+        if self.lane_status_endpoint != STOCK_ETF_GUI_LANE_STATUS_ENDPOINT {
+            blockers.push(Blocker::LaneStatusEndpointMismatch);
+        }
+        if !self.lane_status_endpoint_get_only {
+            blockers.push(Blocker::LaneStatusEndpointNotGetOnly);
+        }
+        if self.evidence_status_endpoint != STOCK_ETF_GUI_EVIDENCE_STATUS_ENDPOINT {
+            blockers.push(Blocker::EvidenceStatusEndpointMismatch);
+        }
+        if !self.evidence_status_endpoint_get_only {
+            blockers.push(Blocker::EvidenceStatusEndpointNotGetOnly);
         }
         if !self.display_only {
             blockers.push(Blocker::DisplayOnlyMissing);
@@ -263,6 +289,10 @@ pub enum StockEtfGuiLaneBlocker {
     StockEtfTabMissing,
     ReadinessEndpointMismatch,
     ReadinessEndpointNotGetOnly,
+    LaneStatusEndpointMismatch,
+    LaneStatusEndpointNotGetOnly,
+    EvidenceStatusEndpointMismatch,
+    EvidenceStatusEndpointNotGetOnly,
     DisplayOnlyMissing,
     ClientLaneStateTrusted,
     LocalStorageAuthorityNotDenied,
