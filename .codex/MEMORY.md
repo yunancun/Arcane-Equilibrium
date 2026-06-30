@@ -1113,3 +1113,10 @@ Do not paste long reports or stable architecture into TODO.
 - The main Stock/ETF GUI bundle is reduced from `350` to `197` lines; `tab-stock-etf-readiness.js` is `159` lines and exposes `window.renderReadiness` for the main loader/fallback path.
 - The static no-write guard now scans the readiness module and proves `renderReadiness` plus shared helper definitions stay out of the main bundle, with `tab-stock-etf.js <= 250` and `tab-stock-etf-readiness.js <= 250`.
 - Verification passed: Stock/ETF JS `node --check`; route/no-write focused tests `30 passed`; full Stock/ETF FastAPI/static `111 passed`; focused IBKR timeline + trace-title structure tests `2 passed`; `git diff --check` PASS. This grants no new endpoint, IPC method, client input, IBKR contact, SDK import, socket/HTTP, connector runtime, secret access, read probe execution, paper order, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
+
+## 2026-07-01 Fresh Invocation-Window Source Preflight Blocked
+
+- PM established session loop state sha `e6724c79a45b187e1c020065cf6c445950bafcf01daf923e9e73e94afbad7a2d` for `P0-CURRENT-CANDIDATE-FRESH-INVOCATION-WINDOW-LEASE-BBO-ORDER-SHAPE-GATE` and ran only the corrected dry-run with `PYTHONPATH=helper_scripts/research`.
+- Dry-run sha `148deaecd3e7423d1ecf207c5d8f715e48f6773e95f676500e1e05299237e6b6` is `CURRENT_CANDIDATE_ACTUAL_ADMISSION_BBO_LEASE_WINDOW_SOURCE_NOT_READY`; source blockers are stale current-candidate envelope plus missing/mismatched pre-active sizing-aware gate evidence.
+- E3 returned `BLOCKED`; BB accepted public Bybit market-data GET scope in principle but also blocked `--run` until source inputs dry-run ready. Boundary: no lease, public quote, Bybit call, order/cancel/modify, PG access, runtime mutation, service restart, Cost Gate change, live/mainnet, fill/PnL, or proof.
+- TODO v688 active blocker is `P0-CURRENT-CANDIDATE-FRESH-INVOCATION-WINDOW-SOURCE-INPUT-REFRESH-GATE`.

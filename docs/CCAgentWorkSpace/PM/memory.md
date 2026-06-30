@@ -3264,3 +3264,10 @@
 - PM moved the lane/readiness renderer and local UI helpers into `tab-stock-etf-readiness.js`, reducing the Stock/ETF main GUI bundle from `350` to `197` lines.
 - Verification passed: Stock/ETF JS `node --check`; route/no-write focused tests `30 passed`; full Stock/ETF FastAPI/static `111 passed`; IBKR timeline + trace-title guard `2 passed`; `git diff --check` PASS.
 - Boundary unchanged: no endpoint/IPC/client-input change, no IBKR contact, no connector/runtime/secret/read-probe/paper-order/evidence/DB/tiny-live/live change, and no Bybit behavior change.
+
+## 2026-07-01 Fresh Invocation-Window Source Preflight Blocked
+
+- PM established session loop state sha `e6724c79a45b187e1c020065cf6c445950bafcf01daf923e9e73e94afbad7a2d` and ran only the corrected no-order dry-run with `PYTHONPATH=helper_scripts/research`.
+- Dry-run sha `148deaecd3e7423d1ecf207c5d8f715e48f6773e95f676500e1e05299237e6b6` returned `CURRENT_CANDIDATE_ACTUAL_ADMISSION_BBO_LEASE_WINDOW_SOURCE_NOT_READY` because the current-candidate envelope is stale and the gate/sizing packet is not the required pre-active sizing-aware loss-control packet.
+- E3 blocked the proposed `--run`; BB accepted public market-data GET scope in principle but also blocked `--run` until source inputs dry-run ready. No lease, public quote, Bybit call, order/cancel/modify, PG access, runtime mutation, service restart, Cost Gate change, live/mainnet, fill/PnL, or proof occurred.
+- Next blocker: `P0-CURRENT-CANDIDATE-FRESH-INVOCATION-WINDOW-SOURCE-INPUT-REFRESH-GATE`.
