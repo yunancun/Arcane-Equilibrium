@@ -646,6 +646,103 @@ async fn stock_etf_paper_status_is_blocked_source_fixture_without_side_effects()
     assert_eq!(result["phase2"]["connector_enabled"], false);
 }
 
+#[tokio::test]
+async fn stock_etf_reconciliation_status_is_blocked_source_fixture_without_side_effects() {
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let req =
+        r#"{"jsonrpc":"2.0","method":"stock_etf.get_reconciliation_status","params":{},"id":4810}"#;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
+    )
+    .await;
+
+    assert!(resp.error.is_none());
+    let result = resp.result.expect("stock_etf reconciliation status result");
+    assert_eq!(
+        result["phase"],
+        "phase3_reconciliation_status_source_fixture"
+    );
+    assert_eq!(result["asset_lane"], "stock_etf_cash");
+    assert_eq!(result["broker"], "ibkr");
+    assert_eq!(result["environment"], "paper_shadow");
+    assert_eq!(result["reconciliation_status_state"], "blocked");
+    assert_eq!(result["phase3_started"], false);
+    assert_eq!(result["paper_shadow_reconciliation_started"], false);
+    assert_eq!(result["paper_orders_ready"], false);
+    assert_eq!(result["paper_fills_ready"], false);
+    assert_eq!(result["shadow_fills_ready"], false);
+    assert_eq!(result["scorecard_writer_started"], false);
+    assert_eq!(result["db_apply_performed"], false);
+    assert_eq!(result["ibkr_call_performed"], false);
+    assert_eq!(result["secret_slot_touched"], false);
+    assert_eq!(result["order_routed"], false);
+    assert_eq!(result["bybit_ipc_reused"], false);
+
+    let matching = &result["matching"];
+    assert_eq!(
+        matching["expected_lifecycle_contract_id"],
+        "ibkr_paper_order_lifecycle_v1"
+    );
+    assert_eq!(matching["lifecycle_contract_id"], "");
+    assert_eq!(
+        matching["expected_event_log_contract_id"],
+        "broker_lifecycle_event_log_v1"
+    );
+    assert_eq!(matching["event_log_contract_id"], "");
+    assert_eq!(
+        matching["expected_shadow_contract_id"],
+        "stock_shadow_fill_model_v1"
+    );
+    assert_eq!(matching["shadow_contract_id"], "");
+    assert_eq!(matching["lifecycle_event_accepted"], false);
+    assert_eq!(matching["shadow_fill_model_accepted"], false);
+    assert!(json_array_contains(
+        &matching["lifecycle_blockers"],
+        "lifecycle_contract_id_mismatch"
+    ));
+    assert!(json_array_contains(
+        &matching["shadow_blockers"],
+        "contract_id_mismatch"
+    ));
+    assert_eq!(matching["append_only_event_ready"], false);
+    assert_eq!(matching["paper_order_id_present"], false);
+    assert_eq!(matching["broker_order_id_present"], false);
+    assert_eq!(matching["execution_id_present"], false);
+    assert_eq!(matching["commission_report_id_present"], false);
+    assert_eq!(matching["shadow_signal_id_present"], false);
+    assert_eq!(matching["shadow_fill_price_present"], false);
+    assert_eq!(matching["paper_shadow_link_present"], false);
+    assert_eq!(matching["divergence_bps"], 0);
+    assert_eq!(matching["divergence_threshold_bps"], 0);
+    assert_eq!(matching["divergence_within_threshold"], false);
+    assert_eq!(matching["unmatched_paper_fill_count"], 0);
+    assert_eq!(matching["unmatched_shadow_fill_count"], 0);
+    assert_eq!(matching["reconciliation_run_id_present"], false);
+    assert_eq!(matching["raw_artifact_hash_present"], false);
+    assert_eq!(matching["redacted_summary_hash_present"], false);
+
+    assert_eq!(result["phase2"]["first_ibkr_contact_allowed"], false);
+    assert_eq!(result["phase2"]["connector_enabled"], false);
+}
+
 fn json_array_contains(value: &serde_json::Value, expected: &str) -> bool {
     value
         .as_array()

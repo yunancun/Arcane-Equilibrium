@@ -393,6 +393,79 @@ def _valid_paper_status() -> dict[str, Any]:
         "db_apply_performed": False,
     }
 
+
+def _valid_reconciliation_status() -> dict[str, Any]:
+    return {
+        "phase": "phase3_reconciliation_status_source_fixture",
+        "asset_lane": "stock_etf_cash",
+        "broker": "ibkr",
+        "environment": "paper_shadow",
+        "reconciliation_status_state": "blocked",
+        "phase3_started": False,
+        "paper_shadow_reconciliation_started": False,
+        "paper_orders_ready": False,
+        "paper_fills_ready": False,
+        "shadow_fills_ready": False,
+        "scorecard_writer_started": False,
+        "db_apply_performed": False,
+        "matching": {
+            "expected_lifecycle_contract_id": "ibkr_paper_order_lifecycle_v1",
+            "lifecycle_contract_id": "",
+            "expected_event_log_contract_id": "broker_lifecycle_event_log_v1",
+            "event_log_contract_id": "",
+            "expected_shadow_contract_id": "stock_shadow_fill_model_v1",
+            "shadow_contract_id": "",
+            "lifecycle_event_accepted": False,
+            "shadow_fill_model_accepted": False,
+            "lifecycle_blockers": [
+                "lifecycle_contract_id_mismatch",
+                "event_log_contract_id_mismatch",
+                "source_version_mismatch",
+            ],
+            "shadow_blockers": [
+                "contract_id_mismatch",
+                "source_version_mismatch",
+                "signal_id_missing",
+            ],
+            "append_only_event_ready": False,
+            "paper_order_id_present": False,
+            "broker_order_id_present": False,
+            "execution_id_present": False,
+            "commission_report_id_present": False,
+            "shadow_signal_id_present": False,
+            "shadow_fill_price_present": False,
+            "paper_shadow_link_present": False,
+            "divergence_bps": 0,
+            "divergence_threshold_bps": 0,
+            "divergence_within_threshold": False,
+            "unmatched_paper_fill_count": 0,
+            "unmatched_shadow_fill_count": 0,
+            "reconciliation_run_id_present": False,
+            "raw_artifact_hash_present": False,
+            "redacted_summary_hash_present": False,
+        },
+        "phase2": {
+            "external_surface_gate": {
+                "status": "BLOCKED",
+                "ibkr_contact_allowed": False,
+                "blockers": ["status_not_pass"],
+                "ibkr_call_performed": False,
+            },
+            "api_allowlist": _valid_api_allowlist(),
+            "immutable_pass_artifact_present": False,
+            "first_ibkr_contact_allowed": False,
+            "connector_enabled": False,
+            "secret_slot_touched": False,
+            "order_routed": False,
+        },
+        "ibkr_live_enabled": False,
+        "ibkr_call_performed": False,
+        "secret_slot_touched": False,
+        "order_routed": False,
+        "bybit_ipc_reused": False,
+    }
+
+
 def _make_authless_client() -> TestClient:
     route_module._IPC_CLIENT = None
     app = FastAPI()
