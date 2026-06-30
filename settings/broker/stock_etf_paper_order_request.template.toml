@@ -1,0 +1,48 @@
+# ADR-0048 Stock/ETF paper order request envelope template.
+#
+# This is a blocked, secret-free source template. It does not start IPC,
+# contact IBKR, create connectors, route paper orders, inspect secrets, apply
+# DB changes, or change Bybit live execution behavior.
+
+contract_id = ""
+source_version = 0
+asset_lane = "crypto_perp"
+broker = "bybit"
+environment = "live_reserved_denied"
+request_method = "unknown_denied"
+operation = "transfer_or_account_write"
+authority_scope = "denied"
+effect_capable = false
+request_id = ""
+account_fingerprint_hash = ""
+session_attestation_hash = ""
+scoped_authorization_hash = ""
+decision_lease_id = ""
+guardian_state_hash = ""
+risk_config_hash = ""
+instrument_identity_hash = ""
+cost_model_version_hash = ""
+pit_universe_contract_hash = ""
+source_artifact_hash = ""
+lifecycle_contract_hash = ""
+broker_capability_registry_hash = ""
+audit_event_id = ""
+symbol = ""
+quantity_decimal = ""
+limit_price_decimal = ""
+order_local_id = ""
+idempotency_key = ""
+broker_order_id = ""
+cancel_reason = ""
+replacement_idempotency_key = ""
+replacement_quantity_decimal = ""
+replacement_limit_price_decimal = ""
+replace_reason = ""
+ibkr_contact_performed = false
+connector_runtime_started = false
+secret_content_serialized = false
+order_routed = false
+bybit_path_reused = false
+live_or_tiny_live_authorized = false
+margin_short_options_cfd_requested = false
+python_direct_broker_write_requested = false

@@ -408,3 +408,51 @@ approval。未批准 IBKR contact、secret、connector runtime、Phase 1/2/3/4/5
 start、paper order/cancel/replace、fill import、DB apply、Postgres dry-run、
 evidence clock、scorecard writer、tiny-live、live、Linux runtime sync/restart 或
 Bybit behavior change。
+
+## 2026-06-30 PM Session Checkpoint — Paper Request Envelope Contract
+
+PM 已在本 session 追加 Phase 1D source-only checkpoint：
+`stock_etf_paper_order_request_v1` typed request envelope。這是 contract/test/docs
+hardening，不是 paper order runtime。
+
+已完成：
+
+- Rust `openclaw_types` 新增 `StockEtfPaperOrderRequestEnvelopeV1`，作為
+  lane-scoped IPC 與 IBKR paper lifecycle 之間的 typed request contract。
+- Validator 固定 stock/ETF + IBKR + paper identity，並驗證 request method、
+  broker operation、authority scope、effect-capable flag 必須對映 preview / submit /
+  cancel / replace。
+- Preview/submit request shape 現在 machine-checks normalized symbol、stock/ETF
+  instrument kind、buy/sell side、market/limit order type、positive decimal
+  quantity、explicit limit-price policy、day/GTC time-in-force。
+- Submit additionally requires session/scoped authorization/Decision Lease/
+  Guardian/risk/instrument/lifecycle/capability/audit lineage and local
+  order/idempotency ids; broker order id is rejected before broker ack.
+- Cancel requires local order id, broker order id, cancel reason, idempotency,
+  lifecycle/capability/audit lineage, and rejects submit order-shape pollution.
+- Replace requires original local/broker ids plus replacement idempotency,
+  quantity, limit-price policy, time-in-force, replace reason, and rejects
+  original mutable-field pollution.
+- Phase0 manifest source + JSON now include `stock_etf_paper_order_request_v1`;
+  contract count is now 29, with FastAPI Phase0 normalizer/tests updated.
+- Added blocked secret-free template
+  `settings/broker/stock_etf_paper_order_request.template.toml`.
+
+Verification：
+
+- Python compile PASS for changed Phase0 normalizer/test fixture files.
+- Paper request acceptance `8 passed`; Phase0 manifest `6 passed`.
+- Lane IPC acceptance `9 passed`.
+- FastAPI Phase0/StockETF focused tests `14 passed`.
+- Engine Stock/ETF cargo filter `21 passed`（既有 warnings only）。
+- Full openclaw_types PASS：`35` unit/golden + `217` integration/acceptance +
+  `0` doc-tests。
+- Workspace `cargo check` PASS。
+- `rustfmt --check` PASS。
+- `git diff --check` PASS。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 1 runtime approval 或 paper-order
+approval。未批准 IBKR contact、secret、connector runtime、Phase 1/2/3/4/5 runtime
+start、paper order/cancel/replace、fill import、DB apply、Postgres dry-run、
+evidence clock、scorecard writer、tiny-live、live、Linux runtime sync/restart 或
+Bybit behavior change。

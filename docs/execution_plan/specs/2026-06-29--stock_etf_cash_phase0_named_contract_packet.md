@@ -531,6 +531,77 @@ write authority, reuse of existing Bybit paper IPC paths, IBKR contact,
 connector runtime, serialized secrets, live environment, and Bybit-live
 regressions. This contract starts no IPC server and authorizes no paper order.
 
+## 9A. `stock_etf_paper_order_request_v1`
+
+Required fields:
+
+- exact contract id `stock_etf_paper_order_request_v1`
+- `source_version=1`
+- `asset_lane=stock_etf_cash`
+- `broker=ibkr`
+- `environment=paper`
+- lane-scoped IPC method, broker operation, authority scope, and effect-capable
+  flag
+- request id and account fingerprint hash
+
+Preview/submit order intent fields:
+
+- normalized symbol
+- stock/ETF instrument kind
+- buy/sell side
+- market/limit order type
+- positive decimal quantity
+- explicit limit-price policy
+- day/GTC time in force
+
+Submit-only fields:
+
+- session attestation hash
+- scoped authorization hash
+- Decision Lease id
+- Guardian state hash
+- risk config hash
+- instrument identity hash
+- local order id
+- idempotency key
+- lifecycle contract hash
+- broker capability registry hash
+- audit event id
+
+Cancel-only fields:
+
+- local order id
+- broker order id
+- cancel reason
+- idempotency key
+- lifecycle / capability / audit lineage
+
+Replace-only fields:
+
+- local order id
+- broker order id
+- instrument identity hash
+- symbol and side
+- replacement idempotency key
+- replacement positive decimal quantity
+- replacement limit-price policy
+- replacement time in force
+- replace reason
+- lifecycle / capability / audit lineage
+
+Source validator:
+`openclaw_types::stock_etf_paper_order_request::StockEtfPaperOrderRequestEnvelopeV1`.
+The validator rejects wrong lane/broker/environment, unsupported IPC methods,
+operation/scope/effect mismatches, missing hashes/ids, lower-case or unsafe
+symbols, CFD/crypto/cash instrument kinds for orders, non-positive decimal
+quantities, implicit or mismatched limit-price policy, market orders with a
+limit price, cancel requests polluted by submit order-shape fields, replace
+requests polluted by original mutable fields, IBKR contact, connector runtime,
+serialized secrets, routed orders, Bybit path reuse, live/tiny-live authority,
+margin/short/options/CFD requests, and Python direct broker writes.
+This contract creates no order and only defines the typed request envelope that
+future runtime code must satisfy before reaching the paper lifecycle.
+
 ## 10. `ibkr_paper_order_lifecycle_v1`
 
 Required fields:
