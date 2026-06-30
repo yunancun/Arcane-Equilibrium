@@ -935,3 +935,10 @@ Do not paste long reports or stable architecture into TODO.
 - Policy status now carries `lane_scoped_ipc_contract_id`, `readonly_probe_request_contract_id`, `read_rows_require_lane_scoped_ipc`, and `read_rows_require_readonly_probe_request` under `broker_capability_registry`.
 - FastAPI treats an accepted broker capability registry that omits or mismatches those read-row gate claims as `contract_violation_blocked`.
 - Verification passed: Python compile PASS; Node syntax PASS; focused policy/static `15 passed`; focused engine policy-status `1 passed`; full Stock/ETF FastAPI/static `94 passed`; engine `stock_etf` filter `29 passed`; workspace `cargo check` PASS; `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Read-Only Probe Request Operation Binding
+
+- Source-only IPC checkpoint makes `stock_etf.preview_readonly_probe` derive the top-level broker decision operation from an accepted `stock_etf_ibkr_readonly_probe_request_v1` envelope instead of always using method fallback `health_read`.
+- Invalid or parse-failed readonly-probe payloads are not trusted for operation selection and still fall back to the method-level `HealthRead` fixture boundary.
+- Added a market-data readonly-probe IPC test proving a valid `market_data_snapshot` request yields top-level `decision.operation=market_data_read` while remaining `allowed=false` with no contact or routing side effects.
+- Verification passed: `rustfmt`; readonly-probe IPC focused `3 passed`; engine `stock_etf` filter `30 passed`; workspace `cargo check` PASS; `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.

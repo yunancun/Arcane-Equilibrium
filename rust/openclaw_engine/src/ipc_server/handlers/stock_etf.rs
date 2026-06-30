@@ -125,7 +125,7 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
             JsonRpcResponse::success(id, disable_cleanup_status_summary(phase2))
         }
         _ => {
-            let operation = match operation_for_method(method) {
+            let operation = match operation_for_method_and_params(method, params) {
                 Some(op) => op,
                 None => {
                     return JsonRpcResponse::error(
@@ -1753,6 +1753,23 @@ fn operation_for_method(method: &str) -> Option<BrokerOperation> {
         "stock_etf.preview_readonly_probe" => Some(BrokerOperation::HealthRead),
         _ => None,
     }
+}
+
+fn operation_for_method_and_params(
+    method: &str,
+    params: &serde_json::Value,
+) -> Option<BrokerOperation> {
+    if method == "stock_etf.preview_readonly_probe" {
+        return readonly_probe_operation_from_params(params)
+            .or_else(|| operation_for_method(method));
+    }
+    operation_for_method(method)
+}
+
+fn readonly_probe_operation_from_params(params: &serde_json::Value) -> Option<BrokerOperation> {
+    let request =
+        serde_json::from_value::<StockEtfIbkrReadonlyProbeRequestV1>(params.clone()).ok()?;
+    request.validate().accepted.then_some(request.operation)
 }
 
 fn paper_request_method_for_ipc(method: &str) -> Option<StockEtfLaneScopedIpcMethod> {
