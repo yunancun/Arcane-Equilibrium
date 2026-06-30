@@ -14,7 +14,7 @@ This directory stores broker capability contracts and default-off runtime postur
 
 `ibkr_paper_order_lifecycle.toml` records the default-blocked paper order lifecycle and append-only event log shape. It does not authorize connector creation or paper orders.
 
-`stock_etf_broker_capability_registry.template.toml` records the default-blocked broker capability registry contract shape. It is source-only and does not contact IBKR, create secrets, create connectors, route orders, or change Bybit live execution behavior.
+`stock_etf_broker_capability_registry.template.toml` records the default-blocked broker capability registry contract shape with exact `broker_capability_registry_v1` / source-version fields. It is source-only and does not contact IBKR, create secrets, create connectors, route orders, or change Bybit live execution behavior.
 
 `stock_etf_lane_scoped_ipc.template.toml` records the default-blocked lane-scoped IPC method matrix contract shape. It does not start IPC, contact IBKR, create connectors, route paper orders, inspect secrets, or change Bybit live execution behavior.
 

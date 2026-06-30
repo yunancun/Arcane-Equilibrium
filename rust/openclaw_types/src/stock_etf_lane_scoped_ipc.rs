@@ -7,6 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::stock_etf_broker_capability_registry::STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID;
 use crate::stock_etf_lane::{
     AssetLane, AuthorityScope, Broker, BrokerOperation, StockEtfDenialReason,
 };
@@ -95,7 +96,7 @@ const PAPER_EFFECT_GATES: &[&str] = &[
     "idempotency_key",
     "lane_scoped_ipc_v1",
     "ibkr_paper_order_lifecycle_v1",
-    "broker_capability_registry_v1",
+    STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID,
     "audit.asset_lane_events_v1",
 ];
 const FILL_IMPORT_GATES: &[&str] = &[
@@ -110,7 +111,7 @@ const PREVIEW_GATES: &[&str] = &[
     "instrument_identity_contract_v1",
     "stock_etf_pit_universe_contract_v1",
     STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID,
-    "broker_capability_registry_v1",
+    STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID,
 ];
 const SHADOW_GATES: &[&str] = &[
     STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,

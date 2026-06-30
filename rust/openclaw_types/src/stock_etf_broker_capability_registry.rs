@@ -52,6 +52,7 @@ const REQUIRED_OPERATIONS: &[BrokerOperation] = &[
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StockEtfBrokerCapabilityRegistryV1 {
     pub registry_id: String,
+    pub source_version: u32,
     pub asset_lane: AssetLane,
     pub broker: Broker,
     pub bybit_live_execution_unchanged: bool,
@@ -68,6 +69,7 @@ impl Default for StockEtfBrokerCapabilityRegistryV1 {
     fn default() -> Self {
         Self {
             registry_id: String::new(),
+            source_version: 0,
             asset_lane: AssetLane::CryptoPerp,
             broker: Broker::Bybit,
             bybit_live_execution_unchanged: false,
@@ -86,6 +88,7 @@ impl StockEtfBrokerCapabilityRegistryV1 {
     pub fn accepted_fixture() -> Self {
         Self {
             registry_id: STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID.to_string(),
+            source_version: 1,
             asset_lane: AssetLane::StockEtfCash,
             broker: Broker::Ibkr,
             bybit_live_execution_unchanged: true,
@@ -112,6 +115,9 @@ impl StockEtfBrokerCapabilityRegistryV1 {
 
         if self.registry_id != STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID {
             blockers.push(Blocker::RegistryIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
         }
         if self.asset_lane != AssetLane::StockEtfCash {
             blockers.push(Blocker::WrongAssetLane);
@@ -382,6 +388,7 @@ impl<B> StockEtfBrokerCapabilityVerdict<B> {
 #[serde(rename_all = "snake_case")]
 pub enum StockEtfBrokerCapabilityBlocker {
     RegistryIdMismatch,
+    SourceVersionMismatch,
     WrongAssetLane,
     WrongBroker,
     BybitLiveExecutionNotProtected,
