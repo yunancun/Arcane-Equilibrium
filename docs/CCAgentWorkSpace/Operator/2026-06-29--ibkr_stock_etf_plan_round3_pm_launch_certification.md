@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 58 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 59 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -1253,6 +1253,36 @@ Verification 已過：
 - `rustfmt`：PASS
 - Engine `stock_etf` filter：`31 passed`
 - Rust IPC handler/test split static guards：`4 passed`
+- Full Stock/ETF FastAPI/static：`105 passed`
+- IBKR timeline + trace-title structure guard：`2 passed`
+- `git diff --check`：PASS
+
+邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 IBKR contact、沒有 SDK import、
+沒有 socket/HTTP、沒有 secret access/creation、沒有 connector runtime、沒有 read probe
+execution、沒有 paper order/cancel/replace、沒有 fill import、沒有 evidence writer、沒有
+DB apply、沒有 evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live
+execution 行為。
+
+## 2026-06-30 Operator Update — Route Fixture Split Guard
+
+本 session 已降低 Stock/ETF FastAPI route fixture 的結構風險：
+
+- 將 `stock_etf_route_fixtures.py` 拆成同名 package：
+  `stock_etf_route_fixtures/`。
+- Package 內部按責任切分為 `app.py`、`phase2_payloads.py`、
+  `phase3_payloads.py`、`phase5_payloads.py` 與 `__init__.py` re-export。
+- 既有 route tests 的 `from stock_etf_route_fixtures import ...` import surface
+  不變。
+- 原 1525 行 fixture 檔移除；拆分後各模組為 `57`、`63`、`482`、`629`、
+  `364` 行，全部低於 800 行 review-attention threshold。
+- 新增 structure guard，要求 legacy flat helper 保持移除、package module/export
+  surface 穩定，並阻止 payload fixture 模組引入 network / IBKR SDK / file-write
+  token。
+
+Verification 已過：
+
+- Route fixture `py_compile`：PASS
+- Route fixture split static guard：`3 passed`
 - Full Stock/ETF FastAPI/static：`105 passed`
 - IBKR timeline + trace-title structure guard：`2 passed`
 - `git diff --check`：PASS
