@@ -9,6 +9,7 @@ from .stock_etf_data_foundation_normalizers import (
 from .stock_etf_disable_cleanup_normalizers import _normalize_disable_cleanup_status
 from .stock_etf_evidence_normalizers import _normalize_evidence_status
 from .stock_etf_paper_normalizers import _normalize_paper_status
+from .stock_etf_phase0_normalizers import _normalize_phase0_status
 from .stock_etf_policy_normalizers import _normalize_policy_status
 from .stock_etf_readiness_normalizers import (
     _normalize_lane_status,

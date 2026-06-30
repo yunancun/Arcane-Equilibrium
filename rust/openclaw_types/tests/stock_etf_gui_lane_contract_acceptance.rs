@@ -11,10 +11,11 @@ use openclaw_types::{
     STOCK_ETF_GUI_DATA_FOUNDATION_STATUS_ENDPOINT, STOCK_ETF_GUI_DISABLE_CLEANUP_STATUS_ENDPOINT,
     STOCK_ETF_GUI_EVIDENCE_STATUS_ENDPOINT, STOCK_ETF_GUI_LANE_CONTRACT_ID,
     STOCK_ETF_GUI_LANE_STATUS_ENDPOINT, STOCK_ETF_GUI_LAUNCH_STATUS_ENDPOINT,
-    STOCK_ETF_GUI_PAPER_STATUS_ENDPOINT, STOCK_ETF_GUI_POLICY_STATUS_ENDPOINT,
-    STOCK_ETF_GUI_READINESS_ENDPOINT, STOCK_ETF_GUI_RECONCILIATION_STATUS_ENDPOINT,
-    STOCK_ETF_GUI_RELEASE_PACKET_STATUS_ENDPOINT, STOCK_ETF_GUI_SCORECARD_STATUS_ENDPOINT,
-    STOCK_ETF_GUI_SHADOW_STATUS_ENDPOINT, STOCK_ETF_GUI_UNIVERSE_STATUS_ENDPOINT,
+    STOCK_ETF_GUI_PAPER_STATUS_ENDPOINT, STOCK_ETF_GUI_PHASE0_STATUS_ENDPOINT,
+    STOCK_ETF_GUI_POLICY_STATUS_ENDPOINT, STOCK_ETF_GUI_READINESS_ENDPOINT,
+    STOCK_ETF_GUI_RECONCILIATION_STATUS_ENDPOINT, STOCK_ETF_GUI_RELEASE_PACKET_STATUS_ENDPOINT,
+    STOCK_ETF_GUI_SCORECARD_STATUS_ENDPOINT, STOCK_ETF_GUI_SHADOW_STATUS_ENDPOINT,
+    STOCK_ETF_GUI_UNIVERSE_STATUS_ENDPOINT,
 };
 
 #[test]
@@ -59,6 +60,10 @@ fn accepted_fixture_is_display_only_get_only_and_crypto_default() {
     assert_eq!(
         contract.lane_status_endpoint,
         STOCK_ETF_GUI_LANE_STATUS_ENDPOINT
+    );
+    assert_eq!(
+        contract.phase0_status_endpoint,
+        STOCK_ETF_GUI_PHASE0_STATUS_ENDPOINT
     );
     assert_eq!(
         contract.data_foundation_status_endpoint,
@@ -114,6 +119,7 @@ fn accepted_fixture_is_display_only_get_only_and_crypto_default() {
     );
     assert!(contract.readiness_endpoint_get_only);
     assert!(contract.lane_status_endpoint_get_only);
+    assert!(contract.phase0_status_endpoint_get_only);
     assert!(contract.data_foundation_status_endpoint_get_only);
     assert!(contract.policy_status_endpoint_get_only);
     assert!(contract.authorization_status_endpoint_get_only);
@@ -156,6 +162,8 @@ fn gui_lane_contract_requires_all_stock_etf_readonly_get_endpoints() {
     contract.readiness_endpoint_get_only = false;
     contract.lane_status_endpoint = "/api/v1/stock-etf/status".to_string();
     contract.lane_status_endpoint_get_only = false;
+    contract.phase0_status_endpoint = "/api/v1/stock-etf/phase0".to_string();
+    contract.phase0_status_endpoint_get_only = false;
     contract.data_foundation_status_endpoint = "/api/v1/stock-etf/data".to_string();
     contract.data_foundation_status_endpoint_get_only = false;
     contract.policy_status_endpoint = "/api/v1/stock-etf/policy".to_string();
@@ -198,6 +206,12 @@ fn gui_lane_contract_requires_all_stock_etf_readonly_get_endpoints() {
     assert!(verdict
         .blockers
         .contains(&StockEtfGuiLaneBlocker::LaneStatusEndpointNotGetOnly));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfGuiLaneBlocker::Phase0StatusEndpointMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfGuiLaneBlocker::Phase0StatusEndpointNotGetOnly));
     assert!(verdict
         .blockers
         .contains(&StockEtfGuiLaneBlocker::DataFoundationStatusEndpointMismatch));
@@ -402,6 +416,10 @@ fn blocked_template_is_parseable_and_secret_free() {
     assert_eq!(
         parsed.lane_status_endpoint,
         STOCK_ETF_GUI_LANE_STATUS_ENDPOINT
+    );
+    assert_eq!(
+        parsed.phase0_status_endpoint,
+        STOCK_ETF_GUI_PHASE0_STATUS_ENDPOINT
     );
     assert_eq!(
         parsed.account_status_endpoint,

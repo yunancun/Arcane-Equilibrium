@@ -815,6 +815,9 @@ function renderFallback() {
   renderReconciliationStatus(reconciliationFallback('api_unavailable'));
   renderScorecardStatus(scorecardFallback('api_unavailable'));
   renderLaunchStatus(launchFallback('api_unavailable'));
+  if (window.renderPhase0Status && window.phase0Fallback) {
+    window.renderPhase0Status(window.phase0Fallback('api_unavailable'));
+  }
   if (window.renderReleasePacketStatus && window.releasePacketFallback) {
     window.renderReleasePacketStatus(window.releasePacketFallback('api_unavailable'));
   }
@@ -1833,6 +1836,7 @@ async function loadReadiness() {
     reconciliationPayload,
     scorecardPayload,
     launchPayload,
+    phase0Payload,
     releasePacketPayload,
     disableCleanupPayload,
   ] = await Promise.all([
@@ -1849,6 +1853,7 @@ async function loadReadiness() {
     ocApi(RECONCILIATION_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(SCORECARD_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(LAUNCH_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
+    ocApi(window.STOCK_ETF_PHASE0_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(window.STOCK_ETF_RELEASE_PACKET_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
     ocApi(window.STOCK_ETF_DISABLE_CLEANUP_STATUS_ENDPOINT, { method: 'GET', timeoutMs: 5000, toastOnError: false }),
   ]);
@@ -1888,6 +1893,13 @@ async function loadReadiness() {
       ? launchPayload.data
       : launchFallback('api_unavailable')
   );
+  if (window.renderPhase0Status && window.phase0Fallback) {
+    window.renderPhase0Status(
+      phase0Payload && phase0Payload.data
+        ? phase0Payload.data
+        : window.phase0Fallback('api_unavailable')
+    );
+  }
   if (window.renderReleasePacketStatus && window.releasePacketFallback) {
     window.renderReleasePacketStatus(
       releasePacketPayload && releasePacketPayload.data

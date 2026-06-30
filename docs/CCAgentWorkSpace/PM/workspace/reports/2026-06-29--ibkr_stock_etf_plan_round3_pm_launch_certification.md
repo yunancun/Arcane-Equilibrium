@@ -262,3 +262,42 @@ PM 判定：checkpoint 可接受，但仍不是 launch approval。未批准 IBKR
 connector runtime、release packet materialization、paper-shadow launch、paper order、
 fill import、evidence clock、scorecard writer、DB apply、Phase 2/3/5 start、
 tiny-live、live、Linux runtime sync/restart 或 Bybit behavior change。
+
+## 2026-06-30 PM Session Checkpoint — Phase 0 Packet Status
+
+PM 已在本 session 追加下一個 source-only checkpoint：
+`phase0-status` read-only surface。
+
+已完成：
+
+- Rust IPC：`stock_etf.get_phase0_status` fixture，來源為
+  `stock_etf_phase0_contract_packet_manifest_v1` accepted source manifest；runtime
+  phase、connector、order、secret、DB、evidence-clock、scorecard、launch、Bybit reuse
+  fields 全部 blocked false。
+- Rust dispatch/registry：method 為 readonly、slot none，且不進 Bybit live-write token
+  surface；`lane_scoped_ipc_v1` 增加 `GetPhase0Status`。
+- FastAPI：authenticated/no-store
+  `GET /api/v1/stock-etf/phase0-status`，只 read IPC、fail-closed normalize，
+  並拒絕 client-supplied Phase 0/launch/live state。
+- GUI：`Phase 0 Packet` metric 與 `Phase 0 Packet Status` panel；render hook 拆入
+  `/static/tab-stock-etf-phase0.js`，主 Stock/ETF JS 仍低於 2000 行。
+- Contracts：`gui_lane_contract_v1` 增加 exact GET-only phase0-status endpoint；
+  blocked template、settings README、Phase 0 named contract packet endpoint 清單同步更新。
+
+Verification：
+
+- Python compile PASS。
+- Full Stock/ETF FastAPI/static pytest `89 passed`。
+- Node check PASS for `tab-stock-etf.js`、`tab-stock-etf-phase0.js`、
+  `tab-stock-etf-release-packet.js`、`tab-stock-etf-disable-cleanup.js`。
+- HTML inline parser PASS（1 inline script）。
+- Rust format checks PASS（含 `lib.rs` with `skip_children=true`）。
+- Engine Stock/ETF cargo filter `21 passed`。
+- Full openclaw_types PASS：`35` unit/golden + `206` integration/acceptance + `0` doc-tests。
+- Workspace `cargo check` PASS。
+
+PM 判定：checkpoint 可接受，但仍不是 launch approval。未批准 IBKR contact、secret、
+connector runtime、Phase 1/2/3/4/5 runtime start、release packet materialization、
+paper-shadow launch、paper order、fill import、evidence clock、scorecard writer、
+DB apply、GUI lane authority、tiny-live、live、Linux runtime sync/restart 或 Bybit
+behavior change。

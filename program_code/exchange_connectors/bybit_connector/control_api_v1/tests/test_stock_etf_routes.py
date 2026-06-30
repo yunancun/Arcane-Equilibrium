@@ -76,6 +76,7 @@ def test_stock_etf_openapi_exposes_stock_etf_get_only(client_fail_closed: TestCl
         "/api/v1/stock-etf/lane-status": {"get"},
         "/api/v1/stock-etf/launch-status": {"get"},
         "/api/v1/stock-etf/paper-status": {"get"},
+        "/api/v1/stock-etf/phase0-status": {"get"},
         "/api/v1/stock-etf/policy-status": {"get"},
         "/api/v1/stock-etf/readiness": {"get"},
         "/api/v1/stock-etf/reconciliation-status": {"get"},
@@ -97,6 +98,7 @@ def test_stock_etf_runtime_rejects_write_methods(client_fail_closed: TestClient)
         "/api/v1/stock-etf/lane-status",
         "/api/v1/stock-etf/launch-status",
         "/api/v1/stock-etf/paper-status",
+        "/api/v1/stock-etf/phase0-status",
         "/api/v1/stock-etf/policy-status",
         "/api/v1/stock-etf/readiness",
         "/api/v1/stock-etf/reconciliation-status",
@@ -136,6 +138,9 @@ def test_stock_etf_router_registered_in_main_app() -> None:
 
 def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     html_source = (STATIC_DIR / "tab-stock-etf.html").read_text(encoding="utf-8")
+    phase0_js = (STATIC_DIR / "tab-stock-etf-phase0.js").read_text(
+        encoding="utf-8"
+    )
     release_packet_js = (STATIC_DIR / "tab-stock-etf-release-packet.js").read_text(
         encoding="utf-8"
     )
@@ -143,7 +148,17 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
         encoding="utf-8"
     )
     js_source = (STATIC_DIR / "tab-stock-etf.js").read_text(encoding="utf-8")
-    source = html_source + "\n" + release_packet_js + "\n" + disable_cleanup_js + "\n" + js_source
+    source = (
+        html_source
+        + "\n"
+        + phase0_js
+        + "\n"
+        + release_packet_js
+        + "\n"
+        + disable_cleanup_js
+        + "\n"
+        + js_source
+    )
     assert "/api/v1/stock-etf/account-status" in source
     assert "/api/v1/stock-etf/authorization-status" in source
     assert "/api/v1/stock-etf/data-foundation-status" in source
@@ -152,6 +167,7 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     assert "/api/v1/stock-etf/lane-status" in source
     assert "/api/v1/stock-etf/launch-status" in source
     assert "/api/v1/stock-etf/paper-status" in source
+    assert "/api/v1/stock-etf/phase0-status" in source
     assert "/api/v1/stock-etf/policy-status" in source
     assert "/api/v1/stock-etf/readiness" in source
     assert "/api/v1/stock-etf/reconciliation-status" in source
@@ -159,6 +175,7 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     assert "/api/v1/stock-etf/scorecard-status" in source
     assert "/api/v1/stock-etf/shadow-status" in source
     assert "/api/v1/stock-etf/universe-status" in source
+    assert "tab-stock-etf-phase0.js" in html_source
     assert "tab-stock-etf-release-packet.js" in html_source
     assert "tab-stock-etf-disable-cleanup.js" in html_source
     assert "tab-stock-etf.js" in html_source
@@ -182,6 +199,8 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     assert "se-scorecard-body" in source
     assert "se-launch-status" in source
     assert "se-launch-body" in source
+    assert "se-phase0-status" in source
+    assert "se-phase0-body" in source
     assert "se-release-packet-status" in source
     assert "se-release-packet-body" in source
     assert "se-disable-cleanup-status" in source

@@ -13,20 +13,21 @@ use openclaw_types::{
     IbkrSessionAttestationV1, InstrumentKind, NonBybitApiAllowlistV1,
     StockEtfBrokerCapabilityRegistryV1, StockEtfDisableCleanupRunbookV1,
     StockEtfEvidenceClockDayV1, StockEtfFeatureFlags, StockEtfGateInputs,
-    StockEtfInstrumentIdentityV1, StockEtfPitUniverseV1, StockEtfReferenceDataSourcesV1,
-    StockEtfReleasePacketV1, StockEtfRiskPolicyV1, StockEtfScorecardVerdictV1,
-    StockEtfStrategyHypothesisV1, StockMarketDataProvenanceV1, StockShadowFillModelV1,
-    TinyLiveAdrEligibilityV1, BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID,
-    BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID, FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID,
-    IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID, IBKR_PAPER_ATTESTATION_CONTRACT_ID,
-    IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID, IBKR_SECRET_SLOT_CONTRACT_ID,
-    IBKR_SESSION_ATTESTATION_CONTRACT_ID, STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID,
-    STOCK_ETF_DISABLE_CLEANUP_RUNBOOK_ID, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
-    STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID, STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
-    STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID, STOCK_ETF_RELEASE_PACKET_CONTRACT_ID,
-    STOCK_ETF_RISK_POLICY_CONTRACT_ID, STOCK_ETF_SCORECARD_VERDICT_CONTRACT_ID,
-    STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID, STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID,
-    STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID, STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
+    StockEtfInstrumentIdentityV1, StockEtfPhase0ContractPacketManifestV1, StockEtfPitUniverseV1,
+    StockEtfReferenceDataSourcesV1, StockEtfReleasePacketV1, StockEtfRiskPolicyV1,
+    StockEtfScorecardVerdictV1, StockEtfStrategyHypothesisV1, StockMarketDataProvenanceV1,
+    StockShadowFillModelV1, TinyLiveAdrEligibilityV1,
+    BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID, BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
+    FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID, IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
+    IBKR_PAPER_ATTESTATION_CONTRACT_ID, IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
+    IBKR_SECRET_SLOT_CONTRACT_ID, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
+    STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID, STOCK_ETF_DISABLE_CLEANUP_RUNBOOK_ID,
+    STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID, STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID,
+    STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID, STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID,
+    STOCK_ETF_RELEASE_PACKET_CONTRACT_ID, STOCK_ETF_RISK_POLICY_CONTRACT_ID,
+    STOCK_ETF_SCORECARD_VERDICT_CONTRACT_ID, STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
+    STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
+    STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
 };
 
 pub(in crate::ipc_server) fn handle_stock_etf_ipc(
@@ -63,6 +64,9 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
                 "bybit_ipc_reused": false,
             }),
         ),
+        "stock_etf.get_phase0_status" => {
+            JsonRpcResponse::success(id, phase0_status_summary(phase2))
+        }
         "stock_etf.get_readiness" => JsonRpcResponse::success(
             id,
             serde_json::json!({
@@ -149,6 +153,69 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
             )
         }
     }
+}
+
+fn phase0_status_summary(phase2: serde_json::Value) -> serde_json::Value {
+    let manifest = StockEtfPhase0ContractPacketManifestV1::accepted_fixture();
+    let verdict = manifest.validate();
+    serde_json::json!({
+        "phase": "phase0_contract_packet_status_source_fixture",
+        "asset_lane": AssetLane::StockEtfCash,
+        "broker": Broker::Ibkr,
+        "scope": manifest.scope,
+        "gui_authority": "display_only",
+        "phase0_status_state": "accepted_no_runtime_authority",
+        "phase0_accepted": verdict.accepted,
+        "phase0_blockers": verdict.blockers,
+        "contract_count": manifest.contracts.len(),
+        "contracts": manifest.contracts,
+        "manifest": {
+            "schema": manifest.schema,
+            "generated_at": manifest.generated_at,
+            "status": manifest.status,
+            "scope": manifest.scope,
+            "adr": manifest.authority.adr,
+            "amd": manifest.authority.amd,
+            "contract_packet": manifest.authority.contract_packet,
+        },
+        "api_baseline": {
+            "selected": manifest.api_baseline.selected,
+            "host_policy": manifest.api_baseline.host_policy,
+            "paper_port_default_candidate": manifest.api_baseline.paper_port_default_candidate,
+            "live_ports_denied": manifest.api_baseline.live_ports_denied,
+            "ibkr_call_performed": manifest.api_baseline.ibkr_call_performed,
+        },
+        "global_denials": {
+            "ibkr_live": manifest.global_denials.ibkr_live,
+            "tiny_live": manifest.global_denials.tiny_live,
+            "margin": manifest.global_denials.margin,
+            "short": manifest.global_denials.short,
+            "options": manifest.global_denials.options,
+            "cfd": manifest.global_denials.cfd,
+            "transfer": manifest.global_denials.transfer,
+            "account_management_writes": manifest.global_denials.account_management_writes,
+            "python_broker_write_authority": manifest.global_denials.python_broker_write_authority,
+            "gui_lane_authority": manifest.global_denials.gui_lane_authority,
+            "automatic_promotion": manifest.global_denials.automatic_promotion,
+        },
+        "phase_unlock": manifest.phase_unlock,
+        "phase1_runtime_started": false,
+        "phase2_started": false,
+        "phase3_started": false,
+        "phase4_runtime_started": false,
+        "phase5_started": false,
+        "paper_shadow_launch_authorized": false,
+        "tiny_live_or_live_authorized": false,
+        "connector_runtime_started": false,
+        "db_apply_performed": false,
+        "evidence_clock_started": false,
+        "scorecard_writer_started": false,
+        "ibkr_call_performed": false,
+        "secret_slot_touched": false,
+        "order_routed": false,
+        "bybit_ipc_reused": false,
+        "phase2": phase2,
+    })
 }
 
 fn data_foundation_status_summary(phase2: serde_json::Value) -> serde_json::Value {

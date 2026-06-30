@@ -149,3 +149,31 @@ Verification 已過：
 邊界不變：沒有 IBKR contact、沒有 secret access/creation、沒有 connector runtime、
 沒有 paper order、沒有 fill import、沒有 evidence clock、沒有 scorecard writer、
 沒有 DB apply、沒有 Linux runtime sync/restart，也沒有改動 Bybit live execution 行為。
+
+## 2026-06-30 Operator Update — Phase 0 Packet Status
+
+本 session 已完成下一個 source-only checkpoint：`phase0-status`。
+
+你現在會在 Stock/ETF GUI 看到新的 `Phase 0 Packet` 指標與
+`Phase 0 Packet Status` 面板；後端是
+`GET /api/v1/stock-etf/phase0-status`，Rust IPC 是
+`stock_etf.get_phase0_status`。
+
+這只是顯示 `stock_etf_phase0_contract_packet_manifest_v1` 的 accepted source
+manifest、contract count、API baseline、global denials 與 phase unlock posture；
+不是 Phase 1+ 啟動、不是 release packet 物化、不是 paper/shadow launch、不是
+connector runtime，也不是任何 order/write path。
+
+Verification 已過：
+
+- Full Stock/ETF FastAPI/static：`89 passed`
+- Engine Stock/ETF：`21 passed`
+- Full openclaw_types：`35` unit/golden + `206` integration/acceptance + `0` doc-tests
+- Workspace `cargo check`：PASS
+- Node check：`tab-stock-etf.js` + `tab-stock-etf-phase0.js` +
+  `tab-stock-etf-release-packet.js` + `tab-stock-etf-disable-cleanup.js` PASS
+
+邊界不變：沒有 IBKR contact、沒有 secret access/creation、沒有 connector runtime、
+沒有 Phase 1/2/3/4/5 runtime start、沒有 paper order、沒有 fill import、沒有
+evidence clock、沒有 scorecard writer、沒有 DB apply、沒有 Linux runtime sync/restart，
+也沒有改動 Bybit live execution 行為。

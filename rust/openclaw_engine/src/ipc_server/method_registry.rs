@@ -67,6 +67,12 @@ pub const STOCK_ETF_GET_LANE_STATUS: IpcMethodSpec = IpcMethodSpec {
     slot: IpcSlotRequirement::None,
 };
 
+pub const STOCK_ETF_GET_PHASE0_STATUS: IpcMethodSpec = IpcMethodSpec {
+    name: "stock_etf.get_phase0_status",
+    readonly: true,
+    slot: IpcSlotRequirement::None,
+};
+
 pub const STOCK_ETF_GET_READINESS: IpcMethodSpec = IpcMethodSpec {
     name: "stock_etf.get_readiness",
     readonly: true,
@@ -193,6 +199,7 @@ pub const IPC_METHOD_REGISTRY: &[IpcMethodSpec] = &[
     PROCESS_EARN_INTENT,
     EVALUATE_PROMOTION_CRITERIA,
     STOCK_ETF_GET_LANE_STATUS,
+    STOCK_ETF_GET_PHASE0_STATUS,
     STOCK_ETF_GET_READINESS,
     STOCK_ETF_GET_DATA_FOUNDATION_STATUS,
     STOCK_ETF_GET_POLICY_STATUS,
@@ -273,6 +280,7 @@ mod tests {
     fn stock_etf_methods_are_registered_as_lane_scoped_fixtures() {
         for name in [
             "stock_etf.get_lane_status",
+            "stock_etf.get_phase0_status",
             "stock_etf.get_readiness",
             "stock_etf.get_data_foundation_status",
             "stock_etf.get_policy_status",
@@ -311,6 +319,7 @@ mod tests {
     fn stock_etf_registry_keeps_readonly_and_write_fixture_boundaries_explicit() {
         for name in [
             "stock_etf.get_lane_status",
+            "stock_etf.get_phase0_status",
             "stock_etf.get_readiness",
             "stock_etf.get_account_status",
             "stock_etf.get_evidence_status",
