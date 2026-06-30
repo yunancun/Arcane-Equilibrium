@@ -370,7 +370,11 @@ async fn stock_etf_phase0_status_exposes_accepted_source_manifest_without_runtim
     );
     assert_eq!(result["phase0_accepted"], true);
     assert_eq!(result["phase0_blockers"].as_array().unwrap().len(), 0);
-    assert_eq!(result["contract_count"], 29);
+    assert_eq!(result["contract_count"], 30);
+    assert!(json_array_contains(
+        &result["contracts"],
+        "stock_etf_paper_fill_import_request_v1"
+    ));
     assert_eq!(
         result["manifest"]["schema"],
         "stock_etf_phase0_contract_packet_manifest_v1"

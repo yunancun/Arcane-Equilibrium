@@ -520,6 +520,45 @@ Phase 1/2/3/4/5 runtime start、paper order/cancel/replace、fill import、DB ap
 Postgres dry-run、evidence clock、scorecard writer、tiny-live、live、Linux runtime
 sync/restart 或 Bybit behavior change。
 
+## 2026-06-30 PM Session Checkpoint — Paper Fill Import Request Contract
+
+PM 已在本 session 追加 Phase 1D source-only checkpoint：
+`stock_etf_paper_fill_import_request_v1`。這是 contract/test/template/spec
+hardening，不是 fill importer 或 DB persistence。
+
+已完成：
+
+- Rust `openclaw_types` 新增 `StockEtfPaperFillImportRequestV1`，作為未來
+  `stock_etf.import_paper_fills` 入口與 lifecycle reconstruction 之間的 typed
+  request contract。
+- Validator 固定 stock/ETF + IBKR + paper identity，read-only fill-import authority，
+  session/lifecycle/event-log/redaction/source lineage，broker order/execution/
+  commission ids，import idempotency，observed order state，stale-state policy，
+  raw/redacted artifact hashes。
+- Validator 拒絕 duplicate import、stale unknown state without policy、IBKR contact、
+  connector runtime、secret serialization、fill import side effect、DB apply、order
+  routing、Bybit path reuse、live/tiny-live authority、margin/short/options/CFD、Python
+  direct broker writes。
+- Added blocked secret-free template and synchronized Phase0 manifest source, repository
+  manifest JSON, FastAPI Phase0 count, route fixtures/tests, and Phase0 packet spec.
+  Contract count is now 30.
+
+Verification：
+
+- Fill import request acceptance `6 passed`。
+- Phase0 manifest acceptance `6 passed`。
+- FastAPI Phase0/StockETF focused tests `14 passed`。
+- Full openclaw_types `35` unit/golden + `227` integration/acceptance +
+  `0` doc-tests。
+- Engine Stock/ETF cargo filter `23 passed`（既有 warnings only）。
+- Workspace `cargo check` PASS。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 1 runtime approval、fill importer
+approval、lifecycle writer approval 或 paper-order approval。未批准 IBKR contact、
+secret、connector runtime、Phase 1/2/3/4/5 runtime start、fill import、DB apply、
+Postgres dry-run、paper order/cancel/replace、evidence clock、scorecard writer、
+tiny-live、live、Linux runtime sync/restart 或 Bybit behavior change。
+
 ## 2026-06-30 PM Session Checkpoint — Paper Request Envelope Contract
 
 PM 已在本 session 追加 Phase 1D source-only checkpoint：

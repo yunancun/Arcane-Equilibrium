@@ -1404,6 +1404,53 @@ cancel/replace、不匯入 fill、不做 DB migration/apply、不做 Postgres dr
 evidence clock、不啟動 scorecard writer、不做 Linux runtime sync/restart、不啟動
 paper-shadow launch、不授權 tiny-live/live 或任何 Bybit behavior change。
 
+## 27. 2026-06-30 PM session source checkpoint：Paper Fill Import Request Contract
+
+本 session 繼續 Phase 1D source-only contract hardening。前面已補上 paper order
+request envelope 與 lifecycle contract；本 checkpoint 新增未來
+`stock_etf.import_paper_fills` 必須滿足的 typed request contract，先封住 fill
+idempotency、duplicate import、stale unknown-state 與 redaction/evidence lineage。
+
+新增 checkpoint：
+
+- Rust `openclaw_types` 新增 `stock_etf_paper_fill_import_request_v1`，位於
+  `stock_etf_paper_fill_import_request.rs`。
+- Contract 固定 `asset_lane=stock_etf_cash`、`broker=ibkr`、`environment=paper`、
+  `request_method=import_paper_fills`、`operation=paper_order_fill_import`、
+  `authority_scope=readonly`、`effect_capable=false`。
+- Validator 要求 session attestation hash、lifecycle contract id/hash、event-log
+  contract id/hash、redaction policy id/hash、source artifact hash、reconciliation run id、
+  broker order id、execution id、commission report id、import idempotency key、observed
+  order state、stale-state policy、raw artifact hash 與 redacted summary hash。
+- Validator 拒絕 duplicate import、沒有 policy 的 stale unknown state、IBKR contact、
+  connector runtime、serialized secret、fill import side effect、DB apply、order routed、
+  Bybit path reuse、live/tiny-live authority、margin/short/options/CFD request、Python
+  direct broker write。
+- 新增 blocked secret-free template
+  `settings/broker/stock_etf_paper_fill_import_request.template.toml`。
+- Phase0 manifest source、repository manifest JSON、FastAPI Phase0 count、route fixtures/tests
+  與 Phase0 packet spec 同步；contract count 從 29 更新為 30。
+
+驗證：
+
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_paper_fill_import_request_acceptance -- --nocapture`：
+  fill import request acceptance `6 passed`。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_types --test stock_etf_phase0_manifest_acceptance -- --nocapture`：
+  Phase0 manifest acceptance `6 passed`。
+- `python3 -m pytest -q ...test_stock_etf_phase0_status_routes.py ...test_stock_etf_routes.py`：
+  FastAPI Phase0/StockETF focused `14 passed`。
+- Full `cargo test --manifest-path rust/Cargo.toml -p openclaw_types`：
+  `35` unit/golden + `227` integration/acceptance + `0` doc-tests。
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf -- --nocapture`：
+  Stock/ETF engine filter `23 passed`（既有 warnings only）。
+- `cargo check --manifest-path rust/Cargo.toml --workspace`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不讀/建 secret、不啟動 connector runtime、
+不啟動 lifecycle writer、不啟動 Phase 1/2/3/4/5 runtime、不匯入 fill、不做 DB
+migration/apply、不做 Postgres dry-run、不啟動 evidence clock、不啟動 scorecard writer、
+不做 Linux runtime sync/restart、不送 paper order、不做 cancel/replace、不授權
+tiny-live/live 或任何 Bybit behavior change。
+
 ## 23. 2026-06-30 PM session source checkpoint：Paper Request Envelope Contract
 
 本 session 繼續 Phase 1D，但仍停留在 source-only contract。上一個 checkpoint 固定

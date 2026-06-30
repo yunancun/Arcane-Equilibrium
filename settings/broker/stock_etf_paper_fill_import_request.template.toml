@@ -1,0 +1,43 @@
+# ADR-0048 Stock/ETF paper fill import request template.
+#
+# This is a blocked, secret-free source template. It does not start IPC,
+# contact IBKR, create connectors, import fills, route orders, inspect secrets,
+# apply DB changes, or change Bybit live execution behavior.
+
+contract_id = ""
+source_version = 0
+asset_lane = "crypto_perp"
+broker = "bybit"
+environment = "live_reserved_denied"
+request_method = "unknown_denied"
+operation = "transfer_or_account_write"
+authority_scope = "denied"
+effect_capable = false
+request_id = ""
+session_attestation_hash = ""
+lifecycle_contract_id = ""
+lifecycle_contract_hash = ""
+event_log_contract_id = ""
+event_log_contract_hash = ""
+redaction_policy_contract_id = ""
+redaction_policy_hash = ""
+source_artifact_hash = ""
+reconciliation_run_id = ""
+broker_order_id = ""
+execution_id = ""
+commission_report_id = ""
+import_idempotency_key = ""
+raw_artifact_hash = ""
+redacted_summary_hash = ""
+duplicate_import_detected = false
+stale_unknown_state_without_policy = false
+ibkr_contact_performed = false
+connector_runtime_started = false
+secret_content_serialized = false
+fill_import_performed = false
+db_apply_performed = false
+order_routed = false
+bybit_path_reused = false
+live_or_tiny_live_authorized = false
+margin_short_options_cfd_requested = false
+python_direct_broker_write_requested = false
