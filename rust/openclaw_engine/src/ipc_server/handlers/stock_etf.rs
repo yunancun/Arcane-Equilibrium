@@ -10,13 +10,14 @@ use openclaw_types::{
     BrokerCapabilityRequest, BrokerEnvironment, BrokerLifecycleEventLogV1, BrokerOperation,
     IbkrExternalSurfaceGateV1, IbkrPaperAttestationPolicyV1, IbkrPhase2PolicyBundleV1,
     IbkrSessionAttestationV1, InstrumentKind, NonBybitApiAllowlistV1, StockEtfEvidenceClockDayV1,
-    StockEtfFeatureFlags, StockEtfGateInputs, StockEtfPitUniverseV1, StockEtfStrategyHypothesisV1,
-    StockMarketDataProvenanceV1, StockShadowFillModelV1,
+    StockEtfFeatureFlags, StockEtfGateInputs, StockEtfPitUniverseV1, StockEtfScorecardVerdictV1,
+    StockEtfStrategyHypothesisV1, StockMarketDataProvenanceV1, StockShadowFillModelV1,
     BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID, BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
     IBKR_PAPER_ATTESTATION_CONTRACT_ID, IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
     IBKR_SESSION_ATTESTATION_CONTRACT_ID, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
-    STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID, STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
-    STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID, STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
+    STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID, STOCK_ETF_SCORECARD_VERDICT_CONTRACT_ID,
+    STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
+    STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
 };
 
 pub(in crate::ipc_server) fn handle_stock_etf_ipc(
@@ -81,6 +82,9 @@ pub(in crate::ipc_server) fn handle_stock_etf_ipc(
         "stock_etf.get_paper_status" => JsonRpcResponse::success(id, paper_status_summary(phase2)),
         "stock_etf.get_reconciliation_status" => {
             JsonRpcResponse::success(id, reconciliation_status_summary(phase2))
+        }
+        "stock_etf.get_scorecard_status" => {
+            JsonRpcResponse::success(id, scorecard_status_summary(phase2))
         }
         _ => {
             let operation = match operation_for_method(method) {
@@ -261,6 +265,169 @@ fn reconciliation_status_summary(phase2: serde_json::Value) -> serde_json::Value
         "secret_slot_touched": false,
         "order_routed": false,
         "bybit_ipc_reused": false,
+    })
+}
+
+fn scorecard_status_summary(phase2: serde_json::Value) -> serde_json::Value {
+    let verdict = StockEtfScorecardVerdictV1::default();
+    let scorecard_verdict = verdict.validate();
+    let mut scorecard = serde_json::Map::new();
+    macro_rules! put_scorecard {
+        ($key:literal, $value:expr) => {
+            scorecard.insert($key.to_string(), serde_json::json!($value));
+        };
+    }
+    put_scorecard!(
+        "expected_contract_id",
+        STOCK_ETF_SCORECARD_VERDICT_CONTRACT_ID
+    );
+    put_scorecard!("contract_id", &verdict.contract_id);
+    put_scorecard!("source_version", verdict.source_version);
+    put_scorecard!("accepted", scorecard_verdict.accepted);
+    put_scorecard!("blockers", scorecard_verdict.blockers);
+    put_scorecard!("verdict_label", verdict.verdict_label);
+    put_scorecard!(
+        "scorecard_input_bundle_hash_present",
+        !verdict.scorecard_input_bundle_hash.is_empty()
+    );
+    put_scorecard!(
+        "evidence_clock_manifest_hash_present",
+        !verdict.evidence_clock_manifest_hash.is_empty()
+    );
+    put_scorecard!(
+        "dq_manifest_hash_present",
+        !verdict.dq_manifest_hash.is_empty()
+    );
+    put_scorecard!(
+        "formula_appendix_hash_present",
+        !verdict.formula_appendix_hash.is_empty()
+    );
+    put_scorecard!(
+        "statistical_preregistration_hash_present",
+        !verdict.statistical_preregistration_hash.is_empty()
+    );
+    put_scorecard!(
+        "benchmark_version_hash_present",
+        !verdict.benchmark_version_hash.is_empty()
+    );
+    put_scorecard!(
+        "cost_model_version_hash_present",
+        !verdict.cost_model_version_hash.is_empty()
+    );
+    put_scorecard!(
+        "strategy_hypothesis_hash_present",
+        !verdict.strategy_hypothesis_hash.is_empty()
+    );
+    put_scorecard!(
+        "reference_data_sources_hash_present",
+        !verdict.reference_data_sources_hash.is_empty()
+    );
+    put_scorecard!(
+        "scorecard_manifest_hash_present",
+        !verdict.scorecard_manifest_hash.is_empty()
+    );
+    put_scorecard!(
+        "verdict_rationale_hash_present",
+        !verdict.verdict_rationale_hash.is_empty()
+    );
+    put_scorecard!(
+        "paper_shadow_window_trading_days",
+        verdict.paper_shadow_window_trading_days
+    );
+    put_scorecard!("min_window_trading_days", verdict.min_window_trading_days);
+    put_scorecard!(
+        "independent_observation_count",
+        verdict.independent_observation_count
+    );
+    put_scorecard!(
+        "min_independent_observation_count",
+        verdict.min_independent_observation_count
+    );
+    put_scorecard!("gross_pnl_minor_units", verdict.gross_pnl_minor_units);
+    put_scorecard!("net_pnl_minor_units", verdict.net_pnl_minor_units);
+    put_scorecard!("commission_minor_units", verdict.commission_minor_units);
+    put_scorecard!(
+        "spread_slippage_minor_units",
+        verdict.spread_slippage_minor_units
+    );
+    put_scorecard!("fx_drag_minor_units", verdict.fx_drag_minor_units);
+    put_scorecard!("tax_drag_minor_units", verdict.tax_drag_minor_units);
+    put_scorecard!("benchmark_excess_lcb_bps", verdict.benchmark_excess_lcb_bps);
+    put_scorecard!(
+        "conservative_cost_stress_lcb_bps",
+        verdict.conservative_cost_stress_lcb_bps
+    );
+    put_scorecard!(
+        "paper_shadow_divergence_bps",
+        verdict.paper_shadow_divergence_bps
+    );
+    put_scorecard!(
+        "max_paper_shadow_divergence_bps",
+        verdict.max_paper_shadow_divergence_bps
+    );
+    put_scorecard!("psr_bps", verdict.psr_bps);
+    put_scorecard!("min_psr_bps", verdict.min_psr_bps);
+    put_scorecard!("dsr_bps", verdict.dsr_bps);
+    put_scorecard!("min_dsr_bps", verdict.min_dsr_bps);
+    put_scorecard!(
+        "concentration_label_passed",
+        verdict.concentration_label_passed
+    );
+    put_scorecard!("regime_label_passed", verdict.regime_label_passed);
+    put_scorecard!("breadth_label_passed", verdict.breadth_label_passed);
+    put_scorecard!("freshness_label_passed", verdict.freshness_label_passed);
+    put_scorecard!(
+        "survivorship_label_passed",
+        verdict.survivorship_label_passed
+    );
+    put_scorecard!(
+        "execution_realism_label_passed",
+        verdict.execution_realism_label_passed
+    );
+    put_scorecard!("qc_review_hash_present", !verdict.qc_review_hash.is_empty());
+    put_scorecard!(
+        "mit_review_hash_present",
+        !verdict.mit_review_hash.is_empty()
+    );
+    put_scorecard!("qa_review_hash_present", !verdict.qa_review_hash.is_empty());
+    put_scorecard!("qc_review_passed", verdict.qc_review_passed);
+    put_scorecard!("mit_review_passed", verdict.mit_review_passed);
+    put_scorecard!("qa_review_passed", verdict.qa_review_passed);
+    put_scorecard!(
+        "scorecard_is_derived_only",
+        verdict.scorecard_is_derived_only
+    );
+    put_scorecard!(
+        "paper_and_shadow_fills_separate",
+        verdict.paper_and_shadow_fills_separate
+    );
+    put_scorecard!("live_fill_claimed", verdict.live_fill_claimed);
+    put_scorecard!(
+        "bybit_live_execution_unchanged",
+        verdict.bybit_live_execution_unchanged
+    );
+    put_scorecard!("sealed", verdict.sealed);
+    let scorecard = serde_json::Value::Object(scorecard);
+
+    serde_json::json!({
+        "phase": "phase3_scorecard_status_source_fixture",
+        "asset_lane": AssetLane::StockEtfCash,
+        "broker": Broker::Ibkr,
+        "environment": "paper_shadow",
+        "scorecard_status_state": "blocked",
+        "phase3_started": false,
+        "scorecard_writer_started": false,
+        "db_apply_performed": false,
+        "evidence_clock_started": false,
+        "paper_shadow_window_complete": false,
+        "scorecard": scorecard,
+        "phase2": phase2,
+        "ibkr_live_enabled": false,
+        "ibkr_call_performed": false,
+        "secret_slot_touched": false,
+        "order_routed": false,
+        "bybit_ipc_reused": false,
+        "live_or_tiny_live_authorized": false,
     })
 }
 

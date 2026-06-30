@@ -24,6 +24,7 @@ from .stock_etf_status_normalizers import (
     _normalize_paper_status,
     _normalize_readiness,
     _normalize_reconciliation_status,
+    _normalize_scorecard_status,
     _normalize_shadow_status,
     _normalize_universe_status,
 )
@@ -44,6 +45,7 @@ _UNIVERSE_STATUS_METHOD = "stock_etf.get_universe_status"
 _SHADOW_STATUS_METHOD = "stock_etf.get_shadow_status"
 _PAPER_STATUS_METHOD = "stock_etf.get_paper_status"
 _RECONCILIATION_STATUS_METHOD = "stock_etf.get_reconciliation_status"
+_SCORECARD_STATUS_METHOD = "stock_etf.get_scorecard_status"
 
 
 def _apply_no_store_headers(response: Response) -> None:
@@ -167,6 +169,19 @@ async def _query_stock_etf_reconciliation_status(
         raw = await ipc.call(_RECONCILIATION_STATUS_METHOD, params={})
     except Exception as exc:
         logger.warning("stock_etf: %s failed: %s", _RECONCILIATION_STATUS_METHOD, exc)
+        return ({}, f"ipc_error:{type(exc).__name__}")
+    return (raw if isinstance(raw, dict) else {}, None)
+
+
+async def _query_stock_etf_scorecard_status(
+    ipc: EngineIPCClient | None,
+) -> tuple[dict[str, Any], str | None]:
+    if ipc is None:
+        return ({}, "ipc_unavailable")
+    try:
+        raw = await ipc.call(_SCORECARD_STATUS_METHOD, params={})
+    except Exception as exc:
+        logger.warning("stock_etf: %s failed: %s", _SCORECARD_STATUS_METHOD, exc)
         return ({}, f"ipc_error:{type(exc).__name__}")
     return (raw if isinstance(raw, dict) else {}, None)
 
@@ -312,6 +327,24 @@ async def get_stock_etf_reconciliation_status(
         "data": _normalize_reconciliation_status(raw, reason),
         "is_simulated": False,
         "data_category": "stock_etf_reconciliation_status",
+    }
+
+
+@stock_etf_router.get("/scorecard-status")
+async def get_stock_etf_scorecard_status(
+    response: Response,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    """Read-only Stock/ETF scorecard verdict status surface for the GUI."""
+    del actor
+    _apply_no_store_headers(response)
+    ipc = await _get_ipc()
+    raw, reason = await _query_stock_etf_scorecard_status(ipc)
+    return {
+        "ok": True,
+        "data": _normalize_scorecard_status(raw, reason),
+        "is_simulated": False,
+        "data_category": "stock_etf_scorecard_status",
     }
 
 

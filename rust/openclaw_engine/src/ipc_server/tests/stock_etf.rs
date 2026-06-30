@@ -883,6 +883,94 @@ async fn stock_etf_reconciliation_status_is_blocked_source_fixture_without_side_
     assert_eq!(result["phase2"]["connector_enabled"], false);
 }
 
+#[tokio::test]
+async fn stock_etf_scorecard_status_is_blocked_source_fixture_without_side_effects() {
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let req =
+        r#"{"jsonrpc":"2.0","method":"stock_etf.get_scorecard_status","params":{},"id":4812}"#;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
+    )
+    .await;
+
+    assert!(resp.error.is_none());
+    let result = resp.result.expect("stock_etf scorecard status result");
+    assert_eq!(result["phase"], "phase3_scorecard_status_source_fixture");
+    assert_eq!(result["asset_lane"], "stock_etf_cash");
+    assert_eq!(result["broker"], "ibkr");
+    assert_eq!(result["environment"], "paper_shadow");
+    assert_eq!(result["scorecard_status_state"], "blocked");
+    assert_eq!(result["phase3_started"], false);
+    assert_eq!(result["scorecard_writer_started"], false);
+    assert_eq!(result["db_apply_performed"], false);
+    assert_eq!(result["evidence_clock_started"], false);
+    assert_eq!(result["paper_shadow_window_complete"], false);
+    assert_eq!(result["ibkr_live_enabled"], false);
+    assert_eq!(result["ibkr_call_performed"], false);
+    assert_eq!(result["secret_slot_touched"], false);
+    assert_eq!(result["order_routed"], false);
+    assert_eq!(result["bybit_ipc_reused"], false);
+    assert_eq!(result["live_or_tiny_live_authorized"], false);
+
+    let scorecard = &result["scorecard"];
+    assert_eq!(
+        scorecard["expected_contract_id"],
+        "stock_etf_scorecard_verdict_v1"
+    );
+    assert_eq!(scorecard["contract_id"], "");
+    assert_eq!(scorecard["source_version"], 0);
+    assert_eq!(scorecard["accepted"], false);
+    assert_eq!(scorecard["verdict_label"], "insufficient_evidence");
+    assert!(json_array_contains(
+        &scorecard["blockers"],
+        "contract_id_missing"
+    ));
+    assert!(json_array_contains(
+        &scorecard["blockers"],
+        "source_version_mismatch"
+    ));
+    assert_eq!(scorecard["scorecard_input_bundle_hash_present"], false);
+    assert_eq!(scorecard["formula_appendix_hash_present"], false);
+    assert_eq!(scorecard["statistical_preregistration_hash_present"], false);
+    assert_eq!(scorecard["scorecard_manifest_hash_present"], false);
+    assert_eq!(scorecard["paper_shadow_window_trading_days"], 0);
+    assert_eq!(scorecard["min_independent_observation_count"], 0);
+    assert_eq!(scorecard["benchmark_excess_lcb_bps"], 0);
+    assert_eq!(scorecard["conservative_cost_stress_lcb_bps"], 0);
+    assert_eq!(scorecard["psr_bps"], 0);
+    assert_eq!(scorecard["dsr_bps"], 0);
+    assert_eq!(scorecard["concentration_label_passed"], false);
+    assert_eq!(scorecard["execution_realism_label_passed"], false);
+    assert_eq!(scorecard["qc_review_hash_present"], false);
+    assert_eq!(scorecard["qc_review_passed"], false);
+    assert_eq!(scorecard["scorecard_is_derived_only"], false);
+    assert_eq!(scorecard["paper_and_shadow_fills_separate"], false);
+    assert_eq!(scorecard["live_fill_claimed"], false);
+    assert_eq!(scorecard["bybit_live_execution_unchanged"], false);
+    assert_eq!(scorecard["sealed"], false);
+
+    assert_eq!(result["phase2"]["first_ibkr_contact_allowed"], false);
+    assert_eq!(result["phase2"]["connector_enabled"], false);
+}
+
 fn json_array_contains(value: &serde_json::Value, expected: &str) -> bool {
     value
         .as_array()
