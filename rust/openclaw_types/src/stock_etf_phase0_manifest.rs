@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::stock_etf_audit_events::STOCK_ETF_ASSET_LANE_EVENTS_CONTRACT_ID;
 use crate::stock_etf_broker_capability_registry::STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID;
 use crate::stock_etf_db_evidence_ddl::STOCK_ETF_DB_EVIDENCE_CONTRACT_ID;
+use crate::stock_etf_disable_cleanup_runbook::STOCK_ETF_DISABLE_CLEANUP_RUNBOOK_ID;
 use crate::stock_etf_gui_lane_contract::STOCK_ETF_GUI_LANE_CONTRACT_ID;
 use crate::stock_etf_instrument_identity::STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID;
 use crate::stock_etf_lane::{AssetLane, Broker};
@@ -61,7 +62,7 @@ const REQUIRED_CONTRACTS: &[&str] = &[
     STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
     STOCK_ETF_GUI_LANE_CONTRACT_ID,
     STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID,
-    "stock_etf_kill_switch_and_disable_cleanup_runbook_v1",
+    STOCK_ETF_DISABLE_CLEANUP_RUNBOOK_ID,
     STOCK_ETF_RELEASE_PACKET_CONTRACT_ID,
     STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID,
 ];

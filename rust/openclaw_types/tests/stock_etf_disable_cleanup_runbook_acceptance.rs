@@ -24,6 +24,10 @@ fn default_runbook_blocks_cleanup_acceptance() {
     ));
     assert!(has(
         &verdict.blockers,
+        StockEtfDisableCleanupBlocker::SourceVersionMismatch
+    ));
+    assert!(has(
+        &verdict.blockers,
         StockEtfDisableCleanupBlocker::WrongAssetLane
     ));
     assert!(has(
@@ -59,6 +63,7 @@ fn accepted_fixture_validates_required_disable_cleanup_contract() {
         verdict.blockers
     );
     assert_eq!(runbook.runbook_id, STOCK_ETF_DISABLE_CLEANUP_RUNBOOK_ID);
+    assert_eq!(runbook.source_version, 1);
     assert!(runbook.bybit_live_execution_unchanged);
     assert!(!runbook.ibkr_contact_performed);
     assert!(!runbook.connector_runtime_started);
@@ -68,6 +73,24 @@ fn accepted_fixture_validates_required_disable_cleanup_contract() {
     assert!(!runbook.paper_shadow_launch_authorized);
     assert!(!runbook.tiny_live_authorized);
     assert!(!runbook.live_authorized);
+}
+
+#[test]
+fn runbook_requires_exact_id_and_source_version() {
+    let mut runbook = StockEtfDisableCleanupRunbookV1::accepted_fixture();
+    runbook.runbook_id = "stock_etf_kill_switch_and_disable_cleanup_runbook_v1_fixture".to_string();
+    runbook.source_version = 2;
+
+    let blockers = runbook.validate().blockers;
+
+    assert!(has(
+        &blockers,
+        StockEtfDisableCleanupBlocker::RunbookIdMismatch
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfDisableCleanupBlocker::SourceVersionMismatch
+    ));
 }
 
 #[test]
@@ -238,6 +261,7 @@ fn blocked_template_is_parseable_and_secret_free() {
     let parsed: toml::Value = toml::from_str(&raw).expect("disable cleanup template parses");
 
     assert_eq!(parsed["runbook"]["runbook_id"].as_str(), Some(""));
+    assert_eq!(parsed["runbook"]["source_version"].as_integer(), Some(0));
     assert_eq!(
         parsed["runbook"]["asset_lane"].as_str(),
         Some("crypto_perp")
