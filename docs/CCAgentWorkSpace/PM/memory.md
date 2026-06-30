@@ -2810,3 +2810,10 @@
 - PM made Stock/ETF IPC fixture boundaries explicit in Rust method-registry tests: lane-status/readiness/preview/import/shadow methods remain read-only fixtures.
 - Stock/ETF submit/cancel/replace paper methods stay visibly non-readonly, require no global IPC slot, do not enter the Bybit live-write token surface, and do not alias legacy paper method names.
 - Verification passed: `rustfmt --edition 2021`, focused registry cargo test `1 passed`, filtered `openclaw_engine stock_etf` cargo test `7 passed`, and `git diff --check`. This grants no IBKR contact, connector runtime, secret access, paper order, fill import, DB apply, GUI/lane selector authority, Phase 2 start, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Evidence Status Read-Only Surface
+
+- PM added Rust IPC read-only fixture `stock_etf.get_evidence_status`, registry/dispatch coverage, and a blocked `phase3_evidence_status_source_fixture` from existing market-data provenance/evidence-clock contracts.
+- FastAPI now exposes authenticated no-store `GET /api/v1/stock-etf/evidence-status`, calls only that IPC method with empty params, ignores client-supplied state, fail-closes on IPC errors, and converts Phase 3/contact/secret/order/scorecard/DB/Bybit IPC side-effect signals into contract violations while top-level authority fields remain false.
+- `tab-stock-etf.html` renders the Evidence Status panel from the read-only endpoint; static guards require lane-status/readiness/evidence-status and still reject write methods, direct `fetch`, forms, browser storage lane authority, direct IBKR broker writes, and Stock/ETF write IPC strings.
+- Verification passed: `rustfmt --edition 2021`, filtered `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine stock_etf` `8 passed`, route/static `py_compile`, focused pytest `27 passed`, Node inline-script syntax `checked 2 inline scripts`, and `git diff --check`. This grants no IBKR contact, connector runtime, secret access, evidence clock runtime, scorecard writer, DB apply, paper order, fill import, GUI/lane selector authority, Phase 2 start, Phase 3 start, tiny-live, live, or Bybit behavior change.

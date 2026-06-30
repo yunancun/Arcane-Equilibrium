@@ -272,6 +272,113 @@ async fn stock_etf_lane_status_exposes_flags_without_ibkr_contact() {
     );
 }
 
+#[tokio::test]
+async fn stock_etf_evidence_status_is_blocked_source_fixture_without_side_effects() {
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let req = r#"{"jsonrpc":"2.0","method":"stock_etf.get_evidence_status","params":{},"id":4806}"#;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
+    )
+    .await;
+
+    assert!(resp.error.is_none());
+    let result = resp.result.expect("stock_etf evidence status result");
+    assert_eq!(result["phase"], "phase3_evidence_status_source_fixture");
+    assert_eq!(result["asset_lane"], "stock_etf_cash");
+    assert_eq!(result["broker"], "ibkr");
+    assert_eq!(result["environment"], "paper");
+    assert_eq!(result["evidence_status_state"], "blocked");
+    assert_eq!(result["phase3_started"], false);
+    assert_eq!(result["ibkr_call_performed"], false);
+    assert_eq!(result["secret_slot_touched"], false);
+    assert_eq!(result["order_routed"], false);
+    assert_eq!(result["bybit_ipc_reused"], false);
+
+    let market_data = &result["market_data_provenance"];
+    assert_eq!(
+        market_data["expected_contract_id"],
+        "stock_market_data_provenance_v1"
+    );
+    assert_eq!(market_data["contract_id"], "");
+    assert_eq!(market_data["source_version"], 0);
+    assert_eq!(market_data["accepted"], false);
+    assert!(json_array_contains(
+        &market_data["blockers"],
+        "market_data_provenance_contract_id_mismatch"
+    ));
+    assert_eq!(market_data["ibkr_contact_performed"], false);
+    assert_eq!(market_data["connector_runtime_started"], false);
+    assert_eq!(market_data["secret_content_serialized"], false);
+    assert_eq!(market_data["live_or_tiny_live_authorized"], false);
+
+    let evidence_clock = &result["evidence_clock"];
+    assert_eq!(
+        evidence_clock["expected_contract_id"],
+        "stock_etf_evidence_clock_v1"
+    );
+    assert_eq!(evidence_clock["contract_id"], "");
+    assert_eq!(evidence_clock["source_version"], 0);
+    assert_eq!(evidence_clock["status"], "NOT_STARTED");
+    assert_eq!(evidence_clock["accepted"], false);
+    assert!(json_array_contains(
+        &evidence_clock["blockers"],
+        "evidence_clock_contract_id_mismatch"
+    ));
+    assert_eq!(evidence_clock["checker_contacted_ibkr"], false);
+    assert_eq!(evidence_clock["checker_started_connector_runtime"], false);
+    assert_eq!(evidence_clock["checker_started_evidence_clock"], false);
+    assert_eq!(evidence_clock["checker_wrote_scorecard"], false);
+    assert_eq!(evidence_clock["checker_applied_db"], false);
+    assert_eq!(evidence_clock["secret_content_serialized"], false);
+    assert_eq!(evidence_clock["live_or_tiny_live_authorized"], false);
+    assert_eq!(
+        evidence_clock["ibkr_readonly_paper_connector_green_5d"],
+        false
+    );
+    assert_eq!(evidence_clock["shadow_collector_green_5d"], false);
+
+    let frozen_inputs = &result["frozen_inputs"];
+    assert_eq!(frozen_inputs["accepted"], false);
+    assert_eq!(frozen_inputs["universe_hash_present"], false);
+    assert_eq!(frozen_inputs["gui_evidence_view_available"], false);
+    assert_eq!(frozen_inputs["daily_scorecard_regeneration_passed"], false);
+
+    let dq_manifest = &result["dq_manifest"];
+    assert_eq!(dq_manifest["shape_accepted"], false);
+    assert_eq!(dq_manifest["passes_day_quality"], false);
+    assert_eq!(dq_manifest["calendar_aware_coverage_bps"], 0);
+    assert_eq!(dq_manifest["symbol_completeness_bps"], 0);
+    assert_eq!(dq_manifest["latency_dq_passed"], false);
+    assert_eq!(dq_manifest["market_data_provenance_accepted"], false);
+    assert_eq!(dq_manifest["scorecard_regeneration_passed"], false);
+
+    let scorecard = &result["scorecard"];
+    assert_eq!(scorecard["writer_started"], false);
+    assert_eq!(scorecard["db_apply_performed"], false);
+    assert_eq!(scorecard["daily_scorecard_regeneration_passed"], false);
+
+    assert_eq!(result["phase2"]["first_ibkr_contact_allowed"], false);
+    assert_eq!(result["phase2"]["connector_enabled"], false);
+}
+
 fn json_array_contains(value: &serde_json::Value, expected: &str) -> bool {
     value
         .as_array()

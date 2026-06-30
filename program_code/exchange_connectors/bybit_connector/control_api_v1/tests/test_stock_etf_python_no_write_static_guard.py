@@ -132,6 +132,8 @@ def test_stock_etf_static_gui_surface_remains_display_only() -> None:
     forbidden_snippets = FORBIDDEN_STATIC_GUI_SNIPPETS | FORBIDDEN_IPC_METHOD_STRINGS
     for path in files:
         source = path.read_text(encoding="utf-8")
+        if "/api/v1/stock-etf/evidence-status" not in source:
+            violations.append(f"{path}: missing read-only Stock/ETF evidence-status endpoint")
         if "/api/v1/stock-etf/lane-status" not in source:
             violations.append(f"{path}: missing read-only Stock/ETF lane-status endpoint")
         if "/api/v1/stock-etf/readiness" not in source:
