@@ -2111,7 +2111,7 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 
 新增 checkpoint：
 
-- 主計畫 PM session checkpoint 現在從 14 到 51 連續遞增，無重複編號。
+- 主計畫 PM session checkpoint 現在從 14 到 52 連續遞增，無重複編號。
 - 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
   lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
   connector skeleton / readonly-probe / broker read gate / policy display / operation
@@ -2420,6 +2420,43 @@ surface。
   `8 passed`。
 - `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
   `102 passed`。
+- `python3 -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
+  `2 passed`。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 52. 2026-06-30 PM session source checkpoint：Python Persistence Static Guard
+
+本 checkpoint 強化 Stock/ETF / IBKR Python source surface 的 no persistence/no writer
+邊界。前面已經禁止 broker/network imports 與 FastAPI method drift；這次明確防止
+Stock/ETF / IBKR Python surface 直接接入 DB、object store、本地 persistence/evidence
+writer 或文件寫入 API。
+
+已完成：
+
+- 新增 `test_stock_etf_ibkr_python_surface_has_no_persistence_or_file_writers`。
+- 掃描 scoped Stock/ETF / IBKR Python files。
+- 禁止 DB/persistence/object-store imports：psycopg/psycopg2/sqlalchemy/sqlite3/
+  asyncpg/duckdb/redis/boto3 等。
+- 禁止 local persistence/evidence-writer imports：`db_pool`、`audit_persistence`、
+  `state_store`、`agent_event_store` 等。
+- 禁止 dynamic persistence imports。
+- 禁止明確 file writer calls：`write_text`、`write_bytes`、write-mode `open(...)`、
+  `os.replace(...)` 等。
+- 本 guard 不改 route behavior、不新增 endpoint、不改 IPC method、不啟動 runtime，只防
+  Python surface 出現 DB/evidence writer 或本地文件寫入路徑。
+
+驗證：
+
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_python_no_write_static_guard.py`：
+  `9 passed`。
+- `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  `103 passed`。
 - `python3 -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
   `2 passed`。
 - `git diff --check`：PASS。

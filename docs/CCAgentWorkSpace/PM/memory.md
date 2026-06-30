@@ -3080,7 +3080,7 @@
 
 ## 2026-06-30 IBKR Stock/ETF Plan Timeline Checkpoint Guard
 
-- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 51, aligned to the PM memory / Operator source timeline.
+- PM normalized the main IBKR development arrangement so PM session checkpoints are now linear and unique from 14 through 52, aligned to the PM memory / Operator source timeline.
 - Added a structure test that reads the main plan Markdown and fails if PM session checkpoint numbers become duplicated, skipped, or out of order.
 - Verification passed: focused IBKR timeline structure test `1 passed`; section-body compare against `HEAD` PASS; `git diff --check` PASS. The full structure test file still has pre-existing docs README index drift failures unrelated to this guard. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
 
@@ -3137,3 +3137,9 @@
 - PM added an AST guard proving `stock_etf_routes.py` IPC calls use named method constants whose resolved values are exactly the readonly Stock/ETF status/readiness method allowlist.
 - The guard blocks future FastAPI GET/status surfaces from calling paper preview/submit/cancel/replace, fill import, shadow evaluation, readonly-probe preview, or any other non-status IPC method.
 - Verification passed: Python no-write static guard `8 passed`; full Stock/ETF FastAPI/static `102 passed`; focused IBKR timeline + trace-title structure tests `2 passed`; `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
+
+## 2026-06-30 IBKR Stock/ETF Python Persistence Static Guard
+
+- PM added a source-only AST guard proving Stock/ETF / IBKR Python surfaces do not import persistence, DB, object-store, or local evidence-writer modules.
+- The guard also blocks dynamic persistence imports and explicit file-writer calls such as write_text/write_bytes/open-write/os.replace in the scoped Stock/ETF/IBKR Python surface.
+- Verification passed: Python no-write static guard `9 passed`; full Stock/ETF FastAPI/static `103 passed`; focused IBKR timeline + trace-title structure tests `2 passed`; `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, connector runtime, secret access/creation, read probe execution, paper order/cancel/replace, fill import, evidence writer, DB apply, evidence clock, tiny-live, live, or Bybit behavior change.
