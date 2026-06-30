@@ -3,6 +3,7 @@
 # discussion may be opened; it never authorizes IBKR tiny-live or live.
 
 contract_id = ""
+source_version = 0
 adr_path = "docs/adr/0048-ibkr-stock-etf-paper-shadow-lane.md"
 amd_path = "docs/governance_dev/amendments/2026-06-29--AMD-2026-06-29-01-ibkr-stock-etf-paper-shadow-lane.md"
 spec_path = "docs/execution_plan/specs/2026-06-29--stock_etf_cash_phase0_named_contract_packet.md"

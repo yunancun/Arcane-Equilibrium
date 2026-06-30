@@ -903,6 +903,8 @@ DB delete/truncate permission, paper-shadow launch authority, tiny-live, and liv
 
 Release packet must include:
 
+- exact packet id `stock_etf_release_packet_v1`
+- source version `1`
 - ADR/AMD/spec paths
 - role reports
 - E2/E4/QA logs
@@ -919,6 +921,8 @@ Release packet must include:
 
 Eligibility to discuss tiny-live requires:
 
+- exact contract id `tiny_live_adr_eligibility_v1`
+- source version `1`
 - Phase 5 release packet hash
 - scorecard manifest hash
 - DQ manifest hash

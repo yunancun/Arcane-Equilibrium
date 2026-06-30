@@ -8,11 +8,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::stock_etf_lane::{AssetLane, Broker};
 use crate::stock_etf_phase3_evidence::STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID;
+use crate::stock_etf_release_packet::STOCK_ETF_RELEASE_PACKET_CONTRACT_ID;
 use crate::stock_etf_scorecard_inputs::{
     BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID, STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID,
     STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID, STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID,
     STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
 };
+use crate::stock_etf_tiny_live_eligibility::STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID;
 
 pub const STOCK_ETF_PHASE0_MANIFEST_SCHEMA: &str = "stock_etf_phase0_contract_packet_manifest_v1";
 pub const STOCK_ETF_PHASE0_MANIFEST_STATUS: &str = "ACCEPTED_PHASE0_CONTRACT_NO_RUNTIME_AUTHORITY";
@@ -51,8 +53,8 @@ const REQUIRED_CONTRACTS: &[&str] = &[
     "gui_lane_contract_v1",
     STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID,
     "stock_etf_kill_switch_and_disable_cleanup_runbook_v1",
-    "stock_etf_release_packet_v1",
-    "tiny_live_adr_eligibility_v1",
+    STOCK_ETF_RELEASE_PACKET_CONTRACT_ID,
+    STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID,
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

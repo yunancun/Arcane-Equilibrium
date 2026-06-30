@@ -13,6 +13,7 @@ pub const STOCK_ETF_RELEASE_AMD_PATH: &str =
     "docs/governance_dev/amendments/2026-06-29--AMD-2026-06-29-01-ibkr-stock-etf-paper-shadow-lane.md";
 pub const STOCK_ETF_RELEASE_SPEC_PATH: &str =
     "docs/execution_plan/specs/2026-06-29--stock_etf_cash_phase0_named_contract_packet.md";
+pub const STOCK_ETF_RELEASE_PACKET_CONTRACT_ID: &str = "stock_etf_release_packet_v1";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StockEtfReleaseManifestHashV1 {
@@ -171,6 +172,7 @@ impl StockEtfKillDisableCleanupProofV1 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StockEtfReleasePacketV1 {
     pub packet_id: String,
+    pub source_version: u32,
     pub adr_path: String,
     pub amd_path: String,
     pub spec_path: String,
@@ -202,6 +204,7 @@ impl Default for StockEtfReleasePacketV1 {
     fn default() -> Self {
         Self {
             packet_id: String::new(),
+            source_version: 0,
             adr_path: STOCK_ETF_RELEASE_ADR_PATH.to_string(),
             amd_path: STOCK_ETF_RELEASE_AMD_PATH.to_string(),
             spec_path: STOCK_ETF_RELEASE_SPEC_PATH.to_string(),
@@ -234,7 +237,8 @@ impl Default for StockEtfReleasePacketV1 {
 impl StockEtfReleasePacketV1 {
     pub fn accepted_fixture() -> Self {
         Self {
-            packet_id: "stock_etf_release_packet_v1_fixture".to_string(),
+            packet_id: STOCK_ETF_RELEASE_PACKET_CONTRACT_ID.to_string(),
+            source_version: 1,
             adr_path: STOCK_ETF_RELEASE_ADR_PATH.to_string(),
             amd_path: STOCK_ETF_RELEASE_AMD_PATH.to_string(),
             spec_path: STOCK_ETF_RELEASE_SPEC_PATH.to_string(),
@@ -278,6 +282,11 @@ impl StockEtfReleasePacketV1 {
 
         if self.packet_id.trim().is_empty() {
             blockers.push(Blocker::PacketIdMissing);
+        } else if self.packet_id != STOCK_ETF_RELEASE_PACKET_CONTRACT_ID {
+            blockers.push(Blocker::PacketIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::SourceVersionMismatch);
         }
         if self.adr_path != STOCK_ETF_RELEASE_ADR_PATH {
             blockers.push(Blocker::AdrPathMismatch);
@@ -393,6 +402,8 @@ impl<B> StockEtfReleaseVerdict<B> {
 #[serde(rename_all = "snake_case")]
 pub enum StockEtfReleasePacketBlocker {
     PacketIdMissing,
+    PacketIdMismatch,
+    SourceVersionMismatch,
     AdrPathMismatch,
     AmdPathMismatch,
     SpecPathMismatch,
