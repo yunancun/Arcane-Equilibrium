@@ -2602,3 +2602,31 @@ Verification 已過：
 access/creation、沒有 connector runtime、沒有 read probe execution、沒有 result
 import、沒有 DB/evidence/scorecard writer、沒有 paper order/cancel/replace、沒有
 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Broker Capability Registry Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF Broker Capability Registry Source Static Guard`。
+
+這個 guard 鎖住 `stock_etf_broker_capability_registry.rs` 的 Stock/ETF IBKR operation
+capability matrix source hygiene：15 個 broker operations、required audit fields、
+expected capability mapper、entry validator 與 blocker surface 必須保留。
+
+Guard 要求 read-only rows 保留 external surface、lane-scoped IPC、readonly probe 與
+session/provenance/instrument gates；paper-write rows 保留 PaperRehearsal、paper
+attestation、scoped authorization、risk policy、decision lease、guardian、lifecycle
+gates 且 Rust-owned；shadow/scorecard rows 保留 evidence/provenance/scorecard input
+lineage gates；live/margin/options/CFD/account-write rows 必須維持 Denied scope 與
+typed denials。source 不得出現 env/fs/network/IBKR SDK/clock/thread/process/order/
+Bybit runtime tokens 或 secret material access tokens。
+
+Verification 已過：
+
+- New structure guard pytest：`5 passed`
+- Focused broker capability registry acceptance：`10 passed`
+- Full `cargo test -p openclaw_types`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
+access/creation、沒有 connector runtime、沒有 read probe execution、沒有 result
+import、沒有 DB/evidence/scorecard writer、沒有 paper order/cancel/replace、沒有
+tiny-live/live authority，也沒有改動 Bybit live execution 行為。

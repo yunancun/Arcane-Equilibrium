@@ -4658,3 +4658,47 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper
 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
 clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
 Bybit behavior change。
+
+## 107. 2026-07-01 PM session source checkpoint：Stock/ETF Broker Capability Registry Source Static Guard
+
+本 checkpoint 為 `stock_etf_broker_capability_registry.rs` 補上 source-only
+structure guard。這不是 broker registry activation、不是 IBKR contact、不是 read
+probe、不是 paper order authorization；只把 Stock/ETF IBKR operation capability
+matrix 的 source invariant 機器化。
+
+已完成：
+
+- 新增 `tests/structure/test_stock_etf_broker_capability_registry_source_static.py`。
+- Guard 鎖住 `stock_etf_broker_capability_registry.rs` 低於 800 行 governance cap。
+- Guard 要求 registry contract id、audit fields、15 個 required operations、registry
+  entry/verdict/blocker surface、expected capability mapper、entry validator 保持在
+  source 中。
+- Guard 要求 default 仍 fail-closed：CryptoPerp/Bybit、empty operations、Bybit live
+  protection false、Python broker write denied false、IBKR live denied false。
+- Guard 要求 accepted fixture 仍為 StockEtfCash/IBKR，並保留 Bybit live unchanged、
+  Python broker write denied、IBKR live denied、CFD/margin reserved denied、no first
+  IBKR contact、no secret serialization。
+- Guard 要求 read-only rows 保留 external surface、lane-scoped IPC、readonly probe
+  request、session/provenance/instrument gates；paper-write rows 保留 PaperRehearsal、
+  paper attestation、scoped authorization、risk policy、decision lease、guardian 與
+  lifecycle gates，且 Rust-owned。
+- Guard 要求 shadow/scorecard rows 保留 evidence clock、PIT universe、strategy、
+  reference/cost/provenance/cash-ledger/result-import gates。
+- Guard 要求 live/margin/options/CFD/account-write rows 維持 Denied scope 與 typed
+  denials。
+- Guard 禁止 env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens
+  與 secret material access tokens。
+
+驗證：
+
+- New structure guard py_compile：PASS。
+- Focused structure guard pytest：`5 passed`。
+- Focused broker capability registry acceptance：`10 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
+cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
+clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
+Bybit behavior change。
