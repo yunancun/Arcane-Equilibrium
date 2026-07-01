@@ -253,6 +253,27 @@ def test_stock_etf_scorecard_inputs_bundle_keeps_derived_only_boundary() -> None
     assert "live_or_tiny_live_authorized: false" in source
 
 
+def test_stock_etf_scorecard_inputs_bundle_excludes_writer_live_and_authority_crosswire() -> None:
+    source = _bundle()
+
+    for forbidden_true in (
+        "live_fill_claimed: true",
+        "ibkr_contact_performed: true",
+        "connector_runtime_started: true",
+        "broker_fill_import_performed: true",
+        "scorecard_writer_started: true",
+        "db_apply_performed: true",
+        "evidence_clock_started: true",
+        "secret_content_serialized: true",
+        "live_or_tiny_live_authorized: true",
+    ):
+        assert forbidden_true not in source
+
+    assert "scorecard_is_derived_only: false" in source
+    assert "paper_and_shadow_fills_separate: false" in source
+    assert "bybit_live_execution_unchanged: false" in source
+
+
 def test_stock_etf_scorecard_inputs_bundle_keeps_cross_contract_and_side_effect_gates() -> None:
     source = _bundle()
 

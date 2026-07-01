@@ -6450,3 +6450,43 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 fill import、不生成
 shadow fill、不啟動 reconciliation writer、不做 result import、不做 DB/evidence writer、不做 paper
 order route、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 154. 2026-07-01 PM session source checkpoint：Stock/ETF Scorecard Input Bundle Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_scorecard_inputs` bundle 的 derived-only / paper-shadow separation /
+live-fill / writer-runtime authority cross-wire coverage。這不是 Rust production behavior change、
+不是 IBKR contact、不是 connector runtime、不是 secret access、不是 fill import execution、不是
+scorecard derivation、不是 scorecard writer、不是 DB/evidence writer、不是 tiny-live/live gate；
+只把 scorecard input bundle 的 source-only evidence posture 變成行為型 regression test 與
+source-static guard。
+
+已完成：
+
+- 在 `stock_etf_scorecard_inputs_acceptance.rs` 新增
+  `scorecard_bundle_rejects_derived_separation_live_and_writer_cross_wire_independently`。
+- Acceptance 證明 `scorecard_is_derived_only=false` 只產生 `ScorecardNotDerivedOnly`，不誤報
+  paper-shadow separation、live fill 或 writer blocker。
+- Acceptance 證明 `paper_and_shadow_fills_separate=false` 只產生
+  `PaperShadowFillSeparationMissing`，不誤報 derived-only、live fill 或 writer blocker。
+- Acceptance 證明 `live_fill_claimed=true` 只產生 `LiveFillClaimed`，不誤報 derived-only、
+  paper-shadow separation 或 writer blocker。
+- Acceptance 證明 writer/runtime/tiny-live 污染必須產生 `ScorecardWriterStarted`、
+  `DbApplyPerformed`、`EvidenceClockStarted`、`LiveOrTinyLiveAuthorized`，且不誤報 input
+  evidence posture blockers。
+- 在 `test_stock_etf_scorecard_inputs_source_static.py` 新增 bundle cross-wire guard，禁止
+  live fill、IBKR contact、connector runtime、broker fill import、scorecard writer、DB apply、
+  evidence clock、secret serialization、tiny-live/live authority 被 hardcoded 成 true。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Scorecard inputs source static pytest：`8 passed`。
+- Scorecard inputs Rust acceptance：`13 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 fill import、不做 scorecard
+derivation、不啟動 scorecard writer、不做 DB/evidence writer、不做 paper order route、不做 Linux
+runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。

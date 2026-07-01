@@ -295,6 +295,93 @@ fn scorecard_bundle_rejects_live_fill_claim_and_missing_separation() {
 }
 
 #[test]
+fn scorecard_bundle_rejects_derived_separation_live_and_writer_cross_wire_independently() {
+    let mut derived_pollution = StockEtfScorecardInputBundleV1::accepted_fixture();
+    derived_pollution.scorecard_is_derived_only = false;
+    let verdict = derived_pollution.validate();
+
+    assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::ScorecardNotDerivedOnly));
+    assert!(!verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::PaperShadowFillSeparationMissing));
+    assert!(!verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::LiveFillClaimed));
+    assert!(!verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::ScorecardWriterStarted));
+
+    let mut separation_pollution = StockEtfScorecardInputBundleV1::accepted_fixture();
+    separation_pollution.paper_and_shadow_fills_separate = false;
+    let verdict = separation_pollution.validate();
+
+    assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::PaperShadowFillSeparationMissing));
+    assert!(!verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::ScorecardNotDerivedOnly));
+    assert!(!verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::LiveFillClaimed));
+    assert!(!verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::ScorecardWriterStarted));
+
+    let mut live_fill_pollution = StockEtfScorecardInputBundleV1::accepted_fixture();
+    live_fill_pollution.live_fill_claimed = true;
+    let verdict = live_fill_pollution.validate();
+
+    assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::LiveFillClaimed));
+    assert!(!verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::ScorecardNotDerivedOnly));
+    assert!(!verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::PaperShadowFillSeparationMissing));
+    assert!(!verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::ScorecardWriterStarted));
+
+    let mut writer_pollution = StockEtfScorecardInputBundleV1::accepted_fixture();
+    writer_pollution.scorecard_writer_started = true;
+    writer_pollution.db_apply_performed = true;
+    writer_pollution.evidence_clock_started = true;
+    writer_pollution.live_or_tiny_live_authorized = true;
+    let verdict = writer_pollution.validate();
+
+    assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::ScorecardWriterStarted));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::DbApplyPerformed));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::EvidenceClockStarted));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::LiveOrTinyLiveAuthorized));
+    assert!(!verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::ScorecardNotDerivedOnly));
+    assert!(!verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::PaperShadowFillSeparationMissing));
+    assert!(!verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::LiveFillClaimed));
+}
+
+#[test]
 fn scorecard_bundle_rejects_missing_cross_contract_hashes_and_runtime_side_effects() {
     let mut bundle = StockEtfScorecardInputBundleV1::accepted_fixture();
     bundle
