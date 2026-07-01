@@ -171,6 +171,7 @@ def test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles() -> None
         "Stock/ETF Phase3 Evidence Source Static Guard",
         "Stock/ETF Paper Order Fixture Source Static Guard",
         "Stock/ETF IPC Scorecard Summary Source Static Guard",
+        "Stock/ETF Read-Only Probe Request Template Source Static Guard",
     )
     plan_source = IBKR_STOCK_ETF_PLAN.read_text()
     operator_source = IBKR_STOCK_ETF_OPERATOR.read_text()

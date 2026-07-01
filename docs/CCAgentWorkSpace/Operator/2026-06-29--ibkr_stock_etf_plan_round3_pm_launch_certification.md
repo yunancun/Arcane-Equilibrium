@@ -3338,3 +3338,30 @@ Verification 已過：
 邊界不變：沒有 IBKR contact、沒有 connector runtime、沒有 IPC runtime side effect、沒有
 scorecard writer、沒有 evidence clock、沒有 DB apply、沒有 paper order route、沒有 tiny-live/live
 authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Read-Only Probe Request Template Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF Read-Only Probe Request Template Source Static Guard`。
+
+這個 guard 鎖住 `settings/broker/stock_etf_ibkr_readonly_probe_request.template.toml`。前一輪
+source guard 已鎖住 Rust read-only probe request contract；這次補齊 settings/template 直接覆蓋，
+避免 default-blocked template 被改成 contact-ready、secret-aware、order-capable 或 client-portal
+usable。
+
+Guard 要求 template 保留 empty contract/source lineage、CryptoPerp/Bybit/LiveReservedDenied
+default、client-portal denied action、transfer/account-write denied operation、denied authority、
+effect=false，並要求所有 IBKR contact、connector runtime、secret serialization、order route、
+paper submit、DB apply、evidence clock、Bybit path reuse、live/tiny-live、account write、entitlement
+purchase、client portal use、Python direct broker write flags 全部為 false。
+
+Verification 已過：
+
+- New structure guard pytest：`5 passed`
+- Focused read-only probe request acceptance：`6 passed`
+- Full `cargo test -p openclaw_types`：PASS
+- Docs PM trace tests：PASS
+
+邊界不變：沒有 IBKR contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有
+read-only probe execution、沒有 result import、沒有 evidence/scorecard writer、沒有 DB apply、沒有
+paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
