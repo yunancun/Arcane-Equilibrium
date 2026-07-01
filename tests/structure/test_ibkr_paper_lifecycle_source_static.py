@@ -178,12 +178,27 @@ def _source() -> str:
     return PAPER_LIFECYCLE.read_text(encoding="utf-8")
 
 
+def _event_default_block(source: str) -> str:
+    return source.split("impl Default for BrokerLifecycleEventLogV1", 1)[1].split(
+        "impl BrokerLifecycleEventLogV1",
+        1,
+    )[0]
+
+
+def _accepted_ack_fixture_block(source: str) -> str:
+    return source.split("impl BrokerLifecycleEventLogV1", 1)[1].split(
+        "pub fn validate(&self)",
+        1,
+    )[0]
+
+
 def test_ibkr_paper_lifecycle_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
 
 def test_ibkr_paper_lifecycle_source_keeps_contract_event_log_surface() -> None:
     source = _source()
+    default_block = _event_default_block(source)
 
     for token in REQUIRED_TYPE_TOKENS:
         assert token in source
@@ -194,19 +209,77 @@ def test_ibkr_paper_lifecycle_source_keeps_contract_event_log_surface() -> None:
     for state in REQUIRED_STATES:
         assert f"State::{state}" in source or f"IbkrPaperOrderLifecycleState::{state}" in source
 
-    assert "lifecycle_contract_id: String::new()" in source
-    assert "event_log_contract_id: String::new()" in source
-    assert "source_version: 0" in source
-    assert "event_sequence: 0" in source
-    assert "event_time_ms: 0" in source
-    assert "request_contract_id: String::new()" in source
-    assert "asset_lane: AssetLane::StockEtfCash" in source
-    assert "broker: Broker::Ibkr" in source
-    assert "environment: BrokerEnvironment::Paper" in source
-    assert "operation: BrokerOperation::PaperOrderSubmit" in source
-    assert "allowed: false" in source
-    assert "stale_state_policy: None" in source
+    assert "lifecycle_contract_id: String::new()" in default_block
+    assert "event_log_contract_id: String::new()" in default_block
+    assert "source_version: 0" in default_block
+    assert "event_sequence: 0" in default_block
+    assert "event_time_ms: 0" in default_block
+    assert "request_contract_id: String::new()" in default_block
+    assert "asset_lane: AssetLane::StockEtfCash" in default_block
+    assert "broker: Broker::Ibkr" in default_block
+    assert "environment: BrokerEnvironment::Paper" in default_block
+    assert "operation: BrokerOperation::PaperOrderSubmit" in default_block
+    assert "allowed: false" in default_block
+    assert "stale_state_policy: None" in default_block
     assert "accepted: blockers.is_empty()" in source
+
+
+def test_ibkr_paper_lifecycle_accepted_ack_fixture_excludes_cross_wire_defaults() -> None:
+    source = _source()
+    fixture = _accepted_ack_fixture_block(source)
+
+    for required in (
+        "lifecycle_contract_id: IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID.to_string()",
+        "event_log_contract_id: BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID.to_string()",
+        "source_version: 1",
+        'event_id: "lifecycle_event_0001".to_string()',
+        "event_sequence: 2",
+        "genesis_event: false",
+        "event_time_ms: 1_772_233_000_000",
+        'request_contract_id: STOCK_ETF_PAPER_ORDER_REQUEST_CONTRACT_ID.to_string()',
+        "operation: BrokerOperation::PaperOrderSubmit",
+        'order_local_id: "local_order_0001".to_string()',
+        'idempotency_key: "idem_0001".to_string()',
+        'broker_order_id: "paper_broker_order_0001".to_string()',
+        'reconciliation_run_id: "reconcile_run_0001".to_string()',
+        "previous_state: IbkrPaperOrderLifecycleState::BrokerSubmitRequested",
+        "next_state: IbkrPaperOrderLifecycleState::BrokerAcknowledged",
+        "allowed: true",
+        "IbkrPaperStaleStatePolicy::ReconcileByBrokerOrderIdAndIdempotencyKey",
+        "raw_artifact_hash: \"a\".repeat(64)",
+        "redacted_summary_hash: \"b\".repeat(64)",
+        "..Self::default()",
+    ):
+        assert required in fixture
+
+    for forbidden in (
+        "lifecycle_contract_id: String::new()",
+        "event_log_contract_id: String::new()",
+        "source_version: 0",
+        "event_sequence: 0",
+        "genesis_event: true",
+        "event_time_ms: 0",
+        "previous_event_hash: String::new()",
+        "event_hash: String::new()",
+        "request_contract_id: String::new()",
+        "request_envelope_hash: String::new()",
+        "asset_lane: AssetLane::CryptoPerp",
+        "broker: Broker::Bybit",
+        "environment: BrokerEnvironment::LiveReservedDenied",
+        "operation: BrokerOperation::LiveOrderSubmit",
+        "operation: BrokerOperation::TransferOrAccountWrite",
+        "order_local_id: String::new()",
+        "idempotency_key: String::new()",
+        "broker_order_id: String::new()",
+        "reconciliation_run_id: String::new()",
+        "allowed: false",
+        "denial_reason: Some(",
+        "stale_state_policy: None",
+        "IbkrPaperStaleStatePolicy::PreserveTerminalWithEvidence",
+        "raw_artifact_hash: String::new()",
+        "redacted_summary_hash: String::new()",
+    ):
+        assert forbidden not in fixture
 
 
 def test_ibkr_paper_lifecycle_source_keeps_append_only_lineage_validation() -> None:
