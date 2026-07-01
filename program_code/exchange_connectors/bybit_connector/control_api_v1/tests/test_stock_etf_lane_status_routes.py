@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -12,6 +13,16 @@ from stock_etf_route_fixtures import (
     _valid_lane_status,
     client_fail_closed,
 )
+
+EXPECTED_LANE_STATUS_CONTRACT_VIOLATIONS = [
+    "ibkr_call_performed",
+    "secret_slot_touched",
+    "order_routed",
+    "bybit_ipc_reused",
+    "asset_lane_mismatch",
+    "broker_mismatch",
+]
+
 
 def test_stock_etf_lane_status_returns_200_when_ipc_down(client_fail_closed: TestClient) -> None:
     resp = client_fail_closed.get("/api/v1/stock-etf/lane-status")
@@ -119,14 +130,22 @@ def test_stock_etf_lane_status_blocks_contract_violation() -> None:
 
     assert data["lane_status_state"] == "contract_violation_blocked"
     assert data["degraded"] is True
-    assert set(data["contract_violations"]) == {
-        "ibkr_call_performed",
-        "secret_slot_touched",
-        "order_routed",
-        "bybit_ipc_reused",
-        "asset_lane_mismatch",
-        "broker_mismatch",
-    }
+    assert data["contract_violations"] == EXPECTED_LANE_STATUS_CONTRACT_VIOLATIONS
     assert data["asset_lane"] == "stock_etf_cash"
     assert data["broker"] == "ibkr"
     assert data["paper_order_entry_visible"] is False
+
+
+def test_stock_etf_lane_status_contract_violation_assertions_stay_exact() -> None:
+    source = Path(__file__).read_text(encoding="utf-8")
+    source_under_test = source.split(
+        "def test_stock_etf_lane_status_contract_violation_assertions_stay_exact", 1
+    )[0]
+    forbidden_patterns = [
+        'set(data["contract_violations"])',
+        'in data["contract_violations"]',
+        'issubset(set(data["contract_violations"]))',
+    ]
+
+    for pattern in forbidden_patterns:
+        assert pattern not in source_under_test
