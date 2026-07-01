@@ -6830,3 +6830,44 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不啟動 market-data ingestion、不啟動
 DQ writer、不啟動 evidence clock runtime、不做 scorecard writer、不做 DB/evidence writer、不做 paper
 order route、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 163. 2026-07-01 PM session source checkpoint：Stock/ETF Phase3 Evidence Clock Runtime Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_phase3_evidence` 中 `StockEtfEvidenceClockDayV1` 的 Bybit unchanged、
+IBKR contact、connector runtime、evidence clock runtime、scorecard writer、DB apply、secret
+serialization、tiny-live/live authority、IBKR connector green dependency、shadow collector green
+dependency cross-wire coverage。這不是 Rust production behavior change、不是 IBKR contact、不是
+connector runtime、不是 evidence clock runtime、不是 scorecard writer、不是 DB apply、不是 paper order
+route、不是 tiny-live/live gate；只把 evidence-clock day artifact 的 source-only、dependency-green、
+no-runtime、no-writer、no-live-authority posture 變成行為型 regression test 與 source-static guard。
+
+已完成：
+
+- 在 `stock_etf_phase3_evidence_acceptance.rs` 新增
+  `evidence_clock_day_rejects_runtime_writer_secret_and_authority_cross_wire_independently`。
+- Acceptance 證明 `bybit_live_execution_unchanged=false` 只產生
+  `BybitLiveExecutionNotProtected`。
+- Acceptance 證明 `checker_contacted_ibkr=true`、`checker_started_connector_runtime=true`、
+  `checker_started_evidence_clock=true`、`checker_wrote_scorecard=true`、`checker_applied_db=true`、
+  `secret_content_serialized=true`、`live_or_tiny_live_authorized=true` 都會各自只產生單一對應 blocker。
+- Acceptance 證明 `ibkr_readonly_paper_connector_green_5d=false` 只產生
+  `IbkrConnectorNotGreenFiveDays`，`shadow_collector_green_5d=false` 只產生
+  `ShadowCollectorNotGreenFiveDays`。
+- 在 `test_stock_etf_phase3_evidence_source_static.py` 新增 evidence-clock `pass_day_fixture()` body
+  parser，禁止 live environment、Bybit changed、IBKR contact、connector runtime、evidence clock runtime、
+  scorecard writer、DB apply、secret serialization、tiny-live/live authority、missing green dependencies、
+  `WindowComplete` status 被 hardcoded 到 pass-day fixture，並鎖住 default fail-closed posture。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Phase3 evidence source static pytest：`13 passed`。
+- Phase3 evidence Rust acceptance：`22 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不啟動 evidence clock runtime、不做
+scorecard writer、不做 DB/evidence writer、不做 paper order route、不做 Linux runtime sync/restart、
+不授權 tiny-live/live 或任何 Bybit behavior change。

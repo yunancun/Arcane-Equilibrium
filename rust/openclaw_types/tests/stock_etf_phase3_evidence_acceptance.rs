@@ -445,6 +445,67 @@ fn evidence_clock_day_rejects_contract_drift_and_checker_side_effects() {
 }
 
 #[test]
+fn evidence_clock_day_rejects_runtime_writer_secret_and_authority_cross_wire_independently() {
+    let mut bybit = StockEtfEvidenceClockDayV1::pass_day_fixture();
+    bybit.bybit_live_execution_unchanged = false;
+    assert_single_evidence_clock_blocker(
+        bybit,
+        StockEtfPhase3Blocker::BybitLiveExecutionNotProtected,
+    );
+
+    let mut ibkr_contact = StockEtfEvidenceClockDayV1::pass_day_fixture();
+    ibkr_contact.checker_contacted_ibkr = true;
+    assert_single_evidence_clock_blocker(ibkr_contact, StockEtfPhase3Blocker::IbkrContactPerformed);
+
+    let mut connector = StockEtfEvidenceClockDayV1::pass_day_fixture();
+    connector.checker_started_connector_runtime = true;
+    assert_single_evidence_clock_blocker(connector, StockEtfPhase3Blocker::ConnectorRuntimeStarted);
+
+    let mut evidence_clock = StockEtfEvidenceClockDayV1::pass_day_fixture();
+    evidence_clock.checker_started_evidence_clock = true;
+    assert_single_evidence_clock_blocker(
+        evidence_clock,
+        StockEtfPhase3Blocker::EvidenceClockRuntimeStarted,
+    );
+
+    let mut scorecard_writer = StockEtfEvidenceClockDayV1::pass_day_fixture();
+    scorecard_writer.checker_wrote_scorecard = true;
+    assert_single_evidence_clock_blocker(
+        scorecard_writer,
+        StockEtfPhase3Blocker::ScorecardWriterStarted,
+    );
+
+    let mut db_apply = StockEtfEvidenceClockDayV1::pass_day_fixture();
+    db_apply.checker_applied_db = true;
+    assert_single_evidence_clock_blocker(db_apply, StockEtfPhase3Blocker::DbApplyPerformed);
+
+    let mut secret = StockEtfEvidenceClockDayV1::pass_day_fixture();
+    secret.secret_content_serialized = true;
+    assert_single_evidence_clock_blocker(secret, StockEtfPhase3Blocker::SecretContentSerialized);
+
+    let mut live_authority = StockEtfEvidenceClockDayV1::pass_day_fixture();
+    live_authority.live_or_tiny_live_authorized = true;
+    assert_single_evidence_clock_blocker(
+        live_authority,
+        StockEtfPhase3Blocker::LiveOrTinyLiveAuthorized,
+    );
+
+    let mut connector_green = StockEtfEvidenceClockDayV1::pass_day_fixture();
+    connector_green.ibkr_readonly_paper_connector_green_5d = false;
+    assert_single_evidence_clock_blocker(
+        connector_green,
+        StockEtfPhase3Blocker::IbkrConnectorNotGreenFiveDays,
+    );
+
+    let mut shadow_green = StockEtfEvidenceClockDayV1::pass_day_fixture();
+    shadow_green.shadow_collector_green_5d = false;
+    assert_single_evidence_clock_blocker(
+        shadow_green,
+        StockEtfPhase3Blocker::ShadowCollectorNotGreenFiveDays,
+    );
+}
+
+#[test]
 fn quarantined_day_requires_valid_manifest_shape_and_actual_dq_failure() {
     let mut quarantined = StockEtfEvidenceClockDayV1::pass_day_fixture();
     quarantined.status = StockEtfEvidenceClockStatus::QuarantinedDay;
@@ -844,6 +905,21 @@ fn assert_single_phase3_blocker(collector: StockEtfCollectorRunV1, blocker: Stoc
 
 fn assert_single_dq_blocker(manifest: StockEtfDailyDqManifestV1, blocker: StockEtfPhase3Blocker) {
     let verdict = manifest.validates_shape();
+
+    assert!(!verdict.accepted);
+    assert_eq!(
+        verdict.blockers,
+        vec![blocker],
+        "expected only {blocker:?}; blockers: {:?}",
+        verdict.blockers
+    );
+}
+
+fn assert_single_evidence_clock_blocker(
+    day: StockEtfEvidenceClockDayV1,
+    blocker: StockEtfPhase3Blocker,
+) {
+    let verdict = day.validate();
 
     assert!(!verdict.accepted);
     assert_eq!(
