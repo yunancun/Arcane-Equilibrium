@@ -5212,3 +5212,29 @@ Verification 已過：
 service stop、沒有 runtime action、沒有 secret lookup、沒有 DB cleanup/delete/truncate、沒有 IBKR contact、
 沒有 connector runtime、沒有 SDK import、沒有 paper order routing、沒有 broker session、沒有 paper-shadow
 launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF GUI Lane Default Authority Exact Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF GUI Lane Default Authority Exact Guard`。
+
+這個 checkpoint 補強 `StockEtfGuiLaneContractV1` 的 GUI display-only/default authority exact coverage。
+
+新增 Rust acceptance 證明 default GUI lane contract、contract id/source drift、client lane state authority、
+effect-capable GUI surfaces、route/cache/auth regression evidence、denied effect operations 都會以完整 ordered
+blocker vectors fail closed。Python source-static guard 也鎖住 GUI lane validator blocker emit order。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Stock/ETF GUI lane source static pytest：`7 passed`
+- Stock/ETF GUI lane Rust acceptance：`9 passed`
+- Full `cargo test -p openclaw_types`：`35` unit/golden + `337` integration/acceptance + `0` doc-tests
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 GUI runtime change、沒有 endpoint/IPC method change、
+沒有 IPC server start、沒有 IBKR contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、
+沒有 paper order routing、沒有 broker session、沒有 DB/evidence writer、沒有 scorecard writer、沒有
+paper-shadow launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。

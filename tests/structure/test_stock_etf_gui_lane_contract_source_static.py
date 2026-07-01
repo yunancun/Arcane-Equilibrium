@@ -214,6 +214,13 @@ def _source() -> str:
     return GUI_LANE.read_text(encoding="utf-8")
 
 
+def _validate_block(source: str) -> str:
+    return source.split(
+        "pub fn validate(&self) -> StockEtfGuiLaneVerdict<StockEtfGuiLaneBlocker>",
+        1,
+    )[1].split("StockEtfGuiLaneVerdict::new(blockers)", 1)[0]
+
+
 def test_stock_etf_gui_lane_contract_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
@@ -363,6 +370,78 @@ def test_stock_etf_gui_lane_contract_source_keeps_validation_matrix() -> None:
     assert 'has_required_denial(\n            &self.denied_effect_operations,\n            "ibkr_api_contact_before_phase2_gate",' in source
     assert "self.ibkr_contact_performed" in source
     assert "self.secret_content_serialized" in source
+
+
+def test_stock_etf_gui_lane_contract_source_keeps_exact_blocker_order() -> None:
+    validate = _validate_block(_source())
+    ordered_blockers = (
+        "ContractIdMissing",
+        "ContractIdMismatch",
+        "SourceVersionMismatch",
+        "DefaultLaneNotCryptoPerp",
+        "StockEtfTabMissing",
+        "ReadinessEndpointMismatch",
+        "ReadinessEndpointNotGetOnly",
+        "LaneStatusEndpointMismatch",
+        "LaneStatusEndpointNotGetOnly",
+        "Phase0StatusEndpointMismatch",
+        "Phase0StatusEndpointNotGetOnly",
+        "DataFoundationStatusEndpointMismatch",
+        "DataFoundationStatusEndpointNotGetOnly",
+        "PolicyStatusEndpointMismatch",
+        "PolicyStatusEndpointNotGetOnly",
+        "AuthorizationStatusEndpointMismatch",
+        "AuthorizationStatusEndpointNotGetOnly",
+        "AccountStatusEndpointMismatch",
+        "AccountStatusEndpointNotGetOnly",
+        "EvidenceStatusEndpointMismatch",
+        "EvidenceStatusEndpointNotGetOnly",
+        "UniverseStatusEndpointMismatch",
+        "UniverseStatusEndpointNotGetOnly",
+        "ShadowStatusEndpointMismatch",
+        "ShadowStatusEndpointNotGetOnly",
+        "PaperStatusEndpointMismatch",
+        "PaperStatusEndpointNotGetOnly",
+        "ReconciliationStatusEndpointMismatch",
+        "ReconciliationStatusEndpointNotGetOnly",
+        "ScorecardStatusEndpointMismatch",
+        "ScorecardStatusEndpointNotGetOnly",
+        "LaunchStatusEndpointMismatch",
+        "LaunchStatusEndpointNotGetOnly",
+        "ReleasePacketStatusEndpointMismatch",
+        "ReleasePacketStatusEndpointNotGetOnly",
+        "DisableCleanupStatusEndpointMismatch",
+        "DisableCleanupStatusEndpointNotGetOnly",
+        "DisplayOnlyMissing",
+        "ClientLaneStateTrusted",
+        "LocalStorageAuthorityNotDenied",
+        "QueryParamAuthorityNotDenied",
+        "HiddenFieldAuthorityNotDenied",
+        "LoginSuccessSelectorPresent",
+        "PostRoutePresent",
+        "OrderWidgetPresent",
+        "SecretWidgetPresent",
+        "IbkrContactOnRenderAllowed",
+        "PaperOrderEntryVisible",
+        "StockLiveDisabledDisplayMissing",
+        "CfdSurfaceNotHiddenOrFailClosed",
+        "RouteCachePartitionMissing",
+        "AuthPartitionMissing",
+        "StaleCacheCrossLaneNotDenied",
+        "CryptoTabsRegressionMissing",
+        "DecisionLeaseRiskRegressionMissing",
+        "StaticSourceHashInvalid",
+        "RouteTestHashInvalid",
+        "CryptoRegressionHashInvalid",
+        "LiveOrderDenialMissing",
+        "SecretSlotDenialMissing",
+        "PreGateContactDenialMissing",
+        "IbkrContactPerformed",
+        "SecretContentSerialized",
+    )
+
+    positions = [validate.index(f"Blocker::{blocker}") for blocker in ordered_blockers]
+    assert positions == sorted(positions)
 
 
 def test_stock_etf_gui_lane_contract_source_has_no_runtime_secret_order_or_bybit_client_tokens() -> None:
