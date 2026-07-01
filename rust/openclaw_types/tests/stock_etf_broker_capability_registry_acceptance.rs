@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use openclaw_types::{
     evaluate_broker_operation, AssetLane, AuthorityScope, Broker, BrokerCapabilityRequest,
     BrokerEnvironment, BrokerOperation, InstrumentKind, StockEtfBrokerCapabilityBlocker,
-    StockEtfBrokerCapabilityRegistryV1, StockEtfDenialReason, StockEtfFeatureFlags,
-    StockEtfGateInputs, BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID,
+    StockEtfBrokerCapabilityEntryV1, StockEtfBrokerCapabilityRegistryV1, StockEtfDenialReason,
+    StockEtfFeatureFlags, StockEtfGateInputs, BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID,
     IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
     STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID, STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID,
     STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
@@ -188,6 +188,163 @@ fn accepted_registry_contains_full_stock_etf_ibkr_operation_matrix() {
         .any(|entry| entry.operation == BrokerOperation::LiveOrderSubmit
             && entry.authority_scope == AuthorityScope::Denied
             && entry.typed_denial_reason == Some(StockEtfDenialReason::IbkrLiveNotAuthorized)));
+}
+
+#[test]
+fn registry_rejects_each_top_level_gap_independently() {
+    assert_single_blocker(
+        StockEtfBrokerCapabilityRegistryV1 {
+            registry_id: String::new(),
+            ..StockEtfBrokerCapabilityRegistryV1::accepted_fixture()
+        },
+        StockEtfBrokerCapabilityBlocker::RegistryIdMismatch,
+    );
+    assert_single_blocker(
+        StockEtfBrokerCapabilityRegistryV1 {
+            source_version: 2,
+            ..StockEtfBrokerCapabilityRegistryV1::accepted_fixture()
+        },
+        StockEtfBrokerCapabilityBlocker::SourceVersionMismatch,
+    );
+    assert_single_blocker(
+        StockEtfBrokerCapabilityRegistryV1 {
+            asset_lane: AssetLane::CryptoPerp,
+            ..StockEtfBrokerCapabilityRegistryV1::accepted_fixture()
+        },
+        StockEtfBrokerCapabilityBlocker::WrongAssetLane,
+    );
+    assert_single_blocker(
+        StockEtfBrokerCapabilityRegistryV1 {
+            broker: Broker::Bybit,
+            ..StockEtfBrokerCapabilityRegistryV1::accepted_fixture()
+        },
+        StockEtfBrokerCapabilityBlocker::WrongBroker,
+    );
+    assert_single_blocker(
+        StockEtfBrokerCapabilityRegistryV1 {
+            bybit_live_execution_unchanged: false,
+            ..StockEtfBrokerCapabilityRegistryV1::accepted_fixture()
+        },
+        StockEtfBrokerCapabilityBlocker::BybitLiveExecutionNotProtected,
+    );
+    assert_single_blocker(
+        StockEtfBrokerCapabilityRegistryV1 {
+            python_broker_write_authority_denied: false,
+            ..StockEtfBrokerCapabilityRegistryV1::accepted_fixture()
+        },
+        StockEtfBrokerCapabilityBlocker::PythonBrokerWriteAuthorityNotDenied,
+    );
+    assert_single_blocker(
+        StockEtfBrokerCapabilityRegistryV1 {
+            ibkr_live_denied: false,
+            ..StockEtfBrokerCapabilityRegistryV1::accepted_fixture()
+        },
+        StockEtfBrokerCapabilityBlocker::IbkrLiveNotDenied,
+    );
+    assert_single_blocker(
+        StockEtfBrokerCapabilityRegistryV1 {
+            cfd_margin_reserved_denied: false,
+            ..StockEtfBrokerCapabilityRegistryV1::accepted_fixture()
+        },
+        StockEtfBrokerCapabilityBlocker::CfdMarginReservedNotDenied,
+    );
+    assert_single_blocker(
+        StockEtfBrokerCapabilityRegistryV1 {
+            first_ibkr_contact_performed: true,
+            ..StockEtfBrokerCapabilityRegistryV1::accepted_fixture()
+        },
+        StockEtfBrokerCapabilityBlocker::FirstIbkrContactPerformed,
+    );
+    assert_single_blocker(
+        StockEtfBrokerCapabilityRegistryV1 {
+            secret_content_serialized: true,
+            ..StockEtfBrokerCapabilityRegistryV1::accepted_fixture()
+        },
+        StockEtfBrokerCapabilityBlocker::SecretContentSerialized,
+    );
+    assert_single_blocker(
+        StockEtfBrokerCapabilityRegistryV1 {
+            required_audit_fields: Vec::new(),
+            ..StockEtfBrokerCapabilityRegistryV1::accepted_fixture()
+        },
+        StockEtfBrokerCapabilityBlocker::RequiredAuditFieldMissing,
+    );
+}
+
+#[test]
+fn registry_rejects_each_operation_coverage_gap_independently() {
+    let mut missing = StockEtfBrokerCapabilityRegistryV1::accepted_fixture();
+    missing
+        .operations
+        .retain(|entry| entry.operation != BrokerOperation::MarketDataRead);
+    assert_single_blocker(missing, StockEtfBrokerCapabilityBlocker::OperationMissing);
+
+    let mut duplicated = StockEtfBrokerCapabilityRegistryV1::accepted_fixture();
+    duplicated
+        .operations
+        .push(operation(&duplicated, BrokerOperation::HealthRead).clone());
+    assert_single_blocker(
+        duplicated,
+        StockEtfBrokerCapabilityBlocker::OperationDuplicated,
+    );
+}
+
+#[test]
+fn registry_rejects_each_operation_shape_gap_independently() {
+    assert_single_operation_blocker(
+        BrokerOperation::PaperOrderSubmit,
+        |entry| entry.authority_scope = AuthorityScope::ReadOnly,
+        StockEtfBrokerCapabilityBlocker::OperationAuthorityScopeMismatch,
+    );
+    assert_single_operation_blocker(
+        BrokerOperation::PaperOrderSubmit,
+        |entry| {
+            entry
+                .required_gates
+                .retain(|gate| gate != STOCK_ETF_RISK_POLICY_CONTRACT_ID)
+        },
+        StockEtfBrokerCapabilityBlocker::OperationRequiredGateMissing,
+    );
+    assert_single_operation_blocker(
+        BrokerOperation::PaperOrderSubmit,
+        |entry| entry.typed_denial_reason = Some(StockEtfDenialReason::LaneDisabled),
+        StockEtfBrokerCapabilityBlocker::OperationTypedDenialMismatch,
+    );
+    assert_single_operation_blocker(
+        BrokerOperation::PaperOrderSubmit,
+        |entry| entry.rust_owned = false,
+        StockEtfBrokerCapabilityBlocker::OperationRustOwnershipMismatch,
+    );
+    assert_single_operation_blocker(
+        BrokerOperation::PaperOrderSubmit,
+        |entry| entry.audit_event_required = false,
+        StockEtfBrokerCapabilityBlocker::OperationAuditEventMissing,
+    );
+    assert_single_operation_blocker(
+        BrokerOperation::PaperOrderSubmit,
+        |entry| entry.source_artifact_hash_required = false,
+        StockEtfBrokerCapabilityBlocker::OperationSourceArtifactHashMissing,
+    );
+    assert_single_operation_blocker(
+        BrokerOperation::LiveOrderSubmit,
+        |entry| entry.authority_scope = AuthorityScope::PaperRehearsal,
+        StockEtfBrokerCapabilityBlocker::OperationAuthorityScopeMismatch,
+    );
+    assert_single_operation_blocker(
+        BrokerOperation::LiveOrderSubmit,
+        |entry| entry.typed_denial_reason = None,
+        StockEtfBrokerCapabilityBlocker::OperationTypedDenialMismatch,
+    );
+    assert_single_operation_blocker(
+        BrokerOperation::PaperOrderFillImport,
+        |entry| entry.authority_scope = AuthorityScope::PaperRehearsal,
+        StockEtfBrokerCapabilityBlocker::OperationAuthorityScopeMismatch,
+    );
+    assert_single_operation_blocker(
+        BrokerOperation::PaperOrderFillImport,
+        |entry| entry.rust_owned = true,
+        StockEtfBrokerCapabilityBlocker::OperationRustOwnershipMismatch,
+    );
 }
 
 #[test]
@@ -513,4 +670,46 @@ fn has(
     blocker: StockEtfBrokerCapabilityBlocker,
 ) -> bool {
     blockers.contains(&blocker)
+}
+
+fn assert_single_blocker(
+    registry: StockEtfBrokerCapabilityRegistryV1,
+    expected: StockEtfBrokerCapabilityBlocker,
+) {
+    let verdict = registry.validate();
+
+    assert!(!verdict.accepted);
+    assert_eq!(verdict.blockers, vec![expected]);
+}
+
+fn assert_single_operation_blocker(
+    operation_kind: BrokerOperation,
+    mutate: impl FnOnce(&mut StockEtfBrokerCapabilityEntryV1),
+    expected: StockEtfBrokerCapabilityBlocker,
+) {
+    let mut registry = StockEtfBrokerCapabilityRegistryV1::accepted_fixture();
+    mutate(operation_mut(&mut registry, operation_kind));
+    assert_single_blocker(registry, expected);
+}
+
+fn operation(
+    registry: &StockEtfBrokerCapabilityRegistryV1,
+    operation_kind: BrokerOperation,
+) -> &StockEtfBrokerCapabilityEntryV1 {
+    registry
+        .operations
+        .iter()
+        .find(|entry| entry.operation == operation_kind)
+        .expect("broker capability operation exists")
+}
+
+fn operation_mut(
+    registry: &mut StockEtfBrokerCapabilityRegistryV1,
+    operation_kind: BrokerOperation,
+) -> &mut StockEtfBrokerCapabilityEntryV1 {
+    registry
+        .operations
+        .iter_mut()
+        .find(|entry| entry.operation == operation_kind)
+        .expect("broker capability operation exists")
 }

@@ -3924,3 +3924,10 @@
 - Source-static parsing now pins feature flag and gate input default fail-closed posture plus `evaluate_broker_operation` denial ordering.
 - Verification passed: stock/ETF lane source static `8 passed`; stock/ETF lane Rust acceptance `14 passed`; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, paper order routing, DB/evidence writer, scorecard writer, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Broker Capability Registry Authority Lineage Cross-Wire Guard
+
+- PM added test-only/source-static exact-blocker coverage for `StockEtfBrokerCapabilityRegistryV1` top-level registry posture, operation coverage, and operation row authority/gate/typed-denial/rust/audit/source-artifact shape.
+- Source-static parsing now pins required operations, default fail-closed posture, and accepted StockEtfCash/IBKR/no-contact/no-secret fixture posture.
+- Verification passed: broker capability registry source static `8 passed`; broker capability registry Rust acceptance `14 passed`; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, paper order routing, DB/evidence writer, scorecard writer, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

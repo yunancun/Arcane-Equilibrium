@@ -4962,3 +4962,31 @@ Verification 已過：
 沒有 IBKR contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 paper order routing、
 沒有 DB/evidence writer、沒有 scorecard writer、沒有 broker session、沒有 tiny-live/live authorization，
 也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Broker Capability Registry Authority Lineage Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Broker Capability Registry Authority Lineage Cross-Wire Guard`。
+
+這個 checkpoint 補強 `StockEtfBrokerCapabilityRegistryV1` 的 registry identity、StockEtfCash/IBKR lane
+separation、Bybit/live/python-write/contact/secret denials、required audit fields、required operation coverage
+與 operation row authority/gate/typed-denial/rust/audit/source-artifact shape。
+
+新增 Rust acceptance 證明 top-level registry gaps、missing/duplicated operation gaps，以及 paper submit/live/
+paper-fill-import rows 的 authority/gate/typed-denial/rust/audit/source-artifact gaps 都會 fail closed。Python
+source-static guard 也鎖住 default fail-closed posture、accepted StockEtfCash/IBKR/no-contact/no-secret posture、
+以及 REQUIRED_OPERATIONS 全矩陣。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Broker capability registry source static pytest：`8 passed`
+- Broker capability registry Rust acceptance：`14 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IPC server start、
+沒有 IBKR contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 paper order routing、
+沒有 DB/evidence writer、沒有 scorecard writer、沒有 broker session、沒有 tiny-live/live authorization，
+也沒有改動 Bybit live/demo execution 行為。
