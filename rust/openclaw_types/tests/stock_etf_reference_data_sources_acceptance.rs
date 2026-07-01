@@ -16,46 +16,37 @@ fn default_reference_data_sources_block_phase3_usage() {
     let verdict = StockEtfReferenceDataSourcesV1::default().validate();
 
     assert!(!verdict.accepted);
-    assert!(has(
-        &verdict.blockers,
-        StockEtfReferenceDataSourcesBlocker::ContractIdMismatch
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfReferenceDataSourcesBlocker::SourceVersionMismatch
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfReferenceDataSourcesBlocker::WrongAssetLane
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfReferenceDataSourcesBlocker::WrongBroker
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfReferenceDataSourcesBlocker::EnvironmentDenied
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfReferenceDataSourcesBlocker::EvidenceClockFreezeMissing
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfReferenceDataSourcesBlocker::CorporateActionSourceMissing
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfReferenceDataSourcesBlocker::FxRateSourceMissing
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfReferenceDataSourcesBlocker::FeeScheduleSourceMissing
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfReferenceDataSourcesBlocker::LiveOrTinyLiveAuthorized
-    ));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            StockEtfReferenceDataSourcesBlocker::ContractIdMismatch,
+            StockEtfReferenceDataSourcesBlocker::SourceVersionMismatch,
+            StockEtfReferenceDataSourcesBlocker::WrongAssetLane,
+            StockEtfReferenceDataSourcesBlocker::WrongBroker,
+            StockEtfReferenceDataSourcesBlocker::EnvironmentDenied,
+            StockEtfReferenceDataSourcesBlocker::EvidenceClockFreezeMissing,
+            StockEtfReferenceDataSourcesBlocker::CorporateActionSourceMissing,
+            StockEtfReferenceDataSourcesBlocker::CorporateActionAsOfMissing,
+            StockEtfReferenceDataSourcesBlocker::CorporateActionRawHashInvalid,
+            StockEtfReferenceDataSourcesBlocker::CorporateActionAdjustmentHashInvalid,
+            StockEtfReferenceDataSourcesBlocker::CorporateActionPolicyHashInvalid,
+            StockEtfReferenceDataSourcesBlocker::DividendTreatmentHashInvalid,
+            StockEtfReferenceDataSourcesBlocker::FxRateSourceMissing,
+            StockEtfReferenceDataSourcesBlocker::FxRateAsOfMissing,
+            StockEtfReferenceDataSourcesBlocker::CurrencyDenied,
+            StockEtfReferenceDataSourcesBlocker::FxRateSnapshotHashInvalid,
+            StockEtfReferenceDataSourcesBlocker::FxDragModelHashInvalid,
+            StockEtfReferenceDataSourcesBlocker::FeeScheduleSourceMissing,
+            StockEtfReferenceDataSourcesBlocker::FeeScheduleAsOfMissing,
+            StockEtfReferenceDataSourcesBlocker::CommissionScheduleHashInvalid,
+            StockEtfReferenceDataSourcesBlocker::ExchangeRegulatoryFeeHashInvalid,
+            StockEtfReferenceDataSourcesBlocker::TaxFttPlaceholderHashInvalid,
+            StockEtfReferenceDataSourcesBlocker::WithholdingTaxTreatmentHashInvalid,
+            StockEtfReferenceDataSourcesBlocker::SourceArtifactHashInvalid,
+            StockEtfReferenceDataSourcesBlocker::BybitLiveExecutionNotProtected,
+            StockEtfReferenceDataSourcesBlocker::LiveOrTinyLiveAuthorized,
+        ]
+    );
 }
 
 #[test]
@@ -94,14 +85,13 @@ fn reference_sources_require_exact_contract_id_and_source_version() {
 
     let blockers = sources.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfReferenceDataSourcesBlocker::ContractIdMismatch
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReferenceDataSourcesBlocker::SourceVersionMismatch
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfReferenceDataSourcesBlocker::ContractIdMismatch,
+            StockEtfReferenceDataSourcesBlocker::SourceVersionMismatch,
+        ]
+    );
 }
 
 #[test]
@@ -126,50 +116,27 @@ fn corporate_action_fx_and_fee_sources_require_asof_and_hashes() {
 
     let blockers = sources.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfReferenceDataSourcesBlocker::CorporateActionSourceMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReferenceDataSourcesBlocker::CorporateActionAsOfMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReferenceDataSourcesBlocker::CorporateActionRawHashInvalid
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReferenceDataSourcesBlocker::CorporateActionAdjustmentHashInvalid
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReferenceDataSourcesBlocker::DividendTreatmentHashInvalid
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReferenceDataSourcesBlocker::FxRateSourceMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReferenceDataSourcesBlocker::FxRateAsOfMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReferenceDataSourcesBlocker::FxRateSnapshotHashInvalid
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReferenceDataSourcesBlocker::FeeScheduleSourceMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReferenceDataSourcesBlocker::CommissionScheduleHashInvalid
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReferenceDataSourcesBlocker::TaxFttPlaceholderHashInvalid
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfReferenceDataSourcesBlocker::CorporateActionSourceMissing,
+            StockEtfReferenceDataSourcesBlocker::CorporateActionAsOfMissing,
+            StockEtfReferenceDataSourcesBlocker::CorporateActionRawHashInvalid,
+            StockEtfReferenceDataSourcesBlocker::CorporateActionAdjustmentHashInvalid,
+            StockEtfReferenceDataSourcesBlocker::CorporateActionPolicyHashInvalid,
+            StockEtfReferenceDataSourcesBlocker::DividendTreatmentHashInvalid,
+            StockEtfReferenceDataSourcesBlocker::FxRateSourceMissing,
+            StockEtfReferenceDataSourcesBlocker::FxRateAsOfMissing,
+            StockEtfReferenceDataSourcesBlocker::FxRateSnapshotHashInvalid,
+            StockEtfReferenceDataSourcesBlocker::FxDragModelHashInvalid,
+            StockEtfReferenceDataSourcesBlocker::FeeScheduleSourceMissing,
+            StockEtfReferenceDataSourcesBlocker::FeeScheduleAsOfMissing,
+            StockEtfReferenceDataSourcesBlocker::CommissionScheduleHashInvalid,
+            StockEtfReferenceDataSourcesBlocker::ExchangeRegulatoryFeeHashInvalid,
+            StockEtfReferenceDataSourcesBlocker::TaxFttPlaceholderHashInvalid,
+            StockEtfReferenceDataSourcesBlocker::WithholdingTaxTreatmentHashInvalid,
+        ]
+    );
 }
 
 #[test]
@@ -186,38 +153,19 @@ fn reference_sources_reject_boundary_regressions() {
 
     let blockers = sources.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfReferenceDataSourcesBlocker::EnvironmentDenied
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReferenceDataSourcesBlocker::EvidenceClockFreezeMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReferenceDataSourcesBlocker::CurrencyDenied
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReferenceDataSourcesBlocker::BybitLiveExecutionNotProtected
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReferenceDataSourcesBlocker::IbkrContactPerformed
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReferenceDataSourcesBlocker::ConnectorRuntimeStarted
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReferenceDataSourcesBlocker::SecretContentSerialized
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReferenceDataSourcesBlocker::LiveOrTinyLiveAuthorized
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfReferenceDataSourcesBlocker::EnvironmentDenied,
+            StockEtfReferenceDataSourcesBlocker::EvidenceClockFreezeMissing,
+            StockEtfReferenceDataSourcesBlocker::CurrencyDenied,
+            StockEtfReferenceDataSourcesBlocker::BybitLiveExecutionNotProtected,
+            StockEtfReferenceDataSourcesBlocker::IbkrContactPerformed,
+            StockEtfReferenceDataSourcesBlocker::ConnectorRuntimeStarted,
+            StockEtfReferenceDataSourcesBlocker::SecretContentSerialized,
+            StockEtfReferenceDataSourcesBlocker::LiveOrTinyLiveAuthorized,
+        ]
+    );
 }
 
 #[test]
@@ -307,13 +255,6 @@ fn blocked_template_is_parseable_and_secret_free() {
     assert!(!lower.contains("account_id ="));
     assert!(!lower.contains("password ="));
     assert!(!lower.contains("token ="));
-}
-
-fn has(
-    blockers: &[StockEtfReferenceDataSourcesBlocker],
-    blocker: StockEtfReferenceDataSourcesBlocker,
-) -> bool {
-    blockers.contains(&blocker)
 }
 
 fn assert_single_blocker(

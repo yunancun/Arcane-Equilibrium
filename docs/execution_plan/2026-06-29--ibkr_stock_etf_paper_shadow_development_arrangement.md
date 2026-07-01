@@ -9214,3 +9214,48 @@ runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀
 socket/client construction、不做 broker session、不執行 market-data ingestion、不啟動 collector runtime、不啟動
 evidence clock、不做 paper order routing/cancel/replace、不做 evidence/scorecard/DB writer、不做 release launch、
 不做 Linux runtime sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
+
+## 223. 2026-07-01 PM session source checkpoint：Stock/ETF Data Foundation Exact Blocker Guard
+
+本 checkpoint 補強 Stock/ETF 上游 data foundation contracts 的 aggregate fail-closed lineage，固定
+`StockEtfInstrumentIdentityV1`、`StockEtfPitUniverseV1`、`StockEtfReferenceDataSourcesV1` 的 default posture、
+contract/source drift、identity/venue/currency/hash gaps、PIT constituent/count/hash gaps、reference-data
+corporate-action/FX/fee-tax source gaps，以及 runtime/authority/boundary regressions 的 ordered blocker vectors
+或 exact single-blocker vectors。這不是 Rust production behavior change、不是 IPC/API route change、不是 IBKR
+contact、不是 connector runtime、不是 socket/client construction、不是 secret lookup、不是 broker session、不是
+market-data/data ingestion、不是 paper order route enablement、不是 evidence/scorecard/DB writer、不是 tiny-live/live
+gate；只把 Stock/ETF data foundation source-only contracts 的 fail-closed lineage 變成 exact-blocker acceptance
+guard。
+
+已完成：
+
+- 在 `stock_etf_instrument_identity_acceptance.rs` 將 default identity、contract/source drift、kind/symbol/venue/
+  currency aggregate、cash/non-cash venue mismatch、tradability/PRIIPs/hash aggregate、authority/boundary
+  regressions 固定為 exact blocker vectors 或 exact single-blocker vectors。
+- 在 `stock_etf_pit_universe_acceptance.rs` 將 default PIT universe、identity/window drift、bad constituent/count
+  shape、required hash/freeze/survivorship/boundary aggregate 固定為 exact blocker vectors 或 exact
+  single-blocker vectors。
+- 在 `stock_etf_reference_data_sources_acceptance.rs` 將 default reference-data sources、contract/source drift、
+  corporate-action/FX/fee-tax source gaps、environment/freeze/currency/runtime boundary aggregate 固定為 exact
+  blocker vectors 或 exact single-blocker vectors。
+- 移除三個 acceptance 檔中的 loose `has()` / `blockers.contains` aggregate helper usage。
+- 在三個 source-static tests 新增 validator blocker emit-order guard，pin identity/cash-venue、PIT top-level/
+  constituent/hash、reference-data corporate-action/FX/fee-tax validators 的 source order。
+
+驗證：
+
+- No data foundation blocker `.contains()` scan：PASS。
+- Targeted rustfmt check：PASS。
+- Stock/ETF data foundation source static pytest：`28 passed`。
+- Stock/ETF data foundation Rust acceptance：`24 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、不改 GUI
+runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不做
+socket/client construction、不做 broker session、不執行 data/market-data ingestion、不執行 read-only probe、不執行
+fill import、不做 paper order routing/cancel/replace、不做 evidence/scorecard/DB writer、不啟動 evidence clock、
+不做 release launch、不做 Linux runtime sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit
+behavior change。

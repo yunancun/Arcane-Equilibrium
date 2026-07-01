@@ -302,6 +302,79 @@ def test_stock_etf_reference_data_sources_source_keeps_validation_matrix() -> No
     assert "self.live_or_tiny_live_authorized" in source
 
 
+def test_stock_etf_reference_data_sources_source_keeps_blocker_emit_order() -> None:
+    source = _source()
+    validate_body = source.split("pub fn validate(", 1)[1].split(
+        "StockEtfReferenceDataSourcesVerdict::new",
+        1,
+    )[0]
+    corporate_body = source.split("fn validate_corporate_action_sources(", 1)[1].split(
+        "fn validate_fx_sources(",
+        1,
+    )[0]
+    fx_body = source.split("fn validate_fx_sources(", 1)[1].split(
+        "fn validate_fee_tax_sources(",
+        1,
+    )[0]
+    fee_body = source.split("fn validate_fee_tax_sources(", 1)[1].split(
+        "fn hash(",
+        1,
+    )[0]
+
+    _assert_order(
+        validate_body,
+        (
+            "blockers.push(Blocker::ContractIdMismatch);",
+            "blockers.push(Blocker::SourceVersionMismatch);",
+            "blockers.push(Blocker::WrongAssetLane);",
+            "blockers.push(Blocker::WrongBroker);",
+            "blockers.push(Blocker::EnvironmentDenied);",
+            "blockers.push(Blocker::EvidenceClockFreezeMissing);",
+            "validate_corporate_action_sources(self, &mut blockers)",
+            "validate_fx_sources(self, &mut blockers)",
+            "validate_fee_tax_sources(self, &mut blockers)",
+            "blockers.push(Blocker::SourceArtifactHashInvalid);",
+            "blockers.push(Blocker::BybitLiveExecutionNotProtected);",
+            "blockers.push(Blocker::IbkrContactPerformed);",
+            "blockers.push(Blocker::ConnectorRuntimeStarted);",
+            "blockers.push(Blocker::SecretContentSerialized);",
+            "blockers.push(Blocker::LiveOrTinyLiveAuthorized);",
+        ),
+    )
+    _assert_order(
+        corporate_body,
+        (
+            "blockers.push(Blocker::CorporateActionSourceMissing);",
+            "blockers.push(Blocker::CorporateActionAsOfMissing);",
+            "blockers.push(Blocker::CorporateActionRawHashInvalid);",
+            "blockers.push(Blocker::CorporateActionAdjustmentHashInvalid);",
+            "blockers.push(Blocker::CorporateActionPolicyHashInvalid);",
+            "blockers.push(Blocker::DividendTreatmentHashInvalid);",
+        ),
+    )
+    _assert_order(
+        fx_body,
+        (
+            "blockers.push(Blocker::FxRateSourceMissing);",
+            "blockers.push(Blocker::FxRateAsOfMissing);",
+            "blockers.push(Blocker::CurrencyDenied);",
+            "blockers.push(Blocker::FxRateSnapshotHashInvalid);",
+            "blockers.push(Blocker::FxDragModelHashInvalid);",
+        ),
+    )
+    _assert_order(
+        fee_body,
+        (
+            "blockers.push(Blocker::FeeScheduleSourceMissing);",
+            "blockers.push(Blocker::FeeScheduleAsOfMissing);",
+            "blockers.push(Blocker::CommissionScheduleHashInvalid);",
+            "blockers.push(Blocker::ExchangeRegulatoryFeeHashInvalid);",
+            "blockers.push(Blocker::TaxFttPlaceholderHashInvalid);",
+            "blockers.push(Blocker::WithholdingTaxTreatmentHashInvalid);",
+        ),
+    )
+
+
 def test_stock_etf_reference_data_sources_source_keeps_source_family_checks() -> None:
     source = _source()
 
@@ -334,3 +407,11 @@ def test_stock_etf_reference_data_sources_source_has_no_runtime_secret_order_or_
             violations.append(f"{REFERENCE_SOURCES}: contains forbidden token {token!r}")
 
     assert violations == []
+
+
+def _assert_order(source: str, tokens: tuple[str, ...]) -> None:
+    cursor = -1
+    for token in tokens:
+        index = source.find(token, cursor + 1)
+        assert index > cursor, token
+        cursor = index

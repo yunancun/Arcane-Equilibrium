@@ -18,34 +18,35 @@ fn default_pit_universe_blocks_before_evidence_clock_can_use_universe_hash() {
     let verdict = universe.validate();
 
     assert!(!verdict.accepted);
-    assert!(has(
-        &verdict.blockers,
-        StockEtfPitUniverseBlocker::ContractIdMismatch
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfPitUniverseBlocker::SourceVersionMismatch
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfPitUniverseBlocker::WrongAssetLane
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfPitUniverseBlocker::WrongBroker
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfPitUniverseBlocker::UniverseHashInvalid
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfPitUniverseBlocker::ConstituentCountMissing
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfPitUniverseBlocker::UniverseNotFrozenForEvidenceClock
-    ));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            StockEtfPitUniverseBlocker::ContractIdMismatch,
+            StockEtfPitUniverseBlocker::SourceVersionMismatch,
+            StockEtfPitUniverseBlocker::WrongAssetLane,
+            StockEtfPitUniverseBlocker::WrongBroker,
+            StockEtfPitUniverseBlocker::UniverseIdInvalid,
+            StockEtfPitUniverseBlocker::UniverseVersionInvalid,
+            StockEtfPitUniverseBlocker::UniverseHashInvalid,
+            StockEtfPitUniverseBlocker::PointInTimeAsofMissing,
+            StockEtfPitUniverseBlocker::EffectiveFromMissing,
+            StockEtfPitUniverseBlocker::ConstituentCountMissing,
+            StockEtfPitUniverseBlocker::MaxConstituentsInvalid,
+            StockEtfPitUniverseBlocker::InclusionRuleHashInvalid,
+            StockEtfPitUniverseBlocker::ExclusionRuleHashInvalid,
+            StockEtfPitUniverseBlocker::LiquidityScreenHashInvalid,
+            StockEtfPitUniverseBlocker::TradabilityScreenHashInvalid,
+            StockEtfPitUniverseBlocker::PriipsScreenHashInvalid,
+            StockEtfPitUniverseBlocker::DelistedInactivePolicyHashInvalid,
+            StockEtfPitUniverseBlocker::CorporateActionVersionHashInvalid,
+            StockEtfPitUniverseBlocker::MarketCalendarHashInvalid,
+            StockEtfPitUniverseBlocker::SourceArtifactHashInvalid,
+            StockEtfPitUniverseBlocker::UniverseNotFrozenForEvidenceClock,
+            StockEtfPitUniverseBlocker::SurvivorshipControlsMissing,
+            StockEtfPitUniverseBlocker::BybitLiveExecutionNotProtected,
+            StockEtfPitUniverseBlocker::IbkrLiveNotDenied,
+        ]
+    );
 }
 
 #[test]
@@ -83,14 +84,13 @@ fn pit_universe_requires_exact_contract_id_and_source_version() {
     };
     let blockers = universe.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::ContractIdMismatch
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::SourceVersionMismatch
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfPitUniverseBlocker::ContractIdMismatch,
+            StockEtfPitUniverseBlocker::SourceVersionMismatch,
+        ]
+    );
 }
 
 #[test]
@@ -109,32 +109,19 @@ fn pit_universe_rejects_identity_and_window_regressions() {
     };
     let blockers = universe.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::ContractIdMismatch
-    ));
-    assert!(has(&blockers, StockEtfPitUniverseBlocker::WrongAssetLane));
-    assert!(has(&blockers, StockEtfPitUniverseBlocker::WrongBroker));
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::UniverseIdInvalid
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::UniverseVersionInvalid
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::UniverseHashInvalid
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::PointInTimeAsofMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::EffectiveWindowInvalid
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfPitUniverseBlocker::ContractIdMismatch,
+            StockEtfPitUniverseBlocker::WrongAssetLane,
+            StockEtfPitUniverseBlocker::WrongBroker,
+            StockEtfPitUniverseBlocker::UniverseIdInvalid,
+            StockEtfPitUniverseBlocker::UniverseVersionInvalid,
+            StockEtfPitUniverseBlocker::UniverseHashInvalid,
+            StockEtfPitUniverseBlocker::PointInTimeAsofMissing,
+            StockEtfPitUniverseBlocker::EffectiveWindowInvalid,
+        ]
+    );
 }
 
 #[test]
@@ -159,50 +146,22 @@ fn pit_universe_rejects_bad_constituents_and_count_shape() {
     };
     let blockers = universe.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::ConstituentCountMismatch
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::MaxConstituentsInvalid
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::ConstituentSymbolInvalid
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::ConstituentKindDenied
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::ConstituentIdentityHashInvalid
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::ConstituentVenueDenied
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::ConstituentCashVenueDenied
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::ConstituentCurrencyDenied
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::ConstituentNotTradable
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::ConstituentPriipsBlocked
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::ConstituentNotIncluded
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfPitUniverseBlocker::ConstituentCountMismatch,
+            StockEtfPitUniverseBlocker::MaxConstituentsInvalid,
+            StockEtfPitUniverseBlocker::ConstituentSymbolInvalid,
+            StockEtfPitUniverseBlocker::ConstituentKindDenied,
+            StockEtfPitUniverseBlocker::ConstituentIdentityHashInvalid,
+            StockEtfPitUniverseBlocker::ConstituentVenueDenied,
+            StockEtfPitUniverseBlocker::ConstituentCashVenueDenied,
+            StockEtfPitUniverseBlocker::ConstituentCurrencyDenied,
+            StockEtfPitUniverseBlocker::ConstituentNotTradable,
+            StockEtfPitUniverseBlocker::ConstituentPriipsBlocked,
+            StockEtfPitUniverseBlocker::ConstituentNotIncluded,
+        ]
+    );
 }
 
 #[test]
@@ -227,46 +186,26 @@ fn pit_universe_rejects_missing_rule_hashes_survivorship_and_boundaries() {
     };
     let blockers = universe.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::InclusionRuleHashInvalid
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::LiquidityScreenHashInvalid
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::DelistedInactivePolicyHashInvalid
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::CorporateActionVersionHashInvalid
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::UniverseNotFrozenForEvidenceClock
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::SurvivorshipControlsMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::BybitLiveExecutionNotProtected
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::IbkrLiveNotDenied
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::IbkrContactPerformed
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPitUniverseBlocker::SecretContentSerialized
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfPitUniverseBlocker::InclusionRuleHashInvalid,
+            StockEtfPitUniverseBlocker::ExclusionRuleHashInvalid,
+            StockEtfPitUniverseBlocker::LiquidityScreenHashInvalid,
+            StockEtfPitUniverseBlocker::TradabilityScreenHashInvalid,
+            StockEtfPitUniverseBlocker::PriipsScreenHashInvalid,
+            StockEtfPitUniverseBlocker::DelistedInactivePolicyHashInvalid,
+            StockEtfPitUniverseBlocker::CorporateActionVersionHashInvalid,
+            StockEtfPitUniverseBlocker::MarketCalendarHashInvalid,
+            StockEtfPitUniverseBlocker::SourceArtifactHashInvalid,
+            StockEtfPitUniverseBlocker::UniverseNotFrozenForEvidenceClock,
+            StockEtfPitUniverseBlocker::SurvivorshipControlsMissing,
+            StockEtfPitUniverseBlocker::BybitLiveExecutionNotProtected,
+            StockEtfPitUniverseBlocker::IbkrLiveNotDenied,
+            StockEtfPitUniverseBlocker::IbkrContactPerformed,
+            StockEtfPitUniverseBlocker::SecretContentSerialized,
+        ]
+    );
 }
 
 #[test]
@@ -334,10 +273,6 @@ fn blocked_template_is_parseable_and_secret_free() {
     assert!(!lower.contains("account_id ="));
     assert!(!lower.contains("password ="));
     assert!(!lower.contains("token ="));
-}
-
-fn has(blockers: &[StockEtfPitUniverseBlocker], blocker: StockEtfPitUniverseBlocker) -> bool {
-    blockers.contains(&blocker)
 }
 
 fn assert_single_blocker(universe: StockEtfPitUniverseV1, blocker: StockEtfPitUniverseBlocker) {
