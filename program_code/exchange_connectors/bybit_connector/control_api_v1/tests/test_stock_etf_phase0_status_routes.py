@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
@@ -11,6 +12,18 @@ from stock_etf_route_fixtures import (
     _valid_phase0_status,
     client_fail_closed,
 )
+
+EXPECTED_PHASE0_CONTRACT_VIOLATIONS = [
+    "phase5_started",
+    "paper_shadow_launch_authorized",
+    "phase0_status_mismatch",
+    (
+        "phase0_contract_missing:"
+        "stock_etf_ibkr_readonly_probe_result_import_request_v1"
+    ),
+    "phase0_ibkr_call_performed",
+    "phase0_global_denial_missing:ibkr_live",
+]
 
 
 def test_phase0_status_ipc_down_is_degraded(
@@ -105,13 +118,19 @@ def test_phase0_status_blocks_runtime_or_contract_drift() -> None:
     data = resp.json()["data"]
     assert data["phase0_status_state"] == "contract_violation_blocked"
     assert data["phase0_accepted"] is False
-    assert "phase5_started" in data["contract_violations"]
-    assert "paper_shadow_launch_authorized" in data["contract_violations"]
-    assert "phase0_status_mismatch" in data["contract_violations"]
-    assert (
-        "phase0_contract_missing:"
-        "stock_etf_ibkr_readonly_probe_result_import_request_v1"
-        in data["contract_violations"]
-    )
-    assert "phase0_ibkr_call_performed" in data["contract_violations"]
-    assert "phase0_global_denial_missing:ibkr_live" in data["contract_violations"]
+    assert data["contract_violations"] == EXPECTED_PHASE0_CONTRACT_VIOLATIONS
+
+
+def test_phase0_status_contract_violation_assertions_stay_exact() -> None:
+    source = Path(__file__).read_text(encoding="utf-8")
+    source_under_test = source.split(
+        "def test_phase0_status_contract_violation_assertions_stay_exact", 1
+    )[0]
+    forbidden_patterns = [
+        'set(data["contract_violations"])',
+        'in data["contract_violations"]',
+        'issubset(set(data["contract_violations"]))',
+    ]
+
+    for pattern in forbidden_patterns:
+        assert pattern not in source_under_test

@@ -1815,3 +1815,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM tightened FastAPI lane-status route tests so side-effect and asset/broker mismatch `contract_violations` must match a complete ordered vector.
 - The guard removes the loose lane-status `set(...)` assertion and adds a local source guard blocking set/membership/subset assertions before the guard function.
 - Verification passed: lane-status route `5 passed`; Stock/ETF no-write/surface/lane/readiness `22 passed`; full Stock/ETF Python route/static `129 passed`; changed-file `py_compile` PASS; no-loose scan PASS; diff check PASS. This grants no FastAPI route behavior change, connector production code change, GUI/Rust IPC behavior change, IBKR contact, connector runtime, secret access, broker session, read-only probe execution, fill import, paper order routing, DB/evidence/scorecard writer, evidence clock, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Phase0 Status Route Exact Contract-Violation Guard
+
+- PM tightened FastAPI Phase0 status route tests so runtime/status, required-contract, API baseline, and global-denial `contract_violations` must match a complete ordered vector.
+- The guard removes loose Phase0 membership assertions and adds a local source guard blocking set/membership/subset assertions before the guard function.
+- Verification passed: Phase0 status route `5 passed`; Stock/ETF no-write/surface/Phase0 `15 passed`; full Stock/ETF Python route/static `130 passed`; changed-file `py_compile` PASS; no-loose scan PASS; diff check PASS. This grants no FastAPI route behavior change, connector production code change, GUI/Rust IPC behavior change, IBKR contact, connector runtime, secret access, broker session, read-only probe execution, fill import, paper order routing, DB/evidence/scorecard writer, evidence clock, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
