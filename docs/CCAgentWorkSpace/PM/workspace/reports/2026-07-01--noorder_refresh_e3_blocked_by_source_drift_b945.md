@@ -10,7 +10,7 @@ PM continued the current-head no-order refresh gate without running Control API,
 
 The first current-head attempt at `bf0fd26b69f24aefd2e78b9eefd17ffd764a516a` produced a clean source-stability READY artifact, but the final pre-request fetch advanced source to `b945bc1f1517b0e0193e9efbaca264592946f984`. PM marked the bf0 run `ROTATED` and did not generate a request for that source.
 
-PM then restarted from `b945bc1f1517b0e0193e9efbaca264592946f984`, produced a new source-stability READY artifact, generated an exact no-order E3/BB request, and dispatched E3 only. E3 returned `BLOCKED_BY_SOURCE_DRIFT`: the request hash matched, but E3 final fetch found `HEAD/origin/main == 5c0979d2ee93192bc864935377b3f50b380161f9` while the request and READY artifact were bound to `b945bc1f...`. Source then advanced to `b4c4a9afa12d676cef0452ae407c7685352c1778` before docs sync. BB was not dispatched.
+PM then restarted from `b945bc1f1517b0e0193e9efbaca264592946f984`, produced a new source-stability READY artifact, generated an exact no-order E3/BB request, and dispatched E3 only. E3 returned `BLOCKED_BY_SOURCE_DRIFT`: the request hash matched, but E3 final fetch found `HEAD/origin/main == 5c0979d2ee93192bc864935377b3f50b380161f9` while the request and READY artifact were bound to `b945bc1f...`. Source then advanced through `4723f9dd9cbeb73d08573411385a2600fde6e5b6` before docs sync. BB was not dispatched.
 
 ## Artifacts
 
@@ -46,4 +46,4 @@ No Control API GET, public Bybit quote, private/order endpoint, no-order envelop
 
 ## Next Action
 
-Fetch current `origin/main` and restart the source-only quiet-window sequence from `b4c4a9afa12d676cef0452ae407c7685352c1778` or newer. Only if source remains stable through request generation and review should PM regenerate and dispatch a new exact E3/BB request. The request must still include a reviewed one-GET runtime-local fast-balance refresh path with fast-branch proof because v711 equity sha `db0c68bf028df42429d92583306b5ca8b0d5dd51b17661c2240dbf11b4ea16a4` is stale under 900s.
+Fetch current `origin/main` and restart the source-only quiet-window sequence from `4723f9dd9cbeb73d08573411385a2600fde6e5b6` or newer. Only if source remains stable through request generation and review should PM regenerate and dispatch a new exact E3/BB request. The request must still include a reviewed one-GET runtime-local fast-balance refresh path with fast-branch proof because v711 equity sha `db0c68bf028df42429d92583306b5ca8b0d5dd51b17661c2240dbf11b4ea16a4` is stale under 900s.
