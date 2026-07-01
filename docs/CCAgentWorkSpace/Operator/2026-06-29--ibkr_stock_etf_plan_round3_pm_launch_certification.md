@@ -3022,3 +3022,30 @@ Verification 已過：
 邊界不變：沒有 audit writer、沒有 DB apply、沒有 IBKR contact、沒有 connector runtime、
 沒有 paper order、沒有 evidence clock、沒有 tiny-live/live authorization，也沒有改動 Bybit
 live execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF DB Evidence DDL Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF DB Evidence DDL Source Static Guard`。
+
+這個 guard 鎖住 `stock_etf_db_evidence_ddl.rs` 的 DB evidence contract 與 source SQL auditor
+source hygiene：exact `stock_etf_db_evidence_ddl_v1` contract id、source-only SQL path、
+schemas/tables/natural keys、Guard A/B/C、source SQL auditor helper、contract/source blocker
+surface 必須保留。
+
+Guard 要求 accepted fixture 維持 source-only：不複製到 `sql/migrations/`、不做 DB apply、
+不做 PG write、不註冊 sqlx migration、不宣稱 PM/Operator apply authorization。Source SQL auditor
+必須保留 source-only banner、migration/apply denial、destructive SQL denial、schema/table/column、
+natural-key/FK、stock/IBKR/paper/live、raw hash、append-only audit event、retention/index checks。
+source 不得出現 env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens 或 secret
+material access tokens。
+
+Verification 已過：
+
+- New structure guard pytest：`6 passed`
+- Focused DB evidence DDL acceptance：`10 passed`
+- Full `cargo test -p openclaw_types`：PASS
+
+邊界不變：沒有 migration apply、沒有 PG write、沒有 sqlx registration、沒有 DB runtime、
+沒有 IBKR contact、沒有 paper order、沒有 evidence clock、沒有 tiny-live/live authorization，
+也沒有改動 Bybit live execution 行為。

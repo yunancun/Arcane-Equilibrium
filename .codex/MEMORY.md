@@ -1368,3 +1368,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only structure guard for `stock_etf_audit_events.rs`, pinning the immutable asset-lane event reference contract.
 - The guard requires exact contract id, event kinds, event fields, fail-closed default, genesis/chained fixtures, hash lineage, allowed/denied denial-reason rules, secret/raw-payload denials, and no runtime/secret/order/Bybit client tokens.
 - Verification passed: new guard `6 passed`; asset-lane audit events acceptance `9 passed`; full `cargo test -p openclaw_types` PASS. This grants no audit writer, DB apply, IBKR contact, connector runtime, paper order, evidence clock, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF DB Evidence DDL Source Static Guard
+
+- PM added a source-only structure guard for `stock_etf_db_evidence_ddl.rs`, pinning the DB evidence contract and source SQL auditor boundary.
+- The guard requires source-only fixture posture, migration/apply/sqlx/PG write denials, E2/E4/Linux dry-run/double-apply requirements, Guard A/B/C checks, schema/table/natural-key/FK coverage, stock/IBKR/paper/live-denial constraints, retention/index checks, and no runtime/secret/order/Bybit client tokens.
+- Verification passed: new guard `6 passed`; DB evidence DDL acceptance `10 passed`; full `cargo test -p openclaw_types` PASS. This grants no migration apply, PG write, sqlx registration, DB runtime, IBKR contact, paper order, evidence clock, tiny-live/live, or Bybit behavior change.
