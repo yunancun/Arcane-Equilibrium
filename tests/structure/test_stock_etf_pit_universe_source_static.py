@@ -249,6 +249,58 @@ def test_stock_etf_pit_universe_source_keeps_accepted_fixture_boundary() -> None
     assert "secret_content_serialized: false" in source
 
 
+def test_stock_etf_pit_universe_fixture_excludes_source_freeze_and_authority_crosswire() -> None:
+    source = _source()
+    fixture = source.split("impl StockEtfPitUniverseV1", 1)[1].split(
+        "pub fn validate(&self)",
+        1,
+    )[0]
+    default_impl = source.split("impl Default for StockEtfPitUniverseV1", 1)[1].split(
+        "impl StockEtfPitUniverseV1",
+        1,
+    )[0]
+
+    for forbidden in (
+        "asset_lane: AssetLane::CryptoPerp",
+        "broker: Broker::Bybit",
+        "universe_id: String::new()",
+        "universe_version: String::new()",
+        "universe_hash: String::new()",
+        "point_in_time_asof_ms: 0",
+        "effective_from_ms: 0",
+        "constituent_count: 0",
+        "max_constituents: 0",
+        "constituents: Vec::new()",
+        "frozen_for_evidence_clock: false",
+        "survivorship_bias_controls_present: false",
+        "bybit_live_execution_unchanged: false",
+        "ibkr_live_denied: false",
+        "ibkr_contact_performed: true",
+        "secret_content_serialized: true",
+    ):
+        assert forbidden not in fixture
+
+    for fail_closed in (
+        "asset_lane: AssetLane::CryptoPerp",
+        "broker: Broker::Bybit",
+        "universe_id: String::new()",
+        "universe_version: String::new()",
+        "universe_hash: String::new()",
+        "point_in_time_asof_ms: 0",
+        "effective_from_ms: 0",
+        "constituent_count: 0",
+        "max_constituents: 0",
+        "constituents: Vec::new()",
+        "frozen_for_evidence_clock: false",
+        "survivorship_bias_controls_present: false",
+        "bybit_live_execution_unchanged: false",
+        "ibkr_live_denied: false",
+        "ibkr_contact_performed: false",
+        "secret_content_serialized: false",
+    ):
+        assert fail_closed in default_impl
+
+
 def test_stock_etf_pit_universe_source_keeps_universe_validation_matrix() -> None:
     source = _source()
 

@@ -4310,3 +4310,31 @@ Verification 已過：
 沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 reference-data ingestion、沒有
 scorecard writer、沒有 DB/evidence writer、沒有 paper order route、沒有 tiny-live/live authorization，
 也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF PIT Universe Source Authority Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF PIT Universe Source Authority Cross-Wire Guard`。
+
+這個 checkpoint 補強 `StockEtfPitUniverseV1` 的 evidence-clock freeze / survivorship-bias controls /
+Bybit unchanged / IBKR live denial / IBKR contact / secret serialization cross-wire coverage。新增 Rust
+acceptance 證明 missing freeze、missing survivorship controls、Bybit changed、IBKR live not denied、
+IBKR contact、secret serialization 都會各自只產生單一對應 blocker。
+
+同時新增 Python source-static accepted fixture body guard，禁止 crypto/Bybit lane、missing universe
+identity/hash/as-of/count、missing freeze/survivorship controls、Bybit changed、IBKR live not denied、
+IBKR contact、secret serialization 被 hardcoded 到 accepted fixture，並鎖住 default fail-closed posture。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- PIT universe source static pytest：`9 passed`
+- PIT universe Rust acceptance：`8 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 market-data collection、沒有
+scorecard writer、沒有 DB/evidence writer、沒有 paper order route、沒有 tiny-live/live authorization，
+也沒有改動 Bybit live/demo execution 行為。

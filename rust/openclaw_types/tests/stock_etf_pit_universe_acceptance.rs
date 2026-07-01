@@ -270,6 +270,45 @@ fn pit_universe_rejects_missing_rule_hashes_survivorship_and_boundaries() {
 }
 
 #[test]
+fn pit_universe_rejects_freeze_survivorship_and_authority_cross_wire_independently() {
+    let mut freeze = StockEtfPitUniverseV1::accepted_fixture();
+    freeze.frozen_for_evidence_clock = false;
+    assert_single_blocker(
+        freeze,
+        StockEtfPitUniverseBlocker::UniverseNotFrozenForEvidenceClock,
+    );
+
+    let mut survivorship = StockEtfPitUniverseV1::accepted_fixture();
+    survivorship.survivorship_bias_controls_present = false;
+    assert_single_blocker(
+        survivorship,
+        StockEtfPitUniverseBlocker::SurvivorshipControlsMissing,
+    );
+
+    let mut bybit = StockEtfPitUniverseV1::accepted_fixture();
+    bybit.bybit_live_execution_unchanged = false;
+    assert_single_blocker(
+        bybit,
+        StockEtfPitUniverseBlocker::BybitLiveExecutionNotProtected,
+    );
+
+    let mut ibkr_live = StockEtfPitUniverseV1::accepted_fixture();
+    ibkr_live.ibkr_live_denied = false;
+    assert_single_blocker(ibkr_live, StockEtfPitUniverseBlocker::IbkrLiveNotDenied);
+
+    let mut ibkr_contact = StockEtfPitUniverseV1::accepted_fixture();
+    ibkr_contact.ibkr_contact_performed = true;
+    assert_single_blocker(
+        ibkr_contact,
+        StockEtfPitUniverseBlocker::IbkrContactPerformed,
+    );
+
+    let mut secret = StockEtfPitUniverseV1::accepted_fixture();
+    secret.secret_content_serialized = true;
+    assert_single_blocker(secret, StockEtfPitUniverseBlocker::SecretContentSerialized);
+}
+
+#[test]
 fn blocked_template_is_parseable_and_secret_free() {
     let srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -299,4 +338,16 @@ fn blocked_template_is_parseable_and_secret_free() {
 
 fn has(blockers: &[StockEtfPitUniverseBlocker], blocker: StockEtfPitUniverseBlocker) -> bool {
     blockers.contains(&blocker)
+}
+
+fn assert_single_blocker(universe: StockEtfPitUniverseV1, blocker: StockEtfPitUniverseBlocker) {
+    let verdict = universe.validate();
+
+    assert!(!verdict.accepted);
+    assert_eq!(
+        verdict.blockers,
+        vec![blocker],
+        "expected only {blocker:?}; blockers: {:?}",
+        verdict.blockers
+    );
 }
