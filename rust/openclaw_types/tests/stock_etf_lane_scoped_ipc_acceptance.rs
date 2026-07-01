@@ -345,6 +345,178 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
 }
 
 #[test]
+fn lane_scoped_ipc_rejects_each_top_level_authority_gap_independently() {
+    assert_single_blocker(
+        StockEtfLaneScopedIpcContractV1 {
+            contract_id: String::new(),
+            ..StockEtfLaneScopedIpcContractV1::accepted_fixture()
+        },
+        StockEtfLaneScopedIpcBlocker::ContractIdMismatch,
+    );
+    assert_single_blocker(
+        StockEtfLaneScopedIpcContractV1 {
+            source_version: 2,
+            ..StockEtfLaneScopedIpcContractV1::accepted_fixture()
+        },
+        StockEtfLaneScopedIpcBlocker::SourceVersionMismatch,
+    );
+    assert_single_blocker(
+        StockEtfLaneScopedIpcContractV1 {
+            asset_lane: AssetLane::CryptoPerp,
+            ..StockEtfLaneScopedIpcContractV1::accepted_fixture()
+        },
+        StockEtfLaneScopedIpcBlocker::WrongAssetLane,
+    );
+    assert_single_blocker(
+        StockEtfLaneScopedIpcContractV1 {
+            broker: Broker::Bybit,
+            ..StockEtfLaneScopedIpcContractV1::accepted_fixture()
+        },
+        StockEtfLaneScopedIpcBlocker::WrongBroker,
+    );
+    assert_single_blocker(
+        StockEtfLaneScopedIpcContractV1 {
+            rust_authority_owner: false,
+            ..StockEtfLaneScopedIpcContractV1::accepted_fixture()
+        },
+        StockEtfLaneScopedIpcBlocker::RustAuthorityOwnerMissing,
+    );
+    assert_single_blocker(
+        StockEtfLaneScopedIpcContractV1 {
+            python_forward_only: false,
+            ..StockEtfLaneScopedIpcContractV1::accepted_fixture()
+        },
+        StockEtfLaneScopedIpcBlocker::PythonForwardOnlyMissing,
+    );
+    assert_single_blocker(
+        StockEtfLaneScopedIpcContractV1 {
+            python_direct_broker_write_denied: false,
+            ..StockEtfLaneScopedIpcContractV1::accepted_fixture()
+        },
+        StockEtfLaneScopedIpcBlocker::PythonDirectBrokerWriteNotDenied,
+    );
+    assert_single_blocker(
+        StockEtfLaneScopedIpcContractV1 {
+            bybit_ipc_reuse_denied: false,
+            ..StockEtfLaneScopedIpcContractV1::accepted_fixture()
+        },
+        StockEtfLaneScopedIpcBlocker::BybitIpcReuseNotDenied,
+    );
+    assert_single_blocker(
+        StockEtfLaneScopedIpcContractV1 {
+            existing_bybit_paper_path_denied: false,
+            ..StockEtfLaneScopedIpcContractV1::accepted_fixture()
+        },
+        StockEtfLaneScopedIpcBlocker::ExistingBybitPaperPathNotDenied,
+    );
+    assert_single_blocker(
+        StockEtfLaneScopedIpcContractV1 {
+            live_environment_denied: false,
+            ..StockEtfLaneScopedIpcContractV1::accepted_fixture()
+        },
+        StockEtfLaneScopedIpcBlocker::LiveEnvironmentNotDenied,
+    );
+    assert_single_blocker(
+        StockEtfLaneScopedIpcContractV1 {
+            bybit_live_execution_unchanged: false,
+            ..StockEtfLaneScopedIpcContractV1::accepted_fixture()
+        },
+        StockEtfLaneScopedIpcBlocker::BybitLiveExecutionNotProtected,
+    );
+    assert_single_blocker(
+        StockEtfLaneScopedIpcContractV1 {
+            ibkr_contact_performed: true,
+            ..StockEtfLaneScopedIpcContractV1::accepted_fixture()
+        },
+        StockEtfLaneScopedIpcBlocker::IbkrContactPerformed,
+    );
+    assert_single_blocker(
+        StockEtfLaneScopedIpcContractV1 {
+            connector_runtime_started: true,
+            ..StockEtfLaneScopedIpcContractV1::accepted_fixture()
+        },
+        StockEtfLaneScopedIpcBlocker::ConnectorRuntimeStarted,
+    );
+    assert_single_blocker(
+        StockEtfLaneScopedIpcContractV1 {
+            secret_content_serialized: true,
+            ..StockEtfLaneScopedIpcContractV1::accepted_fixture()
+        },
+        StockEtfLaneScopedIpcBlocker::SecretContentSerialized,
+    );
+}
+
+#[test]
+fn lane_scoped_ipc_rejects_each_command_coverage_gap_independently() {
+    let mut missing = StockEtfLaneScopedIpcContractV1::accepted_fixture();
+    missing
+        .commands
+        .retain(|command| command.method != StockEtfLaneScopedIpcMethod::ImportPaperFills);
+    assert_single_blocker(missing, StockEtfLaneScopedIpcBlocker::CommandMissing);
+
+    let mut duplicated = StockEtfLaneScopedIpcContractV1::accepted_fixture();
+    duplicated
+        .commands
+        .push(command(&duplicated, StockEtfLaneScopedIpcMethod::GetLaneStatus).clone());
+    assert_single_blocker(duplicated, StockEtfLaneScopedIpcBlocker::CommandDuplicated);
+
+    let mut denied_extra = StockEtfLaneScopedIpcContractV1::accepted_fixture();
+    denied_extra
+        .commands
+        .push(StockEtfLaneScopedIpcCommandV1::fixture_for_method(
+            StockEtfLaneScopedIpcMethod::BybitSubmitPaperOrderDenied,
+        ));
+    assert_single_blocker(
+        denied_extra,
+        StockEtfLaneScopedIpcBlocker::CommandMethodDenied,
+    );
+}
+
+#[test]
+fn lane_scoped_ipc_rejects_each_command_shape_gap_independently() {
+    assert_single_command_blocker(
+        |submit| submit.operation = BrokerOperation::LiveOrderSubmit,
+        StockEtfLaneScopedIpcBlocker::CommandOperationMismatch,
+    );
+    assert_single_command_blocker(
+        |submit| submit.authority_scope = AuthorityScope::ReadOnly,
+        StockEtfLaneScopedIpcBlocker::CommandAuthorityScopeMismatch,
+    );
+    assert_single_command_blocker(
+        |submit| submit.effect_capable = false,
+        StockEtfLaneScopedIpcBlocker::CommandEffectCapabilityMismatch,
+    );
+    assert_single_command_blocker(
+        |submit| submit.rust_owned = false,
+        StockEtfLaneScopedIpcBlocker::CommandRustOwnershipMismatch,
+    );
+    assert_single_command_blocker(
+        |submit| {
+            submit
+                .required_gates
+                .retain(|gate| gate != STOCK_ETF_SCOPED_AUTHORIZATION_CONTRACT_ID)
+        },
+        StockEtfLaneScopedIpcBlocker::CommandRequiredGateMissing,
+    );
+    assert_single_command_blocker(
+        |submit| {
+            submit
+                .required_request_fields
+                .retain(|field| field != "decision_lease_id")
+        },
+        StockEtfLaneScopedIpcBlocker::CommandRequestFieldMissing,
+    );
+    assert_single_command_blocker(
+        |submit| {
+            submit
+                .typed_denial_reasons
+                .retain(|reason| *reason != StockEtfDenialReason::DecisionLeaseInvalid)
+        },
+        StockEtfLaneScopedIpcBlocker::CommandDenialReasonMissing,
+    );
+}
+
+#[test]
 fn paper_order_request_shapes_are_method_specific_and_not_cross_wireable() {
     let contract = StockEtfLaneScopedIpcContractV1::accepted_fixture();
     let submit = command(&contract, StockEtfLaneScopedIpcMethod::SubmitPaperOrder);
@@ -707,4 +879,26 @@ fn assert_lacks_fields(command: &StockEtfLaneScopedIpcCommandV1, fields: &[&str]
             command.method
         );
     }
+}
+
+fn assert_single_blocker(
+    candidate: StockEtfLaneScopedIpcContractV1,
+    expected: StockEtfLaneScopedIpcBlocker,
+) {
+    let verdict = candidate.validate();
+
+    assert!(!verdict.accepted);
+    assert_eq!(verdict.blockers, vec![expected]);
+}
+
+fn assert_single_command_blocker(
+    mutate: impl FnOnce(&mut StockEtfLaneScopedIpcCommandV1),
+    expected: StockEtfLaneScopedIpcBlocker,
+) {
+    let mut contract = StockEtfLaneScopedIpcContractV1::accepted_fixture();
+    mutate(command_mut(
+        &mut contract,
+        StockEtfLaneScopedIpcMethod::SubmitPaperOrder,
+    ));
+    assert_single_blocker(contract, expected);
 }

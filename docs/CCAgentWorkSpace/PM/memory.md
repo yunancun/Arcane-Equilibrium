@@ -3910,3 +3910,10 @@
 - Source-static parsing now covers `fixtures.rs` and pins accepted preview/submit/cancel/replace fixtures to StockEtfCash/IBKR/Paper, no-runtime, no-secret, no-Bybit posture.
 - Verification passed: paper order request source static `7 passed`; paper order request Rust acceptance `17 passed`; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, IPC/runtime change, IBKR contact, connector runtime, secret access, paper order routing, cancel/replace routing, DB/evidence writer, scorecard writer, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Lane-Scoped IPC Authority Lineage Cross-Wire Guard
+
+- PM added test-only/source-static exact-blocker coverage for `StockEtfLaneScopedIpcContractV1` top-level authority flags, required method coverage, denied methods, and command operation/authority/effect/rust/gate/field/denial shape.
+- Source-static parsing now pins `REQUIRED_METHODS`, default, and accepted fixture blocks so denied methods stay out of required method coverage and accepted posture remains StockEtfCash/IBKR/no-runtime/no-secret.
+- Verification passed: lane-scoped IPC source static `6 passed`; lane-scoped IPC Rust acceptance `12 passed`; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, paper order routing, DB/evidence writer, scorecard writer, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

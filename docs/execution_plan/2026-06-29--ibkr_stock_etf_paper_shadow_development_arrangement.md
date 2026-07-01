@@ -7857,3 +7857,45 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 paper order routing、不執行 cancel/
 replace routing、不做 DB/evidence writer、不啟動 scorecard writer、不做 broker session、不做 broker routing、
 不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 187. 2026-07-01 PM session source checkpoint：Stock/ETF Lane-Scoped IPC Authority Lineage Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_lane_scoped_ipc` 的 top-level lane/broker/authority flags、Python forward-only /
+direct-write denial、Bybit IPC/paper path denial、live denial、no-contact/no-runtime/no-secret flags、required
+method coverage、denied method handling、command operation/authority/effect/rust ownership、required gate/
+request-field/denial-reason coverage。這不是 Rust production behavior change、不是 IPC server start、不是
+IBKR contact、不是 connector runtime、不是 secret lookup、不是 paper order routing、不是 DB/evidence writer、
+不是 paper order route enablement、不是 tiny-live/live gate；只把 lane-scoped IPC source contract 的
+StockEtfCash/IBKR 分離、required method matrix 與 no-runtime/no-Bybit-reuse posture 變成 exact-blocker
+acceptance test 與 source-static guard。
+
+已完成：
+
+- 在 `stock_etf_lane_scoped_ipc_acceptance.rs` 新增
+  `lane_scoped_ipc_rejects_each_top_level_authority_gap_independently`。
+- Acceptance 證明 contract/source/lane/broker/Rust authority/Python forward-only/Python direct-write denial、
+  Bybit IPC reuse denial、existing Bybit paper path denial、live denial、Bybit live protection、contact/runtime/
+  secret gaps 都會各自只產生單一對應 blocker。
+- 在同檔新增 `lane_scoped_ipc_rejects_each_command_coverage_gap_independently`。
+- Acceptance 證明 missing command、duplicated command、extra denied method command 都會各自只產生單一對應
+  blocker。
+- 在同檔新增 `lane_scoped_ipc_rejects_each_command_shape_gap_independently`。
+- Acceptance 證明 submit-paper command 的 operation、authority scope、effect flag、rust ownership、required
+  gate、required request field、typed denial reason gaps 都會各自只產生單一對應 blocker。
+- 在 `test_stock_etf_lane_scoped_ipc_source_static.py` 新增 required-method/default/accepted-fixture block
+  parsers，鎖住 denied methods 不得進 `REQUIRED_METHODS`，並鎖住 accepted fixture 只能用
+  StockEtfCash/IBKR/no-runtime/no-secret posture。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Lane-scoped IPC source static pytest：`6 passed`。
+- Lane-scoped IPC Rust acceptance：`12 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、
+不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 paper order routing、
+不做 DB/evidence writer、不啟動 scorecard writer、不做 broker session、不做 broker routing、不做 Linux
+runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。

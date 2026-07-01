@@ -4905,3 +4905,32 @@ Verification 已過：
 沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 paper order routing、沒有 cancel/replace
 routing、沒有 DB/evidence writer、沒有 scorecard writer、沒有 broker session、沒有 tiny-live/live
 authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Lane-Scoped IPC Authority Lineage Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Lane-Scoped IPC Authority Lineage Cross-Wire Guard`。
+
+這個 checkpoint 補強 `StockEtfLaneScopedIpcContractV1` 的 top-level lane/broker/authority flags、Python
+forward-only/direct-write denial、Bybit IPC/paper path denial、live denial、no-contact/no-runtime/no-secret
+flags、required method coverage、denied method handling、command operation/authority/effect/rust ownership、
+required gate/request-field/denial-reason coverage。
+
+新增 Rust acceptance 證明 top-level cross-wire gaps、missing/duplicated/denied command gaps，以及 submit-paper
+command 的 operation/authority/effect/rust/gate/field/denial gaps 都會 fail closed。Python source-static guard
+也鎖住 denied methods 不得進 `REQUIRED_METHODS`，並鎖住 accepted fixture 只能用 StockEtfCash/IBKR/
+no-runtime/no-secret posture。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Lane-scoped IPC source static pytest：`6 passed`
+- Lane-scoped IPC Rust acceptance：`12 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IPC server start、
+沒有 IBKR contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 paper order routing、
+沒有 DB/evidence writer、沒有 scorecard writer、沒有 broker session、沒有 tiny-live/live authorization，
+也沒有改動 Bybit live/demo execution 行為。
