@@ -151,6 +151,15 @@ def _default_block(source: str) -> str:
     )[0]
 
 
+def _validate_block(source: str) -> str:
+    return source.split("pub fn validate(&self) -> IbkrPhase2GateArtifactVerdict", 1)[
+        1
+    ].split(
+        "IbkrPhase2GateArtifactVerdict {",
+        1,
+    )[0]
+
+
 def test_ibkr_phase2_artifact_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
@@ -218,6 +227,35 @@ def test_ibkr_phase2_artifact_source_keeps_gate_policy_runtime_cross_checks() ->
     assert "artifact.gate.secret_contract_present == secret_accepted" in source
     assert "artifact.gate.live_secret_absent_or_empty" in source
     assert "topology_accepted" in source
+
+
+def test_ibkr_phase2_artifact_source_keeps_exact_blocker_order() -> None:
+    validate = _validate_block(_source())
+    ordered_blockers = (
+        "ContractIdMismatch",
+        "SourceVersionMismatch",
+        "ArtifactIdMissing",
+        "AdrMismatch",
+        "AmdMismatch",
+        "SourceCommitMissing",
+        "CreatedAtMissing",
+        "ImmutableStoragePathMissing",
+        "ArtifactNotSealed",
+        "PmReviewerMissing",
+        "OperatorReviewerMissing",
+        "RawArtifactHashInvalid",
+        "RedactedSummaryHashInvalid",
+        "ExternalSurfaceGateRejected",
+        "IbkrCallAlreadyPerformed",
+        "PolicyPrerequisiteFlagsRejected",
+        "PolicyGateFlagMismatch",
+        "SecretSlotContractRejected",
+        "ApiSessionTopologyRejected",
+        "RuntimeGateFlagMismatch",
+    )
+
+    positions = [validate.index(f"Blocker::{blocker}") for blocker in ordered_blockers]
+    assert positions == sorted(positions)
 
 
 def test_ibkr_phase2_artifact_source_has_no_runtime_secret_order_or_bybit_client_tokens() -> None:

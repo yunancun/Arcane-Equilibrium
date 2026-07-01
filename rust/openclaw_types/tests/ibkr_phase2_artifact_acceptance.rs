@@ -49,33 +49,27 @@ fn default_gate_artifact_blocks_contact() {
     let verdict = artifact.validate();
 
     assert!(!verdict.ibkr_contact_allowed);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2GateArtifactBlocker::ContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2GateArtifactBlocker::SourceVersionMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2GateArtifactBlocker::ArtifactIdMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2GateArtifactBlocker::SourceCommitMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2GateArtifactBlocker::ArtifactNotSealed));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2GateArtifactBlocker::ExternalSurfaceGateRejected));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2GateArtifactBlocker::PolicyPrerequisiteFlagsRejected));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2GateArtifactBlocker::SecretSlotContractRejected));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2GateArtifactBlocker::ApiSessionTopologyRejected));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            IbkrPhase2GateArtifactBlocker::ContractIdMismatch,
+            IbkrPhase2GateArtifactBlocker::SourceVersionMismatch,
+            IbkrPhase2GateArtifactBlocker::ArtifactIdMissing,
+            IbkrPhase2GateArtifactBlocker::SourceCommitMissing,
+            IbkrPhase2GateArtifactBlocker::CreatedAtMissing,
+            IbkrPhase2GateArtifactBlocker::ImmutableStoragePathMissing,
+            IbkrPhase2GateArtifactBlocker::ArtifactNotSealed,
+            IbkrPhase2GateArtifactBlocker::PmReviewerMissing,
+            IbkrPhase2GateArtifactBlocker::OperatorReviewerMissing,
+            IbkrPhase2GateArtifactBlocker::RawArtifactHashInvalid,
+            IbkrPhase2GateArtifactBlocker::RedactedSummaryHashInvalid,
+            IbkrPhase2GateArtifactBlocker::ExternalSurfaceGateRejected,
+            IbkrPhase2GateArtifactBlocker::PolicyPrerequisiteFlagsRejected,
+            IbkrPhase2GateArtifactBlocker::SecretSlotContractRejected,
+            IbkrPhase2GateArtifactBlocker::ApiSessionTopologyRejected,
+            IbkrPhase2GateArtifactBlocker::RuntimeGateFlagMismatch,
+        ]
+    );
 }
 
 #[test]
@@ -102,12 +96,13 @@ fn artifact_requires_exact_contract_id_and_source_version() {
     let verdict = artifact.validate();
 
     assert!(!verdict.ibkr_contact_allowed);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2GateArtifactBlocker::ContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2GateArtifactBlocker::SourceVersionMismatch));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            IbkrPhase2GateArtifactBlocker::ContractIdMismatch,
+            IbkrPhase2GateArtifactBlocker::SourceVersionMismatch,
+        ]
+    );
 }
 
 #[test]
@@ -116,10 +111,14 @@ fn artifact_rejects_blocked_or_retroactive_external_gate() {
         gate: IbkrExternalSurfaceGateV1::default(),
         ..accepted_artifact_fixture()
     };
-    assert!(blocked_gate
-        .validate()
-        .blockers
-        .contains(&IbkrPhase2GateArtifactBlocker::ExternalSurfaceGateRejected));
+    assert_eq!(
+        blocked_gate.validate().blockers,
+        vec![
+            IbkrPhase2GateArtifactBlocker::ExternalSurfaceGateRejected,
+            IbkrPhase2GateArtifactBlocker::PolicyGateFlagMismatch,
+            IbkrPhase2GateArtifactBlocker::RuntimeGateFlagMismatch,
+        ]
+    );
 
     let retroactive_gate = IbkrPhase2GateArtifactV1 {
         gate: IbkrExternalSurfaceGateV1 {
@@ -129,12 +128,13 @@ fn artifact_rejects_blocked_or_retroactive_external_gate() {
         ..accepted_artifact_fixture()
     };
     let verdict = retroactive_gate.validate();
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2GateArtifactBlocker::ExternalSurfaceGateRejected));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2GateArtifactBlocker::IbkrCallAlreadyPerformed));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            IbkrPhase2GateArtifactBlocker::ExternalSurfaceGateRejected,
+            IbkrPhase2GateArtifactBlocker::IbkrCallAlreadyPerformed,
+        ]
+    );
 }
 
 #[test]
@@ -232,12 +232,13 @@ fn artifact_rejects_policy_flag_mismatch() {
     let verdict = artifact.validate();
 
     assert!(!verdict.ibkr_contact_allowed);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2GateArtifactBlocker::PolicyPrerequisiteFlagsRejected));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2GateArtifactBlocker::PolicyGateFlagMismatch));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            IbkrPhase2GateArtifactBlocker::PolicyPrerequisiteFlagsRejected,
+            IbkrPhase2GateArtifactBlocker::PolicyGateFlagMismatch,
+        ]
+    );
 }
 
 #[test]
@@ -249,15 +250,14 @@ fn artifact_rejects_missing_or_mismatched_runtime_evidence() {
     };
     let verdict = missing_runtime.validate();
     assert!(!verdict.ibkr_contact_allowed);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2GateArtifactBlocker::SecretSlotContractRejected));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2GateArtifactBlocker::ApiSessionTopologyRejected));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2GateArtifactBlocker::RuntimeGateFlagMismatch));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            IbkrPhase2GateArtifactBlocker::SecretSlotContractRejected,
+            IbkrPhase2GateArtifactBlocker::ApiSessionTopologyRejected,
+            IbkrPhase2GateArtifactBlocker::RuntimeGateFlagMismatch,
+        ]
+    );
 
     let mismatched_gate = IbkrPhase2GateArtifactV1 {
         gate: IbkrExternalSurfaceGateV1 {
@@ -267,10 +267,13 @@ fn artifact_rejects_missing_or_mismatched_runtime_evidence() {
         },
         ..accepted_artifact_fixture()
     };
-    assert!(mismatched_gate
-        .validate()
-        .blockers
-        .contains(&IbkrPhase2GateArtifactBlocker::RuntimeGateFlagMismatch));
+    assert_eq!(
+        mismatched_gate.validate().blockers,
+        vec![
+            IbkrPhase2GateArtifactBlocker::ExternalSurfaceGateRejected,
+            IbkrPhase2GateArtifactBlocker::RuntimeGateFlagMismatch,
+        ]
+    );
 }
 
 #[test]

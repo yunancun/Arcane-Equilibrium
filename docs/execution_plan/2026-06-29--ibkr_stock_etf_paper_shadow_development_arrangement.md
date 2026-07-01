@@ -8014,3 +8014,37 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 paper order routing、
 不做 DB/evidence writer、不啟動 scorecard writer、不做 broker session、不做 broker routing、不做 Linux
 runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 191. 2026-07-01 PM session source checkpoint：IBKR Phase 2 Gate Artifact Exact Lineage Guard
+
+本 checkpoint 補強 `ibkr_phase2_artifact` 的 immutable gate artifact lineage，固定 default artifact
+blocker 向量、contract id/source version drift、blocked/retroactive external gate、policy flag mismatch、
+runtime evidence mismatch 與 validator blocker ordering。這不是 Rust production behavior change、不是 IPC
+server start、不是 IBKR contact、不是 connector runtime、不是 secret lookup、不是 paper order routing、不是
+DB/evidence writer、不是 paper order route enablement、不是 tiny-live/live gate；只把 Phase 2 immutable
+gate artifact 的 metadata/gate/policy/runtime lineage 變成 exact-blocker acceptance test 與 source-static
+guard。
+
+已完成：
+
+- 在 `ibkr_phase2_artifact_acceptance.rs` 將 default `IbkrPhase2GateArtifactV1` 檢查提升為完整順序
+  blocker 向量。
+- 在同檔將 contract id/source version drift 固定為 exact 雙 blocker。
+- 在同檔將 blocked/retroactive external gate、policy flag mismatch、runtime evidence mismatch 固定為
+  exact blocker 向量。
+- 在 `test_ibkr_phase2_artifact_source_static.py` 新增 validator blocker ordering parser，鎖住 artifact
+  validator 的 blocker emit order。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- IBKR Phase 2 artifact source static pytest：`6 passed`。
+- IBKR Phase 2 artifact Rust acceptance：`9 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、
+不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 paper order routing、
+不做 DB/evidence writer、不啟動 scorecard writer、不做 broker session、不做 broker routing、不做 Linux
+runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
