@@ -1296,3 +1296,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only structure guard for `stock_etf_risk_policy.rs`, pinning the dormant Stock/ETF cash risk-policy contract and source config shape.
 - The guard requires fail-closed defaults, StockEtfCash/IBKR Paper accepted fixture with `enabled=false` and `shadow_only=true`, cash-only instrument controls, cap ordering and open-order/position limits, universe/identity/market-session gates, cost-model gates, paper-order authority/session/lease/guardian/idempotency/reconciliation gates, and no runtime/secret/order/Bybit client tokens.
 - Verification passed: new guard `5 passed`; risk policy acceptance `8 passed`; full `cargo test -p openclaw_types` PASS. This grants no risk policy runtime enablement, IBKR contact, connector start, paper order authorization, secret access, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Paper Order Request Source Static Guard
+
+- PM added a semantic source-only structure guard for `stock_etf_paper_order_request.rs` and its validation module, beyond the existing split guard.
+- The guard requires fail-closed defaults, preview ReadOnly/effect=false, submit/cancel/replace PaperRehearsal/effect=true, request/hash/decision-lease/audit requirements, Stock/ETF-only normalized order intent, price/TIF compatibility, method-specific pollution blockers, and no runtime/secret/order/Bybit client tokens.
+- Verification passed: new guard `5 passed`; split+semantic paper-order structure guards `8 passed`; paper order request acceptance `8 passed`; full `cargo test -p openclaw_types` PASS. This grants no IPC runtime, IBKR contact, connector start, paper order route, secret access, tiny-live/live, or Bybit behavior change.

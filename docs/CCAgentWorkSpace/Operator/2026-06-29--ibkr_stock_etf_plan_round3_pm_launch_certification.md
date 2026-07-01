@@ -2659,3 +2659,33 @@ Verification 已過：
 access/creation、沒有 connector runtime、沒有 read probe execution、沒有 result
 import、沒有 DB/evidence/scorecard writer、沒有 paper order/cancel/replace、沒有
 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Paper Order Request Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF Paper Order Request Source Static Guard`。
+
+這個 guard 鎖住 `stock_etf_paper_order_request.rs` 與 validation module 的 semantic
+source hygiene：paper order request envelope fields、order type/TIF/limit-price policy、
+verdict/blocker surface 與 validation helper surface 必須保留。
+
+Guard 要求 preview 維持 ReadOnly/effect=false；submit/cancel/replace 維持
+PaperRehearsal/effect=true，並保留 operation/scope/effect mismatch blockers。request
+id、account/session/scoped-auth/guardian/lifecycle/broker-capability hashes、decision
+lease、audit event、risk/instrument/cost/universe/source artifact hashes checks 不得消失。
+submit/preview order intent 仍限制 normalized symbol、Buy/Sell、Stock/ETF、positive
+quantity、limit/market price policy 與 TIF compatibility；preview/submit/cancel/replace
+各自的污染欄位 blocker 必須保留。source 不得出現 env/fs/network/IBKR SDK/clock/
+thread/process/order/Bybit runtime tokens 或 secret material access tokens。
+
+Verification 已過：
+
+- New structure guard pytest：`5 passed`
+- Existing split + new semantic paper-order structure guards：`8 passed`
+- Focused paper order request acceptance：`8 passed`
+- Full `cargo test -p openclaw_types`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
+access/creation、沒有 connector runtime、沒有 read probe execution、沒有 result
+import、沒有 DB/evidence/scorecard writer、沒有 paper order/cancel/replace、沒有
+tiny-live/live authority，也沒有改動 Bybit live execution 行為。
