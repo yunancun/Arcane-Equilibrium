@@ -167,6 +167,10 @@ def _source() -> str:
     return NON_BYBIT_ALLOWLIST.read_text(encoding="utf-8")
 
 
+def _function_block(source: str, start: str, end: str) -> str:
+    return source.split(start, 1)[1].split(end, 1)[0]
+
+
 def test_ibkr_non_bybit_api_allowlist_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
@@ -289,6 +293,50 @@ def test_ibkr_non_bybit_api_allowlist_source_keeps_drift_detection() -> None:
     assert "if self.ibkr_contact_performed" in source
     assert "if self.secret_content_serialized" in source
     assert "if !self.bybit_live_execution_protected" in source
+
+
+def test_ibkr_non_bybit_api_allowlist_source_keeps_exact_blocker_order() -> None:
+    source = _source()
+    validate = _function_block(
+        source,
+        "pub fn validate(&self) -> NonBybitApiAllowlistVerdict",
+        "NonBybitApiAllowlistVerdict {",
+    )
+    actions = _function_block(source, "fn validate_allowlist_actions(", "fn count_action(")
+
+    for block, ordered_blockers in (
+        (
+            validate,
+            (
+                "ContractIdMismatch",
+                "SourceVersionMismatch",
+                "ApiBaselineMismatch",
+                "ClientPortalWebApiNotDenied",
+                "LiveOrderNotDenied",
+                "AccountTransferNotDenied",
+                "MarginShortOptionsCfdNotDenied",
+                "MarketDataEntitlementPurchaseNotDenied",
+                "AccountManagementWriteNotDenied",
+                "IbkrContactPerformed",
+                "SecretContentSerialized",
+                "BybitLiveExecutionNotProtected",
+            ),
+        ),
+        (
+            actions,
+            (
+                "ActionMissing",
+                "ActionDuplicated",
+                "ActionInWrongBucket",
+            ),
+        ),
+    ):
+        positions = [block.index(f"Blocker::{blocker}") for blocker in ordered_blockers]
+        assert positions == sorted(positions)
+
+    assert validate.index("validate_allowlist_actions(self, &mut blockers)") < validate.index(
+        "Blocker::ClientPortalWebApiNotDenied"
+    )
 
 
 def test_ibkr_non_bybit_api_allowlist_source_has_no_runtime_secret_order_or_bybit_client_tokens() -> None:

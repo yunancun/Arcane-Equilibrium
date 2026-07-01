@@ -4013,3 +4013,10 @@
 - Source-static parsing now pins root validator, hash validator, and limits/boundary validator blocker emit order plus root validator child-call order backing the exact acceptance vectors.
 - Verification passed: strategy hypothesis source static `11 passed`; strategy hypothesis Rust acceptance `8 passed`; full `cargo test -p openclaw_types` PASS; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, GUI runtime/API route/IPC behavior change, IBKR contact, connector runtime, secret access, market data collection, scorecard writer, paper order routing, broker session, DB/evidence writer, paper-shadow launch, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Non-Bybit API Allowlist Default Lineage Exact Guard
+
+- PM added test-only/source-static exact-blocker coverage for default `NonBybitApiAllowlistV1`, accepted read/paper-write/denied action buckets, and missing/duplicate/wrong-bucket action drift cases.
+- Source-static parsing now pins allowlist and action-bucket validator blocker emit order, plus action matrix drift detection before denial checks.
+- Verification passed: IBKR Non-Bybit API allowlist source static `7 passed`; IBKR Non-Bybit API allowlist Rust acceptance `4 passed`; full `cargo test -p openclaw_types` PASS; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, GUI runtime/API route/IPC behavior change, IBKR contact, connector runtime, socket/client construction, secret access, paper order routing, broker session, DB/evidence writer, scorecard writer, paper-shadow launch, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

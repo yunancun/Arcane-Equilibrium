@@ -8372,3 +8372,38 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 runtime、不做 market data collection、不啟動 scorecard writer、不執行 paper order routing、不做 broker
 session、不做 broker routing、不做 DB/evidence writer、不做 Linux runtime sync/restart、不授權 paper-shadow
 launch、tiny-live/live 或任何 Bybit behavior change。
+
+## 201. 2026-07-01 PM session source checkpoint：IBKR Non-Bybit API Allowlist Default Lineage Exact Guard
+
+本 checkpoint 補強 `ibkr_non_bybit_api_allowlist` 的 read/paper-write/denied API action matrix fail-closed
+lineage，固定 default `NonBybitApiAllowlistV1`、accepted read/paper-write/denied buckets、missing/duplicate/
+wrong-bucket action drift cases 的 ordered blocker vectors，並用 source-static parser 鎖住 allowlist validator
+與 action-bucket validator blocker emit order。這不是 Rust production behavior change、不是 IPC/API route
+change、不是 IBKR contact、不是 connector runtime、不是 socket/client construction、不是 secret lookup、
+不是 paper order route enablement、不是 tiny-live/live gate；只把 Non-Bybit API allowlist source-only action
+matrix 的 fail-closed lineage 變成 exact-blocker acceptance test 與 source-static guard。
+
+已完成：
+
+- 在 `ibkr_non_bybit_api_allowlist_acceptance.rs` 將 default `NonBybitApiAllowlistV1` 檢查提升為完整順序
+  blocker 向量，包含所有 required API action missing blockers。
+- 在同檔將 accepted fixture 的 read、paper-write、denied action buckets 固定為完整 ordered lists。
+- 在同檔將 missing/duplicate/wrong-bucket action drift cases 固定為 exact blocker vectors。
+- 在 `test_ibkr_non_bybit_api_allowlist_source_static.py` 新增 allowlist/action-bucket validator blocker ordering
+  parser，並鎖住 root validator 在 denial checks 前先執行 action matrix drift detection。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- IBKR Non-Bybit API allowlist source static pytest：`7 passed`。
+- IBKR Non-Bybit API allowlist Rust acceptance：`4 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、
+不改 GUI runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector
+runtime、不做 socket/client construction、不執行 paper order routing、不做 broker session、不做 broker
+routing、不做 DB/evidence writer、不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權
+paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。

@@ -12,33 +12,25 @@ use openclaw_types::{
 
 #[test]
 fn default_allowlist_blocks_before_any_non_bybit_api_contact() {
+    use NonBybitApiAllowlistBlocker as Blocker;
+
     let verdict = NonBybitApiAllowlistV1::default().validate();
+    let mut expected_blockers = vec![Blocker::ContractIdMismatch, Blocker::SourceVersionMismatch];
+    expected_blockers.extend(
+        std::iter::repeat(Blocker::ActionMissing).take(required_non_bybit_api_actions().len()),
+    );
+    expected_blockers.extend([
+        Blocker::ClientPortalWebApiNotDenied,
+        Blocker::LiveOrderNotDenied,
+        Blocker::AccountTransferNotDenied,
+        Blocker::MarginShortOptionsCfdNotDenied,
+        Blocker::MarketDataEntitlementPurchaseNotDenied,
+        Blocker::AccountManagementWriteNotDenied,
+        Blocker::BybitLiveExecutionNotProtected,
+    ]);
 
     assert!(!verdict.accepted);
-    assert!(has(
-        &verdict.blockers,
-        NonBybitApiAllowlistBlocker::ContractIdMismatch
-    ));
-    assert!(has(
-        &verdict.blockers,
-        NonBybitApiAllowlistBlocker::SourceVersionMismatch
-    ));
-    assert!(has(
-        &verdict.blockers,
-        NonBybitApiAllowlistBlocker::ActionMissing
-    ));
-    assert!(has(
-        &verdict.blockers,
-        NonBybitApiAllowlistBlocker::ClientPortalWebApiNotDenied
-    ));
-    assert!(has(
-        &verdict.blockers,
-        NonBybitApiAllowlistBlocker::LiveOrderNotDenied
-    ));
-    assert!(has(
-        &verdict.blockers,
-        NonBybitApiAllowlistBlocker::BybitLiveExecutionNotProtected
-    ));
+    assert_eq!(verdict.blockers, expected_blockers);
 }
 
 #[test]
@@ -53,6 +45,44 @@ fn accepted_allowlist_pins_required_actions_without_runtime_authority() {
     );
     assert_eq!(allowlist.contract_id, NON_BYBIT_API_ALLOWLIST_CONTRACT_ID);
     assert_eq!(allowlist.source_version, 1);
+    assert_eq!(
+        allowlist.read_actions,
+        vec![
+            NonBybitApiAction::ServerTimeRead,
+            NonBybitApiAction::ConnectionHealthRead,
+            NonBybitApiAction::AccountSummarySnapshotRead,
+            NonBybitApiAction::PortfolioPositionsSnapshotRead,
+            NonBybitApiAction::ContractDetailsRead,
+            NonBybitApiAction::MarketDataSnapshotRead,
+            NonBybitApiAction::MarketDataSubscriptionRead,
+            NonBybitApiAction::HistoricalBarsRead,
+            NonBybitApiAction::OpenPaperOrdersRead,
+            NonBybitApiAction::PaperExecutionsCommissionsRead,
+        ]
+    );
+    assert_eq!(
+        allowlist.paper_write_actions,
+        vec![
+            NonBybitApiAction::PaperOrderSubmit,
+            NonBybitApiAction::PaperOrderCancel,
+            NonBybitApiAction::PaperOrderReplace,
+        ]
+    );
+    assert_eq!(
+        allowlist.denied_actions,
+        vec![
+            NonBybitApiAction::LiveOrderSubmit,
+            NonBybitApiAction::LiveAccountQuery,
+            NonBybitApiAction::AccountTransfer,
+            NonBybitApiAction::MarginEnablement,
+            NonBybitApiAction::ShortBorrow,
+            NonBybitApiAction::OptionsTrading,
+            NonBybitApiAction::CfdTrading,
+            NonBybitApiAction::MarketDataEntitlementPurchase,
+            NonBybitApiAction::AccountManagementWrite,
+            NonBybitApiAction::ClientPortalWebApiUse,
+        ]
+    );
     assert_eq!(
         required_non_bybit_api_actions().len(),
         allowlist.read_actions.len()
@@ -104,24 +134,22 @@ fn allowlist_rejects_missing_duplicate_and_wrong_bucket_actions() {
     missing
         .read_actions
         .retain(|action| *action != NonBybitApiAction::ServerTimeRead);
-    assert!(has(
-        &missing.validate().blockers,
-        NonBybitApiAllowlistBlocker::ActionMissing
-    ));
+    assert_eq!(
+        missing.validate().blockers,
+        vec![NonBybitApiAllowlistBlocker::ActionMissing]
+    );
 
     let mut duplicate = NonBybitApiAllowlistV1::accepted_fixture();
     duplicate
         .paper_write_actions
         .push(NonBybitApiAction::ServerTimeRead);
-    let duplicate_blockers = duplicate.validate().blockers;
-    assert!(has(
-        &duplicate_blockers,
-        NonBybitApiAllowlistBlocker::ActionDuplicated
-    ));
-    assert!(has(
-        &duplicate_blockers,
-        NonBybitApiAllowlistBlocker::ActionInWrongBucket
-    ));
+    assert_eq!(
+        duplicate.validate().blockers,
+        vec![
+            NonBybitApiAllowlistBlocker::ActionDuplicated,
+            NonBybitApiAllowlistBlocker::ActionInWrongBucket,
+        ]
+    );
 
     let mut wrong_bucket = NonBybitApiAllowlistV1::accepted_fixture();
     wrong_bucket
@@ -191,10 +219,6 @@ fn allowlist_rejects_denial_secret_contact_and_bybit_cross_wire_independently() 
         bybit,
         NonBybitApiAllowlistBlocker::BybitLiveExecutionNotProtected,
     );
-}
-
-fn has(blockers: &[NonBybitApiAllowlistBlocker], blocker: NonBybitApiAllowlistBlocker) -> bool {
-    blockers.contains(&blocker)
 }
 
 fn assert_single_blocker(allowlist: NonBybitApiAllowlistV1, blocker: NonBybitApiAllowlistBlocker) {
