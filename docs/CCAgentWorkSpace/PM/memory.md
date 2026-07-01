@@ -3707,6 +3707,13 @@
 - Verification passed: targeted rustfmt check PASS; risk policy source static `6 passed`; risk policy Rust acceptance `9 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
 - Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, risk runtime enablement, order execution, DB/evidence writer, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
 
+## 2026-07-01 No-Order Refresh Source Drift To 6AEA
+
+- PM continued `P0-CURRENT-CANDIDATE-NOORDER-REFRESH-CURRENT-HEAD-E3-BB-REQUEST` and stopped `BLOCKED_BY_RUNTIME` before request generation because source advanced during the source-stability quiet window.
+- d2ce first sample sha `abd927f2...` and a03 first sample sha `2092d3fc...` are stale; a03 blocked-by-drift guard sha `47d6c9e...` is not approval. Source advanced again through `e2f71896...` to `6aea48672d941dbe27d1c3b0462b3139a7326058` before final docs/state sync. Final state sha `d827c40c...`; report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-01--noorder_refresh_reblocked_by_source_drift_a92.md`.
+- Next PM must fetch/start from `6aea48672d941dbe27d1c3b0462b3139a7326058` or newer, get a new clean source-stability quiet window, and include a reviewed one-GET fast-balance refresh path because v711 equity is stale under 900s.
+- Boundary unchanged: no Control API GET, Bybit call, Decision Lease, PG, service/env/risk mutation, Cost Gate change, live/mainnet, order/fill/PnL/proof.
+
 ## 2026-07-01 Stock/ETF Phase3 Collector Runtime Cross-Wire Guard
 
 - PM added test-only/source-static coverage for `StockEtfCollectorRunV1` green-session and runtime/writer authority posture.
