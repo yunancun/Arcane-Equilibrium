@@ -12,7 +12,7 @@ PM advanced the current-candidate order-capable fresh-window gate to exact stale
 
 ## Source And Runtime
 
-- Current checkpoint source/origin: `0da1866f6c2db89c730176e3b5fa32236ea775f9`
+- Final dispatch artifact checkpoint before docs/state sync: `0da1866f6c2db89c730176e3b5fa32236ea775f9`
 - Runtime source: `trade-core:/home/ncyu/BybitOpenClaw/srv` at `e16d3323cb58a549262f6bfa6f1ef48ca140aea0`
 - Runtime origin: `c5fce0c6008b783e8264ce06a3a5f781fe18c26e`
 - Runtime status: `## main...origin/main [ahead 8, behind 164]`
