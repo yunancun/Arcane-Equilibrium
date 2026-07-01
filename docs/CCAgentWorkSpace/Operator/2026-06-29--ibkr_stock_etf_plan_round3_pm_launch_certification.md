@@ -4815,3 +4815,32 @@ Verification 已過：
 沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 broker fill import execution、沒有
 scorecard writer、沒有 DB/evidence writer、沒有 evidence clock start、沒有 paper order route、沒有
 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Release Packet Authority Lineage Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Release Packet Authority Lineage Cross-Wire Guard`。
+
+這個 checkpoint 補強 `StockEtfReleasePacketV1` 的 release identity、ADR/AMD/spec path、source timestamp、
+reviewer signoff、evidence hash、migration evidence、kill-disable-cleanup proof 與 final no-live posture
+coverage。新增 Rust acceptance 證明 packet id/source/path/timestamp gaps、PM/Operator/E2/E3/E4/QA/QC/MIT
+signoff gaps、role report paths、release evidence hashes、migration dry-run/double-apply evidence、
+kill-disable-cleanup proof，以及 final window/shakedown/secret/live/seal posture 都會 fail closed。
+
+Python source-static parser 也改成按 impl block 鎖住 `StockEtfReleasePacketV1::accepted_fixture` /
+`Default` 與 `StockEtfKillDisableCleanupProofV1::accepted_fixture`，避免錯抓第一個 `accepted_fixture()`
+而漏看真正 release packet fixture。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Release packet source static pytest：`9 passed`
+- Release packet Rust acceptance：`15 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 release execution、沒有 DB/evidence
+writer、沒有 scorecard writer、沒有 broker session、沒有 paper order route、沒有 tiny-live/live
+authorization，也沒有改動 Bybit live/demo execution 行為。

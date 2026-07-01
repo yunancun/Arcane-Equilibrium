@@ -3889,3 +3889,10 @@
 - PM added test-only/source-static exact-blocker coverage for `StockEtfScorecardVerdictV1` artifact identity, hash lineage, threshold/statistical quality, review gates, derived/live-denial posture, and no-side-effect flags.
 - Verification passed: scorecard verdict source static `8 passed`; scorecard verdict Rust acceptance `14 passed`; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, IPC/runtime change, IBKR contact, connector runtime, secret access, broker fill import execution, scorecard writer, DB/evidence writer, evidence clock start, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Release Packet Authority Lineage Cross-Wire Guard
+
+- PM added test-only/source-static exact-blocker coverage for `StockEtfReleasePacketV1` release identity, ADR/AMD/spec path, source timestamp, reviewer signoff, evidence hashes, migration evidence, kill-disable-cleanup proof, and final no-live posture.
+- Source-static parsing now pins the exact release packet and kill-disable-cleanup fixture blocks instead of a broad first `accepted_fixture()` split.
+- Verification passed: release packet source static `9 passed`; release packet Rust acceptance `15 passed`; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, IPC/runtime change, IBKR contact, connector runtime, secret access, release execution, DB/evidence writer, scorecard writer, broker session, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
