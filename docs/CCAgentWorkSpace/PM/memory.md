@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-01 Stock/ETF IBKR Connector Preview Exact Blocker Guard
+
+- PM tightened the inert Python IBKR connector skeleton preview tests from blocker membership/subset checks to exact ordered blocker vectors across default readiness, connection/account/market-data/contract previews, session/paper attestation, result-import preview, paper lifecycle, fill import, fixtures, and risky config expansion.
+- Added a local source guard so this connector skeleton test cannot regress to loose payload blocker membership for preview blockers.
+- Verification passed: connector skeleton focused `11`, related no-write/surface/readiness `16`, full Stock/ETF Python route/static `127`, py_compile, no-loose connector scan, and diff-check. Boundary unchanged: no connector code or route/runtime behavior change, no IBKR contact, SDK import, secret access/serialization, connector runtime, paper order, fill import, DB/evidence/scorecard writer, tiny-live/live, or Bybit behavior change.
+
 ## 2026-07-01 Standing Envelope Runtime Refresh Blocked By Source Drift
 
 - PM attempted the constrained standing Demo loss-control envelope runtime refresh across clean heads `477b248...`, `67c12f...`, and `19dae039...`; E3/BB approvals were exact-source-bound and became stale before action.
