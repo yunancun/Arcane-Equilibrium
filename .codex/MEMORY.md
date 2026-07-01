@@ -1614,3 +1614,10 @@ Do not paste long reports or stable architecture into TODO.
 - The guard proves live order, margin/short, options/CFD, transfer/account-write, disabled flags, read authorization, shadow cost/universe, and paper market/credential/connector/auth/decision/guardian gaps fail closed with the intended single denial reason.
 - Python source-static parsing now pins `StockEtfFeatureFlags` and `StockEtfGateInputs` default fail-closed posture plus `evaluate_broker_operation` denial ordering.
 - Verification passed: source static `8 passed`; lane acceptance `14 passed`; `cargo fmt -p openclaw_types -- --check` PASS; docs trace PASS; diff check PASS. This grants no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, paper order routing, DB/evidence writer, scorecard writer, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Broker Capability Registry Authority Lineage Cross-Wire Guard
+
+- PM added exact-blocker Rust acceptance coverage for `StockEtfBrokerCapabilityRegistryV1` top-level registry posture, required operation coverage, and operation row authority/gate/typed-denial/rust/audit/source-artifact shape.
+- The guard proves StockEtfCash/IBKR separation, Bybit-live protection, Python broker-write denial, IBKR live denial, CFD/margin denial, first-contact denial, secret denial, audit fields, operation missing/duplicate, and paper/live/fill-import row shape gaps fail closed.
+- Python source-static parsing now pins required operations, default fail-closed posture, and accepted StockEtfCash/IBKR/no-contact/no-secret fixture posture.
+- Verification passed: source static `8 passed`; broker capability registry acceptance `14 passed`; `cargo fmt -p openclaw_types -- --check` PASS; docs trace PASS; diff check PASS. This grants no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, paper order routing, DB/evidence writer, scorecard writer, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

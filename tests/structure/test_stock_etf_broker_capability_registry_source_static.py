@@ -194,6 +194,45 @@ def _source() -> str:
     return BROKER_CAPABILITY_REGISTRY.read_text(encoding="utf-8")
 
 
+def _block_between(source: str, start_token: str, end_tokens: tuple[str, ...]) -> str:
+    start = source.index(start_token)
+    end = len(source)
+    for token in end_tokens:
+        candidate = source.find(token, start + len(start_token))
+        if candidate != -1:
+            end = min(end, candidate)
+    return source[start:end]
+
+
+def _default_block(source: str) -> str:
+    return _block_between(
+        source,
+        "impl Default for StockEtfBrokerCapabilityRegistryV1",
+        ("\n}\n\nimpl StockEtfBrokerCapabilityRegistryV1",),
+    )
+
+
+def _accepted_fixture_block(source: str) -> str:
+    impl = _block_between(
+        source,
+        "impl StockEtfBrokerCapabilityRegistryV1",
+        ("\n#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]\npub struct StockEtfBrokerCapabilityEntryV1",),
+    )
+    return _block_between(
+        impl,
+        "pub fn accepted_fixture() -> Self",
+        ("\n    pub fn validate(&self)",),
+    )
+
+
+def _required_operations_block(source: str) -> str:
+    return _block_between(
+        source,
+        "const REQUIRED_OPERATIONS",
+        ("\n\n#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]",),
+    )
+
+
 def _paper_fill_import_block(source: str) -> str:
     match = re.search(
         r"Op::PaperOrderFillImport => ExpectedCapability \{(?P<body>.*?)\n        \},\n"
@@ -211,6 +250,7 @@ def test_stock_etf_broker_capability_registry_source_stays_below_governance_cap(
 
 def test_stock_etf_broker_capability_registry_source_keeps_registry_contract() -> None:
     source = _source()
+    required_operations = _required_operations_block(source)
 
     for token in REQUIRED_IMPORT_TOKENS | REQUIRED_TYPE_TOKENS:
         assert token in source
@@ -218,6 +258,7 @@ def test_stock_etf_broker_capability_registry_source_keeps_registry_contract() -
         assert field in source
     for operation in REQUIRED_OPERATIONS:
         assert f"BrokerOperation::{operation}" in source or f"Op::{operation}" in source
+        assert f"BrokerOperation::{operation}" in required_operations
     for blocker in REQUIRED_BLOCKERS:
         assert f"Blocker::{blocker}" in source or blocker in source
     for gate in REQUIRED_GATE_LITERALS:
@@ -237,6 +278,71 @@ def test_stock_etf_broker_capability_registry_source_keeps_registry_contract() -
     assert "first_ibkr_contact_performed: false" in source
     assert "secret_content_serialized: false" in source
     assert "accepted: blockers.is_empty()" in source
+
+
+def test_stock_etf_broker_capability_registry_source_keeps_default_fail_closed() -> None:
+    default = _default_block(_source())
+
+    for fail_closed in (
+        "registry_id: String::new()",
+        "source_version: 0",
+        "asset_lane: AssetLane::CryptoPerp",
+        "broker: Broker::Bybit",
+        "bybit_live_execution_unchanged: false",
+        "python_broker_write_authority_denied: false",
+        "ibkr_live_denied: false",
+        "cfd_margin_reserved_denied: false",
+        "first_ibkr_contact_performed: false",
+        "secret_content_serialized: false",
+        "required_audit_fields: Vec::new()",
+        "operations: Vec::new()",
+    ):
+        assert fail_closed in default
+
+    for forbidden in (
+        "asset_lane: AssetLane::StockEtfCash",
+        "broker: Broker::Ibkr",
+        "bybit_live_execution_unchanged: true",
+        "python_broker_write_authority_denied: true",
+        "ibkr_live_denied: true",
+        "cfd_margin_reserved_denied: true",
+        "first_ibkr_contact_performed: true",
+        "secret_content_serialized: true",
+    ):
+        assert forbidden not in default
+
+
+def test_stock_etf_broker_capability_registry_source_keeps_accepted_fixture_safe() -> None:
+    fixture = _accepted_fixture_block(_source())
+
+    for required in (
+        "registry_id: STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID.to_string()",
+        "source_version: 1",
+        "asset_lane: AssetLane::StockEtfCash",
+        "broker: Broker::Ibkr",
+        "bybit_live_execution_unchanged: true",
+        "python_broker_write_authority_denied: true",
+        "ibkr_live_denied: true",
+        "cfd_margin_reserved_denied: true",
+        "first_ibkr_contact_performed: false",
+        "secret_content_serialized: false",
+        "required_audit_fields: REQUIRED_AUDIT_FIELDS",
+        "operations: REQUIRED_OPERATIONS",
+        ".map(StockEtfBrokerCapabilityEntryV1::fixture_for_operation)",
+    ):
+        assert required in fixture
+
+    for forbidden in (
+        "asset_lane: AssetLane::CryptoPerp",
+        "broker: Broker::Bybit",
+        "bybit_live_execution_unchanged: false",
+        "python_broker_write_authority_denied: false",
+        "ibkr_live_denied: false",
+        "cfd_margin_reserved_denied: false",
+        "first_ibkr_contact_performed: true",
+        "secret_content_serialized: true",
+    ):
+        assert forbidden not in fixture
 
 
 def test_stock_etf_broker_capability_registry_source_keeps_operation_authority_matrix() -> None:

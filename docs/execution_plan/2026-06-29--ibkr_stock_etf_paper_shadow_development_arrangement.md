@@ -7941,3 +7941,43 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 paper order routing、
 不做 DB/evidence writer、不啟動 scorecard writer、不做 broker session、不做 broker routing、不做 Linux
 runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 189. 2026-07-01 PM session source checkpoint：Stock/ETF Broker Capability Registry Authority Lineage Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_broker_capability_registry` 的 registry identity、StockEtfCash/IBKR lane
+separation、Bybit/live/python-write/contact/secret denials、required audit fields、required operation coverage
+與 operation row authority/gate/typed-denial/rust/audit/source-artifact shape。這不是 Rust production behavior
+change、不是 IPC server start、不是 IBKR contact、不是 connector runtime、不是 secret lookup、不是 paper order
+routing、不是 DB/evidence writer、不是 paper order route enablement、不是 tiny-live/live gate；只把 broker
+capability registry 的 operation matrix 與 no-live/no-Bybit-crosswire posture 變成 exact-blocker acceptance
+test 與 source-static guard。
+
+已完成：
+
+- 在 `stock_etf_broker_capability_registry_acceptance.rs` 新增
+  `registry_rejects_each_top_level_gap_independently`。
+- Acceptance 證明 registry id/source/lane/broker、Bybit live protection、Python broker write denial、IBKR live
+  denial、CFD/margin denial、first-contact denial、secret denial、required audit fields 都會各自只產生單一對應
+  blocker。
+- 在同檔新增 `registry_rejects_each_operation_coverage_gap_independently`。
+- Acceptance 證明 missing operation、duplicated operation 都會各自只產生單一對應 blocker。
+- 在同檔新增 `registry_rejects_each_operation_shape_gap_independently`。
+- Acceptance 證明 paper submit/live/paper-fill-import rows 的 authority scope、required gates、typed denial、
+  rust ownership、audit event、source artifact hash requirements 都會各自只產生單一對應 blocker。
+- 在 `test_stock_etf_broker_capability_registry_source_static.py` 新增 required-operations/default/
+  accepted-fixture block parsers，鎖住 default fail-closed posture、accepted StockEtfCash/IBKR/no-contact/
+  no-secret posture、以及 REQUIRED_OPERATIONS 全矩陣。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Broker capability registry source static pytest：`8 passed`。
+- Broker capability registry Rust acceptance：`14 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、
+不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 paper order routing、
+不做 DB/evidence writer、不啟動 scorecard writer、不做 broker session、不做 broker routing、不做 Linux
+runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
