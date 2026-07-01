@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,8 @@ class Requirement:
     paths: tuple[str, ...]
     pattern_groups: tuple[tuple[str, ...], ...]
     missing_reason: str
+    path_pattern_groups: tuple[tuple[str, tuple[tuple[str, ...], ...]], ...] = ()
+    path_writer_dispatch_call_sites: tuple[str, ...] = ()
 
 
 SOURCE_REQUIREMENTS: tuple[Requirement, ...] = (
@@ -135,18 +138,45 @@ SOURCE_REQUIREMENTS: tuple[Requirement, ...] = (
         check_id="tick_dispatch_exchange_wiring",
         category="dispatch_boundary",
         description=(
-            "The on-tick dispatch path must forward only an admitted bounded "
-            "probe order request to the existing exchange dispatch channel."
+            "The on-tick path must hand off admitted bounded probe context to "
+            "the production learning-lane writer, and that writer must forward "
+            "only an admitted bounded probe order draft to the existing "
+            "exchange dispatch channel."
         ),
-        paths=("rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs",),
-        pattern_groups=(
-            ("dispatch_admitted_bounded_probe_order", "active_bounded_probe_order_submission"),
-            ("candidate_matched_bounded_probe_order",),
-            ("OrderDispatchRequest",),
-            ("tx.send",),
-            ("order_link_id",),
-            ("context_id",),
-            ("signal_id",),
+        paths=(
+            "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs",
+            "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
+        ),
+        pattern_groups=(),
+        path_pattern_groups=(
+            (
+                "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs",
+                (
+                    ("bounded_probe_active_order_request_for_reject",),
+                    (
+                        "record_reject_event_with_placement_active_request_and_order_dispatch",
+                    ),
+                    ("self.order_dispatch_tx.clone",),
+                ),
+            ),
+            (
+                "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
+                (
+                    ("submit_candidate_matched_bounded_probe_order",),
+                    (
+                        "active_order_draft = active_bounded_probe_order_submission",
+                    ),
+                    ("dispatch_active_bounded_probe_order_draft",),
+                    ("OrderDispatchRequest",),
+                    ("tx.send",),
+                    ("order_link_id",),
+                    ("context_id",),
+                    ("signal_id",),
+                ),
+            ),
+        ),
+        path_writer_dispatch_call_sites=(
+            "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
         ),
         missing_reason="tick_dispatch_active_bounded_probe_exchange_wiring_missing",
     ),
@@ -356,6 +386,7 @@ def _strip_rust_comments_and_strings(text: str) -> str:
         out: list[str] = []
         idx = 0
         open_to_close = {"(": ")", "[": "]", "{": "}"}
+        unmasked_control_flow_macros = {"tokio::select"}
         while idx < len(code):
             if code[idx].isalpha() or code[idx] == "_":
                 start = idx
@@ -373,6 +404,10 @@ def _strip_rust_comments_and_strings(text: str) -> str:
                     while lookahead < len(code) and code[lookahead].isspace():
                         lookahead += 1
                     if lookahead < len(code) and code[lookahead] in open_to_close:
+                        if code[start:after_ident] in unmasked_control_flow_macros:
+                            out.append(code[start:after_ident])
+                            idx = after_ident
+                            continue
                         opener = code[lookahead]
                         closer = open_to_close[opener]
                         depth = 1
@@ -564,8 +599,119 @@ def _find_pattern(files: list[dict[str, Any]], pattern: str) -> dict[str, Any] |
     return None
 
 
+def _balanced_block_end(code_text: str, open_brace_pos: int) -> int | None:
+    if open_brace_pos < 0 or open_brace_pos >= len(code_text):
+        return None
+    if code_text[open_brace_pos] != "{":
+        return None
+    depth = 1
+    cursor = open_brace_pos + 1
+    while cursor < len(code_text) and depth > 0:
+        if code_text[cursor] == "{":
+            depth += 1
+        elif code_text[cursor] == "}":
+            depth -= 1
+        cursor += 1
+    return cursor if depth == 0 else None
+
+
+def _find_writer_active_dispatch_call_site(file: dict[str, Any]) -> dict[str, Any] | None:
+    code_text = str(file["code_text"])
+    branch_pattern = "if let Some(draft) = result.active_order_draft"
+    tx_binding = re.compile(
+        r"\bif\s+let\s+Some\s*\(\s*(?:ref\s+)?tx\s*\)\s*=\s*order_dispatch_tx\s*\{"
+    )
+    dispatch_call = re.compile(
+        r"\bdispatch_active_bounded_probe_order_draft\s*\(\s*tx\s*,\s*draft\s*\)"
+    )
+    cursor = 0
+    while True:
+        branch_pos = code_text.find(branch_pattern, cursor)
+        if branch_pos == -1:
+            return None
+        branch_open = code_text.find("{", branch_pos)
+        branch_end = _balanced_block_end(code_text, branch_open)
+        if branch_end is None:
+            cursor = branch_pos + len(branch_pattern)
+            continue
+        branch_body = code_text[branch_open + 1 : branch_end - 1]
+        tx_match = tx_binding.search(branch_body)
+        if tx_match is None:
+            cursor = branch_end
+            continue
+        tx_abs_start = branch_open + 1 + tx_match.start()
+        tx_open = code_text.find("{", tx_abs_start)
+        tx_end = _balanced_block_end(code_text, tx_open)
+        if tx_end is None or tx_end > branch_end:
+            cursor = branch_end
+            continue
+        tx_body = code_text[tx_open + 1 : tx_end - 1]
+        call_match = dispatch_call.search(tx_body)
+        if call_match is None:
+            cursor = branch_end
+            continue
+        line_no = code_text.count("\n", 0, branch_pos) + 1
+        line_start = code_text.rfind("\n", 0, branch_pos) + 1
+        line_end = code_text.find("\n", branch_pos)
+        if line_end == -1:
+            line_end = len(code_text)
+        call_abs_pos = tx_open + 1 + call_match.start()
+        return {
+            "pattern": (
+                "if let Some(draft) = result.active_order_draft -> "
+                "if let Some(ref tx) = order_dispatch_tx -> "
+                "dispatch_active_bounded_probe_order_draft(tx, draft)"
+            ),
+            "path": file["path"],
+            "line": line_no,
+            "snippet": code_text[line_start:line_end].strip()[:220],
+            "call_line": code_text.count("\n", 0, call_abs_pos) + 1,
+        }
+
+
+def _writer_dispatch_call_site_patterns() -> list[str]:
+    return [
+        "if let Some(draft) = result.active_order_draft",
+        "if let Some(ref tx) = order_dispatch_tx",
+        "dispatch_active_bounded_probe_order_draft(tx, draft)",
+    ]
+
+
+def _writer_dispatch_call_site_row(
+    *,
+    rel_path: str,
+    present: bool,
+    evidence: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "patterns": _writer_dispatch_call_site_patterns(),
+        "present": present,
+        "scope_path": rel_path,
+        "call_site": "active_order_draft_dispatch",
+    }
+    if evidence is not None:
+        row.update(
+            {
+                "matched_pattern": evidence["pattern"],
+                "path": evidence["path"],
+                "line": evidence["line"],
+                "call_line": evidence["call_line"],
+            }
+        )
+    return row
+
+
+def _writer_dispatch_call_site_spec(rel_path: str) -> dict[str, Any]:
+    return {
+        "path": rel_path,
+        "patterns": _writer_dispatch_call_site_patterns(),
+        "call_site": "active_order_draft_dispatch",
+    }
+
+
 def _evaluate_requirement(repo_root: Path, requirement: Requirement) -> dict[str, Any]:
     files, missing_paths = _load_files(repo_root, requirement.paths)
+    files_by_path = {str(file["path"]): file for file in files}
     group_rows: list[dict[str, Any]] = []
     evidence: list[dict[str, Any]] = []
     missing_groups: list[list[str]] = []
@@ -589,6 +735,55 @@ def _evaluate_requirement(repo_root: Path, requirement: Requirement) -> dict[str
                     "line": group_evidence["line"],
                 }
             )
+    for rel_path, scoped_groups in requirement.path_pattern_groups:
+        scoped_file = files_by_path.get(rel_path)
+        scoped_files = [scoped_file] if scoped_file is not None else []
+        for group in scoped_groups:
+            group_evidence = None
+            for pattern in group:
+                group_evidence = _find_pattern(scoped_files, pattern)
+                if group_evidence is not None:
+                    break
+            if group_evidence is None:
+                missing_groups.append(list(group))
+                group_rows.append(
+                    {
+                        "patterns": list(group),
+                        "present": False,
+                        "scope_path": rel_path,
+                    }
+                )
+            else:
+                evidence.append(group_evidence)
+                group_rows.append(
+                    {
+                        "patterns": list(group),
+                        "present": True,
+                        "matched_pattern": group_evidence["pattern"],
+                        "path": group_evidence["path"],
+                        "line": group_evidence["line"],
+                        "scope_path": rel_path,
+                    }
+                )
+    for rel_path in requirement.path_writer_dispatch_call_sites:
+        scoped_file = files_by_path.get(rel_path)
+        call_site_evidence = (
+            _find_writer_active_dispatch_call_site(scoped_file)
+            if scoped_file is not None
+            else None
+        )
+        if call_site_evidence is None:
+            missing_groups.append(_writer_dispatch_call_site_patterns())
+            group_rows.append(_writer_dispatch_call_site_row(rel_path=rel_path, present=False))
+        else:
+            evidence.append(call_site_evidence)
+            group_rows.append(
+                _writer_dispatch_call_site_row(
+                    rel_path=rel_path,
+                    present=True,
+                    evidence=call_site_evidence,
+                )
+            )
     present = bool(files) and not missing_paths and not missing_groups
     return {
         "check_id": requirement.check_id,
@@ -599,6 +794,17 @@ def _evaluate_requirement(repo_root: Path, requirement: Requirement) -> dict[str
         "paths": list(requirement.paths),
         "missing_paths": missing_paths,
         "pattern_groups": [list(group) for group in requirement.pattern_groups],
+        "path_pattern_groups": [
+            {
+                "path": rel_path,
+                "pattern_groups": [list(group) for group in scoped_groups],
+            }
+            for rel_path, scoped_groups in requirement.path_pattern_groups
+        ],
+        "path_writer_dispatch_call_sites": [
+            _writer_dispatch_call_site_spec(rel_path)
+            for rel_path in requirement.path_writer_dispatch_call_sites
+        ],
         "missing_pattern_groups": missing_groups,
         "group_results": group_rows,
         "evidence": evidence,
