@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -15,6 +16,49 @@ from stock_etf_route_fixtures import (
     route_module,
     stock_etf_router,
 )
+
+EXPECTED_POLICY_CONTRACT_VIOLATIONS = [
+    "ibkr_call_performed",
+    "secret_slot_touched",
+    "order_routed",
+    "bybit_ipc_reused",
+    "phase2_started",
+    "phase3_started",
+    "risk_runtime_started",
+    "paper_order_rehearsal_started",
+    "paper_order_submitted",
+    "connector_runtime_started",
+    "db_apply_performed",
+    "evidence_clock_started",
+    "scorecard_writer_started",
+    "asset_lane_mismatch",
+    "broker_mismatch",
+    "environment_mismatch",
+    "risk_expected_contract_id_mismatch",
+    "registry_expected_id_mismatch",
+    "registry_read_rows_missing_lane_scoped_ipc",
+    "registry_read_rows_missing_readonly_probe_request",
+    "registry_scorecard_missing_readonly_probe_result_import_request",
+    "risk_policy_runtime_enabled",
+    "risk_policy_allow_margin",
+    "risk_policy_allow_short",
+    "risk_policy_allow_options",
+    "risk_policy_allow_cfd",
+    "risk_policy_allow_transfer",
+    "risk_policy_allow_live",
+    "risk_policy_ibkr_contact_performed",
+    "risk_policy_connector_runtime_started",
+    "risk_policy_secret_content_serialized",
+    "risk_policy_bybit_live_not_protected",
+    "risk_policy_accepted_without_source_proofs",
+    "registry_first_ibkr_contact_performed",
+    "registry_secret_content_serialized",
+    "registry_bybit_live_not_protected",
+    "registry_python_broker_write_not_denied",
+    "registry_ibkr_live_not_denied",
+    "registry_cfd_margin_not_denied",
+    "registry_accepted_without_source_proofs",
+]
 
 
 def test_stock_etf_policy_status_returns_200_when_ipc_down(
@@ -207,48 +251,7 @@ def test_stock_etf_policy_status_blocks_contract_violation() -> None:
 
     assert data["policy_status_state"] == "contract_violation_blocked"
     assert data["degraded"] is True
-    assert {
-        "ibkr_call_performed",
-        "secret_slot_touched",
-        "order_routed",
-        "bybit_ipc_reused",
-        "phase2_started",
-        "phase3_started",
-        "risk_runtime_started",
-        "paper_order_rehearsal_started",
-        "paper_order_submitted",
-        "connector_runtime_started",
-        "db_apply_performed",
-        "evidence_clock_started",
-        "scorecard_writer_started",
-        "asset_lane_mismatch",
-        "broker_mismatch",
-        "environment_mismatch",
-        "risk_expected_contract_id_mismatch",
-        "risk_policy_runtime_enabled",
-        "risk_policy_allow_margin",
-        "risk_policy_allow_short",
-        "risk_policy_allow_options",
-        "risk_policy_allow_cfd",
-        "risk_policy_allow_transfer",
-        "risk_policy_allow_live",
-        "risk_policy_ibkr_contact_performed",
-        "risk_policy_connector_runtime_started",
-        "risk_policy_secret_content_serialized",
-        "risk_policy_bybit_live_not_protected",
-        "risk_policy_accepted_without_source_proofs",
-        "registry_expected_id_mismatch",
-        "registry_read_rows_missing_lane_scoped_ipc",
-        "registry_read_rows_missing_readonly_probe_request",
-        "registry_scorecard_missing_readonly_probe_result_import_request",
-        "registry_first_ibkr_contact_performed",
-        "registry_secret_content_serialized",
-        "registry_bybit_live_not_protected",
-        "registry_python_broker_write_not_denied",
-        "registry_ibkr_live_not_denied",
-        "registry_cfd_margin_not_denied",
-        "registry_accepted_without_source_proofs",
-    }.issubset(set(data["contract_violations"]))
+    assert data["contract_violations"] == EXPECTED_POLICY_CONTRACT_VIOLATIONS
     assert data["asset_lane"] == "stock_etf_cash"
     assert data["broker"] == "ibkr"
     assert data["environment"] == "paper"
@@ -276,3 +279,19 @@ def test_stock_etf_policy_status_requires_auth() -> None:
     resp = client.get("/api/v1/stock-etf/policy-status")
 
     assert resp.status_code == 401
+
+
+def test_stock_etf_policy_contract_violation_assertions_stay_exact() -> None:
+    source = Path(__file__).read_text(encoding="utf-8")
+    source_under_test = source.split(
+        "def test_stock_etf_policy_contract_violation_assertions_stay_exact",
+        1,
+    )[0]
+    forbidden_patterns = [
+        'set(data["contract_violations"])',
+        'in data["contract_violations"]',
+        'issubset(set(data["contract_violations"]))',
+    ]
+
+    for pattern in forbidden_patterns:
+        assert pattern not in source_under_test
