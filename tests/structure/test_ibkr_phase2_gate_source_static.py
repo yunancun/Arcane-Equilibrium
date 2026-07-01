@@ -223,6 +223,15 @@ def _session_attestation_fixture_block(source: str) -> str:
     )[0]
 
 
+def _session_attestation_validate_block(source: str) -> str:
+    return source.split("pub fn validate(&self, now_ms: u64) -> IbkrSessionAttestationVerdict", 1)[
+        1
+    ].split(
+        "IbkrSessionAttestationVerdict {",
+        1,
+    )[0]
+
+
 def test_ibkr_phase2_gate_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
@@ -392,6 +401,46 @@ def test_ibkr_phase2_gate_source_keeps_session_default_and_paper_fixture_posture
         'raw_artifact_hash: "e".repeat(64)',
     ):
         assert required in fixture
+
+
+def test_ibkr_phase2_gate_source_keeps_session_attestation_exact_blocker_order() -> None:
+    validate = _session_attestation_validate_block(_source())
+    ordered_blockers = (
+        "ContractIdMismatch",
+        "SourceVersionMismatch",
+        "StatusBlocked",
+        "EnvironmentDenied",
+        "HostNotLoopback",
+        "LivePortDenied",
+        "PortNotPaperGatewayDefault",
+        "MissingAccountFingerprint",
+        "AccountFingerprintInvalid",
+        "LiveAccountFingerprint",
+        "MissingProcessIdentity",
+        "UnknownOrLiveGatewayMode",
+        "MissingSecretSlotFingerprint",
+        "SecretSlotFingerprintInvalid",
+        "SecretSlotMissing",
+        "SecretSlotWorldReadable",
+        "SecretSlotModeDenied",
+        "LiveSecretPresentOrUnknown",
+        "EnvVarCredentialFallback",
+        "MissingApiServerVersion",
+        "MissingDataTier",
+        "MissingDataEntitlementsFingerprint",
+        "DataEntitlementsFingerprintInvalid",
+        "MarketDataEntitlementPurchaseNotDenied",
+        "MissingGatewayStartupTime",
+        "GatewayStartupAfterAttestation",
+        "MissingRawArtifactHash",
+        "RawArtifactHashInvalid",
+        "InvalidAttestationWindow",
+        "StaleAttestation",
+    )
+
+    positions = [validate.index(f"Blocker::{blocker}") for blocker in ordered_blockers]
+    assert positions == sorted(positions)
+    assert validate.count("Blocker::SecretSlotWorldReadable") == 2
 
 
 def test_ibkr_phase2_gate_source_has_no_runtime_secret_order_or_bybit_client_tokens() -> None:

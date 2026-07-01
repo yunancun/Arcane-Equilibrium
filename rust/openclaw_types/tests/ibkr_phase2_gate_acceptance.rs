@@ -348,43 +348,36 @@ fn non_bybit_api_allowlist_contract_rejects_identity_and_matrix_drift() {
 
 #[test]
 fn session_attestation_default_blocks_without_secret_or_socket() {
+    use IbkrSessionAttestationBlocker as Blocker;
+
     let attestation = IbkrSessionAttestationV1::default();
     let verdict = attestation.validate(1);
 
     assert!(!verdict.attestation_accepted);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::ContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::SourceVersionMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::StatusBlocked));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::HostNotLoopback));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::PortNotPaperGatewayDefault));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::MissingAccountFingerprint));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::MissingRawArtifactHash));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::MissingDataTier));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::MissingDataEntitlementsFingerprint));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::MarketDataEntitlementPurchaseNotDenied));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::MissingGatewayStartupTime));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::ContractIdMismatch,
+            Blocker::SourceVersionMismatch,
+            Blocker::StatusBlocked,
+            Blocker::HostNotLoopback,
+            Blocker::PortNotPaperGatewayDefault,
+            Blocker::MissingAccountFingerprint,
+            Blocker::MissingProcessIdentity,
+            Blocker::UnknownOrLiveGatewayMode,
+            Blocker::MissingSecretSlotFingerprint,
+            Blocker::SecretSlotModeDenied,
+            Blocker::LiveSecretPresentOrUnknown,
+            Blocker::MissingApiServerVersion,
+            Blocker::MissingDataTier,
+            Blocker::MissingDataEntitlementsFingerprint,
+            Blocker::MarketDataEntitlementPurchaseNotDenied,
+            Blocker::MissingGatewayStartupTime,
+            Blocker::MissingRawArtifactHash,
+            Blocker::InvalidAttestationWindow,
+            Blocker::StaleAttestation,
+        ]
+    );
 }
 
 #[test]
@@ -414,33 +407,37 @@ fn paper_session_attestation_accepts_only_loopback_paper_gateway() {
         ..IbkrSessionAttestationV1::paper_fixture()
     };
     let verdict = wrong_identity.validate(wrong_identity.attested_at_ms + 1);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::ContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::SourceVersionMismatch));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            IbkrSessionAttestationBlocker::ContractIdMismatch,
+            IbkrSessionAttestationBlocker::SourceVersionMismatch,
+        ]
+    );
 
     let network_host = IbkrSessionAttestationV1 {
         host: "192.0.2.10".to_string(),
         ..IbkrSessionAttestationV1::paper_fixture()
     };
-    assert!(network_host
-        .validate(network_host.attested_at_ms + 1)
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::HostNotLoopback));
+    assert_eq!(
+        network_host
+            .validate(network_host.attested_at_ms + 1)
+            .blockers,
+        vec![IbkrSessionAttestationBlocker::HostNotLoopback]
+    );
 
     let live_port = IbkrSessionAttestationV1 {
         port: IBKR_LIVE_GATEWAY_PORT,
         ..IbkrSessionAttestationV1::paper_fixture()
     };
     let verdict = live_port.validate(live_port.attested_at_ms + 1);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::LivePortDenied));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::PortNotPaperGatewayDefault));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            IbkrSessionAttestationBlocker::LivePortDenied,
+            IbkrSessionAttestationBlocker::PortNotPaperGatewayDefault,
+        ]
+    );
 }
 
 #[test]
@@ -591,12 +588,10 @@ fn session_attestation_rejects_each_secret_lineage_and_window_gap_independently(
         ..IbkrSessionAttestationV1::paper_fixture()
     };
     let live_port_verdict = live_port.validate(live_port.attested_at_ms + 1);
-    assert!(live_port_verdict
-        .blockers
-        .contains(&Blocker::LivePortDenied));
-    assert!(live_port_verdict
-        .blockers
-        .contains(&Blocker::PortNotPaperGatewayDefault));
+    assert_eq!(
+        live_port_verdict.blockers,
+        vec![Blocker::LivePortDenied, Blocker::PortNotPaperGatewayDefault]
+    );
 
     let stale = IbkrSessionAttestationV1::paper_fixture();
     assert_single_session_attestation_blocker(
@@ -607,6 +602,8 @@ fn session_attestation_rejects_each_secret_lineage_and_window_gap_independently(
 
 #[test]
 fn session_attestation_requires_hashed_lineage_data_tier_and_startup_time() {
+    use IbkrSessionAttestationBlocker as Blocker;
+
     let attestation = IbkrSessionAttestationV1 {
         account_fingerprint: "paper_account_fingerprint_hash".to_string(),
         secret_slot_fingerprint: "paper_secret_slot_fingerprint_hash".to_string(),
@@ -620,31 +617,24 @@ fn session_attestation_requires_hashed_lineage_data_tier_and_startup_time() {
     let verdict = attestation.validate(attestation.attested_at_ms + 1);
 
     assert!(!verdict.attestation_accepted);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::AccountFingerprintInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::SecretSlotFingerprintInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::MissingDataTier));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::DataEntitlementsFingerprintInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::MarketDataEntitlementPurchaseNotDenied));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::GatewayStartupAfterAttestation));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::RawArtifactHashInvalid));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::AccountFingerprintInvalid,
+            Blocker::SecretSlotFingerprintInvalid,
+            Blocker::MissingDataTier,
+            Blocker::DataEntitlementsFingerprintInvalid,
+            Blocker::MarketDataEntitlementPurchaseNotDenied,
+            Blocker::GatewayStartupAfterAttestation,
+            Blocker::RawArtifactHashInvalid,
+        ]
+    );
 }
 
 #[test]
 fn session_attestation_denies_live_secret_and_env_fallback() {
+    use IbkrSessionAttestationBlocker as Blocker;
+
     let attestation = IbkrSessionAttestationV1 {
         account_fingerprint_is_live: true,
         environment: BrokerEnvironment::LiveReservedDenied,
@@ -658,24 +648,18 @@ fn session_attestation_denies_live_secret_and_env_fallback() {
     let verdict = attestation.validate(attestation.attested_at_ms + 1);
 
     assert!(!verdict.attestation_accepted);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::LiveAccountFingerprint));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::EnvironmentDenied));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::UnknownOrLiveGatewayMode));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::SecretSlotWorldReadable));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::LiveSecretPresentOrUnknown));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSessionAttestationBlocker::EnvVarCredentialFallback));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::EnvironmentDenied,
+            Blocker::LiveAccountFingerprint,
+            Blocker::UnknownOrLiveGatewayMode,
+            Blocker::SecretSlotWorldReadable,
+            Blocker::SecretSlotWorldReadable,
+            Blocker::LiveSecretPresentOrUnknown,
+            Blocker::EnvVarCredentialFallback,
+        ]
+    );
 }
 
 #[test]

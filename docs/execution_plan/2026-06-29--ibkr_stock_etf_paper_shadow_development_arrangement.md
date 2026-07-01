@@ -8550,3 +8550,40 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 runtime、不做 socket/client construction、不執行 paper order routing、不做 broker session、不做 broker
 routing、不做 DB/evidence writer、不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權
 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
+
+## 206. 2026-07-01 PM session source checkpoint：IBKR Session Attestation Default Lineage Exact Guard
+
+本 checkpoint 補強 `ibkr_phase2_gate` session attestation 的 default 與 aggregate fail-closed lineage，固定
+default `IbkrSessionAttestationV1`、identity/host/live-port fixture drifts、hashed lineage/data-tier/startup
+aggregate failures、live-secret/env-fallback aggregate failures 的 ordered blocker vectors，並用 source-static
+parser 鎖住 session attestation validator blocker emit order。這不是 Rust production behavior change、不是
+IPC/API route change、不是 IBKR contact、不是 connector runtime、不是 socket/client construction、不是 secret
+lookup、不是 paper order route enablement、不是 tiny-live/live gate；只把 Phase2 session attestation source-only
+gate 的 fail-closed lineage 變成 exact-blocker acceptance test 與 source-static guard。
+
+已完成：
+
+- 在 `ibkr_phase2_gate_acceptance.rs` 將 default `IbkrSessionAttestationV1` 固定為完整順序 blocker 向量，覆蓋
+  contract/source、status、host/port、account/secret fingerprint、process/gateway mode、secret-slot mode、
+  live-secret、API/data entitlement metadata、gateway startup、raw artifact hash、attestation window 與 stale
+  blockers。
+- 在同檔將 identity/host/live-port fixture drifts、hashed lineage/data-tier/startup aggregate failures、
+  live-secret/env-fallback aggregate failures 固定為 exact blocker vectors。
+- 在 `test_ibkr_phase2_gate_source_static.py` 新增 session attestation validator blocker ordering parser，並鎖住
+  combined world-readable slot mode and flag regression 會產生兩個 `SecretSlotWorldReadable` blocker。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- IBKR Phase2 gate source static pytest：`8 passed`。
+- IBKR Phase2 gate Rust acceptance：`13 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、
+不改 GUI runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector
+runtime、不做 socket/client construction、不執行 paper order routing、不做 broker session、不做 broker
+routing、不做 DB/evidence writer、不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權
+paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。

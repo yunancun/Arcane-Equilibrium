@@ -5432,3 +5432,33 @@ Verification 已過：
 contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 socket/client construction、沒有
 paper order routing、沒有 broker session、沒有 DB/evidence writer、沒有 scorecard writer、沒有 paper-shadow
 launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — IBKR Session Attestation Default Lineage Exact Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`IBKR Session Attestation Default Lineage Exact Guard`。
+
+這個 checkpoint 補強 `IbkrSessionAttestationV1` default、identity/host/live-port fixture drifts、hashed
+lineage/data-tier/startup aggregate failures、live-secret/env-fallback aggregate failures 的 exact fail-closed
+coverage。
+
+新增 Rust acceptance 證明 session attestation 會以完整 ordered blocker vectors 覆蓋 contract/source、status、
+environment、host/port、account/secret fingerprints、process/gateway mode、secret-slot mode、live-secret/env
+fallback、API/data entitlement metadata、gateway startup、raw artifact hash、attestation window、stale
+attestation blockers。Python source-static guard 也鎖住 session attestation validator blocker emit order，包含
+combined world-readable slot mode and flag regression 的 duplicate `SecretSlotWorldReadable` blocker。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- IBKR Phase2 gate source static pytest：`8 passed`
+- IBKR Phase2 gate Rust acceptance：`13 passed`
+- Full `cargo test -p openclaw_types`：PASS
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 GUI runtime/API route/IPC behavior change、沒有 IBKR
+contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 socket/client construction、沒有
+paper order routing、沒有 broker session、沒有 DB/evidence writer、沒有 scorecard writer、沒有 paper-shadow
+launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
