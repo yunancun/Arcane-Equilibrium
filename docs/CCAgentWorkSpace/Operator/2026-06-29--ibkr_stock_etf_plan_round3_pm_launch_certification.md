@@ -6097,3 +6097,28 @@ change、沒有 IBKR contact、沒有 SDK import、沒有 secret access/serializ
 socket/client construction、沒有 broker session、沒有 read-only probe execution、沒有 fill import execution、沒有
 paper order routing/cancel/replace execution、沒有 DB/evidence/scorecard writer、沒有 evidence clock、沒有
 paper-shadow launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Lane Status Route Exact Contract-Violation Guard
+
+本 session 已完成下一個 test-only checkpoint：
+`Stock/ETF Lane Status Route Exact Contract-Violation Guard`。
+
+這個 checkpoint 補強 Stock/ETF FastAPI lane-status route 的 exact contract-violation coverage。
+
+現在 lane-level side-effect violations 與 asset/broker mismatch violations 都用完整 ordered vector 驗證；同檔也
+新增 source guard，防止之後退回 loose `set(...)`、membership 或 subset 檢查。
+
+Verification 已過：
+
+- Lane-status route focused pytest：`5 passed`
+- Stock/ETF no-write/surface/lane/readiness focused pytest：`22 passed`
+- Full Stock/ETF Python route/static pytest：`129 passed`
+- `python3 -m py_compile`：PASS
+- Lane-status no-loose contract violation assertion scan：PASS
+- Diff check：PASS
+
+邊界不變：沒有 FastAPI route behavior change、沒有 connector production code change、沒有 GUI/Rust IPC behavior
+change、沒有 IBKR contact、沒有 SDK import、沒有 secret access/serialization、沒有 connector runtime、沒有
+socket/client construction、沒有 broker session、沒有 read-only probe execution、沒有 fill import execution、沒有
+paper order routing/cancel/replace execution、沒有 DB/evidence/scorecard writer、沒有 evidence clock、沒有
+paper-shadow launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
