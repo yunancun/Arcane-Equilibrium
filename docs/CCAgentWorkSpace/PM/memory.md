@@ -4074,3 +4074,10 @@
 - The Phase2 pre-contact gate test now pins complete ordered default allowlist blockers and complete ordered identity/baseline/action/denial/contact/secret/Bybit drift blockers.
 - Verification passed: IBKR Phase2 gate source static `8 passed`; IBKR Phase2 gate Rust acceptance `13 passed`; full `cargo test -p openclaw_types` PASS; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, GUI runtime/API route/IPC behavior change, IBKR contact, connector runtime, socket/client construction, secret access, paper order routing, broker session, DB/evidence writer, scorecard writer, paper-shadow launch, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Scorecard Verdict Exact Blocker Guard
+
+- PM tightened test-only exact-blocker coverage for `StockEtfScorecardVerdictV1` aggregate fail-closed paths: default artifact, hash-lineage drift, profitability/quality failures, execution-model-invalid rationale, runtime side effects, and evidence/live/Bybit/writer cross-wire cases.
+- The acceptance test no longer uses loose `blockers.contains` helpers for scorecard verdict blockers; aggregate and cross-wire paths now require complete ordered vectors.
+- Verification passed: Stock/ETF scorecard verdict source static `8 passed`; Stock/ETF scorecard verdict Rust acceptance `14 passed`; full `cargo test -p openclaw_types` PASS; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, GUI runtime/API route/IPC behavior change, IBKR contact, connector runtime, socket/client construction, secret access, paper order routing, broker session, DB/evidence writer, scorecard writer, paper-shadow launch, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
