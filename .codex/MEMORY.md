@@ -1464,3 +1464,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only meta guard for IBKR/Stock-ETF Rust source coverage across `openclaw_types` contracts and engine Stock/ETF IPC handler child modules.
 - The guard dynamically scans current `ibkr` / `stock_etf` Rust source files, includes nested child modules, excludes Bybit runtime modules, and fails if any selected Rust source file is not directly referenced by acceptance, structure, engine IPC, or control-api tests.
 - Verification passed: new guard `3 passed`; focused Stock/ETF/IBKR source-static subset PASS; docs trace PASS. This grants no Rust behavior change, IPC runtime, IBKR contact, connector runtime, secret access, paper order route, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 IBKR Connector README Source Boundary Guard
+
+- PM added a source-only README posture guard for the inert IBKR connector skeleton.
+- The guard requires the README to preserve the not-runtime connector boundary, allowed display-only preview scope, denied SDK/network/secret/write/order/DB/tiny-live/live scope, and no runtime-ready/live-ready/paper-order-ready claims.
+- Verification passed: connector skeleton `10 passed`; docs trace PASS. This grants no connector behavior change, endpoint, IBKR contact, connector runtime, secret access, paper order route, tiny-live/live, or Bybit behavior change.

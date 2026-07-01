@@ -175,6 +175,7 @@ def test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles() -> None
         "Stock/ETF Settings Template Coverage Static Guard",
         "Stock/ETF Python/GUI Surface Coverage Static Guard",
         "Stock/ETF Rust Source Coverage Static Guard",
+        "IBKR Connector README Source Boundary Guard",
     )
     plan_source = IBKR_STOCK_ETF_PLAN.read_text()
     operator_source = IBKR_STOCK_ETF_OPERATOR.read_text()

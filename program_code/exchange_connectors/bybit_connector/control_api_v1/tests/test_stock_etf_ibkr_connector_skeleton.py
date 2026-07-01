@@ -46,6 +46,7 @@ FORBIDDEN_WRITE_METHODS = {
 }
 
 IBKR_CONNECTOR_DIR = SRV_ROOT / "program_code" / "broker_connectors" / "ibkr_connector"
+IBKR_CONNECTOR_README = IBKR_CONNECTOR_DIR / "README.md"
 
 FORBIDDEN_BYBIT_IMPORT_PREFIXES = (
     "app",
@@ -245,6 +246,35 @@ EXPECTED_PAPER_CLIENT_PUBLIC_SURFACE = {
     "lifecycle_readiness",
     "paper_attestation_preview",
 }
+EXPECTED_README_REQUIRED_BOUNDARY_LINES = {
+    "It is not a runtime IBKR connector.",
+    "- typed blocked readiness payloads",
+    "- non-secret loopback endpoint descriptors",
+    "- display-only account, market-data, contract-detail, lifecycle, and fill-import previews",
+    "- display-only session and paper attestation previews",
+    "- display-only readonly probe result-import request previews",
+    "- static fixtures for tests",
+    "- IBKR SDK imports",
+    "- socket or HTTP network contact",
+    "- secret reads, env secret fallback, or serialized credential material",
+    "- broker write methods",
+    "- paper order routing, fill import side effects, DB writes, tiny-live, or live",
+    "Rust gates remain the authority for any future read-only or paper capability.",
+}
+FORBIDDEN_README_RUNTIME_CLAIMS = {
+    "runtime-ready",
+    "runtime ready",
+    "ready for runtime",
+    "secret slot",
+    "secret-slot ready",
+    "live ready",
+    "tiny-live ready",
+    "paper order ready",
+    "place_order",
+    "submit_order",
+    "cancel_order",
+    "replace_order",
+}
 
 
 def _ibkr_connector_python_files() -> list[Path]:
@@ -293,6 +323,17 @@ def test_ibkr_connector_package_exports_only_source_boundary_types() -> None:
         IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID
         == "stock_etf_ibkr_readonly_probe_result_import_request_v1"
     )
+
+
+def test_ibkr_connector_readme_preserves_source_only_boundary() -> None:
+    source = IBKR_CONNECTOR_README.read_text(encoding="utf-8")
+    lower_source = source.lower()
+
+    assert IBKR_CONNECTOR_README.exists()
+    for line in EXPECTED_README_REQUIRED_BOUNDARY_LINES:
+        assert line in source
+    for claim in FORBIDDEN_README_RUNTIME_CLAIMS:
+        assert claim not in lower_source
 
 
 def test_ibkr_connector_skeleton_has_no_python_broker_write_methods() -> None:
