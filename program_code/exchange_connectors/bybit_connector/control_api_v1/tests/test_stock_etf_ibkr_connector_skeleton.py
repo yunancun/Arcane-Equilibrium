@@ -468,19 +468,23 @@ def test_ibkr_readonly_config_rejects_runtime_and_live_requests() -> None:
         secret_fingerprint_hash="2" * 64,
     )
 
-    blockers = set(config.validate_source_boundary())
+    blockers = list(config.validate_source_boundary())
 
-    assert {
-        "host_not_loopback",
-        "port_not_reserved_paper_tws",
-        "network_contact_requested",
-        "secret_material_requested",
-        "paper_channel_requested",
-        "live_channel_requested",
-        "bybit_path_reused",
-        "account_fingerprint_present_before_phase2",
-        "secret_fingerprint_present_before_phase2",
-    }.issubset(blockers)
+    assert blockers == list(RISKY_CONFIG_BLOCKERS)
+
+
+def test_ibkr_connector_config_blocker_assertions_stay_exact() -> None:
+    source = Path(__file__).read_text(encoding="utf-8")
+    source_under_test = source.split(
+        "def test_ibkr_connector_config_blocker_assertions_stay_exact",
+        1,
+    )[0]
+    forbidden_patterns = [
+        "issubset(blockers)",
+        "set(config.validate_source_boundary())",
+    ]
+    for pattern in forbidden_patterns:
+        assert pattern not in source_under_test
 
 
 def test_ibkr_connector_previews_remain_display_only() -> None:
