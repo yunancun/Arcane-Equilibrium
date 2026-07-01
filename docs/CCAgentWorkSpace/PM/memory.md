@@ -3769,3 +3769,11 @@
 - Verification passed: PM focused `14 passed`, py_compile, diff-check, CLI smoke; E2/E4 both `DONE`.
 - Next PM should fetch current source, run source-stability with the no-order blocker id, then regenerate E3/BB request only after a clean quiet window; v711 equity remains stale under 900s.
 - Boundary unchanged: no Control API GET, Bybit call, Decision Lease, PG, service/env/risk mutation, Cost Gate change, live/mainnet, order/fill/PnL/proof.
+
+## 2026-07-01 Stock/ETF PIT Universe Source Authority Cross-Wire Guard
+
+- PM added test-only/source-static coverage for `StockEtfPitUniverseV1` evidence-freeze, survivorship, Bybit protection, IBKR live-denial, contact, and secret posture.
+- Acceptance now independently rejects missing evidence-clock freeze, missing survivorship controls, Bybit-live protection loss, IBKR live not denied, IBKR contact, and secret serialization via exact single blockers.
+- Source-static guard now rejects hardcoded crypto/Bybit lane, missing universe identity/hash/as-of/count, missing freeze/survivorship controls, Bybit changed, IBKR live not denied, IBKR contact, and secret serialization in the accepted fixture, and pins default fail-closed posture.
+- Verification passed: targeted rustfmt check PASS; PIT universe source static `9 passed`; PIT universe Rust acceptance `8 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
+- Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, market-data collection, scorecard writer, DB/evidence writer, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
