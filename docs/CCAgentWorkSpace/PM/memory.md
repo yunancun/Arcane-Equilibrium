@@ -3690,3 +3690,11 @@
 - Source-static guard now rejects hardcoded incomplete paper-shadow window, incomplete engineering shakedown, secret serialization, live/tiny-live authority, and unsealed posture in the accepted fixture, and pins default fail-closed posture.
 - Verification passed: targeted rustfmt check PASS; release packet source static `8 passed`; release packet Rust acceptance `9 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
 - Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, release execution, DB/evidence writer, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Strategy Hypothesis Authority Cross-Wire Guard
+
+- PM added test-only/source-static coverage for `stock_etf_strategy_hypothesis` preregistration authority posture.
+- Acceptance now independently rejects non-paper-shadow posture, premature profitability claim, live/tiny-live authority claim, Bybit-live protection loss, IBKR live not denied, IBKR contact, and secret serialization via the expected blockers.
+- Source-static guard now rejects hardcoded non-paper-shadow, profitability claim, live/tiny-live authority, Bybit changed, IBKR live not denied, IBKR contact, and secret serialization in the accepted fixture, and pins default fail-closed posture.
+- Verification passed: targeted rustfmt check PASS; strategy hypothesis source static `10 passed`; strategy hypothesis Rust acceptance `8 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
+- Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, strategy execution, scorecard writer, DB/evidence writer, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
