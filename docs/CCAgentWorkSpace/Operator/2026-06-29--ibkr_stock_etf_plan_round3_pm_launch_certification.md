@@ -4565,3 +4565,33 @@ Verification 已過：
 沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 IB Gateway/TWS startup、沒有 broker
 session、沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution
 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Readonly Probe Request Authority Lineage Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Readonly Probe Request Authority Lineage Cross-Wire Guard`。
+
+這個 checkpoint 補強 `StockEtfIbkrReadonlyProbeRequestV1` 的 authority、pre-contact lineage 與
+no-side-effect boundary coverage。新增 Rust acceptance 證明 contract/source/lane/broker/environment/
+read action/operation/authority/effect、request/probe ids、Phase2 gate/allowlist/secret-slot/topology/
+session/redaction/rate-limit/audit/artifact hashes，以及 contact/runtime/secret/order/DB/evidence/Bybit/
+live/account-write/entitlement/client-portal/Python-write flags 都會 fail closed。
+
+同時保留 paper-order action 的天然 aggregate 行為：paper write action 必須同時命中
+`ProbeActionMismatch` 與 `ApiActionNotReadAllowed`，不把它錯寫成 single-blocker。Python source-static
+parser 也鎖住 `Default` / `accepted_fixture` block，避免 accepted fixture 被硬編成 runtime、secret、
+order、Bybit cross-wire 或 empty-lineage posture。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Readonly probe request source static pytest：`9 passed`
+- Readonly probe request Rust acceptance：`10 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 read-only probe execution、沒有 broker
+session、沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution
+行為。
