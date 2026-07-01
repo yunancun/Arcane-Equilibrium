@@ -6072,3 +6072,37 @@ PM 邊界不變：此 checkpoint 不改 production code、不新增 endpoint/IPC
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 read-only probe、不做
 result import、不做 DB/evidence writer、不做 paper order route、不做 Linux runtime sync/restart、
 不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 143. 2026-07-01 PM session source checkpoint：Stock/ETF Paper Order Validation Source Static Guard
+
+本 checkpoint 為 `stock_etf_paper_order_request/validation.rs` 補上專用 source-only structure
+guard。這不是 Rust production behavior change、不是 IBKR contact、不是 connector runtime、
+不是 secret access、不是 DB/evidence writer、不是 paper order route；只把 paper order request
+validation 子模組的 fail-closed contract 機器化，避免 preview/submit/cancel/replace 的 authority、
+effect、hash、field-separation 邏輯被後續改弱。
+
+已完成：
+
+- 新增 `tests/structure/test_stock_etf_paper_order_request_validation_source_static.py`。
+- Guard 要求 validation 子模組維持 520 行 governance cap 與現有 helper/function surface。
+- Guard 鎖住 top-level contract/source/lane/broker/paper-only/live-denial/boundary flag/request
+  method dispatch checks。
+- Guard 鎖住 method-specific surface mapping：preview 必須保持 ReadOnly + non-effect-capable；
+  submit/cancel/replace 必須保持 PaperRehearsal + effect-capable。
+- Guard 鎖住 preview/submit/cancel/replace 的 field separation、order shape、symbol/side、
+  quantity、limit/market price、time-in-force、preview hash 與 effect hash gates。
+- Guard 禁止 validation 子模組出現 runtime、secret material、order client 或 Bybit client tokens。
+
+驗證：
+
+- New validation guard py_compile：PASS。
+- Focused new guard pytest：`6 passed`。
+- Focused paper-order request validation/parent/fixtures/split subset：`20 passed`。
+- Dynamic docs trace pytest：`2 passed, 5 deselected`；parsed checkpoint titles `130`，
+  missing `[]`。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不新增 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 read-only probe、不做
+result import、不做 DB/evidence writer、不做 paper order/cancel/replace route、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
