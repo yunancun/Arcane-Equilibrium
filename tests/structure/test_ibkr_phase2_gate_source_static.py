@@ -200,6 +200,15 @@ def _external_gate_fixture_block(source: str) -> str:
     )[0]
 
 
+def _external_gate_validate_block(source: str) -> str:
+    return source.split("pub fn validate(&self) -> IbkrExternalSurfaceGateVerdict", 1)[
+        1
+    ].split(
+        "IbkrExternalSurfaceGateVerdict {",
+        1,
+    )[0]
+
+
 def _session_attestation_default_block(source: str) -> str:
     return source.split("impl Default for IbkrSessionAttestationV1", 1)[1].split(
         "impl IbkrSessionAttestationV1",
@@ -278,6 +287,33 @@ def test_ibkr_phase2_gate_source_keeps_default_blocked_and_pass_fixture_posture(
         "..Self::default()",
     ):
         assert required in fixture
+
+
+def test_ibkr_phase2_gate_source_keeps_external_gate_exact_blocker_order() -> None:
+    validate = _external_gate_validate_block(_source())
+    ordered_blockers = (
+        "ContractIdMismatch",
+        "SourceVersionMismatch",
+        "StatusNotPass",
+        "AdrMismatch",
+        "AmdMismatch",
+        "ApiBaselineMismatch",
+        "HostPolicyNotLoopbackOnly",
+        "PortPolicyNotPaperGatewayOnly",
+        "LivePortsNotDenied",
+        "SecretContractMissing",
+        "LiveSecretPresentOrUnknown",
+        "ApiAllowlistMissing",
+        "RedactionSuiteMissing",
+        "RateLimitPolicyMissing",
+        "AuditEventPolicyMissing",
+        "PaperAttestationContractMissing",
+        "PythonNoWriteGuardMissing",
+        "IbkrCallAlreadyPerformed",
+    )
+
+    positions = [validate.index(f"Blocker::{blocker}") for blocker in ordered_blockers]
+    assert positions == sorted(positions)
 
 
 def test_ibkr_phase2_gate_source_keeps_session_attestation_matrix() -> None:
