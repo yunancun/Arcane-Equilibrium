@@ -7613,3 +7613,51 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不啟動 reconciliation writer、不做 broker session、不做 broker routing、不做 DB/evidence writer、不做
 scorecard writer、不做 paper order route、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何
 Bybit behavior change。
+
+## 182. 2026-07-01 PM session source checkpoint：Stock/ETF Scorecard Derivation Authority Lineage Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_scorecard_derivation` 的 artifact identity、ids、hash lineage、
+atomic/replay/paper-shadow separation、seal 與 no-side-effect boundary coverage。這不是 Rust production
+behavior change、不是 IBKR contact、不是 connector runtime、不是 broker fill import execution、不是
+shadow fill generation、不是 reconciliation writer、不是 scorecard writer、不是 DB/evidence writer、不是
+secret lookup、不是 paper order route、不是 tiny-live/live gate；只把 scorecard derivation artifact 的
+sealed source-only lineage 與 no-runtime/no-writer/no-Bybit posture 變成 exact-blocker acceptance test
+與 source-static guard。
+
+已完成：
+
+- 在 `stock_etf_scorecard_derivation_acceptance.rs` 新增
+  `derivation_rejects_each_identity_gap_independently`。
+- Acceptance 證明 contract id missing/mismatch、source version、asset lane、broker、environment gaps
+  都會各自只產生單一對應 blocker。
+- 在同檔新增 `derivation_rejects_each_id_gap_independently`。
+- Acceptance 證明 derivation run、strategy、universe、benchmark、as-of ids 都會各自只產生單一對應 blocker。
+- 在同檔新增 `derivation_rejects_each_hash_lineage_gap_independently`。
+- Acceptance 證明 scorecard input、evidence clock、DQ、paper-shadow reconciliation、formula、preregistration、
+  manifest、verdict、source commit、derivation code、output artifact、QC/MIT/QA review hashes 都會各自只
+  產生單一對應 blocker。
+- 在同檔新增 `derivation_rejects_each_evidence_and_seal_gap_independently`。
+- Acceptance 證明 atomic-facts-only、idempotent replay、paper-shadow fill separation、Bybit-live protection
+  與 sealed posture 都會各自只產生單一對應 blocker。
+- 在同檔新增 `derivation_rejects_each_boundary_flag_independently`。
+- Acceptance 證明 IBKR contact、connector runtime、broker fill import、shadow fill generation、
+  reconciliation writer、scorecard writer、DB apply、evidence clock、secret serialization、live/tiny-live flags
+  都會各自只產生單一對應 blocker。
+- 在 `test_stock_etf_scorecard_derivation_source_static.py` 新增 default / accepted fixture block parser，
+  鎖住 default fail-closed posture 與 accepted fixture 不可硬編 crypto/Bybit/live/shadow/empty-lineage/
+  unsealed/runtime/secret/writer posture。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Scorecard derivation source static pytest：`7 passed`。
+- Scorecard derivation Rust acceptance：`11 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 broker fill import、不生成 shadow
+fill、不啟動 reconciliation writer、不啟動 scorecard writer、不做 broker session、不做 broker routing、
+不做 DB/evidence writer、不啟動 evidence clock、不做 paper order route、不做 Linux runtime sync/restart、
+不授權 tiny-live/live 或任何 Bybit behavior change。

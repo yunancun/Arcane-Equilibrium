@@ -4751,3 +4751,36 @@ Verification 已過：
 沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 fill import execution、沒有 shadow
 fill generation、沒有 reconciliation writer、沒有 DB/evidence writer、沒有 scorecard writer、沒有 broker
 session、沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Scorecard Derivation Authority Lineage Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Scorecard Derivation Authority Lineage Cross-Wire Guard`。
+
+這個 checkpoint 補強 `StockEtfScorecardDerivationV1` 的 artifact identity、ids、hash lineage、
+atomic/replay/paper-shadow separation、seal 與 no-side-effect boundary coverage。新增 Rust acceptance
+證明 contract/source/lane/broker/environment、derivation/strategy/universe/benchmark/as-of ids、scorecard
+input/evidence-clock/DQ/reconciliation/formula/preregistration/manifest/verdict/source/code/output/review
+hashes 都會 fail closed。
+
+Evidence posture 也逐一驗證：atomic-facts-only、idempotent replay、paper-shadow fill separation、
+Bybit-live protection、sealed posture 各自缺失時只產生對應 blocker。Runtime 邊界 flags 也逐一驗證：
+contact/runtime/broker-fill-import/shadow-fill/reconciliation-writer/scorecard-writer/DB/evidence-clock/
+secret/live flags 都會 fail closed。Python source-static parser 鎖住 `Default` / `accepted_fixture` block，
+避免 accepted fixture 被硬編成 crypto、Bybit、live、shadow、empty-lineage、unsealed、runtime、secret 或
+writer posture。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Scorecard derivation source static pytest：`7 passed`
+- Scorecard derivation Rust acceptance：`11 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 broker fill import execution、沒有
+shadow fill generation、沒有 reconciliation writer、沒有 scorecard writer、沒有 DB/evidence writer、沒有
+evidence clock start、沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo
+execution 行為。
