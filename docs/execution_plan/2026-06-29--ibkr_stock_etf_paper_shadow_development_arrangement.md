@@ -6490,3 +6490,49 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 fill import、不做 scorecard
 derivation、不啟動 scorecard writer、不做 DB/evidence writer、不做 paper order route、不做 Linux
 runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 155. 2026-07-01 PM session source checkpoint：Stock/ETF Scorecard Derivation Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_scorecard_derivation` 的 atomic-facts-only / idempotent replay /
+paper-shadow separation / Bybit unchanged / writer-runtime authority cross-wire coverage。這不是 Rust
+production behavior change、不是 IBKR contact、不是 connector runtime、不是 secret access、不是
+scorecard derivation execution、不是 reconciliation writer、不是 scorecard writer、不是
+DB/evidence writer、不是 tiny-live/live gate；只把 scorecard derivation artifact 的 source-only、
+idempotent、sealed posture 變成行為型 regression test 與 source-static guard。
+
+已完成：
+
+- 在 `stock_etf_scorecard_derivation_acceptance.rs` 新增
+  `derivation_rejects_atomic_replay_separation_and_writer_cross_wire_independently`。
+- Acceptance 證明 `derived_from_atomic_facts_only=false` 只產生
+  `NotDerivedFromAtomicFactsOnly`，不誤報 replay、paper-shadow separation、Bybit unchanged 或 writer
+  blocker。
+- Acceptance 證明 `idempotent_replay_proven=false` 只產生
+  `IdempotentReplayNotProven`，不誤報 atomic-facts、paper-shadow separation、Bybit unchanged 或 writer
+  blocker。
+- Acceptance 證明 `paper_and_shadow_fills_separate=false` 只產生
+  `PaperShadowFillSeparationMissing`，不誤報 atomic-facts、replay、Bybit unchanged 或 writer blocker。
+- Acceptance 證明 `bybit_live_execution_unchanged=false` 只產生
+  `BybitLiveExecutionNotProtected`，不誤報 atomic-facts、replay、paper-shadow separation 或 writer
+  blocker。
+- Acceptance 證明 IBKR contact / connector runtime / broker fill import / shadow fill /
+  reconciliation writer / scorecard writer / DB apply / evidence clock / secret serialization /
+  tiny-live/live authority 污染必須產生各自 blocker，且不誤報 derivation evidence posture blockers。
+- 在 `test_stock_etf_scorecard_derivation_source_static.py` 新增 fixture cross-wire guard，禁止
+  IBKR contact、connector runtime、broker fill import、shadow fill、reconciliation writer、
+  scorecard writer、DB apply、evidence clock、secret serialization、tiny-live/live authority 被
+  hardcoded 成 true，並鎖住 default fail-closed posture。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Scorecard derivation source static pytest：`7 passed`。
+- Scorecard derivation Rust acceptance：`6 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 scorecard derivation、不啟動
+reconciliation writer、不啟動 scorecard writer、不做 DB/evidence writer、不做 paper order route、
+不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
