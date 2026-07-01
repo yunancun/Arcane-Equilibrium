@@ -5222,3 +5222,39 @@ connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result
 collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
 cancel/replace、不做 migration、不啟動 evidence writer/clock、不新增 GUI fanout、不授權
 tiny-live/live 或任何 Bybit behavior change。
+
+## 120. 2026-07-01 PM session source checkpoint：Stock/ETF Asset-Lane Audit Events Source Static Guard
+
+本 checkpoint 為 `stock_etf_audit_events.rs` 補上 source-only structure guard。這不是
+audit writer、不是 DB apply、不是 IBKR contact、不是 connector runtime、不是 evidence
+clock、不是 order route；只把 asset-lane immutable event reference contract 的 source
+invariant 機器化。
+
+已完成：
+
+- 新增 `tests/structure/test_stock_etf_audit_events_source_static.py`。
+- Guard 鎖住 `stock_etf_audit_events.rs` 低於 800 行 governance cap。
+- Guard 要求 exact `audit.asset_lane_events_v1` contract id、event kind 列表、event field
+  surface、verdict/blocker surface 保持在 source 中。
+- Guard 要求 default event fail-closed：`source_version=0`、`Unknown` event kind、sequence
+  missing、StockEtfCash/IBKR/ReadOnly、`allowed=false`、no secret serialization、no raw payload
+  inline。
+- Guard 要求 accepted genesis/chained fixtures 保留 hash linkage、IBKR external-surface source、
+  scorecard input reference、readonly/derived permission scopes。
+- Guard 要求 validation matrix 保留 schema/source-version、event id/kind/sequence、genesis
+  previous-hash、non-genesis hash、actor/source、lane/broker/live denial、account/session/source
+  hashes、allowed/denied denial-reason rules、input hashes、secret/raw-payload denials。
+- Guard 禁止 env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens
+  與 secret material access tokens。
+
+驗證：
+
+- New structure guard py_compile：PASS。
+- Focused structure guard pytest：`6 passed`。
+- Focused asset-lane audit events acceptance：`9 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不送 paper order、不做 cancel/replace、不匯入 fill、
+不做 audit writer、不做 DB apply、不啟動 evidence writer/clock、不授權 tiny-live/live 或任何
+Bybit behavior change。
