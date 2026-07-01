@@ -3806,6 +3806,36 @@ Verification 已過：
 沒有 result import、沒有 DB/evidence writer、沒有 paper order route、沒有 tiny-live/live authorization，
 也沒有改動 Bybit live/demo execution 行為。
 
+## 2026-07-01 Operator Update — Stock/ETF Paper Fill Import Request Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Paper Fill Import Request Cross-Wire Guard`。
+
+這個 checkpoint 補強 `stock_etf_paper_fill_import_request` 的 IPC method / BrokerOperation /
+AuthorityScope cross-wire coverage。新增 Rust acceptance 證明 `EvaluateShadowSignal` method
+混入 fill-import request 時會被 `RequestMethodMismatch` 擋下；`ImportPaperFills` 搭配
+`PaperOrderSubmit` operation 會被 `OperationMismatch` 擋下；paper-submit method / operation /
+`PaperRehearsal` scope / `effect_capable=true` 污染會同時產生 method、operation、scope、effect
+blockers；shadow-signal method / operation / scope 污染會產生 method、operation、scope blockers
+且不誤報 effect blocker。
+
+同時新增 Python source-static cross-wire guard，禁止 paper order、shadow signal、readonly probe、
+Bybit-denied method 以及 paper/live/shadow operation 混入 fill-import source。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Paper fill import request source static pytest：`7 passed`
+- Paper fill import request Rust acceptance：`7 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 fill import execution、
+沒有 result import、沒有 DB/evidence writer、沒有 paper order route、沒有 tiny-live/live authorization，
+也沒有改動 Bybit live/demo execution 行為。
+
 ## 2026-07-01 Operator Update — Stock/ETF Shadow Signal Request Cross-Wire Guard
 
 本 session 已完成下一個 test-only/source-static checkpoint：

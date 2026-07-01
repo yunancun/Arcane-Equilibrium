@@ -6374,3 +6374,42 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 shadow signal、不生成
 shadow fill、不做 result import、不做 DB/evidence writer、不做 paper order route、不做 Linux
 runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 152. 2026-07-01 PM session source checkpoint：Stock/ETF Paper Fill Import Request Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_paper_fill_import_request` 的 IPC method / BrokerOperation /
+AuthorityScope cross-wire coverage。這不是 Rust production behavior change、不是 IBKR contact、
+不是 connector runtime、不是 secret access、不是 fill import execution、不是 DB/evidence writer、
+不是 paper order route；只把 paper fill import request envelope 的 method / operation / scope gate
+變成行為型 regression test 與 source-static guard。
+
+已完成：
+
+- 在 `stock_etf_paper_fill_import_request_acceptance.rs` 新增
+  `fill_import_request_rejects_method_operation_and_scope_cross_wire`。
+- Acceptance 證明 fill-import request 若混入 `EvaluateShadowSignal` IPC method 但 operation 仍為
+  `PaperOrderFillImport`，必須只產生 `RequestMethodMismatch`。
+- Acceptance 證明 `ImportPaperFills` 若搭配 `PaperOrderSubmit` operation，必須只產生
+  `OperationMismatch`。
+- Acceptance 證明 request envelope 若混入 paper-submit method、paper-submit operation、
+  `PaperRehearsal` scope 與 `effect_capable=true`，必須同時產生 method / operation / scope /
+  effect blockers。
+- Acceptance 證明 shadow-signal method / operation / scope 污染必須產生 method / operation /
+  scope blockers，但不可誤報 effect blocker。
+- 在 `test_stock_etf_paper_fill_import_request_source_static.py` 新增 source-static cross-wire guard，
+  禁止 paper order、shadow signal、readonly probe、Bybit-denied method 以及 paper/live/shadow
+  operation 混入 fill-import source。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Paper fill import request source static pytest：`7 passed`。
+- Paper fill import request Rust acceptance：`7 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 fill import、不做
+result import、不做 DB/evidence writer、不做 paper order route、不做 Linux runtime sync/restart、
+不授權 tiny-live/live 或任何 Bybit behavior change。

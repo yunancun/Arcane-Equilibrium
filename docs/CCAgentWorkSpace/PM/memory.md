@@ -3629,3 +3629,11 @@
 - Source-static guard now rejects paper order, fill import, readonly probe, Bybit-denied method, paper operation, and live operation pollution in the shadow signal source.
 - Verification passed: targeted rustfmt check PASS; shadow signal source static `7 passed`; shadow signal Rust acceptance `6 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
 - Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, shadow signal execution, shadow fill generation, result import, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Paper Fill Import Request Cross-Wire Guard
+
+- PM added test-only/source-static coverage for `stock_etf_paper_fill_import_request` IPC method / operation / scope mapping.
+- Acceptance now rejects fill-import request method pollution with `EvaluateShadowSignal`, operation pollution with `PaperOrderSubmit`, paper-submit method/operation/scope/effect pollution, and shadow-signal method/operation/scope pollution via the expected blockers.
+- Source-static guard now rejects paper order, shadow signal, readonly probe, Bybit-denied method, paper operation, live operation, and shadow operation pollution in the fill-import source.
+- Verification passed: targeted rustfmt check PASS; paper fill import source static `7 passed`; paper fill import Rust acceptance `7 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
+- Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, fill import execution, result import, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

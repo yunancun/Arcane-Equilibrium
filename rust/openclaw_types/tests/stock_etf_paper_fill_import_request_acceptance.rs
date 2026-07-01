@@ -102,6 +102,117 @@ fn accepted_fill_import_request_validates_without_side_effects() {
 }
 
 #[test]
+fn fill_import_request_rejects_method_operation_and_scope_cross_wire() {
+    let wrong_method = StockEtfPaperFillImportRequestV1 {
+        request_method: StockEtfLaneScopedIpcMethod::EvaluateShadowSignal,
+        operation: BrokerOperation::PaperOrderFillImport,
+        authority_scope: AuthorityScope::ReadOnly,
+        effect_capable: false,
+        ..StockEtfPaperFillImportRequestV1::accepted_fixture()
+    };
+    let verdict = wrong_method.validate();
+
+    assert!(!verdict.accepted);
+    assert!(has(
+        &verdict,
+        StockEtfPaperFillImportBlocker::RequestMethodMismatch
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfPaperFillImportBlocker::OperationMismatch
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfPaperFillImportBlocker::AuthorityScopeMismatch
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfPaperFillImportBlocker::EffectCapabilityPresent
+    ));
+
+    let wrong_operation = StockEtfPaperFillImportRequestV1 {
+        request_method: StockEtfLaneScopedIpcMethod::ImportPaperFills,
+        operation: BrokerOperation::PaperOrderSubmit,
+        authority_scope: AuthorityScope::ReadOnly,
+        effect_capable: false,
+        ..StockEtfPaperFillImportRequestV1::accepted_fixture()
+    };
+    let verdict = wrong_operation.validate();
+
+    assert!(!verdict.accepted);
+    assert!(has(
+        &verdict,
+        StockEtfPaperFillImportBlocker::OperationMismatch
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfPaperFillImportBlocker::RequestMethodMismatch
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfPaperFillImportBlocker::AuthorityScopeMismatch
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfPaperFillImportBlocker::EffectCapabilityPresent
+    ));
+
+    let paper_write_pollution = StockEtfPaperFillImportRequestV1 {
+        request_method: StockEtfLaneScopedIpcMethod::SubmitPaperOrder,
+        operation: BrokerOperation::PaperOrderSubmit,
+        authority_scope: AuthorityScope::PaperRehearsal,
+        effect_capable: true,
+        ..StockEtfPaperFillImportRequestV1::accepted_fixture()
+    };
+    let verdict = paper_write_pollution.validate();
+
+    assert!(!verdict.accepted);
+    assert!(has(
+        &verdict,
+        StockEtfPaperFillImportBlocker::RequestMethodMismatch
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfPaperFillImportBlocker::OperationMismatch
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfPaperFillImportBlocker::AuthorityScopeMismatch
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfPaperFillImportBlocker::EffectCapabilityPresent
+    ));
+
+    let shadow_signal_pollution = StockEtfPaperFillImportRequestV1 {
+        request_method: StockEtfLaneScopedIpcMethod::EvaluateShadowSignal,
+        operation: BrokerOperation::ShadowSignalEmit,
+        authority_scope: AuthorityScope::ShadowOnly,
+        effect_capable: false,
+        ..StockEtfPaperFillImportRequestV1::accepted_fixture()
+    };
+    let verdict = shadow_signal_pollution.validate();
+
+    assert!(!verdict.accepted);
+    assert!(has(
+        &verdict,
+        StockEtfPaperFillImportBlocker::RequestMethodMismatch
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfPaperFillImportBlocker::OperationMismatch
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfPaperFillImportBlocker::AuthorityScopeMismatch
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfPaperFillImportBlocker::EffectCapabilityPresent
+    ));
+}
+
+#[test]
 fn fill_import_request_requires_lineage_ids_hashes_and_stale_policy() {
     let bad = StockEtfPaperFillImportRequestV1 {
         request_id: String::new(),
