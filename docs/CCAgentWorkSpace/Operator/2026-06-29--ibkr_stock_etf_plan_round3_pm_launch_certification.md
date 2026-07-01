@@ -3094,3 +3094,23 @@ Verification 已過：
 邊界不變：沒有 GUI write surface、沒有 lane selection authority、沒有 IBKR contact、沒有
 secret widget、沒有 order widget、沒有 tiny-live/live authorization，也沒有改動 Bybit live
 execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Read-Only Probe Request Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF Read-Only Probe Request Source Static Guard`。
+
+這個 guard 鎖住 `stock_etf_ibkr_readonly_probe_request.rs` 的 future pre-contact request
+envelope source hygiene：read probe kinds、allowlisted read action/operation mapping、
+StockEtfCash/IBKR/ReadOnly accepted fixture、Phase2 gate/allowlist/secret-slot/topology/session/
+redaction/rate-limit/audit lineage hashes、side-effect denial flags 必須保留。
+
+Verification 已過：
+
+- New structure guard pytest：`8 passed`
+- Focused read-only probe request acceptance：`6 passed`
+- Full `cargo test -p openclaw_types`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 read probe execution、沒有 connector runtime、沒有 secret
+access、沒有 order route、沒有 evidence writer、沒有 DB apply、沒有 tiny-live/live authorization，
+也沒有改動 Bybit live execution 行為。

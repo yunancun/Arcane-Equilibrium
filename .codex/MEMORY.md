@@ -1386,3 +1386,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only structure guard for `stock_etf_gui_lane_contract.rs`, pinning the display-only GUI lane contract boundary.
 - The guard requires exact GET-only endpoint constants, fail-closed defaults, display-only accepted fixture, client-lane-state untrusted posture, localStorage/query/hidden-field authority denial, no post/order/secret widgets, route/auth/cache partitions, crypto/Decision Lease regression hashes, denial operations, and no runtime/secret/order/Bybit client tokens.
 - Verification passed: new guard `6 passed`; GUI lane contract acceptance `9 passed`; full `cargo test -p openclaw_types` PASS. This grants no GUI write surface, lane selection authority, IBKR contact, secret widget, order widget, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Read-Only Probe Request Source Static Guard
+
+- PM added a source-only structure guard for `stock_etf_ibkr_readonly_probe_request.rs`, pinning the future pre-contact read-only probe request envelope.
+- The guard requires read probe kinds, allowlisted read action/operation mappings, StockEtfCash/IBKR/ReadOnly accepted fixture, Phase2 gate/allowlist/secret-slot/topology/session/redaction/rate-limit/audit lineage hashes, no contact/runtime/secret/order/DB/evidence-clock/Bybit/live/account-write/entitlement/client-portal/Python-write flags, and no runtime/secret/order/Bybit client tokens.
+- Verification passed: new guard `8 passed`; read-only probe request acceptance `6 passed`; full `cargo test -p openclaw_types` PASS. This grants no IBKR contact, read probe execution, connector runtime, secret access, order route, evidence writer, DB apply, tiny-live/live, or Bybit behavior change.

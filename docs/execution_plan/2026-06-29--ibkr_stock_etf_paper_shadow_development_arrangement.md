@@ -5364,3 +5364,40 @@ PM 邊界不變：此 checkpoint 不新增 GUI write surface，不新增 POST ro
 state，不授權 localStorage/query/hidden-field，不建立 order/secret widget，不呼叫 IBKR，不導入
 IBKR SDK，不讀/建 secret，不啟動 connector runtime，不送 paper order，不授權 tiny-live/live 或
 任何 Bybit behavior change。
+
+## 124. 2026-07-01 PM session source checkpoint：Stock/ETF Read-Only Probe Request Source Static Guard
+
+本 checkpoint 為 `stock_etf_ibkr_readonly_probe_request.rs` 補上 source-only structure guard。
+這不是 IBKR contact、不是 read probe execution、不是 connector runtime、不是 secret access、
+不是 order route、不是 evidence writer；只把 future first-contact 前的 readonly probe request
+envelope source invariant 機器化。
+
+已完成：
+
+- 新增 `tests/structure/test_stock_etf_ibkr_readonly_probe_request_source_static.py`。
+- Guard 鎖住 `stock_etf_ibkr_readonly_probe_request.rs` 低於 800 行 governance cap。
+- Guard 要求 exact `stock_etf_ibkr_readonly_probe_request_v1` contract id、read probe kind 列表、
+  request fields、verdict/blocker surface、helper surface 保持在 source 中。
+- Guard 要求 default request fail-closed：CryptoPerp/Bybit/LiveReservedDenied、Client Portal API、
+  transfer/account-write operation、Denied authority、empty lineage hashes、all side-effect flags false。
+- Guard 要求 accepted fixture 保留 StockEtfCash/IBKR/ReadOnly、ConnectionHealthRead、HealthRead、
+  ReadOnly authority、effect=false、request/probe ids、Phase2 gate、non-Bybit allowlist、secret-slot、
+  API topology、session attestation、redaction/rate-limit/audit policy hashes。
+- Guard 要求 probe kind 到 NonBybitApiAction/BrokerOperation mapping 保持完整，並要求 API action
+  必須 classify 為 read-allowed/external-gate-required/no paper-order gates。
+- Guard 要求 boundary flags 保留 no IBKR contact、no connector runtime、no secret serialization、
+  no order/paper order、no DB apply、no evidence clock、no Bybit path reuse、no live/tiny-live、no
+  margin/short/options/CFD/account-write/entitlement/client-portal/Python broker write。
+- Guard 禁止 env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens
+  與 secret material access tokens。
+
+驗證：
+
+- New structure guard py_compile：PASS。
+- Focused structure guard pytest：`8 passed`。
+- Focused read-only probe request acceptance：`6 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector
+runtime、不執行 read probe、不送 order、不提交 paper order、不做 DB apply、不啟動 evidence
+writer/clock、不授權 tiny-live/live 或任何 Bybit behavior change。

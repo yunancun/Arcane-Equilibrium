@@ -162,6 +162,7 @@ def test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles() -> None
         "Stock/ETF DB Evidence DDL Source Static Guard",
         "Stock/ETF Disable Cleanup Runbook Source Static Guard",
         "Stock/ETF GUI Lane Contract Source Static Guard",
+        "Stock/ETF Read-Only Probe Request Source Static Guard",
     )
     plan_source = IBKR_STOCK_ETF_PLAN.read_text()
     operator_source = IBKR_STOCK_ETF_OPERATOR.read_text()
