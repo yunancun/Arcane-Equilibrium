@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-01 No-Order Refresh READY Invalidated By Source Drift
+
+- PM rotated from `1028a35f...` to `e19700b2...` after source drift, then produced a clean source-stability READY artifact sha `93d3f264...` bound to `P0-CURRENT-CANDIDATE-NOORDER-REFRESH-CURRENT-HEAD-E3-BB-REQUEST`.
+- Final pre-request fetch found source had advanced to `272f8c529...`, so no E3/BB request was generated and the e197 READY artifact is non-consumable. State transition is `BLOCKED_BY_RUNTIME`; final state sha `625dcb16...`.
+- Boundary unchanged: no Control API GET, public quote, envelope rebuild, plan write, lease, private/order endpoint, PG/service/env/risk mutation, Cost Gate change, live/mainnet, order/fill/PnL/proof. Next run starts from `272f8c529...` or newer and still needs a reviewed one-GET fast-balance refresh path because v711 equity is stale under 900s.
+
 ## 2026-07-01 No-Order Refresh Request Source Drift
 
 - PM generated current-head no-order refresh request sha `c007a2f...` after source-stability READY sha `2a1b5a...`; BB approved with conditions, but E3 blocked because source drifted, then source advanced again to `15ce7bc...`.
@@ -3785,3 +3791,11 @@
 - Source-static guard now rejects hardcoded crypto/Bybit lane, missing instrument identity/as-of/calendar, Bybit changed, IBKR live not denied, margin/short/options/CFD not denied, IBKR contact, and secret serialization in the accepted fixture, and pins default fail-closed posture.
 - Verification passed: targeted rustfmt check PASS; instrument identity source static `8 passed`; instrument identity Rust acceptance `9 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
 - Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, market-data subscription, scorecard writer, DB/evidence writer, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Non-Bybit API Allowlist Acceptance Cross-Wire Guard
+
+- PM added test-only/source-static coverage for `NonBybitApiAllowlistV1` action bucket, denial, contact, secret, and Bybit-protection posture.
+- Acceptance now covers default fail-closed state, accepted required-action matrix, read/session/paper-write/denied classification semantics, missing/duplicate/wrong bucket actions, and exact single blockers for denial/contact/secret/Bybit cross-wire regressions.
+- Source-static guard now rejects empty action buckets, false denial booleans, IBKR contact, secret serialization, and Bybit protection loss in the accepted fixture, and pins default fail-closed posture.
+- Verification passed: targeted rustfmt check PASS; non-Bybit allowlist source static `6 passed`; non-Bybit allowlist Rust acceptance `4 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
+- Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, SDK import, connector runtime, secret access, Client Portal Web API enablement, broker routing, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
