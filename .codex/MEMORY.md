@@ -1513,3 +1513,9 @@ Do not paste long reports or stable architecture into TODO.
 
 - PM added Rust acceptance coverage in `stock_etf_paper_order_request_acceptance.rs` for method surface mismatch blockers, effect-capable submit authorization/lifecycle/audit hash gates, and preview effect/cancel/replace pollution blockers.
 - Verification passed: targeted Rust acceptance `11 passed`; targeted rustfmt PASS; dynamic docs trace `2 passed, 5 deselected` with 131 parsed titles and no missing Operator trace; full `cargo fmt -p openclaw_types -- --check` still has pre-existing `rust/openclaw_types/src/risk.rs` formatting drift outside this checkpoint; diff check PASS. This grants no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, DB/evidence writer, paper order/cancel/replace route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Openclaw Types Format Gate Hygiene
+
+- PM cleared the pre-existing `rust/openclaw_types/src/risk.rs` formatting drift that had blocked `cargo fmt -p openclaw_types -- --check` during recent Stock/ETF Rust checkpoints.
+- Change is mechanical rustfmt only: one `return Err(...)` expression and two test vector literals.
+- Verification passed: `cargo fmt -p openclaw_types -- --check` PASS; `cargo test -p openclaw_types risk --lib` `13 passed`; full `cargo test -p openclaw_types` PASS; dynamic docs trace `2 passed, 5 deselected` with 132 parsed titles and no missing Operator trace; diff check PASS. This grants no trading logic change, risk semantics change, endpoint/IPC change, IBKR contact, connector runtime, secret access, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
