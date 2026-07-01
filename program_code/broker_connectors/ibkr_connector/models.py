@@ -6,6 +6,8 @@ from dataclasses import asdict, dataclass, field
 
 
 IBKR_CONNECTOR_SURFACE_ID = "ibkr_stock_etf_readonly_connector_skeleton_v1"
+IBKR_PAPER_ATTESTATION_CONTRACT_ID = "ibkr_paper_attestation_v1"
+IBKR_SESSION_ATTESTATION_CONTRACT_ID = "ibkr_session_attestation_v1"
 
 
 @dataclass(frozen=True)
@@ -85,6 +87,74 @@ class IbkrReadOnlySurfaceStatus:
         return payload
 
 
+@dataclass(frozen=True)
+class IbkrSessionAttestationPreview:
+    """Secret-free placeholder for the future broker session attestation."""
+
+    expected_contract_id: str = IBKR_SESSION_ATTESTATION_CONTRACT_ID
+    contract_id: str = ""
+    source_version: int = 0
+    status: str = "BLOCKED"
+    attestation_accepted: bool = False
+    blockers: tuple[str, ...] = field(
+        default_factory=lambda: (
+            "phase2_gate_not_accepted",
+            "session_attestation_blocked_source_only",
+        )
+    )
+    environment: str = "read_only"
+    account_fingerprint_present: bool = False
+    account_fingerprint_is_live: bool = False
+    secret_slot_fingerprint_present: bool = False
+    api_server_version_present: bool = False
+    raw_artifact_hash_present: bool = False
+    network_contact_performed: bool = False
+    secret_content_loaded: bool = False
+    bybit_path_reused: bool = False
+
+    def to_dict(self) -> dict[str, object]:
+        payload = asdict(self)
+        payload["blockers"] = list(self.blockers)
+        return payload
+
+
+@dataclass(frozen=True)
+class IbkrPaperAttestationPreview:
+    """Secret-free placeholder for future paper account/channel attestation."""
+
+    expected_contract_id: str = IBKR_PAPER_ATTESTATION_CONTRACT_ID
+    contract_id: str = ""
+    source_version: int = 0
+    accepted: bool = False
+    blockers: tuple[str, ...] = field(
+        default_factory=lambda: (
+            "phase2_gate_not_accepted",
+            "paper_attestation_blocked_source_only",
+            "paper_session_attestation_missing",
+        )
+    )
+    environment: str = "paper"
+    paper_account_attestation_present: bool = False
+    session_attestation_present: bool = False
+    paper_order_channel_attested: bool = False
+    account_fingerprint_present: bool = False
+    secret_slot_fingerprint_present: bool = False
+    network_contact_performed: bool = False
+    secret_content_loaded: bool = False
+    paper_channel_exposed: bool = False
+    live_channel_exposed: bool = False
+    bybit_path_reused: bool = False
+
+    def to_dict(self) -> dict[str, object]:
+        payload = asdict(self)
+        payload["blockers"] = list(self.blockers)
+        return payload
+
+
+def _dedupe_blockers(blockers: list[str]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(blockers))
+
+
 def blocked_readonly_status(
     *extra_blockers: str,
     config: IbkrReadOnlyEndpointConfig | None = None,
@@ -92,4 +162,33 @@ def blocked_readonly_status(
     blockers = ["phase2_gate_not_accepted", *extra_blockers]
     if config is not None:
         blockers.extend(config.validate_source_boundary())
-    return IbkrReadOnlySurfaceStatus(blockers=tuple(dict.fromkeys(blockers)))
+    return IbkrReadOnlySurfaceStatus(blockers=_dedupe_blockers(blockers))
+
+
+def blocked_session_attestation_preview(
+    *extra_blockers: str,
+    config: IbkrReadOnlyEndpointConfig | None = None,
+) -> IbkrSessionAttestationPreview:
+    blockers = [
+        "phase2_gate_not_accepted",
+        "session_attestation_blocked_source_only",
+        *extra_blockers,
+    ]
+    if config is not None:
+        blockers.extend(config.validate_source_boundary())
+    return IbkrSessionAttestationPreview(blockers=_dedupe_blockers(blockers))
+
+
+def blocked_paper_attestation_preview(
+    *extra_blockers: str,
+    config: IbkrReadOnlyEndpointConfig | None = None,
+) -> IbkrPaperAttestationPreview:
+    blockers = [
+        "phase2_gate_not_accepted",
+        "paper_attestation_blocked_source_only",
+        "paper_session_attestation_missing",
+        *extra_blockers,
+    ]
+    if config is not None:
+        blockers.extend(config.validate_source_boundary())
+    return IbkrPaperAttestationPreview(blockers=_dedupe_blockers(blockers))

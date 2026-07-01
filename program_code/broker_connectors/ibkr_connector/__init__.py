@@ -7,16 +7,24 @@ in Rust gates before any future read-only or paper capability can be enabled.
 
 from .models import (
     IBKR_CONNECTOR_SURFACE_ID,
+    IBKR_PAPER_ATTESTATION_CONTRACT_ID,
+    IBKR_SESSION_ATTESTATION_CONTRACT_ID,
+    IbkrPaperAttestationPreview,
     IbkrReadOnlyEndpointConfig,
     IbkrReadOnlySurfaceStatus,
+    IbkrSessionAttestationPreview,
 )
 from .paper_client import IbkrPaperClientBoundary
 from .readonly_client import IbkrReadOnlyClient
 
 __all__ = [
     "IBKR_CONNECTOR_SURFACE_ID",
+    "IBKR_PAPER_ATTESTATION_CONTRACT_ID",
+    "IBKR_SESSION_ATTESTATION_CONTRACT_ID",
+    "IbkrPaperAttestationPreview",
     "IbkrPaperClientBoundary",
     "IbkrReadOnlyClient",
     "IbkrReadOnlyEndpointConfig",
     "IbkrReadOnlySurfaceStatus",
+    "IbkrSessionAttestationPreview",
 ]

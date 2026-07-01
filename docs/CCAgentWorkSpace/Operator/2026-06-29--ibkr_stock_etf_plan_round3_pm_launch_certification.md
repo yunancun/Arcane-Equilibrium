@@ -1409,6 +1409,36 @@ runtime、沒有 read probe execution、沒有 collector start、沒有 market-d
 writer、沒有 evidence clock、沒有 scorecard writer、沒有 Linux runtime sync/restart、
 沒有 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
 
+## 2026-07-01 Operator Update — Connector Attestation Preview Guard
+
+本 session 已完成一個 source-only connector checkpoint：Connector Attestation
+Preview Guard。
+
+這次只是在 inert IBKR connector skeleton 補上 blocked session attestation 與
+paper attestation preview payload。它不是 IBKR contact、不是 read probe、不是 paper
+account/channel attestation runtime，也沒有新增 FastAPI endpoint 或 IPC method。
+
+結果：
+
+- `IbkrReadOnlyClient` 現在有 `session_attestation_preview()`。
+- `IbkrPaperClientBoundary` 現在有 `paper_attestation_preview()`。
+- Preview payload 都固定 secret-free、no network、no Bybit path、accepted false。
+- Static fixtures 與 connector public surface freeze tests 已同步。
+
+Verification 已過：
+
+- Python changed files `py_compile` PASS
+- Connector skeleton focused test：`8 passed`
+- Full Stock/ETF FastAPI/static pytest：`120 passed`
+- Docs trace：`2 passed`
+- `git diff --check` PASS
+
+邊界不變：沒有 IBKR contact、SDK import、socket/HTTP、secret access/creation、
+connector runtime、read probe execution、collector start、market-data ingestion、
+DQ writer、paper order/cancel/replace、fill import、DB/evidence writer、evidence clock、
+scorecard writer、Linux runtime sync/restart、tiny-live/live authority，也沒有改動
+Bybit live execution 行為。
+
 ## 2026-07-01 Operator Update — Phase3 Evidence Module Split Guard
 
 本 session 已完成一個 source-only maintainability checkpoint：

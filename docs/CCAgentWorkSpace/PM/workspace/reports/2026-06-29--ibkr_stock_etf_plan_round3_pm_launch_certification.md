@@ -1090,6 +1090,40 @@ runtime、read probe execution、collector start、market-data ingestion、DQ wr
 paper order/cancel/replace、fill import、DB apply、evidence writer、evidence clock、
 scorecard writer、tiny-live、live、Linux runtime sync/restart 或 Bybit behavior change。
 
+## 2026-07-01 PM Session Checkpoint — Connector Attestation Preview Guard
+
+PM 已在本 session 追加 source-only connector checkpoint：Connector Attestation
+Preview Guard。這是 inert Python connector skeleton payload hardening，不是
+IBKR runtime approval、session attestation runtime 或 paper channel approval。
+
+已完成：
+
+- 新增 `IbkrSessionAttestationPreview` / `IbkrPaperAttestationPreview` typed
+  blocked preview payloads。
+- `IbkrReadOnlyClient.session_attestation_preview()` 與
+  `IbkrPaperClientBoundary.paper_attestation_preview()` 回傳 secret-free blocked
+  dict，固定 no network / no secret / no Bybit path。
+- Static fixtures 與 connector public surface freeze tests 同步更新。
+
+Verification：
+
+- Python changed files `py_compile` PASS。
+- Connector skeleton focused test：`8 passed`。
+- Full Stock/ETF FastAPI/static pytest：`120 passed`。
+- Docs trace：`2 passed`。
+- `git diff --check` PASS。
+
+Dispatch 記錄：本 turn 因工具層 spawn policy 未允許 sub-agent dispatch，PM 本地完成
+narrow source hardening / review / regression。Full Stock/ETF regression、docs trace
+與 diff hygiene 已完成。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 2 runtime approval、IBKR contact
+approval、secret access approval、paper-order approval 或 launch approval。未批准
+IBKR SDK import、socket/HTTP、secret、connector runtime、read probe execution、
+collector start、market-data ingestion、DQ writer、paper order/cancel/replace、
+fill import、DB apply、evidence writer、evidence clock、scorecard writer、tiny-live、
+live、Linux runtime sync/restart 或 Bybit behavior change。
+
 ## 2026-07-01 PM Session Checkpoint — Phase3 Evidence Module Split Guard
 
 PM 已在本 session 追加 source-only maintainability checkpoint：

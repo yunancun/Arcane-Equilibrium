@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from .models import IbkrReadOnlyEndpointConfig, blocked_readonly_status
+from .models import (
+    IbkrReadOnlyEndpointConfig,
+    blocked_paper_attestation_preview,
+    blocked_readonly_status,
+)
 
 
 class IbkrPaperClientBoundary:
@@ -46,3 +50,7 @@ class IbkrPaperClientBoundary:
             }
         )
         return payload
+
+    def paper_attestation_preview(self) -> dict[str, object]:
+        status = blocked_paper_attestation_preview(config=self._config)
+        return status.to_dict()

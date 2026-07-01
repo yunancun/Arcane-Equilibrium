@@ -8,6 +8,7 @@ Allowed in this package now:
 - typed blocked readiness payloads
 - non-secret loopback endpoint descriptors
 - display-only account, market-data, contract-detail, lifecycle, and fill-import previews
+- display-only session and paper attestation previews
 - static fixtures for tests
 
 Denied in this package now:
