@@ -7,6 +7,7 @@ MAX_LINES = 800
 
 REQUIRED_TYPE_TOKENS = {
     "STOCK_ETF_DB_EVIDENCE_DDL_SOURCE_PATH",
+    "docs/execution_plan/specs/2026-06-29--stock_etf_db_evidence_ddl_v1.source_only.sql",
     "stock_etf_db_evidence_ddl_v1.source_only.sql",
     "STOCK_ETF_DB_EVIDENCE_CONTRACT_ID",
     '"stock_etf_db_evidence_ddl_v1"',

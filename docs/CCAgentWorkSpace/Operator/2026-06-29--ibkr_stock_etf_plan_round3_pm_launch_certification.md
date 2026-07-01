@@ -3460,3 +3460,36 @@ Verification 已過：
 邊界不變：沒有 connector behavior change、沒有 endpoint change、沒有 IBKR contact、沒有
 connector runtime、沒有 secret access、沒有 paper order route、沒有 tiny-live/live authorization，
 也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Phase0 Spec Artifact Coverage Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF Phase0 Spec Artifact Coverage Static Guard`。
+
+這個 guard 把 Phase0 source artifacts 的入口完整性機器化。它掃描
+`docs/execution_plan/specs` 中所有 `stock_etf` / `ibkr` artifacts，並要求目前 scope 精確等於：
+`2026-06-29--stock_etf_cash_phase0_named_contract_packet.manifest.json`、
+`2026-06-29--stock_etf_cash_phase0_named_contract_packet.md`、
+`2026-06-29--stock_etf_db_evidence_ddl_v1.source_only.sql`。新增或改名 artifact 後，如果沒有
+同步測試與 launch trace，guard 會 fail。
+
+Guard 同時要求三個 artifact 都被 structure / Rust acceptance / Stock-ETF control-api tests
+直接引用，且主開發安排與本 Operator 摘要都列出它們。Manifest JSON 仍必須保持
+`stock_etf_cash` / `ibkr` / `paper_shadow_only`、loopback-only IB Gateway、paper port 4002、
+no prior IBKR call、global denials 與 phase unlock fail-closed；contract packet 必須保留
+no-runtime-authority denial list；DB evidence SQL 必須保持 SOURCE-ONLY，且不得複製到
+`sql/migrations`。
+
+Verification 已過：
+
+- New structure guard pytest：`6 passed`
+- Focused Phase0/source-static pytest subset：`31 passed`
+- Rust Phase0 manifest acceptance：`6 passed`
+- Rust release packet acceptance：`8 passed`
+- Rust DB evidence DDL acceptance：`10 passed`
+- Docs PM trace tests：PASS
+- Diff check：PASS
+
+邊界不變：沒有 IBKR contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有
+read-only probe execution、沒有 result import、沒有 evidence/scorecard writer、沒有 DB apply、
+沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
