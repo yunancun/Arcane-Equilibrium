@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -11,10 +12,30 @@ from fastapi.testclient import TestClient
 from stock_etf_route_fixtures import (
     _make_client_with_ipc,
     _valid_universe_status,
+    client_fail_closed,
     route_module,
     stock_etf_router,
-    client_fail_closed,
 )
+
+EXPECTED_UNIVERSE_CONTRACT_VIOLATIONS = [
+    "ibkr_call_performed",
+    "secret_slot_touched",
+    "order_routed",
+    "bybit_ipc_reused",
+    "asset_lane_mismatch",
+    "broker_mismatch",
+    "environment_mismatch",
+    "phase3_started",
+    "collector_started",
+    "market_data_ingestion_started",
+    "db_apply_performed",
+    "universe_expected_contract_id_mismatch",
+    "universe_ibkr_contact_performed",
+    "universe_secret_content_serialized",
+    "universe_bybit_live_not_protected",
+    "universe_ibkr_live_not_denied",
+]
+
 
 def test_stock_etf_universe_status_returns_200_when_ipc_down(
     client_fail_closed: TestClient,
@@ -152,24 +173,7 @@ def test_stock_etf_universe_status_blocks_contract_violation() -> None:
 
     assert data["universe_status_state"] == "contract_violation_blocked"
     assert data["degraded"] is True
-    assert {
-        "ibkr_call_performed",
-        "secret_slot_touched",
-        "order_routed",
-        "bybit_ipc_reused",
-        "asset_lane_mismatch",
-        "broker_mismatch",
-        "environment_mismatch",
-        "phase3_started",
-        "collector_started",
-        "market_data_ingestion_started",
-        "db_apply_performed",
-        "universe_expected_contract_id_mismatch",
-        "universe_ibkr_contact_performed",
-        "universe_secret_content_serialized",
-        "universe_bybit_live_not_protected",
-        "universe_ibkr_live_not_denied",
-    }.issubset(set(data["contract_violations"]))
+    assert data["contract_violations"] == EXPECTED_UNIVERSE_CONTRACT_VIOLATIONS
     assert data["asset_lane"] == "stock_etf_cash"
     assert data["broker"] == "ibkr"
     assert data["environment"] == "paper"
@@ -194,3 +198,19 @@ def test_stock_etf_universe_status_requires_auth() -> None:
     resp = client.get("/api/v1/stock-etf/universe-status")
 
     assert resp.status_code == 401
+
+
+def test_stock_etf_universe_contract_violation_assertions_stay_exact() -> None:
+    source = Path(__file__).read_text(encoding="utf-8")
+    source_under_test = source.split(
+        "def test_stock_etf_universe_contract_violation_assertions_stay_exact",
+        1,
+    )[0]
+    forbidden_patterns = [
+        'set(data["contract_violations"])',
+        'in data["contract_violations"]',
+        'issubset(set(data["contract_violations"]))',
+    ]
+
+    for pattern in forbidden_patterns:
+        assert pattern not in source_under_test
