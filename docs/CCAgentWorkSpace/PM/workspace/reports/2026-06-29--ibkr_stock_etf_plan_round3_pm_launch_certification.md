@@ -566,6 +566,50 @@ approval、lifecycle writer approval、DB persistence approval 或 paper-order a
 fill import、DB apply、Postgres dry-run、paper order/cancel/replace、evidence clock、
 scorecard writer、tiny-live、live、Linux runtime sync/restart 或 Bybit behavior change。
 
+## 2026-07-01 PM Session Checkpoint — Scorecard Input Result-Import Lineage Guard
+
+PM 已將 readonly probe result-import request lineage 納入 scorecard input bundle 與
+scorecard status display surface。這不是 IBKR contact approval、read-only probe
+approval、result import approval、evidence writer approval、scorecard writer approval
+或 launch approval。
+
+已完成：
+
+- Rust scorecard input bundle contract 新增 result-import request contract id/hash
+  欄位，並以 blocker 要求 exact
+  `stock_etf_ibkr_readonly_probe_result_import_request_v1` 與 64-hex hash。
+- Blocked TOML template 保持 blocked/no-hash；accepted fixture 才能攜帶完整
+  result-import request lineage。
+- Rust IPC scorecard status source fixture 新增 default-blocked
+  `scorecard_input_bundle` 摘要，避免 status 面只顯示 derivation/verdict。
+- FastAPI normalizer 與 GUI scorecard renderer 已同步 fail-closed 顯示，並拒絕
+  accepted/hash-present/runtime side-effect claims。
+- Python route/static tests、Rust input acceptance test 與 Rust IPC scorecard fixture
+  test 已鎖住此 lineage。
+
+Verification：
+
+- Python changed files `py_compile` PASS。
+- Stock/ETF JS syntax PASS。
+- Scoped Rust rustfmt PASS。
+- Focused Rust scorecard input acceptance PASS。
+- Focused engine scorecard IPC fixture PASS。
+- Focused FastAPI scorecard/static pytest PASS。
+- Full Stock/ETF FastAPI/static pytest PASS。
+- Docs trace guard PASS。
+
+Dispatch 記錄：本 turn 因工具層 spawn policy 未允許 sub-agent dispatch，PM 本地完成
+narrow scorecard input lineage propagation / review / regression。此 checkpoint 為
+source/display hardening。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 2/3 runtime approval、IBKR contact
+approval、read-only probe approval、result import approval、evidence writer approval、
+scorecard writer approval 或 launch approval。未批准 IBKR SDK import、socket/HTTP、
+secret、connector runtime、read probe execution、collector start、market-data
+ingestion、DQ writer、paper order/cancel/replace、fill import、DB apply、evidence
+writer、evidence clock、scorecard writer、tiny-live、live、Linux runtime sync/restart
+或 Bybit behavior change。
+
 ## 2026-06-30 PM Session Checkpoint — Paper Lifecycle State Machine
 
 PM 已在本 session 追加 Phase 1D source-only checkpoint：

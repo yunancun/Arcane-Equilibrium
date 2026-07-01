@@ -350,6 +350,10 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     assert "shadow_fill_generated" in source
     assert "paper_shadow_reconciliation_hash_present" in source
     assert "stock_etf_scorecard_derivation_v1" in source
+    assert "scorecard_input_bundle" in source
+    assert "input_bundle.readonly_probe_result_import_request_contract_id" in source
+    assert "input_bundle.readonly_probe_result_import_request_hash_present" in source
+    assert "input_bundle.atomic_fact_input_hash_present" in source
     assert "scorecard_derivation" in source
     assert "se-scorecard-status" in source
     assert "se-scorecard-body" in source

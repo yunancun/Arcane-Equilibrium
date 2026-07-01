@@ -3,6 +3,8 @@
 # derive scorecards, apply migrations, contact IBKR, or start an evidence clock.
 
 market_data_provenance_contract_hash = ""
+readonly_probe_result_import_request_contract_id = ""
+readonly_probe_result_import_request_hash = ""
 reference_data_sources_contract_hash = ""
 risk_policy_contract_hash = ""
 atomic_fact_input_hash = ""

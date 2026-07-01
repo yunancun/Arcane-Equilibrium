@@ -45,10 +45,12 @@
 
   function renderScorecardStatus(data) {
     const status = data || scorecardFallback('api_unavailable');
+    const inputBundle = status.scorecard_input_bundle || {};
     const derivation = status.scorecard_derivation || {};
     const scorecard = status.scorecard || {};
     const state = status.scorecard_status_state || 'blocked';
     const scorecardBlockers = []
+      .concat(inputBundle.blockers || [])
       .concat(derivation.blockers || [])
       .concat(scorecard.blockers || [])
       .concat(status.phase2_gate_blockers || [])
@@ -60,6 +62,26 @@
     document.getElementById('se-scorecard-body').innerHTML = [
       kvRow('phase', textChip(status.phase || '-')),
       kvRow('phase3_started', boolChip(status.phase3_started, true)),
+      kvRow('input_bundle.accepted', boolChip(inputBundle.accepted, false)),
+      kvRow('input_bundle.readonly_probe_result_import_request_contract_id', textChip(inputBundle.readonly_probe_result_import_request_contract_id || '-')),
+      kvRow('input_bundle.readonly_probe_result_import_request_hash_present', boolChip(inputBundle.readonly_probe_result_import_request_hash_present, false)),
+      kvRow('input_bundle.market_data_provenance_contract_hash_present', boolChip(inputBundle.market_data_provenance_contract_hash_present, false)),
+      kvRow('input_bundle.reference_data_sources_contract_hash_present', boolChip(inputBundle.reference_data_sources_contract_hash_present, false)),
+      kvRow('input_bundle.risk_policy_contract_hash_present', boolChip(inputBundle.risk_policy_contract_hash_present, false)),
+      kvRow('input_bundle.atomic_fact_input_hash_present', boolChip(inputBundle.atomic_fact_input_hash_present, false)),
+      kvRow('input_bundle.source_commit_present', boolChip(inputBundle.source_commit_present, false)),
+      kvRow('input_bundle.scorecard_is_derived_only', boolChip(inputBundle.scorecard_is_derived_only, false)),
+      kvRow('input_bundle.paper_and_shadow_fills_separate', boolChip(inputBundle.paper_and_shadow_fills_separate, false)),
+      kvRow('input_bundle.live_fill_claimed', boolChip(inputBundle.live_fill_claimed, true)),
+      kvRow('input_bundle.bybit_live_execution_unchanged', boolChip(inputBundle.bybit_live_execution_unchanged, false)),
+      kvRow('input_bundle.ibkr_contact_performed', boolChip(inputBundle.ibkr_contact_performed, true)),
+      kvRow('input_bundle.connector_runtime_started', boolChip(inputBundle.connector_runtime_started, true)),
+      kvRow('input_bundle.broker_fill_import_performed', boolChip(inputBundle.broker_fill_import_performed, true)),
+      kvRow('input_bundle.scorecard_writer_started', boolChip(inputBundle.scorecard_writer_started, true)),
+      kvRow('input_bundle.db_apply_performed', boolChip(inputBundle.db_apply_performed, true)),
+      kvRow('input_bundle.evidence_clock_started', boolChip(inputBundle.evidence_clock_started, true)),
+      kvRow('input_bundle.secret_content_serialized', boolChip(inputBundle.secret_content_serialized, true)),
+      kvRow('input_bundle.live_or_tiny_live_authorized', boolChip(inputBundle.live_or_tiny_live_authorized, true)),
       kvRow('derivation.accepted', boolChip(derivation.accepted, false)),
       kvRow('derivation.contract_id', textChip(derivation.contract_id || '-')),
       kvRow('derivation.expected_contract_id', textChip(derivation.expected_contract_id || '-')),

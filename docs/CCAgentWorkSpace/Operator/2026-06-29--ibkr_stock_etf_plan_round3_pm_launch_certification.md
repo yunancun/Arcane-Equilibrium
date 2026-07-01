@@ -656,6 +656,39 @@ Verification 已過：
 clock、沒有 scorecard writer、沒有 Linux runtime sync/restart，沒有 tiny-live/live
 authority，也沒有改動 Bybit live execution 行為。
 
+## 2026-07-01 Operator Update — Scorecard Input Result-Import Lineage Guard
+
+本 session 已把 readonly probe result-import request lineage 接入
+Stock/ETF scorecard input 與 scorecard status display surface：
+
+- `StockEtfScorecardInputBundleV1` 現在要求
+  `stock_etf_ibkr_readonly_probe_result_import_request_v1` contract id 與 64-hex
+  result-import request hash。
+- Scorecard input blocked template 仍不帶 hash、不導入 broker result、不啟動
+  writer；accepted fixture 才能帶完整 lineage。
+- Rust IPC `stock_etf.get_scorecard_status` 現在顯示 default-blocked
+  `scorecard_input_bundle` 摘要，只輸出 hash-present boolean。
+- FastAPI scorecard status normalizer/GUI 會 fail-closed 顯示 input bundle lineage，
+  並拒絕 accepted/hash-present/writer/DB/IBKR/Bybit reuse side-effect claims。
+
+Verification 已過：
+
+- Python changed files `py_compile`：PASS
+- Stock/ETF JS syntax：PASS
+- Scoped Rust rustfmt：PASS
+- Focused Rust scorecard input acceptance：PASS
+- Focused engine scorecard IPC fixture：PASS
+- Focused FastAPI scorecard/static pytest：PASS
+- Full Stock/ETF FastAPI/static pytest：PASS
+- Docs trace guard：PASS
+
+邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 GUI fanout、沒有 IBKR
+contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation、沒有
+connector runtime、沒有 read probe execution、沒有 result import、沒有 collector、
+沒有 market-data ingestion、沒有 DQ writer、沒有 evidence writer、沒有 DB apply、
+沒有 evidence clock、沒有 scorecard writer、沒有 paper order/cancel/replace、沒有
+tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
 ## 2026-06-30 Operator Update — IBKR Read-Only Connector Skeleton Boundary
 
 本 session 已完成下一個 source-only checkpoint：

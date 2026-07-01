@@ -162,10 +162,35 @@ pub(super) fn reconciliation_status_summary(phase2: serde_json::Value) -> serde_
 }
 
 pub(super) fn scorecard_status_summary(phase2: serde_json::Value) -> serde_json::Value {
+    let input_bundle = StockEtfScorecardInputBundleV1::default();
+    let input_bundle_verdict = input_bundle.validate();
     let derivation = StockEtfScorecardDerivationV1::default();
     let derivation_verdict = derivation.validate();
     let verdict = StockEtfScorecardVerdictV1::default();
     let scorecard_verdict = verdict.validate();
+    let scorecard_input_bundle = serde_json::json!({
+        "accepted": input_bundle_verdict.accepted,
+        "blockers": input_bundle_verdict.blockers,
+        "readonly_probe_result_import_request_contract_id": &input_bundle.readonly_probe_result_import_request_contract_id,
+        "readonly_probe_result_import_request_hash_present": !input_bundle.readonly_probe_result_import_request_hash.is_empty(),
+        "market_data_provenance_contract_hash_present": !input_bundle.market_data_provenance_contract_hash.is_empty(),
+        "reference_data_sources_contract_hash_present": !input_bundle.reference_data_sources_contract_hash.is_empty(),
+        "risk_policy_contract_hash_present": !input_bundle.risk_policy_contract_hash.is_empty(),
+        "atomic_fact_input_hash_present": !input_bundle.atomic_fact_input_hash.is_empty(),
+        "source_commit_present": !input_bundle.source_commit.is_empty(),
+        "scorecard_is_derived_only": input_bundle.scorecard_is_derived_only,
+        "paper_and_shadow_fills_separate": input_bundle.paper_and_shadow_fills_separate,
+        "live_fill_claimed": input_bundle.live_fill_claimed,
+        "bybit_live_execution_unchanged": input_bundle.bybit_live_execution_unchanged,
+        "ibkr_contact_performed": input_bundle.ibkr_contact_performed,
+        "connector_runtime_started": input_bundle.connector_runtime_started,
+        "broker_fill_import_performed": input_bundle.broker_fill_import_performed,
+        "scorecard_writer_started": input_bundle.scorecard_writer_started,
+        "db_apply_performed": input_bundle.db_apply_performed,
+        "evidence_clock_started": input_bundle.evidence_clock_started,
+        "secret_content_serialized": input_bundle.secret_content_serialized,
+        "live_or_tiny_live_authorized": input_bundle.live_or_tiny_live_authorized,
+    });
     let derivation = serde_json::json!({
         "expected_contract_id": STOCK_ETF_SCORECARD_DERIVATION_CONTRACT_ID,
         "contract_id": &derivation.contract_id,
@@ -350,6 +375,7 @@ pub(super) fn scorecard_status_summary(phase2: serde_json::Value) -> serde_json:
         "db_apply_performed": false,
         "evidence_clock_started": false,
         "paper_shadow_window_complete": false,
+        "scorecard_input_bundle": scorecard_input_bundle,
         "scorecard_derivation": derivation,
         "scorecard": scorecard,
         "phase2": phase2,

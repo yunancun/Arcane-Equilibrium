@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::ibkr_phase2_artifact::is_sha256_hex;
+use crate::stock_etf_ibkr_readonly_probe_result_import_request::STOCK_ETF_IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID;
 use crate::stock_etf_lane::{AssetLane, Broker, BrokerEnvironment};
 
 pub const BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID: &str =
@@ -536,6 +537,8 @@ pub struct StockEtfScorecardInputBundleV1 {
     pub benchmark: StockEtfBenchmarkVersionV1,
     pub shadow_fill_model: StockShadowFillModelV1,
     pub storage_capacity: StockEtfStorageCapacityV1,
+    pub readonly_probe_result_import_request_contract_id: String,
+    pub readonly_probe_result_import_request_hash: String,
     pub market_data_provenance_contract_hash: String,
     pub reference_data_sources_contract_hash: String,
     pub risk_policy_contract_hash: String,
@@ -563,6 +566,8 @@ impl Default for StockEtfScorecardInputBundleV1 {
             benchmark: StockEtfBenchmarkVersionV1::default(),
             shadow_fill_model: StockShadowFillModelV1::default(),
             storage_capacity: StockEtfStorageCapacityV1::default(),
+            readonly_probe_result_import_request_contract_id: String::new(),
+            readonly_probe_result_import_request_hash: String::new(),
             market_data_provenance_contract_hash: String::new(),
             reference_data_sources_contract_hash: String::new(),
             risk_policy_contract_hash: String::new(),
@@ -592,6 +597,9 @@ impl StockEtfScorecardInputBundleV1 {
             benchmark: StockEtfBenchmarkVersionV1::accepted_fixture(),
             shadow_fill_model: StockShadowFillModelV1::accepted_fill_fixture(),
             storage_capacity: StockEtfStorageCapacityV1::accepted_fixture(),
+            readonly_probe_result_import_request_contract_id:
+                STOCK_ETF_IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID.to_string(),
+            readonly_probe_result_import_request_hash: "b".repeat(64),
             market_data_provenance_contract_hash: "8".repeat(64),
             reference_data_sources_contract_hash: "9".repeat(64),
             risk_policy_contract_hash: "a".repeat(64),
@@ -629,6 +637,14 @@ impl StockEtfScorecardInputBundleV1 {
         }
         if !self.storage_capacity.validate().accepted {
             blockers.push(Blocker::StorageCapacityRejected);
+        }
+        if self.readonly_probe_result_import_request_contract_id
+            != STOCK_ETF_IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID
+        {
+            blockers.push(Blocker::ReadonlyProbeResultImportRequestContractIdMismatch);
+        }
+        if !is_sha256_hex(&self.readonly_probe_result_import_request_hash) {
+            blockers.push(Blocker::ReadonlyProbeResultImportRequestHashInvalid);
         }
         if !is_sha256_hex(&self.market_data_provenance_contract_hash) {
             blockers.push(Blocker::MarketDataProvenanceContractHashInvalid);
@@ -762,6 +778,8 @@ pub enum StockEtfScorecardInputBlocker {
     BenchmarkRejected,
     ShadowFillModelRejected,
     StorageCapacityRejected,
+    ReadonlyProbeResultImportRequestContractIdMismatch,
+    ReadonlyProbeResultImportRequestHashInvalid,
     MarketDataProvenanceContractHashInvalid,
     ReferenceDataSourcesContractHashInvalid,
     RiskPolicyContractHashInvalid,

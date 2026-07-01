@@ -3432,3 +3432,11 @@
 - The connector package export freeze, read-only client public surface freeze, payload shape guard, no-Bybit-import guard, and Python no-write static guard now cover the new preview.
 - Verification passed: Python compile, connector skeleton focused `8 passed`, Python no-write static guard `21 passed`, and full Stock/ETF FastAPI/static `120 passed`.
 - Boundary unchanged: no endpoint, IPC method, FastAPI production import, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe, result import, DB/evidence/scorecard writer, paper order/cancel/replace, tiny-live/live, Linux runtime, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF Scorecard Input Result-Import Lineage Guard
+
+- PM hardened `StockEtfScorecardInputBundleV1` so future scorecard input bundles must carry `stock_etf_ibkr_readonly_probe_result_import_request_v1` contract id and a 64-hex result-import request hash.
+- Rust IPC `stock_etf.get_scorecard_status` now exposes a default-blocked `scorecard_input_bundle` summary, including result-import lineage hash-present flags and side-effect flags.
+- FastAPI scorecard status normalization and GUI scorecard rendering now fail closed around the input bundle, rejecting accepted/hash-present/runtime side-effect claims before any scorecard writer.
+- Verification passed: Python compile, JS syntax, scoped Rust format, focused Rust scorecard input acceptance, focused engine scorecard IPC fixture, focused FastAPI scorecard/static pytest, full Stock/ETF FastAPI/static pytest, and docs trace guard.
+- Boundary unchanged: no endpoint, IPC method, GUI fanout, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe, result import, collector, market-data ingestion, DQ writer, paper order/cancel/replace, fill import, DB/evidence/scorecard writer, evidence clock, tiny-live/live, Linux runtime, or Bybit behavior change.
