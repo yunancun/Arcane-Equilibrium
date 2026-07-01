@@ -3650,3 +3650,11 @@
 - Source-static guard now rejects `PaperRehearsal`, `ShadowOnly`, `effect_capable=true`, paper-order scope, and shadow-signal scope pollution in the reconciliation source.
 - Verification passed: targeted rustfmt check PASS; paper-shadow reconciliation source static `8 passed`; paper-shadow reconciliation Rust acceptance `6 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
 - Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, fill import execution, shadow fill generation, reconciliation writer, result import, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Scorecard Input Bundle Cross-Wire Guard
+
+- PM added test-only/source-static coverage for `stock_etf_scorecard_inputs` bundle evidence posture.
+- Acceptance now independently rejects derived-only, paper-shadow separation, live-fill claim, and writer/runtime/tiny-live pollution via the expected blockers.
+- Source-static guard now rejects hardcoded true values for live fill, IBKR contact, connector runtime, broker fill import, scorecard writer, DB apply, evidence clock, secret serialization, and tiny-live/live authority in the bundle source.
+- Verification passed: targeted rustfmt check PASS; scorecard inputs source static `8 passed`; scorecard inputs Rust acceptance `13 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
+- Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, fill import execution, scorecard derivation, scorecard writer, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
