@@ -56,6 +56,15 @@ def test_stock_etf_evidence_status_returns_200_when_ipc_down(
     assert data["dq_manifest"]["evidence_clock_started"] is False
     assert data["evidence_clock"]["status"] == "NOT_STARTED"
     assert data["evidence_clock"]["blockers"] == ["ipc_unavailable"]
+    assert data["evidence_clock"]["collector_run_contract_id"] == ""
+    assert data["evidence_clock"]["collector_run_contract_hash_present"] is False
+    assert data["evidence_clock"]["dq_manifest_contract_id"] == ""
+    assert data["evidence_clock"]["dq_manifest_contract_hash_present"] is False
+    assert data["evidence_clock"]["source_artifact_hash_present"] is False
+    assert (
+        data["evidence_clock"]["market_data_provenance_contract_hash_present"] is False
+    )
+    assert data["evidence_clock"]["scorecard_input_bundle_hash_present"] is False
     assert data["scorecard"]["writer_started"] is False
     assert data["scorecard"]["db_apply_performed"] is False
 
@@ -93,6 +102,15 @@ def test_stock_etf_evidence_status_uses_only_readonly_fixture_method() -> None:
         "stock_etf_evidence_clock_v1"
     )
     assert data["evidence_clock"]["status"] == "NOT_STARTED"
+    assert data["evidence_clock"]["collector_run_contract_id"] == ""
+    assert data["evidence_clock"]["collector_run_contract_hash_present"] is False
+    assert data["evidence_clock"]["dq_manifest_contract_id"] == ""
+    assert data["evidence_clock"]["dq_manifest_contract_hash_present"] is False
+    assert data["evidence_clock"]["source_artifact_hash_present"] is False
+    assert (
+        data["evidence_clock"]["market_data_provenance_contract_hash_present"] is False
+    )
+    assert data["evidence_clock"]["scorecard_input_bundle_hash_present"] is False
     assert data["frozen_inputs"]["gui_evidence_view_available"] is False
     assert data["dq_manifest"]["passes_day_quality"] is False
     assert data["dq_manifest"]["expected_contract_id"] == "stock_etf_dq_manifest_v1"
@@ -190,6 +208,8 @@ def test_stock_etf_evidence_status_blocks_contract_violation() -> None:
     payload["dq_manifest"]["live_or_tiny_live_authorized"] = True
     payload["evidence_clock"]["checker_contacted_ibkr"] = True
     payload["evidence_clock"]["checker_started_connector_runtime"] = True
+    payload["evidence_clock"]["collector_run_contract_id"] = "stock_etf_collector_run_v2"
+    payload["evidence_clock"]["dq_manifest_contract_id"] = "stock_etf_dq_manifest_v2"
     payload["evidence_clock"]["checker_started_evidence_clock"] = True
     payload["evidence_clock"]["checker_wrote_scorecard"] = True
     payload["evidence_clock"]["checker_applied_db"] = True
@@ -240,6 +260,8 @@ def test_stock_etf_evidence_status_blocks_contract_violation() -> None:
         "dq_manifest_live_or_tiny_live_authorized",
         "evidence_clock_contacted_ibkr",
         "evidence_clock_started_connector_runtime",
+        "evidence_clock_collector_run_contract_id_mismatch",
+        "evidence_clock_dq_manifest_contract_id_mismatch",
         "evidence_clock_started",
         "evidence_clock_wrote_scorecard",
         "evidence_clock_applied_db",

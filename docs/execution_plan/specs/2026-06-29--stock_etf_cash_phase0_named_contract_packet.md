@@ -1261,7 +1261,8 @@ Source validator:
 The validator requires exact `stock_etf_evidence_clock_v1` contract id, source
 version `1`, `stock_etf_cash` / IBKR lane binding, read-only/paper/shadow
 environment, source artifact hash, market-data provenance contract hash,
-scorecard input bundle hash, frozen inputs, DQ manifest shape, Bybit-live
+collector-run contract id/hash, DQ manifest contract id/hash, scorecard input
+bundle hash, frozen inputs, DQ manifest shape, Bybit-live
 unchanged proof, and checker-side denials for IBKR contact, connector runtime,
 runtime evidence-clock start, scorecard writer, DB apply, serialized secrets,
 and tiny-live/live authority. `WINDOW_COMPLETE` remains unavailable from the

@@ -1380,6 +1380,30 @@ connector runtime、沒有 read probe execution、沒有 paper order/cancel/repl
 import、沒有 evidence writer、沒有 DB apply、沒有 evidence clock、沒有 tiny-live/live
 authority，也沒有改動 Bybit live execution 行為。
 
+## 2026-07-01 Operator Update — Evidence Clock Lineage Guard
+
+本 session 已完成下一個 source-only checkpoint：Evidence Clock Lineage Guard。
+
+這次把 `stock_etf_evidence_clock_v1` checker 補成必須引用 collector run 與 DQ
+manifest 的 contract id/hash lineage。你會在 existing Evidence Status panel 看到
+evidence-clock 的 collector/DQ/source/provenance/scorecard input hash presence。
+
+Verification 已過：
+
+- Python changed files `py_compile` PASS
+- Stock/ETF evidence/fallback JS `node --check` PASS
+- Scoped Rust `rustfmt --edition 2021 --check` PASS
+- Phase3 evidence acceptance：`19 passed`
+- Phase0 manifest acceptance：`6 passed`
+- Focused evidence-status pytest：`4 passed`
+
+邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 GUI fanout 增加、沒有 IBKR
+contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation、沒有 connector
+runtime、沒有 read probe execution、沒有 collector start、沒有 market-data ingestion、
+沒有 DQ writer、沒有 paper order/cancel/replace、沒有 fill import、沒有 DB/evidence
+writer、沒有 evidence clock、沒有 scorecard writer、沒有 Linux runtime sync/restart、
+沒有 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
 ## 2026-07-01 Operator Update — DQ Manifest Contract
 
 本 session 已新增 `stock_etf_dq_manifest_v1`，把未來 Phase 3 daily DQ manifest

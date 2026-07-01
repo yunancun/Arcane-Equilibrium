@@ -686,6 +686,10 @@ pub struct StockEtfEvidenceClockDayV1 {
     pub asset_lane: AssetLane,
     pub broker: Broker,
     pub environment: BrokerEnvironment,
+    pub collector_run_contract_id: String,
+    pub collector_run_contract_hash: String,
+    pub dq_manifest_contract_id: String,
+    pub dq_manifest_contract_hash: String,
     pub source_artifact_hash: String,
     pub market_data_provenance_contract_hash: String,
     pub scorecard_input_bundle_hash: String,
@@ -712,6 +716,10 @@ impl Default for StockEtfEvidenceClockDayV1 {
             asset_lane: AssetLane::CryptoPerp,
             broker: Broker::Bybit,
             environment: BrokerEnvironment::LiveReservedDenied,
+            collector_run_contract_id: String::new(),
+            collector_run_contract_hash: String::new(),
+            dq_manifest_contract_id: String::new(),
+            dq_manifest_contract_hash: String::new(),
             source_artifact_hash: String::new(),
             market_data_provenance_contract_hash: String::new(),
             scorecard_input_bundle_hash: String::new(),
@@ -740,6 +748,10 @@ impl StockEtfEvidenceClockDayV1 {
             asset_lane: AssetLane::StockEtfCash,
             broker: Broker::Ibkr,
             environment: BrokerEnvironment::Paper,
+            collector_run_contract_id: STOCK_ETF_COLLECTOR_RUN_CONTRACT_ID.to_string(),
+            collector_run_contract_hash: "9".repeat(64),
+            dq_manifest_contract_id: STOCK_ETF_DQ_MANIFEST_CONTRACT_ID.to_string(),
+            dq_manifest_contract_hash: "4".repeat(64),
             source_artifact_hash: "5".repeat(64),
             market_data_provenance_contract_hash: "6".repeat(64),
             scorecard_input_bundle_hash: "7".repeat(64),
@@ -781,6 +793,18 @@ impl StockEtfEvidenceClockDayV1 {
             BrokerEnvironment::ReadOnly | BrokerEnvironment::Paper | BrokerEnvironment::Shadow
         ) {
             blockers.push(Blocker::EvidenceClockEnvironmentDenied);
+        }
+        if self.collector_run_contract_id != STOCK_ETF_COLLECTOR_RUN_CONTRACT_ID {
+            blockers.push(Blocker::EvidenceClockCollectorRunContractMismatch);
+        }
+        if !is_sha256_hex(&self.collector_run_contract_hash) {
+            blockers.push(Blocker::EvidenceClockCollectorRunHashInvalid);
+        }
+        if self.dq_manifest_contract_id != STOCK_ETF_DQ_MANIFEST_CONTRACT_ID {
+            blockers.push(Blocker::EvidenceClockDqManifestContractMismatch);
+        }
+        if !is_sha256_hex(&self.dq_manifest_contract_hash) {
+            blockers.push(Blocker::EvidenceClockDqManifestHashInvalid);
         }
         if !is_sha256_hex(&self.source_artifact_hash) {
             blockers.push(Blocker::EvidenceClockSourceArtifactHashInvalid);
@@ -940,6 +964,10 @@ pub enum StockEtfPhase3Blocker {
     EvidenceClockWrongAssetLane,
     EvidenceClockWrongBroker,
     EvidenceClockEnvironmentDenied,
+    EvidenceClockCollectorRunContractMismatch,
+    EvidenceClockCollectorRunHashInvalid,
+    EvidenceClockDqManifestContractMismatch,
+    EvidenceClockDqManifestHashInvalid,
     EvidenceClockSourceArtifactHashInvalid,
     EvidenceClockMarketDataProvenanceHashInvalid,
     EvidenceClockScorecardInputHashInvalid,
