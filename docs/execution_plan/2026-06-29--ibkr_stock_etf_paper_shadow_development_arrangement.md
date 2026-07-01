@@ -6910,3 +6910,43 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不啟動 market-data ingestion、不做
 evidence writer、不做 DB/evidence writer、不做 paper order route、不做 Linux runtime sync/restart、
 不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 165. 2026-07-01 PM session source checkpoint：Stock/ETF Phase3 Frozen Inputs Readiness Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_phase3_evidence::market_data` 中
+`StockEtfFrozenEvidenceInputsV1` 的 frozen source hash、corporate-action/FX/fee as-of、
+paper-shadow divergence threshold、GUI evidence view readiness、daily scorecard regeneration readiness
+cross-wire coverage。這不是 Rust production behavior change、不是 IBKR contact、不是 connector
+runtime、不是 market-data ingestion、不是 evidence writer、不是 scorecard writer、不是 DB apply、
+不是 paper order route、不是 tiny-live/live gate；只把 frozen-input artifact 的 source-only、
+readiness-only、no-runtime posture 變成行為型 regression test 與 source-static guard。
+
+已完成：
+
+- 在 `stock_etf_phase3_evidence_acceptance.rs` 新增
+  `frozen_inputs_reject_source_readiness_cross_wire_independently`。
+- Acceptance 證明 `universe_hash`、`benchmark_hash`、`cost_model_hash`、
+  `strategy_hypothesis_hash`、`reference_data_sources_contract_hash`、
+  `paper_shadow_divergence_threshold_hash` 缺失時，都會各自只產生單一對應 hash blocker。
+- Acceptance 證明 `corporate_action_fx_fee_asof_ms=0` 只產生
+  `CorporateActionFxFeeAsOfMissing`。
+- Acceptance 證明 `gui_evidence_view_available=false` 只產生 `GuiEvidenceViewMissing`。
+- Acceptance 證明 `daily_scorecard_regeneration_passed=false` 只產生
+  `ScorecardRegenerationMissing`。
+- 在 `test_stock_etf_phase3_evidence_source_static.py` 新增 frozen-input `source_fixture()` body
+  parser，禁止 missing hash、zero as-of、missing GUI evidence view、missing scorecard regeneration
+  被 hardcoded 到 source fixture，並鎖住 default fail-closed posture。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Phase3 evidence source static pytest：`15 passed`。
+- Phase3 evidence Rust acceptance：`24 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不啟動 market-data ingestion、不做
+evidence writer、不做 scorecard writer、不做 DB/evidence writer、不做 paper order route、不做
+Linux runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
