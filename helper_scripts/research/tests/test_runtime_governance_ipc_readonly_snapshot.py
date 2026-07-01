@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import os
 from pathlib import Path
+from typing import Any
 
 from cost_gate_learning_lane import runtime_governance_ipc_readonly_snapshot as mod
 
@@ -101,6 +102,51 @@ def test_dispatch_ipc_method_preserves_protocol_error_reason() -> None:
     assert entry["ok"] is False
     assert entry["error"] == "ipc_dispatch_exception:EngineProtocolError"
     assert entry["error_reason"] == "response_id_mismatch"
+
+
+def test_dispatch_ipc_method_default_branch_awaits_one_shot_ipc_call(
+    monkeypatch,
+) -> None:
+    from program_code.exchange_connectors.bybit_connector.control_api_v1.app import (
+        ipc_dispatch,
+    )
+
+    seen: dict[str, Any] = {}
+
+    async def fake_one_shot_ipc_call(
+        method: str,
+        *,
+        params: dict[str, Any],
+        timeout: float,
+        wrap_errors_as_http: bool,
+        error_context: str,
+    ) -> dict[str, Any]:
+        seen.update(
+            {
+                "method": method,
+                "params": params,
+                "timeout": timeout,
+                "wrap_errors_as_http": wrap_errors_as_http,
+                "error_context": error_context,
+            }
+        )
+        return {"level": "NORMAL"}
+
+    monkeypatch.setattr(ipc_dispatch, "one_shot_ipc_call", fake_one_shot_ipc_call)
+
+    entry = mod._dispatch_ipc_method(
+        method="governance.get_status",
+        timeout_seconds=5.0,
+    )
+
+    assert entry == {"ok": True, "result": {"level": "NORMAL"}}
+    assert seen == {
+        "method": "governance.get_status",
+        "params": {},
+        "timeout": 5.0,
+        "wrap_errors_as_http": False,
+        "error_context": "runtime_governance_ipc_readonly_snapshot",
+    }
 
 
 def test_cli_sets_ipc_secret_file_env_without_serializing_secret(

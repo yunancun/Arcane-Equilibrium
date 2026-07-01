@@ -142,7 +142,7 @@ def _dispatch_ipc_method(
                     wrap_errors_as_http=False,
                     error_context="runtime_governance_ipc_readonly_snapshot",
                 ),
-                timeout=timeout_seconds + 1.0,
+                timeout_seconds + 1.0,
             )
     except Exception as exc:  # noqa: BLE001
         entry = {"ok": False, "error": f"ipc_dispatch_exception:{type(exc).__name__}"}
