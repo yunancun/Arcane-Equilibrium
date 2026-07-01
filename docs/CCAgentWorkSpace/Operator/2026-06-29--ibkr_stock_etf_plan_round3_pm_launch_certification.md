@@ -3749,3 +3749,31 @@ Verification 已過：
 沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 read-only probe execution、
 沒有 fill import/result import、沒有 DB/evidence writer、沒有 paper order route、
 沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Broker Operation Authority Taxonomy Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Broker Operation Authority Taxonomy Guard`。
+
+這個 checkpoint 補強 `stock_etf_lane` 的 operation authority taxonomy。新增 Rust acceptance 直接鎖住
+`BrokerOperation::{is_read,is_paper_write,is_shadow,authority_scope}` 的分類：read-only operations
+包含 `PaperOrderFillImport` 與 `ScorecardDerive`；paper submit/cancel/replace 保持
+`PaperRehearsal`；shadow emit/reconstruct 保持 `ShadowOnly`；live/margin/options/transfer 類保持
+`Denied`。
+
+同時新增 Python source-static method body parser，直接檢查 `is_read`、`is_paper_write`、
+`is_shadow` 與 `authority_scope` fallback order，防止 fill-import/read-only 與 paper-order/write
+authority 邊界被後續改弱。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Stock/ETF lane source static pytest：`5 passed`
+- Stock/ETF lane Rust acceptance：`10 passed`
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 read-only probe execution、
+沒有 fill import/result import、沒有 DB/evidence writer、沒有 paper order route、
+沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。

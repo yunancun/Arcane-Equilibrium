@@ -3592,3 +3592,11 @@
 - The source-static guard now parses the exact `Op::PaperOrderFillImport => ExpectedCapability` block and rejects PaperRehearsal, scoped authorization, Decision Lease, or Guardian gate pollution.
 - Verification passed: targeted rustfmt check PASS; broker capability source static `6 passed`; broker capability Rust acceptance `11 passed`; dynamic docs trace PASS; diff check PASS.
 - Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, fill/result import, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Broker Operation Authority Taxonomy Guard
+
+- PM added test-only/source-static coverage for `BrokerOperation::{is_read,is_paper_write,is_shadow,authority_scope}` in `stock_etf_lane`.
+- Acceptance now pins read-only operations including `PaperOrderFillImport` and `ScorecardDerive`, paper submit/cancel/replace as `PaperRehearsal`, shadow emit/reconstruct as `ShadowOnly`, and live/margin/options/transfer as `Denied`.
+- Source-static guard now parses the method bodies for `is_read`, `is_paper_write`, `is_shadow`, and checks `authority_scope` fallback order.
+- Verification passed: targeted rustfmt check PASS; lane source static `5 passed`; lane Rust acceptance `10 passed`; dynamic docs trace PASS; diff check PASS.
+- Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, fill/result import, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

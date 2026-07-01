@@ -149,6 +149,16 @@ def _source() -> str:
     return STOCK_ETF_LANE.read_text(encoding="utf-8")
 
 
+def _broker_operation_bool_method_body(source: str, method_name: str) -> str:
+    match = re.search(
+        rf"pub const fn {method_name}\(self\) -> bool \{{(?P<body>.*?)\n    \}}",
+        source,
+        re.DOTALL,
+    )
+    assert match is not None
+    return match.group("body")
+
+
 def test_stock_etf_lane_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
@@ -173,6 +183,41 @@ def test_stock_etf_lane_source_keeps_boundary_taxonomy_matrix() -> None:
     assert "request.operation == Op::MarginOrShort" in source
     assert "request.operation == Op::OptionsOrCfd" in source
     assert "request.operation == Op::TransferOrAccountWrite" in source
+
+
+def test_stock_etf_lane_source_keeps_operation_authority_classification() -> None:
+    source = _source()
+    read_body = _broker_operation_bool_method_body(source, "is_read")
+    paper_write_body = _broker_operation_bool_method_body(source, "is_paper_write")
+    shadow_body = _broker_operation_bool_method_body(source, "is_shadow")
+
+    for operation in (
+        "Self::HealthRead",
+        "Self::AccountSnapshotRead",
+        "Self::MarketDataRead",
+        "Self::ContractDetailsRead",
+        "Self::PaperOrderFillImport",
+        "Self::ScorecardDerive",
+    ):
+        assert operation in read_body
+
+    for operation in (
+        "Self::PaperOrderSubmit",
+        "Self::PaperOrderCancel",
+        "Self::PaperOrderReplace",
+    ):
+        assert operation in paper_write_body
+        assert operation not in read_body
+
+    assert "Self::PaperOrderFillImport" not in paper_write_body
+    assert "Self::ShadowSignalEmit" in shadow_body
+    assert "Self::ShadowFillReconstruct" in shadow_body
+    assert "Self::PaperOrderFillImport" not in shadow_body
+    assert "pub const fn authority_scope(self) -> AuthorityScope" in source
+    assert "if self.is_paper_write() {\n            AuthorityScope::PaperRehearsal" in source
+    assert "} else if self.is_shadow() {\n            AuthorityScope::ShadowOnly" in source
+    assert "} else if self.is_read() {\n            AuthorityScope::ReadOnly" in source
+    assert "} else {\n            AuthorityScope::Denied" in source
 
 
 def test_stock_etf_lane_source_keeps_feature_flag_env_allowlist_scoped() -> None:

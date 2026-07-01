@@ -6231,3 +6231,37 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 read-only probe、不做
 fill import/result import、不做 DB/evidence writer、不做 paper order route、不做 Linux runtime
 sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 148. 2026-07-01 PM session source checkpoint：Stock/ETF Broker Operation Authority Taxonomy Guard
+
+本 checkpoint 補強 `stock_etf_lane` 的 operation authority taxonomy coverage。這不是 Rust production
+behavior change、不是 broker capability semantics change、不是 IBKR contact、不是 connector
+runtime、不是 secret access、不是 DB/evidence writer、不是 paper order route；只把
+`BrokerOperation::{is_read,is_paper_write,is_shadow,authority_scope}` 的分類契約用 acceptance 與
+source-static guard 鎖住。
+
+已完成：
+
+- 在 `stock_etf_lane_acceptance.rs` 新增
+  `broker_operation_authority_taxonomy_keeps_fill_import_readonly_and_orders_separate`。
+- Acceptance 鎖住 `HealthRead`、`AccountSnapshotRead`、`MarketDataRead`、`ContractDetailsRead`、
+  `PaperOrderFillImport`、`ScorecardDerive` 必須維持 `is_read=true` 與 `AuthorityScope::ReadOnly`。
+- Acceptance 鎖住 `PaperOrderSubmit/Cancel/Replace` 必須維持 `is_paper_write=true` 與
+  `AuthorityScope::PaperRehearsal`，且不能混入 read/shadow。
+- Acceptance 鎖住 `ShadowSignalEmit/ShadowFillReconstruct` 必須維持 `AuthorityScope::ShadowOnly`；
+  live/margin/options/transfer 類 operation 必須維持 `AuthorityScope::Denied`。
+- 在 `test_stock_etf_lane_source_static.py` 新增 method body parser，直接檢查
+  `is_read`、`is_paper_write`、`is_shadow` 與 `authority_scope` fallback order。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Stock/ETF lane source static pytest：`5 passed`。
+- Stock/ETF lane Rust acceptance：`10 passed`。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 read-only probe、不做
+fill import/result import、不做 DB/evidence writer、不做 paper order route、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
