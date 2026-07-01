@@ -199,6 +199,122 @@ def test_blocks_on_connector_mode_after_credentials_match(tmp_path: Path) -> Non
     assert packet["answers"]["order_capable_action_allowed_by_this_packet"] is False
 
 
+def test_redacted_secret_derivative_mode_omits_api_key_derived_fields(
+    tmp_path: Path,
+) -> None:
+    packet = _build(
+        tmp_path,
+        redact_secret_derivatives=True,
+        expected_demo_api_key_prefix=EXPECTED_KEY[:9],
+    )
+    api_key = packet["checks"]["demo_api_slot"]["api_key"]
+    text = json.dumps(packet, sort_keys=True)
+
+    assert packet["status"] == mod.READY_STATUS
+    assert api_key["present"] is True
+    assert api_key["nonempty"] is True
+    assert api_key["mode_octal"] is not None
+    assert api_key["masked_value"] is None
+    assert api_key["length"] is None
+    assert api_key["sha256_12"] is None
+    assert api_key["expected_sha256_match"] is None
+    assert api_key["expected_prefix_match"] is None
+    assert api_key["expected_prefix_len"] is None
+    assert api_key["expected_prefix_sha256_12"] is None
+    assert api_key["expected_key_matches_observed"] is None
+    assert api_key["secret_derivatives_redacted"] is True
+    assert api_key["secret_bytes_read"] is False
+    assert packet["checks"]["demo_api_slot"]["api_secret"]["secret_bytes_read"] is False
+    assert packet["answers"]["secret_derivatives_redacted"] is True
+    assert EXPECTED_KEY not in text
+    assert EXPECTED_KEY[:6] not in text
+    assert EXPECTED_KEY[-4:] not in text
+    assert mod._sha256_text(EXPECTED_KEY)[:12] not in text
+    assert mod._sha256_text(EXPECTED_KEY[:9])[:12] not in text
+    assert "demo_api_slot:demo_api_key_expected_value_mismatch" not in packet[
+        "blocking_reasons"
+    ]
+    assert "demo_api_key_expected_value_redacted" in packet["checks"][
+        "demo_api_slot"
+    ]["advisory_reasons"]
+
+
+def test_redacted_secret_derivative_mode_blocks_strict_expected_key_match(
+    tmp_path: Path,
+) -> None:
+    packet = _build(
+        tmp_path,
+        redact_secret_derivatives=True,
+        expected_demo_api_key_prefix=EXPECTED_KEY[:9],
+        require_expected_demo_api_key_match=True,
+    )
+    text = json.dumps(packet, sort_keys=True)
+
+    assert packet["status"] == mod.BLOCKED_BY_CREDENTIALS_STATUS
+    assert "demo_api_slot:demo_api_key_expected_value_redacted" in packet[
+        "blocking_reasons"
+    ]
+    assert packet["checks"]["demo_api_slot"]["api_key"][
+        "expected_key_match_required"
+    ] is True
+    assert packet["checks"]["demo_api_slot"]["api_key"][
+        "expected_key_matches_observed"
+    ] is None
+    assert packet["checks"]["demo_api_slot"]["api_key"]["secret_bytes_read"] is False
+    assert packet["checks"]["demo_api_slot"]["api_secret"][
+        "secret_bytes_read"
+    ] is False
+    assert EXPECTED_KEY not in text
+    assert EXPECTED_KEY[:6] not in text
+    assert EXPECTED_KEY[-4:] not in text
+    assert mod._sha256_text(EXPECTED_KEY)[:12] not in text
+    assert mod._sha256_text(EXPECTED_KEY[:9])[:12] not in text
+
+
+def test_redacted_secret_derivative_mode_blocks_non_regular_secret_files(
+    tmp_path: Path,
+) -> None:
+    paths = _fixture(tmp_path)
+    api_key_path = paths["secrets_dir"] / "demo" / "api_key"
+    api_secret_path = paths["secrets_dir"] / "demo" / "api_secret"
+    api_key_path.unlink()
+    api_secret_path.unlink()
+    api_key_path.mkdir()
+    api_secret_path.mkdir()
+
+    packet = mod.build_bounded_demo_runtime_readiness(
+        secrets_dir=paths["secrets_dir"],
+        connector_env_file=paths["connector_env"],
+        plan_json=paths["plan"],
+        standing_auth_json=paths["auth"],
+        candidate_side_cell_key=SIDE_CELL,
+        engine_environ_file=paths["engine_env"],
+        require_engine_env=True,
+        redact_secret_derivatives=True,
+        now_utc=NOW,
+    )
+    api_key = packet["checks"]["demo_api_slot"]["api_key"]
+    api_secret = packet["checks"]["demo_api_slot"]["api_secret"]
+
+    assert packet["status"] == mod.BLOCKED_BY_CREDENTIALS_STATUS
+    assert api_key["present"] is True
+    assert api_key["regular_file"] is False
+    assert api_key["nonempty"] is False
+    assert api_key["read_error"] == "not_regular_file"
+    assert api_key["secret_bytes_read"] is False
+    assert api_secret["present"] is True
+    assert api_secret["regular_file"] is False
+    assert api_secret["nonempty"] is False
+    assert api_secret["read_error"] == "not_regular_file"
+    assert api_secret["secret_bytes_read"] is False
+    assert "demo_api_slot:demo_api_key_missing_or_empty" in packet[
+        "blocking_reasons"
+    ]
+    assert "demo_api_slot:demo_api_secret_missing_or_empty" in packet[
+        "blocking_reasons"
+    ]
+
+
 def test_ready_still_grants_no_order_or_runtime_authority(tmp_path: Path) -> None:
     packet = _build(tmp_path)
 

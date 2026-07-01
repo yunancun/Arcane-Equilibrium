@@ -233,7 +233,41 @@ def _read_text_secret(path: Path) -> tuple[str | None, str | None]:
         return None, f"read_error:{type(exc).__name__}"
 
 
-def _secret_presence_summary(path: Path) -> dict[str, Any]:
+def _presence_summary_without_reading(path: Path) -> dict[str, Any]:
+    try:
+        stat_result = path.stat()
+    except FileNotFoundError:
+        stat_result = None
+        error = "missing"
+    except OSError as exc:
+        stat_result = None
+        error = f"stat_error:{type(exc).__name__}"
+    else:
+        error = None
+    is_regular_file = (
+        stat.S_ISREG(stat_result.st_mode) if stat_result is not None else False
+    )
+    return {
+        "path": str(path),
+        "present": stat_result is not None,
+        "read_error": "not_regular_file" if stat_result and not is_regular_file else error,
+        "regular_file": is_regular_file,
+        "nonempty": bool(stat_result and is_regular_file and stat_result.st_size),
+        "mode_octal": (
+            oct(stat.S_IMODE(stat_result.st_mode)) if stat_result is not None else None
+        ),
+        "value_omitted": True,
+        "secret_bytes_read": False,
+    }
+
+
+def _secret_presence_summary(
+    path: Path,
+    *,
+    redact_secret_derivatives: bool = False,
+) -> dict[str, Any]:
+    if redact_secret_derivatives:
+        return _presence_summary_without_reading(path)
     value, error = _read_text_secret(path)
     return {
         "path": str(path),
@@ -242,6 +276,7 @@ def _secret_presence_summary(path: Path) -> dict[str, Any]:
         "nonempty": bool(value),
         "mode_octal": _mode_octal(path) if value is not None else None,
         "value_omitted": True,
+        "secret_bytes_read": value is not None,
     }
 
 
@@ -251,13 +286,39 @@ def _api_key_summary(
     expected_sha256: str | None,
     expected_prefix: str | None,
     require_expected_match: bool,
+    redact_secret_derivatives: bool = False,
 ) -> dict[str, Any]:
+    if redact_secret_derivatives:
+        summary = _presence_summary_without_reading(path)
+        return {
+            **summary,
+            "masked_value": None,
+            "length": None,
+            "sha256_12": None,
+            "expected_key_check_provided": bool(
+                _str(expected_sha256) or _str(expected_prefix)
+            ),
+            "expected_sha256_match": None,
+            "expected_prefix_match": None,
+            "expected_prefix_len": None,
+            "expected_prefix_sha256_12": None,
+            "expected_key_matches_observed": None,
+            "expected_key_match_required": require_expected_match,
+            "secret_derivatives_redacted": True,
+        }
+
     value, error = _read_text_secret(path)
-    value_hash = _sha256_text(value) if value else None
+    value_hash = (
+        _sha256_text(value)
+        if value and not redact_secret_derivatives
+        else None
+    )
     expected_sha = _str(expected_sha256).lower() or None
     expected_prefix_text = _str(expected_prefix) or None
     expected_prefix_hash = (
-        _sha256_text(expected_prefix_text)[:12] if expected_prefix_text else None
+        _sha256_text(expected_prefix_text)[:12]
+        if expected_prefix_text and not redact_secret_derivatives
+        else None
     )
     sha_match = (
         value_hash == expected_sha
@@ -266,7 +327,7 @@ def _api_key_summary(
     )
     prefix_match = (
         value.startswith(expected_prefix_text)
-        if value and expected_prefix_text
+        if value and expected_prefix_text and not redact_secret_derivatives
         else None
     )
     expected_match = True
@@ -283,16 +344,26 @@ def _api_key_summary(
         "read_error": error,
         "nonempty": bool(value),
         "mode_octal": _mode_octal(path) if value is not None else None,
-        "masked_value": _mask_api_key(value),
-        "length": len(value) if value else None,
-        "sha256_12": value_hash[:12] if value_hash else None,
+        "masked_value": None if redact_secret_derivatives else _mask_api_key(value),
+        "length": None if redact_secret_derivatives else (len(value) if value else None),
+        "sha256_12": (
+            None
+            if redact_secret_derivatives
+            else (value_hash[:12] if value_hash else None)
+        ),
         "expected_key_check_provided": bool(expected_sha or expected_prefix_text),
         "expected_sha256_match": sha_match,
         "expected_prefix_match": prefix_match,
-        "expected_prefix_len": len(expected_prefix_text) if expected_prefix_text else None,
+        "expected_prefix_len": (
+            None
+            if redact_secret_derivatives
+            else (len(expected_prefix_text) if expected_prefix_text else None)
+        ),
         "expected_prefix_sha256_12": expected_prefix_hash,
         "expected_key_matches_observed": expected_match,
         "expected_key_match_required": require_expected_match,
+        "secret_derivatives_redacted": False,
+        "secret_bytes_read": value is not None,
     }
 
 
@@ -303,6 +374,7 @@ def _demo_slot_check(
     expected_sha256: str | None,
     expected_prefix: str | None,
     require_expected_match: bool,
+    redact_secret_derivatives: bool = False,
 ) -> dict[str, Any]:
     slot_dir = secrets_dir / slot
     api_key = _api_key_summary(
@@ -310,8 +382,12 @@ def _demo_slot_check(
         expected_sha256=expected_sha256,
         expected_prefix=expected_prefix,
         require_expected_match=require_expected_match,
+        redact_secret_derivatives=redact_secret_derivatives,
     )
-    api_secret = _secret_presence_summary(slot_dir / "api_secret")
+    api_secret = _secret_presence_summary(
+        slot_dir / "api_secret",
+        redact_secret_derivatives=redact_secret_derivatives,
+    )
     endpoint_value, endpoint_error = _read_text_secret(slot_dir / "bybit_endpoint")
     endpoint = _str(endpoint_value).lower() or None
     blockers: list[str] = []
@@ -324,8 +400,21 @@ def _demo_slot_check(
     advisory_reasons: list[str] = []
     if api_key["expected_key_matches_observed"] is False:
         advisory_reasons.append("demo_api_key_expected_value_mismatch")
+    if (
+        redact_secret_derivatives
+        and api_key["expected_key_check_provided"]
+        and api_key["expected_key_matches_observed"] is None
+    ):
+        advisory_reasons.append("demo_api_key_expected_value_redacted")
     if api_key["expected_key_matches_observed"] is False and require_expected_match:
         blockers.append("demo_api_key_expected_value_mismatch")
+    if (
+        redact_secret_derivatives
+        and require_expected_match
+        and api_key["expected_key_check_provided"]
+        and api_key["expected_key_matches_observed"] is None
+    ):
+        blockers.append("demo_api_key_expected_value_redacted")
     ready = not blockers
     return {
         "status": "READY" if ready else "BLOCKED",
@@ -615,6 +704,7 @@ def build_bounded_demo_runtime_readiness(
     expected_demo_api_key_sha256: str | None = None,
     expected_demo_api_key_prefix: str | None = None,
     require_expected_demo_api_key_match: bool = False,
+    redact_secret_derivatives: bool = False,
     engine_environ_file: Path | None = None,
     require_engine_env: bool = False,
     now_utc: dt.datetime | None = None,
@@ -651,6 +741,7 @@ def build_bounded_demo_runtime_readiness(
             expected_sha256=expected_demo_api_key_sha256,
             expected_prefix=expected_demo_api_key_prefix,
             require_expected_match=require_expected_demo_api_key_match,
+            redact_secret_derivatives=redact_secret_derivatives,
         ),
         "connector_mode": _connector_mode_check(connector_env_file),
         "plan": plan_check,
@@ -678,6 +769,7 @@ def build_bounded_demo_runtime_readiness(
         "answers": _answers(
             final_window_ready=final_window_ready,
             require_expected_demo_api_key_match=require_expected_demo_api_key_match,
+            redact_secret_derivatives=redact_secret_derivatives,
         ),
         "boundary": BOUNDARY,
     }
@@ -687,11 +779,13 @@ def _answers(
     *,
     final_window_ready: bool,
     require_expected_demo_api_key_match: bool = False,
+    redact_secret_derivatives: bool = False,
 ) -> dict[str, Any]:
     return {
         "bounded_demo_runtime_readiness_inspected": True,
         "bounded_demo_final_window_prerequisites_ready": final_window_ready,
         "expected_demo_api_key_match_required": require_expected_demo_api_key_match,
+        "secret_derivatives_redacted": redact_secret_derivatives,
         "order_capable_action_allowed_by_this_packet": False,
         "decision_lease_acquire_performed": False,
         "runtime_mutation_performed": False,
@@ -762,6 +856,15 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-demo-api-key-sha256")
     parser.add_argument("--expected-demo-api-key-prefix")
     parser.add_argument(
+        "--redact-secret-derivatives",
+        action="store_true",
+        help=(
+            "Do not emit API-key masked values, lengths, hashes, prefix matches, "
+            "or other secret-derived fields. Presence, nonempty, mode, and demo "
+            "endpoint checks remain available."
+        ),
+    )
+    parser.add_argument(
         "--require-expected-demo-api-key-match",
         action="store_true",
         help=(
@@ -789,6 +892,7 @@ def main(argv: list[str] | None = None) -> int:
         expected_demo_api_key_sha256=args.expected_demo_api_key_sha256,
         expected_demo_api_key_prefix=args.expected_demo_api_key_prefix,
         require_expected_demo_api_key_match=args.require_expected_demo_api_key_match,
+        redact_secret_derivatives=args.redact_secret_derivatives,
         engine_environ_file=args.engine_environ_file,
         require_engine_env=args.require_engine_env,
     )
