@@ -1242,3 +1242,9 @@ Do not paste long reports or stable architecture into TODO.
 - Phase0 manifest/JSON now moves from 35 to 36 named contracts, and broker capability `scorecard_derive` now requires readonly probe result import request lineage before scorecard facts can be considered complete.
 - Verification passed: scoped Rust format; result import request acceptance `6 passed`; Phase0 manifest acceptance `6 passed`; broker capability registry acceptance `10 passed`; full `cargo test -p openclaw_types` PASS; full Stock/ETF FastAPI/static pytest `120 passed`; focused docs trace `2 passed`; `git diff --check` PASS.
 - Boundary unchanged: no IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, result import, collector, market-data ingestion, DQ writer, paper order/cancel/replace, fill import, DB/evidence writer, evidence clock, scorecard writer, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF Lane-Scoped IPC Source Static Guard
+
+- PM added a source-only structure guard for `stock_etf_lane_scoped_ipc.rs`, keeping the lane-scoped IPC contract below 800 lines while proving the 20-method matrix, denied sentinels, and lane/auth/Phase2/session/non-Bybit/secret-topology/broker-registry/asset-lane contract tokens remain present.
+- The guard bans env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens in the contract source, preventing source drift into runtime authority.
+- Verification passed: new guard `3 passed`; lane-scoped IPC acceptance `9 passed`; full `cargo test -p openclaw_types` PASS. This grants no IPC runtime, IBKR contact, connector runtime, secret access, read probe, result import, paper order/cancel/replace, fill import, DB/evidence/scorecard writer, tiny-live/live, or Bybit behavior change.
