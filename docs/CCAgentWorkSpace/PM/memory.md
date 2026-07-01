@@ -3966,3 +3966,10 @@
 - Source-static parsing now pins component and bundle validator blocker emit order backing the default exact acceptance vectors.
 - Verification passed: scorecard inputs source static `10 passed`; scorecard inputs Rust acceptance `14 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `337` integration/acceptance + `0` doc-tests; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, broker fill import, scorecard derivation, scorecard writer, DB/evidence writer, evidence clock start, paper order routing, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Audit Events Default Lineage Exact Guard
+
+- PM added test-only/source-static exact-blocker coverage for default `StockEtfAssetLaneEventV1` plus schema/source drift, chained/genesis hash rules, allow/deny reason rules, and raw/secret/live/input-hash regressions.
+- Source-static parsing now pins the audit event validator blocker emit order backing the exact acceptance vectors.
+- Verification passed: audit events source static `7 passed`; audit events Rust acceptance `9 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `337` integration/acceptance + `0` doc-tests; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, audit writer, DB migration/apply, evidence writer, scorecard writer, paper order routing, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

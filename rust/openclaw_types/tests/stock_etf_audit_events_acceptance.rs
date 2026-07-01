@@ -12,27 +12,36 @@ use openclaw_types::{
 
 #[test]
 fn default_asset_lane_event_is_blocked() {
+    use StockEtfAssetLaneEventBlocker as Blocker;
+
     let verdict = StockEtfAssetLaneEventV1::default().validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfAssetLaneEventBlocker::SourceVersionMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfAssetLaneEventBlocker::EventIdMissing));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfAssetLaneEventBlocker::EventKindUnknown));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfAssetLaneEventBlocker::SequenceNumberMissing));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfAssetLaneEventBlocker::DenialReasonMissingOnDeniedEvent));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfAssetLaneEventBlocker::PayloadHashInvalid));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::SourceVersionMismatch,
+            Blocker::EventIdMissing,
+            Blocker::EventKindUnknown,
+            Blocker::SequenceNumberMissing,
+            Blocker::PreviousEventHashInvalid,
+            Blocker::EventTimeMissing,
+            Blocker::ProducerCommitMissing,
+            Blocker::ActorMissing,
+            Blocker::SourceMissing,
+            Blocker::PermissionScopeMissing,
+            Blocker::AccountFingerprintHashInvalid,
+            Blocker::SessionFingerprintHashInvalid,
+            Blocker::DecisionIdMissing,
+            Blocker::OrderIntentIdMissing,
+            Blocker::DenialReasonMissingOnDeniedEvent,
+            Blocker::PayloadHashInvalid,
+            Blocker::RawArtifactHashInvalid,
+            Blocker::RedactedSummaryHashInvalid,
+            Blocker::SourceArtifactHashInvalid,
+            Blocker::InputArtifactHashesMissing,
+        ]
+    );
 }
 
 #[test]
@@ -62,12 +71,13 @@ fn asset_lane_event_requires_exact_schema_and_source_version() {
     let verdict = event.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfAssetLaneEventBlocker::SchemaVersionMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfAssetLaneEventBlocker::SourceVersionMismatch));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            StockEtfAssetLaneEventBlocker::SchemaVersionMismatch,
+            StockEtfAssetLaneEventBlocker::SourceVersionMismatch,
+        ]
+    );
 }
 
 #[test]
@@ -80,9 +90,10 @@ fn chained_asset_lane_event_requires_previous_hash() {
     let verdict = missing_previous.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfAssetLaneEventBlocker::PreviousEventHashInvalid));
+    assert_eq!(
+        verdict.blockers,
+        vec![StockEtfAssetLaneEventBlocker::PreviousEventHashInvalid]
+    );
 }
 
 #[test]
@@ -94,12 +105,13 @@ fn invalid_genesis_sequence_or_previous_hash_is_rejected() {
     let verdict = event.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfAssetLaneEventBlocker::GenesisSequenceInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfAssetLaneEventBlocker::GenesisPreviousHashPresent));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            StockEtfAssetLaneEventBlocker::GenesisSequenceInvalid,
+            StockEtfAssetLaneEventBlocker::GenesisPreviousHashPresent,
+        ]
+    );
 }
 
 #[test]
@@ -108,18 +120,20 @@ fn allowed_and_denied_events_have_opposite_denial_reason_rules() {
     allowed.denial_reason = Some(StockEtfDenialReason::LaneDisabled);
     let allowed_verdict = allowed.validate();
     assert!(!allowed_verdict.accepted);
-    assert!(allowed_verdict
-        .blockers
-        .contains(&StockEtfAssetLaneEventBlocker::DenialReasonPresentOnAllowedEvent));
+    assert_eq!(
+        allowed_verdict.blockers,
+        vec![StockEtfAssetLaneEventBlocker::DenialReasonPresentOnAllowedEvent]
+    );
 
     let mut denied = StockEtfAssetLaneEventV1::accepted_chained_fixture();
     denied.allowed = false;
     denied.denial_reason = None;
     let denied_verdict = denied.validate();
     assert!(!denied_verdict.accepted);
-    assert!(denied_verdict
-        .blockers
-        .contains(&StockEtfAssetLaneEventBlocker::DenialReasonMissingOnDeniedEvent));
+    assert_eq!(
+        denied_verdict.blockers,
+        vec![StockEtfAssetLaneEventBlocker::DenialReasonMissingOnDeniedEvent]
+    );
 }
 
 #[test]
@@ -132,15 +146,14 @@ fn live_secret_or_inline_raw_payload_is_rejected() {
     let verdict = event.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfAssetLaneEventBlocker::LiveEnvironmentDenied));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfAssetLaneEventBlocker::SecretContentSerialized));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfAssetLaneEventBlocker::RawPayloadInlined));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            StockEtfAssetLaneEventBlocker::LiveEnvironmentDenied,
+            StockEtfAssetLaneEventBlocker::SecretContentSerialized,
+            StockEtfAssetLaneEventBlocker::RawPayloadInlined,
+        ]
+    );
 }
 
 #[test]
@@ -152,12 +165,13 @@ fn unknown_event_kind_and_bad_input_hashes_are_rejected() {
     let verdict = event.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfAssetLaneEventBlocker::EventKindUnknown));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfAssetLaneEventBlocker::InputArtifactHashInvalid));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            StockEtfAssetLaneEventBlocker::EventKindUnknown,
+            StockEtfAssetLaneEventBlocker::InputArtifactHashInvalid,
+        ]
+    );
 }
 
 #[test]

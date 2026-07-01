@@ -163,6 +163,13 @@ def _source() -> str:
     return AUDIT_EVENTS.read_text(encoding="utf-8")
 
 
+def _validate_block(source: str) -> str:
+    return source.split(
+        "pub fn validate(&self) -> StockEtfAssetLaneEventVerdict<StockEtfAssetLaneEventBlocker>",
+        1,
+    )[1].split("StockEtfAssetLaneEventVerdict::new(blockers)", 1)[0]
+
+
 def test_stock_etf_audit_events_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
@@ -252,6 +259,45 @@ def test_stock_etf_audit_events_source_keeps_validation_matrix() -> None:
     assert ".any(|hash| !is_sha256_hex(hash))" in source
     assert "self.secret_content_serialized" in source
     assert "self.raw_payload_inlined" in source
+
+
+def test_stock_etf_audit_events_source_keeps_exact_blocker_order() -> None:
+    validate = _validate_block(_source())
+    ordered_blockers = (
+        "SchemaVersionMismatch",
+        "SourceVersionMismatch",
+        "EventIdMissing",
+        "EventKindUnknown",
+        "SequenceNumberMissing",
+        "GenesisSequenceInvalid",
+        "GenesisPreviousHashPresent",
+        "PreviousEventHashInvalid",
+        "EventTimeMissing",
+        "ProducerCommitMissing",
+        "ActorMissing",
+        "SourceMissing",
+        "WrongAssetLane",
+        "WrongBroker",
+        "LiveEnvironmentDenied",
+        "PermissionScopeMissing",
+        "AccountFingerprintHashInvalid",
+        "SessionFingerprintHashInvalid",
+        "DecisionIdMissing",
+        "OrderIntentIdMissing",
+        "DenialReasonPresentOnAllowedEvent",
+        "DenialReasonMissingOnDeniedEvent",
+        "PayloadHashInvalid",
+        "RawArtifactHashInvalid",
+        "RedactedSummaryHashInvalid",
+        "SourceArtifactHashInvalid",
+        "InputArtifactHashesMissing",
+        "InputArtifactHashInvalid",
+        "SecretContentSerialized",
+        "RawPayloadInlined",
+    )
+
+    positions = [validate.index(f"Blocker::{blocker}") for blocker in ordered_blockers]
+    assert positions == sorted(positions)
 
 
 def test_stock_etf_audit_events_source_has_no_runtime_secret_order_or_bybit_client_tokens() -> None:

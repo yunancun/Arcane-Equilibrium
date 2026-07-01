@@ -8155,3 +8155,39 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不做 scorecard derivation、不啟動 scorecard writer、不做 DB/evidence writer、不啟動 evidence clock、
 不執行 paper order routing、不做 broker session、不做 broker routing、不做 Linux runtime sync/restart、
 不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 195. 2026-07-01 PM session source checkpoint：Stock/ETF Audit Events Default Lineage Exact Guard
+
+本 checkpoint 補強 `stock_etf_audit_events` 的 default asset-lane audit event lineage，固定 default
+`StockEtfAssetLaneEventV1`、schema/source drift、chained previous hash、genesis sequence/previous hash、
+allow/deny reason、live/secret/raw-payload、unknown-kind/bad-input-hash cases 的 ordered blocker vectors，
+並用 source-static parser 鎖住 validator blocker emit order。這不是 Rust production behavior change、
+不是 audit writer、不是 DB migration/apply、不是 IPC server start、不是 IBKR contact、不是 connector
+runtime、不是 secret lookup、不是 paper order route enablement、不是 tiny-live/live gate；只把 asset-lane
+audit event source-only append/reference contract 的 fail-closed lineage 變成 exact-blocker acceptance test
+與 source-static guard。
+
+已完成：
+
+- 在 `stock_etf_audit_events_acceptance.rs` 將 default `StockEtfAssetLaneEventV1` 檢查提升為完整順序
+  blocker 向量。
+- 在同檔將 schema/source drift、chained previous hash、genesis sequence/previous hash、allow/deny reason、
+  live/secret/raw-payload、unknown-kind/bad-input-hash cases 固定為 exact blocker vectors。
+- 在 `test_stock_etf_audit_events_source_static.py` 新增 validator blocker ordering parser，鎖住 exact
+  blocker emit order。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Stock/ETF audit events source static pytest：`7 passed`。
+- Stock/ETF audit events Rust acceptance：`9 passed`。
+- Full `cargo test -p openclaw_types`：`35` unit/golden + `337` integration/acceptance + `0` doc-tests。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、
+不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 audit writer、
+不做 DB migration/apply、不做 evidence writer、不啟動 scorecard writer、不執行 paper order routing、
+不做 broker session、不做 broker routing、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何
+Bybit behavior change。
