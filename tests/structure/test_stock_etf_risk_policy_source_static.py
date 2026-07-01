@@ -360,6 +360,115 @@ def test_stock_etf_risk_policy_source_keeps_caps_universe_cost_and_order_gates()
     assert "if !policy.broker_reconciliation_required" in source
 
 
+def test_stock_etf_risk_policy_source_keeps_blocker_emit_order() -> None:
+    source = _source()
+    validate_body = source.split("pub fn validate(&self)", 1)[1].split(
+        "StockEtfRiskPolicyVerdict::new",
+        1,
+    )[0]
+    caps_body = source.split("fn validate_caps(", 1)[1].split(
+        "fn validate_cash_only_controls(",
+        1,
+    )[0]
+    cash_body = source.split("fn validate_cash_only_controls(", 1)[1].split(
+        "fn validate_universe_controls(",
+        1,
+    )[0]
+    universe_body = source.split("fn validate_universe_controls(", 1)[1].split(
+        "fn validate_cost_model_controls(",
+        1,
+    )[0]
+    cost_body = source.split("fn validate_cost_model_controls(", 1)[1].split(
+        "fn validate_paper_order_controls(",
+        1,
+    )[0]
+    paper_body = source.split("fn validate_paper_order_controls(", 1)[1].split(
+        "fn positive_finite(",
+        1,
+    )[0]
+
+    _assert_order(
+        validate_body,
+        (
+            "blockers.push(Blocker::ContractIdMismatch);",
+            "blockers.push(Blocker::SourceVersionMismatch);",
+            "blockers.push(Blocker::VersionMismatch);",
+            "blockers.push(Blocker::WrongAssetLane);",
+            "blockers.push(Blocker::WrongBroker);",
+            "blockers.push(Blocker::WrongEnvironment);",
+            "blockers.push(Blocker::RuntimeEnablementClaimed);",
+            "blockers.push(Blocker::ShadowOnlyPostureMissing);",
+            "validate_caps(self, &mut blockers);",
+            "validate_cash_only_controls(self, &mut blockers);",
+            "validate_universe_controls(self, &mut blockers);",
+            "validate_cost_model_controls(self, &mut blockers);",
+            "validate_paper_order_controls(self, &mut blockers);",
+            "blockers.push(Blocker::BybitLiveExecutionNotProtected);",
+            "blockers.push(Blocker::IbkrContactPerformed);",
+            "blockers.push(Blocker::ConnectorRuntimeStarted);",
+            "blockers.push(Blocker::SecretContentSerialized);",
+        ),
+    )
+    _assert_order(
+        caps_body,
+        (
+            "blockers.push(Blocker::OrderCapMissing);",
+            "blockers.push(Blocker::PositionCapMissing);",
+            "blockers.push(Blocker::DailyCapMissing);",
+            "blockers.push(Blocker::CapOrderingInvalid);",
+            "blockers.push(Blocker::OpenOrderLimitMissing);",
+            "blockers.push(Blocker::OpenOrderLimitTooHigh);",
+            "blockers.push(Blocker::OpenPositionLimitMissing);",
+            "blockers.push(Blocker::OpenPositionLimitTooHigh);",
+        ),
+    )
+    _assert_order(
+        cash_body,
+        (
+            "blockers.push(Blocker::MarginAllowed);",
+            "blockers.push(Blocker::ShortAllowed);",
+            "blockers.push(Blocker::OptionsAllowed);",
+            "blockers.push(Blocker::CfdAllowed);",
+            "blockers.push(Blocker::TransferAllowed);",
+            "blockers.push(Blocker::LiveAllowed);",
+        ),
+    )
+    _assert_order(
+        universe_body,
+        (
+            "blockers.push(Blocker::AllowedInstrumentMissing);",
+            "blockers.push(Blocker::ForbiddenInstrumentAllowed);",
+            "blockers.push(Blocker::DeniedInstrumentMissing);",
+            "blockers.push(Blocker::FrozenUniverseHashNotRequired);",
+            "blockers.push(Blocker::InstrumentIdentityHashNotRequired);",
+            "blockers.push(Blocker::MarketSessionNotRequired);",
+        ),
+    )
+    _assert_order(
+        cost_body,
+        (
+            "blockers.push(Blocker::CostModelBeforeShadowFillMissing);",
+            "blockers.push(Blocker::CostModelBeforeScorecardMissing);",
+            "blockers.push(Blocker::CommissionScheduleMissing);",
+            "blockers.push(Blocker::SpreadEstimateMissing);",
+            "blockers.push(Blocker::SlippageEstimateMissing);",
+            "blockers.push(Blocker::FxDragMissing);",
+            "blockers.push(Blocker::ConservativePenaltyMissing);",
+        ),
+    )
+    _assert_order(
+        paper_body,
+        (
+            "blockers.push(Blocker::RustAuthorityMissing);",
+            "blockers.push(Blocker::SessionAttestationMissing);",
+            "blockers.push(Blocker::DecisionLeaseMissing);",
+            "blockers.push(Blocker::GuardianMissing);",
+            "blockers.push(Blocker::IdempotencyKeyMissing);",
+            "blockers.push(Blocker::BrokerReconciliationMissing);",
+        ),
+    )
+
+
 def test_stock_etf_risk_policy_source_has_no_runtime_secret_order_or_bybit_client_tokens() -> None:
     source = _source()
     violations = []
@@ -374,3 +483,11 @@ def test_stock_etf_risk_policy_source_has_no_runtime_secret_order_or_bybit_clien
             violations.append(f"{RISK_POLICY}: contains forbidden token {token!r}")
 
     assert violations == []
+
+
+def _assert_order(source: str, tokens: tuple[str, ...]) -> None:
+    cursor = -1
+    for token in tokens:
+        index = source.find(token, cursor + 1)
+        assert index > cursor, token
+        cursor = index

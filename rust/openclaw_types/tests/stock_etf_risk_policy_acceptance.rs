@@ -16,46 +16,49 @@ fn default_risk_policy_blocks_runtime_authority() {
     let verdict = StockEtfRiskPolicyV1::default().validate();
 
     assert!(!verdict.accepted);
-    assert!(has(
-        &verdict.blockers,
-        StockEtfRiskPolicyBlocker::ContractIdMismatch
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfRiskPolicyBlocker::SourceVersionMismatch
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfRiskPolicyBlocker::VersionMismatch
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfRiskPolicyBlocker::WrongAssetLane
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfRiskPolicyBlocker::WrongBroker
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfRiskPolicyBlocker::WrongEnvironment
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfRiskPolicyBlocker::RuntimeEnablementClaimed
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfRiskPolicyBlocker::OrderCapMissing
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfRiskPolicyBlocker::MarginAllowed
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfRiskPolicyBlocker::AllowedInstrumentMissing
-    ));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            StockEtfRiskPolicyBlocker::ContractIdMismatch,
+            StockEtfRiskPolicyBlocker::SourceVersionMismatch,
+            StockEtfRiskPolicyBlocker::VersionMismatch,
+            StockEtfRiskPolicyBlocker::WrongAssetLane,
+            StockEtfRiskPolicyBlocker::WrongBroker,
+            StockEtfRiskPolicyBlocker::WrongEnvironment,
+            StockEtfRiskPolicyBlocker::RuntimeEnablementClaimed,
+            StockEtfRiskPolicyBlocker::ShadowOnlyPostureMissing,
+            StockEtfRiskPolicyBlocker::OrderCapMissing,
+            StockEtfRiskPolicyBlocker::PositionCapMissing,
+            StockEtfRiskPolicyBlocker::DailyCapMissing,
+            StockEtfRiskPolicyBlocker::OpenOrderLimitMissing,
+            StockEtfRiskPolicyBlocker::OpenPositionLimitMissing,
+            StockEtfRiskPolicyBlocker::MarginAllowed,
+            StockEtfRiskPolicyBlocker::ShortAllowed,
+            StockEtfRiskPolicyBlocker::OptionsAllowed,
+            StockEtfRiskPolicyBlocker::CfdAllowed,
+            StockEtfRiskPolicyBlocker::TransferAllowed,
+            StockEtfRiskPolicyBlocker::LiveAllowed,
+            StockEtfRiskPolicyBlocker::AllowedInstrumentMissing,
+            StockEtfRiskPolicyBlocker::DeniedInstrumentMissing,
+            StockEtfRiskPolicyBlocker::FrozenUniverseHashNotRequired,
+            StockEtfRiskPolicyBlocker::InstrumentIdentityHashNotRequired,
+            StockEtfRiskPolicyBlocker::MarketSessionNotRequired,
+            StockEtfRiskPolicyBlocker::CostModelBeforeShadowFillMissing,
+            StockEtfRiskPolicyBlocker::CostModelBeforeScorecardMissing,
+            StockEtfRiskPolicyBlocker::CommissionScheduleMissing,
+            StockEtfRiskPolicyBlocker::SpreadEstimateMissing,
+            StockEtfRiskPolicyBlocker::SlippageEstimateMissing,
+            StockEtfRiskPolicyBlocker::FxDragMissing,
+            StockEtfRiskPolicyBlocker::ConservativePenaltyMissing,
+            StockEtfRiskPolicyBlocker::RustAuthorityMissing,
+            StockEtfRiskPolicyBlocker::SessionAttestationMissing,
+            StockEtfRiskPolicyBlocker::DecisionLeaseMissing,
+            StockEtfRiskPolicyBlocker::GuardianMissing,
+            StockEtfRiskPolicyBlocker::IdempotencyKeyMissing,
+            StockEtfRiskPolicyBlocker::BrokerReconciliationMissing,
+            StockEtfRiskPolicyBlocker::BybitLiveExecutionNotProtected,
+        ]
+    );
 }
 
 #[test]
@@ -139,14 +142,13 @@ fn risk_policy_requires_exact_contract_id_and_source_version() {
 
     let blockers = policy.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfRiskPolicyBlocker::ContractIdMismatch
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfRiskPolicyBlocker::SourceVersionMismatch
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfRiskPolicyBlocker::ContractIdMismatch,
+            StockEtfRiskPolicyBlocker::SourceVersionMismatch,
+        ]
+    );
 }
 
 #[test]
@@ -169,30 +171,23 @@ fn risk_policy_rejects_runtime_enablement_caps_and_cash_only_regressions() {
 
     let blockers = policy.validate().blockers;
 
-    assert!(has(&blockers, StockEtfRiskPolicyBlocker::WrongEnvironment));
-    assert!(has(
-        &blockers,
-        StockEtfRiskPolicyBlocker::RuntimeEnablementClaimed
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfRiskPolicyBlocker::ShadowOnlyPostureMissing
-    ));
-    assert!(has(&blockers, StockEtfRiskPolicyBlocker::OrderCapMissing));
-    assert!(has(
-        &blockers,
-        StockEtfRiskPolicyBlocker::OpenOrderLimitTooHigh
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfRiskPolicyBlocker::OpenPositionLimitTooHigh
-    ));
-    assert!(has(&blockers, StockEtfRiskPolicyBlocker::MarginAllowed));
-    assert!(has(&blockers, StockEtfRiskPolicyBlocker::ShortAllowed));
-    assert!(has(&blockers, StockEtfRiskPolicyBlocker::OptionsAllowed));
-    assert!(has(&blockers, StockEtfRiskPolicyBlocker::CfdAllowed));
-    assert!(has(&blockers, StockEtfRiskPolicyBlocker::TransferAllowed));
-    assert!(has(&blockers, StockEtfRiskPolicyBlocker::LiveAllowed));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfRiskPolicyBlocker::WrongEnvironment,
+            StockEtfRiskPolicyBlocker::RuntimeEnablementClaimed,
+            StockEtfRiskPolicyBlocker::ShadowOnlyPostureMissing,
+            StockEtfRiskPolicyBlocker::OrderCapMissing,
+            StockEtfRiskPolicyBlocker::OpenOrderLimitTooHigh,
+            StockEtfRiskPolicyBlocker::OpenPositionLimitTooHigh,
+            StockEtfRiskPolicyBlocker::MarginAllowed,
+            StockEtfRiskPolicyBlocker::ShortAllowed,
+            StockEtfRiskPolicyBlocker::OptionsAllowed,
+            StockEtfRiskPolicyBlocker::CfdAllowed,
+            StockEtfRiskPolicyBlocker::TransferAllowed,
+            StockEtfRiskPolicyBlocker::LiveAllowed,
+        ]
+    );
 }
 
 #[test]
@@ -219,43 +214,30 @@ fn risk_policy_rejects_universe_cost_and_order_gate_regressions() {
 
     let blockers = policy.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfRiskPolicyBlocker::AllowedInstrumentMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfRiskPolicyBlocker::ForbiddenInstrumentAllowed
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfRiskPolicyBlocker::DeniedInstrumentMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfRiskPolicyBlocker::FrozenUniverseHashNotRequired
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfRiskPolicyBlocker::CostModelBeforeShadowFillMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfRiskPolicyBlocker::CommissionScheduleMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfRiskPolicyBlocker::RustAuthorityMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfRiskPolicyBlocker::DecisionLeaseMissing
-    ));
-    assert!(has(&blockers, StockEtfRiskPolicyBlocker::GuardianMissing));
-    assert!(has(
-        &blockers,
-        StockEtfRiskPolicyBlocker::BrokerReconciliationMissing
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfRiskPolicyBlocker::AllowedInstrumentMissing,
+            StockEtfRiskPolicyBlocker::ForbiddenInstrumentAllowed,
+            StockEtfRiskPolicyBlocker::DeniedInstrumentMissing,
+            StockEtfRiskPolicyBlocker::FrozenUniverseHashNotRequired,
+            StockEtfRiskPolicyBlocker::InstrumentIdentityHashNotRequired,
+            StockEtfRiskPolicyBlocker::MarketSessionNotRequired,
+            StockEtfRiskPolicyBlocker::CostModelBeforeShadowFillMissing,
+            StockEtfRiskPolicyBlocker::CostModelBeforeScorecardMissing,
+            StockEtfRiskPolicyBlocker::CommissionScheduleMissing,
+            StockEtfRiskPolicyBlocker::SpreadEstimateMissing,
+            StockEtfRiskPolicyBlocker::SlippageEstimateMissing,
+            StockEtfRiskPolicyBlocker::FxDragMissing,
+            StockEtfRiskPolicyBlocker::ConservativePenaltyMissing,
+            StockEtfRiskPolicyBlocker::RustAuthorityMissing,
+            StockEtfRiskPolicyBlocker::SessionAttestationMissing,
+            StockEtfRiskPolicyBlocker::DecisionLeaseMissing,
+            StockEtfRiskPolicyBlocker::GuardianMissing,
+            StockEtfRiskPolicyBlocker::IdempotencyKeyMissing,
+            StockEtfRiskPolicyBlocker::BrokerReconciliationMissing,
+        ]
+    );
 }
 
 #[test]
@@ -268,22 +250,15 @@ fn risk_policy_rejects_contact_secret_connector_and_bybit_regressions() {
 
     let blockers = policy.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfRiskPolicyBlocker::BybitLiveExecutionNotProtected
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfRiskPolicyBlocker::IbkrContactPerformed
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfRiskPolicyBlocker::ConnectorRuntimeStarted
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfRiskPolicyBlocker::SecretContentSerialized
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfRiskPolicyBlocker::BybitLiveExecutionNotProtected,
+            StockEtfRiskPolicyBlocker::IbkrContactPerformed,
+            StockEtfRiskPolicyBlocker::ConnectorRuntimeStarted,
+            StockEtfRiskPolicyBlocker::SecretContentSerialized,
+        ]
+    );
 }
 
 #[test]
@@ -383,10 +358,6 @@ fn blocked_template_is_parseable_and_secret_free() {
     assert!(!lower.contains("account_id ="));
     assert!(!lower.contains("password ="));
     assert!(!lower.contains("token ="));
-}
-
-fn has(blockers: &[StockEtfRiskPolicyBlocker], blocker: StockEtfRiskPolicyBlocker) -> bool {
-    blockers.contains(&blocker)
 }
 
 fn assert_single_blocker(policy: StockEtfRiskPolicyV1, blocker: StockEtfRiskPolicyBlocker) {
