@@ -134,6 +134,7 @@ def test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles() -> None
         "Scorecard Status Module Split Guard",
         "Python No-Write Static Guard Split Guard",
         "Scorecard Input Module Split Guard",
+        "Rust IPC Parent Module Split Guard",
     )
     plan_source = IBKR_STOCK_ETF_PLAN.read_text()
     operator_source = IBKR_STOCK_ETF_OPERATOR.read_text()

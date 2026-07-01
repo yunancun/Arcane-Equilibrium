@@ -5,8 +5,13 @@ ROOT = Path(__file__).resolve().parents[2]
 IPC_TEST_ROOT = ROOT / "rust/openclaw_engine/src/ipc_server/tests"
 STOCK_ETF_PARENT = IPC_TEST_ROOT / "stock_etf.rs"
 STOCK_ETF_SPLIT_DIR = IPC_TEST_ROOT / "stock_etf"
-MAX_LINES = 1200
-EXPECTED_MODULES = {"request_contracts.rs", "status_fixtures.rs"}
+MAX_LINES = 800
+EXPECTED_MODULES = {
+    "foundation_status_fixtures.rs",
+    "precontact_fixtures.rs",
+    "request_contracts.rs",
+    "status_fixtures.rs",
+}
 FORBIDDEN_RUNTIME_MATERIAL_TOKENS = (
     "std::env",
     "env::var",
@@ -122,21 +127,21 @@ def test_stock_etf_ipc_fixture_tests_are_split_under_governance_cap() -> None:
 
     assert "mod request_contracts;" in parent
     assert "mod status_fixtures;" in parent
+    assert "mod precontact_fixtures;" in parent
+    assert "mod foundation_status_fixtures;" in parent
     assert set(modules) == EXPECTED_MODULES
     assert _loc(STOCK_ETF_PARENT) <= MAX_LINES
     assert all(loc <= MAX_LINES for loc in modules.values())
 
 
 def test_stock_etf_ipc_fixture_tests_have_no_runtime_material_readers() -> None:
-    sources = {
-        STOCK_ETF_PARENT: STOCK_ETF_PARENT.read_text(encoding="utf-8"),
-        STOCK_ETF_SPLIT_DIR / "request_contracts.rs": (
-            STOCK_ETF_SPLIT_DIR / "request_contracts.rs"
-        ).read_text(encoding="utf-8"),
-        STOCK_ETF_SPLIT_DIR / "status_fixtures.rs": (
-            STOCK_ETF_SPLIT_DIR / "status_fixtures.rs"
-        ).read_text(encoding="utf-8"),
-    }
+    sources = {STOCK_ETF_PARENT: STOCK_ETF_PARENT.read_text(encoding="utf-8")}
+    sources.update(
+        {
+            path: path.read_text(encoding="utf-8")
+            for path in STOCK_ETF_SPLIT_DIR.glob("*.rs")
+        }
+    )
 
     violations = []
     for path, source in sources.items():
@@ -148,15 +153,13 @@ def test_stock_etf_ipc_fixture_tests_have_no_runtime_material_readers() -> None:
 
 
 def test_stock_etf_ipc_fixture_tests_do_not_import_or_call_bybit_runtime_paths() -> None:
-    sources = {
-        STOCK_ETF_PARENT: STOCK_ETF_PARENT.read_text(encoding="utf-8"),
-        STOCK_ETF_SPLIT_DIR / "request_contracts.rs": (
-            STOCK_ETF_SPLIT_DIR / "request_contracts.rs"
-        ).read_text(encoding="utf-8"),
-        STOCK_ETF_SPLIT_DIR / "status_fixtures.rs": (
-            STOCK_ETF_SPLIT_DIR / "status_fixtures.rs"
-        ).read_text(encoding="utf-8"),
-    }
+    sources = {STOCK_ETF_PARENT: STOCK_ETF_PARENT.read_text(encoding="utf-8")}
+    sources.update(
+        {
+            path: path.read_text(encoding="utf-8")
+            for path in STOCK_ETF_SPLIT_DIR.glob("*.rs")
+        }
+    )
 
     violations = []
     for path, source in sources.items():
@@ -168,15 +171,13 @@ def test_stock_etf_ipc_fixture_tests_do_not_import_or_call_bybit_runtime_paths()
 
 
 def test_stock_etf_ipc_fixture_tests_have_no_clock_thread_or_process_side_effects() -> None:
-    sources = {
-        STOCK_ETF_PARENT: STOCK_ETF_PARENT.read_text(encoding="utf-8"),
-        STOCK_ETF_SPLIT_DIR / "request_contracts.rs": (
-            STOCK_ETF_SPLIT_DIR / "request_contracts.rs"
-        ).read_text(encoding="utf-8"),
-        STOCK_ETF_SPLIT_DIR / "status_fixtures.rs": (
-            STOCK_ETF_SPLIT_DIR / "status_fixtures.rs"
-        ).read_text(encoding="utf-8"),
-    }
+    sources = {STOCK_ETF_PARENT: STOCK_ETF_PARENT.read_text(encoding="utf-8")}
+    sources.update(
+        {
+            path: path.read_text(encoding="utf-8")
+            for path in STOCK_ETF_SPLIT_DIR.glob("*.rs")
+        }
+    )
 
     violations = []
     for path, source in sources.items():
@@ -234,3 +235,26 @@ def test_stock_etf_tail_status_fixtures_remain_source_only_tests() -> None:
         "reqwest",
     ):
         assert forbidden not in source
+
+
+def test_stock_etf_precontact_and_foundation_fixtures_are_in_child_modules() -> None:
+    parent = STOCK_ETF_PARENT.read_text(encoding="utf-8")
+    precontact = (STOCK_ETF_SPLIT_DIR / "precontact_fixtures.rs").read_text(
+        encoding="utf-8"
+    )
+    foundation = (STOCK_ETF_SPLIT_DIR / "foundation_status_fixtures.rs").read_text(
+        encoding="utf-8"
+    )
+
+    assert "stock_etf_readiness_exposes_phase2_precontact_blockers" in precontact
+    assert "stock_etf_data_foundation_status_is_blocked_source_fixture" in foundation
+    assert "stock_etf_policy_status_is_blocked_source_fixture" in foundation
+    assert "stock_etf_authorization_status_is_blocked_source_fixture" in foundation
+
+    for moved_test in (
+        "stock_etf_readiness_exposes_phase2_precontact_blockers",
+        "stock_etf_data_foundation_status_is_blocked_source_fixture",
+        "stock_etf_policy_status_is_blocked_source_fixture",
+        "stock_etf_authorization_status_is_blocked_source_fixture",
+    ):
+        assert moved_test not in parent
