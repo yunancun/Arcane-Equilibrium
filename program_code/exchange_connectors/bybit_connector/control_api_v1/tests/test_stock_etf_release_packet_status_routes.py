@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -12,6 +13,67 @@ from stock_etf_route_fixtures import (
     _valid_release_packet_status,
     client_fail_closed,
 )
+
+
+EXPECTED_RELEASE_PACKET_CONTRACT_VIOLATIONS = [
+    "ibkr_call_performed",
+    "secret_slot_touched",
+    "order_routed",
+    "bybit_ipc_reused",
+    "phase3_started",
+    "phase5_started",
+    "connector_runtime_started",
+    "scorecard_writer_started",
+    "db_apply_performed",
+    "evidence_clock_started",
+    "paper_shadow_launch_authorized",
+    "tiny_live_or_live_authorized",
+    "asset_lane_mismatch",
+    "broker_mismatch",
+    "environment_mismatch",
+    "release_expected_contract_id_mismatch",
+    "release_packet_not_accepted",
+    "source_commit_missing",
+    "reviewer_role_count_below_minimum",
+    "reviewer_role_Operator_missing",
+    "reviewer_role_E2_missing",
+    "reviewer_role_E3_missing",
+    "reviewer_role_E4_missing",
+    "reviewer_role_QA_missing",
+    "reviewer_role_QC_missing",
+    "reviewer_role_MIT_missing",
+    "role_report_count_missing",
+    "manifest_hash_count_missing",
+    "gui_screenshot_hash_count_missing",
+    "dq_manifest_hash_count_missing",
+    "scorecard_regeneration_hash_count_missing",
+    "release_e2_log_hash_present_missing",
+    "release_e3_redaction_log_hash_present_missing",
+    "release_e4_log_hash_present_missing",
+    "release_qa_log_hash_present_missing",
+    "release_redaction_fixture_hash_present_missing",
+    "release_evidence_archive_pointer_present_missing",
+    "release_evidence_archive_hash_present_missing",
+    "release_paper_shadow_window_complete_missing",
+    "release_engineering_shakedown_complete_missing",
+    "release_sealed_missing",
+    "release_secret_content_serialized",
+    "release_ibkr_live_or_tiny_live_authorized",
+    "pg_migration_manifest_hash_present_missing",
+    "pg_dry_run_log_hash_present_missing",
+    "pg_double_apply_log_hash_present_missing",
+    "manifest_release_manifest_hash_missing",
+    "kill_stock_etf_lane_enabled_false_missing",
+    "kill_ibkr_readonly_enabled_false_missing",
+    "kill_ibkr_paper_enabled_false_missing",
+    "kill_stock_etf_shadow_only_true_missing",
+    "kill_collector_stopped_missing",
+    "kill_gui_stock_views_disabled_or_hidden_missing",
+    "kill_live_secret_absence_proven_missing",
+    "kill_evidence_archive_forward_only_missing",
+    "kill_proof_hash_present_missing",
+    "kill_destructive_db_cleanup_requested",
+]
 
 
 def test_stock_etf_release_packet_status_returns_200_when_ipc_down(
@@ -240,39 +302,7 @@ def test_stock_etf_release_packet_status_blocks_contract_violation() -> None:
 
     assert data["release_packet_status_state"] == "contract_violation_blocked"
     assert data["degraded"] is True
-    assert {
-        "ibkr_call_performed",
-        "secret_slot_touched",
-        "order_routed",
-        "bybit_ipc_reused",
-        "asset_lane_mismatch",
-        "broker_mismatch",
-        "environment_mismatch",
-        "phase3_started",
-        "phase5_started",
-        "connector_runtime_started",
-        "scorecard_writer_started",
-        "db_apply_performed",
-        "evidence_clock_started",
-        "paper_shadow_launch_authorized",
-        "tiny_live_or_live_authorized",
-        "release_expected_contract_id_mismatch",
-        "release_packet_not_accepted",
-        "source_commit_missing",
-        "reviewer_role_count_below_minimum",
-        "reviewer_role_Operator_missing",
-        "role_report_count_missing",
-        "manifest_hash_count_missing",
-        "gui_screenshot_hash_count_missing",
-        "release_e2_log_hash_present_missing",
-        "manifest_release_manifest_hash_missing",
-        "pg_dry_run_log_hash_present_missing",
-        "release_secret_content_serialized",
-        "release_ibkr_live_or_tiny_live_authorized",
-        "kill_stock_etf_lane_enabled_false_missing",
-        "kill_live_secret_absence_proven_missing",
-        "kill_destructive_db_cleanup_requested",
-    }.issubset(set(data["contract_violations"]))
+    assert data["contract_violations"] == EXPECTED_RELEASE_PACKET_CONTRACT_VIOLATIONS
     assert data["paper_shadow_launch_authorized"] is False
     assert data["tiny_live_or_live_authorized"] is False
     assert data["connector_runtime_started"] is False
@@ -280,3 +310,18 @@ def test_stock_etf_release_packet_status_blocks_contract_violation() -> None:
     assert data["db_apply_performed"] is False
     assert data["evidence_clock_started"] is False
     fake_ipc.call.assert_awaited_once()
+
+
+def test_stock_etf_release_packet_contract_violation_assertions_stay_exact() -> None:
+    source = Path(__file__).read_text(encoding="utf-8")
+    source_under_test = source.split(
+        "def test_stock_etf_release_packet_contract_violation_assertions_stay_exact",
+        1,
+    )[0]
+    forbidden_patterns = [
+        'set(data["contract_violations"])',
+        'in data["contract_violations"]',
+        'issubset(set(data["contract_violations"]))',
+    ]
+    for pattern in forbidden_patterns:
+        assert pattern not in source_under_test

@@ -9873,3 +9873,38 @@ construction、不做 broker session、不執行 read-only probe、不執行 bro
 cancel/replace、不做 reconciliation writer、不做 scorecard writer、不做 DB/evidence writer、不啟動 evidence
 clock、不做 release launch、不做 Linux runtime sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何
 Bybit behavior change。
+
+## 242. 2026-07-01 PM session source checkpoint：Stock/ETF Release Packet Route Exact Contract-Violation Guard
+
+本 checkpoint 補強 Stock/ETF FastAPI release-packet route 的 exact contract-violation lineage，固定 top-level
+side-effect、launch-authority drift、lane/environment drift、release packet identity/acceptance drift、
+reviewer-role drift、evidence/hash/log coverage drift、migration evidence drift、manifest-hash drift、
+kill-disable cleanup proof drift、destructive cleanup request 的 ordered violation vector。這不是 FastAPI route
+behavior change、不是 connector production code change、不是 GUI/Rust IPC behavior change、不是 IBKR contact、
+不是 connector runtime、不是 secret lookup、不是 broker session、不是 read-only probe execution、不是 paper order
+route enablement、不是 release launch、不是 DB/evidence writer、不是 scorecard writer、不是 tiny-live/live
+gate；只把 release-packet route source-only test 從 subset check 收緊成 exact-vector guard。
+
+已完成：
+
+- 在 `test_stock_etf_release_packet_status_routes.py` 新增完整 ordered
+  `EXPECTED_RELEASE_PACKET_CONTRACT_VIOLATIONS`。
+- 將 release-packet route 的 loose `issubset(set(data["contract_violations"]))` 檢查改為 exact ordered list
+  assertion。
+- 新增本檔內 source guard，防止 release-packet route contract-violation assertions 退回 loose
+  set/membership/subset 檢查。
+
+驗證：
+
+- Release-packet route focused pytest：`5 passed`。
+- Stock/ETF no-write/surface/release-packet focused pytest：`15 passed`。
+- Full Stock/ETF Python route/static pytest：`142 passed`。
+- `python3 -m py_compile` for changed release-packet route test：PASS。
+- Release-packet no-loose contract violation assertion scan：PASS。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 FastAPI route 行為、不改 connector production code、不改 GUI runtime、不改 Rust
+IPC 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀/建/序列化 secret、不啟動 connector runtime、不做 socket/client
+construction、不做 broker session、不執行 read-only probe、不做 paper order routing/cancel/replace、不做 release
+launch、不做 DB/evidence writer、不做 scorecard writer、不啟動 evidence clock、不做 Linux runtime sync/restart、
+不做 destructive DB cleanup、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
