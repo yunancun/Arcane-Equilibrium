@@ -3973,3 +3973,10 @@
 - Source-static parsing now pins the audit event validator blocker emit order backing the exact acceptance vectors.
 - Verification passed: audit events source static `7 passed`; audit events Rust acceptance `9 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `337` integration/acceptance + `0` doc-tests; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, audit writer, DB migration/apply, evidence writer, scorecard writer, paper order routing, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF DB Evidence DDL Default Lineage Exact Guard
+
+- PM added test-only/source-static exact-blocker coverage for default `StockEtfDbEvidenceDdlContractV1`, identity drift, required schemas/tables/natural keys, migration/apply authority claims, and guard/control gaps.
+- Source-static parsing now pins both the contract validator and source SQL auditor blocker emit order backing the exact acceptance vectors.
+- Verification passed: DB evidence DDL source static `7 passed`; DB evidence DDL Rust acceptance `10 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `337` integration/acceptance + `0` doc-tests; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, SQL source draft change, sqlx migration registration, DB migration/apply, PG write, IPC server start, IBKR contact, connector runtime, secret access, audit/evidence/scorecard writer, paper order routing, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
