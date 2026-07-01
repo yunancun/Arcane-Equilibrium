@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-01 Stock/ETF Broker Capability Registry Exact Blocker Guard
+
+- PM tightened `StockEtfBrokerCapabilityRegistryV1` aggregate acceptance coverage to exact ordered blocker vectors for default registry posture, read-row gate gaps, registry identity/source mismatch, operation coverage, paper write/fill-import shape gaps, denied-row regressions, and boundary flags.
+- Source-static guard now pins validator blocker emit order across registry top-level checks, operation coverage checks, and operation row validation checks.
+- Verification passed: broker capability registry source static `9`, Rust acceptance `14`, full `cargo test -p openclaw_types`, cargo fmt, docs trace, and diff-check. Boundary unchanged: no Rust production code change, IBKR contact, connector/runtime, secret access/serialization, paper order route, fill import, evidence/scorecard/DB writer, tiny-live/live, or Bybit behavior change.
+
 ## 2026-07-01 No-Order Refresh Blocked By Loss-Control 6b0e
 
 - PM rotated from stale `bef289ef...` request to clean `6b0e6b03...`; 6b0e source-stability READY sha `8b89bd88...` was produced but not consumed.

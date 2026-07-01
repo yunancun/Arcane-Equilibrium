@@ -23,33 +23,40 @@ use openclaw_types::{
 
 #[test]
 fn default_registry_blocks_without_matrix_or_boundaries() {
+    use StockEtfBrokerCapabilityBlocker as Blocker;
+
     let verdict = StockEtfBrokerCapabilityRegistryV1::default().validate();
 
     assert!(!verdict.accepted);
-    assert!(has(
-        &verdict.blockers,
-        StockEtfBrokerCapabilityBlocker::RegistryIdMismatch
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfBrokerCapabilityBlocker::SourceVersionMismatch
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfBrokerCapabilityBlocker::WrongAssetLane
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfBrokerCapabilityBlocker::WrongBroker
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfBrokerCapabilityBlocker::BybitLiveExecutionNotProtected
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfBrokerCapabilityBlocker::OperationMissing
-    ));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::RegistryIdMismatch,
+            Blocker::SourceVersionMismatch,
+            Blocker::WrongAssetLane,
+            Blocker::WrongBroker,
+            Blocker::BybitLiveExecutionNotProtected,
+            Blocker::PythonBrokerWriteAuthorityNotDenied,
+            Blocker::IbkrLiveNotDenied,
+            Blocker::CfdMarginReservedNotDenied,
+            Blocker::RequiredAuditFieldMissing,
+            Blocker::OperationMissing,
+            Blocker::OperationMissing,
+            Blocker::OperationMissing,
+            Blocker::OperationMissing,
+            Blocker::OperationMissing,
+            Blocker::OperationMissing,
+            Blocker::OperationMissing,
+            Blocker::OperationMissing,
+            Blocker::OperationMissing,
+            Blocker::OperationMissing,
+            Blocker::OperationMissing,
+            Blocker::OperationMissing,
+            Blocker::OperationMissing,
+            Blocker::OperationMissing,
+            Blocker::OperationMissing,
+        ]
+    );
 }
 
 #[test]
@@ -349,6 +356,8 @@ fn registry_rejects_each_operation_shape_gap_independently() {
 
 #[test]
 fn readonly_rows_require_lane_scoped_ipc_and_probe_request_gate() {
+    use StockEtfBrokerCapabilityBlocker as Blocker;
+
     let mut registry = StockEtfBrokerCapabilityRegistryV1::accepted_fixture();
     for operation in [
         BrokerOperation::HealthRead,
@@ -369,32 +378,37 @@ fn readonly_rows_require_lane_scoped_ipc_and_probe_request_gate() {
 
     let blockers = registry.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfBrokerCapabilityBlocker::OperationRequiredGateMissing
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            Blocker::OperationRequiredGateMissing,
+            Blocker::OperationRequiredGateMissing,
+            Blocker::OperationRequiredGateMissing,
+            Blocker::OperationRequiredGateMissing,
+        ]
+    );
 }
 
 #[test]
 fn registry_requires_exact_id_and_source_version() {
+    use StockEtfBrokerCapabilityBlocker as Blocker;
+
     let mut registry = StockEtfBrokerCapabilityRegistryV1::accepted_fixture();
     registry.registry_id = "broker_capability_registry_v1_fixture".to_string();
     registry.source_version = 2;
 
     let blockers = registry.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfBrokerCapabilityBlocker::RegistryIdMismatch
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfBrokerCapabilityBlocker::SourceVersionMismatch
-    ));
+    assert_eq!(
+        blockers,
+        vec![Blocker::RegistryIdMismatch, Blocker::SourceVersionMismatch]
+    );
 }
 
 #[test]
 fn registry_requires_every_operation_once() {
+    use StockEtfBrokerCapabilityBlocker as Blocker;
+
     let mut registry = StockEtfBrokerCapabilityRegistryV1::accepted_fixture();
     let duplicate = registry.operations[0].clone();
     registry
@@ -404,18 +418,16 @@ fn registry_requires_every_operation_once() {
 
     let blockers = registry.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfBrokerCapabilityBlocker::OperationMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfBrokerCapabilityBlocker::OperationDuplicated
-    ));
+    assert_eq!(
+        blockers,
+        vec![Blocker::OperationDuplicated, Blocker::OperationMissing]
+    );
 }
 
 #[test]
 fn paper_write_rows_require_rust_owned_gates_audit_and_source_hash() {
+    use StockEtfBrokerCapabilityBlocker as Blocker;
+
     let mut registry = StockEtfBrokerCapabilityRegistryV1::accepted_fixture();
     let submit = registry
         .operations
@@ -429,22 +441,15 @@ fn paper_write_rows_require_rust_owned_gates_audit_and_source_hash() {
 
     let blockers = registry.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfBrokerCapabilityBlocker::OperationRustOwnershipMismatch
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfBrokerCapabilityBlocker::OperationRequiredGateMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfBrokerCapabilityBlocker::OperationAuditEventMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfBrokerCapabilityBlocker::OperationSourceArtifactHashMissing
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            Blocker::OperationRequiredGateMissing,
+            Blocker::OperationRustOwnershipMismatch,
+            Blocker::OperationAuditEventMissing,
+            Blocker::OperationSourceArtifactHashMissing,
+        ]
+    );
 }
 
 #[test]
@@ -485,30 +490,22 @@ fn paper_fill_import_row_is_readonly_and_requires_session_lifecycle_gate() {
 
     let blockers = broken.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfBrokerCapabilityBlocker::OperationAuthorityScopeMismatch
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfBrokerCapabilityBlocker::OperationRequiredGateMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfBrokerCapabilityBlocker::OperationRustOwnershipMismatch
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfBrokerCapabilityBlocker::OperationAuditEventMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfBrokerCapabilityBlocker::OperationSourceArtifactHashMissing
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfBrokerCapabilityBlocker::OperationAuthorityScopeMismatch,
+            StockEtfBrokerCapabilityBlocker::OperationRequiredGateMissing,
+            StockEtfBrokerCapabilityBlocker::OperationRustOwnershipMismatch,
+            StockEtfBrokerCapabilityBlocker::OperationAuditEventMissing,
+            StockEtfBrokerCapabilityBlocker::OperationSourceArtifactHashMissing,
+        ]
+    );
 }
 
 #[test]
 fn denied_rows_require_exact_typed_denials_and_no_authority() {
+    use StockEtfBrokerCapabilityBlocker as Blocker;
+
     let mut registry = StockEtfBrokerCapabilityRegistryV1::accepted_fixture();
     let live = registry
         .operations
@@ -527,18 +524,20 @@ fn denied_rows_require_exact_typed_denials_and_no_authority() {
 
     let blockers = registry.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfBrokerCapabilityBlocker::OperationAuthorityScopeMismatch
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfBrokerCapabilityBlocker::OperationTypedDenialMismatch
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            Blocker::OperationAuthorityScopeMismatch,
+            Blocker::OperationTypedDenialMismatch,
+            Blocker::OperationTypedDenialMismatch,
+        ]
+    );
 }
 
 #[test]
 fn registry_boundary_flags_reject_contact_secret_and_bybit_regression() {
+    use StockEtfBrokerCapabilityBlocker as Blocker;
+
     let mut registry = StockEtfBrokerCapabilityRegistryV1::accepted_fixture();
     registry.bybit_live_execution_unchanged = false;
     registry.python_broker_write_authority_denied = false;
@@ -550,34 +549,18 @@ fn registry_boundary_flags_reject_contact_secret_and_bybit_regression() {
 
     let blockers = registry.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfBrokerCapabilityBlocker::BybitLiveExecutionNotProtected
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfBrokerCapabilityBlocker::PythonBrokerWriteAuthorityNotDenied
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfBrokerCapabilityBlocker::IbkrLiveNotDenied
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfBrokerCapabilityBlocker::CfdMarginReservedNotDenied
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfBrokerCapabilityBlocker::FirstIbkrContactPerformed
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfBrokerCapabilityBlocker::SecretContentSerialized
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfBrokerCapabilityBlocker::RequiredAuditFieldMissing
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            Blocker::BybitLiveExecutionNotProtected,
+            Blocker::PythonBrokerWriteAuthorityNotDenied,
+            Blocker::IbkrLiveNotDenied,
+            Blocker::CfdMarginReservedNotDenied,
+            Blocker::FirstIbkrContactPerformed,
+            Blocker::SecretContentSerialized,
+            Blocker::RequiredAuditFieldMissing,
+        ]
+    );
 }
 
 #[test]
@@ -663,13 +646,6 @@ fn blocked_template_is_parseable_and_secret_free() {
     assert!(!lower.contains("account_id ="));
     assert!(!lower.contains("password ="));
     assert!(!lower.contains("token ="));
-}
-
-fn has(
-    blockers: &[StockEtfBrokerCapabilityBlocker],
-    blocker: StockEtfBrokerCapabilityBlocker,
-) -> bool {
-    blockers.contains(&blocker)
 }
 
 fn assert_single_blocker(

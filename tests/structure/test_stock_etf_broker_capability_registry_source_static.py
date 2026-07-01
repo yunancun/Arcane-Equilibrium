@@ -204,6 +204,26 @@ def _block_between(source: str, start_token: str, end_tokens: tuple[str, ...]) -
     return source[start:end]
 
 
+def _named_function_body(source: str, name: str) -> str:
+    marker = f"fn {name}("
+    start = source.index(marker)
+    brace = source.index("{", start)
+    depth = 0
+    for index in range(brace, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start : index + 1]
+    raise AssertionError(f"function body not closed: {name}")
+
+
+def _assert_ordered_tokens(block: str, tokens: tuple[str, ...]) -> None:
+    positions = [block.index(token) for token in tokens]
+    assert positions == sorted(positions)
+
+
 def _default_block(source: str) -> str:
     return _block_between(
         source,
@@ -419,6 +439,45 @@ def test_stock_etf_broker_capability_registry_source_keeps_denied_and_validation
     assert "if entry.rust_owned != expected.rust_owned" in source
     assert "if !entry.audit_event_required" in source
     assert "if !entry.source_artifact_hash_required" in source
+
+
+def test_stock_etf_broker_capability_registry_source_pins_blocker_emit_order() -> None:
+    source = _source()
+    validate_body = source[source.index("pub fn validate(&self)") : source.index(
+        "StockEtfBrokerCapabilityVerdict::new(blockers)"
+    )]
+    validate_entry_body = _named_function_body(source, "validate_entry")
+
+    _assert_ordered_tokens(
+        validate_body,
+        (
+            "Blocker::RegistryIdMismatch",
+            "Blocker::SourceVersionMismatch",
+            "Blocker::WrongAssetLane",
+            "Blocker::WrongBroker",
+            "Blocker::BybitLiveExecutionNotProtected",
+            "Blocker::PythonBrokerWriteAuthorityNotDenied",
+            "Blocker::IbkrLiveNotDenied",
+            "Blocker::CfdMarginReservedNotDenied",
+            "Blocker::FirstIbkrContactPerformed",
+            "Blocker::SecretContentSerialized",
+            "Blocker::RequiredAuditFieldMissing",
+            "Blocker::OperationMissing",
+            "Blocker::OperationDuplicated",
+            "validate_entry(matches[0], &mut blockers)",
+        ),
+    )
+    _assert_ordered_tokens(
+        validate_entry_body,
+        (
+            "Blocker::OperationAuthorityScopeMismatch",
+            "Blocker::OperationRequiredGateMissing",
+            "Blocker::OperationTypedDenialMismatch",
+            "Blocker::OperationRustOwnershipMismatch",
+            "Blocker::OperationAuditEventMissing",
+            "Blocker::OperationSourceArtifactHashMissing",
+        ),
+    )
 
 
 def test_stock_etf_broker_capability_registry_source_has_no_runtime_secret_order_or_bybit_client_tokens() -> None:
