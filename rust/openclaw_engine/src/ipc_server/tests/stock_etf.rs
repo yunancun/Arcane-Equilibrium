@@ -103,36 +103,49 @@ async fn stock_etf_phase0_status_exposes_accepted_source_manifest_without_runtim
         "accepted_no_runtime_authority"
     );
     assert_eq!(result["phase0_accepted"], true);
-    assert_eq!(result["phase0_blockers"].as_array().unwrap().len(), 0);
+    assert_json_array_eq(&result["phase0_blockers"], &[]);
     assert_eq!(result["contract_count"], 36);
-    assert!(json_array_contains(
+    assert_json_array_eq(
         &result["contracts"],
-        "stock_etf_ibkr_readonly_probe_request_v1"
-    ));
-    assert!(json_array_contains(
-        &result["contracts"],
-        "stock_etf_ibkr_readonly_probe_result_import_request_v1"
-    ));
-    assert!(json_array_contains(
-        &result["contracts"],
-        "stock_etf_paper_fill_import_request_v1"
-    ));
-    assert!(json_array_contains(
-        &result["contracts"],
-        "stock_etf_shadow_signal_request_v1"
-    ));
-    assert!(json_array_contains(
-        &result["contracts"],
-        "stock_etf_paper_shadow_reconciliation_v1"
-    ));
-    assert!(json_array_contains(
-        &result["contracts"],
-        "stock_etf_collector_run_v1"
-    ));
-    assert!(json_array_contains(
-        &result["contracts"],
-        "stock_etf_dq_manifest_v1"
-    ));
+        &[
+            "asset_lane_taxonomy_v1",
+            "broker_capability_registry_v1",
+            "phase2_ibkr_external_surface_gate_v1",
+            "non_bybit_api_allowlist_v1",
+            "stock_etf_ibkr_readonly_probe_request_v1",
+            "stock_etf_ibkr_readonly_probe_result_import_request_v1",
+            "instrument_identity_contract_v1",
+            "stock_etf_pit_universe_contract_v1",
+            "stock_etf_strategy_hypothesis_contract_v1",
+            "stock_etf_risk_policy_v1",
+            "stock_etf_reference_data_sources_v1",
+            "ibkr_api_session_topology_v1",
+            "ibkr_session_attestation_v1",
+            "feature_flag_secret_auth_matrix_v1",
+            "lane_scoped_ipc_v1",
+            "stock_etf_paper_order_request_v1",
+            "stock_etf_paper_fill_import_request_v1",
+            "stock_etf_shadow_signal_request_v1",
+            "ibkr_paper_order_lifecycle_v1",
+            "broker_lifecycle_event_log_v1",
+            "audit.asset_lane_events_v1",
+            "stock_etf_db_evidence_ddl_v1",
+            "stock_market_data_provenance_v1",
+            "broker_account_portfolio_cash_ledger_v1",
+            "cost_model_version_v1",
+            "benchmark_versions_v1",
+            "stock_shadow_fill_model_v1",
+            "stock_etf_paper_shadow_reconciliation_v1",
+            "stock_etf_collector_run_v1",
+            "stock_etf_dq_manifest_v1",
+            "stock_etf_evidence_clock_v1",
+            "gui_lane_contract_v1",
+            "stock_etf_storage_capacity_v1",
+            "stock_etf_kill_switch_and_disable_cleanup_runbook_v1",
+            "stock_etf_release_packet_v1",
+            "tiny_live_adr_eligibility_v1",
+        ],
+    );
     assert_eq!(
         result["manifest"]["schema"],
         "stock_etf_phase0_contract_packet_manifest_v1"
@@ -218,10 +231,17 @@ async fn stock_etf_lane_status_exposes_flags_without_ibkr_contact() {
         phase2["external_surface_gate"]["ibkr_contact_allowed"],
         false
     );
-    assert!(json_array_contains(
+    assert_json_array_eq(
         &phase2["external_surface_gate"]["blockers"],
-        "status_not_pass"
-    ));
+        &[
+            "contract_id_mismatch",
+            "source_version_mismatch",
+            "status_not_pass",
+            "live_ports_not_denied",
+            "secret_contract_missing",
+            "live_secret_present_or_unknown",
+        ],
+    );
     assert_eq!(
         phase2["api_allowlist"]["contract_id"],
         "non_bybit_api_allowlist_v1"
@@ -283,10 +303,27 @@ async fn stock_etf_evidence_status_is_blocked_source_fixture_without_side_effect
     assert_eq!(market_data["contract_id"], "");
     assert_eq!(market_data["source_version"], 0);
     assert_eq!(market_data["accepted"], false);
-    assert!(json_array_contains(
+    assert_json_array_eq(
         &market_data["blockers"],
-        "market_data_provenance_contract_id_mismatch"
-    ));
+        &[
+            "market_data_provenance_contract_id_mismatch",
+            "market_data_provenance_version_mismatch",
+            "market_data_provenance_wrong_asset_lane",
+            "market_data_provenance_wrong_broker",
+            "market_data_provenance_environment_denied",
+            "source_missing",
+            "entitlement_tier_missing",
+            "raw_payload_hash_invalid",
+            "market_data_timestamp_missing",
+            "adjustment_marker_unknown",
+            "corporate_action_version_hash_invalid",
+            "symbol_missing",
+            "instrument_identity_hash_invalid",
+            "calendar_session_missing",
+            "source_artifact_hash_invalid",
+            "bybit_live_execution_not_protected",
+        ],
+    );
     assert_eq!(market_data["ibkr_contact_performed"], false);
     assert_eq!(market_data["connector_runtime_started"], false);
     assert_eq!(market_data["secret_content_serialized"], false);
@@ -300,10 +337,32 @@ async fn stock_etf_evidence_status_is_blocked_source_fixture_without_side_effect
     assert_eq!(collector_run["contract_id"], "");
     assert_eq!(collector_run["source_version"], 0);
     assert_eq!(collector_run["accepted"], false);
-    assert!(json_array_contains(
+    assert_json_array_eq(
         &collector_run["blockers"],
-        "collector_run_contract_id_mismatch"
-    ));
+        &[
+            "collector_run_contract_id_mismatch",
+            "collector_run_version_mismatch",
+            "collector_run_wrong_asset_lane",
+            "collector_run_wrong_broker",
+            "collector_run_environment_denied",
+            "collector_run_id_missing",
+            "collector_trading_day_missing",
+            "collector_pit_universe_contract_mismatch",
+            "collector_pit_universe_hash_invalid",
+            "collector_market_data_provenance_contract_mismatch",
+            "collector_market_data_provenance_hash_invalid",
+            "collector_reference_data_sources_contract_mismatch",
+            "collector_reference_data_sources_hash_invalid",
+            "collector_storage_capacity_contract_mismatch",
+            "collector_storage_capacity_hash_invalid",
+            "collector_expected_sessions_too_small",
+            "collector_gap_report_hash_invalid",
+            "collector_dq_manifest_hash_invalid",
+            "collector_replay_manifest_hash_invalid",
+            "collector_source_artifact_hash_invalid",
+            "bybit_live_execution_not_protected",
+        ],
+    );
     assert_eq!(collector_run["expected_trading_sessions"], 0);
     assert_eq!(collector_run["completed_trading_sessions"], 0);
     assert_eq!(collector_run["market_data_ingestion_started"], false);
@@ -322,10 +381,28 @@ async fn stock_etf_evidence_status_is_blocked_source_fixture_without_side_effect
     assert_eq!(evidence_clock["source_version"], 0);
     assert_eq!(evidence_clock["status"], "NOT_STARTED");
     assert_eq!(evidence_clock["accepted"], false);
-    assert!(json_array_contains(
+    assert_json_array_eq(
         &evidence_clock["blockers"],
-        "evidence_clock_contract_id_mismatch"
-    ));
+        &[
+            "evidence_clock_contract_id_mismatch",
+            "evidence_clock_version_mismatch",
+            "evidence_clock_wrong_asset_lane",
+            "evidence_clock_wrong_broker",
+            "evidence_clock_environment_denied",
+            "evidence_clock_collector_run_contract_mismatch",
+            "evidence_clock_collector_run_hash_invalid",
+            "evidence_clock_dq_manifest_contract_mismatch",
+            "evidence_clock_dq_manifest_hash_invalid",
+            "evidence_clock_source_artifact_hash_invalid",
+            "evidence_clock_market_data_provenance_hash_invalid",
+            "evidence_clock_scorecard_input_hash_invalid",
+            "bybit_live_execution_not_protected",
+            "ibkr_connector_not_green_five_days",
+            "shadow_collector_not_green_five_days",
+            "frozen_inputs_rejected",
+            "dq_manifest_shape_rejected",
+        ],
+    );
     assert_eq!(evidence_clock["checker_contacted_ibkr"], false);
     assert_eq!(evidence_clock["checker_started_connector_runtime"], false);
     assert_eq!(evidence_clock["checker_started_evidence_clock"], false);
@@ -353,10 +430,24 @@ async fn stock_etf_evidence_status_is_blocked_source_fixture_without_side_effect
     assert_eq!(dq_manifest["contract_id"], "");
     assert_eq!(dq_manifest["source_version"], 0);
     assert_eq!(dq_manifest["shape_accepted"], false);
-    assert!(json_array_contains(
+    assert_json_array_eq(
         &dq_manifest["shape_blockers"],
-        "dq_manifest_contract_id_mismatch"
-    ));
+        &[
+            "dq_manifest_contract_id_mismatch",
+            "dq_manifest_version_mismatch",
+            "dq_manifest_wrong_asset_lane",
+            "dq_manifest_wrong_broker",
+            "dq_manifest_environment_denied",
+            "dq_manifest_collector_run_id_missing",
+            "dq_manifest_market_data_provenance_contract_mismatch",
+            "dq_manifest_market_data_provenance_hash_invalid",
+            "dq_manifest_source_artifact_hash_invalid",
+            "bybit_live_execution_not_protected",
+            "trading_day_missing",
+            "quarantine_manifest_hash_invalid",
+            "atomic_fact_input_hash_invalid",
+        ],
+    );
     assert_eq!(dq_manifest["passes_day_quality"], false);
     assert_eq!(dq_manifest["collector_run_id"], "");
     assert_eq!(
@@ -440,14 +531,31 @@ async fn stock_etf_universe_status_is_blocked_source_fixture_without_side_effect
     assert_eq!(universe["contract_id"], "");
     assert_eq!(universe["source_version"], 0);
     assert_eq!(universe["accepted"], false);
-    assert!(json_array_contains(
+    assert_json_array_eq(
         &universe["blockers"],
-        "contract_id_mismatch"
-    ));
-    assert!(json_array_contains(
-        &universe["blockers"],
-        "source_version_mismatch"
-    ));
+        &[
+            "contract_id_mismatch",
+            "source_version_mismatch",
+            "universe_id_invalid",
+            "universe_version_invalid",
+            "universe_hash_invalid",
+            "point_in_time_asof_missing",
+            "effective_from_missing",
+            "constituent_count_missing",
+            "max_constituents_invalid",
+            "inclusion_rule_hash_invalid",
+            "exclusion_rule_hash_invalid",
+            "liquidity_screen_hash_invalid",
+            "tradability_screen_hash_invalid",
+            "priips_screen_hash_invalid",
+            "delisted_inactive_policy_hash_invalid",
+            "corporate_action_version_hash_invalid",
+            "market_calendar_hash_invalid",
+            "source_artifact_hash_invalid",
+            "universe_not_frozen_for_evidence_clock",
+            "survivorship_controls_missing",
+        ],
+    );
     assert_eq!(universe["universe_hash_present"], false);
     assert_eq!(universe["constituent_count"], 0);
     assert_eq!(universe["sample_constituents"].as_array().unwrap().len(), 0);
@@ -512,18 +620,21 @@ async fn stock_etf_shadow_status_is_blocked_source_fixture_without_side_effects(
     assert_eq!(shadow["contract_id"], "");
     assert_eq!(shadow["source_version"], 0);
     assert_eq!(shadow["accepted"], false);
-    assert!(json_array_contains(
+    assert_json_array_eq(
         &shadow["blockers"],
-        "contract_id_mismatch"
-    ));
-    assert!(json_array_contains(
-        &shadow["blockers"],
-        "source_version_mismatch"
-    ));
-    assert!(json_array_contains(
-        &shadow["blockers"],
-        "signal_id_missing"
-    ));
+        &[
+            "contract_id_mismatch",
+            "source_version_mismatch",
+            "signal_id_missing",
+            "instrument_identity_hash_invalid",
+            "order_side_unknown",
+            "intended_notional_missing",
+            "market_session_missing",
+            "quote_or_bar_source_hash_invalid",
+            "conservative_fill_price_missing",
+            "synthetic_shadow_marker_missing",
+        ],
+    );
     assert_eq!(shadow["synthetic_shadow"], false);
     assert_eq!(shadow["broker_paper_fill_linked"], false);
     assert_eq!(shadow["live_fill_linked"], false);
@@ -536,14 +647,38 @@ async fn stock_etf_shadow_status_is_blocked_source_fixture_without_side_effects(
     assert_eq!(strategy["contract_id"], "");
     assert_eq!(strategy["source_version"], 0);
     assert_eq!(strategy["accepted"], false);
-    assert!(json_array_contains(
+    assert_json_array_eq(
         &strategy["blockers"],
-        "contract_id_mismatch"
-    ));
-    assert!(json_array_contains(
-        &strategy["blockers"],
-        "source_version_mismatch"
-    ));
+        &[
+            "contract_id_mismatch",
+            "source_version_mismatch",
+            "hypothesis_id_invalid",
+            "hypothesis_version_invalid",
+            "strategy_family_denied",
+            "timeframe_denied",
+            "instrument_scope_denied",
+            "universe_hash_invalid",
+            "pit_universe_contract_hash_invalid",
+            "benchmark_version_hash_invalid",
+            "cost_model_version_hash_invalid",
+            "entry_rule_hash_invalid",
+            "exit_rule_hash_invalid",
+            "risk_rule_hash_invalid",
+            "feature_set_hash_invalid",
+            "data_source_policy_hash_invalid",
+            "statistical_design_hash_invalid",
+            "hypothesis_preregistration_hash_invalid",
+            "holding_period_too_short",
+            "turnover_limit_missing",
+            "max_constituents_missing",
+            "independent_observation_target_too_low",
+            "lookahead_controls_missing",
+            "survivorship_controls_missing",
+            "multiple_testing_control_missing",
+            "benchmark_metric_missing",
+            "cost_after_metric_missing",
+        ],
+    );
     assert_eq!(strategy["paper_shadow_only"], true);
     assert_eq!(strategy["profitability_claimed"], false);
     assert_eq!(strategy["live_or_tiny_live_authority_claimed"], false);
@@ -621,18 +756,30 @@ async fn stock_etf_paper_status_is_blocked_source_fixture_without_side_effects()
     assert_eq!(lifecycle["request_contract_id"], "");
     assert_eq!(lifecycle["source_version"], 0);
     assert_eq!(lifecycle["accepted"], false);
-    assert!(json_array_contains(
+    assert_json_array_eq(
         &lifecycle["blockers"],
-        "lifecycle_contract_id_mismatch"
-    ));
-    assert!(json_array_contains(
-        &lifecycle["blockers"],
-        "event_log_contract_id_mismatch"
-    ));
-    assert!(json_array_contains(
-        &lifecycle["blockers"],
-        "source_version_mismatch"
-    ));
+        &[
+            "lifecycle_contract_id_mismatch",
+            "event_log_contract_id_mismatch",
+            "source_version_mismatch",
+            "event_id_missing",
+            "event_sequence_missing",
+            "previous_event_hash_invalid",
+            "event_time_missing",
+            "event_hash_invalid",
+            "request_contract_id_mismatch",
+            "request_envelope_hash_invalid",
+            "operation_transition_mismatch",
+            "local_order_id_missing",
+            "idempotency_key_missing",
+            "reconciliation_run_id_missing",
+            "invalid_state_transition",
+            "denial_reason_missing_on_denied_event",
+            "stale_state_policy_missing",
+            "raw_artifact_hash_invalid",
+            "redacted_summary_hash_invalid",
+        ],
+    );
     assert_eq!(lifecycle["operation"], "paper_order_submit");
     assert_eq!(lifecycle["previous_state"], "LOCAL_INTENT_CREATED");
     assert_eq!(lifecycle["next_state"], "LOCAL_INTENT_CREATED");
@@ -672,11 +819,37 @@ async fn stock_etf_paper_status_is_blocked_source_fixture_without_side_effects()
     assert_eq!(result["phase2"]["connector_enabled"], false);
 }
 
-fn json_array_contains(value: &serde_json::Value, expected: &str) -> bool {
-    value
+#[test]
+fn stock_etf_ipc_status_fixture_assertions_stay_exact() {
+    let sources = [
+        include_str!("stock_etf.rs"),
+        include_str!("stock_etf/precontact_fixtures.rs"),
+        include_str!("stock_etf/foundation_status_fixtures.rs"),
+        include_str!("stock_etf/status_fixtures.rs"),
+    ];
+    let forbidden = [
+        "json_array_".to_string() + "contains(",
+        [".iter().", "any(|item| item.as_str() == Some("].concat(),
+    ];
+
+    for source in sources {
+        for pattern in &forbidden {
+            assert!(
+                !source.contains(pattern),
+                "stock_etf IPC status fixture tests must use exact ordered arrays, found {pattern}"
+            );
+        }
+    }
+}
+
+fn assert_json_array_eq(value: &serde_json::Value, expected: &[&str]) {
+    let actual: Vec<&str> = value
         .as_array()
-        .map(|items| items.iter().any(|item| item.as_str() == Some(expected)))
-        .unwrap_or(false)
+        .expect("json array")
+        .iter()
+        .map(|item| item.as_str().expect("string item"))
+        .collect();
+    assert_eq!(actual, expected);
 }
 
 async fn dispatch_stock_etf_test_request(req: &str) -> JsonRpcResponse {
