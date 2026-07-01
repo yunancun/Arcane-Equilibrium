@@ -3516,3 +3516,11 @@
 - Added `test_stock_etf_paper_order_request_split_static.py` to enforce module allowlist, moved ownership, 800-line cap, and no-runtime-token posture.
 - Verification passed: scoped Rust format, paper-order split static guard `3 passed`, paper-order acceptance `8 passed`, full `cargo test -p openclaw_types`, and engine Stock/ETF IPC `29 passed`.
 - Boundary unchanged: no endpoint, IPC method, payload behavior, GUI fanout, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe, result import, DB/evidence/scorecard writer, paper order/cancel/replace, tiny-live/live, Linux runtime, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Phase0 Spec Artifact Coverage Static Guard
+
+- PM added a source-only meta guard for Phase0 Stock/ETF/IBKR spec artifacts under `docs/execution_plan/specs`.
+- The guard requires the artifact scope to stay exact, every selected artifact to be directly referenced by tests, and the main plan plus Operator launch summary to list all selected artifacts.
+- It also pins manifest fail-closed authority, named packet no-runtime denials, and DB evidence SQL source-only / no-migration-copy posture.
+- Verification passed: new guard `6 passed`; focused source-static subset `31 passed`; Rust Phase0/release/DDL acceptance `6/8/10 passed`; docs trace PASS.
+- Boundary unchanged: no runtime behavior change, IBKR contact, connector runtime, secret access, DB apply, paper order route, tiny-live/live, Linux runtime, or Bybit behavior change.

@@ -1470,3 +1470,10 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only README posture guard for the inert IBKR connector skeleton.
 - The guard requires the README to preserve the not-runtime connector boundary, allowed display-only preview scope, denied SDK/network/secret/write/order/DB/tiny-live/live scope, and no runtime-ready/live-ready/paper-order-ready claims.
 - Verification passed: connector skeleton `10 passed`; docs trace PASS. This grants no connector behavior change, endpoint, IBKR contact, connector runtime, secret access, paper order route, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Phase0 Spec Artifact Coverage Static Guard
+
+- PM added a source-only meta guard for Phase0 Stock/ETF/IBKR spec artifacts under `docs/execution_plan/specs`.
+- The guard requires the current artifact scope to stay exact, every selected artifact to be directly referenced by tests, and the main plan plus Operator launch summary to list all selected artifacts.
+- It also pins manifest fail-closed authority, named packet no-runtime denials, and DB evidence SQL source-only / no-migration-copy posture.
+- Verification passed: new guard `6 passed`; focused source-static subset `31 passed`; Rust Phase0/release/DDL acceptance `6/8/10 passed`; docs trace PASS. This grants no runtime behavior change, IBKR contact, connector runtime, secret access, DB apply, paper order route, tiny-live/live, or Bybit behavior change.
