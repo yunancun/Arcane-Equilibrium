@@ -4934,3 +4934,31 @@ Verification 已過：
 沒有 IBKR contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 paper order routing、
 沒有 DB/evidence writer、沒有 scorecard writer、沒有 broker session、沒有 tiny-live/live authorization，
 也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Lane Taxonomy Authority Decision Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Lane Taxonomy Authority Decision Cross-Wire Guard`。
+
+這個 checkpoint 補強 `stock_etf_lane` 的 broker capability decision coverage，固定 StockEtfCash/IBKR/
+Paper/Shadow/ReadOnly taxonomy、feature flag fail-closed posture、gate input fail-closed posture、live/
+margin/options/account-write denial、flag denial、read/shadow/paper gate denial 與 allowed authority scope。
+
+新增 Rust acceptance 證明 wrong lane/broker/environment/operation/instrument、flag gaps、read/shadow/paper
+gate gaps 都會各自只產生單一 denial reason；all-green read/shadow/paper requests 只得到對應 authority
+scope。Python source-static guard 也鎖住 feature flags / gate inputs default fail-closed posture 與
+`evaluate_broker_operation` denial ordering。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Stock/ETF lane source static pytest：`8 passed`
+- Stock/ETF lane Rust acceptance：`14 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IPC server start、
+沒有 IBKR contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 paper order routing、
+沒有 DB/evidence writer、沒有 scorecard writer、沒有 broker session、沒有 tiny-live/live authorization，
+也沒有改動 Bybit live/demo execution 行為。

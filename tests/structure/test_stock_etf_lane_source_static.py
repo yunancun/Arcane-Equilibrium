@@ -149,6 +149,24 @@ def _source() -> str:
     return STOCK_ETF_LANE.read_text(encoding="utf-8")
 
 
+def _block_between(source: str, start_token: str, end_tokens: tuple[str, ...]) -> str:
+    start = source.index(start_token)
+    end = len(source)
+    for token in end_tokens:
+        candidate = source.find(token, start + len(start_token))
+        if candidate != -1:
+            end = min(end, candidate)
+    return source[start:end]
+
+
+def _default_block(source: str, type_name: str) -> str:
+    return _block_between(
+        source,
+        f"impl Default for {type_name}",
+        ("\n}\n\nimpl ", "\n}\n\n#[derive"),
+    )
+
+
 def _broker_operation_bool_method_body(source: str, method_name: str) -> str:
     match = re.search(
         rf"pub const fn {method_name}\(self\) -> bool \{{(?P<body>.*?)\n    \}}",
@@ -237,6 +255,117 @@ def test_stock_etf_lane_source_keeps_feature_flag_env_allowlist_scoped() -> None
         assert "password" not in lower
         assert "account" not in lower
         assert "key" not in lower
+
+
+def test_stock_etf_lane_source_keeps_feature_flag_default_fail_closed() -> None:
+    default = _default_block(_source(), "StockEtfFeatureFlags")
+
+    for fail_closed in (
+        "stock_etf_lane_enabled: false",
+        "ibkr_readonly_enabled: false",
+        "ibkr_paper_enabled: false",
+        "asset_lane_default: AssetLane::CryptoPerp",
+        "stock_etf_shadow_only: true",
+    ):
+        assert fail_closed in default
+
+    for forbidden in (
+        "stock_etf_lane_enabled: true",
+        "ibkr_readonly_enabled: true",
+        "ibkr_paper_enabled: true",
+        "asset_lane_default: AssetLane::StockEtfCash",
+        "stock_etf_shadow_only: false",
+    ):
+        assert forbidden not in default
+
+
+def test_stock_etf_lane_source_keeps_gate_inputs_default_fail_closed() -> None:
+    default = _default_block(_source(), "StockEtfGateInputs")
+
+    for fail_closed in (
+        "external_surface_gate_passed: false",
+        "session_attested: false",
+        "scoped_authorization_present: false",
+        "decision_lease_valid: false",
+        "guardian_allows: false",
+        "risk_config_hash_present: false",
+        "instrument_identity_hash_present: false",
+        "idempotency_key_present: false",
+        "market_open: true",
+        "cost_model_present: false",
+        "universe_match: false",
+        "credential_available: false",
+        "connector_available: false",
+    ):
+        assert fail_closed in default
+
+    for forbidden in (
+        "external_surface_gate_passed: true",
+        "session_attested: true",
+        "scoped_authorization_present: true",
+        "decision_lease_valid: true",
+        "guardian_allows: true",
+        "risk_config_hash_present: true",
+        "instrument_identity_hash_present: true",
+        "idempotency_key_present: true",
+        "market_open: false",
+        "cost_model_present: true",
+        "universe_match: true",
+        "credential_available: true",
+        "connector_available: true",
+    ):
+        assert forbidden not in default
+
+
+def test_stock_etf_lane_source_keeps_evaluate_broker_operation_denial_order() -> None:
+    source = _source()
+    evaluator = _block_between(
+        source,
+        "pub fn evaluate_broker_operation(",
+        ("\n#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]",),
+    )
+
+    ordered_tokens = [
+        "request.asset_lane != AssetLane::StockEtfCash",
+        "request.broker != Broker::Ibkr",
+        "request.environment == BrokerEnvironment::LiveReservedDenied",
+        "request.operation == Op::LiveOrderSubmit",
+        "request.operation == Op::MarginOrShort",
+        "request.operation == Op::OptionsOrCfd",
+        "request.operation == Op::TransferOrAccountWrite",
+        "!request.instrument_kind.allowed_for_stock_etf_cash()",
+        "!flags.stock_etf_lane_enabled",
+        "request.operation.is_read() && !flags.ibkr_readonly_enabled",
+        "request.operation.is_paper_write() && !flags.ibkr_paper_enabled",
+        "request.operation.is_paper_write() && flags.stock_etf_shadow_only",
+        "request.operation.is_read() && !gates.external_surface_gate_passed",
+        "request.operation.is_shadow()",
+        "if request.operation.is_paper_write() {\n        if !gates.market_open",
+    ]
+    positions = [evaluator.index(token) for token in ordered_tokens]
+    assert positions == sorted(positions)
+
+    for denial in (
+        "Deny::WrongAssetLane",
+        "Deny::WrongBroker",
+        "Deny::LiveReservedDenied",
+        "Deny::IbkrLiveNotAuthorized",
+        "Deny::StockEtfCashOnly",
+        "Deny::InstrumentKindDenied",
+        "Deny::AccountWriteDenied",
+        "Deny::LaneDisabled",
+        "Deny::BrokerDisabled",
+        "Deny::ShadowOnly",
+        "Deny::AuthorizationInvalid",
+        "Deny::CostModelMissing",
+        "Deny::UniverseMismatch",
+        "Deny::MarketClosed",
+        "Deny::CredentialUnavailable",
+        "Deny::ConnectorUnavailable",
+        "Deny::DecisionLeaseInvalid",
+        "Deny::GuardianDenied",
+    ):
+        assert denial in evaluator
 
 
 def test_stock_etf_lane_source_has_no_runtime_secret_order_or_bybit_client_tokens() -> None:

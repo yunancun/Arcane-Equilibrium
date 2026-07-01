@@ -3917,3 +3917,10 @@
 - Source-static parsing now pins `REQUIRED_METHODS`, default, and accepted fixture blocks so denied methods stay out of required method coverage and accepted posture remains StockEtfCash/IBKR/no-runtime/no-secret.
 - Verification passed: lane-scoped IPC source static `6 passed`; lane-scoped IPC Rust acceptance `12 passed`; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, paper order routing, DB/evidence writer, scorecard writer, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Lane Taxonomy Authority Decision Cross-Wire Guard
+
+- PM added test-only/source-static exact-denial coverage for `stock_etf_lane` broker capability decisions across lane/broker/environment/operation/instrument gaps, feature flag gaps, read/shadow/paper gate gaps, and all-green authority scopes.
+- Source-static parsing now pins feature flag and gate input default fail-closed posture plus `evaluate_broker_operation` denial ordering.
+- Verification passed: stock/ETF lane source static `8 passed`; stock/ETF lane Rust acceptance `14 passed`; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, paper order routing, DB/evidence writer, scorecard writer, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
