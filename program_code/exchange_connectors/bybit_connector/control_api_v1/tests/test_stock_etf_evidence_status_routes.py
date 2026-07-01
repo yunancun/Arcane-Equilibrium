@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -12,6 +13,52 @@ from stock_etf_route_fixtures import (
     _valid_evidence_status,
     client_fail_closed,
 )
+
+
+EXPECTED_EVIDENCE_CONTRACT_VIOLATIONS = [
+    "ibkr_call_performed",
+    "secret_slot_touched",
+    "order_routed",
+    "bybit_ipc_reused",
+    "asset_lane_mismatch",
+    "broker_mismatch",
+    "environment_mismatch",
+    "phase3_started",
+    "market_data_ibkr_contact_performed",
+    "market_data_connector_runtime_started",
+    "market_data_secret_content_serialized",
+    "market_data_live_or_tiny_live_authorized",
+    "collector_run_ibkr_contact_performed",
+    "collector_run_connector_runtime_started",
+    "collector_run_market_data_ingestion_started",
+    "collector_run_evidence_writer_started",
+    "collector_run_scorecard_writer_started",
+    "collector_run_db_apply_performed",
+    "collector_run_secret_content_serialized",
+    "collector_run_live_or_tiny_live_authorized",
+    "dq_manifest_ibkr_contact_performed",
+    "dq_manifest_connector_runtime_started",
+    "dq_manifest_market_data_ingestion_started",
+    "dq_manifest_writer_started",
+    "dq_manifest_evidence_clock_started",
+    "dq_manifest_scorecard_writer_started",
+    "dq_manifest_db_apply_performed",
+    "dq_manifest_secret_content_serialized",
+    "dq_manifest_live_or_tiny_live_authorized",
+    "evidence_clock_collector_run_contract_id_mismatch",
+    "evidence_clock_dq_manifest_contract_id_mismatch",
+    "evidence_clock_contacted_ibkr",
+    "evidence_clock_started_connector_runtime",
+    "evidence_clock_started",
+    "evidence_clock_wrote_scorecard",
+    "evidence_clock_applied_db",
+    "evidence_clock_secret_content_serialized",
+    "evidence_clock_live_or_tiny_live_authorized",
+    "frozen_inputs_daily_scorecard_regenerated",
+    "scorecard_writer_started",
+    "scorecard_db_apply_performed",
+]
+
 
 def test_stock_etf_evidence_status_returns_200_when_ipc_down(
     client_fail_closed: TestClient,
@@ -228,49 +275,7 @@ def test_stock_etf_evidence_status_blocks_contract_violation() -> None:
 
     assert data["evidence_status_state"] == "contract_violation_blocked"
     assert data["degraded"] is True
-    assert {
-        "ibkr_call_performed",
-        "secret_slot_touched",
-        "order_routed",
-        "bybit_ipc_reused",
-        "asset_lane_mismatch",
-        "broker_mismatch",
-        "environment_mismatch",
-        "phase3_started",
-        "market_data_ibkr_contact_performed",
-        "market_data_connector_runtime_started",
-        "market_data_secret_content_serialized",
-        "market_data_live_or_tiny_live_authorized",
-        "collector_run_ibkr_contact_performed",
-        "collector_run_connector_runtime_started",
-        "collector_run_market_data_ingestion_started",
-        "collector_run_evidence_writer_started",
-        "collector_run_scorecard_writer_started",
-        "collector_run_db_apply_performed",
-        "collector_run_secret_content_serialized",
-        "collector_run_live_or_tiny_live_authorized",
-        "dq_manifest_ibkr_contact_performed",
-        "dq_manifest_connector_runtime_started",
-        "dq_manifest_market_data_ingestion_started",
-        "dq_manifest_writer_started",
-        "dq_manifest_evidence_clock_started",
-        "dq_manifest_scorecard_writer_started",
-        "dq_manifest_db_apply_performed",
-        "dq_manifest_secret_content_serialized",
-        "dq_manifest_live_or_tiny_live_authorized",
-        "evidence_clock_contacted_ibkr",
-        "evidence_clock_started_connector_runtime",
-        "evidence_clock_collector_run_contract_id_mismatch",
-        "evidence_clock_dq_manifest_contract_id_mismatch",
-        "evidence_clock_started",
-        "evidence_clock_wrote_scorecard",
-        "evidence_clock_applied_db",
-        "evidence_clock_secret_content_serialized",
-        "evidence_clock_live_or_tiny_live_authorized",
-        "frozen_inputs_daily_scorecard_regenerated",
-        "scorecard_writer_started",
-        "scorecard_db_apply_performed",
-    }.issubset(set(data["contract_violations"]))
+    assert data["contract_violations"] == EXPECTED_EVIDENCE_CONTRACT_VIOLATIONS
     assert data["asset_lane"] == "stock_etf_cash"
     assert data["broker"] == "ibkr"
     assert data["environment"] == "paper"
@@ -284,3 +289,18 @@ def test_stock_etf_evidence_status_blocks_contract_violation() -> None:
     assert data["evidence_clock_started"] is False
     assert data["scorecard_writer_started"] is False
     assert data["db_apply_performed"] is False
+
+
+def test_stock_etf_evidence_contract_violation_assertions_stay_exact() -> None:
+    source = Path(__file__).read_text(encoding="utf-8")
+    source_under_test = source.split(
+        "def test_stock_etf_evidence_contract_violation_assertions_stay_exact",
+        1,
+    )[0]
+    forbidden_patterns = [
+        'set(data["contract_violations"])',
+        'in data["contract_violations"]',
+        'issubset(set(data["contract_violations"]))',
+    ]
+    for pattern in forbidden_patterns:
+        assert pattern not in source_under_test
