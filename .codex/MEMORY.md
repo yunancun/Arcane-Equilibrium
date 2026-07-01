@@ -1458,3 +1458,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only control-api guard for the dynamic Python/GUI candidate scanners used by Stock/ETF/IBKR no-write/no-runtime/static GUI tests.
 - The guard requires all current `app/*stock_etf*.py` / `app/*ibkr*.py`, all `program_code/broker_connectors/ibkr_connector/**/*.py`, and all `app/static/tab-stock-etf*` files to be selected by the relevant scanners, while excluding Bybit runtime fragments such as REST client/private WS/order manager/order router/bounded-probe active-order paths.
 - Verification passed: new guard `4 passed`; full Stock/ETF control-api pytest PASS; docs trace PASS. This grants no FastAPI behavior change, GUI behavior change, connector runtime, IBKR contact, secret access, paper order route, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Rust Source Coverage Static Guard
+
+- PM added a source-only meta guard for IBKR/Stock-ETF Rust source coverage across `openclaw_types` contracts and engine Stock/ETF IPC handler child modules.
+- The guard dynamically scans current `ibkr` / `stock_etf` Rust source files, includes nested child modules, excludes Bybit runtime modules, and fails if any selected Rust source file is not directly referenced by acceptance, structure, engine IPC, or control-api tests.
+- Verification passed: new guard `3 passed`; focused Stock/ETF/IBKR source-static subset PASS; docs trace PASS. This grants no Rust behavior change, IPC runtime, IBKR contact, connector runtime, secret access, paper order route, tiny-live/live, or Bybit behavior change.

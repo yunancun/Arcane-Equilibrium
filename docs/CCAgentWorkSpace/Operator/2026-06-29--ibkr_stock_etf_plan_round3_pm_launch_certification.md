@@ -3411,3 +3411,29 @@ Verification 已過：
 邊界不變：沒有 FastAPI behavior change、沒有 GUI behavior change、沒有 IBKR contact、沒有
 connector runtime、沒有 secret access、沒有 paper order route、沒有 tiny-live/live authorization，
 也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Rust Source Coverage Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF Rust Source Coverage Static Guard`。
+
+這個 guard 把 Rust source coverage 變成機器化規則：所有
+`rust/openclaw_types/src` 底下 `ibkr` / `stock_etf` Rust source，以及
+`rust/openclaw_engine/src/ipc_server/handlers/stock_etf.rs` 和 `handlers/stock_etf/`
+底下所有 child modules，都必須被 structure / Rust acceptance / engine IPC /
+Stock/ETF control-api tests 直接引用。
+
+Guard 特別要求 nested child modules 也在 scope，包括 paper-order fixtures/validation、
+Phase3 market-data、scorecard input components/bundle、precontact、request/status summaries、
+scorecard summary；同時明確排除 Bybit runtime fragments（REST client、order manager、
+bounded-probe active-order），避免 Stock/ETF coverage guard 擴散到既有 Bybit runtime module。
+
+Verification 已過：
+
+- New structure guard pytest：`3 passed`
+- Focused Stock/ETF/IBKR source-static structure subset：PASS
+- Docs PM trace tests：PASS
+
+邊界不變：沒有 Rust behavior change、沒有 IPC runtime change、沒有 IBKR contact、沒有
+connector runtime、沒有 secret access、沒有 paper order route、沒有 tiny-live/live authorization，
+也沒有改動 Bybit live/demo execution 行為。

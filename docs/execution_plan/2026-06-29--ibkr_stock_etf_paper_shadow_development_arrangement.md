@@ -5832,3 +5832,36 @@ guards 的檔案選取面機器化。
 PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector
 runtime、不執行 read-only probe、不做 result import、不啟動 evidence/scorecard writer、不做 DB
 apply、不做 paper order route、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 136. 2026-07-01 PM session source checkpoint：Stock/ETF Rust Source Coverage Static Guard
+
+本 checkpoint 新增 IBKR/Stock-ETF Rust source coverage meta guard。這不是 Rust behavior
+change、不是 IPC runtime change、不是 IBKR contact、不是 secret access、不是 connector
+runtime、不是 paper order route；只把 Rust contract 與 Stock/ETF IPC handler source 覆蓋面
+機器化。
+
+已完成：
+
+- 新增 `tests/structure/test_stock_etf_rust_source_coverage_static.py`。
+- Guard 動態掃描 `rust/openclaw_types/src` 底下檔名/路徑包含 `ibkr` 或
+  `stock_etf` 的 Rust source。
+- Guard 動態掃描 `rust/openclaw_engine/src/ipc_server/handlers/stock_etf.rs` 與
+  `handlers/stock_etf/` 底下所有 child modules。
+- Guard 要求 nested child modules 仍在 scope：paper-order fixtures/validation、Phase3
+  market-data、scorecard input components/bundle、precontact、request/status summaries、
+  scorecard summary。
+- Guard 要求 Bybit runtime modules 不在 scope：REST client、order manager、
+  bounded-probe active-order。
+- Guard 要求每個 matching Rust source 檔都被 structure tests、Rust acceptance tests、
+  Rust engine IPC tests 或 Stock/ETF control-api tests 直接引用；未引用即 fail。
+
+驗證：
+
+- New structure guard py_compile：PASS。
+- Focused new guard pytest：`3 passed`。
+- Focused Stock/ETF/IBKR source-static structure subset：PASS。
+- Docs PM trace tests：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector
+runtime、不執行 read-only probe、不做 result import、不啟動 evidence/scorecard writer、不做 DB
+apply、不做 paper order route、不授權 tiny-live/live 或任何 Bybit behavior change。
