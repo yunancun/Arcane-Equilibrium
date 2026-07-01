@@ -242,6 +242,26 @@ def _function_body(source: str, function_name: str, return_type: str) -> str:
     return match.group("body")
 
 
+def _named_function_body(source: str, name: str) -> str:
+    marker = f"fn {name}("
+    start = source.index(marker)
+    brace = source.index("{", start)
+    depth = 0
+    for index in range(brace, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start : index + 1]
+    raise AssertionError(f"function body not closed: {name}")
+
+
+def _assert_ordered_tokens(block: str, tokens: tuple[str, ...]) -> None:
+    positions = [block.index(token) for token in tokens]
+    assert positions == sorted(positions)
+
+
 def _default_block(source: str) -> str:
     return source.split(
         "impl Default for StockEtfIbkrReadonlyProbeResultImportRequestV1",
@@ -574,6 +594,95 @@ def test_stock_etf_readonly_probe_result_import_request_source_keeps_boundary_fl
         "python_direct_broker_write_requested",
     ):
         assert f"request.{flag}" in source
+
+
+def test_stock_etf_readonly_probe_result_import_request_source_pins_blocker_emit_order() -> None:
+    source = _source()
+    validate_body = source[source.index("pub fn validate(&self)") : source.index(
+        "validate_required_lineage(self, &mut blockers)"
+    )]
+    required_lineage = _named_function_body(source, "validate_required_lineage")
+    kind_lineage = _named_function_body(source, "validate_kind_lineage")
+    boundary_flags = _named_function_body(source, "validate_boundary_flags")
+
+    _assert_ordered_tokens(
+        validate_body,
+        (
+            "Blocker::ContractIdMismatch",
+            "Blocker::SourceVersionMismatch",
+            "Blocker::WrongAssetLane",
+            "Blocker::WrongBroker",
+            "Blocker::EnvironmentDenied",
+            "Blocker::ProbeActionMismatch",
+            "Blocker::OperationMismatch",
+            "Blocker::AuthorityScopeMismatch",
+            "Blocker::EffectCapabilityPresent",
+            "Blocker::ApiActionNotReadAllowed",
+        ),
+    )
+    _assert_ordered_tokens(
+        required_lineage,
+        (
+            "Blocker::ResultImportRequestIdMissing",
+            "Blocker::RequestIdMissing",
+            "Blocker::ProbeIdMissing",
+            "Blocker::ReadonlyProbeRequestContractIdMismatch",
+            "Blocker::ReadonlyProbeRequestHashInvalid",
+            "Blocker::SessionAttestationContractIdMismatch",
+            "Blocker::SessionAttestationHashInvalid",
+            "Blocker::ApiAllowlistContractIdMismatch",
+            "Blocker::ApiAllowlistHashInvalid",
+            "Blocker::RedactionPolicyContractIdMismatch",
+            "Blocker::RedactionPolicyHashInvalid",
+            "Blocker::AuditEventPolicyContractIdMismatch",
+            "Blocker::AuditEventPolicyHashInvalid",
+            "Blocker::ResultPayloadHashInvalid",
+            "Blocker::RawArtifactHashInvalid",
+            "Blocker::RedactedSummaryHashInvalid",
+            "Blocker::SourceArtifactHashInvalid",
+            "Blocker::ResultAsOfMissing",
+            "Blocker::ImportRequestedAtMissing",
+            "Blocker::ResultAsOfAfterImportRequested",
+            "Blocker::IdempotencyKeyMissing",
+            "Blocker::DuplicateImportDetected",
+            "Blocker::StaleResultWithoutManualReview",
+        ),
+    )
+    _assert_ordered_tokens(
+        kind_lineage,
+        (
+            "Blocker::HealthSnapshotHashInvalid",
+            "Blocker::AccountCashLedgerContractIdMismatch",
+            "Blocker::AccountCashLedgerHashInvalid",
+            "Blocker::InstrumentIdentityContractIdMismatch",
+            "Blocker::InstrumentIdentityHashInvalid",
+            "Blocker::MarketDataProvenanceContractIdMismatch",
+            "Blocker::MarketDataProvenanceHashInvalid",
+            "Blocker::BrokerLifecycleEventLogContractIdMismatch",
+            "Blocker::BrokerLifecycleEventLogHashInvalid",
+        ),
+    )
+    _assert_ordered_tokens(
+        boundary_flags,
+        (
+            "Blocker::IbkrContactPerformed",
+            "Blocker::ConnectorRuntimeStarted",
+            "Blocker::SecretContentSerialized",
+            "Blocker::ResultImportPerformed",
+            "Blocker::EvidenceWriterStarted",
+            "Blocker::ScorecardWriterStarted",
+            "Blocker::DbApplyPerformed",
+            "Blocker::OrderRouted",
+            "Blocker::PaperOrderSubmitted",
+            "Blocker::BybitPathReused",
+            "Blocker::LiveOrTinyLiveAuthorized",
+            "Blocker::MarginShortOptionsCfdRequested",
+            "Blocker::AccountWriteRequested",
+            "Blocker::MarketDataEntitlementPurchaseRequested",
+            "Blocker::ClientPortalWebApiRequested",
+            "Blocker::PythonDirectBrokerWriteRequested",
+        ),
+    )
 
 
 def test_stock_etf_readonly_probe_result_import_request_source_has_no_runtime_secret_order_or_bybit_client_tokens() -> None:

@@ -5800,3 +5800,33 @@ contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、
 broker session、沒有 read-only probe execution、沒有 result import、沒有 paper order routing/cancel/replace
 execution、沒有 scorecard writer、沒有 DB/evidence writer、沒有 evidence clock、沒有 paper-shadow launch、沒有
 release launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Readonly Probe Result Import Exact Blocker Guard
+
+本 session 已完成下一個 test-only checkpoint：
+`Stock/ETF Readonly Probe Result Import Exact Blocker Guard`。
+
+這個 checkpoint 補強 `StockEtfIbkrReadonlyProbeResultImportRequestV1` sanitized read-only probe result-import
+request contract 的 aggregate fail-closed coverage。
+
+新增 Rust acceptance 證明 default request、read-action/operation cross-wire、common lineage/hash/timestamp
+aggregate failures、kind-specific downstream lineage、duplicate/stale replay、no-side-effect boundary regressions
+都會以完整 ordered blocker vectors 或 exact single-blocker vectors fail closed。paper-order API action 與
+missing import timestamp 的天然 aggregate 行為也被固定。source-static 也新增 validator blocker emit-order
+guard。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Stock/ETF readonly probe result-import source static pytest：`12 passed`
+- Stock/ETF readonly probe result-import Rust acceptance：`11 passed`
+- Full `cargo test -p openclaw_types`：PASS
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 GUI runtime/API route/IPC behavior change、沒有 IBKR
+contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 socket/client construction、沒有
+broker session、沒有 read-only probe execution、沒有 result import execution、沒有 evidence/scorecard writer、
+沒有 DB apply、沒有 paper order routing/cancel/replace execution、沒有 evidence clock、沒有 paper-shadow launch、
+沒有 release launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
