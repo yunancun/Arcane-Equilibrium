@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -11,10 +12,62 @@ from fastapi.testclient import TestClient
 from stock_etf_route_fixtures import (
     _make_client_with_ipc,
     _valid_paper_status,
+    client_fail_closed,
     route_module,
     stock_etf_router,
-    client_fail_closed,
 )
+
+
+EXPECTED_PAPER_CONTRACT_VIOLATIONS = [
+    "ibkr_call_performed",
+    "secret_slot_touched",
+    "order_routed",
+    "bybit_ipc_reused",
+    "db_apply_performed",
+    "asset_lane_mismatch",
+    "broker_mismatch",
+    "environment_mismatch",
+    "phase2_started",
+    "paper_lifecycle_started",
+    "paper_order_submitted",
+    "paper_fill_imported",
+    "paper_reconciliation_started",
+    "paper_account_snapshot_present",
+    "broker_paper_attestation_present",
+    "paper_lifecycle_expected_contract_id_mismatch",
+    "paper_event_log_expected_contract_id_mismatch",
+    "paper_request_expected_contract_id_mismatch",
+    "paper_lifecycle_event_accepted_before_gate",
+    "paper_lifecycle_event_allowed_before_gate",
+    "paper_lifecycle_event_id_present",
+    "paper_lifecycle_event_sequence_present",
+    "paper_lifecycle_genesis_event",
+    "paper_lifecycle_previous_event_hash_present",
+    "paper_lifecycle_event_hash_present",
+    "paper_lifecycle_request_envelope_hash_present",
+    "paper_lifecycle_stale_state_policy_present",
+    "paper_lifecycle_order_local_id_present",
+    "paper_lifecycle_idempotency_key_present",
+    "paper_lifecycle_broker_order_id_present",
+    "paper_lifecycle_execution_id_present",
+    "paper_lifecycle_commission_report_id_present",
+    "paper_lifecycle_reconciliation_run_id_present",
+    "paper_lifecycle_raw_artifact_hash_present",
+    "paper_lifecycle_redacted_summary_hash_present",
+    "paper_lifecycle_request_contract_id_present",
+    "paper_reconstructability_append_only_event_ready",
+    "paper_reconstructability_event_hash_chain_ready",
+    "paper_reconstructability_request_envelope_linked",
+    "paper_reconstructability_stale_state_policy_present",
+    "paper_reconstructability_restart_recovery_required",
+    "paper_reconstructability_manual_review_required",
+]
+
+EXPECTED_STALE_PAPER_CONTRACT_VIOLATIONS = [
+    "paper_request_expected_contract_id_mismatch",
+    "paper_lifecycle_state_machine_fields_missing",
+]
+
 
 def test_stock_etf_paper_status_returns_200_when_ipc_down(
     client_fail_closed: TestClient,
@@ -205,44 +258,7 @@ def test_stock_etf_paper_status_blocks_contract_violation() -> None:
 
     assert data["paper_status_state"] == "contract_violation_blocked"
     assert data["degraded"] is True
-    assert {
-        "ibkr_call_performed",
-        "secret_slot_touched",
-        "order_routed",
-        "bybit_ipc_reused",
-        "db_apply_performed",
-        "asset_lane_mismatch",
-        "broker_mismatch",
-        "environment_mismatch",
-        "phase2_started",
-        "paper_lifecycle_started",
-        "paper_order_submitted",
-        "paper_fill_imported",
-        "paper_reconciliation_started",
-        "paper_account_snapshot_present",
-        "broker_paper_attestation_present",
-        "paper_lifecycle_expected_contract_id_mismatch",
-        "paper_event_log_expected_contract_id_mismatch",
-        "paper_request_expected_contract_id_mismatch",
-        "paper_lifecycle_event_accepted_before_gate",
-        "paper_lifecycle_event_allowed_before_gate",
-        "paper_lifecycle_event_sequence_present",
-        "paper_lifecycle_genesis_event",
-        "paper_lifecycle_previous_event_hash_present",
-        "paper_lifecycle_event_hash_present",
-        "paper_lifecycle_request_envelope_hash_present",
-        "paper_lifecycle_stale_state_policy_present",
-        "paper_lifecycle_request_contract_id_present",
-        "paper_lifecycle_broker_order_id_present",
-        "paper_lifecycle_execution_id_present",
-        "paper_lifecycle_commission_report_id_present",
-        "paper_reconstructability_append_only_event_ready",
-        "paper_reconstructability_event_hash_chain_ready",
-        "paper_reconstructability_request_envelope_linked",
-        "paper_reconstructability_stale_state_policy_present",
-        "paper_reconstructability_restart_recovery_required",
-        "paper_reconstructability_manual_review_required",
-    }.issubset(set(data["contract_violations"]))
+    assert data["contract_violations"] == EXPECTED_PAPER_CONTRACT_VIOLATIONS
     assert data["asset_lane"] == "stock_etf_cash"
     assert data["broker"] == "ibkr"
     assert data["environment"] == "paper"
@@ -286,8 +302,7 @@ def test_stock_etf_paper_status_rejects_stale_lifecycle_shape() -> None:
 
     assert data["paper_status_state"] == "contract_violation_blocked"
     assert data["lifecycle_event"]["state_machine_contract_fields_present"] is False
-    assert "paper_lifecycle_state_machine_fields_missing" in data["contract_violations"]
-    assert "paper_request_expected_contract_id_mismatch" in data["contract_violations"]
+    assert data["contract_violations"] == EXPECTED_STALE_PAPER_CONTRACT_VIOLATIONS
     assert data["paper_order_entry_visible"] is False
     assert data["order_routed"] is False
 
@@ -301,3 +316,18 @@ def test_stock_etf_paper_status_requires_auth() -> None:
     resp = client.get("/api/v1/stock-etf/paper-status")
 
     assert resp.status_code == 401
+
+
+def test_stock_etf_paper_contract_violation_assertions_stay_exact() -> None:
+    source = Path(__file__).read_text(encoding="utf-8")
+    source_under_test = source.split(
+        "def test_stock_etf_paper_contract_violation_assertions_stay_exact",
+        1,
+    )[0]
+    forbidden_patterns = [
+        'set(data["contract_violations"])',
+        'in data["contract_violations"]',
+        'issubset(set(data["contract_violations"]))',
+    ]
+    for pattern in forbidden_patterns:
+        assert pattern not in source_under_test
