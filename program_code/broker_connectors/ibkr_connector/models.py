@@ -7,6 +7,9 @@ from dataclasses import asdict, dataclass, field
 
 IBKR_CONNECTOR_SURFACE_ID = "ibkr_stock_etf_readonly_connector_skeleton_v1"
 IBKR_PAPER_ATTESTATION_CONTRACT_ID = "ibkr_paper_attestation_v1"
+IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID = (
+    "stock_etf_ibkr_readonly_probe_result_import_request_v1"
+)
 IBKR_SESSION_ATTESTATION_CONTRACT_ID = "ibkr_session_attestation_v1"
 
 
@@ -123,6 +126,46 @@ class IbkrSessionAttestationPreview:
 
 
 @dataclass(frozen=True)
+class IbkrReadOnlyProbeResultImportPreview:
+    """Secret-free placeholder for a future sanitized read-result import request."""
+
+    contract_id: str = IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID
+    source_version: int = 1
+    request_artifact_present: bool = False
+    request_validated: bool = False
+    accepted_for_import: bool = False
+    status: str = "blocked_no_result_import_request_artifact"
+    blockers: tuple[str, ...] = field(
+        default_factory=lambda: (
+            "phase2_gate_not_accepted",
+            "probe_result_import_request_blocked_source_only",
+            "probe_result_import_request_artifact_missing",
+        )
+    )
+    asset_lane: str = "stock_etf_cash"
+    broker: str = "ibkr"
+    environment: str = "read_only"
+    network_contact_performed: bool = False
+    ibkr_contact_performed: bool = False
+    connector_runtime_started: bool = False
+    secret_content_loaded: bool = False
+    secret_content_serialized: bool = False
+    result_import_performed: bool = False
+    evidence_writer_started: bool = False
+    scorecard_writer_started: bool = False
+    db_apply_performed: bool = False
+    order_routed: bool = False
+    paper_order_submitted: bool = False
+    bybit_path_reused: bool = False
+    live_or_tiny_live_authorized: bool = False
+
+    def to_dict(self) -> dict[str, object]:
+        payload = asdict(self)
+        payload["blockers"] = list(self.blockers)
+        return payload
+
+
+@dataclass(frozen=True)
 class IbkrPaperAttestationPreview:
     """Secret-free placeholder for future paper account/channel attestation."""
 
@@ -181,6 +224,21 @@ def blocked_session_attestation_preview(
     if config is not None:
         blockers.extend(config.validate_source_boundary())
     return IbkrSessionAttestationPreview(blockers=_dedupe_blockers(blockers))
+
+
+def blocked_readonly_probe_result_import_preview(
+    *extra_blockers: str,
+    config: IbkrReadOnlyEndpointConfig | None = None,
+) -> IbkrReadOnlyProbeResultImportPreview:
+    blockers = [
+        "phase2_gate_not_accepted",
+        "probe_result_import_request_blocked_source_only",
+        "probe_result_import_request_artifact_missing",
+        *extra_blockers,
+    ]
+    if config is not None:
+        blockers.extend(config.validate_source_boundary())
+    return IbkrReadOnlyProbeResultImportPreview(blockers=_dedupe_blockers(blockers))
 
 
 def blocked_paper_attestation_preview(

@@ -3424,3 +3424,11 @@
 - GUI readiness renderer and API-unavailable fallback display the result-import request contract/status/blockers/side-effect flags without adding endpoints, IPC methods, GUI fanout, client input, or connector public API.
 - Verification passed: Python compile, JS syntax, scoped Rust rustfmt, focused FastAPI readiness/static `20 passed`, focused engine readiness IPC PASS, full Stock/ETF FastAPI/static `120 passed`, and engine Stock/ETF IPC regression `31 passed`.
 - Boundary unchanged: no IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe, result import, collector, market-data ingestion, DQ writer, paper order/cancel/replace, DB/evidence/scorecard writer, evidence clock, tiny-live/live, Linux runtime, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF Connector Result-Import Preview Guard
+
+- PM added `IbkrReadOnlyProbeResultImportPreview` plus `IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID` to the inert Python IBKR connector skeleton.
+- `IbkrReadOnlyClient.readonly_probe_result_import_request_preview()` and a matching fixture now return a blocked no-artifact result-import request preview with import/writer/DB/order/live/Bybit flags false.
+- The connector package export freeze, read-only client public surface freeze, payload shape guard, no-Bybit-import guard, and Python no-write static guard now cover the new preview.
+- Verification passed: Python compile, connector skeleton focused `8 passed`, Python no-write static guard `21 passed`, and full Stock/ETF FastAPI/static `120 passed`.
+- Boundary unchanged: no endpoint, IPC method, FastAPI production import, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe, result import, DB/evidence/scorecard writer, paper order/cancel/replace, tiny-live/live, Linux runtime, or Bybit behavior change.
