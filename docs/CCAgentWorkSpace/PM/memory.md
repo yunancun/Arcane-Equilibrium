@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-01 Standing Envelope Runtime Refresh Blocked By Source Drift
+
+- PM attempted the constrained standing Demo loss-control envelope runtime refresh across clean heads `477b248...`, `67c12f...`, and `19dae039...`; E3/BB approvals were exact-source-bound and became stale before action.
+- Runtime precheck still showed expired standing auth sha `8c891b4e...` for `grid_trading|ETHUSDT|Buy`, cap `954.18759458`, max probe orders `2`, canonical soak plan sha `30056993...`, and Demo-only/mainnet-disabled service posture.
+- PM stopped before any Control API GET or envelope materialization when final source check advanced to `ed2b7514...`; state transition `BLOCKED_BY_RUNTIME`. Next blocker is current-head source stability or a reviewed source-impact guard before retrying the runtime refresh.
+
 ## 2026-07-01 Stock/ETF GUI Lane Endpoint Exact Blocker Guard
 
 - PM tightened `StockEtfGuiLaneContractV1` read-only endpoint aggregate acceptance to an exact ordered blocker vector for all Stock/ETF GUI status endpoints and GET-only flags.
