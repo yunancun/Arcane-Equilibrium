@@ -20,27 +20,75 @@ use openclaw_types::{
 
 #[test]
 fn default_gui_lane_contract_blocks_gui_authority() {
+    use StockEtfGuiLaneBlocker as Blocker;
+
     let verdict = StockEtfGuiLaneContractV1::default().validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::ContractIdMissing));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::SourceVersionMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::StockEtfTabMissing));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::ReadinessEndpointMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::DisplayOnlyMissing));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::ClientLaneStateTrusted));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::ContractIdMissing,
+            Blocker::SourceVersionMismatch,
+            Blocker::StockEtfTabMissing,
+            Blocker::ReadinessEndpointMismatch,
+            Blocker::ReadinessEndpointNotGetOnly,
+            Blocker::LaneStatusEndpointMismatch,
+            Blocker::LaneStatusEndpointNotGetOnly,
+            Blocker::Phase0StatusEndpointMismatch,
+            Blocker::Phase0StatusEndpointNotGetOnly,
+            Blocker::DataFoundationStatusEndpointMismatch,
+            Blocker::DataFoundationStatusEndpointNotGetOnly,
+            Blocker::PolicyStatusEndpointMismatch,
+            Blocker::PolicyStatusEndpointNotGetOnly,
+            Blocker::AuthorizationStatusEndpointMismatch,
+            Blocker::AuthorizationStatusEndpointNotGetOnly,
+            Blocker::AccountStatusEndpointMismatch,
+            Blocker::AccountStatusEndpointNotGetOnly,
+            Blocker::EvidenceStatusEndpointMismatch,
+            Blocker::EvidenceStatusEndpointNotGetOnly,
+            Blocker::UniverseStatusEndpointMismatch,
+            Blocker::UniverseStatusEndpointNotGetOnly,
+            Blocker::ShadowStatusEndpointMismatch,
+            Blocker::ShadowStatusEndpointNotGetOnly,
+            Blocker::PaperStatusEndpointMismatch,
+            Blocker::PaperStatusEndpointNotGetOnly,
+            Blocker::ReconciliationStatusEndpointMismatch,
+            Blocker::ReconciliationStatusEndpointNotGetOnly,
+            Blocker::ScorecardStatusEndpointMismatch,
+            Blocker::ScorecardStatusEndpointNotGetOnly,
+            Blocker::LaunchStatusEndpointMismatch,
+            Blocker::LaunchStatusEndpointNotGetOnly,
+            Blocker::ReleasePacketStatusEndpointMismatch,
+            Blocker::ReleasePacketStatusEndpointNotGetOnly,
+            Blocker::DisableCleanupStatusEndpointMismatch,
+            Blocker::DisableCleanupStatusEndpointNotGetOnly,
+            Blocker::DisplayOnlyMissing,
+            Blocker::ClientLaneStateTrusted,
+            Blocker::LocalStorageAuthorityNotDenied,
+            Blocker::QueryParamAuthorityNotDenied,
+            Blocker::HiddenFieldAuthorityNotDenied,
+            Blocker::LoginSuccessSelectorPresent,
+            Blocker::PostRoutePresent,
+            Blocker::OrderWidgetPresent,
+            Blocker::SecretWidgetPresent,
+            Blocker::IbkrContactOnRenderAllowed,
+            Blocker::PaperOrderEntryVisible,
+            Blocker::StockLiveDisabledDisplayMissing,
+            Blocker::CfdSurfaceNotHiddenOrFailClosed,
+            Blocker::RouteCachePartitionMissing,
+            Blocker::AuthPartitionMissing,
+            Blocker::StaleCacheCrossLaneNotDenied,
+            Blocker::CryptoTabsRegressionMissing,
+            Blocker::DecisionLeaseRiskRegressionMissing,
+            Blocker::StaticSourceHashInvalid,
+            Blocker::RouteTestHashInvalid,
+            Blocker::CryptoRegressionHashInvalid,
+            Blocker::LiveOrderDenialMissing,
+            Blocker::SecretSlotDenialMissing,
+            Blocker::PreGateContactDenialMissing,
+        ]
+    );
 }
 
 #[test]
@@ -147,12 +195,13 @@ fn gui_lane_contract_requires_exact_contract_id_and_source_version() {
     let verdict = contract.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::ContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::SourceVersionMismatch));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            StockEtfGuiLaneBlocker::ContractIdMismatch,
+            StockEtfGuiLaneBlocker::SourceVersionMismatch,
+        ]
+    );
 }
 
 #[test]
@@ -303,18 +352,15 @@ fn client_lane_state_sources_cannot_authorize() {
     let verdict = contract.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::ClientLaneStateTrusted));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::LocalStorageAuthorityNotDenied));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::QueryParamAuthorityNotDenied));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::HiddenFieldAuthorityNotDenied));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            StockEtfGuiLaneBlocker::ClientLaneStateTrusted,
+            StockEtfGuiLaneBlocker::LocalStorageAuthorityNotDenied,
+            StockEtfGuiLaneBlocker::QueryParamAuthorityNotDenied,
+            StockEtfGuiLaneBlocker::HiddenFieldAuthorityNotDenied,
+        ]
+    );
 }
 
 #[test]
@@ -331,21 +377,18 @@ fn effect_capable_gui_surfaces_are_rejected() {
     let verdict = contract.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::PostRoutePresent));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::OrderWidgetPresent));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::SecretWidgetPresent));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::IbkrContactPerformed));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::SecretContentSerialized));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            StockEtfGuiLaneBlocker::PostRoutePresent,
+            StockEtfGuiLaneBlocker::OrderWidgetPresent,
+            StockEtfGuiLaneBlocker::SecretWidgetPresent,
+            StockEtfGuiLaneBlocker::IbkrContactOnRenderAllowed,
+            StockEtfGuiLaneBlocker::PaperOrderEntryVisible,
+            StockEtfGuiLaneBlocker::IbkrContactPerformed,
+            StockEtfGuiLaneBlocker::SecretContentSerialized,
+        ]
+    );
 }
 
 #[test]
@@ -362,21 +405,18 @@ fn route_cache_auth_and_crypto_regression_evidence_are_required() {
     let verdict = contract.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::RouteCachePartitionMissing));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::AuthPartitionMissing));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::CryptoTabsRegressionMissing));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::DecisionLeaseRiskRegressionMissing));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::RouteTestHashInvalid));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            StockEtfGuiLaneBlocker::RouteCachePartitionMissing,
+            StockEtfGuiLaneBlocker::AuthPartitionMissing,
+            StockEtfGuiLaneBlocker::StaleCacheCrossLaneNotDenied,
+            StockEtfGuiLaneBlocker::CryptoTabsRegressionMissing,
+            StockEtfGuiLaneBlocker::DecisionLeaseRiskRegressionMissing,
+            StockEtfGuiLaneBlocker::RouteTestHashInvalid,
+            StockEtfGuiLaneBlocker::CryptoRegressionHashInvalid,
+        ]
+    );
 }
 
 #[test]
@@ -387,15 +427,14 @@ fn denied_effect_operations_are_required() {
     let verdict = contract.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::LiveOrderDenialMissing));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::SecretSlotDenialMissing));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::PreGateContactDenialMissing));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            StockEtfGuiLaneBlocker::LiveOrderDenialMissing,
+            StockEtfGuiLaneBlocker::SecretSlotDenialMissing,
+            StockEtfGuiLaneBlocker::PreGateContactDenialMissing,
+        ]
+    );
 }
 
 #[test]

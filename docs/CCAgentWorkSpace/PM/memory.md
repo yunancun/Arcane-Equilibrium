@@ -3987,3 +3987,10 @@
 - Source-static parsing now pins runbook/env/proof validator blocker emit order backing the exact acceptance vectors.
 - Verification passed: disable cleanup source static `8 passed`; disable cleanup Rust acceptance `7 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `337` integration/acceptance + `0` doc-tests; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, IPC server start, service stop, runtime action, IBKR contact, connector runtime, secret access, DB cleanup/delete/truncate, paper order routing, broker session, paper-shadow launch, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF GUI Lane Default Authority Exact Guard
+
+- PM added test-only/source-static exact-blocker coverage for default `StockEtfGuiLaneContractV1`, identity drift, client lane state authority, effect-capable GUI surfaces, route/cache/auth evidence, and denied effect operations.
+- Source-static parsing now pins GUI lane validator blocker emit order backing the exact acceptance vectors.
+- Verification passed: GUI lane source static `7 passed`; GUI lane Rust acceptance `9 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `337` integration/acceptance + `0` doc-tests; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, GUI runtime/API route/IPC behavior change, IBKR contact, connector runtime, secret access, paper order routing, broker session, DB/evidence writer, scorecard writer, paper-shadow launch, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
