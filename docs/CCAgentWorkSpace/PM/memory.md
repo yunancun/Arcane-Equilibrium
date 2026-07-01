@@ -4054,3 +4054,9 @@
 - Source-static parsing now pins external surface gate validator blocker emit order.
 - Verification passed: IBKR Phase2 gate source static `7 passed`; IBKR Phase2 gate Rust acceptance `13 passed`; full `cargo test -p openclaw_types` PASS; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, GUI runtime/API route/IPC behavior change, IBKR contact, connector runtime, socket/client construction, secret access, paper order routing, broker session, DB/evidence writer, scorecard writer, paper-shadow launch, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 No-Order Refresh READY Invalidated Before Request 3947
+
+- PM rotated `P0-CURRENT-CANDIDATE-NOORDER-REFRESH-CURRENT-HEAD-E3-BB-REQUEST` to clean source `3947d3c5...`; READY passed, but final pre-request fetch advanced `origin/main` to `c1870447...`.
+- State transition `ROTATED`; final state sha `da2f8789638080477e12e1c638a3c598e96af2b849a98088a3edcc72f1ac9808`; no exact request, E3/BB dispatch, Control API/Bybit/PG/lease/order/runtime mutation, or proof.
+- Next PM starts from `c1870447...` or newer and must obtain a fresh source-stability quiet window before regenerating the request.
