@@ -8801,3 +8801,42 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 runtime、不做 socket/client construction、不執行 paper order routing、不做 broker session、不做 broker routing、
 不做 DB/evidence writer、不啟動 scorecard writer、不啟動 evidence clock、不做 release launch、不做 Linux runtime
 sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
+
+## 213. 2026-07-01 PM session source checkpoint：IBKR Paper Lifecycle Exact Blocker Guard
+
+本 checkpoint 補強 `BrokerLifecycleEventLogV1` append-only paper lifecycle/event-log 的 aggregate fail-closed
+lineage，固定 default lifecycle events、contract/source drift、live/account-write cross-wire、append-only chain gaps、
+genesis shape、operation/transition mismatches、terminal-state reversal、unknown-state recovery、stale-policy drift、
+denied-event posture 的 ordered blocker vectors 或 exact single-blocker vectors。這不是 Rust production behavior
+change、不是 IPC/API route change、不是 IBKR contact、不是 connector runtime、不是 socket/client construction、不是
+secret lookup、不是 lifecycle writer 啟動、不是 paper order route enablement、不是 fill import execution、不是
+tiny-live/live gate；只把 IBKR paper lifecycle source-only evidence contract 的 fail-closed lineage 變成
+exact-blocker acceptance guard。
+
+已完成：
+
+- 在 `ibkr_paper_lifecycle_acceptance.rs` 將 default `BrokerLifecycleEventLogV1` 固定為完整順序 blocker 向量，
+  覆蓋 lifecycle/event-log/source identity、event/request hashes、operation transition、local/idempotency/
+  reconciliation ids、state transition、denial reason、stale policy 與 raw/redacted artifact hashes。
+- 在同檔將 contract/source drift、live/account-write cross-wire、append-only chain gaps、genesis shape、
+  operation/transition mismatches、terminal-state reversal、unknown-state recovery、stale-policy drift、denied-event
+  posture 固定為 exact blocker vectors。
+- 移除 paper lifecycle blocker 的 loose `blockers.contains` checks；aggregate 與 cross-wire cases 改為完整
+  ordered-vector assertions。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- IBKR paper lifecycle source static pytest：`7 passed`。
+- IBKR paper lifecycle Rust acceptance：`15 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、
+不改 GUI runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector
+runtime、不做 socket/client construction、不啟動 lifecycle writer、不執行 paper order routing、不執行 fill import、
+不做 broker session、不做 broker routing、不做 DB/evidence writer、不啟動 scorecard writer、不啟動 evidence clock、
+不做 release launch、不做 Linux runtime sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit
+behavior change。

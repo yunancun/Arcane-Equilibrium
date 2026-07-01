@@ -39,70 +39,64 @@ fn accepted_ack_lifecycle_event_is_append_only_evidence() {
 
 #[test]
 fn default_lifecycle_event_is_blocked_and_incomplete() {
+    use IbkrPaperLifecycleEventBlocker as Blocker;
+
     let verdict = BrokerLifecycleEventLogV1::default().validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperLifecycleEventBlocker::LifecycleContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperLifecycleEventBlocker::EventLogContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperLifecycleEventBlocker::SourceVersionMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperLifecycleEventBlocker::EventIdMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperLifecycleEventBlocker::EventSequenceMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperLifecycleEventBlocker::PreviousEventHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperLifecycleEventBlocker::EventTimeMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperLifecycleEventBlocker::EventHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperLifecycleEventBlocker::RequestContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperLifecycleEventBlocker::RequestEnvelopeHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperLifecycleEventBlocker::LocalOrderIdMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperLifecycleEventBlocker::InvalidStateTransition));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperLifecycleEventBlocker::StaleStatePolicyMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperLifecycleEventBlocker::RawArtifactHashInvalid));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::LifecycleContractIdMismatch,
+            Blocker::EventLogContractIdMismatch,
+            Blocker::SourceVersionMismatch,
+            Blocker::EventIdMissing,
+            Blocker::EventSequenceMissing,
+            Blocker::PreviousEventHashInvalid,
+            Blocker::EventTimeMissing,
+            Blocker::EventHashInvalid,
+            Blocker::RequestContractIdMismatch,
+            Blocker::RequestEnvelopeHashInvalid,
+            Blocker::OperationTransitionMismatch,
+            Blocker::LocalOrderIdMissing,
+            Blocker::IdempotencyKeyMissing,
+            Blocker::ReconciliationRunIdMissing,
+            Blocker::InvalidStateTransition,
+            Blocker::DenialReasonMissingOnDeniedEvent,
+            Blocker::StaleStatePolicyMissing,
+            Blocker::RawArtifactHashInvalid,
+            Blocker::RedactedSummaryHashInvalid,
+        ]
+    );
 }
 
 #[test]
 fn lifecycle_event_requires_exact_contract_ids_and_source_version() {
+    use IbkrPaperLifecycleEventBlocker as Blocker;
+
     let event = BrokerLifecycleEventLogV1 {
         lifecycle_contract_id: "ibkr_paper_order_lifecycle_v1_fixture".to_string(),
         event_log_contract_id: "broker_lifecycle_event_log_v1_fixture".to_string(),
         source_version: 2,
         ..BrokerLifecycleEventLogV1::accepted_ack_fixture()
     };
-    let blockers = event.validate().blockers;
+    let verdict = event.validate();
 
-    assert!(blockers.contains(&IbkrPaperLifecycleEventBlocker::LifecycleContractIdMismatch));
-    assert!(blockers.contains(&IbkrPaperLifecycleEventBlocker::EventLogContractIdMismatch));
-    assert!(blockers.contains(&IbkrPaperLifecycleEventBlocker::SourceVersionMismatch));
+    assert!(!verdict.accepted);
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::LifecycleContractIdMismatch,
+            Blocker::EventLogContractIdMismatch,
+            Blocker::SourceVersionMismatch,
+        ]
+    );
 }
 
 #[test]
 fn live_or_account_write_operation_is_not_paper_lifecycle() {
+    use IbkrPaperLifecycleEventBlocker as Blocker;
+
     let event = BrokerLifecycleEventLogV1 {
         environment: BrokerEnvironment::LiveReservedDenied,
         operation: BrokerOperation::LiveOrderSubmit,
@@ -111,19 +105,21 @@ fn live_or_account_write_operation_is_not_paper_lifecycle() {
     let verdict = event.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperLifecycleEventBlocker::LiveEnvironmentDenied));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperLifecycleEventBlocker::PaperEnvironmentRequired));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperLifecycleEventBlocker::OperationNotPaperLifecycle));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::LiveEnvironmentDenied,
+            Blocker::PaperEnvironmentRequired,
+            Blocker::OperationNotPaperLifecycle,
+            Blocker::OperationTransitionMismatch,
+        ]
+    );
 }
 
 #[test]
 fn lifecycle_event_requires_paper_environment() {
+    use IbkrPaperLifecycleEventBlocker as Blocker;
+
     let event = BrokerLifecycleEventLogV1 {
         environment: BrokerEnvironment::ReadOnly,
         ..BrokerLifecycleEventLogV1::accepted_ack_fixture()
@@ -131,13 +127,13 @@ fn lifecycle_event_requires_paper_environment() {
     let verdict = event.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperLifecycleEventBlocker::PaperEnvironmentRequired));
+    assert_eq!(verdict.blockers, vec![Blocker::PaperEnvironmentRequired]);
 }
 
 #[test]
 fn append_only_chain_and_request_envelope_are_required() {
+    use IbkrPaperLifecycleEventBlocker as Blocker;
+
     let broken_chain = BrokerLifecycleEventLogV1 {
         event_sequence: 0,
         previous_event_hash: String::new(),
@@ -146,13 +142,18 @@ fn append_only_chain_and_request_envelope_are_required() {
         request_envelope_hash: String::new(),
         ..BrokerLifecycleEventLogV1::accepted_ack_fixture()
     };
-    let blockers = broken_chain.validate().blockers;
-
-    assert!(blockers.contains(&IbkrPaperLifecycleEventBlocker::EventSequenceMissing));
-    assert!(blockers.contains(&IbkrPaperLifecycleEventBlocker::PreviousEventHashInvalid));
-    assert!(blockers.contains(&IbkrPaperLifecycleEventBlocker::EventHashInvalid));
-    assert!(blockers.contains(&IbkrPaperLifecycleEventBlocker::RequestContractIdMismatch));
-    assert!(blockers.contains(&IbkrPaperLifecycleEventBlocker::RequestEnvelopeHashInvalid));
+    let verdict = broken_chain.validate();
+    assert!(!verdict.accepted);
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::EventSequenceMissing,
+            Blocker::PreviousEventHashInvalid,
+            Blocker::EventHashInvalid,
+            Blocker::RequestContractIdMismatch,
+            Blocker::RequestEnvelopeHashInvalid,
+        ]
+    );
 
     let bad_genesis = BrokerLifecycleEventLogV1 {
         event_sequence: 2,
@@ -160,9 +161,15 @@ fn append_only_chain_and_request_envelope_are_required() {
         previous_event_hash: "f".repeat(64),
         ..BrokerLifecycleEventLogV1::accepted_ack_fixture()
     };
-    let blockers = bad_genesis.validate().blockers;
-    assert!(blockers.contains(&IbkrPaperLifecycleEventBlocker::GenesisSequenceInvalid));
-    assert!(blockers.contains(&IbkrPaperLifecycleEventBlocker::GenesisPreviousEventHashPresent));
+    let verdict = bad_genesis.validate();
+    assert!(!verdict.accepted);
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::GenesisSequenceInvalid,
+            Blocker::GenesisPreviousEventHashPresent,
+        ]
+    );
 
     let genesis = BrokerLifecycleEventLogV1 {
         event_sequence: 1,
@@ -294,17 +301,12 @@ fn lifecycle_event_rejects_each_paper_authority_and_artifact_gap_independently()
         if blocker == Blocker::OperationNotPaperLifecycle {
             let verdict = event.validate();
             assert!(!verdict.accepted);
-            assert!(verdict
-                .blockers
-                .contains(&Blocker::OperationNotPaperLifecycle));
-            assert!(verdict
-                .blockers
-                .contains(&Blocker::OperationTransitionMismatch));
             assert_eq!(
-                verdict.blockers.len(),
-                2,
-                "expected operation aggregate only, got {:?}",
-                verdict.blockers
+                verdict.blockers,
+                vec![
+                    Blocker::OperationNotPaperLifecycle,
+                    Blocker::OperationTransitionMismatch,
+                ]
             );
         } else {
             assert_single_blocker(event, blocker);
@@ -333,8 +335,10 @@ fn operation_must_match_lifecycle_transition_shape() {
         commission_report_id: "paper_commission_0001".to_string(),
         ..BrokerLifecycleEventLogV1::accepted_ack_fixture()
     };
-    let blockers = submit_used_for_fill.validate().blockers;
-    assert!(blockers.contains(&IbkrPaperLifecycleEventBlocker::OperationTransitionMismatch));
+    assert_single_blocker(
+        submit_used_for_fill,
+        IbkrPaperLifecycleEventBlocker::OperationTransitionMismatch,
+    );
 
     let cancel_used_for_replace = BrokerLifecycleEventLogV1 {
         previous_state: IbkrPaperOrderLifecycleState::BrokerAcknowledged,
@@ -342,12 +346,16 @@ fn operation_must_match_lifecycle_transition_shape() {
         operation: BrokerOperation::PaperOrderCancel,
         ..BrokerLifecycleEventLogV1::accepted_ack_fixture()
     };
-    let blockers = cancel_used_for_replace.validate().blockers;
-    assert!(blockers.contains(&IbkrPaperLifecycleEventBlocker::OperationTransitionMismatch));
+    assert_single_blocker(
+        cancel_used_for_replace,
+        IbkrPaperLifecycleEventBlocker::OperationTransitionMismatch,
+    );
 }
 
 #[test]
 fn terminal_state_cannot_transition_back_to_active_lifecycle() {
+    use IbkrPaperLifecycleEventBlocker as Blocker;
+
     let event = BrokerLifecycleEventLogV1 {
         previous_state: IbkrPaperOrderLifecycleState::Filled,
         next_state: IbkrPaperOrderLifecycleState::CancelRequested,
@@ -358,13 +366,20 @@ fn terminal_state_cannot_transition_back_to_active_lifecycle() {
     let verdict = event.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperLifecycleEventBlocker::InvalidStateTransition));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::OperationTransitionMismatch,
+            Blocker::InvalidStateTransition,
+            Blocker::StaleStatePolicyMismatch,
+        ]
+    );
 }
 
 #[test]
 fn unknown_state_only_recovers_to_manual_review_or_terminal_with_evidence() {
+    use IbkrPaperLifecycleEventBlocker as Blocker;
+
     let invalid = BrokerLifecycleEventLogV1 {
         previous_state: IbkrPaperOrderLifecycleState::StateUnknown,
         next_state: IbkrPaperOrderLifecycleState::BrokerAcknowledged,
@@ -372,12 +387,15 @@ fn unknown_state_only_recovers_to_manual_review_or_terminal_with_evidence() {
     };
     let invalid_verdict = invalid.validate();
     assert!(!invalid_verdict.accepted);
-    assert!(invalid_verdict
-        .blockers
-        .contains(&IbkrPaperLifecycleEventBlocker::InvalidStateTransition));
-    assert!(invalid_verdict
-        .blockers
-        .contains(&IbkrPaperLifecycleEventBlocker::StateUnknownRecoveryInvalid));
+    assert_eq!(
+        invalid_verdict.blockers,
+        vec![
+            Blocker::OperationTransitionMismatch,
+            Blocker::InvalidStateTransition,
+            Blocker::StateUnknownRecoveryInvalid,
+            Blocker::StaleStatePolicyMismatch,
+        ]
+    );
 
     let terminal = BrokerLifecycleEventLogV1 {
         operation: BrokerOperation::PaperOrderFillImport,
@@ -398,8 +416,10 @@ fn unknown_state_only_recovers_to_manual_review_or_terminal_with_evidence() {
         stale_state_policy: Some(IbkrPaperStaleStatePolicy::ManualReviewOnUnknown),
         ..BrokerLifecycleEventLogV1::accepted_ack_fixture()
     };
-    let blockers = wrong_policy.validate().blockers;
-    assert!(blockers.contains(&IbkrPaperLifecycleEventBlocker::StaleStatePolicyMismatch));
+    assert_single_blocker(
+        wrong_policy,
+        IbkrPaperLifecycleEventBlocker::StaleStatePolicyMismatch,
+    );
 
     let manual_review = BrokerLifecycleEventLogV1 {
         operation: BrokerOperation::PaperOrderSubmit,
@@ -414,12 +434,16 @@ fn unknown_state_only_recovers_to_manual_review_or_terminal_with_evidence() {
         stale_state_policy: Some(IbkrPaperStaleStatePolicy::PreserveTerminalWithEvidence),
         ..BrokerLifecycleEventLogV1::accepted_ack_fixture()
     };
-    let blockers = active_preserve_policy.validate().blockers;
-    assert!(blockers.contains(&IbkrPaperLifecycleEventBlocker::StaleStatePolicyMismatch));
+    assert_single_blocker(
+        active_preserve_policy,
+        IbkrPaperLifecycleEventBlocker::StaleStatePolicyMismatch,
+    );
 }
 
 #[test]
 fn denied_lifecycle_event_requires_denial_reason() {
+    use IbkrPaperLifecycleEventBlocker as Blocker;
+
     let denied_without_reason = BrokerLifecycleEventLogV1 {
         previous_state: IbkrPaperOrderLifecycleState::RustAuthorityAccepted,
         next_state: IbkrPaperOrderLifecycleState::Rejected,
@@ -429,9 +453,10 @@ fn denied_lifecycle_event_requires_denial_reason() {
     };
     let verdict = denied_without_reason.validate();
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperLifecycleEventBlocker::DenialReasonMissingOnDeniedEvent));
+    assert_eq!(
+        verdict.blockers,
+        vec![Blocker::DenialReasonMissingOnDeniedEvent]
+    );
 
     let denied_with_reason = BrokerLifecycleEventLogV1 {
         denial_reason: Some(StockEtfDenialReason::AuthorizationInvalid),
@@ -446,8 +471,7 @@ fn denied_lifecycle_event_requires_denial_reason() {
         denial_reason: Some(StockEtfDenialReason::AuthorizationInvalid),
         ..BrokerLifecycleEventLogV1::accepted_ack_fixture()
     };
-    let blockers = denied_but_active.validate().blockers;
-    assert!(blockers.contains(&IbkrPaperLifecycleEventBlocker::DeniedEventAdvancesActiveState));
+    assert_single_blocker(denied_but_active, Blocker::DeniedEventAdvancesActiveState);
 }
 
 #[test]

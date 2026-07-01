@@ -4121,3 +4121,10 @@
 - The acceptance test no longer uses loose tiny-live blocker helpers; aggregate and cross-wire paths now require complete ordered vectors.
 - Verification passed: Stock/ETF tiny-live eligibility source static `7 passed`; Stock/ETF tiny-live eligibility Rust acceptance `13 passed`; full `cargo test -p openclaw_types` PASS; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, GUI runtime/API route/IPC behavior change, IBKR contact, connector runtime, socket/client construction, secret access, paper order routing, broker session, DB/evidence writer, scorecard writer, evidence clock, paper-shadow launch, release launch, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Paper Lifecycle Exact Blocker Guard
+
+- PM tightened test-only exact-blocker coverage for `BrokerLifecycleEventLogV1` aggregate fail-closed paths: default lifecycle events, contract/source drift, live/account-write cross-wire, append-only chain gaps, genesis shape, operation/transition mismatches, terminal-state reversal, unknown-state recovery, stale-policy drift, and denied-event posture.
+- The acceptance test no longer uses loose paper lifecycle blocker checks; aggregate and cross-wire paths now require complete ordered vectors.
+- Verification passed: IBKR paper lifecycle source static `7 passed`; IBKR paper lifecycle Rust acceptance `15 passed`; full `cargo test -p openclaw_types` PASS; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, IPC/API behavior change, IBKR contact, connector runtime, socket/client construction, secret access, lifecycle writer, paper order routing, fill import execution, broker session, DB/evidence writer, scorecard writer, evidence clock, paper-shadow launch, release launch, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
