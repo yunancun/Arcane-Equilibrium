@@ -1428,3 +1428,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only structure guard for `stock_etf_phase3_evidence.rs` and `stock_etf_phase3_evidence/market_data.rs`, pinning Phase3 collector/DQ/evidence-clock/provenance/frozen-input posture.
 - The guard requires collector run PIT/provenance/reference/storage lineage, five green sessions, gap/DQ/replay/source hashes, DQ shape-vs-quality split, evidence-clock collector/DQ/source/market-data/scorecard-input lineage, connector/shadow green gates, PassDay/QuarantinedDay/WindowComplete rules, market-data provenance source/timestamp/adjustment/identity/calendar hashes, frozen inputs, and no ingest/clock/writer/DB/contact/runtime/secret/live authority tokens.
 - Verification passed: new guard `10 passed`; Phase3 evidence acceptance `19 passed`; full `cargo test -p openclaw_types` PASS. This grants no IBKR contact, connector runtime, market-data ingest, collector runtime, DQ/evidence/scorecard writer, evidence clock runtime, DB apply, paper order, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Paper Order Fixture Source Static Guard
+
+- PM added a source-only structure guard for `stock_etf_paper_order_request/fixtures.rs`, pinning accepted preview/submit/cancel/replace paper-order fixture posture.
+- The guard requires preview ReadOnly SPY ETF buy limit DAY shape, submit PaperRehearsal/effect=true session/scoped/decision/guardian/lifecycle/registry/audit lineage, cancel broker-order/cancel-reason shape, replace replacement-idempotency/quantity/limit/TIF/reason shape, fixture inheritance/field clearing, and no runtime/secret/order/Bybit client tokens.
+- Verification passed: new guard `6 passed`; paper order request acceptance `8 passed`; full `cargo test -p openclaw_types` PASS. This grants no IBKR contact, connector runtime, paper order route, paper submit/cancel/replace execution, secret access, tiny-live/live, or Bybit behavior change.

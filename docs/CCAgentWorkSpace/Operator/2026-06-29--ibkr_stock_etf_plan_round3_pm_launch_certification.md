@@ -3284,3 +3284,29 @@ Verification 已過：
 邊界不變：沒有 IBKR contact、沒有 connector runtime、沒有 market-data ingest、沒有 collector
 runtime、沒有 DQ/evidence/scorecard writer、沒有 evidence clock runtime、沒有 DB apply、沒有
 paper order、沒有 tiny-live/live authorization，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Paper Order Fixture Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF Paper Order Fixture Source Static Guard`。
+
+這個 guard 鎖住 `stock_etf_paper_order_request/fixtures.rs` 的 accepted fixture source hygiene：
+accepted preview/submit/cancel/replace fixture functions、paper order request contract id、
+lane-scoped IPC methods、broker operations、authority scopes、instrument/order/price/TIF enums 必須
+保留。
+
+Guard 要求 preview fixture 保留 StockEtfCash/IBKR/Paper、PreviewPaperOrder、PaperOrderSubmit、
+ReadOnly authority、SPY ETF buy limit DAY shape、risk/instrument/cost/PIT/source hashes。Submit
+fixture 必須保留 PaperRehearsal、effect_capable=true、session/scoped/decision/guardian/lifecycle/
+broker-registry/audit lineage、local order id、idempotency key。Cancel/replace fixtures 必須保留
+broker-order/cancel-reason 與 replacement idempotency/quantity/limit/TIF/reason shape。
+
+Verification 已過：
+
+- New structure guard pytest：`6 passed`
+- Focused paper order request acceptance：`8 passed`
+- Full `cargo test -p openclaw_types`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 connector runtime、沒有 paper order route、沒有 paper
+submit/cancel/replace execution、沒有 secret access、沒有 tiny-live/live authorization，也沒有改動
+Bybit live execution 行為。
