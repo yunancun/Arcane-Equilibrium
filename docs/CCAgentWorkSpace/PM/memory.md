@@ -31,6 +31,12 @@
 - Verification passed: connector skeleton focused `9`, Python no-write/static/GUI guard focused `30`, and Stock/ETF Python route/static `121`.
 - Boundary unchanged: no IBKR contact, SDK, secret, connector runtime, paper order, fill import, DB apply, evidence clock, tiny-live/live, or Bybit behavior change.
 
+## 2026-07-01 IBKR Phase2 Policy Source Static Guard
+
+- PM added a structure guard for `ibkr_phase2_policies.rs` covering the 800-line cap, named Phase2 policy contract/template presence, and no runtime/network/clock/order/Bybit tokens.
+- Verification passed: new structure guard `3`, focused Phase2 policy acceptance `9`, and full `cargo test -p openclaw_types`.
+- Boundary unchanged: no IBKR contact, SDK, secret, connector runtime, read probe, paper order, fill import, DB apply, evidence clock, tiny-live/live, or Bybit behavior change.
+
 ## 2026-06-30 IBKR Stock/ETF Reconciliation GUI Contract Display
 
 - PM split Stock/ETF reconciliation rendering into `tab-stock-etf-reconciliation.js`; main `tab-stock-etf.js` is now 1847 lines, below the 2000-line cap.

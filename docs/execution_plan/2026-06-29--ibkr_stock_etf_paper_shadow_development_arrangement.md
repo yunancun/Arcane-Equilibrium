@@ -4370,3 +4370,34 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper
 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
 clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
 Bybit behavior change。
+
+## 99. 2026-07-01 PM session source checkpoint：Phase2 Policy Source Static Guard
+
+本 checkpoint 為 `ibkr_phase2_policies.rs` 補上 source-only structure guard。這不是
+Phase 2 runtime start、不是 external-surface gate PASS、不是 IBKR contact；只把
+redaction、rate-limit、audit-event、paper-attestation、Python no-write guard 這組
+Phase 2 prerequisite policy contract 的 source hygiene 機器化。
+
+已完成：
+
+- 新增 `tests/structure/test_ibkr_phase2_policies_source_static.py`。
+- Guard 鎖住 `ibkr_phase2_policies.rs` 低於 800 行 governance cap。
+- Guard 要求 5 個 named contract id 與 5 個 policy `impl` 保持在 source 中，並
+  承認 bundle 自身也有 `source_template()`。
+- Guard 禁止 runtime material/network/clock/thread/process/order/Bybit runtime tokens，
+  防止 Phase 2 policy contract 檔長出 secret IO、socket、clock、spawn、order 或
+  Bybit runtime dependency。
+
+驗證：
+
+- New structure guard py_compile：PASS。
+- Focused structure guard pytest：`3 passed`。
+- Focused Phase2 policy acceptance：`9 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
+cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
+clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
+Bybit behavior change。

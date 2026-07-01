@@ -2404,3 +2404,24 @@ IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/cre
 沒有 connector runtime、沒有 read probe execution、沒有 result import、沒有 DB/
 evidence/scorecard writer、沒有 paper order/cancel/replace、沒有 tiny-live/live
 authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Phase2 Policy Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Phase2 Policy Source Static Guard`。
+
+這個 guard 鎖住 `ibkr_phase2_policies.rs` 的 Phase 2 prerequisite policy source
+hygiene：redaction、rate-limit、audit-event、paper-attestation、Python no-write
+guard 必須保留 named contract id/template surface，檔案低於 800 行，且不得長出
+runtime material、network、clock/thread/process、order 或 Bybit runtime token。
+
+Verification 已過：
+
+- New structure guard pytest：`3 passed`
+- Focused Phase2 policy acceptance：`9 passed`
+- Full `cargo test -p openclaw_types`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
+access/creation、沒有 connector runtime、沒有 read probe execution、沒有 result
+import、沒有 DB/evidence/scorecard writer、沒有 paper order/cancel/replace、沒有
+tiny-live/live authority，也沒有改動 Bybit live execution 行為。
