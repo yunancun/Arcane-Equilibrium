@@ -1272,3 +1272,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only structure guard for `ibkr_phase2_artifact.rs`, pinning artifact fields, blocker/verdict surface, PM/Operator reviewer checks, policy-flag cross-checks, secret-slot/API-topology runtime contract cross-checks, fail-closed defaults, and retroactive call denial.
 - The guard rejects env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens plus secret material access tokens, keeping the file as a PASS-artifact validator rather than artifact materialization or IBKR contact.
 - Verification passed: new guard `4 passed`; Phase2 artifact acceptance `8 passed`; full `cargo test -p openclaw_types` PASS. This grants no external-surface PASS, artifact seal, IBKR contact, connector runtime, secret access, paper order, DB/evidence/scorecard writer, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 IBKR Feature Flag Secret Auth Source Static Guard
+
+- PM added a source-only structure guard for `ibkr_feature_flag_secret_auth.rs`, pinning the feature flag, secret-slot contract, Phase2 artifact, session attestation, and authorization envelope decision matrix.
+- The guard requires fail-closed defaults, live/account-write denial, paper flag and shadow-only checks, secret/artifact/session validation, envelope scope/hash/expiry checks, and secret/account fingerprint consistency across secret/artifact/session contracts.
+- Verification passed: new guard `5 passed`; feature-flag/secret auth acceptance `8 passed`; full `cargo test -p openclaw_types` PASS. This grants no feature enablement, secret read, IBKR contact, connector runtime, paper order authorization, DB/evidence/scorecard writer, tiny-live/live, or Bybit behavior change.

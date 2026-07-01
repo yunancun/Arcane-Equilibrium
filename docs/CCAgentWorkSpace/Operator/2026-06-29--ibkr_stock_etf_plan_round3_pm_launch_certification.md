@@ -2549,3 +2549,29 @@ Verification 已過：
 access/creation、沒有 connector runtime、沒有 read probe execution、沒有 result
 import、沒有 DB/evidence/scorecard writer、沒有 paper order/cancel/replace、沒有
 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — IBKR Feature Flag Secret Auth Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`IBKR Feature Flag Secret Auth Source Static Guard`。
+
+這個 guard 鎖住 `ibkr_feature_flag_secret_auth.rs` 的 IBKR paper auth matrix source
+hygiene：feature flags、secret-slot contract、Phase2 artifact、session attestation 與
+authorization envelope 必須保留在同一個 fail-closed decision chain 中。
+
+Guard 同時要求 live/account-write operation denial、paper flag 與 shadow-only gate、
+secret/artifact/session validation、authorization envelope scope/hash/expiry，以及
+secret-slot fingerprint/account fingerprint 跨 secret/artifact/session 的一致性檢查不得
+消失。source 不得出現 env/fs/network/IBKR SDK/clock/thread/process/order/Bybit
+runtime tokens 或 secret material access tokens。
+
+Verification 已過：
+
+- New structure guard pytest：`5 passed`
+- Focused feature-flag/secret auth acceptance：`8 passed`
+- Full `cargo test -p openclaw_types`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
+access/creation、沒有 connector runtime、沒有 read probe execution、沒有 result
+import、沒有 DB/evidence/scorecard writer、沒有 paper order/cancel/replace、沒有
+tiny-live/live authority，也沒有改動 Bybit live execution 行為。

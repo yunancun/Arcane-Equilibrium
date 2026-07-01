@@ -4577,3 +4577,43 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper
 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
 clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
 Bybit behavior change。
+
+## 105. 2026-07-01 PM session source checkpoint：IBKR Feature Flag Secret Auth Source Static Guard
+
+本 checkpoint 為 `ibkr_feature_flag_secret_auth.rs` 補上 source-only structure
+guard。這不是 feature flag enablement、不是 secret-slot reader、不是 Phase 2
+artifact PASS、不是 session runtime、不是 paper order authorization；只把未來 IBKR
+paper auth 前必須同時滿足的 feature flag、secret-slot contract、Phase2 artifact、
+session attestation 與 authorization envelope source invariant 機器化。
+
+已完成：
+
+- 新增 `tests/structure/test_ibkr_feature_flag_secret_auth_source_static.py`。
+- Guard 鎖住 `ibkr_feature_flag_secret_auth.rs` 低於 800 行 governance cap。
+- Guard 要求 matrix contract id、authorization envelope、matrix/verdict/blocker
+  surface、evaluation helper 保持在 source 中。
+- Guard 要求 default 仍 fail-closed：empty contract/source version、read-only/denied
+  envelope、default feature flags、default secret/artifact/session/envelope contracts、
+  GUI override denied false、server Rust authoritative false。
+- Guard 要求 decision chain 仍同時檢查 lane/broker/live environment/instrument/live
+  or account-write operation、read-only/paper/shadow-only flags、secret contract、
+  live-secret absence、Phase2 artifact、session attestation 與 authorization envelope。
+- Guard 要求 authorization envelope 維持 scope、hash validity、expiry、
+  secret-slot fingerprint 與 account fingerprint 跨 secret/artifact/session 的一致性
+  檢查。
+- Guard 禁止 env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens
+  與 secret material access tokens。
+
+驗證：
+
+- New structure guard py_compile：PASS。
+- Focused structure guard pytest：`5 passed`。
+- Focused feature-flag/secret auth acceptance：`8 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
+cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
+clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
+Bybit behavior change。
