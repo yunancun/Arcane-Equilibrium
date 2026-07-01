@@ -7071,3 +7071,45 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不啟動 market-data subscription、不做
 scorecard writer、不做 DB/evidence writer、不做 paper order route、不做 Linux runtime sync/restart、
 不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 169. 2026-07-01 PM session source checkpoint：Stock/ETF Non-Bybit API Allowlist Acceptance Cross-Wire Guard
+
+本 checkpoint 補強 `ibkr_non_bybit_api_allowlist` 中 `NonBybitApiAllowlistV1` 的 read / paper-write /
+denied action bucket、Client Portal Web API denial、live/account-transfer/margin-short-options-CFD /
+market-data-entitlement/account-management write denial、IBKR contact、secret serialization、Bybit
+live protection cross-wire coverage。這不是 Rust production behavior change、不是 IBKR contact、
+不是 connector runtime、不是 Client Portal Web API enablement、不是 paper order route、不是
+secret access、不是 tiny-live/live gate；只把 non-Bybit API allowlist artifact 的 source-only、
+no-runtime、no-contact、no-secret、no-Bybit-cross-wire posture 變成行為型 regression test 與
+source-static guard。
+
+已完成：
+
+- 新增 `ibkr_non_bybit_api_allowlist_acceptance.rs`，覆蓋 default fail-closed posture。
+- Acceptance 證明 accepted fixture pin 住 required action matrix、contract id、source version、no
+  contact、no secret、Bybit live execution protected。
+- Acceptance 證明 `ServerTimeRead`、`AccountSummarySnapshotRead`、`PaperOrderSubmit`、
+  `LiveOrderSubmit`、`ClientPortalWebApiUse` 的 classification / denial semantics。
+- Acceptance 證明 missing action、duplicated action、wrong bucket action 都會被拒絕。
+- Acceptance 證明 Client Portal Web API、live order、account transfer、margin/short/options/CFD、
+  market-data entitlement purchase、account-management write denial 缺失都會各自只產生單一對應
+  blocker。
+- Acceptance 證明 `ibkr_contact_performed=true`、`secret_content_serialized=true`、
+  `bybit_live_execution_protected=false` 都會各自只產生單一對應 blocker。
+- 在 `test_ibkr_non_bybit_api_allowlist_source_static.py` 新增 accepted fixture body parser，禁止 empty
+  action buckets、denial booleans false、IBKR contact、secret serialization、Bybit protection loss 被
+  hardcoded 到 accepted fixture，並鎖住 default fail-closed posture。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Non-Bybit allowlist source static pytest：`6 passed`。
+- Non-Bybit allowlist Rust acceptance：`4 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不啟用 Client Portal Web API、不做
+broker routing、不做 paper order route、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何
+Bybit behavior change。
