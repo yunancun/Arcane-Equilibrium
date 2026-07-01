@@ -7031,3 +7031,43 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不啟動 market-data collection、不做
 scorecard writer、不做 DB/evidence writer、不做 paper order route、不做 Linux runtime sync/restart、
 不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 168. 2026-07-01 PM session source checkpoint：Stock/ETF Instrument Identity Authority Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_instrument_identity` 中 `StockEtfInstrumentIdentityV1` 的 Bybit
+unchanged、IBKR live denial、margin/short denial、options/CFD denial、IBKR contact、secret
+serialization cross-wire coverage。這不是 Rust production behavior change、不是 IBKR contact、
+不是 connector runtime、不是 market-data subscription、不是 order route、不是 scorecard writer、
+不是 DB apply、不是 tiny-live/live gate；只把 instrument identity artifact 的 source-only、
+point-in-time、cash-only、no-contact、no-secret posture 變成行為型 regression test 與 source-static
+guard。
+
+已完成：
+
+- 在 `stock_etf_instrument_identity_acceptance.rs` 新增
+  `instrument_identity_rejects_live_margin_secret_and_authority_cross_wire_independently`。
+- Acceptance 證明 `bybit_live_execution_unchanged=false` 只產生
+  `BybitLiveExecutionNotProtected`。
+- Acceptance 證明 `ibkr_live_denied=false` 只產生 `IbkrLiveNotDenied`。
+- Acceptance 證明 `margin_short_denied=false` 只產生 `MarginShortNotDenied`。
+- Acceptance 證明 `options_cfd_denied=false` 只產生 `OptionsCfdNotDenied`。
+- Acceptance 證明 `ibkr_contact_performed=true` 只產生 `IbkrContactPerformed`。
+- Acceptance 證明 `secret_content_serialized=true` 只產生 `SecretContentSerialized`。
+- 在 `test_stock_etf_instrument_identity_source_static.py` 新增 accepted fixture body parser，禁止
+  crypto/Bybit lane、missing instrument identity/as-of/calendar、Bybit changed、IBKR live not denied、
+  margin/short/options/CFD not denied、IBKR contact、secret serialization 被 hardcoded 到 accepted
+  fixture，並鎖住 default fail-closed posture。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Instrument identity source static pytest：`8 passed`。
+- Instrument identity Rust acceptance：`9 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不啟動 market-data subscription、不做
+scorecard writer、不做 DB/evidence writer、不做 paper order route、不做 Linux runtime sync/restart、
+不授權 tiny-live/live 或任何 Bybit behavior change。
