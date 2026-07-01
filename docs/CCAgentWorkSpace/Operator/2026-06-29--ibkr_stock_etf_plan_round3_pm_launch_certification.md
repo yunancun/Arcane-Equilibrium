@@ -3114,3 +3114,33 @@ Verification 已過：
 邊界不變：沒有 IBKR contact、沒有 read probe execution、沒有 connector runtime、沒有 secret
 access、沒有 order route、沒有 evidence writer、沒有 DB apply、沒有 tiny-live/live authorization，
 也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Read-Only Probe Result Import Request Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF Read-Only Probe Result Import Request Source Static Guard`。
+
+這個 guard 鎖住 `stock_etf_ibkr_readonly_probe_result_import_request.rs` 的 future sanitized
+readonly probe result import request source hygiene：exact
+`stock_etf_ibkr_readonly_probe_result_import_request_v1` contract id、request fields、verdict/
+blocker surface、read probe kind 列表、read action/operation mapping、common lineage、
+kind-specific downstream lineage、side-effect denial flags 必須保留。
+
+Guard 要求 default request 維持 fail-closed：CryptoPerp/Bybit/LiveReservedDenied、Client
+Portal API、transfer/account-write operation、Denied authority、empty lineage hashes、
+duplicate/stale flags false、all side-effect flags false。Accepted fixture 必須保留
+StockEtfCash/IBKR/ReadOnly、ConnectionHealthRead、HealthRead、ReadOnly authority、effect=false、
+result-import/request/probe ids、readonly probe request、session attestation、non-Bybit allowlist、
+redaction/audit policy、payload/raw/redacted/source artifact hashes、as-of/import-request timestamps、
+idempotency key。Kind-specific lineage 必須保留 health snapshot、account cash ledger、
+market-data provenance、instrument identity、paper lifecycle event log 的 contract/hash checks。
+
+Verification 已過：
+
+- New structure guard pytest：`10 passed`
+- Focused read-only probe result import request acceptance：`6 passed`
+- Full `cargo test -p openclaw_types`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 read probe execution、沒有 result import execution、沒有
+connector runtime、沒有 secret access、沒有 evidence/scorecard writer、沒有 DB apply、沒有
+order route、沒有 tiny-live/live authorization，也沒有改動 Bybit live execution 行為。
