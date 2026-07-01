@@ -1434,3 +1434,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only structure guard for `stock_etf_paper_order_request/fixtures.rs`, pinning accepted preview/submit/cancel/replace paper-order fixture posture.
 - The guard requires preview ReadOnly SPY ETF buy limit DAY shape, submit PaperRehearsal/effect=true session/scoped/decision/guardian/lifecycle/registry/audit lineage, cancel broker-order/cancel-reason shape, replace replacement-idempotency/quantity/limit/TIF/reason shape, fixture inheritance/field clearing, and no runtime/secret/order/Bybit client tokens.
 - Verification passed: new guard `6 passed`; paper order request acceptance `8 passed`; full `cargo test -p openclaw_types` PASS. This grants no IBKR contact, connector runtime, paper order route, paper submit/cancel/replace execution, secret access, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF IPC Scorecard Summary Source Static Guard
+
+- PM added a source-only structure guard for `rust/openclaw_engine/src/ipc_server/handlers/stock_etf/status_summaries/scorecard.rs`, pinning the display-only scorecard status child module that was previously only indirectly covered by the parent split guard.
+- The guard requires default construction/validation of scorecard input bundle, derivation, and verdict contracts; blocked Phase3 scorecard status posture; input/derivation/verdict lineage; PnL/cost/statistical/review/quality-label fields; no writer/DB/evidence-clock/order/contact/live authority flags; and no runtime/secret/order/Bybit client tokens.
+- Verification passed: new guard `5 passed`; focused Rust IPC scorecard status acceptance PASS; existing Rust IPC handler split guard PASS; full `cargo test -p openclaw_engine` PASS. This grants no IBKR contact, connector runtime, scorecard writer, evidence clock, DB apply, paper order route, tiny-live/live, or Bybit behavior change.

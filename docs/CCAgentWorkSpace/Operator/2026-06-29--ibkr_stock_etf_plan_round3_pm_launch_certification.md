@@ -3310,3 +3310,31 @@ Verification 已過：
 邊界不變：沒有 IBKR contact、沒有 connector runtime、沒有 paper order route、沒有 paper
 submit/cancel/replace execution、沒有 secret access、沒有 tiny-live/live authorization，也沒有改動
 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF IPC Scorecard Summary Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF IPC Scorecard Summary Source Static Guard`。
+
+這個 guard 鎖住
+`rust/openclaw_engine/src/ipc_server/handlers/stock_etf/status_summaries/scorecard.rs`
+的 display-only scorecard status child module。現有 parent split guard 只掃 `stock_etf/*.rs`，
+沒有直接掃 `status_summaries/scorecard.rs`；本 checkpoint 補齊這個 source hygiene 缺口。
+
+Guard 要求 scorecard status 保留 default-blocked Phase3 posture：no scorecard writer、no DB
+apply、no evidence clock、no paper-shadow window complete、no IBKR call、no secret touch、no order
+route、no Bybit IPC reuse、no live/tiny-live authority。Input bundle、derivation、verdict payload
+必須保留 read-only result-import / market-data / reference / risk / atomic-fact lineage、scorecard
+input/evidence/DQ/formula/preregistration/reconciliation hashes、PnL/cost/statistical fields、quality
+labels、QC/MIT/QA review hashes與 sealed/default-blocked posture。
+
+Verification 已過：
+
+- New structure guard pytest：`5 passed`
+- Focused Rust IPC scorecard status acceptance：PASS
+- Existing Rust IPC handler split guard：PASS
+- Full `cargo test -p openclaw_engine`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 connector runtime、沒有 IPC runtime side effect、沒有
+scorecard writer、沒有 evidence clock、沒有 DB apply、沒有 paper order route、沒有 tiny-live/live
+authorization，也沒有改動 Bybit live/demo execution 行為。
