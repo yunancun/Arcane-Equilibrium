@@ -58,6 +58,38 @@ _CLOSED_PNL_FAILURE_LOCK = RLock()
 _GUI_READ_STATEMENT_TIMEOUT_MS = int(os.getenv("OPENCLAW_GUI_READ_STATEMENT_TIMEOUT_MS", "1500"))
 
 
+def _demo_fast_balance_snapshot_unavailable(reason: str) -> dict[str, Any]:
+    """Fail-closed fast balance payload; never falls back to Bybit wallet REST."""
+    return {
+        "source": "rust_engine",
+        "read_model": "rust_snapshot_fast",
+        "pipeline_status": "snapshot_unavailable",
+        "pipeline_reason": reason,
+        "enabled": False,
+        "balance_display": "N/A",
+        "totalEquity": None,
+        "total_equity": None,
+        "equity": None,
+        "balance": None,
+        "totalAvailableBalance": None,
+        "total_available_balance": None,
+        "availableBalance": None,
+        "available_balance": None,
+        "totalWalletBalance": None,
+        "total_wallet_balance": None,
+        "walletBalance": None,
+        "wallet_balance": None,
+        "totalPerpUPL": None,
+        "total_unrealized_pnl": None,
+        "unrealized_pnl": None,
+        "engine_initial_balance": None,
+        "engine_peak_balance": None,
+        "engine_current_balance": None,
+        "engine_realized_pnl": None,
+        "engine_total_fees": None,
+    }
+
+
 def _closed_pnl_cache():
     """Lazy singleton for Demo closed-PnL REST reads."""
     global _CLOSED_PNL_CACHE
@@ -202,11 +234,15 @@ async def get_demo_balance(
     if not demo_pipeline_up:
         return _envelope({
             "source": "rust_engine",
+            "read_model": "rust_snapshot_fast",
             "enabled": False,
             "pipeline_status": "disconnected",
             "pipeline_reason": "Bybit Demo wallet REST 未連接（引擎啟動時抓取失敗）/ "
                                "Bybit Demo wallet REST disconnected (REST fetch failed at engine startup)",
             "balance_display": "N/A",
+            "totalEquity": None,
+            "total_equity": None,
+            "equity": None,
             "balance": None,
             "engine_initial_balance": None,
             "engine_peak_balance": None,
@@ -220,6 +256,10 @@ async def get_demo_balance(
                 return _envelope(_paper_state_balance_payload(demo_state))
         except Exception:
             logger.debug("Demo fast balance snapshot unavailable", exc_info=True)
+        return _envelope(_demo_fast_balance_snapshot_unavailable(
+            "Demo Rust paper_state snapshot unavailable; fast balance does not "
+            "fall back to Bybit wallet REST"
+        ))
 
     rc = _get_rust_client()
     if rc is None:

@@ -318,7 +318,11 @@ def test_authority_contaminated_payload_fails_closed() -> None:
     assert artifact["answers"]["order_authority_granted"] is False
 
 
-def test_capture_uses_only_approved_fast_balance_get_with_token_file(tmp_path) -> None:
+def test_capture_uses_only_approved_fast_balance_get_with_token_file(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("OPENCLAW_API_TOKEN", raising=False)
     token_file = tmp_path / "api_token"
     token_file.write_text("secret-token\n", encoding="utf-8")
     token_file.chmod(stat.S_IRUSR | stat.S_IWUSR)
@@ -332,8 +336,14 @@ def test_capture_uses_only_approved_fast_balance_get_with_token_file(tmp_path) -
     )
 
     assert artifact["status"] == mod.READY_STATUS
+    rendered = json.dumps(artifact, ensure_ascii=False, sort_keys=True)
     assert artifact["source_transport"]["transport_status"] == "success"
     assert artifact["source_transport"]["authorization_header_used"] is True
+    assert artifact["source_transport"]["token_source"] == "token_file"
+    assert artifact["source_transport"]["token_file_used"] is True
+    assert artifact["source_transport"]["token_file_mode"] == "0o600"
+    assert artifact["source_transport"]["env_token_present"] is False
+    assert artifact["source_transport"]["env_token_allowed"] is True
     assert artifact["answers"]["control_api_call_performed"] is True
     assert artifact["answers"]["bybit_call_performed"] is False
     assert len(opener.requests) == 1
@@ -345,6 +355,37 @@ def test_capture_uses_only_approved_fast_balance_get_with_token_file(tmp_path) -
     assert parsed.path == "/api/v1/strategy/demo/balance"
     assert parsed.query == "fast=1"
     assert req.headers["Authorization"] == "Bearer secret-token"
+    assert "secret-token" not in rendered
+
+
+def test_capture_forbid_env_token_fails_before_control_api_get(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("OPENCLAW_API_TOKEN", "env-token-must-not-be-used")
+    token_file = tmp_path / "api_token"
+    token_file.write_text("file-token\n", encoding="utf-8")
+    token_file.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    opener = FakeOpener(_balance_payload())
+
+    artifact = mod.capture_demo_fast_balance_equity_artifact(
+        api_base="http://127.0.0.1:8000",
+        token_file=token_file,
+        forbid_env_token=True,
+        opener=opener,
+        now_fn=_now,
+    )
+
+    assert artifact["status"] == mod.SOURCE_FAILURE_STATUS
+    rendered = json.dumps(artifact, ensure_ascii=False, sort_keys=True)
+    assert artifact["source_transport"]["error_class"] == "SourcePolicyError"
+    assert artifact["source_transport"]["env_token_present"] is True
+    assert artifact["source_transport"]["env_token_allowed"] is False
+    assert artifact["answers"]["control_api_call_performed"] is False
+    assert artifact["answers"]["bybit_call_performed"] is False
+    assert opener.requests == []
+    assert "env-token-must-not-be-used" not in rendered
+    assert "file-token" not in rendered
 
 
 def test_capture_rejects_unapproved_api_base() -> None:
@@ -373,7 +414,8 @@ def test_token_file_must_not_be_group_or_world_readable(tmp_path) -> None:
     )
 
     assert artifact["status"] == mod.SOURCE_FAILURE_STATUS
-    assert artifact["source_transport"]["error_class"] == "ValueError"
+    assert artifact["source_transport"]["error_class"] == "SourcePolicyError"
+    assert artifact["answers"]["control_api_call_performed"] is False
 
 
 def test_cli_supplied_json_writes_ready_artifact(tmp_path, monkeypatch) -> None:
@@ -398,6 +440,45 @@ def test_cli_supplied_json_writes_ready_artifact(tmp_path, monkeypatch) -> None:
     assert rc == 0
     assert artifact["status"] == mod.READY_STATUS
     assert artifact["equity"]["equity_usdt"] == 88.0
+
+
+def test_cli_capture_forbid_env_token_writes_source_failure_without_secret(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(mod, "_utc_now", _now)
+    monkeypatch.setenv("OPENCLAW_API_TOKEN", "env-token-must-not-be-used")
+    token_file = tmp_path / "api_token"
+    token_file.write_text("file-token\n", encoding="utf-8")
+    token_file.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    out = tmp_path / "artifact.json"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "demo_fast_balance_equity_artifact.py",
+            "--capture",
+            "--forbid-env-token",
+            "--api-base",
+            "http://127.0.0.1:8000",
+            "--token-file",
+            str(token_file),
+            "--json-output",
+            str(out),
+        ],
+    )
+
+    rc = mod.main()
+    artifact = json.loads(out.read_text(encoding="utf-8"))
+    rendered = json.dumps(artifact, ensure_ascii=False, sort_keys=True)
+
+    assert rc == 0
+    assert artifact["status"] == mod.SOURCE_FAILURE_STATUS
+    assert artifact["source_transport"]["error_class"] == "SourcePolicyError"
+    assert artifact["source_transport"]["env_token_present"] is True
+    assert artifact["source_transport"]["env_token_allowed"] is False
+    assert artifact["answers"]["control_api_call_performed"] is False
+    assert "env-token-must-not-be-used" not in rendered
+    assert "file-token" not in rendered
 
 
 def test_static_no_order_db_bybit_imports() -> None:
