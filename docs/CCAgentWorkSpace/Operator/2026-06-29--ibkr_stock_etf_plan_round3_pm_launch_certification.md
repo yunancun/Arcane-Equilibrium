@@ -3199,3 +3199,31 @@ Verification 已過：
 邊界不變：沒有 IBKR contact、沒有 connector runtime、沒有 market-data collection、沒有
 evidence clock、沒有 scorecard writer、沒有 DB apply、沒有 paper order、沒有 tiny-live/live
 authorization，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Reference Data Sources Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF Reference Data Sources Source Static Guard`。
+
+這個 guard 鎖住 `stock_etf_reference_data_sources.rs` 的 corporate-action、FX、fee、tax/FTT
+source-as-of source hygiene：exact `stock_etf_reference_data_sources_v1` contract id、reference
+source fields、corporate-action/FX/fee-tax validators、verdict/blocker surface 必須保留。
+
+Guard 要求 default reference sources 維持 fail-closed：CryptoPerp/Bybit/LiveReservedDenied、not
+frozen for evidence clock、empty corporate-action/FX/fee source names、zero as-of values、
+UnknownDenied currencies、empty hashes、Bybit live unchanged false、no contact/runtime/secret flags、
+live/tiny-live authorized true as blocker。Accepted fixture 必須保留 StockEtfCash/IBKR/Paper、
+frozen for evidence clock、corporate-action source/as-of/raw/adjustment/policy/dividend hashes、
+USD/USD FX source/as-of/snapshot/drag-model hashes、IBKR paper fee source/as-of/commission/
+regulatory/tax/withholding/source hashes、Bybit live protection、no contact/runtime/secret/live-tiny
+authority。
+
+Verification 已過：
+
+- New structure guard pytest：`7 passed`
+- Focused reference data sources acceptance：`6 passed`
+- Full `cargo test -p openclaw_types`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 connector runtime、沒有 reference/market-data ingest、沒有
+evidence clock、沒有 scorecard writer、沒有 DB migration/apply、沒有 tiny-live/live authorization，
+也沒有改動 Bybit live execution 行為。
