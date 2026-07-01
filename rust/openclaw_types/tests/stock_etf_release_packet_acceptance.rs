@@ -17,38 +17,7 @@ fn default_release_packet_blocks_launch() {
     let verdict = packet.validate();
 
     assert!(!verdict.accepted);
-    assert!(has(
-        &verdict.blockers,
-        StockEtfReleasePacketBlocker::PacketIdMissing
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfReleasePacketBlocker::SourceVersionMismatch
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfReleasePacketBlocker::PmSignoffMissing
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfReleasePacketBlocker::OperatorSignoffMissing
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfReleasePacketBlocker::ManifestHashesInvalid
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfReleasePacketBlocker::KillLaneFlagNotDisabled
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfReleasePacketBlocker::PaperShadowWindowIncomplete
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfReleasePacketBlocker::ReleasePacketNotSealed
-    ));
+    assert_eq!(verdict.blockers, default_release_packet_blockers());
 }
 
 #[test]
@@ -462,6 +431,8 @@ fn release_packet_rejects_each_final_posture_gap_independently() {
 
 #[test]
 fn release_packet_requires_exact_contract_id_and_source_version() {
+    use StockEtfReleasePacketBlocker as Blocker;
+
     let packet = StockEtfReleasePacketV1 {
         packet_id: "stock_etf_release_packet_v1_fixture".to_string(),
         source_version: 2,
@@ -469,18 +440,16 @@ fn release_packet_requires_exact_contract_id_and_source_version() {
     };
     let blockers = packet.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfReleasePacketBlocker::PacketIdMismatch
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReleasePacketBlocker::SourceVersionMismatch
-    ));
+    assert_eq!(
+        blockers,
+        vec![Blocker::PacketIdMismatch, Blocker::SourceVersionMismatch]
+    );
 }
 
 #[test]
 fn release_packet_requires_phase5_role_signoffs_and_hashes() {
+    use StockEtfReleasePacketBlocker as Blocker;
+
     let packet = StockEtfReleasePacketV1 {
         reviewer_roles: vec!["PM".to_string(), "Operator".to_string()],
         role_report_paths: vec!["docs/CCAgentWorkSpace/PM/workspace/reports/x.md".to_string()],
@@ -492,50 +461,27 @@ fn release_packet_requires_phase5_role_signoffs_and_hashes() {
     };
     let blockers = packet.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfReleasePacketBlocker::E2SignoffMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReleasePacketBlocker::E3SignoffMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReleasePacketBlocker::E4SignoffMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReleasePacketBlocker::QaSignoffMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReleasePacketBlocker::QcSignoffMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReleasePacketBlocker::MitSignoffMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReleasePacketBlocker::E2LogHashInvalid
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReleasePacketBlocker::E3RedactionLogHashInvalid
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReleasePacketBlocker::QaLogHashInvalid
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReleasePacketBlocker::ManifestHashesInvalid
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            Blocker::E2SignoffMissing,
+            Blocker::E3SignoffMissing,
+            Blocker::E4SignoffMissing,
+            Blocker::QaSignoffMissing,
+            Blocker::QcSignoffMissing,
+            Blocker::MitSignoffMissing,
+            Blocker::E2LogHashInvalid,
+            Blocker::E3RedactionLogHashInvalid,
+            Blocker::QaLogHashInvalid,
+            Blocker::ManifestHashesInvalid,
+        ]
+    );
 }
 
 #[test]
 fn migration_evidence_requires_dry_run_and_double_apply_when_declared() {
+    use StockEtfReleasePacketBlocker as Blocker;
+
     let packet = StockEtfReleasePacketV1 {
         pg_migration_evidence: StockEtfPgMigrationEvidenceV1 {
             migrations_declared: true,
@@ -547,14 +493,13 @@ fn migration_evidence_requires_dry_run_and_double_apply_when_declared() {
     };
     let blockers = packet.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfReleasePacketBlocker::PgDryRunLogMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReleasePacketBlocker::PgDoubleApplyLogMissing
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            Blocker::PgDryRunLogMissing,
+            Blocker::PgDoubleApplyLogMissing
+        ]
+    );
 
     let accepted = StockEtfReleasePacketV1 {
         pg_migration_evidence: StockEtfPgMigrationEvidenceV1::migration_fixture(),
@@ -565,6 +510,8 @@ fn migration_evidence_requires_dry_run_and_double_apply_when_declared() {
 
 #[test]
 fn kill_disable_cleanup_rejects_open_flags_and_destructive_db_cleanup() {
+    use StockEtfReleasePacketBlocker as Blocker;
+
     let packet = StockEtfReleasePacketV1 {
         kill_disable_cleanup_proof: StockEtfKillDisableCleanupProofV1 {
             stock_etf_lane_enabled_false: false,
@@ -579,34 +526,23 @@ fn kill_disable_cleanup_rejects_open_flags_and_destructive_db_cleanup() {
     };
     let blockers = packet.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfReleasePacketBlocker::KillLaneFlagNotDisabled
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReleasePacketBlocker::KillReadonlyFlagNotDisabled
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReleasePacketBlocker::KillPaperFlagNotDisabled
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReleasePacketBlocker::KillShadowOnlyFlagNotPreserved
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReleasePacketBlocker::DestructiveDbCleanupRequested
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReleasePacketBlocker::KillDisableProofHashInvalid
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            Blocker::KillLaneFlagNotDisabled,
+            Blocker::KillReadonlyFlagNotDisabled,
+            Blocker::KillPaperFlagNotDisabled,
+            Blocker::KillShadowOnlyFlagNotPreserved,
+            Blocker::DestructiveDbCleanupRequested,
+            Blocker::KillDisableProofHashInvalid,
+        ]
+    );
 }
 
 #[test]
 fn release_packet_rejects_secret_serialization_and_live_authority() {
+    use StockEtfReleasePacketBlocker as Blocker;
+
     let packet = StockEtfReleasePacketV1 {
         secret_content_serialized: true,
         ibkr_live_or_tiny_live_authorized: true,
@@ -614,14 +550,13 @@ fn release_packet_rejects_secret_serialization_and_live_authority() {
     };
     let blockers = packet.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfReleasePacketBlocker::SecretContentSerialized
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfReleasePacketBlocker::LiveOrTinyLiveAuthorityPresent
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            Blocker::SecretContentSerialized,
+            Blocker::LiveOrTinyLiveAuthorityPresent,
+        ]
+    );
 }
 
 #[test]
@@ -630,99 +565,46 @@ fn release_packet_rejects_secret_authority_window_and_seal_cross_wire_independen
         secret_content_serialized: true,
         ..StockEtfReleasePacketV1::accepted_fixture()
     };
-    let secret_blockers = secret.validate().blockers;
-    assert!(has(
-        &secret_blockers,
-        StockEtfReleasePacketBlocker::SecretContentSerialized
-    ));
-    assert!(lacks(
-        &secret_blockers,
-        StockEtfReleasePacketBlocker::LiveOrTinyLiveAuthorityPresent
-    ));
-    assert!(lacks(
-        &secret_blockers,
-        StockEtfReleasePacketBlocker::ReleasePacketNotSealed
-    ));
+    assert_single_blocker(
+        secret,
+        StockEtfReleasePacketBlocker::SecretContentSerialized,
+    );
 
     let live_authority = StockEtfReleasePacketV1 {
         ibkr_live_or_tiny_live_authorized: true,
         ..StockEtfReleasePacketV1::accepted_fixture()
     };
-    let live_authority_blockers = live_authority.validate().blockers;
-    assert!(has(
-        &live_authority_blockers,
-        StockEtfReleasePacketBlocker::LiveOrTinyLiveAuthorityPresent
-    ));
-    assert!(lacks(
-        &live_authority_blockers,
-        StockEtfReleasePacketBlocker::SecretContentSerialized
-    ));
-    assert!(lacks(
-        &live_authority_blockers,
-        StockEtfReleasePacketBlocker::ReleasePacketNotSealed
-    ));
+    assert_single_blocker(
+        live_authority,
+        StockEtfReleasePacketBlocker::LiveOrTinyLiveAuthorityPresent,
+    );
 
     let unsealed = StockEtfReleasePacketV1 {
         sealed: false,
         ..StockEtfReleasePacketV1::accepted_fixture()
     };
-    let unsealed_blockers = unsealed.validate().blockers;
-    assert!(has(
-        &unsealed_blockers,
-        StockEtfReleasePacketBlocker::ReleasePacketNotSealed
-    ));
-    assert!(lacks(
-        &unsealed_blockers,
-        StockEtfReleasePacketBlocker::SecretContentSerialized
-    ));
-    assert!(lacks(
-        &unsealed_blockers,
-        StockEtfReleasePacketBlocker::LiveOrTinyLiveAuthorityPresent
-    ));
+    assert_single_blocker(
+        unsealed,
+        StockEtfReleasePacketBlocker::ReleasePacketNotSealed,
+    );
 
     let incomplete_window = StockEtfReleasePacketV1 {
         paper_shadow_window_complete: false,
         ..StockEtfReleasePacketV1::accepted_fixture()
     };
-    let incomplete_window_blockers = incomplete_window.validate().blockers;
-    assert!(has(
-        &incomplete_window_blockers,
-        StockEtfReleasePacketBlocker::PaperShadowWindowIncomplete
-    ));
-    assert!(lacks(
-        &incomplete_window_blockers,
-        StockEtfReleasePacketBlocker::SecretContentSerialized
-    ));
-    assert!(lacks(
-        &incomplete_window_blockers,
-        StockEtfReleasePacketBlocker::LiveOrTinyLiveAuthorityPresent
-    ));
-    assert!(lacks(
-        &incomplete_window_blockers,
-        StockEtfReleasePacketBlocker::ReleasePacketNotSealed
-    ));
+    assert_single_blocker(
+        incomplete_window,
+        StockEtfReleasePacketBlocker::PaperShadowWindowIncomplete,
+    );
 
     let incomplete_shakedown = StockEtfReleasePacketV1 {
         engineering_shakedown_complete: false,
         ..StockEtfReleasePacketV1::accepted_fixture()
     };
-    let incomplete_shakedown_blockers = incomplete_shakedown.validate().blockers;
-    assert!(has(
-        &incomplete_shakedown_blockers,
-        StockEtfReleasePacketBlocker::EngineeringShakedownIncomplete
-    ));
-    assert!(lacks(
-        &incomplete_shakedown_blockers,
-        StockEtfReleasePacketBlocker::SecretContentSerialized
-    ));
-    assert!(lacks(
-        &incomplete_shakedown_blockers,
-        StockEtfReleasePacketBlocker::LiveOrTinyLiveAuthorityPresent
-    ));
-    assert!(lacks(
-        &incomplete_shakedown_blockers,
-        StockEtfReleasePacketBlocker::ReleasePacketNotSealed
-    ));
+    assert_single_blocker(
+        incomplete_shakedown,
+        StockEtfReleasePacketBlocker::EngineeringShakedownIncomplete,
+    );
 }
 
 #[test]
@@ -762,14 +644,6 @@ fn blocked_release_packet_template_is_parseable_and_secret_free() {
     assert!(!lower.contains("token ="));
 }
 
-fn has(blockers: &[StockEtfReleasePacketBlocker], blocker: StockEtfReleasePacketBlocker) -> bool {
-    blockers.contains(&blocker)
-}
-
-fn lacks(blockers: &[StockEtfReleasePacketBlocker], blocker: StockEtfReleasePacketBlocker) -> bool {
-    !blockers.contains(&blocker)
-}
-
 fn assert_single_blocker(
     candidate: StockEtfReleasePacketV1,
     expected: StockEtfReleasePacketBlocker,
@@ -778,6 +652,49 @@ fn assert_single_blocker(
 
     assert!(!verdict.accepted);
     assert_eq!(verdict.blockers, vec![expected]);
+}
+
+fn default_release_packet_blockers() -> Vec<StockEtfReleasePacketBlocker> {
+    use StockEtfReleasePacketBlocker as Blocker;
+
+    vec![
+        Blocker::PacketIdMissing,
+        Blocker::SourceVersionMismatch,
+        Blocker::SourceCommitMissing,
+        Blocker::CreatedAtMissing,
+        Blocker::PmSignoffMissing,
+        Blocker::OperatorSignoffMissing,
+        Blocker::E2SignoffMissing,
+        Blocker::E3SignoffMissing,
+        Blocker::E4SignoffMissing,
+        Blocker::QaSignoffMissing,
+        Blocker::QcSignoffMissing,
+        Blocker::MitSignoffMissing,
+        Blocker::RoleReportsMissing,
+        Blocker::E2LogHashInvalid,
+        Blocker::E3RedactionLogHashInvalid,
+        Blocker::E4LogHashInvalid,
+        Blocker::QaLogHashInvalid,
+        Blocker::ManifestHashesInvalid,
+        Blocker::RedactionFixtureHashInvalid,
+        Blocker::GuiScreenshotsMissing,
+        Blocker::DqManifestsMissing,
+        Blocker::ScorecardRegenerationMissing,
+        Blocker::KillLaneFlagNotDisabled,
+        Blocker::KillReadonlyFlagNotDisabled,
+        Blocker::KillPaperFlagNotDisabled,
+        Blocker::KillShadowOnlyFlagNotPreserved,
+        Blocker::CollectorStopProofMissing,
+        Blocker::GuiDisableProofMissing,
+        Blocker::LiveSecretAbsenceProofMissing,
+        Blocker::EvidenceArchiveNotForwardOnly,
+        Blocker::KillDisableProofHashInvalid,
+        Blocker::EvidenceArchivePointerMissing,
+        Blocker::EvidenceArchiveHashInvalid,
+        Blocker::PaperShadowWindowIncomplete,
+        Blocker::EngineeringShakedownIncomplete,
+        Blocker::ReleasePacketNotSealed,
+    ]
 }
 
 fn roles_without(excluded: &str) -> Vec<String> {
