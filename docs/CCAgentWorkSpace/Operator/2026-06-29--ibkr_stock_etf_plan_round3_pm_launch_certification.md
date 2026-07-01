@@ -5489,3 +5489,30 @@ Verification 已過：
 contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 socket/client construction、沒有
 paper order routing、沒有 broker session、沒有 DB/evidence writer、沒有 scorecard writer、沒有 paper-shadow
 launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Scorecard Verdict Exact Blocker Guard
+
+本 session 已完成下一個 test-only checkpoint：
+`Stock/ETF Scorecard Verdict Exact Blocker Guard`。
+
+這個 checkpoint 補強 `StockEtfScorecardVerdictV1` launch verdict acceptance 的 aggregate fail-closed coverage。
+
+新增 Rust acceptance 證明 default scorecard verdict artifact、hash-lineage aggregate drift、
+profitability/quality aggregate failures、execution-model-invalid rationale、runtime side-effect aggregate failures、
+evidence/live/Bybit/writer cross-wire cases 都會以完整 ordered blocker vectors 或 exact single-blocker verdicts
+fail closed。既有 scorecard verdict source-static guard 仍是 production validator dispatch/order 的權威證據。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Stock/ETF scorecard verdict source static pytest：`8 passed`
+- Stock/ETF scorecard verdict Rust acceptance：`14 passed`
+- Full `cargo test -p openclaw_types`：PASS
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 GUI runtime/API route/IPC behavior change、沒有 IBKR
+contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 socket/client construction、沒有
+paper order routing、沒有 broker session、沒有 DB/evidence writer、沒有 scorecard writer、沒有 paper-shadow
+launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
