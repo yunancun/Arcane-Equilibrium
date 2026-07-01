@@ -1551,3 +1551,10 @@ Do not paste long reports or stable architecture into TODO.
 - `StateUnknown` without stale policy remains intentionally aggregate: `StaleStatePolicyMissing` plus `StaleUnknownStateWithoutPolicy`, not a single-blocker claim.
 - Python source-static parsing now pins `Default` / `accepted_fixture` blocks so the accepted fixture cannot hardcode crypto, Bybit, live, wrong-method, wrong-operation, effectful, empty-lineage, replay, runtime, secret, or order posture.
 - Verification passed: source static `8 passed`; paper fill import acceptance `10 passed`; `cargo fmt -p openclaw_types -- --check` PASS; docs trace PASS; diff check PASS. This grants no Rust production code change, IPC change, IBKR contact, connector runtime, secret access, fill import execution, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Shadow Signal Request Authority Lineage Cross-Wire Guard
+
+- PM added exact-blocker Rust acceptance coverage for `StockEtfShadowSignalRequestV1` authority, request/evaluation/signal lineage, evidence-clock/PIT/strategy/instrument/market/cost/event/source hashes, and boundary flags.
+- The guard proves contract/source/lane/broker/environment/method/operation/authority/effect gaps and contact/runtime/secret/shadow-signal/shadow-fill/scorecard/DB/order/Bybit/live/margin/Python-write flags fail closed.
+- Python source-static parsing now pins `Default` / `accepted_fixture` blocks so the accepted fixture cannot hardcode crypto, Bybit, paper/read-only/live, wrong-method, wrong-operation, effectful, empty-lineage, runtime, secret, or order posture.
+- Verification passed: source static `8 passed`; shadow signal request acceptance `9 passed`; `cargo fmt -p openclaw_types -- --check` PASS; docs trace PASS; diff check PASS. This grants no Rust production code change, IPC change, IBKR contact, connector runtime, secret access, shadow signal emission, shadow fill generation, shadow collector, DB/evidence writer, scorecard writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

@@ -3865,3 +3865,9 @@
 - PM added test-only/source-static exact-blocker coverage for `StockEtfPaperFillImportRequestV1` authority, lifecycle/event-log/redaction/session lineage, stale policy, replay, and no-side-effect flags.
 - Verification passed: paper fill source static `8 passed`; paper fill Rust acceptance `10 passed`; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, IPC/runtime change, IBKR contact, connector runtime, secret access, fill import execution, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Shadow Signal Request Authority Lineage Cross-Wire Guard
+
+- PM added test-only/source-static exact-blocker coverage for `StockEtfShadowSignalRequestV1` authority, request/evaluation/signal lineage, evidence-clock/PIT/strategy/instrument/market/cost/event/source hashes, and no-side-effect flags.
+- Verification passed: shadow signal source static `8 passed`; shadow signal Rust acceptance `9 passed`; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, IPC/runtime change, IBKR contact, connector runtime, secret access, shadow signal emission, shadow fill generation, shadow collector, DB/evidence writer, scorecard writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
