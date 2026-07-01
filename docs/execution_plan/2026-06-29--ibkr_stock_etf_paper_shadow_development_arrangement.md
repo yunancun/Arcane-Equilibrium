@@ -6413,3 +6413,40 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 fill import、不做
 result import、不做 DB/evidence writer、不做 paper order route、不做 Linux runtime sync/restart、
 不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 153. 2026-07-01 PM session source checkpoint：Stock/ETF Paper Shadow Reconciliation Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_paper_shadow_reconciliation` 的 scope / AuthorityScope /
+effect-capable cross-wire coverage。這不是 Rust production behavior change、不是 IBKR contact、
+不是 connector runtime、不是 secret access、不是 fill import execution、不是 shadow fill
+generation、不是 reconciliation writer、不是 DB/evidence writer、不是 paper order route；只把
+paper-shadow reconciliation evidence 的 `paper_shadow` / `ReadOnly` / non-effect posture 變成
+行為型 regression test 與 source-static guard。
+
+已完成：
+
+- 在 `stock_etf_paper_shadow_reconciliation_acceptance.rs` 新增
+  `reconciliation_rejects_scope_authority_and_effect_cross_wire`。
+- Acceptance 證明 reconciliation scope 若混入 `shadow_signal`，必須只產生 `ScopeMismatch`。
+- Acceptance 證明 authority 若混入 `ShadowOnly`，必須只產生 `AuthorityScopeMismatch`。
+- Acceptance 證明 paper-write scope / `PaperRehearsal` / `effect_capable=true` 污染必須同時產生
+  scope / authority / effect blockers。
+- Acceptance 證明 shadow-only scope / authority 污染必須產生 scope / authority blockers，且不可誤報
+  effect blocker。
+- 在 `test_stock_etf_paper_shadow_reconciliation_source_static.py` 新增 source-static cross-wire guard，
+  禁止 `PaperRehearsal`、`ShadowOnly`、`effect_capable=true`、paper-order scope、shadow-signal
+  scope 混入 reconciliation source。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Paper-shadow reconciliation source static pytest：`8 passed`。
+- Paper-shadow reconciliation Rust acceptance：`6 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 fill import、不生成
+shadow fill、不啟動 reconciliation writer、不做 result import、不做 DB/evidence writer、不做 paper
+order route、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。

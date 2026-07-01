@@ -102,6 +102,97 @@ fn accepted_reconciliation_validates_without_side_effects() {
 }
 
 #[test]
+fn reconciliation_rejects_scope_authority_and_effect_cross_wire() {
+    let wrong_scope = StockEtfPaperShadowReconciliationV1 {
+        scope: "shadow_signal".to_string(),
+        authority_scope: AuthorityScope::ReadOnly,
+        effect_capable: false,
+        ..StockEtfPaperShadowReconciliationV1::accepted_fixture()
+    };
+    let verdict = wrong_scope.validate();
+
+    assert!(!verdict.accepted);
+    assert!(has(
+        &verdict,
+        StockEtfPaperShadowReconciliationBlocker::ScopeMismatch
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfPaperShadowReconciliationBlocker::AuthorityScopeMismatch
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfPaperShadowReconciliationBlocker::EffectCapabilityPresent
+    ));
+
+    let wrong_authority = StockEtfPaperShadowReconciliationV1 {
+        scope: STOCK_ETF_PAPER_SHADOW_RECONCILIATION_SCOPE.to_string(),
+        authority_scope: AuthorityScope::ShadowOnly,
+        effect_capable: false,
+        ..StockEtfPaperShadowReconciliationV1::accepted_fixture()
+    };
+    let verdict = wrong_authority.validate();
+
+    assert!(!verdict.accepted);
+    assert!(has(
+        &verdict,
+        StockEtfPaperShadowReconciliationBlocker::AuthorityScopeMismatch
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfPaperShadowReconciliationBlocker::ScopeMismatch
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfPaperShadowReconciliationBlocker::EffectCapabilityPresent
+    ));
+
+    let paper_write_pollution = StockEtfPaperShadowReconciliationV1 {
+        scope: "paper_order".to_string(),
+        authority_scope: AuthorityScope::PaperRehearsal,
+        effect_capable: true,
+        ..StockEtfPaperShadowReconciliationV1::accepted_fixture()
+    };
+    let verdict = paper_write_pollution.validate();
+
+    assert!(!verdict.accepted);
+    assert!(has(
+        &verdict,
+        StockEtfPaperShadowReconciliationBlocker::ScopeMismatch
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfPaperShadowReconciliationBlocker::AuthorityScopeMismatch
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfPaperShadowReconciliationBlocker::EffectCapabilityPresent
+    ));
+
+    let shadow_only_pollution = StockEtfPaperShadowReconciliationV1 {
+        scope: "shadow_signal".to_string(),
+        authority_scope: AuthorityScope::ShadowOnly,
+        effect_capable: false,
+        ..StockEtfPaperShadowReconciliationV1::accepted_fixture()
+    };
+    let verdict = shadow_only_pollution.validate();
+
+    assert!(!verdict.accepted);
+    assert!(has(
+        &verdict,
+        StockEtfPaperShadowReconciliationBlocker::ScopeMismatch
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfPaperShadowReconciliationBlocker::AuthorityScopeMismatch
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfPaperShadowReconciliationBlocker::EffectCapabilityPresent
+    ));
+}
+
+#[test]
 fn reconciliation_requires_ids_and_lineage_hashes() {
     let bad = StockEtfPaperShadowReconciliationV1 {
         reconciliation_run_id: String::new(),
