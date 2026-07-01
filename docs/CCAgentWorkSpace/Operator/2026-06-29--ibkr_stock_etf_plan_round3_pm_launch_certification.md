@@ -3614,3 +3614,32 @@ Verification 已過：
 沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 read-only probe execution、
 沒有 result import、沒有 DB/evidence writer、沒有 paper order route、沒有 tiny-live/live authorization，
 也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Paper Order Validation Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF Paper Order Validation Source Static Guard`。
+
+這個 guard 專門鎖住 `stock_etf_paper_order_request/validation.rs`。它不是改 Rust production
+behavior，而是把 paper order request validation 的 fail-closed contract 機器化，避免
+preview/submit/cancel/replace 的 authority、effect、hash、field-separation 邏輯被後續改弱。
+
+Guard 要求 preview 保持 ReadOnly + non-effect-capable；submit/cancel/replace 保持
+PaperRehearsal + effect-capable；top-level validation 保留 Stock/ETF cash lane、IBKR broker、
+paper-only environment、live-denial、boundary flags 和 request-method dispatch。它也鎖住
+order shape、symbol/side、quantity、limit/market price、time-in-force、preview hash、effect
+hash gates，並禁止 runtime、secret material、order client 或 Bybit client tokens。
+
+Verification 已過：
+
+- New validation guard py_compile：PASS
+- Focused new guard pytest：`6 passed`
+- Focused paper-order request validation/parent/fixtures/split subset：`20 passed`
+- Dynamic docs trace pytest：`2 passed, 5 deselected`；parsed checkpoint titles `130`，
+  missing `[]`
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 read-only probe execution、
+沒有 result import、沒有 DB/evidence writer、沒有 paper order/cancel/replace route、
+沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。

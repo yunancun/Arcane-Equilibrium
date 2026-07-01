@@ -1502,3 +1502,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM replaced the hand-maintained Stock/ETF checkpoint title tuple in `test_docs_readme_index_static.py` with dynamic parsing of PM session checkpoint titles from the main IBKR development arrangement.
 - Operator round3 summary now carries exact trace aliases for the three historical title mismatches: `Stock/ETF GUI split`, `Paper Lifecycle State-Machine Contract Hardening`, and `Paper Status Lifecycle Surface Hardening`.
 - Verification passed: dynamic docs trace `2 passed, 5 deselected`; full docs README/index pytest still has pre-existing docs README index drift (4 failures unrelated to Stock/ETF trace); diff check PASS. This grants no production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Paper Order Validation Source Static Guard
+
+- PM added `test_stock_etf_paper_order_request_validation_source_static.py` for `stock_etf_paper_order_request/validation.rs`.
+- The guard pins top-level fail-closed dispatch, preview ReadOnly/non-effect posture, submit/cancel/replace PaperRehearsal effect posture, method-specific field separation, order shape/price/TIF checks, preview/effect hash gates, and no runtime/secret/order-client/Bybit-client tokens.
+- Verification passed: new validation guard `6 passed`; paper-order request validation/parent/fixtures/split subset `20 passed`; dynamic docs trace `2 passed, 5 deselected` with 130 parsed titles and no missing Operator trace; py_compile and diff check PASS. This grants no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, DB/evidence writer, paper order/cancel/replace route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
