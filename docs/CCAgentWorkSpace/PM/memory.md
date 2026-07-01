@@ -4245,3 +4245,10 @@
 - The acceptance test no longer uses loose paper-fill import blocker helper checks; aggregate paths now require complete ordered vectors, and source-static pins validator blocker emit order.
 - Verification passed: Stock/ETF paper-fill import source static `9 passed`; Stock/ETF paper-fill import Rust acceptance `10 passed`; full `cargo test -p openclaw_types` PASS; package fmt/diff check PASS.
 - Boundary unchanged: no Rust production code change, GUI runtime/API route/IPC behavior change, IBKR contact, connector runtime, socket/client construction, secret access, broker session, paper order routing/cancel/replace execution, lifecycle writer, fill import execution, DB/evidence writer, scorecard writer, evidence clock, paper-shadow launch, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Rust IPC Status Exact Blocker Guard
+
+- PM tightened test-only exact-blocker coverage for Rust IPC Stock/ETF status source fixtures: Phase0 manifest, Phase2 pre-contact readiness, data foundation, policy, authorization, evidence, universe, shadow, paper, account, reconciliation, and scorecard vectors.
+- The IPC fixture tests no longer use loose `json_array_contains` membership checks; parent and submodule fixture files now require complete ordered vectors and include a source guard against future loose membership assertions.
+- Verification passed: changed fixture `rustfmt --edition 2021 --check` PASS; `cargo test -p openclaw_engine stock_etf -- --test-threads=1` PASS with Stock/ETF IPC/lib `32 passed`; no-loose blocker scan PASS; changed-fixture diff check PASS.
+- Boundary unchanged: no Rust IPC handler behavior change, API route/GUI behavior change, connector production code change, IBKR contact, connector runtime, socket/client construction, secret access, broker session, read-only probe execution, paper order routing/cancel/replace execution, DB/evidence writer, scorecard writer, evidence clock, release launch, paper-shadow launch, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.

@@ -44,10 +44,10 @@ async fn stock_etf_readiness_exposes_phase2_precontact_blockers_without_ibkr_con
     );
     assert_eq!(connector_skeleton["accepted"], false);
     assert_eq!(connector_skeleton["status"], "blocked_source_only");
-    assert!(json_array_contains(
+    assert_json_array_eq(
         &connector_skeleton["blockers"],
-        "phase2_gate_not_accepted"
-    ));
+        &["phase2_gate_not_accepted"],
+    );
     assert_eq!(connector_skeleton["network_contact_performed"], false);
     assert_eq!(connector_skeleton["secret_content_loaded"], false);
     assert_eq!(connector_skeleton["paper_channel_exposed"], false);
@@ -64,14 +64,17 @@ async fn stock_etf_readiness_exposes_phase2_precontact_blockers_without_ibkr_con
         phase2["external_surface_gate"]["ibkr_contact_allowed"],
         false
     );
-    assert!(json_array_contains(
+    assert_json_array_eq(
         &phase2["external_surface_gate"]["blockers"],
-        "status_not_pass"
-    ));
-    assert!(json_array_contains(
-        &phase2["external_surface_gate"]["blockers"],
-        "secret_contract_missing"
-    ));
+        &[
+            "contract_id_mismatch",
+            "source_version_mismatch",
+            "status_not_pass",
+            "live_ports_not_denied",
+            "secret_contract_missing",
+            "live_secret_present_or_unknown",
+        ],
+    );
     assert_eq!(
         phase2["api_allowlist"]["contract_id"],
         "non_bybit_api_allowlist_v1"
@@ -97,14 +100,10 @@ async fn stock_etf_readiness_exposes_phase2_precontact_blockers_without_ibkr_con
     assert_eq!(readonly_probe["request_validated"], false);
     assert_eq!(readonly_probe["accepted_for_contact"], false);
     assert_eq!(readonly_probe["status"], "blocked_no_request_artifact");
-    assert!(json_array_contains(
+    assert_json_array_eq(
         &readonly_probe["blockers"],
-        "phase2_gate_not_accepted"
-    ));
-    assert!(json_array_contains(
-        &readonly_probe["blockers"],
-        "probe_request_artifact_missing"
-    ));
+        &["phase2_gate_not_accepted", "probe_request_artifact_missing"],
+    );
     assert_eq!(readonly_probe["ibkr_contact_performed"], false);
     assert_eq!(readonly_probe["connector_runtime_started"], false);
     assert_eq!(readonly_probe["secret_content_serialized"], false);
@@ -127,14 +126,13 @@ async fn stock_etf_readiness_exposes_phase2_precontact_blockers_without_ibkr_con
         result_import_request["status"],
         "blocked_no_result_import_request_artifact"
     );
-    assert!(json_array_contains(
+    assert_json_array_eq(
         &result_import_request["blockers"],
-        "phase2_gate_not_accepted"
-    ));
-    assert!(json_array_contains(
-        &result_import_request["blockers"],
-        "probe_result_import_request_artifact_missing"
-    ));
+        &[
+            "phase2_gate_not_accepted",
+            "probe_result_import_request_artifact_missing",
+        ],
+    );
     assert_eq!(result_import_request["ibkr_contact_performed"], false);
     assert_eq!(result_import_request["connector_runtime_started"], false);
     assert_eq!(result_import_request["secret_content_serialized"], false);
