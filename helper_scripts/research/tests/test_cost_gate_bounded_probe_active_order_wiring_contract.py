@@ -31,7 +31,14 @@ def _candidate() -> dict[str, object]:
     }
 
 
-def _write_ready_active_order_repo(repo: Path, *, writer_no_order: bool = False) -> None:
+def _write_ready_active_order_repo(
+    repo: Path,
+    *,
+    writer_no_order: bool = False,
+    writer_dispatch: bool = True,
+    writer_production_dispatch: bool = True,
+    writer_production_call: bool = True,
+) -> None:
     _write(
         repo / "rust/openclaw_engine/src/bounded_probe_active_order.rs",
         """
@@ -129,14 +136,49 @@ pub fn evaluate_probe_admission() {
 """,
     )
     writer_contract = "This writer does not submit orders." if writer_no_order else ""
+    writer_production_dispatch_call = (
+        "dispatch_active_bounded_probe_order_draft(tx, draft);"
+        if writer_production_call
+        else "let _ = (tx, draft);"
+    )
+    writer_active_dispatch_call = (
+        """
+pub fn persist_result_and_dispatch() {
+    if let Some(draft) = result.active_order_draft {
+        if let Some(ref tx) = order_dispatch_tx {
+            WRITER_PRODUCTION_DISPATCH_CALL
+        }
+    }
+}
+""".replace("WRITER_PRODUCTION_DISPATCH_CALL", writer_production_dispatch_call)
+        if writer_production_dispatch
+        else ""
+    )
+    writer_dispatch_contract = (
+        """
+pub fn dispatch_active_bounded_probe_order_draft() {
+    let _ = order_dispatch_tx.clone();
+    let order_link_id = draft.lineage.order_link_id.clone();
+    let context_id = draft.lineage.context_id.clone();
+    let signal_id = draft.lineage.signal_id.clone();
+    let _ = tx.send(OrderDispatchRequest {
+        order_link_id,
+        context_id,
+        intent_id: Some(signal_id),
+    });
+}
+"""
+        if writer_dispatch
+        else ""
+    )
     _write(
         repo / "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
         f"""
 //! {writer_contract}
 const OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED: &str = "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED";
-pub fn active_bounded_probe_order_submission() {{
+pub fn build_runtime_admission_result() {{
     let bounded_probe_adapter_enabled = true;
-    submit_candidate_matched_bounded_probe_order();
+    let active_order_decision = submit_candidate_matched_bounded_probe_order();
     evaluate_probe_admission(
         &plan,
         event,
@@ -146,20 +188,26 @@ pub fn active_bounded_probe_order_submission() {{
         bounded_probe_adapter_enabled,
         risk_state,
     );
+    let active_order_draft = active_bounded_probe_order_submission(active_order_decision);
+    Ok(Some(RuntimeAdmissionBuildResult {{ active_order_draft }}))
 }}
+
+pub fn active_bounded_probe_order_submission() {{
+    Some(draft)
+}}
+{writer_active_dispatch_call}
+{writer_dispatch_contract}
 """,
     )
     _write(
         repo / "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs",
         """
-pub fn dispatch_admitted_bounded_probe_order() {
-    active_bounded_probe_order_submission();
-    let _order = candidate_matched_bounded_probe_order();
-    let _ = tx.send(OrderDispatchRequest {
-        order_link_id,
-        context_id,
-        signal_id,
-    });
+pub fn dispatch_rejected_probe_to_writer() {
+    let active_request = bounded_probe_active_order_request_for_reject();
+    record_reject_event_with_placement_active_request_and_order_dispatch(
+        active_request,
+        self.order_dispatch_tx.clone(),
+    );
     let _ = LeaseOutcome::Consumed;
     let order_id = order_link_id.clone();
     let fill_id = make_fill_id();
@@ -246,6 +294,61 @@ def test_future_complete_source_contract_only_reaches_e3_bb_review_ready(
     assert packet["max_safe_next_action"] == "e3_bb_exchange_facing_review_packet_only_no_order"
 
 
+def test_writer_dispatch_is_required_for_split_dispatch_boundary(tmp_path: Path) -> None:
+    _write_ready_active_order_repo(tmp_path, writer_dispatch=False)
+
+    packet = build_bounded_probe_active_order_wiring_contract(
+        repo_root=tmp_path,
+        candidate=_candidate(),
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == PATCH_REQUIRED_STATUS
+    assert "tick_dispatch_active_bounded_probe_exchange_wiring_missing" in packet[
+        "source_contract"
+    ]["missing_requirements"]
+    assert packet["answers"]["source_contract_ready_for_e3_bb_review"] is False
+    assert packet["answers"]["order_authority_granted"] is False
+
+
+def test_dead_writer_dispatch_helper_does_not_satisfy_contract(tmp_path: Path) -> None:
+    _write_ready_active_order_repo(tmp_path, writer_production_dispatch=False)
+
+    packet = build_bounded_probe_active_order_wiring_contract(
+        repo_root=tmp_path,
+        candidate=_candidate(),
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == PATCH_REQUIRED_STATUS
+    assert "tick_dispatch_active_bounded_probe_exchange_wiring_missing" in packet[
+        "source_contract"
+    ]["missing_requirements"]
+    assert packet["answers"]["source_contract_ready_for_e3_bb_review"] is False
+    assert packet["answers"]["order_authority_granted"] is False
+    assert packet["answers"]["order_submission_performed"] is False
+
+
+def test_writer_branch_without_dispatch_call_does_not_satisfy_contract(
+    tmp_path: Path,
+) -> None:
+    _write_ready_active_order_repo(tmp_path, writer_production_call=False)
+
+    packet = build_bounded_probe_active_order_wiring_contract(
+        repo_root=tmp_path,
+        candidate=_candidate(),
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == PATCH_REQUIRED_STATUS
+    assert "tick_dispatch_active_bounded_probe_exchange_wiring_missing" in packet[
+        "source_contract"
+    ]["missing_requirements"]
+    assert packet["answers"]["source_contract_ready_for_e3_bb_review"] is False
+    assert packet["answers"]["order_authority_granted"] is False
+    assert packet["answers"]["order_submission_performed"] is False
+
+
 def test_marker_strings_do_not_satisfy_active_order_contract(tmp_path: Path) -> None:
     for rel_path in (
         "rust/openclaw_engine/src/bounded_probe_active_order.rs",
@@ -268,7 +371,12 @@ pub fn marker_only() {
     let _ = "limit_price max_fresh_bbo_age_ms max_initial_passive_gap_bps";
     let _ = "evaluate_probe_admission allowed_to_submit_order ORDER_AUTHORITY_GRANTED";
     let _ = "risk_state validate_operator_authorization Decision Lease main_cost_gate_adjustment";
-    let _ = "dispatch_admitted_bounded_probe_order active_bounded_probe_order_submission";
+    let _ = "bounded_probe_active_order_request_for_reject";
+    let _ = "record_reject_event_with_placement_active_request_and_order_dispatch";
+    let _ = "self.order_dispatch_tx.clone";
+    let _ = "submit_candidate_matched_bounded_probe_order";
+    let _ = "active_order_draft = active_bounded_probe_order_submission";
+    let _ = "result.active_order_draft order_dispatch_tx dispatch_active_bounded_probe_order_draft";
     let _ = "OrderDispatchRequest tx.send order_link_id context_id signal_id";
     let _ = "order_id fill_id fee slippage_bps matched_blocked_control";
 }
@@ -311,7 +419,12 @@ pub fn marker_only() {
     let _ = "limit_price max_fresh_bbo_age_ms max_initial_passive_gap_bps //";
     let _ = "evaluate_probe_admission allowed_to_submit_order ORDER_AUTHORITY_GRANTED //";
     let _ = "risk_state validate_operator_authorization Decision Lease main_cost_gate_adjustment //";
-    let _ = "dispatch_admitted_bounded_probe_order active_bounded_probe_order_submission //";
+    let _ = "bounded_probe_active_order_request_for_reject //";
+    let _ = "record_reject_event_with_placement_active_request_and_order_dispatch //";
+    let _ = "self.order_dispatch_tx.clone //";
+    let _ = "submit_candidate_matched_bounded_probe_order //";
+    let _ = "active_order_draft = active_bounded_probe_order_submission //";
+    let _ = "result.active_order_draft order_dispatch_tx dispatch_active_bounded_probe_order_draft //";
     let _ = "OrderDispatchRequest tx.send order_link_id context_id signal_id //";
     let _ = "order_id fill_id fee slippage_bps matched_blocked_control //";
     let _ = "submit_candidate_matched_bounded_probe_order bounded_probe_adapter_enabled //";
@@ -409,6 +522,22 @@ mod tests {
         let bounded_probe_adapter_enabled = true;
         let _ = bounded_probe_adapter_enabled;
     }
+    pub fn build_runtime_admission_result() {
+        let active_order_draft = active_bounded_probe_order_submission(active_order_decision);
+        let _ = active_order_draft;
+    }
+    pub fn dispatch_active_bounded_probe_order_draft() {
+        bounded_probe_active_order_request_for_reject();
+        record_reject_event_with_placement_active_request_and_order_dispatch();
+        let _ = self.order_dispatch_tx.clone();
+        let _ = result.active_order_draft;
+        let _ = order_dispatch_tx;
+        let _ = tx.send(OrderDispatchRequest {
+            order_link_id,
+            context_id,
+            signal_id,
+        });
+    }
 }
 """
     for rel_path in (
@@ -454,7 +583,11 @@ pub fn marker_only() {
     let _ = r#"limit_price max_fresh_bbo_age_ms max_initial_passive_gap_bps //"#;
     let _ = r#"evaluate_probe_admission allowed_to_submit_order ORDER_AUTHORITY_GRANTED //"#;
     let _ = r#"risk_state validate_operator_authorization Decision Lease main_cost_gate_adjustment //"#;
-    let _ = r#"dispatch_admitted_bounded_probe_order active_bounded_probe_order_submission //"#;
+    let _ = r#"bounded_probe_active_order_request_for_reject //"#;
+    let _ = r#"record_reject_event_with_placement_active_request_and_order_dispatch //"#;
+    let _ = r#"self.order_dispatch_tx.clone //"#;
+    let _ = r#"submit_candidate_matched_bounded_probe_order active_order_draft = active_bounded_probe_order_submission //"#;
+    let _ = r#"result.active_order_draft order_dispatch_tx dispatch_active_bounded_probe_order_draft //"#;
     let _ = r#"OrderDispatchRequest tx.send order_link_id context_id signal_id //"#;
     let _ = r#"order_id fill_id fee slippage_bps matched_blocked_control //"#;
     let _ = r#"submit_candidate_matched_bounded_probe_order bounded_probe_adapter_enabled //"#;
@@ -510,8 +643,15 @@ risk_state
 validate_operator_authorization
 Decision Lease
 main_cost_gate_adjustment
-dispatch_admitted_bounded_probe_order
+bounded_probe_active_order_request_for_reject
+record_reject_event_with_placement_active_request_and_order_dispatch
+self.order_dispatch_tx.clone
+submit_candidate_matched_bounded_probe_order
+active_order_draft = active_bounded_probe_order_submission
+result.active_order_draft
+order_dispatch_tx
 active_bounded_probe_order_submission
+dispatch_active_bounded_probe_order_draft
 OrderDispatchRequest
 tx.send
 order_link_id
@@ -577,8 +717,15 @@ pub fn marker_only() {
         validate_operator_authorization
         Decision Lease
         main_cost_gate_adjustment
-        dispatch_admitted_bounded_probe_order
+        bounded_probe_active_order_request_for_reject
+        record_reject_event_with_placement_active_request_and_order_dispatch
+        self.order_dispatch_tx.clone
+        submit_candidate_matched_bounded_probe_order
+        active_order_draft = active_bounded_probe_order_submission
+        result.active_order_draft
+        order_dispatch_tx
         active_bounded_probe_order_submission
+        dispatch_active_bounded_probe_order_draft
         OrderDispatchRequest
         tx.send
         order_link_id
