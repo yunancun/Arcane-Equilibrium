@@ -6,8 +6,8 @@
 use std::path::PathBuf;
 
 use openclaw_types::{
-    evaluate_feature_flag_secret_auth_matrix, AuthorityScope, BrokerCapabilityRequest,
-    BrokerEnvironment, BrokerOperation, FeatureFlagSecretAuthBlocker,
+    evaluate_feature_flag_secret_auth_matrix, AssetLane, AuthorityScope, Broker,
+    BrokerCapabilityRequest, BrokerEnvironment, BrokerOperation, FeatureFlagSecretAuthBlocker,
     FeatureFlagSecretAuthMatrixV1, IbkrApiSessionTopologyV1, IbkrExternalSurfaceGateV1,
     IbkrPhase2GateArtifactV1, IbkrPhase2PolicyBundleV1, IbkrSecretSlotContractV1,
     IbkrSessionAttestationV1, InstrumentKind, StockEtfAuthorizationEnvelopeV1,
@@ -205,6 +205,198 @@ fn accepted_paper_matrix_requires_matching_secret_artifact_session_and_envelope(
 }
 
 #[test]
+fn feature_flag_secret_auth_rejects_each_authority_gap_independently() {
+    use FeatureFlagSecretAuthBlocker as Blocker;
+
+    let cases: [(
+        fn(&mut FeatureFlagSecretAuthMatrixV1, &mut BrokerCapabilityRequest),
+        Blocker,
+    ); 21] = [
+        (
+            |matrix, _| {
+                matrix.contract_id = "feature_flag_secret_auth_matrix_v1_fixture".to_string()
+            },
+            Blocker::ContractIdMismatch,
+        ),
+        (
+            |matrix, _| matrix.source_version = 2,
+            Blocker::SourceVersionMismatch,
+        ),
+        (
+            |matrix, _| matrix.server_rust_matrix_authoritative = false,
+            Blocker::ServerRustMatrixNotAuthoritative,
+        ),
+        (
+            |matrix, _| matrix.gui_lane_state_override_denied = false,
+            Blocker::GuiLaneStateOverrideNotDenied,
+        ),
+        (
+            |matrix, request| {
+                request.asset_lane = AssetLane::CryptoPerp;
+                matrix.authorization_envelope.asset_lane = AssetLane::CryptoPerp;
+            },
+            Blocker::WrongAssetLane,
+        ),
+        (
+            |matrix, request| {
+                request.broker = Broker::Bybit;
+                matrix.authorization_envelope.broker = Broker::Bybit;
+            },
+            Blocker::WrongBroker,
+        ),
+        (
+            |matrix, request| {
+                request.environment = BrokerEnvironment::LiveReservedDenied;
+                matrix.authorization_envelope.environment = BrokerEnvironment::LiveReservedDenied;
+            },
+            Blocker::LiveEnvironmentDenied,
+        ),
+        (
+            |_, request| request.instrument_kind = InstrumentKind::CryptoPerp,
+            Blocker::InstrumentKindDenied,
+        ),
+        (
+            |matrix, request| {
+                request.operation = BrokerOperation::LiveOrderSubmit;
+                matrix.authorization_envelope.permission_scope = AuthorityScope::Denied;
+            },
+            Blocker::LiveOrAccountWriteOperationDenied,
+        ),
+        (
+            |matrix, _| matrix.flags.stock_etf_lane_enabled = false,
+            Blocker::LaneFlagDisabled,
+        ),
+        (
+            |matrix, request| {
+                request.operation = BrokerOperation::HealthRead;
+                matrix.authorization_envelope.permission_scope = AuthorityScope::ReadOnly;
+                matrix.flags.ibkr_readonly_enabled = false;
+            },
+            Blocker::ReadonlyFlagDisabled,
+        ),
+        (
+            |matrix, _| matrix.flags.ibkr_paper_enabled = false,
+            Blocker::PaperFlagDisabled,
+        ),
+        (
+            |matrix, _| matrix.flags.stock_etf_shadow_only = true,
+            Blocker::ShadowOnlyBlocksPaper,
+        ),
+        (
+            |matrix, _| {
+                matrix.secret_slot_contract.contract_id =
+                    "ibkr_secret_slot_contract_v1_fixture".to_string()
+            },
+            Blocker::SecretContractRejected,
+        ),
+        (
+            |matrix, _| matrix.phase2_gate_artifact.artifact_id = String::new(),
+            Blocker::Phase2ArtifactRejected,
+        ),
+        (
+            |matrix, _| {
+                matrix.session_attestation.contract_id =
+                    "ibkr_session_attestation_v1_fixture".to_string()
+            },
+            Blocker::SessionAttestationRejected,
+        ),
+        (
+            |matrix, _| matrix.authorization_envelope.environment = BrokerEnvironment::ReadOnly,
+            Blocker::AuthorizationEnvelopeMismatch,
+        ),
+        (
+            |matrix, _| matrix.authorization_envelope.permission_scope = AuthorityScope::ReadOnly,
+            Blocker::PermissionScopeMismatch,
+        ),
+        (
+            |matrix, _| matrix.authorization_envelope.risk_config_hash = "risk_hash".to_string(),
+            Blocker::RiskConfigHashInvalid,
+        ),
+        (
+            |matrix, _| matrix.authorization_envelope.expires_at_ms = NOW_MS,
+            Blocker::AuthorizationEnvelopeExpired,
+        ),
+        (
+            |matrix, _| matrix.authorization_envelope.secret_slot_fingerprint = "c".repeat(64),
+            Blocker::SecretSlotFingerprintMismatch,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut matrix = accepted_matrix(true, false);
+        let mut request = paper_submit_request();
+        mutate(&mut matrix, &mut request);
+        assert_single_feature_flag_secret_auth_blocker(
+            evaluate_feature_flag_secret_auth_matrix(&matrix, request, NOW_MS),
+            blocker,
+        );
+    }
+
+    let mut account_mismatch = accepted_matrix(true, false);
+    account_mismatch
+        .authorization_envelope
+        .account_fingerprint_hash = "c".repeat(64);
+    assert_single_feature_flag_secret_auth_blocker(
+        evaluate_feature_flag_secret_auth_matrix(&account_mismatch, paper_submit_request(), NOW_MS),
+        Blocker::AccountFingerprintMismatch,
+    );
+}
+
+#[test]
+fn feature_flag_secret_auth_preserves_aggregate_lineage_failures_when_hashes_are_invalid() {
+    let mut secret_live_missing = accepted_matrix(true, false);
+    secret_live_missing
+        .secret_slot_contract
+        .live_secret_absent_or_empty = false;
+    let verdict = evaluate_feature_flag_secret_auth_matrix(
+        &secret_live_missing,
+        paper_submit_request(),
+        NOW_MS,
+    );
+    assert!(!verdict.allowed);
+    assert!(verdict
+        .blockers
+        .contains(&FeatureFlagSecretAuthBlocker::SecretContractRejected));
+    assert!(verdict
+        .blockers
+        .contains(&FeatureFlagSecretAuthBlocker::LiveSecretAbsentOrEmptyNotProven));
+
+    let mut invalid_secret_hash = accepted_matrix(true, false);
+    invalid_secret_hash
+        .authorization_envelope
+        .secret_slot_fingerprint = "paper_secret_slot_fingerprint".to_string();
+    let verdict = evaluate_feature_flag_secret_auth_matrix(
+        &invalid_secret_hash,
+        paper_submit_request(),
+        NOW_MS,
+    );
+    assert!(!verdict.allowed);
+    assert!(verdict
+        .blockers
+        .contains(&FeatureFlagSecretAuthBlocker::SecretSlotFingerprintInvalid));
+    assert!(verdict
+        .blockers
+        .contains(&FeatureFlagSecretAuthBlocker::SecretSlotFingerprintMismatch));
+
+    let mut invalid_account_hash = accepted_matrix(true, false);
+    invalid_account_hash
+        .authorization_envelope
+        .account_fingerprint_hash = "paper_account_fingerprint".to_string();
+    let verdict = evaluate_feature_flag_secret_auth_matrix(
+        &invalid_account_hash,
+        paper_submit_request(),
+        NOW_MS,
+    );
+    assert!(!verdict.allowed);
+    assert!(verdict
+        .blockers
+        .contains(&FeatureFlagSecretAuthBlocker::AccountFingerprintHashInvalid));
+    assert!(verdict
+        .blockers
+        .contains(&FeatureFlagSecretAuthBlocker::AccountFingerprintMismatch));
+}
+
+#[test]
 fn feature_flag_secret_auth_matrix_requires_exact_contract_id_and_version() {
     let matrix = FeatureFlagSecretAuthMatrixV1 {
         contract_id: "feature_flag_secret_auth_matrix_v1_fixture".to_string(),
@@ -267,4 +459,18 @@ fn source_auth_matrix_template_is_default_blocked_and_secret_free() {
     assert!(!lower.contains("account_id ="));
     assert!(!lower.contains("password ="));
     assert!(!lower.contains("token ="));
+}
+
+fn assert_single_feature_flag_secret_auth_blocker(
+    verdict: openclaw_types::FeatureFlagSecretAuthVerdict,
+    blocker: FeatureFlagSecretAuthBlocker,
+) {
+    assert!(!verdict.allowed);
+    assert_eq!(verdict.effective_authority_scope, AuthorityScope::Denied);
+    assert_eq!(
+        verdict.blockers,
+        vec![blocker],
+        "expected only {blocker:?}; blockers: {:?}",
+        verdict.blockers
+    );
 }

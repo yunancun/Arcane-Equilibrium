@@ -147,6 +147,27 @@ def _source() -> str:
     return FEATURE_FLAG_SECRET_AUTH.read_text(encoding="utf-8")
 
 
+def _authorization_envelope_default_block(source: str) -> str:
+    return source.split("impl Default for StockEtfAuthorizationEnvelopeV1", 1)[1].split(
+        "impl StockEtfAuthorizationEnvelopeV1",
+        1,
+    )[0]
+
+
+def _authorization_envelope_paper_fixture_block(source: str) -> str:
+    return source.split("pub fn paper_fixture(expires_at_ms: u64) -> Self", 1)[1].split(
+        "pub struct FeatureFlagSecretAuthMatrixV1",
+        1,
+    )[0]
+
+
+def _matrix_default_block(source: str) -> str:
+    return source.split("impl Default for FeatureFlagSecretAuthMatrixV1", 1)[1].split(
+        "impl FeatureFlagSecretAuthMatrixV1",
+        1,
+    )[0]
+
+
 def test_ibkr_feature_flag_secret_auth_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
@@ -174,6 +195,49 @@ def test_ibkr_feature_flag_secret_auth_source_keeps_auth_matrix_contract() -> No
     assert "server_rust_matrix_authoritative: false" in source
     assert "allowed: blockers.is_empty()" in source
     assert "AuthorityScope::Denied" in source
+
+
+def test_ibkr_feature_flag_secret_auth_source_keeps_default_and_paper_fixture_posture() -> None:
+    source = _source()
+    envelope_default = _authorization_envelope_default_block(source)
+    envelope_fixture = _authorization_envelope_paper_fixture_block(source)
+    matrix_default = _matrix_default_block(source)
+
+    for required in (
+        "asset_lane: AssetLane::StockEtfCash",
+        "broker: Broker::Ibkr",
+        "environment: BrokerEnvironment::ReadOnly",
+        "permission_scope: AuthorityScope::Denied",
+        "secret_slot_fingerprint: String::new()",
+        "account_fingerprint_hash: String::new()",
+        "risk_config_hash: String::new()",
+        "expires_at_ms: 0",
+    ):
+        assert required in envelope_default
+
+    for required in (
+        "environment: BrokerEnvironment::Paper",
+        "permission_scope: AuthorityScope::PaperRehearsal",
+        'secret_slot_fingerprint: "a".repeat(64)',
+        'account_fingerprint_hash: "b".repeat(64)',
+        'risk_config_hash: "d".repeat(64)',
+        "expires_at_ms",
+        "..Self::default()",
+    ):
+        assert required in envelope_fixture
+
+    for required in (
+        "contract_id: String::new()",
+        "source_version: 0",
+        "flags: StockEtfFeatureFlags::default()",
+        "secret_slot_contract: IbkrSecretSlotContractV1::default()",
+        "phase2_gate_artifact: IbkrPhase2GateArtifactV1::default()",
+        "session_attestation: IbkrSessionAttestationV1::default()",
+        "authorization_envelope: StockEtfAuthorizationEnvelopeV1::default()",
+        "gui_lane_state_override_denied: false",
+        "server_rust_matrix_authoritative: false",
+    ):
+        assert required in matrix_default
 
 
 def test_ibkr_feature_flag_secret_auth_source_keeps_policy_secret_artifact_session_chain() -> None:
