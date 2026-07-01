@@ -610,6 +610,43 @@ ingestion、DQ writer、paper order/cancel/replace、fill import、DB apply、ev
 writer、evidence clock、scorecard writer、tiny-live、live、Linux runtime sync/restart
 或 Bybit behavior change。
 
+## 2026-07-01 PM Session Checkpoint — Python No-Write Static Guard Split Guard
+
+PM 已將 Stock/ETF Python no-write static guard 拆分為 shared helper + Python/route/GUI
+三個窄測試模組。這不是 behavior change、endpoint change、IPC method change 或
+runtime approval；目的只是讓保護 IBKR source-only posture 的測試守衛保持可審查。
+
+已完成：
+
+- `stock_etf_static_guard_helpers.py` 集中常數、候選檔掃描與 AST 檢查 helper。
+- `test_stock_etf_python_no_write_static_guard.py` 降至 152 行，保留 Python/connector
+  no-write、network、persistence、secret/env、clock/concurrency 與 connector-import
+  guard。
+- `test_stock_etf_route_static_guard.py` 承接 GET-only、empty IPC params、readonly
+  status IPC allowlist 與 authenticated actor signature guard。
+- `test_stock_etf_static_gui_guard.py` 承接 GUI endpoint template、display-only、
+  no-background-work、one-shot fanout budget 與 renderer/fallback split guard。
+- 拆分後最大 guard/helper 檔 522 行，所有 Stock/ETF guard files 均低於 800 行
+  review threshold。
+
+Verification：
+
+- Python changed files `py_compile` PASS。
+- Focused split guard pytest：`21 passed`。
+- Full Stock/ETF FastAPI/static pytest：`120 passed`。
+
+Dispatch 記錄：本 turn 因工具層 spawn policy 未允許 sub-agent dispatch，PM 本地完成
+narrow test-only hygiene / review / regression。此 checkpoint 為 source/test guard
+維護，不改 runtime behavior。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 2/3 runtime approval、IBKR contact
+approval、read-only probe approval、result import approval、evidence writer approval、
+scorecard writer approval 或 launch approval。未批准 IBKR SDK import、socket/HTTP、
+secret、connector runtime、read probe execution、collector start、market-data
+ingestion、DQ writer、paper order/cancel/replace、fill import、DB apply、evidence
+writer、evidence clock、scorecard writer、tiny-live、live、Linux runtime sync/restart
+或 Bybit behavior change。
+
 ## 2026-07-01 PM Session Checkpoint — Scorecard Status Module Split Guard
 
 PM 已將 Rust scorecard status source fixture 拆出父模組。這不是 IBKR contact

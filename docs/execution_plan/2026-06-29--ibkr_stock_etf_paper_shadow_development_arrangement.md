@@ -4200,3 +4200,36 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper
 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
 clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
 Bybit behavior change。
+
+## 94. 2026-07-01 PM session source checkpoint：Python No-Write Static Guard Split Guard
+
+本 checkpoint 將 Stock/ETF Python no-write static guard 從單一 1022 行測試檔拆成
+共享 helper 與三個窄測試模組。這不是 behavior change、不是 endpoint change、
+不是 IPC method change，也不放寬任何 IBKR/Bybit 邊界；只降低 guard 本身的審查
+成本，避免保護 IBKR source-only posture 的測試檔繼續膨脹。
+
+已完成：
+
+- 新增 `stock_etf_static_guard_helpers.py`，集中常數、候選檔掃描與 AST 檢查 helper。
+- `test_stock_etf_python_no_write_static_guard.py` 只保留 Python/connector surface
+  no-write、network、persistence、secret/env、clock/concurrency 與 connector-import
+  邊界測試。
+- 新增 `test_stock_etf_route_static_guard.py`，承接 GET-only、empty params、
+  readonly status IPC allowlist 與 authenticated actor route signature guard。
+- 新增 `test_stock_etf_static_gui_guard.py`，承接 GUI endpoint template、display-only、
+  no-background-work、one-shot fanout budget 與 renderer/fallback split guard。
+- 原 1022 行 guard 降至 152 行；共享 helper 522 行；新增 route/GUI guard 分別
+  147/263 行，Stock/ETF guard files 皆低於 800 行 review threshold。
+
+驗證：
+
+- Python changed files `py_compile`：PASS。
+- Focused split guard pytest：`21 passed`。
+- Full Stock/ETF FastAPI/static pytest：`120 passed`。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
+cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
+clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
+Bybit behavior change。

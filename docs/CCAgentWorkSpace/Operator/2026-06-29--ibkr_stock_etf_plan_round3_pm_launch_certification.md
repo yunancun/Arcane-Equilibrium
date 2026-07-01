@@ -2276,3 +2276,27 @@ Verification 已過：
 沒有 connector runtime、沒有 read probe execution、沒有 result import、沒有 DB/
 evidence/scorecard writer、沒有 paper order/cancel/replace、沒有 tiny-live/live
 authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Python No-Write Static Guard Split Guard
+
+本 session 已把 Stock/ETF Python no-write static guard 從 1022 行單檔拆成
+shared helper + 三個窄測試檔：
+
+- `stock_etf_static_guard_helpers.py` 集中 AST/helper/constants。
+- Python/connector no-write guard 保留在
+  `test_stock_etf_python_no_write_static_guard.py`。
+- Route/IPC guard 移到 `test_stock_etf_route_static_guard.py`。
+- GUI display/perf guard 移到 `test_stock_etf_static_gui_guard.py`。
+- 拆分後最大 guard/helper 檔 522 行；所有 Stock/ETF guard files 均低於 800 行。
+
+Verification 已過：
+
+- Python changed files `py_compile`：PASS
+- Focused split guard pytest：`21 passed`
+- Full Stock/ETF FastAPI/static pytest：`120 passed`
+
+邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 GUI fanout 增加、沒有
+IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation、
+沒有 connector runtime、沒有 read probe execution、沒有 result import、沒有 DB/
+evidence/scorecard writer、沒有 paper order/cancel/replace、沒有 tiny-live/live
+authority，也沒有改動 Bybit live execution 行為。

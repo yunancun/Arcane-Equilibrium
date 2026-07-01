@@ -3456,3 +3456,10 @@
 - `status_summaries.rs` is now 785 lines and the scorecard child module is 228 lines.
 - Verification passed: scoped Rust format, focused engine scorecard IPC fixture, engine Stock/ETF IPC regression `29 passed`, docs trace guard, and `git diff --check`.
 - Boundary unchanged: no endpoint, IPC method, payload behavior, GUI fanout, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe, result import, DB/evidence/scorecard writer, paper order/cancel/replace, tiny-live/live, Linux runtime, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF Python No-Write Static Guard Split Guard
+
+- PM split the 1022-line Stock/ETF Python no-write static guard into a shared helper plus Python/route/GUI guard modules.
+- The guard logic remains intact: Python/connector no-write, route/IPC readonly status, GUI display-only/no-background-work, fanout budget, and renderer/fallback split checks still run.
+- Verification passed: Python compile, focused split guard `21 passed`, and full Stock/ETF FastAPI/static `120 passed`.
+- Boundary unchanged: no endpoint, IPC method, GUI fanout, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe, result import, DB/evidence/scorecard writer, paper order/cancel/replace, tiny-live/live, Linux runtime, or Bybit behavior change.
