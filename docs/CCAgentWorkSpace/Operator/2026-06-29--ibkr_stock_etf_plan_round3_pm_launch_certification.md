@@ -3049,3 +3049,27 @@ Verification 已過：
 邊界不變：沒有 migration apply、沒有 PG write、沒有 sqlx registration、沒有 DB runtime、
 沒有 IBKR contact、沒有 paper order、沒有 evidence clock、沒有 tiny-live/live authorization，
 也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Disable Cleanup Runbook Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF Disable Cleanup Runbook Source Static Guard`。
+
+這個 guard 鎖住 `stock_etf_disable_cleanup_runbook.rs` 的 kill-switch / disable-cleanup
+runbook source hygiene：exact runbook id、固定 disable env flag values、required proof kinds、
+fail-closed default、accepted fixture boundary、env/proof validation matrix 必須保留。
+
+Guard 允許固定 `OPENCLAW_*` flag 字面量，但禁止任何 env 讀取或 runtime 操作。Accepted fixture
+必須維持 StockEtfCash/IBKR、Bybit live unchanged true，且 IBKR contact、connector runtime、
+paper order、secret slot、secret serialization、destructive DB cleanup、DB delete/truncate、
+paper-shadow launch、tiny-live、live 全部 false。
+
+Verification 已過：
+
+- New structure guard pytest：`7 passed`
+- Focused disable-cleanup runbook acceptance：`7 passed`
+- Full `cargo test -p openclaw_types`：PASS
+
+邊界不變：沒有 service stop、沒有 env mutation、沒有 secret inspection、沒有 DB cleanup、
+沒有 IBKR contact、沒有 paper order、沒有 launch authorization、沒有 tiny-live/live，也沒有
+改動 Bybit live execution 行為。

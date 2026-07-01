@@ -5295,3 +5295,38 @@ PM 邊界不變：此 checkpoint 不把 source draft 複製到 `sql/migrations/`
 migration/apply，不做 PG write/dry-run，不註冊 sqlx migration，不呼叫 IBKR、不導入 IBKR SDK、
 不讀/建 secret、不啟動 connector runtime、不送 paper order、不做 evidence writer/clock、
 不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 122. 2026-07-01 PM session source checkpoint：Stock/ETF Disable Cleanup Runbook Source Static Guard
+
+本 checkpoint 為 `stock_etf_disable_cleanup_runbook.rs` 補上 source-only structure guard。這不是
+service stop、不是 env mutation、不是 secret inspection、不是 DB cleanup、不是 IBKR contact、
+不是 paper order、不是 launch authorization；只把 kill-switch / disable-cleanup runbook 的
+source invariant 機器化。
+
+已完成：
+
+- 新增 `tests/structure/test_stock_etf_disable_cleanup_runbook_source_static.py`。
+- Guard 鎖住 `stock_etf_disable_cleanup_runbook.rs` 低於 800 行 governance cap。
+- Guard 要求 exact `stock_etf_kill_switch_and_disable_cleanup_runbook_v1` runbook id、
+  required env flag values、required proof kinds、contract/verdict/blocker surface 保持在 source
+  中。
+- Guard 允許固定 `OPENCLAW_*` disable flag 字面量，但禁止任何 env/fs/network/IBKR SDK/clock/
+  thread/process/order/Bybit runtime token。
+- Guard 要求 default runbook fail-closed：CryptoPerp/Bybit placeholder、Bybit live unchanged
+  proof missing、no launch authority、empty env/proof vectors。
+- Guard 要求 accepted fixture 保留 StockEtfCash/IBKR、Bybit live unchanged true、IBKR contact/
+  connector runtime/paper order/secret/destructive DB cleanup/tiny-live/live 全部 false。
+- Guard 要求 env/proof validation 保留 missing/duplicated/unexpected checks、expected/observed
+  value checks、evidence hash checks、proof verified/runtime-authority/destructive-cleanup checks。
+
+驗證：
+
+- New structure guard py_compile：PASS。
+- Focused structure guard pytest：`7 passed`。
+- Focused disable-cleanup runbook acceptance：`7 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+
+PM 邊界不變：此 checkpoint 不讀 env、不改 env、不停服務、不檢查 secret、不建立 secret slot、
+不做 destructive cleanup、不做 DB delete/truncate、不呼叫 IBKR、不導入 IBKR SDK、不啟動
+connector runtime、不送 paper order、不授權 paper-shadow launch/tiny-live/live 或任何 Bybit
+behavior change。
