@@ -4744,3 +4744,49 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper
 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
 clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
 Bybit behavior change。
+
+## 109. 2026-07-01 PM session source checkpoint：Stock/ETF Paper Order Request Source Static Guard
+
+本 checkpoint 為 `stock_etf_paper_order_request.rs` 與
+`stock_etf_paper_order_request/validation.rs` 補上 source-only semantic guard。這不是
+IPC runtime、不是 IBKR contact、不是 connector start、不是 paper order route；只把
+paper order request envelope 在 lane-scoped IPC 與 IBKR paper lifecycle 之間的 source
+invariant 機器化。
+
+已完成：
+
+- 新增 `tests/structure/test_stock_etf_paper_order_request_source_static.py`。
+- Guard 鎖住 parent module 與 validation module 低於 800 行 governance cap。
+- Guard 要求 request envelope fields、paper order type/time-in-force/limit-price policy、
+  verdict/blocker surface 與 validation helper surface 保持在 source 中。
+- Guard 要求 default 仍 fail-closed：CryptoPerp/Bybit、LiveReservedDenied、
+  UnknownDenied IPC method、TransferOrAccountWrite operation、Denied authority、
+  `effect_capable=false`，且 no contact/runtime/secret/order/Bybit/live flags。
+- Guard 要求 preview 仍是 `PaperOrderSubmit` + ReadOnly + effect=false；submit/cancel/
+  replace 仍是 PaperRehearsal + effect=true，並保持 operation/scope/effect mismatch
+  blockers。
+- Guard 要求 request id、account/session/scoped-auth/guardian/lifecycle/broker-capability
+  hashes、decision lease、audit event、risk/instrument/cost/universe/source artifact hashes
+  checks 不得消失。
+- Guard 要求 submit/preview order intent 仍限制 normalized symbol、Buy/Sell side、
+  Stock/ETF instrument、positive quantity、limit/market price policy 與 TIF compatibility。
+- Guard 要求 preview 禁止 effect/lifecycle fields，submit 禁止 broker order id 與
+  cancel/replace fields，cancel 禁止 order-shape pollution，replace 禁止 original mutable
+  fields。
+- Guard 禁止 env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens
+  與 secret material access tokens。
+
+驗證：
+
+- New structure guard py_compile：PASS。
+- Focused structure guard pytest：`5 passed`。
+- Existing split + new semantic paper-order structure guards：`8 passed`。
+- Focused paper order request acceptance：`8 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
+cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
+clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
+Bybit behavior change。
