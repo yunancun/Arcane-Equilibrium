@@ -5098,3 +5098,33 @@ Verification 已過：
 沒有 evidence writer、沒有 DQ writer、沒有 evidence clock start、沒有 scorecard writer、沒有 DB apply、
 沒有 paper order routing、沒有 broker session、沒有 tiny-live/live authorization，也沒有改動 Bybit
 live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Scorecard Inputs Default Lineage Exact Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Scorecard Inputs Default Lineage Exact Guard`。
+
+這個 checkpoint 補強 `StockEtfScorecardInputBundleV1` 與 cash ledger、cost model、benchmark、
+shadow fill model、storage capacity 五個 atomic scorecard input validator 的 default fail-closed exact
+coverage。
+
+新增 Rust acceptance 證明 default bundle 與五個 atomic input contracts 會以完整 ordered blocker vectors
+fail closed，覆蓋 contract/source、StockEtfCash/IBKR lane drift、hash lineage、derived-only/separation、
+Bybit protection 與 no-runtime/no-writer posture。Python source-static guard 也鎖住 component/bundle
+validator blocker emit order。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Stock/ETF scorecard inputs source static pytest：`10 passed`
+- Stock/ETF scorecard inputs Rust acceptance：`14 passed`
+- Full `cargo test -p openclaw_types`：`35` unit/golden + `337` integration/acceptance + `0` doc-tests
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IPC server start、
+沒有 IBKR contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 broker fill import、
+沒有 scorecard derivation、沒有 scorecard writer、沒有 DB/evidence writer、沒有 evidence clock start、
+沒有 paper order routing、沒有 broker session、沒有 tiny-live/live authorization，也沒有改動 Bybit
+live/demo execution 行為。

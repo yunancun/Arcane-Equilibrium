@@ -153,6 +153,19 @@ def _bundle() -> str:
     return SCORECARD_BUNDLE.read_text(encoding="utf-8")
 
 
+def _validate_block(source: str, type_name: str) -> str:
+    impl_block = source.split(f"impl {type_name}", 1)[1]
+    return impl_block.split(
+        "pub fn validate(&self) -> StockEtfScorecardInputVerdict<StockEtfScorecardInputBlocker>",
+        1,
+    )[1].split("StockEtfScorecardInputVerdict::new(blockers)", 1)[0]
+
+
+def _assert_blocker_order(validate: str, ordered_blockers: tuple[str, ...]) -> None:
+    positions = [validate.index(f"Blocker::{blocker}") for blocker in ordered_blockers]
+    assert positions == sorted(positions)
+
+
 def test_stock_etf_scorecard_inputs_sources_stay_below_governance_cap() -> None:
     assert len(_parent().splitlines()) <= MAX_LINES
     assert len(_components().splitlines()) <= MAX_LINES
@@ -302,6 +315,132 @@ def test_stock_etf_scorecard_inputs_bundle_keeps_cross_contract_and_side_effect_
     assert "self.evidence_clock_started" in source
     assert "self.secret_content_serialized" in source
     assert "self.live_or_tiny_live_authorized" in source
+
+
+def test_stock_etf_scorecard_inputs_components_keep_exact_blocker_order() -> None:
+    source = _components()
+
+    _assert_blocker_order(
+        _validate_block(source, "BrokerAccountPortfolioCashLedgerV1"),
+        (
+            "ContractIdMismatch",
+            "SourceVersionMismatch",
+            "WrongAssetLane",
+            "WrongBroker",
+            "CashLedgerEnvironmentDenied",
+            "AccountFingerprintHashInvalid",
+            "AccountSnapshotHashInvalid",
+            "PortfolioPositionsHashInvalid",
+            "CurrencyMissing",
+            "AsOfMissing",
+            "SourceReportHashInvalid",
+        ),
+    )
+    _assert_blocker_order(
+        _validate_block(source, "StockEtfCostModelVersionV1"),
+        (
+            "ContractIdMismatch",
+            "SourceVersionMismatch",
+            "CostModelVersionHashInvalid",
+            "CommissionScheduleHashInvalid",
+            "ExchangeRegFeeHashInvalid",
+            "SpreadModelHashInvalid",
+            "SlippageModelHashInvalid",
+            "FxDragModelHashInvalid",
+            "TaxFeePlaceholderHashInvalid",
+            "ConservativeFillPenaltyMissing",
+        ),
+    )
+    _assert_blocker_order(
+        _validate_block(source, "StockEtfBenchmarkVersionV1"),
+        (
+            "ContractIdMismatch",
+            "SourceVersionMismatch",
+            "BenchmarkIdMissing",
+            "BenchmarkDataSourceHashInvalid",
+            "BenchmarkConstructionHashInvalid",
+            "BenchmarkRebalanceHashInvalid",
+            "BenchmarkCurrencyHashInvalid",
+            "BenchmarkCorporateActionHashInvalid",
+            "BenchmarkMatchedControlHashInvalid",
+            "BenchmarkVersionHashInvalid",
+        ),
+    )
+    _assert_blocker_order(
+        _validate_block(source, "StockShadowFillModelV1"),
+        (
+            "ContractIdMismatch",
+            "SourceVersionMismatch",
+            "SignalIdMissing",
+            "InstrumentIdentityHashInvalid",
+            "OrderSideUnknown",
+            "IntendedNotionalMissing",
+            "MarketSessionMissing",
+            "QuoteOrBarSourceHashInvalid",
+            "ConservativeFillPriceMissing",
+            "SyntheticShadowMarkerMissing",
+            "ShadowFillLinkedToBrokerPaperFill",
+            "ShadowFillLinkedToLiveFill",
+        ),
+    )
+    _assert_blocker_order(
+        _validate_block(source, "StockEtfStorageCapacityV1"),
+        (
+            "ContractIdMismatch",
+            "SourceVersionMismatch",
+            "UniverseSizeMissing",
+            "UniverseSizeExceedsCapacityPlan",
+            "RowsPerDayEstimateMissing",
+            "RowsPerDayEstimateExceedsCapacityPlan",
+            "RawPayloadRetentionMissing",
+            "RawPayloadRetentionTooShort",
+            "CompressedRetentionMissing",
+            "CompressedRetentionShorterThanRawPayloadHashRetention",
+            "CompressedRetentionExceedsCapacityPlan",
+            "IndexBudgetMissing",
+            "IndexBudgetExceedsCapacityPlan",
+            "QuerySloMissing",
+            "QuerySloExceedsCapacityPlan",
+            "ArchivePathMissing",
+            "ArchivePathUnsafe",
+            "CapacityPlanHashInvalid",
+            "CapacityBreachPolicyMissing",
+        ),
+    )
+
+
+def test_stock_etf_scorecard_inputs_bundle_keeps_exact_blocker_order() -> None:
+    validate = _validate_block(_bundle(), "StockEtfScorecardInputBundleV1")
+
+    _assert_blocker_order(
+        validate,
+        (
+            "CashLedgerRejected",
+            "CostModelRejected",
+            "BenchmarkRejected",
+            "ShadowFillModelRejected",
+            "StorageCapacityRejected",
+            "ReadonlyProbeResultImportRequestContractIdMismatch",
+            "ReadonlyProbeResultImportRequestHashInvalid",
+            "MarketDataProvenanceContractHashInvalid",
+            "ReferenceDataSourcesContractHashInvalid",
+            "RiskPolicyContractHashInvalid",
+            "AtomicFactInputHashInvalid",
+            "SourceCommitMissing",
+            "ScorecardNotDerivedOnly",
+            "PaperShadowFillSeparationMissing",
+            "LiveFillClaimed",
+            "BybitLiveExecutionNotProtected",
+            "IbkrContactPerformed",
+            "ConnectorRuntimeStarted",
+            "BrokerFillImportPerformed",
+            "ScorecardWriterStarted",
+            "DbApplyPerformed",
+            "EvidenceClockStarted",
+            "SecretContentSerialized",
+            "LiveOrTinyLiveAuthorized",
+        ),
+    )
 
 
 def test_stock_etf_scorecard_inputs_sources_have_no_runtime_secret_order_or_bybit_client_tokens() -> None:

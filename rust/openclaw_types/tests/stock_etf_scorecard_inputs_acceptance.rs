@@ -22,45 +22,116 @@ use openclaw_types::{
 
 #[test]
 fn default_scorecard_bundle_blocks_all_atomic_inputs() {
+    use StockEtfScorecardInputBlocker as Blocker;
+
     let verdict = StockEtfScorecardInputBundleV1::default().validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::CashLedgerRejected));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::CostModelRejected));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::BenchmarkRejected));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::ShadowFillModelRejected));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::StorageCapacityRejected));
-    assert!(verdict.blockers.contains(
-        &StockEtfScorecardInputBlocker::ReadonlyProbeResultImportRequestContractIdMismatch
-    ));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::ReadonlyProbeResultImportRequestHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::MarketDataProvenanceContractHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::ReferenceDataSourcesContractHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::RiskPolicyContractHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::ScorecardNotDerivedOnly));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::BybitLiveExecutionNotProtected));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::CashLedgerRejected,
+            Blocker::CostModelRejected,
+            Blocker::BenchmarkRejected,
+            Blocker::ShadowFillModelRejected,
+            Blocker::StorageCapacityRejected,
+            Blocker::ReadonlyProbeResultImportRequestContractIdMismatch,
+            Blocker::ReadonlyProbeResultImportRequestHashInvalid,
+            Blocker::MarketDataProvenanceContractHashInvalid,
+            Blocker::ReferenceDataSourcesContractHashInvalid,
+            Blocker::RiskPolicyContractHashInvalid,
+            Blocker::AtomicFactInputHashInvalid,
+            Blocker::SourceCommitMissing,
+            Blocker::ScorecardNotDerivedOnly,
+            Blocker::PaperShadowFillSeparationMissing,
+            Blocker::BybitLiveExecutionNotProtected,
+        ]
+    );
+}
+
+#[test]
+fn default_atomic_scorecard_inputs_emit_exact_fail_closed_blockers() {
+    use StockEtfScorecardInputBlocker as Blocker;
+
+    assert_eq!(
+        BrokerAccountPortfolioCashLedgerV1::default()
+            .validate()
+            .blockers,
+        vec![
+            Blocker::ContractIdMismatch,
+            Blocker::SourceVersionMismatch,
+            Blocker::WrongAssetLane,
+            Blocker::WrongBroker,
+            Blocker::CashLedgerEnvironmentDenied,
+            Blocker::AccountFingerprintHashInvalid,
+            Blocker::AccountSnapshotHashInvalid,
+            Blocker::PortfolioPositionsHashInvalid,
+            Blocker::CurrencyMissing,
+            Blocker::AsOfMissing,
+            Blocker::SourceReportHashInvalid,
+        ]
+    );
+    assert_eq!(
+        StockEtfCostModelVersionV1::default().validate().blockers,
+        vec![
+            Blocker::ContractIdMismatch,
+            Blocker::SourceVersionMismatch,
+            Blocker::CostModelVersionHashInvalid,
+            Blocker::CommissionScheduleHashInvalid,
+            Blocker::ExchangeRegFeeHashInvalid,
+            Blocker::SpreadModelHashInvalid,
+            Blocker::SlippageModelHashInvalid,
+            Blocker::FxDragModelHashInvalid,
+            Blocker::TaxFeePlaceholderHashInvalid,
+            Blocker::ConservativeFillPenaltyMissing,
+        ]
+    );
+    assert_eq!(
+        StockEtfBenchmarkVersionV1::default().validate().blockers,
+        vec![
+            Blocker::ContractIdMismatch,
+            Blocker::SourceVersionMismatch,
+            Blocker::BenchmarkIdMissing,
+            Blocker::BenchmarkDataSourceHashInvalid,
+            Blocker::BenchmarkConstructionHashInvalid,
+            Blocker::BenchmarkRebalanceHashInvalid,
+            Blocker::BenchmarkCurrencyHashInvalid,
+            Blocker::BenchmarkCorporateActionHashInvalid,
+            Blocker::BenchmarkMatchedControlHashInvalid,
+            Blocker::BenchmarkVersionHashInvalid,
+        ]
+    );
+    assert_eq!(
+        StockShadowFillModelV1::default().validate().blockers,
+        vec![
+            Blocker::ContractIdMismatch,
+            Blocker::SourceVersionMismatch,
+            Blocker::SignalIdMissing,
+            Blocker::InstrumentIdentityHashInvalid,
+            Blocker::OrderSideUnknown,
+            Blocker::IntendedNotionalMissing,
+            Blocker::MarketSessionMissing,
+            Blocker::QuoteOrBarSourceHashInvalid,
+            Blocker::ConservativeFillPriceMissing,
+            Blocker::SyntheticShadowMarkerMissing,
+        ]
+    );
+    assert_eq!(
+        StockEtfStorageCapacityV1::default().validate().blockers,
+        vec![
+            Blocker::ContractIdMismatch,
+            Blocker::SourceVersionMismatch,
+            Blocker::UniverseSizeMissing,
+            Blocker::RowsPerDayEstimateMissing,
+            Blocker::RawPayloadRetentionMissing,
+            Blocker::CompressedRetentionMissing,
+            Blocker::IndexBudgetMissing,
+            Blocker::QuerySloMissing,
+            Blocker::ArchivePathMissing,
+            Blocker::CapacityPlanHashInvalid,
+            Blocker::CapacityBreachPolicyMissing,
+        ]
+    );
 }
 
 #[test]
@@ -106,6 +177,8 @@ fn accepted_fixture_keeps_scorecard_derived_and_live_separate() {
     assert_eq!(bundle.market_data_provenance_contract_hash.len(), 64);
     assert_eq!(bundle.reference_data_sources_contract_hash.len(), 64);
     assert_eq!(bundle.risk_policy_contract_hash.len(), 64);
+    assert_eq!(bundle.atomic_fact_input_hash.len(), 64);
+    assert_eq!(bundle.source_commit, "535019c9");
     assert!(bundle.bybit_live_execution_unchanged);
     assert!(!bundle.ibkr_contact_performed);
     assert!(!bundle.connector_runtime_started);
@@ -462,6 +535,7 @@ fn blocked_template_is_parseable_and_secret_free() {
 
     assert!(!parsed.scorecard_is_derived_only);
     assert!(!parsed.paper_and_shadow_fills_separate);
+    assert!(!parsed.live_fill_claimed);
     assert!(!parsed.bybit_live_execution_unchanged);
     assert!(!parsed.ibkr_contact_performed);
     assert!(!parsed.connector_runtime_started);
@@ -478,6 +552,8 @@ fn blocked_template_is_parseable_and_secret_free() {
     assert!(parsed.market_data_provenance_contract_hash.is_empty());
     assert!(parsed.reference_data_sources_contract_hash.is_empty());
     assert!(parsed.risk_policy_contract_hash.is_empty());
+    assert!(parsed.atomic_fact_input_hash.is_empty());
+    assert!(parsed.source_commit.is_empty());
     assert!(parsed.cash_ledger.contract_id.is_empty());
     assert_eq!(parsed.cash_ledger.source_version, 0);
     assert!(parsed.cost_model.contract_id.is_empty());
