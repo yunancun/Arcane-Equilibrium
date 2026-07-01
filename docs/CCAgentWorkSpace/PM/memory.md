@@ -3478,3 +3478,11 @@
 - Rust IPC handler/test split static guards now cap files at 800 lines and require the new child-module allowlist plus moved helper/test ownership.
 - Verification passed: scoped Rust format, focused split structure guards `14 passed`, engine Stock/ETF IPC `29 passed`, docs trace guard, and `git diff --check`.
 - Boundary unchanged: no endpoint, IPC method, payload behavior, GUI fanout, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe, result import, DB/evidence/scorecard writer, paper order/cancel/replace, tiny-live/live, Linux runtime, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF Paper Order Request Module Split Guard
+
+- PM split `stock_etf_paper_order_request.rs` into a 216-line parent type/default module, 114-line fixture module, and 498-line validation module.
+- Public paper-order request types, accepted fixture methods, `validate()`, contract id, and import surface remain unchanged.
+- Added `test_stock_etf_paper_order_request_split_static.py` to enforce module allowlist, moved ownership, 800-line cap, and no-runtime-token posture.
+- Verification passed: scoped Rust format, paper-order split static guard `3 passed`, paper-order acceptance `8 passed`, full `cargo test -p openclaw_types`, and engine Stock/ETF IPC `29 passed`.
+- Boundary unchanged: no endpoint, IPC method, payload behavior, GUI fanout, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe, result import, DB/evidence/scorecard writer, paper order/cancel/replace, tiny-live/live, Linux runtime, or Bybit behavior change.

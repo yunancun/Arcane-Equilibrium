@@ -2326,6 +2326,33 @@ IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/cre
 evidence/scorecard writer、沒有 paper order/cancel/replace、沒有 tiny-live/live
 authority，也沒有改動 Bybit live execution 行為。
 
+## 2026-07-01 Operator Update — Paper Order Request Module Split Guard
+
+本 session 已把 Rust paper-order request contract 做純拆檔 hygiene：
+
+- `stock_etf_paper_order_request.rs` 保留 public enums、envelope、default、
+  verdict/blocker 與 contract id。
+- `stock_etf_paper_order_request/fixtures.rs` 承載 accepted preview/submit/cancel/
+  replace fixtures。
+- `stock_etf_paper_order_request/validation.rs` 承載 `validate()` 與 helper。
+- 父檔降至 216 行；fixtures/validation 為 114/498 行。
+- 新增 paper-order request split static guard，鎖住模組 allowlist 與 no-runtime-token
+  posture。
+
+Verification 已過：
+
+- Scoped Rust rustfmt：PASS
+- Focused paper-order request split static guard：`3 passed`
+- Focused paper-order request acceptance：`8 passed`
+- Full `cargo test -p openclaw_types`：PASS
+- Engine Stock/ETF IPC regression：`29 passed`
+
+邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 payload 行為改動、沒有
+IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation、
+沒有 connector runtime、沒有 read probe execution、沒有 result import、沒有 DB/
+evidence/scorecard writer、沒有 paper order/cancel/replace、沒有 tiny-live/live
+authority，也沒有改動 Bybit live execution 行為。
+
 ## 2026-07-01 Operator Update — Rust IPC Parent Module Split Guard
 
 本 session 已把 Stock/ETF Rust IPC handler parent 和 IPC fixture test parent 做

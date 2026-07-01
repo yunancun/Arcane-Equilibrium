@@ -4300,3 +4300,36 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper
 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
 clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
 Bybit behavior change。
+
+## 97. 2026-07-01 PM session source checkpoint：Paper Order Request Module Split Guard
+
+本 checkpoint 將 Rust `stock_etf_paper_order_request.rs` 從 798 行邊界檔拆成父
+type/default 檔 + `fixtures.rs` + `validation.rs`。這不是 contract behavior
+change、不是 endpoint/IPC change、不是 payload shape change；只降低 future
+paper-order source-only contract 的單檔審查風險，保留
+`openclaw_types::StockEtfPaperOrderRequestEnvelopeV1` public method surface。
+
+已完成：
+
+- 父檔保留 public enums、envelope、default、verdict/blocker 與 contract id。
+- `fixtures.rs` 承載 accepted preview/submit/cancel/replace fixtures。
+- `validation.rs` 承載 `validate()` 與 order intent、effect hash、limit price、
+  boundary flag helper。
+- 原父檔由 798 行降至 216 行；fixtures/validation 子模組分別為 114/498 行。
+- 新增 paper-order request split static guard，鎖住子模組 allowlist、moved ownership
+  與 no-runtime-token posture。
+
+驗證：
+
+- Scoped Rust `rustfmt --edition 2021 --check`：PASS。
+- Focused paper-order request split static guard：`3 passed`。
+- Focused paper-order request acceptance：`8 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- Engine Stock/ETF IPC regression：`29 passed`。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
+cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
+clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
+Bybit behavior change。
