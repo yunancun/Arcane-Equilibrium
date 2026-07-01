@@ -3,6 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 PARENT = ROOT / "rust/openclaw_types/src/stock_etf_paper_order_request.rs"
+FIXTURES = ROOT / "rust/openclaw_types/src/stock_etf_paper_order_request/fixtures.rs"
 VALIDATION = ROOT / "rust/openclaw_types/src/stock_etf_paper_order_request/validation.rs"
 MAX_LINES = 800
 
@@ -17,6 +18,30 @@ REQUIRED_PARENT_TYPE_TOKENS = {
     "pub enum StockEtfPaperOrderRequestBlocker",
     "mod fixtures;",
     "mod validation;",
+}
+REQUIRED_FIXTURE_TOKENS = {
+    "pub fn accepted_preview_fixture() -> Self",
+    "pub fn accepted_submit_fixture() -> Self",
+    "pub fn accepted_cancel_fixture() -> Self",
+    "pub fn accepted_replace_fixture() -> Self",
+    "contract_id: STOCK_ETF_PAPER_ORDER_REQUEST_CONTRACT_ID.to_string()",
+    "source_version: 1",
+    "asset_lane: AssetLane::StockEtfCash",
+    "broker: Broker::Ibkr",
+    "environment: BrokerEnvironment::Paper",
+    "request_method: StockEtfLaneScopedIpcMethod::PreviewPaperOrder",
+    "request_method: StockEtfLaneScopedIpcMethod::SubmitPaperOrder",
+    "request_method: StockEtfLaneScopedIpcMethod::CancelPaperOrder",
+    "request_method: StockEtfLaneScopedIpcMethod::ReplacePaperOrder",
+    "operation: BrokerOperation::PaperOrderSubmit",
+    "operation: BrokerOperation::PaperOrderCancel",
+    "operation: BrokerOperation::PaperOrderReplace",
+    "authority_scope: AuthorityScope::ReadOnly",
+    "authority_scope: AuthorityScope::PaperRehearsal",
+    "effect_capable: true",
+    "..Self::default()",
+    "..Self::accepted_preview_fixture()",
+    "..Self::accepted_cancel_fixture()",
 }
 REQUIRED_VALIDATION_TYPE_TOKENS = {
     "impl StockEtfPaperOrderRequestEnvelopeV1",
@@ -219,21 +244,55 @@ def _parent() -> str:
     return PARENT.read_text(encoding="utf-8")
 
 
+def _fixtures() -> str:
+    return FIXTURES.read_text(encoding="utf-8")
+
+
 def _validation() -> str:
     return VALIDATION.read_text(encoding="utf-8")
 
 
+def _block_between(source: str, start_token: str, end_tokens: tuple[str, ...]) -> str:
+    start = source.index(start_token)
+    end = len(source)
+    for token in end_tokens:
+        candidate = source.find(token, start + len(start_token))
+        if candidate != -1:
+            end = min(end, candidate)
+    return source[start:end]
+
+
+def _default_block(parent: str) -> str:
+    return _block_between(
+        parent,
+        "impl Default for StockEtfPaperOrderRequestEnvelopeV1",
+        ("\n#[derive", "\nimpl "),
+    )
+
+
+def _fixture_block(fixtures: str, function_name: str) -> str:
+    return _block_between(
+        fixtures,
+        f"pub fn {function_name}() -> Self",
+        ("\n    pub fn ", "\n}"),
+    )
+
+
 def test_stock_etf_paper_order_request_source_stays_below_governance_cap() -> None:
     assert len(_parent().splitlines()) <= MAX_LINES
+    assert len(_fixtures().splitlines()) <= MAX_LINES
     assert len(_validation().splitlines()) <= MAX_LINES
 
 
 def test_stock_etf_paper_order_request_source_keeps_envelope_contract() -> None:
     parent = _parent()
+    fixtures = _fixtures()
     validation = _validation()
 
     for token in REQUIRED_PARENT_TYPE_TOKENS:
         assert token in parent
+    for token in REQUIRED_FIXTURE_TOKENS:
+        assert token in fixtures
     for token in REQUIRED_VALIDATION_TYPE_TOKENS:
         assert token in validation
     for field in REQUIRED_FIELDS:
@@ -259,6 +318,130 @@ def test_stock_etf_paper_order_request_source_keeps_envelope_contract() -> None:
     assert "margin_short_options_cfd_requested: false" in parent
     assert "python_direct_broker_write_requested: false" in parent
     assert "accepted: blockers.is_empty()" in validation
+
+
+def test_stock_etf_paper_order_request_source_keeps_default_fail_closed() -> None:
+    default_impl = _default_block(_parent())
+
+    for fail_closed in (
+        "contract_id: String::new()",
+        "source_version: 0",
+        "asset_lane: AssetLane::CryptoPerp",
+        "broker: Broker::Bybit",
+        "environment: BrokerEnvironment::LiveReservedDenied",
+        "request_method: StockEtfLaneScopedIpcMethod::UnknownDenied",
+        "operation: BrokerOperation::TransferOrAccountWrite",
+        "authority_scope: AuthorityScope::Denied",
+        "effect_capable: false",
+        "request_id: String::new()",
+        "account_fingerprint_hash: String::new()",
+        "session_attestation_hash: String::new()",
+        "scoped_authorization_hash: String::new()",
+        "decision_lease_id: String::new()",
+        "guardian_state_hash: String::new()",
+        "risk_config_hash: String::new()",
+        "instrument_identity_hash: String::new()",
+        "cost_model_version_hash: String::new()",
+        "pit_universe_contract_hash: String::new()",
+        "source_artifact_hash: String::new()",
+        "lifecycle_contract_hash: String::new()",
+        "broker_capability_registry_hash: String::new()",
+        "audit_event_id: String::new()",
+        "symbol: String::new()",
+        "instrument_kind: None",
+        "side: None",
+        "order_type: None",
+        "quantity_decimal: String::new()",
+        "limit_price_policy: None",
+        "limit_price_decimal: String::new()",
+        "time_in_force: None",
+        "order_local_id: String::new()",
+        "idempotency_key: String::new()",
+        "broker_order_id: String::new()",
+        "cancel_reason: String::new()",
+        "replacement_idempotency_key: String::new()",
+        "replacement_quantity_decimal: String::new()",
+        "replacement_limit_price_policy: None",
+        "replacement_limit_price_decimal: String::new()",
+        "replacement_time_in_force: None",
+        "replace_reason: String::new()",
+        "ibkr_contact_performed: false",
+        "connector_runtime_started: false",
+        "secret_content_serialized: false",
+        "order_routed: false",
+        "bybit_path_reused: false",
+        "live_or_tiny_live_authorized: false",
+        "margin_short_options_cfd_requested: false",
+        "python_direct_broker_write_requested: false",
+    ):
+        assert fail_closed in default_impl
+
+
+def test_stock_etf_paper_order_request_source_keeps_accepted_fixtures_lane_separated() -> None:
+    fixtures = _fixtures()
+    preview = _fixture_block(fixtures, "accepted_preview_fixture")
+    submit = _fixture_block(fixtures, "accepted_submit_fixture")
+    cancel = _fixture_block(fixtures, "accepted_cancel_fixture")
+    replace = _fixture_block(fixtures, "accepted_replace_fixture")
+
+    for block in (preview, cancel):
+        for required in (
+            "contract_id: STOCK_ETF_PAPER_ORDER_REQUEST_CONTRACT_ID.to_string()",
+            "source_version: 1",
+            "asset_lane: AssetLane::StockEtfCash",
+            "broker: Broker::Ibkr",
+            "environment: BrokerEnvironment::Paper",
+        ):
+            assert required in block
+
+    for forbidden in (
+        "asset_lane: AssetLane::CryptoPerp",
+        "broker: Broker::Bybit",
+        "environment: BrokerEnvironment::LiveReservedDenied",
+        "ibkr_contact_performed: true",
+        "connector_runtime_started: true",
+        "secret_content_serialized: true",
+        "order_routed: true",
+        "bybit_path_reused: true",
+        "live_or_tiny_live_authorized: true",
+        "margin_short_options_cfd_requested: true",
+        "python_direct_broker_write_requested: true",
+    ):
+        assert forbidden not in fixtures
+
+    assert "request_method: StockEtfLaneScopedIpcMethod::PreviewPaperOrder" in preview
+    assert "operation: BrokerOperation::PaperOrderSubmit" in preview
+    assert "authority_scope: AuthorityScope::ReadOnly" in preview
+    assert "effect_capable: true" not in preview
+    assert "session_attestation_hash:" not in preview
+    assert "broker_order_id:" not in preview
+
+    assert "request_method: StockEtfLaneScopedIpcMethod::SubmitPaperOrder" in submit
+    assert "authority_scope: AuthorityScope::PaperRehearsal" in submit
+    assert "effect_capable: true" in submit
+    assert "session_attestation_hash:" in submit
+    assert "scoped_authorization_hash:" in submit
+    assert "broker_order_id:" not in submit
+    assert "cost_model_version_hash: String::new()" in submit
+    assert "pit_universe_contract_hash: String::new()" in submit
+    assert "source_artifact_hash: String::new()" in submit
+
+    assert "request_method: StockEtfLaneScopedIpcMethod::CancelPaperOrder" in cancel
+    assert "operation: BrokerOperation::PaperOrderCancel" in cancel
+    assert "broker_order_id:" in cancel
+    assert "cancel_reason:" in cancel
+    assert "symbol:" not in cancel
+    assert "order_type:" not in cancel
+
+    assert "request_method: StockEtfLaneScopedIpcMethod::ReplacePaperOrder" in replace
+    assert "operation: BrokerOperation::PaperOrderReplace" in replace
+    assert "replacement_idempotency_key:" in replace
+    assert "replacement_quantity_decimal:" in replace
+    assert "replacement_limit_price_policy:" in replace
+    assert "replacement_time_in_force:" in replace
+    assert "replace_reason:" in replace
+    assert "idempotency_key: String::new()" in replace
+    assert "cancel_reason: String::new()" in replace
 
 
 def test_stock_etf_paper_order_request_source_keeps_method_authority_surface() -> None:
@@ -318,7 +501,7 @@ def test_stock_etf_paper_order_request_source_keeps_shape_and_hash_validation() 
 
 
 def test_stock_etf_paper_order_request_source_has_no_runtime_secret_order_or_bybit_client_tokens() -> None:
-    sources = {PARENT: _parent(), VALIDATION: _validation()}
+    sources = {PARENT: _parent(), FIXTURES: _fixtures(), VALIDATION: _validation()}
     violations = []
 
     boundary_tokens = (

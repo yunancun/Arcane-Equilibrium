@@ -7805,3 +7805,55 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 release、不做 DB/evidence
 writer、不啟動 scorecard writer、不做 broker session、不做 broker routing、不做 paper order route、
 不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 186. 2026-07-01 PM session source checkpoint：Stock/ETF Paper Order Request Authority Lineage Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_paper_order_request` 的 common surface、method/operation/authority/effect
+matrix、preview hash/order-intent gates、effect lifecycle lineage、submit/cancel/replace shape gates 與
+no-side-effect boundary flags。這不是 Rust production behavior change、不是 IBKR contact、不是 connector
+runtime、不是 secret lookup、不是 paper order routing、不是 cancel/replace routing、不是 DB/evidence writer、
+不是 paper order route enablement、不是 tiny-live/live gate；只把 future paper order request envelope 的
+StockEtfCash/IBKR/Paper 分離、lineage 與 no-runtime/no-order-route posture 變成 exact-blocker acceptance test
+與 source-static guard。
+
+已完成：
+
+- 在 `stock_etf_paper_order_request_acceptance.rs` 新增
+  `paper_order_request_rejects_each_common_surface_gap_independently`。
+- Acceptance 證明 contract/source/lane/broker/environment/request method/request id/account hash gaps 可獨立
+  阻斷；`LiveReservedDenied` environment 維持 `LiveEnvironmentDenied + EnvironmentNotPaper` 雙重阻斷。
+- 在同檔新增 `paper_order_request_rejects_each_method_authority_and_effect_gap_independently`。
+- Acceptance 證明 preview/submit/cancel/replace method surface 的 operation、authority scope、effect flag drift
+  可各自只產生單一對應 blocker。
+- 在同檔新增 `paper_order_request_rejects_each_preview_hash_and_order_intent_gap_independently`。
+- Acceptance 證明 preview risk/instrument/cost/PIT/source hashes、symbol、instrument kind、side、order type、
+  quantity、limit-price policy、time-in-force gates 可獨立阻斷；invalid limit price 維持 policy+price
+  雙重阻斷。
+- 在同檔新增 `paper_order_request_rejects_each_effect_lifecycle_and_submit_gap_independently`。
+- Acceptance 證明 session/scoped authorization/decision lease/guardian/lifecycle/capability/audit lineage、
+  local order id、idempotency key、submit broker-order pollution、submit cancel/replace pollution 可獨立阻斷。
+- 在同檔新增 `paper_order_request_rejects_each_cancel_and_replace_gap_independently`。
+- Acceptance 證明 cancel broker-order/cancel reason/shape pollution、replace instrument/replacement id/
+  replacement quantity/replacement policy/replacement TIF/replace reason/original mutable pollution 可獨立阻斷；
+  invalid replacement price 維持 policy+price 雙重阻斷。
+- 在同檔新增 `paper_order_request_rejects_each_boundary_flag_independently`。
+- Acceptance 證明 IBKR contact、connector runtime、secret serialization、order routed、Bybit path reuse、
+  live/tiny-live authority、margin/short/options/CFD、Python direct broker write flags 都會各自只產生單一
+  對應 blocker。
+- 在 `test_stock_etf_paper_order_request_source_static.py` 新增 `fixtures.rs` coverage 與 fixture/default block
+  parsers，鎖住 accepted preview/submit/cancel/replace fixtures 的 StockEtfCash/IBKR/Paper 分離、
+  no-runtime、no-secret、no-Bybit posture。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Paper order request source static pytest：`7 passed`。
+- Paper order request Rust acceptance：`17 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 paper order routing、不執行 cancel/
+replace routing、不做 DB/evidence writer、不啟動 scorecard writer、不做 broker session、不做 broker routing、
+不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
