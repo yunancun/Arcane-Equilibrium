@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-01 No-Order Refresh E3 Blocked By Source Drift D38
+
+- PM produced clean `d38cd691...` source-stability READY artifact sha `cdf7df92...` and exact no-order E3/BB request sha `42aaa4a6...`.
+- E3 returned `BLOCKED_BY_SOURCE_DRIFT`: request/READY hashes matched and no scope gap was found, but E3 final fetch moved `origin/main` to `391a2652...`; BB was not dispatched.
+- State transition is `BLOCKED_BY_RUNTIME`; final state sha `28ddf985...`. No Control API GET, public quote, envelope rebuild, plan write, lease, private/order endpoint, PG/service/env/risk mutation, Cost Gate change, live/mainnet, order/fill/PnL/proof.
+
 ## 2026-07-01 IBKR Session Attestation Source Posture Cross-Wire Guard
 
 - PM added exact single-blocker acceptance coverage for `IbkrSessionAttestationV1` identity, loopback/paper port, account/secret lineage, data-tier, entitlement, startup, raw artifact, freshness-window, live-secret, and env-fallback gaps.
