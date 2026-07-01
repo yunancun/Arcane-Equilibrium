@@ -6106,3 +6106,37 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不新增 endpoin
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 read-only probe、不做
 result import、不做 DB/evidence writer、不做 paper order/cancel/replace route、不做 Linux runtime
 sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 144. 2026-07-01 PM session source checkpoint：Stock/ETF Paper Order Acceptance Authority Gate Hardening
+
+本 checkpoint 補強 `stock_etf_paper_order_request_acceptance.rs` 的 Rust acceptance coverage。這是
+test-only，不是 Rust production behavior change、不是 IPC/endpoint change、不是 IBKR contact、
+不是 connector runtime、不是 secret access、不是 DB/evidence writer、不是 paper order route；
+只把 paper order request 的 authority/effect/hash gates 變成行為型 regression tests。
+
+已完成：
+
+- 新增 request-method surface mismatch acceptance：preview/submit/cancel/replace 若 operation、
+  authority_scope 或 effect_capable 與 method contract 不一致，必須產生對應 blocker。
+- 新增 effect-capable submit request acceptance：缺 session attestation、scoped authorization、
+  decision lease、Guardian state、lifecycle contract、broker capability registry 或 audit event 時
+  必須 fail closed。
+- 新增 preview pollution acceptance：read-only preview envelope 若帶 effect/lifecycle、
+  broker-order、cancel 或 replace 欄位，必須以 `PreviewEffectFieldPresent` block。
+
+驗證：
+
+- Targeted Rust acceptance：`cargo test -p openclaw_types --test stock_etf_paper_order_request_acceptance`
+  passed `11 passed`。
+- Targeted rustfmt：`rustfmt rust/openclaw_types/tests/stock_etf_paper_order_request_acceptance.rs`
+  PASS。
+- Full `cargo fmt -p openclaw_types -- --check`：known pre-existing formatting drift remains in
+  `rust/openclaw_types/src/risk.rs` outside this checkpoint。
+- Dynamic docs trace pytest：`2 passed, 5 deselected`；parsed checkpoint titles `131`，
+  missing `[]`。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不新增 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 read-only probe、不做
+result import、不做 DB/evidence writer、不做 paper order/cancel/replace route、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。

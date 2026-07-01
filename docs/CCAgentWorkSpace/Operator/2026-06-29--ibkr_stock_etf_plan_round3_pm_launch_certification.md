@@ -3643,3 +3643,36 @@ Verification 已過：
 沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 read-only probe execution、
 沒有 result import、沒有 DB/evidence writer、沒有 paper order/cancel/replace route、
 沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Paper Order Acceptance Authority Gate Hardening
+
+本 session 已完成下一個 test-only checkpoint：
+`Stock/ETF Paper Order Acceptance Authority Gate Hardening`。
+
+這個 checkpoint 補強 `stock_etf_paper_order_request_acceptance.rs`，把 paper order request 的
+authority/effect/hash gates 變成 Rust 行為型 regression tests。它不改 production Rust code、
+IPC、endpoint、connector runtime、IBKR contact、secret access、DB/evidence writer 或 paper order
+route。
+
+新增 coverage 包括：preview/submit/cancel/replace 的 operation / authority_scope /
+effect_capable surface mismatch blockers；effect-capable submit 對 session attestation、scoped
+authorization、decision lease、Guardian state、lifecycle contract、broker capability registry、
+audit event 的 fail-closed blockers；以及 read-only preview envelope 污染 effect/lifecycle、
+broker-order、cancel、replace 欄位時的 `PreviewEffectFieldPresent` blocker。
+
+Verification 已過：
+
+- Targeted Rust acceptance：`cargo test -p openclaw_types --test stock_etf_paper_order_request_acceptance`
+  passed `11 passed`
+- Targeted rustfmt：`rustfmt rust/openclaw_types/tests/stock_etf_paper_order_request_acceptance.rs`
+  PASS
+- Full `cargo fmt -p openclaw_types -- --check`：known pre-existing formatting drift remains in
+  `rust/openclaw_types/src/risk.rs` outside this checkpoint
+- Dynamic docs trace pytest：`2 passed, 5 deselected`；parsed checkpoint titles `131`，
+  missing `[]`
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 read-only probe execution、
+沒有 result import、沒有 DB/evidence writer、沒有 paper order/cancel/replace route、
+沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
