@@ -1248,3 +1248,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only structure guard for `stock_etf_lane_scoped_ipc.rs`, keeping the lane-scoped IPC contract below 800 lines while proving the 20-method matrix, denied sentinels, and lane/auth/Phase2/session/non-Bybit/secret-topology/broker-registry/asset-lane contract tokens remain present.
 - The guard bans env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens in the contract source, preventing source drift into runtime authority.
 - Verification passed: new guard `3 passed`; lane-scoped IPC acceptance `9 passed`; full `cargo test -p openclaw_types` PASS. This grants no IPC runtime, IBKR contact, connector runtime, secret access, read probe, result import, paper order/cancel/replace, fill import, DB/evidence/scorecard writer, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF Lane Source Static Guard
+
+- PM added a source-only structure guard for `stock_etf_lane.rs`, keeping the lane taxonomy, broker/env/instrument/authority surfaces, 15 broker operations, 20 denial variants, 13 gate fields, and live/margin/options/CFD/account-write typed denials pinned.
+- The guard allows only the existing `StockEtfFeatureFlags::from_env()` single `std::env::var(key).ok()` path over five non-secret feature flag keys, and rejects fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime plus secret/account material tokens.
+- Verification passed: new guard `4 passed`; Stock/ETF lane acceptance `9 passed`; full `cargo test -p openclaw_types` PASS. This grants no feature enablement, IBKR contact, connector runtime, secret access, read probe, result import, paper order/cancel/replace, DB/evidence/scorecard writer, tiny-live/live, or Bybit behavior change.
