@@ -1350,3 +1350,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only structure guard for `stock_etf_tiny_live_eligibility.rs`, pinning the future ADR discussion-only gate.
 - The guard requires release ADR/AMD/spec paths, fail-closed default NotEligible posture, accepted AdrDiscussionOnly fixture, phase5/scorecard/reconciliation/DQ/preregistration/review hashes, paper-shadow window/statistics/review gates, explicit TinyLiveAuthorized and LiveAuthorized rejection, secret serialization denial, sealed requirement, and no runtime/secret/order/Bybit client tokens.
 - Verification passed: new guard `6 passed`; tiny-live eligibility acceptance `7 passed`; full `cargo test -p openclaw_types` PASS. This grants no tiny-live/live authorization, IBKR contact, secret access, connector runtime, evidence clock, Bybit gate lowering, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Release Packet Source Static Guard
+
+- PM added a source-only structure guard for `stock_etf_release_packet.rs`, pinning the paper/shadow release evidence packet.
+- The guard requires release ADR/AMD/spec paths, release packet/manifest/migration/kill-disable proof surfaces, role signoffs PM/Operator/E2/E3/E4/QA/QC/MIT, manifest/log/redaction/GUI/DQ/scorecard regeneration/evidence archive hashes, migration dry-run/double-apply evidence, kill/disable cleanup proof, no destructive DB cleanup, no secret serialization, no IBKR tiny-live/live authority, sealed requirement, and no runtime/secret/order/Bybit client tokens.
+- Verification passed: new guard `7 passed`; release packet acceptance `8 passed`; full `cargo test -p openclaw_types` PASS. This grants no PASS artifact creation, secret slot, broker session, paper order, evidence clock, tiny-live/live authorization, or Bybit behavior change.
