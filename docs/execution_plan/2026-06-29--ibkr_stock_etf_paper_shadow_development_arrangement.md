@@ -4401,3 +4401,36 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper
 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
 clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
 Bybit behavior change。
+
+## 100. 2026-07-01 PM session source checkpoint：Lane-Scoped IPC Source Static Guard
+
+本 checkpoint 為 `stock_etf_lane_scoped_ipc.rs` 補上 source-only structure guard。
+這不是 IPC runtime 啟動、不是 IBKR contact、不是 connector wiring，也不是 Bybit
+runtime reuse；只把 Stock/ETF lane-scoped IPC contract 的 method matrix、contract
+tokens 與 no-runtime posture 機器化，避免未來改動在 source 層面引入 paper/order/
+network/secret/Bybit runtime drift。
+
+已完成：
+
+- 新增 `tests/structure/test_stock_etf_lane_scoped_ipc_source_static.py`。
+- Guard 鎖住 `stock_etf_lane_scoped_ipc.rs` 低於 800 行 governance cap。
+- Guard 要求 20 個 lane-scoped IPC method variants 保持對齊 engine Method mapping，
+  並保留 `BybitSubmitPaperOrderDenied` / `UnknownDenied` denied sentinels。
+- Guard 要求 lane IPC、scoped authorization、external surface gate、session
+  attestation、non-Bybit allowlist、secret slot/topology、broker registry、asset-lane
+  events 等 contract tokens 保持在 source 中。
+- Guard 禁止 env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens。
+
+驗證：
+
+- New structure guard py_compile：PASS。
+- Focused structure guard pytest：`3 passed`。
+- Focused lane-scoped IPC acceptance：`9 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
+cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
+clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
+Bybit behavior change。
