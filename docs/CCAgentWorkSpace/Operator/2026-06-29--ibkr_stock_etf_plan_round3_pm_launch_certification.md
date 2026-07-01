@@ -5350,3 +5350,31 @@ Verification 已過：
 contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 socket/client construction、沒有
 paper order routing、沒有 broker session、沒有 DB/evidence writer、沒有 scorecard writer、沒有 paper-shadow
 launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — IBKR Phase2 Runtime Aggregate Lineage Exact Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`IBKR Phase2 Runtime Aggregate Lineage Exact Guard`。
+
+這個 checkpoint 補強 `ibkr_phase2_runtime` 的 secret-slot / API session topology aggregate fail-closed exact
+coverage。
+
+新增 Rust acceptance 證明 `IbkrSecretSlotContractV1` live-secret/serialized-sensitive aggregate failures 與
+`IbkrApiSessionTopologyV1` network-host/live-port/live-mode aggregate failures 都會以完整 ordered blocker
+vectors fail closed。Python source-static guard 也鎖住 secret-slot 與 API-session-topology validator blocker
+emit order。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- IBKR Phase2 runtime source static pytest：`7 passed`
+- IBKR Phase2 runtime Rust acceptance：`9 passed`
+- Full `cargo test -p openclaw_types`：PASS
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 GUI runtime/API route/IPC behavior change、沒有 IBKR
+contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 socket/client construction、沒有
+paper order routing、沒有 broker session、沒有 DB/evidence writer、沒有 scorecard writer、沒有 paper-shadow
+launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。

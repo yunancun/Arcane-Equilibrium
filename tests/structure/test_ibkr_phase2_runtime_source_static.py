@@ -162,6 +162,10 @@ def _source() -> str:
     return PHASE2_RUNTIME.read_text(encoding="utf-8")
 
 
+def _function_block(source: str, start: str, end: str) -> str:
+    return source.split(start, 1)[1].split(end, 1)[0]
+
+
 def _secret_slot_default_block(source: str) -> str:
     return source.split("impl Default for IbkrSecretSlotContractV1", 1)[1].split(
         "impl IbkrSecretSlotContractV1",
@@ -327,6 +331,65 @@ def test_ibkr_phase2_runtime_source_keeps_fail_closed_verdicts_and_live_port_dua
     assert "blockers.push(Blocker::PaperPortNotUsed)" in source
     assert "if !self.live_secret_absent_or_empty" in source
     assert "blockers.push(Blocker::LiveSecretAbsentOrEmptyNotProven)" in source
+
+
+def test_ibkr_phase2_runtime_source_keeps_exact_blocker_order() -> None:
+    source = _source()
+    secret_slot = _function_block(
+        source,
+        "pub fn validate(&self) -> IbkrSecretSlotContractVerdict {",
+        "IbkrSecretSlotContractVerdict {",
+    )
+    topology = _function_block(
+        source,
+        "pub fn validate(&self) -> IbkrApiSessionTopologyVerdict {",
+        "IbkrApiSessionTopologyVerdict {",
+    )
+
+    for block, ordered_blockers in (
+        (
+            secret_slot,
+            (
+                "ContractIdMismatch",
+                "SourceVersionMismatch",
+                "ContractMissing",
+                "ReadonlySlotPostureInvalid",
+                "PaperSlotMissingOrUnhashed",
+                "LiveSlotPresentOrUnknown",
+                "SecretSlotFingerprintInvalid",
+                "AccountFingerprintHashInvalid",
+                "OwnerOnlyPermissionsMissing",
+                "EnvVarCredentialFallbackNotDenied",
+                "SecretContentSerialized",
+                "AccountIdSerialized",
+                "LiveSecretAbsentOrEmptyNotProven",
+            ),
+        ),
+        (
+            topology,
+            (
+                "ContractIdMismatch",
+                "SourceVersionMismatch",
+                "TopologyMissing",
+                "ApiBaselineMismatch",
+                "RuntimeOwnerMismatch",
+                "HostNotLoopback",
+                "LivePortDenied",
+                "PaperPortNotUsed",
+                "GatewayModeNotPaper",
+                "EnvironmentNotPaper",
+                "DeterministicClientIdMissing",
+                "ProcessIdentityMissing",
+                "AccountFingerprintHashInvalid",
+                "ApiServerVersionMissing",
+                "DataEntitlementsMissing",
+                "StartupTimeMissing",
+                "AttestationExpiryMissing",
+            ),
+        ),
+    ):
+        positions = [block.index(f"Blocker::{blocker}") for blocker in ordered_blockers]
+        assert positions == sorted(positions)
 
 
 def test_ibkr_phase2_runtime_source_has_no_runtime_secret_order_or_bybit_client_tokens() -> None:

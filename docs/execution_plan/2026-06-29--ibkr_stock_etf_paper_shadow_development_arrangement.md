@@ -8443,3 +8443,40 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 runtime、不做 socket/client construction、不執行 paper order routing、不做 broker session、不做 broker
 routing、不做 DB/evidence writer、不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權
 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
+
+## 203. 2026-07-01 PM session source checkpoint：IBKR Phase2 Runtime Aggregate Lineage Exact Guard
+
+本 checkpoint 補強 `ibkr_phase2_runtime` 的 secret-slot / API session topology aggregate fail-closed
+lineage，固定 `IbkrSecretSlotContractV1` live-secret/serialized-sensitive aggregate failures 與
+`IbkrApiSessionTopologyV1` network-host/live-port/live-mode aggregate failures 的 ordered blocker vectors，
+並用 source-static parser 鎖住 secret-slot 與 API-session-topology validator blocker emit order。這不是 Rust
+production behavior change、不是 IPC/API route change、不是 IBKR contact、不是 connector runtime、不是
+socket/client construction、不是 secret lookup、不是 paper order route enablement、不是 tiny-live/live gate；
+只把 Phase2 runtime source-only contracts 的 aggregate fail-closed lineage 變成 exact-blocker acceptance
+test 與 source-static guard。
+
+已完成：
+
+- 在 `ibkr_phase2_runtime_acceptance.rs` 將 secret-slot live-secret/serialized-sensitive aggregate failure 固定為
+  完整順序 blocker 向量，覆蓋 identity、posture、hash、owner/env denial、serialized sensitive fields 與
+  live-secret absence proof。
+- 在同檔將 API session topology network-host/live-port/live-mode aggregate failure 固定為完整順序 blocker
+  向量，覆蓋 identity、host/port、gateway mode、environment、account hash 與 runtime metadata。
+- 在 `test_ibkr_phase2_runtime_source_static.py` 新增 secret-slot 與 API-session-topology validator blocker
+  ordering parser。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- IBKR Phase2 runtime source static pytest：`7 passed`。
+- IBKR Phase2 runtime Rust acceptance：`9 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、
+不改 GUI runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector
+runtime、不做 socket/client construction、不執行 paper order routing、不做 broker session、不做 broker
+routing、不做 DB/evidence writer、不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權
+paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。

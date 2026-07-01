@@ -4033,3 +4033,10 @@
 - PM rotated `P0-CURRENT-CANDIDATE-NOORDER-REFRESH-CURRENT-HEAD-E3-BB-REQUEST` to clean source `2f01d083...`; READY failed closed because `origin/main` advanced to `2f09fda2...`.
 - State transition `ROTATED`; final state sha `60610a3d9355617dfcd6f765d94fe7c66183c824c5fc995eb9a56d70cd16c52a`; no exact request, E3/BB dispatch, Control API/Bybit/PG/lease/order/runtime mutation, or proof.
 - Next PM starts from `2f09fda2...` or newer and must obtain a fresh source-stability quiet window before regenerating the request.
+
+## 2026-07-01 IBKR Phase2 Runtime Aggregate Lineage Exact Guard
+
+- PM added test-only/source-static exact-blocker coverage for `IbkrSecretSlotContractV1` live-secret/serialized-sensitive aggregate failures and `IbkrApiSessionTopologyV1` network-host/live-port/live-mode aggregate failures.
+- Source-static parsing now pins secret-slot and API-session-topology validator blocker emit order.
+- Verification passed: IBKR Phase2 runtime source static `7 passed`; IBKR Phase2 runtime Rust acceptance `9 passed`; full `cargo test -p openclaw_types` PASS; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, GUI runtime/API route/IPC behavior change, IBKR contact, connector runtime, socket/client construction, secret access, paper order routing, broker session, DB/evidence writer, scorecard writer, paper-shadow launch, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
