@@ -131,13 +131,10 @@ def _dispatch_ipc_method(
             )
         else:
             from program_code.exchange_connectors.bybit_connector.control_api_v1.app import (  # noqa: PLC0415
-                governance_lease_bridge as bridge,
-            )
-            from program_code.exchange_connectors.bybit_connector.control_api_v1.app import (  # noqa: PLC0415
                 ipc_dispatch,
             )
 
-            raw = bridge._run_async_blocking(  # type: ignore[attr-defined]  # noqa: SLF001
+            raw = _run_dispatcher_awaitable(
                 ipc_dispatch.one_shot_ipc_call(
                     method,
                     params=dict(params or {}),
@@ -148,7 +145,11 @@ def _dispatch_ipc_method(
                 timeout=timeout_seconds + 1.0,
             )
     except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "error": f"ipc_dispatch_exception:{type(exc).__name__}"}
+        entry = {"ok": False, "error": f"ipc_dispatch_exception:{type(exc).__name__}"}
+        reason = getattr(exc, "reason", None)
+        if isinstance(reason, str) and reason:
+            entry["error_reason"] = reason
+        return entry
     return _normalize_method_entry(raw)
 
 

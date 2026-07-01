@@ -46,6 +46,16 @@ async def _failing_dispatcher(method: str, params: dict, timeout: float) -> dict
     return await _ready_dispatcher(method, params, timeout)
 
 
+async def _protocol_error_dispatcher(method: str, params: dict, timeout: float) -> dict:
+    from app.ipc_client import EngineProtocolError
+
+    raise EngineProtocolError(
+        "response_id_mismatch",
+        expected_id=1,
+        actual_id=None,
+    )
+
+
 def test_build_ready_snapshot_uses_read_only_governance_methods() -> None:
     packet = mod.build_runtime_governance_ipc_readonly_snapshot(
         now_utc=NOW,
@@ -80,6 +90,17 @@ def test_build_snapshot_blocks_when_any_runtime_method_fails() -> None:
     assert packet["summary"] is None
     assert packet["runtime_blockers"] == ["governance.list_leases_not_ok"]
     assert packet["methods"]["governance.list_leases"]["ok"] is False
+
+
+def test_dispatch_ipc_method_preserves_protocol_error_reason() -> None:
+    entry = mod._dispatch_ipc_method(
+        method="governance.get_status",
+        dispatcher=_protocol_error_dispatcher,
+    )
+
+    assert entry["ok"] is False
+    assert entry["error"] == "ipc_dispatch_exception:EngineProtocolError"
+    assert entry["error_reason"] == "response_id_mismatch"
 
 
 def test_cli_sets_ipc_secret_file_env_without_serializing_secret(
