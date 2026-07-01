@@ -59,6 +59,8 @@ fn source_secret_slot_contract_accepts_only_hashed_paper_and_absent_live() {
 
 #[test]
 fn secret_slot_contract_rejects_live_secret_and_serialized_sensitive_fields() {
+    use IbkrSecretSlotContractBlocker as Blocker;
+
     let contract = IbkrSecretSlotContractV1 {
         contract_id: "ibkr_secret_slot_contract_v1_fixture".to_string(),
         source_version: 2,
@@ -77,39 +79,23 @@ fn secret_slot_contract_rejects_live_secret_and_serialized_sensitive_fields() {
     let verdict = contract.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSecretSlotContractBlocker::ContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSecretSlotContractBlocker::SourceVersionMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSecretSlotContractBlocker::ReadonlySlotPostureInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSecretSlotContractBlocker::PaperSlotMissingOrUnhashed));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSecretSlotContractBlocker::LiveSlotPresentOrUnknown));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSecretSlotContractBlocker::SecretSlotFingerprintInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSecretSlotContractBlocker::AccountFingerprintHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSecretSlotContractBlocker::OwnerOnlyPermissionsMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSecretSlotContractBlocker::EnvVarCredentialFallbackNotDenied));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSecretSlotContractBlocker::SecretContentSerialized));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSecretSlotContractBlocker::AccountIdSerialized));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::ContractIdMismatch,
+            Blocker::SourceVersionMismatch,
+            Blocker::ReadonlySlotPostureInvalid,
+            Blocker::PaperSlotMissingOrUnhashed,
+            Blocker::LiveSlotPresentOrUnknown,
+            Blocker::SecretSlotFingerprintInvalid,
+            Blocker::AccountFingerprintHashInvalid,
+            Blocker::OwnerOnlyPermissionsMissing,
+            Blocker::EnvVarCredentialFallbackNotDenied,
+            Blocker::SecretContentSerialized,
+            Blocker::AccountIdSerialized,
+            Blocker::LiveSecretAbsentOrEmptyNotProven,
+        ]
+    );
 }
 
 #[test]
@@ -224,6 +210,8 @@ fn source_api_session_topology_accepts_loopback_paper_gateway_only() {
 
 #[test]
 fn topology_rejects_network_host_live_port_and_live_mode() {
+    use IbkrApiSessionTopologyBlocker as Blocker;
+
     let topology = IbkrApiSessionTopologyV1 {
         contract_id: "ibkr_api_session_topology_v1_fixture".to_string(),
         source_version: 2,
@@ -243,36 +231,25 @@ fn topology_rejects_network_host_live_port_and_live_mode() {
     let verdict = topology.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrApiSessionTopologyBlocker::ContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrApiSessionTopologyBlocker::SourceVersionMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrApiSessionTopologyBlocker::HostNotLoopback));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrApiSessionTopologyBlocker::LivePortDenied));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrApiSessionTopologyBlocker::PaperPortNotUsed));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrApiSessionTopologyBlocker::GatewayModeNotPaper));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrApiSessionTopologyBlocker::EnvironmentNotPaper));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrApiSessionTopologyBlocker::DeterministicClientIdMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrApiSessionTopologyBlocker::ProcessIdentityMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrApiSessionTopologyBlocker::AccountFingerprintHashInvalid));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::ContractIdMismatch,
+            Blocker::SourceVersionMismatch,
+            Blocker::HostNotLoopback,
+            Blocker::LivePortDenied,
+            Blocker::PaperPortNotUsed,
+            Blocker::GatewayModeNotPaper,
+            Blocker::EnvironmentNotPaper,
+            Blocker::DeterministicClientIdMissing,
+            Blocker::ProcessIdentityMissing,
+            Blocker::AccountFingerprintHashInvalid,
+            Blocker::ApiServerVersionMissing,
+            Blocker::DataEntitlementsMissing,
+            Blocker::StartupTimeMissing,
+            Blocker::AttestationExpiryMissing,
+        ]
+    );
 }
 
 #[test]
