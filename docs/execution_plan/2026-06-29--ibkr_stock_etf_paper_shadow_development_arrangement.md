@@ -9044,3 +9044,48 @@ runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀
 socket/client construction、不做 broker session、不執行 read-only probe、不執行 result import、不執行 paper order
 routing/cancel/replace、不做 scorecard/DB/evidence writer、不啟動 evidence clock、不做 release launch、不做 Linux
 runtime sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
+
+## 219. 2026-07-01 PM session source checkpoint：Stock/ETF Readonly Probe Result Import Exact Blocker Guard
+
+本 checkpoint 補強 `StockEtfIbkrReadonlyProbeResultImportRequestV1` sanitized read-only probe result-import request
+contract 的 aggregate fail-closed lineage，固定 default request、read-action/operation cross-wire、common
+lineage/hash/timestamp aggregate failures、kind-specific downstream lineage、duplicate/stale replay、no-side-effect
+boundary regressions 的 ordered blocker vectors 或 exact single-blocker vectors。這不是 Rust production behavior
+change、不是 IPC/API route change、不是 IBKR contact、不是 connector runtime、不是 socket/client construction、
+不是 secret lookup、不是 broker session、不是 read-only probe execution、不是 result import execution、不是
+paper order route enablement、不是 evidence/scorecard/DB writer、不是 tiny-live/live gate；只把 Stock/ETF IBKR
+read-only probe result-import request source-only contract 的 fail-closed lineage 變成 exact-blocker acceptance
+guard。
+
+已完成：
+
+- 在 `stock_etf_ibkr_readonly_probe_result_import_request_acceptance.rs` 將 default
+  `StockEtfIbkrReadonlyProbeResultImportRequestV1` 固定為完整順序 blocker 向量，覆蓋 contract/source identity、
+  lane/broker/environment、probe action、operation、authority scope、API read allowlist、result-import/request/
+  probe ids、readonly probe request、session attestation、API allowlist、redaction/audit policies、payload/raw/
+  redacted/source hashes、timestamps、idempotency 與 health snapshot hash。
+- 在同檔將 read-action/operation cross-wire、common lineage/hash/timestamp aggregate、kind-specific downstream
+  lineage、duplicate/stale replay、no-side-effect boundary regressions 固定為 exact blocker vectors。
+- 保留 paper-order API action 與 missing import timestamp 的天然 aggregate 行為：paper action 必須同時命中
+  `ProbeActionMismatch` 與 `ApiActionNotReadAllowed`；`import_requested_at_ms=0` 必須同時命中
+  `ImportRequestedAtMissing` 與 `ResultAsOfAfterImportRequested`。
+- 移除 result-import request blocker 的 loose `has()` / `blockers.contains` helper；aggregate cases 改為完整
+  ordered-vector assertions。
+- 在 `test_stock_etf_ibkr_readonly_probe_result_import_request_source_static.py` 新增 validator blocker
+  emit-order guard，pin top-level、required lineage、kind-specific lineage 與 boundary flags 的 source order。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Stock/ETF readonly probe result-import source static pytest：`12 passed`。
+- Stock/ETF readonly probe result-import Rust acceptance：`11 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、不改 GUI
+runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不做
+socket/client construction、不做 broker session、不執行 read-only probe、不執行 result import、不執行 paper order
+routing/cancel/replace、不做 evidence/scorecard/DB writer、不啟動 evidence clock、不做 release launch、不做 Linux
+runtime sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。

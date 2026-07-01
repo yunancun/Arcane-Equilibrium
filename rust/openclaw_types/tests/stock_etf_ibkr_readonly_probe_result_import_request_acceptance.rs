@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use openclaw_types::{
     AssetLane, AuthorityScope, Broker, BrokerEnvironment, BrokerOperation, NonBybitApiAction,
     StockEtfIbkrReadonlyProbeKind, StockEtfIbkrReadonlyProbeResultImportBlocker,
-    StockEtfIbkrReadonlyProbeResultImportRequestV1, StockEtfIbkrReadonlyProbeResultImportVerdict,
+    StockEtfIbkrReadonlyProbeResultImportRequestV1,
     BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID, BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
     IBKR_AUDIT_EVENT_POLICY_CONTRACT_ID, IBKR_REDACTION_POLICY_CONTRACT_ID,
     IBKR_SESSION_ATTESTATION_CONTRACT_ID, NON_BYBIT_API_ALLOWLIST_CONTRACT_ID,
@@ -20,45 +20,46 @@ use openclaw_types::{
 
 #[test]
 fn default_result_import_request_blocks_all_authority() {
+    use StockEtfIbkrReadonlyProbeResultImportBlocker as Blocker;
+
     let verdict = StockEtfIbkrReadonlyProbeResultImportRequestV1::default().validate();
 
     assert!(!verdict.accepted);
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::ContractIdMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::SourceVersionMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::WrongAssetLane
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::WrongBroker
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::EnvironmentDenied
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::ProbeActionMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::OperationMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::ResultImportRequestIdMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::HealthSnapshotHashInvalid
-    ));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::ContractIdMismatch,
+            Blocker::SourceVersionMismatch,
+            Blocker::WrongAssetLane,
+            Blocker::WrongBroker,
+            Blocker::EnvironmentDenied,
+            Blocker::ProbeActionMismatch,
+            Blocker::OperationMismatch,
+            Blocker::AuthorityScopeMismatch,
+            Blocker::ApiActionNotReadAllowed,
+            Blocker::ResultImportRequestIdMissing,
+            Blocker::RequestIdMissing,
+            Blocker::ProbeIdMissing,
+            Blocker::ReadonlyProbeRequestContractIdMismatch,
+            Blocker::ReadonlyProbeRequestHashInvalid,
+            Blocker::SessionAttestationContractIdMismatch,
+            Blocker::SessionAttestationHashInvalid,
+            Blocker::ApiAllowlistContractIdMismatch,
+            Blocker::ApiAllowlistHashInvalid,
+            Blocker::RedactionPolicyContractIdMismatch,
+            Blocker::RedactionPolicyHashInvalid,
+            Blocker::AuditEventPolicyContractIdMismatch,
+            Blocker::AuditEventPolicyHashInvalid,
+            Blocker::ResultPayloadHashInvalid,
+            Blocker::RawArtifactHashInvalid,
+            Blocker::RedactedSummaryHashInvalid,
+            Blocker::SourceArtifactHashInvalid,
+            Blocker::ResultAsOfMissing,
+            Blocker::ImportRequestedAtMissing,
+            Blocker::IdempotencyKeyMissing,
+            Blocker::HealthSnapshotHashInvalid,
+        ]
+    );
 }
 
 #[test]
@@ -121,6 +122,8 @@ fn accepted_result_import_request_validates_without_side_effects() {
 
 #[test]
 fn result_import_request_requires_common_lineage_and_artifacts() {
+    use StockEtfIbkrReadonlyProbeResultImportBlocker as Blocker;
+
     let bad = StockEtfIbkrReadonlyProbeResultImportRequestV1 {
         result_import_request_id: String::new(),
         request_id: String::new(),
@@ -146,66 +149,31 @@ fn result_import_request_requires_common_lineage_and_artifacts() {
     };
     let verdict = bad.validate();
 
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::ResultImportRequestIdMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::RequestIdMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::ProbeIdMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::ReadonlyProbeRequestContractIdMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::ReadonlyProbeRequestHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::SessionAttestationContractIdMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::ApiAllowlistContractIdMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::RedactionPolicyContractIdMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::AuditEventPolicyContractIdMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::ResultPayloadHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::RawArtifactHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::RedactedSummaryHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::SourceArtifactHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::ResultAsOfAfterImportRequested
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::IdempotencyKeyMissing
-    ));
+    assert!(!verdict.accepted);
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::ResultImportRequestIdMissing,
+            Blocker::RequestIdMissing,
+            Blocker::ProbeIdMissing,
+            Blocker::ReadonlyProbeRequestContractIdMismatch,
+            Blocker::ReadonlyProbeRequestHashInvalid,
+            Blocker::SessionAttestationContractIdMismatch,
+            Blocker::SessionAttestationHashInvalid,
+            Blocker::ApiAllowlistContractIdMismatch,
+            Blocker::ApiAllowlistHashInvalid,
+            Blocker::RedactionPolicyContractIdMismatch,
+            Blocker::RedactionPolicyHashInvalid,
+            Blocker::AuditEventPolicyContractIdMismatch,
+            Blocker::AuditEventPolicyHashInvalid,
+            Blocker::ResultPayloadHashInvalid,
+            Blocker::RawArtifactHashInvalid,
+            Blocker::RedactedSummaryHashInvalid,
+            Blocker::SourceArtifactHashInvalid,
+            Blocker::ResultAsOfAfterImportRequested,
+            Blocker::IdempotencyKeyMissing,
+        ]
+    );
 }
 
 #[test]
@@ -226,12 +194,15 @@ fn result_import_kind_requires_matching_downstream_lineage() {
         account_cash_ledger_hash: String::new(),
         ..account
     };
-    let blockers = bad_account.validate().blockers;
-    assert!(blockers.contains(
-        &StockEtfIbkrReadonlyProbeResultImportBlocker::AccountCashLedgerContractIdMismatch
-    ));
-    assert!(blockers
-        .contains(&StockEtfIbkrReadonlyProbeResultImportBlocker::AccountCashLedgerHashInvalid));
+    let verdict = bad_account.validate();
+    assert!(!verdict.accepted);
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            StockEtfIbkrReadonlyProbeResultImportBlocker::AccountCashLedgerContractIdMismatch,
+            StockEtfIbkrReadonlyProbeResultImportBlocker::AccountCashLedgerHashInvalid,
+        ]
+    );
 
     let market = StockEtfIbkrReadonlyProbeResultImportRequestV1 {
         probe_kind: StockEtfIbkrReadonlyProbeKind::MarketDataSnapshot,
@@ -266,6 +237,8 @@ fn result_import_kind_requires_matching_downstream_lineage() {
 
 #[test]
 fn result_import_request_rejects_probe_action_operation_cross_wire() {
+    use StockEtfIbkrReadonlyProbeResultImportBlocker as Blocker;
+
     let market_with_account_action = StockEtfIbkrReadonlyProbeResultImportRequestV1 {
         probe_kind: StockEtfIbkrReadonlyProbeKind::MarketDataSnapshot,
         api_action: NonBybitApiAction::AccountSummarySnapshotRead,
@@ -277,14 +250,7 @@ fn result_import_request_rejects_probe_action_operation_cross_wire() {
     let verdict = market_with_account_action.validate();
 
     assert!(!verdict.accepted);
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::ProbeActionMismatch
-    ));
-    assert!(!has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::OperationMismatch
-    ));
+    assert_eq!(verdict.blockers, vec![Blocker::ProbeActionMismatch]);
 
     let market_with_account_operation = StockEtfIbkrReadonlyProbeResultImportRequestV1 {
         probe_kind: StockEtfIbkrReadonlyProbeKind::MarketDataSnapshot,
@@ -297,14 +263,7 @@ fn result_import_request_rejects_probe_action_operation_cross_wire() {
     let verdict = market_with_account_operation.validate();
 
     assert!(!verdict.accepted);
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::OperationMismatch
-    ));
-    assert!(!has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::ProbeActionMismatch
-    ));
+    assert_eq!(verdict.blockers, vec![Blocker::OperationMismatch]);
 
     let paper_write_action = StockEtfIbkrReadonlyProbeResultImportRequestV1 {
         api_action: NonBybitApiAction::PaperOrderSubmit,
@@ -314,18 +273,13 @@ fn result_import_request_rejects_probe_action_operation_cross_wire() {
     let verdict = paper_write_action.validate();
 
     assert!(!verdict.accepted);
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::ProbeActionMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::ApiActionNotReadAllowed
-    ));
-    assert!(!has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::OperationMismatch
-    ));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::ProbeActionMismatch,
+            Blocker::ApiActionNotReadAllowed,
+        ]
+    );
 }
 
 #[test]
@@ -494,13 +448,12 @@ fn result_import_request_rejects_each_common_lineage_gap_independently() {
     missing_import_time.import_requested_at_ms = 0;
     let verdict = missing_import_time.validate();
     assert!(!verdict.accepted);
-    assert!(has(&verdict, Blocker::ImportRequestedAtMissing));
-    assert!(has(&verdict, Blocker::ResultAsOfAfterImportRequested));
     assert_eq!(
-        verdict.blockers.len(),
-        2,
-        "expected timestamp aggregate only, got {:?}",
-        verdict.blockers
+        verdict.blockers,
+        vec![
+            Blocker::ImportRequestedAtMissing,
+            Blocker::ResultAsOfAfterImportRequested,
+        ]
     );
 }
 
@@ -555,6 +508,8 @@ fn result_import_request_rejects_each_kind_lineage_gap_independently() {
 
 #[test]
 fn result_import_request_rejects_boundary_and_replay_regressions() {
+    use StockEtfIbkrReadonlyProbeResultImportBlocker as Blocker;
+
     let bad = StockEtfIbkrReadonlyProbeResultImportRequestV1 {
         duplicate_import_detected: true,
         stale_result_without_manual_review: true,
@@ -578,78 +533,30 @@ fn result_import_request_rejects_boundary_and_replay_regressions() {
     };
     let verdict = bad.validate();
 
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::DuplicateImportDetected
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::StaleResultWithoutManualReview
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::IbkrContactPerformed
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::ConnectorRuntimeStarted
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::SecretContentSerialized
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::ResultImportPerformed
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::EvidenceWriterStarted
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::ScorecardWriterStarted
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::DbApplyPerformed
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::OrderRouted
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::PaperOrderSubmitted
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::BybitPathReused
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::LiveOrTinyLiveAuthorized
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::MarginShortOptionsCfdRequested
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::AccountWriteRequested
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::MarketDataEntitlementPurchaseRequested
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::ClientPortalWebApiRequested
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfIbkrReadonlyProbeResultImportBlocker::PythonDirectBrokerWriteRequested
-    ));
+    assert!(!verdict.accepted);
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::DuplicateImportDetected,
+            Blocker::StaleResultWithoutManualReview,
+            Blocker::IbkrContactPerformed,
+            Blocker::ConnectorRuntimeStarted,
+            Blocker::SecretContentSerialized,
+            Blocker::ResultImportPerformed,
+            Blocker::EvidenceWriterStarted,
+            Blocker::ScorecardWriterStarted,
+            Blocker::DbApplyPerformed,
+            Blocker::OrderRouted,
+            Blocker::PaperOrderSubmitted,
+            Blocker::BybitPathReused,
+            Blocker::LiveOrTinyLiveAuthorized,
+            Blocker::MarginShortOptionsCfdRequested,
+            Blocker::AccountWriteRequested,
+            Blocker::MarketDataEntitlementPurchaseRequested,
+            Blocker::ClientPortalWebApiRequested,
+            Blocker::PythonDirectBrokerWriteRequested,
+        ]
+    );
 }
 
 #[test]
@@ -756,13 +663,6 @@ fn result_import_request_template_is_blocked_parseable_and_secret_free() {
     assert!(!lower.contains("account_id ="));
     assert!(!lower.contains("password ="));
     assert!(!lower.contains("token ="));
-}
-
-fn has(
-    verdict: &StockEtfIbkrReadonlyProbeResultImportVerdict,
-    blocker: StockEtfIbkrReadonlyProbeResultImportBlocker,
-) -> bool {
-    verdict.blockers.contains(&blocker)
 }
 
 fn accepted_account_result_import() -> StockEtfIbkrReadonlyProbeResultImportRequestV1 {
