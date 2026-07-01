@@ -1338,3 +1338,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only structure guard for `stock_etf_scorecard_derivation.rs`, pinning sealed derived scorecard artifact lineage.
 - The guard requires fail-closed defaults, accepted StockEtfCash/IBKR/Paper sealed shape, id/run/as-of lineage, scorecard input/evidence clock/DQ/reconciliation/formula/preregistration/manifest/verdict/source/code/output/review hashes, atomic-facts-only and idempotent replay proof, paper-shadow separation, Bybit-live protection, no writer/DB/evidence-clock/runtime flags, and no runtime/secret/order/Bybit client tokens.
 - Verification passed: new guard `6 passed`; scorecard derivation acceptance `5 passed`; full `cargo test -p openclaw_types` PASS. This grants no IBKR contact, broker fill import, shadow-fill generation, reconciliation/scorecard writer, evidence clock, DB apply, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Scorecard Verdict Source Static Guard
+
+- PM added a source-only structure guard for `stock_etf_scorecard_verdict.rs`, pinning the statistical scorecard verdict before any future tiny-live ADR discussion.
+- The guard requires fail-closed defaults, profitability-feasible fixture statistics, verdict label dispatch, formula/preregistration/reconciliation/hash lineage, window and independent-observation thresholds, divergence/PSR/DSR/LCB gates, quality labels, execution-model-invalid failure evidence, QC/MIT/QA review gates, no writer/DB/evidence-clock/tiny-live/runtime flags, and no runtime/secret/order/Bybit client tokens.
+- Verification passed: new guard `7 passed`; scorecard verdict acceptance `8 passed`; full `cargo test -p openclaw_types` PASS. This grants no IBKR contact, scorecard writer, evidence clock, DB apply, tiny-live/live authorization, gate lowering, or Bybit behavior change.
