@@ -1642,3 +1642,10 @@ Do not paste long reports or stable architecture into TODO.
 - The guard proves Phase 2 prerequisite policy failures emit complete ordered blocker vectors across redaction/rate/audit/paper/python subcontracts and the aggregate bundle gate flags.
 - Python source-static now pins each policy validator and bundle validator blocker emit order.
 - Verification passed: source static `5 passed`; Phase 2 policy acceptance `13 passed`; `cargo fmt -p openclaw_types -- --check` PASS; docs trace PASS; diff check PASS. This grants no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, paper order routing, DB/evidence writer, scorecard writer, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Phase3 Evidence Default Lineage Exact Guard
+
+- PM added exact-blocker Rust acceptance coverage for default `StockMarketDataProvenanceV1`, `StockEtfCollectorRunV1`, `StockEtfDailyDqManifestV1`, and `StockEtfEvidenceClockDayV1` fail-closed posture.
+- The guard proves default Phase 3 evidence contracts emit complete ordered blocker vectors across identity, lane/broker/environment, lineage hashes, Bybit protection, nested frozen-input/DQ shape, and green-day readiness gates.
+- Python source-static now pins the four validator blocker emit orders backing the default exact acceptance vectors.
+- Verification passed: source static `16 passed`; Phase 3 evidence acceptance `24 passed`; `cargo fmt -p openclaw_types -- --check` PASS; docs trace PASS; diff check PASS. This grants no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, market data ingestion, evidence writer, DQ writer, evidence clock start, scorecard writer, DB apply, paper order routing, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

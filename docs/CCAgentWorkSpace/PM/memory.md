@@ -3952,3 +3952,10 @@
 - Source-static parsing now pins each policy validator and bundle validator blocker emit order.
 - Verification passed: IBKR Phase 2 policy source static `5 passed`; IBKR Phase 2 policy Rust acceptance `13 passed`; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, paper order routing, DB/evidence writer, scorecard writer, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Phase3 Evidence Default Lineage Exact Guard
+
+- PM added test-only/source-static exact-blocker coverage for default `StockMarketDataProvenanceV1`, `StockEtfCollectorRunV1`, `StockEtfDailyDqManifestV1`, and `StockEtfEvidenceClockDayV1` fail-closed posture.
+- Source-static parsing now pins the four validator blocker emit orders backing the default exact acceptance vectors.
+- Verification passed: Stock/ETF Phase 3 evidence source static `16 passed`; Stock/ETF Phase 3 evidence Rust acceptance `24 passed`; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, market data ingestion, evidence writer, DQ writer, evidence clock start, scorecard writer, DB apply, paper order routing, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
