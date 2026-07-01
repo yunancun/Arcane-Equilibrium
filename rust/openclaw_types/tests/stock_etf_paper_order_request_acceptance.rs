@@ -82,6 +82,144 @@ fn accepted_preview_submit_cancel_and_replace_envelopes_validate_without_side_ef
 }
 
 #[test]
+fn request_method_surface_mismatches_block_operation_authority_and_effect_regressions() {
+    let mut preview = StockEtfPaperOrderRequestEnvelopeV1::accepted_preview_fixture();
+    preview.authority_scope = AuthorityScope::PaperRehearsal;
+    preview.effect_capable = true;
+    let verdict = preview.validate();
+    assert!(has(
+        &verdict,
+        StockEtfPaperOrderRequestBlocker::AuthorityScopeMismatch
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfPaperOrderRequestBlocker::EffectCapabilityMismatch
+    ));
+
+    let mut submit = StockEtfPaperOrderRequestEnvelopeV1::accepted_submit_fixture();
+    submit.operation = BrokerOperation::PaperOrderCancel;
+    submit.authority_scope = AuthorityScope::ReadOnly;
+    submit.effect_capable = false;
+    let verdict = submit.validate();
+    assert!(has(
+        &verdict,
+        StockEtfPaperOrderRequestBlocker::OperationMismatch
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfPaperOrderRequestBlocker::AuthorityScopeMismatch
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfPaperOrderRequestBlocker::EffectCapabilityMismatch
+    ));
+
+    let mut cancel = StockEtfPaperOrderRequestEnvelopeV1::accepted_cancel_fixture();
+    cancel.operation = BrokerOperation::PaperOrderSubmit;
+    cancel.authority_scope = AuthorityScope::ReadOnly;
+    cancel.effect_capable = false;
+    let verdict = cancel.validate();
+    assert!(has(
+        &verdict,
+        StockEtfPaperOrderRequestBlocker::OperationMismatch
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfPaperOrderRequestBlocker::AuthorityScopeMismatch
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfPaperOrderRequestBlocker::EffectCapabilityMismatch
+    ));
+
+    let mut replace = StockEtfPaperOrderRequestEnvelopeV1::accepted_replace_fixture();
+    replace.operation = BrokerOperation::PaperOrderSubmit;
+    replace.authority_scope = AuthorityScope::ReadOnly;
+    replace.effect_capable = false;
+    let verdict = replace.validate();
+    assert!(has(
+        &verdict,
+        StockEtfPaperOrderRequestBlocker::OperationMismatch
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfPaperOrderRequestBlocker::AuthorityScopeMismatch
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfPaperOrderRequestBlocker::EffectCapabilityMismatch
+    ));
+}
+
+#[test]
+fn effect_capable_requests_require_authorization_lifecycle_and_audit_hashes() {
+    let mut submit = StockEtfPaperOrderRequestEnvelopeV1::accepted_submit_fixture();
+    submit.session_attestation_hash.clear();
+    submit.scoped_authorization_hash = "not-a-sha".to_string();
+    submit.decision_lease_id.clear();
+    submit.guardian_state_hash.clear();
+    submit.lifecycle_contract_hash.clear();
+    submit.broker_capability_registry_hash.clear();
+    submit.audit_event_id.clear();
+
+    let verdict = submit.validate();
+
+    assert!(has(
+        &verdict,
+        StockEtfPaperOrderRequestBlocker::SessionAttestationHashInvalid
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfPaperOrderRequestBlocker::ScopedAuthorizationHashInvalid
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfPaperOrderRequestBlocker::DecisionLeaseMissing
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfPaperOrderRequestBlocker::GuardianStateHashInvalid
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfPaperOrderRequestBlocker::LifecycleContractHashInvalid
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfPaperOrderRequestBlocker::BrokerCapabilityRegistryHashInvalid
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfPaperOrderRequestBlocker::AuditEventIdMissing
+    ));
+}
+
+#[test]
+fn preview_request_rejects_effect_lifecycle_and_cancel_replace_pollution() {
+    let mut preview_with_effect_fields =
+        StockEtfPaperOrderRequestEnvelopeV1::accepted_preview_fixture();
+    preview_with_effect_fields.session_attestation_hash = "7".repeat(64);
+    preview_with_effect_fields.decision_lease_id = "decision_lease_0001".to_string();
+    preview_with_effect_fields.broker_order_id = "paper_broker_order_0001".to_string();
+    let verdict = preview_with_effect_fields.validate();
+    assert!(has(
+        &verdict,
+        StockEtfPaperOrderRequestBlocker::PreviewEffectFieldPresent
+    ));
+
+    let mut preview_with_cancel_replace_fields =
+        StockEtfPaperOrderRequestEnvelopeV1::accepted_preview_fixture();
+    preview_with_cancel_replace_fields.cancel_reason = "cancel_not_allowed".to_string();
+    preview_with_cancel_replace_fields.replacement_idempotency_key =
+        "replace_not_allowed".to_string();
+    let verdict = preview_with_cancel_replace_fields.validate();
+    assert!(has(
+        &verdict,
+        StockEtfPaperOrderRequestBlocker::PreviewEffectFieldPresent
+    ));
+}
+
+#[test]
 fn submit_request_requires_stock_etf_order_intent_and_limit_price_policy() {
     let mut bad = StockEtfPaperOrderRequestEnvelopeV1::accepted_submit_fixture();
     bad.symbol = "spy".to_string();
