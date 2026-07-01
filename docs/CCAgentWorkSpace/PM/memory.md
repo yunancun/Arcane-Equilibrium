@@ -3883,3 +3883,9 @@
 - PM added test-only/source-static exact-blocker coverage for `StockEtfScorecardDerivationV1` artifact identity, ids, hash lineage, atomic/replay/separation/seal posture, and no-side-effect flags.
 - Verification passed: scorecard derivation source static `7 passed`; scorecard derivation Rust acceptance `11 passed`; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, IPC/runtime change, IBKR contact, connector runtime, secret access, broker fill import execution, shadow fill generation, reconciliation writer, scorecard writer, DB/evidence writer, evidence clock start, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Scorecard Verdict Authority Lineage Cross-Wire Guard
+
+- PM added test-only/source-static exact-blocker coverage for `StockEtfScorecardVerdictV1` artifact identity, hash lineage, threshold/statistical quality, review gates, derived/live-denial posture, and no-side-effect flags.
+- Verification passed: scorecard verdict source static `8 passed`; scorecard verdict Rust acceptance `14 passed`; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, IPC/runtime change, IBKR contact, connector runtime, secret access, broker fill import execution, scorecard writer, DB/evidence writer, evidence clock start, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

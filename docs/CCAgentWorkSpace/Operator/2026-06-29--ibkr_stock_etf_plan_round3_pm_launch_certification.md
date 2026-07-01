@@ -4784,3 +4784,34 @@ Verification 已過：
 shadow fill generation、沒有 reconciliation writer、沒有 scorecard writer、沒有 DB/evidence writer、沒有
 evidence clock start、沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo
 execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Scorecard Verdict Authority Lineage Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Scorecard Verdict Authority Lineage Cross-Wire Guard`。
+
+這個 checkpoint 補強 `StockEtfScorecardVerdictV1` 的 artifact identity、hash lineage、threshold/statistical
+quality、review gates、derived-only / paper-shadow separation / live denial 與 no-side-effect boundary
+coverage。新增 Rust acceptance 證明 contract/source/lane/broker/environment、scorecard/evidence/DQ/formula/
+preregistration/benchmark/cost/strategy/reference/reconciliation/manifest/rationale hashes、threshold shape、
+positive LCB、PSR/DSR、quality labels、QC/MIT/QA review gates 都會 fail closed。
+
+Runtime/authority posture 也逐一驗證：derived-only、paper-shadow separation、live-fill denial、Bybit-live
+protection、contact/runtime/broker-fill-import/scorecard-writer/DB/evidence-clock/secret/live flags、sealed
+posture，以及 execution-model-invalid special case 都會 fail closed。Python source-static parser 鎖住
+`Default` / `profitability_feasible_fixture` block，避免 profitability fixture 被硬編成 crypto、Bybit、
+live、empty-lineage、missing-threshold、runtime、secret、writer 或 live/tiny-live posture。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Scorecard verdict source static pytest：`8 passed`
+- Scorecard verdict Rust acceptance：`14 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 broker fill import execution、沒有
+scorecard writer、沒有 DB/evidence writer、沒有 evidence clock start、沒有 paper order route、沒有
+tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
