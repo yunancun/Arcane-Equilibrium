@@ -6871,3 +6871,42 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不啟動 evidence clock runtime、不做
 scorecard writer、不做 DB/evidence writer、不做 paper order route、不做 Linux runtime sync/restart、
 不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 164. 2026-07-01 PM session source checkpoint：Stock/ETF Phase3 Market Data Provenance Runtime Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_phase3_evidence::market_data` 中 `StockMarketDataProvenanceV1` 的 live
+environment denial、Bybit unchanged、IBKR contact、connector runtime、secret serialization、
+tiny-live/live authority cross-wire coverage。這不是 Rust production behavior change、不是 IBKR contact、
+不是 connector runtime、不是 market-data ingestion、不是 evidence writer、不是 DB apply、不是 paper
+order route、不是 tiny-live/live gate；只把 market-data provenance artifact 的 source-only、paper/shadow
+provenance、no-runtime、no-secret、no-live-authority posture 變成行為型 regression test 與 source-static
+guard。
+
+已完成：
+
+- 在 `stock_etf_phase3_evidence_acceptance.rs` 新增
+  `market_data_provenance_rejects_runtime_secret_and_authority_cross_wire_independently`。
+- Acceptance 證明 `environment=LiveReservedDenied` 只產生
+  `MarketDataProvenanceEnvironmentDenied`。
+- Acceptance 證明 `bybit_live_execution_unchanged=false` 只產生
+  `BybitLiveExecutionNotProtected`。
+- Acceptance 證明 `ibkr_contact_performed=true`、`connector_runtime_started=true`、
+  `secret_content_serialized=true`、`live_or_tiny_live_authorized=true` 都會各自只產生單一對應 blocker。
+- 在 `test_stock_etf_phase3_evidence_source_static.py` 新增 market-data provenance `source_fixture()`
+  body parser，禁止 live environment、Bybit changed、IBKR contact、connector runtime、secret
+  serialization、tiny-live/live authority、unknown adjustment marker、zero timestamps 被 hardcoded 到
+  source fixture，並鎖住 default fail-closed posture。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Phase3 evidence source static pytest：`14 passed`。
+- Phase3 evidence Rust acceptance：`23 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不啟動 market-data ingestion、不做
+evidence writer、不做 DB/evidence writer、不做 paper order route、不做 Linux runtime sync/restart、
+不授權 tiny-live/live 或任何 Bybit behavior change。

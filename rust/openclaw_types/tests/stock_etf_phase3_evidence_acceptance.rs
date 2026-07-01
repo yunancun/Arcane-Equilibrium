@@ -97,6 +97,39 @@ fn market_data_provenance_rejects_boundary_regressions() {
 }
 
 #[test]
+fn market_data_provenance_rejects_runtime_secret_and_authority_cross_wire_independently() {
+    let mut live_environment = StockMarketDataProvenanceV1::source_fixture();
+    live_environment.environment = BrokerEnvironment::LiveReservedDenied;
+    assert_single_market_data_blocker(
+        live_environment,
+        StockEtfPhase3Blocker::MarketDataProvenanceEnvironmentDenied,
+    );
+
+    let mut bybit = StockMarketDataProvenanceV1::source_fixture();
+    bybit.bybit_live_execution_unchanged = false;
+    assert_single_market_data_blocker(bybit, StockEtfPhase3Blocker::BybitLiveExecutionNotProtected);
+
+    let mut ibkr_contact = StockMarketDataProvenanceV1::source_fixture();
+    ibkr_contact.ibkr_contact_performed = true;
+    assert_single_market_data_blocker(ibkr_contact, StockEtfPhase3Blocker::IbkrContactPerformed);
+
+    let mut connector = StockMarketDataProvenanceV1::source_fixture();
+    connector.connector_runtime_started = true;
+    assert_single_market_data_blocker(connector, StockEtfPhase3Blocker::ConnectorRuntimeStarted);
+
+    let mut secret = StockMarketDataProvenanceV1::source_fixture();
+    secret.secret_content_serialized = true;
+    assert_single_market_data_blocker(secret, StockEtfPhase3Blocker::SecretContentSerialized);
+
+    let mut live_authority = StockMarketDataProvenanceV1::source_fixture();
+    live_authority.live_or_tiny_live_authorized = true;
+    assert_single_market_data_blocker(
+        live_authority,
+        StockEtfPhase3Blocker::LiveOrTinyLiveAuthorized,
+    );
+}
+
+#[test]
 fn market_data_provenance_template_is_blocked_parseable_and_secret_free() {
     let srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -893,6 +926,21 @@ fn phase3_evidence_template_is_default_blocked_and_secret_free() {
 
 fn assert_single_phase3_blocker(collector: StockEtfCollectorRunV1, blocker: StockEtfPhase3Blocker) {
     let verdict = collector.validate();
+
+    assert!(!verdict.accepted);
+    assert_eq!(
+        verdict.blockers,
+        vec![blocker],
+        "expected only {blocker:?}; blockers: {:?}",
+        verdict.blockers
+    );
+}
+
+fn assert_single_market_data_blocker(
+    provenance: StockMarketDataProvenanceV1,
+    blocker: StockEtfPhase3Blocker,
+) {
+    let verdict = provenance.validate();
 
     assert!(!verdict.accepted);
     assert_eq!(

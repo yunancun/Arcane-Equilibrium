@@ -3737,3 +3737,11 @@
 - Source-static guard now rejects hardcoded live environment, Bybit changed, IBKR contact, connector runtime, evidence clock runtime, scorecard writer, DB apply, secret serialization, tiny-live/live authority, missing green dependencies, and `WindowComplete` status in the pass-day fixture, and pins default fail-closed posture.
 - Verification passed: targeted rustfmt check PASS; Phase3 evidence source static `13 passed`; Phase3 evidence Rust acceptance `22 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
 - Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, evidence clock runtime, scorecard writer, DB/evidence writer, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Phase3 Market Data Provenance Runtime Cross-Wire Guard
+
+- PM added test-only/source-static coverage for `StockMarketDataProvenanceV1` live-environment and runtime/secret authority posture.
+- Acceptance now independently rejects live environment, Bybit-live protection loss, IBKR contact, connector runtime, secret serialization, and tiny-live/live authority via exact single blockers.
+- Source-static guard now rejects hardcoded live environment, Bybit changed, IBKR contact, connector runtime, secret serialization, tiny-live/live authority, unknown adjustment marker, and zero timestamps in the source fixture, and pins default fail-closed posture.
+- Verification passed: targeted rustfmt check PASS; Phase3 evidence source static `14 passed`; Phase3 evidence Rust acceptance `23 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
+- Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, market-data ingestion, evidence writer, DB/evidence writer, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
