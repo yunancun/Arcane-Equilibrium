@@ -3666,3 +3666,11 @@
 - Source-static guard now rejects hardcoded true values for IBKR contact, connector runtime, broker fill import, shadow fill, reconciliation writer, scorecard writer, DB apply, evidence clock, secret serialization, and tiny-live/live authority in the accepted fixture, and pins default fail-closed posture.
 - Verification passed: targeted rustfmt check PASS; scorecard derivation source static `7 passed`; scorecard derivation Rust acceptance `6 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
 - Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, scorecard derivation execution, reconciliation writer, scorecard writer, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Scorecard Verdict Cross-Wire Guard
+
+- PM added test-only/source-static coverage for `stock_etf_scorecard_verdict` artifact evidence posture.
+- Acceptance now independently rejects derived-only, paper-shadow separation, live-fill claim, Bybit unchanged, and writer/runtime/tiny-live pollution via the expected blockers.
+- Source-static guard now rejects hardcoded true values for live fill, IBKR contact, connector runtime, broker fill import, scorecard writer, DB apply, evidence clock, secret serialization, and tiny-live/live authority in the profitability-feasible fixture, and pins default fail-closed posture.
+- Verification passed: targeted rustfmt check PASS; scorecard verdict source static `8 passed`; scorecard verdict Rust acceptance `9 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
+- Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, scorecard writer execution, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

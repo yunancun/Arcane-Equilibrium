@@ -218,6 +218,40 @@ def test_stock_etf_scorecard_verdict_source_keeps_profitability_feasible_fixture
     assert "sealed: true" in source
 
 
+def test_stock_etf_scorecard_verdict_fixture_excludes_writer_live_and_authority_crosswire() -> None:
+    source = _source()
+    fixture = source.split("pub fn profitability_feasible_fixture() -> Self", 1)[1].split(
+        "pub fn validate(&self)",
+        1,
+    )[0]
+    default_impl = source.split("impl Default for StockEtfScorecardVerdictV1", 1)[1].split(
+        "impl StockEtfScorecardVerdictV1",
+        1,
+    )[0]
+
+    for forbidden in (
+        "live_fill_claimed: true",
+        "ibkr_contact_performed: true",
+        "connector_runtime_started: true",
+        "broker_fill_import_performed: true",
+        "scorecard_writer_started: true",
+        "db_apply_performed: true",
+        "evidence_clock_started: true",
+        "secret_content_serialized: true",
+        "live_or_tiny_live_authorized: true",
+    ):
+        assert forbidden not in fixture
+
+    for fail_closed in (
+        "verdict_label: StockEtfScorecardVerdictLabel::InsufficientEvidence",
+        "scorecard_is_derived_only: false",
+        "paper_and_shadow_fills_separate: false",
+        "bybit_live_execution_unchanged: false",
+        "sealed: false",
+    ):
+        assert fail_closed in default_impl
+
+
 def test_stock_etf_scorecard_verdict_source_keeps_validation_dispatch() -> None:
     source = _source()
 
