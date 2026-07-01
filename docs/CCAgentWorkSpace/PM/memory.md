@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-01 Stock/ETF DB Evidence DDL Exact Blocker Guard
+
+- PM tightened `StockEtfDbEvidenceDdl` source SQL auditor mutation acceptance to exact single-blocker vectors for required column, foreign key, synthetic-shadow check, destructive statement, migration dry-run, guard B/C, and retention-plan drift.
+- Existing source-static guard continues to pin DB evidence DDL contract and source-auditor blocker emit order; no Rust production validator or SQL draft behavior changed.
+- Verification passed: DB evidence DDL source static `7`, Rust acceptance `10`, full `cargo test -p openclaw_types`, cargo fmt, docs trace, and diff-check. Boundary unchanged: no migration apply, Postgres open/write, sqlx registration, IBKR contact, connector/runtime, secret access/serialization, paper order route, evidence/scorecard writer, tiny-live/live, or Bybit behavior change.
+
 ## 2026-07-01 Stock/ETF Risk Policy Exact Blocker Guard
 
 - PM tightened `StockEtfRiskPolicyV1` aggregate acceptance coverage to exact ordered blocker vectors for default fail-closed posture, contract/source mismatch, runtime/cap/cash-only regressions, universe/cost/paper-order gate gaps, and Bybit/IBKR/connector/secret boundary flags.
