@@ -8,9 +8,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use openclaw_types::{
-    evaluate_broker_operation, AssetLane, Broker, BrokerCapabilityRequest, BrokerEnvironment,
-    BrokerOperation, IbkrPaperOrderLifecycleState, InstrumentKind, StockEtfDenialReason,
-    StockEtfFeatureFlags, StockEtfGateInputs,
+    evaluate_broker_operation, AssetLane, AuthorityScope, Broker, BrokerCapabilityRequest,
+    BrokerEnvironment, BrokerOperation, IbkrPaperOrderLifecycleState, InstrumentKind,
+    StockEtfDenialReason, StockEtfFeatureFlags, StockEtfGateInputs,
 };
 
 #[test]
@@ -177,6 +177,68 @@ fn paper_order_requires_all_phase2_style_gates_even_when_flags_on() {
         decision.denial_reason,
         Some(StockEtfDenialReason::CredentialUnavailable)
     );
+}
+
+#[test]
+fn broker_operation_authority_taxonomy_keeps_fill_import_readonly_and_orders_separate() {
+    for operation in [
+        BrokerOperation::HealthRead,
+        BrokerOperation::AccountSnapshotRead,
+        BrokerOperation::MarketDataRead,
+        BrokerOperation::ContractDetailsRead,
+        BrokerOperation::PaperOrderFillImport,
+        BrokerOperation::ScorecardDerive,
+    ] {
+        assert!(operation.is_read(), "{operation:?} must stay read-only");
+        assert!(
+            !operation.is_paper_write(),
+            "{operation:?} must not be a paper write"
+        );
+        assert!(!operation.is_shadow(), "{operation:?} must not be shadow");
+        assert_eq!(operation.authority_scope(), AuthorityScope::ReadOnly);
+    }
+
+    for operation in [
+        BrokerOperation::PaperOrderSubmit,
+        BrokerOperation::PaperOrderCancel,
+        BrokerOperation::PaperOrderReplace,
+    ] {
+        assert!(!operation.is_read(), "{operation:?} must not be read-only");
+        assert!(
+            operation.is_paper_write(),
+            "{operation:?} must stay a paper write"
+        );
+        assert!(!operation.is_shadow(), "{operation:?} must not be shadow");
+        assert_eq!(operation.authority_scope(), AuthorityScope::PaperRehearsal);
+    }
+
+    for operation in [
+        BrokerOperation::ShadowSignalEmit,
+        BrokerOperation::ShadowFillReconstruct,
+    ] {
+        assert!(!operation.is_read(), "{operation:?} must not be read-only");
+        assert!(
+            !operation.is_paper_write(),
+            "{operation:?} must not be a paper write"
+        );
+        assert!(operation.is_shadow(), "{operation:?} must stay shadow");
+        assert_eq!(operation.authority_scope(), AuthorityScope::ShadowOnly);
+    }
+
+    for operation in [
+        BrokerOperation::LiveOrderSubmit,
+        BrokerOperation::MarginOrShort,
+        BrokerOperation::OptionsOrCfd,
+        BrokerOperation::TransferOrAccountWrite,
+    ] {
+        assert!(!operation.is_read(), "{operation:?} must not be read-only");
+        assert!(
+            !operation.is_paper_write(),
+            "{operation:?} must not be a paper write"
+        );
+        assert!(!operation.is_shadow(), "{operation:?} must not be shadow");
+        assert_eq!(operation.authority_scope(), AuthorityScope::Denied);
+    }
 }
 
 #[test]
