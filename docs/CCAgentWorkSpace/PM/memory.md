@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-01 Stock/ETF Phase3 Evidence Exact Blocker Guard
+
+- PM tightened `StockEtfPhase3` evidence acceptance coverage to exact ordered blocker vectors for market-data provenance drift/boundaries, frozen-input lineage, collector lineage/runtime side effects, evidence-clock gate/status regressions, and DQ manifest runtime side effects.
+- Source-static guard now pins validator blocker emit order across market-data provenance, frozen inputs, collector run, DQ manifest, and evidence-clock validators including side-effect and status blockers.
+- Verification passed: Phase3 evidence source static `16`, Rust acceptance `24`, full `cargo test -p openclaw_types`, cargo fmt, docs trace, and diff-check. Boundary unchanged: no market-data ingestion, evidence clock runtime, IBKR contact, connector/runtime, secret access/serialization, scorecard/DB writer, tiny-live/live, or Bybit behavior change.
+
 ## 2026-07-01 Stock/ETF Broker Capability Registry Exact Blocker Guard
 
 - PM tightened `StockEtfBrokerCapabilityRegistryV1` aggregate acceptance coverage to exact ordered blocker vectors for default registry posture, read-row gate gaps, registry identity/source mismatch, operation coverage, paper write/fill-import shape gaps, denied-row regressions, and boundary flags.
