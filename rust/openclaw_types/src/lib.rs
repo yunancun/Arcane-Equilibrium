@@ -25,6 +25,7 @@ pub mod stock_etf_db_evidence_ddl;
 pub mod stock_etf_disable_cleanup_runbook;
 pub mod stock_etf_gui_lane_contract;
 pub mod stock_etf_ibkr_readonly_probe_request;
+pub mod stock_etf_ibkr_readonly_probe_result_import_request;
 pub mod stock_etf_instrument_identity;
 pub mod stock_etf_lane;
 pub mod stock_etf_lane_scoped_ipc;
@@ -135,6 +136,11 @@ pub use stock_etf_ibkr_readonly_probe_request::{
     StockEtfIbkrReadonlyProbeBlocker, StockEtfIbkrReadonlyProbeKind,
     StockEtfIbkrReadonlyProbeRequestV1, StockEtfIbkrReadonlyProbeVerdict,
     STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID,
+};
+pub use stock_etf_ibkr_readonly_probe_result_import_request::{
+    StockEtfIbkrReadonlyProbeResultImportBlocker, StockEtfIbkrReadonlyProbeResultImportRequestV1,
+    StockEtfIbkrReadonlyProbeResultImportVerdict,
+    STOCK_ETF_IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID,
 };
 pub use stock_etf_instrument_identity::{
     StockEtfCurrency, StockEtfInstrumentIdentityBlocker, StockEtfInstrumentIdentityV1,

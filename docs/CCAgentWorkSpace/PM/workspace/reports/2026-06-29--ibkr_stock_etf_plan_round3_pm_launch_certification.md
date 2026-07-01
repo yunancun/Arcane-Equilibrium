@@ -1203,3 +1203,49 @@ approval。未批准 IBKR contact、IBKR SDK import、socket/HTTP、secret、con
 runtime、read probe execution、collector start、market-data ingestion、DQ writer、
 paper order/cancel/replace、fill import、DB apply、evidence writer、evidence clock、
 scorecard writer、tiny-live、live、Linux runtime sync/restart 或 Bybit behavior change。
+
+## 2026-07-01 PM Session Checkpoint — Read-Only Probe Result Import Request Contract
+
+PM 已在本 session 追加 source-only contract checkpoint：Read-Only Probe Result
+Import Request Contract。這不是 read probe runtime approval、result import approval、
+evidence writer approval、scorecard writer approval、IBKR contact approval 或 launch
+approval。
+
+已完成：
+
+- 新增
+  `stock_etf_ibkr_readonly_probe_result_import_request_v1` Rust validator 與
+  acceptance tests。
+- Contract 綁定 read-only probe request hash、session attestation hash、
+  allowlist/redaction/audit policy hashes、result payload/raw/redacted/source hashes、
+  as-of/import-request timestamp 與 idempotency key。
+- Probe kind-specific downstream lineage 覆蓋 health snapshot、account cash ledger、
+  market-data provenance、instrument identity、broker lifecycle event log。
+- Validator fail-closed 拒絕 duplicate/stale import、IBKR contact、connector runtime、
+  secret serialization、result import/evidence writer/scorecard writer/DB apply、
+  order/paper order、Bybit reuse、entitlement purchase、Client Portal Web API、Python
+  direct broker write、tiny-live/live。
+- Phase0 manifest/JSON 從 35 named contracts 更新為 36；broker capability registry
+  scorecard gate、settings template / README、Phase0 named-contract spec 已同步。
+
+Verification：
+
+- Scoped Rust format PASS。
+- Result import request acceptance：`6 passed`。
+- Phase0 manifest acceptance：`6 passed`。
+- Broker capability registry acceptance：`10 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- Full Stock/ETF FastAPI/static pytest：`120 passed`。
+- Focused docs trace：`2 passed`。
+- `git diff --check`：PASS。
+
+Dispatch 記錄：本 turn 因工具層 spawn policy 未允許 sub-agent dispatch，PM 本地完成
+narrow source contract / review / regression。Full Rust type regression 已完成。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 2/3 runtime approval、IBKR contact
+approval、read-only probe approval、result import approval、market-data ingestion
+approval、paper-order approval 或 launch approval。未批准 IBKR SDK import、
+socket/HTTP、secret、connector runtime、read probe execution、collector start、
+market-data ingestion、DQ writer、paper order/cancel/replace、fill import、DB apply、
+evidence writer、evidence clock、scorecard writer、tiny-live、live、Linux runtime
+sync/restart 或 Bybit behavior change。
