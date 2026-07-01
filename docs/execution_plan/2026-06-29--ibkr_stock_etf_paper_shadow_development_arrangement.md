@@ -9337,3 +9337,38 @@ socket/client construction、不做 broker session、不複製/註冊 sql migrat
 write/dry-run、不執行 read-only probe、不執行 fill import、不做 paper order routing/cancel/replace、不做
 evidence/scorecard/DB writer、不啟動 evidence clock、不做 release launch、不做 Linux runtime sync/restart、不授權
 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
+
+## 226. 2026-07-01 PM session source checkpoint：Stock/ETF GUI Lane Endpoint Exact Blocker Guard
+
+本 checkpoint 補強 `StockEtfGuiLaneContractV1` source-only GUI lane read-only endpoint aggregate 的 exact
+fail-closed lineage，固定 16 個 Stock/ETF GUI status endpoints 的 mismatch / not-GET-only ordered blocker vector。
+這不是 Rust production behavior change、不是 GUI runtime change、不是 IPC/API route implementation change、不是
+endpoint server startup、不是 IBKR contact、不是 connector runtime、不是 secret lookup、不是 broker session、不是
+paper order route enablement、不是 evidence/scorecard/DB writer、不是 tiny-live/live gate；只把 Stock/ETF GUI lane
+endpoint source-only contract 變成 exact-blocker acceptance guard。
+
+已完成：
+
+- 在 `stock_etf_gui_lane_contract_acceptance.rs` 將 all Stock/ETF read-only status endpoint mismatch / not-GET-only
+  aggregate 改成完整 exact ordered blocker vector。
+- 移除該 test 中 32 個 loose `verdict.blockers.contains(...)` membership assertions。
+- 保持既有 `test_stock_etf_gui_lane_contract_source_static.py` source-order guard；本 checkpoint 不改 production
+  source validator。
+- 本輪全域掃描已確認 Stock/ETF acceptance/static blocker guard 不再有 broad `.contains()` blocker membership。
+
+驗證：
+
+- Global loose blocker scan：PASS。
+- Targeted rustfmt check：PASS。
+- Stock/ETF GUI lane source static pytest：`7 passed`。
+- Stock/ETF GUI lane Rust acceptance：`9 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、不改 GUI
+runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不做
+socket/client construction、不做 broker session、不執行 read-only probe、不執行 fill import、不做 paper order
+routing/cancel/replace、不做 evidence/scorecard/DB writer、不啟動 evidence clock、不做 release launch、不做 Linux
+runtime sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。

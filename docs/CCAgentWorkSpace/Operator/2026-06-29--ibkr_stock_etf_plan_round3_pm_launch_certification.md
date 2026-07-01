@@ -6014,3 +6014,34 @@ construction、沒有 broker session、沒有 read-only probe execution、沒有
 routing/cancel/replace execution、沒有 evidence/scorecard writer、沒有 DB apply、沒有 evidence clock、沒有
 paper-shadow launch、沒有 release launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution
 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF GUI Lane Endpoint Exact Blocker Guard
+
+本 session 已完成下一個 test-only checkpoint：
+`Stock/ETF GUI Lane Endpoint Exact Blocker Guard`。
+
+這個 checkpoint 補強 `StockEtfGuiLaneContractV1` source-only GUI lane read-only endpoint aggregate 的 exact
+fail-closed coverage。
+
+新增 Rust acceptance 證明 16 個 Stock/ETF GUI status endpoints 的 mismatch / not-GET-only cases 會以完整
+ordered blocker vector fail closed。既有 source-static guard 仍覆蓋 GUI lane validator blocker emit order；本
+checkpoint 不改 production validator 或 GUI runtime。全域 loose blocker 掃描也已確認 Stock/ETF
+acceptance/static blocker guard 不再有 broad `.contains()` blocker membership。
+
+Verification 已過：
+
+- Global loose blocker scan：PASS
+- Targeted rustfmt check：PASS
+- Stock/ETF GUI lane source static pytest：`7 passed`
+- Stock/ETF GUI lane Rust acceptance：`9 passed`
+- Full `cargo test -p openclaw_types`：PASS
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 GUI runtime/API route/IPC behavior change、沒有 endpoint
+implementation/server startup、沒有 IBKR contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、
+沒有 socket/client construction、沒有 broker session、沒有 read-only probe execution、沒有 fill import execution、
+沒有 paper order routing/cancel/replace execution、沒有 evidence/scorecard writer、沒有 DB apply、沒有 evidence
+clock、沒有 paper-shadow launch、沒有 release launch、沒有 tiny-live/live authorization，也沒有改動 Bybit
+live/demo execution 行為。
