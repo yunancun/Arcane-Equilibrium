@@ -3753,3 +3753,19 @@
 - Source-static guard now rejects hardcoded missing hash, zero as-of, missing GUI evidence view, and missing scorecard regeneration in the source fixture, and pins default fail-closed posture.
 - Verification passed: targeted rustfmt check PASS; Phase3 evidence source static `15 passed`; Phase3 evidence Rust acceptance `24 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
 - Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, market-data ingestion, evidence writer, scorecard writer, DB/evidence writer, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Reference Data Sources Runtime Authority Cross-Wire Guard
+
+- PM added test-only/source-static coverage for `StockEtfReferenceDataSourcesV1` evidence-freeze, FX currency, and runtime/authority posture.
+- Acceptance now independently rejects live environment, missing evidence-clock freeze, denied currency, Bybit-live protection loss, IBKR contact, connector runtime, secret serialization, and tiny-live/live authority via exact single blockers.
+- Source-static guard now rejects hardcoded live environment, missing evidence freeze, missing source names/as-of, unknown currencies, Bybit changed, IBKR contact, connector runtime, secret serialization, and tiny-live/live authority in the accepted fixture, and pins default fail-closed posture.
+- Verification passed: targeted rustfmt check PASS; reference-data source static `8 passed`; reference-data Rust acceptance `7 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
+- Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, reference-data ingestion, scorecard writer, DB/evidence writer, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 No-Order Source-Stability Guard Binding
+
+- PM fixed `source_stability_window_guard_v1` so it can bind `P0-CURRENT-CANDIDATE-NOORDER-REFRESH-CURRENT-HEAD-E3-BB-REQUEST` via `--active-blocker-id` while preserving the historical order-capable default.
+- Source commit `07592ea70445e1e5e1b3b55389e3d16cdcdcda9d`; report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-01--source_stability_guard_blocker_binding_done.md`; final session state sha `e4ba2f7b...`.
+- Verification passed: PM focused `14 passed`, py_compile, diff-check, CLI smoke; E2/E4 both `DONE`.
+- Next PM should fetch current source, run source-stability with the no-order blocker id, then regenerate E3/BB request only after a clean quiet window; v711 equity remains stale under 900s.
+- Boundary unchanged: no Control API GET, Bybit call, Decision Lease, PG, service/env/risk mutation, Cost Gate change, live/mainnet, order/fill/PnL/proof.
