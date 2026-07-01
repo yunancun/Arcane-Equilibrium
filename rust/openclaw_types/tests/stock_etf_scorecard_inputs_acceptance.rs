@@ -192,6 +192,8 @@ fn accepted_fixture_keeps_scorecard_derived_and_live_separate() {
 
 #[test]
 fn scorecard_subcontracts_require_named_contract_ids_and_source_versions() {
+    use StockEtfScorecardInputBlocker as Blocker;
+
     let mut ledger = BrokerAccountPortfolioCashLedgerV1::accepted_fixture();
     ledger.contract_id = "wrong_cash_ledger_v1".to_string();
     ledger.source_version = 2;
@@ -212,20 +214,18 @@ fn scorecard_subcontracts_require_named_contract_ids_and_source_versions() {
     storage.contract_id = "stock_etf_storage_capacity_v2".to_string();
     storage.source_version = 2;
 
-    for blockers in [
-        ledger.validate().blockers,
-        cost.validate().blockers,
-        benchmark.validate().blockers,
-        shadow.validate().blockers,
-        storage.validate().blockers,
-    ] {
-        assert!(blockers.contains(&StockEtfScorecardInputBlocker::ContractIdMismatch));
-        assert!(blockers.contains(&StockEtfScorecardInputBlocker::SourceVersionMismatch));
-    }
+    let expected = vec![Blocker::ContractIdMismatch, Blocker::SourceVersionMismatch];
+    assert_eq!(ledger.validate().blockers, expected.clone());
+    assert_eq!(cost.validate().blockers, expected.clone());
+    assert_eq!(benchmark.validate().blockers, expected.clone());
+    assert_eq!(shadow.validate().blockers, expected.clone());
+    assert_eq!(storage.validate().blockers, expected);
 }
 
 #[test]
 fn cash_ledger_rejects_live_environment_and_missing_hashes() {
+    use StockEtfScorecardInputBlocker as Blocker;
+
     let mut ledger = BrokerAccountPortfolioCashLedgerV1::accepted_fixture();
     ledger.environment = BrokerEnvironment::LiveReservedDenied;
     ledger.account_snapshot_hash.clear();
@@ -233,16 +233,19 @@ fn cash_ledger_rejects_live_environment_and_missing_hashes() {
     let verdict = ledger.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::CashLedgerEnvironmentDenied));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::AccountSnapshotHashInvalid));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::CashLedgerEnvironmentDenied,
+            Blocker::AccountSnapshotHashInvalid,
+        ]
+    );
 }
 
 #[test]
 fn shadow_fill_must_be_synthetic_and_never_linked_to_broker_or_live_fill() {
+    use StockEtfScorecardInputBlocker as Blocker;
+
     let mut shadow = StockShadowFillModelV1::accepted_fill_fixture();
     shadow.synthetic_shadow = false;
     shadow.broker_paper_fill_linked = true;
@@ -251,19 +254,20 @@ fn shadow_fill_must_be_synthetic_and_never_linked_to_broker_or_live_fill() {
     let verdict = shadow.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::SyntheticShadowMarkerMissing));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::ShadowFillLinkedToBrokerPaperFill));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::ShadowFillLinkedToLiveFill));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::SyntheticShadowMarkerMissing,
+            Blocker::ShadowFillLinkedToBrokerPaperFill,
+            Blocker::ShadowFillLinkedToLiveFill,
+        ]
+    );
 }
 
 #[test]
 fn storage_capacity_requires_forward_capacity_policy_before_evidence_clock() {
+    use StockEtfScorecardInputBlocker as Blocker;
+
     let mut storage = StockEtfStorageCapacityV1::accepted_fixture();
     storage.capacity_breach_blocks_evidence_clock = false;
     storage.capacity_plan_hash.clear();
@@ -272,19 +276,20 @@ fn storage_capacity_requires_forward_capacity_policy_before_evidence_clock() {
     let verdict = storage.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::CapacityBreachPolicyMissing));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::CapacityPlanHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::RowsPerDayEstimateMissing));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::RowsPerDayEstimateMissing,
+            Blocker::CapacityPlanHashInvalid,
+            Blocker::CapacityBreachPolicyMissing,
+        ]
+    );
 }
 
 #[test]
 fn storage_capacity_rejects_unbounded_volume_and_slow_query_plan() {
+    use StockEtfScorecardInputBlocker as Blocker;
+
     let mut storage = StockEtfStorageCapacityV1::accepted_fixture();
     storage.universe_size = STOCK_ETF_STORAGE_MAX_UNIVERSE_SIZE + 1;
     storage.rows_per_day_estimate = STOCK_ETF_STORAGE_MAX_ROWS_PER_DAY_ESTIMATE + 1;
@@ -294,22 +299,21 @@ fn storage_capacity_rejects_unbounded_volume_and_slow_query_plan() {
     let verdict = storage.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::UniverseSizeExceedsCapacityPlan));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::RowsPerDayEstimateExceedsCapacityPlan));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::IndexBudgetExceedsCapacityPlan));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::QuerySloExceedsCapacityPlan));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::UniverseSizeExceedsCapacityPlan,
+            Blocker::RowsPerDayEstimateExceedsCapacityPlan,
+            Blocker::IndexBudgetExceedsCapacityPlan,
+            Blocker::QuerySloExceedsCapacityPlan,
+        ]
+    );
 }
 
 #[test]
 fn storage_capacity_requires_retention_order_for_evidence_window() {
+    use StockEtfScorecardInputBlocker as Blocker;
+
     let mut storage = StockEtfStorageCapacityV1::accepted_fixture();
     storage.raw_payload_hash_retention_days = 30;
     storage.compressed_retention_days = 29;
@@ -317,16 +321,19 @@ fn storage_capacity_requires_retention_order_for_evidence_window() {
     let verdict = storage.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::RawPayloadRetentionTooShort));
-    assert!(verdict.blockers.contains(
-        &StockEtfScorecardInputBlocker::CompressedRetentionShorterThanRawPayloadHashRetention
-    ));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::RawPayloadRetentionTooShort,
+            Blocker::CompressedRetentionShorterThanRawPayloadHashRetention,
+        ]
+    );
 }
 
 #[test]
 fn storage_capacity_archive_path_must_be_lane_scoped_relative_path() {
+    use StockEtfScorecardInputBlocker as Blocker;
+
     for unsafe_path in [
         "/tmp/openclaw/stock_etf",
         "../evidence/stock_etf_cash/archive",
@@ -340,14 +347,14 @@ fn storage_capacity_archive_path_must_be_lane_scoped_relative_path() {
         let verdict = storage.validate();
 
         assert!(!verdict.accepted, "{unsafe_path} should be rejected");
-        assert!(verdict
-            .blockers
-            .contains(&StockEtfScorecardInputBlocker::ArchivePathUnsafe));
+        assert_eq!(verdict.blockers, vec![Blocker::ArchivePathUnsafe]);
     }
 }
 
 #[test]
 fn scorecard_bundle_rejects_live_fill_claim_and_missing_separation() {
+    use StockEtfScorecardInputBlocker as Blocker;
+
     let mut bundle = StockEtfScorecardInputBundleV1::accepted_fixture();
     bundle.scorecard_is_derived_only = false;
     bundle.paper_and_shadow_fills_separate = false;
@@ -356,72 +363,43 @@ fn scorecard_bundle_rejects_live_fill_claim_and_missing_separation() {
     let verdict = bundle.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::ScorecardNotDerivedOnly));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::PaperShadowFillSeparationMissing));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::LiveFillClaimed));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::ScorecardNotDerivedOnly,
+            Blocker::PaperShadowFillSeparationMissing,
+            Blocker::LiveFillClaimed,
+        ]
+    );
 }
 
 #[test]
 fn scorecard_bundle_rejects_derived_separation_live_and_writer_cross_wire_independently() {
+    use StockEtfScorecardInputBlocker as Blocker;
+
     let mut derived_pollution = StockEtfScorecardInputBundleV1::accepted_fixture();
     derived_pollution.scorecard_is_derived_only = false;
     let verdict = derived_pollution.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::ScorecardNotDerivedOnly));
-    assert!(!verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::PaperShadowFillSeparationMissing));
-    assert!(!verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::LiveFillClaimed));
-    assert!(!verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::ScorecardWriterStarted));
+    assert_eq!(verdict.blockers, vec![Blocker::ScorecardNotDerivedOnly]);
 
     let mut separation_pollution = StockEtfScorecardInputBundleV1::accepted_fixture();
     separation_pollution.paper_and_shadow_fills_separate = false;
     let verdict = separation_pollution.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::PaperShadowFillSeparationMissing));
-    assert!(!verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::ScorecardNotDerivedOnly));
-    assert!(!verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::LiveFillClaimed));
-    assert!(!verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::ScorecardWriterStarted));
+    assert_eq!(
+        verdict.blockers,
+        vec![Blocker::PaperShadowFillSeparationMissing]
+    );
 
     let mut live_fill_pollution = StockEtfScorecardInputBundleV1::accepted_fixture();
     live_fill_pollution.live_fill_claimed = true;
     let verdict = live_fill_pollution.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::LiveFillClaimed));
-    assert!(!verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::ScorecardNotDerivedOnly));
-    assert!(!verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::PaperShadowFillSeparationMissing));
-    assert!(!verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::ScorecardWriterStarted));
+    assert_eq!(verdict.blockers, vec![Blocker::LiveFillClaimed]);
 
     let mut writer_pollution = StockEtfScorecardInputBundleV1::accepted_fixture();
     writer_pollution.scorecard_writer_started = true;
@@ -431,31 +409,21 @@ fn scorecard_bundle_rejects_derived_separation_live_and_writer_cross_wire_indepe
     let verdict = writer_pollution.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::ScorecardWriterStarted));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::DbApplyPerformed));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::EvidenceClockStarted));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::LiveOrTinyLiveAuthorized));
-    assert!(!verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::ScorecardNotDerivedOnly));
-    assert!(!verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::PaperShadowFillSeparationMissing));
-    assert!(!verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::LiveFillClaimed));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::ScorecardWriterStarted,
+            Blocker::DbApplyPerformed,
+            Blocker::EvidenceClockStarted,
+            Blocker::LiveOrTinyLiveAuthorized,
+        ]
+    );
 }
 
 #[test]
 fn scorecard_bundle_rejects_missing_cross_contract_hashes_and_runtime_side_effects() {
+    use StockEtfScorecardInputBlocker as Blocker;
+
     let mut bundle = StockEtfScorecardInputBundleV1::accepted_fixture();
     bundle
         .readonly_probe_result_import_request_contract_id
@@ -477,48 +445,25 @@ fn scorecard_bundle_rejects_missing_cross_contract_hashes_and_runtime_side_effec
     let verdict = bundle.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict.blockers.contains(
-        &StockEtfScorecardInputBlocker::ReadonlyProbeResultImportRequestContractIdMismatch
-    ));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::ReadonlyProbeResultImportRequestHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::MarketDataProvenanceContractHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::ReferenceDataSourcesContractHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::RiskPolicyContractHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::BybitLiveExecutionNotProtected));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::IbkrContactPerformed));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::ConnectorRuntimeStarted));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::BrokerFillImportPerformed));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::ScorecardWriterStarted));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::DbApplyPerformed));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::EvidenceClockStarted));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::SecretContentSerialized));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardInputBlocker::LiveOrTinyLiveAuthorized));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::ReadonlyProbeResultImportRequestContractIdMismatch,
+            Blocker::ReadonlyProbeResultImportRequestHashInvalid,
+            Blocker::MarketDataProvenanceContractHashInvalid,
+            Blocker::ReferenceDataSourcesContractHashInvalid,
+            Blocker::RiskPolicyContractHashInvalid,
+            Blocker::BybitLiveExecutionNotProtected,
+            Blocker::IbkrContactPerformed,
+            Blocker::ConnectorRuntimeStarted,
+            Blocker::BrokerFillImportPerformed,
+            Blocker::ScorecardWriterStarted,
+            Blocker::DbApplyPerformed,
+            Blocker::EvidenceClockStarted,
+            Blocker::SecretContentSerialized,
+            Blocker::LiveOrTinyLiveAuthorized,
+        ]
+    );
 }
 
 #[test]

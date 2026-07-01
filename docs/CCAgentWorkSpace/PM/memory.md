@@ -4101,3 +4101,10 @@
 - The acceptance test no longer uses loose `has/lacks` helpers for release packet blockers; aggregate and cross-wire paths now require complete ordered vectors.
 - Verification passed: Stock/ETF release packet source static `9 passed`; Stock/ETF release packet Rust acceptance `15 passed`; full `cargo test -p openclaw_types` PASS; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, GUI runtime/API route/IPC behavior change, IBKR contact, connector runtime, socket/client construction, secret access, paper order routing, broker session, DB/evidence writer, scorecard writer, paper-shadow launch, release launch, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Scorecard Inputs Exact Blocker Guard
+
+- PM tightened test-only exact-blocker coverage for `StockEtfScorecardInputBundleV1` and atomic input subcontracts: contract/source drift, cash ledger environment/hash drift, shadow-fill broker/live linkage, storage capacity limits, archive path safety, derived-only separation, and runtime side-effect cross-wire cases.
+- The acceptance test no longer uses loose `blockers.contains` checks for scorecard input blockers; aggregate and cross-wire paths now require complete ordered vectors.
+- Verification passed: Stock/ETF scorecard inputs source static `10 passed`; Stock/ETF scorecard inputs Rust acceptance `14 passed`; full `cargo test -p openclaw_types` PASS; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, GUI runtime/API route/IPC behavior change, IBKR contact, connector runtime, socket/client construction, secret access, broker fill import, paper order routing, broker session, DB/evidence writer, scorecard writer, evidence clock, paper-shadow launch, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
