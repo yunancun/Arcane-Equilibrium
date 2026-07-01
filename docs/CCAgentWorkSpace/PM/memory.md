@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-01 No-Order Refresh E3 Stale By Source Drift
+
+- PM produced a clean `c3ab4861...` source-stability READY artifact sha `3f0451b...` and exact no-order E3/BB request sha `8b13397f...`.
+- E3 returned `DONE_WITH_CONCERNS` bound only to the c3ab request/source, but PM's post-E3 fetch found `HEAD == origin/main == 13478295...`, and source later advanced to `5bbac76a...`; the request/E3 approval are stale and BB was not dispatched.
+- State transition is `BLOCKED_BY_RUNTIME`; final state sha `5cf737a...`. No Control API GET, public quote, envelope rebuild, plan write, lease, private/order endpoint, PG/service/env/risk mutation, Cost Gate change, live/mainnet, order/fill/PnL/proof.
+
 ## 2026-07-01 No-Order Refresh READY Invalidated By Source Drift
 
 - PM rotated from `1028a35f...` to `e19700b2...` after source drift, then produced a clean source-stability READY artifact sha `93d3f264...` bound to `P0-CURRENT-CANDIDATE-NOORDER-REFRESH-CURRENT-HEAD-E3-BB-REQUEST`.
@@ -3815,3 +3821,11 @@
 - Source-static guard now parses the default block and pins empty/unsealed/no-reviewer/no-runtime/no-secret/topology-default/hash-empty fail-closed posture.
 - Verification passed: targeted rustfmt check PASS; Phase2 artifact source static `5 passed`; Phase2 artifact Rust acceptance `9 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
 - Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, SDK import, connector runtime, secret access, PASS artifact materialization, broker session, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR External Surface Gate Precontact Cross-Wire Guard
+
+- PM added test-only/source-static coverage for `IbkrExternalSurfaceGateV1` pre-contact gate identity, surface, secret, policy, and no-retroactive-call posture.
+- Acceptance now independently rejects contract/source/ADR/AMD/API baseline/host/port/live-port/secret/allowlist/policy/no-write/retroactive-call gaps via exact single blockers.
+- Source-static guard now parses default and passing fixture blocks, pinning default blocked posture and passing fixture no-side-effect posture.
+- Verification passed: targeted rustfmt check PASS; Phase2 gate source static `5 passed`; Phase2 gate Rust acceptance `12 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
+- Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, SDK import, connector runtime, secret access, session attestation runtime, broker session, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
