@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -15,6 +16,56 @@ from stock_etf_route_fixtures import (
     route_module,
     stock_etf_router,
 )
+
+EXPECTED_RECONCILIATION_CONTRACT_VIOLATIONS = [
+    "ibkr_call_performed",
+    "secret_slot_touched",
+    "order_routed",
+    "bybit_ipc_reused",
+    "asset_lane_mismatch",
+    "broker_mismatch",
+    "environment_mismatch",
+    "phase3_started",
+    "paper_shadow_reconciliation_started",
+    "paper_orders_ready",
+    "paper_fills_ready",
+    "shadow_fills_ready",
+    "scorecard_writer_started",
+    "db_apply_performed",
+    "reconciliation_lifecycle_expected_contract_id_mismatch",
+    "reconciliation_event_log_expected_contract_id_mismatch",
+    "reconciliation_shadow_expected_contract_id_mismatch",
+    "reconciliation_expected_contract_id_mismatch",
+    "reconciliation_reconciliation_accepted",
+    "reconciliation_lifecycle_event_accepted",
+    "reconciliation_shadow_fill_model_accepted",
+    "reconciliation_append_only_event_ready",
+    "reconciliation_paper_order_id_present",
+    "reconciliation_broker_order_id_present",
+    "reconciliation_execution_id_present",
+    "reconciliation_commission_report_id_present",
+    "reconciliation_shadow_signal_id_present",
+    "reconciliation_shadow_fill_price_present",
+    "reconciliation_paper_shadow_link_present",
+    "reconciliation_divergence_within_threshold",
+    "reconciliation_reconciliation_run_id_present",
+    "reconciliation_contract_reconciliation_run_id_present",
+    "reconciliation_paper_shadow_link_hash_present",
+    "reconciliation_paper_fill_imported",
+    "reconciliation_shadow_fill_synthetic",
+    "reconciliation_raw_artifact_hash_present",
+    "reconciliation_redacted_summary_hash_present",
+    "reconciliation_reconciliation_writer_started",
+    "reconciliation_ibkr_contact_performed",
+    "reconciliation_connector_runtime_started",
+    "reconciliation_secret_content_serialized",
+    "reconciliation_fill_import_performed",
+    "reconciliation_shadow_fill_generated",
+    "reconciliation_divergence_bps_present",
+    "reconciliation_divergence_threshold_bps_present",
+    "reconciliation_unmatched_paper_fill_count_present",
+    "reconciliation_unmatched_shadow_fill_count_present",
+]
 
 
 def test_stock_etf_reconciliation_status_returns_200_when_ipc_down(
@@ -209,53 +260,10 @@ def test_stock_etf_reconciliation_status_blocks_contract_violation() -> None:
 
     assert data["reconciliation_status_state"] == "contract_violation_blocked"
     assert data["degraded"] is True
-    assert {
-        "ibkr_call_performed",
-        "secret_slot_touched",
-        "order_routed",
-        "bybit_ipc_reused",
-        "asset_lane_mismatch",
-        "broker_mismatch",
-        "environment_mismatch",
-        "phase3_started",
-        "paper_shadow_reconciliation_started",
-        "paper_orders_ready",
-        "paper_fills_ready",
-        "shadow_fills_ready",
-        "scorecard_writer_started",
-        "db_apply_performed",
-        "reconciliation_lifecycle_expected_contract_id_mismatch",
-        "reconciliation_event_log_expected_contract_id_mismatch",
-        "reconciliation_shadow_expected_contract_id_mismatch",
-        "reconciliation_expected_contract_id_mismatch",
-        "reconciliation_reconciliation_accepted",
-        "reconciliation_lifecycle_event_accepted",
-        "reconciliation_shadow_fill_model_accepted",
-        "reconciliation_append_only_event_ready",
-        "reconciliation_broker_order_id_present",
-        "reconciliation_execution_id_present",
-        "reconciliation_commission_report_id_present",
-        "reconciliation_shadow_signal_id_present",
-        "reconciliation_shadow_fill_price_present",
-        "reconciliation_paper_shadow_link_present",
-        "reconciliation_divergence_bps_present",
-        "reconciliation_divergence_threshold_bps_present",
-        "reconciliation_unmatched_paper_fill_count_present",
-        "reconciliation_unmatched_shadow_fill_count_present",
-        "reconciliation_reconciliation_run_id_present",
-        "reconciliation_contract_reconciliation_run_id_present",
-        "reconciliation_paper_shadow_link_hash_present",
-        "reconciliation_paper_fill_imported",
-        "reconciliation_shadow_fill_synthetic",
-        "reconciliation_raw_artifact_hash_present",
-        "reconciliation_redacted_summary_hash_present",
-        "reconciliation_reconciliation_writer_started",
-        "reconciliation_ibkr_contact_performed",
-        "reconciliation_connector_runtime_started",
-        "reconciliation_secret_content_serialized",
-        "reconciliation_fill_import_performed",
-        "reconciliation_shadow_fill_generated",
-    }.issubset(set(data["contract_violations"]))
+    assert (
+        data["contract_violations"]
+        == EXPECTED_RECONCILIATION_CONTRACT_VIOLATIONS
+    )
     assert data["asset_lane"] == "stock_etf_cash"
     assert data["broker"] == "ibkr"
     assert data["environment"] == "paper_shadow"
@@ -283,3 +291,19 @@ def test_stock_etf_reconciliation_status_requires_auth() -> None:
     resp = client.get("/api/v1/stock-etf/reconciliation-status")
 
     assert resp.status_code == 401
+
+
+def test_stock_etf_reconciliation_contract_violation_assertions_stay_exact() -> None:
+    source = Path(__file__).read_text(encoding="utf-8")
+    source_under_test = source.split(
+        "def test_stock_etf_reconciliation_contract_violation_assertions_stay_exact",
+        1,
+    )[0]
+    forbidden_patterns = [
+        'set(data["contract_violations"])',
+        'in data["contract_violations"]',
+        'issubset(set(data["contract_violations"]))',
+    ]
+
+    for pattern in forbidden_patterns:
+        assert pattern not in source_under_test
