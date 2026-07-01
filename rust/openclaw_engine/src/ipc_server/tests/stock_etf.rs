@@ -225,10 +225,14 @@ async fn stock_etf_phase0_status_exposes_accepted_source_manifest_without_runtim
     );
     assert_eq!(result["phase0_accepted"], true);
     assert_eq!(result["phase0_blockers"].as_array().unwrap().len(), 0);
-    assert_eq!(result["contract_count"], 35);
+    assert_eq!(result["contract_count"], 36);
     assert!(json_array_contains(
         &result["contracts"],
         "stock_etf_ibkr_readonly_probe_request_v1"
+    ));
+    assert!(json_array_contains(
+        &result["contracts"],
+        "stock_etf_ibkr_readonly_probe_result_import_request_v1"
     ));
     assert!(json_array_contains(
         &result["contracts"],
@@ -797,8 +801,16 @@ async fn stock_etf_policy_status_is_blocked_source_fixture_without_side_effects(
         registry["readonly_probe_request_contract_id"],
         "stock_etf_ibkr_readonly_probe_request_v1"
     );
+    assert_eq!(
+        registry["readonly_probe_result_import_request_contract_id"],
+        "stock_etf_ibkr_readonly_probe_result_import_request_v1"
+    );
     assert_eq!(registry["read_rows_require_lane_scoped_ipc"], false);
     assert_eq!(registry["read_rows_require_readonly_probe_request"], false);
+    assert_eq!(
+        registry["scorecard_requires_readonly_probe_result_import_request"],
+        false
+    );
     assert_eq!(registry["paper_operation_count"], 0);
     assert_eq!(registry["denied_operation_count"], 0);
     assert_eq!(registry["bybit_live_execution_unchanged"], true);

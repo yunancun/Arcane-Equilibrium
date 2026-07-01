@@ -1249,3 +1249,43 @@ socket/HTTP、secret、connector runtime、read probe execution、collector star
 market-data ingestion、DQ writer、paper order/cancel/replace、fill import、DB apply、
 evidence writer、evidence clock、scorecard writer、tiny-live、live、Linux runtime
 sync/restart 或 Bybit behavior change。
+
+## 2026-07-01 PM Session Checkpoint — Phase0 Result-Import Display Lineage Guard
+
+PM 已將上一個 readonly probe result-import source-only contract 同步到
+control-plane/display surface。這不是 IBKR contact approval、read-only probe
+approval、result import approval、scorecard writer approval 或 launch approval。
+
+已完成：
+
+- FastAPI Phase0 normalizer、route fixture、route tests 同步 36-contract manifest，
+  並檢查 readonly probe request / result-import request presence。
+- Rust IPC Phase0 status test 同步 36-contract assertion 與 result-import contract
+  presence assertion。
+- Rust IPC policy summary、FastAPI policy normalizer、fixture、tests 新增
+  `readonly_probe_result_import_request_contract_id` 與
+  `scorecard_requires_readonly_probe_result_import_request`。
+- GUI Phase0 / Policy panels 顯示 result-import request presence 與 scorecard gate
+  lineage；static route guard 鎖住這些字串。
+
+Verification：
+
+- Python changed files `py_compile` PASS。
+- Stock/ETF JS syntax PASS。
+- Scoped Rust rustfmt PASS。
+- Focused FastAPI Phase0/Policy/Route pytest：`23 passed`。
+- Full Stock/ETF FastAPI/static pytest：`120 passed`。
+- Focused engine Phase0/Policy IPC tests PASS。
+- Engine Stock/ETF IPC regression：`31 passed`。
+
+Dispatch 記錄：本 turn 因工具層 spawn policy 未允許 sub-agent dispatch，PM 本地完成
+narrow source/display propagation / review / regression。此 checkpoint 為 display-only
+control-plane hardening。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 2/3 runtime approval、IBKR contact
+approval、read-only probe approval、result import approval、scorecard writer approval
+或 launch approval。未批准 IBKR SDK import、socket/HTTP、secret、connector runtime、
+read probe execution、collector start、market-data ingestion、DQ writer、paper
+order/cancel/replace、fill import、DB apply、evidence writer、evidence clock、
+scorecard writer、tiny-live、live、Linux runtime sync/restart 或 Bybit behavior
+change。

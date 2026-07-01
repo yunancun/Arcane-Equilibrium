@@ -28,13 +28,14 @@ def _valid_phase0_status() -> dict[str, Any]:
         "phase0_status_state": "accepted_no_runtime_authority",
         "phase0_accepted": True,
         "phase0_blockers": [],
-        "contract_count": 35,
+        "contract_count": 36,
         "contracts": [
             "asset_lane_taxonomy_v1",
             "broker_capability_registry_v1",
             "phase2_ibkr_external_surface_gate_v1",
             "non_bybit_api_allowlist_v1",
             "stock_etf_ibkr_readonly_probe_request_v1",
+            "stock_etf_ibkr_readonly_probe_result_import_request_v1",
             "instrument_identity_contract_v1",
             "stock_etf_pit_universe_contract_v1",
             "stock_etf_strategy_hypothesis_contract_v1",
@@ -330,8 +331,12 @@ def _valid_policy_status() -> dict[str, Any]:
             "readonly_probe_request_contract_id": (
                 "stock_etf_ibkr_readonly_probe_request_v1"
             ),
+            "readonly_probe_result_import_request_contract_id": (
+                "stock_etf_ibkr_readonly_probe_result_import_request_v1"
+            ),
             "read_rows_require_lane_scoped_ipc": False,
             "read_rows_require_readonly_probe_request": False,
+            "scorecard_requires_readonly_probe_result_import_request": False,
             "paper_operation_count": 0,
             "denied_operation_count": 0,
             "bybit_live_execution_unchanged": True,

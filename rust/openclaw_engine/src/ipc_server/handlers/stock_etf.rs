@@ -27,6 +27,7 @@ use openclaw_types::{
     STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID, STOCK_ETF_COLLECTOR_RUN_CONTRACT_ID,
     STOCK_ETF_DISABLE_CLEANUP_RUNBOOK_ID, STOCK_ETF_DQ_MANIFEST_CONTRACT_ID,
     STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID, STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID,
+    STOCK_ETF_IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID,
     STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID, STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID,
     STOCK_ETF_PAPER_FILL_IMPORT_REQUEST_CONTRACT_ID, STOCK_ETF_PAPER_ORDER_REQUEST_CONTRACT_ID,
     STOCK_ETF_PAPER_SHADOW_RECONCILIATION_CONTRACT_ID, STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
@@ -446,6 +447,15 @@ fn policy_status_summary(phase2: serde_json::Value) -> serde_json::Value {
                 .iter()
                 .any(|gate| gate.as_str() == STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID)
         });
+    let scorecard_rows: Vec<_> = registry
+        .operations
+        .iter()
+        .filter(|entry| entry.operation == BrokerOperation::ScorecardDerive)
+        .collect();
+    let scorecard_requires_readonly_probe_result_import_request = scorecard_rows.len() == 1
+        && scorecard_rows[0].required_gates.iter().any(|gate| {
+            gate.as_str() == STOCK_ETF_IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID
+        });
 
     let mut risk = serde_json::Map::new();
     macro_rules! put_risk {
@@ -571,8 +581,10 @@ fn policy_status_summary(phase2: serde_json::Value) -> serde_json::Value {
         "read_operation_count": read_operation_count,
         "lane_scoped_ipc_contract_id": STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID,
         "readonly_probe_request_contract_id": STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID,
+        "readonly_probe_result_import_request_contract_id": STOCK_ETF_IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID,
         "read_rows_require_lane_scoped_ipc": read_rows_require_lane_scoped_ipc,
         "read_rows_require_readonly_probe_request": read_rows_require_readonly_probe_request,
+        "scorecard_requires_readonly_probe_result_import_request": scorecard_requires_readonly_probe_result_import_request,
         "paper_operation_count": paper_operation_count,
         "denied_operation_count": denied_operation_count,
         "bybit_live_execution_unchanged": registry.bybit_live_execution_unchanged,
