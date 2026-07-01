@@ -2630,3 +2630,32 @@ Verification 已過：
 access/creation、沒有 connector runtime、沒有 read probe execution、沒有 result
 import、沒有 DB/evidence/scorecard writer、沒有 paper order/cancel/replace、沒有
 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Risk Policy Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF Risk Policy Source Static Guard`。
+
+這個 guard 鎖住 `stock_etf_risk_policy.rs` 的 dormant Stock/ETF cash risk-policy
+source hygiene：contract/source config/caps/cash-only/universe/cost-model/paper-order
+validators 與完整 blocker surface 必須保留。
+
+Guard 要求 default 保持 fail-closed，accepted fixture 保持 StockEtfCash/IBKR Paper、
+`enabled=false`、`shadow_only=true`、cash-only、stock/ETF/cash allowed、CFD/crypto
+denied、Bybit live unchanged、no IBKR contact、no connector runtime、no secret
+serialization。caps ordering、max open order/position 上限、universe/identity/market
+session、cost model、Rust authority、session attestation、decision lease、guardian、
+idempotency key、broker reconciliation gates 不得消失。source 不得出現
+env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens 或 secret
+material access tokens。
+
+Verification 已過：
+
+- New structure guard pytest：`5 passed`
+- Focused risk policy acceptance：`8 passed`
+- Full `cargo test -p openclaw_types`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
+access/creation、沒有 connector runtime、沒有 read probe execution、沒有 result
+import、沒有 DB/evidence/scorecard writer、沒有 paper order/cancel/replace、沒有
+tiny-live/live authority，也沒有改動 Bybit live execution 行為。
