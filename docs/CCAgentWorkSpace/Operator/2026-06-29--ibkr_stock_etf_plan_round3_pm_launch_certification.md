@@ -3256,3 +3256,31 @@ Verification 已過：
 邊界不變：沒有 IBKR contact、沒有 connector runtime、沒有 market-data collection、沒有
 evidence clock、沒有 scorecard writer、沒有 profitability claim、沒有 paper order、沒有
 tiny-live/live authorization，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Phase3 Evidence Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF Phase3 Evidence Source Static Guard`。
+
+這個 guard 鎖住 `stock_etf_phase3_evidence.rs` 與
+`stock_etf_phase3_evidence/market_data.rs` 的 Phase3 evidence source hygiene：collector run、
+DQ manifest、evidence clock day、market-data provenance、frozen inputs、Phase3 contract ids、
+verdict/blocker surface、source fixtures、validation helpers 必須保留。
+
+Guard 要求 collector run 保留 PIT universe、market-data provenance、reference data sources、
+storage-capacity lineage hashes、gap/DQ/replay/source hashes、5 green sessions、no ingestion/writer/
+DB/secret/live flags。DQ manifest 必須保留 named market-data provenance lineage、shape-vs-quality
+split、10000 bps coverage/completeness、latency/provenance/scorecard-regeneration gates。Evidence
+clock day 必須保留 connector/shadow 5-day gates、frozen inputs、PassDay/QuarantinedDay/
+WindowComplete rules。Market-data provenance/frozen inputs 必須保留 source/timestamp/adjustment/
+identity/calendar/reference/strategy hashes 與 GUI/scorecard readiness。
+
+Verification 已過：
+
+- New structure guard pytest：`10 passed`
+- Focused Phase3 evidence acceptance：`19 passed`
+- Full `cargo test -p openclaw_types`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 connector runtime、沒有 market-data ingest、沒有 collector
+runtime、沒有 DQ/evidence/scorecard writer、沒有 evidence clock runtime、沒有 DB apply、沒有
+paper order、沒有 tiny-live/live authorization，也沒有改動 Bybit live execution 行為。
