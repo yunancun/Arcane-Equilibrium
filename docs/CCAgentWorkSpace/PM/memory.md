@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-01 IBKR Connector Risky Config Blocker Guard
+
+- PM added a source-only regression that forces risky IBKR connector endpoint config values to appear only as blockers across every inert preview payload.
+- Verification passed: connector skeleton focused `9`, Python no-write/static/GUI guard focused `30`, and Stock/ETF Python route/static `121`.
+- Boundary unchanged: no IBKR contact, SDK, secret, connector runtime, paper order, fill import, DB apply, evidence clock, tiny-live/live, or Bybit behavior change.
+
 ## 2026-06-30 IBKR Stock/ETF Reconciliation GUI Contract Display
 
 - PM split Stock/ETF reconciliation rendering into `tab-stock-etf-reconciliation.js`; main `tab-stock-etf.js` is now 1847 lines, below the 2000-line cap.

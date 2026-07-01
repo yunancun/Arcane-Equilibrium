@@ -4333,3 +4333,40 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper
 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
 clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
 Bybit behavior change。
+
+## 98. 2026-07-01 PM session source checkpoint：Connector Risky Config Blocker Guard
+
+本 checkpoint 為 inert IBKR connector skeleton 補上 risky endpoint config regression。
+這不是 connector wiring、不是 FastAPI route wiring、不是 Rust IPC behavior change；
+只鎖住一個 source-only 安全不變量：即使未來有人用 non-loopback host、live TWS
+port、secret/account fingerprint、paper/live channel flags 或 Bybit reuse flag 建立
+client，所有 preview payload 也只能擴充 blockers，不能暗示任何 network/secret/
+paper/live/import/order/DB side effect。
+
+已完成：
+
+- `test_stock_etf_ibkr_connector_skeleton.py` 新增 `RISKY_CONFIG_BLOCKERS`。
+- 新增 `test_ibkr_connector_risky_config_only_expands_blockers`，覆蓋
+  `connection_plan`、readiness、account/market-data/contract-detail preview、
+  session attestation、readonly probe result-import、paper lifecycle、fill import、
+  paper attestation。
+- Regression 要求 risky config blockers 全部出現在 payload blockers 中，
+  blockers 去重，且既有 side-effect false keys 全部仍為 `false`。
+- 沒有改 production code、route、Rust IPC、GUI、connector README 或 Bybit module。
+
+驗證：
+
+- Connector skeleton py_compile：PASS。
+- Connector skeleton focused pytest：`9 passed`。
+- Python no-write/static/GUI guard focused pytest：`30 passed`。
+- Stock/ETF Python route/static suite：`121 passed`。
+- 廣義 `-k stock_etf` collection 嘗試因無關 L2 測試在 Python 3.10 缺少
+  `tomllib` 中止；已改用 `test_stock_etf_*.py` 檔案集合完成本 checkpoint 相關
+  E4 覆蓋。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
+cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
+clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
+Bybit behavior change。

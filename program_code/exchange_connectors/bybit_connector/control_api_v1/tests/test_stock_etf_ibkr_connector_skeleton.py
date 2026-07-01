@@ -206,6 +206,17 @@ SIDE_EFFECT_FALSE_KEYS = {
     "secret_content_serialized",
     "session_attestation_present",
 }
+RISKY_CONFIG_BLOCKERS = {
+    "host_not_loopback",
+    "port_not_reserved_paper_tws",
+    "network_contact_requested",
+    "secret_material_requested",
+    "paper_channel_requested",
+    "live_channel_requested",
+    "bybit_path_reused",
+    "account_fingerprint_present_before_phase2",
+    "secret_fingerprint_present_before_phase2",
+}
 EXPECTED_CONNECTOR_EXPORTS = (
     "IBKR_CONNECTOR_SURFACE_ID",
     "IBKR_PAPER_ATTESTATION_CONTRACT_ID",
@@ -504,3 +515,46 @@ def test_ibkr_connector_preview_payload_shapes_are_fail_closed() -> None:
     assert "paper_session_attestation_missing" in payloads[
         "paper_attestation"
     ][0]["blockers"]
+
+
+def test_ibkr_connector_risky_config_only_expands_blockers() -> None:
+    config = IbkrReadOnlyEndpointConfig(
+        host="0.0.0.0",
+        port=7496,
+        allow_network_contact=True,
+        allow_secret_material=True,
+        allow_paper_channel=True,
+        allow_live_channel=True,
+        bybit_path_reused=True,
+        account_fingerprint_hash="1" * 64,
+        secret_fingerprint_hash="2" * 64,
+    )
+    client = IbkrReadOnlyClient(config)
+    paper = IbkrPaperClientBoundary(config)
+
+    payloads = {
+        "connection_plan": client.connection_plan(),
+        "readiness": client.readiness().to_dict(),
+        "account_snapshot": client.account_snapshot_preview(),
+        "market_data": client.market_data_preview(),
+        "contract_details": client.contract_details_preview(),
+        "session_attestation": client.session_attestation_preview(),
+        "readonly_probe_result_import": (
+            client.readonly_probe_result_import_request_preview()
+        ),
+        "paper_lifecycle": paper.lifecycle_readiness(),
+        "fill_import": paper.fill_import_readiness(),
+        "paper_attestation": paper.paper_attestation_preview(),
+    }
+
+    for name, payload in payloads.items():
+        blockers = set(payload["blockers"])
+        assert RISKY_CONFIG_BLOCKERS.issubset(blockers), name
+        assert "phase2_gate_not_accepted" in blockers
+        assert len(payload["blockers"]) == len(blockers), name
+        if "accepted" in payload:
+            assert payload["accepted"] is False
+        if "attestation_accepted" in payload:
+            assert payload["attestation_accepted"] is False
+        for key in SIDE_EFFECT_FALSE_KEYS.intersection(payload):
+            assert payload[key] is False, f"{name}.{key}"
