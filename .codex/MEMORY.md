@@ -1621,3 +1621,10 @@ Do not paste long reports or stable architecture into TODO.
 - The guard proves StockEtfCash/IBKR separation, Bybit-live protection, Python broker-write denial, IBKR live denial, CFD/margin denial, first-contact denial, secret denial, audit fields, operation missing/duplicate, and paper/live/fill-import row shape gaps fail closed.
 - Python source-static parsing now pins required operations, default fail-closed posture, and accepted StockEtfCash/IBKR/no-contact/no-secret fixture posture.
 - Verification passed: source static `8 passed`; broker capability registry acceptance `14 passed`; `cargo fmt -p openclaw_types -- --check` PASS; docs trace PASS; diff check PASS. This grants no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, paper order routing, DB/evidence writer, scorecard writer, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Phase 2 Runtime Secret/Topology Exact Default Guard
+
+- PM added exact-blocker Rust acceptance coverage for `IbkrSecretSlotContractV1` and `IbkrApiSessionTopologyV1` default fail-closed posture plus live-port dual denial.
+- The guard proves default secret-slot and topology contracts emit complete ordered blocker vectors, and live TWS/Gateway ports are rejected by both `LivePortDenied` and `PaperPortNotUsed`.
+- Python source-static now pins fail-closed verdict construction, secret slot live-secret denial, and topology live-port/paper-port dual-denial source logic.
+- Verification passed: source static `6 passed`; Phase 2 runtime acceptance `9 passed`; `cargo fmt -p openclaw_types -- --check` PASS; docs trace PASS; diff check PASS. This grants no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, paper order routing, DB/evidence writer, scorecard writer, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

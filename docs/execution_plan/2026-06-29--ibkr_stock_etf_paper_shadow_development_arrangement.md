@@ -7981,3 +7981,36 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 paper order routing、
 不做 DB/evidence writer、不啟動 scorecard writer、不做 broker session、不做 broker routing、不做 Linux
 runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 190. 2026-07-01 PM session source checkpoint：IBKR Phase 2 Runtime Secret/Topology Exact Default Guard
+
+本 checkpoint 補強 `ibkr_phase2_runtime` 的 secret-slot contract 與 API session topology default
+fail-closed posture，固定 default secret-slot blocker 向量、default topology blocker 向量，以及 live
+TWS/Gateway port 必須同時被 `LivePortDenied` 與 `PaperPortNotUsed` 拒絕。這不是 Rust production behavior
+change、不是 IPC server start、不是 IBKR contact、不是 connector runtime、不是 secret lookup、不是 paper order
+routing、不是 DB/evidence writer、不是 paper order route enablement、不是 tiny-live/live gate；只把 Phase 2
+runtime evidence 的 secret/topology fail-closed posture 變成 exact-blocker acceptance test 與 source-static
+guard。
+
+已完成：
+
+- 在 `ibkr_phase2_runtime_acceptance.rs` 將 default `IbkrSecretSlotContractV1` 檢查提升為完整順序 blocker
+  向量。
+- 在同檔將 default `IbkrApiSessionTopologyV1` 檢查提升為完整順序 blocker 向量。
+- 在同檔將 live TWS/Gateway port topology case 固定為 `LivePortDenied` + `PaperPortNotUsed` 雙 blocker。
+- 在 `test_ibkr_phase2_runtime_source_static.py` 新增 fail-closed verdict 與 live-port dual-denial source guard，
+  鎖住 secret slot live-secret denial 與 topology live-port/paper-port 雙重拒絕邏輯。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- IBKR Phase 2 runtime source static pytest：`6 passed`。
+- IBKR Phase 2 runtime Rust acceptance：`9 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、
+不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 paper order routing、
+不做 DB/evidence writer、不啟動 scorecard writer、不做 broker session、不做 broker routing、不做 Linux
+runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。

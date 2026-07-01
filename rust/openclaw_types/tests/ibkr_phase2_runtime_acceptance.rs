@@ -18,27 +18,22 @@ fn default_secret_slot_contract_blocks_gate_prerequisites() {
     let verdict = contract.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSecretSlotContractBlocker::ContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSecretSlotContractBlocker::SourceVersionMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSecretSlotContractBlocker::ContractMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSecretSlotContractBlocker::PaperSlotMissingOrUnhashed));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSecretSlotContractBlocker::LiveSlotPresentOrUnknown));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSecretSlotContractBlocker::SecretSlotFingerprintInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrSecretSlotContractBlocker::LiveSecretAbsentOrEmptyNotProven));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            IbkrSecretSlotContractBlocker::ContractIdMismatch,
+            IbkrSecretSlotContractBlocker::SourceVersionMismatch,
+            IbkrSecretSlotContractBlocker::ContractMissing,
+            IbkrSecretSlotContractBlocker::ReadonlySlotPostureInvalid,
+            IbkrSecretSlotContractBlocker::PaperSlotMissingOrUnhashed,
+            IbkrSecretSlotContractBlocker::LiveSlotPresentOrUnknown,
+            IbkrSecretSlotContractBlocker::SecretSlotFingerprintInvalid,
+            IbkrSecretSlotContractBlocker::AccountFingerprintHashInvalid,
+            IbkrSecretSlotContractBlocker::OwnerOnlyPermissionsMissing,
+            IbkrSecretSlotContractBlocker::EnvVarCredentialFallbackNotDenied,
+            IbkrSecretSlotContractBlocker::LiveSecretAbsentOrEmptyNotProven,
+        ]
+    );
 }
 
 #[test]
@@ -189,27 +184,27 @@ fn default_api_session_topology_blocks_before_gateway_contact() {
     let verdict = topology.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrApiSessionTopologyBlocker::ContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrApiSessionTopologyBlocker::SourceVersionMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrApiSessionTopologyBlocker::TopologyMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrApiSessionTopologyBlocker::ApiBaselineMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrApiSessionTopologyBlocker::HostNotLoopback));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrApiSessionTopologyBlocker::PaperPortNotUsed));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrApiSessionTopologyBlocker::GatewayModeNotPaper));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            IbkrApiSessionTopologyBlocker::ContractIdMismatch,
+            IbkrApiSessionTopologyBlocker::SourceVersionMismatch,
+            IbkrApiSessionTopologyBlocker::TopologyMissing,
+            IbkrApiSessionTopologyBlocker::ApiBaselineMismatch,
+            IbkrApiSessionTopologyBlocker::RuntimeOwnerMismatch,
+            IbkrApiSessionTopologyBlocker::HostNotLoopback,
+            IbkrApiSessionTopologyBlocker::PaperPortNotUsed,
+            IbkrApiSessionTopologyBlocker::GatewayModeNotPaper,
+            IbkrApiSessionTopologyBlocker::EnvironmentNotPaper,
+            IbkrApiSessionTopologyBlocker::DeterministicClientIdMissing,
+            IbkrApiSessionTopologyBlocker::ProcessIdentityMissing,
+            IbkrApiSessionTopologyBlocker::AccountFingerprintHashInvalid,
+            IbkrApiSessionTopologyBlocker::ApiServerVersionMissing,
+            IbkrApiSessionTopologyBlocker::DataEntitlementsMissing,
+            IbkrApiSessionTopologyBlocker::StartupTimeMissing,
+            IbkrApiSessionTopologyBlocker::AttestationExpiryMissing,
+        ]
+    );
 }
 
 #[test]
@@ -359,8 +354,10 @@ fn topology_rejects_each_paper_gateway_gap_independently() {
         ..IbkrApiSessionTopologyV1::source_template()
     };
     let verdict = live_port.validate();
-    assert!(verdict.blockers.contains(&Blocker::LivePortDenied));
-    assert!(verdict.blockers.contains(&Blocker::PaperPortNotUsed));
+    assert_eq!(
+        verdict.blockers,
+        vec![Blocker::LivePortDenied, Blocker::PaperPortNotUsed]
+    );
 }
 
 #[test]
