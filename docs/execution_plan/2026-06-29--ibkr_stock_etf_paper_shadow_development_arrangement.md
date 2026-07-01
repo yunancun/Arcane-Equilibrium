@@ -6337,3 +6337,40 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 read-only probe、不做
 result import、不做 DB/evidence writer、不做 paper order route、不做 Linux runtime sync/restart、
 不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 151. 2026-07-01 PM session source checkpoint：Stock/ETF Shadow Signal Request Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_shadow_signal_request` 的 IPC method / BrokerOperation /
+AuthorityScope cross-wire coverage。這不是 Rust production behavior change、不是 IBKR contact、
+不是 connector runtime、不是 secret access、不是 shadow signal execution、不是 shadow fill
+generation、不是 DB/evidence writer、不是 paper order route；只把 shadow-only request envelope 的
+method / operation / scope gate 變成行為型 regression test 與 source-static guard。
+
+已完成：
+
+- 在 `stock_etf_shadow_signal_request_acceptance.rs` 新增
+  `shadow_signal_request_rejects_method_operation_and_paper_write_cross_wire`。
+- Acceptance 證明 shadow signal request 若混入 `ImportPaperFills` IPC method，必須產生
+  `RequestMethodMismatch`，且不誤報 operation / scope / effect blocker。
+- Acceptance 證明 `EvaluateShadowSignal` 若搭配 `PaperOrderSubmit` operation，必須產生
+  `OperationMismatch`，且不誤報 method / scope / effect blocker。
+- Acceptance 證明 request envelope 若混入 paper-submit method、paper-submit operation、
+  `PaperRehearsal` scope 與 `effect_capable=true`，必須同時產生 method / operation / scope /
+  effect blockers。
+- 在 `test_stock_etf_shadow_signal_request_source_static.py` 新增 source-static cross-wire guard，
+  禁止 paper order、fill import、readonly probe、Bybit-denied method 以及 paper/live operation
+  混入 shadow signal source。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Shadow signal request source static pytest：`7 passed`。
+- Shadow signal request Rust acceptance：`6 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 shadow signal、不生成
+shadow fill、不做 result import、不做 DB/evidence writer、不做 paper order route、不做 Linux
+runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
