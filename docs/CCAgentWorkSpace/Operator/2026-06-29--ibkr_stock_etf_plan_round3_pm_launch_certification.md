@@ -3073,3 +3073,24 @@ Verification 已過：
 邊界不變：沒有 service stop、沒有 env mutation、沒有 secret inspection、沒有 DB cleanup、
 沒有 IBKR contact、沒有 paper order、沒有 launch authorization、沒有 tiny-live/live，也沒有
 改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF GUI Lane Contract Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF GUI Lane Contract Source Static Guard`。
+
+這個 guard 鎖住 `stock_etf_gui_lane_contract.rs` 的 display-only GUI lane source hygiene：
+exact `gui_lane_contract_v1` contract id、16 個 Stock/ETF GET-only endpoint constants/path、
+display-only accepted fixture、client lane state untrusted、localStorage/query/hidden-field
+authority denial、no POST/order/secret widget、route/auth/cache partition、regression hashes、
+denied effect operations 必須保留。
+
+Verification 已過：
+
+- New structure guard pytest：`6 passed`
+- Focused GUI lane contract acceptance：`9 passed`
+- Full `cargo test -p openclaw_types`：PASS
+
+邊界不變：沒有 GUI write surface、沒有 lane selection authority、沒有 IBKR contact、沒有
+secret widget、沒有 order widget、沒有 tiny-live/live authorization，也沒有改動 Bybit live
+execution 行為。
