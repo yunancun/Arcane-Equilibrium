@@ -3523,3 +3523,34 @@ Verification 已過：
 邊界不變：沒有 ADR/AMD content change、沒有 IBKR contact、沒有 connector runtime、沒有 SDK
 import、沒有 secret access、沒有 read-only probe execution、沒有 result import、沒有 DB apply、
 沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Stable Boundary Docs Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF Stable Boundary Docs Static Guard`。
+
+這個 guard 鎖住 AMD-2026-06-29-01 要求同步的長期入口文件：`CLAUDE.md`、
+`.codex/MEMORY.md`、`README.md`、`docs/_indexes/document_index.md`、
+`docs/_indexes/initiative_index.md`、`docs/governance_dev/SPECIFICATION_REGISTER.md`。目的不是
+改文案，而是避免新 session / agent 只讀穩定入口時，把 IBKR `stock_etf_cash` paper/shadow
+research lane 誤讀成 active live、runtime-ready 或 paper-order-ready。
+
+Guard 要求 CLAUDE/Codex memory 保留 Bybit-only active live execution boundary 與
+ADR-0048 + AMD-2026-06-29-01 IBKR read-only/paper/shadow exception；README 保留
+IBKR 不是 live/tiny-live 或 durable-alpha promotion lane；document/initiative index 保留
+ADR/AMD/Phase0 packet routing 與 real secret/topology evidence + immutable Phase2 PASS artifact
+仍缺的 blocker；SPEC register 保留 active amendment/ADR rows、Bybit-only live execution wording、
+IBKR read-only/paper/shadow limits 與 live/tiny-live/margin/short/options/CFD/transfer/account-write
+denials。Stable docs 若出現 IBKR live approval、connector runtime approval、paper-order route
+approval 或 first-contact allowance，guard 會 fail。
+
+Verification 已過：
+
+- New structure guard pytest：`3 passed`
+- Focused stable-boundary + ADR/AMD + Phase0 spec artifact subset：`16 passed`
+- Docs PM trace tests：PASS
+- Diff check：PASS
+
+邊界不變：沒有 stable-doc wording change、沒有 IBKR contact、沒有 connector runtime、沒有 SDK
+import、沒有 secret access、沒有 read-only probe execution、沒有 result import、沒有 DB apply、
+沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
