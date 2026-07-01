@@ -3896,3 +3896,10 @@
 - Source-static parsing now pins the exact release packet and kill-disable-cleanup fixture blocks instead of a broad first `accepted_fixture()` split.
 - Verification passed: release packet source static `9 passed`; release packet Rust acceptance `15 passed`; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, IPC/runtime change, IBKR contact, connector runtime, secret access, release execution, DB/evidence writer, scorecard writer, broker session, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Tiny-Live Eligibility Authority Lineage Cross-Wire Guard
+
+- PM added test-only/source-static exact-blocker coverage for `TinyLiveAdrEligibilityV1` source/path, release/scorecard/reconciliation/DQ/preregistration/review lineage, statistical gates, review gates, decision, secret, and seal posture.
+- Source-static parsing now pins the exact ADR discussion fixture/default blocks so the fixture remains future ADR discussion only, not tiny-live/live approval.
+- Verification passed: tiny-live eligibility source static `7 passed`; tiny-live eligibility Rust acceptance `13 passed`; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, IPC/runtime change, IBKR contact, connector runtime, secret access, release execution, DB/evidence writer, scorecard writer, broker session, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

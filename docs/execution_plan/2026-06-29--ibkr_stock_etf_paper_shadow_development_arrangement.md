@@ -7759,3 +7759,49 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 release、不做 DB/evidence
 writer、不啟動 scorecard writer、不做 broker session、不做 broker routing、不做 paper order route、
 不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 185. 2026-07-01 PM session source checkpoint：Stock/ETF Tiny-Live Eligibility Authority Lineage Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_tiny_live_eligibility` 的 contract identity、ADR/AMD/spec path、Phase 5 release
+packet lineage、scorecard lineage、paper-shadow reconciliation lineage、DQ/preregistration/review hashes、
+statistical gates、review gates、ADR-discussion-only decision、secret denial 與 sealed posture coverage。這不是
+Rust production behavior change、不是 IBKR contact、不是 connector runtime、不是 secret lookup、不是
+release execution、不是 DB/evidence writer、不是 scorecard writer、不是 paper order route、不是
+tiny-live/live gate；只把 future ADR discussion eligibility artifact 的 lineage 與 no-live/no-secret posture
+變成 exact-blocker acceptance test 與 source-static guard。
+
+已完成：
+
+- 在 `stock_etf_tiny_live_eligibility_acceptance.rs` 新增
+  `tiny_live_eligibility_rejects_each_identity_and_path_gap_independently`。
+- Acceptance 證明 contract id missing/mismatch、source version、ADR/AMD/spec path gaps 都會各自只產生
+  單一對應 blocker。
+- 在同檔新增 `tiny_live_eligibility_rejects_each_hash_lineage_gap_independently`。
+- Acceptance 證明 Phase 5 release packet、scorecard derivation/verdict/manifest、paper-shadow reconciliation、
+  DQ manifest、statistical preregistration、QC/MIT/QA review hashes 都會各自只產生單一對應 blocker。
+- 在同檔新增 `tiny_live_eligibility_rejects_each_statistical_gate_gap_independently`。
+- Acceptance 證明 paper-shadow window、benchmark after-cost LCB、min/actual independent observations、
+  cost-stress LCB、divergence threshold/exceeded gates 都會各自只產生單一對應 blocker。
+- 在同檔新增 `tiny_live_eligibility_rejects_each_label_and_review_gap_independently`。
+- Acceptance 證明 concentration/regime/freshness labels 與 QC/MIT/QA review pass flags 都會各自只產生單一
+  對應 blocker。
+- 在同檔新增 `tiny_live_eligibility_rejects_each_decision_secret_and_seal_gap_independently`。
+- Acceptance 證明 `NotEligible`、`TinyLiveAuthorized`、`LiveAuthorized`、secret serialization 與 unsealed
+  posture 都會各自只產生單一對應 blocker；`AdrDiscussionOnly` 仍是唯一可通過 decision。
+- 在 `test_stock_etf_tiny_live_eligibility_source_static.py` 新增 impl-block parser，精準鎖住
+  `TinyLiveAdrEligibilityV1::adr_discussion_fixture` 與 `Default`，避免 fixture 硬編 tiny-live/live approval、
+  secret serialization、unsealed posture 或空 lineage。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Tiny-live eligibility source static pytest：`7 passed`。
+- Tiny-live eligibility Rust acceptance：`13 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 release、不做 DB/evidence
+writer、不啟動 scorecard writer、不做 broker session、不做 broker routing、不做 paper order route、
+不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。

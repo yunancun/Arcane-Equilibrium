@@ -131,6 +131,41 @@ def _source() -> str:
     return TINY_LIVE_ELIGIBILITY.read_text(encoding="utf-8")
 
 
+def _block_between(source: str, start_token: str, end_tokens: tuple[str, ...]) -> str:
+    start = source.index(start_token)
+    end = len(source)
+    for token in end_tokens:
+        candidate = source.find(token, start + len(start_token))
+        if candidate != -1:
+            end = min(end, candidate)
+    return source[start:end]
+
+
+def _impl_block(source: str, type_name: str) -> str:
+    return _block_between(
+        source,
+        f"impl {type_name} {{",
+        ("\nimpl ", "\n#[derive", "\nfn "),
+    )
+
+
+def _default_block(source: str, type_name: str) -> str:
+    return _block_between(
+        source,
+        f"impl Default for {type_name} {{",
+        ("\nimpl ", "\n#[derive", "\nfn "),
+    )
+
+
+def _adr_discussion_fixture_block(source: str) -> str:
+    impl = _impl_block(source, "TinyLiveAdrEligibilityV1")
+    return _block_between(
+        impl,
+        "pub fn adr_discussion_fixture() -> Self",
+        ("\n    pub fn validate(&self)",),
+    )
+
+
 def test_stock_etf_tiny_live_eligibility_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
@@ -159,40 +194,59 @@ def test_stock_etf_tiny_live_eligibility_source_keeps_contract_surface() -> None
 
 def test_stock_etf_tiny_live_eligibility_source_keeps_adr_discussion_only_fixture() -> None:
     source = _source()
+    fixture = _adr_discussion_fixture_block(source)
 
-    assert "contract_id: STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID.to_string()" in source
-    assert "source_version: 1" in source
-    assert "paper_shadow_window_complete: true" in source
-    assert "benchmark_relative_after_cost_lcb_bps: 11" in source
-    assert "independent_observation_count: 80" in source
-    assert "min_independent_observation_count: 60" in source
-    assert "conservative_cost_stress_lcb_bps: 4" in source
-    assert "paper_shadow_divergence_bps: 45" in source
-    assert "max_paper_shadow_divergence_bps: 100" in source
-    assert "concentration_label_passed: true" in source
-    assert "regime_label_passed: true" in source
-    assert "freshness_label_passed: true" in source
-    assert "qc_review_passed: true" in source
-    assert "mit_review_passed: true" in source
-    assert "qa_review_passed: true" in source
-    assert "decision: TinyLiveAdrEligibilityDecision::AdrDiscussionOnly" in source
-    assert "secret_content_serialized: false" in source
-    assert "sealed: true" in source
-    assert "..Self::default()" in source
+    assert "contract_id: STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID.to_string()" in fixture
+    assert "source_version: 1" in fixture
+    assert "paper_shadow_window_complete: true" in fixture
+    assert "benchmark_relative_after_cost_lcb_bps: 11" in fixture
+    assert "independent_observation_count: 80" in fixture
+    assert "min_independent_observation_count: 60" in fixture
+    assert "conservative_cost_stress_lcb_bps: 4" in fixture
+    assert "paper_shadow_divergence_bps: 45" in fixture
+    assert "max_paper_shadow_divergence_bps: 100" in fixture
+    assert "concentration_label_passed: true" in fixture
+    assert "regime_label_passed: true" in fixture
+    assert "freshness_label_passed: true" in fixture
+    assert "qc_review_passed: true" in fixture
+    assert "mit_review_passed: true" in fixture
+    assert "qa_review_passed: true" in fixture
+    assert "decision: TinyLiveAdrEligibilityDecision::AdrDiscussionOnly" in fixture
+    assert "secret_content_serialized: false" in fixture
+    assert "sealed: true" in fixture
+    assert "..Self::default()" in fixture
 
 
 def test_stock_etf_tiny_live_eligibility_fixture_excludes_live_authority_and_secret_crosswire() -> None:
     source = _source()
-    fixture = source.split("pub fn adr_discussion_fixture() -> Self", 1)[1].split(
-        "pub fn validate(&self)",
-        1,
-    )[0]
-    default_impl = source.split("impl Default for TinyLiveAdrEligibilityV1", 1)[1].split(
-        "impl TinyLiveAdrEligibilityV1",
-        1,
-    )[0]
+    fixture = _adr_discussion_fixture_block(source)
+    default_impl = _default_block(source, "TinyLiveAdrEligibilityV1")
 
     for forbidden in (
+        "source_version: 0",
+        "phase5_release_packet_hash: String::new()",
+        "scorecard_derivation_hash: String::new()",
+        "scorecard_verdict_hash: String::new()",
+        "scorecard_manifest_hash: String::new()",
+        "paper_shadow_reconciliation_hash: String::new()",
+        "dq_manifest_hash: String::new()",
+        "statistical_preregistration_hash: String::new()",
+        "qc_review_hash: String::new()",
+        "mit_review_hash: String::new()",
+        "qa_review_hash: String::new()",
+        "paper_shadow_window_complete: false",
+        "benchmark_relative_after_cost_lcb_bps: 0",
+        "independent_observation_count: 0",
+        "min_independent_observation_count: 0",
+        "conservative_cost_stress_lcb_bps: 0",
+        "max_paper_shadow_divergence_bps: 0",
+        "concentration_label_passed: false",
+        "regime_label_passed: false",
+        "freshness_label_passed: false",
+        "qc_review_passed: false",
+        "mit_review_passed: false",
+        "qa_review_passed: false",
+        "decision: TinyLiveAdrEligibilityDecision::NotEligible",
         "decision: TinyLiveAdrEligibilityDecision::TinyLiveAuthorized",
         "decision: TinyLiveAdrEligibilityDecision::LiveAuthorized",
         "secret_content_serialized: true",
@@ -201,8 +255,31 @@ def test_stock_etf_tiny_live_eligibility_fixture_excludes_live_authority_and_sec
         assert forbidden not in fixture
 
     for fail_closed in (
+        "contract_id: String::new()",
+        "source_version: 0",
+        "phase5_release_packet_hash: String::new()",
+        "scorecard_derivation_hash: String::new()",
+        "scorecard_verdict_hash: String::new()",
+        "scorecard_manifest_hash: String::new()",
+        "paper_shadow_reconciliation_hash: String::new()",
+        "dq_manifest_hash: String::new()",
+        "statistical_preregistration_hash: String::new()",
+        "qc_review_hash: String::new()",
+        "mit_review_hash: String::new()",
+        "qa_review_hash: String::new()",
         "decision: TinyLiveAdrEligibilityDecision::NotEligible",
         "paper_shadow_window_complete: false",
+        "benchmark_relative_after_cost_lcb_bps: 0",
+        "independent_observation_count: 0",
+        "min_independent_observation_count: 0",
+        "conservative_cost_stress_lcb_bps: 0",
+        "max_paper_shadow_divergence_bps: 0",
+        "concentration_label_passed: false",
+        "regime_label_passed: false",
+        "freshness_label_passed: false",
+        "qc_review_passed: false",
+        "mit_review_passed: false",
+        "qa_review_passed: false",
         "secret_content_serialized: false",
         "sealed: false",
     ):
