@@ -5098,3 +5098,44 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper
 cancel/replace、不匯入 broker fill、不做 scorecard writer、不做 DB apply、不啟動 evidence
 writer/clock、不降低任何 Bybit gate、不新增 GUI fanout、不授權 tiny-live/live 或任何 Bybit
 behavior change。
+
+## 117. 2026-07-01 PM session source checkpoint：Stock/ETF Tiny-Live Eligibility Source Static Guard
+
+本 checkpoint 為 `stock_etf_tiny_live_eligibility.rs` 補上 source-only structure guard。這不是
+tiny-live/live authorization、不是 IBKR contact、不是 connector construction、不是 secret
+access、不是 evidence clock、不是 Bybit gate lowering；只把未來 ADR discussion-only gate 的
+source invariant 機器化。
+
+已完成：
+
+- 新增 `tests/structure/test_stock_etf_tiny_live_eligibility_source_static.py`。
+- Guard 鎖住 `stock_etf_tiny_live_eligibility.rs` 低於 800 行 governance cap。
+- Guard 要求 ADR/AMD/spec release paths、tiny-live ADR eligibility contract id、decision enum、
+  request/verdict/blocker surface 保持在 source 中。
+- Guard 要求 default 仍 fail-closed：NotEligible、paper-shadow window incomplete、LCBs/observation/
+  divergence threshold 為 0、secret serialization false、sealed false。
+- Guard 要求 accepted fixture 仍只允許 AdrDiscussionOnly，並保留 phase5 release packet、
+  scorecard derivation/verdict/manifest、paper-shadow reconciliation、DQ manifest、statistical
+  preregistration、QC/MIT/QA review hashes，paper-shadow window complete、positive LCBs、
+  independent observation gate、divergence gate、labels/reviews passed、sealed=true。
+- Guard 要求 contract/path/hash/stat/review gates 不得消失。
+- Guard 要求 decision matrix 保持：AdrDiscussionOnly 可通過，TinyLiveAuthorized 必須回
+  TinyLiveAuthorizationRequested，LiveAuthorized 必須回 LiveAuthorizationRequested，NotEligible
+  必須回 DecisionNotAdrDiscussionOnly。
+- Guard 要求 secret serialization denial 與 sealed requirement 不得消失。
+- Guard 禁止 env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens
+  與 secret material access tokens。
+
+驗證：
+
+- New structure guard py_compile：PASS。
+- Focused structure guard pytest：`6 passed`。
+- Focused tiny-live eligibility acceptance：`7 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
+cancel/replace、不匯入 broker fill、不做 scorecard writer、不做 DB apply、不啟動 evidence
+writer/clock、不降低任何 Bybit gate、不新增 GUI fanout、不授權 tiny-live/live 或任何 Bybit
+behavior change。

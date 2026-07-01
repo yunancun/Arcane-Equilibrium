@@ -155,6 +155,7 @@ def test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles() -> None
         "Stock/ETF Scorecard Inputs Source Static Guard",
         "Stock/ETF Scorecard Derivation Source Static Guard",
         "Stock/ETF Scorecard Verdict Source Static Guard",
+        "Stock/ETF Tiny-Live Eligibility Source Static Guard",
     )
     plan_source = IBKR_STOCK_ETF_PLAN.read_text()
     operator_source = IBKR_STOCK_ETF_OPERATOR.read_text()
