@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -15,6 +16,85 @@ from stock_etf_route_fixtures import (
     route_module,
     stock_etf_router,
 )
+
+
+EXPECTED_SCORECARD_CONTRACT_VIOLATIONS = [
+    "ibkr_call_performed",
+    "secret_slot_touched",
+    "order_routed",
+    "bybit_ipc_reused",
+    "live_or_tiny_live_authorized",
+    "phase3_started",
+    "scorecard_writer_started",
+    "db_apply_performed",
+    "evidence_clock_started",
+    "paper_shadow_window_complete",
+    "asset_lane_mismatch",
+    "broker_mismatch",
+    "environment_mismatch",
+    "scorecard_input_bundle_accepted_before_writer",
+    "scorecard_input_bundle_readonly_probe_result_import_request_contract_id_mismatch",
+    "scorecard_input_bundle_readonly_probe_result_import_request_hash_present",
+    "scorecard_input_bundle_market_data_provenance_contract_hash_present",
+    "scorecard_input_bundle_reference_data_sources_contract_hash_present",
+    "scorecard_input_bundle_risk_policy_contract_hash_present",
+    "scorecard_input_bundle_atomic_fact_input_hash_present",
+    "scorecard_input_bundle_source_commit_present",
+    "scorecard_input_bundle_scorecard_is_derived_only",
+    "scorecard_input_bundle_paper_and_shadow_fills_separate",
+    "scorecard_input_bundle_live_fill_claimed",
+    "scorecard_input_bundle_bybit_live_execution_unchanged",
+    "scorecard_input_bundle_ibkr_contact_performed",
+    "scorecard_input_bundle_connector_runtime_started",
+    "scorecard_input_bundle_broker_fill_import_performed",
+    "scorecard_input_bundle_scorecard_writer_started",
+    "scorecard_input_bundle_db_apply_performed",
+    "scorecard_input_bundle_evidence_clock_started",
+    "scorecard_input_bundle_secret_content_serialized",
+    "scorecard_input_bundle_live_or_tiny_live_authorized",
+    "derivation_expected_contract_id_mismatch",
+    "derivation_accepted_before_writer",
+    "derivation_derivation_run_id_present",
+    "derivation_scorecard_input_bundle_hash_present",
+    "derivation_paper_shadow_reconciliation_hash_present",
+    "derivation_scorecard_verdict_hash_present",
+    "derivation_output_artifact_hash_present",
+    "derivation_derived_from_atomic_facts_only",
+    "derivation_idempotent_replay_proven",
+    "derivation_paper_and_shadow_fills_separate",
+    "derivation_bybit_live_execution_unchanged",
+    "derivation_sealed",
+    "derivation_ibkr_contact_performed",
+    "derivation_shadow_fill_generated",
+    "derivation_reconciliation_writer_started",
+    "derivation_scorecard_writer_started",
+    "derivation_db_apply_performed",
+    "derivation_live_or_tiny_live_authorized",
+    "scorecard_expected_contract_id_mismatch",
+    "scorecard_accepted_before_writer",
+    "scorecard_scorecard_input_bundle_hash_present",
+    "scorecard_formula_appendix_hash_present",
+    "scorecard_statistical_preregistration_hash_present",
+    "scorecard_paper_shadow_reconciliation_hash_present",
+    "scorecard_scorecard_manifest_hash_present",
+    "scorecard_verdict_rationale_hash_present",
+    "scorecard_concentration_label_passed",
+    "scorecard_regime_label_passed",
+    "scorecard_breadth_label_passed",
+    "scorecard_freshness_label_passed",
+    "scorecard_survivorship_label_passed",
+    "scorecard_execution_realism_label_passed",
+    "scorecard_qc_review_hash_present",
+    "scorecard_qc_review_passed",
+    "scorecard_scorecard_is_derived_only",
+    "scorecard_paper_and_shadow_fills_separate",
+    "scorecard_bybit_live_execution_unchanged",
+    "scorecard_sealed",
+    "scorecard_paper_shadow_window_trading_days_present",
+    "scorecard_independent_observation_count_present",
+    "scorecard_benchmark_excess_lcb_bps_present",
+    "scorecard_psr_bps_present",
+]
 
 
 def test_stock_etf_scorecard_status_returns_200_when_ipc_down(
@@ -278,73 +358,7 @@ def test_stock_etf_scorecard_status_blocks_contract_violation() -> None:
 
     assert data["scorecard_status_state"] == "contract_violation_blocked"
     assert data["degraded"] is True
-    assert {
-        "ibkr_call_performed",
-        "secret_slot_touched",
-        "order_routed",
-        "bybit_ipc_reused",
-        "live_or_tiny_live_authorized",
-        "asset_lane_mismatch",
-        "broker_mismatch",
-        "environment_mismatch",
-        "phase3_started",
-        "scorecard_writer_started",
-        "db_apply_performed",
-        "evidence_clock_started",
-        "paper_shadow_window_complete",
-        "scorecard_input_bundle_accepted_before_writer",
-        "scorecard_input_bundle_readonly_probe_result_import_request_contract_id_mismatch",
-        "scorecard_input_bundle_readonly_probe_result_import_request_hash_present",
-        "scorecard_input_bundle_market_data_provenance_contract_hash_present",
-        "scorecard_input_bundle_reference_data_sources_contract_hash_present",
-        "scorecard_input_bundle_risk_policy_contract_hash_present",
-        "scorecard_input_bundle_atomic_fact_input_hash_present",
-        "scorecard_input_bundle_source_commit_present",
-        "scorecard_input_bundle_scorecard_is_derived_only",
-        "scorecard_input_bundle_paper_and_shadow_fills_separate",
-        "scorecard_input_bundle_live_fill_claimed",
-        "scorecard_input_bundle_bybit_live_execution_unchanged",
-        "scorecard_input_bundle_ibkr_contact_performed",
-        "scorecard_input_bundle_connector_runtime_started",
-        "scorecard_input_bundle_broker_fill_import_performed",
-        "scorecard_input_bundle_scorecard_writer_started",
-        "scorecard_input_bundle_db_apply_performed",
-        "scorecard_input_bundle_evidence_clock_started",
-        "scorecard_input_bundle_secret_content_serialized",
-        "scorecard_input_bundle_live_or_tiny_live_authorized",
-        "derivation_expected_contract_id_mismatch",
-        "derivation_accepted_before_writer",
-        "derivation_derivation_run_id_present",
-        "derivation_paper_shadow_reconciliation_hash_present",
-        "derivation_scorecard_verdict_hash_present",
-        "derivation_output_artifact_hash_present",
-        "derivation_derived_from_atomic_facts_only",
-        "derivation_idempotent_replay_proven",
-        "derivation_reconciliation_writer_started",
-        "derivation_scorecard_writer_started",
-        "derivation_db_apply_performed",
-        "derivation_live_or_tiny_live_authorized",
-        "scorecard_expected_contract_id_mismatch",
-        "scorecard_accepted_before_writer",
-        "scorecard_scorecard_input_bundle_hash_present",
-        "scorecard_formula_appendix_hash_present",
-        "scorecard_statistical_preregistration_hash_present",
-        "scorecard_paper_shadow_reconciliation_hash_present",
-        "scorecard_scorecard_manifest_hash_present",
-        "scorecard_verdict_rationale_hash_present",
-        "scorecard_concentration_label_passed",
-        "scorecard_execution_realism_label_passed",
-        "scorecard_qc_review_hash_present",
-        "scorecard_qc_review_passed",
-        "scorecard_scorecard_is_derived_only",
-        "scorecard_paper_and_shadow_fills_separate",
-        "scorecard_bybit_live_execution_unchanged",
-        "scorecard_sealed",
-        "scorecard_paper_shadow_window_trading_days_present",
-        "scorecard_independent_observation_count_present",
-        "scorecard_benchmark_excess_lcb_bps_present",
-        "scorecard_psr_bps_present",
-    }.issubset(set(data["contract_violations"]))
+    assert data["contract_violations"] == EXPECTED_SCORECARD_CONTRACT_VIOLATIONS
     assert data["asset_lane"] == "stock_etf_cash"
     assert data["broker"] == "ibkr"
     assert data["environment"] == "paper_shadow"
@@ -368,3 +382,18 @@ def test_stock_etf_scorecard_status_requires_auth() -> None:
     resp = client.get("/api/v1/stock-etf/scorecard-status")
 
     assert resp.status_code == 401
+
+
+def test_stock_etf_scorecard_contract_violation_assertions_stay_exact() -> None:
+    source = Path(__file__).read_text(encoding="utf-8")
+    source_under_test = source.split(
+        "def test_stock_etf_scorecard_contract_violation_assertions_stay_exact",
+        1,
+    )[0]
+    forbidden_patterns = [
+        'set(data["contract_violations"])',
+        'in data["contract_violations"]',
+        'issubset(set(data["contract_violations"]))',
+    ]
+    for pattern in forbidden_patterns:
+        assert pattern not in source_under_test
