@@ -150,6 +150,7 @@ def test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles() -> None
         "Stock/ETF Paper Order Request Source Static Guard",
         "IBKR Paper Lifecycle Source Static Guard",
         "Stock/ETF Paper Fill Import Request Source Static Guard",
+        "Stock/ETF Paper Shadow Reconciliation Source Static Guard",
     )
     plan_source = IBKR_STOCK_ETF_PLAN.read_text()
     operator_source = IBKR_STOCK_ETF_OPERATOR.read_text()

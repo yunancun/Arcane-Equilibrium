@@ -1314,3 +1314,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only structure guard for `stock_etf_paper_fill_import_request.rs`, pinning the paper fill import request envelope after paper lifecycle events.
 - The guard requires fail-closed defaults, accepted ReadOnly/effect=false shape, lifecycle/event-log/redaction/session/source hashes, reconciliation/broker/execution/commission/idempotency identifiers, stale StateUnknown policy handling, duplicate-import denial, no-side-effect boundary flags, and no runtime/secret/order/Bybit client tokens.
 - Verification passed: new guard `6 passed`; paper fill import request acceptance `6 passed`; full `cargo test -p openclaw_types` PASS. This grants no IBKR contact, connector construction, fill import execution, DB apply, paper order route, secret access, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Paper Shadow Reconciliation Source Static Guard
+
+- PM added a source-only structure guard for `stock_etf_paper_shadow_reconciliation.rs`, pinning the paper fill to synthetic shadow fill reconciliation envelope.
+- The guard requires fail-closed defaults, accepted ReadOnly/effect=false paper_shadow shape, lineage hashes, append-only event readiness, imported paper-fill and synthetic shadow-fill separation, divergence threshold checks, unmatched-fill denial, no writer/DB/order/runtime flags, and no runtime/secret/order/Bybit client tokens.
+- Verification passed: new guard `7 passed`; paper shadow reconciliation acceptance `5 passed`; full `cargo test -p openclaw_types` PASS. This grants no IBKR contact, connector construction, fill import, shadow-fill generation, reconciliation/scorecard writer, DB apply, paper order route, tiny-live/live, or Bybit behavior change.

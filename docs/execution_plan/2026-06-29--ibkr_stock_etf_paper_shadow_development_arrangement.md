@@ -4876,3 +4876,50 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper
 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
 clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
 Bybit behavior change。
+
+## 112. 2026-07-01 PM session source checkpoint：Stock/ETF Paper Shadow Reconciliation Source Static Guard
+
+本 checkpoint 為 `stock_etf_paper_shadow_reconciliation.rs` 補上 source-only structure
+guard。這不是 IBKR contact、不是 connector construction、不是 fill import execution、
+不是 shadow fill generation、不是 reconciliation writer、不是 scorecard writer、不是
+DB apply、不是 paper order route；只把 paper fill 與 synthetic shadow fill reconciliation
+envelope 的 source invariant 機器化。
+
+已完成：
+
+- 新增 `tests/structure/test_stock_etf_paper_shadow_reconciliation_source_static.py`。
+- Guard 鎖住 `stock_etf_paper_shadow_reconciliation.rs` 低於 800 行 governance cap。
+- Guard 要求 reconciliation contract id/scope、request/verdict/blocker surface、
+  required-field validator、reconciliation-evidence validator、boundary-flag validator 保持在
+  source 中。
+- Guard 要求 default 仍 fail-closed：CryptoPerp/Bybit、Denied authority、effect=false、
+  append-only event 未 ready、paper fill 未 imported、shadow fill 未 synthetic、divergence
+  threshold 為 0。
+- Guard 要求 accepted fixture 仍是 StockEtfCash/IBKR、`paper_shadow`、ReadOnly、
+  effect=false，並保留 append-only event ready、paper fill imported、synthetic shadow fill、
+  divergence <= threshold、unmatched paper/shadow fill count 為 0。
+- Guard 要求 reconciliation/broker/execution/commission/shadow-signal ids 與 lifecycle、
+  event-log、paper-fill-import、shadow-signal、shadow-fill-model、cost-model、
+  market-data-provenance、divergence-threshold、paper-shadow-link、raw/redacted/source
+  artifact hashes checks 不得消失。
+- Guard 要求 append-only event、paper fill imported、shadow fill synthetic、divergence
+  threshold、divergence exceed、unmatched paper/shadow fill gates 不得消失。
+- Guard 要求 IBKR contact、connector runtime、secret serialization、fill import、shadow
+  fill generation、reconciliation writer、scorecard writer、DB apply、order route、Bybit reuse、
+  live/tiny-live、margin/short/options/CFD、Python direct broker write boundary flags 不得消失。
+- Guard 禁止 env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens
+  與 secret material access tokens。
+
+驗證：
+
+- New structure guard py_compile：PASS。
+- Focused structure guard pytest：`7 passed`。
+- Focused paper shadow reconciliation acceptance：`5 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
+cancel/replace、不匯入 fill、不生成 shadow fill、不做 reconciliation/scorecard writer、不做
+DB apply、不啟動 evidence writer、不啟動 evidence clock、不新增 GUI fanout、不授權
+tiny-live/live 或任何 Bybit behavior change。
