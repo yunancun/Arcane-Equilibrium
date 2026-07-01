@@ -234,6 +234,107 @@ fn release_packet_rejects_secret_serialization_and_live_authority() {
 }
 
 #[test]
+fn release_packet_rejects_secret_authority_window_and_seal_cross_wire_independently() {
+    let secret = StockEtfReleasePacketV1 {
+        secret_content_serialized: true,
+        ..StockEtfReleasePacketV1::accepted_fixture()
+    };
+    let secret_blockers = secret.validate().blockers;
+    assert!(has(
+        &secret_blockers,
+        StockEtfReleasePacketBlocker::SecretContentSerialized
+    ));
+    assert!(lacks(
+        &secret_blockers,
+        StockEtfReleasePacketBlocker::LiveOrTinyLiveAuthorityPresent
+    ));
+    assert!(lacks(
+        &secret_blockers,
+        StockEtfReleasePacketBlocker::ReleasePacketNotSealed
+    ));
+
+    let live_authority = StockEtfReleasePacketV1 {
+        ibkr_live_or_tiny_live_authorized: true,
+        ..StockEtfReleasePacketV1::accepted_fixture()
+    };
+    let live_authority_blockers = live_authority.validate().blockers;
+    assert!(has(
+        &live_authority_blockers,
+        StockEtfReleasePacketBlocker::LiveOrTinyLiveAuthorityPresent
+    ));
+    assert!(lacks(
+        &live_authority_blockers,
+        StockEtfReleasePacketBlocker::SecretContentSerialized
+    ));
+    assert!(lacks(
+        &live_authority_blockers,
+        StockEtfReleasePacketBlocker::ReleasePacketNotSealed
+    ));
+
+    let unsealed = StockEtfReleasePacketV1 {
+        sealed: false,
+        ..StockEtfReleasePacketV1::accepted_fixture()
+    };
+    let unsealed_blockers = unsealed.validate().blockers;
+    assert!(has(
+        &unsealed_blockers,
+        StockEtfReleasePacketBlocker::ReleasePacketNotSealed
+    ));
+    assert!(lacks(
+        &unsealed_blockers,
+        StockEtfReleasePacketBlocker::SecretContentSerialized
+    ));
+    assert!(lacks(
+        &unsealed_blockers,
+        StockEtfReleasePacketBlocker::LiveOrTinyLiveAuthorityPresent
+    ));
+
+    let incomplete_window = StockEtfReleasePacketV1 {
+        paper_shadow_window_complete: false,
+        ..StockEtfReleasePacketV1::accepted_fixture()
+    };
+    let incomplete_window_blockers = incomplete_window.validate().blockers;
+    assert!(has(
+        &incomplete_window_blockers,
+        StockEtfReleasePacketBlocker::PaperShadowWindowIncomplete
+    ));
+    assert!(lacks(
+        &incomplete_window_blockers,
+        StockEtfReleasePacketBlocker::SecretContentSerialized
+    ));
+    assert!(lacks(
+        &incomplete_window_blockers,
+        StockEtfReleasePacketBlocker::LiveOrTinyLiveAuthorityPresent
+    ));
+    assert!(lacks(
+        &incomplete_window_blockers,
+        StockEtfReleasePacketBlocker::ReleasePacketNotSealed
+    ));
+
+    let incomplete_shakedown = StockEtfReleasePacketV1 {
+        engineering_shakedown_complete: false,
+        ..StockEtfReleasePacketV1::accepted_fixture()
+    };
+    let incomplete_shakedown_blockers = incomplete_shakedown.validate().blockers;
+    assert!(has(
+        &incomplete_shakedown_blockers,
+        StockEtfReleasePacketBlocker::EngineeringShakedownIncomplete
+    ));
+    assert!(lacks(
+        &incomplete_shakedown_blockers,
+        StockEtfReleasePacketBlocker::SecretContentSerialized
+    ));
+    assert!(lacks(
+        &incomplete_shakedown_blockers,
+        StockEtfReleasePacketBlocker::LiveOrTinyLiveAuthorityPresent
+    ));
+    assert!(lacks(
+        &incomplete_shakedown_blockers,
+        StockEtfReleasePacketBlocker::ReleasePacketNotSealed
+    ));
+}
+
+#[test]
 fn blocked_release_packet_template_is_parseable_and_secret_free() {
     let srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -272,4 +373,8 @@ fn blocked_release_packet_template_is_parseable_and_secret_free() {
 
 fn has(blockers: &[StockEtfReleasePacketBlocker], blocker: StockEtfReleasePacketBlocker) -> bool {
     blockers.contains(&blocker)
+}
+
+fn lacks(blockers: &[StockEtfReleasePacketBlocker], blocker: StockEtfReleasePacketBlocker) -> bool {
+    !blockers.contains(&blocker)
 }

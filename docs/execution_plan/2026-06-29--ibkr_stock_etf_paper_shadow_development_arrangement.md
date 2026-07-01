@@ -6619,3 +6619,44 @@ writer、不是 paper order route；只把未來 ADR 討論資格 artifact 的 n
 PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不授權 tiny-live/live、不做
 DB/evidence writer、不做 paper order route、不做 Linux runtime sync/restart、不改任何 Bybit behavior。
+
+## 158. 2026-07-01 PM session source checkpoint：Stock/ETF Release Packet Authority Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_release_packet` 的 secret serialization / tiny-live/live authority /
+release seal / paper-shadow window / engineering shakedown cross-wire coverage。這不是 Rust production
+behavior change、不是 release execution、不是 IBKR contact、不是 connector runtime、不是 secret
+access、不是 DB/evidence writer、不是 paper order route、不是 tiny-live/live authorization；只把
+release packet artifact 的 no-secret、no-live-authority、sealed posture 變成行為型 regression test 與
+source-static guard。
+
+已完成：
+
+- 在 `stock_etf_release_packet_acceptance.rs` 新增
+  `release_packet_rejects_secret_authority_window_and_seal_cross_wire_independently`。
+- Acceptance 證明 `secret_content_serialized=true` 只產生 `SecretContentSerialized`，不誤報
+  live/tiny-live authority 或 seal blocker。
+- Acceptance 證明 `ibkr_live_or_tiny_live_authorized=true` 只產生
+  `LiveOrTinyLiveAuthorityPresent`，不誤報 secret 或 seal blocker。
+- Acceptance 證明 `sealed=false` 只產生 `ReleasePacketNotSealed`，不誤報 secret 或 live/tiny-live
+  authority blocker。
+- Acceptance 證明 `paper_shadow_window_complete=false` 只產生 `PaperShadowWindowIncomplete`，不誤報
+  secret、live/tiny-live authority 或 seal blocker。
+- Acceptance 證明 `engineering_shakedown_complete=false` 只產生
+  `EngineeringShakedownIncomplete`，不誤報 secret、live/tiny-live authority 或 seal blocker。
+- 在 `test_stock_etf_release_packet_source_static.py` 新增 fixture cross-wire guard，禁止 incomplete
+  paper-shadow window、incomplete engineering shakedown、secret serialization、live/tiny-live authority、
+  unsealed posture 被 hardcoded 到 accepted fixture，並鎖住 default fail-closed posture。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Release packet source static pytest：`8 passed`。
+- Release packet Rust acceptance：`9 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 release、不做 DB/evidence
+writer、不做 paper order route、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何 Bybit
+behavior change。

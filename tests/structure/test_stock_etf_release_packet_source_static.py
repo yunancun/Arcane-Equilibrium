@@ -207,6 +207,36 @@ def test_stock_etf_release_packet_source_keeps_accepted_release_fixture_without_
     assert "sealed: true" in source
 
 
+def test_stock_etf_release_packet_fixture_excludes_live_secret_and_unsealed_crosswire() -> None:
+    source = _source()
+    fixture = source.split("pub fn accepted_fixture() -> Self", 1)[1].split(
+        "pub fn validate(&self)",
+        1,
+    )[0]
+    default_impl = source.split("impl Default for StockEtfReleasePacketV1", 1)[1].split(
+        "impl StockEtfReleasePacketV1",
+        1,
+    )[0]
+
+    for forbidden in (
+        "paper_shadow_window_complete: false",
+        "engineering_shakedown_complete: false",
+        "secret_content_serialized: true",
+        "ibkr_live_or_tiny_live_authorized: true",
+        "sealed: false",
+    ):
+        assert forbidden not in fixture
+
+    for fail_closed in (
+        "paper_shadow_window_complete: false",
+        "engineering_shakedown_complete: false",
+        "secret_content_serialized: false",
+        "ibkr_live_or_tiny_live_authorized: false",
+        "sealed: false",
+    ):
+        assert fail_closed in default_impl
+
+
 def test_stock_etf_release_packet_source_keeps_role_and_evidence_validation() -> None:
     source = _source()
 
