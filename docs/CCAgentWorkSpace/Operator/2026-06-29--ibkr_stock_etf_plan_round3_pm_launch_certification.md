@@ -804,7 +804,7 @@ evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live ex
 
 本 session 已完成主計畫治理清理：
 
-- 主開發安排內的 PM session checkpoints 已重排為 14 到 81 連續遞增，消除重複與倒序。
+- 主開發安排內的 PM session checkpoints 已重排為 14 到 82 連續遞增，消除重複與倒序。
 - 23-41 區塊按 PM memory / Operator 實際 source timeline 排列；section-body 對比確認
   沒有丟失 checkpoint 正文。
 - 新增 structure test，防止 IBKR 主計畫 checkpoint 編號再次重複或倒序。
@@ -1379,6 +1379,42 @@ contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation
 connector runtime、沒有 read probe execution、沒有 paper order/cancel/replace、沒有 fill
 import、沒有 evidence writer、沒有 DB apply、沒有 evidence clock、沒有 tiny-live/live
 authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — DQ Manifest Contract
+
+本 session 已新增 `stock_etf_dq_manifest_v1`，把未來 Phase 3 daily DQ manifest
+必須提供的 identity、collector/provenance/source lineage 與 side-effect denial 固定為
+source-only contract。
+
+重點：
+
+- Phase0 named contracts 從 34 更新為 35，新增 `stock_etf_dq_manifest_v1`。
+- Existing Evidence Status panel 現在顯示 default-blocked `dq_manifest` contract
+  identity、lineage hash presence 與 side-effect flags。
+- FastAPI normalizer 會把 DQ manifest 的 IBKR contact、connector runtime、
+  market-data ingestion、DQ writer、evidence-clock start、scorecard writer、DB apply、
+  secret serialization、tiny-live/live truthy claims 擋成 `contract_violation_blocked`。
+- 沒有新增 endpoint、IPC method、GUI fanout、background work、runtime writer 或 connector。
+
+Verification 已過：
+
+- Python changed files `py_compile`：PASS
+- Stock/ETF JS `node --check`：PASS
+- Scoped Rust `rustfmt --check`：PASS；`lib.rs` 使用 `skip_children=true` 避開既有
+  unrelated `risk.rs` formatting drift
+- Phase3 evidence acceptance：`19 passed`
+- Phase0 manifest acceptance：`6 passed`
+- Focused Phase0/Evidence/Route pytest：`22 passed`
+- Full Stock/ETF FastAPI/static：`120 passed`
+- Full `openclaw_types`：PASS
+- Engine Stock/ETF focused：`31 passed`
+- IBKR timeline + trace-title structure guard：`2 passed`
+- `git diff --check`：PASS
+
+邊界不變：沒有 IBKR contact、SDK import、socket/HTTP、secret access、connector
+runtime、read probe execution、collector start、market-data ingestion、DQ writer、paper
+order/cancel/replace、fill import、DB/evidence/scorecard writer、evidence clock、
+tiny-live/live、Linux runtime sync/restart 或 Bybit behavior change。
 
 ## 2026-07-01 Operator Update — Collector Run Contract
 

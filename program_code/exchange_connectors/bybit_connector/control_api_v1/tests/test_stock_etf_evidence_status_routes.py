@@ -49,6 +49,11 @@ def test_stock_etf_evidence_status_returns_200_when_ipc_down(
     assert data["market_data_provenance"]["blockers"] == ["ipc_unavailable"]
     assert data["collector_run"]["expected_contract_id"] == "stock_etf_collector_run_v1"
     assert data["collector_run"]["blockers"] == ["ipc_unavailable"]
+    assert data["dq_manifest"]["expected_contract_id"] == "stock_etf_dq_manifest_v1"
+    assert data["dq_manifest"]["shape_blockers"] == ["ipc_unavailable"]
+    assert data["dq_manifest"]["market_data_ingestion_started"] is False
+    assert data["dq_manifest"]["dq_writer_started"] is False
+    assert data["dq_manifest"]["evidence_clock_started"] is False
     assert data["evidence_clock"]["status"] == "NOT_STARTED"
     assert data["evidence_clock"]["blockers"] == ["ipc_unavailable"]
     assert data["scorecard"]["writer_started"] is False
@@ -90,6 +95,24 @@ def test_stock_etf_evidence_status_uses_only_readonly_fixture_method() -> None:
     assert data["evidence_clock"]["status"] == "NOT_STARTED"
     assert data["frozen_inputs"]["gui_evidence_view_available"] is False
     assert data["dq_manifest"]["passes_day_quality"] is False
+    assert data["dq_manifest"]["expected_contract_id"] == "stock_etf_dq_manifest_v1"
+    assert data["dq_manifest"]["contract_id"] == ""
+    assert data["dq_manifest"]["source_version"] == 0
+    assert data["dq_manifest"]["collector_run_id"] == ""
+    assert (
+        data["dq_manifest"]["market_data_provenance_contract_hash_present"] is False
+    )
+    assert data["dq_manifest"]["source_artifact_hash_present"] is False
+    assert data["dq_manifest"]["bybit_live_execution_unchanged"] is False
+    assert data["dq_manifest"]["ibkr_contact_performed"] is False
+    assert data["dq_manifest"]["connector_runtime_started"] is False
+    assert data["dq_manifest"]["market_data_ingestion_started"] is False
+    assert data["dq_manifest"]["dq_writer_started"] is False
+    assert data["dq_manifest"]["evidence_clock_started"] is False
+    assert data["dq_manifest"]["scorecard_writer_started"] is False
+    assert data["dq_manifest"]["db_apply_performed"] is False
+    assert data["dq_manifest"]["secret_content_serialized"] is False
+    assert data["dq_manifest"]["live_or_tiny_live_authorized"] is False
     assert data["scorecard"]["writer_started"] is False
     assert data["scorecard"]["db_apply_performed"] is False
     assert data["allowed_gui_actions"] == ["refresh_evidence_status"]
@@ -156,6 +179,15 @@ def test_stock_etf_evidence_status_blocks_contract_violation() -> None:
     payload["collector_run"]["db_apply_performed"] = True
     payload["collector_run"]["secret_content_serialized"] = True
     payload["collector_run"]["live_or_tiny_live_authorized"] = True
+    payload["dq_manifest"]["ibkr_contact_performed"] = True
+    payload["dq_manifest"]["connector_runtime_started"] = True
+    payload["dq_manifest"]["market_data_ingestion_started"] = True
+    payload["dq_manifest"]["dq_writer_started"] = True
+    payload["dq_manifest"]["evidence_clock_started"] = True
+    payload["dq_manifest"]["scorecard_writer_started"] = True
+    payload["dq_manifest"]["db_apply_performed"] = True
+    payload["dq_manifest"]["secret_content_serialized"] = True
+    payload["dq_manifest"]["live_or_tiny_live_authorized"] = True
     payload["evidence_clock"]["checker_contacted_ibkr"] = True
     payload["evidence_clock"]["checker_started_connector_runtime"] = True
     payload["evidence_clock"]["checker_started_evidence_clock"] = True
@@ -197,6 +229,15 @@ def test_stock_etf_evidence_status_blocks_contract_violation() -> None:
         "collector_run_db_apply_performed",
         "collector_run_secret_content_serialized",
         "collector_run_live_or_tiny_live_authorized",
+        "dq_manifest_ibkr_contact_performed",
+        "dq_manifest_connector_runtime_started",
+        "dq_manifest_market_data_ingestion_started",
+        "dq_manifest_writer_started",
+        "dq_manifest_evidence_clock_started",
+        "dq_manifest_scorecard_writer_started",
+        "dq_manifest_db_apply_performed",
+        "dq_manifest_secret_content_serialized",
+        "dq_manifest_live_or_tiny_live_authorized",
         "evidence_clock_contacted_ibkr",
         "evidence_clock_started_connector_runtime",
         "evidence_clock_started",

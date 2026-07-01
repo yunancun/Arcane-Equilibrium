@@ -44,11 +44,12 @@ def test_phase0_status_uses_only_phase0_ipc_method_with_empty_params() -> None:
     data = resp.json()["data"]
     assert data["phase0_status_state"] == "accepted_no_runtime_authority"
     assert data["phase0_accepted"] is True
-    assert data["contract_count"] == 34
+    assert data["contract_count"] == 35
     assert "stock_etf_ibkr_readonly_probe_request_v1" in data["contracts"]
     assert "stock_etf_shadow_signal_request_v1" in data["contracts"]
     assert "stock_etf_paper_shadow_reconciliation_v1" in data["contracts"]
     assert "stock_etf_collector_run_v1" in data["contracts"]
+    assert "stock_etf_dq_manifest_v1" in data["contracts"]
     assert data["manifest"]["schema"] == "stock_etf_phase0_contract_packet_manifest_v1"
     assert data["api_baseline"]["live_ports_denied"] is True
     assert data["global_denials"]["ibkr_live"] is True

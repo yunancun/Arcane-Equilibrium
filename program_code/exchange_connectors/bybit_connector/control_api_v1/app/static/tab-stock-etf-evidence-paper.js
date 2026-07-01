@@ -91,6 +91,14 @@
       kvRow('frozen_inputs.accepted', boolChip(frozen.accepted, false)),
       kvRow('frozen_inputs.gui_evidence_view_available', boolChip(frozen.gui_evidence_view_available, false)),
       kvRow('dq.shape_accepted', boolChip(dq.shape_accepted, false)),
+      kvRow('dq.contract_id', textChip(dq.contract_id || '-')),
+      kvRow('dq.market_data_provenance_hash_present', boolChip(dq.market_data_provenance_contract_hash_present, false)),
+      kvRow('dq.source_artifact_hash_present', boolChip(dq.source_artifact_hash_present, false)),
+      kvRow('dq.ibkr_contact_performed', boolChip(dq.ibkr_contact_performed, true)),
+      kvRow('dq.connector_runtime_started', boolChip(dq.connector_runtime_started, true)),
+      kvRow('dq.market_data_ingestion_started', boolChip(dq.market_data_ingestion_started, true)),
+      kvRow('dq.dq_writer_started', boolChip(dq.dq_writer_started, true)),
+      kvRow('dq.evidence_clock_started', boolChip(dq.evidence_clock_started, true)),
       kvRow(
         'dq.coverage_bps',
         '<span class="se-code">' +

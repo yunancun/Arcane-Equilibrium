@@ -225,7 +225,7 @@ async fn stock_etf_phase0_status_exposes_accepted_source_manifest_without_runtim
     );
     assert_eq!(result["phase0_accepted"], true);
     assert_eq!(result["phase0_blockers"].as_array().unwrap().len(), 0);
-    assert_eq!(result["contract_count"], 34);
+    assert_eq!(result["contract_count"], 35);
     assert!(json_array_contains(
         &result["contracts"],
         "stock_etf_ibkr_readonly_probe_request_v1"
@@ -245,6 +245,10 @@ async fn stock_etf_phase0_status_exposes_accepted_source_manifest_without_runtim
     assert!(json_array_contains(
         &result["contracts"],
         "stock_etf_collector_run_v1"
+    ));
+    assert!(json_array_contains(
+        &result["contracts"],
+        "stock_etf_dq_manifest_v1"
     ));
     assert_eq!(
         result["manifest"]["schema"],
@@ -459,8 +463,34 @@ async fn stock_etf_evidence_status_is_blocked_source_fixture_without_side_effect
     assert_eq!(frozen_inputs["daily_scorecard_regeneration_passed"], false);
 
     let dq_manifest = &result["dq_manifest"];
+    assert_eq!(
+        dq_manifest["expected_contract_id"],
+        "stock_etf_dq_manifest_v1"
+    );
+    assert_eq!(dq_manifest["contract_id"], "");
+    assert_eq!(dq_manifest["source_version"], 0);
     assert_eq!(dq_manifest["shape_accepted"], false);
+    assert!(json_array_contains(
+        &dq_manifest["shape_blockers"],
+        "dq_manifest_contract_id_mismatch"
+    ));
     assert_eq!(dq_manifest["passes_day_quality"], false);
+    assert_eq!(dq_manifest["collector_run_id"], "");
+    assert_eq!(
+        dq_manifest["market_data_provenance_contract_hash_present"],
+        false
+    );
+    assert_eq!(dq_manifest["source_artifact_hash_present"], false);
+    assert_eq!(dq_manifest["bybit_live_execution_unchanged"], false);
+    assert_eq!(dq_manifest["ibkr_contact_performed"], false);
+    assert_eq!(dq_manifest["connector_runtime_started"], false);
+    assert_eq!(dq_manifest["market_data_ingestion_started"], false);
+    assert_eq!(dq_manifest["dq_writer_started"], false);
+    assert_eq!(dq_manifest["evidence_clock_started"], false);
+    assert_eq!(dq_manifest["scorecard_writer_started"], false);
+    assert_eq!(dq_manifest["db_apply_performed"], false);
+    assert_eq!(dq_manifest["secret_content_serialized"], false);
+    assert_eq!(dq_manifest["live_or_tiny_live_authorized"], false);
     assert_eq!(dq_manifest["calendar_aware_coverage_bps"], 0);
     assert_eq!(dq_manifest["symbol_completeness_bps"], 0);
     assert_eq!(dq_manifest["latency_dq_passed"], false);

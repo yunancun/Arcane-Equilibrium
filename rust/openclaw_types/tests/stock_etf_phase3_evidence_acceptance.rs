@@ -9,8 +9,8 @@ use openclaw_types::{
     AssetLane, Broker, BrokerEnvironment, StockEtfCollectorRunV1, StockEtfDailyDqManifestV1,
     StockEtfEvidenceClockDayV1, StockEtfEvidenceClockStatus, StockEtfFrozenEvidenceInputsV1,
     StockEtfPhase3Blocker, StockMarketDataProvenanceV1, STOCK_ETF_COLLECTOR_MIN_GREEN_TRADING_DAYS,
-    STOCK_ETF_COLLECTOR_RUN_CONTRACT_ID, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
-    STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
+    STOCK_ETF_COLLECTOR_RUN_CONTRACT_ID, STOCK_ETF_DQ_MANIFEST_CONTRACT_ID,
+    STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
 };
 
 #[test]
@@ -402,6 +402,99 @@ fn dq_manifest_shape_is_separate_from_pass_day_quality() {
 }
 
 #[test]
+fn default_dq_manifest_blocks_named_contract_and_lineage() {
+    let verdict = StockEtfDailyDqManifestV1::default().validates_shape();
+
+    assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::DqManifestContractIdMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::DqManifestVersionMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::DqManifestWrongAssetLane));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::DqManifestWrongBroker));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::DqManifestEnvironmentDenied));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::DqManifestCollectorRunIdMissing));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::DqManifestMarketDataProvenanceContractMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::DqManifestMarketDataProvenanceHashInvalid));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::DqManifestSourceArtifactHashInvalid));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::BybitLiveExecutionNotProtected));
+}
+
+#[test]
+fn source_dq_manifest_has_named_contract_lineage_and_no_side_effects() {
+    let manifest = StockEtfDailyDqManifestV1::pass_fixture();
+    let verdict = manifest.validates_shape();
+
+    assert!(verdict.accepted);
+    assert!(verdict.blockers.is_empty());
+    assert_eq!(manifest.contract_id, STOCK_ETF_DQ_MANIFEST_CONTRACT_ID);
+    assert_eq!(manifest.source_version, 1);
+    assert_eq!(manifest.asset_lane, AssetLane::StockEtfCash);
+    assert_eq!(manifest.broker, Broker::Ibkr);
+    assert_eq!(manifest.environment, BrokerEnvironment::Paper);
+    assert_eq!(
+        manifest.market_data_provenance_contract_id,
+        STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID
+    );
+    assert!(manifest.bybit_live_execution_unchanged);
+    assert!(!manifest.ibkr_contact_performed);
+    assert!(!manifest.connector_runtime_started);
+    assert!(!manifest.market_data_ingestion_started);
+    assert!(!manifest.dq_writer_started);
+    assert!(!manifest.evidence_clock_started);
+    assert!(!manifest.scorecard_writer_started);
+    assert!(!manifest.db_apply_performed);
+    assert!(!manifest.secret_content_serialized);
+    assert!(!manifest.live_or_tiny_live_authorized);
+}
+
+#[test]
+fn dq_manifest_rejects_runtime_side_effect_claims() {
+    let mut manifest = StockEtfDailyDqManifestV1::pass_fixture();
+    manifest.bybit_live_execution_unchanged = false;
+    manifest.ibkr_contact_performed = true;
+    manifest.connector_runtime_started = true;
+    manifest.market_data_ingestion_started = true;
+    manifest.dq_writer_started = true;
+    manifest.evidence_clock_started = true;
+    manifest.scorecard_writer_started = true;
+    manifest.db_apply_performed = true;
+    manifest.secret_content_serialized = true;
+    manifest.live_or_tiny_live_authorized = true;
+
+    let blockers = manifest.validates_shape().blockers;
+
+    assert!(blockers.contains(&StockEtfPhase3Blocker::BybitLiveExecutionNotProtected));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::IbkrContactPerformed));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::ConnectorRuntimeStarted));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::DqManifestMarketDataIngestionStarted));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::DqManifestWriterStarted));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::DqManifestEvidenceClockStarted));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::ScorecardWriterStarted));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::DbApplyPerformed));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::SecretContentSerialized));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::LiveOrTinyLiveAuthorized));
+}
+
+#[test]
 fn phase3_evidence_template_is_default_blocked_and_secret_free() {
     let srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -545,6 +638,27 @@ fn phase3_evidence_template_is_default_blocked_and_secret_free() {
     assert_eq!(
         parsed["frozen_inputs"]["reference_data_sources_contract_hash"].as_str(),
         Some("")
+    );
+    assert_eq!(parsed["dq_manifest"]["contract_id"].as_str(), Some(""));
+    assert_eq!(
+        parsed["dq_manifest"]["source_version"].as_integer(),
+        Some(0)
+    );
+    assert_eq!(
+        STOCK_ETF_DQ_MANIFEST_CONTRACT_ID,
+        "stock_etf_dq_manifest_v1"
+    );
+    assert_eq!(
+        parsed["dq_manifest"]["market_data_ingestion_started"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        parsed["dq_manifest"]["dq_writer_started"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        parsed["dq_manifest"]["evidence_clock_started"].as_bool(),
+        Some(false)
     );
     assert_eq!(
         parsed["dq_manifest"]["calendar_aware_coverage_bps"].as_integer(),

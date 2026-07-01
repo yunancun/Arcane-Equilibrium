@@ -180,7 +180,8 @@ pub use stock_etf_phase3_evidence::{
     StockEtfEvidenceClockDayV1, StockEtfEvidenceClockStatus, StockEtfFrozenEvidenceInputsV1,
     StockEtfPhase3Blocker, StockEtfPhase3Verdict, StockMarketDataProvenanceV1,
     STOCK_ETF_COLLECTOR_MIN_GREEN_TRADING_DAYS, STOCK_ETF_COLLECTOR_RUN_CONTRACT_ID,
-    STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
+    STOCK_ETF_DQ_MANIFEST_CONTRACT_ID, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
+    STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
 };
 pub use stock_etf_pit_universe::{
     StockEtfPitUniverseBlocker, StockEtfPitUniverseConstituentV1, StockEtfPitUniverseV1,

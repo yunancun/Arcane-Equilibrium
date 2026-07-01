@@ -1006,3 +1006,46 @@ IBKR contact、IBKR SDK import、socket/HTTP、secret、connector runtime、read
 execution、collector start、market-data ingestion、paper order/cancel/replace、fill
 import、scorecard writer、DB apply、evidence clock、tiny-live、live、Linux runtime
 sync/restart 或 Bybit behavior change。
+
+## 2026-07-01 PM Session Checkpoint — DQ Manifest Contract
+
+PM 已在本 session 追加 Phase 3 source-only checkpoint：
+`stock_etf_dq_manifest_v1`。這是 daily DQ manifest contract，不是 DQ writer、
+market-data ingestion approval 或 evidence-clock approval。
+
+已完成：
+
+- `openclaw_types` 新增 `STOCK_ETF_DQ_MANIFEST_CONTRACT_ID`，並擴展
+  `StockEtfDailyDqManifestV1` validator。
+- Phase0 manifest / repository manifest / Phase0 FastAPI fixtures 從 34 named
+  contracts 更新為 35，Phase0 packet spec 新增 `stock_etf_dq_manifest_v1`。
+- Phase3 evidence template `[dq_manifest]` 補齊 default-blocked named contract、
+  collector/provenance/source lineage 與 side-effect denial fields。
+- Existing evidence-status IPC/FastAPI/GUI surfaces 顯示 default-blocked
+  `dq_manifest`，並將 DQ side-effect truthy claims 擋成 contract violations。
+
+Verification：
+
+- Python changed files `py_compile` PASS。
+- Stock/ETF JS `node --check` PASS。
+- Scoped Rust `rustfmt --check` PASS；`lib.rs` 用 `skip_children=true` 避開既有
+  unrelated `risk.rs` formatting drift。
+- Phase3 evidence acceptance：`19 passed`。
+- Phase0 manifest acceptance：`6 passed`。
+- Focused Phase0/Evidence/Route pytest：`22 passed`。
+- Full Stock/ETF FastAPI/static：`120 passed`。
+- Full `openclaw_types`：PASS。
+- Engine Stock/ETF focused：`31 passed`。
+- IBKR timeline + trace-title structure guard：`2 passed`。
+- `git diff --check`：PASS。
+
+Dispatch 記錄：正常 feature/source-contract chain 應為
+`PM -> PA -> E1/E1a -> E2 -> E4 -> QA -> PM`；本 desktop session 沒有可用 sub-agent
+spawn tool，因此 PM 本地完成實作、審查與回歸，並以 focused/full tests 作為補償驗證。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 3 runtime approval、DQ writer approval、
+market-data ingestion approval、evidence-clock approval 或 launch approval。未批准
+IBKR contact、IBKR SDK import、socket/HTTP、secret、connector runtime、read probe
+execution、collector start、market-data ingestion、DQ writer、paper order/cancel/replace、
+fill import、scorecard writer、DB apply、evidence clock、tiny-live、live、Linux runtime
+sync/restart 或 Bybit behavior change。
