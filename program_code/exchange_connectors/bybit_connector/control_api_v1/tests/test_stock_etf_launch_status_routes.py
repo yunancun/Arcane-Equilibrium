@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -15,6 +16,85 @@ from stock_etf_route_fixtures import (
     route_module,
     stock_etf_router,
 )
+
+
+EXPECTED_LAUNCH_CONTRACT_VIOLATIONS = [
+    "ibkr_call_performed",
+    "secret_slot_touched",
+    "order_routed",
+    "bybit_ipc_reused",
+    "phase3_started",
+    "phase5_started",
+    "connector_runtime_started",
+    "scorecard_writer_started",
+    "db_apply_performed",
+    "evidence_clock_started",
+    "paper_shadow_launch_authorized",
+    "tiny_live_or_live_authorized",
+    "asset_lane_mismatch",
+    "broker_mismatch",
+    "environment_mismatch",
+    "release_expected_contract_id_mismatch",
+    "runbook_expected_id_mismatch",
+    "tiny_live_expected_contract_id_mismatch",
+    "release_packet_accepted_before_launch_audit",
+    "disable_cleanup_runbook_accepted_before_launch_audit",
+    "tiny_live_eligibility_accepted_before_launch_audit",
+    "release_paper_shadow_window_complete",
+    "release_engineering_shakedown_complete",
+    "release_pg_migrations_declared",
+    "release_pg_dry_run_log_hash_present",
+    "release_pg_double_apply_log_hash_present",
+    "release_redaction_fixture_hash_present",
+    "release_evidence_archive_pointer_present",
+    "release_evidence_archive_hash_present",
+    "release_secret_content_serialized",
+    "release_ibkr_live_or_tiny_live_authorized",
+    "release_sealed",
+    "runbook_bybit_live_execution_unchanged",
+    "runbook_ibkr_contact_performed",
+    "runbook_connector_runtime_started",
+    "runbook_paper_order_routed",
+    "runbook_secret_slot_created",
+    "runbook_secret_content_serialized",
+    "runbook_destructive_db_cleanup_requested",
+    "runbook_db_delete_or_truncate_allowed",
+    "runbook_paper_shadow_launch_authorized",
+    "runbook_tiny_live_authorized",
+    "runbook_live_authorized",
+    "tiny_live_paper_shadow_window_complete",
+    "tiny_live_scorecard_derivation_hash_present",
+    "tiny_live_scorecard_verdict_hash_present",
+    "tiny_live_scorecard_manifest_hash_present",
+    "tiny_live_paper_shadow_reconciliation_hash_present",
+    "tiny_live_dq_manifest_hash_present",
+    "tiny_live_statistical_preregistration_hash_present",
+    "tiny_live_qc_review_hash_present",
+    "tiny_live_mit_review_hash_present",
+    "tiny_live_qa_review_hash_present",
+    "tiny_live_concentration_label_passed",
+    "tiny_live_regime_label_passed",
+    "tiny_live_freshness_label_passed",
+    "tiny_live_qc_review_passed",
+    "tiny_live_mit_review_passed",
+    "tiny_live_qa_review_passed",
+    "tiny_live_secret_content_serialized",
+    "tiny_live_sealed",
+    "release_role_report_count_present",
+    "release_manifest_hash_count_present",
+    "release_gui_screenshot_hash_count_present",
+    "release_dq_manifest_hash_count_present",
+    "release_scorecard_regeneration_hash_count_present",
+    "runbook_env_flag_count_present",
+    "runbook_proof_count_present",
+    "tiny_live_benchmark_relative_after_cost_lcb_bps_present",
+    "tiny_live_independent_observation_count_present",
+    "tiny_live_min_independent_observation_count_present",
+    "tiny_live_conservative_cost_stress_lcb_bps_present",
+    "tiny_live_paper_shadow_divergence_bps_present",
+    "tiny_live_max_paper_shadow_divergence_bps_present",
+    "tiny_live_decision_not_blocked",
+]
 
 
 def test_stock_etf_launch_status_returns_200_when_ipc_down(
@@ -264,49 +344,7 @@ def test_stock_etf_launch_status_blocks_contract_violation() -> None:
 
     assert data["launch_status_state"] == "contract_violation_blocked"
     assert data["degraded"] is True
-    assert {
-        "ibkr_call_performed",
-        "secret_slot_touched",
-        "order_routed",
-        "bybit_ipc_reused",
-        "asset_lane_mismatch",
-        "broker_mismatch",
-        "environment_mismatch",
-        "phase3_started",
-        "phase5_started",
-        "connector_runtime_started",
-        "scorecard_writer_started",
-        "db_apply_performed",
-        "evidence_clock_started",
-        "paper_shadow_launch_authorized",
-        "tiny_live_or_live_authorized",
-        "release_expected_contract_id_mismatch",
-        "release_packet_accepted_before_launch_audit",
-        "release_paper_shadow_window_complete",
-        "release_engineering_shakedown_complete",
-        "release_secret_content_serialized",
-        "release_ibkr_live_or_tiny_live_authorized",
-        "release_sealed",
-        "release_role_report_count_present",
-        "runbook_expected_id_mismatch",
-        "disable_cleanup_runbook_accepted_before_launch_audit",
-        "runbook_bybit_live_execution_unchanged",
-        "runbook_ibkr_contact_performed",
-        "runbook_connector_runtime_started",
-        "runbook_paper_shadow_launch_authorized",
-        "runbook_env_flag_count_present",
-        "tiny_live_expected_contract_id_mismatch",
-        "tiny_live_eligibility_accepted_before_launch_audit",
-        "tiny_live_scorecard_derivation_hash_present",
-        "tiny_live_scorecard_verdict_hash_present",
-        "tiny_live_paper_shadow_reconciliation_hash_present",
-        "tiny_live_qa_review_hash_present",
-        "tiny_live_paper_shadow_window_complete",
-        "tiny_live_concentration_label_passed",
-        "tiny_live_qa_review_passed",
-        "tiny_live_decision_not_blocked",
-        "tiny_live_independent_observation_count_present",
-    }.issubset(set(data["contract_violations"]))
+    assert data["contract_violations"] == EXPECTED_LAUNCH_CONTRACT_VIOLATIONS
     assert data["asset_lane"] == "stock_etf_cash"
     assert data["broker"] == "ibkr"
     assert data["environment"] == "paper_shadow"
@@ -333,3 +371,18 @@ def test_stock_etf_launch_status_requires_auth() -> None:
     resp = client.get("/api/v1/stock-etf/launch-status")
 
     assert resp.status_code == 401
+
+
+def test_stock_etf_launch_contract_violation_assertions_stay_exact() -> None:
+    source = Path(__file__).read_text(encoding="utf-8")
+    source_under_test = source.split(
+        "def test_stock_etf_launch_contract_violation_assertions_stay_exact",
+        1,
+    )[0]
+    forbidden_patterns = [
+        'set(data["contract_violations"])',
+        'in data["contract_violations"]',
+        'issubset(set(data["contract_violations"]))',
+    ]
+    for pattern in forbidden_patterns:
+        assert pattern not in source_under_test
