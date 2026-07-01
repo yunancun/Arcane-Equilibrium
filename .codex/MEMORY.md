@@ -1607,3 +1607,10 @@ Do not paste long reports or stable architecture into TODO.
 - The guard proves top-level cross-wire gaps, missing/duplicated/denied command gaps, and submit-paper command operation/authority/effect/rust/gate/field/denial gaps fail closed.
 - Python source-static parsing now pins `REQUIRED_METHODS`, default, and accepted fixture blocks so denied methods stay out of required method coverage and the accepted fixture remains StockEtfCash/IBKR/no-runtime/no-secret.
 - Verification passed: source static `6 passed`; lane-scoped IPC acceptance `12 passed`; `cargo fmt -p openclaw_types -- --check` PASS; docs trace PASS; diff check PASS. This grants no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, paper order routing, DB/evidence writer, scorecard writer, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Lane Taxonomy Authority Decision Cross-Wire Guard
+
+- PM added exact-denial Rust acceptance coverage for `stock_etf_lane` broker capability decisions across lane/broker/environment/operation/instrument gaps, feature flag gaps, read/shadow/paper gate gaps, and all-green authority scopes.
+- The guard proves live order, margin/short, options/CFD, transfer/account-write, disabled flags, read authorization, shadow cost/universe, and paper market/credential/connector/auth/decision/guardian gaps fail closed with the intended single denial reason.
+- Python source-static parsing now pins `StockEtfFeatureFlags` and `StockEtfGateInputs` default fail-closed posture plus `evaluate_broker_operation` denial ordering.
+- Verification passed: source static `8 passed`; lane acceptance `14 passed`; `cargo fmt -p openclaw_types -- --check` PASS; docs trace PASS; diff check PASS. This grants no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, paper order routing, DB/evidence writer, scorecard writer, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

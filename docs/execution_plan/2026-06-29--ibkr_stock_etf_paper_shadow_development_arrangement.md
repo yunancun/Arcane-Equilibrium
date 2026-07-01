@@ -7899,3 +7899,45 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 paper order routing、
 不做 DB/evidence writer、不啟動 scorecard writer、不做 broker session、不做 broker routing、不做 Linux
 runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 188. 2026-07-01 PM session source checkpoint：Stock/ETF Lane Taxonomy Authority Decision Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_lane` 的 broker capability decision coverage，固定 StockEtfCash/IBKR/Paper/
+Shadow/ReadOnly taxonomy、feature flag fail-closed posture、gate input fail-closed posture、live/margin/options/
+account-write denial、flag denial、read/shadow/paper gate denial 與 allowed authority scope。這不是 Rust
+production behavior change、不是 IPC server start、不是 IBKR contact、不是 connector runtime、不是 secret
+lookup、不是 paper order routing、不是 DB/evidence writer、不是 paper order route enablement、不是
+tiny-live/live gate；只把 lane taxonomy 的 authority/denial ordering 與 no-live/no-Bybit-crosswire posture
+變成 exact-denial acceptance test 與 source-static guard。
+
+已完成：
+
+- 在 `stock_etf_lane_acceptance.rs` 新增
+  `broker_capability_rejects_each_lane_broker_and_operation_gap_independently`。
+- Acceptance 證明 wrong asset lane、wrong broker、live-reserved environment、live order、margin/short、
+  options/CFD、transfer/account-write、wrong instrument kind 都會各自只產生單一對應 denial reason。
+- 在同檔新增 `broker_capability_rejects_each_flag_gap_independently`。
+- Acceptance 證明 lane disabled、readonly disabled、paper disabled、shadow-only flags 都會各自只產生單一對應
+  denial reason。
+- 在同檔新增 `broker_capability_rejects_each_gate_gap_independently`。
+- Acceptance 證明 read authorization、shadow cost/universe、paper market/credential/connector/auth/decision
+  lease/guardian gates 都會各自只產生單一對應 denial reason。
+- 在同檔新增 `broker_capability_allows_only_read_shadow_or_paper_when_all_gates_pass`。
+- Acceptance 證明 all-green read、shadow、paper requests 只得到對應 ReadOnly/ShadowOnly/PaperRehearsal
+  authority scope；live/tiny-live、margin/options/CFD 與 account-write 仍不可通過。
+- 在 `test_stock_etf_lane_source_static.py` 新增 default block parser，鎖住 `StockEtfFeatureFlags` 與
+  `StockEtfGateInputs` default fail-closed posture，並鎖住 `evaluate_broker_operation` denial ordering。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Stock/ETF lane source static pytest：`8 passed`。
+- Stock/ETF lane Rust acceptance：`14 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、
+不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 paper order routing、
+不做 DB/evidence writer、不啟動 scorecard writer、不做 broker session、不做 broker routing、不做 Linux
+runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
