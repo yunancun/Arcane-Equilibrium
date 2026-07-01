@@ -211,9 +211,7 @@ impl PricingConfig {
             ));
         }
         if self.cold_default_acceptable_modes.is_empty() {
-            return Err(
-                "risk.pricing.cold_default_acceptable_modes must not be empty".into(),
-            );
+            return Err("risk.pricing.cold_default_acceptable_modes must not be empty".into());
         }
         // LG-3 RFC §2.3 fail-closed：live 不可進入白名單，否則 mainnet 退化。
         if self
@@ -267,7 +265,11 @@ mod tests {
         assert_eq!(cfg.max_age_fail_minutes, 1440);
         assert_eq!(
             cfg.cold_default_acceptable_modes,
-            vec!["paper".to_string(), "demo".to_string(), "live_demo".to_string()],
+            vec![
+                "paper".to_string(),
+                "demo".to_string(),
+                "live_demo".to_string()
+            ],
         );
         assert!(cfg.validate().is_ok());
     }
@@ -346,7 +348,11 @@ max_age_warn_minutes = 15
         assert_eq!(cfg.max_age_fail_minutes, 1440); // default
         assert_eq!(
             cfg.cold_default_acceptable_modes,
-            vec!["paper".to_string(), "demo".to_string(), "live_demo".to_string()],
+            vec![
+                "paper".to_string(),
+                "demo".to_string(),
+                "live_demo".to_string()
+            ],
         );
         assert!(cfg.validate().is_ok());
     }

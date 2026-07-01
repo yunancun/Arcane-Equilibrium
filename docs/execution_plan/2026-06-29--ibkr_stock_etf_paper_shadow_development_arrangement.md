@@ -6140,3 +6140,31 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不新增 endpoin
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 read-only probe、不做
 result import、不做 DB/evidence writer、不做 paper order/cancel/replace route、不做 Linux runtime
 sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 145. 2026-07-01 PM session source checkpoint：Stock/ETF Openclaw Types Format Gate Hygiene
+
+本 checkpoint 清掉先前阻擋 `openclaw_types` package-level format gate 的既有 drift。這不是
+IBKR behavior change、不是 Bybit behavior change、不是 runtime/deploy action；只把
+`rust/openclaw_types/src/risk.rs` 做機械 rustfmt，讓後續 Stock/ETF Rust checkpoint 可以重新使用
+`cargo fmt -p openclaw_types -- --check` 作為 package-level gate，而不必只依賴 file-scoped
+rustfmt。
+
+已完成：
+
+- 執行 `rustfmt rust/openclaw_types/src/risk.rs`。
+- diff 只包含一個 `return Err(...)` expression formatting 與兩個 test vector literal formatting。
+- 解除 #144 當時記錄的 `rust/openclaw_types/src/risk.rs` pre-existing formatting drift。
+
+驗證：
+
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- `cargo test -p openclaw_types risk --lib`：`13 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- Dynamic docs trace pytest：`2 passed, 5 deselected`；parsed checkpoint titles `132`，
+  missing `[]`。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 trading logic、不改 risk semantics、不新增 endpoint/IPC method、
+不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 read-only
+probe、不做 result import、不做 DB/evidence writer、不做 paper order route、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
