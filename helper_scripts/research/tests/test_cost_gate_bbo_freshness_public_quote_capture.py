@@ -619,6 +619,52 @@ def test_stale_and_future_ticker_time_fail_closed() -> None:
     assert "ticker_time_future_or_clock_ambiguous" in future["blocking_gates"]
 
 
+def test_small_negative_ticker_age_within_timestamp_tolerance_is_fresh() -> None:
+    packet, _ = _capture(payloads=_payloads(ticker_time_ms=START_MS + 24))
+
+    assert packet["status"] == mod.READY_STATUS
+    assert packet["derived"]["freshness"]["raw_bbo_age_ms"] == -4
+    assert packet["derived"]["effective_bbo_age_ms"] == 16.0
+    assert packet["derived"]["bbo_fresh"] is True
+    assert "ticker_time_future_or_clock_ambiguous" not in packet["blocking_gates"]
+
+
+def test_future_ticker_time_beyond_tolerance_fails_closed() -> None:
+    packet, _ = _capture(payloads=_payloads(ticker_time_ms=START_MS + 36))
+
+    assert packet["status"] == mod.SOURCE_FAILURE_STATUS
+    assert packet["derived"]["freshness"]["raw_bbo_age_ms"] == -16
+    assert packet["derived"]["effective_bbo_age_ms"] == 4.0
+    assert "ticker_time_future_or_clock_ambiguous" in packet["blocking_gates"]
+
+
+def test_small_negative_ticker_age_with_negative_effective_age_fails_closed() -> None:
+    def iso(ms: int) -> str:
+        return dt.datetime.fromtimestamp(
+            ms / 1000.0,
+            tz=dt.timezone.utc,
+        ).isoformat()
+
+    freshness, reasons = mod._freshness(
+        time_record={
+            "payload": {"time": START_MS + 10},
+            "request_end_utc": iso(START_MS + 10),
+            "duration_ms": 1.0,
+        },
+        ticker_record={
+            "request_end_utc": iso(START_MS + 20),
+            "duration_ms": 1.0,
+        },
+        ticker_time_ms=START_MS + 24,
+        max_fresh_bbo_age_ms=1000,
+    )
+
+    assert freshness["raw_bbo_age_ms"] == -4
+    assert freshness["effective_bbo_age_ms"] == -2.0
+    assert freshness["bbo_fresh"] is False
+    assert "ticker_time_future_or_clock_ambiguous" in reasons
+
+
 def test_instrument_non_trading_or_malformed_fails_closed() -> None:
     non_trading, _ = _capture(payloads=_payloads(instrument_status="PreLaunch"))
     malformed_payloads = _payloads()
