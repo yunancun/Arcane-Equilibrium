@@ -16,7 +16,11 @@ from .stock_etf_status_common import (
 _PHASE0_SCHEMA = "stock_etf_phase0_contract_packet_manifest_v1"
 _PHASE0_STATUS = "ACCEPTED_PHASE0_CONTRACT_NO_RUNTIME_AUTHORITY"
 _PHASE0_SCOPE = "paper_shadow_only"
-_PHASE0_CONTRACT_COUNT = 35
+_PHASE0_CONTRACT_COUNT = 36
+_PHASE0_REQUIRED_CONTRACTS: tuple[str, ...] = (
+    "stock_etf_ibkr_readonly_probe_request_v1",
+    "stock_etf_ibkr_readonly_probe_result_import_request_v1",
+)
 _PHASE0_SAFETY_FALSE_FIELDS: tuple[str, ...] = (
     "phase1_runtime_started",
     "phase2_started",
@@ -92,6 +96,10 @@ def _phase0_contract_violations(
         violations.append("phase0_not_accepted")
     if _as_int(source.get("contract_count")) != _PHASE0_CONTRACT_COUNT:
         violations.append("phase0_contract_count_mismatch")
+    contracts = {str(item) for item in _as_list(source.get("contracts"))}
+    for contract_id in _PHASE0_REQUIRED_CONTRACTS:
+        if contract_id not in contracts:
+            violations.append(f"phase0_contract_missing:{contract_id}")
 
     api_baseline = _as_dict(source.get("api_baseline"))
     if not _as_bool(api_baseline.get("live_ports_denied")):

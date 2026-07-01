@@ -44,8 +44,12 @@ def test_phase0_status_uses_only_phase0_ipc_method_with_empty_params() -> None:
     data = resp.json()["data"]
     assert data["phase0_status_state"] == "accepted_no_runtime_authority"
     assert data["phase0_accepted"] is True
-    assert data["contract_count"] == 35
+    assert data["contract_count"] == 36
     assert "stock_etf_ibkr_readonly_probe_request_v1" in data["contracts"]
+    assert (
+        "stock_etf_ibkr_readonly_probe_result_import_request_v1"
+        in data["contracts"]
+    )
     assert "stock_etf_shadow_signal_request_v1" in data["contracts"]
     assert "stock_etf_paper_shadow_reconciliation_v1" in data["contracts"]
     assert "stock_etf_collector_run_v1" in data["contracts"]
@@ -86,6 +90,7 @@ def test_phase0_status_blocks_runtime_or_contract_drift() -> None:
     payload["phase5_started"] = True
     payload["paper_shadow_launch_authorized"] = True
     payload["manifest"]["status"] = "RUNTIME_LAUNCHED"
+    payload["contracts"].remove("stock_etf_ibkr_readonly_probe_result_import_request_v1")
     payload["api_baseline"]["ibkr_call_performed"] = True
     payload["global_denials"]["ibkr_live"] = False
     fake_ipc = AsyncMock()
@@ -103,5 +108,10 @@ def test_phase0_status_blocks_runtime_or_contract_drift() -> None:
     assert "phase5_started" in data["contract_violations"]
     assert "paper_shadow_launch_authorized" in data["contract_violations"]
     assert "phase0_status_mismatch" in data["contract_violations"]
+    assert (
+        "phase0_contract_missing:"
+        "stock_etf_ibkr_readonly_probe_result_import_request_v1"
+        in data["contract_violations"]
+    )
     assert "phase0_ibkr_call_performed" in data["contract_violations"]
     assert "phase0_global_denial_missing:ibkr_live" in data["contract_violations"]

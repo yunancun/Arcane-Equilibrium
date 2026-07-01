@@ -1,5 +1,8 @@
 (function () {
   const ENDPOINT = '/api/v1/stock-etf/phase0-status';
+  const READONLY_PROBE_REQUEST_CONTRACT_ID = 'stock_etf_ibkr_readonly_probe_request_v1';
+  const READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID =
+    'stock_etf_ibkr_readonly_probe_result_import_request_v1';
   window.STOCK_ETF_PHASE0_STATUS_ENDPOINT = ENDPOINT;
 
   function esc(value) {
@@ -33,6 +36,10 @@
       return '<span class="se-muted">' + esc(emptyText || '-') + '</span>';
     }
     return items.map(item => ocChip(String(item), toneFor(item))).join('');
+  }
+
+  function hasContract(status, contractId) {
+    return Array.isArray(status.contracts) && status.contracts.includes(contractId);
   }
 
   function setChip(id, text, type) {
@@ -111,6 +118,14 @@
       kvRow('manifest.scope', textChip(manifest.scope || status.scope || '-')),
       kvRow('manifest.accepted', boolChip(status.phase0_accepted, false)),
       kvRow('contract_count', textChip(status.contract_count || 0)),
+      kvRow(
+        'contracts.readonly_probe_request',
+        boolChip(hasContract(status, READONLY_PROBE_REQUEST_CONTRACT_ID), false)
+      ),
+      kvRow(
+        'contracts.readonly_probe_result_import_request',
+        boolChip(hasContract(status, READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID), false)
+      ),
       kvRow('api.selected', textChip(api.selected || '-')),
       kvRow('api.host_policy', textChip(api.host_policy || '-')),
       kvRow('api.paper_port_default_candidate', textChip(api.paper_port_default_candidate || 0)),

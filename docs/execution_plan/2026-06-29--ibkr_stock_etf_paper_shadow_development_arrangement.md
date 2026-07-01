@@ -3972,3 +3972,46 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不啟動 Ph
 runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
 evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
 sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 88. 2026-07-01 PM session source/display checkpoint：Phase0 Result-Import Display Lineage Guard
+
+本 checkpoint 將上一個
+`stock_etf_ibkr_readonly_probe_result_import_request_v1` source-only contract 從
+Rust type/manifest layer 同步到 control-plane 與 display surface。這不是 read probe
+runtime、不是 result import runtime、不是 scorecard writer，也不批准 IBKR contact；
+只防止 FastAPI/GUI/IPC 顯示層仍停在 35 contracts 或漏顯 scorecard lineage gate。
+
+已完成：
+
+- FastAPI Phase0 normalizer / route fixture / tests 從 35 contracts 同步為 36，
+  並 fail-closed 檢查 readonly probe request 與 readonly probe result-import
+  request 兩個 required contract presence。
+- Rust IPC Phase0 status test 同步 `contract_count=36`，並覆蓋
+  `stock_etf_ibkr_readonly_probe_result_import_request_v1` 出現在 manifest list。
+- Rust IPC policy status summary 新增
+  `readonly_probe_result_import_request_contract_id` 與
+  `scorecard_requires_readonly_probe_result_import_request`，對應 broker capability
+  registry 的 `scorecard_derive` gate。
+- FastAPI policy normalizer / fixture / tests fail-closed 地傳遞並檢查上述兩個欄位；
+  accepted registry 若缺 result-import contract id 或 scorecard gate 會進入
+  `contract_violation_blocked`。
+- Stock/ETF GUI Phase0 panel 顯示 readonly probe request / result-import request
+  presence；Policy panel 顯示 result-import contract id 與 scorecard gate boolean。
+
+驗證：
+
+- Python changed files `py_compile`：PASS。
+- Stock/ETF JS `node --check`：PASS。
+- Scoped Rust `rustfmt --edition 2021 --check`：PASS。
+- Focused FastAPI Phase0/Policy/Route pytest：`23 passed`。
+- Full Stock/ETF FastAPI/static pytest：`120 passed`。
+- Focused engine Phase0 IPC test：PASS。
+- Focused engine Policy IPC test：PASS。
+- Engine Stock/ETF IPC regression：`31 passed`。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。

@@ -185,8 +185,11 @@ function policyFallback(reason) {
       read_operation_count: 0,
       lane_scoped_ipc_contract_id: 'lane_scoped_ipc_v1',
       readonly_probe_request_contract_id: 'stock_etf_ibkr_readonly_probe_request_v1',
+      readonly_probe_result_import_request_contract_id:
+        'stock_etf_ibkr_readonly_probe_result_import_request_v1',
       read_rows_require_lane_scoped_ipc: false,
       read_rows_require_readonly_probe_request: false,
+      scorecard_requires_readonly_probe_result_import_request: false,
       paper_operation_count: 0,
       denied_operation_count: 0,
       bybit_live_execution_unchanged: true,
@@ -430,12 +433,20 @@ function renderPolicyStatus(data) {
       textChip(registry.readonly_probe_request_contract_id || '-')
     ),
     kvRow(
+      'registry.readonly_probe_result_import_request_contract_id',
+      textChip(registry.readonly_probe_result_import_request_contract_id || '-')
+    ),
+    kvRow(
       'registry.read_rows_require_lane_scoped_ipc',
       boolChip(registry.read_rows_require_lane_scoped_ipc, false)
     ),
     kvRow(
       'registry.read_rows_require_readonly_probe_request',
       boolChip(registry.read_rows_require_readonly_probe_request, false)
+    ),
+    kvRow(
+      'registry.scorecard_requires_readonly_probe_result_import_request',
+      boolChip(registry.scorecard_requires_readonly_probe_result_import_request, false)
     ),
     kvRow(
       'registry.counts',

@@ -3407,3 +3407,11 @@
 - Inert Python connector preview plus FastAPI account/authorization normalizers expose only fail-closed `unknown` / `False` / `0` fields and reject client/IPC claims before gate.
 - Verification passed: Python compile, connector/account/authorization focused tests `18 passed`, Phase2 gate `11 passed`, feature-flag auth `8 passed`, full Stock/ETF FastAPI/static `120 passed`, full `openclaw_types` `291 passed`, docs trace `2 passed`, and `git diff --check` PASS.
 - Boundary unchanged: no endpoint, IPC method, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe, market-data ingestion, paper order, fill import, DB/evidence writer, tiny-live/live, Linux runtime, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF Phase0 Result-Import Display Lineage Guard
+
+- PM propagated `stock_etf_ibkr_readonly_probe_result_import_request_v1` from Rust type/manifest authority into FastAPI Phase0 status, Rust IPC Phase0 assertions, policy status normalization, and GUI display rows.
+- Phase0 control-plane fixtures now carry 36 contracts and fail closed if either readonly probe request or readonly probe result-import request is missing.
+- Policy status now exposes `readonly_probe_result_import_request_contract_id` plus `scorecard_requires_readonly_probe_result_import_request`; an accepted registry missing that scorecard gate is a contract violation.
+- Verification passed: Python compile, JS syntax, scoped Rust rustfmt, focused FastAPI Phase0/Policy/Route `23 passed`, full Stock/ETF FastAPI/static `120 passed`, focused engine Phase0/Policy IPC tests PASS, and engine Stock/ETF IPC regression `31 passed`.
+- Boundary unchanged: no endpoint, IPC method, GUI fanout, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe, result import, paper order, fill import, DB/evidence/scorecard writer, tiny-live/live, Linux runtime, or Bybit behavior change.

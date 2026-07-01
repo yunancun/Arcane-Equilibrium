@@ -326,8 +326,11 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     assert "se-policy-body" in source
     assert "lane_scoped_ipc_contract_id" in source
     assert "readonly_probe_request_contract_id" in source
+    assert "readonly_probe_result_import_request_contract_id" in source
     assert "read_rows_require_lane_scoped_ipc" in source
     assert "read_rows_require_readonly_probe_request" in source
+    assert "scorecard_requires_readonly_probe_result_import_request" in source
+    assert "stock_etf_ibkr_readonly_probe_result_import_request_v1" in source
     assert "se-authorization-status" in source
     assert "se-authorization-body" in source
     assert "se-shadow-status" in source
