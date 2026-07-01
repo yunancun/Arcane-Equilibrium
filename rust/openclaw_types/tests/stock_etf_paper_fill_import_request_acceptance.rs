@@ -17,42 +17,41 @@ use openclaw_types::{
 
 #[test]
 fn default_fill_import_request_blocks_all_authority() {
+    use StockEtfPaperFillImportBlocker as Blocker;
+
     let verdict = StockEtfPaperFillImportRequestV1::default().validate();
 
-    assert!(!verdict.accepted);
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::ContractIdMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::SourceVersionMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::WrongAssetLane
-    ));
-    assert!(has(&verdict, StockEtfPaperFillImportBlocker::WrongBroker));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::EnvironmentNotPaper
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::RequestMethodMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::OperationMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::ObservedOrderStateMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::StaleStatePolicyMissing
-    ));
+    assert_verdict_blockers(
+        verdict,
+        &[
+            Blocker::ContractIdMismatch,
+            Blocker::SourceVersionMismatch,
+            Blocker::WrongAssetLane,
+            Blocker::WrongBroker,
+            Blocker::EnvironmentNotPaper,
+            Blocker::RequestMethodMismatch,
+            Blocker::OperationMismatch,
+            Blocker::AuthorityScopeMismatch,
+            Blocker::RequestIdMissing,
+            Blocker::SessionAttestationHashInvalid,
+            Blocker::LifecycleContractIdMismatch,
+            Blocker::LifecycleContractHashInvalid,
+            Blocker::EventLogContractIdMismatch,
+            Blocker::EventLogContractHashInvalid,
+            Blocker::RedactionPolicyContractIdMismatch,
+            Blocker::RedactionPolicyHashInvalid,
+            Blocker::SourceArtifactHashInvalid,
+            Blocker::ReconciliationRunIdMissing,
+            Blocker::BrokerOrderIdMissing,
+            Blocker::ExecutionIdMissing,
+            Blocker::CommissionReportIdMissing,
+            Blocker::ImportIdempotencyKeyMissing,
+            Blocker::ObservedOrderStateMissing,
+            Blocker::StaleStatePolicyMissing,
+            Blocker::RawArtifactHashInvalid,
+            Blocker::RedactedSummaryHashInvalid,
+        ],
+    );
 }
 
 #[test]
@@ -103,6 +102,8 @@ fn accepted_fill_import_request_validates_without_side_effects() {
 
 #[test]
 fn fill_import_request_rejects_method_operation_and_scope_cross_wire() {
+    use StockEtfPaperFillImportBlocker as Blocker;
+
     let wrong_method = StockEtfPaperFillImportRequestV1 {
         request_method: StockEtfLaneScopedIpcMethod::EvaluateShadowSignal,
         operation: BrokerOperation::PaperOrderFillImport,
@@ -112,23 +113,7 @@ fn fill_import_request_rejects_method_operation_and_scope_cross_wire() {
     };
     let verdict = wrong_method.validate();
 
-    assert!(!verdict.accepted);
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::RequestMethodMismatch
-    ));
-    assert!(!has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::OperationMismatch
-    ));
-    assert!(!has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::AuthorityScopeMismatch
-    ));
-    assert!(!has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::EffectCapabilityPresent
-    ));
+    assert_verdict_blockers(verdict, &[Blocker::RequestMethodMismatch]);
 
     let wrong_operation = StockEtfPaperFillImportRequestV1 {
         request_method: StockEtfLaneScopedIpcMethod::ImportPaperFills,
@@ -139,23 +124,7 @@ fn fill_import_request_rejects_method_operation_and_scope_cross_wire() {
     };
     let verdict = wrong_operation.validate();
 
-    assert!(!verdict.accepted);
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::OperationMismatch
-    ));
-    assert!(!has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::RequestMethodMismatch
-    ));
-    assert!(!has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::AuthorityScopeMismatch
-    ));
-    assert!(!has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::EffectCapabilityPresent
-    ));
+    assert_verdict_blockers(verdict, &[Blocker::OperationMismatch]);
 
     let paper_write_pollution = StockEtfPaperFillImportRequestV1 {
         request_method: StockEtfLaneScopedIpcMethod::SubmitPaperOrder,
@@ -166,23 +135,15 @@ fn fill_import_request_rejects_method_operation_and_scope_cross_wire() {
     };
     let verdict = paper_write_pollution.validate();
 
-    assert!(!verdict.accepted);
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::RequestMethodMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::OperationMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::AuthorityScopeMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::EffectCapabilityPresent
-    ));
+    assert_verdict_blockers(
+        verdict,
+        &[
+            Blocker::RequestMethodMismatch,
+            Blocker::OperationMismatch,
+            Blocker::AuthorityScopeMismatch,
+            Blocker::EffectCapabilityPresent,
+        ],
+    );
 
     let shadow_signal_pollution = StockEtfPaperFillImportRequestV1 {
         request_method: StockEtfLaneScopedIpcMethod::EvaluateShadowSignal,
@@ -193,23 +154,14 @@ fn fill_import_request_rejects_method_operation_and_scope_cross_wire() {
     };
     let verdict = shadow_signal_pollution.validate();
 
-    assert!(!verdict.accepted);
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::RequestMethodMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::OperationMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::AuthorityScopeMismatch
-    ));
-    assert!(!has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::EffectCapabilityPresent
-    ));
+    assert_verdict_blockers(
+        verdict,
+        &[
+            Blocker::RequestMethodMismatch,
+            Blocker::OperationMismatch,
+            Blocker::AuthorityScopeMismatch,
+        ],
+    );
 }
 
 #[test]
@@ -266,6 +218,8 @@ fn fill_import_request_rejects_each_authority_gap_independently() {
 
 #[test]
 fn fill_import_request_requires_lineage_ids_hashes_and_stale_policy() {
+    use StockEtfPaperFillImportBlocker as Blocker;
+
     let bad = StockEtfPaperFillImportRequestV1 {
         request_id: String::new(),
         session_attestation_hash: "not_hash".to_string(),
@@ -289,62 +243,29 @@ fn fill_import_request_requires_lineage_ids_hashes_and_stale_policy() {
     };
     let verdict = bad.validate();
 
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::RequestIdMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::SessionAttestationHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::LifecycleContractIdMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::EventLogContractIdMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::RedactionPolicyContractIdMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::ReconciliationRunIdMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::BrokerOrderIdMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::ExecutionIdMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::CommissionReportIdMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::ImportIdempotencyKeyMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::ObservedOrderStateMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::StaleStatePolicyMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::RawArtifactHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::RedactedSummaryHashInvalid
-    ));
+    assert_verdict_blockers(
+        verdict,
+        &[
+            Blocker::RequestIdMissing,
+            Blocker::SessionAttestationHashInvalid,
+            Blocker::LifecycleContractIdMismatch,
+            Blocker::LifecycleContractHashInvalid,
+            Blocker::EventLogContractIdMismatch,
+            Blocker::EventLogContractHashInvalid,
+            Blocker::RedactionPolicyContractIdMismatch,
+            Blocker::RedactionPolicyHashInvalid,
+            Blocker::SourceArtifactHashInvalid,
+            Blocker::ReconciliationRunIdMissing,
+            Blocker::BrokerOrderIdMissing,
+            Blocker::ExecutionIdMissing,
+            Blocker::CommissionReportIdMissing,
+            Blocker::ImportIdempotencyKeyMissing,
+            Blocker::ObservedOrderStateMissing,
+            Blocker::StaleStatePolicyMissing,
+            Blocker::RawArtifactHashInvalid,
+            Blocker::RedactedSummaryHashInvalid,
+        ],
+    );
 }
 
 #[test]
@@ -451,14 +372,12 @@ fn fill_import_request_rejects_each_lineage_gap_independently() {
             )
         {
             let verdict = request.validate();
-            assert!(!verdict.accepted);
-            assert!(has(&verdict, Blocker::StaleStatePolicyMissing));
-            assert!(has(&verdict, Blocker::StaleUnknownStateWithoutPolicy));
-            assert_eq!(
-                verdict.blockers.len(),
-                2,
-                "expected stale unknown aggregate only, got {:?}",
-                verdict.blockers
+            assert_verdict_blockers(
+                verdict,
+                &[
+                    Blocker::StaleStatePolicyMissing,
+                    Blocker::StaleUnknownStateWithoutPolicy,
+                ],
             );
         } else {
             assert_single_blocker(request, blocker);
@@ -468,6 +387,8 @@ fn fill_import_request_rejects_each_lineage_gap_independently() {
 
 #[test]
 fn fill_import_request_rejects_boundary_and_replay_regressions() {
+    use StockEtfPaperFillImportBlocker as Blocker;
+
     let bad = StockEtfPaperFillImportRequestV1 {
         duplicate_import_detected: true,
         observed_order_state: Some(IbkrPaperOrderLifecycleState::StateUnknown),
@@ -487,51 +408,24 @@ fn fill_import_request_rejects_boundary_and_replay_regressions() {
     };
     let verdict = bad.validate();
 
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::DuplicateImportDetected
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::StaleUnknownStateWithoutPolicy
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::IbkrContactPerformed
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::ConnectorRuntimeStarted
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::SecretContentSerialized
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::FillImportPerformed
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::DbApplyPerformed
-    ));
-    assert!(has(&verdict, StockEtfPaperFillImportBlocker::OrderRouted));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::BybitPathReused
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::LiveOrTinyLiveAuthorized
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::MarginShortOptionsCfdRequested
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperFillImportBlocker::PythonDirectBrokerWriteRequested
-    ));
+    assert_verdict_blockers(
+        verdict,
+        &[
+            Blocker::StaleStatePolicyMissing,
+            Blocker::DuplicateImportDetected,
+            Blocker::StaleUnknownStateWithoutPolicy,
+            Blocker::IbkrContactPerformed,
+            Blocker::ConnectorRuntimeStarted,
+            Blocker::SecretContentSerialized,
+            Blocker::FillImportPerformed,
+            Blocker::DbApplyPerformed,
+            Blocker::OrderRouted,
+            Blocker::BybitPathReused,
+            Blocker::LiveOrTinyLiveAuthorized,
+            Blocker::MarginShortOptionsCfdRequested,
+            Blocker::PythonDirectBrokerWriteRequested,
+        ],
+    );
 }
 
 #[test]
@@ -628,22 +522,19 @@ fn blocked_template_is_parseable_and_secret_free() {
     assert!(!lower.contains("token ="));
 }
 
-fn has(verdict: &StockEtfPaperFillImportVerdict, blocker: StockEtfPaperFillImportBlocker) -> bool {
-    verdict.blockers.contains(&blocker)
-}
-
 fn assert_single_blocker(
     request: StockEtfPaperFillImportRequestV1,
     blocker: StockEtfPaperFillImportBlocker,
 ) {
     let verdict = request.validate();
 
+    assert_verdict_blockers(verdict, &[blocker]);
+}
+
+fn assert_verdict_blockers(
+    verdict: StockEtfPaperFillImportVerdict,
+    expected: &[StockEtfPaperFillImportBlocker],
+) {
     assert!(!verdict.accepted);
-    assert_eq!(
-        verdict.blockers,
-        vec![blocker],
-        "expected only {:?}, got {:?}",
-        blocker,
-        verdict.blockers
-    );
+    assert_eq!(verdict.blockers.as_slice(), expected);
 }

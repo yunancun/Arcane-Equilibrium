@@ -5686,3 +5686,31 @@ contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、
 broker session、沒有 paper order routing/cancel/replace execution、沒有 lifecycle writer、沒有 fill import、沒有
 DB/evidence writer、沒有 scorecard writer、沒有 evidence clock、沒有 paper-shadow launch、沒有 release launch、
 沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Paper Fill Import Exact Blocker Guard
+
+本 session 已完成下一個 test-only checkpoint：
+`Stock/ETF Paper Fill Import Exact Blocker Guard`。
+
+這個 checkpoint 補強 `StockEtfPaperFillImportRequestV1` paper-fill import request contract 的 aggregate
+fail-closed coverage。
+
+新增 Rust acceptance 證明 default request、method/operation/scope cross-wire、lineage/hash/stale-policy
+aggregate failures、StateUnknown stale-policy aggregate、duplicate/replay regressions、no-side-effect boundary
+regressions 都會以完整 ordered blocker vectors 或 exact single-blocker vectors fail closed。source-static 也新增
+validator blocker emit-order guard。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Stock/ETF paper-fill import source static pytest：`9 passed`
+- Stock/ETF paper-fill import Rust acceptance：`10 passed`
+- Full `cargo test -p openclaw_types`：PASS
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 GUI runtime/API route/IPC behavior change、沒有 IBKR
+contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 socket/client construction、沒有
+broker session、沒有 paper order routing/cancel/replace execution、沒有 lifecycle writer、沒有 fill import execution、
+沒有 DB/evidence writer、沒有 scorecard writer、沒有 evidence clock、沒有 paper-shadow launch、沒有 release launch、
+沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。

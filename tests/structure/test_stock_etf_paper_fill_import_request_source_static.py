@@ -191,6 +191,26 @@ def _accepted_fixture_block(source: str) -> str:
     )[0]
 
 
+def _function_body(source: str, name: str) -> str:
+    marker = f"fn {name}("
+    start = source.index(marker)
+    brace = source.index("{", start)
+    depth = 0
+    for index in range(brace, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start : index + 1]
+    raise AssertionError(f"function body not closed: {name}")
+
+
+def _assert_ordered_tokens(block: str, tokens: tuple[str, ...]) -> None:
+    positions = [block.index(token) for token in tokens]
+    assert positions == sorted(positions)
+
+
 def test_stock_etf_paper_fill_import_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
@@ -385,6 +405,70 @@ def test_stock_etf_paper_fill_import_source_keeps_lineage_and_replay_validation(
     assert "request.duplicate_import_detected" in source
     assert "request.stale_unknown_state_without_policy" in source
     assert "Some(IbkrPaperOrderLifecycleState::StateUnknown)" in source
+
+
+def test_stock_etf_paper_fill_import_source_pins_blocker_emit_order() -> None:
+    source = _source()
+    validate_body = source[source.index("pub fn validate(&self)") : source.index(
+        "validate_required_fields(self, &mut blockers)"
+    )]
+    required_fields = _function_body(source, "validate_required_fields")
+    boundary_flags = _function_body(source, "validate_boundary_flags")
+
+    _assert_ordered_tokens(
+        validate_body,
+        (
+            "Blocker::ContractIdMismatch",
+            "Blocker::SourceVersionMismatch",
+            "Blocker::WrongAssetLane",
+            "Blocker::WrongBroker",
+            "Blocker::EnvironmentNotPaper",
+            "Blocker::RequestMethodMismatch",
+            "Blocker::OperationMismatch",
+            "Blocker::AuthorityScopeMismatch",
+            "Blocker::EffectCapabilityPresent",
+        ),
+    )
+    _assert_ordered_tokens(
+        required_fields,
+        (
+            "Blocker::RequestIdMissing",
+            "Blocker::SessionAttestationHashInvalid",
+            "Blocker::LifecycleContractIdMismatch",
+            "Blocker::LifecycleContractHashInvalid",
+            "Blocker::EventLogContractIdMismatch",
+            "Blocker::EventLogContractHashInvalid",
+            "Blocker::RedactionPolicyContractIdMismatch",
+            "Blocker::RedactionPolicyHashInvalid",
+            "Blocker::SourceArtifactHashInvalid",
+            "Blocker::ReconciliationRunIdMissing",
+            "Blocker::BrokerOrderIdMissing",
+            "Blocker::ExecutionIdMissing",
+            "Blocker::CommissionReportIdMissing",
+            "Blocker::ImportIdempotencyKeyMissing",
+            "Blocker::ObservedOrderStateMissing",
+            "Blocker::StaleStatePolicyMissing",
+            "Blocker::RawArtifactHashInvalid",
+            "Blocker::RedactedSummaryHashInvalid",
+            "Blocker::DuplicateImportDetected",
+            "Blocker::StaleUnknownStateWithoutPolicy",
+        ),
+    )
+    _assert_ordered_tokens(
+        boundary_flags,
+        (
+            "Blocker::IbkrContactPerformed",
+            "Blocker::ConnectorRuntimeStarted",
+            "Blocker::SecretContentSerialized",
+            "Blocker::FillImportPerformed",
+            "Blocker::DbApplyPerformed",
+            "Blocker::OrderRouted",
+            "Blocker::BybitPathReused",
+            "Blocker::LiveOrTinyLiveAuthorized",
+            "Blocker::MarginShortOptionsCfdRequested",
+            "Blocker::PythonDirectBrokerWriteRequested",
+        ),
+    )
 
 
 def test_stock_etf_paper_fill_import_source_keeps_no_side_effect_boundary_flags() -> None:
