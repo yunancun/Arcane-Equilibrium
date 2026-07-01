@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-01 Stock/ETF Readonly Probe Request Exact Blocker Guard
+
+- PM tightened `StockEtfIbkrReadonlyProbeRequestV1` aggregate acceptance coverage to exact ordered blocker vectors for default, read-action/operation/authority cross-wire, pre-contact lineage/hash gaps, and no-side-effect boundary regressions.
+- Source-static guard now pins validator blocker emit order across top-level identity, required pre-contact lineage fields, and boundary flags.
+- Verification passed: readonly probe request source static `10`, Rust acceptance `10`, full `cargo test -p openclaw_types`, cargo fmt, docs trace, and diff-check. Boundary unchanged: no IBKR contact, connector/runtime, read-only probe execution, secret access/serialization, paper order, DB/evidence writer, evidence clock, tiny-live/live, or Bybit behavior change.
+
 ## 2026-07-01 Stock/ETF Shadow Signal Request Exact Blocker Guard
 
 - PM tightened `StockEtfShadowSignalRequestV1` aggregate acceptance coverage to exact ordered blocker vectors for default, method/operation/scope cross-wire, lineage/hash gaps, and no-side-effect boundary regressions.

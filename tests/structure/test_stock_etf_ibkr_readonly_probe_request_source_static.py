@@ -213,6 +213,26 @@ def _function_body(source: str, function_name: str, return_type: str) -> str:
     return match.group("body")
 
 
+def _named_function_body(source: str, name: str) -> str:
+    marker = f"fn {name}("
+    start = source.index(marker)
+    brace = source.index("{", start)
+    depth = 0
+    for index in range(brace, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start : index + 1]
+    raise AssertionError(f"function body not closed: {name}")
+
+
+def _assert_ordered_tokens(block: str, tokens: tuple[str, ...]) -> None:
+    positions = [block.index(token) for token in tokens]
+    assert positions == sorted(positions)
+
+
 def _default_block(source: str) -> str:
     return source.split("impl Default for StockEtfIbkrReadonlyProbeRequestV1", 1)[1].split(
         "impl StockEtfIbkrReadonlyProbeRequestV1",
@@ -468,6 +488,76 @@ def test_stock_etf_readonly_probe_request_source_keeps_required_field_and_bounda
         "python_direct_broker_write_requested",
     ):
         assert f"request.{flag}" in source
+
+
+def test_stock_etf_readonly_probe_request_source_pins_blocker_emit_order() -> None:
+    source = _source()
+    validate_body = source[source.index("pub fn validate(&self)") : source.index(
+        "validate_required_fields(self, &mut blockers)"
+    )]
+    required_fields = _named_function_body(source, "validate_required_fields")
+    boundary_flags = _named_function_body(source, "validate_boundary_flags")
+
+    _assert_ordered_tokens(
+        validate_body,
+        (
+            "Blocker::ContractIdMismatch",
+            "Blocker::SourceVersionMismatch",
+            "Blocker::WrongAssetLane",
+            "Blocker::WrongBroker",
+            "Blocker::EnvironmentNotReadonly",
+            "Blocker::ProbeActionMismatch",
+            "Blocker::OperationMismatch",
+            "Blocker::AuthorityScopeMismatch",
+            "Blocker::EffectCapabilityPresent",
+            "Blocker::ApiActionNotReadAllowed",
+        ),
+    )
+    _assert_ordered_tokens(
+        required_fields,
+        (
+            "Blocker::RequestIdMissing",
+            "Blocker::ProbeIdMissing",
+            "Blocker::ExternalSurfaceGateContractIdMismatch",
+            "Blocker::Phase2GateArtifactHashInvalid",
+            "Blocker::ApiAllowlistContractIdMismatch",
+            "Blocker::ApiAllowlistHashInvalid",
+            "Blocker::SecretSlotContractIdMismatch",
+            "Blocker::SecretSlotContractHashInvalid",
+            "Blocker::ApiSessionTopologyContractIdMismatch",
+            "Blocker::ApiSessionTopologyHashInvalid",
+            "Blocker::SessionAttestationContractIdMismatch",
+            "Blocker::SessionAttestationHashInvalid",
+            "Blocker::RedactionPolicyContractIdMismatch",
+            "Blocker::RedactionPolicyHashInvalid",
+            "Blocker::RateLimitPolicyContractIdMismatch",
+            "Blocker::RateLimitPolicyHashInvalid",
+            "Blocker::AuditEventPolicyContractIdMismatch",
+            "Blocker::AuditEventPolicyHashInvalid",
+            "Blocker::SourceArtifactHashInvalid",
+            "Blocker::RawArtifactHashInvalid",
+            "Blocker::RedactedSummaryHashInvalid",
+        ),
+    )
+    _assert_ordered_tokens(
+        boundary_flags,
+        (
+            "Blocker::IbkrContactPerformed",
+            "Blocker::ConnectorRuntimeStarted",
+            "Blocker::SecretContentSerialized",
+            "Blocker::OrderRouted",
+            "Blocker::PaperOrderSubmitted",
+            "Blocker::DbApplyPerformed",
+            "Blocker::EvidenceClockStarted",
+            "Blocker::BybitPathReused",
+            "Blocker::LiveOrTinyLiveAuthorized",
+            "Blocker::MarginShortOptionsCfdRequested",
+            "Blocker::AccountWriteRequested",
+            "Blocker::MarketDataEntitlementPurchaseRequested",
+            "Blocker::ClientPortalWebApiRequested",
+            "Blocker::PythonDirectBrokerWriteRequested",
+        ),
+    )
 
 
 def test_stock_etf_readonly_probe_request_source_has_no_runtime_secret_order_or_bybit_client_tokens() -> None:
