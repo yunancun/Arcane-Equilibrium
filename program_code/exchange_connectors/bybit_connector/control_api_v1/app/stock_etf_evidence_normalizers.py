@@ -7,6 +7,7 @@ from typing import Any
 from .stock_etf_status_common import (
     _COLLECTOR_RUN_CONTRACT_ID,
     _DENIED_OPERATIONS,
+    _DQ_MANIFEST_CONTRACT_ID,
     _EVIDENCE_CLOCK_CONTRACT_ID,
     _MARKET_DATA_PROVENANCE_CONTRACT_ID,
     _SAFETY_FALSE_FIELDS,
@@ -175,10 +176,39 @@ def _normalize_dq_manifest(value: Any, reason: str | None) -> dict[str, Any]:
     if not source:
         return fallback
     return {
+        "expected_contract_id": _as_str(
+            source.get("expected_contract_id"),
+            _DQ_MANIFEST_CONTRACT_ID,
+        ),
+        "contract_id": _as_str(source.get("contract_id"), ""),
+        "source_version": _as_int(source.get("source_version")),
         "shape_accepted": _as_bool(source.get("shape_accepted")),
         "shape_blockers": [str(item) for item in _as_list(source.get("shape_blockers"))],
         "passes_day_quality": _as_bool(source.get("passes_day_quality")),
+        "collector_run_id": _as_str(source.get("collector_run_id"), ""),
         "trading_day": _as_str(source.get("trading_day"), ""),
+        "market_data_provenance_contract_hash_present": _as_bool(
+            source.get("market_data_provenance_contract_hash_present")
+        ),
+        "source_artifact_hash_present": _as_bool(
+            source.get("source_artifact_hash_present")
+        ),
+        "bybit_live_execution_unchanged": _as_bool(
+            source.get("bybit_live_execution_unchanged")
+        ),
+        "ibkr_contact_performed": _as_bool(source.get("ibkr_contact_performed")),
+        "connector_runtime_started": _as_bool(source.get("connector_runtime_started")),
+        "market_data_ingestion_started": _as_bool(
+            source.get("market_data_ingestion_started")
+        ),
+        "dq_writer_started": _as_bool(source.get("dq_writer_started")),
+        "evidence_clock_started": _as_bool(source.get("evidence_clock_started")),
+        "scorecard_writer_started": _as_bool(source.get("scorecard_writer_started")),
+        "db_apply_performed": _as_bool(source.get("db_apply_performed")),
+        "secret_content_serialized": _as_bool(source.get("secret_content_serialized")),
+        "live_or_tiny_live_authorized": _as_bool(
+            source.get("live_or_tiny_live_authorized")
+        ),
         "calendar_aware_coverage_bps": _as_int(source.get("calendar_aware_coverage_bps")),
         "symbol_completeness_bps": _as_int(source.get("symbol_completeness_bps")),
         "latency_dq_passed": _as_bool(source.get("latency_dq_passed")),
@@ -211,6 +241,7 @@ def _evidence_status_contract_violations(
     collector_run: dict[str, Any],
     evidence_clock: dict[str, Any],
     frozen_inputs: dict[str, Any],
+    dq_manifest: dict[str, Any],
     scorecard: dict[str, Any],
     reason: str | None,
 ) -> list[str]:
@@ -255,6 +286,26 @@ def _evidence_status_contract_violations(
         violations.append("collector_run_secret_content_serialized")
     if _as_bool(collector_run.get("live_or_tiny_live_authorized")):
         violations.append("collector_run_live_or_tiny_live_authorized")
+    if _as_str(dq_manifest.get("expected_contract_id"), "") != _DQ_MANIFEST_CONTRACT_ID:
+        violations.append("dq_manifest_expected_contract_id_mismatch")
+    if _as_bool(dq_manifest.get("ibkr_contact_performed")):
+        violations.append("dq_manifest_ibkr_contact_performed")
+    if _as_bool(dq_manifest.get("connector_runtime_started")):
+        violations.append("dq_manifest_connector_runtime_started")
+    if _as_bool(dq_manifest.get("market_data_ingestion_started")):
+        violations.append("dq_manifest_market_data_ingestion_started")
+    if _as_bool(dq_manifest.get("dq_writer_started")):
+        violations.append("dq_manifest_writer_started")
+    if _as_bool(dq_manifest.get("evidence_clock_started")):
+        violations.append("dq_manifest_evidence_clock_started")
+    if _as_bool(dq_manifest.get("scorecard_writer_started")):
+        violations.append("dq_manifest_scorecard_writer_started")
+    if _as_bool(dq_manifest.get("db_apply_performed")):
+        violations.append("dq_manifest_db_apply_performed")
+    if _as_bool(dq_manifest.get("secret_content_serialized")):
+        violations.append("dq_manifest_secret_content_serialized")
+    if _as_bool(dq_manifest.get("live_or_tiny_live_authorized")):
+        violations.append("dq_manifest_live_or_tiny_live_authorized")
     if _as_str(evidence_clock.get("expected_contract_id"), "") != _EVIDENCE_CLOCK_CONTRACT_ID:
         violations.append("evidence_clock_expected_contract_id_mismatch")
     if _as_bool(evidence_clock.get("checker_contacted_ibkr")):
@@ -305,6 +356,7 @@ def _normalize_evidence_status(raw: Any, reason: str | None) -> dict[str, Any]:
         collector_run,
         evidence_clock,
         frozen_inputs,
+        dq_manifest,
         scorecard,
         reason,
     )

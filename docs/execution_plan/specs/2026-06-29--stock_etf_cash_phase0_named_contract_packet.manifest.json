@@ -59,6 +59,7 @@
     "stock_shadow_fill_model_v1",
     "stock_etf_paper_shadow_reconciliation_v1",
     "stock_etf_collector_run_v1",
+    "stock_etf_dq_manifest_v1",
     "stock_etf_evidence_clock_v1",
     "gui_lane_contract_v1",
     "stock_etf_storage_capacity_v1",

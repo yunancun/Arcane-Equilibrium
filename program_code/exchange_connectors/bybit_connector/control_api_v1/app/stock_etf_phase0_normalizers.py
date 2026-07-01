@@ -16,7 +16,7 @@ from .stock_etf_status_common import (
 _PHASE0_SCHEMA = "stock_etf_phase0_contract_packet_manifest_v1"
 _PHASE0_STATUS = "ACCEPTED_PHASE0_CONTRACT_NO_RUNTIME_AUTHORITY"
 _PHASE0_SCOPE = "paper_shadow_only"
-_PHASE0_CONTRACT_COUNT = 34
+_PHASE0_CONTRACT_COUNT = 35
 _PHASE0_SAFETY_FALSE_FIELDS: tuple[str, ...] = (
     "phase1_runtime_started",
     "phase2_started",

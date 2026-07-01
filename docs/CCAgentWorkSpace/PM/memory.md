@@ -3371,3 +3371,10 @@
 - Existing evidence-status IPC/FastAPI/GUI surfaces now expose default-blocked `collector_run` without adding endpoints, IPC methods, GUI fanout, or runtime work.
 - Verification passed: Python compile, JS syntax, scoped Rust format, full Stock/ETF FastAPI/static `120 passed`, full `openclaw_types` `287` tests, engine Stock/ETF focused `31 passed`, docs trace `2 passed`, and `git diff --check` PASS.
 - Boundary unchanged: no IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, collector start, market-data ingestion, paper order/cancel/replace, fill import, DB/evidence/scorecard writer, evidence clock, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF DQ Manifest Contract
+
+- PM added source-only `stock_etf_dq_manifest_v1` and raised Phase0 named contracts to 35; the validator requires exact contract identity, Stock/ETF IBKR paper/shadow binding, collector/provenance/source lineage hashes, DQ quality fields, Bybit-live unchanged proof, and no runtime side-effect claims.
+- Existing evidence-status IPC/FastAPI/GUI surfaces now expose default-blocked `dq_manifest` without adding endpoints, IPC methods, GUI fanout, runtime work, or a DQ writer.
+- Verification passed: Python compile, JS syntax, scoped Rust format, Phase3 evidence acceptance `19 passed`, Phase0 manifest acceptance `6 passed`, focused Phase0/Evidence/Route pytest `22 passed`, full Stock/ETF FastAPI/static `120 passed`, full `openclaw_types` PASS, engine Stock/ETF focused `31 passed`, docs trace `2 passed`, and `git diff --check` PASS.
+- Boundary unchanged: no IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, collector start, market-data ingestion, DQ writer, paper order/cancel/replace, fill import, DB/evidence/scorecard writer, evidence clock, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

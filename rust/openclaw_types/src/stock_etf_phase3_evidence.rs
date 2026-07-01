@@ -12,6 +12,7 @@ use crate::stock_etf_reference_data_sources::STOCK_ETF_REFERENCE_DATA_SOURCES_CO
 use crate::stock_etf_scorecard_inputs::STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID;
 
 pub const STOCK_ETF_COLLECTOR_RUN_CONTRACT_ID: &str = "stock_etf_collector_run_v1";
+pub const STOCK_ETF_DQ_MANIFEST_CONTRACT_ID: &str = "stock_etf_dq_manifest_v1";
 pub const STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID: &str = "stock_etf_evidence_clock_v1";
 pub const STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID: &str = "stock_market_data_provenance_v1";
 pub const STOCK_ETF_COLLECTOR_MIN_GREEN_TRADING_DAYS: u16 = 5;
@@ -475,6 +476,25 @@ impl StockEtfCollectorRunV1 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StockEtfDailyDqManifestV1 {
+    pub contract_id: String,
+    pub source_version: u32,
+    pub asset_lane: AssetLane,
+    pub broker: Broker,
+    pub environment: BrokerEnvironment,
+    pub collector_run_id: String,
+    pub market_data_provenance_contract_id: String,
+    pub market_data_provenance_contract_hash: String,
+    pub source_artifact_hash: String,
+    pub bybit_live_execution_unchanged: bool,
+    pub ibkr_contact_performed: bool,
+    pub connector_runtime_started: bool,
+    pub market_data_ingestion_started: bool,
+    pub dq_writer_started: bool,
+    pub evidence_clock_started: bool,
+    pub scorecard_writer_started: bool,
+    pub db_apply_performed: bool,
+    pub secret_content_serialized: bool,
+    pub live_or_tiny_live_authorized: bool,
     pub trading_day: String,
     pub calendar_aware_coverage_bps: u16,
     pub symbol_completeness_bps: u16,
@@ -488,6 +508,25 @@ pub struct StockEtfDailyDqManifestV1 {
 impl Default for StockEtfDailyDqManifestV1 {
     fn default() -> Self {
         Self {
+            contract_id: String::new(),
+            source_version: 0,
+            asset_lane: AssetLane::CryptoPerp,
+            broker: Broker::Bybit,
+            environment: BrokerEnvironment::LiveReservedDenied,
+            collector_run_id: String::new(),
+            market_data_provenance_contract_id: String::new(),
+            market_data_provenance_contract_hash: String::new(),
+            source_artifact_hash: String::new(),
+            bybit_live_execution_unchanged: false,
+            ibkr_contact_performed: false,
+            connector_runtime_started: false,
+            market_data_ingestion_started: false,
+            dq_writer_started: false,
+            evidence_clock_started: false,
+            scorecard_writer_started: false,
+            db_apply_performed: false,
+            secret_content_serialized: false,
+            live_or_tiny_live_authorized: false,
             trading_day: String::new(),
             calendar_aware_coverage_bps: 0,
             symbol_completeness_bps: 0,
@@ -503,6 +542,26 @@ impl Default for StockEtfDailyDqManifestV1 {
 impl StockEtfDailyDqManifestV1 {
     pub fn pass_fixture() -> Self {
         Self {
+            contract_id: STOCK_ETF_DQ_MANIFEST_CONTRACT_ID.to_string(),
+            source_version: 1,
+            asset_lane: AssetLane::StockEtfCash,
+            broker: Broker::Ibkr,
+            environment: BrokerEnvironment::Paper,
+            collector_run_id: "stock-etf-collector-run-2026-03-01".to_string(),
+            market_data_provenance_contract_id: STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID
+                .to_string(),
+            market_data_provenance_contract_hash: "6".repeat(64),
+            source_artifact_hash: "8".repeat(64),
+            bybit_live_execution_unchanged: true,
+            ibkr_contact_performed: false,
+            connector_runtime_started: false,
+            market_data_ingestion_started: false,
+            dq_writer_started: false,
+            evidence_clock_started: false,
+            scorecard_writer_started: false,
+            db_apply_performed: false,
+            secret_content_serialized: false,
+            live_or_tiny_live_authorized: false,
             trading_day: "2026-03-01".to_string(),
             calendar_aware_coverage_bps: 10_000,
             symbol_completeness_bps: 10_000,
@@ -518,6 +577,66 @@ impl StockEtfDailyDqManifestV1 {
         use StockEtfPhase3Blocker as Blocker;
 
         let mut blockers = Vec::new();
+        if self.contract_id != STOCK_ETF_DQ_MANIFEST_CONTRACT_ID {
+            blockers.push(Blocker::DqManifestContractIdMismatch);
+        }
+        if self.source_version != 1 {
+            blockers.push(Blocker::DqManifestVersionMismatch);
+        }
+        if self.asset_lane != AssetLane::StockEtfCash {
+            blockers.push(Blocker::DqManifestWrongAssetLane);
+        }
+        if self.broker != Broker::Ibkr {
+            blockers.push(Blocker::DqManifestWrongBroker);
+        }
+        if !matches!(
+            self.environment,
+            BrokerEnvironment::ReadOnly | BrokerEnvironment::Paper | BrokerEnvironment::Shadow
+        ) {
+            blockers.push(Blocker::DqManifestEnvironmentDenied);
+        }
+        if self.collector_run_id.trim().is_empty() {
+            blockers.push(Blocker::DqManifestCollectorRunIdMissing);
+        }
+        if self.market_data_provenance_contract_id != STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID {
+            blockers.push(Blocker::DqManifestMarketDataProvenanceContractMismatch);
+        }
+        if !is_sha256_hex(&self.market_data_provenance_contract_hash) {
+            blockers.push(Blocker::DqManifestMarketDataProvenanceHashInvalid);
+        }
+        if !is_sha256_hex(&self.source_artifact_hash) {
+            blockers.push(Blocker::DqManifestSourceArtifactHashInvalid);
+        }
+        if !self.bybit_live_execution_unchanged {
+            blockers.push(Blocker::BybitLiveExecutionNotProtected);
+        }
+        if self.ibkr_contact_performed {
+            blockers.push(Blocker::IbkrContactPerformed);
+        }
+        if self.connector_runtime_started {
+            blockers.push(Blocker::ConnectorRuntimeStarted);
+        }
+        if self.market_data_ingestion_started {
+            blockers.push(Blocker::DqManifestMarketDataIngestionStarted);
+        }
+        if self.dq_writer_started {
+            blockers.push(Blocker::DqManifestWriterStarted);
+        }
+        if self.evidence_clock_started {
+            blockers.push(Blocker::DqManifestEvidenceClockStarted);
+        }
+        if self.scorecard_writer_started {
+            blockers.push(Blocker::ScorecardWriterStarted);
+        }
+        if self.db_apply_performed {
+            blockers.push(Blocker::DbApplyPerformed);
+        }
+        if self.secret_content_serialized {
+            blockers.push(Blocker::SecretContentSerialized);
+        }
+        if self.live_or_tiny_live_authorized {
+            blockers.push(Blocker::LiveOrTinyLiveAuthorized);
+        }
         if self.trading_day.trim().is_empty() {
             blockers.push(Blocker::TradingDayMissing);
         }
@@ -798,6 +917,18 @@ pub enum StockEtfPhase3Blocker {
     DivergenceThresholdHashInvalid,
     GuiEvidenceViewMissing,
     ScorecardRegenerationMissing,
+    DqManifestContractIdMismatch,
+    DqManifestVersionMismatch,
+    DqManifestWrongAssetLane,
+    DqManifestWrongBroker,
+    DqManifestEnvironmentDenied,
+    DqManifestCollectorRunIdMissing,
+    DqManifestMarketDataProvenanceContractMismatch,
+    DqManifestMarketDataProvenanceHashInvalid,
+    DqManifestSourceArtifactHashInvalid,
+    DqManifestMarketDataIngestionStarted,
+    DqManifestWriterStarted,
+    DqManifestEvidenceClockStarted,
     TradingDayMissing,
     CoverageBpsInvalid,
     QuarantineManifestHashInvalid,

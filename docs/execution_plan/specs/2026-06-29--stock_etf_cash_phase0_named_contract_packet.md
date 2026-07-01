@@ -1199,6 +1199,37 @@ The validator rejects contract drift, wrong lane/broker/environment, missing
 run identity, missing lineage hashes, fewer than five expected sessions,
 incomplete sessions, Bybit-live regression, and all runtime side-effect claims.
 
+## 17C. `stock_etf_dq_manifest_v1`
+
+The daily DQ manifest contract pins the data-quality artifact that an evidence
+clock day consumes. It is a source-only shape in Phase 0/1 and does not start
+market-data ingestion, a DQ writer, or the evidence clock.
+
+Required fields:
+
+- exact contract id `stock_etf_dq_manifest_v1`
+- `source_version=1`
+- `asset_lane=stock_etf_cash`
+- `broker=ibkr`
+- read-only, paper, or shadow environment only
+- collector run id and trading day
+- market-data provenance contract id/hash
+- source artifact hash
+- calendar-aware coverage and symbol completeness basis points
+- quarantine manifest and atomic fact input hashes
+- market-data provenance accepted marker
+- scorecard regeneration passed marker
+- Bybit-live unchanged proof
+- no IBKR contact, connector runtime, market-data ingestion, DQ writer,
+  evidence-clock start, scorecard writer, DB apply, serialized secret content,
+  tiny-live, or live authorization claim from the source contract/checker
+
+Source validator:
+`openclaw_types::stock_etf_phase3_evidence::StockEtfDailyDqManifestV1`.
+The validator rejects contract drift, wrong lane/broker/environment, missing
+collector/provenance/source lineage, invalid coverage/hash shape, Bybit-live
+regression, and all runtime side-effect claims.
+
 ## 18. `stock_etf_evidence_clock_v1`
 
 Clock start requires:
