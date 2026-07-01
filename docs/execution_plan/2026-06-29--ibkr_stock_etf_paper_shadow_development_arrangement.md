@@ -6168,3 +6168,32 @@ PM 邊界不變：此 checkpoint 不改 trading logic、不改 risk semantics、
 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 read-only
 probe、不做 result import、不做 DB/evidence writer、不做 paper order route、不做 Linux runtime
 sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 146. 2026-07-01 PM session source checkpoint：Stock/ETF Docs README Index Gate Restoration
+
+本 checkpoint 修復 full docs README/index structure gate 的既有 drift。這不是 runtime behavior
+change、不是 IBKR contact、不是 connector runtime、不是 secret access、不是 DB/evidence writer、
+不是 paper order route；只把 `docs/README.md` 的穩定入口索引補回測試要求的可審計狀態，讓
+Stock/ETF checkpoint trace guard 可以和完整 docs index gate 一起綠。
+
+已完成：
+
+- 更新 `docs/README.md`，新增 `Static Guard Index`。
+- 補回 `docs/agents/` 穩定入口，包含 `agents/domain.md`、`agents/issue-tracker.md`、
+  `agents/triage-labels.md`。
+- 補回 helper script 索引入口 `../helper_scripts/SCRIPT_INDEX.md`。
+- 補回 `CCAgentWorkSpace/` 19 個 Agent / role directories 的穩定描述，並明確列出
+  `CCAgentWorkSpace/MIT/`、`CCAgentWorkSpace/BB/`、`CCAgentWorkSpace/Operator/`。
+- 補回 `docs/archive/` top-level Markdown 檔名索引，避免 archive path drift 讓 docs README
+  structure guard 失真。
+
+驗證：
+
+- Full docs README/index structure pytest：`7 passed`。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 production code、不改 trading logic、不新增 endpoint/IPC method、
+不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 read-only
+probe、不做 result import、不做 DB/evidence writer、不做 paper order route、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。

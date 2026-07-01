@@ -39,6 +39,112 @@ This directory holds all engineering documents, logs, handoff records, and decis
 
 ---
 
+## 稳定入口索引 (Static Guard Index)
+
+### docs/agents/
+
+| 路径 | 用途 |
+|---|---|
+| `agents/domain.md` | Agent domain / ownership routing reference |
+| `agents/issue-tracker.md` | Issue tracker and TODO hygiene reference |
+| `agents/triage-labels.md` | Triage label vocabulary and classification reference |
+
+### helper_scripts/
+
+- 脚本索引入口：[`../helper_scripts/SCRIPT_INDEX.md`](../helper_scripts/SCRIPT_INDEX.md)
+
+### docs/CCAgentWorkSpace/
+
+当前 workspace 目录包含 19 個 Agent / role directories。MIT 與 BB 是 Stock/ETF / Bybit 邊界審計時的穩定入口：
+
+- `CCAgentWorkSpace/MIT/` — Market / Information Theory Auditor；data、feature、CV、schema rigor。
+- `CCAgentWorkSpace/BB/` — Bybit Boundary Reviewer；交易所/Bybit 相容性與隔離審查。
+- `CCAgentWorkSpace/Operator/` — Operator-facing 摘要與交接 trace。
+
+### docs/archive/
+
+Top-level archive 檔名索引如下；完整歷史語義仍以 `_indexes/document_index.md` 與 `_indexes/initiative_index.md` 分流查詢。
+
+- `2026-04-01--completed_todo_archive_wave0_7_phase1_3.md`
+- `2026-04-03--completed_todo_archive_batch9a_wave8_xp.md`
+- `2026-04-03--data_storage_architecture_optimal_draft_v0.1.md`
+- `2026-04-03--rust_migration_master_plan_v2.md`
+- `2026-04-03--rust_migration_v2.5_consolidated.md`
+- `2026-04-03--system_snapshot_external_analysis.md`
+- `2026-04-04--completed_todo_archive_phase0123_rust.md`
+- `2026-04-06--completed_todo_archive_l3_phases.md`
+- `2026-04-07--claude_md_section3_history_phase0_4.md`
+- `2026-04-08--arch_rc1_1c_history_archive.md`
+- `2026-04-08--main_docs_1c3_1c4_narrative.md`
+- `2026-04-09--scanner_todo_phase_a_d_spec.md`
+- `2026-04-10--completed_todo_live_gui_dead_py.md`
+- `2026-04-11--completed_todo_3e_arch.md`
+- `2026-04-11--completed_todo_w19_w20_phase6.md`
+- `2026-04-12--changelog_archive_pre_0408.md`
+- `2026-04-12--completed_todo_full_program_audit.md`
+- `2026-04-13--changelog_archive_0408_0409.md`
+- `2026-04-14--completed_todo_w22_phantom_heal.md`
+- `2026-04-15--claude_md_section3_snapshot.md`
+- `2026-04-15--completed_todo_w22_engine_heal_edge_p3.md`
+- `2026-04-15--phase5_promotion_edge_crisis_full.md`
+- `2026-04-16--completed_todo_strategy_close_tag_edge_p3_dedup.md`
+- `2026-04-17--completed_todo_p0_scanner_phantom_live_guard.md`
+- `2026-04-20--claude_md_section3_snapshot.md`
+- `2026-04-20--completed_todo_batch.md`
+- `2026-04-21--claude_md_section3_snapshot.md`
+- `2026-04-21--completed_todo_batch.md`
+- `2026-04-22--step_0_derived_todo_batch.md`
+- `2026-04-24--completed_todo_batch.md`
+- `2026-04-24--todo_snapshot_pre_refactor.md`
+- `2026-04-24--todo_v1_refactor_snapshot.md`
+- `2026-04-24--todo_v2_dual_axis_snapshot.md`
+- `2026-04-29--62finding-batch-A-to-F.md`
+- `2026-04-29--CLAUDE-pre-trim-snapshot.md`
+- `2026-04-29--TODO-pre-trim-snapshot.md`
+- `2026-04-29--claude_md_section3_pre_04_27_detail.md`
+- `2026-04-29--strkusdt-p0-wave.md`
+- `2026-04-29--wave-A-to-H-narrative.md`
+- `2026-04-30--CLAUDE-pre-cleanup-snapshot.md`
+- `2026-04-30--README-pre-cleanup-snapshot.md`
+- `2026-04-30--TODO-pre-cleanup-snapshot.md`
+- `2026-04-30--TODO-stale-active-mainline.md`
+- `2026-04-30--active_docs_cleanup_archive.md`
+- `2026-05-01--completed_waves_1_2_3_and_backlog.md`
+- `2026-05-02--CLAUDE-pre-trim-snapshot.md`
+- `2026-05-02--TODO-pre-trim-snapshot.md`
+- `2026-05-06--claude_md_stale_extract.md`
+- `2026-05-06--readme_stale_extract.md`
+- `2026-05-06--todo_completed_extract.md`
+- `2026-05-07--todo_v12_agent_openclaw_replan_archive.md`
+- `2026-05-09--claude_md_section5_pre_alpha_surface.md`
+- `2026-05-09--qctodo_sprint_n0_n5_archive.md`
+- `2026-05-09--w_audit_verified_closed_archive.md`
+- `2026-05-09--w_audit_verified_closed_archive_v2.md`
+- `2026-05-09--w_audit_verified_closed_archive_v3.md`
+- `2026-05-15--todo_v21_completion_cleanup_archive.md`
+- `2026-05-15--todo_v24_stale_rows_archive.md`
+- `2026-05-16--close_maker_first_phase_1b_round1_archive.md`
+- `2026-05-16--stage1_demo_a4c_tombstone_cleanup.md`
+- `2026-05-16--todo_v36_completion_cleanup_archive.md`
+- `2026-05-17--cold_audit_pm_final.md`
+- `2026-05-19--todo_v55_translation_archive.md`
+- `2026-05-20--todo_v57_3_closure_cleanup_archive.md`
+- `2026-05-21--sprint_1a_alpha_repair_closure.md`
+- `2026-05-21--todo_v57_5_route_change_purge.md`
+- `2026-05-21--todo_v58_layout_refactor_archive.md`
+- `2026-05-21--todo_v60_archive.md`
+- `2026-05-23--gui_bybit_first_pnl_refactor.md`
+- `2026-05-23--sprint_4plus_5plus_wave1_closure.md`
+- `2026-05-29--cold_audit_p1_p2_p3_closure_archive.md`
+- `2026-05-30--cold_audit_pm_final.md`
+- `2026-05-31--todo_v92_archive.md`
+- `2026-05-31--todo_v93_pre_aeg_cleanup_archive.md`
+- `2026-06-03--todo_v110_pre_cleanup_archive.md`
+- `2026-06-10--skills_todo_audit_closed.md`
+- `README.md`
+
+---
+
 ## 强制规则 (Mandatory Rules)
 
 **任何人（包括 AI Agent）向 docs/ 写入或新增文件时，必须遵守以下规则：**

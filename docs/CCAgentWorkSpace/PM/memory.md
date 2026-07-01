@@ -3579,3 +3579,9 @@
 - Change is mechanical rustfmt only: one `return Err(...)` expression and two test vector literals.
 - Verification passed: `cargo fmt -p openclaw_types -- --check` PASS; `cargo test -p openclaw_types risk --lib` `13 passed`; full `cargo test -p openclaw_types` PASS; dynamic docs trace `2 passed, 5 deselected` with 132 parsed titles and no missing Operator trace; diff check PASS.
 - Boundary unchanged: no trading logic change, risk semantics change, endpoint/IPC change, IBKR contact, connector runtime, secret access, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Docs README Index Gate Restoration
+
+- PM restored the full `tests/structure/test_docs_readme_index_static.py` gate by adding a stable `docs/README.md` index for `docs/agents/`, `../helper_scripts/SCRIPT_INDEX.md`, 19 `CCAgentWorkSpace/` role directories with MIT/BB boundary anchors, and top-level `docs/archive/` Markdown filenames.
+- Verification passed: full docs README/index structure pytest `7 passed`; dynamic PM plan / Operator trace title coverage PASS; diff check PASS.
+- Boundary unchanged: no production code change, trading logic change, endpoint/IPC change, IBKR contact, connector runtime, secret access, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
