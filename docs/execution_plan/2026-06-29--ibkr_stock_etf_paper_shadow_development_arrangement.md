@@ -7388,3 +7388,52 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不啟動 read-only probe runtime、不做
 broker session、不做 broker routing、不做 paper order route、不做 Linux runtime sync/restart、不授權
 tiny-live/live 或任何 Bybit behavior change。
+
+## 177. 2026-07-01 PM session source checkpoint：Stock/ETF Readonly Probe Result Import Authority Lineage Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_ibkr_readonly_probe_result_import_request` 的 authority、common lineage、
+kind-specific downstream lineage、timestamp/replay 與 no-side-effect boundary coverage。這不是 Rust
+production behavior change、不是 IBKR contact、不是 connector runtime、不是 read-only probe execution、
+不是 result import execution、不是 secret lookup、不是 broker session、不是 evidence/scorecard writer、
+不是 paper order route、不是 tiny-live/live gate；只把 future sanitized read-only result import request
+envelope 的 lane/broker/environment/action/operation/authority/effect、request/result/source lineage、
+downstream lineage、idempotency/replay 與 no-runtime/no-writer/no-order/no-Bybit cross-wire posture 變成
+exact-blocker acceptance test 與 source-static guard。
+
+已完成：
+
+- 在 `stock_etf_ibkr_readonly_probe_result_import_request_acceptance.rs` 新增
+  `result_import_request_rejects_each_authority_gap_independently`。
+- Acceptance 證明 contract id、source version、asset lane、broker、environment、read action、operation、
+  authority scope、effect-capable gaps 都會各自只產生單一對應 blocker。
+- 在同檔新增 `result_import_request_rejects_each_common_lineage_gap_independently`。
+- Acceptance 證明 result-import/request/probe ids、readonly probe request、session attestation、non-Bybit
+  allowlist、redaction/audit policies、payload/raw/redacted/source artifact hashes、result as-of、
+  idempotency、duplicate import、stale manual-review gates 都會各自只產生單一對應 blocker。
+- Acceptance 明確保留 missing import timestamp aggregate 行為：`import_requested_at_ms=0` 必須同時命中
+  `ImportRequestedAtMissing` 與 `ResultAsOfAfterImportRequested`。
+- 在同檔新增 `result_import_request_rejects_each_kind_lineage_gap_independently`。
+- Acceptance 證明 account cash ledger、market-data provenance、instrument identity、broker lifecycle event
+  log 的 contract/hash gaps 都會各自只產生單一對應 blocker。
+- 在同檔新增 `result_import_request_rejects_each_boundary_flag_independently`。
+- Acceptance 證明 IBKR contact、connector runtime、secret serialization、result import、evidence writer、
+  scorecard writer、DB apply、order route、paper submit、Bybit path reuse、live/tiny-live、margin/short/options/
+  CFD、account write、market-data entitlement purchase、Client Portal Web API、Python direct broker write flags
+  都會各自只產生單一對應 blocker。
+- 在 `test_stock_etf_ibkr_readonly_probe_result_import_request_source_static.py` 新增 default / accepted fixture
+  block parser，鎖住 default fail-closed posture 與 accepted fixture 不可硬編 runtime、secret、order、writer、
+  Bybit cross-wire 或 empty-common-lineage posture。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Readonly probe result-import source static pytest：`11 passed`。
+- Readonly probe result-import Rust acceptance：`11 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不啟動 read-only probe runtime、不執行
+result import、不做 broker session、不做 broker routing、不做 evidence/scorecard writer、不做 paper order
+route、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。

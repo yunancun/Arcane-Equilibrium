@@ -242,6 +242,26 @@ def _function_body(source: str, function_name: str, return_type: str) -> str:
     return match.group("body")
 
 
+def _default_block(source: str) -> str:
+    return source.split(
+        "impl Default for StockEtfIbkrReadonlyProbeResultImportRequestV1",
+        1,
+    )[1].split(
+        "impl StockEtfIbkrReadonlyProbeResultImportRequestV1",
+        1,
+    )[0]
+
+
+def _accepted_fixture_block(source: str) -> str:
+    return source.split(
+        "impl StockEtfIbkrReadonlyProbeResultImportRequestV1",
+        1,
+    )[1].split(
+        "pub fn validate(&self)",
+        1,
+    )[0]
+
+
 def test_stock_etf_readonly_probe_result_import_request_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
@@ -258,7 +278,7 @@ def test_stock_etf_readonly_probe_result_import_request_source_keeps_contract_su
 
 
 def test_stock_etf_readonly_probe_result_import_request_source_keeps_fail_closed_default() -> None:
-    source = _source()
+    source = _default_block(_source())
 
     assert "contract_id: String::new()" in source
     assert "source_version: 0" in source
@@ -291,7 +311,7 @@ def test_stock_etf_readonly_probe_result_import_request_source_keeps_fail_closed
 
 
 def test_stock_etf_readonly_probe_result_import_request_source_keeps_accepted_fixture_boundary() -> None:
-    source = _source()
+    source = _accepted_fixture_block(_source())
 
     assert (
         "contract_id: STOCK_ETF_IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID"
@@ -322,6 +342,95 @@ def test_stock_etf_readonly_probe_result_import_request_source_keeps_accepted_fi
     assert "audit_event_policy_contract_id: IBKR_AUDIT_EVENT_POLICY_CONTRACT_ID.to_string()" in source
     assert 'idempotency_key: "readonly_probe_result_import_idem_0001".to_string()' in source
     assert "..Self::default()" in source
+
+
+def test_stock_etf_readonly_probe_result_import_fixture_excludes_authority_cross_wire() -> None:
+    source = _source()
+    default_block = _default_block(source)
+    fixture = _accepted_fixture_block(source)
+
+    for required_default in (
+        "asset_lane: AssetLane::CryptoPerp",
+        "broker: Broker::Bybit",
+        "environment: BrokerEnvironment::LiveReservedDenied",
+        "api_action: NonBybitApiAction::ClientPortalWebApiUse",
+        "operation: BrokerOperation::TransferOrAccountWrite",
+        "authority_scope: AuthorityScope::Denied",
+        "result_import_request_id: String::new()",
+        "request_id: String::new()",
+        "probe_id: String::new()",
+        "result_as_of_ms: 0",
+        "import_requested_at_ms: 0",
+        "idempotency_key: String::new()",
+        "duplicate_import_detected: false",
+        "stale_result_without_manual_review: false",
+        "ibkr_contact_performed: false",
+        "connector_runtime_started: false",
+        "secret_content_serialized: false",
+        "result_import_performed: false",
+        "evidence_writer_started: false",
+        "scorecard_writer_started: false",
+        "db_apply_performed: false",
+        "order_routed: false",
+        "paper_order_submitted: false",
+        "bybit_path_reused: false",
+        "live_or_tiny_live_authorized: false",
+        "margin_short_options_cfd_requested: false",
+        "account_write_requested: false",
+        "market_data_entitlement_purchase_requested: false",
+        "client_portal_web_api_requested: false",
+        "python_direct_broker_write_requested: false",
+    ):
+        assert required_default in default_block
+
+    for forbidden in (
+        "asset_lane: AssetLane::CryptoPerp",
+        "broker: Broker::Bybit",
+        "environment: BrokerEnvironment::LiveReservedDenied",
+        "api_action: NonBybitApiAction::ClientPortalWebApiUse",
+        "api_action: NonBybitApiAction::PaperOrderSubmit",
+        "operation: BrokerOperation::TransferOrAccountWrite",
+        "operation: BrokerOperation::PaperOrderSubmit",
+        "operation: BrokerOperation::LiveOrderSubmit",
+        "authority_scope: AuthorityScope::Denied",
+        "authority_scope: AuthorityScope::PaperRehearsal",
+        "effect_capable: true",
+        "result_import_request_id: String::new()",
+        "request_id: String::new()",
+        "probe_id: String::new()",
+        "readonly_probe_request_hash: String::new()",
+        "session_attestation_hash: String::new()",
+        "api_allowlist_hash: String::new()",
+        "redaction_policy_hash: String::new()",
+        "audit_event_policy_hash: String::new()",
+        "health_snapshot_hash: String::new()",
+        "result_payload_hash: String::new()",
+        "raw_artifact_hash: String::new()",
+        "redacted_summary_hash: String::new()",
+        "source_artifact_hash: String::new()",
+        "result_as_of_ms: 0",
+        "import_requested_at_ms: 0",
+        "idempotency_key: String::new()",
+        "duplicate_import_detected: true",
+        "stale_result_without_manual_review: true",
+        "ibkr_contact_performed: true",
+        "connector_runtime_started: true",
+        "secret_content_serialized: true",
+        "result_import_performed: true",
+        "evidence_writer_started: true",
+        "scorecard_writer_started: true",
+        "db_apply_performed: true",
+        "order_routed: true",
+        "paper_order_submitted: true",
+        "bybit_path_reused: true",
+        "live_or_tiny_live_authorized: true",
+        "margin_short_options_cfd_requested: true",
+        "account_write_requested: true",
+        "market_data_entitlement_purchase_requested: true",
+        "client_portal_web_api_requested: true",
+        "python_direct_broker_write_requested: true",
+    ):
+        assert forbidden not in fixture
 
 
 def test_stock_etf_readonly_probe_result_import_request_source_keeps_action_and_operation_mapping() -> None:

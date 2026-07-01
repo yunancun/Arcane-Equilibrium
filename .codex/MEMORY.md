@@ -1527,3 +1527,11 @@ Do not paste long reports or stable architecture into TODO.
 - Paper-order action remains intentionally aggregate: it must trigger `ProbeActionMismatch` plus `ApiActionNotReadAllowed`, not a single-blocker claim.
 - Python source-static parsing now pins `Default` / `accepted_fixture` blocks so the accepted fixture cannot hardcode runtime, secret, order, Bybit cross-wire, or empty-lineage posture.
 - Verification passed: source static `9 passed`; readonly probe request acceptance `10 passed`; `cargo fmt -p openclaw_types -- --check` PASS; docs trace PASS; diff check PASS. This grants no Rust production code change, IPC change, IBKR contact, connector runtime, secret access, read-only probe execution, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Readonly Probe Result Import Authority Lineage Cross-Wire Guard
+
+- PM added exact-blocker Rust acceptance coverage for `StockEtfIbkrReadonlyProbeResultImportRequestV1` authority, common lineage, kind-specific downstream lineage, replay/timestamp gates, and boundary flags.
+- The guard proves lane/broker/environment/action/operation/authority/effect gaps, result-import/request/probe ids, readonly probe request, session/allowlist/redaction/audit/artifact lineage, idempotency/duplicate/stale gates, downstream account/market/instrument/lifecycle hashes, and contact/runtime/secret/writer/order/DB/Bybit/live/account-write/entitlement/client-portal/Python-write flags fail closed.
+- Missing import timestamp remains intentionally aggregate: `ImportRequestedAtMissing` plus `ResultAsOfAfterImportRequested`, not a single-blocker claim.
+- Python source-static parsing now pins `Default` / `accepted_fixture` blocks so the accepted fixture cannot hardcode runtime, secret, order, writer, Bybit cross-wire, or empty-common-lineage posture.
+- Verification passed: source static `11 passed`; readonly probe result-import acceptance `11 passed`; `cargo fmt -p openclaw_types -- --check` PASS; docs trace PASS; diff check PASS. This grants no Rust production code change, IPC change, IBKR contact, connector runtime, secret access, read-only probe execution, result import execution, DB/evidence/scorecard writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

@@ -329,6 +329,231 @@ fn result_import_request_rejects_probe_action_operation_cross_wire() {
 }
 
 #[test]
+fn result_import_request_rejects_each_authority_gap_independently() {
+    use StockEtfIbkrReadonlyProbeResultImportBlocker as Blocker;
+
+    let cases: [(
+        fn(&mut StockEtfIbkrReadonlyProbeResultImportRequestV1),
+        Blocker,
+    ); 9] = [
+        (
+            |request| {
+                request.contract_id =
+                    "stock_etf_ibkr_readonly_probe_result_import_request_v1_fixture".to_string()
+            },
+            Blocker::ContractIdMismatch,
+        ),
+        (
+            |request| request.source_version = 2,
+            Blocker::SourceVersionMismatch,
+        ),
+        (
+            |request| request.asset_lane = AssetLane::CryptoPerp,
+            Blocker::WrongAssetLane,
+        ),
+        (
+            |request| request.broker = Broker::Bybit,
+            Blocker::WrongBroker,
+        ),
+        (
+            |request| request.environment = BrokerEnvironment::LiveReservedDenied,
+            Blocker::EnvironmentDenied,
+        ),
+        (
+            |request| request.api_action = NonBybitApiAction::AccountSummarySnapshotRead,
+            Blocker::ProbeActionMismatch,
+        ),
+        (
+            |request| request.operation = BrokerOperation::AccountSnapshotRead,
+            Blocker::OperationMismatch,
+        ),
+        (
+            |request| request.authority_scope = AuthorityScope::PaperRehearsal,
+            Blocker::AuthorityScopeMismatch,
+        ),
+        (
+            |request| request.effect_capable = true,
+            Blocker::EffectCapabilityPresent,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut request = StockEtfIbkrReadonlyProbeResultImportRequestV1::accepted_fixture();
+        mutate(&mut request);
+        assert_single_blocker(request, blocker);
+    }
+}
+
+#[test]
+fn result_import_request_rejects_each_common_lineage_gap_independently() {
+    use StockEtfIbkrReadonlyProbeResultImportBlocker as Blocker;
+
+    let cases: [(
+        fn(&mut StockEtfIbkrReadonlyProbeResultImportRequestV1),
+        Blocker,
+    ); 23] = [
+        (
+            |request| request.result_import_request_id.clear(),
+            Blocker::ResultImportRequestIdMissing,
+        ),
+        (
+            |request| request.request_id.clear(),
+            Blocker::RequestIdMissing,
+        ),
+        (|request| request.probe_id.clear(), Blocker::ProbeIdMissing),
+        (
+            |request| request.readonly_probe_request_contract_id = "wrong".to_string(),
+            Blocker::ReadonlyProbeRequestContractIdMismatch,
+        ),
+        (
+            |request| request.readonly_probe_request_hash.clear(),
+            Blocker::ReadonlyProbeRequestHashInvalid,
+        ),
+        (
+            |request| request.session_attestation_contract_id = "wrong".to_string(),
+            Blocker::SessionAttestationContractIdMismatch,
+        ),
+        (
+            |request| request.session_attestation_hash.clear(),
+            Blocker::SessionAttestationHashInvalid,
+        ),
+        (
+            |request| request.api_allowlist_contract_id = "wrong".to_string(),
+            Blocker::ApiAllowlistContractIdMismatch,
+        ),
+        (
+            |request| request.api_allowlist_hash.clear(),
+            Blocker::ApiAllowlistHashInvalid,
+        ),
+        (
+            |request| request.redaction_policy_contract_id = "wrong".to_string(),
+            Blocker::RedactionPolicyContractIdMismatch,
+        ),
+        (
+            |request| request.redaction_policy_hash.clear(),
+            Blocker::RedactionPolicyHashInvalid,
+        ),
+        (
+            |request| request.audit_event_policy_contract_id = "wrong".to_string(),
+            Blocker::AuditEventPolicyContractIdMismatch,
+        ),
+        (
+            |request| request.audit_event_policy_hash.clear(),
+            Blocker::AuditEventPolicyHashInvalid,
+        ),
+        (
+            |request| request.health_snapshot_hash.clear(),
+            Blocker::HealthSnapshotHashInvalid,
+        ),
+        (
+            |request| request.result_payload_hash.clear(),
+            Blocker::ResultPayloadHashInvalid,
+        ),
+        (
+            |request| request.raw_artifact_hash.clear(),
+            Blocker::RawArtifactHashInvalid,
+        ),
+        (
+            |request| request.redacted_summary_hash.clear(),
+            Blocker::RedactedSummaryHashInvalid,
+        ),
+        (
+            |request| request.source_artifact_hash.clear(),
+            Blocker::SourceArtifactHashInvalid,
+        ),
+        (
+            |request| request.result_as_of_ms = 0,
+            Blocker::ResultAsOfMissing,
+        ),
+        (
+            |request| request.result_as_of_ms = request.import_requested_at_ms + 1,
+            Blocker::ResultAsOfAfterImportRequested,
+        ),
+        (
+            |request| request.idempotency_key.clear(),
+            Blocker::IdempotencyKeyMissing,
+        ),
+        (
+            |request| request.duplicate_import_detected = true,
+            Blocker::DuplicateImportDetected,
+        ),
+        (
+            |request| request.stale_result_without_manual_review = true,
+            Blocker::StaleResultWithoutManualReview,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut request = StockEtfIbkrReadonlyProbeResultImportRequestV1::accepted_fixture();
+        mutate(&mut request);
+        assert_single_blocker(request, blocker);
+    }
+
+    let mut missing_import_time =
+        StockEtfIbkrReadonlyProbeResultImportRequestV1::accepted_fixture();
+    missing_import_time.import_requested_at_ms = 0;
+    let verdict = missing_import_time.validate();
+    assert!(!verdict.accepted);
+    assert!(has(&verdict, Blocker::ImportRequestedAtMissing));
+    assert!(has(&verdict, Blocker::ResultAsOfAfterImportRequested));
+    assert_eq!(
+        verdict.blockers.len(),
+        2,
+        "expected timestamp aggregate only, got {:?}",
+        verdict.blockers
+    );
+}
+
+#[test]
+fn result_import_request_rejects_each_kind_lineage_gap_independently() {
+    use StockEtfIbkrReadonlyProbeResultImportBlocker as Blocker;
+
+    let mut account_contract = accepted_account_result_import();
+    account_contract.account_cash_ledger_contract_id = "wrong".to_string();
+    assert_single_blocker(
+        account_contract,
+        Blocker::AccountCashLedgerContractIdMismatch,
+    );
+
+    let mut account_hash = accepted_account_result_import();
+    account_hash.account_cash_ledger_hash.clear();
+    assert_single_blocker(account_hash, Blocker::AccountCashLedgerHashInvalid);
+
+    let mut market_contract = accepted_market_result_import();
+    market_contract.market_data_provenance_contract_id = "wrong".to_string();
+    assert_single_blocker(
+        market_contract,
+        Blocker::MarketDataProvenanceContractIdMismatch,
+    );
+
+    let mut market_hash = accepted_market_result_import();
+    market_hash.market_data_provenance_hash.clear();
+    assert_single_blocker(market_hash, Blocker::MarketDataProvenanceHashInvalid);
+
+    let mut instrument_contract = accepted_contract_details_result_import();
+    instrument_contract.instrument_identity_contract_id = "wrong".to_string();
+    assert_single_blocker(
+        instrument_contract,
+        Blocker::InstrumentIdentityContractIdMismatch,
+    );
+
+    let mut instrument_hash = accepted_contract_details_result_import();
+    instrument_hash.instrument_identity_hash.clear();
+    assert_single_blocker(instrument_hash, Blocker::InstrumentIdentityHashInvalid);
+
+    let mut lifecycle_contract = accepted_open_orders_result_import();
+    lifecycle_contract.broker_lifecycle_event_log_contract_id = "wrong".to_string();
+    assert_single_blocker(
+        lifecycle_contract,
+        Blocker::BrokerLifecycleEventLogContractIdMismatch,
+    );
+
+    let mut lifecycle_hash = accepted_open_orders_result_import();
+    lifecycle_hash.broker_lifecycle_event_log_hash.clear();
+    assert_single_blocker(lifecycle_hash, Blocker::BrokerLifecycleEventLogHashInvalid);
+}
+
+#[test]
 fn result_import_request_rejects_boundary_and_replay_regressions() {
     let bad = StockEtfIbkrReadonlyProbeResultImportRequestV1 {
         duplicate_import_detected: true,
@@ -428,6 +653,84 @@ fn result_import_request_rejects_boundary_and_replay_regressions() {
 }
 
 #[test]
+fn result_import_request_rejects_each_boundary_flag_independently() {
+    use StockEtfIbkrReadonlyProbeResultImportBlocker as Blocker;
+
+    let cases: [(
+        fn(&mut StockEtfIbkrReadonlyProbeResultImportRequestV1),
+        Blocker,
+    ); 16] = [
+        (
+            |request| request.ibkr_contact_performed = true,
+            Blocker::IbkrContactPerformed,
+        ),
+        (
+            |request| request.connector_runtime_started = true,
+            Blocker::ConnectorRuntimeStarted,
+        ),
+        (
+            |request| request.secret_content_serialized = true,
+            Blocker::SecretContentSerialized,
+        ),
+        (
+            |request| request.result_import_performed = true,
+            Blocker::ResultImportPerformed,
+        ),
+        (
+            |request| request.evidence_writer_started = true,
+            Blocker::EvidenceWriterStarted,
+        ),
+        (
+            |request| request.scorecard_writer_started = true,
+            Blocker::ScorecardWriterStarted,
+        ),
+        (
+            |request| request.db_apply_performed = true,
+            Blocker::DbApplyPerformed,
+        ),
+        (|request| request.order_routed = true, Blocker::OrderRouted),
+        (
+            |request| request.paper_order_submitted = true,
+            Blocker::PaperOrderSubmitted,
+        ),
+        (
+            |request| request.bybit_path_reused = true,
+            Blocker::BybitPathReused,
+        ),
+        (
+            |request| request.live_or_tiny_live_authorized = true,
+            Blocker::LiveOrTinyLiveAuthorized,
+        ),
+        (
+            |request| request.margin_short_options_cfd_requested = true,
+            Blocker::MarginShortOptionsCfdRequested,
+        ),
+        (
+            |request| request.account_write_requested = true,
+            Blocker::AccountWriteRequested,
+        ),
+        (
+            |request| request.market_data_entitlement_purchase_requested = true,
+            Blocker::MarketDataEntitlementPurchaseRequested,
+        ),
+        (
+            |request| request.client_portal_web_api_requested = true,
+            Blocker::ClientPortalWebApiRequested,
+        ),
+        (
+            |request| request.python_direct_broker_write_requested = true,
+            Blocker::PythonDirectBrokerWriteRequested,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut request = StockEtfIbkrReadonlyProbeResultImportRequestV1::accepted_fixture();
+        mutate(&mut request);
+        assert_single_blocker(request, blocker);
+    }
+}
+
+#[test]
 fn result_import_request_template_is_blocked_parseable_and_secret_free() {
     let srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -460,4 +763,65 @@ fn has(
     blocker: StockEtfIbkrReadonlyProbeResultImportBlocker,
 ) -> bool {
     verdict.blockers.contains(&blocker)
+}
+
+fn accepted_account_result_import() -> StockEtfIbkrReadonlyProbeResultImportRequestV1 {
+    StockEtfIbkrReadonlyProbeResultImportRequestV1 {
+        probe_kind: StockEtfIbkrReadonlyProbeKind::AccountSummarySnapshot,
+        api_action: NonBybitApiAction::AccountSummarySnapshotRead,
+        operation: BrokerOperation::AccountSnapshotRead,
+        account_cash_ledger_contract_id: BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID
+            .to_string(),
+        account_cash_ledger_hash: "b".repeat(64),
+        ..StockEtfIbkrReadonlyProbeResultImportRequestV1::accepted_fixture()
+    }
+}
+
+fn accepted_market_result_import() -> StockEtfIbkrReadonlyProbeResultImportRequestV1 {
+    StockEtfIbkrReadonlyProbeResultImportRequestV1 {
+        probe_kind: StockEtfIbkrReadonlyProbeKind::MarketDataSnapshot,
+        api_action: NonBybitApiAction::MarketDataSnapshotRead,
+        operation: BrokerOperation::MarketDataRead,
+        market_data_provenance_contract_id: STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID.to_string(),
+        market_data_provenance_hash: "c".repeat(64),
+        ..StockEtfIbkrReadonlyProbeResultImportRequestV1::accepted_fixture()
+    }
+}
+
+fn accepted_contract_details_result_import() -> StockEtfIbkrReadonlyProbeResultImportRequestV1 {
+    StockEtfIbkrReadonlyProbeResultImportRequestV1 {
+        probe_kind: StockEtfIbkrReadonlyProbeKind::ContractDetails,
+        api_action: NonBybitApiAction::ContractDetailsRead,
+        operation: BrokerOperation::ContractDetailsRead,
+        instrument_identity_contract_id: STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID.to_string(),
+        instrument_identity_hash: "d".repeat(64),
+        ..StockEtfIbkrReadonlyProbeResultImportRequestV1::accepted_fixture()
+    }
+}
+
+fn accepted_open_orders_result_import() -> StockEtfIbkrReadonlyProbeResultImportRequestV1 {
+    StockEtfIbkrReadonlyProbeResultImportRequestV1 {
+        probe_kind: StockEtfIbkrReadonlyProbeKind::OpenPaperOrders,
+        api_action: NonBybitApiAction::OpenPaperOrdersRead,
+        operation: BrokerOperation::AccountSnapshotRead,
+        broker_lifecycle_event_log_contract_id: BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID.to_string(),
+        broker_lifecycle_event_log_hash: "e".repeat(64),
+        ..StockEtfIbkrReadonlyProbeResultImportRequestV1::accepted_fixture()
+    }
+}
+
+fn assert_single_blocker(
+    request: StockEtfIbkrReadonlyProbeResultImportRequestV1,
+    blocker: StockEtfIbkrReadonlyProbeResultImportBlocker,
+) {
+    let verdict = request.validate();
+
+    assert!(!verdict.accepted);
+    assert_eq!(
+        verdict.blockers,
+        vec![blocker],
+        "expected only {:?}, got {:?}",
+        blocker,
+        verdict.blockers
+    );
 }
