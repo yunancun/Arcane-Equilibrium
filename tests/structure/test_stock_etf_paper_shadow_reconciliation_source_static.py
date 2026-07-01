@@ -236,6 +236,16 @@ def test_stock_etf_paper_shadow_reconciliation_source_keeps_accepted_readonly_sh
     assert "..Self::default()" in source
 
 
+def test_stock_etf_paper_shadow_reconciliation_source_excludes_write_shadow_and_effect_crosswire() -> None:
+    source = _source()
+
+    assert "AuthorityScope::PaperRehearsal" not in source
+    assert "AuthorityScope::ShadowOnly" not in source
+    assert "effect_capable: true" not in source
+    assert 'scope: "paper_order"' not in source
+    assert 'scope: "shadow_signal"' not in source
+
+
 def test_stock_etf_paper_shadow_reconciliation_source_keeps_lineage_validation() -> None:
     source = _source()
 

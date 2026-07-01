@@ -3836,6 +3836,35 @@ Verification 已過：
 沒有 result import、沒有 DB/evidence writer、沒有 paper order route、沒有 tiny-live/live authorization，
 也沒有改動 Bybit live/demo execution 行為。
 
+## 2026-07-01 Operator Update — Stock/ETF Paper Shadow Reconciliation Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Paper Shadow Reconciliation Cross-Wire Guard`。
+
+這個 checkpoint 補強 `stock_etf_paper_shadow_reconciliation` 的 scope / AuthorityScope /
+effect-capable cross-wire coverage。新增 Rust acceptance 證明 reconciliation scope 混入
+`shadow_signal` 只會觸發 `ScopeMismatch`；authority 混入 `ShadowOnly` 只會觸發
+`AuthorityScopeMismatch`；paper-write scope / `PaperRehearsal` / `effect_capable=true` 污染會同時
+產生 scope、authority、effect blockers；shadow-only scope / authority 污染會產生 scope、authority
+blockers 且不誤報 effect blocker。
+
+同時新增 Python source-static cross-wire guard，禁止 `PaperRehearsal`、`ShadowOnly`、
+`effect_capable=true`、paper-order scope、shadow-signal scope 混入 reconciliation source。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Paper-shadow reconciliation source static pytest：`8 passed`
+- Paper-shadow reconciliation Rust acceptance：`6 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 fill import execution、
+沒有 shadow fill generation、沒有 reconciliation writer、沒有 result import、沒有 DB/evidence writer、
+沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
 ## 2026-07-01 Operator Update — Stock/ETF Shadow Signal Request Cross-Wire Guard
 
 本 session 已完成下一個 test-only/source-static checkpoint：
