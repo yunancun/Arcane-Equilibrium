@@ -250,6 +250,51 @@ fn instrument_identity_rejects_contact_secret_and_boundary_regressions() {
 }
 
 #[test]
+fn instrument_identity_rejects_live_margin_secret_and_authority_cross_wire_independently() {
+    let mut bybit = StockEtfInstrumentIdentityV1::accepted_fixture();
+    bybit.bybit_live_execution_unchanged = false;
+    assert_single_blocker(
+        bybit,
+        StockEtfInstrumentIdentityBlocker::BybitLiveExecutionNotProtected,
+    );
+
+    let mut ibkr_live = StockEtfInstrumentIdentityV1::accepted_fixture();
+    ibkr_live.ibkr_live_denied = false;
+    assert_single_blocker(
+        ibkr_live,
+        StockEtfInstrumentIdentityBlocker::IbkrLiveNotDenied,
+    );
+
+    let mut margin_short = StockEtfInstrumentIdentityV1::accepted_fixture();
+    margin_short.margin_short_denied = false;
+    assert_single_blocker(
+        margin_short,
+        StockEtfInstrumentIdentityBlocker::MarginShortNotDenied,
+    );
+
+    let mut options_cfd = StockEtfInstrumentIdentityV1::accepted_fixture();
+    options_cfd.options_cfd_denied = false;
+    assert_single_blocker(
+        options_cfd,
+        StockEtfInstrumentIdentityBlocker::OptionsCfdNotDenied,
+    );
+
+    let mut ibkr_contact = StockEtfInstrumentIdentityV1::accepted_fixture();
+    ibkr_contact.ibkr_contact_performed = true;
+    assert_single_blocker(
+        ibkr_contact,
+        StockEtfInstrumentIdentityBlocker::IbkrContactPerformed,
+    );
+
+    let mut secret = StockEtfInstrumentIdentityV1::accepted_fixture();
+    secret.secret_content_serialized = true;
+    assert_single_blocker(
+        secret,
+        StockEtfInstrumentIdentityBlocker::SecretContentSerialized,
+    );
+}
+
+#[test]
 fn blocked_template_is_parseable_and_secret_free() {
     let srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -289,4 +334,19 @@ fn has(
     blocker: StockEtfInstrumentIdentityBlocker,
 ) -> bool {
     blockers.contains(&blocker)
+}
+
+fn assert_single_blocker(
+    identity: StockEtfInstrumentIdentityV1,
+    blocker: StockEtfInstrumentIdentityBlocker,
+) {
+    let verdict = identity.validate();
+
+    assert!(!verdict.accepted);
+    assert_eq!(
+        verdict.blockers,
+        vec![blocker],
+        "expected only {blocker:?}; blockers: {:?}",
+        verdict.blockers
+    );
 }

@@ -3777,3 +3777,11 @@
 - Source-static guard now rejects hardcoded crypto/Bybit lane, missing universe identity/hash/as-of/count, missing freeze/survivorship controls, Bybit changed, IBKR live not denied, IBKR contact, and secret serialization in the accepted fixture, and pins default fail-closed posture.
 - Verification passed: targeted rustfmt check PASS; PIT universe source static `9 passed`; PIT universe Rust acceptance `8 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
 - Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, market-data collection, scorecard writer, DB/evidence writer, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Instrument Identity Authority Cross-Wire Guard
+
+- PM added test-only/source-static coverage for `StockEtfInstrumentIdentityV1` Bybit protection, IBKR live-denial, cash-only denial, contact, and secret posture.
+- Acceptance now independently rejects Bybit-live protection loss, IBKR live not denied, margin/short not denied, options/CFD not denied, IBKR contact, and secret serialization via exact single blockers.
+- Source-static guard now rejects hardcoded crypto/Bybit lane, missing instrument identity/as-of/calendar, Bybit changed, IBKR live not denied, margin/short/options/CFD not denied, IBKR contact, and secret serialization in the accepted fixture, and pins default fail-closed posture.
+- Verification passed: targeted rustfmt check PASS; instrument identity source static `8 passed`; instrument identity Rust acceptance `9 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
+- Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, market-data subscription, scorecard writer, DB/evidence writer, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.

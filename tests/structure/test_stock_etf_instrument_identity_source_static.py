@@ -239,6 +239,62 @@ def test_stock_etf_instrument_identity_source_keeps_accepted_fixture_boundary() 
     assert "secret_content_serialized: false" in source
 
 
+def test_stock_etf_instrument_identity_fixture_excludes_live_margin_and_secret_crosswire() -> None:
+    source = _source()
+    fixture = source.split("impl StockEtfInstrumentIdentityV1", 1)[1].split(
+        "pub fn validate(&self)",
+        1,
+    )[0]
+    default_impl = source.split("impl Default for StockEtfInstrumentIdentityV1", 1)[1].split(
+        "impl StockEtfInstrumentIdentityV1",
+        1,
+    )[0]
+
+    for forbidden in (
+        "asset_lane: AssetLane::CryptoPerp",
+        "broker: Broker::Bybit",
+        "instrument_kind: InstrumentKind::CryptoPerp",
+        "symbol: String::new()",
+        "listing_venue: StockEtfListingVenue::UnknownDenied",
+        "primary_exchange: StockEtfListingVenue::UnknownDenied",
+        "currency: StockEtfCurrency::UnknownDenied",
+        "tradability_status: StockEtfTradabilityStatus::UnknownDenied",
+        "priips_kid_status: StockEtfPriipsKidStatus::UnknownDenied",
+        "fractional_policy_recorded: false",
+        "point_in_time_asof_ms: 0",
+        "market_calendar_id: String::new()",
+        "bybit_live_execution_unchanged: false",
+        "ibkr_live_denied: false",
+        "margin_short_denied: false",
+        "options_cfd_denied: false",
+        "ibkr_contact_performed: true",
+        "secret_content_serialized: true",
+    ):
+        assert forbidden not in fixture
+
+    for fail_closed in (
+        "asset_lane: AssetLane::CryptoPerp",
+        "broker: Broker::Bybit",
+        "instrument_kind: InstrumentKind::CryptoPerp",
+        "symbol: String::new()",
+        "listing_venue: StockEtfListingVenue::UnknownDenied",
+        "primary_exchange: StockEtfListingVenue::UnknownDenied",
+        "currency: StockEtfCurrency::UnknownDenied",
+        "tradability_status: StockEtfTradabilityStatus::UnknownDenied",
+        "priips_kid_status: StockEtfPriipsKidStatus::UnknownDenied",
+        "fractional_policy_recorded: false",
+        "point_in_time_asof_ms: 0",
+        "market_calendar_id: String::new()",
+        "bybit_live_execution_unchanged: false",
+        "ibkr_live_denied: false",
+        "margin_short_denied: false",
+        "options_cfd_denied: false",
+        "ibkr_contact_performed: false",
+        "secret_content_serialized: false",
+    ):
+        assert fail_closed in default_impl
+
+
 def test_stock_etf_instrument_identity_source_keeps_validation_matrix() -> None:
     source = _source()
 
