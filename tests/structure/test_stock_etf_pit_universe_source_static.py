@@ -328,6 +328,79 @@ def test_stock_etf_pit_universe_source_keeps_universe_validation_matrix() -> Non
     assert "self.secret_content_serialized" in source
 
 
+def test_stock_etf_pit_universe_source_keeps_blocker_emit_order() -> None:
+    source = _source()
+    validate_body = source.split("pub fn validate(&self)", 1)[1].split(
+        "StockEtfPitUniverseVerdict::new",
+        1,
+    )[0]
+    constituent_body = source.split("fn validate_constituent(", 1)[1].split(
+        "fn validate_required_hashes(",
+        1,
+    )[0]
+    hash_body = source.split("fn validate_required_hashes(", 1)[1].split(
+        "fn valid_identifier(",
+        1,
+    )[0]
+
+    _assert_order(
+        validate_body,
+        (
+            "blockers.push(Blocker::ContractIdMismatch);",
+            "blockers.push(Blocker::SourceVersionMismatch);",
+            "blockers.push(Blocker::WrongAssetLane);",
+            "blockers.push(Blocker::WrongBroker);",
+            "blockers.push(Blocker::UniverseIdInvalid);",
+            "blockers.push(Blocker::UniverseVersionInvalid);",
+            "blockers.push(Blocker::UniverseHashInvalid);",
+            "blockers.push(Blocker::PointInTimeAsofMissing);",
+            "blockers.push(Blocker::EffectiveFromMissing);",
+            "blockers.push(Blocker::EffectiveWindowInvalid);",
+            "blockers.push(Blocker::ConstituentCountMissing);",
+            "blockers.push(Blocker::ConstituentCountMismatch);",
+            "blockers.push(Blocker::MaxConstituentsInvalid);",
+            "blockers.push(Blocker::UniverseTooBroadForV1);",
+            "validate_constituent(constituent, &mut blockers)",
+            "validate_required_hashes(self, &mut blockers)",
+            "blockers.push(Blocker::UniverseNotFrozenForEvidenceClock);",
+            "blockers.push(Blocker::SurvivorshipControlsMissing);",
+            "blockers.push(Blocker::BybitLiveExecutionNotProtected);",
+            "blockers.push(Blocker::IbkrLiveNotDenied);",
+            "blockers.push(Blocker::IbkrContactPerformed);",
+            "blockers.push(Blocker::SecretContentSerialized);",
+        ),
+    )
+    _assert_order(
+        constituent_body,
+        (
+            "blockers.push(Blocker::ConstituentSymbolInvalid);",
+            "blockers.push(Blocker::ConstituentKindDenied);",
+            "blockers.push(Blocker::ConstituentIdentityHashInvalid);",
+            "blockers.push(Blocker::ConstituentVenueDenied);",
+            "blockers.push(Blocker::ConstituentCashVenueDenied);",
+            "blockers.push(Blocker::ConstituentCurrencyDenied);",
+            "blockers.push(Blocker::ConstituentNotTradable);",
+            "blockers.push(Blocker::ConstituentPriipsBlocked);",
+            "blockers.push(Blocker::ConstituentNotIncluded);",
+            "blockers.push(Blocker::IncludedConstituentHasExclusionReason);",
+        ),
+    )
+    _assert_order(
+        hash_body,
+        (
+            "blockers.push(Blocker::InclusionRuleHashInvalid);",
+            "blockers.push(Blocker::ExclusionRuleHashInvalid);",
+            "blockers.push(Blocker::LiquidityScreenHashInvalid);",
+            "blockers.push(Blocker::TradabilityScreenHashInvalid);",
+            "blockers.push(Blocker::PriipsScreenHashInvalid);",
+            "blockers.push(Blocker::DelistedInactivePolicyHashInvalid);",
+            "blockers.push(Blocker::CorporateActionVersionHashInvalid);",
+            "blockers.push(Blocker::MarketCalendarHashInvalid);",
+            "blockers.push(Blocker::SourceArtifactHashInvalid);",
+        ),
+    )
+
+
 def test_stock_etf_pit_universe_source_keeps_constituent_and_hash_checks() -> None:
     source = _source()
 
@@ -377,3 +450,11 @@ def test_stock_etf_pit_universe_source_has_no_runtime_secret_order_or_bybit_clie
             violations.append(f"{PIT_UNIVERSE}: contains forbidden token {token!r}")
 
     assert violations == []
+
+
+def _assert_order(source: str, tokens: tuple[str, ...]) -> None:
+    cursor = -1
+    for token in tokens:
+        index = source.find(token, cursor + 1)
+        assert index > cursor, token
+        cursor = index

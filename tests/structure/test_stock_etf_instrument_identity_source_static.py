@@ -326,6 +326,57 @@ def test_stock_etf_instrument_identity_source_keeps_validation_matrix() -> None:
     assert "self.secret_content_serialized" in source
 
 
+def test_stock_etf_instrument_identity_source_keeps_blocker_emit_order() -> None:
+    source = _source()
+    validate_body = source.split("pub fn validate(&self)", 1)[1].split(
+        "StockEtfInstrumentIdentityVerdict::new",
+        1,
+    )[0]
+    cash_rules = source.split("fn validate_cash_venue_pair(", 1)[1].split(
+        "fn valid_symbol(",
+        1,
+    )[0]
+
+    _assert_order(
+        validate_body,
+        (
+            "blockers.push(Blocker::ContractIdMismatch);",
+            "blockers.push(Blocker::SourceVersionMismatch);",
+            "blockers.push(Blocker::WrongAssetLane);",
+            "blockers.push(Blocker::WrongBroker);",
+            "blockers.push(Blocker::InstrumentKindDenied);",
+            "blockers.push(Blocker::SymbolInvalid);",
+            "blockers.push(Blocker::ListingVenueDenied);",
+            "blockers.push(Blocker::PrimaryExchangeDenied);",
+            "validate_cash_venue_pair(",
+            "blockers.push(Blocker::CurrencyDenied);",
+            "blockers.push(Blocker::TradabilityNotTradable);",
+            "blockers.push(Blocker::PriipsKidBlocked);",
+            "blockers.push(Blocker::FractionalPolicyMissing);",
+            "blockers.push(Blocker::PointInTimeAsofMissing);",
+            "blockers.push(Blocker::MarketCalendarIdMissing);",
+            "blockers.push(Blocker::MarketCalendarHashInvalid);",
+            "blockers.push(Blocker::BrokerContractDetailsHashInvalid);",
+            "blockers.push(Blocker::InstrumentIdentityHashInvalid);",
+            "blockers.push(Blocker::CorporateActionAdjustmentHashInvalid);",
+            "blockers.push(Blocker::SourceArtifactHashInvalid);",
+            "blockers.push(Blocker::BybitLiveExecutionNotProtected);",
+            "blockers.push(Blocker::IbkrLiveNotDenied);",
+            "blockers.push(Blocker::MarginShortNotDenied);",
+            "blockers.push(Blocker::OptionsCfdNotDenied);",
+            "blockers.push(Blocker::IbkrContactPerformed);",
+            "blockers.push(Blocker::SecretContentSerialized);",
+        ),
+    )
+    _assert_order(
+        cash_rules,
+        (
+            "blockers.push(Blocker::CashInstrumentVenueMismatch);",
+            "blockers.push(Blocker::NonCashInstrumentVenueMismatch);",
+        ),
+    )
+
+
 def test_stock_etf_instrument_identity_source_keeps_cash_and_symbol_rules() -> None:
     source = _source()
 
@@ -348,3 +399,11 @@ def test_stock_etf_instrument_identity_source_has_no_runtime_secret_order_or_byb
             violations.append(f"{INSTRUMENT_IDENTITY}: contains forbidden token {token!r}")
 
     assert violations == []
+
+
+def _assert_order(source: str, tokens: tuple[str, ...]) -> None:
+    cursor = -1
+    for token in tokens:
+        index = source.find(token, cursor + 1)
+        assert index > cursor, token
+        cursor = index

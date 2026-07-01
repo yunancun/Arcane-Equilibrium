@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-01 Stock/ETF Data Foundation Exact Blocker Guard
+
+- PM tightened source-only data foundation acceptance coverage to exact ordered blocker vectors for `StockEtfInstrumentIdentityV1`, `StockEtfPitUniverseV1`, and `StockEtfReferenceDataSourcesV1` aggregate failure cases.
+- Source-static guards now pin validator blocker emit order across identity validation/cash venue rules, PIT universe top-level/constituent/hash validators, and reference-data corporate-action/FX/fee-tax validators.
+- Verification passed: data foundation source static `28`, Rust acceptance `24`, full `cargo test -p openclaw_types`, cargo fmt, docs trace, and diff-check. Boundary unchanged: no Rust production code change, IBKR contact, connector/runtime, secret access/serialization, data ingestion, paper order route, evidence/scorecard/DB writer, tiny-live/live, or Bybit behavior change.
+
 ## 2026-07-01 Standing Auth Readiness Cycle Source Fix
 
 - PM fixed the standing Demo authorization refresh guardrail cycle: default still requires bounded readiness READY, while explicit `--allow-expired-standing-auth-readiness-only` accepts only the single combined blocker `standing_authorization:standing_auth_expired`.

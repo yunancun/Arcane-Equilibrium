@@ -18,34 +18,34 @@ fn default_instrument_identity_blocks_before_contract_details_can_be_used() {
     let verdict = identity.validate();
 
     assert!(!verdict.accepted);
-    assert!(has(
-        &verdict.blockers,
-        StockEtfInstrumentIdentityBlocker::ContractIdMismatch
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfInstrumentIdentityBlocker::SourceVersionMismatch
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfInstrumentIdentityBlocker::WrongAssetLane
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfInstrumentIdentityBlocker::WrongBroker
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfInstrumentIdentityBlocker::InstrumentKindDenied
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfInstrumentIdentityBlocker::SymbolInvalid
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfInstrumentIdentityBlocker::TradabilityNotTradable
-    ));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            StockEtfInstrumentIdentityBlocker::ContractIdMismatch,
+            StockEtfInstrumentIdentityBlocker::SourceVersionMismatch,
+            StockEtfInstrumentIdentityBlocker::WrongAssetLane,
+            StockEtfInstrumentIdentityBlocker::WrongBroker,
+            StockEtfInstrumentIdentityBlocker::InstrumentKindDenied,
+            StockEtfInstrumentIdentityBlocker::SymbolInvalid,
+            StockEtfInstrumentIdentityBlocker::ListingVenueDenied,
+            StockEtfInstrumentIdentityBlocker::PrimaryExchangeDenied,
+            StockEtfInstrumentIdentityBlocker::CurrencyDenied,
+            StockEtfInstrumentIdentityBlocker::TradabilityNotTradable,
+            StockEtfInstrumentIdentityBlocker::PriipsKidBlocked,
+            StockEtfInstrumentIdentityBlocker::FractionalPolicyMissing,
+            StockEtfInstrumentIdentityBlocker::PointInTimeAsofMissing,
+            StockEtfInstrumentIdentityBlocker::MarketCalendarIdMissing,
+            StockEtfInstrumentIdentityBlocker::MarketCalendarHashInvalid,
+            StockEtfInstrumentIdentityBlocker::BrokerContractDetailsHashInvalid,
+            StockEtfInstrumentIdentityBlocker::InstrumentIdentityHashInvalid,
+            StockEtfInstrumentIdentityBlocker::CorporateActionAdjustmentHashInvalid,
+            StockEtfInstrumentIdentityBlocker::SourceArtifactHashInvalid,
+            StockEtfInstrumentIdentityBlocker::BybitLiveExecutionNotProtected,
+            StockEtfInstrumentIdentityBlocker::IbkrLiveNotDenied,
+            StockEtfInstrumentIdentityBlocker::MarginShortNotDenied,
+            StockEtfInstrumentIdentityBlocker::OptionsCfdNotDenied,
+        ]
+    );
 }
 
 #[test]
@@ -82,14 +82,13 @@ fn instrument_identity_requires_exact_contract_id_and_source_version() {
     };
     let blockers = identity.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfInstrumentIdentityBlocker::ContractIdMismatch
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfInstrumentIdentityBlocker::SourceVersionMismatch
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfInstrumentIdentityBlocker::ContractIdMismatch,
+            StockEtfInstrumentIdentityBlocker::SourceVersionMismatch,
+        ]
+    );
 }
 
 #[test]
@@ -104,26 +103,16 @@ fn instrument_identity_rejects_wrong_kind_symbol_venue_and_currency() {
     };
     let blockers = identity.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfInstrumentIdentityBlocker::InstrumentKindDenied
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfInstrumentIdentityBlocker::SymbolInvalid
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfInstrumentIdentityBlocker::ListingVenueDenied
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfInstrumentIdentityBlocker::PrimaryExchangeDenied
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfInstrumentIdentityBlocker::CurrencyDenied
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfInstrumentIdentityBlocker::InstrumentKindDenied,
+            StockEtfInstrumentIdentityBlocker::SymbolInvalid,
+            StockEtfInstrumentIdentityBlocker::ListingVenueDenied,
+            StockEtfInstrumentIdentityBlocker::PrimaryExchangeDenied,
+            StockEtfInstrumentIdentityBlocker::CurrencyDenied,
+        ]
+    );
 }
 
 #[test]
@@ -135,20 +124,20 @@ fn cash_and_non_cash_venue_rules_are_separate() {
         symbol: "USD".to_string(),
         ..StockEtfInstrumentIdentityV1::accepted_fixture()
     };
-    assert!(has(
-        &cash_wrong.validate().blockers,
-        StockEtfInstrumentIdentityBlocker::CashInstrumentVenueMismatch
-    ));
+    assert_single_blocker(
+        cash_wrong,
+        StockEtfInstrumentIdentityBlocker::CashInstrumentVenueMismatch,
+    );
 
     let stock_wrong = StockEtfInstrumentIdentityV1 {
         listing_venue: StockEtfListingVenue::CashLedger,
         primary_exchange: StockEtfListingVenue::CashLedger,
         ..StockEtfInstrumentIdentityV1::accepted_fixture()
     };
-    assert!(has(
-        &stock_wrong.validate().blockers,
-        StockEtfInstrumentIdentityBlocker::NonCashInstrumentVenueMismatch
-    ));
+    assert_single_blocker(
+        stock_wrong,
+        StockEtfInstrumentIdentityBlocker::NonCashInstrumentVenueMismatch,
+    );
 }
 
 #[test]
@@ -168,46 +157,21 @@ fn instrument_identity_rejects_untradable_priips_missing_and_missing_hashes() {
     };
     let blockers = identity.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfInstrumentIdentityBlocker::TradabilityNotTradable
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfInstrumentIdentityBlocker::PriipsKidBlocked
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfInstrumentIdentityBlocker::FractionalPolicyMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfInstrumentIdentityBlocker::PointInTimeAsofMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfInstrumentIdentityBlocker::MarketCalendarIdMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfInstrumentIdentityBlocker::MarketCalendarHashInvalid
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfInstrumentIdentityBlocker::BrokerContractDetailsHashInvalid
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfInstrumentIdentityBlocker::InstrumentIdentityHashInvalid
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfInstrumentIdentityBlocker::CorporateActionAdjustmentHashInvalid
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfInstrumentIdentityBlocker::SourceArtifactHashInvalid
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfInstrumentIdentityBlocker::TradabilityNotTradable,
+            StockEtfInstrumentIdentityBlocker::PriipsKidBlocked,
+            StockEtfInstrumentIdentityBlocker::FractionalPolicyMissing,
+            StockEtfInstrumentIdentityBlocker::PointInTimeAsofMissing,
+            StockEtfInstrumentIdentityBlocker::MarketCalendarIdMissing,
+            StockEtfInstrumentIdentityBlocker::MarketCalendarHashInvalid,
+            StockEtfInstrumentIdentityBlocker::BrokerContractDetailsHashInvalid,
+            StockEtfInstrumentIdentityBlocker::InstrumentIdentityHashInvalid,
+            StockEtfInstrumentIdentityBlocker::CorporateActionAdjustmentHashInvalid,
+            StockEtfInstrumentIdentityBlocker::SourceArtifactHashInvalid,
+        ]
+    );
 }
 
 #[test]
@@ -223,30 +187,17 @@ fn instrument_identity_rejects_contact_secret_and_boundary_regressions() {
     };
     let blockers = identity.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfInstrumentIdentityBlocker::BybitLiveExecutionNotProtected
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfInstrumentIdentityBlocker::IbkrLiveNotDenied
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfInstrumentIdentityBlocker::MarginShortNotDenied
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfInstrumentIdentityBlocker::OptionsCfdNotDenied
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfInstrumentIdentityBlocker::IbkrContactPerformed
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfInstrumentIdentityBlocker::SecretContentSerialized
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfInstrumentIdentityBlocker::BybitLiveExecutionNotProtected,
+            StockEtfInstrumentIdentityBlocker::IbkrLiveNotDenied,
+            StockEtfInstrumentIdentityBlocker::MarginShortNotDenied,
+            StockEtfInstrumentIdentityBlocker::OptionsCfdNotDenied,
+            StockEtfInstrumentIdentityBlocker::IbkrContactPerformed,
+            StockEtfInstrumentIdentityBlocker::SecretContentSerialized,
+        ]
+    );
 }
 
 #[test]
@@ -327,13 +278,6 @@ fn blocked_template_is_parseable_and_secret_free() {
     assert!(!lower.contains("account_id ="));
     assert!(!lower.contains("password ="));
     assert!(!lower.contains("token ="));
-}
-
-fn has(
-    blockers: &[StockEtfInstrumentIdentityBlocker],
-    blocker: StockEtfInstrumentIdentityBlocker,
-) -> bool {
-    blockers.contains(&blocker)
 }
 
 fn assert_single_blocker(
