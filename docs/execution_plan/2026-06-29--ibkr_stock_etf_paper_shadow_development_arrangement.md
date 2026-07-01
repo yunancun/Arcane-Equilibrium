@@ -4169,3 +4169,34 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper
 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
 clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
 Bybit behavior change。
+
+## 93. 2026-07-01 PM session source checkpoint：Scorecard Status Module Split Guard
+
+本 checkpoint 將 Rust Stock/ETF `scorecard_status_summary` 從
+`status_summaries.rs` 拆到 `status_summaries/scorecard.rs`。這不是 behavior change、
+不是 endpoint change、不是 IPC method change，也不改 scorecard payload；只降低單檔
+體積與維護風險，讓 source-only status fixtures 更清楚分層。
+
+已完成：
+
+- 新增 `rust/openclaw_engine/src/ipc_server/handlers/stock_etf/status_summaries/scorecard.rs`，
+  承載原 scorecard status source fixture。
+- `status_summaries.rs` 保留 thin wrapper，對外 `scorecard_status_summary` import
+  surface 不變。
+- 父檔由 1006 行降至 785 行，低於 800 行 review threshold；新子模組 228 行。
+- 沒有新增 endpoint、IPC method、request handler、GUI fanout 或 runtime path。
+
+驗證：
+
+- Scoped Rust `rustfmt --edition 2021 --check`：PASS。
+- Focused engine scorecard IPC fixture：PASS。
+- Engine Stock/ETF IPC regression：`29 passed`。
+- Docs trace guard：PASS。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
+cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
+clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
+Bybit behavior change。
