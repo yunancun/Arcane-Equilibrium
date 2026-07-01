@@ -147,6 +147,10 @@ def _source() -> str:
     return FEATURE_FLAG_SECRET_AUTH.read_text(encoding="utf-8")
 
 
+def _function_block(source: str, start: str, end: str) -> str:
+    return source.split(start, 1)[1].split(end, 1)[0]
+
+
 def _authorization_envelope_default_block(source: str) -> str:
     return source.split("impl Default for StockEtfAuthorizationEnvelopeV1", 1)[1].split(
         "impl StockEtfAuthorizationEnvelopeV1",
@@ -294,6 +298,70 @@ def test_ibkr_feature_flag_secret_auth_source_keeps_authorization_envelope_cross
     assert ".api_session_topology" in source
     assert ".account_fingerprint_hash" in source
     assert "envelope.account_fingerprint_hash != self.session_attestation.account_fingerprint" in source
+
+
+def test_ibkr_feature_flag_secret_auth_source_keeps_exact_blocker_order() -> None:
+    source = _source()
+    validate = _function_block(
+        source,
+        "let mut blockers = Vec::new();",
+        "FeatureFlagSecretAuthVerdict {",
+    )
+    envelope = _function_block(
+        source,
+        "fn validate_authorization_envelope(",
+        "FeatureFlagSecretAuthVerdict {",
+    )
+
+    for block, ordered_blockers in (
+        (
+            validate,
+            (
+                "ContractIdMismatch",
+                "SourceVersionMismatch",
+                "ServerRustMatrixNotAuthoritative",
+                "GuiLaneStateOverrideNotDenied",
+                "WrongAssetLane",
+                "WrongBroker",
+                "LiveEnvironmentDenied",
+                "InstrumentKindDenied",
+                "LiveOrAccountWriteOperationDenied",
+                "LaneFlagDisabled",
+                "ReadonlyFlagDisabled",
+                "PaperFlagDisabled",
+                "ShadowOnlyBlocksPaper",
+                "SecretContractRejected",
+                "LiveSecretAbsentOrEmptyNotProven",
+                "Phase2ArtifactRejected",
+                "SessionAttestationRejected",
+            ),
+        ),
+        (
+            envelope,
+            (
+                "AuthorizationEnvelopeMismatch",
+                "PermissionScopeMismatch",
+                "SecretSlotFingerprintInvalid",
+                "AccountFingerprintHashInvalid",
+                "RiskConfigHashInvalid",
+                "AuthorizationEnvelopeExpired",
+                "SecretSlotFingerprintMismatch",
+                "AccountFingerprintMismatch",
+            ),
+        ),
+    ):
+        positions = [block.index(f"Blocker::{blocker}") for blocker in ordered_blockers]
+        assert positions == sorted(positions)
+
+    assert validate.index("let secret_verdict = self.secret_slot_contract.validate()") < validate.index(
+        "let artifact_verdict = self.phase2_gate_artifact.validate()"
+    )
+    assert validate.index("let artifact_verdict = self.phase2_gate_artifact.validate()") < validate.index(
+        "let session_verdict = self.session_attestation.validate(now_ms)"
+    )
+    assert validate.index("let session_verdict = self.session_attestation.validate(now_ms)") < validate.index(
+        "self.validate_authorization_envelope(request, now_ms, &mut blockers)"
+    )
 
 
 def test_ibkr_feature_flag_secret_auth_source_has_no_runtime_secret_order_or_bybit_client_tokens() -> None:
