@@ -716,6 +716,31 @@ connector runtime、沒有 read probe execution、沒有 result import、沒有 
 scorecard writer、沒有 paper order/cancel/replace、沒有 tiny-live/live authority，也
 沒有改動 Bybit live execution 行為。
 
+## 2026-07-01 Operator Update — Scorecard Status Module Split Guard
+
+本 session 已拆分 Rust scorecard status source fixture：
+
+- `scorecard_status_summary` 從
+  `rust/openclaw_engine/src/ipc_server/handlers/stock_etf/status_summaries.rs`
+  移到 `status_summaries/scorecard.rs`。
+- 父檔保留 thin wrapper，因此既有 `stock_etf.get_scorecard_status` IPC surface 與
+  payload shape 不變。
+- `status_summaries.rs` 從 1006 行降到 785 行，新 scorecard 子模組 228 行。
+
+Verification 已過：
+
+- Scoped Rust rustfmt：PASS
+- Focused engine scorecard IPC fixture：PASS
+- Engine Stock/ETF IPC regression：`29 passed`
+- Docs trace guard：PASS
+- `git diff --check`：PASS
+
+邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 payload 行為改動、沒有 IBKR
+contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation、沒有
+connector runtime、沒有 read probe execution、沒有 result import、沒有 DB/evidence/
+scorecard writer、沒有 paper order/cancel/replace、沒有 tiny-live/live authority，也
+沒有改動 Bybit live execution 行為。
+
 ## 2026-06-30 Operator Update — IBKR Read-Only Connector Skeleton Boundary
 
 本 session 已完成下一個 source-only checkpoint：

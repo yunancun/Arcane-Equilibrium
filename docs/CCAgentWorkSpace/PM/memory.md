@@ -3448,3 +3448,11 @@
 - Static no-write/split guard now checks that fallback payloads keep the scorecard input bundle result-import lineage fields.
 - Verification passed: Python compile, JS syntax, focused fallback/static/docs trace pytest, full Stock/ETF FastAPI/static pytest, and `git diff --check`.
 - Boundary unchanged: no endpoint, IPC method, GUI fanout, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe, result import, DB/evidence/scorecard writer, paper order/cancel/replace, tiny-live/live, Linux runtime, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF Scorecard Status Module Split Guard
+
+- PM split Rust `scorecard_status_summary` from `status_summaries.rs` into `status_summaries/scorecard.rs`.
+- The parent module keeps a thin wrapper, so `stock_etf.get_scorecard_status` behavior and payload shape remain unchanged.
+- `status_summaries.rs` is now 785 lines and the scorecard child module is 228 lines.
+- Verification passed: scoped Rust format, focused engine scorecard IPC fixture, engine Stock/ETF IPC regression `29 passed`, docs trace guard, and `git diff --check`.
+- Boundary unchanged: no endpoint, IPC method, payload behavior, GUI fanout, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe, result import, DB/evidence/scorecard writer, paper order/cancel/replace, tiny-live/live, Linux runtime, or Bybit behavior change.

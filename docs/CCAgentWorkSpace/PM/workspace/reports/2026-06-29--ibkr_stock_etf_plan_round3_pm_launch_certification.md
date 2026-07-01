@@ -610,6 +610,39 @@ ingestion、DQ writer、paper order/cancel/replace、fill import、DB apply、ev
 writer、evidence clock、scorecard writer、tiny-live、live、Linux runtime sync/restart
 或 Bybit behavior change。
 
+## 2026-07-01 PM Session Checkpoint — Scorecard Status Module Split Guard
+
+PM 已將 Rust scorecard status source fixture 拆出父模組。這不是 IBKR contact
+approval、read-only probe approval、result import approval、evidence writer approval、
+scorecard writer approval 或 launch approval。
+
+已完成：
+
+- 新增 `status_summaries/scorecard.rs`，承載原 `scorecard_status_summary`。
+- `status_summaries.rs` 保留 thin wrapper，維持既有 handler import surface。
+- 父檔降到 785 行，新子模組 228 行；沒有 payload、endpoint、IPC method 或 GUI
+  fanout change。
+
+Verification：
+
+- Scoped Rust rustfmt PASS。
+- Focused engine scorecard IPC fixture PASS。
+- Engine Stock/ETF IPC regression：`29 passed`。
+- Docs trace guard PASS。
+- `git diff --check` PASS。
+
+Dispatch 記錄：本 turn 因工具層 spawn policy 未允許 sub-agent dispatch，PM 本地完成
+narrow Rust module split / review / regression。此 checkpoint 為 source organization
+hardening。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 2/3 runtime approval、IBKR contact
+approval、read-only probe approval、result import approval、evidence writer approval、
+scorecard writer approval 或 launch approval。未批准 IBKR SDK import、socket/HTTP、
+secret、connector runtime、read probe execution、collector start、market-data
+ingestion、DQ writer、paper order/cancel/replace、fill import、DB apply、evidence
+writer、evidence clock、scorecard writer、tiny-live、live、Linux runtime sync/restart
+或 Bybit behavior change。
+
 ## 2026-07-01 PM Session Checkpoint — Scorecard Fallback Input Lineage Guard
 
 PM 已將 scorecard input bundle result-import lineage 補進 browser-side degraded
