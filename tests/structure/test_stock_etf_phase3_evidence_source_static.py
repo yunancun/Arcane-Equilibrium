@@ -464,6 +464,52 @@ def test_stock_etf_phase3_dq_manifest_source_keeps_shape_and_quality_split() -> 
     assert "self.scorecard_regeneration_passed" in parent
 
 
+def test_stock_etf_phase3_dq_manifest_fixture_excludes_runtime_writer_secret_and_authority_crosswire() -> None:
+    parent = _parent()
+    fixture = parent.split("impl StockEtfDailyDqManifestV1", 1)[1].split(
+        "pub fn validates_shape(&self)",
+        1,
+    )[0]
+    default_impl = parent.split("impl Default for StockEtfDailyDqManifestV1", 1)[1].split(
+        "impl StockEtfDailyDqManifestV1",
+        1,
+    )[0]
+
+    for forbidden in (
+        "environment: BrokerEnvironment::LiveReservedDenied",
+        "bybit_live_execution_unchanged: false",
+        "ibkr_contact_performed: true",
+        "connector_runtime_started: true",
+        "market_data_ingestion_started: true",
+        "dq_writer_started: true",
+        "evidence_clock_started: true",
+        "scorecard_writer_started: true",
+        "db_apply_performed: true",
+        "secret_content_serialized: true",
+        "live_or_tiny_live_authorized: true",
+        "calendar_aware_coverage_bps: 0",
+        "symbol_completeness_bps: 0",
+    ):
+        assert forbidden not in fixture
+
+    for fail_closed in (
+        "environment: BrokerEnvironment::LiveReservedDenied",
+        "bybit_live_execution_unchanged: false",
+        "ibkr_contact_performed: false",
+        "connector_runtime_started: false",
+        "market_data_ingestion_started: false",
+        "dq_writer_started: false",
+        "evidence_clock_started: false",
+        "scorecard_writer_started: false",
+        "db_apply_performed: false",
+        "secret_content_serialized: false",
+        "live_or_tiny_live_authorized: false",
+        "calendar_aware_coverage_bps: 0",
+        "symbol_completeness_bps: 0",
+    ):
+        assert fail_closed in default_impl
+
+
 def test_stock_etf_phase3_evidence_clock_source_keeps_gate_and_status_rules() -> None:
     parent = _parent()
 
