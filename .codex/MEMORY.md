@@ -1484,3 +1484,9 @@ Do not paste long reports or stable architecture into TODO.
 - The guard requires the authority artifact scope to stay exact, both artifacts to be directly referenced by tests, and the main plan plus Operator launch summary to list full authority paths.
 - It pins Bybit-only active live execution, IBKR read-only/paper/shadow scope, closed taxonomy, denied live/tiny-live/margin/short/options/CFD/transfer/GUI/Python/Bybit-paper-reuse paths, allowed readonly/paper secret slots, denied live slot, Rust authority, inert connector posture, and discussion-only tiny-live eligibility.
 - Verification passed: new guard `7 passed`; focused ADR/AMD + Phase0/release source-static subset `29 passed`; docs trace PASS. This grants no ADR/AMD content change, runtime behavior change, IBKR contact, connector runtime, secret access, DB apply, paper order route, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Stable Boundary Docs Static Guard
+
+- PM added a source-only guard for AMD-required stable boundary docs: `CLAUDE.md`, `.codex/MEMORY.md`, `README.md`, document index, initiative index, and specification register.
+- The guard pins Bybit-only active live execution, ADR-0048 / AMD-2026-06-29-01 IBKR read-only/paper/shadow exception routing, Phase2 real secret/topology + immutable PASS blocker wording, and stable-doc denials for IBKR runtime/live/order approval.
+- Verification passed: new guard `3 passed`; focused stable-boundary + ADR/AMD + Phase0 spec artifact subset `16 passed`; docs trace PASS. This grants no stable-doc wording change, IBKR contact, connector runtime, secret access, DB apply, paper order route, tiny-live/live, or Bybit behavior change.
