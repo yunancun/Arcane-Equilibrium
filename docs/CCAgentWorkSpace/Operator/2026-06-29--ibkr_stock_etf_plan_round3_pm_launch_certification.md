@@ -2689,3 +2689,31 @@ Verification 已過：
 access/creation、沒有 connector runtime、沒有 read probe execution、沒有 result
 import、沒有 DB/evidence/scorecard writer、沒有 paper order/cancel/replace、沒有
 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — IBKR Paper Lifecycle Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`IBKR Paper Lifecycle Source Static Guard`。
+
+這個 guard 鎖住 `ibkr_paper_lifecycle.rs` 的 IBKR paper order lifecycle 與 append-only
+event-log contract source hygiene：contract ids、event fields、verdict/blocker surface、
+stale-state policy、restart recovery input/action、transition helpers 必須保留。
+
+Guard 要求 append-only validation 保留 genesis sequence/hash rules、event/request hash
+checks、StockEtfCash/IBKR/Paper checks、live environment denial、paper lifecycle operation
+gating、operation/state transition gating、raw/redacted hash checks。StateUnknown recovery
+只能 manual-review 或 terminal-with-evidence；denied events 必須有 denial reason 且不能
+advance active state；restart recovery 必須維持 fail-closed。source 不得出現
+env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens 或 secret
+material access tokens。
+
+Verification 已過：
+
+- New structure guard pytest：`6 passed`
+- Focused paper lifecycle acceptance：`12 passed`
+- Full `cargo test -p openclaw_types`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
+access/creation、沒有 connector runtime、沒有 read probe execution、沒有 result
+import、沒有 DB/evidence/scorecard writer、沒有 paper order/cancel/replace、沒有
+tiny-live/live authority，也沒有改動 Bybit live execution 行為。

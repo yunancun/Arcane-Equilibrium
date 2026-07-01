@@ -1302,3 +1302,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a semantic source-only structure guard for `stock_etf_paper_order_request.rs` and its validation module, beyond the existing split guard.
 - The guard requires fail-closed defaults, preview ReadOnly/effect=false, submit/cancel/replace PaperRehearsal/effect=true, request/hash/decision-lease/audit requirements, Stock/ETF-only normalized order intent, price/TIF compatibility, method-specific pollution blockers, and no runtime/secret/order/Bybit client tokens.
 - Verification passed: new guard `5 passed`; split+semantic paper-order structure guards `8 passed`; paper order request acceptance `8 passed`; full `cargo test -p openclaw_types` PASS. This grants no IPC runtime, IBKR contact, connector start, paper order route, secret access, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 IBKR Paper Lifecycle Source Static Guard
+
+- PM added a source-only structure guard for `ibkr_paper_lifecycle.rs`, pinning the paper order lifecycle and append-only event-log contract.
+- The guard requires contract ids, event fields, fail-closed default, accepted ack lineage, genesis/hash rules, StockEtfCash/IBKR/Paper checks, live denial, paper lifecycle operation and transition gating, StateUnknown recovery rules, denied-event semantics, stale-state policy matching, restart recovery fail-closed classification, and no runtime/secret/order/Bybit client tokens.
+- Verification passed: new guard `6 passed`; paper lifecycle acceptance `12 passed`; full `cargo test -p openclaw_types` PASS. This grants no IBKR contact, connector construction, paper order route, lifecycle writer, secret access, tiny-live/live, or Bybit behavior change.

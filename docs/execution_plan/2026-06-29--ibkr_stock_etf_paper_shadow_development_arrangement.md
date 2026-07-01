@@ -4790,3 +4790,46 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper
 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
 clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
 Bybit behavior change。
+
+## 110. 2026-07-01 PM session source checkpoint：IBKR Paper Lifecycle Source Static Guard
+
+本 checkpoint 為 `ibkr_paper_lifecycle.rs` 補上 source-only structure guard。這不是
+IBKR contact、不是 connector construction、不是 paper order route、不是 lifecycle
+writer；只把 IBKR paper order lifecycle 與 append-only event-log contract 的 source
+invariant 機器化。
+
+已完成：
+
+- 新增 `tests/structure/test_ibkr_paper_lifecycle_source_static.py`。
+- Guard 鎖住 `ibkr_paper_lifecycle.rs` 低於 800 行 governance cap。
+- Guard 要求 lifecycle/event-log contract ids、event fields、event verdict/blocker
+  surface、stale-state policy、restart recovery input/action、transition helpers 保持在
+  source 中。
+- Guard 要求 default event 仍 blocked/incomplete，accepted ack fixture 仍保留 request
+  contract lineage、event sequence、append-only hashes、paper environment、submit ack
+  transition、idempotency/reconciliation ids 與 raw/redacted hashes。
+- Guard 要求 append-only validation 保留 genesis sequence/hash rules、event/request
+  hash checks、StockEtfCash/IBKR/Paper checks、live environment denial、paper lifecycle
+  operation gating、operation-transition gating、state-transition gating、raw/redacted hash
+  checks。
+- Guard 要求 StateUnknown recovery 只能 manual-review 或 terminal-with-evidence，denied
+  events 必須有 denial reason 且不能 advance active state，stale-state policy matching
+  不得消失。
+- Guard 要求 restart recovery 分類保持 fail-closed：terminal evidence preserve、
+  broker known + broker order id + idempotency key 才 reconcile，否則 MarkStateUnknown。
+- Guard 禁止 env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens
+  與 secret material access tokens。
+
+驗證：
+
+- New structure guard py_compile：PASS。
+- Focused structure guard pytest：`6 passed`。
+- Focused paper lifecycle acceptance：`12 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
+cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
+clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
+Bybit behavior change。

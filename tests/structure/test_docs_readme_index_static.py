@@ -148,6 +148,7 @@ def test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles() -> None
         "Stock/ETF Broker Capability Registry Source Static Guard",
         "Stock/ETF Risk Policy Source Static Guard",
         "Stock/ETF Paper Order Request Source Static Guard",
+        "IBKR Paper Lifecycle Source Static Guard",
     )
     plan_source = IBKR_STOCK_ETF_PLAN.read_text()
     operator_source = IBKR_STOCK_ETF_OPERATOR.read_text()
