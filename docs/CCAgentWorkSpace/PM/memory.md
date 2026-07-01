@@ -3871,3 +3871,9 @@
 - PM added test-only/source-static exact-blocker coverage for `StockEtfShadowSignalRequestV1` authority, request/evaluation/signal lineage, evidence-clock/PIT/strategy/instrument/market/cost/event/source hashes, and no-side-effect flags.
 - Verification passed: shadow signal source static `8 passed`; shadow signal Rust acceptance `9 passed`; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, IPC/runtime change, IBKR contact, connector runtime, secret access, shadow signal emission, shadow fill generation, shadow collector, DB/evidence writer, scorecard writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Paper Shadow Reconciliation Authority Lineage Cross-Wire Guard
+
+- PM added test-only/source-static exact-blocker coverage for `StockEtfPaperShadowReconciliationV1` authority/scope, paper-fill/shadow-signal/shadow-fill-model lineage, reconciliation evidence gates, and no-side-effect flags.
+- Verification passed: paper-shadow reconciliation source static `9 passed`; paper-shadow reconciliation Rust acceptance `10 passed`; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, IPC/runtime change, IBKR contact, connector runtime, secret access, fill import execution, shadow fill generation, reconciliation writer, DB/evidence writer, scorecard writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

@@ -193,6 +193,51 @@ fn reconciliation_rejects_scope_authority_and_effect_cross_wire() {
 }
 
 #[test]
+fn reconciliation_rejects_each_authority_gap_independently() {
+    use StockEtfPaperShadowReconciliationBlocker as Blocker;
+
+    let cases: [(fn(&mut StockEtfPaperShadowReconciliationV1), Blocker); 7] = [
+        (
+            |reconciliation| {
+                reconciliation.contract_id =
+                    "stock_etf_paper_shadow_reconciliation_v1_fixture".to_string()
+            },
+            Blocker::ContractIdMismatch,
+        ),
+        (
+            |reconciliation| reconciliation.source_version = 2,
+            Blocker::SourceVersionMismatch,
+        ),
+        (
+            |reconciliation| reconciliation.asset_lane = AssetLane::CryptoPerp,
+            Blocker::WrongAssetLane,
+        ),
+        (
+            |reconciliation| reconciliation.broker = Broker::Bybit,
+            Blocker::WrongBroker,
+        ),
+        (
+            |reconciliation| reconciliation.scope = "shadow_signal".to_string(),
+            Blocker::ScopeMismatch,
+        ),
+        (
+            |reconciliation| reconciliation.authority_scope = AuthorityScope::ShadowOnly,
+            Blocker::AuthorityScopeMismatch,
+        ),
+        (
+            |reconciliation| reconciliation.effect_capable = true,
+            Blocker::EffectCapabilityPresent,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut reconciliation = StockEtfPaperShadowReconciliationV1::accepted_fixture();
+        mutate(&mut reconciliation);
+        assert_single_blocker(reconciliation, blocker);
+    }
+}
+
+#[test]
 fn reconciliation_requires_ids_and_lineage_hashes() {
     let bad = StockEtfPaperShadowReconciliationV1 {
         reconciliation_run_id: String::new(),
@@ -289,6 +334,96 @@ fn reconciliation_requires_ids_and_lineage_hashes() {
         &verdict,
         StockEtfPaperShadowReconciliationBlocker::SourceArtifactHashInvalid
     ));
+}
+
+#[test]
+fn reconciliation_rejects_each_lineage_gap_independently() {
+    use StockEtfPaperShadowReconciliationBlocker as Blocker;
+
+    let cases: [(fn(&mut StockEtfPaperShadowReconciliationV1), Blocker); 18] = [
+        (
+            |reconciliation| reconciliation.reconciliation_run_id.clear(),
+            Blocker::ReconciliationRunIdMissing,
+        ),
+        (
+            |reconciliation| reconciliation.paper_order_local_id.clear(),
+            Blocker::PaperOrderLocalIdMissing,
+        ),
+        (
+            |reconciliation| reconciliation.broker_order_id.clear(),
+            Blocker::BrokerOrderIdMissing,
+        ),
+        (
+            |reconciliation| reconciliation.execution_id.clear(),
+            Blocker::ExecutionIdMissing,
+        ),
+        (
+            |reconciliation| reconciliation.commission_report_id.clear(),
+            Blocker::CommissionReportIdMissing,
+        ),
+        (
+            |reconciliation| reconciliation.shadow_signal_id.clear(),
+            Blocker::ShadowSignalIdMissing,
+        ),
+        (
+            |reconciliation| reconciliation.lifecycle_contract_hash = "not_hash".to_string(),
+            Blocker::LifecycleContractHashInvalid,
+        ),
+        (
+            |reconciliation| reconciliation.event_log_contract_hash.clear(),
+            Blocker::EventLogContractHashInvalid,
+        ),
+        (
+            |reconciliation| reconciliation.paper_fill_import_request_hash.clear(),
+            Blocker::PaperFillImportRequestHashInvalid,
+        ),
+        (
+            |reconciliation| reconciliation.shadow_signal_request_hash.clear(),
+            Blocker::ShadowSignalRequestHashInvalid,
+        ),
+        (
+            |reconciliation| reconciliation.shadow_fill_model_hash.clear(),
+            Blocker::ShadowFillModelHashInvalid,
+        ),
+        (
+            |reconciliation| reconciliation.cost_model_version_hash.clear(),
+            Blocker::CostModelVersionHashInvalid,
+        ),
+        (
+            |reconciliation| reconciliation.market_data_provenance_hash.clear(),
+            Blocker::MarketDataProvenanceHashInvalid,
+        ),
+        (
+            |reconciliation| {
+                reconciliation
+                    .paper_shadow_divergence_threshold_hash
+                    .clear()
+            },
+            Blocker::PaperShadowDivergenceThresholdHashInvalid,
+        ),
+        (
+            |reconciliation| reconciliation.paper_shadow_link_hash.clear(),
+            Blocker::PaperShadowLinkHashInvalid,
+        ),
+        (
+            |reconciliation| reconciliation.raw_artifact_hash.clear(),
+            Blocker::RawArtifactHashInvalid,
+        ),
+        (
+            |reconciliation| reconciliation.redacted_summary_hash.clear(),
+            Blocker::RedactedSummaryHashInvalid,
+        ),
+        (
+            |reconciliation| reconciliation.source_artifact_hash.clear(),
+            Blocker::SourceArtifactHashInvalid,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut reconciliation = StockEtfPaperShadowReconciliationV1::accepted_fixture();
+        mutate(&mut reconciliation);
+        assert_single_blocker(reconciliation, blocker);
+    }
 }
 
 #[test]
@@ -397,6 +532,114 @@ fn reconciliation_rejects_unmatched_divergent_or_side_effecting_evidence() {
 }
 
 #[test]
+fn reconciliation_rejects_each_evidence_gate_independently() {
+    use StockEtfPaperShadowReconciliationBlocker as Blocker;
+
+    let cases: [(fn(&mut StockEtfPaperShadowReconciliationV1), Blocker); 7] = [
+        (
+            |reconciliation| reconciliation.append_only_event_ready = false,
+            Blocker::AppendOnlyEventNotReady,
+        ),
+        (
+            |reconciliation| reconciliation.paper_fill_imported = false,
+            Blocker::PaperFillNotImported,
+        ),
+        (
+            |reconciliation| reconciliation.shadow_fill_synthetic = false,
+            Blocker::ShadowFillNotSynthetic,
+        ),
+        (
+            |reconciliation| reconciliation.divergence_threshold_bps = 0,
+            Blocker::DivergenceThresholdMissing,
+        ),
+        (
+            |reconciliation| reconciliation.divergence_bps = 125,
+            Blocker::DivergenceExceedsThreshold,
+        ),
+        (
+            |reconciliation| reconciliation.unmatched_paper_fill_count = 1,
+            Blocker::UnmatchedPaperFillPresent,
+        ),
+        (
+            |reconciliation| reconciliation.unmatched_shadow_fill_count = 1,
+            Blocker::UnmatchedShadowFillPresent,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut reconciliation = StockEtfPaperShadowReconciliationV1::accepted_fixture();
+        mutate(&mut reconciliation);
+        assert_single_blocker(reconciliation, blocker);
+    }
+}
+
+#[test]
+fn reconciliation_rejects_each_boundary_flag_independently() {
+    use StockEtfPaperShadowReconciliationBlocker as Blocker;
+
+    let cases: [(fn(&mut StockEtfPaperShadowReconciliationV1), Blocker); 13] = [
+        (
+            |reconciliation| reconciliation.ibkr_contact_performed = true,
+            Blocker::IbkrContactPerformed,
+        ),
+        (
+            |reconciliation| reconciliation.connector_runtime_started = true,
+            Blocker::ConnectorRuntimeStarted,
+        ),
+        (
+            |reconciliation| reconciliation.secret_content_serialized = true,
+            Blocker::SecretContentSerialized,
+        ),
+        (
+            |reconciliation| reconciliation.fill_import_performed = true,
+            Blocker::FillImportPerformed,
+        ),
+        (
+            |reconciliation| reconciliation.shadow_fill_generated = true,
+            Blocker::ShadowFillGenerated,
+        ),
+        (
+            |reconciliation| reconciliation.reconciliation_writer_started = true,
+            Blocker::ReconciliationWriterStarted,
+        ),
+        (
+            |reconciliation| reconciliation.scorecard_writer_started = true,
+            Blocker::ScorecardWriterStarted,
+        ),
+        (
+            |reconciliation| reconciliation.db_apply_performed = true,
+            Blocker::DbApplyPerformed,
+        ),
+        (
+            |reconciliation| reconciliation.order_routed = true,
+            Blocker::OrderRouted,
+        ),
+        (
+            |reconciliation| reconciliation.bybit_path_reused = true,
+            Blocker::BybitPathReused,
+        ),
+        (
+            |reconciliation| reconciliation.live_or_tiny_live_authorized = true,
+            Blocker::LiveOrTinyLiveAuthorized,
+        ),
+        (
+            |reconciliation| reconciliation.margin_short_options_cfd_requested = true,
+            Blocker::MarginShortOptionsCfdRequested,
+        ),
+        (
+            |reconciliation| reconciliation.python_direct_broker_write_requested = true,
+            Blocker::PythonDirectBrokerWriteRequested,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut reconciliation = StockEtfPaperShadowReconciliationV1::accepted_fixture();
+        mutate(&mut reconciliation);
+        assert_single_blocker(reconciliation, blocker);
+    }
+}
+
+#[test]
 fn blocked_template_is_parseable_and_secret_free() {
     let srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -437,4 +680,14 @@ fn has(
     blocker: StockEtfPaperShadowReconciliationBlocker,
 ) -> bool {
     verdict.blockers.contains(&blocker)
+}
+
+fn assert_single_blocker(
+    reconciliation: StockEtfPaperShadowReconciliationV1,
+    expected: StockEtfPaperShadowReconciliationBlocker,
+) {
+    let verdict = reconciliation.validate();
+
+    assert!(!verdict.accepted);
+    assert_eq!(verdict.blockers, vec![expected]);
 }
