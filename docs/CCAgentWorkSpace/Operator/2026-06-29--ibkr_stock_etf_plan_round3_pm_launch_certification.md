@@ -4844,3 +4844,32 @@ Verification 已過：
 沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 release execution、沒有 DB/evidence
 writer、沒有 scorecard writer、沒有 broker session、沒有 paper order route、沒有 tiny-live/live
 authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Tiny-Live Eligibility Authority Lineage Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Tiny-Live Eligibility Authority Lineage Cross-Wire Guard`。
+
+這個 checkpoint 補強 `TinyLiveAdrEligibilityV1` 的 contract identity、ADR/AMD/spec path、Phase 5 release
+packet lineage、scorecard lineage、paper-shadow reconciliation lineage、DQ/preregistration/review hashes、
+statistical gates、review gates、ADR-discussion-only decision、secret denial 與 sealed posture coverage。
+新增 Rust acceptance 證明 source/path gaps、release/scorecard/reconciliation/DQ/preregistration/review hash
+gaps、paper-shadow/statistical gates、quality labels、QC/MIT/QA review pass flags，以及 decision/secret/seal
+posture 都會 fail closed。
+
+Python source-static parser 也改成按 impl block 鎖住 `TinyLiveAdrEligibilityV1::adr_discussion_fixture`
+與 `Default`，確保 fixture 只代表 future ADR discussion eligibility，不代表 tiny-live/live approval。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Tiny-live eligibility source static pytest：`7 passed`
+- Tiny-live eligibility Rust acceptance：`13 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 release execution、沒有 DB/evidence
+writer、沒有 scorecard writer、沒有 broker session、沒有 paper order route、沒有 tiny-live/live
+authorization，也沒有改動 Bybit live/demo execution 行為。
