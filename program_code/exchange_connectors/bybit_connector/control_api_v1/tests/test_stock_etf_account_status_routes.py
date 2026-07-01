@@ -85,6 +85,9 @@ def test_stock_etf_account_status_uses_only_readonly_fixture_method() -> None:
     )
     assert data["session_attestation"]["accepted"] is False
     assert data["session_attestation"]["secret_slot_fingerprint_present"] is False
+    assert data["session_attestation"]["data_tier"] == "unknown"
+    assert data["session_attestation"]["entitlements_fingerprint_present"] is False
+    assert data["session_attestation"]["gateway_started_at_ms"] == 0
     assert data["paper_attestation_policy"]["expected_contract_id"] == (
         "ibkr_paper_attestation_v1"
     )
@@ -171,6 +174,10 @@ def test_stock_etf_account_status_blocks_contract_violation() -> None:
     payload["session_attestation"]["secret_world_readable"] = True
     payload["session_attestation"]["env_var_credential_fallback_used"] = True
     payload["session_attestation"]["api_server_version_present"] = True
+    payload["session_attestation"]["data_tier"] = "delayed"
+    payload["session_attestation"]["entitlements_fingerprint_present"] = True
+    payload["session_attestation"]["market_data_entitlement_purchase_denied"] = True
+    payload["session_attestation"]["gateway_started_at_ms"] = 1
     payload["session_attestation"]["raw_artifact_hash_present"] = True
     payload["session_attestation"]["port"] = 4002
     payload["session_attestation"]["attested_at_ms"] = 1
@@ -224,6 +231,10 @@ def test_stock_etf_account_status_blocks_contract_violation() -> None:
         "session_attestation_secret_world_readable",
         "session_attestation_env_var_credential_fallback_used",
         "session_attestation_api_server_version_present",
+        "session_attestation_entitlements_fingerprint_present",
+        "session_attestation_market_data_entitlement_purchase_denied",
+        "session_attestation_data_tier_present",
+        "session_attestation_gateway_started_at_present",
         "session_attestation_raw_artifact_hash_present",
         "session_attestation_port_present",
         "session_attestation_attested_at_present",

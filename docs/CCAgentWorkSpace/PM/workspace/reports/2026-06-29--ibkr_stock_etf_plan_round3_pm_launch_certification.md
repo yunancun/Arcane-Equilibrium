@@ -1090,6 +1090,48 @@ runtime、read probe execution、collector start、market-data ingestion、DQ wr
 paper order/cancel/replace、fill import、DB apply、evidence writer、evidence clock、
 scorecard writer、tiny-live、live、Linux runtime sync/restart 或 Bybit behavior change。
 
+## 2026-07-01 PM Session Checkpoint — Session Attestation Data-Tier Lineage Guard
+
+PM 已在本 session 追加 source-only contract hardening checkpoint：
+Session Attestation Data-Tier Lineage Guard。這不是 Phase 2 runtime approval、
+IBKR contact approval、read-only probe approval、market-data ingestion approval 或
+paper-channel approval。
+
+已完成：
+
+- `ibkr_session_attestation_v1` 新增 data tier、entitlements fingerprint、
+  market-data entitlement purchase denial 與 gateway startup timestamp lineage。
+- Session validator 要求 account/secret-slot/entitlements/raw artifact lineage
+  為 64-hex hash 形狀。
+- Validator 新增 missing/invalid data-tier lineage、entitlement purchase not
+  denied、gateway startup after attestation blockers。
+- Inert Python connector preview 與 FastAPI account/authorization normalizers
+  同步維持 fail-closed display fields，並拒絕 client/IPC pre-gate claims。
+- Phase0 named-contract packet 同步補齊 required fields / blockers。
+
+Verification：
+
+- Python changed files `py_compile` PASS。
+- Connector/account/authorization focused tests：`18 passed`。
+- Scoped Rust `rustfmt --edition 2021 --check` PASS。
+- Phase2 gate acceptance：`11 passed`。
+- Feature-flag auth acceptance：`8 passed`。
+- Full Stock/ETF FastAPI/static pytest：`120 passed`。
+- Full `cargo test -p openclaw_types`：`291 passed`。
+- Focused docs trace：`2 passed`。
+- `git diff --check`：PASS。
+
+Dispatch 記錄：本 turn 因工具層 spawn policy 未允許 sub-agent dispatch，PM 本地完成
+narrow source hardening / review / regression。Full Rust/Python regression 已完成。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 2 runtime approval、IBKR contact
+approval、read-only probe approval、market-data ingestion approval、paper-order
+approval 或 launch approval。未批准 IBKR SDK import、socket/HTTP、secret、
+connector runtime、read probe execution、collector start、market-data ingestion、
+DQ writer、paper order/cancel/replace、fill import、DB apply、evidence writer、
+evidence clock、scorecard writer、tiny-live、live、Linux runtime sync/restart 或
+Bybit behavior change。
+
 ## 2026-07-01 PM Session Checkpoint — Connector Attestation Preview Guard
 
 PM 已在本 session 追加 source-only connector checkpoint：Connector Attestation

@@ -107,6 +107,10 @@ class IbkrSessionAttestationPreview:
     account_fingerprint_is_live: bool = False
     secret_slot_fingerprint_present: bool = False
     api_server_version_present: bool = False
+    data_tier: str = "unknown"
+    entitlements_fingerprint_present: bool = False
+    market_data_entitlement_purchase_denied: bool = False
+    gateway_started_at_ms: int = 0
     raw_artifact_hash_present: bool = False
     network_contact_performed: bool = False
     secret_content_loaded: bool = False

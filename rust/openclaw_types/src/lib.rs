@@ -72,9 +72,9 @@ pub use ibkr_phase2_gate::{
     IbkrExternalSurfaceGateStatus, IbkrExternalSurfaceGateV1, IbkrExternalSurfaceGateVerdict,
     IbkrGatewayMode, IbkrHostPolicy, IbkrPortPolicy, IbkrSecretSlotMode,
     IbkrSessionAttestationBlocker, IbkrSessionAttestationStatus, IbkrSessionAttestationV1,
-    IbkrSessionAttestationVerdict, IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID, IBKR_LIVE_GATEWAY_PORT,
-    IBKR_LIVE_TWS_PORT, IBKR_PAPER_GATEWAY_DEFAULT_PORT, IBKR_PHASE2_ADR, IBKR_PHASE2_AMD,
-    IBKR_SESSION_ATTESTATION_CONTRACT_ID,
+    IbkrSessionAttestationVerdict, IbkrSessionDataTier, IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
+    IBKR_LIVE_GATEWAY_PORT, IBKR_LIVE_TWS_PORT, IBKR_PAPER_GATEWAY_DEFAULT_PORT, IBKR_PHASE2_ADR,
+    IBKR_PHASE2_AMD, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
 };
 pub use ibkr_phase2_policies::{
     IbkrAuditEventPolicyBlocker, IbkrAuditEventPolicyV1, IbkrPaperAttestationPolicyBlocker,

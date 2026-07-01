@@ -448,6 +448,10 @@ def _valid_authorization_status() -> dict[str, Any]:
             "account_fingerprint_is_live": False,
             "secret_slot_fingerprint_present": False,
             "api_server_version_present": False,
+            "data_tier": "unknown",
+            "entitlements_fingerprint_present": False,
+            "market_data_entitlement_purchase_denied": False,
+            "gateway_started_at_ms": 0,
             "raw_artifact_hash_present": False,
         },
         "authorization_envelope": {
