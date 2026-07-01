@@ -60,6 +60,12 @@ class _SnapshotReader:
         }
 
 
+class _EmptySnapshotReader(_SnapshotReader):
+    def get_paper_state(self, engine: str) -> dict:
+        assert engine == "demo"
+        return {}
+
+
 @pytest.mark.asyncio
 async def test_demo_fast_balance_uses_snapshot_without_rest(monkeypatch) -> None:
     from app import paper_trading_routes
@@ -78,6 +84,34 @@ async def test_demo_fast_balance_uses_snapshot_without_rest(monkeypatch) -> None
     assert data["read_model"] == "rust_snapshot_fast"
     assert data["totalEquity"] == 1002.5
     assert data["engine_initial_balance"] == 990.0
+
+
+@pytest.mark.asyncio
+async def test_demo_fast_balance_missing_snapshot_fails_closed_without_rest(monkeypatch) -> None:
+    from app import paper_trading_routes
+    from app import strategy_ai_routes as routes
+
+    monkeypatch.setattr(
+        paper_trading_routes,
+        "get_rust_reader",
+        lambda: _EmptySnapshotReader(),
+    )
+    monkeypatch.setattr(
+        routes,
+        "_get_rust_client",
+        lambda: pytest.fail("fast demo balance must not fall back to Bybit REST"),
+    )
+
+    out = await routes.get_demo_balance(fast=True, actor=None)
+
+    data = out["data"]
+    assert data["source"] == "rust_engine"
+    assert data["read_model"] == "rust_snapshot_fast"
+    assert data["pipeline_status"] == "snapshot_unavailable"
+    assert data["enabled"] is False
+    assert data["totalEquity"] is None
+    assert data["equity"] is None
+    assert data["balance"] is None
 
 
 @pytest.mark.asyncio

@@ -111,6 +111,10 @@ NowFn = Callable[[], dt.datetime]
 Opener = Callable[..., Any]
 
 
+class SourcePolicyError(ValueError):
+    """Raised before any Control API GET when source policy is not satisfied."""
+
+
 class _RedirectRefusedHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
         raise urllib.error.HTTPError(
@@ -581,30 +585,55 @@ def _normalize_api_base_url(api_base: str) -> str:
     return normalized
 
 
-def _read_token(token_file: Path | None) -> str | None:
+def _read_token(
+    token_file: Path | None,
+    *,
+    forbid_env_token: bool = False,
+) -> tuple[str | None, dict[str, Any]]:
     env_token = _str(os.environ.get("OPENCLAW_API_TOKEN"))
-    if env_token:
-        return env_token
     path = token_file or DEFAULT_TOKEN_FILE
+    meta: dict[str, Any] = {
+        "token_source": "none",
+        "env_token_present": bool(env_token),
+        "env_token_allowed": not forbid_env_token,
+        "env_token_used": False,
+        "token_file_path": str(path),
+        "token_file_exists": path.exists(),
+        "token_file_used": False,
+    }
+    if env_token and forbid_env_token:
+        raise SourcePolicyError(
+            "OPENCLAW_API_TOKEN present while env token fallback is forbidden"
+        )
+    if env_token:
+        meta["token_source"] = "environment"
+        meta["env_token_used"] = True
+        return env_token, meta
     if not path.exists():
-        return None
+        return None, meta
     mode = stat.S_IMODE(path.stat().st_mode)
+    meta["token_file_mode"] = oct(mode)
     if mode & 0o077:
-        raise ValueError(f"token file permissions too broad: {path}")
+        raise SourcePolicyError(f"token file permissions too broad: {path}")
     token = _str(path.read_text(encoding="utf-8"))
-    return token or None
+    if token:
+        meta["token_source"] = "token_file"
+        meta["token_file_used"] = True
+        return token, meta
+    return None, meta
 
 
 def fetch_demo_fast_balance(
     *,
     api_base: str,
     token_file: Path | None = None,
+    forbid_env_token: bool = False,
     timeout_seconds: float = 5.0,
     opener: Opener = urlopen_no_redirect,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     normalized_base = _normalize_api_base_url(api_base)
     url = f"{normalized_base}{DEMO_FAST_BALANCE_ENDPOINT}"
-    token = _read_token(token_file)
+    token, token_meta = _read_token(token_file, forbid_env_token=forbid_env_token)
     headers = {
         "Accept": "application/json",
         "User-Agent": USER_AGENT,
@@ -625,6 +654,7 @@ def fetch_demo_fast_balance(
         "endpoint": DEMO_FAST_BALANCE_ENDPOINT,
         "method": "GET",
         "authorization_header_used": bool(token),
+        **token_meta,
     }
 
 
@@ -632,6 +662,7 @@ def capture_demo_fast_balance_equity_artifact(
     *,
     api_base: str = DEFAULT_API_BASE,
     token_file: Path | None = None,
+    forbid_env_token: bool = False,
     timeout_seconds: float = 5.0,
     opener: Opener = urlopen_no_redirect,
     now_fn: NowFn = _utc_now,
@@ -659,19 +690,24 @@ def capture_demo_fast_balance_equity_artifact(
         payload, transport = fetch_demo_fast_balance(
             api_base=normalized_base,
             token_file=token_file,
+            forbid_env_token=forbid_env_token,
             timeout_seconds=timeout_seconds,
             opener=opener,
         )
     except Exception as exc:
+        call_performed = not isinstance(exc, SourcePolicyError)
         return _build_packet(
             balance_payload=None,
-            control_api_call_performed=True,
+            control_api_call_performed=call_performed,
             api_base=normalized_base,
             source_transport={
                 "transport_status": "failure",
                 "api_base": normalized_base,
                 "endpoint": DEMO_FAST_BALANCE_ENDPOINT,
                 "method": "GET",
+                "env_token_present": bool(_str(os.environ.get("OPENCLAW_API_TOKEN"))),
+                "env_token_allowed": not forbid_env_token,
+                "token_file_path": str(token_file or DEFAULT_TOKEN_FILE),
                 "error_class": type(exc).__name__,
                 "error": _str(exc)[:240],
             },
@@ -713,6 +749,7 @@ def _build_parser() -> argparse.ArgumentParser:
     source.add_argument("--capture", action="store_true")
     parser.add_argument("--api-base", default=DEFAULT_API_BASE)
     parser.add_argument("--token-file", type=Path)
+    parser.add_argument("--forbid-env-token", action="store_true")
     parser.add_argument("--timeout-seconds", type=float, default=5.0)
     parser.add_argument("--runtime-data-dir", type=Path)
     parser.add_argument("--bybit-secret-root", type=Path)
@@ -742,6 +779,7 @@ def main() -> int:
         packet = capture_demo_fast_balance_equity_artifact(
             api_base=args.api_base,
             token_file=args.token_file,
+            forbid_env_token=args.forbid_env_token,
             timeout_seconds=max(0.1, float(args.timeout_seconds)),
             runtime_diagnostics=runtime_diagnostics,
         )
