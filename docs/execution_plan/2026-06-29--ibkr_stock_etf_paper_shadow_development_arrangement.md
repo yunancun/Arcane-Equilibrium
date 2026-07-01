@@ -8228,3 +8228,39 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 audit writer、不做 evidence writer、
 不啟動 scorecard writer、不執行 paper order routing、不做 broker session、不做 broker routing、不做
 Linux runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 197. 2026-07-01 PM session source checkpoint：Stock/ETF Disable Cleanup Default Lineage Exact Guard
+
+本 checkpoint 補強 `stock_etf_disable_cleanup_runbook` 的 kill-switch / disable-cleanup fail-closed lineage，
+固定 default `StockEtfDisableCleanupRunbookV1`、runbook identity drift、env flag gaps、proof gaps、
+contact/secret/destructive cleanup/launch authority claims 的 ordered blocker vectors，並用 source-static
+parser 鎖住 runbook/env/proof validator blocker emit order。這不是 Rust production behavior change、不是
+service stop、不是 runtime action、不是 secret lookup、不是 DB cleanup/delete/truncate、不是 IPC server
+start、不是 IBKR contact、不是 connector runtime、不是 paper order route enablement、不是 tiny-live/live gate；
+只把 disable-cleanup source-only runbook 的 fail-closed lineage 變成 exact-blocker acceptance test 與
+source-static guard。
+
+已完成：
+
+- 在 `stock_etf_disable_cleanup_runbook_acceptance.rs` 將 default `StockEtfDisableCleanupRunbookV1` 檢查提升
+  為完整順序 blocker 向量，包含重複 env/proof missing blockers。
+- 在同檔將 runbook identity drift、env flag gaps、proof gaps、contact/secret/destructive cleanup/launch
+  authority claims 固定為 exact blocker vectors。
+- 在 `test_stock_etf_disable_cleanup_runbook_source_static.py` 新增 runbook/env/proof validator blocker
+  ordering parser，鎖住 exact blocker emit order。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Stock/ETF disable cleanup source static pytest：`8 passed`。
+- Stock/ETF disable cleanup Rust acceptance：`7 passed`。
+- Full `cargo test -p openclaw_types`：`35` unit/golden + `337` integration/acceptance + `0` doc-tests。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、
+不停止 service、不做 runtime action、不讀/建 secret、不做 DB cleanup/delete/truncate、不呼叫 IBKR、
+不導入 IBKR SDK、不啟動 connector runtime、不執行 paper order routing、不做 broker session、不做 broker
+routing、不做 Linux runtime sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior
+change。

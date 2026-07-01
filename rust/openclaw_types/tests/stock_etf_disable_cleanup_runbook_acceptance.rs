@@ -14,42 +14,34 @@ use openclaw_types::{
 
 #[test]
 fn default_runbook_blocks_cleanup_acceptance() {
+    use StockEtfDisableCleanupBlocker as Blocker;
+
     let runbook = StockEtfDisableCleanupRunbookV1::default();
     let verdict = runbook.validate();
 
     assert!(!verdict.accepted);
-    assert!(has(
-        &verdict.blockers,
-        StockEtfDisableCleanupBlocker::RunbookIdMismatch
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfDisableCleanupBlocker::SourceVersionMismatch
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfDisableCleanupBlocker::WrongAssetLane
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfDisableCleanupBlocker::WrongBroker
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfDisableCleanupBlocker::SourceArtifactHashInvalid
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfDisableCleanupBlocker::BybitLiveExecutionNotProtected
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfDisableCleanupBlocker::EnvFlagMissing
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfDisableCleanupBlocker::ProofMissing
-    ));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::RunbookIdMismatch,
+            Blocker::SourceVersionMismatch,
+            Blocker::WrongAssetLane,
+            Blocker::WrongBroker,
+            Blocker::SourceArtifactHashInvalid,
+            Blocker::BybitLiveExecutionNotProtected,
+            Blocker::EnvFlagMissing,
+            Blocker::EnvFlagMissing,
+            Blocker::EnvFlagMissing,
+            Blocker::EnvFlagMissing,
+            Blocker::ProofMissing,
+            Blocker::ProofMissing,
+            Blocker::ProofMissing,
+            Blocker::ProofMissing,
+            Blocker::ProofMissing,
+            Blocker::ProofMissing,
+            Blocker::ProofMissing,
+        ]
+    );
 }
 
 #[test]
@@ -83,14 +75,13 @@ fn runbook_requires_exact_id_and_source_version() {
 
     let blockers = runbook.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfDisableCleanupBlocker::RunbookIdMismatch
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDisableCleanupBlocker::SourceVersionMismatch
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfDisableCleanupBlocker::RunbookIdMismatch,
+            StockEtfDisableCleanupBlocker::SourceVersionMismatch,
+        ]
+    );
 }
 
 #[test]
@@ -120,30 +111,17 @@ fn env_flags_must_be_exact_disable_values_with_evidence_hashes() {
 
     let blockers = runbook.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfDisableCleanupBlocker::EnvFlagMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDisableCleanupBlocker::EnvFlagDuplicated
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDisableCleanupBlocker::EnvFlagExpectedValueMismatch
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDisableCleanupBlocker::EnvFlagObservedValueMismatch
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDisableCleanupBlocker::EnvFlagEvidenceHashInvalid
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDisableCleanupBlocker::EnvFlagUnexpected
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfDisableCleanupBlocker::EnvFlagMissing,
+            StockEtfDisableCleanupBlocker::EnvFlagDuplicated,
+            StockEtfDisableCleanupBlocker::EnvFlagExpectedValueMismatch,
+            StockEtfDisableCleanupBlocker::EnvFlagObservedValueMismatch,
+            StockEtfDisableCleanupBlocker::EnvFlagEvidenceHashInvalid,
+            StockEtfDisableCleanupBlocker::EnvFlagUnexpected,
+        ]
+    );
 }
 
 #[test]
@@ -162,27 +140,17 @@ fn proofs_must_cover_required_actions_without_authority_or_destructive_claims() 
 
     let blockers = runbook.validate().blockers;
 
-    assert!(has(&blockers, StockEtfDisableCleanupBlocker::ProofMissing));
-    assert!(has(
-        &blockers,
-        StockEtfDisableCleanupBlocker::ProofDuplicated
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDisableCleanupBlocker::ProofNotVerified
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDisableCleanupBlocker::ProofEvidenceHashInvalid
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDisableCleanupBlocker::ProofGrantsRuntimeAuthority
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDisableCleanupBlocker::ProofDestructiveCleanupClaimed
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfDisableCleanupBlocker::ProofDuplicated,
+            StockEtfDisableCleanupBlocker::ProofNotVerified,
+            StockEtfDisableCleanupBlocker::ProofEvidenceHashInvalid,
+            StockEtfDisableCleanupBlocker::ProofGrantsRuntimeAuthority,
+            StockEtfDisableCleanupBlocker::ProofDestructiveCleanupClaimed,
+            StockEtfDisableCleanupBlocker::ProofMissing,
+        ]
+    );
 }
 
 #[test]
@@ -203,50 +171,22 @@ fn runbook_rejects_contact_secret_destructive_cleanup_and_launch_claims() {
     };
     let blockers = runbook.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfDisableCleanupBlocker::BybitLiveExecutionNotProtected
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDisableCleanupBlocker::IbkrContactPerformed
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDisableCleanupBlocker::ConnectorRuntimeStarted
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDisableCleanupBlocker::PaperOrderRouted
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDisableCleanupBlocker::SecretSlotCreated
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDisableCleanupBlocker::SecretContentSerialized
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDisableCleanupBlocker::DestructiveDbCleanupRequested
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDisableCleanupBlocker::DbDeleteOrTruncateAllowed
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDisableCleanupBlocker::PaperShadowLaunchAuthorityClaimed
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDisableCleanupBlocker::TinyLiveAuthorityClaimed
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDisableCleanupBlocker::LiveAuthorityClaimed
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfDisableCleanupBlocker::BybitLiveExecutionNotProtected,
+            StockEtfDisableCleanupBlocker::IbkrContactPerformed,
+            StockEtfDisableCleanupBlocker::ConnectorRuntimeStarted,
+            StockEtfDisableCleanupBlocker::PaperOrderRouted,
+            StockEtfDisableCleanupBlocker::SecretSlotCreated,
+            StockEtfDisableCleanupBlocker::SecretContentSerialized,
+            StockEtfDisableCleanupBlocker::DestructiveDbCleanupRequested,
+            StockEtfDisableCleanupBlocker::DbDeleteOrTruncateAllowed,
+            StockEtfDisableCleanupBlocker::PaperShadowLaunchAuthorityClaimed,
+            StockEtfDisableCleanupBlocker::TinyLiveAuthorityClaimed,
+            StockEtfDisableCleanupBlocker::LiveAuthorityClaimed,
+        ]
+    );
 }
 
 #[test]
@@ -287,8 +227,4 @@ fn blocked_template_is_parseable_and_secret_free() {
     assert!(!lower.contains("account_id ="));
     assert!(!lower.contains("password ="));
     assert!(!lower.contains("token ="));
-}
-
-fn has(blockers: &[StockEtfDisableCleanupBlocker], blocker: StockEtfDisableCleanupBlocker) -> bool {
-    blockers.contains(&blocker)
 }
