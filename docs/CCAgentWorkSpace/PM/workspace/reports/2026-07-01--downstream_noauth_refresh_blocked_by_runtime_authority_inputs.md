@@ -4,7 +4,8 @@
 - Active blocker: `P0-CURRENT-CANDIDATE-DOWNSTREAM-NOAUTH-INPUT-REFRESH-FOR-PHASE-AB`
 - Next blocker: `P0-CURRENT-CANDIDATE-STANDING-AUTH-AND-EQUITY-INPUT-REFRESH-FOR-DOWNSTREAM-NOAUTH`
 - Candidate: `grid_trading|ETHUSDT|Buy`
-- Source head: `a4a598a2e1402c1477cbd94088eeabc14a0f6839`
+- Runtime action source check: `a4a598a2e1402c1477cbd94088eeabc14a0f6839`
+- v701 docs/state first pushed at: `46a72be028e28bbb4982a3b6b7d5264a92b9114e`
 - Runtime head: `e16d3323cb58a549262f6bfa6f1ef48ca140aea0`
 - Runtime manifest: `trade-core:/tmp/openclaw/downstream_noauth_input_refresh_20260701T044905Z_noauth/manifest/downstream_noauth_input_refresh_manifest.json`
 - Runtime manifest sha: `7c502ccf4b5d68573eaeddbb71ece1563b566fa66a4a9e704a6ea68491fc54bc`
