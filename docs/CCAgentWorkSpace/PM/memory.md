@@ -3682,3 +3682,11 @@
 - Source-static guard now rejects hardcoded TinyLiveAuthorized, LiveAuthorized, secret serialization, and unsealed posture in the ADR discussion fixture, and pins default fail-closed posture.
 - Verification passed: targeted rustfmt check PASS; tiny-live eligibility source static `7 passed`; tiny-live eligibility Rust acceptance `8 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
 - Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, tiny-live/live authorization, DB/evidence writer, paper order route, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Release Packet Authority Cross-Wire Guard
+
+- PM added test-only/source-static coverage for `stock_etf_release_packet` final release posture.
+- Acceptance now independently rejects secret serialization, live/tiny-live authority, unsealed packet, incomplete paper-shadow window, and incomplete engineering shakedown via the expected blockers.
+- Source-static guard now rejects hardcoded incomplete paper-shadow window, incomplete engineering shakedown, secret serialization, live/tiny-live authority, and unsealed posture in the accepted fixture, and pins default fail-closed posture.
+- Verification passed: targeted rustfmt check PASS; release packet source static `8 passed`; release packet Rust acceptance `9 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
+- Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, release execution, DB/evidence writer, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.

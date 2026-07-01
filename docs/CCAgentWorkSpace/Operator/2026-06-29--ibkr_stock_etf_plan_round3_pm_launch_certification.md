@@ -3834,6 +3834,35 @@ Verification 已過：
 沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 tiny-live/live authorization、
 沒有 DB/evidence writer、沒有 paper order route，也沒有改動 Bybit live/demo execution 行為。
 
+## 2026-07-01 Operator Update — Stock/ETF Release Packet Authority Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Release Packet Authority Cross-Wire Guard`。
+
+這個 checkpoint 補強 `stock_etf_release_packet` artifact 的 secret serialization / tiny-live/live authority /
+release seal / paper-shadow window / engineering shakedown cross-wire coverage。新增 Rust acceptance 分別
+證明 `secret_content_serialized=true`、`ibkr_live_or_tiny_live_authorized=true`、`sealed=false`、
+`paper_shadow_window_complete=false`、`engineering_shakedown_complete=false` 各自只觸發對應 blocker，
+避免 secret、live authority、release seal、paper-shadow window、engineering shakedown posture 彼此遮蔽。
+
+同時新增 Python source-static fixture cross-wire guard，禁止 incomplete paper-shadow window、incomplete
+engineering shakedown、secret serialization、live/tiny-live authority、unsealed posture 被 hardcoded 到
+accepted fixture，並鎖住 default fail-closed posture。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Release packet source static pytest：`8 passed`
+- Release packet Rust acceptance：`9 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 release execution、沒有
+DB/evidence writer、沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit
+live/demo execution 行為。
+
 ## 2026-07-01 Operator Update — Stock/ETF Scorecard Verdict Cross-Wire Guard
 
 本 session 已完成下一個 test-only/source-static checkpoint：
