@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-01 Standing Auth Readiness Cycle Source Fix
+
+- PM fixed the standing Demo authorization refresh guardrail cycle: default still requires bounded readiness READY, while explicit `--allow-expired-standing-auth-readiness-only` accepts only the single combined blocker `standing_authorization:standing_auth_expired`.
+- E2 found a nested/top-level blocker disagreement fail-open; PM fixed by unioning top-level and nested readiness blockers, then E2 replayed the prior inconsistent packet as NOT_READY with no preview.
+- Verification passed: focused guardrail `10`, adjacent auth/equity/readiness/no-order `66`, py_compile, diff-check, E2, and E4. Runtime standing auth remains expired; next step is E3-reviewed runtime refresh/materialization, not no-order E3/BB.
+
 ## 2026-07-01 Stock/ETF Phase3 Evidence Exact Blocker Guard
 
 - PM tightened `StockEtfPhase3` evidence acceptance coverage to exact ordered blocker vectors for market-data provenance drift/boundaries, frozen-input lineage, collector lineage/runtime side effects, evidence-clock gate/status regressions, and DQ manifest runtime side effects.
