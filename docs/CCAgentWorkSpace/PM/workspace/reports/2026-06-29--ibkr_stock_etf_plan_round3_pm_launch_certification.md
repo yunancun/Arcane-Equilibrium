@@ -610,6 +610,42 @@ ingestion、DQ writer、paper order/cancel/replace、fill import、DB apply、ev
 writer、evidence clock、scorecard writer、tiny-live、live、Linux runtime sync/restart
 或 Bybit behavior change。
 
+## 2026-07-01 PM Session Checkpoint — Paper Order Request Module Split Guard
+
+PM 已完成 `stock_etf_paper_order_request.rs` source hygiene checkpoint。這不是
+contract behavior change、endpoint/IPC change 或 payload shape change；只拆分
+fixture 與 validator implementation，保留 public type/method/import surface。
+
+已完成：
+
+- 父檔保留 public enums、envelope、default、verdict/blocker 與 contract id。
+- `fixtures.rs` 承載 accepted preview/submit/cancel/replace fixtures。
+- `validation.rs` 承載 `validate()` 與 order intent、effect hash、limit price、
+  boundary flag helper。
+- 原父檔由 798 行降至 216 行；fixtures/validation 子模組分別為 114/498 行。
+- 新增 paper-order request split static guard，鎖住子模組 allowlist、moved ownership
+  與 no-runtime-token posture。
+
+Verification：
+
+- Scoped Rust rustfmt PASS。
+- Focused paper-order request split static guard：`3 passed`。
+- Focused paper-order request acceptance：`8 passed`。
+- Full `cargo test -p openclaw_types` PASS。
+- Engine Stock/ETF IPC regression：`29 passed`。
+
+Dispatch 記錄：本 turn 因工具層 spawn policy 未允許 sub-agent dispatch，PM 本地完成
+narrow source hygiene / review / regression。此 checkpoint 為 source-only contract
+split hardening。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 2/3 runtime approval、IBKR contact
+approval、read-only probe approval、result import approval、paper order approval、
+evidence writer approval、scorecard writer approval 或 launch approval。未批准 IBKR
+SDK import、socket/HTTP、secret、connector runtime、read probe execution、collector
+start、market-data ingestion、DQ writer、paper order/cancel/replace、fill import、
+DB apply、evidence writer、evidence clock、scorecard writer、tiny-live、live、Linux
+runtime sync/restart 或 Bybit behavior change。
+
 ## 2026-07-01 PM Session Checkpoint — Rust IPC Parent Module Split Guard
 
 PM 已完成 Stock/ETF Rust IPC parent source hygiene checkpoint。這不是 behavior
