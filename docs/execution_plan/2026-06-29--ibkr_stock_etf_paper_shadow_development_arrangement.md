@@ -4833,3 +4833,46 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper
 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
 clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
 Bybit behavior change。
+
+## 111. 2026-07-01 PM session source checkpoint：Stock/ETF Paper Fill Import Request Source Static Guard
+
+本 checkpoint 為 `stock_etf_paper_fill_import_request.rs` 補上 source-only structure
+guard。這不是 IBKR contact、不是 connector construction、不是 fill import execution、
+不是 DB apply、不是 paper order route；只把 paper fill import request envelope 的
+source invariant 機器化。
+
+已完成：
+
+- 新增 `tests/structure/test_stock_etf_paper_fill_import_request_source_static.py`。
+- Guard 鎖住 `stock_etf_paper_fill_import_request.rs` 低於 800 行 governance cap。
+- Guard 要求 fill-import contract id、request/verdict/blocker surface、required-field
+  validator、boundary-flag validator 與 lifecycle/event-log/redaction imports 保持在
+  source 中。
+- Guard 要求 default 仍 fail-closed：CryptoPerp/Bybit、LiveReservedDenied、
+  UnknownDenied IPC method、TransferOrAccountWrite operation、Denied authority、
+  `effect_capable=false`、observed state/stale policy empty。
+- Guard 要求 accepted fixture 仍是 StockEtfCash/IBKR/Paper、ImportPaperFills、
+  PaperOrderFillImport、ReadOnly、effect=false，並綁定 lifecycle/event-log/redaction
+  contract ids、Filled observed state、PreserveTerminalWithEvidence stale policy。
+- Guard 要求 request id、session attestation、lifecycle/event-log/redaction/source
+  artifact hashes、reconciliation run id、broker order id、execution id、commission report id、
+  import idempotency key、raw/redacted hashes checks 不得消失。
+- Guard 要求 duplicate import denial、StateUnknown stale-policy handling、IBKR contact、
+  connector runtime、secret serialization、fill import、DB apply、order route、Bybit reuse、
+  live/tiny-live、margin/short/options/CFD、Python direct broker write boundary flags 不得消失。
+- Guard 禁止 env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens
+  與 secret material access tokens。
+
+驗證：
+
+- New structure guard py_compile：PASS。
+- Focused structure guard pytest：`6 passed`。
+- Focused paper fill import request acceptance：`6 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
+cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
+clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
+Bybit behavior change。
