@@ -1477,3 +1477,10 @@ Do not paste long reports or stable architecture into TODO.
 - The guard requires the current artifact scope to stay exact, every selected artifact to be directly referenced by tests, and the main plan plus Operator launch summary to list all selected artifacts.
 - It also pins manifest fail-closed authority, named packet no-runtime denials, and DB evidence SQL source-only / no-migration-copy posture.
 - Verification passed: new guard `6 passed`; focused source-static subset `31 passed`; Rust Phase0/release/DDL acceptance `6/8/10 passed`; docs trace PASS. This grants no runtime behavior change, IBKR contact, connector runtime, secret access, DB apply, paper order route, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF ADR/AMD Authority Coverage Static Guard
+
+- PM added a source-only meta guard for ADR-0048 and AMD-2026-06-29-01 authority artifacts.
+- The guard requires the authority artifact scope to stay exact, both artifacts to be directly referenced by tests, and the main plan plus Operator launch summary to list full authority paths.
+- It pins Bybit-only active live execution, IBKR read-only/paper/shadow scope, closed taxonomy, denied live/tiny-live/margin/short/options/CFD/transfer/GUI/Python/Bybit-paper-reuse paths, allowed readonly/paper secret slots, denied live slot, Rust authority, inert connector posture, and discussion-only tiny-live eligibility.
+- Verification passed: new guard `7 passed`; focused ADR/AMD + Phase0/release source-static subset `29 passed`; docs trace PASS. This grants no ADR/AMD content change, runtime behavior change, IBKR contact, connector runtime, secret access, DB apply, paper order route, tiny-live/live, or Bybit behavior change.

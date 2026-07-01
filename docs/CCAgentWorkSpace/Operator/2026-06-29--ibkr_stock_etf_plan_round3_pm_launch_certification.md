@@ -3493,3 +3493,33 @@ Verification 已過：
 邊界不變：沒有 IBKR contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有
 read-only probe execution、沒有 result import、沒有 evidence/scorecard writer、沒有 DB apply、
 沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF ADR/AMD Authority Coverage Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF ADR/AMD Authority Coverage Static Guard`。
+
+這個 guard 把最高層 authority artifacts 的入口完整性機器化。它掃描 Stock/ETF ADR/AMD source，
+並要求目前 scope 精確等於：
+`docs/adr/0048-ibkr-stock-etf-paper-shadow-lane.md`、
+`docs/governance_dev/amendments/2026-06-29--AMD-2026-06-29-01-ibkr-stock-etf-paper-shadow-lane.md`。
+新增、改名或刪除 authority artifact 後，如果沒有同步測試與 launch trace，guard 會 fail。
+
+Guard 同時要求兩個 authority artifacts 都被 structure / Rust acceptance / Stock-ETF
+control-api tests 直接引用，且主開發安排與本 Operator 摘要都列出完整路徑。ADR-0048
+必須繼續保留 Bybit-only active live execution venue、IBKR read-only/paper/shadow research scope、
+closed lane/broker/environment taxonomy，以及 IBKR live/tiny-live/margin/short/options/CFD/
+transfer/GUI/Python/Bybit-paper-reuse denied paths。AMD-2026-06-29-01 必須繼續保留 paper/shadow
+amendment boundary、readonly/paper secret slots、denied live slot、Rust authority、inert connector
+skeleton posture，以及 tiny-live eligibility discussion-only boundary。
+
+Verification 已過：
+
+- New structure guard pytest：`7 passed`
+- Focused ADR/AMD + Phase0/release source-static subset：`29 passed`
+- Docs PM trace tests：PASS
+- Diff check：PASS
+
+邊界不變：沒有 ADR/AMD content change、沒有 IBKR contact、沒有 connector runtime、沒有 SDK
+import、沒有 secret access、沒有 read-only probe execution、沒有 result import、沒有 DB apply、
+沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
