@@ -4135,3 +4135,10 @@
 - The acceptance test no longer uses loose paper-order request blocker helper checks; aggregate paths now require complete ordered vectors, and source-static pins validator blocker emit order.
 - Verification passed: Stock/ETF paper-order request source static `14 passed`; Stock/ETF paper-order request Rust acceptance `17 passed`; full `cargo test -p openclaw_types` PASS; package fmt/diff check PASS.
 - Boundary unchanged: no Rust production code change, GUI runtime/API route/IPC behavior change, IBKR contact, connector runtime, socket/client construction, secret access, broker session, paper order routing/cancel/replace execution, lifecycle writer, fill import, DB/evidence writer, scorecard writer, evidence clock, paper-shadow launch, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Paper Fill Import Exact Blocker Guard
+
+- PM tightened test-only exact-blocker coverage for `StockEtfPaperFillImportRequestV1` aggregate fail-closed paths: default request, method/operation/scope cross-wire, lineage/hash/stale-policy aggregate failures, StateUnknown stale-policy aggregate, duplicate/replay regressions, and no-side-effect boundary regressions.
+- The acceptance test no longer uses loose paper-fill import blocker helper checks; aggregate paths now require complete ordered vectors, and source-static pins validator blocker emit order.
+- Verification passed: Stock/ETF paper-fill import source static `9 passed`; Stock/ETF paper-fill import Rust acceptance `10 passed`; full `cargo test -p openclaw_types` PASS; package fmt/diff check PASS.
+- Boundary unchanged: no Rust production code change, GUI runtime/API route/IPC behavior change, IBKR contact, connector runtime, socket/client construction, secret access, broker session, paper order routing/cancel/replace execution, lifecycle writer, fill import execution, DB/evidence writer, scorecard writer, evidence clock, paper-shadow launch, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.

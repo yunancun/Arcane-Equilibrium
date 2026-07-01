@@ -8880,3 +8880,42 @@ runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀
 socket/client construction、不做 broker session、不執行 paper order routing/cancel/replace、不啟動 lifecycle
 writer、不執行 fill import、不做 DB/evidence writer、不啟動 scorecard writer、不啟動 evidence clock、不做 release
 launch、不做 Linux runtime sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
+
+## 215. 2026-07-01 PM session source checkpoint：Stock/ETF Paper Fill Import Exact Blocker Guard
+
+本 checkpoint 補強 `StockEtfPaperFillImportRequestV1` paper-fill import request contract 的 aggregate fail-closed
+lineage，固定 default request、method/operation/scope cross-wire、lineage/hash/stale-policy aggregate failures、
+StateUnknown stale-policy aggregate、duplicate/replay regressions、no-side-effect boundary regressions 的 ordered
+blocker vectors 或 exact single-blocker vectors。這不是 Rust production behavior change、不是 IPC/API route
+change、不是 IBKR contact、不是 connector runtime、不是 socket/client construction、不是 secret lookup、不是
+broker session、不是 paper order route enablement、不是 cancel/replace execution、不是 lifecycle writer、不是 fill
+import execution、不是 DB/evidence writer、不是 tiny-live/live gate；只把 Stock/ETF paper-fill import source-only
+contract 的 fail-closed lineage 變成 exact-blocker acceptance guard。
+
+已完成：
+
+- 在 `stock_etf_paper_fill_import_request_acceptance.rs` 將 default `StockEtfPaperFillImportRequestV1` 固定為
+  完整順序 blocker 向量，覆蓋 contract/source identity、lane/broker/env、method/operation/scope、request/session、
+  lifecycle/event-log/redaction/source lineage、broker/execution/commission/idempotency ids、stale policy 與 artifact
+  hashes。
+- 在同檔將 method/operation/scope cross-wire、lineage/hash/stale-policy aggregate、StateUnknown stale-policy
+  aggregate、duplicate/replay regressions、no-side-effect boundary regressions 固定為 exact blocker vectors。
+- 移除 paper-fill import blocker 的 loose `has()` / `blockers.contains` helper；aggregate cases 改為完整
+  ordered-vector assertions。
+- 在 `test_stock_etf_paper_fill_import_request_source_static.py` 新增 validator blocker emit-order guard，pin
+  top-level、required fields 與 boundary flags 的 source order。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Stock/ETF paper-fill import source static pytest：`9 passed`。
+- Stock/ETF paper-fill import Rust acceptance：`10 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、不改 GUI
+runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不做
+socket/client construction、不做 broker session、不執行 paper order routing/cancel/replace、不啟動 lifecycle writer、
+不執行 fill import、不做 DB/evidence writer、不啟動 scorecard writer、不啟動 evidence clock、不做 release launch、
+不做 Linux runtime sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
