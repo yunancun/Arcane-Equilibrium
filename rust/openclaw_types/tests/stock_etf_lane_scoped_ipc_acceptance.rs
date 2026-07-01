@@ -22,33 +22,47 @@ use openclaw_types::{
 
 #[test]
 fn default_lane_scoped_ipc_contract_blocks_all_authority() {
+    use StockEtfLaneScopedIpcBlocker as Blocker;
+
     let verdict = StockEtfLaneScopedIpcContractV1::default().validate();
 
     assert!(!verdict.accepted);
-    assert!(has(
-        &verdict.blockers,
-        StockEtfLaneScopedIpcBlocker::ContractIdMismatch
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfLaneScopedIpcBlocker::SourceVersionMismatch
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfLaneScopedIpcBlocker::WrongAssetLane
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfLaneScopedIpcBlocker::WrongBroker
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfLaneScopedIpcBlocker::RustAuthorityOwnerMissing
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfLaneScopedIpcBlocker::CommandMissing
-    ));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::ContractIdMismatch,
+            Blocker::SourceVersionMismatch,
+            Blocker::WrongAssetLane,
+            Blocker::WrongBroker,
+            Blocker::RustAuthorityOwnerMissing,
+            Blocker::PythonForwardOnlyMissing,
+            Blocker::PythonDirectBrokerWriteNotDenied,
+            Blocker::BybitIpcReuseNotDenied,
+            Blocker::ExistingBybitPaperPathNotDenied,
+            Blocker::LiveEnvironmentNotDenied,
+            Blocker::BybitLiveExecutionNotProtected,
+            Blocker::CommandMissing,
+            Blocker::CommandMissing,
+            Blocker::CommandMissing,
+            Blocker::CommandMissing,
+            Blocker::CommandMissing,
+            Blocker::CommandMissing,
+            Blocker::CommandMissing,
+            Blocker::CommandMissing,
+            Blocker::CommandMissing,
+            Blocker::CommandMissing,
+            Blocker::CommandMissing,
+            Blocker::CommandMissing,
+            Blocker::CommandMissing,
+            Blocker::CommandMissing,
+            Blocker::CommandMissing,
+            Blocker::CommandMissing,
+            Blocker::CommandMissing,
+            Blocker::CommandMissing,
+            Blocker::CommandMissing,
+            Blocker::CommandMissing,
+        ]
+    );
 }
 
 #[test]
@@ -603,10 +617,10 @@ fn paper_order_request_shapes_are_method_specific_and_not_cross_wireable() {
         StockEtfLaneScopedIpcMethod::CancelPaperOrder,
     )
     .required_request_fields = submit_fields;
-    assert!(has(
-        &cancel_cross_wired_as_submit.validate().blockers,
-        StockEtfLaneScopedIpcBlocker::CommandRequestFieldMissing
-    ));
+    assert_single_blocker(
+        cancel_cross_wired_as_submit,
+        StockEtfLaneScopedIpcBlocker::CommandRequestFieldMissing,
+    );
 
     let mut replace_cross_wired_as_cancel = StockEtfLaneScopedIpcContractV1::accepted_fixture();
     let cancel_fields = command(
@@ -620,10 +634,10 @@ fn paper_order_request_shapes_are_method_specific_and_not_cross_wireable() {
         StockEtfLaneScopedIpcMethod::ReplacePaperOrder,
     )
     .required_request_fields = cancel_fields;
-    assert!(has(
-        &replace_cross_wired_as_cancel.validate().blockers,
-        StockEtfLaneScopedIpcBlocker::CommandRequestFieldMissing
-    ));
+    assert_single_blocker(
+        replace_cross_wired_as_cancel,
+        StockEtfLaneScopedIpcBlocker::CommandRequestFieldMissing,
+    );
 
     let mut submit_cross_wired_as_cancel = StockEtfLaneScopedIpcContractV1::accepted_fixture();
     let cancel_fields = command(
@@ -637,10 +651,10 @@ fn paper_order_request_shapes_are_method_specific_and_not_cross_wireable() {
         StockEtfLaneScopedIpcMethod::SubmitPaperOrder,
     )
     .required_request_fields = cancel_fields;
-    assert!(has(
-        &submit_cross_wired_as_cancel.validate().blockers,
-        StockEtfLaneScopedIpcBlocker::CommandRequestFieldMissing
-    ));
+    assert_single_blocker(
+        submit_cross_wired_as_cancel,
+        StockEtfLaneScopedIpcBlocker::CommandRequestFieldMissing,
+    );
 }
 
 #[test]
@@ -652,18 +666,19 @@ fn lane_scoped_ipc_requires_exact_contract_id_and_source_version() {
     };
     let blockers = contract.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfLaneScopedIpcBlocker::ContractIdMismatch
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfLaneScopedIpcBlocker::SourceVersionMismatch
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfLaneScopedIpcBlocker::ContractIdMismatch,
+            StockEtfLaneScopedIpcBlocker::SourceVersionMismatch,
+        ]
+    );
 }
 
 #[test]
 fn lane_scoped_ipc_rejects_top_level_boundary_regressions() {
+    use StockEtfLaneScopedIpcBlocker as Blocker;
+
     let contract = StockEtfLaneScopedIpcContractV1 {
         contract_id: "wrong".to_string(),
         asset_lane: AssetLane::CryptoPerp,
@@ -682,40 +697,24 @@ fn lane_scoped_ipc_rejects_top_level_boundary_regressions() {
     };
     let blockers = contract.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfLaneScopedIpcBlocker::ContractIdMismatch
-    ));
-    assert!(has(&blockers, StockEtfLaneScopedIpcBlocker::WrongAssetLane));
-    assert!(has(&blockers, StockEtfLaneScopedIpcBlocker::WrongBroker));
-    assert!(has(
-        &blockers,
-        StockEtfLaneScopedIpcBlocker::PythonDirectBrokerWriteNotDenied
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfLaneScopedIpcBlocker::BybitIpcReuseNotDenied
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfLaneScopedIpcBlocker::ExistingBybitPaperPathNotDenied
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfLaneScopedIpcBlocker::LiveEnvironmentNotDenied
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfLaneScopedIpcBlocker::IbkrContactPerformed
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfLaneScopedIpcBlocker::ConnectorRuntimeStarted
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfLaneScopedIpcBlocker::SecretContentSerialized
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            Blocker::ContractIdMismatch,
+            Blocker::WrongAssetLane,
+            Blocker::WrongBroker,
+            Blocker::RustAuthorityOwnerMissing,
+            Blocker::PythonForwardOnlyMissing,
+            Blocker::PythonDirectBrokerWriteNotDenied,
+            Blocker::BybitIpcReuseNotDenied,
+            Blocker::ExistingBybitPaperPathNotDenied,
+            Blocker::LiveEnvironmentNotDenied,
+            Blocker::BybitLiveExecutionNotProtected,
+            Blocker::IbkrContactPerformed,
+            Blocker::ConnectorRuntimeStarted,
+            Blocker::SecretContentSerialized,
+        ]
+    );
 }
 
 #[test]
@@ -729,15 +728,19 @@ fn lane_scoped_ipc_requires_exact_command_coverage_once() {
 
     let blockers = contract.validate().blockers;
 
-    assert!(has(&blockers, StockEtfLaneScopedIpcBlocker::CommandMissing));
-    assert!(has(
-        &blockers,
-        StockEtfLaneScopedIpcBlocker::CommandDuplicated
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfLaneScopedIpcBlocker::CommandDuplicated,
+            StockEtfLaneScopedIpcBlocker::CommandMissing,
+        ]
+    );
 }
 
 #[test]
 fn paper_effect_methods_require_gates_fields_denials_and_rust_ownership() {
+    use StockEtfLaneScopedIpcBlocker as Blocker;
+
     let mut contract = StockEtfLaneScopedIpcContractV1::accepted_fixture();
     let submit = contract
         .commands
@@ -756,34 +759,18 @@ fn paper_effect_methods_require_gates_fields_denials_and_rust_ownership() {
 
     let blockers = contract.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfLaneScopedIpcBlocker::CommandOperationMismatch
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfLaneScopedIpcBlocker::CommandAuthorityScopeMismatch
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfLaneScopedIpcBlocker::CommandEffectCapabilityMismatch
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfLaneScopedIpcBlocker::CommandRustOwnershipMismatch
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfLaneScopedIpcBlocker::CommandRequiredGateMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfLaneScopedIpcBlocker::CommandRequestFieldMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfLaneScopedIpcBlocker::CommandDenialReasonMissing
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            Blocker::CommandOperationMismatch,
+            Blocker::CommandAuthorityScopeMismatch,
+            Blocker::CommandEffectCapabilityMismatch,
+            Blocker::CommandRustOwnershipMismatch,
+            Blocker::CommandRequiredGateMissing,
+            Blocker::CommandRequestFieldMissing,
+            Blocker::CommandDenialReasonMissing,
+        ]
+    );
 }
 
 #[test]
@@ -798,11 +785,13 @@ fn denied_or_unknown_ipc_methods_cannot_clear_contract() {
 
     let blockers = contract.validate().blockers;
 
-    assert!(has(&blockers, StockEtfLaneScopedIpcBlocker::CommandMissing));
-    assert!(has(
-        &blockers,
-        StockEtfLaneScopedIpcBlocker::CommandMethodDenied
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfLaneScopedIpcBlocker::CommandMethodDenied,
+            StockEtfLaneScopedIpcBlocker::CommandMissing,
+        ]
+    );
 }
 
 #[test]
@@ -833,10 +822,6 @@ fn blocked_template_is_parseable_and_secret_free() {
     assert!(!lower.contains("account_id ="));
     assert!(!lower.contains("password ="));
     assert!(!lower.contains("token ="));
-}
-
-fn has(blockers: &[StockEtfLaneScopedIpcBlocker], blocker: StockEtfLaneScopedIpcBlocker) -> bool {
-    blockers.contains(&blocker)
 }
 
 fn command(

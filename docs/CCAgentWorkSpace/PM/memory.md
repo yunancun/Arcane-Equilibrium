@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-01 Stock/ETF Lane-Scoped IPC Exact Blocker Guard
+
+- PM tightened `StockEtfLaneScopedIpcContractV1` aggregate acceptance coverage to exact ordered blocker vectors for default contract posture, top-level boundary regressions, command coverage/denied-method aggregates, command shape failures, and paper-order request-shape cross-wire cases.
+- Source-static guard now pins validator blocker emit order across top-level IPC contract flags and command validation shape checks.
+- Verification passed: lane-scoped IPC source static `7`, Rust acceptance `12`, full `cargo test -p openclaw_types`, cargo fmt, docs trace, and diff-check. Boundary unchanged: no IPC runtime/server, IBKR contact, connector/runtime, secret access/serialization, paper order route, result/fill import, evidence/scorecard/DB writer, tiny-live/live, or Bybit behavior change.
+
 ## 2026-07-01 Stock/ETF Readonly Probe Result Import Exact Blocker Guard
 
 - PM tightened `StockEtfIbkrReadonlyProbeResultImportRequestV1` aggregate acceptance coverage to exact ordered blocker vectors for default, read-action/operation cross-wire, common/kind-specific lineage gaps, timestamp/replay, and no-side-effect boundary regressions.

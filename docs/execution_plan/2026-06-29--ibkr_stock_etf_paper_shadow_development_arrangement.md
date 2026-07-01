@@ -9089,3 +9089,45 @@ runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀
 socket/client construction、不做 broker session、不執行 read-only probe、不執行 result import、不執行 paper order
 routing/cancel/replace、不做 evidence/scorecard/DB writer、不啟動 evidence clock、不做 release launch、不做 Linux
 runtime sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
+
+## 220. 2026-07-01 PM session source checkpoint：Stock/ETF Lane-Scoped IPC Exact Blocker Guard
+
+本 checkpoint 補強 `StockEtfLaneScopedIpcContractV1` source-only lane-scoped IPC contract 的 aggregate
+fail-closed lineage，固定 default contract、top-level boundary regressions、exact contract/source mismatch、
+command coverage once-only、denied/unknown method aggregate、paper-effect command shape failures、paper-order
+request-shape cross-wire cases 的 ordered blocker vectors 或 exact single-blocker vectors。這不是 Rust
+production behavior change、不是 IPC runtime/server startup、不是 API route change、不是 IBKR contact、不是
+connector runtime、不是 socket/client construction、不是 secret lookup、不是 broker session、不是 read-only probe
+execution、不是 result/fill import execution、不是 paper order route enablement、不是 evidence/scorecard/DB writer、
+不是 tiny-live/live gate；只把 Stock/ETF lane-scoped IPC source-only contract 的 fail-closed method matrix 與
+IBKR/Bybit boundary 變成 exact-blocker acceptance guard。
+
+已完成：
+
+- 在 `stock_etf_lane_scoped_ipc_acceptance.rs` 將 default `StockEtfLaneScopedIpcContractV1` 固定為完整順序
+  blocker 向量，覆蓋 contract/source identity、Stock/ETF lane、IBKR broker、Rust authority owner、Python
+  forward-only、direct broker write denial、Bybit IPC reuse denial、existing Bybit paper path denial、live
+  environment denial、Bybit live unchanged proof，以及 20 個 required IPC methods 的 missing blockers。
+- 在同檔將 top-level boundary regressions、exact contract/source mismatch、command coverage once-only、
+  denied/unknown method aggregate、paper-effect command shape failures、paper-order request-shape cross-wire cases
+  固定為 exact blocker vectors 或 exact single-blocker vectors。
+- 移除 lane-scoped IPC blocker 的 loose `has()` / `blockers.contains` helper；aggregate cases 改為完整
+  ordered-vector assertions。
+- 在 `test_stock_etf_lane_scoped_ipc_source_static.py` 新增 validator blocker emit-order guard，pin top-level IPC
+  contract flags、denied/missing/duplicated command checks，以及 command shape validation 的 source order。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Stock/ETF lane-scoped IPC source static pytest：`7 passed`。
+- Stock/ETF lane-scoped IPC Rust acceptance：`12 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、不改 GUI
+runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不做
+socket/client construction、不做 broker session、不執行 read-only probe、不執行 result/fill import、不執行 paper
+order routing/cancel/replace、不做 evidence/scorecard/DB writer、不啟動 evidence clock、不做 release launch、
+不做 Linux runtime sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
