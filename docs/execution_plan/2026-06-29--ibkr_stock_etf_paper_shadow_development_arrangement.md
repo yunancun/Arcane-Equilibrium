@@ -6581,3 +6581,41 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 scorecard writer、不做
 DB/evidence writer、不做 paper order route、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何
 Bybit behavior change。
+
+## 157. 2026-07-01 PM session source checkpoint：Stock/ETF Tiny-Live Eligibility Decision Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_tiny_live_eligibility` 的 ADR-discussion-only decision matrix 與
+secret/sealed posture cross-wire coverage。這不是 Rust production behavior change、不是 IBKR contact、
+不是 connector runtime、不是 secret access、不是 tiny-live/live authorization、不是 DB/evidence
+writer、不是 paper order route；只把未來 ADR 討論資格 artifact 的 no-live-authority posture 變成
+行為型 regression test 與 source-static guard。
+
+已完成：
+
+- 在 `stock_etf_tiny_live_eligibility_acceptance.rs` 新增
+  `tiny_live_eligibility_rejects_decision_and_secret_cross_wire_independently`。
+- Acceptance 證明 `NotEligible` decision 只產生 `DecisionNotAdrDiscussionOnly`，不誤報 tiny-live、
+  live、secret 或 sealed blockers。
+- Acceptance 證明 `TinyLiveAuthorized` decision 只產生 `TinyLiveAuthorizationRequested`，不誤報
+  NotEligible、live、secret 或 sealed blockers。
+- Acceptance 證明 `LiveAuthorized` decision 只產生 `LiveAuthorizationRequested`，不誤報 NotEligible、
+  tiny-live、secret 或 sealed blockers。
+- Acceptance 證明 `secret_content_serialized=true` 只產生 `SecretContentSerialized`，不誤報 decision
+  或 sealed blockers。
+- Acceptance 證明 `sealed=false` 只產生 `NotSealed`，不誤報 decision 或 secret blockers。
+- 在 `test_stock_etf_tiny_live_eligibility_source_static.py` 新增 fixture cross-wire guard，禁止
+  `TinyLiveAuthorized`、`LiveAuthorized`、secret serialization、unsealed posture 被 hardcoded 到
+  `adr_discussion_fixture()`，並鎖住 default fail-closed posture。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Tiny-live eligibility source static pytest：`7 passed`。
+- Tiny-live eligibility Rust acceptance：`8 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不授權 tiny-live/live、不做
+DB/evidence writer、不做 paper order route、不做 Linux runtime sync/restart、不改任何 Bybit behavior。

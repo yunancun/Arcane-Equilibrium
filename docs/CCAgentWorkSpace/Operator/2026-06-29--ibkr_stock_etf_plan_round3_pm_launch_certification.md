@@ -3806,6 +3806,34 @@ Verification 已過：
 沒有 result import、沒有 DB/evidence writer、沒有 paper order route、沒有 tiny-live/live authorization，
 也沒有改動 Bybit live/demo execution 行為。
 
+## 2026-07-01 Operator Update — Stock/ETF Tiny-Live Eligibility Decision Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Tiny-Live Eligibility Decision Cross-Wire Guard`。
+
+這個 checkpoint 補強 `stock_etf_tiny_live_eligibility` artifact 的 ADR-discussion-only decision matrix
+與 secret/sealed posture cross-wire coverage。新增 Rust acceptance 分別證明 `NotEligible`、
+`TinyLiveAuthorized`、`LiveAuthorized`、`secret_content_serialized=true`、`sealed=false` 各自只觸發
+對應 blocker，避免 tiny-live/live authorization、secret serialization、unsealed posture 彼此遮蔽或被
+誤當作可通過。
+
+同時新增 Python source-static fixture cross-wire guard，禁止 `TinyLiveAuthorized`、
+`LiveAuthorized`、secret serialization、unsealed posture 被 hardcoded 到 `adr_discussion_fixture()`，
+並鎖住 default fail-closed posture。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Tiny-live eligibility source static pytest：`7 passed`
+- Tiny-live eligibility Rust acceptance：`8 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 tiny-live/live authorization、
+沒有 DB/evidence writer、沒有 paper order route，也沒有改動 Bybit live/demo execution 行為。
+
 ## 2026-07-01 Operator Update — Stock/ETF Scorecard Verdict Cross-Wire Guard
 
 本 session 已完成下一個 test-only/source-static checkpoint：
