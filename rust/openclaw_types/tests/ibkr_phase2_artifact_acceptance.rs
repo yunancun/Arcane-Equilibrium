@@ -168,6 +168,64 @@ fn artifact_rejects_missing_review_hash_and_seal_fields() {
 }
 
 #[test]
+fn artifact_rejects_each_metadata_seal_and_hash_gap_independently() {
+    use IbkrPhase2GateArtifactBlocker as Blocker;
+
+    let cases: [(fn(&mut IbkrPhase2GateArtifactV1), Blocker); 11] = [
+        (
+            |artifact| artifact.artifact_id = String::new(),
+            Blocker::ArtifactIdMissing,
+        ),
+        (
+            |artifact| artifact.adr = "ADR-0047".to_string(),
+            Blocker::AdrMismatch,
+        ),
+        (
+            |artifact| artifact.amd = "AMD-2026-06-29-99".to_string(),
+            Blocker::AmdMismatch,
+        ),
+        (
+            |artifact| artifact.source_commit = String::new(),
+            Blocker::SourceCommitMissing,
+        ),
+        (
+            |artifact| artifact.created_at_ms = 0,
+            Blocker::CreatedAtMissing,
+        ),
+        (
+            |artifact| artifact.immutable_storage_path = String::new(),
+            Blocker::ImmutableStoragePathMissing,
+        ),
+        (
+            |artifact| artifact.reviewer_roles = vec!["Operator".to_string()],
+            Blocker::PmReviewerMissing,
+        ),
+        (
+            |artifact| artifact.reviewer_roles = vec!["PM".to_string()],
+            Blocker::OperatorReviewerMissing,
+        ),
+        (
+            |artifact| artifact.sealed = false,
+            Blocker::ArtifactNotSealed,
+        ),
+        (
+            |artifact| artifact.raw_artifact_hash = "not-a-hash".to_string(),
+            Blocker::RawArtifactHashInvalid,
+        ),
+        (
+            |artifact| artifact.redacted_summary_hash = "c".repeat(63),
+            Blocker::RedactedSummaryHashInvalid,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut artifact = accepted_artifact_fixture();
+        mutate(&mut artifact);
+        assert_single_artifact_blocker(artifact.validate(), blocker);
+    }
+}
+
+#[test]
 fn artifact_rejects_policy_flag_mismatch() {
     let mut artifact = accepted_artifact_fixture();
     artifact.policy_flags.python_no_write_guard_present = false;
@@ -268,4 +326,17 @@ fn blocked_artifact_template_is_parseable_and_secret_free() {
     assert!(!lower.contains("account_id ="));
     assert!(!lower.contains("password ="));
     assert!(!lower.contains("token ="));
+}
+
+fn assert_single_artifact_blocker(
+    verdict: openclaw_types::IbkrPhase2GateArtifactVerdict,
+    blocker: IbkrPhase2GateArtifactBlocker,
+) {
+    assert!(!verdict.ibkr_contact_allowed);
+    assert_eq!(
+        verdict.blockers,
+        vec![blocker],
+        "expected only {blocker:?}; blockers: {:?}",
+        verdict.blockers
+    );
 }

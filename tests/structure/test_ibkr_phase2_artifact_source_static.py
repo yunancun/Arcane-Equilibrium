@@ -144,6 +144,13 @@ def _source() -> str:
     return PHASE2_ARTIFACT.read_text(encoding="utf-8")
 
 
+def _default_block(source: str) -> str:
+    return source.split("impl Default for IbkrPhase2GateArtifactV1", 1)[1].split(
+        "impl IbkrPhase2GateArtifactV1",
+        1,
+    )[0]
+
+
 def test_ibkr_phase2_artifact_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
@@ -164,6 +171,33 @@ def test_ibkr_phase2_artifact_source_keeps_artifact_contract_matrix() -> None:
     assert "secret_slot_contract: IbkrSecretSlotContractV1::default()" in source
     assert "api_session_topology: IbkrApiSessionTopologyV1::default()" in source
     assert "ibkr_contact_allowed: blockers.is_empty()" in source
+
+
+def test_ibkr_phase2_artifact_default_keeps_fail_closed_metadata_and_runtime_posture() -> None:
+    default = _default_block(_source())
+
+    for required in (
+        "contract_id: String::new()",
+        "source_version: 0",
+        "artifact_id: String::new()",
+        "source_commit: String::new()",
+        "created_at_ms: 0",
+        "immutable_storage_path: String::new()",
+        "reviewer_roles: Vec::new()",
+        "sealed: false",
+        "gate: IbkrExternalSurfaceGateV1::default()",
+        "redaction_suite_passed: false",
+        "rate_limit_policy_present: false",
+        "audit_event_policy_present: false",
+        "paper_attestation_contract_present: false",
+        "python_no_write_guard_present: false",
+        "secret_slot_contract: IbkrSecretSlotContractV1::default()",
+        "api_session_topology: IbkrApiSessionTopologyV1::default()",
+        "raw_artifact_hash: String::new()",
+        "redacted_summary_hash: String::new()",
+        "supersedes_artifact_id: None",
+    ):
+        assert required in default
 
 
 def test_ibkr_phase2_artifact_source_keeps_gate_policy_runtime_cross_checks() -> None:
