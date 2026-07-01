@@ -79,6 +79,28 @@ class EngineTimeoutError(Exception):
     pass
 
 
+class EngineProtocolError(Exception):
+    """Raised when the engine violates the JSON-RPC response contract.
+
+    引擎回覆不符合預期 JSON-RPC contract 時拋出。
+    """
+
+    def __init__(
+        self,
+        reason: str,
+        *,
+        expected_id: int | None = None,
+        actual_id: Any = None,
+    ) -> None:
+        self.reason = reason
+        self.expected_id = expected_id
+        self.actual_id = actual_id
+        super().__init__(
+            f"IPC protocol error: {reason} "
+            f"(expected_id={expected_id!r}, actual_id={actual_id!r})"
+        )
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # EngineIPCClient / 引擎 IPC 客戶端
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -622,9 +644,22 @@ class EngineIPCClient:
         if not raw:
             raise RuntimeError("IPC auth: empty response from server")
         resp = json.loads(raw.decode("utf-8").strip())
+        if resp.get("id") != 0:
+            raise EngineProtocolError(
+                "auth_response_id_mismatch",
+                expected_id=0,
+                actual_id=resp.get("id"),
+            )
         if resp.get("error"):
             raise RuntimeError(
                 f"IPC auth rejected: {resp['error'].get('message', resp['error'])}"
+            )
+        result = resp.get("result")
+        if not isinstance(result, dict) or result.get("authenticated") is not True:
+            raise EngineProtocolError(
+                "auth_response_not_authenticated",
+                expected_id=0,
+                actual_id=resp.get("id"),
             )
         logger.info("IPC HMAC-SHA256 auth handshake succeeded / IPC 認證握手成功")
 
@@ -699,6 +734,11 @@ class EngineIPCClient:
                 request_id, response.get("id"),
                 request_id, response.get("id"),
             )
+            raise EngineProtocolError(
+                "response_id_mismatch",
+                expected_id=request_id,
+                actual_id=response.get("id"),
+            )
 
         if "error" in response:
             error = response["error"]
@@ -706,8 +746,14 @@ class EngineIPCClient:
                 f"Engine RPC error [{error.get('code')}]: {error.get('message')} / "
                 f"引擎 RPC 錯誤 [{error.get('code')}]: {error.get('message')}"
             )
+        if "result" not in response:
+            raise EngineProtocolError(
+                "missing_result",
+                expected_id=request_id,
+                actual_id=response.get("id"),
+            )
 
-        return response.get("result", {})
+        return response["result"]
 
     # ─── Internal: reconnection / 內部：重連 ─────────────────────────────────
 
