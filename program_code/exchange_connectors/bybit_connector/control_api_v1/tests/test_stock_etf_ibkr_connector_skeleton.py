@@ -207,7 +207,7 @@ SIDE_EFFECT_FALSE_KEYS = {
     "secret_content_serialized",
     "session_attestation_present",
 }
-RISKY_CONFIG_BLOCKERS = {
+RISKY_CONFIG_BLOCKERS = (
     "host_not_loopback",
     "port_not_reserved_paper_tws",
     "network_contact_requested",
@@ -217,6 +217,65 @@ RISKY_CONFIG_BLOCKERS = {
     "bybit_path_reused",
     "account_fingerprint_present_before_phase2",
     "secret_fingerprint_present_before_phase2",
+)
+EXPECTED_DEFAULT_BLOCKERS = {
+    "connection_plan": (
+        "phase2_gate_not_accepted",
+        "connection_plan_blocked",
+    ),
+    "readiness": ("phase2_gate_not_accepted",),
+    "account_snapshot": (
+        "phase2_gate_not_accepted",
+        "account_snapshot_blocked",
+    ),
+    "market_data": (
+        "phase2_gate_not_accepted",
+        "market_data_blocked",
+    ),
+    "contract_details": (
+        "phase2_gate_not_accepted",
+        "contract_details_blocked",
+    ),
+    "session_attestation": (
+        "phase2_gate_not_accepted",
+        "session_attestation_blocked_source_only",
+    ),
+    "readonly_probe_result_import": (
+        "phase2_gate_not_accepted",
+        "probe_result_import_request_blocked_source_only",
+        "probe_result_import_request_artifact_missing",
+    ),
+    "paper_lifecycle": (
+        "phase2_gate_not_accepted",
+        "paper_lifecycle_runtime_blocked",
+        "rust_authority_required",
+        "paper_session_attestation_missing",
+    ),
+    "fill_import": (
+        "phase2_gate_not_accepted",
+        "fill_import_runtime_blocked",
+        "stock_etf_paper_fill_import_request_required",
+    ),
+    "paper_attestation": (
+        "phase2_gate_not_accepted",
+        "paper_attestation_blocked_source_only",
+        "paper_session_attestation_missing",
+    ),
+    "fixture": ("phase2_gate_not_accepted",),
+    "session_fixture": (
+        "phase2_gate_not_accepted",
+        "session_attestation_blocked_source_only",
+    ),
+    "readonly_probe_result_import_fixture": (
+        "phase2_gate_not_accepted",
+        "probe_result_import_request_blocked_source_only",
+        "probe_result_import_request_artifact_missing",
+    ),
+    "paper_fixture": (
+        "phase2_gate_not_accepted",
+        "paper_attestation_blocked_source_only",
+        "paper_session_attestation_missing",
+    ),
 }
 EXPECTED_CONNECTOR_EXPORTS = (
     "IBKR_CONNECTOR_SURFACE_ID",
@@ -313,6 +372,10 @@ def _declared_public_surface(cls: type) -> set[str]:
     return {name for name in vars(cls) if not name.startswith("_")}
 
 
+def _expected_risky_blockers(surface_name: str) -> list[str]:
+    return list(EXPECTED_DEFAULT_BLOCKERS[surface_name] + RISKY_CONFIG_BLOCKERS)
+
+
 def test_ibkr_connector_package_exports_only_source_boundary_types() -> None:
     assert tuple(ibkr_connector.__all__) == EXPECTED_CONNECTOR_EXPORTS
     for name in EXPECTED_CONNECTOR_EXPORTS:
@@ -389,7 +452,7 @@ def test_ibkr_readonly_client_is_blocked_without_network_or_secret_side_effects(
     assert status["live_channel_exposed"] is False
     assert status["order_write_method_present"] is False
     assert status["bybit_path_reused"] is False
-    assert "phase2_gate_not_accepted" in status["blockers"]
+    assert status["blockers"] == list(EXPECTED_DEFAULT_BLOCKERS["readiness"])
 
 
 def test_ibkr_readonly_config_rejects_runtime_and_live_requests() -> None:
@@ -512,50 +575,82 @@ def test_ibkr_connector_preview_payload_shapes_are_fail_closed() -> None:
             assert payload["broker"] == "ibkr"
             assert payload["environment"] == "read_only"
             assert payload["source_version"] == 1
-        assert "phase2_gate_not_accepted" in payload["blockers"]
-        assert len(payload["blockers"]) == len(set(payload["blockers"]))
+        assert payload["blockers"] == list(EXPECTED_DEFAULT_BLOCKERS[name])
         for key in SIDE_EFFECT_FALSE_KEYS.intersection(payload):
             assert payload[key] is False, f"{name}.{key}"
 
-    assert "connection_plan_blocked" in payloads["connection_plan"][0]["blockers"]
-    assert "account_snapshot_blocked" in payloads["account_snapshot"][0]["blockers"]
-    assert "market_data_blocked" in payloads["market_data"][0]["blockers"]
-    assert "contract_details_blocked" in payloads["contract_details"][0]["blockers"]
-    assert "paper_lifecycle_runtime_blocked" in payloads["paper_lifecycle"][0]["blockers"]
-    assert "rust_authority_required" in payloads["paper_lifecycle"][0]["blockers"]
+    assert payloads["connection_plan"][0]["blockers"] == list(
+        EXPECTED_DEFAULT_BLOCKERS["connection_plan"]
+    )
+    assert payloads["account_snapshot"][0]["blockers"] == list(
+        EXPECTED_DEFAULT_BLOCKERS["account_snapshot"]
+    )
+    assert payloads["market_data"][0]["blockers"] == list(
+        EXPECTED_DEFAULT_BLOCKERS["market_data"]
+    )
+    assert payloads["contract_details"][0]["blockers"] == list(
+        EXPECTED_DEFAULT_BLOCKERS["contract_details"]
+    )
+    assert payloads["paper_lifecycle"][0]["blockers"] == list(
+        EXPECTED_DEFAULT_BLOCKERS["paper_lifecycle"]
+    )
     assert payloads["paper_lifecycle"][0]["rust_authority_required"] is True
-    assert "fill_import_runtime_blocked" in payloads["fill_import"][0]["blockers"]
-    assert (
-        "stock_etf_paper_fill_import_request_required"
-        in payloads["fill_import"][0]["blockers"]
+    assert payloads["fill_import"][0]["blockers"] == list(
+        EXPECTED_DEFAULT_BLOCKERS["fill_import"]
     )
     assert (
         payloads["session_attestation"][0]["expected_contract_id"]
         == IBKR_SESSION_ATTESTATION_CONTRACT_ID
     )
-    assert "session_attestation_blocked_source_only" in payloads[
-        "session_attestation"
-    ][0]["blockers"]
+    assert payloads["session_attestation"][0]["blockers"] == list(
+        EXPECTED_DEFAULT_BLOCKERS["session_attestation"]
+    )
     assert (
         payloads["readonly_probe_result_import"][0]["contract_id"]
         == IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID
     )
-    assert "probe_result_import_request_blocked_source_only" in payloads[
-        "readonly_probe_result_import"
-    ][0]["blockers"]
-    assert "probe_result_import_request_artifact_missing" in payloads[
-        "readonly_probe_result_import"
-    ][0]["blockers"]
+    assert payloads["readonly_probe_result_import"][0]["blockers"] == list(
+        EXPECTED_DEFAULT_BLOCKERS["readonly_probe_result_import"]
+    )
     assert (
         payloads["paper_attestation"][0]["expected_contract_id"]
         == IBKR_PAPER_ATTESTATION_CONTRACT_ID
     )
-    assert "paper_attestation_blocked_source_only" in payloads[
-        "paper_attestation"
-    ][0]["blockers"]
-    assert "paper_session_attestation_missing" in payloads[
-        "paper_attestation"
-    ][0]["blockers"]
+    assert payloads["paper_attestation"][0]["blockers"] == list(
+        EXPECTED_DEFAULT_BLOCKERS["paper_attestation"]
+    )
+
+
+def test_ibkr_connector_preview_blocker_assertions_stay_exact() -> None:
+    source = Path(__file__).read_text(encoding="utf-8")
+
+    forbidden_patterns = tuple(
+        "".join(parts)
+        for parts in (
+            (
+                '"phase2_gate_not_accepted"',
+                " in status",
+                '["blockers"]',
+            ),
+            (
+                "in payload",
+                '["blockers"]',
+            ),
+            (
+                "in payloads",
+                '["',
+            ),
+            (
+                "blockers = set(",
+                "payload",
+                '["blockers"])',
+            ),
+            ("RISKY_CONFIG_BLOCKERS", ".issubset"),
+        )
+    )
+
+    for pattern in forbidden_patterns:
+        assert pattern not in source
 
 
 def test_ibkr_connector_risky_config_only_expands_blockers() -> None:
@@ -589,10 +684,7 @@ def test_ibkr_connector_risky_config_only_expands_blockers() -> None:
     }
 
     for name, payload in payloads.items():
-        blockers = set(payload["blockers"])
-        assert RISKY_CONFIG_BLOCKERS.issubset(blockers), name
-        assert "phase2_gate_not_accepted" in blockers
-        assert len(payload["blockers"]) == len(blockers), name
+        assert payload["blockers"] == _expected_risky_blockers(name), name
         if "accepted" in payload:
             assert payload["accepted"] is False
         if "attestation_accepted" in payload:

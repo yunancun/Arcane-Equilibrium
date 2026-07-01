@@ -9372,3 +9372,37 @@ runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀
 socket/client construction、不做 broker session、不執行 read-only probe、不執行 fill import、不做 paper order
 routing/cancel/replace、不做 evidence/scorecard/DB writer、不啟動 evidence clock、不做 release launch、不做 Linux
 runtime sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
+
+## 227. 2026-07-01 PM session source checkpoint：Stock/ETF IBKR Connector Preview Exact Blocker Guard
+
+本 checkpoint 補強 inert Python IBKR connector skeleton preview payload 的 exact fail-closed lineage，固定 default
+readiness、connection/account/market-data/contract previews、session attestation、readonly result-import preview、
+paper lifecycle、fill import、paper attestation、fixtures，以及 risky config expansion 的 ordered blocker vectors。
+這不是 connector production code change、不是 API/GUI/Rust IPC behavior change、不是 IBKR contact、不是 connector
+runtime、不是 secret lookup、不是 broker session、不是 read-only probe execution、不是 paper order route enablement、
+不是 DB/evidence/scorecard writer、不是 tiny-live/live gate；只把 Python connector skeleton source-only tests 從
+membership/subset blocker checks 收緊成 exact-vector guard。
+
+已完成：
+
+- 在 `test_stock_etf_ibkr_connector_skeleton.py` 新增 `EXPECTED_DEFAULT_BLOCKERS`，覆蓋每個 inert preview payload
+  與 fixtures 的完整 ordered blocker vector。
+- 將 risky endpoint config coverage 改為 exact ordered blocker-vector assertions，保留
+  `IbkrReadOnlyEndpointConfig.validate_source_boundary()` 的 blocker emit order。
+- 新增本檔內 source guard，防止 connector skeleton preview blocker assertions 退回 loose payload membership 或
+  subset 檢查。
+
+驗證：
+
+- Connector skeleton focused pytest：`11 passed`。
+- Stock/ETF no-write/surface/readiness focused pytest：`16 passed`。
+- Full Stock/ETF Python route/static pytest：`127 passed`。
+- `python3 -m py_compile` for changed connector skeleton test：PASS。
+- Connector skeleton no-loose blocker scan：PASS。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 connector production code、不改 FastAPI route 行為、不改 GUI runtime、不改 Rust
+IPC 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀/建/序列化 secret、不啟動 connector runtime、不做 socket/client
+construction、不做 broker session、不執行 read-only probe、不執行 fill import、不做 paper order routing/cancel/
+replace、不做 DB/evidence/scorecard writer、不啟動 evidence clock、不做 release launch、不做 Linux runtime sync/
+restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
