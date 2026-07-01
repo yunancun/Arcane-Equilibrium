@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -193,6 +194,17 @@ def _source() -> str:
     return BROKER_CAPABILITY_REGISTRY.read_text(encoding="utf-8")
 
 
+def _paper_fill_import_block(source: str) -> str:
+    match = re.search(
+        r"Op::PaperOrderFillImport => ExpectedCapability \{(?P<body>.*?)\n        \},\n"
+        r"        Op::ShadowSignalEmit",
+        source,
+        re.DOTALL,
+    )
+    assert match is not None
+    return match.group("body")
+
+
 def test_stock_etf_broker_capability_registry_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
@@ -258,6 +270,20 @@ def test_stock_etf_broker_capability_registry_source_keeps_operation_authority_m
     assert "BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID" in source
     assert "STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID" in source
     assert "STOCK_SHADOW_FILL_MODEL_CONTRACT_ID" in source
+
+
+def test_stock_etf_broker_capability_registry_source_keeps_paper_fill_import_readonly_gate() -> None:
+    body = _paper_fill_import_block(_source())
+
+    assert "authority_scope: Scope::ReadOnly" in body
+    assert "IBKR_SESSION_ATTESTATION_CONTRACT_ID" in body
+    assert "IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID" in body
+    assert "typed_denial_reason: None" in body
+    assert "rust_owned: false" in body
+    assert "Scope::PaperRehearsal" not in body
+    assert "stock_etf_scoped_authorization_v1" not in body
+    assert "decision_lease_valid" not in body
+    assert "guardian_allows" not in body
 
 
 def test_stock_etf_broker_capability_registry_source_keeps_denied_and_validation_matrix() -> None:

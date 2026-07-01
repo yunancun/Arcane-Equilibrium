@@ -3722,3 +3722,30 @@ Verification 已過：
 沒有 IBKR contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 read-only
 probe execution、沒有 result import、沒有 DB/evidence writer、沒有 paper order route、
 沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Broker Capability Paper Fill Import Gate Hardening
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Broker Capability Paper Fill Import Gate Hardening`。
+
+這個 checkpoint 補強 broker capability registry 對 `PaperOrderFillImport` 的 coverage。新增 Rust
+acceptance 直接鎖住該 row 必須保持 `AuthorityScope::ReadOnly`、`typed_denial_reason=None`、
+`rust_owned=false`、audit event required、source artifact hash required，且 required gates 必須包含
+`IBKR_SESSION_ATTESTATION_CONTRACT_ID` 與 `IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID`。
+
+同時新增 Python source-static block parser，直接檢查 `Op::PaperOrderFillImport => ExpectedCapability`
+block，禁止混入 `PaperRehearsal`、scoped authorization、Decision Lease 或 Guardian gate，避免 paper
+fill import 被後續錯升級成 paper-write / order-like authority。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Broker capability source static pytest：`6 passed`
+- Broker capability Rust acceptance：`11 passed`
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 read-only probe execution、
+沒有 fill import/result import、沒有 DB/evidence writer、沒有 paper order route、
+沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。

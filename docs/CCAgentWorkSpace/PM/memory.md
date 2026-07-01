@@ -3585,3 +3585,10 @@
 - PM restored the full `tests/structure/test_docs_readme_index_static.py` gate by adding a stable `docs/README.md` index for `docs/agents/`, `../helper_scripts/SCRIPT_INDEX.md`, 19 `CCAgentWorkSpace/` role directories with MIT/BB boundary anchors, and top-level `docs/archive/` Markdown filenames.
 - Verification passed: full docs README/index structure pytest `7 passed`; dynamic PM plan / Operator trace title coverage PASS; diff check PASS.
 - Boundary unchanged: no production code change, trading logic change, endpoint/IPC change, IBKR contact, connector runtime, secret access, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Broker Capability Paper Fill Import Gate Hardening
+
+- PM added test-only/source-static coverage for `BrokerOperation::PaperOrderFillImport` in the broker capability registry: it must remain `AuthorityScope::ReadOnly`, `typed_denial_reason=None`, `rust_owned=false`, audit/source-hash required, and gated by session attestation plus IBKR paper lifecycle.
+- The source-static guard now parses the exact `Op::PaperOrderFillImport => ExpectedCapability` block and rejects PaperRehearsal, scoped authorization, Decision Lease, or Guardian gate pollution.
+- Verification passed: targeted rustfmt check PASS; broker capability source static `6 passed`; broker capability Rust acceptance `11 passed`; dynamic docs trace PASS; diff check PASS.
+- Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, fill/result import, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
