@@ -37,6 +37,12 @@
 - Verification passed: connector skeleton focused `9`, Python no-write/static/GUI guard focused `30`, and Stock/ETF Python route/static `121`.
 - Boundary unchanged: no IBKR contact, SDK, secret, connector runtime, paper order, fill import, DB apply, evidence clock, tiny-live/live, or Bybit behavior change.
 
+## 2026-07-01 Stock/ETF Rust Source Coverage Static Guard
+
+- PM added a source-only meta guard requiring all current IBKR/Stock-ETF Rust contract and engine IPC handler files to be directly referenced by tests, including nested child modules.
+- Verification passed: new guard `3`, focused Stock/ETF/IBKR source-static structure subset, and docs trace.
+- Boundary unchanged: no Rust behavior change, IPC runtime, IBKR contact, connector runtime, secret, paper order, tiny-live/live, or Bybit behavior change.
+
 ## 2026-07-01 IBKR Phase2 Policy Source Static Guard
 
 - PM added a structure guard for `ibkr_phase2_policies.rs` covering the 800-line cap, named Phase2 policy contract/template presence, and no runtime/network/clock/order/Bybit tokens.
