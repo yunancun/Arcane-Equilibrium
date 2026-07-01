@@ -7303,3 +7303,44 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不啟動 authorization runtime、不做
 broker session、不做 broker routing、不做 paper order route、不做 Linux runtime sync/restart、不授權
 tiny-live/live 或任何 Bybit behavior change。
+
+## 175. 2026-07-01 PM session source checkpoint：IBKR Phase2 Runtime Secret Topology Cross-Wire Guard
+
+本 checkpoint 補強 `ibkr_phase2_runtime` 中 `IbkrSecretSlotContractV1` 與
+`IbkrApiSessionTopologyV1` 的 pre-contact runtime evidence contract posture。這不是 Rust production
+behavior change、不是 IBKR contact、不是 connector runtime、不是 secret lookup、不是 gateway startup、
+不是 broker session、不是 paper order route、不是 tiny-live/live gate；只把 secret-slot hashed posture、
+live-secret absence、owner-only permissions、env-var fallback denial、no secret/account serialization、
+loopback paper gateway topology、deterministic client/process identity、account fingerprint 與 topology
+lineage 變成 exact-blocker acceptance test 與 source-static guard。
+
+已完成：
+
+- 在 `ibkr_phase2_runtime_acceptance.rs` 新增
+  `secret_slot_contract_rejects_each_slot_and_secret_gap_independently`。
+- Acceptance 證明 secret contract id、source version、contract present、readonly/paper/live slot posture、
+  secret/account fingerprint hash、owner-only permissions、env-var fallback denial、secret serialization、
+  account id serialization、live-secret absence proof 都會各自只產生單一對應 blocker。
+- 在同檔新增 `topology_rejects_each_paper_gateway_gap_independently`。
+- Acceptance 證明 topology contract id、source version、topology present、API baseline、runtime owner、
+  loopback host、paper port、gateway mode、paper environment、deterministic client id、process identity、
+  account fingerprint、API server version、data entitlements、startup time、attestation expiry 都會各自只產生
+  單一對應 blocker。
+- Acceptance 明確保留 live TWS/gateway port aggregate 行為：live port 必須同時命中
+  `LivePortDenied` 與 `PaperPortNotUsed`。
+- 在 `test_ibkr_phase2_runtime_source_static.py` 新增 secret-slot/default template 與 topology/default
+  template block parser，鎖住 default fail-closed posture 與 source template 的 paper-only/no-secret posture。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Phase2 runtime source static pytest：`5 passed`。
+- Phase2 runtime Rust acceptance：`9 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不啟動 IB Gateway/TWS、不做 broker session、
+不做 broker routing、不做 paper order route、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何
+Bybit behavior change。

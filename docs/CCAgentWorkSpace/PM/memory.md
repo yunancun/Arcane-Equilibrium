@@ -31,6 +31,12 @@
 - E3 returned `BLOCKED_BY_SOURCE_DRIFT`: request/READY hashes matched and no scope gap was found, but E3 final fetch moved `origin/main` to `391a2652...`; BB was not dispatched.
 - State transition is `BLOCKED_BY_RUNTIME`; final state sha `28ddf985...`. No Control API GET, public quote, envelope rebuild, plan write, lease, private/order endpoint, PG/service/env/risk mutation, Cost Gate change, live/mainnet, order/fill/PnL/proof.
 
+## 2026-07-01 IBKR Phase2 Runtime Secret Topology Cross-Wire Guard
+
+- PM added exact single-blocker acceptance coverage for `IbkrSecretSlotContractV1` and `IbkrApiSessionTopologyV1` secret-slot, live-secret absence, owner/fallback, no-serialization, loopback paper gateway, runtime owner, client/process identity, account fingerprint, server/data/startup/expiry gaps.
+- Live TWS/gateway port remains aggregate by design: it hits both live-port and non-paper-port blockers. Source-static guard now parses secret/topology default and source-template blocks.
+- Verification passed: Phase2 runtime source static `5`, Rust acceptance `9`, targeted rustfmt/cargo fmt/docs trace/diff-check. Boundary unchanged: no IBKR contact, SDK, secret, connector/runtime/gateway startup, broker session, paper order, tiny-live/live, or Bybit behavior change.
+
 ## 2026-07-01 IBKR Feature Flag Secret Auth Authority Cross-Wire Guard
 
 - PM added exact single-blocker acceptance coverage for `FeatureFlagSecretAuthMatrixV1` contract/source, server authority, GUI override, lane/broker/environment/instrument/operation, read/paper/shadow flags, secret/artifact/session prerequisites, authorization envelope mismatch/scope/expiry/hash-lineage gaps.

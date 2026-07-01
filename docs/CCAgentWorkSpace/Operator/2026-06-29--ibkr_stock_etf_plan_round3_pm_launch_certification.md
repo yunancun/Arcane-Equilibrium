@@ -4535,3 +4535,33 @@ Verification 已過：
 沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 authorization runtime、沒有 broker
 session、沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution
 行為。
+
+## 2026-07-01 Operator Update — IBKR Phase2 Runtime Secret Topology Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`IBKR Phase2 Runtime Secret Topology Cross-Wire Guard`。
+
+這個 checkpoint 補強 Phase 2 runtime evidence 底座：`IbkrSecretSlotContractV1` 與
+`IbkrApiSessionTopologyV1`。新增 Rust acceptance 證明 secret-slot contract/source、slot posture、
+secret/account hash、owner-only permission、env-var fallback denial、secret/account serialization、
+live-secret absence、API baseline、runtime owner、loopback host、paper gateway port、gateway mode、
+paper environment、deterministic client/process identity、account fingerprint、server/data/startup/expiry
+記錄缺口都會各自只產生單一 blocker。
+
+同時保留 live TWS/gateway port 的 aggregate 行為：live port 必須同時命中 live-port 與 non-paper-port
+blocker。Python source-static parser 也鎖住 secret/topology default fail-closed posture 與 source
+template 的 paper-only/no-secret posture。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Phase2 runtime source static pytest：`5 passed`
+- Phase2 runtime Rust acceptance：`9 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 IB Gateway/TWS startup、沒有 broker
+session、沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution
+行為。
