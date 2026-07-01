@@ -4128,3 +4128,10 @@
 - The acceptance test no longer uses loose paper lifecycle blocker checks; aggregate and cross-wire paths now require complete ordered vectors.
 - Verification passed: IBKR paper lifecycle source static `7 passed`; IBKR paper lifecycle Rust acceptance `15 passed`; full `cargo test -p openclaw_types` PASS; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, IPC/API behavior change, IBKR contact, connector runtime, socket/client construction, secret access, lifecycle writer, paper order routing, fill import execution, broker session, DB/evidence writer, scorecard writer, evidence clock, paper-shadow launch, release launch, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Paper Order Request Exact Blocker Guard
+
+- PM tightened test-only exact-blocker coverage for `StockEtfPaperOrderRequestEnvelopeV1` aggregate fail-closed paths: default envelope, method/authority/effect mismatches, effect lifecycle hash gaps, preview pollution, submit order-intent failures, market-order price/TIF mismatch, cancel submit-shape pollution, replace replacement-shape gaps, and boundary regressions.
+- The acceptance test no longer uses loose paper-order request blocker helper checks; aggregate paths now require complete ordered vectors, and source-static pins validator blocker emit order.
+- Verification passed: Stock/ETF paper-order request source static `14 passed`; Stock/ETF paper-order request Rust acceptance `17 passed`; full `cargo test -p openclaw_types` PASS; package fmt/diff check PASS.
+- Boundary unchanged: no Rust production code change, GUI runtime/API route/IPC behavior change, IBKR contact, connector runtime, socket/client construction, secret access, broker session, paper order routing/cancel/replace execution, lifecycle writer, fill import, DB/evidence writer, scorecard writer, evidence clock, paper-shadow launch, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
