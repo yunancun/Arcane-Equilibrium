@@ -120,6 +120,38 @@ async fn stock_etf_readiness_exposes_phase2_precontact_blockers_without_ibkr_con
     assert_eq!(readonly_probe["evidence_clock_started"], false);
     assert_eq!(readonly_probe["bybit_path_reused"], false);
     assert_eq!(readonly_probe["live_or_tiny_live_authorized"], false);
+    let result_import_request = &phase2["readonly_probe_result_import_request"];
+    assert_eq!(
+        result_import_request["contract_id"],
+        "stock_etf_ibkr_readonly_probe_result_import_request_v1"
+    );
+    assert_eq!(result_import_request["source_version"], 1);
+    assert_eq!(result_import_request["request_artifact_present"], false);
+    assert_eq!(result_import_request["request_validated"], false);
+    assert_eq!(result_import_request["accepted_for_import"], false);
+    assert_eq!(
+        result_import_request["status"],
+        "blocked_no_result_import_request_artifact"
+    );
+    assert!(json_array_contains(
+        &result_import_request["blockers"],
+        "phase2_gate_not_accepted"
+    ));
+    assert!(json_array_contains(
+        &result_import_request["blockers"],
+        "probe_result_import_request_artifact_missing"
+    ));
+    assert_eq!(result_import_request["ibkr_contact_performed"], false);
+    assert_eq!(result_import_request["connector_runtime_started"], false);
+    assert_eq!(result_import_request["secret_content_serialized"], false);
+    assert_eq!(result_import_request["result_import_performed"], false);
+    assert_eq!(result_import_request["evidence_writer_started"], false);
+    assert_eq!(result_import_request["scorecard_writer_started"], false);
+    assert_eq!(result_import_request["db_apply_performed"], false);
+    assert_eq!(result_import_request["order_routed"], false);
+    assert_eq!(result_import_request["paper_order_submitted"], false);
+    assert_eq!(result_import_request["bybit_path_reused"], false);
+    assert_eq!(result_import_request["live_or_tiny_live_authorized"], false);
     assert_eq!(phase2["policy_prerequisites"]["bundle_accepted"], true);
     assert_eq!(
         phase2["policy_prerequisites"]["flags"]["redaction_suite_passed"],

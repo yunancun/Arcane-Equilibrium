@@ -4015,3 +4015,46 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不啟動 Ph
 runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
 evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
 sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 89. 2026-07-01 PM session source/display checkpoint：Readiness Result-Import Request Guard
+
+本 checkpoint 將
+`stock_etf_ibkr_readonly_probe_result_import_request_v1` 接入
+`stock_etf.get_readiness` / FastAPI readiness / GUI readiness display 的
+fail-closed 路徑。這不是 read probe runtime、不是 result import runtime、不是
+connector runtime，也不批准 IBKR contact；只讓 readiness 面板在 Phase2 尚未通過時
+明確顯示 result-import request artifact 缺失與所有 side-effect flags 為 false。
+
+已完成：
+
+- Rust IPC `phase2_precontact_summary()` 新增
+  `readonly_probe_result_import_request`，預設
+  `blocked_no_result_import_request_artifact`，並固定
+  `accepted_for_import=false`、`result_import_performed=false`、
+  `evidence_writer_started=false`、`scorecard_writer_started=false`、
+  `db_apply_performed=false`。
+- FastAPI readiness normalizer 新增 result-import request fail-closed fallback，
+  並在 contract id、source version、status 或任何副作用旗標被上游聲稱 ready/true
+  時進入 `contract_violation_blocked`。
+- Stock/ETF GUI readiness renderer 與 browser fallback 同步顯示 result-import
+  request contract/status/blockers/side-effect flags，不新增 endpoint、IPC method、
+  GUI fanout 或 client input。
+- Route/static tests 鎖住 result-import readiness 欄位與 GUI 字串；Rust IPC test
+  鎖住 Phase2 pre-contact source fixture 的 result-import default-blocked payload。
+
+驗證：
+
+- Python changed files `py_compile`：PASS。
+- Stock/ETF JS `node --check`：PASS。
+- Scoped Rust `rustfmt --edition 2021 --check`：PASS。
+- Focused FastAPI readiness/static route pytest：`20 passed`。
+- Focused engine readiness IPC test：PASS。
+- Full Stock/ETF FastAPI/static pytest：`120 passed`。
+- Engine Stock/ETF IPC regression：`31 passed`。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不啟動 Phase 1/2/3/4/5
+runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
+evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。

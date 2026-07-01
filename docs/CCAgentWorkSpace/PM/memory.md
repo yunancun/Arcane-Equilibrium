@@ -3415,3 +3415,12 @@
 - Policy status now exposes `readonly_probe_result_import_request_contract_id` plus `scorecard_requires_readonly_probe_result_import_request`; an accepted registry missing that scorecard gate is a contract violation.
 - Verification passed: Python compile, JS syntax, scoped Rust rustfmt, focused FastAPI Phase0/Policy/Route `23 passed`, full Stock/ETF FastAPI/static `120 passed`, focused engine Phase0/Policy IPC tests PASS, and engine Stock/ETF IPC regression `31 passed`.
 - Boundary unchanged: no endpoint, IPC method, GUI fanout, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe, result import, paper order, fill import, DB/evidence/scorecard writer, tiny-live/live, Linux runtime, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF Readiness Result-Import Request Guard
+
+- PM propagated `stock_etf_ibkr_readonly_probe_result_import_request_v1` into the readiness pre-contact source/display surface.
+- Rust IPC `stock_etf.get_readiness` now exposes a default-blocked `readonly_probe_result_import_request` with `accepted_for_import=false`, `result_import_performed=false`, writer flags false, DB/order flags false, and Bybit reuse false.
+- FastAPI readiness normalizer fails closed when the block is missing and treats contract mismatch, ready status, or any result-import/writer/DB/order/Bybit side-effect claim as `contract_violation_blocked`.
+- GUI readiness renderer and API-unavailable fallback display the result-import request contract/status/blockers/side-effect flags without adding endpoints, IPC methods, GUI fanout, client input, or connector public API.
+- Verification passed: Python compile, JS syntax, scoped Rust rustfmt, focused FastAPI readiness/static `20 passed`, focused engine readiness IPC PASS, full Stock/ETF FastAPI/static `120 passed`, and engine Stock/ETF IPC regression `31 passed`.
+- Boundary unchanged: no IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe, result import, collector, market-data ingestion, DQ writer, paper order/cancel/replace, DB/evidence/scorecard writer, evidence clock, tiny-live/live, Linux runtime, or Bybit behavior change.

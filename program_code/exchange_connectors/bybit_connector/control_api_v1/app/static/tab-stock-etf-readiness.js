@@ -43,6 +43,7 @@
     const source = data.source_readiness || {};
     const apiAllowlist = data.api_allowlist || {};
     const readonlyProbe = data.readonly_probe_request || {};
+    const readonlyProbeResultImport = data.readonly_probe_result_import_request || {};
     const connectorSkeleton = data.connector_skeleton || {};
     const lane = laneStatus || {};
     const flags = lane.flags || {};
@@ -85,6 +86,10 @@
       kvRow('readonly_probe.source_version', textChip(readonlyProbe.source_version || 0)),
       kvRow('readonly_probe.status', textChip(readonlyProbe.status || 'blocked_no_request_artifact')),
       kvRow('readonly_probe.accepted_for_contact', boolChip(readonlyProbe.accepted_for_contact, false)),
+      kvRow('readonly_probe_result_import.contract_id', textChip(readonlyProbeResultImport.contract_id || '-')),
+      kvRow('readonly_probe_result_import.source_version', textChip(readonlyProbeResultImport.source_version || 0)),
+      kvRow('readonly_probe_result_import.status', textChip(readonlyProbeResultImport.status || 'blocked_no_result_import_request_artifact')),
+      kvRow('readonly_probe_result_import.accepted_for_import', boolChip(readonlyProbeResultImport.accepted_for_import, false)),
       kvRow('connector_skeleton.surface_id', textChip(connectorSkeleton.surface_id || '-')),
       kvRow('connector_skeleton.accepted', boolChip(connectorSkeleton.accepted, false)),
       kvRow('connector_skeleton.status', textChip(connectorSkeleton.status || 'blocked_source_only')),
@@ -128,6 +133,21 @@
       kvRow('readonly_probe.bybit_path_reused', boolChip(readonlyProbe.bybit_path_reused, true)),
       kvRow('readonly_probe.live_or_tiny_live_authorized', boolChip(readonlyProbe.live_or_tiny_live_authorized, true)),
       kvRow('readonly_probe.blockers', chipList(readonlyProbe.blockers, 'none')),
+      kvRow('readonly_probe_result_import.request_artifact_present', boolChip(readonlyProbeResultImport.request_artifact_present, true)),
+      kvRow('readonly_probe_result_import.request_validated', boolChip(readonlyProbeResultImport.request_validated, true)),
+      kvRow('readonly_probe_result_import.accepted_for_import', boolChip(readonlyProbeResultImport.accepted_for_import, true)),
+      kvRow('readonly_probe_result_import.ibkr_contact_performed', boolChip(readonlyProbeResultImport.ibkr_contact_performed, true)),
+      kvRow('readonly_probe_result_import.connector_runtime_started', boolChip(readonlyProbeResultImport.connector_runtime_started, true)),
+      kvRow('readonly_probe_result_import.secret_content_serialized', boolChip(readonlyProbeResultImport.secret_content_serialized, true)),
+      kvRow('readonly_probe_result_import.result_import_performed', boolChip(readonlyProbeResultImport.result_import_performed, true)),
+      kvRow('readonly_probe_result_import.evidence_writer_started', boolChip(readonlyProbeResultImport.evidence_writer_started, true)),
+      kvRow('readonly_probe_result_import.scorecard_writer_started', boolChip(readonlyProbeResultImport.scorecard_writer_started, true)),
+      kvRow('readonly_probe_result_import.db_apply_performed', boolChip(readonlyProbeResultImport.db_apply_performed, true)),
+      kvRow('readonly_probe_result_import.order_routed', boolChip(readonlyProbeResultImport.order_routed, true)),
+      kvRow('readonly_probe_result_import.paper_order_submitted', boolChip(readonlyProbeResultImport.paper_order_submitted, true)),
+      kvRow('readonly_probe_result_import.bybit_path_reused', boolChip(readonlyProbeResultImport.bybit_path_reused, true)),
+      kvRow('readonly_probe_result_import.live_or_tiny_live_authorized', boolChip(readonlyProbeResultImport.live_or_tiny_live_authorized, true)),
+      kvRow('readonly_probe_result_import.blockers', chipList(readonlyProbeResultImport.blockers, 'none')),
       kvRow('connector_skeleton.network_contact_performed', boolChip(connectorSkeleton.network_contact_performed, true)),
       kvRow('connector_skeleton.secret_content_loaded', boolChip(connectorSkeleton.secret_content_loaded, true)),
       kvRow('connector_skeleton.paper_channel_exposed', boolChip(connectorSkeleton.paper_channel_exposed, true)),
@@ -143,6 +163,7 @@
       .concat(source.denial_reasons || [])
       .concat(data.phase2_gate_blockers || [])
       .concat(readonlyProbe.blockers || [])
+      .concat(readonlyProbeResultImport.blockers || [])
       .concat(apiAllowlist.blockers || [])
       .concat(data.contract_violations || []);
     setChip('se-denied-count', String(denied.length), denied.length ? 'warn' : 'neutral');

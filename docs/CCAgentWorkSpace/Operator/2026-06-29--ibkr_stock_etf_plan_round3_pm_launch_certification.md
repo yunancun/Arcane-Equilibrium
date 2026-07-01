@@ -2131,3 +2131,35 @@ contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation
 connector runtime、沒有 read probe execution、沒有 result import、沒有 evidence writer、
 沒有 DB apply、沒有 evidence clock、沒有 scorecard writer、沒有 paper order/cancel/
 replace、沒有 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Readiness Result-Import Request Guard
+
+本 session 已把 readonly probe result-import request contract 傳遞到
+Stock/ETF readiness display/control-plane surface：
+
+- Rust IPC `stock_etf.get_readiness` 的 `phase2` source fixture 現在包含
+  `readonly_probe_result_import_request`，預設
+  `blocked_no_result_import_request_artifact`。
+- FastAPI readiness normalizer 會在 result-import request 缺失時 fail-closed，
+  並拒絕 contract id/version/status mismatch 或任何 result import / writer / DB /
+  order / Bybit reuse side-effect claim。
+- GUI readiness Phase2/Guard 表格與 API-unavailable fallback 現在顯示
+  result-import request 的 contract、status、blockers 與 side-effect flags。
+- 沒有新增 endpoint、IPC method、GUI fanout、client input 或 connector skeleton
+  public API。
+
+Verification 已過：
+
+- Python changed files `py_compile`：PASS
+- Stock/ETF JS syntax：PASS
+- Scoped Rust rustfmt：PASS
+- Focused FastAPI readiness/static route pytest：`20 passed`
+- Focused engine readiness IPC test：PASS
+- Full Stock/ETF FastAPI/static pytest：`120 passed`
+- Engine Stock/ETF IPC regression：`31 passed`
+
+邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
+access/creation、沒有 connector runtime、沒有 read probe execution、沒有 result
+import、沒有 collector、沒有 market-data ingestion、沒有 DQ writer、沒有 evidence
+writer、沒有 DB apply、沒有 evidence clock、沒有 scorecard writer、沒有 paper order/
+cancel/replace、沒有 tiny-live/live authority，也沒有改動 Bybit live execution 行為。

@@ -1289,3 +1289,42 @@ read probe execution、collector start、market-data ingestion、DQ writer、pap
 order/cancel/replace、fill import、DB apply、evidence writer、evidence clock、
 scorecard writer、tiny-live、live、Linux runtime sync/restart 或 Bybit behavior
 change。
+
+## 2026-07-01 PM Session Checkpoint — Readiness Result-Import Request Guard
+
+PM 已將 readonly probe result-import request 接入 readiness pre-contact source/display
+surface。這不是 IBKR contact approval、read-only probe approval、result import
+approval、evidence writer approval、scorecard writer approval 或 launch approval。
+
+已完成：
+
+- Rust IPC readiness `phase2` source fixture 新增
+  `readonly_probe_result_import_request`，固定 blocked/no-artifact posture。
+- FastAPI readiness normalizer 新增 result-import request fallback 與 contract
+  violation guard，拒絕 contract mismatch、ready status、result import/writer/DB/
+  order/Bybit reuse side-effect claim。
+- GUI readiness renderer 與 fallback 同步顯示 result-import request contract/status/
+  blockers/side-effect flags，沒有新增 API fanout 或 client state input。
+- Python route/static tests 與 Rust IPC readiness test 已鎖住此 display-only lineage。
+
+Verification：
+
+- Python changed files `py_compile` PASS。
+- Stock/ETF JS syntax PASS。
+- Scoped Rust rustfmt PASS。
+- Focused FastAPI readiness/static route pytest：`20 passed`。
+- Focused engine readiness IPC test PASS。
+- Full Stock/ETF FastAPI/static pytest：`120 passed`。
+- Engine Stock/ETF IPC regression：`31 passed`。
+
+Dispatch 記錄：本 turn 因工具層 spawn policy 未允許 sub-agent dispatch，PM 本地完成
+narrow source/display propagation / review / regression。此 checkpoint 為 readiness
+display-only hardening。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 2/3 runtime approval、IBKR contact
+approval、read-only probe approval、result import approval、evidence writer approval、
+scorecard writer approval 或 launch approval。未批准 IBKR SDK import、socket/HTTP、
+secret、connector runtime、read probe execution、collector start、market-data
+ingestion、DQ writer、paper order/cancel/replace、fill import、DB apply、evidence
+writer、evidence clock、scorecard writer、tiny-live、live、Linux runtime sync/restart
+或 Bybit behavior change。
