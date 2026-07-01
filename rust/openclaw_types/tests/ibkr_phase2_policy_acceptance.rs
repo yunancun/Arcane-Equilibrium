@@ -9,11 +9,12 @@ use std::path::PathBuf;
 use openclaw_types::{
     IbkrAuditEventPolicyBlocker, IbkrAuditEventPolicyV1, IbkrExternalSurfaceGateV1,
     IbkrPaperAttestationPolicyBlocker, IbkrPaperAttestationPolicyV1, IbkrPhase2PolicyBundleBlocker,
-    IbkrPhase2PolicyBundleV1, IbkrPythonWriteGuardPolicyBlocker, IbkrPythonWriteGuardPolicyV1,
-    IbkrRateLimitPolicyBlocker, IbkrRateLimitPolicyV1, IbkrRateLimitScope,
-    IbkrRedactionPolicyBlocker, IbkrRedactionPolicyV1, IBKR_AUDIT_EVENT_POLICY_CONTRACT_ID,
-    IBKR_PAPER_ATTESTATION_CONTRACT_ID, IBKR_PYTHON_WRITE_GUARD_POLICY_CONTRACT_ID,
-    IBKR_RATE_LIMIT_POLICY_CONTRACT_ID, IBKR_REDACTION_POLICY_CONTRACT_ID,
+    IbkrPhase2PolicyBundleV1, IbkrPolicyVerdict, IbkrPythonWriteGuardPolicyBlocker,
+    IbkrPythonWriteGuardPolicyV1, IbkrRateLimitPolicyBlocker, IbkrRateLimitPolicyV1,
+    IbkrRateLimitScope, IbkrRedactionPolicyBlocker, IbkrRedactionPolicyV1,
+    IBKR_AUDIT_EVENT_POLICY_CONTRACT_ID, IBKR_PAPER_ATTESTATION_CONTRACT_ID,
+    IBKR_PYTHON_WRITE_GUARD_POLICY_CONTRACT_ID, IBKR_RATE_LIMIT_POLICY_CONTRACT_ID,
+    IBKR_REDACTION_POLICY_CONTRACT_ID,
 };
 
 #[test]
@@ -398,6 +399,274 @@ fn python_write_guard_denies_python_broker_writes_without_bybit_mutation() {
 }
 
 #[test]
+fn redaction_policy_rejects_each_leak_and_missing_hash_independently() {
+    use IbkrRedactionPolicyBlocker as Blocker;
+
+    let cases: [(fn(&mut IbkrRedactionPolicyV1), Blocker); 9] = [
+        (
+            |policy| policy.raw_payload_hash_required = false,
+            Blocker::RawPayloadHashNotRequired,
+        ),
+        (
+            |policy| policy.redacted_summary_hash_required = false,
+            Blocker::RedactedSummaryHashNotRequired,
+        ),
+        (
+            |policy| policy.account_id_in_logs_allowed = true,
+            Blocker::AccountIdLogLeakAllowed,
+        ),
+        (
+            |policy| policy.secret_in_logs_allowed = true,
+            Blocker::SecretLogLeakAllowed,
+        ),
+        (
+            |policy| policy.local_path_in_logs_allowed = true,
+            Blocker::LocalPathLogLeakAllowed,
+        ),
+        (
+            |policy| policy.cookie_in_logs_allowed = true,
+            Blocker::CookieLogLeakAllowed,
+        ),
+        (
+            |policy| policy.token_in_logs_allowed = true,
+            Blocker::TokenLogLeakAllowed,
+        ),
+        (
+            |policy| policy.raw_payload_in_logs_allowed = true,
+            Blocker::RawPayloadLogLeakAllowed,
+        ),
+        (
+            |policy| policy.stack_trace_in_reports_allowed = true,
+            Blocker::StackTraceReportLeakAllowed,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut policy = IbkrRedactionPolicyV1::source_template();
+        mutate(&mut policy);
+        assert_single_policy_blocker(policy.validate(), blocker);
+    }
+}
+
+#[test]
+fn rate_limit_policy_rejects_each_budget_gap_independently() {
+    use IbkrRateLimitPolicyBlocker as Blocker;
+
+    let cases: [(fn(&mut IbkrRateLimitPolicyV1), Blocker); 8] = [
+        (
+            |policy| policy.scope = IbkrRateLimitScope::GlobalOnly,
+            Blocker::ScopeNotPerAction,
+        ),
+        (
+            |policy| policy.min_request_spacing_ms = 0,
+            Blocker::RequestSpacingMissing,
+        ),
+        (
+            |policy| policy.max_in_flight_requests = 0,
+            Blocker::ConcurrencyLimitMissing,
+        ),
+        (
+            |policy| policy.per_action_buckets_present = false,
+            Blocker::PerActionBucketsMissing,
+        ),
+        (
+            |policy| policy.pacing_violation_circuit_breaker_present = false,
+            Blocker::PacingCircuitBreakerMissing,
+        ),
+        (
+            |policy| policy.read_snapshot_budget_present = false,
+            Blocker::ReadSnapshotBudgetMissing,
+        ),
+        (
+            |policy| policy.market_data_subscription_budget_present = false,
+            Blocker::MarketDataSubscriptionBudgetMissing,
+        ),
+        (
+            |policy| policy.paper_order_write_budget_present = false,
+            Blocker::PaperOrderWriteBudgetMissing,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut policy = IbkrRateLimitPolicyV1::source_template();
+        mutate(&mut policy);
+        assert_single_policy_blocker(policy.validate(), blocker);
+    }
+}
+
+#[test]
+fn audit_event_policy_rejects_each_lineage_gap_independently() {
+    use IbkrAuditEventPolicyBlocker as Blocker;
+
+    let cases: [(fn(&mut IbkrAuditEventPolicyV1), Blocker); 12] = [
+        (
+            |policy| policy.append_only_required = false,
+            Blocker::AppendOnlyMissing,
+        ),
+        (
+            |policy| policy.asset_lane_required = false,
+            Blocker::AssetLaneMissing,
+        ),
+        (
+            |policy| policy.broker_required = false,
+            Blocker::BrokerMissing,
+        ),
+        (
+            |policy| policy.environment_required = false,
+            Blocker::EnvironmentMissing,
+        ),
+        (
+            |policy| policy.operation_required = false,
+            Blocker::OperationMissing,
+        ),
+        (
+            |policy| policy.allowed_required = false,
+            Blocker::AllowedMissing,
+        ),
+        (
+            |policy| policy.denial_reason_required = false,
+            Blocker::DenialReasonMissing,
+        ),
+        (
+            |policy| policy.source_artifact_hash_required = false,
+            Blocker::SourceArtifactHashMissing,
+        ),
+        (
+            |policy| policy.raw_artifact_hash_required = false,
+            Blocker::RawArtifactHashMissing,
+        ),
+        (
+            |policy| policy.redacted_summary_hash_required = false,
+            Blocker::RedactedSummaryHashMissing,
+        ),
+        (
+            |policy| policy.account_fingerprint_hash_only = false,
+            Blocker::AccountFingerprintHashOnlyMissing,
+        ),
+        (
+            |policy| policy.raw_payload_storage_allowed = true,
+            Blocker::RawPayloadStorageAllowed,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut policy = IbkrAuditEventPolicyV1::source_template();
+        mutate(&mut policy);
+        assert_single_policy_blocker(policy.validate(), blocker);
+    }
+}
+
+#[test]
+fn paper_attestation_and_python_guard_reject_each_authority_gap_independently() {
+    use IbkrPaperAttestationPolicyBlocker as PaperBlocker;
+    use IbkrPythonWriteGuardPolicyBlocker as PythonBlocker;
+
+    let paper_cases: [(fn(&mut IbkrPaperAttestationPolicyV1), PaperBlocker); 15] = [
+        (
+            |policy| policy.external_surface_gate_required = false,
+            PaperBlocker::ExternalSurfaceGateMissing,
+        ),
+        (
+            |policy| policy.session_attestation_required = false,
+            PaperBlocker::SessionAttestationMissing,
+        ),
+        (
+            |policy| policy.rust_lane_scoped_ipc_required = false,
+            PaperBlocker::RustLaneScopedIpcMissing,
+        ),
+        (
+            |policy| policy.scoped_authorization_required = false,
+            PaperBlocker::ScopedAuthorizationMissing,
+        ),
+        (
+            |policy| policy.decision_lease_required = false,
+            PaperBlocker::DecisionLeaseMissing,
+        ),
+        (
+            |policy| policy.guardian_required = false,
+            PaperBlocker::GuardianMissing,
+        ),
+        (
+            |policy| policy.risk_config_hash_required = false,
+            PaperBlocker::RiskConfigHashMissing,
+        ),
+        (
+            |policy| policy.instrument_identity_hash_required = false,
+            PaperBlocker::InstrumentIdentityHashMissing,
+        ),
+        (
+            |policy| policy.idempotency_key_required = false,
+            PaperBlocker::IdempotencyKeyMissing,
+        ),
+        (
+            |policy| policy.lifecycle_event_log_required = false,
+            PaperBlocker::LifecycleEventLogMissing,
+        ),
+        (
+            |policy| policy.reconciliation_required_before_terminal = false,
+            PaperBlocker::ReconciliationBeforeTerminalMissing,
+        ),
+        (
+            |policy| policy.paper_environment_only = false,
+            PaperBlocker::PaperEnvironmentOnlyMissing,
+        ),
+        (
+            |policy| policy.live_account_fingerprint_denied = false,
+            PaperBlocker::LiveAccountFingerprintNotDenied,
+        ),
+        (
+            |policy| policy.margin_short_options_cfd_denied = false,
+            PaperBlocker::MarginShortOptionsCfdNotDenied,
+        ),
+        (
+            |policy| policy.max_paper_notional_required = false,
+            PaperBlocker::MaxPaperNotionalMissing,
+        ),
+    ];
+    for (mutate, blocker) in paper_cases {
+        let mut policy = IbkrPaperAttestationPolicyV1::source_template();
+        mutate(&mut policy);
+        assert_single_policy_blocker(policy.validate(), blocker);
+    }
+
+    let python_cases: [(fn(&mut IbkrPythonWriteGuardPolicyV1), PythonBlocker); 7] = [
+        (
+            |policy| policy.python_broker_write_authority_denied = false,
+            PythonBlocker::PythonBrokerWriteAuthorityNotDenied,
+        ),
+        (
+            |policy| policy.python_can_read_display_import = false,
+            PythonBlocker::PythonReadDisplayImportMissing,
+        ),
+        (
+            |policy| policy.python_can_call_rust_lane_ipc = false,
+            PythonBlocker::PythonRustIpcBridgeMissing,
+        ),
+        (
+            |policy| policy.python_ibkr_order_methods_denied = false,
+            PythonBlocker::PythonIbkrOrderMethodsNotDenied,
+        ),
+        (
+            |policy| policy.python_live_secret_access_denied = false,
+            PythonBlocker::PythonLiveSecretAccessNotDenied,
+        ),
+        (
+            |policy| policy.gui_cannot_override_authority = false,
+            PythonBlocker::GuiAuthorityOverrideNotDenied,
+        ),
+        (
+            |policy| policy.bybit_paths_unmodified = false,
+            PythonBlocker::BybitPathMutationNotAccounted,
+        ),
+    ];
+    for (mutate, blocker) in python_cases {
+        let mut policy = IbkrPythonWriteGuardPolicyV1::source_template();
+        mutate(&mut policy);
+        assert_single_policy_blocker(policy.validate(), blocker);
+    }
+}
+
+#[test]
 fn source_policy_template_is_parseable_and_secret_free() {
     let srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -471,4 +740,17 @@ fn source_policy_template_is_parseable_and_secret_free() {
     assert!(!lower.contains("account_id ="));
     assert!(!lower.contains("password ="));
     assert!(!lower.contains("token ="));
+}
+
+fn assert_single_policy_blocker<B>(verdict: IbkrPolicyVerdict<B>, blocker: B)
+where
+    B: Copy + Eq + std::fmt::Debug,
+{
+    assert!(!verdict.accepted);
+    assert_eq!(
+        verdict.blockers,
+        vec![blocker],
+        "expected only {blocker:?}; blockers: {:?}",
+        verdict.blockers
+    );
 }

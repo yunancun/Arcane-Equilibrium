@@ -3799,3 +3799,11 @@
 - Source-static guard now rejects empty action buckets, false denial booleans, IBKR contact, secret serialization, and Bybit protection loss in the accepted fixture, and pins default fail-closed posture.
 - Verification passed: targeted rustfmt check PASS; non-Bybit allowlist source static `6 passed`; non-Bybit allowlist Rust acceptance `4 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
 - Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, SDK import, connector runtime, secret access, Client Portal Web API enablement, broker routing, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Phase2 Policy Template Authority Cross-Wire Guard
+
+- PM added test-only/source-static coverage for Phase 2 redaction, rate-limit, audit-event, paper-attestation, and Python write-guard policy template posture.
+- Acceptance now independently rejects missing payload hashes, secret/account/path/cookie/token/raw-payload/stack-trace leaks, missing per-action pacing/budgets, missing append-only audit lineage, missing Rust-scoped paper attestation gates, Python write/live-secret/GUI override gaps, and Bybit mutation gaps via exact single blockers.
+- Source-static guard now parses source-template/default blocks and pins safe `source_template()` plus fail-closed `Default` posture.
+- Verification passed: targeted rustfmt check PASS; Phase2 policy source static `4 passed`; Phase2 policy Rust acceptance `13 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
+- Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, SDK import, connector runtime, secret access, redaction/rate-limit/audit runtime, broker routing, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
