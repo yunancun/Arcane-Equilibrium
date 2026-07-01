@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -11,10 +12,38 @@ from fastapi.testclient import TestClient
 from stock_etf_route_fixtures import (
     _make_client_with_ipc,
     _valid_shadow_status,
+    client_fail_closed,
     route_module,
     stock_etf_router,
-    client_fail_closed,
 )
+
+EXPECTED_SHADOW_CONTRACT_VIOLATIONS = [
+    "ibkr_call_performed",
+    "secret_slot_touched",
+    "order_routed",
+    "bybit_ipc_reused",
+    "asset_lane_mismatch",
+    "broker_mismatch",
+    "environment_mismatch",
+    "phase3_started",
+    "shadow_collector_started",
+    "shadow_signal_emitted",
+    "shadow_fill_generated",
+    "scorecard_writer_started",
+    "db_apply_performed",
+    "shadow_fill_expected_contract_id_mismatch",
+    "shadow_fill_linked_to_broker_paper_fill",
+    "shadow_fill_linked_to_live_fill",
+    "strategy_expected_contract_id_mismatch",
+    "strategy_not_paper_shadow_only",
+    "strategy_profitability_claimed",
+    "strategy_live_or_tiny_live_authority_claimed",
+    "strategy_bybit_live_not_protected",
+    "strategy_ibkr_live_not_denied",
+    "strategy_ibkr_contact_performed",
+    "strategy_secret_content_serialized",
+]
+
 
 def test_stock_etf_shadow_status_returns_200_when_ipc_down(
     client_fail_closed: TestClient,
@@ -171,32 +200,7 @@ def test_stock_etf_shadow_status_blocks_contract_violation() -> None:
 
     assert data["shadow_status_state"] == "contract_violation_blocked"
     assert data["degraded"] is True
-    assert {
-        "ibkr_call_performed",
-        "secret_slot_touched",
-        "order_routed",
-        "bybit_ipc_reused",
-        "asset_lane_mismatch",
-        "broker_mismatch",
-        "environment_mismatch",
-        "phase3_started",
-        "shadow_collector_started",
-        "shadow_signal_emitted",
-        "shadow_fill_generated",
-        "scorecard_writer_started",
-        "db_apply_performed",
-        "shadow_fill_expected_contract_id_mismatch",
-        "shadow_fill_linked_to_broker_paper_fill",
-        "shadow_fill_linked_to_live_fill",
-        "strategy_expected_contract_id_mismatch",
-        "strategy_not_paper_shadow_only",
-        "strategy_profitability_claimed",
-        "strategy_live_or_tiny_live_authority_claimed",
-        "strategy_bybit_live_not_protected",
-        "strategy_ibkr_live_not_denied",
-        "strategy_ibkr_contact_performed",
-        "strategy_secret_content_serialized",
-    }.issubset(set(data["contract_violations"]))
+    assert data["contract_violations"] == EXPECTED_SHADOW_CONTRACT_VIOLATIONS
     assert data["asset_lane"] == "stock_etf_cash"
     assert data["broker"] == "ibkr"
     assert data["environment"] == "shadow"
@@ -223,3 +227,19 @@ def test_stock_etf_shadow_status_requires_auth() -> None:
     resp = client.get("/api/v1/stock-etf/shadow-status")
 
     assert resp.status_code == 401
+
+
+def test_stock_etf_shadow_contract_violation_assertions_stay_exact() -> None:
+    source = Path(__file__).read_text(encoding="utf-8")
+    source_under_test = source.split(
+        "def test_stock_etf_shadow_contract_violation_assertions_stay_exact",
+        1,
+    )[0]
+    forbidden_patterns = [
+        'set(data["contract_violations"])',
+        'in data["contract_violations"]',
+        'issubset(set(data["contract_violations"]))',
+    ]
+
+    for pattern in forbidden_patterns:
+        assert pattern not in source_under_test
