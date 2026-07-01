@@ -5184,3 +5184,31 @@ Verification 已過：
 contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 audit writer、沒有 evidence
 writer、沒有 scorecard writer、沒有 paper order routing、沒有 broker session、沒有 tiny-live/live
 authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Disable Cleanup Default Lineage Exact Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Disable Cleanup Default Lineage Exact Guard`。
+
+這個 checkpoint 補強 `StockEtfDisableCleanupRunbookV1` 的 default kill-switch / disable-cleanup
+fail-closed exact coverage。
+
+新增 Rust acceptance 證明 default runbook、runbook identity drift、env flag gaps、proof gaps、
+contact/secret/destructive cleanup/launch authority claims 都會以完整 ordered blocker vectors fail closed，
+包含重複 env/proof missing blockers。Python source-static guard 也鎖住 runbook/env/proof validator blocker
+emit order。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Stock/ETF disable cleanup source static pytest：`8 passed`
+- Stock/ETF disable cleanup Rust acceptance：`7 passed`
+- Full `cargo test -p openclaw_types`：`35` unit/golden + `337` integration/acceptance + `0` doc-tests
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IPC server start、沒有
+service stop、沒有 runtime action、沒有 secret lookup、沒有 DB cleanup/delete/truncate、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 paper order routing、沒有 broker session、沒有 paper-shadow
+launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。

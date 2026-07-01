@@ -3980,3 +3980,10 @@
 - Source-static parsing now pins both the contract validator and source SQL auditor blocker emit order backing the exact acceptance vectors.
 - Verification passed: DB evidence DDL source static `7 passed`; DB evidence DDL Rust acceptance `10 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `337` integration/acceptance + `0` doc-tests; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, SQL source draft change, sqlx migration registration, DB migration/apply, PG write, IPC server start, IBKR contact, connector runtime, secret access, audit/evidence/scorecard writer, paper order routing, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Disable Cleanup Default Lineage Exact Guard
+
+- PM added test-only/source-static exact-blocker coverage for default `StockEtfDisableCleanupRunbookV1`, identity drift, env flag gaps, proof gaps, and contact/secret/destructive cleanup/launch authority claims.
+- Source-static parsing now pins runbook/env/proof validator blocker emit order backing the exact acceptance vectors.
+- Verification passed: disable cleanup source static `8 passed`; disable cleanup Rust acceptance `7 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `337` integration/acceptance + `0` doc-tests; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, IPC server start, service stop, runtime action, IBKR contact, connector runtime, secret access, DB cleanup/delete/truncate, paper order routing, broker session, paper-shadow launch, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

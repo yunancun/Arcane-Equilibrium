@@ -138,6 +138,10 @@ def _source() -> str:
     return DISABLE_CLEANUP.read_text(encoding="utf-8")
 
 
+def _function_block(source: str, start: str, end: str) -> str:
+    return source.split(start, 1)[1].split(end, 1)[0]
+
+
 def test_stock_etf_disable_cleanup_runbook_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
@@ -241,6 +245,64 @@ def test_stock_etf_disable_cleanup_runbook_source_keeps_env_and_proof_validation
     assert "!is_sha256_hex(&proof.evidence_hash)" in source
     assert "proof.grants_runtime_authority" in source
     assert "proof.destructive_cleanup_claimed" in source
+
+
+def test_stock_etf_disable_cleanup_runbook_source_keeps_exact_blocker_order() -> None:
+    source = _source()
+    runbook = _function_block(
+        source,
+        "pub fn validate(&self) -> StockEtfDisableCleanupVerdict<StockEtfDisableCleanupBlocker>",
+        "StockEtfDisableCleanupVerdict::new(blockers)",
+    )
+    env_flags = _function_block(source, "fn validate_env_flags(", "fn validate_env_flag(")
+    env_flag = _function_block(source, "fn validate_env_flag(", "fn validate_proofs(")
+    proofs = _function_block(source, "fn validate_proofs(", "fn validate_proof(")
+    proof = _function_block(source, "fn validate_proof(", "fn expected_env_flag_value(")
+
+    for block, ordered_blockers in (
+        (
+            runbook,
+            (
+                "RunbookIdMismatch",
+                "SourceVersionMismatch",
+                "WrongAssetLane",
+                "WrongBroker",
+                "SourceArtifactHashInvalid",
+                "BybitLiveExecutionNotProtected",
+                "IbkrContactPerformed",
+                "ConnectorRuntimeStarted",
+                "PaperOrderRouted",
+                "SecretSlotCreated",
+                "SecretContentSerialized",
+                "DestructiveDbCleanupRequested",
+                "DbDeleteOrTruncateAllowed",
+                "PaperShadowLaunchAuthorityClaimed",
+                "TinyLiveAuthorityClaimed",
+                "LiveAuthorityClaimed",
+            ),
+        ),
+        (env_flags, ("EnvFlagMissing", "EnvFlagDuplicated", "EnvFlagUnexpected")),
+        (
+            env_flag,
+            (
+                "EnvFlagExpectedValueMismatch",
+                "EnvFlagObservedValueMismatch",
+                "EnvFlagEvidenceHashInvalid",
+            ),
+        ),
+        (proofs, ("ProofMissing", "ProofDuplicated")),
+        (
+            proof,
+            (
+                "ProofNotVerified",
+                "ProofEvidenceHashInvalid",
+                "ProofGrantsRuntimeAuthority",
+                "ProofDestructiveCleanupClaimed",
+            ),
+        ),
+    ):
+        positions = [block.index(f"Blocker::{blocker}") for blocker in ordered_blockers]
+        assert positions == sorted(positions)
 
 
 def test_stock_etf_disable_cleanup_runbook_source_has_no_runtime_secret_order_or_bybit_client_tokens() -> None:
