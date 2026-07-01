@@ -1374,3 +1374,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only structure guard for `stock_etf_db_evidence_ddl.rs`, pinning the DB evidence contract and source SQL auditor boundary.
 - The guard requires source-only fixture posture, migration/apply/sqlx/PG write denials, E2/E4/Linux dry-run/double-apply requirements, Guard A/B/C checks, schema/table/natural-key/FK coverage, stock/IBKR/paper/live-denial constraints, retention/index checks, and no runtime/secret/order/Bybit client tokens.
 - Verification passed: new guard `6 passed`; DB evidence DDL acceptance `10 passed`; full `cargo test -p openclaw_types` PASS. This grants no migration apply, PG write, sqlx registration, DB runtime, IBKR contact, paper order, evidence clock, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Disable Cleanup Runbook Source Static Guard
+
+- PM added a source-only structure guard for `stock_etf_disable_cleanup_runbook.rs`, pinning the kill-switch and disable/cleanup runbook contract boundary.
+- The guard requires exact runbook id, fixed disable env flag values without env reads, required proof kinds, fail-closed defaults, StockEtfCash/IBKR accepted fixture, no contact/secret/order/destructive DB/launch/tiny-live/live claims, env/proof validation, and no runtime/secret/order/Bybit client tokens.
+- Verification passed: new guard `7 passed`; disable-cleanup runbook acceptance `7 passed`; full `cargo test -p openclaw_types` PASS. This grants no service stop, env mutation, secret inspection, DB cleanup, IBKR contact, paper order, tiny-live/live, or Bybit behavior change.
