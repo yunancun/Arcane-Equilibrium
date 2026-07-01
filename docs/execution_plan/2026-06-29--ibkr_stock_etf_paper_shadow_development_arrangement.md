@@ -8765,3 +8765,39 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 runtime、不做 socket/client construction、不做 broker fill import、不執行 paper order routing、不做 broker session、
 不做 broker routing、不做 DB/evidence writer、不啟動 scorecard writer、不啟動 evidence clock、不做 Linux runtime
 sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
+
+## 212. 2026-07-01 PM session source checkpoint：Stock/ETF Tiny-Live Eligibility Exact Blocker Guard
+
+本 checkpoint 補強 `TinyLiveAdrEligibilityV1` future ADR discussion gate 的 aggregate fail-closed lineage，固定
+default discussion gate、contract/source drift、positive-scorecard evidence gaps、statistical gate gaps、tiny-live/live
+authority requests、secret serialization、seal cross-wire cases 的 ordered blocker vectors 或 exact single-blocker
+vectors。這不是 Rust production behavior change、不是 IPC/API route change、不是 IBKR contact、不是 connector
+runtime、不是 socket/client construction、不是 secret lookup、不是 paper order route enablement、不是 release launch、
+不是 tiny-live/live authorization；只把 tiny-live ADR discussion source-only gate 的 fail-closed lineage 變成
+exact-blocker acceptance guard。
+
+已完成：
+
+- 在 `stock_etf_tiny_live_eligibility_acceptance.rs` 將 default `TinyLiveAdrEligibilityV1` 固定為完整順序 blocker
+  向量，覆蓋 identity/source、Phase5/scorecard/reconciliation/DQ/review hashes、paper-shadow window、statistical
+  thresholds、labels/reviews、ADR-discussion-only decision 與 sealed posture。
+- 在同檔將 contract/source drift、positive-scorecard evidence gaps、statistical gate aggregate gaps、tiny-live/live
+  authority requests、secret serialization、seal cross-wire cases 固定為 exact blocker vectors。
+- 移除 tiny-live eligibility blocker 的 loose helper checks；decision/secret/seal cross-wire cases 改為 exact
+  single-blocker assertions。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Stock/ETF tiny-live eligibility source static pytest：`7 passed`。
+- Stock/ETF tiny-live eligibility Rust acceptance：`13 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、
+不改 GUI runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector
+runtime、不做 socket/client construction、不執行 paper order routing、不做 broker session、不做 broker routing、
+不做 DB/evidence writer、不啟動 scorecard writer、不啟動 evidence clock、不做 release launch、不做 Linux runtime
+sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
