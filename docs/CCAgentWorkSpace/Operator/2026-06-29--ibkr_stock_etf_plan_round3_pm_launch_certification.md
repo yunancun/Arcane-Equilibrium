@@ -5238,3 +5238,32 @@ Verification 已過：
 沒有 IPC server start、沒有 IBKR contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、
 沒有 paper order routing、沒有 broker session、沒有 DB/evidence writer、沒有 scorecard writer、沒有
 paper-shadow launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Phase0 Manifest Default Lineage Exact Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Phase0 Manifest Default Lineage Exact Guard`。
+
+這個 checkpoint 補強 `StockEtfPhase0ContractPacketManifestV1` 的 Phase0 named contract packet manifest
+fail-closed exact coverage。
+
+新增 Rust acceptance 證明 default Phase0 manifest、contract completeness/duplicate/unexpected、
+API baseline drift、global denial/unlock drift 都會以完整 ordered blocker vectors fail closed，且 accepted
+fixture 的 contract list 必須完全等於 `required_phase0_contract_ids()` 的 ordered list。Python source-static
+guard 也鎖住 manifest/authority/API/contracts/unlock validator blocker emit order 與 root validator child-call
+order。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Stock/ETF Phase0 manifest source static pytest：`7 passed`
+- Stock/ETF Phase0 manifest Rust acceptance：`6 passed`
+- Full `cargo test -p openclaw_types`：PASS
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 GUI runtime/API route/IPC behavior change、沒有 IBKR
+contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 paper order routing、沒有 broker
+session、沒有 DB/evidence writer、沒有 scorecard writer、沒有 paper-shadow launch、沒有 tiny-live/live
+authorization，也沒有改動 Bybit live/demo execution 行為。
