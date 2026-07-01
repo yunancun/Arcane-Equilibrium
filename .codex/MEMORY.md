@@ -1452,3 +1452,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only meta guard for IBKR/Stock-ETF TOML settings/template coverage across `settings/asset_lanes`, `settings/broker`, and `settings/risk_control_rules`.
 - The guard dynamically scans `ibkr`, `stock_etf`, and legacy `stock_market_data` TOML names, requires the non-prefixed market-data alias to be included, excludes unrelated Bybit runtime risk configs, and fails if any matching settings file is not directly referenced by Rust acceptance, structure, or Stock/ETF control-api tests.
 - Verification passed: new guard `3 passed`; docs trace PASS. This grants no settings mutation, IBKR contact, connector runtime, secret access, read-only probe, result import, evidence/scorecard writer, DB apply, paper order route, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Python/GUI Surface Coverage Static Guard
+
+- PM added a source-only control-api guard for the dynamic Python/GUI candidate scanners used by Stock/ETF/IBKR no-write/no-runtime/static GUI tests.
+- The guard requires all current `app/*stock_etf*.py` / `app/*ibkr*.py`, all `program_code/broker_connectors/ibkr_connector/**/*.py`, and all `app/static/tab-stock-etf*` files to be selected by the relevant scanners, while excluding Bybit runtime fragments such as REST client/private WS/order manager/order router/bounded-probe active-order paths.
+- Verification passed: new guard `4 passed`; full Stock/ETF control-api pytest PASS; docs trace PASS. This grants no FastAPI behavior change, GUI behavior change, connector runtime, IBKR contact, secret access, paper order route, tiny-live/live, or Bybit behavior change.

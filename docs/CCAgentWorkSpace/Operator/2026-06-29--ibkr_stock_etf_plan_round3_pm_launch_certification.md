@@ -3388,3 +3388,26 @@ Verification 已過：
 邊界不變：沒有改 settings values、沒有 IBKR contact、沒有 connector runtime、沒有 secret access、
 沒有 read-only probe execution、沒有 result import、沒有 evidence/scorecard writer、沒有 DB apply、
 沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Python/GUI Surface Coverage Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF Python/GUI Surface Coverage Static Guard`。
+
+這個 guard 鎖住現有 static guards 的檔案選取面：所有 `app/*stock_etf*.py` / `app/*ibkr*.py`
+control-api modules、所有 `program_code/broker_connectors/ibkr_connector/**/*.py` connector
+skeleton files、所有 `app/static/tab-stock-etf*` GUI files 都必須進入對應 scanner。這避免未來
+新增 Python/GUI surface 後逃過 no-write、no-runtime、no-secret、no-background static guards。
+
+Guard 也明確排除 Bybit runtime fragments（REST client、private WS、order manager/router、
+bounded-probe active-order），保持 IBKR research-lane coverage 不擴散到既有 Bybit runtime module。
+
+Verification 已過：
+
+- New control-api guard pytest：`4 passed`
+- Full Stock/ETF control-api pytest：PASS
+- Docs PM trace tests：PASS
+
+邊界不變：沒有 FastAPI behavior change、沒有 GUI behavior change、沒有 IBKR contact、沒有
+connector runtime、沒有 secret access、沒有 paper order route、沒有 tiny-live/live authorization，
+也沒有改動 Bybit live/demo execution 行為。
