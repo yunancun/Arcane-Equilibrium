@@ -10,6 +10,7 @@ use openclaw_types::{
     BrokerEnvironment, BrokerOperation, InstrumentKind, StockEtfBrokerCapabilityBlocker,
     StockEtfBrokerCapabilityRegistryV1, StockEtfDenialReason, StockEtfFeatureFlags,
     StockEtfGateInputs, BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID,
+    IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
     STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID, STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID,
     STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
     STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID,
@@ -278,6 +279,66 @@ fn paper_write_rows_require_rust_owned_gates_audit_and_source_hash() {
     assert!(has(
         &blockers,
         StockEtfBrokerCapabilityBlocker::OperationRequiredGateMissing
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfBrokerCapabilityBlocker::OperationAuditEventMissing
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfBrokerCapabilityBlocker::OperationSourceArtifactHashMissing
+    ));
+}
+
+#[test]
+fn paper_fill_import_row_is_readonly_and_requires_session_lifecycle_gate() {
+    let registry = StockEtfBrokerCapabilityRegistryV1::accepted_fixture();
+    let fill_import = registry
+        .operations
+        .iter()
+        .find(|entry| entry.operation == BrokerOperation::PaperOrderFillImport)
+        .expect("paper fill import row");
+
+    assert_eq!(fill_import.authority_scope, AuthorityScope::ReadOnly);
+    assert_eq!(fill_import.typed_denial_reason, None);
+    assert!(!fill_import.rust_owned);
+    assert!(fill_import.audit_event_required);
+    assert!(fill_import.source_artifact_hash_required);
+    assert!(fill_import
+        .required_gates
+        .contains(&IBKR_SESSION_ATTESTATION_CONTRACT_ID.to_string()));
+    assert!(fill_import
+        .required_gates
+        .contains(&IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID.to_string()));
+
+    let mut broken = registry;
+    let fill_import = broken
+        .operations
+        .iter_mut()
+        .find(|entry| entry.operation == BrokerOperation::PaperOrderFillImport)
+        .expect("paper fill import row");
+    fill_import.authority_scope = AuthorityScope::PaperRehearsal;
+    fill_import.required_gates.retain(|gate| {
+        gate != IBKR_SESSION_ATTESTATION_CONTRACT_ID
+            && gate != IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID
+    });
+    fill_import.rust_owned = true;
+    fill_import.audit_event_required = false;
+    fill_import.source_artifact_hash_required = false;
+
+    let blockers = broken.validate().blockers;
+
+    assert!(has(
+        &blockers,
+        StockEtfBrokerCapabilityBlocker::OperationAuthorityScopeMismatch
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfBrokerCapabilityBlocker::OperationRequiredGateMissing
+    ));
+    assert!(has(
+        &blockers,
+        StockEtfBrokerCapabilityBlocker::OperationRustOwnershipMismatch
     ));
     assert!(has(
         &blockers,
