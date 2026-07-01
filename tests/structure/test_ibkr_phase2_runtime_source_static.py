@@ -315,6 +315,20 @@ def test_ibkr_phase2_runtime_source_keeps_default_and_source_template_posture() 
         assert required in topology_template
 
 
+def test_ibkr_phase2_runtime_source_keeps_fail_closed_verdicts_and_live_port_dual_denial() -> None:
+    source = _source()
+
+    assert "accepted: blockers.is_empty()" in source
+    assert "if self.contract_id != IBKR_SECRET_SLOT_CONTRACT_ID" in source
+    assert "if self.contract_id != IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID" in source
+    assert "if self.port == IBKR_LIVE_GATEWAY_PORT || self.port == IBKR_LIVE_TWS_PORT" in source
+    assert "blockers.push(Blocker::LivePortDenied)" in source
+    assert "if self.port != IBKR_PAPER_GATEWAY_DEFAULT_PORT" in source
+    assert "blockers.push(Blocker::PaperPortNotUsed)" in source
+    assert "if !self.live_secret_absent_or_empty" in source
+    assert "blockers.push(Blocker::LiveSecretAbsentOrEmptyNotProven)" in source
+
+
 def test_ibkr_phase2_runtime_source_has_no_runtime_secret_order_or_bybit_client_tokens() -> None:
     source = _source()
     violations = []

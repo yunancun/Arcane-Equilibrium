@@ -4935,6 +4935,34 @@ Verification 已過：
 沒有 DB/evidence writer、沒有 scorecard writer、沒有 broker session、沒有 tiny-live/live authorization，
 也沒有改動 Bybit live/demo execution 行為。
 
+## 2026-07-01 Operator Update — IBKR Phase 2 Runtime Secret/Topology Exact Default Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`IBKR Phase 2 Runtime Secret/Topology Exact Default Guard`。
+
+這個 checkpoint 補強 `ibkr_phase2_runtime` 的 secret-slot contract 與 API session topology default
+fail-closed posture，固定 default secret-slot blocker 向量、default topology blocker 向量，以及 live
+TWS/Gateway port 必須同時被 `LivePortDenied` 與 `PaperPortNotUsed` 拒絕。
+
+新增 Rust acceptance 證明 default secret-slot 與 default topology 會以完整順序 blocker 向量 fail closed；
+live TWS/Gateway port topology case 只允許 `LivePortDenied` + `PaperPortNotUsed` 雙 blocker。Python
+source-static guard 也鎖住 fail-closed verdict、secret slot live-secret denial 與 topology live-port/paper-port
+雙重拒絕邏輯。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- IBKR Phase 2 runtime source static pytest：`6 passed`
+- IBKR Phase 2 runtime Rust acceptance：`9 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IPC server start、
+沒有 IBKR contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 paper order routing、
+沒有 DB/evidence writer、沒有 scorecard writer、沒有 broker session、沒有 tiny-live/live authorization，
+也沒有改動 Bybit live/demo execution 行為。
+
 ## 2026-07-01 Operator Update — Stock/ETF Lane Taxonomy Authority Decision Cross-Wire Guard
 
 本 session 已完成下一個 test-only/source-static checkpoint：

@@ -3931,3 +3931,10 @@
 - Source-static parsing now pins required operations, default fail-closed posture, and accepted StockEtfCash/IBKR/no-contact/no-secret fixture posture.
 - Verification passed: broker capability registry source static `8 passed`; broker capability registry Rust acceptance `14 passed`; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, paper order routing, DB/evidence writer, scorecard writer, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Phase 2 Runtime Secret/Topology Exact Default Guard
+
+- PM added test-only/source-static exact-blocker coverage for `IbkrSecretSlotContractV1` and `IbkrApiSessionTopologyV1` default fail-closed posture plus live-port dual denial.
+- Source-static parsing now pins fail-closed verdict construction, secret slot live-secret denial, and topology live-port/paper-port dual-denial source logic.
+- Verification passed: IBKR Phase 2 runtime source static `6 passed`; IBKR Phase 2 runtime Rust acceptance `9 passed`; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, paper order routing, DB/evidence writer, scorecard writer, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
