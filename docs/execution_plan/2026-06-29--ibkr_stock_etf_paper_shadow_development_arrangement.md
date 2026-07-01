@@ -8728,3 +8728,40 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 runtime、不做 socket/client construction、不執行 paper order routing、不做 broker session、不做 broker
 routing、不做 DB/evidence writer、不啟動 scorecard writer、不做 release launch、不做 Linux runtime sync/restart、
 不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
+
+## 211. 2026-07-01 PM session source checkpoint：Stock/ETF Scorecard Inputs Exact Blocker Guard
+
+本 checkpoint 補強 `StockEtfScorecardInputBundleV1` 與 atomic scorecard input subcontracts 的 aggregate
+fail-closed lineage，固定 contract/source drift、cash ledger environment/hash drift、shadow-fill broker/live linkage、
+storage capacity limits、archive path safety、derived-only separation、runtime side-effect cross-wire cases 的 ordered
+blocker vectors 或 exact single-blocker vectors。這不是 Rust production behavior change、不是 IPC/API route
+change、不是 IBKR contact、不是 connector runtime、不是 socket/client construction、不是 secret lookup、不是 broker
+fill import、不是 paper order route enablement、不是 DB/evidence writer 啟動、不是 scorecard writer 啟動、不是
+evidence clock 啟動、不是 tiny-live/live gate；只把 scorecard input source-only evidence contract 的 fail-closed
+lineage 變成 exact-blocker acceptance guard。
+
+已完成：
+
+- 在 `stock_etf_scorecard_inputs_acceptance.rs` 將 subcontract contract/source drift、cash ledger environment/hash
+  drift、shadow-fill broker/live linkage、storage forward-capacity policy、unbounded capacity limits、retention order
+  與 archive path safety 固定為 exact blocker vectors。
+- 在同檔將 scorecard bundle derived-only/paper-shadow separation/live-fill/runtime side-effect cross-wire cases 固定為
+  exact blocker vectors。
+- 移除 scorecard input blocker 的剩餘 loose `blockers.contains` checks；atomic 與 bundle fail-closed cases 改為完整
+  ordered-vector assertions。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Stock/ETF scorecard inputs source static pytest：`10 passed`。
+- Stock/ETF scorecard inputs Rust acceptance：`14 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、
+不改 GUI runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector
+runtime、不做 socket/client construction、不做 broker fill import、不執行 paper order routing、不做 broker session、
+不做 broker routing、不做 DB/evidence writer、不啟動 scorecard writer、不啟動 evidence clock、不做 Linux runtime
+sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
