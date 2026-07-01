@@ -3392,3 +3392,10 @@
 - `stock_etf_phase3_evidence.rs` dropped from 982 to 742 lines; the new child module is 254 lines.
 - Verification passed: scoped Rust format, Phase3 evidence acceptance `19 passed`, Phase0 manifest acceptance `6 passed`, full Stock/ETF FastAPI/static `120 passed`, full `openclaw_types` PASS, engine Stock/ETF focused PASS, docs trace `2 passed`, and `git diff --check` PASS.
 - Boundary unchanged: no contract behavior, endpoint, IPC, GUI payload, IBKR contact, runtime, order, DB/evidence writer, evidence clock, tiny-live/live, Linux runtime, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF Connector Attestation Preview Guard
+
+- PM added inert Python connector skeleton session and paper attestation preview payloads plus blocked fixtures, preserving source-only/no-network/no-secret/no-Bybit posture.
+- `IbkrReadOnlyClient.session_attestation_preview()` and `IbkrPaperClientBoundary.paper_attestation_preview()` now return typed blocked dicts for future Phase 2 gate wiring.
+- Verification passed: Python compile, connector skeleton focused test `8 passed`, full Stock/ETF FastAPI/static `120 passed`, docs trace `2 passed`, and `git diff --check` PASS.
+- Boundary unchanged: no endpoint, IPC, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe, paper order, fill import, DB/evidence writer, tiny-live/live, Linux runtime, or Bybit behavior change.
