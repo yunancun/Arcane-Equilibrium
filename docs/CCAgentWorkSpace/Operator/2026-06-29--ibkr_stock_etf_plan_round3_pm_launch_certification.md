@@ -179,6 +179,30 @@ Verification 已過：
 evidence clock、沒有 scorecard writer、沒有 DB apply、沒有 Linux runtime sync/restart，
 也沒有改動 Bybit live execution 行為。
 
+## 2026-07-01 Operator Update — Connector Risky Config Blocker Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Connector Risky Config Blocker Guard`。
+
+這個 guard 鎖住 inert IBKR connector skeleton 的 risky config 行為：如果有人用
+non-loopback host、live TWS port、secret/account fingerprint、paper/live channel
+flag 或 Bybit reuse flag 建立 client，所有 preview payload 只能新增 blockers，
+不能把任何 network、secret、paper/live、import、order、DB side effect 變成 true。
+
+Verification 已過：
+
+- Connector skeleton focused pytest：`9 passed`
+- Python no-write/static/GUI guard focused pytest：`30 passed`
+- Stock/ETF Python route/static suite：`121 passed`
+
+補充：廣義 `-k stock_etf` collection 會先掃到無關 L2 測試，本機 Python 3.10
+缺 `tomllib` 因而中止；本 checkpoint 已改用 `test_stock_etf_*.py` 檔案集合完成
+相關覆蓋。
+
+邊界不變：沒有 IBKR contact、沒有 IBKR SDK、沒有 secret access/creation、沒有
+connector runtime、沒有 paper order、沒有 fill import、沒有 DB apply、沒有 evidence
+clock、沒有 Linux runtime sync/restart，也沒有改動 Bybit live execution 行為。
+
 ## 2026-06-30 Operator Update — DB Evidence DDL Source Audit
 
 本 session 已完成下一個 source-only checkpoint：
