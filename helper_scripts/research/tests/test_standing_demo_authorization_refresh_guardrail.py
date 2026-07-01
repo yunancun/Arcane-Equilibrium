@@ -193,6 +193,99 @@ def test_candidate_mismatch_blocks_refresh() -> None:
     assert review["envelope_preview"] == {}
 
 
+def test_expired_standing_auth_readiness_blocks_by_default() -> None:
+    review = _review(
+        runtime_readiness=_runtime_readiness(
+            status=mod.READINESS_AUTH_OR_PLAN_BLOCKED_STATUS,
+            blocking_reasons=["standing_authorization:standing_auth_expired"],
+        )
+    )
+
+    assert review["status"] == mod.NOT_READY_STATUS
+    assert "runtime_readiness_status_not_ready" in review["source_blockers"]
+    assert review["runtime_readiness_resolution"][
+        "expired_standing_auth_only"
+    ] is True
+    assert review["runtime_readiness_resolution"][
+        "expired_standing_auth_readiness_exception_applied"
+    ] is False
+    assert review["envelope_preview"] == {}
+
+
+def test_expired_standing_auth_readiness_can_be_explicitly_allowed() -> None:
+    review = _review(
+        runtime_readiness=_runtime_readiness(
+            status=mod.READINESS_AUTH_OR_PLAN_BLOCKED_STATUS,
+            blocking_reasons=["standing_authorization:standing_auth_expired"],
+        ),
+        allow_expired_standing_auth_readiness_only=True,
+    )
+
+    assert review["status"] == mod.READY_STATUS
+    assert review["source_blockers"] == []
+    assert review["runtime_readiness_resolution"]["accepted"] is True
+    assert review["runtime_readiness_resolution"][
+        "expired_standing_auth_readiness_exception_applied"
+    ] is True
+    assert review["runtime_readiness_resolution"][
+        "other_runtime_readiness_blockers_accepted"
+    ] is False
+    assert review["summary"][
+        "expired_standing_auth_readiness_exception_applied"
+    ] is True
+    assert review["answers"]["runtime_readiness_other_blockers_accepted"] is False
+    assert review["envelope_preview"]["candidate"]["side_cell_key"] == SIDE_CELL
+
+
+def test_expired_standing_auth_readiness_flag_rejects_extra_blockers() -> None:
+    review = _review(
+        runtime_readiness=_runtime_readiness(
+            status=mod.READINESS_AUTH_OR_PLAN_BLOCKED_STATUS,
+            blocking_reasons=[
+                "standing_authorization:standing_auth_expired",
+                "plan:plan_status_not_ready",
+            ],
+        ),
+        allow_expired_standing_auth_readiness_only=True,
+    )
+
+    assert review["status"] == mod.NOT_READY_STATUS
+    assert "runtime_readiness_status_not_ready" in review["source_blockers"]
+    assert review["runtime_readiness_resolution"][
+        "expired_standing_auth_readiness_exception_applied"
+    ] is False
+    assert review["envelope_preview"] == {}
+
+
+def test_expired_standing_auth_readiness_flag_rejects_nested_extra_blockers() -> None:
+    review = _review(
+        runtime_readiness=_runtime_readiness(
+            status=mod.READINESS_AUTH_OR_PLAN_BLOCKED_STATUS,
+            blocking_reasons=["standing_authorization:standing_auth_expired"],
+            checks={
+                "plan": {
+                    "blocking_reasons": ["plan_status_not_ready"],
+                },
+                "standing_authorization": {
+                    "blocking_reasons": ["standing_auth_expired"],
+                },
+            },
+        ),
+        allow_expired_standing_auth_readiness_only=True,
+    )
+
+    assert review["status"] == mod.NOT_READY_STATUS
+    assert "runtime_readiness_status_not_ready" in review["source_blockers"]
+    assert review["runtime_readiness_resolution"]["blocking_reasons"] == [
+        "plan:plan_status_not_ready",
+        "standing_authorization:standing_auth_expired",
+    ]
+    assert review["runtime_readiness_resolution"][
+        "expired_standing_auth_readiness_exception_applied"
+    ] is False
+    assert review["envelope_preview"] == {}
+
+
 def test_authority_contamination_blocks_refresh() -> None:
     review = _review(
         existing_authorization=_existing_authorization(

@@ -39,6 +39,7 @@ AUTHORITY_BOUNDARY_VIOLATION_STATUS = "AUTHORITY_BOUNDARY_VIOLATION"
 
 READINESS_SCHEMA_VERSION = "bounded_demo_runtime_readiness_v1"
 READINESS_READY_STATUS = "BOUNDED_DEMO_RUNTIME_READY_FOR_FINAL_WINDOW_GATES"
+READINESS_AUTH_OR_PLAN_BLOCKED_STATUS = "BOUNDED_DEMO_RUNTIME_BLOCKED_BY_AUTH_OR_PLAN"
 DEMO_ACCOUNT_EQUITY_ARTIFACT_SCHEMA_VERSION = "demo_account_equity_artifact_v1"
 DEMO_ACCOUNT_EQUITY_ARTIFACT_READY_STATUS = (
     "DEMO_FAST_BALANCE_EQUITY_ARTIFACT_READY_NO_AUTHORITY"
@@ -55,6 +56,9 @@ HARD_MAX_AUTHORIZED_PROBE_ORDERS = 3
 DEFAULT_RUNTIME_ENVELOPE_PATH = Path(
     "/tmp/openclaw/cost_gate_learning_lane/standing_demo_operator_authorization.json"
 )
+EXPIRED_STANDING_AUTH_READINESS_BLOCKERS = {
+    "standing_authorization:standing_auth_expired",
+}
 
 BOUNDARY = (
     "source-only standing Demo authorization refresh guardrail; no runtime file "
@@ -472,20 +476,62 @@ def _existing_static_reasons(existing: dict[str, Any], candidate: dict[str, Any]
     return sorted(set(reasons))
 
 
-def _readiness_reasons(readiness: dict[str, Any], candidate: dict[str, Any]) -> list[str]:
+def _readiness_blocking_reasons(readiness: dict[str, Any]) -> list[str]:
+    reasons: list[str] = [
+        _str(reason)
+        for reason in _list(readiness.get("blocking_reasons"))
+        if _str(reason)
+    ]
+    for name, check in _dict(readiness.get("checks")).items():
+        for reason in _list(_dict(check).get("blocking_reasons")):
+            text = _str(reason)
+            if text:
+                reasons.append(f"{name}:{text}")
+    return sorted(set(reasons))
+
+
+def _readiness_resolution(
+    readiness: dict[str, Any],
+    candidate: dict[str, Any],
+    *,
+    allow_expired_standing_auth_readiness_only: bool,
+) -> tuple[list[str], dict[str, Any]]:
     reasons: list[str] = []
     if not readiness:
-        return ["runtime_readiness_required"]
+        return ["runtime_readiness_required"], {
+            "accepted": False,
+            "status": None,
+            "blocking_reasons": [],
+            "allow_expired_standing_auth_readiness_only": allow_expired_standing_auth_readiness_only,
+            "expired_standing_auth_readiness_exception_applied": False,
+        }
+    blocking_reasons = _readiness_blocking_reasons(readiness)
+    expired_standing_auth_only = (
+        readiness.get("status") == READINESS_AUTH_OR_PLAN_BLOCKED_STATUS
+        and bool(blocking_reasons)
+        and set(blocking_reasons).issubset(EXPIRED_STANDING_AUTH_READINESS_BLOCKERS)
+    )
+    exception_applied = (
+        allow_expired_standing_auth_readiness_only and expired_standing_auth_only
+    )
     if readiness.get("schema_version") != READINESS_SCHEMA_VERSION:
         reasons.append("runtime_readiness_schema_version_invalid")
-    if readiness.get("status") != READINESS_READY_STATUS:
+    if readiness.get("status") != READINESS_READY_STATUS and not exception_applied:
         reasons.append("runtime_readiness_status_not_ready")
     if not _candidate_matches(_candidate_identity(readiness), candidate):
         reasons.append("runtime_readiness_candidate_mismatch")
     answers = _dict(readiness.get("answers"))
     if _truthy(answers.get("order_submission_performed")):
         reasons.append("runtime_readiness_order_submission_performed_true")
-    return sorted(set(reasons))
+    return sorted(set(reasons)), {
+        "accepted": not reasons,
+        "status": readiness.get("status"),
+        "blocking_reasons": blocking_reasons,
+        "allow_expired_standing_auth_readiness_only": allow_expired_standing_auth_readiness_only,
+        "expired_standing_auth_only": expired_standing_auth_only,
+        "expired_standing_auth_readiness_exception_applied": exception_applied,
+        "other_runtime_readiness_blockers_accepted": False,
+    }
 
 
 def _build_envelope_preview(
@@ -559,6 +605,7 @@ def build_standing_demo_authorization_refresh_guardrail(
     max_account_equity_artifact_age_seconds: int = (
         DEFAULT_MAX_ACCOUNT_EQUITY_ARTIFACT_AGE_SECONDS
     ),
+    allow_expired_standing_auth_readiness_only: bool = False,
     runtime_envelope_path: Path = DEFAULT_RUNTIME_ENVELOPE_PATH,
     now_utc: dt.datetime | None = None,
     source_head: str | None = None,
@@ -570,7 +617,14 @@ def build_standing_demo_authorization_refresh_guardrail(
     candidate = _candidate_identity(existing)
     source_reasons: list[str] = []
     source_reasons.extend(_existing_static_reasons(existing, candidate))
-    source_reasons.extend(_readiness_reasons(readiness, candidate))
+    readiness_reasons, readiness_resolution = _readiness_resolution(
+        readiness,
+        candidate,
+        allow_expired_standing_auth_readiness_only=(
+            allow_expired_standing_auth_readiness_only
+        ),
+    )
+    source_reasons.extend(readiness_reasons)
 
     old_expires_at = _parse_dt(existing.get("expires_at_utc"))
     old_expired = old_expires_at is not None and old_expires_at <= now
@@ -727,6 +781,7 @@ def build_standing_demo_authorization_refresh_guardrail(
             "max_authorized_probe_orders_per_candidate": int(old_probe_orders or 0),
             "resolved_cap_usdt": _round_decimal(old_cap, 8),
         },
+        "runtime_readiness_resolution": readiness_resolution,
         "equity_resolution": equity,
         "current_gui_cap_resolution": current_cap_resolution,
         "risk_cap_lineage": risk_cap_lineage,
@@ -749,6 +804,11 @@ def build_standing_demo_authorization_refresh_guardrail(
             ),
             "max_authorized_probe_orders_per_candidate": requested_probe_orders,
             "authorization_ttl_hours": authorization_ttl_hours,
+            "expired_standing_auth_readiness_exception_applied": (
+                readiness_resolution.get(
+                    "expired_standing_auth_readiness_exception_applied"
+                )
+            ),
             "standing_envelope_materialized": False,
             "bounded_demo_probe_authorized": False,
             "runtime_admission_ready": False,
@@ -762,6 +822,12 @@ def build_standing_demo_authorization_refresh_guardrail(
         "answers": {
             "source_only_research_artifact": True,
             "refresh_ready_no_runtime_mutation": bool(envelope_preview),
+            "expired_standing_auth_readiness_exception_applied": (
+                readiness_resolution.get(
+                    "expired_standing_auth_readiness_exception_applied"
+                )
+            ),
+            "runtime_readiness_other_blockers_accepted": False,
             "runtime_mutation_performed": False,
             "env_mutation_performed": False,
             "crontab_mutation_performed": False,
@@ -833,6 +899,15 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_MAX_ACCOUNT_EQUITY_ARTIFACT_AGE_SECONDS,
     )
+    parser.add_argument(
+        "--allow-expired-standing-auth-readiness-only",
+        action="store_true",
+        help=(
+            "Allow refresh to consume a bounded Demo runtime-readiness packet whose "
+            "only blocker is the standing auth being expired. Credential, connector, "
+            "plan, engine, candidate, and authority blockers still fail closed."
+        ),
+    )
     parser.add_argument("--runtime-envelope-path", type=Path, default=DEFAULT_RUNTIME_ENVELOPE_PATH)
     parser.add_argument("--source-head")
     parser.add_argument("--runtime-head")
@@ -859,6 +934,9 @@ def main() -> int:
         max_authorization_ttl_hours=args.max_authorization_ttl_hours,
         max_account_equity_artifact_age_seconds=(
             args.max_account_equity_artifact_age_seconds
+        ),
+        allow_expired_standing_auth_readiness_only=(
+            args.allow_expired_standing_auth_readiness_only
         ),
         runtime_envelope_path=args.runtime_envelope_path,
         source_head=args.source_head,
