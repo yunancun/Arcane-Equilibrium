@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from pathlib import Path
 
 from cost_gate_learning_lane.bounded_probe_active_order_wiring_contract import (
@@ -8,6 +9,7 @@ from cost_gate_learning_lane.bounded_probe_active_order_wiring_contract import (
     PATCH_REQUIRED_STATUS,
     READY_STATUS,
     build_bounded_probe_active_order_wiring_contract,
+    main,
     render_markdown,
 )
 
@@ -933,3 +935,94 @@ def test_lineage_requirement_is_mandatory(tmp_path: Path) -> None:
         "source_contract"
     ]["missing_requirements"]
     assert packet["answers"]["order_authority_granted"] is False
+
+
+def test_cli_allows_omitted_authority_readiness_json(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _write_ready_active_order_repo(tmp_path)
+    output = tmp_path / "contract.json"
+    markdown = tmp_path / "contract.md"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "bounded_probe_active_order_wiring_contract.py",
+            "--repo-root",
+            str(tmp_path),
+            "--candidate-side-cell-key",
+            SIDE_CELL,
+            "--candidate-strategy-name",
+            "grid_trading",
+            "--candidate-symbol",
+            "AVAXUSDT",
+            "--candidate-side",
+            "Sell",
+            "--candidate-horizon-minutes",
+            "240",
+            "--json-output",
+            str(output),
+            "--output",
+            str(markdown),
+        ],
+    )
+
+    assert main() == 0
+    packet = json.loads(output.read_text(encoding="utf-8"))
+
+    assert packet["status"] == READY_STATUS
+    assert packet["authority_readiness_packet"]["provided"] is False
+    assert packet["authority_readiness_packet"]["authority_violation"] is None
+    assert packet["answers"]["source_contract_ready_for_e3_bb_review"] is True
+
+
+def test_cli_rejects_supplied_authority_readiness_json_with_authority_signal(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _write_ready_active_order_repo(tmp_path)
+    authority = tmp_path / "authority.json"
+    authority.write_text(
+        json.dumps(
+            {
+                "schema_version": "bounded_demo_probe_authority_patch_readiness_v1",
+                "status": "PLACEMENT_REPAIR_PLAN_REQUIRED",
+                "answers": {
+                    "adapter_enabled_by_runtime_bounded_probe_gate": True,
+                    "order_authority_granted": False,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "contract.json"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "bounded_probe_active_order_wiring_contract.py",
+            "--repo-root",
+            str(tmp_path),
+            "--authority-readiness-json",
+            str(authority),
+            "--candidate-side-cell-key",
+            SIDE_CELL,
+            "--candidate-strategy-name",
+            "grid_trading",
+            "--candidate-symbol",
+            "AVAXUSDT",
+            "--candidate-side",
+            "Sell",
+            "--candidate-horizon-minutes",
+            "240",
+            "--json-output",
+            str(output),
+        ],
+    )
+
+    assert main() == 0
+    packet = json.loads(output.read_text(encoding="utf-8"))
+
+    assert packet["status"] == "AUTHORITY_BOUNDARY_VIOLATION"
+    assert packet["authority_readiness_packet"]["provided"] is True
+    assert packet["authority_readiness_packet"]["authority_violation"] == (
+        "adapter_enabled_by_runtime_bounded_probe_gate"
+    )
+    assert packet["answers"]["source_contract_ready_for_e3_bb_review"] is False

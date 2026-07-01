@@ -1042,9 +1042,14 @@ def main() -> int:
         "outcome_horizon_minutes": args.candidate_horizon_minutes,
     }
     candidate = {key: value for key, value in candidate.items() if value is not None}
+    authority_readiness_packet = (
+        _read_json(args.authority_readiness_json)
+        if args.authority_readiness_json
+        else None
+    )
     packet = build_bounded_probe_active_order_wiring_contract(
         repo_root=args.repo_root,
-        authority_readiness_packet=_read_json(args.authority_readiness_json),
+        authority_readiness_packet=authority_readiness_packet,
         candidate=candidate,
     )
     markdown = render_markdown(packet)
