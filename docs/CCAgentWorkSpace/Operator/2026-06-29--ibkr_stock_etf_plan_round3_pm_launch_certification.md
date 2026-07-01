@@ -4873,3 +4873,35 @@ Verification 已過：
 沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 release execution、沒有 DB/evidence
 writer、沒有 scorecard writer、沒有 broker session、沒有 paper order route、沒有 tiny-live/live
 authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Paper Order Request Authority Lineage Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Paper Order Request Authority Lineage Cross-Wire Guard`。
+
+這個 checkpoint 補強 `StockEtfPaperOrderRequestEnvelopeV1` 的 common surface、method/operation/authority/
+effect matrix、preview hash/order-intent gates、effect lifecycle lineage、submit/cancel/replace shape gates
+與 no-side-effect boundary flags。新增 Rust acceptance 證明 source/lane/broker/environment/request method、
+preview hashes/order intent、effect lifecycle、submit/cancel/replace shape，以及 contact/runtime/secret/order/
+Bybit/live/margin/Python-write boundary flags 都會 fail closed。
+
+保留兩個刻意 aggregate blocker：`LiveReservedDenied` environment 同時產生 `LiveEnvironmentDenied` 與
+`EnvironmentNotPaper`；invalid limit price / replacement price 同時產生 policy mismatch 與 price invalid。
+這些是雙重阻斷，不是 test gap。
+
+Python source-static guard 也納入 `fixtures.rs`，並鎖住 accepted preview/submit/cancel/replace fixtures 的
+StockEtfCash/IBKR/Paper 分離、no-runtime、no-secret、no-Bybit posture。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Paper order request source static pytest：`7 passed`
+- Paper order request Rust acceptance：`17 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 paper order routing、沒有 cancel/replace
+routing、沒有 DB/evidence writer、沒有 scorecard writer、沒有 broker session、沒有 tiny-live/live
+authorization，也沒有改動 Bybit live/demo execution 行為。

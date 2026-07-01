@@ -3903,3 +3903,10 @@
 - Source-static parsing now pins the exact ADR discussion fixture/default blocks so the fixture remains future ADR discussion only, not tiny-live/live approval.
 - Verification passed: tiny-live eligibility source static `7 passed`; tiny-live eligibility Rust acceptance `13 passed`; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, IPC/runtime change, IBKR contact, connector runtime, secret access, release execution, DB/evidence writer, scorecard writer, broker session, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Paper Order Request Authority Lineage Cross-Wire Guard
+
+- PM added test-only/source-static exact-blocker coverage for `StockEtfPaperOrderRequestEnvelopeV1` common surface, method authority/effect, preview/order-intent, effect lifecycle, submit/cancel/replace shape, and no-side-effect flags.
+- Source-static parsing now covers `fixtures.rs` and pins accepted preview/submit/cancel/replace fixtures to StockEtfCash/IBKR/Paper, no-runtime, no-secret, no-Bybit posture.
+- Verification passed: paper order request source static `7 passed`; paper order request Rust acceptance `17 passed`; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, IPC/runtime change, IBKR contact, connector runtime, secret access, paper order routing, cancel/replace routing, DB/evidence writer, scorecard writer, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
