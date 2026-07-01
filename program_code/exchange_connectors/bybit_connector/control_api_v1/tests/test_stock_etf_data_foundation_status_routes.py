@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -15,6 +16,40 @@ from stock_etf_route_fixtures import (
     route_module,
     stock_etf_router,
 )
+
+EXPECTED_DATA_FOUNDATION_CONTRACT_VIOLATIONS = [
+    "ibkr_call_performed",
+    "secret_slot_touched",
+    "order_routed",
+    "bybit_ipc_reused",
+    "phase2_started",
+    "phase3_started",
+    "contract_details_request_started",
+    "reference_data_collection_started",
+    "market_data_ingestion_started",
+    "connector_runtime_started",
+    "db_apply_performed",
+    "evidence_clock_started",
+    "scorecard_writer_started",
+    "asset_lane_mismatch",
+    "broker_mismatch",
+    "environment_mismatch",
+    "instrument_expected_contract_id_mismatch",
+    "reference_expected_contract_id_mismatch",
+    "instrument_ibkr_contact_performed",
+    "instrument_secret_content_serialized",
+    "instrument_bybit_live_not_protected",
+    "instrument_ibkr_live_not_denied",
+    "instrument_margin_short_not_denied",
+    "instrument_options_cfd_not_denied",
+    "instrument_accepted_without_source_proofs",
+    "reference_ibkr_contact_performed",
+    "reference_connector_runtime_started",
+    "reference_secret_content_serialized",
+    "reference_live_or_tiny_live_authorized",
+    "reference_bybit_live_not_protected",
+    "reference_accepted_without_source_proofs",
+]
 
 
 def test_stock_etf_data_foundation_status_returns_200_when_ipc_down(
@@ -190,39 +225,10 @@ def test_stock_etf_data_foundation_status_blocks_contract_violation() -> None:
 
     assert data["data_foundation_status_state"] == "contract_violation_blocked"
     assert data["degraded"] is True
-    assert {
-        "ibkr_call_performed",
-        "secret_slot_touched",
-        "order_routed",
-        "bybit_ipc_reused",
-        "phase2_started",
-        "phase3_started",
-        "contract_details_request_started",
-        "reference_data_collection_started",
-        "market_data_ingestion_started",
-        "connector_runtime_started",
-        "db_apply_performed",
-        "evidence_clock_started",
-        "scorecard_writer_started",
-        "asset_lane_mismatch",
-        "broker_mismatch",
-        "environment_mismatch",
-        "instrument_expected_contract_id_mismatch",
-        "instrument_ibkr_contact_performed",
-        "instrument_secret_content_serialized",
-        "instrument_bybit_live_not_protected",
-        "instrument_ibkr_live_not_denied",
-        "instrument_margin_short_not_denied",
-        "instrument_options_cfd_not_denied",
-        "instrument_accepted_without_source_proofs",
-        "reference_expected_contract_id_mismatch",
-        "reference_ibkr_contact_performed",
-        "reference_connector_runtime_started",
-        "reference_secret_content_serialized",
-        "reference_live_or_tiny_live_authorized",
-        "reference_bybit_live_not_protected",
-        "reference_accepted_without_source_proofs",
-    }.issubset(set(data["contract_violations"]))
+    assert (
+        data["contract_violations"]
+        == EXPECTED_DATA_FOUNDATION_CONTRACT_VIOLATIONS
+    )
     assert data["asset_lane"] == "stock_etf_cash"
     assert data["broker"] == "ibkr"
     assert data["environment"] == "paper"
@@ -250,3 +256,19 @@ def test_stock_etf_data_foundation_status_requires_auth() -> None:
     resp = client.get("/api/v1/stock-etf/data-foundation-status")
 
     assert resp.status_code == 401
+
+
+def test_stock_etf_data_foundation_contract_violation_assertions_stay_exact() -> None:
+    source = Path(__file__).read_text(encoding="utf-8")
+    source_under_test = source.split(
+        "def test_stock_etf_data_foundation_contract_violation_assertions_stay_exact",
+        1,
+    )[0]
+    forbidden_patterns = [
+        'set(data["contract_violations"])',
+        'in data["contract_violations"]',
+        'issubset(set(data["contract_violations"]))',
+    ]
+
+    for pattern in forbidden_patterns:
+        assert pattern not in source_under_test
