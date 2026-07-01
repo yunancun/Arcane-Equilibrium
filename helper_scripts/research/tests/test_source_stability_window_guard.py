@@ -8,6 +8,7 @@ from cost_gate_learning_lane import source_stability_window_guard as mod
 NOW = dt.datetime(2026, 7, 1, 8, 0, tzinfo=dt.timezone.utc)
 PREV = dt.datetime(2026, 7, 1, 7, 58, tzinfo=dt.timezone.utc)
 HEAD = "80d40d2cae881c70ab166a7826e7375eb67addef"
+NOORDER_BLOCKER_ID = "P0-CURRENT-CANDIDATE-NOORDER-REFRESH-CURRENT-HEAD-E3-BB-REQUEST"
 
 
 def _state(**overrides) -> dict:
@@ -41,6 +42,7 @@ def test_first_sample_records_no_approval() -> None:
     )
 
     assert packet["status"] == mod.SAMPLE_STATUS
+    assert packet["active_blocker_id"] == mod.ACTIVE_BLOCKER_ID
     assert packet["answers"]["source_stability_window_ready"] is False
     assert packet["answers"]["approval_granted_by_this_packet"] is False
     assert packet["answers"]["order_submission_performed"] is False
@@ -201,3 +203,28 @@ def test_all_trading_authority_answers_stay_false_when_ready() -> None:
             assert value is True
         else:
             assert value is False
+
+
+def test_active_blocker_id_can_bind_noorder_refresh_scope() -> None:
+    packet = mod.build_source_stability_window_guard(
+        current_source_state=_state(),
+        active_blocker_id=NOORDER_BLOCKER_ID,
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == mod.SAMPLE_STATUS
+    assert packet["active_blocker_id"] == NOORDER_BLOCKER_ID
+    assert packet["answers"]["approval_granted_by_this_packet"] is False
+    assert packet["answers"]["bybit_call_performed"] is False
+    assert packet["max_safe_next_action"] == "RECHECK_SOURCE_AFTER_QUIET_WINDOW_NO_RUNTIME_ACTION"
+    assert f"- Active blocker: `{NOORDER_BLOCKER_ID}`" in mod.render_markdown(packet)
+
+
+def test_blank_active_blocker_id_falls_back_to_compatibility_default() -> None:
+    packet = mod.build_source_stability_window_guard(
+        current_source_state=_state(),
+        active_blocker_id="  ",
+        now_utc=NOW,
+    )
+
+    assert packet["active_blocker_id"] == mod.ACTIVE_BLOCKER_ID

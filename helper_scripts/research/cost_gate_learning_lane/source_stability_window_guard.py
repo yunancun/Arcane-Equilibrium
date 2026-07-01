@@ -138,9 +138,13 @@ def build_source_stability_window_guard(
     min_quiet_seconds: int = 60,
     required_source_head: str | None = None,
     required_origin_main: str | None = None,
+    active_blocker_id: str | None = None,
     now_utc: dt.datetime | None = None,
 ) -> dict[str, Any]:
     now = now_utc or _utc_now()
+    blocker_id = str(active_blocker_id or ACTIVE_BLOCKER_ID).strip()
+    if not blocker_id:
+        blocker_id = ACTIVE_BLOCKER_ID
     previous_source = _previous_source_state(previous_guard)
     blockers: list[str] = []
     if min_quiet_seconds <= 0:
@@ -216,7 +220,7 @@ def build_source_stability_window_guard(
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at_utc": _iso(now),
-        "active_blocker_id": ACTIVE_BLOCKER_ID,
+        "active_blocker_id": blocker_id,
         "status": status,
         "reason": reason,
         "boundary": BOUNDARY,
@@ -287,6 +291,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--min-quiet-seconds", type=int, default=60)
     parser.add_argument("--required-source-head")
     parser.add_argument("--required-origin-main")
+    parser.add_argument(
+        "--active-blocker-id",
+        default=ACTIVE_BLOCKER_ID,
+        help=(
+            "TODO blocker id to bind into the guard artifact; defaults to the "
+            "historical order-capable fresh-window gate for compatibility."
+        ),
+    )
     parser.add_argument("--now-utc")
     parser.add_argument("--json-output", type=Path)
     parser.add_argument("--output", type=Path)
@@ -307,6 +319,7 @@ def main(argv: list[str] | None = None) -> int:
         min_quiet_seconds=args.min_quiet_seconds,
         required_source_head=args.required_source_head,
         required_origin_main=args.required_origin_main,
+        active_blocker_id=args.active_blocker_id,
         now_utc=now,
     )
     if args.json_output:
