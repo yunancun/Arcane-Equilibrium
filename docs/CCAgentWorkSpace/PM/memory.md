@@ -25,6 +25,13 @@
 
 ## 近期記錄
 
+## 2026-07-01 Standing Envelope Source Impact Guard Done
+
+- PM closed `P0-STANDING-DEMO-LOSS-CONTROL-ENVELOPE-SOURCE-STABILITY-CURRENT-HEAD` as source/test/docs `DONE_WITH_CONCERNS` by adding `standing_envelope_source_impact_guard_v1`.
+- The guard compares an approved base ref to current `HEAD`, requires clean source plus `HEAD == origin/main`, and fails closed for protected standing-refresh/runtime/security/config surfaces, unknown changes, binary/submodule ambiguity, missing refs, non-ancestor base, and git errors.
+- READY grants only E3/BB review input for the standing-envelope refresh surface; it grants no stale approval consumption, runtime action, Control API GET, Bybit call, Decision Lease, order, PG, risk/Cost Gate, live/mainnet, fill/PnL, or proof.
+- Verification passed focused/adjacent tests `38`, py_compile, diff-check, E2, and E4. Runtime standing auth remains expired; next blocker is `P0-STANDING-DEMO-LOSS-CONTROL-ENVELOPE-REFRESH-CURRENT-HEAD` with a fresh exact-source or source-impact-guarded E3/BB cycle.
+
 ## 2026-07-01 Stock/ETF IBKR Connector Preview Exact Blocker Guard
 
 - PM tightened the inert Python IBKR connector skeleton preview tests from blocker membership/subset checks to exact ordered blocker vectors across default readiness, connection/account/market-data/contract previews, session/paper attestation, result-import preview, paper lifecycle, fill import, fixtures, and risky config expansion.
