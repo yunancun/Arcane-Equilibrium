@@ -140,6 +140,7 @@ def test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles() -> None
         "Phase2 Policy Source Static Guard",
         "Lane-Scoped IPC Source Static Guard",
         "Stock/ETF Lane Source Static Guard",
+        "IBKR Phase2 Gate Source Static Guard",
     )
     plan_source = IBKR_STOCK_ETF_PLAN.read_text()
     operator_source = IBKR_STOCK_ETF_OPERATOR.read_text()
