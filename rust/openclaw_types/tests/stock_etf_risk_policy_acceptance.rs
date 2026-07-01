@@ -287,6 +287,76 @@ fn risk_policy_rejects_contact_secret_connector_and_bybit_regressions() {
 }
 
 #[test]
+fn risk_policy_rejects_runtime_cash_and_authority_cross_wire_independently() {
+    let mut enabled = StockEtfRiskPolicyV1::accepted_fixture();
+    enabled.enabled = true;
+    assert_single_blocker(enabled, StockEtfRiskPolicyBlocker::RuntimeEnablementClaimed);
+
+    let mut shadow_only = StockEtfRiskPolicyV1::accepted_fixture();
+    shadow_only.shadow_only = false;
+    assert_single_blocker(
+        shadow_only,
+        StockEtfRiskPolicyBlocker::ShadowOnlyPostureMissing,
+    );
+
+    let mut live_environment = StockEtfRiskPolicyV1::accepted_fixture();
+    live_environment.environment = BrokerEnvironment::LiveReservedDenied;
+    assert_single_blocker(
+        live_environment,
+        StockEtfRiskPolicyBlocker::WrongEnvironment,
+    );
+
+    let mut margin = StockEtfRiskPolicyV1::accepted_fixture();
+    margin.allow_margin = true;
+    assert_single_blocker(margin, StockEtfRiskPolicyBlocker::MarginAllowed);
+
+    let mut short = StockEtfRiskPolicyV1::accepted_fixture();
+    short.allow_short = true;
+    assert_single_blocker(short, StockEtfRiskPolicyBlocker::ShortAllowed);
+
+    let mut options = StockEtfRiskPolicyV1::accepted_fixture();
+    options.allow_options = true;
+    assert_single_blocker(options, StockEtfRiskPolicyBlocker::OptionsAllowed);
+
+    let mut cfd = StockEtfRiskPolicyV1::accepted_fixture();
+    cfd.allow_cfd = true;
+    assert_single_blocker(cfd, StockEtfRiskPolicyBlocker::CfdAllowed);
+
+    let mut transfer = StockEtfRiskPolicyV1::accepted_fixture();
+    transfer.allow_transfer = true;
+    assert_single_blocker(transfer, StockEtfRiskPolicyBlocker::TransferAllowed);
+
+    let mut live = StockEtfRiskPolicyV1::accepted_fixture();
+    live.allow_live = true;
+    assert_single_blocker(live, StockEtfRiskPolicyBlocker::LiveAllowed);
+
+    let mut bybit = StockEtfRiskPolicyV1::accepted_fixture();
+    bybit.bybit_live_execution_unchanged = false;
+    assert_single_blocker(
+        bybit,
+        StockEtfRiskPolicyBlocker::BybitLiveExecutionNotProtected,
+    );
+
+    let mut ibkr_contact = StockEtfRiskPolicyV1::accepted_fixture();
+    ibkr_contact.ibkr_contact_performed = true;
+    assert_single_blocker(
+        ibkr_contact,
+        StockEtfRiskPolicyBlocker::IbkrContactPerformed,
+    );
+
+    let mut connector = StockEtfRiskPolicyV1::accepted_fixture();
+    connector.connector_runtime_started = true;
+    assert_single_blocker(
+        connector,
+        StockEtfRiskPolicyBlocker::ConnectorRuntimeStarted,
+    );
+
+    let mut secret = StockEtfRiskPolicyV1::accepted_fixture();
+    secret.secret_content_serialized = true;
+    assert_single_blocker(secret, StockEtfRiskPolicyBlocker::SecretContentSerialized);
+}
+
+#[test]
 fn blocked_template_is_parseable_and_secret_free() {
     let srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -317,4 +387,16 @@ fn blocked_template_is_parseable_and_secret_free() {
 
 fn has(blockers: &[StockEtfRiskPolicyBlocker], blocker: StockEtfRiskPolicyBlocker) -> bool {
     blockers.contains(&blocker)
+}
+
+fn assert_single_blocker(policy: StockEtfRiskPolicyV1, blocker: StockEtfRiskPolicyBlocker) {
+    let verdict = policy.validate();
+
+    assert!(!verdict.accepted);
+    assert_eq!(
+        verdict.blockers,
+        vec![blocker],
+        "expected only {blocker:?}; blockers: {:?}",
+        verdict.blockers
+    );
 }

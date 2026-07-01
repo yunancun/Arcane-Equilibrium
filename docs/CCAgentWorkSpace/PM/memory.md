@@ -3698,3 +3698,11 @@
 - Source-static guard now rejects hardcoded non-paper-shadow, profitability claim, live/tiny-live authority, Bybit changed, IBKR live not denied, IBKR contact, and secret serialization in the accepted fixture, and pins default fail-closed posture.
 - Verification passed: targeted rustfmt check PASS; strategy hypothesis source static `10 passed`; strategy hypothesis Rust acceptance `8 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
 - Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, strategy execution, scorecard writer, DB/evidence writer, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Risk Policy Runtime Authority Cross-Wire Guard
+
+- PM added test-only/source-static coverage for `stock_etf_risk_policy` dormant paper/shadow risk posture.
+- Acceptance now independently rejects runtime enablement, non-shadow posture, live environment, margin/short/options/CFD/transfer/live allowance, Bybit-live protection loss, IBKR contact, connector runtime, and secret serialization via exact single blockers.
+- Source-static guard now rejects hardcoded runtime enabled, non-shadow, live environment, margin/short/options/CFD/transfer/live allowance, Bybit changed, IBKR contact, connector runtime, and secret serialization in the accepted fixture or source-config mapper, and pins default fail-closed posture.
+- Verification passed: targeted rustfmt check PASS; risk policy source static `6 passed`; risk policy Rust acceptance `9 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
+- Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, risk runtime enablement, order execution, DB/evidence writer, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.

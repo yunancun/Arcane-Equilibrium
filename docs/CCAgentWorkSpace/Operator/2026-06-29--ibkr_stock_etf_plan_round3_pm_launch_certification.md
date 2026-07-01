@@ -4104,3 +4104,33 @@ Verification 已過：
 沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 strategy execution、沒有
 scorecard writer、沒有 DB/evidence writer、沒有 paper order route、沒有 tiny-live/live authorization，
 也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Risk Policy Runtime Authority Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Risk Policy Runtime Authority Cross-Wire Guard`。
+
+這個 checkpoint 補強 `stock_etf_risk_policy` 的 dormant paper/shadow posture、cash-only controls、
+live-denial controls、Bybit unchanged、IBKR contact、connector runtime、secret serialization
+cross-wire coverage。新增 Rust acceptance 證明 `enabled=true`、`shadow_only=false`、
+`environment=LiveReservedDenied`、margin/short/options/CFD/transfer/live allowance、Bybit changed、
+IBKR contact、connector runtime、secret serialization 都會各自只產生單一對應 blocker。
+
+同時新增 Python source-static fixture / source-config mapper body guard，禁止 runtime enabled、
+non-shadow、live environment、margin/short/options/CFD/transfer/live allowance、Bybit changed、
+IBKR contact、connector runtime、secret serialization 被 hardcoded 到 accepted fixture 或 source-config
+mapper，並鎖住 default fail-closed posture。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Risk policy source static pytest：`6 passed`
+- Risk policy Rust acceptance：`9 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 risk runtime enablement、沒有
+order execution、沒有 DB/evidence writer、沒有 paper order route、沒有 tiny-live/live authorization，
+也沒有改動 Bybit live/demo execution 行為。
