@@ -87,6 +87,8 @@ paper order、沒有 DB apply、沒有 evidence clock、沒有 Linux runtime syn
 
 ## 2026-06-30 Operator Update — GUI Split Hygiene
 
+Trace title: `Stock/ETF GUI split`.
+
 `authorization-status` 完成後，我把 Stock/ETF GUI 做了純拆檔：原本
 `tab-stock-etf.html` 已到 2225 行，超過 repo 2000 行硬上限；現在 HTML 是 341 行，
 主要 JS 移到 `tab-stock-etf.js`，1883 行。
@@ -419,6 +421,8 @@ writer、沒有 Linux runtime sync/restart，也沒有改動 Bybit live executio
 
 ## 2026-06-30 Operator Update — Paper Lifecycle State Machine
 
+Trace title: `Paper Lifecycle State-Machine Contract Hardening`.
+
 本 session 已完成下一個 source-only checkpoint：
 `ibkr_paper_order_lifecycle_v1` / `broker_lifecycle_event_log_v1`
 state-machine contract hardening。
@@ -451,6 +455,8 @@ replace、沒有 fill import、沒有 DB apply、沒有 evidence clock、沒有 
 writer、沒有 Linux runtime sync/restart，也沒有改動 Bybit live execution 行為。
 
 ## 2026-06-30 Operator Update — Paper Status Lifecycle Surface
+
+Trace title: `Paper Status Lifecycle Surface Hardening`.
 
 本 session 已完成下一個 source-only checkpoint：paper-status lifecycle surface
 hardening。
@@ -3581,3 +3587,30 @@ Verification 已過：
 邊界不變：沒有 index wording change、沒有 IBKR contact、沒有 connector runtime、沒有 SDK
 import、沒有 secret access、沒有 read-only probe execution、沒有 result import、沒有 DB apply、
 沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Dynamic Checkpoint Trace Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF Dynamic Checkpoint Trace Guard`。
+
+這個 guard 把 PM main plan / Operator summary trace title 檢查改成動態解析。以後主開發安排新增
+`PM session ... checkpoint` 標題時，測試會自動要求 Operator round3 summary 也能搜尋到同一個
+checkpoint title，不再依賴手寫長清單。
+
+本次也補上三個歷史 trace alias：`Stock/ETF GUI split`、
+`Paper Lifecycle State-Machine Contract Hardening`、
+`Paper Status Lifecycle Surface Hardening`。這三段內容本來已在 Operator summary 內，只是 heading
+和主計畫 title 不完全一致。
+
+Verification 已過：
+
+- Dynamic docs trace guard py_compile：PASS
+- Dynamic docs trace pytest：`2 passed, 5 deselected`
+- Full docs README/index structure pytest：known pre-existing docs README index drift remains
+  (4 failures outside the Stock/ETF trace guard)
+- Diff check：PASS
+
+邊界不變：沒有 production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 read-only probe execution、
+沒有 result import、沒有 DB/evidence writer、沒有 paper order route、沒有 tiny-live/live authorization，
+也沒有改動 Bybit live/demo execution 行為。
