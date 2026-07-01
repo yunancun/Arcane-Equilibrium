@@ -3807,3 +3807,11 @@
 - Source-static guard now parses source-template/default blocks and pins safe `source_template()` plus fail-closed `Default` posture.
 - Verification passed: targeted rustfmt check PASS; Phase2 policy source static `4 passed`; Phase2 policy Rust acceptance `13 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
 - Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, SDK import, connector runtime, secret access, redaction/rate-limit/audit runtime, broker routing, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Phase2 Gate Artifact Metadata Cross-Wire Guard
+
+- PM added test-only/source-static coverage for immutable Phase 2 gate artifact metadata, reviewer, seal, hash, and default runtime posture.
+- Acceptance now independently rejects missing artifact id, ADR/AMD/source identity, created-at, immutable storage path, PM/Operator reviewer, sealed flag, raw artifact hash, and redacted summary hash via exact single blockers.
+- Source-static guard now parses the default block and pins empty/unsealed/no-reviewer/no-runtime/no-secret/topology-default/hash-empty fail-closed posture.
+- Verification passed: targeted rustfmt check PASS; Phase2 artifact source static `5 passed`; Phase2 artifact Rust acceptance `9 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
+- Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, SDK import, connector runtime, secret access, PASS artifact materialization, broker session, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.

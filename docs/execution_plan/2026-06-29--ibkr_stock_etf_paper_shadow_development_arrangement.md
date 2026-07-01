@@ -7154,3 +7154,39 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不啟動 redaction/rate-limit/audit runtime、
 不做 broker routing、不做 paper order route、不做 Linux runtime sync/restart、不授權 tiny-live/live
 或任何 Bybit behavior change。
+
+## 171. 2026-07-01 PM session source checkpoint：IBKR Phase2 Gate Artifact Metadata Cross-Wire Guard
+
+本 checkpoint 補強 `ibkr_phase2_artifact` 中 immutable Phase 2 gate artifact 的 metadata、reviewer、
+seal、hash 與 default runtime posture coverage。這不是 Rust production behavior change、不是 IBKR
+contact、不是 connector runtime、不是 artifact materialization、不是 secret lookup、不是 broker session、
+不是 paper order route、不是 tiny-live/live gate；只把 gate artifact 的 sealed-review metadata、
+source/ADR/AMD identity、immutable storage、hash lineage、default fail-closed posture 變成 exact-blocker
+acceptance test 與 source-static guard。
+
+已完成：
+
+- 在 `ibkr_phase2_artifact_acceptance.rs` 新增
+  `artifact_rejects_each_metadata_seal_and_hash_gap_independently`。
+- Acceptance 證明 artifact id、ADR、AMD、source commit、created-at、immutable storage path、PM reviewer、
+  Operator reviewer、sealed flag、raw artifact hash、redacted summary hash 缺失或錯誤都會各自只產生
+  單一對應 blocker。
+- 保留既有 runtime/gate mismatch aggregate coverage；不把會同時拒絕 external gate 的 runtime drift
+  誤標成 single-blocker。
+- 在 `test_ibkr_phase2_artifact_source_static.py` 新增 default block parser，鎖住 contract/source default
+  empty、reviewer empty、sealed false、gate/default policy flags false、secret/topology default、hash empty、
+  supersedes none 的 fail-closed posture。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Phase2 artifact source static pytest：`5 passed`。
+- Phase2 artifact Rust acceptance：`9 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不物化 PASS artifact、不做 broker routing、
+不做 paper order route、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior
+change。
