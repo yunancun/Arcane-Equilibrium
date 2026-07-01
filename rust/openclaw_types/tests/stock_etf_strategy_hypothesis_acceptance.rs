@@ -261,6 +261,289 @@ fn strategy_hypothesis_rejects_bad_limits_controls_and_authority_claims() {
 }
 
 #[test]
+fn strategy_hypothesis_rejects_authority_profitability_and_secret_cross_wire_independently() {
+    let paper_shadow = StockEtfStrategyHypothesisV1 {
+        paper_shadow_only: false,
+        ..StockEtfStrategyHypothesisV1::accepted_fixture()
+    };
+    let paper_shadow_blockers = paper_shadow.validate().blockers;
+    assert_eq!(
+        paper_shadow_blockers.len(),
+        1,
+        "unexpected blockers: {:?}",
+        paper_shadow_blockers
+    );
+    assert!(has(
+        &paper_shadow_blockers,
+        StockEtfStrategyHypothesisBlocker::PaperShadowOnlyMissing
+    ));
+    assert!(lacks(
+        &paper_shadow_blockers,
+        StockEtfStrategyHypothesisBlocker::PrematureProfitabilityClaim
+    ));
+    assert!(lacks(
+        &paper_shadow_blockers,
+        StockEtfStrategyHypothesisBlocker::LiveOrTinyLiveAuthorityClaimed
+    ));
+    assert!(lacks(
+        &paper_shadow_blockers,
+        StockEtfStrategyHypothesisBlocker::BybitLiveExecutionNotProtected
+    ));
+    assert!(lacks(
+        &paper_shadow_blockers,
+        StockEtfStrategyHypothesisBlocker::IbkrLiveNotDenied
+    ));
+    assert!(lacks(
+        &paper_shadow_blockers,
+        StockEtfStrategyHypothesisBlocker::IbkrContactPerformed
+    ));
+    assert!(lacks(
+        &paper_shadow_blockers,
+        StockEtfStrategyHypothesisBlocker::SecretContentSerialized
+    ));
+
+    let profitability = StockEtfStrategyHypothesisV1 {
+        profitability_claimed: true,
+        ..StockEtfStrategyHypothesisV1::accepted_fixture()
+    };
+    let profitability_blockers = profitability.validate().blockers;
+    assert_eq!(
+        profitability_blockers.len(),
+        1,
+        "unexpected blockers: {:?}",
+        profitability_blockers
+    );
+    assert!(has(
+        &profitability_blockers,
+        StockEtfStrategyHypothesisBlocker::PrematureProfitabilityClaim
+    ));
+    assert!(lacks(
+        &profitability_blockers,
+        StockEtfStrategyHypothesisBlocker::PaperShadowOnlyMissing
+    ));
+    assert!(lacks(
+        &profitability_blockers,
+        StockEtfStrategyHypothesisBlocker::LiveOrTinyLiveAuthorityClaimed
+    ));
+    assert!(lacks(
+        &profitability_blockers,
+        StockEtfStrategyHypothesisBlocker::BybitLiveExecutionNotProtected
+    ));
+    assert!(lacks(
+        &profitability_blockers,
+        StockEtfStrategyHypothesisBlocker::IbkrLiveNotDenied
+    ));
+    assert!(lacks(
+        &profitability_blockers,
+        StockEtfStrategyHypothesisBlocker::IbkrContactPerformed
+    ));
+    assert!(lacks(
+        &profitability_blockers,
+        StockEtfStrategyHypothesisBlocker::SecretContentSerialized
+    ));
+
+    let live_authority = StockEtfStrategyHypothesisV1 {
+        live_or_tiny_live_authority_claimed: true,
+        ..StockEtfStrategyHypothesisV1::accepted_fixture()
+    };
+    let live_authority_blockers = live_authority.validate().blockers;
+    assert_eq!(
+        live_authority_blockers.len(),
+        1,
+        "unexpected blockers: {:?}",
+        live_authority_blockers
+    );
+    assert!(has(
+        &live_authority_blockers,
+        StockEtfStrategyHypothesisBlocker::LiveOrTinyLiveAuthorityClaimed
+    ));
+    assert!(lacks(
+        &live_authority_blockers,
+        StockEtfStrategyHypothesisBlocker::PaperShadowOnlyMissing
+    ));
+    assert!(lacks(
+        &live_authority_blockers,
+        StockEtfStrategyHypothesisBlocker::PrematureProfitabilityClaim
+    ));
+    assert!(lacks(
+        &live_authority_blockers,
+        StockEtfStrategyHypothesisBlocker::BybitLiveExecutionNotProtected
+    ));
+    assert!(lacks(
+        &live_authority_blockers,
+        StockEtfStrategyHypothesisBlocker::IbkrLiveNotDenied
+    ));
+    assert!(lacks(
+        &live_authority_blockers,
+        StockEtfStrategyHypothesisBlocker::IbkrContactPerformed
+    ));
+    assert!(lacks(
+        &live_authority_blockers,
+        StockEtfStrategyHypothesisBlocker::SecretContentSerialized
+    ));
+
+    let bybit = StockEtfStrategyHypothesisV1 {
+        bybit_live_execution_unchanged: false,
+        ..StockEtfStrategyHypothesisV1::accepted_fixture()
+    };
+    let bybit_blockers = bybit.validate().blockers;
+    assert_eq!(
+        bybit_blockers.len(),
+        1,
+        "unexpected blockers: {:?}",
+        bybit_blockers
+    );
+    assert!(has(
+        &bybit_blockers,
+        StockEtfStrategyHypothesisBlocker::BybitLiveExecutionNotProtected
+    ));
+    assert!(lacks(
+        &bybit_blockers,
+        StockEtfStrategyHypothesisBlocker::PaperShadowOnlyMissing
+    ));
+    assert!(lacks(
+        &bybit_blockers,
+        StockEtfStrategyHypothesisBlocker::PrematureProfitabilityClaim
+    ));
+    assert!(lacks(
+        &bybit_blockers,
+        StockEtfStrategyHypothesisBlocker::LiveOrTinyLiveAuthorityClaimed
+    ));
+    assert!(lacks(
+        &bybit_blockers,
+        StockEtfStrategyHypothesisBlocker::IbkrLiveNotDenied
+    ));
+    assert!(lacks(
+        &bybit_blockers,
+        StockEtfStrategyHypothesisBlocker::IbkrContactPerformed
+    ));
+    assert!(lacks(
+        &bybit_blockers,
+        StockEtfStrategyHypothesisBlocker::SecretContentSerialized
+    ));
+
+    let ibkr_live = StockEtfStrategyHypothesisV1 {
+        ibkr_live_denied: false,
+        ..StockEtfStrategyHypothesisV1::accepted_fixture()
+    };
+    let ibkr_live_blockers = ibkr_live.validate().blockers;
+    assert_eq!(
+        ibkr_live_blockers.len(),
+        1,
+        "unexpected blockers: {:?}",
+        ibkr_live_blockers
+    );
+    assert!(has(
+        &ibkr_live_blockers,
+        StockEtfStrategyHypothesisBlocker::IbkrLiveNotDenied
+    ));
+    assert!(lacks(
+        &ibkr_live_blockers,
+        StockEtfStrategyHypothesisBlocker::PaperShadowOnlyMissing
+    ));
+    assert!(lacks(
+        &ibkr_live_blockers,
+        StockEtfStrategyHypothesisBlocker::PrematureProfitabilityClaim
+    ));
+    assert!(lacks(
+        &ibkr_live_blockers,
+        StockEtfStrategyHypothesisBlocker::LiveOrTinyLiveAuthorityClaimed
+    ));
+    assert!(lacks(
+        &ibkr_live_blockers,
+        StockEtfStrategyHypothesisBlocker::BybitLiveExecutionNotProtected
+    ));
+    assert!(lacks(
+        &ibkr_live_blockers,
+        StockEtfStrategyHypothesisBlocker::IbkrContactPerformed
+    ));
+    assert!(lacks(
+        &ibkr_live_blockers,
+        StockEtfStrategyHypothesisBlocker::SecretContentSerialized
+    ));
+
+    let ibkr_contact = StockEtfStrategyHypothesisV1 {
+        ibkr_contact_performed: true,
+        ..StockEtfStrategyHypothesisV1::accepted_fixture()
+    };
+    let ibkr_contact_blockers = ibkr_contact.validate().blockers;
+    assert_eq!(
+        ibkr_contact_blockers.len(),
+        1,
+        "unexpected blockers: {:?}",
+        ibkr_contact_blockers
+    );
+    assert!(has(
+        &ibkr_contact_blockers,
+        StockEtfStrategyHypothesisBlocker::IbkrContactPerformed
+    ));
+    assert!(lacks(
+        &ibkr_contact_blockers,
+        StockEtfStrategyHypothesisBlocker::PaperShadowOnlyMissing
+    ));
+    assert!(lacks(
+        &ibkr_contact_blockers,
+        StockEtfStrategyHypothesisBlocker::PrematureProfitabilityClaim
+    ));
+    assert!(lacks(
+        &ibkr_contact_blockers,
+        StockEtfStrategyHypothesisBlocker::LiveOrTinyLiveAuthorityClaimed
+    ));
+    assert!(lacks(
+        &ibkr_contact_blockers,
+        StockEtfStrategyHypothesisBlocker::BybitLiveExecutionNotProtected
+    ));
+    assert!(lacks(
+        &ibkr_contact_blockers,
+        StockEtfStrategyHypothesisBlocker::IbkrLiveNotDenied
+    ));
+    assert!(lacks(
+        &ibkr_contact_blockers,
+        StockEtfStrategyHypothesisBlocker::SecretContentSerialized
+    ));
+
+    let secret = StockEtfStrategyHypothesisV1 {
+        secret_content_serialized: true,
+        ..StockEtfStrategyHypothesisV1::accepted_fixture()
+    };
+    let secret_blockers = secret.validate().blockers;
+    assert_eq!(
+        secret_blockers.len(),
+        1,
+        "unexpected blockers: {:?}",
+        secret_blockers
+    );
+    assert!(has(
+        &secret_blockers,
+        StockEtfStrategyHypothesisBlocker::SecretContentSerialized
+    ));
+    assert!(lacks(
+        &secret_blockers,
+        StockEtfStrategyHypothesisBlocker::PaperShadowOnlyMissing
+    ));
+    assert!(lacks(
+        &secret_blockers,
+        StockEtfStrategyHypothesisBlocker::PrematureProfitabilityClaim
+    ));
+    assert!(lacks(
+        &secret_blockers,
+        StockEtfStrategyHypothesisBlocker::LiveOrTinyLiveAuthorityClaimed
+    ));
+    assert!(lacks(
+        &secret_blockers,
+        StockEtfStrategyHypothesisBlocker::BybitLiveExecutionNotProtected
+    ));
+    assert!(lacks(
+        &secret_blockers,
+        StockEtfStrategyHypothesisBlocker::IbkrLiveNotDenied
+    ));
+    assert!(lacks(
+        &secret_blockers,
+        StockEtfStrategyHypothesisBlocker::IbkrContactPerformed
+    ));
+}
+
+#[test]
 fn blocked_template_is_parseable_and_secret_free() {
     let srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -294,4 +577,11 @@ fn has(
     blocker: StockEtfStrategyHypothesisBlocker,
 ) -> bool {
     blockers.contains(&blocker)
+}
+
+fn lacks(
+    blockers: &[StockEtfStrategyHypothesisBlocker],
+    blocker: StockEtfStrategyHypothesisBlocker,
+) -> bool {
+    !blockers.contains(&blocker)
 }

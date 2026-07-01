@@ -277,6 +277,40 @@ def test_stock_etf_strategy_hypothesis_source_keeps_accepted_fixture_boundary() 
     assert "secret_content_serialized: false" in source
 
 
+def test_stock_etf_strategy_hypothesis_fixture_excludes_live_profit_secret_and_bybit_crosswire() -> None:
+    source = _source()
+    fixture = source.split("pub fn accepted_fixture() -> Self", 1)[1].split(
+        "pub fn validate(&self)",
+        1,
+    )[0]
+    default_impl = source.split("impl Default for StockEtfStrategyHypothesisV1", 1)[1].split(
+        "impl StockEtfStrategyHypothesisV1",
+        1,
+    )[0]
+
+    for forbidden in (
+        "paper_shadow_only: false",
+        "profitability_claimed: true",
+        "live_or_tiny_live_authority_claimed: true",
+        "bybit_live_execution_unchanged: false",
+        "ibkr_live_denied: false",
+        "ibkr_contact_performed: true",
+        "secret_content_serialized: true",
+    ):
+        assert forbidden not in fixture
+
+    for fail_closed in (
+        "paper_shadow_only: false",
+        "profitability_claimed: false",
+        "live_or_tiny_live_authority_claimed: false",
+        "bybit_live_execution_unchanged: false",
+        "ibkr_live_denied: false",
+        "ibkr_contact_performed: false",
+        "secret_content_serialized: false",
+    ):
+        assert fail_closed in default_impl
+
+
 def test_stock_etf_strategy_hypothesis_source_keeps_identity_and_strategy_matrix() -> None:
     source = _source()
 

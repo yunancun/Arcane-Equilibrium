@@ -4074,3 +4074,33 @@ Verification 已過：
 沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 read-only probe execution、
 沒有 result import、沒有 DB/evidence writer、沒有 paper order route、沒有 tiny-live/live authorization，
 也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Strategy Hypothesis Authority Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Strategy Hypothesis Authority Cross-Wire Guard`。
+
+這個 checkpoint 補強 `stock_etf_strategy_hypothesis` 的 pre-registration / paper-shadow only /
+profitability claim / live authority / Bybit unchanged / IBKR live denied / secret serialization
+cross-wire coverage。新增 Rust acceptance 證明 `paper_shadow_only=false`、`profitability_claimed=true`、
+`live_or_tiny_live_authority_claimed=true`、`bybit_live_execution_unchanged=false`、
+`ibkr_live_denied=false`、`ibkr_contact_performed=true`、`secret_content_serialized=true` 都會產生各自
+blocker，且不誤報其他 strategy authority blockers。
+
+同時新增 Python source-static fixture body guard，禁止 non-paper-shadow、profitability claim、
+live/tiny-live authority、Bybit changed、IBKR live not denied、IBKR contact、secret serialization 被
+hardcoded 到 accepted fixture，並鎖住 default fail-closed posture。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Strategy hypothesis source static pytest：`10 passed`
+- Strategy hypothesis Rust acceptance：`8 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 strategy execution、沒有
+scorecard writer、沒有 DB/evidence writer、沒有 paper order route、沒有 tiny-live/live authorization，
+也沒有改動 Bybit live/demo execution 行為。
