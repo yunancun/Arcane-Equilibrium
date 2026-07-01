@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-01 Order-Capable Source-Stable Packet Invalidated
+
+- PM produced a clean `2ee1e187` source-stability READY artifact and blocked packet sha `db1b8552...`, but stopped before E3/BB request generation because source advanced to `87ce8fbb...`.
+- State transition is `BLOCKED_BY_RUNTIME`; do not consume the `2ee1e187` ready/contract/packet chain. Next run must start from `87ce8fbb...` or newer with a fresh quiet window and exact E3/BB review.
+- No Phase A/B, public quote, Decision Lease, private/order endpoint, order, runtime mutation, Cost Gate change, live/mainnet, fill/PnL, or proof occurred.
+
 ## 2026-07-01 Downstream No-Auth Refresh Runtime Blocker
 
 - PM attempted the corrected E3-approved no-auth refresh for `grid_trading|ETHUSDT|Buy`; manifest sha `7c502cc...` is `BLOCKED_BY_RUNTIME`.
