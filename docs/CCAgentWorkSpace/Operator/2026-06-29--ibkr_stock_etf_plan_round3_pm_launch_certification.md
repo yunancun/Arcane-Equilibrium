@@ -6098,6 +6098,31 @@ socket/client construction、沒有 broker session、沒有 read-only probe exec
 paper order routing/cancel/replace execution、沒有 DB/evidence/scorecard writer、沒有 evidence clock、沒有
 paper-shadow launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
 
+## 2026-07-01 Operator Update — Stock/ETF IBKR Connector Config Exact Blocker Guard
+
+本 session 已完成下一個 test-only checkpoint：
+`Stock/ETF IBKR Connector Config Exact Blocker Guard`。
+
+這個 checkpoint 補強 inert IBKR connector skeleton 的 config blocker exact coverage。
+
+現在 `IbkrReadOnlyEndpointConfig.validate_source_boundary()` 的 risky runtime/live/secret/Bybit-path blockers
+使用完整 ordered vector 驗證；同檔也新增 source guard，防止之後退回 loose set/subset 檢查。
+
+Verification 已過：
+
+- IBKR connector skeleton focused pytest：`12 passed`
+- Full Stock/ETF Python route/static pytest：`144 passed`
+- `python3 -m py_compile`：PASS
+- Connector config no-loose blocker assertion scan：PASS
+- Diff check：PASS
+
+邊界不變：沒有 connector production code change、沒有 FastAPI route behavior change、沒有 GUI/Rust IPC behavior
+change、沒有 IBKR contact、沒有 SDK import、沒有 secret access/serialization、沒有 connector runtime、沒有
+socket/client construction、沒有 broker session、沒有 read-only probe execution、沒有 paper order routing/cancel/
+replace execution、沒有 release launch、沒有 DB/evidence writer、沒有 scorecard writer、沒有 evidence clock、沒有
+destructive DB cleanup、沒有 paper-shadow launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo
+execution 行為。
+
 ## 2026-07-01 Operator Update — Stock/ETF Launch Route Exact Contract-Violation Guard
 
 本 session 已完成下一個 test-only checkpoint：
