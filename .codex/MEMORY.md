@@ -1266,3 +1266,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only structure guard for `ibkr_phase2_runtime.rs`, pinning secret-slot and API-session-topology contract IDs, secret posture/gateway mode/verdict/blocker types, hashed paper slot, absent live slot, owner-only permission, env fallback denial, and loopback paper gateway topology.
 - The guard rejects env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens plus secret material access tokens, keeping the file as evidence-shape validation rather than a secret reader or gateway starter.
 - Verification passed: new guard `4 passed`; Phase2 runtime acceptance `7 passed`; full `cargo test -p openclaw_types` PASS. This grants no secret read, gateway/TWS start, API topology probe, IBKR contact, connector runtime, paper order, DB/evidence/scorecard writer, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 IBKR Phase2 Artifact Source Static Guard
+
+- PM added a source-only structure guard for `ibkr_phase2_artifact.rs`, pinning artifact fields, blocker/verdict surface, PM/Operator reviewer checks, policy-flag cross-checks, secret-slot/API-topology runtime contract cross-checks, fail-closed defaults, and retroactive call denial.
+- The guard rejects env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens plus secret material access tokens, keeping the file as a PASS-artifact validator rather than artifact materialization or IBKR contact.
+- Verification passed: new guard `4 passed`; Phase2 artifact acceptance `8 passed`; full `cargo test -p openclaw_types` PASS. This grants no external-surface PASS, artifact seal, IBKR contact, connector runtime, secret access, paper order, DB/evidence/scorecard writer, tiny-live/live, or Bybit behavior change.

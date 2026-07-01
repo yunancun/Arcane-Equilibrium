@@ -2524,3 +2524,28 @@ Verification 已過：
 access/creation、沒有 connector runtime、沒有 read probe execution、沒有 result
 import、沒有 DB/evidence/scorecard writer、沒有 paper order/cancel/replace、沒有
 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — IBKR Phase2 Artifact Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`IBKR Phase2 Artifact Source Static Guard`。
+
+這個 guard 鎖住 `ibkr_phase2_artifact.rs` 的 Phase 2 PASS artifact source hygiene：
+artifact fields、verdict/blocker enum、hash helper、PM/Operator reviewer check、
+policy-flag cross-check、secret-slot/API-topology runtime contract cross-check 必須保留。
+
+Guard 同時要求 artifact default 保持 fail-closed，`ibkr_contact_allowed` 只能由
+`blockers.is_empty()` 得出，且 retroactive `ibkr_call_performed` 必須被拒絕。source
+不得出現 env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens 或
+secret material access tokens。
+
+Verification 已過：
+
+- New structure guard pytest：`4 passed`
+- Focused Phase2 artifact acceptance：`8 passed`
+- Full `cargo test -p openclaw_types`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
+access/creation、沒有 connector runtime、沒有 read probe execution、沒有 result
+import、沒有 DB/evidence/scorecard writer、沒有 paper order/cancel/replace、沒有
+tiny-live/live authority，也沒有改動 Bybit live execution 行為。

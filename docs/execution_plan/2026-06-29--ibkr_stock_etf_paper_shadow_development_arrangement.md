@@ -4542,3 +4542,38 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper
 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
 clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
 Bybit behavior change。
+
+## 104. 2026-07-01 PM session source checkpoint：IBKR Phase2 Artifact Source Static Guard
+
+本 checkpoint 為 `ibkr_phase2_artifact.rs` 補上 source-only structure guard。這不是
+external-surface gate PASS、不是 immutable artifact materialization、不是第一次
+IBKR contact；只把 Phase 2 PASS 前必須聚合的 gate、policy、secret-slot、API
+topology 與 PM/Operator seal/hash metadata source invariant 機器化。
+
+已完成：
+
+- 新增 `tests/structure/test_ibkr_phase2_artifact_source_static.py`。
+- Guard 鎖住 `ibkr_phase2_artifact.rs` 低於 800 行 governance cap。
+- Guard 要求 artifact fields、verdict/blocker enum、`is_sha256_hex`、PM/Operator
+  reviewer check、policy-flag cross-check、runtime contract cross-check 保持在 source
+  中。
+- Guard 要求 artifact default 仍 fail-closed：empty contract/source/artifact fields、
+  default blocked external gate、default secret-slot contract、default API topology。
+- Guard 要求 validate 仍以 `blockers.is_empty()` 作為 `ibkr_contact_allowed` 的唯一
+  source verdict，並拒絕 retroactive `ibkr_call_performed`。
+- Guard 禁止 env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens
+  與 secret material access tokens。
+
+驗證：
+
+- New structure guard py_compile：PASS。
+- Focused structure guard pytest：`4 passed`。
+- Focused Phase2 artifact acceptance：`8 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
+cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
+clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
+Bybit behavior change。
