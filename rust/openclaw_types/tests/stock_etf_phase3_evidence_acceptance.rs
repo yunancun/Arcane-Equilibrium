@@ -581,6 +581,61 @@ fn dq_manifest_rejects_runtime_side_effect_claims() {
 }
 
 #[test]
+fn dq_manifest_rejects_runtime_writer_secret_and_authority_cross_wire_independently() {
+    let mut bybit = StockEtfDailyDqManifestV1::pass_fixture();
+    bybit.bybit_live_execution_unchanged = false;
+    assert_single_dq_blocker(bybit, StockEtfPhase3Blocker::BybitLiveExecutionNotProtected);
+
+    let mut ibkr_contact = StockEtfDailyDqManifestV1::pass_fixture();
+    ibkr_contact.ibkr_contact_performed = true;
+    assert_single_dq_blocker(ibkr_contact, StockEtfPhase3Blocker::IbkrContactPerformed);
+
+    let mut connector = StockEtfDailyDqManifestV1::pass_fixture();
+    connector.connector_runtime_started = true;
+    assert_single_dq_blocker(connector, StockEtfPhase3Blocker::ConnectorRuntimeStarted);
+
+    let mut ingestion = StockEtfDailyDqManifestV1::pass_fixture();
+    ingestion.market_data_ingestion_started = true;
+    assert_single_dq_blocker(
+        ingestion,
+        StockEtfPhase3Blocker::DqManifestMarketDataIngestionStarted,
+    );
+
+    let mut dq_writer = StockEtfDailyDqManifestV1::pass_fixture();
+    dq_writer.dq_writer_started = true;
+    assert_single_dq_blocker(dq_writer, StockEtfPhase3Blocker::DqManifestWriterStarted);
+
+    let mut evidence_clock = StockEtfDailyDqManifestV1::pass_fixture();
+    evidence_clock.evidence_clock_started = true;
+    assert_single_dq_blocker(
+        evidence_clock,
+        StockEtfPhase3Blocker::DqManifestEvidenceClockStarted,
+    );
+
+    let mut scorecard_writer = StockEtfDailyDqManifestV1::pass_fixture();
+    scorecard_writer.scorecard_writer_started = true;
+    assert_single_dq_blocker(
+        scorecard_writer,
+        StockEtfPhase3Blocker::ScorecardWriterStarted,
+    );
+
+    let mut db_apply = StockEtfDailyDqManifestV1::pass_fixture();
+    db_apply.db_apply_performed = true;
+    assert_single_dq_blocker(db_apply, StockEtfPhase3Blocker::DbApplyPerformed);
+
+    let mut secret = StockEtfDailyDqManifestV1::pass_fixture();
+    secret.secret_content_serialized = true;
+    assert_single_dq_blocker(secret, StockEtfPhase3Blocker::SecretContentSerialized);
+
+    let mut live_authority = StockEtfDailyDqManifestV1::pass_fixture();
+    live_authority.live_or_tiny_live_authorized = true;
+    assert_single_dq_blocker(
+        live_authority,
+        StockEtfPhase3Blocker::LiveOrTinyLiveAuthorized,
+    );
+}
+
+#[test]
 fn phase3_evidence_template_is_default_blocked_and_secret_free() {
     let srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -777,6 +832,18 @@ fn phase3_evidence_template_is_default_blocked_and_secret_free() {
 
 fn assert_single_phase3_blocker(collector: StockEtfCollectorRunV1, blocker: StockEtfPhase3Blocker) {
     let verdict = collector.validate();
+
+    assert!(!verdict.accepted);
+    assert_eq!(
+        verdict.blockers,
+        vec![blocker],
+        "expected only {blocker:?}; blockers: {:?}",
+        verdict.blockers
+    );
+}
+
+fn assert_single_dq_blocker(manifest: StockEtfDailyDqManifestV1, blocker: StockEtfPhase3Blocker) {
+    let verdict = manifest.validates_shape();
 
     assert!(!verdict.accepted);
     assert_eq!(
