@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-01 Stock/ETF GUI Lane Endpoint Exact Blocker Guard
+
+- PM tightened `StockEtfGuiLaneContractV1` read-only endpoint aggregate acceptance to an exact ordered blocker vector for all Stock/ETF GUI status endpoints and GET-only flags.
+- Existing source-static guard already pins GUI lane validator blocker emit order; this checkpoint removes the last broad `blockers.contains` membership coverage from Stock/ETF acceptance/static blocker scans.
+- Verification passed: global loose blocker scan, GUI lane source static `7`, Rust acceptance `9`, full `cargo test -p openclaw_types`, cargo fmt, docs trace, and diff-check. Boundary unchanged: no GUI runtime/API/IPC behavior change, IBKR contact, connector/runtime, secret access/serialization, paper order route, tiny-live/live, or Bybit behavior change.
+
 ## 2026-07-01 Stock/ETF DB Evidence DDL Exact Blocker Guard
 
 - PM tightened `StockEtfDbEvidenceDdl` source SQL auditor mutation acceptance to exact single-blocker vectors for required column, foreign key, synthetic-shadow check, destructive statement, migration dry-run, guard B/C, and retention-plan drift.

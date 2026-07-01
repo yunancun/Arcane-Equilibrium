@@ -206,6 +206,8 @@ fn gui_lane_contract_requires_exact_contract_id_and_source_version() {
 
 #[test]
 fn gui_lane_contract_requires_all_stock_etf_readonly_get_endpoints() {
+    use StockEtfGuiLaneBlocker as Blocker;
+
     let mut contract = StockEtfGuiLaneContractV1::accepted_fixture();
     contract.readiness_endpoint = "/api/v1/stock-etf/readiness?lane=stock".to_string();
     contract.readiness_endpoint_get_only = false;
@@ -243,102 +245,43 @@ fn gui_lane_contract_requires_all_stock_etf_readonly_get_endpoints() {
     let verdict = contract.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::ReadinessEndpointMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::ReadinessEndpointNotGetOnly));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::LaneStatusEndpointMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::LaneStatusEndpointNotGetOnly));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::Phase0StatusEndpointMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::Phase0StatusEndpointNotGetOnly));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::DataFoundationStatusEndpointMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::DataFoundationStatusEndpointNotGetOnly));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::PolicyStatusEndpointMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::PolicyStatusEndpointNotGetOnly));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::AuthorizationStatusEndpointMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::AuthorizationStatusEndpointNotGetOnly));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::AccountStatusEndpointMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::AccountStatusEndpointNotGetOnly));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::EvidenceStatusEndpointMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::EvidenceStatusEndpointNotGetOnly));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::UniverseStatusEndpointMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::UniverseStatusEndpointNotGetOnly));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::ShadowStatusEndpointMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::ShadowStatusEndpointNotGetOnly));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::PaperStatusEndpointMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::PaperStatusEndpointNotGetOnly));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::ReconciliationStatusEndpointMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::ReconciliationStatusEndpointNotGetOnly));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::ScorecardStatusEndpointMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::ScorecardStatusEndpointNotGetOnly));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::LaunchStatusEndpointMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::LaunchStatusEndpointNotGetOnly));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::ReleasePacketStatusEndpointMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::ReleasePacketStatusEndpointNotGetOnly));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::DisableCleanupStatusEndpointMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfGuiLaneBlocker::DisableCleanupStatusEndpointNotGetOnly));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::ReadinessEndpointMismatch,
+            Blocker::ReadinessEndpointNotGetOnly,
+            Blocker::LaneStatusEndpointMismatch,
+            Blocker::LaneStatusEndpointNotGetOnly,
+            Blocker::Phase0StatusEndpointMismatch,
+            Blocker::Phase0StatusEndpointNotGetOnly,
+            Blocker::DataFoundationStatusEndpointMismatch,
+            Blocker::DataFoundationStatusEndpointNotGetOnly,
+            Blocker::PolicyStatusEndpointMismatch,
+            Blocker::PolicyStatusEndpointNotGetOnly,
+            Blocker::AuthorizationStatusEndpointMismatch,
+            Blocker::AuthorizationStatusEndpointNotGetOnly,
+            Blocker::AccountStatusEndpointMismatch,
+            Blocker::AccountStatusEndpointNotGetOnly,
+            Blocker::EvidenceStatusEndpointMismatch,
+            Blocker::EvidenceStatusEndpointNotGetOnly,
+            Blocker::UniverseStatusEndpointMismatch,
+            Blocker::UniverseStatusEndpointNotGetOnly,
+            Blocker::ShadowStatusEndpointMismatch,
+            Blocker::ShadowStatusEndpointNotGetOnly,
+            Blocker::PaperStatusEndpointMismatch,
+            Blocker::PaperStatusEndpointNotGetOnly,
+            Blocker::ReconciliationStatusEndpointMismatch,
+            Blocker::ReconciliationStatusEndpointNotGetOnly,
+            Blocker::ScorecardStatusEndpointMismatch,
+            Blocker::ScorecardStatusEndpointNotGetOnly,
+            Blocker::LaunchStatusEndpointMismatch,
+            Blocker::LaunchStatusEndpointNotGetOnly,
+            Blocker::ReleasePacketStatusEndpointMismatch,
+            Blocker::ReleasePacketStatusEndpointNotGetOnly,
+            Blocker::DisableCleanupStatusEndpointMismatch,
+            Blocker::DisableCleanupStatusEndpointNotGetOnly,
+        ]
+    );
 }
 
 #[test]
