@@ -4135,3 +4135,37 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper
 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
 clock、不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權 tiny-live/live
 或任何 Bybit behavior change。
+
+## 92. 2026-07-01 PM session source/display checkpoint：Scorecard Fallback Input Lineage Guard
+
+本 checkpoint 將 `scorecard_input_bundle` 的 result-import lineage fallback 補進
+browser-side `scorecardFallback()`。這不是 API fanout change、不是 endpoint change、
+不是 IPC method change，也不批准任何 IBKR contact；只確保 API unavailable/degraded
+時 GUI 仍保留與 FastAPI fail-closed payload 一致的 input-bundle lineage/blocker
+顯示。
+
+已完成：
+
+- `tab-stock-etf-fallbacks.js` 的 `scorecardFallback()` 新增 default-degraded
+  `scorecard_input_bundle` block。
+- Fallback 固定
+  `readonly_probe_result_import_request_contract_id=stock_etf_ibkr_readonly_probe_result_import_request_v1`，
+  result-import request hash-present、market/reference/risk/atomic/source lineage
+  flags 與所有 side-effect flags 皆為 false。
+- Python static no-write/split guard 鎖住 fallback payload 必須保留
+  `scorecard_input_bundle` 與 readonly probe result-import request lineage 欄位。
+
+驗證：
+
+- Python changed files `py_compile`：PASS。
+- Stock/ETF JS `node --check`：PASS。
+- Focused fallback/static/docs trace pytest：PASS。
+- Full Stock/ETF FastAPI/static pytest：PASS。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
+cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
+clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
+Bybit behavior change。

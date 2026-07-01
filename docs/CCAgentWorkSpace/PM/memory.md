@@ -3440,3 +3440,11 @@
 - FastAPI scorecard status normalization and GUI scorecard rendering now fail closed around the input bundle, rejecting accepted/hash-present/runtime side-effect claims before any scorecard writer.
 - Verification passed: Python compile, JS syntax, scoped Rust format, focused Rust scorecard input acceptance, focused engine scorecard IPC fixture, focused FastAPI scorecard/static pytest, full Stock/ETF FastAPI/static pytest, and docs trace guard.
 - Boundary unchanged: no endpoint, IPC method, GUI fanout, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe, result import, collector, market-data ingestion, DQ writer, paper order/cancel/replace, fill import, DB/evidence/scorecard writer, evidence clock, tiny-live/live, Linux runtime, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF Scorecard Fallback Input Lineage Guard
+
+- PM added a default-degraded `scorecard_input_bundle` to browser-side `scorecardFallback()`.
+- The fallback preserves `stock_etf_ibkr_readonly_probe_result_import_request_v1` lineage context while keeping result-import hash-present, market/reference/risk/atomic/source lineage flags, and all side-effect flags false.
+- Static no-write/split guard now checks that fallback payloads keep the scorecard input bundle result-import lineage fields.
+- Verification passed: Python compile, JS syntax, focused fallback/static/docs trace pytest, full Stock/ETF FastAPI/static pytest, and `git diff --check`.
+- Boundary unchanged: no endpoint, IPC method, GUI fanout, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe, result import, DB/evidence/scorecard writer, paper order/cancel/replace, tiny-live/live, Linux runtime, or Bybit behavior change.

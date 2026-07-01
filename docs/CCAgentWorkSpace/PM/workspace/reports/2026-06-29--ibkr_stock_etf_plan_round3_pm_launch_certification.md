@@ -610,6 +610,42 @@ ingestion、DQ writer、paper order/cancel/replace、fill import、DB apply、ev
 writer、evidence clock、scorecard writer、tiny-live、live、Linux runtime sync/restart
 或 Bybit behavior change。
 
+## 2026-07-01 PM Session Checkpoint — Scorecard Fallback Input Lineage Guard
+
+PM 已將 scorecard input bundle result-import lineage 補進 browser-side degraded
+fallback。這不是 IBKR contact approval、read-only probe approval、result import
+approval、evidence writer approval、scorecard writer approval 或 launch approval。
+
+已完成：
+
+- `tab-stock-etf-fallbacks.js` 的 `scorecardFallback()` 新增 default-degraded
+  `scorecard_input_bundle`。
+- Fallback 使用預期
+  `stock_etf_ibkr_readonly_probe_result_import_request_v1` contract id，並將所有
+  hash-present/source lineage/side-effect flags 固定為 false。
+- Static no-write/split guard 新增 fallback lineage 字串檢查，避免 API unavailable
+  時 scorecard panel 漏顯 input-bundle lineage。
+
+Verification：
+
+- Python changed files `py_compile` PASS。
+- Stock/ETF JS syntax PASS。
+- Focused fallback/static/docs trace pytest PASS。
+- Full Stock/ETF FastAPI/static pytest PASS。
+- `git diff --check` PASS。
+
+Dispatch 記錄：本 turn 因工具層 spawn policy 未允許 sub-agent dispatch，PM 本地完成
+narrow GUI fallback consistency / review / regression。此 checkpoint 為 display-only
+fallback hardening。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 2/3 runtime approval、IBKR contact
+approval、read-only probe approval、result import approval、evidence writer approval、
+scorecard writer approval 或 launch approval。未批准 IBKR SDK import、socket/HTTP、
+secret、connector runtime、read probe execution、collector start、market-data
+ingestion、DQ writer、paper order/cancel/replace、fill import、DB apply、evidence
+writer、evidence clock、scorecard writer、tiny-live、live、Linux runtime sync/restart
+或 Bybit behavior change。
+
 ## 2026-06-30 PM Session Checkpoint — Paper Lifecycle State Machine
 
 PM 已在本 session 追加 Phase 1D source-only checkpoint：

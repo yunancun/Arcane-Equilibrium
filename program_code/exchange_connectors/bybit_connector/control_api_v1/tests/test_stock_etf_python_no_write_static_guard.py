@@ -642,6 +642,10 @@ def test_stock_etf_static_gui_payload_builders_remain_split() -> None:
 
     assert missing_fallbacks == []
     assert main_definitions == []
+    assert "scorecard_input_bundle" in fallback_source
+    assert "readonly_probe_result_import_request_contract_id" in fallback_source
+    assert "readonly_probe_result_import_request_hash_present" in fallback_source
+    assert "stock_etf_ibkr_readonly_probe_result_import_request_v1" in fallback_source
     assert len(main_source.splitlines()) <= 1400
     assert len(fallback_source.splitlines()) <= 800
 
