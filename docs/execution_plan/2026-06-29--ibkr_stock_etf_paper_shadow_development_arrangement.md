@@ -9131,3 +9131,45 @@ runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀
 socket/client construction、不做 broker session、不執行 read-only probe、不執行 result/fill import、不執行 paper
 order routing/cancel/replace、不做 evidence/scorecard/DB writer、不啟動 evidence clock、不做 release launch、
 不做 Linux runtime sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
+
+## 221. 2026-07-01 PM session source checkpoint：Stock/ETF Broker Capability Registry Exact Blocker Guard
+
+本 checkpoint 補強 `StockEtfBrokerCapabilityRegistryV1` source-only broker operation matrix 的 aggregate
+fail-closed lineage，固定 default registry、read-row gate aggregate、registry id/source mismatch、operation
+coverage once-only、paper write/fill-import row shape failures、denied-row regressions、contact/secret/Bybit/Python
+write boundary flags 的 ordered blocker vectors 或 exact single-blocker vectors。這不是 Rust production behavior
+change、不是 IPC/API route change、不是 IBKR contact、不是 connector runtime、不是 socket/client construction、
+不是 secret lookup、不是 broker session、不是 read-only probe execution、不是 fill import execution、不是 paper
+order route enablement、不是 evidence/scorecard/DB writer、不是 tiny-live/live gate；只把 Stock/ETF broker
+capability registry source-only operation matrix 的 fail-closed lineage 變成 exact-blocker acceptance guard。
+
+已完成：
+
+- 在 `stock_etf_broker_capability_registry_acceptance.rs` 將 default
+  `StockEtfBrokerCapabilityRegistryV1` 固定為完整順序 blocker 向量，覆蓋 registry/source identity、
+  Stock/ETF lane、IBKR broker、Bybit live unchanged proof、Python broker write denial、IBKR live denial、
+  CFD/margin denial、required audit fields，以及 15 個 required broker operations 的 missing blockers。
+- 在同檔將 read-row IPC/probe gate aggregate、registry id/source mismatch、operation coverage once-only、
+  paper write row shape failures、paper fill-import row shape failures、denied live/account-write row regressions、
+  contact/secret/Bybit/Python-write boundary flags固定為 exact blocker vectors 或 exact single-blocker vectors。
+- 移除 broker capability blocker 的 loose `has()` / `blockers.contains` helper；aggregate cases 改為完整
+  ordered-vector assertions。
+- 在 `test_stock_etf_broker_capability_registry_source_static.py` 新增 validator blocker emit-order guard，pin
+  registry top-level checks、operation coverage checks，以及 operation row validation 的 source order。
+
+驗證：
+
+- No blocker loose helper scan：PASS。
+- Targeted rustfmt check：PASS。
+- Stock/ETF broker capability registry source static pytest：`9 passed`。
+- Stock/ETF broker capability registry Rust acceptance：`14 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、不改 GUI
+runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不做
+socket/client construction、不做 broker session、不執行 read-only probe、不執行 result/fill import、不執行 paper
+order routing/cancel/replace、不做 evidence/scorecard/DB writer、不啟動 evidence clock、不做 release launch、
+不做 Linux runtime sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
