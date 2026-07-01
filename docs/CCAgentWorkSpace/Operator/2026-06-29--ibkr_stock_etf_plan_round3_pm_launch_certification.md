@@ -2447,3 +2447,29 @@ Verification 已過：
 access/creation、沒有 connector runtime、沒有 read probe execution、沒有 result
 import、沒有 DB/evidence/scorecard writer、沒有 paper order/cancel/replace、沒有
 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Lane Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF Lane Source Static Guard`。
+
+這個 guard 鎖住 `stock_etf_lane.rs` 的 lane foundation source hygiene：檔案需低於
+800 行，lane/broker/environment/instrument/authority/operation/denial/gate/lifecycle
+surface 不得消失，15 個 broker operations、20 個 denial variants、13 個 gate
+fields 必須保持完整，live/margin/options/CFD/account-write typed denials 也要保留。
+
+Feature flag env surface 只允許 5 個非 secret allowlist keys，且只允許
+`StockEtfFeatureFlags::from_env()` 的單一 `std::env::var(key).ok()` path；guard 會
+拒絕 fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens 與
+secret/account material tokens。
+
+Verification 已過：
+
+- New structure guard pytest：`4 passed`
+- Focused Stock/ETF lane acceptance：`9 passed`
+- Full `cargo test -p openclaw_types`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
+access/creation、沒有 connector runtime、沒有 read probe execution、沒有 result
+import、沒有 DB/evidence/scorecard writer、沒有 paper order/cancel/replace、沒有
+tiny-live/live authority，也沒有改動 Bybit live execution 行為。
