@@ -265,6 +265,70 @@ fn result_import_kind_requires_matching_downstream_lineage() {
 }
 
 #[test]
+fn result_import_request_rejects_probe_action_operation_cross_wire() {
+    let market_with_account_action = StockEtfIbkrReadonlyProbeResultImportRequestV1 {
+        probe_kind: StockEtfIbkrReadonlyProbeKind::MarketDataSnapshot,
+        api_action: NonBybitApiAction::AccountSummarySnapshotRead,
+        operation: BrokerOperation::MarketDataRead,
+        market_data_provenance_contract_id: STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID.to_string(),
+        market_data_provenance_hash: "c".repeat(64),
+        ..StockEtfIbkrReadonlyProbeResultImportRequestV1::accepted_fixture()
+    };
+    let verdict = market_with_account_action.validate();
+
+    assert!(!verdict.accepted);
+    assert!(has(
+        &verdict,
+        StockEtfIbkrReadonlyProbeResultImportBlocker::ProbeActionMismatch
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfIbkrReadonlyProbeResultImportBlocker::OperationMismatch
+    ));
+
+    let market_with_account_operation = StockEtfIbkrReadonlyProbeResultImportRequestV1 {
+        probe_kind: StockEtfIbkrReadonlyProbeKind::MarketDataSnapshot,
+        api_action: NonBybitApiAction::MarketDataSnapshotRead,
+        operation: BrokerOperation::AccountSnapshotRead,
+        market_data_provenance_contract_id: STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID.to_string(),
+        market_data_provenance_hash: "c".repeat(64),
+        ..StockEtfIbkrReadonlyProbeResultImportRequestV1::accepted_fixture()
+    };
+    let verdict = market_with_account_operation.validate();
+
+    assert!(!verdict.accepted);
+    assert!(has(
+        &verdict,
+        StockEtfIbkrReadonlyProbeResultImportBlocker::OperationMismatch
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfIbkrReadonlyProbeResultImportBlocker::ProbeActionMismatch
+    ));
+
+    let paper_write_action = StockEtfIbkrReadonlyProbeResultImportRequestV1 {
+        api_action: NonBybitApiAction::PaperOrderSubmit,
+        operation: BrokerOperation::HealthRead,
+        ..StockEtfIbkrReadonlyProbeResultImportRequestV1::accepted_fixture()
+    };
+    let verdict = paper_write_action.validate();
+
+    assert!(!verdict.accepted);
+    assert!(has(
+        &verdict,
+        StockEtfIbkrReadonlyProbeResultImportBlocker::ProbeActionMismatch
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfIbkrReadonlyProbeResultImportBlocker::ApiActionNotReadAllowed
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfIbkrReadonlyProbeResultImportBlocker::OperationMismatch
+    ));
+}
+
+#[test]
 fn result_import_request_rejects_boundary_and_replay_regressions() {
     let bad = StockEtfIbkrReadonlyProbeResultImportRequestV1 {
         duplicate_import_detected: true,
