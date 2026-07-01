@@ -8334,3 +8334,41 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 runtime、不執行 paper order routing、不做 broker session、不做 broker routing、不做 DB/evidence writer、
 不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何
 Bybit behavior change。
+
+## 200. 2026-07-01 PM session source checkpoint：Stock/ETF Strategy Hypothesis Default Lineage Exact Guard
+
+本 checkpoint 補強 `stock_etf_strategy_hypothesis` 的 source-only pre-registration hypothesis fail-closed
+lineage，固定 default `StockEtfStrategyHypothesisV1`、contract/source drift、identity/family/timeframe/scope
+regressions、missing hashes、bad limits/controls/authority claims、single-flag authority/profitability/secret
+cases 的 ordered blocker vectors，並用 source-static parser 鎖住 root validator、hash validator、
+limits/boundary validator blocker emit order 與 root validator child-call order。這不是 Rust production
+behavior change、不是 IPC/API route change、不是 IBKR contact、不是 connector runtime、不是 secret lookup、
+不是 market data collection、不是 scorecard writer、不是 paper order route enablement、不是 tiny-live/live
+gate；只把 strategy hypothesis source-only preregistration contract 的 fail-closed lineage 變成 exact-blocker
+acceptance test 與 source-static guard。
+
+已完成：
+
+- 在 `stock_etf_strategy_hypothesis_acceptance.rs` 將 default `StockEtfStrategyHypothesisV1` 檢查提升為完整
+  順序 blocker 向量，補齊 identity、hash lineage、controls、paper-shadow、Bybit/IBKR live-denial blockers。
+- 在同檔將 contract/source drift、identity/family/timeframe/scope regressions、missing hashes、
+  bad limits/controls/authority claims、single-flag authority/profitability/secret cases 固定為 exact blocker
+  vectors。
+- 在 `test_stock_etf_strategy_hypothesis_source_static.py` 新增 root validator、hash validator、
+  limits/boundary validator blocker ordering parser，並鎖住 root validator child-call order。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Stock/ETF strategy hypothesis source static pytest：`11 passed`。
+- Stock/ETF strategy hypothesis Rust acceptance：`8 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、
+不改 GUI runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector
+runtime、不做 market data collection、不啟動 scorecard writer、不執行 paper order routing、不做 broker
+session、不做 broker routing、不做 DB/evidence writer、不做 Linux runtime sync/restart、不授權 paper-shadow
+launch、tiny-live/live 或任何 Bybit behavior change。

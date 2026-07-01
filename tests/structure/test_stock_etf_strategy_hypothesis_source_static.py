@@ -189,6 +189,10 @@ def _source() -> str:
     return STRATEGY_HYPOTHESIS.read_text(encoding="utf-8")
 
 
+def _function_block(source: str, start: str, end: str) -> str:
+    return source.split(start, 1)[1].split(end, 1)[0]
+
+
 def test_stock_etf_strategy_hypothesis_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
@@ -371,6 +375,91 @@ def test_stock_etf_strategy_hypothesis_source_keeps_limits_controls_and_boundari
     assert "!hypothesis.ibkr_live_denied" in source
     assert "hypothesis.ibkr_contact_performed" in source
     assert "hypothesis.secret_content_serialized" in source
+
+
+def test_stock_etf_strategy_hypothesis_source_keeps_exact_blocker_order() -> None:
+    source = _source()
+    validate = _function_block(
+        source,
+        "pub fn validate(&self) -> StockEtfStrategyHypothesisVerdict<StockEtfStrategyHypothesisBlocker>",
+        "StockEtfStrategyHypothesisVerdict::new(blockers)",
+    )
+    hashes = _function_block(
+        source,
+        "fn validate_hashes(",
+        "fn validate_limits_and_controls(",
+    )
+    limits = _function_block(
+        source,
+        "fn validate_limits_and_controls(",
+        "fn valid_identifier(",
+    )
+
+    for block, ordered_blockers in (
+        (
+            validate,
+            (
+                "ContractIdMismatch",
+                "SourceVersionMismatch",
+                "WrongAssetLane",
+                "WrongBroker",
+                "HypothesisIdInvalid",
+                "HypothesisVersionInvalid",
+                "StrategyFamilyDenied",
+                "TimeframeDenied",
+                "InstrumentScopeDenied",
+            ),
+        ),
+        (
+            hashes,
+            (
+                "UniverseHashInvalid",
+                "PitUniverseContractHashInvalid",
+                "BenchmarkVersionHashInvalid",
+                "CostModelVersionHashInvalid",
+                "EntryRuleHashInvalid",
+                "ExitRuleHashInvalid",
+                "RiskRuleHashInvalid",
+                "FeatureSetHashInvalid",
+                "DataSourcePolicyHashInvalid",
+                "StatisticalDesignHashInvalid",
+                "HypothesisPreregistrationHashInvalid",
+            ),
+        ),
+        (
+            limits,
+            (
+                "HoldingPeriodTooShort",
+                "TurnoverLimitMissing",
+                "TurnoverLimitTooHigh",
+                "MaxConstituentsMissing",
+                "MaxConstituentsTooBroad",
+                "IndependentObservationTargetTooLow",
+                "LookaheadControlsMissing",
+                "SurvivorshipControlsMissing",
+                "MultipleTestingControlMissing",
+                "BenchmarkMetricMissing",
+                "CostAfterMetricMissing",
+                "ForbiddenInstrumentPolicyMissing",
+                "PaperShadowOnlyMissing",
+                "PrematureProfitabilityClaim",
+                "LiveOrTinyLiveAuthorityClaimed",
+                "BybitLiveExecutionNotProtected",
+                "IbkrLiveNotDenied",
+                "IbkrContactPerformed",
+                "SecretContentSerialized",
+            ),
+        ),
+    ):
+        positions = [block.index(f"Blocker::{blocker}") for blocker in ordered_blockers]
+        assert positions == sorted(positions)
+
+    validator_call_order = (
+        "validate_hashes(self, &mut blockers)",
+        "validate_limits_and_controls(self, &mut blockers)",
+    )
+    positions = [validate.index(call) for call in validator_call_order]
+    assert positions == sorted(positions)
 
 
 def test_stock_etf_strategy_hypothesis_source_keeps_identifier_rules() -> None:

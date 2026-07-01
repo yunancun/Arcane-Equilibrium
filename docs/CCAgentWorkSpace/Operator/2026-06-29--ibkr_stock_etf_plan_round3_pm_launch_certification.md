@@ -5267,3 +5267,30 @@ Verification 已過：
 contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 paper order routing、沒有 broker
 session、沒有 DB/evidence writer、沒有 scorecard writer、沒有 paper-shadow launch、沒有 tiny-live/live
 authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Strategy Hypothesis Default Lineage Exact Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Strategy Hypothesis Default Lineage Exact Guard`。
+
+這個 checkpoint 補強 `StockEtfStrategyHypothesisV1` 的 strategy preregistration fail-closed exact coverage。
+
+新增 Rust acceptance 證明 default strategy hypothesis、contract/source drift、identity/family/timeframe/scope
+regressions、missing hashes、bad limits/controls/authority claims、single-flag authority/profitability/secret cases
+都會以完整 ordered blocker vectors fail closed。Python source-static guard 也鎖住 root validator、hash
+validator、limits/boundary validator blocker emit order 與 root validator child-call order。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Stock/ETF strategy hypothesis source static pytest：`11 passed`
+- Stock/ETF strategy hypothesis Rust acceptance：`8 passed`
+- Full `cargo test -p openclaw_types`：PASS
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 GUI runtime/API route/IPC behavior change、沒有 IBKR
+contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 market data collection、沒有
+scorecard writer、沒有 paper order routing、沒有 broker session、沒有 DB/evidence writer、沒有 paper-shadow
+launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
