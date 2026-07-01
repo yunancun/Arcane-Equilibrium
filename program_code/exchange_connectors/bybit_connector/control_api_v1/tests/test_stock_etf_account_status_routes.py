@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -15,6 +16,55 @@ from stock_etf_route_fixtures import (
     route_module,
     stock_etf_router,
 )
+
+EXPECTED_ACCOUNT_CONTRACT_VIOLATIONS = [
+    "ibkr_call_performed",
+    "secret_slot_touched",
+    "order_routed",
+    "bybit_ipc_reused",
+    "db_apply_performed",
+    "asset_lane_mismatch",
+    "broker_mismatch",
+    "environment_mismatch",
+    "phase2_started",
+    "readonly_account_snapshot_started",
+    "paper_account_snapshot_started",
+    "account_snapshot_present",
+    "portfolio_positions_snapshot_present",
+    "cash_ledger_present",
+    "paper_account_attestation_present",
+    "session_attestation_present",
+    "connector_runtime_started",
+    "gateway_socket_open",
+    "account_snapshot_expected_contract_id_mismatch",
+    "account_snapshot_accepted_before_gate",
+    "account_snapshot_account_fingerprint_hash_present",
+    "account_snapshot_account_snapshot_hash_present",
+    "account_snapshot_portfolio_positions_hash_present",
+    "account_snapshot_source_report_hash_present",
+    "account_snapshot_as_of_present",
+    "session_attestation_expected_contract_id_mismatch",
+    "session_attestation_accepted_before_gate",
+    "session_attestation_account_fingerprint_present",
+    "session_attestation_account_fingerprint_is_live",
+    "session_attestation_process_identity_present",
+    "session_attestation_secret_slot_fingerprint_present",
+    "session_attestation_secret_world_readable",
+    "session_attestation_env_var_credential_fallback_used",
+    "session_attestation_api_server_version_present",
+    "session_attestation_entitlements_fingerprint_present",
+    "session_attestation_market_data_entitlement_purchase_denied",
+    "session_attestation_raw_artifact_hash_present",
+    "session_attestation_data_tier_present",
+    "session_attestation_gateway_started_at_present",
+    "session_attestation_port_present",
+    "session_attestation_attested_at_present",
+    "session_attestation_expires_at_present",
+    "paper_attestation_expected_contract_id_mismatch",
+    "paper_attestation_policy_not_paper_only",
+    "paper_attestation_live_account_not_denied",
+    "paper_attestation_margin_short_options_cfd_not_denied",
+]
 
 
 def test_stock_etf_account_status_returns_200_when_ipc_down(
@@ -196,54 +246,7 @@ def test_stock_etf_account_status_blocks_contract_violation() -> None:
 
     assert data["account_status_state"] == "contract_violation_blocked"
     assert data["degraded"] is True
-    assert {
-        "ibkr_call_performed",
-        "secret_slot_touched",
-        "order_routed",
-        "bybit_ipc_reused",
-        "db_apply_performed",
-        "asset_lane_mismatch",
-        "broker_mismatch",
-        "environment_mismatch",
-        "phase2_started",
-        "readonly_account_snapshot_started",
-        "paper_account_snapshot_started",
-        "account_snapshot_present",
-        "portfolio_positions_snapshot_present",
-        "cash_ledger_present",
-        "paper_account_attestation_present",
-        "session_attestation_present",
-        "connector_runtime_started",
-        "gateway_socket_open",
-        "account_snapshot_expected_contract_id_mismatch",
-        "account_snapshot_accepted_before_gate",
-        "account_snapshot_account_fingerprint_hash_present",
-        "account_snapshot_account_snapshot_hash_present",
-        "account_snapshot_portfolio_positions_hash_present",
-        "account_snapshot_source_report_hash_present",
-        "account_snapshot_as_of_present",
-        "session_attestation_expected_contract_id_mismatch",
-        "session_attestation_accepted_before_gate",
-        "session_attestation_account_fingerprint_present",
-        "session_attestation_account_fingerprint_is_live",
-        "session_attestation_process_identity_present",
-        "session_attestation_secret_slot_fingerprint_present",
-        "session_attestation_secret_world_readable",
-        "session_attestation_env_var_credential_fallback_used",
-        "session_attestation_api_server_version_present",
-        "session_attestation_entitlements_fingerprint_present",
-        "session_attestation_market_data_entitlement_purchase_denied",
-        "session_attestation_data_tier_present",
-        "session_attestation_gateway_started_at_present",
-        "session_attestation_raw_artifact_hash_present",
-        "session_attestation_port_present",
-        "session_attestation_attested_at_present",
-        "session_attestation_expires_at_present",
-        "paper_attestation_expected_contract_id_mismatch",
-        "paper_attestation_policy_not_paper_only",
-        "paper_attestation_live_account_not_denied",
-        "paper_attestation_margin_short_options_cfd_not_denied",
-    }.issubset(set(data["contract_violations"]))
+    assert data["contract_violations"] == EXPECTED_ACCOUNT_CONTRACT_VIOLATIONS
     assert data["asset_lane"] == "stock_etf_cash"
     assert data["broker"] == "ibkr"
     assert data["environment"] == "paper_readonly"
@@ -266,3 +269,19 @@ def test_stock_etf_account_status_requires_auth() -> None:
     resp = client.get("/api/v1/stock-etf/account-status")
 
     assert resp.status_code == 401
+
+
+def test_stock_etf_account_contract_violation_assertions_stay_exact() -> None:
+    source = Path(__file__).read_text(encoding="utf-8")
+    source_under_test = source.split(
+        "def test_stock_etf_account_contract_violation_assertions_stay_exact",
+        1,
+    )[0]
+    forbidden_patterns = [
+        'set(data["contract_violations"])',
+        'in data["contract_violations"]',
+        'issubset(set(data["contract_violations"]))',
+    ]
+
+    for pattern in forbidden_patterns:
+        assert pattern not in source_under_test
