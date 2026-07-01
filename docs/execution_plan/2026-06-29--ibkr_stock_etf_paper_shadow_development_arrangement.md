@@ -6536,3 +6536,48 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 scorecard derivation、不啟動
 reconciliation writer、不啟動 scorecard writer、不做 DB/evidence writer、不做 paper order route、
 不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 156. 2026-07-01 PM session source checkpoint：Stock/ETF Scorecard Verdict Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_scorecard_verdict` 的 derived-only / paper-shadow separation /
+live-fill / Bybit unchanged / writer-runtime authority cross-wire coverage。這不是 Rust production
+behavior change、不是 IBKR contact、不是 connector runtime、不是 secret access、不是 scorecard
+writer、不是 DB/evidence writer、不是 tiny-live/live gate；只把 scorecard verdict artifact 的
+source-only、paper/shadow separated、no-live-claim posture 變成行為型 regression test 與
+source-static guard。
+
+已完成：
+
+- 在 `stock_etf_scorecard_verdict_acceptance.rs` 新增
+  `scorecard_verdict_rejects_evidence_live_bybit_and_writer_cross_wire_independently`。
+- Acceptance 證明 `scorecard_is_derived_only=false` 只產生 `ScorecardNotDerivedOnly`，不誤報
+  paper-shadow separation、live fill、Bybit unchanged 或 writer blocker。
+- Acceptance 證明 `paper_and_shadow_fills_separate=false` 只產生
+  `PaperShadowFillSeparationMissing`，不誤報 derived-only、live fill、Bybit unchanged 或 writer
+  blocker。
+- Acceptance 證明 `live_fill_claimed=true` 只產生 `LiveFillClaimed`，不誤報 derived-only、
+  paper-shadow separation、Bybit unchanged 或 writer blocker。
+- Acceptance 證明 `bybit_live_execution_unchanged=false` 只產生
+  `BybitLiveExecutionNotProtected`，不誤報 derived-only、paper-shadow separation、live fill 或 writer
+  blocker。
+- Acceptance 證明 IBKR contact / connector runtime / broker fill import / scorecard writer /
+  DB apply / evidence clock / secret serialization / tiny-live/live authority 污染必須產生各自 blocker，
+  且不誤報 verdict evidence posture blockers。
+- 在 `test_stock_etf_scorecard_verdict_source_static.py` 新增 fixture cross-wire guard，禁止
+  live fill、IBKR contact、connector runtime、broker fill import、scorecard writer、DB apply、
+  evidence clock、secret serialization、tiny-live/live authority 被 hardcoded 成 true，並鎖住 default
+  fail-closed posture。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Scorecard verdict source static pytest：`8 passed`。
+- Scorecard verdict Rust acceptance：`9 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 scorecard writer、不做
+DB/evidence writer、不做 paper order route、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何
+Bybit behavior change。
