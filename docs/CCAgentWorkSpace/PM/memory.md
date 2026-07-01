@@ -3613,3 +3613,11 @@
 - Source-static guard now parses `expected_api_action` / `expected_operation` bodies and rejects paper/live order mapping pollution.
 - Verification passed: targeted rustfmt check PASS; result import source static `10 passed`; result import Rust acceptance `7 passed`; dynamic docs trace PASS; diff check PASS.
 - Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, read-only probe execution, result import, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Readonly Probe Request Cross-Wire Guard
+
+- PM added test-only/source-static coverage for `stock_etf_ibkr_readonly_probe_request` probe kind / API action / operation mapping.
+- Acceptance now rejects market-data probe request with account action, market-data probe request with account operation, and paper-order action pollution via `ProbeActionMismatch`, `OperationMismatch`, and `ApiActionNotReadAllowed`.
+- Source-static guard now parses `expected_api_action` / `expected_operation` bodies and rejects paper/live order mapping pollution.
+- Verification passed: targeted rustfmt check PASS; request source static `8 passed`; request Rust acceptance `7 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
+- Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, read-only probe execution, result import, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

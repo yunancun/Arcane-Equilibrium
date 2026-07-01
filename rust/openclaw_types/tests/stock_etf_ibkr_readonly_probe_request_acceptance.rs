@@ -166,6 +166,79 @@ fn readonly_probe_requires_allowlisted_read_action_and_operation_mapping() {
 }
 
 #[test]
+fn readonly_probe_request_rejects_probe_action_operation_cross_wire() {
+    let market_with_account_action = StockEtfIbkrReadonlyProbeRequestV1 {
+        probe_kind: StockEtfIbkrReadonlyProbeKind::MarketDataSnapshot,
+        api_action: NonBybitApiAction::AccountSummarySnapshotRead,
+        operation: BrokerOperation::MarketDataRead,
+        ..StockEtfIbkrReadonlyProbeRequestV1::accepted_fixture()
+    };
+    let verdict = market_with_account_action.validate();
+
+    assert!(!verdict.accepted);
+    assert!(has(
+        &verdict,
+        StockEtfIbkrReadonlyProbeBlocker::ProbeActionMismatch
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfIbkrReadonlyProbeBlocker::OperationMismatch
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfIbkrReadonlyProbeBlocker::ApiActionNotReadAllowed
+    ));
+
+    let market_with_account_operation = StockEtfIbkrReadonlyProbeRequestV1 {
+        probe_kind: StockEtfIbkrReadonlyProbeKind::MarketDataSnapshot,
+        api_action: NonBybitApiAction::MarketDataSnapshotRead,
+        operation: BrokerOperation::AccountSnapshotRead,
+        ..StockEtfIbkrReadonlyProbeRequestV1::accepted_fixture()
+    };
+    let verdict = market_with_account_operation.validate();
+
+    assert!(!verdict.accepted);
+    assert!(has(
+        &verdict,
+        StockEtfIbkrReadonlyProbeBlocker::OperationMismatch
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfIbkrReadonlyProbeBlocker::ProbeActionMismatch
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfIbkrReadonlyProbeBlocker::ApiActionNotReadAllowed
+    ));
+
+    let paper_write_action = StockEtfIbkrReadonlyProbeRequestV1 {
+        probe_kind: StockEtfIbkrReadonlyProbeKind::MarketDataSnapshot,
+        api_action: NonBybitApiAction::PaperOrderSubmit,
+        operation: BrokerOperation::MarketDataRead,
+        ..StockEtfIbkrReadonlyProbeRequestV1::accepted_fixture()
+    };
+    let verdict = paper_write_action.validate();
+
+    assert!(!verdict.accepted);
+    assert!(has(
+        &verdict,
+        StockEtfIbkrReadonlyProbeBlocker::ProbeActionMismatch
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfIbkrReadonlyProbeBlocker::ApiActionNotReadAllowed
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfIbkrReadonlyProbeBlocker::OperationMismatch
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfIbkrReadonlyProbeBlocker::PaperOrderSubmitted
+    ));
+}
+
+#[test]
 fn readonly_probe_requires_full_precontact_lineage_hashes() {
     let bad = StockEtfIbkrReadonlyProbeRequestV1 {
         request_id: String::new(),
