@@ -795,11 +795,12 @@ fn test_persist_intent_hurst_nan_value_maps_null_no_panic() {
     }
 }
 
-/// 4 個透傳點結構覆蓋（include_str! 自審範式，對齊 database writers 先例）：
+/// 5 個透傳點結構覆蓋（include_str! 自審範式，對齊 database writers 先例）：
 /// 簽名改動已由編譯器強制「每個 call site 必傳第 12 參數」，本測試補上編譯器
 /// 管不到的縫——某個 call site 被改成傳 `None` 而非同 tick snapshot 引用。
-/// 不變量：step_4_5_dispatch.rs 內 3 個 call site（pre-risk caller / exchange /
-/// paper）全部傳 `indicators.and_then(|i| i.hurst.as_ref())`，且
+/// 不變量：step_4_5_dispatch.rs 內 4 個 call site（policy pre-risk caller /
+/// soak-isolation pre-risk caller / exchange / paper）全部傳
+/// `indicators.and_then(|i| i.hurst.as_ref())`，且
 /// record_pre_risk_rejection 內部 persist_intent 呼叫透傳其 `hurst` 參數。
 #[test]
 fn test_dispatch_forwards_hurst_at_all_persist_intent_call_sites() {
@@ -807,8 +808,9 @@ fn test_dispatch_forwards_hurst_at_all_persist_intent_call_sites() {
     let forward_expr = "indicators.and_then(|i| i.hurst.as_ref())";
     let n = src.matches(forward_expr).count();
     assert_eq!(
-        n, 3,
-        "dispatch 必須在恰 3 個 call site（:546 pre-risk caller / exchange / paper）\
+        n, 4,
+        "dispatch 必須在恰 4 個 call site（policy pre-risk caller / soak-isolation \
+         pre-risk caller / exchange / paper）\
          傳同 tick snapshot 的 hurst；計數漂移 = 漏接或被改傳 None，n={n}"
     );
 
