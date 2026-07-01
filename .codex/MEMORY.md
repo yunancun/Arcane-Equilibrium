@@ -1220,3 +1220,10 @@ Do not paste long reports or stable architecture into TODO.
 - Existing evidence-status IPC/FastAPI/GUI surfaces now expose default-blocked evidence-clock collector/DQ/source/provenance/scorecard input hash presence without adding endpoints, IPC methods, GUI fanout, runtime work, or an evidence clock.
 - Verification passed: Python compile, JS syntax, scoped Rust format, Phase3 evidence acceptance `19 passed`, Phase0 manifest acceptance `6 passed`, and focused evidence-status pytest `4 passed`.
 - Boundary unchanged: no IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, collector start, market-data ingestion, DQ writer, paper order/cancel/replace, fill import, DB/evidence/scorecard writer, evidence clock, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF Phase3 Evidence Module Split Guard
+
+- PM split Phase3 market-data provenance and frozen-input contracts into `stock_etf_phase3_evidence/market_data.rs` while preserving the parent module public re-export surface.
+- `stock_etf_phase3_evidence.rs` dropped from 982 to 742 lines; the new child module is 254 lines.
+- Verification passed: scoped Rust format, Phase3 evidence acceptance `19 passed`, Phase0 manifest acceptance `6 passed`, full Stock/ETF FastAPI/static `120 passed`, full `openclaw_types` PASS, engine Stock/ETF focused PASS, docs trace `2 passed`, and `git diff --check` PASS.
+- Boundary unchanged: no contract behavior, endpoint, IPC, GUI payload, IBKR contact, runtime, order, DB/evidence writer, evidence clock, tiny-live/live, Linux runtime, or Bybit behavior change.
