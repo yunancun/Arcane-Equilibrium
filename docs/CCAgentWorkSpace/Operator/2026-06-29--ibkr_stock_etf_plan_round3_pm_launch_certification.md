@@ -4935,6 +4935,32 @@ Verification 已過：
 沒有 DB/evidence writer、沒有 scorecard writer、沒有 broker session、沒有 tiny-live/live authorization，
 也沒有改動 Bybit live/demo execution 行為。
 
+## 2026-07-01 Operator Update — IBKR Phase 2 Gate Artifact Exact Lineage Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`IBKR Phase 2 Gate Artifact Exact Lineage Guard`。
+
+這個 checkpoint 補強 `IbkrPhase2GateArtifactV1` 的 default artifact、contract id/source version、
+external gate、policy flag、runtime evidence lineage exact-blocker coverage。
+
+新增 Rust acceptance 證明 default artifact、identity drift、blocked/retroactive external gate、policy flag
+mismatch、runtime evidence mismatch 都會以完整 exact blocker 向量 fail closed。Python source-static guard
+也鎖住 artifact validator blocker emit order。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- IBKR Phase 2 artifact source static pytest：`6 passed`
+- IBKR Phase 2 artifact Rust acceptance：`9 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IPC server start、
+沒有 IBKR contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 paper order routing、
+沒有 DB/evidence writer、沒有 scorecard writer、沒有 broker session、沒有 tiny-live/live authorization，
+也沒有改動 Bybit live/demo execution 行為。
+
 ## 2026-07-01 Operator Update — IBKR Phase 2 Runtime Secret/Topology Exact Default Guard
 
 本 session 已完成下一個 test-only/source-static checkpoint：

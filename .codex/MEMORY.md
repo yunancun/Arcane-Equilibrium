@@ -1628,3 +1628,10 @@ Do not paste long reports or stable architecture into TODO.
 - The guard proves default secret-slot and topology contracts emit complete ordered blocker vectors, and live TWS/Gateway ports are rejected by both `LivePortDenied` and `PaperPortNotUsed`.
 - Python source-static now pins fail-closed verdict construction, secret slot live-secret denial, and topology live-port/paper-port dual-denial source logic.
 - Verification passed: source static `6 passed`; Phase 2 runtime acceptance `9 passed`; `cargo fmt -p openclaw_types -- --check` PASS; docs trace PASS; diff check PASS. This grants no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, paper order routing, DB/evidence writer, scorecard writer, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Phase 2 Gate Artifact Exact Lineage Guard
+
+- PM added exact-blocker Rust acceptance coverage for `IbkrPhase2GateArtifactV1` default artifact, contract id/source version, external gate, policy flag, and runtime evidence lineage failures.
+- The guard proves default artifact, identity drift, blocked/retroactive external gate, policy flag mismatch, and runtime evidence mismatch fail closed with complete ordered blocker vectors.
+- Python source-static now pins artifact validator blocker emit order so exact acceptance remains aligned with the source contract.
+- Verification passed: source static `6 passed`; Phase 2 artifact acceptance `9 passed`; `cargo fmt -p openclaw_types -- --check` PASS; docs trace PASS; diff check PASS. This grants no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, paper order routing, DB/evidence writer, scorecard writer, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

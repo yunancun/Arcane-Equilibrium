@@ -3938,3 +3938,10 @@
 - Source-static parsing now pins fail-closed verdict construction, secret slot live-secret denial, and topology live-port/paper-port dual-denial source logic.
 - Verification passed: IBKR Phase 2 runtime source static `6 passed`; IBKR Phase 2 runtime Rust acceptance `9 passed`; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, paper order routing, DB/evidence writer, scorecard writer, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Phase 2 Gate Artifact Exact Lineage Guard
+
+- PM added test-only/source-static exact-blocker coverage for `IbkrPhase2GateArtifactV1` default artifact, contract id/source version, external gate, policy flag, and runtime evidence lineage failures.
+- Source-static parsing now pins artifact validator blocker emit order so exact acceptance remains aligned with the source contract.
+- Verification passed: IBKR Phase 2 artifact source static `6 passed`; IBKR Phase 2 artifact Rust acceptance `9 passed`; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, paper order routing, DB/evidence writer, scorecard writer, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
