@@ -11,61 +11,12 @@ use openclaw_types::{
     StockEtfScorecardDerivationV1, STOCK_ETF_SCORECARD_DERIVATION_CONTRACT_ID,
 };
 
-fn assert_has_blocker(
-    blockers: &[StockEtfScorecardDerivationBlocker],
-    blocker: StockEtfScorecardDerivationBlocker,
-) {
-    assert!(
-        blockers.contains(&blocker),
-        "missing blocker {blocker:?}; blockers: {blockers:?}"
-    );
-}
-
-fn assert_lacks_blocker(
-    blockers: &[StockEtfScorecardDerivationBlocker],
-    blocker: StockEtfScorecardDerivationBlocker,
-) {
-    assert!(
-        !blockers.contains(&blocker),
-        "unexpected blocker {blocker:?}; blockers: {blockers:?}"
-    );
-}
-
 #[test]
 fn default_derivation_blocks_unsealed_unknown_artifact() {
     let verdict = StockEtfScorecardDerivationV1::default().validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::ContractIdMissing));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::SourceVersionMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::WrongAssetLane));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::WrongBroker));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::DerivationRunIdMissing));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::ScorecardInputBundleHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::PaperShadowReconciliationHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::NotDerivedFromAtomicFactsOnly));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::BybitLiveExecutionNotProtected));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::NotSealed));
+    assert_eq!(verdict.blockers, default_derivation_blockers());
 }
 
 #[test]
@@ -100,6 +51,8 @@ fn accepted_derivation_validates_without_side_effects() {
 
 #[test]
 fn derivation_requires_ids_and_lineage_hashes() {
+    use StockEtfScorecardDerivationBlocker as Blocker;
+
     let mut candidate = StockEtfScorecardDerivationV1::accepted_fixture();
     candidate.contract_id = "stock_etf_scorecard_derivation_v1_fixture".to_string();
     candidate.derivation_run_id.clear();
@@ -115,36 +68,21 @@ fn derivation_requires_ids_and_lineage_hashes() {
     let verdict = candidate.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::ContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::DerivationRunIdMissing));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::StrategyIdMissing));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::UniverseVersionMissing));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::BenchmarkVersionMissing));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::AsOfDateMissing));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::ScorecardInputBundleHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::PaperShadowReconciliationHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::ScorecardVerdictHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::OutputArtifactHashInvalid));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::ContractIdMismatch,
+            Blocker::DerivationRunIdMissing,
+            Blocker::StrategyIdMissing,
+            Blocker::UniverseVersionMissing,
+            Blocker::BenchmarkVersionMissing,
+            Blocker::AsOfDateMissing,
+            Blocker::ScorecardInputBundleHashInvalid,
+            Blocker::PaperShadowReconciliationHashInvalid,
+            Blocker::ScorecardVerdictHashInvalid,
+            Blocker::OutputArtifactHashInvalid,
+        ]
+    );
 }
 
 #[test]
@@ -297,6 +235,8 @@ fn derivation_rejects_each_hash_lineage_gap_independently() {
 
 #[test]
 fn derivation_rejects_runtime_side_effects_and_authority() {
+    use StockEtfScorecardDerivationBlocker as Blocker;
+
     let mut candidate = StockEtfScorecardDerivationV1::accepted_fixture();
     candidate.derived_from_atomic_facts_only = false;
     candidate.idempotent_replay_proven = false;
@@ -317,39 +257,26 @@ fn derivation_rejects_runtime_side_effects_and_authority() {
     let verdict = candidate.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::NotDerivedFromAtomicFactsOnly));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::IdempotentReplayNotProven));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::PaperShadowFillSeparationMissing));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::BybitLiveExecutionNotProtected));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::IbkrContactPerformed));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::ShadowFillGenerated));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::ReconciliationWriterStarted));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::ScorecardWriterStarted));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::DbApplyPerformed));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::LiveOrTinyLiveAuthorized));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::NotSealed));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::NotDerivedFromAtomicFactsOnly,
+            Blocker::IdempotentReplayNotProven,
+            Blocker::PaperShadowFillSeparationMissing,
+            Blocker::BybitLiveExecutionNotProtected,
+            Blocker::IbkrContactPerformed,
+            Blocker::ConnectorRuntimeStarted,
+            Blocker::BrokerFillImportPerformed,
+            Blocker::ShadowFillGenerated,
+            Blocker::ReconciliationWriterStarted,
+            Blocker::ScorecardWriterStarted,
+            Blocker::DbApplyPerformed,
+            Blocker::EvidenceClockStarted,
+            Blocker::SecretContentSerialized,
+            Blocker::LiveOrTinyLiveAuthorized,
+            Blocker::NotSealed,
+        ]
+    );
 }
 
 #[test]
@@ -439,105 +366,23 @@ fn derivation_rejects_each_boundary_flag_independently() {
 
 #[test]
 fn derivation_rejects_atomic_replay_separation_and_writer_cross_wire_independently() {
+    use StockEtfScorecardDerivationBlocker as Blocker;
+
     let mut atomic = StockEtfScorecardDerivationV1::accepted_fixture();
     atomic.derived_from_atomic_facts_only = false;
-    let atomic_verdict = atomic.validate();
-    assert!(!atomic_verdict.accepted);
-    assert_has_blocker(
-        &atomic_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::NotDerivedFromAtomicFactsOnly,
-    );
-    assert_lacks_blocker(
-        &atomic_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::IdempotentReplayNotProven,
-    );
-    assert_lacks_blocker(
-        &atomic_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::PaperShadowFillSeparationMissing,
-    );
-    assert_lacks_blocker(
-        &atomic_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::BybitLiveExecutionNotProtected,
-    );
-    assert_lacks_blocker(
-        &atomic_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::ScorecardWriterStarted,
-    );
+    assert_single_blocker(atomic, Blocker::NotDerivedFromAtomicFactsOnly);
 
     let mut replay = StockEtfScorecardDerivationV1::accepted_fixture();
     replay.idempotent_replay_proven = false;
-    let replay_verdict = replay.validate();
-    assert!(!replay_verdict.accepted);
-    assert_has_blocker(
-        &replay_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::IdempotentReplayNotProven,
-    );
-    assert_lacks_blocker(
-        &replay_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::NotDerivedFromAtomicFactsOnly,
-    );
-    assert_lacks_blocker(
-        &replay_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::PaperShadowFillSeparationMissing,
-    );
-    assert_lacks_blocker(
-        &replay_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::BybitLiveExecutionNotProtected,
-    );
-    assert_lacks_blocker(
-        &replay_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::ScorecardWriterStarted,
-    );
+    assert_single_blocker(replay, Blocker::IdempotentReplayNotProven);
 
     let mut separation = StockEtfScorecardDerivationV1::accepted_fixture();
     separation.paper_and_shadow_fills_separate = false;
-    let separation_verdict = separation.validate();
-    assert!(!separation_verdict.accepted);
-    assert_has_blocker(
-        &separation_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::PaperShadowFillSeparationMissing,
-    );
-    assert_lacks_blocker(
-        &separation_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::NotDerivedFromAtomicFactsOnly,
-    );
-    assert_lacks_blocker(
-        &separation_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::IdempotentReplayNotProven,
-    );
-    assert_lacks_blocker(
-        &separation_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::BybitLiveExecutionNotProtected,
-    );
-    assert_lacks_blocker(
-        &separation_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::ScorecardWriterStarted,
-    );
+    assert_single_blocker(separation, Blocker::PaperShadowFillSeparationMissing);
 
     let mut bybit = StockEtfScorecardDerivationV1::accepted_fixture();
     bybit.bybit_live_execution_unchanged = false;
-    let bybit_verdict = bybit.validate();
-    assert!(!bybit_verdict.accepted);
-    assert_has_blocker(
-        &bybit_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::BybitLiveExecutionNotProtected,
-    );
-    assert_lacks_blocker(
-        &bybit_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::NotDerivedFromAtomicFactsOnly,
-    );
-    assert_lacks_blocker(
-        &bybit_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::IdempotentReplayNotProven,
-    );
-    assert_lacks_blocker(
-        &bybit_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::PaperShadowFillSeparationMissing,
-    );
-    assert_lacks_blocker(
-        &bybit_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::ScorecardWriterStarted,
-    );
+    assert_single_blocker(bybit, Blocker::BybitLiveExecutionNotProtected);
 
     let mut writer_runtime = StockEtfScorecardDerivationV1::accepted_fixture();
     writer_runtime.ibkr_contact_performed = true;
@@ -552,61 +397,20 @@ fn derivation_rejects_atomic_replay_separation_and_writer_cross_wire_independent
     writer_runtime.live_or_tiny_live_authorized = true;
     let writer_runtime_verdict = writer_runtime.validate();
     assert!(!writer_runtime_verdict.accepted);
-    assert_has_blocker(
-        &writer_runtime_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::IbkrContactPerformed,
-    );
-    assert_has_blocker(
-        &writer_runtime_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::ConnectorRuntimeStarted,
-    );
-    assert_has_blocker(
-        &writer_runtime_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::BrokerFillImportPerformed,
-    );
-    assert_has_blocker(
-        &writer_runtime_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::ShadowFillGenerated,
-    );
-    assert_has_blocker(
-        &writer_runtime_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::ReconciliationWriterStarted,
-    );
-    assert_has_blocker(
-        &writer_runtime_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::ScorecardWriterStarted,
-    );
-    assert_has_blocker(
-        &writer_runtime_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::DbApplyPerformed,
-    );
-    assert_has_blocker(
-        &writer_runtime_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::EvidenceClockStarted,
-    );
-    assert_has_blocker(
-        &writer_runtime_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::SecretContentSerialized,
-    );
-    assert_has_blocker(
-        &writer_runtime_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::LiveOrTinyLiveAuthorized,
-    );
-    assert_lacks_blocker(
-        &writer_runtime_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::NotDerivedFromAtomicFactsOnly,
-    );
-    assert_lacks_blocker(
-        &writer_runtime_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::IdempotentReplayNotProven,
-    );
-    assert_lacks_blocker(
-        &writer_runtime_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::PaperShadowFillSeparationMissing,
-    );
-    assert_lacks_blocker(
-        &writer_runtime_verdict.blockers,
-        StockEtfScorecardDerivationBlocker::BybitLiveExecutionNotProtected,
+    assert_eq!(
+        writer_runtime_verdict.blockers,
+        vec![
+            Blocker::IbkrContactPerformed,
+            Blocker::ConnectorRuntimeStarted,
+            Blocker::BrokerFillImportPerformed,
+            Blocker::ShadowFillGenerated,
+            Blocker::ReconciliationWriterStarted,
+            Blocker::ScorecardWriterStarted,
+            Blocker::DbApplyPerformed,
+            Blocker::EvidenceClockStarted,
+            Blocker::SecretContentSerialized,
+            Blocker::LiveOrTinyLiveAuthorized,
+        ]
     );
 }
 
@@ -623,9 +427,7 @@ fn blocked_template_is_parseable_and_secret_free() {
     let verdict = parsed.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfScorecardDerivationBlocker::ContractIdMissing));
+    assert_eq!(verdict.blockers, default_derivation_blockers());
     assert!(!raw.contains("account_id"));
     assert!(!raw.contains("token"));
     assert!(!raw.contains("password"));
@@ -639,4 +441,40 @@ fn assert_single_blocker(
 
     assert!(!verdict.accepted);
     assert_eq!(verdict.blockers, vec![expected]);
+}
+
+fn default_derivation_blockers() -> Vec<StockEtfScorecardDerivationBlocker> {
+    use StockEtfScorecardDerivationBlocker as Blocker;
+
+    vec![
+        Blocker::ContractIdMissing,
+        Blocker::SourceVersionMismatch,
+        Blocker::WrongAssetLane,
+        Blocker::WrongBroker,
+        Blocker::EnvironmentDenied,
+        Blocker::DerivationRunIdMissing,
+        Blocker::StrategyIdMissing,
+        Blocker::UniverseVersionMissing,
+        Blocker::BenchmarkVersionMissing,
+        Blocker::AsOfDateMissing,
+        Blocker::ScorecardInputBundleHashInvalid,
+        Blocker::EvidenceClockManifestHashInvalid,
+        Blocker::DqManifestHashInvalid,
+        Blocker::PaperShadowReconciliationHashInvalid,
+        Blocker::FormulaAppendixHashInvalid,
+        Blocker::StatisticalPreregistrationHashInvalid,
+        Blocker::ScorecardManifestHashInvalid,
+        Blocker::ScorecardVerdictHashInvalid,
+        Blocker::SourceCommitHashInvalid,
+        Blocker::DerivationCodeHashInvalid,
+        Blocker::OutputArtifactHashInvalid,
+        Blocker::QcReviewHashInvalid,
+        Blocker::MitReviewHashInvalid,
+        Blocker::QaReviewHashInvalid,
+        Blocker::NotDerivedFromAtomicFactsOnly,
+        Blocker::IdempotentReplayNotProven,
+        Blocker::PaperShadowFillSeparationMissing,
+        Blocker::BybitLiveExecutionNotProtected,
+        Blocker::NotSealed,
+    ]
 }

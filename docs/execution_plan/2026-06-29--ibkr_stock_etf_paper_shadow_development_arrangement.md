@@ -8656,3 +8656,39 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 runtime、不做 socket/client construction、不執行 paper order routing、不做 broker session、不做 broker
 routing、不做 DB/evidence writer、不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權
 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
+
+## 209. 2026-07-01 PM session source checkpoint：Stock/ETF Scorecard Derivation Exact Blocker Guard
+
+本 checkpoint 補強 `StockEtfScorecardDerivationV1` scorecard derivation acceptance 的 aggregate fail-closed
+lineage，固定 default/template derivation artifacts、ID/hash-lineage aggregate drift、runtime side-effect aggregate
+failures、atomic/replay/separation/Bybit/writer cross-wire cases 的 ordered blocker vectors 或 exact single-blocker
+verdicts。這不是 Rust production behavior change、不是 IPC/API route change、不是 IBKR contact、不是 connector
+runtime、不是 socket/client construction、不是 secret lookup、不是 paper order route enablement、不是
+reconciliation/scorecard writer 啟動、不是 shadow-fill generation、不是 tiny-live/live gate；只把 scorecard
+derivation source-only artifact 的 fail-closed lineage 變成 exact-blocker acceptance guard。
+
+已完成：
+
+- 在 `stock_etf_scorecard_derivation_acceptance.rs` 將 default 與 template `StockEtfScorecardDerivationV1` 固定為
+  完整順序 blocker 向量，覆蓋 contract/source、StockEtfCash/IBKR lane、environment、ID lineage、hash lineage、
+  atomic/replay/separation、Bybit protection 與 sealed posture。
+- 在同檔將 ID/hash-lineage aggregate drift、runtime side-effect aggregate failures、writer/runtime aggregate
+  failures 固定為 exact blocker vectors。
+- 移除 scorecard derivation blocker 的 loose `blockers.contains` helper checks；atomic/replay/separation/Bybit/
+  writer cross-wire cases 改為 single-blocker 或 complete-vector assertions。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Stock/ETF scorecard derivation source static pytest：`7 passed`。
+- Stock/ETF scorecard derivation Rust acceptance：`11 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、
+不改 GUI runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector
+runtime、不做 socket/client construction、不執行 paper order routing、不做 broker session、不做 broker
+routing、不做 DB/evidence writer、不啟動 scorecard writer、不啟動 reconciliation writer、不生成 shadow fill、
+不做 Linux runtime sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
