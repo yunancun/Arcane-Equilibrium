@@ -68,6 +68,95 @@ fn external_surface_gate_pass_fixture_allows_contact_without_call_side_effect() 
 }
 
 #[test]
+fn external_surface_gate_rejects_each_precontact_gap_independently() {
+    use IbkrExternalSurfaceGateBlocker as Blocker;
+
+    let cases: [(fn(&mut IbkrExternalSurfaceGateV1), Blocker); 17] = [
+        (
+            |gate| gate.contract_id = "phase2_ibkr_external_surface_gate_v1_fixture".to_string(),
+            Blocker::ContractIdMismatch,
+        ),
+        (
+            |gate| gate.source_version = 2,
+            Blocker::SourceVersionMismatch,
+        ),
+        (
+            |gate| gate.status = IbkrExternalSurfaceGateStatus::Blocked,
+            Blocker::StatusNotPass,
+        ),
+        (
+            |gate| gate.adr = "ADR-0047".to_string(),
+            Blocker::AdrMismatch,
+        ),
+        (
+            |gate| gate.amd = "AMD-2026-06-29-99".to_string(),
+            Blocker::AmdMismatch,
+        ),
+        (
+            |gate| gate.api_baseline = IbkrApiBaseline::ClientPortalWebApiDenied,
+            Blocker::ApiBaselineMismatch,
+        ),
+        (
+            |gate| gate.host_policy = IbkrHostPolicy::NetworkHostDenied,
+            Blocker::HostPolicyNotLoopbackOnly,
+        ),
+        (
+            |gate| gate.port_policy = IbkrPortPolicy::LiveOrTwsPortDenied,
+            Blocker::PortPolicyNotPaperGatewayOnly,
+        ),
+        (
+            |gate| gate.live_ports_denied = false,
+            Blocker::LivePortsNotDenied,
+        ),
+        (
+            |gate| gate.secret_contract_present = false,
+            Blocker::SecretContractMissing,
+        ),
+        (
+            |gate| gate.live_secret_absent_or_empty = false,
+            Blocker::LiveSecretPresentOrUnknown,
+        ),
+        (
+            |gate| gate.api_allowlist_present = false,
+            Blocker::ApiAllowlistMissing,
+        ),
+        (
+            |gate| gate.redaction_suite_passed = false,
+            Blocker::RedactionSuiteMissing,
+        ),
+        (
+            |gate| gate.rate_limit_policy_present = false,
+            Blocker::RateLimitPolicyMissing,
+        ),
+        (
+            |gate| gate.audit_event_policy_present = false,
+            Blocker::AuditEventPolicyMissing,
+        ),
+        (
+            |gate| gate.paper_attestation_contract_present = false,
+            Blocker::PaperAttestationContractMissing,
+        ),
+        (
+            |gate| gate.python_no_write_guard_present = false,
+            Blocker::PythonNoWriteGuardMissing,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut gate = IbkrExternalSurfaceGateV1::passing_fixture();
+        mutate(&mut gate);
+        assert_single_external_gate_blocker(gate.validate(), blocker);
+    }
+
+    let mut retroactive = IbkrExternalSurfaceGateV1::passing_fixture();
+    retroactive.ibkr_call_performed = true;
+    assert_single_external_gate_blocker(
+        retroactive.validate(),
+        IbkrExternalSurfaceGateBlocker::IbkrCallAlreadyPerformed,
+    );
+}
+
+#[test]
 fn external_surface_gate_rejects_retroactive_or_wrong_surface_pass() {
     let wrong_identity = IbkrExternalSurfaceGateV1 {
         contract_id: "phase2_ibkr_external_surface_gate_v1_fixture".to_string(),
@@ -461,4 +550,17 @@ fn source_gate_template_is_blocked_and_secret_free() {
     assert!(!lower.contains("account_id ="));
     assert!(!lower.contains("password ="));
     assert!(!lower.contains("token ="));
+}
+
+fn assert_single_external_gate_blocker(
+    verdict: openclaw_types::IbkrExternalSurfaceGateVerdict,
+    blocker: IbkrExternalSurfaceGateBlocker,
+) {
+    assert!(!verdict.ibkr_contact_allowed);
+    assert_eq!(
+        verdict.blockers,
+        vec![blocker],
+        "expected only {blocker:?}; blockers: {:?}",
+        verdict.blockers
+    );
 }
