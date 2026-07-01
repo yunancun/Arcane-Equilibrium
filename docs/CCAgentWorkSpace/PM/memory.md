@@ -25,6 +25,11 @@
 
 ## 近期記錄
 
+## 2026-07-01 Control API Auth Source Repaired Fast Balance Ready
+
+- PM closed `P0-CURRENT-CANDIDATE-CONTROL-API-AUTH-REPAIR-FOR-NOORDER-REFRESH` as `DONE_WITH_CONCERNS`: runtime-local token path plus fast-branch proof allowed exactly one E3-approved Control API fast-balance GET; current-head supplied-json equity artifact sha `db0c68bf...` is ready with equity `9541.87588778`.
+- Boundary unchanged: no public quote, envelope rebuild, plan write, lease, private/order endpoint, PG/service/env/risk mutation, Cost Gate change, live/mainnet, fill/PnL/proof. Next blocker is fresh current-head no-order E3/BB request.
+
 ## 2026-07-01 Order-Capable Source-Stable Packet Invalidated
 
 - PM produced a clean `2ee1e187` source-stability READY artifact and blocked packet sha `db1b8552...`, but stopped before E3/BB request generation because source advanced to `87ce8fbb...`.
