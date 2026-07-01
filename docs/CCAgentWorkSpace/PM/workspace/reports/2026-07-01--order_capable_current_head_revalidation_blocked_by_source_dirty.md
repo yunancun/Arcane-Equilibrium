@@ -8,12 +8,12 @@ Active blocker: `P0-CURRENT-CANDIDATE-ORDER-CAPABLE-DEMO-INVOKE-FRESH-WINDOW-RUN
 
 `BLOCKED_BY_RUNTIME`
 
-The current-head order-capable packet failed closed correctly on stale renewed active BBO evidence. PM did not continue to exchange-facing BBO refresh because local source drifted during review setup and the tree is now dirty with an untracked parallel-work file.
+The pre-doc current-head order-capable packet failed closed correctly on stale renewed active BBO evidence. PM did not continue to exchange-facing BBO refresh because local source drifted during review setup and the tree is now dirty with parallel-work changes.
 
 ## Evidence
 
-- Current-head packet: `/tmp/openclaw/order_capable_fresh_window_current_head_revalidation_20260701T0601Z_after_stock_audit_head/packet/order_capable_demo_invoke_e3_bb_review_request.json`
-- Current-head packet sha: `f2bb2cb8e5c6d5ba249e33004e6eea7eb758693d146145cbe5392714f68f3dd4`
+- Pre-doc current-head packet: `/tmp/openclaw/order_capable_fresh_window_current_head_revalidation_20260701T0601Z_after_stock_audit_head/packet/order_capable_demo_invoke_e3_bb_review_request.json`
+- Pre-doc current-head packet sha: `f2bb2cb8e5c6d5ba249e33004e6eea7eb758693d146145cbe5392714f68f3dd4`
 - Packet status: `CURRENT_CANDIDATE_ORDER_CAPABLE_DEMO_INVOKE_REVIEW_PACKET_BLOCKED_BY_LOSS_CONTROL`
 - Loss-control blockers: `renewed_active_bbo_manifest_stale_for_review_packet`
 - Authority violations: `[]`
@@ -26,7 +26,7 @@ The current-head order-capable packet failed closed correctly on stale renewed a
 
 - Drifted request: `/tmp/openclaw/renewed_active_bbo_e3_bb_review_20260701T0601Z_current_head_stale_manifest_refresh/e3_bb_active_lease_bbo_renewed_review_request.json`
 - Drifted request sha: `bf612a5fe7b10882fa6b288ec18dd032e093d3219ab11ca2525538fbb5bdb4cd`
-- Reason closed: it was bound to a superseded source head after `origin/main` advanced, and the local tree then became dirty with untracked `tests/structure/test_stock_etf_db_evidence_ddl_source_static.py`.
+- Reason closed: it was bound to a superseded source head after `origin/main` advanced, and the local tree then became dirty with parallel Stock/ETF changes.
 
 ## Boundary
 
