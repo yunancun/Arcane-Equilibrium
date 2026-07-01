@@ -4617,3 +4617,44 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper
 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
 clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
 Bybit behavior change。
+
+## 106. 2026-07-01 PM session source checkpoint：IBKR Non-Bybit API Allowlist Source Static Guard
+
+本 checkpoint 為 `ibkr_non_bybit_api_allowlist.rs` 補上 source-only structure guard。
+這不是 external-surface gate PASS、不是 IBKR client construction、不是 read probe、
+不是 paper order submission；只把非 Bybit IBKR API action allowlist/deny matrix 的
+source invariant 機器化。
+
+已完成：
+
+- 新增 `tests/structure/test_ibkr_non_bybit_api_allowlist_source_static.py`。
+- Guard 鎖住 `ibkr_non_bybit_api_allowlist.rs` 低於 800 行 governance cap。
+- Guard 要求 allowlist contract id、action enum、denial reason enum、decision、
+  allowlist/verdict/blocker surface、classifier、required-action list 與 bucket
+  validator 保持在 source 中。
+- Guard 要求 10 個 read actions、3 個 paper-write actions、10 個 denied actions 與
+  10 個 typed denial reasons 不得消失。
+- Guard 要求 paper-write action 仍需要 external surface gate、session attestation 與
+  paper-order gates，且不能在 external gate 後直接 allowed。
+- Guard 要求 live order、live account fingerprint、transfer、margin/short/options/CFD、
+  market-data entitlement purchase、account management write、Client Portal Web API 仍
+  typed-denied。
+- Guard 要求 drift detection 保留 missing/duplicated/wrong-bucket checks，並要求
+  retroactive IBKR contact、secret serialization、Bybit live execution unprotected 都會
+  block。
+- Guard 禁止 env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens
+  與 secret material access tokens。
+
+驗證：
+
+- New structure guard py_compile：PASS。
+- Focused structure guard pytest：`5 passed`。
+- Focused Phase2 gate/allowlist acceptance：`11 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
+cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
+clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
+Bybit behavior change。
