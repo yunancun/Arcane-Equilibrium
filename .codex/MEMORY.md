@@ -1392,3 +1392,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only structure guard for `stock_etf_ibkr_readonly_probe_request.rs`, pinning the future pre-contact read-only probe request envelope.
 - The guard requires read probe kinds, allowlisted read action/operation mappings, StockEtfCash/IBKR/ReadOnly accepted fixture, Phase2 gate/allowlist/secret-slot/topology/session/redaction/rate-limit/audit lineage hashes, no contact/runtime/secret/order/DB/evidence-clock/Bybit/live/account-write/entitlement/client-portal/Python-write flags, and no runtime/secret/order/Bybit client tokens.
 - Verification passed: new guard `8 passed`; read-only probe request acceptance `6 passed`; full `cargo test -p openclaw_types` PASS. This grants no IBKR contact, read probe execution, connector runtime, secret access, order route, evidence writer, DB apply, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Read-Only Probe Result Import Request Source Static Guard
+
+- PM added a source-only structure guard for `stock_etf_ibkr_readonly_probe_result_import_request.rs`, pinning the future sanitized read-only probe result import request envelope.
+- The guard requires fail-closed defaults, StockEtfCash/IBKR/ReadOnly accepted fixture, read action/operation mappings, request/session/allowlist/redaction/audit/result payload/raw/redacted/source artifact lineage, as-of/import-request/idempotency/replay checks, and kind-specific health snapshot/account cash ledger/market-data provenance/instrument identity/paper lifecycle lineage checks.
+- Verification passed: new guard `10 passed`; read-only probe result import request acceptance `6 passed`; full `cargo test -p openclaw_types` PASS. This grants no IBKR contact, read probe execution, result import execution, connector runtime, secret access, evidence/scorecard writer, DB apply, order route, tiny-live/live, or Bybit behavior change.

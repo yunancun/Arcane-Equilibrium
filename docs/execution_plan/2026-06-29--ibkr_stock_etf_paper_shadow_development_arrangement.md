@@ -5401,3 +5401,49 @@ envelope source invariant 機器化。
 PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector
 runtime、不執行 read probe、不送 order、不提交 paper order、不做 DB apply、不啟動 evidence
 writer/clock、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 125. 2026-07-01 PM session source checkpoint：Stock/ETF Read-Only Probe Result Import Request Source Static Guard
+
+本 checkpoint 為 `stock_etf_ibkr_readonly_probe_result_import_request.rs` 補上 source-only
+structure guard。這不是 IBKR contact、不是 read probe execution、不是 result import
+execution、不是 connector runtime、不是 secret access、不是 evidence/scorecard writer、不是
+DB apply、不是 order route；只把 future sanitized readonly probe result import request envelope
+的 source invariant 機器化。
+
+已完成：
+
+- 新增 `tests/structure/test_stock_etf_ibkr_readonly_probe_result_import_request_source_static.py`。
+- Guard 鎖住 `stock_etf_ibkr_readonly_probe_result_import_request.rs` 低於 800 行 governance cap。
+- Guard 要求 exact `stock_etf_ibkr_readonly_probe_result_import_request_v1` contract id、request
+  fields、verdict/blocker surface、helper surface、read probe kind 列表保持在 source 中。
+- Guard 要求 default request fail-closed：CryptoPerp/Bybit/LiveReservedDenied、Client Portal API、
+  transfer/account-write operation、Denied authority、empty lineage hashes、duplicate/stale flags
+  false、all side-effect flags false。
+- Guard 要求 accepted fixture 保留 StockEtfCash/IBKR/ReadOnly、ConnectionHealthRead、HealthRead、
+  ReadOnly authority、effect=false、result-import/request/probe ids、readonly probe request、
+  session attestation、non-Bybit allowlist、redaction/audit policy、payload/raw/redacted/source
+  artifact hashes、as-of/import-request timestamps、idempotency key。
+- Guard 要求 probe kind 到 NonBybitApiAction/BrokerOperation mapping 保持完整，並要求 API action
+  必須 classify 為 read-allowed/external-gate-required/no paper-order gates。
+- Guard 要求 common lineage 保留 request/session/allowlist/redaction/audit/result payload/raw/
+  redacted/source artifact hashes、as-of <= import-request、idempotency、duplicate/stale denial。
+- Guard 要求 kind-specific downstream lineage 保留 health snapshot、account cash ledger、
+  market-data provenance、instrument identity、paper lifecycle event log 的 contract/hash checks。
+- Guard 要求 boundary flags 保留 no IBKR contact、no connector runtime、no secret serialization、
+  no result import、no evidence/scorecard writer、no DB apply、no order/paper order、no Bybit path
+  reuse、no live/tiny-live、no margin/short/options/CFD/account-write/entitlement/client-portal/
+  Python broker write。
+- Guard 禁止 env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens
+  與 secret material access tokens。
+
+驗證：
+
+- New structure guard py_compile：PASS。
+- Focused structure guard pytest：`10 passed`。
+- Focused read-only probe result import request acceptance：`6 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector
+runtime、不執行 read probe、不做 result import execution、不啟動 collector、不啟動 market-data
+ingestion、不啟動 DQ writer、不送 order、不提交 paper order、不做 DB apply、不啟動 evidence/
+scorecard writer、不啟動 evidence clock、不授權 tiny-live/live 或任何 Bybit behavior change。
