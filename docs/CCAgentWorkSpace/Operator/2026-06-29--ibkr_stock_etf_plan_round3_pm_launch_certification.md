@@ -3806,6 +3806,39 @@ Verification 已過：
 沒有 result import、沒有 DB/evidence writer、沒有 paper order route、沒有 tiny-live/live authorization，
 也沒有改動 Bybit live/demo execution 行為。
 
+## 2026-07-01 Operator Update — Stock/ETF Scorecard Derivation Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Scorecard Derivation Cross-Wire Guard`。
+
+這個 checkpoint 補強 `stock_etf_scorecard_derivation` artifact 的 atomic-facts-only / idempotent
+replay / paper-shadow separation / Bybit unchanged / writer-runtime authority cross-wire coverage。
+新增 Rust acceptance 分別證明 `derived_from_atomic_facts_only=false`、
+`idempotent_replay_proven=false`、`paper_and_shadow_fills_separate=false`、
+`bybit_live_execution_unchanged=false` 各自只觸發對應 blocker；IBKR contact / connector runtime /
+broker fill import / shadow fill / reconciliation writer / scorecard writer / DB apply / evidence clock /
+secret serialization / tiny-live/live authority 污染會觸發各自 blocker，且不誤報 derivation evidence
+posture blockers。
+
+同時新增 Python source-static fixture cross-wire guard，禁止 IBKR contact、connector runtime、
+broker fill import、shadow fill、reconciliation writer、scorecard writer、DB apply、evidence clock、
+secret serialization、tiny-live/live authority 被 hardcoded 成 true，並鎖住 default fail-closed
+posture。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Scorecard derivation source static pytest：`7 passed`
+- Scorecard derivation Rust acceptance：`6 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 scorecard derivation execution、
+沒有 reconciliation writer、沒有 scorecard writer、沒有 DB/evidence writer、沒有 paper order route、
+沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
 ## 2026-07-01 Operator Update — Stock/ETF Scorecard Input Bundle Cross-Wire Guard
 
 本 session 已完成下一個 test-only/source-static checkpoint：

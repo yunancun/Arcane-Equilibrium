@@ -224,6 +224,41 @@ def test_stock_etf_scorecard_derivation_source_keeps_accepted_sealed_shape() -> 
     assert "sealed: true" in source
 
 
+def test_stock_etf_scorecard_derivation_fixture_excludes_writer_live_and_authority_crosswire() -> None:
+    source = _source()
+    accepted_fixture = source.split("pub fn accepted_fixture() -> Self", 1)[1].split(
+        "pub fn validate(&self)",
+        1,
+    )[0]
+    default_impl = source.split("impl Default for StockEtfScorecardDerivationV1", 1)[1].split(
+        "impl StockEtfScorecardDerivationV1",
+        1,
+    )[0]
+
+    for forbidden in (
+        "ibkr_contact_performed: true",
+        "connector_runtime_started: true",
+        "broker_fill_import_performed: true",
+        "shadow_fill_generated: true",
+        "reconciliation_writer_started: true",
+        "scorecard_writer_started: true",
+        "db_apply_performed: true",
+        "evidence_clock_started: true",
+        "secret_content_serialized: true",
+        "live_or_tiny_live_authorized: true",
+    ):
+        assert forbidden not in accepted_fixture
+
+    for fail_closed in (
+        "derived_from_atomic_facts_only: false",
+        "idempotent_replay_proven: false",
+        "paper_and_shadow_fills_separate: false",
+        "bybit_live_execution_unchanged: false",
+        "sealed: false",
+    ):
+        assert fail_closed in default_impl
+
+
 def test_stock_etf_scorecard_derivation_source_keeps_id_and_hash_validation() -> None:
     source = _source()
 
