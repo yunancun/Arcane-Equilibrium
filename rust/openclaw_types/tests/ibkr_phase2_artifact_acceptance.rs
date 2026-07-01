@@ -139,6 +139,8 @@ fn artifact_rejects_blocked_or_retroactive_external_gate() {
 
 #[test]
 fn artifact_rejects_missing_review_hash_and_seal_fields() {
+    use IbkrPhase2GateArtifactBlocker as Blocker;
+
     let artifact = IbkrPhase2GateArtifactV1 {
         reviewer_roles: vec!["PM".to_string()],
         sealed: false,
@@ -150,21 +152,16 @@ fn artifact_rejects_missing_review_hash_and_seal_fields() {
     let verdict = artifact.validate();
 
     assert!(!verdict.ibkr_contact_allowed);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2GateArtifactBlocker::OperatorReviewerMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2GateArtifactBlocker::ArtifactNotSealed));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2GateArtifactBlocker::RawArtifactHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2GateArtifactBlocker::RedactedSummaryHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2GateArtifactBlocker::ImmutableStoragePathMissing));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::ImmutableStoragePathMissing,
+            Blocker::ArtifactNotSealed,
+            Blocker::OperatorReviewerMissing,
+            Blocker::RawArtifactHashInvalid,
+            Blocker::RedactedSummaryHashInvalid,
+        ]
+    );
 }
 
 #[test]

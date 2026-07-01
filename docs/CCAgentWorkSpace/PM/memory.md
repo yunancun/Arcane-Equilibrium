@@ -4040,3 +4040,10 @@
 - Source-static parsing now pins secret-slot and API-session-topology validator blocker emit order.
 - Verification passed: IBKR Phase2 runtime source static `7 passed`; IBKR Phase2 runtime Rust acceptance `9 passed`; full `cargo test -p openclaw_types` PASS; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, GUI runtime/API route/IPC behavior change, IBKR contact, connector runtime, socket/client construction, secret access, paper order routing, broker session, DB/evidence writer, scorecard writer, paper-shadow launch, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Phase2 Artifact Metadata Lineage Exact Guard
+
+- PM added test-only/source-static exact-blocker coverage for `IbkrPhase2GateArtifactV1` review/seal/hash/path aggregate metadata failures.
+- Source-static parsing now pins artifact runtime child-check order: secret contract validation, API topology validation, then runtime gate/artifact match.
+- Verification passed: IBKR Phase2 artifact source static `6 passed`; IBKR Phase2 artifact Rust acceptance `9 passed`; full `cargo test -p openclaw_types` PASS; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, GUI runtime/API route/IPC behavior change, IBKR contact, connector runtime, socket/client construction, secret access, paper order routing, broker session, DB/evidence writer, scorecard writer, paper-shadow launch, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

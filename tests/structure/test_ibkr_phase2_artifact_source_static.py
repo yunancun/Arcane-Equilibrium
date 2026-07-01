@@ -256,6 +256,12 @@ def test_ibkr_phase2_artifact_source_keeps_exact_blocker_order() -> None:
 
     positions = [validate.index(f"Blocker::{blocker}") for blocker in ordered_blockers]
     assert positions == sorted(positions)
+    assert validate.index("let secret_verdict = self.secret_slot_contract.validate()") < validate.index(
+        "let topology_verdict = self.api_session_topology.validate()"
+    )
+    assert validate.index("let topology_verdict = self.api_session_topology.validate()") < validate.index(
+        "runtime_contracts_match_gate(self, secret_verdict.accepted, topology_verdict.accepted)"
+    )
 
 
 def test_ibkr_phase2_artifact_source_has_no_runtime_secret_order_or_bybit_client_tokens() -> None:

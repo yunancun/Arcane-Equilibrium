@@ -8480,3 +8480,38 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 runtime、不做 socket/client construction、不執行 paper order routing、不做 broker session、不做 broker
 routing、不做 DB/evidence writer、不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權
 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
+
+## 204. 2026-07-01 PM session source checkpoint：IBKR Phase2 Artifact Metadata Lineage Exact Guard
+
+本 checkpoint 補強 `ibkr_phase2_artifact` 的 immutable gate artifact review/seal/hash/path aggregate
+fail-closed lineage，固定 `IbkrPhase2GateArtifactV1` missing immutable path、unsealed artifact、missing
+Operator review、invalid raw artifact hash、invalid redacted summary hash 的 ordered blocker vector，並用
+source-static parser 鎖住 secret contract validation -> API topology validation -> runtime gate/artifact match
+的 child-check order。這不是 Rust production behavior change、不是 IPC/API route change、不是 IBKR contact、
+不是 connector runtime、不是 socket/client construction、不是 secret lookup、不是 paper order route
+enablement、不是 tiny-live/live gate；只把 Phase2 immutable artifact metadata source-only fail-closed lineage
+變成 exact-blocker acceptance test 與 source-static guard。
+
+已完成：
+
+- 在 `ibkr_phase2_artifact_acceptance.rs` 將 review/seal/hash/path aggregate failure 固定為完整順序 blocker
+  向量，覆蓋 immutable path missing、artifact unsealed、Operator review missing、raw artifact hash invalid、
+  redacted summary hash invalid。
+- 在 `test_ibkr_phase2_artifact_source_static.py` 將 artifact runtime child-check order 固定為 secret contract
+  validation -> API topology validation -> runtime gate/artifact match。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- IBKR Phase2 artifact source static pytest：`6 passed`。
+- IBKR Phase2 artifact Rust acceptance：`9 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、
+不改 GUI runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector
+runtime、不做 socket/client construction、不執行 paper order routing、不做 broker session、不做 broker
+routing、不做 DB/evidence writer、不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權
+paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
