@@ -7710,3 +7710,52 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 broker fill import、不啟動 scorecard
 writer、不做 broker session、不做 broker routing、不做 DB/evidence writer、不啟動 evidence clock、不做
 paper order route、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 184. 2026-07-01 PM session source checkpoint：Stock/ETF Release Packet Authority Lineage Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_release_packet` 的 release identity、ADR/AMD/spec path、source timestamp、
+reviewer signoff、evidence hash、migration evidence、kill-disable-cleanup proof 與 final no-live posture
+coverage。這不是 Rust production behavior change、不是 IBKR contact、不是 connector runtime、不是
+secret lookup、不是 release execution、不是 DB/evidence writer、不是 scorecard writer、不是 paper order
+route、不是 tiny-live/live gate；只把 release packet artifact 的 final launch evidence lineage 與 no-live
+posture 變成 exact-blocker acceptance test 與 source-static guard。
+
+已完成：
+
+- 在 `stock_etf_release_packet_acceptance.rs` 新增
+  `release_packet_rejects_each_identity_and_path_gap_independently`。
+- Acceptance 證明 packet id missing/mismatch、source version、ADR/AMD/spec path、source commit 與
+  created timestamp gaps 都會各自只產生單一對應 blocker。
+- 在同檔新增 `release_packet_rejects_each_required_role_gap_independently`。
+- Acceptance 證明 PM/Operator/E2/E3/E4/QA/QC/MIT signoff 與 role report paths gaps 都會各自只產生
+  單一對應 blocker。
+- 在同檔新增 `release_packet_rejects_each_evidence_hash_gap_independently`。
+- Acceptance 證明 E2/E3/E4/QA logs、manifest、redaction fixture、GUI screenshot、DQ manifest、scorecard
+  regeneration、evidence archive pointer/hash gaps 都會各自只產生單一對應 blocker。
+- 在同檔新增 `release_packet_rejects_each_migration_evidence_gap_independently`。
+- Acceptance 證明 migration manifest、dry-run log 與 double-apply log gaps 都會各自只產生單一對應
+  blocker。
+- 在同檔新增 `release_packet_rejects_each_kill_disable_cleanup_gap_independently`。
+- Acceptance 證明 lane/readonly/paper disable、shadow-only preservation、collector stop、GUI disable、
+  live-secret absence、forward-only archive、destructive DB cleanup denial 與 kill proof hash gaps 都會各自只
+  產生單一對應 blocker。
+- 在同檔新增 `release_packet_rejects_each_final_posture_gap_independently`。
+- Acceptance 證明 paper-shadow window、engineering shakedown、secret serialization、live/tiny-live authority
+  與 sealed posture gaps 都會各自只產生單一對應 blocker。
+- 在 `test_stock_etf_release_packet_source_static.py` 新增 impl-block parser，精準鎖住
+  `StockEtfReleasePacketV1::accepted_fixture` / `Default` 與
+  `StockEtfKillDisableCleanupProofV1::accepted_fixture`，避免錯抓第一個 `accepted_fixture()` 區塊。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Release packet source static pytest：`9 passed`。
+- Release packet Rust acceptance：`15 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 release、不做 DB/evidence
+writer、不啟動 scorecard writer、不做 broker session、不做 broker routing、不做 paper order route、
+不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。

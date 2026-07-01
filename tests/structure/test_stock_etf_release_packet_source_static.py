@@ -142,6 +142,49 @@ def _source() -> str:
     return RELEASE_PACKET.read_text(encoding="utf-8")
 
 
+def _block_between(source: str, start_token: str, end_tokens: tuple[str, ...]) -> str:
+    start = source.index(start_token)
+    end = len(source)
+    for token in end_tokens:
+        candidate = source.find(token, start + len(start_token))
+        if candidate != -1:
+            end = min(end, candidate)
+    return source[start:end]
+
+
+def _impl_block(source: str, type_name: str) -> str:
+    return _block_between(
+        source,
+        f"impl {type_name} {{",
+        ("\nimpl ", "\n#[derive", "\nfn "),
+    )
+
+
+def _default_block(source: str, type_name: str) -> str:
+    return _block_between(
+        source,
+        f"impl Default for {type_name} {{",
+        ("\nimpl ", "\n#[derive", "\nfn "),
+    )
+
+
+def _accepted_fixture_block(source: str, type_name: str) -> str:
+    impl = _impl_block(source, type_name)
+    return _block_between(
+        impl,
+        "pub fn accepted_fixture() -> Self",
+        ("\n    pub fn validate(&self)",),
+    )
+
+
+def _release_packet_fixture_block(source: str) -> str:
+    return _accepted_fixture_block(source, "StockEtfReleasePacketV1")
+
+
+def _kill_disable_cleanup_fixture_block(source: str) -> str:
+    return _accepted_fixture_block(source, "StockEtfKillDisableCleanupProofV1")
+
+
 def test_stock_etf_release_packet_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
@@ -189,36 +232,38 @@ def test_stock_etf_release_packet_source_keeps_manifest_migration_and_kill_proof
 
 def test_stock_etf_release_packet_source_keeps_accepted_release_fixture_without_live_authority() -> None:
     source = _source()
+    fixture = _release_packet_fixture_block(source)
 
-    assert "packet_id: STOCK_ETF_RELEASE_PACKET_CONTRACT_ID.to_string()" in source
-    assert "source_version: 1" in source
-    assert "adr_path: STOCK_ETF_RELEASE_ADR_PATH.to_string()" in source
-    assert "amd_path: STOCK_ETF_RELEASE_AMD_PATH.to_string()" in source
-    assert "spec_path: STOCK_ETF_RELEASE_SPEC_PATH.to_string()" in source
-    assert "reviewer_roles: required_release_roles()" in source
-    assert "StockEtfReleaseManifestHashV1::fixture" in source
-    assert "pg_migration_evidence: StockEtfPgMigrationEvidenceV1::no_migration_fixture()" in source
-    assert "kill_disable_cleanup_proof: StockEtfKillDisableCleanupProofV1::accepted_fixture()" in source
-    assert "evidence_archive_pointer: \"archive://stock-etf/fixture\".to_string()" in source
-    assert "paper_shadow_window_complete: true" in source
-    assert "engineering_shakedown_complete: true" in source
-    assert "secret_content_serialized: false" in source
-    assert "ibkr_live_or_tiny_live_authorized: false" in source
-    assert "sealed: true" in source
+    assert "packet_id: STOCK_ETF_RELEASE_PACKET_CONTRACT_ID.to_string()" in fixture
+    assert "source_version: 1" in fixture
+    assert "adr_path: STOCK_ETF_RELEASE_ADR_PATH.to_string()" in fixture
+    assert "amd_path: STOCK_ETF_RELEASE_AMD_PATH.to_string()" in fixture
+    assert "spec_path: STOCK_ETF_RELEASE_SPEC_PATH.to_string()" in fixture
+    assert "reviewer_roles: required_release_roles()" in fixture
+    assert "StockEtfReleaseManifestHashV1::fixture" in fixture
+    assert "pg_migration_evidence: StockEtfPgMigrationEvidenceV1::no_migration_fixture()" in fixture
+    assert "kill_disable_cleanup_proof: StockEtfKillDisableCleanupProofV1::accepted_fixture()" in fixture
+    assert "evidence_archive_pointer: \"archive://stock-etf/fixture\".to_string()" in fixture
+    assert "paper_shadow_window_complete: true" in fixture
+    assert "engineering_shakedown_complete: true" in fixture
+    assert "secret_content_serialized: false" in fixture
+    assert "ibkr_live_or_tiny_live_authorized: false" in fixture
+    assert "sealed: true" in fixture
 
 
 def test_stock_etf_release_packet_fixture_excludes_live_secret_and_unsealed_crosswire() -> None:
     source = _source()
-    fixture = source.split("pub fn accepted_fixture() -> Self", 1)[1].split(
-        "pub fn validate(&self)",
-        1,
-    )[0]
-    default_impl = source.split("impl Default for StockEtfReleasePacketV1", 1)[1].split(
-        "impl StockEtfReleasePacketV1",
-        1,
-    )[0]
+    fixture = _release_packet_fixture_block(source)
+    default_impl = _default_block(source, "StockEtfReleasePacketV1")
 
     for forbidden in (
+        "source_version: 0",
+        "source_commit: String::new()",
+        "created_at_ms: 0",
+        "reviewer_roles: Vec::new()",
+        "role_report_paths: Vec::new()",
+        "manifest_hashes: Vec::new()",
+        "evidence_archive_pointer: String::new()",
         "paper_shadow_window_complete: false",
         "engineering_shakedown_complete: false",
         "secret_content_serialized: true",
@@ -228,6 +273,14 @@ def test_stock_etf_release_packet_fixture_excludes_live_secret_and_unsealed_cros
         assert forbidden not in fixture
 
     for fail_closed in (
+        "packet_id: String::new()",
+        "source_version: 0",
+        "source_commit: String::new()",
+        "created_at_ms: 0",
+        "reviewer_roles: Vec::new()",
+        "role_report_paths: Vec::new()",
+        "manifest_hashes: Vec::new()",
+        "evidence_archive_pointer: String::new()",
         "paper_shadow_window_complete: false",
         "engineering_shakedown_complete: false",
         "secret_content_serialized: false",
@@ -235,6 +288,39 @@ def test_stock_etf_release_packet_fixture_excludes_live_secret_and_unsealed_cros
         "sealed: false",
     ):
         assert fail_closed in default_impl
+
+
+def test_stock_etf_release_packet_source_keeps_kill_disable_cleanup_fixture_safe() -> None:
+    source = _source()
+    fixture = _kill_disable_cleanup_fixture_block(source)
+
+    for required in (
+        "stock_etf_lane_enabled_false: true",
+        "ibkr_readonly_enabled_false: true",
+        "ibkr_paper_enabled_false: true",
+        "stock_etf_shadow_only_true: true",
+        "collector_stopped: true",
+        "gui_stock_views_disabled_or_hidden: true",
+        "live_secret_absence_proven: true",
+        "evidence_archive_forward_only: true",
+        "destructive_db_cleanup_requested: false",
+        'proof_hash: "4".repeat(64)',
+    ):
+        assert required in fixture
+
+    for forbidden in (
+        "stock_etf_lane_enabled_false: false",
+        "ibkr_readonly_enabled_false: false",
+        "ibkr_paper_enabled_false: false",
+        "stock_etf_shadow_only_true: false",
+        "collector_stopped: false",
+        "gui_stock_views_disabled_or_hidden: false",
+        "live_secret_absence_proven: false",
+        "evidence_archive_forward_only: false",
+        "destructive_db_cleanup_requested: true",
+        "proof_hash: String::new()",
+    ):
+        assert forbidden not in fixture
 
 
 def test_stock_etf_release_packet_source_keeps_role_and_evidence_validation() -> None:

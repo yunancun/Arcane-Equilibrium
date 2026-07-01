@@ -70,6 +70,397 @@ fn accepted_fixture_completes_paper_shadow_release_without_live_authority() {
 }
 
 #[test]
+fn release_packet_rejects_each_identity_and_path_gap_independently() {
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            packet_id: String::new(),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::PacketIdMissing,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            packet_id: "stock_etf_release_packet_v1_fixture".to_string(),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::PacketIdMismatch,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            source_version: 2,
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::SourceVersionMismatch,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            adr_path: "docs/adr/wrong.md".to_string(),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::AdrPathMismatch,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            amd_path: "docs/governance_dev/amendments/wrong.md".to_string(),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::AmdPathMismatch,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            spec_path: "docs/execution_plan/specs/wrong.md".to_string(),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::SpecPathMismatch,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            source_commit: String::new(),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::SourceCommitMissing,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            created_at_ms: 0,
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::CreatedAtMissing,
+    );
+}
+
+#[test]
+fn release_packet_rejects_each_required_role_gap_independently() {
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            reviewer_roles: roles_without("PM"),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::PmSignoffMissing,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            reviewer_roles: roles_without("Operator"),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::OperatorSignoffMissing,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            reviewer_roles: roles_without("E2"),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::E2SignoffMissing,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            reviewer_roles: roles_without("E3"),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::E3SignoffMissing,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            reviewer_roles: roles_without("E4"),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::E4SignoffMissing,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            reviewer_roles: roles_without("QA"),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::QaSignoffMissing,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            reviewer_roles: roles_without("QC"),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::QcSignoffMissing,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            reviewer_roles: roles_without("MIT"),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::MitSignoffMissing,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            role_report_paths: Vec::new(),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::RoleReportsMissing,
+    );
+}
+
+#[test]
+fn release_packet_rejects_each_evidence_hash_gap_independently() {
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            e2_log_hash: "not-a-hash".to_string(),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::E2LogHashInvalid,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            e3_redaction_log_hash: String::new(),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::E3RedactionLogHashInvalid,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            e4_log_hash: "not-a-hash".to_string(),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::E4LogHashInvalid,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            qa_log_hash: "z".repeat(64),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::QaLogHashInvalid,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            manifest_hashes: Vec::new(),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::ManifestHashesInvalid,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            redaction_fixture_hash: "not-a-hash".to_string(),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::RedactionFixtureHashInvalid,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            gui_screenshot_hashes: Vec::new(),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::GuiScreenshotsMissing,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            dq_manifest_hashes: Vec::new(),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::DqManifestsMissing,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            scorecard_regeneration_hashes: Vec::new(),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::ScorecardRegenerationMissing,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            evidence_archive_pointer: String::new(),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::EvidenceArchivePointerMissing,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            evidence_archive_hash: "not-a-hash".to_string(),
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::EvidenceArchiveHashInvalid,
+    );
+}
+
+#[test]
+fn release_packet_rejects_each_migration_evidence_gap_independently() {
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            pg_migration_evidence: StockEtfPgMigrationEvidenceV1 {
+                migrations_declared: true,
+                migration_manifest_hash: String::new(),
+                pg_dry_run_log_hash: "2".repeat(64),
+                pg_double_apply_log_hash: "3".repeat(64),
+            },
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::PgMigrationManifestHashInvalid,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            pg_migration_evidence: StockEtfPgMigrationEvidenceV1 {
+                migrations_declared: true,
+                migration_manifest_hash: "1".repeat(64),
+                pg_dry_run_log_hash: String::new(),
+                pg_double_apply_log_hash: "3".repeat(64),
+            },
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::PgDryRunLogMissing,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            pg_migration_evidence: StockEtfPgMigrationEvidenceV1 {
+                migrations_declared: true,
+                migration_manifest_hash: "1".repeat(64),
+                pg_dry_run_log_hash: "2".repeat(64),
+                pg_double_apply_log_hash: String::new(),
+            },
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::PgDoubleApplyLogMissing,
+    );
+}
+
+#[test]
+fn release_packet_rejects_each_kill_disable_cleanup_gap_independently() {
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            kill_disable_cleanup_proof: StockEtfKillDisableCleanupProofV1 {
+                stock_etf_lane_enabled_false: false,
+                ..StockEtfKillDisableCleanupProofV1::accepted_fixture()
+            },
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::KillLaneFlagNotDisabled,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            kill_disable_cleanup_proof: StockEtfKillDisableCleanupProofV1 {
+                ibkr_readonly_enabled_false: false,
+                ..StockEtfKillDisableCleanupProofV1::accepted_fixture()
+            },
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::KillReadonlyFlagNotDisabled,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            kill_disable_cleanup_proof: StockEtfKillDisableCleanupProofV1 {
+                ibkr_paper_enabled_false: false,
+                ..StockEtfKillDisableCleanupProofV1::accepted_fixture()
+            },
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::KillPaperFlagNotDisabled,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            kill_disable_cleanup_proof: StockEtfKillDisableCleanupProofV1 {
+                stock_etf_shadow_only_true: false,
+                ..StockEtfKillDisableCleanupProofV1::accepted_fixture()
+            },
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::KillShadowOnlyFlagNotPreserved,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            kill_disable_cleanup_proof: StockEtfKillDisableCleanupProofV1 {
+                collector_stopped: false,
+                ..StockEtfKillDisableCleanupProofV1::accepted_fixture()
+            },
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::CollectorStopProofMissing,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            kill_disable_cleanup_proof: StockEtfKillDisableCleanupProofV1 {
+                gui_stock_views_disabled_or_hidden: false,
+                ..StockEtfKillDisableCleanupProofV1::accepted_fixture()
+            },
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::GuiDisableProofMissing,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            kill_disable_cleanup_proof: StockEtfKillDisableCleanupProofV1 {
+                live_secret_absence_proven: false,
+                ..StockEtfKillDisableCleanupProofV1::accepted_fixture()
+            },
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::LiveSecretAbsenceProofMissing,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            kill_disable_cleanup_proof: StockEtfKillDisableCleanupProofV1 {
+                evidence_archive_forward_only: false,
+                ..StockEtfKillDisableCleanupProofV1::accepted_fixture()
+            },
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::EvidenceArchiveNotForwardOnly,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            kill_disable_cleanup_proof: StockEtfKillDisableCleanupProofV1 {
+                destructive_db_cleanup_requested: true,
+                ..StockEtfKillDisableCleanupProofV1::accepted_fixture()
+            },
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::DestructiveDbCleanupRequested,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            kill_disable_cleanup_proof: StockEtfKillDisableCleanupProofV1 {
+                proof_hash: "not-a-hash".to_string(),
+                ..StockEtfKillDisableCleanupProofV1::accepted_fixture()
+            },
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::KillDisableProofHashInvalid,
+    );
+}
+
+#[test]
+fn release_packet_rejects_each_final_posture_gap_independently() {
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            paper_shadow_window_complete: false,
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::PaperShadowWindowIncomplete,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            engineering_shakedown_complete: false,
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::EngineeringShakedownIncomplete,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            secret_content_serialized: true,
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::SecretContentSerialized,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            ibkr_live_or_tiny_live_authorized: true,
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::LiveOrTinyLiveAuthorityPresent,
+    );
+    assert_single_blocker(
+        StockEtfReleasePacketV1 {
+            sealed: false,
+            ..StockEtfReleasePacketV1::accepted_fixture()
+        },
+        StockEtfReleasePacketBlocker::ReleasePacketNotSealed,
+    );
+}
+
+#[test]
 fn release_packet_requires_exact_contract_id_and_source_version() {
     let packet = StockEtfReleasePacketV1 {
         packet_id: "stock_etf_release_packet_v1_fixture".to_string(),
@@ -377,4 +768,22 @@ fn has(blockers: &[StockEtfReleasePacketBlocker], blocker: StockEtfReleasePacket
 
 fn lacks(blockers: &[StockEtfReleasePacketBlocker], blocker: StockEtfReleasePacketBlocker) -> bool {
     !blockers.contains(&blocker)
+}
+
+fn assert_single_blocker(
+    candidate: StockEtfReleasePacketV1,
+    expected: StockEtfReleasePacketBlocker,
+) {
+    let verdict = candidate.validate();
+
+    assert!(!verdict.accepted);
+    assert_eq!(verdict.blockers, vec![expected]);
+}
+
+fn roles_without(excluded: &str) -> Vec<String> {
+    StockEtfReleasePacketV1::accepted_fixture()
+        .reviewer_roles
+        .into_iter()
+        .filter(|role| role != excluded)
+        .collect()
 }
