@@ -3365,3 +3365,26 @@ Verification 已過：
 邊界不變：沒有 IBKR contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有
 read-only probe execution、沒有 result import、沒有 evidence/scorecard writer、沒有 DB apply、沒有
 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Settings Template Coverage Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF Settings Template Coverage Static Guard`。
+
+這個 guard 把 settings/template coverage 變成機器化規則：`settings/asset_lanes`、
+`settings/broker`、`settings/risk_control_rules` 中所有 `ibkr`、`stock_etf`、legacy
+`stock_market_data` TOML 檔，必須被 acceptance/structure/control-api tests 直接引用。這避免
+future template 像 read-only probe request template 一樣被加入後沒有任何 test 直接讀取。
+
+Guard 特別要求 `stock_market_data_provenance.template.toml` 這個非 `stock_etf_*` 命名例外被掃到，
+並明確排除 unrelated Bybit runtime risk configs（`risk_config_demo.toml`、`risk_config_live.toml`、
+`risk_config_paper.toml`），避免把 IBKR research-lane guard 擴散到既有 Bybit runtime config。
+
+Verification 已過：
+
+- New structure guard pytest：`3 passed`
+- Docs PM trace tests：PASS
+
+邊界不變：沒有改 settings values、沒有 IBKR contact、沒有 connector runtime、沒有 secret access、
+沒有 read-only probe execution、沒有 result import、沒有 evidence/scorecard writer、沒有 DB apply、
+沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
