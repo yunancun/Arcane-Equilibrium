@@ -4595,3 +4595,35 @@ Verification 已過：
 沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 read-only probe execution、沒有 broker
 session、沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution
 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Readonly Probe Result Import Authority Lineage Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Readonly Probe Result Import Authority Lineage Cross-Wire Guard`。
+
+這個 checkpoint 補強 `StockEtfIbkrReadonlyProbeResultImportRequestV1` 的 authority、common lineage、
+kind-specific downstream lineage、timestamp/replay 與 no-side-effect boundary coverage。新增 Rust
+acceptance 證明 contract/source/lane/broker/environment/read action/operation/authority/effect、
+result-import/request/probe ids、readonly probe request、session/allowlist/redaction/audit/artifacts、
+result timestamp/idempotency、duplicate/stale gates、downstream account/market/instrument/lifecycle
+lineage，以及 contact/runtime/secret/writer/order/DB/Bybit/live/account-write/entitlement/client-portal/
+Python-write flags 都會 fail closed。
+
+同時保留 missing import timestamp 的天然 aggregate 行為：`import_requested_at_ms=0` 必須同時命中
+`ImportRequestedAtMissing` 與 `ResultAsOfAfterImportRequested`。Python source-static parser 也鎖住
+`Default` / `accepted_fixture` block，避免 accepted fixture 被硬編成 runtime、secret、order、writer、
+Bybit cross-wire 或 empty-common-lineage posture。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Readonly probe result-import source static pytest：`11 passed`
+- Readonly probe result-import Rust acceptance：`11 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 read-only probe execution、沒有 result
+import execution、沒有 evidence/scorecard writer、沒有 broker session、沒有 paper order route、沒有
+tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
