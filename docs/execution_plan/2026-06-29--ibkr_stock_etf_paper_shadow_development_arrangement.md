@@ -4506,3 +4506,39 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper
 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
 clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
 Bybit behavior change。
+
+## 103. 2026-07-01 PM session source checkpoint：IBKR Phase2 Runtime Source Static Guard
+
+本 checkpoint 為 `ibkr_phase2_runtime.rs` 補上 source-only structure guard。這不是
+secret-slot reader、不是 gateway/TWS process start、不是 API topology probe、不是
+IBKR contact；只把 Phase 2 secret-slot contract 與 API session topology contract 的
+source hygiene 機器化。
+
+已完成：
+
+- 新增 `tests/structure/test_ibkr_phase2_runtime_source_static.py`。
+- Guard 鎖住 `ibkr_phase2_runtime.rs` 低於 800 行 governance cap。
+- Guard 要求 secret-slot / API-session-topology contract IDs、paper/live port
+  imports、secret-slot posture enum、gateway process mode、verdict/blocker types 保持
+  在 source 中。
+- Guard 要求 secret-slot source template 維持 hashed paper slot、absent live slot、
+  owner-only permission、env fallback denied、secret/account serialization false。
+- Guard 要求 API session topology 維持 `ib_gateway_tws_api`、`trade-core`、
+  loopback `127.0.0.1`、paper gateway port、PaperGateway mode、Paper environment、
+  live-port denial 與 loopback check。
+- Guard 禁止 env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens
+  與 secret material access tokens。
+
+驗證：
+
+- New structure guard py_compile：PASS。
+- Focused structure guard pytest：`4 passed`。
+- Focused Phase2 runtime acceptance：`7 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
+cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
+clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
+Bybit behavior change。
