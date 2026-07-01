@@ -10,54 +10,40 @@ use std::path::PathBuf;
 use openclaw_types::{
     AssetLane, AuthorityScope, Broker, BrokerEnvironment, BrokerOperation,
     StockEtfLaneScopedIpcMethod, StockEtfShadowSignalRequestBlocker, StockEtfShadowSignalRequestV1,
-    StockEtfShadowSignalRequestVerdict, STOCK_ETF_SHADOW_SIGNAL_REQUEST_CONTRACT_ID,
+    STOCK_ETF_SHADOW_SIGNAL_REQUEST_CONTRACT_ID,
 };
 
 #[test]
 fn default_shadow_signal_request_blocks_all_authority() {
+    use StockEtfShadowSignalRequestBlocker as Blocker;
+
     let verdict = StockEtfShadowSignalRequestV1::default().validate();
 
     assert!(!verdict.accepted);
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::ContractIdMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::SourceVersionMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::WrongAssetLane
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::WrongBroker
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::EnvironmentNotShadow
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::RequestMethodMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::OperationMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::AuthorityScopeMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::RequestIdMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::ShadowSignalIdMissing
-    ));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::ContractIdMismatch,
+            Blocker::SourceVersionMismatch,
+            Blocker::WrongAssetLane,
+            Blocker::WrongBroker,
+            Blocker::EnvironmentNotShadow,
+            Blocker::RequestMethodMismatch,
+            Blocker::OperationMismatch,
+            Blocker::AuthorityScopeMismatch,
+            Blocker::RequestIdMissing,
+            Blocker::EvaluationRunIdMissing,
+            Blocker::ShadowSignalIdMissing,
+            Blocker::EvidenceClockHashInvalid,
+            Blocker::PitUniverseContractHashInvalid,
+            Blocker::StrategyHypothesisHashInvalid,
+            Blocker::InstrumentIdentityHashInvalid,
+            Blocker::MarketDataProvenanceHashInvalid,
+            Blocker::CostModelVersionHashInvalid,
+            Blocker::AssetLaneEventsContractHashInvalid,
+            Blocker::SourceArtifactHashInvalid,
+        ]
+    );
 }
 
 #[test]
@@ -98,6 +84,8 @@ fn accepted_shadow_signal_request_validates_without_side_effects() {
 
 #[test]
 fn shadow_signal_request_rejects_method_operation_and_paper_write_cross_wire() {
+    use StockEtfShadowSignalRequestBlocker as Blocker;
+
     let wrong_method = StockEtfShadowSignalRequestV1 {
         request_method: StockEtfLaneScopedIpcMethod::ImportPaperFills,
         operation: BrokerOperation::ShadowSignalEmit,
@@ -108,22 +96,7 @@ fn shadow_signal_request_rejects_method_operation_and_paper_write_cross_wire() {
     let verdict = wrong_method.validate();
 
     assert!(!verdict.accepted);
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::RequestMethodMismatch
-    ));
-    assert!(!has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::OperationMismatch
-    ));
-    assert!(!has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::AuthorityScopeMismatch
-    ));
-    assert!(!has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::EffectCapabilityPresent
-    ));
+    assert_eq!(verdict.blockers, vec![Blocker::RequestMethodMismatch]);
 
     let wrong_operation = StockEtfShadowSignalRequestV1 {
         request_method: StockEtfLaneScopedIpcMethod::EvaluateShadowSignal,
@@ -135,22 +108,7 @@ fn shadow_signal_request_rejects_method_operation_and_paper_write_cross_wire() {
     let verdict = wrong_operation.validate();
 
     assert!(!verdict.accepted);
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::OperationMismatch
-    ));
-    assert!(!has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::RequestMethodMismatch
-    ));
-    assert!(!has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::AuthorityScopeMismatch
-    ));
-    assert!(!has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::EffectCapabilityPresent
-    ));
+    assert_eq!(verdict.blockers, vec![Blocker::OperationMismatch]);
 
     let paper_write_pollution = StockEtfShadowSignalRequestV1 {
         request_method: StockEtfLaneScopedIpcMethod::SubmitPaperOrder,
@@ -162,22 +120,15 @@ fn shadow_signal_request_rejects_method_operation_and_paper_write_cross_wire() {
     let verdict = paper_write_pollution.validate();
 
     assert!(!verdict.accepted);
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::RequestMethodMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::OperationMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::AuthorityScopeMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::EffectCapabilityPresent
-    ));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::RequestMethodMismatch,
+            Blocker::OperationMismatch,
+            Blocker::AuthorityScopeMismatch,
+            Blocker::EffectCapabilityPresent,
+        ]
+    );
 }
 
 #[test]
@@ -234,6 +185,8 @@ fn shadow_signal_request_rejects_each_authority_gap_independently() {
 
 #[test]
 fn shadow_signal_request_requires_signal_identity_and_lineage_hashes() {
+    use StockEtfShadowSignalRequestBlocker as Blocker;
+
     let bad = StockEtfShadowSignalRequestV1 {
         request_id: String::new(),
         evaluation_run_id: String::new(),
@@ -250,50 +203,23 @@ fn shadow_signal_request_requires_signal_identity_and_lineage_hashes() {
     };
     let verdict = bad.validate();
 
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::RequestIdMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::EvaluationRunIdMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::ShadowSignalIdMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::EvidenceClockHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::PitUniverseContractHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::StrategyHypothesisHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::InstrumentIdentityHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::MarketDataProvenanceHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::CostModelVersionHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::AssetLaneEventsContractHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::SourceArtifactHashInvalid
-    ));
+    assert!(!verdict.accepted);
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::RequestIdMissing,
+            Blocker::EvaluationRunIdMissing,
+            Blocker::ShadowSignalIdMissing,
+            Blocker::EvidenceClockHashInvalid,
+            Blocker::PitUniverseContractHashInvalid,
+            Blocker::StrategyHypothesisHashInvalid,
+            Blocker::InstrumentIdentityHashInvalid,
+            Blocker::MarketDataProvenanceHashInvalid,
+            Blocker::CostModelVersionHashInvalid,
+            Blocker::AssetLaneEventsContractHashInvalid,
+            Blocker::SourceArtifactHashInvalid,
+        ]
+    );
 }
 
 #[test]
@@ -356,6 +282,8 @@ fn shadow_signal_request_rejects_each_lineage_gap_independently() {
 
 #[test]
 fn shadow_signal_request_rejects_boundary_regressions() {
+    use StockEtfShadowSignalRequestBlocker as Blocker;
+
     let bad = StockEtfShadowSignalRequestV1 {
         ibkr_contact_performed: true,
         connector_runtime_started: true,
@@ -373,54 +301,24 @@ fn shadow_signal_request_rejects_boundary_regressions() {
     };
     let verdict = bad.validate();
 
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::IbkrContactPerformed
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::ConnectorRuntimeStarted
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::SecretContentSerialized
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::ShadowSignalEmitted
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::ShadowFillGenerated
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::ScorecardWriterStarted
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::DbApplyPerformed
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::OrderRouted
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::BybitPathReused
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::LiveOrTinyLiveAuthorized
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::MarginShortOptionsCfdRequested
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfShadowSignalRequestBlocker::PythonDirectBrokerWriteRequested
-    ));
+    assert!(!verdict.accepted);
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::IbkrContactPerformed,
+            Blocker::ConnectorRuntimeStarted,
+            Blocker::SecretContentSerialized,
+            Blocker::ShadowSignalEmitted,
+            Blocker::ShadowFillGenerated,
+            Blocker::ScorecardWriterStarted,
+            Blocker::DbApplyPerformed,
+            Blocker::OrderRouted,
+            Blocker::BybitPathReused,
+            Blocker::LiveOrTinyLiveAuthorized,
+            Blocker::MarginShortOptionsCfdRequested,
+            Blocker::PythonDirectBrokerWriteRequested,
+        ]
+    );
 }
 
 #[test]
@@ -514,13 +412,6 @@ fn blocked_template_is_parseable_and_secret_free() {
     assert!(!lower.contains("account_id ="));
     assert!(!lower.contains("password ="));
     assert!(!lower.contains("token ="));
-}
-
-fn has(
-    verdict: &StockEtfShadowSignalRequestVerdict,
-    blocker: StockEtfShadowSignalRequestBlocker,
-) -> bool {
-    verdict.blockers.contains(&blocker)
 }
 
 fn assert_single_blocker(
