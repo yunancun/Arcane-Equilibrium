@@ -3745,3 +3745,11 @@
 - Source-static guard now rejects hardcoded live environment, Bybit changed, IBKR contact, connector runtime, secret serialization, tiny-live/live authority, unknown adjustment marker, and zero timestamps in the source fixture, and pins default fail-closed posture.
 - Verification passed: targeted rustfmt check PASS; Phase3 evidence source static `14 passed`; Phase3 evidence Rust acceptance `23 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
 - Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, market-data ingestion, evidence writer, DB/evidence writer, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Phase3 Frozen Inputs Readiness Cross-Wire Guard
+
+- PM added test-only/source-static coverage for `StockEtfFrozenEvidenceInputsV1` source-readiness posture.
+- Acceptance now independently rejects missing universe, benchmark, cost-model, strategy-hypothesis, reference-data, and divergence-threshold hashes, zero corporate-action/FX/fee as-of, missing GUI evidence view, and missing scorecard regeneration via exact single blockers.
+- Source-static guard now rejects hardcoded missing hash, zero as-of, missing GUI evidence view, and missing scorecard regeneration in the source fixture, and pins default fail-closed posture.
+- Verification passed: targeted rustfmt check PASS; Phase3 evidence source static `15 passed`; Phase3 evidence Rust acceptance `24 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
+- Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, market-data ingestion, evidence writer, scorecard writer, DB/evidence writer, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.

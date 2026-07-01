@@ -675,6 +675,44 @@ def test_stock_etf_frozen_inputs_source_keeps_hash_and_display_readiness_checks(
     assert "!self.daily_scorecard_regeneration_passed" in child
 
 
+def test_stock_etf_frozen_inputs_fixture_excludes_missing_readiness_crosswire() -> None:
+    child = _market_data()
+    fixture = child.split("impl StockEtfFrozenEvidenceInputsV1", 1)[1].split(
+        "pub fn validate(&self)",
+        1,
+    )[0]
+    default_impl = child.split("impl Default for StockEtfFrozenEvidenceInputsV1", 1)[1].split(
+        "impl StockEtfFrozenEvidenceInputsV1",
+        1,
+    )[0]
+
+    for forbidden in (
+        'universe_hash: String::new()',
+        'benchmark_hash: String::new()',
+        'cost_model_hash: String::new()',
+        'strategy_hypothesis_hash: String::new()',
+        'reference_data_sources_contract_hash: String::new()',
+        "corporate_action_fx_fee_asof_ms: 0",
+        'paper_shadow_divergence_threshold_hash: String::new()',
+        "gui_evidence_view_available: false",
+        "daily_scorecard_regeneration_passed: false",
+    ):
+        assert forbidden not in fixture
+
+    for fail_closed in (
+        'universe_hash: String::new()',
+        'benchmark_hash: String::new()',
+        'cost_model_hash: String::new()',
+        'strategy_hypothesis_hash: String::new()',
+        'reference_data_sources_contract_hash: String::new()',
+        "corporate_action_fx_fee_asof_ms: 0",
+        'paper_shadow_divergence_threshold_hash: String::new()',
+        "gui_evidence_view_available: false",
+        "daily_scorecard_regeneration_passed: false",
+    ):
+        assert fail_closed in default_impl
+
+
 def test_stock_etf_phase3_sources_have_no_runtime_secret_order_or_bybit_client_tokens() -> None:
     combined = _combined()
     violations = []

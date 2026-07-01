@@ -172,6 +172,60 @@ fn frozen_inputs_require_reference_data_sources_contract_hash() {
 }
 
 #[test]
+fn frozen_inputs_reject_source_readiness_cross_wire_independently() {
+    let mut universe = StockEtfFrozenEvidenceInputsV1::source_fixture();
+    universe.universe_hash.clear();
+    assert_single_frozen_input_blocker(universe, StockEtfPhase3Blocker::UniverseHashInvalid);
+
+    let mut benchmark = StockEtfFrozenEvidenceInputsV1::source_fixture();
+    benchmark.benchmark_hash.clear();
+    assert_single_frozen_input_blocker(benchmark, StockEtfPhase3Blocker::BenchmarkHashInvalid);
+
+    let mut cost_model = StockEtfFrozenEvidenceInputsV1::source_fixture();
+    cost_model.cost_model_hash.clear();
+    assert_single_frozen_input_blocker(cost_model, StockEtfPhase3Blocker::CostModelHashInvalid);
+
+    let mut strategy = StockEtfFrozenEvidenceInputsV1::source_fixture();
+    strategy.strategy_hypothesis_hash.clear();
+    assert_single_frozen_input_blocker(
+        strategy,
+        StockEtfPhase3Blocker::StrategyHypothesisHashInvalid,
+    );
+
+    let mut reference = StockEtfFrozenEvidenceInputsV1::source_fixture();
+    reference.reference_data_sources_contract_hash.clear();
+    assert_single_frozen_input_blocker(
+        reference,
+        StockEtfPhase3Blocker::ReferenceDataSourcesHashInvalid,
+    );
+
+    let mut asof = StockEtfFrozenEvidenceInputsV1::source_fixture();
+    asof.corporate_action_fx_fee_asof_ms = 0;
+    assert_single_frozen_input_blocker(
+        asof,
+        StockEtfPhase3Blocker::CorporateActionFxFeeAsOfMissing,
+    );
+
+    let mut divergence = StockEtfFrozenEvidenceInputsV1::source_fixture();
+    divergence.paper_shadow_divergence_threshold_hash.clear();
+    assert_single_frozen_input_blocker(
+        divergence,
+        StockEtfPhase3Blocker::DivergenceThresholdHashInvalid,
+    );
+
+    let mut gui = StockEtfFrozenEvidenceInputsV1::source_fixture();
+    gui.gui_evidence_view_available = false;
+    assert_single_frozen_input_blocker(gui, StockEtfPhase3Blocker::GuiEvidenceViewMissing);
+
+    let mut scorecard = StockEtfFrozenEvidenceInputsV1::source_fixture();
+    scorecard.daily_scorecard_regeneration_passed = false;
+    assert_single_frozen_input_blocker(
+        scorecard,
+        StockEtfPhase3Blocker::ScorecardRegenerationMissing,
+    );
+}
+
+#[test]
 fn default_collector_run_blocks_phase3_evidence_clock() {
     let verdict = StockEtfCollectorRunV1::default().validate();
 
@@ -953,6 +1007,21 @@ fn assert_single_market_data_blocker(
 
 fn assert_single_dq_blocker(manifest: StockEtfDailyDqManifestV1, blocker: StockEtfPhase3Blocker) {
     let verdict = manifest.validates_shape();
+
+    assert!(!verdict.accepted);
+    assert_eq!(
+        verdict.blockers,
+        vec![blocker],
+        "expected only {blocker:?}; blockers: {:?}",
+        verdict.blockers
+    );
+}
+
+fn assert_single_frozen_input_blocker(
+    frozen_inputs: StockEtfFrozenEvidenceInputsV1,
+    blocker: StockEtfPhase3Blocker,
+) {
+    let verdict = frozen_inputs.validate();
 
     assert!(!verdict.accepted);
     assert_eq!(

@@ -4252,3 +4252,31 @@ Verification 已過：
 沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 market-data ingestion、沒有
 evidence writer、沒有 DB/evidence writer、沒有 paper order route、沒有 tiny-live/live authorization，
 也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Phase3 Frozen Inputs Readiness Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Phase3 Frozen Inputs Readiness Cross-Wire Guard`。
+
+這個 checkpoint 補強 `StockEtfFrozenEvidenceInputsV1` 的 frozen source hashes /
+corporate-action-FX-fee as-of / paper-shadow divergence threshold / GUI evidence view readiness /
+daily scorecard regeneration readiness coverage。新增 Rust acceptance 證明各 hash 缺失、zero as-of、
+missing GUI evidence view、missing scorecard regeneration 都會各自只產生單一對應 blocker。
+
+同時新增 Python source-static frozen-input fixture body guard，禁止 missing hash、zero as-of、
+missing GUI evidence view、missing scorecard regeneration 被 hardcoded 到 source fixture，並鎖住
+default fail-closed posture。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Phase3 evidence source static pytest：`15 passed`
+- Phase3 evidence Rust acceptance：`24 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 market-data ingestion、沒有
+evidence writer、沒有 scorecard writer、沒有 DB/evidence writer、沒有 paper order route、沒有
+tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
