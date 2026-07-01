@@ -4058,3 +4058,39 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不啟動 Ph
 runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
 evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
 sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 90. 2026-07-01 PM session source checkpoint：Connector Result-Import Preview Guard
+
+本 checkpoint 將 readonly probe result-import request 的 blocked preview 補進
+inert Python IBKR connector skeleton。這不是 result import runtime、不是 connector
+runtime、不是 FastAPI production wiring，也不批准 IBKR contact；只讓 connector
+skeleton 的 future-facing source-only preview surface 與 readiness/result-import
+contract 對齊。
+
+已完成：
+
+- 新增 `IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID` 與
+  `IbkrReadOnlyProbeResultImportPreview`，固定 contract id/source version、blocked
+  no-artifact status、`accepted_for_import=false`、`result_import_performed=false`、
+  writer/DB/order/live/Bybit reuse flags false。
+- `IbkrReadOnlyClient.readonly_probe_result_import_request_preview()` 回傳 secret-free
+  blocked dict；新增 matching static fixture。
+- Connector skeleton `__all__`、public client surface freeze、payload shape guard、
+  no-Bybit-import guard 與 display-only side-effect guard 已同步。
+- Connector README 明確列入 display-only readonly probe result-import request
+  preview；沒有新增 FastAPI endpoint、IPC method、GUI fanout 或 production
+  control-api import。
+
+驗證：
+
+- Python changed files `py_compile`：PASS。
+- Connector skeleton focused pytest：`8 passed`。
+- Python no-write static guard：`21 passed`。
+- Full Stock/ETF FastAPI/static pytest：`120 passed`。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
+cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
+clock、不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權 tiny-live/live
+或任何 Bybit behavior change。

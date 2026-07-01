@@ -15,15 +15,18 @@ import program_code.broker_connectors.ibkr_connector as ibkr_connector  # noqa: 
 from program_code.broker_connectors.ibkr_connector import (  # noqa: E402
     IBKR_CONNECTOR_SURFACE_ID,
     IBKR_PAPER_ATTESTATION_CONTRACT_ID,
+    IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID,
     IBKR_SESSION_ATTESTATION_CONTRACT_ID,
     IbkrPaperAttestationPreview,
     IbkrPaperClientBoundary,
     IbkrReadOnlyClient,
     IbkrReadOnlyEndpointConfig,
+    IbkrReadOnlyProbeResultImportPreview,
     IbkrSessionAttestationPreview,
 )
 from program_code.broker_connectors.ibkr_connector.fixtures import (  # noqa: E402
     blocked_paper_attestation_fixture,
+    blocked_readonly_probe_result_import_fixture,
     blocked_readonly_fixture,
     blocked_session_attestation_fixture,
 )
@@ -125,6 +128,32 @@ SESSION_ATTESTATION_KEYS = {
     "status",
 }
 
+READONLY_PROBE_RESULT_IMPORT_KEYS = {
+    "accepted_for_import",
+    "asset_lane",
+    "blockers",
+    "broker",
+    "bybit_path_reused",
+    "connector_runtime_started",
+    "contract_id",
+    "db_apply_performed",
+    "environment",
+    "evidence_writer_started",
+    "ibkr_contact_performed",
+    "live_or_tiny_live_authorized",
+    "network_contact_performed",
+    "order_routed",
+    "paper_order_submitted",
+    "request_artifact_present",
+    "request_validated",
+    "result_import_performed",
+    "scorecard_writer_started",
+    "secret_content_loaded",
+    "secret_content_serialized",
+    "source_version",
+    "status",
+}
+
 PAPER_ATTESTATION_KEYS = {
     "accepted",
     "account_fingerprint_present",
@@ -145,33 +174,48 @@ PAPER_ATTESTATION_KEYS = {
 }
 
 SIDE_EFFECT_FALSE_KEYS = {
+    "accepted_for_import",
     "account_snapshot_loaded",
     "broker_write_authority",
     "bybit_path_reused",
+    "connector_runtime_started",
     "contract_details_loaded",
     "db_apply_authority",
+    "db_apply_performed",
+    "evidence_writer_started",
     "fill_import_readiness",
+    "ibkr_contact_performed",
     "live_channel_exposed",
+    "live_or_tiny_live_authorized",
     "market_data_loaded",
     "network_contact_allowed",
     "network_contact_performed",
     "order_write_method_present",
+    "order_routed",
     "paper_channel_exposed",
     "paper_lifecycle_readiness",
+    "paper_order_submitted",
     "paper_account_attestation_present",
     "python_broker_write_authority",
     "python_import_side_effects",
+    "request_artifact_present",
+    "request_validated",
+    "result_import_performed",
+    "scorecard_writer_started",
     "secret_content_loaded",
+    "secret_content_serialized",
     "session_attestation_present",
 }
 EXPECTED_CONNECTOR_EXPORTS = (
     "IBKR_CONNECTOR_SURFACE_ID",
     "IBKR_PAPER_ATTESTATION_CONTRACT_ID",
+    "IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID",
     "IBKR_SESSION_ATTESTATION_CONTRACT_ID",
     "IbkrPaperAttestationPreview",
     "IbkrPaperClientBoundary",
     "IbkrReadOnlyClient",
     "IbkrReadOnlyEndpointConfig",
+    "IbkrReadOnlyProbeResultImportPreview",
     "IbkrReadOnlySurfaceStatus",
     "IbkrSessionAttestationPreview",
 )
@@ -182,6 +226,7 @@ EXPECTED_READONLY_CLIENT_PUBLIC_SURFACE = {
     "contract_details_preview",
     "market_data_preview",
     "readiness",
+    "readonly_probe_result_import_request_preview",
     "session_attestation_preview",
 }
 EXPECTED_PAPER_CLIENT_PUBLIC_SURFACE = {
@@ -233,6 +278,10 @@ def test_ibkr_connector_package_exports_only_source_boundary_types() -> None:
         assert getattr(ibkr_connector, name) is not None
     assert IBKR_SESSION_ATTESTATION_CONTRACT_ID == "ibkr_session_attestation_v1"
     assert IBKR_PAPER_ATTESTATION_CONTRACT_ID == "ibkr_paper_attestation_v1"
+    assert (
+        IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID
+        == "stock_etf_ibkr_readonly_probe_result_import_request_v1"
+    )
 
 
 def test_ibkr_connector_skeleton_has_no_python_broker_write_methods() -> None:
@@ -240,6 +289,8 @@ def test_ibkr_connector_skeleton_has_no_python_broker_write_methods() -> None:
         assert sorted(FORBIDDEN_WRITE_METHODS.intersection(dir(cls))) == []
     assert IbkrSessionAttestationPreview().attestation_accepted is False
     assert IbkrPaperAttestationPreview().accepted is False
+    assert IbkrReadOnlyProbeResultImportPreview().accepted_for_import is False
+    assert IbkrReadOnlyProbeResultImportPreview().result_import_performed is False
 
 
 def test_ibkr_connector_client_public_surfaces_are_frozen_source_only() -> None:
@@ -327,17 +378,21 @@ def test_ibkr_connector_previews_remain_display_only() -> None:
         client.market_data_preview(),
         client.contract_details_preview(),
         client.session_attestation_preview(),
+        client.readonly_probe_result_import_request_preview(),
         paper.lifecycle_readiness(),
         paper.fill_import_readiness(),
         paper.paper_attestation_preview(),
         blocked_readonly_fixture(),
         blocked_session_attestation_fixture(),
+        blocked_readonly_probe_result_import_fixture(),
         blocked_paper_attestation_fixture(),
     ):
         assert payload.get("network_contact_performed") is False
         assert payload.get("secret_content_loaded") is False
+        assert payload.get("secret_content_serialized", False) is False
         assert payload.get("bybit_path_reused") is False
         assert payload.get("order_write_method_present", False) is False
+        assert payload.get("result_import_performed", False) is False
 
 
 def test_ibkr_connector_preview_payload_shapes_are_fail_closed() -> None:
@@ -359,6 +414,10 @@ def test_ibkr_connector_preview_payload_shapes_are_fail_closed() -> None:
             client.session_attestation_preview(),
             SESSION_ATTESTATION_KEYS,
         ),
+        "readonly_probe_result_import": (
+            client.readonly_probe_result_import_request_preview(),
+            READONLY_PROBE_RESULT_IMPORT_KEYS,
+        ),
         "paper_lifecycle": (paper.lifecycle_readiness(), PAPER_LIFECYCLE_KEYS),
         "fill_import": (paper.fill_import_readiness(), FILL_IMPORT_KEYS),
         "paper_attestation": (
@@ -369,6 +428,10 @@ def test_ibkr_connector_preview_payload_shapes_are_fail_closed() -> None:
         "session_fixture": (
             blocked_session_attestation_fixture(),
             SESSION_ATTESTATION_KEYS,
+        ),
+        "readonly_probe_result_import_fixture": (
+            blocked_readonly_probe_result_import_fixture(),
+            READONLY_PROBE_RESULT_IMPORT_KEYS,
         ),
         "paper_fixture": (
             blocked_paper_attestation_fixture(),
@@ -387,7 +450,16 @@ def test_ibkr_connector_preview_payload_shapes_are_fail_closed() -> None:
         if "attestation_accepted" in payload:
             assert payload["attestation_accepted"] is False
         if "status" in payload:
-            assert payload["status"] in {"blocked_source_only", "BLOCKED"}
+            assert payload["status"] in {
+                "blocked_source_only",
+                "BLOCKED",
+                "blocked_no_result_import_request_artifact",
+            }
+        if payload.get("contract_id") == IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID:
+            assert payload["asset_lane"] == "stock_etf_cash"
+            assert payload["broker"] == "ibkr"
+            assert payload["environment"] == "read_only"
+            assert payload["source_version"] == 1
         assert "phase2_gate_not_accepted" in payload["blockers"]
         assert len(payload["blockers"]) == len(set(payload["blockers"]))
         for key in SIDE_EFFECT_FALSE_KEYS.intersection(payload):
@@ -411,6 +483,16 @@ def test_ibkr_connector_preview_payload_shapes_are_fail_closed() -> None:
     )
     assert "session_attestation_blocked_source_only" in payloads[
         "session_attestation"
+    ][0]["blockers"]
+    assert (
+        payloads["readonly_probe_result_import"][0]["contract_id"]
+        == IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID
+    )
+    assert "probe_result_import_request_blocked_source_only" in payloads[
+        "readonly_probe_result_import"
+    ][0]["blockers"]
+    assert "probe_result_import_request_artifact_missing" in payloads[
+        "readonly_probe_result_import"
     ][0]["blockers"]
     assert (
         payloads["paper_attestation"][0]["expected_contract_id"]

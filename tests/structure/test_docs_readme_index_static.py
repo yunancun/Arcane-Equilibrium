@@ -128,6 +128,7 @@ def test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles() -> None
         "Read-Only Probe Result Import Request Contract",
         "Phase0 Result-Import Display Lineage Guard",
         "Readiness Result-Import Request Guard",
+        "Connector Result-Import Preview Guard",
     )
     plan_source = IBKR_STOCK_ETF_PLAN.read_text()
     operator_source = IBKR_STOCK_ETF_OPERATOR.read_text()

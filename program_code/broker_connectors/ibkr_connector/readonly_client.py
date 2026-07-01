@@ -6,8 +6,9 @@ from .models import (
     IBKR_CONNECTOR_SURFACE_ID,
     IbkrReadOnlyEndpointConfig,
     IbkrReadOnlySurfaceStatus,
-    blocked_session_attestation_preview,
+    blocked_readonly_probe_result_import_preview,
     blocked_readonly_status,
+    blocked_session_attestation_preview,
 )
 
 
@@ -63,4 +64,8 @@ class IbkrReadOnlyClient:
 
     def session_attestation_preview(self) -> dict[str, object]:
         status = blocked_session_attestation_preview(config=self._config)
+        return status.to_dict()
+
+    def readonly_probe_result_import_request_preview(self) -> dict[str, object]:
+        status = blocked_readonly_probe_result_import_preview(config=self._config)
         return status.to_dict()

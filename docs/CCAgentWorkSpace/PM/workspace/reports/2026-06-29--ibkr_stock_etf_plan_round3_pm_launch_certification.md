@@ -1328,3 +1328,39 @@ secret、connector runtime、read probe execution、collector start、market-dat
 ingestion、DQ writer、paper order/cancel/replace、fill import、DB apply、evidence
 writer、evidence clock、scorecard writer、tiny-live、live、Linux runtime sync/restart
 或 Bybit behavior change。
+
+## 2026-07-01 PM Session Checkpoint — Connector Result-Import Preview Guard
+
+PM 已將 readonly probe result-import request 補進 inert Python connector skeleton
+preview surface。這不是 IBKR contact approval、connector runtime approval、read-only
+probe approval、result import approval、evidence writer approval、scorecard writer
+approval 或 launch approval。
+
+已完成：
+
+- 新增 `IbkrReadOnlyProbeResultImportPreview` 與 matching blocked fixture。
+- 新增 `IbkrReadOnlyClient.readonly_probe_result_import_request_preview()`，只回傳
+  source-only blocked dict，不提供 import/execute/apply capability。
+- Public `__all__` freeze、read-only client public surface freeze、payload shape guard
+  與 display-only side-effect guard 已同步。
+- README 記錄 display-only readonly probe result-import request preview；production
+  FastAPI control API 仍不可 import connector skeleton。
+
+Verification：
+
+- Python changed files `py_compile` PASS。
+- Connector skeleton focused pytest：`8 passed`。
+- Python no-write static guard：`21 passed`。
+- Full Stock/ETF FastAPI/static pytest：`120 passed`。
+
+Dispatch 記錄：本 turn 因工具層 spawn policy 未允許 sub-agent dispatch，PM 本地完成
+narrow inert connector skeleton propagation / review / regression。此 checkpoint 為
+source-only preview hardening。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 2/3 runtime approval、IBKR contact
+approval、read-only probe approval、result import approval、evidence writer approval、
+scorecard writer approval 或 launch approval。未批准 IBKR SDK import、socket/HTTP、
+secret、connector runtime、read probe execution、collector start、market-data
+ingestion、DQ writer、paper order/cancel/replace、fill import、DB apply、evidence
+writer、evidence clock、scorecard writer、tiny-live、live、Linux runtime sync/restart
+或 Bybit behavior change。

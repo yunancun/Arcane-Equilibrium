@@ -9,6 +9,7 @@ Allowed in this package now:
 - non-secret loopback endpoint descriptors
 - display-only account, market-data, contract-detail, lifecycle, and fill-import previews
 - display-only session and paper attestation previews
+- display-only readonly probe result-import request previews
 - static fixtures for tests
 
 Denied in this package now:
