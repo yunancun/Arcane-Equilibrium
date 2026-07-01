@@ -3227,3 +3227,32 @@ Verification 已過：
 邊界不變：沒有 IBKR contact、沒有 connector runtime、沒有 reference/market-data ingest、沒有
 evidence clock、沒有 scorecard writer、沒有 DB migration/apply、沒有 tiny-live/live authorization，
 也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Strategy Hypothesis Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF Strategy Hypothesis Source Static Guard`。
+
+這個 guard 鎖住 `stock_etf_strategy_hypothesis.rs` 的 pre-registered paper-shadow strategy
+hypothesis source hygiene：exact `stock_etf_strategy_hypothesis_contract_v1` contract id、hypothesis
+fields、family/timeframe/scope enums、verdict/blocker surface、hash validator、limit/control
+validator、identifier helper 必須保留。
+
+Guard 要求 default hypothesis 維持 fail-closed：CryptoPerp/Bybit、empty id/version、
+UnknownDenied family/timeframe/scope、empty universe/cost/rule/design/preregistration hashes、zero
+holding/turnover/constituent/sample controls、all bias/metric/paper-shadow controls false、no
+profitability/live authority claim、Bybit live unchanged false、IBKR live denied false。Accepted
+fixture 必須保留 StockEtfCash/IBKR、daily momentum large-100 hypothesis id/version、
+DailyMomentum/Daily/StockAndEtf、all universe/rule/design/preregistration hashes、holding/turnover/
+constituent/sample controls、bias/multiple-testing/benchmark/cost-after/no-options-CFD-margin-short
+controls、paper-shadow-only、no profitability/live authority。
+
+Verification 已過：
+
+- New structure guard pytest：`9 passed`
+- Focused strategy hypothesis acceptance：`7 passed`
+- Full `cargo test -p openclaw_types`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 connector runtime、沒有 market-data collection、沒有
+evidence clock、沒有 scorecard writer、沒有 profitability claim、沒有 paper order、沒有
+tiny-live/live authorization，也沒有改動 Bybit live execution 行為。
