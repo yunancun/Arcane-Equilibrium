@@ -237,6 +237,64 @@ fn collector_run_rejects_side_effecting_runtime_claims() {
 }
 
 #[test]
+fn collector_run_rejects_runtime_writer_secret_and_authority_cross_wire_independently() {
+    let mut incomplete_sessions = StockEtfCollectorRunV1::source_fixture();
+    incomplete_sessions.completed_trading_sessions = STOCK_ETF_COLLECTOR_MIN_GREEN_TRADING_DAYS - 1;
+    assert_single_phase3_blocker(
+        incomplete_sessions,
+        StockEtfPhase3Blocker::CollectorCompletedSessionsMissing,
+    );
+
+    let mut bybit = StockEtfCollectorRunV1::source_fixture();
+    bybit.bybit_live_execution_unchanged = false;
+    assert_single_phase3_blocker(bybit, StockEtfPhase3Blocker::BybitLiveExecutionNotProtected);
+
+    let mut ibkr_contact = StockEtfCollectorRunV1::source_fixture();
+    ibkr_contact.ibkr_contact_performed = true;
+    assert_single_phase3_blocker(ibkr_contact, StockEtfPhase3Blocker::IbkrContactPerformed);
+
+    let mut connector = StockEtfCollectorRunV1::source_fixture();
+    connector.connector_runtime_started = true;
+    assert_single_phase3_blocker(connector, StockEtfPhase3Blocker::ConnectorRuntimeStarted);
+
+    let mut ingestion = StockEtfCollectorRunV1::source_fixture();
+    ingestion.market_data_ingestion_started = true;
+    assert_single_phase3_blocker(
+        ingestion,
+        StockEtfPhase3Blocker::CollectorMarketDataIngestionStarted,
+    );
+
+    let mut evidence_writer = StockEtfCollectorRunV1::source_fixture();
+    evidence_writer.evidence_writer_started = true;
+    assert_single_phase3_blocker(
+        evidence_writer,
+        StockEtfPhase3Blocker::CollectorEvidenceWriterStarted,
+    );
+
+    let mut scorecard_writer = StockEtfCollectorRunV1::source_fixture();
+    scorecard_writer.scorecard_writer_started = true;
+    assert_single_phase3_blocker(
+        scorecard_writer,
+        StockEtfPhase3Blocker::ScorecardWriterStarted,
+    );
+
+    let mut db_apply = StockEtfCollectorRunV1::source_fixture();
+    db_apply.db_apply_performed = true;
+    assert_single_phase3_blocker(db_apply, StockEtfPhase3Blocker::DbApplyPerformed);
+
+    let mut secret = StockEtfCollectorRunV1::source_fixture();
+    secret.secret_content_serialized = true;
+    assert_single_phase3_blocker(secret, StockEtfPhase3Blocker::SecretContentSerialized);
+
+    let mut live_authority = StockEtfCollectorRunV1::source_fixture();
+    live_authority.live_or_tiny_live_authorized = true;
+    assert_single_phase3_blocker(
+        live_authority,
+        StockEtfPhase3Blocker::LiveOrTinyLiveAuthorized,
+    );
+}
+
+#[test]
 fn default_evidence_clock_day_is_not_a_pass_day() {
     let verdict = StockEtfEvidenceClockDayV1::default().validate();
 
@@ -715,4 +773,16 @@ fn phase3_evidence_template_is_default_blocked_and_secret_free() {
     assert!(!lower.contains("account_id ="));
     assert!(!lower.contains("password ="));
     assert!(!lower.contains("token ="));
+}
+
+fn assert_single_phase3_blocker(collector: StockEtfCollectorRunV1, blocker: StockEtfPhase3Blocker) {
+    let verdict = collector.validate();
+
+    assert!(!verdict.accepted);
+    assert_eq!(
+        verdict.blockers,
+        vec![blocker],
+        "expected only {blocker:?}; blockers: {:?}",
+        verdict.blockers
+    );
 }

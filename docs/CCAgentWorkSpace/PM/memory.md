@@ -3706,3 +3706,11 @@
 - Source-static guard now rejects hardcoded runtime enabled, non-shadow, live environment, margin/short/options/CFD/transfer/live allowance, Bybit changed, IBKR contact, connector runtime, and secret serialization in the accepted fixture or source-config mapper, and pins default fail-closed posture.
 - Verification passed: targeted rustfmt check PASS; risk policy source static `6 passed`; risk policy Rust acceptance `9 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
 - Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, risk runtime enablement, order execution, DB/evidence writer, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Phase3 Collector Runtime Cross-Wire Guard
+
+- PM added test-only/source-static coverage for `StockEtfCollectorRunV1` green-session and runtime/writer authority posture.
+- Acceptance now independently rejects incomplete green sessions, Bybit-live protection loss, IBKR contact, connector runtime, market-data ingestion, evidence writer, scorecard writer, DB apply, secret serialization, and tiny-live/live authority via exact single blockers.
+- Source-static guard now rejects hardcoded live environment, zero session counts, Bybit changed, IBKR contact, connector runtime, market-data ingestion, evidence writer, scorecard writer, DB apply, secret serialization, and tiny-live/live authority in the collector fixture, and pins default fail-closed posture.
+- Verification passed: targeted rustfmt check PASS; Phase3 evidence source static `11 passed`; Phase3 evidence Rust acceptance `20 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
+- Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, market-data ingestion, evidence clock runtime, writer execution, DB/evidence writer, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.

@@ -6750,3 +6750,44 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不啟用 risk runtime、不做 order execution、
 不做 DB/evidence writer、不做 paper order route、不做 Linux runtime sync/restart、不授權 tiny-live/live
 或任何 Bybit behavior change。
+
+## 161. 2026-07-01 PM session source checkpoint：Stock/ETF Phase3 Collector Runtime Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_phase3_evidence` 中 `StockEtfCollectorRunV1` 的 green-session、
+Bybit unchanged、IBKR contact、connector runtime、market-data ingestion、evidence writer、scorecard
+writer、DB apply、secret serialization、tiny-live/live authority cross-wire coverage。這不是 Rust
+production behavior change、不是 IBKR contact、不是 connector runtime、不是 market-data ingestion、
+不是 evidence clock runtime、不是 writer execution、不是 DB apply、不是 paper order route、不是
+tiny-live/live gate；只把 collector run artifact 的 source-only、no-runtime、no-writer、no-live-authority
+posture 變成行為型 regression test 與 source-static guard。
+
+已完成：
+
+- 在 `stock_etf_phase3_evidence_acceptance.rs` 新增
+  `collector_run_rejects_runtime_writer_secret_and_authority_cross_wire_independently`。
+- Acceptance 證明 `completed_trading_sessions` 低於 required green sessions 只產生
+  `CollectorCompletedSessionsMissing`。
+- Acceptance 證明 `bybit_live_execution_unchanged=false` 只產生
+  `BybitLiveExecutionNotProtected`。
+- Acceptance 證明 `ibkr_contact_performed=true`、`connector_runtime_started=true`、
+  `market_data_ingestion_started=true`、`evidence_writer_started=true`、`scorecard_writer_started=true`、
+  `db_apply_performed=true`、`secret_content_serialized=true`、`live_or_tiny_live_authorized=true` 都會
+  各自只產生單一對應 blocker。
+- 在 `test_stock_etf_phase3_evidence_source_static.py` 新增 collector `source_fixture()` body parser，
+  禁止 live environment、zero session counts、Bybit changed、IBKR contact、connector runtime、
+  market-data ingestion、evidence writer、scorecard writer、DB apply、secret serialization、
+  tiny-live/live authority 被 hardcoded 到 collector fixture，並鎖住 default fail-closed posture。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Phase3 evidence source static pytest：`11 passed`。
+- Phase3 evidence Rust acceptance：`20 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不啟動 market-data ingestion、不啟動
+evidence clock runtime、不做 writer execution、不做 DB/evidence writer、不做 paper order route、不做
+Linux runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
