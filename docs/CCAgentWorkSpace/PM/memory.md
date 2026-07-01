@@ -4020,3 +4020,10 @@
 - Source-static parsing now pins allowlist and action-bucket validator blocker emit order, plus action matrix drift detection before denial checks.
 - Verification passed: IBKR Non-Bybit API allowlist source static `7 passed`; IBKR Non-Bybit API allowlist Rust acceptance `4 passed`; full `cargo test -p openclaw_types` PASS; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, GUI runtime/API route/IPC behavior change, IBKR contact, connector runtime, socket/client construction, secret access, paper order routing, broker session, DB/evidence writer, scorecard writer, paper-shadow launch, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Feature Flag Secret Auth Default Lineage Exact Guard
+
+- PM added test-only/source-static exact-blocker coverage for default `FeatureFlagSecretAuthMatrixV1`, readonly/paper/live/shadow/gui cases, fingerprint mismatch, aggregate secret/hash failures, and contract/source drift cases.
+- Source-static parsing now pins root validator and authorization-envelope validator blocker emit order, plus secret -> artifact -> session -> envelope validation order.
+- Verification passed: IBKR feature flag secret auth source static `7 passed`; IBKR feature flag secret auth Rust acceptance `10 passed`; full `cargo test -p openclaw_types` PASS; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, GUI runtime/API route/IPC behavior change, IBKR contact, connector runtime, socket/client construction, secret access, paper order routing, broker session, DB/evidence writer, scorecard writer, paper-shadow launch, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

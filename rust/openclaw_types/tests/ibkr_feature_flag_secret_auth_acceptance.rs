@@ -94,6 +94,8 @@ fn paper_submit_request() -> BrokerCapabilityRequest {
 
 #[test]
 fn default_feature_flag_secret_auth_matrix_blocks_contact() {
+    use FeatureFlagSecretAuthBlocker as Blocker;
+
     let verdict = evaluate_feature_flag_secret_auth_matrix(
         &FeatureFlagSecretAuthMatrixV1::default(),
         paper_submit_request(),
@@ -102,24 +104,28 @@ fn default_feature_flag_secret_auth_matrix_blocks_contact() {
 
     assert!(!verdict.allowed);
     assert_eq!(verdict.effective_authority_scope, AuthorityScope::Denied);
-    assert!(verdict
-        .blockers
-        .contains(&FeatureFlagSecretAuthBlocker::ContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&FeatureFlagSecretAuthBlocker::SourceVersionMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&FeatureFlagSecretAuthBlocker::LaneFlagDisabled));
-    assert!(verdict
-        .blockers
-        .contains(&FeatureFlagSecretAuthBlocker::PaperFlagDisabled));
-    assert!(verdict
-        .blockers
-        .contains(&FeatureFlagSecretAuthBlocker::SecretContractRejected));
-    assert!(verdict
-        .blockers
-        .contains(&FeatureFlagSecretAuthBlocker::Phase2ArtifactRejected));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::ContractIdMismatch,
+            Blocker::SourceVersionMismatch,
+            Blocker::ServerRustMatrixNotAuthoritative,
+            Blocker::GuiLaneStateOverrideNotDenied,
+            Blocker::LaneFlagDisabled,
+            Blocker::PaperFlagDisabled,
+            Blocker::ShadowOnlyBlocksPaper,
+            Blocker::SecretContractRejected,
+            Blocker::LiveSecretAbsentOrEmptyNotProven,
+            Blocker::Phase2ArtifactRejected,
+            Blocker::SessionAttestationRejected,
+            Blocker::AuthorizationEnvelopeMismatch,
+            Blocker::PermissionScopeMismatch,
+            Blocker::SecretSlotFingerprintInvalid,
+            Blocker::AccountFingerprintHashInvalid,
+            Blocker::RiskConfigHashInvalid,
+            Blocker::AuthorizationEnvelopeExpired,
+        ]
+    );
 }
 
 #[test]
@@ -128,12 +134,10 @@ fn readonly_flag_does_not_allow_paper_write() {
     let verdict = evaluate_feature_flag_secret_auth_matrix(&matrix, paper_submit_request(), NOW_MS);
 
     assert!(!verdict.allowed);
-    assert!(verdict
-        .blockers
-        .contains(&FeatureFlagSecretAuthBlocker::PaperFlagDisabled));
-    assert!(!verdict
-        .blockers
-        .contains(&FeatureFlagSecretAuthBlocker::ReadonlyFlagDisabled));
+    assert_eq!(
+        verdict.blockers,
+        vec![FeatureFlagSecretAuthBlocker::PaperFlagDisabled]
+    );
 }
 
 #[test]
@@ -147,12 +151,15 @@ fn paper_flag_does_not_allow_live_or_account_write_paths() {
     let verdict = evaluate_feature_flag_secret_auth_matrix(&matrix, live_request, NOW_MS);
 
     assert!(!verdict.allowed);
-    assert!(verdict
-        .blockers
-        .contains(&FeatureFlagSecretAuthBlocker::LiveEnvironmentDenied));
-    assert!(verdict
-        .blockers
-        .contains(&FeatureFlagSecretAuthBlocker::LiveOrAccountWriteOperationDenied));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            FeatureFlagSecretAuthBlocker::LiveEnvironmentDenied,
+            FeatureFlagSecretAuthBlocker::LiveOrAccountWriteOperationDenied,
+            FeatureFlagSecretAuthBlocker::AuthorizationEnvelopeMismatch,
+            FeatureFlagSecretAuthBlocker::PermissionScopeMismatch,
+        ]
+    );
 }
 
 #[test]
@@ -161,9 +168,10 @@ fn shadow_only_blocks_paper_even_when_readonly_and_paper_flags_are_enabled() {
     let verdict = evaluate_feature_flag_secret_auth_matrix(&matrix, paper_submit_request(), NOW_MS);
 
     assert!(!verdict.allowed);
-    assert!(verdict
-        .blockers
-        .contains(&FeatureFlagSecretAuthBlocker::ShadowOnlyBlocksPaper));
+    assert_eq!(
+        verdict.blockers,
+        vec![FeatureFlagSecretAuthBlocker::ShadowOnlyBlocksPaper]
+    );
 }
 
 #[test]
@@ -173,9 +181,10 @@ fn gui_lane_state_cannot_override_server_rust_matrix() {
     let verdict = evaluate_feature_flag_secret_auth_matrix(&matrix, paper_submit_request(), NOW_MS);
 
     assert!(!verdict.allowed);
-    assert!(verdict
-        .blockers
-        .contains(&FeatureFlagSecretAuthBlocker::GuiLaneStateOverrideNotDenied));
+    assert_eq!(
+        verdict.blockers,
+        vec![FeatureFlagSecretAuthBlocker::GuiLaneStateOverrideNotDenied]
+    );
 }
 
 #[test]
@@ -199,9 +208,10 @@ fn accepted_paper_matrix_requires_matching_secret_artifact_session_and_envelope(
     let mismatch_verdict =
         evaluate_feature_flag_secret_auth_matrix(&mismatched, paper_submit_request(), NOW_MS);
     assert!(!mismatch_verdict.allowed);
-    assert!(mismatch_verdict
-        .blockers
-        .contains(&FeatureFlagSecretAuthBlocker::AccountFingerprintMismatch));
+    assert_eq!(
+        mismatch_verdict.blockers,
+        vec![FeatureFlagSecretAuthBlocker::AccountFingerprintMismatch]
+    );
 }
 
 #[test]
@@ -354,12 +364,13 @@ fn feature_flag_secret_auth_preserves_aggregate_lineage_failures_when_hashes_are
         NOW_MS,
     );
     assert!(!verdict.allowed);
-    assert!(verdict
-        .blockers
-        .contains(&FeatureFlagSecretAuthBlocker::SecretContractRejected));
-    assert!(verdict
-        .blockers
-        .contains(&FeatureFlagSecretAuthBlocker::LiveSecretAbsentOrEmptyNotProven));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            FeatureFlagSecretAuthBlocker::SecretContractRejected,
+            FeatureFlagSecretAuthBlocker::LiveSecretAbsentOrEmptyNotProven,
+        ]
+    );
 
     let mut invalid_secret_hash = accepted_matrix(true, false);
     invalid_secret_hash
@@ -371,12 +382,13 @@ fn feature_flag_secret_auth_preserves_aggregate_lineage_failures_when_hashes_are
         NOW_MS,
     );
     assert!(!verdict.allowed);
-    assert!(verdict
-        .blockers
-        .contains(&FeatureFlagSecretAuthBlocker::SecretSlotFingerprintInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&FeatureFlagSecretAuthBlocker::SecretSlotFingerprintMismatch));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            FeatureFlagSecretAuthBlocker::SecretSlotFingerprintInvalid,
+            FeatureFlagSecretAuthBlocker::SecretSlotFingerprintMismatch,
+        ]
+    );
 
     let mut invalid_account_hash = accepted_matrix(true, false);
     invalid_account_hash
@@ -388,12 +400,13 @@ fn feature_flag_secret_auth_preserves_aggregate_lineage_failures_when_hashes_are
         NOW_MS,
     );
     assert!(!verdict.allowed);
-    assert!(verdict
-        .blockers
-        .contains(&FeatureFlagSecretAuthBlocker::AccountFingerprintHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&FeatureFlagSecretAuthBlocker::AccountFingerprintMismatch));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            FeatureFlagSecretAuthBlocker::AccountFingerprintHashInvalid,
+            FeatureFlagSecretAuthBlocker::AccountFingerprintMismatch,
+        ]
+    );
 }
 
 #[test]
@@ -406,12 +419,13 @@ fn feature_flag_secret_auth_matrix_requires_exact_contract_id_and_version() {
     let verdict = evaluate_feature_flag_secret_auth_matrix(&matrix, paper_submit_request(), NOW_MS);
 
     assert!(!verdict.allowed);
-    assert!(verdict
-        .blockers
-        .contains(&FeatureFlagSecretAuthBlocker::ContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&FeatureFlagSecretAuthBlocker::SourceVersionMismatch));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            FeatureFlagSecretAuthBlocker::ContractIdMismatch,
+            FeatureFlagSecretAuthBlocker::SourceVersionMismatch,
+        ]
+    );
 }
 
 #[test]
