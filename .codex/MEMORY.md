@@ -1344,3 +1344,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only structure guard for `stock_etf_scorecard_verdict.rs`, pinning the statistical scorecard verdict before any future tiny-live ADR discussion.
 - The guard requires fail-closed defaults, profitability-feasible fixture statistics, verdict label dispatch, formula/preregistration/reconciliation/hash lineage, window and independent-observation thresholds, divergence/PSR/DSR/LCB gates, quality labels, execution-model-invalid failure evidence, QC/MIT/QA review gates, no writer/DB/evidence-clock/tiny-live/runtime flags, and no runtime/secret/order/Bybit client tokens.
 - Verification passed: new guard `7 passed`; scorecard verdict acceptance `8 passed`; full `cargo test -p openclaw_types` PASS. This grants no IBKR contact, scorecard writer, evidence clock, DB apply, tiny-live/live authorization, gate lowering, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Tiny-Live Eligibility Source Static Guard
+
+- PM added a source-only structure guard for `stock_etf_tiny_live_eligibility.rs`, pinning the future ADR discussion-only gate.
+- The guard requires release ADR/AMD/spec paths, fail-closed default NotEligible posture, accepted AdrDiscussionOnly fixture, phase5/scorecard/reconciliation/DQ/preregistration/review hashes, paper-shadow window/statistics/review gates, explicit TinyLiveAuthorized and LiveAuthorized rejection, secret serialization denial, sealed requirement, and no runtime/secret/order/Bybit client tokens.
+- Verification passed: new guard `6 passed`; tiny-live eligibility acceptance `7 passed`; full `cargo test -p openclaw_types` PASS. This grants no tiny-live/live authorization, IBKR contact, secret access, connector runtime, evidence clock, Bybit gate lowering, or Bybit behavior change.
