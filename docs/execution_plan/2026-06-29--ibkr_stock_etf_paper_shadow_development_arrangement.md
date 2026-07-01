@@ -6041,3 +6041,34 @@ artifact。
 PM 邊界不變：此 checkpoint 不改 index 正文、不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、
 不啟動 connector runtime、不執行 read-only probe、不做 result import、不做 DB apply、不做 paper
 order route、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 142. 2026-07-01 PM session source checkpoint：Stock/ETF Dynamic Checkpoint Trace Guard
+
+本 checkpoint 將 Stock/ETF checkpoint trace title guard 從手寫長清單改成由主開發安排自動抽取。
+這不是 runtime behavior change、不是 IBKR contact、不是 connector runtime、不是 secret access、
+不是 DB migration apply、不是 paper order route；只確保主開發安排新增 PM session checkpoint 時，
+Operator round3 summary 也必須保留可搜尋 trace，避免後續交接時 PM plan 與 Operator summary 脫節。
+
+已完成：
+
+- 更新 `tests/structure/test_docs_readme_index_static.py`。
+- Guard 解析本文件所有 `PM session ... checkpoint` 標題，並要求 dynamic title list 維持目前
+  Stock/ETF checkpoint history 覆蓋規模。
+- Guard 要求每個解析出的 checkpoint title 都出現在 Operator round3 summary。
+- 移除舊的手寫 `required_titles` tuple，後續新增 checkpoint 不再需要額外手動更新測試清單。
+- Operator round3 summary 補上三個歷史 exact trace alias：
+  `Stock/ETF GUI split`、`Paper Lifecycle State-Machine Contract Hardening`、
+  `Paper Status Lifecycle Surface Hardening`。
+
+驗證：
+
+- Dynamic docs trace guard py_compile：PASS。
+- Dynamic docs trace pytest：`2 passed, 5 deselected`。
+- Full docs README/index structure pytest：known pre-existing docs README index drift remains
+  (4 failures outside the Stock/ETF trace guard)。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 production code、不新增 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 read-only probe、不做
+result import、不做 DB/evidence writer、不做 paper order route、不做 Linux runtime sync/restart、
+不授權 tiny-live/live 或任何 Bybit behavior change。

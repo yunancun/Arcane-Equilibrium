@@ -1496,3 +1496,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only guard for IBKR/Stock-ETF path-like references in `docs/_indexes/document_index.md` and `docs/_indexes/initiative_index.md`.
 - The guard resolves path-like index references to repo files while excluding endpoint/flag/method code spans, and pins required launch trace references for ADR/AMD, Phase0 artifacts, DB DDL, main plan, PM round3 report, and Operator round3 summary.
 - Verification passed: new guard `3 passed`; focused index + stable-boundary + ADR/AMD + Phase0 spec artifact subset `19 passed`; docs trace PASS. This grants no index wording change, IBKR contact, connector runtime, secret access, DB apply, paper order route, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Dynamic Checkpoint Trace Guard
+
+- PM replaced the hand-maintained Stock/ETF checkpoint title tuple in `test_docs_readme_index_static.py` with dynamic parsing of PM session checkpoint titles from the main IBKR development arrangement.
+- Operator round3 summary now carries exact trace aliases for the three historical title mismatches: `Stock/ETF GUI split`, `Paper Lifecycle State-Machine Contract Hardening`, and `Paper Status Lifecycle Surface Hardening`.
+- Verification passed: dynamic docs trace `2 passed, 5 deselected`; full docs README/index pytest still has pre-existing docs README index drift (4 failures unrelated to Stock/ETF trace); diff check PASS. This grants no production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
