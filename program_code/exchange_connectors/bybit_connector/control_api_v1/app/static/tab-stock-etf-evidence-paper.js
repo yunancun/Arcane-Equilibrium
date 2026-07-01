@@ -46,12 +46,14 @@
   function renderEvidenceStatus(data) {
     const evidence = data || evidenceFallback('api_unavailable');
     const marketData = evidence.market_data_provenance || {};
+    const collector = evidence.collector_run || {};
     const clock = evidence.evidence_clock || {};
     const frozen = evidence.frozen_inputs || {};
     const dq = evidence.dq_manifest || {};
     const scorecard = evidence.scorecard || {};
     const evidenceBlockers = []
       .concat(marketData.blockers || [])
+      .concat(collector.blockers || [])
       .concat(clock.blockers || [])
       .concat(frozen.blockers || [])
       .concat(dq.shape_blockers || [])
@@ -67,6 +69,20 @@
       kvRow('market_data_provenance.accepted', boolChip(marketData.accepted, false)),
       kvRow('market_data_provenance.ibkr_contact_performed', boolChip(marketData.ibkr_contact_performed, true)),
       kvRow('market_data_provenance.connector_runtime_started', boolChip(marketData.connector_runtime_started, true)),
+      kvRow('collector_run.accepted', boolChip(collector.accepted, false)),
+      kvRow('collector_run.contract_id', textChip(collector.contract_id || '-')),
+      kvRow(
+        'collector_run.sessions',
+        '<span class="se-code">' +
+          ocEsc(
+            'expected=' + String(collector.expected_trading_sessions || 0) +
+            ' completed=' + String(collector.completed_trading_sessions || 0)
+          ) +
+        '</span>'
+      ),
+      kvRow('collector_run.market_data_ingestion_started', boolChip(collector.market_data_ingestion_started, true)),
+      kvRow('collector_run.evidence_writer_started', boolChip(collector.evidence_writer_started, true)),
+      kvRow('collector_run.scorecard_writer_started', boolChip(collector.scorecard_writer_started, true)),
       kvRow('evidence_clock.status', textChip(clock.status || 'NOT_STARTED')),
       kvRow('evidence_clock.accepted', boolChip(clock.accepted, false)),
       kvRow('evidence_clock.started', boolChip(evidence.evidence_clock_started, true)),

@@ -10,6 +10,7 @@ _API_ALLOWLIST_READ_ACTION_COUNT = 10
 _API_ALLOWLIST_PAPER_WRITE_ACTION_COUNT = 3
 _API_ALLOWLIST_DENIED_ACTION_COUNT = 10
 _MARKET_DATA_PROVENANCE_CONTRACT_ID = "stock_market_data_provenance_v1"
+_COLLECTOR_RUN_CONTRACT_ID = "stock_etf_collector_run_v1"
 _EVIDENCE_CLOCK_CONTRACT_ID = "stock_etf_evidence_clock_v1"
 _PIT_UNIVERSE_CONTRACT_ID = "stock_etf_pit_universe_contract_v1"
 _SHADOW_FILL_MODEL_CONTRACT_ID = "stock_shadow_fill_model_v1"
@@ -129,6 +130,37 @@ def _evidence_clock_fail_closed(reason: str) -> dict[str, Any]:
         "live_or_tiny_live_authorized": False,
         "ibkr_readonly_paper_connector_green_5d": False,
         "shadow_collector_green_5d": False,
+    }
+
+
+def _collector_run_fail_closed(reason: str) -> dict[str, Any]:
+    return {
+        "expected_contract_id": _COLLECTOR_RUN_CONTRACT_ID,
+        "contract_id": "",
+        "source_version": 0,
+        "accepted": False,
+        "blockers": [reason],
+        "collector_run_id": "",
+        "trading_day": "",
+        "expected_trading_sessions": 0,
+        "completed_trading_sessions": 0,
+        "pit_universe_contract_hash_present": False,
+        "market_data_provenance_contract_hash_present": False,
+        "reference_data_sources_contract_hash_present": False,
+        "storage_capacity_contract_hash_present": False,
+        "gap_report_hash_present": False,
+        "dq_manifest_hash_present": False,
+        "replay_manifest_hash_present": False,
+        "source_artifact_hash_present": False,
+        "bybit_live_execution_unchanged": False,
+        "ibkr_contact_performed": False,
+        "connector_runtime_started": False,
+        "market_data_ingestion_started": False,
+        "evidence_writer_started": False,
+        "scorecard_writer_started": False,
+        "db_apply_performed": False,
+        "secret_content_serialized": False,
+        "live_or_tiny_live_authorized": False,
     }
 
 

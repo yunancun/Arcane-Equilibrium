@@ -28,7 +28,7 @@ def _valid_phase0_status() -> dict[str, Any]:
         "phase0_status_state": "accepted_no_runtime_authority",
         "phase0_accepted": True,
         "phase0_blockers": [],
-        "contract_count": 33,
+        "contract_count": 34,
         "contracts": [
             "asset_lane_taxonomy_v1",
             "broker_capability_registry_v1",
@@ -57,6 +57,7 @@ def _valid_phase0_status() -> dict[str, Any]:
             "benchmark_versions_v1",
             "stock_shadow_fill_model_v1",
             "stock_etf_paper_shadow_reconciliation_v1",
+            "stock_etf_collector_run_v1",
             "stock_etf_evidence_clock_v1",
             "gui_lane_contract_v1",
             "stock_etf_storage_capacity_v1",

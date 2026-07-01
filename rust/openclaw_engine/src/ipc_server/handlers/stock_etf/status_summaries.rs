@@ -856,6 +856,8 @@ pub(super) fn universe_status_summary(phase2: serde_json::Value) -> serde_json::
 pub(super) fn evidence_status_summary(phase2: serde_json::Value) -> serde_json::Value {
     let market_data_provenance = StockMarketDataProvenanceV1::default();
     let market_data_verdict = market_data_provenance.validate();
+    let collector_run = StockEtfCollectorRunV1::default();
+    let collector_run_verdict = collector_run.validate();
     let evidence_clock_day = StockEtfEvidenceClockDayV1::default();
     let evidence_clock_verdict = evidence_clock_day.validate();
     let frozen_inputs_verdict = evidence_clock_day.frozen_inputs.validate();
@@ -878,6 +880,34 @@ pub(super) fn evidence_status_summary(phase2: serde_json::Value) -> serde_json::
             "connector_runtime_started": market_data_provenance.connector_runtime_started,
             "secret_content_serialized": market_data_provenance.secret_content_serialized,
             "live_or_tiny_live_authorized": market_data_provenance.live_or_tiny_live_authorized,
+        },
+        "collector_run": {
+            "expected_contract_id": STOCK_ETF_COLLECTOR_RUN_CONTRACT_ID,
+            "contract_id": collector_run.contract_id,
+            "source_version": collector_run.source_version,
+            "accepted": collector_run_verdict.accepted,
+            "blockers": collector_run_verdict.blockers,
+            "collector_run_id": collector_run.collector_run_id,
+            "trading_day": collector_run.trading_day,
+            "expected_trading_sessions": collector_run.expected_trading_sessions,
+            "completed_trading_sessions": collector_run.completed_trading_sessions,
+            "pit_universe_contract_hash_present": !collector_run.pit_universe_contract_hash.is_empty(),
+            "market_data_provenance_contract_hash_present": !collector_run.market_data_provenance_contract_hash.is_empty(),
+            "reference_data_sources_contract_hash_present": !collector_run.reference_data_sources_contract_hash.is_empty(),
+            "storage_capacity_contract_hash_present": !collector_run.storage_capacity_contract_hash.is_empty(),
+            "gap_report_hash_present": !collector_run.gap_report_hash.is_empty(),
+            "dq_manifest_hash_present": !collector_run.dq_manifest_hash.is_empty(),
+            "replay_manifest_hash_present": !collector_run.replay_manifest_hash.is_empty(),
+            "source_artifact_hash_present": !collector_run.source_artifact_hash.is_empty(),
+            "bybit_live_execution_unchanged": collector_run.bybit_live_execution_unchanged,
+            "ibkr_contact_performed": collector_run.ibkr_contact_performed,
+            "connector_runtime_started": collector_run.connector_runtime_started,
+            "market_data_ingestion_started": collector_run.market_data_ingestion_started,
+            "evidence_writer_started": collector_run.evidence_writer_started,
+            "scorecard_writer_started": collector_run.scorecard_writer_started,
+            "db_apply_performed": collector_run.db_apply_performed,
+            "secret_content_serialized": collector_run.secret_content_serialized,
+            "live_or_tiny_live_authorized": collector_run.live_or_tiny_live_authorized,
         },
         "evidence_clock": {
             "expected_contract_id": STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,

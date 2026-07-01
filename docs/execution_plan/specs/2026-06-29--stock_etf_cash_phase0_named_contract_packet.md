@@ -1168,6 +1168,37 @@ hashes, append-only event readiness, imported paper-fill marker, synthetic
 shadow-fill marker, positive threshold, divergence within threshold, zero
 unmatched fills, and all side-effect flags false.
 
+## 17B. `stock_etf_collector_run_v1`
+
+The collector-run manifest contract pins how Phase 3 will prove five green
+trading sessions before an evidence-clock day can be counted. It is a
+source-only shape in Phase 0/1 and does not start a collector.
+
+Required fields:
+
+- exact contract id `stock_etf_collector_run_v1`
+- `source_version=1`
+- `asset_lane=stock_etf_cash`
+- `broker=ibkr`
+- read-only, paper, or shadow environment only
+- collector run id and trading day
+- PIT universe contract id/hash
+- market-data provenance contract id/hash
+- reference-data source contract id/hash
+- storage-capacity contract id/hash
+- expected and completed trading-session counts, minimum 5
+- gap report, DQ manifest, replay manifest, and source artifact hashes
+- Bybit-live unchanged proof
+- no IBKR contact, connector runtime, market-data ingestion, evidence writer,
+  scorecard writer, DB apply, serialized secret content, tiny-live, or live
+  authorization claim from the source contract/checker
+
+Source validator:
+`openclaw_types::stock_etf_phase3_evidence::StockEtfCollectorRunV1`.
+The validator rejects contract drift, wrong lane/broker/environment, missing
+run identity, missing lineage hashes, fewer than five expected sessions,
+incomplete sessions, Bybit-live regression, and all runtime side-effect claims.
+
 ## 18. `stock_etf_evidence_clock_v1`
 
 Clock start requires:

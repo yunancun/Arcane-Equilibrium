@@ -964,3 +964,45 @@ PM 判定：checkpoint 可接受，但只是 display hardening。未批准 IBKR 
 IBKR SDK import、socket/HTTP、secret、connector runtime、Phase 1/2/3/4/5 runtime
 start、paper order/cancel/replace、fill import、scorecard writer、DB apply、
 evidence clock、tiny-live、live、Linux runtime sync/restart 或 Bybit behavior change。
+
+## 2026-07-01 PM Session Checkpoint — Collector Run Contract
+
+PM 已在本 session 追加 Phase 3 source-only checkpoint：
+`stock_etf_collector_run_v1`。這是 collector run manifest contract，不是 collector
+runtime，也不是 market-data ingestion approval。
+
+已完成：
+
+- `openclaw_types` 新增 `StockEtfCollectorRunV1` validator 與 shared contract
+  constants。
+- Phase0 manifest / repository manifest / Phase0 FastAPI fixtures 從 33 named
+  contracts 更新為 34，Phase0 packet spec 新增 `stock_etf_collector_run_v1`。
+- Phase3 evidence template 新增 default-blocked `[collector_run]`。
+- Validator 要求 5 green trading sessions、PIT universe、market-data provenance、
+  reference-data sources、storage-capacity、gap report、DQ manifest、replay manifest、
+  source artifact lineage。
+- Existing evidence-status IPC/FastAPI/GUI surfaces 顯示 default-blocked
+  `collector_run`，並將 collector side-effect truthy claims 擋成 contract
+  violations。
+
+Verification：
+
+- Python changed files `py_compile` PASS。
+- Stock/ETF JS `node --check` PASS。
+- Scoped Rust `rustfmt --edition 2021 --check` PASS。
+- Full Stock/ETF FastAPI/static：`120 passed`。
+- Full `openclaw_types`：`287` tests passed。
+- Engine Stock/ETF focused：`31 passed`。
+- IBKR timeline + trace-title structure guard：`2 passed`。
+- `git diff --check` PASS。
+
+Dispatch 記錄：正常 feature/source-contract chain 應為
+`PM -> PA -> E1/E1a -> E2 -> E4 -> QA -> PM`；本 desktop session 沒有可用 sub-agent
+spawn tool，因此 PM 本地完成實作、審查與回歸，並以 focused/full tests 作為補償驗證。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 3 runtime approval、collector approval、
+market-data ingestion approval、evidence writer approval 或 launch approval。未批准
+IBKR contact、IBKR SDK import、socket/HTTP、secret、connector runtime、read probe
+execution、collector start、market-data ingestion、paper order/cancel/replace、fill
+import、scorecard writer、DB apply、evidence clock、tiny-live、live、Linux runtime
+sync/restart 或 Bybit behavior change。
