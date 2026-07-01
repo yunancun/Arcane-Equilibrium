@@ -4067,3 +4067,10 @@
 - Source-static parsing now pins session attestation validator blocker emit order, including duplicate `SecretSlotWorldReadable` emission for combined world-readable slot mode and flag regressions.
 - Verification passed: IBKR Phase2 gate source static `8 passed`; IBKR Phase2 gate Rust acceptance `13 passed`; full `cargo test -p openclaw_types` PASS; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, GUI runtime/API route/IPC behavior change, IBKR contact, connector runtime, socket/client construction, secret access, paper order routing, broker session, DB/evidence writer, scorecard writer, paper-shadow launch, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Embedded Allowlist Gate Exact Guard
+
+- PM added test-only exact-blocker coverage for the `NonBybitApiAllowlistV1` checks embedded in `ibkr_phase2_gate_acceptance`.
+- The Phase2 pre-contact gate test now pins complete ordered default allowlist blockers and complete ordered identity/baseline/action/denial/contact/secret/Bybit drift blockers.
+- Verification passed: IBKR Phase2 gate source static `8 passed`; IBKR Phase2 gate Rust acceptance `13 passed`; full `cargo test -p openclaw_types` PASS; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, GUI runtime/API route/IPC behavior change, IBKR contact, connector runtime, socket/client construction, secret access, paper order routing, broker session, DB/evidence writer, scorecard writer, paper-shadow launch, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

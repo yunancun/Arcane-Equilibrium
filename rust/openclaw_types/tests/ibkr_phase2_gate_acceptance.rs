@@ -263,17 +263,25 @@ fn non_bybit_api_allowlist_contract_pins_complete_action_matrix() {
 
 #[test]
 fn non_bybit_api_allowlist_contract_rejects_identity_and_matrix_drift() {
+    use NonBybitApiAllowlistBlocker as Blocker;
+
     let default = NonBybitApiAllowlistV1::default().validate();
+    let mut expected_default_blockers =
+        vec![Blocker::ContractIdMismatch, Blocker::SourceVersionMismatch];
+    expected_default_blockers.extend(
+        std::iter::repeat(Blocker::ActionMissing).take(required_non_bybit_api_actions().len()),
+    );
+    expected_default_blockers.extend([
+        Blocker::ClientPortalWebApiNotDenied,
+        Blocker::LiveOrderNotDenied,
+        Blocker::AccountTransferNotDenied,
+        Blocker::MarginShortOptionsCfdNotDenied,
+        Blocker::MarketDataEntitlementPurchaseNotDenied,
+        Blocker::AccountManagementWriteNotDenied,
+        Blocker::BybitLiveExecutionNotProtected,
+    ]);
     assert!(!default.accepted);
-    assert!(default
-        .blockers
-        .contains(&NonBybitApiAllowlistBlocker::ContractIdMismatch));
-    assert!(default
-        .blockers
-        .contains(&NonBybitApiAllowlistBlocker::SourceVersionMismatch));
-    assert!(default
-        .blockers
-        .contains(&NonBybitApiAllowlistBlocker::ActionMissing));
+    assert_eq!(default.blockers, expected_default_blockers);
 
     let mut drifted = NonBybitApiAllowlistV1 {
         contract_id: "non_bybit_api_allowlist_v1_fixture".to_string(),
@@ -299,51 +307,26 @@ fn non_bybit_api_allowlist_contract_rejects_identity_and_matrix_drift() {
     let verdict = drifted.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&NonBybitApiAllowlistBlocker::ContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&NonBybitApiAllowlistBlocker::SourceVersionMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&NonBybitApiAllowlistBlocker::ApiBaselineMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&NonBybitApiAllowlistBlocker::ActionMissing));
-    assert!(verdict
-        .blockers
-        .contains(&NonBybitApiAllowlistBlocker::ActionDuplicated));
-    assert!(verdict
-        .blockers
-        .contains(&NonBybitApiAllowlistBlocker::ActionInWrongBucket));
-    assert!(verdict
-        .blockers
-        .contains(&NonBybitApiAllowlistBlocker::ClientPortalWebApiNotDenied));
-    assert!(verdict
-        .blockers
-        .contains(&NonBybitApiAllowlistBlocker::LiveOrderNotDenied));
-    assert!(verdict
-        .blockers
-        .contains(&NonBybitApiAllowlistBlocker::AccountTransferNotDenied));
-    assert!(verdict
-        .blockers
-        .contains(&NonBybitApiAllowlistBlocker::MarginShortOptionsCfdNotDenied));
-    assert!(verdict
-        .blockers
-        .contains(&NonBybitApiAllowlistBlocker::MarketDataEntitlementPurchaseNotDenied));
-    assert!(verdict
-        .blockers
-        .contains(&NonBybitApiAllowlistBlocker::AccountManagementWriteNotDenied));
-    assert!(verdict
-        .blockers
-        .contains(&NonBybitApiAllowlistBlocker::IbkrContactPerformed));
-    assert!(verdict
-        .blockers
-        .contains(&NonBybitApiAllowlistBlocker::SecretContentSerialized));
-    assert!(verdict
-        .blockers
-        .contains(&NonBybitApiAllowlistBlocker::BybitLiveExecutionNotProtected));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::ContractIdMismatch,
+            Blocker::SourceVersionMismatch,
+            Blocker::ApiBaselineMismatch,
+            Blocker::ActionDuplicated,
+            Blocker::ActionInWrongBucket,
+            Blocker::ActionMissing,
+            Blocker::ClientPortalWebApiNotDenied,
+            Blocker::LiveOrderNotDenied,
+            Blocker::AccountTransferNotDenied,
+            Blocker::MarginShortOptionsCfdNotDenied,
+            Blocker::MarketDataEntitlementPurchaseNotDenied,
+            Blocker::AccountManagementWriteNotDenied,
+            Blocker::IbkrContactPerformed,
+            Blocker::SecretContentSerialized,
+            Blocker::BybitLiveExecutionNotProtected,
+        ]
+    );
 }
 
 #[test]

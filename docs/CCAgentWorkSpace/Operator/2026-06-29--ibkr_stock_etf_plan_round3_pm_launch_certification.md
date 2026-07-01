@@ -5462,3 +5462,30 @@ Verification 已過：
 contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 socket/client construction、沒有
 paper order routing、沒有 broker session、沒有 DB/evidence writer、沒有 scorecard writer、沒有 paper-shadow
 launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — IBKR Embedded Allowlist Gate Exact Guard
+
+本 session 已完成下一個 test-only checkpoint：
+`IBKR Embedded Allowlist Gate Exact Guard`。
+
+這個 checkpoint 補強 `ibkr_phase2_gate_acceptance` 內嵌的 `NonBybitApiAllowlistV1` default 與 aggregate drift
+exact fail-closed coverage。
+
+新增 Rust acceptance 證明 embedded default allowlist 與 identity/source/API baseline/action drift/denial/contact/
+secret/Bybit aggregate failures 都會以完整 ordered blocker vectors fail closed。既有 Phase2 gate source-static
+guard 與 dedicated allowlist source-static order guard 仍是 production source order 的權威證據。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- IBKR Phase2 gate source static pytest：`8 passed`
+- IBKR Phase2 gate Rust acceptance：`13 passed`
+- Full `cargo test -p openclaw_types`：PASS
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 GUI runtime/API route/IPC behavior change、沒有 IBKR
+contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 socket/client construction、沒有
+paper order routing、沒有 broker session、沒有 DB/evidence writer、沒有 scorecard writer、沒有 paper-shadow
+launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
