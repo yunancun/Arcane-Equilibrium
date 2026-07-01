@@ -3621,3 +3621,11 @@
 - Source-static guard now parses `expected_api_action` / `expected_operation` bodies and rejects paper/live order mapping pollution.
 - Verification passed: targeted rustfmt check PASS; request source static `8 passed`; request Rust acceptance `7 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
 - Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, read-only probe execution, result import, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Shadow Signal Request Cross-Wire Guard
+
+- PM added test-only/source-static coverage for `stock_etf_shadow_signal_request` IPC method / operation / scope mapping.
+- Acceptance now rejects shadow signal request method pollution with `ImportPaperFills`, operation pollution with `PaperOrderSubmit`, and paper-submit method/operation/scope/effect pollution via the expected blockers.
+- Source-static guard now rejects paper order, fill import, readonly probe, Bybit-denied method, paper operation, and live operation pollution in the shadow signal source.
+- Verification passed: targeted rustfmt check PASS; shadow signal source static `7 passed`; shadow signal Rust acceptance `6 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
+- Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, shadow signal execution, shadow fill generation, result import, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

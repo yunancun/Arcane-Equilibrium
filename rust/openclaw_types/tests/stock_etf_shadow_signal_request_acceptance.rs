@@ -97,6 +97,90 @@ fn accepted_shadow_signal_request_validates_without_side_effects() {
 }
 
 #[test]
+fn shadow_signal_request_rejects_method_operation_and_paper_write_cross_wire() {
+    let wrong_method = StockEtfShadowSignalRequestV1 {
+        request_method: StockEtfLaneScopedIpcMethod::ImportPaperFills,
+        operation: BrokerOperation::ShadowSignalEmit,
+        authority_scope: AuthorityScope::ShadowOnly,
+        effect_capable: false,
+        ..StockEtfShadowSignalRequestV1::accepted_fixture()
+    };
+    let verdict = wrong_method.validate();
+
+    assert!(!verdict.accepted);
+    assert!(has(
+        &verdict,
+        StockEtfShadowSignalRequestBlocker::RequestMethodMismatch
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfShadowSignalRequestBlocker::OperationMismatch
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfShadowSignalRequestBlocker::AuthorityScopeMismatch
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfShadowSignalRequestBlocker::EffectCapabilityPresent
+    ));
+
+    let wrong_operation = StockEtfShadowSignalRequestV1 {
+        request_method: StockEtfLaneScopedIpcMethod::EvaluateShadowSignal,
+        operation: BrokerOperation::PaperOrderSubmit,
+        authority_scope: AuthorityScope::ShadowOnly,
+        effect_capable: false,
+        ..StockEtfShadowSignalRequestV1::accepted_fixture()
+    };
+    let verdict = wrong_operation.validate();
+
+    assert!(!verdict.accepted);
+    assert!(has(
+        &verdict,
+        StockEtfShadowSignalRequestBlocker::OperationMismatch
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfShadowSignalRequestBlocker::RequestMethodMismatch
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfShadowSignalRequestBlocker::AuthorityScopeMismatch
+    ));
+    assert!(!has(
+        &verdict,
+        StockEtfShadowSignalRequestBlocker::EffectCapabilityPresent
+    ));
+
+    let paper_write_pollution = StockEtfShadowSignalRequestV1 {
+        request_method: StockEtfLaneScopedIpcMethod::SubmitPaperOrder,
+        operation: BrokerOperation::PaperOrderSubmit,
+        authority_scope: AuthorityScope::PaperRehearsal,
+        effect_capable: true,
+        ..StockEtfShadowSignalRequestV1::accepted_fixture()
+    };
+    let verdict = paper_write_pollution.validate();
+
+    assert!(!verdict.accepted);
+    assert!(has(
+        &verdict,
+        StockEtfShadowSignalRequestBlocker::RequestMethodMismatch
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfShadowSignalRequestBlocker::OperationMismatch
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfShadowSignalRequestBlocker::AuthorityScopeMismatch
+    ));
+    assert!(has(
+        &verdict,
+        StockEtfShadowSignalRequestBlocker::EffectCapabilityPresent
+    ));
+}
+
+#[test]
 fn shadow_signal_request_requires_signal_identity_and_lineage_hashes() {
     let bad = StockEtfShadowSignalRequestV1 {
         request_id: String::new(),

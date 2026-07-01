@@ -196,6 +196,34 @@ def test_stock_etf_shadow_signal_request_source_keeps_shadow_only_shape() -> Non
     assert "..Self::default()" in source
 
 
+def test_stock_etf_shadow_signal_request_source_excludes_paper_fill_readonly_and_live_crosswire() -> None:
+    source = _source()
+
+    for forbidden_method in (
+        "StockEtfLaneScopedIpcMethod::PreviewPaperOrder",
+        "StockEtfLaneScopedIpcMethod::SubmitPaperOrder",
+        "StockEtfLaneScopedIpcMethod::CancelPaperOrder",
+        "StockEtfLaneScopedIpcMethod::ReplacePaperOrder",
+        "StockEtfLaneScopedIpcMethod::ImportPaperFills",
+        "StockEtfLaneScopedIpcMethod::PreviewReadonlyProbe",
+        "StockEtfLaneScopedIpcMethod::BybitSubmitPaperOrderDenied",
+    ):
+        assert forbidden_method not in source
+
+    for forbidden_operation in (
+        "BrokerOperation::PaperOrderSubmit",
+        "BrokerOperation::PaperOrderCancel",
+        "BrokerOperation::PaperOrderReplace",
+        "BrokerOperation::PaperOrderFillImport",
+        "BrokerOperation::LiveOrderSubmit",
+    ):
+        assert forbidden_operation not in source
+
+    assert "AuthorityScope::PaperRehearsal" not in source
+    assert "AuthorityScope::ReadOnly" not in source
+    assert "effect_capable: true" not in source
+
+
 def test_stock_etf_shadow_signal_request_source_keeps_lineage_validation() -> None:
     source = _source()
 
