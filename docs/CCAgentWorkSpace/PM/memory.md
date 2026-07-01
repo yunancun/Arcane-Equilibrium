@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-01 Stock/ETF Risk Policy Exact Blocker Guard
+
+- PM tightened `StockEtfRiskPolicyV1` aggregate acceptance coverage to exact ordered blocker vectors for default fail-closed posture, contract/source mismatch, runtime/cap/cash-only regressions, universe/cost/paper-order gate gaps, and Bybit/IBKR/connector/secret boundary flags.
+- Source-static guard now pins risk policy validator blocker emit order across top-level checks, caps, cash-only controls, universe controls, cost model controls, paper-order controls, and authority boundary flags.
+- Verification passed: risk policy source static `7`, Rust acceptance `9`, full `cargo test -p openclaw_types`, cargo fmt, docs trace, and diff-check. Boundary unchanged: no Rust production code change, IBKR contact, connector/runtime, secret access/serialization, paper order route, scorecard/DB writer, tiny-live/live, or Bybit behavior change.
+
 ## 2026-07-01 Stock/ETF Data Foundation Exact Blocker Guard
 
 - PM tightened source-only data foundation acceptance coverage to exact ordered blocker vectors for `StockEtfInstrumentIdentityV1`, `StockEtfPitUniverseV1`, and `StockEtfReferenceDataSourcesV1` aggregate failure cases.

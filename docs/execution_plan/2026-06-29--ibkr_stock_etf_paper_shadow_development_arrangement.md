@@ -9259,3 +9259,42 @@ socket/client construction、不做 broker session、不執行 data/market-data 
 fill import、不做 paper order routing/cancel/replace、不做 evidence/scorecard/DB writer、不啟動 evidence clock、
 不做 release launch、不做 Linux runtime sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit
 behavior change。
+
+## 224. 2026-07-01 PM session source checkpoint：Stock/ETF Risk Policy Exact Blocker Guard
+
+本 checkpoint 補強 `StockEtfRiskPolicyV1` source-only risk policy contract 的 aggregate fail-closed lineage，固定
+default policy、contract/source drift、runtime/cap/cash-only regressions、universe/cost/paper-order gate gaps、
+Bybit/IBKR/connector/secret boundary flags 的 ordered blocker vectors 或 exact single-blocker vectors。這不是
+Rust production behavior change、不是 IPC/API route change、不是 IBKR contact、不是 connector runtime、不是
+socket/client construction、不是 secret lookup、不是 broker session、不是 paper order route enablement、不是
+evidence/scorecard/DB writer、不是 tiny-live/live gate；只把 Stock/ETF risk policy source-only contract 的
+fail-closed lineage 變成 exact-blocker acceptance guard。
+
+已完成：
+
+- 在 `stock_etf_risk_policy_acceptance.rs` 將 default `StockEtfRiskPolicyV1` 固定為完整順序 blocker 向量，
+  覆蓋 contract/source/config identity、Stock/ETF lane、IBKR broker、paper/shadow posture、caps、cash-only
+  controls、universe gates、cost-model gates、paper-order gates 與 Bybit boundary proof。
+- 在同檔將 contract/source drift、runtime/cap/cash-only aggregate regressions、universe/cost/paper-order gate
+  aggregate、Bybit/IBKR/connector/secret boundary aggregate 固定為 exact blocker vectors。
+- 移除 risk policy acceptance 中 loose `has()` / `blockers.contains` aggregate helper usage。
+- 在 `test_stock_etf_risk_policy_source_static.py` 新增 validator blocker emit-order guard，pin top-level risk
+  policy checks、caps、cash-only controls、universe controls、cost-model controls、paper-order controls 與 authority
+  boundary flags 的 source order。
+
+驗證：
+
+- No risk policy blocker `.contains()` scan：PASS。
+- Targeted rustfmt check：PASS。
+- Stock/ETF risk policy source static pytest：`7 passed`。
+- Stock/ETF risk policy Rust acceptance：`9 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、不改 GUI
+runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不做
+socket/client construction、不做 broker session、不執行 read-only probe、不執行 fill import、不做 paper order
+routing/cancel/replace、不做 evidence/scorecard/DB writer、不啟動 evidence clock、不做 release launch、不做 Linux
+runtime sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
