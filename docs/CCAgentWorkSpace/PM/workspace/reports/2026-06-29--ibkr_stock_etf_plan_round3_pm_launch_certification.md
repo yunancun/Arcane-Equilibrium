@@ -1089,3 +1089,41 @@ approval。未批准 IBKR contact、IBKR SDK import、socket/HTTP、secret、con
 runtime、read probe execution、collector start、market-data ingestion、DQ writer、
 paper order/cancel/replace、fill import、DB apply、evidence writer、evidence clock、
 scorecard writer、tiny-live、live、Linux runtime sync/restart 或 Bybit behavior change。
+
+## 2026-07-01 PM Session Checkpoint — Phase3 Evidence Module Split Guard
+
+PM 已在本 session 追加 source-only maintainability checkpoint：
+Phase3 Evidence Module Split Guard。這是 Rust module organization，不是 contract
+behavior change、runtime approval 或 launch approval。
+
+已完成：
+
+- 新增 `rust/openclaw_types/src/stock_etf_phase3_evidence/market_data.rs`。
+- 將 `StockEtfAdjustmentMarker`、`StockMarketDataProvenanceV1`、
+  `StockEtfFrozenEvidenceInputsV1` 移入子模組。
+- 原 `stock_etf_phase3_evidence` module 保留 public re-export，所以既有
+  `openclaw_types::StockMarketDataProvenanceV1` 等 public API 不變。
+- `stock_etf_phase3_evidence.rs` 從 982 行降到 742 行，低於 800 行
+  review-attention threshold；新增子模組為 254 行。
+
+Verification：
+
+- Scoped Rust `rustfmt --edition 2021 --check` PASS。
+- Phase3 evidence acceptance：`19 passed`。
+- Phase0 manifest acceptance：`6 passed`。
+- Full Stock/ETF FastAPI/static pytest：`120 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- Engine Stock/ETF focused test：PASS。
+- Docs trace：`2 passed`。
+- `git diff --check`：PASS。
+
+Dispatch 記錄：本 turn 因工具層 spawn policy 未允許 sub-agent dispatch，PM 本地完成
+narrow refactor / review / regression。這是純 structure refactor，full regression
+已在 push 前完成。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 3 runtime approval、collector approval、
+DQ writer approval、evidence-clock approval、scorecard writer approval 或 launch
+approval。未批准 IBKR contact、IBKR SDK import、socket/HTTP、secret、connector
+runtime、read probe execution、collector start、market-data ingestion、DQ writer、
+paper order/cancel/replace、fill import、DB apply、evidence writer、evidence clock、
+scorecard writer、tiny-live、live、Linux runtime sync/restart 或 Bybit behavior change。

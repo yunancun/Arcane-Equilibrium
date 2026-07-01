@@ -1395,7 +1395,41 @@ Verification 已過：
 - Scoped Rust `rustfmt --edition 2021 --check` PASS
 - Phase3 evidence acceptance：`19 passed`
 - Phase0 manifest acceptance：`6 passed`
+- Full Stock/ETF FastAPI/static pytest：`120 passed`
+- Full `cargo test -p openclaw_types` PASS
+- Engine Stock/ETF focused test PASS
+- Docs trace：`2 passed`
+- `git diff --check` PASS
 - Focused evidence-status pytest：`4 passed`
+
+邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 GUI fanout 增加、沒有 IBKR
+contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation、沒有 connector
+runtime、沒有 read probe execution、沒有 collector start、沒有 market-data ingestion、
+沒有 DQ writer、沒有 paper order/cancel/replace、沒有 fill import、沒有 DB/evidence
+writer、沒有 evidence clock、沒有 scorecard writer、沒有 Linux runtime sync/restart、
+沒有 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Phase3 Evidence Module Split Guard
+
+本 session 已完成一個 source-only maintainability checkpoint：
+Phase3 Evidence Module Split Guard。
+
+這次沒有改 contract 語義，也沒有改 FastAPI/GUI payload；只是把 Phase3
+market-data provenance 與 frozen-input contract 從
+`stock_etf_phase3_evidence.rs` 拆到
+`stock_etf_phase3_evidence/market_data.rs`，並保留原 public re-export。
+
+結果：
+
+- `stock_etf_phase3_evidence.rs` 從 982 行降到 742 行，低於 800 行
+  review-attention threshold。
+- 新子模組 `market_data.rs` 為 254 行。
+
+Verification 已過：
+
+- Scoped Rust `rustfmt --edition 2021 --check` PASS
+- Phase3 evidence acceptance：`19 passed`
+- Phase0 manifest acceptance：`6 passed`
 
 邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 GUI fanout 增加、沒有 IBKR
 contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation、沒有 connector
