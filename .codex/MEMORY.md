@@ -1362,3 +1362,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only structure guard for `stock_etf_phase0_manifest.rs`, pinning the Phase0 named contract packet manifest.
 - The guard requires manifest schema/status/scope/paths, complete required contract set, accepted StockEtfCash/IBKR shape, loopback-only IB Gateway/TWS API baseline, paper port candidate 4002, live port denial, no prior IBKR call, all global denials, phase unlock fail-closed strings, duplicate/missing/unexpected contract detection, and no runtime/secret/order/Bybit client tokens.
 - Verification passed: new guard `6 passed`; Phase0 manifest acceptance `6 passed`; full `cargo test -p openclaw_types` PASS. This grants no runtime authority, IBKR contact, connector construction, migration, evidence clock, order route, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Asset-Lane Audit Events Source Static Guard
+
+- PM added a source-only structure guard for `stock_etf_audit_events.rs`, pinning the immutable asset-lane event reference contract.
+- The guard requires exact contract id, event kinds, event fields, fail-closed default, genesis/chained fixtures, hash lineage, allowed/denied denial-reason rules, secret/raw-payload denials, and no runtime/secret/order/Bybit client tokens.
+- Verification passed: new guard `6 passed`; asset-lane audit events acceptance `9 passed`; full `cargo test -p openclaw_types` PASS. This grants no audit writer, DB apply, IBKR contact, connector runtime, paper order, evidence clock, tiny-live/live, or Bybit behavior change.

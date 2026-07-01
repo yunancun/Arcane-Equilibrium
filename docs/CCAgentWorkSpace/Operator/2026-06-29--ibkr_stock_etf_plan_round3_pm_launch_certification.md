@@ -2995,3 +2995,30 @@ Verification 已過：
 邊界不變：沒有 runtime authority、沒有 IBKR contact、沒有 connector construction、沒有
 migration、沒有 evidence clock、沒有 order route、沒有 tiny-live/live authorization，也沒有
 改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Asset-Lane Audit Events Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF Asset-Lane Audit Events Source Static Guard`。
+
+這個 guard 鎖住 `stock_etf_audit_events.rs` 的 immutable event reference source hygiene：
+exact `audit.asset_lane_events_v1` contract id、event kind 列表、event field surface、
+genesis/chained hash linkage、allowed/denied denial-reason rules、secret/raw payload denial
+必須保留。
+
+Guard 要求 default event 維持 fail-closed：`source_version=0`、`Unknown` event kind、
+sequence missing、StockEtfCash/IBKR/ReadOnly、`allowed=false`、no secret serialization、no raw
+payload inline。Validation matrix 必須保留 schema/source-version、previous hash、lane/broker、
+live denial、account/session/source hashes、input hashes、secret/raw-payload blockers。source 不得
+出現 env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens 或 secret material
+access tokens。
+
+Verification 已過：
+
+- New structure guard pytest：`6 passed`
+- Focused asset-lane audit events acceptance：`9 passed`
+- Full `cargo test -p openclaw_types`：PASS
+
+邊界不變：沒有 audit writer、沒有 DB apply、沒有 IBKR contact、沒有 connector runtime、
+沒有 paper order、沒有 evidence clock、沒有 tiny-live/live authorization，也沒有改動 Bybit
+live execution 行為。
