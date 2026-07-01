@@ -357,6 +357,50 @@ def test_stock_etf_phase3_collector_source_keeps_fail_closed_and_fixture_boundar
     assert "bybit_live_execution_unchanged: true" in parent
 
 
+def test_stock_etf_phase3_collector_fixture_excludes_runtime_writer_secret_and_authority_crosswire() -> None:
+    parent = _parent()
+    fixture = parent.split("impl StockEtfCollectorRunV1", 1)[1].split(
+        "pub fn validate(&self)",
+        1,
+    )[0]
+    default_impl = parent.split("impl Default for StockEtfCollectorRunV1", 1)[1].split(
+        "impl StockEtfCollectorRunV1",
+        1,
+    )[0]
+
+    for forbidden in (
+        "environment: BrokerEnvironment::LiveReservedDenied",
+        "expected_trading_sessions: 0",
+        "completed_trading_sessions: 0",
+        "bybit_live_execution_unchanged: false",
+        "ibkr_contact_performed: true",
+        "connector_runtime_started: true",
+        "market_data_ingestion_started: true",
+        "evidence_writer_started: true",
+        "scorecard_writer_started: true",
+        "db_apply_performed: true",
+        "secret_content_serialized: true",
+        "live_or_tiny_live_authorized: true",
+    ):
+        assert forbidden not in fixture
+
+    for fail_closed in (
+        "environment: BrokerEnvironment::LiveReservedDenied",
+        "expected_trading_sessions: 0",
+        "completed_trading_sessions: 0",
+        "bybit_live_execution_unchanged: false",
+        "ibkr_contact_performed: false",
+        "connector_runtime_started: false",
+        "market_data_ingestion_started: false",
+        "evidence_writer_started: false",
+        "scorecard_writer_started: false",
+        "db_apply_performed: false",
+        "secret_content_serialized: false",
+        "live_or_tiny_live_authorized: false",
+    ):
+        assert fail_closed in default_impl
+
+
 def test_stock_etf_phase3_collector_source_keeps_validation_matrix() -> None:
     parent = _parent()
 
