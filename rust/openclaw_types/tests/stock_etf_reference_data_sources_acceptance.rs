@@ -221,6 +221,65 @@ fn reference_sources_reject_boundary_regressions() {
 }
 
 #[test]
+fn reference_sources_reject_runtime_freeze_and_authority_cross_wire_independently() {
+    let mut environment = StockEtfReferenceDataSourcesV1::accepted_fixture();
+    environment.environment = BrokerEnvironment::LiveReservedDenied;
+    assert_single_blocker(
+        environment,
+        StockEtfReferenceDataSourcesBlocker::EnvironmentDenied,
+    );
+
+    let mut freeze = StockEtfReferenceDataSourcesV1::accepted_fixture();
+    freeze.frozen_for_evidence_clock = false;
+    assert_single_blocker(
+        freeze,
+        StockEtfReferenceDataSourcesBlocker::EvidenceClockFreezeMissing,
+    );
+
+    let mut currency = StockEtfReferenceDataSourcesV1::accepted_fixture();
+    currency.base_currency = StockEtfCurrency::UnknownDenied;
+    assert_single_blocker(
+        currency,
+        StockEtfReferenceDataSourcesBlocker::CurrencyDenied,
+    );
+
+    let mut bybit = StockEtfReferenceDataSourcesV1::accepted_fixture();
+    bybit.bybit_live_execution_unchanged = false;
+    assert_single_blocker(
+        bybit,
+        StockEtfReferenceDataSourcesBlocker::BybitLiveExecutionNotProtected,
+    );
+
+    let mut ibkr_contact = StockEtfReferenceDataSourcesV1::accepted_fixture();
+    ibkr_contact.ibkr_contact_performed = true;
+    assert_single_blocker(
+        ibkr_contact,
+        StockEtfReferenceDataSourcesBlocker::IbkrContactPerformed,
+    );
+
+    let mut connector = StockEtfReferenceDataSourcesV1::accepted_fixture();
+    connector.connector_runtime_started = true;
+    assert_single_blocker(
+        connector,
+        StockEtfReferenceDataSourcesBlocker::ConnectorRuntimeStarted,
+    );
+
+    let mut secret = StockEtfReferenceDataSourcesV1::accepted_fixture();
+    secret.secret_content_serialized = true;
+    assert_single_blocker(
+        secret,
+        StockEtfReferenceDataSourcesBlocker::SecretContentSerialized,
+    );
+
+    let mut live_authority = StockEtfReferenceDataSourcesV1::accepted_fixture();
+    live_authority.live_or_tiny_live_authorized = true;
+    assert_single_blocker(
+        live_authority,
+        StockEtfReferenceDataSourcesBlocker::LiveOrTinyLiveAuthorized,
+    );
+}
+
+#[test]
 fn blocked_template_is_parseable_and_secret_free() {
     let srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -255,4 +314,19 @@ fn has(
     blocker: StockEtfReferenceDataSourcesBlocker,
 ) -> bool {
     blockers.contains(&blocker)
+}
+
+fn assert_single_blocker(
+    sources: StockEtfReferenceDataSourcesV1,
+    blocker: StockEtfReferenceDataSourcesBlocker,
+) {
+    let verdict = sources.validate();
+
+    assert!(!verdict.accepted);
+    assert_eq!(
+        verdict.blockers,
+        vec![blocker],
+        "expected only {blocker:?}; blockers: {:?}",
+        verdict.blockers
+    );
 }

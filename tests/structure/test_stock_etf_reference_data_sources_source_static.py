@@ -229,6 +229,56 @@ def test_stock_etf_reference_data_sources_source_keeps_accepted_fixture_boundary
     assert "live_or_tiny_live_authorized: false" in source
 
 
+def test_stock_etf_reference_data_sources_fixture_excludes_runtime_and_authority_crosswire() -> None:
+    source = _source()
+    fixture = source.split("impl StockEtfReferenceDataSourcesV1", 1)[1].split(
+        "pub fn validate(",
+        1,
+    )[0]
+    default_impl = source.split("impl Default for StockEtfReferenceDataSourcesV1", 1)[1].split(
+        "impl StockEtfReferenceDataSourcesV1",
+        1,
+    )[0]
+
+    for forbidden in (
+        "environment: BrokerEnvironment::LiveReservedDenied",
+        "frozen_for_evidence_clock: false",
+        "corporate_action_source_name: String::new()",
+        "corporate_action_asof_ms: 0",
+        "fx_rate_source_name: String::new()",
+        "fx_rate_asof_ms: 0",
+        "base_currency: StockEtfCurrency::UnknownDenied",
+        "quote_currency: StockEtfCurrency::UnknownDenied",
+        "fee_schedule_source_name: String::new()",
+        "fee_schedule_asof_ms: 0",
+        "bybit_live_execution_unchanged: false",
+        "ibkr_contact_performed: true",
+        "connector_runtime_started: true",
+        "secret_content_serialized: true",
+        "live_or_tiny_live_authorized: true",
+    ):
+        assert forbidden not in fixture
+
+    for fail_closed in (
+        "environment: BrokerEnvironment::LiveReservedDenied",
+        "frozen_for_evidence_clock: false",
+        "corporate_action_source_name: String::new()",
+        "corporate_action_asof_ms: 0",
+        "fx_rate_source_name: String::new()",
+        "fx_rate_asof_ms: 0",
+        "base_currency: StockEtfCurrency::UnknownDenied",
+        "quote_currency: StockEtfCurrency::UnknownDenied",
+        "fee_schedule_source_name: String::new()",
+        "fee_schedule_asof_ms: 0",
+        "bybit_live_execution_unchanged: false",
+        "ibkr_contact_performed: false",
+        "connector_runtime_started: false",
+        "secret_content_serialized: false",
+        "live_or_tiny_live_authorized: true",
+    ):
+        assert fail_closed in default_impl
+
+
 def test_stock_etf_reference_data_sources_source_keeps_validation_matrix() -> None:
     source = _source()
 
