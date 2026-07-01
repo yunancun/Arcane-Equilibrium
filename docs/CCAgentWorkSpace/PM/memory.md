@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-01 No-Order Refresh Request Invalidated Before E3/BB 8e7
+
+- PM produced clean `8e7ab58...` source-stability READY artifact sha `824bdf17...` and exact no-order E3/BB request sha `e2882504...`.
+- Pre-dispatch fetch/check found `HEAD/origin/main == 8c1e4779...`, then docs-sync fetch found `origin/main == 8b4dde92...`; the request and READY artifact are stale/non-consumable and E3/BB were not dispatched.
+- State transition is `ROTATED`; final state sha `4ff417e0...`. No Control API GET, public quote, envelope rebuild, plan write, lease, private/order endpoint, PG/service/env/risk mutation, Cost Gate change, live/mainnet, order/fill/PnL/proof.
+
 ## 2026-07-01 No-Order Refresh E3 Blocked By Source Drift B945
 
 - PM rotated once from `bf0fd26b...` after final pre-request fetch advanced to `b945bc1f...`; the bf0 READY sha `77298d1f...` and final ROTATED state sha `178d9c6a...` are non-consumable.
