@@ -2325,3 +2325,31 @@ IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/cre
 沒有 connector runtime、沒有 read probe execution、沒有 result import、沒有 DB/
 evidence/scorecard writer、沒有 paper order/cancel/replace、沒有 tiny-live/live
 authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Rust IPC Parent Module Split Guard
+
+本 session 已把 Stock/ETF Rust IPC handler parent 和 IPC fixture test parent 做
+純拆檔 hygiene：
+
+- `handlers/stock_etf/precontact.rs` 承載 Phase2 pre-contact / readonly probe /
+  result-import / connector skeleton summaries。
+- `tests/stock_etf/precontact_fixtures.rs` 承載 readiness pre-contact fixture test。
+- `tests/stock_etf/foundation_status_fixtures.rs` 承載 data-foundation、policy、
+  authorization status fixture tests。
+- Handler parent 降至 750 行；IPC fixture test parent 降至 706 行；新子模組
+  118/158/353 行。
+- Rust IPC split static guards 的 line cap 已從 1200 收緊到 800。
+
+Verification 已過：
+
+- Scoped Rust rustfmt：PASS
+- Focused Rust IPC split structure guards：`14 passed`
+- Engine Stock/ETF IPC regression：`29 passed`
+- Docs trace guard：PASS
+- `git diff --check`：PASS
+
+邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 payload 行為改動、沒有
+IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation、
+沒有 connector runtime、沒有 read probe execution、沒有 result import、沒有 DB/
+evidence/scorecard writer、沒有 paper order/cancel/replace、沒有 tiny-live/live
+authority，也沒有改動 Bybit live execution 行為。

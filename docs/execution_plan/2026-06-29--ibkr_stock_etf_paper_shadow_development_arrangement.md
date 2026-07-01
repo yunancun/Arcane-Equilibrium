@@ -4266,3 +4266,37 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper
 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
 clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
 Bybit behavior change。
+
+## 96. 2026-07-01 PM session source checkpoint：Rust IPC Parent Module Split Guard
+
+本 checkpoint 將 Stock/ETF Rust IPC handler parent 與 IPC fixture test parent
+拆出 precontact / foundation child modules。這不是 behavior change、不是 endpoint
+change、不是 IPC method change，也不改 payload shape；只降低 Stock/ETF source-only
+IPC layer 的單檔審查風險，並把 split structure guard 的 line cap 收緊到 800。
+
+已完成：
+
+- `handlers/stock_etf/precontact.rs` 承載 Phase2 pre-contact、readonly probe
+  request、result-import request 與 connector skeleton summaries。
+- `tests/stock_etf/precontact_fixtures.rs` 承載 readiness pre-contact fixture test。
+- `tests/stock_etf/foundation_status_fixtures.rs` 承載 data-foundation、policy、
+  authorization status fixture tests。
+- Handler parent 由 860 行降至 750 行；IPC fixture test parent 由 1209 行降至
+  706 行；新增 precontact/foundation 子模組分別為 118/158/353 行。
+- Rust IPC handler/test split static guards 的 file cap 從 1200 收緊到 800，並鎖住
+  新子模組 allowlist 與 moved helper/test ownership。
+
+驗證：
+
+- Scoped Rust `rustfmt --edition 2021 --check`：PASS。
+- Focused Rust IPC split structure guards：`14 passed`。
+- Engine Stock/ETF IPC regression：`29 passed`。
+- Docs trace guard：PASS。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
+cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
+clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
+Bybit behavior change。

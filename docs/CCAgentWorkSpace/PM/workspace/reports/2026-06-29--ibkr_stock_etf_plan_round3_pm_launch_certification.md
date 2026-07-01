@@ -610,6 +610,44 @@ ingestion、DQ writer、paper order/cancel/replace、fill import、DB apply、ev
 writer、evidence clock、scorecard writer、tiny-live、live、Linux runtime sync/restart
 或 Bybit behavior change。
 
+## 2026-07-01 PM Session Checkpoint — Rust IPC Parent Module Split Guard
+
+PM 已完成 Stock/ETF Rust IPC parent source hygiene checkpoint。這不是 behavior
+change、endpoint change、IPC method change 或 payload change；只把 precontact /
+foundation responsibilities 拆到子模組，降低 handler/test parent 的審查風險。
+
+已完成：
+
+- `handlers/stock_etf/precontact.rs` 承載 Phase2 pre-contact、readonly probe request、
+  result-import request 與 connector skeleton summaries。
+- `tests/stock_etf/precontact_fixtures.rs` 承載 readiness pre-contact fixture test。
+- `tests/stock_etf/foundation_status_fixtures.rs` 承載 data-foundation、policy、
+  authorization status fixture tests。
+- Handler parent 由 860 行降至 750 行；IPC fixture test parent 由 1209 行降至
+  706 行；新子模組 118/158/353 行。
+- Rust IPC handler/test split static guards line cap 收緊到 800，並鎖住新子模組
+  allowlist 與 moved ownership。
+
+Verification：
+
+- Scoped Rust rustfmt PASS。
+- Focused Rust IPC split structure guards：`14 passed`。
+- Engine Stock/ETF IPC regression：`29 passed`。
+- Docs trace guard：PASS。
+- `git diff --check` PASS。
+
+Dispatch 記錄：本 turn 因工具層 spawn policy 未允許 sub-agent dispatch，PM 本地完成
+narrow source hygiene / review / regression。此 checkpoint 為 source-only split
+hardening。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 2/3 runtime approval、IBKR contact
+approval、read-only probe approval、result import approval、evidence writer approval、
+scorecard writer approval 或 launch approval。未批准 IBKR SDK import、socket/HTTP、
+secret、connector runtime、read probe execution、collector start、market-data
+ingestion、DQ writer、paper order/cancel/replace、fill import、DB apply、evidence
+writer、evidence clock、scorecard writer、tiny-live、live、Linux runtime sync/restart
+或 Bybit behavior change。
+
 ## 2026-07-01 PM Session Checkpoint — Scorecard Input Module Split Guard
 
 PM 已將 Rust `stock_etf_scorecard_inputs.rs` 拆分為父 re-export、component

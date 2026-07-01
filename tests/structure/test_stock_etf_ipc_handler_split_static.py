@@ -8,8 +8,9 @@ STOCK_ETF_HANDLER = HANDLER_ROOT / "stock_etf.rs"
 STOCK_ETF_SPLIT_DIR = HANDLER_ROOT / "stock_etf"
 REQUEST_SUMMARIES = STOCK_ETF_SPLIT_DIR / "request_summaries.rs"
 STATUS_SUMMARIES = STOCK_ETF_SPLIT_DIR / "status_summaries.rs"
-MAX_LINES = 1200
-EXPECTED_MODULES = {"request_summaries.rs", "status_summaries.rs"}
+PRECONTACT = STOCK_ETF_SPLIT_DIR / "precontact.rs"
+MAX_LINES = 800
+EXPECTED_MODULES = {"precontact.rs", "request_summaries.rs", "status_summaries.rs"}
 FORBIDDEN_RUNTIME_MATERIAL_TOKENS = (
     "std::env",
     "env::var",
@@ -125,6 +126,7 @@ def test_stock_etf_ipc_handler_files_stay_below_governance_cap() -> None:
 
     assert "mod request_summaries;" in parent
     assert "mod status_summaries;" in parent
+    assert "mod precontact;" in parent
     assert set(modules) == EXPECTED_MODULES
     assert _loc(STOCK_ETF_HANDLER) <= MAX_LINES
     assert all(loc <= MAX_LINES for loc in modules.values())
@@ -133,6 +135,7 @@ def test_stock_etf_ipc_handler_files_stay_below_governance_cap() -> None:
 def test_stock_etf_ipc_handler_files_have_no_runtime_material_readers() -> None:
     sources = {
         STOCK_ETF_HANDLER: STOCK_ETF_HANDLER.read_text(encoding="utf-8"),
+        PRECONTACT: PRECONTACT.read_text(encoding="utf-8"),
         REQUEST_SUMMARIES: REQUEST_SUMMARIES.read_text(encoding="utf-8"),
         STATUS_SUMMARIES: STATUS_SUMMARIES.read_text(encoding="utf-8"),
     }
@@ -151,6 +154,7 @@ def test_stock_etf_ipc_handler_files_have_no_runtime_material_readers() -> None:
 def test_stock_etf_ipc_handler_files_do_not_import_or_call_bybit_runtime_paths() -> None:
     sources = {
         STOCK_ETF_HANDLER: STOCK_ETF_HANDLER.read_text(encoding="utf-8"),
+        PRECONTACT: PRECONTACT.read_text(encoding="utf-8"),
         REQUEST_SUMMARIES: REQUEST_SUMMARIES.read_text(encoding="utf-8"),
         STATUS_SUMMARIES: STATUS_SUMMARIES.read_text(encoding="utf-8"),
     }
@@ -167,6 +171,7 @@ def test_stock_etf_ipc_handler_files_do_not_import_or_call_bybit_runtime_paths()
 def test_stock_etf_ipc_handler_files_have_no_clock_thread_or_process_side_effects() -> None:
     sources = {
         STOCK_ETF_HANDLER: STOCK_ETF_HANDLER.read_text(encoding="utf-8"),
+        PRECONTACT: PRECONTACT.read_text(encoding="utf-8"),
         REQUEST_SUMMARIES: REQUEST_SUMMARIES.read_text(encoding="utf-8"),
         STATUS_SUMMARIES: STATUS_SUMMARIES.read_text(encoding="utf-8"),
     }
@@ -217,6 +222,26 @@ def test_stock_etf_request_summary_helpers_are_in_child_module() -> None:
         "ureq",
     ):
         assert forbidden not in child
+
+
+def test_stock_etf_precontact_helpers_are_in_child_module() -> None:
+    parent = STOCK_ETF_HANDLER.read_text(encoding="utf-8")
+    child = PRECONTACT.read_text(encoding="utf-8")
+
+    for name in (
+        "phase2_precontact_summary",
+        "connector_skeleton_summary",
+    ):
+        assert re.search(re.escape(f"pub(super) fn {name}("), child)
+        assert not re.search(rf"^{re.escape(f'fn {name}(')}", parent, re.MULTILINE)
+
+    for marker in (
+        "readonly_probe_request_summary",
+        "readonly_probe_result_import_request_summary",
+        "phase2_gate_not_accepted",
+        "blocked_source_only",
+    ):
+        assert marker in child
 
 
 def test_stock_etf_status_summary_builders_are_in_child_module() -> None:

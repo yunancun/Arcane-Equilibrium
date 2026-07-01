@@ -3470,3 +3470,11 @@
 - Public `openclaw_types::stock_etf_scorecard_inputs::*` imports, contract ids, fixtures, and validator behavior remain unchanged.
 - Verification passed: scoped Rust format, scorecard input acceptance `12 passed`, scorecard derivation/verdict acceptance `13 passed`, full `cargo test -p openclaw_types`, and engine Stock/ETF IPC `29 passed`.
 - Boundary unchanged: no endpoint, IPC method, payload behavior, GUI fanout, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe, result import, DB/evidence/scorecard writer, paper order/cancel/replace, tiny-live/live, Linux runtime, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF Rust IPC Parent Module Split Guard
+
+- PM split handler Phase2 pre-contact summaries into `handlers/stock_etf/precontact.rs` and moved readiness/data-foundation/policy/authorization fixture tests into `precontact_fixtures.rs` / `foundation_status_fixtures.rs`.
+- Handler parent dropped from 860 to 750 lines; IPC fixture test parent dropped from 1209 to 706 lines; new child modules are 118/158/353 lines.
+- Rust IPC handler/test split static guards now cap files at 800 lines and require the new child-module allowlist plus moved helper/test ownership.
+- Verification passed: scoped Rust format, focused split structure guards `14 passed`, engine Stock/ETF IPC `29 passed`, docs trace guard, and `git diff --check`.
+- Boundary unchanged: no endpoint, IPC method, payload behavior, GUI fanout, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe, result import, DB/evidence/scorecard writer, paper order/cancel/replace, tiny-live/live, Linux runtime, or Bybit behavior change.
