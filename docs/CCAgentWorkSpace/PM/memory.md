@@ -43,6 +43,12 @@
 - Verification passed: new guard `3`, focused Stock/ETF/IBKR source-static structure subset, and docs trace.
 - Boundary unchanged: no Rust behavior change, IPC runtime, IBKR contact, connector runtime, secret, paper order, tiny-live/live, or Bybit behavior change.
 
+## 2026-07-01 IBKR Connector README Source Boundary Guard
+
+- PM added a source-only README posture guard for the inert IBKR connector skeleton documentation.
+- Verification passed: connector skeleton `10` and docs trace.
+- Boundary unchanged: no connector behavior change, endpoint, IBKR contact, connector runtime, secret, paper order, tiny-live/live, or Bybit behavior change.
+
 ## 2026-07-01 IBKR Phase2 Policy Source Static Guard
 
 - PM added a structure guard for `ibkr_phase2_policies.rs` covering the 800-line cap, named Phase2 policy contract/template presence, and no runtime/network/clock/order/Bybit tokens.

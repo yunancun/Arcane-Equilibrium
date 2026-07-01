@@ -3437,3 +3437,26 @@ Verification 已過：
 邊界不變：沒有 Rust behavior change、沒有 IPC runtime change、沒有 IBKR contact、沒有
 connector runtime、沒有 secret access、沒有 paper order route、沒有 tiny-live/live authorization，
 也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — IBKR Connector README Source Boundary Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`IBKR Connector README Source Boundary Guard`。
+
+這個 guard 把 `program_code/broker_connectors/ibkr_connector/README.md` 納入 connector skeleton
+測試。它要求 README 明確保留「不是 runtime IBKR connector」口徑，allowed scope 只限 typed
+blocked readiness payloads、non-secret loopback descriptors、display-only previews、static fixtures；
+denied scope 必須保留 IBKR SDK imports、socket/HTTP contact、secret/env credential fallback、
+broker write methods、paper order routing、fill-import side effects、DB writes、tiny-live、live。
+
+Guard 同時禁止 README 出現 runtime-ready、live-ready、paper-order-ready 或 direct broker write
+method support claims，避免文檔把 inert skeleton 誤導成 runtime/order-capable surface。
+
+Verification 已過：
+
+- Connector skeleton pytest：`10 passed`
+- Docs PM trace tests：PASS
+
+邊界不變：沒有 connector behavior change、沒有 endpoint change、沒有 IBKR contact、沒有
+connector runtime、沒有 secret access、沒有 paper order route、沒有 tiny-live/live authorization，
+也沒有改動 Bybit live/demo execution 行為。

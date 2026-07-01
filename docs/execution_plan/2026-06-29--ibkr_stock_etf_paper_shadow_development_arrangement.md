@@ -5865,3 +5865,34 @@ runtime、不是 paper order route；只把 Rust contract 與 Stock/ETF IPC hand
 PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector
 runtime、不執行 read-only probe、不做 result import、不啟動 evidence/scorecard writer、不做 DB
 apply、不做 paper order route、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 137. 2026-07-01 PM session source checkpoint：IBKR Connector README Source Boundary Guard
+
+本 checkpoint 為 inert IBKR connector skeleton README 補上 source-only posture guard。這不是
+connector behavior change、不是 endpoint change、不是 IBKR contact、不是 secret access、
+不是 connector runtime、不是 paper order route；只把 connector package 文檔邊界納入測試，
+避免 source-only skeleton 被描述成 runtime-ready 或 order-capable。
+
+已完成：
+
+- 在 `test_stock_etf_ibkr_connector_skeleton.py` 新增
+  `test_ibkr_connector_readme_preserves_source_only_boundary()`。
+- Guard 要求 `program_code/broker_connectors/ibkr_connector/README.md` 明確保留
+  `It is not a runtime IBKR connector.`。
+- Guard 要求 README 的 allowed scope 維持 typed blocked readiness payloads、non-secret loopback
+  endpoint descriptors、display-only previews、static fixtures。
+- Guard 要求 README 的 denied scope 保留 IBKR SDK imports、socket/HTTP contact、secret/env
+  credential fallback、broker write methods、paper order routing、fill-import side effects、
+  DB writes、tiny-live、live。
+- Guard 禁止 README 出現 runtime-ready、live-ready、paper-order-ready 或 direct broker write
+  method support claims。
+
+驗證：
+
+- Connector skeleton test py_compile：PASS。
+- Focused connector skeleton pytest：`10 passed`。
+- Docs PM trace tests：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector
+runtime、不執行 read-only probe、不做 result import、不做 DB apply、不做 paper order route、
+不授權 tiny-live/live 或任何 Bybit behavior change。
