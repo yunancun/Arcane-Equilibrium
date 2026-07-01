@@ -90,6 +90,21 @@ def _default_block(source: str, type_name: str) -> str:
     )[0]
 
 
+def _validate_block(source: str, type_name: str) -> str:
+    return source.split(f"impl {type_name}", 1)[1].split(
+        "pub fn validate(&self)",
+        1,
+    )[1].split(
+        "IbkrPolicyVerdict::from_blockers(blockers)",
+        1,
+    )[0]
+
+
+def _assert_ordered_tokens(block: str, tokens: tuple[str, ...]) -> None:
+    positions = [block.index(token) for token in tokens]
+    assert positions == sorted(positions)
+
+
 def test_ibkr_phase2_policy_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
@@ -203,6 +218,112 @@ def test_ibkr_phase2_policy_source_templates_keep_fail_closed_authority_posture(
         default = _default_block(source, type_name)
         assert "source_version: 0" in default
         assert "policy_present: false" in default
+
+
+def test_ibkr_phase2_policy_source_keeps_validator_blocker_order() -> None:
+    source = _source()
+
+    _assert_ordered_tokens(
+        _validate_block(source, "IbkrRedactionPolicyV1"),
+        (
+            "ContractIdMismatch",
+            "SourceVersionMismatch",
+            "PolicyMissing",
+            "RawPayloadHashNotRequired",
+            "RedactedSummaryHashNotRequired",
+            "AccountIdLogLeakAllowed",
+            "SecretLogLeakAllowed",
+            "LocalPathLogLeakAllowed",
+            "CookieLogLeakAllowed",
+            "TokenLogLeakAllowed",
+            "RawPayloadLogLeakAllowed",
+            "StackTraceReportLeakAllowed",
+        ),
+    )
+    _assert_ordered_tokens(
+        _validate_block(source, "IbkrRateLimitPolicyV1"),
+        (
+            "ContractIdMismatch",
+            "SourceVersionMismatch",
+            "PolicyMissing",
+            "ScopeNotPerAction",
+            "RequestSpacingMissing",
+            "ConcurrencyLimitMissing",
+            "PerActionBucketsMissing",
+            "PacingCircuitBreakerMissing",
+            "ReadSnapshotBudgetMissing",
+            "MarketDataSubscriptionBudgetMissing",
+            "PaperOrderWriteBudgetMissing",
+        ),
+    )
+    _assert_ordered_tokens(
+        _validate_block(source, "IbkrAuditEventPolicyV1"),
+        (
+            "ContractIdMismatch",
+            "SourceVersionMismatch",
+            "PolicyMissing",
+            "AppendOnlyMissing",
+            "AssetLaneMissing",
+            "BrokerMissing",
+            "EnvironmentMissing",
+            "OperationMissing",
+            "AllowedMissing",
+            "DenialReasonMissing",
+            "SourceArtifactHashMissing",
+            "RawArtifactHashMissing",
+            "RedactedSummaryHashMissing",
+            "AccountFingerprintHashOnlyMissing",
+            "RawPayloadStorageAllowed",
+        ),
+    )
+    _assert_ordered_tokens(
+        _validate_block(source, "IbkrPaperAttestationPolicyV1"),
+        (
+            "ContractIdMismatch",
+            "SourceVersionMismatch",
+            "PolicyMissing",
+            "ExternalSurfaceGateMissing",
+            "SessionAttestationMissing",
+            "RustLaneScopedIpcMissing",
+            "ScopedAuthorizationMissing",
+            "DecisionLeaseMissing",
+            "GuardianMissing",
+            "RiskConfigHashMissing",
+            "InstrumentIdentityHashMissing",
+            "IdempotencyKeyMissing",
+            "LifecycleEventLogMissing",
+            "ReconciliationBeforeTerminalMissing",
+            "PaperEnvironmentOnlyMissing",
+            "LiveAccountFingerprintNotDenied",
+            "MarginShortOptionsCfdNotDenied",
+            "MaxPaperNotionalMissing",
+        ),
+    )
+    _assert_ordered_tokens(
+        _validate_block(source, "IbkrPythonWriteGuardPolicyV1"),
+        (
+            "ContractIdMismatch",
+            "SourceVersionMismatch",
+            "PolicyMissing",
+            "PythonBrokerWriteAuthorityNotDenied",
+            "PythonReadDisplayImportMissing",
+            "PythonRustIpcBridgeMissing",
+            "PythonIbkrOrderMethodsNotDenied",
+            "PythonLiveSecretAccessNotDenied",
+            "GuiAuthorityOverrideNotDenied",
+            "BybitPathMutationNotAccounted",
+        ),
+    )
+    _assert_ordered_tokens(
+        _validate_block(source, "IbkrPhase2PolicyBundleV1"),
+        (
+            "RedactionPolicyRejected",
+            "RateLimitPolicyRejected",
+            "AuditEventPolicyRejected",
+            "PaperAttestationPolicyRejected",
+            "PythonWriteGuardPolicyRejected",
+        ),
+    )
 
 
 def test_ibkr_phase2_policy_source_has_no_runtime_or_bybit_tokens() -> None:

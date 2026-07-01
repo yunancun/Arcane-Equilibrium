@@ -1635,3 +1635,10 @@ Do not paste long reports or stable architecture into TODO.
 - The guard proves default artifact, identity drift, blocked/retroactive external gate, policy flag mismatch, and runtime evidence mismatch fail closed with complete ordered blocker vectors.
 - Python source-static now pins artifact validator blocker emit order so exact acceptance remains aligned with the source contract.
 - Verification passed: source static `6 passed`; Phase 2 artifact acceptance `9 passed`; `cargo fmt -p openclaw_types -- --check` PASS; docs trace PASS; diff check PASS. This grants no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, paper order routing, DB/evidence writer, scorecard writer, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Phase 2 Policy Exact Prerequisite Guard
+
+- PM added exact-blocker Rust acceptance coverage for `IbkrPhase2PolicyBundleV1` default rejection, child policy identity drift, redaction leaks, rate-limit budgets, audit lineage, paper-attestation authority, and python-write guard gaps.
+- The guard proves Phase 2 prerequisite policy failures emit complete ordered blocker vectors across redaction/rate/audit/paper/python subcontracts and the aggregate bundle gate flags.
+- Python source-static now pins each policy validator and bundle validator blocker emit order.
+- Verification passed: source static `5 passed`; Phase 2 policy acceptance `13 passed`; `cargo fmt -p openclaw_types -- --check` PASS; docs trace PASS; diff check PASS. This grants no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, paper order routing, DB/evidence writer, scorecard writer, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

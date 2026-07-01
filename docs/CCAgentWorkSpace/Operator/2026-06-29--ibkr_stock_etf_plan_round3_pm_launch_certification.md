@@ -5044,3 +5044,30 @@ Verification 已過：
 沒有 IBKR contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 paper order routing、
 沒有 DB/evidence writer、沒有 scorecard writer、沒有 broker session、沒有 tiny-live/live authorization，
 也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — IBKR Phase 2 Policy Exact Prerequisite Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`IBKR Phase 2 Policy Exact Prerequisite Guard`。
+
+這個 checkpoint 補強 `IbkrPhase2PolicyBundleV1` 與 redaction/rate-limit/audit/paper-attestation/
+python-write-guard 子 policy 的 exact rejection coverage。
+
+新增 Rust acceptance 證明 default policy bundle、各子 policy identity drift、redaction leak、rate-limit
+budget、audit lineage、paper-attestation authority、python-write guard aggregate gaps 都會以完整 exact
+blocker 向量 fail closed。Python source-static guard 也鎖住各 policy validator 與 bundle validator blocker
+emit order。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- IBKR Phase 2 policy source static pytest：`5 passed`
+- IBKR Phase 2 policy Rust acceptance：`13 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IPC server start、
+沒有 IBKR contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 paper order routing、
+沒有 DB/evidence writer、沒有 scorecard writer、沒有 broker session、沒有 tiny-live/live authorization，
+也沒有改動 Bybit live/demo execution 行為。

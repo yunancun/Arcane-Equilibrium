@@ -24,21 +24,16 @@ fn default_policy_bundle_blocks_all_gate_prerequisites() {
     let flags = bundle.gate_prerequisite_flags();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2PolicyBundleBlocker::RedactionPolicyRejected));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2PolicyBundleBlocker::RateLimitPolicyRejected));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2PolicyBundleBlocker::AuditEventPolicyRejected));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2PolicyBundleBlocker::PaperAttestationPolicyRejected));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPhase2PolicyBundleBlocker::PythonWriteGuardPolicyRejected));
+    assert_policy_blockers(
+        verdict,
+        &[
+            IbkrPhase2PolicyBundleBlocker::RedactionPolicyRejected,
+            IbkrPhase2PolicyBundleBlocker::RateLimitPolicyRejected,
+            IbkrPhase2PolicyBundleBlocker::AuditEventPolicyRejected,
+            IbkrPhase2PolicyBundleBlocker::PaperAttestationPolicyRejected,
+            IbkrPhase2PolicyBundleBlocker::PythonWriteGuardPolicyRejected,
+        ],
+    );
 
     assert!(!flags.redaction_suite_passed);
     assert!(!flags.rate_limit_policy_present);
@@ -105,13 +100,13 @@ fn source_policies_require_exact_contract_ids_and_versions() {
         ..IbkrRedactionPolicyV1::source_template()
     };
     let verdict = redaction.validate();
-    assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrRedactionPolicyBlocker::ContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrRedactionPolicyBlocker::SourceVersionMismatch));
+    assert_policy_blockers(
+        verdict,
+        &[
+            IbkrRedactionPolicyBlocker::ContractIdMismatch,
+            IbkrRedactionPolicyBlocker::SourceVersionMismatch,
+        ],
+    );
 
     let rate_limit = IbkrRateLimitPolicyV1 {
         contract_id: "ibkr_rate_limit_policy_v1_fixture".to_string(),
@@ -119,13 +114,13 @@ fn source_policies_require_exact_contract_ids_and_versions() {
         ..IbkrRateLimitPolicyV1::source_template()
     };
     let verdict = rate_limit.validate();
-    assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrRateLimitPolicyBlocker::ContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrRateLimitPolicyBlocker::SourceVersionMismatch));
+    assert_policy_blockers(
+        verdict,
+        &[
+            IbkrRateLimitPolicyBlocker::ContractIdMismatch,
+            IbkrRateLimitPolicyBlocker::SourceVersionMismatch,
+        ],
+    );
 
     let audit_event = IbkrAuditEventPolicyV1 {
         contract_id: "ibkr_audit_event_policy_v1_fixture".to_string(),
@@ -133,13 +128,13 @@ fn source_policies_require_exact_contract_ids_and_versions() {
         ..IbkrAuditEventPolicyV1::source_template()
     };
     let verdict = audit_event.validate();
-    assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrAuditEventPolicyBlocker::ContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrAuditEventPolicyBlocker::SourceVersionMismatch));
+    assert_policy_blockers(
+        verdict,
+        &[
+            IbkrAuditEventPolicyBlocker::ContractIdMismatch,
+            IbkrAuditEventPolicyBlocker::SourceVersionMismatch,
+        ],
+    );
 
     let paper_attestation = IbkrPaperAttestationPolicyV1 {
         contract_id: "ibkr_paper_attestation_v1_fixture".to_string(),
@@ -147,13 +142,13 @@ fn source_policies_require_exact_contract_ids_and_versions() {
         ..IbkrPaperAttestationPolicyV1::source_template()
     };
     let verdict = paper_attestation.validate();
-    assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperAttestationPolicyBlocker::ContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperAttestationPolicyBlocker::SourceVersionMismatch));
+    assert_policy_blockers(
+        verdict,
+        &[
+            IbkrPaperAttestationPolicyBlocker::ContractIdMismatch,
+            IbkrPaperAttestationPolicyBlocker::SourceVersionMismatch,
+        ],
+    );
 
     let python_write_guard = IbkrPythonWriteGuardPolicyV1 {
         contract_id: "ibkr_python_write_guard_policy_v1_fixture".to_string(),
@@ -161,13 +156,13 @@ fn source_policies_require_exact_contract_ids_and_versions() {
         ..IbkrPythonWriteGuardPolicyV1::source_template()
     };
     let verdict = python_write_guard.validate();
-    assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPythonWriteGuardPolicyBlocker::ContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPythonWriteGuardPolicyBlocker::SourceVersionMismatch));
+    assert_policy_blockers(
+        verdict,
+        &[
+            IbkrPythonWriteGuardPolicyBlocker::ContractIdMismatch,
+            IbkrPythonWriteGuardPolicyBlocker::SourceVersionMismatch,
+        ],
+    );
 }
 
 #[test]
@@ -184,28 +179,18 @@ fn redaction_policy_denies_secret_account_cookie_token_path_and_stack_trace_leak
     };
     let verdict = policy.validate();
 
-    assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrRedactionPolicyBlocker::AccountIdLogLeakAllowed));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrRedactionPolicyBlocker::SecretLogLeakAllowed));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrRedactionPolicyBlocker::LocalPathLogLeakAllowed));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrRedactionPolicyBlocker::CookieLogLeakAllowed));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrRedactionPolicyBlocker::TokenLogLeakAllowed));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrRedactionPolicyBlocker::RawPayloadLogLeakAllowed));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrRedactionPolicyBlocker::StackTraceReportLeakAllowed));
+    assert_policy_blockers(
+        verdict,
+        &[
+            IbkrRedactionPolicyBlocker::AccountIdLogLeakAllowed,
+            IbkrRedactionPolicyBlocker::SecretLogLeakAllowed,
+            IbkrRedactionPolicyBlocker::LocalPathLogLeakAllowed,
+            IbkrRedactionPolicyBlocker::CookieLogLeakAllowed,
+            IbkrRedactionPolicyBlocker::TokenLogLeakAllowed,
+            IbkrRedactionPolicyBlocker::RawPayloadLogLeakAllowed,
+            IbkrRedactionPolicyBlocker::StackTraceReportLeakAllowed,
+        ],
+    );
 }
 
 #[test]
@@ -223,31 +208,19 @@ fn rate_limit_policy_requires_per_action_buckets_and_circuit_breaker() {
     };
     let verdict = policy.validate();
 
-    assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrRateLimitPolicyBlocker::ScopeNotPerAction));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrRateLimitPolicyBlocker::RequestSpacingMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrRateLimitPolicyBlocker::ConcurrencyLimitMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrRateLimitPolicyBlocker::PerActionBucketsMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrRateLimitPolicyBlocker::PacingCircuitBreakerMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrRateLimitPolicyBlocker::ReadSnapshotBudgetMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrRateLimitPolicyBlocker::MarketDataSubscriptionBudgetMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrRateLimitPolicyBlocker::PaperOrderWriteBudgetMissing));
+    assert_policy_blockers(
+        verdict,
+        &[
+            IbkrRateLimitPolicyBlocker::ScopeNotPerAction,
+            IbkrRateLimitPolicyBlocker::RequestSpacingMissing,
+            IbkrRateLimitPolicyBlocker::ConcurrencyLimitMissing,
+            IbkrRateLimitPolicyBlocker::PerActionBucketsMissing,
+            IbkrRateLimitPolicyBlocker::PacingCircuitBreakerMissing,
+            IbkrRateLimitPolicyBlocker::ReadSnapshotBudgetMissing,
+            IbkrRateLimitPolicyBlocker::MarketDataSubscriptionBudgetMissing,
+            IbkrRateLimitPolicyBlocker::PaperOrderWriteBudgetMissing,
+        ],
+    );
 }
 
 #[test]
@@ -269,43 +242,23 @@ fn audit_event_policy_requires_append_only_lane_fields_and_hashes() {
     };
     let verdict = policy.validate();
 
-    assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrAuditEventPolicyBlocker::AppendOnlyMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrAuditEventPolicyBlocker::AssetLaneMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrAuditEventPolicyBlocker::BrokerMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrAuditEventPolicyBlocker::EnvironmentMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrAuditEventPolicyBlocker::OperationMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrAuditEventPolicyBlocker::AllowedMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrAuditEventPolicyBlocker::DenialReasonMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrAuditEventPolicyBlocker::SourceArtifactHashMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrAuditEventPolicyBlocker::RawArtifactHashMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrAuditEventPolicyBlocker::RedactedSummaryHashMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrAuditEventPolicyBlocker::AccountFingerprintHashOnlyMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrAuditEventPolicyBlocker::RawPayloadStorageAllowed));
+    assert_policy_blockers(
+        verdict,
+        &[
+            IbkrAuditEventPolicyBlocker::AppendOnlyMissing,
+            IbkrAuditEventPolicyBlocker::AssetLaneMissing,
+            IbkrAuditEventPolicyBlocker::BrokerMissing,
+            IbkrAuditEventPolicyBlocker::EnvironmentMissing,
+            IbkrAuditEventPolicyBlocker::OperationMissing,
+            IbkrAuditEventPolicyBlocker::AllowedMissing,
+            IbkrAuditEventPolicyBlocker::DenialReasonMissing,
+            IbkrAuditEventPolicyBlocker::SourceArtifactHashMissing,
+            IbkrAuditEventPolicyBlocker::RawArtifactHashMissing,
+            IbkrAuditEventPolicyBlocker::RedactedSummaryHashMissing,
+            IbkrAuditEventPolicyBlocker::AccountFingerprintHashOnlyMissing,
+            IbkrAuditEventPolicyBlocker::RawPayloadStorageAllowed,
+        ],
+    );
 }
 
 #[test]
@@ -330,34 +283,26 @@ fn paper_attestation_policy_requires_rust_scope_and_denies_live_margin() {
     };
     let verdict = policy.validate();
 
-    assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperAttestationPolicyBlocker::ExternalSurfaceGateMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperAttestationPolicyBlocker::SessionAttestationMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperAttestationPolicyBlocker::RustLaneScopedIpcMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperAttestationPolicyBlocker::ScopedAuthorizationMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperAttestationPolicyBlocker::DecisionLeaseMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperAttestationPolicyBlocker::GuardianMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperAttestationPolicyBlocker::PaperEnvironmentOnlyMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperAttestationPolicyBlocker::LiveAccountFingerprintNotDenied));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPaperAttestationPolicyBlocker::MarginShortOptionsCfdNotDenied));
+    assert_policy_blockers(
+        verdict,
+        &[
+            IbkrPaperAttestationPolicyBlocker::ExternalSurfaceGateMissing,
+            IbkrPaperAttestationPolicyBlocker::SessionAttestationMissing,
+            IbkrPaperAttestationPolicyBlocker::RustLaneScopedIpcMissing,
+            IbkrPaperAttestationPolicyBlocker::ScopedAuthorizationMissing,
+            IbkrPaperAttestationPolicyBlocker::DecisionLeaseMissing,
+            IbkrPaperAttestationPolicyBlocker::GuardianMissing,
+            IbkrPaperAttestationPolicyBlocker::RiskConfigHashMissing,
+            IbkrPaperAttestationPolicyBlocker::InstrumentIdentityHashMissing,
+            IbkrPaperAttestationPolicyBlocker::IdempotencyKeyMissing,
+            IbkrPaperAttestationPolicyBlocker::LifecycleEventLogMissing,
+            IbkrPaperAttestationPolicyBlocker::ReconciliationBeforeTerminalMissing,
+            IbkrPaperAttestationPolicyBlocker::PaperEnvironmentOnlyMissing,
+            IbkrPaperAttestationPolicyBlocker::LiveAccountFingerprintNotDenied,
+            IbkrPaperAttestationPolicyBlocker::MarginShortOptionsCfdNotDenied,
+            IbkrPaperAttestationPolicyBlocker::MaxPaperNotionalMissing,
+        ],
+    );
 }
 
 #[test]
@@ -374,28 +319,18 @@ fn python_write_guard_denies_python_broker_writes_without_bybit_mutation() {
     };
     let verdict = policy.validate();
 
-    assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPythonWriteGuardPolicyBlocker::PythonBrokerWriteAuthorityNotDenied));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPythonWriteGuardPolicyBlocker::PythonReadDisplayImportMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPythonWriteGuardPolicyBlocker::PythonRustIpcBridgeMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPythonWriteGuardPolicyBlocker::PythonIbkrOrderMethodsNotDenied));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPythonWriteGuardPolicyBlocker::PythonLiveSecretAccessNotDenied));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPythonWriteGuardPolicyBlocker::GuiAuthorityOverrideNotDenied));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrPythonWriteGuardPolicyBlocker::BybitPathMutationNotAccounted));
+    assert_policy_blockers(
+        verdict,
+        &[
+            IbkrPythonWriteGuardPolicyBlocker::PythonBrokerWriteAuthorityNotDenied,
+            IbkrPythonWriteGuardPolicyBlocker::PythonReadDisplayImportMissing,
+            IbkrPythonWriteGuardPolicyBlocker::PythonRustIpcBridgeMissing,
+            IbkrPythonWriteGuardPolicyBlocker::PythonIbkrOrderMethodsNotDenied,
+            IbkrPythonWriteGuardPolicyBlocker::PythonLiveSecretAccessNotDenied,
+            IbkrPythonWriteGuardPolicyBlocker::GuiAuthorityOverrideNotDenied,
+            IbkrPythonWriteGuardPolicyBlocker::BybitPathMutationNotAccounted,
+        ],
+    );
 }
 
 #[test]
@@ -746,11 +681,19 @@ fn assert_single_policy_blocker<B>(verdict: IbkrPolicyVerdict<B>, blocker: B)
 where
     B: Copy + Eq + std::fmt::Debug,
 {
+    assert_policy_blockers(verdict, &[blocker]);
+}
+
+fn assert_policy_blockers<B>(verdict: IbkrPolicyVerdict<B>, blockers: &[B])
+where
+    B: Copy + Eq + std::fmt::Debug,
+{
     assert!(!verdict.accepted);
     assert_eq!(
         verdict.blockers,
-        vec![blocker],
-        "expected only {blocker:?}; blockers: {:?}",
+        blockers.to_vec(),
+        "expected blockers {:?}; blockers: {:?}",
+        blockers,
         verdict.blockers
     );
 }

@@ -8048,3 +8048,38 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 paper order routing、
 不做 DB/evidence writer、不啟動 scorecard writer、不做 broker session、不做 broker routing、不做 Linux
 runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 192. 2026-07-01 PM session source checkpoint：IBKR Phase 2 Policy Exact Prerequisite Guard
+
+本 checkpoint 補強 `ibkr_phase2_policies` 的 prerequisite policy exact rejection coverage，固定 default
+policy bundle blocker 向量、各子 policy contract id/source version drift、redaction leak、rate-limit budget、
+audit lineage、paper-attestation authority、python-write guard aggregate gaps 與 validator blocker ordering。
+這不是 Rust production behavior change、不是 IPC server start、不是 IBKR contact、不是 connector runtime、
+不是 secret lookup、不是 paper order routing、不是 DB/evidence writer、不是 paper order route enablement、
+不是 tiny-live/live gate；只把 Phase 2 prerequisite policy 的 gate flags 與 no-secret/no-write/no-Bybit
+posture 變成 exact-blocker acceptance test 與 source-static guard。
+
+已完成：
+
+- 在 `ibkr_phase2_policy_acceptance.rs` 將 default `IbkrPhase2PolicyBundleV1` 檢查提升為完整順序 blocker
+  向量。
+- 在同檔將 redaction/rate-limit/audit/paper-attestation/python-write-guard contract id/source version drift
+  固定為 exact 雙 blocker。
+- 在同檔將 redaction leak、rate-limit budget、audit lineage、paper-attestation authority、python-write guard
+  aggregate gaps 固定為 exact blocker vectors。
+- 在 `test_ibkr_phase2_policies_source_static.py` 新增各 policy validator 與 bundle validator blocker ordering
+  parser，鎖住 prerequisite policy emit order。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- IBKR Phase 2 policy source static pytest：`5 passed`。
+- IBKR Phase 2 policy Rust acceptance：`13 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、
+不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 paper order routing、
+不做 DB/evidence writer、不啟動 scorecard writer、不做 broker session、不做 broker routing、不做 Linux
+runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
