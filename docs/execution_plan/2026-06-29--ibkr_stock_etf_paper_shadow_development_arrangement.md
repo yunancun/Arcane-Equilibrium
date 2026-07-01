@@ -5182,3 +5182,43 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper
 cancel/replace、不匯入 broker fill、不做 scorecard writer、不做 DB apply、不啟動 evidence
 writer/clock、不建立 PASS artifact、不建立 secret slot、不授權 tiny-live/live 或任何 Bybit
 behavior change。
+
+## 119. 2026-07-01 PM session source checkpoint：Stock/ETF Phase0 Manifest Source Static Guard
+
+本 checkpoint 為 `stock_etf_phase0_manifest.rs` 補上 source-only structure guard。這不是
+runtime authority、不是 IBKR contact、不是 connector construction、不是 migration、不是
+evidence clock、不是 order route；只把 Phase0 named contract packet manifest 的 source
+invariant 機器化。
+
+已完成：
+
+- 新增 `tests/structure/test_stock_etf_phase0_manifest_source_static.py`。
+- Guard 鎖住 `stock_etf_phase0_manifest.rs` 低於 800 行 governance cap。
+- Guard 要求 Phase0 manifest schema/status/scope/generated_at/ADR/AMD/packet paths、required
+  contract set、manifest/authority/API baseline/global denials/unlock table/verdict/blocker surface
+  保持在 source 中。
+- Guard 要求 accepted manifest 仍是 StockEtfCash/IBKR/paper_shadow_only，並保留 authority、
+  API baseline、global denials、contracts、phase unlock accepted fixtures。
+- Guard 要求 API baseline 保持 `ib_gateway_tws_api`、`loopback_only`、paper port 4002、
+  live ports denied、`ibkr_call_performed=false`。
+- Guard 要求 global denials 保留 IBKR live、tiny-live、margin、short、options、CFD、transfer、
+  account-management writes、Python broker write authority、GUI lane authority、automatic
+  promotion 全部 denied。
+- Guard 要求 phase unlock 保持 Phase1 只在 E2/E4/QA 後允許，Phase2 contact、Phase3 evidence
+  clock、Phase4 GUI runtime、Phase5 online、tiny-live/live 全部 fail-closed。
+- Guard 要求 required contract missing/duplicated/unexpected detection 不得消失。
+- Guard 禁止 env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens
+  與 secret material access tokens。
+
+驗證：
+
+- New structure guard py_compile：PASS。
+- Focused structure guard pytest：`6 passed`。
+- Focused Phase0 manifest acceptance：`6 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
+cancel/replace、不做 migration、不啟動 evidence writer/clock、不新增 GUI fanout、不授權
+tiny-live/live 或任何 Bybit behavior change。
