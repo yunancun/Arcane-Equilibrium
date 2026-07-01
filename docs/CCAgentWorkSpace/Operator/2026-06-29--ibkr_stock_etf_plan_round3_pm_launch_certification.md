@@ -4280,3 +4280,33 @@ Verification 已過：
 沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 market-data ingestion、沒有
 evidence writer、沒有 scorecard writer、沒有 DB/evidence writer、沒有 paper order route、沒有
 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Reference Data Sources Runtime Authority Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Reference Data Sources Runtime Authority Cross-Wire Guard`。
+
+這個 checkpoint 補強 `StockEtfReferenceDataSourcesV1` 的 evidence-clock freeze / USD-only FX /
+Bybit unchanged / IBKR contact / connector runtime / secret serialization / live-authority
+cross-wire coverage。新增 Rust acceptance 證明 live environment、missing evidence freeze、wrong
+currency、Bybit changed、IBKR contact、connector runtime、secret serialization、tiny-live/live
+authority 都會各自只產生單一對應 blocker。
+
+同時新增 Python source-static accepted fixture body guard，禁止 live environment、missing evidence
+freeze、missing source names/as-of、unknown currencies、Bybit changed、IBKR contact、connector runtime、
+secret serialization、tiny-live/live authority 被 hardcoded 到 accepted fixture，並鎖住 default
+fail-closed posture。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Reference-data source static pytest：`8 passed`
+- Reference-data Rust acceptance：`7 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 reference-data ingestion、沒有
+scorecard writer、沒有 DB/evidence writer、沒有 paper order route、沒有 tiny-live/live authorization，
+也沒有改動 Bybit live/demo execution 行為。
