@@ -162,6 +162,34 @@ def _source() -> str:
     return PHASE2_RUNTIME.read_text(encoding="utf-8")
 
 
+def _secret_slot_default_block(source: str) -> str:
+    return source.split("impl Default for IbkrSecretSlotContractV1", 1)[1].split(
+        "impl IbkrSecretSlotContractV1",
+        1,
+    )[0]
+
+
+def _secret_slot_template_block(source: str) -> str:
+    return source.split("impl IbkrSecretSlotContractV1", 1)[1].split(
+        "pub fn validate(&self)",
+        1,
+    )[0]
+
+
+def _topology_default_block(source: str) -> str:
+    return source.split("impl Default for IbkrApiSessionTopologyV1", 1)[1].split(
+        "impl IbkrApiSessionTopologyV1",
+        1,
+    )[0]
+
+
+def _topology_template_block(source: str) -> str:
+    return source.split("impl IbkrApiSessionTopologyV1", 1)[1].split(
+        "pub fn validate(&self)",
+        1,
+    )[0]
+
+
 def test_ibkr_phase2_runtime_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
@@ -203,6 +231,88 @@ def test_ibkr_phase2_runtime_source_keeps_api_session_topology_matrix() -> None:
     assert "self.port == IBKR_LIVE_GATEWAY_PORT || self.port == IBKR_LIVE_TWS_PORT" in source
     assert "self.port != IBKR_PAPER_GATEWAY_DEFAULT_PORT" in source
     assert "!is_loopback_or_unix_local_host(&self.host)" in source
+
+
+def test_ibkr_phase2_runtime_source_keeps_default_and_source_template_posture() -> None:
+    source = _source()
+    secret_default = _secret_slot_default_block(source)
+    secret_template = _secret_slot_template_block(source)
+    topology_default = _topology_default_block(source)
+    topology_template = _topology_template_block(source)
+
+    for required in (
+        "contract_id: String::new()",
+        "source_version: 0",
+        "contract_present: false",
+        "readonly_slot_posture: IbkrSecretSlotPosture::Unknown",
+        "paper_slot_posture: IbkrSecretSlotPosture::Unknown",
+        "live_slot_posture: IbkrSecretSlotPosture::Unknown",
+        "secret_slot_fingerprint: String::new()",
+        "account_fingerprint_hash: String::new()",
+        "owner_only_permissions: false",
+        "env_var_credential_fallback_denied: false",
+        "secret_content_serialized: false",
+        "account_id_serialized: false",
+        "live_secret_absent_or_empty: false",
+    ):
+        assert required in secret_default
+
+    for required in (
+        "contract_id: IBKR_SECRET_SLOT_CONTRACT_ID.to_string()",
+        "source_version: 1",
+        "contract_present: true",
+        "readonly_slot_posture: IbkrSecretSlotPosture::PresentHashed",
+        "paper_slot_posture: IbkrSecretSlotPosture::PresentHashed",
+        "live_slot_posture: IbkrSecretSlotPosture::LiveAbsentOrEmpty",
+        'secret_slot_fingerprint: "a".repeat(64)',
+        'account_fingerprint_hash: "b".repeat(64)',
+        "owner_only_permissions: true",
+        "env_var_credential_fallback_denied: true",
+        "secret_content_serialized: false",
+        "account_id_serialized: false",
+        "live_secret_absent_or_empty: true",
+    ):
+        assert required in secret_template
+
+    for required in (
+        "contract_id: String::new()",
+        "source_version: 0",
+        "topology_present: false",
+        "api_baseline: String::new()",
+        "runtime_owner: String::new()",
+        "host: String::new()",
+        "port: 0",
+        "gateway_mode: IbkrGatewayProcessMode::Unknown",
+        "environment: BrokerEnvironment::ReadOnly",
+        "deterministic_client_id_present: false",
+        "process_identity_recorded: false",
+        "account_fingerprint_hash: String::new()",
+        "api_server_version_recorded: false",
+        "data_entitlements_recorded: false",
+        "startup_time_recorded: false",
+        "attestation_expiry_recorded: false",
+    ):
+        assert required in topology_default
+
+    for required in (
+        "contract_id: IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID.to_string()",
+        "source_version: 1",
+        "topology_present: true",
+        'api_baseline: "ib_gateway_tws_api".to_string()',
+        'runtime_owner: "trade-core".to_string()',
+        'host: "127.0.0.1".to_string()',
+        "port: IBKR_PAPER_GATEWAY_DEFAULT_PORT",
+        "gateway_mode: IbkrGatewayProcessMode::PaperGateway",
+        "environment: BrokerEnvironment::Paper",
+        "deterministic_client_id_present: true",
+        "process_identity_recorded: true",
+        'account_fingerprint_hash: "c".repeat(64)',
+        "api_server_version_recorded: true",
+        "data_entitlements_recorded: true",
+        "startup_time_recorded: true",
+        "attestation_expiry_recorded: true",
+    ):
+        assert required in topology_template
 
 
 def test_ibkr_phase2_runtime_source_has_no_runtime_secret_order_or_bybit_client_tokens() -> None:
