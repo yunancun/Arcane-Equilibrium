@@ -2968,3 +2968,30 @@ Verification 已過：
 邊界不變：沒有 PASS artifact creation、沒有 secret slot、沒有 broker session、沒有 paper
 order、沒有 evidence clock、沒有 tiny-live/live authorization，也沒有改動 Bybit live execution
 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Phase0 Manifest Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF Phase0 Manifest Source Static Guard`。
+
+這個 guard 鎖住 `stock_etf_phase0_manifest.rs` 的 named contract packet source hygiene：
+manifest schema/status/scope/paths、required contract set、API baseline、global denials、phase
+unlock table 必須保留。
+
+Guard 要求 accepted manifest 維持 StockEtfCash/IBKR/paper_shadow_only；API baseline 必須
+維持 `ib_gateway_tws_api`、`loopback_only`、paper port 4002、live ports denied、no prior IBKR
+call。Global denials 必須保留 IBKR live、tiny-live、margin、short、options、CFD、transfer、
+account-management writes、Python broker write authority、GUI lane authority、automatic
+promotion 全部 denied。Phase unlock 必須保留 Phase2 contact、Phase3 evidence clock、Phase4
+GUI runtime、Phase5 online、tiny-live/live fail-closed。source 不得出現 env/fs/network/IBKR
+SDK/clock/thread/process/order/Bybit runtime tokens 或 secret material access tokens。
+
+Verification 已過：
+
+- New structure guard pytest：`6 passed`
+- Focused Phase0 manifest acceptance：`6 passed`
+- Full `cargo test -p openclaw_types`：PASS
+
+邊界不變：沒有 runtime authority、沒有 IBKR contact、沒有 connector construction、沒有
+migration、沒有 evidence clock、沒有 order route、沒有 tiny-live/live authorization，也沒有
+改動 Bybit live execution 行為。

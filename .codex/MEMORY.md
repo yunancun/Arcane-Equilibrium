@@ -1356,3 +1356,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only structure guard for `stock_etf_release_packet.rs`, pinning the paper/shadow release evidence packet.
 - The guard requires release ADR/AMD/spec paths, release packet/manifest/migration/kill-disable proof surfaces, role signoffs PM/Operator/E2/E3/E4/QA/QC/MIT, manifest/log/redaction/GUI/DQ/scorecard regeneration/evidence archive hashes, migration dry-run/double-apply evidence, kill/disable cleanup proof, no destructive DB cleanup, no secret serialization, no IBKR tiny-live/live authority, sealed requirement, and no runtime/secret/order/Bybit client tokens.
 - Verification passed: new guard `7 passed`; release packet acceptance `8 passed`; full `cargo test -p openclaw_types` PASS. This grants no PASS artifact creation, secret slot, broker session, paper order, evidence clock, tiny-live/live authorization, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Phase0 Manifest Source Static Guard
+
+- PM added a source-only structure guard for `stock_etf_phase0_manifest.rs`, pinning the Phase0 named contract packet manifest.
+- The guard requires manifest schema/status/scope/paths, complete required contract set, accepted StockEtfCash/IBKR shape, loopback-only IB Gateway/TWS API baseline, paper port candidate 4002, live port denial, no prior IBKR call, all global denials, phase unlock fail-closed strings, duplicate/missing/unexpected contract detection, and no runtime/secret/order/Bybit client tokens.
+- Verification passed: new guard `6 passed`; Phase0 manifest acceptance `6 passed`; full `cargo test -p openclaw_types` PASS. This grants no runtime authority, IBKR contact, connector construction, migration, evidence clock, order route, tiny-live/live, or Bybit behavior change.
