@@ -3144,3 +3144,30 @@ Verification 已過：
 邊界不變：沒有 IBKR contact、沒有 read probe execution、沒有 result import execution、沒有
 connector runtime、沒有 secret access、沒有 evidence/scorecard writer、沒有 DB apply、沒有
 order route、沒有 tiny-live/live authorization，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Instrument Identity Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF Instrument Identity Source Static Guard`。
+
+這個 guard 鎖住 `stock_etf_instrument_identity.rs` 的 point-in-time Stock/ETF cash instrument
+identity source hygiene：exact `instrument_identity_contract_v1` contract id、identity fields、
+listing venue/currency/tradability/PRIIPs enums、verdict/blocker surface、cash/non-cash venue
+rules、symbol rules、PIT/hash lineage、side-effect denial flags 必須保留。
+
+Guard 要求 default identity 維持 fail-closed：CryptoPerp/Bybit、CryptoPerp instrument kind、
+empty symbol、UnknownDenied venue/currency/tradability/PRIIPs、missing PIT/as-of/hash lineage、
+Bybit live unchanged false、IBKR live/margin/options-CFD denial flags false。Accepted fixture 必須
+保留 StockEtfCash/IBKR、Stock、`AMD`、XNAS listing/primary exchange、USD、Tradable、PRIIPs
+NotRequired、fractional policy recorded、PIT as-of、market calendar、broker contract-details、
+identity、corporate-action-adjustment、source artifact hashes。
+
+Verification 已過：
+
+- New structure guard pytest：`7 passed`
+- Focused instrument identity acceptance：`8 passed`
+- Full `cargo test -p openclaw_types`：PASS
+
+邊界不變：沒有 IBKR contract-details call、沒有 market-data subscription、沒有 connector
+runtime、沒有 secret access、沒有 paper order、沒有 evidence/scorecard writer、沒有 DB apply、
+沒有 tiny-live/live authorization，也沒有改動 Bybit live execution 行為。
