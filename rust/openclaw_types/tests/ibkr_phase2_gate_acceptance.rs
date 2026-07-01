@@ -18,30 +18,31 @@ use openclaw_types::{
 
 #[test]
 fn external_surface_gate_default_blocks_before_any_ibkr_contact() {
+    use IbkrExternalSurfaceGateBlocker as Blocker;
+
     let gate = IbkrExternalSurfaceGateV1::default();
     let verdict = gate.validate();
 
     assert_eq!(gate.status, IbkrExternalSurfaceGateStatus::Blocked);
     assert!(!gate.ibkr_call_performed);
     assert!(!verdict.ibkr_contact_allowed);
-    assert!(verdict
-        .blockers
-        .contains(&IbkrExternalSurfaceGateBlocker::ContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrExternalSurfaceGateBlocker::SourceVersionMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrExternalSurfaceGateBlocker::StatusNotPass));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrExternalSurfaceGateBlocker::LivePortsNotDenied));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrExternalSurfaceGateBlocker::ApiAllowlistMissing));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrExternalSurfaceGateBlocker::RedactionSuiteMissing));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::ContractIdMismatch,
+            Blocker::SourceVersionMismatch,
+            Blocker::StatusNotPass,
+            Blocker::LivePortsNotDenied,
+            Blocker::SecretContractMissing,
+            Blocker::LiveSecretPresentOrUnknown,
+            Blocker::ApiAllowlistMissing,
+            Blocker::RedactionSuiteMissing,
+            Blocker::RateLimitPolicyMissing,
+            Blocker::AuditEventPolicyMissing,
+            Blocker::PaperAttestationContractMissing,
+            Blocker::PythonNoWriteGuardMissing,
+        ]
+    );
 }
 
 #[test]
@@ -158,36 +159,36 @@ fn external_surface_gate_rejects_each_precontact_gap_independently() {
 
 #[test]
 fn external_surface_gate_rejects_retroactive_or_wrong_surface_pass() {
+    use IbkrExternalSurfaceGateBlocker as Blocker;
+
     let wrong_identity = IbkrExternalSurfaceGateV1 {
         contract_id: "phase2_ibkr_external_surface_gate_v1_fixture".to_string(),
         source_version: 2,
         ..IbkrExternalSurfaceGateV1::passing_fixture()
     };
     let identity_verdict = wrong_identity.validate();
-    assert!(identity_verdict
-        .blockers
-        .contains(&IbkrExternalSurfaceGateBlocker::ContractIdMismatch));
-    assert!(identity_verdict
-        .blockers
-        .contains(&IbkrExternalSurfaceGateBlocker::SourceVersionMismatch));
+    assert_eq!(
+        identity_verdict.blockers,
+        vec![Blocker::ContractIdMismatch, Blocker::SourceVersionMismatch]
+    );
 
     let retroactive = IbkrExternalSurfaceGateV1 {
         ibkr_call_performed: true,
         ..IbkrExternalSurfaceGateV1::passing_fixture()
     };
-    assert!(retroactive
-        .validate()
-        .blockers
-        .contains(&IbkrExternalSurfaceGateBlocker::IbkrCallAlreadyPerformed));
+    assert_eq!(
+        retroactive.validate().blockers,
+        vec![Blocker::IbkrCallAlreadyPerformed]
+    );
 
     let client_portal = IbkrExternalSurfaceGateV1 {
         api_baseline: IbkrApiBaseline::ClientPortalWebApiDenied,
         ..IbkrExternalSurfaceGateV1::passing_fixture()
     };
-    assert!(client_portal
-        .validate()
-        .blockers
-        .contains(&IbkrExternalSurfaceGateBlocker::ApiBaselineMismatch));
+    assert_eq!(
+        client_portal.validate().blockers,
+        vec![Blocker::ApiBaselineMismatch]
+    );
 
     let network_host = IbkrExternalSurfaceGateV1 {
         host_policy: IbkrHostPolicy::NetworkHostDenied,
@@ -195,12 +196,13 @@ fn external_surface_gate_rejects_retroactive_or_wrong_surface_pass() {
         ..IbkrExternalSurfaceGateV1::passing_fixture()
     };
     let verdict = network_host.validate();
-    assert!(verdict
-        .blockers
-        .contains(&IbkrExternalSurfaceGateBlocker::HostPolicyNotLoopbackOnly));
-    assert!(verdict
-        .blockers
-        .contains(&IbkrExternalSurfaceGateBlocker::PortPolicyNotPaperGatewayOnly));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::HostPolicyNotLoopbackOnly,
+            Blocker::PortPolicyNotPaperGatewayOnly,
+        ]
+    );
 }
 
 #[test]
