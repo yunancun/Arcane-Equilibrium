@@ -5891,3 +5891,33 @@ socket/client construction、沒有 broker session、沒有 read-only probe exec
 沒有 paper order routing/cancel/replace execution、沒有 evidence/scorecard writer、沒有 DB apply、沒有 evidence
 clock、沒有 paper-shadow launch、沒有 release launch、沒有 tiny-live/live authorization，也沒有改動 Bybit
 live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Phase3 Evidence Exact Blocker Guard
+
+本 session 已完成下一個 test-only checkpoint：
+`Stock/ETF Phase3 Evidence Exact Blocker Guard`。
+
+這個 checkpoint 補強 `StockEtfPhase3` evidence contracts 的 aggregate fail-closed coverage。
+
+新增 Rust acceptance 證明 market-data provenance drift/boundary failures、frozen-input lineage、collector lineage
+與 runtime side effects、evidence-clock gate/status regressions、DQ manifest runtime side effects 都會以完整
+ordered blocker vectors 或 exact single-blocker vectors fail closed。source-static 也擴充 validator blocker
+emit-order guard，覆蓋 market-data provenance、frozen inputs、collector run、DQ manifest、evidence-clock validators。
+
+Verification 已過：
+
+- No Phase3 blocker `.contains()` scan：PASS
+- Targeted rustfmt check：PASS
+- Stock/ETF Phase3 evidence source static pytest：`16 passed`
+- Stock/ETF Phase3 evidence Rust acceptance：`24 passed`
+- Full `cargo test -p openclaw_types`：PASS
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 collector/evidence-clock runtime startup、沒有 GUI runtime/API
+route/IPC behavior change、沒有 IBKR contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有
+socket/client construction、沒有 broker session、沒有 market-data ingestion、沒有 read-only probe execution、沒有
+fill import execution、沒有 paper order routing/cancel/replace execution、沒有 evidence/scorecard writer、沒有 DB
+apply、沒有 paper-shadow launch、沒有 release launch、沒有 tiny-live/live authorization，也沒有改動 Bybit
+live/demo execution 行為。

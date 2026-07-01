@@ -9173,3 +9173,44 @@ runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀
 socket/client construction、不做 broker session、不執行 read-only probe、不執行 result/fill import、不執行 paper
 order routing/cancel/replace、不做 evidence/scorecard/DB writer、不啟動 evidence clock、不做 release launch、
 不做 Linux runtime sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
+
+## 222. 2026-07-01 PM session source checkpoint：Stock/ETF Phase3 Evidence Exact Blocker Guard
+
+本 checkpoint 補強 `StockEtfPhase3` evidence contracts 的 aggregate fail-closed lineage，固定 market-data
+provenance drift/boundary failures、frozen-input lineage、collector lineage/runtime side effects、evidence-clock
+gate/status regressions、DQ manifest runtime side effects 的 ordered blocker vectors 或 exact single-blocker
+vectors。這不是 Rust production behavior change、不是 collector/evidence-clock runtime start、不是 IPC/API route
+change、不是 IBKR contact、不是 connector runtime、不是 socket/client construction、不是 secret lookup、不是 broker
+session、不是 market-data ingestion、不是 evidence/scorecard/DB writer、不是 paper order route enablement、不是
+tiny-live/live gate；只把 Stock/ETF Phase3 evidence source-only contracts 的 fail-closed lineage 變成
+exact-blocker acceptance guard。
+
+已完成：
+
+- 在 `stock_etf_phase3_evidence_acceptance.rs` 將 market-data provenance 的 contract/source drift 與 boundary
+  regressions 固定為完整順序 blocker 向量。
+- 在同檔將 frozen evidence inputs reference-data lineage gap、collector run lineage aggregate、collector runtime
+  side-effect aggregate、evidence-clock pass-day/status regressions、contract/lineage drift、checker side effects、
+  DQ manifest runtime side-effect aggregate 固定為 exact blocker vectors 或 exact single-blocker vectors。
+- 移除 Phase3 evidence acceptance 中 blocker `.contains()` 的寬鬆 aggregate usage；aggregate cases 改為完整
+  ordered-vector assertions。
+- 在 `test_stock_etf_phase3_evidence_source_static.py` 擴充 validator blocker emit-order guard，pin market-data
+  provenance、frozen inputs、collector run、DQ manifest、evidence-clock validators 的 lineage、side-effect 與 status
+  blocker order。
+
+驗證：
+
+- No Phase3 blocker `.contains()` scan：PASS。
+- Targeted rustfmt check：PASS。
+- Stock/ETF Phase3 evidence source static pytest：`16 passed`。
+- Stock/ETF Phase3 evidence Rust acceptance：`24 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、不改 GUI
+runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不做
+socket/client construction、不做 broker session、不執行 market-data ingestion、不啟動 collector runtime、不啟動
+evidence clock、不做 paper order routing/cancel/replace、不做 evidence/scorecard/DB writer、不做 release launch、
+不做 Linux runtime sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。

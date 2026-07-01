@@ -57,18 +57,27 @@ fn source_market_data_provenance_has_required_hashes_and_calendar_session() {
 
 #[test]
 fn market_data_provenance_requires_exact_contract_id_and_source_version() {
+    use StockEtfPhase3Blocker as Blocker;
+
     let mut provenance = StockMarketDataProvenanceV1::source_fixture();
     provenance.contract_id = "stock_market_data_provenance_v1_fixture".to_string();
     provenance.source_version = 2;
 
     let blockers = provenance.validate().blockers;
 
-    assert!(blockers.contains(&StockEtfPhase3Blocker::MarketDataProvenanceContractIdMismatch));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::MarketDataProvenanceVersionMismatch));
+    assert_eq!(
+        blockers,
+        vec![
+            Blocker::MarketDataProvenanceContractIdMismatch,
+            Blocker::MarketDataProvenanceVersionMismatch,
+        ]
+    );
 }
 
 #[test]
 fn market_data_provenance_rejects_boundary_regressions() {
+    use StockEtfPhase3Blocker as Blocker;
+
     let mut provenance = StockMarketDataProvenanceV1::source_fixture();
     provenance.asset_lane = AssetLane::CryptoPerp;
     provenance.broker = Broker::Bybit;
@@ -82,15 +91,20 @@ fn market_data_provenance_rejects_boundary_regressions() {
 
     let blockers = provenance.validate().blockers;
 
-    assert!(blockers.contains(&StockEtfPhase3Blocker::MarketDataProvenanceWrongAssetLane));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::MarketDataProvenanceWrongBroker));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::MarketDataProvenanceEnvironmentDenied));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::SourceArtifactHashInvalid));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::BybitLiveExecutionNotProtected));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::IbkrContactPerformed));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::ConnectorRuntimeStarted));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::SecretContentSerialized));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::LiveOrTinyLiveAuthorized));
+    assert_eq!(
+        blockers,
+        vec![
+            Blocker::MarketDataProvenanceWrongAssetLane,
+            Blocker::MarketDataProvenanceWrongBroker,
+            Blocker::MarketDataProvenanceEnvironmentDenied,
+            Blocker::SourceArtifactHashInvalid,
+            Blocker::BybitLiveExecutionNotProtected,
+            Blocker::IbkrContactPerformed,
+            Blocker::ConnectorRuntimeStarted,
+            Blocker::SecretContentSerialized,
+            Blocker::LiveOrTinyLiveAuthorized,
+        ]
+    );
 }
 
 #[test]
@@ -163,9 +177,10 @@ fn frozen_inputs_require_reference_data_sources_contract_hash() {
     let verdict = missing.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::ReferenceDataSourcesHashInvalid));
+    assert_eq!(
+        verdict.blockers,
+        vec![StockEtfPhase3Blocker::ReferenceDataSourcesHashInvalid]
+    );
 }
 
 #[test]
@@ -257,6 +272,8 @@ fn default_collector_run_blocks_phase3_evidence_clock() {
 
 #[test]
 fn source_collector_run_requires_five_green_sessions_and_lineage_hashes() {
+    use StockEtfPhase3Blocker as Blocker;
+
     let collector = StockEtfCollectorRunV1::source_fixture();
     let verdict = collector.validate();
 
@@ -291,17 +308,24 @@ fn source_collector_run_requires_five_green_sessions_and_lineage_hashes() {
     missing_lineage.replay_manifest_hash.clear();
     let blockers = missing_lineage.validate().blockers;
 
-    assert!(blockers.contains(&StockEtfPhase3Blocker::CollectorPitUniverseHashInvalid));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::CollectorMarketDataProvenanceHashInvalid));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::CollectorReferenceDataSourcesHashInvalid));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::CollectorStorageCapacityHashInvalid));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::CollectorGapReportHashInvalid));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::CollectorDqManifestHashInvalid));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::CollectorReplayManifestHashInvalid));
+    assert_eq!(
+        blockers,
+        vec![
+            Blocker::CollectorPitUniverseHashInvalid,
+            Blocker::CollectorMarketDataProvenanceHashInvalid,
+            Blocker::CollectorReferenceDataSourcesHashInvalid,
+            Blocker::CollectorStorageCapacityHashInvalid,
+            Blocker::CollectorGapReportHashInvalid,
+            Blocker::CollectorDqManifestHashInvalid,
+            Blocker::CollectorReplayManifestHashInvalid,
+        ]
+    );
 }
 
 #[test]
 fn collector_run_rejects_side_effecting_runtime_claims() {
+    use StockEtfPhase3Blocker as Blocker;
+
     let mut collector = StockEtfCollectorRunV1::source_fixture();
     collector.expected_trading_sessions = STOCK_ETF_COLLECTOR_MIN_GREEN_TRADING_DAYS;
     collector.completed_trading_sessions = STOCK_ETF_COLLECTOR_MIN_GREEN_TRADING_DAYS - 1;
@@ -316,16 +340,21 @@ fn collector_run_rejects_side_effecting_runtime_claims() {
     collector.live_or_tiny_live_authorized = true;
     let blockers = collector.validate().blockers;
 
-    assert!(blockers.contains(&StockEtfPhase3Blocker::CollectorCompletedSessionsMissing));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::BybitLiveExecutionNotProtected));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::IbkrContactPerformed));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::ConnectorRuntimeStarted));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::CollectorMarketDataIngestionStarted));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::CollectorEvidenceWriterStarted));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::ScorecardWriterStarted));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::DbApplyPerformed));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::SecretContentSerialized));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::LiveOrTinyLiveAuthorized));
+    assert_eq!(
+        blockers,
+        vec![
+            Blocker::CollectorCompletedSessionsMissing,
+            Blocker::BybitLiveExecutionNotProtected,
+            Blocker::IbkrContactPerformed,
+            Blocker::ConnectorRuntimeStarted,
+            Blocker::CollectorMarketDataIngestionStarted,
+            Blocker::CollectorEvidenceWriterStarted,
+            Blocker::ScorecardWriterStarted,
+            Blocker::DbApplyPerformed,
+            Blocker::SecretContentSerialized,
+            Blocker::LiveOrTinyLiveAuthorized,
+        ]
+    );
 }
 
 #[test]
@@ -446,21 +475,25 @@ fn pass_day_requires_green_dependencies_frozen_inputs_and_dq_quality() {
     missing_connector.ibkr_readonly_paper_connector_green_5d = false;
     let verdict = missing_connector.validate();
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::IbkrConnectorNotGreenFiveDays));
+    assert_eq!(
+        verdict.blockers,
+        vec![StockEtfPhase3Blocker::IbkrConnectorNotGreenFiveDays]
+    );
 
     let mut weak_dq = pass;
     weak_dq.dq_manifest.calendar_aware_coverage_bps = 9_900;
     let weak_verdict = weak_dq.validate();
     assert!(!weak_verdict.accepted);
-    assert!(weak_verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::PassDayQualityRejected));
+    assert_eq!(
+        weak_verdict.blockers,
+        vec![StockEtfPhase3Blocker::PassDayQualityRejected]
+    );
 }
 
 #[test]
 fn evidence_clock_day_rejects_contract_drift_and_checker_side_effects() {
+    use StockEtfPhase3Blocker as Blocker;
+
     let mut day = StockEtfEvidenceClockDayV1::pass_day_fixture();
     day.contract_id = "stock_etf_evidence_clock_v2".to_string();
     day.source_version = 2;
@@ -485,26 +518,31 @@ fn evidence_clock_day_rejects_contract_drift_and_checker_side_effects() {
 
     let blockers = day.validate().blockers;
 
-    assert!(blockers.contains(&StockEtfPhase3Blocker::EvidenceClockContractIdMismatch));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::EvidenceClockVersionMismatch));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::EvidenceClockWrongAssetLane));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::EvidenceClockWrongBroker));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::EvidenceClockEnvironmentDenied));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::EvidenceClockCollectorRunContractMismatch));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::EvidenceClockCollectorRunHashInvalid));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::EvidenceClockDqManifestContractMismatch));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::EvidenceClockDqManifestHashInvalid));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::EvidenceClockSourceArtifactHashInvalid));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::EvidenceClockMarketDataProvenanceHashInvalid));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::EvidenceClockScorecardInputHashInvalid));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::BybitLiveExecutionNotProtected));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::IbkrContactPerformed));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::ConnectorRuntimeStarted));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::EvidenceClockRuntimeStarted));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::ScorecardWriterStarted));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::DbApplyPerformed));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::SecretContentSerialized));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::LiveOrTinyLiveAuthorized));
+    assert_eq!(
+        blockers,
+        vec![
+            Blocker::EvidenceClockContractIdMismatch,
+            Blocker::EvidenceClockVersionMismatch,
+            Blocker::EvidenceClockWrongAssetLane,
+            Blocker::EvidenceClockWrongBroker,
+            Blocker::EvidenceClockEnvironmentDenied,
+            Blocker::EvidenceClockCollectorRunContractMismatch,
+            Blocker::EvidenceClockCollectorRunHashInvalid,
+            Blocker::EvidenceClockDqManifestContractMismatch,
+            Blocker::EvidenceClockDqManifestHashInvalid,
+            Blocker::EvidenceClockSourceArtifactHashInvalid,
+            Blocker::EvidenceClockMarketDataProvenanceHashInvalid,
+            Blocker::EvidenceClockScorecardInputHashInvalid,
+            Blocker::BybitLiveExecutionNotProtected,
+            Blocker::IbkrContactPerformed,
+            Blocker::ConnectorRuntimeStarted,
+            Blocker::EvidenceClockRuntimeStarted,
+            Blocker::ScorecardWriterStarted,
+            Blocker::DbApplyPerformed,
+            Blocker::SecretContentSerialized,
+            Blocker::LiveOrTinyLiveAuthorized,
+        ]
+    );
 }
 
 #[test]
@@ -583,9 +621,10 @@ fn quarantined_day_requires_valid_manifest_shape_and_actual_dq_failure() {
     false_quarantine.status = StockEtfEvidenceClockStatus::QuarantinedDay;
     let verdict = false_quarantine.validate();
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::QuarantinedDayWithoutDqFailure));
+    assert_eq!(
+        verdict.blockers,
+        vec![StockEtfPhase3Blocker::QuarantinedDayWithoutDqFailure]
+    );
 }
 
 #[test]
@@ -597,9 +636,10 @@ fn window_complete_status_is_not_source_authorized_by_checker_fixture() {
     let verdict = day.validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::WindowCompleteNotSourceAuthorized));
+    assert_eq!(
+        verdict.blockers,
+        vec![StockEtfPhase3Blocker::WindowCompleteNotSourceAuthorized]
+    );
 }
 
 #[test]
@@ -666,6 +706,8 @@ fn source_dq_manifest_has_named_contract_lineage_and_no_side_effects() {
 
 #[test]
 fn dq_manifest_rejects_runtime_side_effect_claims() {
+    use StockEtfPhase3Blocker as Blocker;
+
     let mut manifest = StockEtfDailyDqManifestV1::pass_fixture();
     manifest.bybit_live_execution_unchanged = false;
     manifest.ibkr_contact_performed = true;
@@ -680,16 +722,21 @@ fn dq_manifest_rejects_runtime_side_effect_claims() {
 
     let blockers = manifest.validates_shape().blockers;
 
-    assert!(blockers.contains(&StockEtfPhase3Blocker::BybitLiveExecutionNotProtected));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::IbkrContactPerformed));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::ConnectorRuntimeStarted));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::DqManifestMarketDataIngestionStarted));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::DqManifestWriterStarted));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::DqManifestEvidenceClockStarted));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::ScorecardWriterStarted));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::DbApplyPerformed));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::SecretContentSerialized));
-    assert!(blockers.contains(&StockEtfPhase3Blocker::LiveOrTinyLiveAuthorized));
+    assert_eq!(
+        blockers,
+        vec![
+            Blocker::BybitLiveExecutionNotProtected,
+            Blocker::IbkrContactPerformed,
+            Blocker::ConnectorRuntimeStarted,
+            Blocker::DqManifestMarketDataIngestionStarted,
+            Blocker::DqManifestWriterStarted,
+            Blocker::DqManifestEvidenceClockStarted,
+            Blocker::ScorecardWriterStarted,
+            Blocker::DbApplyPerformed,
+            Blocker::SecretContentSerialized,
+            Blocker::LiveOrTinyLiveAuthorized,
+        ]
+    );
 }
 
 #[test]
