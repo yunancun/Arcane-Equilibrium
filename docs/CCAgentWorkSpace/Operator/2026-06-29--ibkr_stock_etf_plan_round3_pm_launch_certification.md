@@ -4396,3 +4396,31 @@ Verification 已過：
 沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 Client Portal Web API enablement、
 沒有 broker routing、沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit
 live/demo execution 行為。
+
+## 2026-07-01 Operator Update — IBKR Phase2 Policy Template Authority Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`IBKR Phase2 Policy Template Authority Cross-Wire Guard`。
+
+這個 checkpoint 補強 Phase 2 policy templates：redaction、rate-limit、audit-event、
+paper-attestation、Python write-guard。新增 Rust acceptance 證明 secret/account/path/cookie/token/
+raw payload/stack trace leak、missing per-action pacing/budgets、missing append-only audit lineage、
+missing Rust-scoped paper attestation、Python write authority / live-secret / GUI override / Bybit
+mutation gap 都會各自 fail closed，且關鍵 cases 是 exact single blocker。
+
+同時新增 Python source-static parser，直接鎖住各 policy `source_template()` 的安全 posture 與
+`Default` fail-closed posture，避免 template 被硬編成 runtime authority 或 secret/log leak。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Phase2 policy source static pytest：`4 passed`
+- Phase2 policy Rust acceptance：`13 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 redaction/rate-limit/audit runtime、
+沒有 broker routing、沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit
+live/demo execution 行為。

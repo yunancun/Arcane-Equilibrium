@@ -7113,3 +7113,44 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不啟用 Client Portal Web API、不做
 broker routing、不做 paper order route、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何
 Bybit behavior change。
+
+## 170. 2026-07-01 PM session source checkpoint：IBKR Phase2 Policy Template Authority Cross-Wire Guard
+
+本 checkpoint 補強 `ibkr_phase2_policies` 中 Phase 2 redaction、rate-limit、audit-event、
+paper-attestation、Python write-guard policy templates 的單點 authority regression coverage。這不是
+Rust production behavior change、不是 IBKR contact、不是 connector runtime、不是 redaction writer、
+不是 rate limiter runtime、不是 audit writer、不是 secret lookup、不是 paper order route、不是
+tiny-live/live gate；只把 Phase 2 policy source templates 的 no-secret-leak、per-action pacing、
+append-only audit、Rust-scoped paper attestation、Python no-write / no-Bybit-mutation posture 變成
+exact-blocker acceptance test 與 source-static guard。
+
+已完成：
+
+- 在 `ibkr_phase2_policy_acceptance.rs` 新增 redaction exact-blocker cases，逐一證明 missing payload
+  hashes、account/secret/path/cookie/token/raw-payload/stack-trace log leaks 只產生單一對應 blocker。
+- 新增 rate-limit exact-blocker cases，逐一證明 non-per-action scope、missing spacing/concurrency、
+  missing per-action buckets、missing pacing circuit breaker、missing read/market-data/paper-write
+  budgets 只產生單一對應 blocker。
+- 新增 audit-event exact-blocker cases，逐一證明 append-only、lane/broker/environment/operation、
+  allow/deny reason、source/raw/redacted hashes、account-fingerprint-only 與 raw-payload-storage
+  posture 不可漏開。
+- 新增 paper-attestation / Python write-guard exact-blocker cases，逐一證明 Phase 2 gate、session、
+  Rust IPC、scoped authorization、Decision Lease、Guardian、risk/instrument/idempotency/lifecycle/
+  reconciliation、paper-only、live/margin denial、max notional、Python no-write/no-secret/GUI no-override/
+  Bybit unchanged posture 不可漏開。
+- 在 `test_ibkr_phase2_policies_source_static.py` 新增 source-template/default block parser，鎖住
+  source templates 的安全 posture 與 default fail-closed posture。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Phase2 policy source static pytest：`4 passed`。
+- Phase2 policy Rust acceptance：`13 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不啟動 redaction/rate-limit/audit runtime、
+不做 broker routing、不做 paper order route、不做 Linux runtime sync/restart、不授權 tiny-live/live
+或任何 Bybit behavior change。
