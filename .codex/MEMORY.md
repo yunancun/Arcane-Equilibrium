@@ -1326,3 +1326,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only structure guard for `stock_etf_shadow_signal_request.rs`, pinning the shadow signal request envelope before paper-shadow reconciliation.
 - The guard requires fail-closed defaults, accepted StockEtfCash/IBKR/Shadow `EvaluateShadowSignal` shape, ShadowOnly/effect=false authority, evidence clock/PIT universe/strategy/instrument/market-data/cost/asset-lane/source lineage hashes, no shadow emission/writer/order/runtime flags, and no runtime/secret/order/Bybit client tokens.
 - Verification passed: new guard `6 passed`; shadow signal request acceptance `5 passed`; full `cargo test -p openclaw_types` PASS. This grants no IBKR contact, connector construction, shadow signal emission, shadow-fill generation, scorecard writer, DB apply, paper order route, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Scorecard Inputs Source Static Guard
+
+- PM added a source-only structure guard for the split `stock_etf_scorecard_inputs` parent/components/bundle modules.
+- The guard requires scorecard input contract ids, storage capacity caps, cash ledger Paper/ReadOnly checks, cost/benchmark/shadow-fill validators, synthetic shadow fill separation, storage retention/archive/query-SLO gates, derived-only bundle posture, cross-contract hashes, Bybit-live protection, no evidence clock/writer/DB/runtime flags, and no runtime/secret/order/Bybit client tokens.
+- Verification passed: new guard `7 passed`; scorecard inputs acceptance `12 passed`; full `cargo test -p openclaw_types` PASS. This grants no IBKR contact, broker fill import, scorecard derivation/writer, evidence clock, DB apply, tiny-live/live, or Bybit behavior change.
