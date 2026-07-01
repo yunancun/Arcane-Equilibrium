@@ -119,6 +119,8 @@ SECRET_ASSIGNMENT_RE = re.compile(
     r"[a-z0-9_-]*"
     r")\s*[:=]\s*[^\s,;&]+"
 )
+
+BBO_FUTURE_TIMESTAMP_TOLERANCE_MS = 10.0
 BEARER_TOKEN_RE = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+")
 LOCAL_PATH_RE = re.compile(r"(?<!:)(?:/(?:Users|home|tmp|var|private|etc|opt|usr|Volumes)/[^\s,;)'\"]+)")
 URI_RE = re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s,;)'\"]+")
@@ -834,6 +836,7 @@ def _freshness(
     if reasons:
         return {
             "freshness_rule": "bybit_server_time_offset_plus_request_durations",
+            "future_timestamp_tolerance_ms": BBO_FUTURE_TIMESTAMP_TOLERANCE_MS,
             "effective_bbo_age_ms": None,
             "bbo_fresh": False,
             "max_fresh_bbo_age_ms": max_fresh_bbo_age_ms,
@@ -849,13 +852,17 @@ def _freshness(
     estimated_server_at_ticker_end_ms = ticker_local_end_ms - local_minus_server_ms
     raw_age_ms = estimated_server_at_ticker_end_ms - ticker_time_ms
     effective_age_ms = raw_age_ms + time_duration_ms + ticker_duration_ms
-    if raw_age_ms < -1.0 or effective_age_ms < 0:
+    if (
+        raw_age_ms < -BBO_FUTURE_TIMESTAMP_TOLERANCE_MS
+        or effective_age_ms < 0
+    ):
         reasons.append("ticker_time_future_or_clock_ambiguous")
     bbo_fresh = not reasons and effective_age_ms <= float(max_fresh_bbo_age_ms)
     if not bbo_fresh and not reasons:
         reasons.append("bbo_freshness_exceeds_gate")
     return {
         "freshness_rule": "bybit_server_time_offset_plus_request_durations",
+        "future_timestamp_tolerance_ms": BBO_FUTURE_TIMESTAMP_TOLERANCE_MS,
         "server_time_ms": time_ms,
         "server_time_utc": _ms_to_iso(time_ms),
         "ticker_time_ms": ticker_time_ms,
@@ -947,6 +954,7 @@ def capture_public_quote(
     instrument: dict[str, Any] | None = None
     freshness: dict[str, Any] = {
         "freshness_rule": "bybit_server_time_offset_plus_request_durations",
+        "future_timestamp_tolerance_ms": BBO_FUTURE_TIMESTAMP_TOLERANCE_MS,
         "effective_bbo_age_ms": None,
         "bbo_fresh": False,
         "max_fresh_bbo_age_ms": max_fresh_bbo_age_ms,

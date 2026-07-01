@@ -571,6 +571,9 @@ def build_current_candidate_public_quote_construction_refresh(
     instrument: dict[str, Any] | None = None
     freshness: dict[str, Any] = {
         "freshness_rule": "bybit_server_time_offset_plus_request_durations",
+        "future_timestamp_tolerance_ms": (
+            quote_capture.BBO_FUTURE_TIMESTAMP_TOLERANCE_MS
+        ),
         "effective_bbo_age_ms": None,
         "bbo_fresh": False,
         "max_fresh_bbo_age_ms": max_fresh_bbo_age_ms,
