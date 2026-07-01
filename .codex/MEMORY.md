@@ -1234,3 +1234,11 @@ Do not paste long reports or stable architecture into TODO.
 - `IbkrReadOnlyClient.session_attestation_preview()` and `IbkrPaperClientBoundary.paper_attestation_preview()` now return typed blocked dicts for future Phase 2 gate wiring.
 - Verification passed: Python compile, connector skeleton focused test `8 passed`, full Stock/ETF FastAPI/static `120 passed`, docs trace `2 passed`, and `git diff --check` PASS.
 - Boundary unchanged: no endpoint, IPC, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe, paper order, fill import, DB/evidence writer, tiny-live/live, Linux runtime, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF Read-Only Probe Result Import Request Contract
+
+- PM added source-only `stock_etf_ibkr_readonly_probe_result_import_request_v1` to bind future sanitized read-only probe outputs back to the pre-contact request, session attestation, allowlist, redaction/audit policy, result payload, raw/redacted/source artifacts, as-of/import-request timestamps, idempotency, and one downstream evidence family.
+- Probe kind-specific lineage now covers health snapshot, `broker_account_portfolio_cash_ledger_v1`, `stock_market_data_provenance_v1`, `instrument_identity_contract_v1`, and `broker_lifecycle_event_log_v1`.
+- Phase0 manifest/JSON now moves from 35 to 36 named contracts, and broker capability `scorecard_derive` now requires readonly probe result import request lineage before scorecard facts can be considered complete.
+- Verification passed: scoped Rust format; result import request acceptance `6 passed`; Phase0 manifest acceptance `6 passed`; broker capability registry acceptance `10 passed`; full `cargo test -p openclaw_types` PASS; full Stock/ETF FastAPI/static pytest `120 passed`; focused docs trace `2 passed`; `git diff --check` PASS.
+- Boundary unchanged: no IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, result import, collector, market-data ingestion, DQ writer, paper order/cancel/replace, fill import, DB/evidence writer, evidence clock, scorecard writer, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

@@ -2068,3 +2068,35 @@ contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation
 connector runtime、沒有 read probe execution、沒有 paper order/cancel/replace、沒有 fill
 import、沒有 evidence writer、沒有 DB apply、沒有 evidence clock、沒有 tiny-live/live
 authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Read-Only Probe Result Import Request Contract
+
+本 session 已新增 source-only
+`stock_etf_ibkr_readonly_probe_result_import_request_v1` contract：
+
+- 新 Rust validator 固定 future sanitized IBKR read-only probe result 進入 evidence
+  前的 request/session/allowlist/redaction/audit/result hash lineage。
+- Validator 依 probe kind 要求 downstream lineage：health snapshot、account cash
+  ledger、market-data provenance、instrument identity 或 broker lifecycle event log。
+- Phase0 manifest/JSON 從 35 named contracts 更新為 36，納入新 named contract。
+- Broker capability registry 的 `scorecard_derive` gate 現在要求 readonly probe
+  result import request lineage。
+- 新增 default-blocked secret-free TOML template，並更新 settings README 與 Phase0
+  spec。
+
+Verification 已過：
+
+- Scoped Rust format：PASS
+- Result import request acceptance：`6 passed`
+- Phase0 manifest acceptance：`6 passed`
+- Broker capability registry acceptance：`10 passed`
+- Full `cargo test -p openclaw_types`：PASS
+- Full Stock/ETF FastAPI/static pytest：`120 passed`
+- Focused docs trace：`2 passed`
+- `git diff --check`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
+access/creation、沒有 connector runtime、沒有 read probe execution、沒有 result
+import、沒有 evidence writer、沒有 DB apply、沒有 evidence clock、沒有 scorecard
+writer、沒有 paper order/cancel/replace、沒有 tiny-live/live authority，也沒有改動
+Bybit live execution 行為。

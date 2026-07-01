@@ -4,6 +4,8 @@
 # execution behavior.
 # Accepted read rows must require lane_scoped_ipc_v1 and
 # stock_etf_ibkr_readonly_probe_request_v1 in addition to per-operation gates.
+# Accepted scorecard derivation rows must also require
+# stock_etf_ibkr_readonly_probe_result_import_request_v1 lineage.
 
 registry_id = ""
 source_version = 0

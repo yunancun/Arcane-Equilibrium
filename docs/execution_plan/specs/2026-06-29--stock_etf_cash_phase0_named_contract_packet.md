@@ -93,7 +93,7 @@ Matrix:
 | `paper_order_fill_import` | Read/import only | session attestation + idempotency |
 | `shadow_signal_emit` | Allowed after Phase 3 | frozen hypothesis + universe |
 | `shadow_fill_reconstruct` | Allowed after Phase 3 | cost model + market provenance |
-| `scorecard_derive` | Derived only | atomic facts + hashes |
+| `scorecard_derive` | Derived only | readonly probe result import request + atomic facts + hashes |
 | `live_order_submit` | Denied | typed denial `ibkr_live_not_authorized` |
 | `margin_or_short` | Denied | typed denial `stock_etf_cash_only` |
 | `options_or_cfd` | Denied | typed denial `instrument_kind_denied` |
@@ -110,9 +110,12 @@ artifact hashes, paper-write Rust ownership, required gates for read / paper /
 shadow / scorecard operations including `stock_etf_risk_policy_v1`; read
 operations must include `lane_scoped_ipc_v1` and
 `stock_etf_ibkr_readonly_probe_request_v1` before any future read can be
-represented as available capability. It also requires exact typed denials for
-live, margin/short, options/CFD, and transfer/account-write operations. It
-rejects first IBKR contact or serialized secret content in the registry artifact.
+represented as available capability. Scorecard derivation must include
+`stock_etf_ibkr_readonly_probe_result_import_request_v1` lineage before account
+cash ledger / market-data provenance facts can feed derived scorecards. It also
+requires exact typed denials for live, margin/short, options/CFD, and
+transfer/account-write operations. It rejects first IBKR contact or serialized
+secret content in the registry artifact.
 
 ## 4. `phase2_ibkr_external_surface_gate_v1`
 
@@ -257,6 +260,57 @@ lineage hashes, and side-effect denials. It rejects paper-write/denied actions,
 runtime/contact/write evidence, entitlement purchase, Client Portal Web API use,
 secret serialization, and Bybit path reuse. This contract performs no probe and
 does not authorize any IBKR contact by itself.
+
+## 5A.1. `stock_etf_ibkr_readonly_probe_result_import_request_v1`
+
+This contract pins the source-only request envelope that must exist before any
+future sanitized IBKR read-only probe output can be imported into account,
+market-data, instrument, or paper-order read evidence. It links a result payload
+back to the read-only probe request, session attestation, allowlist, redaction
+policy, audit-event policy, and exactly one downstream evidence family.
+
+Required fields:
+
+- exact contract id `stock_etf_ibkr_readonly_probe_result_import_request_v1`
+- `source_version=1`
+- `asset_lane=stock_etf_cash`
+- `broker=ibkr`
+- environment limited to `readonly` or `paper`
+- probe kind mapped to one approved read action
+- broker operation mapped to `health_read`, `account_snapshot_read`,
+  `contract_details_read`, or `market_data_read`
+- `authority_scope=readonly`
+- `effect_capable=false`
+- result-import request id, read-only request id, and probe id
+- `stock_etf_ibkr_readonly_probe_request_v1` id/hash
+- `ibkr_session_attestation_v1` id/hash
+- `non_bybit_api_allowlist_v1` id/hash
+- redaction and audit-event policy id/hash fields
+- kind-specific downstream lineage:
+  `broker_account_portfolio_cash_ledger_v1`,
+  `stock_market_data_provenance_v1`, `instrument_identity_contract_v1`,
+  `broker_lifecycle_event_log_v1`, or a health snapshot hash
+- result payload, raw artifact, redacted summary, and source artifact hashes
+- result as-of timestamp, import-request timestamp, and idempotency key
+
+Denied in the source-only envelope:
+
+- duplicate import or stale result without manual review
+- IBKR contact, connector runtime, or secret serialization
+- result import, evidence writer, scorecard writer, or DB apply
+- order routing or paper order submission
+- Bybit path reuse
+- tiny-live/live authority
+- margin/short/options/CFD, account writes, entitlement purchases,
+  Client Portal Web API use, or Python direct broker writes
+
+Source validator:
+`openclaw_types::stock_etf_ibkr_readonly_probe_result_import_request::StockEtfIbkrReadonlyProbeResultImportRequestV1`.
+The validator requires exact contract identity/source version, Stock/ETF IBKR
+read-only identity, allowlisted read action/operation mapping, full request /
+session / policy lineage, one kind-specific downstream evidence hash family,
+timestamp/idempotency guards, and side-effect denials. It performs no result
+import, writes no evidence, and does not authorize IBKR contact by itself.
 
 ## 5B. `instrument_identity_contract_v1`
 

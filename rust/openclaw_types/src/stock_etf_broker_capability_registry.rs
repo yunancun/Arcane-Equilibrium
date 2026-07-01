@@ -12,6 +12,7 @@ use crate::ibkr_phase2_gate::{
 };
 use crate::ibkr_phase2_policies::IBKR_PAPER_ATTESTATION_CONTRACT_ID;
 use crate::stock_etf_ibkr_readonly_probe_request::STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID;
+use crate::stock_etf_ibkr_readonly_probe_result_import_request::STOCK_ETF_IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID;
 use crate::stock_etf_instrument_identity::STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID;
 use crate::stock_etf_lane::{
     AssetLane, AuthorityScope, Broker, BrokerOperation, StockEtfDenialReason,
@@ -315,6 +316,7 @@ fn expected_capability(operation: BrokerOperation) -> ExpectedCapability {
         Op::ScorecardDerive => ExpectedCapability {
             authority_scope: Scope::ReadOnly,
             required_gates: &[
+                STOCK_ETF_IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID,
                 BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID,
                 STOCK_ETF_RISK_POLICY_CONTRACT_ID,
                 STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID,

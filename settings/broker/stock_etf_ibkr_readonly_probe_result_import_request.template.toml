@@ -1,0 +1,63 @@
+# ADR-0048 Stock/ETF IBKR read-only probe result import request template.
+#
+# This is a blocked, secret-free source template. It does not contact IBKR,
+# import an SDK, create connectors, inspect secrets, import evidence, apply DB
+# changes, route orders, or change Bybit live execution behavior.
+
+contract_id = ""
+source_version = 0
+asset_lane = "crypto_perp"
+broker = "bybit"
+environment = "live_reserved_denied"
+probe_kind = "connection_health"
+api_action = "client_portal_web_api_use"
+operation = "transfer_or_account_write"
+authority_scope = "denied"
+effect_capable = false
+result_import_request_id = ""
+request_id = ""
+probe_id = ""
+readonly_probe_request_contract_id = ""
+readonly_probe_request_hash = ""
+session_attestation_contract_id = ""
+session_attestation_hash = ""
+api_allowlist_contract_id = ""
+api_allowlist_hash = ""
+redaction_policy_contract_id = ""
+redaction_policy_hash = ""
+audit_event_policy_contract_id = ""
+audit_event_policy_hash = ""
+account_cash_ledger_contract_id = ""
+account_cash_ledger_hash = ""
+market_data_provenance_contract_id = ""
+market_data_provenance_hash = ""
+instrument_identity_contract_id = ""
+instrument_identity_hash = ""
+broker_lifecycle_event_log_contract_id = ""
+broker_lifecycle_event_log_hash = ""
+health_snapshot_hash = ""
+result_payload_hash = ""
+raw_artifact_hash = ""
+redacted_summary_hash = ""
+source_artifact_hash = ""
+result_as_of_ms = 0
+import_requested_at_ms = 0
+idempotency_key = ""
+duplicate_import_detected = false
+stale_result_without_manual_review = false
+ibkr_contact_performed = false
+connector_runtime_started = false
+secret_content_serialized = false
+result_import_performed = false
+evidence_writer_started = false
+scorecard_writer_started = false
+db_apply_performed = false
+order_routed = false
+paper_order_submitted = false
+bybit_path_reused = false
+live_or_tiny_live_authorized = false
+margin_short_options_cfd_requested = false
+account_write_requested = false
+market_data_entitlement_purchase_requested = false
+client_portal_web_api_requested = false
+python_direct_broker_write_requested = false
