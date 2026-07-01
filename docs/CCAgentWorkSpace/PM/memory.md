@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-01 Stock/ETF Paper Shadow Reconciliation Exact Blocker Guard
+
+- PM tightened `StockEtfPaperShadowReconciliationV1` aggregate acceptance coverage to exact ordered blocker vectors for default, scope/authority/effect cross-wire, lineage/hash gaps, reconciliation-evidence failures, and no-side-effect boundary regressions.
+- Source-static guard now pins validator blocker emit order across top-level identity, required fields, reconciliation evidence, and boundary flags.
+- Verification passed: reconciliation source static `10`, Rust acceptance `10`, full `cargo test -p openclaw_types`, cargo fmt, docs trace, and diff-check. Boundary unchanged: no IBKR contact, connector/runtime, fill import, shadow fill generation, reconciliation/scorecard writer, DB/evidence writer, tiny-live/live, or Bybit behavior change.
+
 ## 2026-07-01 No-Order Refresh Request Invalidated Before E3/BB 8e7
 
 - PM produced clean `8e7ab58...` source-stability READY artifact sha `824bdf17...` and exact no-order E3/BB request sha `e2882504...`.
