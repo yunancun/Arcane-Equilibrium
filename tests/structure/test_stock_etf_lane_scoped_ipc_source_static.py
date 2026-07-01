@@ -111,6 +111,26 @@ def _block_between(source: str, start_token: str, end_tokens: tuple[str, ...]) -
     return source[start:end]
 
 
+def _named_function_body(source: str, name: str) -> str:
+    marker = f"fn {name}("
+    start = source.index(marker)
+    brace = source.index("{", start)
+    depth = 0
+    for index in range(brace, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start : index + 1]
+    raise AssertionError(f"function body not closed: {name}")
+
+
+def _assert_ordered_tokens(block: str, tokens: tuple[str, ...]) -> None:
+    positions = [block.index(token) for token in tokens]
+    assert positions == sorted(positions)
+
+
 def _required_methods_block(source: str) -> str:
     return _block_between(source, "const REQUIRED_METHODS", ("\n\nconst STATUS_FIELDS",))
 
@@ -244,6 +264,49 @@ def test_stock_etf_lane_scoped_ipc_source_keeps_expected_method_authority_classe
     assert "required_gates: READONLY_PROBE_GATES" in source
     assert "Method::BybitSubmitPaperOrderDenied | Method::UnknownDenied" in source
     assert "authority_scope: Scope::Denied" in source
+
+
+def test_stock_etf_lane_scoped_ipc_source_pins_blocker_emit_order() -> None:
+    source = _source()
+    validate_body = source[source.index("pub fn validate(&self)") : source.index(
+        "StockEtfLaneScopedIpcVerdict::new(blockers)"
+    )]
+    validate_command_body = _named_function_body(source, "validate_command")
+
+    _assert_ordered_tokens(
+        validate_body,
+        (
+            "Blocker::ContractIdMismatch",
+            "Blocker::SourceVersionMismatch",
+            "Blocker::WrongAssetLane",
+            "Blocker::WrongBroker",
+            "Blocker::RustAuthorityOwnerMissing",
+            "Blocker::PythonForwardOnlyMissing",
+            "Blocker::PythonDirectBrokerWriteNotDenied",
+            "Blocker::BybitIpcReuseNotDenied",
+            "Blocker::ExistingBybitPaperPathNotDenied",
+            "Blocker::LiveEnvironmentNotDenied",
+            "Blocker::BybitLiveExecutionNotProtected",
+            "Blocker::IbkrContactPerformed",
+            "Blocker::ConnectorRuntimeStarted",
+            "Blocker::SecretContentSerialized",
+            "Blocker::CommandMethodDenied",
+            "Blocker::CommandMissing",
+            "Blocker::CommandDuplicated",
+        ),
+    )
+    _assert_ordered_tokens(
+        validate_command_body,
+        (
+            "Blocker::CommandOperationMismatch",
+            "Blocker::CommandAuthorityScopeMismatch",
+            "Blocker::CommandEffectCapabilityMismatch",
+            "Blocker::CommandRustOwnershipMismatch",
+            "Blocker::CommandRequiredGateMissing",
+            "Blocker::CommandRequestFieldMissing",
+            "Blocker::CommandDenialReasonMissing",
+        ),
+    )
 
 
 def test_stock_etf_lane_scoped_ipc_source_has_no_runtime_or_bybit_tokens() -> None:

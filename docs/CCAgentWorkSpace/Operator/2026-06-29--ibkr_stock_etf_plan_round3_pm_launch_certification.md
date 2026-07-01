@@ -5830,3 +5830,33 @@ contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、
 broker session、沒有 read-only probe execution、沒有 result import execution、沒有 evidence/scorecard writer、
 沒有 DB apply、沒有 paper order routing/cancel/replace execution、沒有 evidence clock、沒有 paper-shadow launch、
 沒有 release launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Lane-Scoped IPC Exact Blocker Guard
+
+本 session 已完成下一個 test-only checkpoint：
+`Stock/ETF Lane-Scoped IPC Exact Blocker Guard`。
+
+這個 checkpoint 補強 `StockEtfLaneScopedIpcContractV1` source-only lane-scoped IPC contract 的 aggregate
+fail-closed coverage。
+
+新增 Rust acceptance 證明 default contract、top-level boundary regressions、exact contract/source mismatch、
+command coverage once-only、denied/unknown method aggregate、paper-effect command shape failures、paper-order
+request-shape cross-wire cases 都會以完整 ordered blocker vectors 或 exact single-blocker vectors fail closed。
+source-static 也新增 validator blocker emit-order guard。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Stock/ETF lane-scoped IPC source static pytest：`7 passed`
+- Stock/ETF lane-scoped IPC Rust acceptance：`12 passed`
+- Full `cargo test -p openclaw_types`：PASS
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 IPC runtime/server startup、沒有 GUI runtime/API route/IPC
+behavior change、沒有 IBKR contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有
+socket/client construction、沒有 broker session、沒有 read-only probe execution、沒有 result/fill import execution、
+沒有 paper order routing/cancel/replace execution、沒有 evidence/scorecard writer、沒有 DB apply、沒有 evidence
+clock、沒有 paper-shadow launch、沒有 release launch、沒有 tiny-live/live authorization，也沒有改動 Bybit
+live/demo execution 行為。
