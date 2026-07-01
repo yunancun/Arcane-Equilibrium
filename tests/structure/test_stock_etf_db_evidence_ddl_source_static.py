@@ -182,6 +182,20 @@ def _source() -> str:
     return DB_EVIDENCE.read_text(encoding="utf-8")
 
 
+def _contract_validate_block(source: str) -> str:
+    return source.split(
+        "pub fn validate(&self) -> StockEtfDbEvidenceDdlVerdict<StockEtfDbEvidenceDdlBlocker>",
+        1,
+    )[1].split("StockEtfDbEvidenceDdlVerdict::new(blockers)", 1)[0]
+
+
+def _source_audit_block(source: str) -> str:
+    return source.split(
+        "pub fn audit_stock_etf_db_evidence_source_sql(raw: &str) -> StockEtfDbEvidenceDdlSourceAudit",
+        1,
+    )[1].split("StockEtfDbEvidenceDdlSourceAudit {", 1)[0]
+
+
 def test_stock_etf_db_evidence_ddl_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
@@ -303,6 +317,79 @@ def test_stock_etf_db_evidence_ddl_source_keeps_source_sql_auditor_checks() -> N
     assert 'sql.contains("create_hypertable")' in source
     assert 'sql.contains("add_retention_policy")' in source
     assert 'sql.matches("create index if not exists").count()' in source
+
+
+def test_stock_etf_db_evidence_ddl_source_keeps_exact_blocker_order() -> None:
+    source = _source()
+    contract_ordered_blockers = (
+        "ContractIdMismatch",
+        "SourceVersionMismatch",
+        "SourceSqlPathMismatch",
+        "SourceSqlHashInvalid",
+        "SourceOnlyFlagMissing",
+        "MigrationFilePathPresent",
+        "CopiedToSqlMigrations",
+        "DbApplyPerformed",
+        "PgWritePerformed",
+        "SqlxMigrationRegistered",
+        "PmOperatorApplyAuthorizationClaimed",
+        "E2ReviewRequirementMissing",
+        "E4ReviewRequirementMissing",
+        "LinuxPgDryRunRequirementMissing",
+        "PgDoubleApplyRequirementMissing",
+        "GuardAExistingTableColumnsMissing",
+        "GuardBTypeSensitiveAddColumnMissing",
+        "GuardCHotPathIndexesMissing",
+        "RequiredSchemaMissing",
+        "RequiredTableMissing",
+        "RequiredNaturalKeyMissing",
+        "StockAssetLaneCheckMissing",
+        "IbkrBrokerCheckMissing",
+        "LiveEnvironmentNotDenied",
+        "PaperShadowTableSeparationMissing",
+        "SyntheticShadowCheckMissing",
+        "RawArtifactHashRequirementMissing",
+        "AuditAssetLaneEventsMissing",
+        "ForwardOnlyEvidenceRetentionMissing",
+        "DestructiveCleanupRollbackNotDenied",
+        "SecretContentSerialized",
+    )
+    source_ordered_blockers = (
+        "SourceOnlyBannerMissing",
+        "MigrationApplyDenialMissing",
+        "ForbiddenDestructiveOrMigrationStatement",
+        "RequiredSchemaMissing",
+        "GuardABlockMissing",
+        "GuardBBlockMissing",
+        "GuardCBlockMissing",
+        "MigrationDryRunPlanMissing",
+        "RequiredTableMissing",
+        "RequiredTableColumnMissing",
+        "RequiredNaturalKeyMissing",
+        "RequiredForeignKeyMissing",
+        "StockAssetLaneCheckMissing",
+        "IbkrBrokerCheckMissing",
+        "PaperEnvironmentCheckMissing",
+        "LiveEnvironmentNotDenied",
+        "SyntheticShadowCheckMissing",
+        "RawArtifactHashRequirementMissing",
+        "AuditAssetLaneEventsMissing",
+        "ForwardOnlyAuditCommentMissing",
+        "HypertableRetentionPlanMissing",
+        "HotPathIndexMissing",
+    )
+
+    contract = _contract_validate_block(source)
+    contract_positions = [
+        contract.index(f"Blocker::{blocker}") for blocker in contract_ordered_blockers
+    ]
+    assert contract_positions == sorted(contract_positions)
+
+    source_audit = _source_audit_block(source)
+    source_positions = [
+        source_audit.index(f"Blocker::{blocker}") for blocker in source_ordered_blockers
+    ]
+    assert source_positions == sorted(source_positions)
 
 
 def test_stock_etf_db_evidence_ddl_source_has_no_runtime_secret_order_or_bybit_client_tokens() -> None:

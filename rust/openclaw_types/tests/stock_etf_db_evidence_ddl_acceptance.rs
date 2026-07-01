@@ -14,29 +14,39 @@ use openclaw_types::{
 
 #[test]
 fn default_db_evidence_ddl_contract_blocks_migration_authority() {
+    use StockEtfDbEvidenceDdlBlocker as Blocker;
+
     let verdict = StockEtfDbEvidenceDdlContractV1::default().validate();
 
     assert!(!verdict.accepted);
-    assert!(has(
-        &verdict.blockers,
-        StockEtfDbEvidenceDdlBlocker::ContractIdMismatch
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfDbEvidenceDdlBlocker::SourceVersionMismatch
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfDbEvidenceDdlBlocker::SourceSqlHashInvalid
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfDbEvidenceDdlBlocker::SourceOnlyFlagMissing
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfDbEvidenceDdlBlocker::RequiredTableMissing
-    ));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::ContractIdMismatch,
+            Blocker::SourceVersionMismatch,
+            Blocker::SourceSqlHashInvalid,
+            Blocker::SourceOnlyFlagMissing,
+            Blocker::E2ReviewRequirementMissing,
+            Blocker::E4ReviewRequirementMissing,
+            Blocker::LinuxPgDryRunRequirementMissing,
+            Blocker::PgDoubleApplyRequirementMissing,
+            Blocker::GuardAExistingTableColumnsMissing,
+            Blocker::GuardBTypeSensitiveAddColumnMissing,
+            Blocker::GuardCHotPathIndexesMissing,
+            Blocker::RequiredSchemaMissing,
+            Blocker::RequiredTableMissing,
+            Blocker::RequiredNaturalKeyMissing,
+            Blocker::StockAssetLaneCheckMissing,
+            Blocker::IbkrBrokerCheckMissing,
+            Blocker::LiveEnvironmentNotDenied,
+            Blocker::PaperShadowTableSeparationMissing,
+            Blocker::SyntheticShadowCheckMissing,
+            Blocker::RawArtifactHashRequirementMissing,
+            Blocker::AuditAssetLaneEventsMissing,
+            Blocker::ForwardOnlyEvidenceRetentionMissing,
+            Blocker::DestructiveCleanupRollbackNotDenied,
+        ]
+    );
 }
 
 #[test]
@@ -84,14 +94,13 @@ fn db_evidence_ddl_requires_exact_contract_id_and_source_version() {
 
     let blockers = contract.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfDbEvidenceDdlBlocker::ContractIdMismatch
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDbEvidenceDdlBlocker::SourceVersionMismatch
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfDbEvidenceDdlBlocker::ContractIdMismatch,
+            StockEtfDbEvidenceDdlBlocker::SourceVersionMismatch,
+        ]
+    );
 }
 
 #[test]
@@ -107,18 +116,14 @@ fn required_lists_must_include_schemas_tables_and_natural_keys() {
 
     let blockers = contract.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfDbEvidenceDdlBlocker::RequiredSchemaMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDbEvidenceDdlBlocker::RequiredTableMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDbEvidenceDdlBlocker::RequiredNaturalKeyMissing
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfDbEvidenceDdlBlocker::RequiredSchemaMissing,
+            StockEtfDbEvidenceDdlBlocker::RequiredTableMissing,
+            StockEtfDbEvidenceDdlBlocker::RequiredNaturalKeyMissing,
+        ]
+    );
 }
 
 #[test]
@@ -134,34 +139,18 @@ fn migration_apply_or_runtime_claims_are_rejected() {
 
     let blockers = contract.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfDbEvidenceDdlBlocker::MigrationFilePathPresent
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDbEvidenceDdlBlocker::CopiedToSqlMigrations
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDbEvidenceDdlBlocker::DbApplyPerformed
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDbEvidenceDdlBlocker::PgWritePerformed
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDbEvidenceDdlBlocker::SqlxMigrationRegistered
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDbEvidenceDdlBlocker::PmOperatorApplyAuthorizationClaimed
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDbEvidenceDdlBlocker::SecretContentSerialized
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfDbEvidenceDdlBlocker::MigrationFilePathPresent,
+            StockEtfDbEvidenceDdlBlocker::CopiedToSqlMigrations,
+            StockEtfDbEvidenceDdlBlocker::DbApplyPerformed,
+            StockEtfDbEvidenceDdlBlocker::PgWritePerformed,
+            StockEtfDbEvidenceDdlBlocker::SqlxMigrationRegistered,
+            StockEtfDbEvidenceDdlBlocker::PmOperatorApplyAuthorizationClaimed,
+            StockEtfDbEvidenceDdlBlocker::SecretContentSerialized,
+        ]
+    );
 }
 
 #[test]
@@ -186,50 +175,27 @@ fn guard_and_constraint_controls_are_required() {
 
     let blockers = contract.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfDbEvidenceDdlBlocker::E2ReviewRequirementMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDbEvidenceDdlBlocker::E4ReviewRequirementMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDbEvidenceDdlBlocker::LinuxPgDryRunRequirementMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDbEvidenceDdlBlocker::PgDoubleApplyRequirementMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDbEvidenceDdlBlocker::GuardAExistingTableColumnsMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDbEvidenceDdlBlocker::GuardBTypeSensitiveAddColumnMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDbEvidenceDdlBlocker::GuardCHotPathIndexesMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDbEvidenceDdlBlocker::LiveEnvironmentNotDenied
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDbEvidenceDdlBlocker::PaperShadowTableSeparationMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDbEvidenceDdlBlocker::SyntheticShadowCheckMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfDbEvidenceDdlBlocker::DestructiveCleanupRollbackNotDenied
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfDbEvidenceDdlBlocker::E2ReviewRequirementMissing,
+            StockEtfDbEvidenceDdlBlocker::E4ReviewRequirementMissing,
+            StockEtfDbEvidenceDdlBlocker::LinuxPgDryRunRequirementMissing,
+            StockEtfDbEvidenceDdlBlocker::PgDoubleApplyRequirementMissing,
+            StockEtfDbEvidenceDdlBlocker::GuardAExistingTableColumnsMissing,
+            StockEtfDbEvidenceDdlBlocker::GuardBTypeSensitiveAddColumnMissing,
+            StockEtfDbEvidenceDdlBlocker::GuardCHotPathIndexesMissing,
+            StockEtfDbEvidenceDdlBlocker::StockAssetLaneCheckMissing,
+            StockEtfDbEvidenceDdlBlocker::IbkrBrokerCheckMissing,
+            StockEtfDbEvidenceDdlBlocker::LiveEnvironmentNotDenied,
+            StockEtfDbEvidenceDdlBlocker::PaperShadowTableSeparationMissing,
+            StockEtfDbEvidenceDdlBlocker::SyntheticShadowCheckMissing,
+            StockEtfDbEvidenceDdlBlocker::RawArtifactHashRequirementMissing,
+            StockEtfDbEvidenceDdlBlocker::AuditAssetLaneEventsMissing,
+            StockEtfDbEvidenceDdlBlocker::ForwardOnlyEvidenceRetentionMissing,
+            StockEtfDbEvidenceDdlBlocker::DestructiveCleanupRollbackNotDenied,
+        ]
+    );
 }
 
 #[test]
@@ -376,10 +342,6 @@ fn blocked_template_is_parseable_and_secret_free() {
     assert!(!lower.contains("account_id ="));
     assert!(!lower.contains("password ="));
     assert!(!lower.contains("token ="));
-}
-
-fn has(blockers: &[StockEtfDbEvidenceDdlBlocker], blocker: StockEtfDbEvidenceDdlBlocker) -> bool {
-    blockers.contains(&blocker)
 }
 
 fn has_source_blocker(

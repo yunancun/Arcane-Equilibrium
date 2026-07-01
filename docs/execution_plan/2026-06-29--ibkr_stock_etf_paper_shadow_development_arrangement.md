@@ -8191,3 +8191,40 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不做 DB migration/apply、不做 evidence writer、不啟動 scorecard writer、不執行 paper order routing、
 不做 broker session、不做 broker routing、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何
 Bybit behavior change。
+
+## 196. 2026-07-01 PM session source checkpoint：Stock/ETF DB Evidence DDL Default Lineage Exact Guard
+
+本 checkpoint 補強 `stock_etf_db_evidence_ddl` 的 source-only DDL contract lineage，固定 default
+`StockEtfDbEvidenceDdlContractV1`、contract id/source drift、required schemas/tables/natural keys、
+migration/apply authority claims、guard/control gaps 的 ordered blocker vectors，並用 source-static parser
+鎖住 contract validator 與 source SQL auditor blocker emit order。這不是 Rust production behavior change、
+不是 SQL source draft change、不是 sqlx migration registration、不是 DB migration/apply、不是 PG write、
+不是 IPC server start、不是 IBKR contact、不是 connector runtime、不是 secret lookup、不是 paper order route
+enablement、不是 tiny-live/live gate；只把 DB evidence DDL source-only contract 的 fail-closed lineage 變成
+exact-blocker acceptance test 與 source-static guard。
+
+已完成：
+
+- 在 `stock_etf_db_evidence_ddl_acceptance.rs` 將 default `StockEtfDbEvidenceDdlContractV1` 檢查提升為完整
+  順序 blocker 向量。
+- 在同檔將 contract id/source version drift、required schemas/tables/natural keys、migration/apply authority
+  claims、guard/control gaps 固定為 exact blocker vectors。
+- 在同檔移除已不再使用的 `has` helper，避免 dead-code warning。
+- 在 `test_stock_etf_db_evidence_ddl_source_static.py` 新增 contract validator 與 source SQL auditor blocker
+  ordering parser，鎖住 exact blocker emit order。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Stock/ETF DB evidence DDL source static pytest：`7 passed`。
+- Stock/ETF DB evidence DDL Rust acceptance：`10 passed`。
+- Full `cargo test -p openclaw_types`：`35` unit/golden + `337` integration/acceptance + `0` doc-tests。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、
+不修改 SQL source draft、不註冊 sqlx migration、不做 DB migration/apply、不做 PG write、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 audit writer、不做 evidence writer、
+不啟動 scorecard writer、不執行 paper order routing、不做 broker session、不做 broker routing、不做
+Linux runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
