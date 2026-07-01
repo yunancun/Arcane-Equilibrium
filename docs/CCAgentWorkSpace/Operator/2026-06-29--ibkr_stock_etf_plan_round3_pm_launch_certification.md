@@ -2473,3 +2473,28 @@ Verification 已過：
 access/creation、沒有 connector runtime、沒有 read probe execution、沒有 result
 import、沒有 DB/evidence/scorecard writer、沒有 paper order/cancel/replace、沒有
 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — IBKR Phase2 Gate Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`IBKR Phase2 Gate Source Static Guard`。
+
+這個 guard 鎖住 `ibkr_phase2_gate.rs` 的 Phase 2 pre-contact gate source hygiene：
+ADR/AMD、external-surface gate、session attestation、paper/live port constants 要保持
+精確；external-surface gate fields/blockers、session attestation fields/blockers、
+loopback/paper-port/live-port/env-fallback/staleness checks 不得消失。
+
+Guard 同時拒絕 env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime
+tokens 與 secret material access tokens，確保 Phase 2 gate source 不會長出真正
+runtime 或 contact 能力。
+
+Verification 已過：
+
+- New structure guard pytest：`4 passed`
+- Focused Phase2 gate acceptance：`11 passed`
+- Full `cargo test -p openclaw_types`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
+access/creation、沒有 connector runtime、沒有 read probe execution、沒有 result
+import、沒有 DB/evidence/scorecard writer、沒有 paper order/cancel/replace、沒有
+tiny-live/live authority，也沒有改動 Bybit live execution 行為。

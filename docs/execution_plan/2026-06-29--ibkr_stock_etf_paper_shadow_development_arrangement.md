@@ -4469,3 +4469,40 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper
 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
 clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
 Bybit behavior change。
+
+## 102. 2026-07-01 PM session source checkpoint：IBKR Phase2 Gate Source Static Guard
+
+本 checkpoint 為 `ibkr_phase2_gate.rs` 補上 source-only structure guard。這不是
+external-surface gate PASS、不是 session attestation runtime、不是第一次 IBKR
+contact；只把 Phase 2 pre-contact gate 與 session attestation contract 的 source
+hygiene 機器化，避免未來改動引入 env/secret material reads、socket、clock、
+process、order 或 Bybit runtime coupling。
+
+已完成：
+
+- 新增 `tests/structure/test_ibkr_phase2_gate_source_static.py`。
+- Guard 鎖住 `ibkr_phase2_gate.rs` 低於 800 行 governance cap。
+- Guard 要求 ADR/AMD、external-surface gate、session attestation、paper/live port
+  constants 保持精確。
+- Guard 要求 external-surface gate type surface、13 個 gate fields、18 個 gate
+  blockers、`ibkr_contact_allowed: blockers.is_empty()` 與 retroactive
+  `ibkr_call_performed` blocker 保持在 source 中。
+- Guard 要求 session attestation type surface、20 個 attestation fields、28 個
+  attestation blockers、loopback/paper-port/live-port/env-fallback/staleness checks
+  保持在 source 中。
+- Guard 禁止 env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens
+  與 secret material access tokens。
+
+驗證：
+
+- New structure guard py_compile：PASS。
+- Focused structure guard pytest：`4 passed`。
+- Focused Phase2 gate acceptance：`11 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
+cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
+clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
+Bybit behavior change。
