@@ -9,9 +9,9 @@ use openclaw_types::{
     classify_non_bybit_api_action, required_non_bybit_api_actions, BrokerEnvironment,
     IbkrApiBaseline, IbkrExternalSurfaceGateBlocker, IbkrExternalSurfaceGateStatus,
     IbkrExternalSurfaceGateV1, IbkrGatewayMode, IbkrHostPolicy, IbkrPortPolicy, IbkrSecretSlotMode,
-    IbkrSessionAttestationBlocker, IbkrSessionAttestationV1, NonBybitApiAction,
-    NonBybitApiAllowlistBlocker, NonBybitApiAllowlistV1, NonBybitApiDenialReason,
-    IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID, IBKR_LIVE_GATEWAY_PORT,
+    IbkrSessionAttestationBlocker, IbkrSessionAttestationV1, IbkrSessionDataTier,
+    NonBybitApiAction, NonBybitApiAllowlistBlocker, NonBybitApiAllowlistV1,
+    NonBybitApiDenialReason, IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID, IBKR_LIVE_GATEWAY_PORT,
     IBKR_PAPER_GATEWAY_DEFAULT_PORT, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
     NON_BYBIT_API_ALLOWLIST_CONTRACT_ID,
 };
@@ -282,6 +282,18 @@ fn session_attestation_default_blocks_without_secret_or_socket() {
     assert!(verdict
         .blockers
         .contains(&IbkrSessionAttestationBlocker::MissingRawArtifactHash));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrSessionAttestationBlocker::MissingDataTier));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrSessionAttestationBlocker::MissingDataEntitlementsFingerprint));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrSessionAttestationBlocker::MarketDataEntitlementPurchaseNotDenied));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrSessionAttestationBlocker::MissingGatewayStartupTime));
 }
 
 #[test]
@@ -298,6 +310,12 @@ fn paper_session_attestation_accepts_only_loopback_paper_gateway() {
     assert_eq!(attestation.source_version, 1);
     assert_eq!(attestation.host, "127.0.0.1");
     assert_eq!(attestation.port, IBKR_PAPER_GATEWAY_DEFAULT_PORT);
+    assert_eq!(attestation.data_tier, IbkrSessionDataTier::Delayed);
+    assert_eq!(attestation.account_fingerprint.len(), 64);
+    assert_eq!(attestation.secret_slot_fingerprint.len(), 64);
+    assert_eq!(attestation.entitlements_fingerprint.len(), 64);
+    assert!(attestation.market_data_entitlement_purchase_denied);
+    assert!(attestation.gateway_started_at_ms <= attestation.attested_at_ms);
 
     let wrong_identity = IbkrSessionAttestationV1 {
         contract_id: "ibkr_session_attestation_v1_fixture".to_string(),
@@ -332,6 +350,44 @@ fn paper_session_attestation_accepts_only_loopback_paper_gateway() {
     assert!(verdict
         .blockers
         .contains(&IbkrSessionAttestationBlocker::PortNotPaperGatewayDefault));
+}
+
+#[test]
+fn session_attestation_requires_hashed_lineage_data_tier_and_startup_time() {
+    let attestation = IbkrSessionAttestationV1 {
+        account_fingerprint: "paper_account_fingerprint_hash".to_string(),
+        secret_slot_fingerprint: "paper_secret_slot_fingerprint_hash".to_string(),
+        data_tier: IbkrSessionDataTier::Unknown,
+        entitlements_fingerprint: "data_entitlements_fixture".to_string(),
+        market_data_entitlement_purchase_denied: false,
+        gateway_started_at_ms: 1_772_232_000_001,
+        raw_artifact_hash: "redacted_raw_artifact_hash".to_string(),
+        ..IbkrSessionAttestationV1::paper_fixture()
+    };
+    let verdict = attestation.validate(attestation.attested_at_ms + 1);
+
+    assert!(!verdict.attestation_accepted);
+    assert!(verdict
+        .blockers
+        .contains(&IbkrSessionAttestationBlocker::AccountFingerprintInvalid));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrSessionAttestationBlocker::SecretSlotFingerprintInvalid));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrSessionAttestationBlocker::MissingDataTier));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrSessionAttestationBlocker::DataEntitlementsFingerprintInvalid));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrSessionAttestationBlocker::MarketDataEntitlementPurchaseNotDenied));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrSessionAttestationBlocker::GatewayStartupAfterAttestation));
+    assert!(verdict
+        .blockers
+        .contains(&IbkrSessionAttestationBlocker::RawArtifactHashInvalid));
 }
 
 #[test]

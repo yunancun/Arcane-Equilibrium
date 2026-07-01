@@ -451,6 +451,10 @@ Required before any read-only account snapshot or paper lifecycle rehearsal:
 - `secret_slot_mode`
 - `live_secret_absent_or_empty`
 - `api_server_version`
+- `data_tier`
+- `entitlements_fingerprint`
+- `market_data_entitlement_purchase_denied`
+- `gateway_started_at_ms`
 - `attested_at`
 - `expires_at`
 - `raw_artifact_hash`
@@ -462,6 +466,9 @@ Blockers:
 - missing or world-readable secret
 - env-var credential fallback
 - unknown session mode
+- missing data tier / entitlements fingerprint
+- market-data entitlement purchase not denied
+- gateway startup after attestation
 - stale attestation
 
 ## 8. `feature_flag_secret_auth_matrix_v1`

@@ -3399,3 +3399,11 @@
 - `IbkrReadOnlyClient.session_attestation_preview()` and `IbkrPaperClientBoundary.paper_attestation_preview()` now return typed blocked dicts for future Phase 2 gate wiring.
 - Verification passed: Python compile, connector skeleton focused test `8 passed`, full Stock/ETF FastAPI/static `120 passed`, docs trace `2 passed`, and `git diff --check` PASS.
 - Boundary unchanged: no endpoint, IPC, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe, paper order, fill import, DB/evidence writer, tiny-live/live, Linux runtime, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF Session Attestation Data-Tier Lineage Guard
+
+- PM hardened `ibkr_session_attestation_v1` with `IbkrSessionDataTier`, entitlements fingerprint, market-data entitlement purchase denial, and gateway startup timestamp lineage.
+- Session validation now requires 64-hex account/secret-slot/entitlements/raw artifact hashes and rejects missing data tier, invalid entitlement lineage, entitlement purchase not denied, and gateway startup after attestation.
+- Inert Python connector preview plus FastAPI account/authorization normalizers expose only fail-closed `unknown` / `False` / `0` fields and reject client/IPC claims before gate.
+- Verification passed: Python compile, connector/account/authorization focused tests `18 passed`, Phase2 gate `11 passed`, feature-flag auth `8 passed`, full Stock/ETF FastAPI/static `120 passed`, full `openclaw_types` `291 passed`, docs trace `2 passed`, and `git diff --check` PASS.
+- Boundary unchanged: no endpoint, IPC method, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe, market-data ingestion, paper order, fill import, DB/evidence writer, tiny-live/live, Linux runtime, or Bybit behavior change.

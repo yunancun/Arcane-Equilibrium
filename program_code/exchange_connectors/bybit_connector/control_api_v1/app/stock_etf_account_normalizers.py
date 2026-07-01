@@ -103,6 +103,14 @@ def _normalize_session_attestation(value: Any, reason: str | None) -> dict[str, 
         "api_server_version_present": _as_bool(
             source.get("api_server_version_present")
         ),
+        "data_tier": _as_str(source.get("data_tier"), "unknown"),
+        "entitlements_fingerprint_present": _as_bool(
+            source.get("entitlements_fingerprint_present")
+        ),
+        "market_data_entitlement_purchase_denied": _as_bool(
+            source.get("market_data_entitlement_purchase_denied")
+        ),
+        "gateway_started_at_ms": _as_int(source.get("gateway_started_at_ms")),
         "attested_at_ms": _as_int(source.get("attested_at_ms")),
         "expires_at_ms": _as_int(source.get("expires_at_ms")),
         "raw_artifact_hash_present": _as_bool(
@@ -216,10 +224,16 @@ def _account_status_contract_violations(
         "live_secret_absent_or_empty",
         "env_var_credential_fallback_used",
         "api_server_version_present",
+        "entitlements_fingerprint_present",
+        "market_data_entitlement_purchase_denied",
         "raw_artifact_hash_present",
     ):
         if _as_bool(session_attestation.get(key)):
             violations.append(f"session_attestation_{key}")
+    if _as_str(session_attestation.get("data_tier"), "unknown") != "unknown":
+        violations.append("session_attestation_data_tier_present")
+    if _as_int(session_attestation.get("gateway_started_at_ms")) != 0:
+        violations.append("session_attestation_gateway_started_at_present")
     if _as_int(session_attestation.get("port")) != 0:
         violations.append("session_attestation_port_present")
     if _as_int(session_attestation.get("attested_at_ms")) != 0:

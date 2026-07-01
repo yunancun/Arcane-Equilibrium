@@ -83,6 +83,9 @@ def test_stock_etf_authorization_status_uses_only_readonly_fixture_method() -> N
     assert secret["accepted"] is False
     assert data["phase2_gate_artifact"]["ibkr_contact_allowed"] is False
     assert data["session_attestation"]["attestation_accepted"] is False
+    assert data["session_attestation"]["data_tier"] == "unknown"
+    assert data["session_attestation"]["entitlements_fingerprint_present"] is False
+    assert data["session_attestation"]["gateway_started_at_ms"] == 0
     assert data["authorization_envelope"]["permission_scope"] == "denied"
     assert data["allowed_gui_actions"] == ["refresh_authorization_status"]
     fake_ipc.call.assert_awaited_once()
@@ -170,6 +173,10 @@ def test_stock_etf_authorization_status_blocks_contract_violation() -> None:
     session["expected_contract_id"] = "wrong"
     session["attestation_accepted"] = True
     session["account_fingerprint_is_live"] = True
+    session["data_tier"] = "delayed"
+    session["entitlements_fingerprint_present"] = True
+    session["market_data_entitlement_purchase_denied"] = True
+    session["gateway_started_at_ms"] = 1
 
     envelope = payload["authorization_envelope"]
     envelope["permission_scope"] = "paper_rehearsal"
@@ -219,6 +226,10 @@ def test_stock_etf_authorization_status_blocks_contract_violation() -> None:
         "session_expected_contract_id_mismatch",
         "session_attestation_accepted",
         "session_live_account_fingerprint",
+        "session_data_tier_claimed",
+        "session_entitlements_fingerprint_present",
+        "session_market_data_entitlement_purchase_claimed",
+        "session_gateway_startup_claimed",
         "authorization_envelope_scope_not_denied",
         "authorization_envelope_expiry_claimed",
     }.issubset(set(data["contract_violations"]))

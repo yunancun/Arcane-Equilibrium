@@ -1380,6 +1380,42 @@ connector runtime、沒有 read probe execution、沒有 paper order/cancel/repl
 import、沒有 evidence writer、沒有 DB apply、沒有 evidence clock、沒有 tiny-live/live
 authority，也沒有改動 Bybit live execution 行為。
 
+## 2026-07-01 Operator Update — Session Attestation Data-Tier Lineage Guard
+
+本 session 已把 `ibkr_session_attestation_v1` source-only contract 補硬：
+
+- Rust 新增 `IbkrSessionDataTier`，並在 session attestation 中記錄
+  `data_tier`、`entitlements_fingerprint`、
+  `market_data_entitlement_purchase_denied`、`gateway_started_at_ms`。
+- Session validator 現在要求 account/secret-slot/entitlements/raw artifact lineage
+  皆為 64-hex hash 形狀，並拒絕 missing data tier、未禁止 market-data
+  entitlement purchase、gateway startup 晚於 attestation 的 payload。
+- Inert Python connector session preview 與 FastAPI account/authorization
+  normalizers 同步新增 display-only fail-closed 欄位：`unknown` / `False` / `0`。
+- Account/authorization contract violation guard 會拒絕 client/IPC 提前宣稱
+  data tier、entitlements fingerprint、market-data entitlement purchase denial 或
+  gateway startup timestamp。
+- Phase0 named-contract packet 同步補齊 `ibkr_session_attestation_v1` required
+  fields / blockers。
+
+Verification 已過：
+
+- Python changed files `py_compile`：PASS
+- Connector/account/authorization focused tests：`18 passed`
+- Scoped Rust `rustfmt --edition 2021 --check`：PASS
+- IBKR Phase2 gate acceptance：`11 passed`
+- IBKR feature-flag auth acceptance：`8 passed`
+- Full Stock/ETF FastAPI/static：`120 passed`
+- Full `cargo test -p openclaw_types`：`291 passed`
+- Focused docs trace：`2 passed`
+- `git diff --check`：PASS
+
+邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 client input、沒有 IBKR
+contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation、沒有
+connector runtime、沒有 read probe execution、沒有 market-data ingestion、沒有 paper
+order/cancel/replace、沒有 fill import、沒有 evidence writer、沒有 DB apply、沒有
+evidence clock、沒有 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
 ## 2026-07-01 Operator Update — Evidence Clock Lineage Guard
 
 本 session 已完成下一個 source-only checkpoint：Evidence Clock Lineage Guard。

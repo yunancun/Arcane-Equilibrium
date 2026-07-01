@@ -89,6 +89,10 @@ def _session_fail_closed(reason: str) -> dict[str, Any]:
         "account_fingerprint_is_live": False,
         "secret_slot_fingerprint_present": False,
         "api_server_version_present": False,
+        "data_tier": "unknown",
+        "entitlements_fingerprint_present": False,
+        "market_data_entitlement_purchase_denied": False,
+        "gateway_started_at_ms": 0,
         "raw_artifact_hash_present": False,
     }
 
@@ -231,6 +235,14 @@ def _normalize_session(value: Any, reason: str | None) -> dict[str, Any]:
         "api_server_version_present": _as_bool(
             source.get("api_server_version_present")
         ),
+        "data_tier": _as_str(source.get("data_tier"), "unknown"),
+        "entitlements_fingerprint_present": _as_bool(
+            source.get("entitlements_fingerprint_present")
+        ),
+        "market_data_entitlement_purchase_denied": _as_bool(
+            source.get("market_data_entitlement_purchase_denied")
+        ),
+        "gateway_started_at_ms": _as_int(source.get("gateway_started_at_ms")),
         "raw_artifact_hash_present": _as_bool(
             source.get("raw_artifact_hash_present")
         ),
@@ -333,6 +345,14 @@ def _authorization_contract_violations(
         violations.append("session_attestation_accepted")
     if _as_bool(session.get("account_fingerprint_is_live")):
         violations.append("session_live_account_fingerprint")
+    if _as_str(session.get("data_tier"), "unknown") != "unknown":
+        violations.append("session_data_tier_claimed")
+    if _as_bool(session.get("entitlements_fingerprint_present")):
+        violations.append("session_entitlements_fingerprint_present")
+    if _as_bool(session.get("market_data_entitlement_purchase_denied")):
+        violations.append("session_market_data_entitlement_purchase_claimed")
+    if _as_int(session.get("gateway_started_at_ms")) > 0:
+        violations.append("session_gateway_startup_claimed")
     if _as_str(envelope.get("permission_scope"), "denied") != "denied":
         violations.append("authorization_envelope_scope_not_denied")
     if _as_int(envelope.get("expires_at_ms")) > 0:

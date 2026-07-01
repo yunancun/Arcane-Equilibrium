@@ -282,6 +282,21 @@ impl Default for IbkrSecretSlotMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IbkrSessionDataTier {
+    AccountOnly,
+    Delayed,
+    RealtimeEntitled,
+    Unknown,
+}
+
+impl Default for IbkrSessionDataTier {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IbkrSessionAttestationV1 {
     pub contract_id: String,
@@ -300,6 +315,10 @@ pub struct IbkrSessionAttestationV1 {
     pub live_secret_absent_or_empty: bool,
     pub env_var_credential_fallback_used: bool,
     pub api_server_version: String,
+    pub data_tier: IbkrSessionDataTier,
+    pub entitlements_fingerprint: String,
+    pub market_data_entitlement_purchase_denied: bool,
+    pub gateway_started_at_ms: u64,
     pub attested_at_ms: u64,
     pub expires_at_ms: u64,
     pub raw_artifact_hash: String,
@@ -324,6 +343,10 @@ impl Default for IbkrSessionAttestationV1 {
             live_secret_absent_or_empty: false,
             env_var_credential_fallback_used: false,
             api_server_version: String::new(),
+            data_tier: IbkrSessionDataTier::Unknown,
+            entitlements_fingerprint: String::new(),
+            market_data_entitlement_purchase_denied: false,
+            gateway_started_at_ms: 0,
             attested_at_ms: 0,
             expires_at_ms: 0,
             raw_artifact_hash: String::new(),
@@ -337,22 +360,26 @@ impl IbkrSessionAttestationV1 {
             contract_id: IBKR_SESSION_ATTESTATION_CONTRACT_ID.to_string(),
             source_version: 1,
             status: IbkrSessionAttestationStatus::PaperAttested,
-            account_fingerprint: "paper_account_fingerprint_hash".to_string(),
+            account_fingerprint: "b".repeat(64),
             account_fingerprint_is_live: false,
             environment: BrokerEnvironment::Paper,
             host: "127.0.0.1".to_string(),
             port: IBKR_PAPER_GATEWAY_DEFAULT_PORT,
             process_identity: "trade-core:ibgateway-paper".to_string(),
             gateway_mode: IbkrGatewayMode::Paper,
-            secret_slot_fingerprint: "paper_secret_slot_fingerprint_hash".to_string(),
+            secret_slot_fingerprint: "a".repeat(64),
             secret_slot_mode: IbkrSecretSlotMode::Paper,
             secret_world_readable: false,
             live_secret_absent_or_empty: true,
             env_var_credential_fallback_used: false,
             api_server_version: "source_fixture_only".to_string(),
+            data_tier: IbkrSessionDataTier::Delayed,
+            entitlements_fingerprint: "c".repeat(64),
+            market_data_entitlement_purchase_denied: true,
+            gateway_started_at_ms: 1_772_231_940_000,
             attested_at_ms: 1_772_232_000_000,
             expires_at_ms: 1_772_235_600_000,
-            raw_artifact_hash: "redacted_raw_artifact_hash".to_string(),
+            raw_artifact_hash: "e".repeat(64),
         }
     }
 
@@ -390,6 +417,8 @@ impl IbkrSessionAttestationV1 {
         }
         if self.account_fingerprint.trim().is_empty() {
             blockers.push(Blocker::MissingAccountFingerprint);
+        } else if !is_sha256_hex(&self.account_fingerprint) {
+            blockers.push(Blocker::AccountFingerprintInvalid);
         }
         if self.account_fingerprint_is_live {
             blockers.push(Blocker::LiveAccountFingerprint);
@@ -405,6 +434,8 @@ impl IbkrSessionAttestationV1 {
         }
         if self.secret_slot_fingerprint.trim().is_empty() {
             blockers.push(Blocker::MissingSecretSlotFingerprint);
+        } else if !is_sha256_hex(&self.secret_slot_fingerprint) {
+            blockers.push(Blocker::SecretSlotFingerprintInvalid);
         }
         match self.secret_slot_mode {
             IbkrSecretSlotMode::Paper | IbkrSecretSlotMode::ReadOnly => {}
@@ -426,8 +457,26 @@ impl IbkrSessionAttestationV1 {
         if self.api_server_version.trim().is_empty() {
             blockers.push(Blocker::MissingApiServerVersion);
         }
+        if self.data_tier == IbkrSessionDataTier::Unknown {
+            blockers.push(Blocker::MissingDataTier);
+        }
+        if self.entitlements_fingerprint.trim().is_empty() {
+            blockers.push(Blocker::MissingDataEntitlementsFingerprint);
+        } else if !is_sha256_hex(&self.entitlements_fingerprint) {
+            blockers.push(Blocker::DataEntitlementsFingerprintInvalid);
+        }
+        if !self.market_data_entitlement_purchase_denied {
+            blockers.push(Blocker::MarketDataEntitlementPurchaseNotDenied);
+        }
+        if self.gateway_started_at_ms == 0 {
+            blockers.push(Blocker::MissingGatewayStartupTime);
+        } else if self.gateway_started_at_ms > self.attested_at_ms {
+            blockers.push(Blocker::GatewayStartupAfterAttestation);
+        }
         if self.raw_artifact_hash.trim().is_empty() {
             blockers.push(Blocker::MissingRawArtifactHash);
+        } else if !is_sha256_hex(&self.raw_artifact_hash) {
+            blockers.push(Blocker::RawArtifactHashInvalid);
         }
         if self.expires_at_ms <= self.attested_at_ms || self.attested_at_ms == 0 {
             blockers.push(Blocker::InvalidAttestationWindow);
@@ -455,17 +504,26 @@ pub enum IbkrSessionAttestationBlocker {
     LivePortDenied,
     PortNotPaperGatewayDefault,
     MissingAccountFingerprint,
+    AccountFingerprintInvalid,
     LiveAccountFingerprint,
     MissingProcessIdentity,
     UnknownOrLiveGatewayMode,
     MissingSecretSlotFingerprint,
+    SecretSlotFingerprintInvalid,
     SecretSlotMissing,
     SecretSlotWorldReadable,
     SecretSlotModeDenied,
     LiveSecretPresentOrUnknown,
     EnvVarCredentialFallback,
     MissingApiServerVersion,
+    MissingDataTier,
+    MissingDataEntitlementsFingerprint,
+    DataEntitlementsFingerprintInvalid,
+    MarketDataEntitlementPurchaseNotDenied,
+    MissingGatewayStartupTime,
+    GatewayStartupAfterAttestation,
     MissingRawArtifactHash,
+    RawArtifactHashInvalid,
     InvalidAttestationWindow,
     StaleAttestation,
 }
@@ -481,4 +539,12 @@ pub fn is_loopback_or_unix_local_host(host: &str) -> bool {
     let normalized = host.trim().to_ascii_lowercase();
     matches!(normalized.as_str(), "127.0.0.1" | "::1" | "localhost")
         || normalized.starts_with("unix:")
+}
+
+fn is_sha256_hex(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 64
+        && bytes
+            .iter()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(b))
 }
