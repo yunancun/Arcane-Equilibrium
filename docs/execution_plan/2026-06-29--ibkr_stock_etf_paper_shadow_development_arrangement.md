@@ -8299,3 +8299,38 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 runtime、不執行 paper order routing、不做 broker session、不做 broker routing、不做 DB/evidence writer、
 不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何
 Bybit behavior change。
+
+## 199. 2026-07-01 PM session source checkpoint：Stock/ETF Phase0 Manifest Default Lineage Exact Guard
+
+本 checkpoint 補強 `stock_etf_phase0_manifest` 的 Phase0 named contract packet manifest fail-closed
+lineage，固定 default `StockEtfPhase0ContractPacketManifestV1`、contract completeness/duplicate/unexpected、
+API baseline drift、global denial/unlock drift 的 ordered blocker vectors，並用 source-static parser 鎖住
+manifest/authority/API/contracts/unlock validator blocker emit order 與 root validator child-call order。這不是
+Rust production behavior change、不是 IPC/API route change、不是 IBKR contact、不是 connector runtime、
+不是 secret lookup、不是 paper order route enablement、不是 tiny-live/live gate；只把 Phase0 manifest
+source-only packet contract 的 fail-closed lineage 變成 exact-blocker acceptance test 與 source-static guard。
+
+已完成：
+
+- 在 `stock_etf_phase0_manifest_acceptance.rs` 將 default `StockEtfPhase0ContractPacketManifestV1` 檢查
+  提升為完整順序 blocker 向量，包含所有 required contract missing blockers。
+- 在同檔將 accepted fixture 合約集合改為 `required_phase0_contract_ids()` ordered equality，並將 contract
+  completeness/duplicate/unexpected、API baseline、global denial/unlock cases 固定為 exact blocker vectors。
+- 在 `test_stock_etf_phase0_manifest_source_static.py` 新增 manifest/authority/API/contracts/unlock validator
+  blocker ordering parser，並鎖住 root validator child-call order。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Stock/ETF Phase0 manifest source static pytest：`7 passed`。
+- Stock/ETF Phase0 manifest Rust acceptance：`6 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、
+不改 GUI runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector
+runtime、不執行 paper order routing、不做 broker session、不做 broker routing、不做 DB/evidence writer、
+不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何
+Bybit behavior change。

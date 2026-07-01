@@ -164,6 +164,10 @@ def _source() -> str:
     return PHASE0_MANIFEST.read_text(encoding="utf-8")
 
 
+def _function_block(source: str, start: str, end: str) -> str:
+    return source.split(start, 1)[1].split(end, 1)[0]
+
+
 def test_stock_etf_phase0_manifest_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
@@ -250,6 +254,86 @@ def test_stock_etf_phase0_manifest_source_keeps_validation_matrix() -> None:
     assert "Blocker::ContractUnexpected" in source
     assert 'unlock.phase2_ibkr_external_contact != "BLOCKED_UNTIL_PHASE2_EXTERNAL_SURFACE_GATE_PASS"' in source
     assert 'unlock.tiny_live_or_live != "BLOCKED_REQUIRES_FUTURE_ADR"' in source
+
+
+def test_stock_etf_phase0_manifest_source_keeps_exact_blocker_order() -> None:
+    source = _source()
+    manifest = _function_block(
+        source,
+        "pub fn validate(&self) -> StockEtfPhase0ManifestVerdict<StockEtfPhase0ManifestBlocker>",
+        "StockEtfPhase0ManifestVerdict::new(blockers)",
+    )
+    authority = _function_block(source, "fn validate_authority(", "fn validate_api_baseline(")
+    api_baseline = _function_block(
+        source,
+        "fn validate_api_baseline(",
+        "fn validate_global_denials(",
+    )
+    contracts = _function_block(source, "fn validate_contracts(", "fn validate_phase_unlock(")
+    phase_unlock = source.split("fn validate_phase_unlock(", 1)[1]
+
+    for block, ordered_blockers in (
+        (
+            manifest,
+            (
+                "SchemaMismatch",
+                "GeneratedAtMismatch",
+                "StatusMismatch",
+                "WrongAssetLane",
+                "WrongBroker",
+                "ScopeMismatch",
+            ),
+        ),
+        (
+            authority,
+            (
+                "AdrPathMismatch",
+                "AmdPathMismatch",
+                "ContractPacketPathMismatch",
+            ),
+        ),
+        (
+            api_baseline,
+            (
+                "ApiBaselineSelectedMismatch",
+                "ApiBaselineHostPolicyMismatch",
+                "ApiBaselinePaperPortMismatch",
+                "ApiBaselineLivePortsNotDenied",
+                "ApiBaselineIbkrCallAlreadyPerformed",
+            ),
+        ),
+        (
+            contracts,
+            (
+                "ContractMissing",
+                "ContractDuplicated",
+                "ContractUnexpected",
+            ),
+        ),
+        (
+            phase_unlock,
+            (
+                "Phase1UnlockMismatch",
+                "Phase2ContactNotBlocked",
+                "Phase3EvidenceClockNotBlocked",
+                "Phase4GuiRuntimeNotBlocked",
+                "Phase5OnlineNotBlocked",
+                "TinyLiveOrLiveNotBlocked",
+            ),
+        ),
+    ):
+        positions = [block.index(f"Blocker::{blocker}") for blocker in ordered_blockers]
+        assert positions == sorted(positions)
+
+    validator_call_order = (
+        "validate_authority(&self.authority, &mut blockers)",
+        "validate_api_baseline(&self.api_baseline, &mut blockers)",
+        "validate_global_denials(&self.global_denials, &mut blockers)",
+        "validate_contracts(&self.contracts, &mut blockers)",
+        "validate_phase_unlock(&self.phase_unlock, &mut blockers)",
+    )
+    positions = [manifest.index(call) for call in validator_call_order]
+    assert positions == sorted(positions)
 
 
 def test_stock_etf_phase0_manifest_source_has_no_runtime_secret_order_or_bybit_client_tokens() -> None:

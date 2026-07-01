@@ -10,60 +10,46 @@ use openclaw_types::{
     required_phase0_contract_ids, StockEtfPhase0ApiBaselineV1,
     StockEtfPhase0ContractPacketManifestV1, StockEtfPhase0GlobalDenialsV1,
     StockEtfPhase0ManifestBlocker, StockEtfPhase0UnlockTableV1,
-    BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID, BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
-    FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID, IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID,
-    IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID, IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
-    IBKR_SESSION_ATTESTATION_CONTRACT_ID, NON_BYBIT_API_ALLOWLIST_CONTRACT_ID,
-    STOCK_ETF_ASSET_LANE_TAXONOMY_CONTRACT_ID, STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID,
-    STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID, STOCK_ETF_COLLECTOR_RUN_CONTRACT_ID,
-    STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID, STOCK_ETF_DB_EVIDENCE_CONTRACT_ID,
-    STOCK_ETF_DISABLE_CLEANUP_RUNBOOK_ID, STOCK_ETF_DQ_MANIFEST_CONTRACT_ID,
-    STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID, STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID,
-    STOCK_ETF_IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID,
-    STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID, STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID,
-    STOCK_ETF_PAPER_FILL_IMPORT_REQUEST_CONTRACT_ID, STOCK_ETF_PAPER_ORDER_REQUEST_CONTRACT_ID,
-    STOCK_ETF_PAPER_SHADOW_RECONCILIATION_CONTRACT_ID, STOCK_ETF_PHASE0_MANIFEST_SCHEMA,
-    STOCK_ETF_PHASE0_MANIFEST_STATUS, STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
-    STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID, STOCK_ETF_RISK_POLICY_CONTRACT_ID,
-    STOCK_ETF_SHADOW_SIGNAL_REQUEST_CONTRACT_ID, STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID,
-    STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
-    STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
+    STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID, STOCK_ETF_PHASE0_MANIFEST_SCHEMA,
+    STOCK_ETF_PHASE0_MANIFEST_STATUS,
 };
 
 #[test]
 fn default_manifest_blocks_phase0_acceptance() {
+    use StockEtfPhase0ManifestBlocker as Blocker;
+
     let manifest = StockEtfPhase0ContractPacketManifestV1::default();
     let verdict = manifest.validate();
+    let mut expected_blockers = vec![
+        Blocker::SchemaMismatch,
+        Blocker::GeneratedAtMismatch,
+        Blocker::StatusMismatch,
+        Blocker::WrongAssetLane,
+        Blocker::WrongBroker,
+        Blocker::ScopeMismatch,
+        Blocker::AdrPathMismatch,
+        Blocker::AmdPathMismatch,
+        Blocker::ContractPacketPathMismatch,
+        Blocker::ApiBaselineSelectedMismatch,
+        Blocker::ApiBaselineHostPolicyMismatch,
+        Blocker::ApiBaselinePaperPortMismatch,
+        Blocker::ApiBaselineLivePortsNotDenied,
+        Blocker::GlobalDenialMissing,
+    ];
+    expected_blockers.extend(
+        std::iter::repeat(Blocker::ContractMissing).take(required_phase0_contract_ids().len()),
+    );
+    expected_blockers.extend([
+        Blocker::Phase1UnlockMismatch,
+        Blocker::Phase2ContactNotBlocked,
+        Blocker::Phase3EvidenceClockNotBlocked,
+        Blocker::Phase4GuiRuntimeNotBlocked,
+        Blocker::Phase5OnlineNotBlocked,
+        Blocker::TinyLiveOrLiveNotBlocked,
+    ]);
 
     assert!(!verdict.accepted);
-    assert!(has(
-        &verdict.blockers,
-        StockEtfPhase0ManifestBlocker::SchemaMismatch
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfPhase0ManifestBlocker::StatusMismatch
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfPhase0ManifestBlocker::WrongAssetLane
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfPhase0ManifestBlocker::WrongBroker
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfPhase0ManifestBlocker::GlobalDenialMissing
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfPhase0ManifestBlocker::ContractMissing
-    ));
-    assert!(has(
-        &verdict.blockers,
-        StockEtfPhase0ManifestBlocker::Phase2ContactNotBlocked
-    ));
+    assert_eq!(verdict.blockers, expected_blockers);
 }
 
 #[test]
@@ -85,99 +71,13 @@ fn accepted_fixture_validates_phase0_packet_without_runtime_authority() {
     assert!(manifest.global_denials.python_broker_write_authority);
     assert!(manifest.global_denials.gui_lane_authority);
     assert!(manifest.global_denials.automatic_promotion);
-    assert!(manifest
-        .contracts
-        .contains(&STOCK_ETF_ASSET_LANE_TAXONOMY_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&STOCK_ETF_RISK_POLICY_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&NON_BYBIT_API_ALLOWLIST_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&STOCK_ETF_IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&IBKR_SESSION_ATTESTATION_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&FEATURE_FLAG_SECRET_AUTH_MATRIX_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&STOCK_ETF_PAPER_ORDER_REQUEST_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&STOCK_ETF_PAPER_FILL_IMPORT_REQUEST_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&STOCK_ETF_SHADOW_SIGNAL_REQUEST_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&STOCK_SHADOW_FILL_MODEL_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&STOCK_ETF_PAPER_SHADOW_RECONCILIATION_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&STOCK_ETF_COLLECTOR_RUN_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&STOCK_ETF_DQ_MANIFEST_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&STOCK_ETF_DB_EVIDENCE_CONTRACT_ID.to_string()));
-    assert!(manifest
-        .contracts
-        .contains(&STOCK_ETF_DISABLE_CLEANUP_RUNBOOK_ID.to_string()));
+    assert_eq!(
+        manifest.contracts,
+        required_phase0_contract_ids()
+            .iter()
+            .map(|contract| contract.to_string())
+            .collect::<Vec<_>>()
+    );
 }
 
 #[test]
@@ -216,18 +116,14 @@ fn manifest_contracts_must_be_complete_unique_and_known() {
 
     let blockers = manifest.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfPhase0ManifestBlocker::ContractMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPhase0ManifestBlocker::ContractDuplicated
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPhase0ManifestBlocker::ContractUnexpected
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfPhase0ManifestBlocker::ContractDuplicated,
+            StockEtfPhase0ManifestBlocker::ContractMissing,
+            StockEtfPhase0ManifestBlocker::ContractUnexpected,
+        ]
+    );
 }
 
 #[test]
@@ -244,26 +140,16 @@ fn api_baseline_rejects_non_loopback_live_ports_and_prior_contact() {
     };
     let blockers = manifest.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfPhase0ManifestBlocker::ApiBaselineSelectedMismatch
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPhase0ManifestBlocker::ApiBaselineHostPolicyMismatch
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPhase0ManifestBlocker::ApiBaselinePaperPortMismatch
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPhase0ManifestBlocker::ApiBaselineLivePortsNotDenied
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPhase0ManifestBlocker::ApiBaselineIbkrCallAlreadyPerformed
-    ));
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfPhase0ManifestBlocker::ApiBaselineSelectedMismatch,
+            StockEtfPhase0ManifestBlocker::ApiBaselineHostPolicyMismatch,
+            StockEtfPhase0ManifestBlocker::ApiBaselinePaperPortMismatch,
+            StockEtfPhase0ManifestBlocker::ApiBaselineLivePortsNotDenied,
+            StockEtfPhase0ManifestBlocker::ApiBaselineIbkrCallAlreadyPerformed,
+        ]
+    );
 }
 
 #[test]
@@ -287,36 +173,16 @@ fn global_denials_and_phase_unlocks_must_remain_fail_closed() {
     };
     let blockers = manifest.validate().blockers;
 
-    assert!(has(
-        &blockers,
-        StockEtfPhase0ManifestBlocker::GlobalDenialMissing
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPhase0ManifestBlocker::Phase1UnlockMismatch
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPhase0ManifestBlocker::Phase2ContactNotBlocked
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPhase0ManifestBlocker::Phase3EvidenceClockNotBlocked
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPhase0ManifestBlocker::Phase4GuiRuntimeNotBlocked
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPhase0ManifestBlocker::Phase5OnlineNotBlocked
-    ));
-    assert!(has(
-        &blockers,
-        StockEtfPhase0ManifestBlocker::TinyLiveOrLiveNotBlocked
-    ));
-}
-
-fn has(blockers: &[StockEtfPhase0ManifestBlocker], blocker: StockEtfPhase0ManifestBlocker) -> bool {
-    blockers.contains(&blocker)
+    assert_eq!(
+        blockers,
+        vec![
+            StockEtfPhase0ManifestBlocker::GlobalDenialMissing,
+            StockEtfPhase0ManifestBlocker::Phase1UnlockMismatch,
+            StockEtfPhase0ManifestBlocker::Phase2ContactNotBlocked,
+            StockEtfPhase0ManifestBlocker::Phase3EvidenceClockNotBlocked,
+            StockEtfPhase0ManifestBlocker::Phase4GuiRuntimeNotBlocked,
+            StockEtfPhase0ManifestBlocker::Phase5OnlineNotBlocked,
+            StockEtfPhase0ManifestBlocker::TinyLiveOrLiveNotBlocked,
+        ]
+    );
 }

@@ -3994,3 +3994,10 @@
 - Source-static parsing now pins GUI lane validator blocker emit order backing the exact acceptance vectors.
 - Verification passed: GUI lane source static `7 passed`; GUI lane Rust acceptance `9 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `337` integration/acceptance + `0` doc-tests; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, GUI runtime/API route/IPC behavior change, IBKR contact, connector runtime, secret access, paper order routing, broker session, DB/evidence writer, scorecard writer, paper-shadow launch, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Phase0 Manifest Default Lineage Exact Guard
+
+- PM added test-only/source-static exact-blocker coverage for default `StockEtfPhase0ContractPacketManifestV1`, contract completeness/duplicate/unexpected, API baseline drift, and global denial/unlock drift.
+- Source-static parsing now pins manifest/authority/API/contracts/unlock validator blocker emit order plus root validator child-call order backing the exact acceptance vectors.
+- Verification passed: Phase0 manifest source static `7 passed`; Phase0 manifest Rust acceptance `6 passed`; full `cargo test -p openclaw_types` PASS; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, GUI runtime/API route/IPC behavior change, IBKR contact, connector runtime, secret access, paper order routing, broker session, DB/evidence writer, scorecard writer, paper-shadow launch, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
