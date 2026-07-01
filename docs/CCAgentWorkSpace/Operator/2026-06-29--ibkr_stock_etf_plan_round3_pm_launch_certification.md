@@ -4657,3 +4657,35 @@ Verification 已過：
 沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 lifecycle writer、沒有 evidence/
 scorecard writer、沒有 broker session、沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動
 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Paper Fill Import Request Authority Lineage Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Paper Fill Import Request Authority Lineage Cross-Wire Guard`。
+
+這個 checkpoint 補強 `StockEtfPaperFillImportRequestV1` 的 lane/broker/environment/method/operation/
+authority、lifecycle/event-log/redaction/session lineage、idempotency/replay、stale-state policy 與
+no-side-effect boundary coverage。新增 Rust acceptance 證明 contract/source/lane/broker/environment/
+method/operation/authority/effect、request/session/lifecycle/event-log/redaction/source artifact/
+reconciliation/broker-order/execution/commission/idempotency/observed-state/stale-policy/raw-redacted
+lineage，以及 contact/runtime/secret/fill-import/DB/order/Bybit/live/margin/Python-write flags 都會 fail
+closed。
+
+同時保留 `StateUnknown` without stale policy 的天然 aggregate 行為：必須同時命中
+`StaleStatePolicyMissing` 與 `StaleUnknownStateWithoutPolicy`。Python source-static parser 也鎖住
+`Default` / `accepted_fixture` block，避免 accepted fixture 被硬編成 crypto、Bybit、live、wrong method、
+wrong operation、effectful、empty-lineage、replay、runtime、secret 或 order posture。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Paper fill import source static pytest：`8 passed`
+- Paper fill import Rust acceptance：`10 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 fill import execution、沒有 DB/evidence
+writer、沒有 broker session、沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit
+live/demo execution 行為。

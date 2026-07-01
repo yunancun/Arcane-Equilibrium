@@ -3859,3 +3859,9 @@
 - Source-static guard now parses default and passing fixture blocks, pinning default blocked posture and passing fixture no-side-effect posture.
 - Verification passed: targeted rustfmt check PASS; Phase2 gate source static `5 passed`; Phase2 gate Rust acceptance `12 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
 - Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, SDK import, connector runtime, secret access, session attestation runtime, broker session, paper order route, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Paper Fill Import Request Authority Lineage Cross-Wire Guard
+
+- PM added test-only/source-static exact-blocker coverage for `StockEtfPaperFillImportRequestV1` authority, lifecycle/event-log/redaction/session lineage, stale policy, replay, and no-side-effect flags.
+- Verification passed: paper fill source static `8 passed`; paper fill Rust acceptance `10 passed`; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, IPC/runtime change, IBKR contact, connector runtime, secret access, fill import execution, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

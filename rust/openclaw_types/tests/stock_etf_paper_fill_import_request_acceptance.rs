@@ -213,6 +213,58 @@ fn fill_import_request_rejects_method_operation_and_scope_cross_wire() {
 }
 
 #[test]
+fn fill_import_request_rejects_each_authority_gap_independently() {
+    use StockEtfPaperFillImportBlocker as Blocker;
+
+    let cases: [(fn(&mut StockEtfPaperFillImportRequestV1), Blocker); 9] = [
+        (
+            |request| {
+                request.contract_id = "stock_etf_paper_fill_import_request_v1_fixture".to_string()
+            },
+            Blocker::ContractIdMismatch,
+        ),
+        (
+            |request| request.source_version = 2,
+            Blocker::SourceVersionMismatch,
+        ),
+        (
+            |request| request.asset_lane = AssetLane::CryptoPerp,
+            Blocker::WrongAssetLane,
+        ),
+        (
+            |request| request.broker = Broker::Bybit,
+            Blocker::WrongBroker,
+        ),
+        (
+            |request| request.environment = BrokerEnvironment::ReadOnly,
+            Blocker::EnvironmentNotPaper,
+        ),
+        (
+            |request| request.request_method = StockEtfLaneScopedIpcMethod::EvaluateShadowSignal,
+            Blocker::RequestMethodMismatch,
+        ),
+        (
+            |request| request.operation = BrokerOperation::PaperOrderSubmit,
+            Blocker::OperationMismatch,
+        ),
+        (
+            |request| request.authority_scope = AuthorityScope::PaperRehearsal,
+            Blocker::AuthorityScopeMismatch,
+        ),
+        (
+            |request| request.effect_capable = true,
+            Blocker::EffectCapabilityPresent,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut request = StockEtfPaperFillImportRequestV1::accepted_fixture();
+        mutate(&mut request);
+        assert_single_blocker(request, blocker);
+    }
+}
+
+#[test]
 fn fill_import_request_requires_lineage_ids_hashes_and_stale_policy() {
     let bad = StockEtfPaperFillImportRequestV1 {
         request_id: String::new(),
@@ -296,6 +348,125 @@ fn fill_import_request_requires_lineage_ids_hashes_and_stale_policy() {
 }
 
 #[test]
+fn fill_import_request_rejects_each_lineage_gap_independently() {
+    use StockEtfPaperFillImportBlocker as Blocker;
+
+    let cases: [(fn(&mut StockEtfPaperFillImportRequestV1), Blocker); 21] = [
+        (
+            |request| request.request_id.clear(),
+            Blocker::RequestIdMissing,
+        ),
+        (
+            |request| request.session_attestation_hash.clear(),
+            Blocker::SessionAttestationHashInvalid,
+        ),
+        (
+            |request| request.lifecycle_contract_id = "wrong".to_string(),
+            Blocker::LifecycleContractIdMismatch,
+        ),
+        (
+            |request| request.lifecycle_contract_hash.clear(),
+            Blocker::LifecycleContractHashInvalid,
+        ),
+        (
+            |request| request.event_log_contract_id = "wrong".to_string(),
+            Blocker::EventLogContractIdMismatch,
+        ),
+        (
+            |request| request.event_log_contract_hash.clear(),
+            Blocker::EventLogContractHashInvalid,
+        ),
+        (
+            |request| request.redaction_policy_contract_id = "wrong".to_string(),
+            Blocker::RedactionPolicyContractIdMismatch,
+        ),
+        (
+            |request| request.redaction_policy_hash.clear(),
+            Blocker::RedactionPolicyHashInvalid,
+        ),
+        (
+            |request| request.source_artifact_hash.clear(),
+            Blocker::SourceArtifactHashInvalid,
+        ),
+        (
+            |request| request.reconciliation_run_id.clear(),
+            Blocker::ReconciliationRunIdMissing,
+        ),
+        (
+            |request| request.broker_order_id.clear(),
+            Blocker::BrokerOrderIdMissing,
+        ),
+        (
+            |request| request.execution_id.clear(),
+            Blocker::ExecutionIdMissing,
+        ),
+        (
+            |request| request.commission_report_id.clear(),
+            Blocker::CommissionReportIdMissing,
+        ),
+        (
+            |request| request.import_idempotency_key.clear(),
+            Blocker::ImportIdempotencyKeyMissing,
+        ),
+        (
+            |request| request.observed_order_state = None,
+            Blocker::ObservedOrderStateMissing,
+        ),
+        (
+            |request| request.stale_state_policy = None,
+            Blocker::StaleStatePolicyMissing,
+        ),
+        (
+            |request| request.raw_artifact_hash.clear(),
+            Blocker::RawArtifactHashInvalid,
+        ),
+        (
+            |request| request.redacted_summary_hash.clear(),
+            Blocker::RedactedSummaryHashInvalid,
+        ),
+        (
+            |request| request.duplicate_import_detected = true,
+            Blocker::DuplicateImportDetected,
+        ),
+        (
+            |request| request.stale_unknown_state_without_policy = true,
+            Blocker::StaleUnknownStateWithoutPolicy,
+        ),
+        (
+            |request| {
+                request.observed_order_state = Some(IbkrPaperOrderLifecycleState::StateUnknown);
+                request.stale_state_policy = None;
+            },
+            Blocker::StaleStatePolicyMissing,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut request = StockEtfPaperFillImportRequestV1::accepted_fixture();
+        mutate(&mut request);
+        if blocker == Blocker::StaleStatePolicyMissing
+            && matches!(
+                request.observed_order_state,
+                Some(IbkrPaperOrderLifecycleState::StateUnknown)
+            )
+        {
+            let verdict = request.validate();
+            assert!(!verdict.accepted);
+            assert!(has(&verdict, Blocker::StaleStatePolicyMissing));
+            assert!(has(&verdict, Blocker::StaleUnknownStateWithoutPolicy));
+            assert_eq!(
+                verdict.blockers.len(),
+                2,
+                "expected stale unknown aggregate only, got {:?}",
+                verdict.blockers
+            );
+        } else {
+            assert_single_blocker(request, blocker);
+        }
+    }
+}
+
+#[test]
 fn fill_import_request_rejects_boundary_and_replay_regressions() {
     let bad = StockEtfPaperFillImportRequestV1 {
         duplicate_import_detected: true,
@@ -364,6 +535,57 @@ fn fill_import_request_rejects_boundary_and_replay_regressions() {
 }
 
 #[test]
+fn fill_import_request_rejects_each_boundary_flag_independently() {
+    use StockEtfPaperFillImportBlocker as Blocker;
+
+    let cases: [(fn(&mut StockEtfPaperFillImportRequestV1), Blocker); 10] = [
+        (
+            |request| request.ibkr_contact_performed = true,
+            Blocker::IbkrContactPerformed,
+        ),
+        (
+            |request| request.connector_runtime_started = true,
+            Blocker::ConnectorRuntimeStarted,
+        ),
+        (
+            |request| request.secret_content_serialized = true,
+            Blocker::SecretContentSerialized,
+        ),
+        (
+            |request| request.fill_import_performed = true,
+            Blocker::FillImportPerformed,
+        ),
+        (
+            |request| request.db_apply_performed = true,
+            Blocker::DbApplyPerformed,
+        ),
+        (|request| request.order_routed = true, Blocker::OrderRouted),
+        (
+            |request| request.bybit_path_reused = true,
+            Blocker::BybitPathReused,
+        ),
+        (
+            |request| request.live_or_tiny_live_authorized = true,
+            Blocker::LiveOrTinyLiveAuthorized,
+        ),
+        (
+            |request| request.margin_short_options_cfd_requested = true,
+            Blocker::MarginShortOptionsCfdRequested,
+        ),
+        (
+            |request| request.python_direct_broker_write_requested = true,
+            Blocker::PythonDirectBrokerWriteRequested,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut request = StockEtfPaperFillImportRequestV1::accepted_fixture();
+        mutate(&mut request);
+        assert_single_blocker(request, blocker);
+    }
+}
+
+#[test]
 fn state_unknown_is_allowed_only_with_explicit_stale_policy() {
     let request = StockEtfPaperFillImportRequestV1 {
         observed_order_state: Some(IbkrPaperOrderLifecycleState::StateUnknown),
@@ -408,4 +630,20 @@ fn blocked_template_is_parseable_and_secret_free() {
 
 fn has(verdict: &StockEtfPaperFillImportVerdict, blocker: StockEtfPaperFillImportBlocker) -> bool {
     verdict.blockers.contains(&blocker)
+}
+
+fn assert_single_blocker(
+    request: StockEtfPaperFillImportRequestV1,
+    blocker: StockEtfPaperFillImportBlocker,
+) {
+    let verdict = request.validate();
+
+    assert!(!verdict.accepted);
+    assert_eq!(
+        verdict.blockers,
+        vec![blocker],
+        "expected only {:?}, got {:?}",
+        blocker,
+        verdict.blockers
+    );
 }

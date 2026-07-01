@@ -177,12 +177,27 @@ def _source() -> str:
     return PAPER_FILL_IMPORT.read_text(encoding="utf-8")
 
 
+def _default_block(source: str) -> str:
+    return source.split("impl Default for StockEtfPaperFillImportRequestV1", 1)[1].split(
+        "impl StockEtfPaperFillImportRequestV1",
+        1,
+    )[0]
+
+
+def _accepted_fixture_block(source: str) -> str:
+    return source.split("impl StockEtfPaperFillImportRequestV1", 1)[1].split(
+        "pub fn validate(&self)",
+        1,
+    )[0]
+
+
 def test_stock_etf_paper_fill_import_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
 
 def test_stock_etf_paper_fill_import_source_keeps_contract_surface() -> None:
     source = _source()
+    default_block = _default_block(source)
 
     for token in REQUIRED_IMPORT_TOKENS | REQUIRED_TYPE_TOKENS:
         assert token in source
@@ -191,22 +206,22 @@ def test_stock_etf_paper_fill_import_source_keeps_contract_surface() -> None:
     for blocker in REQUIRED_BLOCKERS:
         assert f"Blocker::{blocker}" in source or blocker in source
 
-    assert "contract_id: String::new()" in source
-    assert "source_version: 0" in source
-    assert "asset_lane: AssetLane::CryptoPerp" in source
-    assert "broker: Broker::Bybit" in source
-    assert "environment: BrokerEnvironment::LiveReservedDenied" in source
-    assert "request_method: StockEtfLaneScopedIpcMethod::UnknownDenied" in source
-    assert "operation: BrokerOperation::TransferOrAccountWrite" in source
-    assert "authority_scope: AuthorityScope::Denied" in source
-    assert "effect_capable: false" in source
-    assert "observed_order_state: None" in source
-    assert "stale_state_policy: None" in source
+    assert "contract_id: String::new()" in default_block
+    assert "source_version: 0" in default_block
+    assert "asset_lane: AssetLane::CryptoPerp" in default_block
+    assert "broker: Broker::Bybit" in default_block
+    assert "environment: BrokerEnvironment::LiveReservedDenied" in default_block
+    assert "request_method: StockEtfLaneScopedIpcMethod::UnknownDenied" in default_block
+    assert "operation: BrokerOperation::TransferOrAccountWrite" in default_block
+    assert "authority_scope: AuthorityScope::Denied" in default_block
+    assert "effect_capable: false" in default_block
+    assert "observed_order_state: None" in default_block
+    assert "stale_state_policy: None" in default_block
     assert "accepted: blockers.is_empty()" in source
 
 
 def test_stock_etf_paper_fill_import_source_keeps_accepted_readonly_shape() -> None:
-    source = _source()
+    source = _accepted_fixture_block(_source())
 
     assert "contract_id: STOCK_ETF_PAPER_FILL_IMPORT_REQUEST_CONTRACT_ID.to_string()" in source
     assert "source_version: 1" in source
@@ -223,6 +238,90 @@ def test_stock_etf_paper_fill_import_source_keeps_accepted_readonly_shape() -> N
     assert "observed_order_state: Some(IbkrPaperOrderLifecycleState::Filled)" in source
     assert "stale_state_policy: Some(IbkrPaperStaleStatePolicy::PreserveTerminalWithEvidence)" in source
     assert "..Self::default()" in source
+
+
+def test_stock_etf_paper_fill_import_fixture_excludes_authority_lineage_and_runtime_crosswire() -> None:
+    source = _source()
+    default_block = _default_block(source)
+    fixture = _accepted_fixture_block(source)
+
+    for required_default in (
+        "asset_lane: AssetLane::CryptoPerp",
+        "broker: Broker::Bybit",
+        "environment: BrokerEnvironment::LiveReservedDenied",
+        "request_method: StockEtfLaneScopedIpcMethod::UnknownDenied",
+        "operation: BrokerOperation::TransferOrAccountWrite",
+        "authority_scope: AuthorityScope::Denied",
+        "request_id: String::new()",
+        "session_attestation_hash: String::new()",
+        "lifecycle_contract_id: String::new()",
+        "event_log_contract_id: String::new()",
+        "redaction_policy_contract_id: String::new()",
+        "reconciliation_run_id: String::new()",
+        "broker_order_id: String::new()",
+        "execution_id: String::new()",
+        "commission_report_id: String::new()",
+        "import_idempotency_key: String::new()",
+        "observed_order_state: None",
+        "stale_state_policy: None",
+        "duplicate_import_detected: false",
+        "stale_unknown_state_without_policy: false",
+        "ibkr_contact_performed: false",
+        "connector_runtime_started: false",
+        "secret_content_serialized: false",
+        "fill_import_performed: false",
+        "db_apply_performed: false",
+        "order_routed: false",
+        "bybit_path_reused: false",
+        "live_or_tiny_live_authorized: false",
+        "margin_short_options_cfd_requested: false",
+        "python_direct_broker_write_requested: false",
+    ):
+        assert required_default in default_block
+
+    for forbidden in (
+        "asset_lane: AssetLane::CryptoPerp",
+        "broker: Broker::Bybit",
+        "environment: BrokerEnvironment::LiveReservedDenied",
+        "request_method: StockEtfLaneScopedIpcMethod::UnknownDenied",
+        "request_method: StockEtfLaneScopedIpcMethod::SubmitPaperOrder",
+        "request_method: StockEtfLaneScopedIpcMethod::EvaluateShadowSignal",
+        "operation: BrokerOperation::TransferOrAccountWrite",
+        "operation: BrokerOperation::PaperOrderSubmit",
+        "operation: BrokerOperation::ShadowSignalEmit",
+        "authority_scope: AuthorityScope::Denied",
+        "authority_scope: AuthorityScope::PaperRehearsal",
+        "authority_scope: AuthorityScope::ShadowOnly",
+        "effect_capable: true",
+        "request_id: String::new()",
+        "session_attestation_hash: String::new()",
+        "lifecycle_contract_hash: String::new()",
+        "event_log_contract_hash: String::new()",
+        "redaction_policy_hash: String::new()",
+        "source_artifact_hash: String::new()",
+        "reconciliation_run_id: String::new()",
+        "broker_order_id: String::new()",
+        "execution_id: String::new()",
+        "commission_report_id: String::new()",
+        "import_idempotency_key: String::new()",
+        "observed_order_state: None",
+        "stale_state_policy: None",
+        "raw_artifact_hash: String::new()",
+        "redacted_summary_hash: String::new()",
+        "duplicate_import_detected: true",
+        "stale_unknown_state_without_policy: true",
+        "ibkr_contact_performed: true",
+        "connector_runtime_started: true",
+        "secret_content_serialized: true",
+        "fill_import_performed: true",
+        "db_apply_performed: true",
+        "order_routed: true",
+        "bybit_path_reused: true",
+        "live_or_tiny_live_authorized: true",
+        "margin_short_options_cfd_requested: true",
+        "python_direct_broker_write_requested: true",
+    ):
+        assert forbidden not in fixture
 
 
 def test_stock_etf_paper_fill_import_source_excludes_paper_shadow_readonly_and_live_crosswire() -> None:
