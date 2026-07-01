@@ -1380,3 +1380,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only structure guard for `stock_etf_disable_cleanup_runbook.rs`, pinning the kill-switch and disable/cleanup runbook contract boundary.
 - The guard requires exact runbook id, fixed disable env flag values without env reads, required proof kinds, fail-closed defaults, StockEtfCash/IBKR accepted fixture, no contact/secret/order/destructive DB/launch/tiny-live/live claims, env/proof validation, and no runtime/secret/order/Bybit client tokens.
 - Verification passed: new guard `7 passed`; disable-cleanup runbook acceptance `7 passed`; full `cargo test -p openclaw_types` PASS. This grants no service stop, env mutation, secret inspection, DB cleanup, IBKR contact, paper order, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF GUI Lane Contract Source Static Guard
+
+- PM added a source-only structure guard for `stock_etf_gui_lane_contract.rs`, pinning the display-only GUI lane contract boundary.
+- The guard requires exact GET-only endpoint constants, fail-closed defaults, display-only accepted fixture, client-lane-state untrusted posture, localStorage/query/hidden-field authority denial, no post/order/secret widgets, route/auth/cache partitions, crypto/Decision Lease regression hashes, denial operations, and no runtime/secret/order/Bybit client tokens.
+- Verification passed: new guard `6 passed`; GUI lane contract acceptance `9 passed`; full `cargo test -p openclaw_types` PASS. This grants no GUI write surface, lane selection authority, IBKR contact, secret widget, order widget, tiny-live/live, or Bybit behavior change.

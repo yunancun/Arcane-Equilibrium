@@ -5330,3 +5330,37 @@ PM 邊界不變：此 checkpoint 不讀 env、不改 env、不停服務、不檢
 不做 destructive cleanup、不做 DB delete/truncate、不呼叫 IBKR、不導入 IBKR SDK、不啟動
 connector runtime、不送 paper order、不授權 paper-shadow launch/tiny-live/live 或任何 Bybit
 behavior change。
+
+## 123. 2026-07-01 PM session source checkpoint：Stock/ETF GUI Lane Contract Source Static Guard
+
+本 checkpoint 為 `stock_etf_gui_lane_contract.rs` 補上 source-only structure guard。這不是 GUI
+write surface、不是 lane selection authority、不是 IBKR contact、不是 secret/order widget、不是
+runtime route；只把 display-only GUI lane contract 的 source invariant 機器化。
+
+已完成：
+
+- 新增 `tests/structure/test_stock_etf_gui_lane_contract_source_static.py`。
+- Guard 鎖住 `stock_etf_gui_lane_contract.rs` 低於 800 行 governance cap。
+- Guard 要求 exact `gui_lane_contract_v1` contract id、16 個 Stock/ETF GET-only endpoint
+  constants/path、contract/verdict/blocker surface 保持在 source 中。
+- Guard 要求 default contract fail-closed：CryptoPerp default、Stock/ETF tab missing、endpoints
+  empty/not GET-only、display-only/client-state-untrusted/authority-denial flags 全部 false。
+- Guard 要求 accepted fixture 保留 display-only、client lane state untrusted、localStorage/query/
+  hidden-field authority denied、no login-success selector、no POST route、no order/secret widget、
+  no render-time IBKR contact、paper order entry hidden、stock live disabled display、CFD hidden。
+- Guard 要求 route/auth/cache partition、crypto tab regression、Decision Lease risk regression、
+  static/route/crypto hashes、live-order/secret-slot/pre-gate-contact denials 保持 required。
+- Guard 禁止 env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens
+  與 secret material access tokens。
+
+驗證：
+
+- New structure guard py_compile：PASS。
+- Focused structure guard pytest：`6 passed`。
+- Focused GUI lane contract acceptance：`9 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+
+PM 邊界不變：此 checkpoint 不新增 GUI write surface，不新增 POST route，不信任 client lane
+state，不授權 localStorage/query/hidden-field，不建立 order/secret widget，不呼叫 IBKR，不導入
+IBKR SDK，不讀/建 secret，不啟動 connector runtime，不送 paper order，不授權 tiny-live/live 或
+任何 Bybit behavior change。
