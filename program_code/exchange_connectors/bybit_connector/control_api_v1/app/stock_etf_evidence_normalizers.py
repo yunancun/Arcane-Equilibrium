@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .stock_etf_status_common import (
+    _COLLECTOR_RUN_CONTRACT_ID,
     _DENIED_OPERATIONS,
     _EVIDENCE_CLOCK_CONTRACT_ID,
     _MARKET_DATA_PROVENANCE_CONTRACT_ID,
@@ -15,6 +16,7 @@ from .stock_etf_status_common import (
     _as_int,
     _as_list,
     _as_str,
+    _collector_run_fail_closed,
     _dq_manifest_fail_closed,
     _evidence_clock_fail_closed,
     _frozen_inputs_fail_closed,
@@ -79,6 +81,62 @@ def _normalize_evidence_clock(value: Any, reason: str | None) -> dict[str, Any]:
             source.get("ibkr_readonly_paper_connector_green_5d")
         ),
         "shadow_collector_green_5d": _as_bool(source.get("shadow_collector_green_5d")),
+    }
+
+
+def _normalize_collector_run(value: Any, reason: str | None) -> dict[str, Any]:
+    fallback = _collector_run_fail_closed(reason or "missing_collector_run")
+    source = _as_dict(value)
+    if not source:
+        return fallback
+    return {
+        "expected_contract_id": _as_str(
+            source.get("expected_contract_id"),
+            _COLLECTOR_RUN_CONTRACT_ID,
+        ),
+        "contract_id": _as_str(source.get("contract_id"), ""),
+        "source_version": _as_int(source.get("source_version")),
+        "accepted": _as_bool(source.get("accepted")),
+        "blockers": [str(item) for item in _as_list(source.get("blockers"))],
+        "collector_run_id": _as_str(source.get("collector_run_id"), ""),
+        "trading_day": _as_str(source.get("trading_day"), ""),
+        "expected_trading_sessions": _as_int(source.get("expected_trading_sessions")),
+        "completed_trading_sessions": _as_int(source.get("completed_trading_sessions")),
+        "pit_universe_contract_hash_present": _as_bool(
+            source.get("pit_universe_contract_hash_present")
+        ),
+        "market_data_provenance_contract_hash_present": _as_bool(
+            source.get("market_data_provenance_contract_hash_present")
+        ),
+        "reference_data_sources_contract_hash_present": _as_bool(
+            source.get("reference_data_sources_contract_hash_present")
+        ),
+        "storage_capacity_contract_hash_present": _as_bool(
+            source.get("storage_capacity_contract_hash_present")
+        ),
+        "gap_report_hash_present": _as_bool(source.get("gap_report_hash_present")),
+        "dq_manifest_hash_present": _as_bool(source.get("dq_manifest_hash_present")),
+        "replay_manifest_hash_present": _as_bool(
+            source.get("replay_manifest_hash_present")
+        ),
+        "source_artifact_hash_present": _as_bool(
+            source.get("source_artifact_hash_present")
+        ),
+        "bybit_live_execution_unchanged": _as_bool(
+            source.get("bybit_live_execution_unchanged")
+        ),
+        "ibkr_contact_performed": _as_bool(source.get("ibkr_contact_performed")),
+        "connector_runtime_started": _as_bool(source.get("connector_runtime_started")),
+        "market_data_ingestion_started": _as_bool(
+            source.get("market_data_ingestion_started")
+        ),
+        "evidence_writer_started": _as_bool(source.get("evidence_writer_started")),
+        "scorecard_writer_started": _as_bool(source.get("scorecard_writer_started")),
+        "db_apply_performed": _as_bool(source.get("db_apply_performed")),
+        "secret_content_serialized": _as_bool(source.get("secret_content_serialized")),
+        "live_or_tiny_live_authorized": _as_bool(
+            source.get("live_or_tiny_live_authorized")
+        ),
     }
 
 
@@ -150,6 +208,7 @@ def _evidence_status_contract_violations(
     source: dict[str, Any],
     phase2: dict[str, Any],
     market_data_provenance: dict[str, Any],
+    collector_run: dict[str, Any],
     evidence_clock: dict[str, Any],
     frozen_inputs: dict[str, Any],
     scorecard: dict[str, Any],
@@ -178,6 +237,24 @@ def _evidence_status_contract_violations(
         violations.append("market_data_secret_content_serialized")
     if _as_bool(market_data_provenance.get("live_or_tiny_live_authorized")):
         violations.append("market_data_live_or_tiny_live_authorized")
+    if _as_str(collector_run.get("expected_contract_id"), "") != _COLLECTOR_RUN_CONTRACT_ID:
+        violations.append("collector_run_expected_contract_id_mismatch")
+    if _as_bool(collector_run.get("ibkr_contact_performed")):
+        violations.append("collector_run_ibkr_contact_performed")
+    if _as_bool(collector_run.get("connector_runtime_started")):
+        violations.append("collector_run_connector_runtime_started")
+    if _as_bool(collector_run.get("market_data_ingestion_started")):
+        violations.append("collector_run_market_data_ingestion_started")
+    if _as_bool(collector_run.get("evidence_writer_started")):
+        violations.append("collector_run_evidence_writer_started")
+    if _as_bool(collector_run.get("scorecard_writer_started")):
+        violations.append("collector_run_scorecard_writer_started")
+    if _as_bool(collector_run.get("db_apply_performed")):
+        violations.append("collector_run_db_apply_performed")
+    if _as_bool(collector_run.get("secret_content_serialized")):
+        violations.append("collector_run_secret_content_serialized")
+    if _as_bool(collector_run.get("live_or_tiny_live_authorized")):
+        violations.append("collector_run_live_or_tiny_live_authorized")
     if _as_str(evidence_clock.get("expected_contract_id"), "") != _EVIDENCE_CLOCK_CONTRACT_ID:
         violations.append("evidence_clock_expected_contract_id_mismatch")
     if _as_bool(evidence_clock.get("checker_contacted_ibkr")):
@@ -216,6 +293,7 @@ def _normalize_evidence_status(raw: Any, reason: str | None) -> dict[str, Any]:
         reason,
     )
     evidence_clock = _normalize_evidence_clock(source.get("evidence_clock"), reason)
+    collector_run = _normalize_collector_run(source.get("collector_run"), reason)
     frozen_inputs = _normalize_frozen_inputs(source.get("frozen_inputs"), reason)
     dq_manifest = _normalize_dq_manifest(source.get("dq_manifest"), reason)
     scorecard = _normalize_scorecard(source.get("scorecard"))
@@ -224,6 +302,7 @@ def _normalize_evidence_status(raw: Any, reason: str | None) -> dict[str, Any]:
         source,
         phase2,
         market_data_provenance,
+        collector_run,
         evidence_clock,
         frozen_inputs,
         scorecard,
@@ -264,6 +343,7 @@ def _normalize_evidence_status(raw: Any, reason: str | None) -> dict[str, Any]:
         "immutable_pass_artifact_present": immutable_artifact,
         "connector_enabled": connector_enabled,
         "market_data_provenance": market_data_provenance,
+        "collector_run": collector_run,
         "evidence_clock": evidence_clock,
         "frozen_inputs": frozen_inputs,
         "dq_manifest": dq_manifest,

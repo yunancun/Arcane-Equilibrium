@@ -225,7 +225,7 @@ async fn stock_etf_phase0_status_exposes_accepted_source_manifest_without_runtim
     );
     assert_eq!(result["phase0_accepted"], true);
     assert_eq!(result["phase0_blockers"].as_array().unwrap().len(), 0);
-    assert_eq!(result["contract_count"], 33);
+    assert_eq!(result["contract_count"], 34);
     assert!(json_array_contains(
         &result["contracts"],
         "stock_etf_ibkr_readonly_probe_request_v1"
@@ -241,6 +241,10 @@ async fn stock_etf_phase0_status_exposes_accepted_source_manifest_without_runtim
     assert!(json_array_contains(
         &result["contracts"],
         "stock_etf_paper_shadow_reconciliation_v1"
+    ));
+    assert!(json_array_contains(
+        &result["contracts"],
+        "stock_etf_collector_run_v1"
     ));
     assert_eq!(
         result["manifest"]["schema"],
@@ -400,6 +404,27 @@ async fn stock_etf_evidence_status_is_blocked_source_fixture_without_side_effect
     assert_eq!(market_data["connector_runtime_started"], false);
     assert_eq!(market_data["secret_content_serialized"], false);
     assert_eq!(market_data["live_or_tiny_live_authorized"], false);
+
+    let collector_run = &result["collector_run"];
+    assert_eq!(
+        collector_run["expected_contract_id"],
+        "stock_etf_collector_run_v1"
+    );
+    assert_eq!(collector_run["contract_id"], "");
+    assert_eq!(collector_run["source_version"], 0);
+    assert_eq!(collector_run["accepted"], false);
+    assert!(json_array_contains(
+        &collector_run["blockers"],
+        "collector_run_contract_id_mismatch"
+    ));
+    assert_eq!(collector_run["expected_trading_sessions"], 0);
+    assert_eq!(collector_run["completed_trading_sessions"], 0);
+    assert_eq!(collector_run["market_data_ingestion_started"], false);
+    assert_eq!(collector_run["evidence_writer_started"], false);
+    assert_eq!(collector_run["scorecard_writer_started"], false);
+    assert_eq!(collector_run["db_apply_performed"], false);
+    assert_eq!(collector_run["secret_content_serialized"], false);
+    assert_eq!(collector_run["live_or_tiny_live_authorized"], false);
 
     let evidence_clock = &result["evidence_clock"];
     assert_eq!(

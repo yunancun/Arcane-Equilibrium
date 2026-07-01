@@ -2111,7 +2111,7 @@ contact，也不改 Stock/ETF 或 Bybit 行為。
 
 新增 checkpoint：
 
-- 主計畫 PM session checkpoint 現在從 14 到 80 連續遞增，無重複編號。
+- 主計畫 PM session checkpoint 現在從 14 到 81 連續遞增，無重複編號。
 - 已按 PM memory / Operator 實際 source timeline 重排 23-41 區塊：paper request /
   lifecycle / fill-import / shadow / reconciliation / scorecard / tiny-live /
   connector skeleton / readonly-probe / broker read gate / policy display / operation
@@ -3637,3 +3637,57 @@ connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 Phase 
 runtime、不送 paper order、不做 cancel/replace、不匯入 fill、不做 DB apply、不啟動
 evidence writer、不啟動 evidence clock、不啟動 scorecard writer、不做 Linux runtime
 sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 81. 2026-07-01 PM session source checkpoint：Collector Run Contract
+
+本 checkpoint 將 `stock_etf_collector_run_v1` 具體化為 Phase 3 source-only
+collector run manifest contract。它不是 collector runtime，不啟動 market-data ingestion，
+不新增 endpoint，不新增 IPC method，也不增加 GUI fanout；只讓既有 Phase0 manifest、
+Phase3 evidence status、FastAPI normalizer 與 GUI evidence panel 能看見 fail-closed
+collector-run lineage 狀態。
+
+已完成：
+
+- `openclaw_types` 新增 `StockEtfCollectorRunV1` 與
+  `STOCK_ETF_COLLECTOR_RUN_CONTRACT_ID` / `STOCK_ETF_COLLECTOR_MIN_GREEN_TRADING_DAYS`。
+- Validator 要求 exact contract id/source version、`stock_etf_cash` + IBKR + paper/shadow
+  identity、collector run id/trading day、至少 5 個 green trading sessions，以及 PIT
+  universe、market-data provenance、reference-data sources、storage-capacity、gap report、
+  DQ manifest、replay manifest、source artifact 的 lineage hashes。
+- Validator 明確拒絕 IBKR contact、connector runtime、market-data ingestion、
+  evidence writer、scorecard writer、DB apply、secret serialization、tiny-live/live authority。
+- Phase0 manifest / repository manifest / Phase0 FastAPI fixtures contract count 從 33
+  更新為 34，Phase0 named contract packet spec 新增 `stock_etf_collector_run_v1`。
+- `settings/broker/stock_etf_phase3_evidence_contracts.toml` 新增 `[collector_run]`
+  default-blocked template；settings README 同步。
+- 既有 `stock_etf.get_evidence_status` source fixture 暴露 default-blocked
+  `collector_run` block；FastAPI evidence normalizer fail-closes missing/mismatched
+  collector-run payload，並將 collector side-effect truthy claims 轉為
+  `contract_violation_blocked`。
+- GUI `tab-stock-etf-evidence-paper.js` 只 display collector-run accepted/id/session
+  counts/lineage flags/side-effect flags；既有 `tab-stock-etf-fallbacks.js` 提供
+  secret-free fail-closed fallback。
+
+驗證：
+
+- Python changed files `py_compile`：PASS。
+- `node --check` for `tab-stock-etf-evidence-paper.js` and
+  `tab-stock-etf-fallbacks.js`：PASS。
+- Scoped Rust `rustfmt --edition 2021 --check`：PASS。
+- `python3 -B -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf*.py`：
+  `120 passed`。
+- `cargo test -p openclaw_types`：`287` tests passed
+  (`35` unit/golden + `252` integration/acceptance + `0` doc-tests)。
+- `cargo test -p openclaw_engine stock_etf -- --nocapture`：target Stock/ETF tests
+  `31 passed`；僅既有 unrelated warnings（`ScriptedSpawn` visibility 與
+  `m3_emitter_replay_forbidden` unused import）。
+- `python3 -B -m pytest -q tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_pm_checkpoint_numbers_are_linear tests/structure/test_docs_readme_index_static.py::test_ibkr_stock_etf_plan_and_operator_cover_pm_memory_trace_titles`：
+  `2 passed`。
+- `git diff --check`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不啟動 collector、不啟動
+market-data ingestion、不啟動 Phase 1/2/3/4/5 runtime、不送 paper order、不做
+cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
+clock、不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權 tiny-live/live
+或任何 Bybit behavior change。

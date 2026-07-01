@@ -314,6 +314,8 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     assert "tab-stock-etf.js" in html_source
     assert "se-evidence-status" in source
     assert "se-evidence-body" in source
+    assert "stock_etf_collector_run_v1" in source
+    assert "collector_run" in source
     assert "se-account-status" in source
     assert "se-account-body" in source
     assert "se-data-foundation-status" in source

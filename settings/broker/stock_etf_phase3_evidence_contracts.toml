@@ -35,6 +35,38 @@ paper_shadow_divergence_threshold_hash = ""
 gui_evidence_view_available = false
 daily_scorecard_regeneration_passed = false
 
+[collector_run]
+contract_id = ""
+source_version = 0
+asset_lane = "crypto_perp"
+broker = "bybit"
+environment = "live_reserved_denied"
+collector_run_id = ""
+trading_day = ""
+pit_universe_contract_id = ""
+pit_universe_contract_hash = ""
+market_data_provenance_contract_id = ""
+market_data_provenance_contract_hash = ""
+reference_data_sources_contract_id = ""
+reference_data_sources_contract_hash = ""
+storage_capacity_contract_id = ""
+storage_capacity_contract_hash = ""
+expected_trading_sessions = 0
+completed_trading_sessions = 0
+gap_report_hash = ""
+dq_manifest_hash = ""
+replay_manifest_hash = ""
+source_artifact_hash = ""
+bybit_live_execution_unchanged = false
+ibkr_contact_performed = false
+connector_runtime_started = false
+market_data_ingestion_started = false
+evidence_writer_started = false
+scorecard_writer_started = false
+db_apply_performed = false
+secret_content_serialized = false
+live_or_tiny_live_authorized = false
+
 [dq_manifest]
 trading_day = ""
 calendar_aware_coverage_bps = 0

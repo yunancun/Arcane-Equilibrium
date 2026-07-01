@@ -6,9 +6,10 @@
 use std::path::PathBuf;
 
 use openclaw_types::{
-    AssetLane, Broker, BrokerEnvironment, StockEtfDailyDqManifestV1, StockEtfEvidenceClockDayV1,
-    StockEtfEvidenceClockStatus, StockEtfFrozenEvidenceInputsV1, StockEtfPhase3Blocker,
-    StockMarketDataProvenanceV1, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
+    AssetLane, Broker, BrokerEnvironment, StockEtfCollectorRunV1, StockEtfDailyDqManifestV1,
+    StockEtfEvidenceClockDayV1, StockEtfEvidenceClockStatus, StockEtfFrozenEvidenceInputsV1,
+    StockEtfPhase3Blocker, StockMarketDataProvenanceV1, STOCK_ETF_COLLECTOR_MIN_GREEN_TRADING_DAYS,
+    STOCK_ETF_COLLECTOR_RUN_CONTRACT_ID, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
     STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
 };
 
@@ -135,6 +136,104 @@ fn frozen_inputs_require_reference_data_sources_contract_hash() {
     assert!(verdict
         .blockers
         .contains(&StockEtfPhase3Blocker::ReferenceDataSourcesHashInvalid));
+}
+
+#[test]
+fn default_collector_run_blocks_phase3_evidence_clock() {
+    let verdict = StockEtfCollectorRunV1::default().validate();
+
+    assert!(!verdict.accepted);
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::CollectorRunContractIdMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::CollectorRunVersionMismatch));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::CollectorRunWrongAssetLane));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::CollectorRunWrongBroker));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::CollectorRunIdMissing));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfPhase3Blocker::CollectorExpectedSessionsTooSmall));
+}
+
+#[test]
+fn source_collector_run_requires_five_green_sessions_and_lineage_hashes() {
+    let collector = StockEtfCollectorRunV1::source_fixture();
+    let verdict = collector.validate();
+
+    assert!(
+        verdict.accepted,
+        "collector blockers: {:?}",
+        verdict.blockers
+    );
+    assert_eq!(collector.contract_id, STOCK_ETF_COLLECTOR_RUN_CONTRACT_ID);
+    assert_eq!(
+        collector.expected_trading_sessions,
+        STOCK_ETF_COLLECTOR_MIN_GREEN_TRADING_DAYS
+    );
+    assert_eq!(
+        collector.completed_trading_sessions,
+        STOCK_ETF_COLLECTOR_MIN_GREEN_TRADING_DAYS
+    );
+    assert!(!collector.ibkr_contact_performed);
+    assert!(!collector.connector_runtime_started);
+    assert!(!collector.market_data_ingestion_started);
+    assert!(!collector.evidence_writer_started);
+    assert!(!collector.scorecard_writer_started);
+    assert!(!collector.db_apply_performed);
+
+    let mut missing_lineage = collector.clone();
+    missing_lineage.pit_universe_contract_hash.clear();
+    missing_lineage.market_data_provenance_contract_hash.clear();
+    missing_lineage.reference_data_sources_contract_hash.clear();
+    missing_lineage.storage_capacity_contract_hash.clear();
+    missing_lineage.gap_report_hash.clear();
+    missing_lineage.dq_manifest_hash.clear();
+    missing_lineage.replay_manifest_hash.clear();
+    let blockers = missing_lineage.validate().blockers;
+
+    assert!(blockers.contains(&StockEtfPhase3Blocker::CollectorPitUniverseHashInvalid));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::CollectorMarketDataProvenanceHashInvalid));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::CollectorReferenceDataSourcesHashInvalid));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::CollectorStorageCapacityHashInvalid));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::CollectorGapReportHashInvalid));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::CollectorDqManifestHashInvalid));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::CollectorReplayManifestHashInvalid));
+}
+
+#[test]
+fn collector_run_rejects_side_effecting_runtime_claims() {
+    let mut collector = StockEtfCollectorRunV1::source_fixture();
+    collector.expected_trading_sessions = STOCK_ETF_COLLECTOR_MIN_GREEN_TRADING_DAYS;
+    collector.completed_trading_sessions = STOCK_ETF_COLLECTOR_MIN_GREEN_TRADING_DAYS - 1;
+    collector.bybit_live_execution_unchanged = false;
+    collector.ibkr_contact_performed = true;
+    collector.connector_runtime_started = true;
+    collector.market_data_ingestion_started = true;
+    collector.evidence_writer_started = true;
+    collector.scorecard_writer_started = true;
+    collector.db_apply_performed = true;
+    collector.secret_content_serialized = true;
+    collector.live_or_tiny_live_authorized = true;
+    let blockers = collector.validate().blockers;
+
+    assert!(blockers.contains(&StockEtfPhase3Blocker::CollectorCompletedSessionsMissing));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::BybitLiveExecutionNotProtected));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::IbkrContactPerformed));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::ConnectorRuntimeStarted));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::CollectorMarketDataIngestionStarted));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::CollectorEvidenceWriterStarted));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::ScorecardWriterStarted));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::DbApplyPerformed));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::SecretContentSerialized));
+    assert!(blockers.contains(&StockEtfPhase3Blocker::LiveOrTinyLiveAuthorized));
 }
 
 #[test]
@@ -336,6 +435,48 @@ fn phase3_evidence_template_is_default_blocked_and_secret_free() {
     assert_eq!(
         STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
         "stock_market_data_provenance_v1"
+    );
+    assert_eq!(parsed["collector_run"]["contract_id"].as_str(), Some(""));
+    assert_eq!(
+        parsed["collector_run"]["source_version"].as_integer(),
+        Some(0)
+    );
+    assert_eq!(
+        parsed["collector_run"]["asset_lane"].as_str(),
+        Some("crypto_perp")
+    );
+    assert_eq!(parsed["collector_run"]["broker"].as_str(), Some("bybit"));
+    assert_eq!(
+        parsed["collector_run"]["environment"].as_str(),
+        Some("live_reserved_denied")
+    );
+    assert_eq!(
+        parsed["collector_run"]["expected_trading_sessions"].as_integer(),
+        Some(0)
+    );
+    assert_eq!(
+        parsed["collector_run"]["completed_trading_sessions"].as_integer(),
+        Some(0)
+    );
+    assert_eq!(
+        parsed["collector_run"]["market_data_ingestion_started"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        parsed["collector_run"]["evidence_writer_started"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        parsed["collector_run"]["scorecard_writer_started"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        parsed["collector_run"]["db_apply_performed"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        STOCK_ETF_COLLECTOR_RUN_CONTRACT_ID,
+        "stock_etf_collector_run_v1"
     );
     assert_eq!(
         parsed["evidence_clock_day"]["status"].as_str(),

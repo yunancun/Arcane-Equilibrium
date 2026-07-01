@@ -1201,3 +1201,9 @@ Do not paste long reports or stable architecture into TODO.
 - Every Stock/ETF GUI `ocApi` call must be GET-only with `timeoutMs: 5000` and `toastOnError: false`.
 - This prevents future display-only GUI drift into extra API fanout, longer timeout budgets, or repeated loaders before runtime approval.
 - Verification passed: Python no-write static guard `21 passed`; full Stock/ETF FastAPI/static `120 passed`; docs trace guard `2 passed`; `git diff --check` PASS. This grants no endpoint/IPC method change, client input change, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, paper order/cancel/replace, fill import, DB/evidence writer, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF Collector Run Contract
+
+- PM added source-only `stock_etf_collector_run_v1` and raised the Phase0 named contract count to 34, tying future collector evidence to 5 green trading sessions plus PIT universe, market-data provenance, reference-data, storage-capacity, gap, DQ, replay, and source-artifact hashes.
+- Existing `stock_etf.get_evidence_status`, FastAPI normalization/fallback, and the GUI evidence panel now expose a default-blocked `collector_run` block without adding endpoints, IPC methods, GUI fanout, or runtime/background work.
+- Verification passed: Python compile, Stock/ETF JS `node --check`, scoped Rust `rustfmt`, full Stock/ETF FastAPI/static `120 passed`, full `openclaw_types` `287` tests, engine Stock/ETF focused `31 passed`, docs trace guard `2 passed`, and `git diff --check` PASS. This grants no IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, collector start, market-data ingestion, paper order/cancel/replace, fill import, DB/evidence/scorecard writer, evidence clock, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

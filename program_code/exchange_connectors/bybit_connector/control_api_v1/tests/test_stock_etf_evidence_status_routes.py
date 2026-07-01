@@ -47,6 +47,8 @@ def test_stock_etf_evidence_status_returns_200_when_ipc_down(
     assert data["scorecard_writer_started"] is False
     assert data["db_apply_performed"] is False
     assert data["market_data_provenance"]["blockers"] == ["ipc_unavailable"]
+    assert data["collector_run"]["expected_contract_id"] == "stock_etf_collector_run_v1"
+    assert data["collector_run"]["blockers"] == ["ipc_unavailable"]
     assert data["evidence_clock"]["status"] == "NOT_STARTED"
     assert data["evidence_clock"]["blockers"] == ["ipc_unavailable"]
     assert data["scorecard"]["writer_started"] is False
@@ -75,6 +77,13 @@ def test_stock_etf_evidence_status_uses_only_readonly_fixture_method() -> None:
         "stock_market_data_provenance_v1"
     )
     assert data["market_data_provenance"]["accepted"] is False
+    assert data["collector_run"]["expected_contract_id"] == "stock_etf_collector_run_v1"
+    assert data["collector_run"]["accepted"] is False
+    assert data["collector_run"]["expected_trading_sessions"] == 0
+    assert data["collector_run"]["completed_trading_sessions"] == 0
+    assert data["collector_run"]["market_data_ingestion_started"] is False
+    assert data["collector_run"]["evidence_writer_started"] is False
+    assert data["collector_run"]["scorecard_writer_started"] is False
     assert data["evidence_clock"]["expected_contract_id"] == (
         "stock_etf_evidence_clock_v1"
     )
@@ -139,6 +148,14 @@ def test_stock_etf_evidence_status_blocks_contract_violation() -> None:
     payload["market_data_provenance"]["connector_runtime_started"] = True
     payload["market_data_provenance"]["secret_content_serialized"] = True
     payload["market_data_provenance"]["live_or_tiny_live_authorized"] = True
+    payload["collector_run"]["ibkr_contact_performed"] = True
+    payload["collector_run"]["connector_runtime_started"] = True
+    payload["collector_run"]["market_data_ingestion_started"] = True
+    payload["collector_run"]["evidence_writer_started"] = True
+    payload["collector_run"]["scorecard_writer_started"] = True
+    payload["collector_run"]["db_apply_performed"] = True
+    payload["collector_run"]["secret_content_serialized"] = True
+    payload["collector_run"]["live_or_tiny_live_authorized"] = True
     payload["evidence_clock"]["checker_contacted_ibkr"] = True
     payload["evidence_clock"]["checker_started_connector_runtime"] = True
     payload["evidence_clock"]["checker_started_evidence_clock"] = True
@@ -172,6 +189,14 @@ def test_stock_etf_evidence_status_blocks_contract_violation() -> None:
         "market_data_connector_runtime_started",
         "market_data_secret_content_serialized",
         "market_data_live_or_tiny_live_authorized",
+        "collector_run_ibkr_contact_performed",
+        "collector_run_connector_runtime_started",
+        "collector_run_market_data_ingestion_started",
+        "collector_run_evidence_writer_started",
+        "collector_run_scorecard_writer_started",
+        "collector_run_db_apply_performed",
+        "collector_run_secret_content_serialized",
+        "collector_run_live_or_tiny_live_authorized",
         "evidence_clock_contacted_ibkr",
         "evidence_clock_started_connector_runtime",
         "evidence_clock_started",
