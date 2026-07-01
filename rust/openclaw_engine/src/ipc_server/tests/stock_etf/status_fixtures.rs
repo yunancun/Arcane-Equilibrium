@@ -306,6 +306,47 @@ async fn stock_etf_scorecard_status_is_blocked_source_fixture_without_side_effec
     assert_eq!(result["bybit_ipc_reused"], false);
     assert_eq!(result["live_or_tiny_live_authorized"], false);
 
+    let input_bundle = &result["scorecard_input_bundle"];
+    assert_eq!(input_bundle["accepted"], false);
+    assert!(json_array_contains(
+        &input_bundle["blockers"],
+        "readonly_probe_result_import_request_contract_id_mismatch"
+    ));
+    assert!(json_array_contains(
+        &input_bundle["blockers"],
+        "readonly_probe_result_import_request_hash_invalid"
+    ));
+    assert_eq!(
+        input_bundle["readonly_probe_result_import_request_contract_id"],
+        ""
+    );
+    assert_eq!(
+        input_bundle["readonly_probe_result_import_request_hash_present"],
+        false
+    );
+    assert_eq!(
+        input_bundle["market_data_provenance_contract_hash_present"],
+        false
+    );
+    assert_eq!(
+        input_bundle["reference_data_sources_contract_hash_present"],
+        false
+    );
+    assert_eq!(input_bundle["risk_policy_contract_hash_present"], false);
+    assert_eq!(input_bundle["atomic_fact_input_hash_present"], false);
+    assert_eq!(input_bundle["source_commit_present"], false);
+    assert_eq!(input_bundle["scorecard_is_derived_only"], false);
+    assert_eq!(input_bundle["paper_and_shadow_fills_separate"], false);
+    assert_eq!(input_bundle["bybit_live_execution_unchanged"], false);
+    assert_eq!(input_bundle["ibkr_contact_performed"], false);
+    assert_eq!(input_bundle["connector_runtime_started"], false);
+    assert_eq!(input_bundle["broker_fill_import_performed"], false);
+    assert_eq!(input_bundle["scorecard_writer_started"], false);
+    assert_eq!(input_bundle["db_apply_performed"], false);
+    assert_eq!(input_bundle["evidence_clock_started"], false);
+    assert_eq!(input_bundle["secret_content_serialized"], false);
+    assert_eq!(input_bundle["live_or_tiny_live_authorized"], false);
+
     let derivation = &result["scorecard_derivation"];
     assert_eq!(
         derivation["expected_contract_id"],

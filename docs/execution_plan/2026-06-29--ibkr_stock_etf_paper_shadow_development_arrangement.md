@@ -4094,3 +4094,44 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper
 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
 clock、不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權 tiny-live/live
 或任何 Bybit behavior change。
+
+## 91. 2026-07-01 PM session source/display checkpoint：Scorecard Input Result-Import Lineage Guard
+
+本 checkpoint 將 `stock_etf_ibkr_readonly_probe_result_import_request_v1`
+lineage 接入 scorecard input bundle contract 與 scorecard status display surface。這
+不是 result import runtime、不是 scorecard writer、不是 evidence clock，也不批准
+IBKR contact；只讓未來 scorecard 派生輸入必須顯式攜帶 readonly probe
+result-import request contract id/hash lineage。
+
+已完成：
+
+- Rust `StockEtfScorecardInputBundleV1` 新增
+  `readonly_probe_result_import_request_contract_id` 與
+  `readonly_probe_result_import_request_hash`，validator 要求 exact result-import
+  request contract id 與 64-hex hash。
+- Blocked TOML template 保持 source-only blocked posture；accepted fixture 才帶完整
+  result-import request lineage。
+- Rust IPC `stock_etf.get_scorecard_status` 新增 default-blocked
+  `scorecard_input_bundle` 摘要，僅暴露 hash-present boolean，不暴露 hash 內容。
+- FastAPI scorecard normalizer 新增 input-bundle fail-closed fallback 與 contract
+  violation guard；GUI scorecard panel 顯示 input-bundle lineage/side-effect flags。
+- Route/static/Rust IPC tests 鎖住 result-import lineage guard，不新增 endpoint、IPC
+  method、GUI fanout、client input、connector runtime 或 production result import。
+
+驗證：
+
+- Python changed files `py_compile`：PASS。
+- Stock/ETF JS `node --check`：PASS。
+- Scoped Rust `rustfmt --edition 2021 --check`：PASS。
+- Focused Rust scorecard input acceptance：PASS。
+- Focused engine scorecard IPC fixture：PASS。
+- Focused FastAPI scorecard/static pytest：PASS。
+- Full Stock/ETF FastAPI/static pytest：PASS。
+- Docs trace guard：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
+cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
+clock、不啟動 scorecard writer、不做 Linux runtime sync/restart、不授權 tiny-live/live
+或任何 Bybit behavior change。

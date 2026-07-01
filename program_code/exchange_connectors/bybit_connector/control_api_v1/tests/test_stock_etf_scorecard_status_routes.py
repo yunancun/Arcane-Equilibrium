@@ -52,6 +52,16 @@ def test_stock_etf_scorecard_status_returns_200_when_ipc_down(
     assert data["secret_slot_touched"] is False
     assert data["order_routed"] is False
     assert data["bybit_ipc_reused"] is False
+    assert data["scorecard_input_bundle"]["blockers"] == ["ipc_unavailable"]
+    assert data["scorecard_input_bundle"][
+        "readonly_probe_result_import_request_contract_id"
+    ] == "stock_etf_ibkr_readonly_probe_result_import_request_v1"
+    assert (
+        data["scorecard_input_bundle"][
+            "readonly_probe_result_import_request_hash_present"
+        ]
+        is False
+    )
     assert data["scorecard_derivation"]["blockers"] == ["ipc_unavailable"]
     assert data["scorecard"]["blockers"] == ["ipc_unavailable"]
 
@@ -74,6 +84,22 @@ def test_stock_etf_scorecard_status_uses_only_readonly_fixture_method() -> None:
     assert data["scorecard_status_state"] == "blocked"
     assert data["phase"] == "phase3_scorecard_status_source_fixture"
     assert data["phase3_started"] is False
+    input_bundle = data["scorecard_input_bundle"]
+    assert input_bundle["accepted"] is False
+    assert (
+        input_bundle["readonly_probe_result_import_request_contract_id"]
+        == "stock_etf_ibkr_readonly_probe_result_import_request_v1"
+    )
+    assert input_bundle["readonly_probe_result_import_request_hash_present"] is False
+    assert input_bundle["market_data_provenance_contract_hash_present"] is False
+    assert input_bundle["reference_data_sources_contract_hash_present"] is False
+    assert input_bundle["risk_policy_contract_hash_present"] is False
+    assert input_bundle["atomic_fact_input_hash_present"] is False
+    assert input_bundle["scorecard_is_derived_only"] is False
+    assert input_bundle["paper_and_shadow_fills_separate"] is False
+    assert input_bundle["bybit_live_execution_unchanged"] is False
+    assert input_bundle["ibkr_contact_performed"] is False
+    assert input_bundle["scorecard_writer_started"] is False
     derivation = data["scorecard_derivation"]
     assert (
         derivation["expected_contract_id"]
@@ -167,6 +193,30 @@ def test_stock_etf_scorecard_status_blocks_contract_violation() -> None:
     payload["order_routed"] = True
     payload["bybit_ipc_reused"] = True
     payload["live_or_tiny_live_authorized"] = True
+    input_bundle = payload["scorecard_input_bundle"]
+    input_bundle["accepted"] = True
+    input_bundle["readonly_probe_result_import_request_contract_id"] = "wrong"
+    for key in (
+        "readonly_probe_result_import_request_hash_present",
+        "market_data_provenance_contract_hash_present",
+        "reference_data_sources_contract_hash_present",
+        "risk_policy_contract_hash_present",
+        "atomic_fact_input_hash_present",
+        "source_commit_present",
+        "scorecard_is_derived_only",
+        "paper_and_shadow_fills_separate",
+        "live_fill_claimed",
+        "bybit_live_execution_unchanged",
+        "ibkr_contact_performed",
+        "connector_runtime_started",
+        "broker_fill_import_performed",
+        "scorecard_writer_started",
+        "db_apply_performed",
+        "evidence_clock_started",
+        "secret_content_serialized",
+        "live_or_tiny_live_authorized",
+    ):
+        input_bundle[key] = True
     derivation = payload["scorecard_derivation"]
     derivation["expected_contract_id"] = "wrong"
     derivation["accepted"] = True
@@ -242,6 +292,26 @@ def test_stock_etf_scorecard_status_blocks_contract_violation() -> None:
         "db_apply_performed",
         "evidence_clock_started",
         "paper_shadow_window_complete",
+        "scorecard_input_bundle_accepted_before_writer",
+        "scorecard_input_bundle_readonly_probe_result_import_request_contract_id_mismatch",
+        "scorecard_input_bundle_readonly_probe_result_import_request_hash_present",
+        "scorecard_input_bundle_market_data_provenance_contract_hash_present",
+        "scorecard_input_bundle_reference_data_sources_contract_hash_present",
+        "scorecard_input_bundle_risk_policy_contract_hash_present",
+        "scorecard_input_bundle_atomic_fact_input_hash_present",
+        "scorecard_input_bundle_source_commit_present",
+        "scorecard_input_bundle_scorecard_is_derived_only",
+        "scorecard_input_bundle_paper_and_shadow_fills_separate",
+        "scorecard_input_bundle_live_fill_claimed",
+        "scorecard_input_bundle_bybit_live_execution_unchanged",
+        "scorecard_input_bundle_ibkr_contact_performed",
+        "scorecard_input_bundle_connector_runtime_started",
+        "scorecard_input_bundle_broker_fill_import_performed",
+        "scorecard_input_bundle_scorecard_writer_started",
+        "scorecard_input_bundle_db_apply_performed",
+        "scorecard_input_bundle_evidence_clock_started",
+        "scorecard_input_bundle_secret_content_serialized",
+        "scorecard_input_bundle_live_or_tiny_live_authorized",
         "derivation_expected_contract_id_mismatch",
         "derivation_accepted_before_writer",
         "derivation_derivation_run_id_present",

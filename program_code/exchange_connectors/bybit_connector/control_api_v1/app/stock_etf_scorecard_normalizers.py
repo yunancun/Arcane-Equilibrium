@@ -19,6 +19,101 @@ from .stock_etf_status_common import (
     _phase2_fail_closed,
 )
 
+_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID = (
+    "stock_etf_ibkr_readonly_probe_result_import_request_v1"
+)
+
+
+def _scorecard_input_bundle_fail_closed(reason: str) -> dict[str, Any]:
+    return {
+        "accepted": False,
+        "blockers": [reason],
+        "readonly_probe_result_import_request_contract_id": (
+            _READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID
+        ),
+        "readonly_probe_result_import_request_hash_present": False,
+        "market_data_provenance_contract_hash_present": False,
+        "reference_data_sources_contract_hash_present": False,
+        "risk_policy_contract_hash_present": False,
+        "atomic_fact_input_hash_present": False,
+        "source_commit_present": False,
+        "scorecard_is_derived_only": False,
+        "paper_and_shadow_fills_separate": False,
+        "live_fill_claimed": False,
+        "bybit_live_execution_unchanged": False,
+        "ibkr_contact_performed": False,
+        "connector_runtime_started": False,
+        "broker_fill_import_performed": False,
+        "scorecard_writer_started": False,
+        "db_apply_performed": False,
+        "evidence_clock_started": False,
+        "secret_content_serialized": False,
+        "live_or_tiny_live_authorized": False,
+    }
+
+
+def _normalize_scorecard_input_bundle(
+    value: Any, reason: str | None
+) -> dict[str, Any]:
+    fallback = _scorecard_input_bundle_fail_closed(
+        reason or "missing_scorecard_input_bundle"
+    )
+    source = _as_dict(value)
+    if not source:
+        return fallback
+    return {
+        "accepted": _as_bool(source.get("accepted")),
+        "blockers": [str(item) for item in _as_list(source.get("blockers"))],
+        "readonly_probe_result_import_request_contract_id": _as_str(
+            source.get("readonly_probe_result_import_request_contract_id"),
+            _READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID,
+        ),
+        "readonly_probe_result_import_request_hash_present": _as_bool(
+            source.get("readonly_probe_result_import_request_hash_present")
+        ),
+        "market_data_provenance_contract_hash_present": _as_bool(
+            source.get("market_data_provenance_contract_hash_present")
+        ),
+        "reference_data_sources_contract_hash_present": _as_bool(
+            source.get("reference_data_sources_contract_hash_present")
+        ),
+        "risk_policy_contract_hash_present": _as_bool(
+            source.get("risk_policy_contract_hash_present")
+        ),
+        "atomic_fact_input_hash_present": _as_bool(
+            source.get("atomic_fact_input_hash_present")
+        ),
+        "source_commit_present": _as_bool(source.get("source_commit_present")),
+        "scorecard_is_derived_only": _as_bool(
+            source.get("scorecard_is_derived_only")
+        ),
+        "paper_and_shadow_fills_separate": _as_bool(
+            source.get("paper_and_shadow_fills_separate")
+        ),
+        "live_fill_claimed": _as_bool(source.get("live_fill_claimed")),
+        "bybit_live_execution_unchanged": _as_bool(
+            source.get("bybit_live_execution_unchanged")
+        ),
+        "ibkr_contact_performed": _as_bool(source.get("ibkr_contact_performed")),
+        "connector_runtime_started": _as_bool(
+            source.get("connector_runtime_started")
+        ),
+        "broker_fill_import_performed": _as_bool(
+            source.get("broker_fill_import_performed")
+        ),
+        "scorecard_writer_started": _as_bool(
+            source.get("scorecard_writer_started")
+        ),
+        "db_apply_performed": _as_bool(source.get("db_apply_performed")),
+        "evidence_clock_started": _as_bool(source.get("evidence_clock_started")),
+        "secret_content_serialized": _as_bool(
+            source.get("secret_content_serialized")
+        ),
+        "live_or_tiny_live_authorized": _as_bool(
+            source.get("live_or_tiny_live_authorized")
+        ),
+    }
+
 
 def _scorecard_derivation_fail_closed(reason: str) -> dict[str, Any]:
     return {
@@ -310,6 +405,7 @@ def _normalize_scorecard_verdict(value: Any, reason: str | None) -> dict[str, An
 def _scorecard_status_contract_violations(
     source: dict[str, Any],
     phase2: dict[str, Any],
+    input_bundle: dict[str, Any],
     derivation: dict[str, Any],
     scorecard: dict[str, Any],
     reason: str | None,
@@ -336,6 +432,47 @@ def _scorecard_status_contract_violations(
         violations.append("broker_mismatch")
     if _as_str(source.get("environment"), "paper_shadow") != "paper_shadow":
         violations.append("environment_mismatch")
+    if "scorecard_input_bundle" not in source:
+        violations.append("scorecard_input_bundle_missing")
+    if _as_bool(input_bundle.get("accepted")):
+        violations.append("scorecard_input_bundle_accepted_before_writer")
+    input_bundle_result_import_contract_id = _as_str(
+        input_bundle.get("readonly_probe_result_import_request_contract_id"), ""
+    )
+    if (
+        input_bundle_result_import_contract_id
+        and input_bundle_result_import_contract_id
+        != _READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID
+    ):
+        violations.append(
+            "scorecard_input_bundle_readonly_probe_result_import_request_contract_id_mismatch"
+        )
+    for key in (
+        "readonly_probe_result_import_request_hash_present",
+        "market_data_provenance_contract_hash_present",
+        "reference_data_sources_contract_hash_present",
+        "risk_policy_contract_hash_present",
+        "atomic_fact_input_hash_present",
+        "source_commit_present",
+        "scorecard_is_derived_only",
+        "paper_and_shadow_fills_separate",
+        "live_fill_claimed",
+        "bybit_live_execution_unchanged",
+    ):
+        if _as_bool(input_bundle.get(key)):
+            violations.append(f"scorecard_input_bundle_{key}")
+    for key in (
+        "ibkr_contact_performed",
+        "connector_runtime_started",
+        "broker_fill_import_performed",
+        "scorecard_writer_started",
+        "db_apply_performed",
+        "evidence_clock_started",
+        "secret_content_serialized",
+        "live_or_tiny_live_authorized",
+    ):
+        if _as_bool(input_bundle.get(key)):
+            violations.append(f"scorecard_input_bundle_{key}")
     if (
         _as_str(derivation.get("expected_contract_id"), "")
         != _SCORECARD_DERIVATION_CONTRACT_ID
@@ -448,6 +585,10 @@ def _normalize_scorecard_status(raw: Any, reason: str | None) -> dict[str, Any]:
     phase2 = _as_dict(source.get("phase2")) or _phase2_fail_closed()
     external_surface_gate = _as_dict(phase2.get("external_surface_gate"))
     api_allowlist = _normalize_api_allowlist(phase2.get("api_allowlist"))
+    input_bundle = _normalize_scorecard_input_bundle(
+        source.get("scorecard_input_bundle"),
+        reason,
+    )
     derivation = _normalize_scorecard_derivation(
         source.get("scorecard_derivation"),
         reason,
@@ -457,6 +598,7 @@ def _normalize_scorecard_status(raw: Any, reason: str | None) -> dict[str, Any]:
     contract_violations = _scorecard_status_contract_violations(
         source,
         phase2,
+        input_bundle,
         derivation,
         scorecard,
         reason,
@@ -496,6 +638,7 @@ def _normalize_scorecard_status(raw: Any, reason: str | None) -> dict[str, Any]:
         "first_ibkr_contact_allowed": first_contact_allowed,
         "immutable_pass_artifact_present": immutable_artifact,
         "connector_enabled": connector_enabled,
+        "scorecard_input_bundle": input_bundle,
         "scorecard_derivation": derivation,
         "scorecard": scorecard,
         "ibkr_live_enabled": False,

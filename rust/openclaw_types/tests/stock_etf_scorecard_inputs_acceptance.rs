@@ -15,8 +15,9 @@ use openclaw_types::{
     StockEtfCostModelVersionV1, StockEtfScorecardInputBlocker, StockEtfScorecardInputBundleV1,
     StockEtfStorageCapacityV1, StockShadowFillModelV1,
     BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID, STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID,
-    STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID, STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID,
-    STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
+    STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID,
+    STOCK_ETF_IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID,
+    STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID, STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
 };
 
 #[test]
@@ -39,6 +40,12 @@ fn default_scorecard_bundle_blocks_all_atomic_inputs() {
     assert!(verdict
         .blockers
         .contains(&StockEtfScorecardInputBlocker::StorageCapacityRejected));
+    assert!(verdict.blockers.contains(
+        &StockEtfScorecardInputBlocker::ReadonlyProbeResultImportRequestContractIdMismatch
+    ));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::ReadonlyProbeResultImportRequestHashInvalid));
     assert!(verdict
         .blockers
         .contains(&StockEtfScorecardInputBlocker::MarketDataProvenanceContractHashInvalid));
@@ -86,11 +93,16 @@ fn accepted_fixture_keeps_scorecard_derived_and_live_separate() {
         bundle.storage_capacity.contract_id,
         STOCK_ETF_STORAGE_CAPACITY_CONTRACT_ID
     );
+    assert_eq!(
+        bundle.readonly_probe_result_import_request_contract_id,
+        STOCK_ETF_IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID
+    );
     assert_eq!(bundle.cash_ledger.source_version, 1);
     assert_eq!(bundle.cost_model.source_version, 1);
     assert_eq!(bundle.benchmark.source_version, 1);
     assert_eq!(bundle.shadow_fill_model.source_version, 1);
     assert_eq!(bundle.storage_capacity.source_version, 1);
+    assert_eq!(bundle.readonly_probe_result_import_request_hash.len(), 64);
     assert_eq!(bundle.market_data_provenance_contract_hash.len(), 64);
     assert_eq!(bundle.reference_data_sources_contract_hash.len(), 64);
     assert_eq!(bundle.risk_policy_contract_hash.len(), 64);
@@ -285,6 +297,10 @@ fn scorecard_bundle_rejects_live_fill_claim_and_missing_separation() {
 #[test]
 fn scorecard_bundle_rejects_missing_cross_contract_hashes_and_runtime_side_effects() {
     let mut bundle = StockEtfScorecardInputBundleV1::accepted_fixture();
+    bundle
+        .readonly_probe_result_import_request_contract_id
+        .clear();
+    bundle.readonly_probe_result_import_request_hash.clear();
     bundle.market_data_provenance_contract_hash.clear();
     bundle.reference_data_sources_contract_hash.clear();
     bundle.risk_policy_contract_hash.clear();
@@ -301,6 +317,12 @@ fn scorecard_bundle_rejects_missing_cross_contract_hashes_and_runtime_side_effec
     let verdict = bundle.validate();
 
     assert!(!verdict.accepted);
+    assert!(verdict.blockers.contains(
+        &StockEtfScorecardInputBlocker::ReadonlyProbeResultImportRequestContractIdMismatch
+    ));
+    assert!(verdict
+        .blockers
+        .contains(&StockEtfScorecardInputBlocker::ReadonlyProbeResultImportRequestHashInvalid));
     assert!(verdict
         .blockers
         .contains(&StockEtfScorecardInputBlocker::MarketDataProvenanceContractHashInvalid));
@@ -362,6 +384,10 @@ fn blocked_template_is_parseable_and_secret_free() {
     assert!(!parsed.evidence_clock_started);
     assert!(!parsed.secret_content_serialized);
     assert!(!parsed.live_or_tiny_live_authorized);
+    assert!(parsed
+        .readonly_probe_result_import_request_contract_id
+        .is_empty());
+    assert!(parsed.readonly_probe_result_import_request_hash.is_empty());
     assert!(parsed.market_data_provenance_contract_hash.is_empty());
     assert!(parsed.reference_data_sources_contract_hash.is_empty());
     assert!(parsed.risk_policy_contract_hash.is_empty());
