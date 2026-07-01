@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -202,6 +203,16 @@ def _source() -> str:
     return READONLY_PROBE.read_text(encoding="utf-8")
 
 
+def _function_body(source: str, function_name: str, return_type: str) -> str:
+    match = re.search(
+        rf"fn {function_name}\(kind: StockEtfIbkrReadonlyProbeKind\) -> {return_type} \{{(?P<body>.*?)\n\}}",
+        source,
+        re.DOTALL,
+    )
+    assert match is not None
+    return match.group("body")
+
+
 def test_stock_etf_readonly_probe_request_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
@@ -274,6 +285,8 @@ def test_stock_etf_readonly_probe_request_source_keeps_accepted_fixture_boundary
 
 def test_stock_etf_readonly_probe_request_source_keeps_action_and_operation_mapping() -> None:
     source = _source()
+    api_body = _function_body(source, "expected_api_action", "NonBybitApiAction")
+    operation_body = _function_body(source, "expected_operation", "BrokerOperation")
 
     for kind, action in (
         ("ServerTime", "ServerTimeRead"),
@@ -293,6 +306,18 @@ def test_stock_etf_readonly_probe_request_source_keeps_action_and_operation_mapp
     assert "BrokerOperation::AccountSnapshotRead" in source
     assert "BrokerOperation::ContractDetailsRead" in source
     assert "BrokerOperation::MarketDataRead" in source
+    assert "NonBybitApiAction::PaperOrderSubmit" not in api_body
+    assert "NonBybitApiAction::PaperOrderCancel" not in api_body
+    assert "NonBybitApiAction::PaperOrderReplace" not in api_body
+    assert "BrokerOperation::PaperOrderSubmit" not in operation_body
+    assert "BrokerOperation::PaperOrderCancel" not in operation_body
+    assert "BrokerOperation::PaperOrderReplace" not in operation_body
+    assert "BrokerOperation::LiveOrderSubmit" not in operation_body
+    assert (
+        "StockEtfIbkrReadonlyProbeKind::OpenPaperOrders\n        | StockEtfIbkrReadonlyProbeKind::PaperExecutionsCommissions"
+        in operation_body
+    )
+    assert "=> {\n            BrokerOperation::AccountSnapshotRead" in operation_body
 
 
 def test_stock_etf_readonly_probe_request_source_keeps_validation_matrix() -> None:

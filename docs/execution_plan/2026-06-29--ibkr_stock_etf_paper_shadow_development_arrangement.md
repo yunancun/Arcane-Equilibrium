@@ -6300,3 +6300,40 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 read-only probe、不做
 result import、不做 DB/evidence writer、不做 paper order route、不做 Linux runtime sync/restart、
 不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 150. 2026-07-01 PM session source checkpoint：Stock/ETF Readonly Probe Request Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_ibkr_readonly_probe_request` 的 probe kind / API action /
+BrokerOperation cross-wire coverage。這不是 Rust production behavior change、不是 IBKR contact、
+不是 connector runtime、不是 secret access、不是 read-only probe execution、不是 DB/evidence
+writer、不是 paper order route；只把 pre-contact read-only probe request envelope 的 action /
+operation mapping gate 變成行為型 regression test 與 source-static body guard。
+
+已完成：
+
+- 在 `stock_etf_ibkr_readonly_probe_request_acceptance.rs` 新增
+  `readonly_probe_request_rejects_probe_action_operation_cross_wire`。
+- Acceptance 證明 `MarketDataSnapshot` 搭配錯誤 `AccountSummarySnapshotRead` action 時，必須產生
+  `ProbeActionMismatch`，且不應誤報 `OperationMismatch` 或 read-allowlist failure。
+- Acceptance 證明 `MarketDataSnapshot` 搭配錯誤 `AccountSnapshotRead` operation 時，必須產生
+  `OperationMismatch`，且不應誤報 `ProbeActionMismatch` 或 read-allowlist failure。
+- Acceptance 證明 request envelope 若混入 `PaperOrderSubmit` action，必須同時產生
+  `ProbeActionMismatch` 與 `ApiActionNotReadAllowed`，且不可被 paper-order submitted flag
+  誤當作已提交訂單處理。
+- 在 `test_stock_etf_ibkr_readonly_probe_request_source_static.py` 新增 mapping function body parser，
+  直接鎖住 `expected_api_action` / `expected_operation` 不包含 paper order 或 live order operation，
+  並要求 open-paper-orders / paper-executions-commissions 只映射到 account snapshot read。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Readonly probe request source static pytest：`8 passed`。
+- Readonly probe request Rust acceptance：`7 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 read-only probe、不做
+result import、不做 DB/evidence writer、不做 paper order route、不做 Linux runtime sync/restart、
+不授權 tiny-live/live 或任何 Bybit behavior change。

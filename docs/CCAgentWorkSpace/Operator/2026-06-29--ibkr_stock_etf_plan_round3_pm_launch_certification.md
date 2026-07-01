@@ -3805,3 +3805,33 @@ Verification 已過：
 沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 read-only probe execution、
 沒有 result import、沒有 DB/evidence writer、沒有 paper order route、沒有 tiny-live/live authorization，
 也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Readonly Probe Request Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Readonly Probe Request Cross-Wire Guard`。
+
+這個 checkpoint 補強 `stock_etf_ibkr_readonly_probe_request` 的 probe kind / API action /
+BrokerOperation cross-wire coverage。新增 Rust acceptance 證明 `MarketDataSnapshot` 搭配錯誤
+`AccountSummarySnapshotRead` action 會被 `ProbeActionMismatch` 擋下、搭配錯誤
+`AccountSnapshotRead` operation 會被 `OperationMismatch` 擋下；若 request envelope 混入
+`PaperOrderSubmit` action，必須同時產生 `ProbeActionMismatch` 與
+`ApiActionNotReadAllowed`，且不可被誤解為已提交 paper order。
+
+同時新增 Python source-static function body parser，直接檢查 `expected_api_action` /
+`expected_operation`，禁止 paper-order/live-order action 或 operation 混入 read-only probe request
+mapping，並要求 open-paper-orders / paper-executions-commissions 只映射到 account snapshot read。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Readonly probe request source static pytest：`8 passed`
+- Readonly probe request Rust acceptance：`7 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 read-only probe execution、
+沒有 result import、沒有 DB/evidence writer、沒有 paper order route、沒有 tiny-live/live authorization，
+也沒有改動 Bybit live/demo execution 行為。
