@@ -186,6 +186,20 @@ def _source() -> str:
     return PHASE2_GATE.read_text(encoding="utf-8")
 
 
+def _external_gate_default_block(source: str) -> str:
+    return source.split("impl Default for IbkrExternalSurfaceGateV1", 1)[1].split(
+        "impl IbkrExternalSurfaceGateV1",
+        1,
+    )[0]
+
+
+def _external_gate_fixture_block(source: str) -> str:
+    return source.split("impl IbkrExternalSurfaceGateV1", 1)[1].split(
+        "pub fn validate(&self)",
+        1,
+    )[0]
+
+
 def test_ibkr_phase2_gate_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
@@ -206,6 +220,50 @@ def test_ibkr_phase2_gate_source_keeps_external_surface_gate_matrix() -> None:
     assert "if self.ibkr_call_performed" in source
     assert "if self.host_policy != IbkrHostPolicy::LoopbackOnly" in source
     assert "if self.port_policy != IbkrPortPolicy::PaperGatewayPortOnly" in source
+
+
+def test_ibkr_phase2_gate_source_keeps_default_blocked_and_pass_fixture_posture() -> None:
+    source = _source()
+    default = _external_gate_default_block(source)
+    fixture = _external_gate_fixture_block(source)
+
+    for required in (
+        "contract_id: String::new()",
+        "source_version: 0",
+        "status: IbkrExternalSurfaceGateStatus::Blocked",
+        "api_baseline: IbkrApiBaseline::IbGatewayTwsApi",
+        "host_policy: IbkrHostPolicy::LoopbackOnly",
+        "port_policy: IbkrPortPolicy::PaperGatewayPortOnly",
+        "live_ports_denied: false",
+        "secret_contract_present: false",
+        "live_secret_absent_or_empty: false",
+        "api_allowlist_present: false",
+        "redaction_suite_passed: false",
+        "rate_limit_policy_present: false",
+        "audit_event_policy_present: false",
+        "paper_attestation_contract_present: false",
+        "python_no_write_guard_present: false",
+        "ibkr_call_performed: false",
+    ):
+        assert required in default
+
+    for required in (
+        "contract_id: IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID.to_string()",
+        "source_version: 1",
+        "status: IbkrExternalSurfaceGateStatus::Pass",
+        "live_ports_denied: true",
+        "secret_contract_present: true",
+        "live_secret_absent_or_empty: true",
+        "api_allowlist_present: true",
+        "redaction_suite_passed: true",
+        "rate_limit_policy_present: true",
+        "audit_event_policy_present: true",
+        "paper_attestation_contract_present: true",
+        "python_no_write_guard_present: true",
+        "ibkr_call_performed: false",
+        "..Self::default()",
+    ):
+        assert required in fixture
 
 
 def test_ibkr_phase2_gate_source_keeps_session_attestation_matrix() -> None:
