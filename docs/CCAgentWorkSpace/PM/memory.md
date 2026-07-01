@@ -25,6 +25,11 @@
 
 ## 近期記錄
 
+## 2026-07-01 No-Order Refresh Request Source Drift
+
+- PM generated current-head no-order refresh request sha `c007a2f...` after source-stability READY sha `2a1b5a...`; BB approved with conditions, but E3 blocked because source drifted, then source advanced again to `15ce7bc...`.
+- State transition is `BLOCKED_BY_RUNTIME`; do not consume `c007a2f...` or its BB approval. Next run needs a fresh clean source-stability quiet window at `15ce7bc...` or newer and a regenerated exact E3/BB request; v711 equity is stale, so do not raise age limits.
+
 ## 2026-07-01 Control API Auth Source Repaired Fast Balance Ready
 
 - PM closed `P0-CURRENT-CANDIDATE-CONTROL-API-AUTH-REPAIR-FOR-NOORDER-REFRESH` as `DONE_WITH_CONCERNS`: runtime-local token path plus fast-branch proof allowed exactly one E3-approved Control API fast-balance GET; current-head supplied-json equity artifact sha `db0c68bf...` is ready with equity `9541.87588778`.
@@ -3637,3 +3642,11 @@
 - Source-static guard now rejects paper order, shadow signal, readonly probe, Bybit-denied method, paper operation, live operation, and shadow operation pollution in the fill-import source.
 - Verification passed: targeted rustfmt check PASS; paper fill import source static `7 passed`; paper fill import Rust acceptance `7 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
 - Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, fill import execution, result import, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Paper Shadow Reconciliation Cross-Wire Guard
+
+- PM added test-only/source-static coverage for `stock_etf_paper_shadow_reconciliation` scope / authority / effect posture.
+- Acceptance now rejects wrong reconciliation scope, shadow-only authority pollution, paper-write scope/authority/effect pollution, and shadow-only scope/authority pollution via the expected blockers.
+- Source-static guard now rejects `PaperRehearsal`, `ShadowOnly`, `effect_capable=true`, paper-order scope, and shadow-signal scope pollution in the reconciliation source.
+- Verification passed: targeted rustfmt check PASS; paper-shadow reconciliation source static `8 passed`; paper-shadow reconciliation Rust acceptance `6 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
+- Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, fill import execution, shadow fill generation, reconciliation writer, result import, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
