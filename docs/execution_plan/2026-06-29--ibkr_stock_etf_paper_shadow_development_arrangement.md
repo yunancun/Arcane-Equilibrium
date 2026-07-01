@@ -7567,3 +7567,49 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 shadow fill、不啟動 shadow collector、不做 broker session、不做 broker routing、不做 DB/evidence writer、
 不做 scorecard writer、不做 paper order route、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何
 Bybit behavior change。
+
+## 181. 2026-07-01 PM session source checkpoint：Stock/ETF Paper Shadow Reconciliation Authority Lineage Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_paper_shadow_reconciliation` 的 contract/scope/authority、paper-fill/
+shadow-signal/shadow-fill-model lineage、reconciliation evidence gates 與 no-side-effect boundary coverage。
+這不是 Rust production behavior change、不是 IBKR contact、不是 connector runtime、不是 fill import
+execution、不是 shadow fill generation、不是 reconciliation writer、不是 DB/evidence writer、不是 secret
+lookup、不是 broker session、不是 paper order route、不是 tiny-live/live gate；只把 paper fill fact 與
+synthetic shadow fill fact 的 reconciliation envelope 變成 exact-blocker acceptance test 與 source-static
+guard。
+
+已完成：
+
+- 在 `stock_etf_paper_shadow_reconciliation_acceptance.rs` 新增
+  `reconciliation_rejects_each_authority_gap_independently`。
+- Acceptance 證明 contract id、source version、asset lane、broker、scope、authority scope、effect-capable
+  gaps 都會各自只產生單一對應 blocker。
+- 在同檔新增 `reconciliation_rejects_each_lineage_gap_independently`。
+- Acceptance 證明 reconciliation run、paper local order、broker order、execution、commission、shadow signal
+  ids，以及 lifecycle/event-log/paper-fill-import/shadow-signal/shadow-fill-model/cost/market/divergence/link/
+  raw/redacted/source artifact hashes 都會各自只產生單一對應 blocker。
+- 在同檔新增 `reconciliation_rejects_each_evidence_gate_independently`。
+- Acceptance 證明 append-only event、paper fill imported、synthetic shadow fill、divergence threshold、
+  divergence excess、unmatched paper/shadow fill evidence gates 都會各自只產生單一對應 blocker。
+- 在同檔新增 `reconciliation_rejects_each_boundary_flag_independently`。
+- Acceptance 證明 IBKR contact、connector runtime、secret serialization、fill import execution、shadow fill
+  generation、reconciliation writer、scorecard writer、DB apply、order route、Bybit path reuse、live/tiny-live、
+  margin/short/options/CFD、Python direct broker write flags 都會各自只產生單一對應 blocker。
+- 在 `test_stock_etf_paper_shadow_reconciliation_source_static.py` 新增 default / accepted fixture block
+  parser，鎖住 default fail-closed posture 與 accepted fixture 不可硬編 crypto/Bybit/wrong-scope/
+  wrong-authority/effectful/empty-lineage/unready-evidence/runtime/secret/writer/order posture。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Paper-shadow reconciliation source static pytest：`9 passed`。
+- Paper-shadow reconciliation Rust acceptance：`10 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 fill import、不生成 shadow fill、
+不啟動 reconciliation writer、不做 broker session、不做 broker routing、不做 DB/evidence writer、不做
+scorecard writer、不做 paper order route、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何
+Bybit behavior change。
