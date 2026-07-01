@@ -1284,3 +1284,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only structure guard for `ibkr_non_bybit_api_allowlist.rs`, pinning the IBKR non-Bybit API action allowlist/deny matrix.
 - The guard requires 10 read actions, 3 paper-write actions, 10 denied actions, 10 typed denial reasons, paper-write gate/session/order-gate requirements, live/account/client-portal typed denials, action missing/duplicated/wrong-bucket detection, retroactive contact denial, secret serialization denial, and Bybit live execution protection.
 - Verification passed: new guard `5 passed`; Phase2 gate/allowlist acceptance `11 passed`; full `cargo test -p openclaw_types` PASS. This grants no external-surface PASS, IBKR client construction, read probe, paper order submission/cancel/replace, secret access, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Broker Capability Registry Source Static Guard
+
+- PM added a source-only structure guard for `stock_etf_broker_capability_registry.rs`, pinning the Stock/ETF IBKR broker operation capability matrix.
+- The guard requires 15 operations, audit fields, fail-closed defaults, StockEtfCash/IBKR accepted fixture boundaries, read-only gates, paper-write PaperRehearsal/Rust-owned gates, shadow/scorecard lineage gates, live/margin/options/CFD/account-write denied scopes and typed denials, plus no runtime/secret/order/Bybit client tokens.
+- Verification passed: new guard `5 passed`; broker capability registry acceptance `10 passed`; full `cargo test -p openclaw_types` PASS. This grants no broker registry activation, IBKR contact, read probe, paper order authorization, secret access, tiny-live/live, or Bybit behavior change.
