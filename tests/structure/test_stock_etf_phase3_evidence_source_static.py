@@ -299,6 +299,18 @@ def _combined() -> str:
     return f"{_parent()}\n{_market_data()}"
 
 
+def _validate_block(source: str, type_name: str, method_name: str) -> str:
+    return source.split(f"impl {type_name}", 1)[1].split(method_name, 1)[1].split(
+        "StockEtfPhase3Verdict::new(blockers)",
+        1,
+    )[0]
+
+
+def _assert_ordered_tokens(block: str, tokens: tuple[str, ...]) -> None:
+    positions = [block.index(token) for token in tokens]
+    assert positions == sorted(positions)
+
+
 def test_stock_etf_phase3_evidence_sources_stay_below_governance_caps() -> None:
     assert len(_parent().splitlines()) <= MAX_PARENT_LINES
     assert len(_market_data().splitlines()) <= MAX_MARKET_DATA_LINES
@@ -711,6 +723,101 @@ def test_stock_etf_frozen_inputs_fixture_excludes_missing_readiness_crosswire() 
         "daily_scorecard_regeneration_passed: false",
     ):
         assert fail_closed in default_impl
+
+
+def test_stock_etf_phase3_sources_keep_default_exact_blocker_order() -> None:
+    parent = _parent()
+    child = _market_data()
+
+    _assert_ordered_tokens(
+        _validate_block(child, "StockMarketDataProvenanceV1", "pub fn validate(&self)"),
+        (
+            "MarketDataProvenanceContractIdMismatch",
+            "MarketDataProvenanceVersionMismatch",
+            "MarketDataProvenanceWrongAssetLane",
+            "MarketDataProvenanceWrongBroker",
+            "MarketDataProvenanceEnvironmentDenied",
+            "SourceMissing",
+            "EntitlementTierMissing",
+            "RawPayloadHashInvalid",
+            "MarketDataTimestampMissing",
+            "AdjustmentMarkerUnknown",
+            "CorporateActionVersionHashInvalid",
+            "SymbolMissing",
+            "InstrumentIdentityHashInvalid",
+            "CalendarSessionMissing",
+            "SourceArtifactHashInvalid",
+            "BybitLiveExecutionNotProtected",
+        ),
+    )
+    _assert_ordered_tokens(
+        _validate_block(parent, "StockEtfCollectorRunV1", "pub fn validate(&self)"),
+        (
+            "CollectorRunContractIdMismatch",
+            "CollectorRunVersionMismatch",
+            "CollectorRunWrongAssetLane",
+            "CollectorRunWrongBroker",
+            "CollectorRunEnvironmentDenied",
+            "CollectorRunIdMissing",
+            "CollectorTradingDayMissing",
+            "CollectorPitUniverseContractMismatch",
+            "CollectorPitUniverseHashInvalid",
+            "CollectorMarketDataProvenanceContractMismatch",
+            "CollectorMarketDataProvenanceHashInvalid",
+            "CollectorReferenceDataSourcesContractMismatch",
+            "CollectorReferenceDataSourcesHashInvalid",
+            "CollectorStorageCapacityContractMismatch",
+            "CollectorStorageCapacityHashInvalid",
+            "CollectorExpectedSessionsTooSmall",
+            "CollectorCompletedSessionsMissing",
+            "CollectorGapReportHashInvalid",
+            "CollectorDqManifestHashInvalid",
+            "CollectorReplayManifestHashInvalid",
+            "CollectorSourceArtifactHashInvalid",
+            "BybitLiveExecutionNotProtected",
+        ),
+    )
+    _assert_ordered_tokens(
+        _validate_block(parent, "StockEtfDailyDqManifestV1", "pub fn validates_shape(&self)"),
+        (
+            "DqManifestContractIdMismatch",
+            "DqManifestVersionMismatch",
+            "DqManifestWrongAssetLane",
+            "DqManifestWrongBroker",
+            "DqManifestEnvironmentDenied",
+            "DqManifestCollectorRunIdMissing",
+            "DqManifestMarketDataProvenanceContractMismatch",
+            "DqManifestMarketDataProvenanceHashInvalid",
+            "DqManifestSourceArtifactHashInvalid",
+            "BybitLiveExecutionNotProtected",
+            "TradingDayMissing",
+            "CoverageBpsInvalid",
+            "QuarantineManifestHashInvalid",
+            "AtomicFactInputHashInvalid",
+        ),
+    )
+    _assert_ordered_tokens(
+        _validate_block(parent, "StockEtfEvidenceClockDayV1", "pub fn validate(&self)"),
+        (
+            "EvidenceClockContractIdMismatch",
+            "EvidenceClockVersionMismatch",
+            "EvidenceClockWrongAssetLane",
+            "EvidenceClockWrongBroker",
+            "EvidenceClockEnvironmentDenied",
+            "EvidenceClockCollectorRunContractMismatch",
+            "EvidenceClockCollectorRunHashInvalid",
+            "EvidenceClockDqManifestContractMismatch",
+            "EvidenceClockDqManifestHashInvalid",
+            "EvidenceClockSourceArtifactHashInvalid",
+            "EvidenceClockMarketDataProvenanceHashInvalid",
+            "EvidenceClockScorecardInputHashInvalid",
+            "BybitLiveExecutionNotProtected",
+            "IbkrConnectorNotGreenFiveDays",
+            "ShadowCollectorNotGreenFiveDays",
+            "FrozenInputsRejected",
+            "DqManifestShapeRejected",
+        ),
+    )
 
 
 def test_stock_etf_phase3_sources_have_no_runtime_secret_order_or_bybit_client_tokens() -> None:

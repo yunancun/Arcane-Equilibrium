@@ -18,30 +18,27 @@ fn default_market_data_provenance_blocks_scorecard_readiness() {
     let verdict = StockMarketDataProvenanceV1::default().validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::MarketDataProvenanceContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::MarketDataProvenanceVersionMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::MarketDataProvenanceWrongAssetLane));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::MarketDataProvenanceWrongBroker));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::SourceMissing));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::RawPayloadHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::AdjustmentMarkerUnknown));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::CalendarSessionMissing));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            StockEtfPhase3Blocker::MarketDataProvenanceContractIdMismatch,
+            StockEtfPhase3Blocker::MarketDataProvenanceVersionMismatch,
+            StockEtfPhase3Blocker::MarketDataProvenanceWrongAssetLane,
+            StockEtfPhase3Blocker::MarketDataProvenanceWrongBroker,
+            StockEtfPhase3Blocker::MarketDataProvenanceEnvironmentDenied,
+            StockEtfPhase3Blocker::SourceMissing,
+            StockEtfPhase3Blocker::EntitlementTierMissing,
+            StockEtfPhase3Blocker::RawPayloadHashInvalid,
+            StockEtfPhase3Blocker::MarketDataTimestampMissing,
+            StockEtfPhase3Blocker::AdjustmentMarkerUnknown,
+            StockEtfPhase3Blocker::CorporateActionVersionHashInvalid,
+            StockEtfPhase3Blocker::SymbolMissing,
+            StockEtfPhase3Blocker::InstrumentIdentityHashInvalid,
+            StockEtfPhase3Blocker::CalendarSessionMissing,
+            StockEtfPhase3Blocker::SourceArtifactHashInvalid,
+            StockEtfPhase3Blocker::BybitLiveExecutionNotProtected,
+        ]
+    );
 }
 
 #[test]
@@ -230,24 +227,32 @@ fn default_collector_run_blocks_phase3_evidence_clock() {
     let verdict = StockEtfCollectorRunV1::default().validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::CollectorRunContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::CollectorRunVersionMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::CollectorRunWrongAssetLane));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::CollectorRunWrongBroker));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::CollectorRunIdMissing));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::CollectorExpectedSessionsTooSmall));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            StockEtfPhase3Blocker::CollectorRunContractIdMismatch,
+            StockEtfPhase3Blocker::CollectorRunVersionMismatch,
+            StockEtfPhase3Blocker::CollectorRunWrongAssetLane,
+            StockEtfPhase3Blocker::CollectorRunWrongBroker,
+            StockEtfPhase3Blocker::CollectorRunEnvironmentDenied,
+            StockEtfPhase3Blocker::CollectorRunIdMissing,
+            StockEtfPhase3Blocker::CollectorTradingDayMissing,
+            StockEtfPhase3Blocker::CollectorPitUniverseContractMismatch,
+            StockEtfPhase3Blocker::CollectorPitUniverseHashInvalid,
+            StockEtfPhase3Blocker::CollectorMarketDataProvenanceContractMismatch,
+            StockEtfPhase3Blocker::CollectorMarketDataProvenanceHashInvalid,
+            StockEtfPhase3Blocker::CollectorReferenceDataSourcesContractMismatch,
+            StockEtfPhase3Blocker::CollectorReferenceDataSourcesHashInvalid,
+            StockEtfPhase3Blocker::CollectorStorageCapacityContractMismatch,
+            StockEtfPhase3Blocker::CollectorStorageCapacityHashInvalid,
+            StockEtfPhase3Blocker::CollectorExpectedSessionsTooSmall,
+            StockEtfPhase3Blocker::CollectorGapReportHashInvalid,
+            StockEtfPhase3Blocker::CollectorDqManifestHashInvalid,
+            StockEtfPhase3Blocker::CollectorReplayManifestHashInvalid,
+            StockEtfPhase3Blocker::CollectorSourceArtifactHashInvalid,
+            StockEtfPhase3Blocker::BybitLiveExecutionNotProtected,
+        ]
+    );
 }
 
 #[test]
@@ -386,57 +391,28 @@ fn default_evidence_clock_day_is_not_a_pass_day() {
     let verdict = StockEtfEvidenceClockDayV1::default().validate();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::EvidenceClockContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::EvidenceClockVersionMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::EvidenceClockWrongAssetLane));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::EvidenceClockWrongBroker));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::EvidenceClockEnvironmentDenied));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::EvidenceClockCollectorRunContractMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::EvidenceClockCollectorRunHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::EvidenceClockDqManifestContractMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::EvidenceClockDqManifestHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::EvidenceClockSourceArtifactHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::EvidenceClockMarketDataProvenanceHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::EvidenceClockScorecardInputHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::BybitLiveExecutionNotProtected));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::IbkrConnectorNotGreenFiveDays));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::ShadowCollectorNotGreenFiveDays));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::FrozenInputsRejected));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::DqManifestShapeRejected));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            StockEtfPhase3Blocker::EvidenceClockContractIdMismatch,
+            StockEtfPhase3Blocker::EvidenceClockVersionMismatch,
+            StockEtfPhase3Blocker::EvidenceClockWrongAssetLane,
+            StockEtfPhase3Blocker::EvidenceClockWrongBroker,
+            StockEtfPhase3Blocker::EvidenceClockEnvironmentDenied,
+            StockEtfPhase3Blocker::EvidenceClockCollectorRunContractMismatch,
+            StockEtfPhase3Blocker::EvidenceClockCollectorRunHashInvalid,
+            StockEtfPhase3Blocker::EvidenceClockDqManifestContractMismatch,
+            StockEtfPhase3Blocker::EvidenceClockDqManifestHashInvalid,
+            StockEtfPhase3Blocker::EvidenceClockSourceArtifactHashInvalid,
+            StockEtfPhase3Blocker::EvidenceClockMarketDataProvenanceHashInvalid,
+            StockEtfPhase3Blocker::EvidenceClockScorecardInputHashInvalid,
+            StockEtfPhase3Blocker::BybitLiveExecutionNotProtected,
+            StockEtfPhase3Blocker::IbkrConnectorNotGreenFiveDays,
+            StockEtfPhase3Blocker::ShadowCollectorNotGreenFiveDays,
+            StockEtfPhase3Blocker::FrozenInputsRejected,
+            StockEtfPhase3Blocker::DqManifestShapeRejected,
+        ]
+    );
 }
 
 #[test]
@@ -640,36 +616,24 @@ fn default_dq_manifest_blocks_named_contract_and_lineage() {
     let verdict = StockEtfDailyDqManifestV1::default().validates_shape();
 
     assert!(!verdict.accepted);
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::DqManifestContractIdMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::DqManifestVersionMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::DqManifestWrongAssetLane));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::DqManifestWrongBroker));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::DqManifestEnvironmentDenied));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::DqManifestCollectorRunIdMissing));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::DqManifestMarketDataProvenanceContractMismatch));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::DqManifestMarketDataProvenanceHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::DqManifestSourceArtifactHashInvalid));
-    assert!(verdict
-        .blockers
-        .contains(&StockEtfPhase3Blocker::BybitLiveExecutionNotProtected));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            StockEtfPhase3Blocker::DqManifestContractIdMismatch,
+            StockEtfPhase3Blocker::DqManifestVersionMismatch,
+            StockEtfPhase3Blocker::DqManifestWrongAssetLane,
+            StockEtfPhase3Blocker::DqManifestWrongBroker,
+            StockEtfPhase3Blocker::DqManifestEnvironmentDenied,
+            StockEtfPhase3Blocker::DqManifestCollectorRunIdMissing,
+            StockEtfPhase3Blocker::DqManifestMarketDataProvenanceContractMismatch,
+            StockEtfPhase3Blocker::DqManifestMarketDataProvenanceHashInvalid,
+            StockEtfPhase3Blocker::DqManifestSourceArtifactHashInvalid,
+            StockEtfPhase3Blocker::BybitLiveExecutionNotProtected,
+            StockEtfPhase3Blocker::TradingDayMissing,
+            StockEtfPhase3Blocker::QuarantineManifestHashInvalid,
+            StockEtfPhase3Blocker::AtomicFactInputHashInvalid,
+        ]
+    );
 }
 
 #[test]

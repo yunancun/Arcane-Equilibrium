@@ -5071,3 +5071,30 @@ Verification 已過：
 沒有 IBKR contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 paper order routing、
 沒有 DB/evidence writer、沒有 scorecard writer、沒有 broker session、沒有 tiny-live/live authorization，
 也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Phase3 Evidence Default Lineage Exact Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Phase3 Evidence Default Lineage Exact Guard`。
+
+這個 checkpoint 補強 default `StockMarketDataProvenanceV1`、`StockEtfCollectorRunV1`、
+`StockEtfDailyDqManifestV1`、`StockEtfEvidenceClockDayV1` 的 fail-closed exact-blocker coverage。
+
+新增 Rust acceptance 證明 default Phase 3 evidence contracts 會以完整 ordered blocker vectors fail closed，
+覆蓋 identity、lane/broker/environment、lineage hashes、Bybit protection、nested frozen-input/DQ shape 與
+green-day readiness gates。Python source-static guard 也鎖住四個 validator blocker emit order。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Stock/ETF Phase 3 evidence source static pytest：`16 passed`
+- Stock/ETF Phase 3 evidence Rust acceptance：`24 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IPC server start、
+沒有 IBKR contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 market data ingestion、
+沒有 evidence writer、沒有 DQ writer、沒有 evidence clock start、沒有 scorecard writer、沒有 DB apply、
+沒有 paper order routing、沒有 broker session、沒有 tiny-live/live authorization，也沒有改動 Bybit
+live/demo execution 行為。

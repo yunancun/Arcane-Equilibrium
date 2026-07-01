@@ -8083,3 +8083,38 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 paper order routing、
 不做 DB/evidence writer、不啟動 scorecard writer、不做 broker session、不做 broker routing、不做 Linux
 runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 193. 2026-07-01 PM session source checkpoint：Stock/ETF Phase3 Evidence Default Lineage Exact Guard
+
+本 checkpoint 補強 `stock_etf_phase3_evidence` 的 default evidence fail-closed lineage，固定 default
+market-data provenance、collector run、DQ manifest、evidence-clock day blocker 向量與四個 validator blocker
+ordering。這不是 Rust production behavior change、不是 IPC server start、不是 IBKR contact、不是 connector
+runtime、不是 secret lookup、不是 market data ingestion、不是 evidence writer、不是 DQ writer、不是 evidence
+clock start、不是 scorecard writer、不是 DB apply、不是 paper order route enablement、不是 tiny-live/live gate；
+只把 Phase 3 evidence 的 default identity/lineage/no-runtime/no-writer/no-Bybit-crosswire posture 變成
+exact-blocker acceptance test 與 source-static guard。
+
+已完成：
+
+- 在 `stock_etf_phase3_evidence_acceptance.rs` 將 default `StockMarketDataProvenanceV1` 檢查提升為完整
+  順序 blocker 向量。
+- 在同檔將 default `StockEtfCollectorRunV1` 檢查提升為完整順序 blocker 向量。
+- 在同檔將 default `StockEtfDailyDqManifestV1` 檢查提升為完整順序 blocker 向量。
+- 在同檔將 default `StockEtfEvidenceClockDayV1` 檢查提升為完整順序 blocker 向量。
+- 在 `test_stock_etf_phase3_evidence_source_static.py` 新增四個 validator blocker ordering parser，鎖住
+  default exact blocker emit order。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Stock/ETF Phase 3 evidence source static pytest：`16 passed`。
+- Stock/ETF Phase 3 evidence Rust acceptance：`24 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、
+不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 paper order routing、
+不做 market data ingestion、不做 evidence writer、不做 DQ writer、不啟動 evidence clock、不啟動 scorecard
+writer、不做 DB apply、不做 broker session、不做 broker routing、不做 Linux runtime sync/restart、
+不授權 tiny-live/live 或任何 Bybit behavior change。
