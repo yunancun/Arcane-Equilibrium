@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-01 Downstream No-Auth Refresh Runtime Blocker
+
+- PM attempted the corrected E3-approved no-auth refresh for `grid_trading|ETHUSDT|Buy`; manifest sha `7c502cc...` is `BLOCKED_BY_RUNTIME`.
+- Blockers are concrete: Control API equity capture failed on localhost because API binds `100.91.109.86:8000`, and standing auth was rejected as preflight approval source by helper freshness/schema gates.
+- No quote, lease, order/private endpoint, PG write, runtime/risk mutation, Cost Gate change, live/mainnet, fill, PnL, or proof occurred.
+
 ## 2026-07-01 IBKR Connector Risky Config Blocker Guard
 
 - PM added a source-only regression that forces risky IBKR connector endpoint config values to appear only as blockers across every inert preview payload.
