@@ -689,6 +689,33 @@ connector runtime、沒有 read probe execution、沒有 result import、沒有 
 沒有 evidence clock、沒有 scorecard writer、沒有 paper order/cancel/replace、沒有
 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
 
+## 2026-07-01 Operator Update — Scorecard Fallback Input Lineage Guard
+
+本 session 已把 scorecard input bundle result-import lineage 補進 browser-side
+fallback：
+
+- `scorecardFallback()` 現在包含 default-degraded `scorecard_input_bundle`。
+- Fallback 固定顯示
+  `stock_etf_ibkr_readonly_probe_result_import_request_v1` contract id，且
+  result-import hash-present、market/reference/risk/atomic/source lineage flags 與所有
+  side-effect flags 均為 false。
+- Static no-write/split guard 已鎖住 fallback payload 不可再漏掉
+  `scorecard_input_bundle` 與 readonly probe result-import request lineage 欄位。
+
+Verification 已過：
+
+- Python changed files `py_compile`：PASS
+- Stock/ETF JS syntax：PASS
+- Focused fallback/static/docs trace pytest：PASS
+- Full Stock/ETF FastAPI/static pytest：PASS
+- `git diff --check`：PASS
+
+邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 GUI fanout、沒有 IBKR
+contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation、沒有
+connector runtime、沒有 read probe execution、沒有 result import、沒有 DB/evidence/
+scorecard writer、沒有 paper order/cancel/replace、沒有 tiny-live/live authority，也
+沒有改動 Bybit live execution 行為。
+
 ## 2026-06-30 Operator Update — IBKR Read-Only Connector Skeleton Boundary
 
 本 session 已完成下一個 source-only checkpoint：
