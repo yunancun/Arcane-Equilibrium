@@ -1049,3 +1049,43 @@ IBKR contact、IBKR SDK import、socket/HTTP、secret、connector runtime、read
 execution、collector start、market-data ingestion、DQ writer、paper order/cancel/replace、
 fill import、scorecard writer、DB apply、evidence clock、tiny-live、live、Linux runtime
 sync/restart 或 Bybit behavior change。
+
+## 2026-07-01 PM Session Checkpoint — Evidence Clock Lineage Guard
+
+PM 已在本 session 追加 Phase 3 source-only checkpoint：
+Evidence Clock Lineage Guard。這是 `stock_etf_evidence_clock_v1` source checker
+hardening，不是 evidence-clock runtime、evidence writer、scorecard writer 或 launch
+approval。
+
+已完成：
+
+- `StockEtfEvidenceClockDayV1` 新增 collector-run contract id/hash 與 DQ manifest
+  contract id/hash lineage 欄位。
+- Rust validator 要求 exact `stock_etf_collector_run_v1` /
+  `stock_etf_dq_manifest_v1`，並拒絕 invalid lineage hashes。
+- Phase3 evidence TOML template、existing evidence-status source fixture、FastAPI
+  normalizer/fail-closed fallback、display-only GUI evidence panel 同步顯示
+  collector/DQ/source/provenance/scorecard input hash presence。
+- FastAPI contract violation guard 會把錯誤 collector/DQ lineage contract id 擋成
+  `contract_violation_blocked`。
+
+Verification：
+
+- Python changed files `py_compile` PASS。
+- Stock/ETF evidence/fallback JS `node --check` PASS。
+- Scoped Rust `rustfmt --edition 2021 --check` PASS。
+- Phase3 evidence acceptance：`19 passed`。
+- Phase0 manifest acceptance：`6 passed`。
+- Focused evidence-status pytest：`4 passed`。
+
+Dispatch 記錄：repo feature/source-contract chain 應為
+`PM -> PA -> E1/E1a -> E2 -> E4 -> QA -> PM`。本 turn 因工具層 spawn policy
+未允許 sub-agent dispatch，PM 本地完成 narrow implementation / adversarial review /
+focused regression，並以 Rust/Python/JS focused checks 作補償驗證。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 3 runtime approval、collector approval、
+DQ writer approval、evidence-clock approval、scorecard writer approval 或 launch
+approval。未批准 IBKR contact、IBKR SDK import、socket/HTTP、secret、connector
+runtime、read probe execution、collector start、market-data ingestion、DQ writer、
+paper order/cancel/replace、fill import、DB apply、evidence writer、evidence clock、
+scorecard writer、tiny-live、live、Linux runtime sync/restart 或 Bybit behavior change。

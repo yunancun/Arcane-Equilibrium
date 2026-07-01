@@ -3378,3 +3378,10 @@
 - Existing evidence-status IPC/FastAPI/GUI surfaces now expose default-blocked `dq_manifest` without adding endpoints, IPC methods, GUI fanout, runtime work, or a DQ writer.
 - Verification passed: Python compile, JS syntax, scoped Rust format, Phase3 evidence acceptance `19 passed`, Phase0 manifest acceptance `6 passed`, focused Phase0/Evidence/Route pytest `22 passed`, full Stock/ETF FastAPI/static `120 passed`, full `openclaw_types` PASS, engine Stock/ETF focused `31 passed`, docs trace `2 passed`, and `git diff --check` PASS.
 - Boundary unchanged: no IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, collector start, market-data ingestion, DQ writer, paper order/cancel/replace, fill import, DB/evidence/scorecard writer, evidence clock, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF Evidence Clock Lineage Guard
+
+- PM hardened source-only `stock_etf_evidence_clock_v1` so evidence-clock day artifacts carry collector-run and DQ-manifest contract id/hash lineage.
+- Existing evidence-status IPC/FastAPI/GUI surfaces now expose default-blocked evidence-clock collector/DQ/source/provenance/scorecard input hash presence without adding endpoints, IPC methods, GUI fanout, runtime work, or an evidence clock.
+- Verification passed: Python compile, JS syntax, scoped Rust format, Phase3 evidence acceptance `19 passed`, Phase0 manifest acceptance `6 passed`, and focused evidence-status pytest `4 passed`.
+- Boundary unchanged: no IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe execution, collector start, market-data ingestion, DQ writer, paper order/cancel/replace, fill import, DB/evidence/scorecard writer, evidence clock, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

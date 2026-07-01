@@ -65,6 +65,29 @@ def _normalize_evidence_clock(value: Any, reason: str | None) -> dict[str, Any]:
         "status": _as_str(source.get("status"), "NOT_STARTED"),
         "accepted": _as_bool(source.get("accepted")),
         "blockers": [str(item) for item in _as_list(source.get("blockers"))],
+        "collector_run_contract_id": _as_str(
+            source.get("collector_run_contract_id"),
+            "",
+        ),
+        "collector_run_contract_hash_present": _as_bool(
+            source.get("collector_run_contract_hash_present")
+        ),
+        "dq_manifest_contract_id": _as_str(
+            source.get("dq_manifest_contract_id"),
+            "",
+        ),
+        "dq_manifest_contract_hash_present": _as_bool(
+            source.get("dq_manifest_contract_hash_present")
+        ),
+        "source_artifact_hash_present": _as_bool(
+            source.get("source_artifact_hash_present")
+        ),
+        "market_data_provenance_contract_hash_present": _as_bool(
+            source.get("market_data_provenance_contract_hash_present")
+        ),
+        "scorecard_input_bundle_hash_present": _as_bool(
+            source.get("scorecard_input_bundle_hash_present")
+        ),
         "checker_contacted_ibkr": _as_bool(source.get("checker_contacted_ibkr")),
         "checker_started_connector_runtime": _as_bool(
             source.get("checker_started_connector_runtime")
@@ -308,6 +331,16 @@ def _evidence_status_contract_violations(
         violations.append("dq_manifest_live_or_tiny_live_authorized")
     if _as_str(evidence_clock.get("expected_contract_id"), "") != _EVIDENCE_CLOCK_CONTRACT_ID:
         violations.append("evidence_clock_expected_contract_id_mismatch")
+    if _as_str(evidence_clock.get("collector_run_contract_id"), "") not in (
+        "",
+        _COLLECTOR_RUN_CONTRACT_ID,
+    ):
+        violations.append("evidence_clock_collector_run_contract_id_mismatch")
+    if _as_str(evidence_clock.get("dq_manifest_contract_id"), "") not in (
+        "",
+        _DQ_MANIFEST_CONTRACT_ID,
+    ):
+        violations.append("evidence_clock_dq_manifest_contract_id_mismatch")
     if _as_bool(evidence_clock.get("checker_contacted_ibkr")):
         violations.append("evidence_clock_contacted_ibkr")
     if _as_bool(evidence_clock.get("checker_started_connector_runtime")):
