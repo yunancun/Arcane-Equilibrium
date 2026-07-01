@@ -3700,3 +3700,25 @@ Verification 已過：
 沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 read-only probe execution、
 沒有 result import、沒有 DB/evidence writer、沒有 paper order/cancel/replace route、
 沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Docs README Index Gate Restoration
+
+本 session 已完成下一個 docs hygiene checkpoint：
+`Stock/ETF Docs README Index Gate Restoration`。
+
+這個 checkpoint 修復 full docs README/index structure gate 的既有 drift。變更只在
+`docs/README.md`：新增 `Static Guard Index`，補回 `docs/agents/` 三個穩定入口、
+`../helper_scripts/SCRIPT_INDEX.md`、`CCAgentWorkSpace/` 19 個 Agent / role directories 摘要
+與 `CCAgentWorkSpace/MIT/`、`CCAgentWorkSpace/BB/` 邊界行，並列出 `docs/archive/` top-level
+Markdown 檔名索引。
+
+Verification 已過：
+
+- Full docs README/index structure pytest：`7 passed`
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 production code change、沒有 trading logic change、沒有 endpoint/IPC method change、
+沒有 IBKR contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 read-only
+probe execution、沒有 result import、沒有 DB/evidence writer、沒有 paper order route、
+沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
