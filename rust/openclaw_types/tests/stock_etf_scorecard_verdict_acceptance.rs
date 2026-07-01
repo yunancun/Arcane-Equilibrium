@@ -7,7 +7,8 @@
 use std::path::PathBuf;
 
 use openclaw_types::{
-    StockEtfScorecardVerdictBlocker, StockEtfScorecardVerdictLabel, StockEtfScorecardVerdictV1,
+    AssetLane, Broker, BrokerEnvironment, StockEtfScorecardVerdictBlocker,
+    StockEtfScorecardVerdictLabel, StockEtfScorecardVerdictV1,
     STOCK_ETF_SCORECARD_VERDICT_CONTRACT_ID,
 };
 
@@ -135,6 +136,112 @@ fn scorecard_verdict_requires_formula_preregistration_and_manifest_hashes() {
 }
 
 #[test]
+fn scorecard_verdict_rejects_each_identity_gap_independently() {
+    use StockEtfScorecardVerdictBlocker as Blocker;
+
+    let cases: [(fn(&mut StockEtfScorecardVerdictV1), Blocker); 7] = [
+        (
+            |candidate| candidate.contract_id.clear(),
+            Blocker::ContractIdMissing,
+        ),
+        (
+            |candidate| {
+                candidate.contract_id = "stock_etf_scorecard_verdict_v1_fixture".to_string()
+            },
+            Blocker::ContractIdMismatch,
+        ),
+        (
+            |candidate| candidate.source_version = 2,
+            Blocker::SourceVersionMismatch,
+        ),
+        (
+            |candidate| candidate.asset_lane = AssetLane::CryptoPerp,
+            Blocker::WrongAssetLane,
+        ),
+        (
+            |candidate| candidate.broker = Broker::Bybit,
+            Blocker::WrongBroker,
+        ),
+        (
+            |candidate| candidate.environment = BrokerEnvironment::Shadow,
+            Blocker::EnvironmentDenied,
+        ),
+        (
+            |candidate| candidate.environment = BrokerEnvironment::LiveReservedDenied,
+            Blocker::EnvironmentDenied,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut candidate = StockEtfScorecardVerdictV1::profitability_feasible_fixture();
+        mutate(&mut candidate);
+        assert_single_blocker(candidate, blocker);
+    }
+}
+
+#[test]
+fn scorecard_verdict_rejects_each_hash_lineage_gap_independently() {
+    use StockEtfScorecardVerdictBlocker as Blocker;
+
+    let cases: [(fn(&mut StockEtfScorecardVerdictV1), Blocker); 12] = [
+        (
+            |candidate| candidate.scorecard_input_bundle_hash.clear(),
+            Blocker::ScorecardInputBundleHashInvalid,
+        ),
+        (
+            |candidate| candidate.evidence_clock_manifest_hash.clear(),
+            Blocker::EvidenceClockManifestHashInvalid,
+        ),
+        (
+            |candidate| candidate.dq_manifest_hash.clear(),
+            Blocker::DqManifestHashInvalid,
+        ),
+        (
+            |candidate| candidate.formula_appendix_hash = "not-a-sha".to_string(),
+            Blocker::FormulaAppendixHashInvalid,
+        ),
+        (
+            |candidate| candidate.statistical_preregistration_hash.clear(),
+            Blocker::StatisticalPreregistrationHashInvalid,
+        ),
+        (
+            |candidate| candidate.benchmark_version_hash.clear(),
+            Blocker::BenchmarkVersionHashInvalid,
+        ),
+        (
+            |candidate| candidate.cost_model_version_hash.clear(),
+            Blocker::CostModelVersionHashInvalid,
+        ),
+        (
+            |candidate| candidate.strategy_hypothesis_hash.clear(),
+            Blocker::StrategyHypothesisHashInvalid,
+        ),
+        (
+            |candidate| candidate.reference_data_sources_hash.clear(),
+            Blocker::ReferenceDataSourcesHashInvalid,
+        ),
+        (
+            |candidate| candidate.paper_shadow_reconciliation_hash.clear(),
+            Blocker::PaperShadowReconciliationHashInvalid,
+        ),
+        (
+            |candidate| candidate.scorecard_manifest_hash.clear(),
+            Blocker::ScorecardManifestHashInvalid,
+        ),
+        (
+            |candidate| candidate.verdict_rationale_hash.clear(),
+            Blocker::VerdictRationaleHashInvalid,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut candidate = StockEtfScorecardVerdictV1::profitability_feasible_fixture();
+        mutate(&mut candidate);
+        assert_single_blocker(candidate, blocker);
+    }
+}
+
+#[test]
 fn profitability_feasible_requires_thresholds_positive_lcbs_and_quality_labels() {
     let mut candidate = StockEtfScorecardVerdictV1::profitability_feasible_fixture();
     candidate.paper_shadow_window_trading_days = 10;
@@ -193,6 +300,110 @@ fn profitability_feasible_requires_thresholds_positive_lcbs_and_quality_labels()
     assert!(verdict
         .blockers
         .contains(&StockEtfScorecardVerdictBlocker::ExecutionRealismLabelRejected));
+}
+
+#[test]
+fn scorecard_verdict_rejects_each_threshold_shape_gap_independently() {
+    use StockEtfScorecardVerdictBlocker as Blocker;
+
+    let cases: [(fn(&mut StockEtfScorecardVerdictV1), Blocker); 6] = [
+        (
+            |candidate| candidate.min_window_trading_days = 0,
+            Blocker::WindowThresholdMissing,
+        ),
+        (
+            |candidate| candidate.min_independent_observation_count = 0,
+            Blocker::MinIndependentObservationMissing,
+        ),
+        (
+            |candidate| candidate.max_paper_shadow_divergence_bps = 0,
+            Blocker::DivergenceThresholdMissing,
+        ),
+        (
+            |candidate| candidate.psr_bps = 10_001,
+            Blocker::ProbabilityMetricOutOfRange,
+        ),
+        (
+            |candidate| candidate.min_psr_bps = 0,
+            Blocker::PsrThresholdMissing,
+        ),
+        (
+            |candidate| candidate.min_dsr_bps = 0,
+            Blocker::DsrThresholdMissing,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut candidate = StockEtfScorecardVerdictV1::profitability_feasible_fixture();
+        mutate(&mut candidate);
+        assert_single_blocker(candidate, blocker);
+    }
+}
+
+#[test]
+fn scorecard_verdict_rejects_each_profitability_and_quality_gap_independently() {
+    use StockEtfScorecardVerdictBlocker as Blocker;
+
+    let cases: [(fn(&mut StockEtfScorecardVerdictV1), Blocker); 13] = [
+        (
+            |candidate| candidate.paper_shadow_window_trading_days = 29,
+            Blocker::WindowThresholdNotMet,
+        ),
+        (
+            |candidate| candidate.independent_observation_count = 59,
+            Blocker::IndependentObservationThresholdNotMet,
+        ),
+        (
+            |candidate| candidate.paper_shadow_divergence_bps = 101,
+            Blocker::PaperShadowDivergenceExceeded,
+        ),
+        (
+            |candidate| candidate.benchmark_excess_lcb_bps = 0,
+            Blocker::BenchmarkAfterCostLcbNotPositive,
+        ),
+        (
+            |candidate| candidate.conservative_cost_stress_lcb_bps = 0,
+            Blocker::CostStressLcbNotPositive,
+        ),
+        (
+            |candidate| candidate.psr_bps = 9_499,
+            Blocker::PsrThresholdNotMet,
+        ),
+        (
+            |candidate| candidate.dsr_bps = 8_999,
+            Blocker::DsrThresholdNotMet,
+        ),
+        (
+            |candidate| candidate.concentration_label_passed = false,
+            Blocker::ConcentrationLabelRejected,
+        ),
+        (
+            |candidate| candidate.regime_label_passed = false,
+            Blocker::RegimeLabelRejected,
+        ),
+        (
+            |candidate| candidate.breadth_label_passed = false,
+            Blocker::BreadthLabelRejected,
+        ),
+        (
+            |candidate| candidate.freshness_label_passed = false,
+            Blocker::FreshnessLabelRejected,
+        ),
+        (
+            |candidate| candidate.survivorship_label_passed = false,
+            Blocker::SurvivorshipLabelRejected,
+        ),
+        (
+            |candidate| candidate.execution_realism_label_passed = false,
+            Blocker::ExecutionRealismLabelRejected,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut candidate = StockEtfScorecardVerdictV1::profitability_feasible_fixture();
+        mutate(&mut candidate);
+        assert_single_blocker(candidate, blocker);
+    }
 }
 
 #[test]
@@ -298,6 +509,106 @@ fn scorecard_verdict_rejects_runtime_side_effects_and_authority() {
     assert!(verdict
         .blockers
         .contains(&StockEtfScorecardVerdictBlocker::NotSealed));
+}
+
+#[test]
+fn scorecard_verdict_rejects_each_review_authority_and_boundary_gap_independently() {
+    use StockEtfScorecardVerdictBlocker as Blocker;
+
+    let cases: [(fn(&mut StockEtfScorecardVerdictV1), Blocker); 21] = [
+        (
+            |candidate| candidate.qc_review_hash.clear(),
+            Blocker::QcReviewHashInvalid,
+        ),
+        (
+            |candidate| candidate.mit_review_hash.clear(),
+            Blocker::MitReviewHashInvalid,
+        ),
+        (
+            |candidate| candidate.qa_review_hash.clear(),
+            Blocker::QaReviewHashInvalid,
+        ),
+        (
+            |candidate| candidate.qc_review_passed = false,
+            Blocker::QcReviewMissing,
+        ),
+        (
+            |candidate| candidate.mit_review_passed = false,
+            Blocker::MitReviewMissing,
+        ),
+        (
+            |candidate| candidate.qa_review_passed = false,
+            Blocker::QaReviewMissing,
+        ),
+        (
+            |candidate| candidate.scorecard_is_derived_only = false,
+            Blocker::ScorecardNotDerivedOnly,
+        ),
+        (
+            |candidate| candidate.paper_and_shadow_fills_separate = false,
+            Blocker::PaperShadowFillSeparationMissing,
+        ),
+        (
+            |candidate| candidate.live_fill_claimed = true,
+            Blocker::LiveFillClaimed,
+        ),
+        (
+            |candidate| candidate.bybit_live_execution_unchanged = false,
+            Blocker::BybitLiveExecutionNotProtected,
+        ),
+        (
+            |candidate| candidate.ibkr_contact_performed = true,
+            Blocker::IbkrContactPerformed,
+        ),
+        (
+            |candidate| candidate.connector_runtime_started = true,
+            Blocker::ConnectorRuntimeStarted,
+        ),
+        (
+            |candidate| candidate.broker_fill_import_performed = true,
+            Blocker::BrokerFillImportPerformed,
+        ),
+        (
+            |candidate| candidate.scorecard_writer_started = true,
+            Blocker::ScorecardWriterStarted,
+        ),
+        (
+            |candidate| candidate.db_apply_performed = true,
+            Blocker::DbApplyPerformed,
+        ),
+        (
+            |candidate| candidate.evidence_clock_started = true,
+            Blocker::EvidenceClockStarted,
+        ),
+        (
+            |candidate| candidate.secret_content_serialized = true,
+            Blocker::SecretContentSerialized,
+        ),
+        (
+            |candidate| candidate.live_or_tiny_live_authorized = true,
+            Blocker::LiveOrTinyLiveAuthorized,
+        ),
+        (|candidate| candidate.sealed = false, Blocker::NotSealed),
+        (
+            |candidate| {
+                candidate.verdict_label = StockEtfScorecardVerdictLabel::ExecutionModelInvalid
+            },
+            Blocker::ExecutionInvalidVerdictWithoutExecutionFailure,
+        ),
+        (
+            |candidate| {
+                candidate.verdict_label = StockEtfScorecardVerdictLabel::EngineeringReady;
+                candidate.execution_realism_label_passed = false;
+            },
+            Blocker::ExecutionRealismLabelRejected,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut candidate = StockEtfScorecardVerdictV1::profitability_feasible_fixture();
+        mutate(&mut candidate);
+        assert_single_blocker(candidate, blocker);
+    }
 }
 
 #[test]
@@ -499,4 +810,14 @@ fn blocked_template_is_parseable_and_secret_free() {
     assert!(!lower.contains("account_id ="));
     assert!(!lower.contains("password ="));
     assert!(!lower.contains("token ="));
+}
+
+fn assert_single_blocker(
+    candidate: StockEtfScorecardVerdictV1,
+    expected: StockEtfScorecardVerdictBlocker,
+) {
+    let verdict = candidate.validate();
+
+    assert!(!verdict.accepted);
+    assert_eq!(verdict.blockers, vec![expected]);
 }
