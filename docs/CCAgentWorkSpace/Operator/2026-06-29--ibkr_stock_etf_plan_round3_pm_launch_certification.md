@@ -2575,3 +2575,30 @@ Verification 已過：
 access/creation、沒有 connector runtime、沒有 read probe execution、沒有 result
 import、沒有 DB/evidence/scorecard writer、沒有 paper order/cancel/replace、沒有
 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — IBKR Non-Bybit API Allowlist Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`IBKR Non-Bybit API Allowlist Source Static Guard`。
+
+這個 guard 鎖住 `ibkr_non_bybit_api_allowlist.rs` 的非 Bybit IBKR API action
+allowlist/deny matrix source hygiene：10 個 read actions、3 個 paper-write actions、
+10 個 denied actions 與 10 個 typed denial reasons 必須保留。
+
+Guard 要求 paper-write action 仍需要 external surface gate、session attestation 與
+paper-order gates，且不能在 external gate 後直接 allowed；live order、live account、
+transfer、margin/short/options/CFD、market-data entitlement purchase、account
+management write 與 Client Portal Web API 仍必須 typed-denied。source 不得出現
+env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens 或 secret
+material access tokens。
+
+Verification 已過：
+
+- New structure guard pytest：`5 passed`
+- Focused Phase2 gate/allowlist acceptance：`11 passed`
+- Full `cargo test -p openclaw_types`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
+access/creation、沒有 connector runtime、沒有 read probe execution、沒有 result
+import、沒有 DB/evidence/scorecard writer、沒有 paper order/cancel/replace、沒有
+tiny-live/live authority，也沒有改動 Bybit live execution 行為。

@@ -1278,3 +1278,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only structure guard for `ibkr_feature_flag_secret_auth.rs`, pinning the feature flag, secret-slot contract, Phase2 artifact, session attestation, and authorization envelope decision matrix.
 - The guard requires fail-closed defaults, live/account-write denial, paper flag and shadow-only checks, secret/artifact/session validation, envelope scope/hash/expiry checks, and secret/account fingerprint consistency across secret/artifact/session contracts.
 - Verification passed: new guard `5 passed`; feature-flag/secret auth acceptance `8 passed`; full `cargo test -p openclaw_types` PASS. This grants no feature enablement, secret read, IBKR contact, connector runtime, paper order authorization, DB/evidence/scorecard writer, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 IBKR Non-Bybit API Allowlist Source Static Guard
+
+- PM added a source-only structure guard for `ibkr_non_bybit_api_allowlist.rs`, pinning the IBKR non-Bybit API action allowlist/deny matrix.
+- The guard requires 10 read actions, 3 paper-write actions, 10 denied actions, 10 typed denial reasons, paper-write gate/session/order-gate requirements, live/account/client-portal typed denials, action missing/duplicated/wrong-bucket detection, retroactive contact denial, secret serialization denial, and Bybit live execution protection.
+- Verification passed: new guard `5 passed`; Phase2 gate/allowlist acceptance `11 passed`; full `cargo test -p openclaw_types` PASS. This grants no external-surface PASS, IBKR client construction, read probe, paper order submission/cancel/replace, secret access, tiny-live/live, or Bybit behavior change.
