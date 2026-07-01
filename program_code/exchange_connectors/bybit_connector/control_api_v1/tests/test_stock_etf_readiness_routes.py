@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -12,6 +13,68 @@ from stock_etf_route_fixtures import (
     _valid_api_allowlist,
     client_fail_closed,
 )
+
+EXPECTED_CONTRACT_VIOLATIONS = [
+    "ibkr_call_performed",
+    "secret_slot_touched",
+    "order_routed",
+    "bybit_ipc_reused",
+    "connector_skeleton_accepted",
+    "connector_skeleton_status_not_blocked",
+    "readonly_probe_request_contract_id_mismatch",
+    "readonly_probe_request_source_version_mismatch",
+    "readonly_probe_request_status_not_blocked",
+    "readonly_probe_result_import_request_contract_id_mismatch",
+    "readonly_probe_result_import_request_source_version_mismatch",
+    "readonly_probe_result_import_request_status_not_blocked",
+    "connector_skeleton_network_contact_performed",
+    "connector_skeleton_secret_content_loaded",
+    "connector_skeleton_paper_channel_exposed",
+    "connector_skeleton_live_channel_exposed",
+    "connector_skeleton_order_write_method_present",
+    "connector_skeleton_bybit_path_reused",
+    "readonly_probe_request_request_artifact_present",
+    "readonly_probe_request_request_validated",
+    "readonly_probe_request_accepted_for_contact",
+    "readonly_probe_request_ibkr_contact_performed",
+    "readonly_probe_request_connector_runtime_started",
+    "readonly_probe_request_secret_content_serialized",
+    "readonly_probe_request_order_routed",
+    "readonly_probe_request_paper_order_submitted",
+    "readonly_probe_request_db_apply_performed",
+    "readonly_probe_request_evidence_clock_started",
+    "readonly_probe_request_bybit_path_reused",
+    "readonly_probe_request_live_or_tiny_live_authorized",
+    "readonly_probe_result_import_request_request_artifact_present",
+    "readonly_probe_result_import_request_request_validated",
+    "readonly_probe_result_import_request_accepted_for_import",
+    "readonly_probe_result_import_request_ibkr_contact_performed",
+    "readonly_probe_result_import_request_connector_runtime_started",
+    "readonly_probe_result_import_request_secret_content_serialized",
+    "readonly_probe_result_import_request_result_import_performed",
+    "readonly_probe_result_import_request_evidence_writer_started",
+    "readonly_probe_result_import_request_scorecard_writer_started",
+    "readonly_probe_result_import_request_db_apply_performed",
+    "readonly_probe_result_import_request_order_routed",
+    "readonly_probe_result_import_request_paper_order_submitted",
+    "readonly_probe_result_import_request_bybit_path_reused",
+    "readonly_probe_result_import_request_live_or_tiny_live_authorized",
+]
+
+EXPECTED_MISSING_API_ALLOWLIST_CONTRACT_VIOLATIONS = [
+    "api_allowlist_not_accepted",
+    "api_allowlist_contract_id_mismatch",
+    "api_allowlist_source_version_mismatch",
+    "api_allowlist_read_action_count_mismatch",
+    "api_allowlist_paper_write_action_count_mismatch",
+    "api_allowlist_denied_action_count_mismatch",
+    "api_allowlist_bybit_live_not_protected",
+]
+
+EXPECTED_BOOLEAN_API_ALLOWLIST_VERSION_CONTRACT_VIOLATIONS = [
+    "api_allowlist_source_version_mismatch",
+]
+
 
 def _valid_readonly_probe_request() -> dict[str, Any]:
     return {
@@ -369,52 +432,7 @@ def test_stock_etf_readiness_blocks_contract_violation() -> None:
 
     assert data["readiness_state"] == "contract_violation_blocked"
     assert data["degraded"] is True
-    assert set(data["contract_violations"]) == {
-        "ibkr_call_performed",
-        "secret_slot_touched",
-        "order_routed",
-        "bybit_ipc_reused",
-        "readonly_probe_request_contract_id_mismatch",
-        "readonly_probe_request_source_version_mismatch",
-        "readonly_probe_request_status_not_blocked",
-        "readonly_probe_request_request_artifact_present",
-        "readonly_probe_request_request_validated",
-        "readonly_probe_request_accepted_for_contact",
-        "readonly_probe_request_ibkr_contact_performed",
-        "readonly_probe_request_connector_runtime_started",
-        "readonly_probe_request_secret_content_serialized",
-        "readonly_probe_request_order_routed",
-        "readonly_probe_request_paper_order_submitted",
-        "readonly_probe_request_db_apply_performed",
-        "readonly_probe_request_evidence_clock_started",
-        "readonly_probe_request_bybit_path_reused",
-        "readonly_probe_request_live_or_tiny_live_authorized",
-        "readonly_probe_result_import_request_contract_id_mismatch",
-        "readonly_probe_result_import_request_source_version_mismatch",
-        "readonly_probe_result_import_request_status_not_blocked",
-        "readonly_probe_result_import_request_request_artifact_present",
-        "readonly_probe_result_import_request_request_validated",
-        "readonly_probe_result_import_request_accepted_for_import",
-        "readonly_probe_result_import_request_ibkr_contact_performed",
-        "readonly_probe_result_import_request_connector_runtime_started",
-        "readonly_probe_result_import_request_secret_content_serialized",
-        "readonly_probe_result_import_request_result_import_performed",
-        "readonly_probe_result_import_request_evidence_writer_started",
-        "readonly_probe_result_import_request_scorecard_writer_started",
-        "readonly_probe_result_import_request_db_apply_performed",
-        "readonly_probe_result_import_request_order_routed",
-        "readonly_probe_result_import_request_paper_order_submitted",
-        "readonly_probe_result_import_request_bybit_path_reused",
-        "readonly_probe_result_import_request_live_or_tiny_live_authorized",
-        "connector_skeleton_accepted",
-        "connector_skeleton_status_not_blocked",
-        "connector_skeleton_network_contact_performed",
-        "connector_skeleton_secret_content_loaded",
-        "connector_skeleton_paper_channel_exposed",
-        "connector_skeleton_live_channel_exposed",
-        "connector_skeleton_order_write_method_present",
-        "connector_skeleton_bybit_path_reused",
-    }
+    assert data["contract_violations"] == EXPECTED_CONTRACT_VIOLATIONS
     assert data["ibkr_live_enabled"] is False
     assert data["stock_live_disabled"] is True
     assert data["paper_order_entry_visible"] is False
@@ -461,9 +479,10 @@ def test_stock_etf_readiness_blocks_missing_api_allowlist_contract() -> None:
     assert data["readiness_state"] == "contract_violation_blocked"
     assert data["degraded"] is True
     assert data["api_allowlist"]["accepted"] is False
-    assert "api_allowlist_not_accepted" in data["contract_violations"]
-    assert "api_allowlist_contract_id_mismatch" in data["contract_violations"]
-    assert "api_allowlist_source_version_mismatch" in data["contract_violations"]
+    assert (
+        data["contract_violations"]
+        == EXPECTED_MISSING_API_ALLOWLIST_CONTRACT_VIOLATIONS
+    )
 
 
 def test_stock_etf_readiness_rejects_boolean_api_allowlist_version() -> None:
@@ -509,4 +528,22 @@ def test_stock_etf_readiness_rejects_boolean_api_allowlist_version() -> None:
 
     assert data["readiness_state"] == "contract_violation_blocked"
     assert data["api_allowlist"]["source_version"] == 0
-    assert "api_allowlist_source_version_mismatch" in data["contract_violations"]
+    assert (
+        data["contract_violations"]
+        == EXPECTED_BOOLEAN_API_ALLOWLIST_VERSION_CONTRACT_VIOLATIONS
+    )
+
+
+def test_stock_etf_readiness_contract_violation_assertions_stay_exact() -> None:
+    source = Path(__file__).read_text(encoding="utf-8")
+    source_under_test = source.split(
+        "def test_stock_etf_readiness_contract_violation_assertions_stay_exact", 1
+    )[0]
+    forbidden_patterns = [
+        'set(data["contract_violations"])',
+        'in data["contract_violations"]',
+        'issubset(set(data["contract_violations"]))',
+    ]
+
+    for pattern in forbidden_patterns:
+        assert pattern not in source_under_test
