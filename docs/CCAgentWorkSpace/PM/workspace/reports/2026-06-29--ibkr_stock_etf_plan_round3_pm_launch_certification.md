@@ -610,6 +610,44 @@ ingestion、DQ writer、paper order/cancel/replace、fill import、DB apply、ev
 writer、evidence clock、scorecard writer、tiny-live、live、Linux runtime sync/restart
 或 Bybit behavior change。
 
+## 2026-07-01 PM Session Checkpoint — Scorecard Input Module Split Guard
+
+PM 已將 Rust `stock_etf_scorecard_inputs.rs` 拆分為父 re-export、component
+validators 與 bundle validator。這不是 contract behavior change、payload change、
+endpoint/IPC change 或 runtime approval；目的只是讓 scorecard input source-only
+contract 低於單檔 review threshold。
+
+已完成：
+
+- 父檔保留 constants、public re-export、`StockEtfScorecardInputVerdict` 與
+  `StockEtfScorecardInputBlocker`。
+- `components.rs` 承載 cash ledger、cost model、benchmark、shadow fill model、
+  storage capacity component validators。
+- `bundle.rs` 承載 `StockEtfScorecardInputBundleV1` default/accepted fixture 與
+  bundle-level lineage/side-effect validator。
+- Public import surface `openclaw_types::stock_etf_scorecard_inputs::*` 維持不變。
+- 原父檔由 800 行降至 128 行；新 components/bundle 模組分別為 520/181 行。
+
+Verification：
+
+- Scoped Rust rustfmt PASS。
+- Focused scorecard input acceptance：`12 passed`。
+- Focused scorecard derivation/verdict acceptance：`13 passed`。
+- Full `cargo test -p openclaw_types` PASS。
+- Engine Stock/ETF IPC regression：`29 passed`。
+
+Dispatch 記錄：本 turn 因工具層 spawn policy 未允許 sub-agent dispatch，PM 本地完成
+narrow Rust module-layout refactor / review / regression。此 checkpoint 為 source
+hygiene，不改 runtime behavior。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 2/3 runtime approval、IBKR contact
+approval、read-only probe approval、result import approval、evidence writer approval、
+scorecard writer approval 或 launch approval。未批准 IBKR SDK import、socket/HTTP、
+secret、connector runtime、read probe execution、collector start、market-data
+ingestion、DQ writer、paper order/cancel/replace、fill import、DB apply、evidence
+writer、evidence clock、scorecard writer、tiny-live、live、Linux runtime sync/restart
+或 Bybit behavior change。
+
 ## 2026-07-01 PM Session Checkpoint — Python No-Write Static Guard Split Guard
 
 PM 已將 Stock/ETF Python no-write static guard 拆分為 shared helper + Python/route/GUI

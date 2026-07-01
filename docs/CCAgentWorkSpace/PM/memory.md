@@ -3463,3 +3463,10 @@
 - The guard logic remains intact: Python/connector no-write, route/IPC readonly status, GUI display-only/no-background-work, fanout budget, and renderer/fallback split checks still run.
 - Verification passed: Python compile, focused split guard `21 passed`, and full Stock/ETF FastAPI/static `120 passed`.
 - Boundary unchanged: no endpoint, IPC method, GUI fanout, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe, result import, DB/evidence/scorecard writer, paper order/cancel/replace, tiny-live/live, Linux runtime, or Bybit behavior change.
+
+## 2026-07-01 IBKR Stock/ETF Scorecard Input Module Split Guard
+
+- PM split Rust `stock_etf_scorecard_inputs.rs` into a 128-line parent re-export, 520-line component validators module, and 181-line bundle validator module.
+- Public `openclaw_types::stock_etf_scorecard_inputs::*` imports, contract ids, fixtures, and validator behavior remain unchanged.
+- Verification passed: scoped Rust format, scorecard input acceptance `12 passed`, scorecard derivation/verdict acceptance `13 passed`, full `cargo test -p openclaw_types`, and engine Stock/ETF IPC `29 passed`.
+- Boundary unchanged: no endpoint, IPC method, payload behavior, GUI fanout, IBKR contact, SDK import, socket/HTTP, secret access, connector runtime, read probe, result import, DB/evidence/scorecard writer, paper order/cancel/replace, tiny-live/live, Linux runtime, or Bybit behavior change.

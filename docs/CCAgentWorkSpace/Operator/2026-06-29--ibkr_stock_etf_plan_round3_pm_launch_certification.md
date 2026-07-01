@@ -2300,3 +2300,28 @@ IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/cre
 沒有 connector runtime、沒有 read probe execution、沒有 result import、沒有 DB/
 evidence/scorecard writer、沒有 paper order/cancel/replace、沒有 tiny-live/live
 authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Scorecard Input Module Split Guard
+
+本 session 已把 Rust scorecard input contract 從 800 行邊界檔拆成三塊：
+
+- `stock_etf_scorecard_inputs.rs`：只保留 constants、public re-export、verdict/blocker。
+- `stock_etf_scorecard_inputs/components.rs`：cash ledger、cost model、benchmark、
+  shadow fill、storage capacity validators。
+- `stock_etf_scorecard_inputs/bundle.rs`：scorecard input bundle validator。
+- Public import surface 維持 `openclaw_types::stock_etf_scorecard_inputs::*` 不變。
+- 父檔降至 128 行；components/bundle 為 520/181 行。
+
+Verification 已過：
+
+- Scoped Rust rustfmt：PASS
+- Focused scorecard input acceptance：`12 passed`
+- Focused scorecard derivation/verdict acceptance：`13 passed`
+- Full `cargo test -p openclaw_types`：PASS
+- Engine Stock/ETF IPC regression：`29 passed`
+
+邊界不變：沒有新增 endpoint、沒有新增 IPC method、沒有 payload 行為改動、沒有
+IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret access/creation、
+沒有 connector runtime、沒有 read probe execution、沒有 result import、沒有 DB/
+evidence/scorecard writer、沒有 paper order/cancel/replace、沒有 tiny-live/live
+authority，也沒有改動 Bybit live execution 行為。
