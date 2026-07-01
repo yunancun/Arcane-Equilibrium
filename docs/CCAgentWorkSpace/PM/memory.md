@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-01 No-Order Refresh Blocked By Loss-Control 6b0e
+
+- PM rotated from stale `bef289ef...` request to clean `6b0e6b03...`; 6b0e source-stability READY sha `8b89bd88...` was produced but not consumed.
+- Runtime SSH freshness check found standing auth sha `8c891b4e...` had only `80.377923s` remaining at `2026-07-01T17:14:45Z` and expired at `2026-07-01T17:16:05.473618+00:00`; final docs-sync fetch found `origin/main == c1d2ef4c...`.
+- State transition `BLOCKED_BY_LOSS_CONTROL`; next blocker is `P0-STANDING-DEMO-LOSS-CONTROL-ENVELOPE-REFRESH-CURRENT-HEAD`. No E3/BB dispatch, API GET, public quote, lease, order/private endpoint, runtime mutation, Cost Gate change, live/mainnet, fill/PnL, or proof.
+
 ## 2026-07-01 Stock/ETF Lane-Scoped IPC Exact Blocker Guard
 
 - PM tightened `StockEtfLaneScopedIpcContractV1` aggregate acceptance coverage to exact ordered blocker vectors for default contract posture, top-level boundary regressions, command coverage/denied-method aggregates, command shape failures, and paper-order request-shape cross-wire cases.
