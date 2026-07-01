@@ -6071,3 +6071,29 @@ contact、沒有 SDK import、沒有 secret access/serialization、沒有 connec
 construction、沒有 broker session、沒有 read-only probe execution、沒有 fill import execution、沒有 paper order
 routing/cancel/replace execution、沒有 DB/evidence/scorecard writer、沒有 evidence clock、沒有 paper-shadow launch、
 沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Readiness Route Exact Contract-Violation Guard
+
+本 session 已完成下一個 test-only checkpoint：
+`Stock/ETF Readiness Route Exact Contract-Violation Guard`。
+
+這個 checkpoint 補強 Stock/ETF FastAPI readiness route 的 exact contract-violation coverage。
+
+現在 readiness aggregate side-effect violations、missing API allowlist contract violations、boolean
+`source_version` normalization violations 都用完整 ordered vectors 驗證；同檔也新增 source guard，防止之後退回
+loose `set(...)`、membership 或 subset 檢查。
+
+Verification 已過：
+
+- Readiness route focused pytest：`7 passed`
+- Stock/ETF no-write/surface/readiness focused pytest：`17 passed`
+- Full Stock/ETF Python route/static pytest：`128 passed`
+- `python3 -m py_compile`：PASS
+- Readiness no-loose contract violation assertion scan：PASS
+- Diff check：PASS
+
+邊界不變：沒有 FastAPI route behavior change、沒有 connector production code change、沒有 GUI/Rust IPC behavior
+change、沒有 IBKR contact、沒有 SDK import、沒有 secret access/serialization、沒有 connector runtime、沒有
+socket/client construction、沒有 broker session、沒有 read-only probe execution、沒有 fill import execution、沒有
+paper order routing/cancel/replace execution、沒有 DB/evidence/scorecard writer、沒有 evidence clock、沒有
+paper-shadow launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
