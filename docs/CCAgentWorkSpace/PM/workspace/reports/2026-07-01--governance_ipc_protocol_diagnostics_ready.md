@@ -4,7 +4,7 @@
 
 PM advanced `P0-CURRENT-CANDIDATE-FRESH-INVOCATION-WINDOW-SOURCE-INPUT-REFRESH-GATE` by diagnosing and fixing the recurrent read-only governance IPC blocker without retrying public quote capture.
 
-- Session loop state: `/tmp/openclaw/session_loop_state_20260701T_ipc_response_mismatch_diagnosis/session_loop_state.json`, sha `f434bba0960db9b1bbfed46112c76c942234a2d531752bdf6dceee078ee9f751`, status `DONE_WITH_CONCERNS`.
+- Session loop state: `/tmp/openclaw/session_loop_state_20260701T_ipc_response_mismatch_diagnosis/session_loop_state.json`, metadata-corrected sha `7eab20b54c5aaf3a03b1ec48119adf833eba4f1321b87300cc036115983f030d`, status transition `DONE_WITH_CONCERNS`. The correction updates stale/invalid git pointer metadata only (`source_head`/`runtime_origin`), with no governance snapshot, service, exchange, lease, order, risk, or Cost Gate mutation.
 - Source commits:
   - `5f45254cf3f6c09fcc08d2ab3450e32cd656a125` adds fail-closed JSON-RPC protocol diagnostics.
   - `c5fce0c6008b783e8264ce06a3a5f781fe18c26e` fixes the snapshot helper await call and adds default-dispatcher coverage.
