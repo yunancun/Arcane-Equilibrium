@@ -8961,3 +8961,43 @@ socket/client construction、不做 broker session、不執行 paper order routi
 不執行 fill import、不生成 shadow fill、不做 reconciliation/scorecard writer、不做 DB/evidence writer、不啟動
 evidence clock、不做 release launch、不做 Linux runtime sync/restart、不授權 paper-shadow launch、tiny-live/live
 或任何 Bybit behavior change。
+
+## 217. 2026-07-01 PM session source checkpoint：Stock/ETF Shadow Signal Request Exact Blocker Guard
+
+本 checkpoint 補強 `StockEtfShadowSignalRequestV1` future shadow-signal evaluation request contract 的 aggregate
+fail-closed lineage，固定 default request、method/operation/authority/effect cross-wire、lineage/hash aggregate
+failures、no-side-effect boundary regressions 的 ordered blocker vectors 或 exact single-blocker vectors。這不是
+Rust production behavior change、不是 IPC/API route change、不是 IBKR contact、不是 connector runtime、不是
+socket/client construction、不是 secret lookup、不是 broker session、不是 paper order route enablement、不是 shadow
+signal emission、不是 shadow fill generation、不是 scorecard writer、不是 DB/evidence writer、不是 tiny-live/live
+gate；只把 Stock/ETF shadow-signal request source-only contract 的 fail-closed lineage 變成 exact-blocker
+acceptance guard。
+
+已完成：
+
+- 在 `stock_etf_shadow_signal_request_acceptance.rs` 將 default `StockEtfShadowSignalRequestV1` 固定為完整
+  順序 blocker 向量，覆蓋 contract/source identity、lane/broker/shadow environment、IPC method、operation、
+  authority scope、request/evaluation/signal ids 與 evidence-clock/PIT universe/strategy hypothesis/instrument
+  identity/market-data provenance/cost model/asset-lane events/source hashes。
+- 在同檔將 method/operation/authority/effect cross-wire、lineage/hash aggregate、no-side-effect boundary
+  regressions 固定為 exact blocker vectors。
+- 移除 shadow-signal request blocker 的 loose `has()` / `blockers.contains` helper；aggregate cases 改為完整
+  ordered-vector assertions。
+- 在 `test_stock_etf_shadow_signal_request_source_static.py` 新增 validator blocker emit-order guard，pin
+  top-level、required fields 與 boundary flags 的 source order。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Stock/ETF shadow-signal request source static pytest：`9 passed`。
+- Stock/ETF shadow-signal request Rust acceptance：`9 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、不改 GUI
+runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不做
+socket/client construction、不做 broker session、不執行 paper order routing/cancel/replace、不啟動 shadow signal
+emitter、不生成 shadow fill、不做 scorecard/DB/evidence writer、不啟動 evidence clock、不做 release launch、
+不做 Linux runtime sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。

@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-01 Stock/ETF Shadow Signal Request Exact Blocker Guard
+
+- PM tightened `StockEtfShadowSignalRequestV1` aggregate acceptance coverage to exact ordered blocker vectors for default, method/operation/scope cross-wire, lineage/hash gaps, and no-side-effect boundary regressions.
+- Source-static guard now pins validator blocker emit order across top-level identity, required fields, and boundary flags.
+- Verification passed: shadow signal source static `9`, Rust acceptance `9`, full `cargo test -p openclaw_types`, cargo fmt, docs trace, and diff-check. Boundary unchanged: no IBKR contact, connector/runtime, shadow signal emission, shadow fill generation, scorecard/DB/evidence writer, paper order, tiny-live/live, or Bybit behavior change.
+
 ## 2026-07-01 Stock/ETF Paper Shadow Reconciliation Exact Blocker Guard
 
 - PM tightened `StockEtfPaperShadowReconciliationV1` aggregate acceptance coverage to exact ordered blocker vectors for default, scope/authority/effect cross-wire, lineage/hash gaps, reconciliation-evidence failures, and no-side-effect boundary regressions.
