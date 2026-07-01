@@ -6709,3 +6709,44 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 strategy、不做 scorecard writer、
 不做 DB/evidence writer、不做 paper order route、不做 Linux runtime sync/restart、不授權 tiny-live/live
 或任何 Bybit behavior change。
+
+## 160. 2026-07-01 PM session source checkpoint：Stock/ETF Risk Policy Runtime Authority Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_risk_policy` 的 dormant paper/shadow risk posture、cash-only controls、
+live-denial controls、Bybit unchanged、IBKR contact、connector runtime、secret serialization cross-wire
+coverage。這不是 Rust production behavior change、不是 IBKR contact、不是 connector runtime、不是
+secret access、不是 order execution、不是 risk runtime enablement、不是 DB/evidence writer、不是
+paper order route、不是 tiny-live/live gate；只把 risk policy artifact 的 source-only、disabled、
+shadow-only、cash-only、no-runtime-authority posture 變成行為型 regression test 與 source-static guard。
+
+已完成：
+
+- 在 `stock_etf_risk_policy_acceptance.rs` 新增
+  `risk_policy_rejects_runtime_cash_and_authority_cross_wire_independently`。
+- Acceptance 證明 `enabled=true` 只產生 `RuntimeEnablementClaimed`。
+- Acceptance 證明 `shadow_only=false` 只產生 `ShadowOnlyPostureMissing`。
+- Acceptance 證明 `environment=LiveReservedDenied` 只產生 `WrongEnvironment`。
+- Acceptance 證明 `allow_margin=true`、`allow_short=true`、`allow_options=true`、`allow_cfd=true`、
+  `allow_transfer=true`、`allow_live=true` 會各自只產生對應 cash-only / live-denial blocker。
+- Acceptance 證明 `bybit_live_execution_unchanged=false` 只產生
+  `BybitLiveExecutionNotProtected`。
+- Acceptance 證明 `ibkr_contact_performed=true`、`connector_runtime_started=true`、
+  `secret_content_serialized=true` 會各自只產生對應 IBKR contact、connector runtime、secret blocker。
+- 在 `test_stock_etf_risk_policy_source_static.py` 新增 accepted fixture / source-config mapper body
+  parser，禁止 runtime enabled、non-shadow、live environment、margin/short/options/CFD/transfer/live
+  allowance、Bybit changed、IBKR contact、connector runtime、secret serialization 被 hardcoded 到
+  accepted fixture 或 source-config mapper，並鎖住 default fail-closed posture。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Risk policy source static pytest：`6 passed`。
+- Risk policy Rust acceptance：`9 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不啟用 risk runtime、不做 order execution、
+不做 DB/evidence writer、不做 paper order route、不做 Linux runtime sync/restart、不授權 tiny-live/live
+或任何 Bybit behavior change。

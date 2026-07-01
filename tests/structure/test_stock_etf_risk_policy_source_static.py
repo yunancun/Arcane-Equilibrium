@@ -265,6 +265,64 @@ def test_stock_etf_risk_policy_source_keeps_dormant_cash_only_paper_shadow_postu
     assert "BrokerEnvironment::Paper | BrokerEnvironment::Shadow" in source
 
 
+def test_stock_etf_risk_policy_fixture_excludes_runtime_live_secret_and_connector_crosswire() -> None:
+    source = _source()
+    fixture = source.split("pub fn accepted_fixture() -> Self", 1)[1].split(
+        "pub fn from_source_config(",
+        1,
+    )[0]
+    source_config_mapper = source.split("pub fn from_source_config(", 1)[1].split(
+        "pub fn validate(&self)",
+        1,
+    )[0]
+    default_impl = source.split("impl Default for StockEtfRiskPolicyV1", 1)[1].split(
+        "impl StockEtfRiskPolicyV1",
+        1,
+    )[0]
+
+    for forbidden in (
+        "environment: BrokerEnvironment::LiveReservedDenied",
+        "enabled: true",
+        "shadow_only: false",
+        "allow_margin: true",
+        "allow_short: true",
+        "allow_options: true",
+        "allow_cfd: true",
+        "allow_transfer: true",
+        "allow_live: true",
+        "bybit_live_execution_unchanged: false",
+        "ibkr_contact_performed: true",
+        "connector_runtime_started: true",
+        "secret_content_serialized: true",
+    ):
+        assert forbidden not in fixture
+
+    for forbidden in (
+        "bybit_live_execution_unchanged: false",
+        "ibkr_contact_performed: true",
+        "connector_runtime_started: true",
+        "secret_content_serialized: true",
+    ):
+        assert forbidden not in source_config_mapper
+
+    for fail_closed in (
+        "environment: BrokerEnvironment::LiveReservedDenied",
+        "enabled: true",
+        "shadow_only: false",
+        "allow_margin: true",
+        "allow_short: true",
+        "allow_options: true",
+        "allow_cfd: true",
+        "allow_transfer: true",
+        "allow_live: true",
+        "bybit_live_execution_unchanged: false",
+        "ibkr_contact_performed: false",
+        "connector_runtime_started: false",
+        "secret_content_serialized: false",
+    ):
+        assert fail_closed in default_impl
+
+
 def test_stock_etf_risk_policy_source_keeps_caps_universe_cost_and_order_gates() -> None:
     source = _source()
 
