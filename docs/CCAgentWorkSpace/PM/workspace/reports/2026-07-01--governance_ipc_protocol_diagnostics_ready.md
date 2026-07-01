@@ -36,6 +36,7 @@ Runtime verification after E3 approval:
 - Source commit `c5fce0c6` fixed that bug and was cherry-picked after second E3 approval to runtime `461dfbe210a46b3cd9c23a1424085124adf5b9ee`.
 - Runtime source-only checks after the second cherry-pick: IPC protocol/HMAC smoke `8 passed`, snapshot helper tests `6 passed`, `py_compile` passed, `git diff --check` passed.
 - Final read-only governance snapshot `/tmp/openclaw/runtime_governance_ipc_protocol_diagnostics_20260701T004959Z_after_await_fix/governance/runtime_governance_snapshot.json` sha `53930c4bf898f0308a2a643833f956b8e65f760f7c4750ffcfece87549456176` is `RUNTIME_GOVERNANCE_IPC_READONLY_SNAPSHOT_READY`.
+- The generated final snapshot hash is preserved as primary method evidence. Use the metadata-corrected session loop state and verified Git heads for source/runtime pinning if snapshot metadata conflicts.
 
 Final snapshot summary:
 
