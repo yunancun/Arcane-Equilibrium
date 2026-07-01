@@ -2939,3 +2939,32 @@ Verification 已過：
 邊界不變：沒有 tiny-live/live authorization、沒有 IBKR contact、沒有 SDK import、沒有
 socket/HTTP、沒有 secret access/creation、沒有 connector runtime、沒有 evidence clock、
 沒有 Bybit gate lowering，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Release Packet Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF Release Packet Source Static Guard`。
+
+這個 guard 鎖住 `stock_etf_release_packet.rs` 的 paper/shadow release packet source hygiene：
+release paths、packet/manifest/migration/kill-disable proof surfaces、role signoffs、hashes、
+sealed/no-live authority gates 必須保留。
+
+Guard 要求 default 保持 source_version 0、paper-shadow window incomplete、engineering
+shakedown incomplete、sealed false；accepted fixture 必須保留 exact ADR/AMD/spec paths、
+PM/Operator/E2/E3/E4/QA/QC/MIT roles、manifest hashes、no-migration fixture、kill-disable
+cleanup proof、evidence archive、paper-shadow window complete、engineering shakedown complete、
+secret false、IBKR live/tiny-live false、sealed=true。Validation 必須保留 role report/log/hash、
+PG migration dry-run/double-apply、redaction fixture、GUI screenshots、DQ manifest、scorecard
+regeneration、kill-disable cleanup、evidence archive、secret serialization denial、live/tiny-live
+authority denial 與 sealed requirement。source 不得出現 env/fs/network/IBKR SDK/clock/
+thread/process/order/Bybit runtime tokens 或 secret material access tokens。
+
+Verification 已過：
+
+- New structure guard pytest：`7 passed`
+- Focused release packet acceptance：`8 passed`
+- Full `cargo test -p openclaw_types`：PASS
+
+邊界不變：沒有 PASS artifact creation、沒有 secret slot、沒有 broker session、沒有 paper
+order、沒有 evidence clock、沒有 tiny-live/live authorization，也沒有改動 Bybit live execution
+行為。

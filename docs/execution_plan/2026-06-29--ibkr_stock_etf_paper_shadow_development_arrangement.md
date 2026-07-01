@@ -5139,3 +5139,46 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper
 cancel/replace、不匯入 broker fill、不做 scorecard writer、不做 DB apply、不啟動 evidence
 writer/clock、不降低任何 Bybit gate、不新增 GUI fanout、不授權 tiny-live/live 或任何 Bybit
 behavior change。
+
+## 118. 2026-07-01 PM session source checkpoint：Stock/ETF Release Packet Source Static Guard
+
+本 checkpoint 為 `stock_etf_release_packet.rs` 補上 source-only structure guard。這不是
+PASS artifact creation、不是 secret slot、不是 broker session、不是 paper order、不是
+evidence clock、不是 tiny-live/live authorization；只把 paper/shadow release packet 的
+source invariant 機器化。
+
+已完成：
+
+- 新增 `tests/structure/test_stock_etf_release_packet_source_static.py`。
+- Guard 鎖住 `stock_etf_release_packet.rs` 低於 800 行 governance cap。
+- Guard 要求 ADR/AMD/spec release paths、release packet contract id、manifest hash、
+  PG migration evidence、kill-disable cleanup proof、release packet/verdict/blocker surface 保持在
+  source 中。
+- Guard 要求 default 仍 fail-closed：empty packet id、source_version 0、paper-shadow window
+  incomplete、engineering shakedown incomplete、secret false、IBKR live/tiny-live false、sealed false。
+- Guard 要求 accepted fixture 保留 exact release paths、all required roles、manifest hashes、
+  no-migration fixture、kill-disable cleanup proof、evidence archive pointer/hash、paper-shadow
+  window complete、engineering shakedown complete、secret false、IBKR live/tiny-live false、
+  sealed=true。
+- Guard 要求 PM/Operator/E2/E3/E4/QA/QC/MIT signoff mapping、role reports、E2/E3/E4/QA logs、
+  manifest hashes、PG migration dry-run/double-apply evidence、redaction fixture、GUI screenshots、
+  DQ manifests、scorecard regeneration hashes、kill-disable cleanup proof、evidence archive、
+  paper-shadow window、engineering shakedown gates 不得消失。
+- Guard 要求 secret serialization denial、IBKR live/tiny-live authority denial、release packet
+  sealed requirement 不得消失。
+- Guard 禁止 env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens
+  與 secret material access tokens。
+
+驗證：
+
+- New structure guard py_compile：PASS。
+- Focused structure guard pytest：`7 passed`。
+- Focused release packet acceptance：`8 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
+cancel/replace、不匯入 broker fill、不做 scorecard writer、不做 DB apply、不啟動 evidence
+writer/clock、不建立 PASS artifact、不建立 secret slot、不授權 tiny-live/live 或任何 Bybit
+behavior change。
