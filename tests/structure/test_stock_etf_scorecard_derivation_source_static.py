@@ -172,12 +172,27 @@ def _source() -> str:
     return SCORECARD_DERIVATION.read_text(encoding="utf-8")
 
 
+def _default_block(source: str) -> str:
+    return source.split("impl Default for StockEtfScorecardDerivationV1", 1)[1].split(
+        "impl StockEtfScorecardDerivationV1",
+        1,
+    )[0]
+
+
+def _accepted_fixture_block(source: str) -> str:
+    return source.split("pub fn accepted_fixture() -> Self", 1)[1].split(
+        "pub fn validate(&self)",
+        1,
+    )[0]
+
+
 def test_stock_etf_scorecard_derivation_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
 
 def test_stock_etf_scorecard_derivation_source_keeps_contract_surface() -> None:
     source = _source()
+    default_block = _default_block(source)
 
     for token in REQUIRED_TYPE_TOKENS:
         assert token in source
@@ -186,21 +201,21 @@ def test_stock_etf_scorecard_derivation_source_keeps_contract_surface() -> None:
     for blocker in REQUIRED_BLOCKERS:
         assert f"Blocker::{blocker}" in source or blocker in source
 
-    assert "contract_id: String::new()" in source
-    assert "source_version: 0" in source
-    assert "asset_lane: AssetLane::CryptoPerp" in source
-    assert "broker: Broker::Bybit" in source
-    assert "environment: BrokerEnvironment::LiveReservedDenied" in source
-    assert "derived_from_atomic_facts_only: false" in source
-    assert "idempotent_replay_proven: false" in source
-    assert "paper_and_shadow_fills_separate: false" in source
-    assert "bybit_live_execution_unchanged: false" in source
-    assert "sealed: false" in source
+    assert "contract_id: String::new()" in default_block
+    assert "source_version: 0" in default_block
+    assert "asset_lane: AssetLane::CryptoPerp" in default_block
+    assert "broker: Broker::Bybit" in default_block
+    assert "environment: BrokerEnvironment::LiveReservedDenied" in default_block
+    assert "derived_from_atomic_facts_only: false" in default_block
+    assert "idempotent_replay_proven: false" in default_block
+    assert "paper_and_shadow_fills_separate: false" in default_block
+    assert "bybit_live_execution_unchanged: false" in default_block
+    assert "sealed: false" in default_block
     assert "accepted: blockers.is_empty()" in source
 
 
 def test_stock_etf_scorecard_derivation_source_keeps_accepted_sealed_shape() -> None:
-    source = _source()
+    source = _accepted_fixture_block(_source())
 
     assert "contract_id: STOCK_ETF_SCORECARD_DERIVATION_CONTRACT_ID.to_string()" in source
     assert "source_version: 1" in source
@@ -226,16 +241,38 @@ def test_stock_etf_scorecard_derivation_source_keeps_accepted_sealed_shape() -> 
 
 def test_stock_etf_scorecard_derivation_fixture_excludes_writer_live_and_authority_crosswire() -> None:
     source = _source()
-    accepted_fixture = source.split("pub fn accepted_fixture() -> Self", 1)[1].split(
-        "pub fn validate(&self)",
-        1,
-    )[0]
-    default_impl = source.split("impl Default for StockEtfScorecardDerivationV1", 1)[1].split(
-        "impl StockEtfScorecardDerivationV1",
-        1,
-    )[0]
+    accepted_fixture = _accepted_fixture_block(source)
+    default_impl = _default_block(source)
 
     for forbidden in (
+        "asset_lane: AssetLane::CryptoPerp",
+        "broker: Broker::Bybit",
+        "environment: BrokerEnvironment::LiveReservedDenied",
+        "environment: BrokerEnvironment::Shadow",
+        "contract_id: String::new()",
+        "derivation_run_id: String::new()",
+        "strategy_id: String::new()",
+        "universe_version: String::new()",
+        "benchmark_version: String::new()",
+        "as_of_date: String::new()",
+        "scorecard_input_bundle_hash: String::new()",
+        "evidence_clock_manifest_hash: String::new()",
+        "dq_manifest_hash: String::new()",
+        "paper_shadow_reconciliation_hash: String::new()",
+        "formula_appendix_hash: String::new()",
+        "statistical_preregistration_hash: String::new()",
+        "scorecard_manifest_hash: String::new()",
+        "scorecard_verdict_hash: String::new()",
+        "source_commit_hash: String::new()",
+        "derivation_code_hash: String::new()",
+        "output_artifact_hash: String::new()",
+        "qc_review_hash: String::new()",
+        "mit_review_hash: String::new()",
+        "qa_review_hash: String::new()",
+        "derived_from_atomic_facts_only: false",
+        "idempotent_replay_proven: false",
+        "paper_and_shadow_fills_separate: false",
+        "bybit_live_execution_unchanged: false",
         "ibkr_contact_performed: true",
         "connector_runtime_started: true",
         "broker_fill_import_performed: true",
@@ -246,14 +283,37 @@ def test_stock_etf_scorecard_derivation_fixture_excludes_writer_live_and_authori
         "evidence_clock_started: true",
         "secret_content_serialized: true",
         "live_or_tiny_live_authorized: true",
+        "sealed: false",
     ):
         assert forbidden not in accepted_fixture
 
     for fail_closed in (
+        "asset_lane: AssetLane::CryptoPerp",
+        "broker: Broker::Bybit",
+        "environment: BrokerEnvironment::LiveReservedDenied",
+        "derivation_run_id: String::new()",
+        "strategy_id: String::new()",
+        "universe_version: String::new()",
+        "benchmark_version: String::new()",
+        "as_of_date: String::new()",
+        "scorecard_input_bundle_hash: String::new()",
+        "evidence_clock_manifest_hash: String::new()",
+        "dq_manifest_hash: String::new()",
+        "paper_shadow_reconciliation_hash: String::new()",
         "derived_from_atomic_facts_only: false",
         "idempotent_replay_proven: false",
         "paper_and_shadow_fills_separate: false",
         "bybit_live_execution_unchanged: false",
+        "ibkr_contact_performed: false",
+        "connector_runtime_started: false",
+        "broker_fill_import_performed: false",
+        "shadow_fill_generated: false",
+        "reconciliation_writer_started: false",
+        "scorecard_writer_started: false",
+        "db_apply_performed: false",
+        "evidence_clock_started: false",
+        "secret_content_serialized: false",
+        "live_or_tiny_live_authorized: false",
         "sealed: false",
     ):
         assert fail_closed in default_impl

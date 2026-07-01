@@ -3877,3 +3877,9 @@
 - PM added test-only/source-static exact-blocker coverage for `StockEtfPaperShadowReconciliationV1` authority/scope, paper-fill/shadow-signal/shadow-fill-model lineage, reconciliation evidence gates, and no-side-effect flags.
 - Verification passed: paper-shadow reconciliation source static `9 passed`; paper-shadow reconciliation Rust acceptance `10 passed`; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, IPC/runtime change, IBKR contact, connector runtime, secret access, fill import execution, shadow fill generation, reconciliation writer, DB/evidence writer, scorecard writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Scorecard Derivation Authority Lineage Cross-Wire Guard
+
+- PM added test-only/source-static exact-blocker coverage for `StockEtfScorecardDerivationV1` artifact identity, ids, hash lineage, atomic/replay/separation/seal posture, and no-side-effect flags.
+- Verification passed: scorecard derivation source static `7 passed`; scorecard derivation Rust acceptance `11 passed`; package fmt/docs trace/diff check PASS.
+- Boundary unchanged: no Rust production code change, IPC/runtime change, IBKR contact, connector runtime, secret access, broker fill import execution, shadow fill generation, reconciliation writer, scorecard writer, DB/evidence writer, evidence clock start, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

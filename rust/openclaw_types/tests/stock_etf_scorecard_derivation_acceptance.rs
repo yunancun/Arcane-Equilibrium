@@ -7,8 +7,8 @@
 use std::path::PathBuf;
 
 use openclaw_types::{
-    StockEtfScorecardDerivationBlocker, StockEtfScorecardDerivationV1,
-    STOCK_ETF_SCORECARD_DERIVATION_CONTRACT_ID,
+    AssetLane, Broker, BrokerEnvironment, StockEtfScorecardDerivationBlocker,
+    StockEtfScorecardDerivationV1, STOCK_ETF_SCORECARD_DERIVATION_CONTRACT_ID,
 };
 
 fn assert_has_blocker(
@@ -148,6 +148,154 @@ fn derivation_requires_ids_and_lineage_hashes() {
 }
 
 #[test]
+fn derivation_rejects_each_identity_gap_independently() {
+    use StockEtfScorecardDerivationBlocker as Blocker;
+
+    let cases: [(fn(&mut StockEtfScorecardDerivationV1), Blocker); 7] = [
+        (
+            |candidate| candidate.contract_id.clear(),
+            Blocker::ContractIdMissing,
+        ),
+        (
+            |candidate| {
+                candidate.contract_id = "stock_etf_scorecard_derivation_v1_fixture".to_string()
+            },
+            Blocker::ContractIdMismatch,
+        ),
+        (
+            |candidate| candidate.source_version = 2,
+            Blocker::SourceVersionMismatch,
+        ),
+        (
+            |candidate| candidate.asset_lane = AssetLane::CryptoPerp,
+            Blocker::WrongAssetLane,
+        ),
+        (
+            |candidate| candidate.broker = Broker::Bybit,
+            Blocker::WrongBroker,
+        ),
+        (
+            |candidate| candidate.environment = BrokerEnvironment::Shadow,
+            Blocker::EnvironmentDenied,
+        ),
+        (
+            |candidate| candidate.environment = BrokerEnvironment::LiveReservedDenied,
+            Blocker::EnvironmentDenied,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut candidate = StockEtfScorecardDerivationV1::accepted_fixture();
+        mutate(&mut candidate);
+        assert_single_blocker(candidate, blocker);
+    }
+}
+
+#[test]
+fn derivation_rejects_each_id_gap_independently() {
+    use StockEtfScorecardDerivationBlocker as Blocker;
+
+    let cases: [(fn(&mut StockEtfScorecardDerivationV1), Blocker); 5] = [
+        (
+            |candidate| candidate.derivation_run_id.clear(),
+            Blocker::DerivationRunIdMissing,
+        ),
+        (
+            |candidate| candidate.strategy_id.clear(),
+            Blocker::StrategyIdMissing,
+        ),
+        (
+            |candidate| candidate.universe_version.clear(),
+            Blocker::UniverseVersionMissing,
+        ),
+        (
+            |candidate| candidate.benchmark_version.clear(),
+            Blocker::BenchmarkVersionMissing,
+        ),
+        (
+            |candidate| candidate.as_of_date.clear(),
+            Blocker::AsOfDateMissing,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut candidate = StockEtfScorecardDerivationV1::accepted_fixture();
+        mutate(&mut candidate);
+        assert_single_blocker(candidate, blocker);
+    }
+}
+
+#[test]
+fn derivation_rejects_each_hash_lineage_gap_independently() {
+    use StockEtfScorecardDerivationBlocker as Blocker;
+
+    let cases: [(fn(&mut StockEtfScorecardDerivationV1), Blocker); 14] = [
+        (
+            |candidate| candidate.scorecard_input_bundle_hash.clear(),
+            Blocker::ScorecardInputBundleHashInvalid,
+        ),
+        (
+            |candidate| candidate.evidence_clock_manifest_hash.clear(),
+            Blocker::EvidenceClockManifestHashInvalid,
+        ),
+        (
+            |candidate| candidate.dq_manifest_hash.clear(),
+            Blocker::DqManifestHashInvalid,
+        ),
+        (
+            |candidate| candidate.paper_shadow_reconciliation_hash = "not-a-sha".to_string(),
+            Blocker::PaperShadowReconciliationHashInvalid,
+        ),
+        (
+            |candidate| candidate.formula_appendix_hash.clear(),
+            Blocker::FormulaAppendixHashInvalid,
+        ),
+        (
+            |candidate| candidate.statistical_preregistration_hash.clear(),
+            Blocker::StatisticalPreregistrationHashInvalid,
+        ),
+        (
+            |candidate| candidate.scorecard_manifest_hash.clear(),
+            Blocker::ScorecardManifestHashInvalid,
+        ),
+        (
+            |candidate| candidate.scorecard_verdict_hash.clear(),
+            Blocker::ScorecardVerdictHashInvalid,
+        ),
+        (
+            |candidate| candidate.source_commit_hash.clear(),
+            Blocker::SourceCommitHashInvalid,
+        ),
+        (
+            |candidate| candidate.derivation_code_hash.clear(),
+            Blocker::DerivationCodeHashInvalid,
+        ),
+        (
+            |candidate| candidate.output_artifact_hash.clear(),
+            Blocker::OutputArtifactHashInvalid,
+        ),
+        (
+            |candidate| candidate.qc_review_hash.clear(),
+            Blocker::QcReviewHashInvalid,
+        ),
+        (
+            |candidate| candidate.mit_review_hash.clear(),
+            Blocker::MitReviewHashInvalid,
+        ),
+        (
+            |candidate| candidate.qa_review_hash.clear(),
+            Blocker::QaReviewHashInvalid,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut candidate = StockEtfScorecardDerivationV1::accepted_fixture();
+        mutate(&mut candidate);
+        assert_single_blocker(candidate, blocker);
+    }
+}
+
+#[test]
 fn derivation_rejects_runtime_side_effects_and_authority() {
     let mut candidate = StockEtfScorecardDerivationV1::accepted_fixture();
     candidate.derived_from_atomic_facts_only = false;
@@ -202,6 +350,91 @@ fn derivation_rejects_runtime_side_effects_and_authority() {
     assert!(verdict
         .blockers
         .contains(&StockEtfScorecardDerivationBlocker::NotSealed));
+}
+
+#[test]
+fn derivation_rejects_each_evidence_and_seal_gap_independently() {
+    use StockEtfScorecardDerivationBlocker as Blocker;
+
+    let cases: [(fn(&mut StockEtfScorecardDerivationV1), Blocker); 5] = [
+        (
+            |candidate| candidate.derived_from_atomic_facts_only = false,
+            Blocker::NotDerivedFromAtomicFactsOnly,
+        ),
+        (
+            |candidate| candidate.idempotent_replay_proven = false,
+            Blocker::IdempotentReplayNotProven,
+        ),
+        (
+            |candidate| candidate.paper_and_shadow_fills_separate = false,
+            Blocker::PaperShadowFillSeparationMissing,
+        ),
+        (
+            |candidate| candidate.bybit_live_execution_unchanged = false,
+            Blocker::BybitLiveExecutionNotProtected,
+        ),
+        (|candidate| candidate.sealed = false, Blocker::NotSealed),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut candidate = StockEtfScorecardDerivationV1::accepted_fixture();
+        mutate(&mut candidate);
+        assert_single_blocker(candidate, blocker);
+    }
+}
+
+#[test]
+fn derivation_rejects_each_boundary_flag_independently() {
+    use StockEtfScorecardDerivationBlocker as Blocker;
+
+    let cases: [(fn(&mut StockEtfScorecardDerivationV1), Blocker); 10] = [
+        (
+            |candidate| candidate.ibkr_contact_performed = true,
+            Blocker::IbkrContactPerformed,
+        ),
+        (
+            |candidate| candidate.connector_runtime_started = true,
+            Blocker::ConnectorRuntimeStarted,
+        ),
+        (
+            |candidate| candidate.broker_fill_import_performed = true,
+            Blocker::BrokerFillImportPerformed,
+        ),
+        (
+            |candidate| candidate.shadow_fill_generated = true,
+            Blocker::ShadowFillGenerated,
+        ),
+        (
+            |candidate| candidate.reconciliation_writer_started = true,
+            Blocker::ReconciliationWriterStarted,
+        ),
+        (
+            |candidate| candidate.scorecard_writer_started = true,
+            Blocker::ScorecardWriterStarted,
+        ),
+        (
+            |candidate| candidate.db_apply_performed = true,
+            Blocker::DbApplyPerformed,
+        ),
+        (
+            |candidate| candidate.evidence_clock_started = true,
+            Blocker::EvidenceClockStarted,
+        ),
+        (
+            |candidate| candidate.secret_content_serialized = true,
+            Blocker::SecretContentSerialized,
+        ),
+        (
+            |candidate| candidate.live_or_tiny_live_authorized = true,
+            Blocker::LiveOrTinyLiveAuthorized,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut candidate = StockEtfScorecardDerivationV1::accepted_fixture();
+        mutate(&mut candidate);
+        assert_single_blocker(candidate, blocker);
+    }
 }
 
 #[test]
@@ -396,4 +629,14 @@ fn blocked_template_is_parseable_and_secret_free() {
     assert!(!raw.contains("account_id"));
     assert!(!raw.contains("token"));
     assert!(!raw.contains("password"));
+}
+
+fn assert_single_blocker(
+    candidate: StockEtfScorecardDerivationV1,
+    expected: StockEtfScorecardDerivationBlocker,
+) {
+    let verdict = candidate.validate();
+
+    assert!(!verdict.accepted);
+    assert_eq!(verdict.blockers, vec![expected]);
 }
