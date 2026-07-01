@@ -4627,3 +4627,33 @@ Verification 已過：
 沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 read-only probe execution、沒有 result
 import execution、沒有 evidence/scorecard writer、沒有 broker session、沒有 paper order route、沒有
 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — IBKR Paper Lifecycle Event Authority Lineage Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`IBKR Paper Lifecycle Event Authority Lineage Cross-Wire Guard`。
+
+這個 checkpoint 補強 `BrokerLifecycleEventLogV1` 的 append-only event identity、request lineage、
+paper-only authority、transition/stale-policy、denial semantics 與 fill identity coverage。新增 Rust
+acceptance 證明 lifecycle/event-log/source/event/request identity、StockEtfCash/IBKR/Paper posture、
+local order/idempotency/reconciliation ids、broker order id、raw/redacted artifact hashes、stale policy、
+denied-event reason、fill execution/commission ids 都會 fail closed。
+
+同時保留 non-paper operation 的天然 aggregate 行為：非 paper lifecycle operation 必須同時命中
+`OperationNotPaperLifecycle` 與 `OperationTransitionMismatch`。Python source-static parser 也鎖住
+`Default` / `accepted_ack_fixture` block，避免 accepted ack fixture 被硬編成 live、Bybit、wrong operation、
+denied、empty-lineage 或 stale-policy-missing posture。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Paper lifecycle source static pytest：`7 passed`
+- Paper lifecycle Rust acceptance：`15 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 lifecycle writer、沒有 evidence/
+scorecard writer、沒有 broker session、沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動
+Bybit live/demo execution 行為。

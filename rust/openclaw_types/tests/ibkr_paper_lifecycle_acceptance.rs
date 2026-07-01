@@ -6,8 +6,8 @@
 use std::path::PathBuf;
 
 use openclaw_types::{
-    classify_ibkr_paper_restart_recovery, is_operation_transition_allowed, BrokerEnvironment,
-    BrokerLifecycleEventLogV1, BrokerOperation, IbkrPaperLifecycleEventBlocker,
+    classify_ibkr_paper_restart_recovery, is_operation_transition_allowed, AssetLane, Broker,
+    BrokerEnvironment, BrokerLifecycleEventLogV1, BrokerOperation, IbkrPaperLifecycleEventBlocker,
     IbkrPaperOrderLifecycleState, IbkrPaperRestartRecoveryAction, IbkrPaperRestartRecoveryInputV1,
     IbkrPaperStaleStatePolicy, StockEtfDenialReason, BROKER_LIFECYCLE_EVENT_LOG_CONTRACT_ID,
     IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID, STOCK_ETF_PAPER_ORDER_REQUEST_CONTRACT_ID,
@@ -177,6 +177,142 @@ fn append_only_chain_and_request_envelope_are_required() {
 }
 
 #[test]
+fn lifecycle_event_rejects_each_identity_and_lineage_gap_independently() {
+    use IbkrPaperLifecycleEventBlocker as Blocker;
+
+    let cases: [(fn(&mut BrokerLifecycleEventLogV1), Blocker); 15] = [
+        (
+            |event| {
+                event.lifecycle_contract_id = "ibkr_paper_order_lifecycle_v1_fixture".to_string()
+            },
+            Blocker::LifecycleContractIdMismatch,
+        ),
+        (
+            |event| {
+                event.event_log_contract_id = "broker_lifecycle_event_log_v1_fixture".to_string()
+            },
+            Blocker::EventLogContractIdMismatch,
+        ),
+        (
+            |event| event.source_version = 2,
+            Blocker::SourceVersionMismatch,
+        ),
+        (|event| event.event_id.clear(), Blocker::EventIdMissing),
+        (
+            |event| event.event_sequence = 0,
+            Blocker::EventSequenceMissing,
+        ),
+        (
+            |event| event.previous_event_hash.clear(),
+            Blocker::PreviousEventHashInvalid,
+        ),
+        (|event| event.event_time_ms = 0, Blocker::EventTimeMissing),
+        (|event| event.event_hash.clear(), Blocker::EventHashInvalid),
+        (
+            |event| event.request_contract_id = "wrong".to_string(),
+            Blocker::RequestContractIdMismatch,
+        ),
+        (
+            |event| event.request_envelope_hash.clear(),
+            Blocker::RequestEnvelopeHashInvalid,
+        ),
+        (
+            |event| event.asset_lane = AssetLane::CryptoPerp,
+            Blocker::WrongAssetLane,
+        ),
+        (|event| event.broker = Broker::Bybit, Blocker::WrongBroker),
+        (
+            |event| event.order_local_id.clear(),
+            Blocker::LocalOrderIdMissing,
+        ),
+        (
+            |event| event.idempotency_key.clear(),
+            Blocker::IdempotencyKeyMissing,
+        ),
+        (
+            |event| event.reconciliation_run_id.clear(),
+            Blocker::ReconciliationRunIdMissing,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut event = BrokerLifecycleEventLogV1::accepted_ack_fixture();
+        mutate(&mut event);
+        assert_single_blocker(event, blocker);
+    }
+}
+
+#[test]
+fn lifecycle_event_rejects_each_paper_authority_and_artifact_gap_independently() {
+    use IbkrPaperLifecycleEventBlocker as Blocker;
+
+    let cases: [(fn(&mut BrokerLifecycleEventLogV1), Blocker); 9] = [
+        (
+            |event| event.environment = BrokerEnvironment::ReadOnly,
+            Blocker::PaperEnvironmentRequired,
+        ),
+        (
+            |event| event.operation = BrokerOperation::PaperOrderCancel,
+            Blocker::OperationTransitionMismatch,
+        ),
+        (
+            |event| event.broker_order_id.clear(),
+            Blocker::BrokerOrderIdMissing,
+        ),
+        (
+            |event| event.denial_reason = Some(StockEtfDenialReason::AuthorizationInvalid),
+            Blocker::DenialReasonPresentOnAllowedEvent,
+        ),
+        (
+            |event| event.stale_state_policy = None,
+            Blocker::StaleStatePolicyMissing,
+        ),
+        (
+            |event| {
+                event.stale_state_policy =
+                    Some(IbkrPaperStaleStatePolicy::PreserveTerminalWithEvidence)
+            },
+            Blocker::StaleStatePolicyMismatch,
+        ),
+        (
+            |event| event.raw_artifact_hash.clear(),
+            Blocker::RawArtifactHashInvalid,
+        ),
+        (
+            |event| event.redacted_summary_hash.clear(),
+            Blocker::RedactedSummaryHashInvalid,
+        ),
+        (
+            |event| event.operation = BrokerOperation::TransferOrAccountWrite,
+            Blocker::OperationNotPaperLifecycle,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut event = BrokerLifecycleEventLogV1::accepted_ack_fixture();
+        mutate(&mut event);
+        if blocker == Blocker::OperationNotPaperLifecycle {
+            let verdict = event.validate();
+            assert!(!verdict.accepted);
+            assert!(verdict
+                .blockers
+                .contains(&Blocker::OperationNotPaperLifecycle));
+            assert!(verdict
+                .blockers
+                .contains(&Blocker::OperationTransitionMismatch));
+            assert_eq!(
+                verdict.blockers.len(),
+                2,
+                "expected operation aggregate only, got {:?}",
+                verdict.blockers
+            );
+        } else {
+            assert_single_blocker(event, blocker);
+        }
+    }
+}
+
+#[test]
 fn operation_must_match_lifecycle_transition_shape() {
     assert!(is_operation_transition_allowed(
         BrokerOperation::PaperOrderSubmit,
@@ -315,6 +451,39 @@ fn denied_lifecycle_event_requires_denial_reason() {
 }
 
 #[test]
+fn lifecycle_event_rejects_denial_and_fill_identity_gaps_independently() {
+    use IbkrPaperLifecycleEventBlocker as Blocker;
+
+    let denied_without_reason = BrokerLifecycleEventLogV1 {
+        previous_state: IbkrPaperOrderLifecycleState::RustAuthorityAccepted,
+        next_state: IbkrPaperOrderLifecycleState::Rejected,
+        allowed: false,
+        denial_reason: None,
+        broker_order_id: String::new(),
+        ..BrokerLifecycleEventLogV1::accepted_ack_fixture()
+    };
+    assert_single_blocker(
+        denied_without_reason.clone(),
+        Blocker::DenialReasonMissingOnDeniedEvent,
+    );
+
+    let denied_but_active = BrokerLifecycleEventLogV1 {
+        allowed: false,
+        denial_reason: Some(StockEtfDenialReason::AuthorizationInvalid),
+        ..BrokerLifecycleEventLogV1::accepted_ack_fixture()
+    };
+    assert_single_blocker(denied_but_active, Blocker::DeniedEventAdvancesActiveState);
+
+    let mut missing_execution = accepted_fill_event();
+    missing_execution.execution_id.clear();
+    assert_single_blocker(missing_execution, Blocker::ExecutionIdMissing);
+
+    let mut missing_commission = accepted_fill_event();
+    missing_commission.commission_report_id.clear();
+    assert_single_blocker(missing_commission, Blocker::CommissionReportIdMissing);
+}
+
+#[test]
 fn restart_recovery_classification_is_fail_closed() {
     let reconcile = IbkrPaperRestartRecoveryInputV1 {
         broker_state_known: true,
@@ -382,4 +551,31 @@ fn lifecycle_template_is_default_blocked_and_secret_free() {
     assert!(!lower.contains("account_id ="));
     assert!(!lower.contains("password ="));
     assert!(!lower.contains("token ="));
+}
+
+fn accepted_fill_event() -> BrokerLifecycleEventLogV1 {
+    BrokerLifecycleEventLogV1 {
+        operation: BrokerOperation::PaperOrderFillImport,
+        previous_state: IbkrPaperOrderLifecycleState::BrokerAcknowledged,
+        next_state: IbkrPaperOrderLifecycleState::Filled,
+        execution_id: "paper_exec_0001".to_string(),
+        commission_report_id: "paper_commission_0001".to_string(),
+        ..BrokerLifecycleEventLogV1::accepted_ack_fixture()
+    }
+}
+
+fn assert_single_blocker(
+    event: BrokerLifecycleEventLogV1,
+    blocker: IbkrPaperLifecycleEventBlocker,
+) {
+    let verdict = event.validate();
+
+    assert!(!verdict.accepted);
+    assert_eq!(
+        verdict.blockers,
+        vec![blocker],
+        "expected only {:?}, got {:?}",
+        blocker,
+        verdict.blockers
+    );
 }

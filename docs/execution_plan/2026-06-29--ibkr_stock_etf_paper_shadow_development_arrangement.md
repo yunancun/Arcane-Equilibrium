@@ -7437,3 +7437,45 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不啟動 read-only probe runtime、不執行
 result import、不做 broker session、不做 broker routing、不做 evidence/scorecard writer、不做 paper order
 route、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 178. 2026-07-01 PM session source checkpoint：IBKR Paper Lifecycle Event Authority Lineage Cross-Wire Guard
+
+本 checkpoint 補強 `ibkr_paper_lifecycle` 的 append-only event identity、request lineage、paper-only
+authority、transition/stale-policy、denial semantics 與 fill identity coverage。這不是 Rust production
+behavior change、不是 IBKR contact、不是 connector runtime、不是 lifecycle writer、不是 secret lookup、
+不是 broker session、不是 evidence/scorecard writer、不是 paper order route、不是 tiny-live/live gate；只把
+paper lifecycle event 的 source/event/request identity、StockEtfCash/IBKR/Paper authority、state transition、
+stale recovery、denied-event 與 fill id posture 變成 exact-blocker acceptance test 與 source-static guard。
+
+已完成：
+
+- 在 `ibkr_paper_lifecycle_acceptance.rs` 新增
+  `lifecycle_event_rejects_each_identity_and_lineage_gap_independently`。
+- Acceptance 證明 lifecycle/event-log contract ids、source version、event id、event sequence、previous-event
+  hash、event time/hash、paper-order request contract/hash、asset lane、broker、local order id、idempotency
+  key、reconciliation run id gaps 都會各自只產生單一對應 blocker。
+- 在同檔新增 `lifecycle_event_rejects_each_paper_authority_and_artifact_gap_independently`。
+- Acceptance 證明 ReadOnly environment、paper transition mismatch、broker order id、allowed-event denial
+  reason、stale policy missing/mismatch、raw/redacted artifact hash gaps 都會各自只產生單一對應 blocker。
+- Acceptance 明確保留 non-paper operation aggregate 行為：非 paper lifecycle operation 必須同時命中
+  `OperationNotPaperLifecycle` 與 `OperationTransitionMismatch`。
+- 在同檔新增 `lifecycle_event_rejects_denial_and_fill_identity_gaps_independently`。
+- Acceptance 證明 denied event missing reason、denied active-state event、fill execution id、commission report
+  id gaps 都會各自只產生單一對應 blocker。
+- 在 `test_ibkr_paper_lifecycle_source_static.py` 新增 default / accepted ack fixture block parser，鎖住
+  default fail-closed posture 與 accepted ack fixture 不可硬編 live/Bybit/wrong-operation/denied/empty-lineage/
+  stale-policy-missing posture。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Paper lifecycle source static pytest：`7 passed`。
+- Paper lifecycle Rust acceptance：`15 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不啟動 lifecycle writer、不做 broker
+session、不做 broker routing、不做 evidence/scorecard writer、不做 paper order route、不做 Linux runtime
+sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。

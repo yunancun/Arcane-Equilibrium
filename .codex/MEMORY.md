@@ -1535,3 +1535,11 @@ Do not paste long reports or stable architecture into TODO.
 - Missing import timestamp remains intentionally aggregate: `ImportRequestedAtMissing` plus `ResultAsOfAfterImportRequested`, not a single-blocker claim.
 - Python source-static parsing now pins `Default` / `accepted_fixture` blocks so the accepted fixture cannot hardcode runtime, secret, order, writer, Bybit cross-wire, or empty-common-lineage posture.
 - Verification passed: source static `11 passed`; readonly probe result-import acceptance `11 passed`; `cargo fmt -p openclaw_types -- --check` PASS; docs trace PASS; diff check PASS. This grants no Rust production code change, IPC change, IBKR contact, connector runtime, secret access, read-only probe execution, result import execution, DB/evidence/scorecard writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Paper Lifecycle Event Authority Lineage Cross-Wire Guard
+
+- PM added exact-blocker Rust acceptance coverage for `BrokerLifecycleEventLogV1` event identity, request lineage, paper authority, transition/stale policy, denial semantics, and fill identity gaps.
+- The guard proves lifecycle/event-log/source/event/request ids and hashes, StockEtfCash/IBKR/Paper posture, local order/idempotency/reconciliation ids, broker order id, stale policy, raw/redacted artifacts, denied-event reason, active denied-event blocking, and fill execution/commission ids fail closed.
+- Non-paper lifecycle operation remains intentionally aggregate: `OperationNotPaperLifecycle` plus `OperationTransitionMismatch`, not a single-blocker claim.
+- Python source-static parsing now pins `Default` / `accepted_ack_fixture` blocks so the accepted ack fixture cannot hardcode live, Bybit, wrong-operation, denied, empty-lineage, or stale-policy-missing posture.
+- Verification passed: source static `7 passed`; paper lifecycle acceptance `15 passed`; `cargo fmt -p openclaw_types -- --check` PASS; docs trace PASS; diff check PASS. This grants no Rust production code change, IPC change, IBKR contact, connector runtime, secret access, lifecycle writer, DB/evidence/scorecard writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
