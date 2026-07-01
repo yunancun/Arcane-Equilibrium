@@ -7,9 +7,9 @@
 - Current-head packet: `/tmp/openclaw/order_capable_demo_invoke_review_20260701T042614Z_current_head_d895191/order_capable_demo_invoke_e3_bb_review_request.json`
 - Current-head packet sha: `ae9a6f995102aeec141f592fb2fbbb0ac3911827e477e80f9b6c73cc0edb35f7`
 - Runtime execution manifest: `trade-core:/tmp/openclaw/order_capable_phase_ab_no_order_20260701T042953Z_ae9a6f/execution_manifest.json`
-- Runtime execution manifest sha: `c1892de13d1b490a5a3ae30cf46438a12653e28e1a69655d1a201d0bcda28e84`
+- Runtime execution manifest sha: `086ffb8dbb4cc03932916699ce33748787ddb0cc28da662ceed7bbeaadde6f21`
 - Final session state: `/tmp/openclaw/session_loop_state_20260701T042953Z_order_capable_phase_ab_no_order_blocked/session_loop_state_final.json`
-- Final session state sha: `017f48f6cb792942c51e1365032342582164e68f98b09909a44cf163208b797c`
+- Final session state sha: `6055b4e01775e034610caf11aba077563f6ff5c5c3bcef225c7b668366c1b7de`
 
 ## Summary
 
@@ -17,7 +17,7 @@ PM refreshed the order-capable Demo invoke packet after source-head drift invali
 
 Pre-run checks passed: standing auth remained active until `2026-07-01T09:02:17.250395Z`, candidate stayed `grid_trading|ETHUSDT|Buy`, runtime stayed `e16d3323cb58a549262f6bfa6f1ef48ca140aea0`, and Phase A/B helper checksums matched between source and runtime.
 
-The runtime run failed closed before public quote capture and before any active Decision Lease. The no-authority envelope emitted `FALSE_NEGATIVE_REVIEW_INPUT_NOT_READY` because the downstream false-negative review/preflight inputs exceeded the 21600-second freshness contract. Phase A quote therefore recorded request count `0`, and dry-run stopped as `CURRENT_CANDIDATE_ACTUAL_ADMISSION_BBO_LEASE_WINDOW_SOURCE_NOT_READY`.
+The runtime run failed closed before public quote capture and before any active Decision Lease. The no-authority envelope emitted `FALSE_NEGATIVE_REVIEW_INPUT_NOT_READY` because the downstream false-negative review/preflight inputs exceeded the 21600-second freshness contract. Phase A quote therefore recorded request count `0`, and dry-run stopped as `CURRENT_CANDIDATE_ACTUAL_ADMISSION_BBO_LEASE_WINDOW_SOURCE_NOT_READY`. The manifest was corrected after initial write to record that zero request count from the quote artifact; no runtime action was rerun for the correction.
 
 ## Evidence
 
