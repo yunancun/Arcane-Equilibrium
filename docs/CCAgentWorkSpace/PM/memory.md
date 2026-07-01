@@ -4075,6 +4075,12 @@
 - Verification passed: IBKR Phase2 gate source static `8 passed`; IBKR Phase2 gate Rust acceptance `13 passed`; full `cargo test -p openclaw_types` PASS; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, GUI runtime/API route/IPC behavior change, IBKR contact, connector runtime, socket/client construction, secret access, paper order routing, broker session, DB/evidence writer, scorecard writer, paper-shadow launch, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
 
+## 2026-07-01 No-Order Refresh Request Invalidated Before E3/BB 70e
+
+- PM rotated `P0-CURRENT-CANDIDATE-NOORDER-REFRESH-CURRENT-HEAD-E3-BB-REQUEST` to clean source `70e2790a...`, got READY sha `05965d4e...`, and generated exact request sha `690c152f...`.
+- Pre-dispatch fetch moved source to `76cf3968...`, so the request/READY are non-consumable and E3/BB were not dispatched.
+- State transition `ROTATED`; final state sha `e560f4f6d6509a7f6a318e9132ba16e1501b99d6cee537079af14881b0b0d0e3`; no Control API/Bybit/PG/lease/order/runtime mutation/proof.
+
 ## 2026-07-01 Stock/ETF Scorecard Verdict Exact Blocker Guard
 
 - PM tightened test-only exact-blocker coverage for `StockEtfScorecardVerdictV1` aggregate fail-closed paths: default artifact, hash-lineage drift, profitability/quality failures, execution-model-invalid rationale, runtime side effects, and evidence/live/Bybit/writer cross-wire cases.
