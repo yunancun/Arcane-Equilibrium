@@ -7479,3 +7479,48 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不啟動 lifecycle writer、不做 broker
 session、不做 broker routing、不做 evidence/scorecard writer、不做 paper order route、不做 Linux runtime
 sync/restart、不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 179. 2026-07-01 PM session source checkpoint：Stock/ETF Paper Fill Import Request Authority Lineage Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_paper_fill_import_request` 的 lane/broker/environment/method/operation/
+authority、lifecycle/event-log/redaction/session lineage、idempotency/replay、stale-state policy 與
+no-side-effect boundary coverage。這不是 Rust production behavior change、不是 IBKR contact、不是
+connector runtime、不是 fill import execution、不是 DB/evidence writer、不是 secret lookup、不是 broker
+session、不是 paper order route、不是 tiny-live/live gate；只把 future paper fill import request envelope 的
+StockEtfCash/IBKR/Paper authority、lifecycle/event-log lineage、fill identity、stale policy 與 no-runtime/
+no-writer/no-order/no-Bybit cross-wire posture 變成 exact-blocker acceptance test 與 source-static guard。
+
+已完成：
+
+- 在 `stock_etf_paper_fill_import_request_acceptance.rs` 新增
+  `fill_import_request_rejects_each_authority_gap_independently`。
+- Acceptance 證明 contract id、source version、asset lane、broker、environment、IPC method、operation、
+  authority scope、effect-capable gaps 都會各自只產生單一對應 blocker。
+- 在同檔新增 `fill_import_request_rejects_each_lineage_gap_independently`。
+- Acceptance 證明 request id、session attestation、lifecycle/event-log contract/hash、redaction policy、
+  source artifact、reconciliation run、broker order、execution、commission、idempotency、observed state、
+  stale policy、raw/redacted artifact、duplicate import 與 explicit stale-unknown flags 都會各自只產生單一
+  對應 blocker。
+- Acceptance 明確保留 `StateUnknown` without stale policy aggregate 行為：必須同時命中
+  `StaleStatePolicyMissing` 與 `StaleUnknownStateWithoutPolicy`。
+- 在同檔新增 `fill_import_request_rejects_each_boundary_flag_independently`。
+- Acceptance 證明 IBKR contact、connector runtime、secret serialization、fill import execution、DB apply、
+  order route、Bybit path reuse、live/tiny-live、margin/short/options/CFD、Python direct broker write flags
+  都會各自只產生單一對應 blocker。
+- 在 `test_stock_etf_paper_fill_import_request_source_static.py` 新增 default / accepted fixture block parser，
+  鎖住 default fail-closed posture 與 accepted fixture 不可硬編 crypto/Bybit/live/wrong-method/
+  wrong-operation/effectful/empty-lineage/replay/runtime/secret/order posture。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Paper fill import source static pytest：`8 passed`。
+- Paper fill import Rust acceptance：`10 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 fill import、不做 broker session、
+不做 broker routing、不做 DB/evidence writer、不做 paper order route、不做 Linux runtime sync/restart、
+不授權 tiny-live/live 或任何 Bybit behavior change。

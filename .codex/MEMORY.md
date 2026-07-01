@@ -1543,3 +1543,11 @@ Do not paste long reports or stable architecture into TODO.
 - Non-paper lifecycle operation remains intentionally aggregate: `OperationNotPaperLifecycle` plus `OperationTransitionMismatch`, not a single-blocker claim.
 - Python source-static parsing now pins `Default` / `accepted_ack_fixture` blocks so the accepted ack fixture cannot hardcode live, Bybit, wrong-operation, denied, empty-lineage, or stale-policy-missing posture.
 - Verification passed: source static `7 passed`; paper lifecycle acceptance `15 passed`; `cargo fmt -p openclaw_types -- --check` PASS; docs trace PASS; diff check PASS. This grants no Rust production code change, IPC change, IBKR contact, connector runtime, secret access, lifecycle writer, DB/evidence/scorecard writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Paper Fill Import Request Authority Lineage Cross-Wire Guard
+
+- PM added exact-blocker Rust acceptance coverage for `StockEtfPaperFillImportRequestV1` authority, lifecycle/event-log/redaction/session lineage, idempotency/replay, stale-state policy, and boundary flags.
+- The guard proves contract/source/lane/broker/environment/method/operation/authority/effect gaps, request/session/lifecycle/event-log/redaction/source artifact/reconciliation/broker-order/execution/commission/idempotency/observed-state/stale-policy/raw-redacted lineage, duplicate/stale flags, and contact/runtime/secret/fill-import/DB/order/Bybit/live/margin/Python-write flags fail closed.
+- `StateUnknown` without stale policy remains intentionally aggregate: `StaleStatePolicyMissing` plus `StaleUnknownStateWithoutPolicy`, not a single-blocker claim.
+- Python source-static parsing now pins `Default` / `accepted_fixture` blocks so the accepted fixture cannot hardcode crypto, Bybit, live, wrong-method, wrong-operation, effectful, empty-lineage, replay, runtime, secret, or order posture.
+- Verification passed: source static `8 passed`; paper fill import acceptance `10 passed`; `cargo fmt -p openclaw_types -- --check` PASS; docs trace PASS; diff check PASS. This grants no Rust production code change, IPC change, IBKR contact, connector runtime, secret access, fill import execution, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
