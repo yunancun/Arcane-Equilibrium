@@ -181,6 +181,58 @@ fn shadow_signal_request_rejects_method_operation_and_paper_write_cross_wire() {
 }
 
 #[test]
+fn shadow_signal_request_rejects_each_authority_gap_independently() {
+    use StockEtfShadowSignalRequestBlocker as Blocker;
+
+    let cases: [(fn(&mut StockEtfShadowSignalRequestV1), Blocker); 9] = [
+        (
+            |request| {
+                request.contract_id = "stock_etf_shadow_signal_request_v1_fixture".to_string()
+            },
+            Blocker::ContractIdMismatch,
+        ),
+        (
+            |request| request.source_version = 2,
+            Blocker::SourceVersionMismatch,
+        ),
+        (
+            |request| request.asset_lane = AssetLane::CryptoPerp,
+            Blocker::WrongAssetLane,
+        ),
+        (
+            |request| request.broker = Broker::Bybit,
+            Blocker::WrongBroker,
+        ),
+        (
+            |request| request.environment = BrokerEnvironment::Paper,
+            Blocker::EnvironmentNotShadow,
+        ),
+        (
+            |request| request.request_method = StockEtfLaneScopedIpcMethod::ImportPaperFills,
+            Blocker::RequestMethodMismatch,
+        ),
+        (
+            |request| request.operation = BrokerOperation::PaperOrderSubmit,
+            Blocker::OperationMismatch,
+        ),
+        (
+            |request| request.authority_scope = AuthorityScope::ReadOnly,
+            Blocker::AuthorityScopeMismatch,
+        ),
+        (
+            |request| request.effect_capable = true,
+            Blocker::EffectCapabilityPresent,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut request = StockEtfShadowSignalRequestV1::accepted_fixture();
+        mutate(&mut request);
+        assert_single_blocker(request, blocker);
+    }
+}
+
+#[test]
 fn shadow_signal_request_requires_signal_identity_and_lineage_hashes() {
     let bad = StockEtfShadowSignalRequestV1 {
         request_id: String::new(),
@@ -242,6 +294,64 @@ fn shadow_signal_request_requires_signal_identity_and_lineage_hashes() {
         &verdict,
         StockEtfShadowSignalRequestBlocker::SourceArtifactHashInvalid
     ));
+}
+
+#[test]
+fn shadow_signal_request_rejects_each_lineage_gap_independently() {
+    use StockEtfShadowSignalRequestBlocker as Blocker;
+
+    let cases: [(fn(&mut StockEtfShadowSignalRequestV1), Blocker); 11] = [
+        (
+            |request| request.request_id.clear(),
+            Blocker::RequestIdMissing,
+        ),
+        (
+            |request| request.evaluation_run_id.clear(),
+            Blocker::EvaluationRunIdMissing,
+        ),
+        (
+            |request| request.shadow_signal_id.clear(),
+            Blocker::ShadowSignalIdMissing,
+        ),
+        (
+            |request| request.evidence_clock_hash = "not_hash".to_string(),
+            Blocker::EvidenceClockHashInvalid,
+        ),
+        (
+            |request| request.pit_universe_contract_hash.clear(),
+            Blocker::PitUniverseContractHashInvalid,
+        ),
+        (
+            |request| request.strategy_hypothesis_hash.clear(),
+            Blocker::StrategyHypothesisHashInvalid,
+        ),
+        (
+            |request| request.instrument_identity_hash.clear(),
+            Blocker::InstrumentIdentityHashInvalid,
+        ),
+        (
+            |request| request.market_data_provenance_hash.clear(),
+            Blocker::MarketDataProvenanceHashInvalid,
+        ),
+        (
+            |request| request.cost_model_version_hash.clear(),
+            Blocker::CostModelVersionHashInvalid,
+        ),
+        (
+            |request| request.asset_lane_events_contract_hash.clear(),
+            Blocker::AssetLaneEventsContractHashInvalid,
+        ),
+        (
+            |request| request.source_artifact_hash.clear(),
+            Blocker::SourceArtifactHashInvalid,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut request = StockEtfShadowSignalRequestV1::accepted_fixture();
+        mutate(&mut request);
+        assert_single_blocker(request, blocker);
+    }
 }
 
 #[test]
@@ -314,6 +424,65 @@ fn shadow_signal_request_rejects_boundary_regressions() {
 }
 
 #[test]
+fn shadow_signal_request_rejects_each_boundary_flag_independently() {
+    use StockEtfShadowSignalRequestBlocker as Blocker;
+
+    let cases: [(fn(&mut StockEtfShadowSignalRequestV1), Blocker); 12] = [
+        (
+            |request| request.ibkr_contact_performed = true,
+            Blocker::IbkrContactPerformed,
+        ),
+        (
+            |request| request.connector_runtime_started = true,
+            Blocker::ConnectorRuntimeStarted,
+        ),
+        (
+            |request| request.secret_content_serialized = true,
+            Blocker::SecretContentSerialized,
+        ),
+        (
+            |request| request.shadow_signal_emitted = true,
+            Blocker::ShadowSignalEmitted,
+        ),
+        (
+            |request| request.shadow_fill_generated = true,
+            Blocker::ShadowFillGenerated,
+        ),
+        (
+            |request| request.scorecard_writer_started = true,
+            Blocker::ScorecardWriterStarted,
+        ),
+        (
+            |request| request.db_apply_performed = true,
+            Blocker::DbApplyPerformed,
+        ),
+        (|request| request.order_routed = true, Blocker::OrderRouted),
+        (
+            |request| request.bybit_path_reused = true,
+            Blocker::BybitPathReused,
+        ),
+        (
+            |request| request.live_or_tiny_live_authorized = true,
+            Blocker::LiveOrTinyLiveAuthorized,
+        ),
+        (
+            |request| request.margin_short_options_cfd_requested = true,
+            Blocker::MarginShortOptionsCfdRequested,
+        ),
+        (
+            |request| request.python_direct_broker_write_requested = true,
+            Blocker::PythonDirectBrokerWriteRequested,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut request = StockEtfShadowSignalRequestV1::accepted_fixture();
+        mutate(&mut request);
+        assert_single_blocker(request, blocker);
+    }
+}
+
+#[test]
 fn blocked_template_is_parseable_and_secret_free() {
     let srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -352,4 +521,14 @@ fn has(
     blocker: StockEtfShadowSignalRequestBlocker,
 ) -> bool {
     verdict.blockers.contains(&blocker)
+}
+
+fn assert_single_blocker(
+    request: StockEtfShadowSignalRequestV1,
+    expected: StockEtfShadowSignalRequestBlocker,
+) {
+    let verdict = request.validate();
+
+    assert!(!verdict.accepted);
+    assert_eq!(verdict.blockers, vec![expected]);
 }

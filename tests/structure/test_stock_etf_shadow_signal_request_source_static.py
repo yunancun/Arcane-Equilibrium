@@ -155,12 +155,27 @@ def _source() -> str:
     return SHADOW_SIGNAL_REQUEST.read_text(encoding="utf-8")
 
 
+def _default_block(source: str) -> str:
+    return source.split("impl Default for StockEtfShadowSignalRequestV1", 1)[1].split(
+        "impl StockEtfShadowSignalRequestV1",
+        1,
+    )[0]
+
+
+def _accepted_fixture_block(source: str) -> str:
+    return source.split("impl StockEtfShadowSignalRequestV1", 1)[1].split(
+        "pub fn validate(&self)",
+        1,
+    )[0]
+
+
 def test_stock_etf_shadow_signal_request_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
 
 def test_stock_etf_shadow_signal_request_source_keeps_contract_surface() -> None:
     source = _source()
+    default_block = _default_block(source)
 
     for token in REQUIRED_TYPE_TOKENS:
         assert token in source
@@ -169,20 +184,20 @@ def test_stock_etf_shadow_signal_request_source_keeps_contract_surface() -> None
     for blocker in REQUIRED_BLOCKERS:
         assert f"Blocker::{blocker}" in source or blocker in source
 
-    assert "contract_id: String::new()" in source
-    assert "source_version: 0" in source
-    assert "asset_lane: AssetLane::CryptoPerp" in source
-    assert "broker: Broker::Bybit" in source
-    assert "environment: BrokerEnvironment::LiveReservedDenied" in source
-    assert "request_method: StockEtfLaneScopedIpcMethod::UnknownDenied" in source
-    assert "operation: BrokerOperation::TransferOrAccountWrite" in source
-    assert "authority_scope: AuthorityScope::Denied" in source
-    assert "effect_capable: false" in source
+    assert "contract_id: String::new()" in default_block
+    assert "source_version: 0" in default_block
+    assert "asset_lane: AssetLane::CryptoPerp" in default_block
+    assert "broker: Broker::Bybit" in default_block
+    assert "environment: BrokerEnvironment::LiveReservedDenied" in default_block
+    assert "request_method: StockEtfLaneScopedIpcMethod::UnknownDenied" in default_block
+    assert "operation: BrokerOperation::TransferOrAccountWrite" in default_block
+    assert "authority_scope: AuthorityScope::Denied" in default_block
+    assert "effect_capable: false" in default_block
     assert "accepted: blockers.is_empty()" in source
 
 
 def test_stock_etf_shadow_signal_request_source_keeps_shadow_only_shape() -> None:
-    source = _source()
+    source = _accepted_fixture_block(_source())
 
     assert "contract_id: STOCK_ETF_SHADOW_SIGNAL_REQUEST_CONTRACT_ID.to_string()" in source
     assert "source_version: 1" in source
@@ -194,6 +209,89 @@ def test_stock_etf_shadow_signal_request_source_keeps_shadow_only_shape() -> Non
     assert "authority_scope: AuthorityScope::ShadowOnly" in source
     assert "effect_capable: false" in source
     assert "..Self::default()" in source
+
+
+def test_stock_etf_shadow_signal_request_fixture_excludes_authority_lineage_and_runtime_crosswire() -> None:
+    source = _source()
+    default_block = _default_block(source)
+    fixture = _accepted_fixture_block(source)
+
+    for required_default in (
+        "asset_lane: AssetLane::CryptoPerp",
+        "broker: Broker::Bybit",
+        "environment: BrokerEnvironment::LiveReservedDenied",
+        "request_method: StockEtfLaneScopedIpcMethod::UnknownDenied",
+        "operation: BrokerOperation::TransferOrAccountWrite",
+        "authority_scope: AuthorityScope::Denied",
+        "request_id: String::new()",
+        "evaluation_run_id: String::new()",
+        "shadow_signal_id: String::new()",
+        "evidence_clock_hash: String::new()",
+        "pit_universe_contract_hash: String::new()",
+        "strategy_hypothesis_hash: String::new()",
+        "instrument_identity_hash: String::new()",
+        "market_data_provenance_hash: String::new()",
+        "cost_model_version_hash: String::new()",
+        "asset_lane_events_contract_hash: String::new()",
+        "source_artifact_hash: String::new()",
+        "ibkr_contact_performed: false",
+        "connector_runtime_started: false",
+        "secret_content_serialized: false",
+        "shadow_signal_emitted: false",
+        "shadow_fill_generated: false",
+        "scorecard_writer_started: false",
+        "db_apply_performed: false",
+        "order_routed: false",
+        "bybit_path_reused: false",
+        "live_or_tiny_live_authorized: false",
+        "margin_short_options_cfd_requested: false",
+        "python_direct_broker_write_requested: false",
+    ):
+        assert required_default in default_block
+
+    for forbidden in (
+        "asset_lane: AssetLane::CryptoPerp",
+        "broker: Broker::Bybit",
+        "environment: BrokerEnvironment::LiveReservedDenied",
+        "environment: BrokerEnvironment::Paper",
+        "environment: BrokerEnvironment::ReadOnly",
+        "request_method: StockEtfLaneScopedIpcMethod::UnknownDenied",
+        "request_method: StockEtfLaneScopedIpcMethod::SubmitPaperOrder",
+        "request_method: StockEtfLaneScopedIpcMethod::ImportPaperFills",
+        "request_method: StockEtfLaneScopedIpcMethod::PreviewReadonlyProbe",
+        "operation: BrokerOperation::TransferOrAccountWrite",
+        "operation: BrokerOperation::PaperOrderSubmit",
+        "operation: BrokerOperation::PaperOrderFillImport",
+        "operation: BrokerOperation::LiveOrderSubmit",
+        "authority_scope: AuthorityScope::Denied",
+        "authority_scope: AuthorityScope::ReadOnly",
+        "authority_scope: AuthorityScope::PaperRehearsal",
+        "effect_capable: true",
+        "request_id: String::new()",
+        "evaluation_run_id: String::new()",
+        "shadow_signal_id: String::new()",
+        "evidence_clock_hash: String::new()",
+        "pit_universe_contract_hash: String::new()",
+        "strategy_hypothesis_hash: String::new()",
+        "instrument_identity_hash: String::new()",
+        "market_data_provenance_hash: String::new()",
+        "cost_model_version_hash: String::new()",
+        "asset_lane_events_contract_hash: String::new()",
+        "source_artifact_hash: String::new()",
+        "ibkr_contact_performed: true",
+        "connector_runtime_started: true",
+        "secret_content_serialized: true",
+        "shadow_signal_emitted: true",
+        "shadow_fill_generated: true",
+        "scorecard_writer_started: true",
+        "db_apply_performed: true",
+        "order_routed: true",
+        "bybit_path_reused: true",
+        "live_or_tiny_live_authorized: true",
+        "margin_short_options_cfd_requested: true",
+        "python_direct_broker_write_requested: true",
+    ):
+        assert forbidden not in fixture
 
 
 def test_stock_etf_shadow_signal_request_source_excludes_paper_fill_readonly_and_live_crosswire() -> None:

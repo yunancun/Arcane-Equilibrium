@@ -7524,3 +7524,46 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 fill import、不做 broker session、
 不做 broker routing、不做 DB/evidence writer、不做 paper order route、不做 Linux runtime sync/restart、
 不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 180. 2026-07-01 PM session source checkpoint：Stock/ETF Shadow Signal Request Authority Lineage Cross-Wire Guard
+
+本 checkpoint 補強 `stock_etf_shadow_signal_request` 的 lane/broker/environment/method/operation/
+authority、evidence-clock/PIT-universe/strategy/instrument/market-data/cost/event/source lineage 與
+no-side-effect boundary coverage。這不是 Rust production behavior change、不是 IBKR contact、不是
+connector runtime、不是 shadow signal emission、不是 shadow fill generation、不是 DB/evidence writer、
+不是 secret lookup、不是 broker session、不是 paper order route、不是 tiny-live/live gate；只把 future
+shadow signal evaluation request envelope 的 StockEtfCash/IBKR/Shadow authority、lineage 與 no-runtime/
+no-writer/no-order/no-Bybit cross-wire posture 變成 exact-blocker acceptance test 與 source-static guard。
+
+已完成：
+
+- 在 `stock_etf_shadow_signal_request_acceptance.rs` 新增
+  `shadow_signal_request_rejects_each_authority_gap_independently`。
+- Acceptance 證明 contract id、source version、asset lane、broker、environment、IPC method、operation、
+  authority scope、effect-capable gaps 都會各自只產生單一對應 blocker。
+- 在同檔新增 `shadow_signal_request_rejects_each_lineage_gap_independently`。
+- Acceptance 證明 request/evaluation/signal ids、evidence clock、PIT universe、strategy hypothesis、
+  instrument identity、market-data provenance、cost model、asset-lane event 與 source artifact lineage gaps
+  都會各自只產生單一對應 blocker。
+- 在同檔新增 `shadow_signal_request_rejects_each_boundary_flag_independently`。
+- Acceptance 證明 IBKR contact、connector runtime、secret serialization、shadow signal emission、shadow fill
+  generation、scorecard writer、DB apply、order route、Bybit path reuse、live/tiny-live、margin/short/options/
+  CFD、Python direct broker write flags 都會各自只產生單一對應 blocker。
+- 在 `test_stock_etf_shadow_signal_request_source_static.py` 新增 default / accepted fixture block parser，
+  鎖住 default fail-closed posture 與 accepted fixture 不可硬編 crypto/Bybit/paper/read-only/live/
+  wrong-method/wrong-operation/effectful/empty-lineage/runtime/secret/order posture。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Shadow signal request source static pytest：`8 passed`。
+- Shadow signal request Rust acceptance：`9 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 shadow signal emission、不生成
+shadow fill、不啟動 shadow collector、不做 broker session、不做 broker routing、不做 DB/evidence writer、
+不做 scorecard writer、不做 paper order route、不做 Linux runtime sync/restart、不授權 tiny-live/live 或任何
+Bybit behavior change。
