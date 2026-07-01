@@ -9,55 +9,50 @@ use std::path::PathBuf;
 
 use openclaw_types::{
     AssetLane, AuthorityScope, Broker, StockEtfPaperShadowReconciliationBlocker,
-    StockEtfPaperShadowReconciliationV1, StockEtfPaperShadowReconciliationVerdict,
-    STOCK_ETF_PAPER_SHADOW_RECONCILIATION_CONTRACT_ID, STOCK_ETF_PAPER_SHADOW_RECONCILIATION_SCOPE,
+    StockEtfPaperShadowReconciliationV1, STOCK_ETF_PAPER_SHADOW_RECONCILIATION_CONTRACT_ID,
+    STOCK_ETF_PAPER_SHADOW_RECONCILIATION_SCOPE,
 };
 
 #[test]
 fn default_reconciliation_blocks_all_authority() {
+    use StockEtfPaperShadowReconciliationBlocker as Blocker;
+
     let verdict = StockEtfPaperShadowReconciliationV1::default().validate();
 
     assert!(!verdict.accepted);
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::ContractIdMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::SourceVersionMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::WrongAssetLane
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::WrongBroker
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::ScopeMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::AuthorityScopeMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::ReconciliationRunIdMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::AppendOnlyEventNotReady
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::PaperFillNotImported
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::ShadowFillNotSynthetic
-    ));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::ContractIdMismatch,
+            Blocker::SourceVersionMismatch,
+            Blocker::WrongAssetLane,
+            Blocker::WrongBroker,
+            Blocker::ScopeMismatch,
+            Blocker::AuthorityScopeMismatch,
+            Blocker::ReconciliationRunIdMissing,
+            Blocker::PaperOrderLocalIdMissing,
+            Blocker::BrokerOrderIdMissing,
+            Blocker::ExecutionIdMissing,
+            Blocker::CommissionReportIdMissing,
+            Blocker::ShadowSignalIdMissing,
+            Blocker::LifecycleContractHashInvalid,
+            Blocker::EventLogContractHashInvalid,
+            Blocker::PaperFillImportRequestHashInvalid,
+            Blocker::ShadowSignalRequestHashInvalid,
+            Blocker::ShadowFillModelHashInvalid,
+            Blocker::CostModelVersionHashInvalid,
+            Blocker::MarketDataProvenanceHashInvalid,
+            Blocker::PaperShadowDivergenceThresholdHashInvalid,
+            Blocker::PaperShadowLinkHashInvalid,
+            Blocker::RawArtifactHashInvalid,
+            Blocker::RedactedSummaryHashInvalid,
+            Blocker::SourceArtifactHashInvalid,
+            Blocker::AppendOnlyEventNotReady,
+            Blocker::PaperFillNotImported,
+            Blocker::ShadowFillNotSynthetic,
+            Blocker::DivergenceThresholdMissing,
+        ]
+    );
 }
 
 #[test]
@@ -103,6 +98,8 @@ fn accepted_reconciliation_validates_without_side_effects() {
 
 #[test]
 fn reconciliation_rejects_scope_authority_and_effect_cross_wire() {
+    use StockEtfPaperShadowReconciliationBlocker as Blocker;
+
     let wrong_scope = StockEtfPaperShadowReconciliationV1 {
         scope: "shadow_signal".to_string(),
         authority_scope: AuthorityScope::ReadOnly,
@@ -112,18 +109,7 @@ fn reconciliation_rejects_scope_authority_and_effect_cross_wire() {
     let verdict = wrong_scope.validate();
 
     assert!(!verdict.accepted);
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::ScopeMismatch
-    ));
-    assert!(!has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::AuthorityScopeMismatch
-    ));
-    assert!(!has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::EffectCapabilityPresent
-    ));
+    assert_eq!(verdict.blockers, vec![Blocker::ScopeMismatch]);
 
     let wrong_authority = StockEtfPaperShadowReconciliationV1 {
         scope: STOCK_ETF_PAPER_SHADOW_RECONCILIATION_SCOPE.to_string(),
@@ -134,18 +120,7 @@ fn reconciliation_rejects_scope_authority_and_effect_cross_wire() {
     let verdict = wrong_authority.validate();
 
     assert!(!verdict.accepted);
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::AuthorityScopeMismatch
-    ));
-    assert!(!has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::ScopeMismatch
-    ));
-    assert!(!has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::EffectCapabilityPresent
-    ));
+    assert_eq!(verdict.blockers, vec![Blocker::AuthorityScopeMismatch]);
 
     let paper_write_pollution = StockEtfPaperShadowReconciliationV1 {
         scope: "paper_order".to_string(),
@@ -156,18 +131,14 @@ fn reconciliation_rejects_scope_authority_and_effect_cross_wire() {
     let verdict = paper_write_pollution.validate();
 
     assert!(!verdict.accepted);
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::ScopeMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::AuthorityScopeMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::EffectCapabilityPresent
-    ));
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::ScopeMismatch,
+            Blocker::AuthorityScopeMismatch,
+            Blocker::EffectCapabilityPresent,
+        ]
+    );
 
     let shadow_only_pollution = StockEtfPaperShadowReconciliationV1 {
         scope: "shadow_signal".to_string(),
@@ -178,18 +149,10 @@ fn reconciliation_rejects_scope_authority_and_effect_cross_wire() {
     let verdict = shadow_only_pollution.validate();
 
     assert!(!verdict.accepted);
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::ScopeMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::AuthorityScopeMismatch
-    ));
-    assert!(!has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::EffectCapabilityPresent
-    ));
+    assert_eq!(
+        verdict.blockers,
+        vec![Blocker::ScopeMismatch, Blocker::AuthorityScopeMismatch]
+    );
 }
 
 #[test]
@@ -239,6 +202,8 @@ fn reconciliation_rejects_each_authority_gap_independently() {
 
 #[test]
 fn reconciliation_requires_ids_and_lineage_hashes() {
+    use StockEtfPaperShadowReconciliationBlocker as Blocker;
+
     let bad = StockEtfPaperShadowReconciliationV1 {
         reconciliation_run_id: String::new(),
         paper_order_local_id: String::new(),
@@ -262,78 +227,30 @@ fn reconciliation_requires_ids_and_lineage_hashes() {
     };
     let verdict = bad.validate();
 
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::ReconciliationRunIdMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::PaperOrderLocalIdMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::BrokerOrderIdMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::ExecutionIdMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::CommissionReportIdMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::ShadowSignalIdMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::LifecycleContractHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::EventLogContractHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::PaperFillImportRequestHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::ShadowSignalRequestHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::ShadowFillModelHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::CostModelVersionHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::MarketDataProvenanceHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::PaperShadowDivergenceThresholdHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::PaperShadowLinkHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::RawArtifactHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::RedactedSummaryHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::SourceArtifactHashInvalid
-    ));
+    assert!(!verdict.accepted);
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::ReconciliationRunIdMissing,
+            Blocker::PaperOrderLocalIdMissing,
+            Blocker::BrokerOrderIdMissing,
+            Blocker::ExecutionIdMissing,
+            Blocker::CommissionReportIdMissing,
+            Blocker::ShadowSignalIdMissing,
+            Blocker::LifecycleContractHashInvalid,
+            Blocker::EventLogContractHashInvalid,
+            Blocker::PaperFillImportRequestHashInvalid,
+            Blocker::ShadowSignalRequestHashInvalid,
+            Blocker::ShadowFillModelHashInvalid,
+            Blocker::CostModelVersionHashInvalid,
+            Blocker::MarketDataProvenanceHashInvalid,
+            Blocker::PaperShadowDivergenceThresholdHashInvalid,
+            Blocker::PaperShadowLinkHashInvalid,
+            Blocker::RawArtifactHashInvalid,
+            Blocker::RedactedSummaryHashInvalid,
+            Blocker::SourceArtifactHashInvalid,
+        ]
+    );
 }
 
 #[test]
@@ -428,6 +345,8 @@ fn reconciliation_rejects_each_lineage_gap_independently() {
 
 #[test]
 fn reconciliation_rejects_unmatched_divergent_or_side_effecting_evidence() {
+    use StockEtfPaperShadowReconciliationBlocker as Blocker;
+
     let bad = StockEtfPaperShadowReconciliationV1 {
         append_only_event_ready: false,
         paper_fill_imported: false,
@@ -453,82 +372,31 @@ fn reconciliation_rejects_unmatched_divergent_or_side_effecting_evidence() {
     };
     let verdict = bad.validate();
 
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::AppendOnlyEventNotReady
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::PaperFillNotImported
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::ShadowFillNotSynthetic
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::DivergenceExceedsThreshold
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::UnmatchedPaperFillPresent
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::UnmatchedShadowFillPresent
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::IbkrContactPerformed
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::ConnectorRuntimeStarted
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::SecretContentSerialized
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::FillImportPerformed
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::ShadowFillGenerated
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::ReconciliationWriterStarted
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::ScorecardWriterStarted
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::DbApplyPerformed
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::OrderRouted
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::BybitPathReused
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::LiveOrTinyLiveAuthorized
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::MarginShortOptionsCfdRequested
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperShadowReconciliationBlocker::PythonDirectBrokerWriteRequested
-    ));
+    assert!(!verdict.accepted);
+    assert_eq!(
+        verdict.blockers,
+        vec![
+            Blocker::AppendOnlyEventNotReady,
+            Blocker::PaperFillNotImported,
+            Blocker::ShadowFillNotSynthetic,
+            Blocker::DivergenceExceedsThreshold,
+            Blocker::UnmatchedPaperFillPresent,
+            Blocker::UnmatchedShadowFillPresent,
+            Blocker::IbkrContactPerformed,
+            Blocker::ConnectorRuntimeStarted,
+            Blocker::SecretContentSerialized,
+            Blocker::FillImportPerformed,
+            Blocker::ShadowFillGenerated,
+            Blocker::ReconciliationWriterStarted,
+            Blocker::ScorecardWriterStarted,
+            Blocker::DbApplyPerformed,
+            Blocker::OrderRouted,
+            Blocker::BybitPathReused,
+            Blocker::LiveOrTinyLiveAuthorized,
+            Blocker::MarginShortOptionsCfdRequested,
+            Blocker::PythonDirectBrokerWriteRequested,
+        ]
+    );
 }
 
 #[test]
@@ -673,13 +541,6 @@ fn blocked_template_is_parseable_and_secret_free() {
     assert!(!lower.contains("account_id ="));
     assert!(!lower.contains("password ="));
     assert!(!lower.contains("token ="));
-}
-
-fn has(
-    verdict: &StockEtfPaperShadowReconciliationVerdict,
-    blocker: StockEtfPaperShadowReconciliationBlocker,
-) -> bool {
-    verdict.blockers.contains(&blocker)
 }
 
 fn assert_single_blocker(
