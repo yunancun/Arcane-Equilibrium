@@ -4964,3 +4964,45 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper
 cancel/replace、不匯入 fill、不發射 shadow signal、不生成 shadow fill、不做 scorecard
 writer、不做 DB apply、不啟動 evidence writer、不啟動 evidence clock、不新增 GUI fanout、
 不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 114. 2026-07-01 PM session source checkpoint：Stock/ETF Scorecard Inputs Source Static Guard
+
+本 checkpoint 為 split `stock_etf_scorecard_inputs` parent/components/bundle modules 補上
+source-only structure guard。這不是 IBKR contact、不是 broker fill import、不是 scorecard
+derivation、不是 scorecard writer、不是 DB apply、不是 evidence clock；只把 paper-shadow
+scorecard inputs 的 source invariant 與容量/效率邊界機器化。
+
+已完成：
+
+- 新增 `tests/structure/test_stock_etf_scorecard_inputs_source_static.py`。
+- Guard 鎖住 parent、components、bundle 三檔各自低於 800 行 governance cap。
+- Guard 要求 cash ledger、cost model、benchmark、shadow fill model、storage capacity
+  contract ids 與 storage caps/retention/query-SLO/archive path prefix 保持在 parent source。
+- Guard 要求 cash ledger 仍限制 StockEtfCash/IBKR 且只接受 Paper/ReadOnly，並保留 account、
+  snapshot、positions、currency、as-of、source-report checks。
+- Guard 要求 cost/benchmark validators、shadow fill synthetic marker、broker paper fill/live
+  fill separation、storage universe/rows/index/query-SLO caps、raw/compressed retention order、
+  safe lane-scoped archive path、capacity-plan hash、capacity breach blocks evidence clock policy
+  不得消失。
+- Guard 要求 bundle accepted fixture 仍由 cash ledger/cost/benchmark/shadow fill/storage
+  accepted fixtures 組成，並保持 readonly probe result import contract id、scorecard
+  derived-only、paper/shadow fills separate、live fill false、Bybit live execution unchanged。
+- Guard 要求 bundle validation 保留 sub-validator rejection、cross-contract hashes、source
+  commit、derived-only、paper-shadow separation、live fill denial、Bybit live protection、IBKR
+  contact、connector runtime、broker fill import、scorecard writer、DB apply、evidence clock、
+  secret serialization、live/tiny-live boundary flags。
+- Guard 禁止 env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens
+  與 secret material access tokens。
+
+驗證：
+
+- New structure guard py_compile：PASS。
+- Focused structure guard pytest：`7 passed`。
+- Focused scorecard inputs acceptance：`12 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
+cancel/replace、不匯入 broker fill、不衍生或寫入 scorecard、不做 DB apply、不啟動
+evidence writer/clock、不新增 GUI fanout、不授權 tiny-live/live 或任何 Bybit behavior change。
