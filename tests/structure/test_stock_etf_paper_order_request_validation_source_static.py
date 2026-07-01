@@ -118,6 +118,11 @@ def _assert_tokens(source: str, tokens: tuple[str, ...]) -> None:
         assert token in source
 
 
+def _assert_ordered_tokens(block: str, tokens: tuple[str, ...]) -> None:
+    positions = [block.index(token) for token in tokens]
+    assert positions == sorted(positions)
+
+
 def test_stock_etf_paper_order_request_validation_source_stays_below_governance_cap() -> None:
     source = _source()
 
@@ -200,6 +205,167 @@ def test_stock_etf_paper_order_request_validation_keeps_boundary_and_surface_map
             "Blocker::AuthorityScopeMismatch",
             "if envelope.effect_capable != effect_capable",
             "Blocker::EffectCapabilityMismatch",
+        ),
+    )
+
+
+def test_stock_etf_paper_order_request_validation_pins_blocker_emit_order() -> None:
+    source = _source()
+    validate_body = source[source.index("pub fn validate(&self)") : source.index(
+        "fn validate_boundary_flags("
+    )]
+    boundary = _function_body("validate_boundary_flags")
+    expected_surface = _function_body("validate_expected_surface")
+    preview = _function_body("validate_preview")
+    submit = _function_body("validate_submit")
+    cancel = _function_body("validate_cancel")
+    replace = _function_body("validate_replace")
+    order_intent = _function_body("validate_order_intent")
+    symbol_and_side = _function_body("validate_symbol_and_side")
+    preview_hashes = _function_body("validate_preview_hashes")
+    effect_hashes = _function_body("validate_effect_hashes")
+    limit_price = _function_body("validate_limit_price")
+    replacement_limit_price = _function_body("validate_replacement_limit_price")
+
+    _assert_ordered_tokens(
+        validate_body,
+        (
+            "Blocker::ContractIdMismatch",
+            "Blocker::SourceVersionMismatch",
+            "Blocker::WrongAssetLane",
+            "Blocker::WrongBroker",
+            "Blocker::LiveEnvironmentDenied",
+            "Blocker::EnvironmentNotPaper",
+            "validate_boundary_flags(self, &mut blockers)",
+            "validate_expected_surface(self, &mut blockers)",
+            "Blocker::RequestIdMissing",
+            "Blocker::AccountFingerprintHashInvalid",
+            "Blocker::RequestMethodUnsupported",
+        ),
+    )
+    _assert_ordered_tokens(
+        boundary,
+        (
+            "Blocker::IbkrContactPerformed",
+            "Blocker::ConnectorRuntimeStarted",
+            "Blocker::SecretContentSerialized",
+            "Blocker::OrderRouted",
+            "Blocker::BybitPathReused",
+            "Blocker::LiveOrTinyLiveAuthorized",
+            "Blocker::MarginShortOptionsCfdRequested",
+            "Blocker::PythonDirectBrokerWriteRequested",
+        ),
+    )
+    _assert_ordered_tokens(
+        expected_surface,
+        (
+            "Blocker::OperationMismatch",
+            "Blocker::AuthorityScopeMismatch",
+            "Blocker::EffectCapabilityMismatch",
+        ),
+    )
+    _assert_ordered_tokens(
+        preview,
+        (
+            "validate_order_intent(envelope, blockers)",
+            "validate_preview_hashes(envelope, blockers)",
+            "Blocker::PreviewEffectFieldPresent",
+        ),
+    )
+    _assert_ordered_tokens(
+        submit,
+        (
+            "validate_order_intent(envelope, blockers)",
+            "validate_effect_hashes(envelope, blockers)",
+            "Blocker::RiskConfigHashInvalid",
+            "Blocker::InstrumentIdentityHashInvalid",
+            "Blocker::LocalOrderIdMissing",
+            "Blocker::IdempotencyKeyMissing",
+            "Blocker::SubmitBrokerOrderIdPresent",
+            "Blocker::SubmitCancelOrReplaceFieldPresent",
+        ),
+    )
+    _assert_ordered_tokens(
+        cancel,
+        (
+            "validate_effect_hashes(envelope, blockers)",
+            "Blocker::LocalOrderIdMissing",
+            "Blocker::IdempotencyKeyMissing",
+            "Blocker::BrokerOrderIdMissing",
+            "Blocker::CancelReasonMissing",
+            "Blocker::CancelOrderShapeFieldPresent",
+            "Blocker::SubmitCancelOrReplaceFieldPresent",
+        ),
+    )
+    _assert_ordered_tokens(
+        replace,
+        (
+            "validate_effect_hashes(envelope, blockers)",
+            "Blocker::LocalOrderIdMissing",
+            "Blocker::BrokerOrderIdMissing",
+            "Blocker::InstrumentIdentityHashInvalid",
+            "validate_symbol_and_side(envelope, blockers)",
+            "Blocker::ReplacementIdempotencyKeyMissing",
+            "Blocker::ReplacementQuantityInvalid",
+            "validate_replacement_limit_price(envelope, blockers)",
+            "Blocker::ReplacementTimeInForceMissing",
+            "Blocker::ReplaceReasonMissing",
+            "Blocker::ReplaceOriginalMutableFieldPresent",
+        ),
+    )
+    _assert_ordered_tokens(
+        order_intent,
+        (
+            "validate_symbol_and_side(envelope, blockers)",
+            "Blocker::InstrumentKindDenied",
+            "Blocker::OrderTypeMissing",
+            "Blocker::QuantityInvalid",
+            "validate_limit_price(envelope, blockers)",
+            "Blocker::TimeInForceIncompatible",
+            "Blocker::TimeInForceMissing",
+        ),
+    )
+    _assert_ordered_tokens(
+        symbol_and_side,
+        (
+            "Blocker::SymbolInvalid",
+            "Blocker::SideMissing",
+        ),
+    )
+    _assert_ordered_tokens(
+        preview_hashes,
+        (
+            "Blocker::RiskConfigHashInvalid",
+            "Blocker::InstrumentIdentityHashInvalid",
+            "Blocker::CostModelVersionHashInvalid",
+            "Blocker::PitUniverseContractHashInvalid",
+            "Blocker::SourceArtifactHashInvalid",
+        ),
+    )
+    _assert_ordered_tokens(
+        effect_hashes,
+        (
+            "Blocker::SessionAttestationHashInvalid",
+            "Blocker::ScopedAuthorizationHashInvalid",
+            "Blocker::DecisionLeaseMissing",
+            "Blocker::GuardianStateHashInvalid",
+            "Blocker::LifecycleContractHashInvalid",
+            "Blocker::BrokerCapabilityRegistryHashInvalid",
+            "Blocker::AuditEventIdMissing",
+        ),
+    )
+    _assert_ordered_tokens(
+        limit_price,
+        (
+            "Blocker::LimitPricePolicyMismatch",
+            "Blocker::LimitPriceInvalid",
+        ),
+    )
+    _assert_ordered_tokens(
+        replacement_limit_price,
+        (
+            "Blocker::ReplacementLimitPricePolicyMismatch",
+            "Blocker::ReplacementLimitPriceInvalid",
         ),
     )
 

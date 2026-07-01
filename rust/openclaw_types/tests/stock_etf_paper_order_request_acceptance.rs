@@ -16,30 +16,24 @@ use openclaw_types::{
 
 #[test]
 fn default_paper_order_request_envelope_blocks_all_authority() {
+    use StockEtfPaperOrderRequestBlocker as Blocker;
+
     let verdict = StockEtfPaperOrderRequestEnvelopeV1::default().validate();
 
-    assert!(!verdict.accepted);
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::ContractIdMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::SourceVersionMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::WrongAssetLane
-    ));
-    assert!(has(&verdict, StockEtfPaperOrderRequestBlocker::WrongBroker));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::LiveEnvironmentDenied
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::RequestMethodUnsupported
-    ));
+    assert_verdict_blockers(
+        verdict,
+        &[
+            Blocker::ContractIdMismatch,
+            Blocker::SourceVersionMismatch,
+            Blocker::WrongAssetLane,
+            Blocker::WrongBroker,
+            Blocker::LiveEnvironmentDenied,
+            Blocker::EnvironmentNotPaper,
+            Blocker::RequestIdMissing,
+            Blocker::AccountFingerprintHashInvalid,
+            Blocker::RequestMethodUnsupported,
+        ],
+    );
 }
 
 #[test]
@@ -554,76 +548,67 @@ fn paper_order_request_rejects_each_boundary_flag_independently() {
 
 #[test]
 fn request_method_surface_mismatches_block_operation_authority_and_effect_regressions() {
+    use StockEtfPaperOrderRequestBlocker as Blocker;
+
     let mut preview = StockEtfPaperOrderRequestEnvelopeV1::accepted_preview_fixture();
     preview.authority_scope = AuthorityScope::PaperRehearsal;
     preview.effect_capable = true;
     let verdict = preview.validate();
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::AuthorityScopeMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::EffectCapabilityMismatch
-    ));
+    assert_verdict_blockers(
+        verdict,
+        &[
+            Blocker::AuthorityScopeMismatch,
+            Blocker::EffectCapabilityMismatch,
+        ],
+    );
 
     let mut submit = StockEtfPaperOrderRequestEnvelopeV1::accepted_submit_fixture();
     submit.operation = BrokerOperation::PaperOrderCancel;
     submit.authority_scope = AuthorityScope::ReadOnly;
     submit.effect_capable = false;
     let verdict = submit.validate();
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::OperationMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::AuthorityScopeMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::EffectCapabilityMismatch
-    ));
+    assert_verdict_blockers(
+        verdict,
+        &[
+            Blocker::OperationMismatch,
+            Blocker::AuthorityScopeMismatch,
+            Blocker::EffectCapabilityMismatch,
+        ],
+    );
 
     let mut cancel = StockEtfPaperOrderRequestEnvelopeV1::accepted_cancel_fixture();
     cancel.operation = BrokerOperation::PaperOrderSubmit;
     cancel.authority_scope = AuthorityScope::ReadOnly;
     cancel.effect_capable = false;
     let verdict = cancel.validate();
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::OperationMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::AuthorityScopeMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::EffectCapabilityMismatch
-    ));
+    assert_verdict_blockers(
+        verdict,
+        &[
+            Blocker::OperationMismatch,
+            Blocker::AuthorityScopeMismatch,
+            Blocker::EffectCapabilityMismatch,
+        ],
+    );
 
     let mut replace = StockEtfPaperOrderRequestEnvelopeV1::accepted_replace_fixture();
     replace.operation = BrokerOperation::PaperOrderSubmit;
     replace.authority_scope = AuthorityScope::ReadOnly;
     replace.effect_capable = false;
     let verdict = replace.validate();
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::OperationMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::AuthorityScopeMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::EffectCapabilityMismatch
-    ));
+    assert_verdict_blockers(
+        verdict,
+        &[
+            Blocker::OperationMismatch,
+            Blocker::AuthorityScopeMismatch,
+            Blocker::EffectCapabilityMismatch,
+        ],
+    );
 }
 
 #[test]
 fn effect_capable_requests_require_authorization_lifecycle_and_audit_hashes() {
+    use StockEtfPaperOrderRequestBlocker as Blocker;
+
     let mut submit = StockEtfPaperOrderRequestEnvelopeV1::accepted_submit_fixture();
     submit.session_attestation_hash.clear();
     submit.scoped_authorization_hash = "not-a-sha".to_string();
@@ -635,34 +620,18 @@ fn effect_capable_requests_require_authorization_lifecycle_and_audit_hashes() {
 
     let verdict = submit.validate();
 
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::SessionAttestationHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::ScopedAuthorizationHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::DecisionLeaseMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::GuardianStateHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::LifecycleContractHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::BrokerCapabilityRegistryHashInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::AuditEventIdMissing
-    ));
+    assert_verdict_blockers(
+        verdict,
+        &[
+            Blocker::SessionAttestationHashInvalid,
+            Blocker::ScopedAuthorizationHashInvalid,
+            Blocker::DecisionLeaseMissing,
+            Blocker::GuardianStateHashInvalid,
+            Blocker::LifecycleContractHashInvalid,
+            Blocker::BrokerCapabilityRegistryHashInvalid,
+            Blocker::AuditEventIdMissing,
+        ],
+    );
 }
 
 #[test]
@@ -673,10 +642,10 @@ fn preview_request_rejects_effect_lifecycle_and_cancel_replace_pollution() {
     preview_with_effect_fields.decision_lease_id = "decision_lease_0001".to_string();
     preview_with_effect_fields.broker_order_id = "paper_broker_order_0001".to_string();
     let verdict = preview_with_effect_fields.validate();
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::PreviewEffectFieldPresent
-    ));
+    assert_verdict_blockers(
+        verdict,
+        &[StockEtfPaperOrderRequestBlocker::PreviewEffectFieldPresent],
+    );
 
     let mut preview_with_cancel_replace_fields =
         StockEtfPaperOrderRequestEnvelopeV1::accepted_preview_fixture();
@@ -684,14 +653,16 @@ fn preview_request_rejects_effect_lifecycle_and_cancel_replace_pollution() {
     preview_with_cancel_replace_fields.replacement_idempotency_key =
         "replace_not_allowed".to_string();
     let verdict = preview_with_cancel_replace_fields.validate();
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::PreviewEffectFieldPresent
-    ));
+    assert_verdict_blockers(
+        verdict,
+        &[StockEtfPaperOrderRequestBlocker::PreviewEffectFieldPresent],
+    );
 }
 
 #[test]
 fn submit_request_requires_stock_etf_order_intent_and_limit_price_policy() {
+    use StockEtfPaperOrderRequestBlocker as Blocker;
+
     let mut bad = StockEtfPaperOrderRequestEnvelopeV1::accepted_submit_fixture();
     bad.symbol = "spy".to_string();
     bad.instrument_kind = Some(InstrumentKind::CryptoPerp);
@@ -704,35 +675,24 @@ fn submit_request_requires_stock_etf_order_intent_and_limit_price_policy() {
 
     let verdict = bad.validate();
 
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::SymbolInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::InstrumentKindDenied
-    ));
-    assert!(has(&verdict, StockEtfPaperOrderRequestBlocker::SideMissing));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::QuantityInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::LimitPricePolicyMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::LimitPriceInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::TimeInForceMissing
-    ));
+    assert_verdict_blockers(
+        verdict,
+        &[
+            Blocker::SymbolInvalid,
+            Blocker::SideMissing,
+            Blocker::InstrumentKindDenied,
+            Blocker::QuantityInvalid,
+            Blocker::LimitPricePolicyMismatch,
+            Blocker::LimitPriceInvalid,
+            Blocker::TimeInForceMissing,
+        ],
+    );
 }
 
 #[test]
 fn market_submit_requires_absent_limit_price_and_day_tif() {
+    use StockEtfPaperOrderRequestBlocker as Blocker;
+
     let mut valid_market = StockEtfPaperOrderRequestEnvelopeV1::accepted_submit_fixture();
     valid_market.order_type = Some(StockEtfPaperOrderType::Market);
     valid_market.limit_price_policy = Some(StockEtfLimitPricePolicy::AbsentForMarketOrder);
@@ -744,18 +704,20 @@ fn market_submit_requires_absent_limit_price_and_day_tif() {
     valid_market.time_in_force = Some(StockEtfPaperTimeInForce::Gtc);
     let verdict = valid_market.validate();
 
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::LimitPriceInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::TimeInForceIncompatible
-    ));
+    assert_verdict_blockers(
+        verdict,
+        &[
+            Blocker::LimitPricePolicyMismatch,
+            Blocker::LimitPriceInvalid,
+            Blocker::TimeInForceIncompatible,
+        ],
+    );
 }
 
 #[test]
 fn cancel_request_rejects_submit_shape_pollution() {
+    use StockEtfPaperOrderRequestBlocker as Blocker;
+
     let mut cancel = StockEtfPaperOrderRequestEnvelopeV1::accepted_cancel_fixture();
     cancel.symbol = "SPY".to_string();
     cancel.instrument_kind = Some(InstrumentKind::Etf);
@@ -770,22 +732,20 @@ fn cancel_request_rejects_submit_shape_pollution() {
 
     let verdict = cancel.validate();
 
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::BrokerOrderIdMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::CancelReasonMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::CancelOrderShapeFieldPresent
-    ));
+    assert_verdict_blockers(
+        verdict,
+        &[
+            Blocker::BrokerOrderIdMissing,
+            Blocker::CancelReasonMissing,
+            Blocker::CancelOrderShapeFieldPresent,
+        ],
+    );
 }
 
 #[test]
 fn replace_request_requires_replacement_shape_and_rejects_original_mutable_fields() {
+    use StockEtfPaperOrderRequestBlocker as Blocker;
+
     let mut replace = StockEtfPaperOrderRequestEnvelopeV1::accepted_replace_fixture();
     replace.replacement_idempotency_key.clear();
     replace.replacement_quantity_decimal = "0".to_string();
@@ -798,34 +758,23 @@ fn replace_request_requires_replacement_shape_and_rejects_original_mutable_field
 
     let verdict = replace.validate();
 
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::ReplacementIdempotencyKeyMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::ReplacementQuantityInvalid
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::ReplacementLimitPricePolicyMismatch
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::ReplacementTimeInForceMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::ReplaceReasonMissing
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::ReplaceOriginalMutableFieldPresent
-    ));
+    assert_verdict_blockers(
+        verdict,
+        &[
+            Blocker::ReplacementIdempotencyKeyMissing,
+            Blocker::ReplacementQuantityInvalid,
+            Blocker::ReplacementLimitPricePolicyMismatch,
+            Blocker::ReplacementTimeInForceMissing,
+            Blocker::ReplaceReasonMissing,
+            Blocker::ReplaceOriginalMutableFieldPresent,
+        ],
+    );
 }
 
 #[test]
 fn request_envelope_rejects_boundary_regressions() {
+    use StockEtfPaperOrderRequestBlocker as Blocker;
+
     let envelope = StockEtfPaperOrderRequestEnvelopeV1 {
         asset_lane: AssetLane::CryptoPerp,
         broker: Broker::Bybit,
@@ -842,44 +791,23 @@ fn request_envelope_rejects_boundary_regressions() {
     };
     let verdict = envelope.validate();
 
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::WrongAssetLane
-    ));
-    assert!(has(&verdict, StockEtfPaperOrderRequestBlocker::WrongBroker));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::LiveEnvironmentDenied
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::IbkrContactPerformed
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::ConnectorRuntimeStarted
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::SecretContentSerialized
-    ));
-    assert!(has(&verdict, StockEtfPaperOrderRequestBlocker::OrderRouted));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::BybitPathReused
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::LiveOrTinyLiveAuthorized
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::MarginShortOptionsCfdRequested
-    ));
-    assert!(has(
-        &verdict,
-        StockEtfPaperOrderRequestBlocker::PythonDirectBrokerWriteRequested
-    ));
+    assert_verdict_blockers(
+        verdict,
+        &[
+            Blocker::WrongAssetLane,
+            Blocker::WrongBroker,
+            Blocker::LiveEnvironmentDenied,
+            Blocker::EnvironmentNotPaper,
+            Blocker::IbkrContactPerformed,
+            Blocker::ConnectorRuntimeStarted,
+            Blocker::SecretContentSerialized,
+            Blocker::OrderRouted,
+            Blocker::BybitPathReused,
+            Blocker::LiveOrTinyLiveAuthorized,
+            Blocker::MarginShortOptionsCfdRequested,
+            Blocker::PythonDirectBrokerWriteRequested,
+        ],
+    );
 }
 
 #[test]
@@ -912,13 +840,6 @@ fn blocked_template_is_parseable_and_secret_free() {
     assert!(!lower.contains("token ="));
 }
 
-fn has(
-    verdict: &StockEtfPaperOrderRequestVerdict,
-    blocker: StockEtfPaperOrderRequestBlocker,
-) -> bool {
-    verdict.blockers.contains(&blocker)
-}
-
 fn assert_single_blocker(
     candidate: StockEtfPaperOrderRequestEnvelopeV1,
     expected: StockEtfPaperOrderRequestBlocker,
@@ -932,6 +853,13 @@ fn assert_exact_blockers(
 ) {
     let verdict = candidate.validate();
 
+    assert_verdict_blockers(verdict, expected);
+}
+
+fn assert_verdict_blockers(
+    verdict: StockEtfPaperOrderRequestVerdict,
+    expected: &[StockEtfPaperOrderRequestBlocker],
+) {
     assert!(!verdict.accepted);
     assert_eq!(verdict.blockers.as_slice(), expected);
 }
