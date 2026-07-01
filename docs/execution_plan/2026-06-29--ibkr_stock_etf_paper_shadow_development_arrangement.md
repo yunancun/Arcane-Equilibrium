@@ -7264,3 +7264,42 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不啟動 session attestation runtime、
 不做 broker session、不做 broker routing、不做 paper order route、不做 Linux runtime sync/restart、
 不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 174. 2026-07-01 PM session source checkpoint：IBKR Feature Flag Secret Auth Authority Cross-Wire Guard
+
+本 checkpoint 補強 `ibkr_feature_flag_secret_auth` 中 feature flag、secret-slot、Phase 2 artifact、
+session attestation 與 scoped authorization envelope 的 authority cross-wire coverage。這不是 Rust
+production behavior change、不是 IBKR contact、不是 connector runtime、不是 secret lookup、不是
+authorization runtime、不是 broker session、不是 paper order route、不是 tiny-live/live gate；只把
+server-Rust matrix authority、GUI override denial、lane/broker/environment/instrument/operation、read/paper
+flags、shadow-only、secret contract、artifact/session prerequisite、authorization envelope lineage 與 expiry
+posture 變成 exact-blocker acceptance test 與 source-static guard。
+
+已完成：
+
+- 在 `ibkr_feature_flag_secret_auth_acceptance.rs` 新增
+  `feature_flag_secret_auth_rejects_each_authority_gap_independently`。
+- Acceptance 證明 contract id、source version、server-Rust authority、GUI override denial、wrong lane、
+  wrong broker、live environment、denied instrument kind、live/account-write operation、lane flag、read-only
+  flag、paper flag、shadow-only blocks paper、secret contract rejection、Phase 2 artifact rejection、session
+  attestation rejection、authorization envelope mismatch、permission scope mismatch、risk config hash、envelope
+  expiry、secret-slot fingerprint mismatch、account fingerprint mismatch 都會各自只產生單一對應 blocker。
+- Acceptance 明確保留 aggregate lineage failures：live-secret absence 未證明會同時拒絕 secret contract；
+  invalid secret/account hashes 會同時命中 invalid-hash 與 fingerprint mismatch，不被誤標成 single-blocker。
+- 在 `test_ibkr_feature_flag_secret_auth_source_static.py` 新增 authorization envelope default / paper fixture
+  與 matrix default block parser，鎖住 default denied posture、paper rehearsal fixture hashes 與 matrix default
+  fail-closed posture。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Feature flag secret auth source static pytest：`6 passed`。
+- Feature flag secret auth Rust acceptance：`10 passed`。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不呼叫 IBKR、
+不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不啟動 authorization runtime、不做
+broker session、不做 broker routing、不做 paper order route、不做 Linux runtime sync/restart、不授權
+tiny-live/live 或任何 Bybit behavior change。

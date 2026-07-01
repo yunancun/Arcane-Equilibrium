@@ -4507,3 +4507,31 @@ Verification 已過：
 沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 session attestation runtime、
 沒有 broker session、沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit
 live/demo execution 行為。
+
+## 2026-07-01 Operator Update — IBKR Feature Flag Secret Auth Authority Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`IBKR Feature Flag Secret Auth Authority Cross-Wire Guard`。
+
+這個 checkpoint 補強 `FeatureFlagSecretAuthMatrixV1` 的 server-Rust authority、GUI override denial、
+lane/broker/environment/instrument/operation gating、read-only/paper/shadow-only flags、secret contract、
+Phase 2 artifact、session attestation、authorization envelope hash lineage 與 expiry。新增 Rust acceptance
+證明可獨立隔離的每個 gap 都會各自只產生單一 blocker。
+
+同時保留天然 aggregate 行為：live-secret absence 未證明會同時拒絕 secret contract；invalid secret/account
+hash 會同時命中 invalid-hash 與 fingerprint mismatch，不把它們錯寫成 single-blocker。Python source-static
+parser 也鎖住 authorization envelope default / paper fixture 與 matrix default fail-closed posture。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Feature flag secret auth source static pytest：`6 passed`
+- Feature flag secret auth Rust acceptance：`10 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 authorization runtime、沒有 broker
+session、沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution
+行為。
