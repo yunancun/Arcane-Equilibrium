@@ -225,19 +225,19 @@ fn source_sql_audit_rejects_contract_drift_and_migration_promotion() {
     let missing_column = raw.replace("idempotency_key TEXT NOT NULL,\n", "");
     assert_ne!(missing_column, raw);
     let missing_column_audit = audit_stock_etf_db_evidence_source_sql(&missing_column);
-    assert!(has_source_blocker(
-        &missing_column_audit.blockers,
-        StockEtfDbEvidenceDdlSourceBlocker::RequiredTableColumnMissing
-    ));
+    assert_eq!(
+        missing_column_audit.blockers,
+        vec![StockEtfDbEvidenceDdlSourceBlocker::RequiredTableColumnMissing]
+    );
 
     let missing_scorecard_lineage = raw.replace("cost_model_version TEXT NOT NULL,\n", "");
     assert_ne!(missing_scorecard_lineage, raw);
     let missing_scorecard_lineage_audit =
         audit_stock_etf_db_evidence_source_sql(&missing_scorecard_lineage);
-    assert!(has_source_blocker(
-        &missing_scorecard_lineage_audit.blockers,
-        StockEtfDbEvidenceDdlSourceBlocker::RequiredTableColumnMissing
-    ));
+    assert_eq!(
+        missing_scorecard_lineage_audit.blockers,
+        vec![StockEtfDbEvidenceDdlSourceBlocker::RequiredTableColumnMissing]
+    );
 
     let missing_foreign_key = raw.replace(
         "FOREIGN KEY (asset_lane, broker, environment, broker_order_id, execution_id)\n        REFERENCES broker.paper_fills (asset_lane, broker, environment, broker_order_id, execution_id)",
@@ -245,10 +245,10 @@ fn source_sql_audit_rejects_contract_drift_and_migration_promotion() {
     );
     assert_ne!(missing_foreign_key, raw);
     let missing_foreign_key_audit = audit_stock_etf_db_evidence_source_sql(&missing_foreign_key);
-    assert!(has_source_blocker(
-        &missing_foreign_key_audit.blockers,
-        StockEtfDbEvidenceDdlSourceBlocker::RequiredForeignKeyMissing
-    ));
+    assert_eq!(
+        missing_foreign_key_audit.blockers,
+        vec![StockEtfDbEvidenceDdlSourceBlocker::RequiredForeignKeyMissing]
+    );
 
     let missing_shadow_check = raw.replace(
         "synthetic_shadow BOOLEAN NOT NULL DEFAULT TRUE CHECK (synthetic_shadow = TRUE)",
@@ -256,17 +256,17 @@ fn source_sql_audit_rejects_contract_drift_and_migration_promotion() {
     );
     assert_ne!(missing_shadow_check, raw);
     let missing_shadow_audit = audit_stock_etf_db_evidence_source_sql(&missing_shadow_check);
-    assert!(has_source_blocker(
-        &missing_shadow_audit.blockers,
-        StockEtfDbEvidenceDdlSourceBlocker::SyntheticShadowCheckMissing
-    ));
+    assert_eq!(
+        missing_shadow_audit.blockers,
+        vec![StockEtfDbEvidenceDdlSourceBlocker::SyntheticShadowCheckMissing]
+    );
 
     let destructive = format!("{raw}\nDROP TABLE broker.paper_orders;\n");
     let destructive_audit = audit_stock_etf_db_evidence_source_sql(&destructive);
-    assert!(has_source_blocker(
-        &destructive_audit.blockers,
-        StockEtfDbEvidenceDdlSourceBlocker::ForbiddenDestructiveOrMigrationStatement
-    ));
+    assert_eq!(
+        destructive_audit.blockers,
+        vec![StockEtfDbEvidenceDdlSourceBlocker::ForbiddenDestructiveOrMigrationStatement]
+    );
 }
 
 #[test]
@@ -280,35 +280,35 @@ fn source_sql_audit_rejects_migration_guard_and_retention_plan_drift() {
     let missing_dry_run_plan = raw.replace("Linux Postgres dry-run", "Linux Postgres review");
     assert_ne!(missing_dry_run_plan, raw);
     let missing_dry_run_plan_audit = audit_stock_etf_db_evidence_source_sql(&missing_dry_run_plan);
-    assert!(has_source_blocker(
-        &missing_dry_run_plan_audit.blockers,
-        StockEtfDbEvidenceDdlSourceBlocker::MigrationDryRunPlanMissing
-    ));
+    assert_eq!(
+        missing_dry_run_plan_audit.blockers,
+        vec![StockEtfDbEvidenceDdlSourceBlocker::MigrationDryRunPlanMissing]
+    );
 
     let missing_guard_b = raw.replace("data_type INTO v_actual", "column_name INTO v_actual");
     assert_ne!(missing_guard_b, raw);
     let missing_guard_b_audit = audit_stock_etf_db_evidence_source_sql(&missing_guard_b);
-    assert!(has_source_blocker(
-        &missing_guard_b_audit.blockers,
-        StockEtfDbEvidenceDdlSourceBlocker::GuardBBlockMissing
-    ));
+    assert_eq!(
+        missing_guard_b_audit.blockers,
+        vec![StockEtfDbEvidenceDdlSourceBlocker::GuardBBlockMissing]
+    );
 
     let missing_guard_c = raw.replace("pg_get_indexdef", "pg_get_index_definition");
     assert_ne!(missing_guard_c, raw);
     let missing_guard_c_audit = audit_stock_etf_db_evidence_source_sql(&missing_guard_c);
-    assert!(has_source_blocker(
-        &missing_guard_c_audit.blockers,
-        StockEtfDbEvidenceDdlSourceBlocker::GuardCBlockMissing
-    ));
+    assert_eq!(
+        missing_guard_c_audit.blockers,
+        vec![StockEtfDbEvidenceDdlSourceBlocker::GuardCBlockMissing]
+    );
 
     let missing_retention_plan = raw.replace("create_hypertable", "create_time_table");
     assert_ne!(missing_retention_plan, raw);
     let missing_retention_plan_audit =
         audit_stock_etf_db_evidence_source_sql(&missing_retention_plan);
-    assert!(has_source_blocker(
-        &missing_retention_plan_audit.blockers,
-        StockEtfDbEvidenceDdlSourceBlocker::HypertableRetentionPlanMissing
-    ));
+    assert_eq!(
+        missing_retention_plan_audit.blockers,
+        vec![StockEtfDbEvidenceDdlSourceBlocker::HypertableRetentionPlanMissing]
+    );
 }
 
 #[test]
@@ -342,11 +342,4 @@ fn blocked_template_is_parseable_and_secret_free() {
     assert!(!lower.contains("account_id ="));
     assert!(!lower.contains("password ="));
     assert!(!lower.contains("token ="));
-}
-
-fn has_source_blocker(
-    blockers: &[StockEtfDbEvidenceDdlSourceBlocker],
-    blocker: StockEtfDbEvidenceDdlSourceBlocker,
-) -> bool {
-    blockers.contains(&blocker)
 }

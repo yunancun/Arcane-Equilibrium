@@ -9298,3 +9298,42 @@ runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀
 socket/client construction、不做 broker session、不執行 read-only probe、不執行 fill import、不做 paper order
 routing/cancel/replace、不做 evidence/scorecard/DB writer、不啟動 evidence clock、不做 release launch、不做 Linux
 runtime sync/restart、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
+
+## 225. 2026-07-01 PM session source checkpoint：Stock/ETF DB Evidence DDL Exact Blocker Guard
+
+本 checkpoint 補強 `StockEtfDbEvidenceDdl` source SQL auditor mutation cases 的 exact fail-closed lineage，固定
+required column drift、foreign-key drift、synthetic-shadow check drift、destructive statement injection、migration
+dry-run text drift、guard B/C drift、hypertable/retention-plan drift 的 exact single-blocker vectors。這不是 Rust
+production behavior change、不是 source-only SQL draft behavior change、不是 migration copy/registration、不是
+Postgres open/write/apply/dry-run、不是 IPC/API route change、不是 IBKR contact、不是 connector runtime、不是
+secret lookup、不是 broker session、不是 paper order route enablement、不是 evidence/scorecard/DB writer、不是
+tiny-live/live gate；只把 Stock/ETF DB evidence DDL source-auditor mutation cases 變成 exact-blocker acceptance
+guard。
+
+已完成：
+
+- 在 `stock_etf_db_evidence_ddl_acceptance.rs` 將 source SQL auditor 的 required-column drift cases 改成 exact
+  single-blocker vectors。
+- 在同檔將 required foreign-key drift、synthetic-shadow check drift、destructive statement injection、migration
+  dry-run text drift、guard B/C drift、hypertable/retention-plan drift 改成 exact single-blocker vectors。
+- 移除 DB evidence DDL acceptance 中 loose `has_source_blocker()` / `.contains()` helper usage。
+- 保持既有 `test_stock_etf_db_evidence_ddl_source_static.py` source-order guard；本 checkpoint 不改 production
+  source validator 或 source-only SQL draft。
+
+驗證：
+
+- No DB evidence DDL source-auditor `.contains()` scan：PASS。
+- Targeted rustfmt check：PASS。
+- Stock/ETF DB evidence DDL source static pytest：`7 passed`。
+- Stock/ETF DB evidence DDL Rust acceptance：`10 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、不改 GUI
+runtime、不改 API route 行為、不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不做
+socket/client construction、不做 broker session、不複製/註冊 sql migration、不開啟 Postgres、不執行 DB apply/
+write/dry-run、不執行 read-only probe、不執行 fill import、不做 paper order routing/cancel/replace、不做
+evidence/scorecard/DB writer、不啟動 evidence clock、不做 release launch、不做 Linux runtime sync/restart、不授權
+paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。

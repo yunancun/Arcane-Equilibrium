@@ -5983,3 +5983,34 @@ Verification 已過：
 session、沒有 read-only probe execution、沒有 fill import execution、沒有 paper order routing/cancel/replace
 execution、沒有 evidence/scorecard writer、沒有 DB apply、沒有 evidence clock、沒有 paper-shadow launch、沒有
 release launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF DB Evidence DDL Exact Blocker Guard
+
+本 session 已完成下一個 test-only checkpoint：
+`Stock/ETF DB Evidence DDL Exact Blocker Guard`。
+
+這個 checkpoint 補強 `StockEtfDbEvidenceDdl` source SQL auditor mutation cases 的 exact fail-closed coverage。
+
+新增 Rust acceptance 證明 required column drift、required foreign-key drift、synthetic-shadow check drift、
+destructive statement injection、migration dry-run text drift、guard B/C drift、hypertable/retention-plan drift 都會以
+exact single-blocker vectors fail closed。既有 source-static guard 仍覆蓋 DB evidence DDL contract 與 source-auditor
+blocker emit order；本 checkpoint 不改 production validator 或 source-only SQL draft。
+
+Verification 已過：
+
+- No DB evidence DDL source-auditor `.contains()` scan：PASS
+- Targeted rustfmt check：PASS
+- Stock/ETF DB evidence DDL source static pytest：`7 passed`
+- Stock/ETF DB evidence DDL Rust acceptance：`10 passed`
+- Full `cargo test -p openclaw_types`：PASS
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 source-only SQL draft behavior change、沒有 sql/migrations copy
+或 sqlx migration registration、沒有 Postgres open/write/apply/dry-run、沒有 GUI runtime/API route/IPC behavior
+change、沒有 IBKR contact、沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 socket/client
+construction、沒有 broker session、沒有 read-only probe execution、沒有 fill import execution、沒有 paper order
+routing/cancel/replace execution、沒有 evidence/scorecard writer、沒有 DB apply、沒有 evidence clock、沒有
+paper-shadow launch、沒有 release launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution
+行為。
