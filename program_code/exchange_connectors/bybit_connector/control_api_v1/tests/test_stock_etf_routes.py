@@ -327,6 +327,9 @@ def test_stock_etf_static_tab_is_readonly_display_only() -> None:
     assert "lane_scoped_ipc_contract_id" in source
     assert "readonly_probe_request_contract_id" in source
     assert "readonly_probe_result_import_request_contract_id" in source
+    assert "readonly_probe_result_import.contract_id" in source
+    assert "readonly_probe_result_import.accepted_for_import" in source
+    assert "readonly_probe_result_import.result_import_performed" in source
     assert "read_rows_require_lane_scoped_ipc" in source
     assert "read_rows_require_readonly_probe_request" in source
     assert "scorecard_requires_readonly_probe_result_import_request" in source

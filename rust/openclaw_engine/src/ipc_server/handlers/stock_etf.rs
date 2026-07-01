@@ -791,6 +791,7 @@ fn phase2_precontact_summary() -> serde_json::Value {
             "flags": policy_flags,
         },
         "readonly_probe_request": readonly_probe_request_summary(),
+        "readonly_probe_result_import_request": readonly_probe_result_import_request_summary(),
         "immutable_pass_artifact_present": false,
         "first_ibkr_contact_allowed": false,
         "connector_enabled": false,
@@ -815,6 +816,29 @@ fn readonly_probe_request_summary() -> serde_json::Value {
         "paper_order_submitted": false,
         "db_apply_performed": false,
         "evidence_clock_started": false,
+        "bybit_path_reused": false,
+        "live_or_tiny_live_authorized": false,
+    })
+}
+
+fn readonly_probe_result_import_request_summary() -> serde_json::Value {
+    serde_json::json!({
+        "contract_id": STOCK_ETF_IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID,
+        "source_version": 1,
+        "request_artifact_present": false,
+        "request_validated": false,
+        "accepted_for_import": false,
+        "status": "blocked_no_result_import_request_artifact",
+        "blockers": ["phase2_gate_not_accepted", "probe_result_import_request_artifact_missing"],
+        "ibkr_contact_performed": false,
+        "connector_runtime_started": false,
+        "secret_content_serialized": false,
+        "result_import_performed": false,
+        "evidence_writer_started": false,
+        "scorecard_writer_started": false,
+        "db_apply_performed": false,
+        "order_routed": false,
+        "paper_order_submitted": false,
         "bybit_path_reused": false,
         "live_or_tiny_live_authorized": false,
     })
