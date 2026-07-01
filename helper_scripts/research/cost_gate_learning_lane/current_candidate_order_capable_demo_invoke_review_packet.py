@@ -46,10 +46,10 @@ DEFAULT_MAX_SOURCE_CONTRACT_AGE_SECONDS = 6 * 60 * 60
 DEFAULT_MAX_AUTH_REMAINING_SECONDS = 15 * 60
 DEFAULT_MAX_RENEWED_NO_ORDER_AGE_SECONDS = 3 * 60 * 60
 
-ACTIVE_BLOCKER_ID = "P0-CURRENT-CANDIDATE-ORDER-CAPABLE-DEMO-INVOKE-E3-BB-REVIEW"
-NEXT_BLOCKER_ID = (
-    "P0-CURRENT-CANDIDATE-ORDER-CAPABLE-DEMO-INVOKE-E3-BB-PACKET-REVIEW"
+ACTIVE_BLOCKER_ID = (
+    "P0-CURRENT-CANDIDATE-ORDER-CAPABLE-DEMO-INVOKE-FRESH-WINDOW-RUN-GATE"
 )
+NEXT_BLOCKER_ID = ACTIVE_BLOCKER_ID
 
 BOUNDARY = (
     "order-capable Demo invocation E3/BB review packet only; no approval by "
@@ -359,6 +359,7 @@ def _validate_standing_auth(
 ) -> dict[str, Any]:
     data = _dict(payload)
     answers = _dict(data.get("answers"))
+    risk_cap_lineage = _dict(data.get("risk_cap_lineage"))
     candidate = _candidate_identity(_dict(data.get("candidate")))
     blockers: list[str] = []
     authority: list[str] = []
@@ -393,6 +394,8 @@ def _validate_standing_auth(
         "candidate": candidate,
         "expires_at_utc": data.get("expires_at_utc"),
         "remaining_seconds": remaining,
+        "resolved_cap_usdt": _float(risk_cap_lineage.get("resolved_cap_usdt")),
+        "risk_cap_lineage": risk_cap_lineage,
         "blockers": blockers,
         "authority_violations": authority,
     }
@@ -654,6 +657,13 @@ def build_order_capable_demo_invoke_review_packet(
     answers = _false_answers()
     answers["review_packet_ready"] = not loss_control_blockers and not authority_violations
 
+    plan_max_notional = _float(plan_review.get("max_demo_notional_usdt_per_order"))
+    standing_resolved_cap = _float(standing_review.get("resolved_cap_usdt"))
+    cap_candidates = [
+        value for value in (plan_max_notional, standing_resolved_cap) if value is not None
+    ]
+    effective_future_order_cap = min(cap_candidates) if cap_candidates else None
+
     status: str
     reason: str
     if authority_violations:
@@ -761,8 +771,12 @@ def build_order_capable_demo_invoke_review_packet(
                 "max_orders": 1,
                 "demo_only": True,
                 "post_only_near_touch_limit_or_skip": True,
-                "max_notional_usdt_from_plan": plan_review.get(
-                    "max_demo_notional_usdt_per_order"
+                "max_notional_usdt_from_plan": plan_max_notional,
+                "current_standing_resolved_cap_usdt": standing_resolved_cap,
+                "effective_future_order_cap_usdt": effective_future_order_cap,
+                "effective_future_order_cap_source": (
+                    "min(bounded_demo_soak_plan.max_demo_notional_usdt_per_order, "
+                    "standing_demo_authorization.risk_cap_lineage.resolved_cap_usdt)"
                 ),
                 "must_record_candidate_matched_order_fill_fee_slippage_lineage": True,
             },

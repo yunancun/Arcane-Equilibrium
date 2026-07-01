@@ -65,6 +65,10 @@ def _standing_auth(**overrides) -> dict:
         "environment": "demo",
         "expires_at_utc": "2026-07-01T09:02:17.250395+00:00",
         "candidate": _candidate(),
+        "risk_cap_lineage": {
+            "resolved_cap_usdt": 954.18759458,
+            "risk_source_of_truth": "GUI-backed Rust RiskConfig",
+        },
         "answers": {
             "demo_only": True,
             "candidate_scoping_required": True,
@@ -198,6 +202,10 @@ def test_ready_packet_keeps_order_submission_denied() -> None:
 
     assert packet["status"] == mod.READY_STATUS
     assert packet["candidate"]["side_cell_key"] == SIDE_CELL
+    assert packet["active_blocker_id"] == (
+        "P0-CURRENT-CANDIDATE-ORDER-CAPABLE-DEMO-INVOKE-FRESH-WINDOW-RUN-GATE"
+    )
+    assert packet["next_blocker_id"] == packet["active_blocker_id"]
     assert packet["loss_control_blockers"] == []
     assert packet["authority_boundary_violations"] == []
     assert packet["answers"]["review_packet_ready"] is True
@@ -206,6 +214,15 @@ def test_ready_packet_keeps_order_submission_denied() -> None:
     assert packet["requested_scope"]["future_phase_c_conditional_single_bounded_demo_order"][
         "allowed_by_this_packet"
     ] is False
+    assert packet["requested_scope"]["future_phase_c_conditional_single_bounded_demo_order"][
+        "max_notional_usdt_from_plan"
+    ] == 954.18759777
+    assert packet["requested_scope"]["future_phase_c_conditional_single_bounded_demo_order"][
+        "current_standing_resolved_cap_usdt"
+    ] == 954.18759458
+    assert packet["requested_scope"]["future_phase_c_conditional_single_bounded_demo_order"][
+        "effective_future_order_cap_usdt"
+    ] == 954.18759458
     assert packet["reviews"]["bounded_demo_soak_plan"][
         "materialized_order_authority_is_input_only"
     ] is True
