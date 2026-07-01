@@ -1649,3 +1649,10 @@ Do not paste long reports or stable architecture into TODO.
 - The guard proves default Phase 3 evidence contracts emit complete ordered blocker vectors across identity, lane/broker/environment, lineage hashes, Bybit protection, nested frozen-input/DQ shape, and green-day readiness gates.
 - Python source-static now pins the four validator blocker emit orders backing the default exact acceptance vectors.
 - Verification passed: source static `16 passed`; Phase 3 evidence acceptance `24 passed`; `cargo fmt -p openclaw_types -- --check` PASS; docs trace PASS; diff check PASS. This grants no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, market data ingestion, evidence writer, DQ writer, evidence clock start, scorecard writer, DB apply, paper order routing, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Scorecard Inputs Default Lineage Exact Guard
+
+- PM added exact-blocker Rust acceptance coverage for default `StockEtfScorecardInputBundleV1` plus cash ledger, cost model, benchmark, shadow fill model, and storage capacity input validators.
+- The guard proves default scorecard input contracts emit complete ordered blocker vectors across aggregate child rejection, contract/source, StockEtfCash/IBKR lane drift, hash lineage, derived-only/separation, storage capacity, Bybit protection, and no-runtime/no-writer posture.
+- Python source-static now pins component and bundle validator blocker emit orders backing the default exact acceptance vectors.
+- Verification passed: source static `10 passed`; scorecard inputs acceptance `14 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `337` integration/acceptance + `0` doc-tests; `cargo fmt -p openclaw_types -- --check` PASS; docs trace PASS; diff check PASS. This grants no Rust production code change, IPC server start, IBKR contact, connector runtime, secret access, broker fill import, scorecard derivation, scorecard writer, DB/evidence writer, evidence clock start, paper order routing, broker session, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

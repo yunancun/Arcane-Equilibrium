@@ -8118,3 +8118,40 @@ PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/I
 不做 market data ingestion、不做 evidence writer、不做 DQ writer、不啟動 evidence clock、不啟動 scorecard
 writer、不做 DB apply、不做 broker session、不做 broker routing、不做 Linux runtime sync/restart、
 不授權 tiny-live/live 或任何 Bybit behavior change。
+
+## 194. 2026-07-01 PM session source checkpoint：Stock/ETF Scorecard Inputs Default Lineage Exact Guard
+
+本 checkpoint 補強 `stock_etf_scorecard_inputs` 的 default input lineage，固定 default scorecard input
+bundle、cash ledger、cost model、benchmark、shadow fill model、storage capacity 的完整 ordered blocker
+vectors，並用 source-static parser 鎖住 validator blocker emit order。這不是 Rust production behavior
+change、不是 IPC server start、不是 IBKR contact、不是 connector runtime、不是 secret lookup、不是 broker
+fill import、不是 scorecard derivation/writer、不是 DB/evidence writer、不是 paper order route enablement、
+不是 tiny-live/live gate；只把 scorecard input source-only evidence contract 的 fail-closed lineage 變成
+exact-blocker acceptance test 與 source-static guard。
+
+已完成：
+
+- 在 `stock_etf_scorecard_inputs_acceptance.rs` 將 default `StockEtfScorecardInputBundleV1` 檢查提升為完整
+  順序 blocker 向量。
+- 在同檔新增 default cash ledger、cost model、benchmark、shadow fill model、storage capacity 五個 atomic
+  validator 的完整順序 blocker vectors。
+- 在同檔補齊 accepted/template 對 `atomic_fact_input_hash`、`source_commit`、`live_fill_claimed` 的
+  lineage/fail-closed 檢查。
+- 在 `test_stock_etf_scorecard_inputs_source_static.py` 新增 component 與 bundle validator blocker ordering
+  parser，鎖住 exact blocker emit order。
+
+驗證：
+
+- Targeted rustfmt check：PASS。
+- Stock/ETF scorecard inputs source static pytest：`10 passed`。
+- Stock/ETF scorecard inputs Rust acceptance：`14 passed`。
+- Full `cargo test -p openclaw_types`：`35` unit/golden + `337` integration/acceptance + `0` doc-tests。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary 保持 checkpoint title coverage。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 endpoint/IPC method、不啟動 IPC server、
+不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動 connector runtime、不執行 broker fill import、
+不做 scorecard derivation、不啟動 scorecard writer、不做 DB/evidence writer、不啟動 evidence clock、
+不執行 paper order routing、不做 broker session、不做 broker routing、不做 Linux runtime sync/restart、
+不授權 tiny-live/live 或任何 Bybit behavior change。
