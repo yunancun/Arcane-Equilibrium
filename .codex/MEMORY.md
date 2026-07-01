@@ -1446,3 +1446,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only structure guard for `settings/broker/stock_etf_ibkr_readonly_probe_request.template.toml`, closing the last direct settings coverage gap found in the IBKR/Stock-ETF template scan.
 - The guard requires default denied template posture, empty Phase2/allowlist/secret-slot/topology/session/redaction/rate-limit/audit/artifact lineage, all contact/runtime/secret/order/DB/evidence-clock/Bybit/live/account-write/entitlement/client-portal/Python-write flags false, and no runtime/network/SDK/order/secret material tokens.
 - Verification passed: new guard `5 passed`; read-only probe request acceptance `6 passed`; full `cargo test -p openclaw_types` PASS; docs trace PASS. This grants no IBKR contact, read-only probe execution, connector runtime, secret access, result import, evidence/scorecard writer, DB apply, paper order route, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Settings Template Coverage Static Guard
+
+- PM added a source-only meta guard for IBKR/Stock-ETF TOML settings/template coverage across `settings/asset_lanes`, `settings/broker`, and `settings/risk_control_rules`.
+- The guard dynamically scans `ibkr`, `stock_etf`, and legacy `stock_market_data` TOML names, requires the non-prefixed market-data alias to be included, excludes unrelated Bybit runtime risk configs, and fails if any matching settings file is not directly referenced by Rust acceptance, structure, or Stock/ETF control-api tests.
+- Verification passed: new guard `3 passed`; docs trace PASS. This grants no settings mutation, IBKR contact, connector runtime, secret access, read-only probe, result import, evidence/scorecard writer, DB apply, paper order route, tiny-live/live, or Bybit behavior change.
