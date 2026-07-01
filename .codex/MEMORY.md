@@ -1308,3 +1308,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only structure guard for `ibkr_paper_lifecycle.rs`, pinning the paper order lifecycle and append-only event-log contract.
 - The guard requires contract ids, event fields, fail-closed default, accepted ack lineage, genesis/hash rules, StockEtfCash/IBKR/Paper checks, live denial, paper lifecycle operation and transition gating, StateUnknown recovery rules, denied-event semantics, stale-state policy matching, restart recovery fail-closed classification, and no runtime/secret/order/Bybit client tokens.
 - Verification passed: new guard `6 passed`; paper lifecycle acceptance `12 passed`; full `cargo test -p openclaw_types` PASS. This grants no IBKR contact, connector construction, paper order route, lifecycle writer, secret access, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Paper Fill Import Request Source Static Guard
+
+- PM added a source-only structure guard for `stock_etf_paper_fill_import_request.rs`, pinning the paper fill import request envelope after paper lifecycle events.
+- The guard requires fail-closed defaults, accepted ReadOnly/effect=false shape, lifecycle/event-log/redaction/session/source hashes, reconciliation/broker/execution/commission/idempotency identifiers, stale StateUnknown policy handling, duplicate-import denial, no-side-effect boundary flags, and no runtime/secret/order/Bybit client tokens.
+- Verification passed: new guard `6 passed`; paper fill import request acceptance `6 passed`; full `cargo test -p openclaw_types` PASS. This grants no IBKR contact, connector construction, fill import execution, DB apply, paper order route, secret access, tiny-live/live, or Bybit behavior change.

@@ -2717,3 +2717,35 @@ Verification 已過：
 access/creation、沒有 connector runtime、沒有 read probe execution、沒有 result
 import、沒有 DB/evidence/scorecard writer、沒有 paper order/cancel/replace、沒有
 tiny-live/live authority，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Paper Fill Import Request Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF Paper Fill Import Request Source Static Guard`。
+
+這個 guard 鎖住 `stock_etf_paper_fill_import_request.rs` 的 paper fill import request
+source hygiene：contract id、request/verdict/blocker surface、required-field validator、
+boundary-flag validator、lifecycle/event-log/redaction imports 必須保留。
+
+Guard 要求 default 保持 CryptoPerp/Bybit/LiveReservedDenied/UnknownDenied/
+TransferOrAccountWrite/Denied/effect=false；accepted fixture 維持 StockEtfCash/IBKR
+Paper、ImportPaperFills、PaperOrderFillImport、ReadOnly、effect=false。session、
+lifecycle/event-log/redaction/source artifact hashes、reconciliation/broker/execution/
+commission/idempotency ids、raw/redacted hashes、duplicate-import denial 與 StateUnknown
+stale-policy handling 不得消失。IBKR contact、connector runtime、secret serialization、
+fill import、DB apply、order route、Bybit reuse、live/tiny-live、margin/short/options/CFD、
+Python direct broker write boundary flags 必須繼續 fail closed。source 不得出現
+env/fs/network/IBKR SDK/clock/thread/process/order/Bybit runtime tokens 或 secret
+material access tokens。
+
+Verification 已過：
+
+- New structure guard pytest：`6 passed`
+- Focused paper fill import request acceptance：`6 passed`
+- Full `cargo test -p openclaw_types`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 SDK import、沒有 socket/HTTP、沒有 secret
+access/creation、沒有 connector runtime、沒有 read probe execution、沒有 result
+import、沒有 DB/evidence/scorecard writer、沒有 paper order/cancel/replace、沒有
+fill import execution、沒有 DB apply、沒有 tiny-live/live authority，也沒有改動 Bybit live
+execution 行為。
