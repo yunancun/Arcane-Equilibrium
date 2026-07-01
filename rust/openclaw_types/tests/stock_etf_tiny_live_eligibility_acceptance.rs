@@ -10,6 +10,26 @@ use openclaw_types::{
     STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID,
 };
 
+fn assert_has_blocker(
+    blockers: &[TinyLiveAdrEligibilityBlocker],
+    blocker: TinyLiveAdrEligibilityBlocker,
+) {
+    assert!(
+        blockers.contains(&blocker),
+        "missing blocker {blocker:?}; blockers: {blockers:?}"
+    );
+}
+
+fn assert_lacks_blocker(
+    blockers: &[TinyLiveAdrEligibilityBlocker],
+    blocker: TinyLiveAdrEligibilityBlocker,
+) {
+    assert!(
+        !blockers.contains(&blocker),
+        "unexpected blocker {blocker:?}; blockers: {blockers:?}"
+    );
+}
+
 #[test]
 fn default_tiny_live_eligibility_blocks_discussion() {
     let verdict = TinyLiveAdrEligibilityV1::default().validate();
@@ -169,6 +189,134 @@ fn tiny_live_or_live_authority_is_rejected_even_with_all_evidence_present() {
     assert!(live_verdict
         .blockers
         .contains(&TinyLiveAdrEligibilityBlocker::SecretContentSerialized));
+}
+
+#[test]
+fn tiny_live_eligibility_rejects_decision_and_secret_cross_wire_independently() {
+    let mut not_eligible = TinyLiveAdrEligibilityV1::adr_discussion_fixture();
+    not_eligible.decision = TinyLiveAdrEligibilityDecision::NotEligible;
+    let not_eligible_verdict = not_eligible.validate();
+    assert!(!not_eligible_verdict.accepted);
+    assert_has_blocker(
+        &not_eligible_verdict.blockers,
+        TinyLiveAdrEligibilityBlocker::DecisionNotAdrDiscussionOnly,
+    );
+    assert_lacks_blocker(
+        &not_eligible_verdict.blockers,
+        TinyLiveAdrEligibilityBlocker::TinyLiveAuthorizationRequested,
+    );
+    assert_lacks_blocker(
+        &not_eligible_verdict.blockers,
+        TinyLiveAdrEligibilityBlocker::LiveAuthorizationRequested,
+    );
+    assert_lacks_blocker(
+        &not_eligible_verdict.blockers,
+        TinyLiveAdrEligibilityBlocker::SecretContentSerialized,
+    );
+    assert_lacks_blocker(
+        &not_eligible_verdict.blockers,
+        TinyLiveAdrEligibilityBlocker::NotSealed,
+    );
+
+    let mut tiny_live = TinyLiveAdrEligibilityV1::adr_discussion_fixture();
+    tiny_live.decision = TinyLiveAdrEligibilityDecision::TinyLiveAuthorized;
+    let tiny_live_verdict = tiny_live.validate();
+    assert!(!tiny_live_verdict.accepted);
+    assert_has_blocker(
+        &tiny_live_verdict.blockers,
+        TinyLiveAdrEligibilityBlocker::TinyLiveAuthorizationRequested,
+    );
+    assert_lacks_blocker(
+        &tiny_live_verdict.blockers,
+        TinyLiveAdrEligibilityBlocker::DecisionNotAdrDiscussionOnly,
+    );
+    assert_lacks_blocker(
+        &tiny_live_verdict.blockers,
+        TinyLiveAdrEligibilityBlocker::LiveAuthorizationRequested,
+    );
+    assert_lacks_blocker(
+        &tiny_live_verdict.blockers,
+        TinyLiveAdrEligibilityBlocker::SecretContentSerialized,
+    );
+    assert_lacks_blocker(
+        &tiny_live_verdict.blockers,
+        TinyLiveAdrEligibilityBlocker::NotSealed,
+    );
+
+    let mut live = TinyLiveAdrEligibilityV1::adr_discussion_fixture();
+    live.decision = TinyLiveAdrEligibilityDecision::LiveAuthorized;
+    let live_verdict = live.validate();
+    assert!(!live_verdict.accepted);
+    assert_has_blocker(
+        &live_verdict.blockers,
+        TinyLiveAdrEligibilityBlocker::LiveAuthorizationRequested,
+    );
+    assert_lacks_blocker(
+        &live_verdict.blockers,
+        TinyLiveAdrEligibilityBlocker::DecisionNotAdrDiscussionOnly,
+    );
+    assert_lacks_blocker(
+        &live_verdict.blockers,
+        TinyLiveAdrEligibilityBlocker::TinyLiveAuthorizationRequested,
+    );
+    assert_lacks_blocker(
+        &live_verdict.blockers,
+        TinyLiveAdrEligibilityBlocker::SecretContentSerialized,
+    );
+    assert_lacks_blocker(
+        &live_verdict.blockers,
+        TinyLiveAdrEligibilityBlocker::NotSealed,
+    );
+
+    let mut secret = TinyLiveAdrEligibilityV1::adr_discussion_fixture();
+    secret.secret_content_serialized = true;
+    let secret_verdict = secret.validate();
+    assert!(!secret_verdict.accepted);
+    assert_has_blocker(
+        &secret_verdict.blockers,
+        TinyLiveAdrEligibilityBlocker::SecretContentSerialized,
+    );
+    assert_lacks_blocker(
+        &secret_verdict.blockers,
+        TinyLiveAdrEligibilityBlocker::DecisionNotAdrDiscussionOnly,
+    );
+    assert_lacks_blocker(
+        &secret_verdict.blockers,
+        TinyLiveAdrEligibilityBlocker::TinyLiveAuthorizationRequested,
+    );
+    assert_lacks_blocker(
+        &secret_verdict.blockers,
+        TinyLiveAdrEligibilityBlocker::LiveAuthorizationRequested,
+    );
+    assert_lacks_blocker(
+        &secret_verdict.blockers,
+        TinyLiveAdrEligibilityBlocker::NotSealed,
+    );
+
+    let mut unsealed = TinyLiveAdrEligibilityV1::adr_discussion_fixture();
+    unsealed.sealed = false;
+    let unsealed_verdict = unsealed.validate();
+    assert!(!unsealed_verdict.accepted);
+    assert_has_blocker(
+        &unsealed_verdict.blockers,
+        TinyLiveAdrEligibilityBlocker::NotSealed,
+    );
+    assert_lacks_blocker(
+        &unsealed_verdict.blockers,
+        TinyLiveAdrEligibilityBlocker::DecisionNotAdrDiscussionOnly,
+    );
+    assert_lacks_blocker(
+        &unsealed_verdict.blockers,
+        TinyLiveAdrEligibilityBlocker::TinyLiveAuthorizationRequested,
+    );
+    assert_lacks_blocker(
+        &unsealed_verdict.blockers,
+        TinyLiveAdrEligibilityBlocker::LiveAuthorizationRequested,
+    );
+    assert_lacks_blocker(
+        &unsealed_verdict.blockers,
+        TinyLiveAdrEligibilityBlocker::SecretContentSerialized,
+    );
 }
 
 #[test]

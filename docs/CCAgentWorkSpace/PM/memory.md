@@ -3674,3 +3674,11 @@
 - Source-static guard now rejects hardcoded true values for live fill, IBKR contact, connector runtime, broker fill import, scorecard writer, DB apply, evidence clock, secret serialization, and tiny-live/live authority in the profitability-feasible fixture, and pins default fail-closed posture.
 - Verification passed: targeted rustfmt check PASS; scorecard verdict source static `8 passed`; scorecard verdict Rust acceptance `9 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
 - Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, scorecard writer execution, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Tiny-Live Eligibility Decision Cross-Wire Guard
+
+- PM added test-only/source-static coverage for `stock_etf_tiny_live_eligibility` ADR-discussion-only decision posture.
+- Acceptance now independently rejects NotEligible, TinyLiveAuthorized, LiveAuthorized, secret serialization, and unsealed posture via the expected blockers.
+- Source-static guard now rejects hardcoded TinyLiveAuthorized, LiveAuthorized, secret serialization, and unsealed posture in the ADR discussion fixture, and pins default fail-closed posture.
+- Verification passed: targeted rustfmt check PASS; tiny-live eligibility source static `7 passed`; tiny-live eligibility Rust acceptance `8 passed`; package `cargo fmt -p openclaw_types -- --check` PASS; dynamic docs trace PASS; diff check PASS.
+- Boundary unchanged: no Rust production code change, endpoint/IPC change, IBKR contact, connector runtime, secret access, tiny-live/live authorization, DB/evidence writer, paper order route, Linux runtime sync/restart, or Bybit behavior change.

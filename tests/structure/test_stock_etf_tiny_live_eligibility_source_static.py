@@ -181,6 +181,34 @@ def test_stock_etf_tiny_live_eligibility_source_keeps_adr_discussion_only_fixtur
     assert "..Self::default()" in source
 
 
+def test_stock_etf_tiny_live_eligibility_fixture_excludes_live_authority_and_secret_crosswire() -> None:
+    source = _source()
+    fixture = source.split("pub fn adr_discussion_fixture() -> Self", 1)[1].split(
+        "pub fn validate(&self)",
+        1,
+    )[0]
+    default_impl = source.split("impl Default for TinyLiveAdrEligibilityV1", 1)[1].split(
+        "impl TinyLiveAdrEligibilityV1",
+        1,
+    )[0]
+
+    for forbidden in (
+        "decision: TinyLiveAdrEligibilityDecision::TinyLiveAuthorized",
+        "decision: TinyLiveAdrEligibilityDecision::LiveAuthorized",
+        "secret_content_serialized: true",
+        "sealed: false",
+    ):
+        assert forbidden not in fixture
+
+    for fail_closed in (
+        "decision: TinyLiveAdrEligibilityDecision::NotEligible",
+        "paper_shadow_window_complete: false",
+        "secret_content_serialized: false",
+        "sealed: false",
+    ):
+        assert fail_closed in default_impl
+
+
 def test_stock_etf_tiny_live_eligibility_source_keeps_hash_stat_review_gates() -> None:
     source = _source()
 
