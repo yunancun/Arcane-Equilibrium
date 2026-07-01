@@ -9,10 +9,10 @@ use openclaw_types::{
     classify_non_bybit_api_action, required_non_bybit_api_actions, BrokerEnvironment,
     IbkrApiBaseline, IbkrExternalSurfaceGateBlocker, IbkrExternalSurfaceGateStatus,
     IbkrExternalSurfaceGateV1, IbkrGatewayMode, IbkrHostPolicy, IbkrPortPolicy, IbkrSecretSlotMode,
-    IbkrSessionAttestationBlocker, IbkrSessionAttestationV1, IbkrSessionDataTier,
-    NonBybitApiAction, NonBybitApiAllowlistBlocker, NonBybitApiAllowlistV1,
+    IbkrSessionAttestationBlocker, IbkrSessionAttestationStatus, IbkrSessionAttestationV1,
+    IbkrSessionDataTier, NonBybitApiAction, NonBybitApiAllowlistBlocker, NonBybitApiAllowlistV1,
     NonBybitApiDenialReason, IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID, IBKR_LIVE_GATEWAY_PORT,
-    IBKR_PAPER_GATEWAY_DEFAULT_PORT, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
+    IBKR_LIVE_TWS_PORT, IBKR_PAPER_GATEWAY_DEFAULT_PORT, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
     NON_BYBIT_API_ALLOWLIST_CONTRACT_ID,
 };
 
@@ -442,6 +442,168 @@ fn paper_session_attestation_accepts_only_loopback_paper_gateway() {
 }
 
 #[test]
+fn session_attestation_rejects_each_secret_lineage_and_window_gap_independently() {
+    use IbkrSessionAttestationBlocker as Blocker;
+
+    let cases: [(fn(&mut IbkrSessionAttestationV1), Blocker); 29] = [
+        (
+            |attestation| {
+                attestation.contract_id = "ibkr_session_attestation_v1_fixture".to_string()
+            },
+            Blocker::ContractIdMismatch,
+        ),
+        (
+            |attestation| attestation.source_version = 2,
+            Blocker::SourceVersionMismatch,
+        ),
+        (
+            |attestation| attestation.status = IbkrSessionAttestationStatus::Blocked,
+            Blocker::StatusBlocked,
+        ),
+        (
+            |attestation| attestation.environment = BrokerEnvironment::LiveReservedDenied,
+            Blocker::EnvironmentDenied,
+        ),
+        (
+            |attestation| attestation.host = "192.0.2.10".to_string(),
+            Blocker::HostNotLoopback,
+        ),
+        (
+            |attestation| attestation.port = 1,
+            Blocker::PortNotPaperGatewayDefault,
+        ),
+        (
+            |attestation| attestation.account_fingerprint = String::new(),
+            Blocker::MissingAccountFingerprint,
+        ),
+        (
+            |attestation| {
+                attestation.account_fingerprint = "paper_account_fingerprint_hash".to_string()
+            },
+            Blocker::AccountFingerprintInvalid,
+        ),
+        (
+            |attestation| attestation.account_fingerprint_is_live = true,
+            Blocker::LiveAccountFingerprint,
+        ),
+        (
+            |attestation| attestation.process_identity = String::new(),
+            Blocker::MissingProcessIdentity,
+        ),
+        (
+            |attestation| attestation.gateway_mode = IbkrGatewayMode::Unknown,
+            Blocker::UnknownOrLiveGatewayMode,
+        ),
+        (
+            |attestation| attestation.secret_slot_fingerprint = String::new(),
+            Blocker::MissingSecretSlotFingerprint,
+        ),
+        (
+            |attestation| {
+                attestation.secret_slot_fingerprint =
+                    "paper_secret_slot_fingerprint_hash".to_string()
+            },
+            Blocker::SecretSlotFingerprintInvalid,
+        ),
+        (
+            |attestation| attestation.secret_slot_mode = IbkrSecretSlotMode::Missing,
+            Blocker::SecretSlotMissing,
+        ),
+        (
+            |attestation| attestation.secret_slot_mode = IbkrSecretSlotMode::WorldReadable,
+            Blocker::SecretSlotWorldReadable,
+        ),
+        (
+            |attestation| attestation.secret_slot_mode = IbkrSecretSlotMode::LiveDenied,
+            Blocker::SecretSlotModeDenied,
+        ),
+        (
+            |attestation| attestation.secret_world_readable = true,
+            Blocker::SecretSlotWorldReadable,
+        ),
+        (
+            |attestation| attestation.live_secret_absent_or_empty = false,
+            Blocker::LiveSecretPresentOrUnknown,
+        ),
+        (
+            |attestation| attestation.env_var_credential_fallback_used = true,
+            Blocker::EnvVarCredentialFallback,
+        ),
+        (
+            |attestation| attestation.api_server_version = String::new(),
+            Blocker::MissingApiServerVersion,
+        ),
+        (
+            |attestation| attestation.data_tier = IbkrSessionDataTier::Unknown,
+            Blocker::MissingDataTier,
+        ),
+        (
+            |attestation| attestation.entitlements_fingerprint = String::new(),
+            Blocker::MissingDataEntitlementsFingerprint,
+        ),
+        (
+            |attestation| {
+                attestation.entitlements_fingerprint = "data_entitlements_fixture".to_string()
+            },
+            Blocker::DataEntitlementsFingerprintInvalid,
+        ),
+        (
+            |attestation| attestation.market_data_entitlement_purchase_denied = false,
+            Blocker::MarketDataEntitlementPurchaseNotDenied,
+        ),
+        (
+            |attestation| attestation.gateway_started_at_ms = 0,
+            Blocker::MissingGatewayStartupTime,
+        ),
+        (
+            |attestation| attestation.gateway_started_at_ms = attestation.attested_at_ms + 1,
+            Blocker::GatewayStartupAfterAttestation,
+        ),
+        (
+            |attestation| attestation.raw_artifact_hash = String::new(),
+            Blocker::MissingRawArtifactHash,
+        ),
+        (
+            |attestation| attestation.raw_artifact_hash = "redacted_raw_artifact_hash".to_string(),
+            Blocker::RawArtifactHashInvalid,
+        ),
+        (
+            |attestation| attestation.expires_at_ms = attestation.attested_at_ms,
+            Blocker::InvalidAttestationWindow,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut attestation = IbkrSessionAttestationV1::paper_fixture();
+        mutate(&mut attestation);
+        let now_ms = if blocker == Blocker::InvalidAttestationWindow {
+            attestation.attested_at_ms - 1
+        } else {
+            attestation.attested_at_ms + 1
+        };
+        assert_single_session_attestation_blocker(attestation.validate(now_ms), blocker);
+    }
+
+    let live_port = IbkrSessionAttestationV1 {
+        port: IBKR_LIVE_TWS_PORT,
+        ..IbkrSessionAttestationV1::paper_fixture()
+    };
+    let live_port_verdict = live_port.validate(live_port.attested_at_ms + 1);
+    assert!(live_port_verdict
+        .blockers
+        .contains(&Blocker::LivePortDenied));
+    assert!(live_port_verdict
+        .blockers
+        .contains(&Blocker::PortNotPaperGatewayDefault));
+
+    let stale = IbkrSessionAttestationV1::paper_fixture();
+    assert_single_session_attestation_blocker(
+        stale.validate(stale.expires_at_ms),
+        Blocker::StaleAttestation,
+    );
+}
+
+#[test]
 fn session_attestation_requires_hashed_lineage_data_tier_and_startup_time() {
     let attestation = IbkrSessionAttestationV1 {
         account_fingerprint: "paper_account_fingerprint_hash".to_string(),
@@ -557,6 +719,19 @@ fn assert_single_external_gate_blocker(
     blocker: IbkrExternalSurfaceGateBlocker,
 ) {
     assert!(!verdict.ibkr_contact_allowed);
+    assert_eq!(
+        verdict.blockers,
+        vec![blocker],
+        "expected only {blocker:?}; blockers: {:?}",
+        verdict.blockers
+    );
+}
+
+fn assert_single_session_attestation_blocker(
+    verdict: openclaw_types::IbkrSessionAttestationVerdict,
+    blocker: IbkrSessionAttestationBlocker,
+) {
+    assert!(!verdict.attestation_accepted);
     assert_eq!(
         verdict.blockers,
         vec![blocker],
