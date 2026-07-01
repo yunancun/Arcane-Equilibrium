@@ -4366,3 +4366,33 @@ Verification 已過：
 沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 market-data subscription、沒有
 scorecard writer、沒有 DB/evidence writer、沒有 paper order route、沒有 tiny-live/live authorization，
 也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Non-Bybit API Allowlist Acceptance Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`Stock/ETF Non-Bybit API Allowlist Acceptance Cross-Wire Guard`。
+
+這個 checkpoint 補強 `NonBybitApiAllowlistV1` 的 read / paper-write / denied action bucket、Client
+Portal Web API denial、live/account-transfer/margin-short-options-CFD / market-data entitlement /
+account-management write denial、IBKR contact、secret serialization、Bybit live protection
+cross-wire coverage。新增 Rust acceptance 證明 default fail-closed、accepted fixture matrix、
+classification semantics、missing/duplicate/wrong bucket action，以及 denial/contact/secret/Bybit
+protection loss 都會 fail closed。
+
+同時新增 Python source-static accepted fixture body guard，禁止 empty action buckets、denial booleans
+false、IBKR contact、secret serialization、Bybit protection loss 被 hardcoded 到 accepted fixture，並
+鎖住 default fail-closed posture。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Non-Bybit allowlist source static pytest：`6 passed`
+- Non-Bybit allowlist Rust acceptance：`4 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 Client Portal Web API enablement、
+沒有 broker routing、沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit
+live/demo execution 行為。

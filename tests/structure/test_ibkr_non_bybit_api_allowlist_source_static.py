@@ -224,6 +224,50 @@ def test_ibkr_non_bybit_api_allowlist_source_keeps_action_bucket_semantics() -> 
     assert "Action::ClientPortalWebApiUse" in source
 
 
+def test_ibkr_non_bybit_api_allowlist_fixture_excludes_runtime_secret_and_authority_crosswire() -> None:
+    source = _source()
+    fixture = source.split("impl NonBybitApiAllowlistV1", 1)[1].split(
+        "pub fn validate(&self)",
+        1,
+    )[0]
+    default_impl = source.split("impl Default for NonBybitApiAllowlistV1", 1)[1].split(
+        "impl NonBybitApiAllowlistV1",
+        1,
+    )[0]
+
+    for forbidden in (
+        "read_actions: Vec::new()",
+        "paper_write_actions: Vec::new()",
+        "denied_actions: Vec::new()",
+        "client_portal_web_api_denied: false",
+        "live_order_denied: false",
+        "account_transfer_denied: false",
+        "margin_short_options_cfd_denied: false",
+        "market_data_entitlement_purchase_denied: false",
+        "account_management_write_denied: false",
+        "ibkr_contact_performed: true",
+        "secret_content_serialized: true",
+        "bybit_live_execution_protected: false",
+    ):
+        assert forbidden not in fixture
+
+    for fail_closed in (
+        "read_actions: Vec::new()",
+        "paper_write_actions: Vec::new()",
+        "denied_actions: Vec::new()",
+        "client_portal_web_api_denied: false",
+        "live_order_denied: false",
+        "account_transfer_denied: false",
+        "margin_short_options_cfd_denied: false",
+        "market_data_entitlement_purchase_denied: false",
+        "account_management_write_denied: false",
+        "ibkr_contact_performed: false",
+        "secret_content_serialized: false",
+        "bybit_live_execution_protected: false",
+    ):
+        assert fail_closed in default_impl
+
+
 def test_ibkr_non_bybit_api_allowlist_source_keeps_drift_detection() -> None:
     source = _source()
 
