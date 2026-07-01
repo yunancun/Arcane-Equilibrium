@@ -1719,3 +1719,10 @@ Do not paste long reports or stable architecture into TODO.
 - The guard proves runtime source-only contracts emit complete ordered blocker vectors across secret-slot identity, posture, hashes, owner/env denials, serialized sensitive fields, live-secret absence proof, topology identity, host/port, gateway mode, environment, account hash, and runtime metadata.
 - Python source-static now pins secret-slot and API-session-topology validator blocker emit order.
 - Verification passed: source static `7 passed`; IBKR Phase2 runtime acceptance `9 passed`; full `cargo test -p openclaw_types` PASS; `cargo fmt -p openclaw_types -- --check` PASS; docs trace PASS; diff check PASS. This grants no Rust production code change, GUI runtime/API route/IPC behavior change, IBKR contact, connector runtime, socket/client construction, secret access, paper order routing, broker session, DB/evidence writer, scorecard writer, paper-shadow launch, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 IBKR Phase2 Artifact Metadata Lineage Exact Guard
+
+- PM added exact-blocker Rust acceptance coverage for `IbkrPhase2GateArtifactV1` review/seal/hash/path aggregate metadata failures.
+- The guard proves immutable Phase2 gate artifact metadata emits the exact blocker vector for missing immutable path, unsealed artifact, missing Operator review, invalid raw artifact hash, and invalid redacted summary hash.
+- Python source-static now pins artifact runtime child-check order: secret contract validation, API topology validation, then runtime gate/artifact match.
+- Verification passed: source static `6 passed`; IBKR Phase2 artifact acceptance `9 passed`; full `cargo test -p openclaw_types` PASS; `cargo fmt -p openclaw_types -- --check` PASS; docs trace PASS; diff check PASS. This grants no Rust production code change, GUI runtime/API route/IPC behavior change, IBKR contact, connector runtime, socket/client construction, secret access, paper order routing, broker session, DB/evidence writer, scorecard writer, paper-shadow launch, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
