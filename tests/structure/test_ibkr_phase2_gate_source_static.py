@@ -200,6 +200,20 @@ def _external_gate_fixture_block(source: str) -> str:
     )[0]
 
 
+def _session_attestation_default_block(source: str) -> str:
+    return source.split("impl Default for IbkrSessionAttestationV1", 1)[1].split(
+        "impl IbkrSessionAttestationV1",
+        1,
+    )[0]
+
+
+def _session_attestation_fixture_block(source: str) -> str:
+    return source.split("impl IbkrSessionAttestationV1", 1)[1].split(
+        "pub fn validate(&self, now_ms: u64)",
+        1,
+    )[0]
+
+
 def test_ibkr_phase2_gate_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
@@ -282,6 +296,66 @@ def test_ibkr_phase2_gate_source_keeps_session_attestation_matrix() -> None:
     assert "if now_ms >= self.expires_at_ms" in source
     assert 'matches!(normalized.as_str(), "127.0.0.1" | "::1" | "localhost")' in source
     assert 'normalized.starts_with("unix:")' in source
+
+
+def test_ibkr_phase2_gate_source_keeps_session_default_and_paper_fixture_posture() -> None:
+    source = _source()
+    default = _session_attestation_default_block(source)
+    fixture = _session_attestation_fixture_block(source)
+
+    for required in (
+        "contract_id: String::new()",
+        "source_version: 0",
+        "status: IbkrSessionAttestationStatus::Blocked",
+        "account_fingerprint: String::new()",
+        "account_fingerprint_is_live: false",
+        "environment: BrokerEnvironment::ReadOnly",
+        "host: String::new()",
+        "port: 0",
+        "process_identity: String::new()",
+        "gateway_mode: IbkrGatewayMode::Unknown",
+        "secret_slot_fingerprint: String::new()",
+        "secret_slot_mode: IbkrSecretSlotMode::Unknown",
+        "secret_world_readable: false",
+        "live_secret_absent_or_empty: false",
+        "env_var_credential_fallback_used: false",
+        "api_server_version: String::new()",
+        "data_tier: IbkrSessionDataTier::Unknown",
+        "entitlements_fingerprint: String::new()",
+        "market_data_entitlement_purchase_denied: false",
+        "gateway_started_at_ms: 0",
+        "attested_at_ms: 0",
+        "expires_at_ms: 0",
+        "raw_artifact_hash: String::new()",
+    ):
+        assert required in default
+
+    for required in (
+        "contract_id: IBKR_SESSION_ATTESTATION_CONTRACT_ID.to_string()",
+        "source_version: 1",
+        "status: IbkrSessionAttestationStatus::PaperAttested",
+        'account_fingerprint: "b".repeat(64)',
+        "account_fingerprint_is_live: false",
+        "environment: BrokerEnvironment::Paper",
+        'host: "127.0.0.1".to_string()',
+        "port: IBKR_PAPER_GATEWAY_DEFAULT_PORT",
+        'process_identity: "trade-core:ibgateway-paper".to_string()',
+        "gateway_mode: IbkrGatewayMode::Paper",
+        'secret_slot_fingerprint: "a".repeat(64)',
+        "secret_slot_mode: IbkrSecretSlotMode::Paper",
+        "secret_world_readable: false",
+        "live_secret_absent_or_empty: true",
+        "env_var_credential_fallback_used: false",
+        'api_server_version: "source_fixture_only".to_string()',
+        "data_tier: IbkrSessionDataTier::Delayed",
+        'entitlements_fingerprint: "c".repeat(64)',
+        "market_data_entitlement_purchase_denied: true",
+        "gateway_started_at_ms: 1_772_231_940_000",
+        "attested_at_ms: 1_772_232_000_000",
+        "expires_at_ms: 1_772_235_600_000",
+        'raw_artifact_hash: "e".repeat(64)',
+    ):
+        assert required in fixture
 
 
 def test_ibkr_phase2_gate_source_has_no_runtime_secret_order_or_bybit_client_tokens() -> None:

@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-01 IBKR Session Attestation Source Posture Cross-Wire Guard
+
+- PM added exact single-blocker acceptance coverage for `IbkrSessionAttestationV1` identity, loopback/paper port, account/secret lineage, data-tier, entitlement, startup, raw artifact, freshness-window, live-secret, and env-fallback gaps.
+- Source-static guard now parses the session attestation default and paper fixture blocks, locking fail-closed default posture plus loopback/paper-gateway/no-live-secret/hash-lineage paper posture.
+- Verification passed: Phase2 gate source static `6`, Phase2 gate Rust acceptance `13`, targeted rustfmt/cargo fmt/docs trace/diff-check. Boundary unchanged: no IBKR contact, SDK, secret, connector/session runtime, broker session, paper order, tiny-live/live, or Bybit behavior change.
+
 ## 2026-07-01 No-Order Refresh E3 Stale By Source Drift
 
 - PM produced a clean `c3ab4861...` source-stability READY artifact sha `3f0451b...` and exact no-order E3/BB request sha `8b13397f...`.

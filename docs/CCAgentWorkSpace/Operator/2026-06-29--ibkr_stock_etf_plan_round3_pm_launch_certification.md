@@ -4478,3 +4478,32 @@ Verification 已過：
 沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 session attestation runtime、
 沒有 broker session、沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit
 live/demo execution 行為。
+
+## 2026-07-01 Operator Update — IBKR Session Attestation Source Posture Cross-Wire Guard
+
+本 session 已完成下一個 test-only/source-static checkpoint：
+`IBKR Session Attestation Source Posture Cross-Wire Guard`。
+
+這個 checkpoint 補強 `IbkrSessionAttestationV1` 的 paper-only session 姿態：contract/source identity、
+status、paper/read-only environment、loopback host、paper gateway port、account/secret fingerprint、
+gateway mode、live secret absence、env-var credential fallback denial、API server version、data tier、
+entitlement fingerprint、market-data entitlement purchase denial、gateway startup time、raw artifact hash
+與 attestation freshness window。新增 Rust acceptance 證明每個獨立 gap 都會各自只產生單一 blocker。
+
+同時新增 Python source-static parser，直接鎖住 session attestation 的 default fail-closed posture 與
+paper fixture 的 loopback/paper-gateway/no-live-secret/hash-lineage posture。live TWS/gateway port 仍保留
+aggregate 行為，必須同時命中 live-port 與 non-paper-port blocker。
+
+Verification 已過：
+
+- Targeted rustfmt check：PASS
+- Phase2 gate source static pytest：`6 passed`
+- Phase2 gate Rust acceptance：`13 passed`
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 endpoint/IPC method change、沒有 IBKR contact、
+沒有 connector runtime、沒有 SDK import、沒有 secret access、沒有 session attestation runtime、
+沒有 broker session、沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit
+live/demo execution 行為。
