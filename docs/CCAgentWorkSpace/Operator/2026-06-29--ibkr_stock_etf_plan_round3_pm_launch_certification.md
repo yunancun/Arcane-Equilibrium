@@ -3171,3 +3171,31 @@ Verification 已過：
 邊界不變：沒有 IBKR contract-details call、沒有 market-data subscription、沒有 connector
 runtime、沒有 secret access、沒有 paper order、沒有 evidence/scorecard writer、沒有 DB apply、
 沒有 tiny-live/live authorization，也沒有改動 Bybit live execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF PIT Universe Source Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF PIT Universe Source Static Guard`。
+
+這個 guard 鎖住 `stock_etf_pit_universe.rs` 的 point-in-time universe membership source
+hygiene：exact `stock_etf_pit_universe_contract_v1` contract id、universe fields、constituent
+fields、verdict/blocker surface、constituent validator、required-hash validator、identifier/symbol
+helpers 必須保留。
+
+Guard 要求 default universe 維持 fail-closed：CryptoPerp/Bybit、empty universe id/version/hash、
+missing PIT/effective window、zero counts、empty constituents、empty rule/screen/policy hashes、
+not frozen for evidence clock、survivorship controls missing、Bybit live unchanged false、IBKR live
+denied false。Accepted fixture 必須保留 StockEtfCash/IBKR、`US_LARGE_100_V1`、version
+`US_LARGE_100_V1_20260301`、PIT/effective window、3 constituents AMD/MSFT/SPY、max 100、
+rule/screen/policy/calendar/source hashes、frozen/survivorship controls、Bybit live protection、IBKR
+live denial。
+
+Verification 已過：
+
+- New structure guard pytest：`8 passed`
+- Focused PIT universe acceptance：`7 passed`
+- Full `cargo test -p openclaw_types`：PASS
+
+邊界不變：沒有 IBKR contact、沒有 connector runtime、沒有 market-data collection、沒有
+evidence clock、沒有 scorecard writer、沒有 DB apply、沒有 paper order、沒有 tiny-live/live
+authorization，也沒有改動 Bybit live execution 行為。
