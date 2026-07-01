@@ -1519,3 +1519,11 @@ Do not paste long reports or stable architecture into TODO.
 - PM cleared the pre-existing `rust/openclaw_types/src/risk.rs` formatting drift that had blocked `cargo fmt -p openclaw_types -- --check` during recent Stock/ETF Rust checkpoints.
 - Change is mechanical rustfmt only: one `return Err(...)` expression and two test vector literals.
 - Verification passed: `cargo fmt -p openclaw_types -- --check` PASS; `cargo test -p openclaw_types risk --lib` `13 passed`; full `cargo test -p openclaw_types` PASS; dynamic docs trace `2 passed, 5 deselected` with 132 parsed titles and no missing Operator trace; diff check PASS. This grants no trading logic change, risk semantics change, endpoint/IPC change, IBKR contact, connector runtime, secret access, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Readonly Probe Request Authority Lineage Cross-Wire Guard
+
+- PM added exact-blocker Rust acceptance coverage for `StockEtfIbkrReadonlyProbeRequestV1` authority, pre-contact lineage, and boundary flags.
+- The guard proves lane/broker/environment/action/operation/authority/effect gaps, request/probe ids, Phase2 gate/allowlist/secret-slot/topology/session/redaction/rate-limit/audit/artifact hashes, and contact/runtime/secret/order/DB/evidence/Bybit/live/account-write/entitlement/client-portal/Python-write flags fail closed.
+- Paper-order action remains intentionally aggregate: it must trigger `ProbeActionMismatch` plus `ApiActionNotReadAllowed`, not a single-blocker claim.
+- Python source-static parsing now pins `Default` / `accepted_fixture` blocks so the accepted fixture cannot hardcode runtime, secret, order, Bybit cross-wire, or empty-lineage posture.
+- Verification passed: source static `9 passed`; readonly probe request acceptance `10 passed`; `cargo fmt -p openclaw_types -- --check` PASS; docs trace PASS; diff check PASS. This grants no Rust production code change, IPC change, IBKR contact, connector runtime, secret access, read-only probe execution, DB/evidence writer, paper order route, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.

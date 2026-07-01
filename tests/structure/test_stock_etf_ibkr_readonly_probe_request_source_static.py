@@ -213,6 +213,20 @@ def _function_body(source: str, function_name: str, return_type: str) -> str:
     return match.group("body")
 
 
+def _default_block(source: str) -> str:
+    return source.split("impl Default for StockEtfIbkrReadonlyProbeRequestV1", 1)[1].split(
+        "impl StockEtfIbkrReadonlyProbeRequestV1",
+        1,
+    )[0]
+
+
+def _accepted_fixture_block(source: str) -> str:
+    return source.split("impl StockEtfIbkrReadonlyProbeRequestV1", 1)[1].split(
+        "pub fn validate(&self)",
+        1,
+    )[0]
+
+
 def test_stock_etf_readonly_probe_request_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
@@ -229,7 +243,7 @@ def test_stock_etf_readonly_probe_request_source_keeps_contract_surface() -> Non
 
 
 def test_stock_etf_readonly_probe_request_source_keeps_fail_closed_default() -> None:
-    source = _source()
+    source = _default_block(_source())
 
     assert "contract_id: String::new()" in source
     assert "source_version: 0" in source
@@ -258,7 +272,7 @@ def test_stock_etf_readonly_probe_request_source_keeps_fail_closed_default() -> 
 
 
 def test_stock_etf_readonly_probe_request_source_keeps_accepted_fixture_boundary() -> None:
-    source = _source()
+    source = _accepted_fixture_block(_source())
 
     assert "contract_id: STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID.to_string()" in source
     assert "source_version: 1" in source
@@ -281,6 +295,81 @@ def test_stock_etf_readonly_probe_request_source_keeps_accepted_fixture_boundary
     assert "rate_limit_policy_contract_id: IBKR_RATE_LIMIT_POLICY_CONTRACT_ID.to_string()" in source
     assert "audit_event_policy_contract_id: IBKR_AUDIT_EVENT_POLICY_CONTRACT_ID.to_string()" in source
     assert "..Self::default()" in source
+
+
+def test_stock_etf_readonly_probe_request_fixture_excludes_authority_cross_wire() -> None:
+    source = _source()
+    default_block = _default_block(source)
+    fixture = _accepted_fixture_block(source)
+
+    for required_default in (
+        "asset_lane: AssetLane::CryptoPerp",
+        "broker: Broker::Bybit",
+        "environment: BrokerEnvironment::LiveReservedDenied",
+        "api_action: NonBybitApiAction::ClientPortalWebApiUse",
+        "operation: BrokerOperation::TransferOrAccountWrite",
+        "authority_scope: AuthorityScope::Denied",
+        "request_id: String::new()",
+        "probe_id: String::new()",
+        "ibkr_contact_performed: false",
+        "connector_runtime_started: false",
+        "secret_content_serialized: false",
+        "order_routed: false",
+        "paper_order_submitted: false",
+        "db_apply_performed: false",
+        "evidence_clock_started: false",
+        "bybit_path_reused: false",
+        "live_or_tiny_live_authorized: false",
+        "margin_short_options_cfd_requested: false",
+        "account_write_requested: false",
+        "market_data_entitlement_purchase_requested: false",
+        "client_portal_web_api_requested: false",
+        "python_direct_broker_write_requested: false",
+    ):
+        assert required_default in default_block
+
+    for forbidden in (
+        "asset_lane: AssetLane::CryptoPerp",
+        "broker: Broker::Bybit",
+        "environment: BrokerEnvironment::LiveReservedDenied",
+        "environment: BrokerEnvironment::Paper",
+        "api_action: NonBybitApiAction::ClientPortalWebApiUse",
+        "api_action: NonBybitApiAction::PaperOrderSubmit",
+        "operation: BrokerOperation::TransferOrAccountWrite",
+        "operation: BrokerOperation::PaperOrderSubmit",
+        "operation: BrokerOperation::LiveOrderSubmit",
+        "authority_scope: AuthorityScope::Denied",
+        "authority_scope: AuthorityScope::PaperRehearsal",
+        "effect_capable: true",
+        "request_id: String::new()",
+        "probe_id: String::new()",
+        "phase2_gate_artifact_hash: String::new()",
+        "api_allowlist_hash: String::new()",
+        "secret_slot_contract_hash: String::new()",
+        "api_session_topology_hash: String::new()",
+        "session_attestation_hash: String::new()",
+        "redaction_policy_hash: String::new()",
+        "rate_limit_policy_hash: String::new()",
+        "audit_event_policy_hash: String::new()",
+        "source_artifact_hash: String::new()",
+        "raw_artifact_hash: String::new()",
+        "redacted_summary_hash: String::new()",
+        "ibkr_contact_performed: true",
+        "connector_runtime_started: true",
+        "secret_content_serialized: true",
+        "order_routed: true",
+        "paper_order_submitted: true",
+        "db_apply_performed: true",
+        "evidence_clock_started: true",
+        "bybit_path_reused: true",
+        "live_or_tiny_live_authorized: true",
+        "margin_short_options_cfd_requested: true",
+        "account_write_requested: true",
+        "market_data_entitlement_purchase_requested: true",
+        "client_portal_web_api_requested: true",
+        "python_direct_broker_write_requested: true",
+    ):
+        assert forbidden not in fixture
 
 
 def test_stock_etf_readonly_probe_request_source_keeps_action_and_operation_mapping() -> None:

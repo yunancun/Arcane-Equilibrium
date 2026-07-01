@@ -239,6 +239,58 @@ fn readonly_probe_request_rejects_probe_action_operation_cross_wire() {
 }
 
 #[test]
+fn readonly_probe_request_rejects_each_authority_gap_independently() {
+    use StockEtfIbkrReadonlyProbeBlocker as Blocker;
+
+    let cases: [(fn(&mut StockEtfIbkrReadonlyProbeRequestV1), Blocker); 9] = [
+        (
+            |request| {
+                request.contract_id = "stock_etf_ibkr_readonly_probe_request_v1_fixture".to_string()
+            },
+            Blocker::ContractIdMismatch,
+        ),
+        (
+            |request| request.source_version = 2,
+            Blocker::SourceVersionMismatch,
+        ),
+        (
+            |request| request.asset_lane = AssetLane::CryptoPerp,
+            Blocker::WrongAssetLane,
+        ),
+        (
+            |request| request.broker = Broker::Bybit,
+            Blocker::WrongBroker,
+        ),
+        (
+            |request| request.environment = BrokerEnvironment::Paper,
+            Blocker::EnvironmentNotReadonly,
+        ),
+        (
+            |request| request.api_action = NonBybitApiAction::AccountSummarySnapshotRead,
+            Blocker::ProbeActionMismatch,
+        ),
+        (
+            |request| request.operation = BrokerOperation::AccountSnapshotRead,
+            Blocker::OperationMismatch,
+        ),
+        (
+            |request| request.authority_scope = AuthorityScope::PaperRehearsal,
+            Blocker::AuthorityScopeMismatch,
+        ),
+        (
+            |request| request.effect_capable = true,
+            Blocker::EffectCapabilityPresent,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut request = StockEtfIbkrReadonlyProbeRequestV1::accepted_fixture();
+        mutate(&mut request);
+        assert_single_blocker(request, blocker);
+    }
+}
+
+#[test]
 fn readonly_probe_requires_full_precontact_lineage_hashes() {
     let bad = StockEtfIbkrReadonlyProbeRequestV1 {
         request_id: String::new(),
@@ -325,6 +377,119 @@ fn readonly_probe_requires_full_precontact_lineage_hashes() {
 }
 
 #[test]
+fn readonly_probe_request_rejects_each_lineage_gap_independently() {
+    use StockEtfIbkrReadonlyProbeBlocker as Blocker;
+
+    let cases: [(fn(&mut StockEtfIbkrReadonlyProbeRequestV1), Blocker); 22] = [
+        (
+            |request| request.request_id.clear(),
+            Blocker::RequestIdMissing,
+        ),
+        (|request| request.probe_id.clear(), Blocker::ProbeIdMissing),
+        (
+            |request| request.external_surface_gate_contract_id = "wrong".to_string(),
+            Blocker::ExternalSurfaceGateContractIdMismatch,
+        ),
+        (
+            |request| request.phase2_gate_artifact_hash.clear(),
+            Blocker::Phase2GateArtifactHashInvalid,
+        ),
+        (
+            |request| request.api_allowlist_contract_id = "wrong".to_string(),
+            Blocker::ApiAllowlistContractIdMismatch,
+        ),
+        (
+            |request| request.api_allowlist_hash.clear(),
+            Blocker::ApiAllowlistHashInvalid,
+        ),
+        (
+            |request| request.secret_slot_contract_id = "wrong".to_string(),
+            Blocker::SecretSlotContractIdMismatch,
+        ),
+        (
+            |request| request.secret_slot_contract_hash.clear(),
+            Blocker::SecretSlotContractHashInvalid,
+        ),
+        (
+            |request| request.api_session_topology_contract_id = "wrong".to_string(),
+            Blocker::ApiSessionTopologyContractIdMismatch,
+        ),
+        (
+            |request| request.api_session_topology_hash.clear(),
+            Blocker::ApiSessionTopologyHashInvalid,
+        ),
+        (
+            |request| request.session_attestation_contract_id = "wrong".to_string(),
+            Blocker::SessionAttestationContractIdMismatch,
+        ),
+        (
+            |request| request.session_attestation_hash.clear(),
+            Blocker::SessionAttestationHashInvalid,
+        ),
+        (
+            |request| request.redaction_policy_contract_id = "wrong".to_string(),
+            Blocker::RedactionPolicyContractIdMismatch,
+        ),
+        (
+            |request| request.redaction_policy_hash.clear(),
+            Blocker::RedactionPolicyHashInvalid,
+        ),
+        (
+            |request| request.rate_limit_policy_contract_id = "wrong".to_string(),
+            Blocker::RateLimitPolicyContractIdMismatch,
+        ),
+        (
+            |request| request.rate_limit_policy_hash.clear(),
+            Blocker::RateLimitPolicyHashInvalid,
+        ),
+        (
+            |request| request.audit_event_policy_contract_id = "wrong".to_string(),
+            Blocker::AuditEventPolicyContractIdMismatch,
+        ),
+        (
+            |request| request.audit_event_policy_hash.clear(),
+            Blocker::AuditEventPolicyHashInvalid,
+        ),
+        (
+            |request| request.source_artifact_hash.clear(),
+            Blocker::SourceArtifactHashInvalid,
+        ),
+        (
+            |request| request.raw_artifact_hash.clear(),
+            Blocker::RawArtifactHashInvalid,
+        ),
+        (
+            |request| request.redacted_summary_hash.clear(),
+            Blocker::RedactedSummaryHashInvalid,
+        ),
+        (
+            |request| {
+                request.api_action = NonBybitApiAction::PaperOrderSubmit;
+            },
+            Blocker::ProbeActionMismatch,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut request = StockEtfIbkrReadonlyProbeRequestV1::accepted_fixture();
+        mutate(&mut request);
+        if blocker == Blocker::ProbeActionMismatch {
+            let verdict = request.validate();
+            assert!(has(&verdict, Blocker::ProbeActionMismatch));
+            assert!(has(&verdict, Blocker::ApiActionNotReadAllowed));
+            assert_eq!(
+                verdict.blockers.len(),
+                2,
+                "expected only probe/action blockers, got {:?}",
+                verdict.blockers
+            );
+        } else {
+            assert_single_blocker(request, blocker);
+        }
+    }
+}
+
+#[test]
 fn readonly_probe_rejects_contact_runtime_write_and_bybit_regressions() {
     let bad = StockEtfIbkrReadonlyProbeRequestV1 {
         ibkr_contact_performed: true,
@@ -401,6 +566,73 @@ fn readonly_probe_rejects_contact_runtime_write_and_bybit_regressions() {
 }
 
 #[test]
+fn readonly_probe_request_rejects_each_boundary_flag_independently() {
+    use StockEtfIbkrReadonlyProbeBlocker as Blocker;
+
+    let cases: [(fn(&mut StockEtfIbkrReadonlyProbeRequestV1), Blocker); 14] = [
+        (
+            |request| request.ibkr_contact_performed = true,
+            Blocker::IbkrContactPerformed,
+        ),
+        (
+            |request| request.connector_runtime_started = true,
+            Blocker::ConnectorRuntimeStarted,
+        ),
+        (
+            |request| request.secret_content_serialized = true,
+            Blocker::SecretContentSerialized,
+        ),
+        (|request| request.order_routed = true, Blocker::OrderRouted),
+        (
+            |request| request.paper_order_submitted = true,
+            Blocker::PaperOrderSubmitted,
+        ),
+        (
+            |request| request.db_apply_performed = true,
+            Blocker::DbApplyPerformed,
+        ),
+        (
+            |request| request.evidence_clock_started = true,
+            Blocker::EvidenceClockStarted,
+        ),
+        (
+            |request| request.bybit_path_reused = true,
+            Blocker::BybitPathReused,
+        ),
+        (
+            |request| request.live_or_tiny_live_authorized = true,
+            Blocker::LiveOrTinyLiveAuthorized,
+        ),
+        (
+            |request| request.margin_short_options_cfd_requested = true,
+            Blocker::MarginShortOptionsCfdRequested,
+        ),
+        (
+            |request| request.account_write_requested = true,
+            Blocker::AccountWriteRequested,
+        ),
+        (
+            |request| request.market_data_entitlement_purchase_requested = true,
+            Blocker::MarketDataEntitlementPurchaseRequested,
+        ),
+        (
+            |request| request.client_portal_web_api_requested = true,
+            Blocker::ClientPortalWebApiRequested,
+        ),
+        (
+            |request| request.python_direct_broker_write_requested = true,
+            Blocker::PythonDirectBrokerWriteRequested,
+        ),
+    ];
+
+    for (mutate, blocker) in cases {
+        let mut request = StockEtfIbkrReadonlyProbeRequestV1::accepted_fixture();
+        mutate(&mut request);
+        assert_single_blocker(request, blocker);
+    }
+}
+
+#[test]
 fn readonly_probe_kind_maps_to_expected_read_operations() {
     let account = StockEtfIbkrReadonlyProbeRequestV1 {
         probe_kind: StockEtfIbkrReadonlyProbeKind::AccountSummarySnapshot,
@@ -431,4 +663,20 @@ fn has(
     blocker: StockEtfIbkrReadonlyProbeBlocker,
 ) -> bool {
     verdict.blockers.contains(&blocker)
+}
+
+fn assert_single_blocker(
+    request: StockEtfIbkrReadonlyProbeRequestV1,
+    blocker: StockEtfIbkrReadonlyProbeBlocker,
+) {
+    let verdict = request.validate();
+
+    assert!(!verdict.accepted);
+    assert_eq!(
+        verdict.blockers,
+        vec![blocker],
+        "expected only {:?}, got {:?}",
+        blocker,
+        verdict.blockers
+    );
 }
