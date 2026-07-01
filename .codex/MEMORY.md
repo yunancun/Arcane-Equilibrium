@@ -1490,3 +1490,9 @@ Do not paste long reports or stable architecture into TODO.
 - PM added a source-only guard for AMD-required stable boundary docs: `CLAUDE.md`, `.codex/MEMORY.md`, `README.md`, document index, initiative index, and specification register.
 - The guard pins Bybit-only active live execution, ADR-0048 / AMD-2026-06-29-01 IBKR read-only/paper/shadow exception routing, Phase2 real secret/topology + immutable PASS blocker wording, and stable-doc denials for IBKR runtime/live/order approval.
 - Verification passed: new guard `3 passed`; focused stable-boundary + ADR/AMD + Phase0 spec artifact subset `16 passed`; docs trace PASS. This grants no stable-doc wording change, IBKR contact, connector runtime, secret access, DB apply, paper order route, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-01 Stock/ETF Index Reference Integrity Static Guard
+
+- PM added a source-only guard for IBKR/Stock-ETF path-like references in `docs/_indexes/document_index.md` and `docs/_indexes/initiative_index.md`.
+- The guard resolves path-like index references to repo files while excluding endpoint/flag/method code spans, and pins required launch trace references for ADR/AMD, Phase0 artifacts, DB DDL, main plan, PM round3 report, and Operator round3 summary.
+- Verification passed: new guard `3 passed`; focused index + stable-boundary + ADR/AMD + Phase0 spec artifact subset `19 passed`; docs trace PASS. This grants no index wording change, IBKR contact, connector runtime, secret access, DB apply, paper order route, tiny-live/live, or Bybit behavior change.

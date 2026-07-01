@@ -3554,3 +3554,30 @@ Verification 已過：
 邊界不變：沒有 stable-doc wording change、沒有 IBKR contact、沒有 connector runtime、沒有 SDK
 import、沒有 secret access、沒有 read-only probe execution、沒有 result import、沒有 DB apply、
 沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
+## 2026-07-01 Operator Update — Stock/ETF Index Reference Integrity Static Guard
+
+本 session 已完成下一個 source-only checkpoint：
+`Stock/ETF Index Reference Integrity Static Guard`。
+
+這個 guard 鎖住 `docs/_indexes/document_index.md` 與 `docs/_indexes/initiative_index.md` 的
+IBKR/Stock-ETF launch trace 路徑完整性。它解析 index 內相關 code spans，只把 path-like
+entries 當作檔案路徑，並明確排除 endpoint / flag / method pattern，例如
+`/api/v1/stock-etf/readiness`、`first_ibkr_contact_allowed=false`、`stock_etf.*`。
+
+Guard 要求 `docs/`、`settings/`、ADR、governance amendment、execution plan、CCAgent workspace
+prefix 下的 path-like references 全部 resolve 到現有 repo file。它也要求 index 保留
+ADR-0048、AMD-2026-06-29-01、Phase0 packet/manifest、DB DDL source draft、主開發安排、PM round3
+report、Operator round3 summary 等 launch trace references。這能避免後續審計從 index 入口追
+IBKR paper/shadow gate 時撞到 stale/broken path。
+
+Verification 已過：
+
+- New structure guard pytest：`3 passed`
+- Focused index + stable-boundary + ADR/AMD + Phase0 spec artifact subset：`19 passed`
+- Docs PM trace tests：PASS
+- Diff check：PASS
+
+邊界不變：沒有 index wording change、沒有 IBKR contact、沒有 connector runtime、沒有 SDK
+import、沒有 secret access、沒有 read-only probe execution、沒有 result import、沒有 DB apply、
+沒有 paper order route、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
