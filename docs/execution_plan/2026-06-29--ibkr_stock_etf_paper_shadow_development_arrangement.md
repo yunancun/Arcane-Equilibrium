@@ -4233,3 +4233,36 @@ collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper
 cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
 clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
 Bybit behavior change。
+
+## 95. 2026-07-01 PM session source checkpoint：Scorecard Input Module Split Guard
+
+本 checkpoint 將 Rust `stock_etf_scorecard_inputs.rs` 從 800 行邊界檔拆成父
+re-export + `components.rs` + `bundle.rs`。這不是 contract behavior change、不是
+payload change、不是 endpoint/IPC change；只降低 scorecard input source-only
+contract 的單檔審查風險，保留
+`openclaw_types::stock_etf_scorecard_inputs::*` public import surface。
+
+已完成：
+
+- 父檔保留 contract constants、public re-export、`StockEtfScorecardInputVerdict`
+  與 `StockEtfScorecardInputBlocker`。
+- `components.rs` 承載 cash ledger、cost model、benchmark、shadow fill model、
+  storage capacity component validators。
+- `bundle.rs` 承載 `StockEtfScorecardInputBundleV1` default/accepted fixture 與
+  bundle-level lineage/side-effect validator。
+- 原父檔由 800 行降至 128 行；新 components/bundle 模組分別為 520/181 行。
+
+驗證：
+
+- Scoped Rust `rustfmt --edition 2021 --check`：PASS。
+- Focused scorecard input acceptance：`12 passed`。
+- Focused scorecard derivation/verdict acceptance：`13 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- Engine Stock/ETF IPC regression：`29 passed`。
+
+PM 邊界不變：此 checkpoint 不呼叫 IBKR、不導入 IBKR SDK、不讀/建 secret、不啟動
+connector runtime、不開 socket/HTTP、不執行 read probe、不匯入 result、不啟動
+collector、不啟動 market-data ingestion、不啟動 DQ writer、不送 paper order、不做
+cancel/replace、不匯入 fill、不做 DB apply、不啟動 evidence writer、不啟動 evidence
+clock、不啟動 scorecard writer、不新增 GUI fanout、不授權 tiny-live/live 或任何
+Bybit behavior change。
