@@ -3988,6 +3988,11 @@
 - Verification passed: disable cleanup source static `8 passed`; disable cleanup Rust acceptance `7 passed`; full `cargo test -p openclaw_types` `35` unit/golden + `337` integration/acceptance + `0` doc-tests; package fmt/docs trace/diff check PASS.
 - Boundary unchanged: no Rust production code change, IPC server start, service stop, runtime action, IBKR contact, connector runtime, secret access, DB cleanup/delete/truncate, paper order routing, broker session, paper-shadow launch, tiny-live/live, Linux runtime sync/restart, or Bybit behavior change.
 
+## 2026-07-01 No-Order Refresh D89 Source Drift
+
+- PM rotated the active ETH no-order refresh request to clean source `d89c0278...`, produced READY sha `579dbf6b...` and request sha `6964855a...`, then stopped before E3/BB because final fetch advanced source to `b71847fa...`.
+- Boundary unchanged: no Control API GET, Bybit call, Decision Lease, runtime mutation, order/private endpoint, Cost Gate change, live/mainnet, fill/PnL/proof, E3 dispatch, or BB dispatch.
+
 ## 2026-07-01 Stock/ETF GUI Lane Default Authority Exact Guard
 
 - PM added test-only/source-static exact-blocker coverage for default `StockEtfGuiLaneContractV1`, identity drift, client lane state authority, effect-capable GUI surfaces, route/cache/auth evidence, and denied effect operations.
