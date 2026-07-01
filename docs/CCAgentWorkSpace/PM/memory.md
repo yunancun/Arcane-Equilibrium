@@ -37,6 +37,12 @@
 - Source-static guard now pins validator blocker emit order across top-level identity, required fields, reconciliation evidence, and boundary flags.
 - Verification passed: reconciliation source static `10`, Rust acceptance `10`, full `cargo test -p openclaw_types`, cargo fmt, docs trace, and diff-check. Boundary unchanged: no IBKR contact, connector/runtime, fill import, shadow fill generation, reconciliation/scorecard writer, DB/evidence writer, tiny-live/live, or Bybit behavior change.
 
+## 2026-07-01 No-Order Refresh BB Blocked By Source Drift ad456
+
+- PM rotated from `87da68e...` after first source sample found `origin/main == ad45654a...`, then produced ad456 READY sha `5f3a7130...` and exact request sha `94396a9f...`.
+- E3 approved with conditions sha `2fcf78ed...`, but BB returned `BLOCKED_BY_SOURCE_DRIFT` sha `fa38ac0b...` because mandatory fetch found `origin/main == e5f5a754...`.
+- State transition is `BLOCKED_BY_RUNTIME`; final state sha `39fb5a29...`. No Control API GET, public quote, envelope rebuild, plan write, lease, private/order endpoint, PG/service/env/risk mutation, Cost Gate change, live/mainnet, order/fill/PnL/proof, consumable approval, or BB approval.
+
 ## 2026-07-01 No-Order Refresh Request Invalidated Before E3/BB 8e7
 
 - PM produced clean `8e7ab58...` source-stability READY artifact sha `824bdf17...` and exact no-order E3/BB request sha `e2882504...`.
