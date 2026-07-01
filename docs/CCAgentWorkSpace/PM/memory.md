@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-01 No-Order Refresh E3 Blocked By Source Drift B945
+
+- PM rotated once from `bf0fd26b...` after final pre-request fetch advanced to `b945bc1f...`; the bf0 READY sha `77298d1f...` and final ROTATED state sha `178d9c6a...` are non-consumable.
+- PM then produced b945 source-stability READY sha `4162b642...` and exact no-order request sha `346bc50c...`; E3 returned `BLOCKED_BY_SOURCE_DRIFT` because final review fetch found `HEAD/origin/main == 5c0979d...`; source later advanced to `b4c4a9af...` before docs sync.
+- State transition is `BLOCKED_BY_RUNTIME`; E3 verdict sha `a5dc67a...`, final state sha `166d32be...`. BB was not dispatched. No Control API GET, public quote, envelope rebuild, plan write, lease, private/order endpoint, PG/service/env/risk mutation, Cost Gate change, live/mainnet, order/fill/PnL/proof.
+
 ## 2026-07-01 No-Order Refresh E3 Blocked By Source Drift D38
 
 - PM produced clean `d38cd691...` source-stability READY artifact sha `cdf7df92...` and exact no-order E3/BB request sha `42aaa4a6...`.
