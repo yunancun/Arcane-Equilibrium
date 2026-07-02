@@ -10074,3 +10074,34 @@ connector production code、不呼叫 IBKR、不導入 IBKR SDK、不讀/建/序
 socket/client construction、不做 broker session、不執行 read-only probe、不做 paper order routing/cancel/replace、
 不做 release launch、不做 DB/evidence writer、不做 scorecard writer、不啟動 evidence clock、不做 Linux runtime
 sync/restart、不做 destructive DB cleanup、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
+
+## 248. 2026-07-02 PM session source checkpoint：Stock/ETF Readiness Denied Operations Exact Guard
+
+本 checkpoint 補強 Stock/ETF FastAPI readiness route 的 denied operation coverage，固定 GUI/API surface 必須
+展示完整 ordered denied operations vector，而不是只檢查其中兩個 membership。這不是 FastAPI route behavior
+change、不是 Rust IPC behavior change、不是 GUI behavior change、不是 connector production code change、不是
+IBKR contact、不是 connector runtime、不是 secret lookup、不是 broker session、不是 read-only probe execution、
+不是 paper order route enablement、不是 release launch、不是 DB/evidence writer、不是 scorecard writer、不是
+tiny-live/live gate；只把 readiness route source-only test 從 membership checks 收緊成 exact-vector guard。
+
+已完成：
+
+- 在 `test_stock_etf_readiness_routes.py` 新增 complete ordered `EXPECTED_DENIED_OPERATIONS`。
+- 將 fail-closed readiness route 與 readonly fixture route 的 `denied_operations` membership assertions 改為
+  `data["denied_operations"] == EXPECTED_DENIED_OPERATIONS`。
+- 擴展 readiness route source guard，防止 `denied_operations` assertions 退回 loose `set(...)`、membership
+  或 subset 檢查。
+
+驗證：
+
+- Readiness route focused pytest：`7 passed`。
+- Full Stock/ETF Python route/static pytest：`144 passed`。
+- `python3 -m py_compile` for changed readiness route test：PASS。
+- Readiness denied-operations no-loose assertion scan：PASS。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 FastAPI route 行為、不改 Rust IPC handler behavior、不改 GUI runtime、不改
+connector production code、不呼叫 IBKR、不導入 IBKR SDK、不讀/建/序列化 secret、不啟動 connector runtime、不做
+socket/client construction、不做 broker session、不執行 read-only probe、不做 paper order routing/cancel/replace、
+不做 release launch、不做 DB/evidence writer、不做 scorecard writer、不啟動 evidence clock、不做 Linux runtime
+sync/restart、不做 destructive DB cleanup、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。

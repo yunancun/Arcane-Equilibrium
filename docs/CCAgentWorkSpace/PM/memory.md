@@ -4266,3 +4266,10 @@
 - The exact assertion source guard now covers the new modules so loose blocker membership assertions cannot return after the split.
 - Verification passed: Stock/ETF Rust IPC fixture line counts all below 800; fixture `rustfmt --edition 2021 --check` PASS; `cargo test -p openclaw_engine stock_etf -- --test-threads=1` PASS with Stock/ETF IPC/lib `32 passed`; no-loose blocker scan PASS.
 - Boundary unchanged: no Rust IPC handler behavior change, FastAPI route behavior change, GUI behavior change, connector production code change, IBKR contact, connector runtime, socket/client construction, secret access, broker session, read-only probe execution, paper order routing/cancel/replace execution, DB/evidence writer, scorecard writer, evidence clock, release launch, paper-shadow launch, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-02 Stock/ETF Readiness Denied Operations Exact Guard
+
+- PM tightened FastAPI readiness route tests so `denied_operations` must match the complete ordered Stock/ETF denied operation vector on both fail-closed and readonly fixture paths.
+- The readiness route source guard now rejects loose `set(...)`, membership, and subset assertions for `denied_operations`.
+- Verification passed: readiness route `7 passed`; full Stock/ETF Python route/static `144 passed`; changed-file `py_compile` PASS; no-loose denied-operations scan PASS; diff check PASS.
+- Boundary unchanged: no FastAPI route behavior change, Rust IPC handler behavior change, GUI behavior change, connector production code change, IBKR contact, connector runtime, socket/client construction, secret access, broker session, read-only probe execution, paper order routing/cancel/replace execution, DB/evidence writer, scorecard writer, evidence clock, release launch, paper-shadow launch, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
