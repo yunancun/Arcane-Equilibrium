@@ -754,6 +754,39 @@ connector runtime、read probe execution、collector start、market-data ingesti
 paper order/cancel/replace、fill import、DB apply、evidence writer、evidence clock、
 scorecard writer、tiny-live、live、Linux runtime sync/restart 或 Bybit behavior change。
 
+## 2026-07-02 PM Session Checkpoint — Stock/ETF API Allowlist Route Surface Parity Guard
+
+PM 已完成下一個 test-only checkpoint：Stock/ETF API Allowlist Route Surface
+Parity Guard。這不是 connector behavior change、FastAPI behavior change、IBKR
+contact、runtime approval、paper-order approval、fill-import approval 或 launch approval。
+
+已完成：
+
+- 擴展 `test_stock_etf_api_allowlist_cross_surface_parity.py`，以參數化 route test
+  覆蓋所有 accepted Stock/ETF status fixtures that expose `api_allowlist`。
+- 14 個 display-only status endpoints 現在都必須在 FastAPI normalization 後保留 exact
+  `read_actions`、`paper_write_actions`、`denied_actions` 與 counts。
+- 測試使用 existing mocked IPC fixture，不啟動 server、不 import connector runtime、不觸碰
+  secret/socket/broker session。
+
+Verification：
+
+- Parity test `py_compile` PASS。
+- API allowlist parity + connector action-matrix + readiness focused pytest：`28 passed`。
+- Full Stock/ETF FastAPI/static pytest：`165 passed`。
+- `git diff --check` PASS。
+- Dynamic docs trace pytest：PASS。
+
+Dispatch 記錄：本 checkpoint 為窄範圍 test-only route-surface drift guard；沒有
+production/runtime/exchange-facing 行為，PM 本地完成 review 與 regression。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 2 runtime approval、IBKR contact
+approval、read-only probe approval、paper-order approval、fill-import approval、scorecard
+writer approval 或 launch approval。未批准 IBKR SDK import、socket/HTTP、secret、
+connector runtime、read probe execution、collector start、market-data ingestion、DQ writer、
+paper order/cancel/replace、fill import、DB apply、evidence writer、evidence clock、
+scorecard writer、tiny-live、live、Linux runtime sync/restart 或 Bybit behavior change。
+
 ## 2026-07-01 PM Session Checkpoint — Paper Order Request Module Split Guard
 
 PM 已完成 `stock_etf_paper_order_request.rs` source hygiene checkpoint。這不是

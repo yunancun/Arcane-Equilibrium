@@ -4,11 +4,29 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from unittest.mock import AsyncMock
+
+import pytest
 
 from stock_etf_route_fixtures import (
     API_ALLOWLIST_DENIED_ACTIONS,
     API_ALLOWLIST_PAPER_WRITE_ACTIONS,
     API_ALLOWLIST_READ_ACTIONS,
+    _make_client_with_ipc,
+    _valid_account_status,
+    _valid_authorization_status,
+    _valid_data_foundation_status,
+    _valid_disable_cleanup_status,
+    _valid_evidence_status,
+    _valid_lane_status,
+    _valid_launch_status,
+    _valid_paper_status,
+    _valid_policy_status,
+    _valid_reconciliation_status,
+    _valid_release_packet_status,
+    _valid_scorecard_status,
+    _valid_shadow_status,
+    _valid_universe_status,
 )
 
 
@@ -43,3 +61,37 @@ def test_ibkr_connector_action_matrix_matches_fastapi_readiness_allowlist() -> N
 
 def test_ibkr_connector_action_matrix_fixture_matches_fastapi_allowlist() -> None:
     _assert_matches_fastapi_allowlist_buckets(blocked_api_action_matrix_fixture())
+
+
+@pytest.mark.parametrize(
+    ("path", "payload_factory"),
+    [
+        ("/api/v1/stock-etf/lane-status", _valid_lane_status),
+        ("/api/v1/stock-etf/data-foundation-status", _valid_data_foundation_status),
+        ("/api/v1/stock-etf/policy-status", _valid_policy_status),
+        ("/api/v1/stock-etf/authorization-status", _valid_authorization_status),
+        ("/api/v1/stock-etf/evidence-status", _valid_evidence_status),
+        ("/api/v1/stock-etf/account-status", _valid_account_status),
+        ("/api/v1/stock-etf/universe-status", _valid_universe_status),
+        ("/api/v1/stock-etf/shadow-status", _valid_shadow_status),
+        ("/api/v1/stock-etf/paper-status", _valid_paper_status),
+        ("/api/v1/stock-etf/reconciliation-status", _valid_reconciliation_status),
+        ("/api/v1/stock-etf/scorecard-status", _valid_scorecard_status),
+        ("/api/v1/stock-etf/launch-status", _valid_launch_status),
+        ("/api/v1/stock-etf/release-packet-status", _valid_release_packet_status),
+        ("/api/v1/stock-etf/disable-cleanup-status", _valid_disable_cleanup_status),
+    ],
+)
+def test_stock_etf_status_routes_preserve_api_allowlist_buckets(
+    path: str, payload_factory
+) -> None:
+    fake_ipc = AsyncMock()
+    fake_ipc.call = AsyncMock(return_value=payload_factory())
+    client = _make_client_with_ipc(fake_ipc)
+    try:
+        response = client.get(path)
+    finally:
+        client._stock_etf_patcher.stop()  # type: ignore[attr-defined]
+
+    assert response.status_code == 200
+    _assert_matches_fastapi_allowlist_buckets(response.json()["data"]["api_allowlist"])
