@@ -3,15 +3,49 @@ from __future__ import annotations
 from typing import Any
 
 
+API_ALLOWLIST_READ_ACTIONS = [
+    "server_time_read",
+    "connection_health_read",
+    "account_summary_snapshot_read",
+    "portfolio_positions_snapshot_read",
+    "contract_details_read",
+    "market_data_snapshot_read",
+    "market_data_subscription_read",
+    "historical_bars_read",
+    "open_paper_orders_read",
+    "paper_executions_commissions_read",
+]
+API_ALLOWLIST_PAPER_WRITE_ACTIONS = [
+    "paper_order_submit",
+    "paper_order_cancel",
+    "paper_order_replace",
+]
+API_ALLOWLIST_DENIED_ACTIONS = [
+    "live_order_submit",
+    "live_account_query",
+    "account_transfer",
+    "margin_enablement",
+    "short_borrow",
+    "options_trading",
+    "cfd_trading",
+    "market_data_entitlement_purchase",
+    "account_management_write",
+    "client_portal_web_api_use",
+]
+
+
 def _valid_api_allowlist() -> dict[str, Any]:
     return {
         "contract_id": "non_bybit_api_allowlist_v1",
         "source_version": 1,
         "accepted": True,
         "blockers": [],
-        "read_action_count": 10,
-        "paper_write_action_count": 3,
-        "denied_action_count": 10,
+        "read_actions": list(API_ALLOWLIST_READ_ACTIONS),
+        "read_action_count": len(API_ALLOWLIST_READ_ACTIONS),
+        "paper_write_actions": list(API_ALLOWLIST_PAPER_WRITE_ACTIONS),
+        "paper_write_action_count": len(API_ALLOWLIST_PAPER_WRITE_ACTIONS),
+        "denied_actions": list(API_ALLOWLIST_DENIED_ACTIONS),
+        "denied_action_count": len(API_ALLOWLIST_DENIED_ACTIONS),
         "ibkr_contact_performed": False,
         "secret_content_serialized": False,
         "bybit_live_execution_protected": True,

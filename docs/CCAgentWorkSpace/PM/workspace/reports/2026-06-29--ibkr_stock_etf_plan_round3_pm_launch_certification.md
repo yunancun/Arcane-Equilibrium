@@ -679,6 +679,48 @@ connector runtime、read probe execution、collector start、market-data ingesti
 paper order/cancel/replace、fill import、DB apply、evidence writer、evidence clock、
 scorecard writer、tiny-live、live、Linux runtime sync/restart 或 Bybit behavior change。
 
+## 2026-07-02 PM Session Checkpoint — Stock/ETF API Allowlist Status Bucket Exact Guard
+
+PM 已完成下一個 source/status checkpoint：Stock/ETF API Allowlist Status Bucket
+Exact Guard。這不是 connector runtime approval、IBKR contact approval、read-only
+probe approval、paper-order approval、fill-import approval、scorecard writer approval
+或 launch approval。
+
+已完成：
+
+- Rust Phase2 precontact status payload 現在除了 action bucket counts，也顯示
+  `non_bybit_api_allowlist_v1` 的完整 ordered `read_actions`、`paper_write_actions`
+  與 `denied_actions`。
+- FastAPI readiness normalizer/fail-closed payload 同步保留三個 action bucket list，
+  並在 contract violation guard 中拒絕 bucket drift，即使 count 仍正確也會 fail
+  closed。
+- Route fixtures 與 readiness tests 共用 exact allowlist bucket constants；新增 drift
+  regression，證明 `read_actions` 被 paper-write action 汙染時只產生
+  `api_allowlist_read_actions_mismatch`。
+- Rust precontact fixture assertion 從 count-only 提升為 ordered bucket exact
+  assertions。
+
+Verification：
+
+- Python changed files `py_compile` PASS。
+- Focused FastAPI readiness pytest：`8 passed`。
+- Full Stock/ETF FastAPI/static pytest：`149 passed`。
+- Scoped Rust rustfmt PASS。
+- Focused Rust precontact readiness test PASS。
+- Engine Stock/ETF focused regression：`32 passed`；僅有既有 Rust warning。
+- `git diff --check` PASS。
+- Dynamic docs trace pytest：PASS。
+
+Dispatch 記錄：本 checkpoint 為 source/status contract hardening；沒有 production runtime/
+exchange-facing 行為，PM 本地完成 review 與 regression。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 2 runtime approval、IBKR contact
+approval、read-only probe approval、paper-order approval、fill-import approval、scorecard
+writer approval 或 launch approval。未批准 IBKR SDK import、socket/HTTP、secret、
+connector runtime、read probe execution、collector start、market-data ingestion、DQ writer、
+paper order/cancel/replace、fill import、DB apply、evidence writer、evidence clock、
+scorecard writer、tiny-live、live、Linux runtime sync/restart 或 Bybit behavior change。
+
 ## 2026-07-01 PM Session Checkpoint — Paper Order Request Module Split Guard
 
 PM 已完成 `stock_etf_paper_order_request.rs` source hygiene checkpoint。這不是
