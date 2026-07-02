@@ -6221,6 +6221,33 @@ construction、沒有 broker session、沒有 read-only probe execution、沒有
 routing/cancel/replace execution、沒有 DB/evidence/scorecard writer、沒有 evidence clock、沒有 paper-shadow launch、
 沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
 
+## 2026-07-02 Operator Update — Stock/ETF API Allowlist Route Surface Parity Guard
+
+本 session 已完成下一個 test-only checkpoint：
+`Stock/ETF API Allowlist Route Surface Parity Guard`。
+
+這個 checkpoint 把剛新增的 cross-surface parity 延伸到所有會顯示 `api_allowlist` 的 accepted
+Stock/ETF status route。之前許多 route tests 只檢查 contract id；現在 route normalization 後的
+bucket list/count 也必須完整保留。
+
+新增 route-surface guard 覆蓋 14 個 display-only endpoints，包括 lane、data foundation、policy、
+authorization、evidence、account、universe、shadow、paper、reconciliation、scorecard、launch、
+release-packet、disable-cleanup status。
+
+Verification 已過：
+
+- Parity test `py_compile`：PASS
+- API allowlist parity + connector action-matrix + readiness focused pytest：`28 passed`
+- Full Stock/ETF Python route/static pytest：`165 passed`
+- `git diff --check`：PASS
+- Dynamic docs trace pytest：PASS
+
+邊界不變：沒有 production code change、沒有 FastAPI route behavior change、沒有 GUI/Rust IPC behavior change、
+沒有 IBKR contact、沒有 SDK import、沒有 secret access/serialization、沒有 connector runtime、沒有 socket/client
+construction、沒有 broker session、沒有 read-only probe execution、沒有 fill import execution、沒有 paper order
+routing/cancel/replace execution、沒有 DB/evidence/scorecard writer、沒有 evidence clock、沒有 paper-shadow launch、
+沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
 ## 2026-07-02 Operator Update — Stock/ETF Phase3 Evidence Acceptance Split Guard
 
 本 session 已完成下一個 test-only checkpoint：
