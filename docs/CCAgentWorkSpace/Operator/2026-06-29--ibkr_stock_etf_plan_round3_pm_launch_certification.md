@@ -6098,6 +6098,34 @@ socket/client construction、沒有 broker session、沒有 read-only probe exec
 paper order routing/cancel/replace execution、沒有 DB/evidence/scorecard writer、沒有 evidence clock、沒有
 paper-shadow launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
 
+## 2026-07-02 Operator Update - IBKR Non-Bybit API Allowlist Bucket Exact Guard
+
+本 session 已完成下一個 test-only checkpoint：
+`IBKR Non-Bybit API Allowlist Bucket Exact Guard`。
+
+這個 checkpoint 補強 `ibkr_phase2_gate_acceptance.rs` 內嵌的 non-Bybit API allowlist accepted fixture。
+
+現在 `read_actions`、`paper_write_actions`、`denied_actions` 必須等於完整 ordered vectors，不再只靠三個
+bucket 的 `.len()` 加總對齊 `required_non_bybit_api_actions().len()`。同檔新增 source guard，防止之後退回
+aggregate count coverage。
+
+Verification 已過：
+
+- IBKR Phase2 gate focused Rust acceptance：`14 passed`
+- Full `cargo test -p openclaw_types`：PASS
+- Package fmt：PASS
+- Phase2 gate source static pytest：`8 passed`
+- Embedded allowlist bucket no-loose assertion scan：PASS
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 non-Bybit API allowlist validator semantics change、沒有
+external-surface/session gate semantics change、沒有 Rust IPC handler behavior change、沒有 FastAPI route behavior
+change、沒有 GUI runtime change、沒有 connector production code change、沒有 IBKR contact、沒有 SDK import、
+沒有 secret access/serialization、沒有 connector runtime、沒有 socket/client construction、沒有 broker session、
+沒有 read-only probe execution、沒有 fill import execution、沒有 paper order routing/cancel/replace execution、沒有
+DB/evidence/scorecard writer、沒有 evidence clock、沒有 paper-shadow launch、沒有 tiny-live/live authorization，
+也沒有改動 Bybit live/demo execution 行為。
+
 ## 2026-07-02 Operator Update — Stock/ETF Lane Readiness Denial Reasons Exact Guard
 
 本 session 已完成下一個 test-only checkpoint：
