@@ -6248,6 +6248,37 @@ construction、沒有 broker session、沒有 read-only probe execution、沒有
 routing/cancel/replace execution、沒有 DB/evidence/scorecard writer、沒有 evidence clock、沒有 paper-shadow launch、
 沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
 
+## 2026-07-02 Operator Update — Stock/ETF API Allowlist Fail-Closed Route Surface Parity Guard
+
+本 session 已完成下一個 test-only checkpoint：
+`Stock/ETF API Allowlist Fail-Closed Route Surface Parity Guard`。
+
+這個 checkpoint 補上 degraded path：所有會顯示 `api_allowlist` 的 Stock/ETF status route，
+在 IPC unavailable 時也必須保留穩定 allowlist schema，而不是只回傳 contract/count 部分欄位。
+
+新增 fail-closed guard 覆蓋 14 個 display-only endpoints，並要求：
+
+- `contract_id=""`
+- `source_version=0`
+- `accepted=false`
+- `blockers=["ipc_unavailable"]`
+- three bucket lists 為 `[]`
+- three bucket counts 為 `0`
+
+Verification 已過：
+
+- Parity test `py_compile`：PASS
+- API allowlist parity + readiness focused pytest：`38 passed`
+- Full Stock/ETF Python route/static pytest：`179 passed`
+- `git diff --check`：PASS
+- Dynamic docs trace pytest：PASS
+
+邊界不變：沒有 production code change、沒有 FastAPI route behavior change、沒有 GUI/Rust IPC behavior change、
+沒有 IBKR contact、沒有 SDK import、沒有 secret access/serialization、沒有 connector runtime、沒有 socket/client
+construction、沒有 broker session、沒有 read-only probe execution、沒有 fill import execution、沒有 paper order
+routing/cancel/replace execution、沒有 DB/evidence/scorecard writer、沒有 evidence clock、沒有 paper-shadow launch、
+沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
 ## 2026-07-02 Operator Update — Stock/ETF Phase3 Evidence Acceptance Split Guard
 
 本 session 已完成下一個 test-only checkpoint：
