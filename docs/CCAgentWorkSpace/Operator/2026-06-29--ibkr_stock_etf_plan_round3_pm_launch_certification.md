@@ -6098,6 +6098,34 @@ socket/client construction、沒有 broker session、沒有 read-only probe exec
 paper order routing/cancel/replace execution、沒有 DB/evidence/scorecard writer、沒有 evidence clock、沒有
 paper-shadow launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
 
+## 2026-07-02 Operator Update — Stock/ETF Broker Capability Gate Matrix Exact Guard
+
+本 session 已完成下一個 test-only checkpoint：
+`Stock/ETF Broker Capability Gate Matrix Exact Guard`。
+
+這個 checkpoint 補強 Stock/ETF Rust broker capability registry 的 exact gate matrix coverage。
+
+現在 15 個 accepted broker operations 的 `required_gates` 必須等於完整 ordered vectors；legacy acceptance
+檔內 accepted rows 與 paper-fill-import row 的正向 `.required_gates.contains(...)` membership checks 已移除，
+並由 source guard 防止 loose gate assertions 回流。
+
+Verification 已過：
+
+- Broker capability focused Rust acceptance：`14 + 2 passed`
+- Full `cargo test -p openclaw_types`：PASS
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Broker capability source static pytest：`9 passed`
+- Broker capability gate no-loose assertion scan：PASS
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 broker capability validator semantics change、沒有 Rust IPC
+handler behavior change、沒有 FastAPI route/GUI behavior change、沒有 connector production code change、沒有 IBKR
+contact、沒有 SDK import、沒有 secret access/serialization、沒有 connector runtime、沒有 socket/client
+construction、沒有 broker session、沒有 read-only probe execution、沒有 paper order routing/cancel/replace
+execution、沒有 fill import execution、沒有 release launch、沒有 DB/evidence writer、沒有 scorecard writer、沒有
+evidence clock、沒有 destructive DB cleanup、沒有 paper-shadow launch、沒有 tiny-live/live authorization，也沒有
+改動 Bybit live/demo execution 行為。
+
 ## 2026-07-02 Operator Update — Stock/ETF Lane-Scoped IPC IO Matrix Exact Guard
 
 本 session 已完成下一個 test-only checkpoint：

@@ -9,16 +9,10 @@ use openclaw_types::{
     evaluate_broker_operation, AssetLane, AuthorityScope, Broker, BrokerCapabilityRequest,
     BrokerEnvironment, BrokerOperation, InstrumentKind, StockEtfBrokerCapabilityBlocker,
     StockEtfBrokerCapabilityEntryV1, StockEtfBrokerCapabilityRegistryV1, StockEtfDenialReason,
-    StockEtfFeatureFlags, StockEtfGateInputs, BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID,
-    IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
-    STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID, STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID,
-    STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID, STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID,
-    STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID,
-    STOCK_ETF_IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID,
-    STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID, STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID,
-    STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID, STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID,
-    STOCK_ETF_RISK_POLICY_CONTRACT_ID, STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
-    STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID, STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
+    StockEtfFeatureFlags, StockEtfGateInputs, IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID,
+    IBKR_SESSION_ATTESTATION_CONTRACT_ID, STOCK_ETF_BROKER_CAPABILITY_REGISTRY_ID,
+    STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID, STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID,
+    STOCK_ETF_RISK_POLICY_CONTRACT_ID,
 };
 
 #[test]
@@ -83,112 +77,40 @@ fn accepted_registry_contains_full_stock_etf_ibkr_operation_matrix() {
     assert!(!registry.first_ibkr_contact_performed);
     assert!(!registry.secret_content_serialized);
     assert_eq!(registry.operations.len(), 15);
-    assert!(registry.operations.iter().any(|entry| entry.operation
-        == BrokerOperation::PaperOrderSubmit
-        && entry.authority_scope == AuthorityScope::PaperRehearsal
-        && entry.rust_owned
-        && entry
-            .required_gates
-            .contains(&STOCK_ETF_RISK_POLICY_CONTRACT_ID.to_string())));
-    assert!(registry.operations.iter().any(|entry| {
-        entry.operation == BrokerOperation::HealthRead
-            && entry
-                .required_gates
-                .contains(&STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID.to_string())
-            && entry
-                .required_gates
-                .contains(&STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID.to_string())
-    }));
-    assert!(registry.operations.iter().any(|entry| {
-        entry.operation == BrokerOperation::AccountSnapshotRead
-            && entry
-                .required_gates
-                .contains(&STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID.to_string())
-            && entry
-                .required_gates
-                .contains(&STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID.to_string())
-    }));
-    assert!(registry.operations.iter().any(|entry| {
-        entry.operation == BrokerOperation::MarketDataRead
-            && entry
-                .required_gates
-                .contains(&STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID.to_string())
-            && entry
-                .required_gates
-                .contains(&STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID.to_string())
-            && entry
-                .required_gates
-                .contains(&STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID.to_string())
-    }));
-    assert!(registry.operations.iter().any(|entry| {
-        entry.operation == BrokerOperation::ContractDetailsRead
-            && entry
-                .required_gates
-                .contains(&STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID.to_string())
-            && entry
-                .required_gates
-                .contains(&STOCK_ETF_IBKR_READONLY_PROBE_REQUEST_CONTRACT_ID.to_string())
-            && entry
-                .required_gates
-                .contains(&STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID.to_string())
-    }));
-    assert!(registry.operations.iter().any(|entry| {
-        entry.operation == BrokerOperation::ShadowSignalEmit
-            && entry
-                .required_gates
-                .contains(&STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID.to_string())
-            && entry
-                .required_gates
-                .contains(&STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID.to_string())
-            && entry
-                .required_gates
-                .contains(&STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID.to_string())
-    }));
-    assert!(registry.operations.iter().any(|entry| {
-        entry.operation == BrokerOperation::ScorecardDerive
-            && entry.required_gates.contains(
-                &STOCK_ETF_IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID.to_string(),
-            )
-            && entry
-                .required_gates
-                .contains(&BROKER_ACCOUNT_PORTFOLIO_CASH_LEDGER_CONTRACT_ID.to_string())
-            && entry
-                .required_gates
-                .contains(&STOCK_ETF_RISK_POLICY_CONTRACT_ID.to_string())
-            && entry
-                .required_gates
-                .contains(&STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID.to_string())
-            && entry
-                .required_gates
-                .contains(&STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID.to_string())
-            && entry
-                .required_gates
-                .contains(&STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID.to_string())
-            && entry
-                .required_gates
-                .contains(&STOCK_ETF_BENCHMARK_VERSIONS_CONTRACT_ID.to_string())
-            && entry
-                .required_gates
-                .contains(&STOCK_SHADOW_FILL_MODEL_CONTRACT_ID.to_string())
-            && entry
-                .required_gates
-                .contains(&STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID.to_string())
-            && entry
-                .required_gates
-                .contains(&STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID.to_string())
-    }));
-    assert!(registry.operations.iter().any(|entry| {
-        entry.operation == BrokerOperation::ShadowFillReconstruct
-            && entry
-                .required_gates
-                .contains(&STOCK_ETF_REFERENCE_DATA_SOURCES_CONTRACT_ID.to_string())
-            && entry
-                .required_gates
-                .contains(&STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID.to_string())
-            && entry
-                .required_gates
-                .contains(&STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID.to_string())
-    }));
+    assert!(registry
+        .operations
+        .iter()
+        .any(|entry| entry.operation == BrokerOperation::PaperOrderSubmit
+            && entry.authority_scope == AuthorityScope::PaperRehearsal
+            && entry.rust_owned));
+    assert!(registry
+        .operations
+        .iter()
+        .any(|entry| entry.operation == BrokerOperation::HealthRead));
+    assert!(registry
+        .operations
+        .iter()
+        .any(|entry| entry.operation == BrokerOperation::AccountSnapshotRead));
+    assert!(registry
+        .operations
+        .iter()
+        .any(|entry| entry.operation == BrokerOperation::MarketDataRead));
+    assert!(registry
+        .operations
+        .iter()
+        .any(|entry| entry.operation == BrokerOperation::ContractDetailsRead));
+    assert!(registry
+        .operations
+        .iter()
+        .any(|entry| entry.operation == BrokerOperation::ShadowSignalEmit));
+    assert!(registry
+        .operations
+        .iter()
+        .any(|entry| entry.operation == BrokerOperation::ScorecardDerive));
+    assert!(registry
+        .operations
+        .iter()
+        .any(|entry| entry.operation == BrokerOperation::ShadowFillReconstruct));
     assert!(registry
         .operations
         .iter()
@@ -466,12 +388,6 @@ fn paper_fill_import_row_is_readonly_and_requires_session_lifecycle_gate() {
     assert!(!fill_import.rust_owned);
     assert!(fill_import.audit_event_required);
     assert!(fill_import.source_artifact_hash_required);
-    assert!(fill_import
-        .required_gates
-        .contains(&IBKR_SESSION_ATTESTATION_CONTRACT_ID.to_string()));
-    assert!(fill_import
-        .required_gates
-        .contains(&IBKR_PAPER_ORDER_LIFECYCLE_CONTRACT_ID.to_string()));
 
     let mut broken = registry;
     let fill_import = broken
