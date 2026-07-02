@@ -39,9 +39,28 @@ fn default_flags_keep_stock_etf_and_ibkr_off() {
     assert!(!readiness.readonly_ready);
     assert!(!readiness.paper_ready);
     assert!(readiness.live_denied);
-    assert!(readiness
-        .denial_reasons
-        .contains(&StockEtfDenialReason::LaneDisabled));
+    assert_eq!(
+        readiness.denial_reasons,
+        vec![
+            StockEtfDenialReason::LaneDisabled,
+            StockEtfDenialReason::BrokerDisabled,
+            StockEtfDenialReason::ShadowOnly,
+        ]
+    );
+}
+
+#[test]
+fn readiness_denial_reason_assertions_stay_exact() {
+    let source = include_str!("stock_etf_lane_acceptance.rs");
+    let prefix = source
+        .split("fn readiness_denial_reason_assertions_stay_exact")
+        .next()
+        .expect("source guard anchor exists");
+
+    assert!(
+        !prefix.contains(".denial_reasons.contains("),
+        "loose readiness denial reason assertion returned before source guard"
+    );
 }
 
 #[test]
