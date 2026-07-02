@@ -610,6 +610,42 @@ ingestion、DQ writer、paper order/cancel/replace、fill import、DB apply、ev
 writer、evidence clock、scorecard writer、tiny-live、live、Linux runtime sync/restart
 或 Bybit behavior change。
 
+## 2026-07-02 PM Session Checkpoint — Stock/ETF IBKR Connector Action Matrix Preview Guard
+
+PM 已完成下一個 source-only connector checkpoint：Stock/ETF IBKR Connector Action
+Matrix Preview Guard。這不是 connector runtime approval、IBKR contact approval、
+read-only probe approval、paper-order approval、fill-import approval 或 launch approval。
+
+已完成：
+
+- 新增 `IbkrApiActionMatrixPreview`，把 Rust `non_bybit_api_allowlist_v1` 的 10 個
+  read actions、3 個 paper-write actions、10 個 denied actions 以 inert Python payload
+  顯示。
+- 新增 `IbkrReadOnlyClient.api_action_matrix_preview()` 與
+  `blocked_api_action_matrix_fixture()`；payload 固定 blocked/source-only，並顯式保留
+  external gate、broker write、paper write authorization、IBKR contact、network contact、
+  secret loaded/serialized、Bybit reuse、tiny-live/live 全部 false。
+- Public `__all__` freeze、README boundary、fixture export、client public surface freeze、
+  payload shape guard、default/risky config blocker guard 已同步。
+
+Verification：
+
+- Python changed files `py_compile` PASS。
+- Connector skeleton + no-write focused pytest：`18 passed`。
+- Full Stock/ETF FastAPI/static pytest：`144 passed`。
+- `git diff --check` PASS。
+- Dynamic docs trace pytest：PASS。
+
+Dispatch 記錄：本 checkpoint 為窄範圍 inert connector source hardening；沒有 production/runtime/
+exchange-facing 行為，PM 本地完成 review 與 regression。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 2/3 runtime approval、IBKR contact
+approval、read-only probe approval、paper-order approval、fill-import approval、scorecard
+writer approval 或 launch approval。未批准 IBKR SDK import、socket/HTTP、secret、
+connector runtime、read probe execution、collector start、market-data ingestion、DQ writer、
+paper order/cancel/replace、fill import、DB apply、evidence writer、evidence clock、
+scorecard writer、tiny-live、live、Linux runtime sync/restart 或 Bybit behavior change。
+
 ## 2026-07-01 PM Session Checkpoint — Paper Order Request Module Split Guard
 
 PM 已完成 `stock_etf_paper_order_request.rs` source hygiene checkpoint。這不是

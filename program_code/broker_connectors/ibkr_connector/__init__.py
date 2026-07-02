@@ -7,9 +7,11 @@ in Rust gates before any future read-only or paper capability can be enabled.
 
 from .models import (
     IBKR_CONNECTOR_SURFACE_ID,
+    IBKR_NON_BYBIT_API_ALLOWLIST_CONTRACT_ID,
     IBKR_PAPER_ATTESTATION_CONTRACT_ID,
     IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID,
     IBKR_SESSION_ATTESTATION_CONTRACT_ID,
+    IbkrApiActionMatrixPreview,
     IbkrPaperAttestationPreview,
     IbkrReadOnlyEndpointConfig,
     IbkrReadOnlyProbeResultImportPreview,
@@ -21,9 +23,11 @@ from .readonly_client import IbkrReadOnlyClient
 
 __all__ = [
     "IBKR_CONNECTOR_SURFACE_ID",
+    "IBKR_NON_BYBIT_API_ALLOWLIST_CONTRACT_ID",
     "IBKR_PAPER_ATTESTATION_CONTRACT_ID",
     "IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID",
     "IBKR_SESSION_ATTESTATION_CONTRACT_ID",
+    "IbkrApiActionMatrixPreview",
     "IbkrPaperAttestationPreview",
     "IbkrPaperClientBoundary",
     "IbkrReadOnlyClient",

@@ -6,6 +6,7 @@ from .models import (
     IBKR_CONNECTOR_SURFACE_ID,
     IbkrReadOnlyEndpointConfig,
     IbkrReadOnlySurfaceStatus,
+    blocked_api_action_matrix_preview,
     blocked_readonly_probe_result_import_preview,
     blocked_readonly_status,
     blocked_session_attestation_preview,
@@ -49,6 +50,10 @@ class IbkrReadOnlyClient:
             "bybit_path_reused": False,
             "blockers": list(status.blockers),
         }
+
+    def api_action_matrix_preview(self) -> dict[str, object]:
+        status = blocked_api_action_matrix_preview(config=self._config)
+        return status.to_dict()
 
     def account_snapshot_preview(self) -> dict[str, object]:
         status = blocked_readonly_status("account_snapshot_blocked", config=self._config)

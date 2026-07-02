@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass, field
 
 
 IBKR_CONNECTOR_SURFACE_ID = "ibkr_stock_etf_readonly_connector_skeleton_v1"
+IBKR_NON_BYBIT_API_ALLOWLIST_CONTRACT_ID = "non_bybit_api_allowlist_v1"
 IBKR_PAPER_ATTESTATION_CONTRACT_ID = "ibkr_paper_attestation_v1"
 IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID = (
     "stock_etf_ibkr_readonly_probe_result_import_request_v1"
@@ -166,6 +167,80 @@ class IbkrReadOnlyProbeResultImportPreview:
 
 
 @dataclass(frozen=True)
+class IbkrApiActionMatrixPreview:
+    """Display-only mirror of the Rust non-Bybit API action buckets."""
+
+    contract_id: str = IBKR_NON_BYBIT_API_ALLOWLIST_CONTRACT_ID
+    source_version: int = 1
+    accepted: bool = False
+    status: str = "blocked_source_only"
+    blockers: tuple[str, ...] = field(
+        default_factory=lambda: (
+            "phase2_gate_not_accepted",
+            "api_action_matrix_blocked_source_only",
+        )
+    )
+    asset_lane: str = "stock_etf_cash"
+    broker: str = "ibkr"
+    environment: str = "read_only"
+    read_actions: tuple[str, ...] = field(
+        default_factory=lambda: (
+            "server_time_read",
+            "connection_health_read",
+            "account_summary_snapshot_read",
+            "portfolio_positions_snapshot_read",
+            "contract_details_read",
+            "market_data_snapshot_read",
+            "market_data_subscription_read",
+            "historical_bars_read",
+            "open_paper_orders_read",
+            "paper_executions_commissions_read",
+        )
+    )
+    paper_write_actions: tuple[str, ...] = field(
+        default_factory=lambda: (
+            "paper_order_submit",
+            "paper_order_cancel",
+            "paper_order_replace",
+        )
+    )
+    denied_actions: tuple[str, ...] = field(
+        default_factory=lambda: (
+            "live_order_submit",
+            "live_account_query",
+            "account_transfer",
+            "margin_enablement",
+            "short_borrow",
+            "options_trading",
+            "cfd_trading",
+            "market_data_entitlement_purchase",
+            "account_management_write",
+            "client_portal_web_api_use",
+        )
+    )
+    external_surface_gate_accepted: bool = False
+    broker_write_authority: bool = False
+    paper_write_actions_authorized: bool = False
+    ibkr_contact_performed: bool = False
+    network_contact_performed: bool = False
+    secret_content_loaded: bool = False
+    secret_content_serialized: bool = False
+    bybit_path_reused: bool = False
+    live_or_tiny_live_authorized: bool = False
+
+    def to_dict(self) -> dict[str, object]:
+        payload = asdict(self)
+        payload["blockers"] = list(self.blockers)
+        payload["read_actions"] = list(self.read_actions)
+        payload["paper_write_actions"] = list(self.paper_write_actions)
+        payload["denied_actions"] = list(self.denied_actions)
+        payload["read_action_count"] = len(self.read_actions)
+        payload["paper_write_action_count"] = len(self.paper_write_actions)
+        payload["denied_action_count"] = len(self.denied_actions)
+        return payload
+
+
+@dataclass(frozen=True)
 class IbkrPaperAttestationPreview:
     """Secret-free placeholder for future paper account/channel attestation."""
 
@@ -239,6 +314,20 @@ def blocked_readonly_probe_result_import_preview(
     if config is not None:
         blockers.extend(config.validate_source_boundary())
     return IbkrReadOnlyProbeResultImportPreview(blockers=_dedupe_blockers(blockers))
+
+
+def blocked_api_action_matrix_preview(
+    *extra_blockers: str,
+    config: IbkrReadOnlyEndpointConfig | None = None,
+) -> IbkrApiActionMatrixPreview:
+    blockers = [
+        "phase2_gate_not_accepted",
+        "api_action_matrix_blocked_source_only",
+        *extra_blockers,
+    ]
+    if config is not None:
+        blockers.extend(config.validate_source_boundary())
+    return IbkrApiActionMatrixPreview(blockers=_dedupe_blockers(blockers))
 
 
 def blocked_paper_attestation_preview(
