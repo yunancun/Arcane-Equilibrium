@@ -646,6 +646,39 @@ connector runtime、read probe execution、collector start、market-data ingesti
 paper order/cancel/replace、fill import、DB apply、evidence writer、evidence clock、
 scorecard writer、tiny-live、live、Linux runtime sync/restart 或 Bybit behavior change。
 
+## 2026-07-02 PM Session Checkpoint — Stock/ETF IBKR Connector Action Matrix Test Split Guard
+
+PM 已完成下一個 hygiene checkpoint：Stock/ETF IBKR Connector Action Matrix Test Split
+Guard。這不是 connector behavior change、FastAPI wiring、IBKR contact、runtime
+approval、paper-order approval、fill-import approval 或 launch approval。
+
+已完成：
+
+- 新增 `test_stock_etf_ibkr_connector_action_matrix.py`，承接 action-matrix exact
+  buckets、fixture parity、risky config blocker expansion 與 dataclass inert posture。
+- 原 `test_stock_etf_ibkr_connector_skeleton.py` 回到 skeleton/package surface coverage，
+  保留 exports、README boundary、Bybit import separation、public method freeze 與其他
+  preview payload shape checks。
+- Line-count hygiene：skeleton test 701 行，action-matrix test 168 行。
+
+Verification：
+
+- Changed Python tests `py_compile` PASS。
+- Connector skeleton/action-matrix/no-write focused pytest：`22 passed`。
+- Full Stock/ETF FastAPI/static pytest：`148 passed`。
+- `git diff --check` PASS。
+- Dynamic docs trace pytest：PASS。
+
+Dispatch 記錄：本 checkpoint 為窄範圍 test organization，沒有 production/runtime/
+exchange-facing 行為，PM 本地完成 review 與 regression。
+
+PM 判定：checkpoint 可接受，但仍不是 connector runtime approval、IBKR contact
+approval、read-only probe approval、paper-order approval、fill-import approval、scorecard
+writer approval 或 launch approval。未批准 IBKR SDK import、socket/HTTP、secret、
+connector runtime、read probe execution、collector start、market-data ingestion、DQ writer、
+paper order/cancel/replace、fill import、DB apply、evidence writer、evidence clock、
+scorecard writer、tiny-live、live、Linux runtime sync/restart 或 Bybit behavior change。
+
 ## 2026-07-01 PM Session Checkpoint — Paper Order Request Module Split Guard
 
 PM 已完成 `stock_etf_paper_order_request.rs` source hygiene checkpoint。這不是
