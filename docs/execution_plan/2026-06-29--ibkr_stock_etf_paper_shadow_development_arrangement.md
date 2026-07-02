@@ -10006,3 +10006,34 @@ connector production code、不呼叫 IBKR、不導入 IBKR SDK、不讀/建/序
 socket/client construction、不做 broker session、不執行 read-only probe、不做 paper order routing/cancel/replace、
 不做 release launch、不做 DB/evidence writer、不做 scorecard writer、不啟動 evidence clock、不做 Linux runtime
 sync/restart、不做 destructive DB cleanup、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
+
+## 246. 2026-07-02 PM session source checkpoint：Stock/ETF Phase0 Route Exact Contract Manifest Guard
+
+本 checkpoint 補強 Stock/ETF FastAPI Phase0 status route 的 accepted manifest coverage，固定 API surface
+`contracts` 必須等於完整 36-item ordered Phase0 contract list。這不是 FastAPI route behavior change、不是 Rust
+IPC behavior change、不是 GUI behavior change、不是 connector production code change、不是 IBKR contact、不是
+connector runtime、不是 secret lookup、不是 broker session、不是 read-only probe execution、不是 paper order route
+enablement、不是 release launch、不是 DB/evidence writer、不是 scorecard writer、不是 tiny-live/live gate；只把
+Phase0 route source-only test 從 contract membership checks 收緊成 exact-vector guard。
+
+已完成：
+
+- 在 `test_stock_etf_phase0_status_routes.py` 新增完整 ordered `EXPECTED_PHASE0_CONTRACTS`。
+- 將 accepted Phase0 route 的 `contracts` membership assertions 改為 `data["contracts"] ==
+  EXPECTED_PHASE0_CONTRACTS`，並讓 `contract_count` 對齊 expected vector length。
+- 擴展本檔 source guard，防止 `contract_violations` 與 `contracts` assertions 退回 loose `set(...)`、
+  membership 或 subset 檢查。
+
+驗證：
+
+- Phase0 status route focused pytest：`5 passed`。
+- Full Stock/ETF Python route/static pytest：`144 passed`。
+- `python3 -m py_compile` for changed Phase0 route test：PASS。
+- Phase0 no-loose contract/contracts assertion scan：PASS。
+- Changed-file diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 FastAPI route 行為、不改 Rust IPC handler behavior、不改 GUI runtime、不改
+connector production code、不呼叫 IBKR、不導入 IBKR SDK、不讀/建/序列化 secret、不啟動 connector runtime、不做
+socket/client construction、不做 broker session、不執行 read-only probe、不做 paper order routing/cancel/replace、
+不做 release launch、不做 DB/evidence writer、不做 scorecard writer、不啟動 evidence clock、不做 Linux runtime
+sync/restart、不做 destructive DB cleanup、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。

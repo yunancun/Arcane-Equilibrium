@@ -6098,6 +6098,31 @@ socket/client construction、沒有 broker session、沒有 read-only probe exec
 paper order routing/cancel/replace execution、沒有 DB/evidence/scorecard writer、沒有 evidence clock、沒有
 paper-shadow launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
 
+## 2026-07-02 Operator Update — Stock/ETF Phase0 Route Exact Contract Manifest Guard
+
+本 session 已完成下一個 test-only checkpoint：
+`Stock/ETF Phase0 Route Exact Contract Manifest Guard`。
+
+這個 checkpoint 補強 Stock/ETF FastAPI Phase0 status route 的 accepted contract manifest coverage。
+
+現在 Phase0 API surface 的 `contracts` 必須等於完整 36-item ordered Phase0 contract list；同檔 source guard
+也防止之後退回 loose `set(...)`、membership 或 subset 檢查。
+
+Verification 已過：
+
+- Phase0 status route focused pytest：`5 passed`
+- Full Stock/ETF Python route/static pytest：`144 passed`
+- `python3 -m py_compile`：PASS
+- Phase0 no-loose contract/contracts assertion scan：PASS
+- Changed-file diff check：PASS
+
+邊界不變：沒有 FastAPI route behavior change、沒有 Rust IPC handler behavior change、沒有 GUI behavior
+change、沒有 connector production code change、沒有 IBKR contact、沒有 SDK import、沒有 secret access/
+serialization、沒有 connector runtime、沒有 socket/client construction、沒有 broker session、沒有 read-only
+probe execution、沒有 paper order routing/cancel/replace execution、沒有 release launch、沒有 DB/evidence
+writer、沒有 scorecard writer、沒有 evidence clock、沒有 destructive DB cleanup、沒有 paper-shadow launch、沒有
+tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
 ## 2026-07-01 Operator Update — Stock/ETF Rust IPC Status Exact Blocker Guard
 
 本 session 已完成下一個 test-only checkpoint：
