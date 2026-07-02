@@ -9,15 +9,8 @@ use std::path::PathBuf;
 use openclaw_types::{
     AssetLane, AuthorityScope, Broker, BrokerOperation, StockEtfDenialReason,
     StockEtfLaneScopedIpcBlocker, StockEtfLaneScopedIpcCommandV1, StockEtfLaneScopedIpcContractV1,
-    StockEtfLaneScopedIpcMethod, IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID,
-    IBKR_AUDIT_EVENT_POLICY_CONTRACT_ID, IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
-    IBKR_RATE_LIMIT_POLICY_CONTRACT_ID, IBKR_REDACTION_POLICY_CONTRACT_ID,
-    IBKR_SECRET_SLOT_CONTRACT_ID, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
-    NON_BYBIT_API_ALLOWLIST_CONTRACT_ID, STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID,
-    STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID, STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID,
-    STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID, STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID,
-    STOCK_ETF_RISK_POLICY_CONTRACT_ID, STOCK_ETF_SCOPED_AUTHORIZATION_CONTRACT_ID,
-    STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID,
+    StockEtfLaneScopedIpcMethod, STOCK_ETF_LANE_SCOPED_IPC_CONTRACT_ID,
+    STOCK_ETF_SCOPED_AUTHORIZATION_CONTRACT_ID,
 };
 
 #[test]
@@ -110,65 +103,14 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
     assert_eq!(submit.authority_scope, AuthorityScope::PaperRehearsal);
     assert!(submit.effect_capable);
     assert!(submit.rust_owned);
-    assert!(submit
-        .required_gates
-        .contains(&STOCK_ETF_SCOPED_AUTHORIZATION_CONTRACT_ID.to_string()));
-    assert!(submit
-        .required_gates
-        .contains(&STOCK_ETF_RISK_POLICY_CONTRACT_ID.to_string()));
-    assert!(submit
-        .required_gates
-        .contains(&STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID.to_string()));
-    assert!(submit
-        .required_request_fields
-        .contains(&"decision_lease_id".to_string()));
-    assert_fields(
-        submit,
-        &[
-            "account_fingerprint_hash",
-            "instrument_identity_hash",
-            "symbol",
-            "instrument_kind",
-            "side",
-            "order_type",
-            "quantity",
-            "limit_price_policy",
-            "time_in_force",
-            "order_local_id",
-            "idempotency_key",
-        ],
-    );
 
     let preview = contract
         .commands
         .iter()
         .find(|command| command.method == StockEtfLaneScopedIpcMethod::PreviewPaperOrder)
         .expect("preview method exists");
-    assert!(preview
-        .required_gates
-        .contains(&STOCK_ETF_INSTRUMENT_IDENTITY_CONTRACT_ID.to_string()));
-    assert!(preview
-        .required_gates
-        .contains(&STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID.to_string()));
-    assert!(preview
-        .required_gates
-        .contains(&STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID.to_string()));
     assert!(!preview.effect_capable);
     assert_eq!(preview.authority_scope, AuthorityScope::ReadOnly);
-    assert_fields(
-        preview,
-        &[
-            "account_fingerprint_hash",
-            "instrument_identity_hash",
-            "symbol",
-            "instrument_kind",
-            "side",
-            "order_type",
-            "quantity",
-            "limit_price_policy",
-            "time_in_force",
-        ],
-    );
 
     let paper_status = contract
         .commands
@@ -299,18 +241,10 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
         .iter()
         .find(|command| command.method == StockEtfLaneScopedIpcMethod::EvaluateShadowSignal)
         .expect("shadow method exists");
-    assert!(shadow
-        .required_gates
-        .contains(&STOCK_ETF_COST_MODEL_VERSION_CONTRACT_ID.to_string()));
-    assert!(shadow
-        .required_gates
-        .contains(&STOCK_ETF_EVIDENCE_CLOCK_CONTRACT_ID.to_string()));
-    assert!(shadow
-        .required_gates
-        .contains(&STOCK_ETF_PIT_UNIVERSE_CONTRACT_ID.to_string()));
-    assert!(shadow
-        .required_gates
-        .contains(&STOCK_ETF_STRATEGY_HYPOTHESIS_CONTRACT_ID.to_string()));
+    assert_eq!(shadow.operation, BrokerOperation::ShadowSignalEmit);
+    assert_eq!(shadow.authority_scope, AuthorityScope::ShadowOnly);
+    assert!(!shadow.effect_capable);
+    assert!(!shadow.rust_owned);
 
     let readonly_probe = contract
         .commands
@@ -321,41 +255,6 @@ fn accepted_fixture_pins_stock_etf_method_matrix_without_runtime_authority() {
     assert_eq!(readonly_probe.authority_scope, AuthorityScope::ReadOnly);
     assert!(!readonly_probe.effect_capable);
     assert!(readonly_probe.rust_owned);
-    for gate in [
-        IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
-        NON_BYBIT_API_ALLOWLIST_CONTRACT_ID,
-        IBKR_SECRET_SLOT_CONTRACT_ID,
-        IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID,
-        IBKR_SESSION_ATTESTATION_CONTRACT_ID,
-        IBKR_REDACTION_POLICY_CONTRACT_ID,
-        IBKR_RATE_LIMIT_POLICY_CONTRACT_ID,
-        IBKR_AUDIT_EVENT_POLICY_CONTRACT_ID,
-    ] {
-        assert!(
-            readonly_probe.required_gates.contains(&gate.to_string()),
-            "readonly probe method missing gate {gate}"
-        );
-    }
-    assert_fields(
-        readonly_probe,
-        &[
-            "probe_kind",
-            "api_action",
-            "request_id",
-            "probe_id",
-            "phase2_gate_artifact_hash",
-            "api_allowlist_hash",
-            "secret_slot_contract_hash",
-            "api_session_topology_hash",
-            "session_attestation_hash",
-            "redaction_policy_hash",
-            "rate_limit_policy_hash",
-            "audit_event_policy_hash",
-            "source_artifact_hash",
-            "raw_artifact_hash",
-            "redacted_summary_hash",
-        ],
-    );
 }
 
 #[test]
@@ -550,19 +449,6 @@ fn paper_order_request_shapes_are_method_specific_and_not_cross_wireable() {
         replace.required_request_fields
     );
 
-    assert_fields(
-        cancel,
-        &[
-            "account_fingerprint_hash",
-            "order_local_id",
-            "broker_order_id",
-            "cancel_reason",
-            "idempotency_key",
-            "lifecycle_contract_hash",
-            "broker_capability_registry_hash",
-            "audit_event_id",
-        ],
-    );
     assert_lacks_fields(
         cancel,
         &[
@@ -576,25 +462,6 @@ fn paper_order_request_shapes_are_method_specific_and_not_cross_wireable() {
         ],
     );
 
-    assert_fields(
-        replace,
-        &[
-            "account_fingerprint_hash",
-            "order_local_id",
-            "broker_order_id",
-            "instrument_identity_hash",
-            "symbol",
-            "side",
-            "replacement_idempotency_key",
-            "replacement_quantity",
-            "replacement_limit_price_policy",
-            "replacement_time_in_force",
-            "replace_reason",
-            "lifecycle_contract_hash",
-            "broker_capability_registry_hash",
-            "audit_event_id",
-        ],
-    );
     assert_lacks_fields(
         replace,
         &[
@@ -844,16 +711,6 @@ fn command_mut(
         .iter_mut()
         .find(|command| command.method == method)
         .expect("stock/ETF IPC method exists")
-}
-
-fn assert_fields(command: &StockEtfLaneScopedIpcCommandV1, fields: &[&str]) {
-    for field in fields {
-        assert!(
-            command.required_request_fields.contains(&field.to_string()),
-            "{:?} missing required request field {field}",
-            command.method
-        );
-    }
 }
 
 fn assert_lacks_fields(command: &StockEtfLaneScopedIpcCommandV1, fields: &[&str]) {

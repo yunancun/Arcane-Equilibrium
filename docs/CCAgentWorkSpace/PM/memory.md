@@ -4273,3 +4273,10 @@
 - The readiness route source guard now rejects loose `set(...)`, membership, and subset assertions for `denied_operations`.
 - Verification passed: readiness route `7 passed`; full Stock/ETF Python route/static `144 passed`; changed-file `py_compile` PASS; no-loose denied-operations scan PASS; diff check PASS.
 - Boundary unchanged: no FastAPI route behavior change, Rust IPC handler behavior change, GUI behavior change, connector production code change, IBKR contact, connector runtime, socket/client construction, secret access, broker session, read-only probe execution, paper order routing/cancel/replace execution, DB/evidence writer, scorecard writer, evidence clock, release launch, paper-shadow launch, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-02 Stock/ETF Lane-Scoped IPC IO Matrix Exact Guard
+
+- PM added a split test-only Rust acceptance guard for the lane-scoped IPC command IO matrix so all 20 accepted commands must keep complete ordered `required_gates` and `required_request_fields` vectors.
+- The legacy lane-scoped IPC acceptance file no longer uses positive gate/field membership assertions for submit/preview/shadow/readonly-probe; a source guard blocks `.required_gates.contains(...)`, `assert_fields(...)`, and positive request-field contains checks from returning.
+- Verification passed: lane-scoped IPC focused Rust acceptance `12 + 2 passed`; full `cargo test -p openclaw_types` PASS; package fmt PASS; lane-scoped IPC source static `7 passed`; no-loose IO scan PASS; diff check PASS.
+- Boundary unchanged: no Rust production code change, Rust IPC handler behavior change, FastAPI route behavior change, GUI behavior change, connector production code change, IBKR contact, connector runtime, socket/client construction, secret access, broker session, read-only probe execution, paper order routing/cancel/replace execution, DB/evidence writer, scorecard writer, evidence clock, release launch, paper-shadow launch, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
