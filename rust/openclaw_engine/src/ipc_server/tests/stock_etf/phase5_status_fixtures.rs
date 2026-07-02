@@ -164,7 +164,7 @@ async fn stock_etf_release_packet_status_is_display_only_source_fixture() {
     assert_eq!(release["packet_id"], "stock_etf_release_packet_v1");
     assert_eq!(release["source_version"], 1);
     assert_eq!(release["accepted"], true);
-    assert_eq!(release["blockers"].as_array().unwrap().len(), 0);
+    assert_json_array_eq(&release["blockers"], &[]);
     assert_eq!(release["source_commit_present"], true);
     assert_eq!(release["reviewer_role_count"], 8);
     assert_eq!(release["role_report_count"], 2);
@@ -173,7 +173,19 @@ async fn stock_etf_release_packet_status_is_display_only_source_fixture() {
     assert_eq!(release["e4_log_hash_present"], true);
     assert_eq!(release["qa_log_hash_present"], true);
     assert_eq!(release["manifest_hash_count"], 2);
-    assert_eq!(release["manifest_hashes"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        release["manifest_hashes"],
+        serde_json::json!([
+            {
+                "label": "release_manifest",
+                "hash_present": true,
+            },
+            {
+                "label": "artifact_manifest",
+                "hash_present": true,
+            },
+        ])
+    );
     assert_eq!(release["pg_migrations_declared"], false);
     assert_eq!(release["pg_dry_run_log_hash_present"], false);
     assert_eq!(release["pg_double_apply_log_hash_present"], false);
@@ -275,13 +287,94 @@ async fn stock_etf_disable_cleanup_status_is_display_only_source_fixture() {
     );
     assert_eq!(runbook["source_version"], 1);
     assert_eq!(runbook["accepted"], true);
-    assert_eq!(runbook["blockers"].as_array().unwrap().len(), 0);
+    assert_json_array_eq(&runbook["blockers"], &[]);
     assert_eq!(runbook["source_artifact_hash_present"], true);
     assert_eq!(runbook["bybit_live_execution_unchanged"], true);
     assert_eq!(runbook["env_flag_count"], 4);
     assert_eq!(runbook["proof_count"], 7);
-    assert_eq!(runbook["env_flags"].as_array().unwrap().len(), 4);
-    assert_eq!(runbook["proofs"].as_array().unwrap().len(), 7);
+    assert_eq!(
+        runbook["env_flags"],
+        serde_json::json!([
+            {
+                "name": "OPENCLAW_STOCK_ETF_LANE_ENABLED",
+                "expected_value": "0",
+                "observed_value": "0",
+                "evidence_hash_present": true,
+            },
+            {
+                "name": "OPENCLAW_IBKR_READONLY_ENABLED",
+                "expected_value": "0",
+                "observed_value": "0",
+                "evidence_hash_present": true,
+            },
+            {
+                "name": "OPENCLAW_IBKR_PAPER_ENABLED",
+                "expected_value": "0",
+                "observed_value": "0",
+                "evidence_hash_present": true,
+            },
+            {
+                "name": "OPENCLAW_STOCK_ETF_SHADOW_ONLY",
+                "expected_value": "1",
+                "observed_value": "1",
+                "evidence_hash_present": true,
+            },
+        ])
+    );
+    assert_eq!(
+        runbook["proofs"],
+        serde_json::json!([
+            {
+                "kind": "collector_stopped",
+                "verified": true,
+                "evidence_hash_present": true,
+                "grants_runtime_authority": false,
+                "destructive_cleanup_claimed": false,
+            },
+            {
+                "kind": "gui_stock_views_disabled_or_hidden",
+                "verified": true,
+                "evidence_hash_present": true,
+                "grants_runtime_authority": false,
+                "destructive_cleanup_claimed": false,
+            },
+            {
+                "kind": "live_secret_absence_proven",
+                "verified": true,
+                "evidence_hash_present": true,
+                "grants_runtime_authority": false,
+                "destructive_cleanup_claimed": false,
+            },
+            {
+                "kind": "evidence_archive_forward_only",
+                "verified": true,
+                "evidence_hash_present": true,
+                "grants_runtime_authority": false,
+                "destructive_cleanup_claimed": false,
+            },
+            {
+                "kind": "db_forward_only_retention_preserved",
+                "verified": true,
+                "evidence_hash_present": true,
+                "grants_runtime_authority": false,
+                "destructive_cleanup_claimed": false,
+            },
+            {
+                "kind": "append_only_audit_preserved",
+                "verified": true,
+                "evidence_hash_present": true,
+                "grants_runtime_authority": false,
+                "destructive_cleanup_claimed": false,
+            },
+            {
+                "kind": "bybit_live_execution_unchanged",
+                "verified": true,
+                "evidence_hash_present": true,
+                "grants_runtime_authority": false,
+                "destructive_cleanup_claimed": false,
+            },
+        ])
+    );
     assert_eq!(runbook["ibkr_contact_performed"], false);
     assert_eq!(runbook["connector_runtime_started"], false);
     assert_eq!(runbook["paper_order_routed"], false);

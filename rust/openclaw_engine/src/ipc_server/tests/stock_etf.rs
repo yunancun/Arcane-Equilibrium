@@ -78,6 +78,7 @@ fn stock_etf_ipc_status_fixture_assertions_stay_exact() {
     let forbidden = [
         "json_array_".to_string() + "contains(",
         [".iter().", "any(|item| item.as_str() == Some("].concat(),
+        [".as_array().", "unwrap().", "len()"].concat(),
     ];
 
     for source in sources {
