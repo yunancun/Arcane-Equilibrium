@@ -10319,3 +10319,44 @@ external-surface/session gate semantics、不改 Rust IPC handler behavior、不
 replace、不做 fill import execution、不做 release launch、不做 DB/evidence writer、不做 scorecard writer、不啟動
 evidence clock、不做 Linux runtime sync/restart、不做 destructive DB cleanup、不授權 paper-shadow launch、
 tiny-live/live 或任何 Bybit behavior change。
+
+## 255. 2026-07-02 PM session source checkpoint：Stock/ETF IPC Phase5 Status List Exact Guard
+
+本 checkpoint 補強 Rust IPC Stock/ETF Phase5 status fixture 的 list exact coverage，固定 release-packet status
+中的 empty blockers 與 `manifest_hashes` object list、disable-cleanup status 中的 empty blockers、
+`env_flags` 與 `proofs` object lists，以及 universe status 的 empty `sample_constituents` 都必須等於完整
+ordered arrays，而不是只檢查 `.as_array().unwrap().len()`。這不是 Rust IPC handler behavior change、不是
+FastAPI route behavior change、不是 GUI behavior change、不是 release launch、不是 disable/cleanup action、不是
+IBKR contact、不是 connector runtime、不是 secret lookup、不是 broker session、不是 read-only probe execution、
+不是 paper order/fill route enablement；只把 Rust IPC fixture coverage 從 length-only list checks 收緊成 exact
+list guard。
+
+已完成：
+
+- 將 release packet IPC status 的 accepted `blockers` 改為 exact empty array assertion。
+- 將 release packet IPC status 的 `manifest_hashes` 改為完整 ordered object list assertion：
+  `release_manifest`、`artifact_manifest`。
+- 將 disable-cleanup IPC status 的 accepted `blockers` 改為 exact empty array assertion。
+- 將 disable-cleanup IPC status 的 `env_flags` 改為完整 4-item ordered object list assertion。
+- 將 disable-cleanup IPC status 的 `proofs` 改為完整 7-item ordered object list assertion。
+- 將 universe IPC status 的 empty `sample_constituents` 改為 exact empty array assertion。
+- 擴充 Rust IPC status fixture source guard，禁止 `.as_array().unwrap().len()` length-only list assertions 回流。
+- 維持 test 檔尺寸 hygiene：parent `stock_etf.rs` 128 行、`core_status_fixtures.rs` 759 行、
+  `phase5_status_fixtures.rs` 401 行，均低於 800 行。
+
+驗證：
+
+- Changed-file rustfmt：PASS。
+- Stock/ETF Rust IPC focused tests：`cargo test -p openclaw_engine stock_etf -- --test-threads=1`，核心
+  Stock/ETF IPC/lib `32 passed`。
+- Stock/ETF IPC no-loose list assertion scan：PASS。
+- Diff check：PASS。
+- Full `cargo fmt -p openclaw_engine -- --check` 未作為本 checkpoint gate：該命令目前會報出既有 unrelated
+  crate-wide rustfmt drift；本 checkpoint 僅以 changed-file rustfmt 驗證，未格式化無關檔案。
+
+PM 邊界不變：此 checkpoint 不改 Rust IPC handler behavior、不改 Rust production behavior、不改 FastAPI route
+行為、不改 GUI runtime、不改 connector production code、不呼叫 IBKR、不導入 IBKR SDK、不讀/建/序列化 secret、
+不啟動 connector runtime、不做 socket/client construction、不做 broker session、不執行 read-only probe、不做
+paper order routing/cancel/replace、不做 fill import execution、不做 release launch、不做 disable/cleanup action、
+不做 DB/evidence writer、不做 scorecard writer、不啟動 evidence clock、不做 Linux runtime sync/restart、不做
+destructive DB cleanup、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。

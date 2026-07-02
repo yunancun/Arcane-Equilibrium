@@ -6098,6 +6098,34 @@ socket/client construction、沒有 broker session、沒有 read-only probe exec
 paper order routing/cancel/replace execution、沒有 DB/evidence/scorecard writer、沒有 evidence clock、沒有
 paper-shadow launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
 
+## 2026-07-02 Operator Update - Stock/ETF IPC Phase5 Status List Exact Guard
+
+本 session 已完成下一個 test-only checkpoint：
+`Stock/ETF IPC Phase5 Status List Exact Guard`。
+
+這個 checkpoint 補強 Rust IPC Stock/ETF Phase5 status fixture 的 exact list coverage。
+
+現在 release-packet status 的 `blockers`、`manifest_hashes`，disable-cleanup status 的 `blockers`、
+`env_flags`、`proofs`，以及 universe status 的 `sample_constituents` 都用完整 ordered arrays 驗證，不再只看
+`.as_array().unwrap().len()`。共享 source guard 也已禁止這種 length-only list assertion 回流。
+
+Verification 已過：
+
+- Changed-file rustfmt：PASS
+- Stock/ETF Rust IPC focused tests：`32 passed`
+- Stock/ETF IPC no-loose list assertion scan：PASS
+- Diff check：PASS
+
+注意：`cargo fmt -p openclaw_engine -- --check` 目前會報既有 unrelated crate-wide rustfmt drift；本 checkpoint 只
+用 changed-file rustfmt 驗證，未格式化無關檔案。
+
+邊界不變：沒有 Rust IPC handler behavior change、沒有 Rust production behavior change、沒有 FastAPI route
+behavior change、沒有 GUI runtime change、沒有 connector production code change、沒有 IBKR contact、沒有 SDK
+import、沒有 secret access/serialization、沒有 connector runtime、沒有 socket/client construction、沒有 broker
+session、沒有 read-only probe execution、沒有 fill import execution、沒有 paper order routing/cancel/replace
+execution、沒有 release launch、沒有 disable/cleanup action、沒有 DB/evidence/scorecard writer、沒有 evidence
+clock、沒有 paper-shadow launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
 ## 2026-07-02 Operator Update - IBKR Non-Bybit API Allowlist Bucket Exact Guard
 
 本 session 已完成下一個 test-only checkpoint：

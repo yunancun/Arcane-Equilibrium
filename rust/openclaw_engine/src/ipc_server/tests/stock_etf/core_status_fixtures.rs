@@ -497,7 +497,7 @@ async fn stock_etf_universe_status_is_blocked_source_fixture_without_side_effect
     );
     assert_eq!(universe["universe_hash_present"], false);
     assert_eq!(universe["constituent_count"], 0);
-    assert_eq!(universe["sample_constituents"].as_array().unwrap().len(), 0);
+    assert_json_array_eq(&universe["sample_constituents"], &[]);
     assert_eq!(universe["frozen_for_evidence_clock"], false);
     assert_eq!(universe["survivorship_bias_controls_present"], false);
     assert_eq!(universe["bybit_live_execution_unchanged"], true);
