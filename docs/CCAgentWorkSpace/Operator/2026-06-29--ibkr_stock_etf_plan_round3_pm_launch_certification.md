@@ -6098,6 +6098,34 @@ socket/client construction、沒有 broker session、沒有 read-only probe exec
 paper order routing/cancel/replace execution、沒有 DB/evidence/scorecard writer、沒有 evidence clock、沒有
 paper-shadow launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
 
+## 2026-07-02 Operator Update — Stock/ETF Lane Readiness Denial Reasons Exact Guard
+
+本 session 已完成下一個 test-only checkpoint：
+`Stock/ETF Lane Readiness Denial Reasons Exact Guard`。
+
+這個 checkpoint 補強 Stock/ETF Rust lane default readiness 的 fail-closed denial exact coverage。
+
+現在 default feature flags 下的 `readiness.denial_reasons` 必須等於完整 ordered vector：
+`LaneDisabled`、`BrokerDisabled`、`ShadowOnly`；原本只檢查 `LaneDisabled` membership 的 assertion 已移除，
+並由 source guard 防止 loose readiness denial assertions 回流。
+
+Verification 已過：
+
+- Lane focused Rust acceptance：`15 passed`
+- Full `cargo test -p openclaw_types`：PASS
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Lane source static pytest：`8 passed`
+- Readiness denial reason no-loose assertion scan：PASS
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 lane/readiness validator semantics change、沒有 source/runtime
+config change、沒有 Rust IPC handler behavior change、沒有 FastAPI route/GUI behavior change、沒有 connector
+production code change、沒有 IBKR contact、沒有 SDK import、沒有 secret access/serialization、沒有 connector
+runtime、沒有 socket/client construction、沒有 broker session、沒有 read-only probe execution、沒有 paper order
+routing/cancel/replace execution、沒有 fill import execution、沒有 release launch、沒有 DB/evidence writer、沒有
+scorecard writer、沒有 evidence clock、沒有 destructive DB cleanup、沒有 paper-shadow launch、沒有 tiny-live/live
+authorization，也沒有改動 Bybit live/demo execution 行為。
+
 ## 2026-07-02 Operator Update — Stock/ETF Risk Policy Instrument Kind Exact Guard
 
 本 session 已完成下一個 test-only checkpoint：
