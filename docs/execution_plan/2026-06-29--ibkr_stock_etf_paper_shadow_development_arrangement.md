@@ -10504,3 +10504,40 @@ connector runtime、不做 socket/client construction、不做 broker session、
 routing/cancel/replace、不做 fill import execution、不做 release launch、不做 DB/evidence writer、不做 scorecard
 writer、不啟動 evidence clock、不做 Linux runtime sync/restart、不做 destructive DB cleanup、不授權 paper-shadow
 launch、tiny-live/live 或任何 Bybit behavior change。
+
+## 260. 2026-07-02 PM session source checkpoint：Stock/ETF API Allowlist Status Bucket Exact Guard
+
+本 checkpoint 將 `non_bybit_api_allowlist_v1` 的完整 read / paper-write / denied
+ordered action buckets 從 source allowlist 傳到 Rust Phase2 precontact status 與
+FastAPI readiness status contract。這不是 IBKR connector runtime、不是 IBKR contact、不是
+read-only probe execution、不是 paper-order submit/cancel/replace enablement；只是避免 status
+surface 只驗證 action counts 而漏掉 bucket 內容漂移。
+
+已完成：
+
+- Rust `phase2_precontact_summary()` 的 `api_allowlist` payload 新增 `read_actions`、
+  `paper_write_actions`、`denied_actions`，保留既有 count 與 side-effect false flags。
+- Rust precontact fixture test 對三個 action bucket 做 ordered exact assertions。
+- FastAPI `stock_etf_status_common.py` 新增 exact bucket constants，fail-closed payload
+  攜帶空 bucket list，normalizer 保留 list，contract guard 新增
+  `api_allowlist_*_actions_mismatch`。
+- Readiness route fixtures export exact bucket constants；accepted path assert bucket list
+  與 count，並新增 count-correct/content-drift fail-closed regression。
+
+驗證：
+
+- Python changed files `py_compile`：PASS。
+- Focused FastAPI readiness pytest：`8 passed`。
+- Full Stock/ETF FastAPI/static pytest：`149 passed`。
+- Scoped Rust rustfmt：PASS。
+- Focused Rust precontact readiness test：PASS。
+- Engine Stock/ETF focused regression：`32 passed`；僅有既有 Rust warning。
+- `git diff --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步。
+
+PM 邊界不變：此 checkpoint 不改 connector production code、不改 FastAPI broker runtime wiring、不改 GUI runtime、
+不呼叫 IBKR、不導入 IBKR SDK、不讀/建/序列化 secret、不啟動 connector runtime、不做 socket/client
+construction、不做 broker session、不執行 read-only probe、不做 paper order routing/cancel/replace、不做 fill
+import execution、不做 release launch、不做 DB/evidence writer、不做 scorecard writer、不啟動 evidence clock、不做
+Linux runtime sync/restart、不做 destructive DB cleanup、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit
+behavior change。

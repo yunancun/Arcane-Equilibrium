@@ -6157,6 +6157,41 @@ change、沒有 Rust production code change、沒有 IBKR contact、沒有 SDK i
 沒有 fill import execution、沒有 paper order routing/cancel/replace execution、沒有 DB/evidence/scorecard writer、
 沒有 evidence clock、沒有 paper-shadow launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
 
+## 2026-07-02 Operator Update — Stock/ETF API Allowlist Status Bucket Exact Guard
+
+本 session 已完成下一個 source/status checkpoint：
+`Stock/ETF API Allowlist Status Bucket Exact Guard`。
+
+這個 checkpoint 把 `non_bybit_api_allowlist_v1` 的完整 ordered action buckets
+一路固定到 Rust Phase2 precontact status、FastAPI readiness normalizer 與 route
+contract guard。之前 status surface 主要證明 count；現在 count 正確但 bucket 內容漂移也會
+fail closed。
+
+現在 readiness / precontact status 明確顯示並驗證：
+
+- 10 個 read actions
+- 3 個 paper-write actions
+- 10 個 denied actions
+- bucket list 與 count 必須同時匹配
+- IBKR contact、secret serialization、Bybit path reuse、tiny-live/live 仍保持 denied / false
+
+Verification 已過：
+
+- Python changed files `py_compile`：PASS
+- Readiness route focused pytest：`8 passed`
+- Full Stock/ETF Python route/static pytest：`149 passed`
+- Scoped Rust rustfmt：PASS
+- Focused Rust precontact readiness test：PASS
+- Engine Stock/ETF focused regression：`32 passed`；僅有既有 Rust warning
+- `git diff --check`：PASS
+- Dynamic docs trace pytest：PASS
+
+邊界不變：沒有 connector production code change、沒有 FastAPI broker runtime wiring、沒有 GUI runtime behavior
+change、沒有 IBKR contact、沒有 SDK import、沒有 secret access/serialization、沒有 connector runtime、沒有
+socket/client construction、沒有 broker session、沒有 read-only probe execution、沒有 fill import execution、沒有
+paper order routing/cancel/replace execution、沒有 DB/evidence/scorecard writer、沒有 evidence clock、沒有
+paper-shadow launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
 ## 2026-07-02 Operator Update — Stock/ETF Phase3 Evidence Acceptance Split Guard
 
 本 session 已完成下一個 test-only checkpoint：

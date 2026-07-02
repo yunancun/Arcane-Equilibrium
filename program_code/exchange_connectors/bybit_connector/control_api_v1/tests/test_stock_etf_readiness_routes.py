@@ -9,6 +9,9 @@ from unittest.mock import AsyncMock
 from fastapi.testclient import TestClient
 
 from stock_etf_route_fixtures import (
+    API_ALLOWLIST_DENIED_ACTIONS,
+    API_ALLOWLIST_PAPER_WRITE_ACTIONS,
+    API_ALLOWLIST_READ_ACTIONS,
     _make_client_with_ipc,
     _valid_api_allowlist,
     client_fail_closed,
@@ -65,8 +68,11 @@ EXPECTED_MISSING_API_ALLOWLIST_CONTRACT_VIOLATIONS = [
     "api_allowlist_not_accepted",
     "api_allowlist_contract_id_mismatch",
     "api_allowlist_source_version_mismatch",
+    "api_allowlist_read_actions_mismatch",
     "api_allowlist_read_action_count_mismatch",
+    "api_allowlist_paper_write_actions_mismatch",
     "api_allowlist_paper_write_action_count_mismatch",
+    "api_allowlist_denied_actions_mismatch",
     "api_allowlist_denied_action_count_mismatch",
     "api_allowlist_bybit_live_not_protected",
 ]
@@ -263,8 +269,11 @@ def test_stock_etf_readiness_uses_only_readonly_fixture_method() -> None:
     assert data["api_allowlist"]["contract_id"] == "non_bybit_api_allowlist_v1"
     assert data["api_allowlist"]["source_version"] == 1
     assert data["api_allowlist"]["accepted"] is True
+    assert data["api_allowlist"]["read_actions"] == API_ALLOWLIST_READ_ACTIONS
     assert data["api_allowlist"]["read_action_count"] == 10
+    assert data["api_allowlist"]["paper_write_actions"] == API_ALLOWLIST_PAPER_WRITE_ACTIONS
     assert data["api_allowlist"]["paper_write_action_count"] == 3
+    assert data["api_allowlist"]["denied_actions"] == API_ALLOWLIST_DENIED_ACTIONS
     assert data["api_allowlist"]["denied_action_count"] == 10
     assert data["readonly_probe_request"]["contract_id"] == (
         "stock_etf_ibkr_readonly_probe_request_v1"
@@ -542,6 +551,53 @@ def test_stock_etf_readiness_rejects_boolean_api_allowlist_version() -> None:
         data["contract_violations"]
         == EXPECTED_BOOLEAN_API_ALLOWLIST_VERSION_CONTRACT_VIOLATIONS
     )
+
+
+def test_stock_etf_readiness_rejects_api_allowlist_bucket_drift() -> None:
+    api_allowlist = _valid_api_allowlist()
+    api_allowlist["read_actions"] = list(API_ALLOWLIST_READ_ACTIONS)
+    api_allowlist["read_actions"][0] = "paper_order_submit"
+    fake_ipc = AsyncMock()
+    fake_ipc.call = AsyncMock(
+        return_value={
+            "readiness": {
+                "asset_lane": "stock_etf_cash",
+                "broker": "ibkr",
+                "default_asset_lane": "crypto_perp",
+                "readonly_ready": True,
+                "paper_ready": False,
+                "shadow_only": True,
+                "live_denied": True,
+                "denial_reasons": [],
+            },
+            "phase2": {
+                "external_surface_gate": {
+                    "status": "BLOCKED",
+                    "ibkr_contact_allowed": False,
+                    "blockers": ["status_not_pass"],
+                    "ibkr_call_performed": False,
+                },
+                "api_allowlist": api_allowlist,
+                "immutable_pass_artifact_present": False,
+                "first_ibkr_contact_allowed": False,
+                "connector_enabled": False,
+            },
+            "ibkr_live_enabled": False,
+            "ibkr_call_performed": False,
+            "secret_slot_touched": False,
+            "order_routed": False,
+            "bybit_ipc_reused": False,
+        }
+    )
+    client = _make_client_with_ipc(fake_ipc)
+    try:
+        data = client.get("/api/v1/stock-etf/readiness").json()["data"]
+    finally:
+        client._stock_etf_patcher.stop()  # type: ignore[attr-defined]
+
+    assert data["readiness_state"] == "contract_violation_blocked"
+    assert data["degraded"] is True
+    assert data["contract_violations"] == ["api_allowlist_read_actions_mismatch"]
 
 
 def test_stock_etf_readiness_contract_violation_assertions_stay_exact() -> None:

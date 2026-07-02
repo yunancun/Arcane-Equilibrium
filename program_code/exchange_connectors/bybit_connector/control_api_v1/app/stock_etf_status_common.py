@@ -6,9 +6,38 @@ from typing import Any
 
 _API_ALLOWLIST_CONTRACT_ID = "non_bybit_api_allowlist_v1"
 _API_ALLOWLIST_SOURCE_VERSION = 1
-_API_ALLOWLIST_READ_ACTION_COUNT = 10
-_API_ALLOWLIST_PAPER_WRITE_ACTION_COUNT = 3
-_API_ALLOWLIST_DENIED_ACTION_COUNT = 10
+_API_ALLOWLIST_READ_ACTIONS: tuple[str, ...] = (
+    "server_time_read",
+    "connection_health_read",
+    "account_summary_snapshot_read",
+    "portfolio_positions_snapshot_read",
+    "contract_details_read",
+    "market_data_snapshot_read",
+    "market_data_subscription_read",
+    "historical_bars_read",
+    "open_paper_orders_read",
+    "paper_executions_commissions_read",
+)
+_API_ALLOWLIST_PAPER_WRITE_ACTIONS: tuple[str, ...] = (
+    "paper_order_submit",
+    "paper_order_cancel",
+    "paper_order_replace",
+)
+_API_ALLOWLIST_DENIED_ACTIONS: tuple[str, ...] = (
+    "live_order_submit",
+    "live_account_query",
+    "account_transfer",
+    "margin_enablement",
+    "short_borrow",
+    "options_trading",
+    "cfd_trading",
+    "market_data_entitlement_purchase",
+    "account_management_write",
+    "client_portal_web_api_use",
+)
+_API_ALLOWLIST_READ_ACTION_COUNT = len(_API_ALLOWLIST_READ_ACTIONS)
+_API_ALLOWLIST_PAPER_WRITE_ACTION_COUNT = len(_API_ALLOWLIST_PAPER_WRITE_ACTIONS)
+_API_ALLOWLIST_DENIED_ACTION_COUNT = len(_API_ALLOWLIST_DENIED_ACTIONS)
 _MARKET_DATA_PROVENANCE_CONTRACT_ID = "stock_market_data_provenance_v1"
 _COLLECTOR_RUN_CONTRACT_ID = "stock_etf_collector_run_v1"
 _DQ_MANIFEST_CONTRACT_ID = "stock_etf_dq_manifest_v1"
@@ -67,8 +96,11 @@ def _phase2_fail_closed() -> dict[str, Any]:
             "source_version": 0,
             "accepted": False,
             "blockers": ["ipc_unavailable"],
+            "read_actions": [],
             "read_action_count": 0,
+            "paper_write_actions": [],
             "paper_write_action_count": 0,
+            "denied_actions": [],
             "denied_action_count": 0,
             "ibkr_contact_performed": False,
             "secret_content_serialized": False,
@@ -443,8 +475,13 @@ def _normalize_api_allowlist(value: Any) -> dict[str, Any]:
         "source_version": _as_int(source.get("source_version")),
         "accepted": _as_bool(source.get("accepted")),
         "blockers": [str(item) for item in _as_list(source.get("blockers"))],
+        "read_actions": [str(item) for item in _as_list(source.get("read_actions"))],
         "read_action_count": _as_int(source.get("read_action_count")),
+        "paper_write_actions": [
+            str(item) for item in _as_list(source.get("paper_write_actions"))
+        ],
         "paper_write_action_count": _as_int(source.get("paper_write_action_count")),
+        "denied_actions": [str(item) for item in _as_list(source.get("denied_actions"))],
         "denied_action_count": _as_int(source.get("denied_action_count")),
         "ibkr_contact_performed": _as_bool(source.get("ibkr_contact_performed")),
         "secret_content_serialized": _as_bool(source.get("secret_content_serialized")),
@@ -462,13 +499,25 @@ def _api_allowlist_contract_violations(api_allowlist: dict[str, Any]) -> list[st
         violations.append("api_allowlist_contract_id_mismatch")
     if _as_int(api_allowlist.get("source_version")) != _API_ALLOWLIST_SOURCE_VERSION:
         violations.append("api_allowlist_source_version_mismatch")
+    if list(_as_list(api_allowlist.get("read_actions"))) != list(
+        _API_ALLOWLIST_READ_ACTIONS
+    ):
+        violations.append("api_allowlist_read_actions_mismatch")
     if _as_int(api_allowlist.get("read_action_count")) != _API_ALLOWLIST_READ_ACTION_COUNT:
         violations.append("api_allowlist_read_action_count_mismatch")
+    if list(_as_list(api_allowlist.get("paper_write_actions"))) != list(
+        _API_ALLOWLIST_PAPER_WRITE_ACTIONS
+    ):
+        violations.append("api_allowlist_paper_write_actions_mismatch")
     if (
         _as_int(api_allowlist.get("paper_write_action_count"))
         != _API_ALLOWLIST_PAPER_WRITE_ACTION_COUNT
     ):
         violations.append("api_allowlist_paper_write_action_count_mismatch")
+    if list(_as_list(api_allowlist.get("denied_actions"))) != list(
+        _API_ALLOWLIST_DENIED_ACTIONS
+    ):
+        violations.append("api_allowlist_denied_actions_mismatch")
     if _as_int(api_allowlist.get("denied_action_count")) != _API_ALLOWLIST_DENIED_ACTION_COUNT:
         violations.append("api_allowlist_denied_action_count_mismatch")
     if _as_bool(api_allowlist.get("ibkr_contact_performed")):
