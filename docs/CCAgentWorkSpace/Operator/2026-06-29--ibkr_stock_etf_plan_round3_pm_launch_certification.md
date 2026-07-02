@@ -6128,6 +6128,35 @@ socket/client construction、沒有 broker session、沒有 read-only probe exec
 paper order routing/cancel/replace execution、沒有 DB/evidence/scorecard writer、沒有 evidence clock、沒有
 paper-shadow launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
 
+## 2026-07-02 Operator Update — Stock/ETF IBKR Connector Action Matrix Test Split Guard
+
+本 session 已完成下一個 hygiene checkpoint：
+`Stock/ETF IBKR Connector Action Matrix Test Split Guard`。
+
+這個 checkpoint 只整理測試結構，把 action-matrix exact coverage 從 701+ 行骨架測試中拆出來，避免
+IBKR connector skeleton guard 再次接近 800 行 review threshold。
+
+現在：
+
+- `test_stock_etf_ibkr_connector_skeleton.py`：701 行，保留 package/export/README/Bybit-separation/public-surface/
+  general preview payload coverage
+- `test_stock_etf_ibkr_connector_action_matrix.py`：168 行，專責 `non_bybit_api_allowlist_v1` exact buckets、
+  fixture parity、risky config blocker expansion、dataclass inert posture
+
+Verification 已過：
+
+- Changed Python tests `py_compile`：PASS
+- Connector skeleton/action-matrix/no-write focused pytest：`22 passed`
+- Full Stock/ETF Python route/static pytest：`148 passed`
+- `git diff --check`：PASS
+- Dynamic docs trace pytest：PASS
+
+邊界不變：沒有 connector production code change、沒有 FastAPI route behavior change、沒有 GUI/Rust IPC behavior
+change、沒有 Rust production code change、沒有 IBKR contact、沒有 SDK import、沒有 secret access/serialization、
+沒有 connector runtime、沒有 socket/client construction、沒有 broker session、沒有 read-only probe execution、
+沒有 fill import execution、沒有 paper order routing/cancel/replace execution、沒有 DB/evidence/scorecard writer、
+沒有 evidence clock、沒有 paper-shadow launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
 ## 2026-07-02 Operator Update — Stock/ETF Phase3 Evidence Acceptance Split Guard
 
 本 session 已完成下一個 test-only checkpoint：
