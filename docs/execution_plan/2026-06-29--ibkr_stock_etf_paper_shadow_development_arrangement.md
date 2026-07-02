@@ -10541,3 +10541,35 @@ construction、不做 broker session、不執行 read-only probe、不做 paper 
 import execution、不做 release launch、不做 DB/evidence writer、不做 scorecard writer、不啟動 evidence clock、不做
 Linux runtime sync/restart、不做 destructive DB cleanup、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit
 behavior change。
+
+## 261. 2026-07-02 PM session test checkpoint：Stock/ETF API Allowlist Cross-Surface Parity Guard
+
+本 checkpoint 新增 test-only cross-surface parity guard，要求 inert Python IBKR connector
+preview/fixture 與 FastAPI readiness accepted fixture 使用同一組 `non_bybit_api_allowlist_v1`
+read / paper-write / denied ordered buckets 與 counts。這不是 IBKR connector runtime、不是
+FastAPI runtime wiring、不是 IBKR contact、不是 read-only probe execution、不是 paper-order
+enablement；只是防止 source-only 顯示面在未來各自漂移。
+
+已完成：
+
+- 新增 `test_stock_etf_api_allowlist_cross_surface_parity.py`。
+- `IbkrReadOnlyClient().api_action_matrix_preview()` 必須匹配 FastAPI readiness fixture
+  的 three-bucket allowlist constants。
+- `blocked_api_action_matrix_fixture()` 必須匹配同一組 constants。
+- 測試只比對 dict/list/count/source contract，不啟動 FastAPI app、不建立 broker session、
+  不觸碰 runtime 或 secret。
+
+驗證：
+
+- New parity test `py_compile`：PASS。
+- API allowlist parity + connector action-matrix + readiness focused pytest：`14 passed`。
+- Full Stock/ETF FastAPI/static pytest：`151 passed`。
+- `git diff --check`：PASS。
+- Dynamic docs trace pytest：PASS；主計畫與 Operator summary checkpoint title coverage 保持同步。
+
+PM 邊界不變：此 checkpoint 不改 production code、不改 FastAPI route 行為、不改 GUI runtime、不改 Rust IPC
+handler behavior、不呼叫 IBKR、不導入 IBKR SDK、不讀/建/序列化 secret、不啟動 connector runtime、不做
+socket/client construction、不做 broker session、不執行 read-only probe、不做 paper order routing/cancel/replace、
+不做 fill import execution、不做 release launch、不做 DB/evidence writer、不做 scorecard writer、不啟動 evidence
+clock、不做 Linux runtime sync/restart、不做 destructive DB cleanup、不授權 paper-shadow launch、tiny-live/live 或
+任何 Bybit behavior change。
