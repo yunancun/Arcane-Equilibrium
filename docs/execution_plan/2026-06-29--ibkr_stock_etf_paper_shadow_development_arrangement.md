@@ -10105,3 +10105,39 @@ connector production code、不呼叫 IBKR、不導入 IBKR SDK、不讀/建/序
 socket/client construction、不做 broker session、不執行 read-only probe、不做 paper order routing/cancel/replace、
 不做 release launch、不做 DB/evidence writer、不做 scorecard writer、不啟動 evidence clock、不做 Linux runtime
 sync/restart、不做 destructive DB cleanup、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
+
+## 249. 2026-07-02 PM session source checkpoint：Stock/ETF Lane-Scoped IPC IO Matrix Exact Guard
+
+本 checkpoint 補強 Stock/ETF lane-scoped IPC command matrix 的 exact IO coverage，固定 20 個 accepted IPC
+commands 的 `required_gates` 與 `required_request_fields` 必須等於完整 ordered vectors，而不是只檢查少數
+membership。這不是 Rust production behavior change、不是 Rust IPC handler behavior change、不是 FastAPI route
+behavior change、不是 GUI behavior change、不是 connector production code change、不是 IBKR contact、不是
+connector runtime、不是 secret lookup、不是 broker session、不是 read-only probe execution、不是 paper order
+route enablement；只把 lane-scoped IPC acceptance coverage 從局部 membership checks 收緊成獨立 exact-matrix
+guard。
+
+已完成：
+
+- 新增 `stock_etf_lane_scoped_ipc_io_matrix_acceptance.rs`，逐一固定 20 個 lane-scoped IPC command 的完整
+  ordered gates/request-fields matrix。
+- 移除 `stock_etf_lane_scoped_ipc_acceptance.rs` 內 submit/preview/shadow/readonly-probe 的正向 membership
+  assertions，改由新 matrix acceptance test 驗證完整 vectors。
+- 新增 source guard，防止 legacy acceptance 檔回流 `.required_gates.contains(...)`、`assert_fields(...)`、
+  或正向 `required_request_fields.contains(...)`。
+- 維持 test 檔尺寸 hygiene：legacy acceptance 檔 746 行，新 IO matrix acceptance 檔 348 行，均低於 800 行。
+
+驗證：
+
+- Lane-scoped IPC focused Rust acceptance：`12 + 2 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Lane-scoped IPC source static pytest：`7 passed`。
+- Lane-scoped IPC IO no-loose assertion scan：PASS。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 Rust IPC handler behavior、不改 FastAPI route 行為、
+不改 GUI runtime、不改 connector production code、不呼叫 IBKR、不導入 IBKR SDK、不讀/建/序列化 secret、
+不啟動 connector runtime、不做 socket/client construction、不做 broker session、不執行 read-only probe、
+不做 paper order routing/cancel/replace、不做 release launch、不做 DB/evidence writer、不做 scorecard writer、
+不啟動 evidence clock、不做 Linux runtime sync/restart、不做 destructive DB cleanup、不授權 paper-shadow launch、
+tiny-live/live 或任何 Bybit behavior change。
