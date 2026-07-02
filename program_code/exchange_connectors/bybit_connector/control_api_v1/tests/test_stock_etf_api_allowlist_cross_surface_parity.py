@@ -27,6 +27,7 @@ from stock_etf_route_fixtures import (
     _valid_scorecard_status,
     _valid_shadow_status,
     _valid_universe_status,
+    client_fail_closed,
 )
 
 
@@ -51,6 +52,19 @@ def _assert_matches_fastapi_allowlist_buckets(payload: dict[str, object]) -> Non
     assert payload["read_action_count"] == len(API_ALLOWLIST_READ_ACTIONS)
     assert payload["paper_write_action_count"] == len(API_ALLOWLIST_PAPER_WRITE_ACTIONS)
     assert payload["denied_action_count"] == len(API_ALLOWLIST_DENIED_ACTIONS)
+
+
+def _assert_fail_closed_api_allowlist_buckets(payload: dict[str, object]) -> None:
+    assert payload["contract_id"] == ""
+    assert payload["source_version"] == 0
+    assert payload["accepted"] is False
+    assert payload["blockers"] == ["ipc_unavailable"]
+    assert payload["read_actions"] == []
+    assert payload["paper_write_actions"] == []
+    assert payload["denied_actions"] == []
+    assert payload["read_action_count"] == 0
+    assert payload["paper_write_action_count"] == 0
+    assert payload["denied_action_count"] == 0
 
 
 def test_ibkr_connector_action_matrix_matches_fastapi_readiness_allowlist() -> None:
@@ -95,3 +109,31 @@ def test_stock_etf_status_routes_preserve_api_allowlist_buckets(
 
     assert response.status_code == 200
     _assert_matches_fastapi_allowlist_buckets(response.json()["data"]["api_allowlist"])
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/stock-etf/lane-status",
+        "/api/v1/stock-etf/data-foundation-status",
+        "/api/v1/stock-etf/policy-status",
+        "/api/v1/stock-etf/authorization-status",
+        "/api/v1/stock-etf/evidence-status",
+        "/api/v1/stock-etf/account-status",
+        "/api/v1/stock-etf/universe-status",
+        "/api/v1/stock-etf/shadow-status",
+        "/api/v1/stock-etf/paper-status",
+        "/api/v1/stock-etf/reconciliation-status",
+        "/api/v1/stock-etf/scorecard-status",
+        "/api/v1/stock-etf/launch-status",
+        "/api/v1/stock-etf/release-packet-status",
+        "/api/v1/stock-etf/disable-cleanup-status",
+    ],
+)
+def test_stock_etf_fail_closed_status_routes_preserve_api_allowlist_shape(
+    client_fail_closed, path: str
+) -> None:
+    response = client_fail_closed.get(path)
+
+    assert response.status_code == 200
+    _assert_fail_closed_api_allowlist_buckets(response.json()["data"]["api_allowlist"])
