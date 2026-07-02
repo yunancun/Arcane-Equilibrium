@@ -610,6 +610,40 @@ ingestion、DQ writer、paper order/cancel/replace、fill import、DB apply、ev
 writer、evidence clock、scorecard writer、tiny-live、live、Linux runtime sync/restart
 或 Bybit behavior change。
 
+## 2026-07-02 PM Session Checkpoint — Stock/ETF Session Attestation Safety Shape Parity Guard
+
+PM 已完成下一個 test/source checkpoint：Stock/ETF Session Attestation Safety Shape
+Parity Guard。這不是 Phase 2 runtime approval、IBKR contact approval、secret lookup
+approval、broker session approval、read-only probe approval、paper-order approval 或
+launch approval。
+
+已完成：
+
+- Inert Python connector `IbkrSessionAttestationPreview` 補齊 Rust Phase2 session
+  attestation default lineage 的 display-only safety 欄位。
+- FastAPI authorization status normalizer/fallback 補齊同一組 host/port/process/
+  gateway/secret-slot/live-secret/env-fallback/API/data-tier/entitlement/window 欄位。
+- Authorization contract-violation guard 會拒絕 Phase2 gate 前任何 session identity、
+  topology、secret lineage、data entitlement、startup/window 或 raw-artifact claim。
+- 新增 cross-surface parity test，鎖住 connector preview/fixture、account route、
+  authorization route 與 IPC-unavailable fail-closed path 的共同 safety baseline。
+
+Verification：
+
+- Python changed files `py_compile` PASS。
+- Focused parity/authorization/connector pytest：`20 passed`。
+- Full Stock/ETF FastAPI/static pytest：`181 passed`。
+- `git diff --check` PASS。
+- Dynamic docs trace pytest：`23 passed`。
+
+PM 判定：checkpoint 可接受，但仍不是 Phase 2/3 runtime approval、IBKR contact
+approval、read-only probe approval、secret-slot approval、broker session approval、
+paper-order approval 或 launch approval。未批准 IBKR SDK import、socket/HTTP、
+secret、connector runtime、read probe execution、collector start、market-data
+ingestion、DQ writer、paper order/cancel/replace、fill import、DB apply、evidence
+writer、evidence clock、scorecard writer、tiny-live、live、Linux runtime sync/restart
+或 Bybit behavior change。
+
 ## 2026-07-02 PM Session Checkpoint — Stock/ETF IBKR Connector Action Matrix Preview Guard
 
 PM 已完成下一個 source-only connector checkpoint：Stock/ETF IBKR Connector Action

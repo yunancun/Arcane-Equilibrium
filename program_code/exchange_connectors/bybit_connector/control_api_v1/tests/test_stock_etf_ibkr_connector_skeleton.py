@@ -120,13 +120,23 @@ SESSION_ATTESTATION_KEYS = {
     "environment",
     "expected_contract_id",
     "gateway_started_at_ms",
+    "gateway_mode",
+    "host",
+    "live_secret_absent_or_empty",
     "market_data_entitlement_purchase_denied",
     "network_contact_performed",
+    "port",
+    "process_identity_present",
     "raw_artifact_hash_present",
     "secret_content_loaded",
     "secret_slot_fingerprint_present",
+    "secret_slot_mode",
+    "secret_world_readable",
     "source_version",
     "status",
+    "attested_at_ms",
+    "env_var_credential_fallback_used",
+    "expires_at_ms",
 }
 
 READONLY_PROBE_RESULT_IMPORT_KEYS = {
