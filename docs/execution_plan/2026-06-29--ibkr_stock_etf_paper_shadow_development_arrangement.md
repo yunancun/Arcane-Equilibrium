@@ -10037,3 +10037,40 @@ connector production code、不呼叫 IBKR、不導入 IBKR SDK、不讀/建/序
 socket/client construction、不做 broker session、不執行 read-only probe、不做 paper order routing/cancel/replace、
 不做 release launch、不做 DB/evidence writer、不做 scorecard writer、不啟動 evidence clock、不做 Linux runtime
 sync/restart、不做 destructive DB cleanup、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
+
+## 247. 2026-07-02 PM session hygiene checkpoint：Stock/ETF Rust IPC Fixture Split Guard
+
+本 checkpoint 將過大的 Stock/ETF Rust IPC fixture 測試檔拆成更小的子模組，降低後續審查與維護風險。
+這不是 Rust IPC behavior change、不是 FastAPI route behavior change、不是 GUI behavior change、不是 connector
+production code change、不是 IBKR contact、不是 connector runtime、不是 secret lookup、不是 broker session、不是
+read-only probe execution、不是 paper order route enablement、不是 release launch、不是 DB/evidence writer、不是
+scorecard writer、不是 tiny-live/live gate；只把既有 source-fixture tests 移到更清楚的 module 邊界，並保持
+exact-blocker source guard 覆蓋新檔案。
+
+已完成：
+
+- 將 `stock_etf.rs` 主測試檔收斂成 module shell，保留 untrusted params guard、exact assertion source guard
+  與 shared dispatch helper。
+- 新增 `stock_etf/core_status_fixtures.rs`，承接 Phase0、lane、evidence、universe、shadow、paper IPC
+  status fixture tests。
+- 新增 `stock_etf/phase5_status_fixtures.rs`，承接 launch、release-packet、disable-cleanup IPC status
+  fixture tests。
+- 將 `status_fixtures.rs` 收斂成 account、reconciliation、scorecard fixture tests；所有 Rust Stock/ETF
+  IPC fixture files 目前均低於 800 行。
+- 擴展 Rust exact assertion source guard，納入 `core_status_fixtures.rs` 與 `phase5_status_fixtures.rs`，
+  防止拆檔後 loose blocker membership assertion 回流。
+
+驗證：
+
+- Rust fixture line-count guard：`stock_etf.rs` 127 行、`core_status_fixtures.rs` 759 行、
+  `status_fixtures.rs` 571 行、`phase5_status_fixtures.rs` 308 行；全部低於 800 行。
+- `rustfmt --edition 2021 --check` on Stock/ETF Rust IPC fixture files：PASS。
+- `cargo test -p openclaw_engine stock_etf -- --test-threads=1`：PASS；Stock/ETF Rust IPC/lib tests `32
+  passed`，其餘 integration/bin targets filtered and exited 0。
+- Rust IPC fixture no-loose blocker assertion scan：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust IPC handler behavior、不改 FastAPI route 行為、不改 GUI runtime、不改
+connector production code、不呼叫 IBKR、不導入 IBKR SDK、不讀/建/序列化 secret、不啟動 connector runtime、不做
+socket/client construction、不做 broker session、不執行 read-only probe、不做 paper order routing/cancel/replace、
+不做 release launch、不做 DB/evidence writer、不做 scorecard writer、不啟動 evidence clock、不做 Linux runtime
+sync/restart、不做 destructive DB cleanup、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。

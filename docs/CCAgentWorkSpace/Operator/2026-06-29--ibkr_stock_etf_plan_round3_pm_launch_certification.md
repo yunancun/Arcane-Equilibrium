@@ -6098,6 +6098,32 @@ socket/client construction、沒有 broker session、沒有 read-only probe exec
 paper order routing/cancel/replace execution、沒有 DB/evidence/scorecard writer、沒有 evidence clock、沒有
 paper-shadow launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
 
+## 2026-07-02 Operator Update — Stock/ETF Rust IPC Fixture Split Guard
+
+本 session 已完成下一個 hygiene checkpoint：
+`Stock/ETF Rust IPC Fixture Split Guard`。
+
+這個 checkpoint 將過大的 Stock/ETF Rust IPC fixture tests 拆成更小的 module 邊界，降低後續審查與維護風險。
+
+現在 `stock_etf.rs` 只保留 module shell、untrusted params guard、exact assertion source guard 與 shared
+dispatch helper；Phase0/lane/evidence/universe/shadow/paper fixture tests 移到 `core_status_fixtures.rs`，
+Phase5 launch/release/disable-cleanup fixture tests 移到 `phase5_status_fixtures.rs`。exact assertion source
+guard 也已納入新子模組，避免拆檔後 loose blocker membership assertion 回流。
+
+Verification 已過：
+
+- Rust IPC fixture line counts：127 / 759 / 571 / 308；全部低於 800 行
+- Rust fixture `rustfmt --edition 2021 --check`：PASS
+- `cargo test -p openclaw_engine stock_etf -- --test-threads=1`：PASS（Stock/ETF Rust IPC/lib `32 passed`）
+- Rust IPC fixture no-loose blocker assertion scan：PASS
+
+邊界不變：沒有 Rust IPC handler behavior change、沒有 FastAPI route behavior change、沒有 GUI behavior
+change、沒有 connector production code change、沒有 IBKR contact、沒有 SDK import、沒有 secret access/
+serialization、沒有 connector runtime、沒有 socket/client construction、沒有 broker session、沒有 read-only
+probe execution、沒有 paper order routing/cancel/replace execution、沒有 release launch、沒有 DB/evidence
+writer、沒有 scorecard writer、沒有 evidence clock、沒有 destructive DB cleanup、沒有 paper-shadow launch、沒有
+tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
 ## 2026-07-02 Operator Update — Stock/ETF Phase0 Route Exact Contract Manifest Guard
 
 本 session 已完成下一個 test-only checkpoint：

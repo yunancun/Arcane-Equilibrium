@@ -4259,3 +4259,10 @@
 - The Phase0 route source guard now rejects loose `set(...)`, membership, and subset assertions for both `contract_violations` and `contracts`.
 - Verification passed: Phase0 route `5 passed`; full Stock/ETF Python route/static `144 passed`; changed-file `py_compile` PASS; no-loose contract/contracts scan PASS; changed-file diff check PASS.
 - Boundary unchanged: no FastAPI route behavior change, Rust IPC handler behavior change, GUI behavior change, connector production code change, IBKR contact, connector runtime, socket/client construction, secret access, broker session, read-only probe execution, paper order routing/cancel/replace execution, DB/evidence writer, scorecard writer, evidence clock, release launch, paper-shadow launch, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-02 Stock/ETF Rust IPC Fixture Split Guard
+
+- PM split oversized Rust IPC Stock/ETF fixture tests into clearer modules: parent `stock_etf.rs` now holds only the module shell/shared guard/helper plus untrusted params test, core status fixtures live in `core_status_fixtures.rs`, and Phase5 status fixtures live in `phase5_status_fixtures.rs`.
+- The exact assertion source guard now covers the new modules so loose blocker membership assertions cannot return after the split.
+- Verification passed: Stock/ETF Rust IPC fixture line counts all below 800; fixture `rustfmt --edition 2021 --check` PASS; `cargo test -p openclaw_engine stock_etf -- --test-threads=1` PASS with Stock/ETF IPC/lib `32 passed`; no-loose blocker scan PASS.
+- Boundary unchanged: no Rust IPC handler behavior change, FastAPI route behavior change, GUI behavior change, connector production code change, IBKR contact, connector runtime, socket/client construction, secret access, broker session, read-only probe execution, paper order routing/cancel/replace execution, DB/evidence writer, scorecard writer, evidence clock, release launch, paper-shadow launch, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
