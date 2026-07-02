@@ -25,6 +25,45 @@ EXPECTED_PHASE0_CONTRACT_VIOLATIONS = [
     "phase0_global_denial_missing:ibkr_live",
 ]
 
+EXPECTED_PHASE0_CONTRACTS = [
+    "asset_lane_taxonomy_v1",
+    "broker_capability_registry_v1",
+    "phase2_ibkr_external_surface_gate_v1",
+    "non_bybit_api_allowlist_v1",
+    "stock_etf_ibkr_readonly_probe_request_v1",
+    "stock_etf_ibkr_readonly_probe_result_import_request_v1",
+    "instrument_identity_contract_v1",
+    "stock_etf_pit_universe_contract_v1",
+    "stock_etf_strategy_hypothesis_contract_v1",
+    "stock_etf_risk_policy_v1",
+    "stock_etf_reference_data_sources_v1",
+    "ibkr_api_session_topology_v1",
+    "ibkr_session_attestation_v1",
+    "feature_flag_secret_auth_matrix_v1",
+    "lane_scoped_ipc_v1",
+    "stock_etf_paper_order_request_v1",
+    "stock_etf_paper_fill_import_request_v1",
+    "stock_etf_shadow_signal_request_v1",
+    "ibkr_paper_order_lifecycle_v1",
+    "broker_lifecycle_event_log_v1",
+    "audit.asset_lane_events_v1",
+    "stock_etf_db_evidence_ddl_v1",
+    "stock_market_data_provenance_v1",
+    "broker_account_portfolio_cash_ledger_v1",
+    "cost_model_version_v1",
+    "benchmark_versions_v1",
+    "stock_shadow_fill_model_v1",
+    "stock_etf_paper_shadow_reconciliation_v1",
+    "stock_etf_collector_run_v1",
+    "stock_etf_dq_manifest_v1",
+    "stock_etf_evidence_clock_v1",
+    "gui_lane_contract_v1",
+    "stock_etf_storage_capacity_v1",
+    "stock_etf_kill_switch_and_disable_cleanup_runbook_v1",
+    "stock_etf_release_packet_v1",
+    "tiny_live_adr_eligibility_v1",
+]
+
 
 def test_phase0_status_ipc_down_is_degraded(
     client_fail_closed: TestClient,
@@ -57,16 +96,8 @@ def test_phase0_status_uses_only_phase0_ipc_method_with_empty_params() -> None:
     data = resp.json()["data"]
     assert data["phase0_status_state"] == "accepted_no_runtime_authority"
     assert data["phase0_accepted"] is True
-    assert data["contract_count"] == 36
-    assert "stock_etf_ibkr_readonly_probe_request_v1" in data["contracts"]
-    assert (
-        "stock_etf_ibkr_readonly_probe_result_import_request_v1"
-        in data["contracts"]
-    )
-    assert "stock_etf_shadow_signal_request_v1" in data["contracts"]
-    assert "stock_etf_paper_shadow_reconciliation_v1" in data["contracts"]
-    assert "stock_etf_collector_run_v1" in data["contracts"]
-    assert "stock_etf_dq_manifest_v1" in data["contracts"]
+    assert data["contract_count"] == len(EXPECTED_PHASE0_CONTRACTS)
+    assert data["contracts"] == EXPECTED_PHASE0_CONTRACTS
     assert data["manifest"]["schema"] == "stock_etf_phase0_contract_packet_manifest_v1"
     assert data["api_baseline"]["live_ports_denied"] is True
     assert data["global_denials"]["ibkr_live"] is True
@@ -121,15 +152,18 @@ def test_phase0_status_blocks_runtime_or_contract_drift() -> None:
     assert data["contract_violations"] == EXPECTED_PHASE0_CONTRACT_VIOLATIONS
 
 
-def test_phase0_status_contract_violation_assertions_stay_exact() -> None:
+def test_phase0_status_contract_assertions_stay_exact() -> None:
     source = Path(__file__).read_text(encoding="utf-8")
     source_under_test = source.split(
-        "def test_phase0_status_contract_violation_assertions_stay_exact", 1
+        "def test_phase0_status_contract_assertions_stay_exact", 1
     )[0]
     forbidden_patterns = [
         'set(data["contract_violations"])',
         'in data["contract_violations"]',
         'issubset(set(data["contract_violations"]))',
+        'set(data["contracts"])',
+        'in data["contracts"]',
+        'issubset(set(data["contracts"]))',
     ]
 
     for pattern in forbidden_patterns:

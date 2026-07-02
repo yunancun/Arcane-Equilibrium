@@ -4252,3 +4252,10 @@
 - The IPC fixture tests no longer use loose `json_array_contains` membership checks; parent and submodule fixture files now require complete ordered vectors and include a source guard against future loose membership assertions.
 - Verification passed: changed fixture `rustfmt --edition 2021 --check` PASS; `cargo test -p openclaw_engine stock_etf -- --test-threads=1` PASS with Stock/ETF IPC/lib `32 passed`; no-loose blocker scan PASS; changed-fixture diff check PASS.
 - Boundary unchanged: no Rust IPC handler behavior change, API route/GUI behavior change, connector production code change, IBKR contact, connector runtime, socket/client construction, secret access, broker session, read-only probe execution, paper order routing/cancel/replace execution, DB/evidence writer, scorecard writer, evidence clock, release launch, paper-shadow launch, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
+
+## 2026-07-02 Stock/ETF Phase0 Route Exact Contract Manifest Guard
+
+- PM tightened test-only exact-manifest coverage for the FastAPI Phase0 status route: accepted `contracts` now must match the complete ordered 36-item Phase0 contract list.
+- The Phase0 route source guard now rejects loose `set(...)`, membership, and subset assertions for both `contract_violations` and `contracts`.
+- Verification passed: Phase0 route `5 passed`; full Stock/ETF Python route/static `144 passed`; changed-file `py_compile` PASS; no-loose contract/contracts scan PASS; changed-file diff check PASS.
+- Boundary unchanged: no FastAPI route behavior change, Rust IPC handler behavior change, GUI behavior change, connector production code change, IBKR contact, connector runtime, socket/client construction, secret access, broker session, read-only probe execution, paper order routing/cancel/replace execution, DB/evidence writer, scorecard writer, evidence clock, release launch, paper-shadow launch, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
