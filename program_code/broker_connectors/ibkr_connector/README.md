@@ -7,6 +7,7 @@ Allowed in this package now:
 
 - typed blocked readiness payloads
 - non-secret loopback endpoint descriptors
+- display-only non-Bybit API action matrix previews
 - display-only account, market-data, contract-detail, lifecycle, and fill-import previews
 - display-only session and paper attestation previews
 - display-only readonly probe result-import request previews

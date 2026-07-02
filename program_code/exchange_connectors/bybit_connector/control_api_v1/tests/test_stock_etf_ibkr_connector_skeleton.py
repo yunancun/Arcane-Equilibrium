@@ -14,9 +14,11 @@ if str(SRV_ROOT) not in sys.path:
 import program_code.broker_connectors.ibkr_connector as ibkr_connector  # noqa: E402
 from program_code.broker_connectors.ibkr_connector import (  # noqa: E402
     IBKR_CONNECTOR_SURFACE_ID,
+    IBKR_NON_BYBIT_API_ALLOWLIST_CONTRACT_ID,
     IBKR_PAPER_ATTESTATION_CONTRACT_ID,
     IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID,
     IBKR_SESSION_ATTESTATION_CONTRACT_ID,
+    IbkrApiActionMatrixPreview,
     IbkrPaperAttestationPreview,
     IbkrPaperClientBoundary,
     IbkrReadOnlyClient,
@@ -25,6 +27,7 @@ from program_code.broker_connectors.ibkr_connector import (  # noqa: E402
     IbkrSessionAttestationPreview,
 )
 from program_code.broker_connectors.ibkr_connector.fixtures import (  # noqa: E402
+    blocked_api_action_matrix_fixture,
     blocked_paper_attestation_fixture,
     blocked_readonly_probe_result_import_fixture,
     blocked_readonly_fixture,
@@ -54,6 +57,26 @@ FORBIDDEN_BYBIT_IMPORT_PREFIXES = (
     "exchange_connectors.bybit_connector",
     "program_code.exchange_connectors.bybit_connector",
 )
+
+EXPECTED_READ_ACTIONS = [
+    "server_time_read", "connection_health_read",
+    "account_summary_snapshot_read", "portfolio_positions_snapshot_read",
+    "contract_details_read", "market_data_snapshot_read",
+    "market_data_subscription_read", "historical_bars_read",
+    "open_paper_orders_read", "paper_executions_commissions_read",
+]
+EXPECTED_PAPER_WRITE_ACTIONS = [
+    "paper_order_submit",
+    "paper_order_cancel",
+    "paper_order_replace",
+]
+EXPECTED_DENIED_ACTIONS = [
+    "live_order_submit", "live_account_query",
+    "account_transfer", "margin_enablement",
+    "short_borrow", "options_trading",
+    "cfd_trading", "market_data_entitlement_purchase",
+    "account_management_write", "client_portal_web_api_use",
+]
 
 READONLY_SURFACE_KEYS = {
     "accepted",
@@ -92,6 +115,32 @@ CONNECTION_PLAN_KEYS = {
     "status",
     "surface_id",
     "transport",
+}
+
+API_ACTION_MATRIX_KEYS = {
+    "accepted",
+    "asset_lane",
+    "blockers",
+    "broker",
+    "broker_write_authority",
+    "bybit_path_reused",
+    "contract_id",
+    "denied_action_count",
+    "denied_actions",
+    "environment",
+    "external_surface_gate_accepted",
+    "ibkr_contact_performed",
+    "live_or_tiny_live_authorized",
+    "network_contact_performed",
+    "paper_write_action_count",
+    "paper_write_actions",
+    "paper_write_actions_authorized",
+    "read_action_count",
+    "read_actions",
+    "secret_content_loaded",
+    "secret_content_serialized",
+    "source_version",
+    "status",
 }
 
 PAPER_LIFECYCLE_KEYS = READONLY_SURFACE_KEYS | {
@@ -184,6 +233,7 @@ SIDE_EFFECT_FALSE_KEYS = {
     "db_apply_authority",
     "db_apply_performed",
     "evidence_writer_started",
+    "external_surface_gate_accepted",
     "fill_import_readiness",
     "ibkr_contact_performed",
     "live_channel_exposed",
@@ -195,6 +245,7 @@ SIDE_EFFECT_FALSE_KEYS = {
     "order_routed",
     "paper_channel_exposed",
     "paper_lifecycle_readiness",
+    "paper_write_actions_authorized",
     "paper_order_submitted",
     "paper_account_attestation_present",
     "python_broker_write_authority",
@@ -224,6 +275,10 @@ EXPECTED_DEFAULT_BLOCKERS = {
         "connection_plan_blocked",
     ),
     "readiness": ("phase2_gate_not_accepted",),
+    "api_action_matrix": (
+        "phase2_gate_not_accepted",
+        "api_action_matrix_blocked_source_only",
+    ),
     "account_snapshot": (
         "phase2_gate_not_accepted",
         "account_snapshot_blocked",
@@ -262,6 +317,10 @@ EXPECTED_DEFAULT_BLOCKERS = {
         "paper_session_attestation_missing",
     ),
     "fixture": ("phase2_gate_not_accepted",),
+    "api_action_matrix_fixture": (
+        "phase2_gate_not_accepted",
+        "api_action_matrix_blocked_source_only",
+    ),
     "session_fixture": (
         "phase2_gate_not_accepted",
         "session_attestation_blocked_source_only",
@@ -279,9 +338,11 @@ EXPECTED_DEFAULT_BLOCKERS = {
 }
 EXPECTED_CONNECTOR_EXPORTS = (
     "IBKR_CONNECTOR_SURFACE_ID",
+    "IBKR_NON_BYBIT_API_ALLOWLIST_CONTRACT_ID",
     "IBKR_PAPER_ATTESTATION_CONTRACT_ID",
     "IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID",
     "IBKR_SESSION_ATTESTATION_CONTRACT_ID",
+    "IbkrApiActionMatrixPreview",
     "IbkrPaperAttestationPreview",
     "IbkrPaperClientBoundary",
     "IbkrReadOnlyClient",
@@ -292,6 +353,7 @@ EXPECTED_CONNECTOR_EXPORTS = (
 )
 EXPECTED_READONLY_CLIENT_PUBLIC_SURFACE = {
     "account_snapshot_preview",
+    "api_action_matrix_preview",
     "config",
     "connection_plan",
     "contract_details_preview",
@@ -309,6 +371,7 @@ EXPECTED_README_REQUIRED_BOUNDARY_LINES = {
     "It is not a runtime IBKR connector.",
     "- typed blocked readiness payloads",
     "- non-secret loopback endpoint descriptors",
+    "- display-only non-Bybit API action matrix previews",
     "- display-only account, market-data, contract-detail, lifecycle, and fill-import previews",
     "- display-only session and paper attestation previews",
     "- display-only readonly probe result-import request previews",
@@ -380,6 +443,7 @@ def test_ibkr_connector_package_exports_only_source_boundary_types() -> None:
     assert tuple(ibkr_connector.__all__) == EXPECTED_CONNECTOR_EXPORTS
     for name in EXPECTED_CONNECTOR_EXPORTS:
         assert getattr(ibkr_connector, name) is not None
+    assert IBKR_NON_BYBIT_API_ALLOWLIST_CONTRACT_ID == "non_bybit_api_allowlist_v1"
     assert IBKR_SESSION_ATTESTATION_CONTRACT_ID == "ibkr_session_attestation_v1"
     assert IBKR_PAPER_ATTESTATION_CONTRACT_ID == "ibkr_paper_attestation_v1"
     assert (
@@ -402,6 +466,8 @@ def test_ibkr_connector_readme_preserves_source_only_boundary() -> None:
 def test_ibkr_connector_skeleton_has_no_python_broker_write_methods() -> None:
     for cls in (IbkrReadOnlyClient, IbkrPaperClientBoundary):
         assert sorted(FORBIDDEN_WRITE_METHODS.intersection(dir(cls))) == []
+    assert IbkrApiActionMatrixPreview().accepted is False
+    assert IbkrApiActionMatrixPreview().paper_write_actions_authorized is False
     assert IbkrSessionAttestationPreview().attestation_accepted is False
     assert IbkrPaperAttestationPreview().accepted is False
     assert IbkrReadOnlyProbeResultImportPreview().accepted_for_import is False
@@ -493,6 +559,7 @@ def test_ibkr_connector_previews_remain_display_only() -> None:
 
     for payload in (
         client.connection_plan(),
+        client.api_action_matrix_preview(),
         client.account_snapshot_preview(),
         client.market_data_preview(),
         client.contract_details_preview(),
@@ -502,6 +569,7 @@ def test_ibkr_connector_previews_remain_display_only() -> None:
         paper.fill_import_readiness(),
         paper.paper_attestation_preview(),
         blocked_readonly_fixture(),
+        blocked_api_action_matrix_fixture(),
         blocked_session_attestation_fixture(),
         blocked_readonly_probe_result_import_fixture(),
         blocked_paper_attestation_fixture(),
@@ -520,6 +588,10 @@ def test_ibkr_connector_preview_payload_shapes_are_fail_closed() -> None:
     payloads = {
         "connection_plan": (client.connection_plan(), CONNECTION_PLAN_KEYS),
         "readiness": (client.readiness().to_dict(), READONLY_SURFACE_KEYS),
+        "api_action_matrix": (
+            client.api_action_matrix_preview(),
+            API_ACTION_MATRIX_KEYS,
+        ),
         "account_snapshot": (
             client.account_snapshot_preview(),
             READONLY_SURFACE_KEYS,
@@ -544,6 +616,10 @@ def test_ibkr_connector_preview_payload_shapes_are_fail_closed() -> None:
             PAPER_ATTESTATION_KEYS,
         ),
         "fixture": (blocked_readonly_fixture(), READONLY_SURFACE_KEYS),
+        "api_action_matrix_fixture": (
+            blocked_api_action_matrix_fixture(),
+            API_ACTION_MATRIX_KEYS,
+        ),
         "session_fixture": (
             blocked_session_attestation_fixture(),
             SESSION_ATTESTATION_KEYS,
@@ -574,6 +650,14 @@ def test_ibkr_connector_preview_payload_shapes_are_fail_closed() -> None:
                 "BLOCKED",
                 "blocked_no_result_import_request_artifact",
             }
+        if payload.get("contract_id") == IBKR_NON_BYBIT_API_ALLOWLIST_CONTRACT_ID:
+            assert payload["source_version"] == 1
+            assert payload["read_actions"] == EXPECTED_READ_ACTIONS
+            assert payload["paper_write_actions"] == EXPECTED_PAPER_WRITE_ACTIONS
+            assert payload["denied_actions"] == EXPECTED_DENIED_ACTIONS
+            assert payload["read_action_count"] == len(EXPECTED_READ_ACTIONS)
+            assert payload["paper_write_action_count"] == len(EXPECTED_PAPER_WRITE_ACTIONS)
+            assert payload["denied_action_count"] == len(EXPECTED_DENIED_ACTIONS)
         if payload.get("contract_id") == IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID:
             assert payload["asset_lane"] == "stock_etf_cash"
             assert payload["broker"] == "ibkr"
@@ -586,6 +670,15 @@ def test_ibkr_connector_preview_payload_shapes_are_fail_closed() -> None:
     assert payloads["connection_plan"][0]["blockers"] == list(
         EXPECTED_DEFAULT_BLOCKERS["connection_plan"]
     )
+    assert (
+        payloads["api_action_matrix"][0]["contract_id"]
+        == IBKR_NON_BYBIT_API_ALLOWLIST_CONTRACT_ID
+    )
+    assert payloads["api_action_matrix"][0]["blockers"] == list(
+        EXPECTED_DEFAULT_BLOCKERS["api_action_matrix"]
+    )
+    assert payloads["api_action_matrix"][0]["broker_write_authority"] is False
+    assert payloads["api_action_matrix"][0]["paper_write_actions_authorized"] is False
     assert payloads["account_snapshot"][0]["blockers"] == list(
         EXPECTED_DEFAULT_BLOCKERS["account_snapshot"]
     )
@@ -675,6 +768,7 @@ def test_ibkr_connector_risky_config_only_expands_blockers() -> None:
     payloads = {
         "connection_plan": client.connection_plan(),
         "readiness": client.readiness().to_dict(),
+        "api_action_matrix": client.api_action_matrix_preview(),
         "account_snapshot": client.account_snapshot_preview(),
         "market_data": client.market_data_preview(),
         "contract_details": client.contract_details_preview(),

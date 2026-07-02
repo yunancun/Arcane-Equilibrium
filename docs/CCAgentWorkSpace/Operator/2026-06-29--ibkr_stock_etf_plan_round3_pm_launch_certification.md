@@ -6098,6 +6098,36 @@ socket/client construction、沒有 broker session、沒有 read-only probe exec
 paper order routing/cancel/replace execution、沒有 DB/evidence/scorecard writer、沒有 evidence clock、沒有
 paper-shadow launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
 
+## 2026-07-02 Operator Update — Stock/ETF IBKR Connector Action Matrix Preview Guard
+
+本 session 已完成下一個 source-only connector checkpoint：
+`Stock/ETF IBKR Connector Action Matrix Preview Guard`。
+
+這個 checkpoint 把 Rust `non_bybit_api_allowlist_v1` 的 action bucket 以不可執行的 Python connector preview
+顯示出來，讓 inert IBKR skeleton 自身也能審計完整 read / paper-write / denied matrix。
+
+現在 connector preview 明確固定：
+
+- 10 個 read actions
+- 3 個 paper-write actions
+- 10 個 denied actions
+- external gate、broker write authority、paper write authorization、IBKR contact、network contact、secret loaded/
+  serialized、Bybit path reuse、tiny-live/live 全部 false
+
+Verification 已過：
+
+- Python changed files `py_compile`：PASS
+- Connector skeleton + no-write focused pytest：`18 passed`
+- Full Stock/ETF Python route/static pytest：`144 passed`
+- `git diff --check`：PASS
+- Dynamic docs trace pytest：PASS
+
+邊界不變：沒有 FastAPI route behavior change、沒有 GUI/Rust IPC behavior change、沒有 Rust production code
+change、沒有 IBKR contact、沒有 SDK import、沒有 secret access/serialization、沒有 connector runtime、沒有
+socket/client construction、沒有 broker session、沒有 read-only probe execution、沒有 fill import execution、沒有
+paper order routing/cancel/replace execution、沒有 DB/evidence/scorecard writer、沒有 evidence clock、沒有
+paper-shadow launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
 ## 2026-07-02 Operator Update — Stock/ETF Phase3 Evidence Acceptance Split Guard
 
 本 session 已完成下一個 test-only checkpoint：
