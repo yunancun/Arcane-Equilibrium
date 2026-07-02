@@ -75,6 +75,16 @@ EXPECTED_BOOLEAN_API_ALLOWLIST_VERSION_CONTRACT_VIOLATIONS = [
     "api_allowlist_source_version_mismatch",
 ]
 
+EXPECTED_DENIED_OPERATIONS = [
+    "ibkr_live_order_submit",
+    "ibkr_tiny_live",
+    "ibkr_margin_or_short",
+    "ibkr_options_or_cfd",
+    "ibkr_transfer_or_account_write",
+    "ibkr_secret_slot_creation",
+    "ibkr_api_contact_before_phase2_gate",
+]
+
 
 def _valid_readonly_probe_request() -> dict[str, Any]:
     return {
@@ -170,6 +180,7 @@ def test_stock_etf_readiness_returns_200_when_ipc_down(client_fail_closed: TestC
     assert data["connector_skeleton"]["secret_content_loaded"] is False
     assert data["connector_skeleton"]["order_write_method_present"] is False
     assert data["paper_order_entry_visible"] is False
+    assert data["denied_operations"] == EXPECTED_DENIED_OPERATIONS
     assert data["ibkr_call_performed"] is False
     assert data["secret_slot_touched"] is False
     assert data["order_routed"] is False
@@ -278,8 +289,7 @@ def test_stock_etf_readiness_uses_only_readonly_fixture_method() -> None:
     assert data["readonly_probe_result_import_request"]["accepted_for_import"] is False
     assert data["connector_skeleton"]["status"] == "blocked_source_only"
     assert data["connector_skeleton"]["accepted"] is False
-    assert "ibkr_live_order_submit" in data["denied_operations"]
-    assert "ibkr_secret_slot_creation" in data["denied_operations"]
+    assert data["denied_operations"] == EXPECTED_DENIED_OPERATIONS
     fake_ipc.call.assert_awaited_once()
 
 
@@ -543,6 +553,9 @@ def test_stock_etf_readiness_contract_violation_assertions_stay_exact() -> None:
         'set(data["contract_violations"])',
         'in data["contract_violations"]',
         'issubset(set(data["contract_violations"]))',
+        'set(data["denied_operations"])',
+        'in data["denied_operations"]',
+        'issubset(set(data["denied_operations"]))',
     ]
 
     for pattern in forbidden_patterns:
