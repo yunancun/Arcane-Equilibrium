@@ -6131,6 +6131,36 @@ import execution、沒有 paper order routing/cancel/replace execution、沒有 
 writer、沒有 evidence clock、沒有 paper-shadow launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo
 execution 行為。
 
+## 2026-07-02 Operator Update — Stock/ETF Paper Order Request Acceptance Split Guard
+
+本 session 已完成下一個 test-only checkpoint：
+`Stock/ETF Paper Order Request Acceptance Split Guard`。
+
+這個 checkpoint 把 oversized paper-order request Rust acceptance 檔按契約邊界拆開。
+
+現在 default/accepted fixture、aggregate cross-wire、method-specific shape、boundary regression 與 template
+coverage 保留在 `stock_etf_paper_order_request_acceptance.rs`，逐欄位 gap matrix coverage 移到
+`stock_etf_paper_order_request_gap_acceptance.rs`。拆分後兩個檔案分別為 378 / 506 行，均低於 800 行，且原
+17 個 paper-order request tests 保持不變。
+
+Verification 已過：
+
+- Changed-file rustfmt：PASS
+- Paper-order focused Rust acceptance：原檔 `11 passed`、gap 檔 `6 passed`
+- Full `cargo test -p openclaw_types`：PASS
+- Test count / line-count scans：PASS
+
+PM 未派 PA/E1/E2/E4/QA subagent：本 checkpoint 是窄範圍純測試檔拆分，沒有 production/runtime/exchange-facing
+行為，也沒有改 validator semantics。
+
+邊界不變：沒有 Rust production code change、沒有 paper-order request validator semantics change、沒有 source/
+runtime config change、沒有 Rust IPC handler behavior change、沒有 FastAPI route behavior change、沒有 GUI
+runtime change、沒有 connector production code change、沒有 IBKR contact、沒有 SDK import、沒有 secret access/
+serialization、沒有 connector runtime、沒有 socket/client construction、沒有 broker session、沒有 read-only probe
+execution、沒有 fill import execution、沒有 paper order routing/cancel/replace execution、沒有 release launch、沒有
+DB/evidence/scorecard writer、沒有 evidence clock、沒有 paper-shadow launch、沒有 tiny-live/live authorization，也沒有
+改動 Bybit live/demo execution 行為。
+
 ## 2026-07-02 Operator Update - Stock/ETF IPC Phase5 Status List Exact Guard
 
 本 session 已完成下一個 test-only checkpoint：
