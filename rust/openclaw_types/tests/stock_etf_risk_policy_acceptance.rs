@@ -87,25 +87,41 @@ fn accepted_fixture_pins_cash_only_shadow_risk_policy() {
     assert!(!policy.allow_cfd);
     assert!(!policy.allow_transfer);
     assert!(!policy.allow_live);
-    assert!(policy
-        .instrument_kinds_allowed
-        .contains(&InstrumentKind::Stock));
-    assert!(policy
-        .instrument_kinds_allowed
-        .contains(&InstrumentKind::Etf));
-    assert!(policy
-        .instrument_kinds_allowed
-        .contains(&InstrumentKind::Cash));
-    assert!(policy
-        .instrument_kinds_denied
-        .contains(&InstrumentKind::CryptoPerp));
-    assert!(policy
-        .instrument_kinds_denied
-        .contains(&InstrumentKind::CfdReserved));
+    assert_eq!(
+        policy.instrument_kinds_allowed,
+        instrument_kind_vec(&[
+            InstrumentKind::Stock,
+            InstrumentKind::Etf,
+            InstrumentKind::Cash,
+        ])
+    );
+    assert_eq!(
+        policy.instrument_kinds_denied,
+        instrument_kind_vec(&[InstrumentKind::CfdReserved, InstrumentKind::CryptoPerp])
+    );
     assert!(policy.bybit_live_execution_unchanged);
     assert!(!policy.ibkr_contact_performed);
     assert!(!policy.connector_runtime_started);
     assert!(!policy.secret_content_serialized);
+}
+
+#[test]
+fn risk_policy_instrument_kind_assertions_stay_exact() {
+    let source = include_str!("stock_etf_risk_policy_acceptance.rs");
+    let prefix = source
+        .split("fn risk_policy_instrument_kind_assertions_stay_exact")
+        .next()
+        .expect("source guard anchor exists");
+
+    for pattern in [
+        ".instrument_kinds_allowed.contains(",
+        ".instrument_kinds_denied.contains(",
+    ] {
+        assert!(
+            !prefix.contains(pattern),
+            "loose risk-policy instrument-kind assertion returned before source guard: {pattern}"
+        );
+    }
 }
 
 #[test]
@@ -370,4 +386,8 @@ fn assert_single_blocker(policy: StockEtfRiskPolicyV1, blocker: StockEtfRiskPoli
         "expected only {blocker:?}; blockers: {:?}",
         verdict.blockers
     );
+}
+
+fn instrument_kind_vec(values: &[InstrumentKind]) -> Vec<InstrumentKind> {
+    values.to_vec()
 }

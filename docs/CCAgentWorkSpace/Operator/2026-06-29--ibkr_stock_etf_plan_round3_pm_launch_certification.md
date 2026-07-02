@@ -6098,6 +6098,34 @@ socket/client construction、沒有 broker session、沒有 read-only probe exec
 paper order routing/cancel/replace execution、沒有 DB/evidence/scorecard writer、沒有 evidence clock、沒有
 paper-shadow launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
 
+## 2026-07-02 Operator Update — Stock/ETF Risk Policy Instrument Kind Exact Guard
+
+本 session 已完成下一個 test-only checkpoint：
+`Stock/ETF Risk Policy Instrument Kind Exact Guard`。
+
+這個 checkpoint 補強 Stock/ETF Rust risk policy accepted fixture 的 instrument-kind exact coverage。
+
+現在 accepted fixture 的 `instrument_kinds_allowed` 與 `instrument_kinds_denied` 必須等於完整 ordered vectors；
+accepted fixture 的 instrument-kind membership checks 已移除，並由 source guard 防止 loose instrument-kind
+assertions 回流。
+
+Verification 已過：
+
+- Risk policy focused Rust acceptance：`10 passed`
+- Full `cargo test -p openclaw_types`：PASS
+- `cargo fmt -p openclaw_types -- --check`：PASS
+- Risk policy source static pytest：`7 passed`
+- Risk policy instrument-kind no-loose assertion scan：PASS
+- Diff check：PASS
+
+邊界不變：沒有 Rust production code change、沒有 risk policy validator semantics change、沒有 source/runtime
+config change、沒有 Rust IPC handler behavior change、沒有 FastAPI route/GUI behavior change、沒有 connector
+production code change、沒有 IBKR contact、沒有 SDK import、沒有 secret access/serialization、沒有 connector
+runtime、沒有 socket/client construction、沒有 broker session、沒有 read-only probe execution、沒有 paper order
+routing/cancel/replace execution、沒有 fill import execution、沒有 release launch、沒有 DB/evidence writer、沒有
+scorecard writer、沒有 evidence clock、沒有 destructive DB cleanup、沒有 paper-shadow launch、沒有 tiny-live/live
+authorization，也沒有改動 Bybit live/demo execution 行為。
+
 ## 2026-07-02 Operator Update — Stock/ETF DB Evidence DDL Required Surface Exact Guard
 
 本 session 已完成下一個 test-only checkpoint：

@@ -10212,3 +10212,40 @@ runtime、不做 socket/client construction、不做 broker session、不執行 
 cancel/replace、不做 fill import execution、不做 release launch、不做 DB/evidence writer、不做 scorecard writer、
 不啟動 evidence clock、不做 Linux runtime sync/restart、不做 destructive DB cleanup、不授權 paper-shadow launch、
 tiny-live/live 或任何 Bybit behavior change。
+
+## 252. 2026-07-02 PM session source checkpoint：Stock/ETF Risk Policy Instrument Kind Exact Guard
+
+本 checkpoint 補強 Stock/ETF risk policy accepted fixture 的 instrument-kind exact coverage，固定
+`instrument_kinds_allowed` 與 `instrument_kinds_denied` 必須等於完整 ordered vectors，而不是只檢查局部
+membership。這不是 Rust production behavior change、不是 risk policy validator semantics change、不是 config
+change、不是 Rust IPC handler behavior change、不是 FastAPI route behavior change、不是 GUI behavior change、不是
+connector production code change、不是 IBKR contact、不是 connector runtime、不是 secret lookup、不是 broker
+session、不是 read-only probe execution、不是 paper order/fill route enablement；只把 risk policy acceptance
+coverage 從局部 instrument-kind membership checks 收緊成 exact-vector guard。
+
+已完成：
+
+- 將 `stock_etf_risk_policy_acceptance.rs` 的 accepted fixture `instrument_kinds_allowed` 改為完整 ordered
+  vector assertion：`Stock`、`Etf`、`Cash`。
+- 將 accepted fixture `instrument_kinds_denied` 改為完整 ordered vector assertion：`CfdReserved`、
+  `CryptoPerp`。
+- 新增 source guard，防止 accepted instrument-kind assertions 回流 `.instrument_kinds_allowed.contains(...)`
+  或 `.instrument_kinds_denied.contains(...)`。
+- 維持 test 檔尺寸 hygiene：`stock_etf_risk_policy_acceptance.rs` 目前為 393 行，低於 800 行。
+
+驗證：
+
+- Risk policy focused Rust acceptance：`10 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- Risk policy source static pytest：`7 passed`。
+- Risk policy instrument-kind no-loose assertion scan：PASS。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 risk policy validator semantics、不改 source config/
+runtime config、不改 Rust IPC handler behavior、不改 FastAPI route 行為、不改 GUI runtime、不改 connector
+production code、不呼叫 IBKR、不導入 IBKR SDK、不讀/建/序列化 secret、不啟動 connector runtime、不做
+socket/client construction、不做 broker session、不執行 read-only probe、不做 paper order routing/cancel/replace、
+不做 fill import execution、不做 release launch、不做 DB/evidence writer、不做 scorecard writer、不啟動 evidence
+clock、不做 Linux runtime sync/restart、不做 destructive DB cleanup、不授權 paper-shadow launch、tiny-live/live 或
+任何 Bybit behavior change。
