@@ -10176,3 +10176,39 @@ IBKR SDK、不讀/建/序列化 secret、不啟動 connector runtime、不做 so
 session、不執行 read-only probe、不做 paper order routing/cancel/replace、不做 fill import execution、不做 release
 launch、不做 DB/evidence writer、不做 scorecard writer、不啟動 evidence clock、不做 Linux runtime sync/restart、
 不做 destructive DB cleanup、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
+
+## 251. 2026-07-02 PM session source checkpoint：Stock/ETF DB Evidence DDL Required Surface Exact Guard
+
+本 checkpoint 補強 Stock/ETF DB evidence DDL contract accepted fixture 的 required surface exact coverage，固定
+`required_schemas`、`required_tables` 與 `required_natural_keys` 必須等於完整 ordered vectors，而不是只檢查
+局部 membership。這不是 Rust production behavior change、不是 DB evidence validator semantics change、不是
+migration apply、不是 DB/PG runtime、不是 Rust IPC handler behavior change、不是 FastAPI route behavior change、
+不是 GUI behavior change、不是 connector production code change、不是 IBKR contact、不是 connector runtime、不是
+secret lookup、不是 broker session、不是 read-only probe execution、不是 paper order/fill route enablement；只把
+DB evidence DDL acceptance coverage 從局部 schema/table membership checks 收緊成 exact required-surface guard。
+
+已完成：
+
+- 將 `stock_etf_db_evidence_ddl_acceptance.rs` 的 accepted fixture `required_schemas` 改為完整 ordered vector assertion。
+- 將 accepted fixture `required_tables` 改為完整 13-item ordered vector assertion。
+- 新增 accepted fixture `required_natural_keys` 完整 4-item ordered vector assertion。
+- 新增 source guard，防止 accepted required surface assertions 回流 `.required_schemas.contains(...)`、
+  `.required_tables.contains(...)` 或 `.required_natural_keys.contains(...)`。
+- 維持 test 檔尺寸 hygiene：`stock_etf_db_evidence_ddl_acceptance.rs` 目前為 387 行，低於 800 行。
+
+驗證：
+
+- DB evidence DDL focused Rust acceptance：`11 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- `cargo fmt -p openclaw_types -- --check`：PASS。
+- DB evidence DDL source static pytest：`7 passed`。
+- DB evidence required-surface no-loose assertion scan：PASS。
+- Diff check：PASS。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 DB evidence validator semantics、不改 migration/DDL
+production behavior、不做 DB apply、不連 PG、不改 Rust IPC handler behavior、不改 FastAPI route 行為、不改 GUI
+runtime、不改 connector production code、不呼叫 IBKR、不導入 IBKR SDK、不讀/建/序列化 secret、不啟動 connector
+runtime、不做 socket/client construction、不做 broker session、不執行 read-only probe、不做 paper order routing/
+cancel/replace、不做 fill import execution、不做 release launch、不做 DB/evidence writer、不做 scorecard writer、
+不啟動 evidence clock、不做 Linux runtime sync/restart、不做 destructive DB cleanup、不授權 paper-shadow launch、
+tiny-live/live 或任何 Bybit behavior change。

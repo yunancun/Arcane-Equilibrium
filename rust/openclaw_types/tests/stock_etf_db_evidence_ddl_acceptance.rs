@@ -71,19 +71,57 @@ fn accepted_fixture_is_source_only_and_has_expected_schema_surface() {
     assert!(!contract.pg_write_performed);
     assert!(!contract.sqlx_migration_registered);
     assert!(!contract.pm_operator_apply_authorized);
-    assert!(contract.required_schemas.contains(&"broker".to_string()));
-    assert!(contract.required_schemas.contains(&"research".to_string()));
-    assert!(contract.required_schemas.contains(&"audit".to_string()));
-    assert_eq!(contract.required_tables.len(), 13);
-    assert!(contract
-        .required_tables
-        .contains(&"broker.paper_orders".to_string()));
-    assert!(contract
-        .required_tables
-        .contains(&"research.stock_shadow_fills".to_string()));
-    assert!(contract
-        .required_tables
-        .contains(&"audit.asset_lane_events".to_string()));
+    assert_eq!(
+        contract.required_schemas,
+        string_vec(&["broker", "research", "audit"])
+    );
+    assert_eq!(
+        contract.required_tables,
+        string_vec(&[
+            "broker.instruments",
+            "broker.instrument_listings",
+            "broker.market_sessions",
+            "broker.corporate_actions",
+            "broker.fx_rates",
+            "broker.account_cash_ledger",
+            "broker.paper_orders",
+            "broker.paper_fills",
+            "broker.commissions",
+            "research.stock_shadow_signals",
+            "research.stock_shadow_fills",
+            "research.stock_etf_scorecard",
+            "audit.asset_lane_events",
+        ])
+    );
+    assert_eq!(
+        contract.required_natural_keys,
+        string_vec(&[
+            "instrument:asset_lane,broker,symbol,listing_venue,currency,primary_exchange",
+            "order:asset_lane,broker,environment,account_fingerprint,local_order_id",
+            "fill:asset_lane,broker,environment,broker_order_id,execution_id",
+            "scorecard:asset_lane,strategy_id,universe_version,benchmark_version,as_of_date",
+        ])
+    );
+}
+
+#[test]
+fn db_evidence_ddl_required_surface_assertions_stay_exact() {
+    let source = include_str!("stock_etf_db_evidence_ddl_acceptance.rs");
+    let prefix = source
+        .split("fn db_evidence_ddl_required_surface_assertions_stay_exact")
+        .next()
+        .expect("source guard anchor exists");
+
+    for pattern in [
+        ".required_schemas.contains(",
+        ".required_tables.contains(",
+        ".required_natural_keys.contains(",
+    ] {
+        assert!(
+            !prefix.contains(pattern),
+            "loose DB evidence required surface assertion returned before source guard: {pattern}"
+        );
+    }
 }
 
 #[test]
@@ -342,4 +380,8 @@ fn blocked_template_is_parseable_and_secret_free() {
     assert!(!lower.contains("account_id ="));
     assert!(!lower.contains("password ="));
     assert!(!lower.contains("token ="));
+}
+
+fn string_vec(values: &[&str]) -> Vec<String> {
+    values.iter().map(|value| value.to_string()).collect()
 }
