@@ -10360,3 +10360,43 @@ PM 邊界不變：此 checkpoint 不改 Rust IPC handler behavior、不改 Rust 
 paper order routing/cancel/replace、不做 fill import execution、不做 release launch、不做 disable/cleanup action、
 不做 DB/evidence writer、不做 scorecard writer、不啟動 evidence clock、不做 Linux runtime sync/restart、不做
 destructive DB cleanup、不授權 paper-shadow launch、tiny-live/live 或任何 Bybit behavior change。
+
+## 256. 2026-07-02 PM session source checkpoint：Stock/ETF Phase3 Evidence Acceptance Split Guard
+
+本 checkpoint 將 oversized `stock_etf_phase3_evidence_acceptance.rs` 拆成 Phase3 契約邊界更清楚的三個
+integration test 檔：collector/evidence-clock/template coverage 保留在原檔，market-data/frozen-input coverage
+移到 `stock_etf_phase3_market_data_acceptance.rs`，DQ manifest coverage 移到
+`stock_etf_phase3_dq_acceptance.rs`。這不是 Rust production behavior change、不是 Phase3 validator semantics
+change、不是 config change、不是 Rust IPC handler behavior change、不是 FastAPI route behavior change、不是 GUI
+behavior change、不是 connector production code change、不是 IBKR contact、不是 connector runtime、不是 secret
+lookup、不是 broker session、不是 read-only probe execution、不是 paper order/fill route enablement；只降低
+Phase3 acceptance test review blast radius 並保持原 24 個測試語義。
+
+已完成：
+
+- 新增 `stock_etf_phase3_market_data_acceptance.rs`，承接 market-data provenance 與 frozen-input source
+  readiness coverage。
+- 新增 `stock_etf_phase3_dq_acceptance.rs`，承接 DQ manifest shape/day-quality 與 side-effect guard coverage。
+- 將原 `stock_etf_phase3_evidence_acceptance.rs` 收斂為 collector run、evidence-clock day 與全 Phase3
+  template guard。
+- 維持 test 檔尺寸 hygiene：原檔 640 行，market-data 檔 265 行，DQ 檔 173 行，均低於 800 行。
+- PM 未派 PA/E1/E2/E4/QA subagent：本 checkpoint 為窄範圍純測試檔拆分，沒有 production/runtime/exchange-facing
+  行為，也未改 validator semantics；以 PM 本地精準驗證與全 package 測試收斂。
+
+驗證：
+
+- Changed-file rustfmt：PASS。
+- Phase3 focused Rust acceptance：DQ `5 passed`、evidence `11 passed`、market-data `8 passed`。
+- Full `cargo test -p openclaw_types`：PASS。
+- Test count preservation scan：拆分後仍為 24 個 Phase3 evidence-related tests。
+- Line-count guard：三個拆分檔均低於 800 行。
+- Rust toolchain note：桌面 shell 的 `~/.cargo/bin` proxy 指向 stale rustup-init symlink；驗證改以
+  Homebrew rustup + stable toolchain bin 單次命令執行，未改 repo 或全域 toolchain/env。
+
+PM 邊界不變：此 checkpoint 不改 Rust production code、不改 Phase3 validator semantics、不改 source config/
+runtime config、不改 Rust IPC handler behavior、不改 FastAPI route 行為、不改 GUI runtime、不改 connector
+production code、不呼叫 IBKR、不導入 IBKR SDK、不讀/建/序列化 secret、不啟動 connector runtime、不做
+socket/client construction、不做 broker session、不執行 read-only probe、不做 paper order routing/cancel/replace、
+不做 fill import execution、不做 release launch、不做 DB/evidence writer、不做 scorecard writer、不啟動 evidence
+clock、不做 Linux runtime sync/restart、不做 destructive DB cleanup、不授權 paper-shadow launch、tiny-live/live 或
+任何 Bybit behavior change。
