@@ -6098,6 +6098,39 @@ socket/client construction、沒有 broker session、沒有 read-only probe exec
 paper order routing/cancel/replace execution、沒有 DB/evidence/scorecard writer、沒有 evidence clock、沒有
 paper-shadow launch、沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
 
+## 2026-07-02 Operator Update — Stock/ETF Session Attestation Safety Shape Parity Guard
+
+本 session 已完成下一個 test/source checkpoint：
+`Stock/ETF Session Attestation Safety Shape Parity Guard`。
+
+這個 checkpoint 補齊並鎖住 `ibkr_session_attestation_v1` 在 Python display-only surfaces
+上的共同 fail-closed safety shape。
+
+已完成：
+
+- Inert IBKR connector session preview 補齊 host/port、process identity、gateway mode、
+  secret-slot mode、live-secret/env-fallback、API/data-tier/entitlement、attested/expires
+  window 等安全欄位，全部仍為空、0、`unknown` 或 `false`。
+- Authorization status normalizer/fallback 與 fixture 對齊同一 shape。
+- Authorization contract-violation guard 會攔截 Phase2 gate 前的 session identity、
+  topology、secret lineage、entitlement、startup/window/raw-artifact claim。
+- 新增 cross-surface parity test，覆蓋 connector preview/fixture、account route、
+  authorization route 與 IPC unavailable fail-closed path。
+
+Verification 已過：
+
+- Python changed files `py_compile`：PASS
+- Focused parity/authorization/connector pytest：`20 passed`
+- Full Stock/ETF Python route/static pytest：`181 passed`
+- Docs trace pytest：`23 passed`
+- Diff check：PASS
+
+邊界不變：沒有 FastAPI broker runtime 行為 change、沒有 GUI/Rust IPC behavior change、沒有 IBKR contact、
+沒有 SDK import、沒有 secret access/serialization、沒有 connector runtime、沒有 socket/client construction、
+沒有 broker session、沒有 read-only probe execution、沒有 fill import execution、沒有 paper order
+routing/cancel/replace execution、沒有 DB/evidence/scorecard writer、沒有 evidence clock、沒有 paper-shadow launch、
+沒有 tiny-live/live authorization，也沒有改動 Bybit live/demo execution 行為。
+
 ## 2026-07-02 Operator Update — Stock/ETF IBKR Connector Action Matrix Preview Guard
 
 本 session 已完成下一個 source-only connector checkpoint：

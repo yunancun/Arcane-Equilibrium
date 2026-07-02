@@ -50,11 +50,25 @@ EXPECTED_AUTHORIZATION_CONTRACT_VIOLATIONS = [
     "phase2_artifact_contact_allowed",
     "session_expected_contract_id_mismatch",
     "session_attestation_accepted",
+    "session_account_fingerprint_present",
     "session_live_account_fingerprint",
+    "session_host_claimed",
+    "session_port_claimed",
+    "session_process_identity_present",
+    "session_gateway_mode_claimed",
+    "session_secret_slot_fingerprint_present",
+    "session_secret_slot_mode_claimed",
+    "session_secret_world_readable",
+    "session_live_secret_absent_or_empty",
+    "session_env_var_credential_fallback_used",
+    "session_api_server_version_present",
     "session_data_tier_claimed",
     "session_entitlements_fingerprint_present",
     "session_market_data_entitlement_purchase_claimed",
     "session_gateway_startup_claimed",
+    "session_attested_at_claimed",
+    "session_expires_at_claimed",
+    "session_raw_artifact_hash_present",
     "authorization_envelope_scope_not_denied",
     "authorization_envelope_expiry_claimed",
 ]
@@ -129,6 +143,11 @@ def test_stock_etf_authorization_status_uses_only_readonly_fixture_method() -> N
     assert data["session_attestation"]["data_tier"] == "unknown"
     assert data["session_attestation"]["entitlements_fingerprint_present"] is False
     assert data["session_attestation"]["gateway_started_at_ms"] == 0
+    assert data["session_attestation"]["port"] == 0
+    assert data["session_attestation"]["process_identity_present"] is False
+    assert data["session_attestation"]["secret_slot_mode"] == "unknown"
+    assert data["session_attestation"]["attested_at_ms"] == 0
+    assert data["session_attestation"]["expires_at_ms"] == 0
     assert data["authorization_envelope"]["permission_scope"] == "denied"
     assert data["allowed_gui_actions"] == ["refresh_authorization_status"]
     fake_ipc.call.assert_awaited_once()
@@ -215,11 +234,25 @@ def test_stock_etf_authorization_status_blocks_contract_violation() -> None:
     session = payload["session_attestation"]
     session["expected_contract_id"] = "wrong"
     session["attestation_accepted"] = True
+    session["account_fingerprint_present"] = True
     session["account_fingerprint_is_live"] = True
+    session["host"] = "127.0.0.1"
+    session["port"] = 4002
+    session["process_identity_present"] = True
+    session["gateway_mode"] = "paper"
+    session["secret_slot_fingerprint_present"] = True
+    session["secret_slot_mode"] = "paper"
+    session["secret_world_readable"] = True
+    session["live_secret_absent_or_empty"] = True
+    session["env_var_credential_fallback_used"] = True
+    session["api_server_version_present"] = True
     session["data_tier"] = "delayed"
     session["entitlements_fingerprint_present"] = True
     session["market_data_entitlement_purchase_denied"] = True
     session["gateway_started_at_ms"] = 1
+    session["attested_at_ms"] = 1
+    session["expires_at_ms"] = 2
+    session["raw_artifact_hash_present"] = True
 
     envelope = payload["authorization_envelope"]
     envelope["permission_scope"] = "paper_rehearsal"

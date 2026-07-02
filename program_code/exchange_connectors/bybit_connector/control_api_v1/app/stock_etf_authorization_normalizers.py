@@ -87,12 +87,22 @@ def _session_fail_closed(reason: str) -> dict[str, Any]:
         "environment": "read_only",
         "account_fingerprint_present": False,
         "account_fingerprint_is_live": False,
+        "host": "",
+        "port": 0,
+        "process_identity_present": False,
+        "gateway_mode": "unknown",
         "secret_slot_fingerprint_present": False,
+        "secret_slot_mode": "unknown",
+        "secret_world_readable": False,
+        "live_secret_absent_or_empty": False,
+        "env_var_credential_fallback_used": False,
         "api_server_version_present": False,
         "data_tier": "unknown",
         "entitlements_fingerprint_present": False,
         "market_data_entitlement_purchase_denied": False,
         "gateway_started_at_ms": 0,
+        "attested_at_ms": 0,
+        "expires_at_ms": 0,
         "raw_artifact_hash_present": False,
     }
 
@@ -229,8 +239,22 @@ def _normalize_session(value: Any, reason: str | None) -> dict[str, Any]:
         "account_fingerprint_is_live": _as_bool(
             source.get("account_fingerprint_is_live")
         ),
+        "host": _as_str(source.get("host"), ""),
+        "port": _as_int(source.get("port")),
+        "process_identity_present": _as_bool(
+            source.get("process_identity_present")
+        ),
+        "gateway_mode": _as_str(source.get("gateway_mode"), "unknown"),
         "secret_slot_fingerprint_present": _as_bool(
             source.get("secret_slot_fingerprint_present")
+        ),
+        "secret_slot_mode": _as_str(source.get("secret_slot_mode"), "unknown"),
+        "secret_world_readable": _as_bool(source.get("secret_world_readable")),
+        "live_secret_absent_or_empty": _as_bool(
+            source.get("live_secret_absent_or_empty")
+        ),
+        "env_var_credential_fallback_used": _as_bool(
+            source.get("env_var_credential_fallback_used")
         ),
         "api_server_version_present": _as_bool(
             source.get("api_server_version_present")
@@ -243,6 +267,8 @@ def _normalize_session(value: Any, reason: str | None) -> dict[str, Any]:
             source.get("market_data_entitlement_purchase_denied")
         ),
         "gateway_started_at_ms": _as_int(source.get("gateway_started_at_ms")),
+        "attested_at_ms": _as_int(source.get("attested_at_ms")),
+        "expires_at_ms": _as_int(source.get("expires_at_ms")),
         "raw_artifact_hash_present": _as_bool(
             source.get("raw_artifact_hash_present")
         ),
@@ -343,8 +369,30 @@ def _authorization_contract_violations(
         violations.append("session_expected_contract_id_mismatch")
     if _as_bool(session.get("attestation_accepted")):
         violations.append("session_attestation_accepted")
+    if _as_bool(session.get("account_fingerprint_present")):
+        violations.append("session_account_fingerprint_present")
     if _as_bool(session.get("account_fingerprint_is_live")):
         violations.append("session_live_account_fingerprint")
+    if _as_str(session.get("host"), ""):
+        violations.append("session_host_claimed")
+    if _as_int(session.get("port")) != 0:
+        violations.append("session_port_claimed")
+    if _as_bool(session.get("process_identity_present")):
+        violations.append("session_process_identity_present")
+    if _as_str(session.get("gateway_mode"), "unknown") != "unknown":
+        violations.append("session_gateway_mode_claimed")
+    if _as_bool(session.get("secret_slot_fingerprint_present")):
+        violations.append("session_secret_slot_fingerprint_present")
+    if _as_str(session.get("secret_slot_mode"), "unknown") != "unknown":
+        violations.append("session_secret_slot_mode_claimed")
+    if _as_bool(session.get("secret_world_readable")):
+        violations.append("session_secret_world_readable")
+    if _as_bool(session.get("live_secret_absent_or_empty")):
+        violations.append("session_live_secret_absent_or_empty")
+    if _as_bool(session.get("env_var_credential_fallback_used")):
+        violations.append("session_env_var_credential_fallback_used")
+    if _as_bool(session.get("api_server_version_present")):
+        violations.append("session_api_server_version_present")
     if _as_str(session.get("data_tier"), "unknown") != "unknown":
         violations.append("session_data_tier_claimed")
     if _as_bool(session.get("entitlements_fingerprint_present")):
@@ -353,6 +401,12 @@ def _authorization_contract_violations(
         violations.append("session_market_data_entitlement_purchase_claimed")
     if _as_int(session.get("gateway_started_at_ms")) > 0:
         violations.append("session_gateway_startup_claimed")
+    if _as_int(session.get("attested_at_ms")) > 0:
+        violations.append("session_attested_at_claimed")
+    if _as_int(session.get("expires_at_ms")) > 0:
+        violations.append("session_expires_at_claimed")
+    if _as_bool(session.get("raw_artifact_hash_present")):
+        violations.append("session_raw_artifact_hash_present")
     if _as_str(envelope.get("permission_scope"), "denied") != "denied":
         violations.append("authorization_envelope_scope_not_denied")
     if _as_int(envelope.get("expires_at_ms")) > 0:
