@@ -251,14 +251,67 @@ fn non_bybit_api_allowlist_contract_pins_complete_action_matrix() {
     assert_eq!(allowlist.contract_id, NON_BYBIT_API_ALLOWLIST_CONTRACT_ID);
     assert_eq!(allowlist.source_version, 1);
     assert_eq!(
-        allowlist.read_actions.len()
-            + allowlist.paper_write_actions.len()
-            + allowlist.denied_actions.len(),
-        required_non_bybit_api_actions().len()
+        allowlist.read_actions,
+        vec![
+            NonBybitApiAction::ServerTimeRead,
+            NonBybitApiAction::ConnectionHealthRead,
+            NonBybitApiAction::AccountSummarySnapshotRead,
+            NonBybitApiAction::PortfolioPositionsSnapshotRead,
+            NonBybitApiAction::ContractDetailsRead,
+            NonBybitApiAction::MarketDataSnapshotRead,
+            NonBybitApiAction::MarketDataSubscriptionRead,
+            NonBybitApiAction::HistoricalBarsRead,
+            NonBybitApiAction::OpenPaperOrdersRead,
+            NonBybitApiAction::PaperExecutionsCommissionsRead,
+        ]
+    );
+    assert_eq!(
+        allowlist.paper_write_actions,
+        vec![
+            NonBybitApiAction::PaperOrderSubmit,
+            NonBybitApiAction::PaperOrderCancel,
+            NonBybitApiAction::PaperOrderReplace,
+        ]
+    );
+    assert_eq!(
+        allowlist.denied_actions,
+        vec![
+            NonBybitApiAction::LiveOrderSubmit,
+            NonBybitApiAction::LiveAccountQuery,
+            NonBybitApiAction::AccountTransfer,
+            NonBybitApiAction::MarginEnablement,
+            NonBybitApiAction::ShortBorrow,
+            NonBybitApiAction::OptionsTrading,
+            NonBybitApiAction::CfdTrading,
+            NonBybitApiAction::MarketDataEntitlementPurchase,
+            NonBybitApiAction::AccountManagementWrite,
+            NonBybitApiAction::ClientPortalWebApiUse,
+        ]
     );
     assert!(!allowlist.ibkr_contact_performed);
     assert!(!allowlist.secret_content_serialized);
     assert!(allowlist.bybit_live_execution_protected);
+}
+
+#[test]
+fn non_bybit_api_allowlist_bucket_assertions_stay_exact() {
+    let source = include_str!("ibkr_phase2_gate_acceptance.rs");
+    let prefix = source
+        .split("fn non_bybit_api_allowlist_bucket_assertions_stay_exact")
+        .next()
+        .expect("source guard anchor exists");
+
+    for pattern in [
+        "allowlist.read_actions.len()",
+        "allowlist.paper_write_actions.len()",
+        "allowlist.denied_actions.len()",
+        "required_non_bybit_api_actions().len()",
+    ] {
+        assert!(
+            !prefix.contains(pattern),
+            "loose non-Bybit API allowlist bucket assertion returned before source guard: {pattern}"
+        );
+    }
 }
 
 #[test]
