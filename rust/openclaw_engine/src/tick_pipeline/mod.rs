@@ -952,6 +952,12 @@ pub struct TickStats {
     /// `#[serde(default)]`：舊版 snapshot 無此欄位時 deserialize 退回 0（向後相容）。
     #[serde(default)]
     pub qty_zero_skips: u64,
+    /// BOUNDED-PROBE-SOAK-DISPATCH-EDGE（2026-07-02 設計 §1.1）：soak 武裝期間
+    /// 在派單邊界被 withhold 的已批准普通 Open 計數（每筆遞增；log 另行 60s
+    /// 節流）。預期量級：cost_gate 拒絕率 99.9%+ 下每日數十~數百筆。
+    /// `#[serde(default)]`：舊版 snapshot 無此欄位時 deserialize 退回 0（向後相容）。
+    #[serde(default)]
+    pub soak_withheld_opens: u64,
 }
 
 /// Core tick pipeline — owns all processing state / 核心 tick 管線 — 擁有所有處理狀態。
@@ -991,6 +997,11 @@ pub struct TickPipeline {
     /// Cost-gate demo-learning lane 寫入器控制代碼。默認停用；啟用時只把
     /// eligible exchange-gate reject 記為 append-only admission decision，不改送單。
     demo_learning_lane_writer: crate::demo_learning_lane_writer::DemoLearningLaneWriterHandle,
+    /// BOUNDED-PROBE-SOAK-DISPATCH-EDGE（2026-07-02 設計 §1.2）：soak envelope
+    /// 生命週期閘（30s TTL 惰性緩存 + last_good 硬上界）。僅 demo/live_demo +
+    /// flag=1 + 遇 approved Open 時被 step_4_5_dispatch 查詢；per-pipeline 實例，
+    /// 非全局 singleton。
+    soak_envelope_gate: crate::demo_learning_lane_soak_gate::SoakEnvelopeGate,
     /// Instrument info cache for exchange precision rounding (R-05).
     /// 合約信息緩存，用於交易所精度取整。
     instrument_cache: Option<Arc<InstrumentInfoCache>>,

@@ -75,6 +75,9 @@ pub mod decision_context_producer;
 pub mod demo_learning_lane;
 pub mod demo_learning_lane_hot_path;
 pub mod demo_learning_lane_ledger;
+// 2026-07-02 soak dispatch-edge containment §1.2:envelope 生命週期閘
+// (30s TTL 緩存 + last_good 硬上界),step_4_5_dispatch withhold 判定用。
+pub mod demo_learning_lane_soak_gate;
 pub mod demo_learning_lane_writer;
 #[cfg(test)]
 mod demo_learning_lane_hot_path_tests;

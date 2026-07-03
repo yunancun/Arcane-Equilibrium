@@ -61,6 +61,9 @@ impl TickPipeline {
             canary_mode: false,
             demo_learning_lane_writer:
                 crate::demo_learning_lane_writer::DemoLearningLaneWriterHandle::disabled(),
+            // 2026-07-02 soak §1.2:envelope 閘 default(從未刷新即 fail-closed);
+            // plan 路徑於首次判定時經 demo_learning_lane_plan_path_from_env 惰性解析。
+            soak_envelope_gate: crate::demo_learning_lane_soak_gate::SoakEnvelopeGate::default(),
             instrument_cache: None,
             use_maker_close: false,
             order_dispatch_tx: None,

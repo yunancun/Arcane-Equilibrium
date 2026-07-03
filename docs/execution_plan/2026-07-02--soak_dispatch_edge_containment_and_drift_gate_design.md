@@ -44,6 +44,11 @@ soak 生效 = `flag OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED=1(硬前提兼 kill s
 ### 1.6 部署與回滾
 Mac 實作→E2 對抗審→E4 回歸→push→Linux pull+`restart_all.sh --engine-only --rebuild --keep-auth`。重新武裝 soak 前置:新 envelope 簽署(見 Part 3)。回滾=revert commit+rebuild(env flag 不變,当前=0)。
 
+### 1.7 實作後前提修正(2026-07-03,E1/E2 修復輪定案,PM 回寫)
+- **§1.3「writer 唯一寫者」前提證偽**(E2 F1,MAJOR):cron `cost_gate_learning_lane_cron.sh` 與 Python `runtime_adapter.py` 以同一 `OPENCLAW_DATA_DIR` 對同一 `probe_ledger.jsonl` append(probe_outcome / side_cell_disabled rows),Rust 消費鏈靠這些行做 auto/manual disable。純 in-memory cache 會使兩條 disable 路徑對運行中 engine 全盲。**落地修法**:cache 附 `LedgerStat{len,mtime}` 每事件 stat 比對,外部變化(增長/截斷/替換/刪除)→先 flush 自寫緩衝再全量重讀;自寫落盤同步快照防自觸發。攤還仍 O(1),§1.3 目的(消除每事件全量重讀)保留。
+- **§1.1 lease 語義架構事實**(E2 F2 覆核定案):withhold 可達模式(demo/live_demo)恆為 Validation profile → router gate ON 時 `acquire_lease` 短路回 `LeaseId::Bypass`,`release_lease(Bypass)` 為設計上 no-op——withhold 塊的 `LeaseOutcome::Failed` 釋放屬**結構性防禦**(防未來 profile 映射變動),非當前熱路徑。測試以三層釘死:gate-ON pipeline(BYPASS 轉移可觀測)+ 真 Active lease seam(revoke=execution_failed)+ 源碼契約(withhold 塊必含 Failed 釋放)。
+- 殘留 follow-up(E2/E4 裁定不阻塞,登記待後續觸碰時折入):writer stat 快照 µs 級 TOCTOU(L-R1)/capture-error 分支無條件更新快照(L-R2,一行修)/refresh 內靜默 flush 吞錯(L-R3)/withhold 源碼契約補 `emit_decision_feature` negative token(E4 L-1)/QTY-ZERO-SKIP 路徑 lease 不釋放之既有不對稱(E2 NOTE-1,pre-existing)。
+
 ---
 
 ## Part 2:Post-Approval Drift Gate(operator 已批准放寬方向)

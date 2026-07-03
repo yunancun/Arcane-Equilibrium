@@ -42,14 +42,16 @@ const PLAN_PATH_ENV: &str = "OPENCLAW_DEMO_LEARNING_LANE_PLAN";
 const LEDGER_PATH_ENV: &str = "OPENCLAW_DEMO_LEARNING_LANE_LEDGER";
 const OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED: &str = "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED";
 
+// pub(crate):dispatch-edge withhold 的 feed 恢復釘子測試需檢視 writer channel
+// 收到的 RejectEvent(見 step_4_5_dispatch_tests.rs);僅 crate 內測試消費。
 #[derive(Debug, Clone)]
-struct WriterMsg {
-    event: RejectEvent,
-    risk_state: String,
-    now_ms: u64,
-    placement_decision: Option<BoundedProbePlacementDecision>,
-    active_order_request: Option<ActiveBoundedProbeOrderRequest>,
-    order_dispatch_tx: Option<tokio::sync::mpsc::UnboundedSender<OrderDispatchRequest>>,
+pub(crate) struct WriterMsg {
+    pub(crate) event: RejectEvent,
+    pub(crate) risk_state: String,
+    pub(crate) now_ms: u64,
+    pub(crate) placement_decision: Option<BoundedProbePlacementDecision>,
+    pub(crate) active_order_request: Option<ActiveBoundedProbeOrderRequest>,
+    pub(crate) order_dispatch_tx: Option<tokio::sync::mpsc::UnboundedSender<OrderDispatchRequest>>,
 }
 
 #[derive(Clone)]
@@ -154,6 +156,21 @@ impl DemoLearningLaneWriterHandle {
             .compare_exchange(last, now_ms, Ordering::Relaxed, Ordering::Relaxed)
             .is_ok()
     }
+
+    /// 測試用 handle:繞過 spawn 的 env gate 與 writer task,把 channel 接收端
+    /// 交給測試直接檢視(feed 恢復釘子:cost_gate reject → channel 收到事件)。
+    #[cfg(test)]
+    pub(crate) fn handle_for_test() -> (Self, mpsc::Receiver<WriterMsg>) {
+        let (tx, rx) = mpsc::channel(CHANNEL_CAPACITY);
+        (
+            Self {
+                tx: Some(tx),
+                total_dropped: Arc::new(AtomicU64::new(0)),
+                last_warn_ms: Arc::new(AtomicU64::new(0)),
+            },
+            rx,
+        )
+    }
 }
 
 pub fn spawn(data_dir: PathBuf, cancel: CancellationToken) -> DemoLearningLaneWriterHandle {
@@ -164,12 +181,13 @@ pub fn spawn(data_dir: PathBuf, cancel: CancellationToken) -> DemoLearningLaneWr
         return DemoLearningLaneWriterHandle::disabled();
     }
 
-    let base_dir = data_dir.join("cost_gate_learning_lane");
-    let plan_path = env_path_or_default(
-        PLAN_PATH_ENV,
-        base_dir.join("demo_learning_lane_plan_latest.json"),
+    let plan_path = demo_learning_lane_plan_path(&data_dir);
+    let ledger_path = env_path_or_default(
+        LEDGER_PATH_ENV,
+        data_dir
+            .join("cost_gate_learning_lane")
+            .join("probe_ledger.jsonl"),
     );
-    let ledger_path = env_path_or_default(LEDGER_PATH_ENV, base_dir.join("probe_ledger.jsonl"));
 
     let (tx, rx) = mpsc::channel(CHANNEL_CAPACITY);
     info!(
@@ -188,6 +206,28 @@ pub fn spawn(data_dir: PathBuf, cancel: CancellationToken) -> DemoLearningLaneWr
 
 fn env_path_or_default(name: &str, default_path: PathBuf) -> PathBuf {
     path_override_or_default(std::env::var(name).ok(), default_path)
+}
+
+/// plan 路徑的唯一解析入口(PLAN_PATH_ENV override + data_dir 默認)。
+/// 為什麼共用:soak 圍欄(demo_learning_lane_soak_gate)與 writer admission
+/// 必須讀同一份 plan;各自解析(默認值/override 任一漂移)= guard 與 admission
+/// 判準漂移,即安全洞(2026-07-02 設計 §1.2)。
+pub(crate) fn demo_learning_lane_plan_path(data_dir: &Path) -> PathBuf {
+    env_path_or_default(
+        PLAN_PATH_ENV,
+        data_dir
+            .join("cost_gate_learning_lane")
+            .join("demo_learning_lane_plan_latest.json"),
+    )
+}
+
+/// env 級解析:OPENCLAW_DATA_DIR 默認 "/tmp/openclaw" 鏡像 main.rs 既有慣例
+/// (writer spawn 的 data_dir 亦由 main.rs 以同一默認值構造,兩端同源)。
+pub(crate) fn demo_learning_lane_plan_path_from_env() -> PathBuf {
+    let data_dir = PathBuf::from(
+        std::env::var("OPENCLAW_DATA_DIR").unwrap_or_else(|_| "/tmp/openclaw".into()),
+    );
+    demo_learning_lane_plan_path(&data_dir)
 }
 
 fn path_override_or_default(value: Option<String>, default_path: PathBuf) -> PathBuf {
@@ -214,6 +254,35 @@ async fn run_writer(
             return;
         }
     };
+    // O(n²) 修復(2026-07-02 設計 §1.3):啟動讀一次後維護 in-memory cache;
+    // append 檔案同步 push(parse-back,與重啟後 read_ledger_rows 讀到的內容
+    // 等價),消除每事件全量重讀(feed 恢復 12.9 萬筆/日下的自爆點)。
+    // 啟動讀失敗 fail-closed 退出(比照上方 open_writer 失敗先例):壞 ledger
+    // 下繼續跑會讓 dedup / 預算判定失真,寧可停寫並大聲告警。
+    //
+    // F1(E2 2026-07-03 審查):「writer 唯一寫者」設計前提不成立——cron
+    // `cost_gate_learning_lane_cron.sh` 與 Python `runtime_adapter.py` 以同一
+    // OPENCLAW_DATA_DIR 對同一 probe_ledger.jsonl append `probe_outcome` /
+    // `side_cell_disabled` rows,而 admission 靠這些行做 auto/manual disable
+    // (demo_learning_lane.rs summarize_side_cell_runtime_state)。純 in-memory
+    // cache 會使兩條 disable 路徑對運行中 engine 全盲直到重啟。
+    // 修法 = stat 級失效:緩存 last-known (len, mtime),每事件 fs::metadata
+    // 比對;任何外部變化(增長/截斷/替換/刪除)→ 先 flush 自寫緩衝再全量
+    // 重讀。外部 append 低頻(cron 每小時級),攤還仍 O(1),設計「消除每事件
+    // 全量重讀」目的保留。
+    let mut ledger_rows = match read_ledger_rows(&ledger_path) {
+        Ok(rows) => rows,
+        Err(e) => {
+            warn!(
+                error = %e,
+                ledger_path = %ledger_path.display(),
+                "demo-learning lane writer failed to load ledger cache; exiting / demo-learning lane ledger cache 載入失敗，任務退出"
+            );
+            return;
+        }
+    };
+    // stat 快照:None = 檔案不存在(或 stat 暫不可得,下一事件重試判定)。
+    let mut ledger_stat = stat_ledger(&ledger_path).ok().flatten();
     let mut flush_timer =
         tokio::time::interval(std::time::Duration::from_millis(FLUSH_INTERVAL_MS));
     flush_timer.tick().await;
@@ -235,18 +304,29 @@ async fn run_writer(
                     order_dispatch_tx,
                 } = msg;
                 let active_order_dispatch_channel_available = order_dispatch_tx.is_some();
-                match build_runtime_admission_result(
-                    &plan_path,
+                // F1:先做 stat 級外部變化偵測;refresh 失敗走既有 capture-error
+                // 分支(鏡像修前「每事件讀檔失敗 → capture-error row」語義)。
+                let admission_build = refresh_ledger_cache_if_externally_changed(
+                    &mut bw,
                     &ledger_path,
-                    &event,
-                    &risk_state,
-                    now_ms,
-                    Utc::now(),
-                    placement_decision.as_ref(),
-                    active_order_request,
-                    active_order_dispatch_channel_available,
-                    None,
-                ) {
+                    &mut ledger_rows,
+                    &mut ledger_stat,
+                )
+                .and_then(|()| {
+                    build_runtime_admission_result(
+                        &plan_path,
+                        &ledger_rows,
+                        &event,
+                        &risk_state,
+                        now_ms,
+                        Utc::now(),
+                        placement_decision.as_ref(),
+                        active_order_request,
+                        active_order_dispatch_channel_available,
+                        None,
+                    )
+                });
+                match admission_build {
                     Ok(Some(result)) => {
                         match result.record.to_json_string() {
                             Ok(json) => {
@@ -256,36 +336,45 @@ async fn run_writer(
                                         ledger_path = %ledger_path.display(),
                                         "demo-learning lane ledger write failed / demo-learning lane ledger 寫入失敗"
                                     );
-                                } else if let Err(e) = bw.flush() {
-                                    warn!(
-                                        error = %e,
-                                        ledger_path = %ledger_path.display(),
-                                        "demo-learning lane ledger flush failed / demo-learning lane ledger flush 失敗"
-                                    );
-                                } else if let Some(draft) = result.active_order_draft {
-                                    if let Some(ref tx) = order_dispatch_tx {
-                                        match dispatch_active_bounded_probe_order_draft(tx, draft) {
-                                            Ok(true) => {
-                                                info!(
-                                                    ledger_path = %ledger_path.display(),
-                                                    "bounded Demo probe active order dispatched after admission ledger flush / bounded Demo probe active order 已在 admission ledger flush 後派發"
-                                                );
-                                            }
-                                            Ok(false) => {
-                                                warn!(
-                                                    ledger_path = %ledger_path.display(),
-                                                    "bounded Demo probe active order draft failed final notional cap check before dispatch / bounded Demo probe active order draft 在派發前未通過最終 notional cap 檢查"
-                                                );
-                                            }
-                                            Err(e) => {
-                                                warn!(
-                                                    error = %e,
-                                                    ledger_path = %ledger_path.display(),
-                                                    "bounded Demo probe order dispatch channel send failed after admission ledger flush / bounded Demo probe order admission ledger flush 後派發 channel send 失敗"
-                                                );
+                                } else {
+                                    // 寫檔成功即同步 push cache(flush 失敗也 push:
+                                    // cache 只會更保守地 dedup,方向安全)。
+                                    push_ledger_cache(&mut ledger_rows, &json);
+                                    if let Err(e) = bw.flush() {
+                                        warn!(
+                                            error = %e,
+                                            ledger_path = %ledger_path.display(),
+                                            "demo-learning lane ledger flush failed / demo-learning lane ledger flush 失敗"
+                                        );
+                                    } else if let Some(draft) = result.active_order_draft {
+                                        if let Some(ref tx) = order_dispatch_tx {
+                                            match dispatch_active_bounded_probe_order_draft(tx, draft) {
+                                                Ok(true) => {
+                                                    info!(
+                                                        ledger_path = %ledger_path.display(),
+                                                        "bounded Demo probe active order dispatched after admission ledger flush / bounded Demo probe active order 已在 admission ledger flush 後派發"
+                                                    );
+                                                }
+                                                Ok(false) => {
+                                                    warn!(
+                                                        ledger_path = %ledger_path.display(),
+                                                        "bounded Demo probe active order draft failed final notional cap check before dispatch / bounded Demo probe active order draft 在派發前未通過最終 notional cap 檢查"
+                                                    );
+                                                }
+                                                Err(e) => {
+                                                    warn!(
+                                                        error = %e,
+                                                        ledger_path = %ledger_path.display(),
+                                                        "bounded Demo probe order dispatch channel send failed after admission ledger flush / bounded Demo probe order admission ledger flush 後派發 channel send 失敗"
+                                                    );
+                                                }
                                             }
                                         }
                                     }
+                                    // F1:自寫落盤後同步 stat 快照,避免下一事件把
+                                    // 自己的寫入誤判為外部變化而觸發無謂全量重讀
+                                    // (那會退回 O(n²))。
+                                    ledger_stat = stat_ledger(&ledger_path).ok().flatten();
                                 }
                             }
                             Err(e) => {
@@ -310,12 +399,19 @@ async fn run_writer(
                                         ledger_path = %ledger_path.display(),
                                         "demo-learning lane capture-error write failed / demo-learning lane capture-error 寫入失敗"
                                     );
-                                } else if let Err(flush_err) = bw.flush() {
-                                    warn!(
-                                        error = %flush_err,
-                                        ledger_path = %ledger_path.display(),
-                                        "demo-learning lane capture-error flush failed / demo-learning lane capture-error flush 失敗"
-                                    );
+                                } else {
+                                    // capture-error row 也入 cache:修前語義下它同樣
+                                    // 參與 attempt_id dedup(同 attempt 不重寫)。
+                                    push_ledger_cache(&mut ledger_rows, &json);
+                                    if let Err(flush_err) = bw.flush() {
+                                        warn!(
+                                            error = %flush_err,
+                                            ledger_path = %ledger_path.display(),
+                                            "demo-learning lane capture-error flush failed / demo-learning lane capture-error flush 失敗"
+                                        );
+                                    }
+                                    // F1:同上,自寫落盤後同步 stat 快照。
+                                    ledger_stat = stat_ledger(&ledger_path).ok().flatten();
                                 }
                             }
                             Err(ser_err) => {
@@ -342,9 +438,11 @@ pub(crate) fn build_runtime_admission_record(
     placement_decision: Option<&BoundedProbePlacementDecision>,
     active_order_request: Option<ActiveBoundedProbeOrderRequest>,
 ) -> Result<Option<AdmissionLedgerRecord>, String> {
+    // 測試 helper 保留舊 path 簽名:讀一次檔再委派,與 run_writer 啟動載入等價。
+    let ledger_rows = read_ledger_rows(ledger_path)?;
     build_runtime_admission_result(
         plan_path,
-        ledger_path,
+        &ledger_rows,
         event,
         risk_state,
         now_ms,
@@ -366,7 +464,9 @@ struct RuntimeAdmissionBuildResult {
 #[allow(clippy::too_many_arguments)]
 fn build_runtime_admission_result(
     plan_path: &Path,
-    ledger_path: &Path,
+    // O(n²) 修復(§1.3):改收 caller 持有的 in-memory rows(writer task 啟動
+    // 載入一次後維護),不再每事件全量重讀 ledger 檔。
+    ledger_rows: &[LedgerRecord],
     event: &RejectEvent,
     risk_state: &str,
     now_ms: u64,
@@ -376,7 +476,6 @@ fn build_runtime_admission_result(
     active_order_dispatch_channel_available: bool,
     bounded_probe_adapter_enabled_override: Option<bool>,
 ) -> Result<Option<RuntimeAdmissionBuildResult>, String> {
-    let ledger_rows = read_ledger_rows(ledger_path)?;
     let attempt_id = attempt_id_for_reject_event(event);
     if ledger_rows
         .iter()
@@ -400,7 +499,7 @@ fn build_runtime_admission_result(
     let decision = evaluate_probe_admission(
         &plan,
         event,
-        &ledger_rows,
+        ledger_rows,
         now_ms,
         &AdmissionConfig::default(),
         bounded_probe_adapter_enabled,
@@ -412,7 +511,7 @@ fn build_runtime_admission_result(
     {
         let active_order_decision = submit_candidate_matched_bounded_probe_order(
             &plan,
-            &ledger_rows,
+            ledger_rows,
             event.clone(),
             placement_decision,
             risk_state,
@@ -528,6 +627,69 @@ fn read_ledger_rows(path: &Path) -> Result<Vec<LedgerRecord>, String> {
         Ok(content) => LedgerRecord::from_jsonl_str(&content),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
         Err(err) => Err(format!("read ledger {} failed: {err}", path.display())),
+    }
+}
+
+/// ledger 檔 stat 快照:len + mtime。None 語義由呼叫端定義為「檔案不存在」。
+/// 為什麼 len+mtime 雙比對:len 抓 append/截斷(即使 mtime 粒度粗),mtime 抓
+/// 同長度改寫;同秒內同長度替換屬病態案例,接受(E2 F1 修法方向即 stat 級)。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LedgerStat {
+    len: u64,
+    mtime: Option<std::time::SystemTime>,
+}
+
+fn stat_ledger(path: &Path) -> Result<Option<LedgerStat>, String> {
+    match std::fs::metadata(path) {
+        Ok(meta) => Ok(Some(LedgerStat {
+            len: meta.len(),
+            mtime: meta.modified().ok(),
+        })),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(format!("stat ledger {} failed: {err}", path.display())),
+    }
+}
+
+/// F1(E2 2026-07-03):偵測外部寫者(cron reject_materializer / outcome_refresh、
+/// Python runtime_adapter)對 ledger 的變化,命中即全量重讀刷新 in-memory cache。
+///
+/// 為什麼重讀前先 flush:本 task 可能有已 push cache 但尚在 BufWriter 緩衝的
+/// 自寫行;不先落盤,重讀會把它們從 cache 丟失 → dedup 回退。
+/// 為什麼全量重讀而非增量:同時覆蓋 append / 截斷 / 替換 / 刪除四種外部變化,
+/// 語義與修前「每事件讀檔」一致;外部變化低頻,攤還 O(1)。
+/// 失敗語義:stat / 重讀錯誤回 Err,呼叫端走 capture-error 分支(鏡像修前
+/// 每事件讀檔失敗行為);cache 與快照維持原狀,下一事件自動重試。
+fn refresh_ledger_cache_if_externally_changed(
+    bw: &mut BufWriter<File>,
+    ledger_path: &Path,
+    ledger_rows: &mut Vec<LedgerRecord>,
+    ledger_stat: &mut Option<LedgerStat>,
+) -> Result<(), String> {
+    let current = stat_ledger(ledger_path)?;
+    if current == *ledger_stat {
+        return Ok(());
+    }
+    let _ = bw.flush();
+    *ledger_rows = read_ledger_rows(ledger_path)?;
+    *ledger_stat = stat_ledger(ledger_path)?;
+    tracing::debug!(
+        ledger_path = %ledger_path.display(),
+        rows = ledger_rows.len(),
+        "demo-learning lane ledger cache refreshed after external change / 偵測到外部 ledger 變化，cache 已全量重讀"
+    );
+    Ok(())
+}
+
+/// 把剛寫入檔案的 JSONL 行 parse 回 `LedgerRecord` 後 push 進 in-memory cache。
+/// 為什麼 parse-back 而非手工構造:保證 cache 內容與「重啟後 read_ledger_rows
+/// 讀到的同一行」逐位等價,dedup / cooldown / 預算判定語義與修前一致。
+fn push_ledger_cache(rows: &mut Vec<LedgerRecord>, json_line: &str) {
+    match serde_json::from_str::<LedgerRecord>(json_line) {
+        Ok(row) => rows.push(row),
+        Err(e) => warn!(
+            error = %e,
+            "demo-learning lane ledger cache parse-back failed; row not cached / ledger cache parse-back 失敗，該行未入緩存"
+        ),
     }
 }
 
@@ -948,7 +1110,6 @@ mod tests {
     fn runtime_admission_dispatch_requires_channel_and_emits_candidate_matched_request() {
         let tmp = TempDir::new().unwrap();
         let plan_path = tmp.path().join("plan.json");
-        let ledger_path = tmp.path().join("probe_ledger.jsonl");
         std::fs::write(&plan_path, authorized_plan_json("2026-06-21T10:49:45Z")).unwrap();
         let event = reject_event();
         let placement = BoundedProbePlacementDecision::Submit(BoundedProbeAttemptPlacement {
@@ -996,7 +1157,7 @@ mod tests {
 
         let without_channel = build_runtime_admission_result(
             &plan_path,
-            &ledger_path,
+            &[],
             &event,
             "NORMAL",
             1_782_041_001_000,
@@ -1016,7 +1177,7 @@ mod tests {
 
         let with_channel = build_runtime_admission_result(
             &plan_path,
-            &ledger_path,
+            &[],
             &event,
             "NORMAL",
             1_782_041_001_000,
@@ -1186,5 +1347,207 @@ mod tests {
             rows[0].reason.as_deref(),
             Some("runtime_admission_evaluation_failed")
         );
+    }
+
+    fn writer_msg(event: RejectEvent) -> WriterMsg {
+        WriterMsg {
+            event,
+            risk_state: "NORMAL".to_string(),
+            now_ms: 1_782_041_001_000,
+            placement_decision: None,
+            active_order_request: None,
+            order_dispatch_tx: None,
+        }
+    }
+
+    /// O(n²) 修復等價性(§1.3):同 run 內同 attempt_id 重複事件只落一行
+    /// (修前語義 = 每事件全量重讀檔案後 dedup;修後 = in-memory cache dedup)。
+    #[tokio::test]
+    async fn ledger_cache_dedups_same_attempt_within_run() {
+        let tmp = TempDir::new().unwrap();
+        let plan_path = tmp.path().join("plan.json");
+        let ledger_path = tmp.path().join("probe_ledger.jsonl");
+        std::fs::write(&plan_path, plan_json("2026-06-21T10:49:45Z")).unwrap();
+
+        let (tx, rx) = mpsc::channel(4);
+        let cancel = CancellationToken::new();
+        let handle = tokio::spawn(run_writer(
+            rx,
+            plan_path,
+            ledger_path.clone(),
+            cancel.clone(),
+        ));
+
+        tx.send(writer_msg(reject_event())).await.unwrap();
+        tx.send(writer_msg(reject_event())).await.unwrap();
+        drop(tx);
+        handle.await.unwrap();
+
+        let content = std::fs::read_to_string(&ledger_path).unwrap();
+        let rows = LedgerRecord::from_jsonl_str(&content).unwrap();
+        assert_eq!(rows.len(), 1, "同 attempt_id 第二筆必被 cache dedup");
+    }
+
+    /// O(n²) 修復等價性:啟動載入使既有 ledger row 仍參與 dedup(與修前
+    /// 「每事件讀檔看到舊行」一致)。
+    #[tokio::test]
+    async fn ledger_cache_dedups_against_preexisting_rows() {
+        let tmp = TempDir::new().unwrap();
+        let plan_path = tmp.path().join("plan.json");
+        let ledger_path = tmp.path().join("probe_ledger.jsonl");
+        std::fs::write(&plan_path, plan_json("2026-06-21T10:49:45Z")).unwrap();
+        std::fs::write(
+            &ledger_path,
+            r#"{"record_type":"probe_admission_decision","attempt_id":"ctx-live_demo-ETHUSDT-1782041000000","side_cell_key":"ma_crossover|ETHUSDT|Sell"}"#,
+        )
+        .unwrap();
+
+        let (tx, rx) = mpsc::channel(4);
+        let cancel = CancellationToken::new();
+        let handle = tokio::spawn(run_writer(
+            rx,
+            plan_path,
+            ledger_path.clone(),
+            cancel.clone(),
+        ));
+
+        tx.send(writer_msg(reject_event())).await.unwrap();
+        drop(tx);
+        handle.await.unwrap();
+
+        let content = std::fs::read_to_string(&ledger_path).unwrap();
+        let rows = LedgerRecord::from_jsonl_str(&content).unwrap();
+        assert_eq!(rows.len(), 1, "既有行必經啟動載入參與 dedup,不得重複 append");
+    }
+
+    /// O(n²) 修復等價性:capture-error row(plan 缺檔)同樣入 cache 參與 dedup
+    /// (修前語義:第二筆事件讀檔看到 capture-error 行後即 dedup)。
+    #[tokio::test]
+    async fn ledger_cache_dedups_capture_error_rows() {
+        let tmp = TempDir::new().unwrap();
+        let plan_path = tmp.path().join("missing-plan.json");
+        let ledger_path = tmp.path().join("probe_ledger.jsonl");
+
+        let (tx, rx) = mpsc::channel(4);
+        let cancel = CancellationToken::new();
+        let handle = tokio::spawn(run_writer(
+            rx,
+            plan_path,
+            ledger_path.clone(),
+            cancel.clone(),
+        ));
+
+        tx.send(writer_msg(reject_event())).await.unwrap();
+        tx.send(writer_msg(reject_event())).await.unwrap();
+        drop(tx);
+        handle.await.unwrap();
+
+        let content = std::fs::read_to_string(&ledger_path).unwrap();
+        let rows = LedgerRecord::from_jsonl_str(&content).unwrap();
+        assert_eq!(rows.len(), 1, "同 attempt 的 capture-error 只落一行");
+        assert_eq!(
+            rows[0].record_type.as_deref(),
+            Some(CAPTURE_ERROR_LEDGER_RECORD_TYPE)
+        );
+    }
+
+    /// 路徑解析共用函數:override env 缺席時落 data_dir 默認(soak 圍欄與
+    /// writer spawn 同源,杜絕雙路徑漂移)。
+    /// F4(E2 2026-07-03):持 test_env_lock save/remove/restore,斷言無條件
+    /// 執行——修前 if-包裹在外部已設 PLAN_PATH_ENV 時靜默降級為空測。
+    #[test]
+    fn plan_path_resolution_defaults_under_data_dir() {
+        let _guard = crate::test_env_lock::guard();
+        let saved = std::env::var(PLAN_PATH_ENV).ok();
+        std::env::remove_var(PLAN_PATH_ENV);
+        let data_dir = PathBuf::from("/tmp/openclaw-test-data");
+        let resolved = demo_learning_lane_plan_path(&data_dir);
+        match saved {
+            Some(v) => std::env::set_var(PLAN_PATH_ENV, v),
+            None => std::env::remove_var(PLAN_PATH_ENV),
+        }
+        assert_eq!(
+            resolved,
+            data_dir
+                .join("cost_gate_learning_lane")
+                .join("demo_learning_lane_plan_latest.json")
+        );
+    }
+
+    async fn wait_for_ledger_rows(path: &Path, want: usize) {
+        for _ in 0..500u32 {
+            if let Ok(content) = std::fs::read_to_string(path) {
+                if content.lines().filter(|l| !l.trim().is_empty()).count() >= want {
+                    return;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("ledger did not reach {want} rows within timeout");
+    }
+
+    /// F1 釘子(E2 2026-07-03):外部寫者(Python runtime_adapter / cron)append
+    /// 的 `side_cell_disabled` row 必須在**同一 run 內**對下一事件的 admission
+    /// 可見(manual disable 即時生效,不等 engine 重啟)。純 in-memory cache
+    /// 版本(F1 修前)此測試必紅(row B 落 ADAPTER_DISABLED 而非
+    /// SIDE_CELL_DISABLED)。
+    #[tokio::test]
+    async fn ledger_cache_sees_external_side_cell_disable_without_restart() {
+        let tmp = TempDir::new().unwrap();
+        let plan_path = tmp.path().join("plan.json");
+        let ledger_path = tmp.path().join("probe_ledger.jsonl");
+        std::fs::write(&plan_path, authorized_plan_json("2026-06-21T10:49:45Z")).unwrap();
+
+        let (tx, rx) = mpsc::channel(4);
+        let cancel = CancellationToken::new();
+        let handle = tokio::spawn(run_writer(
+            rx,
+            plan_path,
+            ledger_path.clone(),
+            cancel.clone(),
+        ));
+
+        // 事件 A:先落第一行並等待落盤,確保外部 append 排在其後。
+        tx.send(writer_msg(reject_event())).await.unwrap();
+        wait_for_ledger_rows(&ledger_path, 1).await;
+
+        // 模擬外部寫者(runtime_adapter.py manual disable row 形狀)。
+        {
+            use std::io::Write as _;
+            let mut f = OpenOptions::new().append(true).open(&ledger_path).unwrap();
+            writeln!(
+                f,
+                r#"{{"record_type":"side_cell_disabled","side_cell_key":"ma_crossover|ETHUSDT|Sell","disable_reason":"manual_disable"}}"#
+            )
+            .unwrap();
+        }
+
+        // 事件 B:同 cell、不同 attempt_id。admission 必須看到外部 disable。
+        let mut event_b = reject_event();
+        event_b.ts_ms += 1_000;
+        event_b.context_id = Some("ctx-live_demo-ETHUSDT-1782041001000".to_string());
+        event_b.signal_id =
+            Some("sig-live_demo-ma_crossover-ETHUSDT-1782041001000".to_string());
+        tx.send(writer_msg(event_b)).await.unwrap();
+        drop(tx);
+        handle.await.unwrap();
+
+        let content = std::fs::read_to_string(&ledger_path).unwrap();
+        let rows = LedgerRecord::from_jsonl_str(&content).unwrap();
+        assert_eq!(
+            rows.len(),
+            3,
+            "A admission + 外部 disable + B admission 共 3 行,got {rows:?}"
+        );
+        let row_b = rows
+            .iter()
+            .find(|r| r.attempt_id.as_deref() == Some("ctx-live_demo-ETHUSDT-1782041001000"))
+            .expect("事件 B 必落 admission row");
+        assert_eq!(
+            row_b.decision.as_deref(),
+            Some("SIDE_CELL_DISABLED"),
+            "外部 manual disable 必須不等重啟即時生效(F1)"
+        );
+        assert_eq!(row_b.reason.as_deref(), Some("manual_disable"));
     }
 }

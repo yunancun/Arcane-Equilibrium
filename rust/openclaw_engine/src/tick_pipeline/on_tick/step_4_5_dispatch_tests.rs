@@ -22,6 +22,7 @@ use crate::demo_learning_lane::{
 };
 use crate::tick_pipeline::OrderDispatchRequest;
 use openclaw_core::alpha_surface::{AlphaSurface, FundingCurveSnapshot, OIDeltaPanel};
+use openclaw_types::PriceEvent;
 use std::sync::Arc;
 use tokio::sync::RwLock as TokioRwLock;
 
@@ -551,6 +552,575 @@ async fn b_rem_1_helper_releases_read_guard_before_return() {
          否則 dispatch hot path 會跨 strategy.on_tick 持鎖"
     );
     drop(write_attempt);
+}
+
+// =========================================================================
+// 2026-07-02 soak dispatch-edge containment(設計 §1.1/§1.5)withhold 矩陣。
+//
+// 為什麼是 pipeline 級整合測試:withhold 點位於 `if gate.approved {` 分支
+// 頂端、所有副作用之前;只有把真實 Open 推過完整 on_tick(scanner gate →
+// exchange gate → dispatch 邊界)才能證明 [27] 審計形狀鐵則(零 Approved
+// verdict 殘留 + rejected qty=0 intent)、lease Failed 釋放與 feed 恢復。
+// env flag 讀寫全程持 crate::test_env_lock::guard()(process-global env 教訓)。
+// =========================================================================
+
+const SOAK_TEST_STRATEGY: &str = "soak_test_open";
+const SOAK_FLAG_ENV: &str = "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED";
+
+/// 構造 soak 圍欄用有效 plan(envelope 全欄位過核心判定;expires 由測試控制)。
+fn soak_plan_json_expiring_at(expires_at_utc: &str) -> String {
+    format!(
+        r#"{{
+            "schema_version": "cost_gate_demo_learning_lane_plan_v1",
+            "generated_at_utc": "2026-06-21T11:00:00+00:00",
+            "status": "READY_FOR_DEMO_LEARNING_PROBE",
+            "gate_status": "OPERATOR_REVIEW",
+            "main_cost_gate_adjustment": "NONE",
+            "learning_gate_adjustment": "SIDE_CELL_DEMO_PROBE_ONLY_AFTER_ADAPTER_WIRING",
+            "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+            "operator_authorization": {{
+                "schema_version": "bounded_demo_probe_operator_authorization_v1",
+                "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+                "authorization_id": "auth-demo-soak-test-001",
+                "operator_id": "operator-test",
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "expires_at_utc": "{expires_at_utc}",
+                "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+                "main_cost_gate_adjustment": "NONE",
+                "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+                "max_authorized_probe_orders": 2,
+                "probe_authority_granted": true,
+                "order_authority_granted": true,
+                "promotion_evidence": false
+            }},
+            "selected_probe_candidate_count": 0,
+            "probe_candidates": []
+        }}"#
+    )
+}
+
+/// withhold 判定走 wall-clock(openclaw_core::now_ms),fixture 到期時刻須
+/// 相對真實現在時間構造。
+fn rfc3339_relative_to_now(offset_ms: i64) -> String {
+    let ms = openclaw_core::now_ms() as i64 + offset_ms;
+    chrono::DateTime::from_timestamp_millis(ms)
+        .unwrap()
+        .to_rfc3339()
+}
+
+/// 可開關的最小策略:emit=true 時對 ctx.symbol 發一筆 Open,把「已批准的
+/// 普通 Open」推進到 dispatch 邊界。emit=false 供指標暖機期靜默(cost_gate
+/// 的 ATR-warmup fail-closed 要求 ATR 可得,見 SEC-11;暖機期不得發 Open
+/// 以免污染 verdict / rejection 斷言)。on_rejection 記錄 reason 供
+/// eager-mutate 回滾 hook 驗證。
+struct AlwaysOpenStrategy {
+    active: bool,
+    emit: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    rejections: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl crate::strategies::Strategy for AlwaysOpenStrategy {
+    fn name(&self) -> &str {
+        SOAK_TEST_STRATEGY
+    }
+    fn is_active(&self) -> bool {
+        self.active
+    }
+    fn set_active(&mut self, active: bool) {
+        self.active = active;
+    }
+    fn declared_alpha_sources(&self) -> &[openclaw_core::alpha_surface::AlphaSourceTag] {
+        &[]
+    }
+    fn on_tick(
+        &mut self,
+        ctx: &crate::tick_pipeline::TickContext<'_>,
+        _surface: &AlphaSurface<'_>,
+    ) -> Vec<crate::strategies::StrategyAction> {
+        if !self.emit.load(std::sync::atomic::Ordering::Relaxed) {
+            return vec![];
+        }
+        vec![crate::strategies::StrategyAction::Open(
+            crate::intent_processor::OrderIntent {
+                symbol: ctx.symbol.to_string(),
+                is_long: true,
+                qty: 0.01,
+                confidence: 0.9,
+                strategy: SOAK_TEST_STRATEGY.into(),
+                order_type: "market".into(),
+                limit_price: None,
+                confluence_score: None,
+                persistence_elapsed_ms: None,
+                time_in_force: None,
+                maker_timeout_ms: None,
+                intent_type: crate::intent_processor::IntentType::OpenLong,
+                earn_payload: None,
+            },
+        )]
+    }
+    fn on_rejection(&mut self, _intent: &crate::intent_processor::OrderIntent, reason: &str) {
+        self.rejections.lock().unwrap().push(reason.to_string());
+    }
+}
+
+struct SoakDispatchHarness {
+    pipeline: crate::tick_pipeline::TickPipeline,
+    emit: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    rejections: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    order_rx: tokio::sync::mpsc::UnboundedReceiver<OrderDispatchRequest>,
+    trading_rx: tokio::sync::mpsc::Receiver<crate::database::TradingMsg>,
+}
+
+/// Demo(或指定 kind)pipeline + AlwaysOpen 策略 + dispatch/trading channel。
+/// `plan_json`:Some=寫入 TempDir plan 檔;None=缺檔(indeterminate 路徑)。
+fn soak_harness(
+    kind: crate::tick_pipeline::PipelineKind,
+    dir: &tempfile::TempDir,
+    plan_json: Option<&str>,
+) -> SoakDispatchHarness {
+    let plan_path = dir.path().join("plan.json");
+    if let Some(json) = plan_json {
+        std::fs::write(&plan_path, json).unwrap();
+    }
+    let mut pipeline = crate::tick_pipeline::TickPipeline::with_kind(&["ETHUSDT"], 10_000.0, kind);
+    pipeline
+        .soak_envelope_gate
+        .set_plan_path_for_tests(plan_path);
+    let emit = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let rejections = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    pipeline.orchestrator.register(Box::new(AlwaysOpenStrategy {
+        active: true,
+        emit: std::sync::Arc::clone(&emit),
+        rejections: std::sync::Arc::clone(&rejections),
+    }));
+    let (order_tx, order_rx) = tokio::sync::mpsc::unbounded_channel();
+    pipeline.set_shadow_channel(order_tx);
+    let (trading_tx, trading_rx) = tokio::sync::mpsc::channel(64);
+    pipeline.set_trading_channel(trading_tx);
+    SoakDispatchHarness {
+        pipeline,
+        emit,
+        rejections,
+        order_rx,
+        trading_rx,
+    }
+}
+
+fn drain_trading_msgs(
+    rx: &mut tokio::sync::mpsc::Receiver<crate::database::TradingMsg>,
+) -> Vec<crate::database::TradingMsg> {
+    let mut out = Vec::new();
+    while let Ok(msg) = rx.try_recv() {
+        out.push(msg);
+    }
+    out
+}
+
+/// 持 test_env_lock 設定/還原 soak flag 後執行 body(env 為 process-global)。
+fn with_soak_flag<R>(value: Option<&str>, body: impl FnOnce() -> R) -> R {
+    let _guard = crate::test_env_lock::guard();
+    let saved = std::env::var(SOAK_FLAG_ENV).ok();
+    match value {
+        Some(v) => std::env::set_var(SOAK_FLAG_ENV, v),
+        None => std::env::remove_var(SOAK_FLAG_ENV),
+    }
+    let result = body();
+    match saved {
+        Some(v) => std::env::set_var(SOAK_FLAG_ENV, v),
+        None => std::env::remove_var(SOAK_FLAG_ENV),
+    }
+    result
+}
+
+const SOAK_TEST_TS_MS: u64 = 1_782_040_200_000;
+
+/// 暖機 40 根 1m bar(emit=false,零 Open)讓 ATR 可得,drain 掉暖機期
+/// engine 信號雜訊,再開 emit 打「受測 tick」——之後的斷言只看單筆 Open。
+fn soak_warm_then_tick(h: &mut SoakDispatchHarness) {
+    for i in 0..40u64 {
+        let ts = SOAK_TEST_TS_MS - (40 - i) * 60_000;
+        // 每根 bar 價格小幅變動,確保 True Range > 0 → ATR > 0。
+        let price = 3_000.0 + (i % 7) as f64;
+        let _ = h
+            .pipeline
+            .on_tick(&PriceEvent::new("ETHUSDT".to_string(), price, ts));
+    }
+    let _ = drain_trading_msgs(&mut h.trading_rx);
+    h.emit.store(true, std::sync::atomic::Ordering::Relaxed);
+    let event = PriceEvent::new("ETHUSDT".to_string(), 3_000.0, SOAK_TEST_TS_MS);
+    let _ = h.pipeline.on_tick(&event);
+}
+
+/// §1.5 矩陣①:envelope Active → 無 OrderDispatchRequest + lease 無洩漏 +
+/// typed rejected verdict + qty=0 intent + 零 Approved verdict 殘留([27])+
+/// on_rejection 回滾 hook + soak_withheld_opens 計數 + exchange_seq 零副作用。
+#[test]
+fn soak_withhold_active_envelope_blocks_dispatch_with_clean_audit_shape() {
+    with_soak_flag(Some("1"), || {
+        let dir = tempfile::TempDir::new().unwrap();
+        let plan = soak_plan_json_expiring_at(&rfc3339_relative_to_now(3_600_000));
+        let mut h = soak_harness(
+            crate::tick_pipeline::PipelineKind::Demo,
+            &dir,
+            Some(&plan),
+        );
+        soak_warm_then_tick(&mut h);
+
+        assert!(
+            h.order_rx.try_recv().is_err(),
+            "soak 武裝:普通 approved Open 絕不產生 OrderDispatchRequest"
+        );
+        assert_eq!(
+            h.pipeline.stats.soak_withheld_opens, 1,
+            "withhold 計數必遞增"
+        );
+        assert_eq!(
+            h.pipeline.stats.total_intents, 0,
+            "withhold 不計入 total_intents(未派發)"
+        );
+        assert!(
+            h.rejections
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|r| r == super::BOUNDED_PROBE_SOAK_WITHHELD_REJECT_REASON),
+            "on_rejection 回滾 hook 必以 withheld reason 被調用"
+        );
+        // 副作用零執行的直接證據:exchange_seq 遞增位於 withhold continue 之後。
+        assert_eq!(
+            h.pipeline.exchange_seq, 0,
+            "withhold 必須發生在 exchange_seq 遞增之前(零副作用)"
+        );
+        // 誠實註記(E2 F2):本測試 router gate 默認 OFF,gate 不取 lease,此
+        // 斷言只證「無 SM 物件殘留」,對 lease 釋放無 bite。lease 覆蓋見
+        // soak_withhold_with_router_gate_on_leaves_no_live_lease(gate-ON)、
+        // withhold_failed_release_revokes_active_lease_without_leak(真 Active
+        // lease seam)與 soak_withhold_block_lease_release_contract(源碼契約)。
+        assert_eq!(h.pipeline.governance.lease.lock().len(), 0);
+
+        let msgs = drain_trading_msgs(&mut h.trading_rx);
+        let mut rejected_verdicts = 0;
+        for msg in &msgs {
+            match msg {
+                crate::database::TradingMsg::RiskVerdict {
+                    verdict, reasons, ..
+                } => {
+                    assert_ne!(
+                        verdict, "Approved",
+                        "[27] 審計形狀:withhold 路徑不得殘留 Approved verdict"
+                    );
+                    if verdict == "Rejected" {
+                        rejected_verdicts += 1;
+                        assert!(
+                            reasons
+                                .iter()
+                                .any(|r| r == super::BOUNDED_PROBE_SOAK_WITHHELD_REJECT_REASON),
+                            "rejected verdict 必帶 withheld reason,got {reasons:?}"
+                        );
+                    }
+                }
+                crate::database::TradingMsg::Intent { qty, .. } => {
+                    assert_eq!(*qty, 0.0, "[27] 審計形狀:withhold intent 必為 qty=0");
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(rejected_verdicts, 1, "必寫恰一筆 typed rejected verdict");
+        assert!(
+            msgs.iter()
+                .any(|m| matches!(m, crate::database::TradingMsg::Intent { qty, .. } if *qty == 0.0)),
+            "必寫 qty=0 intent 行"
+        );
+    });
+}
+
+/// §1.5 矩陣②:envelope 可讀+已過期 → 圍欄解除,Open 正常派發。
+#[test]
+fn soak_withhold_expired_envelope_allows_dispatch() {
+    with_soak_flag(Some("1"), || {
+        let dir = tempfile::TempDir::new().unwrap();
+        let plan = soak_plan_json_expiring_at(&rfc3339_relative_to_now(-3_600_000));
+        let mut h = soak_harness(
+            crate::tick_pipeline::PipelineKind::Demo,
+            &dir,
+            Some(&plan),
+        );
+        soak_warm_then_tick(&mut h);
+
+        let req = h
+            .order_rx
+            .try_recv()
+            .expect("envelope 已過期 → 圍欄解除,普通 Open 必派發");
+        assert_eq!(req.symbol, "ETHUSDT");
+        assert_eq!(h.pipeline.stats.soak_withheld_opens, 0);
+        // 對照組:放行路徑 exchange_seq 正常遞增(與 withhold 測試的 0 成對)。
+        assert_eq!(h.pipeline.exchange_seq, 1);
+        let msgs = drain_trading_msgs(&mut h.trading_rx);
+        assert!(
+            msgs.iter().any(|m| matches!(
+                m,
+                crate::database::TradingMsg::RiskVerdict { verdict, .. } if verdict == "Approved"
+            )),
+            "放行路徑必persist Approved verdict(既有行為)"
+        );
+    });
+}
+
+/// §1.5 矩陣③:envelope indeterminate(缺檔且從未可讀)→ fail-closed 照攔。
+#[test]
+fn soak_withhold_missing_plan_fails_closed() {
+    with_soak_flag(Some("1"), || {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut h = soak_harness(crate::tick_pipeline::PipelineKind::Demo, &dir, None);
+        soak_warm_then_tick(&mut h);
+
+        assert!(
+            h.order_rx.try_recv().is_err(),
+            "缺檔 = indeterminate → fail-closed 照攔"
+        );
+        assert_eq!(h.pipeline.stats.soak_withheld_opens, 1);
+    });
+}
+
+/// §1.5 矩陣④:flag=0(kill switch)→ 圍欄全滅,即使 envelope 有效也放行。
+#[test]
+fn soak_flag_off_never_withholds_even_with_active_envelope() {
+    with_soak_flag(None, || {
+        let dir = tempfile::TempDir::new().unwrap();
+        let plan = soak_plan_json_expiring_at(&rfc3339_relative_to_now(3_600_000));
+        let mut h = soak_harness(
+            crate::tick_pipeline::PipelineKind::Demo,
+            &dir,
+            Some(&plan),
+        );
+        soak_warm_then_tick(&mut h);
+
+        assert!(
+            h.order_rx.try_recv().is_ok(),
+            "flag=0 → 圍欄與 withhold 全滅,Open 正常派發"
+        );
+        assert_eq!(h.pipeline.stats.soak_withheld_opens, 0);
+    });
+}
+
+/// §1.5 矩陣⑤:paper pipeline 恆不攔(mode 硬條件;live/paper flag 矩陣見上方
+/// bounded_probe_soak_isolation_blocks_only_explicit_demo_adapter_runtime)。
+#[test]
+fn soak_paper_kind_never_withheld_with_flag_and_active_envelope() {
+    with_soak_flag(Some("1"), || {
+        let dir = tempfile::TempDir::new().unwrap();
+        let plan = soak_plan_json_expiring_at(&rfc3339_relative_to_now(3_600_000));
+        let mut h = soak_harness(
+            crate::tick_pipeline::PipelineKind::Paper,
+            &dir,
+            Some(&plan),
+        );
+        soak_warm_then_tick(&mut h);
+
+        assert_eq!(
+            h.pipeline.stats.soak_withheld_opens, 0,
+            "paper 模式恆不觸發 withhold"
+        );
+        assert_eq!(
+            h.pipeline.stats.total_intents, 1,
+            "paper 提交路徑必須完全不受 soak 影響"
+        );
+    });
+}
+
+/// §1.5 feed 恢復釘子:soak 武裝下 cost_gate reject 必餵到 probe writer channel。
+/// 此測試在舊 pre-risk guard 下必然失敗(Open 在 gate 前即被攔,writer 斷糧),
+/// 證明修復非裝飾。
+#[test]
+fn soak_cost_gate_reject_feeds_probe_writer_channel_while_armed() {
+    with_soak_flag(Some("1"), || {
+        let dir = tempfile::TempDir::new().unwrap();
+        let plan = soak_plan_json_expiring_at(&rfc3339_relative_to_now(3_600_000));
+        let mut h = soak_harness(
+            crate::tick_pipeline::PipelineKind::Demo,
+            &dir,
+            Some(&plan),
+        );
+        // 注入負 edge estimate → exchange gate cost_gate(JS-demo)拒絕。
+        let json = format!(
+            r#"{{"{SOAK_TEST_STRATEGY}::ETHUSDT": {{"shrunk_bps": -5.0, "win_rate": 0.4, "n": 50, "std_bps": 2.0}}}}"#
+        );
+        let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(&json).unwrap();
+        h.pipeline.set_edge_estimates(estimates);
+        let (writer_handle, mut writer_rx) =
+            crate::demo_learning_lane_writer::DemoLearningLaneWriterHandle::handle_for_test();
+        h.pipeline.set_demo_learning_lane_writer(writer_handle);
+
+        soak_warm_then_tick(&mut h);
+
+        assert!(
+            h.order_rx.try_recv().is_err(),
+            "cost_gate reject → 不派發(與 soak 無關的既有語義)"
+        );
+        assert_eq!(
+            h.pipeline.stats.soak_withheld_opens, 0,
+            "reject ≠ withhold:計數不得誤增"
+        );
+        let msg = writer_rx
+            .try_recv()
+            .expect("cost_gate reject 必餵 probe writer channel(feed 恢復釘子)");
+        assert_eq!(msg.event.strategy_name, SOAK_TEST_STRATEGY);
+        assert_eq!(msg.event.symbol, "ETHUSDT");
+        assert_eq!(
+            msg.event.reject_reason_code,
+            crate::demo_learning_lane::ELIGIBLE_REJECT_REASON_CODE,
+            "reject reason 必 normalize 成 eligible code"
+        );
+    });
+}
+
+// =========================================================================
+// E2 F2(2026-07-03)lease 覆蓋三層。
+//
+// 架構事實(修正 E2 F2 的一處前提):withhold 可達模式(demo/live_demo)
+// 經 effective_governance_profile 恆為 Validation profile;router gate ON 時
+// acquire_lease 對非 Production profile 短路回 LeaseId::Bypass(governance_core
+// acquire_lease 開頭),release_lease(Bypass)=設計上 no-op。真 Active lease
+// 在今日接線下於 withhold 路徑結構性不可達(Production 僅 Live+Mainnet,而
+// em="live" 被 mode 檢查排除)。因此黑箱 pipeline 測試無法對「刪 release 呼叫」
+// 產生行為級 bite——覆蓋改三層:
+//   ① gate-ON pipeline 測試:證 withhold 下 lease 取得可觀測(BYPASS 轉移
+//      emit)且零 SM 物件/零 live lease 殘留;
+//   ② 真 Active lease seam 測試:證 withhold 所用的
+//      release_decision_lease_for_governance(...Failed...) 對真 lease 是
+//      revoke(execution_failed)且不洩漏——未來若 profile 接線改變,語義已釘;
+//   ③ 源碼契約測試(include_str! 範式,同檔 fast_track_reduce.rs 先例):
+//      釘死 withhold 塊必含 Failed 釋放呼叫——「刪 release 呼叫」的 mutation
+//      由此測試咬紅。
+// =========================================================================
+
+/// F2-①:router gate ON 下 withhold 完整走通:acquisition 可觀測(Validation
+/// profile → BYPASS 合成轉移),withhold 後零 SM 物件、零 live lease。
+#[test]
+fn soak_withhold_with_router_gate_on_leaves_no_live_lease() {
+    with_soak_flag(Some("1"), || {
+        let dir = tempfile::TempDir::new().unwrap();
+        let plan = soak_plan_json_expiring_at(&rfc3339_relative_to_now(3_600_000));
+        let mut h = soak_harness(
+            crate::tick_pipeline::PipelineKind::Demo,
+            &dir,
+            Some(&plan),
+        );
+        h.pipeline.governance.set_router_gate_enabled_for_test(true);
+        let (ltx, lrx) = std::sync::mpsc::channel();
+        h.pipeline.governance.set_lease_transition_tx(ltx);
+
+        soak_warm_then_tick(&mut h);
+
+        assert!(
+            h.order_rx.try_recv().is_err(),
+            "gate ON 不改變 withhold 語義:無 OrderDispatchRequest"
+        );
+        assert_eq!(h.pipeline.stats.soak_withheld_opens, 1);
+        // 取得可觀測:Validation profile 的 acquire_lease 對受測 tick 的 Open
+        // emit 一筆 BYPASS 合成轉移(這證明 gate ON 時 lease facade 真被走到)。
+        let transitions: Vec<_> = lrx.try_iter().collect();
+        assert!(
+            transitions
+                .iter()
+                .any(|t| t.to_state == "BYPASS" && t.event == "non_production_bypass"),
+            "router gate ON 必經 lease facade(BYPASS 轉移可觀測),got {:?}",
+            transitions
+                .iter()
+                .map(|t| (&t.to_state, &t.event))
+                .collect::<Vec<_>>()
+        );
+        // Bypass 不建 SM 物件;withhold 的 release(Bypass) 為設計上 no-op。
+        assert_eq!(h.pipeline.governance.lease.lock().len(), 0);
+        assert!(h.pipeline.governance.lease.lock().get_live().is_empty());
+    });
+}
+
+/// F2-②:withhold 所依賴的釋放語義 seam——對真 Active lease 以
+/// `LeaseOutcome::Failed` + withhold stage 釋放 = SM revoke(execution_failed),
+/// 不 consume、不洩漏 live lease、REVOKED 轉移可觀測。
+#[test]
+fn withhold_failed_release_revokes_active_lease_without_leak() {
+    use openclaw_core::governance_core::{GovernanceCore, GovernanceProfile};
+
+    // Validation core 自動授權(is_authorized=true),再以 Production profile
+    // 參數取真 SM lease——鏡像「未來 withhold 模式若接上 requires_lease profile」
+    // 時 gate.lease_id 會攜帶的 Active lease。
+    let mut governance = GovernanceCore::new_with_profile(GovernanceProfile::Validation);
+    let (ltx, lrx) = std::sync::mpsc::channel();
+    governance.set_lease_transition_tx(ltx);
+    let lease = governance
+        .acquire_lease(
+            "intent-soak-withhold-seam-1",
+            "TRADE_ENTRY",
+            30_000,
+            GovernanceProfile::Production,
+            "router",
+        )
+        .expect("authorized core + Production profile 必取得真 Active lease");
+    assert!(lease.is_active(), "必須是 LeaseId::Active 而非 Bypass");
+    assert_eq!(
+        governance.lease.lock().get_live().len(),
+        1,
+        "釋放前必有一條 live lease"
+    );
+
+    // 與 withhold 塊逐字同款的釋放呼叫(Failed + withhold stage)。
+    super::release_decision_lease_for_governance(
+        &governance,
+        Some(lease.as_str()),
+        super::LeaseOutcome::Failed,
+        super::BOUNDED_PROBE_SOAK_WITHHELD_LEASE_STAGE,
+    );
+
+    assert!(
+        governance.lease.lock().get_live().is_empty(),
+        "Failed 釋放後不得殘留 live lease(洩漏)"
+    );
+    let states = governance.lease.lock().snapshot_states();
+    assert!(
+        states
+            .iter()
+            .all(|(_, s)| format!("{s}") == "REVOKED"),
+        "Failed 釋放 = revoke(非 consume),got {states:?}"
+    );
+    let transitions: Vec<_> = lrx.try_iter().collect();
+    assert!(
+        transitions
+            .iter()
+            .any(|t| t.to_state == "REVOKED" && t.event == "revoke_requested"),
+        "REVOKED 轉移必可觀測(execution_failed 審計軌)"
+    );
+}
+
+/// F2-③:源碼契約(include_str! 範式,先例見 tick_pipeline/tests/
+/// fast_track_reduce.rs)——withhold 塊(should_withhold_approved_open 命中至
+/// continue)必含 lease Failed 釋放與完整審計動作。「刪 release 呼叫」的
+/// mutation 由本測試咬紅(行為級 bite 因 Bypass 架構不可得,見上方模塊註記)。
+#[test]
+fn soak_withhold_block_lease_release_contract() {
+    let src = include_str!("step_4_5_dispatch.rs");
+    let start = src
+        .find(".should_withhold_approved_open(")
+        .expect("withhold 判定呼叫必存在");
+    let end = start
+        + src[start..]
+            .find("continue;")
+            .expect("withhold 塊必以 continue 收尾");
+    let block = &src[start..end];
+    for required in [
+        "release_decision_lease_for_governance",
+        "LeaseOutcome::Failed",
+        "BOUNDED_PROBE_SOAK_WITHHELD_LEASE_STAGE",
+        "gate.lease_id.as_deref()",
+        "record_undispatched_rejection",
+        "soak_withheld_opens += 1",
+    ] {
+        assert!(
+            block.contains(required),
+            "withhold 塊缺失必要動作 `{required}`——lease Failed 釋放/審計形狀被 mutation 移除"
+        );
+    }
 }
 
 #[test]
