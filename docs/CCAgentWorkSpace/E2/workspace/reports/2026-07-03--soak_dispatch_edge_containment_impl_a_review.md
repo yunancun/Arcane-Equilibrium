@@ -163,3 +163,50 @@
 
 - 按派工指示,E2/memory.md 屬並行 session 改動中檔案「絕不觸碰」——本輪完成序列的 memory 追加**跳過**,結論以本報告+inline 回報為準,待並行 session 收手後由 PM 裁定補記。
 - E2 未改任何業務代碼;唯一寫檔 = 本報告。mutation 探針經 scratchpad backup 完整還原(git diff --stat 親驗)。
+
+---
+
+# Re-review 第三輪(殘留清零批:L-R1/L-R2/L-R3/L-1/NOTE-1)· 2026-07-03
+
+- 基準:HEAD `77c7ce95b`(IMPL-A 已 commit,本地領先 origin/main `2bc69697c` 一個 commit=待 PM push,預期);delta 恰 3 檔(writer +172 / dispatch +16 / dispatch_tests +37,親驗)。並行 session 檔(memory/、各角色 memory.md、E1 報告)照舊零觸碰。
+
+## 裁決:RETURN_TO_E1(1 個必修小項 R3-1,按 operator 新原則「發現=修復」不留殘留;五項修復本身全數閉合)
+
+### 五項修復逐項核驗(全親讀+親跑)
+
+**L-R1(TOCTOU 消除)= 閉合,機制與失效方向論證成立**
+- 自寫側 `advance_ledger_stat_after_self_write`(writer.rs):expected_len = 舊快照 len(None→0)+ 自寫 bytes(json.len()+1,writeln! 恰一個 `\n`);實際 stat 僅 len 恰等時採納,否則保留舊快照→下一事件必重讀。窮舉失效方向:外部行擠進窗口 / flush 未全落盤 / 啟動 stat 曾失敗(快照 None)/ bytes 計算錯——**全部收斂為「至多多一次重讀」,無任何路徑產生盲窗**。
+- refresh 側:快照改取**讀前** stat(pre_read),讀與 stat 間的外部 append 已入 cache 而快照偏小→至多一次過觸發重讀;反向吞行盲窗被消除。`?` 傳播在賦值前,Err 時 cache/快照原狀不變(親讀證)。
+- 測試 2 條均真咬:**mutation 親跑**——advance 還原為修前 stat-as-snapshot → `self_write_snapshot_does_not_swallow_racing_external_append` **紅**、no-race 對照測綠(精準區分);對照測的 cache-marker 手法同時釘住 O(1)(bytes 計算錯→快照不採納→誤重讀→marker 消失→紅,堵「靜默退回 O(n²)」)。cmp byte-identical 還原。
+
+**L-R2 = 閉合;E1「無獨立可觀測失效模式」聲明覆核=基本成立,唯一獨立 corner 找到且落在已接受病態案例內**
+- 對抗推演:無 refresh_ok gate 時,capture-error 分支的 advance 在「refresh 因外部變化失敗」場景下 expected_len ≠ actual(含外部 bytes)→ L-R1 本就拒採納→行為等價。**唯一 gate 獨立生效的輸入**:外部「同長度改寫」(len 不變僅 mtime 變)觸發 refresh + 讀恰好瞬時失敗——無 gate 時 advance 會採納(len 恰等 expected)把 mtime-only 變化吞掉。此 corner 需疊加 F1 輪已明文接受的同長改寫病態案例。裁定:gate 是正確的 belt+suspenders,獨立測試缺失有理,行為 bite 由 L-R1 測承擔的聲明**接受**。
+- refresh 失敗→capture-error row 落盤但快照不推進→下一事件必重讀(自癒);plan-missing 持續態(refresh 成功、build 失敗)快照正常推進→無 O(n²) 回退。兩向都對。
+
+**L-R3 = 閉合**:refresh 內 flush 吞錯改 warn;無節流理由(僅外部變化時執行=cron 每小時級天然限頻+同檔既有 flush warn 均無節流)成立;flush 失敗不中斷重讀+快照取讀前 stat→下事件重試,方向一致。
+
+**L-1 = 閉合**:withhold 契約補 `!block.contains("emit_decision_feature")` 負向釘(ML 污染防線);block 內現有註釋不含該字串,無假紅。
+
+**NOTE-1(live Production 真實路徑)= 閉合,coordinator 三重點逐一核**
+- ① 釋放點:`if final_qty <= 0.0 {` 塊內序=reason 構造(純)→on_rejection(策略回滾)→**release(新)**→qty_zero_skips+=1→debug log→continue;判定與 continue 間**無持久化/channel/emit 副作用**;無雙重釋放——`decision_lease_id = gate.lease_id.clone()` 與 channel-closed/missing 釋放分支、fill consumer 均在 continue 後不可達,本 iteration 再無 lease 使用。與緊鄰 withhold 塊完全同構(同 helper 同 outcome,僅 stage 字串異)。
+- ② 下游互動:`check_expiry`(sm/lease.rs:508)只掃 `!o.state.is_terminal()` 的過期 lease——REVOKED 是 terminal→guardian **不會 double-handle**;sweep 純清理+telemetry,無任何行為依賴「洩漏的 Active lease 存在」;提前 Failed 釋放嚴格減少 stale lease。demo/live_demo(Validation→Bypass)release=no-op,**當前 runtime 行為零變化**(live+Mainnet 今日未跑);live 下 REVOKED(即時)取代 EXPIRED(guardian 延後),transition 淨量近中性。
+- ③ `qty_zero_skips` 計數:遞增位置/語義未動,契約測試釘 `qty_zero_skips += 1` 在塊內;靜默 skip(debug log、無 reject 記錄)未變。
+- 契約測試 span 唯一(`if final_qty <= 0.0 {` 全檔恰 1 hit;withhold 的 continue 在 span 起點前,不誤截)。**mutation 親跑**:刪 release 呼叫→`qty_zero_skip_block_lease_release_contract` **紅**(精準訊息)→cmp byte-identical 還原。Failed 釋放語義由 F2-② seam 測共同覆蓋(同 helper 同 outcome)成立。
+
+### 新 finding(必修,不落「需核實/不確定/需 operator 決策」三例外)
+
+**R3-1:qty-zero 契約測試缺 QTY-ZERO-SKIP-1 負向釘**(`step_4_5_dispatch_tests.rs:1139-1158`)
+- 事實鏈:QTY-ZERO-SKIP-1 核心語義=「靜默 skip,**不寫** reject label、**不污染** decision_features」;該負向不變量**至今零測試釘**——既有測試只覆蓋 counter default/serde/snapshot(`dual_rail_dispatch.rs:1396-1411` 註釋明言端到端行為交 E4 runtime)。歷史上被 QTY-ZERO-SKIP-1 修掉的 bug 正是此塊呼叫 record/emit——今日 mutation「把 `record_undispatched_rejection` / `emit_decision_feature_intent_rejected` 加回 qty-zero 塊」全套仍綠。
+- 本輪新契約測試自稱「與 withhold 塊對齊」,而 withhold 契約(post-L-1)有負向釘,qty-zero 契約沒有——同 delta 內不對稱。
+- 修法(一處 2 斷言):`qty_zero_skip_block_lease_release_contract` 補 `!block.contains("record_undispatched_rejection")` + `!block.contains("emit_decision_feature")`(同 L-1 範式;block 內現有註釋不含這兩字串,無假紅)。
+
+### 驗證(親跑)
+
+- lib **4261 passed / 0 failed / 1 ignored**(4258+3);全套 **4670 passed / 0 failed**(awk 加總,基線 4667+3)——與 E1 宣稱逐位一致。
+- mutation 2 輪(NOTE-1 release 刪除→契約紅;L-R1 stat-as-snapshot 還原→TOCTOU 釘紅/對照綠)親跑,均 cmp byte-identical 還原,工作樹 delta 恢復 3 檔 +214/−11。
+- 注釋全中文優先含 why-rationale;零硬編碼路徑;零 env/settings 改動;新 prod 代碼零 unwrap/unsafe。
+- §5:sibling 零新 push;本地領先 origin/main 1 commit(IMPL-A 待 push)如實記錄,無 git 寫操作。
+
+## R3-1 單點覆核(第四輪)= 閉合 → **PASS to E4**
+
+兩負向斷言在位含中文 why-rationale(dispatch_tests.rs `qty_zero_skip_block_lease_release_contract` 尾部);親跑綠;E2 獨立 mutation(以可編譯真碼形狀 `let _ = record_undispatched_rejection;` 重引符號入 qty-zero 塊)→ 契約測**紅**(:1164「絕不得寫 reject 記錄」精準訊息)→ cmp byte-identical 還原 → lib **4261 passed / 0 failed / 1 ignored** 全綠(斷言折入既有測試,總數不變,與宣稱一致)。全鏈裁決:IMPL-A + 三輪修復(F1-F4 / 五項殘留清零 / R3-1)全數閉合,**PASS to E4**。

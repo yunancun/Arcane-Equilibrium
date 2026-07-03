@@ -163,3 +163,47 @@ E2 narrow re-review(限 F1-F4 delta)→ E4 回歸(Linux 真 engine,含部署後 
 1. F1 stat 失效的並發窗口論證(`refresh_ledger_cache_if_externally_changed` 的 flush-before-reread + 重讀後重 stat;mtime 粒度病態案例接受聲明)。
 2. F2 架構事實(Validation→Bypass→release no-op)是否認可;三層覆蓋 + 源碼契約 bite 是否滿足「load-bearing claim 必有 test bite」紀律,或 E2 另裁(如:要求把 Bypass 事實回寫設計文檔——屬 PM 收尾)。
 3. F2-② seam 測試用 Production profile 參數在 Validation core 上取真 lease 的手法是否可接受(鏡像未來接線,非現實路徑)。
+
+---
+
+## 十一、殘留修復輪(2026-07-03,operator 裁決「殘留項不留」;基準 = HEAD `77c7ce95b`)
+
+出處:E2 narrow re-review + E4 報告殘留項(設計正本 §1.7 登記)。本輪改 3 檔:`demo_learning_lane_writer.rs`、`step_4_5_dispatch.rs`、`step_4_5_dispatch_tests.rs`。
+
+### L-R2:capture-error 分支無條件推進 stat 快照吞掉重試不變量
+
+修法:`run_writer` 以 `refresh_ok` 記住 refresh 成敗;capture-error 分支**僅 refresh 成功時**推進快照,失敗保留舊 stat → 下一事件 stat 必不匹配 → 必重試重讀。
+誠實聲明:與 L-R1 的 expected-len 採納機制疊加後,`refresh_ok` gate 無獨立可觀測失效模式(refresh 失敗 + 外部行存在時,expected-len 必不符 → 本就不採納;唯一 gate 獨佔場景 = 「stat 瞬時失敗且無外部變化」,該場景 cache 本就不 stale)。屬 belt+suspenders 的字面落實,行為級 bite 由 L-R1 兩測承擔,未另造假測試。
+
+### L-R3:refresh 內 `let _ = bw.flush()` 靜默吞錯
+
+修法:改 `if let Err(e) = bw.flush() { warn!(...) }`(比照檔內既有 flush warn 風格)。**節流取捨**:未加額外節流狀態——此 flush 僅在「偵測到外部變化」時執行(cron 每小時級),觸發頻率天然受限;檔內既有 run_writer flush warn 亦無節流。flush 失敗不中斷重讀(讀到缺自寫緩衝行的檔案時快照取讀前 stat,下一事件必重試),註釋已寫明。無 log 斷言測試(純觀測面)。
+
+### L-R1(TOCTOU):自寫 flush 與 stat 快照之間的外部 append 盲窗
+
+修法 = coordinator 建議的預期檔長法,雙側消除:
+- **自寫側**:新 `advance_ledger_stat_after_self_write(path, stat, written_bytes)`——以「寫前快照長度 + 自寫 bytes(json.len()+1)」推算預期檔長,實際 stat **僅在 len 恰等於預期時採納**;不等(外部行擠進窗口 / flush 未全落盤)保留舊快照 → 下一事件必重讀。mtime 陷阱解法:mtime 只在採納時隨 actual 一起收,不合成、不單獨比對 → 無 spurious re-read(O(1) 保留,由對照組測試釘死)。
+- **refresh 側**(同類窗口,順帶消除):快照改取「讀之前」的 stat(原為讀後)——讀後外部 append 只造成下一事件過觸發一次重讀(方向安全),不再可能把讀不到的行 bytes 吞進快照。
+- **失效方向**:兩側任何不確定都收斂為「多一次重讀」,永不產生盲窗。
+- 測試:`self_write_snapshot_does_not_swallow_racing_external_append`(確定性重現窗口結局:自寫+外部行都已落盤後才推進快照 → 外部行必於下一 refresh 可見;**mutation 親證**:把 advance 改回修前 stat-as-snapshot 語義 → 紅)+ `self_write_snapshot_adopts_without_race_and_avoids_spurious_reread`(cache 標記行技巧證無競態時零無謂重讀)。
+
+### L-1:withhold 契約測試補負向釘子
+
+`soak_withhold_block_lease_release_contract` 增 `assert!(!block.contains("emit_decision_feature"))`。**mutation 親證**:往 withhold 塊插入 `emit_decision_feature_intent_rejected` 呼叫 → 紅 → 還原。
+
+### NOTE-1:QTY-ZERO-SKIP 路徑 lease 洩漏(pre-existing 不對稱)
+
+修法:`if final_qty <= 0.0` 塊 `continue` 前補 `release_decision_lease_for_governance(..., LeaseOutcome::Failed, QTY_ZERO_SKIP_LEASE_STAGE)`(新常量 `"qty_zero_skip"`,獨特 stage 利審計)。live(Production)下 lease 為真 Active,本修復消除 ExpiryGuardian TTL 兜底的真實洩漏窗口;demo/live_demo(Validation)為 Bypass no-op。
+測試:`qty_zero_skip_block_lease_release_contract`(源碼契約,手法同 F2-③;**mutation 親證**:刪釋放呼叫 → 紅 → 還原);Failed 釋放語義(revoke 非 consume、零 live 殘留)由既有 F2-② seam 測試共同覆蓋(同一 helper 同一 outcome)。未做 pipeline 級 qty-zero 整合測試(需 instrument cache 取整到 0 的重 fixture,契約+seam 已覆蓋 load-bearing claim)。
+
+### R3-1(E2 第三輪):qty-zero 契約測試補 skip-not-reject 負向釘
+
+`qty_zero_skip_block_lease_release_contract` 增兩斷言:`!block.contains("record_undispatched_rejection")` + `!block.contains("emit_decision_feature")`——QTY-ZERO-SKIP-1 的核心語義(skip-not-reject,防 trading.intents label 與 ML 污染)修前零測試咬(E2 驗證插回呼叫全套仍綠)。塊內註釋已預先 grep 證不含此二字串(無假紅)。**mutation 親證**:把 `record_undispatched_rejection` 呼叫插回 qty-zero 塊 → 該契約測必紅 → 還原 cmp byte-identical → lib 4261/0 全綠。
+
+### 驗證(殘留修復輪)
+
+- `cargo build` 綠;clippy 觸碰檔零新 warning(writer `&& true` 兩條 pre-existing 行位移)。
+- `cargo test --lib`:**4261 passed / 0 failed / 1 ignored**(基線 4258,+3 = L-R1 兩測 + NOTE-1 契約 1;L-1 為既有測試內加斷言)。
+- `cargo test` 全套:**4670 passed / 0 failed**(基線 4667,+3),零 FAILED target。
+- mutation 自證 3 輪(L-R1 stat-as-snapshot 回退→紅 / NOTE-1 刪釋放→紅 / L-1 插 emit→紅),均 scratchpad backup 還原 cmp byte-identical。
+- scope:本輪僅 3 檔(git status 親證);無 env/commit/push;並行 session 檔案零觸碰(本輪紀律含各 agent memory.md → memory 追加再次跳過,待 PM 裁定補記)。

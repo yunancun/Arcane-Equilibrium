@@ -306,13 +306,16 @@ async fn run_writer(
                 let active_order_dispatch_channel_available = order_dispatch_tx.is_some();
                 // F1:先做 stat 級外部變化偵測;refresh 失敗走既有 capture-error
                 // 分支(鏡像修前「每事件讀檔失敗 → capture-error row」語義)。
-                let admission_build = refresh_ledger_cache_if_externally_changed(
+                // L-R2:記住 refresh 成敗——失敗時 capture-error 分支不得推進
+                // stat 快照,保留舊 stat 使下一事件必重試重讀。
+                let refresh_result = refresh_ledger_cache_if_externally_changed(
                     &mut bw,
                     &ledger_path,
                     &mut ledger_rows,
                     &mut ledger_stat,
-                )
-                .and_then(|()| {
+                );
+                let refresh_ok = refresh_result.is_ok();
+                let admission_build = refresh_result.and_then(|()| {
                     build_runtime_admission_result(
                         &plan_path,
                         &ledger_rows,
@@ -371,10 +374,15 @@ async fn run_writer(
                                             }
                                         }
                                     }
-                                    // F1:自寫落盤後同步 stat 快照,避免下一事件把
-                                    // 自己的寫入誤判為外部變化而觸發無謂全量重讀
-                                    // (那會退回 O(n²))。
-                                    ledger_stat = stat_ledger(&ledger_path).ok().flatten();
+                                    // F1+L-R1:自寫落盤後以「預期檔長」推進快照
+                                    // (直接 stat-as-snapshot 會吞掉窗口內的外部
+                                    // append → 盲窗;預期長不符即保留舊快照,
+                                    // 下一事件必重讀)。+1 = b"\n"。
+                                    advance_ledger_stat_after_self_write(
+                                        &ledger_path,
+                                        &mut ledger_stat,
+                                        json.len() as u64 + 1,
+                                    );
                                 }
                             }
                             Err(e) => {
@@ -410,8 +418,16 @@ async fn run_writer(
                                             "demo-learning lane capture-error flush failed / demo-learning lane capture-error flush 失敗"
                                         );
                                     }
-                                    // F1:同上,自寫落盤後同步 stat 快照。
-                                    ledger_stat = stat_ledger(&ledger_path).ok().flatten();
+                                    // L-R2:僅 refresh 成功時推進快照;refresh 失敗
+                                    // 保留舊 stat → 下一事件 stat 必不匹配 → 必重試
+                                    // 重讀(否則 cache 對外部行的盲態被快照固化)。
+                                    if refresh_ok {
+                                        advance_ledger_stat_after_self_write(
+                                            &ledger_path,
+                                            &mut ledger_stat,
+                                            json.len() as u64 + 1,
+                                        );
+                                    }
                                 }
                             }
                             Err(ser_err) => {
@@ -669,15 +685,52 @@ fn refresh_ledger_cache_if_externally_changed(
     if current == *ledger_stat {
         return Ok(());
     }
-    let _ = bw.flush();
+    // L-R3(E2 re-review):flush 失敗要可見,不得靜默吞錯。觸發頻率天然受限
+    // (僅外部變化時執行,cron 每小時級),無需額外節流狀態。flush 失敗不中斷
+    // 重讀:讀到的檔案缺自寫緩衝行時,快照取讀前 stat,下一事件必重試。
+    if let Err(e) = bw.flush() {
+        warn!(
+            error = %e,
+            ledger_path = %ledger_path.display(),
+            "demo-learning lane ledger flush before cache reread failed / ledger cache 重讀前 flush 失敗"
+        );
+    }
+    // L-R1(refresh 側 TOCTOU 消除):快照取「讀之前」的 stat。讀與 stat 之間
+    // 若有外部 append,該行已被讀進 cache 而快照長度偏小 → 下一事件至多過觸發
+    // 一次重讀(方向安全);反向(讀後才 stat)會把讀不到的外部行 bytes 吞進
+    // 快照,形成盲窗。
+    let pre_read = stat_ledger(ledger_path)?;
     *ledger_rows = read_ledger_rows(ledger_path)?;
-    *ledger_stat = stat_ledger(ledger_path)?;
+    *ledger_stat = pre_read;
     tracing::debug!(
         ledger_path = %ledger_path.display(),
         rows = ledger_rows.len(),
         "demo-learning lane ledger cache refreshed after external change / 偵測到外部 ledger 變化，cache 已全量重讀"
     );
     Ok(())
+}
+
+/// L-R1(自寫側 TOCTOU 消除):自寫落盤後推進 stat 快照。
+///
+/// 為什麼不能直接拿「當下 stat」當快照:flush 與 stat 之間若有外部 append,
+/// 該外部行的 bytes 會被吞進快照,直到下一次外部變化前全盲。改為以
+/// 「寫前快照長度 + 自寫 bytes」推算預期檔長,實際 stat 僅在 len 恰等於預期
+/// 時採納;不等(外部行擠進窗口 / flush 未全落盤)則保留舊快照,下一事件
+/// stat 必不匹配 → 觸發全量重讀,外部行必可見。
+/// 失效方向:只會多一次重讀(過觸發),永不產生盲窗。
+fn advance_ledger_stat_after_self_write(
+    ledger_path: &Path,
+    ledger_stat: &mut Option<LedgerStat>,
+    written_bytes: u64,
+) {
+    let expected_len = ledger_stat.as_ref().map_or(0, |s| s.len) + written_bytes;
+    match stat_ledger(ledger_path) {
+        Ok(Some(actual)) if actual.len == expected_len => {
+            *ledger_stat = Some(actual);
+        }
+        // 不採納(len 不符或 stat 失敗):保留舊快照,下一事件必重讀。
+        _ => {}
+    }
 }
 
 /// 把剛寫入檔案的 JSONL 行 parse 回 `LedgerRecord` 後 push 進 in-memory cache。
@@ -1471,6 +1524,103 @@ mod tests {
             data_dir
                 .join("cost_gate_learning_lane")
                 .join("demo_learning_lane_plan_latest.json")
+        );
+    }
+
+    /// L-R1 釘子:「自寫落盤與快照推進之間」外部 append(TOCTOU 窗口)→ 快照
+    /// 不得吞掉外部 bytes,下一次 refresh 必看見外部行。修前語義(自寫後直接
+    /// stat-as-snapshot)會把外部行 bytes 收進快照 → refresh 判無變化 → 本測必紅。
+    #[test]
+    fn self_write_snapshot_does_not_swallow_racing_external_append() {
+        let tmp = TempDir::new().unwrap();
+        let ledger_path = tmp.path().join("probe_ledger.jsonl");
+        std::fs::write(
+            &ledger_path,
+            "{\"record_type\":\"probe_admission_decision\",\"attempt_id\":\"a1\"}\n",
+        )
+        .unwrap();
+        let mut ledger_stat = stat_ledger(&ledger_path).unwrap();
+        let mut ledger_rows = read_ledger_rows(&ledger_path).unwrap();
+
+        // 重現窗口結局:自寫行與外部行都已落盤,但快照推進只知道自寫 bytes。
+        let self_row = r#"{"record_type":"probe_admission_decision","attempt_id":"a2"}"#;
+        let external_row = r#"{"record_type":"side_cell_disabled","side_cell_key":"ma_crossover|ETHUSDT|Sell","disable_reason":"manual_disable"}"#;
+        {
+            use std::io::Write as _;
+            let mut f = OpenOptions::new().append(true).open(&ledger_path).unwrap();
+            writeln!(f, "{self_row}").unwrap();
+            writeln!(f, "{external_row}").unwrap();
+        }
+        push_ledger_cache(&mut ledger_rows, self_row);
+        advance_ledger_stat_after_self_write(
+            &ledger_path,
+            &mut ledger_stat,
+            self_row.len() as u64 + 1,
+        );
+
+        // 實際 len = 預期 + 外部 bytes → 快照必不採納 → refresh 必觸發重讀。
+        let (mut bw, _) = open_writer(&ledger_path).unwrap();
+        refresh_ledger_cache_if_externally_changed(
+            &mut bw,
+            &ledger_path,
+            &mut ledger_rows,
+            &mut ledger_stat,
+        )
+        .unwrap();
+        assert!(
+            ledger_rows
+                .iter()
+                .any(|r| r.record_type.as_deref() == Some("side_cell_disabled")),
+            "窗口內外部 append 的 disable row 必於下一次 refresh 可見(L-R1)"
+        );
+    }
+
+    /// L-R1 對照組:無外部競態時快照正常採納,下一事件不觸發無謂重讀
+    /// (O(1) 攤還保留)。以 cache 專屬標記行偵測重讀:若 refresh 誤觸發,
+    /// 標記會被檔案內容覆蓋而消失。
+    #[test]
+    fn self_write_snapshot_adopts_without_race_and_avoids_spurious_reread() {
+        let tmp = TempDir::new().unwrap();
+        let ledger_path = tmp.path().join("probe_ledger.jsonl");
+        std::fs::write(
+            &ledger_path,
+            "{\"record_type\":\"probe_admission_decision\",\"attempt_id\":\"a1\"}\n",
+        )
+        .unwrap();
+        let mut ledger_stat = stat_ledger(&ledger_path).unwrap();
+        let mut ledger_rows = read_ledger_rows(&ledger_path).unwrap();
+
+        let self_row = r#"{"record_type":"probe_admission_decision","attempt_id":"a2"}"#;
+        {
+            use std::io::Write as _;
+            let mut f = OpenOptions::new().append(true).open(&ledger_path).unwrap();
+            writeln!(f, "{self_row}").unwrap();
+        }
+        push_ledger_cache(&mut ledger_rows, self_row);
+        advance_ledger_stat_after_self_write(
+            &ledger_path,
+            &mut ledger_stat,
+            self_row.len() as u64 + 1,
+        );
+
+        // cache 專屬標記(不在檔案裡):重讀會讓它消失。
+        push_ledger_cache(
+            &mut ledger_rows,
+            r#"{"record_type":"probe_admission_decision","attempt_id":"cache-marker"}"#,
+        );
+        let (mut bw, _) = open_writer(&ledger_path).unwrap();
+        refresh_ledger_cache_if_externally_changed(
+            &mut bw,
+            &ledger_path,
+            &mut ledger_rows,
+            &mut ledger_stat,
+        )
+        .unwrap();
+        assert!(
+            ledger_rows
+                .iter()
+                .any(|r| r.attempt_id.as_deref() == Some("cache-marker")),
+            "無外部變化時 refresh 必為 no-op(快照已採納,不得無謂重讀)"
         );
     }
 

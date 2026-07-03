@@ -47,7 +47,7 @@ Mac 實作→E2 對抗審→E4 回歸→push→Linux pull+`restart_all.sh --engi
 ### 1.7 實作後前提修正(2026-07-03,E1/E2 修復輪定案,PM 回寫)
 - **§1.3「writer 唯一寫者」前提證偽**(E2 F1,MAJOR):cron `cost_gate_learning_lane_cron.sh` 與 Python `runtime_adapter.py` 以同一 `OPENCLAW_DATA_DIR` 對同一 `probe_ledger.jsonl` append(probe_outcome / side_cell_disabled rows),Rust 消費鏈靠這些行做 auto/manual disable。純 in-memory cache 會使兩條 disable 路徑對運行中 engine 全盲。**落地修法**:cache 附 `LedgerStat{len,mtime}` 每事件 stat 比對,外部變化(增長/截斷/替換/刪除)→先 flush 自寫緩衝再全量重讀;自寫落盤同步快照防自觸發。攤還仍 O(1),§1.3 目的(消除每事件全量重讀)保留。
 - **§1.1 lease 語義架構事實**(E2 F2 覆核定案):withhold 可達模式(demo/live_demo)恆為 Validation profile → router gate ON 時 `acquire_lease` 短路回 `LeaseId::Bypass`,`release_lease(Bypass)` 為設計上 no-op——withhold 塊的 `LeaseOutcome::Failed` 釋放屬**結構性防禦**(防未來 profile 映射變動),非當前熱路徑。測試以三層釘死:gate-ON pipeline(BYPASS 轉移可觀測)+ 真 Active lease seam(revoke=execution_failed)+ 源碼契約(withhold 塊必含 Failed 釋放)。
-- 殘留 follow-up(E2/E4 裁定不阻塞,登記待後續觸碰時折入):writer stat 快照 µs 級 TOCTOU(L-R1)/capture-error 分支無條件更新快照(L-R2,一行修)/refresh 內靜默 flush 吞錯(L-R3)/withhold 源碼契約補 `emit_decision_feature` negative token(E4 L-1)/QTY-ZERO-SKIP 路徑 lease 不釋放之既有不對稱(E2 NOTE-1,pre-existing)。
+- ~~殘留 follow-up(E2/E4 裁定不阻塞,登記待後續觸碰時折入)~~ **已於 2026-07-03 同日全數清零**(operator 裁定新原則「問題發現=修復,不殘留」;E1→E2 兩輪→E4 鏈閉合,全套 4670/0):L-R1 TOCTOU 以 expected-len 快照推進消除(失效方向全收斂為多一次重讀,永不盲窗)/L-R2 改 refresh 成功才推進快照/L-R3 flush 吞錯補 warn/L-1+R3-1 withhold 與 qty-zero 兩源碼契約補 record/emit negative token/NOTE-1 qty-zero 塊補 `LeaseOutcome::Failed` 釋放(stage=`qty_zero_skip`,消除 live Production 真 Active lease 的 ExpiryGuardian TTL 兜底洩漏窗口)。關鍵路徑均經雙向 mutation 自證(E1 自證+E2 獨立抽驗)。
 
 ---
 

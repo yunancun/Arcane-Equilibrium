@@ -50,6 +50,10 @@ const BOUNDED_PROBE_SOAK_WITHHELD_REJECT_REASON: &str =
 /// withhold 路徑釋放 lease 的獨特 stage 字串(LeaseOutcome::Failed 先例沿用,
 /// 不引入新 outcome 值;審計面可由此字串定位 soak withhold 釋放)。
 const BOUNDED_PROBE_SOAK_WITHHELD_LEASE_STAGE: &str = "bounded_probe_soak_isolation_withheld";
+/// QTY-ZERO-SKIP 路徑釋放 lease 的獨特 stage 字串(E2 NOTE-1,operator 裁決
+/// 修復:與 withhold 塊對齊,消除 live(Production)下真 Active lease 靠
+/// ExpiryGuardian TTL 兜底的洩漏窗口)。
+const QTY_ZERO_SKIP_LEASE_STAGE: &str = "qty_zero_skip";
 
 pub(crate) fn bounded_probe_soak_isolation_enabled_from_values(
     engine_mode: &str,
@@ -983,6 +987,18 @@ impl TickPipeline {
                                         final_qty,
                                     );
                                     strategy.on_rejection(intent, &reason);
+                                    // E2 NOTE-1(operator 裁決修復):與緊鄰 withhold
+                                    // 塊對齊,continue 前釋放 gate 已取得的 lease。
+                                    // 修前此路徑靠 ExpiryGuardian TTL 兜底——live
+                                    // (Production)下 lease 是真 Active,構成真實
+                                    // 洩漏窗口;demo/live_demo(Validation)為
+                                    // Bypass no-op。
+                                    release_decision_lease_for_governance(
+                                        &self.governance,
+                                        gate.lease_id.as_deref(),
+                                        LeaseOutcome::Failed,
+                                        QTY_ZERO_SKIP_LEASE_STAGE,
+                                    );
                                     self.stats.qty_zero_skips += 1;
                                     tracing::debug!(
                                         symbol = %intent.symbol,
