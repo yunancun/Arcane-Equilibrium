@@ -10,7 +10,7 @@ export const meta = {
   whenToUse: 'ultracode 啟用且 operator 要求全盤審查/全面優化檢查/冷酷對抗審計時，由主會話（conductor）按 ultracode-full-audit skill 調用；Stage 0 凍結與 Stage 3-4 收斂由主會話親做；默認 report-only',
   phases: [
     { title: 'Audit', detail: '審計 agent 並行 fan-out（默認 10 軸；read-only 邊界+本輪 focus 注入；finding 後置標註 defect_type/anchor；附 negative-space 盲區）' },
-    { title: 'Verify', detail: '每軸原始 C/H finding 雙質疑者（證據鏈∥影響）+ 高危類加第三質疑者（可達性）+ seam critic 審軸交界盲區' },
+    { title: 'Verify', detail: '每軸原始 C/H+目的承載 M finding 雙質疑者（證據鏈∥影響）+ 高危類加第三質疑者（可達性）+ seam critic 審軸交界盲區' },
     { title: 'Cluster', detail: '對 confirmed 按 (file, anchor) 無損機械聚簇呈現，標 hit_axes（純報告層，不改 verify/fix 粒度）' },
     { title: 'Fix', detail: 'args.fix=true 時：對每條 confirmed 原始 finding（非聚簇體）E1 worktree 修復 → E2 複審' },
     { title: 'Regression', detail: '有修復落地時：E4 全量回歸對照 memory BASELINE' },
@@ -18,9 +18,13 @@ export const meta = {
 }
 
 // defect_type 後置多選標註（含 other），僅供呈現層聚簇與 corroboration，不進去重主鍵、不限制調查範圍
-const DEFECT_TYPES = ['hardcoded-config', 'missing-gate', 'auth-bypass', 'fake-success', 'dead-code', 'duplicate-logic', 'leakage', 'drift-source-runtime', 'lineage-gap', 'untruthful-ai', 'replay-misuse', 'perf-hotpath', 'index-broken', 'doc-stale', 'test-blindspot', 'bybit-incompat', 'math-error', 'schema-issue', 'secret-leak', 'readability-debt', 'other']
+const DEFECT_TYPES = ['hardcoded-config', 'missing-gate', 'auth-bypass', 'fake-success', 'dead-code', 'duplicate-logic', 'leakage', 'drift-source-runtime', 'lineage-gap', 'untruthful-ai', 'replay-misuse', 'perf-hotpath', 'index-broken', 'doc-stale', 'test-blindspot', 'bybit-incompat', 'math-error', 'schema-issue', 'secret-leak', 'readability-debt', 'over-gate', 'evolution-blocker', 'other']
 // 高危類：強制加第三質疑者（可達性/可利用性）
 const HIGH_RISK_TYPES = ['auth-bypass', 'secret-leak', 'missing-gate', 'leakage', 'replay-misuse']
+// 機能/摩擦類（over-gate=負淨貢獻控制、evolution-blocker=進化凍死）：「生產不可達」正是缺陷本身，不適用 latent 降級
+const CAPABILITY_TYPES = ['over-gate', 'evolution-blocker']
+// 目的承載類：MEDIUM 也進對抗複核（削弱可審計性/進化能力/盈利的缺陷不得沉底）
+const GOAL_TYPES = ['over-gate', 'evolution-blocker', 'lineage-gap']
 
 const FINDINGS_SCHEMA = {
   type: 'object', required: ['verdict', 'confidence', 'findings'], additionalProperties: false,
@@ -107,7 +111,7 @@ const focus = (args && args.focus) || null
 const baseline = (args && args.baseline) || null
 
 const READONLY = 'read-only audit 硬邊界：不修復 / 不改功能 / 不部署 / 不重啟 runtime / 不改 DB schema / 不動 live·demo·paper auth / 不啟動交易 / 不改 risk·strategy·TOML live config。Linux 證據僅允許 ssh trade-core read-only 命令；遇任何 rebuild·restart·migration·auth·trading mutation 需求立即停止、標 BLOCKED 回報。'
-const ANNOTATE = '【後置標註，寫完每條 finding 後再填，不要讓它影響你的調查方向】defect_type：從枚舉多選（覆蓋不全選 other，可多選——多視角分歧是 corroboration 證據不是錯誤）；symbol_anchor：缺陷所在函數/配置鍵/常數名（涉配置或常數的一律填 config-key/TOML-key/env-var 名，跨軸天然對齊）；root_anchor：若你判斷症狀的根因在上游別處，填上游 檔::符號。這些僅供事後機械聚簇展示，絕不限制你的調查範圍與深度。'
+const ANNOTATE = '【後置標註，寫完每條 finding 後再填，不要讓它影響你的調查方向】defect_type：從枚舉多選（覆蓋不全選 other，可多選——多視角分歧是 corroboration 證據不是錯誤）；symbol_anchor：缺陷所在函數/配置鍵/常數名（涉配置或常數的一律填 config-key/TOML-key/env-var 名，跨軸天然對齊）；root_anchor：若你判斷症狀的根因在上游別處，填上游 檔::符號。這些僅供事後機械聚簇展示，絕不限制你的調查範圍與深度。severity 計價校正（裁決座標）：over-gate/evolution-blocker 類 impact 以被壓制的期望盈利/被凍結的進化價值計、readability-debt/duplicate-logic 類以重複開發成本（被 agent 讀改頻率×體量×剩餘壽命）計，不以工程風險計——風控雙向：負淨貢獻控制（拒真無風險換益/凍死槓桿/摩擦>保護）與缺失控制同類缺陷。'
 
 function focusFor(ax) {
   if (!focus) return ''
@@ -124,40 +128,47 @@ const audits = (await parallel(axes.map(ax => () =>
   ).then(r => r && { axis: ax, ...r }),
 ))).filter(Boolean)
 
+// 覆蓋洞顯式化：BLOCKED/未回報軸 ≠ 該域清白（verdict 欄位有消費者，不再靜默）
+const coverage_holes = axes.filter(ax => !audits.some(a => a.axis === ax)).concat(audits.filter(a => a.verdict === 'BLOCKED').map(a => a.axis))
+if (coverage_holes.length) log(`⚠️ 覆蓋洞：${coverage_holes.join(', ')} BLOCKED/未回報 — 本輪結果不構成該域清白證明`)
+
 const all = audits.flatMap(a => (a.findings || []).map(f => ({ ...f, axis: a.axis })))
 const assumptions = audits.flatMap(a => (a.assumptions || []).map(x => ({ ...x, axis: a.axis })))
-const critical = all.filter(f => f.severity === 'CRITICAL' || f.severity === 'HIGH')
-log(`共 ${all.length} 條 finding（C/H ${critical.length} 進對抗複核，M/L/INFO 直入報告）+ ${assumptions.length} 條待證假設/盲區`)
+const critical = all.filter(f => f.severity === 'CRITICAL' || f.severity === 'HIGH' || (f.severity === 'MEDIUM' && (f.defect_type || []).some(t => GOAL_TYPES.includes(t))))
+log(`共 ${all.length} 條 finding（C/H+目的承載 M ${critical.length} 進對抗複核，其餘 M/L/INFO 直入報告）+ ${assumptions.length} 條待證假設/盲區`)
 
 phase('Verify')
 // 每軸原始 finding 各跑質疑者（粒度不變，對抗暴露面不被去重壓縮）；高危類追加可達性第三視角
 const verifyJobs = critical.map(f => () => {
   const isHighRisk = f.severity === 'CRITICAL' || (f.defect_type || []).some(t => HIGH_RISK_TYPES.includes(t))
+  const isCapability = (f.defect_type || []).some(t => CAPABILITY_TYPES.includes(t))
   const queries = [
     () => agent(
-      `嘗試反駁這條審計發現（拿不出具體反證則 refuted=false，不為對抗而對抗）：[${f.axis}] ${f.title}\n分類：${f.classification}\n證據：${f.evidence}\n檔案：${f.file || '未指明'}\n你的視角：證據鏈成立性 — 引用的檔案/行/輸出是否真實存在、結論是否過度推斷（INFERENCE/ASSUMPTION 尤其要查）。實地核查後下結論。`,
+      `嘗試反駁這條審計發現（拿不出具體反證則 refuted=false，不為對抗而對抗）：[${f.axis}] ${f.title}\n分類：${f.classification}\n證據：${f.evidence}\n檔案：${f.file || '未指明'}\n你的視角：證據鏈成立性 — 引用的檔案/行/輸出是否真實存在、結論是否過度推斷（INFERENCE/ASSUMPTION 尤其要查）。實地核查後下結論。\n${READONLY}`,
       { label: `verify-evid:${f.axis}`, phase: 'Verify', schema: VERDICT_SCHEMA },
     ),
     () => agent(
-      `嘗試反駁這條審計發現（拿不出具體反證則 refuted=false）：[${f.axis}] ${f.title}\n證據：${f.evidence}\n影響：${f.impact}\n你的視角：影響真實性 — 按證據實地復查，問題是否真實、severity 是否高估。`,
+      `嘗試反駁這條審計發現（拿不出具體反證則 refuted=false）：[${f.axis}] ${f.title}\n證據：${f.evidence}\n影響：${f.impact}\n你的視角：影響真實性 — 按證據實地復查，問題是否真實、severity 是否高估。\n${READONLY}`,
       { label: `verify-impact:${f.axis}`, phase: 'Verify', schema: VERDICT_SCHEMA },
     ),
   ]
   const reachJob = isHighRisk
     ? agent(
-        `可達性/可利用性核查：[${f.axis}] ${f.title}\n證據：${f.evidence}\n檔案：${f.file || '未指明'}\n在當前生產 gate 鏈 / 配置 / 調用圖下，這條路徑是否真能被觸發？給出可達或不可達的具體證據鏈。reachable=生產可觸發 / latent=代碼級存在但生產不可達 / unknown=證據不足。`,
+        `可達性/可利用性核查：[${f.axis}] ${f.title}\n證據：${f.evidence}\n檔案：${f.file || '未指明'}\n在當前生產 gate 鏈 / 配置 / 調用圖下，這條路徑是否真能被觸發？給出可達或不可達的具體證據鏈。reachable=生產可觸發 / latent=代碼級存在但生產不可達 / unknown=證據不足。\n${READONLY}`,
         { label: `verify-reach:${f.axis}`, phase: 'Verify', schema: REACH_SCHEMA },
       ).then(r => r || { reachable: 'unknown', reason: 'no-result' })
     : Promise.resolve(null)
   return Promise.all([parallel(queries), reachJob]).then(([vs, reach]) => {
     const votes = vs.filter(Boolean)
     const refutedCount = votes.filter(v => v.refuted).length
+    const quorum = votes.length === 2   // 質疑者死亡=法定人數不足，降 disputed，不得靜默 confirmed
     return {
       ...f,
-      confirmed: refutedCount === 0,
-      disputed: refutedCount === 1,
+      confirmed: quorum && refutedCount === 0,
+      disputed: refutedCount === 1 || (!quorum && refutedCount === 0),
       reachable: reach ? reach.reachable : null,
-      latent: reach ? reach.reachable === 'latent' : false,
+      // capability/摩擦類「不可達」是缺陷本身（凍死/鎖死），不降級
+      latent: reach ? (reach.reachable === 'latent' && !isCapability) : false,
       refutations: votes.map(v => v.reason).join(' | '),
     }
   })
@@ -202,7 +213,9 @@ let fixes = []
 if (doFix && confirmed.length) {
   phase('Fix')
   // 對「每條 confirmed 原始 finding」修復，不對聚簇體 —— 確保同位置的第二個缺陷不被合併掩蓋
-  const queue = confirmed.slice(0, maxFixes)
+  // 修復隊列按 severity→可達性排序後再截斷（防 CRITICAL 被軸序擠出隊列）
+  const SEV_RANK = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 }
+  const queue = [...confirmed].sort((a, b) => (SEV_RANK[a.severity] ?? 9) - (SEV_RANK[b.severity] ?? 9) || (b.reachable === 'reachable' ? 1 : 0) - (a.reachable === 'reachable' ? 1 : 0)).slice(0, maxFixes)
   if (confirmed.length > maxFixes) log(`修復上限 ${maxFixes}，餘 ${confirmed.length - maxFixes} 條留報告交 PM`)
   fixes = (await pipeline(queue,
     f => agent(
@@ -233,7 +246,7 @@ const slim = f => ({ axis: f.axis, severity: f.severity, title: f.title, file: f
 const report_paths = audits.map(a => ({ axis: a.axis, report: a.report_path })).filter(x => x.report)
 
 return {
-  scope, axes, mode: doFix ? 'fix' : 'report-only', baseline,
+  scope, axes, mode: doFix ? 'fix' : 'report-only', baseline, coverage_holes,
   totals: {
     findings: all.length, critical_high: critical.length,
     confirmed: confirmed.length, latent: latent.length, disputed: disputed.length,
