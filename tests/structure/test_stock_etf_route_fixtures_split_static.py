@@ -20,6 +20,12 @@ EXPECTED_MODULES = {
 }
 
 EXPECTED_EXPORTS = {
+    # 2026-07-03 同步 commit 929593791（expose stock ETF allowlist action buckets）：
+    # phase2_payloads.py 新增三個靜態 allowlist list 常量並經 __init__ 再導出；
+    # 已驗證為 source-only（下方 payload source-only 測試持續覆蓋 phase2_payloads.py）。
+    "API_ALLOWLIST_DENIED_ACTIONS",
+    "API_ALLOWLIST_PAPER_WRITE_ACTIONS",
+    "API_ALLOWLIST_READ_ACTIONS",
     "STATIC_DIR",
     "_make_authless_client",
     "_make_client_with_ipc",

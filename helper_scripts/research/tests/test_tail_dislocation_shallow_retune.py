@@ -4,14 +4,27 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import sys
+from pathlib import Path
 
 import pytest
 
-import screen as base
-import shallow_retune_screen as srs
-import shallow_retune_adversarial as adv
-import shallow_retune_execution_realism as execr
-import shallow_retune_l1_short_exit_replay as l1replay
+# 為什麼檔頭補路徑: tail_dislocation_meanrev/ 不是 package(無 __init__.py),
+# screen 等模組以 bare module 名互相 import;從 repo root 裸跑 pytest 時該
+# 目錄不在 sys.path → collection ModuleNotFoundError 中斷整個 research suite。
+# 仿 conftest.py 的 RESEARCH_DIR 模式,但 scope 限本檔——`screen` 這類通用名
+# 不宜進 conftest 全域 sys.path,避免污染其他測試的 import 解析。
+_TAIL_DISLOCATION_DIR = (
+    Path(__file__).resolve().parents[1] / "tail_dislocation_meanrev"
+)
+if str(_TAIL_DISLOCATION_DIR) not in sys.path:
+    sys.path.insert(0, str(_TAIL_DISLOCATION_DIR))
+
+import screen as base  # noqa: E402
+import shallow_retune_screen as srs  # noqa: E402
+import shallow_retune_adversarial as adv  # noqa: E402
+import shallow_retune_execution_realism as execr  # noqa: E402
+import shallow_retune_l1_short_exit_replay as l1replay  # noqa: E402
 
 
 def _bars(symbol: str, *, n: int = 16) -> list[dict]:

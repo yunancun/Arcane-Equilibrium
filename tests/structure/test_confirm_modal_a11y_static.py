@@ -12,7 +12,9 @@ def _source(rel_path: str) -> str:
 
 
 def test_common_confirm_modal_has_dialog_a11y_and_focus_trap() -> None:
-    source = _source("common.js")
+    # ae71575e8 (P2-COMMON-JS-LOC) 把 common.js 拆為 4 檔，confirm modal
+    # （含 a11y 屬性與 focus trap）整段移入 common-modals.js；斷言內容不變。
+    source = _source("common-modals.js")
 
     assert 'role="dialog" aria-modal="true" aria-labelledby="oc-gc-title" tabindex="-1"' in source
     assert "var previousActive = document.activeElement;" in source

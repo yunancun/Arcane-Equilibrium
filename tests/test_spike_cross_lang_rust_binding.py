@@ -26,8 +26,10 @@ MODULE_NOTE
   - Rust 端讀同 input, println! 輸出 JSON, Python parse 比對
 
 依賴:
-  - 標準 lib (json / re / subprocess / pathlib / math)
-  - 不需 numpy / cargo 在 PATH (走 SRV_ROOT 推算)
+  - 標準 lib (json / re / shutil / subprocess / pathlib / math / os)
+  - 不需 numpy;cargo workspace 路徑走 SRV_ROOT 推算
+  - cargo binary 走 _locate_cargo() 多層定位 (PATH → ~/.cargo/bin →
+    rustup which → ~/.rustup/toolchains/*/bin);全部缺席才 skipif
   - cargo workspace 在 srv/rust/openclaw_engine/Cargo.toml
 
 硬邊界:
@@ -41,7 +43,9 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -57,6 +61,72 @@ EXPECTED_SAMPLE_STD: float = math.sqrt(62.5)  # ≈ 7.905694150420948
 
 # AC-7 容差
 TOLERANCE: float = 1e-4
+
+
+def _locate_cargo() -> str | None:
+    """多層定位 cargo binary,回傳絕對路徑;全部缺席回傳 None。
+
+    為什麼: Mac 非互動 shell (裸跑 `python3 -m pytest`) 的 PATH 常無 cargo,
+      且 homebrew rustup 改名 rustup-init→rustup 後 `~/.cargo/bin/cargo`
+      symlink 鏈可能斷裂 (指向不存在的 rustup-init)。直接寫死 "cargo" 會
+      FileNotFoundError 假紅。定位順序:
+        1. shutil.which("cargo") — PATH 正常時的標準路徑
+        2. ~/.cargo/bin/cargo — rustup 預設安裝位 (is_file() 跟隨 symlink,
+           斷裂 symlink 自動跳過)
+        3. `rustup which cargo` — rustup 權威解析當前 toolchain 的 cargo
+        4. ~/.rustup/toolchains/*/bin/cargo — rustup 慣例 toolchain 路徑兜底
+    不變量: 回傳的路徑必為真實可執行檔;None 代表工具真缺席 (skipif 唯一
+      合法情境),cargo 存在時測試必須真跑。
+    """
+    found = shutil.which("cargo")
+    if found:
+        return found
+
+    home = Path.home()
+    default_cargo = home / ".cargo" / "bin" / "cargo"
+    if default_cargo.is_file() and os.access(default_cargo, os.X_OK):
+        return str(default_cargo)
+
+    rustup = shutil.which("rustup")
+    if rustup is None:
+        default_rustup = home / ".cargo" / "bin" / "rustup"
+        if default_rustup.is_file() and os.access(default_rustup, os.X_OK):
+            rustup = str(default_rustup)
+    if rustup is not None:
+        try:
+            probe = subprocess.run(
+                [rustup, "which", "cargo"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            probe = None
+        if probe is not None and probe.returncode == 0:
+            candidate = Path(probe.stdout.strip())
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+
+    toolchains = home / ".rustup" / "toolchains"
+    if toolchains.is_dir():
+        for candidate in sorted(toolchains.glob("*/bin/cargo")):
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+
+    return None
+
+
+CARGO_BIN: str | None = _locate_cargo()
+
+# skipif 只允許「cargo 工具真缺席」情境;reason 列出全部已檢查位置供排查。
+pytestmark = pytest.mark.skipif(
+    CARGO_BIN is None,
+    reason=(
+        "cargo not found: checked PATH, ~/.cargo/bin/cargo, "
+        "`rustup which cargo`, and ~/.rustup/toolchains/*/bin/cargo"
+    ),
+)
 
 
 def _srv_root() -> Path:
@@ -83,9 +153,17 @@ def _run_rust_fixture() -> str:
     srv_root = _srv_root()
     cargo_manifest = srv_root / "rust" / "openclaw_engine" / "Cargo.toml"
     assert cargo_manifest.exists(), f"Cargo.toml not found: {cargo_manifest}"
+    assert CARGO_BIN is not None, "cargo missing; skipif should have skipped"
+
+    # 為什麼補 PATH: 直呼 toolchain cargo (~/.rustup/toolchains/*/bin/cargo)
+    # 時 rustc 需同目錄可尋;把 cargo 所在 bin 目錄前置到子行程 PATH,
+    # 保證 rustc/rustdoc 與 cargo 同 toolchain,不影響父行程環境。
+    env = dict(os.environ)
+    cargo_bin_dir = str(Path(CARGO_BIN).parent)
+    env["PATH"] = cargo_bin_dir + os.pathsep + env.get("PATH", "")
 
     cmd = [
-        "cargo",
+        CARGO_BIN,
         "test",
         "--release",
         "--features",
@@ -104,6 +182,7 @@ def _run_rust_fixture() -> str:
         text=True,
         timeout=300,  # 300s 防 cold-build 超時
         check=False,
+        env=env,
     )
     assert result.returncode == 0, (
         f"cargo test failed (rc={result.returncode})\n"

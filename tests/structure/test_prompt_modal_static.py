@@ -15,7 +15,8 @@ PROMPT_REPLACEMENT_TARGETS = (
 
 
 def test_common_js_exposes_custom_prompt_modal() -> None:
-    source = (STATIC / "common.js").read_text(encoding="utf-8")
+    # ae71575e8 (P2-COMMON-JS-LOC) 拆檔後 openPromptModal 移入 common-modals.js。
+    source = (STATIC / "common-modals.js").read_text(encoding="utf-8")
     assert "function openPromptModal(options)" in source
     assert "oc-generic-prompt-overlay" in source
     assert "oc-prompt-select" in source
