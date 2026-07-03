@@ -74,3 +74,39 @@
 ## 結論
 
 **PASS**。退 E1 清單:無。基線 +31 全新增測試、0 removed、0 regression;§1.5 四組實質齊備(1 個 LOW 級斷言縫隙不阻塞);mock 抽查全真路徑;flake 未重現且與 diff 無關;Python/GUI 面零連帶破壞。
+
+---
+
+# 追加節:殘留修復批(L-R1/L-R2/L-R3/L-1/NOTE-1/R3-1)narrow 回歸 · 2026-07-03
+
+- 被驗:HEAD `77c7ce95b`(= IMPL-A commit;親驗 11 檔 blob md5 == 本 E4 上輪驗收態,基線名單可直接複用)+ 3 檔 dirty delta(+225/−11):`demo_learning_lane_writer.rs`(L-R1 expected-len 快照/L-R2 refresh_ok gate/L-R3 flush warn)、`step_4_5_dispatch.rs`(qty-zero 塊 lease Failed 釋放 + 新常量 `QTY_ZERO_SKIP_LEASE_STAGE="qty_zero_skip"`)、`step_4_5_dispatch_tests.rs`(+2 L-R1 測 +1 qty-zero 契約測 + L-1/R3-1 負向斷言)。E2 第三輪 RETURN(R3-1)→ 第四輪 PASS to E4。
+
+## 裁決:PASS(ready for PM commit + push)
+
+## 計數表
+
+| 引擎 | passed | failed | ignored | baseline(上輪 ×2 驗證) | delta |
+|---|---|---|---|---|---|
+| Rust full 47 targets · run1 | 4670 | 0 | 6 | 4667/0/6 | +3 |
+| Rust full 47 targets · run2 | 4670 | 0 | 6 | 4667/0/6 | +3 |
+| Rust lib(兩輪皆) | 4261 | 0 | 1 | 4258/0/1 | +3 |
+
+- exit 0 ×2;47 target 結果 ex-timing byte-identical;`stress_tick_latency_benchmark` ×2 綠(累計 ×5 綠)。
+- **名字級對賬**(`--lib -- --list` vs 上輪已驗名單 4259):**REMOVED=0 / ADDED=3** = `self_write_snapshot_does_not_swallow_racing_external_append` + `self_write_snapshot_adopts_without_race_and_avoids_spurious_reread` + `qty_zero_skip_block_lease_release_contract`(coordinator 預期名單第 2 條實名以此為準)。L-1/R3-1 為既有測試內加斷言,計數不變,與宣稱一致。
+
+## L-R1 兩測 mock 抽查
+
+零 mock:直呼真 `stat_ledger`/`read_ledger_rows`/`push_ledger_cache`/`advance_ledger_stat_after_self_write`/`refresh_ledger_cache_if_externally_changed`,真 tempfile IO。racing 測確定性重現窗口結局(自寫+外部行皆落盤、快照僅知自寫 bytes→len 不符必不採納→下一 refresh 必見 `side_cell_disabled`);對照組以 cache 專屬標記行證無競態時零無謂重讀(O(1) 攤還保留)——鏡像對,分別咬「盲窗」與「過觸發」兩個失效方向。誠實註記:兩測為函數級(確定性交錯無法在 spawned task 內重現);`advance_ledger_stat_after_self_write` 於 run_writer 兩個自寫點的接線由 diff 親讀證實,task 級路徑由既有 F1 釘子(`ledger_cache_sees_external_side_cell_disable_without_restart`,真 run_writer)+3 條 dedup 等價測本輪全綠共同覆蓋。mutation bite 由 E1 親證 + E2 第三/四輪獨立覆核(E4 不重跑)。
+
+## qty-zero(NOTE-1,live Production 真實路徑)
+
+- 生產 delta 親讀:`if final_qty <= 0.0` 塊 `continue` 前補 `release_decision_lease_for_governance(...Failed, QTY_ZERO_SKIP_LEASE_STAGE)`,與緊鄰 withhold 塊同 helper 同 outcome;Failed=revoke 語義由既有 seam 測 `withhold_failed_release_revokes_active_lease_without_leak` 覆蓋(本輪綠)。
+- **既有 QTY-ZERO-SKIP-1 測試不受影響**:`dual_rail_dispatch.rs` 零觸碰(git status 空);`test_qty_zero_skips_counter_defaults_zero_and_exposed_in_snapshot` + `test_tick_stats_deserializes_legacy_json_without_qty_zero_skips`(legacy 缺欄位退 0 + round-trip)兩態名單皆在、run1/run2 皆綠;ipc fixture(`qty_zero_skips: 0`)本輪未動。skip-not-reject 語義新增 R3-1 負向釘(`!contains record_undispatched_rejection` + `!contains emit_decision_feature`),同時閉合上輪 E4 finding L-1(withhold 契約補 `!contains emit_decision_feature`)。
+
+## Python/GUI
+
+本批 delta 0 個 .py/.js(git diff 親證)——Python/GUI 面按聲明跳過(上輪已全量確認,rust 源掃描契約測試所在 research/tests 與本 3 檔無新耦合)。
+
+## 結論
+
+**PASS**。退 E1 清單:無。上輪 finding L-1 已閉合;E2 交接 L-R1/L-R2/L-R3 全數處置;NOTE-1 pre-existing 不對稱消除且既有測試零擾動。

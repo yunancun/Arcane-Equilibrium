@@ -1121,6 +1121,54 @@ fn soak_withhold_block_lease_release_contract() {
             "withhold 塊缺失必要動作 `{required}`——lease Failed 釋放/審計形狀被 mutation 移除"
         );
     }
+    // L-1(E2 re-review):負向釘子——withhold 塊永不寫 decision_features
+    // (gate 已批准非真負樣本,[27] ML 污染防線;QTY-ZERO-SKIP-1 同款取捨)。
+    assert!(
+        !block.contains("emit_decision_feature"),
+        "withhold 塊絕不得出現 decision_features emit(ML 污染防線)"
+    );
+}
+
+/// E2 NOTE-1(operator 裁決修復):QTY-ZERO-SKIP 路徑與 withhold 塊對齊,
+/// `continue` 前必釋放 lease(live Production 下為真 Active lease,消除
+/// ExpiryGuardian TTL 兜底的洩漏窗口)。源碼契約手法同 F2-③;Failed 釋放
+/// 語義(revoke 非 consume、零 live 殘留)由
+/// withhold_failed_release_revokes_active_lease_without_leak seam 測試共同
+/// 覆蓋(同一 helper 同一 outcome)。
+#[test]
+fn qty_zero_skip_block_lease_release_contract() {
+    let src = include_str!("step_4_5_dispatch.rs");
+    let start = src
+        .find("if final_qty <= 0.0 {")
+        .expect("qty-zero skip 塊必存在");
+    let end = start
+        + src[start..]
+            .find("continue;")
+            .expect("qty-zero skip 塊必以 continue 收尾");
+    let block = &src[start..end];
+    for required in [
+        "release_decision_lease_for_governance",
+        "LeaseOutcome::Failed",
+        "QTY_ZERO_SKIP_LEASE_STAGE",
+        "gate.lease_id.as_deref()",
+        "qty_zero_skips += 1",
+    ] {
+        assert!(
+            block.contains(required),
+            "qty-zero skip 塊缺失必要動作 `{required}`——lease Failed 釋放被 mutation 移除"
+        );
+    }
+    // R3-1(E2 第三輪):QTY-ZERO-SKIP-1 核心語義的負向釘——skip-not-reject:
+    // 該塊 99.9% 為 BTCUSDT 取整噪音,寫 reject 記錄 / decision_features 負標籤
+    // 會污染 trading.intents label 與 ML 訓練(該塊設立時的原始理由,修前無測試咬)。
+    assert!(
+        !block.contains("record_undispatched_rejection"),
+        "qty-zero skip 塊絕不得寫 reject 記錄(skip-not-reject 語義)"
+    );
+    assert!(
+        !block.contains("emit_decision_feature"),
+        "qty-zero skip 塊絕不得寫 decision_features(ML 污染防線)"
+    );
 }
 
 #[test]
