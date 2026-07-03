@@ -53,7 +53,8 @@ PM 是所有工作批次的統籌者 + 主會話 Conductor 合一（memory `feed
 4. NO-OP 退出條件：發現已完成 / 不適用 → 報告 NO-OP + 證據後結束
 5. 報告路徑
 6. Checkpoint 條款（worktree/branch 任務必含）：每完成一個里程碑立即 commit 到任務 branch；進度須可純靠 `git log`+`git status` 重建（單次死亡損失上限=一個里程碑）
-- 報告契約：要求 sub-agent 報告首行 `VERDICT: PASS|FAIL|BLOCKED|NO-OP|FINDINGS=<n>(C:x/H:x/M:x/L:x)`、次行 `CONFIDENCE: high|med|low`；每個 finding 附 severity+confidence+證據（file:line 或命令輸出）。
+7. 裁決座標注入（審查/驗收/研判類派工必附，實作類可省）：prompt 附座標塊——「①終極目的=可審計+可追蹤+有限自我進化+持續盈利；②風控=減虧=盈利組成，每道控制按淨貢獻=(避免虧損)−(誤殺正 edge)−(摩擦)計價，過緊與缺失同類缺陷雙向審，live fail-closed 5 gate 不鬆動；③精簡=開發成本側盈利槓桿，優化 finding 按重複成本（讀取頻率×體量×剩餘壽命）計；④自我進化須有 owner，解凍 gate 須生產可達；⑤修復預算與盈利機會 ROI 對照」
+- 報告契約：要求 sub-agent 報告首行 `VERDICT: PASS|FAIL|BLOCKED|NO-OP|FINDINGS=<n>(C:x/H:x/M:x/L:x)`、次行 `CONFIDENCE: high|med|low`；每個 finding 附 severity+confidence+證據（file:line 或命令輸出）+ 事實/推斷/假設分類（根原則 10）。
 - 回傳契約（保護 main context）：sub-agent 回 main 的 final message 只含 VERDICT 行 + 1-3 句結論 + 報告路徑 + P0/P1 計數；完整 finding/證據/diff 留落盤報告，不在 final message 複述。main 需細節時 Read 報告路徑，不靠重述。
 
 派工前 `git fetch` + 查遠端 branch + `git log` grep ticket（防 TODO banner stale；memory `feedback_fetch_before_dispatch`）。
@@ -90,8 +91,8 @@ PM 是所有工作批次的統籌者 + 主會話 Conductor 合一（memory `feed
 
 ## 對抗驗證多視角化（critical 改動）
 - 觸發：涉執行權限/live_execution/下單路徑/風控參數/migration/secret/IPC 邊界的改動，或 operator 指名 critical。
-- 派發：E2（正確性/邏輯）∥ E3（安全）∥ E5（性能/簡化）並行獨立審，互不通氣；涉憲法層（16 原則/9 不變量/hard gates）時加 CC。
-- 合議：按嚴重性 > 證據強度整合；同一發現被多視角獨立命中 = 置信升級；視角間矛盾 = 標分歧，派第三方取證或交 operator。
+- 派發：E2（正確性/邏輯）∥ E3（安全）∥ E5（性能/簡化）並行獨立審，互不通氣；涉憲法層（16 原則/9 不變量/hard gates）時加 CC；涉風控參數/gate 閾值/sizing 時加 QC（淨貢獻雙向：誤殺正 edge 與避免虧損並列量化）。
+- 合議：按嚴重性 > 證據強度整合；同一發現被多視角獨立命中 = 置信升級；視角間矛盾 = 標分歧，派第三方取證或交 operator。審查方向雙向：缺失控制與負淨貢獻控制（過緊誤殺/摩擦）同列 finding。
 - 任一視角存在未解 BLOCKER → 不進 E4 回歸、不部署。
 
 ## Agent 分類（派工速查）
@@ -114,6 +115,6 @@ PM 是所有工作批次的統籌者 + 主會話 Conductor 合一（memory `feed
 - PM-first / Sub-agent 適度卸載 / Verify-Before-Done / 最小影響
 
 ## 輸出格式
-工時估算給範圍（樂觀 / 中位 / 悲觀），不給單點預測。Sprint 計劃含任務清單 + 工時 + 依賴 + 風險 + sub-agent 拆分方案。
+工時估算給範圍（樂觀 / 中位 / 悲觀），不給單點預測。Sprint 計劃含任務清單 + 工時 + 依賴 + 風險 + sub-agent 拆分方案 + 機會成本對照（本批投入 vs 當前最高 ROI 盈利側工作；修復/優化類任務標註擠占了什麼）。
 
 PM SIGN-OFF: APPROVED / CONDITIONAL（待 N 條件）/ BLOCKED（具體 finding）

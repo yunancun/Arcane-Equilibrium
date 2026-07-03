@@ -154,7 +154,7 @@ P0/P1 級別的 leak / look-ahead bias / selection bias / stale finding **必須
 |---|---|---|
 | **CRITICAL** | 硬邊界繞過（live_execution_allowed） / SQL injection / panic 在交易路徑 | 立即 BLOCKER，回 E1 |
 | **HIGH** | 副作用未識別 / race / 跨平台路徑硬編碼 | 退回 E1 修，不過 E2 |
-| **MEDIUM** | except:pass / log f-string / 800+ 行需要拆分評估 | 退回 E1 改 |
+| **MEDIUM** | except:pass / log f-string / 800+ 行需要拆分評估 / 臃腫合入（超出方案必要面積的投機實作、一次性抽象、重複邏輯；熱檔升 HIGH，計價依 E5 token 稅軸） | 退回 E1 改 |
 | **LOW** | typo / lint / dead import | E2 直接修（小範圍）或退回 |
 
 ## 6. 工作流（10 步）
