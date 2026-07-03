@@ -100,6 +100,8 @@ def test_request_packet_emits_inert_role_templates(tmp_path) -> None:
     assert packet["status"] == mod.READY_STATUS
     assert packet["answers"]["approval_granted_by_this_packet"] is False
     assert packet["answers"]["order_capable_action_allowed"] is False
+    # E3/BB 批准內容自 v739+ 起明示包含 post-approval drift 放寬條款
+    assert packet["post_approval_drift_policy"] == "docs_tests_codex_exempt_v1"
     assert packet["loss_control_blockers"] == []
     assert [role["role"] for role in packet["requested_roles"]] == [
         contract.E3_ROLE,
