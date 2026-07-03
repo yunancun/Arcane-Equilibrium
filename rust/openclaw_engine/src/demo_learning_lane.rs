@@ -24,6 +24,9 @@ pub const BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SCHEMA_VERSION: &str =
 pub const BOUNDED_PROBE_AUTHORIZED_STATUS: &str = "BOUNDED_DEMO_PROBE_AUTHORIZED";
 pub const AUTHORITY_PATH_PATCH_READY_STATUS: &str =
     "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW";
+/// envelope 過期的唯一 reason 字串。soak 圍欄依此把「確定性過期」與其他
+/// envelope 缺陷(一律 fail-closed)區分開;字面值與抽取前 byte-identical。
+pub const OPERATOR_AUTHORIZATION_EXPIRED_REASON: &str = "operator_authorization_expired";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AdmissionConfig {
@@ -770,13 +773,18 @@ pub fn evaluate_probe_admission(
     )
 }
 
-fn validate_operator_authorization(
-    plan: &DemoLearningLanePlan,
-    candidate: &ProbeCandidate,
-    side_cell_key: &str,
+/// operator authorization envelope 的 candidate 無關核心判定。
+///
+/// 為什麼抽共用純函數(2026-07-02 soak dispatch-edge containment 設計 §1.2):
+/// soak 圍欄(demo_learning_lane_soak_gate)與 probe admission 必須使用同一份
+/// envelope 判準;若兩端各自實現,任一側漂移即成安全洞(guard 攔錯窗口或
+/// admission 放錯單)。side_cell 匹配與 candidate 預算比對屬 candidate 相關
+/// 檢查,留在 `validate_operator_authorization`。回傳 Ok(expires_at_ms)。
+pub fn validate_operator_authorization_envelope(
+    operator_authorization: Option<&BoundedProbeOperatorAuthorization>,
     now_ms: u64,
-) -> Result<(), &'static str> {
-    let Some(auth) = plan.operator_authorization.as_ref() else {
+) -> Result<u64, &'static str> {
+    let Some(auth) = operator_authorization else {
         return Err("operator_authorization_missing_for_order_authority");
     };
     if auth.schema_version != BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SCHEMA_VERSION {
@@ -791,9 +799,6 @@ fn validate_operator_authorization(
     if auth.operator_id.as_deref().unwrap_or("").trim().is_empty() {
         return Err("operator_authorization_operator_id_missing");
     }
-    if auth.side_cell_key.trim() != side_cell_key {
-        return Err("operator_authorization_side_cell_mismatch");
-    }
     if auth.authority_path_readiness_status != AUTHORITY_PATH_PATCH_READY_STATUS {
         return Err("operator_authorization_authority_path_not_ready");
     }
@@ -803,12 +808,8 @@ fn validate_operator_authorization(
     if auth.order_authority != ORDER_AUTHORITY_GRANTED {
         return Err("operator_authorization_order_authority_mismatch");
     }
-    let max_authorized_probe_orders = auth.max_authorized_probe_orders.unwrap_or(0);
-    if max_authorized_probe_orders == 0 {
+    if auth.max_authorized_probe_orders.unwrap_or(0) == 0 {
         return Err("operator_authorization_probe_budget_missing");
-    }
-    if candidate.max_probe_orders() > max_authorized_probe_orders {
-        return Err("operator_authorization_probe_budget_below_candidate_budget");
     }
     if auth.probe_authority_granted != Some(true) {
         return Err("operator_authorization_probe_authority_not_granted");
@@ -827,9 +828,85 @@ fn validate_operator_authorization(
     };
     let expires_ms = parsed.with_timezone(&Utc).timestamp_millis();
     if expires_ms < 0 || expires_ms as u64 <= now_ms {
-        return Err("operator_authorization_expired");
+        return Err(OPERATOR_AUTHORIZATION_EXPIRED_REASON);
+    }
+    Ok(expires_ms as u64)
+}
+
+fn validate_operator_authorization(
+    plan: &DemoLearningLanePlan,
+    candidate: &ProbeCandidate,
+    side_cell_key: &str,
+    now_ms: u64,
+) -> Result<(), &'static str> {
+    // candidate 無關檢查走共用核心(與 soak 圍欄同一實現,判準不可能漂移)。
+    // 注意:多重缺陷 envelope 的 reason 先後順序與抽取前略有差異(核心檢查
+    // 先於 side_cell / candidate 預算),accept/reject 語義逐位不變。
+    // 跨實現註記(E2 2026-07-03 F3):Python 平行判準(runtime_adapter.py:274-296、
+    // bounded_probe_plan_inclusion_review.py:310-325)保持舊檢查順序(side_cell
+    // 先於 expiry);同一多缺陷 envelope 兩實現的 reason 字串可能不同——離線
+    // Rust-vs-Python 對賬按 reason diff 屬預期噪音,accept/reject 逐位等價。
+    validate_operator_authorization_envelope(plan.operator_authorization.as_ref(), now_ms)?;
+    let Some(auth) = plan.operator_authorization.as_ref() else {
+        return Err("operator_authorization_missing_for_order_authority");
+    };
+    if auth.side_cell_key.trim() != side_cell_key {
+        return Err("operator_authorization_side_cell_mismatch");
+    }
+    if candidate.max_probe_orders() > auth.max_authorized_probe_orders.unwrap_or(0) {
+        return Err("operator_authorization_probe_budget_below_candidate_budget");
     }
     Ok(())
+}
+
+/// soak dispatch-edge 圍欄的 envelope 三態(設計 §1.2)。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SoakEnvelopeState {
+    /// 可讀+有效:圍欄武裝;expires_at_ms = operator 親簽的到期時刻。
+    Active { expires_at_ms: u64 },
+    /// 可讀+已確定過期:唯一一種可由 plan 內容直接證明的確定性解除證據。
+    Expired,
+    /// 不可讀/缺檔/壞 JSON/schema 錯/envelope 欄位無效:fail-closed 照攔。
+    /// 為什麼 fail-closed:任何存疑狀態都不得成為放行邊(不確定默認收縮);
+    /// 解除只能靠確定性過期證據(Expired,或呼叫端的 last_good 硬上界超時)。
+    Indeterminate { reason: String },
+}
+
+/// 把「plan 檔讀取結果」分類成 soak 圍欄三態。純函數:讀檔 IO 由呼叫端
+/// (demo_learning_lane_soak_gate)持有,本模組維持零 IO 契約。
+/// `plan_json_read`:Ok = 檔案內容;Err = 讀檔失敗簡述(缺檔/IO 錯)。
+pub fn soak_envelope_state(
+    plan_json_read: Result<&str, &str>,
+    now_ms: u64,
+) -> SoakEnvelopeState {
+    let plan_json = match plan_json_read {
+        Ok(content) => content,
+        Err(read_err) => {
+            return SoakEnvelopeState::Indeterminate {
+                reason: format!("plan_unreadable:{read_err}"),
+            }
+        }
+    };
+    let plan = match DemoLearningLanePlan::from_json_str(plan_json) {
+        Ok(plan) => plan,
+        Err(_) => {
+            return SoakEnvelopeState::Indeterminate {
+                reason: "plan_json_parse_failed".to_string(),
+            }
+        }
+    };
+    if plan.schema_version != PLAN_SCHEMA_VERSION {
+        return SoakEnvelopeState::Indeterminate {
+            reason: "plan_schema_version_mismatch".to_string(),
+        };
+    }
+    match validate_operator_authorization_envelope(plan.operator_authorization.as_ref(), now_ms) {
+        Ok(expires_at_ms) => SoakEnvelopeState::Active { expires_at_ms },
+        Err(OPERATOR_AUTHORIZATION_EXPIRED_REASON) => SoakEnvelopeState::Expired,
+        Err(reason) => SoakEnvelopeState::Indeterminate {
+            reason: reason.to_string(),
+        },
+    }
 }
 
 fn plan_is_stale_or_missing_generated_at(

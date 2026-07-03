@@ -537,6 +537,188 @@ fn rejects_stale_plan_and_main_gate_relaxation() {
     );
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// 2026-07-02 soak dispatch-edge containment §1.2:soak_envelope_state 全矩陣
+// + envelope 共用核心(validate_operator_authorization_envelope)不漂移釘子。
+// ─────────────────────────────────────────────────────────────────────────
+
+fn plan_json_with_expiry(expires_at_utc: &str) -> String {
+    format!(
+        r#"{{
+            "schema_version": "cost_gate_demo_learning_lane_plan_v1",
+            "generated_at_utc": "2026-06-21T11:00:00+00:00",
+            "status": "READY_FOR_DEMO_LEARNING_PROBE",
+            "gate_status": "OPERATOR_REVIEW",
+            "main_cost_gate_adjustment": "NONE",
+            "learning_gate_adjustment": "SIDE_CELL_DEMO_PROBE_ONLY_AFTER_ADAPTER_WIRING",
+            "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+            "operator_authorization": {{
+                "schema_version": "bounded_demo_probe_operator_authorization_v1",
+                "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+                "authorization_id": "auth-demo-eth-sell-001",
+                "operator_id": "operator-test",
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "expires_at_utc": "{expires_at_utc}",
+                "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+                "main_cost_gate_adjustment": "NONE",
+                "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+                "max_authorized_probe_orders": 2,
+                "probe_authority_granted": true,
+                "order_authority_granted": true,
+                "promotion_evidence": false
+            }},
+            "selected_probe_candidate_count": 0,
+            "probe_candidates": []
+        }}"#
+    )
+}
+
+#[test]
+fn soak_envelope_state_valid_envelope_is_active_with_expiry() {
+    // NOW_MS < 2026-06-21T12:00:00Z(=1_782_043_200_000)→ Active。
+    let json = plan_json_with_expiry("2026-06-21T12:00:00+00:00");
+    assert_eq!(
+        soak_envelope_state(Ok(&json), NOW_MS),
+        SoakEnvelopeState::Active {
+            expires_at_ms: 1_782_043_200_000
+        }
+    );
+}
+
+#[test]
+fn soak_envelope_state_expired_envelope_is_expired() {
+    let json = plan_json_with_expiry("2026-06-21T10:00:00+00:00");
+    assert_eq!(
+        soak_envelope_state(Ok(&json), NOW_MS),
+        SoakEnvelopeState::Expired
+    );
+}
+
+#[test]
+fn soak_envelope_state_unreadable_is_indeterminate() {
+    let state = soak_envelope_state(Err("No such file or directory"), NOW_MS);
+    assert!(
+        matches!(&state, SoakEnvelopeState::Indeterminate { reason }
+            if reason.starts_with("plan_unreadable:")),
+        "缺檔/IO 錯 → indeterminate,got {state:?}"
+    );
+}
+
+#[test]
+fn soak_envelope_state_bad_json_and_schema_are_indeterminate() {
+    assert!(matches!(
+        soak_envelope_state(Ok("{not json"), NOW_MS),
+        SoakEnvelopeState::Indeterminate { reason } if reason == "plan_json_parse_failed"
+    ));
+    let wrong_schema = plan_json_with_expiry("2026-06-21T12:00:00+00:00")
+        .replace("cost_gate_demo_learning_lane_plan_v1", "some_other_schema_v9");
+    assert!(matches!(
+        soak_envelope_state(Ok(&wrong_schema), NOW_MS),
+        SoakEnvelopeState::Indeterminate { reason } if reason == "plan_schema_version_mismatch"
+    ));
+}
+
+#[test]
+fn soak_envelope_state_missing_or_invalid_authorization_is_indeterminate() {
+    // 缺 operator_authorization 塊(order_authority 有 grant 也不算數)。
+    let json = plan_json_with_expiry("2026-06-21T12:00:00+00:00");
+    let plan_no_auth = r#"{
+            "schema_version": "cost_gate_demo_learning_lane_plan_v1",
+            "status": "READY_FOR_DEMO_LEARNING_PROBE",
+            "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+            "main_cost_gate_adjustment": "NONE",
+            "probe_candidates": []
+        }"#;
+    assert!(matches!(
+        soak_envelope_state(Ok(plan_no_auth), NOW_MS),
+        SoakEnvelopeState::Indeterminate { reason }
+            if reason == "operator_authorization_missing_for_order_authority"
+    ));
+
+    // 欄位無效(promotion_evidence=true)→ indeterminate,不是 Expired。
+    let bad = json.replace(
+        r#""promotion_evidence": false"#,
+        r#""promotion_evidence": true"#,
+    );
+    assert!(matches!(
+        soak_envelope_state(Ok(&bad), NOW_MS),
+        SoakEnvelopeState::Indeterminate { reason }
+            if reason == "operator_authorization_promotion_boundary_invalid"
+    ));
+
+    // 到期時間戳格式錯 → indeterminate(不可作確定性過期證據)。
+    let malformed = plan_json_with_expiry("not-a-timestamp");
+    assert!(matches!(
+        soak_envelope_state(Ok(&malformed), NOW_MS),
+        SoakEnvelopeState::Indeterminate { reason }
+            if reason == "operator_authorization_expiry_malformed"
+    ));
+}
+
+#[test]
+fn soak_envelope_state_ignores_plan_staleness_when_envelope_valid() {
+    // 刻意決策(§1.2):圍欄判準抽自 validate_operator_authorization,不含
+    // plan generated_at staleness(stale 只影響 admission,不影響 soak 窗口)。
+    let stale = plan_json_with_expiry("2026-06-21T12:00:00+00:00").replace(
+        r#""generated_at_utc": "2026-06-21T11:00:00+00:00""#,
+        r#""generated_at_utc": "2020-01-01T00:00:00+00:00""#,
+    );
+    assert!(matches!(
+        soak_envelope_state(Ok(&stale), NOW_MS),
+        SoakEnvelopeState::Active { .. }
+    ));
+}
+
+/// 共用核心不漂移釘子:admission 的 validate_operator_authorization 與
+/// soak_envelope_state 對同一 plan 必須同判(有效→admit 路徑通過 auth 檢查;
+/// 過期→admission reason 與 soak Expired 同源同字串)。
+#[test]
+fn soak_envelope_core_stays_in_lockstep_with_admission_authorization_check() {
+    // 有效 envelope:admission 走到 Admit(auth 檢查通過)。
+    let admitted = evaluate_probe_admission(
+        &sample_plan(ORDER_AUTHORITY_GRANTED),
+        &selected_event(),
+        &[],
+        NOW_MS,
+        &AdmissionConfig::default(),
+        true,
+        "NORMAL",
+    );
+    assert_eq!(
+        admitted.decision,
+        AdmissionDecisionCode::AdmitDemoLearningProbe
+    );
+    assert!(matches!(
+        soak_envelope_state(
+            Ok(&plan_json_with_expiry("2026-06-21T12:00:00+00:00")),
+            NOW_MS
+        ),
+        SoakEnvelopeState::Active { .. }
+    ));
+
+    // 過期 envelope:admission reject reason 與 soak 判準用同一常量字串。
+    let expired = evaluate_probe_admission(
+        &sample_plan_with_authorization(
+            ORDER_AUTHORITY_GRANTED,
+            Some("2026-06-21T10:59:00+00:00"),
+        ),
+        &selected_event(),
+        &[],
+        NOW_MS,
+        &AdmissionConfig::default(),
+        true,
+        "NORMAL",
+    );
+    assert_eq!(expired.reason, OPERATOR_AUTHORIZATION_EXPIRED_REASON);
+    assert_eq!(
+        soak_envelope_state(
+            Ok(&plan_json_with_expiry("2026-06-21T10:59:00+00:00")),
+            NOW_MS
+        ),
+        SoakEnvelopeState::Expired
+    );
+}
+
 #[test]
 fn normalizes_cost_gate_negative_reason_text() {
     assert_eq!(

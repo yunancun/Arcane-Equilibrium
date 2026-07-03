@@ -41,8 +41,15 @@ use super::super::*;
 
 const BOUNDED_PROBE_ATTEMPT_RECORD_TYPE: &str = "bounded_probe_attempt";
 const BOUNDED_PROBE_ADAPTER_ENV: &str = "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED";
-const BOUNDED_PROBE_SOAK_ISOLATION_REJECT_REASON: &str =
-    "bounded_probe_soak_isolation:ordinary_demo_entry_blocked";
+/// dispatch-edge withhold 的 typed rejected verdict reason(2026-07-02 設計 §1.1)。
+/// 與舊 pre-risk 全攔 reason(`bounded_probe_soak_isolation:ordinary_demo_entry_blocked`,
+/// 已隨 guard 塊刪除)刻意不同字串:數據考古可區分「pre-risk 全攔時代」與
+/// 「dispatch-edge withhold 時代」的記錄。
+const BOUNDED_PROBE_SOAK_WITHHELD_REJECT_REASON: &str =
+    "bounded_probe_soak_isolation:approved_entry_withheld_at_dispatch";
+/// withhold 路徑釋放 lease 的獨特 stage 字串(LeaseOutcome::Failed 先例沿用,
+/// 不引入新 outcome 值;審計面可由此字串定位 soak withhold 釋放)。
+const BOUNDED_PROBE_SOAK_WITHHELD_LEASE_STAGE: &str = "bounded_probe_soak_isolation_withheld";
 
 pub(crate) fn bounded_probe_soak_isolation_enabled_from_values(
     engine_mode: &str,
@@ -289,8 +296,12 @@ pub(crate) fn dispatch_admitted_bounded_probe_order(
     Ok(true)
 }
 
+/// 記錄「未派發即拒」的統一審計形狀:display intent + qty=0 intent 持久化 +
+/// typed rejected verdict。呼叫端:pre-risk scanner/policy gate 與 soak
+/// dispatch-edge withhold(2026-07-02 更名自 record_pre_risk_rejection,
+/// 語義已泛化 —— 兩處共同點是 intent 從未產生 OrderDispatchRequest)。
 #[allow(clippy::too_many_arguments)]
-fn record_pre_risk_rejection(
+fn record_undispatched_rejection(
     trading_tx: &Option<tokio::sync::mpsc::Sender<crate::database::TradingMsg>>,
     recent_intents: &mut std::collections::VecDeque<crate::pipeline_types::TimestampedIntent>,
     em: &str,
@@ -751,7 +762,7 @@ impl TickPipeline {
                                 .per_strategy_new_entry_rejection(intent)
                             {
                                 strategy.on_rejection(intent, &reason);
-                                record_pre_risk_rejection(
+                                record_undispatched_rejection(
                                     &self.trading_tx,
                                     &mut self.recent_intents,
                                     em,
@@ -795,33 +806,6 @@ impl TickPipeline {
                                     symbol = %intent.symbol,
                                     reason = %reason,
                                     "SCANNER-RISK-POLICY-GATE: demo/live_demo new entry blocked before risk verdict"
-                                );
-                                continue;
-                            }
-                            if bounded_probe_soak_isolation_enabled(em) {
-                                strategy.on_rejection(
-                                    intent,
-                                    BOUNDED_PROBE_SOAK_ISOLATION_REJECT_REASON,
-                                );
-                                record_pre_risk_rejection(
-                                    &self.trading_tx,
-                                    &mut self.recent_intents,
-                                    em,
-                                    event.ts_ms,
-                                    &signal_id,
-                                    &context_id,
-                                    intent,
-                                    event.last_price,
-                                    scanner_ctx.as_ref(),
-                                    Some(&scanner_gate_audit),
-                                    indicators.and_then(|i| i.hurst.as_ref()),
-                                    BOUNDED_PROBE_SOAK_ISOLATION_REJECT_REASON,
-                                );
-                                tracing::warn!(
-                                    strategy = %intent.strategy,
-                                    symbol = %intent.symbol,
-                                    reason = BOUNDED_PROBE_SOAK_ISOLATION_REJECT_REASON,
-                                    "BOUNDED-PROBE-SOAK-ISOLATION: ordinary demo new entry blocked; bounded probe writer owns order-capable candidate path"
                                 );
                                 continue;
                             }
@@ -893,6 +877,68 @@ impl TickPipeline {
                             }
 
                             if gate.approved {
+                                // BOUNDED-PROBE-SOAK-DISPATCH-EDGE(2026-07-02 設計 §1.1):
+                                // soak 武裝時把普通 Open 截在交易所派單邊界。必須釘死在任何
+                                // 副作用之前 —— exchange_seq 遞增 / Approved verdict persist /
+                                // persist_intent / spine lineage / tx.send / proactive_mirror_insert
+                                // 全部尚未執行;[27] 審計形狀鐵則:被 withhold 的 intent 只留
+                                // rejected qty=0 記錄,絕不能同時留 Approved verdict。
+                                // 與舊 pre-risk 全攔不同:cost_gate reject 已恢復流經完整
+                                // pipeline(probe writer feed 的唯一候選源);soak 期間唯一能
+                                // 觸達交易所的新開倉 = 通過完整 admission 鏈的 bounded probe 單
+                                // (writer 直送 order_dispatch_tx,order_link_id 帶獨特前綴)。
+                                if bounded_probe_soak_isolation_enabled(em) {
+                                    // envelope 到期是牆鐘授權語義,禁用 event.ts_ms
+                                    // (WS payload ts 不可作授權時鐘,Fix-4 教訓)。
+                                    let wall_now_ms = openclaw_core::now_ms();
+                                    if self
+                                        .soak_envelope_gate
+                                        .should_withhold_approved_open(wall_now_ms)
+                                    {
+                                        // eager-mutate 回滾 hook(QTY-ZERO-SKIP-1 先例)。
+                                        strategy.on_rejection(
+                                            intent,
+                                            BOUNDED_PROBE_SOAK_WITHHELD_REJECT_REASON,
+                                        );
+                                        // 釋放 gate 已取得的 lease:Failed 先例沿用
+                                        // (見下方 channel-closed 分支),不引入 Cancelled。
+                                        release_decision_lease_for_governance(
+                                            &self.governance,
+                                            gate.lease_id.as_deref(),
+                                            LeaseOutcome::Failed,
+                                            BOUNDED_PROBE_SOAK_WITHHELD_LEASE_STAGE,
+                                        );
+                                        // typed rejected verdict + qty=0 intent(審計形狀)。
+                                        // 刻意不寫 decision_features 負標籤:gate 已批准,
+                                        // 非真負樣本,寫入會污染 ML 訓練(QTY-ZERO-SKIP-1
+                                        // 同款取捨)。
+                                        record_undispatched_rejection(
+                                            &self.trading_tx,
+                                            &mut self.recent_intents,
+                                            em,
+                                            event.ts_ms,
+                                            &signal_id,
+                                            &context_id,
+                                            intent,
+                                            event.last_price,
+                                            scanner_ctx.as_ref(),
+                                            Some(&scanner_gate_audit),
+                                            indicators.and_then(|i| i.hurst.as_ref()),
+                                            BOUNDED_PROBE_SOAK_WITHHELD_REJECT_REASON,
+                                        );
+                                        self.stats.soak_withheld_opens += 1;
+                                        if self.soak_envelope_gate.should_log_withhold(wall_now_ms)
+                                        {
+                                            tracing::warn!(
+                                                strategy = %intent.strategy,
+                                                symbol = %intent.symbol,
+                                                withheld_total = self.stats.soak_withheld_opens,
+                                                "BOUNDED-PROBE-SOAK-DISPATCH-EDGE: approved ordinary demo entry withheld at dispatch edge / soak 武裝中,已批准的普通 demo 開倉在派單邊界被截留"
+                                            );
+                                        }
+                                        continue;
+                                    }
+                                }
                                 self.exchange_seq = self.exchange_seq.wrapping_add(1);
                                 let order_link_id = format!(
                                     "oc_{}_{}_{}",
@@ -928,7 +974,8 @@ impl TickPipeline {
                                 // 仍呼叫 `strategy.on_rejection`：這是策略內部 eager-mutate
                                 // 狀態（bb_breakout entry_price / trailing_stop）的 rollback
                                 // hook，不是污染源；不回滾會讓策略誤以為已開倉（W6 hot-loop
-                                // 類 bug）。污染源 `record_pre_risk_rejection` /
+                                // 類 bug）。污染源 `record_undispatched_rejection`（時名
+                                // record_pre_risk_rejection）/
                                 // `emit_decision_feature_intent_rejected` 已移除。
                                 if final_qty <= 0.0 {
                                     let reason = exchange_qty_rounded_to_zero_reason(
