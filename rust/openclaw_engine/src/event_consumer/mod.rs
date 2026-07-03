@@ -9,12 +9,18 @@
 
 mod bootstrap;
 mod dispatch;
+// EVENT-CONSUMER-SPLIT-2（2026-07-03）：dispatch.rs retcode 分類簇拆出（§九 800 行治理）。
+mod dispatch_retcode;
 mod execution_fill_helpers;
 mod funding_settlement;
 mod governor_cooldown;
 pub mod handlers;
 mod loop_exchange;
 mod loop_handlers;
+// EVENT-CONSUMER-SPLIT-2（2026-07-03）：Arm D/E/F 自 loop_handlers.rs 拆出（§九 800 行治理）。
+mod loop_pending_registration;
+mod loop_pipeline_command;
+mod loop_tick;
 // MUST-FIX-2 Round 2 (2026-05-19/20)：halt-state restore helper 在 sibling
 // crate test（tick_pipeline::tests::halt_ttl）內被呼叫 → pub(crate) 暴露足夠，
 // 不需要 pub。
