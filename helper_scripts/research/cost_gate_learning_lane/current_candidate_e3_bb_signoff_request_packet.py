@@ -25,6 +25,11 @@ from typing import Any
 from cost_gate_learning_lane import (
     current_candidate_e3_bb_enablement_review_contract as contract,
 )
+# 引用 drift gate 的 policy 常量（單一定義來源，避免雙定義漂移）；
+# drift gate 不 import 本生成器，無循環 import。
+from cost_gate_learning_lane.standing_envelope_post_approval_drift_gate import (
+    DRIFT_POLICY_DOCS_TESTS_CODEX_EXEMPT_V1 as POST_APPROVAL_DRIFT_POLICY,
+)
 
 
 SCHEMA_VERSION = "current_candidate_e3_bb_signoff_request_packet_v1"
@@ -368,6 +373,10 @@ def build_current_candidate_e3_bb_signoff_request_packet(
         "status": status,
         "reason": reason,
         "candidate_side_cell_key": candidate,
+        # 為什麼要有這個字段：E3/BB 批准 exact packet 時把 post-approval drift 放寬
+        # 條款（docs_tests_codex_exempt_v1）明示納入批准內容，堵「批准 exact packet、
+        # PM 事後單方放寬」的治理洞；消費端見 standing_envelope_post_approval_drift_gate.py。
+        "post_approval_drift_policy": POST_APPROVAL_DRIFT_POLICY,
         "source_contract": {
             "path": str(e3_bb_contract_path) if e3_bb_contract_path else None,
             "sha256": _sha256(e3_bb_contract_path),
