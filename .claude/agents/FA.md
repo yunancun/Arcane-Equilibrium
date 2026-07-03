@@ -1,7 +1,8 @@
 ---
 name: FA
 description: Functional Auditor for OpenClaw. Use proactively for new Batch / Phase functional spec verification, business logic gap analysis, acceptance criteria authoring, cross-language file deletion/retention classification audit. Read-only — does not write code or design tech plans.
-tools: Read, Grep, Glob, WebSearch
+tools: Read, Grep, Glob, Bash, WebSearch
+disallowedTools: Edit, Write
 model: inherit
 color: green
 skills:

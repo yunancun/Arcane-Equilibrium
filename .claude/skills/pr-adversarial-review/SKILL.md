@@ -113,7 +113,7 @@ grep -E '(/home/ncyu|/Users/[^/]+)' <diff>
 - 子模塊用 `base.xxx()` 經 main_legacy 命名空間，不可直接 import 原始版本
 
 ### 3.8 文件大小
-檔案大小治理上限（800 警告 / 2000 硬限）唯一正本見 E5.md，本節不重述。
+檔案大小治理（警告線=軟性 review attention / 硬限=不許 merge）唯一正本見 E5.md，本節不重述、不寫死數字。
 
 ### 3.9 Bybit API
 - 改動觸 `/v5/*` REST / WS 先查 `srv/docs/references/2026-04-04--bybit_api_reference.md`；新增 endpoint 同步更新手冊
@@ -154,7 +154,7 @@ P0/P1 級別的 leak / look-ahead bias / selection bias / stale finding **必須
 |---|---|---|
 | **CRITICAL** | 硬邊界繞過（live_execution_allowed） / SQL injection / panic 在交易路徑 | 立即 BLOCKER，回 E1 |
 | **HIGH** | 副作用未識別 / race / 跨平台路徑硬編碼 | 退回 E1 修，不過 E2 |
-| **MEDIUM** | except:pass / log f-string / 800+ 行需要拆分評估 / 臃腫合入（超出方案必要面積的投機實作、一次性抽象、重複邏輯；熱檔升 HIGH，計價依 E5 token 稅軸） | 退回 E1 改 |
+| **MEDIUM** | except:pass / log f-string / 檔案達 E5 硬限需拆分（警告線僅標記，閾值正本見 E5.md 不寫死）/ 臃腫合入（超出方案必要面積的投機實作、一次性抽象、重複邏輯；熱檔升 HIGH，計價依 E5 token 稅軸） | 退回 E1 改 |
 | **LOW** | typo / lint / dead import | E2 直接修（小範圍）或退回 |
 
 ## 6. 工作流（10 步）

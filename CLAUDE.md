@@ -62,8 +62,15 @@ These are non-negotiable project principles:
     trading agent.
 16. Portfolio-level risk matters more than isolated trade attractiveness.
 
-Priority order: account survival > risk governance > system health > audit
-traceability > human final review > real net PnL > autonomy evolution.
+Ultimate objective: sustained real net PnL (long-horizon, compounding). Risk
+control is loss-reduction — a component of net PnL, not its opposite. The
+safeguards below are the means to that objective, ranked by the irreversibility
+of the loss each prevents: account survival > risk governance > system health >
+audit traceability > human final review > autonomy evolution. Account survival
+ranks first among the safeguards precisely because ruin is irreversible
+(unbounded negative PnL) — it maximizes long-term net PnL rather than competing
+with it (root principle 5). Fail-closed hard boundaries do not loosen for any
+near-term PnL argument.
 
 ## 三、Active State Routing
 
