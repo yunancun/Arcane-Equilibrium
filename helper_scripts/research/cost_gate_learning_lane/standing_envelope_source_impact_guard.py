@@ -5,6 +5,15 @@ This helper is source-only. It compares a previously reviewed source head with
 the current source head and emits a fail-closed impact packet. It does not grant
 approval, call runtime or Bybit, acquire a Decision Lease, write PG, mutate
 services, or change risk/Cost Gate state.
+
+2026-07-03 修復（E2 temp-repo 實證三個假陰性）：舊採集只靠帶 rename 偵測的
+`git diff --numstat` 中的 "-" 行比對 name-status 路徑——(a) binary rename 的
+numstat 行是 curly-brace 合併路徑，與 name-status 兩端永不相等，flag 永不觸發；
+(b) 裸 gitlink（mode 160000）numstat 給行數而非 "-"，根本不觸 binary 偵測；
+(c) symlink（mode 120000）同樣以行數呈現、按路徑分類。三者落在 docs/ 等豁免樹
+即假陰性放行。修法＝`--numstat --no-renames`（rename 兩端各自以原始路徑出現）
+加上 `git diff --raw` mode 白名單（SAFE_FILE_MODES 之外任一端一律 ambiguous），
+並加 unmatched 安全網：三路輸出對不上時以 git_errors blocker 收斂，不默默放行。
 """
 
 from __future__ import annotations
@@ -104,6 +113,11 @@ DEPENDENCY_OR_CONFIG_SUFFIXES = (
     "yarn.lock",
 )
 
+# git file mode 白名單：000000（不存在端）/ 100644（一般檔）/ 100755（可執行檔）。
+# 為什麼採白名單而非黑名單：160000 gitlink 與 120000 symlink 之外，任何未知或
+# 未來新增的 mode 也代表內容超出本 repo 可審範圍，deny-by-default 才 fail-closed。
+SAFE_FILE_MODES = {"000000", "100644", "100755"}
+
 
 def _utc_now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
@@ -185,6 +199,12 @@ def _parse_name_status(output: str) -> list[dict[str, Any]]:
 
 
 def _binary_paths_from_numstat(output: str) -> set[str]:
+    """從 numstat 輸出取 binary（"-" 行）路徑集合。
+
+    為什麼呼叫端必須帶 `--no-renames`：帶 rename 偵測時 binary rename 行是
+    curly-brace 合併路徑（`docs/{a.png => b.png}`），與 name-status 兩端路徑
+    永不相等，flag 永不觸發（E2 2026-07-03 實證假陰性）。
+    """
     paths: set[str] = set()
     for raw_line in output.splitlines():
         parts = raw_line.split("\t")
@@ -195,6 +215,37 @@ def _binary_paths_from_numstat(output: str) -> set[str]:
     return paths
 
 
+def _parse_raw_diff_line(line: str) -> dict[str, Any] | None:
+    """解析 `git diff --raw` 單行：`:<src_mode> <dst_mode> <src_sha> <dst_sha> <status>\\t<path>[\\t<path2>]`。"""
+    if not line.startswith(":"):
+        return None
+    head, *paths = line.split("\t")
+    fields = head[1:].split(" ")
+    if len(fields) < 5 or not paths:
+        return None
+    return {
+        "src_mode": fields[0],
+        "dst_mode": fields[1],
+        "status": fields[4],
+        "paths": [p for p in paths if p],
+    }
+
+
+def _unmatched_flagged_paths(
+    flagged_paths: set[str], changes: list[dict[str, Any]]
+) -> list[str]:
+    """回傳未被任何 name-status 條目覆蓋的 flagged 路徑（排序後）。
+
+    為什麼 fail-closed：numstat / --raw / name-status 三路輸出理應同源一致；
+    對不上代表 rename、引號或編碼形態超出已知契約，若默默丟棄該路徑，
+    binary/gitlink/symlink 歧義就會漏標、被路徑分類（如 docs/ 豁免）放行。
+    """
+    covered: set[str] = set()
+    for change in changes:
+        covered.update(str(p) for p in change.get("paths") or [])
+    return sorted(p for p in flagged_paths if p not in covered)
+
+
 def collect_git_impact_inputs(
     repo_root: Path,
     *,
@@ -202,6 +253,13 @@ def collect_git_impact_inputs(
     current_source_head: str = "HEAD",
     now_utc: dt.datetime | None = None,
 ) -> dict[str, Any]:
+    """採集 base..current 的 git 影響面輸入（name-status + numstat + raw 三路）。
+
+    為什麼三路並收：name-status 給路徑與狀態；`--numstat --no-renames` 給可靠的
+    binary 集合（rename 兩端各自以原始路徑出現）；`--raw` 給 mode bits，任一端
+    mode 不在 SAFE_FILE_MODES（gitlink/symlink/未知 mode）即 ambiguous。任何一路
+    採集失敗、解析失敗或三路對不上，都以 git_errors 傳導成 build 端 blocker。
+    """
     now = now_utc or _utc_now()
     git_errors: list[dict[str, str]] = []
     resolved_base = _try_git_stdout(
@@ -222,6 +280,7 @@ def collect_git_impact_inputs(
     ancestor_returncode: int | None = None
     diff_output = ""
     binary_paths: set[str] = set()
+    ambiguous_mode_paths: set[str] = set()
     if resolved_base and resolved_current:
         ancestor = _run_git(
             repo_root,
@@ -244,21 +303,74 @@ def collect_git_impact_inputs(
             )
         else:
             diff_output = diff_result.stdout.strip()
+        # 必須帶 --no-renames：見 _binary_paths_from_numstat docstring（binary
+        # rename curly-brace 路徑假陰性）。
         numstat_result = _run_git(
             repo_root,
-            ["diff", "--numstat", f"{resolved_base}..{resolved_current}"],
+            ["diff", "--numstat", "--no-renames", f"{resolved_base}..{resolved_current}"],
             check=False,
         )
         if numstat_result.returncode != 0:
             git_errors.append(
                 {
                     "key": "git_diff_numstat_failed",
-                    "command": f"git diff --numstat {resolved_base}..{resolved_current}",
+                    "command": f"git diff --numstat --no-renames {resolved_base}..{resolved_current}",
                     "stderr": numstat_result.stderr.strip(),
                 }
             )
         else:
             binary_paths = _binary_paths_from_numstat(numstat_result.stdout)
+        # mode-aware 採集：numstat 對 gitlink（160000）給行數而非 "-"、symlink
+        # （120000）亦按行數呈現，兩者都不觸 binary 偵測（E2 2026-07-03 實證），
+        # 必須從 --raw 的 mode bits 補攔。
+        raw_result = _run_git(
+            repo_root,
+            ["diff", "--raw", f"{resolved_base}..{resolved_current}"],
+            check=False,
+        )
+        if raw_result.returncode != 0:
+            git_errors.append(
+                {
+                    "key": "git_diff_raw_failed",
+                    "command": f"git diff --raw {resolved_base}..{resolved_current}",
+                    "stderr": raw_result.stderr.strip(),
+                }
+            )
+        else:
+            for line in raw_result.stdout.splitlines():
+                if not line.strip():
+                    continue
+                entry = _parse_raw_diff_line(line)
+                if entry is None:
+                    # 為什麼 fail-closed：解析不了的 raw 行代表 diff 形態超出
+                    # 已知契約，不能假設它安全。
+                    git_errors.append({"key": "git_diff_raw_parse_failed", "line": line})
+                    continue
+                if (
+                    entry["src_mode"] not in SAFE_FILE_MODES
+                    or entry["dst_mode"] not in SAFE_FILE_MODES
+                ):
+                    ambiguous_mode_paths.update(entry["paths"])
+    changed_paths = [
+        {
+            **change,
+            "binary_or_submodule_ambiguous": any(
+                p in binary_paths or p in ambiguous_mode_paths
+                for p in change.get("paths", [])
+            ),
+        }
+        for change in _parse_name_status(diff_output)
+    ]
+    # unmatched 安全網：flagged 路徑若對不回任何 name-status 條目，per-change flag
+    # 無處落地，必須升為 git_errors blocker，不得默默放行。
+    unmatched = _unmatched_flagged_paths(binary_paths | ambiguous_mode_paths, changed_paths)
+    if unmatched:
+        git_errors.append(
+            {
+                "key": "binary_or_mode_path_unmatched",
+                "paths": json.dumps(unmatched, ensure_ascii=False),
+            }
+        )
     return {
         "collected_at_utc": _iso(now),
         "repo_root": str(repo_root),
@@ -270,10 +382,10 @@ def collect_git_impact_inputs(
         "worktree_clean": not dirty_paths,
         "dirty_paths": dirty_paths,
         "base_is_ancestor_of_current": ancestor_returncode == 0,
-        "changed_paths": [
-            {**change, "binary_or_submodule_ambiguous": any(p in binary_paths for p in change.get("paths", []))}
-            for change in _parse_name_status(diff_output)
-        ],
+        "changed_paths": changed_paths,
+        # debug 透明用途；build 端不依賴這兩鍵（只加鍵不改既有鍵語義）。
+        "binary_paths": sorted(binary_paths),
+        "ambiguous_mode_paths": sorted(ambiguous_mode_paths),
         "git_errors": git_errors,
     }
 

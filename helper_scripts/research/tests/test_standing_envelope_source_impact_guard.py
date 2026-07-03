@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import subprocess
 
 from cost_gate_learning_lane import standing_envelope_source_impact_guard as mod
@@ -48,6 +49,30 @@ def _git(repo, *args: str) -> str:
         stderr=subprocess.PIPE,
     )
     return result.stdout.strip()
+
+
+def _make_repo(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "test@example.invalid")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "docs").mkdir()
+    return repo
+
+
+def _collect_and_build(repo, base: str) -> dict:
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git_inputs = mod.collect_git_impact_inputs(
+        repo,
+        base_source_head=base,
+        current_source_head="HEAD",
+        now_utc=NOW,
+    )
+    return mod.build_standing_envelope_source_impact_guard(
+        git_inputs=git_inputs,
+        now_utc=NOW,
+    )
 
 
 def test_docs_tests_and_guard_tooling_are_ready_no_authority() -> None:
@@ -198,6 +223,102 @@ def test_render_markdown_includes_status_and_boundary() -> None:
     assert "# Standing Envelope Source Impact Guard" in markdown
     assert f"- Status: `{mod.READY_STATUS}`" in markdown
     assert "no runtime call" in markdown
+
+
+def test_temp_git_blocks_binary_rename_under_docs(tmp_path) -> None:
+    # 假陰性回歸（E2 2026-07-03 實證）：binary rename 在帶 rename 偵測的 numstat
+    # 中是 curly-brace 合併路徑，舊碼 flag 永不觸發，docs/ 下即 READY 放行。
+    repo = _make_repo(tmp_path)
+    (repo / "docs" / "a.bin").write_bytes(b"\x00\x01\x02binary-payload")
+    _git(repo, "add", "docs/a.bin")
+    _git(repo, "commit", "-m", "base")
+    base = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "mv", "docs/a.bin", "docs/b.bin")
+    _git(repo, "commit", "-m", "rename binary under docs")
+
+    packet = _collect_and_build(repo, base)
+
+    assert packet["status"] == mod.BLOCKED_STATUS
+    assert "binary_or_submodule_change_ambiguous" in packet["blockers"]
+
+
+def test_temp_git_blocks_bare_gitlink_under_docs(tmp_path) -> None:
+    # 假陰性回歸：裸 gitlink（mode 160000）的 numstat 是行數而非 "-"，舊碼根本
+    # 不觸 binary 偵測；靠 --raw mode 白名單攔。gitlink 目錄不存在於 worktree，
+    # 可能同時觸 worktree_dirty，本測試只釘 mode 歧義 blocker。
+    repo = _make_repo(tmp_path)
+    (repo / "docs" / "safe.md").write_text("base\n", encoding="utf-8")
+    _git(repo, "add", "docs/safe.md")
+    _git(repo, "commit", "-m", "base")
+    base = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "update-index", "--add", "--cacheinfo", f"160000,{base},docs/subrepo")
+    _git(repo, "commit", "-m", "add bare gitlink under docs")
+
+    packet = _collect_and_build(repo, base)
+
+    assert packet["status"] == mod.BLOCKED_STATUS
+    assert "binary_or_submodule_change_ambiguous" in packet["blockers"]
+
+
+def test_temp_git_blocks_symlink_under_docs(tmp_path) -> None:
+    # 假陰性回歸：symlink（mode 120000）numstat 給行數、name-status 是 A/M，
+    # 舊碼按路徑分類（docs/ = documentation_or_todo）放行；symlink 可指向豁免樹
+    # 外任意目標，必須 fail-closed。
+    repo = _make_repo(tmp_path)
+    (repo / "docs" / "safe.md").write_text("base\n", encoding="utf-8")
+    _git(repo, "add", "docs/safe.md")
+    _git(repo, "commit", "-m", "base")
+    base = _git(repo, "rev-parse", "HEAD")
+    os.symlink("safe.md", repo / "docs" / "link.md")
+    _git(repo, "add", "docs/link.md")
+    _git(repo, "commit", "-m", "add symlink under docs")
+
+    packet = _collect_and_build(repo, base)
+
+    assert packet["status"] == mod.BLOCKED_STATUS
+    assert "binary_or_submodule_change_ambiguous" in packet["blockers"]
+
+
+def test_unmatched_flagged_paths_escalate_to_blocker() -> None:
+    # unmatched 安全網：flagged 路徑對不回任何 name-status 條目時，per-change
+    # flag 無處落地，必須經 git_errors 升為 blocker，不得默默放行。
+    unmatched = mod._unmatched_flagged_paths(
+        {"docs/orphan.bin", "docs/covered.bin"},
+        [{"status": "M", "paths": ["docs/covered.bin"]}],
+    )
+    assert unmatched == ["docs/orphan.bin"]
+
+    packet = _packet(
+        _change("docs/safe.md"),
+        git_errors=[
+            {"key": "binary_or_mode_path_unmatched", "paths": '["docs/orphan.bin"]'}
+        ],
+    )
+    assert packet["status"] == mod.BLOCKED_STATUS
+    assert "binary_or_mode_path_unmatched" in packet["blockers"]
+
+
+def test_collect_escalates_unmatched_flagged_path_to_blocker(tmp_path, monkeypatch) -> None:
+    # e2e 接線回歸（E2 RETURN 2026-07-03）：上面的 seam 測試直呼私函數 + 合成
+    # git_errors，釘不住 collect_git_impact_inputs 內「_unmatched_flagged_paths
+    # 呼叫 + git_errors append」的真實接線（E2 mutation 刪接線後全 suite 仍綠＝
+    # 逃逸）；該接線同時是防「未來有人拔 --no-renames」回退的唯一 backstop。
+    # 構造：monkeypatch 上游 numstat 採集，製造三路輸出不一致的 phantom flagged path。
+    repo = _make_repo(tmp_path)
+    (repo / "docs" / "safe.md").write_text("base\n", encoding="utf-8")
+    _git(repo, "add", "docs/safe.md")
+    _git(repo, "commit", "-m", "base")
+    base = _git(repo, "rev-parse", "HEAD")
+    (repo / "docs" / "safe.md").write_text("base\ncurrent\n", encoding="utf-8")
+    _git(repo, "commit", "-am", "current")
+    monkeypatch.setattr(
+        mod, "_binary_paths_from_numstat", lambda output: {"docs/phantom.bin"}
+    )
+
+    packet = _collect_and_build(repo, base)
+
+    assert packet["status"] == mod.BLOCKED_STATUS
+    assert "binary_or_mode_path_unmatched" in packet["blockers"]
 
 
 def test_collect_git_inputs_and_cli_required_origin_mismatch(tmp_path) -> None:
