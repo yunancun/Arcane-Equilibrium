@@ -15,13 +15,27 @@ class _RequestLike:
 
 
 def test_cookie_secure_auto_treats_https_proxy_hints_as_fail_closed(monkeypatch) -> None:
+    """OPS-1 P1-OPS-1-PROXY-HEADER-SPOOF-RISK（commit 65e784376）後的契約：
+
+    proxy header 只有 operator 顯式 opt-in `OPENCLAW_TRUST_PROXY_HEADERS=1`
+    才可信；未 opt-in 時完全忽略（直連 8000 的攻擊者可任意偽造
+    X-Forwarded-*，不得讓不可信輸入影響安全判定），`request.url.scheme`
+    為唯一真相。opt-in 後任何 HTTPS hint 一律標 Secure（fail-closed）。
+    """
     from program_code.exchange_connectors.bybit_connector.control_api_v1.app.auth_routes_common import (
         should_set_secure_cookie,
     )
 
     monkeypatch.delenv("OPENCLAW_COOKIE_SECURE", raising=False)
-    monkeypatch.delenv("OPENCLAW_TRUST_PROXY_HEADERS", raising=False)
 
+    # 未 opt-in：偽造 proxy hint 對判定零影響（spoof 免疫，fail-closed 到 scheme）。
+    monkeypatch.delenv("OPENCLAW_TRUST_PROXY_HEADERS", raising=False)
+    assert should_set_secure_cookie(_RequestLike(scheme="https")) is True
+    assert should_set_secure_cookie(_RequestLike(headers={"x-forwarded-proto": "https"})) is False
+    assert should_set_secure_cookie(_RequestLike()) is False
+
+    # 顯式 opt-in（Caddy 反代部署）：HTTPS hint 一律視為 Secure。
+    monkeypatch.setenv("OPENCLAW_TRUST_PROXY_HEADERS", "1")
     assert should_set_secure_cookie(_RequestLike(scheme="https")) is True
     assert should_set_secure_cookie(_RequestLike(headers={"x-forwarded-proto": "https"})) is True
     assert should_set_secure_cookie(_RequestLike(headers={"x-forwarded-ssl": "on"})) is True
@@ -36,6 +50,8 @@ def test_cookie_secure_explicit_disable_still_overrides_auto(monkeypatch) -> Non
     )
 
     monkeypatch.setenv("OPENCLAW_COOKIE_SECURE", "0")
+    # 開啟 proxy 信任，證明顯式 disable 連「可信 hint」也一併覆蓋。
+    monkeypatch.setenv("OPENCLAW_TRUST_PROXY_HEADERS", "1")
 
     assert should_set_secure_cookie(_RequestLike(scheme="https")) is False
     assert should_set_secure_cookie(_RequestLike(headers={"x-forwarded-proto": "https"})) is False

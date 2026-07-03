@@ -48,7 +48,14 @@ async def _failing_dispatcher(method: str, params: dict, timeout: float) -> dict
 
 
 async def _protocol_error_dispatcher(method: str, params: dict, timeout: float) -> dict:
-    from app.ipc_client import EngineProtocolError
+    # 為什麼全限定 import: 從 repo root 裸跑 pytest 時 control_api_v1 不在
+    # sys.path,bare `from app.ipc_client import ...` 會 ModuleNotFoundError
+    # 且被 SUT 的 except 包裝成錯誤 reason(假紅)。SUT import 時已把 srv root
+    # 注入 sys.path,program_code 前綴全限定路徑在任何 cwd 都可解析;
+    # 本測試只需要該 exception class 本體,不依賴 bare-import 語意。
+    from program_code.exchange_connectors.bybit_connector.control_api_v1.app.ipc_client import (
+        EngineProtocolError,
+    )
 
     raise EngineProtocolError(
         "response_id_mismatch",

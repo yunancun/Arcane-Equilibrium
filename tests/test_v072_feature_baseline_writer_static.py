@@ -24,8 +24,16 @@ def test_writer_rebuilds_rust_feature_collector_schema():
 
 
 def test_writer_cli_defaults_to_dry_run_and_requires_apply_ack():
+    # 19fa94fc4 加入 OPENCLAW_FEATURE_BASELINE_APPLY=1 env gate 作為第二條
+    # 顯式 ack 路徑，拒絕訊息隨之改寫；dry-run 默認 + 顯式 ack 才可寫 DB 的
+    # fail-closed 意圖不變（--yes/--force 類自動 ack 旗標仍被拒）。
     assert 'name = "feature_baseline_writer"' in CARGO
     assert "Mode::DryRun" in BIN
     assert "--i-understand-this-modifies-db" in BIN
-    assert "--apply requires --i-understand-this-modifies-db" in BIN
+    assert 'FEATURE_BASELINE_APPLY_ENV: &str = "OPENCLAW_FEATURE_BASELINE_APPLY"' in BIN
+    assert (
+        "apply mode requires --i-understand-this-modifies-db or {FEATURE_BASELINE_APPLY_ENV}=1"
+        in BIN
+    )
+    assert "rejected flag {arg}: --apply requires the explicit acknowledgement flag" in BIN
     assert "write_feature_baseline_rows(&pool, &rows)" in BIN
