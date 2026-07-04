@@ -103,7 +103,13 @@ impl TickPipeline {
 
         // Step 2: Compute indicators (need enough 1m bars)
         // 步驟 2：計算指標（需要足夠的 1 分鐘 K 線）
-        let mut indicators = self.compute_indicators(sym);
+        //
+        // P1-11 (2026-07-04)：改走 bar-close gated 1m 快取（PERF-1 5m 半邊補全）。
+        // 同一根 1m bar 內回快取 clone（與每 tick 重算 bit-identical），僅新 1m
+        // 收盤或 ewma_lambda 熱重載時重算。回傳為 owned clone，下方 hurst 打標 /
+        // latest_indicators 鏡像 / FeatureSnapshot 發送每 tick 照舊在 clone 上
+        // 執行 —— 只省「重算」本身，不改任何下游語義（快取不會被打標污染）。
+        let mut indicators = self.cached_or_recompute_indicators_1m(sym);
 
         // G7-03 Phase B: stabilize `hurst.regime` via per-symbol hysteresis when
         // `risk.hurst.enabled = true`. No-op (bit-identical to Phase A) when the
