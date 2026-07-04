@@ -912,3 +912,12 @@ case "$SCOPE" in
     --api-only)    restart_api; sleep 3; echo "API server restarted" ;;
     all)           restart_engine; wait_for_engine_socket_ready; restart_api; wait_and_verify ;;
 esac
+
+# ── P1-4：成功啟動服務後派生 learning-lane 世代 pin 檔 ──
+# 為什麼在此：set -e 下任何服務啟動失敗都會在此之前中止，走到這裡代表本次
+# scope 已成功啟動。pin 隨每次部署/重啟自動前進（不限 --rebuild），去除
+# 「部署後忘改 crontab inline SHA」的復發保證（FA F4 根因）。派生失敗不影響
+# 已完成的重啟結果（|| true）——lane 端遇 pin 缺失/舊值自會 fail-close。
+OPENCLAW_BASE_DIR="$REPO_ROOT" OPENCLAW_DATA_DIR="$DATA_DIR" \
+    bash "$REPO_ROOT/helper_scripts/deploy/derive_expected_source_head.sh" || \
+    echo "WARN: expected source head pin derivation failed; lane will fail-close on stale pin"

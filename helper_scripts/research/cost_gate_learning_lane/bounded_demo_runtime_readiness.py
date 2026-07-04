@@ -30,15 +30,23 @@ BLOCKED_BY_INPUT_STATUS = "BOUNDED_DEMO_RUNTIME_BLOCKED_BY_INPUT"
 READY_PLAN_STATUS = "READY_FOR_DEMO_LEARNING_PROBE"
 READY_PLAN_GATE_STATUS = "OPERATOR_REVIEW"
 ACTIVE_STANDING_AUTH_STATUS = "STANDING_DEMO_AUTHORIZATION_ACTIVE"
-DEFAULT_CONNECTOR_ENV_FILE = Path(
-    "/home/ncyu/BybitOpenClaw/secrets/environment_files/trading_services.env"
-)
-DEFAULT_PLAN_JSON = Path(
-    "/tmp/openclaw/cost_gate_learning_lane/bounded_demo_probe_soak_plan.json"
-)
-DEFAULT_STANDING_AUTH_JSON = Path(
-    "/tmp/openclaw/cost_gate_learning_lane/standing_demo_operator_authorization.json"
-)
+def _default_connector_env_file() -> Path:
+    # 從 OPENCLAW_SECRETS_ROOT 派生（鏡 restart_all.sh / 各 cron 慣例），去除
+    # 硬編碼 /home/ncyu Linux 路徑（跨平台準則：隨時可部署 Mac）。
+    secrets_root = Path(os.environ.get("OPENCLAW_SECRETS_ROOT", str(Path.home() / "BybitOpenClaw/secrets")))
+    return secrets_root / "environment_files" / "trading_services.env"
+
+
+def _default_plan_json() -> Path:
+    # D3 遷移殘留修：/tmp/openclaw 硬編碼默認改 OPENCLAW_DATA_DIR 派生（鏡
+    # policy.py 慣例），避免 refresh 鏈讀 /tmp 舊檔而 engine 讀新 SSOT 的雙真相分裂。
+    data_dir = Path(os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw"))
+    return data_dir / "cost_gate_learning_lane" / "bounded_demo_probe_soak_plan.json"
+
+
+def _default_standing_auth_json() -> Path:
+    data_dir = Path(os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw"))
+    return data_dir / "cost_gate_learning_lane" / "standing_demo_operator_authorization.json"
 BOUNDARY = (
     "read-only bounded Demo runtime readiness inspection only; no Bybit private "
     "call, no credential validation request, no Decision Lease acquire/release, "
@@ -697,9 +705,9 @@ def build_bounded_demo_runtime_readiness(
     *,
     secrets_dir: Path,
     slot: str = "demo",
-    connector_env_file: Path = DEFAULT_CONNECTOR_ENV_FILE,
-    plan_json: Path = DEFAULT_PLAN_JSON,
-    standing_auth_json: Path = DEFAULT_STANDING_AUTH_JSON,
+    connector_env_file: Path | None = None,
+    plan_json: Path | None = None,
+    standing_auth_json: Path | None = None,
     candidate_side_cell_key: str | None = None,
     expected_demo_api_key_sha256: str | None = None,
     expected_demo_api_key_prefix: str | None = None,
@@ -710,6 +718,14 @@ def build_bounded_demo_runtime_readiness(
     now_utc: dt.datetime | None = None,
 ) -> dict[str, Any]:
     now = now_utc or _utc_now()
+    # None → 於呼叫時解析 env 派生默認（避免 import 時凍結 OPENCLAW_DATA_DIR/
+    # OPENCLAW_SECRETS_ROOT）。
+    if connector_env_file is None:
+        connector_env_file = _default_connector_env_file()
+    if plan_json is None:
+        plan_json = _default_plan_json()
+    if standing_auth_json is None:
+        standing_auth_json = _default_standing_auth_json()
     if slot != "demo":
         status = BLOCKED_BY_INPUT_STATUS
         return {
@@ -849,9 +865,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--secrets-dir", type=Path, default=_default_secrets_dir())
     parser.add_argument("--slot", default="demo")
-    parser.add_argument("--connector-env-file", type=Path, default=DEFAULT_CONNECTOR_ENV_FILE)
-    parser.add_argument("--plan-json", type=Path, default=DEFAULT_PLAN_JSON)
-    parser.add_argument("--standing-auth-json", type=Path, default=DEFAULT_STANDING_AUTH_JSON)
+    parser.add_argument("--connector-env-file", type=Path, default=_default_connector_env_file())
+    parser.add_argument("--plan-json", type=Path, default=_default_plan_json())
+    parser.add_argument("--standing-auth-json", type=Path, default=_default_standing_auth_json())
     parser.add_argument("--candidate-side-cell-key")
     parser.add_argument("--expected-demo-api-key-sha256")
     parser.add_argument("--expected-demo-api-key-prefix")

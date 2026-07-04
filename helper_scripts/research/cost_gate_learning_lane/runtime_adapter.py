@@ -709,6 +709,14 @@ def build_ledger_record(decision: dict[str, Any], *, record_type: str = "probe_a
 
 
 def _default_plan_path() -> Path:
+    # RES-8：逐位鏡像 Rust demo_learning_lane_writer.rs:211-231 的 plan 路徑解析——
+    # OPENCLAW_DEMO_LEARNING_LANE_PLAN env override 優先（trim 後非空才生效，空白/
+    # 空串回退默認），否則 OPENCLAW_DATA_DIR 派生默認。為什麼必須對齊：Python
+    # adapter 與 Rust writer/soak 圍欄若解析出不同 plan 路徑，兩實現對賬失義
+    # （guard 與 admission 判準漂移=安全洞，2026-07-02 設計 §1.2）。
+    override = os.environ.get("OPENCLAW_DEMO_LEARNING_LANE_PLAN")
+    if override is not None and override.strip():
+        return Path(override.strip())
     data_dir = Path(os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw"))
     return data_dir / "cost_gate_learning_lane" / "demo_learning_lane_plan_latest.json"
 
