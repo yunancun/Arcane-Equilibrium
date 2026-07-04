@@ -776,8 +776,9 @@ async fn async_main(
         }
     }
 
-    // Initialize BudgetTracker + audit pool
-    tasks::init_budget_and_audit(&db_pool, &budget_tracker_slot, &audit_pool_slot).await;
+    // Initialize BudgetTracker + audit pool（budget_store = DOC-08 §4 daily 腿來源）
+    tasks::init_budget_and_audit(&db_pool, &budget_store, &budget_tracker_slot, &audit_pool_slot)
+        .await;
 
     // ------------------------------------------------------------------
     // Phase 4: LinUCB runtime + news context snapshot + governance wrappers

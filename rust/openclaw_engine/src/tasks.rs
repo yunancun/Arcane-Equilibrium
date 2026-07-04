@@ -212,8 +212,11 @@ pub(crate) fn spawn_instrument_refresh(
 
 /// Initialize BudgetTracker + audit pool and inject into IPC server slots.
 /// 初始化 BudgetTracker + 審計 pool 並注入 IPC 服務器槽位。
+/// `budget_store`：TOML BudgetConfig 熱重載 store —— DOC-08 §4 daily_usd_max
+/// enforcement 腿的來源（冷審計 R2 latent 修復）。
 pub(crate) async fn init_budget_and_audit(
     db_pool: &Arc<DbPool>,
+    budget_store: &Arc<ConfigStore<openclaw_engine::config::BudgetConfig>>,
     budget_tracker_slot: &BudgetTrackerSlot,
     audit_pool_slot: &AuditPoolSlot,
 ) {
@@ -225,7 +228,12 @@ pub(crate) async fn init_budget_and_audit(
     }
 
     if db_pool.is_available() {
-        match openclaw_engine::ai_budget::BudgetTracker::new(Arc::clone(db_pool)).await {
+        match openclaw_engine::ai_budget::BudgetTracker::new(
+            Arc::clone(db_pool),
+            Some(Arc::clone(budget_store)),
+        )
+        .await
+        {
             Ok(tracker) => {
                 budget_tracker_slot.write().await.replace(Arc::new(tracker));
                 info!("BudgetTracker initialized / AI 預算追蹤器已初始化");

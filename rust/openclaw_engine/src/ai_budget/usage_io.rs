@@ -116,3 +116,29 @@ pub async fn load_mtd_usage(pool: &DbPool) -> Result<HashMap<String, f64>, Strin
     }
     Ok(out)
 }
+
+/// DOC-08 §4 每日腿：按 scope 加總「當前 UTC 日」已用 cost_usd（冷審計 R2 latent 修復）。
+///
+/// 為什麼顯式用 UTC 日窗：tracker 的內存日窗以 epoch-day（ms / 86_400_000）翻轉，
+/// 這裡若沿用 `date_trunc('day', NOW())`（隨 DB session TimeZone）會與內存判定漂移；
+/// `NOW() AT TIME ZONE 'utc'` 先取 UTC naive 時間再截日、回轉 timestamptz，兩端對齊。
+/// 無用量的 scope 可能不存在；caller 應視為 0。
+pub async fn load_daily_usage(pool: &DbPool) -> Result<HashMap<String, f64>, String> {
+    let pg = pool
+        .get()
+        .ok_or_else(|| "usage_io::load_daily_usage: pool not available".to_string())?;
+    let rows: Vec<(String, Option<f64>)> = sqlx::query_as::<_, (String, Option<f64>)>(
+        "SELECT scope, COALESCE(SUM(cost_usd)::float8, 0.0) AS dtd
+           FROM learning.ai_usage_log
+          WHERE time >= date_trunc('day', NOW() AT TIME ZONE 'utc') AT TIME ZONE 'utc'
+          GROUP BY scope",
+    )
+    .fetch_all(pg)
+    .await
+    .map_err(|e| format!("ai_usage_log daily select failed: {e}"))?;
+    let mut out = HashMap::new();
+    for (scope, dtd) in rows {
+        out.insert(scope, dtd.unwrap_or(0.0));
+    }
+    Ok(out)
+}

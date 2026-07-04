@@ -14,6 +14,7 @@
 //!   counter。三段降級閾值以 `local_total` scope 為基準（operator 可調月度預算）。
 //!   定價為以 model id 為鍵的占位 const map（4-17 會改用 PG 表）。
 
+use crate::config::{BudgetConfig as TomlBudgetConfig, ConfigStore};
 use crate::database::pool::DbPool;
 use arc_swap::ArcSwap;
 use std::collections::HashMap;
@@ -157,9 +158,19 @@ impl DegradeLevel {
 struct UsageCache {
     /// Per-scope MTD spend (USD) / per-scope 月內已用（美元）
     mtd_usd: HashMap<String, f64>,
+    /// DOC-08 §4 每日腿：per-scope 當前 UTC 日已用（美元）。
+    /// 冷審計 R2 latent 修復——daily_usd_max 此前在 Rust 端零 runtime 消費者。
+    daily_usd: HashMap<String, f64>,
+    /// daily_usd 對應的 UTC epoch-day；不等於「今日」時整窗清零重計。
+    daily_utc_day: i64,
     /// Wall-clock millis when this snapshot was last refreshed from DB.
     /// 從 DB 上次刷新此快照的牆鐘毫秒。
     refreshed_at_ms: u64,
+}
+
+/// 把牆鐘毫秒換算為 UTC epoch-day（與 usage_io::load_daily_usage 的 UTC 日窗對齊）。
+fn utc_day_from_ms(ms: i64) -> i64 {
+    ms.div_euclid(86_400_000)
 }
 
 /// AI budget tracker — fail-closed enforcement of the $100/$150 ceilings.
@@ -177,17 +188,26 @@ pub struct BudgetTracker {
     /// Pricing table loaded from settings/ai_pricing.yaml at boot (4-17).
     /// 啟動時從 settings/ai_pricing.yaml 載入的定價表（4-17）。
     pricing: Arc<PricingTable>,
+    /// TOML BudgetConfig 熱重載 store —— DOC-08 §4 `caps.daily_usd_max` 的唯一來源。
+    /// production 由 tasks::init_budget_and_audit 注入 Some；None 僅限測試/降級構造，
+    /// 此時取 struct default 值（見 daily_usd_max()）。
+    toml_budget: Option<Arc<ConfigStore<TomlBudgetConfig>>>,
     /// Last config refresh wall-clock millis (atomic for lock-free reads).
     /// 上次配置刷新的牆鐘毫秒（原子，便於無鎖讀取）。
     last_config_refresh_ms: AtomicU64,
 }
 
 impl BudgetTracker {
-    /// Build a new BudgetTracker; loads config + MTD usage from PG if pool is up.
+    /// Build a new BudgetTracker; loads config + MTD/daily usage from PG if pool is up.
     /// Falls back to in-memory defaults when PG is unavailable (cold start safe).
-    /// 構建新 BudgetTracker；若 pool 可用則從 PG 載入 config + MTD 用量。
+    /// `toml_budget`：TOML BudgetConfig 熱重載 store（DOC-08 §4 daily_usd_max 來源）；
+    /// production 必須傳 Some。
+    /// 構建新 BudgetTracker；若 pool 可用則從 PG 載入 config + MTD/每日用量。
     /// PG 不可用時回退到內存預設（冷啟動安全）。
-    pub async fn new(pool: Arc<DbPool>) -> Result<Self, String> {
+    pub async fn new(
+        pool: Arc<DbPool>,
+        toml_budget: Option<Arc<ConfigStore<TomlBudgetConfig>>>,
+    ) -> Result<Self, String> {
         // 4-17: load pricing table fail-closed.
         // 4-17：載入定價表 fail-closed。
         let pricing_table = pricing::load_default()
@@ -211,23 +231,34 @@ impl BudgetTracker {
             BudgetConfig::defaults()
         };
 
+        let today_utc_day = utc_day_from_ms(now_ms() as i64);
         let usage = if pool.is_available() {
-            match usage_io::load_mtd_usage(&pool).await {
-                Ok(map) => UsageCache {
-                    mtd_usd: map,
-                    refreshed_at_ms: now_ms(),
-                },
+            let mtd_usd = match usage_io::load_mtd_usage(&pool).await {
+                Ok(map) => map,
                 Err(e) => {
                     warn!(error = %e, "BudgetTracker: MTD usage load failed, starting at zero / MTD 用量載入失敗，從零開始");
-                    UsageCache {
-                        mtd_usd: HashMap::new(),
-                        refreshed_at_ms: now_ms(),
-                    }
+                    HashMap::new()
                 }
+            };
+            // DOC-08 §4：每日窗載入失敗時鏡像 MTD 既有語義（從零開始 + warn）。
+            let daily_usd = match usage_io::load_daily_usage(&pool).await {
+                Ok(map) => map,
+                Err(e) => {
+                    warn!(error = %e, "BudgetTracker: daily usage load failed, starting at zero / 每日用量載入失敗，從零開始");
+                    HashMap::new()
+                }
+            };
+            UsageCache {
+                mtd_usd,
+                daily_usd,
+                daily_utc_day: today_utc_day,
+                refreshed_at_ms: now_ms(),
             }
         } else {
             UsageCache {
                 mtd_usd: HashMap::new(),
+                daily_usd: HashMap::new(),
+                daily_utc_day: today_utc_day,
                 refreshed_at_ms: now_ms(),
             }
         };
@@ -246,6 +277,7 @@ impl BudgetTracker {
             config_cache: Arc::new(ArcSwap::from_pointee(config)),
             usage_cache: Arc::new(RwLock::new(usage)),
             pricing,
+            toml_budget,
             last_config_refresh_ms: AtomicU64::new(now_ms()),
         })
     }
@@ -271,10 +303,24 @@ impl BudgetTracker {
         Self {
             pool,
             config_cache: Arc::new(ArcSwap::from_pointee(config)),
-            usage_cache: Arc::new(RwLock::new(UsageCache::default())),
+            usage_cache: Arc::new(RwLock::new(UsageCache {
+                daily_utc_day: utc_day_from_ms(now_ms() as i64),
+                ..UsageCache::default()
+            })),
             pricing,
+            toml_budget: None,
             last_config_refresh_ms: AtomicU64::new(now_ms()),
         }
+    }
+
+    /// 測試專用：注入帶指定 daily_usd_max 的 TOML BudgetConfig store，
+    /// 讓 daily gate 測試不觸碰檔案系統與 env。
+    #[cfg(test)]
+    pub fn with_daily_cap_for_test(mut self, daily_usd_max: f64) -> Self {
+        let mut cfg = TomlBudgetConfig::default();
+        cfg.caps.daily_usd_max = daily_usd_max;
+        self.toml_budget = Some(Arc::new(ConfigStore::new(cfg)));
+        self
     }
 
     /// Compute USD cost for a given model + token counts via the loaded pricing table.
@@ -314,15 +360,18 @@ impl BudgetTracker {
         Ok(())
     }
 
-    /// Reload MTD usage from PG (called periodically or on-demand).
-    /// 從 PG 重載月內已用（定期或按需）。
+    /// Reload MTD + daily usage from PG (called periodically or on-demand).
+    /// 從 PG 重載月內已用 + 每日已用（定期或按需）。
     pub async fn refresh_usage(&self) -> Result<(), String> {
         if !self.pool.is_available() {
             return Ok(());
         }
         let map = usage_io::load_mtd_usage(&self.pool).await?;
+        let daily = usage_io::load_daily_usage(&self.pool).await?;
         let mut guard = self.usage_cache.write().await;
         guard.mtd_usd = map;
+        guard.daily_usd = daily;
+        guard.daily_utc_day = utc_day_from_ms(now_ms() as i64);
         guard.refreshed_at_ms = now_ms();
         Ok(())
     }
@@ -389,6 +438,7 @@ impl BudgetTracker {
         //    the retry doesn't double-bill the operator.
         //    僅在新插入時累進內存 MTD 快取；去重路徑跳過，避免重試雙重計費。
         if inserted {
+            let today = utc_day_from_ms(now_ms() as i64);
             let mut guard = self.usage_cache.write().await;
             *guard.mtd_usd.entry(scope.to_string()).or_insert(0.0) += cost_usd;
             if scope != SCOPE_LOCAL_TOTAL {
@@ -396,6 +446,18 @@ impl BudgetTracker {
                     .mtd_usd
                     .entry(SCOPE_LOCAL_TOTAL.to_string())
                     .or_insert(0.0) += cost_usd;
+            }
+            // DOC-08 §4 每日腿：先翻日窗再累進；重試「舊日 tuple」（event_time_ms
+            // 不在今日窗）不污染今日累計，與 hypertable PK 去重語義一致。
+            Self::roll_daily_window(&mut guard, today);
+            if utc_day_from_ms(event_time_ms) == today {
+                *guard.daily_usd.entry(scope.to_string()).or_insert(0.0) += cost_usd;
+                if scope != SCOPE_LOCAL_TOTAL {
+                    *guard
+                        .daily_usd
+                        .entry(SCOPE_LOCAL_TOTAL.to_string())
+                        .or_insert(0.0) += cost_usd;
+                }
             }
         } else {
             debug!(
@@ -405,6 +467,57 @@ impl BudgetTracker {
         }
 
         Ok(cost_usd)
+    }
+
+    /// 日界翻轉：cache 標記日 != 今日 → 清空 daily 累計並改標今日。
+    /// 為什麼可以直接清零：本引擎是 `learning.ai_usage_log` 唯一寫入者，翻轉
+    /// 瞬間「今日」尚無任何已記帳開銷；重啟（new）與定期 refresh_usage 會從 DB
+    /// 重載校正殘餘漂移。
+    fn roll_daily_window(cache: &mut UsageCache, today_utc_day: i64) {
+        if cache.daily_utc_day != today_utc_day {
+            cache.daily_usd.clear();
+            cache.daily_utc_day = today_utc_day;
+        }
+    }
+
+    /// DOC-08 §4 每日硬上限值（來源：TOML BudgetConfig `caps.daily_usd_max`，
+    /// 熱重載即時生效）。0 = 不設限（沿用 BudgetCaps 既有欄位契約，不在此重定義）。
+    /// 無 store（測試/降級構造）→ 取 struct default；production 由 tasks 注入真實 store。
+    fn daily_usd_max(&self) -> f64 {
+        match &self.toml_budget {
+            Some(store) => store.load().caps.daily_usd_max,
+            None => TomlBudgetConfig::default().caps.daily_usd_max,
+        }
+    }
+
+    /// DOC-08 §4 每日上限 gate：回傳 `Some(拒絕理由)` 代表新的付費 AI 調用必須被拒。
+    ///
+    /// 為什麼 fail-closed：DOC-08 §4 規定每日 $2.00 硬上限；缺這條腿時 teacher
+    /// kill-switch 一開，單日可燒到月度 cap 而不觸任何 daily 邊界（冷審計 R2
+    /// latent finding）。本 gate 只攔 AI 調用，不攔任何交易路徑
+    /// （caller = claude_teacher pre-call gate）。
+    pub async fn daily_cap_rejection(&self) -> Option<String> {
+        let cap = self.daily_usd_max();
+        if cap <= 0.0 {
+            return None; // 0 = uncapped（BudgetCaps 既有契約）
+        }
+        let today = utc_day_from_ms(now_ms() as i64);
+        let mut guard = self.usage_cache.write().await;
+        Self::roll_daily_window(&mut guard, today);
+        let used = guard
+            .daily_usd
+            .get(SCOPE_LOCAL_TOTAL)
+            .copied()
+            .unwrap_or(0.0);
+        if used >= cap {
+            Some(format!(
+                "daily AI spend cap reached: used={used:.4} USD >= daily_usd_max={cap:.4} USD \
+                 (DOC-08 §4); denying new paid AI calls until UTC day rollover / 每日 AI 開銷已達 \
+                 daily_usd_max，拒絕新的付費 AI 調用直到 UTC 日界翻轉"
+            ))
+        } else {
+            None
+        }
     }
 
     /// Remaining USD for a scope this month (limit − MTD usage; clamped at 0).
@@ -467,11 +580,22 @@ impl BudgetTracker {
         let local_used = usage.mtd_usd.get(SCOPE_LOCAL_TOTAL).copied().unwrap_or(0.0);
         let local_limit = cfg.limit(SCOPE_LOCAL_TOTAL);
         let level = DegradeLevel::from_usage(local_used, local_limit);
+        // DOC-08 §4 每日腿觀測欄位（additive，不改既有 key）。
+        let daily_used = usage
+            .daily_usd
+            .get(SCOPE_LOCAL_TOTAL)
+            .copied()
+            .unwrap_or(0.0);
         serde_json::json!({
             "config": config_obj,
             "usage_mtd": usage_obj,
             "remaining": remaining_obj,
             "degrade_level": level.as_str(),
+            "daily": {
+                "used_local_total": daily_used,
+                "daily_usd_max": self.daily_usd_max(),
+                "utc_day": usage.daily_utc_day,
+            },
             "last_refresh_ms": usage.refreshed_at_ms,
         })
     }
@@ -488,12 +612,15 @@ impl BudgetTracker {
             .store(now_ms(), Ordering::Relaxed);
     }
 
-    /// Test-only: directly inject MTD usage to bypass DB.
-    /// 測試專用：直接注入 MTD 用量繞過 DB。
+    /// Test-only: directly inject MTD + daily usage to bypass DB.
+    /// 測試專用：直接注入 MTD + 每日用量繞過 DB（鏡像 record_usage 的雙窗累進）。
     #[cfg(test)]
     pub async fn inject_usage_for_test(&self, scope: &str, usd: f64) {
+        let today = utc_day_from_ms(now_ms() as i64);
         let mut guard = self.usage_cache.write().await;
         *guard.mtd_usd.entry(scope.to_string()).or_insert(0.0) += usd;
+        Self::roll_daily_window(&mut guard, today);
+        *guard.daily_usd.entry(scope.to_string()).or_insert(0.0) += usd;
     }
 }
 
@@ -592,7 +719,7 @@ mod tests {
         let _g = crate::test_env_lock::guard();
         set_test_pricing_path();
         let pool = empty_pool().await;
-        let tracker = BudgetTracker::new(pool).await.unwrap();
+        let tracker = BudgetTracker::new(pool, None).await.unwrap();
         let cfg = tracker.config_cache.load_full();
         assert_eq!(cfg.limit(SCOPE_LOCAL_TOTAL), 100.0);
         assert_eq!(cfg.limit(SCOPE_PLATFORM_HARD_CAP), 150.0);
@@ -785,6 +912,100 @@ mod tests {
         assert_eq!(DegradeLevel::SoftWarn.as_str(), "soft_warn");
         assert_eq!(DegradeLevel::HardLimit.as_str(), "hard_limit");
         assert_eq!(DegradeLevel::Killswitch.as_str(), "killswitch");
+    }
+
+    // --- DOC-08 §4 daily_usd_max enforcement tests / 每日硬上限測試 ---
+
+    // 每日窗已用 >= cap → 拒絕新的付費 AI 調用。
+    #[tokio::test]
+    async fn test_daily_cap_rejection_blocks_at_cap() {
+        let pool = empty_pool().await;
+        let tracker = BudgetTracker::new_for_test(pool, BudgetConfig::defaults())
+            .with_daily_cap_for_test(2.0);
+        tracker.inject_usage_for_test(SCOPE_LOCAL_TOTAL, 2.0).await;
+        let rejection = tracker.daily_cap_rejection().await;
+        assert!(
+            rejection.is_some(),
+            "daily spend at cap must be rejected (fail-closed)"
+        );
+        assert!(rejection.unwrap().contains("daily_usd_max"));
+    }
+
+    // 每日窗低於 cap → 放行。
+    #[tokio::test]
+    async fn test_daily_cap_below_cap_allows() {
+        let pool = empty_pool().await;
+        let tracker = BudgetTracker::new_for_test(pool, BudgetConfig::defaults())
+            .with_daily_cap_for_test(2.0);
+        tracker.inject_usage_for_test(SCOPE_LOCAL_TOTAL, 1.99).await;
+        assert!(tracker.daily_cap_rejection().await.is_none());
+    }
+
+    // cap = 0 → 不設限（BudgetCaps 既有欄位契約）。
+    #[tokio::test]
+    async fn test_daily_cap_zero_uncapped() {
+        let pool = empty_pool().await;
+        let tracker = BudgetTracker::new_for_test(pool, BudgetConfig::defaults())
+            .with_daily_cap_for_test(0.0);
+        tracker
+            .inject_usage_for_test(SCOPE_LOCAL_TOTAL, 10_000.0)
+            .await;
+        assert!(tracker.daily_cap_rejection().await.is_none());
+    }
+
+    // 日界翻轉：昨日窗滿額，翻日後 gate 必須放行（清零重計）。
+    #[tokio::test]
+    async fn test_daily_window_roll_clears_spend() {
+        let pool = empty_pool().await;
+        let tracker = BudgetTracker::new_for_test(pool, BudgetConfig::defaults())
+            .with_daily_cap_for_test(2.0);
+        tracker.inject_usage_for_test(SCOPE_LOCAL_TOTAL, 5.0).await;
+        assert!(tracker.daily_cap_rejection().await.is_some());
+        // 把窗標記改為「昨天」模擬跨日；下一次讀取應翻窗清零。
+        {
+            let mut guard = tracker.usage_cache.write().await;
+            guard.daily_utc_day -= 1;
+        }
+        assert!(
+            tracker.daily_cap_rejection().await.is_none(),
+            "day rollover must clear the daily window"
+        );
+        let guard = tracker.usage_cache.read().await;
+        assert!(guard.daily_usd.is_empty(), "daily map must be cleared");
+        // 月度窗不受日界翻轉影響。
+        assert!((guard.mtd_usd.get(SCOPE_LOCAL_TOTAL).copied().unwrap() - 5.0).abs() < 1e-9);
+    }
+
+    // record_usage 同步累進每日窗（scope + local_total 鏡像月度語義）；
+    // status_json 暴露 daily 觀測欄位。
+    #[tokio::test]
+    async fn test_record_usage_bumps_daily_and_status_json() {
+        let pool = empty_pool().await;
+        let tracker = BudgetTracker::new_for_test(pool, BudgetConfig::defaults())
+            .with_daily_cap_for_test(2.0);
+        let (rid, ts) = make_request_id(SCOPE_AGENT_TEACHER);
+        let cost = tracker
+            .record_usage(
+                SCOPE_AGENT_TEACHER,
+                "anthropic",
+                "claude-sonnet-4-5",
+                1_000,
+                500,
+                "unit_test",
+                &rid,
+                ts,
+            )
+            .await
+            .expect("record_usage OK");
+        let guard = tracker.usage_cache.read().await;
+        let teacher_daily = guard.daily_usd.get(SCOPE_AGENT_TEACHER).copied().unwrap();
+        let local_daily = guard.daily_usd.get(SCOPE_LOCAL_TOTAL).copied().unwrap();
+        assert!((teacher_daily - cost).abs() < 1e-9);
+        assert!((local_daily - cost).abs() < 1e-9);
+        drop(guard);
+        let status = tracker.status_json().await;
+        assert!((status["daily"]["used_local_total"].as_f64().unwrap() - cost).abs() < 1e-9);
+        assert_eq!(status["daily"]["daily_usd_max"], 2.0);
     }
 
     // --- E5-FN-2 Plan N tests / E5-FN-2 Plan N 測試 ---
