@@ -177,6 +177,15 @@ def _fetch_recent_fill_returns(
                 WHERE ts >= NOW() - (%s || ' days')::interval
                   AND engine_mode = ANY(%s)
                   AND realized_pnl IS NOT NULL
+                  -- P2-4 (2026-07-04)：系統動作 fill 不是策略 arm。無此過濾時
+                  -- risk_close:* 等偽策略會被立成 thompson posterior arm
+                  -- （learning.bayesian_posteriors 已有 2026-05-10 前例）。
+                  -- 判準對齊 F4-2 join 側隔離（edge_label_backfill 等）。
+                  AND (strategy_name IS NULL OR (
+                        strategy_name NOT LIKE 'unattributed:%%'
+                        AND strategy_name NOT LIKE 'risk_close:%%'
+                        AND strategy_name <> 'orphan_frozen'
+                  ))
                 ORDER BY ts DESC
                 LIMIT %s
                 """,
@@ -271,6 +280,7 @@ def _run_linucb(dsn: str | None, args: argparse.Namespace) -> JobResult:
         from ml_training.linucb_trainer import (  # type: ignore
             CANONICAL_FEATURE_NAMES_V1,
             LinUcbTrainConfig,
+            enumerate_v1_15_arm_ids,
             train_all_arms,
         )
 
@@ -282,12 +292,37 @@ def _run_linucb(dsn: str | None, args: argparse.Namespace) -> JobResult:
             max_age_days=args.max_age_days,
         )
         rows = train_all_arms(dsn, cfg)
+        expected_arms = len(enumerate_v1_15_arm_ids())
+        total_pulls = sum(row.n_pulls_after for row in rows)
         detail = {
             "engine_mode": args.linucb_engine_mode,
             "arms": len(rows),
-            "total_pulls": sum(row.n_pulls_after for row in rows),
+            "arms_expected": expected_arms,
+            "total_pulls": total_pulls,
             "converged_arms": sum(1 for row in rows if row.converged),
         }
+        # P2-11 ③ (2026-07-04)：train_all_arms 對 per-arm fetch/upsert 失敗只
+        # logger.error + continue，15 arm 全敗仍回空 list —— 無條件回 "ok" 即假成功
+        # （07-04 runtime 實證 arms=0/83.7s/"ok"）。誠實三態：
+        #   全敗 → error；部分敗 → error（帶 arms_failed）；全到但 0 觀測 → skipped
+        #   （對齊模組「insufficient samples as skip」自述）。
+        if len(rows) == 0:
+            return JobResult(
+                "linucb_trainer", "error", _elapsed_ms(start), detail, "all_arms_failed",
+            )
+        if len(rows) < expected_arms:
+            detail["arms_failed"] = expected_arms - len(rows)
+            return JobResult(
+                "linucb_trainer",
+                "error",
+                _elapsed_ms(start),
+                detail,
+                f"arms_failed: {expected_arms - len(rows)}/{expected_arms}",
+            )
+        if total_pulls == 0:
+            return JobResult(
+                "linucb_trainer", "skipped", _elapsed_ms(start), detail, "zero_observations",
+            )
         return JobResult("linucb_trainer", "ok", _elapsed_ms(start), detail)
     except Exception as exc:  # noqa: BLE001
         return JobResult(

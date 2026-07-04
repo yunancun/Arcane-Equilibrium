@@ -16,10 +16,14 @@
 -- SOURCE: docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-16--PA--subsecond-tick-orderbook-recorder-design.md §2
 --
 -- 範圍 / Scope (V142):
---   §A market.trades CREATE TABLE IF NOT EXISTS + Guard A（per-trade tape，5 欄）
---   §B market.ob_top CREATE TABLE IF NOT EXISTS + Guard A（L1 top-of-book sampled，6 欄）
+--   §A market.trades CREATE TABLE IF NOT EXISTS（per-trade tape，5 欄）
+--   §B market.ob_top CREATE TABLE IF NOT EXISTS（L1 top-of-book sampled，6 欄）
 --   §C 條件 hypertable（無 TimescaleDB 時跳過，mirror V002）
 --   §D 壓縮 + 保留策略 + sync_commit COMMENT（mirror V006）
+--   ⚠️ 誠實更正（2026-07-04 P2-11 ①）：本檔 body 從未含 Guard A DO-block（header
+--   原聲稱有）。兩表的必要欄 Guard A 反射由 V148__recorder_promotions_guard_retrofit
+--   補齊；本 header 修正屬 governance 措辭訂正，checksum 漂移由
+--   bin/repair_migration_checksum 處理（不手改 _sqlx_migrations）。
 --
 -- 編號決策:
 --   prod _sqlx_migrations 最高 = 139；本 repo file chain 最高 = V141（V140 缺號、

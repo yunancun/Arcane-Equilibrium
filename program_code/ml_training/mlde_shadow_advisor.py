@@ -210,6 +210,10 @@ WITH base AS (
       ) d ON TRUE
      WHERE i.engine_mode = ANY(%s)
        AND df.label_net_edge_bps IS NOT NULL
+       -- P1-3 (2026-07-04)：排除 governance reject 合成 label（99.97% 佔比實測），
+       -- 它們是 QueryCanceled（statement timeout）的 join 基數根因，且對 advisor
+       -- 聚合是雜訊非樣本。與 parquet_etl._LOAD_TRAINING_DATA_SQL 同一判準。
+       AND df.label_close_tag IS DISTINCT FROM 'rejected_governance'
        AND i.signal_id IS NOT NULL AND i.signal_id <> ''
        AND i.context_id IS NOT NULL AND i.context_id <> ''
        AND COALESCE(i.details->>'source', '') <> 'command'

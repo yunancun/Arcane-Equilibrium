@@ -49,6 +49,14 @@ THRESH_LGBM_VS_LINEAR_QR_MIN_DIFF = 0.05  # +5pp pinball skill vs linear QR
 SAMPLE_GATE_PROD = 500
 SAMPLE_GATE_SHADOW = 200
 
+# P1-3 (2026-07-04) label 組成硬 gate 閾值：
+#   - synthetic_share 修後期望恆 0（SQL 邊界已排除 rejected_governance），
+#     > 0 即代表訓練集過濾退化，fail-closed 封頂 shadow_only。
+#   - zeros_share 是退化偵測器：>0.5 表示標籤一半以上恰為 0（常數預測器指紋，
+#     07-04 實證 pinball skill 恆 0 / coverage 恆 1 即此形態）。
+THRESH_LABEL_SYNTHETIC_SHARE_MAX = 0.0
+THRESH_LABEL_ZEROS_SHARE_MAX = 0.5
+
 
 def _build_train_serve_skew_harness(
     result: QuantileTrainingResult,
@@ -200,6 +208,33 @@ def _check_lgbm_vs_linear_qr(result: QuantileTrainingResult) -> Tuple[bool, Dict
     return all_pass, {"per_quantile": per_q}
 
 
+def _check_label_composition(
+    label_composition: Optional[Dict[str, Any]],
+) -> Tuple[bool, Dict[str, Any]]:
+    """P1-3 label 組成硬 gate：synthetic_share == 0 且 zeros_share ≤ 0.5。
+
+    為什麼 fail-closed：合成 reject label（99.97% 佔比實測）會訓練出常數預測器
+    卻拿到「百萬樣本」假象；本 gate 讓退化在 verdict 層被封頂 shadow_only，
+    不能 ship。composition 缺席（dry-run / 舊呼叫端）→ 視為未評估，回 pass 並
+    標 source=unavailable（與 lgbm_vs_linear_qr 的 sklearn 缺席慣例對齊）。
+    """
+    if not label_composition:
+        return True, {"source": "unavailable"}
+    synthetic_share = float(label_composition.get("synthetic_share", 0.0))
+    zeros_share = float(label_composition.get("zeros_share", 0.0))
+    passed = (
+        synthetic_share <= THRESH_LABEL_SYNTHETIC_SHARE_MAX
+        and zeros_share <= THRESH_LABEL_ZEROS_SHARE_MAX
+    )
+    return passed, {
+        "synthetic_share": synthetic_share,
+        "zeros_share": zeros_share,
+        "synthetic_share_max": THRESH_LABEL_SYNTHETIC_SHARE_MAX,
+        "zeros_share_max": THRESH_LABEL_ZEROS_SHARE_MAX,
+        "passed": passed,
+    }
+
+
 def _sample_size_bucket(n_labeled: int) -> str:
     """spec §6.5 bucket: prod / shadow / none.
     spec §6.5 樣本分層：production / shadow_only / no_ship。"""
@@ -219,6 +254,7 @@ def generate_acceptance_report(
     include_train_serve_harness: bool = True,
     harness_n_samples: int = 1000,
     harness_seed: int = 1337,
+    label_composition: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Assemble per-gate metrics + overall verdict (ship / shadow / no_ship).
 
@@ -229,12 +265,15 @@ def generate_acceptance_report(
       post_cqr_coverage — optional {"q10": (emp, err_pp), ...} after applying CQR.
       output_path — if provided, JSON-serialize report here.
       include_train_serve_harness — produce 1000 random vectors + preds for CC T7.
+      label_composition — P1-3 訓練集 label 組成（parquet_etl.build_label_composition
+        產出）；提供時作為第六道硬 gate（synthetic_share == 0 且 zeros_share ≤ 0.5，
+        fail → verdict 封頂 shadow_only）並原樣寫入 report。
 
     Returns dict with all gate metrics, sample-size bucket, final verdict.
     Verdict logic:
       n_labeled < 200                        → no_ship
       200 ≤ n_labeled < 500                  → shadow_only (regardless of metrics)
-      n_labeled ≥ 500 AND all 5 hard gates   → should_ship
+      n_labeled ≥ 500 AND all hard gates     → should_ship
       n_labeled ≥ 500 AND any gate fails     → shadow_only (downgrade)
     裁決邏輯見上；JSON 持久化可選。
     """
@@ -250,6 +289,9 @@ def generate_acceptance_report(
         "embargo_config": asdict(result.embargo_config) if result.embargo_config else None,
         "training_success": bool(result.success),
         "training_error": result.error or None,
+        # P1-3：label 組成永遠落 report（None = 呼叫端未提供，如 dry-run），
+        # 供 MIT/E4 驗收溯源（top_close_tags / informative vs synthetic 記帳）。
+        "label_composition": label_composition,
     }
 
     if not result.success:
@@ -261,12 +303,13 @@ def generate_acceptance_report(
     bucket = _sample_size_bucket(result.n_samples_labeled)
     report["sample_bucket"] = bucket
 
-    # Per-gate evaluations (all five).
+    # Per-gate evaluations (five metric gates + P1-3 label composition gate).
     skill_pass, skill_detail = _check_pinball_skill(result)
     coverage_pass, coverage_detail = _check_coverage_error(result, post_cqr_coverage)
     lift_pass, lift_detail = _check_decile_lift(result)
     crossing_pass, crossing_detail = _check_crossing(result)
     floor_pass, floor_detail = _check_lgbm_vs_linear_qr(result)
+    composition_pass, composition_detail = _check_label_composition(label_composition)
 
     report["gates"] = {
         "pinball_skill": {"passed": skill_pass, **skill_detail},
@@ -274,8 +317,11 @@ def generate_acceptance_report(
         "decile_lift": {"passed": lift_pass, **lift_detail},
         "crossing_rate": {"passed": crossing_pass, **crossing_detail},
         "lgbm_vs_linear_qr": {"passed": floor_pass, **floor_detail},
+        "label_composition": {"passed": composition_pass, **composition_detail},
     }
-    all_hard_gates_pass = all([skill_pass, coverage_pass, lift_pass, crossing_pass, floor_pass])
+    all_hard_gates_pass = all([
+        skill_pass, coverage_pass, lift_pass, crossing_pass, floor_pass, composition_pass,
+    ])
     report["all_hard_gates_pass"] = all_hard_gates_pass
 
     report["cqr_offsets"] = cqr_offsets or {}
@@ -303,6 +349,7 @@ def generate_acceptance_report(
                     ("decile_lift", lift_pass),
                     ("crossing_rate", crossing_pass),
                     ("lgbm_vs_linear_qr", floor_pass),
+                    ("label_composition", composition_pass),
                 ) if not passed
             ]
             reason = f"sample ≥ prod but gate(s) failed: {failed} → downgrade to shadow"
