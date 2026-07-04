@@ -237,6 +237,14 @@ from .checks_cron_heartbeat import (  # noqa: F401
 from .checks_cost_gate_double_deduct import (  # noqa: F401
     check_90_cost_gate_double_deduct,
 )
+# [92][93] P0-2④ crontab 治理巡檢（2026-07-04）— 2026-06-27 crontab 屠殺 follow-up。
+# [92] live crontab render vs repo 正本 render 不一致 > 24h = FAIL；
+# [93] journal 出現無對應 manifest 的 REPLACE = FAIL（治理外 mutation 偵測）。
+# 預設 WARN；OPENCLAW_CRONTAB_GOVERNANCE_REQUIRED=1 升 FAIL。
+from .checks_crontab_governance import (  # noqa: F401
+    check_92_crontab_matches_repo_render,
+    check_93_crontab_replace_has_manifest,
+)
 
 __all__ = [
     "main",
@@ -348,4 +356,7 @@ __all__ = [
     "check_90_cost_gate_double_deduct",
     # [91] INTRADAY-KLINES-PERMANENT-FIX R3（2026-06-16）kline_calibration cron heartbeat.
     "check_91_kline_calibration_cron_fires",
+    # [92][93] P0-2④ crontab 治理巡檢（2026-07-04）— crontab 屠殺 follow-up.
+    "check_92_crontab_matches_repo_render",
+    "check_93_crontab_replace_has_manifest",
 ]
