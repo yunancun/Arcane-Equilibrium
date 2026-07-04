@@ -103,12 +103,14 @@ function clusterKey(f) {
 }
 
 // ---- 參數（args 全部可選）----
-const scope = (args && args.scope) || 'srv/ 全倉（rust engine、control_api、GUI、helper_scripts、.claude 配置、治理文檔）'
-const axes = (args && args.axes) || ['CC', 'FA', 'E3', 'BB', 'QC', 'MIT', 'AI-E', 'E5', 'A3', 'R4']
-const doFix = !!(args && args.fix)
-const maxFixes = (args && args.max_fixes) || 5
-const focus = (args && args.focus) || null
-const baseline = (args && args.baseline) || null
+// 2026-07-04 實證(cold-audit R2):harness 可能將 args 以 JSON 字串傳入,未 parse 會靜默降級到默認配置
+const args_ = (typeof args === 'string') ? (() => { try { return JSON.parse(args) } catch (_e) { return null } })() : args
+const scope = (args_ && args_.scope) || 'srv/ 全倉（rust engine、control_api、GUI、helper_scripts、.claude 配置、治理文檔）'
+const axes = (args_ && args_.axes) || ['CC', 'FA', 'E3', 'BB', 'QC', 'MIT', 'AI-E', 'E5', 'A3', 'R4']
+const doFix = !!(args_ && args_.fix)
+const maxFixes = (args_ && args_.max_fixes) || 5
+const focus = (args_ && args_.focus) || null
+const baseline = (args_ && args_.baseline) || null
 
 const READONLY = 'read-only audit 硬邊界：不修復 / 不改功能 / 不部署 / 不重啟 runtime / 不改 DB schema / 不動 live·demo·paper auth / 不啟動交易 / 不改 risk·strategy·TOML live config。Linux 證據僅允許 ssh trade-core read-only 命令；遇任何 rebuild·restart·migration·auth·trading mutation 需求立即停止、標 BLOCKED 回報。'
 const ANNOTATE = '【後置標註，寫完每條 finding 後再填，不要讓它影響你的調查方向】defect_type：從枚舉多選（覆蓋不全選 other，可多選——多視角分歧是 corroboration 證據不是錯誤）；symbol_anchor：缺陷所在函數/配置鍵/常數名（涉配置或常數的一律填 config-key/TOML-key/env-var 名，跨軸天然對齊）；root_anchor：若你判斷症狀的根因在上游別處，填上游 檔::符號。這些僅供事後機械聚簇展示，絕不限制你的調查範圍與深度。severity 計價校正（裁決座標）：over-gate/evolution-blocker 類 impact 以被壓制的期望盈利/被凍結的進化價值計、readability-debt/duplicate-logic 類以重複開發成本（被 agent 讀改頻率×體量×剩餘壽命）計，不以工程風險計——風控雙向：負淨貢獻控制（拒真無風險換益/凍死槓桿/摩擦>保護）與缺失控制同類缺陷。'
