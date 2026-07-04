@@ -221,22 +221,36 @@ impl BybitResponse {
 // Rate limit state / 限流狀態
 // ---------------------------------------------------------------------------
 
-/// Bybit V5 rate limit group — each group has independent limits.
-/// Bybit V5 限流分組 — 每組有獨立的限制。
+/// Bybit V5 rate limit group — 內部分組近似器。
+///
+/// 為什麼是「近似」：Bybit 官方 rate limit 是 per-endpoint × per-UID 的 1 秒滾動窗
+/// （官方原文 "The API rate limit is based on the rolling time window per second and
+/// UID"），並非本枚舉的粗分組。此處各 group 只是冷啟動兜底 seed（見
+/// `RateLimitState::default`），runtime 每次 response 後以該端點的 `X-Bapi-Limit*`
+/// header 覆寫該組剩餘值，實際退避跟隨官方 per-endpoint 真值。以下註記標官方 linear
+/// 端點上限（2026-07-04 官方頁實抓；per BB P1-6 勘誤），括號內為本地 seed。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(usize)]
 pub enum RateLimitGroup {
-    /// Order creation/amendment/cancellation (20 req/s per UID) / 訂單操作
+    /// 訂單操作 `/v5/order/*` `/v5/execution/*`：官方 create/amend/cancel/cancel-all
+    /// 各 10 req/s 獨立額度（batch 另有獨立額度，消耗=請求數×訂單數）、
+    /// order/realtime|history + execution/list 各 50 req/s；本地 seed=10（保守）。
     Order,
-    /// Position queries and configuration (20 req/s per UID) / 持倉操作
+    /// 持倉操作 `/v5/position/*`：官方 position/list + closed-pnl 各 50 req/s、
+    /// set-leverage/trading-stop/confirm-pending-mmr 各 10 req/s；本地 seed=10（保守）。
     Position,
-    /// Account queries (20 req/s per UID) / 帳戶查詢
+    /// 帳戶查詢 `/v5/account/*`：官方 wallet-balance + account/info 各 50 req/s、
+    /// transaction-log 25 req/s、fee-rate 5 req/s；本地 seed=10（fee-rate 官方比
+    /// seed 嚴，靠 header 即時收斂）。
     Account,
-    /// Market data queries (10-120 req/s depending on endpoint) / 市場數據
+    /// 市場數據 `/v5/market/*`（public）：無 per-UID group 上限，僅 per-IP 600 req/5s；
+    /// 本地 seed=120。
     Market,
-    /// Asset operations (5 req/s) / 資產操作
+    /// 資產操作 `/v5/asset/*` `/v5/spot-margin*` `/v5/earn/*`：官方 per-endpoint 不均一
+    /// （coin/query-info 5/s、fundinghistory 30/s、inter-transfer 60 req/min…）；
+    /// 本地 seed=5（保守）。
     Asset,
-    /// Other / 其他
+    /// 其他端點：本地 seed=10。
     Other,
 }
 

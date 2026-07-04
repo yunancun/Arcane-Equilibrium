@@ -62,8 +62,13 @@ def _parse_dt(value: Any) -> dt.datetime | None:
         parsed = dt.datetime.fromisoformat(text)
     except ValueError:
         return None
+    # B2（冷審計 R2）：naive datetime（無 tz offset）一律拒收，不再默認視為 UTC。
+    # 為什麼 fail-closed：Rust 側 validate_operator_authorization_envelope 以
+    # DateTime::parse_from_rfc3339 嚴格要求 offset（demo_learning_lane.rs），
+    # Python 寬鬆接受會造成同一 envelope 跨語言 accept/reject 分歧；統一嚴格側，
+    # 存疑輸入默認收縮。
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+        return None
     return parsed.astimezone(dt.timezone.utc)
 
 
@@ -76,6 +81,12 @@ def _age_seconds(value: Any, *, now_utc: dt.datetime) -> float | None:
 
 
 def _int(value: Any, default: int = 0) -> int:
+    # B3（冷審計 R2）：字串數值（如 "5"）一律回 default，不再靜默轉型。
+    # 為什麼：Rust 側 serde Option<u64> 對 JSON 字串 reject，Python 若接受 "5"
+    # 會造成同一 envelope 兩側判定分歧；default=0 在下游一律走「缺失/無效」
+    # 分支（fail-closed 方向）。
+    if isinstance(value, str):
+        return default
     try:
         return int(float(value))
     except (TypeError, ValueError):
