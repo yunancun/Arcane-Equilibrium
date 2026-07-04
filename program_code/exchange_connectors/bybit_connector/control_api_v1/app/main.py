@@ -428,6 +428,31 @@ async def _startup_integrity_check() -> None:
         f"; degraded: {degraded}" if degraded else "",
     )
 
+    # ── P0-1c boot 紀錄：append 本 worker 的 boot 紀錄到 boot_history.jsonl ──
+    # 冷審計 R2 P0-1：07-03 重啟未 rebuild 無人發現 —— uvicorn 進程無 boot SHA
+    # 可觀測面。git rev-parse + 寫檔屬慢速 I/O，按本 handler 架構規則放 daemon
+    # thread（fail-open：任何失敗只記 warning，不阻斷啟動）。
+    import os as _boot_os  # noqa: PLC0415
+    import threading as _boot_threading  # noqa: PLC0415
+
+    def _append_boot_record_offload() -> None:
+        try:
+            from .boot_observability import append_boot_record as _boot_append  # noqa: PLC0415
+            _path = _boot_append()
+            base.logger.info(
+                "Boot record appended (pid=%d): %s / boot 紀錄已寫入",
+                _boot_os.getpid(), _path,
+            )
+        except Exception as _boot_exc:
+            base.logger.warning(
+                "Boot record append failed (fail-open): %s / boot 紀錄寫入失敗（不阻斷）",
+                _boot_exc,
+            )
+
+    _boot_threading.Thread(
+        target=_append_boot_record_offload, name="boot-record-append", daemon=True
+    ).start()
+
     # ── Auto-reauth on startup: if active paper session exists but no auth, re-grant ──
     # 啟動時自動重授權：如果存在活躍 paper session 但 GovernanceHub 無有效授權，自動補授權。
     # Root cause: grant_paper_authorization() is only called on POST /paper/session/start.
