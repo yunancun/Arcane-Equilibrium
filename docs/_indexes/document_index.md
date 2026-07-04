@@ -1525,3 +1525,4 @@
 | `2026-05-31--todo_v92_archive.md` | TODO v92 archive：v75-91 歷史增量與 P0-EDGE cost-wall / alpha redirection / V### reconcile 決策歸檔 |
 | `2026-05-31--todo_v93_pre_aeg_cleanup_archive.md` | TODO v93 pre-AEG cleanup archive：AEG cleanup 前 active TODO 快照與歷史敘事歸檔 |
 | `2026-06-03--todo_v110_pre_cleanup_archive.md` | TODO v110 pre-cleanup archive：funding/OI backfill 落地後 active TODO 快照與 AEG/P0-EDGE 歷史敘事歸檔 |
+| `2026-07-04--todo_v738_pre_slim_archive.md` | TODO v738 pre-slim archive：P1-7 瘦身前全文快照(v684-v738 演進殘骸/§1 DONE_WITH_CONCERNS 墓場/§2 60 行原文/§4 sha 清單) |
