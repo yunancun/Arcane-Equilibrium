@@ -127,3 +127,38 @@
 ### 附錄:待證假設(不入 TODO)
 
 assumptions 93 條(CC10/FA10/E3 5/BB9/QC11/MIT10/AI-E9/E5 10/A3 9/R4 10)與 seam #2(GUI↔engine↔TOML 三方對表)、#7(vacuous PASS 分母標記)留檔各軸報告;下輪 focus 回流。
+
+---
+
+# Addendum v2(2026-07-04 補票 + E4/TW 補審收斂)
+
+## A. 證據面補全帳
+
+1. **Verify 補票**(resume `wf_6dc68c2f-4a0`,2.08M tokens):30 張缺票補齊,disputed 18→1,confirmed 18→34;16 條轉正**與 §1 主會話手工判定零矛盾**。唯一殘留 disputed = AI-E cost_edge 原則13 條——事實面(雙腿 dormant)已由 V12 親證,爭議僅在「是否構成原則違反」的解讀 → 維持 P2-2 operator 決策項。
+2. **E4/TW 補審**(`wf_63ba9216-071`,補丁腳本 focus/baseline 注入生效,1.67M tokens):25 findings,7 confirmed 全票,0 disputed。報告:E4 `2026-07-04--e4_test_matrix_blindspot_audit.md`、TW `2026-07-04--tw_full_audit_doc_dedup_comment_governance.md`。
+3. A3/R4 報告檔已由 conductor 代落盤(出處=raw result,檔頭有聲明);正本腳本 `openclaw-full-audit.js` 已補 args-parse guard(字串 args 靜默降級缺陷根修)。
+4. 三輪合計實耗:7.475M + 2.082M + 1.673M = **11.23M subagent tokens**,220 agents。
+
+## B. P0-1 事實修正(evidence discipline,誠實糾錯)
+
+原 P0-1 稱「主機無引擎進程/binary,寫 fill 者不可指認」——**該子claim 錯誤**,根因是 conductor 取證失誤:①pgrep/find 用底線名 `openclaw_engine`,實際 binary 為連字號 `openclaw-engine`;②`ps | head -6` 被 uvicorn 6 進程佔滿截斷了引擎行。E4 F9 抓出,已用正確名複核:
+
+- 引擎進程存在:PID 2368227,`rust/target/release/openclaw-engine`,36.1% CPU / 2.5GB RSS。
+- 啟動於 **2026-07-03 03:02:41** = CC 所報「無 mutation 紀錄的 runtime 重啟」即此;重啟**未 rebuild**。
+- binary build **2026-06-29 19:28** → 運行世代比 cron pin(00a78d92,06-30)更老;`d0eeafb41`(07-03)與 IMPL-A/IMPL-B(已測未部署,E4 F9)均不在線上。
+
+**P0-1 改述**:執行身份已指認(引擎+uvicorn 雙棧),缺陷收斂為「**運行世代失控 + 重啟不 rebuild + 無 build-SHA 可觀測面**」:engine=06-29 build、uvicorn=06-30 世代、HEAD=07-03,重啟這一 mutation 本身無紀錄。修復動作不變(受控重啟需 **--rebuild**、pin 隨部署派生、boot SHA 落 PG/持久 log),acceptance 補「重啟後 `openclaw-engine` binary mtime≥部署時刻且 build SHA=部署 HEAD」。D1 依然是 operator 先決。
+（memory `build-SHA≠git-commit` 教訓第三次應驗;另 F2 之 36% CPU/2.5GB RSS 直接歸因 P1-10 ledger 全量重讀,重啟前後應對照。）
+
+## C. E4/TW 增量併入(7 confirmed)
+
+- **P1-8 擴充(主體實錘,v739 前置不變)**:F1 跨語言契約**零 golden-vector parity test**(plan envelope/ledger 行/order_link_id+FNV lineage hash/AdmissionConfig 全部雙實現各自自洽)+ F3 plan 檔路徑 env-override 不對稱→**runtime 雙 plan 檔分裂實錘** + F8 `candidate_matched_demo_fills` 無 in-repo producer(fills→promotion 證據鏈斷點)。owner 鏈改:PM→E4(fixture 設計)+BB(cutover diff)→E1→E4。
+- **新 P1-10**:probe_ledger.jsonl 無界成長(472MB/388,798 行)+雙寫者兩側全量重讀,零 rotation/retention/scale 測試;直接吃掉引擎 36% CPU/2.5GB RSS(F2)。與 P0-3 遷移同批設計(rotation+retention+增量讀)。
+- **新 P1-11**:1m 指標每 tick 無條件重算(補票轉正 E5 HIGH;PERF-1 只做了 5m 半邊)。E5→E1,熱路徑 SLA 驗收。
+- **P2 增**:F5 `BYBIT_MODE`/`BYBIT_CONNECTOR_WRITE_ENABLED` 零 runtime 強制消費者(治理語義純表示層,missing-gate);F6 soak withhold/Indeterminate 無哨兵消費者(over-gate 誤殺不可觀測;latent 但機能類不降級);F7 markout exit 無 max-delay 上界(併 P1-2 方法論批);TW 兩條 HIGH:SCRIPT_INDEX.md 巨型 changelog 劣化(229 段)、Codex 直駕代碼注釋治理(中文優先+MODULE_NOTE)整體未執行(stock_etf 41+ 模塊)→ 併 P2-10/P3 文檔治理批,owner TW。
+- **P3 增**:F10 engine_mode 正規化不對稱、F11 四段版 order_link_id 校驗零 caller(dead-code)、F14 probe_outcome 未與真 fill 對賬(admitted-but-unfilled 同權)。
+- **P0-2 補充**:F12 證 4/5 cron pin stale 外加**兩個 cron log 0-byte**(head-gated cron 實際行為未驗)——對帳範圍含 log 產出驗證。
+
+## D. 收斂後隊列總覽
+
+P0×3(P0-1 已修正表述)/ P1×11 / P2×15 / P3 文檔+小項批。operator 決策 D1-D8 不變,新增 **D9:probe_ledger rotation 策略**(與 D3 同一討論)。quorum 完整度:40 C/H + 7 補審 C/H 全部雙質疑者(高危類三)全票;唯一 disputed=cost_edge 解讀,已隔離為決策項。
