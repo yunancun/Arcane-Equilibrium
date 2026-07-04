@@ -441,10 +441,18 @@ fn enforces_budget_cooldown_and_failed_outcome_disable() {
         AdmissionDecisionCode::ProbeBudgetExhausted
     );
 
+    // P2-7:UCB-futility 需 n≥8 且 x̄+z₀.₉₀·s/√n<0 才禁用。8 筆全 −8bps(s=0) →
+    // UCB=−8<0 → 禁用;n=2 已不足以禁用(默認門檻 2→8)。
     let failed_rows = LedgerRecord::from_jsonl_str(
         r#"
         {"record_type":"probe_outcome","side_cell_key":"ma_crossover|ETHUSDT|Sell","realized_net_bps":-8.0}
-        {"record_type":"probe_outcome","side_cell_key":"ma_crossover|ETHUSDT|Sell","realized_net_bps":-3.0}
+        {"record_type":"probe_outcome","side_cell_key":"ma_crossover|ETHUSDT|Sell","realized_net_bps":-8.0}
+        {"record_type":"probe_outcome","side_cell_key":"ma_crossover|ETHUSDT|Sell","realized_net_bps":-8.0}
+        {"record_type":"probe_outcome","side_cell_key":"ma_crossover|ETHUSDT|Sell","realized_net_bps":-8.0}
+        {"record_type":"probe_outcome","side_cell_key":"ma_crossover|ETHUSDT|Sell","realized_net_bps":-8.0}
+        {"record_type":"probe_outcome","side_cell_key":"ma_crossover|ETHUSDT|Sell","realized_net_bps":-8.0}
+        {"record_type":"probe_outcome","side_cell_key":"ma_crossover|ETHUSDT|Sell","realized_net_bps":-8.0}
+        {"record_type":"probe_outcome","side_cell_key":"ma_crossover|ETHUSDT|Sell","realized_net_bps":-8.0}
         "#,
     )
     .unwrap();
@@ -461,6 +469,74 @@ fn enforces_budget_cooldown_and_failed_outcome_disable() {
         failed.decision,
         AdmissionDecisionCode::RealizedProbeOutcomesFailLearningThreshold
     );
+}
+
+fn side_cell_candidate() -> ProbeCandidate {
+    let plan = sample_plan(ORDER_AUTHORITY_GRANTED);
+    plan.probe_candidates
+        .into_iter()
+        .find(|c| c.side_cell_key == "ma_crossover|ETHUSDT|Sell")
+        .expect("sample plan has ETHUSDT|Sell candidate")
+}
+
+fn outcome_rows_from_nets(nets: &[f64]) -> Vec<LedgerRecord> {
+    let lines: String = nets
+        .iter()
+        .map(|net| {
+            format!(
+                r#"{{"record_type":"probe_outcome","side_cell_key":"ma_crossover|ETHUSDT|Sell","realized_net_bps":{net}}}"#
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    LedgerRecord::from_jsonl_str(&lines).unwrap()
+}
+
+#[test]
+fn ucb_futility_disable_rule_matches_spec_thresholds() {
+    // QC spec 測試用例 6:UCB-futility 規則的三個判準點。
+    let candidate = side_cell_candidate();
+    let cfg = AdmissionConfig::default();
+
+    // n=7 全負 → 未達 n≥8 門檻 → 不禁用(UCB 規則不啟動)。
+    let seven_neg = outcome_rows_from_nets(&[-120.0; 7]);
+    let state7 = summarize_side_cell_runtime_state(&candidate, &seven_neg, NOW_MS, &cfg);
+    assert!(
+        !state7.disabled,
+        "n=7 不應禁用(未達 n≥8),got reason={:?}",
+        state7.disable_reason
+    );
+
+    // n=8,x̄=−120,s=200 → UCB = −120 + 1.2816·200/√8 ≈ −29.4 < 0 → 禁用。
+    let mut nets_neg120 = vec![-120.0; 8];
+    scale_to_mean_std(&mut nets_neg120, -120.0, 200.0);
+    let state_neg = summarize_side_cell_runtime_state(&candidate, &outcome_rows_from_nets(&nets_neg120), NOW_MS, &cfg);
+    assert!(
+        state_neg.disabled,
+        "n=8 x̄=−120 s=200 UCB≈−29.4<0 應禁用,got avg={:?} reason={:?}",
+        state_neg.avg_realized_net_bps, state_neg.disable_reason
+    );
+
+    // n=8,x̄=−80,s=200 → UCB = −80 + 90.6 ≈ +10.6 > 0 → 不禁用。
+    let mut nets_neg80 = vec![-80.0; 8];
+    scale_to_mean_std(&mut nets_neg80, -80.0, 200.0);
+    let state_hold = summarize_side_cell_runtime_state(&candidate, &outcome_rows_from_nets(&nets_neg80), NOW_MS, &cfg);
+    assert!(
+        !state_hold.disabled,
+        "n=8 x̄=−80 s=200 UCB≈+10.6>0 不應禁用,got avg={:?} reason={:?}",
+        state_hold.avg_realized_net_bps, state_hold.disable_reason
+    );
+}
+
+/// 把 8 個等值樣本改造成指定均值與樣本標準差(ddof=1),供 UCB 判準測試。
+/// 對稱雙點構造:4 個 mean+d、4 個 mean−d,則 x̄=mean、s=d·√(8/7)。
+fn scale_to_mean_std(values: &mut [f64], mean: f64, std: f64) {
+    assert_eq!(values.len(), 8);
+    // s² = Σ(x−x̄)²/(n−1);對稱雙點 x̄=mean、Σ=8d² → s=d·√(8/7) ⇒ d=s·√(7/8)。
+    let d = std * (7.0f64 / 8.0).sqrt();
+    for (i, v) in values.iter_mut().enumerate() {
+        *v = if i < 4 { mean + d } else { mean - d };
+    }
 }
 
 #[test]
