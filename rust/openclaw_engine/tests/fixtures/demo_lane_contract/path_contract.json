@@ -1,0 +1,35 @@
+{
+  "_comment": "C6 plan 檔路徑解析 env 矩陣 golden fixture。兩語言同 OPENCLAW_DATA_DIR 應解析同一默認 plan 檔路徑（相對子路徑 cost_gate_learning_lane/demo_learning_lane_plan_latest.json）。OPENCLAW_DEMO_LEARNING_LANE_PLAN override 優先子測 = PENDING（此分支 Python _default_plan_path 只認 OPENCLAW_DATA_DIR，Rust demo_learning_lane_plan_path 認 override；env 修待 overgate-b/後續 E1 落地——見 E4 report concerns）。錨點 fix/authz-contract-0704。",
+  "default_subpath": "cost_gate_learning_lane/demo_learning_lane_plan_latest.json",
+  "default_data_dir_fallback": "/tmp/openclaw",
+  "ledger_default_subpath": "cost_gate_learning_lane/probe_ledger.jsonl",
+  "shared_default_matrix": [
+    {
+      "_note": "OPENCLAW_DATA_DIR 設定 -> 兩側同解析 <data_dir>/cost_gate_learning_lane/demo_learning_lane_plan_latest.json",
+      "env": {"OPENCLAW_DATA_DIR": "/var/openclaw"},
+      "expected_plan_path": "/var/openclaw/cost_gate_learning_lane/demo_learning_lane_plan_latest.json",
+      "both_sides_agree": true
+    },
+    {
+      "_note": "OPENCLAW_DATA_DIR 未設 -> 兩側同 fallback /tmp/openclaw",
+      "env": {},
+      "expected_plan_path": "/tmp/openclaw/cost_gate_learning_lane/demo_learning_lane_plan_latest.json",
+      "both_sides_agree": true
+    }
+  ],
+  "override_priority_matrix_pending": [
+    {
+      "_note": "PENDING：OPENCLAW_DEMO_LEARNING_LANE_PLAN override。Rust demo_learning_lane_plan_path 取 override（demo_learning_lane_writer.rs:215）；Python _default_plan_path 忽略此 env（只認 OPENCLAW_DATA_DIR）。此分支未含 runtime_adapter env 修 -> 兩側分歧，此子測標 PENDING，依賴 overgate-b(或後續 E1)補 Python override。",
+      "env": {"OPENCLAW_DATA_DIR": "/var/openclaw", "OPENCLAW_DEMO_LEARNING_LANE_PLAN": "/custom/plan.json"},
+      "rust_expected_plan_path": "/custom/plan.json",
+      "python_expected_plan_path": "/var/openclaw/cost_gate_learning_lane/demo_learning_lane_plan_latest.json",
+      "both_sides_agree": false,
+      "status": "PENDING_ENV_FIX"
+    }
+  ],
+  "env_names": {
+    "data_dir": "OPENCLAW_DATA_DIR",
+    "plan_override": "OPENCLAW_DEMO_LEARNING_LANE_PLAN",
+    "ledger_override": "OPENCLAW_DEMO_LEARNING_LANE_LEDGER"
+  }
+}
