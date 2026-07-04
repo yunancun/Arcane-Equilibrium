@@ -60,6 +60,9 @@ pub mod bybit_private_ws_status_writer;
 pub mod bybit_rest_client;
 pub mod bounded_probe_active_order;
 pub mod bounded_probe_near_touch;
+// P0-1c boot/build SHA 可觀測面（2026-07-04）：build.rs 嵌入的 git SHA/build 時間
+// 常量 + boot_history.jsonl append，讓運行進程的代碼世代可對表部署 HEAD。
+pub mod boot_observability;
 pub mod canary_writer;
 pub mod claude_teacher;
 pub mod combine_layer;
