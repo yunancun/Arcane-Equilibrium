@@ -27,6 +27,28 @@ class ProbeOutcomeConfig:
     max_entry_delay_ms: int = 5 * 60_000
 
 
+# F14(E4 2026-07-04 補審):fill 對賬誠實性標記。probe outcome 是 admission 時價的
+# markout proxy,admitted-but-unfilled 與真 filled 不可同權。標記描述「outcome 生成
+# 當下 ledger 內可見的 fill 執行證據」,只做數據誠實性標注,不改 promotion/review 判準。
+FILL_RECONCILIATION_FIELD = "fill_reconciliation"
+FILL_RECONCILIATION_FILLED = "filled"
+FILL_RECONCILIATION_ADMITTED_ONLY = "admitted_only"
+FILL_RECONCILIATION_INDETERMINATE = "indeterminate"
+
+# 為什麼只認執行層識別碼:order_id 只證明曾下單,不證明成交;fill/exec id 才是成交證據。
+_FILL_EXECUTION_EVIDENCE_KEYS = ("fill_id", "exec_id", "execution_id")
+# 可把 fill 證據行綁回 admission attempt 的識別碼鍵(頂層 / event / lineage 內)。
+_FILL_LINK_ID_KEYS = (
+    "attempt_id",
+    "context_id",
+    "signal_id",
+    "order_link_id",
+    "orderLinkId",
+    "openclaw_order_link_id",
+    "bounded_probe_attempt_id",
+)
+
+
 def _utc_now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
 
@@ -117,6 +139,61 @@ def _attempt_id(row: dict[str, Any]) -> str:
     if signal_id:
         return signal_id
     return "|".join([_ledger_side_cell(row), str(_row_ts_ms(row))])
+
+
+def _row_link_sections(row: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    return (row, _dict(row.get("event")), _dict(row.get("lineage")))
+
+
+def _row_has_fill_execution_evidence(row: dict[str, Any]) -> bool:
+    return any(
+        _str(section.get(key))
+        for section in _row_link_sections(row)
+        for key in _FILL_EXECUTION_EVIDENCE_KEYS
+    )
+
+
+def _fill_evidence_link_ids(ledger_rows: list[dict[str, Any]]) -> set[str]:
+    """收集所有攜帶 fill 執行證據的 ledger 行可綁定的識別碼集合(一次掃描)。"""
+    out: set[str] = set()
+    for row in ledger_rows:
+        if not isinstance(row, dict):
+            continue
+        if not _row_has_fill_execution_evidence(row):
+            continue
+        for section in _row_link_sections(row):
+            for key in _FILL_LINK_ID_KEYS:
+                text = _str(section.get(key))
+                if text:
+                    out.add(text)
+    return out
+
+
+def _admission_reconciliation_link_ids(row: dict[str, Any]) -> set[str]:
+    # 只取可綁定執行 lineage 的識別碼;合成 attempt_id(side_cell|ts fallback)不算,
+    # 因為 fill 證據行不會攜帶它,無從對賬 → 該類 attempt 標 indeterminate。
+    event = _dict(row.get("event"))
+    out: set[str] = set()
+    for source, keys in (
+        (row, ("order_link_id",)),
+        (event, ("context_id", "signal_id", "order_link_id")),
+    ):
+        for key in keys:
+            text = _str(source.get(key))
+            if text:
+                out.add(text)
+    return out
+
+
+def _fill_reconciliation_marker(
+    link_ids: set[str],
+    fill_evidence_link_ids: set[str],
+) -> str:
+    if not link_ids:
+        return FILL_RECONCILIATION_INDETERMINATE
+    if link_ids & fill_evidence_link_ids:
+        return FILL_RECONCILIATION_FILLED
+    return FILL_RECONCILIATION_ADMITTED_ONLY
 
 
 def validate_outcome_config(cfg: ProbeOutcomeConfig) -> None:
@@ -241,6 +318,7 @@ def _build_markout_outcome_records(
     record_type: str,
     outcome_source: str,
     boundary: str,
+    reconcile_fills: bool = False,
 ) -> list[dict[str, Any]]:
     cfg = cfg or ProbeOutcomeConfig()
     validate_outcome_config(cfg)
@@ -250,6 +328,8 @@ def _build_markout_outcome_records(
         ledger_rows,
         record_type=record_type,
     )
+    # F14:fill 對賬只對 admitted probe 有意義(blocked-signal 是 counterfactual,從未下單)。
+    fill_evidence_link_ids = _fill_evidence_link_ids(ledger_rows) if reconcile_fills else set()
     outcomes: list[dict[str, Any]] = []
 
     for row in ledger_rows:
@@ -291,34 +371,38 @@ def _build_markout_outcome_records(
         side_sign = -1.0 if side.lower() == "sell" else 1.0
         gross_bps = side_sign * (exit_price - entry) / entry * 10_000.0
         net_bps = gross_bps - cfg.cost_bps
-        outcomes.append(
-            {
-                "schema_version": ADAPTER_SCHEMA_VERSION,
-                "record_type": record_type,
-                "generated_at_utc": now.isoformat(),
-                "attempt_id": attempt_id,
-                "side_cell_key": row.get("side_cell_key") or _ledger_side_cell(row),
-                "source_admission_decision": decision,
-                "allowed_to_submit_order": row.get("allowed_to_submit_order"),
-                "strategy_name": event.get("strategy_name") or event.get("strategy"),
-                "symbol": symbol,
-                "side": side,
-                "event_ts_ms": event_ts_ms,
-                "entry_ts_ms": entry_ts_ms,
-                "exit_ts_ms": exit_ts_ms,
-                "horizon_minutes": horizon_minutes,
-                "default_horizon_minutes": cfg.horizon_minutes,
-                "entry_price": entry,
-                "exit_price": exit_price,
-                "gross_bps": gross_bps,
-                "cost_bps": cfg.cost_bps,
-                "realized_net_bps": net_bps,
-                "outcome_source": outcome_source,
-                "candidate_summary": row.get("candidate_summary") or {},
-                "promotion_evidence": False,
-                "boundary": boundary,
-            }
-        )
+        record = {
+            "schema_version": ADAPTER_SCHEMA_VERSION,
+            "record_type": record_type,
+            "generated_at_utc": now.isoformat(),
+            "attempt_id": attempt_id,
+            "side_cell_key": row.get("side_cell_key") or _ledger_side_cell(row),
+            "source_admission_decision": decision,
+            "allowed_to_submit_order": row.get("allowed_to_submit_order"),
+            "strategy_name": event.get("strategy_name") or event.get("strategy"),
+            "symbol": symbol,
+            "side": side,
+            "event_ts_ms": event_ts_ms,
+            "entry_ts_ms": entry_ts_ms,
+            "exit_ts_ms": exit_ts_ms,
+            "horizon_minutes": horizon_minutes,
+            "default_horizon_minutes": cfg.horizon_minutes,
+            "entry_price": entry,
+            "exit_price": exit_price,
+            "gross_bps": gross_bps,
+            "cost_bps": cfg.cost_bps,
+            "realized_net_bps": net_bps,
+            "outcome_source": outcome_source,
+            "candidate_summary": row.get("candidate_summary") or {},
+            "promotion_evidence": False,
+            "boundary": boundary,
+        }
+        if reconcile_fills:
+            record[FILL_RECONCILIATION_FIELD] = _fill_reconciliation_marker(
+                _admission_reconciliation_link_ids(row),
+                fill_evidence_link_ids,
+            )
+        outcomes.append(record)
 
     return outcomes
 
@@ -344,6 +428,8 @@ def build_probe_outcome_records(
             "future fill-backed writer replaces source; no PG, Bybit, "
             "order, config, risk, auth, or runtime mutation"
         ),
+        # F14:admitted probe 必附 fill 對賬標記(filled/admitted_only/indeterminate)。
+        reconcile_fills=True,
     )
 
 
