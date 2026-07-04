@@ -278,6 +278,20 @@ def _matching_control_rows(
     return _latest_unique_by_attempt(controls), _latest_unique_by_attempt(excluded_controls)
 
 
+def _fill_reconciliation_counts(rows: list[dict[str, Any]]) -> dict[str, int]:
+    """F14:分開計數 fill 對賬標記(filled/admitted_only/indeterminate)。
+
+    無標記的 legacy 行計入 "unmarked",不與 indeterminate 混同(indeterminate 是
+    writer 明確判定「無法對賬」,unmarked 是標記機制上線前的舊行)。純觀測欄位,
+    不參與任何 review 判定。
+    """
+    counts: dict[str, int] = {}
+    for row in rows:
+        marker = _str(row.get("fill_reconciliation")) or "unmarked"
+        counts[marker] = counts.get(marker, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def _net_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     nets = [
         value for value in (_float(row.get("realized_net_bps")) for row in rows)
@@ -631,6 +645,8 @@ def build_bounded_demo_probe_result_review(
                 "min_filled_probe_outcomes_for_learning_review"
             ),
             "max_filled_probe_outcomes_before_review": max_outcomes_before_review,
+            # F14:對已計數 outcome 分開統計 fill 對賬標記,不影響上方任何判定欄位。
+            "fill_reconciliation_counts": _fill_reconciliation_counts(outcomes),
         },
         "proof_exclusion": proof_exclusion,
         "evidence_quality": evidence_quality,
@@ -688,6 +704,7 @@ def render_markdown(packet: dict[str, Any]) -> str:
         f"- Raw completed outcomes: `{summary.get('raw_completed_probe_outcome_count')}`",
         f"- Completed outcomes: `{summary.get('completed_probe_outcome_count')}`",
         f"- Proof-excluded probe outcomes: `{proof_exclusion.get('proof_excluded_probe_outcome_count')}`",
+        f"- Fill reconciliation counts: `{summary.get('fill_reconciliation_counts')}`",
         f"- Avg net bps: `{summary.get('avg_realized_net_bps')}`",
         f"- Net-positive pct: `{summary.get('net_positive_pct')}`",
         f"- Evidence quality: `{quality.get('status')}`",
