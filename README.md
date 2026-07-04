@@ -24,11 +24,14 @@ Agentic trading governance system — 自主扫描 650+ 交易对，智能部署
 | Tab | 内容 |
 |-----|------|
 | `system` | 系统总览、运行状态、章节状态 |
-| `replay` | replay / Stage 0R 诊断与报告入口 |
+| `edge-gates` | Pre-live / edge readiness gates |
+| `stock-etf` | Stock/ETF IBKR read-only / paper / shadow research lane（per ADR-0048 + AMD-2026-06-29-01；零真钱） |
 | `paper` | Paper Archive 状态展示；不再启用为 promotion lane，legacy artifacts 仅作 replay diagnostics / fixture infrastructure |
 | `demo` | Demo trading / Stage 1 demo micro-canary 目标环境（当前未开放） |
 | `live` | Live_Ready 仪表盘、余额/PnL/持仓/成交/API key 管理 |
+| `replay` | replay / Stage 0R 诊断与报告入口 |
 | `strategy` | 策略部署、scanner、品种管理 |
+| `charts` | 圖表 / 交易视图（`/trading?embed=1` 内嵌） |
 | `risk` | 风控参数、止损、denylist |
 | `earn` | Earn 理财 / first-stake GUI（governance group，5-gate 对映后端 9-gate，typed-confirm 带 amount） |
 | `governance` | GovernanceHub、授权、Decision Lease、对账 |
@@ -36,10 +39,10 @@ Agentic trading governance system — 自主扫描 650+ 交易对，智能部署
 | `learning` | Learning Cockpit、promotion evidence、ML/feature 状态 |
 | `agents` | 本地 5-Agent 只读状态 / proposal relay 入口 |
 | `monitoring` | Grafana 与系统健康 |
-| `settings` | 参数、环境、维护操作 |
-| `phase4` | Phase 4 / historical acceptance surfaces |
 | `development` | 開發與維護工具入口 |
-| `edge-gates` | Pre-live / edge readiness gates |
+| `settings` | 参数、环境、维护操作 |
+
+> Tab 表以 `console.html` nav 定义为 SoT（2026-07-04 TW per R4 对齐：补 `stock-etf`/`charts`，移除已下架的 `phase4`；排序对齐 GUI group core/trading/edge/governance/intelligence/ops）。
 
 ---
 

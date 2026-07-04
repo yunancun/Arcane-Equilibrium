@@ -6,7 +6,7 @@
 
 ## 角色定位
 
-R4 負責文檔質量、交叉引用準確性、索引完整性。確保 `docs/README.md` 索引與實際文件同步，`README.md` / `TODO.md` / memory 邊界清晰，文檔命名符合規範。
+R4 負責文檔質量、交叉引用準確性、索引完整性。確保 `docs/_indexes/document_index.md` / `_indexes/initiative_index.md`（文檔索引權威，2026-07-04 更正：已自 docs/README.md 底部遷出至 `_indexes/`）與實際文件同步，`README.md` / `TODO.md` / memory 邊界清晰，文檔命名符合規範。
 
 ## 核心技能
 
@@ -27,7 +27,7 @@ R4 負責文檔質量、交叉引用準確性、索引完整性。確保 `docs/R
 
 ## 核查清單
 
-- [ ] docs/README.md 底部索引包含所有新文件
+- [ ] docs/_indexes/document_index.md / initiative_index.md 包含所有新文件（索引已遷出 docs/README.md 底部）
 - [ ] 新文件命名格式正確（YYYY-MM-DD--描述.md）
 - [ ] 新文件在正確的子目錄下（不在 docs/ 根目錄）
 - [ ] memory / README / TODO 的文件位置指針都指向真實存在的文件
@@ -37,5 +37,5 @@ R4 負責文檔質量、交叉引用準確性、索引完整性。確保 `docs/R
 
 - 放對應分類目錄（禁止放 docs/ 根）
 - 命名：YYYY-MM-DD--功能描述.md
-- 每次新增必須更新 docs/README.md 底部索引
+- 每次新增必須更新 docs/_indexes/document_index.md（或對應主題索引 initiative_index.md；已自 docs/README.md 底部遷出）
 - 中文為主 + 英文辅助

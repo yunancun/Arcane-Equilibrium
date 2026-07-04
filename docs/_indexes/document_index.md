@@ -6,6 +6,24 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-07 冷審計 R2 + soak dispatch / drift-gate 設計批（2026-07-04 TW per R4 補登）
+
+> 本節補回 R4 cold-audit R2 指認的「_indexes/document_index.md 零 2026-07 條目」缺口，收 operator 已批准之設計 spec、冷審計主線報告與 E4 回歸報告；IBKR stock_etf 2026-07-01 大批 source-static-guard checkpoint（100+ 份）不逐條展開，主題導航見 `initiative_index.md`。
+
+| 文件 | 内容 |
+|------|------|
+| `execution_plan/2026-07-02--soak_dispatch_edge_containment_and_drift_gate_design.md` | operator 已批准之 soak dispatch edge-containment + standing-envelope post-approval drift-gate 設計（Impl A/B 錨；`d0eeafb41` drift gate 判準側落地來源）。 |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-07-03--cold_audit_validated_fix_plan.md` | PA 冷審計 R2 validated fix plan：D1-D9 裁決依據 + P1/P3 修復批次來源。 |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-07-04--overgate_residual_unified_design_p11.md` | PA over-gate 殘留統一設計（P11）：drift-gate/exact-head/plan-age 疊加拒真率治理。 |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-07-04--cold_audit_remaining_122_unverified.md` | PA 冷審計剩餘 122 未複核項清單。 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-07-03--cold_audit_pm_final.md` | PM 冷審計 R2 最終整合（12 軸閉環 + D1-D9 裁決）。 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-07-03--cold_audit_baseline.md` | PM 冷審計 R2 baseline（凍結 SHA + 軸範圍）。 |
+| `CCAgentWorkSpace/E4/workspace/reports/2026-07-03--part2_post_approval_drift_gate_regression.md` | E4 回歸：standing-envelope post-approval drift-gate（Impl B）測試矩陣。 |
+| `CCAgentWorkSpace/E4/workspace/reports/2026-07-03--soak_dispatch_edge_containment_impl_a_regression.md` | E4 回歸：soak dispatch edge-containment（Impl A）測試矩陣。 |
+| `CCAgentWorkSpace/E4/workspace/reports/2026-07-04--e4_test_matrix_blindspot_audit.md` | E4 測試矩陣盲點審計。 |
+| `governance_dev/amendments/2026-07-04--AMD-2026-07-04-01-doc06-runtime-mutation-record-rule.md` | AMD-2026-07-04-01：DOC-06 Runtime Mutation 紀錄規則泛化（RM-1..RM-4：before/after + manifest + 持久位置 + 移除裁決 + pin-by-reference），泛化 FA F2 crontab 治理規則為 DOC-06 通用條款。 |
+| `archive/2026-07-04--script_index_changelog_prose_archive.md` | SCRIPT_INDEX.md 頭部「最新補充/歷史補充」229 段 run-on changelog prose 歸檔（R4-2026-IDX-04 收斂）；per-batch SSOT 仍在 SCRIPT_INDEX `## YYYY-MM-DD` 區塊，本檔存派生歷史層 + 確定性提取命令。 |
+
 ### 2026-06-29 IBKR Stock/ETF paper + shadow feasibility lane
 
 | 文件 | 内容 |

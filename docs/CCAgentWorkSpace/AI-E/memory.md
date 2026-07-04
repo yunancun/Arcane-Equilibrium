@@ -258,7 +258,7 @@ v1 樂觀「Strategist 354 applied / MLDE 41.7%」結論在 v2 不持續；v1 NE
 ## 2026-06-13 — AI 盈利研判（守+攻，read-only Linux 親證 engine PID 3607315）
 - **守**：6 leak/frozen/unrealized 診斷。核心=已實現端每策略 latest-cell runtime_bps 全負（bb_breakout -11.4/grid -12.5/ma -8.0/funding_arb -24.4，0 validation_passed cell 全系統，n≥30 cell 僅 4 仍負）→ cost_gate 拒單是真負非誤殺（承接 MIT 7d 942360 reject/0 false-kill）。AI 成本=$0 → ROI 數學未定義；DOC-08「達標<$2」=dead-AI 假合規。L1（MLDE/strategist fresh）只在微調負 edge 搜索空間（paradigm blocker）。L2 三 key present 但 boot-disabled+manual-only=0% 激活。memory recall 99 row embedded 但 default-0 dormant。cost_edge_advisor 41226 row 全 B_shadow/ratio=NULL → CLAUDE「ratio≥0.8 關倉」鐵則永不觸發。
 - **攻**：5 機會。O1★=L2 自主 alpha-source 發現（換軌：AI 生成假設過 P3b math gate，非微調，$0.05/天 << $2 cap）；O2★=L2 事件解讀軸（listing fade/公告/Polymarket 原始流 live 但缺 AI 解讀層）；O3=開 memory recall shadow 轉研究效率複利；O4=修 cost_edge_advisor 出 B_shadow 上風控腿；O5★=範式拷問 OHLCV+技術指標是否到天花板（5 候選全死同根因 down-beta+成本牆=搜索空間結構問題非執行問題，換軌另類數據軸）。
-- 成本牆數學：Sonnet 4.6 $3/$15-per-MTok，一次 8K-in/2K-out≈$0.054 → $2 cap 下理論 ~37 次/天深度推理，實跑 0 → L2 預算頭寸 100% 閒置。所有 AI 翻牆機會須過確定性 math gate（LLM 永不驗 alpha），AI 只做生成/解讀/預篩。報告 `workspace/reports/2026-06-13--AI-E--profit_research_守攻.md`。
+- 成本牆數學：Sonnet 4.6 $3/$15-per-MTok，一次 8K-in/2K-out≈$0.054 → $2 cap 下理論 ~37 次/天深度推理，實跑 0 → L2 預算頭寸 100% 閒置。所有 AI 翻牆機會須過確定性 math gate（LLM 永不驗 alpha），AI 只做生成/解讀/預篩。~~報告 `workspace/reports/2026-06-13--AI-E--profit_research_守攻.md`~~ **【2026-07-04 TW per R4 更正：該報告檔全域不存在（lineage gap，已由 07-03 AI-E 自審記錄，見下方 2026-07-03 條）；本條結論本身有效，僅移除失效報告指針】**。
 
 ## 2026-06-14 — 全倉 AI 成本審計（read-only, Linux engine PID 3795194 已重啟, 11 findings）
 - **新 HIGH (F1)**：DOC-08 $2/天硬上限在 Rust BudgetTracker **完全無 daily 腿**（只 monthly local_total $100 / platform_hard_cap $150，usage_io date_trunc('month')）。Python Layer2CostTracker 有 $2/day 但是 manual-only 路徑；Rust autonomous(ClaudeTeacher) 路徑與 daily cap 各管各=雙腦。kill-switch 一開 daily 防線缺失。
@@ -267,7 +267,7 @@ v1 樂觀「Strategist 354 applied / MLDE 41.7%」結論在 v2 不持續；v1 NE
 - **死 cron (F5)**：crontab daily_cost_snapshot.sh 在 repo/Linux/SCRIPT_INDEX 三處皆無+log 不存在→每日成本快照採集腿斷。crontab 已增至 9+ 條(L2 distill PIPELINE=1+EMBED_BACKFILL=1 已 cron 化, m11_replay, polymarket)。
 - **持續 (F6/F7)**：ai_invocations 仍 2 row/0 billable(L1 IPC 不寫表,writer 只接 cloud);L2 memory recall B3 wiring(5dfce536)source-ready 但 agent.l2_call_ledger 表不存在=L2 從未 fire,99 embedded 教訓 0 召回。DreamEngine 0 LLM import 親證零成本。
 - 盲區：/proc/PID/environ 本審權限拒(無法直讀 engine env flag,改用 DB 證 dormant);L1 latency P50/P95 數值未量(ai_invocations 不覆蓋 L1);bybit_thought_gate 56檔9658LOC 僅查 wiring(接 layer2 manual 路徑)未逐檔審。
-- 報告 `workspace/reports/2026-06-14--AI-E--full_repo_cost_audit.md`。
+- ~~報告 `workspace/reports/2026-06-14--AI-E--full_repo_cost_audit.md`~~ **【2026-07-04 TW per R4 更正：該報告檔全域不存在（lineage gap，同 06-13 條；07-03 AI-E 自審已記）；11 findings 結論本身有效，僅移除失效報告指針】**。
 
 ## 2026-06-14 — P2 ai_pricing 雙副本 fix 規格（design-only, read-only）
 - **雙副本根因確認**：(a) Rust `settings/ai_pricing.yaml`(2026-04-06) 鍵=**真名 model-id**(claude-sonnet-4-5/claude-opus-4-6/claude-haiku-4-5-20251001) 漏現行 opus-4-8/sonnet-4-6；fail-CLOSED(unknown→compute_cost Err→check_and_record Err→拒呼叫)。(b) Python `layer2_types.py:474-492 PricingTable` 鍵=**tier alias**(haiku/sonnet/opus)+model_id 僅裝飾(sonnet-4-6/opus-4-7 stale)；fail-OPEN(`layer2_cost_recording.py:104-106` unknown tier→warn→退 sonnet 定價，永不拒)。兩套鍵空間不交集=本質上不是同一張表。
