@@ -1051,15 +1051,23 @@ async function liveStart() {
 async function doLiveStop() {
   // A3 HIGH-1 fix：停止 Live 同樣會市價平倉，必須 typed-phrase 確認
   // WP-01 Wave 1 follow-up：舊 closeDialog('dlg-live-stop') 已移除（dialog 不再存在）
+  // P1-9 誠實對齊：文案逐條對應 POST /api/v1/live/session/stop 的實際行為
+  //   （live_session_endpoints.py::post_live_session_stop）：
+  //   1. cancel_all_orders(engine=live) 2. close_all_positions(engine=live)
+  //   3. 孤兒倉位清掃 + REST 驗證帳戶乾淨
+  //   4. _set_execution_authority(None) 撤銷並持久化（下次重啟不自動恢復）
+  //   5. _LIVE_USER_STOPPED=True → session 狀態轉 stopped、縮倉監控停檢
+  //   6. 撤銷 SM-1 治理授權 + earned-trust tier 重置為 T0
+  //   要恢復交易必須重新啟動 Live（重新走 5 道 gate 授權）。
   const ok = await openTypedConfirmModal({
     title: '⛔ 停止 Live 實盤交易',
-    body: '此操作將：\n1. 取消所有掛單\n2. 市價平倉所有持倉\n3. 停止交易授權租約\n\n⚠ 市價成交存在滑點風險。真實資金。',
+    body: '此操作將：\n1. 取消所有掛單\n2. 市價平倉所有持倉（並清掃交易所孤兒倉位、驗證帳戶乾淨）\n3. 撤銷交易授權並持久化——下次重啟不會自動恢復\n4. Session 轉為「已停止」、縮倉監控停止、SM-1 治理授權撤銷、信任 tier 重置為 T0\n\n⚠ 市價成交存在滑點風險。真實資金。\n要恢復交易需重新啟動 Live（重新通過 5 道 gate 授權）。',
     phrase: 'STOP LIVE',
     confirmLabel: '確認停止 / Stop Live',
     confirmClass: 'oc-btn-danger',
     actor: 'Operator',
-    impact: '所有倉位市價平倉，授權租約終止',
-    rollback: '需重新啟動 Live 交易才能恢復'
+    impact: '撤單 + 市價平倉全部持倉 + 撤銷授權（持久封鎖）+ session 停止',
+    rollback: '需重新啟動 Live 交易（重走 5 道 gate 授權）才能恢復'
   }).catch(function() { return false; });
   if (!ok) return;
   const d = await ocPost('/api/v1/live/session/stop', {});
@@ -1079,15 +1087,20 @@ async function doLiveStop() {
 async function doEmergencyStop() {
   // A3-BLOCKER-1 fix：緊急停止必須 typed-phrase 確認，防止誤觸
   // WP-01 Wave 1 follow-up：舊 closeDialog('dlg-live-emergency') 已移除（dialog 不再存在）
+  // P1-9 誠實對齊：緊急停止與「停止 Live」打同一個 POST /api/v1/live/session/stop
+  //   （空 body），後端行為完全相同——沒有額外的「引擎封鎖」能力。之前文案
+  //   聲稱「封鎖引擎需手動解除」是假差異化：真實封鎖語義（撤授權持久化 +
+  //   _LIVE_USER_STOPPED）「停止 Live」按鈕同樣承載。此按鈕的唯一差異是
+  //   互動層面：跳過逐步思考、且引擎在線時始終可觸發（不受停止鍵 disabled 影響）。
   const ok = await openTypedConfirmModal({
     title: '🚨 緊急停止 / Emergency Stop',
-    body: '緊急停止將立即：\n1. 強制取消所有掛單\n2. 強制市價平倉所有持倉\n3. 封鎖引擎 — 不接受新指令直到手動解除\n\n⚠ 高滑點風險。此操作無法撤銷。',
+    body: '緊急停止與「停止 Live 實盤」執行完全相同的後端動作：\n1. 取消所有掛單\n2. 市價平倉所有持倉（清掃孤兒倉位、驗證帳戶乾淨）\n3. 撤銷交易授權並持久化——下次重啟不自動恢復、session 轉為「已停止」\n\n差異僅在互動層：此鍵跳過逐步確認、且引擎在線時始終可按。\n\n⚠ 高滑點風險。要恢復交易需重新啟動 Live（重走 5 道 gate 授權）。',
     phrase: 'EMERGENCY STOP',
     confirmLabel: '🚨 確認緊急停止',
     confirmClass: 'oc-btn-danger',
     actor: 'Operator',
-    impact: '所有倉位立即市價平倉，引擎封鎖',
-    rollback: '需手動解除引擎封鎖後才能重新啟動'
+    impact: '與「停止 Live」相同：撤單 + 市價平倉全部 + 撤銷授權（持久封鎖）+ session 停止',
+    rollback: '需重新啟動 Live 交易（重走 5 道 gate 授權）才能恢復'
   }).catch(function() { return false; });
   if (!ok) return;
   const d = await ocPost('/api/v1/live/session/stop', {});
