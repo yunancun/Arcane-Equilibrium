@@ -16,19 +16,14 @@ MODULE_NOTE (中文):
   3. 本地 LLM 搜索（零 API 成本）
   4. DuckDuckGo（零成本兜底）
 
-MODULE_NOTE (English):
-  Implements 8 tools available in the Layer 2 Agent loop:
-  Data reads (zero external calls): get_market_state / get_account_state / get_recent_decisions / get_experience
-  External info (SearchProvider abstraction): web_search / fetch_url
-  Outputs: submit_recommendation / record_insight
-
-  4-tier SearchProvider degradation:
-  1. Perplexity Search API + Claude reasoning (citations+timestamps, ~$0.005/query)
-  2. Local LLM (Ollama) + web-pilot (zero API cost)
-  3. Local LLM search (zero API cost)
-  4. DuckDuckGo (zero cost fallback)
+  阻塞卸載（冷審計 R2 latent，2026-07-04）：層級 2/3/4 的底層實作
+  （subprocess.run / client.generate / DDGS）是同步阻塞呼叫（最長 30-60s），
+  直接跑在 async def 內會凍結整個 FastAPI event loop；已一律以
+  asyncio.to_thread 卸載到 worker thread（層級 1 Perplexity 本就是
+  httpx.AsyncClient 真異步）。回歸鎖定見 tests/test_layer2_search_offload.py。
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -610,7 +605,10 @@ class LocalLLMWebSearchProvider(SearchProvider):
         try:
             web_pilot = os.path.expanduser("~/.local/bin/web-pilot")
             safe_query = query.strip().lstrip("-")[:200]
-            proc = subprocess.run(
+            # 冷審計 R2 latent 修復：subprocess.run 最長阻塞 30s，直接跑在
+            # async def 內會凍結整個 event loop；to_thread 卸載（行為不變）。
+            proc = await asyncio.to_thread(
+                subprocess.run,
                 [web_pilot, "search", "--max", str(max_results), "--", safe_query],
                 capture_output=True, text=True, timeout=30,
             )
@@ -671,7 +669,11 @@ class LocalLLMSearchProvider(SearchProvider):
         start = time.time()
         try:
             client = get_local_llm_client()
-            resp = client.generate(f"Briefly answer: {query}", max_tokens=512, timeout=60)
+            # 冷審計 R2 latent 修復：client.generate 是同步 HTTP 呼叫（最長
+            # 阻塞 60s），to_thread 卸載避免凍結 event loop（行為不變）。
+            resp = await asyncio.to_thread(
+                client.generate, f"Briefly answer: {query}", max_tokens=512, timeout=60,
+            )
             content = resp.text if resp.success else ""
             if not content:
                 return SearchResponse(
@@ -724,8 +726,14 @@ class WebPilotSearchProvider(SearchProvider):
         start = time.time()
         try:
             from duckduckgo_search import DDGS
-            with DDGS() as ddgs:
-                raw_results = list(ddgs.text(query, max_results=max_results))
+
+            # 冷審計 R2 latent 修復：DDGS 是同步網路查詢，to_thread 卸載避免
+            # 凍結 event loop；context manager 生命週期整段留在 worker thread。
+            def _ddgs_text() -> list[dict[str, Any]]:
+                with DDGS() as ddgs:
+                    return list(ddgs.text(query, max_results=max_results))
+
+            raw_results = await asyncio.to_thread(_ddgs_text)
 
             results = []
             for item in raw_results:
