@@ -1,0 +1,30 @@
+{
+  "_comment": "C5 AdmissionConfig 默認值 + 範圍邊界 golden fixture。defaults 四值兩側逐值斷言。range_vectors：Rust AdmissionConfig::validate 必 reject（範圍外）；Python validate_runtime_config 對應斷言（Python RuntimeAdmissionConfig 只鏡像默認值、範圍驗證在 validate_runtime_config；NaN 為 Python 側單獨註記——見 python_note）。錨點 fix/authz-contract-0704。",
+  "defaults": {
+    "max_plan_age_hours": 24,
+    "min_failed_outcomes_to_disable": 2,
+    "min_outcome_net_positive_pct": 50.0,
+    "min_avg_net_bps": 0.0
+  },
+  "range_reject_vectors": [
+    {"field": "max_plan_age_hours", "value": 0, "reason": "below_min_1", "rust_reject": true, "python_reject": true},
+    {"field": "max_plan_age_hours", "value": 337, "reason": "above_max_336", "rust_reject": true, "python_reject": true},
+    {"field": "min_failed_outcomes_to_disable", "value": 0, "reason": "below_min_1", "rust_reject": true, "python_reject": true},
+    {"field": "min_failed_outcomes_to_disable", "value": 21, "reason": "above_max_20", "rust_reject": true, "python_reject": true},
+    {"field": "min_outcome_net_positive_pct", "value": -0.1, "reason": "below_min_0", "rust_reject": true, "python_reject": true},
+    {"field": "min_outcome_net_positive_pct", "value": 100.1, "reason": "above_max_100", "rust_reject": true, "python_reject": true},
+    {"field": "min_avg_net_bps", "value": -10001.0, "reason": "below_min_neg10000", "rust_reject": true, "python_reject": true},
+    {"field": "min_avg_net_bps", "value": 10001.0, "reason": "above_max_10000", "rust_reject": true, "python_reject": true}
+  ],
+  "range_accept_vectors": [
+    {"field": "max_plan_age_hours", "value": 1, "note": "min 邊界 inclusive"},
+    {"field": "max_plan_age_hours", "value": 336, "note": "max 邊界 inclusive (24*14)"},
+    {"field": "min_failed_outcomes_to_disable", "value": 20, "note": "max 邊界 inclusive"},
+    {"field": "min_outcome_net_positive_pct", "value": 0.0, "note": "min 邊界"},
+    {"field": "min_outcome_net_positive_pct", "value": 100.0, "note": "max 邊界"},
+    {"field": "min_avg_net_bps", "value": -10000.0, "note": "min 邊界"},
+    {"field": "min_avg_net_bps", "value": 10000.0, "note": "max 邊界"}
+  ],
+  "python_note": "B4(冷審計 R2)：Python RuntimeAdmissionConfig 為 frozen dataclass 只帶默認值，範圍驗證在 validate_runtime_config()（raise ValueError）。Rust AdmissionConfig::validate 另檢 min_avg_net_bps is_finite（NaN/inf reject）——Python validate_runtime_config 以純不等式比較，NaN 比較恒 False 故不 raise（NaN 漏網，單側差異）。NaN 向量列 python_only 因兩側行為不同：Rust reject / Python 不 reject。",
+  "nan_vector": {"field": "min_avg_net_bps", "value": "NaN", "rust_reject": true, "python_reject": false, "note": "Rust is_finite reject；Python 不等式比較 NaN 恒 False 不 raise（B4 單側差異，統一策略待裁）"}
+}
