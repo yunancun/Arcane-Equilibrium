@@ -55,6 +55,10 @@ def _clean_env(monkeypatch, tmp_path: Path):
         monkeypatch.delenv(var, raising=False)
     # Redirect HOME so _secrets_base_dir() cannot read real slot files.
     monkeypatch.setenv("HOME", str(tmp_path))
+    # F5（2026-07-04 冷審計 R2）：寫路徑 gate 默認 fail-closed（flag 缺失=攔）。
+    # 既有簽章/happy-path 測試不驗治理閘，統一給 WRITE_ENABLED=true 讓寫方法可達；
+    # F5 專屬測試（TestBybitWriteGovernanceGate）自行覆寫 flag 三態。
+    monkeypatch.setenv("BYBIT_CONNECTOR_WRITE_ENABLED", "true")
     yield
 
 
@@ -1203,3 +1207,118 @@ def test_parse_instrument_item_none_on_missing_symbol():
     缺 symbol 時 _parse_instrument_item 返回 None。"""
     assert _parse_instrument_item({"lotSizeFilter": {}, "priceFilter": {}}) is None
     assert _parse_instrument_item({"symbol": "X"}) is None
+
+
+# ---------------------------------------------------------------------------
+# F5（2026-07-04 冷審計 R2）：BYBIT_CONNECTOR_WRITE_ENABLED / BYBIT_MODE 治理閘
+#
+# finding：兩個 env flag 此前零 runtime 強制消費者（純表示層，只有 settings_routes
+# 讀來顯示/比對）。本組測試釘住真實消費：
+#   1. WRITE_ENABLED=false / 缺失 → 所有寫路徑（_post: 下單/撤單/撤全部）fail-closed 硬攔。
+#   2. WRITE_ENABLED 不影響讀路徑（_get）。
+#   3. BYBIT_MODE 與構造 environment 不一致 → 構造時 fail-closed。
+# 方向只准收緊（flag 缺失/false=攔）；E2 重點審此組。
+# ---------------------------------------------------------------------------
+
+
+class TestBybitWriteGovernanceGate:
+    """F5：BYBIT_CONNECTOR_WRITE_ENABLED 寫路徑 fail-closed 消費者。"""
+
+    def test_place_order_blocked_when_write_flag_false(self, monkeypatch):
+        """WRITE_ENABLED=false → place_order 被硬攔（不觸網）。"""
+        monkeypatch.setenv("BYBIT_CONNECTOR_WRITE_ENABLED", "false")
+        c = _make_client("demo")
+        recorded = _install_mock_transport(
+            c, lambda req: httpx.Response(200, json=_ok_envelope({"orderId": "X"}))
+        )
+        with pytest.raises(BybitBusinessError) as exc:
+            c.place_order("BTCUSDT", "Buy", "Market", 0.001)
+        assert exc.value.ret_code == -1
+        assert "BYBIT_CONNECTOR_WRITE_ENABLED" in exc.value.ret_msg
+        # 硬攔必須在觸網之前 —— 不得有任何請求發出。
+        assert recorded == []
+        c.close()
+
+    def test_place_order_blocked_when_write_flag_missing(self, monkeypatch):
+        """WRITE_ENABLED 缺失 → 默認攔（fail-closed，flag 缺失=false）。"""
+        monkeypatch.delenv("BYBIT_CONNECTOR_WRITE_ENABLED", raising=False)
+        c = _make_client("demo")
+        recorded = _install_mock_transport(
+            c, lambda req: httpx.Response(200, json=_ok_envelope({"orderId": "X"}))
+        )
+        with pytest.raises(BybitBusinessError):
+            c.place_order("BTCUSDT", "Buy", "Market", 0.001)
+        assert recorded == []
+        c.close()
+
+    def test_cancel_order_blocked_when_write_flag_false(self, monkeypatch):
+        """WRITE_ENABLED=false → cancel_order 也被硬攔（撤單=對交易所 mutation）。"""
+        monkeypatch.setenv("BYBIT_CONNECTOR_WRITE_ENABLED", "false")
+        c = _make_client("demo")
+        recorded = _install_mock_transport(
+            c, lambda req: httpx.Response(200, json=_ok_envelope({}))
+        )
+        with pytest.raises(BybitBusinessError):
+            c.cancel_order("BTCUSDT", order_id="abc")
+        assert recorded == []
+        c.close()
+
+    def test_place_order_allowed_when_write_flag_true(self, monkeypatch):
+        """WRITE_ENABLED=true → place_order 放行（向後相容，寫路徑可達）。"""
+        monkeypatch.setenv("BYBIT_CONNECTOR_WRITE_ENABLED", "true")
+        c = _make_client("demo")
+        recorded = _install_mock_transport(
+            c,
+            lambda req: httpx.Response(
+                200, json=_ok_envelope({"orderId": "OID", "orderLinkId": "LID"})
+            ),
+        )
+        out = c.place_order("BTCUSDT", "Buy", "Market", 0.001)
+        assert out["order_id"] == "OID"
+        assert len(recorded) == 1
+        c.close()
+
+    def test_get_path_not_affected_by_write_flag(self, monkeypatch):
+        """讀路徑（_get）不受 WRITE_ENABLED 影響 —— gate 只收緊寫，不誤殺讀。"""
+        monkeypatch.setenv("BYBIT_CONNECTOR_WRITE_ENABLED", "false")
+        c = _make_client("demo")
+        recorded = _install_mock_transport(
+            c, lambda req: httpx.Response(200, json=_ok_envelope({"list": []}))
+        )
+        c.get_positions("linear")   # 讀路徑，WRITE_ENABLED=false 下仍應成功
+        assert len(recorded) == 1
+        c.close()
+
+
+class TestBybitModeConsistencyAssertion:
+    """F5：BYBIT_MODE 與構造 environment 一致性斷言（fail-closed）。"""
+
+    def test_mode_mismatch_rejected_at_construction(self, monkeypatch):
+        """BYBIT_MODE=demo 但構造 environment=mainnet → fail-closed。"""
+        monkeypatch.setenv("BYBIT_MODE", "demo")
+        monkeypatch.setenv("OPENCLAW_ALLOW_MAINNET", "1")
+        with pytest.raises(BybitBusinessError) as exc:
+            BybitClient(api_key="k", api_secret="s", environment="mainnet")
+        assert "BYBIT_MODE" in exc.value.ret_msg
+        assert exc.value.response.get("guard") == "bybit_mode_consistency"
+
+    def test_mode_match_constructs_ok(self, monkeypatch):
+        """BYBIT_MODE=demo 且構造 environment=demo → 正常構造。"""
+        monkeypatch.setenv("BYBIT_MODE", "demo")
+        c = BybitClient(api_key="k", api_secret="s", environment="demo")
+        assert c.base_url()
+        c.close()
+
+    def test_mode_absent_does_not_assert(self, monkeypatch):
+        """BYBIT_MODE 缺失 → 不做跨欄斷言（治理表示層可選，不改既有構造契約）。"""
+        monkeypatch.delenv("BYBIT_MODE", raising=False)
+        c = BybitClient(api_key="k", api_secret="s", environment="demo")
+        assert c.base_url()
+        c.close()
+
+    def test_live_demo_env_treated_as_demo_mode(self, monkeypatch):
+        """BYBIT_MODE=demo 且 environment=live_demo（走 demo 端點）→ 一致，不誤殺。"""
+        monkeypatch.setenv("BYBIT_MODE", "demo")
+        c = BybitClient(api_key="k", api_secret="s", environment="live_demo")
+        assert c.base_url()
+        c.close()
