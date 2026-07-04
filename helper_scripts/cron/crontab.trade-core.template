@@ -1,0 +1,102 @@
+# ============================================================================
+# crontab.trade-core.template — trade-core host 的 crontab 正本模板
+# ----------------------------------------------------------------------------
+# 為什麼有此檔（P0-2④ crontab 治理正本入 repo）：
+#   2026-06-27 一次無記錄 REPLACE 把 70 行 crontab 清空,33 條 active lane 被殺、
+#   32 條至今仍死(FA 2026-07-04 cron_massacre_reconciliation_d2 §一/§二)。根因面
+#   之一=live crontab 是「口耳相傳的 runtime 狀態」而非隨代碼走 review 的正本。
+#   本模板即該正本:live crontab 只是它經 install_crontab_from_repo.sh render 的
+#   產物,任何一行的增刪都應走 code review。
+#
+# render 契約:
+#   {{HEAD}} 佔位符由 installer 以 `git -C <repo> rev-parse --short HEAD` 派生,
+#   釘住 EXPECTED_SOURCE_HEAD(P1-4 pin-by-reference:pin 隨安裝時 HEAD 走,不手寫
+#   字面,避免 pin drift)。本模板內不出現任何 short-sha 字面。
+#
+# env 統一(operator 2026-07-04 已裁決):
+#   OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv
+#   OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw  ← runtime SSOT,非 /tmp
+#   log 重定向 → …/var/openclaw/logs/
+#   本模板保留機器絕對路徑純因它是 trade-core host 專屬正本(per-host template);
+#   生產「代碼」的路徑不硬編碼原則不受影響,wrapper 內部一律走 ${OPENCLAW_DATA_DIR}。
+#
+# Tier 分層(FA D2 決策面,實際裝回哪些行等 operator 批後由 conductor 執行):
+#   Tier 0 資料保全/審計(4) · Tier 1 學習/風控/監測 producer(14) ·
+#   Tier 2 flash_dip 觀測族(4) · Tier 3 research/alpha(8) · Tier 4 legacy(2,退役候選)。
+#   另含 06-29 重裝恢復的 5 條(demo-learning stack ×4 + ml_training)、
+#   07-04 窗口恢復的 2 條(announcement sentinel + passive_wait_healthcheck)。
+#
+# 硬邊界:本模板不含任何 live 下單 / authorization.json 生成 / execution_authority
+#   相關行;全部為只讀觀測 / 學習 producer / 資料保全 / 審計鏡像。
+# ============================================================================
+
+# ---- Tier 0 — 資料保全 / 審計(4) ----
+0 3 * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw OPENCLAW_SECRETS_ROOT=/home/ncyu/BybitOpenClaw/secrets OPENCLAW_BACKUP_ROOT=/home/ncyu/pg_backups OPENCLAW_BACKUP_RETENTION_DAYS=30 /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/trading_ai_pg_dump_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/trading_ai_pg_dump_cron.cron.log 2>&1
+0 * * * * /usr/sbin/logrotate -s /home/ncyu/logrotate-openclaw.state /home/ncyu/logrotate-openclaw.conf
+*/1 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/halt_audit_pg_writer_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/halt_audit_pg_writer_cron.cron.log 2>&1
+*/2 * * * * cd /home/ncyu/BybitOpenClaw/srv && OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw OPENCLAW_DATABASE_URL_FILE=/home/ncyu/BybitOpenClaw/var/openclaw/runtime_secrets/openclaw_database_url /usr/bin/python3 helper_scripts/canary/canary_audit_pg_writer.py >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/canary_audit_pg_writer.cron.log 2>&1
+
+# ---- Tier 1 — 學習 / 風控 / 監測 producer(14) ----
+*/30 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/edge_label_backfill_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/edge_label_backfill_cron.cron.log 2>&1
+12 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/edge_estimate_snapshots_cycle_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/edge_estimate_snapshots_cycle_cron.cron.log 2>&1
+29 5 * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/daily_kline_backfill_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/daily_kline_backfill_cron.cronout.log 2>&1
+0 6 * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/db/counterfactual_daily_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/counterfactual_daily_cron.cron.log 2>&1
+20 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw OPENCLAW_SECRETS_ROOT=/home/ncyu/BybitOpenClaw/secrets /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/ref21_symbol_universe_snapshot_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/ref21_symbol_universe_snapshot_cron.cron.log 2>&1
+12,42 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/gate_b_watch_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/gate_b_watch_cron.cron.log 2>&1
+*/5 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/panel_aggregator_health_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/panel_aggregator_health_cron.cron.log 2>&1
+41 4 * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/feature_baseline_writer_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/feature_baseline_writer_cron.cron.log 2>&1
+0 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/wave9_replay_no_live_mutation_watch.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/wave9_replay_no_live_mutation_watch.cron.log 2>&1
+0 9 * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/replay_key_rotation_check.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/replay_key_rotation_check.cron.log 2>&1
+0 4 * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw OPENCLAW_SECRETS_ROOT=/home/ncyu/BybitOpenClaw/secrets /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/m11_replay_runner_daily_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/m11_replay_runner_daily_cron.cron.log 2>&1
+23 6 * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/recorder_health_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/recorder_health_cron.cronout.log 2>&1
+41 6 * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/recorder_mm_verdict_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/recorder_mm_verdict_cron.cronout.log 2>&1
+5 6 * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/fill_sim_refresh_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/fill_sim_refresh_cron.cronout.log 2>&1
+
+# ---- Tier 2 — flash_dip 觀測族(唯一活躍成交通道的監測,4) ----
+17 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/flash_dip_touchability_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/flash_dip_touchability_cron.cronout.log 2>&1
+53 6 * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/flash_dip_death_rate_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/flash_dip_death_rate_cron.cronout.log 2>&1
+29 6 * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/flash_dip_execution_realism_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/flash_dip_execution_realism_cron.cronout.log 2>&1
+31 6 * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/flash_dip_l1_short_exit_replay_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/flash_dip_l1_short_exit_replay_cron.cronout.log 2>&1
+
+# ---- Tier 3 — research / alpha 軸(8);alpha_discovery 前置=log rotation ----
+# EXPECTED_SOURCE_HEAD 由 installer render {{HEAD}}→安裝時 short-sha(pin-by-reference)
+*/15 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw OPENCLAW_EXPECTED_SOURCE_HEAD={{HEAD}} /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/alpha_discovery_throughput_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/alpha_discovery_throughput_cron.cronout.log 2>&1
+*/30 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw HOME=/home/ncyu /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/adpe_runner_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/adpe_runner.cron.log 2>&1
+41 4 * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw OPENCLAW_POLYMARKET_QUERY_SET=v2 /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/polymarket_axis_cron.sh daily >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/polymarket_axis_cron.cron.log 2>&1
+7,22,37,52 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw OPENCLAW_POLYMARKET_QUERY_SET=v2 /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/polymarket_axis_cron.sh hourly-topn >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/polymarket_axis_cron.cron.log 2>&1
+2,17,32,47 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw OPENCLAW_POLYMARKET_LEADLAG_QUERY_SET=v2 OPENCLAW_POLYMARKET_LEADLAG_MIN_POINTS=30 /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/polymarket_leadlag_ic_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/polymarket_leadlag_ic_cron.cron.log 2>&1
+17 5 * * * cd /home/ncyu/BybitOpenClaw/srv && OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw PYTHONPATH=/home/ncyu/BybitOpenClaw/srv/helper_scripts/research:/home/ncyu/BybitOpenClaw/srv /usr/bin/python3 -m deribit_vol_axis.cli --mode daily >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/deribit_vol_axis.cron.log 2>&1
+0 */2 * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/research/order_flow_alpha/vol_event_trigger.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/vol_event_trigger.cron.log 2>&1
+23 5 * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw OPENCLAW_SECRETS_ROOT=/home/ncyu/BybitOpenClaw/secrets OPENCLAW_L2_MEMORY_PIPELINE=1 OPENCLAW_L2_MEMORY_EMBED_BACKFILL=1 /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/l2_memory_distill_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/l2_memory_distill_cron.cron.log 2>&1
+
+# ---- 06-29 重裝恢復的 demo-learning stack(4) + ml_training(1) ----
+# ml_training 行含 OPENCLAW_RESIDUAL_ALPHA_PRODUCER=1:70 行版 line 35 原有,06-29 重裝
+# 抹掉致 residual alpha producer(2026-06-05 flag-ON 部署)被靜默降級為 OFF,此處補回
+# (FA D2 §六 drift 修 #1)。demo-learning stack 的 4 條由 install_demo_learning_stack_crons.sh
+# 生成,cadence/env 依該 installer 為準;此處以 07-04 現行 live 形態還原。
+17 3 * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw OPENCLAW_RESIDUAL_ALPHA_PRODUCER=1 /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/ml_training_maintenance_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/ml_training_maintenance_cron.cron.log 2>&1
+
+# ---- cost_gate learning lane ----
+# cost_gate 行含 OPENCLAW_COST_GATE_STANDING_DEMO_AUTHORIZATION_JSON:06-26 E3 審批的
+# wiring 被 06-29 重裝抹掉,此處補回(FA D2 §六 drift 修 #2);standing envelope 路徑
+# 現為 var/openclaw 下。實際裝回需併 P1-1 over-gate 統一設計批,cadence/其餘 env 依
+# install_cost_gate_learning_lane_cron.sh 為準。
+27 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw OPENCLAW_COST_GATE_STANDING_DEMO_AUTHORIZATION_JSON=/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/standing_demo_operator_authorization.json /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/cost_gate_learning_lane_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/cost_gate_learning_lane_cron.cron.log 2>&1
+
+# ---- 07-04 窗口恢復的 2 條(announcement sentinel + passive_wait_healthcheck) ----
+7,37 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/bybit_announcement_sentinel_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/bybit_announcement_sentinel_cron.cron.log 2>&1
+13,43 * * * * cd /home/ncyu/BybitOpenClaw/srv && OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw OPENCLAW_DATABASE_URL="$(cat /home/ncyu/BybitOpenClaw/var/openclaw/runtime_secrets/openclaw_database_url)" python3 -m helper_scripts.db.passive_wait_healthcheck.runner >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/passive_wait_healthcheck.cron.log 2>&1
+
+# ---- Tier 4 — legacy(2,退役候選,需 operator 一句話 ack;以註釋標退役,不裝回) ----
+# 為什麼保留為註釋而非刪除:兩者為「誤刪+superseded-legacy」,腳本仍在現 repo 但舊 cron
+# 指向 legacy /home/ncyu/srv 佈局;不恢復=不損失現行功能,正式退役需記錄(FA D2 Tier 4)。
+# RETIRED_20260704(operator ack pending):bybit_readonly_status_writer(*/5)
+#   指向 legacy /home/ncyu/srv/scripts/;現 repo 同名檔在 readonly_observer_pipeline/,由現行棧供狀態
+# RETIRED_20260704(operator ack pending):cron_observer_cycle(*/5)
+#   同上,log 寫 legacy log_files/;腳本仍在現 repo 但 cron 指 legacy checkout
+
+# ---- 既有 DISABLED_OPENCLAW_20260521(屠殺前即停用,維持退役;owner=operator,退役日 2026-05-21) ----
+# passive_wait_healthcheck 6h 版已被 07-04 新版(13,43 * * * * 30min 頻率)取代
+# DISABLED_OPENCLAW_20260521: 0 */6 * * * passive_wait_healthcheck(6h legacy 版)
+# DISABLED_OPENCLAW_20260521: ref21_market_microstructure_recorder
+# DISABLED_OPENCLAW_20260521: blocked_symbols_30d_unblock_check
