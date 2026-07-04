@@ -151,9 +151,9 @@ impl ClaudeTeacher {
     /// （即月度總額 ≥ 95% / ≥ 100%），或 teacher 專屬 scope 已耗盡時，DENY。
     /// 不發明任何新的記帳路徑。
     ///
-    /// 注意：本 gate 只覆蓋月度 $100/$150 階梯 + teacher $60 scope。
-    /// per-day 範圍（DOC-08 $2/day）目前 Rust 端不存在，屬 operator/config 決策，
-    /// 不在本次範圍內。
+    /// 覆蓋範圍：月度 $100/$150 階梯 + teacher $60 scope + DOC-08 §4 每日
+    /// `daily_usd_max` 硬上限（冷審計 R2 latent 修復——此前 per-day 腿在 Rust
+    /// 端不存在，daily_usd_max 是假功能參數）。
     async fn check_budget_pre_call(&self) -> Result<(), TeacherError> {
         let Some(budget) = &self.budget else {
             // No-tracker 付費路徑 = fail-closed。沒有記帳就拒絕付費呼叫，
@@ -198,6 +198,13 @@ impl ClaudeTeacher {
                      / 讀取 teacher 剩餘預算失敗：{e}，拒絕（fail-closed）"
                 )));
             }
+        }
+
+        // (c) DOC-08 §4 每日硬上限（daily_usd_max，TOML BudgetConfig）：
+        //     每日窗已用 >= cap → 拒絕新的付費 AI 調用（fail-closed）。
+        //     只攔 AI 調用，不攔任何交易路徑；UTC 日界翻轉後自動恢復。
+        if let Some(reason) = budget.daily_cap_rejection().await {
+            return Err(TeacherError::BudgetExceededPreCall(reason));
         }
 
         Ok(())
@@ -418,6 +425,35 @@ mod tests {
             .expect_err("must DENY before the paid call when over cap");
         match err {
             TeacherError::BudgetExceededPreCall(_) => {}
+            other => panic!("expected BudgetExceededPreCall, got {other:?}"),
+        }
+    }
+
+    // Test: PRE-CALL DENY when the DOC-08 §4 daily cap is exhausted even though
+    //       the monthly ladder is far from any threshold.
+    // 為什麼：證明 daily_usd_max 不再是假功能參數——月度窗健康（$2 << $80 SoftWarn）
+    //         時，每日窗滿額必須單獨觸發 pre-call 拒絕（冷審計 R2 latent 修復）。
+    #[tokio::test]
+    async fn test_pre_call_deny_when_daily_cap_exceeded() {
+        let pool = empty_pool().await;
+        let budget = Arc::new(
+            BudgetTracker::new_for_test(Arc::clone(&pool), BudgetConfig::defaults())
+                .with_daily_cap_for_test(2.0),
+        );
+        // 注入 $2：每日窗滿額；月度僅 $2（遠低於 SoftWarn $80），(a)/(b) 腿皆放行。
+        budget.inject_usage_for_test(SCOPE_LOCAL_TOTAL, 2.0).await;
+        let mock: Arc<dyn LlmClient + Send + Sync> =
+            Arc::new(MockClient::new(valid_directive_json(), 100, 50));
+        let teacher =
+            ClaudeTeacher::new(mock, Some(Arc::clone(&budget)), pool, "claude-sonnet-4-5");
+        let err = teacher
+            .fetch_and_persist_directive("ma_crossover")
+            .await
+            .expect_err("must DENY before the paid call when daily cap exhausted");
+        match err {
+            TeacherError::BudgetExceededPreCall(reason) => {
+                assert!(reason.contains("daily_usd_max"), "reason={reason}");
+            }
             other => panic!("expected BudgetExceededPreCall, got {other:?}"),
         }
     }
