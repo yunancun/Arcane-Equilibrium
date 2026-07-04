@@ -137,6 +137,17 @@ for mode in "${ENGINE_MODE_ARRAY[@]}"; do
         AUDIT_ARGS+=(--engine-mode "$mode")
     fi
 done
+# P1-4 世代判準：把 raw pin（env 鏈或 pin 檔）過公共庫轉成 effective head。
+# docs/tests/.codex 前進→回當前 HEAD（不凍 lane）；rust src 等真漂移→回原 pin
+# 使下游 mismatch fail-close；pin 檔壞/git 失敗→非 hex sentinel 必紅。
+# lib 檔缺失時降級為 passthrough（沿用 raw expected），不因缺 helper 硬崩 cron。
+SG_LIB="$BASE/helper_scripts/cron/lib/source_generation_gate.sh"
+if [[ -f "$SG_LIB" ]]; then
+    source "$SG_LIB"
+else
+    resolve_effective_expected_head() { printf '%s' "$4"; }
+fi
+EXPECTED_HEAD="$(resolve_effective_expected_head "$BASE" "$DATA" "demo_learning_evidence_audit" "$EXPECTED_HEAD")"
 if [[ -n "$EXPECTED_HEAD" ]]; then
     AUDIT_ARGS+=(--expected-head "$EXPECTED_HEAD")
 fi

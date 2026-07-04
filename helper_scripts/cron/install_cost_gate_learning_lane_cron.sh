@@ -22,6 +22,33 @@ OPENCLAW_COST_GATE_LEARNING_INSTALL_PREFLIGHT="${OPENCLAW_COST_GATE_LEARNING_INS
 OPENCLAW_COST_GATE_LEARNING_REQUIRE_EXPECTED_HEAD="${OPENCLAW_COST_GATE_LEARNING_REQUIRE_EXPECTED_HEAD:-1}"
 OPENCLAW_COST_GATE_LEARNING_EXPECTED_HEAD="${OPENCLAW_COST_GATE_LEARNING_EXPECTED_HEAD:-${OPENCLAW_EXPECTED_SOURCE_HEAD:-}}"
 
+# P1-4：expected head 未由 env 顯式傳入時，從 pin 檔
+# $OPENCLAW_DATA_DIR/runtime_generation/expected_source_head.json 解析（部署後
+# 由 deploy/derive_expected_source_head.sh 與重啟腳本自動派生），去除歷史上把
+# inline SHA 手寫進安裝命令的復發保證。env 顯式傳值時仍優先（割接兼容）。
+if [[ -z "$OPENCLAW_COST_GATE_LEARNING_EXPECTED_HEAD" ]]; then
+    _PYBIN="${OPENCLAW_PYTHON_BIN:-}"
+    if [[ -z "$_PYBIN" ]]; then
+        if [[ -x "$HOME/.venv/bin/python" ]]; then _PYBIN="$HOME/.venv/bin/python"; else _PYBIN="python3"; fi
+    fi
+    _RESOLVED_HEAD="$(
+        cd "$OPENCLAW_BASE_DIR/helper_scripts/research" 2>/dev/null &&
+        PYTHONDONTWRITEBYTECODE=1 "$_PYBIN" -c '
+import sys
+from pathlib import Path
+from cost_gate_learning_lane.source_generation import resolve_expected_source_head
+r = resolve_expected_source_head(None, data_dir=Path(sys.argv[1]), env={})
+# pin 檔壞（error 非 None）不回傳 head：讓下游 REQUIRE 檢查照舊 fail-close，
+# 不讓損壞的 pin 檔靜默退化成「未提供」。
+sys.stdout.write(r["head"] or "")
+' "$OPENCLAW_DATA_DIR" 2>/dev/null
+    )" || _RESOLVED_HEAD=""
+    if [[ -n "$_RESOLVED_HEAD" ]]; then
+        OPENCLAW_COST_GATE_LEARNING_EXPECTED_HEAD="$_RESOLVED_HEAD"
+        echo "Resolved expected head from pin file: $OPENCLAW_COST_GATE_LEARNING_EXPECTED_HEAD"
+    fi
+fi
+
 WRAPPER="$OPENCLAW_BASE_DIR/helper_scripts/cron/cost_gate_learning_lane_cron.sh"
 MARKER="cost_gate_learning_lane_cron.sh"
 

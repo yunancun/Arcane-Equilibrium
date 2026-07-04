@@ -1527,6 +1527,43 @@ mod tests {
         );
     }
 
+    /// RES-8 golden vector:override env 的 trim/空串語義正本(Python
+    /// runtime_adapter._default_plan_path 必逐位鏡像本表)。空白/空串回退默認,
+    /// 非空值 trim 後直用。與 test_plan_path_parity_matrix.py 的期望對齊。
+    #[test]
+    fn plan_path_override_trim_and_empty_fallback_golden_vectors() {
+        let _guard = crate::test_env_lock::guard();
+        let saved = std::env::var(PLAN_PATH_ENV).ok();
+        let data_dir = PathBuf::from("/tmp/openclaw-test-data");
+        let default_path = data_dir
+            .join("cost_gate_learning_lane")
+            .join("demo_learning_lane_plan_latest.json");
+
+        // (env_value, expected)：None=移除 env。
+        let cases: [(Option<&str>, PathBuf); 5] = [
+            (None, default_path.clone()),
+            (Some(""), default_path.clone()),
+            (Some("   "), default_path.clone()),
+            (Some("/custom/plan.json"), PathBuf::from("/custom/plan.json")),
+            (Some("  /custom/plan.json  "), PathBuf::from("/custom/plan.json")),
+        ];
+        for (env_value, expected) in cases {
+            match env_value {
+                Some(v) => std::env::set_var(PLAN_PATH_ENV, v),
+                None => std::env::remove_var(PLAN_PATH_ENV),
+            }
+            assert_eq!(
+                demo_learning_lane_plan_path(&data_dir),
+                expected,
+                "env={env_value:?}"
+            );
+        }
+        match saved {
+            Some(v) => std::env::set_var(PLAN_PATH_ENV, v),
+            None => std::env::remove_var(PLAN_PATH_ENV),
+        }
+    }
+
     /// L-R1 釘子:「自寫落盤與快照推進之間」外部 append(TOCTOU 窗口)→ 快照
     /// 不得吞掉外部 bytes,下一次 refresh 必看見外部行。修前語義(自寫後直接
     /// stat-as-snapshot)會把外部行 bytes 收進快照 → refresh 判無變化 → 本測必紅。

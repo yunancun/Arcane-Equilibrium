@@ -30,6 +30,11 @@ ACTIVATION_PREFLIGHT_JSON="${OPENCLAW_SEALED_HORIZON_ACTIVATION_PREFLIGHT_JSON:-
 STACK_HEALTH_JSON="${OPENCLAW_SEALED_HORIZON_STACK_HEALTH_JSON:-$DATA/demo_learning_stack_healthcheck/demo_learning_stack_healthcheck_latest.json}"
 OPERATOR_REVIEW_JSON="${OPENCLAW_SEALED_HORIZON_OPERATOR_REVIEW_JSON:-$LANE_DIR/sealed_horizon_operator_review_latest.json}"
 MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_SEALED_HORIZON_PREFLIGHT_MAX_ARTIFACT_AGE_HOURS:-24}"
+# P1-4：本 cron 行歷史帶 OPENCLAW_EXPECTED_SOURCE_HEAD 但腳本 0 消費（RES-10
+# 惰性 pin=治理幻覺）。此處補真消費：pin 過公共庫世代判準，DRIFT_ROTATED /
+# INDETERMINATE（真代碼漂移 / pin 檔壞 / git 失敗）時跳過 preflight 並記 fail-close
+# 狀態，避免舊世代 checkout 產出誤導 operator 的 bounded probe 授權建議。
+EXPECTED_HEAD="${OPENCLAW_SEALED_HORIZON_PREFLIGHT_EXPECTED_HEAD:-${OPENCLAW_EXPECTED_SOURCE_HEAD:-}}"
 
 mkdir -p "$LANE_DIR" "$LOG_DIR" "$LOCK_ROOT" "$HEARTBEAT_DIR"
 
@@ -172,6 +177,28 @@ if [[ ! -f "$SEALED_EVIDENCE_JSON" ]]; then
     preflight_rc=0
     write_status "SEALED_HORIZON_EVIDENCE_MISSING"
     exit 0
+fi
+
+# P1-4 世代判準（RES-10 補真消費）：只在 pin 已提供時 gate；MATCH / DRIFT_EXEMPT
+# （docs/tests/.codex 前進）放行，DRIFT_ROTATED / INDETERMINATE（真代碼漂移 /
+# pin 檔壞 / git 失敗）跳過 preflight 並記 fail-close 狀態。pin 未配置
+# （PIN_NOT_PROVIDED）沿既有行為不新增凍結面。
+if [[ -n "$EXPECTED_HEAD" ]]; then
+    GEN_LINE="$(
+        cd "$BASE/helper_scripts/research" 2>/dev/null &&
+        PYTHONDONTWRITEBYTECODE=1 "$PYBIN" -m cost_gate_learning_lane.source_generation \
+            --repo-root "$BASE" \
+            --data-dir "$DATA" \
+            --expected-head "$EXPECTED_HEAD" \
+            --lane "sealed_horizon_probe_preflight" 2>>"$LOG" | head -n 1
+    )" || GEN_LINE=""
+    GEN_STATUS="${GEN_LINE%%$'\t'*}"
+    if [[ "$GEN_STATUS" == "DRIFT_ROTATED" || "$GEN_STATUS" == "INDETERMINATE" ]]; then
+        echo "[$(ts)] SKIP: source generation gate ${GEN_STATUS}; not running sealed horizon preflight on drifted/unknown checkout" >> "$LOG"
+        preflight_rc=0
+        write_status "SOURCE_GENERATION_${GEN_STATUS}"
+        exit 0
+    fi
 fi
 
 PREFLIGHT_ARGS=(
