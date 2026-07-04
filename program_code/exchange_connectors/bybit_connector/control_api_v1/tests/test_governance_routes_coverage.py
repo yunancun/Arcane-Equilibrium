@@ -800,13 +800,18 @@ class TestOverrideRiskLevel:
         assert result["code"] == "escalation_not_allowed"
 
     def test_happy_path_deescalation_applied(self):
-        """De-escalation from CAUTIOUS to NORMAL succeeds. / 從 CAUTIOUS 降至 NORMAL 成功。"""
+        """De-escalation from REDUCED to NORMAL succeeds and applies via SM.
+        從 REDUCED 降至 NORMAL 成功並經狀態機真生效。
+
+        P2-6 fake-success 修：真生效必須有 _risk_governor_sm（MagicMock 代表 SM 存在）；
+        回應必帶 applied=True，前端據此顯綠色成功。
+        """
         actor = _make_actor()
         hub = _make_hub(enabled=True)
         status = _make_hub_status(risk_level=2)  # REDUCED
         hub.get_status.return_value = status
         hub._check_de_escalation_gate.return_value = True
-        hub._risk_governor_sm = None  # Skip actual SM call
+        hub._risk_governor_sm = MagicMock()  # SM 存在 → escalate_to 被呼叫（no-op mock）
         with patch(f"{GOV_MOD}._get_governance_hub", return_value=hub):
             result = override_risk_level(
                 body=RiskOverrideRequest(target_level="NORMAL", reason="market recovered"),
@@ -814,6 +819,28 @@ class TestOverrideRiskLevel:
             )
         assert result["ok"] is True
         assert result["data"]["status"] == "override_applied"
+        assert result["data"]["applied"] is True
+        hub._risk_governor_sm.escalate_to.assert_called_once()
+
+    def test_sm_missing_raises_503(self):
+        """P2-6 fake-success 修：_risk_governor_sm is None → 503，不可謊報 override_applied。
+
+        SM missing means escalate_to cannot run — the level does not change. The old
+        code silently returned override_applied (fake-success). Now it fails closed 503.
+        """
+        actor = _make_actor()
+        hub = _make_hub(enabled=True)
+        status = _make_hub_status(risk_level=2)  # REDUCED
+        hub.get_status.return_value = status
+        hub._check_de_escalation_gate.return_value = True
+        hub._risk_governor_sm = None  # 狀態機未初始化 → 無法生效
+        with patch(f"{GOV_MOD}._get_governance_hub", return_value=hub):
+            with pytest.raises(HTTPException) as exc:
+                override_risk_level(
+                    body=RiskOverrideRequest(target_level="NORMAL", reason="market recovered"),
+                    actor=actor
+                )
+        assert exc.value.status_code == 503
 
     def test_deescalation_gate_pending(self):
         """Gate not cleared → de_escalation_pending_approval response. / 門控未通過 → 待批准狀態。"""
@@ -828,8 +855,10 @@ class TestOverrideRiskLevel:
                 actor=actor
             )
         # Should return pending approval response (ok=True with specific message)
+        # P2-6：待審批分支等級零變更，applied 必為 False（前端顯 warn 非綠）。
         assert result["ok"] is True
         assert result["message"] == "de_escalation_pending_approval"
+        assert result["data"]["applied"] is False
 
 
 class TestGetActiveLeases:
