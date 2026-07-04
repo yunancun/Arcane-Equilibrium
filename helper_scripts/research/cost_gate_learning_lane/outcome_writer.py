@@ -16,15 +16,34 @@ from cost_gate_learning_lane.contract import (
     PROBE_ADMISSION_DECISION_RECORD_TYPE,
     PROBE_OUTCOME_RECORD_TYPE,
 )
+from cost_gate_learning_lane.cost_model import (
+    LEGACY_OPTIMISTIC_COST_BPS,
+    SlippageQuantileTable,
+    conservative_cost_bps,
+    funding_crossing_count,
+)
+
+
+# F7:出場觀測延遲上界。延遲 ≤ 25% horizon 時量測窗畸變有界且 exit_ts 已落盤可事後
+# 加權；超過即語義不可救，寫 censored row。cap 30min、floor 5min。
+def _max_exit_delay_ms(horizon_ms: int) -> int:
+    return int(max(5 * 60_000, min(0.25 * horizon_ms, 30 * 60_000)))
 
 
 @dataclass(frozen=True)
 class ProbeOutcomeConfig:
-    """Markout/outcome contract for already-admitted demo-learning probes."""
+    """Markout/outcome contract for already-admitted demo-learning probes.
+
+    cost_bps 為樂觀常數對照(保留 4.0)；權威淨值走保守成本模型(cost_model.py)。
+    slippage_quantiles = 分位 artifact payload(load_slippage_quantiles 的輸入)，
+    None → 走 fallback 鏈的 toml_tier。
+    """
 
     horizon_minutes: int = 60
-    cost_bps: float = 4.0
+    cost_bps: float = LEGACY_OPTIMISTIC_COST_BPS
     max_entry_delay_ms: int = 5 * 60_000
+    funding_interval_hours: float = 8.0
+    slippage_table: SlippageQuantileTable | None = None
 
 
 def _utc_now() -> dt.datetime:
@@ -126,6 +145,8 @@ def validate_outcome_config(cfg: ProbeOutcomeConfig) -> None:
         raise ValueError("--outcome-cost-bps must be in [0, 10000]")
     if cfg.max_entry_delay_ms < 0 or cfg.max_entry_delay_ms > 24 * 3_600_000:
         raise ValueError("--max-entry-delay-ms must be in [0, 86400000]")
+    if not (0.0 < cfg.funding_interval_hours <= 24.0):
+        raise ValueError("funding_interval_hours must be in (0, 24]")
 
 
 def read_price_observations(path: Path) -> list[dict[str, Any]]:
@@ -266,12 +287,34 @@ def _build_markout_outcome_records(
         horizon_minutes = _row_outcome_horizon_minutes(row, cfg.horizon_minutes)
         horizon_ms = horizon_minutes * 60_000
         exit_target_ts_ms = event_ts_ms + horizon_ms
+        max_exit_delay_ms = _max_exit_delay_ms(horizon_ms)
         if event_ts_ms <= 0 or now_ms < exit_target_ts_ms:
             continue
 
         symbol = _str(event.get("symbol")).upper()
         side = _str(event.get("side"))
         observations = _matching_observations(price_observations, symbol=symbol)
+        last_observation_ts_ms = observations[-1][0] if observations else None
+        base_row = {
+            "schema_version": ADAPTER_SCHEMA_VERSION,
+            "record_type": record_type,
+            "generated_at_utc": now.isoformat(),
+            "attempt_id": attempt_id,
+            "side_cell_key": row.get("side_cell_key") or _ledger_side_cell(row),
+            "source_admission_decision": decision,
+            "allowed_to_submit_order": row.get("allowed_to_submit_order"),
+            "strategy_name": event.get("strategy_name") or event.get("strategy"),
+            "symbol": symbol,
+            "side": side,
+            "event_ts_ms": event_ts_ms,
+            "horizon_minutes": horizon_minutes,
+            "default_horizon_minutes": cfg.horizon_minutes,
+            "outcome_source": outcome_source,
+            "candidate_summary": row.get("candidate_summary") or {},
+            "promotion_evidence": False,
+            "boundary": boundary,
+        }
+
         entry = _float(event.get("entry_price") or event.get("price") or event.get("last_price"))
         entry_ts_ms = event_ts_ms
         if entry is None or entry <= 0.0:
@@ -281,46 +324,116 @@ def _build_markout_outcome_records(
                 max_delay_ms=cfg.max_entry_delay_ms,
             )
             if entry_obs is None:
+                # F7:入場觀測缺失。時限未到 → 下輪再試(不落 row);時限已過 → 寫
+                # censored row，終結「無限重掃」漏洞(attempt_id 進 existing set)。
+                entry_deadline_ms = (
+                    event_ts_ms + cfg.max_entry_delay_ms + horizon_ms + max_exit_delay_ms
+                )
+                if now_ms > entry_deadline_ms:
+                    outcomes.append(
+                        _censored_row(
+                            base_row,
+                            censor_reason="entry_observation_gap",
+                            last_observation_ts_ms=last_observation_ts_ms,
+                        )
+                    )
                 continue
             entry_ts_ms, entry = entry_obs
-        exit_obs = _first_price_at_or_after(observations, exit_target_ts_ms)
+
+        exit_obs = _first_price_at_or_after(
+            observations,
+            exit_target_ts_ms,
+            max_delay_ms=max_exit_delay_ms,
+        )
         if exit_obs is None:
+            # F7:出場觀測缺失。超過 exit_target+max_exit_delay 仍無價 → 語義不可救，
+            # 寫 censored row;尚在延遲窗內 → continue(唯一合法重試窗)。
+            if now_ms > exit_target_ts_ms + max_exit_delay_ms:
+                outcomes.append(
+                    _censored_row(
+                        base_row,
+                        censor_reason="exit_observation_gap",
+                        last_observation_ts_ms=last_observation_ts_ms,
+                        entry_ts_ms=entry_ts_ms,
+                        entry_price=entry,
+                    )
+                )
             continue
         exit_ts_ms, exit_price = exit_obs
 
         side_sign = -1.0 if side.lower() == "sell" else 1.0
         gross_bps = side_sign * (exit_price - entry) / entry * 10_000.0
-        net_bps = gross_bps - cfg.cost_bps
+
+        # P1-2a:保守成本模型(taker fee + per-symbol 滑點分位 p75 × SM + funding)。
+        crossings = funding_crossing_count(
+            event_ts_ms=event_ts_ms,
+            horizon_minutes=horizon_minutes,
+            funding_interval_hours=cfg.funding_interval_hours,
+        )
+        cost = conservative_cost_bps(
+            symbol=symbol,
+            horizon_minutes=horizon_minutes,
+            table=cfg.slippage_table,
+            now=now,
+            funding_crossings=crossings,
+        )
+        cost_bps_conservative = cost["cost_bps"]
+        realized_net_bps = gross_bps - cost_bps_conservative
+        net_bps_optimistic = gross_bps - cfg.cost_bps
         outcomes.append(
             {
-                "schema_version": ADAPTER_SCHEMA_VERSION,
-                "record_type": record_type,
-                "generated_at_utc": now.isoformat(),
-                "attempt_id": attempt_id,
-                "side_cell_key": row.get("side_cell_key") or _ledger_side_cell(row),
-                "source_admission_decision": decision,
-                "allowed_to_submit_order": row.get("allowed_to_submit_order"),
-                "strategy_name": event.get("strategy_name") or event.get("strategy"),
-                "symbol": symbol,
-                "side": side,
-                "event_ts_ms": event_ts_ms,
+                **base_row,
+                "censored": False,
                 "entry_ts_ms": entry_ts_ms,
                 "exit_ts_ms": exit_ts_ms,
-                "horizon_minutes": horizon_minutes,
-                "default_horizon_minutes": cfg.horizon_minutes,
+                "exit_delay_ms": exit_ts_ms - exit_target_ts_ms,
                 "entry_price": entry,
                 "exit_price": exit_price,
                 "gross_bps": gross_bps,
-                "cost_bps": cfg.cost_bps,
-                "realized_net_bps": net_bps,
-                "outcome_source": outcome_source,
-                "candidate_summary": row.get("candidate_summary") or {},
-                "promotion_evidence": False,
-                "boundary": boundary,
+                # 語義升級:cost_bps = 保守權威成本(review 直接沿用，下游零改動)。
+                "cost_bps": cost_bps_conservative,
+                "cost_model_version": cost["cost_model_version"],
+                "cost_model_source": cost["cost_model_source"],
+                "slippage_bps": cost["slippage_bps"],
+                "cost_bps_optimistic": cfg.cost_bps,
+                "net_bps_optimistic": net_bps_optimistic,
+                "realized_net_bps": realized_net_bps,
+                "funding_crossings": cost["funding_crossings"],
+                "funding_drag_bps": cost["funding_drag_bps"],
             }
         )
 
     return outcomes
+
+
+def _censored_row(
+    base_row: dict[str, Any],
+    *,
+    censor_reason: str,
+    last_observation_ts_ms: int | None,
+    entry_ts_ms: int | None = None,
+    entry_price: float | None = None,
+) -> dict[str, Any]:
+    """F7:觀測斷供的 censored outcome row。
+
+    為什麼 censored 而非 silent drop：觀測斷供與波動事件相關(MNAR，缺失非隨機)，
+    silent drop 造成的偏差方向不可知；顯式 censoring 保留分母資訊、讓資料品質缺陷
+    可被看見，並終結每輪 refresh 對同 attempt_id 的無限重掃(attempt_id 進 existing set)。
+    censored row 不進 nets/檢定分母(消費側 outcome_review 據 censored 欄剔除)。
+    """
+    return {
+        **base_row,
+        "censored": True,
+        "censor_reason": censor_reason,
+        "entry_ts_ms": entry_ts_ms,
+        "exit_ts_ms": None,
+        "entry_price": entry_price,
+        "exit_price": None,
+        "gross_bps": None,
+        "cost_bps": None,
+        "realized_net_bps": None,
+        "last_observation_ts_ms": last_observation_ts_ms,
+    }
 
 
 def build_probe_outcome_records(

@@ -251,6 +251,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--horizon-minutes", type=int, default=60)
     parser.add_argument("--outcome-cost-bps", type=float, default=4.0)
+    # P1-2a:每日分位 artifact 路徑。給定則保守成本走 per-symbol/global q75,
+    # 否則 fallback 到 toml_tier(離線可跑,仍保守)。--outcome-cost-bps 只保留為
+    # net_bps_optimistic 連續性對照列的常數,不再是權威淨值。
+    parser.add_argument("--slippage-artifact", type=Path, default=None)
     parser.add_argument("--max-entry-delay-ms", type=int, default=5 * 60_000)
     parser.add_argument("--pg-timeframe", default="1m")
     parser.add_argument("--pg-statement-timeout-ms", type=int, default=180_000)
@@ -265,10 +269,17 @@ def main() -> int:
         record_probe_outcomes=args.record_probe_outcomes,
     )
     _validate_selection(selection)
+    slippage_table = None
+    if args.slippage_artifact and args.slippage_artifact.exists():
+        from cost_gate_learning_lane.cost_model import load_slippage_quantiles
+
+        payload = json.loads(args.slippage_artifact.read_text(encoding="utf-8"))
+        slippage_table = load_slippage_quantiles(payload)
     outcome_cfg = ProbeOutcomeConfig(
         horizon_minutes=args.horizon_minutes,
         cost_bps=args.outcome_cost_bps,
         max_entry_delay_ms=args.max_entry_delay_ms,
+        slippage_table=slippage_table,
     )
     validate_outcome_config(outcome_cfg)
 
