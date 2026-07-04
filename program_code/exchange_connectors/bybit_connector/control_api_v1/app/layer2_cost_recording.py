@@ -194,16 +194,22 @@ def record_search_cost(
 
 
 def _add_daily_claude_cost(tracker: "Layer2CostTracker", cost: float) -> None:
-    """Append cost to today's Claude USD rollup / 累計到今日 Claude USD 彙總"""
-    raw = tracker._read_raw()
-    key = tracker._today_key()
-    daily = raw.setdefault("daily_spend", {})
-    day = daily.setdefault(
-        key, {"claude_usd": 0.0, "search_usd": 0.0, "total_usd": 0.0, "session_count": 0},
-    )
-    day["claude_usd"] = round(day["claude_usd"] + cost, 6)
-    day["total_usd"] = round(day["claude_usd"] + day["search_usd"], 6)
-    tracker._write_raw(raw)
+    """Append cost to today's Claude USD rollup / 累計到今日 Claude USD 彙總
+
+    P2-13：讀 raw→累加→寫回是 read-modify-write，整段包 tracker._state_lock
+    （flock 跨進程互斥，否則 4 worker 併發時互吞成本，daily_spend 低估可
+    繞過 DOC-08 $2/day 預算閘）。
+    """
+    with tracker._state_lock():
+        raw = tracker._read_raw()
+        key = tracker._today_key()
+        daily = raw.setdefault("daily_spend", {})
+        day = daily.setdefault(
+            key, {"claude_usd": 0.0, "search_usd": 0.0, "total_usd": 0.0, "session_count": 0},
+        )
+        day["claude_usd"] = round(day["claude_usd"] + cost, 6)
+        day["total_usd"] = round(day["claude_usd"] + day["search_usd"], 6)
+        tracker._write_raw(raw)
 
 
 def _sync_to_rust_budget(
@@ -262,21 +268,28 @@ def _sync_to_rust_budget(
 
 
 def _add_daily_search_cost(tracker: "Layer2CostTracker", cost: float) -> None:
-    """Append cost to today's search USD rollup / 累計到今日 search USD 彙總"""
-    raw = tracker._read_raw()
-    key = tracker._today_key()
-    daily = raw.setdefault("daily_spend", {})
-    day = daily.setdefault(
-        key, {"claude_usd": 0.0, "search_usd": 0.0, "total_usd": 0.0, "session_count": 0},
-    )
-    day["search_usd"] = round(day["search_usd"] + cost, 6)
-    day["total_usd"] = round(day["claude_usd"] + day["search_usd"], 6)
-    tracker._write_raw(raw)
+    """Append cost to today's search USD rollup / 累計到今日 search USD 彙總
+
+    P2-13：同 _add_daily_claude_cost——read-modify-write 整段包 _state_lock。
+    """
+    with tracker._state_lock():
+        raw = tracker._read_raw()
+        key = tracker._today_key()
+        daily = raw.setdefault("daily_spend", {})
+        day = daily.setdefault(
+            key, {"claude_usd": 0.0, "search_usd": 0.0, "total_usd": 0.0, "session_count": 0},
+        )
+        day["search_usd"] = round(day["search_usd"] + cost, 6)
+        day["total_usd"] = round(day["claude_usd"] + day["search_usd"], 6)
+        tracker._write_raw(raw)
 
 
 def _increment_daily_session_count(tracker: "Layer2CostTracker") -> None:
-    """Increment today's session counter / 增加今日 session 計數"""
-    with tracker._lock:
+    """Increment today's session counter / 增加今日 session 計數
+
+    P2-13：RLock 換 _state_lock（read-modify-write 需跨進程互斥）。
+    """
+    with tracker._state_lock():
         raw = tracker._read_raw()
         key = tracker._today_key()
         daily = raw.setdefault("daily_spend", {})
@@ -346,17 +359,20 @@ def record_call(
         entry["total_cost_usd"] = round(entry.get("total_cost_usd", 0.0) + cost_usd, 6)
 
     try:
-        raw = tracker._read_raw()
-        ollama_section = raw.setdefault("ollama_calls", {})
-        model_entry = ollama_section.setdefault(
-            key,
-            {"call_count": 0, "total_duration_ms": 0.0},
-        )
-        model_entry["call_count"] = model_entry.get("call_count", 0) + 1
-        model_entry["total_duration_ms"] = round(
-            model_entry.get("total_duration_ms", 0.0) + duration_ms, 2
-        )
-        tracker._write_raw(raw)
+        # P2-13：此段原本完全無鎖（連 RLock 都沒有）——read-modify-write
+        # 整段包 _state_lock（跨進程 + 跨線程互斥）。
+        with tracker._state_lock():
+            raw = tracker._read_raw()
+            ollama_section = raw.setdefault("ollama_calls", {})
+            model_entry = ollama_section.setdefault(
+                key,
+                {"call_count": 0, "total_duration_ms": 0.0},
+            )
+            model_entry["call_count"] = model_entry.get("call_count", 0) + 1
+            model_entry["total_duration_ms"] = round(
+                model_entry.get("total_duration_ms", 0.0) + duration_ms, 2
+            )
+            tracker._write_raw(raw)
     except Exception:
         # Persistence failure is non-fatal — in-memory stats still updated
         # 持久化失敗是非致命的 — 記憶體統計已更新
@@ -404,8 +420,10 @@ def reset_today_costs(tracker: "Layer2CostTracker") -> dict:
     Zero-out today's cost counters in the persistent state file.
     Returns the zeroed-out day record so callers can confirm what was cleared.
     將今日成本計數器歸零（寫入持久化文件）。返回歸零後的記錄供調用方確認。
+
+    P2-13：RLock 換 _state_lock（read-modify-write 需跨進程互斥）。
     """
-    with tracker._lock:
+    with tracker._state_lock():
         raw = tracker._read_raw()
         key = tracker._today_key()
         zeroed = {
