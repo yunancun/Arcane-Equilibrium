@@ -163,3 +163,31 @@ def test_db_unavailable_is_fail_soft(monkeypatch) -> None:
     assert ok is False
     assert store.stats.write_failures == 1
     assert "record_state_change" in (store.stats.last_error or "")
+
+
+# ---------------------------------------------------------------------------
+# 2026-07-04 冷審計 R2 P2-3：OPENCLAW_AGENT_EVENT_STORE_ENABLED 默認 OFF→ON。
+# 觀測腿默認開啟（寫入目標=PG agent.* 三表，持久存儲）；寫入失敗 fail-soft
+# 不影響主流程（見 test_db_unavailable_is_fail_soft）。顯式 "0" 仍可關閉。
+# ---------------------------------------------------------------------------
+
+
+def test_env_missing_defaults_to_enabled(monkeypatch) -> None:
+    """P2-3：env 缺失時默認 enabled=True（觀測腿默認開）。"""
+    monkeypatch.delenv("OPENCLAW_AGENT_EVENT_STORE_ENABLED", raising=False)
+    store = AgentEventStore()
+    assert store.enabled is True
+
+
+def test_env_zero_explicitly_disables(monkeypatch) -> None:
+    """P2-3：顯式 "0" 仍可關閉（默認 ON 不剝奪 opt-out）。"""
+    monkeypatch.setenv("OPENCLAW_AGENT_EVENT_STORE_ENABLED", "0")
+    store = AgentEventStore()
+    assert store.enabled is False
+
+
+def test_env_one_still_enables(monkeypatch) -> None:
+    """P2-3：顯式 "1" 行為不變（向後相容）。"""
+    monkeypatch.setenv("OPENCLAW_AGENT_EVENT_STORE_ENABLED", "1")
+    store = AgentEventStore()
+    assert store.enabled is True

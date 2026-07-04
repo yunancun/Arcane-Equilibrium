@@ -35,7 +35,8 @@ class TestAgentEventStoreHealthcheck(unittest.TestCase):
         os.environ.update(self._old_env)
 
     def test_disabled_env_pass_skips_without_query(self) -> None:
-        os.environ.pop("OPENCLAW_AGENT_EVENT_STORE_ENABLED", None)
+        # P2-3（2026-07-04）默認 ON 後，「關閉」必須顯式 "0"（env 缺失=默認開）。
+        os.environ["OPENCLAW_AGENT_EVENT_STORE_ENABLED"] = "0"
         cur = _cur([])
 
         status, msg = check_52_agent_event_store_rows(cur)
@@ -43,6 +44,17 @@ class TestAgentEventStoreHealthcheck(unittest.TestCase):
         self.assertEqual(status, "PASS")
         self.assertIn("disabled", msg)
         cur.execute.assert_not_called()
+
+    def test_env_missing_defaults_to_enabled_and_queries(self) -> None:
+        # P2-3：env 缺失=默認開 —— 哨兵必須真的下查詢（不再默認跳過）。
+        os.environ.pop("OPENCLAW_AGENT_EVENT_STORE_ENABLED", None)
+        cur = _cur([(True,), (True,), (True,), (2,), (6,), (1,)])
+
+        status, msg = check_52_agent_event_store_rows(cur)
+
+        self.assertEqual(status, "PASS", msg)
+        self.assertTrue(cur.execute.called)
+        self.assertIn("messages=2", msg)
 
     def test_enabled_all_recent_rows_pass(self) -> None:
         os.environ["OPENCLAW_AGENT_EVENT_STORE_ENABLED"] = "1"

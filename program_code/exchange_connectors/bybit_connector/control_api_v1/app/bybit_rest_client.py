@@ -141,6 +141,46 @@ def _normalize_env(environment: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# F5（2026-07-04 冷審計 R2）：BYBIT_CONNECTOR_WRITE_ENABLED / BYBIT_MODE 治理消費者
+#
+# 這兩個 env flag 此前是「純表示層」——只有 settings_routes 讀來顯示/比對，
+# 對真實下單/撤單路徑零 runtime 強制。此處把它們接成真實 fail-closed 消費者：
+#   - WRITE_ENABLED gate：所有寫請求（_post）在觸網前檢查，方向只准收緊
+#     （flag 缺失/false = 攔），治理關閉寫入時整個 connector 不得產生交易副作用。
+#   - BYBIT_MODE 一致性：構造時斷言 env 宣稱的模式與 client environment 相容，
+#     不相容則 fail-closed，杜絕「面板說 demo、client 連 mainnet」的靜默漂移。
+# ---------------------------------------------------------------------------
+
+_BYBIT_MODE_ENV_KEY = "BYBIT_MODE"
+_BYBIT_CONNECTOR_WRITE_ENABLED_ENV_KEY = "BYBIT_CONNECTOR_WRITE_ENABLED"
+_WRITE_TRUTHY = frozenset({"1", "true", "yes", "on", "enabled"})
+
+
+def _connector_write_enabled() -> bool:
+    """DOC F5：連接器寫入總開關。fail-closed —— 只有顯式 truthy 才放行寫路徑。
+
+    為什麼 flag 缺失也回 False：治理語義是「預設不授予寫權」，缺失/非法值一律
+    當作未授權（方向只准收緊），避免部署遺漏 env 就靜默恢復下單能力。"""
+    raw = os.environ.get(_BYBIT_CONNECTOR_WRITE_ENABLED_ENV_KEY, "")
+    return raw.strip().lower() in _WRITE_TRUTHY
+
+
+def _bybit_mode_targets_mainnet(mode: str) -> Optional[bool]:
+    """把 BYBIT_MODE 值映射為「是否指向主網」。未知/空值回 None（=不做斷言）。
+
+    合法收斂：demo/testnet/live_demo → 非主網；live/mainnet/prod/production → 主網。
+    治理 flag 為可選表示層，缺失或無法解讀時不阻斷構造（見 test_mode_absent）。"""
+    m = (mode or "").strip().lower()
+    if not m:
+        return None
+    if m in {"demo", "testnet", "live_demo", "livedemo"}:
+        return False
+    if m in {"live", "mainnet", "prod", "production"}:
+        return True
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Credential loading / 憑證載入
 # ---------------------------------------------------------------------------
 
@@ -260,6 +300,25 @@ class BybitClient:
         """
         env = _normalize_env(environment)
         is_mainnet = (env == "mainnet")
+
+        # F5 一致性斷言：若 env 顯式宣稱 BYBIT_MODE，其「是否指向主網」必須與本
+        # client 的 environment 相符，否則 fail-closed。為什麼：防止「治理面板/部署
+        # env 說 demo，但 client 實際連 mainnet」（或反之）的靜默模式漂移——這是
+        # 治理表示層與真實連線的分裂。BYBIT_MODE 缺失/不可解讀時不斷言（可選表示層）。
+        mode_targets_mainnet = _bybit_mode_targets_mainnet(
+            os.environ.get(_BYBIT_MODE_ENV_KEY, "")
+        )
+        if mode_targets_mainnet is not None and mode_targets_mainnet != is_mainnet:
+            raise BybitBusinessError(
+                ret_code=-1,
+                ret_msg=(
+                    f"{_BYBIT_MODE_ENV_KEY} mismatch: env declares "
+                    f"mainnet={mode_targets_mainnet} but client environment "
+                    f"'{env}' targets mainnet={is_mainnet}. / "
+                    f"{_BYBIT_MODE_ENV_KEY} 與 client environment 模式不一致，拒絕構造。"
+                ),
+                response={"blocked": True, "guard": "bybit_mode_consistency"},
+            )
 
         # LIVE-GUARD-1 Gate #1: operator opt-in on mainnet.
         # LIVE-GUARD-1 門 #1：Mainnet 需 operator 顯式 opt-in。
@@ -430,6 +489,21 @@ class BybitClient:
     def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
         """Signed POST. Returns parsed JSON response dict.
         簽名 POST。返回解析後的 JSON response dict。"""
+        # F5 fail-closed 寫路徑 gate：所有 _post caller 皆為寫操作
+        # （/v5/order/create、/v5/order/cancel、/v5/order/cancel-all，全對交易所
+        # 產生 mutation），故在此統一入口攔截。撤單雖是降風險，但當治理層關閉寫入
+        # 時整個 connector 不應對交易所有任何副作用；方向只准收緊。必須在觸網前拒絕。
+        if not _connector_write_enabled():
+            raise BybitBusinessError(
+                ret_code=-1,
+                ret_msg=(
+                    f"Write path blocked: {_BYBIT_CONNECTOR_WRITE_ENABLED_ENV_KEY} "
+                    "not enabled (fail-closed; flag missing or false = deny). "
+                    f"寫路徑被阻止：{_BYBIT_CONNECTOR_WRITE_ENABLED_ENV_KEY} 未啟用"
+                    "（fail-closed；flag 缺失或 false = 拒絕）。"
+                ),
+                response={"blocked": True, "guard": _BYBIT_CONNECTOR_WRITE_ENABLED_ENV_KEY},
+            )
         if not self.has_credentials():
             raise BybitCredentialsMissing(
                 "API credentials not configured / 未配置 API 憑證"
