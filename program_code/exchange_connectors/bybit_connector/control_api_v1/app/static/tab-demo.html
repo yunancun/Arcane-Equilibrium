@@ -1334,15 +1334,21 @@ function closeDemoDialog(id) {
 async function doDemoCloseAll() {
   // Close all positions via IPC (Rust engine dispatches to Bybit API in Demo/Live mode)
   // 通過 IPC 平倉（Rust 引擎在 Demo/Live 模式下派發到 Bybit API）
+  //
+  // 為什麼走 classifyLiveMutation：Demo 是真 Bybit demo 下單（operator 政策=live-grade
+  // rigor）。後端已誠實回 partial_failure / closed_all / orphan_sweep，但舊碼只
+  // `if (d && d.data)` 顯綠 ✓，會在部分失敗、仍有殘留倉位時掩蓋風險（fake-success）。
+  // 統一走 classifyLiveMutation：任一殘留（partial_failure / closed_all=false /
+  // rust_synced=false / errors）都判 error → 常駐紅色殘留橫幅，不自動消失。
   closeDemoDialog('dlg-demo-close-all');
   const d = await ocPost('/api/v1/strategy/demo/close-all-positions', {});
-  if (d && d.data) {
-    const msg = (d.data && d.data.message) || '平倉指令已發送';
-    ocToast('✓ ' + msg, 'success');
-    setTimeout(loadAll, 1500);
+  const r = classifyLiveMutation(d);
+  if (r.residualRisk) {
+    ocResidualRiskBanner('demo-close-all', 'Demo 全平未確認 — ' + r.message + '，請手動確認 Bybit Demo');
   } else {
-    ocToast('關閉倉位失敗，請檢查引擎狀態', 'error');
+    ocToast('✓ ' + r.message, 'success');
   }
+  setTimeout(loadAll, 1500);
 }
 
 async function closeDemoPosition(symbol, ownerStrategy, frozenReason) {

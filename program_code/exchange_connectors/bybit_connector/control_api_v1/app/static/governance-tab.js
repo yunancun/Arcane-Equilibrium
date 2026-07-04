@@ -478,9 +478,21 @@ async function submitOverride() {
   }
 
   const d = await govPostOverride(level, reason);
-  if (d && d.ok) {
+  // 為什麼讀 data.status / data.applied：後端三態都可能 ok:true——pending 待審批
+  // （applied=false）/ 真生效（applied=true）/ SM 缺失走 503→null。舊碼只看 d.ok
+  // 會把 pending 誤顯綠色「已降級」（fake-success）。三態分流：applied→綠、
+  // pending→黃 warn、其餘 ok 但無旗標→保守 warn、失敗→紅。
+  const od = (d && d.data) ? d.data : null;
+  if (d && d.ok && od && od.applied === true) {
     ocToast('Risk level de-escalated / 風險等級已降級', 'success');
     hideOverrideModal();
+    loadAll();
+  } else if (d && d.ok && od && od.status === 'de_escalation_pending_approval') {
+    ocToast('降級待審批 — 等級尚未變更 / de-escalation pending approval', 'warn');
+    hideOverrideModal();
+    loadAll();
+  } else if (d && d.ok) {
+    ocToast('降級狀態未確認，請刷新核對 / override state unconfirmed', 'warn');
     loadAll();
   } else {
     ocToast(d ? d.message : 'Override failed / 降級失敗', 'error');
@@ -1007,9 +1019,19 @@ async function submitPromotion() {
   // 調用 governance.js 中的 govPromoteLearningTier()
   // Call govPromoteLearningTier() from governance.js
   const d = await govPromoteLearningTier(targetTier, reason);
-  if (d && d.ok) {
-    ocToast('Promotion submitted / 晉升請求已提交', 'success');
+  // 為什麼讀 data.promoted：後端回 promoted=(result is not None)，gate 拒絕時
+  // promoted=false 但仍 ok:true。舊碼只看 d.ok 顯「已提交」success（軟措辭掩蓋 no-op）。
+  // promoted=false 時明說「未晉升（不符資格）」warn。
+  const od = (d && d.data) ? d.data : null;
+  if (d && d.ok && od && od.promoted === true) {
+    ocToast('Promotion applied / 晉升已生效', 'success');
     hidePromoteModal();
+    await loadLearningTier();
+  } else if (d && d.ok && od && od.promoted === false) {
+    ocToast('未晉升 — 不符晉升資格 / not promoted (gate rejected)', 'warn');
+    await loadLearningTier();
+  } else if (d && d.ok) {
+    ocToast('晉升狀態未確認，請刷新核對 / promotion state unconfirmed', 'warn');
     await loadLearningTier();
   } else {
     ocToast((d && d.message) ? d.message : 'Promotion failed / 晉升失敗', 'error');

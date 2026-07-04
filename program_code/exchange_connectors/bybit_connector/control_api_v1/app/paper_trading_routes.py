@@ -853,10 +853,30 @@ async def post_close_all_positions(
         raise HTTPException(status_code=503, detail="Rust engine not available / Rust 引擎不可用")
     try:
         result = await _ipc_command("close_all_positions", {"engine": "paper"})
+        # 為什麼補算 partial_failure / closed_all：舊碼無條件回「所有 Paper 持倉已平」，
+        # 即使 IPC result 內帶 error（部分倉位未平）也謊報完整成功（fake-success）。
+        # 仿 demo close-all（strategy_ai_routes.post_demo_close_all_positions）回結構化
+        # 欄位，讓前端 classifyLiveMutation 能判殘留 → 紅色殘留橫幅。
+        # Paper 為本地 paper_state，無交易所孤兒倉，故不做 orphan sweep。
+        result_error = result.get("error") if isinstance(result, dict) else None
+        partial_failure = bool(result_error)
+        closed_all = not partial_failure
+        logger.warning(
+            "paper close-all-positions (manual) — closed_all=%s error=%s actor=%s",
+            closed_all, result_error or None, getattr(actor, "actor_id", "?"),
+        )
         return _paper_response({
-            "message": "All paper positions closed — session continues / 所有 Paper 持倉已平，session 繼續",
+            "message": (
+                "Paper close-all partially failed — session continues / Paper 全平部分失敗，session 繼續"
+                if partial_failure else
+                "All paper positions closed — session continues / 所有 Paper 持倉已平，session 繼續"
+            ),
             "source": "rust_engine",
+            "status": "partial_failure" if partial_failure else "closed",
+            "closed_all": closed_all,
+            "partial_failure": partial_failure,
             "close_result": result,
+            "errors": [f"ipc_close_all: {result_error}"] if result_error else None,
         })
     except Exception as e:
         # WP-05 Real Fix

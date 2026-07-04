@@ -594,13 +594,18 @@ async function closeAllPositions() {
     '確認全部平倉 / Confirm Close ALL',
     '確認平掉所有 Paper 持倉？此操作會立即關閉所有持倉，策略繼續運行。\nConfirm close ALL Paper positions? Strategies continue running.',
     async function() {
+      // 為什麼走 classifyLiveMutation：後端已補算 partial_failure / closed_all
+      // （見 paper_trading_routes.post_close_all_positions）。舊碼只 `if (d)` 顯綠，
+      // 會在部分持倉未平（IPC 回 error / 殘留）時掩蓋殘留風險。統一走 classifier：
+      // 任一殘留 → 常駐紅色殘留橫幅（不自動消失），與 live / demo close-all 一致。
       const d = await ocPost('/api/v1/paper/close-all-positions', {});
-      if (d) {
-        ocToast('全部平倉指令已發送 / close all sent', 'success');
-        setTimeout(loadAll, 1500);
+      const r = classifyLiveMutation(d);
+      if (r.residualRisk) {
+        ocResidualRiskBanner('paper-close-all', 'Paper 全平未確認 — ' + r.message);
       } else {
-        ocToast('平倉失敗 / close failed', 'error');
+        ocToast('✓ ' + r.message + ' / close all sent', 'success');
       }
+      setTimeout(loadAll, 1500);
     }
   );
 }

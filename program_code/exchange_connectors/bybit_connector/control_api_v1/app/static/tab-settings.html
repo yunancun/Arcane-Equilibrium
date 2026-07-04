@@ -1129,7 +1129,14 @@ async function savePaperEngineStatus() {
     return;
   }
 
-  ocToast(enabled ? 'Paper Engine 已啟用' : 'Paper Engine 已禁用', 'success');
+  // 為什麼讀 restart_required / runtime_enabled：config 已存但 runtime 尚未生效時
+  // 舊碼仍顯「已啟用」（fake-success），操作員誤以為即刻生效。restart_required=true
+  // 時改顯「已保存，需重啟生效」warn，與 status 行的 restart hint 一致。
+  if (enabled && data.restart_required && !data.runtime_enabled) {
+    ocToast('Paper Engine 設置已保存 — 需重啟後端生效', 'warn');
+  } else {
+    ocToast(enabled ? 'Paper Engine 已啟用' : 'Paper Engine 已禁用', 'success');
+  }
   try {
     window.parent.postMessage({
       type: 'openclaw-paper-engine-setting',
