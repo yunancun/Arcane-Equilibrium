@@ -78,6 +78,16 @@ ARGS=(
     --max-status-age-minutes "$MAX_STATUS_AGE_MINUTES"
     --json-output "$DATED_JSON"
 )
+# P1-4 世代判準：raw pin 過公共庫轉 effective head（docs/tests/.codex 前進不凍
+# lane；真代碼漂移 / pin 檔壞 / git 失敗照舊 fail-close，語意見 lib 註釋）。
+# lib 檔缺失時降級為 passthrough（沿用 raw expected），不因缺 helper 硬崩 cron。
+SG_LIB="$BASE/helper_scripts/cron/lib/source_generation_gate.sh"
+if [[ -f "$SG_LIB" ]]; then
+    source "$SG_LIB"
+else
+    resolve_effective_expected_head() { printf '%s' "$4"; }
+fi
+EXPECTED_HEAD="$(resolve_effective_expected_head "$BASE" "$DATA" "demo_learning_stack_healthcheck" "$EXPECTED_HEAD")"
 if [[ -n "$EXPECTED_HEAD" ]]; then
     ARGS+=(--expected-head "$EXPECTED_HEAD")
 fi
