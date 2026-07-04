@@ -110,8 +110,9 @@ def _resolve_symbol_slot(config: PipelineConfig) -> tuple[bool, str]:
 def _load_dataset(
     config: PipelineConfig,
 ) -> tuple:
-    """Load (features, labels, timestamps, feature_names). Shared between paths.
-    共用資料載入：回傳 (features, labels, timestamps, feature_names)。"""
+    """Load (features, labels, timestamps, feature_names, label_composition).
+    共用資料載入：回傳 5-tuple；label_composition 供 acceptance report 硬 gate
+    （P1-3），dry-run 合成資料無 close_tag 語義 → None（gate 記 unavailable）。"""
     import numpy as np
 
     if config.dry_run:
@@ -140,7 +141,7 @@ def _load_dataset(
         # fractional 20% because total span is < 7d.
         # 壓縮時間戳（1 分鐘）— holdout 因總跨度 <7d 退回 20% 比例切分。
         timestamps = (np.arange(n, dtype=np.int64) * 60_000)
-        return features, labels, timestamps, feature_names
+        return features, labels, timestamps, feature_names, None
 
     # Resolve pooling: symbol=None or "ALL" → SQL-level symbol filter skipped.
     # Everything else → filter to that exact symbol.
@@ -150,7 +151,7 @@ def _load_dataset(
 
     if config.use_quantile_predictor:
         from program_code.ml_training.parquet_etl import load_training_data
-        features, labels, timestamps, feature_names = load_training_data(
+        features, labels, timestamps, feature_names, label_composition = load_training_data(
             symbol=sql_symbol,
             strategy_type=config.strategy_type,
             dsn=config.dsn,
@@ -158,7 +159,7 @@ def _load_dataset(
         )
     else:
         from program_code.ml_training.parquet_etl import load_training_data
-        features, labels, timestamps, feature_names = load_training_data(
+        features, labels, timestamps, feature_names, label_composition = load_training_data(
             symbol=sql_symbol,
             strategy_type=config.strategy_type,
             dsn=config.dsn,
@@ -191,7 +192,7 @@ def _load_dataset(
             "symbol=%s n_rows=%d",
             config.strategy_type, config.engine_mode, sql_symbol, len(labels),
         )
-    return features, labels, timestamps, feature_names
+    return features, labels, timestamps, feature_names, label_composition
 
 
 def _pooled_symbol_breakdown(
@@ -236,6 +237,7 @@ def _pooled_symbol_breakdown(
 def _run_quantile_pipeline(
     config: PipelineConfig,
     features, labels, timestamps, feature_names,
+    label_composition=None,
 ) -> PipelineResult:
     """EDGE-P3-1 Stage 2 quantile path end-to-end.
     EDGE-P3-1 Stage 2 分位路徑端到端。"""
@@ -306,6 +308,9 @@ def _run_quantile_pipeline(
         post_cqr_coverage=post_coverage,
         output_path=str(report_path),
         harness_n_samples=config.onnx_validate_samples,
+        # P1-3：label 組成硬 gate（synthetic_share==0 且 zeros_share≤0.5，
+        # fail → verdict 封頂 shadow_only）。
+        label_composition=label_composition,
     )
     result.stages_completed.append("acceptance_report")
     result.verdict = report.get("verdict", "")
@@ -379,7 +384,12 @@ def _run_quantile_pipeline(
             verdict=result.verdict,
             acceptance_report_path=result.acceptance_report_path,
             feature_schema_hash=train_result.feature_schema_hash,
-            training_sample_size=train_result.n_samples_labeled,
+            # P1-3：registry 記帳改 informative count（排除合成 reject），
+            # 終結「524k 樣本」假象；composition 缺席（dry-run）回退 labeled 數。
+            training_sample_size=(
+                int(label_composition["n_informative"])
+                if label_composition else train_result.n_samples_labeled
+            ),
             dsn=config.dsn,
         )
         if registry_ids:
@@ -482,7 +492,7 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
             config.strategy_type, config.engine_mode,
             config.use_quantile_predictor, config.dry_run,
         )
-        features, labels, timestamps, feature_names = _load_dataset(config)
+        features, labels, timestamps, feature_names, label_composition = _load_dataset(config)
         result.stages_completed.append("etl")
         # Legacy audit-trail convention: labels stage is reported separately
         # even when label computation happens inside the ETL query. Keep for
@@ -496,7 +506,10 @@ def run_pipeline(config: PipelineConfig) -> PipelineResult:
             return result
 
         if config.use_quantile_predictor:
-            inner = _run_quantile_pipeline(config, features, labels, timestamps, feature_names)
+            inner = _run_quantile_pipeline(
+                config, features, labels, timestamps, feature_names,
+                label_composition=label_composition,
+            )
         else:
             inner = _run_legacy_scorer_pipeline(config, features, labels, timestamps, feature_names)
 
