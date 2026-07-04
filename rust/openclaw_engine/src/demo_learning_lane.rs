@@ -39,8 +39,10 @@ pub struct AdmissionConfig {
 impl Default for AdmissionConfig {
     fn default() -> Self {
         Self {
+            // P2-7:n=2 對 ±75bps 效應量兩個方向都近擲硬幣(誤殺率 ~42%)。改為 UCB-futility
+            // 規則需 n≥8 才禁用;此常數是「觸發禁用檢定的最小樣本」,不是 probe 預算。
             max_plan_age_hours: 24,
-            min_failed_outcomes_to_disable: 2,
+            min_failed_outcomes_to_disable: 8,
             min_outcome_net_positive_pct: 50.0,
             min_avg_net_bps: 0.0,
         }
@@ -553,6 +555,18 @@ pub fn summarize_side_cell_runtime_state(
     } else {
         None
     };
+    // P2-7:UCB-futility 禁用規則需樣本標準差(ddof=1)。n<2 無法估變異數。
+    let std_realized_net_bps = match (completed_outcome_count, avg_realized_net_bps) {
+        (n, Some(mean)) if n >= 2 => {
+            let variance = realized_net_bps
+                .iter()
+                .map(|v| (v - mean) * (v - mean))
+                .sum::<f64>()
+                / (n as f64 - 1.0);
+            Some(variance.sqrt())
+        }
+        _ => None,
+    };
     let net_positive_pct = if completed_outcome_count > 0 {
         let positive = realized_net_bps
             .iter()
@@ -574,14 +588,31 @@ pub fn summarize_side_cell_runtime_state(
             None
         }
     });
+    // P2-7:UCB-futility 禁用規則。disable ⇔ n≥8 ∧ (x̄ + z₀.₉₀·s/√n < cfg.min_avg_net_bps)。
+    // 為什麼 UCB 而非均值：n<20 下均值判準對 ±75bps 效應量兩向都近擲硬幣(誤殺率 ~42%);
+    // 加 90% 信賴上界後只在「連樂觀上界都為負」時才 futility 禁用(真 μ=+30 誤殺率降到 ~4%)。
+    // futility-only 早停不膨脹 type-I error。net_positive_pct 腿刪除:n<20 下比例判準更噪。
+    // z₀.₉₀ = 1.2815515655446004(標準常態 0.90 分位)。
+    const Z_090: f64 = 1.281_551_565_544_600_4;
+    let ucb_futility = match (
+        completed_outcome_count >= cfg.min_failed_outcomes_to_disable,
+        avg_realized_net_bps,
+        std_realized_net_bps,
+    ) {
+        (true, Some(mean), Some(std)) => {
+            let ucb = mean + Z_090 * std / (completed_outcome_count as f64).sqrt();
+            ucb < cfg.min_avg_net_bps
+        }
+        // s 不可估(n<2)但已達門檻(僅在 min_failed_outcomes_to_disable=1 且 n=1 時)：
+        // 退回純均值判準,避免無變異數時漏禁真負 cell。
+        (true, Some(mean), None) => mean < cfg.min_avg_net_bps,
+        _ => false,
+    };
     let disable_reason = if manual_disable_reason.is_some() {
         manual_disable_reason
     } else if remaining_probe_orders == 0 {
         Some("probe_budget_exhausted".to_string())
-    } else if completed_outcome_count >= cfg.min_failed_outcomes_to_disable
-        && (avg_realized_net_bps.is_some_and(|avg| avg < cfg.min_avg_net_bps)
-            || net_positive_pct.is_some_and(|pct| pct < cfg.min_outcome_net_positive_pct))
-    {
+    } else if ucb_futility {
         Some("realized_probe_outcomes_fail_learning_threshold".to_string())
     } else {
         None
