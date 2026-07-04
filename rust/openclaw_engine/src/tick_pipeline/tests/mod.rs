@@ -45,6 +45,9 @@ mod engine_event_snapshot;
 mod exit_features;
 mod fanout_canary;
 mod fast_track_reduce;
+// P1-4a G3-DRIFT-LANE-FIX（2026-07-04 冷審計 R2）：非 paper 路徑 FeatureSnapshot
+// 發送回歸測試（features.online_latest 斷供事故）。
+mod feature_snapshot_emit;
 // LG1-T1（Wave 2.2，2026-05-11）：H0 Blocking Production Caller E2E integration test。
 // 對應 PA tech plan `2026-05-11--lg_2_3_4_design_plan.md` §1.4。
 mod h0_blocking;

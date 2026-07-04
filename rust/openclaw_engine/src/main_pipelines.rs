@@ -23,6 +23,11 @@
 //!   呼叫點為單行。各 fn 回傳 `tokio::task::JoinHandle<()>`（Live 為獨立 OS
 //!   線程 `std::thread::JoinHandle<()>`），形狀與抽取前完全一致。
 
+// P1-4a（2026-07-04 冷審計 R2）：feature_tx 接線契約測試（獨立檔案，
+// 避免 include_str! 自掃描把測試內字面模式計入命中）。
+#[cfg(test)]
+mod wiring_tests;
+
 use crate::main_fanout::LiveEventSenderSlot;
 use crate::run_pipeline_crash_only;
 use crate::startup::ExchangePipelineBindings;
@@ -490,7 +495,13 @@ pub(crate) fn spawn_demo_pipeline(
         // 原 D19 僅 Paper 寫入的設計在 PAPER-DISABLE-1 預設關 paper 後導致
         // kline DB 停寫；market_writer.rs:180 ON CONFLICT 去重，多 producer 安全。
         market_data_tx: writers.market_tx.clone(),
-        feature_tx: None,
+        // P1-4a G3-DRIFT-LANE-FIX（2026-07-04 冷審計 R2）：原本僅 Paper 接
+        // feature_tx（D19 遺留），Paper 封存後 features.online_latest 凍結
+        // （2026-05-06 起），G3 drift 偵測（風控腿）全鏈 no-op。修法與 market_tx
+        // 同策略：全 pipeline 共享 feature writer sender。feature_writer 端按
+        // (symbol,timeframe) 去重 + interval flush，多 producer 安全，DB 寫入
+        // 節奏不變（仍為 feature_upsert_interval_ms 每 key 一次 UPSERT）。
+        feature_tx: writers.feature_tx.clone(),
         last_tick_ms: Some(Arc::clone(ctx.shared_last_tick_ms)),
         // ENGINE-CRASH-FIX C3 (2026-06-15)：牆鐘 atomic clone 給此 pipeline。
         last_processed_wallclock_ms: Some(Arc::clone(ctx.shared_last_processed_wallclock_ms)),
@@ -634,7 +645,10 @@ pub(crate) fn spawn_live_pipeline(
         // 原 D19 僅 Paper 寫入的設計在 PAPER-DISABLE-1 預設關 paper 後導致
         // kline DB 停寫；market_writer.rs:180 ON CONFLICT 去重，多 producer 安全。
         market_data_tx: writers.market_tx.clone(),
-        feature_tx: None,
+        // P1-4a G3-DRIFT-LANE-FIX（2026-07-04 冷審計 R2）：Live 亦接 feature_tx，
+        // 與 market_tx / exit_feature_tx 同扇出策略——避免單引擎接線在該引擎
+        // 停用時斷供（D19 覆轍；詳見上方 Demo spawn 的說明）。
+        feature_tx: writers.feature_tx.clone(),
         last_tick_ms: Some(Arc::clone(ctx.shared_last_tick_ms)),
         // ENGINE-CRASH-FIX C3 (2026-06-15)：牆鐘 atomic clone 給此 pipeline。
         last_processed_wallclock_ms: Some(Arc::clone(ctx.shared_last_processed_wallclock_ms)),
