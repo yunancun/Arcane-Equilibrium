@@ -53,6 +53,9 @@ pub(in crate::ipc_server) fn handle_get_state(
     };
     let state = serde_json::json!({
         "status": "running",
+        // P0-1c：暴露編譯期嵌入的 git SHA，讓 Python probe / operator 能對表
+        // 運行中引擎的代碼世代與部署 HEAD（重啟未 rebuild 可即時偵測）。
+        "build_sha": crate::boot_observability::BUILD_GIT_SHA,
         "system_mode": system_mode,
         "trading_mode": trading_mode,
         "max_open_positions": risk.limits.open_positions_max,

@@ -309,6 +309,33 @@ fn main() {
     }
 
     // ------------------------------------------------------------------
+    // 1b2. P0-1c boot 紀錄：append 一行 boot JSON 到
+    //      OPENCLAW_DATA_DIR/boot_history.jsonl（replay 模式不寫 —— 只記
+    //      真實引擎 boot）。為什麼 fail-soft：可觀測性面故障不得阻斷交易
+    //      引擎啟動，失敗僅記 warn。
+    // ------------------------------------------------------------------
+    {
+        let boot_data_dir =
+            std::env::var("OPENCLAW_DATA_DIR").unwrap_or_else(|_| "/tmp/openclaw".into());
+        match openclaw_engine::boot_observability::append_boot_record(std::path::Path::new(
+            &boot_data_dir,
+        )) {
+            Ok(path) => info!(
+                build_sha = openclaw_engine::boot_observability::BUILD_GIT_SHA,
+                build_time = openclaw_engine::boot_observability::BUILD_TIME,
+                pid = std::process::id(),
+                path = %path.display(),
+                "boot record appended / boot 紀錄已寫入"
+            ),
+            Err(e) => warn!(
+                error = %e,
+                data_dir = %boot_data_dir,
+                "boot record append failed (fail-soft, startup continues) / boot 紀錄寫入失敗（不阻斷啟動）"
+            ),
+        }
+    }
+
+    // ------------------------------------------------------------------
     // 1c. PIPELINE-SLOT-1 Phase 1: consume the restart-kind sentinel written
     //     by `restart_all.sh`. On Manual restart we clear authorization.json
     //     so Operator must re-approve Live after any operator-initiated

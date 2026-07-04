@@ -341,11 +341,19 @@ def register_system_legacy_routes(app) -> None:
         """
         import time as _time
 
+        # P0-1c：boot_sha（進程啟動時凍結）與 repo_head（當前 checkout，60s TTL
+        # 緩存）；兩值不等 = 運行進程代碼世代落後 checkout（重啟未生效可即時偵測）。
+        # git 缺席 / 失敗一律 "unknown"，維持本端點 fail-soft 輕量語意。
+        from .boot_observability import boot_identity as _boot_identity
+
+        _ident = _boot_identity()
         return {
             "status": "ok",
             "api_version": settings.api_version,
             "schema_version": settings.schema_version,
             "ts_ms": int(_time.time() * 1000),
+            "boot_sha": _ident["boot_sha"],
+            "repo_head": _ident["repo_head"],
         }
 
     @app.get(
