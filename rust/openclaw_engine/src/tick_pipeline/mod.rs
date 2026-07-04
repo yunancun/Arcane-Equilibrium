@@ -1403,6 +1403,24 @@ pub struct TickPipeline {
     /// 後服務過期快照。f64 不可雜湊，故 key 整組存為 value 用 `==` 比對，
     /// 而非當 HashMap key 雜湊。
     perf1_indicators_5m_epoch: HashMap<String, (u64, f64)>,
+    /// P1-11 (2026-07-04)：per-symbol 1m IndicatorSnapshot 快取。
+    ///
+    /// 為什麼：PERF-1 (2026-06-14) 只 gate 了 5m 半邊；step_1_2 過去仍每 tick
+    /// 呼 `compute_indicators(sym)` 無條件重算整套 1m 指標，但 1m 指標只在新
+    /// 1m K 線收盤（或 ewma_lambda 熱重載）時才改變 —— 同一根 1m bar 內每 tick
+    /// 結果完全相同。改為按 epoch 快取後僅在跨 1m bar 邊界重算。
+    ///
+    /// 不變量與 5m 側完全同構（見 `perf1_indicators_5m_cache`）：**只快取
+    /// `Some`**；快取回傳與每 tick 重算 bit-identical；只 gate「指標重算」，
+    /// 不 gate 任何下游語義 —— `apply_hurst_regime_label_for` 每 tick 仍在
+    /// 回傳的 clone 上執行（`detector.push` 頻率不變），latest_indicators 鏡像
+    /// 與 FeatureSnapshot 發送照舊每 tick；cache 內永遠是未打 hurst 標的原始快照。
+    perf1_indicators_1m_cache: HashMap<String, IndicatorSnapshot>,
+    /// P1-11 (2026-07-04)：per-symbol 1m 快取 epoch key = (1m 最後收盤 bar 的
+    /// `open_time_ms`, ewma_lambda("1m"))。key 設計理由同 5m 側
+    /// `perf1_indicators_5m_epoch`：open_time_ms 防緩衝長度凍結；lambda 入 key
+    /// 防 RiskConfig 熱重載後服務過期快照；f64 不可雜湊故整組存 value 用 `==` 比對。
+    perf1_indicators_1m_epoch: HashMap<String, (u64, f64)>,
 }
 
 // ---------------------------------------------------------------------------
