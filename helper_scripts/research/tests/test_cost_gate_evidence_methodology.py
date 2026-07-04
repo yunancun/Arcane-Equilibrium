@@ -393,3 +393,93 @@ def test_disable_ucb_false_kill_rate():
             kills += 1
     rate = kills / trials
     assert 0.03 <= rate <= 0.06, f"誤殺率={rate}"
+
+
+# ---------------------------------------------------------------------------
+# P2-7 用例 6 直測(Python 側禁用規則本體 = summarize_side_cell_runtime_state)
+#
+# 為什麼補此測(LOW-2):test_disable_ucb_false_kill_rate 只驗 UCB 純函數誤殺率,
+# 不觸 Python 禁用規則本體;Rust ucb_futility_disable_rule_matches_spec_thresholds
+# 兜住 Rust 側,但 Python-only drift(如 ddof n−1→n、嚴格 <→<=)不會被 golden 常量
+# 測試抓到。此處對齊 Rust 三錨點 + n<2 pure-mean 雙向,直跑真 Python 函數,並含兩個
+# mutation-敏感錨點:D(ddof)、G(嚴格 <)。
+# ---------------------------------------------------------------------------
+
+_UCB_SIDE_CELL_KEY = "ma_crossover|ETHUSDT|Sell"
+_UCB_NOW_MS = 1_782_046_800_000
+
+
+def _ucb_candidate(max_probe_orders: int = 100) -> dict:
+    # max_probe_orders 取大值,確保 remaining>0,不被 probe_budget_exhausted 先攔,
+    # 使禁用決策純由 UCB-futility 規則主導。
+    return {
+        "side_cell_key": _UCB_SIDE_CELL_KEY,
+        "probe_proposal": {"max_probe_orders": max_probe_orders},
+    }
+
+
+def _ucb_outcome_rows(nets: list[float]) -> list[dict]:
+    return [
+        {
+            "record_type": "probe_outcome",
+            "side_cell_key": _UCB_SIDE_CELL_KEY,
+            "realized_net_bps": net,
+        }
+        for net in nets
+    ]
+
+
+def _two_point_mean_std(mean: float, std: float, n: int = 8) -> list[float]:
+    # 對稱雙點構造(對齊 Rust scale_to_mean_std):n/2 個 mean+d、n/2 個 mean−d,
+    # 則 x̄=mean、s(ddof=1)=std。d=std·√((n−1)/n)。
+    d = std * math.sqrt((n - 1) / n)
+    half = n // 2
+    return [mean + d] * half + [mean - d] * half
+
+
+def _ucb_disabled(nets: list[float], *, min_failed: int) -> bool:
+    from cost_gate_learning_lane.runtime_adapter import (
+        RuntimeAdmissionConfig,
+        summarize_side_cell_runtime_state,
+    )
+
+    state = summarize_side_cell_runtime_state(
+        _ucb_candidate(),
+        _ucb_outcome_rows(nets),
+        now_ms=_UCB_NOW_MS,
+        cfg=RuntimeAdmissionConfig(min_failed_outcomes_to_disable=min_failed),
+    )
+    return state["disabled"]
+
+
+def test_python_ucb_futility_disable_rule_matches_spec_thresholds():
+    """用例 6 Python 直測:對齊 Rust 三錨點,證 Python 禁用規則本體 = UCB-futility。"""
+    # A:n=7 全負 → 未達 n≥8 門檻 → 不禁用(UCB 規則不啟動)。
+    assert _ucb_disabled([-120.0] * 7, min_failed=8) is False
+    # B:n=8,x̄=−120,s=200 → UCB ≈ −29.4 < 0 → 禁用。
+    assert _ucb_disabled(_two_point_mean_std(-120.0, 200.0), min_failed=8) is True
+    # C:n=8,x̄=−80,s=200 → UCB ≈ +10.6 > 0 → 不禁用。
+    assert _ucb_disabled(_two_point_mean_std(-80.0, 200.0), min_failed=8) is False
+
+
+def test_python_ucb_futility_pure_mean_fallback_both_directions():
+    """n<2 無法估變異數 → 退純均值判準(對齊 Rust (true, Some(mean), None) 分支)。"""
+    # n=1 mean=−10 → −10 < 0 → 禁用。
+    assert _ucb_disabled([-10.0], min_failed=1) is True
+    # n=1 mean=+10 → +10 < 0 False → 不禁用。
+    assert _ucb_disabled([10.0], min_failed=1) is False
+
+
+def test_python_ucb_ddof_and_strict_comparison_are_mutation_sensitive():
+    """mutation 自證錨點:若 std 誤用 ddof=n(而非 n−1)或 <→<=,此測必紅。
+
+    D(ddof 敏感):n=8,x̄=−87.693,s(ddof=1)=200 → UCB=+2.93>0 不禁用;若 std 誤除以
+      n(ddof=0)則 s=187.08、UCB=−2.93<0 會誤禁 → 突變翻紅。此 mean 精選於兩個 ddof
+      判準的翻轉窗口 (−90.62, −84.77) 正中,使唯一區別就是 n−1 vs n。
+    G(嚴格 < 敏感):n=1 pure-mean,mean=0.0 → 0<0 為 False 不禁用;若 <→<= 則
+      0<=0 為 True 會誤禁 → 突變翻紅。
+    """
+    # D:正解不禁用(ddof=1);ddof=n 突變會使其禁用。
+    assert _ucb_disabled(_two_point_mean_std(-87.693_024_306_047_45, 200.0), min_failed=8) is False
+    # G:正解不禁用(嚴格 <);<= 突變會使其禁用。
+    assert _ucb_disabled([0.0], min_failed=1) is False

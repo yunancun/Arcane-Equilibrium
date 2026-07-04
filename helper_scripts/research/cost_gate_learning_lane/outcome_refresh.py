@@ -24,7 +24,7 @@ for _path in (str(RESEARCH_ROOT), str(ROOT)):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from cost_gate_learning_lane.contract import ADAPTER_SCHEMA_VERSION
+from cost_gate_learning_lane.contract import OUTCOME_ADAPTER_SCHEMA_VERSION
 from cost_gate_learning_lane.outcome_writer import (
     ProbeOutcomeConfig,
     build_blocked_signal_outcome_records,
@@ -129,7 +129,9 @@ def build_cost_gate_outcome_refresh_batch(
 
     return {
         "schema_version": OUTCOME_REFRESH_SCHEMA_VERSION,
-        "adapter_schema_version": ADAPTER_SCHEMA_VERSION,
+        # C4 對稱性:此 batch 只包 outcome 面 record(probe_outcomes + blocked_outcomes),
+        # 故攜 outcome 面版本(v2),與 runtime_adapter.main() 的 probe_outcome_batch 一致。
+        "adapter_schema_version": OUTCOME_ADAPTER_SCHEMA_VERSION,
         "record_type": OUTCOME_REFRESH_RECORD_TYPE,
         "generated_at_utc": generated_at.isoformat(),
         "price_source": price_source,
