@@ -244,6 +244,149 @@ def _artifact_status(path: Path, *, now_utc: dt.datetime) -> dict[str, Any]:
     }
 
 
+# admission decision 記錄的 record_type(對齊 runtime_adapter.build_ledger_record 默認值)。
+PROBE_ADMISSION_DECISION_RECORD_TYPE = "probe_admission_decision"
+ADMIT_DECISION = "ADMIT_DEMO_LEARNING_PROBE"
+
+
+def _soak_envelope_status(
+    plan_path: Path, *, now_utc: dt.datetime
+) -> dict[str, Any]:
+    """讀 canonical soak plan 判斷內嵌 operator_authorization 是否 Active(未過期)。
+
+    為什麼讀 plan 而非 engine env：healthcheck 是唯讀本地檔巡檢，無 engine env 訪問；
+    envelope Active 由簽名塊 expires_at_utc 界定，read-only 可判。
+    """
+    payload, error = _read_json(plan_path)
+    auth = payload.get("operator_authorization")
+    auth = auth if isinstance(auth, dict) else {}
+    expires_at = _parse_ts(auth.get("expires_at_utc"))
+    active = (
+        error is None
+        and payload.get("status") == "READY_FOR_DEMO_LEARNING_PROBE"
+        and expires_at is not None
+        and expires_at > now_utc
+    )
+    return {
+        "path": str(plan_path),
+        "present": error is None,
+        "error": error,
+        "envelope_active": active,
+        "expires_at_utc": auth.get("expires_at_utc"),
+        "side_cell_key": auth.get("side_cell_key"),
+    }
+
+
+def _admission_decision_distribution(
+    ledger_path: Path,
+    *,
+    now_utc: dt.datetime,
+    window_seconds: int,
+) -> dict[str, Any]:
+    """統計滾動窗內 admission decision 的**分布**(非 ledger 行數)。
+
+    為什麼用分布而非「有無新行」：§1.4 評審實證 capture-error 等雜 record 會餵飽 ledger
+    行數使「有行=健康」的判據失明。故只計 record_type=probe_admission_decision 的記錄，
+    輸出各 decision 值計數 + admitted / withheld 分類，讓哨兵判「窗內是否真有 admission
+    活動且分布非全空/退化」。
+    """
+    try:
+        lines = ledger_path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return {
+            "path": str(ledger_path),
+            "present": False,
+            "error": "missing",
+            "window_seconds": window_seconds,
+            "admission_decision_count": 0,
+            "decision_counts": {},
+            "admitted_count": 0,
+            "withheld_or_other_count": 0,
+        }
+    except OSError as exc:
+        return {
+            "path": str(ledger_path),
+            "present": False,
+            "error": f"{type(exc).__name__}:{exc}",
+            "window_seconds": window_seconds,
+            "admission_decision_count": 0,
+            "decision_counts": {},
+            "admitted_count": 0,
+            "withheld_or_other_count": 0,
+        }
+    cutoff = now_utc - dt.timedelta(seconds=window_seconds)
+    decision_counts: dict[str, int] = {}
+    admission_count = 0
+    admitted_count = 0
+    parse_errors = 0
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            parse_errors += 1
+            continue
+        if not isinstance(record, dict):
+            continue
+        if record.get("record_type") != PROBE_ADMISSION_DECISION_RECORD_TYPE:
+            continue
+        ts = _parse_ts(record.get("generated_at_utc") or record.get("ts_utc"))
+        if ts is None or ts < cutoff:
+            continue
+        admission_count += 1
+        decision = str(record.get("decision") or "UNKNOWN").strip() or "UNKNOWN"
+        decision_counts[decision] = decision_counts.get(decision, 0) + 1
+        if decision == ADMIT_DECISION:
+            admitted_count += 1
+    return {
+        "path": str(ledger_path),
+        "present": True,
+        "error": None,
+        "window_seconds": window_seconds,
+        "admission_decision_count": admission_count,
+        "decision_counts": decision_counts,
+        "admitted_count": admitted_count,
+        "withheld_or_other_count": admission_count - admitted_count,
+        "line_parse_errors": parse_errors,
+    }
+
+
+def _soak_sentinel(
+    *,
+    armed_adapter: bool,
+    envelope: dict[str, Any],
+    distribution: dict[str, Any],
+    now_utc: dt.datetime,
+) -> dict[str, Any]:
+    """soak 哨兵：武裝中(flag=1∧envelope Active)而滾動 N 小時 admission 活動全空 → WARN。
+
+    判據=admission decision 分布(禁 ledger 行數判據)。over-gate 誤殺誤禁的靜默是本哨兵
+    要暴露的核心風險——soak 武裝卻長時間零 admission 決策=可能全被 over-gate 拒真而無人知。
+    """
+    armed = bool(armed_adapter) and bool(envelope.get("envelope_active"))
+    admission_count = int(distribution.get("admission_decision_count") or 0)
+    reasons: list[str] = []
+    if armed and admission_count == 0:
+        reasons.append("soak_armed_but_zero_admission_decisions_in_window")
+    warn = bool(reasons)
+    return {
+        "armed": armed,
+        "adapter_armed_input": bool(armed_adapter),
+        "envelope_active": bool(envelope.get("envelope_active")),
+        "envelope": envelope,
+        "admission_distribution": distribution,
+        "warn": warn,
+        "reasons": reasons,
+        "next_action": (
+            "inspect_over_gate_admission_reasons_soak_window_zero_admission"
+            if warn
+            else "no_soak_sentinel_action"
+        ),
+    }
+
+
 def build_healthcheck(
     *,
     data_dir: Path,
@@ -252,6 +395,10 @@ def build_healthcheck(
     crontab_text_file: Path | None,
     max_heartbeat_age_minutes: int,
     max_status_age_minutes: int,
+    soak_adapter_armed: bool = False,
+    soak_plan_json: Path | None = None,
+    probe_ledger_jsonl: Path | None = None,
+    soak_sentinel_window_hours: int = 6,
     now_utc: dt.datetime | None = None,
 ) -> dict[str, Any]:
     now = now_utc or _utc_now()
@@ -392,6 +539,29 @@ def build_healthcheck(
         and source["head_error"] is None
     )
 
+    # soak 哨兵軸(RES-9)：僅武裝中(adapter armed∧envelope Active)才產 WARN；未武裝=非適用。
+    soak_plan_path = (
+        soak_plan_json
+        if soak_plan_json is not None
+        else lane_dir / "bounded_demo_probe_soak_plan.json"
+    )
+    probe_ledger_path = (
+        probe_ledger_jsonl
+        if probe_ledger_jsonl is not None
+        else lane_dir / "probe_ledger.jsonl"
+    )
+    soak_window_seconds = max(1, int(soak_sentinel_window_hours)) * 3600
+    soak_envelope = _soak_envelope_status(soak_plan_path, now_utc=now)
+    admission_distribution = _admission_decision_distribution(
+        probe_ledger_path, now_utc=now, window_seconds=soak_window_seconds
+    )
+    soak_sentinel = _soak_sentinel(
+        armed_adapter=soak_adapter_armed,
+        envelope=soak_envelope,
+        distribution=admission_distribution,
+        now_utc=now,
+    )
+
     status = "EVIDENCE_STACK_ACTIVE"
     reason = "demo_learning_stack_recent_and_evidence_available"
     next_action = "observe_blocked_outcome_review_before_any_bounded_probe"
@@ -447,6 +617,12 @@ def build_healthcheck(
         status = "BOUNDED_PROBE_REVIEW_ARTIFACTS_MISSING"
         reason = "bounded_probe_result_or_execution_realism_review_latest_missing_or_unreadable"
         next_action = "rerun_cost_gate_learning_lane_cron_after_sealed_preflight_refresh"
+    elif soak_sentinel["warn"]:
+        # soak 哨兵僅在 stack 本身已綠(EVIDENCE_STACK_ACTIVE)時才升 WARN，避免掩蓋更嚴重
+        # blocker；語意=stack 健康但 soak 武裝窗零 admission 活動，需查 over-gate 誤殺。
+        status = "SOAK_SENTINEL_WARN"
+        reason = ";".join(soak_sentinel["reasons"])
+        next_action = soak_sentinel["next_action"]
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -457,6 +633,7 @@ def build_healthcheck(
         "thresholds": {
             "max_heartbeat_age_minutes": max_heartbeat_age_minutes,
             "max_status_age_minutes": max_status_age_minutes,
+            "soak_sentinel_window_hours": soak_sentinel_window_hours,
         },
         "answers": {
             "source_ready": source_ready,
@@ -514,6 +691,11 @@ def build_healthcheck(
             ),
             "cost_gate_learning_stage_error": cost_error,
             "cost_gate_learning_ledger_rows_present": bool(ledger_rows),
+            "soak_sentinel_armed": soak_sentinel["armed"],
+            "soak_sentinel_warn": soak_sentinel["warn"],
+            "soak_window_admission_decision_count": (
+                admission_distribution["admission_decision_count"]
+            ),
             "blocked_signal_outcomes_present": bool(blocked_outcomes),
             "blocked_outcome_review_present": bool(review_status),
             "demo_learning_evidence_classification_status": demo_classification_status,
@@ -525,6 +707,7 @@ def build_healthcheck(
         },
         "source": source,
         "cron": cron,
+        "soak_sentinel": soak_sentinel,
         "components": {
             "demo_learning_evidence": demo,
             "sealed_horizon_probe_preflight_cron": sealed_preflight_cron,
@@ -560,6 +743,28 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--crontab-text-file", type=Path, default=None)
     parser.add_argument("--max-heartbeat-age-minutes", type=int, default=90)
     parser.add_argument("--max-status-age-minutes", type=int, default=180)
+    parser.add_argument(
+        "--soak-adapter-armed",
+        action="store_true",
+        help=(
+            "declare the bounded-probe adapter is armed "
+            "(OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED=1); soak sentinel only warns "
+            "when armed AND the soak envelope is active"
+        ),
+    )
+    parser.add_argument(
+        "--soak-plan-json",
+        type=Path,
+        default=None,
+        help="canonical soak plan path (default: <data-dir>/cost_gate_learning_lane/bounded_demo_probe_soak_plan.json)",
+    )
+    parser.add_argument(
+        "--probe-ledger-jsonl",
+        type=Path,
+        default=None,
+        help="probe ledger path for admission decision distribution (default: <data-dir>/cost_gate_learning_lane/probe_ledger.jsonl)",
+    )
+    parser.add_argument("--soak-sentinel-window-hours", type=int, default=6)
     parser.add_argument(
         "--now-utc",
         default=None,
@@ -597,6 +802,8 @@ def main(argv: list[str] | None = None) -> int:
     now = _parse_ts(args.now_utc) if args.now_utc else None
     if args.max_heartbeat_age_minutes <= 0 or args.max_status_age_minutes <= 0:
         raise SystemExit("age thresholds must be positive")
+    if args.soak_sentinel_window_hours <= 0:
+        raise SystemExit("soak sentinel window hours must be positive")
     payload = build_healthcheck(
         data_dir=Path(args.data_dir),
         repo_root=Path(args.repo_root),
@@ -604,6 +811,10 @@ def main(argv: list[str] | None = None) -> int:
         crontab_text_file=args.crontab_text_file,
         max_heartbeat_age_minutes=args.max_heartbeat_age_minutes,
         max_status_age_minutes=args.max_status_age_minutes,
+        soak_adapter_armed=args.soak_adapter_armed,
+        soak_plan_json=args.soak_plan_json,
+        probe_ledger_jsonl=args.probe_ledger_jsonl,
+        soak_sentinel_window_hours=args.soak_sentinel_window_hours,
         now_utc=now,
     )
     text = json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2)
