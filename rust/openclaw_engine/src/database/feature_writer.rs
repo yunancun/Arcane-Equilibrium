@@ -62,10 +62,7 @@ pub async fn run_feature_writer(
             }
             msg = rx.recv() => {
                 match msg {
-                    Some(snap) => {
-                        let key = (snap.symbol.clone(), snap.timeframe.clone());
-                        latest.insert(key, snap);
-                    }
+                    Some(snap) => buffer_snapshot(&mut latest, snap),
                     None => break,
                 }
             }
@@ -77,6 +74,24 @@ pub async fn run_feature_writer(
         flush_features(&pool, &mut latest).await;
     }
     info!("feature_writer stopped / 特徵寫入器已停止");
+}
+
+/// 快照進去重緩衝：僅當 ts_ms 不舊於同 key 既有快照時才替換。
+///
+/// 為什麼：P1-4a（2026-07-04）後 demo/live 多 producer 共享同一 channel，
+/// 同 (symbol,timeframe) 快照可能亂序到達；`online_latest` 表語義=最新快照，
+/// updated_ts_ms 不得回退，故以 max-ts 保序（同 ts 取後到者，維持原覆寫行為）。
+fn buffer_snapshot(
+    latest: &mut HashMap<(String, String), FeatureSnapshot>,
+    snap: FeatureSnapshot,
+) {
+    let key = (snap.symbol.clone(), snap.timeframe.clone());
+    match latest.get(&key) {
+        Some(prev) if prev.ts_ms > snap.ts_ms => {} // 亂序舊快照 → 丟棄
+        _ => {
+            latest.insert(key, snap);
+        }
+    }
 }
 
 /// UPSERT all pending feature snapshots to features.online_latest.
@@ -146,10 +161,48 @@ mod tests {
             IndicatorSnapshot::default(),
             "v1".into(),
         );
-        latest.insert(("BTC".into(), "1m".into()), snap1);
-        latest.insert(("BTC".into(), "1m".into()), snap2);
+        buffer_snapshot(&mut latest, snap1);
+        buffer_snapshot(&mut latest, snap2);
         assert_eq!(latest.len(), 1);
         assert_eq!(latest[&("BTC".into(), "1m".into())].ts_ms, 2000);
+    }
+
+    /// P1-4a 多 producer 亂序防護：舊快照晚到不得覆蓋新快照
+    /// （updated_ts_ms 單調不回退；同 ts 後到者覆寫維持原行為）。
+    #[test]
+    fn test_buffer_snapshot_ignores_stale_out_of_order() {
+        let mut latest: HashMap<(String, String), FeatureSnapshot> = HashMap::new();
+        let newer = FeatureSnapshot::new(
+            "BTC".into(),
+            2000,
+            51000.0,
+            IndicatorSnapshot::default(),
+            "v1".into(),
+        );
+        let stale = FeatureSnapshot::new(
+            "BTC".into(),
+            1000,
+            50000.0,
+            IndicatorSnapshot::default(),
+            "v1".into(),
+        );
+        buffer_snapshot(&mut latest, newer);
+        buffer_snapshot(&mut latest, stale); // 亂序舊快照 → 必須被丟棄
+        assert_eq!(latest.len(), 1);
+        let kept = &latest[&("BTC".into(), "1m".into())];
+        assert_eq!(kept.ts_ms, 2000, "stale 快照不得回捲 ts_ms");
+        assert_eq!(kept.price, 51000.0, "stale 快照不得覆蓋特徵內容");
+
+        // 同 ts 後到者覆寫（維持修改前 insert 語義）
+        let same_ts = FeatureSnapshot::new(
+            "BTC".into(),
+            2000,
+            52000.0,
+            IndicatorSnapshot::default(),
+            "v1".into(),
+        );
+        buffer_snapshot(&mut latest, same_ts);
+        assert_eq!(latest[&("BTC".into(), "1m".into())].price, 52000.0);
     }
 
     #[test]
