@@ -205,9 +205,20 @@ async def toggle_dynamic_risk(request: Request, actor: base.AuthenticatedActor =
             "set_dynamic_risk_enabled",
             params=ipc_params,
         )
+        # 為什麼檢 resp.get("ok")：舊碼 IPC 未拋例外即宣告 enabled；但 Rust 可能回
+        # {"ok": false, ...}（如引擎拒絕、engine 未就緒）。不檢會 fake-success。
+        # ok=false 時把 applied 標為 false 讓前端可分辨「已送達但未生效」，與既有
+        # set_strategy_active 非-ok 記 log 的 pattern 一致。
+        applied = not (isinstance(resp, dict) and resp.get("ok") is False)
+        if not applied:
+            logger.warning(
+                "set_dynamic_risk_enabled IPC non-ok response engine=%s enabled=%s resp=%s",
+                engine, enabled, resp,
+            )
         # Best-effort stub mirror so `get_dynamic_risk_status` cached reads stay consistent.
         # 兼容用：同步更新 Python stub 的旗標，讓 stub fallback 路徑也看到最新狀態。
-        if AUTO_DEPLOYER is not None:
+        # 僅在真生效時鏡像，避免 stub 與 Rust 權威狀態漂移。
+        if applied and AUTO_DEPLOYER is not None:
             try:
                 AUTO_DEPLOYER.set_dynamic_risk_enabled(enabled)
             except Exception:
@@ -215,8 +226,13 @@ async def toggle_dynamic_risk(request: Request, actor: base.AuthenticatedActor =
         return _envelope({
             "enabled": enabled,
             "engine": engine,
+            "applied": applied,
             "ipc_response": resp,
-            "message": f"Dynamic risk {'enabled' if enabled else 'disabled'} on {engine}",
+            "message": (
+                f"Dynamic risk {'enabled' if enabled else 'disabled'} on {engine}"
+                if applied else
+                f"Dynamic risk toggle on {engine} not applied — engine rejected"
+            ),
         })
     except HTTPException:
         raise

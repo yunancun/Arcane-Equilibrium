@@ -915,9 +915,14 @@ def override_risk_level(
         if target_level < current_level:
             # This is a de-escalation, check the gate
             if not hub._check_de_escalation_gate(current_level_str, target_level_str, sanitized_reason):
+                # 為什麼加 applied=False：此分支風控等級零變更（僅入待審批隊列），
+                # 但仍回 ok:true。前端若不讀 applied 會誤顯「已降級」綠色成功
+                # （fake-success）。applied=False 讓前端可分辨「pending 待審批」與
+                # 「已生效」，避免掩蓋「等級仍停在原較高值」的事實。
                 return GovernanceResponse.success(
                     data={
                         "status": "de_escalation_pending_approval",
+                        "applied": False,
                         "current_level": current_level,
                         "target_level": target_level,
                         "reason": sanitized_reason,
@@ -925,7 +930,20 @@ def override_risk_level(
                     message="de_escalation_pending_approval"
                 )
 
-        # SECURITY FIX #9: Actually apply the de-escalation if risk governor supports it
+        # SECURITY FIX #9: Actually apply the de-escalation if risk governor supports it.
+        # 為什麼 SM 缺失必 fail-closed（503）：_risk_governor_sm 為 None 代表狀態機未初始化，
+        # escalate_to 無法執行 → 等級零變更。舊碼直落回 override_applied 會謊報「已降級」
+        # （fake-success，且下游可能誤信風控已放鬆）。SM 缺失是系統降級狀態，回 503
+        # 讓 operator 明確得知「命令未生效、需先恢復狀態機」，不可宣告 applied。
+        if not hub._risk_governor_sm:
+            logger.error(
+                "Risk override cannot apply — _risk_governor_sm is None (actor=%s target=%s)",
+                _sanitize_log(actor.actor_id), target_level,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Risk governor state machine unavailable — override not applied",
+            )
         if hub._risk_governor_sm:
             try:
                 from .risk_governor_state_machine import RiskLevel, RiskInitiator
@@ -943,9 +961,11 @@ def override_risk_level(
                 # SECURITY FIX #6: Return generic error to client
                 raise HTTPException(status_code=500, detail="Failed to apply risk override")
 
+        # applied=True：只有走到這裡（SM 存在且 escalate_to 未拋例外）才是真生效。
         return GovernanceResponse.success(
             data={
                 "status": "override_applied",
+                "applied": True,
                 "current_level": current_level,
                 "target_level": target_level,
                 "reason": sanitized_reason,

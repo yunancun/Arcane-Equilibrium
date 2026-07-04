@@ -640,9 +640,14 @@ async def post_live_close_position(
         "⚠ close_position %s hint_is_long=%s hint_qty=%s — actor=%s",
         sym, hint_is_long, hint_qty, getattr(actor, "actor_id", "?"),
     )
+    # 為什麼用 dispatched 而非 closed：IPC 未拋例外只代表「平倉指令已派發至 Rust」，
+    # 不代表交易所已成交（reduce_only 市價單在塵埃倉場景會被 Bybit 拒單）。舊碼無條件
+    # 回 closed=True 會讓下游誤信「已平」（fake-success）。改欄名 dispatched=True 誠實
+    # 反映「已派發」，與前端「指令已發送 / dispatched」措辭一致（前端不讀 closed 欄位，
+    # 已核 grep 零消費者，改名不破 GUI）。
     return core._live_response({
         "symbol": sym,
-        "closed": True,
+        "dispatched": True,
         "source": "rust_engine",
         "rest_fallback": False,
         "reason": None,
