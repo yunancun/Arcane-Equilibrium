@@ -184,7 +184,9 @@ def test_sealed_horizon_learning_evidence_records_240m_blocked_outcome(tmp_path)
     assert outcome["horizon_minutes"] == 240
     assert outcome["default_horizon_minutes"] == 60
     assert outcome["gross_bps"] == pytest.approx(100.0)
-    assert outcome["realized_net_bps"] == pytest.approx(96.0)
+    # P1-2a:舊 4.0 常數的淨值移到 net_bps_optimistic;realized_net_bps 為保守權威淨值
+    # (無分位 artifact → toml_tier 30bps fallback → cost≈92.3 → net≈7.7)。
+    assert outcome["net_bps_optimistic"] == pytest.approx(96.0)
     assert review["top_side_cell_key"] == "ma_crossover|BTCUSDT|Sell"
     assert len(read_jsonl_ledger(ledger)) == 2
 
