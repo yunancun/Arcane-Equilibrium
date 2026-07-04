@@ -210,3 +210,11 @@
 
 **caller_check**：5m consumer=AlphaSurface.tier1_only + TickContext.indicators_5m + bb_breakout_has_ta（step_4_5:273/291/377）全 read-only by-ref；1m consumer=step_3 signals/step_4_5 dispatch/step_6 derive_regime(latest_indicators)/commands ATR(latest_indicators) — 後二者讀 latest_indicators map 故 1m gate 須仍每 closed-bar 刷新該 map。複用不破任何下游（輸出 bit-identical）。
 
+
+## 2026-07-03 全倉 read-only 優化審計（commit d68a13298, Codex 時代後首輪）
+
+**報告**：`docs/CCAgentWorkSpace/E5/workspace/reports/2026-07-03--full_repo_optimization_audit.md`（已複製 Operator/）。Verdict=FINDINGS，15 項（5 HIGH / 4 MEDIUM / 3 LOW / 3 INFO）。前輪 F2 LTO/F3 urlopen/PERF-1 5m gate 確認已修（471c1811b）；**1m gate（PERF-1 Phase 2）仍 open**（step_1_2 每 tick 無條件 compute_indicators，hurst source TOML enabled=false 故滯回 caveat 當前為零）。
+
+**5 HIGH**：F1 1m 指標 gate 未做（~28μs/tick，engine 實測 40.8% 單核瞬時/RSS 2.1GB=基線）；F2 Linux PG 全出廠默認（shared_buffers=128MB vs 4-8GB 預算、cache hit 62.38%、385GB 庫、klines 壓縮 chunk seq_scan 41.8M）；F3 TODO.md 233 行卻 59,562 tokens 超 Read 25k cap（agent 讀不到 §1 隊列=operational 危害）；F4 13 檔破 2000 硬限（06-14 時 0 檔,無 documented exception）；F5 cost_gate_learning_lane 87 檔 63.6k LOC 複製貼上（_utc_now×81、_authority_preserved×32=治理判準 silent drift 面）。
+
+**新教訓**：1) 行數治理可被超長行繞過——token 質量（wc -c 或 Read tool 自報）須並列於 wc -l 作熱檔判準。2) PG runtime config 屬 drift-source-runtime 類：文檔預算（CLAUDE.md 4-8GB）從未落到 ALTER SYSTEM，audit 必 SHOW 三件套（shared_buffers/work_mem/effective_cache_size）+ cache hit ratio。3) async 阻塞掃描的假陽性判別三步：enclosing def 同步性→caller 執行上下文（thread vs loop）→to_thread 包裹與否；sync client 方法被 async 檔 import 不等於阻塞。4) 複製貼上叢的計數法：同名 def 跨檔 uniq -c 一條命令即出全貌，治理型 helper（authority/identity 判準）重複度是比 util 重複更高危的信號。

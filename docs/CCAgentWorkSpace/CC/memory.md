@@ -157,3 +157,8 @@
 - verdict APPROVE(A):16/16+9/9 適用項全 PASS、硬邊界 0 觸碰、0 自動擴權;smoke mutating 面五重圈欄(零排程/dry-run/mainnet exit 7/確認/30s TTL)
 - 2 LOW(flag 忘關無絆線;[82] flag-OFF restart 後 ≤72h FAIL 噪音=假陽性候選)+3 INFO 全交 PM 濾裁;報告由 PM 代落盤(本 session 無 Write)
 - 報告:workspace/reports/2026-06-11--p5sm_soak_infra_compliance.md(+Operator 鏡像)
+
+### 2026-07-03 全倉 read-only 合規審計（ultracode workflow）
+- verdict Approve(B)：13/16+3 部分（#8 earn lineage 占位/#11+#12 v710-v738 exact-sha 批准死循環 over-gate）、9/9 不變量、硬邊界 0 觸碰、0 BLOCKER；drift gate `d0eeafb41` 放寬有界方向正確待 v739 實走
+- 關鍵 drift：TODO v738 runtime 三元組全 stale（實測 262596c69 clean/PID 2368227/03:15 reset over hotfix 無 mutation 紀錄→PA re-probe）；2000 行硬限 9 生產檔超標無豁免登記（Codex 時代累積，discovery_loop 5954 最重）
+- 報告：workspace/reports/2026-07-03--full_repo_compliance_audit.md（+Operator 鏡像）

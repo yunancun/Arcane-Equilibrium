@@ -153,3 +153,8 @@
 
 ## 2026-06-11 — Polymarket 數據軸紀律 memo(PROCEED, artifact-only)
 - 賠率=corroborating context only 釘死,進交易鏈必走三段鏈;採集端禁 relevance 截斷(不可逆選擇偏差)、append-only point-in-time、track-to-resolution(反 lib 預設 skip-closed,防 survivorship bias);H4 calibration=全軸前置 gate;CLOB /prices-history 回補走獨立 retrospective lane(resolved 市場僅 ≥12h 粒度)。報告:workspace/reports/2026-06-11--polymarket_axis_discipline.md(PM 代落檔)
+
+## 2026-07-03 — 全倉 read-only 數學審計（FINDINGS: 2H/5M/5L/3I，無 CRITICAL）
+- 前輪 P0/P1 全修復確認（donchian_prior/OU 殘差 σ/Kelly Wilson-LB/fast_track+slippage config 化/confluence load guard）；edge estimator 已內建 WF+PSR/DSR/bootstrap gate，113 real cells 0 過驗證、median n=6（樣本饑餓仍第一約束）。
+- 兩 HIGH 均在進化回路：(1) blocked-signal 反事實 markout fill-at-signal-price+4bps 平價成本，與同 cell realized EV 直接矛盾（ATOM|Sell +75 vs −16.8bps）——false-negative 敘事根基不保守；(2) standing envelope refresh 死循環=負淨貢獻 gate（v710-738 拒真率 100%），d0eeafb41 修判準側、TTL 12h 側殘留。
+- 復用教訓：反事實 lane 的矛盾檢查=同 cell realized edge 必附；probe n=2 對 75bps 檢定 power≈8%（驗證用途須明示）；per_trade_risk_pct 是 fraction（0.1=10%）與同塊 percent 欄位混雜，見 4 處 stale "2%" 註解。報告：workspace/reports/2026-07-03--qc-full-repo-math-audit.md
