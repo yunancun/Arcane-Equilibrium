@@ -45,3 +45,8 @@
 
 ## 2026-06-11 subagent 四態契約生效
 - 回報首行 STATUS 四態；R4.md 巡檢新增三項：MEMORY.md「Project context」索引配額 ≤40（超限先 MERGE：主題重疊>敘事弧相同>heat 最低/最舊已完結）、topic 檔可選 `heat:` 欄（召回+1/合併取 sum）、被推翻結論不原地改寫須留「演變軌跡」節。
+
+## 2026-07-04 P1-7 TODO+PM memory 瘦身方案交付(冷審計 R2 修復波)
+- TODO.md 59k tokens 超 25k Read cap=§1尾/§2/§3 對單次讀不可見(治理禁令靜默失效面);方案=快照守恆+§0/§1 逐行處置+§2 家族合併,PM 已落地(132KB→29.5KB)。
+- 發現並根修 PM memory 雙累積區:最新條目躲檔尾 L4256+ 超出 2000 行 Read 窗;規則改「新條目一律倒序插入近期記錄標題後,禁雙區」。
+- 待辦(另批):E4 699/E1 660/E2 364/MIT 321 行 workspace memory 壓實(E4 先 grep BASELINE 永留)。
