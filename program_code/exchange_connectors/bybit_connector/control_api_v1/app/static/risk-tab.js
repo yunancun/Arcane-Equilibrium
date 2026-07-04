@@ -84,8 +84,19 @@ async function submitRiskOverride() {
       reason: reason
     });
     document.getElementById('modal-risk-override').style.display = 'none';
-    if (d && d.ok) {
+    // 為什麼讀 data.status / data.applied：後端有三種結果都可能 ok:true——
+    //   (a) applied=false + status=de_escalation_pending_approval → 僅入待審批，等級未變
+    //   (b) status=override_applied + applied=true → 真生效
+    //   SM 缺失走 503 → ocPost 回 null（已由 ocApi 顯錯誤 toast）
+    // 舊碼只看 d.ok 會把 (a) 誤顯綠色「已降級」（fake-success）。
+    const od = (d && d.data) ? d.data : null;
+    if (d && d.ok && od && od.applied === true) {
       ocToast('Risk level de-escalated / 風險等級已降級', 'success');
+    } else if (d && d.ok && od && od.status === 'de_escalation_pending_approval') {
+      ocToast('降級待審批 — 等級尚未變更 / de-escalation pending approval', 'warn');
+    } else if (d && d.ok) {
+      // ok:true 但無 applied 旗標（契約漂移）→ 保守不宣告成功
+      ocToast('降級狀態未確認，請刷新核對 / override state unconfirmed', 'warn');
     } else {
       ocToast('Override failed: ' + (d?.message || 'Unknown error'), 'error');
     }
@@ -958,7 +969,15 @@ async function toggleDynamicRisk() {
   const engine = _selectedRiskEngine || 'demo';
   const enabled = document.getElementById('dr-toggle').checked;
   const d = await ocPost('/api/v1/strategy/dynamic-risk/toggle', { enabled: enabled, engine: engine });
-  if (d) {
+  // 為什麼讀 data.applied：後端現回 applied 旗標（Rust IPC 回 ok:false 時 applied=false）。
+  // 舊碼只 `if (d)` 會在引擎拒絕時仍顯綠成功（fake-success）。applied=false 時
+  // 還原 checkbox 並顯 warn，讓 operator 知道未生效。
+  const od = (d && d.data) ? d.data : null;
+  if (d && od && od.applied === false) {
+    document.getElementById('dr-toggle').checked = !enabled;
+    ocToast('動態風控設置未生效 (' + engine + ') — 引擎拒絕', 'warn');
+    loadDynamicRisk();
+  } else if (d) {
     if (enabled) {
       ocToast('動態風控已啟用 (' + engine + ') — 數據充足後自動生效', 'success');
     } else {
