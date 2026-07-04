@@ -35,6 +35,8 @@
   .tag-blue { background: rgba(56,139,253,0.15); color: var(--blue); }
   .tag-green { background: rgba(63,185,80,0.15); color: var(--green); }
   .tag-yellow { background: rgba(210,153,34,0.15); color: var(--yellow); }
+  /* P1-9：mode-tag 取到真值前的中性 loading 態，不冒充任何交易模式色。 */
+  .tag-neutral { background: rgba(139,148,158,0.12); color: var(--text-dim); }
   .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
   .dot-ok { background: var(--green); }
   .dot-err { background: var(--red); }
@@ -180,7 +182,10 @@
   <span class="tag tag-blue">Arcane Equilibrium</span>
   <span class="tag tag-yellow">OpenClaw 控制面</span>
   <span class="tag tag-blue" id="asset-lane-tag">lane crypto_perp</span>
-  <span class="tag tag-green" id="mode-tag">shadow_only</span>
+  <!-- P1-9 誠實對齊：mode-tag 由 refreshSidebar() 接 /api/v1/live/session/status 的
+       system_mode 真值刷新，不再硬編碼 shadow_only（無更新路徑的假 badge）。
+       初值用中性 loading 佔位，取到真值前不冒充任何模式。 -->
+  <span class="tag tag-neutral" id="mode-tag" title="引擎當前 system_mode（來自 /api/v1/live/session/status）">mode …</span>
   <span class="spacer"></span>
   <span id="clock" style="font-size:11px;color:var(--text-dim)"></span>
   <span class="oc-curr-badge" onclick="ocToggleCurrency()" title="Click to cycle USDT → USD → EUR / 點擊切換計價貨幣">USDT</span>
@@ -798,6 +803,34 @@ const OC = window.location.origin + '/openclaw';
 const SIDEBAR_REFRESH_MS = 30000;
 let _sidebarRefreshInFlight = false;
 
+// P1-9：頭部 mode-tag 真值刷新。
+// 為什麼：原本 console.html 硬編碼 <span id="mode-tag">shadow_only</span> 且全 JS 零引用，
+//   永遠顯示 shadow_only 無論引擎實際 system_mode 為何——操作員可能在 live_reserved 下
+//   仍看到「shadow_only」而誤判為安全。改由此 helper 接 /api/v1/live/session/status
+//   的 system_mode 真值。三態顯式：已知模式（含 unknown 值）/ status 缺失（offline）。
+// 顏色語義對齊 sidebar s-live-mode 色盤，避免同一模式在頭部與側欄顯示不同色。
+function ocUpdateHeaderModeTag(systemMode) {
+  const tag = document.getElementById('mode-tag');
+  if (!tag) return;
+  // status API 失敗 / 服務離線：fail-loud 顯 offline，不保留上一輪樂觀值。
+  if (!systemMode) {
+    tag.textContent = 'mode offline';
+    tag.className = 'tag tag-neutral';
+    return;
+  }
+  // 引擎回了 'unknown'（讀不到 global_mode_state）：如實顯示，不猜。
+  const colorClass = {
+    live_reserved:  'tag-yellow',   // live 授權態，需醒目 → 黃（警告需注意）
+    demo_reserved:  'tag-blue',
+    shadow_only:    'tag-green',     // 純影子，安全 → 綠
+    observe_only:   'tag-neutral',
+    design_only:    'tag-neutral',
+    unknown:        'tag-neutral',
+  }[systemMode] || 'tag-neutral';
+  tag.textContent = String(systemMode);
+  tag.className = 'tag ' + colorClass;
+}
+
 // ─── Sidebar Refresh ─────────────────────────────────────────
 async function refreshSidebar() {
   if (_sidebarRefreshInFlight) return;
@@ -860,9 +893,16 @@ async function refreshSidebar() {
     document.getElementById('s-live-mode-detail').textContent =
       isLiveActive ? 'auth: ' + execAuth :
       actualKind !== 'live' ? 'engine: ' + actualKind : '';
+    // P1-9：頭部 mode-tag 接引擎真值 system_mode（同一份 sessionData），
+    // 取代硬編碼的 shadow_only 假 badge。未知模式顯式標「mode unknown」，
+    // 不 silent 樂觀升級（危險決策字段三態：已知 / unknown / offline）。
+    ocUpdateHeaderModeTag(systemMode);
   } else {
     modeEl.textContent = '--';
     document.getElementById('s-live-mode-detail').textContent = '';
+    // sessionData 缺失（status API 失敗 / 服務離線）：mode-tag fail-loud 顯 offline，
+    // 不保留上一輪的樂觀值假裝仍然已知。
+    ocUpdateHeaderModeTag(null);
   }
 
   // Live balance from /api/v1/live/balance?fast=1 (Rust snapshot fast path).
