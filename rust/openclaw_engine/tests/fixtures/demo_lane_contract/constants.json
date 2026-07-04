@@ -1,0 +1,28 @@
+{
+  "_comment": "C4 契約常量 golden manifest。兩語言各一測試逐值斷言 shared 節；python_only 節防未來誤鏡像進 Rust。任一側值漂移即紅。錨點 fix/authz-contract-0704。",
+  "shared": {
+    "PLAN_SCHEMA_VERSION": "cost_gate_demo_learning_lane_plan_v1",
+    "ADAPTER_SCHEMA_VERSION": "cost_gate_demo_learning_lane_adapter_v1",
+    "ORDER_AUTHORITY_GRANTED": "DEMO_LEARNING_PROBE_GRANTED",
+    "ELIGIBLE_REJECT_REASON_CODE": "cost_gate_js_demo_negative_edge",
+    "ADMIT_DECISION": "ADMIT_DEMO_LEARNING_PROBE",
+    "BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SCHEMA_VERSION": "bounded_demo_probe_operator_authorization_v1",
+    "BOUNDED_PROBE_AUTHORIZED_STATUS": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+    "AUTHORITY_PATH_PATCH_READY_STATUS": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+    "OPERATOR_AUTHORIZATION_EXPIRED_REASON": "operator_authorization_expired",
+    "ADMISSION_LEDGER_RECORD_TYPE": "probe_admission_decision",
+    "PROBE_OUTCOME_RECORD_TYPE": "probe_outcome",
+    "BLOCKED_SIGNAL_OUTCOME_RECORD_TYPE": "blocked_signal_outcome",
+    "BYBIT_ORDER_LINK_ID_PREFIX": "oc_",
+    "BYBIT_ORDER_LINK_ID_MAX_LEN": 36,
+    "ACTIVE_BOUNDED_PROBE_ORDER_LINK_ID_MAX_SEQ": 2176782335,
+    "ACTIVE_BOUNDED_PROBE_LINEAGE_HASH_MOD": 101559956668416,
+    "ACTIVE_BOUNDED_PROBE_LINEAGE_HASH_LEN": 9,
+    "ACTIVE_BOUNDED_PROBE_REFERENCE_SOURCE": "bounded_probe_active_near_touch"
+  },
+  "python_only": {
+    "STANDING_DEMO_AUTHORIZATION_SCHEMA_VERSION": "standing_demo_operator_authorization_v1",
+    "STANDING_DEMO_AUTHORIZATION_ACTIVE_STATUS": "STANDING_DEMO_AUTHORIZATION_ACTIVE",
+    "PROBE_ADMISSION_DECISION_RECORD_TYPE": "probe_admission_decision"
+  }
+}

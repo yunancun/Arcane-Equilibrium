@@ -1,0 +1,38 @@
+{
+  "_comment": "C2 probe_ledger.jsonl 行契約 golden fixture。ledger_rows.jsonl = 兩條真實 writer 產出行（第1行=真 Python evaluate->build_ledger_record->sort_keys；第2行=Rust-shape 手構納秒 RFC3339+bounded_probe_placement 缺欄）。兩側各讀對方行斷言可解析欄位。poison_* = 毒行三態原始字串（測試各自寫入獨立臨時檔跑 skip-and-count 語義）。錨點 fix/authz-contract-0704。",
+  "good_rows_file": "ledger_rows.jsonl",
+  "good_rows_count": 2,
+  "good_rows_expected": [
+    {
+      "row_index": 0,
+      "source": "python_writer",
+      "decision": "ADMIT_DEMO_LEARNING_PROBE",
+      "attempt_id": "ctx-xlang-1",
+      "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+      "allowed_to_submit_order": true
+    },
+    {
+      "row_index": 1,
+      "source": "rust_shape",
+      "decision": "ADMIT_DEMO_LEARNING_PROBE",
+      "attempt_id": "ctx-rust-1",
+      "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+      "allowed_to_submit_order": true
+    }
+  ],
+  "poison_rows": {
+    "_note": "三態毒行。Python read_jsonl_ledger 對壞 JSON raise ValueError（all-or-nothing）、對非 dict 合法 JSON 靜默跳過；Rust from_jsonl_str 對壞 JSON 整檔 Err、對非 dict serde reject 整檔 Err。統一 skip-and-count 語義尚待 PA/producer 裁決（見 E4 F4/C2 finding），本 fixture 釘現狀兩側行為供 parity 對賬。",
+    "bad_json": "{\"schema_version\": \"x\", \"decision\": ",
+    "non_dict_valid_json": "[1, 2, 3]",
+    "torn_eof": "{\"schema_version\": \"cost_gate_demo_learning_lane_adapter_v1\", \"record_type\": \"probe_"
+  },
+  "current_behavior": {
+    "python_bad_json": "raise ValueError (all-or-nothing)",
+    "python_non_dict": "silent skip (row dropped, no raise)",
+    "python_torn_eof": "raise ValueError (json.JSONDecodeError)",
+    "rust_bad_json": "Err (整檔失敗)",
+    "rust_non_dict": "Err (serde 型別不符)",
+    "rust_torn_eof": "Err (整檔失敗)",
+    "asymmetry": "非 dict 合法 JSON：Python skip vs Rust Err（E4 F4 已知不對稱，統一策略待裁）"
+  }
+}
