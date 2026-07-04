@@ -90,6 +90,11 @@ async fn test_dispatch_get_state() {
         .as_str()
         .map(|s| !s.is_empty())
         .unwrap_or(false));
+    // P0-1c：get_state 必須攜帶編譯期嵌入的 build_sha（運行世代可觀測面）。
+    assert_eq!(
+        result["build_sha"].as_str(),
+        Some(crate::boot_observability::BUILD_GIT_SHA)
+    );
 }
 
 #[tokio::test]
