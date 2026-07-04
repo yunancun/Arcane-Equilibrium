@@ -283,6 +283,10 @@ async fn run_writer(
     };
     // stat 快照:None = 檔案不存在(或 stat 暫不可得,下一事件重試判定)。
     let mut ledger_stat = stat_ledger(&ledger_path).ok().flatten();
+    // P1-10:writer 持有的 append fd 對應的 (dev, ino)。輪轉(自身或 Python 側)
+    // 後主檔 inode 變化,writer 據此重開 fd,否則會續寫舊 inode(已成段檔)。
+    // open_writer 建檔即存在,identity 必可得;偶發 None 時下一事件重試。
+    let mut writer_identity = crate::demo_learning_lane_rotation::ledger_identity(&ledger_path);
     let mut flush_timer =
         tokio::time::interval(std::time::Duration::from_millis(FLUSH_INTERVAL_MS));
     flush_timer.tick().await;
@@ -304,6 +308,16 @@ async fn run_writer(
                     order_dispatch_tx,
                 } = msg;
                 let active_order_dispatch_channel_available = order_dispatch_tx.is_some();
+                // P1-10:先做輪轉+重開。①主檔達 50MB 由本 writer 觸發輪轉;
+                // ②不論自身或 Python 側輪轉,若持有的 append fd inode ≠ 當前主檔
+                // inode 則重開 fd(避免續寫已成段檔的舊 inode)。重開後 ledger_stat
+                // 置 None → 強制下方 refresh 全量重讀(含新段),cache 不遺漏段檔行。
+                rotate_and_reopen_if_needed(
+                    &mut bw,
+                    &ledger_path,
+                    &mut writer_identity,
+                    &mut ledger_stat,
+                );
                 // F1:先做 stat 級外部變化偵測;refresh 失敗走既有 capture-error
                 // 分支(鏡像修前「每事件讀檔失敗 → capture-error row」語義)。
                 // L-R2:記住 refresh 成敗——失敗時 capture-error 分支不得推進
@@ -638,12 +652,23 @@ pub(crate) fn dispatch_active_bounded_probe_order_draft(
     Ok(true)
 }
 
+/// 讀取 retention 窗內完整 ledger 視圖(輪轉段升冪 + 主檔)。
+///
+/// P1-10:輪轉後主檔只剩最新段,dedup / disable-state 判定需 retention 窗內全量
+/// 行,故此處跨段讀;成本由 50MB 輪轉 + 14d retention 封頂。修前只讀單一主檔,
+/// 輪轉後會把段檔行從 cache 丟失 → dedup 回退、side-cell disable 狀態誤判。
+/// 缺檔(主檔與段檔都不存在)回空,鏡像修前 NotFound 語義。
 fn read_ledger_rows(path: &Path) -> Result<Vec<LedgerRecord>, String> {
-    match std::fs::read_to_string(path) {
-        Ok(content) => LedgerRecord::from_jsonl_str(&content),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
-        Err(err) => Err(format!("read ledger {} failed: {err}", path.display())),
+    let mut rows: Vec<LedgerRecord> = Vec::new();
+    for segment in crate::demo_learning_lane_rotation::retained_ledger_paths(path) {
+        match std::fs::read_to_string(&segment) {
+            Ok(content) => rows.extend(LedgerRecord::from_jsonl_str(&content)?),
+            // 視圖枚舉與讀取間段檔被另一側清掉(過期 sweep):冪等跳過。
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(err) => return Err(format!("read ledger {} failed: {err}", segment.display())),
+        }
     }
+    Ok(rows)
 }
 
 /// ledger 檔 stat 快照:len + mtime。None 語義由呼叫端定義為「檔案不存在」。
@@ -753,6 +778,61 @@ fn open_writer(path: &Path) -> std::io::Result<(BufWriter<File>, u64)> {
     let file = OpenOptions::new().create(true).append(true).open(path)?;
     let size = file.metadata().map(|m| m.len()).unwrap_or(0);
     Ok((BufWriter::with_capacity(BUF_WRITER_CAPACITY, file), size))
+}
+
+/// P1-10:每事件寫入前的輪轉 + fd 重開。
+///
+/// 為什麼在寫入前:主檔一旦 ≥50MB 就先輪轉再寫,新行落在新主檔;輪轉是 rename,
+/// 不截斷不丟行(舊行在段檔)。
+/// 為什麼要重開 fd:BufWriter 持有的是 open 時的 inode;不論本 writer 自身輪轉
+/// 還是 Python 側輪轉,主檔 inode 已變,續用舊 fd 會把新行寫進已成段檔的舊 inode
+/// (讀取視圖仍能讀到,但主檔永遠不長大、輪轉語義失效)。故以 (dev, ino) 比對,
+/// 不符即 flush 舊 fd 後重開到當前主檔。
+/// 重開後將 `ledger_stat` 置 None:強制 refresh 全量重讀(含新輪出的段),
+/// 避免 cache 遺漏段檔行造成 dedup 回退。
+/// 失敗語義:重開失敗保留舊 fd 與舊 identity,下一事件重試;不 panic(阻斷寫入
+/// = 丟學習證據,比續寫舊 inode 更糟)。
+fn rotate_and_reopen_if_needed(
+    bw: &mut BufWriter<File>,
+    ledger_path: &Path,
+    writer_identity: &mut Option<(u64, u64)>,
+    ledger_stat: &mut Option<LedgerStat>,
+) {
+    // ①本 writer 觸發輪轉(主檔達閾值)。外部(Python)輪轉不經此路徑,由下方
+    // identity 比對兜底。
+    let _ = crate::demo_learning_lane_rotation::maybe_rotate_ledger_default(ledger_path);
+    // ②identity 比對:當前主檔 inode 與持有 fd 的 inode 是否一致。
+    let current_identity = crate::demo_learning_lane_rotation::ledger_identity(ledger_path);
+    if current_identity == *writer_identity && current_identity.is_some() {
+        return;
+    }
+    // 不一致(或當前無主檔):flush 舊 fd 落盤,重開到當前主檔。
+    if let Err(e) = bw.flush() {
+        warn!(
+            error = %e,
+            ledger_path = %ledger_path.display(),
+            "demo-learning lane ledger flush before reopen failed / 輪轉重開前 flush 失敗"
+        );
+    }
+    match open_writer(ledger_path) {
+        Ok((new_bw, _)) => {
+            *bw = new_bw;
+            *writer_identity = crate::demo_learning_lane_rotation::ledger_identity(ledger_path);
+            // 強制下一步 refresh 全量重讀(跨新段),cache 不遺漏段檔行。
+            *ledger_stat = None;
+            tracing::debug!(
+                ledger_path = %ledger_path.display(),
+                "demo-learning lane ledger writer reopened after rotation / 輪轉後 ledger writer 已重開"
+            );
+        }
+        Err(e) => {
+            warn!(
+                error = %e,
+                ledger_path = %ledger_path.display(),
+                "demo-learning lane ledger reopen after rotation failed; keeping old fd / 輪轉後 ledger 重開失敗，沿用舊 fd"
+            );
+        }
+    }
 }
 
 fn epoch_ms() -> u64 {
@@ -1699,5 +1779,97 @@ mod tests {
             "外部 manual disable 必須不等重啟即時生效(F1)"
         );
         assert_eq!(row_b.reason.as_deref(), Some("manual_disable"));
+    }
+
+    // ---- P1-10 rotation 整合(writer 層跨段讀 + 重開)----
+
+    fn append_raw_line(path: &Path, attempt_id: &str) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .unwrap();
+        writeln!(file, "{{\"attempt_id\":\"{attempt_id}\"}}").unwrap();
+    }
+
+    #[test]
+    fn read_ledger_rows_spans_rotation_no_loss_no_dup() {
+        // read_ledger_rows 跨 retention 段:輪轉後段檔 + 新主檔的行都要讀到,
+        // 不丟不重(P1-10 dedup 依賴此語義)。
+        let tmp = TempDir::new().unwrap();
+        let ledger = tmp.path().join("probe_ledger.jsonl");
+        append_raw_line(&ledger, "a1");
+        append_raw_line(&ledger, "a2");
+        // 以低閾值強制輪轉(now 為近時,段檔在 retention 窗內)。
+        let outcome = crate::demo_learning_lane_rotation::maybe_rotate_ledger(
+            &ledger,
+            1,
+            crate::demo_learning_lane_rotation::RETENTION_DAYS,
+            Utc::now(),
+        );
+        assert!(outcome.rotated);
+        // 輪轉後主檔缺席;續寫新主檔。
+        append_raw_line(&ledger, "b1");
+        let rows = read_ledger_rows(&ledger).unwrap();
+        let ids: Vec<_> = rows
+            .iter()
+            .filter_map(|r| r.attempt_id.clone())
+            .collect();
+        assert_eq!(ids, vec!["a1", "a2", "b1"], "跨段讀取須含段檔與新主檔全部行");
+    }
+
+    #[test]
+    fn rotate_and_reopen_switches_fd_to_new_main_after_external_rotation() {
+        // 模擬 Python 側輪轉:外部把主檔 rename 走。writer 持舊 fd,
+        // rotate_and_reopen_if_needed 須偵測 inode 變化並重開到新主檔,
+        // 之後的寫入落在新主檔而非舊段。
+        let tmp = TempDir::new().unwrap();
+        let ledger = tmp.path().join("probe_ledger.jsonl");
+        let (mut bw, _) = open_writer(&ledger).unwrap();
+        let mut identity = crate::demo_learning_lane_rotation::ledger_identity(&ledger);
+        let mut stat = stat_ledger(&ledger).ok().flatten();
+        // 外部(Python)輪轉:把主檔 rename 成段檔。
+        let segment = tmp.path().join("probe_ledger.20260704T120000Z.jsonl");
+        // 先寫一行讓段檔非空。
+        bw.write_all(b"{\"attempt_id\":\"seg1\"}\n").unwrap();
+        bw.flush().unwrap();
+        std::fs::rename(&ledger, &segment).unwrap();
+        // 觸發偵測+重開(閾值大 → 不自轉,純靠 identity 兜底)。
+        rotate_and_reopen_if_needed(&mut bw, &ledger, &mut identity, &mut stat);
+        // 重開後 stat 應被置 None(強制 refresh 全量重讀)。
+        assert!(stat.is_none());
+        // 新寫入落在新主檔;段檔不被污染。
+        bw.write_all(b"{\"attempt_id\":\"main1\"}\n").unwrap();
+        bw.flush().unwrap();
+        let main_content = std::fs::read_to_string(&ledger).unwrap();
+        assert!(main_content.contains("main1"));
+        assert!(!main_content.contains("seg1"), "新主檔不得含段檔的舊行");
+        let seg_content = std::fs::read_to_string(&segment).unwrap();
+        assert!(seg_content.contains("seg1"));
+        assert!(!seg_content.contains("main1"), "重開後不得續寫舊段");
+    }
+
+    #[test]
+    fn rotate_and_reopen_is_noop_for_small_unrotated_ledger() {
+        // 主檔遠低於 50MB 閾值且未被外部輪轉:identity 不變、不重開、不建段,
+        // 驗證 default 路徑 fast path 無副作用(輪轉閾值分支由 rotation 單測覆蓋)。
+        let tmp = TempDir::new().unwrap();
+        let ledger = tmp.path().join("probe_ledger.jsonl");
+        let (mut bw, _) = open_writer(&ledger).unwrap();
+        let mut identity = crate::demo_learning_lane_rotation::ledger_identity(&ledger);
+        let before = identity;
+        let mut stat = stat_ledger(&ledger).ok().flatten();
+        bw.write_all(b"{\"attempt_id\":\"a1\"}\n").unwrap();
+        bw.flush().unwrap();
+        rotate_and_reopen_if_needed(&mut bw, &ledger, &mut identity, &mut stat);
+        assert!(ledger.exists());
+        assert_eq!(identity, before, "小檔未輪轉,fd identity 不應變");
+        assert_eq!(
+            crate::demo_learning_lane_rotation::rotated_segment_paths_for_test(&ledger).len(),
+            0
+        );
     }
 }
