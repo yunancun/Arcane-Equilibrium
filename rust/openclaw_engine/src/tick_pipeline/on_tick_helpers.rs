@@ -681,6 +681,57 @@ impl TickPipeline {
         }
     }
 
+    /// P1-11 (2026-07-04)：bar-close gated 1m 指標。PERF-1 (2026-06-14) 當時只
+    /// gate 了 5m 半邊，1m 側仍每 tick 無條件重算 —— 本函數把同一機制補到 1m。
+    ///
+    /// 語義與 `cached_or_recompute_indicators_5m` 完全同構（timeframe="1m"）：
+    ///   - epoch key = (1m 最後收盤 bar 的 `open_time_ms`, ewma_lambda("1m"))。
+    ///   - epoch 不變則回快取 clone（與每 tick 重算 bit-identical）；新 1m 收盤
+    ///     或 lambda 熱重載則重算並刷新快取 + epoch。
+    ///   - **只快取 `Some`**：重算回 `None`（暖機 / 未知幣種）不動快取、向下游傳 `None`。
+    ///   - scope fence：只 gate「指標重算」。呼叫端（step_1_2）每 tick 仍在回傳
+    ///     的 clone 上執行 hurst 滯回打標（`detector.push` 頻率不變）/
+    ///     latest_indicators 鏡像 / FeatureSnapshot 發送 —— 快取內永遠是未打標
+    ///     的原始快照，clone 上的 mutation 不可能污染快取。
+    pub(super) fn cached_or_recompute_indicators_1m(
+        &mut self,
+        symbol: &str,
+    ) -> Option<IndicatorSnapshot> {
+        // 無 1m 已關閉 K 線（暖機期 / 未知幣種）→ 無法形成穩定 epoch key，直接回
+        // None 不寫快取。此時直接重算也必回 None（compute 端 <30 根 fail-closed），
+        // 兩路徑等價。
+        let last_open_time_ms = self
+            .kline_manager
+            .last_closed_open_time_ms(symbol, "1m")?;
+        let ewma_lambda = self
+            .risk_store
+            .as_ref()
+            .map(|store| store.load().ewma_vol.lambda_for_timeframe("1m"))
+            .unwrap_or(openclaw_core::indicators::DEFAULT_EWMA_VOL_LAMBDA);
+        let epoch = (last_open_time_ms, ewma_lambda);
+
+        // epoch 未變且有快取 → 回 clone（bit-identical 於重算）。
+        if self.perf1_indicators_1m_epoch.get(symbol) == Some(&epoch) {
+            if let Some(cached) = self.perf1_indicators_1m_cache.get(symbol) {
+                return Some(cached.clone());
+            }
+        }
+
+        // epoch 變化 OR 尚無快取 → 重算（compute_indicators = 1m 全套指標）。
+        match self.compute_indicators(symbol) {
+            Some(snapshot) => {
+                // 只快取 Some + 同步 epoch。
+                self.perf1_indicators_1m_cache
+                    .insert(symbol.to_string(), snapshot.clone());
+                self.perf1_indicators_1m_epoch
+                    .insert(symbol.to_string(), epoch);
+                Some(snapshot)
+            }
+            // 重算回 None：不動快取，向下游傳 None（同 5m 側 never-cache-None）。
+            None => None,
+        }
+    }
+
     /// Session 11: Feed trade & orderbook events into 1-minute aggregators.
     /// Flushes happen at minute boundaries → MarketDataMsg::TradeAgg1m / ObSnapshot.
     /// Session 11：將 trade/orderbook 事件餵入 1 分鐘聚合器，跨分鐘時 flush。

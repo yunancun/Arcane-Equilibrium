@@ -61,6 +61,8 @@ mod kline_confirm_persistence;
 mod halt_ttl;
 mod maker_kpi_hot_reload;
 mod per_symbol_price_pnl;
+// P1-11（2026-07-04）：bar-close gated 1m 指標重算快取回歸測試（PERF-1 5m 半邊補全）。
+mod perf1_indicators_1m_cache;
 // PERF-1（2026-06-14）：bar-close gated 5m 指標重算快取回歸測試。
 mod perf1_indicators_5m_cache;
 mod pipeline_kind_governance;
