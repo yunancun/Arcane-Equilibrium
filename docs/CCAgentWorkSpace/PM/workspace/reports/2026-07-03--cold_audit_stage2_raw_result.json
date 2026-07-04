@@ -1,0 +1,2443 @@
+{
+ "scope": "srv/ 全倉（rust engine、control_api、GUI、helper_scripts、.claude 配置、治理文檔）",
+ "axes": [
+  "CC",
+  "FA",
+  "E3",
+  "BB",
+  "QC",
+  "MIT",
+  "AI-E",
+  "E5",
+  "A3",
+  "R4"
+ ],
+ "mode": "report-only",
+ "baseline": null,
+ "coverage_holes": [],
+ "totals": {
+  "findings": 143,
+  "critical_high": 40,
+  "confirmed": 18,
+  "latent": 4,
+  "disputed": 18,
+  "clusters": 9,
+  "multi_axis_clusters": 0,
+  "ungrouped": 9,
+  "assumptions": 93,
+  "seam_reprobes": 12
+ },
+ "report_paths": [
+  {
+   "axis": "CC",
+   "report": "srv/docs/CCAgentWorkSpace/CC/workspace/reports/2026-07-03--full_repo_compliance_audit.md"
+  },
+  {
+   "axis": "FA",
+   "report": "docs/CCAgentWorkSpace/FA/workspace/reports/2026-07-03--full_repo_functional_audit.md"
+  },
+  {
+   "axis": "E3",
+   "report": "docs/CCAgentWorkSpace/E3/memory.md (index line appended; full findings inline per harness no-.md rule)"
+  },
+  {
+   "axis": "BB",
+   "report": "srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-07-03--bybit_api_compat_audit.md"
+  },
+  {
+   "axis": "QC",
+   "report": "docs/CCAgentWorkSpace/QC/workspace/reports/2026-07-03--qc-full-repo-math-audit.md"
+  },
+  {
+   "axis": "MIT",
+   "report": "srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-07-03--ml-db-full-repo-audit.md"
+  },
+  {
+   "axis": "AI-E",
+   "report": "docs/CCAgentWorkSpace/AI-E/workspace/reports/2026-07-03--ai_cost_full_repo_audit.md"
+  },
+  {
+   "axis": "E5",
+   "report": "docs/CCAgentWorkSpace/E5/workspace/reports/2026-07-03--full_repo_optimization_audit.md"
+  },
+  {
+   "axis": "A3",
+   "report": "docs/CCAgentWorkSpace/A3/workspace/reports/2026-07-03--gui_ux_full_audit.md"
+  },
+  {
+   "axis": "R4",
+   "report": "srv/docs/CCAgentWorkSpace/R4/workspace/reports/2026-07-03--doc_cross_reference_full_audit.md"
+  }
+ ],
+ "consensus": [
+  {
+   "key": "docs/references/2026-04-04--bybit_api_reference.md::docs/references/2026-04-04--bybit_api_reference.md §4.1 rate 表（line 1319-1336）",
+   "hit_axes": [
+    "BB"
+   ],
+   "multi_axis": false,
+   "severities": [
+    "HIGH"
+   ],
+   "defect_types": [
+    "doc-stale",
+    "drift-source-runtime"
+   ],
+   "members": [
+    {
+     "axis": "BB",
+     "severity": "HIGH",
+     "title": "字典 §4.1 rate-limit SSOT erratum 未修（BB-1 2026-06-14 第二輪重申），與官方 per-endpoint 模型全面矛盾且字典內部自相矛盾",
+     "file": "srv/docs/references/2026-04-04--bybit_api_reference.md",
+     "anchor": "docs/references/2026-04-04--bybit_api_reference.md §4.1 rate 表（line 1319-1336）",
+     "defect_type": [
+      "doc-stale",
+      "drift-source-runtime"
+     ],
+     "reachable": null
+    }
+   ]
+  },
+  {
+   "key": "rust/openclaw_engine/src/execution_listener.rs::trading.fills.strategy_name='unattributed:bybit_auto' / order_state_changes.to_status='working'",
+   "hit_axes": [
+    "BB"
+   ],
+   "multi_axis": false,
+   "severities": [
+    "MEDIUM"
+   ],
+   "defect_types": [
+    "lineage-gap"
+   ],
+   "members": [
+    {
+     "axis": "BB",
+     "severity": "MEDIUM",
+     "title": "fill lineage 缺口持續活躍：unattributed:bybit_auto fills 仍在發生 + 本地 Working 尾態 111 筆與交易所實況脫節",
+     "file": "srv/rust/openclaw_engine/src/execution_listener.rs",
+     "anchor": "trading.fills.strategy_name='unattributed:bybit_auto' / order_state_changes.to_status='Working'",
+     "defect_type": [
+      "lineage-gap"
+     ],
+     "reachable": null
+    }
+   ]
+  },
+  {
+   "key": "rust/openclaw_engine/src/order_manager.rs::order_manager.rs::place_order order body（缺 rpitakeraccess 欄）",
+   "hit_axes": [
+    "BB"
+   ],
+   "multi_axis": false,
+   "severities": [
+    "MEDIUM"
+   ],
+   "defect_types": [
+    "evolution-blocker",
+    "other"
+   ],
+   "members": [
+    {
+     "axis": "BB",
+     "severity": "MEDIUM",
+     "title": "rpiTakerAccess 機會第三輪未取（changelog 2026-06-03，full rollout 06-12；BB 06-14 已裁決安全可用）",
+     "file": "srv/rust/openclaw_engine/src/order_manager.rs",
+     "anchor": "order_manager.rs::place_order order body（缺 rpiTakerAccess 欄）",
+     "defect_type": [
+      "evolution-blocker",
+      "other"
+     ],
+     "reachable": null
+    }
+   ]
+  },
+  {
+   "key": "helper_scripts/research/cost_gate_learning_lane/outcome_writer.py::probeoutcomeconfig.cost_bps",
+   "hit_axes": [
+    "QC"
+   ],
+   "multi_axis": false,
+   "severities": [
+    "HIGH"
+   ],
+   "defect_types": [
+    "replay-misuse",
+    "math-error",
+    "test-blindspot"
+   ],
+   "members": [
+    {
+     "axis": "QC",
+     "severity": "HIGH",
+     "title": "Blocked-signal 反事實 markout 假設 fill-at-signal-price + 平價 cost_bps=4.0，成本非保守且與同 cell realized edge 直接矛盾",
+     "file": "helper_scripts/research/cost_gate_learning_lane/outcome_writer.py",
+     "anchor": "ProbeOutcomeConfig.cost_bps",
+     "defect_type": [
+      "replay-misuse",
+      "math-error",
+      "test-blindspot"
+     ],
+     "reachable": "reachable"
+    }
+   ]
+  },
+  {
+   "key": "helper_scripts/research/cost_gate_learning_lane/standing_demo_loss_control_envelope_review.py:52::default_authorization_ttl_hours",
+   "hit_axes": [
+    "QC"
+   ],
+   "multi_axis": false,
+   "severities": [
+    "HIGH"
+   ],
+   "defect_types": [
+    "over-gate",
+    "evolution-blocker"
+   ],
+   "members": [
+    {
+     "axis": "QC",
+     "severity": "HIGH",
+     "title": "Standing envelope refresh 死循環 = 負淨貢獻 gate（v710-v738 拒真率 100%；d0eeafb41 修判準側，TTL 12h 側殘留）",
+     "file": "helper_scripts/research/cost_gate_learning_lane/standing_demo_loss_control_envelope_review.py:52",
+     "anchor": "DEFAULT_AUTHORIZATION_TTL_HOURS",
+     "defect_type": [
+      "over-gate",
+      "evolution-blocker"
+     ],
+     "reachable": null
+    }
+   ]
+  },
+  {
+   "key": "rust/openclaw_engine/src/demo_learning_lane.rs:44::admissionconfig.min_failed_outcomes_to_disable",
+   "hit_axes": [
+    "QC"
+   ],
+   "multi_axis": false,
+   "severities": [
+    "MEDIUM"
+   ],
+   "defect_types": [
+    "test-blindspot",
+    "evolution-blocker"
+   ],
+   "members": [
+    {
+     "axis": "QC",
+     "severity": "MEDIUM",
+     "title": "Bounded probe 預算 n=2/cell 對 cushion 假設檢定 power≈8%——evidence ladder 結構性 stall 風險",
+     "file": "rust/openclaw_engine/src/demo_learning_lane.rs:44",
+     "anchor": "AdmissionConfig.min_failed_outcomes_to_disable",
+     "defect_type": [
+      "test-blindspot",
+      "evolution-blocker"
+     ],
+     "reachable": null
+    }
+   ]
+  },
+  {
+   "key": "program_code/ml_training/parquet_etl.py:459::_load_training_data_sql",
+   "hit_axes": [
+    "MIT"
+   ],
+   "multi_axis": false,
+   "severities": [
+    "HIGH"
+   ],
+   "defect_types": [
+    "leakage",
+    "evolution-blocker",
+    "fake-success",
+    "schema-issue"
+   ],
+   "members": [
+    {
+     "axis": "MIT",
+     "severity": "HIGH",
+     "title": "訓練集 99.9% 合成 0.0 reject label 污染 — quantile/scorer lane 結構性永久 degenerate",
+     "file": "program_code/ml_training/parquet_etl.py:459",
+     "anchor": "_LOAD_TRAINING_DATA_SQL",
+     "defect_type": [
+      "leakage",
+      "evolution-blocker",
+      "fake-success",
+      "schema-issue"
+     ],
+     "reachable": "reachable"
+    }
+   ]
+  },
+  {
+   "key": "rust/openclaw_engine/src/main_pipelines.rs:493::feature_tx",
+   "hit_axes": [
+    "MIT"
+   ],
+   "multi_axis": false,
+   "severities": [
+    "HIGH"
+   ],
+   "defect_types": [
+    "drift-source-runtime",
+    "missing-gate",
+    "evolution-blocker",
+    "dead-code"
+   ],
+   "members": [
+    {
+     "axis": "MIT",
+     "severity": "HIGH",
+     "title": "G3 drift 偵測 lane 全鏈 no-op：feature_tx 只接 paper pipeline，features.online_latest 凍結 2026-05-06",
+     "file": "rust/openclaw_engine/src/main_pipelines.rs:493",
+     "anchor": "feature_tx",
+     "defect_type": [
+      "drift-source-runtime",
+      "missing-gate",
+      "evolution-blocker",
+      "dead-code"
+     ],
+     "reachable": "reachable"
+    }
+   ]
+  },
+  {
+   "key": "helper_scripts/db/passive_wait_healthcheck.py::passive_wait_healthcheck_cron.sh",
+   "hit_axes": [
+    "MIT"
+   ],
+   "multi_axis": false,
+   "severities": [
+    "HIGH"
+   ],
+   "defect_types": [
+    "missing-gate",
+    "lineage-gap",
+    "other"
+   ],
+   "members": [
+    {
+     "axis": "MIT",
+     "severity": "HIGH",
+     "title": "2026-06-27 crontab 置換殺死 ~20 條 evidence/monitor lane；passive_wait_healthcheck（90+ 檢查）未倖存 = 監測自盲",
+     "file": "helper_scripts/db/passive_wait_healthcheck.py",
+     "anchor": "passive_wait_healthcheck_cron.sh",
+     "defect_type": [
+      "missing-gate",
+      "lineage-gap",
+      "other"
+     ],
+     "reachable": "reachable"
+    }
+   ]
+  }
+ ],
+ "ungrouped": [
+  {
+   "axis": "CC",
+   "severity": "MEDIUM",
+   "title": "runtime git reset + engine restart（03:02-04:21 CEST）缺鏈接的 mutation 紀錄（DOC-06 缺口）",
+   "anchor": "restart_all.sh / git reset (runtime ops)",
+   "defect_type": [
+    "lineage-gap",
+    "drift-source-runtime"
+   ],
+   "reachable": null
+  },
+  {
+   "axis": "CC",
+   "severity": "MEDIUM",
+   "title": "over-gate：v710-v738 exact-sha 批准死循環凍結已授權 Demo 自主迴圈（原則 11/12 雙向審）",
+   "anchor": "standing_envelope_post_approval_drift_gate.py::docs_tests_codex_exempt_v1",
+   "defect_type": [
+    "over-gate",
+    "evolution-blocker"
+   ],
+   "reachable": null
+  },
+  {
+   "axis": "FA",
+   "severity": "HIGH",
+   "title": "學習 SSOT 與全部治理證據 artifact 位於 boot-volatile /tmp（開機清空 + 30d age 清理）",
+   "anchor": "OPENCLAW_DATA_DIR / OPENCLAW_DEMO_LEARNING_LANE_LEDGER",
+   "defect_type": [
+    "lineage-gap",
+    "hardcoded-config",
+    "schema-issue"
+   ],
+   "reachable": null
+  },
+  {
+   "axis": "FA",
+   "severity": "HIGH",
+   "title": "06-27 crontab 重寫（70→5 行）無記錄地移除 ~12 個既有 producer cron，學習/審計上游斷供",
+   "anchor": "crontab(user=ncyu)::edge_label_backfill_cron / canary_audit_pg_writer",
+   "defect_type": [
+    "evolution-blocker",
+    "lineage-gap",
+    "drift-source-runtime"
+   ],
+   "reachable": null
+  },
+  {
+   "axis": "FA",
+   "severity": "HIGH",
+   "title": "over-gate：bounded probe lane 100% 凍結 — plan-stale × standing-auth-expired × E3/BB exact-head 死循環，零 probe outcome",
+   "anchor": "max_plan_age_hours / PLAN_STALE_OR_MISSING_GENERATED_AT / expires_at_utc",
+   "defect_type": [
+    "over-gate",
+    "evolution-blocker"
+   ],
+   "reachable": null
+  },
+  {
+   "axis": "FA",
+   "severity": "HIGH",
+   "title": "cron expected-head pins 再度 stale → 健康面長期 SOURCE_NOT_READY（06-24 已修類別一週內復發）",
+   "anchor": "OPENCLAW_DEMO_LEARNING_STACK_HEALTHCHECK_EXPECTED_HEAD / OPENCLAW_EXPECTED_SOURCE_HEAD",
+   "defect_type": [
+    "hardcoded-config",
+    "drift-source-runtime",
+    "index-broken"
+   ],
+   "reachable": null
+  },
+  {
+   "axis": "FA",
+   "severity": "MEDIUM",
+   "title": "SPECIFICATION_REGISTER 模組欄漂移：protective_order_manager.py / oms_state_machine.py 不存在；openclaw_core sm/oms.rs 為死碼",
+   "anchor": "SPECIFICATION_REGISTER.md::DOC-01/SM-03 Module 欄",
+   "defect_type": [
+    "doc-stale",
+    "dead-code",
+    "lineage-gap"
+   ],
+   "reachable": null
+  },
+  {
+   "axis": "FA",
+   "severity": "MEDIUM",
+   "title": "唯一活躍成交通道 flash_dip_buy 30d 淨 -7.04 USDT；unattributed fills 殘留（lineage gap 低量持續）",
+   "anchor": "trading.fills.strategy_name='flash_dip_buy' / 'unattributed:bybit_auto'",
+   "defect_type": [
+    "lineage-gap",
+    "other"
+   ],
+   "reachable": null
+  },
+  {
+   "axis": "AI-E",
+   "severity": "HIGH",
+   "title": "L1 Strategist 調參迴圈自 2026-06-24 全停——AI 棧唯一活躍層歸零，根因在上游 fills 斷流",
+   "anchor": "gather_strategy_metrics / MIN_FILLS(HAVING >=30)",
+   "defect_type": [
+    "evolution-blocker",
+    "drift-source-runtime"
+   ],
+   "reachable": null
+  }
+ ],
+ "latent": [
+  {
+   "axis": "FA",
+   "severity": "MEDIUM",
+   "title": "AI 治理環節 30d 零調用；E2E-1 L2 真模型調用驗證缺口未閉",
+   "anchor": "agent.ai_invocations / DEFAULT_DAILY_HARD_CAP_USD",
+   "defect_type": [
+    "missing-gate",
+    "untruthful-ai",
+    "lineage-gap"
+   ],
+   "reachable": "latent"
+  },
+  {
+   "axis": "BB",
+   "severity": "HIGH",
+   "title": "公告哨兵 cron 條目自 2026-06-27 從 trade-core crontab 消失，delisting/maintenance P0 watch 停擺 ~6 天",
+   "file": "srv/helper_scripts/cron/bybit_announcement_sentinel_cron.sh",
+   "anchor": "crontab::bybit_announcement_sentinel_cron.sh (7,37 * * * *)",
+   "defect_type": [
+    "missing-gate",
+    "drift-source-runtime"
+   ],
+   "reachable": "latent"
+  },
+  {
+   "axis": "AI-E",
+   "severity": "HIGH",
+   "title": "DOC-08 $2/日硬上限在 Rust 自主路徑無 enforcement 腿；daily_usd_max 為假功能參數（06-14 F1 未修）",
+   "anchor": "daily_usd_max",
+   "defect_type": [
+    "missing-gate",
+    "dead-code",
+    "hardcoded-config"
+   ],
+   "reachable": "latent"
+  },
+  {
+   "axis": "AI-E",
+   "severity": "HIGH",
+   "title": "L1 AI 調用觀測 writer 默認 OFF——ai_invocations 空表懸案（E.1/NEW-5）終判：一個 env var 之遙",
+   "anchor": "OPENCLAW_AGENT_EVENT_STORE_ENABLED",
+   "defect_type": [
+    "missing-gate",
+    "lineage-gap"
+   ],
+   "reachable": "latent"
+  }
+ ],
+ "disputed": [
+  {
+   "axis": "AI-E",
+   "severity": "HIGH",
+   "title": "原則 13 cost_edge_ratio≥0.8 關倉鐵則雙腿全 dormant 且無 re-arm 追蹤",
+   "anchor": "cost_edge.enabled / cost_edge_max_ratio",
+   "defect_type": [
+    "missing-gate",
+    "evolution-blocker",
+    "doc-stale"
+   ],
+   "reachable": "latent"
+  },
+  {
+   "axis": "AI-E",
+   "severity": "MEDIUM",
+   "title": "MLDE shadow 產出量較 06-13 基線衰減 ~83%（同饑餓根因，仍 fresh）",
+   "anchor": "mlde_shadow_recommendations.ts",
+   "defect_type": [
+    "evolution-blocker"
+   ],
+   "reachable": null
+  },
+  {
+   "axis": "AI-E",
+   "severity": "MEDIUM",
+   "title": "Cloud L2 雙路徑 key/開關錯位：$2/日預算頭寸 100% 閒置持續 ~3 個月",
+   "anchor": "set_teacher_loop_enabled / ANTHROPIC_API_KEY",
+   "defect_type": [
+    "over-gate",
+    "evolution-blocker"
+   ],
+   "reachable": null
+  },
+  {
+   "axis": "AI-E",
+   "severity": "MEDIUM",
+   "title": "L2 memory recall 永久 dormant：agent.l2_call_ledger 表不存在，99 條 embedded 教訓 0 召回",
+   "anchor": "OPENCLAW_L2_MEMORY_RECALL",
+   "defect_type": [
+    "dead-code",
+    "evolution-blocker",
+    "schema-issue"
+   ],
+   "reachable": null
+  },
+  {
+   "axis": "AI-E",
+   "severity": "MEDIUM",
+   "title": "AI-E 報告 lineage gap：memory 索引的 06-13/06-14 兩份報告在 Mac/Linux/git 全史皆不存在",
+   "anchor": "AI-E/memory.md 報告索引",
+   "defect_type": [
+    "lineage-gap",
+    "doc-stale"
+   ],
+   "reachable": null
+  },
+  {
+   "axis": "E5",
+   "severity": "HIGH",
+   "title": "1m 指標每 tick 無條件重算——PERF-1 只落地 5m 半邊，Phase 2 未做",
+   "file": "rust/openclaw_engine/src/tick_pipeline/on_tick/step_1_2_klines_indicators.rs",
+   "anchor": "compute_indicators",
+   "defect_type": [
+    "perf-hotpath"
+   ],
+   "reachable": null
+  },
+  {
+   "axis": "E5",
+   "severity": "HIGH",
+   "title": "Linux PG 全出廠默認配置，違背 CLAUDE.md 4-8GB 預算——cache hit 僅 62.38%",
+   "file": "Linux trade-core PG runtime（trading_ai）",
+   "anchor": "shared_buffers",
+   "defect_type": [
+    "drift-source-runtime",
+    "perf-hotpath",
+    "hardcoded-config"
+   ],
+   "reachable": null
+  },
+  {
+   "axis": "E5",
+   "severity": "HIGH",
+   "title": "TODO.md 233 行卻 59,562 tokens，超 Read 25k cap——agent 讀不到 Active Queue",
+   "file": "TODO.md",
+   "anchor": "§0 Current Facts 表格 rows",
+   "defect_type": [
+    "readability-debt",
+    "doc-stale",
+    "other"
+   ],
+   "reachable": null
+  },
+  {
+   "axis": "E5",
+   "severity": "HIGH",
+   "title": "13 個 git-tracked 源檔破 2000 行硬限（06-14 審計時 0 檔），無 documented exception",
+   "file": "helper_scripts/research/*、rust/openclaw_engine/src/*（13 檔全清單見報告 F4 表）",
+   "anchor": "discovery_loop.py(5954)/runtime_runner.py(4500)/step_4_5_dispatch.rs(2193)/commands.rs(2266)/intent_processor/mod.rs(2032)/engine_watchdog.py(2412) 等",
+   "defect_type": [
+    "readability-debt",
+    "evolution-blocker"
+   ],
+   "reachable": null
+  },
+  {
+   "axis": "E5",
+   "severity": "HIGH",
+   "title": "cost_gate_learning_lane 87 檔 63.6k LOC 複製貼上叢——治理判準 _authority_preserved ×32 字面複製",
+   "file": "helper_scripts/research/cost_gate_learning_lane/",
+   "anchor": "_authority_preserved / _utc_now / _read_json / _build_parser",
+   "defect_type": [
+    "duplicate-logic",
+    "readability-debt",
+    "leakage"
+   ],
+   "reachable": "reachable"
+  },
+  {
+   "axis": "A3",
+   "severity": "HIGH",
+   "title": "Console header 全局 mode badge 硬編碼 'shadow_only'，永不更新 — 常駐頂欄的假模式資訊",
+   "anchor": "mode-tag",
+   "defect_type": [
+    "hardcoded-config",
+    "fake-success",
+    "drift-source-runtime"
+   ],
+   "reachable": null
+  },
+  {
+   "axis": "A3",
+   "severity": "HIGH",
+   "title": "「緊急停止」與「停止 Live」呼叫完全相同的 endpoint+body，但 modal 承諾不同語義（封鎖引擎/需手動解除 vs 停止授權租約）",
+   "anchor": "doEmergencyStop",
+   "defect_type": [
+    "duplicate-logic",
+    "fake-success",
+    "doc-stale",
+    "other"
+   ],
+   "reachable": null
+  },
+  {
+   "axis": "A3",
+   "severity": "MEDIUM",
+   "title": "Risk Governor 降級 override：pending_approval 分支回 ok:true，前端顯示『風險等級已降級』成功 toast（fake-success）",
+   "anchor": "submitRiskOverride",
+   "defect_type": [
+    "fake-success",
+    "over-gate"
+   ],
+   "reachable": null
+  },
+  {
+   "axis": "A3",
+   "severity": "MEDIUM",
+   "title": "README tab 表（A3 的 tab 結構權威源）與 console 實際 TABS 漂移：漏 stock-etf 與 charts、仍列已移除的 phase4",
+   "anchor": "TABS",
+   "defect_type": [
+    "doc-stale",
+    "dead-code",
+    "lineage-gap"
+   ],
+   "reachable": null
+  },
+  {
+   "axis": "R4",
+   "severity": "HIGH",
+   "title": "TODO.md 膨脹至 ~59.5K tokens / 234 行，masthead 與 §0 違反自家 todo-maintenance 標準（高頻讀檔 token 稅）",
+   "anchor": "TODO.md::masthead+§0",
+   "defect_type": [
+    "readability-debt",
+    "doc-stale",
+    "other"
+   ],
+   "reachable": null
+  },
+  {
+   "axis": "R4",
+   "severity": "HIGH",
+   "title": "PM memory.md 4352 行（壓實閾值 300 的 14.5 倍）；另 E4/E1/MIT/E2/PA 共 5 檔超標",
+   "anchor": "docs/CCAgentWorkSpace/PM/memory.md",
+   "defect_type": [
+    "readability-debt"
+   ],
+   "reachable": null
+  },
+  {
+   "axis": "R4",
+   "severity": "MEDIUM",
+   "title": "L2_TODO.md 鏡像指針斷鏈：TODO.md 已無 row `P1-L2-ADVISORY-MESH-TAILS`，L2 未閉尾巴失去 active queue 錨點",
+   "anchor": "L2_TODO.md::P1-L2-ADVISORY-MESH-TAILS",
+   "defect_type": [
+    "lineage-gap",
+    "index-broken",
+    "doc-stale"
+   ],
+   "reachable": null
+  },
+  {
+   "axis": "R4",
+   "severity": "MEDIUM",
+   "title": "DOC-05（真相源與所有權矩陣 V1.1）缺席 SPECIFICATION_REGISTER Active DOC 表，亦不在 DEPRECATED.md 中央退役索引",
+   "anchor": "SPECIFICATION_REGISTER.md::DOC 表",
+   "defect_type": [
+    "lineage-gap",
+    "doc-stale"
+   ],
+   "reachable": null
+  }
+ ],
+ "medium_low_info": [
+  {
+   "axis": "CC",
+   "severity": "MEDIUM",
+   "title": "TODO §0 runtime 事實漂移：repo head/PID/sync 狀態全部 stale（G6-04）",
+   "anchor": "TODO.md §0 'Runtime sync/materialization state'",
+   "defect_type": [
+    "drift-source-runtime",
+    "doc-stale"
+   ]
+  },
+  {
+   "axis": "CC",
+   "severity": "MEDIUM",
+   "title": "runtime git reset + engine restart（03:02-04:21 CEST）缺鏈接的 mutation 紀錄（DOC-06 缺口）",
+   "anchor": "restart_all.sh / git reset (runtime ops)",
+   "defect_type": [
+    "lineage-gap",
+    "drift-source-runtime"
+   ]
+  },
+  {
+   "axis": "CC",
+   "severity": "MEDIUM",
+   "title": "2000 行硬上限 9 個生產檔超標且無 documented exception",
+   "anchor": "discovery_loop.py / runtime_runner.py / status.py / step_4_5_dispatch.rs / intent_processor/mod.rs",
+   "defect_type": [
+    "readability-debt"
+   ]
+  },
+  {
+   "axis": "CC",
+   "severity": "MEDIUM",
+   "title": "over-gate：v710-v738 exact-sha 批准死循環凍結已授權 Demo 自主迴圈（原則 11/12 雙向審）",
+   "anchor": "standing_envelope_post_approval_drift_gate.py::docs_tests_codex_exempt_v1",
+   "defect_type": [
+    "over-gate",
+    "evolution-blocker"
+   ]
+  },
+  {
+   "axis": "CC",
+   "severity": "LOW",
+   "title": "earn_router 審計 lineage 占位 sentinel governance_approval_id=0",
+   "anchor": "earn_router.rs::governance_approval_id",
+   "defect_type": [
+    "lineage-gap"
+   ]
+  },
+  {
+   "axis": "CC",
+   "severity": "LOW",
+   "title": "AgentTool 訪問分類與代碼自述雙向漂移（DreamEngine/OpportunityTracker）",
+   "anchor": "dream_engine.py::persist_dream_insights",
+   "defect_type": [
+    "doc-stale",
+    "other"
+   ]
+  },
+  {
+   "axis": "CC",
+   "severity": "INFO",
+   "title": "advisory 面 max_retries=1 為合規例外（指紋掃描假陽性候選）",
+   "anchor": "l2_advisory_orchestrator.py::max_retries",
+   "defect_type": [
+    "other"
+   ]
+  },
+  {
+   "axis": "CC",
+   "severity": "LOW",
+   "title": "Demo API key 遮罩片段常態化寫入 TODO.md",
+   "anchor": "TODO.md §0 'Bounded Demo soak runtime state' row",
+   "defect_type": [
+    "secret-leak"
+   ]
+  },
+  {
+   "axis": "CC",
+   "severity": "INFO",
+   "title": "IMPL-A dispatch-edge containment 源碼已進 runtime checkout、running binary 未含",
+   "anchor": "demo_learning_lane_soak_gate.rs / OPENCLAW_BOUNDED_PROBE_SOAK flag",
+   "defect_type": [
+    "drift-source-runtime"
+   ]
+  },
+  {
+   "axis": "CC",
+   "severity": "LOW",
+   "title": "standing auth 過期後內嵌 status 仍為 STANDING_DEMO_AUTHORIZATION_ACTIVE",
+   "anchor": "standing_demo_operator_authorization.json::status",
+   "defect_type": [
+    "fake-success",
+    "schema-issue"
+   ]
+  },
+  {
+   "axis": "CC",
+   "severity": "INFO",
+   "title": "Mac memory/ 髒樹懸掛：R4 巡檢 8 組 MERGE 未 commit（44 modified + 47 untracked）",
+   "anchor": "memory/ (uncommitted R4 merge output)",
+   "defect_type": [
+    "other"
+   ]
+  },
+  {
+   "axis": "CC",
+   "severity": "INFO",
+   "title": "硬邊界 + 9 安全不變量全面 PASS（正向確認）",
+   "anchor": "live_authorization.rs / OPENCLAW_ALLOW_MAINNET / max_retries",
+   "defect_type": [
+    "other"
+   ]
+  },
+  {
+   "axis": "FA",
+   "severity": "MEDIUM",
+   "title": "AI 治理環節 30d 零調用；E2E-1 L2 真模型調用驗證缺口未閉",
+   "anchor": "agent.ai_invocations / DEFAULT_DAILY_HARD_CAP_USD",
+   "defect_type": [
+    "missing-gate",
+    "untruthful-ai",
+    "lineage-gap"
+   ]
+  },
+  {
+   "axis": "FA",
+   "severity": "MEDIUM",
+   "title": "SPECIFICATION_REGISTER 模組欄漂移：protective_order_manager.py / oms_state_machine.py 不存在；openclaw_core sm/oms.rs 為死碼",
+   "anchor": "SPECIFICATION_REGISTER.md::DOC-01/SM-03 Module 欄",
+   "defect_type": [
+    "doc-stale",
+    "dead-code",
+    "lineage-gap"
+   ]
+  },
+  {
+   "axis": "FA",
+   "severity": "MEDIUM",
+   "title": "cost_gate_learning_lane 治理 helper 面積膨脹：86 檔 / 4.4MB，一次性 packet helper 邏輯重複",
+   "anchor": "helper_scripts/research/cost_gate_learning_lane/",
+   "defect_type": [
+    "readability-debt",
+    "duplicate-logic"
+   ]
+  },
+  {
+   "axis": "FA",
+   "severity": "MEDIUM",
+   "title": "唯一活躍成交通道 flash_dip_buy 30d 淨 -7.04 USDT；unattributed fills 殘留（lineage gap 低量持續）",
+   "anchor": "trading.fills.strategy_name='flash_dip_buy' / 'unattributed:bybit_auto'",
+   "defect_type": [
+    "lineage-gap",
+    "other"
+   ]
+  },
+  {
+   "axis": "FA",
+   "severity": "LOW",
+   "title": "SCRIPT_INDEX.md 未收錄 7/86 lane helpers（違 CLAUDE §七）",
+   "anchor": "helper_scripts/SCRIPT_INDEX.md",
+   "defect_type": [
+    "index-broken",
+    "doc-stale"
+   ]
+  },
+  {
+   "axis": "FA",
+   "severity": "LOW",
+   "title": "治理 .docx→.md 轉檔 SOP 腳本不存在（governance_docx_to_md.py 缺）",
+   "anchor": ".claude/skills/spec-compliance::governance_docx_to_md.py",
+   "defect_type": [
+    "doc-stale",
+    "other"
+   ]
+  },
+  {
+   "axis": "FA",
+   "severity": "INFO",
+   "title": "alpha_tournament orchestrator 仍為 stub（進化環節主要缺口，register 標註誠實）",
+   "anchor": "tournament_orchestrator.py::ranking_logic",
+   "defect_type": [
+    "dead-code",
+    "evolution-blocker"
+   ]
+  },
+  {
+   "axis": "FA",
+   "severity": "INFO",
+   "title": "Stage0R residual preflight dormant：flag 預設 0 且 cron 未安裝",
+   "anchor": "OPENCLAW_RESIDUAL_STAGE0R_PREFLIGHT",
+   "defect_type": [
+    "other"
+   ]
+  },
+  {
+   "axis": "FA",
+   "severity": "INFO",
+   "title": "TODO.md v738 runtime facts 已被 overnight 進展超越（PID/writer/head 均變）",
+   "anchor": "TODO.md::Source/runtime pointer",
+   "defect_type": [
+    "doc-stale",
+    "drift-source-runtime"
+   ]
+  },
+  {
+   "axis": "FA",
+   "severity": "INFO",
+   "title": "硬邊界正向驗證：無違反（mainnet=0 / stock_etf GET-only / 無硬編碼路徑 / .claude 完整 / DEPRECATED 紀律良好）",
+   "anchor": "OPENCLAW_ALLOW_MAINNET",
+   "defect_type": [
+    "other"
+   ]
+  },
+  {
+   "axis": "E3",
+   "severity": "LOW",
+   "title": "POLICY-1 Gate-5 (signed authorization.json) exemption is triggered by a self-asserted client boolean with no server-side halt-state verification",
+   "file": "program_code/exchange_connectors/bybit_connector/control_api_v1/app/risk_routes.py:734",
+   "anchor": "operator_override",
+   "defect_type": [
+    "auth-bypass",
+    "over-gate",
+    "missing-gate"
+   ]
+  },
+  {
+   "axis": "E3",
+   "severity": "LOW",
+   "title": "_attach_live_token_if_live mints a live capability token unconditionally when engine=='live'; 5-gate safety depends on every caller being operator-gated (fragile invariant)",
+   "file": "program_code/exchange_connectors/bybit_connector/control_api_v1/app/risk_view_client.py:43",
+   "anchor": "_attach_live_token_if_live",
+   "defect_type": [
+    "auth-bypass",
+    "evolution-blocker",
+    "test-blindspot"
+   ]
+  },
+  {
+   "axis": "E3",
+   "severity": "INFO",
+   "title": "IBKR stock_etf lane is dormant source fixtures — no live broker surface (confirmed clean per ADR-0048)",
+   "file": "rust/openclaw_engine/src/ipc_server/handlers/stock_etf.rs:186",
+   "anchor": "ibkr_live_enabled",
+   "defect_type": [
+    "other"
+   ]
+  },
+  {
+   "axis": "E3",
+   "severity": "INFO",
+   "title": "Bybit credential write path (POST /settings/api-key/{slot}) is well-hardened",
+   "file": "program_code/exchange_connectors/bybit_connector/control_api_v1/app/settings_routes.py:1390",
+   "anchor": "save_api_key",
+   "defect_type": [
+    "other"
+   ]
+  },
+  {
+   "axis": "E3",
+   "severity": "INFO",
+   "title": "Strategy-write / promotion / layer2-cost write endpoints all operator-gated; baseline HIGH-1 remains closed",
+   "file": "program_code/exchange_connectors/bybit_connector/control_api_v1/app/strategy_write_routes.py:40",
+   "anchor": "_require_strategy_write",
+   "defect_type": [
+    "other"
+   ]
+  },
+  {
+   "axis": "E3",
+   "severity": "INFO",
+   "title": "f-string SQL in ml_routes.py:238 and earn_routes.py:988 are parameterized (false-positive candidates)",
+   "file": "program_code/exchange_connectors/bybit_connector/control_api_v1/app/ml_routes.py:238",
+   "anchor": "list_model_registry",
+   "defect_type": [
+    "other"
+   ]
+  },
+  {
+   "axis": "E3",
+   "severity": "INFO",
+   "title": "shell=True in deploy helper runtime_source_reconcile_apply.py is shlex.quote-protected and operator-gated",
+   "file": "helper_scripts/deploy/runtime_source_reconcile_apply.py:63",
+   "anchor": "LocalShellClient.run_shell",
+   "defect_type": [
+    "readability-debt"
+   ]
+  },
+  {
+   "axis": "E3",
+   "severity": "INFO",
+   "title": "Core security baselines intact since 976d420e — 5-gate SSOT, IPC socket 0600+HMAC, CORS/rate-limit, secret hygiene, production-unsafe-free",
+   "file": "program_code/exchange_connectors/bybit_connector/control_api_v1/app/live_preflight.py:168",
+   "anchor": "verify_signed_authorization",
+   "defect_type": [
+    "other"
+   ]
+  },
+  {
+   "axis": "BB",
+   "severity": "MEDIUM",
+   "title": "哨兵 heartbeat 無年齡監控消費者，停擺 6 天零告警",
+   "file": "srv/helper_scripts/cron/bybit_announcement_sentinel_cron.sh",
+   "anchor": "cron_heartbeat/bybit_announcement_sentinel.last_fire",
+   "defect_type": [
+    "test-blindspot",
+    "missing-gate"
+   ]
+  },
+  {
+   "axis": "BB",
+   "severity": "MEDIUM",
+   "title": "Rust client rate 註釋三處三值 + per-prefix 分組模型與官方 per-endpoint 配額結構不符（BB-2/BB-3 持續）",
+   "file": "srv/rust/openclaw_engine/src/bybit_rest_client.rs",
+   "anchor": "RateLimitGroup / RateLimitState::default / group_backoff_threshold",
+   "defect_type": [
+    "doc-stale",
+    "readability-debt"
+   ]
+  },
+  {
+   "axis": "BB",
+   "severity": "MEDIUM",
+   "title": "Python client live_demo 憑證解析仍允許 env-var fallback，與 Rust P1-08 live-slot 禁令 drift（latent provenance gap）",
+   "file": "srv/program_code/exchange_connectors/bybit_connector/control_api_v1/app/bybit_rest_client.py",
+   "anchor": "_resolve_credentials（is_mainnet 判斷應為 is_live_slot）",
+   "defect_type": [
+    "drift-source-runtime",
+    "auth-bypass"
+   ]
+  },
+  {
+   "axis": "BB",
+   "severity": "MEDIUM",
+   "title": "fill lineage 缺口持續活躍：unattributed:bybit_auto fills 仍在發生 + 本地 Working 尾態 111 筆與交易所實況脫節",
+   "file": "srv/rust/openclaw_engine/src/execution_listener.rs",
+   "anchor": "trading.fills.strategy_name='unattributed:bybit_auto' / order_state_changes.to_status='Working'",
+   "defect_type": [
+    "lineage-gap"
+   ]
+  },
+  {
+   "axis": "BB",
+   "severity": "MEDIUM",
+   "title": "rpiTakerAccess 機會第三輪未取（changelog 2026-06-03，full rollout 06-12；BB 06-14 已裁決安全可用）",
+   "file": "srv/rust/openclaw_engine/src/order_manager.rs",
+   "anchor": "order_manager.rs::place_order order body（缺 rpiTakerAccess 欄）",
+   "defect_type": [
+    "evolution-blocker",
+    "other"
+   ]
+  },
+  {
+   "axis": "BB",
+   "severity": "LOW",
+   "title": "字典 funding 章 blanket「每 8 小時結算一次」殘留，與 per-symbol fundingInterval 正確段矛盾",
+   "file": "srv/docs/references/2026-04-04--bybit_api_reference.md",
+   "anchor": "dict get_funding_history 服務描述（line 154）",
+   "defect_type": [
+    "doc-stale"
+   ]
+  },
+  {
+   "axis": "BB",
+   "severity": "LOW",
+   "title": "live_authorization now_ms duration_since 失敗 fallback=0 理論 expiry fail-open（BB-5 持續 nit）",
+   "file": "srv/rust/openclaw_engine/src/live_authorization.rs",
+   "anchor": "live_authorization.rs::now_ms（unwrap_or(0)）",
+   "defect_type": [
+    "over-gate",
+    "other"
+   ]
+  },
+  {
+   "axis": "BB",
+   "severity": "INFO",
+   "title": "BYBIT_ORDER_LINK_ID_MAX_LEN=36 比 Bybit linear 45 上限緊 9 字元（保守方向）",
+   "file": "srv/rust/openclaw_engine/src/bounded_probe_active_order.rs",
+   "anchor": "BYBIT_ORDER_LINK_ID_MAX_LEN",
+   "defect_type": [
+    "over-gate"
+   ]
+  },
+  {
+   "axis": "BB",
+   "severity": "INFO",
+   "title": "公開資料 helper 多處硬編 mainnet base URL（public-only，無合規風險）",
+   "file": "srv/program_code/exchange_connectors/bybit_connector/control_api_v1/replay/bybit_public_client.py",
+   "anchor": "_BYBIT_PUBLIC_BASE_URL / DEFAULT_BASE_URL",
+   "defect_type": [
+    "hardcoded-config",
+    "readability-debt"
+   ]
+  },
+  {
+   "axis": "BB",
+   "severity": "INFO",
+   "title": "demo secret slot 存在未被讀取的 bybit_endpoint 檔（dead config）",
+   "anchor": "secret_files/bybit/demo/bybit_endpoint",
+   "defect_type": [
+    "dead-code"
+   ]
+  },
+  {
+   "axis": "BB",
+   "severity": "INFO",
+   "title": "PASS 面彙總：核心交易路徑 0 ship-stop（HMAC 簽名/4-env 映射/LIVE-GUARD-1 三閘 runtime 實證/gate5 HMAC/retCode fail-closed/withdraw 0 引用/30d changelog 0 breaking/rate 30d 0 hit/25 pinned 0 delisting 中招）",
+   "defect_type": [
+    "other"
+   ]
+  },
+  {
+   "axis": "QC",
+   "severity": "MEDIUM",
+   "title": "學習面 best-of-K 選擇（43 side-cells × 多 horizon）無多重比較控制，headline 數字系統性上偏",
+   "file": "helper_scripts/research/alpha_discovery_throughput/horizon_specific_sealed_replay.py:211-300",
+   "anchor": "horizon_stability_scorecard",
+   "defect_type": [
+    "test-blindspot",
+    "math-error"
+   ]
+  },
+  {
+   "axis": "QC",
+   "severity": "MEDIUM",
+   "title": "Bounded probe 預算 n=2/cell 對 cushion 假設檢定 power≈8%——evidence ladder 結構性 stall 風險",
+   "file": "rust/openclaw_engine/src/demo_learning_lane.rs:44",
+   "anchor": "AdmissionConfig.min_failed_outcomes_to_disable",
+   "defect_type": [
+    "test-blindspot",
+    "evolution-blocker"
+   ]
+  },
+  {
+   "axis": "QC",
+   "severity": "MEDIUM",
+   "title": "per_trade_risk_pct 為 fraction（0.1=10%）與同區塊 percent 欄位混雜；4 處 survival-floor 註解寫 2% 低估實際 5 倍",
+   "file": "rust/openclaw_engine/src/config/risk_config.rs:495",
+   "anchor": "per_trade_risk_pct",
+   "defect_type": [
+    "schema-issue",
+    "doc-stale",
+    "readability-debt"
+   ]
+  },
+  {
+   "axis": "QC",
+   "severity": "MEDIUM",
+   "title": "dynamic_sizing band [0.01,0.05] 與 per_trade_risk_pct=0.1 無交叉驗證：暖機 10% → 50 筆平倉後靜默腰斬至 ≤5%；反向配置存在 fail-open 抬升結構",
+   "file": "rust/openclaw_engine/src/dynamic_risk_sizer.rs:199",
+   "anchor": "dynamic_sizing.max_pct",
+   "defect_type": [
+    "missing-gate",
+    "schema-issue",
+    "drift-source-runtime"
+   ]
+  },
+  {
+   "axis": "QC",
+   "severity": "MEDIUM",
+   "title": "ADPE explore keepalive 的 cost-viability 篩選 edge_evidence_slippage=0.0，違反保守成本硬約束",
+   "file": "settings/adaptive_demo_profit.toml:62",
+   "anchor": "edge_evidence_slippage",
+   "defect_type": [
+    "hardcoded-config",
+    "math-error"
+   ]
+  },
+  {
+   "axis": "QC",
+   "severity": "LOW",
+   "title": "funding_harvest 年化寫死 8h×3×365，未讀 per-symbol fundingInterval",
+   "file": "rust/openclaw_engine/src/strategies/funding_harvest/mod.rs:137",
+   "anchor": "annualized_funding",
+   "defect_type": [
+    "bybit-incompat",
+    "hardcoded-config"
+   ]
+  },
+  {
+   "axis": "QC",
+   "severity": "LOW",
+   "title": "ewma_vol log-return 無 w[0]>0 guard（與同檔 hurst filter 不一致）——2026-04-24 LOW 延續 open",
+   "file": "rust/openclaw_core/src/indicators/volatility.rs:278",
+   "anchor": "ewma_vol",
+   "defect_type": [
+    "math-error",
+    "readability-debt"
+   ]
+  },
+  {
+   "axis": "QC",
+   "severity": "LOW",
+   "title": "close-maker backoff/cascade 6 常數仍硬編碼（前輪 P3 延續 open）",
+   "file": "rust/openclaw_engine/src/strategies/maker_rejection.rs:39-51",
+   "anchor": "CLOSE_MAKER_BACKOFF_INITIAL_MS",
+   "defect_type": [
+    "hardcoded-config"
+   ]
+  },
+  {
+   "axis": "QC",
+   "severity": "LOW",
+   "title": "git 內 settings/edge_estimates.json 為 2026-04-20 化石，與 runtime 同名檔（2026-07-03, 221 keys）分歧 2.5 個月",
+   "file": "settings/edge_estimates.json",
+   "anchor": "settings/edge_estimates.json",
+   "defect_type": [
+    "drift-source-runtime",
+    "lineage-gap"
+   ]
+  },
+  {
+   "axis": "QC",
+   "severity": "INFO",
+   "title": "_rank_score 混量綱加總（bps + pct/2 + log10(n)·5 + 1000/100/50/40 tier bonus），常數敏感性未文檔化",
+   "file": "helper_scripts/research/cost_gate_learning_lane/false_negative_evidence_floor_ranking.py:282-304",
+   "anchor": "_rank_score",
+   "defect_type": [
+    "readability-debt"
+   ]
+  },
+  {
+   "axis": "QC",
+   "severity": "INFO",
+   "title": "runtime edge_estimates _meta.n_cells=45 vs 實際 221 keys（113 real+108 proxy），meta 語意未自述",
+   "file": "settings/edge_estimates.json (runtime)",
+   "anchor": "_meta.n_cells",
+   "defect_type": [
+    "schema-issue"
+   ]
+  },
+  {
+   "axis": "QC",
+   "severity": "INFO",
+   "title": "系統態勢確認（非缺陷）：113 real cells 0 過 WF+PSR/DSR 驗證、101/113 EV<0、median n=6——系統誠實自報無已驗證 edge；樣本饑餓仍第一約束",
+   "file": "settings/edge_estimates.json (runtime)",
+   "anchor": "validation_config",
+   "defect_type": [
+    "other"
+   ]
+  },
+  {
+   "axis": "QC",
+   "severity": "INFO",
+   "title": "正向確認：前兩輪 QC audit 全部 P0/P1 已修復（donchian_prior / OU 殘差 σ / Kelly Wilson-LB+config / fast_track+slippage+cost_gate TOML 化 / confluence load guard / 年化×365 測試固化 / 黑名單 0 違規）",
+   "anchor": "donchian_prior",
+   "defect_type": [
+    "other"
+   ]
+  },
+  {
+   "axis": "MIT",
+   "severity": "MEDIUM",
+   "title": "quantile trainer embargo fail-open：<50 樣本時靜默跳過且不入 acceptance report",
+   "file": "program_code/ml_training/quantile_trainer.py:595",
+   "anchor": "train_quantile_trio",
+   "defect_type": [
+    "leakage",
+    "test-blindspot"
+   ]
+  },
+  {
+   "axis": "MIT",
+   "severity": "LOW",
+   "title": "scorer label winsorization 用全窗口分位數（含未來 fold）— 輕度 cross-fold statistic leak",
+   "file": "program_code/ml_training/label_generator.py:84",
+   "anchor": "generate_labels",
+   "defect_type": [
+    "leakage"
+   ]
+  },
+  {
+   "axis": "MIT",
+   "severity": "MEDIUM",
+   "title": "V141 kline truth-drift guardrail 從未啟動：0 row/16 天，cron 未裝且哨兵 check_91 又因 F-3 停擺（雙盲）",
+   "file": "sql/migrations/V141__research_kline_calibration.sql",
+   "anchor": "kline_calibration_cron.sh",
+   "defect_type": [
+    "missing-gate",
+    "drift-source-runtime"
+   ]
+  },
+  {
+   "axis": "MIT",
+   "severity": "MEDIUM",
+   "title": "regime 軸雙缺陷未修且惡化：aeg_regime_labels stale 32 天 + bayesian_posteriors.regime 實值=engine_mode",
+   "file": "program_code/ml_training/thompson_sampling.py",
+   "anchor": "bayesian_posteriors.regime",
+   "defect_type": [
+    "schema-issue",
+    "drift-source-runtime",
+    "doc-stale"
+   ]
+  },
+  {
+   "axis": "MIT",
+   "severity": "MEDIUM",
+   "title": "mlde_shadow_advisor 每日 run 全 error（QueryCanceled 5s statement timeout）— MLDE advisory lane 死",
+   "file": "program_code/ml_training/mlde_shadow_advisor.py:203",
+   "anchor": "_AGGREGATE_BASE_SQL",
+   "defect_type": [
+    "perf-hotpath",
+    "drift-source-runtime"
+   ]
+  },
+  {
+   "axis": "MIT",
+   "severity": "MEDIUM",
+   "title": "linucb_trainer 以 arms=0/total_pulls=0 回報 ok — 空訓練標成功",
+   "file": "helper_scripts/cron/ml_training_maintenance.py",
+   "anchor": "linucb_trainer",
+   "defect_type": [
+    "fake-success",
+    "test-blindspot"
+   ]
+  },
+  {
+   "axis": "MIT",
+   "severity": "LOW",
+   "title": "訓練 engine_mode 默認 demo，與穩定規則 IN('live','live_demo') 文檔漂移",
+   "file": "helper_scripts/cron/ml_training_maintenance_cron.sh:82",
+   "anchor": "OPENCLAW_ML_CRON_TRAINING_ENGINE_MODES",
+   "defect_type": [
+    "doc-stale",
+    "hardcoded-config"
+   ]
+  },
+  {
+   "axis": "MIT",
+   "severity": "MEDIUM",
+   "title": "V142/V143/V144 header 聲稱 Guard A 但 body 無 Guard DO-block（V023 silent-noop 防線缺口 + 注釋不誠實）",
+   "file": "sql/migrations/V142__tick_orderbook_recorder.sql:42",
+   "anchor": "V142/V143/V144 CREATE TABLE IF NOT EXISTS",
+   "defect_type": [
+    "missing-gate",
+    "doc-stale",
+    "untruthful-ai"
+   ]
+  },
+  {
+   "axis": "MIT",
+   "severity": "LOW",
+   "title": "V142/V143 compression/retention policy 無 timescaledb extension guard（V006 已知缺陷複製）",
+   "file": "sql/migrations/V142__tick_orderbook_recorder.sql:89",
+   "anchor": "add_compression_policy",
+   "defect_type": [
+    "schema-issue",
+    "duplicate-logic"
+   ]
+  },
+  {
+   "axis": "MIT",
+   "severity": "INFO",
+   "title": "V146 未 apply（prod sqlx head=145）— V145 誤導性 markout COMMENT 仍活在 prod",
+   "file": "sql/migrations/V146__fills_maker_markout_comment_fix.sql",
+   "anchor": "trading.fills.maker_markout_bps COMMENT",
+   "defect_type": [
+    "doc-stale"
+   ]
+  },
+  {
+   "axis": "MIT",
+   "severity": "INFO",
+   "title": "market.l1_events 28GB 超 PA realistic 儲存預估 4-9x（硬上界 ~26GB 亦已破）且 recorder 監測 lane 已死",
+   "file": "sql/migrations/V143__l1_book_event_recorder.sql:33",
+   "anchor": "OPENCLAW_L1_MAX_EVENTS_PER_SEC_PER_SYMBOL",
+   "defect_type": [
+    "perf-hotpath",
+    "doc-stale"
+   ]
+  },
+  {
+   "axis": "MIT",
+   "severity": "INFO",
+   "title": "decision_features 14.8M rows（99.9% reject）以 ~55k/day 膨脹 — 下游查詢成本共同根源",
+   "file": "rust/openclaw_engine/src/database/decision_feature_writer.rs:129",
+   "anchor": "learning.decision_features",
+   "defect_type": [
+    "perf-hotpath",
+    "schema-issue"
+   ]
+  },
+  {
+   "axis": "MIT",
+   "severity": "INFO",
+   "title": "ML 決策層斷線三件套維持原狀：resolver 0 caller / combine layer mock / select_next_arm 0 consumer（06-14 結論重驗不變）",
+   "file": "rust/openclaw_engine/src/combine_layer.rs:341",
+   "anchor": "resolve_latest_production_artifact",
+   "defect_type": [
+    "dead-code",
+    "evolution-blocker"
+   ]
+  },
+  {
+   "axis": "AI-E",
+   "severity": "MEDIUM",
+   "title": "MLDE shadow 產出量較 06-13 基線衰減 ~83%（同饑餓根因，仍 fresh）",
+   "anchor": "mlde_shadow_recommendations.ts",
+   "defect_type": [
+    "evolution-blocker"
+   ]
+  },
+  {
+   "axis": "AI-E",
+   "severity": "MEDIUM",
+   "title": "Cloud L2 雙路徑 key/開關錯位：$2/日預算頭寸 100% 閒置持續 ~3 個月",
+   "anchor": "set_teacher_loop_enabled / ANTHROPIC_API_KEY",
+   "defect_type": [
+    "over-gate",
+    "evolution-blocker"
+   ]
+  },
+  {
+   "axis": "AI-E",
+   "severity": "MEDIUM",
+   "title": "L2 memory recall 永久 dormant：agent.l2_call_ledger 表不存在，99 條 embedded 教訓 0 召回",
+   "anchor": "OPENCLAW_L2_MEMORY_RECALL",
+   "defect_type": [
+    "dead-code",
+    "evolution-blocker",
+    "schema-issue"
+   ]
+  },
+  {
+   "axis": "AI-E",
+   "severity": "MEDIUM",
+   "title": "Layer2CostTracker 跨進程預算競態：4 uvicorn workers 共寫 JSON 無 file lock（新發現，dormant）",
+   "anchor": "layer2_cost_state.json / _lock",
+   "defect_type": [
+    "missing-gate",
+    "duplicate-logic"
+   ]
+  },
+  {
+   "axis": "AI-E",
+   "severity": "MEDIUM",
+   "title": "AI-E 報告 lineage gap：memory 索引的 06-13/06-14 兩份報告在 Mac/Linux/git 全史皆不存在",
+   "anchor": "AI-E/memory.md 報告索引",
+   "defect_type": [
+    "lineage-gap",
+    "doc-stale"
+   ]
+  },
+  {
+   "axis": "AI-E",
+   "severity": "LOW",
+   "title": "每日成本快照採集腿不存在（06-14 F5 以刪 cron 而非補實現收場）",
+   "anchor": "daily_cost_snapshot.sh（absent）",
+   "defect_type": [
+    "missing-gate"
+   ]
+  },
+  {
+   "axis": "AI-E",
+   "severity": "LOW",
+   "title": "DOC-08 內文 stale：L1 寫 Ollama 7B（實際 9B/27B）、L2 per-call 估價基於退役定價",
+   "anchor": "DOC-08 §1 模型表",
+   "defect_type": [
+    "doc-stale"
+   ]
+  },
+  {
+   "axis": "AI-E",
+   "severity": "LOW",
+   "title": "cost_edge_ratio 三同名三義未收斂（06-14 F3 殘留命名債）",
+   "anchor": "cost_edge_ratio / trigger_threshold",
+   "defect_type": [
+    "readability-debt",
+    "math-error"
+   ]
+  },
+  {
+   "axis": "AI-E",
+   "severity": "INFO",
+   "title": "GUI AI tab ROI tiles 永久 '--'（誠實空顯示非 fake-success）；adaptive_base_daily_usd=8 無風險（min 束於 2.0）",
+   "anchor": "roi-ratio / adaptive_base_daily_usd",
+   "defect_type": [
+    "dead-code"
+   ]
+  },
+  {
+   "axis": "AI-E",
+   "severity": "INFO",
+   "title": "PASS 面：定價三軸對齊且 07-03 官方複驗仍準；上輪 4 修復閉環確認；新模型 Sonnet 5 intro $2/$10 省 33% 機會窗至 08-31",
+   "anchor": "OPENCLAW_CLAUDE_TEACHER_MODEL / ai_pricing.yaml",
+   "defect_type": [
+    "other"
+   ]
+  },
+  {
+   "axis": "AI-E",
+   "severity": "INFO",
+   "title": "零成本承諾複驗：DreamEngine 0 LLM import、CognitiveModulator 300-3600s 界內；advisor 心跳 ~1.4k row/day 純噪音寫入",
+   "anchor": "cost_edge_advisor_log heartbeat",
+   "defect_type": [
+    "perf-hotpath",
+    "other"
+   ]
+  },
+  {
+   "axis": "E5",
+   "severity": "MEDIUM",
+   "title": "tick 熱路徑每 tick 深拷貝 4 個 panel snapshot（panel 60s 才更新）",
+   "file": "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs:452-489",
+   "anchor": "try_clone_panel_snapshot",
+   "defect_type": [
+    "perf-hotpath"
+   ]
+  },
+  {
+   "axis": "E5",
+   "severity": "MEDIUM",
+   "title": "_percentile 同名異契約 ×6（q∈[0,1] vs p∈[0,100] + NaN 過濾不一致）",
+   "file": "helper_scripts/research/alpha_discovery_throughput/execution_spine.py:30 等 6 處（全清單見報告 F7）",
+   "anchor": "_percentile",
+   "defect_type": [
+    "duplicate-logic",
+    "math-error"
+   ]
+  },
+  {
+   "axis": "E5",
+   "severity": "MEDIUM",
+   "title": "layer2_tools 3/4 SearchProvider 在 async def 內同步阻塞（latent，0 prod caller）",
+   "file": "program_code/exchange_connectors/bybit_connector/control_api_v1/app/layer2_tools.py:613,674,729",
+   "anchor": "LocalLLMWebSearchProvider.search / LocalLLMSearchProvider.search / WebPilotSearchProvider.search",
+   "defect_type": [
+    "perf-hotpath",
+    "dead-code"
+   ]
+  },
+  {
+   "axis": "E5",
+   "severity": "MEDIUM",
+   "title": "helper_scripts/research 356 檔 / 184.8k LOC 一次性 evidence 腳本無 active/stale 歸檔機制",
+   "file": "helper_scripts/research/",
+   "anchor": "SCRIPT_INDEX.md（1588 行無 active/historical 分節）",
+   "defect_type": [
+    "readability-debt",
+    "doc-stale"
+   ]
+  },
+  {
+   "axis": "E5",
+   "severity": "LOW",
+   "title": "cost_gate_learning_lane_cron.sh 1980 行 bash 僅 6 函數，距硬限 <1%",
+   "file": "helper_scripts/cron/cost_gate_learning_lane_cron.sh",
+   "anchor": "cost_gate_learning_lane_cron.sh",
+   "defect_type": [
+    "readability-debt"
+   ]
+  },
+  {
+   "axis": "E5",
+   "severity": "LOW",
+   "title": "ipc_client 單連線 + asyncio.Lock 串行全部 engine IPC（吞吐 ceiling 記錄）",
+   "file": "program_code/exchange_connectors/bybit_connector/control_api_v1/app/ipc_client.py:140",
+   "anchor": "EngineIPCClient._lock",
+   "defect_type": [
+    "perf-hotpath",
+    "other"
+   ]
+  },
+  {
+   "axis": "E5",
+   "severity": "LOW",
+   "title": "pg_stat_statements 未安裝——PG 調參與 seq scan 歸因無法證據驅動",
+   "file": "Linux trade-core PG（trading_ai）",
+   "anchor": "shared_preload_libraries",
+   "defect_type": [
+    "index-broken",
+    "other"
+   ]
+  },
+  {
+   "axis": "E5",
+   "severity": "INFO",
+   "title": "根目錄歷史大 md（AE_INVENTORY 422KB / CLAUDE_CHANGELOG 1.4MB）",
+   "file": "AE_INVENTORY_CONSOLIDATED.md / docs/CLAUDE_CHANGELOG.md",
+   "anchor": "AE_INVENTORY_CONSOLIDATED.md",
+   "defect_type": [
+    "doc-stale"
+   ]
+  },
+  {
+   "axis": "E5",
+   "severity": "INFO",
+   "title": "（正面）前輪 F2 LTO/F3 urlopen/PERF-1 5m gate 已修；drift-gate 死循環 source 側已解待 v739 實走",
+   "file": "rust/Cargo.toml:69-70 / app/layer2_routes.py:528 / on_tick_helpers.rs:645 / d0eeafb41",
+   "anchor": "lto / codegen-units / standing_envelope_post_approval_drift_gate",
+   "defect_type": [
+    "over-gate",
+    "evolution-blocker"
+   ]
+  },
+  {
+   "axis": "E5",
+   "severity": "INFO",
+   "title": "（基線）Linux engine 運行時資源快照",
+   "file": "Linux trade-core engine PID 2368227",
+   "anchor": "openclaw-engine release binary",
+   "defect_type": [
+    "other"
+   ]
+  },
+  {
+   "axis": "A3",
+   "severity": "INFO",
+   "title": "A3 總評 7.5/10（術語友好 7 / 操作流完整 7 / 學習曲線 7.5 / 錯誤提示 8）— 較 2026-05-30 的 8.0 下調",
+   "anchor": "a3_score_v20260703",
+   "defect_type": [
+    "other"
+   ]
+  },
+  {
+   "axis": "A3",
+   "severity": "MEDIUM",
+   "title": "Risk Governor 降級 override：pending_approval 分支回 ok:true，前端顯示『風險等級已降級』成功 toast（fake-success）",
+   "anchor": "submitRiskOverride",
+   "defect_type": [
+    "fake-success",
+    "over-gate"
+   ]
+  },
+  {
+   "axis": "A3",
+   "severity": "MEDIUM",
+   "title": "README tab 表（A3 的 tab 結構權威源）與 console 實際 TABS 漂移：漏 stock-etf 與 charts、仍列已移除的 phase4",
+   "anchor": "TABS",
+   "defect_type": [
+    "doc-stale",
+    "dead-code",
+    "lineage-gap"
+   ]
+  },
+  {
+   "axis": "A3",
+   "severity": "MEDIUM",
+   "title": "Stock/ETF IBKR tab：18 個第一屏 metric 卡全英文工程術語、零中文、零解說 — 全 console 唯一無雙語的 tab，且認知密度超標",
+   "anchor": "se-metric",
+   "defect_type": [
+    "readability-debt",
+    "other"
+   ]
+  },
+  {
+   "axis": "A3",
+   "severity": "MEDIUM",
+   "title": "Rust 引擎宕機無全域跨 tab 告警：engine_alive 只在 system tab 一張 metric 卡 + agents tab chip，console 側欄/header 無引擎狀態燈",
+   "anchor": "loadEngineAlive",
+   "defect_type": [
+    "missing-gate",
+    "other"
+   ]
+  },
+  {
+   "axis": "A3",
+   "severity": "MEDIUM",
+   "title": "源碼-runtime 漂移：本輪全部『已修復』判定僅對 Mac 源碼 head 成立，trade-core runtime 落後 origin/main 164 commits，線上 console 是否含這些修復未驗證",
+   "anchor": "BUILD_TS",
+   "defect_type": [
+    "drift-source-runtime"
+   ]
+  },
+  {
+   "axis": "A3",
+   "severity": "LOW",
+   "title": "側欄footer『Auto-refresh 15s』與實際 SIDEBAR_REFRESH_MS=30000 不符",
+   "anchor": "SIDEBAR_REFRESH_MS",
+   "defect_type": [
+    "doc-stale",
+    "hardcoded-config"
+   ]
+  },
+  {
+   "axis": "A3",
+   "severity": "LOW",
+   "title": "破壞性操作 modal 缺『具體影響』數據：Demo/Live close-all 確認框無持倉數量與預估 UPL",
+   "anchor": "doDemoCloseAll",
+   "defect_type": [
+    "other"
+   ]
+  },
+  {
+   "axis": "A3",
+   "severity": "LOW",
+   "title": "審計感知 UX（ux-checklist §5）系統性缺席：寫操作 toast 無 trace_id、無『最近 5 次 actor+ts+結果』、多數 dashboard 無採集時間 footer",
+   "anchor": "ocToast",
+   "defect_type": [
+    "lineage-gap",
+    "other"
+   ]
+  },
+  {
+   "axis": "A3",
+   "severity": "LOW",
+   "title": "簡繁中文混排遍佈治理/風控視圖，同一畫面同一概念兩種字形",
+   "anchor": "gov-sm-note",
+   "defect_type": [
+    "readability-debt"
+   ]
+  },
+  {
+   "axis": "A3",
+   "severity": "LOW",
+   "title": "首次進入 console 僅見 core group 3 tabs（含最生僻的 Stock/ETF），交易/治理 group 默認折疊；Global Mode Control 卡藏於 dev-support 開關後",
+   "anchor": "TAB_GROUP_DEFAULT_OPEN",
+   "defect_type": [
+    "duplicate-logic",
+    "over-gate",
+    "other"
+   ]
+  },
+  {
+   "axis": "A3",
+   "severity": "LOW",
+   "title": "UTC+local 雙時區標註基本缺席：console 時鐘僅 zh-CN 本地時間，全 GUI 僅 4 處 UTC 字樣",
+   "anchor": "clock",
+   "defect_type": [
+    "other"
+   ]
+  },
+  {
+   "axis": "A3",
+   "severity": "LOW",
+   "title": "設置/風控殘留英文-only placeholder 與 toast",
+   "anchor": "cost-note",
+   "defect_type": [
+    "readability-debt"
+   ]
+  },
+  {
+   "axis": "A3",
+   "severity": "INFO",
+   "title": "Legacy GUI /gui（index.html）仍註冊路由並保留 disabled paper 下單表單",
+   "anchor": "gui_index",
+   "defect_type": [
+    "dead-code"
+   ]
+  },
+  {
+   "axis": "A3",
+   "severity": "INFO",
+   "title": "tab-governance.html:1159-1160 stale 註釋仍引用不存在的 loadGovernance()（2026-05-30 advisory 未清）",
+   "anchor": "loadGovernance",
+   "defect_type": [
+    "doc-stale"
+   ]
+  },
+  {
+   "axis": "A3",
+   "severity": "INFO",
+   "title": "正向確認：既往 A3 findings 全數修復且守住 — A3-GUI-009/010/011 已修（源碼含 A3 編號註釋）、native confirm()/prompt() 全滅、SM 術語加解說、學習 Tab 雙語、engine_alive 上第一屏、Demo close-all modal 補齊",
+   "anchor": "classifyLiveMutation",
+   "defect_type": [
+    "other"
+   ]
+  },
+  {
+   "axis": "R4",
+   "severity": "MEDIUM",
+   "title": "L2_TODO.md 鏡像指針斷鏈：TODO.md 已無 row `P1-L2-ADVISORY-MESH-TAILS`，L2 未閉尾巴失去 active queue 錨點",
+   "anchor": "L2_TODO.md::P1-L2-ADVISORY-MESH-TAILS",
+   "defect_type": [
+    "lineage-gap",
+    "index-broken",
+    "doc-stale"
+   ]
+  },
+  {
+   "axis": "R4",
+   "severity": "MEDIUM",
+   "title": "README Control Console tab 表 ⇄ GUI nav 漂移：缺 `stock-etf`、`charts`，仍列已下架的 `phase4`",
+   "anchor": "README.md::Control Console tab 表",
+   "defect_type": [
+    "doc-stale",
+    "drift-source-runtime"
+   ]
+  },
+  {
+   "axis": "R4",
+   "severity": "MEDIUM",
+   "title": ".claude/agents/R4.md 與 R4 profile.md 仍以『docs/README.md 底部索引』為審計目標，該索引已遷出至 _indexes/document_index.md",
+   "anchor": ".claude/agents/R4.md::核心審計領域/核查清單",
+   "defect_type": [
+    "hardcoded-config",
+    "doc-stale"
+   ]
+  },
+  {
+   "axis": "R4",
+   "severity": "MEDIUM",
+   "title": "DOC-05（真相源與所有權矩陣 V1.1）缺席 SPECIFICATION_REGISTER Active DOC 表，亦不在 DEPRECATED.md 中央退役索引",
+   "anchor": "SPECIFICATION_REGISTER.md::DOC 表",
+   "defect_type": [
+    "lineage-gap",
+    "doc-stale"
+   ]
+  },
+  {
+   "axis": "R4",
+   "severity": "MEDIUM",
+   "title": "_indexes/document_index.md 與 initiative_index.md 零 2026-07 條目；operator 已批准之設計 spec 與 E4 回歸報告未登記",
+   "anchor": "docs/_indexes/document_index.md",
+   "defect_type": [
+    "index-broken",
+    "doc-stale"
+   ]
+  },
+  {
+   "axis": "R4",
+   "severity": "LOW",
+   "title": "SPECIFICATION_REGISTER ADR 節標題停在 0047、表已含 0048；docs/README.md 寫『ADR 0001-0047』實有 0048",
+   "anchor": "SPECIFICATION_REGISTER.md::ADR 節標題",
+   "defect_type": [
+    "doc-stale",
+    "hardcoded-config"
+   ]
+  },
+  {
+   "axis": "R4",
+   "severity": "LOW",
+   "title": "register Cross-Reference Summary『Active REF specifications = 19』與 REF 表狀態不吻合",
+   "anchor": "SPECIFICATION_REGISTER.md::Cross-Reference Summary",
+   "defect_type": [
+    "doc-stale",
+    "math-error"
+   ]
+  },
+  {
+   "axis": "R4",
+   "severity": "LOW",
+   "title": "SCRIPT_INDEX.md『最新補充』段延續巨型敘事模式（前輪 R4-2026-IDX-04 持續）；標頭日期與 changelog 相差一天",
+   "anchor": "helper_scripts/SCRIPT_INDEX.md::最新補充",
+   "defect_type": [
+    "readability-debt",
+    "doc-stale"
+   ]
+  },
+  {
+   "axis": "R4",
+   "severity": "LOW",
+   "title": "CLAUDE_REFERENCE.md 停更 82 天（2026-04-12）且無 STALE 快照 banner，仍自稱含『Authoritative checkers』",
+   "anchor": "docs/CLAUDE_REFERENCE.md::header",
+   "defect_type": [
+    "doc-stale"
+   ]
+  },
+  {
+   "axis": "R4",
+   "severity": "LOW",
+   "title": "docs/README.md 路由表覆蓋缺口：docs/agents/ 表僅列 3/9 檔；docs 根層 KNOWN_ISSUES.md / lessons.md / CLAUDE_REFERENCE.md 不在目錄樹",
+   "anchor": "docs/README.md::稳定入口索引",
+   "defect_type": [
+    "index-broken",
+    "doc-stale"
+   ]
+  },
+  {
+   "axis": "R4",
+   "severity": "LOW",
+   "title": "R4 自身 memory.md 報告索引停更：僅列 2/16 份報告；『項目上下文』段殘留 2026-04-24 runtime 數字未標 stale",
+   "anchor": "docs/CCAgentWorkSpace/R4/memory.md::報告索引",
+   "defect_type": [
+    "doc-stale",
+    "index-broken"
+   ]
+  },
+  {
+   "axis": "R4",
+   "severity": "LOW",
+   "title": "TODO §4 handoff 命令引用已 superseded 的 v693 /tmp artifacts，且 `sed 1,180p` 截不到 §3/§4 自身",
+   "anchor": "TODO.md::§4 Handoff Commands",
+   "defect_type": [
+    "doc-stale",
+    "drift-source-runtime"
+   ]
+  },
+  {
+   "axis": "R4",
+   "severity": "LOW",
+   "title": "README 內部測試計數三口徑並存（crate 註記 ~400/~2400 vs register ~3,600+ Rust vs README ~6,500+ 總）",
+   "anchor": "README.md::项目结构 rust/ 註記",
+   "defect_type": [
+    "doc-stale",
+    "hardcoded-config"
+   ]
+  },
+  {
+   "axis": "R4",
+   "severity": "INFO",
+   "title": "A3.md 配置內嵌 GUI 現狀觀察未標採集日（『學習系統 Tab 6 個核心指標全英文』等）",
+   "anchor": ".claude/agents/A3.md::已知問題示例",
+   "defect_type": [
+    "hardcoded-config",
+    "doc-stale"
+   ]
+  },
+  {
+   "axis": "R4",
+   "severity": "INFO",
+   "title": "（正向核驗，無缺陷）前輪 P1/P3 修復保持 + 各 SSOT 對齊抽查通過",
+   "anchor": "",
+   "defect_type": [
+    "other"
+   ]
+  }
+ ],
+ "assumptions": [
+  {
+   "note": "GUI 93 寫入 endpoints 的 fake-success 逐一掃描未重跑，本輪僅指紋掃描 + authority contracts 抽查",
+   "why_unproven": "體量大（93 endpoints）且既有盤點（project_gui_write_paths_inventory）未見失效信號；read-only 輪次優先 runtime drift 與硬邊界",
+   "axis": "CC"
+  },
+  {
+   "note": "3E-ARCH 三引擎逐原則獨立驗（paper/demo/live）未逐引擎執行——demo 已實測，live 無 runtime 流量，paper 默認關",
+   "why_unproven": "live 面無可觀測 runtime 行為可驗且禁 mutation；paper spawn 需 OPENCLAW_ENABLE_PAPER=1 屬 runtime 變更",
+   "axis": "CC"
+  },
+  {
+   "note": "不變量 1（pre-trade audit/replay 必開）與 8（reconciler→降級）僅驗到模組存在 + 治理文件，未做 runtime 行為注入驗證",
+   "why_unproven": "行為驗證需注入差異/replay = runtime mutation，本輪硬邊界禁止；屬 QA 域派工",
+   "axis": "CC"
+  },
+  {
+   "note": ".claude/hooks/rtk-rewrite.sh 與 session-start.sh 未逐行審注入面，fail-open 契約按 CLAUDE.md 自述採信",
+   "why_unproven": "時間盒；hook 屬 dev 工具鏈非交易路徑，優先級讓位 runtime drift",
+   "axis": "CC"
+  },
+  {
+   "note": ".codex/ 活躍治理層未納入本輪掃描（06-18 起為活躍層非 mirror）",
+   "why_unproven": "FA/R4 文檔域主責；CC 域重疊部分（若 .codex 含 gate 語義）未證實存在，建議 PA 派 FA re-probe",
+   "axis": "CC"
+  },
+  {
+   "note": "sql/ migrations Guard A/B/C retrofit 積欠（04-24 audit V019/V020 debt）未重驗當前狀態",
+   "why_unproven": "需 Linux PG migration state 讀取比對，本輪 ssh 預算用於 runtime drift 三元組；無新 V### 落地信號故降級",
+   "axis": "CC"
+  },
+  {
+   "note": "running engine binary 的 build-SHA 對 source commit 對齊未獨立驗證（TODO 自述 e8b5c77b 採信）",
+   "why_unproven": "read-only 快速 build-info probe 不可得；既有教訓 build-SHA≠git-commit，列 F9 供下次 restart 時驗",
+   "axis": "CC"
+  },
+  {
+   "note": "TODO.md 59-232 行未全文逐行讀（僅 §0/banner/self-check + targeted grep），中段 row 的 runtime 數字可能仍有未偵測 drift",
+   "why_unproven": "檔案 60k tokens 超讀取 cap；drift 抽樣已覆蓋最高權重 rows（runtime sync/auth/PID）",
+   "axis": "CC"
+  },
+  {
+   "note": "IBKR stock_etf lane 的 source validators 未獨立重跑（AST guard/contract packet 按 register + commit 訊息 + 測試名採信）",
+   "why_unproven": "lane 為 source-only dormant 零真錢；validators 自帶測試套件且 06-29 CC 三輪已審",
+   "axis": "CC"
+  },
+  {
+   "note": "connector 側 BYBIT_MODE=demo / BYBIT_CONNECTOR_WRITE_ENABLED=true 未在 API service env 實測（僅 engine env 實測）",
+   "why_unproven": "API service PID env 讀取需再一輪 ssh；TODO 該值有 06-30 cutover 憑證，衝突風險低",
+   "axis": "CC"
+  },
+  {
+   "note": "GUI 93 個寫入端點的 fake-success / Operator 角色驗證矩陣本輪未複掃（僅抽查 stock_etf GET 面與檔案體量）；governance-tab.js(1899行)/tab-live.js(1873行) 逼近 2000 硬帽的寫路徑未逐一追到 Rust authority",
+   "why_unproven": "runtime 業務鏈證據優先佔用了本輪預算；寫入面逐端點追鏈需獨立一輪，FA-1 矩陣（2026-03-31）後未再全量重驗",
+   "axis": "FA"
+  },
+  {
+   "note": "DOC-01..DOC-08 條文級全文對照（.docx/.md 原文逐 § 打 ✅/⚠️/❌）本輪未重做，僅驗 register 索引層 + implementing module 存在性 + runtime 行為抽樣；DOC-01 §5.9 硬止損參數與 runtime TOML 的數值符合性未逐條比對",
+   "why_unproven": "register 模組欄已證漂移（F6），條文對照需先修錨點否則產出錨點失效的對照表；工作量與本輪 runtime 證據衝突",
+   "axis": "FA"
+  },
+  {
+   "note": "grid_trading exit 側趨勢止損（對已開倉 down-beta 庫存的趨勢平倉）存在性未證——僅證入場側 EDGE-P1-1 趨勢硬停（signal.rs:135）與 trend-adjusted cooldown；06-15 虧損根因的『trend-stop 仍 open』可能指此",
+   "why_unproven": "position_mgmt.rs 僅見 external-close 回調；判定需追 position_risk_evaluator 的趨勢條件平倉路徑，本輪未展開；且該策略正是當前 soak 候選，值得 PA 專項 re-probe",
+   "axis": "FA"
+  },
+  {
+   "note": "openclaw_core 死碼名單（FA-H3：9/17 模組 ~4468 行 0 引用）本輪僅複驗 sm/oms.rs 一項，其餘 8 模組現狀未複掃",
+   "why_unproven": "歷史名單自 2026-04-24 未變更跡象，複掃優先級讓位於 runtime 斷鏈證據",
+   "axis": "FA"
+  },
+  {
+   "note": "06-27 crontab 70→5 行的變更是否存在 repo 外授權記錄（.codex session logs / operator 口頭）未窮盡搜索——repo 內 PM 報告面與 TODO 均無記錄為 FACT，『未經記錄的移除』為 INFERENCE",
+   "why_unproven": ".codex 會話產物與 /tmp 下 manifest（crontab_post_sha256=311a0fe0…對應檔）未逐一解析；且 /tmp 檔案本身受 F1 揮發性影響可能已不可考",
+   "axis": "FA"
+  },
+  {
+   "note": "IBKR stock_etf P0-P5 三十餘個 source-only contract validator（07-01/07-02 大量 guard 報告）本輪未逐一審計，僅確認 routes GET-only 與 register/AMD 標註一致",
+   "why_unproven": "該面為 source-only dormant 且 phase unlock table 齊備（有主 dormant）；全量 validator 對照是獨立大型審計",
+   "axis": "FA"
+  },
+  {
+   "note": "probe_ledger.jsonl 增長率（~5h 20k rows ≈ 100k rows/day，~120MB/day 推算）的磁盤壓力與 rotation 策略未評估；386→393MB 單日增長已觀測但無上限機制證據",
+   "why_unproven": "增長率外推基於 5h 窗口單點；rotation/裁剪邏輯需讀 writer 實作與 cron 全文，本輪未展開",
+   "axis": "FA"
+  },
+  {
+   "note": "Live 五 gate 全量再驗證（live_reserved / Operator role auth / secret slot / authorization.json 簽名路徑）本輪僅抽查 OPENCLAW_ALLOW_MAINNET=0；authorization.json 缺失狀態沿用 06-24 E3 觀測",
+   "why_unproven": "auth 面屬 read-only 硬邊界敏感區，深查交 E3 域；FA 只需確認 fail-closed 姿態未鬆動",
+   "axis": "FA"
+  },
+  {
+   "note": "Bybit API 語義符合性（retCode fail-closed / 隱藏 retry / WS topic 覆蓋）未覆蓋",
+   "why_unproven": "BB 專屬域；FA 按分工不重複，但 F8 的 unattributed:bybit_auto fills 提示 BB 側 re-probe 價值",
+   "axis": "FA"
+  },
+  {
+   "note": "demo_learning_stack_healthcheck SOURCE_NOT_READY 常紅期間（06-30 起）是否掩蓋過真實故障未回溯驗證",
+   "why_unproven": "需逐日解析 41MB healthcheck cron log 與 artifact 序列比對，本輪僅取 latest 狀態證明常紅事實",
+   "axis": "FA"
+  },
+  {
+   "note": "Runtime state (whether the system is currently in live_reserved, whether ALLOW_MAINNET=1, whether a signed authorization.json exists) was not re-verified on Linux trade-core this round; assessment of LOW-1/LOW-2 exploitability assumes the 2026-06-24 runtime evidence (live closed, ALLOW_MAINNET=0, no authorization.json, live_orders_30d=0) still holds.",
+   "why_unproven": "Read-only hard-edge plus no ssh runtime probe performed this round; relied on the 2026-06-24 E3 runtime audit as the last runtime baseline rather than re-running ssh trade-core read-only queries.",
+   "axis": "E3"
+  },
+  {
+   "note": "The 1225-commit / 419k-line delta was audited by targeting the highest-risk new surfaces (auth/gate, credential, IPC handlers, routes, secret/SQL/shell scans). Large new modules (microstructure fill_sim ~2796 lines, fill_sim_history ~1159, adaptive runner ~1399, regime_bandit_allocator ~542) were scanned for network/subprocess/order/SQL/live surfaces but not read line-by-line for logic-level flaws.",
+   "why_unproven": "Token/time budget; these are offline research / demo-only modules with no live order path, so deep logic review was deprioritized vs auth-boundary surfaces.",
+   "axis": "E3"
+  },
+  {
+   "note": "The cross-language canonical-hash consistency between Python live_patch_token._rust_serde_float_str and Rust live_authz canonicalize (the binding that makes token content-binding sound) was not independently re-verified this round beyond reading the module notes; a drift there could let a token bound to one operation be replayed for another.",
+   "why_unproven": "The design references a T12 fixture test claiming 225k f64 sweep parity but the fixture was not executed under the read-only constraint (would require running Rust/pytest on Linux); relied on documented test existence.",
+   "axis": "E3"
+  },
+  {
+   "note": "Not every one of the ~100+ write endpoints across all route files was body-traced for its operator/scope guard; the changed route files (strategist_promote, strategy_write, layer2, risk, settings, stock_etf) were verified, but unchanged pre-existing route files were assumed to retain their baseline gates.",
+   "why_unproven": "Scope prioritization on the delta; full 100+ endpoint byte-trace exceeds this round's budget and most are unchanged since the 2026-06-14 PASS baseline.",
+   "axis": "E3"
+  },
+  {
+   "note": "asyncio concurrency / race-condition analysis of the new capability-token NonceLedger and the _save_api_key_lock under high concurrency was reasoned from code (Mutex-guarded, bounded) but not stress-tested this round.",
+   "why_unproven": "Read-only audit; no runtime stress harness executed against the live/demo engine per the hard-edge (no runtime mutation / no engine start).",
+   "axis": "E3"
+  },
+  {
+   "note": "API key permission flags（withdraw=false、read/trade scope）未逐 key 驗證——僅以架構級 0 withdraw 調用點佐證",
+   "why_unproven": "驗證需 Bybit 帳戶 UI 或 GET /v5/user/query-api（私有簽名端點，本輪硬邊界禁打）；建議 operator 定期 UI 截圖或未來單獨批准的 read-only key 查詢專項",
+   "axis": "BB"
+  },
+  {
+   "note": "live key IP whitelist 實際配置狀態未驗",
+   "why_unproven": "同上為帳戶側事實，repo/runtime 無法讀取；僅見 cutover preflight 記錄 public_ipv4_for_bybit_api_allowlist 欄位（正向信號但非證明）",
+   "axis": "BB"
+  },
+  {
+   "note": "111 筆本地 Working 尾態中是否有任何一筆仍真實掛在交易所（vs 全部本地 stale）未實證",
+   "why_unproven": "需打私有 /v5/order/realtime 開單查詢（禁打）；僅以 TODO 記錄的 06-26 cleanup 後 0 open orders + 本地 DB proxy 推斷多為 stale；PA 可 re-probe：下次獲批 read-only 窗口做單 symbol 點查對賬",
+   "axis": "BB"
+  },
+  {
+   "note": "bybit_private_ws.rs（1750 行）與 ws_client/ parsers 的逐行 parsing 正確性本輪未重審",
+   "why_unproven": "上輪 06-14 全倉 audit PASS 後無相關 commit 觸碰跡象的假設未逐 commit 驗證；本輪時間預算優先投向新增面（bounded probe/connector cutover/Python client）與 runtime 退化",
+   "axis": "BB"
+  },
+  {
+   "note": "多策略同 symbol 反向掛單自成交（self-match）暴露面未做 PG 實證查詢",
+   "why_unproven": "wash/STP 風險評估需跨策略同時段反向 open order 重疊查詢；本輪僅確認 flash_dip 全 Buy PostOnly + grid 候選未執行，未跑歷史重疊統計；PA 可 re-probe：order_state_changes 同 symbol 反向 Working 時段交集查詢",
+   "axis": "BB"
+  },
+  {
+   "note": "Earn client 真端點啟用狀態（OP-1 key 重發後 mock gate 是否應解除）未全流程驗證",
+   "why_unproven": "僅 grep 確認 mock gate 註釋仍在（bybit_earn_client.rs:21-22, 214, 390）；OP-1 重發是否已發生屬 operator 側事實，TODO 無新記錄",
+   "axis": "BB"
+  },
+  {
+   "note": "GUI JS（console）Bybit-facing 寫入面本輪未重審",
+   "why_unproven": "GUI 寫入經 Python settings/live_session routes（本輪已審其閘）；GUI 端 93 endpoints 全量走查屬 E5/E2 域交叉，BB 僅覆蓋 exchange-facing 出口",
+   "axis": "BB"
+  },
+  {
+   "note": "哨兵停擺的 root cause（crontab 覆寫 vs operator 有意移除）未從 git/shell history 取得直接證據",
+   "why_unproven": "crontab 變更無版本控制；僅以槽位佔用 + 同批 EXPECTED_HEAD posture + 無 uninstall 記錄推斷；操作紀錄屬 operator 側",
+   "axis": "BB"
+  },
+  {
+   "note": "engine 當前 running binary 是否含最新 source head 的 Bybit 邊界修改未驗 build-SHA",
+   "why_unproven": "runtime repo ahead 8/behind 164（TODO 記錄）+ engine 10.5h 前重啟；build-SHA≠git-commit 教訓下需 /health build hash 對照，本輪未做（不影響 source 側 findings）",
+   "axis": "BB"
+  },
+  {
+   "note": "Rust 端 counterfactual replay / horizon_stability_scorecard 的實際生成器（餵給 policy.py 的 scorecard artifact 上游）未溯源審計——sealed replay markout 是否與 Python outcome_writer 同款樂觀假設僅由消費端 schema 推斷",
+   "why_unproven": "生成鏈落在 /tmp runtime artifacts + 可能的 Rust replay_runner，本輪時間盒內未追到唯一生成點；PA 可從 profitability_path_scorecard 的輸入 artifact 路徑反查",
+   "axis": "QC"
+  },
+  {
+   "note": "PG 層樣本驗證（trade counts、engine_mode IN ('live','live_demo') 隔離、fills 歸屬）本輪未重跑",
+   "why_unproven": "審計廣度優先；僅用 ssh 唯讀取了 edge_estimates.json；PG SELECT 雖 read-only 但前輪已驗過 filter，本輪未重驗",
+   "axis": "QC"
+  },
+  {
+   "note": "dynamic_risk_sizer 在 runtime 的實際顯現（sizer 是否已累滿 50 筆平倉並發布 ≤5% cap、當前 current_pct 實值）未取數——F6 的 runtime 影響側停在 INFERENCE",
+   "why_unproven": "需 runtime IPC/status 讀數，屬灰色地帶（讀 status 安全但需引擎互動），本輪保守未執行",
+   "axis": "QC"
+  },
+  {
+   "note": "mlde_demo_applier / claude_teacher applier 的統計調參邏輯（per_trade_risk_pct patch 路徑、LCB gate 鏡像）未深審",
+   "why_unproven": "屬 QC×MIT 邊界（ML pipeline 方法論主審 MIT）；本輪僅確認其存在與 clamp 結構",
+   "axis": "QC"
+  },
+  {
+   "note": "IBKR stock_etf lane（risk_config_stock_etf_paper.toml + ADR-0048 P1-P5 source-only）完全未審",
+   "why_unproven": "dormant 零真錢 lane，優先級讓位於活躍 demo 迴路；QC 已有 2026-06-29 三輪 launch certification 覆蓋設計面",
+   "axis": "QC"
+  },
+  {
+   "note": "GUI JS 寫入面 fake-success / node --check 類檢查未做；GUI 僅驗證了 API 層 percent↔fraction 轉換（risk_routes.py:308）",
+   "why_unproven": "E2/QA 域；QC lens 只覆蓋語意層。GUI 93 endpoints 的寫入面留給 E2 re-probe",
+   "axis": "QC"
+  },
+  {
+   "note": "funding_short_v2 / liquidation_cascade_fade / cross_asset 策略全量數學未重推導（僅黑名單合規註記與 funding interval 假設檢查）",
+   "why_unproven": "全部 active=false 雙鎖 dormant；revive 時須走 Stage 0R + QC 專審，本輪按剩餘壽命降權",
+   "axis": "QC"
+  },
+  {
+   "note": "三環境 TOML 全 key 差異矩陣（demo vs live vs paper 逐 key diff）未窮舉，僅抽查 [limits]/[dynamic_sizing]/[slippage]/[cost_gate]",
+   "why_unproven": "feedback_env_config_independence 明示三檔故意分開；窮舉 diff 產出大量預期內差異、信噪比低，抽查已覆蓋風控要害 key",
+   "axis": "QC"
+  },
+  {
+   "note": ".claude hooks（rtk-rewrite/session-start）與 workflows 行為未實測，僅確認 25 skills 存在且 SSOT 指針（EX-01/SM-04/risk TOML 路徑）有效",
+   "why_unproven": "hooks 行為測試需執行 Bash 管線，非 QC math lens 核心；E3/PA 域",
+   "axis": "QC"
+  },
+  {
+   "note": "sealed-horizon 240m 候選（ma_crossover|BTCUSDT|Sell, n=13,819）的資料品質 5 test（ADF/JB/autocorr）與 bull-heavy 標籤未驗",
+   "why_unproven": "需 PG 取數 + Python 統計 run（QC 協查模式）；若 operator 走 sealed preflight approve 前應補跑，為 walk-forward-validation-protocol step 0-1 缺口",
+   "axis": "QC"
+  },
+  {
+   "note": "James-Stein p<3 時 _meta.is_valid=false 標記建議（2026-04-24）是否已落地未驗證（僅確認 p<3 回 raw + warning）",
+   "why_unproven": "runtime n_cells=45≥3 使該分支當前不觸發；低優先",
+   "axis": "QC"
+  },
+  {
+   "note": "weekday=6 檔位 job（thompson/optuna/cpcv_validator/dl3_foundation/weekly_report）內部方法論本輪未深審；bayesian_posteriors 07-05 週日 run 是否自癒未驗",
+   "why_unproven": "該檔位每週日才執行，本輪審計窗口內無新 run 產物可驗；cpcv_validator.py 360 行未逐行讀（時間預算取捨）",
+   "axis": "MIT"
+  },
+  {
+   "note": "FeatureVectorV1 決策時刻指標是否含 forming 1m bar（train-serve skew / resample boundary 向量）未逐指標驗證",
+   "why_unproven": "compute_indicators 全鏈逐指標對齊需獨立深審；決策時刻用 forming bar 本身是合法 PIT，風險僅在 ETL 側對齊，優先級讓位給 F-1/F-2",
+   "axis": "MIT"
+  },
+  {
+   "note": "PSI/KS/Wasserstein 實算 drift 螢幕（feature 分佈 reference vs current）未執行",
+   "why_unproven": "Mac 無預備 venv；且 features.online_latest 凍結（F-2）使 current window 無意義 — F-2 修復前實算無效，修復後應由 Linux lane 補跑",
+   "axis": "MIT"
+  },
+  {
+   "note": "引擎 recorder env flags（OPENCLAW_RECORD_TICKS/RECORD_L1_EVENTS）未直讀 /proc/PID/environ 驗證",
+   "why_unproven": "environ 可能含 secret，read-only 衛生迴避；以三表 row fresh-to-now 間接證 writer 活（證據強度足夠但非直證）",
+   "axis": "MIT"
+  },
+  {
+   "note": "06-27 crontab 置換是否為 operator/PM 刻意決策未確認；置換前完整 crontab 內容無法重建",
+   "why_unproven": "TODO/PM reports 中未找到記錄該決策的條目；crontab 無版本控制/差分留痕（本身即 F-3 的 fix_hint 一部分）",
+   "axis": "MIT"
+  },
+  {
+   "note": "16 個 Rust DB writer 吞錯 seam（06-14 發現 warn-only 不 propagate）的 retrofit 進度未重驗",
+   "why_unproven": "本輪聚焦新增缺陷；該 seam 與 F-2（feature writer 若 INSERT 失敗亦靜默）交互，應在 F-2 修復驗證時一併重驗",
+   "axis": "MIT"
+  },
+  {
+   "note": "V140 manual pgvector 的 prod 套用狀態、runtime checkout（ahead 8/behind 164）與 origin/main 的 migration 檔差集未精確比對",
+   "why_unproven": "V140 是 out-of-band manual path；runtime repo 差集比對需在 trade-core 跑 git 命令且與本輪 ML/DB 焦點正交",
+   "axis": "MIT"
+  },
+  {
+   "note": "GUI 寫入面與 control_api 其餘 route（非 strategist_promote）本輪未入深度",
+   "why_unproven": "同日有 E5/compliance 平行全倉審計覆蓋該面；MIT 域內優先深挖 ML/DB 三條 HIGH 鏈",
+   "axis": "MIT"
+  },
+  {
+   "note": "exit_features 消費者集合僅以 06-14 審計結論 + 本輪 grep 無新 consumer 佐證，未重新窮舉",
+   "why_unproven": "row 累積模式（live_demo 停在 1192 與 06-14 相同）與 grep 結果一致支持結論不變；窮舉重驗投入產出比低",
+   "axis": "MIT"
+  },
+  {
+   "note": "scorer_trainer 的 CPCV 訓練路徑（stages 顯示 cpcv_training 有跑）其 purge/embargo 實作正確性未如 quantile 路徑逐行驗",
+   "why_unproven": "quantile 路徑抽查已揭示共通 ETL 層缺陷（F-1/F-5 兩者共享）；scorer 專屬 split 邏輯留待 F-1 修復後的 re-probe",
+   "axis": "MIT"
+  },
+  {
+   "note": "bybit_thought_gate 56 檔僅查 wiring 未逐檔深審（與 06-14 同盲區）",
+   "why_unproven": "體量（~9.6k LOC）vs 本輪聚焦取捨；該面掛在 manual-only layer2 路徑，runtime 零流量下深審邊際價值低",
+   "axis": "AI-E"
+  },
+  {
+   "note": "Anthropic console 實際賬單未驗——「每日 AI 成本 $0」依 DB(ai_usage_log=0/ai_invocations 0 billable)+env+loop-off 三角推定，key 被帶出系統外使用不可證偽",
+   "why_unproven": "無 console 訪問權；read-only 邊界內無法發 API 驗 key 用量",
+   "axis": "AI-E"
+  },
+  {
+   "note": "L1 Ollama 延遲 P50/P95 無真值，DOC-08 <3s SLA 本輪仍不可裁",
+   "why_unproven": "writer env-gate OFF（F3）+ L1 流量自 06-24 歸零（F4）雙重斷源",
+   "axis": "AI-E"
+  },
+  {
+   "note": "claude-sonnet-4-6 在 Anthropic API 端是否仍 active（未進退役/deprecation）未核實",
+   "why_unproven": "需呼 API models list；雖免費但本輪守 read-only 不發外呼，僅以官方 pricing 頁在列為旁證",
+   "axis": "AI-E"
+  },
+  {
+   "note": "ContextDistiller ~520 token 預算 spec 與 Rust→Python IPC AI 路徑端到端延遲（profile 兩條目）零樣本可驗",
+   "why_unproven": "L2 全史 0 真調用、L1 IPC 現停擺，無 runtime 樣本；歷輪同結論，profile 廢止建議仍未被採納",
+   "axis": "AI-E"
+  },
+  {
+   "note": "LM Studio lane（Mac dev 替代 Ollama）實際行為未實測",
+   "why_unproven": "LOCAL_LLM_PROVIDER 未設於任一 runtime 進程，Mac 側無活躍 LLM 業務流量可觀測",
+   "axis": "AI-E"
+  },
+  {
+   "note": "開發側 Claude Code token 稅（analyze_token_usage.py）本輪未重跑——AI 對開發效率單位成本 trend 缺 07 月數據點",
+   "why_unproven": "時間預算讓位 runtime 證據鏈；腳本在位可隨時補跑",
+   "axis": "AI-E"
+  },
+  {
+   "note": "cost_edge_advisor_log 表膨脹率/索引健康未量化（42k row 級尚小）",
+   "why_unproven": "psql read-only 可查但優先級低；建議下輪帶 pg_total_relation_size 一併採",
+   "axis": "AI-E"
+  },
+  {
+   "note": "uvicorn 4 workers 是否各自初始化 Layer2CostTracker 單例（F8 競態前提）未以 runtime 打點證實，僅源碼結構推定",
+   "why_unproven": "驗證需向 API 發請求觀察各 worker 狀態或注入日誌，越出 read-only 靜態證據邊界",
+   "axis": "AI-E"
+  },
+  {
+   "note": "未在 Linux runtime 跑 profiler（flamegraph/py-spy/memray）——熱點分佈是代碼推斷 + 前輪 microbench 外推，非本輪實測火焰圖",
+   "why_unproven": "py-spy/perf 需 sudo 且對 prod 引擎有觀測侵入性，read-only 硬邊界下保守跳過；Mac 開發機無 runtime 可替代取樣",
+   "axis": "E5"
+  },
+  {
+   "note": "cargo bench / cargo bloat / binary size / compile time 未測——Rust 遷移期 binary 監控（skill 要求項）本輪缺位",
+   "why_unproven": "本地 release build 需 10+ 分鐘且會污染 target/（多 session 髒樹），time-box 取捨；建議下輪專項",
+   "axis": "E5"
+  },
+  {
+   "note": "IPC round-trip <5ms SLA 未實測驗證（僅代碼面審 ipc_client 串行設計）",
+   "why_unproven": "實測需向 runtime engine socket 發真請求，屬 runtime 觸碰灰區，read-only 保守跳過",
+   "axis": "E5"
+  },
+  {
+   "note": "klines 壓縮 chunk 41.8M seq scan 的 caller/query 未定位——只有 table 級統計無 query 級歸因",
+   "why_unproven": "pg_stat_statements 未安裝（F12）；且 pg_stat 計數自上次 reset 累計、時間窗未知，rate 無法推算",
+   "axis": "E5"
+  },
+  {
+   "note": "runtime TOML（hurst.enabled 等 RiskConfig 實值）以 source 副本為證，未逐檔 ssh 驗 runtime 副本——F1 的 hurst caveat 判定依賴此假設",
+   "why_unproven": "runtime settings 檔逐一比對成本高且權威序上 runtime TOML > source；已在 F1 標注 caveat 而非斷言",
+   "axis": "E5"
+  },
+  {
+   "note": "Python 80 個 threading.Lock 的持鎖時長未測（lock 審計只做了數量統計）",
+   "why_unproven": "持鎖時長熱力圖需 runtime instrumentation，超出 read-only 邊界",
+   "axis": "E5"
+  },
+  {
+   "note": "engine 71 threads 構成未分解（tokio worker vs blocking pool vs 專用 writer）",
+   "why_unproven": "需 /proc/PID/task 逐 thread comm 讀取比對，時間預算內未展開；RSS 2.1GB 的組成同樣未剖析",
+   "axis": "E5"
+  },
+  {
+   "note": "GUI 前端 runtime 性能（poll 頻率、渲染、17.5k JS LOC 的載入面）未審",
+   "why_unproven": "無瀏覽器環境；靜態體量（1.8MB/53 檔）已記錄，行為面需 devtools 實測",
+   "axis": "E5"
+  },
+  {
+   "note": ".codex 活躍治理層（596K）的 agent 讀頻與 token 稅未深入——僅確認存在與體量",
+   "why_unproven": "Codex agent 的讀取 telemetry 不在本倉可觀測面內；被 drift gate 豁免清單引用故壽命長，值得 PA re-probe",
+   "axis": "E5"
+  },
+  {
+   "note": "測試套件總時長/CI 成本未測（cargo test + pytest 全量跑一遍的 wall-clock）",
+   "why_unproven": "全量測試在 Mac 沙盒不可靠（PG mock）且耗時大；test-blindspot 軸本輪僅覆蓋測試檔體量不含執行成本",
+   "axis": "E5"
+  },
+  {
+   "note": "報告未落盤：本輪 A3 toolset 為 read-only（無 Write/Edit/Bash），無法寫 workspace report 與 memory.md 追加。全文以本結構化輸出承載，report_path 為建議持久化目標；沿用 2026-05-30 precedent 由 PM 驗證後 verbatim 持久化並補 memory 3 行結論。",
+   "why_unproven": "工具硬限制，非證據不足",
+   "axis": "A3"
+  },
+  {
+   "note": "runtime 實際 GUI 版本未驗證（trade-core 線上 console 的 BUILD_TS / 是否含本輪確認的修復）。允許的 ssh trade-core read-only 本輪未執行。",
+   "why_unproven": "本輪優先覆蓋源碼全 tab 靜態走查；TODO v738 顯示 runtime behind 164 commits，已列為獨立 ASSUMPTION finding，PA 可用單條 ssh grep BUILD_TS 快速 re-probe",
+   "axis": "A3"
+  },
+  {
+   "note": "無 browser/preview 工具 — 全部結論來自 click-handler→API→state 靜態 trace；實際渲染（CSS 疊層、toast 遮擋、mobile <860px sidebar 隱藏後關鍵資訊是否可達、iframe 懶載入競態）未經實操驗證。",
+   "why_unproven": "環境未提供 browser 類工具；ux-checklist 工作流已預留此降級模式並要求標註",
+   "axis": "A3"
+  },
+  {
+   "note": "node --check / 等效語法檢查未跑：本輪引用的 JS 檔（tab-live.js、risk-tab.js、earn-tab.js、tab-stock-etf*.js）語法健康未驗證。",
+   "why_unproven": "無 Bash 工具；per GUI sign-off SOP 該步屬 E1/E2 職責，A3 只標記",
+   "axis": "A3"
+  },
+  {
+   "note": "WCAG 2.1 AA 對比度/鍵盤導航全量未測（design:accessibility-review 未展開）：僅確認 mode-badge 元件有 role/aria/tabindex 與 residual banner 的 role=alert；色彩對比值、focus order、SR 動線未量測。",
+   "why_unproven": "無渲染環境無法取 computed color；建議下輪帶 browser 工具專項",
+   "axis": "A3"
+  },
+  {
+   "note": "認知自適應 UX 三元件（CognitiveModulator 壓力水平 / OpportunityTracker 錯過機會 / DreamEngine 建議標示）僅做檔案級 grep 定位（tab-paper/tab-risk/tab-agents/common-modals 有命中），未逐一走查其呈現是否符合『非指令標示、不造 FOMO』要求。",
+   "why_unproven": "命中面多在 requiresPaperEngine 的 legacy paper 視圖（默認隱藏），本輪時間預算讓位給新 stock-etf surface 與 live 寫路徑；PA 可 re-probe tab-paper.html + risk-tab.js 的 cognitive 區塊",
+   "axis": "A3"
+  },
+  {
+   "note": "後端回應契約僅抽驗 3 條（risk/override、live session/stop、GovernanceResponse）；其餘 40+ 寫 endpoint 的 200-with-error 形態沿用 2026-05-30 深查結論未逐條重驗。",
+   "why_unproven": "上次 deep-dive 已全表掃過且本輪抽驗未發現該表結論被推翻；重掃全表成本高、邊際低",
+   "axis": "A3"
+  },
+  {
+   "note": "Earn tab 5-gate 即時性、canary promote、auth renew T3 流程本輪未重走（上輪 CLEAN）。tab-replay / tab-monitoring / tab-edge-gates / tab-phase4（無入口）只確認 read-only 屬性未逐行審。",
+   "why_unproven": "增量審計策略：優先新 surface 與上輪 OPEN/NEEDS-MORE 項；read-only tab 的誤操作風險為零",
+   "axis": "A3"
+  },
+  {
+   "note": "i18n_zh.js 對照表覆蓋率未與各 tab 實際 key 使用 diff（mode_badge.* fallback 鏈已讀，全表未驗）。",
+   "why_unproven": "需要腳本化 key 抽取比對，read-only 環境下人工 diff 成本不成比例",
+   "axis": "A3"
+  },
+  {
+   "note": "報告未實際落盤：R4 工具集本輪唯讀（無 Write/Edit/Bash），report_path 為建議路徑，需 PM 代為持久化（先例：2026-05-30 報告首行 PERSISTENCE NOTE）；memory.md 追加行同樣待 PM 代寫。",
+   "why_unproven": "工具硬限制，非證據不足；正文已附完整報告內容。",
+   "axis": "R4"
+  },
+  {
+   "note": "Rust 文檔體系（/// doc comments、Cargo.toml 註釋、cargo doc 完整性、新 Rust 模組 changelog 五角色結論）本輪未展開——此為 R4 profile 明列核心技能。",
+   "why_unproven": "無 Bash 無法跑 cargo doc/測試計數；逐檔 Read 60+ modules 超出本輪 token 預算。建議 PA re-probe 抽 openclaw_engine 新增 stock_etf 相關模組的 doc comment 覆蓋。",
+   "axis": "R4"
+  },
+  {
+   "note": "TODO runtime 數字（PID 1538641、expired auth sha 8c891b4e、runtime head e16d3323 等）僅按文檔時戳採信，未經 ssh trade-core 實測交叉核驗。",
+   "why_unproven": "唯讀邊界允許 ssh read-only，但本輪聚焦文檔面且無 Bash 工具；G6-04 規定 R4 拿這些數字做決策輸入前應實測——本輪未以其為決策輸入，僅驗時戳合規。",
+   "axis": "R4"
+  },
+  {
+   "note": "CLAUDE.md §四硬邊界 ⇄ Rust/Python hard-boundary 常量（5-gate 名、execution_authority denylist）代碼層對齊未驗——六對強制對齊之一僅完成文檔側。",
+   "why_unproven": "需 grep Rust/Python 源碼並比對常量語義，超出本輪文檔面深度；建議 CC/FA re-probe。",
+   "axis": "R4"
+  },
+  {
+   "note": "全倉編號殭屍引用 regex 全量掃描（skill 工作流 step 2 的完整反向索引）未窮盡執行，僅做 SSOT 差異驅動的定向抽查（DOC-05、ADR 範圍、P1-L2 row、AMD 表）。",
+   "why_unproven": "docs/ 樹含 781+ Operator 檔與大量 archive，全量 grep 輸出處理超 token 預算；archive 內舊 ID 屬合法凍結引用，信噪比低。下輪可分區段跑。",
+   "axis": "R4"
+  },
+  {
+   "note": "CLAUDE_CHANGELOG 條目 ⇄ 實際 git commit SHA 一致性未驗（如 memory 所稱 drift gate commit d0eeafb41）。",
+   "why_unproven": "無 Bash/git 工具，Mac 工作目錄根層非 repo；只驗證了 changelog↔TODO↔報告檔案三方一致。",
+   "axis": "R4"
+  },
+  {
+   "note": ".claude/skills 25 份中僅 doc-cross-reference 做了雙副本內容比對與事實漂移檢查；其餘 24 份 skill 的數字/名單型 hot-facts 未逐檔審。",
+   "why_unproven": "token 預算取捨；.claude/agents 18 份已全量 grep 抽查（結果良好，僅 R4.md/A3.md 兩案）。下輪優先 ultracode-full-audit 與 e2e-integration-acceptance 兩份高風險 skill。",
+   "axis": "R4"
+  },
+  {
+   "note": "PM/E4 等超標 memory 是否已有並行壓實（memory-archive.md 是否存在、行數守恆）未查。",
+   "why_unproven": "僅計了主檔行數；壓實派工前 PM 應先 glob 各目錄 memory-archive.md 避免重複切分。",
+   "axis": "R4"
+  },
+  {
+   "note": "worklogs/、audits/、handoffs/ 2026-06/07 新檔命名規範（YYYY-MM-DD--）未做全量掃描；抽樣所見（PM/E4 reports、execution_plan）全部合規。",
+   "why_unproven": "全樹檔名枚舉輸出量大；已知歷史豁免（DOC-XX docx、governance_dev 大寫檔）使機械掃描需人工濾層。",
+   "axis": "R4"
+  },
+  {
+   "note": "document_inventory.json / path_redirects.md / audit_index.md 內容準確性未驗，僅驗存在。",
+   "why_unproven": "JSON inventory 15K+ 行，逐條驗證超預算；redirect 正確性需對每條目標檔存在性抽查，建議下輪專項。",
+   "axis": "R4"
+  }
+ ],
+ "seam_reprobes": [
+  {
+   "seam": "全輪「source-head 判定 vs running-binary 事實」系統性斷層:A3 自報 trade-core runtime 落後 origin/main 164 commits,CC 發現 IMPL-A 源碼已進 runtime checkout 但 running binary 未含;然而 E3 安全基線、QC config 語義、BB client 行為、AI-E enforcement 判定等本輪絕大多數 verdict 均以 Mac source head 取證。需以 running engine 的 build SHA(非 checkout HEAD、非 origin/main)為基準,重放各軸 P0/P1 判定,標出哪些在 runtime SHA 下翻轉(重點:d0eeafb41 drift-gate、5-gate 路徑、capability token、rate-limit 實作、A3 全部『已修復』判定)。",
+   "assign_axis": "CC",
+   "why": "每軸取證慣性都是讀 Mac 源碼;A3 只把 164-commit 落差報成 GUI caveat,沒有任何軸擁有『runtime SHA 下全 finding 重定價』;memory 既有教訓 build-SHA≠git-commit 本輪無軸執行。"
+  },
+  {
+   "seam": "GUI 顯示值 ↔ Rust engine in-memory 生效值 ↔ TOML on-disk 值三方一致性(trading_mode 冷參數陷阱類)。QC 審了 TOML 語義(per_trade_risk_pct fraction/percent 混雜、dynamic_sizing band 無交叉驗證),A3 審了 GUI 呈現,但無人經 IPC 讀 running engine 實際載入的 per_trade_risk_pct / band / trading_mode,與 TOML 及 GUI 顯示三方對表。",
+   "assign_axis": "QC",
+   "why": "QC 證據面止於配置檔、A3 證據面止於 DOM;『引擎此刻實際用哪個值』落在兩軸之間無 owner,而 GUI 直寫 Rust + 冷參數陷阱意味 on-disk ≠ in-memory 是已知風險類別。"
+  },
+  {
+   "seam": "06-27 crontab 70→5 行重寫的完整 diff 全量對帳:FA 認領 ~12 producer、MIT 認領 ~20 evidence/monitor lane、BB 認領哨兵 1 條、AI-E 認領成本快照 1 條,四軸切片加總仍遠小於被刪總數,且無軸追 mutation 作者/意圖(Codex?operator?事故?)。需從 crontab 備份/shell history/系統日誌還原 06-27 前全文,逐條分類『有意退役 vs 誤刪 vs superseded』+恢復優先級。",
+   "assign_axis": "FA",
+   "why": "每軸只認領自己 domain 的 cron 消費者,重寫事件本身(單一 mutation、被刪全量清單、lineage 與意圖)是跨域無主地帶——現行分工保證沒有軸看到完整 diff。"
+  },
+  {
+   "seam": "unattributed fill → decision → learning 記帳中段 lineage:BB 從交易所側報 unattributed:bybit_auto 持續發生+本地 Working 尾態 111 筆,MIT 從訓練側報 99.9% reject label 污染,但無人追具體 unattributed fill 在 PG 的去向——是否計入 30d net -7.04?是否以錯誤 lineage 進 decision_outcomes/edge_estimates/訓練表?取 3-5 筆具體 fill ID 做全鏈路追蹤。",
+   "assign_axis": "MIT",
+   "why": "BB 證據止於交易所/engine 邊界,MIT 證據始於訓練表;fill→decision→label 中段跨 Rust 記帳與 PG ETL,恰是兩軸交接處,污染若存在會同時使 QC 的 edge 估計與 MIT 的 label 失真。"
+  },
+  {
+   "seam": "授權狀態四表示法同刻一致性:同一 standing auth 在 (a) authorization.json 檔、(b) Rust live_authorization(BB-5 now_ms fallback=0)、(c) Python gate 自報 boolean(E3 POLICY-1)、(d) TODO/GUI 內嵌 status(CC 發現過期後仍 ACTIVE)四處表示。需做同一時間戳四方快照對表,並審狀態轉移(過期/refresh/revoke)時四表示的傳播順序與時滯,找出 fail-open 窗口。",
+   "assign_axis": "E3",
+   "why": "CC/E3/BB 各按自己的層報了一個裂縫,但三個 finding 實為同一狀態機的三個表面;授權狀態的跨層傳播協議本身無 spec 也無單一 owner,單軸複核不會拼出完整狀態機。"
+  },
+  {
+   "seam": "93 個 GUI 寫入 endpoints 的 fake-success 全量掃描:A3 在 Risk Governor 降級 override 抓到一例 pending_approval→ok:true+成功 toast,memory 中 GUI 寫入面盤點已有 fake-success 判別鉤子,但 A3 只抽 UX 面、E3 只抽授權 gating 面,無人以『後端實際 effect vs 前端成功語義』為判準全量掃 93 條寫入路徑。",
+   "assign_axis": "E3",
+   "why": "fake-success 判定需同時讀 route handler 回傳語義(E3 領域)與前端 toast 措辭(A3 領域);模式已被單點證實,系統性掃描恰落在兩軸分工的交界,現行抽樣方式二者都不會覆蓋全集。"
+  },
+  {
+   "seam": "零成交饑餓使負向 PASS 判定空洞化:BB『rate 30d 0 hit』『25 pinned 0 delisting 中招』、QC『黑名單 0 違規』等 PASS 在 v710-v738 拒真率 100%、30d 幾乎零 fill 背景下可能 vacuously true(無流量≠通過壓力)。需為每條負向 PASS 附上同期活動量分母,標記哪些 PASS 在 v739+ 流量恢復後必須重測,避免修復輪把空洞 PASS 當基線。",
+   "assign_axis": "BB",
+   "why": "饑餓是 FA/QC/AI-E 的 finding,PASS 是 BB/E3/QC 各自的正向面;『饑餓 → 他軸 PASS 失效』的推論鏈跨軸,現行分工中無人把活動量分母帶進 PASS 判定。"
+  },
+  {
+   "seam": "mlde_shadow_advisor QueryCanceled(MIT)× PG 全出廠默認+28GB l1_events+14.8M decision_features(E5/MIT)的根因歸屬:MIT 報症狀(5s statement timeout 全 error),E5 報環境(cache hit 62.38%、無 pg_stat_statements),無人對該查詢做 EXPLAIN ANALYZE 判定是 PG 調參可救、索引缺失、還是查詢需重寫——三種結論修復路由完全不同。",
+   "assign_axis": "E5",
+   "why": "MIT 停在『lane 死了』,E5 停在『PG 沒調』,查詢級根因需要兩者證據交叉;現行分工各自止步於自己的層,導致這條 lane 的修復方向無證據可依。"
+  },
+  {
+   "seam": "2000 行硬限違規清單兩軸口徑矛盾:CC 報 9 個生產檔、E5 報 13 個 git-tracked 源檔,同輪同 repo 差 4 檔,說明枚舉 filter(生產 vs git-tracked、是否含 bash/測試/generated)未對齊。需對兩份清單做交集/差集對帳,產出單一權威違規清單+枚舉方法論註記。",
+   "assign_axis": "E5",
+   "why": "同一硬限被兩軸用不同 filter 各掃一遍且數字矛盾,聚簇階段會把兩條 finding 併簇而掩蓋差異;不對帳則修復輪必然漏檔或重工。"
+  },
+  {
+   "seam": "第三持久層(既非 git 也非 PG)的運行時狀態檔全量清冊:已知碎片——FA 報學習 SSOT 在 boot-volatile /tmp、AI-E 報 Layer2CostTracker 4-worker 無鎖共寫 JSON、QC 報 runtime edge_estimates.json 與 git 化石分歧 2.5 個月、memory 記 canary_events.jsonl 無告警消費者。需枚舉 engine/Python 依賴的所有 git 外狀態檔,逐一標:路徑易失性、寫者數/鎖、重啟後行為、備份策略。",
+   "assign_axis": "FA",
+   "why": "每軸只在自己 domain 撞到一個狀態檔就地報告;『runtime JSON/JSONL 狀態層』作為類別無 owner,而它是 reboot 清空、多寫者 race、source↔runtime 分歧三類事故的共同根源。"
+  },
+  {
+   "seam": "agent.l2_call_ledger 表不存在(AI-E)× V### migration 紀律(MIT)交叉:L2 memory recall 永久 dormant 的直接根因是表缺席,但無人判定建表 migration 是從未寫過、寫了未 apply(prod sqlx head=145)、還是 P4 dormant merge ddaafda1 有意留空——三種情況的修復動作與治理結論完全不同。",
+   "assign_axis": "MIT",
+   "why": "AI-E 證據止於『表不存在+99 條教訓 0 召回』,MIT 只審已存在的 V142-146;『應存在而不存在的 migration』落在兩軸掃描範圍的負空間,單軸複核不會觸發此查證。"
+  },
+  {
+   "seam": "06-30 connector cutover 後 Rust↔Python 內側資料契約覆蓋:SCHEMA-1 contract test 在舊 connector 面關閉(06-14 基線),cutover 換了 connector 而 v738 至今零 fill,任何新增/變更的 message 欄位錯配都被零流量掩蓋。需盤點 cutover diff 引入/變更的訊息型別與欄位 vs 現行 contract test 實際覆蓋清單,標出 v739 首批真 fill 將首次行經的未測路徑。",
+   "assign_axis": "BB",
+   "why": "E3 只審 IPC 的安全屬性(0600+HMAC),BB 審了 connector 的交易所外側但未審其內側契約,E4 不在本輪;零流量下 runtime 證據面對此縫隙完全靜默,唯有源碼級 diff 對 contract test 覆蓋比對能提前暴露。"
+  }
+ ],
+ "fixes": [],
+ "regression": null,
+ "next": "主會話接 Stage 3：PA 讀 report_paths 對 consensus 確認異質 corroboration、對 ungrouped/disputed/seam_reprobes/assumptions 定向 re-probe→validated fix plan；Stage 4 PM 裁決+TODO（見 ultracode-full-audit skill）"
+}
