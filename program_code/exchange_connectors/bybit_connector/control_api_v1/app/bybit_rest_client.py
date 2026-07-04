@@ -223,22 +223,30 @@ def _resolve_credentials(
     """Resolve (api_key, api_secret) honouring LIVE-GUARD-1 Rust-side contract.
     解析憑證，遵守 LIVE-GUARD-1 Rust 端契約。
 
-    Mainnet:
+    Mainnet / LiveDemo（"live" slot）:
         1. Explicit param (if non-empty)
         2. Secret file at {base}/live/{api_key|api_secret}
-        (env var fallback DISABLED — LIVE-GUARD-1 Gate #2)
+        (env var fallback DISABLED — LIVE-GUARD-1 Gate #2 / P2-1 is_live_slot)
 
-    Demo / Testnet / LiveDemo:
+    Demo / Testnet（"demo" slot）:
         1. Explicit param (if non-empty)
         2. Env var BYBIT_API_KEY / BYBIT_API_SECRET
-        3. Secret file at {base}/{slot}/{api_key|api_secret}
+        3. Secret file at {base}/demo/{api_key|api_secret}
     """
-    is_mainnet = (env == "mainnet")
     slot = _SECRET_SLOTS.get(env, "demo")
+
+    # P2-1（冷審計 R2，鏡像 Rust bybit_rest_client.rs:1058）：env-var 憑證回退依
+    # 「是否 live slot」收緊，而非只看 is_mainnet。live_demo 映射到 "live" 槽位但
+    # 非 mainnet，舊判準下任何能設進程 env 的路徑都可覆寫 operator 管理的 live slot
+    # 憑證，繞過 live-slot 來源/審計。為什麼 fail-closed：LiveDemo 是 live-grade
+    # 控制流（CLAUDE.md §四），憑證來源必須與 Mainnet 同等嚴格。
+    # 注意：ctor 的 OPENCLAW_ALLOW_MAINNET 門控（Gate #1）與空憑證硬 raise（Gate #3）
+    # 仍鍵於 is_mainnet（真金白銀專屬），不擴大到 live_demo（Rust 同一取捨）。
+    is_live_slot = (slot == "live")
 
     # Resolve api_key / 解析 api_key
     key = (api_key or "").strip() or None
-    if key is None and not is_mainnet:
+    if key is None and not is_live_slot:
         key = (os.environ.get("BYBIT_API_KEY") or "").strip() or None
     if key is None:
         key = _read_secret_file(slot, "api_key")
@@ -246,7 +254,7 @@ def _resolve_credentials(
 
     # Resolve api_secret / 解析 api_secret
     secret = (api_secret or "").strip() or None
-    if secret is None and not is_mainnet:
+    if secret is None and not is_live_slot:
         secret = (os.environ.get("BYBIT_API_SECRET") or "").strip() or None
     if secret is None:
         secret = _read_secret_file(slot, "api_secret")

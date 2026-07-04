@@ -212,6 +212,40 @@ def test_resolve_credentials_mainnet_prefers_param(monkeypatch):
     assert (k, s) == ("param_key", "param_secret")
 
 
+def test_resolve_credentials_live_demo_ignores_env(monkeypatch):
+    """P2-1（冷審計 R2）：live_demo 映射 "live" slot，env var 憑證回退必須關閉。
+    為什麼：LiveDemo 是 live-grade 控制流（CLAUDE.md §四），任何能設進程 env 的
+    路徑不得覆寫 operator 管理的 live slot 憑證（對齊 Rust is_live_slot 判準，
+    bybit_rest_client.rs:1058）。"""
+    monkeypatch.setenv("BYBIT_API_KEY", "envkey")
+    monkeypatch.setenv("BYBIT_API_SECRET", "envsecret")
+    k, s = _resolve_credentials("live_demo", None, None)
+    assert (k, s) != ("envkey", "envsecret")
+    # HOME 已被 autouse fixture 重導向、無 slot 檔 → 必落空，不吃 env。
+    assert (k, s) == ("", "")
+
+
+def test_resolve_credentials_live_demo_parity_with_mainnet(tmp_path, monkeypatch):
+    """live_demo 與 mainnet 對 env-fallback 行為一致：皆忽略 env、只認 live slot 檔。"""
+    live_dir = tmp_path / "live"
+    live_dir.mkdir()
+    (live_dir / "api_key").write_text("slot_live_key\n", encoding="utf-8")
+    (live_dir / "api_secret").write_text("slot_live_secret\n", encoding="utf-8")
+    monkeypatch.setenv("OPENCLAW_SECRETS_DIR", str(tmp_path))
+    monkeypatch.setenv("BYBIT_API_KEY", "envkey")
+    monkeypatch.setenv("BYBIT_API_SECRET", "envsecret")
+    expected = ("slot_live_key", "slot_live_secret")
+    assert _resolve_credentials("live_demo", None, None) == expected
+    assert _resolve_credentials("mainnet", None, None) == expected
+
+
+def test_resolve_credentials_demo_still_uses_env(monkeypatch):
+    """行為保留守衛：demo slot 仍允許 env var 回退（Demo=學習源可放寬，防過度收緊誤傷）。"""
+    monkeypatch.setenv("BYBIT_API_KEY", "envkey")
+    monkeypatch.setenv("BYBIT_API_SECRET", "envsecret")
+    assert _resolve_credentials("demo", None, None) == ("envkey", "envsecret")
+
+
 # ---------------------------------------------------------------------------
 # HMAC signing (known test vector)
 # ---------------------------------------------------------------------------
