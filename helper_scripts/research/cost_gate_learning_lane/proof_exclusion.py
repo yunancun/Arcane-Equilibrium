@@ -119,6 +119,14 @@ def _stable_component(value: Any) -> bool:
     return bool(raw) and raw.strip() == raw
 
 
+def _normalized_engine_mode(value: Any) -> str:
+    # F10(E4 2026-07-04 補審):鏡像 Rust order_link_engine_mode_tag /
+    # learning_probe_admission_is_demo_only 的 trim + to_ascii_lowercase 正規化。
+    # 本檔原為 exact-match,大小寫/空白變體會與 Rust 判定分裂(drift-source)。
+    # 接受集是純 ASCII("demo"/"live_demo"),str.lower() 與 to_ascii_lowercase 等價。
+    return _raw_str(value).strip().lower()
+
+
 def _parse_positive_int(value: Any) -> int | None:
     if value is None or isinstance(value, bool):
         return None
@@ -185,7 +193,9 @@ def _candidate_bound_active_order_link_id_is_valid(
     context_id: str,
     signal_id: str,
 ) -> bool:
-    mode_tag = {"demo": "dm", "live_demo": "ld"}.get(engine_mode)
+    # 鏡像 Rust is_candidate_bound_bounded_probe_order_link_id:mode 判定走 trim+lower,
+    # id 內 mode tag 本身仍必須逐字元相等(不放寬 id 格式)。
+    mode_tag = {"demo": "dm", "live_demo": "ld"}.get(_normalized_engine_mode(engine_mode))
     expected_hash = _candidate_lineage_hash_tag(side_cell_key, context_id, signal_id)
     if mode_tag is None or expected_hash is None:
         return False
@@ -229,7 +239,13 @@ def _active_bounded_probe_proof_key_is_valid(row: dict[str, Any]) -> bool:
         return False
     if _str(proof_key.get("reference_source")) != ACTIVE_BOUNDED_PROBE_REFERENCE_SOURCE:
         return False
-    engine_mode = _raw_str(proof_key.get("engine_mode"))
+    engine_mode_raw = _raw_str(proof_key.get("engine_mode"))
+    # 鏡像 Rust candidate_matched_active_bounded_probe_proof_key(:273):
+    # engine_mode 未 trim-stable 直接拒絕(fail-closed,不靜默修剪);
+    # trim-stable 的大小寫變體按 Rust demo-only 判定(trim+lower)接受。
+    if engine_mode_raw.strip() != engine_mode_raw:
+        return False
+    engine_mode = _normalized_engine_mode(engine_mode_raw)
     if engine_mode not in {"demo", "live_demo"}:
         return False
     signal_ts_ms = _parse_positive_int(proof_key.get("signal_ts_ms"))
