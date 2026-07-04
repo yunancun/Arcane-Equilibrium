@@ -496,7 +496,11 @@ model_tier = "l1_9b"            # F-09 IPC strategist_evaluate Ollama tier；non
 # env=1 + flag=true 才啟動）+ `trigger_threshold=-0.5`（PM lock-in：paper 虧損達
 # AI 花費 50%）。Phase A 0 trade impact / 不接 IntentProcessor / 純 advisory。
 [cost_edge]
-enabled = false                 # Phase A dormant — env-gate + flag dual safeguard
+# 2026-07-04 冷審計 R2 D5（operator 裁決）：demo advisory 腿 arm。advisor 為純觀察
+# 治理腿（Phase B observation-only，不接 IntentProcessor、不碰交易路徑）；env-gate
+# OPENCLAW_COST_EDGE_ADVISOR=1 仍為第二道保險（雙保險 pattern 不變，本 flag 單獨
+# true 不會 spawn daemon）。
+enabled = true
 trigger_threshold = -0.5        # ratio <= -0.5 trigger（PM Tier 9 T9-LOW-1 lock-in）
 
 # REF-20 Sprint 3 Track H E-4 (2026-05-03) — agent 三表 (agent.messages /
