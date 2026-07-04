@@ -118,7 +118,9 @@ def _set_statement_timeout(cur: Any) -> None:
 
 
 def _read_agent_event_store_summary() -> tuple[dict[str, Any], str | None]:
-    enabled = _env_enabled("OPENCLAW_AGENT_EVENT_STORE_ENABLED")
+    # P2-3（2026-07-04）：默認 ON，與 agent_event_store.AgentEventStore 默認一致
+    # （狀態面與寫入面對同一 env 缺失必須報同一語義，避免「面板說關、實際在寫」）。
+    enabled = _env_enabled("OPENCLAW_AGENT_EVENT_STORE_ENABLED", default="1")
     required = _env_enabled("OPENCLAW_AGENT_EVENT_STORE_HEALTH_REQUIRED")
     window_minutes = int(
         os.getenv(
