@@ -436,6 +436,14 @@ def _get_pg_conn(dsn: Optional[str]):
     return psycopg2.connect(resolved)
 
 
+# P1-3 (2026-07-04)：governance reject path 每天寫 ~46k 條合成 label
+# （label_close_tag='rejected_governance'、label_net_edge_bps=0.0）。它們對
+# quantile / scorer 回歸 lane 是 non-sample（不是 0 值樣本）——30d 實測合成佔比
+# 99.97%，混入即讓 pinball skill 恆 0、coverage 恆 1（常數預測器）。因此訓練
+# SQL 在邊界即以 label_close_tag 排除；reject-aware 語義只屬 ADPE reward view /
+# 未來 classifier lane（須經 compute_class_weights，synthetic:informative ≤ 5:1）。
+SYNTHETIC_REJECT_CLOSE_TAG = "rejected_governance"
+
 # Canonical training query. `engine_mode` filter defaults to 'demo' because
 # spec §8.2 uses demo-fill-rate as the primary acceptance gate; operators can
 # widen to ('paper','demo') once Stage 4 paper-promote is active. Paper is
@@ -444,6 +452,8 @@ def _get_pg_conn(dsn: Optional[str]):
 # label_net_edge_bps IS NOT NULL naturally excludes them.
 # 標準訓練查詢；engine_mode 預設 'demo'（§8.2 驗收閾值），paper-promote 後可放寬。
 # Shadow fill 寫入分離表，NOT NULL 過濾自然排除 ε-greedy 探索污染訓練集。
+# P1-3：SELECT 帶出 label_close_tag 供 acceptance report 組成統計；WHERE 以
+# IS DISTINCT FROM 排除合成 reject label（NULL tag 視為 informative，保守納入）。
 _LOAD_TRAINING_DATA_SQL = """
 SELECT
     context_id,
@@ -454,9 +464,11 @@ SELECT
     strategy_name,
     feature_schema_version,
     feature_schema_hash,
-    feature_definition_hash
+    feature_definition_hash,
+    label_close_tag
 FROM learning.decision_features
 WHERE label_net_edge_bps IS NOT NULL
+  AND label_close_tag IS DISTINCT FROM 'rejected_governance'
   AND engine_mode = ANY(%(engine_modes)s)
   AND feature_schema_version = %(feature_schema_version)s
   AND feature_schema_hash = %(feature_schema_hash)s
@@ -468,6 +480,31 @@ ORDER BY ts ASC
 """
 
 
+def build_label_composition(close_tags: list, labels: list) -> dict:
+    """統計訓練集 label 組成，供 acceptance report 硬 gate（P1-3）。
+
+    為什麼：合成 reject label 已在 SQL 邊界排除，此統計是 defence-in-depth ——
+    synthetic_share 修後期望恆 0，>0 即代表過濾退化；zeros_share 是退化偵測器
+    （常數 0 標籤訓練出常數預測器，pinball skill 恆 0）。
+    """
+    n_total = len(labels)
+    n_synthetic = sum(1 for t in close_tags if t == SYNTHETIC_REJECT_CLOSE_TAG)
+    n_zeros = sum(1 for v in labels if float(v) == 0.0)
+    tag_counts: dict = {}
+    for tag in close_tags:
+        key = tag if tag is not None else "<null>"
+        tag_counts[key] = tag_counts.get(key, 0) + 1
+    top_close_tags = sorted(tag_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:5]
+    return {
+        "n_total": n_total,
+        "n_informative": n_total - n_synthetic,
+        "n_synthetic_reject": n_synthetic,
+        "synthetic_share": (n_synthetic / n_total) if n_total else 0.0,
+        "zeros_share": (n_zeros / n_total) if n_total else 0.0,
+        "top_close_tags": [[tag, count] for tag, count in top_close_tags],
+    }
+
+
 def load_training_data(
     symbol: Optional[str] = None,
     strategy_type: Optional[str] = None,
@@ -477,8 +514,9 @@ def load_training_data(
 ):
     """Load labeled training rows from `learning.decision_features`.
 
-    Returns (features, labels, timestamps, feature_names) as numpy arrays /
-    tuple so `run_training_pipeline.run_pipeline()` can feed CPCV directly.
+    Returns (features, labels, timestamps, feature_names, label_composition)
+    so `run_training_pipeline.run_pipeline()` can feed CPCV directly and the
+    acceptance report can gate on label composition (P1-3).
 
     Rows are filtered by exact feature schema/version/definition hash in SQL.
     Missing / non-numeric JSONB fields reject the row rather than zero-filling,
@@ -497,10 +535,10 @@ def load_training_data(
         max_age_days: trailing-window size (90d default, covers 12 weeks
             of fills — enough for LGBM quantile training per strategy).
 
-    從 learning.decision_features 載入已標籤訓練行；回傳 numpy 陣列
-    (features, labels, timestamps, feature_names)。JSONB 缺失 / 非數值欄位
-    SQL 先按 schema/version/definition hash 過濾；JSONB 缺失 / 非數值欄位
-    會拒絕整行，不做靜默 0.0 填充。
+    從 learning.decision_features 載入已標籤訓練行；回傳
+    (features, labels, timestamps, feature_names, label_composition)。
+    SQL 先按 schema/version/definition hash 過濾並排除合成 reject label
+    （P1-3）；JSONB 缺失 / 非數值欄位會拒絕整行，不做靜默 0.0 填充。
 
     Raises:
         RuntimeError: if numpy/psycopg2 missing.
@@ -539,11 +577,12 @@ def load_training_data(
         empty_f = np.empty((0, len(feature_names)), dtype=np.float32)
         empty_y = np.empty((0,), dtype=np.float32)
         empty_ts = np.empty((0,), dtype=np.int64)
-        return empty_f, empty_y, empty_ts, feature_names
+        return empty_f, empty_y, empty_ts, feature_names, build_label_composition([], [])
 
     accepted_features: list[list[float]] = []
     accepted_labels: list[float] = []
     accepted_timestamps: list[int] = []
+    accepted_close_tags: list = []
     rejected_rows = 0
 
     for row in rows:
@@ -557,6 +596,7 @@ def load_training_data(
             _schema_version,
             _schema_hash,
             _definition_hash,
+            close_tag,
         ) = row
         # psycopg2 returns JSONB as already-decoded dict; defensive parse for
         # text-mode rollback or external dumps. 防禦性解析：JSONB → dict。
@@ -593,6 +633,7 @@ def load_training_data(
         accepted_features.append(row_features)
         accepted_labels.append(float(label_bps))
         accepted_timestamps.append(int(ts_ms))
+        accepted_close_tags.append(close_tag)
 
     if accepted_features:
         features_mat = np.asarray(accepted_features, dtype=np.float32)
@@ -603,11 +644,15 @@ def load_training_data(
         labels_vec = np.empty((0,), dtype=np.float32)
         ts_vec = np.empty((0,), dtype=np.int64)
 
+    label_composition = build_label_composition(accepted_close_tags, accepted_labels)
     logger.info(
-        "load_training_data: %d accepted / %d rejected rows × %d features (engine_mode=%s strategy=%s symbol=%s)",
+        "load_training_data: %d accepted / %d rejected rows × %d features "
+        "(engine_mode=%s strategy=%s symbol=%s informative=%d synthetic=%d zeros_share=%.3f)",
         len(accepted_features), rejected_rows, len(feature_names), engine_mode, strategy_type, symbol,
+        label_composition["n_informative"], label_composition["n_synthetic_reject"],
+        label_composition["zeros_share"],
     )
-    return features_mat, labels_vec, ts_vec, feature_names
+    return features_mat, labels_vec, ts_vec, feature_names, label_composition
 
 
 def export_decision_features_parquet(
@@ -664,7 +709,12 @@ def export_decision_features_parquet(
         conn.execute("INSTALL postgres; LOAD postgres;")
         conn.execute(f"ATTACH '{db_url}' AS pg (TYPE postgres, READ_ONLY);")
 
-        label_filter = "AND label_net_edge_bps IS NOT NULL" if labeled_only else ""
+        # P1-3：export 雙胞胎與 _LOAD_TRAINING_DATA_SQL 同步排除合成 reject label。
+        label_filter = (
+            "AND label_net_edge_bps IS NOT NULL "
+            "AND label_close_tag IS DISTINCT FROM 'rejected_governance'"
+            if labeled_only else ""
+        )
         out_path = (
             f"{_clean_dir}/decision_features_{engine_mode}_{start_str}_{end_str}.parquet"
         )

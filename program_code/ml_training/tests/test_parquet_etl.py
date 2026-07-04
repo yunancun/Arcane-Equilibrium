@@ -330,7 +330,7 @@ def test_load_training_data_empty_returns_canonical_shape(monkeypatch):
 
     monkeypatch.setattr(mod, "_get_pg_conn", lambda dsn: _FakeConn())
 
-    features, labels, timestamps, names = mod.load_training_data(
+    features, labels, timestamps, names, composition = mod.load_training_data(
         symbol="BTCUSDT", strategy_type="ma_crossover"
     )
     assert features.shape == (0, 17)
@@ -340,6 +340,10 @@ def test_load_training_data_empty_returns_canonical_shape(monkeypatch):
     assert labels.dtype == np.float32
     assert timestamps.dtype == np.int64
     assert names == list(mod.EDGE_P3_FEATURE_NAMES)
+    # P1-3：空結果 label_composition 全零，供 acceptance report gate 溯源。
+    assert composition["n_total"] == 0
+    assert composition["n_informative"] == 0
+    assert composition["synthetic_share"] == 0.0
 
 
 def test_load_training_data_live_scope_params_include_live_demo(monkeypatch):
@@ -393,16 +397,19 @@ def test_load_training_data_expands_jsonb(monkeypatch):
         "atr_pct": None,            # coerced to 0.0 (null-safe)
         "funding_rate": "notnum",   # coerced to 0.0 (ValueError → 0)
     }
+    # P1-3：SQL 現 SELECT 10 欄（末欄 label_close_tag）；fixture rows 同步補第 10 欄。
+    # 合成 reject label 已在 SQL WHERE 邊界排除，故此處餵入的都是 informative
+    # （close_tag=None 代表真實 outcome label）。
     rows = [
         (
             "ctx1", 1_700_000_000_000.0, feat_dict_complete, 12.5, "BTCUSDT", "ma_crossover",
             mod.EDGE_P3_FEATURE_SCHEMA_VERSION, mod.compute_feature_schema_hash(),
-            mod.compute_feature_definition_hash(),
+            mod.compute_feature_definition_hash(), None,
         ),
         (
             "ctx2", 1_700_000_060_000.0, json.dumps(feat_dict_partial), -7.25, "BTCUSDT", "ma_crossover",
             mod.EDGE_P3_FEATURE_SCHEMA_VERSION, mod.compute_feature_schema_hash(),
-            mod.compute_feature_definition_hash(),
+            mod.compute_feature_definition_hash(), None,
         ),
     ]
 
@@ -424,7 +431,7 @@ def test_load_training_data_expands_jsonb(monkeypatch):
 
     monkeypatch.setattr(mod, "_get_pg_conn", lambda dsn: _FakeConn())
 
-    features, labels, timestamps, names = mod.load_training_data(
+    features, labels, timestamps, names, composition = mod.load_training_data(
         symbol="BTCUSDT", strategy_type="ma_crossover"
     )
 
@@ -432,6 +439,11 @@ def test_load_training_data_expands_jsonb(monkeypatch):
     assert labels.tolist() == [12.5]
     assert timestamps.tolist() == [1_700_000_000_000]
     assert names == list(mod.EDGE_P3_FEATURE_NAMES)
+    # P1-3：僅 1 行被接受（ctx2 因缺特徵被拒），composition 記帳 informative=1、
+    # 無合成 reject（synthetic_share=0）。
+    assert composition["n_total"] == 1
+    assert composition["n_synthetic_reject"] == 0
+    assert composition["synthetic_share"] == 0.0
     # Row 0: complete dict → values 1..17 float32 casts
     assert features[0, 0] == pytest.approx(1.0)
     assert features[0, 10] == pytest.approx(11.0)  # "side" position

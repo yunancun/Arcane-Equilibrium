@@ -18,11 +18,15 @@
 --      範圍（見 recorder-v2 Rust 改動）。
 --
 -- 範圍 / Scope (V143):
---   §A market.l1_events CREATE TABLE IF NOT EXISTS + Guard A（9 欄）
+--   §A market.l1_events CREATE TABLE IF NOT EXISTS（9 欄）
 --   §B 條件 hypertable（無 TimescaleDB 時跳過，mirror V142/V002）
 --   §C 壓縮策略（7 天後壓縮，segmentby symbol，mirror V142/V006）
 --   §D 保留策略（21 天，比 ob_top 30d 短，因 full 事件流量級更高）
 --      + sync_commit COMMENT
+--   ⚠️ 誠實更正（2026-07-04 P2-11 ①）：本檔 body 從未含 Guard A DO-block（header
+--   原聲稱有）。market.l1_events 的必要欄 Guard A 反射由
+--   V148__recorder_promotions_guard_retrofit 補齊；checksum 漂移由
+--   bin/repair_migration_checksum 處理（不手改 _sqlx_migrations）。
 --
 -- 編號決策:
 --   repo file chain 最高 = V142（V140 缺號、V141 file 尚未 apply 到 prod）。

@@ -121,6 +121,71 @@ def test_verdict_downgrades_to_shadow_when_gates_fail_despite_full_sample():
     assert report["all_hard_gates_pass"] is False
 
 
+# ──────────────── P1-3 label composition gate ────────────────
+
+def test_label_composition_gate_absent_passes_as_unavailable():
+    """composition 未提供（dry-run / 舊呼叫端）→ gate pass 且標 unavailable，
+    不影響既有 5 gate 全通過的 ship 裁決（向後相容）。"""
+    cfg = QuantileTrainingConfig()
+    res = _make_result(n_labeled=SAMPLE_GATE_PROD + 50, all_gates_passing=True)
+    report = generate_acceptance_report(res, cfg, include_train_serve_harness=False)
+    assert report["gates"]["label_composition"]["passed"] is True
+    assert report["gates"]["label_composition"]["source"] == "unavailable"
+    assert report["verdict"] == VERDICT_SHIP
+
+
+def test_label_composition_gate_synthetic_present_downgrades_to_shadow():
+    """synthetic_share > 0（過濾退化）即使 5 metric gate 全過也封頂 shadow_only。
+    這是 P1-3 的 fail-closed 核心：合成 label 混入 = 不可 ship。"""
+    cfg = QuantileTrainingConfig()
+    res = _make_result(n_labeled=SAMPLE_GATE_PROD + 50, all_gates_passing=True)
+    composition = {
+        "n_total": 1000, "n_informative": 900, "n_synthetic_reject": 100,
+        "synthetic_share": 0.1, "zeros_share": 0.1,
+        "top_close_tags": [["<null>", 900], ["rejected_governance", 100]],
+    }
+    report = generate_acceptance_report(
+        res, cfg, include_train_serve_harness=False, label_composition=composition,
+    )
+    assert report["gates"]["label_composition"]["passed"] is False
+    assert report["all_hard_gates_pass"] is False
+    assert report["verdict"] == VERDICT_SHADOW
+    assert "label_composition" in report["verdict_reason"]
+
+
+def test_label_composition_gate_high_zeros_share_downgrades_to_shadow():
+    """zeros_share > 0.5（常數 0 標籤 = 常數預測器指紋）即使無合成 label 也封頂。"""
+    cfg = QuantileTrainingConfig()
+    res = _make_result(n_labeled=SAMPLE_GATE_PROD + 50, all_gates_passing=True)
+    composition = {
+        "n_total": 1000, "n_informative": 1000, "n_synthetic_reject": 0,
+        "synthetic_share": 0.0, "zeros_share": 0.6,
+        "top_close_tags": [["<null>", 1000]],
+    }
+    report = generate_acceptance_report(
+        res, cfg, include_train_serve_harness=False, label_composition=composition,
+    )
+    assert report["gates"]["label_composition"]["passed"] is False
+    assert report["verdict"] == VERDICT_SHADOW
+
+
+def test_label_composition_gate_clean_passes():
+    """synthetic_share == 0 且 zeros_share ≤ 0.5 → gate pass，落 report 供溯源。"""
+    cfg = QuantileTrainingConfig()
+    res = _make_result(n_labeled=SAMPLE_GATE_PROD + 50, all_gates_passing=True)
+    composition = {
+        "n_total": 1000, "n_informative": 1000, "n_synthetic_reject": 0,
+        "synthetic_share": 0.0, "zeros_share": 0.2,
+        "top_close_tags": [["<null>", 1000]],
+    }
+    report = generate_acceptance_report(
+        res, cfg, include_train_serve_harness=False, label_composition=composition,
+    )
+    assert report["gates"]["label_composition"]["passed"] is True
+    assert report["verdict"] == VERDICT_SHIP
+    assert report["label_composition"] == composition
+
+
 # ──────────────── individual gate behaviour ────────────────
 
 def test_gate_pinball_skill_threshold_exact_boundary():

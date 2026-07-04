@@ -26,11 +26,15 @@
 --   E1-B 已 ssh trade-core 在 scratch DB 雙 apply 驗冪等（見報告）。
 --
 -- 範圍 / Scope (V144):
---   §A CREATE SCHEMA IF NOT EXISTS learning（Guard A，schema 已由 V019 建，
+--   §A CREATE SCHEMA IF NOT EXISTS learning（schema 已由 V019 建，
 --      重複 IF NOT EXISTS 安全）。
---   §B CREATE TABLE IF NOT EXISTS learning.strategist_promotions（Guard A，16 欄）。
---   §C 兩條 CREATE INDEX IF NOT EXISTS（Guard C 等價：hot-path 查詢索引）。
+--   §B CREATE TABLE IF NOT EXISTS learning.strategist_promotions（16 欄）。
+--   §C 兩條 CREATE INDEX IF NOT EXISTS（hot-path 查詢索引）。
 --   §D 表 COMMENT。
+--   ⚠️ 誠實更正（2026-07-04 P2-11 ①）：本檔 body 從未含 Guard A 型反射 DO-block
+--   （header 原把 IF NOT EXISTS 誤稱 Guard A/Guard C）。必要 16 欄的 Guard A
+--   反射由 V148__recorder_promotions_guard_retrofit 補齊；checksum 漂移由
+--   bin/repair_migration_checksum 處理（不手改 _sqlx_migrations）。
 --
 --   ⚠️ 純 additive（新表，無改既有表）→ git revert 安全；表留存無害
 --      （無 writer 時就是空表）。prod apply 走 sqlx auto-migrate at engine boot
@@ -38,7 +42,8 @@
 -- ============================================================
 
 -- ==========================================================
--- §A Guard A — learning schema（V019 已建，IF NOT EXISTS 重複安全）
+-- §A learning schema（V019 已建，IF NOT EXISTS 重複安全；
+--    非 Guard A —— 反射型 Guard A 見 V148 retrofit）
 -- ==========================================================
 CREATE SCHEMA IF NOT EXISTS learning;
 
@@ -65,7 +70,7 @@ CREATE TABLE IF NOT EXISTS learning.strategist_promotions (
 );
 
 -- ==========================================================
--- §C hot-path 索引（Guard C 等價 — CREATE INDEX IF NOT EXISTS）
+-- §C hot-path 索引（CREATE INDEX IF NOT EXISTS）
 --   idx1：依 (strategy, target_engine) 取最近促升 row（demote precondition /
 --         latest-promote 查詢）。
 --   idx2：依 action 取最近 promote/demote 事件（auto-demote scan / GUI 時間軸）。
