@@ -1064,7 +1064,7 @@ def test_learning_loop_status_falls_back_to_review_artifact_for_top_review_field
         json.dumps(
             {
                 "schema_version": (
-                    "cost_gate_demo_learning_lane_blocked_outcome_review_v2"
+                    "cost_gate_demo_learning_lane_blocked_outcome_review_v3"
                 ),
                 "status": "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT",
                 "next_trigger": (
@@ -1962,6 +1962,7 @@ def test_activation_preflight_surfaces_blocked_outcome_review_candidate(
     ledger_rows = [
         {
             "record_type": "blocked_signal_outcome",
+            "cost_model_version": "conservative_v1",
             "generated_at_utc": "2026-06-21T12:15:00+00:00",
             "attempt_id": "blocked-1",
             "side_cell_key": "ma_crossover|ETHUSDT|Sell",
@@ -1975,28 +1976,30 @@ def test_activation_preflight_surfaces_blocked_outcome_review_candidate(
         },
         {
             "record_type": "blocked_signal_outcome",
+            "cost_model_version": "conservative_v1",
             "generated_at_utc": "2026-06-21T13:15:00+00:00",
             "attempt_id": "blocked-2",
             "side_cell_key": "ma_crossover|ETHUSDT|Sell",
             "strategy_name": "ma_crossover",
             "symbol": "ETHUSDT",
             "side": "Sell",
-            "gross_bps": 8.0,
+            "gross_bps": 15.5,
             "cost_bps": 4.0,
-            "realized_net_bps": 4.0,
+            "realized_net_bps": 11.5,
             "horizon_minutes": 60,
         },
         {
             "record_type": "blocked_signal_outcome",
+            "cost_model_version": "conservative_v1",
             "generated_at_utc": "2026-06-21T14:15:00+00:00",
             "attempt_id": "blocked-3",
             "side_cell_key": "ma_crossover|ETHUSDT|Sell",
             "strategy_name": "ma_crossover",
             "symbol": "ETHUSDT",
             "side": "Sell",
-            "gross_bps": 3.0,
+            "gross_bps": 14.5,
             "cost_bps": 4.0,
-            "realized_net_bps": -1.0,
+            "realized_net_bps": 10.5,
             "horizon_minutes": 60,
         },
     ]
@@ -2017,7 +2020,7 @@ def test_activation_preflight_surfaces_blocked_outcome_review_candidate(
         "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
     )
     assert preflight["ledger"]["blocked_signal_outcome_review_schema_version"] == (
-        "cost_gate_demo_learning_lane_blocked_outcome_review_v2"
+        "cost_gate_demo_learning_lane_blocked_outcome_review_v3"
     )
     assert preflight["ledger"]["blocked_signal_top_review_side_cell_key"] == (
         "ma_crossover|ETHUSDT|Sell"
@@ -2025,14 +2028,16 @@ def test_activation_preflight_surfaces_blocked_outcome_review_candidate(
     assert preflight["ledger"]["blocked_signal_top_review_candidate_side_cell_key"] == (
         "ma_crossover|ETHUSDT|Sell"
     )
+    # P2-8:fixture 收緊為 tight-positive [12.5,11.5,10.5](通過 BH-FDR),
+    # avg=11.5 → cushion=11.5、wrongful_block_score=11.5。
     assert round(
         preflight["ledger"]["blocked_signal_top_review_wrongful_block_score"],
         6,
-    ) == 3.444444
+    ) == 11.5
     assert round(
         preflight["ledger"]["blocked_signal_top_review_net_cost_cushion_bps"],
         6,
-    ) == 5.166667
+    ) == 11.5
     assert preflight["next_actions"] == [
         "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
     ]
@@ -2267,6 +2272,7 @@ def test_alpha_discovery_surfaces_cost_gate_ledger_progress(tmp_path: Path):
         + json.dumps(
             {
                 "record_type": "blocked_signal_outcome",
+                "cost_model_version": "conservative_v1",
                 "generated_at_utc": "2026-06-21T12:15:00+00:00",
                 "attempt_id": "ctx-demo-ma_crossover-ETHUSDT-1782037200000",
                 "side_cell_key": "ma_crossover|ETHUSDT|Sell",
@@ -2392,6 +2398,7 @@ def test_alpha_discovery_routes_positive_blocked_outcome_review_candidate(
         },
         {
             "record_type": "blocked_signal_outcome",
+            "cost_model_version": "conservative_v1",
             "generated_at_utc": "2026-06-21T12:15:00+00:00",
             "attempt_id": "blocked-1",
             "side_cell_key": "ma_crossover|ETHUSDT|Sell",
@@ -2406,6 +2413,7 @@ def test_alpha_discovery_routes_positive_blocked_outcome_review_candidate(
         },
         {
             "record_type": "blocked_signal_outcome",
+            "cost_model_version": "conservative_v1",
             "generated_at_utc": "2026-06-21T13:15:00+00:00",
             "attempt_id": "blocked-2",
             "side_cell_key": "ma_crossover|ETHUSDT|Sell",
@@ -2413,13 +2421,14 @@ def test_alpha_discovery_routes_positive_blocked_outcome_review_candidate(
             "symbol": "ETHUSDT",
             "side": "Sell",
             "source_admission_decision": "ORDER_AUTHORITY_NOT_GRANTED",
-            "gross_bps": 8.0,
+            "gross_bps": 15.5,
             "cost_bps": 4.0,
-            "realized_net_bps": 4.0,
+            "realized_net_bps": 11.5,
             "horizon_minutes": 60,
         },
         {
             "record_type": "blocked_signal_outcome",
+            "cost_model_version": "conservative_v1",
             "generated_at_utc": "2026-06-21T14:15:00+00:00",
             "attempt_id": "blocked-3",
             "side_cell_key": "ma_crossover|ETHUSDT|Sell",
@@ -2427,9 +2436,9 @@ def test_alpha_discovery_routes_positive_blocked_outcome_review_candidate(
             "symbol": "ETHUSDT",
             "side": "Sell",
             "source_admission_decision": "ORDER_AUTHORITY_NOT_GRANTED",
-            "gross_bps": 3.0,
+            "gross_bps": 14.5,
             "cost_bps": 4.0,
-            "realized_net_bps": -1.0,
+            "realized_net_bps": 10.5,
             "horizon_minutes": 60,
         },
     ]
@@ -2495,7 +2504,7 @@ def test_alpha_discovery_routes_positive_blocked_outcome_review_candidate(
         "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE"
     )
     assert row["blocked_signal_outcome_review_schema_version"] == (
-        "cost_gate_demo_learning_lane_blocked_outcome_review_v2"
+        "cost_gate_demo_learning_lane_blocked_outcome_review_v3"
     )
     assert row["blocked_signal_top_review_side_cell_key"] == (
         "ma_crossover|ETHUSDT|Sell"
@@ -2503,8 +2512,9 @@ def test_alpha_discovery_routes_positive_blocked_outcome_review_candidate(
     assert row["blocked_signal_top_review_candidate_side_cell_key"] == (
         "ma_crossover|ETHUSDT|Sell"
     )
-    assert round(row["blocked_signal_top_review_wrongful_block_score"], 6) == 3.444444
-    assert round(row["blocked_signal_top_review_net_cost_cushion_bps"], 6) == 5.166667
+    # P2-8:fixture 收緊為 tight-positive [12.5,11.5,10.5](通過 BH-FDR),avg=11.5。
+    assert round(row["blocked_signal_top_review_wrongful_block_score"], 6) == 11.5
+    assert round(row["blocked_signal_top_review_net_cost_cushion_bps"], 6) == 11.5
 
 
 def test_alpha_discovery_blocks_when_blocked_outcome_review_fails_thresholds(
@@ -2524,6 +2534,7 @@ def test_alpha_discovery_blocks_when_blocked_outcome_review_fails_thresholds(
     ledger_rows = [
         {
             "record_type": "blocked_signal_outcome",
+            "cost_model_version": "conservative_v1",
             "generated_at_utc": "2026-06-21T12:15:00+00:00",
             "attempt_id": "blocked-1",
             "side_cell_key": "ma_crossover|ETHUSDT|Sell",
@@ -2534,6 +2545,7 @@ def test_alpha_discovery_blocks_when_blocked_outcome_review_fails_thresholds(
         },
         {
             "record_type": "blocked_signal_outcome",
+            "cost_model_version": "conservative_v1",
             "generated_at_utc": "2026-06-21T13:15:00+00:00",
             "attempt_id": "blocked-2",
             "side_cell_key": "ma_crossover|ETHUSDT|Sell",
@@ -2544,6 +2556,7 @@ def test_alpha_discovery_blocks_when_blocked_outcome_review_fails_thresholds(
         },
         {
             "record_type": "blocked_signal_outcome",
+            "cost_model_version": "conservative_v1",
             "generated_at_utc": "2026-06-21T14:15:00+00:00",
             "attempt_id": "blocked-3",
             "side_cell_key": "ma_crossover|ETHUSDT|Sell",
@@ -2604,6 +2617,7 @@ def test_alpha_discovery_routes_cost_wall_blocked_outcomes_to_edge_amplification
     ledger_rows = [
         {
             "record_type": "blocked_signal_outcome",
+            "cost_model_version": "conservative_v1",
             "generated_at_utc": "2026-06-21T12:15:00+00:00",
             "attempt_id": "blocked-1",
             "side_cell_key": "ma_crossover|ETHUSDT|Sell",
@@ -2616,6 +2630,7 @@ def test_alpha_discovery_routes_cost_wall_blocked_outcomes_to_edge_amplification
         },
         {
             "record_type": "blocked_signal_outcome",
+            "cost_model_version": "conservative_v1",
             "generated_at_utc": "2026-06-21T13:15:00+00:00",
             "attempt_id": "blocked-2",
             "side_cell_key": "ma_crossover|ETHUSDT|Sell",
@@ -2628,6 +2643,7 @@ def test_alpha_discovery_routes_cost_wall_blocked_outcomes_to_edge_amplification
         },
         {
             "record_type": "blocked_signal_outcome",
+            "cost_model_version": "conservative_v1",
             "generated_at_utc": "2026-06-21T14:15:00+00:00",
             "attempt_id": "blocked-3",
             "side_cell_key": "ma_crossover|ETHUSDT|Sell",
@@ -3208,7 +3224,8 @@ def test_runtime_adapter_builds_markout_outcome_only_for_admitted_probe():
     assert outcome["outcome_source"] == "market_markout_proxy"
     assert outcome["promotion_evidence"] is False
     assert round(outcome["gross_bps"], 6) == 100.0
-    assert round(outcome["realized_net_bps"], 6) == 96.0
+    # P1-2a:realized_net_bps 語義升級為保守成本;舊 4.0 常數的淨值移到 net_bps_optimistic。
+    assert round(outcome["net_bps_optimistic"], 6) == 96.0
 
 
 def test_runtime_adapter_builds_blocked_signal_outcome_for_not_granted_reject():
@@ -3238,7 +3255,8 @@ def test_runtime_adapter_builds_blocked_signal_outcome_for_not_granted_reject():
     assert outcome["outcome_source"] == "market_markout_proxy_for_blocked_signal"
     assert outcome["promotion_evidence"] is False
     assert round(outcome["gross_bps"], 6) == -50.0
-    assert round(outcome["realized_net_bps"], 6) == -54.0
+    # P1-2a:舊 4.0 常數的淨值移到 net_bps_optimistic;realized_net_bps 為保守權威淨值。
+    assert round(outcome["net_bps_optimistic"], 6) == -54.0
 
 
 def test_blocked_signal_outcome_uses_candidate_specific_horizon_from_ledger():
@@ -3267,7 +3285,8 @@ def test_blocked_signal_outcome_uses_candidate_specific_horizon_from_ledger():
     assert outcome["default_horizon_minutes"] == 60
     assert outcome["candidate_summary"]["outcome_horizon_minutes"] == 240
     assert round(outcome["gross_bps"], 6) == 100.0
-    assert round(outcome["realized_net_bps"], 6) == 96.0
+    # P1-2a:舊 4.0 常數的淨值移到 net_bps_optimistic。
+    assert round(outcome["net_bps_optimistic"], 6) == 96.0
 
 
 def test_price_observation_windows_target_unlabeled_blocked_signals_only():
@@ -3296,6 +3315,7 @@ def test_price_observation_windows_target_unlabeled_blocked_signals_only():
 
     completed = {
         "record_type": "blocked_signal_outcome",
+        "cost_model_version": "conservative_v1",
         "attempt_id": _selected_reject_event()["context_id"],
     }
     assert required_price_observation_windows(ledger + [completed]) == []
@@ -3507,7 +3527,8 @@ def test_outcome_refresh_dry_run_append_and_idempotent_blocked_signal_rows(
     assert len(rows) == 2
     assert rows[1]["record_type"] == "blocked_signal_outcome"
     assert rows[1]["promotion_evidence"] is False
-    assert round(rows[1]["realized_net_bps"], 6) == -54.0
+    # P1-2a:舊 4.0 常數的淨值移到 net_bps_optimistic。
+    assert round(rows[1]["net_bps_optimistic"], 6) == -54.0
 
     rerun = refresh_cost_gate_outcomes_from_price_rows(
         ledger_path,
@@ -3568,6 +3589,7 @@ def test_outcome_refresh_pg_price_rows_feed_batch_without_duplicate_queries():
     completed = ledger + [
         {
             "record_type": "blocked_signal_outcome",
+            "cost_model_version": "conservative_v1",
             "attempt_id": _selected_reject_event()["context_id"],
         }
     ]
@@ -3587,6 +3609,7 @@ def test_blocked_signal_outcome_review_scorecard_is_conservative():
         [
             {
                 "record_type": "blocked_signal_outcome",
+                "cost_model_version": "conservative_v1",
                 "generated_at_utc": "2026-06-21T12:15:00+00:00",
                 "attempt_id": "blocked-1",
                 "side_cell_key": "ma_crossover|ETHUSDT|Sell",
@@ -3600,6 +3623,7 @@ def test_blocked_signal_outcome_review_scorecard_is_conservative():
             },
             {
                 "record_type": "blocked_signal_outcome",
+                "cost_model_version": "conservative_v1",
                 "generated_at_utc": "2026-06-21T13:15:00+00:00",
                 "attempt_id": "blocked-2",
                 "side_cell_key": "ma_crossover|ETHUSDT|Sell",
@@ -3613,6 +3637,7 @@ def test_blocked_signal_outcome_review_scorecard_is_conservative():
             },
             {
                 "record_type": "blocked_signal_outcome",
+                "cost_model_version": "conservative_v1",
                 "generated_at_utc": "2026-06-21T14:15:00+00:00",
                 "attempt_id": "blocked-3",
                 "side_cell_key": "ma_crossover|ETHUSDT|Sell",
@@ -3633,24 +3658,20 @@ def test_blocked_signal_outcome_review_scorecard_is_conservative():
         ),
     )
 
-    assert scorecard["status"] == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
+    # P2-8(b):n=3 高變異數 cell 通過保守閾值但不過 BH-FDR(q=0.10)→ 撤下候選,
+    # 改標 EXPLORATION_CANDIDATE_BH_FDR_NOT_PASSED(這是方法學重設計的預期結果:
+    # 立案需 BH pass,marginal 小樣本只可作 exploration 排序)。
+    assert scorecard["status"] == "NO_DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE"
     assert scorecard["schema_version"] == (
-        "cost_gate_demo_learning_lane_blocked_outcome_review_v2"
+        "cost_gate_demo_learning_lane_blocked_outcome_review_v3"
     )
-    assert scorecard["next_trigger"] == (
-        "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
-    )
-    assert scorecard["review_candidate_side_cell_count"] == 1
+    assert scorecard["review_candidate_side_cell_count"] == 0
     assert scorecard["promotion_evidence"] is False
     assert scorecard["order_authority"] == "NOT_GRANTED"
     side_cell = scorecard["top_side_cells"][0]
-    assert side_cell["status"] == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE"
-    assert side_cell["learning_diagnosis"] == "FALSE_NEGATIVE_CANDIDATE_AFTER_COST"
-    assert side_cell["cost_gate_escape_recommendation"] == (
-        "operator_review_bounded_probe_authority_without_global_gate_lowering"
-    )
-    assert side_cell["false_negative_candidate"] is True
-    assert side_cell["edge_amplification_required"] is False
+    assert side_cell["status"] == "EXPLORATION_CANDIDATE_BH_FDR_NOT_PASSED"
+    assert side_cell["bh_fdr_pass"] is False
+    assert side_cell["review_candidate"] is False
     assert side_cell["outcome_count"] == 3
     assert round(side_cell["avg_net_bps"], 6) == 5.166667
     assert round(side_cell["avg_gross_bps"], 6) == 9.166667
@@ -3660,40 +3681,26 @@ def test_blocked_signal_outcome_review_scorecard_is_conservative():
     assert round(side_cell["net_cost_cushion_bps"], 6) == 5.166667
     assert round(side_cell["net_positive_margin_pct"], 6) == 6.666667
     assert side_cell["sample_margin_count"] == 0
+    # wrongful_block_score 為排序分數(不受 BH 影響),margins 不變仍 3.44。
     assert round(side_cell["wrongful_block_score"], 6) == 3.444444
     assert side_cell["review_rank"] == 1
-    assert side_cell["bounded_demo_probe_review_rank"] == 1
+    # BH 撤下候選後不再有 bounded probe rank。
+    assert side_cell["bounded_demo_probe_review_rank"] is None
     assert side_cell["horizon_minutes"] == [60]
     assert side_cell["horizon_counts"] == {"60": 3}
     assert side_cell["dominant_horizon_minutes"] == 60
     assert scorecard["top_side_cell_key"] == "ma_crossover|ETHUSDT|Sell"
-    assert scorecard["top_side_cell_learning_diagnosis"] == (
-        "FALSE_NEGATIVE_CANDIDATE_AFTER_COST"
-    )
-    assert scorecard["top_side_cell_cost_gate_escape_recommendation"] == (
-        "operator_review_bounded_probe_authority_without_global_gate_lowering"
-    )
-    assert scorecard["top_review_candidate_side_cell_key"] == (
-        "ma_crossover|ETHUSDT|Sell"
-    )
-    assert scorecard["top_review_candidate_learning_diagnosis"] == (
-        "FALSE_NEGATIVE_CANDIDATE_AFTER_COST"
-    )
-    assert scorecard["false_negative_candidate_count"] == 1
-    assert scorecard["edge_amplification_required_side_cell_count"] == 0
-    assert scorecard["diagnosis_counts"] == {
-        "FALSE_NEGATIVE_CANDIDATE_AFTER_COST": 1
-    }
-    assert scorecard["cost_gate_escape_recommendation_counts"] == {
-        "operator_review_bounded_probe_authority_without_global_gate_lowering": 1
-    }
-    assert round(scorecard["top_side_cell_wrongful_block_score"], 6) == 3.444444
+    # 非候選 → 診斷落 BLOCK_CONFIRMED_AFTER_COST(review_candidate=False 路徑)。
+    assert side_cell["learning_diagnosis"] == "BLOCK_CONFIRMED_AFTER_COST"
+    assert scorecard["top_review_candidate_side_cell_key"] is None
+    assert scorecard["false_negative_candidate_count"] == 0
     assert round(scorecard["max_wrongful_block_score"], 6) == 3.444444
 
     insufficient = build_blocked_signal_outcome_review(
         [
             {
                 "record_type": "blocked_signal_outcome",
+                "cost_model_version": "conservative_v1",
                 "side_cell_key": "ma_crossover|ETHUSDT|Sell",
                 "realized_net_bps": 12.5,
             }
@@ -3715,6 +3722,7 @@ def test_blocked_signal_outcome_review_separates_cost_wall_from_no_edge():
         [
             {
                 "record_type": "blocked_signal_outcome",
+                "cost_model_version": "conservative_v1",
                 "side_cell_key": "ma_crossover|ETHUSDT|Sell",
                 "strategy_name": "ma_crossover",
                 "symbol": "ETHUSDT",
@@ -3725,6 +3733,7 @@ def test_blocked_signal_outcome_review_separates_cost_wall_from_no_edge():
             },
             {
                 "record_type": "blocked_signal_outcome",
+                "cost_model_version": "conservative_v1",
                 "side_cell_key": "ma_crossover|ETHUSDT|Sell",
                 "strategy_name": "ma_crossover",
                 "symbol": "ETHUSDT",
@@ -3735,6 +3744,7 @@ def test_blocked_signal_outcome_review_separates_cost_wall_from_no_edge():
             },
             {
                 "record_type": "blocked_signal_outcome",
+                "cost_model_version": "conservative_v1",
                 "side_cell_key": "ma_crossover|ETHUSDT|Sell",
                 "strategy_name": "ma_crossover",
                 "symbol": "ETHUSDT",
@@ -3767,6 +3777,7 @@ def test_false_negative_candidate_packet_ranks_cost_gate_escape_paths():
         [
             {
                 "record_type": "blocked_signal_outcome",
+                "cost_model_version": "conservative_v1",
                 "generated_at_utc": "2026-06-21T12:15:00+00:00",
                 "attempt_id": "fn-1",
                 "side_cell_key": "grid_trading|AVAXUSDT|Sell",
@@ -3780,32 +3791,35 @@ def test_false_negative_candidate_packet_ranks_cost_gate_escape_paths():
             },
             {
                 "record_type": "blocked_signal_outcome",
+                "cost_model_version": "conservative_v1",
                 "generated_at_utc": "2026-06-21T13:15:00+00:00",
                 "attempt_id": "fn-2",
                 "side_cell_key": "grid_trading|AVAXUSDT|Sell",
                 "strategy_name": "grid_trading",
                 "symbol": "AVAXUSDT",
                 "side": "Sell",
-                "gross_bps": 7.0,
+                "gross_bps": 11.0,
                 "cost_bps": 4.0,
-                "realized_net_bps": 3.0,
+                "realized_net_bps": 7.0,
                 "horizon_minutes": 60,
             },
             {
                 "record_type": "blocked_signal_outcome",
+                "cost_model_version": "conservative_v1",
                 "generated_at_utc": "2026-06-21T14:15:00+00:00",
                 "attempt_id": "fn-3",
                 "side_cell_key": "grid_trading|AVAXUSDT|Sell",
                 "strategy_name": "grid_trading",
                 "symbol": "AVAXUSDT",
                 "side": "Sell",
-                "gross_bps": 6.0,
+                "gross_bps": 10.0,
                 "cost_bps": 4.0,
-                "realized_net_bps": 2.0,
+                "realized_net_bps": 6.0,
                 "horizon_minutes": 60,
             },
             {
                 "record_type": "blocked_signal_outcome",
+                "cost_model_version": "conservative_v1",
                 "generated_at_utc": "2026-06-21T12:15:00+00:00",
                 "attempt_id": "edge-1",
                 "side_cell_key": "ma_crossover|ETHUSDT|Sell",
@@ -3819,6 +3833,7 @@ def test_false_negative_candidate_packet_ranks_cost_gate_escape_paths():
             },
             {
                 "record_type": "blocked_signal_outcome",
+                "cost_model_version": "conservative_v1",
                 "generated_at_utc": "2026-06-21T13:15:00+00:00",
                 "attempt_id": "edge-2",
                 "side_cell_key": "ma_crossover|ETHUSDT|Sell",
@@ -3832,6 +3847,7 @@ def test_false_negative_candidate_packet_ranks_cost_gate_escape_paths():
             },
             {
                 "record_type": "blocked_signal_outcome",
+                "cost_model_version": "conservative_v1",
                 "generated_at_utc": "2026-06-21T14:15:00+00:00",
                 "attempt_id": "edge-3",
                 "side_cell_key": "ma_crossover|ETHUSDT|Sell",
@@ -3893,6 +3909,7 @@ def _false_negative_candidate_packet_fixture() -> dict:
         [
             {
                 "record_type": "blocked_signal_outcome",
+                "cost_model_version": "conservative_v1",
                 "generated_at_utc": "2026-06-21T12:15:00+00:00",
                 "attempt_id": "fn-1",
                 "side_cell_key": "grid_trading|AVAXUSDT|Sell",
@@ -3906,6 +3923,7 @@ def _false_negative_candidate_packet_fixture() -> dict:
             },
             {
                 "record_type": "blocked_signal_outcome",
+                "cost_model_version": "conservative_v1",
                 "generated_at_utc": "2026-06-21T13:15:00+00:00",
                 "attempt_id": "fn-2",
                 "side_cell_key": "grid_trading|AVAXUSDT|Sell",
@@ -3919,6 +3937,7 @@ def _false_negative_candidate_packet_fixture() -> dict:
             },
             {
                 "record_type": "blocked_signal_outcome",
+                "cost_model_version": "conservative_v1",
                 "generated_at_utc": "2026-06-21T14:15:00+00:00",
                 "attempt_id": "fn-3",
                 "side_cell_key": "grid_trading|AVAXUSDT|Sell",
