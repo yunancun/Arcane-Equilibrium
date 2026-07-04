@@ -19,6 +19,7 @@ import datetime as dt
 import hashlib
 import json
 import math
+import os
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -51,11 +52,30 @@ DEMO_BALANCE_FAST_ENDPOINTS = {
 
 DEFAULT_AUTHORIZATION_TTL_HOURS = 12
 DEFAULT_MAX_AUTHORIZATION_TTL_HOURS = 24
+# soak-window TTL 上限：72h soak 窗 + 24h margin。demo-only 放寬(Demo 放寬/Live 收緊政策)，
+# 僅在 operator 顯式 --soak-window-hours 時生效；不傳此參數則 12/24 默認逐位不變，
+# 放寬路徑不觸及任何 live/live_demo 授權面(本 lane 全程 demo envelope)。
+SOAK_MAX_AUTHORIZATION_TTL_HOURS = 96
 DEFAULT_MAX_ACCOUNT_EQUITY_ARTIFACT_AGE_SECONDS = 15 * 60
 HARD_MAX_AUTHORIZED_PROBE_ORDERS = 3
-DEFAULT_RUNTIME_ENVELOPE_PATH = Path(
-    "/tmp/openclaw/cost_gate_learning_lane/standing_demo_operator_authorization.json"
-)
+
+
+def _default_runtime_envelope_path() -> Path:
+    """派生 runtime standing envelope 預期路徑。
+
+    為什麼走 OPENCLAW_DATA_DIR：D3 SSOT 已遷 var/openclaw，硬編碼 /tmp/openclaw
+    會使 refresh 鏈默認參數讀/寫舊 /tmp 副本而 engine 讀新 SSOT，造成雙真相分裂
+    (RES-7)。鏡像 policy.py:823 既有慣例；同時滿足跨平台不硬編碼機器路徑。
+    """
+    data_dir = Path(os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw"))
+    return (
+        data_dir
+        / "cost_gate_learning_lane"
+        / "standing_demo_operator_authorization.json"
+    )
+
+
+DEFAULT_RUNTIME_ENVELOPE_PATH = _default_runtime_envelope_path()
 EXPIRED_STANDING_AUTH_READINESS_BLOCKERS = {
     "standing_authorization:standing_auth_expired",
 }
@@ -544,11 +564,25 @@ def _build_envelope_preview(
     now_utc: dt.datetime,
     risk_cap_lineage: dict[str, Any],
     source_refs: dict[str, Any],
+    authorization_ttl_hours: int,
+    soak_window_hours: int | None,
 ) -> dict[str, Any]:
     stamp = now_utc.strftime("%Y%m%dT%H%M%SZ")
     side_hash = hashlib.sha256(
         json.dumps(candidate, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()[:12]
+    # soak_window_ttl 審計字段：逐簽顯式記錄本次 TTL 與是否走 soak 放寬路徑，
+    # 使「demo-only 放寬」在 envelope 內可審計(非默認 12/24 時 operator 必顯式指定)。
+    soak_window_ttl = {
+        "authorization_ttl_hours": authorization_ttl_hours,
+        "soak_window_hours": soak_window_hours,
+        "soak_window_ttl_relaxation_applied": soak_window_hours is not None,
+        "reason": (
+            "demo-only soak-window TTL relaxation explicitly requested by operator"
+            if soak_window_hours is not None
+            else "default standing-demo TTL; no soak-window relaxation"
+        ),
+    }
     return {
         "schema_version": STANDING_DEMO_AUTHORIZATION_SCHEMA_VERSION,
         "generated_at_utc": now_utc.isoformat(),
@@ -564,6 +598,7 @@ def _build_envelope_preview(
         "candidate": candidate,
         "max_authorized_probe_orders_per_candidate": max_probe_orders,
         "expires_at_utc": expires_at_utc.isoformat(),
+        "soak_window_ttl": soak_window_ttl,
         "risk_cap_lineage": risk_cap_lineage,
         "source_refs": source_refs,
         "answers": {
@@ -602,6 +637,7 @@ def build_standing_demo_authorization_refresh_guardrail(
     max_authorized_probe_orders: int | None = None,
     authorization_ttl_hours: int = DEFAULT_AUTHORIZATION_TTL_HOURS,
     max_authorization_ttl_hours: int = DEFAULT_MAX_AUTHORIZATION_TTL_HOURS,
+    soak_window_hours: int | None = None,
     max_account_equity_artifact_age_seconds: int = (
         DEFAULT_MAX_ACCOUNT_EQUITY_ARTIFACT_AGE_SECONDS
     ),
@@ -616,6 +652,16 @@ def build_standing_demo_authorization_refresh_guardrail(
     readiness = _dict(runtime_readiness)
     candidate = _candidate_identity(existing)
     source_reasons: list[str] = []
+    # soak-window TTL 對齊：operator 顯式 --soak-window-hours N(1..96) 時，TTL 放寬到 N，
+    # 且 max-TTL 帽同步抬到 SOAK_MAX_AUTHORIZATION_TTL_HOURS。作用域封鎖：未傳此參數時
+    # authorization_ttl_hours / max_authorization_ttl_hours 逐位沿用 12/24 默認，放寬不外溢。
+    soak_window_applied = soak_window_hours is not None
+    if soak_window_applied:
+        if soak_window_hours < 1 or soak_window_hours > SOAK_MAX_AUTHORIZATION_TTL_HOURS:
+            source_reasons.append("soak_window_hours_out_of_bounds")
+        else:
+            authorization_ttl_hours = soak_window_hours
+            max_authorization_ttl_hours = SOAK_MAX_AUTHORIZATION_TTL_HOURS
     source_reasons.extend(_existing_static_reasons(existing, candidate))
     readiness_reasons, readiness_resolution = _readiness_resolution(
         readiness,
@@ -646,7 +692,13 @@ def build_standing_demo_authorization_refresh_guardrail(
         source_reasons.append("max_authorized_probe_orders_increases_prior_envelope")
     if authorization_ttl_hours < 1 or authorization_ttl_hours > max_authorization_ttl_hours:
         source_reasons.append("authorization_ttl_hours_out_of_bounds")
-    if max_authorization_ttl_hours > DEFAULT_MAX_AUTHORIZATION_TTL_HOURS:
+    # max-TTL 帽守衛：非 soak 時上限=24h(DEFAULT_MAX)，soak 放寬時上限=96h(SOAK_MAX)。
+    effective_max_ttl_guardrail = (
+        SOAK_MAX_AUTHORIZATION_TTL_HOURS
+        if soak_window_applied
+        else DEFAULT_MAX_AUTHORIZATION_TTL_HOURS
+    )
+    if max_authorization_ttl_hours > effective_max_ttl_guardrail:
         source_reasons.append("max_authorization_ttl_hours_exceeds_guardrail")
 
     equity_usdt, equity = _equity_resolution(
@@ -735,6 +787,8 @@ def build_standing_demo_authorization_refresh_guardrail(
             now_utc=now,
             risk_cap_lineage=risk_cap_lineage,
             source_refs=source_refs,
+            authorization_ttl_hours=authorization_ttl_hours,
+            soak_window_hours=soak_window_hours if soak_window_applied else None,
         )
         standing_summary = summarize_standing_demo_authorization(
             envelope_preview,
@@ -804,6 +858,9 @@ def build_standing_demo_authorization_refresh_guardrail(
             ),
             "max_authorized_probe_orders_per_candidate": requested_probe_orders,
             "authorization_ttl_hours": authorization_ttl_hours,
+            "max_authorization_ttl_hours": max_authorization_ttl_hours,
+            "soak_window_hours": soak_window_hours if soak_window_applied else None,
+            "soak_window_ttl_relaxation_applied": soak_window_applied,
             "expired_standing_auth_readiness_exception_applied": (
                 readiness_resolution.get(
                     "expired_standing_auth_readiness_exception_applied"
@@ -895,6 +952,18 @@ def _build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_MAX_AUTHORIZATION_TTL_HOURS,
     )
     parser.add_argument(
+        "--soak-window-hours",
+        type=int,
+        default=None,
+        help=(
+            "demo-only soak-window TTL relaxation in hours (1..96). When set, the "
+            "refreshed envelope TTL and the max-TTL guardrail widen to cover a soak "
+            "window so learning survives a full soak without a mid-window human "
+            "refresh. Omit to keep the 12h default / 24h hard cap unchanged. Does "
+            "not touch live/live_demo authorization; this lane is a demo envelope."
+        ),
+    )
+    parser.add_argument(
         "--max-account-equity-artifact-age-seconds",
         type=int,
         default=DEFAULT_MAX_ACCOUNT_EQUITY_ARTIFACT_AGE_SECONDS,
@@ -932,6 +1001,7 @@ def main() -> int:
         max_authorized_probe_orders=args.max_authorized_probe_orders,
         authorization_ttl_hours=args.authorization_ttl_hours,
         max_authorization_ttl_hours=args.max_authorization_ttl_hours,
+        soak_window_hours=args.soak_window_hours,
         max_account_equity_artifact_age_seconds=(
             args.max_account_equity_artifact_age_seconds
         ),
