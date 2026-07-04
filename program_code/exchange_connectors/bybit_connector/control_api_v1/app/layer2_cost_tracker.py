@@ -45,7 +45,9 @@ MODULE_NOTE (English):
   $2/day hard cap is absolute (DOC-08 §4).
 """
 
+import contextlib
 import datetime
+import fcntl
 import json
 import logging
 import os
@@ -168,6 +170,13 @@ class Layer2CostTracker:
             )
         self._file_path = Path(state_file)
         self._lock = threading.RLock()
+        # P2-13（冷審計 R2）：跨進程互斥基礎設施。self._lock（RLock）只擋同進程
+        # 線程；4 uvicorn worker 各持一份 tracker 實例共寫同一 state 檔，須加
+        # flock。鎖標的是 sidecar 檔而非 state 檔本身——_write_raw 用 tmp→replace
+        # 換 inode，鎖被替換掉的檔案會靜默失去互斥。fd/depth 由 self._lock 保護。
+        self._flock_path = Path(str(self._file_path) + ".lock")
+        self._flock_fd: int | None = None
+        self._flock_depth = 0
         self._config = Layer2Config()
         self._pricing = PricingTable()
         self._adaptive = AdaptiveBudgetState()
@@ -178,6 +187,49 @@ class Layer2CostTracker:
         self._load()
 
     # ── Persistence / 持久化 ──
+
+    @contextlib.contextmanager
+    def _state_lock(self):
+        """跨進程 + 跨線程互斥的狀態寫入鎖（P2-13，冷審計 R2 AI-E confirmed）。
+
+        為什麼需要：4 個 uvicorn worker 對 layer2_cost_state.json 做
+        read-modify-write 時互吞對方剛寫入的成本（lost update）→ daily_spend
+        低估 → DOC-08 $2/day 預算閘可被繞過；且共用固定名 .tmp 檔會在
+        tmp→replace 競態下直接 FileNotFoundError（回歸測試已實證兩者）。
+
+        選型（flock 而非 O_APPEND JSONL 改造）：state 檔是 document 型 SSOT
+        （config/pricing/adaptive/daily rollup/session history 多面讀者），
+        JSONL event-log 需重寫全部讀取路徑 + fold 邏輯 + 既有檔遷移，對
+        dormant lane 過度工程。flock 是本 codebase 既有模式（paper_trading_wiring
+        / evolution_auto_scheduler / grafana_data_writer 等），Mac/Linux 雙
+        平台可用，進程崩潰時 kernel 隨 fd 關閉自動釋放，無 stale lock。
+
+        重入：先取 self._lock（RLock，同線程可重入），flock 只在 depth 0→1
+        時取得——同進程對同一檔開第二個 fd 再 flock 會自我死鎖，必須用
+        depth 計數消化嵌套（如 record_session 內嵌 _increment_daily_session_count）。
+        使用契約：任何「讀 raw → 改 → 寫 raw」序列必須整段包在本鎖內，
+        只鎖 _write_raw 擋不住 lost update。
+        """
+        with self._lock:
+            if self._flock_depth == 0:
+                fd = os.open(str(self._flock_path), os.O_CREAT | os.O_RDWR, 0o600)
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX)
+                except OSError:
+                    os.close(fd)
+                    raise
+                self._flock_fd = fd
+            self._flock_depth += 1
+            try:
+                yield
+            finally:
+                self._flock_depth -= 1
+                if self._flock_depth == 0 and self._flock_fd is not None:
+                    try:
+                        fcntl.flock(self._flock_fd, fcntl.LOCK_UN)
+                    finally:
+                        os.close(self._flock_fd)
+                        self._flock_fd = None
 
     def _load(self) -> None:
         """Load state from file or initialize defaults / 从文件加载状态或初始化默认值"""
@@ -222,8 +274,12 @@ class Layer2CostTracker:
         self._adaptive.last_recalculated_ms = adp.get("last_recalculated_ms", 0)
 
     def _save(self) -> None:
-        """Atomic persist: tmp-file-then-replace / 原子持久化：tmp→replace 防止損壞"""
-        with self._lock:
+        """Atomic persist: tmp-file-then-replace / 原子持久化：tmp→replace 防止損壞
+
+        P2-13：_read_raw→merge→寫檔是 read-modify-write，取 _state_lock 而非
+        僅 RLock（跨進程互斥見 _state_lock docstring）。
+        """
+        with self._state_lock():
             self._file_path.parent.mkdir(parents=True, exist_ok=True)
             state = self._read_raw()
             state["config"] = self._config.to_dict()
@@ -248,8 +304,13 @@ class Layer2CostTracker:
         return _default_cost_state()
 
     def _write_raw(self, raw: dict[str, Any]) -> None:
-        """Atomic write: tmp-file-then-replace to prevent corruption / 原子寫入：tmp→replace 防止損壞"""
-        with self._lock:
+        """Atomic write: tmp-file-then-replace to prevent corruption / 原子寫入：tmp→replace 防止損壞
+
+        P2-13：本函數自身也取 _state_lock（可重入），兜底任何未包整段
+        read-modify-write 的呼叫端；但正確用法仍是呼叫端整段包鎖。
+        固定名 .tmp 檔在 flock 之下不會跨進程相撞。
+        """
+        with self._state_lock():
             raw["config"] = self._config.to_dict()
             raw["pricing"] = self._pricing.to_dict()
             raw["adaptive"] = self._adaptive.to_dict()
@@ -370,8 +431,10 @@ class Layer2CostTracker:
         D3 §D.1.1：session.to_dict() 的 LLM 自由文本欄（final_summary /
         recommendation.reasoning / insights）在落 durable layer2_cost_state.json
         之前過 secret redactor（消毒在寫入路徑、無窗口）。
+
+        P2-13：整段（計數 + 讀 raw + 插入 + 寫回）包 _state_lock，跨進程原子。
         """
-        with self._lock:
+        with self._state_lock():
             self._increment_daily_session_count()
             raw = self._read_raw()
             sessions = raw.setdefault("sessions", [])
@@ -401,8 +464,10 @@ class Layer2CostTracker:
         """
         Backfill PnL attribution for a completed session.
         为已完成 session 回填 PnL 归因。
+
+        P2-13：read-modify-write 序列，包 _state_lock（跨進程原子）。
         """
-        with self._lock:
+        with self._state_lock():
             raw = self._read_raw()
             for s in raw.get("sessions", []):
                 if s.get("session_id") == session_id:
