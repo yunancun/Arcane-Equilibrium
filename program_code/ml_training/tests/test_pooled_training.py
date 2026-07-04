@@ -96,7 +96,13 @@ def test_load_training_data_pooled_ignores_symbol_filter(monkeypatch):
         empty_f = np.empty((0, len(feature_names)), dtype=np.float32)
         empty_y = np.empty((0,), dtype=np.float32)
         empty_ts = np.empty((0,), dtype=np.int64)
-        return empty_f, empty_y, empty_ts, feature_names
+        # P1-3：load_training_data 現回 5-tuple（末位 label_composition）；
+        # 空資料集 composition 全零。
+        empty_composition = {
+            "n_total": 0, "n_informative": 0, "n_synthetic_reject": 0,
+            "synthetic_share": 0.0, "zeros_share": 0.0, "top_close_tags": [],
+        }
+        return empty_f, empty_y, empty_ts, feature_names, empty_composition
 
     monkeypatch.setattr(etl, "load_training_data", fake_load_training_data)
 
@@ -138,7 +144,13 @@ def test_load_training_data_per_symbol_forwards_filter(monkeypatch):
         empty_f = np.empty((0, len(feature_names)), dtype=np.float32)
         empty_y = np.empty((0,), dtype=np.float32)
         empty_ts = np.empty((0,), dtype=np.int64)
-        return empty_f, empty_y, empty_ts, feature_names
+        # P1-3：load_training_data 現回 5-tuple（末位 label_composition）；
+        # 空資料集 composition 全零。
+        empty_composition = {
+            "n_total": 0, "n_informative": 0, "n_synthetic_reject": 0,
+            "synthetic_share": 0.0, "zeros_share": 0.0, "top_close_tags": [],
+        }
+        return empty_f, empty_y, empty_ts, feature_names, empty_composition
 
     monkeypatch.setattr(etl, "load_training_data", fake_load_training_data)
 
