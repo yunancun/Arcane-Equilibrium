@@ -390,6 +390,15 @@ from .checks_cron_heartbeat import (
 from .checks_cost_gate_double_deduct import (  # noqa: F401
     check_90_cost_gate_double_deduct,
 )
+# [92][93] P0-2④ crontab 治理巡檢（2026-07-04）— 2026-06-27 crontab 屠殺 follow-up。
+# [92] live crontab render vs repo 正本 render 不一致 > 24h = FAIL；
+# [93] journal 出現無對應 manifest 的 REPLACE = FAIL（治理外 mutation 偵測）。純
+# filesystem + subprocess（crontab -l / journalctl / git），跑於 conn.close() 後。
+# 預設 WARN；OPENCLAW_CRONTAB_GOVERNANCE_REQUIRED=1 升 FAIL。
+from .checks_crontab_governance import (  # noqa: F401
+    check_92_crontab_matches_repo_render,
+    check_93_crontab_replace_has_manifest,
+)
 
 
 # Module docstring used by argparse to show the passive-wait healthcheck
@@ -421,6 +430,8 @@ The checks split between DB pipelines + filesystem/observability sentinels:
     [80]                                                  P0-OPS-4 GAP-D — trading_ai_pg_dump 7-check (delegate standalone)
     [90]                                                  PROFIT-1 — cost_gate double-cost-deduct latent issue sentinel (delegate standalone)
     [91]                                                  INTRADAY-KLINES-PERMANENT-FIX R3 — kline_calibration daily cron heartbeat sentinel
+    [92]                                                  P0-2④ — live crontab render vs repo 正本 render drift (>24h FAIL)
+    [93]                                                  P0-2④ — journal crontab REPLACE without matching manifest (governance-bypass detect)
 
 F7 sentinels [22]-[29] added 2026-04-26 by MIT DB audit + E5 engine.log dive:
   [22] trading_pipeline_silent_gap    (DCS active but fills cliff)
@@ -664,7 +675,7 @@ def main() -> int:
               [83][84][85][86][87]  (L2 P4 online-FDR 五軸，E1-C)
               [88][89]  (L2 記憶層 dormant 哨兵：pipeline freshness + embedding drift，
                          E1-B 2026-06-11 PA spec §12；號占用正本)
-      post-cursor: [7][13][11][Xa][16][18][19][20] [29] [47] [56] [75][76][77][78][79] [80] [90] [91]
+      post-cursor: [7][13][11][Xa][16][18][19][20] [29] [47] [56] [75][76][77][78][79] [80] [90] [91] [92][93]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
     ap.add_argument("--quiet", action="store_true", help="Only print non-PASS lines")
@@ -1586,6 +1597,17 @@ def main() -> int:
     # 已被 P5-SM lease_ipc_soak 占用，沿用 codebase [58]→[68] 重定址慣例避撞號。
     s, m = check_91_kline_calibration_cron_fires()
     results.append(("[91] kline_calibration_cron_fires", s, m))
+
+    # [92][93] P0-2④ crontab 治理巡檢（2026-07-04）— 2026-06-27 crontab 屠殺 follow-up。
+    # [92] live crontab active 行 == repo 正本 render active 行；不一致 > 24h → FAIL。
+    # [93] journal 最近窗口 crontab REPLACE 都應有對應 manifest；缺 → FAIL（治理外
+    # mutation 偵測）。純 filesystem + subprocess（crontab -l / journalctl / git），不
+    # 依賴 runner cur，跑於 conn.close() 後（與 [80]/[90]/[91] 同性質）。預設 WARN；
+    # OPENCLAW_CRONTAB_GOVERNANCE_REQUIRED=1 升 FAIL。
+    s, m = check_92_crontab_matches_repo_render()
+    results.append(("[92] crontab_matches_repo_render", s, m))
+    s, m = check_93_crontab_replace_has_manifest()
+    results.append(("[93] crontab_replace_has_manifest", s, m))
 
     # NOTE: [30] cost_edge_advisor_status moved INSIDE the cursor block by
     # G3-09 Phase B Wave 1 (2026-04-28). Phase A version was filesystem-only
