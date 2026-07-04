@@ -31,7 +31,9 @@ def _status(required: bool) -> str:
 
 def check_52_agent_event_store_rows(cur) -> tuple[str, str]:
     """[52] Verify recent durable rows for the 5-Agent advisory event store."""
-    if not _enabled("OPENCLAW_AGENT_EVENT_STORE_ENABLED"):
+    # P2-3（2026-07-04）：默認 ON，與 AgentEventStore 寫入面默認一致 —— env 缺失
+    # 時哨兵必須真的去查行數（寫入面默認開啟後，哨兵默認跳過=失去 row proof）。
+    if not _enabled("OPENCLAW_AGENT_EVENT_STORE_ENABLED", default="1"):
         return ("PASS", "agent event-store disabled by env; row proof skipped")
 
     required = _enabled("OPENCLAW_AGENT_EVENT_STORE_HEALTH_REQUIRED")

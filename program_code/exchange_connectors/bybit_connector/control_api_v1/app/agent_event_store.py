@@ -4,7 +4,9 @@ Durable event-store writer for the 5-Agent advisory/event foundation.
 MODULE_NOTE (中文):
   AgentEventStore 是 MAG-010..012 的唯一寫入口，負責把 legacy/advisory
   MessageBus、Agent lifecycle、AI invocation 寫入既有 agent.* 表。
-  M1 階段默認關閉；啟用後 DB / serialization 失敗只影響可觀測性，不改交易行為。
+  2026-07-04 冷審計 R2 P2-3：默認由 OFF 改 ON（觀測腿默認開啟；寫入目標=
+  PG agent.* 三表，持久存儲非檔案路徑）；顯式 OPENCLAW_AGENT_EVENT_STORE_ENABLED=0
+  仍可關閉。DB / serialization 失敗只影響可觀測性（fail-soft），不改交易行為。
   禁止在此持久化 raw prompt、raw response、secret、token、cookie、stack trace。
 """
 
@@ -91,8 +93,10 @@ class AgentEventStore:
         enabled: Optional[bool] = None,
         max_payload_bytes: Optional[int] = None,
     ) -> None:
+        # P2-3（2026-07-04）：默認 ON。觀測腿 fail-soft（record_* 全捕獲異常），
+        # 默認開啟不會把 PG 故障放大成主流程故障；顯式 "0" 保留 opt-out。
         self.enabled = (
-            _env_enabled("OPENCLAW_AGENT_EVENT_STORE_ENABLED")
+            _env_enabled("OPENCLAW_AGENT_EVENT_STORE_ENABLED", default="1")
             if enabled is None
             else bool(enabled)
         )

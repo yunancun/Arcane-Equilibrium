@@ -4,15 +4,15 @@ saved_ts_ms = 0
 
 [attention_tax]
 enabled = true
-cost_edge_max_ratio = 100.0
-# Phase 5 exploration mode: set to 100.0 (effective disable) to prevent premature position closes.
-# Original 0.8 caused immediate close; observed cost_ratio for grid/bb entries is 9–18,
-# so even 5.0 was insufficient. 100.0 bypasses the check (fires only at pnl < 0.0012%).
-# After Phase 5 observation + positive JS estimates, lower this back toward 0.8.
-# Phase 5 探索期：設為 100.0（有效禁用）防止過早平倉。
-# 原始 0.8 立即關倉；觀察到 grid/bb 入場的 cost_ratio 為 9–18，5.0 仍不足。
-# 100.0 實際跳過此檢查（僅在盈利 < 0.0012% 才觸發）。
-# Phase 5 觀察期後且 JS 估計轉正後，逐步降回 0.8。
+# 2026-07-04 冷審計 R2 D5：舊 Phase 5 探索值 100.0（永不觸發）收斂回
+# MICRO-PROFIT-FIX-1（2026-04-17）設計值 0.2 + min_profit_to_close_pct 0.3，
+# 出處：rust budget_config.rs default_cost_edge_max_ratio（範圍已縮至 [0, 10]，
+# >10 會被 legacy_migration::sanitize_legacy_budget_config clamp 回 default）
+# 與 settings/risk_control_rules/budget_config.toml（引擎實際載入路徑）同值。
+# 語義：cost_ratio ≥ 0.2 且 pnl_pct ≥ 0.3% 才觸發平倉建議 —— 窄帶鎖定
+# 「利潤縮但仍可抓」（pnl_pct ∈ [0.3%, 0.55%] @ Bybit taker），不再實質停用。
+cost_edge_max_ratio = 0.2
+min_profit_to_close_pct = 0.3
 burn_rate_dormant = 0.0
 burn_rate_low = 0.003
 burn_rate_medium = 0.01

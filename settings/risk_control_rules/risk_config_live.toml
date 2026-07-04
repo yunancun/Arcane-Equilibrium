@@ -401,7 +401,11 @@ model_tier = "l1_9b"            # F-09 IPC strategist_evaluate Ollama tier；non
 # threshold `-0.3`（vs demo/paper `-0.5`）；Phase A 不接 IntentProcessor，
 # Phase C unlock 需 ≥7d demo Phase B shadow 資料審核（RFC §8.3）。
 [cost_edge]
-enabled = false                 # Phase A dormant — env-gate + flag dual safeguard
+# 2026-07-04 冷審計 R2 D5（operator 裁決）：demo/live 雙 arm（基礎設施 demo/live
+# 一致）。advisor 為純觀察治理腿（Phase B observation-only，不接 IntentProcessor、
+# 不碰交易路徑），arm 不構成 live fail-closed 鬆動；env-gate
+# OPENCLAW_COST_EDGE_ADVISOR=1 仍為第二道保險（雙保險 pattern 不變）。
+enabled = true
 trigger_threshold = -0.3        # Live more conservative than demo/paper (-0.5)
 
 # REF-20 Sprint 3 Track H E-4 (2026-05-03) — agent 三表 DB sink schema (Phase A
