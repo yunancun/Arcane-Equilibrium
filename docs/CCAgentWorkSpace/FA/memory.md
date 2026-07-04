@@ -287,3 +287,6 @@ WP-04 F-01 `budget_config.toml × 2` daily 100→2 / monthly 150→60 已 deploy
 - 結論 (b):0 候選滿足,證據鏈 step 0 未啟動(A1/A2 demo inactive/0 fills/無 green Stage 0R);排程項改事件觸發(4 條件)+2026-06-27 backstop;AC-S2-A-3 從屬 AEG 非被取代(必要非充分)
 - 交叉核驗抓 1 處 drift:oi_delta 在 TODO=「排後」非 NO-GO,MIT 06-09 報告憑記憶誤列;按權威序信 TODO
 - 報告:workspace/reports/2026-06-10--ac_s2_a3_evidence_check.md(PM 代落盤,本 session 無寫檔工具)
+
+## 2026-07-03 全倉功能審計（read-only, runtime 實測）
+- 三大 HIGH：(1) 學習 SSOT probe_ledger.jsonl(393MB)+全治理證據在 /tmp（tmpfiles `D /tmp` 開機清空+30d age 清理，~07-22 起證據 sha 斷鏈）；(2) 06-27 crontab 70→5 行掉 12 個 producer cron（edge_label_backfill/canary_audit_pg_writer/alpha discovery 等）無治理記錄；(3) bounded probe lane 100% 凍結（5h 內 11,075/12,646 PLAN_STALE 拒絕、0 admission；standing auth 過期 42h；TTL 12h<審批週期=結構性 over-gate）。writer=1 已解凍但上游 artifact 新鮮度鎖死全鏈。業務鏈 ≈55-60%，最弱=進化 20%。報告：workspace/reports/2026-07-03--full_repo_functional_audit.md
