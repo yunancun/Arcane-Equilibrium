@@ -79,6 +79,13 @@ ORDER_TOUCHABILITY_DEEP_GAP_BPS="${OPENCLAW_DEMO_ORDER_TO_FILL_GAP_DEEP_GAP_BPS:
 SCORECARD_LOOKBACK_HOURS="${OPENCLAW_COST_GATE_SCORECARD_LOOKBACK_HOURS:-168}"
 SCORECARD_LIMIT="${OPENCLAW_COST_GATE_SCORECARD_LIMIT:-50000}"
 REFRESH_PLAN="${OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN:-1}"
+# soak plan 自動重蓋章：默認 0(關)，soak 期由 operator 顯式開。開啟後在授權窗內把過期
+# 的 canonical soak plan 重生 generated_at + 候選快照(不延長 authority；簽名塊 byte-preserve)。
+REFRESH_SOAK_PLAN="${OPENCLAW_COST_GATE_REFRESH_SOAK_PLAN:-0}"
+SOAK_PLAN_JSON="${OPENCLAW_COST_GATE_SOAK_PLAN_JSON:-$LANE_DIR/bounded_demo_probe_soak_plan.json}"
+SOAK_PLAN_REMATERIALIZER_ALERT_JSONL="${OPENCLAW_COST_GATE_SOAK_PLAN_REMATERIALIZER_ALERT_JSONL:-$LANE_DIR/soak_plan_rematerializer_alerts.jsonl}"
+SOAK_PLAN_REMATERIALIZER_JSON="${OPENCLAW_COST_GATE_SOAK_PLAN_REMATERIALIZER_JSON:-$LANE_DIR/soak_plan_rematerializer_latest.json}"
+SOAK_PLAN_EXPECTED_AUTHORIZATION_SHA256="${OPENCLAW_COST_GATE_SOAK_PLAN_EXPECTED_AUTHORIZATION_SHA256:-}"
 PREINSTALL_REFRESH_ONLY="${OPENCLAW_COST_GATE_LEARNING_PREINSTALL_REFRESH_ONLY:-0}"
 PLAN_MAX_SCORECARD_AGE_HOURS="${OPENCLAW_COST_GATE_PLAN_MAX_SCORECARD_AGE_HOURS:-24}"
 PLAN_MIN_CANDIDATE_SAMPLE="${OPENCLAW_COST_GATE_PLAN_MIN_CANDIDATE_SAMPLE:-100}"
@@ -227,6 +234,11 @@ validate_decimal "OPENCLAW_DEMO_ORDER_TO_FILL_GAP_DEEP_GAP_BPS" "$ORDER_TOUCHABI
 validate_int "OPENCLAW_COST_GATE_SCORECARD_LOOKBACK_HOURS" "$SCORECARD_LOOKBACK_HOURS"
 validate_int "OPENCLAW_COST_GATE_SCORECARD_LIMIT" "$SCORECARD_LIMIT"
 validate_bool01 "OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN" "$REFRESH_PLAN"
+validate_bool01 "OPENCLAW_COST_GATE_REFRESH_SOAK_PLAN" "$REFRESH_SOAK_PLAN"
+if [[ -n "$SOAK_PLAN_EXPECTED_AUTHORIZATION_SHA256" && ! "$SOAK_PLAN_EXPECTED_AUTHORIZATION_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "[$(ts)] FATAL: OPENCLAW_COST_GATE_SOAK_PLAN_EXPECTED_AUTHORIZATION_SHA256 must be a 64-char hex sha256: ${SOAK_PLAN_EXPECTED_AUTHORIZATION_SHA256}" | tee -a "$LOG" >&2
+    exit 2
+fi
 validate_bool01 "OPENCLAW_COST_GATE_LEARNING_PREINSTALL_REFRESH_ONLY" "$PREINSTALL_REFRESH_ONLY"
 validate_int "OPENCLAW_COST_GATE_PLAN_MAX_SCORECARD_AGE_HOURS" "$PLAN_MAX_SCORECARD_AGE_HOURS"
 validate_int "OPENCLAW_COST_GATE_PLAN_MIN_CANDIDATE_SAMPLE" "$PLAN_MIN_CANDIDATE_SAMPLE"
@@ -719,6 +731,40 @@ if [[ "$REFRESH_PLAN" == "1" ]]; then
     fi
 else
     echo "[$(ts)] SKIP: cost-gate demo-learning plan refresh disabled by OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN=0" >> "$LOG"
+fi
+
+# soak plan 自動重蓋章步驟(默認關；soak 期由 operator 開 OPENCLAW_COST_GATE_REFRESH_SOAK_PLAN=1)。
+# 前置全 fail-closed 在 soak_plan_rematerializer 內：envelope 有效∧簽名塊 byte-preserve∧
+# side_cell/caps 一致∧fresh scorecard 仍選中；任一不成立=no-op+告警 JSONL(不改 plan)。
+soak_plan_rematerializer_rc=0
+soak_plan_rematerializer_skip_reason=""
+if [[ "$REFRESH_SOAK_PLAN" == "1" ]]; then
+    if [[ -f "$SOAK_PLAN_JSON" ]]; then
+        SOAK_PLAN_ARGS=(
+            -m cost_gate_learning_lane.soak_plan_rematerializer
+            --plan-json "$SOAK_PLAN_JSON"
+            --scorecard-json "$SCORECARD_JSON"
+            --alert-jsonl "$SOAK_PLAN_REMATERIALIZER_ALERT_JSONL"
+            --max-scorecard-age-hours "$PLAN_MAX_SCORECARD_AGE_HOURS"
+            --min-candidate-sample "$PLAN_MIN_CANDIDATE_SAMPLE"
+            --json-output "$SOAK_PLAN_REMATERIALIZER_JSON"
+        )
+        if [[ -n "$SOAK_PLAN_EXPECTED_AUTHORIZATION_SHA256" ]]; then
+            SOAK_PLAN_ARGS+=(--expected-authorization-sha256 "$SOAK_PLAN_EXPECTED_AUTHORIZATION_SHA256")
+        fi
+        (
+            cd "$BASE"
+            export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
+            export PYTHONDONTWRITEBYTECODE=1
+            "$PYBIN" "${SOAK_PLAN_ARGS[@]}"
+        ) >> "$LOG" 2>&1 || soak_plan_rematerializer_rc=$?
+    else
+        soak_plan_rematerializer_skip_reason="soak_plan_json_missing"
+        echo "[$(ts)] SKIP: soak plan rematerialize skipped (soak plan missing: $SOAK_PLAN_JSON)" >> "$LOG"
+    fi
+else
+    soak_plan_rematerializer_skip_reason="refresh_soak_plan_disabled"
+    echo "[$(ts)] SKIP: soak plan rematerialize disabled by OPENCLAW_COST_GATE_REFRESH_SOAK_PLAN=0" >> "$LOG"
 fi
 
 historical_review_rc=0
@@ -1231,7 +1277,7 @@ export SEALED_HORIZON_LEARNING_EVIDENCE_SKIP_REASON="$sealed_horizon_learning_ev
 export REFRESH_SEALED_HORIZON_LEARNING_EVIDENCE="$REFRESH_SEALED_HORIZON_LEARNING_EVIDENCE"
 export APPEND_SEALED_HORIZON_LEARNING_EVIDENCE="$APPEND_SEALED_HORIZON_LEARNING_EVIDENCE"
 
-STATUS_JSON=$(SCORECARD_JSON_OUT="$SCORECARD_JSON_OUT" SCORECARD_JSON="$SCORECARD_JSON" SCORECARD_RC="$scorecard_rc" REFRESH_SCORECARD="$REFRESH_SCORECARD" DATA_FLOW_JSON_OUT="$DATA_FLOW_JSON_OUT" DATA_FLOW_JSON="$DATA_FLOW_JSON" DATA_FLOW_MONITOR_RC="$data_flow_monitor_rc" REFRESH_DATA_FLOW_MONITOR="$REFRESH_DATA_FLOW_MONITOR" ORDER_TOUCHABILITY_JSON_OUT="$ORDER_TOUCHABILITY_JSON_OUT" ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" ORDER_TOUCHABILITY_AUDIT_RC="$order_touchability_audit_rc" ORDER_TOUCHABILITY_AUDIT_SKIP_REASON="$order_touchability_audit_skip_reason" REFRESH_ORDER_TOUCHABILITY_AUDIT="$REFRESH_ORDER_TOUCHABILITY_AUDIT" DECISION_PACKET_JSON_OUT="$DECISION_PACKET_JSON_OUT" DECISION_PACKET_JSON="$DECISION_PACKET_JSON" DECISION_PACKET_RC="$decision_packet_rc" REFRESH_DECISION_PACKET="$REFRESH_DECISION_PACKET" PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN" PREINSTALL_REFRESH_ONLY="$PREINSTALL_REFRESH_ONLY" HISTORICAL_REVIEW_OUT="$HISTORICAL_REVIEW_OUT" MATERIALIZER_OUT="$MATERIALIZER_OUT" REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" BOUNDED_PROBE_PREFLIGHT_JSON="$BOUNDED_PROBE_PREFLIGHT_SOURCE_JSON" ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT="$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST="$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT="$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST="$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST" FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_OUT="$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_OUT" FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_LATEST="$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_LATEST" BOUNDED_PROBE_RESULT_REVIEW_OUT="$BOUNDED_PROBE_RESULT_REVIEW_OUT" BOUNDED_PROBE_RESULT_REVIEW_LATEST="$BOUNDED_PROBE_RESULT_REVIEW_LATEST" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST" HISTORICAL_REVIEW_RC="$historical_review_rc" MATERIALIZER_RC="$materializer_rc" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_RC="$bounded_probe_touchability_preflight_rc" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_RC="$bounded_probe_placement_repair_plan_rc" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_RC="$bounded_probe_authority_patch_readiness_rc" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_RC="$bounded_probe_operator_authorization_rc" FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_RC="$false_negative_candidate_friction_scorecard_rc" BOUNDED_PROBE_RESULT_REVIEW_RC="$bounded_probe_result_review_rc" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_RC="$bounded_probe_execution_realism_review_rc" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_SKIP_REASON="$bounded_probe_touchability_preflight_skip_reason" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_SKIP_REASON="$bounded_probe_placement_repair_plan_skip_reason" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_SKIP_REASON="$bounded_probe_authority_patch_readiness_skip_reason" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SKIP_REASON="$bounded_probe_operator_authorization_skip_reason" FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_SKIP_REASON="$false_negative_candidate_friction_scorecard_skip_reason" BOUNDED_PROBE_RESULT_REVIEW_SKIP_REASON="$bounded_probe_result_review_skip_reason" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_SKIP_REASON="$bounded_probe_execution_realism_review_skip_reason" REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT="$REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT" REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN="$REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN" REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS="$REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS" REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION="$REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION" REFRESH_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD="$REFRESH_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD" REFRESH_BOUNDED_PROBE_RESULT_REVIEW="$REFRESH_BOUNDED_PROBE_RESULT_REVIEW" REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW="$REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW" LEDGER="$LEDGER" MATERIALIZE_REJECTS="$MATERIALIZE_REJECTS" APPEND_MATERIALIZED_REJECTS="$APPEND_MATERIALIZED_REJECTS" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
+STATUS_JSON=$(SCORECARD_JSON_OUT="$SCORECARD_JSON_OUT" SCORECARD_JSON="$SCORECARD_JSON" SCORECARD_RC="$scorecard_rc" REFRESH_SCORECARD="$REFRESH_SCORECARD" DATA_FLOW_JSON_OUT="$DATA_FLOW_JSON_OUT" DATA_FLOW_JSON="$DATA_FLOW_JSON" DATA_FLOW_MONITOR_RC="$data_flow_monitor_rc" REFRESH_DATA_FLOW_MONITOR="$REFRESH_DATA_FLOW_MONITOR" ORDER_TOUCHABILITY_JSON_OUT="$ORDER_TOUCHABILITY_JSON_OUT" ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" ORDER_TOUCHABILITY_AUDIT_RC="$order_touchability_audit_rc" ORDER_TOUCHABILITY_AUDIT_SKIP_REASON="$order_touchability_audit_skip_reason" REFRESH_ORDER_TOUCHABILITY_AUDIT="$REFRESH_ORDER_TOUCHABILITY_AUDIT" DECISION_PACKET_JSON_OUT="$DECISION_PACKET_JSON_OUT" DECISION_PACKET_JSON="$DECISION_PACKET_JSON" DECISION_PACKET_RC="$decision_packet_rc" REFRESH_DECISION_PACKET="$REFRESH_DECISION_PACKET" PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN" REFRESH_SOAK_PLAN="$REFRESH_SOAK_PLAN" SOAK_PLAN_JSON="$SOAK_PLAN_JSON" SOAK_PLAN_REMATERIALIZER_JSON="$SOAK_PLAN_REMATERIALIZER_JSON" SOAK_PLAN_REMATERIALIZER_RC="$soak_plan_rematerializer_rc" SOAK_PLAN_REMATERIALIZER_SKIP_REASON="$soak_plan_rematerializer_skip_reason" PREINSTALL_REFRESH_ONLY="$PREINSTALL_REFRESH_ONLY" HISTORICAL_REVIEW_OUT="$HISTORICAL_REVIEW_OUT" MATERIALIZER_OUT="$MATERIALIZER_OUT" REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" BOUNDED_PROBE_PREFLIGHT_JSON="$BOUNDED_PROBE_PREFLIGHT_SOURCE_JSON" ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT="$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_OUT" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST="$BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_LATEST" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT="$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST="$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_LATEST" FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_OUT="$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_OUT" FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_LATEST="$FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_LATEST" BOUNDED_PROBE_RESULT_REVIEW_OUT="$BOUNDED_PROBE_RESULT_REVIEW_OUT" BOUNDED_PROBE_RESULT_REVIEW_LATEST="$BOUNDED_PROBE_RESULT_REVIEW_LATEST" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST" HISTORICAL_REVIEW_RC="$historical_review_rc" MATERIALIZER_RC="$materializer_rc" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_RC="$bounded_probe_touchability_preflight_rc" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_RC="$bounded_probe_placement_repair_plan_rc" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_RC="$bounded_probe_authority_patch_readiness_rc" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_RC="$bounded_probe_operator_authorization_rc" FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_RC="$false_negative_candidate_friction_scorecard_rc" BOUNDED_PROBE_RESULT_REVIEW_RC="$bounded_probe_result_review_rc" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_RC="$bounded_probe_execution_realism_review_rc" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_SKIP_REASON="$bounded_probe_touchability_preflight_skip_reason" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_SKIP_REASON="$bounded_probe_placement_repair_plan_skip_reason" BOUNDED_PROBE_AUTHORITY_PATCH_READINESS_SKIP_REASON="$bounded_probe_authority_patch_readiness_skip_reason" BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SKIP_REASON="$bounded_probe_operator_authorization_skip_reason" FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_SKIP_REASON="$false_negative_candidate_friction_scorecard_skip_reason" BOUNDED_PROBE_RESULT_REVIEW_SKIP_REASON="$bounded_probe_result_review_skip_reason" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_SKIP_REASON="$bounded_probe_execution_realism_review_skip_reason" REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT="$REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT" REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN="$REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN" REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS="$REFRESH_BOUNDED_PROBE_AUTHORITY_PATCH_READINESS" REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION="$REFRESH_BOUNDED_PROBE_OPERATOR_AUTHORIZATION" REFRESH_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD="$REFRESH_FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD" REFRESH_BOUNDED_PROBE_RESULT_REVIEW="$REFRESH_BOUNDED_PROBE_RESULT_REVIEW" REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW="$REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW" LEDGER="$LEDGER" MATERIALIZE_REJECTS="$MATERIALIZE_REJECTS" APPEND_MATERIALIZED_REJECTS="$APPEND_MATERIALIZED_REJECTS" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
 import datetime
 import hashlib
 import json
@@ -1316,6 +1362,11 @@ status = {
     "order_touchability_audit_rc": int(os.environ["ORDER_TOUCHABILITY_AUDIT_RC"]),
     "decision_packet_rc": int(os.environ["DECISION_PACKET_RC"]),
     "plan_rc": int(os.environ["PLAN_RC"]),
+    "soak_plan_rematerializer_rc": int(os.environ.get("SOAK_PLAN_REMATERIALIZER_RC", "0") or "0"),
+    "refresh_soak_plan": os.environ.get("REFRESH_SOAK_PLAN", "0") == "1",
+    "soak_plan_rematerializer_skip_reason": os.environ.get("SOAK_PLAN_REMATERIALIZER_SKIP_REASON") or None,
+    "soak_plan_latest_path": os.environ.get("SOAK_PLAN_JSON") or None,
+    "soak_plan_rematerializer_json_path": os.environ.get("SOAK_PLAN_REMATERIALIZER_JSON") or None,
     "historical_review_rc": int(os.environ["HISTORICAL_REVIEW_RC"]),
     "materializer_rc": int(os.environ["MATERIALIZER_RC"]),
     "refresh_rc": int(os.environ["REFRESH_RC"]),
@@ -1973,7 +2024,7 @@ if [[ -n "$STATUS_JSON" ]]; then
     echo "$STATUS_JSON" >> "$STATUS_LOG"
 fi
 
-echo "[$(ts)] === Cost-gate learning lane refresh end scorecard_rc=${scorecard_rc} plan_rc=${plan_rc} historical_review_rc=${historical_review_rc} materializer_rc=${materializer_rc} refresh_rc=${refresh_rc} review_rc=${review_rc} false_negative_candidate_packet_rc=${false_negative_candidate_packet_rc} false_negative_operator_review_rc=${false_negative_operator_review_rc} learning_ssot_decision_rc=${learning_ssot_decision_rc} autonomous_parameter_proposal_rc=${autonomous_parameter_proposal_rc} false_negative_bounded_preflight_rc=${false_negative_bounded_preflight_rc} sealed_horizon_learning_evidence_rc=${sealed_horizon_learning_evidence_rc} order_touchability_audit_rc=${order_touchability_audit_rc} bounded_probe_touchability_preflight_rc=${bounded_probe_touchability_preflight_rc} bounded_probe_placement_repair_plan_rc=${bounded_probe_placement_repair_plan_rc} bounded_probe_authority_patch_readiness_rc=${bounded_probe_authority_patch_readiness_rc} bounded_probe_operator_authorization_rc=${bounded_probe_operator_authorization_rc} false_negative_candidate_friction_scorecard_rc=${false_negative_candidate_friction_scorecard_rc} bounded_probe_shadow_placement_impact_rc=${bounded_probe_shadow_placement_impact_rc} bounded_probe_result_review_rc=${bounded_probe_result_review_rc} bounded_probe_execution_realism_review_rc=${bounded_probe_execution_realism_review_rc} ===" >> "$LOG"
+echo "[$(ts)] === Cost-gate learning lane refresh end scorecard_rc=${scorecard_rc} plan_rc=${plan_rc} soak_plan_rematerializer_rc=${soak_plan_rematerializer_rc} historical_review_rc=${historical_review_rc} materializer_rc=${materializer_rc} refresh_rc=${refresh_rc} review_rc=${review_rc} false_negative_candidate_packet_rc=${false_negative_candidate_packet_rc} false_negative_operator_review_rc=${false_negative_operator_review_rc} learning_ssot_decision_rc=${learning_ssot_decision_rc} autonomous_parameter_proposal_rc=${autonomous_parameter_proposal_rc} false_negative_bounded_preflight_rc=${false_negative_bounded_preflight_rc} sealed_horizon_learning_evidence_rc=${sealed_horizon_learning_evidence_rc} order_touchability_audit_rc=${order_touchability_audit_rc} bounded_probe_touchability_preflight_rc=${bounded_probe_touchability_preflight_rc} bounded_probe_placement_repair_plan_rc=${bounded_probe_placement_repair_plan_rc} bounded_probe_authority_patch_readiness_rc=${bounded_probe_authority_patch_readiness_rc} bounded_probe_operator_authorization_rc=${bounded_probe_operator_authorization_rc} false_negative_candidate_friction_scorecard_rc=${false_negative_candidate_friction_scorecard_rc} bounded_probe_shadow_placement_impact_rc=${bounded_probe_shadow_placement_impact_rc} bounded_probe_result_review_rc=${bounded_probe_result_review_rc} bounded_probe_execution_realism_review_rc=${bounded_probe_execution_realism_review_rc} ===" >> "$LOG"
 
 # fail-soft: rc/status are recorded; alpha-discovery reads artifacts and ledger
 # state. Operator action is required for deploy, writer enablement, or probe authority.

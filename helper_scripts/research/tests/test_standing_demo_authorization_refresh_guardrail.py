@@ -319,3 +319,83 @@ def test_probe_order_expansion_blocks_refresh() -> None:
     assert review["status"] == mod.NOT_READY_STATUS
     assert "max_authorized_probe_orders_increases_prior_envelope" in review["source_blockers"]
     assert review["envelope_preview"] == {}
+
+
+def test_default_ttl_unchanged_without_soak_window() -> None:
+    # 作用域封鎖:不傳 --soak-window-hours 時 TTL 逐位維持 12h,max 帽維持 24h,
+    # 且不出現 soak 放寬痕跡。
+    review = _review()
+
+    assert review["status"] == mod.READY_STATUS
+    assert review["summary"]["authorization_ttl_hours"] == 12
+    assert review["summary"]["max_authorization_ttl_hours"] == 24
+    assert review["summary"]["soak_window_hours"] is None
+    assert review["summary"]["soak_window_ttl_relaxation_applied"] is False
+    envelope = review["envelope_preview"]
+    expires = dt.datetime.fromisoformat(envelope["expires_at_utc"])
+    assert expires == NOW + dt.timedelta(hours=12)
+    assert envelope["soak_window_ttl"]["soak_window_ttl_relaxation_applied"] is False
+    assert envelope["soak_window_ttl"]["soak_window_hours"] is None
+
+
+def test_soak_window_widens_ttl_and_records_audit_fields() -> None:
+    review = _review(soak_window_hours=72)
+
+    assert review["status"] == mod.READY_STATUS
+    assert review["source_blockers"] == []
+    assert review["summary"]["authorization_ttl_hours"] == 72
+    assert review["summary"]["max_authorization_ttl_hours"] == 96
+    assert review["summary"]["soak_window_hours"] == 72
+    assert review["summary"]["soak_window_ttl_relaxation_applied"] is True
+    envelope = review["envelope_preview"]
+    expires = dt.datetime.fromisoformat(envelope["expires_at_utc"])
+    assert expires == NOW + dt.timedelta(hours=72)
+    audit = envelope["soak_window_ttl"]
+    assert audit["authorization_ttl_hours"] == 72
+    assert audit["soak_window_hours"] == 72
+    assert audit["soak_window_ttl_relaxation_applied"] is True
+    assert "operator" in audit["reason"]
+    # soak 放寬後 envelope 仍必須通過 standing 驗證(summarize 的 max-TTL 帽同步抬到 96)。
+    assert review["standing_demo_authorization_validation"][
+        "valid_for_candidate_scoped_authorization"
+    ] is True
+
+
+def test_soak_window_at_ceiling_accepted() -> None:
+    review = _review(soak_window_hours=96)
+
+    assert review["status"] == mod.READY_STATUS
+    assert review["summary"]["authorization_ttl_hours"] == 96
+    assert review["envelope_preview"] != {}
+
+
+def test_soak_window_above_ceiling_blocks_refresh() -> None:
+    review = _review(soak_window_hours=97)
+
+    assert review["status"] == mod.NOT_READY_STATUS
+    assert "soak_window_hours_out_of_bounds" in review["source_blockers"]
+    assert review["envelope_preview"] == {}
+
+
+def test_soak_window_below_floor_blocks_refresh() -> None:
+    review = _review(soak_window_hours=0)
+
+    assert review["status"] == mod.NOT_READY_STATUS
+    assert "soak_window_hours_out_of_bounds" in review["source_blockers"]
+    assert review["envelope_preview"] == {}
+
+
+def test_default_runtime_envelope_path_derives_from_data_dir(monkeypatch) -> None:
+    # RES-7:runtime envelope 默認路徑必須由 OPENCLAW_DATA_DIR 派生,不得硬編碼 /tmp。
+    monkeypatch.setenv("OPENCLAW_DATA_DIR", "/srv/openclaw-data")
+    derived = mod._default_runtime_envelope_path()
+    assert str(derived) == (
+        "/srv/openclaw-data/cost_gate_learning_lane/"
+        "standing_demo_operator_authorization.json"
+    )
+    monkeypatch.delenv("OPENCLAW_DATA_DIR", raising=False)
+    fallback = mod._default_runtime_envelope_path()
+    assert str(fallback).endswith(
+        "cost_gate_learning_lane/standing_demo_operator_authorization.json"
+    )
+    assert "/tmp/openclaw" in str(fallback)
