@@ -491,29 +491,10 @@ pub fn is_bybit_safe_order_link_id(order_link_id: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
 }
 
-pub fn is_bybit_safe_order_link_id_for_engine_mode(
-    order_link_id: &str,
-    engine_mode: &str,
-    ts_ms: u64,
-) -> bool {
-    if !is_bybit_safe_order_link_id(order_link_id) {
-        return false;
-    }
-    let expected_mode_tag = match engine_mode.trim().to_ascii_lowercase().as_str() {
-        "demo" => "dm",
-        "live_demo" => "ld",
-        _ => return false,
-    };
-    let parts: Vec<&str> = order_link_id.split('_').collect();
-    if parts.len() != 4 {
-        return false;
-    }
-    let [prefix, mode_tag, ts_part, seq_part]: [&str; 4] = [parts[0], parts[1], parts[2], parts[3]];
-    prefix == "oc"
-        && mode_tag == expected_mode_tag
-        && ts_part == ts_ms.to_string()
-        && seq_part.parse::<u64>().map(|seq| seq > 0).unwrap_or(false)
-}
+// F11(E4 2026-07-04 補審):四段版 is_bybit_safe_order_link_id_for_engine_mode 已刪除。
+// 該版驗證的是無 lineage hash 的舊格式(oc_<mode>_<ts>_<十進位 seq>),生產格式為五段
+// (base36 seq + FNV lineage hash),由更嚴格的 is_candidate_bound_bounded_probe_order_link_id
+// 驗證;全庫 grep 零 caller,保留只會誤導審閱者以為存在第二條校驗路徑。
 
 pub fn bounded_probe_order_link_id_for_candidate(
     engine_mode: &str,
