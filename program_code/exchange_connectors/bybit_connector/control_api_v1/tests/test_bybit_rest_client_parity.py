@@ -78,6 +78,10 @@ def _clean_env(monkeypatch, tmp_path: Path):
     ):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
+    # F5（2026-07-04 冷審計 R2）：寫路徑 gate 默認 fail-closed（flag 缺失=攔）。
+    # 本檔驗證寫方法回應形狀（parity），非治理閘，統一給 WRITE_ENABLED=true 讓
+    # place_order / cancel_order 可達（gate 三態由 test_bybit_rest_client.py 覆蓋）。
+    monkeypatch.setenv("BYBIT_CONNECTOR_WRITE_ENABLED", "true")
     yield
 
 
