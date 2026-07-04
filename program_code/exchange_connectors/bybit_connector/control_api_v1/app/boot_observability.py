@@ -45,8 +45,8 @@ _state: dict[str, Any] = {
 def _git_head_uncached() -> str:
     """以 git rev-parse HEAD 讀當前 checkout 的 SHA；任何失敗回 "unknown"。
 
-    為什麼用本檔所在目錄當 cwd：git 會自行向上尋找 repo root，避免硬編碼
-    /home/ncyu、/Users/ncyu 等機器路徑（跨平台合規）。
+    為什麼用本檔所在目錄當 cwd：git 會自行向上尋找 repo root，避免任何
+    機器特定的絕對路徑硬編碼（跨平台合規）。
     為什麼吞掉所有異常：git 不在 PATH（FileNotFoundError）、非 repo、超時等
     都不得讓可觀測性面拋錯阻斷 startup / healthz。
     """
