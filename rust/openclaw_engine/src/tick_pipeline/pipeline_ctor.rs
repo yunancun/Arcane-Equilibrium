@@ -206,6 +206,10 @@ impl TickPipeline {
             // 重算並 populate；只快取 Some，故暖機期 None 永不入 map。
             perf1_indicators_5m_cache: HashMap::new(),
             perf1_indicators_5m_epoch: HashMap::new(),
+            // P1-11 (2026-07-04)：1m 側空快取 + 空 epoch，語義同上
+            // （PERF-1 5m 半邊補全）。
+            perf1_indicators_1m_cache: HashMap::new(),
+            perf1_indicators_1m_epoch: HashMap::new(),
         }
     }
 
@@ -427,6 +431,9 @@ impl TickPipeline {
         // 加入 scanner 時繼承前一任期的過期快照。
         self.perf1_indicators_5m_cache.remove(symbol);
         self.perf1_indicators_5m_epoch.remove(symbol);
+        // P1-11 (2026-07-04)：1m 指標快取 + epoch 同步清除（同 5m 側理由）。
+        self.perf1_indicators_1m_cache.remove(symbol);
+        self.perf1_indicators_1m_epoch.remove(symbol);
         self.consecutive_losses.remove(symbol);
         self.last_persisted_signal
             .retain(|(sym, _), _| sym != symbol);
