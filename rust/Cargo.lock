@@ -1364,6 +1364,7 @@ dependencies = [
  "hex",
  "hmac",
  "lettre",
+ "libc",
  "ndarray 0.16.1",
  "openclaw_core",
  "openclaw_types",

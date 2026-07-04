@@ -39,6 +39,10 @@ rand = { workspace = true }
 # M3 metric emitter Sprint 2 Track A — sysinfo 0.32（workspace dep）採樣 process
 # 級 CPU/RSS/heartbeat/open_fd/thread/uptime 6 metric；對齊 Mac+Linux 跨平台。
 sysinfo = { workspace = true }
+# P1-10 probe_ledger rotation — flock(2) 跨語言輪轉鎖（與 Python fcntl.flock 對
+# 同一 lock inode 互斥）。libc 0.2.184 本就在 lock 樹內（transitive），此處提為
+# 直接依賴以使用 flock/LOCK_EX/LOCK_UN 常量；零新編譯成本，Unix-only 符合部署目標。
+libc = "=0.2.184"
 
 # EDGE-P3-1 ort backend — ONNX Runtime 1.24 Rust binding.
 # Required over tract-onnx: tract 0.21 implements TreeEnsembleClassifier but

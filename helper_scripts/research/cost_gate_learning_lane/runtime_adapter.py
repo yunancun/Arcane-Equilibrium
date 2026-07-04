@@ -28,6 +28,10 @@ from cost_gate_learning_lane.contract import (
     ELIGIBLE_REJECT_REASON_CODE,
     ORDER_AUTHORITY_GRANTED,
 )
+from cost_gate_learning_lane.ledger_rotation import (
+    maybe_rotate_ledger,
+    retained_ledger_files,
+)
 from cost_gate_learning_lane.outcome_writer import (
     ProbeOutcomeConfig,
     build_blocked_signal_outcome_records,
@@ -146,24 +150,36 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def read_jsonl_ledger(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
+    """讀取 retention 窗內的完整 ledger 視圖(輪轉段升冪 + 主檔)。
+
+    P1-10:輪轉後主檔只剩最新段,消費者的 dedup / outcome join 語義需要
+    retention 窗內全量行,故此處跨段讀;成本由 50MB 輪轉 + 14d retention 封頂
+    (修前為無界單檔全量讀)。逐行 streaming 讀,避免整檔 read_text 的雙倍峰值
+    記憶體。
+    """
     rows: list[dict[str, Any]] = []
-    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            row = json.loads(stripped)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"malformed JSONL ledger at {path}:{line_no}") from exc
-        if isinstance(row, dict):
-            rows.append(row)
+    for file_path in retained_ledger_files(path):
+        with file_path.open("r", encoding="utf-8") as fh:
+            for line_no, line in enumerate(fh, start=1):
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    row = json.loads(stripped)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(
+                        f"malformed JSONL ledger at {file_path}:{line_no}"
+                    ) from exc
+                if isinstance(row, dict):
+                    rows.append(row)
     return rows
 
 
 def append_jsonl_ledger(path: Path, row: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    # P1-10:append 前檢查輪轉(fast path 僅一次 stat)。輪轉細節與並發安全
+    # 論證見 ledger_rotation.py MODULE_NOTE。
+    maybe_rotate_ledger(path)
     with path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(row, ensure_ascii=False, sort_keys=True, default=str) + "\n")
 
