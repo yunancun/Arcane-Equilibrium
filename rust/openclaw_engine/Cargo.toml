@@ -59,6 +59,11 @@ sysinfo = { workspace = true }
 # default features 覆寫 tls-native → tls-rustls 避開 libssl-dev 系統依賴。
 ort = { version = "=2.0.0-rc.12", optional = true, default-features = false, features = ["std", "ndarray", "tracing", "download-binaries", "copy-dylibs", "api-24", "tls-rustls"] }
 
+# P0-1c boot/build SHA 可觀測面（2026-07-04）：build.rs 以 chrono 產生 UTC RFC3339
+# build 時間；git SHA 經 git CLI 取得（缺席 fallback "unknown"，不使 build 失敗）。
+[build-dependencies]
+chrono = { workspace = true }
+
 [dev-dependencies]
 tempfile = "3"
 # Sprint 1A-ζ Track B — M3 spike test 改採 observe_at 注入 std::time::Instant

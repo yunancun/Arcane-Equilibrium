@@ -1144,6 +1144,13 @@ pub(crate) fn consume_restart_sentinel_and_clear_live_auth_if_manual() -> Restar
 pub(crate) fn print_banner() {
     info!("==============================================");
     info!("  OpenClaw Engine v{}", VERSION);
+    // P0-1c：banner 打出編譯期嵌入的 git SHA + build 時間，讓「運行 binary 的
+    // 代碼世代」在 engine.log 首屏即可對表部署 HEAD（重啟未 rebuild 立即可見）。
+    info!(
+        "  Build: {} ({})",
+        openclaw_engine::boot_observability::BUILD_GIT_SHA,
+        openclaw_engine::boot_observability::BUILD_TIME
+    );
     info!("  Mode: Live_Ready | Execution: operator-gated");
     info!("  Bybit V5 Linear — Rust Trading Engine");
     info!("==============================================");
