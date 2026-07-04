@@ -546,7 +546,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--include-non-negative-edge", action="store_true")
     parser.add_argument("--risk-state", default="NORMAL")
     parser.add_argument("--max-plan-age-hours", type=int, default=24)
-    parser.add_argument("--min-failed-outcomes-to-disable", type=int, default=2)
+    # P2-7:CLI 默認與 RuntimeAdmissionConfig dataclass 同步(n≥8 才觸發 UCB-futility 禁用)。
+    parser.add_argument("--min-failed-outcomes-to-disable", type=int, default=8)
     parser.add_argument("--min-outcome-net-positive-pct", type=float, default=50.0)
     parser.add_argument("--min-avg-net-bps", type=float, default=0.0)
     parser.add_argument("--pg-statement-timeout-ms", type=int, default=180_000)

@@ -23,6 +23,8 @@
   "python_only": {
     "STANDING_DEMO_AUTHORIZATION_SCHEMA_VERSION": "standing_demo_operator_authorization_v1",
     "STANDING_DEMO_AUTHORIZATION_ACTIVE_STATUS": "STANDING_DEMO_AUTHORIZATION_ACTIVE",
-    "PROBE_ADMISSION_DECISION_RECORD_TYPE": "probe_admission_decision"
-  }
+    "PROBE_ADMISSION_DECISION_RECORD_TYPE": "probe_admission_decision",
+    "OUTCOME_ADAPTER_SCHEMA_VERSION": "cost_gate_demo_learning_lane_adapter_v2"
+  },
+  "_c4_schema_version_split_note": "C4(冷審計 R2):shared.ADAPTER_SCHEMA_VERSION=admission 面(probe_admission_decision/probe_capture_error),Rust↔Python 逐值 parity,形狀在 P1-2 未變故保 v1。P1-2 保守成本欄只落 outcome 面 record(probe_outcome/blocked_signal_outcome),由 Python 唯一寫入 → OUTCOME_ADAPTER_SCHEMA_VERSION=adapter_v2 列 python_only(Rust 不寫 outcome record 故非 shared)。下游不以 schema_version 字串 gate 立案(per-row cost_model_version=legacy_optimistic_v0 攔截),v1/v2 混寫向後相容。"
 }

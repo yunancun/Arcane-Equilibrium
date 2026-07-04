@@ -27,6 +27,7 @@ from cost_gate_learning_lane.contract import (
     BOUNDED_PROBE_OPERATOR_AUTHORIZATION_SCHEMA_VERSION,
     ELIGIBLE_REJECT_REASON_CODE,
     ORDER_AUTHORITY_GRANTED,
+    OUTCOME_ADAPTER_SCHEMA_VERSION,
 )
 from cost_gate_learning_lane.ledger_rotation import (
     maybe_rotate_ledger,
@@ -47,7 +48,11 @@ class RuntimeAdmissionConfig:
     """Runtime-side guardrails for probe admission decisions."""
 
     max_plan_age_hours: int = 24
-    min_failed_outcomes_to_disable: int = 2
+    # P2-7:n=2 對 ±75bps 效應量兩向都近擲硬幣(誤殺率 ~42%)=負淨貢獻 gate。UCB-futility
+    # 規則需 n≥8 才禁用;此常數是「觸發禁用檢定的最小樣本」,非 probe 預算。與 Rust
+    # AdmissionConfig::default() 逐值對齊(demo_learning_lane.rs)。
+    min_failed_outcomes_to_disable: int = 8
+    # P2-7 起 net_positive_pct 腿已從禁用規則刪除;此欄仍供 review/報表消費,不再 gate 禁用。
     min_outcome_net_positive_pct: float = 50.0
     min_avg_net_bps: float = 0.0
 
@@ -419,6 +424,14 @@ def summarize_side_cell_runtime_state(
         if outcome_count
         else None
     )
+    # P2-7:UCB-futility 禁用規則需樣本標準差(ddof=1)。n<2 無法估變異數 → None,
+    # 由下方退回純均值判準。與 Rust summarize_side_cell_runtime_state 逐值對齊。
+    std_net = None
+    if outcome_count >= 2 and avg_net is not None:
+        variance = sum((value - avg_net) ** 2 for value in realized_bps) / (
+            outcome_count - 1
+        )
+        std_net = math.sqrt(variance)
 
     manual_disable = next(
         (
@@ -427,21 +440,28 @@ def summarize_side_cell_runtime_state(
         ),
         None,
     )
+    # P2-7:UCB-futility 禁用規則。disable ⇔ n≥cfg ∧ (x̄ + z₀.₉₀·s/√n < min_avg_net_bps)。
+    # 為什麼 UCB 而非均值:n<20 下均值判準對 ±75bps 效應量兩向都近擲硬幣(誤殺率 ~42%);
+    # 加 90% 信賴上界後只在「連樂觀上界都為負」時才 futility 禁用(真 μ=+30 誤殺率降到 ~4%)。
+    # net_positive_pct 腿刪除:n<20 下比例判準更噪(Rust P2-7 已刪,兩側須同鍵同規則,
+    # 否則同 n=8 但不同規則 = 跨語言行為分歧,golden 只測常量會假綠)。
+    # z₀.₉₀ = 1.2815515655446004(標準常態 0.90 分位),與 demo_learning_lane.rs 逐值對齊。
+    _Z_090 = 1.281_551_565_544_600_4
+    ucb_futility = False
+    if outcome_count >= cfg.min_failed_outcomes_to_disable and avg_net is not None:
+        if std_net is not None:
+            ucb = avg_net + _Z_090 * std_net / math.sqrt(outcome_count)
+            ucb_futility = ucb < cfg.min_avg_net_bps
+        else:
+            # s 不可估(n<2)但已達門檻(僅在 min_failed_outcomes_to_disable=1 且 n=1 時):
+            # 退回純均值判準,避免無變異數時漏禁真負 cell。
+            ucb_futility = avg_net < cfg.min_avg_net_bps
     disable_reason = None
     if manual_disable is not None:
         disable_reason = _str(manual_disable.get("disable_reason")) or "manual_disable"
     elif remaining <= 0:
         disable_reason = "probe_budget_exhausted"
-    elif (
-        outcome_count >= cfg.min_failed_outcomes_to_disable
-        and (
-            (avg_net is not None and avg_net < cfg.min_avg_net_bps)
-            or (
-                net_positive_pct is not None
-                and net_positive_pct < cfg.min_outcome_net_positive_pct
-            )
-        )
-    ):
+    elif ucb_futility:
         disable_reason = "realized_probe_outcomes_fail_learning_threshold"
 
     return {
@@ -783,7 +803,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--context-id")
     parser.add_argument("--signal-id")
     parser.add_argument("--max-plan-age-hours", type=int, default=24)
-    parser.add_argument("--min-failed-outcomes-to-disable", type=int, default=2)
+    # P2-7:CLI 默認與 RuntimeAdmissionConfig dataclass 同步(n≥8 才觸發 UCB-futility 禁用)。
+    parser.add_argument("--min-failed-outcomes-to-disable", type=int, default=8)
     parser.add_argument("--min-outcome-net-positive-pct", type=float, default=50.0)
     parser.add_argument("--min-avg-net-bps", type=float, default=0.0)
     parser.add_argument("--outcome-horizon-minutes", type=int, default=60)
@@ -827,7 +848,8 @@ def main() -> int:
         for row in outcome_rows + blocked_outcome_rows:
             append_jsonl_ledger(args.ledger, row)
         payload = {
-            "schema_version": ADAPTER_SCHEMA_VERSION,
+            # batch 包裹 outcome 面 record → 用 outcome 面版本,與 base_row 一致。
+            "schema_version": OUTCOME_ADAPTER_SCHEMA_VERSION,
             "record_type": "probe_outcome_batch",
             "outcome_count": len(outcome_rows),
             "blocked_signal_outcome_count": len(blocked_outcome_rows),

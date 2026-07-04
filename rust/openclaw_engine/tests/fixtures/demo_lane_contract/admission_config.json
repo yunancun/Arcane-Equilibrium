@@ -1,8 +1,9 @@
 {
   "_comment": "C5 AdmissionConfig 默認值 + 範圍邊界 golden fixture。defaults 四值兩側逐值斷言。range_vectors：Rust AdmissionConfig::validate 必 reject（範圍外）；Python validate_runtime_config 對應斷言（Python RuntimeAdmissionConfig 只鏡像默認值、範圍驗證在 validate_runtime_config；NaN 為 Python 側單獨註記——見 python_note）。錨點 fix/authz-contract-0704。",
+  "_c5_p2_7_note": "C5(冷審計 R2):min_failed_outcomes_to_disable 由 2 升 8。P2-7 把禁用規則 UCB-futility 化(disable ⇔ n≥8 ∧ x̄+z₀.₉₀·s/√n<min_avg_net_bps),n=2 對 ±75bps 效應量兩向近擲硬幣(誤殺率 ~42%)為負淨貢獻 gate。Rust AdmissionConfig::default() 與 Python RuntimeAdmissionConfig/SealedHorizonEvidenceConfig 兩側 dataclass + CLI 默認 + 禁用規則本體同步為 UCB(net_positive_pct 腿兩側均刪)。",
   "defaults": {
     "max_plan_age_hours": 24,
-    "min_failed_outcomes_to_disable": 2,
+    "min_failed_outcomes_to_disable": 8,
     "min_outcome_net_positive_pct": 50.0,
     "min_avg_net_bps": 0.0
   },

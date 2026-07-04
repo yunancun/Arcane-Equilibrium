@@ -78,7 +78,9 @@ class SealedHorizonLearningEvidenceConfig:
     outcome_cost_bps: float = 4.0
     max_entry_delay_ms: int = 5 * 60_000
     max_plan_age_hours: int = 48
-    min_failed_outcomes_to_disable: int = 2
+    # P2-7:禁用規則 UCB-futility 化,n≥8 才觸發(n=2 誤殺率 ~42% 為負淨貢獻)。與
+    # RuntimeAdmissionConfig / Rust AdmissionConfig::default() 同步。
+    min_failed_outcomes_to_disable: int = 8
     min_outcome_net_positive_pct: float = 50.0
     min_avg_net_bps: float = 0.0
     min_review_outcomes_per_side_cell: int = 100
@@ -762,7 +764,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pg-timeframe", default="1m")
     parser.add_argument("--pg-statement-timeout-ms", type=int, default=180_000)
     parser.add_argument("--max-plan-age-hours", type=int, default=48)
-    parser.add_argument("--min-failed-outcomes-to-disable", type=int, default=2)
+    # P2-7:CLI 默認與 SealedHorizonEvidenceConfig / RuntimeAdmissionConfig 同步(n≥8)。
+    parser.add_argument("--min-failed-outcomes-to-disable", type=int, default=8)
     parser.add_argument("--min-outcome-net-positive-pct", type=float, default=50.0)
     parser.add_argument("--min-avg-net-bps", type=float, default=0.0)
     parser.add_argument("--min-review-outcomes-per-side-cell", type=int, default=100)

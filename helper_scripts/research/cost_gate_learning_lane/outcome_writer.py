@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import Any
 
 from cost_gate_learning_lane.contract import (
-    ADAPTER_SCHEMA_VERSION,
     ADMIT_DECISION,
     BLOCKED_SIGNAL_OUTCOME_RECORD_TYPE,
+    OUTCOME_ADAPTER_SCHEMA_VERSION,
     PROBE_ADMISSION_DECISION_RECORD_TYPE,
     PROBE_OUTCOME_RECORD_TYPE,
 )
@@ -376,7 +376,8 @@ def _build_markout_outcome_records(
         observations = _matching_observations(price_observations, symbol=symbol)
         last_observation_ts_ms = observations[-1][0] if observations else None
         base_row = {
-            "schema_version": ADAPTER_SCHEMA_VERSION,
+            # outcome 面 record 攜 v2(P1-2 保守成本欄);admission 面另用 ADAPTER_SCHEMA_VERSION。
+            "schema_version": OUTCOME_ADAPTER_SCHEMA_VERSION,
             "record_type": record_type,
             "generated_at_utc": now.isoformat(),
             "attempt_id": attempt_id,
