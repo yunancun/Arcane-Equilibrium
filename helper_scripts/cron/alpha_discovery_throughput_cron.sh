@@ -22,6 +22,16 @@ export OPENCLAW_BASE_DIR="${OPENCLAW_BASE_DIR:-$BASE}"
 export OPENCLAW_DATA_DIR="${OPENCLAW_DATA_DIR:-$DATA}"
 
 EXPECTED_SOURCE_HEAD="${OPENCLAW_EXPECTED_SOURCE_HEAD:-${OPENCLAW_COST_GATE_LEARNING_EXPECTED_HEAD:-${OPENCLAW_DEMO_LEARNING_STACK_EXPECTED_HEAD:-}}}"
+# P1-4 世代判準：raw pin 過公共庫轉 effective head（docs/tests/.codex 前進不凍
+# lane；真代碼漂移 / pin 檔壞 / git 失敗照舊 fail-close，語意見 lib 註釋）。
+# lib 檔缺失時降級為 passthrough（沿用 raw expected），不因缺 helper 硬崩 cron。
+SG_LIB="$BASE/helper_scripts/cron/lib/source_generation_gate.sh"
+if [[ -f "$SG_LIB" ]]; then
+    source "$SG_LIB"
+else
+    resolve_effective_expected_head() { printf '%s' "$4"; }
+fi
+EXPECTED_SOURCE_HEAD="$(resolve_effective_expected_head "$BASE" "$DATA" "alpha_discovery_throughput" "$EXPECTED_SOURCE_HEAD")"
 
 if [[ -d "$LOCK_DIR" ]] && [[ -n "$(find "$LOCK_DIR" -maxdepth 0 -mmin +20 2>/dev/null)" ]]; then
     echo "[$(ts)] WARN: stale lock (>20min) cleared: $LOCK_DIR" >> "$LOG"
