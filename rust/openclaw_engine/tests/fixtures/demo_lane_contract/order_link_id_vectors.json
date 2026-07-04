@@ -1,0 +1,206 @@
+{
+  "_comment": "C3 order_link_id 5 段格式 + FNV-1a lineage hash golden vectors。兩語言各自算 (side_cell,ctx,sig)->9位 base36 tag、以及整 id build/validate，逐值對 expected 斷言。FNV-1a offset=0xcbf29ce484222325 prime=0x100000001b3 分隔=0x1e(sc<->ctx)/0x1f(ctx<->sig) mod=36^9 base36 左補零至 9。錨點 fix/authz-contract-0704。",
+  "hash_vectors": [
+    {
+      "_note": "ASCII 基本組",
+      "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+      "context_id": "ctx-1",
+      "signal_id": "sig-1",
+      "expected_hash_tag": "qqv6cefzu"
+    },
+    {
+      "_note": "內嵌 pipe/underscore 的 key/ctx",
+      "side_cell_key": "grid_trading|BTCUSDT|Buy",
+      "context_id": "ctx_a_b",
+      "signal_id": "sig_x",
+      "expected_hash_tag": "lvehprvj3"
+    },
+    {
+      "_note": "UTF-8 多位元組——兩側均逐 byte，等價需執行證明(negative-space #1)",
+      "side_cell_key": "策略|BTCUSDT|Buy",
+      "context_id": "上下文",
+      "signal_id": "訊號",
+      "expected_hash_tag": "0tzkuvcuk"
+    },
+    {
+      "_note": "boundary-shift n1：ab|c|d",
+      "side_cell_key": "ab",
+      "context_id": "c",
+      "signal_id": "d",
+      "expected_hash_tag": "4j7u4sigm"
+    },
+    {
+      "_note": "boundary-shift n2：a|bc|d，必 != n1(正常字元跨欄界改 hash)",
+      "side_cell_key": "a",
+      "context_id": "bc",
+      "signal_id": "d",
+      "expected_hash_tag": "gkr9cqhrq"
+    },
+    {
+      "_note": "separator-collision A：side_cell 欄內含 0x1e(U+001E)；byte-stream = a 1e b 1e c 1f d",
+      "side_cell_key": "a\u001eb",
+      "context_id": "c",
+      "signal_id": "d",
+      "expected_hash_tag": "2mvp836a4"
+    },
+    {
+      "_note": "separator-collision B：ctx 欄含 0x1e；byte-stream 與 A 相同 -> hash == A(兩側共有行為，非跨語言分歧；見報告 finding E4X-1)",
+      "side_cell_key": "a",
+      "context_id": "b\u001ec",
+      "signal_id": "d",
+      "expected_hash_tag": "2mvp836a4"
+    },
+    {
+      "_note": "較長 lineage",
+      "side_cell_key": "some_strategy_name|SOLUSDT|Sell",
+      "context_id": "context-longer-id-0001",
+      "signal_id": "signal-longer-id-0002",
+      "expected_hash_tag": "akpatpduw"
+    }
+  ],
+  "build_vectors": [
+    {
+      "_note": "seq=1 最短",
+      "engine_mode": "demo",
+      "ts_ms": 1782037200000,
+      "seq": 1,
+      "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+      "context_id": "ctx-1",
+      "signal_id": "sig-1",
+      "expected_order_link_id": "oc_dm_1782037200000_1_qqv6cefzu"
+    },
+    {
+      "_note": "seq=MAX 邊界，整 id 剛好 36 字",
+      "engine_mode": "demo",
+      "ts_ms": 1782037200000,
+      "seq": 2176782335,
+      "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+      "context_id": "ctx-1",
+      "signal_id": "sig-1",
+      "expected_order_link_id": "oc_dm_1782037200000_zzzzzz_qqv6cefzu"
+    },
+    {
+      "_note": "live_demo -> ld",
+      "engine_mode": "live_demo",
+      "ts_ms": 1782037200000,
+      "seq": 42,
+      "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+      "context_id": "ctx-1",
+      "signal_id": "sig-1",
+      "expected_order_link_id": "oc_ld_1782037200000_16_qqv6cefzu"
+    }
+  ],
+  "invalid_build_vectors": [
+    {
+      "desc": "seq_zero",
+      "engine_mode": "demo",
+      "ts_ms": 1782037200000,
+      "seq": 0,
+      "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+      "context_id": "c",
+      "signal_id": "s"
+    },
+    {
+      "desc": "seq_over_max",
+      "engine_mode": "demo",
+      "ts_ms": 1782037200000,
+      "seq": 2176782336,
+      "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+      "context_id": "c",
+      "signal_id": "s"
+    },
+    {
+      "desc": "ts_zero",
+      "engine_mode": "demo",
+      "ts_ms": 0,
+      "seq": 1,
+      "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+      "context_id": "c",
+      "signal_id": "s"
+    },
+    {
+      "desc": "unknown_mode_paper",
+      "engine_mode": "paper",
+      "ts_ms": 1782037200000,
+      "seq": 1,
+      "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+      "context_id": "c",
+      "signal_id": "s"
+    },
+    {
+      "desc": "ctx_leading_space_unstable",
+      "engine_mode": "demo",
+      "ts_ms": 1782037200000,
+      "seq": 1,
+      "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+      "context_id": " c",
+      "signal_id": "s"
+    }
+  ],
+  "base36_roundtrip": [
+    {
+      "value": 1,
+      "base36": "1"
+    },
+    {
+      "value": 35,
+      "base36": "z"
+    },
+    {
+      "value": 36,
+      "base36": "10"
+    },
+    {
+      "value": 1295,
+      "base36": "zz"
+    },
+    {
+      "value": 2176782335,
+      "base36": "zzzzzz"
+    }
+  ],
+  "engine_mode_tag_matrix": [
+    {
+      "_note": "小寫規範輸入，兩側皆 dm",
+      "engine_mode": "demo",
+      "rust_tag": "dm",
+      "python_exact_tag": "dm",
+      "divergent": false
+    },
+    {
+      "_note": "live_demo，兩側皆 ld",
+      "engine_mode": "live_demo",
+      "rust_tag": "ld",
+      "python_exact_tag": "ld",
+      "divergent": false
+    },
+    {
+      "_note": "非法 mode，兩側皆拒",
+      "engine_mode": "paper",
+      "rust_tag": null,
+      "python_exact_tag": null,
+      "divergent": false
+    },
+    {
+      "_note": "F10 未修分歧(此分支)：Rust trim+lower -> dm；Python exact-dict -> null。db07df83b(p3-smalls) 合併後兩側統一為 dm",
+      "engine_mode": "Demo",
+      "rust_tag": "dm",
+      "python_exact_tag": null,
+      "divergent": true
+    },
+    {
+      "_note": "F10 未修分歧：Rust -> dm；Python -> null",
+      "engine_mode": "DEMO",
+      "rust_tag": "dm",
+      "python_exact_tag": null,
+      "divergent": true
+    },
+    {
+      "_note": "F10 未修分歧：Rust trim -> dm；Python -> null",
+      "engine_mode": " demo ",
+      "rust_tag": "dm",
+      "python_exact_tag": null,
+      "divergent": true
+    }
+  ]
+}

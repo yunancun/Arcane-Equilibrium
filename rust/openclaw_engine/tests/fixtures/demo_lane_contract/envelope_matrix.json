@@ -1,0 +1,477 @@
+{
+  "_comment": "C1 envelope 13-check 矩陣 golden fixture。單缺陷 reject + 全綠 accept + 邊界。rust_expected_reason 對 Rust validate_operator_authorization_envelope（envelope-core 順序）；python_expected_reason 對 Python _valid_operator_authorization（真 validator 現算，順序不同、expiry 合併，逐值釘死）。now_ms/now_utc 同鐘 2026-06-21T11:00:00Z。B2/B3 已於 fix/authz-contract-0704(5e89fb4e5) 統一到 Rust 嚴格側：naive expiry 兩側 reject、字串預算兩側 reject。錨點 fix/authz-contract-0704。",
+  "now_utc": "2026-06-21T11:00:00+00:00",
+  "now_ms": 1782039600000,
+  "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+  "single_defect_matrix": [
+    {
+      "name": "missing",
+      "envelope": {},
+      "expected_accept": false,
+      "rust_expected_reason": "operator_authorization_missing_for_order_authority",
+      "python_expected_reason": "operator_authorization_missing_for_order_authority"
+    },
+    {
+      "name": "schema_mismatch",
+      "envelope": {
+        "schema_version": "wrong_v9",
+        "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+        "authorization_id": "auth-xlang-001",
+        "operator_id": "operator-test",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "expires_at_utc": "2026-06-21T12:00:00+00:00",
+        "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+        "main_cost_gate_adjustment": "NONE",
+        "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+        "max_authorized_probe_orders": 2,
+        "probe_authority_granted": true,
+        "order_authority_granted": true,
+        "promotion_evidence": false
+      },
+      "expected_accept": false,
+      "rust_expected_reason": "operator_authorization_schema_mismatch",
+      "python_expected_reason": "operator_authorization_schema_mismatch"
+    },
+    {
+      "name": "status_not_authorized",
+      "envelope": {
+        "schema_version": "bounded_demo_probe_operator_authorization_v1",
+        "status": "PENDING",
+        "authorization_id": "auth-xlang-001",
+        "operator_id": "operator-test",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "expires_at_utc": "2026-06-21T12:00:00+00:00",
+        "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+        "main_cost_gate_adjustment": "NONE",
+        "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+        "max_authorized_probe_orders": 2,
+        "probe_authority_granted": true,
+        "order_authority_granted": true,
+        "promotion_evidence": false
+      },
+      "expected_accept": false,
+      "rust_expected_reason": "operator_authorization_status_not_authorized",
+      "python_expected_reason": "operator_authorization_status_not_authorized"
+    },
+    {
+      "name": "auth_id_missing",
+      "envelope": {
+        "schema_version": "bounded_demo_probe_operator_authorization_v1",
+        "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+        "authorization_id": "  ",
+        "operator_id": "operator-test",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "expires_at_utc": "2026-06-21T12:00:00+00:00",
+        "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+        "main_cost_gate_adjustment": "NONE",
+        "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+        "max_authorized_probe_orders": 2,
+        "probe_authority_granted": true,
+        "order_authority_granted": true,
+        "promotion_evidence": false
+      },
+      "expected_accept": false,
+      "rust_expected_reason": "operator_authorization_id_missing",
+      "python_expected_reason": "operator_authorization_id_missing"
+    },
+    {
+      "name": "operator_id_missing",
+      "envelope": {
+        "schema_version": "bounded_demo_probe_operator_authorization_v1",
+        "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+        "authorization_id": "auth-xlang-001",
+        "operator_id": "",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "expires_at_utc": "2026-06-21T12:00:00+00:00",
+        "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+        "main_cost_gate_adjustment": "NONE",
+        "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+        "max_authorized_probe_orders": 2,
+        "probe_authority_granted": true,
+        "order_authority_granted": true,
+        "promotion_evidence": false
+      },
+      "expected_accept": false,
+      "rust_expected_reason": "operator_authorization_operator_id_missing",
+      "python_expected_reason": "operator_authorization_operator_id_missing"
+    },
+    {
+      "name": "authority_path_not_ready",
+      "envelope": {
+        "schema_version": "bounded_demo_probe_operator_authorization_v1",
+        "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+        "authorization_id": "auth-xlang-001",
+        "operator_id": "operator-test",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "expires_at_utc": "2026-06-21T12:00:00+00:00",
+        "authority_path_readiness_status": "NOT_READY",
+        "main_cost_gate_adjustment": "NONE",
+        "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+        "max_authorized_probe_orders": 2,
+        "probe_authority_granted": true,
+        "order_authority_granted": true,
+        "promotion_evidence": false
+      },
+      "expected_accept": false,
+      "rust_expected_reason": "operator_authorization_authority_path_not_ready",
+      "python_expected_reason": "operator_authorization_authority_path_not_ready"
+    },
+    {
+      "name": "cost_gate_adjustment_not_none",
+      "envelope": {
+        "schema_version": "bounded_demo_probe_operator_authorization_v1",
+        "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+        "authorization_id": "auth-xlang-001",
+        "operator_id": "operator-test",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "expires_at_utc": "2026-06-21T12:00:00+00:00",
+        "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+        "main_cost_gate_adjustment": "RELAX",
+        "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+        "max_authorized_probe_orders": 2,
+        "probe_authority_granted": true,
+        "order_authority_granted": true,
+        "promotion_evidence": false
+      },
+      "expected_accept": false,
+      "rust_expected_reason": "operator_authorization_cost_gate_adjustment_not_none",
+      "python_expected_reason": "operator_authorization_cost_gate_adjustment_not_none"
+    },
+    {
+      "name": "order_authority_mismatch",
+      "envelope": {
+        "schema_version": "bounded_demo_probe_operator_authorization_v1",
+        "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+        "authorization_id": "auth-xlang-001",
+        "operator_id": "operator-test",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "expires_at_utc": "2026-06-21T12:00:00+00:00",
+        "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+        "main_cost_gate_adjustment": "NONE",
+        "order_authority": "DENIED",
+        "max_authorized_probe_orders": 2,
+        "probe_authority_granted": true,
+        "order_authority_granted": true,
+        "promotion_evidence": false
+      },
+      "expected_accept": false,
+      "rust_expected_reason": "operator_authorization_order_authority_mismatch",
+      "python_expected_reason": "operator_authorization_order_authority_mismatch"
+    },
+    {
+      "name": "probe_budget_missing",
+      "envelope": {
+        "schema_version": "bounded_demo_probe_operator_authorization_v1",
+        "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+        "authorization_id": "auth-xlang-001",
+        "operator_id": "operator-test",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "expires_at_utc": "2026-06-21T12:00:00+00:00",
+        "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+        "main_cost_gate_adjustment": "NONE",
+        "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+        "max_authorized_probe_orders": 0,
+        "probe_authority_granted": true,
+        "order_authority_granted": true,
+        "promotion_evidence": false
+      },
+      "expected_accept": false,
+      "rust_expected_reason": "operator_authorization_probe_budget_missing",
+      "python_expected_reason": "operator_authorization_probe_budget_missing"
+    },
+    {
+      "name": "probe_authority_not_granted",
+      "envelope": {
+        "schema_version": "bounded_demo_probe_operator_authorization_v1",
+        "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+        "authorization_id": "auth-xlang-001",
+        "operator_id": "operator-test",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "expires_at_utc": "2026-06-21T12:00:00+00:00",
+        "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+        "main_cost_gate_adjustment": "NONE",
+        "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+        "max_authorized_probe_orders": 2,
+        "probe_authority_granted": false,
+        "order_authority_granted": true,
+        "promotion_evidence": false
+      },
+      "expected_accept": false,
+      "rust_expected_reason": "operator_authorization_probe_authority_not_granted",
+      "python_expected_reason": "operator_authorization_probe_authority_not_granted"
+    },
+    {
+      "name": "order_authority_not_granted",
+      "envelope": {
+        "schema_version": "bounded_demo_probe_operator_authorization_v1",
+        "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+        "authorization_id": "auth-xlang-001",
+        "operator_id": "operator-test",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "expires_at_utc": "2026-06-21T12:00:00+00:00",
+        "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+        "main_cost_gate_adjustment": "NONE",
+        "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+        "max_authorized_probe_orders": 2,
+        "probe_authority_granted": true,
+        "order_authority_granted": false,
+        "promotion_evidence": false
+      },
+      "expected_accept": false,
+      "rust_expected_reason": "operator_authorization_order_authority_not_granted",
+      "python_expected_reason": "operator_authorization_order_authority_not_granted"
+    },
+    {
+      "name": "promotion_boundary_invalid",
+      "envelope": {
+        "schema_version": "bounded_demo_probe_operator_authorization_v1",
+        "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+        "authorization_id": "auth-xlang-001",
+        "operator_id": "operator-test",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "expires_at_utc": "2026-06-21T12:00:00+00:00",
+        "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+        "main_cost_gate_adjustment": "NONE",
+        "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+        "max_authorized_probe_orders": 2,
+        "probe_authority_granted": true,
+        "order_authority_granted": true,
+        "promotion_evidence": true
+      },
+      "expected_accept": false,
+      "rust_expected_reason": "operator_authorization_promotion_boundary_invalid",
+      "python_expected_reason": "operator_authorization_promotion_boundary_invalid"
+    },
+    {
+      "name": "expiry_missing",
+      "envelope": {
+        "schema_version": "bounded_demo_probe_operator_authorization_v1",
+        "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+        "authorization_id": "auth-xlang-001",
+        "operator_id": "operator-test",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+        "main_cost_gate_adjustment": "NONE",
+        "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+        "max_authorized_probe_orders": 2,
+        "probe_authority_granted": true,
+        "order_authority_granted": true,
+        "promotion_evidence": false
+      },
+      "expected_accept": false,
+      "rust_expected_reason": "operator_authorization_expiry_missing",
+      "python_expected_reason": "operator_authorization_expiry_missing_or_malformed"
+    }
+  ],
+  "accept_vector": {
+    "name": "all_green_accept",
+    "envelope": {
+      "schema_version": "bounded_demo_probe_operator_authorization_v1",
+      "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+      "authorization_id": "auth-xlang-001",
+      "operator_id": "operator-test",
+      "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+      "expires_at_utc": "2026-06-21T12:00:00+00:00",
+      "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+      "main_cost_gate_adjustment": "NONE",
+      "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+      "max_authorized_probe_orders": 2,
+      "probe_authority_granted": true,
+      "order_authority_granted": true,
+      "promotion_evidence": false
+    },
+    "expected_accept": true,
+    "rust_expected_reason": null,
+    "python_expected_reason": "operator_authorization_valid"
+  },
+  "boundary_vectors": [
+    {
+      "name": "expiry_naive_no_offset_reject",
+      "envelope": {
+        "schema_version": "bounded_demo_probe_operator_authorization_v1",
+        "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+        "authorization_id": "auth-xlang-001",
+        "operator_id": "operator-test",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "expires_at_utc": "2026-06-21T12:00:00",
+        "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+        "main_cost_gate_adjustment": "NONE",
+        "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+        "max_authorized_probe_orders": 2,
+        "probe_authority_granted": true,
+        "order_authority_granted": true,
+        "promotion_evidence": false
+      },
+      "expected_accept": false,
+      "rust_expected_reason": "operator_authorization_expiry_malformed",
+      "python_expected_reason": "operator_authorization_expiry_missing_or_malformed"
+    },
+    {
+      "name": "expiry_Z_suffix_accept",
+      "envelope": {
+        "schema_version": "bounded_demo_probe_operator_authorization_v1",
+        "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+        "authorization_id": "auth-xlang-001",
+        "operator_id": "operator-test",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "expires_at_utc": "2026-06-21T12:00:00Z",
+        "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+        "main_cost_gate_adjustment": "NONE",
+        "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+        "max_authorized_probe_orders": 2,
+        "probe_authority_granted": true,
+        "order_authority_granted": true,
+        "promotion_evidence": false
+      },
+      "expected_accept": true,
+      "rust_expected_reason": null,
+      "python_expected_reason": "operator_authorization_valid"
+    },
+    {
+      "name": "expiry_plus0000_accept",
+      "envelope": {
+        "schema_version": "bounded_demo_probe_operator_authorization_v1",
+        "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+        "authorization_id": "auth-xlang-001",
+        "operator_id": "operator-test",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "expires_at_utc": "2026-06-21T12:00:00+00:00",
+        "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+        "main_cost_gate_adjustment": "NONE",
+        "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+        "max_authorized_probe_orders": 2,
+        "probe_authority_granted": true,
+        "order_authority_granted": true,
+        "promotion_evidence": false
+      },
+      "expected_accept": true,
+      "rust_expected_reason": null,
+      "python_expected_reason": "operator_authorization_valid"
+    },
+    {
+      "name": "expiry_plus0800_equiv_1200Z_accept",
+      "envelope": {
+        "schema_version": "bounded_demo_probe_operator_authorization_v1",
+        "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+        "authorization_id": "auth-xlang-001",
+        "operator_id": "operator-test",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "expires_at_utc": "2026-06-21T20:00:00+08:00",
+        "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+        "main_cost_gate_adjustment": "NONE",
+        "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+        "max_authorized_probe_orders": 2,
+        "probe_authority_granted": true,
+        "order_authority_granted": true,
+        "promotion_evidence": false
+      },
+      "expected_accept": true,
+      "rust_expected_reason": null,
+      "python_expected_reason": "operator_authorization_valid"
+    },
+    {
+      "name": "expiry_equals_now_reject",
+      "envelope": {
+        "schema_version": "bounded_demo_probe_operator_authorization_v1",
+        "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+        "authorization_id": "auth-xlang-001",
+        "operator_id": "operator-test",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "expires_at_utc": "2026-06-21T11:00:00+00:00",
+        "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+        "main_cost_gate_adjustment": "NONE",
+        "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+        "max_authorized_probe_orders": 2,
+        "probe_authority_granted": true,
+        "order_authority_granted": true,
+        "promotion_evidence": false
+      },
+      "expected_accept": false,
+      "rust_expected_reason": "operator_authorization_expired",
+      "python_expected_reason": "operator_authorization_expired"
+    },
+    {
+      "name": "budget_zero_reject",
+      "envelope": {
+        "schema_version": "bounded_demo_probe_operator_authorization_v1",
+        "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+        "authorization_id": "auth-xlang-001",
+        "operator_id": "operator-test",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "expires_at_utc": "2026-06-21T12:00:00+00:00",
+        "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+        "main_cost_gate_adjustment": "NONE",
+        "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+        "max_authorized_probe_orders": 0,
+        "probe_authority_granted": true,
+        "order_authority_granted": true,
+        "promotion_evidence": false
+      },
+      "expected_accept": false,
+      "rust_expected_reason": "operator_authorization_probe_budget_missing",
+      "python_expected_reason": "operator_authorization_probe_budget_missing"
+    },
+    {
+      "name": "budget_string_5_reject",
+      "envelope": {
+        "schema_version": "bounded_demo_probe_operator_authorization_v1",
+        "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+        "authorization_id": "auth-xlang-001",
+        "operator_id": "operator-test",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "expires_at_utc": "2026-06-21T12:00:00+00:00",
+        "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+        "main_cost_gate_adjustment": "NONE",
+        "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+        "max_authorized_probe_orders": "5",
+        "probe_authority_granted": true,
+        "order_authority_granted": true,
+        "promotion_evidence": false
+      },
+      "expected_accept": false,
+      "rust_expected_reason": "operator_authorization_probe_budget_missing",
+      "python_expected_reason": "operator_authorization_probe_budget_missing"
+    },
+    {
+      "name": "promotion_evidence_missing_reject",
+      "envelope": {
+        "schema_version": "bounded_demo_probe_operator_authorization_v1",
+        "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+        "authorization_id": "auth-xlang-001",
+        "operator_id": "operator-test",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "expires_at_utc": "2026-06-21T12:00:00+00:00",
+        "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+        "main_cost_gate_adjustment": "NONE",
+        "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+        "max_authorized_probe_orders": 2,
+        "probe_authority_granted": true,
+        "order_authority_granted": true
+      },
+      "expected_accept": false,
+      "rust_expected_reason": "operator_authorization_promotion_boundary_invalid",
+      "python_expected_reason": "operator_authorization_promotion_boundary_invalid"
+    },
+    {
+      "name": "promotion_evidence_true_reject",
+      "envelope": {
+        "schema_version": "bounded_demo_probe_operator_authorization_v1",
+        "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+        "authorization_id": "auth-xlang-001",
+        "operator_id": "operator-test",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "expires_at_utc": "2026-06-21T12:00:00+00:00",
+        "authority_path_readiness_status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+        "main_cost_gate_adjustment": "NONE",
+        "order_authority": "DEMO_LEARNING_PROBE_GRANTED",
+        "max_authorized_probe_orders": 2,
+        "probe_authority_granted": true,
+        "order_authority_granted": true,
+        "promotion_evidence": true
+      },
+      "expected_accept": false,
+      "rust_expected_reason": "operator_authorization_promotion_boundary_invalid",
+      "python_expected_reason": "operator_authorization_promotion_boundary_invalid"
+    }
+  ]
+}
