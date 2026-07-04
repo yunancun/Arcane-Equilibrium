@@ -18,7 +18,7 @@
 > **SSOT 規則 / SSOT Rule**：本檔為 Bybit endpoint 唯一字典；新增/修改端點時 **同 commit** 更新本檔。
 > This file is the single source of truth for Bybit endpoints; add/modify endpoints in same commit as dictionary update.
 
-**版本**: v1.5 | **日期**: 2026-04-04（SSOT 標記 + confirm-mmr 路徑修正：2026-04-26；F-27 字典 drift 修正：2026-05-09；EDGE-P2-3 Phase 1b close-maker-first 6 處更新：2026-05-16 Wave 3b BB1；**Funding Rate 公式 + upperFundingRate/lowerFundingRate/fundingInterval cap 欄位段補 + kline×6 doc drift 標 cleanup debt：2026-05-31 TW per BB curl 實查**；**Alpha-Evidence governance note：Bybit market endpoints are raw state inputs, not prediction oracle，2026-05-31 PM**）| **審計**: BB+E5+PA 三輪通過 + TW G9-01 路徑修正 + BB Wave 3b 6 處更新 + BB 2026-05-31 funding cap 實查
+**版本**: v1.6 | **日期**: 2026-04-04（SSOT 標記 + confirm-mmr 路徑修正：2026-04-26；F-27 字典 drift 修正：2026-05-09；EDGE-P2-3 Phase 1b close-maker-first 6 處更新：2026-05-16 Wave 3b BB1；**Funding Rate 公式 + upperFundingRate/lowerFundingRate/fundingInterval cap 欄位段補 + kline×6 doc drift 標 cleanup debt：2026-05-31 TW per BB curl 實查**；**Alpha-Evidence governance note：Bybit market endpoints are raw state inputs, not prediction oracle，2026-05-31 PM**；**§4.1 rate-limit 第三輪勘誤 ERR-1~9：per-endpoint × per-UID 滾動窗取代「Order/Position/Account 分組 20 req/s shared quota」舊模型，2026-07-04 TW per BB P1-6 官方頁實抓**）| **審計**: BB+E5+PA 三輪通過 + TW G9-01 路徑修正 + BB Wave 3b 6 處更新 + BB 2026-05-31 funding cap 實查 + BB 2026-07-04 rate-limit per-endpoint 勘誤
 
 ---
 
@@ -328,7 +328,7 @@ F = clamp[ P + clamp(I − P, ±0.05%), upperFundingRate, lowerFundingRate ]
 
 ### 1.2 Orders — `order_manager.rs`
 
-Rate Group: **Order**（V5 預設 20 req/s per UID；Order group 與 cancel/amend/execution.* 共用 quota，詳 §4.1）。
+Rate Group: **Order**（內部分組名；Bybit 官方為 per-endpoint per-UID：create / amend / cancel / cancel-all（linear）各 **10 req/s** 獨立額度、execution/list 50 req/s，詳 §4.1）。
 Client 創建：`OrderManager::new(client: Arc<BybitRestClient>, instruments: Arc<InstrumentInfoCache>)`
 
 核心枚舉：
@@ -516,7 +516,7 @@ Bybit V5 `POST /v5/order/create` request body 中 `time_in_force=PostOnly` 與 `
 
 ### 1.3 Batch Orders — `batch_order_manager.rs`
 
-Rate Group: **Order**。一次最多 10 筆。
+Rate Group: **Order**（內部分組名）。一次最多 10 筆。官方 batch 端點有**獨立額度**（create-batch linear 10 req/s，不與單筆 create 共用；消耗數 = 請求數 × 單請求內訂單數，超限部分失敗、未超限部分成功），詳 §4.1。
 Client 創建：`BatchOrderManager::new(client: Arc<BybitRestClient>)`
 
 ---
@@ -563,7 +563,7 @@ Client 創建：`BatchOrderManager::new(client: Arc<BybitRestClient>)`
 
 ### 1.4 Positions — `position_manager.rs`
 
-Rate Group: **Position** (10 req/s)。
+Rate Group: **Position**（內部分組名；官方 per-endpoint：position/list、closed-pnl 各 **50 req/s**；set-leverage、trading-stop、confirm-pending-mmr 各 10 req/s，詳 §4.1）。
 Client 創建：`PositionManager::new(client: Arc<BybitRestClient>)`
 
 ---
@@ -707,7 +707,7 @@ Client 創建：`PositionManager::new(client: Arc<BybitRestClient>)`
 
 ### 1.5 Account — `account_manager.rs`
 
-Rate Group: **Account** (10 req/s)。
+Rate Group: **Account**（內部分組名；官方 per-endpoint：wallet-balance、account/info 各 **50 req/s**；fee-rate **5 req/s**；transaction-log 25 req/s，詳 §4.1）。
 Client 創建：`AccountManager::new()` — 無需 Arc<BybitRestClient>，在調用時傳入。
 內建緩存：錢包餘額和手續費率會在 refresh 後緩存，可通過 `usdt_equity()` 等方法零延遲讀取。
 
@@ -939,7 +939,7 @@ Client 創建：`PlatformClient::new(client: Arc<BybitRestClient>)`
 
 ### 1.7 Spot Margin — `spot_margin_client.rs`
 
-Rate Group: **Asset** (5 req/s)。所有端點使用 UTA (Unified Trading Account) 路徑。
+Rate Group: **Asset**（內部分組名，engine 以保守 5 req/s seed 追蹤；官方 spot-margin/asset 端點各有獨立且不均一的額度——spot-margin POST 類多為 5 req/s、GET 類 50 req/s，詳 §4.1）。所有端點使用 UTA (Unified Trading Account) 路徑。
 Client 創建：`SpotMarginClient::new(client: Arc<BybitRestClient>)`
 
 ---
@@ -1316,25 +1316,34 @@ pub struct ShadowOrderRequest {
 
 ### 4.1 Rate Limit 分組
 
-> **2026-04-20 EDGE-P2-3 Phase 1B-1 更新**：Bybit V5 當前 Order/Position/Account 分組預設上限為 **20 req/s**（非 10 req/s）；本表同步。實際上限按 UID/VIP 層級另有調整，以帳戶 `/v5/account/info` 為準。
+> **2026-07-04 BB P1-6 勘誤(第三輪;廢止 2026-04-20 與 2026-05-16 兩則舊註)**:Bybit V5 rate limit 是 **per-endpoint × per-UID 的 1 秒滾動窗**(官方原文 "The API rate limit is based on the rolling time window per second and UID"),**不存在「Order/Position/Account 分組共用 quota」**。舊註三項皆誤:「Order/Position/Account 預設 20 req/s」錯、「Order group shared quota」錯、「Cancel API 沒有獨立 budget」錯(cancel / cancel-all / amend / *-batch 各自有獨立 per-endpoint 額度)。runtime 真值權威 = 每個 response 的 `X-Bapi-Limit`(當前端點上限)/ `X-Bapi-Limit-Status`(剩餘)/ `X-Bapi-Limit-Reset-Timestamp`,**非** `/v5/account/info`;上限可隨 VIP/Pro 層級提升(官方 rate-limit 子頁 rules-for-vips / rules-for-pros)。出處:https://bybit-exchange.github.io/docs/v5/rate-limit(2026-07-04 抓取,raw HTML 逐格解析)。
 >
-> **2026-05-16 EDGE-P2-3 Phase 1b BB-SF-1 補錄**：**Order group 20 req/s per UID 是 shared quota** — `POST /v5/order/create` / `POST /v5/order/cancel` / `POST /v5/order/cancel-all` / `POST /v5/order/amend` / `POST /v5/order/create-batch` 全在同一 quota 內計入，**非** per-symbol cap、**非** per-endpoint cap。Cancel API 沒有獨立 rate limit budget，緊急 kill-switch（cancel-all + close-position 序列）必算入 Order group 餘額。
+> **官方為 per-endpoint 獨立額度(2026-07-04 勘誤,取代 2026-05-16 BB-SF-1 shared-quota 舊說)**:`create` / `amend` / `cancel` / `cancel-all` / `create-batch` **各自獨立計額**(linear 各 10 req/s,可升級;cancel-all 在 option=1/s、spot=20/s),彼此不擠佔;batch 端點另有獨立額度且消耗數=請求數×單請求訂單數(超限部分失敗、未超限部分成功)。engine 內部 `RateLimitGroup` 把同前綴端點合併為一個本地計數器(cold-start seed:Order/Position/Account=10、Market=120、Asset=5、Other=10,`bybit_rest_client.rs:297-302`),是**比官方更保守的內部近似**——每次 response 後由該端點的 X-Bapi-* header 覆寫組剩餘值,實際退避跟隨官方 per-endpoint 真值,seed 僅冷啟動兜底。
 >
-> **close-maker-first kill-switch budget 估算**（per BB Wave 3a re-review §4.2 + memory 2026-05-10 W1+W2 baseline）：
-> - close-maker-first 增量：worst case 全 fallback to taker = 1 cancel + 1 market re-dispatch per close ≈ 0.017 req/s
-> - burst 5s window：25 sym 同時 timeout = 25 cancel + 25 market re-dispatch = 50 req / 5s = 10 req/s（vs Order group 20 r/s 50% 餘裕）
-> - vs Order group 20 r/s = 0.085% 利用率（無 throttle 風險）
-> - LG-3 `/kill` IMPL（per BB 2026-05-11 caveat 2/4）必走「per-symbol 序列化 cancel-all → close-position → revoke」順序，每 step 0.3s safety margin 防 burst 觸 cap
+> **close-maker-first kill-switch budget(per-endpoint 模型重算,2026-07-04)**:
+> - close-maker-first 增量:worst case 全 fallback to taker = 1 cancel + 1 market re-dispatch per close ≈ 0.017 req/s(可忽略)
+> - burst 5s window:25 sym 同時 timeout = 25 `order/cancel` + 25 `order/create` / 5s = **每端點 5 req/s = 各自 10 req/s 上限的 50%**;cancel 與 create 是兩個互不佔額的端點,比舊 shared-pool 假設更寬
+> - LG-3 `/kill` 序列(per-symbol `cancel-all` → close `create` → revoke,每 step 0.3s safety margin):25 symbol 全量 ≥7.5s 完成,各端點 ≈3.3 req/s ≈ 33% 利用率;`cancel-all` 自身有獨立 10 req/s(linear)額度,**不吃** create/cancel 額度
+> - 結論:kill-switch 與 close-maker-first 在 per-endpoint 模型下餘裕比舊估算更大,無 throttle 風險;0.3s per-step safety margin 保留
 
-| Group | 上限（V5 基礎） | 適用路徑 | 備註 |
-|-------|------|---------|------|
-| Order | 20 req/s | `/v5/order/*`, `/v5/execution/*` | **shared quota**：create / cancel / cancel-all / amend / batch / execution.* 共用 |
-| Position | 20 req/s | `/v5/position/*` | confirm-pending-mmr / set-leverage / set-trading-stop 等共用 |
-| Account | 20 req/s | `/v5/account/*` | wallet-balance / fee-rate / info 共用 |
-| Market | 120 req/s | `/v5/market/*`, `/v5/spot-lever-token/*` | per IP 端 600/5s |
-| Asset | 5 req/s | `/v5/asset/*`, `/v5/spot-margin*` | 含 transfer / coin-info / borrow |
-| Other | 10 req/s | 其餘 | UTA 升級 / dcp 等 |
-| Announcement | 無 per-UID group（public） | `/v5/announcements/index` | 僅 per-IP 600 req/5s；哨兵 1 req/30min，≈0.0001% |
+| Endpoint(linear, UTA)| 官方上限(2026-07-04 官方頁實抓)| 可升級 | 內部 RateLimitGroup(seed) |
+|---|---|---|---|
+| `POST /v5/order/create` | **10 req/s** | Y(VIP/Pro)| Order(10)|
+| `POST /v5/order/amend` | 10 req/s | Y | Order(10)|
+| `POST /v5/order/cancel` | **10 req/s(獨立額度)** | Y | Order(10)|
+| `POST /v5/order/cancel-all` | **10 req/s(獨立額度;option 1/s、spot 20/s)** | Y | Order(10)|
+| `POST /v5/order/create-batch`(amend/cancel-batch 同)| 10 req/s(獨立額度;消耗=請求數×訂單數)| Y | Order(10)|
+| `GET /v5/order/realtime` / `order/history` / `execution/list` | 50 req/s | N | Order(10,保守)|
+| `GET /v5/position/list` / `position/closed-pnl` | **50 req/s** | N | Position(10,保守)|
+| `POST /v5/position/set-leverage` / `trading-stop` / `confirm-pending-mmr` | 10 req/s | N | Position(10)|
+| `GET /v5/account/wallet-balance` / `account/info` | **50 req/s** | N | Account(10,保守)|
+| `GET /v5/account/transaction-log` | 25 req/s(2026-05-21 changelog 50→25)| N | Account(10)|
+| `GET /v5/account/fee-rate` | **5 req/s** | N | Account(10;此端點官方比 seed 嚴,靠 header 覆寫收斂)|
+| `/v5/market/*`(public)| 無 per-UID 上限;僅 per-IP 600 req/5s | — | Market(120)|
+| `/v5/asset/*` / `/v5/spot-margin*` / `/v5/earn/*` | per-endpoint 不均一(coin/query-info 5/s、fundinghistory 30/s、inter-transfer 60 req/min;spot-margin POST 多 5/s、GET 50/s)| 部分 | Asset(5,保守)|
+| `GET /v5/announcements/index`(public)| 無 per-UID;僅 per-IP 600 req/5s;哨兵 1 req/30min ≈0.0001% | — | 不經簽名 client |
+
+per-IP 總閘:600 req/5s(違反 → HTTP 403 "access too frequent",終止所有 session 等 ≥10min 自動解封)。WS:≤500 connections/5min per IP;market data 另限 1,000 connections per IP(Spot/Linear/Inverse/Options 分開計)。官方表頭現僅列 UTA2.0 Pro 帳戶型號(classic/UTA1.0 欄已裁撤);OpenClaw(UTA, linear)按 linear 欄。
 
 分組追蹤：`RateLimitGroup::from_path(path)` 自動分類。
 查詢剩餘：`client.is_group_near_limit(group, threshold)` / `client.rate_limit_remaining()`

@@ -1,15 +1,21 @@
 # L2 Advisory Mesh — TODO
 
-> **ACTIVE-TAIL MIRRORED / NOT THE ACTIVE QUEUE**
+> **ACTIVE-TAIL 錨點斷鏈修復（2026-07-04 TW per R4 cold-audit R2）/ NOT THE ACTIVE QUEUE**
 >
 > 本文件保留 L2 Advisory Mesh 的专题 ledger、phase checklist 与设计证据指针。
-> 当前全仓 active dispatch queue 只以 `TODO.md` 为准；L2 未闭尾巴已镜像到
-> `TODO.md` row `P1-L2-ADVISORY-MESH-TAILS`。后续 agent 不得只从本文件派工、
+> 当前全仓 active dispatch queue 只以 `TODO.md` 为准；后续 agent 不得只从本文件派工、
 > 标 completed archive，或绕过 `TODO.md` 的 gate / operator action。
+>
+> **斷鏈事實**：原鏡像 `TODO.md` row `P1-L2-ADVISORY-MESH-TAILS` 已於 2026-06-26 v530
+> TODO 精簡波**被刪除（非閉合）**，該 row 現不存在於 `TODO.md`。L2 唯一未閉尾巴 = **E2E-1**
+> （真 `diagnose_leak` → 真 Ollama → 真 `agent.l2_calls` row 的 true distillation model-call
+> 證據；operator-gated，雙閘不變）。在 operator/PM 於 `TODO.md` 重建 active row 之前，
+> 此尾巴的唯一權威錨點 = 本檔 §2「owed（operator-gated）」+ L2 弧報告；不得因 TODO.md
+> 無 row 而視為已閉。**owed（doc governance）**：`TODO.md` 重登 L2 E2E-1 row（owner=PM/operator）。
 
 **版本** v1 ｜ **日期** 2026-06-05 ｜ 設計 = v4-final（0 CRITICAL · 2 BLOCKER 已閉）｜ gating = **B1/M1/M2 ENDORSED**
 
-**最新活化鏡像（2026-06-13）**：V138/V139 runtime activation、B1/B2 memory seed、manual V140、L2 daily cron、`bge-m3` embedding backfill 均已完成；`agent.agent_memory`=99、embedding_pending=0、meta=`ollama|bge-m3|1024`、Linux `[83]-[89]` PASS。剩餘 active tail 以根 `TODO.md` 的 `P1-L2-ADVISORY-MESH-TAILS` 為準：first non-empty material day / E2E true distillation model-call evidence、B3 recall injection、P2p/P5。
+**最新活化鏡像（2026-06-13）**：V138/V139 runtime activation、B1/B2 memory seed、manual V140、L2 daily cron、`bge-m3` embedding backfill 均已完成；`agent.agent_memory`=99、embedding_pending=0、meta=`ollama|bge-m3|1024`、Linux `[83]-[89]` PASS。剩餘 active tail（原以根 `TODO.md` row `P1-L2-ADVISORY-MESH-TAILS` 為準，該 row 已於 2026-06-26 v530 被刪除非閉——見檔首斷鏈修復 banner）：first non-empty material day / E2E true distillation model-call evidence、B3 recall injection、P2p/P5。錨點暫由本檔 §2 owed 承接，待 `TODO.md` 重登。
 
 **狀態**：本檔是專題 ledger / 歷史派工存根；最新 active dispatch 不從此處派發，必須讀根 `TODO.md`。
 **SSOT 連結**：
