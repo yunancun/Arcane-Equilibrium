@@ -147,6 +147,7 @@ Top-level archive 檔名索引如下；完整歷史語義仍以 `_indexes/docume
 - `2026-05-31--todo_v93_pre_aeg_cleanup_archive.md`
 - `2026-06-03--todo_v110_pre_cleanup_archive.md`
 - `2026-06-10--skills_todo_audit_closed.md`
+- `2026-07-04--todo_v738_pre_slim_archive.md`
 - `README.md`
 
 ---
