@@ -759,6 +759,49 @@ async def reset_drawdown_baseline(
             # + ALLOW_MAINNET + secret-slot）一律必過，**只**豁免第 5 門 (signed-auth)。
             # operator-role 已於上方 (:676) 強制檢查，這裡再由 four_gates_minus_authz_ok
             # 的 Gate 1 重複確認（override 永不繞 operator-role）。
+            #
+            # OOS-3：override 只供 live-halt-recovery。把「override 僅供 halt-recovery」
+            # 從註釋收斂成強制不變量——override 分支起始先驗系統是否真處 live-halt 態，
+            # 權威取 Rust runtime status IPC（get_risk_runtime_status engine="live"），
+            # 非讀 snapshot 檔（避 TOCTOU）。非 halt 態 → override 也 409 拒（此時應走
+            # signed-auth renew，不該用 override 降 baseline）。讀取失敗 → fail-closed 拒
+            # （讀不到 halt 態時放行 override = 繞過最小豁免的前提；此時 operator 應走
+            # signed-auth renew，不因讀失敗把 override 打開）。
+            _halt_client = await _get_risk_view_client()
+            halted = await _halt_client.live_session_halted()
+            if halted is None:
+                logger.warning(
+                    "Live drawdown-baseline reset BLOCKED (override halt-state unreadable): "
+                    "actor=%s",
+                    getattr(actor, "actor_id", "unknown"),
+                )
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "live_halt_state_unavailable",
+                        "message": "Live drawdown-baseline reset (override) blocked — could "
+                                   "not read authoritative live halt state from the engine. "
+                                   "Override is fail-closed when halt state is unknown; renew "
+                                   "signed authorization instead.",
+                    },
+                )
+            if not halted:
+                logger.warning(
+                    "Live drawdown-baseline reset BLOCKED (override outside halt state): "
+                    "actor=%s",
+                    getattr(actor, "actor_id", "unknown"),
+                )
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "not_in_live_halt",
+                        "message": "Live drawdown-baseline reset (override) blocked — the live "
+                                   "engine is not in a halt state. Override is reserved for "
+                                   "halt-recovery only; use a signed-auth renew for normal "
+                                   "live resets.",
+                    },
+                )
+
             ok, reason_codes = live_preflight.four_gates_minus_authz_ok(actor)
             if not ok:
                 logger.warning(

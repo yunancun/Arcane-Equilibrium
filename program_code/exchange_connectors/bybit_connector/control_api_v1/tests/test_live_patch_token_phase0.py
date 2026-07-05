@@ -184,6 +184,86 @@ class TestGeneralizedMintInterop(unittest.TestCase):
                 self.assertEqual(out["live_authz_token"], expect, f"{method} bind mismatch")
 
 
+class TestOos4DefensiveInputHygiene(unittest.TestCase):
+    """OOS-4：call_params_with_token / _attach_live_token_if_live 的純防禦輸入衛生。
+
+    不改授權分工、不改行為（現有合法 caller happy-path 不變）；只驗輸入形狀：
+    method ∈ LIVE_WRITE_METHODS、engine ∈ {live,demo,paper}、params 為 dict；違反 raise。
+    """
+
+    def _resolve_rust_live_authz(self):
+        """定位 rust/openclaw_engine/src/ipc_server/live_authz.rs（禁硬編碼機器路徑）。
+        repo root = srv = parents[5]（tests→control_api_v1→bybit_connector→
+        exchange_connectors→program_code→srv），退化向上找含該檔的祖先。"""
+        from pathlib import Path  # noqa: PLC0415
+
+        rel = Path("rust") / "openclaw_engine" / "src" / "ipc_server" / "live_authz.rs"
+        primary = Path(__file__).resolve().parents[5] / rel
+        if primary.exists():
+            return primary
+        for anc in Path(__file__).resolve().parents:
+            cand = anc / rel
+            if cand.exists():
+                return cand
+        return None
+
+    def test_python_whitelist_matches_rust_live_authz(self) -> None:
+        """硬要求：Python LIVE_WRITE_METHODS 逐字等於 Rust live_authz.rs 白名單。
+        兩邊分歧 = 治理債（某 method 一側可鑄、另一側判非 live-write）。"""
+        import re  # noqa: PLC0415
+
+        rust_path = self._resolve_rust_live_authz()
+        if rust_path is None:
+            self.skipTest("rust/openclaw_engine live_authz.rs 不可達（odd cwd / 目錄重排）")
+        text = rust_path.read_text(encoding="utf-8")
+        m = re.search(r"LIVE_WRITE_METHODS[^=]*=\s*&\[(.*?)\];", text, re.DOTALL)
+        self.assertIsNotNone(m, "無法定位 Rust LIVE_WRITE_METHODS 陣列")
+        rust_methods = set(re.findall(r'"([a-z_]+)"', m.group(1)))
+        self.assertEqual(
+            set(lpt.LIVE_WRITE_METHODS),
+            rust_methods,
+            "Python LIVE_WRITE_METHODS 與 Rust live_authz.rs 分歧——兩檔須同步",
+        )
+
+    def test_non_whitelisted_method_raises(self) -> None:
+        with patch.dict(os.environ, {"OPENCLAW_LIVE_PATCH_SECRET": "s"}):
+            with self.assertRaises(ValueError):
+                lpt.call_params_with_token("not_a_live_write_method", {"engine": "live"})
+
+    def test_illegal_engine_raises(self) -> None:
+        with patch.dict(os.environ, {"OPENCLAW_LIVE_PATCH_SECRET": "s"}):
+            with self.assertRaises(ValueError):
+                lpt.call_params_with_token("resume_paper", {"engine": "mainnet"})
+
+    def test_params_not_dict_raises(self) -> None:
+        with patch.dict(os.environ, {"OPENCLAW_LIVE_PATCH_SECRET": "s"}):
+            with self.assertRaises(ValueError):
+                lpt.call_params_with_token("resume_paper", ["engine", "live"])  # type: ignore[arg-type]
+
+    def test_happy_path_still_mints(self) -> None:
+        """現有合法 live method + engine=="live" + dict → 仍正常鑄 token（行為不變）。"""
+        with patch.dict(os.environ, {"OPENCLAW_LIVE_PATCH_SECRET": "s"}):
+            out = lpt.call_params_with_token("reset_drawdown_baseline", {"engine": "live"})
+        self.assertIn("live_authz_token", out)
+        self.assertEqual(out["engine"], "live")
+
+    def test_attach_helper_rejects_non_whitelisted_live_method(self) -> None:
+        """_attach_live_token_if_live 命名入口：engine=="live" 但 method 非白名單 → raise。"""
+        from app.risk_view_client import _attach_live_token_if_live  # noqa: PLC0415
+
+        with patch.dict(os.environ, {"OPENCLAW_LIVE_PATCH_SECRET": "s"}):
+            with self.assertRaises(ValueError):
+                _attach_live_token_if_live("bogus_method", {"engine": "live"})
+
+    def test_attach_helper_passthrough_non_live_unchanged(self) -> None:
+        """demo/paper/缺 engine/非 dict → 原樣回傳（pass-through 不變，不 raise）。"""
+        from app.risk_view_client import _attach_live_token_if_live  # noqa: PLC0415
+
+        self.assertEqual(_attach_live_token_if_live("resume_paper", {"engine": "demo"}), {"engine": "demo"})
+        self.assertIsNone(_attach_live_token_if_live("resume_paper", None))
+        self.assertEqual(_attach_live_token_if_live("resume_paper", {}), {})
+
+
 # ── Route-level tests ─────────────────────────────────────────────────────────
 
 

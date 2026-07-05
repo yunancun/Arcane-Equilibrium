@@ -36,6 +36,37 @@ from typing import Any
 _SECRET_ENV = "OPENCLAW_LIVE_PATCH_SECRET"
 _SECRET_FILE_ENV = "OPENCLAW_LIVE_PATCH_SECRET_FILE"
 
+# OOS-4：LIVE_WRITE_METHODS 白名單，逐字鏡像 Rust
+# rust/openclaw_engine/src/ipc_server/live_authz.rs::LIVE_WRITE_METHODS。
+# 為何在此鏡像：本模塊是 Python authorizer 側鑄 token 的唯一入口，鑄 token 即
+# 「宣稱這是一個 live-write method」。純防禦——若未來 caller 誤把非 live-write
+# method 送進鑄造路徑（typo / 錯接），寧可 fail-loud raise 也不鑄出一個綁到
+# 未知 method 的 token（Rust chokepoint 端本就會拒，但在 Python 側早擋更快定位）。
+# 不改授權分工：caller 仍負責過自己的 5-gate / operator gate；本白名單只做輸入
+# 衛生，不驗 caller 是否 operator-gated。與 Rust 同步是硬要求：兩邊清單分歧會讓
+# 某 method 一側可鑄、另一側判非 live-write，屬治理債，改動時兩檔須同步。
+LIVE_WRITE_METHODS: frozenset[str] = frozenset(
+    {
+        "patch_risk_config",
+        "update_risk_config",
+        "force_governor_tier_looser",
+        "force_governor_tier_tighter",
+        "set_dynamic_risk_enabled",
+        "restore_exit_config_defaults",
+        "reset_drawdown_baseline",
+        "clear_consecutive_losses",
+        "set_strategy_active",
+        "update_strategy_params",
+        "pause_paper",
+        "resume_paper",
+        "reset_paper_state",
+    }
+)
+
+# OOS-4：engine 值白名單（Rust dispatch 對 engine 的合法解析域）。鑄 token 路徑
+# 只在 engine=="live" 觸達，但作為純防禦仍限定合法 engine 域，攔 typo / 注入型字串。
+_ALLOWED_ENGINES: frozenset[str] = frozenset({"live", "demo", "paper"})
+
 # US (Unit Separator, 0x1f) — bind-string 欄位分隔符（與 Rust live_authz.rs US 對齊）。
 _US = b"\x1f"
 
@@ -253,5 +284,24 @@ def call_params_with_token(method: str, params: dict[str, Any]) -> dict[str, Any
     Returns: ``params`` 的淺拷貝 + 三 token 欄。
     fail-closed：secret 缺 → raise（無 token 不可能鑄）。
     """
+    # OOS-4 純防禦輸入衛生（不改行為：現有 caller 皆傳合法 method + engine=="live" +
+    # dict params，happy-path 不變）。違反 → raise，因為鑄出綁到非法 method/engine 的
+    # token 是「假授權」型缺陷（下游 Rust 端雖也會拒，但在 authorizer 側早擋更快定位、
+    # 不浪費一個 nonce）。此處只驗輸入形狀，不驗 caller 是否 operator-gated（那是 caller
+    # 職責、亦是 defer 的結構解）。
+    if not isinstance(params, dict):
+        raise ValueError(f"call_params_with_token: params must be dict, got {type(params)!r}")
+    if method not in LIVE_WRITE_METHODS:
+        raise ValueError(
+            f"call_params_with_token: method {method!r} not in LIVE_WRITE_METHODS "
+            "(mirror of Rust live_authz.rs whitelist) — refusing to mint a token bound "
+            "to a non-live-write method"
+        )
+    engine = params.get("engine")
+    if engine not in _ALLOWED_ENGINES:
+        raise ValueError(
+            f"call_params_with_token: engine {engine!r} not in allowed set "
+            f"{sorted(_ALLOWED_ENGINES)}"
+        )
     token_fields = _mint_fields(method, hash_target_for(method, params))
     return {**params, **token_fields}
