@@ -8,8 +8,8 @@ Owner chain: PM -> PA -> E1/E1a -> E2 -> E4 -> QA -> PM (feature chain); QC/MIT/
         points noted per phase.
 Source design (SSOT): `docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-05--l2-advisory-mesh-design-draft.md`
         (v4-final). Consolidated background: `docs/execution_plan/2026-06-05--l2-copilot-design-session-consolidated.md`.
-Active authority: root `TODO.md` row `P1-L2-ADVISORY-MESH-TAILS`.
-Historical ledger/reference: `L2_TODO.md` (repo root).
+Active authority: root `TODO.md` row `P1-L2-ADVISORY-MESH-E2E-1`.
+Historical ledger/reference: `docs/archive/2026-06-05--l2_advisory_mesh_todo.md`.
 
 This document turns the v4-final design into an executable roadmap. It does **not**
 re-litigate the design. It adds: the build-order phase decomposition, each phase's E1

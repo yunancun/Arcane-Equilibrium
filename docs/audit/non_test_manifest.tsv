@@ -458,6 +458,7 @@ docs/audits/2026-04-18--e5_full_codebase_audit.md	yes	clean	context	documentatio
 docs/audits/2026-04-20--edge_p2_3_phase1b_bybit_postonly_audit.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	13675
 docs/audits/2026-04-20--pyo3_eliminate_phase2_e2_review.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	20652
 docs/archive/2026-04-24--todo_refactor_audit.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	8493
+docs/archive/2026-06-05--l2_advisory_mesh_todo.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	17793
 docs/audits/2026-04-24--v022_missing_audit.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	8112
 docs/decisions/2026-03-17--工程一审修改建议报告_终稿.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	15956
 docs/decisions/2026-03-20--关于h和i部分的核心设计讨论.txt	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.txt	15954
@@ -672,7 +673,7 @@ docs/references/2026-03-25--capability_and_permission_switch_plan_v1.md	yes	clea
 docs/references/2026-03-25--capability_and_permission_switch_plan_v1.pdf	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.pdf	583330
 docs/references/2026-03-25--gui_operator_console_learning_cockpit_v1_spec.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	16058
 docs/references/2026-03-27--full_system_audit_A_to_K.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	6446
-docs/references/2026-03-27--layer2_ai_reasoning_engine_implementation_plan.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	7245
+docs/references/2026-03-27--layer2_ai_reasoning_engine_implementation_plan.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	7640
 docs/references/2026-03-27--local_trading_logic_audit_and_strategy_plan.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	6981
 docs/references/2026-03-27--phase1_risk_framework_and_agent_autonomy_design.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	14945
 docs/references/2026-03-27--phase2_audit_fix_roadmap.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	3942
@@ -926,7 +927,7 @@ helper_scripts/schema_diff.py	yes	clean	in_scope	operator_script	P2_candidate	op
 helper_scripts/start_paper_trading.sh	yes	clean	in_scope	operator_script	P0_candidate	operator_or_maintenance_script	.sh	4769
 helper_scripts/stop_all.sh	yes	clean	in_scope	operator_script	P2_candidate	operator_or_maintenance_script	.sh	3801
 helper_scripts/v2_swap_24h_observation.sh	yes	clean	in_scope	operator_script	P2_candidate	operator_or_maintenance_script	.sh	9295
-memory/MEMORY.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	11205
+memory/MEMORY.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	24895
 memory/README.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	2324
 memory/archive/feedback_audit_template.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	1172
 memory/archive/feedback_qa_audit_strategy.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	737
@@ -968,7 +969,7 @@ memory/feedback_subagent_first.md	yes	clean	context	documentation_context	contex
 memory/feedback_workflow_audit_chain.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	1738
 memory/feedback_working_principles.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	2516
 memory/project_18_agent_runtime_wired.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	4583
-memory/project_2026_04_24_todo_refactor.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	3571
+memory/archive/project_2026_04_24_todo_refactor.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	3655
 memory/project_5agent_runtime_state.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	4902
 memory/project_agent_p2_dynamic_sl_tp.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	1033
 memory/project_agent_workspace.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	1258
