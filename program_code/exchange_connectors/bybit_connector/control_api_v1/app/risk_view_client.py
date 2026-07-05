@@ -51,8 +51,17 @@ def _attach_live_token_if_live(method: str, params: dict[str, Any] | None) -> di
     """
     if not isinstance(params, dict) or params.get("engine") != "live":
         return params
-    from .live_patch_token import call_params_with_token  # noqa: PLC0415
+    from .live_patch_token import LIVE_WRITE_METHODS, call_params_with_token  # noqa: PLC0415
 
+    # OOS-4 純防禦：engine=="live" 走鑄造前，先在此命名入口驗 method 屬 LIVE_WRITE_METHODS
+    # （鏡 Rust live_authz.rs 白名單）。不改行為：現有兩 caller（reset_drawdown_baseline /
+    # resume_paper）皆合法，happy-path 不變。違反 → raise，寧可 fail-loud 也不鑄綁到非
+    # live-write method 的 token。call_params_with_token 內另有同層驗證（雙保險）。
+    if method not in LIVE_WRITE_METHODS:
+        raise ValueError(
+            f"_attach_live_token_if_live: method {method!r} not in LIVE_WRITE_METHODS "
+            "— refusing to mint a live-write token for a non-live-write method"
+        )
     return call_params_with_token(method, params)
 
 
