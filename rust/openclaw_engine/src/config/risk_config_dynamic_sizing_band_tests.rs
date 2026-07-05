@@ -59,6 +59,119 @@ fn test_f_d6_1_demo_dynamic_sizing_band_contains_base() {
 }
 
 #[test]
+fn test_oos6_live_dynamic_sizing_band_contains_base() {
+    // OOS-6(operator 2026-07-05 裁定 A,意圖 live 5%):live band 擴上限至 0.05 後
+    // 必須含 base per_trade_risk_pct=0.05,否則 sizer 首次調整就被 clamp。
+    let cfg = load_toml("risk_config_live.toml");
+    let base = cfg.limits.per_trade_risk_pct;
+    let band = &cfg.dynamic_sizing;
+    assert!(
+        band.min_pct <= base && base <= band.max_pct,
+        "live dynamic_sizing band [{}, {}] must contain base per_trade_risk_pct={} \
+         (OOS-6 operator 2026-07-05 裁定 A 擴 band 上限至 0.05)",
+        band.min_pct,
+        band.max_pct,
+        base
+    );
+    // 釘死裁定後的具體上限,防未來人靜默改回不含 base 的 0.03。
+    assert_eq!(band.min_pct, 0.005, "live dynamic_sizing.min_pct 應為 0.005");
+    assert_eq!(band.max_pct, 0.05, "live dynamic_sizing.max_pct 應為 0.05(OOS-6 擴後)");
+}
+
+#[test]
+fn test_dynamic_sizing_band_contains_base_all_enabled_envs() {
+    // OOS-6 ③:把「band 含 base」斷言從 demo-only 擴到三環境。守 enabled gate:
+    // 僅 enabled=true 的環境要求 band 含 base(paper enabled=false 且 base=0.20
+    // 天然不含 dormant 預設 band,故豁免——與 RiskConfig::validate() 的豁免同語意)。
+    for fname in [
+        "risk_config_demo.toml",
+        "risk_config_paper.toml",
+        "risk_config_live.toml",
+    ] {
+        let cfg = load_toml(fname);
+        let base = cfg.limits.per_trade_risk_pct;
+        let band = &cfg.dynamic_sizing;
+        if !band.enabled {
+            continue; // dynamic_sizing 停用 → 未接 runtime,豁免 band 含 base
+        }
+        assert!(
+            band.min_pct <= base && base <= band.max_pct,
+            "{}: enabled dynamic_sizing band [{}, {}] must contain base \
+             per_trade_risk_pct={}",
+            fname,
+            band.min_pct,
+            band.max_pct,
+            base
+        );
+    }
+}
+
+#[test]
+fn test_all_env_toml_pass_validate() {
+    // OOS-6 ②/③:三環境 real toml 過 RiskConfig::validate()(含新加的 band-contains-base
+    // fail-closed 斷言)必須綠。若哪個環境 band 不含 base 且 enabled,此處會紅。
+    for fname in [
+        "risk_config_demo.toml",
+        "risk_config_paper.toml",
+        "risk_config_live.toml",
+    ] {
+        let cfg = load_toml(fname);
+        assert!(
+            cfg.validate().is_ok(),
+            "{}: validate() must pass, got {:?}",
+            fname,
+            cfg.validate()
+        );
+    }
+}
+
+#[test]
+fn test_validate_rejects_enabled_band_not_containing_base() {
+    // OOS-6 ② 紅→綠:構造 band 不含 base + enabled=true 的 config,validate() 必須
+    // Err(現碼在此改動前是靜默過,由 sizer runtime clamp)。此為 fail-closed 護欄的
+    // 直接證明:max_pct < base(band 上限低於 base)→ 拒絕。
+    let mut cfg = RiskConfig::default();
+    cfg.dynamic_sizing.enabled = true;
+    cfg.limits.per_trade_risk_pct = 0.05;
+    // 把 max_pct 壓到 base 之下,使 band [0.01, 0.03] 不含 base 0.05。
+    cfg.dynamic_sizing.max_pct = 0.03;
+    let err = cfg
+        .validate()
+        .expect_err("enabled band [0.01,0.03] not containing base 0.05 must be rejected");
+    assert!(
+        err.contains("dynamic_sizing band") && err.contains("must contain base"),
+        "error 應指出 band 不含 base,實得: {}",
+        err
+    );
+
+    // 對稱情況:min_pct 抬到 base 之上(band 下限高於 base)也須拒絕。
+    let mut cfg2 = RiskConfig::default();
+    cfg2.dynamic_sizing.enabled = true;
+    cfg2.limits.per_trade_risk_pct = 0.005;
+    cfg2.dynamic_sizing.min_pct = 0.01; // band [0.01, 0.05] 不含 base 0.005
+    assert!(
+        cfg2.validate().is_err(),
+        "enabled band [0.01,0.05] not containing base 0.005 must be rejected"
+    );
+}
+
+#[test]
+fn test_validate_exempts_disabled_band_not_containing_base() {
+    // OOS-6 ②:paper 語意——enabled=false 時即使 band 不含 base 也豁免(dynamic_sizing
+    // 未接 runtime,不影響下單)。此為 fail-closed 護欄不誤殺 dormant 配置的證明。
+    let mut cfg = RiskConfig::default();
+    cfg.dynamic_sizing.enabled = false;
+    cfg.limits.per_trade_risk_pct = 0.20; // 與 paper 同:base 在 dormant band 之外
+    cfg.dynamic_sizing.min_pct = 0.01;
+    cfg.dynamic_sizing.max_pct = 0.05; // band [0.01,0.05] 不含 base 0.20
+    assert!(
+        cfg.validate().is_ok(),
+        "disabled dynamic_sizing must be exempt from band-contains-base, got {:?}",
+        cfg.validate()
+    );
+}
+
+#[test]
 fn test_dynamic_sizing_band_within_ssot_bounds_all_envs() {
     // 三環境 band 兩端皆須落在 SSOT bounds [MIN_PER_TRADE_RISK_PCT, MAX_PER_TRADE_RISK_PCT]
     // 內,且 min<max(排序合法)。此為 band 值任何未來改動的護欄。
