@@ -8,8 +8,8 @@ Purpose: capture the durable "why" behind the L2 Advisory Mesh so a future audit
 Primary artifacts (read these for the actual spec/roadmap):
 - Design SSOT (v4-final): `docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-05--l2-advisory-mesh-design-draft.md`
 - Execution plan: `docs/execution_plan/2026-06-05--l2-advisory-mesh-execution-plan.md`
-- Active authority: root `TODO.md` row `P1-L2-ADVISORY-MESH-TAILS`
-- Historical ledger/reference: `L2_TODO.md` (repo root)
+- Active authority: root `TODO.md` row `P1-L2-ADVISORY-MESH-E2E-1`
+- Historical ledger/reference: `docs/archive/2026-06-05--l2_advisory_mesh_todo.md`
 - Sibling (local sentinel basis): `docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-05--watchdog_alert_wiring_design.md`
 
 ---

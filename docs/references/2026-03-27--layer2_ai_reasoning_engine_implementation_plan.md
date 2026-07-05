@@ -4,7 +4,7 @@
 >
 > 本文件保留 2026-03 Layer 2 设计 lineage。当前 L2 Advisory Mesh、cost、
 > provenance、sentinel、model-call gate 和 open tails 以根目录 `TODO.md` row
-> `P1-L2-ADVISORY-MESH-TAILS`、`L2_TODO.md` historical ledger、2026-06-05 L2
+> `P1-L2-ADVISORY-MESH-E2E-1`、`docs/archive/2026-06-05--l2_advisory_mesh_todo.md` historical ledger、2026-06-05 L2
 > execution plan 和最新 PM/role reports 为准。
 
 **日期：** 2026-03-27

@@ -4,6 +4,9 @@ description: 10 個獨立 agent 並行 audit + PA FIX-PLAN + PM Sign-off → 舊
 type: project
 originSessionId: f4abc469-afe6-401a-af27-a320525bab3c
 ---
+
+> Archived 2026-07-05: completed project memory; retained for historical lookup.
+
 ## 觸發
 Operator 2026-04-24 判斷原 TODO（700 行、47578 tokens）混亂難以梳理清晰工作流程，要求 10 角色（PM FA PA CC QC QA AI-E MIT E5 BB）各自獨立 audit + 讀代碼驗證 + 重構工作安排。
 
@@ -29,7 +32,7 @@ Operator 2026-04-24 判斷原 TODO（700 行、47578 tokens）混亂難以梳理
 
 - **舊 TODO 歸檔**：`docs/archive/2026-04-24--todo_snapshot_pre_refactor.md`（700 行）
 - **新 TODO**：328 行（精煉 53%），按 Wave 1-4 + 6 工作組（G1-G6）組織
-- **Audit 索引**：`docs/audits/2026-04-24--todo_refactor_audit.md`
+- **Audit 索引**：`docs/archive/2026-04-24--todo_refactor_audit.md`
 - **每條 TODO 帶 audit + FIX-PLAN 指針**
 
 ## 3 大 Verified 發現（讀代碼驗證）
