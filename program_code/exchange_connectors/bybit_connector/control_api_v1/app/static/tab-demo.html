@@ -272,6 +272,8 @@ const _demoLastToastByKey = {};
 // 造成同一時刻 8 個 Bybit Demo REST 重複打，加大 GUI 卡頓。
 let _demoRefreshInFlight = false;
 let _demoTabVisible = true;
+// close-all 破壞性確認框的影響摘要（筆數 + 合計未實現盈虧），由 loadPositions() 每次刷新。
+let _demoCloseAllSummary = { count: 0, totalUpl: 0 };
 function _isDemoTabRefreshVisible() {
   return _demoTabVisible && document.visibilityState !== 'hidden';
 }
@@ -593,8 +595,17 @@ async function loadPositions() {
     // Empty positions → empty dust panel (footer shows "no dust").
     // 空持倉 → 空塵埃面板（footer 顯示「無塵埃倉位」）。
     _renderDemoDustPanel([]);
+    // 破壞性 close-all 確認框的影響摘要來源：無持倉時清零。
+    _demoCloseAllSummary = { count: 0, totalUpl: 0 };
     return;
   }
+  // 破壞性 close-all 確認框的影響摘要：從同一份已過濾持倉算筆數與合計未實現盈虧，
+  // 供 openDemoCloseAllDialog() 顯示「將平掉 N 筆，合計預估 UPL ≈ $X」。只讀已在前端的資料。
+  _demoCloseAllSummary = {
+    count: positions.length,
+    totalUpl: positions.reduce((sum, p) =>
+      sum + parseFloat(p.unrealisedPnl || p.unrealised_pnl || p.unrealized_pnl || 0), 0),
+  };
   let html = '';
   positions.forEach(p => {
     const pnl = parseFloat(p.unrealisedPnl || p.unrealised_pnl || p.unrealized_pnl || 0);
@@ -1325,6 +1336,19 @@ window.addEventListener('occurrencychange', function() { loadAll({ force: true }
 // 關閉所有 Demo 倉位
 function openDemoCloseAllDialog() {
   const el = document.getElementById('dlg-demo-close-all');
+  // 影響摘要：從 loadPositions() 已算好的快取讀筆數與合計 UPL，顯示在確認框內。
+  // textContent 賦值（非 innerHTML）天然 XSS-safe；顏色依 UPL 正負著色（綠=盈利/紅=虧損）。
+  const sumEl = document.getElementById('demo-close-all-summary');
+  if (sumEl) {
+    const s = _demoCloseAllSummary || { count: 0, totalUpl: 0 };
+    if (s.count > 0) {
+      sumEl.textContent = '將平掉 ' + s.count + ' 筆倉位，合計預估 UPL ≈ ' + ocMoney(s.totalUpl);
+      sumEl.className = s.totalUpl >= 0 ? 'green' : 'red';
+    } else {
+      sumEl.textContent = '目前無 Demo 持倉（僅取消掛單）';
+      sumEl.className = '';
+    }
+  }
   el.style.display = 'flex';
 }
 function closeDemoDialog(id) {
@@ -1406,6 +1430,8 @@ async function closeDemoPosition(symbol, ownerStrategy, frozenReason) {
       此操作將通過 Bybit Demo API 市價平掉所有 Demo 帳戶倉位並取消掛單。<br>
       <strong>使用虛擬資金，不影響真實帳戶。</strong>
     </p>
+    <!-- 破壞性操作影響摘要（唯讀，來自已載入的持倉表）：ux-checklist §1 二次確認須顯示具體影響 -->
+    <p id="demo-close-all-summary" style="margin:0 0 16px;font-size:13px;font-weight:700;line-height:1.5">--</p>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="oc-btn" onclick="closeDemoDialog('dlg-demo-close-all')">取消</button>
       <button class="oc-btn" onclick="doDemoCloseAll()" style="border-color:rgba(234,179,8,0.7);color:#eab308;font-weight:700">確認關閉所有 Demo 倉位</button>
