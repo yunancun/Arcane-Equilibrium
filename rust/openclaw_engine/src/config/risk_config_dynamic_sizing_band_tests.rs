@@ -55,7 +55,10 @@ fn test_f_d6_1_demo_dynamic_sizing_band_contains_base() {
     );
     // 釘死裁定後的具體 band 值,防未來人靜默改回不含 base 的 [0.01, 0.05]。
     assert_eq!(band.min_pct, 0.01, "demo dynamic_sizing.min_pct 應為 0.01");
-    assert_eq!(band.max_pct, 0.10, "demo dynamic_sizing.max_pct 應為 0.10(F-D6-1 擴後)");
+    assert_eq!(
+        band.max_pct, 0.10,
+        "demo dynamic_sizing.max_pct 應為 0.10(F-D6-1 擴後)"
+    );
 }
 
 #[test]
@@ -74,8 +77,14 @@ fn test_oos6_live_dynamic_sizing_band_contains_base() {
         base
     );
     // 釘死裁定後的具體上限,防未來人靜默改回不含 base 的 0.03。
-    assert_eq!(band.min_pct, 0.005, "live dynamic_sizing.min_pct 應為 0.005");
-    assert_eq!(band.max_pct, 0.05, "live dynamic_sizing.max_pct 應為 0.05(OOS-6 擴後)");
+    assert_eq!(
+        band.min_pct, 0.005,
+        "live dynamic_sizing.min_pct 應為 0.005"
+    );
+    assert_eq!(
+        band.max_pct, 0.05,
+        "live dynamic_sizing.max_pct 應為 0.05(OOS-6 擴後)"
+    );
 }
 
 #[test]

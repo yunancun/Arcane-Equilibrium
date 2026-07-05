@@ -221,7 +221,10 @@ mod tests {
         ] {
             let mut cfg = CloseMakerBackoffConfig::default();
             mutate(&mut cfg);
-            assert!(cfg.validate().is_err(), "expected err after zeroing a field");
+            assert!(
+                cfg.validate().is_err(),
+                "expected err after zeroing a field"
+            );
         }
     }
 }
