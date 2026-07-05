@@ -547,12 +547,22 @@ function ocToast(msg, type, traceId) {
     chip.title = '點擊複製 trace_id / Click to copy trace_id：' + trace;
     chip.setAttribute('role', 'button');
     chip.setAttribute('tabindex', '0');
-    chip.addEventListener('click', function(ev) {
+    chip.setAttribute('aria-label', '複製 trace_id / copy trace_id');
+    // 複製動作抽出，click 與鍵盤(Enter/Space)共用——role=button+tabindex 的元素
+    // 對鍵盤使用者必須同時響應 Enter/Space,否則只綁 click 等於鍵盤不可達(a11y gap)。
+    var copyTrace = function(ev) {
       ev.stopPropagation();
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(trace)
           .then(function() { ocToast('trace_id 已複製 / copied', 'success'); })
           .catch(function() { ocToast('複製失敗 / copy failed', 'error'); });
+      }
+    };
+    chip.addEventListener('click', copyTrace);
+    chip.addEventListener('keydown', function(ev) {
+      if (ev.key === 'Enter' || ev.key === ' ' || ev.key === 'Spacebar') {
+        ev.preventDefault();
+        copyTrace(ev);
       }
     });
     toast.appendChild(chip);
