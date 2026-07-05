@@ -211,6 +211,39 @@ class RiskViewClient:
             logger.warning("refresh_runtime_status failed: %s", e)
         return self._cached_runtime
 
+    async def live_session_halted(self) -> bool | None:
+        """OOS-3：以 Rust runtime status IPC 為權威回報 live 引擎是否真處 session-halt 態。
+
+        為何走 get_risk_runtime_status(engine="live") 而非讀 snapshot 檔：override
+        分支要「即時、無 TOCTOU」的 halt 態判準——snapshot 檔可能過期，且與 Rust
+        權威狀態之間存在讀寫窗口。IPC 直接向 live pipeline 取 `session_halted`
+        （dispatch 對本 method 用 extract_engine_tx，engine="live" → select(live)），
+        是同一份權威狀態，無檔案窗口。
+
+        回傳三態（fail-closed 由 caller 決定如何處置 None）：
+          - True  : live pipeline 明確回報 session_halted=true
+          - False : live pipeline 明確回報 session_halted=false（非 halt 態）
+          - None  : 讀取失敗 / IPC 不可達 / 回應缺 session_halted 欄
+                    → caller 必 fail-closed（不可把讀不到當作「已 halt」而放行 override）。
+        """
+        if self._ipc is None:
+            logger.warning("live_session_halted: no IPC client — cannot read halt state")
+            return None
+        try:
+            resp = await self._ipc.call(
+                "get_risk_runtime_status", params={"engine": "live"}
+            )
+        except Exception as e:
+            logger.warning("live_session_halted: IPC read failed: %s", e)
+            return None
+        if not isinstance(resp, dict) or "session_halted" not in resp:
+            logger.warning(
+                "live_session_halted: runtime status missing session_halted field: %r",
+                resp,
+            )
+            return None
+        return bool(resp.get("session_halted"))
+
     # ═══════════════════════════════════════════════════════════════════════
     # Cached reads (sync — for FastAPI/sync call sites)
     # 快取讀取（sync — 供 FastAPI/sync 呼叫點使用）
