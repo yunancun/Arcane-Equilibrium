@@ -268,9 +268,16 @@
       <div class="mc-label">OpenClaw Gateway</div>
       <div class="mc-val" id="s-oc" style="font-size:14px">--</div>
     </div>
+    <!-- 引擎狀態燈：Rust openclaw_engine 是交易/風控/執行唯一權威，宕機時所有下單
+         與風控路徑失效。原本 engine_alive 只在 System tab 一張卡，跨 tab 時看不到；
+         此處掛在側欄常駐區，任何 tab 都能看到引擎存活狀態（只讀，不改任何 live 授權/gate）。 -->
+    <div class="mc">
+      <div class="mc-label">Rust 引擎 / Engine</div>
+      <div class="mc-val" id="s-engine-alive" style="font-size:14px">--</div>
+    </div>
 
     <div class="mc-sub" style="margin-top:6px;text-align:center">
-      Auto-refresh 15s | <span id="s-token-status">--</span>
+      自動刷新 30s / Auto-refresh 30s | <span id="s-token-status">--</span>
     </div>
   </div>
 
@@ -747,10 +754,13 @@ loadPaperEngineGuiSetting();
 loadDevelopmentSupportSetting();
 
 // ─── Clock ────────────────────────────────────────────────────
+// UTC + 本地雙時區同列：交易環境下操作員可能跨時區，只顯本地易誤判事件時間；
+// UTC 是引擎/日誌/交易所時間的統一基準，故本地時間後追加 UTC（ux-checklist §2 時間區雙標）。
 setInterval(() => {
   const d = new Date();
   document.getElementById('clock').textContent =
-    d.toLocaleDateString('zh-CN') + ' ' + d.toLocaleTimeString('zh-CN', {hour12:false});
+    d.toLocaleDateString('zh-CN') + ' ' + d.toLocaleTimeString('zh-CN', {hour12:false}) +
+    ' | ' + d.toISOString().slice(11, 19) + ' UTC';
 }, 1000);
 
 // ─── User Label ───────────────────────────────────────────────
@@ -1020,6 +1030,30 @@ async function refreshSidebar() {
   } catch(e) {
     document.getElementById('s-oc').textContent = 'Offline';
     document.getElementById('s-oc').className = 'mc-val red';
+  }
+
+  // Rust 引擎存活燈：只讀 /api/v1/openclaw/status 的 runtime.engine_alive（同 System tab
+  // loadEngineAlive 的權威來源）。三態 fail-closed：true=綠在線 / false=紅離線 /
+  // 讀取失敗或欄位缺失=黃未知（禁 fake-success，不當作在線）。純狀態橋接，不寫入任何端點。
+  try {
+    const d = await api('/api/v1/openclaw/status');
+    const runtime = d && d.data && d.data.runtime;
+    const alive = (runtime && typeof runtime.engine_alive === 'boolean') ? runtime.engine_alive : null;
+    const engEl = document.getElementById('s-engine-alive');
+    if (alive === true) {
+      engEl.textContent = '在線 / Engine';
+      engEl.className = 'mc-val green';
+    } else if (alive === false) {
+      engEl.textContent = '離線 / DOWN';
+      engEl.className = 'mc-val red';
+    } else {
+      engEl.textContent = '未知 / Engine ?';
+      engEl.className = 'mc-val yellow';
+    }
+  } catch(e) {
+    const engEl = document.getElementById('s-engine-alive');
+    engEl.textContent = '未知 / Engine ?';
+    engEl.className = 'mc-val yellow';
   }
   } finally {
     _sidebarRefreshInFlight = false;

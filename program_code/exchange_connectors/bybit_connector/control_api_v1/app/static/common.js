@@ -531,11 +531,32 @@ function ocExplain(simple, deep) {
 }
 
 // ─── Toast Notification ──────────────────────────────────────────────────────
+// 可選第三參 traceId：寫操作 toast 帶後端回傳的 trace_id 時，附一段可點擊複製的短碼，
+// 讓操作員在審計追查時能快速取得完整 trace_id（audit-aware UX）。不傳 traceId 時
+// 行為與舊呼叫完全一致（向後相容）；短碼用 textContent 賦值，天然 XSS-safe。
 const _ocToasts = [];
-function ocToast(msg, type) {
+function ocToast(msg, type, traceId) {
   const toast = document.createElement('div');
   toast.className = 'oc-toast oc-toast-' + (type || 'info');
   toast.textContent = msg;
+  if (traceId) {
+    const trace = String(traceId);
+    const chip = document.createElement('span');
+    chip.className = 'oc-toast-trace';
+    chip.textContent = ' · trace ' + (trace.length > 12 ? trace.slice(0, 12) + '…' : trace);
+    chip.title = '點擊複製 trace_id / Click to copy trace_id：' + trace;
+    chip.setAttribute('role', 'button');
+    chip.setAttribute('tabindex', '0');
+    chip.addEventListener('click', function(ev) {
+      ev.stopPropagation();
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(trace)
+          .then(function() { ocToast('trace_id 已複製 / copied', 'success'); })
+          .catch(function() { ocToast('複製失敗 / copy failed', 'error'); });
+      }
+    });
+    toast.appendChild(chip);
+  }
   document.body.appendChild(toast);
   _ocToasts.push(toast);
   // Position before show so offsetHeight is available after DOM insertion
@@ -868,6 +889,10 @@ function ocInjectBaseCSS() {
     /* warn = 黃色「需注意」語意；之前缺此 class → 'warn' toast 退回無樣式（透明背景無邊框）。
        對應 --yellow token，與 success(綠)/error(紅)/info(灰) 視覺區分。 */
     .oc-toast-warn { background: rgba(210,153,34,0.15); color: var(--yellow); border: 1px solid rgba(210,153,34,0.4); }
+    /* trace 短碼可點擊複製；.oc-toast 本身 pointer-events:none，故 chip 需顯式 auto 才能收 click。 */
+    .oc-toast-trace { pointer-events: auto; cursor: pointer; text-decoration: underline;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 11px; opacity: 0.85; }
 
     /* Persistent Residual-Risk Banner / 常駐殘留風險橫幅 — 只能點擊關閉，refreshPage 不清除 */
     .oc-residual-banner { position: fixed; left: 50%; transform: translateX(-50%);
