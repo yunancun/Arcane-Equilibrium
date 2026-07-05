@@ -439,6 +439,64 @@ impl EarnMovementWriter {
             }
         }
     }
+
+    /// 先寫 learning.governance_audit_log 取 BIGSERIAL id，供 earn_movement_log
+    /// 的 governance_approval_id soft-ref 注入（兌現 PA-DRIFT-6 預定鏈，見本檔
+    /// module doc line 48「caller 必先 INSERT learning.governance_audit_log 取 id」）。
+    ///
+    /// 為什麼 raw INSERT 而非走 Python audit writer：
+    ///   - governance_audit_log 是 multi-producer append-only event log（B 型，非
+    ///     單一寫入權威；訂單/交易執行才是單一寫入口 root principle 1）；
+    ///   - 本 writer 已持 engine main pool（同 earn_movement_log 寫入 pool）；
+    ///   - Python 端 governance_audit_log INSERT 皆 fire-and-forget 無 RETURNING，
+    ///     無法回傳 id；走 IPC 只為取一個 id 會把 earn critical path 綁死於
+    ///     control_api 可用性 —— 那才是壞設計。
+    ///
+    /// RETURNING id：governance_audit_log composite PK = (id BIGSERIAL, ts)，取 id
+    /// 即可（ts 由 DB DEFAULT now() 生成，不需回傳）。
+    ///
+    /// 參數說明：
+    ///   - `event_type`: 必在 V150 28-value CHECK 白名單內（earn 走
+    ///     "earn_stake_approval" / "earn_redeem_approval"，見 earn_router
+    ///     earn_audit_event_type helper）；不在則 PG CHECK fail-loud → PgError，
+    ///     caller fail-closed reject。
+    ///   - `decision_lease_id`: earn lease_id 的 String（審計鏈 join key）。
+    ///   - `decided_by`: V035 `decided_by TEXT NOT NULL` → 傳 actor_id（operator
+    ///     role），絕不空字串。
+    ///   - `payload`: forensic JSONB（approval_id UUID / intent_id / direction /
+    ///     amount / engine_mode / api_scope）。其餘 nullable 欄靠 DB DEFAULT。
+    ///
+    /// 沿用既有 `EarnMovementError`：CHECK 違反與 PG 不可達皆落 `PgError`（`sqlx::
+    /// Error::Database` / 連線錯誤），caller 一律 fail-closed，語意足夠，不新增 variant。
+    pub async fn insert_governance_audit_log(
+        &self,
+        event_type: &str,
+        decision_lease_id: &str,
+        decided_by: &str,
+        payload: &JsonValue,
+    ) -> Result<i64, EarnMovementError> {
+        let row = sqlx::query(
+            r#"
+            INSERT INTO learning.governance_audit_log (
+                event_type,
+                decision_lease_id,
+                decided_by,
+                payload
+            )
+            VALUES ($1, $2, $3, $4)
+            RETURNING id
+            "#,
+        )
+        .bind(event_type)
+        .bind(decision_lease_id)
+        .bind(decided_by)
+        .bind(payload)
+        .fetch_one(&self.pool)
+        .await?;
+
+        let id: i64 = row.try_get("id")?;
+        Ok(id)
+    }
 }
 
 /// V100 direction CHECK ('stake'/'redeem') client-side 驗。
@@ -654,6 +712,21 @@ mod tests {
         assert!(
             src.contains("g.id = $1"),
             "lookup_governance_approval must filter by g.id = $1 (soft reference)",
+        );
+    }
+
+    /// insert_governance_audit_log SQL 必寫 `learning.governance_audit_log` 表 +
+    /// `RETURNING id`（CC-3 兌現 PA-DRIFT-6 鏈：先寫 audit log 取真 BIGSERIAL id）。
+    #[test]
+    fn test_insert_governance_audit_log_sql_target() {
+        let src = include_str!("earn_movement_writer.rs");
+        assert!(
+            src.contains("INSERT INTO learning.governance_audit_log"),
+            "insert_governance_audit_log must INSERT INTO learning.governance_audit_log (CC-3)",
+        );
+        assert!(
+            src.contains("RETURNING id"),
+            "insert_governance_audit_log must RETURNING id for earn_router Gate E-5.5 soft-ref",
         );
     }
 

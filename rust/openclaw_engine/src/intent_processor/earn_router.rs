@@ -96,6 +96,12 @@ pub enum EarnDispatchError {
     /// acquire_lease 失敗（lease facade 各分支映射）。
     #[error("earn_dispatch_lease_acquire_failed: {0}")]
     LeaseAcquire(String),
+    /// governance_audit_log 先寫失敗（PG 不可達 / V150 CHECK 違反）。
+    /// 此狀態下 Bybit call 尚未發起、placeholder 未寫；audit lineage 無法建立，
+    /// 視為 fail-closed（絕不 fabricate id / 絕不 fallback 0 — 那會把 lineage 缺口
+    /// 從 always-0 改成 sometimes-0，更糟）。
+    #[error("earn_dispatch_governance_audit_failed: {0}")]
+    GovernanceAuditFailed(String),
     /// Bybit Earn place-order 失敗（retCode != 0 或 transport error）。
     #[error("earn_dispatch_bybit_failed: {0}")]
     BybitFailed(String),
@@ -126,6 +132,12 @@ struct EarnLeaseGuard<'a> {
 impl<'a> EarnLeaseGuard<'a> {
     fn new(governance: &'a GovernanceCore, lease: Option<LeaseId>) -> Self {
         Self { governance, lease }
+    }
+
+    /// 非消耗式取 lease_id &str（Gate E-5.5 audit-log decision_lease_id 用）。
+    /// acquire 成功後 lease 恆為 Some；理論上不可能 None，保守回空字串避 panic。
+    fn lease_id_str(&self) -> &str {
+        self.lease.as_ref().map(|l| l.as_str()).unwrap_or("")
     }
 
     /// 成功路徑：取出 lease 並走 LeaseOutcome::Consumed release。
@@ -228,6 +240,21 @@ fn direction_for_earn_intent_type(intent_type: IntentType) -> &'static str {
             );
             "stake"
         }
+    }
+}
+
+/// 依 IntentType 派發 earn approval 專用 governance_audit_log.event_type
+/// （CC-3 §7.2 決策 (b)：direction 分兩值，event_type 層一級可濾）。
+///
+/// 前置：V150__governance_audit_log_earn_event_types.sql 已 land（28-value
+/// canonical CHECK）。未 apply 時這兩值命中舊 26-value CHECK → INSERT fail →
+/// Gate E-5.5 fail-closed reject（部署時序見設計 §7.3：migration 必先於 engine）。
+fn earn_audit_event_type(intent_type: IntentType) -> &'static str {
+    match intent_type {
+        IntentType::EarnStake => "earn_stake_approval",
+        IntentType::EarnRedeem => "earn_redeem_approval",
+        // 其他 variant 不應走到本 fn（caller 端 is_earn() 已守，Gate E-2 亦驗）。
+        _ => unreachable!("earn intent_type validated at Gate E-2"),
     }
 }
 
@@ -362,18 +389,54 @@ pub(super) async fn dispatch_earn_intent(
         None
     };
 
+    // ─── Gate E-5.5: 先寫 governance_audit_log 取真 id（CC-3 兌現 PA-DRIFT-6 鏈）──
+    // 在 Bybit place-order（Gate E-7）與 placeholder INSERT（Gate E-6）之前，先 raw
+    // INSERT learning.governance_audit_log RETURNING id，把真 BIGSERIAL id 綁到
+    // governance_approval_id 供 Gate E-6 placeholder / Gate E-9 write_failure 注入。
+    // event_type 由 direction 決定（earn_audit_event_type，需 V150 28-value CHECK）；
+    // approval_id（String UUID）作 forensic 寫進 payload JSONB（不佔 decision_lease_id，
+    // 後者語意 = Decision Lease id）。
+    //
+    // 為什麼 fail-closed（絕不 fabricate id）：沒有 audit row 就不該有 earn 動作
+    // （root principle 8「Every trade must be reconstructable and explainable」+
+    // root principle 6「Uncertainty defaults to conservative」）。若失敗時 fallback
+    // 0，等於把 audit-lineage 缺口從 always-0 改成 sometimes-0，更糟。earn 是低頻
+    // operator-driven 非交易熱路徑，reject 代價 = 一次操作延後，遠低於 audit 缺 row
+    // 的治理代價。availability trade-off 見設計 §6（僅授權 earn 路徑，不設先例給熱路徑）。
+    let audit_payload = serde_json::json!({
+        "earn_direction": direction_for_earn_intent_type(intent.intent_type),
+        "approval_id": payload.approval_id,
+        "intent_id": intent_id,
+        "amount_usdt": payload.amount_usdt,
+        "engine_mode": engine_mode,
+        "api_scope_used": api_scope_used,
+    });
+    let governance_approval_id: i64 = match writer
+        .insert_governance_audit_log(
+            earn_audit_event_type(intent.intent_type),
+            lease_guard.lease_id_str(),
+            &payload.actor_id,
+            &audit_payload,
+        )
+        .await
+    {
+        Ok(id) => id,
+        Err(e) => {
+            // Audit-log INSERT 失敗 → 不做 Bybit call、不寫 placeholder；guard 未呼
+            // consume_*，函數 return 觸發 EarnLeaseGuard::drop → release Cancelled
+            // （逐字對齊下方 placeholder-fail 分支機制）。絕不 fabricate id。
+            return IntentResult::rejected(
+                EarnDispatchError::GovernanceAuditFailed(format!("{}", e)).to_string(),
+            );
+        }
+    };
+
     // ─── Gate E-6: INSERT placeholder row（earn_movement_log）─────────────
     // earn_governance §2.5「兩階段範式」：placeholder 寫 'pending'，Bybit ack 後
     // UPDATE outcome 'matched'；Bybit timeout 時 Daily cron 掃 24h pending 補對賬。
-    // governance_approval_id 為 caller 端 INSERT 後傳入 i64 soft ref（PA-DRIFT-6）；
-    // 本 IMPL approval_id 是 String UUID（per EarnIntentPayload）而非 BIGINT id，
-    // writer 需 BIGINT — 採取 string→hash i64 fallback：approval_id 作為 audit
-    // forensic 字串保留在 governance_audit_log，但 writer FK 端用 0（占位 sentinel）
-    // 直到 W6/E1e 補 caller 端「先寫 governance_audit_log RETURNING id」chain。
-    //
-    // 注意：本決策是 Wave C carry-over → 留給 Wave D/E 補 governance_audit_log
-    // INSERT chain；本 IMPL 文檔化此 sentinel 行為避 silent drift。
-    let governance_approval_id: i64 = 0; // Wave D/E carry-over: TODO 接 governance_audit_log INSERT chain
+    // governance_approval_id 為 Gate E-5.5 先寫 governance_audit_log 取回的真實
+    // BIGSERIAL id（soft ref，PA-DRIFT-6）；approval_id（String UUID）已作 forensic
+    // 保留在該 audit row 的 payload JSONB。id 由上方 Gate E-5.5 綁定，此處直接用。
     let direction = direction_for_earn_intent_type(intent.intent_type);
 
     let movement_id = match writer
@@ -658,6 +721,19 @@ mod tests {
     }
 
     #[test]
+    fn earn_audit_event_type_maps_stake_and_redeem() {
+        // CC-3 §7.2：兩 earn event_type 值必對映 V150 28-value CHECK 白名單。
+        assert_eq!(
+            earn_audit_event_type(IntentType::EarnStake),
+            "earn_stake_approval"
+        );
+        assert_eq!(
+            earn_audit_event_type(IntentType::EarnRedeem),
+            "earn_redeem_approval"
+        );
+    }
+
+    #[test]
     fn map_lease_acquire_err_auth_not_effective_string_format() {
         let s = map_lease_acquire_err(GovernanceError::AuthNotEffective);
         assert!(
@@ -685,6 +761,10 @@ mod tests {
         assert!(
             format!("{}", EarnDispatchError::LeaseAcquire("foo".to_string()))
                 .contains("earn_dispatch_lease_acquire_failed")
+        );
+        assert!(
+            format!("{}", EarnDispatchError::GovernanceAuditFailed("audit".to_string()))
+                .contains("earn_dispatch_governance_audit_failed")
         );
         assert!(
             format!("{}", EarnDispatchError::BybitFailed("bar".to_string()))
