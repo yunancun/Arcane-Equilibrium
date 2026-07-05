@@ -20,8 +20,10 @@ Current boundary:
 - M0/Sprint A/M2/M3/M4/M5/M6/M7 are closed.
 - M8 policy/checklist work is closed through MAG-082, but runtime evidence is
   NO-GO after the Stage 2 fast-track review.
-- MAG-083 and MAG-084 remain blocked until a later MAG-082 runtime lineage
-  report PASSes.
+- MAG-083 and MAG-084 were later resolved by the 2026-05-11 W-D release
+  acceptance: `docs/governance_dev/2026-05-11--w_d_mag084_signoff.md`
+  records MAG-083 PASS and MAG-084 SIGNED. The older 2026-05-07 blocked
+  reports remain historical evidence only.
 - Do not start Telegram/WebChat, proposal approval relay, a second GUI, Stage
   3/4, or true-live autonomy from this file. Start from `TODO.md` v13 instead.
 
@@ -334,8 +336,8 @@ PM reconciliation result: M0 contract-freeze direction is approved, but implemen
 | MAG-080 | PM/PA | P0 | DONE (POLICY DOC) | Define cutover policy: shadow -> canary -> primary. | `2026-05-07--mag080_cutover_policy.md` defines Stage 0 shadow, Stage 1 shadow soak, Stage 2 demo/live_demo canary, Stage 3 primary candidate, and Stage 4 primary sign-off. It lists exact control surfaces/flags, lineage and lease thresholds, rollback triggers, executor shadow rollback payload, and operator checklist. Policy only; no runtime flag, rebuild, restart, deploy, DB write, live auth, or trading authority change. |
 | MAG-081 | E3 | P0 | DONE (RISK REVIEW DOC) | Runtime risk review for canary flags and rollback. | `2026-05-07--mag081_canary_flag_runtime_risk_review.md` reviews Agent event-store, Agent Spine client/mode metadata, scanner authority, Decision Lease router, ExecutorAgent shadow mode, Mainnet opt-in, signed live authorization, OpenClaw read-only routes, H-state, cost-edge, and supervisor cloud policy. Verdict: no reviewed single flag can accidentally enable true live autonomy without operator approval; `executor.shadow_mode=false` remains the highest-risk surface but live use is still behind the full live 5-gate chain. Review only; no runtime flag, rebuild, restart, deploy, DB write, live auth, or trading authority change. |
 | MAG-082 | E4 | P0 | DONE (CHECKLIST DOC) | 24h canary validation checklist. | `2026-05-07--mag082_24h_canary_validation_checklist.md` defines the required window header, entry checks, evidence report path, SQL templates, runtime health evidence, and PASS/WARN/FAIL criteria. Every executable canary decision must reconstruct StrategySignal -> StrategistDecision -> GuardianVerdict -> ExecutionPlan -> Decision Lease / idempotency -> ExecutionReport. Checklist only; no 24h canary run, runtime flag, rebuild, restart, deploy, DB write, live auth, or trading authority change. |
-| MAG-083 | QA | P0 | BLOCKED (STAGE 2 NO-GO; WAITING RUNTIME LINEAGE) | Final release audit. | `2026-05-07--mag083_final_release_audit_blocked.md` records the QA pre-audit. After operator approval, `2026-05-07--agenttodo_mag082_24h_canary_validation_stage2_demo_livedemo_20260507t1602z.md` records Stage 2 demo/live_demo authorization/start evidence after rebuild and three-side sync; `2026-05-07--agenttodo_m8_stage2_fast_track_no_go.md` records the fast-track replay review. Final release audit still cannot pass: runtime decision-spine/idempotency rows are 0, and replay completed with 0 fills / `execution_confidence=none`, so no trade reaches execution with proven StrategistDecision + GuardianVerdict + ExecutionPlan + Decision Lease lineage. |
-| MAG-084 | PM | P0 | BLOCKED (WAITING MAG-083 PASS) | Operator sign-off. | `2026-05-07--mag084_operator_signoff_blocked.md` records that sign-off cannot proceed while MAG-083 is blocked. `2026-05-07--agenttodo_m8_stage2_fast_track_no_go.md` keeps M8 blocked after fast-track NO-GO. Sign-off requires a later MAG-082 PASS, MAG-083 rerun with PASS, and only then written sign-off updates TODO/CLAUDE/MEMORY as needed. |
+| MAG-083 | QA | P0 | DONE (2026-05-11 W-D PASS; HISTORICAL) | Final release audit. | Historical 2026-05-07 pre-audit/no-go files recorded the original blocker. Superseding evidence: `docs/governance_dev/2026-05-11--w_d_mag084_signoff.md` records W-D MAG-083 PASS after QA/PA/QC triple audit. Caveats remain bounded there: no Stage 3+ promotion, no true-live, no Executor unlock, no bypass-lineage-as-lease proof. |
+| MAG-084 | PM | P0 | DONE (2026-05-11 SIGNED; HISTORICAL) | Operator sign-off. | Historical 2026-05-07 blocked sign-off file is superseded by `docs/governance_dev/2026-05-11--w_d_mag084_signoff.md`, which records MAG-084 operator sign-off and W-D wave closure. Sign-off did not authorize Mainnet, strategy/risk parameter mutation, scanner hard authority, Stage 3+ promotion, or live order authority. |
 
 ## Open Questions
 

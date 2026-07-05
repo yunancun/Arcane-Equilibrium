@@ -18,6 +18,8 @@
 | `CCAgentWorkSpace/PA/workspace/reports/2026-07-04--cold_audit_remaining_122_unverified.md` | PA 冷審計剩餘 122 未複核項清單。 |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-07-03--cold_audit_pm_final.md` | PM 冷審計 R2 最終整合（12 軸閉環 + D1-D9 裁決）。 |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-07-03--cold_audit_baseline.md` | PM 冷審計 R2 baseline（凍結 SHA + 軸範圍）。 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-07-05--legacy_todo_mag083_phase5_resolution.md` | PM legacy TODO 判定：AgentTodo MAG-083/MAG-084 已由 2026-05-11 W-D sign-off 解決；Signal Diamond Phase 5 strategy params 已由 per-engine TOML + Rust loader/factory 接線解決；不授權 live/Stage3/Executor/Cost Gate。 |
+| `CCAgentWorkSpace/Operator/2026-07-05--legacy_todo_mag083_phase5_resolution.md` | Operator mirror：legacy TODO MAG-083/MAG-084 + Phase 5 strategy params resolved 判定，同 PM 報告 byte-identical。 |
 | `CCAgentWorkSpace/E4/workspace/reports/2026-07-03--part2_post_approval_drift_gate_regression.md` | E4 回歸：standing-envelope post-approval drift-gate（Impl B）測試矩陣。 |
 | `CCAgentWorkSpace/E4/workspace/reports/2026-07-03--soak_dispatch_edge_containment_impl_a_regression.md` | E4 回歸：soak dispatch edge-containment（Impl A）測試矩陣。 |
 | `CCAgentWorkSpace/E4/workspace/reports/2026-07-04--e4_test_matrix_blindspot_audit.md` | E4 測試矩陣盲點審計。 |

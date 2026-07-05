@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-05 Legacy TODO MAG/Phase5 Resolution
+
+- PM cleaned the desktop main worktree by preserving the pre-sync dirty state on branch `preserve/dirty-worktree-20260705-before-main-sync` at `0296d7ba7`, then aligned Mac/Linux/main to `54d5fbf99`.
+- MAG-083/MAG-084 in legacy AgentTodo were stale blockers; 2026-05-11 W-D sign-off already records MAG-083 PASS and MAG-084 SIGNED, with live/Stage3/Executor boundaries still closed.
+- Signal Diamond Phase 5 strategy params are code-complete through per-engine TOML files plus Rust `load_strategy_params(PipelineKind)`; per-mode strategy instance fan-out remains separate future work.
+
 ## 2026-07-02 Stock/ETF Phase0 Route Exact Contract Manifest Guard
 
 - PM tightened test-only exact-manifest coverage for the FastAPI Phase0 status route: accepted `contracts` now must match the complete ordered 36-item Phase0 contract list.
@@ -219,4 +225,3 @@
 - PM tightened `StockEtfPaperShadowReconciliationV1` aggregate acceptance coverage to exact ordered blocker vectors for default, scope/authority/effect cross-wire, lineage/hash gaps, reconciliation-evidence failures, and no-side-effect boundary regressions.
 - Source-static guard now pins validator blocker emit order across top-level identity, required fields, reconciliation evidence, and boundary flags.
 - Verification passed: reconciliation source static `10`, Rust acceptance `10`, full `cargo test -p openclaw_types`, cargo fmt, docs trace, and diff-check. Boundary unchanged: no IBKR contact, connector/runtime, fill import, shadow fill generation, reconciliation/scorecard writer, DB/evidence writer, tiny-live/live, or Bybit behavior change.
-
