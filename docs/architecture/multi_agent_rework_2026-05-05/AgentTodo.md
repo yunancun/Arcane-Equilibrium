@@ -27,6 +27,23 @@ Current boundary:
 - Do not start Telegram/WebChat, proposal approval relay, a second GUI, Stage
   3/4, or true-live autonomy from this file. Start from `TODO.md` v13 instead.
 
+## 2026-07-05 Residual-Work Audit
+
+PM re-audit result: this historical ledger no longer contains dispatchable
+remaining work that should be started directly from this file.
+
+- MAG-002 / MAG-003 were the only remaining `CONDITIONAL` milestone rows.
+  They are historically closed by MAG-015:
+  `2026-05-06--mag015_sprint_a_contract_addendum.md` explicitly resolves the
+  M0 conditional gaps from MAG-002 and MAG-003 for Sprint A.
+- MAG-083 / MAG-084 are already closed by the 2026-05-11 W-D release
+  acceptance, with the caveats recorded below.
+- The historical Open Questions are answered, superseded, or routed to root
+  `TODO.md` / fresh PM dispatch if reopened. They are not a live work queue.
+- The Definition of Done below is a historical target list for the rework, not
+  a current authorization to run Stage 3/4, true-live, Executor unlock,
+  Telegram/WebChat, proposal relay, or new runtime authority work.
+
 ## 2026-05-06 OpenClaw Repositioning Overlay
 
 This backlog is governed by the 2026-05-06 OpenClaw repositioning decision:
@@ -231,8 +248,8 @@ Do not start implementation before CC/FA/PA confirm the authority model:
 |---|---|---:|---|---|---|
 | MAG-000 | PM | P0 | DONE | Review `ENGINEERING_PLAN.md` with operator and confirm target architecture. | Operator confirmed: scanner must be advisory/evidence, Strategist owns open/hold/reduce/close/no_action decisions, Guardian owns non-bypassable veto/modify authority, Rust remains execution engine without hidden decision authority. |
 | MAG-001 | CC | P0 | DONE | Compliance review against root principles, EX-06, DOC-04, SM-02 Decision Lease, H0/P0/P1. | APPROVED in `docs/CCAgentWorkSpace/CC/workspace/reports/2026-05-06--agenttodo_m0_mag001_compliance_review.md`; no blocking boundary violation or required amendment. |
-| MAG-002 | FA | P0 | CONDITIONAL | Formal architecture review of Agent Decision Spine, object lifecycle, and persistence order. | CONDITIONAL in `docs/CCAgentWorkSpace/FA/workspace/reports/2026-05-06--agenttodo_m0_mag002_architecture_review.md`; canonical order accepted, E1 blocked until state transitions / ownership / idempotency / persistence-before-side-effect / scanner decay / protective-close split / fail-closed healthchecks are explicit. |
-| MAG-003 | PA | P0 | CONDITIONAL | Produce implementation RFC with exact module seams, structs, migrations, flags, and rollout order. | CONDITIONAL in `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-06--agenttodo_m0_mag003_implementation_rfc.md`; M1 may start only as durable event-store wave after PM reconciliation, with M2/M3 authority changes gated behind M1 Linux row proof + E2/E4 acceptance. |
+| MAG-002 | FA | P0 | DONE (SUPERSEDED BY MAG-015 CONTRACT ADDENDUM) | Formal architecture review of Agent Decision Spine, object lifecycle, and persistence order. | Original FA review was CONDITIONAL in `docs/CCAgentWorkSpace/FA/workspace/reports/2026-05-06--agenttodo_m0_mag002_architecture_review.md`. Superseding closure: MAG-015 explicitly resolved the M0 conditional gaps from MAG-002/MAG-003 for Sprint A and froze state transitions, ownership, idempotency, persistence-before-side-effect, scanner decay, protective-close split, fail-closed healthchecks, flags, and OpenClaw/GUI semantics. |
+| MAG-003 | PA | P0 | DONE (SUPERSEDED BY MAG-015 CONTRACT ADDENDUM) | Produce implementation RFC with exact module seams, structs, migrations, flags, and rollout order. | Original PA RFC was CONDITIONAL in `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-06--agenttodo_m0_mag003_implementation_rfc.md`. Superseding closure: MAG-015 became the frozen implementation contract for Sprint A, with later M1/M2/M3 work completed under the milestone rows below and Linux/test evidence recorded per row. |
 | MAG-004 | PM | P0 | DONE | Reconcile OpenClaw external Gateway vs local 5-Agent runtime after operator architecture review. | 2026-05-06 overlay accepted: local 5-Agent remains independent; OpenClaw Gateway becomes communication/supervisor/proposal relay; existing console is the only GUI. |
 
 ### M0 Conditional Gate Before E1
@@ -339,17 +356,27 @@ PM reconciliation result: M0 contract-freeze direction is approved, but implemen
 | MAG-083 | QA | P0 | DONE (2026-05-11 W-D PASS; HISTORICAL) | Final release audit. | Historical 2026-05-07 pre-audit/no-go files recorded the original blocker. Superseding evidence: `docs/governance_dev/2026-05-11--w_d_mag084_signoff.md` records W-D MAG-083 PASS after QA/PA/QC triple audit. Caveats remain bounded there: no Stage 3+ promotion, no true-live, no Executor unlock, no bypass-lineage-as-lease proof. |
 | MAG-084 | PM | P0 | DONE (2026-05-11 SIGNED; HISTORICAL) | Operator sign-off. | Historical 2026-05-07 blocked sign-off file is superseded by `docs/governance_dev/2026-05-11--w_d_mag084_signoff.md`, which records MAG-084 operator sign-off and W-D wave closure. Sign-off did not authorize Mainnet, strategy/risk parameter mutation, scanner hard authority, Stage 3+ promotion, or live order authority. |
 
-## Open Questions
+## Historical Open Questions (Answered / Superseded)
 
-1. Should scanner hard market invalidity be represented under H0 eligibility or Guardian risk evidence?
-2. Should Agent Decision Spine be Rust-only authoritative with Python adapters, or DB-authoritative with Rust enforcement?
-3. What is the minimum replay window required before scanner advisory mode can become enforced?
-4. Should Strategist V2 initially control only new entries, or also existing position reviews?
-5. Which UI surface should show the decision chain first: Agent Control tab is now the default; Paper Dashboard and Learning Cockpit should deep-link to it instead of duplicating the chain.
-6. Which OpenClaw channels should be enabled first: Telegram only, or Telegram plus WebChat?
-7. What daily/monthly cloud L2 budget should gate supervisor escalations?
+These questions are retained as historical design context only. They are not
+dispatchable TODO rows.
 
-## Definition of Done
+| # | 2026-07-05 disposition |
+|---:|---|
+| 1 | Scanner hard market invalidity was split by the later scanner advisory / H0 / Guardian boundary work: scanner decay is review evidence, hard eligibility remains fail-closed, and Guardian/H0 facts own veto boundaries. |
+| 2 | Agent Decision Spine authority was resolved as DB durable lineage ledger plus Python reasoning-object producers/adapters plus Rust final execution enforcement. |
+| 3 | Replay-window promotion is no longer decided from this ledger; any enforced scanner advisory promotion must reopen in root `TODO.md` with current replay/canary evidence. |
+| 4 | Strategist V2 covers new entries and existing position reviews through later StrategistDecision / PositionReview work. |
+| 5 | Agent Control tab is the default decision-chain surface; other tabs should deep-link rather than duplicate the chain. |
+| 6 | Telegram/WebChat channel relay is outside this local ledger and belongs to a fresh OpenClaw Gateway / communication-relay dispatch if reopened. |
+| 7 | Cloud L2 budget is governed by the supervisor escalation policy: default-disabled, explicit budget/model config, and `agent.ai_invocations` ledger reservation before provider IO. |
+
+## Historical Definition of Done (Not Current Active Acceptance)
+
+The list below describes the historical rework completion target. Current
+runtime authorization, canary promotion, true-live use, Executor unlock, and
+external-channel work must be accepted through root `TODO.md` and current
+governance evidence, not by this archived ledger alone.
 
 The rework is done only when:
 

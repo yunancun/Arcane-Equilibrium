@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-05 Legacy TODO Remaining Work Audit
+
+- PM re-audited the two residual legacy TODOs after the MAG-083/MAG-084 and Phase 5 cleanup: `AgentTodo.md` and `2026-04-10--signal_diamond_db_todo.md` now have no clean directly-dispatchable remaining work.
+- AgentTodo MAG-002/MAG-003 are historically closed by MAG-015 contract addendum; open questions / DoD were reclassified as historical context and not runtime authorization.
+- Signal Diamond's old `mode_states` / `active_modes` / per-mode strategy-instance limitation is superseded by 3E-4 per-pipeline `PipelineKind` architecture; future shared-compute fan-out would need a fresh root TODO/ADR, not this legacy ledger.
+
 ## 2026-07-05 Legacy TODO MAG/Phase5 Resolution
 
 - PM cleaned the desktop main worktree by preserving the pre-sync dirty state on branch `preserve/dirty-worktree-20260705-before-main-sync` at `0296d7ba7`, then aligned Mac/Linux/main to `54d5fbf99`.
