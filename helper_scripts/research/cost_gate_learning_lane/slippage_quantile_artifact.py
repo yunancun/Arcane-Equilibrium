@@ -25,6 +25,11 @@ from pathlib import Path
 import sys
 from typing import Any
 
+# 共用純函數葉節點：以 alias-import 保持函數體內 _utc_now 引用逐字節不變。
+from cost_gate_learning_lane._lane_common import (
+    utc_now as _utc_now,
+)
+
 
 RESEARCH_ROOT = Path(__file__).resolve().parents[1]
 ROOT = Path(__file__).resolve().parents[3]
@@ -54,10 +59,6 @@ SELECT symbol, count(*) AS n,
        percentile_cont(0.9)  WITHIN GROUP (ORDER BY s) AS q90
 FROM t GROUP BY ROLLUP(symbol)
 """
-
-
-def _utc_now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
 
 
 def _float(value: Any) -> float | None:

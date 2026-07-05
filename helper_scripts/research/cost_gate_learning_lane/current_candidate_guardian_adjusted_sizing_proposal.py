@@ -12,11 +12,19 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import hashlib
 import json
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
 from pathlib import Path
 from typing import Any
+
+# 共用純函數葉節點：以 alias-import 保持函數體內 _utc_now/_dict/_list/_str/_sha256 引用逐字節不變。
+from cost_gate_learning_lane._lane_common import (
+    as_dict as _dict,
+    as_list as _list,
+    as_str as _str,
+    file_sha256 as _sha256,
+    utc_now as _utc_now,
+)
 
 
 SCHEMA_VERSION = "current_candidate_guardian_adjusted_sizing_proposal_v1"
@@ -85,22 +93,6 @@ BOUNDARY = (
     "runtime/service/env/crontab mutation, no Cost Gate lowering, no "
     "live/mainnet authority, and no profit proof"
 )
-
-
-def _utc_now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
-
-
-def _dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
-
-
-def _str(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _dec(value: Any) -> Decimal | None:
@@ -180,12 +172,6 @@ def _parse_dt(value: Any) -> dt.datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=dt.timezone.utc)
     return parsed.astimezone(dt.timezone.utc)
-
-
-def _sha256(path: Path | None) -> str | None:
-    if path is None or not path.exists() or not path.is_file():
-        return None
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _read_json(path: Path | None) -> dict[str, Any] | None:

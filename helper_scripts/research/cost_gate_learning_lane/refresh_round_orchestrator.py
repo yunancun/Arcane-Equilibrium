@@ -24,6 +24,11 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+# 共用純函數葉節點：以 alias-import 保持函數體內 _utc_now 引用逐字節不變。
+from cost_gate_learning_lane._lane_common import (
+    utc_now as _utc_now,
+)
+
 SCHEMA_VERSION = "refresh_round_orchestrator_v1"
 LEDGER_RECORD_SCHEMA_VERSION = "refresh_round_ledger_entry_v1"
 
@@ -61,10 +66,6 @@ BOUNDARY = (
     "runtime/env/crontab mutation, Bybit/PG call, Cost Gate lowering, live/mainnet "
     "authority, or promotion/profit proof"
 )
-
-
-def _utc_now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
 
 
 def _new_round_id(now_utc: dt.datetime) -> str:

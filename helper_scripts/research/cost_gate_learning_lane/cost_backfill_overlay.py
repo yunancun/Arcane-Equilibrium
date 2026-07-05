@@ -27,6 +27,12 @@ from pathlib import Path
 import sys
 from typing import Any
 
+# 共用純函數葉節點：以 alias-import 保持函數體內 _str/_utc_now 引用逐字節不變。
+from cost_gate_learning_lane._lane_common import (
+    as_str as _str,
+    utc_now as _utc_now,
+)
+
 
 RESEARCH_ROOT = Path(__file__).resolve().parents[1]
 ROOT = Path(__file__).resolve().parents[3]
@@ -52,14 +58,6 @@ OVERLAY_FILENAME = "blocked_outcome_cost_backfill_v1.jsonl"
 _OUTCOME_RECORD_TYPES = frozenset(
     {BLOCKED_SIGNAL_OUTCOME_RECORD_TYPE, PROBE_OUTCOME_RECORD_TYPE}
 )
-
-
-def _utc_now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
-
-
-def _str(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _float(value: Any) -> float | None:

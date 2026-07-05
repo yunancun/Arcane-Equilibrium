@@ -32,6 +32,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# 共用純函數葉節點：以 alias-import 保持函數體內 _utc_now 引用逐字節不變。
+from cost_gate_learning_lane._lane_common import (
+    utc_now as _utc_now,
+)
+
 # 直接以檔案路徑執行時需把 research root 加進 sys.path 才能 import 同 package
 # 模塊（沿 standing_envelope_post_approval_drift_gate 慣例）。
 _RESEARCH_ROOT = Path(__file__).resolve().parents[1]
@@ -90,10 +95,6 @@ BOUNDARY = (
     "mutation, no order/live/proof authority; DRIFT_EXEMPT only keeps the "
     "learning lane unfrozen across docs/tests/.codex-only source advance"
 )
-
-
-def _utc_now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
 
 
 def _iso(value: dt.datetime) -> str:

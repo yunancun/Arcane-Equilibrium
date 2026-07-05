@@ -26,6 +26,14 @@ from cost_gate_learning_lane.contract import (
 from cost_gate_learning_lane.proof_exclusion import proof_exclusion_reasons
 from cost_gate_learning_lane.runtime_adapter import read_jsonl_ledger
 
+# 共用純函數葉節點：以 alias-import 保持函數體內 _dict/_list/_str/_utc_now 引用逐字節不變。
+from cost_gate_learning_lane._lane_common import (
+    as_dict as _dict,
+    as_list as _list,
+    as_str as _str,
+    utc_now as _utc_now,
+)
+
 
 BOUNDED_PROBE_RESULT_REVIEW_SCHEMA_VERSION = "bounded_demo_probe_result_review_v1"
 BOUNDARY = (
@@ -33,22 +41,6 @@ BOUNDARY = (
     "Bybit call, order, config, risk, auth, runtime mutation, Cost Gate "
     "lowering, probe authority, order authority, or promotion proof"
 )
-
-
-def _utc_now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
-
-
-def _dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
-
-
-def _str(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _int(value: Any, default: int = 0) -> int:

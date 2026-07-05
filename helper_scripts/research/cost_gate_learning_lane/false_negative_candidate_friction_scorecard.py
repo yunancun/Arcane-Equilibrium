@@ -30,6 +30,14 @@ from cost_gate_learning_lane.false_negative_candidate_packet import (
     SCHEMA_VERSION as FALSE_NEGATIVE_PACKET_SCHEMA_VERSION,
 )
 
+# 共用純函數葉節點：以 alias-import 保持函數體內 _dict/_list/_str/_utc_now 引用逐字節不變。
+from cost_gate_learning_lane._lane_common import (
+    as_dict as _dict,
+    as_list as _list,
+    as_str as _str,
+    utc_now as _utc_now,
+)
+
 
 SCHEMA_VERSION = "cost_gate_false_negative_candidate_friction_scorecard_v1"
 READY_STATUS = "FALSE_NEGATIVE_CANDIDATE_FRICTION_SCORECARD_READY"
@@ -96,22 +104,6 @@ AUTHORITY_TRUE_KEYS = {
     "strategy_mutation_performed",
     "writer_enabled",
 }
-
-
-def _utc_now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
-
-
-def _dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
-
-
-def _str(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _int(value: Any, default: int = 0) -> int:

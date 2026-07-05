@@ -17,6 +17,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
+# 共用純函數葉節點：以 alias-import 保持函數體內 _utc_now 引用逐字節不變。
+from cost_gate_learning_lane._lane_common import (
+    utc_now as _utc_now,
+)
+
 
 SCHEMA_VERSION = "source_stability_window_guard_v1"
 
@@ -34,10 +39,6 @@ BOUNDARY = (
     "modify, no PG query/write, no runtime/service/env/risk mutation, no Cost "
     "Gate lowering, no live/mainnet authority, no fill/PnL, and no profit proof"
 )
-
-
-def _utc_now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
 
 
 def _parse_dt(value: Any) -> dt.datetime | None:

@@ -22,6 +22,13 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Callable
 
+# 共用純函數葉節點：以 alias-import 保持函數體內 _dict/_str/_utc_now 引用逐字節不變。
+from cost_gate_learning_lane._lane_common import (
+    as_dict as _dict,
+    as_str as _str,
+    utc_now as _utc_now,
+)
+
 
 SCHEMA_VERSION = "demo_account_equity_artifact_v1"
 READY_STATUS = "DEMO_FAST_BALANCE_EQUITY_ARTIFACT_READY_NO_AUTHORITY"
@@ -131,20 +138,8 @@ def urlopen_no_redirect(req: urllib.request.Request, timeout: float) -> Any:
     return opener.open(req, timeout=timeout)
 
 
-def _utc_now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
-
-
 def _iso(value: dt.datetime) -> str:
     return value.astimezone(dt.timezone.utc).isoformat()
-
-
-def _dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _str(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _truthy(value: Any) -> bool:

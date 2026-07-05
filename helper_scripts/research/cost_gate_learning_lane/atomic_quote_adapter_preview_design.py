@@ -12,11 +12,19 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import hashlib
 import json
 import re
 from pathlib import Path
 from typing import Any
+
+# 共用純函數葉節點：以 alias-import 保持函數體內 _dict/_list/_str/_sha256/_utc_now 引用逐字節不變。
+from cost_gate_learning_lane._lane_common import (
+    as_dict as _dict,
+    as_list as _list,
+    as_str as _str,
+    file_sha256 as _sha256,
+    utc_now as _utc_now,
+)
 
 
 SCHEMA_VERSION = "cost_gate_atomic_quote_adapter_preview_design_v1"
@@ -157,22 +165,6 @@ SEMANTIC_VALUE_KEYS = {
 }
 
 
-def _utc_now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
-
-
-def _dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
-
-
-def _str(value: Any) -> str:
-    return str(value or "").strip()
-
-
 def _float(value: Any) -> float | None:
     if value is None or isinstance(value, bool):
         return None
@@ -195,12 +187,6 @@ def _truthy(value: Any) -> bool:
     if isinstance(value, (dict, list, tuple, set)):
         return len(value) > 0
     return True
-
-
-def _sha256(path: Path | None) -> str | None:
-    if path is None or not path.exists() or not path.is_file():
-        return None
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _iter_nodes(value: Any) -> list[Any]:
