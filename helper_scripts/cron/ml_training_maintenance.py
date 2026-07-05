@@ -171,7 +171,6 @@ def _fetch_recent_fill_returns(
                 """
                 SELECT COALESCE(strategy_name, 'unknown') AS strategy_name,
                        symbol,
-                       COALESCE(engine_mode, 'unknown') AS engine_mode,
                        (COALESCE(realized_pnl, 0) - ABS(COALESCE(fee, 0)))::float8
                 FROM trading.fills
                 WHERE ts >= NOW() - (%s || ' days')::interval
@@ -191,8 +190,18 @@ def _fetch_recent_fill_returns(
                 """,
                 (days, engine_modes, limit),
             )
-            for strategy, symbol, regime, net_pnl in cur.fetchall():
-                grouped[(str(strategy), str(symbol), str(regime))].append(float(net_pnl or 0.0))
+            # arm key 三元組的第三 slot 語意為 regime，但 trading.fills 無真 regime 欄。
+            # 冷審計 R2 MIT[MEDIUM]：舊碼把 engine_mode(demo/live/live_demo) 誤填入該 slot，
+            # 使 learning.bayesian_posteriors.regime 存的是 engine_mode 值而非 regime。
+            # 修法（取誠實命名而非猜 join）：本 cron 無 leak-free 的 point-in-time regime
+            # 來源可對齊每筆 fill（真 regime 在 trading.decision_context_snapshots.regime_5m，
+            # 需可靠 fill↔snapshot 對齊鍵，此離線聚合處無法保證），故顯式填常量
+            # 'unattributed_regime' —— 不再冒充 engine_mode，且滿足 regime 欄 NOT NULL。
+            # 該表為 dormant 學習表（select_next_arm/load_posteriors 0 live consumer），
+            # 不觸 live gate/sizing；此修僅還原 label 正確性。
+            regime = "unattributed_regime"
+            for strategy, symbol, net_pnl in cur.fetchall():
+                grouped[(str(strategy), str(symbol), regime)].append(float(net_pnl or 0.0))
         return grouped
     finally:
         conn.close()
