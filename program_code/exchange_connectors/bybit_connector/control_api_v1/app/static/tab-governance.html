@@ -263,45 +263,45 @@
   <div id="explain-governance"></div>
 </div>
 
-<!-- ═══ Quick Status Banner / 快速状态栏 ═══ -->
+<!-- ═══ Quick Status Banner / 快速狀態栏 ═══ -->
 <!-- One-line summary: Auth | Risk Level | OMS | Reconciler | Learning — updates with main 10s poll -->
-<!-- 單行状态摘要：授權 | 風險等级 | 執行 | 對賬 | 學習層级 — 随主轮詢 10s 刷新 -->
+<!-- 單行狀態摘要：授權 | 風險等級 | 執行 | 對賬 | 學習層級 — 隨主輪詢 10s 刷新 -->
 <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 14px;
   background:var(--card-bg);border:1px solid var(--border);border-radius:8px;margin-bottom:14px;font-size:12px">
   <span style="color:var(--text-dim)">&#x26A1; Quick Status:</span>
-  <span title="SM-01 授權状态 / SM-01 authorization state">Auth: <strong id="qs-auth">--</strong></span>
+  <span title="SM-01 授權狀態 / SM-01 authorization state">Auth: <strong id="qs-auth">--</strong></span>
   <span style="color:var(--border)">|</span>
-  <span title="SM-04 風險治理等级 / SM-04 risk governance level">Risk: <strong id="qs-risk">--</strong></span>
+  <span title="SM-04 風險治理等級 / SM-04 risk governance level">Risk: <strong id="qs-risk">--</strong></span>
   <span style="color:var(--border)">|</span>
-  <span title="SM-03 訂單執行状态 / SM-03 order execution state">OMS: <strong id="qs-oms">--</strong></span>
+  <span title="SM-03 訂單執行狀態 / SM-03 order execution state">OMS: <strong id="qs-oms">--</strong></span>
   <span style="color:var(--border)">|</span>
-  <span title="EX-04 對賬状态 / EX-04 reconciliation status">Recon: <strong id="qs-recon">--</strong></span>
+  <span title="EX-04 對賬狀態 / EX-04 reconciliation status">Recon: <strong id="qs-recon">--</strong></span>
   <span style="color:var(--border)">|</span>
-  <span title="學習層级 / Learning tier">Learning: <strong id="qs-learning">--</strong></span>
+  <span title="學習層級 / Learning tier">Learning: <strong id="qs-learning">--</strong></span>
   <!-- P2-14 (v80 冷審 Wave 3, 2026-05-29)：原呼叫 loadGovernance() 未定義，刷新按鈕無效；
        真正的整頁刷新函數是 governance-tab.js 的 loadAll()，改呼此函數修復死按鈕。 -->
   <button class="oc-btn" style="margin-left:auto;padding:2px 8px;font-size:11px" onclick="loadAll()" title="刷新 / Refresh">&#x1F504;</button>
 </div>
 
 <!-- ═══ Core State Machines / 核心狀態機 ═══ -->
-<div class="gov-section-label">Core State Machines / 核心状态机</div>
+<div class="gov-section-label">Core State Machines / 核心狀態機</div>
 <div class="oc-grid-2 gov-sm-grid">
 
   <!-- Card 1: Authorization (SM-01) -->
   <div class="oc-card gov-sm-card">
-    <h3>&#x1F511; Authorization / 授權 <abbr title="SM-01: 授權状态机。批准的是操作授權，不是某一筆 Decision Lease / Authorization state machine. This approves operating authorization, not an individual Decision Lease." style="font-size:10px;color:var(--text-dim);cursor:help">SM-01</abbr></h3>
-    <div class="subtitle">授權状态和範圍</div>
-    <div class="gov-sm-note">SM-01 管理操作授權、有效期和可用範圍。没有有效授權時，系統不得進入真實執行链路。</div>
+    <h3>&#x1F511; Authorization / 授權 <abbr title="SM-01: 授權狀態機。批准的是操作授權，不是某一筆 Decision Lease / Authorization state machine. This approves operating authorization, not an individual Decision Lease." style="font-size:10px;color:var(--text-dim);cursor:help">SM-01</abbr></h3>
+    <div class="subtitle">授權狀態和範圍</div>
+    <div class="gov-sm-note">SM-01 管理操作授權、有效期和可用範圍。沒有有效授權時，系統不得進入真實執行鏈路。</div>
     <details class="gov-learn">
       <summary>了解更多 / Learn more</summary>
       <div class="gov-learn-body">
-        它回答三個问題：谁被授權、授權能持續多久、授權覆盖哪些操作範圍。授權過期、撤銷或被冻結時，后續租約和執行状态都應停止推進。
+        它回答三個問題：誰被授權、授權能持續多久、授權覆蓋哪些操作範圍。授權過期、撤銷或被凍結時，後續租約和執行狀態都應停止推進。
       </div>
     </details>
 
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
       <div style="flex:1">
-        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">State / 状态</div>
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">State / 狀態</div>
         <div id="auth-state-badge">--</div>
       </div>
       <div style="flex:1">
@@ -310,7 +310,7 @@
       </div>
     </div>
 
-    <!-- Auth Scope Visualizer / 授權範圍可视化 -->
+    <!-- Auth Scope Visualizer / 授權範圍可視化 -->
     <div style="margin-top:12px;margin-bottom:12px">
       <h4 style="cursor:pointer;font-size:0.95em;margin:0;padding:0" onclick="toggleAuthScope()">
         Authorization Scope / 授權範圍 <span id="auth-scope-toggle" style="font-size:0.85em">▶</span>
@@ -322,7 +322,7 @@
       </div>
     </div>
 
-    <!-- Auth state description line / 授權状态說明 -->
+    <!-- Auth state description line / 授權狀態說明 -->
     <div id="auth-state-desc" style="font-size:11px;color:var(--text-dim);margin-top:4px;margin-bottom:8px"></div>
 
     <div class="gov-boundary-note" id="auth-lease-boundary-note">
@@ -346,15 +346,15 @@
   <!-- Card 2: Decision Leases (SM-02) -->
   <div class="oc-card gov-sm-card">
     <h3 style="cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="toggleDL()">
-      <span>&#x1F4DD; Decision Leases / 決策租約 <abbr title="SM-02: 決策租約状态机。每個 AI 交易意圖持有一個有時效的租約，過期自動作废 / Decision lease state machine. Each AI intent holds a time-bounded lease that auto-expires." style="font-size:10px;color:var(--text-dim);cursor:help">SM-02</abbr></span>
+      <span>&#x1F4DD; Decision Leases / 決策租約 <abbr title="SM-02: 決策租約狀態機。每個 AI 交易意圖持有一個有時效的租約，過期自動作廢 / Decision lease state machine. Each AI intent holds a time-bounded lease that auto-expires." style="font-size:10px;color:var(--text-dim);cursor:help">SM-02</abbr></span>
       <span id="dl-toggle" style="font-size:10px;color:var(--text-dim)">▶ 展開</span>
     </h3>
     <div class="subtitle">只讀短租約追踪</div>
-    <div class="gov-sm-note">SM-02 把 AI 或策略意圖转换为短時有效的執行租約。租約只能由受控程序在最後執行窗口申請、使用、釋放；GUI 不提供手動批准 lease 的入口。</div>
+    <div class="gov-sm-note">SM-02 把 AI 或策略意圖轉換為短時有效的執行租約。租約只能由受控程序在最後執行窗口申請、使用、釋放；GUI 不提供手動批准 lease 的入口。</div>
     <details class="gov-learn">
       <summary>了解更多 / Learn more</summary>
       <div class="gov-learn-body">
-        它将“交易意圖”和“執行許可”分离。每個租約都有 TTL、範圍和状态，确保旧判斷不會在市场條件变化后繼續生效。
+        它將“交易意圖”和“執行許可”分離。每個租約都有 TTL、範圍和狀態，確保舊判斷不會在市場條件變化後繼續生效。
         最終 bounded Demo probe 會在同一窗口刷新 BBO、驗證 GUI 風控、取得短 lease、經 Rust authority path 下單，窗口結束後 lease 應回到 0。
       </div>
     </details>
@@ -366,7 +366,7 @@
     </div>
     <div class="oc-metrics">
       <div class="oc-metric">
-        <div class="oc-metric-label">Active Leases / 活跃租約</div>
+        <div class="oc-metric-label">Active Leases / 活躍租約</div>
         <div class="oc-metric-val" id="lease-active">--</div>
       </div>
       <div class="oc-metric">
@@ -379,7 +379,7 @@
       </div>
     </div>
 
-    <!-- Collapsible lease detail list / 可折叠租約详情列表 -->
+    <!-- Collapsible lease detail list / 可折疊租約詳情列表 -->
     <div style="margin-top:12px">
       <h4 style="cursor:pointer;font-size:0.9em;margin:0;padding:0;display:flex;justify-content:space-between;align-items:center" onclick="toggleLeaseList()">
         <span>詳情 Details</span>
@@ -396,19 +396,19 @@
 
   <!-- Card 3: OMS Execution (SM-03) -->
   <div class="oc-card gov-sm-card">
-    <h3>&#x1F9FE; OMS / 執行状态 <abbr title="SM-03: OMS 執行状态机。管理訂單从建立、校驗、提交到成交、取消或失败的生命周期 / OMS execution state machine. Manages order lifecycle from creation and validation to submission, fill, cancel, or failure." style="font-size:10px;color:var(--text-dim);cursor:help">SM-03</abbr></h3>
-    <div class="subtitle">訂單生命周期和執行边界</div>
-    <div class="gov-sm-note">SM-03 管理訂單从建立、校驗、提交、成交到取消或失败的生命周期。只有通過授權、租約和風控的意圖才應進入此状态机。</div>
+    <h3>&#x1F9FE; OMS / 執行狀態 <abbr title="SM-03: OMS 執行狀態機。管理訂單從建立、校驗、提交到成交、取消或失敗的生命週期 / OMS execution state machine. Manages order lifecycle from creation and validation to submission, fill, cancel, or failure." style="font-size:10px;color:var(--text-dim);cursor:help">SM-03</abbr></h3>
+    <div class="subtitle">訂單生命週期和執行邊界</div>
+    <div class="gov-sm-note">SM-03 管理訂單從建立、校驗、提交、成交到取消或失敗的生命週期。只有通過授權、租約和風控的意圖才應進入此狀態機。</div>
     <details class="gov-learn">
       <summary>了解更多 / Learn more</summary>
       <div class="gov-learn-body">
-        它回答“這笔交易是否已經成为訂單、訂單是否已提交、最終是否成交或終止”。SM-03 不授予交易權限；它執行前必须依賴 SM-01、SM-02 和 SM-04 的結果。
+        它回答“這筆交易是否已經成為訂單、訂單是否已提交、最終是否成交或終止”。SM-03 不授予交易權限；它執行前必須依賴 SM-01、SM-02 和 SM-04 的結果。
       </div>
     </details>
 
     <div class="oc-metrics">
       <div class="oc-metric">
-        <div class="oc-metric-label">Readiness / 準備状态</div>
+        <div class="oc-metric-label">Readiness / 準備狀態</div>
         <div class="oc-metric-val" id="oms-readiness" style="font-size:13px">--</div>
       </div>
       <div class="oc-metric">
@@ -417,7 +417,7 @@
       </div>
     </div>
     <div style="margin-top:12px">
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">Lifecycle / 生命周期</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">Lifecycle / 生命週期</div>
       <div class="gov-state-flow" id="oms-lifecycle">
         <span class="oc-chip oc-chip-neutral">CREATED</span>
         <span class="gov-flow-arrow">→</span>
@@ -436,19 +436,19 @@
 
   <!-- Card 4: Risk Governor (SM-04) -->
   <div class="oc-card gov-sm-card">
-    <h3>&#x1F6E1; Risk Governor / 風控治理 <abbr title="SM-04: 風險治理状态机。管理 Normal/Cautious/Defensive/CircuitBreaker 四级風險等级 / Risk governance state machine. Manages Normal/Cautious/Defensive/CircuitBreaker levels." style="font-size:10px;color:var(--text-dim);cursor:help">SM-04</abbr></h3>
-    <div class="subtitle">風險等级和模式</div>
-    <div class="gov-sm-note">SM-04 根據賬户、持倉、回撤和異常信號調整風險等级。風險升高時自動收縮；風險降低通常需要明确審批。</div>
+    <h3>&#x1F6E1; Risk Governor / 風控治理 <abbr title="SM-04: 風險治理狀態機。管理 Normal/Cautious/Defensive/CircuitBreaker 四級風險等級 / Risk governance state machine. Manages Normal/Cautious/Defensive/CircuitBreaker levels." style="font-size:10px;color:var(--text-dim);cursor:help">SM-04</abbr></h3>
+    <div class="subtitle">風險等級和模式</div>
+    <div class="gov-sm-note">SM-04 根據賬户、持倉、回撤和異常信號調整風險等級。風險升高時自動收縮；風險降低通常需要明確審批。</div>
     <details class="gov-learn">
       <summary>了解更多 / Learn more</summary>
       <div class="gov-learn-body">
-        它決定系統應處於正常、謹慎、收縮、防守、熔斷或人工審查状态。策略不能繞過 SM-04，風險锁定時訂單執行必须停止推進。
+        它決定系統應處於正常、謹慎、收縮、防守、熔斷或人工審查狀態。策略不能繞過 SM-04，風險鎖定時訂單執行必須停止推進。
       </div>
     </details>
 
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
       <div style="flex:1">
-        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Level / 等级</div>
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Level / 等級</div>
         <div id="risk-level-badge">--</div>
       </div>
       <div style="flex:1">
@@ -463,7 +463,7 @@
     </div>
 
     <button class="oc-btn oc-btn-primary" id="btn-override" style="width:100%" onclick="showOverrideModal()">
-      &#x1F4A7; De-escalate / 降级
+      &#x1F4A7; De-escalate / 降級
     </button>
   </div>
 
@@ -522,26 +522,26 @@
 <div class="gov-section-label">Reconciliation Extension / 對賬擴展</div>
 <div class="oc-card gov-full-row">
   <h3 style="cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="toggleRecon()">
-    <span>&#x1F503; Reconciliation / 對賬 <abbr title="EX-04: 持倉對賬。比较 Rust 內部持倉与交易所實際持倉，檢測漂移 / Position reconciler. Compares engine positions vs exchange actuals, detects drift." style="font-size:10px;color:var(--text-dim);cursor:help">EX-04</abbr></span>
+    <span>&#x1F503; Reconciliation / 對賬 <abbr title="EX-04: 持倉對賬。比較 Rust 內部持倉與交易所實際持倉，檢測漂移 / Position reconciler. Compares engine positions vs exchange actuals, detects drift." style="font-size:10px;color:var(--text-dim);cursor:help">EX-04</abbr></span>
     <span id="recon-toggle" style="font-size:10px;color:var(--text-dim)">▶ 展開</span>
   </h3>
-  <div class="subtitle">一致性檢查和手動触发</div>
-  <div class="gov-sm-note">EX-04 比较系統內部記錄与交易所實際状态，發現持倉、訂單或余额漂移。它不是核心授權状态机，但会影响風控和審計判斷。</div>
+  <div class="subtitle">一致性檢查和手動觸發</div>
+  <div class="gov-sm-note">EX-04 比較系統內部記錄與交易所實際狀態，發現持倉、訂單或餘額漂移。它不是核心授權狀態機，但會影響風控和審計判斷。</div>
   <details class="gov-learn">
     <summary>了解更多 / Learn more</summary>
     <div class="gov-learn-body">
-      對賬用于确認“系統記錄状态”和“交易所實際状态”是否一致。若出現不一致，應優先調查并可能触发 SM-04 風控收縮。
+      對賬用於確認“系統記錄狀態”和“交易所實際狀態”是否一致。若出現不一致，應優先調查並可能觸發 SM-04 風控收縮。
     </div>
   </details>
 
   <div id="recon-body" style="display:none">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
     <div style="flex:1">
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Status / 状态</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Status / 狀態</div>
       <div id="recon-consistency">--</div>
     </div>
     <div style="flex:1">
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Last Check / 最后檢查</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Last Check / 最後檢查</div>
       <div id="recon-time" style="font-size:12px">--</div>
     </div>
   </div>
@@ -552,7 +552,7 @@
   </div>
 
   <button class="oc-btn oc-btn-primary" id="btn-reconcile" style="width:100%" onclick="showReconcileModal()">
-    &#x1F504; Trigger / 触发對賬
+    &#x1F504; Trigger / 觸發對賬
   </button>
   </div><!-- end recon-body -->
 </div>
@@ -737,15 +737,15 @@
   </div>
 </div>
 
-<!-- ═══ Paper → Live Gate / 升级门禁 ═══ -->
-<div class="gov-section-label">Eligibility & Learning / 准入与學習</div>
+<!-- ═══ Paper → Live Gate / 升級門禁 ═══ -->
+<div class="gov-section-label">Eligibility & Learning / 准入與學習</div>
 <div class="oc-card" id="paper-live-gate-card">
-  <h3>&#x1F4CB; Paper 模擬 &#x2192; Live 實盤 Gate / 升级门禁</h3>
-  <div class="subtitle">升级 Live 實盤前的 11 项准入評估</div>
+  <h3>&#x1F4CB; Paper 模擬 &#x2192; Live 實盤 Gate / 升級門禁</h3>
+  <div class="subtitle">升級 Live 實盤前的 11 項准入評估</div>
 
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
     <div style="flex:1">
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Gate Status / 门禁状态</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Gate Status / 門禁狀態</div>
       <div id="plg-status-badge">--</div>
     </div>
     <div style="flex:1">
@@ -757,10 +757,10 @@
     </div>
   </div>
 
-  <!-- Criteria list toggle / 准入项目列表折叠 -->
+  <!-- Criteria list toggle / 准入項目列表折疊 -->
   <div>
     <h4 style="cursor:pointer;font-size:0.9em;margin:0 0 8px 0;padding:0;display:flex;justify-content:space-between;align-items:center" onclick="togglePLGCriteria()">
-      <span>准入项目 Criteria</span>
+      <span>准入項目 Criteria</span>
       <span id="plg-criteria-toggle" style="font-size:0.85em">▶</span>
     </h4>
     <div id="plg-criteria-body" style="display:none">
@@ -771,14 +771,14 @@
   </div>
 </div>
 
-<!-- ═══ Learning Tier / 學習層级 ═══ -->
+<!-- ═══ Learning Tier / 學習層級 ═══ -->
 <div class="oc-card" id="learning-tier-card">
-  <h3>&#x1F393; Learning Tier / 學習層级</h3>
-  <div class="subtitle">L0&#x2192;L5 自動晋升追踪</div>
+  <h3>&#x1F393; Learning Tier / 學習層級</h3>
+  <div class="subtitle">L0&#x2192;L5 自動晉升追踪</div>
 
   <div class="oc-metrics" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:12px">
     <div class="oc-metric">
-      <div class="oc-metric-label">Current Tier / 當前層级</div>
+      <div class="oc-metric-label">Current Tier / 當前層級</div>
       <div class="oc-metric-val" id="lt-tier">--</div>
     </div>
     <div class="oc-metric">
@@ -791,9 +791,9 @@
     </div>
   </div>
 
-  <!-- Progress bar toward next tier / 升级進度條 -->
+  <!-- Progress bar toward next tier / 升級進度條 -->
   <div style="margin-bottom:12px">
-    <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">Progress to Next Tier / 下一層级進度</div>
+    <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">Progress to Next Tier / 下一層級進度</div>
     <div style="background:var(--bg);border-radius:6px;height:8px;overflow:hidden">
       <div id="lt-progress" style="height:100%;width:0%;background:var(--accent);border-radius:6px;transition:width 0.4s ease"></div>
     </div>
@@ -802,7 +802,7 @@
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
     <div id="lt-eligible">--</div>
     <button id="btn-promote" class="oc-btn oc-btn-success" style="display:none" onclick="showPromoteModal()">
-      &#x1F4C8; 手動晋升 Promote
+      &#x1F4C8; 手動晉升 Promote
     </button>
   </div>
 </div>
@@ -884,7 +884,7 @@
 </div>
 
 <!-- ═══ Governance Events Feed / 治理事件流 ═══ -->
-<div class="gov-section-label">Approvals & Events / 審批与事件</div>
+<div class="gov-section-label">Approvals & Events / 審批與事件</div>
 <!-- ═══ Pending Approvals / 待批准項目 ═══ -->
 <div class="oc-card" id="pending-approvals-card">
   <h3 style="cursor:pointer" onclick="togglePendingApprovals()">
@@ -933,7 +933,7 @@
 </div>
 
 <!-- ═══ Cross-SM Summary ═══ -->
-<div class="gov-section-label">Status & Audit / 状态与審計</div>
+<div class="gov-section-label">Status & Audit / 狀態與審計</div>
 <div class="oc-card">
   <h3>&#x1F4CA; Governance Summary / 治理摘要</h3>
 
@@ -991,7 +991,7 @@
             <th>Time / 時間</th>
             <th>SM / Who</th>
             <th>Event / 事件</th>
-            <th>Change / 变更</th>
+            <th>Change / 變更</th>
             <th>Reason / 原因</th>
           </tr>
         </thead>
@@ -1008,7 +1008,7 @@
   <div class="oc-modal-content">
     <h3>&#x1F4CB; 申請授權 / Request Authorization</h3>
     <p style="font-size:12px;color:var(--text-dim);margin:8px 0 12px 0">
-      为 Live 實盤交易申請操作員授權。Paper 模擬會自動授權，無需此步驟。<br>
+      為 Live 實盤交易申請操作員授權。Paper 模擬會自動授權，無需此步驟。<br>
       Request Operator authorization for Live trading. Paper is auto-authorized.
     </p>
     <div style="margin-bottom:12px">
@@ -1051,12 +1051,12 @@
 <!-- ═══ Modal: Override Risk Level ═══ -->
 <div id="modal-override" class="oc-modal" style="display:none">
   <div class="oc-modal-content">
-    <h3>De-escalate Risk Level / 降级風險等级</h3>
+    <h3>De-escalate Risk Level / 降級風險等級</h3>
     <p style="font-size:12px;color:var(--text-dim);margin:8px 0 12px 0">
       Select target risk level (de-escalation only)
     </p>
     <div style="margin-bottom:12px">
-      <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:6px">Target Level / 目標等级</label>
+      <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:6px">Target Level / 目標等級</label>
       <select id="override-level" class="oc-select" style="width:100%">
         <option value="">-- Select Level --</option>
       </select>
@@ -1064,7 +1064,7 @@
     <div style="margin-bottom:12px">
       <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:6px">Reason / 原因</label>
       <textarea id="override-reason" class="oc-input" style="width:100%;height:80px;resize:vertical;font-family:inherit"
-        placeholder="Reason for de-escalation / 降级原因..." maxlength="500"></textarea>
+        placeholder="Reason for de-escalation / 降級原因..." maxlength="500"></textarea>
     </div>
     <div class="oc-modal-footer">
       <button class="oc-btn" onclick="hideOverrideModal()">Cancel / 取消</button>
@@ -1092,12 +1092,12 @@
 <!-- ═══ Modal: Promote Learning Tier ═══ -->
 <div id="modal-promote" class="oc-modal" style="display:none">
   <div class="oc-modal-content">
-    <h3>&#x1F393; 手動晋升 Manual Tier Promotion</h3>
+    <h3>&#x1F393; 手動晉升 Manual Tier Promotion</h3>
     <p style="font-size:12px;color:var(--text-dim);margin:8px 0 12px 0">
-      手動晋升學習層级 (需要 Operator 批准) / Manually promote learning tier (requires Operator approval)
+      手動晉升學習層級 (需要 Operator 批准) / Manually promote learning tier (requires Operator approval)
     </p>
     <div style="margin-bottom:12px">
-      <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:6px">Target Tier / 目標層级</label>
+      <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:6px">Target Tier / 目標層級</label>
       <select id="promote-tier" class="oc-select" style="width:100%">
         <option value="">-- Select Tier --</option>
         <option value="L1">L1 — Local Ollama</option>
@@ -1108,7 +1108,7 @@
     <div style="margin-bottom:12px">
       <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:6px">Reason / 原因</label>
       <textarea id="promote-reason" class="oc-input" style="width:100%;height:80px;resize:vertical;font-family:inherit"
-        placeholder="Reason for manual promotion / 手動晋升原因..." maxlength="500"></textarea>
+        placeholder="Reason for manual promotion / 手動晉升原因..." maxlength="500"></textarea>
     </div>
     <div class="oc-modal-footer">
       <button class="oc-btn" onclick="hidePromoteModal()">Cancel / 取消</button>
@@ -1139,25 +1139,26 @@
 
 
 <script>
-// ── Decision Leases + Reconciliation collapse toggles / 折叠切换 ───────���───
+// ── Decision Leases + Reconciliation collapse toggles / 折疊切換 ───────���───
 function toggleDL() {
   const body = document.getElementById('dl-body');
   const tog = document.getElementById('dl-toggle');
   const open = body.style.display !== 'none';
   body.style.display = open ? 'none' : '';
-  tog.textContent = open ? '▶ 展開' : '▼ 折叠';
+  tog.textContent = open ? '▶ 展開' : '▼ 折疊';
 }
 function toggleRecon() {
   const body = document.getElementById('recon-body');
   const tog = document.getElementById('recon-toggle');
   const open = body.style.display !== 'none';
   body.style.display = open ? 'none' : '';
-  tog.textContent = open ? '▶ 展開' : '▼ 折叠';
+  tog.textContent = open ? '▶ 展開' : '▼ 折疊';
 }
 
 // ── Quick Status Banner updater — hooks into governance-tab.js data flows ──
-// Populated by loadGovernance() and loadSummary() callbacks in governance-tab.js
-// 通過 governance-tab.js 的 loadGovernance()/loadSummary() 回調填充
+// 由 governance-tab.js 的 loadAll() 觸發的各狀態載入器（auth/risk/recon/learning）
+// 分別以部分參數回調填充；不存在 loadGovernance()/loadSummary()（P2-14 已修的死呼叫，
+// 見上方 :281 刷新按鈕註釋）。此處更正舊 stale 註釋指向實際存在的 loadAll()。
 function updateQuickStatus(auth, risk, recon, learning, oms) {
   const el = function(id) { return document.getElementById(id); };
   if (auth !== undefined) el('qs-auth').textContent = auth || '--';

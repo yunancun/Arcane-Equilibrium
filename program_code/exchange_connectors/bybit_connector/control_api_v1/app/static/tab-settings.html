@@ -128,7 +128,7 @@
           <div><label style="font-size:11px;color:var(--text-dim)">Amount ($)</label>
           <input class="oc-input" id="cost-amount" type="number" step="0.01" style="width:100%" /></div>
           <div><label style="font-size:11px;color:var(--text-dim)">Note</label>
-          <input class="oc-input" id="cost-note" style="width:100%" placeholder="Optional description" /></div>
+          <input class="oc-input" id="cost-note" style="width:100%" placeholder="可選描述 / Optional description" /></div>
           <button class="oc-btn oc-btn-primary" onclick="submitCost()">Submit Cost</button>
         </div>
       </div>
@@ -140,7 +140,7 @@
           <div><label style="font-size:11px;color:var(--text-dim)">Amount ($)</label>
           <input class="oc-input" id="pnl-amount" type="number" step="0.01" style="width:100%" /></div>
           <div><label style="font-size:11px;color:var(--text-dim)">Note</label>
-          <input class="oc-input" id="pnl-note" style="width:100%" placeholder="Optional description" /></div>
+          <input class="oc-input" id="pnl-note" style="width:100%" placeholder="可選描述 / Optional description" /></div>
           <button class="oc-btn oc-btn-primary" onclick="submitPnl()">Submit PnL</button>
         </div>
       </div>
@@ -796,13 +796,13 @@ async function demoAction(action) {
       ocSetHtml('action-result', '<div class="oc-chip oc-chip-warn">validate 已標記（非驗證）</div>');
       loadControlPlane();
     } else {
-      ocToast('Demo ' + action + ' OK', 'success');
+      ocToast('Demo ' + action + ' 成功 / OK', 'success');
       if (d.state_revision) stateRevision = d.state_revision;
       ocSetHtml('action-result', '<div class="oc-chip oc-chip-good">' + action + ' completed</div>');
       loadControlPlane();
     }
   } else {
-    ocToast('Demo ' + action + ' failed', 'error');
+    ocToast('Demo ' + action + ' 失敗 / failed', 'error');
     ocSetHtml('action-result', '<div class="oc-chip oc-chip-bad">' + action + ' failed</div>');
   }
 }
@@ -816,7 +816,7 @@ async function bundleRecheck() {
     ocToast('Recheck bundle 已手動標記（非驗證 / manual mark, not verified）', 'warn');
     loadAll();
   } else {
-    ocToast('Recheck failed', 'error');
+    ocToast('重新檢查失敗 / Recheck failed', 'error');
   }
 }
 
@@ -848,7 +848,7 @@ async function configAction(action) {
   // tab-system.html executeModeChange 的判讀：success 顯綠、residualRisk 顯常駐橫幅、其餘顯 error。
   const r = classifyLiveMutation(d);
   if (r.severity === 'success' && d && d.action_result === 'success') {
-    ocToast('Config change OK', 'success');
+    ocToast('配置變更成功 / Config change OK', 'success');
     if (d.state_revision) stateRevision = d.state_revision;
     await loadAll();
   } else if (r.residualRisk) {
@@ -869,8 +869,8 @@ async function submitCost() {
     note: $('cost-note').value,
   }, stateRevision);
   const d = await ocPost('/api/v1/input/cost', body);
-  if (d) { ocToast('Cost recorded', 'success'); $('cost-amount').value = ''; $('cost-note').value = ''; }
-  else ocToast('Submit failed', 'error');
+  if (d) { ocToast('已記錄成本 / Cost recorded', 'success'); $('cost-amount').value = ''; $('cost-note').value = ''; }
+  else ocToast('提交失敗 / Submit failed', 'error');
 }
 
 async function submitPnl() {
@@ -880,8 +880,8 @@ async function submitPnl() {
     note: $('pnl-note').value,
   }, stateRevision);
   const d = await ocPost('/api/v1/input/pnl-entry', body);
-  if (d) { ocToast('PnL recorded', 'success'); $('pnl-amount').value = ''; $('pnl-note').value = ''; }
-  else ocToast('Submit failed', 'error');
+  if (d) { ocToast('已記錄盈虧 / PnL recorded', 'success'); $('pnl-amount').value = ''; $('pnl-note').value = ''; }
+  else ocToast('提交失敗 / Submit failed', 'error');
 }
 
 // ─── Data Loading ─────────────────────────────────────────────
