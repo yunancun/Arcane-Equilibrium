@@ -57,6 +57,12 @@ pub use cost_edge_cfg::CostEdgeConfig;
 pub mod fast_track_cfg;
 pub use fast_track_cfg::FastTrackConfig;
 
+// OOS-9 (2026-07-05): close-maker 退避 / 級聯常數 config 化，落在獨立 sibling
+// 檔（對齊 slippage / fast_track sibling 拆分模式，不再壓縮已超標的 advanced 檔）。
+#[path = "risk_config_close_maker_backoff.rs"]
+pub mod close_maker_backoff_cfg;
+pub use close_maker_backoff_cfg::CloseMakerBackoffConfig;
+
 // LG architecture pass (2026-05-11): runtime-facing projection lives outside
 // the primary config schema so callers do not duplicate fallback semantics.
 // LG 架構修復：runtime-facing 投影拆出，避免 callers 重複理解 fallback。
@@ -203,6 +209,13 @@ pub struct RiskConfig {
     /// 0.3 / 1.3。預設保持 G7-07 前行為 bit-identical，可熱重載。
     #[serde(default)]
     pub slippage: SlippageConfig,
+    /// OOS-9 (2026-07-05): close-maker `TooManyPending` 退避 / 級聯參數。
+    /// 把 `strategies::maker_rejection` 六個硬編常數（初始/上限退避、reset window、
+    /// cascade 窗口/symbol 數、global pause）抽成可熱重載 config。預設與原常數
+    /// bit-identical，TOML 缺 `[close_maker_backoff]` section 時 serde default
+    /// 補回原值，行為不變。只 config 化不改值。
+    #[serde(default)]
+    pub close_maker_backoff: CloseMakerBackoffConfig,
     /// G7-06 (2026-04-24): Grid OU residual-based σ estimator schema.
     /// Configures the rolling-window residual-stdev estimator used (in Phase B)
     /// by `grid_helpers::compute_ou_step` to replace the raw-Δx σ path with a
@@ -291,6 +304,7 @@ impl RiskConfig {
         self.ewma_vol.validate()?;
         self.cusum.validate()?;
         self.slippage.validate()?;
+        self.close_maker_backoff.validate()?;
         self.grid_ou.validate()?;
         self.hurst
             .validate()
