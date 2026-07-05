@@ -275,7 +275,13 @@ pub fn ewma_vol(close: &[f64], lambda: f64) -> Option<EwmaVolResult> {
     }
 
     // Log returns
-    let returns: Vec<f64> = close.windows(2).map(|w| (w[1] / w[0]).ln()).collect();
+    // QC-6：過濾掉任一價格 <= 0 的相鄰對，避免 log 計算產生 NaN/Inf 污染 EWMA
+    //       variance 與 regime 判定（與同檔 hurst() 的過濾守衛對齊）。
+    let returns: Vec<f64> = close
+        .windows(2)
+        .filter(|w| w[0] > 0.0 && w[1] > 0.0)
+        .map(|w| (w[1] / w[0]).ln())
+        .collect();
     if returns.is_empty() {
         return None;
     }
@@ -397,5 +403,38 @@ mod tests {
         assert!(ewma_vol(&[1.0, 2.0], 0.97).is_none()); // need >= 3
         assert!(ewma_vol(&CLOSE_20, 1.0).is_none()); // lambda must be < 1
         assert!(ewma_vol(&CLOSE_20, -0.1).is_none()); // lambda must be >= 0
+    }
+
+    // QC-6：close 含 0 或負值時，log-return 過濾守衛須避免 NaN/Inf 傳播。
+    #[test]
+    fn test_ewma_vol_nonpositive_guard() {
+        // 序列中混入一個 0 與一個負值：受影響的相鄰對被過濾，
+        // 剩餘有效 return 仍產生有限的 ewma_vol（非 NaN/Inf）。
+        let close = [44.0, 44.25, 0.0, 44.50, -1.0, 44.25, 44.00, 43.50, 43.25, 43.75];
+        let r = ewma_vol(&close, 0.97).expect("有效 return 足夠時應回 Some");
+        assert!(r.ewma_vol.is_finite(), "ewma_vol 必須有限，實為 {}", r.ewma_vol);
+        assert!(r.ewma_vol >= 0.0);
+        assert!(r.vol_regime == "low" || r.vol_regime == "normal" || r.vol_regime == "high");
+
+        // 全非正價格 → 全被過濾 → returns 空 → None（與 hurst insufficient-valid 回退同構）。
+        assert!(ewma_vol(&[0.0, -1.0, -2.0, 0.0], 0.97).is_none());
+    }
+
+    // QC-6：正常正價序列在加入過濾守衛後結果不變（byte-equal 回歸）。
+    #[test]
+    fn test_ewma_vol_positive_unchanged() {
+        // 過濾守衛對全正價序列是 no-op：手算期望值鎖定，防未來 regression。
+        let r = ewma_vol(&CLOSE_20, 0.97).unwrap();
+        let returns: Vec<f64> = CLOSE_20.windows(2).map(|w| (w[1] / w[0]).ln()).collect();
+        let mut variance = returns[0] * returns[0];
+        for &x in &returns[1..] {
+            variance = 0.97 * variance + (1.0 - 0.97) * x * x;
+        }
+        let expected = variance.sqrt();
+        assert_eq!(
+            r.ewma_vol.to_bits(),
+            expected.to_bits(),
+            "全正價序列過濾守衛須為 no-op（bit-identical）"
+        );
     }
 }
