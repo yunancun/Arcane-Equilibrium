@@ -178,7 +178,7 @@ fn test_flash_dip_demo_gate_flag_off_zero_registration() {
     std::env::remove_var("OPENCLAW_FLASH_DIP_PILOT_ENABLED"); // flag OFF
                                                               // flag OFF → 即使 Demo 也 0 次。
     assert_eq!(
-        flash_dip_count(&StrategyFactory::create_for_engine(PipelineKind::Demo)),
+        flash_dip_count(&StrategyFactory::create_for_engine(PipelineKind::Demo, None)),
         0,
         "flag OFF must yield 0 flash_dip_buy registration even in Demo"
     );
@@ -189,8 +189,8 @@ fn test_flash_dip_never_in_paper_or_live_even_with_flag_on() {
     let _g = FLASH_DIP_ENV_LOCK.lock().unwrap();
     // 強制 flag ON：仍只有 Demo 可能註冊；Paper / Live 結構性 0 次。
     std::env::set_var("OPENCLAW_FLASH_DIP_PILOT_ENABLED", "1");
-    let paper = flash_dip_count(&StrategyFactory::create_for_engine(PipelineKind::Paper));
-    let live = flash_dip_count(&StrategyFactory::create_for_engine(PipelineKind::Live));
+    let paper = flash_dip_count(&StrategyFactory::create_for_engine(PipelineKind::Paper, None));
+    let live = flash_dip_count(&StrategyFactory::create_for_engine(PipelineKind::Live, None));
     std::env::remove_var("OPENCLAW_FLASH_DIP_PILOT_ENABLED");
     assert_eq!(paper, 0, "flash_dip_buy must NEVER register in Paper pipeline");
     assert_eq!(live, 0, "flash_dip_buy must NEVER register in Live pipeline");
@@ -203,7 +203,7 @@ fn test_flash_dip_demo_gate_requires_all_three_conditions() {
     // 的 [flash_dip_buy].active=false → 即使 Demo + flag-ON 仍 0 次（active gate 守住）。
     // 此測試證「flag-ON + Demo 但 active=false → 不註冊」（active 為第三必要條件）。
     std::env::set_var("OPENCLAW_FLASH_DIP_PILOT_ENABLED", "1");
-    let demo = flash_dip_count(&StrategyFactory::create_for_engine(PipelineKind::Demo));
+    let demo = flash_dip_count(&StrategyFactory::create_for_engine(PipelineKind::Demo, None));
     std::env::remove_var("OPENCLAW_FLASH_DIP_PILOT_ENABLED");
     // active=false default in repo TOML → 0 次（除非 operator 顯式 active=true）。
     assert_eq!(

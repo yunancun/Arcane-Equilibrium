@@ -657,6 +657,14 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
         info!("pipeline using NewsContextSnapshot for news context / 接入新聞快照");
     }
 
+    // OOS-9 wiring：在 risk_store 被 move 進 pipeline 之前，取 close-maker 退避
+    // config 的啟動快照，稍後（create_for_engine）注入 grid_trading。close-maker
+    // runtime state 刻意不熱重載（見 CloseMakerBackoffState 註釋），故啟動一次讀取
+    // 即凍結；此快照與 pipeline 首 tick 讀的 risk_store 首快照同源同值。
+    let close_maker_backoff_snapshot = risk_store
+        .as_ref()
+        .map(|store| store.load().close_maker_backoff.clone());
+
     // ARCH-RC1 1C-2-B: Wire live RiskConfig + BudgetConfig stores.
     // First tick after this point reads the real operator-authored config
     // and hot-reloads automatically on every IPC patch that bumps the version.
@@ -862,7 +870,12 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
 
     // Register strategies via factory (3E-9 + BLOCKER-8: per-engine TOML params)
     // 通過工廠註冊策略（3E-9 + BLOCKER-8：每引擎 TOML 參數）
-    for strategy in StrategyFactory::create_for_engine(pipeline_kind) {
+    // OOS-9 wiring：傳入 close-maker 退避啟動快照，令 grid_trading 的退避 runtime
+    // state 用 operator RiskConfig `[close_maker_backoff]` 值（無 risk_store 時 None
+    // → default，bit-identical）。
+    for strategy in
+        StrategyFactory::create_for_engine(pipeline_kind, close_maker_backoff_snapshot.as_ref())
+    {
         pipeline.orchestrator.register(strategy);
     }
 

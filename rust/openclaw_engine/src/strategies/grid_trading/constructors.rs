@@ -60,6 +60,13 @@ impl GridTrading {
             // BB-MF-3 (2026-05-16)：拆 entry / close 兩條獨立 cooldown map。
             reject_cooldown_entry_until_ms: HashMap::new(),
             reject_cooldown_close_until_ms: HashMap::new(),
+            // OOS-9 wiring (2026-07-05)：建構子為 free constructor（僅 lower/upper），
+            // 結構上拿不到 `RiskConfig`，故仍用 `new()`（= default，與原六常數
+            // bit-identical）。TOML `[close_maker_backoff]` 值由 registry
+            // `create_for_engine` 在建構後經 `apply_close_maker_backoff_config`
+            // 注入 —— 這是本 strategy 唯一有 operator RiskConfig 可用的 production
+            // wiring 點，與 `gt.cooldown_ms = ...` 等既有 post-construction override
+            // 同一條路。測試 / replay / create_all 走 `None` 保持 default。
             close_maker_backoff: CloseMakerBackoffState::new(),
             adaptive_range_pct: ADAPTIVE_RANGE_PCT,
             reject_backoff_ms: REJECT_BACKOFF_MS,
@@ -120,6 +127,8 @@ impl GridTrading {
             // BB-MF-3 (2026-05-16)：拆 entry / close 兩條獨立 cooldown map。
             reject_cooldown_entry_until_ms: HashMap::new(),
             reject_cooldown_close_until_ms: HashMap::new(),
+            // OOS-9 wiring：free constructor 無 RiskConfig，用 default；registry
+            // post-construction 注入。詳見 `new()` 同欄位註釋。
             close_maker_backoff: CloseMakerBackoffState::new(),
             adaptive_range_pct: ADAPTIVE_RANGE_PCT,
             reject_backoff_ms: REJECT_BACKOFF_MS,
@@ -194,6 +203,8 @@ impl GridTrading {
             // BB-MF-3 (2026-05-16)：拆 entry / close 兩條獨立 cooldown map。
             reject_cooldown_entry_until_ms: HashMap::new(),
             reject_cooldown_close_until_ms: HashMap::new(),
+            // OOS-9 wiring：free constructor 無 RiskConfig，用 default；registry
+            // post-construction 注入。詳見 `new()` 同欄位註釋。
             close_maker_backoff: CloseMakerBackoffState::new(),
             adaptive_range_pct: ADAPTIVE_RANGE_PCT,
             reject_backoff_ms: REJECT_BACKOFF_MS,
@@ -228,6 +239,24 @@ impl GridTrading {
         if rate > 0.0 {
             self.fee_rate = rate;
         }
+    }
+
+    /// OOS-9 wiring：以 operator 的 RiskConfig `[close_maker_backoff]` 值重建
+    /// close-maker 退避 runtime state（等效 `CloseMakerBackoffState::with_config`）。
+    ///
+    /// 為什麼經此 setter 而非建構子：三個 `new*` 建構子為 free constructor，結構上
+    /// 拿不到 `RiskConfig`；此方法由 registry `create_for_engine`（唯一有 operator
+    /// RiskConfig 的 production 建構點）在建構後呼叫，讓 TOML 值真流入 runtime，而
+    /// 測試 / replay / create_all 路徑保留 default（bit-identical）。
+    ///
+    /// 為什麼可整體替換 state：呼叫點在 registry 建構期、任何 tick 之前，此時
+    /// `close_maker_backoff` 尚無累積退避 / 級聯 state，整體換成注入 config 的空
+    /// state 不丟任何 runtime 資訊。
+    pub fn apply_close_maker_backoff_config(
+        &mut self,
+        cfg: &crate::config::risk_config::CloseMakerBackoffConfig,
+    ) {
+        self.close_maker_backoff = CloseMakerBackoffState::with_config(cfg.clone());
     }
 
     pub fn update_params(&mut self, params: GridTradingParams) -> Result<(), String> {
