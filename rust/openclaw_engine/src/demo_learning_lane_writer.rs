@@ -41,6 +41,10 @@ const ENABLE_WRITER_ENV: &str = "OPENCLAW_DEMO_LEARNING_LANE_WRITER";
 const PLAN_PATH_ENV: &str = "OPENCLAW_DEMO_LEARNING_LANE_PLAN";
 const LEDGER_PATH_ENV: &str = "OPENCLAW_DEMO_LEARNING_LANE_LEDGER";
 const OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED: &str = "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED";
+// OOS-11=B:degraded(唯讀降級)態下 capture-error row 的 capture_error 標記。
+// 為什麼獨立字串:與一般 admission 評估失敗區分,供告警 / 觀測 grep「cache 不
+// 可信、本輪未評估、方向 fail-closed」的降級事件,毒行修好前持續出現。
+const DEGRADED_LEDGER_CAPTURE_ERROR: &str = "ledger_cache_degraded_read_only";
 
 // pub(crate):dispatch-edge withhold 的 feed 恢復釘子測試需檢視 writer channel
 // 收到的 RejectEvent(見 step_4_5_dispatch_tests.rs);僅 crate 內測試消費。
@@ -270,19 +274,37 @@ async fn run_writer(
     // 比對;任何外部變化(增長/截斷/替換/刪除)→ 先 flush 自寫緩衝再全量
     // 重讀。外部 append 低頻(cron 每小時級),攤還仍 O(1),設計「消除每事件
     // 全量重讀」目的保留。
-    let mut ledger_rows = match read_ledger_rows(&ledger_path) {
-        Ok(rows) => rows,
+    //
+    // OOS-11=B(operator 2026-07-05 裁定):啟動載入失敗不再 return-die。
+    // 為什麼不自殺:from_jsonl_str 對任一毒行整檔 Err(all-or-nothing,毒行拒
+    // 語義刻意保留、不放寬 admission),舊碼 warn 後 return = 靜默死到重啟——
+    // 期間 writer 停寫、無告警、operator 無感。改為進入 degraded/read-only 態:
+    // 該輪不信任 in-memory cache(不做 ledger-based dedup / side-cell disable
+    // 判定),對事件只落 fail-closed 的 degraded capture-error row
+    // (allowed_to_submit_order=false,永不 admit / 派單=方向只收緊不放寬),
+    // 並每事件持續告警;task 存活,下一事件重試整檔重讀,毒行被 rotation /
+    // operator 修檔後乾淨即自動退出 degraded。
+    let (mut ledger_rows, mut degraded) = match read_ledger_rows(&ledger_path) {
+        Ok(rows) => (rows, false),
         Err(e) => {
             warn!(
                 error = %e,
                 ledger_path = %ledger_path.display(),
-                "demo-learning lane writer failed to load ledger cache; exiting / demo-learning lane ledger cache 載入失敗，任務退出"
+                "demo-learning lane writer ledger cache load failed; entering degraded read-only mode / demo-learning lane ledger cache 載入失敗，進入 degraded 唯讀降級態"
             );
-            return;
+            (Vec::new(), true)
         }
     };
     // stat 快照:None = 檔案不存在(或 stat 暫不可得,下一事件重試判定)。
-    let mut ledger_stat = stat_ledger(&ledger_path).ok().flatten();
+    // degraded 態下強制 None:即使毒檔可 stat,也不得用毒檔 stat 固化盲態;
+    // 下一事件必嘗試重讀恢復。
+    let mut ledger_stat = if degraded {
+        None
+    } else {
+        stat_ledger(&ledger_path).ok().flatten()
+    };
+    // degraded 告警節流:毒檔可能高頻觸發事件,持續告警但不淹沒日誌。
+    let mut last_degraded_warn_ms: u64 = 0;
     // P1-10:writer 持有的 append fd 對應的 (dev, ino)。輪轉(自身或 Python 側)
     // 後主檔 inode 變化,writer 據此重開 fd,否則會續寫舊 inode(已成段檔)。
     // open_writer 建檔即存在,identity 必可得;偶發 None 時下一事件重試。
@@ -318,31 +340,80 @@ async fn run_writer(
                     &mut writer_identity,
                     &mut ledger_stat,
                 );
-                // F1:先做 stat 級外部變化偵測;refresh 失敗走既有 capture-error
-                // 分支(鏡像修前「每事件讀檔失敗 → capture-error row」語義)。
-                // L-R2:記住 refresh 成敗——失敗時 capture-error 分支不得推進
-                // stat 快照,保留舊 stat 使下一事件必重試重讀。
-                let refresh_result = refresh_ledger_cache_if_externally_changed(
-                    &mut bw,
-                    &ledger_path,
-                    &mut ledger_rows,
-                    &mut ledger_stat,
-                );
-                let refresh_ok = refresh_result.is_ok();
-                let admission_build = refresh_result.and_then(|()| {
-                    build_runtime_admission_result(
-                        &plan_path,
-                        &ledger_rows,
-                        &event,
-                        &risk_state,
-                        now_ms,
-                        Utc::now(),
-                        placement_decision.as_ref(),
-                        active_order_request,
-                        active_order_dispatch_channel_available,
-                        None,
+                // OOS-11=B:degraded 態下先嘗試整檔重讀恢復。成功 = 毒行已被
+                // rotation / operator 修檔清掉,採納乾淨 cache + stat 並退出
+                // degraded,本輪走正常 admission。仍失敗 = 保持 degraded,本輪
+                // 只落 fail-closed degraded row(見下)。
+                if degraded {
+                    // L-R1 紀律:先取「讀之前」的 stat 當快照,再讀。讀與 stat 間
+                    // 若有外部 append,該行已進 cache 而快照偏小 → 至多下一事件過
+                    // 觸發一次重讀(方向安全);反向會把讀不到的外部行 bytes 吞進
+                    // 快照形成盲窗。
+                    let pre_read_stat = stat_ledger(&ledger_path).ok().flatten();
+                    match read_ledger_rows(&ledger_path) {
+                        Ok(rows) => {
+                            ledger_rows = rows;
+                            ledger_stat = pre_read_stat;
+                            degraded = false;
+                            info!(
+                                ledger_path = %ledger_path.display(),
+                                rows = ledger_rows.len(),
+                                "demo-learning lane ledger cache recovered; exiting degraded mode / demo-learning lane ledger cache 已恢復，退出 degraded 態"
+                            );
+                        }
+                        Err(e) => {
+                            // 持續告警(節流):writer 未死,但 cache 不可信,
+                            // operator 需修毒檔或等 rotation。
+                            let now = epoch_ms();
+                            if now.saturating_sub(last_degraded_warn_ms) >= WARN_THROTTLE_MS {
+                                last_degraded_warn_ms = now;
+                                warn!(
+                                    error = %e,
+                                    ledger_path = %ledger_path.display(),
+                                    "demo-learning lane ledger cache still degraded; writing fail-closed degraded row / demo-learning lane ledger cache 仍 degraded，落 fail-closed degraded row"
+                                );
+                            }
+                        }
+                    }
+                }
+                // OOS-11=B:degraded 未恢復 → 本輪不信任 cache,跳過正常 admission
+                // (避免對空/stale cache 做 dedup / side-cell disable 判定而誤放寬),
+                // 直接以 degraded 標記走 capture-error 落 fail-closed row。
+                // refresh_ok=false 使下方不推進 stat 快照 → 下一事件必重試重讀。
+                let (refresh_ok, admission_build) = if degraded {
+                    (
+                        false,
+                        Err(DEGRADED_LEDGER_CAPTURE_ERROR.to_string())
+                            as Result<Option<RuntimeAdmissionBuildResult>, String>,
                     )
-                });
+                } else {
+                    // F1:先做 stat 級外部變化偵測;refresh 失敗走既有 capture-error
+                    // 分支(鏡像修前「每事件讀檔失敗 → capture-error row」語義)。
+                    // L-R2:記住 refresh 成敗——失敗時 capture-error 分支不得推進
+                    // stat 快照,保留舊 stat 使下一事件必重試重讀。
+                    let refresh_result = refresh_ledger_cache_if_externally_changed(
+                        &mut bw,
+                        &ledger_path,
+                        &mut ledger_rows,
+                        &mut ledger_stat,
+                    );
+                    let refresh_ok = refresh_result.is_ok();
+                    let admission_build = refresh_result.and_then(|()| {
+                        build_runtime_admission_result(
+                            &plan_path,
+                            &ledger_rows,
+                            &event,
+                            &risk_state,
+                            now_ms,
+                            Utc::now(),
+                            placement_decision.as_ref(),
+                            active_order_request,
+                            active_order_dispatch_channel_available,
+                            None,
+                        )
+                    });
+                    (refresh_ok, admission_build)
+                };
                 match admission_build {
                     Ok(Some(result)) => {
                         match result.record.to_json_string() {
@@ -1907,6 +1978,111 @@ mod tests {
         assert_eq!(
             crate::demo_learning_lane_rotation::rotated_segment_paths_for_test(&ledger).len(),
             0
+        );
+    }
+
+    /// OOS-11=B 紅測試(修前必紅):啟動時 ledger 含毒行 → read_ledger_rows
+    /// 整檔 Err。舊碼 warn 後 return-die,writer task 靜默結束,毒檔後 append 的
+    /// 事件永不落 row。修後 = 進 degraded 態存活,對事件落一條 fail-closed 的
+    /// degraded capture-error row(allowed_to_submit_order=false,永不 admit),
+    /// task 不 return / 不 panic。
+    #[tokio::test]
+    async fn poison_ledger_at_startup_enters_degraded_and_does_not_die() {
+        let tmp = TempDir::new().unwrap();
+        let plan_path = tmp.path().join("plan.json");
+        let ledger_path = tmp.path().join("probe_ledger.jsonl");
+        std::fs::write(&plan_path, plan_json("2026-06-21T10:49:45Z")).unwrap();
+        // 毒行:from_jsonl_str 對它整檔 Err(all-or-nothing 語義保留)。
+        std::fs::write(&ledger_path, "this-is-not-json\n").unwrap();
+
+        let (tx, rx) = mpsc::channel(4);
+        let cancel = CancellationToken::new();
+        let handle = tokio::spawn(run_writer(
+            rx,
+            plan_path,
+            ledger_path.clone(),
+            cancel.clone(),
+        ));
+
+        // 毒檔已在啟動載入失敗;此事件應落 degraded row 而非讓 task 死掉。
+        tx.send(writer_msg(reject_event())).await.unwrap();
+        drop(tx);
+        // 修前:task 已 return,handle.await 立即 Ok 但無新 row;修後同樣 Ok
+        // (channel 關閉後正常退出),差別在下面 row 斷言。task 不 panic。
+        handle.await.expect("writer task 不得 panic;degraded 態應存活至 channel 關閉");
+
+        // 檔案 = 毒行 + 一條 degraded capture-error row。
+        let content = std::fs::read_to_string(&ledger_path).unwrap();
+        let degraded_line = content
+            .lines()
+            .find(|l| l.contains(DEGRADED_LEDGER_CAPTURE_ERROR))
+            .expect("degraded 態必落一條標記為 ledger_cache_degraded_read_only 的 fail-closed row");
+        let row: serde_json::Value = serde_json::from_str(degraded_line).unwrap();
+        assert_eq!(row["record_type"].as_str(), Some(CAPTURE_ERROR_LEDGER_RECORD_TYPE));
+        assert_eq!(row["decision"].as_str(), Some(CAPTURE_ERROR_DECISION));
+        assert_eq!(
+            row["allowed_to_submit_order"].as_bool(),
+            Some(false),
+            "degraded row 必 fail-closed:永不放寬 admission / 派單"
+        );
+        assert_eq!(
+            row["capture_error"].as_str(),
+            Some(DEGRADED_LEDGER_CAPTURE_ERROR)
+        );
+    }
+
+    /// OOS-11=B 紅測試(修前必紅,因修前 task 已在啟動 return-die):毒檔在
+    /// 首個事件後被 operator 修為乾淨 ledger,下一事件時 writer 整檔重讀成功、
+    /// 自動退出 degraded,對該事件走正常 admission(落 probe_admission_decision)。
+    #[tokio::test]
+    async fn degraded_writer_recovers_when_ledger_becomes_clean() {
+        let tmp = TempDir::new().unwrap();
+        let plan_path = tmp.path().join("plan.json");
+        let ledger_path = tmp.path().join("probe_ledger.jsonl");
+        std::fs::write(&plan_path, plan_json("2026-06-21T10:49:45Z")).unwrap();
+        std::fs::write(&ledger_path, "still-not-json\n").unwrap();
+
+        let (tx, rx) = mpsc::channel(4);
+        let cancel = CancellationToken::new();
+        let handle = tokio::spawn(run_writer(
+            rx,
+            plan_path,
+            ledger_path.clone(),
+            cancel.clone(),
+        ));
+
+        // 事件 A:degraded 態,落 degraded row,等其落盤確保順序。
+        tx.send(writer_msg(reject_event())).await.unwrap();
+        wait_for_ledger_rows(&ledger_path, 2).await; // 毒行 + degraded row
+
+        // operator 修檔:整檔替換為乾淨(空)ledger。
+        std::fs::write(&ledger_path, "").unwrap();
+
+        // 事件 B:不同 attempt_id,應觸發恢復 + 正常 admission。
+        let mut event_b = reject_event();
+        event_b.ts_ms += 1_000;
+        event_b.context_id = Some("ctx-live_demo-ETHUSDT-1782041001000".to_string());
+        event_b.signal_id =
+            Some("sig-live_demo-ma_crossover-ETHUSDT-1782041001000".to_string());
+        tx.send(writer_msg(event_b)).await.unwrap();
+        drop(tx);
+        handle.await.unwrap();
+
+        let content = std::fs::read_to_string(&ledger_path).unwrap();
+        let rows = LedgerRecord::from_jsonl_str(&content)
+            .expect("恢復後 ledger 應可乾淨 parse(毒行已被 operator 覆蓋)");
+        let row_b = rows
+            .iter()
+            .find(|r| r.attempt_id.as_deref() == Some("ctx-live_demo-ETHUSDT-1782041001000"))
+            .expect("事件 B 必落 admission row");
+        assert_eq!(
+            row_b.record_type.as_deref(),
+            Some("probe_admission_decision"),
+            "恢復後必走正常 admission(退出 degraded)"
+        );
+        assert_eq!(
+            row_b.decision.as_deref(),
+            Some("ORDER_AUTHORITY_NOT_GRANTED")
         );
     }
 }
