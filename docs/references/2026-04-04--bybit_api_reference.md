@@ -151,7 +151,7 @@ Client 創建：`MarketDataClient::new(client: Arc<BybitRestClient>)`
 ---
 
 #### get_funding_history
-- **服務**: 查詢永續合約資金費率歷史。資金費率是多空雙方定期互付的費用，每 8 小時結算一次。正費率=多方付空方（市場偏多）；負費率=空方付多方。用於資金費率套利策略、持倉成本計算。
+- **服務**: 查詢永續合約資金費率歷史。資金費率是多空雙方定期互付的費用，預設每 8 小時結算一次（per-symbol `fundingInterval` 可為 8h/4h 等，見下方 instruments-info `upperFundingRate`/`fundingInterval` 段）。正費率=多方付空方（市場偏多）；負費率=空方付多方。用於資金費率套利策略、持倉成本計算。
 - **調用**: `client.get_funding_history(category, symbol, start, end, limit)`
 - **Bybit 路徑**: `GET /v5/market/funding/history`
 - **Input**:

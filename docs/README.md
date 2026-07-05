@@ -48,6 +48,12 @@ This directory holds all engineering documents, logs, handoff records, and decis
 | `agents/domain.md` | Agent domain / ownership routing reference |
 | `agents/issue-tracker.md` | Issue tracker and TODO hygiene reference |
 | `agents/triage-labels.md` | Triage label vocabulary and classification reference |
+| `agents/role-profile-memory-standard.md` | 角色 profile / memory 標準（active state 讀 TODO，項目定位讀 README）|
+| `agents/todo-maintenance.md` | TODO.md 維護標準（編輯 TODO 前必讀）|
+| `agents/sub-agent-hygiene-sop.md` | 後台 sub-agent 防殺 / 活性偵測 SOP |
+| `agents/profit-first-fast-demo-promotion-loop.md` | profit-first 快速 Demo 晉升迴圈 |
+| `agents/context-loading.md` | 各 context class 位置與 PG 連線 / dry-run 範例 |
+| `agents/profit-first-autonomy-loop.md` | profit-first 自主迴圈 |
 
 ### helper_scripts/
 
@@ -163,6 +169,9 @@ Top-level archive 檔名索引如下；完整歷史語義仍以 `_indexes/docume
 ```
 docs/
 ├── README.md                          ← 本文件（目录总览 + 规范 + 索引入口）
+├── KNOWN_ISSUES.md                    ← 已知问题清单（根层参考檔）
+├── lessons.md                         ← 教训沉淀（根层参考檔）
+├── CLAUDE_REFERENCE.md                ← 从 CLAUDE.md 迁出的按需参考（STALE 快照，见檔头 banner）
 │
 ├── worklogs/                          ← 工作日志（顶层为现役；歷史 phase packet 已歸檔 archive/）
 │   └── （顶层文件）                   ← 2026-04-08+ 最新工作日志（直接放根目录；歷史 phase packet 見 "Phase Packet Archive Index" 段）
@@ -171,7 +180,7 @@ docs/
 │   └── YYYY-MM-DD_主题名/
 │
 ├── decisions/                         ← 重大架构/设计决策记录 + 治理源文件（DOC/SM/EX .docx）
-├── adr/                               ← 架构决策记录（ADR 0001-0047）
+├── adr/                               ← 架构决策记录（ADR；最新编号见 docs/adr/ 与 SPECIFICATION_REGISTER）
 │
 ├── architecture/                      ← 架構設計文件（系統層面設計決策）
 │
@@ -239,7 +248,7 @@ YYYY-MM-DD-N--功能描述.扩展名     # N=1,2,3...，優先於 HHmm，git mti
 规则：
 - **日期在前**：便于按时间排序，一目了然
 - **双横线 `--` 分隔**：日期与描述之间、时间与描述之间
-- **功能描述用下划线连接**：避免空格，保持路径兼容性
+- **功能描述用下划线或连字号连接均可**：同一批文件保持一致；避免空格以保路径兼容（hyphen-desc 为 accepted practice，如 `2026-04-29--62finding-batch-A-to-F.md`）。role-infix（如 `--tw_` / `--r4_`）命名跨轮不强制统一，以文件内容为准。
 - **中文描述优先**：描述部分可以用中文，如 `2026-03-26--api_gui_全量工程报告.md`
 - **扩展名保留原格式**：`.md` / `.txt` / `.pdf` / `.py` 均可
 
@@ -282,6 +291,9 @@ YYYY-MM-DD-N--功能描述.扩展名     # N=1,2,3...，優先於 HHmm，git mti
 ### 5. references/ — 长期参考文档
 
 **用途**：不随版本频繁变化的规范性文档，如 API 合同、状态字典规格书、部署规范等。
+
+- `2000_line_exception_registry.md` — CLAUDE.md §七/§九 2000 行硬上限的
+  documented pre-existing exception 正本（超标生产档路径+行数+拆分归属）。
 
 ---
 

@@ -6,7 +6,10 @@
 - 若舊條目與 `TODO.md`、`README.md`、`CLAUDE.md`、`.codex/MEMORY.md`、`docs/agents/context-loading.md`、代碼或 runtime 證據衝突，信任較新的有證據來源並顯式說明衝突。
 - 不要靜默刪除舊條目；只追加可復用的 durable lesson。長報告放 `workspace/reports/`，active 進度放 `TODO.md`。
 
-## 項目上下文（2026-04-24 更新）
+## 項目上下文（2026-04-24 快照）
+
+> ⚠️ 以下為 2026-04-24 快照，active state 讀 `TODO.md`，勿當現值（engine PID / binary mtime /
+> 測試數 / demo 倒數等 runtime 數字均已過期，違 R4 memory usage contract 不放 runtime ledger）。
 
 - 當前 Wave：EDGE-DIAG-1 Phase 4 + P1-11 完工；engine PID 884467；binary mtime 2026-04-24 02:06
 - 測試基準：engine lib 1980 passed / 0 failed；pytest 2996
@@ -38,10 +41,10 @@
 
 ## 報告索引
 
-| 日期 | 任務 | 文件位置 |
-|------|------|---------|
-| 2026-04-01 | 文檔索引審計（v1，Wave 4 基準） | `workspace/reports/2026-04-01--document_index_audit.md` |
-| 2026-04-24 | 索引完整性審計（v2，12 核心索引 × 存在/broken/orphan/時效） | `workspace/reports/2026-04-24--index_integrity_audit.md` |
+完整清單見 `workspace/reports/` 目錄（本表不逐份手維，避免誤導為完整清單）；近期重點：
+- `2026-07-03--doc_cross_reference_full_audit.md`（文檔交叉引用全審計）
+- `2026-07-04--p1_7_todo_memory_token_tax_slimming.md`（P1-7 TODO/memory token 稅瘦身）
+- `2026-05-30--R4--index_integrity_audit.md`（索引完整性審計 v3）
 
 ## 2026-06-11 subagent 四態契約生效
 - 回報首行 STATUS 四態；R4.md 巡檢新增三項：MEMORY.md「Project context」索引配額 ≤40（超限先 MERGE：主題重疊>敘事弧相同>heat 最低/最舊已完結）、topic 檔可選 `heat:` 欄（召回+1/合併取 sum）、被推翻結論不原地改寫須留「演變軌跡」節。
