@@ -2,6 +2,11 @@
 version = 2
 saved_ts_ms = 0
 
+# 單位圖例（QC-2 消歧）：本區 *_pct 欄多為 percent-domain（如
+# position_size_max_pct=25.0 即 25%）。例外為 fraction-domain（0.1=10%）：
+# per_trade_risk_pct、flash_dip_buy_max_notional_pct_equity、
+# guardian_modification_size_factor（SSOT bounds 見 per_trade_risk_pct 為 [0.001,0.20]）。
+# 讀值前先辨 domain，勿把 fraction 欄按 percent 解讀（會低估/高估 100×）。
 [limits]
 stop_loss_max_pct = 25.0
 take_profit_max_pct = 25.0
@@ -45,7 +50,7 @@ drawdown_halt_ttl_ms = 0
 # FLASH-DIP-PILOT (2026-06-18) band-external 名目上限：flash_dip_buy 單筆名目佔 equity
 # 比例硬上限（0.03 = 3%）。在 gate stack Gate 2.7 region 對 intent.strategy=="flash_dip_buy"
 # 做 hard reject（非 scale）。ADDITIVE 收緊（label-conditional，可被 mislabel 繞過）；
-# 真 survival floor = per_trade_risk_pct(2%) + position_size_max_pct（label-independent，
+# 真 survival floor = per_trade_risk_pct(0.1=10%,fraction) + position_size_max_pct（label-independent，
 # 已 denylist）。validate() 拒 > 0.03 或 <= 0；已在 RISKCONFIG_SURVIVAL_DENYLIST。
 flash_dip_buy_max_notional_pct_equity = 0.03
 
