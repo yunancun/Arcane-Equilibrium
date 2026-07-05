@@ -287,6 +287,9 @@ def generate_acceptance_report(
         "n_samples_labeled": int(result.n_samples_labeled),
         "n_holdout": int(result.n_holdout),
         "embargo_config": asdict(result.embargo_config) if result.embargo_config else None,
+        # embargo 意圖配置（embargo_config）之外，另記本次是否「實際」執行 embargo：
+        # 樣本不足時 trainer fail-open 靜默停用，此欄使 report 誠實反映 runtime 事實。
+        "embargo_enforced": bool(result.embargo_enforced),
         "training_success": bool(result.success),
         "training_error": result.error or None,
         # P1-3：label 組成永遠落 report（None = 呼叫端未提供，如 dry-run），

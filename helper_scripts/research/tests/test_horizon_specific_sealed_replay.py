@@ -135,6 +135,25 @@ def test_sealed_replay_passes_only_preselected_retiming_candidate() -> None:
     assert packet["replay_evaluation"]["failed_gate_names"] == []
 
 
+def test_sealed_replay_multiple_comparison_metadata_additive() -> None:
+    # QC-1：附加 multiple_comparison 註記，且不改任何既有 gate 之 pass/fail。
+    packet = build_horizon_specific_sealed_replay_packet(
+        horizon_packet=_horizon_packet(),
+        replay_counterfactual=_counterfactual(),
+        now_utc=dt.datetime(2026, 6, 22, 3, 30, tzinfo=dt.timezone.utc),
+    )
+    mc = packet["multiple_comparison"]
+    # rank1 有 3 個 raw_horizon_rows + rank2 無明細計 1 = selection_k >= 候選掃描組合數。
+    assert mc["selection_k"] >= 3
+    assert mc["expected_max_under_null_bps"] is not None
+    assert mc["expected_max_under_null_bps"] >= 0.0
+    assert "best-of-K" in mc["multiple_comparison_note"]
+    # 純附加：既有 gate 布林與整體 passed 不受影響。
+    assert packet["status"] == "SEALED_HORIZON_REPLAY_READY_FOR_OPERATOR_REVIEW"
+    assert packet["replay_evaluation"]["failed_gate_names"] == []
+    assert all(g["passed"] for g in packet["replay_evaluation"]["gates"])
+
+
 def test_sealed_replay_blocks_stable_candidate_rank() -> None:
     packet = build_horizon_specific_sealed_replay_packet(
         horizon_packet=_horizon_packet(),
