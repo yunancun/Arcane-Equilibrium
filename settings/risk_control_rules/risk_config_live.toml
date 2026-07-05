@@ -212,11 +212,15 @@ h0_shadow_mode = false
 use_maker_close = false
 
 # DYNAMIC-RISK-1: Sharpe-aware dynamic per-trade risk. Live uses tighter
-# defaults than demo: ±0.25% step, 0.5%..3% clamp, Sharpe band [0.5, 1.5],
+# defaults than demo: ±0.25% step, 0.5%..5% clamp, Sharpe band [0.5, 1.5],
 # longer window (500 trades) and 10-min update interval so the live pct
 # drifts only on strong evidence.
 # DYNAMIC-RISK-1：live 較 demo 更緊：更小步、更窄夾限、更高 Sharpe 門檻，
 # 更長窗口，僅在強證據下才緩慢漂移。
+# OOS-6（operator 2026-07-05 裁定 A，意圖 live 5%）：max_pct 0.03→0.05 擴 band
+# 上限，使 band [0.005, 0.05] 含 base per_trade_risk_pct=0.05，否則 agent 首次
+# 動態調整就被 clamp 到 0.03（等效砍風險上限）。仍 < SSOT MAX 0.20。只改 live，
+# 不連帶動 demo/paper（feedback_env_config_independence）。
 [dynamic_sizing]
 enabled = true
 min_trades = 100
@@ -224,7 +228,7 @@ step_pct = 0.0025
 # DYNAMIC-RISK-SIG-1 量綱說明（2026-06-14）：sharpe_high/sharpe_low 是「per-trade
 # Sharpe」（無年化），不要用年化直覺解讀。
 min_pct = 0.005
-max_pct = 0.03
+max_pct = 0.05
 sharpe_high = 1.5
 sharpe_low = 0.5
 update_interval_ms = 600000
