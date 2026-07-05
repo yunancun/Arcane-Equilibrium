@@ -230,6 +230,10 @@ from .checks_cron_heartbeat import (  # noqa: F401
     # cron heartbeat sentinel（kline_calibration.last_fire，stale > 25h → WARN）。
     # ID 取 [91]：PA spec 標 [81] 但 [81]/[82] 已被 P5-SM lease_ipc_soak 占用。
     check_91_kline_calibration_cron_fires,
+    # [94] 冷審計 R2 F-1b（2026-07-05）— bybit_announcement_sentinel 30min cron
+    # heartbeat（bybit_announcement_sentinel.last_fire，stale > 2h → WARN）；先前
+    # 無 age 監控消費者，停擺 6 天零告警。ID 取 [94]：[92]/[93] 已被 crontab 治理占用。
+    check_94_bybit_announcement_sentinel_cron_fires,
 )
 # [90] PROFIT-1（2026-06-14）— cost_gate「雙重扣成本」latent issue 預防性哨兵；
 # delegate 給 standalone
@@ -359,4 +363,6 @@ __all__ = [
     # [92][93] P0-2④ crontab 治理巡檢（2026-07-04）— crontab 屠殺 follow-up.
     "check_92_crontab_matches_repo_render",
     "check_93_crontab_replace_has_manifest",
+    # [94] 冷審計 R2 F-1b（2026-07-05）bybit_announcement_sentinel cron heartbeat.
+    "check_94_bybit_announcement_sentinel_cron_fires",
 ]
