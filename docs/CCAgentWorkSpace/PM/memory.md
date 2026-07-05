@@ -25,6 +25,11 @@
 
 ## 近期記錄
 
+## 2026-07-05 AI/ML Trading Maturity Engineering Plan
+
+- PM integrated QC/MIT/AI-E/PA/E3/BB reviews plus local CC root-principle review into a five-phase AI/ML trading maturity plan: evidence loop, point-in-time training foundation, advisory model layer, controlled Demo learning, and optional RL/MCP research.
+- Sign-off is conditional: proceed with Phase 1/2 engineering; no MCP runtime, no direct AI order authority, no RL policy work before candidate-matched after-cost evidence and sealed manifests exist.
+
 ## 2026-07-05 Official MCP Exchange Tool Review
 
 - PM reviewed IBKR's official AI/MCP connector and Bybit's official `trading-mcp` as source-only architecture inputs. Verdict: do not replace Rust-owned execution or ADR-0048 IBKR baseline; use official tools only as reference/offline inventory unless a future E3/BB-reviewed gate authorizes narrower use.
