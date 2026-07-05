@@ -35,6 +35,29 @@ def test_generate_labels_basic():
     assert labels.min() >= -5.0
 
 
+def test_generate_labels_winsorize_bounds_train_only():
+    """外傳 winsorize_bounds 杜絕 cross-fold 分位洩漏（冷審計 R2 MIT[LOW]）。
+
+    驗證：傳入 train-fold 算好的 (low, high) 時，clip 用的是外傳門檻而非本陣列
+    （含 test-fold）分位。以一個有極端值的陣列，外傳一個窄 bounds → 極端值被
+    夾到外傳門檻，而非用整窗分位（後者會被極端值抬高門檻，夾不掉）。
+    """
+    # ATR=1 使 raw_labels == pnl；主體在 [-2, 2]，含兩個極端 ±100。
+    pnl = np.concatenate([np.linspace(-2.0, 2.0, 98), np.array([100.0, -100.0])])
+    atr = np.ones(100)
+
+    # train-fold 只看主體，算得窄門檻（此處顯式給 [-2, 2]）。
+    labels_bounded, _ = generate_labels(pnl, atr, winsorize_bounds=(-2.0, 2.0))
+    # 外傳門檻應把極端值夾進 [-2, 2]（再經 ±Y_MAX 不變）。
+    assert labels_bounded.max() <= 2.0 + 1e-9
+    assert labels_bounded.min() >= -2.0 - 1e-9
+
+    # 對照：不傳 bounds 時用本陣列 1/99 分位，極端 ±100 會抬高門檻，
+    # 夾後最大值明顯 > 外傳窄門檻的結果（證明兩條路徑確實不同）。
+    labels_leaky, _ = generate_labels(pnl, atr)
+    assert labels_leaky.max() > labels_bounded.max()
+
+
 def test_generate_labels_extreme_detection():
     # MAD outlier detection needs a spread of non-zero values for mad > 0.
     # Normal body: 90 samples drawn from tight range; outliers at extremes.

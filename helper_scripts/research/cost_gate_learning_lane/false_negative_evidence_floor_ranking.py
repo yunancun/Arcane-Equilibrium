@@ -290,6 +290,20 @@ def _rank_score(
     outcome_count: int,
     friction_rank: int,
 ) -> float:
+    """僅供 sorted() 顯示排序 tie-break 的 heuristic score，非 gate 門檻（QC-9）。
+
+    為什麼混量綱加總在此為 by-design：
+      (1) 真 pass/fail 是 _rank_row 的獨立布林 checks（pre_floor_pass 等），本 score
+          只決定 top-N 顯示先後，供 operator review，不作晉升或門檻依據。
+      (2) tier bonus 1000/100/50/40 為刻意 lexicographic 分層：
+          pre_floor_pass(1000) >> current_cap_feasible(100) >> clean_bbo(50) >>
+          sample_floor(40)。巨大 gap 確保「同層」內才由連續量
+          (net_cushion_bps + max(0,net_positive-50)/2 + log10(n)·5) 決序 —— 混量綱
+          加總只在同層細排時起作用，跨層永遠由 tier 主導。
+      (3) 常數敏感性：只要每級 tier gap 遠大於同層連續量的典型幅度（bps 級 cushion +
+          最多 ~25 的 net_positive/2 + 個位數 log 項），排序即穩健，不需精調常數。
+    此 docstring 為純說明；公式與常數 0 變更。
+    """
     score = net_cushion_bps + max(0.0, net_positive_pct - 50.0) / 2.0
     score += math.log10(max(outcome_count, 1) + 1.0) * 5.0
     if pre_floor_pass:
