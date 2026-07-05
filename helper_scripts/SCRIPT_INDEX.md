@@ -485,6 +485,7 @@
 | `research/cost_gate_learning_lane/current_candidate_active_decision_lease_gate_window.py` | 開一個 bounded active Decision Lease 窗並評估 no-order gate：顯式 CLI + env opt-in 下取 short-lived Demo TRADE_ENTRY lease，於 lease active 時擷取 read-only governance state 評估 Decision Lease / Guardian gate evidence，finally 釋放，釋放後不留 runtime admission / order authority。 |
 | `research/cost_gate_learning_lane/bounded_probe_order_construction_repair.py` | 為 bounded probe 建 no-authority order-construction repair proposal：把 construction preview 的 instrument-filter / BBO 失敗轉為可審查 repair options（QC/operator-reviewed cap 調整或 reroute 到 min-qty 合 cap 的 candidate）。 |
 | `research/cost_gate_learning_lane/proof_exclusion.py` | bounded demo-probe evidence row 的 proof-exclusion 規則（source-only / artifact-local，不查 PG / 不連 Bybit / 不授權 / 不改 runtime）。 |
+| `research/cost_gate_learning_lane/_lane_common.py` | lane 內部共用純函數葉節點（非 CLI）：集中跨檔逐字節相同的無狀態小工具 `utc_now`/`as_dict`/`as_list`/`as_str`/`file_sha256`，呼叫端以 alias-import 保持函數體引用不變。純標準庫，不 import 套件內任何其他檔（防 import cycle）；不放 schema 版本 / authority 集合 / boundary 文字（那些屬各腳本自身契約面）。 |
 
 ## 2026-06-20 FlashDip touchability monitor
 

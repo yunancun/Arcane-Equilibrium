@@ -15,6 +15,13 @@ import math
 from pathlib import Path
 from typing import Any
 
+# 共用純函數葉節點：以 alias-import 保持函數體內 _dict/_list/_utc_now 引用逐字節不變。
+from cost_gate_learning_lane._lane_common import (
+    as_dict as _dict,
+    as_list as _list,
+    utc_now as _utc_now,
+)
+
 
 SEALED_HORIZON_OPERATOR_REVIEW_SCHEMA_VERSION = "sealed_horizon_operator_review_v1"
 APPROVED_FOR_PREFLIGHT_STATUS = "APPROVED_FOR_BOUNDED_DEMO_PROBE_PREFLIGHT"
@@ -26,18 +33,6 @@ BOUNDARY = (
     "call, order, config, risk, auth, runtime mutation, Cost Gate lowering, "
     "probe authority, order authority, or promotion proof"
 )
-
-
-def _utc_now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
-
-
-def _dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
 
 
 def _int(value: Any, default: int = 0) -> int:

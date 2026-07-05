@@ -35,6 +35,14 @@ from cost_gate_learning_lane.contract import (
     ORDER_AUTHORITY_GRANTED,
 )
 
+# 共用純函數葉節點：以 alias-import 保持函數體內 _dict/_list/_str/_utc_now 引用逐字節不變。
+from cost_gate_learning_lane._lane_common import (
+    as_dict as _dict,
+    as_list as _list,
+    as_str as _str,
+    utc_now as _utc_now,
+)
+
 # canonical soak plan 的 wrapper schema(=policy.DEMO_LEARNING_LANE_SCHEMA_VERSION，
 # 對齊 policy.py 與 bounded_probe_plan_inclusion_review.py 的 plan 生產者)。
 DEMO_LEARNING_LANE_SCHEMA_VERSION = policy.DEMO_LEARNING_LANE_SCHEMA_VERSION
@@ -51,22 +59,6 @@ BOUNDARY = (
     "Lease, no Bybit/order/PG call, no Cost Gate lowering, no live/mainnet "
     "authority, no promotion/profit proof"
 )
-
-
-def _utc_now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
-
-
-def _dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
-
-
-def _str(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _int(value: Any, default: int = 0) -> int:

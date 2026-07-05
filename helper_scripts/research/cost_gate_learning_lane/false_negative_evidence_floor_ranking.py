@@ -16,6 +16,14 @@ import math
 from pathlib import Path
 from typing import Any
 
+# 共用純函數葉節點：以 alias-import 保持函數體內 _utc_now/_dict/_list/_str 引用逐字節不變。
+from cost_gate_learning_lane._lane_common import (
+    as_dict as _dict,
+    as_list as _list,
+    as_str as _str,
+    utc_now as _utc_now,
+)
+
 
 SCHEMA_VERSION = "cost_gate_false_negative_evidence_floor_ranking_v1"
 READY_STATUS = "FALSE_NEGATIVE_EVIDENCE_FLOOR_RANKING_READY_NO_AUTHORITY"
@@ -66,22 +74,6 @@ AUTHORITY_TRUE_KEYS = {
     "service_restart_performed",
     "writer_enabled",
 }
-
-
-def _utc_now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
-
-
-def _dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
-
-
-def _str(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _int(value: Any, default: int = 0) -> int:

@@ -15,6 +15,13 @@ import json
 from pathlib import Path
 from typing import Any
 
+# 共用純函數葉節點：以 alias-import 保持函數體內 _dict/_str/_utc_now 引用逐字節不變。
+from cost_gate_learning_lane._lane_common import (
+    as_dict as _dict,
+    as_str as _str,
+    utc_now as _utc_now,
+)
+
 
 SCHEMA_VERSION = "cost_gate_fee_tier_maker_ratio_evidence_design_v1"
 READY_STATUS = "FEE_TIER_MAKER_RATIO_EVIDENCE_DESIGN_READY_NO_ORDER"
@@ -148,18 +155,6 @@ MAKER_RATIO_FIELDS = [
     "slippage_bps",
     "proof_exclusion_reasons",
 ]
-
-
-def _utc_now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
-
-
-def _dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _str(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _truthy(value: Any) -> bool:

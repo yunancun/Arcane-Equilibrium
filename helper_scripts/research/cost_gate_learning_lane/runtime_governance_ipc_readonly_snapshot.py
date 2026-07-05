@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import datetime as dt
-import hashlib
 import inspect
 import json
 import math
@@ -19,6 +18,14 @@ import os
 import sys
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping
+
+# 共用純函數葉節點：以 alias-import 保持函數體內 _dict/_list/_sha256/_utc_now 引用逐字節不變。
+from cost_gate_learning_lane._lane_common import (
+    as_dict as _dict,
+    as_list as _list,
+    file_sha256 as _sha256,
+    utc_now as _utc_now,
+)
 
 
 _SRV_ROOT = Path(__file__).resolve().parents[3]
@@ -45,18 +52,6 @@ BOUNDARY = (
 )
 
 IPCDispatcher = Callable[..., Awaitable[Mapping[str, Any]] | Mapping[str, Any]]
-
-
-def _utc_now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
-
-
-def _dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
 
 
 def _float(value: Any) -> float | None:
@@ -89,12 +84,6 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 def _write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text.rstrip() + "\n", encoding="utf-8")
-
-
-def _sha256(path: Path | None) -> str | None:
-    if path is None or not path.exists() or not path.is_file():
-        return None
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _normalize_method_entry(raw: Any) -> dict[str, Any]:

@@ -14,6 +14,14 @@ import json
 from pathlib import Path
 from typing import Any
 
+# 共用純函數葉節點：以 alias-import 保持函數體內 _dict/_list/_str/_utc_now 引用逐字節不變。
+from cost_gate_learning_lane._lane_common import (
+    as_dict as _dict,
+    as_list as _list,
+    as_str as _str,
+    utc_now as _utc_now,
+)
+
 
 SCHEMA_VERSION = "cost_gate_false_negative_evidence_floor_gap_closure_design_v1"
 READY_STATUS = "EVIDENCE_FLOOR_GAP_CLOSURE_DESIGN_READY_NO_AUTHORITY"
@@ -185,22 +193,6 @@ GAP_DESIGNS: dict[str, dict[str, Any]] = {
         "max_safe_next_action": "source-only repeat/OOS contract",
     },
 }
-
-
-def _utc_now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
-
-
-def _dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
-
-
-def _str(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _truthy(value: Any) -> bool:

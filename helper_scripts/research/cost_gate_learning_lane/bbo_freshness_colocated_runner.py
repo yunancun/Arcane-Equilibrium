@@ -28,6 +28,14 @@ from cost_gate_learning_lane.bounded_probe_candidate_construction_preview import
     render_markdown as render_preview_markdown,
 )
 
+# 共用純函數葉節點：以 alias-import 保持函數體內 _dict/_list/_str/_utc_now 引用逐字節不變。
+from cost_gate_learning_lane._lane_common import (
+    as_dict as _dict,
+    as_list as _list,
+    as_str as _str,
+    utc_now as _utc_now,
+)
+
 
 COLOCATED_RUNNER_SCHEMA_VERSION = (
     "bounded_probe_bbo_freshness_colocated_runner_v1"
@@ -99,22 +107,6 @@ DANGER_KEYS = {
     "writer_enabled",
     "execution_authority",
 }
-
-
-def _utc_now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
-
-
-def _dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
-
-
-def _str(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _float(value: Any) -> float | None:
