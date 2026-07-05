@@ -25,6 +25,11 @@
 
 ## 近期記錄
 
+## 2026-07-05 Official MCP Exchange Tool Review
+
+- PM reviewed IBKR's official AI/MCP connector and Bybit's official `trading-mcp` as source-only architecture inputs. Verdict: do not replace Rust-owned execution or ADR-0048 IBKR baseline; use official tools only as reference/offline inventory unless a future E3/BB-reviewed gate authorizes narrower use.
+- Borrowable patterns: IBKR human-in-the-middle instruction flow, Bybit capability taxonomy, credential-minimization language, and deny-by-default MCP tool matrix. No MCP install/config, no credentials, no exchange contact, no runtime mutation.
+
 ## 2026-07-05 Legacy TODO Remaining Work Audit
 
 - PM re-audited the two residual legacy TODOs after the MAG-083/MAG-084 and Phase 5 cleanup: `AgentTodo.md` and `2026-04-10--signal_diamond_db_todo.md` now have no clean directly-dispatchable remaining work.
