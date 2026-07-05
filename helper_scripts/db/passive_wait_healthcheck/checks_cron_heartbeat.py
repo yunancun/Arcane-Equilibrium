@@ -24,6 +24,7 @@ MODULE_NOTE:
     [79] blocked_symbols_30d_unblock    每週     → stale > 8d    → WARN
     [80] trading_ai_pg_dump_freshness   每日     → stale > 26h   → WARN/FAIL
     [91] kline_calibration              每日     → stale > 25h   → WARN
+    [94] bybit_announcement_sentinel    每30min  → stale > 2h    → WARN
 
   Sentinel 缺失 → WARN「heartbeat file missing — cron not installed or
   has never fired」；過時 → WARN「heartbeat stale (age=<s>s, threshold=<s>s)
@@ -240,6 +241,28 @@ def check_91_kline_calibration_cron_fires(
     )
 
 
+def check_94_bybit_announcement_sentinel_cron_fires(
+    now: float | None = None,
+) -> tuple[str, str]:
+    """[94] bybit_announcement_sentinel 30min cron heartbeat（冷審計 R2 F-1b）。
+
+    bybit_announcement_sentinel_cron.sh:48 start-time touch
+    ``bybit_announcement_sentinel.last_fire`` sentinel，但先前 [75]-[91] 註冊清單
+    零涵蓋此 sentinel，導致 cron 停擺 6 天仍零 WARN（純 missing-monitoring，非
+    交易/風控/live gate）。本哨兵補上 age 監控消費者。
+    threshold 2h = cadence 30min 的 4× grace（catches 6d 停擺；避 cron 起跑抖動誤報）。
+    WARN-by-default（cron infra 非 promotion-blocking）；
+    OPENCLAW_CRON_HEARTBEAT_REQUIRED=1 升 WARN → FAIL。
+    """
+    return _classify(
+        check_id="[94]",
+        sentinel_name="bybit_announcement_sentinel.last_fire",
+        cadence_label="7,37 * * * *",
+        threshold_seconds=2 * 3600,
+        now=now,
+    )
+
+
 def check_80_pg_dump_freshness(
     now: float | None = None,
 ) -> tuple[str, str]:
@@ -350,4 +373,5 @@ __all__ = [
     "check_79_blocked_symbols_30d_unblock_check_cron_fires",
     "check_80_pg_dump_freshness",
     "check_91_kline_calibration_cron_fires",
+    "check_94_bybit_announcement_sentinel_cron_fires",
 ]
