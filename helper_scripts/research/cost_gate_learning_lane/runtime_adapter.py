@@ -399,7 +399,22 @@ def summarize_side_cell_runtime_state(
         for row in matching
         if _str(row.get("record_type")) == "probe_outcome"
     ]
-    completed_outcomes: list[dict[str, Any]] = []
+    # LOW-3(operator 2026-07-05 裁定 Python 對齊 Rust):禁用判準的 realized 向量
+    # 必須與 Rust 權威側 demo_learning_lane.rs::summarize_side_cell_runtime_state 同源。
+    # Rust 只保留 record_type=="probe_outcome" 且 realized_net_bps 為有限值的 row
+    # (filter_map + is_finite),完全不做 proof_exclusion。此處據此構造判準向量:
+    # _float 已含 math.isfinite,None/NaN/inf 自動排除,對齊 Rust 的 filter_map+is_finite。
+    # 為什麼移除過濾:Rust 是 golden 認定的權威側,有真 fill 的 row 若在 Python 側被
+    # proof-exclude 而 Rust 不排,兩側 completed_outcome_count 會分歧(跨語言行為 drift)。
+    # 注意:proof_exclusion 仍用於下方診斷欄位(透明度),且在 outcome_review 立案 gate 等
+    # 別處保持不變——本次只移除「禁用判準計算」這一處的過濾。
+    realized_bps = [
+        value
+        for value in (_float(row.get("realized_net_bps")) for row in raw_completed_outcomes)
+        if value is not None
+    ]
+    outcome_count = len(realized_bps)
+    # 診斷欄位(不進禁用判準):如實報告 proof-exclusion 情況供 operator 觀察。
     proof_exclusion_reason_counts: dict[str, int] = {}
     proof_excluded_completed_outcome_count = 0
     for row in raw_completed_outcomes:
@@ -413,11 +428,6 @@ def summarize_side_cell_runtime_state(
                 proof_exclusion_reason_counts[reason] = (
                     proof_exclusion_reason_counts.get(reason, 0) + 1
                 )
-            continue
-        completed_outcomes.append(row)
-    realized = [_float(row.get("realized_net_bps")) for row in completed_outcomes]
-    realized_bps = [value for value in realized if value is not None]
-    outcome_count = len(realized_bps)
     avg_net = sum(realized_bps) / outcome_count if outcome_count else None
     net_positive_pct = (
         100.0 * sum(1 for value in realized_bps if value > 0.0) / outcome_count
@@ -474,8 +484,12 @@ def summarize_side_cell_runtime_state(
         "cooldown_until_ts_ms": cooldown_until,
         "cooldown_active": cooldown_active,
         "raw_completed_outcome_count": len(raw_completed_outcomes),
+        # completed_outcome_count 現與 Rust 逐值一致(未做 proof_exclusion,對齊權威側)。
         "completed_outcome_count": outcome_count,
-        "proof_eligible_completed_outcome_count": outcome_count,
+        # proof_eligible 保留其字面語義=proof 合格且淨值有限的數量(診斷透明度,不進禁用判準);
+        # 現已可能小於 completed_outcome_count,因 proof-excluded row 仍計入禁用判準。
+        "proof_eligible_completed_outcome_count": len(raw_completed_outcomes)
+        - proof_excluded_completed_outcome_count,
         "proof_excluded_completed_outcome_count": proof_excluded_completed_outcome_count,
         "proof_exclusion_present": proof_excluded_completed_outcome_count > 0,
         "proof_exclusion_reason_counts": dict(sorted(proof_exclusion_reason_counts.items())),

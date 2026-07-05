@@ -1389,3 +1389,9 @@ mod tests;
 #[cfg(test)]
 #[path = "risk_config_halt_ttl_tests.rs"]
 mod halt_ttl_tests;
+
+// F-D6-1（operator 2026-07-05 裁定擴 demo dynamic_sizing band 至含 base）：band
+// snapshot 守衛獨立 sibling,避免 risk_config_tests.rs 觸 2000 LOC 硬上限。
+#[cfg(test)]
+#[path = "risk_config_dynamic_sizing_band_tests.rs"]
+mod dynamic_sizing_band_tests;
