@@ -272,7 +272,10 @@ step_pct = 0.005
 # DYNAMIC-RISK-SIG-1 量綱說明（2026-06-14）：sharpe_high/sharpe_low 是「per-trade
 # Sharpe」（mean/std of realized-PnL ring，無年化），不要用年化直覺解讀。
 min_pct = 0.01
-max_pct = 0.05
+# F-D6-1(operator 2026-07-05 裁定擴 band):上限 0.05 → 0.10,使 band [0.01, 0.10]
+# 含 base per_trade_risk_pct=0.1(:34)。原 0.05 不含 base,agent 首次動態調整就被 clamp
+# 到 0.05(砍半);擴後 base 落在 band 內,不再首調即被腰斬。仍在 SSOT bounds [0.001,0.20] 內。
+max_pct = 0.10
 sharpe_high = 1.0
 sharpe_low = 0.0
 update_interval_ms = 300000

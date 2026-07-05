@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -4376,7 +4377,14 @@ def test_runtime_adapter_outcome_rows_are_idempotent_and_feed_disable():
     assert disabled["runtime_state"]["completed_outcome_count"] == 1
 
 
-def test_runtime_adapter_excludes_unattributed_outcomes_from_disable() -> None:
+def test_runtime_adapter_counts_proof_excluded_outcomes_aligned_with_rust() -> None:
+    # LOW-3(operator 2026-07-05 裁定 Python 對齊 Rust):禁用判準不再對 proof-excluded
+    # row 過濾。Rust 權威側 demo_learning_lane.rs::summarize_side_cell_runtime_state
+    # 只保留 record_type=="probe_outcome" 且 realized_net_bps 有限的 row(filter_map+
+    # is_finite),不看 strategy_name/lineage。此 unattributed 且缺 lineage 的 fill-backed
+    # row(realized_net_bps=-25.0,有限)在 Rust 側會被納入 count,故 Python 對齊後亦納入,
+    # 兩側 completed_outcome_count 逐值一致=1,且因 avg=-25<0 觸發 UCB pure-mean 禁用。
+    # 對比前一版斷言(completed_outcome_count==0、不禁用)已被 operator 裁定推翻。
     admitted = evaluate_probe_admission(
         _runtime_plan(order_authority=ORDER_AUTHORITY_GRANTED),
         {
@@ -4399,8 +4407,14 @@ def test_runtime_adapter_excludes_unattributed_outcomes_from_disable() -> None:
         "realized_net_bps": -25.0,
     }
 
+    # probe_proposal.max_probe_orders 取大值(_candidate_max_orders 讀此路徑),確保
+    # remaining>0,不被 probe_budget_exhausted 先攔,使禁用純由 UCB pure-mean(n=1,
+    # avg=-25<0)主導。
     runtime_state = summarize_side_cell_runtime_state(
-        {"side_cell_key": "ma_crossover|ETHUSDT|Sell", "max_probe_orders": 2},
+        {
+            "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+            "probe_proposal": {"max_probe_orders": 100},
+        },
         [*ledger, proof_excluded_outcome],
         now_ms=1_782_046_800_000,
         cfg=RuntimeAdmissionConfig(min_failed_outcomes_to_disable=1),
@@ -4418,15 +4432,80 @@ def test_runtime_adapter_excludes_unattributed_outcomes_from_disable() -> None:
         adapter_enabled=True,
     )
 
+    # 對齊 Rust:realized_net_bps 有限的 probe_outcome 全數計入禁用判準,不 proof-exclude。
+    # runtime_state 直調用大 budget(max_probe_orders=100),禁用純由 UCB pure-mean 主導。
     assert runtime_state["raw_completed_outcome_count"] == 1
-    assert runtime_state["completed_outcome_count"] == 0
+    assert runtime_state["completed_outcome_count"] == 1
+    assert runtime_state["avg_realized_net_bps"] == -25.0
+    assert runtime_state["disabled"] is True
+    assert runtime_state["disable_reason"] == "realized_probe_outcomes_fail_learning_threshold"
+    # 診斷欄位仍如實報告 proof-exclusion(透明度,不影響禁用判準)。
     assert runtime_state["proof_eligible_completed_outcome_count"] == 0
     assert runtime_state["proof_excluded_completed_outcome_count"] == 1
     assert runtime_state["proof_exclusion_present"] is True
     assert runtime_state["proof_exclusion_reason_counts"]["unattributed_strategy_name"] == 1
-    assert decision["decision"] != "REALIZED_PROBE_OUTCOMES_FAIL_LEARNING_THRESHOLD"
-    assert decision["runtime_state"]["completed_outcome_count"] == 0
+    # decision 路徑 candidate budget=2(來自 scorecard),此處僅驗 count 已對齊 Rust=1
+    # (不驗 disable_reason,因 remaining/budget 與 UCB 的優先級由 plan budget 決定)。
+    assert decision["runtime_state"]["completed_outcome_count"] == 1
     assert decision["runtime_state"]["proof_excluded_completed_outcome_count"] == 1
+
+
+def _rust_realized_net_bps_reference(rows: list[dict]) -> list[float]:
+    """逐值鏡像 Rust demo_learning_lane.rs::summarize_side_cell_runtime_state 的
+    realized_net_bps 構造:record_type=="probe_outcome" → filter_map(realized_net_bps)
+    → is_finite。不看 strategy_name / lineage / proof_exclusion。作為對拍基準。"""
+    out: list[float] = []
+    for row in rows:
+        if row.get("record_type") != "probe_outcome":
+            continue
+        raw = row.get("realized_net_bps")
+        if raw is None or isinstance(raw, bool):
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(value):
+            out.append(value)
+    return out
+
+
+def test_runtime_adapter_completed_count_matches_rust_filter_on_fill_backed_rows() -> None:
+    # 對拍證明:對含 fill 證據(exec_id/order_id)但 proof-excluded 的 row,Python 的
+    # completed_outcome_count 必與 Rust filter 基準(_rust_realized_net_bps_reference)逐值一致。
+    # 混入:合格 row、unattributed 缺 lineage row、缺 realized_net_bps row、NaN row。
+    key = "ma_crossover|ETHUSDT|Sell"
+    rows = [
+        {"record_type": "probe_outcome", "side_cell_key": key, "realized_net_bps": -30.0},
+        {
+            "record_type": "probe_outcome",
+            "side_cell_key": key,
+            "strategy_name": "unattributed:bybit_auto",
+            "exec_id": "exec-x1",
+            "order_id": "ord-x1",
+            "realized_net_bps": -40.0,
+        },
+        {"record_type": "probe_outcome", "side_cell_key": key},  # 無 realized → 兩側皆排除
+        {"record_type": "probe_outcome", "side_cell_key": key, "realized_net_bps": float("nan")},
+        {"record_type": "side_cell_disabled", "side_cell_key": key},  # 非 outcome
+    ]
+    expected = _rust_realized_net_bps_reference(rows)
+    assert expected == [-30.0, -40.0]  # 合格 + fill-backed(proof-excluded)皆計入,NaN/缺失排除
+
+    state = summarize_side_cell_runtime_state(
+        {"side_cell_key": key, "probe_proposal": {"max_probe_orders": 100}},
+        rows,
+        now_ms=1_782_046_800_000,
+        cfg=RuntimeAdmissionConfig(min_failed_outcomes_to_disable=8),
+    )
+    assert state["completed_outcome_count"] == len(expected) == 2
+    assert state["avg_realized_net_bps"] == sum(expected) / len(expected)
+    # 診斷欄位(不影響上方對齊 Rust 的判準 count):4 個 probe_outcome 中,fill-backed
+    # unattributed row(缺 lineage)、缺 realized_net_bps row、NaN row 各計一次 proof-excluded=3;
+    # proof-eligible=raw(4)−excluded(3)=1。fill-backed row 雖 proof-excluded 仍計入判準。
+    assert state["raw_completed_outcome_count"] == 4
+    assert state["proof_excluded_completed_outcome_count"] == 3
+    assert state["proof_eligible_completed_outcome_count"] == 1
 
 
 def test_runtime_adapter_normalizes_cost_gate_negative_reason_text():
