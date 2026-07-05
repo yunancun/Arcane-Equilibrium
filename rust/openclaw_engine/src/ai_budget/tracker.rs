@@ -548,6 +548,9 @@ impl BudgetTracker {
     /// A real PnL-based denominator will land with the cost-edge sub-task.
     /// 在 4-17 接入真實 PnL 之前，返回月內 `local_total` 已用 / `local_total`
     /// 上限的比率，作為「燒錢率」代理。真實 PnL 分母由 cost-edge 子任務接入。
+    ///
+    /// 命名消歧（CLAUDE.md #13）：目前實作 = used/limit burn（無量綱，高=接近上限），
+    /// 尚非 #13 canonical（DOC-08 §5.2 cost/edge）；接入真實 PnL 前勿當 #13 值使用。
     pub async fn cost_edge_ratio(&self) -> Result<f64, String> {
         let cfg = self.config_cache.load_full();
         let usage = self.usage_cache.read().await;

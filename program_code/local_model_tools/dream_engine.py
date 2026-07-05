@@ -677,6 +677,9 @@ class ReplayCandidate:
             in bps. Always non-negative. Used downstream by
             ``cost_edge_ratio = expected_cost_bps / max(abs(expected_edge_bps),
             epsilon) >= 0.8`` gate (V3 §12 #24).
+            命名消歧（CLAUDE.md #13）：此 cost_edge_ratio = cost/|edge|（低=好），
+            方向與 #13 canonical（DOC-08 §5.2）一致，屬同一語義族；注意與
+            layer2_adaptive / mlde_shadow_advisor 內同名但方向相反的變量勿混。
         confidence: 4-value Literal {high, medium, low, none}. ``none``
             applies to S3 synthetic fixtures and any Mac dev smoke run
             (V3 §6.3); ``high`` requires calibrated freshness <=72h plus

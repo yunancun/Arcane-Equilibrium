@@ -160,6 +160,8 @@ def get_adaptive_state(tracker: "Layer2CostTracker") -> AdaptiveBudgetState:
 # Cost Edge Ratio / 成本效益比
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# 命名消歧（CLAUDE.md #13）：此 cost_edge_ratio = pnl/spend ROI（高=好），
+# 方向與 #13 canonical（DOC-08 §5.2 cost/edge，低=好）相反，非同一量，勿混用。
 def get_cost_edge_ratio(tracker: "Layer2CostTracker") -> dict:
     """
     Calculate AI cost-to-edge ratio for the current session.

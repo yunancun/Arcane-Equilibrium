@@ -1027,6 +1027,8 @@ def rank_and_veto_replay_candidates(
         if gate_inputs.cost_edge_ratio_override is not None:
             cost_edge_ratio = gate_inputs.cost_edge_ratio_override
         else:
+            # 命名消歧（CLAUDE.md #13）：此 cost_edge_ratio = |edge|/cost（高=好），
+            # 是 DOC-08 §5.2 canonical（cost/|edge|，低=好）的倒數，方向相反，非同一量。
             edge_mag = max(abs(expected_edge_bps), 1e-9)
             cost_edge_ratio = edge_mag / max(expected_cost_bps, 1e-9)
 
