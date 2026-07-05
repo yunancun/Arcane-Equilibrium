@@ -32,9 +32,9 @@
 | **层级** | **引擎** | **成本** | **延迟** | **触发条件** |
 |---|---|---|---|---|
 | L0 | 本地确定性计算（H0 门控、止损检查、健康判断） | 零 | <1ms | 每次 tick，始终运行 |
-| L1 | 本地 Ollama 7B（regime 分类、机会筛选、情绪打分） | 零 API，本地算力 | 1-3s | 每 5 分钟 + 事件触发 |
-| L1.5 | 低成本云端（Haiku ~$0.001 + Perplexity ~$0.005） | ~$0.01-0.05/次 | 2-5s | L1 不确定 + 新闻扫描 |
-| L2 | 完整云端（Sonnet $0.15 / Opus $0.50-4.00） | $0.15-4.00/次 | 5-30s | 高价值机会深度分析 |
+| L1 | 本地 Ollama（现役 Qwen3.5 9B/27B，型号以 runtime config 为准；regime 分类、机会筛选、情绪打分） | 零 API，本地算力 | 1-3s | 每 5 分钟 + 事件触发 |
+| L1.5 | 低成本云端（Haiku ~$0.001 + Perplexity ~$0.005；估价示例，现行单价以 `settings/ai_pricing.yaml` + 官方 pricing 为 SSOT，per-call 定价数字更新归 PA AI-PRICING follow-up） | ~$0.01-0.05/次 | 2-5s | L1 不确定 + 新闻扫描 |
+| L2 | 完整云端（Sonnet $0.15 / Opus $0.50-4.00；估价示例，现行单价以 `settings/ai_pricing.yaml` + 官方 pricing 为 SSOT，per-call 定价数字更新归 PA AI-PRICING follow-up） | $0.15-4.00/次 | 5-30s | 高价值机会深度分析 |
 
 **降级规则：**
 
@@ -61,7 +61,7 @@
 
 | **方案** | **模型** | **占用内存** | **推理速度** | **适用** |
 |---|---|---|---|---|
-| 推荐 | Qwen2.5 7B-Instruct Q4_K_M | ~5GB | ~30 tok/s | Regime 分类、机会筛选、情绪打分 |
+| 推荐 | Qwen3.5 9B/27B（型号以 runtime config 为准） | 视型号 | 视型号 | Regime 分类、机会筛选、情绪打分 |
 | 备选升级 | Qwen2.5 14B-Instruct Q4_K_M | ~10GB | ~15 tok/s | 更精确的策略选择和参数建议 |
 | 不推荐 | 32B+ | 20GB+ | <8 tok/s | 太慢且抢资源 |
 
@@ -89,9 +89,9 @@
 | **任务** | **默认层级** | **默认模型** | **备注** |
 |---|---|---|---|
 | 止损检查、健康判断、H0 门控 | L0 | 本地确定性 | 永远不用 AI |
-| Regime 分类、机会筛选 | L1 | Ollama Qwen2.5 7B | 每 5 分钟 |
-| 新闻情绪打分 | L1 | Ollama Qwen2.5 7B | 解析搜索结果 |
-| 策略参数优化 | L1 | Ollama Qwen2.5 7B | 基于历史数据 |
+| Regime 分类、机会筛选 | L1 | Ollama Qwen3.5 9B/27B（型号以 runtime config 为准） | 每 5 分钟 |
+| 新闻情绪打分 | L1 | Ollama Qwen3.5 9B/27B（型号以 runtime config 为准） | 解析搜索结果 |
+| 策略参数优化 | L1 | Ollama Qwen3.5 9B/27B（型号以 runtime config 为准） | 基于历史数据 |
 | 新闻搜索（主搜索） | L1.5 | Perplexity API | 每 30 分钟 |
 | L1 结果二次确认 | L1.5 | Haiku | 抽样验证 |
 | 高价值机会深度分析 | L2 | Sonnet | 每天 3-5 次 |

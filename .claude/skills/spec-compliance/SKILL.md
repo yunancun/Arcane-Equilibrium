@@ -30,7 +30,7 @@ allowed-tools: Read, Grep, Glob
 ### .docx → .md 同步 SOP
 
 治理文件為 `.docx`（operator 維護源）+ `.md`（已轉檔給 sub-agent 讀）。**若 operator 修改 .docx 後**：
-1. 觸發人工執行 `helper_scripts/maintenance_scripts/governance_docx_to_md.py`（或等價腳本）重轉
+1. 觸發人工執行 docx→md 轉檔（當前無專用腳本；以 pandoc 或 python-docx 等價流程重轉，產物落 `docs/decisions/*.md`）
 2. 比對前後 `.md` 差異，逐條標漂移點
 3. 更新 `SPECIFICATION_REGISTER.md` 若有新增 / 撤回 / 重編號
 4. 通知所有引 DOC-XX 的 skill / TODO 條目重 audit

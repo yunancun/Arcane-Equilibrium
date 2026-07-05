@@ -107,8 +107,8 @@ srv/
 ├── rust/                          ← ★ Rust 交易引擎（交易 / 风控 / 策略配置 / 执行权威）
 │   ├── Cargo.toml                 ← Workspace: 3 crates
 │   ├── openclaw_types/            ← 10 shared types + serde (36 tests)
-│   ├── openclaw_core/             ← 18 modules: SM/indicators/signals/risk/m4_miner (~400 tests；backtest/portfolio 为 reserved-library，未接 API；7 legacy 模块 per ADR-0015 已退役)
-│   ├── openclaw_engine/           ← 60+ modules: tick pipeline/strategies/paper state/canary/news/earn (~2400 tests)
+│   ├── openclaw_core/             ← 18 modules: SM/indicators/signals/risk/m4_miner（core 模組測試，精确数以 cargo workspace CI 为准；backtest/portfolio 为 reserved-library，未接 API；7 legacy 模块 per ADR-0015 已退役）
+│   ├── openclaw_engine/           ← 60+ modules: tick pipeline/strategies/paper state/canary/news/earn（engine 模組測試，精确数以 cargo workspace CI 为准）
 │   └── schemas/                   ← Golden JSON schema (10 types)
 ├── helper_scripts/                ← ★ 详见 helper_scripts/SCRIPT_INDEX.md
 │   ├── restart_all.sh             ← 轻量重启（--rebuild 先编译 + --keep-auth 保持授权）
