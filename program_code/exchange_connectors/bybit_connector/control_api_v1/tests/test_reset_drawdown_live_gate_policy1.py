@@ -57,10 +57,21 @@ def _run(coro):
 
 
 class _FakeRiskViewClient:
-    """最小 RiskViewClient 替身 — route 只用 reset_drawdown_baseline + get_status。"""
+    """最小 RiskViewClient 替身 — route 只用 reset_drawdown_baseline + get_status +
+    live_session_halted（OOS-3 override 前置 halt-state 檢查）。
 
-    def __init__(self, result: dict[str, Any] | Exception) -> None:
+    OOS-3：override 路徑預設語境為 halt-recovery，故 halt_state 預設 True（已 halt）。
+    測試以 halt_state=False 驗「非 halt 態拒 override」、halt_state=None 驗「讀失敗
+    fail-closed 拒」。
+    """
+
+    def __init__(
+        self,
+        result: dict[str, Any] | Exception,
+        halt_state: bool | None = True,
+    ) -> None:
         self._result = result
+        self._halt_state = halt_state
         self.calls: list[str] = []
 
     async def reset_drawdown_baseline(self, engine: str) -> dict[str, Any]:
@@ -72,6 +83,10 @@ class _FakeRiskViewClient:
     async def unhalt_session(self, engine: str) -> dict[str, Any]:
         self.calls.append(f"unhalt:{engine}")
         return {"ok": True}
+
+    async def live_session_halted(self) -> bool | None:
+        self.calls.append("halt_probe")
+        return self._halt_state
 
     def get_status(self) -> dict[str, Any]:
         return {"governor_tier": "Normal"}
@@ -186,7 +201,8 @@ def test_tp1_3_live_override_4gate_pass_resets_distinct_audit(patch_risk_view_cl
     ) as five_gate:
         resp = _run(reset_drawdown_baseline(body=body, actor=_operator_actor("op-ovr")))
     assert resp["ok"] is True
-    assert client.calls == ["live"]
+    # OOS-3：override 先 halt_probe（halt 態）再走 four-gate 再 reset(live)。
+    assert client.calls == ["halt_probe", "live"]
     four_gate.assert_called_once()
     five_gate.assert_not_called()  # override 路徑不跑 require_authz=True
     # DISTINCT 審計 row：可分離查詢（Root #8）。
@@ -239,7 +255,8 @@ def test_tp1_5_live_override_missing_one_of_four_gates_returns_409(patch_risk_vi
     assert exc.value.status_code == 409
     assert exc.value.detail["error"] == "live_gate_failed"
     assert exc.value.detail["gate_failed"] == ["mainnet_env"]
-    assert client.calls == []
+    # OOS-3：halt 態下先 halt_probe 通過，再由 four-gate 缺一擋下，永不 reset。
+    assert client.calls == ["halt_probe"]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -430,3 +447,73 @@ def test_live_override_ipc_failure_surfaces_500_no_audit(patch_risk_view_client,
     assert exc.value.status_code == 500
     # 未發生的 reset 絕不留審計。
     assert audit_hub.get_all_changes() == []
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# OOS-3: override 前置 halt-state 檢查（權威取 Rust runtime status IPC，避 TOCTOU）
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def test_oos3_override_non_halt_state_returns_409_no_reset(patch_risk_view_client, audit_hub):
+    """非 halt 態 + operator_override=True → 409 拒（override 只供 halt-recovery）。
+    這是收緊前會被放行的路徑：現碼必須擋下，且四門 primitive 根本不該被諮詢、0 reset。"""
+    client = patch_risk_view_client(_FakeRiskViewClient({"ok": True}, halt_state=False))
+    body = ResetDrawdownBaselineRequest(engine="live", reason="probe", operator_override=True)
+    four_gate = MagicMock(return_value=(True, []))
+    with patch("app.live_preflight.four_gates_minus_authz_ok", four_gate):
+        with pytest.raises(HTTPException) as exc:
+            _run(reset_drawdown_baseline(body=body, actor=_operator_actor()))
+    assert exc.value.status_code == 409
+    assert exc.value.detail["error"] == "not_in_live_halt"
+    # halt-state 先擋：four-gate 不諮詢、reset 未發生（只有 halt_probe）。
+    four_gate.assert_not_called()
+    assert client.calls == ["halt_probe"]
+    assert audit_hub.get_all_changes() == []
+
+
+def test_oos3_override_halt_state_unreadable_fails_closed_409(patch_risk_view_client, audit_hub):
+    """halt-state 讀取失敗（None）→ fail-closed 拒（讀不到不可放行 override）。
+    語義刻意：此時 operator 應走 signed-auth renew，不因讀失敗把 override 打開。"""
+    client = patch_risk_view_client(_FakeRiskViewClient({"ok": True}, halt_state=None))
+    body = ResetDrawdownBaselineRequest(engine="live", reason="probe", operator_override=True)
+    four_gate = MagicMock(return_value=(True, []))
+    with patch("app.live_preflight.four_gates_minus_authz_ok", four_gate):
+        with pytest.raises(HTTPException) as exc:
+            _run(reset_drawdown_baseline(body=body, actor=_operator_actor()))
+    assert exc.value.status_code == 409
+    assert exc.value.detail["error"] == "live_halt_state_unavailable"
+    four_gate.assert_not_called()
+    assert client.calls == ["halt_probe"]
+    assert audit_hub.get_all_changes() == []
+
+
+def test_oos3_override_halt_state_true_proceeds_to_four_gate(patch_risk_view_client, audit_hub):
+    """真 halt 態 + override + 四門過 → 仍走原豁免路徑放行（halt-recovery 不被卡死）。"""
+    ipc_result = {"engine": "live", "result": "drawdown_baseline_reset"}
+    client = patch_risk_view_client(_FakeRiskViewClient(ipc_result, halt_state=True))
+    body = ResetDrawdownBaselineRequest(
+        engine="live", reason="halt recovery override", operator_override=True
+    )
+    with patch("app.live_preflight.four_gates_minus_authz_ok", return_value=(True, [])):
+        resp = _run(reset_drawdown_baseline(body=body, actor=_operator_actor("op-halt")))
+    assert resp["ok"] is True
+    # halt 態通過 → four-gate → reset(live)。
+    assert client.calls == ["halt_probe", "live"]
+    # override distinct 審計 row 仍寫（Root #8）。
+    changes = audit_hub.get_all_changes()
+    assert len(changes) == 1
+    assert _nv(changes[0])["override"] is True
+
+
+def test_oos3_non_override_live_reset_skips_halt_probe(patch_risk_view_client):
+    """非 override 的 live 5-gate 路徑不觸 halt-state 前置（OOS-3 僅收緊 override 分支）。"""
+    ipc_result = {"engine": "live", "result": "drawdown_baseline_reset"}
+    client = patch_risk_view_client(_FakeRiskViewClient(ipc_result, halt_state=False))
+    body = ResetDrawdownBaselineRequest(
+        engine="live", reason="normal 5-gated reset", operator_override=False
+    )
+    with patch("app.live_preflight.all_five_live_gates_ok", return_value=(True, [])):
+        resp = _run(reset_drawdown_baseline(body=body, actor=_operator_actor()))
+    assert resp["ok"] is True
+    # 未 halt 也放行（非 override 路徑不查 halt）：無 halt_probe，直接 reset。
+    assert client.calls == ["live"]
