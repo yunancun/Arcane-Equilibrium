@@ -298,6 +298,26 @@ impl RiskConfig {
             .validate()
             .map_err(|e| format!("risk.exit: {}", e))?;
         self.dynamic_sizing.validate()?;
+        // OOS-6（operator 2026-07-05 裁定 A）：dynamic_sizing 啟用時，band
+        // [min_pct, max_pct] 必須含 base per_trade_risk_pct。為何 fail-closed：
+        // sizer 起點/回退值皆從 base 出發，若 band 不含 base，DynamicRiskSizer
+        // 首次調整就把 pct 靜默 clamp 到 band 邊界（等效未經 operator 意圖地砍或
+        // 抬風險上限），config 與真實下單量偏離。此處在 config load 直接 reject，
+        // 而非讓 runtime 靜默 clamp。跨 sub-struct 不變量故置於頂層 validate。
+        // paper（enabled=false）豁免：dynamic_sizing 未接 runtime，band 與 base
+        // 的關係不影響下單，且 paper base=0.20 與 dormant 預設 band 天然不含。
+        {
+            let ds = &self.dynamic_sizing;
+            let base = self.limits.per_trade_risk_pct;
+            if ds.enabled && !(ds.min_pct <= base && base <= ds.max_pct) {
+                return Err(format!(
+                    "risk.dynamic_sizing band [{}, {}] must contain base \
+                     per_trade_risk_pct {} when enabled (OOS-6 fail-closed: \
+                     sizer would silently clamp base to band edge otherwise)",
+                    ds.min_pct, ds.max_pct, base
+                ));
+            }
+        }
         self.kelly.validate()?;
         self.fast_track.validate()?;
         self.executor.validate()?;

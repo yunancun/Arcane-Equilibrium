@@ -55,7 +55,12 @@ advisory_allow_requires_governance = false
 use_edge_snapshot_for_explore_evidence = true
 require_cost_viable_edge_for_explore_when_available = true
 edge_evidence_fee_rate = 0.00055
-edge_evidence_slippage = 0.0
+# OOS-7（operator 2026-07-05 裁定 A）：0.0→0.0005（5bps）對齊 Rust cost gate 的
+# 保守滑點下限（risk_config_demo.toml [slippage] default_rate=0.0005 = 低流動性
+# fallback 同量級）。為何不留 0.0：零滑點使 ADPE cost-viability 判定樂觀於 Rust
+# cost gate，讓 grid 反覆產生會被 Rust 擋掉的 intent。取單一保守常數（寧緊勿鬆），
+# 不做 per-symbol tier。fee_bps = 2*(fee_rate+slippage)*10000 = 21bps。只 demo。
+edge_evidence_slippage = 0.0005
 edge_evidence_win_rate_floor = 0.3
 edge_evidence_safety_multiplier = 1.3
 edge_evidence_min_n = 3

@@ -966,6 +966,104 @@ def test_side_edge_evidence_keeps_ma_alive_and_drops_advisory_only_grid(tmp_path
     )
 
 
+@pytest.mark.parametrize(
+    "slippage,expect_viable",
+    [
+        # OOS-7（operator 2026-07-05 裁定 A）：邊際 side bps=20.0，win_rate=1.0，
+        # safety=1.3。
+        #   slippage=0.0    → fee_bps=2*(0.00055+0)*1e4=11.0 → threshold=11.0*1.3=14.3
+        #                     margin=20.0-14.3=5.7>0 → viable（樂觀，與舊 0-slippage 同）。
+        #   slippage=0.0005 → fee_bps=2*(0.00055+0.0005)*1e4=21.0 → threshold=21.0*1.3=27.3
+        #                     margin=20.0-27.3=-7.3<0 → non-viable（對齊 Rust cost gate）。
+        (0.0, True),
+        (0.0005, False),
+    ],
+)
+def test_oos7_slippage_flips_marginal_side_cost_viability(tmp_path, slippage, expect_viable):
+    """OOS-7：edge_evidence_slippage 0→0.0005 使邊際 side 由 cost-viable 轉 non-viable。
+
+    此測試釘死「保守滑點下限使 ADPE cost-viability 不再樂觀於 Rust cost gate」：
+    同一邊際 side（bps=20.0）在 slippage=0.0 判 viable（keepalive ma_crossover），在
+    slippage=0.0005 判 non-viable（無 cost-viable evidence → rejected）。當前 repo
+    config 已設 0.0005，故 expect_viable=False 分支即 production 行為。
+    """
+    ma_arm = make_arm_id("range", "ma_crossover")
+    # 全負 realized reward → all_regimes_flat，觸發 explore keepalive 決策路徑。
+    rewards = [
+        ArmReward(ma_arm, "range", -20.0, float(i), FILL_TIER_TAKER_REAL)
+        for i in range(3)
+    ]
+    edge_path = tmp_path / "edge_estimates.json"
+    edge_path.write_text(
+        json.dumps(
+            {
+                # 邊際 side：bps=20.0 落在 0-slippage threshold(14.3) 與
+                # 0.0005-slippage threshold(27.3) 之間。
+                "ma_crossover::UNIUSDT::Buy": {
+                    "runtime_bps": 20.0,
+                    "win_rate": 1.0,
+                    "n": 3,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = AdpeRunnerConfig(
+        engine_mode="demo",
+        candidate_regimes=["range"],
+        candidate_strategies=[],
+        include_demo_maker_arm=False,
+        enable_explore_sink=True,
+        controlled_experiment_enabled=True,
+        require_advisory_for_explore=True,
+        use_edge_snapshot_for_explore_evidence=True,
+        require_cost_viable_edge_for_explore_when_available=True,
+        explore_strategy_allowlist=["ma_crossover"],
+        max_active_explore_strategies=2,
+        edge_evidence_slippage=slippage,
+        edge_evidence_min_n=3,
+        edge_evidence_require_runtime_symbol_ready=False,
+        rng_seed=5,
+    )
+    lever, _calls = _record_lever({"ma_crossover": False})
+    runner = AdpeRunner(
+        cfg,
+        lever=lever,
+        rewards_fn=lambda: rewards,
+        advisory_fn=lambda: {"ma_crossover": 9.0},
+        edge_estimates_path=str(edge_path),
+    )
+
+    report = runner.run_cycle(dry_run=False)
+
+    assert report.all_regimes_flat is True
+    scores = report.experiment_policy["edge_evidence_scores"]
+    if expect_viable:
+        # slippage=0.0：邊際 side 過 cost wall → 有 cost-viable evidence，ma 保活。
+        assert "ma_crossover" in scores
+        assert scores["ma_crossover"] == pytest.approx(20.0 - 14.3, abs=1e-6)
+        assert report.experiment_policy["selected_explore"] == ["ma_crossover"]
+    else:
+        # slippage=0.0005：邊際 side 被 threshold 擋 → 無 cost-viable evidence。
+        assert "ma_crossover" not in scores
+        assert (
+            report.experiment_policy["rejected_explore"]["ma_crossover"]
+            == "missing_cost_viable_edge_evidence"
+        )
+
+
+def test_oos7_repo_config_edge_evidence_slippage_is_conservative_5bps():
+    """OOS-7：repo adaptive_demo_profit.toml 的 edge_evidence_slippage 已落 0.0005。
+
+    釘死裁定值，防未來人靜默改回 0.0（使 ADPE 判定再度樂觀於 Rust cost gate）。
+    """
+    rc, _alloc = load_runner_config()
+    assert rc.edge_evidence_slippage == pytest.approx(0.0005, abs=1e-9)
+    # 樣本門檻不因本裁定改動（OOS-7 只碰滑點）。
+    assert rc.edge_evidence_min_n == 3
+    assert rc.edge_evidence_grid_min_n == 30
+
+
 def test_edge_evidence_runtime_symbol_readiness_filter_drops_unready_ton(tmp_path):
     ma_arm = make_arm_id("range", "ma_crossover")
     rewards = [
