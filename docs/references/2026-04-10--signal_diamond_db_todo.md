@@ -19,7 +19,7 @@
 | **Risk Config** | ✅ 已完成 | `PerEngineRiskStores` 3 獨立 ConfigStore，IPC 路由按 engine 參數選擇 |
 | **Rust 引擎實例** | ✅ 完成 | `ModeState` 結構體 + `mode_states` HashMap + `ModeStateSnapshot`（Phase 3） |
 | **數據庫** | ✅ 完成 | V015 遷移 + 所有 writer 傳遞 `engine_mode`（Phase 1+2a） |
-| **策略參數** | ❌ 缺失 | 全局一套，無 paper/demo/live 變體（Phase 5 未來） |
+| **策略參數** | ✅ 完成 | `settings/strategy_params_{paper,demo,live}.toml` + Rust `load_strategy_params(PipelineKind)` 已提供 per-engine 變體；缺檔/壞檔對 Demo/Live fail-closed。 |
 | **IPC 狀態** | ✅ 完成 | `get_paper_state(engine=)` + `get_mode_snapshot` + `get_active_modes`（Phase 4） |
 
 ---
@@ -231,13 +231,22 @@ on_tick(event):
 
 **當前方案：** 支持模式**切換**（`set_trading_mode()` + `std::mem::swap`），各模式狀態完整保存/恢復。不支持同一 tick 內同時為 paper+demo+live 各自執行策略。
 
-**Phase 5+ 方案（未來）：** 為每個 active mode 各自持有一份策略實例（`HashMap<TradingMode, Orchestrator>`），on_tick 共享階段後 fan-out 到各模式的 Orchestrator。策略狀態自然隔離。
+**Phase 5+ 方案（仍屬未來）：** 為每個 active mode 各自持有一份策略實例（`HashMap<TradingMode, Orchestrator>`），on_tick 共享階段後 fan-out 到各模式的 Orchestrator。策略狀態自然隔離。這是 per-mode strategy **instance** work，與下方已完成的 per-engine strategy **params** TOML/loader 不同。
 
 ---
 
-### Phase 5: Per-Mode Strategy Params（未來）`[ ]`
+### Phase 5: Per-Mode Strategy Params `[x]`
 
-複用 `PerEngineRiskStores` 模式：
+已落地為 TOML-backed per-engine strategy params，而不是新增 `PerEngineStrategyParams`
+store type。現行權威路徑：
+
+- `settings/strategy_params_paper.toml`
+- `settings/strategy_params_demo.toml`
+- `settings/strategy_params_live.toml`
+- `rust/openclaw_engine/src/strategies/params.rs::load_strategy_params(kind)`
+- `rust/openclaw_engine/src/strategies/registry.rs::StrategyFactory::create_for_engine(kind, ...)`
+
+原設想類型如下，保留作歷史設計草稿：
 ```rust
 pub struct PerEngineStrategyParams {
     pub paper: Arc<ConfigStore<StrategyParamsBundle>>,
@@ -246,7 +255,10 @@ pub struct PerEngineStrategyParams {
 }
 ```
 
-Phase 1-4 中策略參數全局共享，分叉在 intent 層。Agent 自調參數是後續工作。
+驗證面：`rust/openclaw_engine/src/strategies/tests.rs` 覆蓋 per-engine TOML load、
+Demo/Live missing/invalid TOML fail-closed inactive、Paper missing TOML default fallback，
+並檢查真實三端 strategy params 中 `funding_arb.active=false` 與 `bb_breakout` 5m family。
+Agent 自調參數仍由後續 promotion / IPC gate 管控；本 Phase 5 不授予 live mutation。
 
 ---
 
