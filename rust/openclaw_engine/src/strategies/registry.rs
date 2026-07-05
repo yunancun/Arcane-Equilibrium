@@ -22,6 +22,7 @@ use super::{
     bb_breakout, bb_reversion, flash_dip_buy, funding_arb, funding_harvest, funding_short_v2,
     grid_helpers, grid_trading, liquidation_cascade_fade, ma_crossover,
 };
+use crate::config::risk_config::CloseMakerBackoffConfig;
 use crate::tick_pipeline::PipelineKind;
 
 /// FLASH-DIP-PILOT 啟用 env flag。fail-closed：unset / 非 "1" → 永不註冊。
@@ -48,9 +49,19 @@ impl StrategyFactory {
 
     /// Create strategies for a specific engine, loading params from TOML.
     /// 為特定引擎創建策略，從 TOML 加載參數。
-    pub fn create_for_engine(kind: PipelineKind) -> Vec<Box<dyn Strategy>> {
+    ///
+    /// OOS-9 wiring：`close_maker` 為 operator 的 RiskConfig `[close_maker_backoff]`
+    /// 段（由 caller 從已載入的 `risk_store` snapshot 取，見 bootstrap）。傳
+    /// `Some(cfg)` 令 grid 的 close-maker 退避 runtime state 用 operator TOML 值；
+    /// `None`（隔離場景 / 無 risk_store）→ grid 保留 default（bit-identical）。
+    /// 為何值由 caller 傳入而非此處重讀磁碟：避免第二個 RiskConfig 讀取源，值
+    /// 與熱重載 `risk_store` 首快照同源（close-maker state 不熱重載，啟動一次凍結）。
+    pub fn create_for_engine(
+        kind: PipelineKind,
+        close_maker: Option<&CloseMakerBackoffConfig>,
+    ) -> Vec<Box<dyn Strategy>> {
         let params = load_strategy_params(kind);
-        let mut strategies = Self::create_with_params(&params);
+        let mut strategies = Self::create_with_params_and_close_maker(&params, close_maker);
 
         // ── FLASH-DIP-PILOT kind-aware demo-gate（CC 條件 4 / E3 MED-1）──
         // 為什麼 gate 落 create_for_engine（kind-aware）而非 create_with_params
@@ -92,7 +103,26 @@ impl StrategyFactory {
 
     /// Create strategies with explicit params (for testing / direct config).
     /// 使用明確參數創建策略（用於測試 / 直接配置）。
+    ///
+    /// close-maker 退避 state 用 default（bit-identical）。operator 的
+    /// RiskConfig `[close_maker_backoff]` 只在 `create_for_engine` 的 production
+    /// 路徑注入；此 kind-blind 直注參數路徑（測試 / replay / create_all）刻意保留
+    /// default，避免依賴磁碟 RiskConfig。
     pub fn create_with_params(p: &StrategyParamsConfig) -> Vec<Box<dyn Strategy>> {
+        Self::create_with_params_and_close_maker(p, None)
+    }
+
+    /// OOS-9 wiring：與 `create_with_params` 同，但額外注入 operator 的
+    /// close-maker 退避 config 到 grid_trading。`close_maker = None` 時 grid 保留
+    /// default（bit-identical）；`Some(cfg)` 時 grid `close_maker_backoff` runtime
+    /// state 改用 TOML `[close_maker_backoff]` 值。
+    ///
+    /// 為什麼此參數是 grid-only：目前僅 grid_trading 持有 `CloseMakerBackoffState`
+    /// runtime state（close-maker TooManyPending 動態退避）；其餘策略不消費此段。
+    fn create_with_params_and_close_maker(
+        p: &StrategyParamsConfig,
+        close_maker: Option<&CloseMakerBackoffConfig>,
+    ) -> Vec<Box<dyn Strategy>> {
         let mut strategies: Vec<Box<dyn Strategy>> = Vec::new();
 
         // MaCrossover
@@ -276,6 +306,13 @@ impl StrategyFactory {
             .clamp(300_000, 86_400_000);
         gt.set_conf_scale(p.grid_trading.conf_scale);
         gt.set_active(p.grid_trading.active);
+        // OOS-9 wiring：注入 operator 的 RiskConfig `[close_maker_backoff]` 值，
+        // 令 TOML 六常數（backoff_initial/max/reset + cascade window/symbols/pause）
+        // 真流入 grid 的 close-maker 退避 runtime state。`None`（測試 / replay /
+        // create_all）→ 保留 `new()` default，行為 bit-identical。
+        if let Some(cfg) = close_maker {
+            gt.apply_close_maker_backoff_config(cfg);
+        }
         strategies.push(Box::new(gt));
 
         // FundingArb (OC-5: active when TOML sets active=true)
