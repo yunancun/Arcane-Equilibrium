@@ -399,10 +399,15 @@ pub fn load_and_verify(env: BybitEnvironment) -> Result<LiveAuthorization, AuthE
             path: path.clone(),
             reason: e.to_string(),
         })?;
+    // clock-guard（OOS-5 fail-closed）：系統時鐘早於 1970 時 `duration_since`
+    // 回 Err，此時 now_ms 取 `u64::MAX` 而非 0 —— verify_in_memory:339
+    // `expires_at_ms <= now_ms` 因此恆真 → 回 `AuthError::Expired`，逼 operator
+    // 重新 renew，而非把過期授權當有效放行。若退回 0 則任何 auth 都「未過期」，
+    // 屬 fail-open，違反 Live 授權 fail-closed 硬邊界。
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+        .unwrap_or(u64::MAX);
     verify_in_memory(&auth, env, now_ms, &signing_key)?;
     Ok(auth)
 }
@@ -519,6 +524,28 @@ mod tests {
         let err =
             verify_in_memory(&auth, BybitEnvironment::LiveDemo, expiry, TEST_SECRET).unwrap_err();
         assert!(matches!(err, AuthError::Expired { .. }));
+    }
+
+    #[test]
+    fn clock_before_epoch_forces_expired_fail_closed() {
+        // OOS-5 clock-guard fail-closed：`load_and_verify` 在系統時鐘早於 1970
+        // 時把 now_ms 設為 `u64::MAX`（見該函數的 unwrap_or）。此處直接以
+        // `u64::MAX` 呼叫 verify_in_memory 驗證下游語意：即便 auth 本身簽名有效、
+        // 尚未到 expires_at_ms，也必回 `AuthError::Expired`（fail-closed），
+        // 而非因時鐘異常誤放行。若 clock-guard 退回 0 則此測試會誤得 Ok。
+        let now = 1_700_000_000_000;
+        let auth = fresh_auth(now);
+        assert!(
+            auth.expires_at_ms < u64::MAX,
+            "fixture 必須未過期以證明 fail-closed 來自 clock-guard 而非過期本身"
+        );
+        let err = verify_in_memory(&auth, BybitEnvironment::LiveDemo, u64::MAX, TEST_SECRET)
+            .unwrap_err();
+        assert!(
+            matches!(err, AuthError::Expired { .. }),
+            "expected Expired under u64::MAX clock, got {:?}",
+            err
+        );
     }
 
     #[test]

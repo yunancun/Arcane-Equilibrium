@@ -132,7 +132,15 @@ impl FundingHarvest {
         }
     }
 
-    /// 8h funding rate 折算 annualized（Bybit V5：每日 3 × 8h funding cycles）。
+    /// 把單期 funding rate 折算成 annualized。
+    ///
+    /// 為什麼硬編 3×365（OOS-8 誠實化）：`× 3 × 365` 假設 fundingInterval = 8h
+    /// （每日 3 期）。這**不是**所有 Bybit perp 的普適常數——部分合約為 1h/4h
+    /// fundingInterval，套此係數會嚴重低估年化。本策略 `allowed_symbols` 由
+    /// Stage 1 fence 限定為 8h-interval 的 BTCUSDT / ETHUSDT，故此處成立。
+    /// 擴充到非-8h symbol 前，必須先把實際 fundingInterval 接入（見
+    /// `should_enter` / `should_exit` 呼叫點註釋，屬另立 ticket 的級別 2 wiring），
+    /// 不可只放寬 allowed_symbols。
     /// 不變量：純函數，無 self 依賴；負 funding 直接乘出負 annualized（caller 判斷方向）。
     pub(crate) fn annualized_funding(funding_rate_8h: f64) -> f64 {
         funding_rate_8h * 3.0 * 365.0
@@ -158,6 +166,9 @@ impl FundingHarvest {
 
     /// 是否滿足入場條件（純函數，便於 unit test）。
     pub(crate) fn should_enter(&self, funding_rate_8h: f64, basis_pct: f64) -> bool {
+        // annualized 折算鎖定 8h fundingInterval（見 annualized_funding 註釋）。
+        // allowed_symbols 必為 8h-interval symbol（Stage 1 fence + is_allowed_symbol
+        // 雙重 enforce）；擴非-8h symbol 前須先接真實 fundingInterval（級別 2 ticket）。
         let annualized = Self::annualized_funding(funding_rate_8h);
         annualized > self.funding_threshold_annualized
             && self.compute_net_edge_bps_per_period(funding_rate_8h) > 0.0
@@ -174,6 +185,8 @@ impl FundingHarvest {
         now_ms: u64,
         entry_ms: u64,
     ) -> bool {
+        // annualized 折算鎖定 8h fundingInterval（見 annualized_funding 註釋）。
+        // 同 should_enter：allowed_symbols 必為 8h-interval symbol。
         let annualized = Self::annualized_funding(funding_rate_8h);
         // funding decay or 反向。
         if annualized < self.funding_exit_annualized || funding_rate_8h < 0.0 {
