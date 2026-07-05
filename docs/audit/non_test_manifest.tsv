@@ -314,7 +314,7 @@ docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--4.24TodoAudit_FixPlan.md	
 docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--4.24TodoAudit_FixPlan_v2.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	46257
 docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g1_02_event_consumer_split_plan.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	22073
 docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g1_02_step2_loop_handlers_detail_plan.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	23832
-docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g3_01_executor_agent_ipc_rfc.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	44868
+docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--g3_01_executor_agent_ipc_rfc.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	44870
 docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--todo_complete_proposal.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	23789
 docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-26--edge_p1b_7dim_bind_rfc.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	12558
 docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-26--edge_p2_flip_sop_rfc.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	14212
@@ -457,7 +457,7 @@ docs/audits/2026-04-17--g2_funding_arb_clean_edge_v2.md	yes	clean	context	docume
 docs/audits/2026-04-18--e5_full_codebase_audit.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	12863
 docs/audits/2026-04-20--edge_p2_3_phase1b_bybit_postonly_audit.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	13675
 docs/audits/2026-04-20--pyo3_eliminate_phase2_e2_review.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	20652
-docs/audits/2026-04-24--todo_refactor_audit.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	8420
+docs/archive/2026-04-24--todo_refactor_audit.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	8493
 docs/audits/2026-04-24--v022_missing_audit.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	8112
 docs/decisions/2026-03-17--工程一审修改建议报告_终稿.md	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.md	15956
 docs/decisions/2026-03-20--关于h和i部分的核心设计讨论.txt	yes	clean	context	documentation_context	context	project_context_or_historical_evidence	.txt	15954

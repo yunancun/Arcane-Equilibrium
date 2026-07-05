@@ -7,7 +7,7 @@
 - **Supersedes**: None
 - **Implemented by**: G3-02 / G3-03 (later sessions)
 - **Related audits**:
-  - `docs/audits/2026-04-24--todo_refactor_audit.md` — flagged `_shadow_mode` hardcode
+  - `docs/archive/2026-04-24--todo_refactor_audit.md` — flagged `_shadow_mode` hardcode
   - `docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--4.24TodoAudit_FixPlan.md` — G3 work group
 - **Related memory**:
   - `memory/project_layer2_agent_design.md` — "real Layer 2 gap" framing
@@ -699,7 +699,7 @@ If `live_reserved` mode auto-trips off (session timeout, emergency revoke), does
 
 ### 11.1 Audits
 
-- `docs/audits/2026-04-24--todo_refactor_audit.md` — line flagging `_shadow_mode` hardcode.
+- `docs/archive/2026-04-24--todo_refactor_audit.md` — line flagging `_shadow_mode` hardcode.
 - `docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-24--4.24TodoAudit_FixPlan.md` — G3 work group.
 
 ### 11.2 Code paths consulted
