@@ -23,7 +23,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use openclaw_core::alpha_surface::{
-    AlphaSurface, BtcLeadLagPanel, FundingCurveSnapshot, LiquidationPulsePanel, OIDeltaPanel,
+    AlphaSourceTag, AlphaSurface, BtcLeadLagPanel, FundingCurveSnapshot, LiquidationPulsePanel,
+    OIDeltaPanel,
 };
 use openclaw_core::governance_core::LeaseOutcome;
 use openclaw_core::signals::Signal;
@@ -481,10 +482,22 @@ impl TickPipeline {
         // lifetime 約束同 btc_lead_lag：先 clone 到 local var 再 borrow 進 surface，
         // panel.pulses HashMap 內 LiquidationEvent vec clone 成本接受（5m 視窗
         // 內事件數有限 + 60s flush 一次）。
-        let liquidation_pulse_panel_owned: Option<LiquidationPulsePanel> = self
-            .liquidation_pulse_panel_slot
-            .as_ref()
-            .and_then(|slot| slot.try_read().ok().and_then(|guard| guard.clone()));
+        //
+        // E5-1 (2026-07-05) perf gate：深拷貝(~7.8μs，含 HashMap<String,..>)僅在有
+        // active 策略聲明 LiquidationCascade tag 時執行；否則 None —— 語意等同 slot
+        // 未注入 / aggregator 未 emit，消費端(LiquidationCascadeFade)fail-closed 跳過。
+        // 唯一 consumer 預設 active=false → dormant 時省 clone，active 時走原 try_read
+        // 路徑 byte-identical。詳 E5-1 ticket / wf_0559e0a2。
+        let liquidation_pulse_panel_owned: Option<LiquidationPulsePanel> = if self
+            .orchestrator
+            .any_active_strategy_declares(AlphaSourceTag::LiquidationCascade)
+        {
+            self.liquidation_pulse_panel_slot
+                .as_ref()
+                .and_then(|slot| slot.try_read().ok().and_then(|guard| guard.clone()))
+        } else {
+            None
+        };
         let alpha_surface = AlphaSurface {
             funding_curve: funding_curve_owned.as_ref(),
             oi_delta_panel: oi_delta_panel_owned.as_ref(),
