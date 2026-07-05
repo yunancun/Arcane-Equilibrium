@@ -379,6 +379,11 @@ from .checks_cron_heartbeat import (
     # filesystem，跑於 conn.close() 後。WARN-by-default；REQUIRED=1 升 FAIL。ID 取 [91]：
     # PA spec 標 [81] 但 [81]/[82] 已被 P5-SM lease_ipc_soak 占用（沿用 [58]→[68] 慣例）。
     check_91_kline_calibration_cron_fires,
+    # [94] 冷審計 R2 F-1b（2026-07-05）— bybit_announcement_sentinel 30min cron
+    # heartbeat sentinel（bybit_announcement_sentinel.last_fire，stale > 2h → WARN）。純
+    # filesystem，跑於 conn.close() 後。WARN-by-default；REQUIRED=1 升 FAIL。ID 取 [94]：
+    # [92]/[93] 已被 crontab 治理占用；本哨兵補先前零 age 監控消費者（停擺 6d 零告警）。
+    check_94_bybit_announcement_sentinel_cron_fires,
 )
 # PROFIT-1（2026-06-14）— cost_gate「雙重扣成本」latent issue 預防性哨兵 [90]。
 # Delegate 給 standalone
@@ -432,6 +437,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
     [91]                                                  INTRADAY-KLINES-PERMANENT-FIX R3 — kline_calibration daily cron heartbeat sentinel
     [92]                                                  P0-2④ — live crontab render vs repo 正本 render drift (>24h FAIL)
     [93]                                                  P0-2④ — journal crontab REPLACE without matching manifest (governance-bypass detect)
+    [94]                                                  冷審計 R2 F-1b — bybit_announcement_sentinel 30min cron heartbeat sentinel (stale > 2h WARN)
 
 F7 sentinels [22]-[29] added 2026-04-26 by MIT DB audit + E5 engine.log dive:
   [22] trading_pipeline_silent_gap    (DCS active but fills cliff)
@@ -1608,6 +1614,16 @@ def main() -> int:
     results.append(("[92] crontab_matches_repo_render", s, m))
     s, m = check_93_crontab_replace_has_manifest()
     results.append(("[93] crontab_replace_has_manifest", s, m))
+
+    # [94] 冷審計 R2 F-1b（2026-07-05）— bybit_announcement_sentinel 30min cron
+    # heartbeat sentinel（bybit_announcement_sentinel_cron.sh:48 start-time touch
+    # ``bybit_announcement_sentinel.last_fire``；本哨兵驗 mtime < 2h）。純 filesystem
+    # 不依賴 runner cur，故在 conn.close() 後跑（與 [91] 同性質）。補先前零 age 監控
+    # 消費者（停擺 6d 零告警）。WARN-by-default；OPENCLAW_CRON_HEARTBEAT_REQUIRED=1 升 FAIL。
+    s, m = check_94_bybit_announcement_sentinel_cron_fires()
+    results.append(
+        ("[94] bybit_announcement_sentinel_cron_fires", s, m)
+    )
 
     # NOTE: [30] cost_edge_advisor_status moved INSIDE the cursor block by
     # G3-09 Phase B Wave 1 (2026-04-28). Phase A version was filesystem-only
