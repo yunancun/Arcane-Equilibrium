@@ -2009,7 +2009,9 @@ mod tests {
         drop(tx);
         // 修前:task 已 return,handle.await 立即 Ok 但無新 row;修後同樣 Ok
         // (channel 關閉後正常退出),差別在下面 row 斷言。task 不 panic。
-        handle.await.expect("writer task 不得 panic;degraded 態應存活至 channel 關閉");
+        handle
+            .await
+            .expect("writer task 不得 panic;degraded 態應存活至 channel 關閉");
 
         // 檔案 = 毒行 + 一條 degraded capture-error row。
         let content = std::fs::read_to_string(&ledger_path).unwrap();
@@ -2018,7 +2020,10 @@ mod tests {
             .find(|l| l.contains(DEGRADED_LEDGER_CAPTURE_ERROR))
             .expect("degraded 態必落一條標記為 ledger_cache_degraded_read_only 的 fail-closed row");
         let row: serde_json::Value = serde_json::from_str(degraded_line).unwrap();
-        assert_eq!(row["record_type"].as_str(), Some(CAPTURE_ERROR_LEDGER_RECORD_TYPE));
+        assert_eq!(
+            row["record_type"].as_str(),
+            Some(CAPTURE_ERROR_LEDGER_RECORD_TYPE)
+        );
         assert_eq!(row["decision"].as_str(), Some(CAPTURE_ERROR_DECISION));
         assert_eq!(
             row["allowed_to_submit_order"].as_bool(),
@@ -2062,8 +2067,7 @@ mod tests {
         let mut event_b = reject_event();
         event_b.ts_ms += 1_000;
         event_b.context_id = Some("ctx-live_demo-ETHUSDT-1782041001000".to_string());
-        event_b.signal_id =
-            Some("sig-live_demo-ma_crossover-ETHUSDT-1782041001000".to_string());
+        event_b.signal_id = Some("sig-live_demo-ma_crossover-ETHUSDT-1782041001000".to_string());
         tx.send(writer_msg(event_b)).await.unwrap();
         drop(tx);
         handle.await.unwrap();
