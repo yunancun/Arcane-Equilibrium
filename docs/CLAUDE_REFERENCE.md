@@ -3,6 +3,9 @@
 > 從 CLAUDE.md 遷出的參考性資料。新 session 不需要自動讀取，僅在涉及對應領域時查閱。
 > 最後更新：2026-04-12（FIX-47 全程序鏈審計更新）
 >
+> ⚠️ **STALE SNAPSHOT（自 2026-04-12 未更新）**：本檔為歷史參考快照，當前 authoritative
+> checker / 路徑以 `helper_scripts/SCRIPT_INDEX.md` 與 `TODO.md` 為準；引用前先核實路徑仍存在。
+>
 > **2026-04-12 狀態更新**：DEAD-PY-2 已移除所有 Python 交易邏輯（4500 行），
 > Python 層僅剩 API 橋接 + GUI 路由 + 輔助工具。3E-ARCH 三引擎並行完成。
 > Phase 6 自動降級 + 漸進放權全部完成驗收。全程序鏈審計 P0（8/8）+ P1 核心項完畢。

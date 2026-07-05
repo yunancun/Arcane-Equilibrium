@@ -101,12 +101,12 @@ git -C /Users/ncyu/Projects/TradeBot/srv rev-parse HEAD origin/main
 ssh trade-core 'cd /home/ncyu/BybitOpenClaw/srv && git rev-parse HEAD origin/main && git status --short --branch'
 sed -n '1,220p' /Users/ncyu/Projects/TradeBot/srv/docs/agents/profit-first-autonomy-loop.md
 cat /Users/ncyu/Projects/TradeBot/srv/TODO.md
-ssh trade-core 'sha256sum /tmp/openclaw/cost_gate_learning_lane/bounded_demo_probe_soak_plan.json /tmp/openclaw/cost_gate_learning_lane/standing_demo_operator_authorization.json'
-ssh trade-core 'ls -t /tmp/openclaw/ | head -8'   # 最新 session_loop_state / run 目錄
+ssh trade-core 'sha256sum ~/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_demo_probe_soak_plan.json ~/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/standing_demo_operator_authorization.json'
+ssh trade-core 'ls -t ~/BybitOpenClaw/var/openclaw/ | head -8'   # 最新 session_loop_state / run 目錄
 ssh trade-core 'systemctl --user is-active openclaw-trading-api openclaw-watchdog; ps -eo pid,etime,pcpu,args | grep openclaw-engine | grep -v grep'
 ```
 
-> 註:D3 落地(SSOT 遷移)後,上述 `/tmp/openclaw` 路徑統一改 `~/BybitOpenClaw/var/openclaw`,本節需同步更新。v738 期 55 條 artifact sha 驗證全清單見 [archive 快照](docs/archive/2026-07-04--todo_v738_pre_slim_archive.md) §4。
+> 註:D3 SSOT 遷移已落地,上述 handoff 路徑已統一改為 `~/BybitOpenClaw/var/openclaw`。v738 期 55 條 artifact sha 驗證全清單見 [archive 快照](docs/archive/2026-07-04--todo_v738_pre_slim_archive.md) §4。
 
 **Maintenance contract**: stable loop behavior lives in `docs/agents/profit-first-autonomy-loop.md`; current tasks and runtime facts live here. Do not turn either file into a duplicated historical report.
 **Self-check**: 下一位 PM 一分鐘內可定位:標準迴圈 next dispatch=`P0-STANDING-DEMO-LOSS-CONTROL-ENVELOPE-REFRESH-CURRENT-HEAD`(v738 終態 ROTATED,勿消費 v712-v738 stale 批准/READY/過期 standing auth);當前優先=冷審計 R2 修復波(P0×3+P1 batch,見 §1 前五行;spend limit 解除後 resume `wf_8c488f52-f7c` 與 `wf_cea61cbe-d75`)。核心禁令:無 fresh envelope+exact in-window E3/BB 批准,不做任何 order-capable/runtime mutation 動作。
