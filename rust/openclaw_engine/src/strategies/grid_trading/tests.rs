@@ -1402,6 +1402,7 @@ fn test_grid_proceeds_entry_when_symbol_pinned() {
 //       僅完成 helper + 隔離測試，不接線 commands.rs / dispatch.rs production dispatcher。
 // ─────────────────────────────────────────────────────────────────────────────
 
+use crate::config::risk_config::CloseMakerBackoffConfig;
 use crate::strategies::maker_rejection::MakerRejectionCategory;
 
 /// BB-MF-3 #1：entry-side PostOnly reject 不凍結同 symbol 的 close emission。
@@ -1550,6 +1551,43 @@ fn test_close_too_many_pending_dynamic_backoff_per_symbol() {
         g.reject_cooldown_close_until_ms.get("ETH").copied(),
         Some(3_000),
         "other symbol starts at independent 1s backoff"
+    );
+}
+
+/// OOS-9 wiring：證 operator RiskConfig `[close_maker_backoff]` 值真流入 grid 的
+/// close-maker 退避 runtime state（修 wiring 前為 dead-config，E3 LOW-1）。
+///
+/// 對照組（default grid）：首次 TooManyPending → ts + backoff_initial_ms
+/// (default 1_000) = 2_000。注入組（非-default backoff_initial_ms=5_000）：
+/// 首次 → ts + 5_000 = 6_000。修 wiring 前，`apply_close_maker_backoff_config`
+/// 不存在 / 建構子用 default，注入組仍會退到 2_000 → 第二斷言紅（證 config 未
+/// 流入）；接上後綠。用行為級斷言（退避時長）而非讀私有 config，確保驗的是
+/// runtime 真消費了注入值。
+#[test]
+fn test_oos_9_close_maker_backoff_config_flows_into_runtime() {
+    // 對照組：default backoff_initial_ms = 1_000 → 首次退避到 ts + 1s。
+    let mut g_default = GridTrading::new(49_000.0, 51_000.0);
+    g_default.arm_close_cooldown("BTC", 1_000, &MakerRejectionCategory::TooManyPending);
+    assert_eq!(
+        g_default.reject_cooldown_close_until_ms.get("BTC").copied(),
+        Some(2_000),
+        "default 建構子：首次 TooManyPending 退避 = ts + default backoff_initial_ms (1s)"
+    );
+
+    // 注入組：operator 把 backoff_initial_ms 調到 5_000（非-default）。
+    let custom = CloseMakerBackoffConfig {
+        backoff_initial_ms: 5_000,
+        ..CloseMakerBackoffConfig::default()
+    };
+    let mut g_injected = GridTrading::new(49_000.0, 51_000.0);
+    // 模擬 registry `create_for_engine` 的 post-construction 注入序列。
+    g_injected.apply_close_maker_backoff_config(&custom);
+    g_injected.arm_close_cooldown("BTC", 1_000, &MakerRejectionCategory::TooManyPending);
+    assert_eq!(
+        g_injected.reject_cooldown_close_until_ms.get("BTC").copied(),
+        Some(6_000),
+        "注入 backoff_initial_ms=5_000 後：首次退避必為 ts + 5s（證 config 真流入 \
+         runtime；dead-config 時此值仍是 2_000）"
     );
 }
 
