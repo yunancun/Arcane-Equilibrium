@@ -182,6 +182,64 @@ def _gate(name: str, passed: bool, *, actual: Any = None, expected: Any = None) 
     }
 
 
+def _multiple_comparison_metadata(horizon_packet: dict[str, Any]) -> dict[str, Any]:
+    """計算 best-of-K 多重比較的純附加註記（冷審計 R2 QC-1）。
+
+    為什麼：sealed gate 只做點估計 floor 檢查（sample/avg_net/hit_rate），headline
+    best 是在 K 個 (side_cell × horizon) 組合上取 max 選出的。null 下 E[max of K
+    noisy cells] > 0，故 best 之 headline 系統性上偏。本函數 *不改任何 pass/fail
+    語意*，只在 packet 附上 K 與 null 下的 E[max] 近似，供 operator review 排序、
+    不作晉升依據。
+
+    selection_k：跨所有 candidate 掃描過的 (side_cell × horizon) 組合總數。
+    expected_max_under_null_bps：sqrt(2 ln K)·pooled_sd 之 E[max] 上界近似。pooled_sd
+      取所有被掃 horizon 之 avg_net_bps 的樣本標準差（此模組不持有 per-cell 回報 SD，
+      以組合間離散度作保守代理，honest approximation，非精確 DSR）。
+    """
+    candidates = [row for row in _list(horizon_packet.get("candidates")) if isinstance(row, dict)]
+    avg_net_values: list[float] = []
+    selection_k = 0
+    for cand in candidates:
+        rows = [r for r in _list(cand.get("raw_horizon_rows")) if isinstance(r, dict)]
+        if rows:
+            selection_k += len(rows)
+            for r in rows:
+                v = _float(r.get("avg_net_bps"))
+                if v is not None:
+                    avg_net_values.append(v)
+        else:
+            # 無 raw_horizon_rows 明細者，至少計 1 個掃描組合（該 candidate 本身）。
+            selection_k += 1
+            v = _float(cand.get("best_net_bps"))
+            if v is not None:
+                avg_net_values.append(v)
+
+    # pooled_sd：組合間 avg_net 的樣本標準差（ddof=1）；不足 2 點則無法估計。
+    pooled_sd: float | None = None
+    if len(avg_net_values) >= 2:
+        mean = sum(avg_net_values) / len(avg_net_values)
+        var = sum((x - mean) ** 2 for x in avg_net_values) / (len(avg_net_values) - 1)
+        pooled_sd = math.sqrt(var) if var > 0 else 0.0
+
+    expected_max_under_null_bps: float | None = None
+    if pooled_sd is not None and selection_k >= 2:
+        expected_max_under_null_bps = _round(math.sqrt(2.0 * math.log(selection_k)) * pooled_sd)
+
+    return {
+        "selection_k": selection_k,
+        "pooled_sd_bps": _round(pooled_sd) if pooled_sd is not None else None,
+        "expected_max_under_null_bps": expected_max_under_null_bps,
+        "multiple_comparison_note": (
+            "headline best 為 best-of-K（K={k} 個 side_cell×horizon 組合）之選擇，"
+            "未對多重比較 deflate；null 下 E[max]≈{em} bps。此註記僅供 operator "
+            "review 排序，不作晉升依據，不改任何 sealed gate 之 pass/fail。".format(
+                k=selection_k,
+                em=(expected_max_under_null_bps if expected_max_under_null_bps is not None else "n/a"),
+            )
+        ),
+    }
+
+
 def build_horizon_specific_sealed_replay_packet(
     *,
     horizon_packet: dict[str, Any] | None,
@@ -357,6 +415,8 @@ def build_horizon_specific_sealed_replay_packet(
         else "SEALED_HORIZON_REPLAY_BLOCKED"
     )
     failed_gate_names = [gate["name"] for gate in gates if not gate["passed"]]
+    # QC-1：best-of-K 多重比較純附加註記；不參與 gates/passed，僅供 operator review。
+    multiple_comparison = _multiple_comparison_metadata(horizon_payload)
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at_utc": now.isoformat(),
@@ -395,6 +455,9 @@ def build_horizon_specific_sealed_replay_packet(
             "failed_gate_names": failed_gate_names,
             "gates": gates,
         },
+        # QC-1 純附加多重比較註記（selection_k / expected_max_under_null_bps /
+        # multiple_comparison_note）；不改任何 gate pass/fail，僅供 operator review 排序。
+        "multiple_comparison": multiple_comparison,
         "answers": {
             "sealed_replay_passed": passed,
             "retiming_candidate_revalidated": passed,

@@ -638,6 +638,8 @@ def _write_json_snapshot(
         "_meta": {
             "schema_version": 2,
             "updated_at": now_iso,
+            # n_cells = 已訓練 JS results 數（在注入 side/proxy overlay *之前*）；
+            # 非最終 JSON top-level key 總數。overlay 注入後見 n_total_keys 自證（QC-10）。
             "n_cells": len(results),
             "grand_mean_bps": grand_mean_bps,
         }
@@ -699,6 +701,14 @@ def _write_json_snapshot(
             proxy_added,
             grand_mean_bps,
         )
+
+    # QC-10：使 _meta 語意自證。n_cells 只計注入前的訓練 results，與最終 JSON key
+    # 總數不符（曾誤導 checks_strategy 診斷「cells=45」vs 實際 221 keys）。此處補三欄，
+    # 保持 n_cells 既有語意不動（消費端只讀 n_cells），另附 overlay 計數與總 key 數。
+    # n_total_keys = len(snapshot)-1（扣除 "_meta" 本身）；恒等於 n_cells+side+proxy。
+    snapshot["_meta"]["n_side_cells"] = side_added
+    snapshot["_meta"]["n_proxy_cells"] = proxy_added
+    snapshot["_meta"]["n_total_keys"] = len(snapshot) - 1
 
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     tmp = path + ".tmp"

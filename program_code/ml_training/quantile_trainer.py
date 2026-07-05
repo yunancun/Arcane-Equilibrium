@@ -141,6 +141,11 @@ class QuantileTrainingResult:
     n_samples_labeled: int = 0
     n_holdout: int = 0
     embargo_config: Optional[EmbargoConfig] = None
+    # 本次 run 是否「實際」執行了 embargo。embargo_config 只記錄意圖配置；當
+    # embargo 後訓練樣本 < 50 時 train_quantile_trio 會 fail-open 靜默改用未 embargo
+    # 的 train set，此旗標把該事實暴露到 acceptance report，避免「配置顯示 embargo
+    # 已套用、runtime 卻已停用」的隱形 leakage 觀測缺口（冷審計 R2 MIT[MEDIUM]）。
+    embargo_enforced: bool = True
     # Holdout arrays retained so calibration / reports can reuse without
     # re-slicing. Intentionally un-typed to avoid numpy hard-dep in dataclass.
     # 保留 holdout 陣列給 calibration / reports 複用；避免 dataclass 硬相依 numpy。
@@ -598,6 +603,9 @@ def train_quantile_trio(
     if embargo_mask.sum() < 50:
         # Do not enforce if it leaves < 50 samples — log and skip embargo.
         # 若 embargo 後 <50 樣本則不強制執行；日誌告警繼續。
+        # fail-open 已停用 embargo：標記 embargo_enforced=False 使 acceptance report
+        # 可誠實反映本次未套 embargo（否則 report 只見 embargo_config 意圖，誤導）。
+        result.embargo_enforced = False
         logger.warning(
             "embargo too aggressive for %s (n_train after embargo=%d) — disabled this run",
             strategy_name, int(embargo_mask.sum()),

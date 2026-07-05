@@ -67,11 +67,19 @@ def generate_labels(
     net_pnl: np.ndarray,
     atr: np.ndarray,
     config: Optional[LabelConfig] = None,
+    winsorize_bounds: Optional[tuple[float, float]] = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Generate ATR-normalized labels with winsorization.
     生成 ATR 歸一化標籤。
 
     Returns (labels, is_extreme) where is_extreme flags MAD outliers.
+
+    winsorize_bounds:
+        縮尾門檻 (low, high)。為什麼要能外傳：預設 None 時門檻由「本次傳入的
+        raw_labels 全陣列」的 1/99 分位算得；若呼叫端把含 test-fold 的完整窗口一次
+        傳入，會造成 cross-fold statistic leak（全期分位數洩入訓練標籤，冷審計 R2
+        MIT[LOW]）。故 CV pipeline 應在 train-fold 上算好 (low, high) 後由此參數傳入，
+        套用到各 fold，避免 test-fold 分位洩漏。傳 None 保持既有單體行為（向後相容）。
     """
     cfg = config or LabelConfig()
     atr_floor = compute_atr_floor(atr, cfg.atr_floor_quantile)
@@ -81,8 +89,13 @@ def generate_labels(
     raw_labels = net_pnl / safe_atr
 
     # Winsorize at percentiles / 在分位數處縮尾
-    low = np.percentile(raw_labels, cfg.winsorize_pct * 100)
-    high = np.percentile(raw_labels, (1 - cfg.winsorize_pct) * 100)
+    # 為什麼優先用外傳 bounds：見 winsorize_bounds docstring —— 由呼叫端在 train-fold
+    # 算好門檻可杜絕 cross-fold 分位洩漏；未傳時 fallback 到本陣列分位（單體/測試用）。
+    if winsorize_bounds is not None:
+        low, high = winsorize_bounds
+    else:
+        low = np.percentile(raw_labels, cfg.winsorize_pct * 100)
+        high = np.percentile(raw_labels, (1 - cfg.winsorize_pct) * 100)
     labels = np.clip(raw_labels, low, high)
 
     # Final clip at ±Y_MAX / 最終裁剪
