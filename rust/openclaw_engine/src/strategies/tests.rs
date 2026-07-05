@@ -146,7 +146,12 @@ fn test_strategy_factory_creates_six_strategies() {
 
 // ── FLASH-DIP-PILOT kind-aware demo-gate 負測（CC 條件 4 / E3 MED-1 grep-proof）──
 
-/// 序列化 env-sensitive 測試（OPENCLAW_FLASH_DIP_PILOT_ENABLED 為 process-wide）。
+/// 序列化 env-sensitive 測試。
+///
+/// 為什麼要鎖：`create_for_engine` 讀兩個 process-wide 狀態——
+/// `OPENCLAW_FLASH_DIP_PILOT_ENABLED`（flag）與 `OPENCLAW_BASE_DIR`
+/// （`settings_dir()` 據此定位 `strategy_params_demo.toml`）。多測試並行改
+/// 同一 env 會互相污染，故所有讀寫此二 env 的測試共用同一鎖串行化。
 static FLASH_DIP_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn flash_dip_count(strategies: &[Box<dyn super::Strategy>]) -> usize {
@@ -154,6 +159,60 @@ fn flash_dip_count(strategies: &[Box<dyn super::Strategy>]) -> usize {
         .iter()
         .filter(|s| s.name() == "flash_dip_buy")
         .count()
+}
+
+/// 在受控 env 下執行 flash_dip gate 測試，回傳閉包結果。
+///
+/// 為什麼需要此 helper（根因）：`create_for_engine` 經 `settings_dir()` 讀
+/// `OPENCLAW_BASE_DIR/settings/strategy_params_demo.toml`（缺 BASE_DIR 時退回
+/// cwd-相對 `./settings`）。直接依賴 ambient 磁碟會令測試同時受「cwd」與
+/// 「operator 可變的 repo toml `[flash_dip_buy].active`」影響——後者現為
+/// `active=true`（operator 2026-06-18 啟用 pilot），使斷言 active=false 的測試
+/// 在 BASE_DIR 存在時 FAIL、缺失時 PASS，成環境相依的脆弱測試。
+///
+/// 此 helper 把 BASE_DIR 指向臨時目錄並寫入 test 自控的 demo toml（`active`
+/// 值由參數決定），閉包結束後還原原 env，讓測試 cwd-independent 且
+/// env-isolated。`pilot_flag_on` 控制是否設 flag。全程持 `FLASH_DIP_ENV_LOCK`。
+fn with_flash_dip_env<T>(demo_active: bool, pilot_flag_on: bool, body: impl FnOnce() -> T) -> T {
+    const FLAG_ENV: &str = "OPENCLAW_FLASH_DIP_PILOT_ENABLED";
+    const BASE_ENV: &str = "OPENCLAW_BASE_DIR";
+    let _g = FLASH_DIP_ENV_LOCK.lock().unwrap();
+
+    // 保存原 env，測試後精確還原（成對 set/remove，禁洩漏到其他測試）。
+    let prev_flag = std::env::var(FLAG_ENV).ok();
+    let prev_base = std::env::var(BASE_ENV).ok();
+
+    let td = tempfile::tempdir().unwrap();
+    let settings = td.path().join("settings");
+    std::fs::create_dir_all(&settings).unwrap();
+    // 只寫 gate 決策所需欄位；其餘 `#[serde(default)]`。active=true 時附合法參數
+    // 以通過 `FlashDipBuyParams::validate()`（否則 fail-closed 不註冊會混淆語意）。
+    let toml = if demo_active {
+        "[flash_dip_buy]\nactive = true\nk_dip = 0.15\nhold_days = 3\nmax_concurrent = 1\nnotional_frac = 0.01\nallowed_symbols = [\"BTCUSDT\"]\n"
+    } else {
+        "[flash_dip_buy]\nactive = false\n"
+    };
+    std::fs::write(settings.join("strategy_params_demo.toml"), toml).unwrap();
+
+    std::env::set_var(BASE_ENV, td.path());
+    if pilot_flag_on {
+        std::env::set_var(FLAG_ENV, "1");
+    } else {
+        std::env::remove_var(FLAG_ENV);
+    }
+
+    let out = body();
+
+    // 還原：有原值則寫回，無則移除。
+    match prev_base {
+        Some(v) => std::env::set_var(BASE_ENV, v),
+        None => std::env::remove_var(BASE_ENV),
+    }
+    match prev_flag {
+        Some(v) => std::env::set_var(FLAG_ENV, v),
+        None => std::env::remove_var(FLAG_ENV),
+    }
+    out
 }
 
 #[test]
@@ -174,41 +233,65 @@ fn test_flash_dip_never_in_create_all_or_create_with_params() {
 
 #[test]
 fn test_flash_dip_demo_gate_flag_off_zero_registration() {
-    let _g = FLASH_DIP_ENV_LOCK.lock().unwrap();
-    std::env::remove_var("OPENCLAW_FLASH_DIP_PILOT_ENABLED"); // flag OFF
-                                                              // flag OFF → 即使 Demo 也 0 次。
+    // flag OFF → 即使 Demo + toml active=true 也 0 次（flag 為第一必要條件）。
+    // 參數：demo_active=true（施壓，證 flag 短路先於 active），pilot_flag_on=false。
+    let demo = with_flash_dip_env(true, false, || {
+        flash_dip_count(&StrategyFactory::create_for_engine(
+            PipelineKind::Demo,
+            None,
+        ))
+    });
     assert_eq!(
-        flash_dip_count(&StrategyFactory::create_for_engine(PipelineKind::Demo, None)),
-        0,
+        demo, 0,
         "flag OFF must yield 0 flash_dip_buy registration even in Demo"
     );
 }
 
 #[test]
 fn test_flash_dip_never_in_paper_or_live_even_with_flag_on() {
-    let _g = FLASH_DIP_ENV_LOCK.lock().unwrap();
-    // 強制 flag ON：仍只有 Demo 可能註冊；Paper / Live 結構性 0 次。
-    std::env::set_var("OPENCLAW_FLASH_DIP_PILOT_ENABLED", "1");
-    let paper = flash_dip_count(&StrategyFactory::create_for_engine(PipelineKind::Paper, None));
-    let live = flash_dip_count(&StrategyFactory::create_for_engine(PipelineKind::Live, None));
-    std::env::remove_var("OPENCLAW_FLASH_DIP_PILOT_ENABLED");
-    assert_eq!(paper, 0, "flash_dip_buy must NEVER register in Paper pipeline");
-    assert_eq!(live, 0, "flash_dip_buy must NEVER register in Live pipeline");
+    // 強制 flag ON + toml active=true：仍只有 Demo 可能註冊；Paper / Live 結構性 0 次。
+    // 參數：demo_active=true（施壓，證 kind gate 單獨即擋住 Paper/Live，與 active 無關），
+    // pilot_flag_on=true。
+    let (paper, live) = with_flash_dip_env(true, true, || {
+        let paper = flash_dip_count(&StrategyFactory::create_for_engine(
+            PipelineKind::Paper,
+            None,
+        ));
+        let live = flash_dip_count(&StrategyFactory::create_for_engine(
+            PipelineKind::Live,
+            None,
+        ));
+        (paper, live)
+    });
+    assert_eq!(
+        paper, 0,
+        "flash_dip_buy must NEVER register in Paper pipeline"
+    );
+    assert_eq!(
+        live, 0,
+        "flash_dip_buy must NEVER register in Live pipeline"
+    );
 }
 
 #[test]
 fn test_flash_dip_demo_gate_requires_all_three_conditions() {
-    let _g = FLASH_DIP_ENV_LOCK.lock().unwrap();
-    // 三合一 gate：Demo + flag-ON + active=true。repo settings/strategy_params_demo.toml
-    // 的 [flash_dip_buy].active=false → 即使 Demo + flag-ON 仍 0 次（active gate 守住）。
-    // 此測試證「flag-ON + Demo 但 active=false → 不註冊」（active 為第三必要條件）。
-    std::env::set_var("OPENCLAW_FLASH_DIP_PILOT_ENABLED", "1");
-    let demo = flash_dip_count(&StrategyFactory::create_for_engine(PipelineKind::Demo, None));
-    std::env::remove_var("OPENCLAW_FLASH_DIP_PILOT_ENABLED");
-    // active=false default in repo TOML → 0 次（除非 operator 顯式 active=true）。
+    // 三合一 gate：Demo + flag-ON + active=true。此測試以 test 自控 toml
+    // 顯式設 [flash_dip_buy].active=false，證「flag-ON + Demo 但 active=false
+    // → 不註冊」（active 為第三必要條件）。
+    //
+    // 為何用受控 toml 而非 repo settings：repo `strategy_params_demo.toml` 的
+    // active 由 operator 掌控（現為 true，2026-06-18 啟用 pilot），直接讀會使
+    // 本測試變環境相依而 flaky；`with_flash_dip_env` 令其 cwd/env-independent。
+    // 參數：demo_active=false（第三 gate active 缺席），pilot_flag_on=true。
+    let demo = with_flash_dip_env(false, true, || {
+        flash_dip_count(&StrategyFactory::create_for_engine(
+            PipelineKind::Demo,
+            None,
+        ))
+    });
     assert_eq!(
         demo, 0,
-        "Demo + flag-ON but active=false (repo default) must NOT register \
+        "Demo + flag-ON but active=false must NOT register \
          (active is the third required gate condition)"
     );
 }
