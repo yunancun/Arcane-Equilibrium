@@ -211,6 +211,15 @@ impl Orchestrator {
             .collect()
     }
 
+    /// E5-1 (2026-07-05)：查有無 active 策略聲明指定 alpha source tag。
+    /// 供 tick 熱路徑在 clone Tier-2/3 panel 前 gate 深拷貝(無 consumer 時省成本)。
+    pub fn any_active_strategy_declares(&self, tag: AlphaSourceTag) -> bool {
+        self.strategies
+            .iter()
+            .filter(|s| s.is_active())
+            .any(|s| s.declared_alpha_sources().contains(&tag))
+    }
+
     /// Get strategy status info for IPC snapshot.
     /// 獲取策略狀態信息供 IPC 快照使用。
     pub fn strategy_infos(&self) -> Vec<StrategyInfo> {
@@ -286,6 +295,9 @@ mod tests {
         name: String,
         active: bool,
         actions: Vec<StrategyAction>,
+        // E5-1 (2026-07-05)：declared alpha tags 可配置，供 any_active_strategy_declares
+        // gate predicate 測試（不同策略聲明不同 tag 集）。預設 [Ta1m] 保持既有測試行為。
+        declared_tags: Vec<AlphaSourceTag>,
     }
 
     impl Strategy for MockStrategy {
@@ -299,8 +311,7 @@ mod tests {
             self.active = active;
         }
         fn declared_alpha_sources(&self) -> &[AlphaSourceTag] {
-            const TAGS: &[AlphaSourceTag] = &[AlphaSourceTag::Ta1m];
-            TAGS
+            &self.declared_tags
         }
         fn on_tick(
             &mut self,
@@ -316,6 +327,21 @@ mod tests {
             name: name.to_string(),
             active,
             actions,
+            declared_tags: vec![AlphaSourceTag::Ta1m],
+        })
+    }
+
+    // E5-1 (2026-07-05)：構造聲明指定 tag 集的策略，鎖 any_active_strategy_declares。
+    fn mock_strategy_with_tags(
+        name: &str,
+        active: bool,
+        declared_tags: Vec<AlphaSourceTag>,
+    ) -> Box<dyn Strategy> {
+        Box::new(MockStrategy {
+            name: name.to_string(),
+            active,
+            actions: vec![],
+            declared_tags,
         })
     }
 
@@ -516,5 +542,79 @@ mod tests {
             StrategyAction::Open(intent) => assert_eq!(intent.strategy, "ma_crossover"),
             _ => panic!("expected open intent"),
         }
+    }
+
+    // ── E5-1 (2026-07-05) perf gate predicate：any_active_strategy_declares ──
+    // 這組直接鎖 step_4_5_dispatch 深拷貝 gate 的判準邏輯（active+declare→clone /
+    // 否則→省 clone 走 None）。tick pipeline seam 對此 gate 零 test-bite（見
+    // step_4_5_dispatch_tests.rs slot-injection 測），故 predicate 本身必單測窮舉。
+
+    #[test]
+    fn test_declares_true_when_active_strategy_declares_tag() {
+        // active 且聲明 LiquidationCascade 的策略在場 → true。
+        let mut orch = Orchestrator::new();
+        orch.register(mock_strategy_with_tags(
+            "liq_fade",
+            true,
+            vec![AlphaSourceTag::LiquidationCascade],
+        ));
+        assert!(orch.any_active_strategy_declares(AlphaSourceTag::LiquidationCascade));
+    }
+
+    #[test]
+    fn test_declares_false_when_declaring_strategy_inactive() {
+        // 該策略 inactive → false（dormant 時省深拷貝的核心分支）。
+        let mut orch = Orchestrator::new();
+        orch.register(mock_strategy_with_tags(
+            "liq_fade",
+            false,
+            vec![AlphaSourceTag::LiquidationCascade],
+        ));
+        assert!(!orch.any_active_strategy_declares(AlphaSourceTag::LiquidationCascade));
+    }
+
+    #[test]
+    fn test_declares_false_when_active_strategy_declares_other_tag() {
+        // 有 active 策略但不聲明該 tag → false（誤匹配防護：不能因任何 active
+        // 策略在場就走深拷貝）。
+        let mut orch = Orchestrator::new();
+        orch.register(mock_strategy_with_tags(
+            "ta_only",
+            true,
+            vec![AlphaSourceTag::Ta1m, AlphaSourceTag::CrossAsset],
+        ));
+        assert!(!orch.any_active_strategy_declares(AlphaSourceTag::LiquidationCascade));
+    }
+
+    #[test]
+    fn test_declares_false_on_empty_orchestrator() {
+        // 空 orchestrator → false。
+        let orch = Orchestrator::new();
+        assert!(!orch.any_active_strategy_declares(AlphaSourceTag::LiquidationCascade));
+    }
+
+    #[test]
+    fn test_declares_true_with_mixed_active_and_inactive() {
+        // 混合場景：一個 active 非聲明者 + 一個 inactive 聲明者 → false；
+        // 再加一個 active 聲明者 → true（.any() 覆蓋 active 過濾後仍要求 declare）。
+        let mut orch = Orchestrator::new();
+        orch.register(mock_strategy_with_tags(
+            "ta_active",
+            true,
+            vec![AlphaSourceTag::Ta1m],
+        ));
+        orch.register(mock_strategy_with_tags(
+            "liq_inactive",
+            false,
+            vec![AlphaSourceTag::LiquidationCascade],
+        ));
+        assert!(!orch.any_active_strategy_declares(AlphaSourceTag::LiquidationCascade));
+
+        orch.register(mock_strategy_with_tags(
+            "liq_active",
+            true,
+            vec![AlphaSourceTag::LiquidationCascade],
+        ));
+        assert!(orch.any_active_strategy_declares(AlphaSourceTag::LiquidationCascade));
     }
 }

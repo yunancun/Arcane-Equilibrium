@@ -1204,3 +1204,178 @@ fn bounded_probe_reject_wiring_preview_submits_or_skips_without_order() {
         BoundedProbePlacementSkipReason::MissingFreshBbo
     );
 }
+
+// =========================================================================
+// E5-1 (2026-07-05) perf gate — slot-injected pipeline seam 測。
+//
+// 鎖 step_4_5_dispatch 的 liquidation_pulse 深拷貝 gate 端到端行為：
+//   - gate=TRUE（有 active 策略 declare LiquidationCascade）→ 注入的 slot panel
+//     真的透過 clone 進 alpha_surface.liquidation_pulse，consumer 策略看得到 Some
+//     且內容等同注入值（active-clone 回歸鎖）。
+//   - gate=FALSE（declare 者 inactive）→ 即使 slot 內有 panel，surface 側仍為
+//     None（dormant→None 的 byte-neutral 保證）。
+//
+// 觀測手段：注入一個 active observer 策略，把每 tick 見到的
+// alpha_surface.liquidation_pulse 的 source_tier（Some）或 None 記進 shared Vec。
+// observer 本身 declare 的 tag 由測試控制以驅動 gate 真值。
+// =========================================================================
+
+const LIQ_SEAM_PANEL_MARKER: &str = "e5_1_seam_probe_marker";
+const LIQ_SEAM_TS_MS: u64 = 1_782_040_200_000;
+
+/// 觀測 alpha_surface.liquidation_pulse 的最小 active 策略。
+/// declared_tags 供測試切換 gate 真值；on_tick 每次把觀測到的 panel
+/// source_tier（Some）或 None 推進 shared observations。
+struct LiquidationSurfaceObserver {
+    declared_tags: Vec<openclaw_core::alpha_surface::AlphaSourceTag>,
+    observations: std::sync::Arc<std::sync::Mutex<Vec<Option<String>>>>,
+}
+
+impl crate::strategies::Strategy for LiquidationSurfaceObserver {
+    fn name(&self) -> &str {
+        "liq_seam_observer"
+    }
+    fn is_active(&self) -> bool {
+        true
+    }
+    fn set_active(&mut self, _active: bool) {}
+    fn declared_alpha_sources(&self) -> &[openclaw_core::alpha_surface::AlphaSourceTag] {
+        &self.declared_tags
+    }
+    fn on_tick(
+        &mut self,
+        _ctx: &crate::tick_pipeline::TickContext<'_>,
+        surface: &AlphaSurface<'_>,
+    ) -> Vec<crate::strategies::StrategyAction> {
+        let seen = surface
+            .liquidation_pulse
+            .map(|panel| panel.source_tier.clone());
+        self.observations.lock().unwrap().push(seen);
+        vec![]
+    }
+}
+
+/// 建一個帶內容的 LiquidationPulsePanel slot（source_tier = marker）並注入 pipeline。
+fn inject_marked_liquidation_slot(pipeline: &mut crate::tick_pipeline::TickPipeline) {
+    let mut panel = openclaw_core::alpha_surface::LiquidationPulsePanel {
+        snapshot_ts_ms: LIQ_SEAM_TS_MS as i64,
+        source_tier: LIQ_SEAM_PANEL_MARKER.to_string(),
+        ..Default::default()
+    };
+    // 塞一筆 pulse 讓深拷貝真的搬運非空 HashMap（clone 成本路徑）。
+    panel.pulses.insert(
+        "ETHUSDT".to_string(),
+        openclaw_core::alpha_surface::LiquidationPulse {
+            cluster_notional_5m: 123_456.0,
+            snapshot_ts_ms: LIQ_SEAM_TS_MS as i64,
+            ..Default::default()
+        },
+    );
+    // slot 型別為 Arc<tokio::sync::RwLock<Option<..>>>（見 ipc_server::slots）；
+    // dispatch 端走 try_read()，此處以 tokio RwLock 構造對齊。
+    let slot: crate::ipc_server::LiquidationPulsePanelSlot =
+        std::sync::Arc::new(TokioRwLock::new(Some(panel)));
+    pipeline.set_liquidation_pulse_panel_slot(slot);
+}
+
+/// 40 根暖機 bar + 一根受測 tick，讓 tick 走到 step_4_5 strategy dispatch。
+fn warm_then_drive(pipeline: &mut crate::tick_pipeline::TickPipeline) {
+    for i in 0..41u64 {
+        let ts = LIQ_SEAM_TS_MS - (41 - i) * 60_000;
+        let price = 3_000.0 + (i % 7) as f64;
+        let _ = pipeline.on_tick(&PriceEvent::new("ETHUSDT".to_string(), price, ts));
+    }
+    let _ = pipeline.on_tick(&PriceEvent::new(
+        "ETHUSDT".to_string(),
+        3_010.0,
+        LIQ_SEAM_TS_MS,
+    ));
+}
+
+#[test]
+fn e5_1_gate_true_active_declarer_sees_injected_liquidation_panel() {
+    // active observer 自身 declare LiquidationCascade → gate TRUE → slot panel
+    // 應深拷貝進 surface，observer 看到 Some(marker)。
+    let mut pipeline = crate::tick_pipeline::TickPipeline::new(&["ETHUSDT"]);
+    inject_marked_liquidation_slot(&mut pipeline);
+    let observations = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    pipeline
+        .orchestrator
+        .register(Box::new(LiquidationSurfaceObserver {
+            declared_tags: vec![openclaw_core::alpha_surface::AlphaSourceTag::LiquidationCascade],
+            observations: std::sync::Arc::clone(&observations),
+        }));
+
+    warm_then_drive(&mut pipeline);
+
+    let seen = observations.lock().unwrap();
+    assert!(
+        !seen.is_empty(),
+        "observer on_tick 從未被呼叫 — dispatch 未達 strategy loop（seam 測失效）"
+    );
+    // gate TRUE 時，注入的 panel 應以 Some(marker) 抵達 surface；且絕不出現 None。
+    assert!(
+        seen.iter().any(|o| o.as_deref() == Some(LIQ_SEAM_PANEL_MARKER)),
+        "gate=TRUE 應把注入 slot panel 深拷貝進 surface.liquidation_pulse，實測 observations={seen:?}"
+    );
+    assert!(
+        seen.iter().all(|o| o.as_deref() == Some(LIQ_SEAM_PANEL_MARKER)),
+        "gate=TRUE 全程應為 Some(marker)，出現非預期值 observations={seen:?}"
+    );
+}
+
+#[test]
+fn e5_1_gate_false_dormant_declarer_yields_none_despite_injected_slot() {
+    // 場景：LiquidationCascade declare 者 inactive（→ gate FALSE），另有一個 active
+    // observer 不 declare 該 tag（僅為見證 surface）。即使 slot 內有 panel，
+    // observer 應只看到 None（dormant→None byte-neutral）。
+    let mut pipeline = crate::tick_pipeline::TickPipeline::new(&["ETHUSDT"]);
+    inject_marked_liquidation_slot(&mut pipeline);
+
+    // inactive 的 LiquidationCascade declare 者（不參與 dispatch，但也不觸發 gate）。
+    struct InactiveLiqDeclarer;
+    impl crate::strategies::Strategy for InactiveLiqDeclarer {
+        fn name(&self) -> &str {
+            "liq_declarer_inactive"
+        }
+        fn is_active(&self) -> bool {
+            false
+        }
+        fn set_active(&mut self, _active: bool) {}
+        fn declared_alpha_sources(&self) -> &[openclaw_core::alpha_surface::AlphaSourceTag] {
+            const TAGS: &[openclaw_core::alpha_surface::AlphaSourceTag] =
+                &[openclaw_core::alpha_surface::AlphaSourceTag::LiquidationCascade];
+            TAGS
+        }
+        fn on_tick(
+            &mut self,
+            _ctx: &crate::tick_pipeline::TickContext<'_>,
+            _surface: &AlphaSurface<'_>,
+        ) -> Vec<crate::strategies::StrategyAction> {
+            panic!("inactive 策略的 on_tick 不應被呼叫");
+        }
+    }
+    pipeline.orchestrator.register(Box::new(InactiveLiqDeclarer));
+
+    let observations = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    pipeline
+        .orchestrator
+        .register(Box::new(LiquidationSurfaceObserver {
+            // observer active 但只 declare Ta1m（不觸發 liquidation gate）。
+            declared_tags: vec![openclaw_core::alpha_surface::AlphaSourceTag::Ta1m],
+            observations: std::sync::Arc::clone(&observations),
+        }));
+
+    warm_then_drive(&mut pipeline);
+
+    let seen = observations.lock().unwrap();
+    assert!(
+        !seen.is_empty(),
+        "observer on_tick 從未被呼叫 — dispatch 未達 strategy loop（seam 測失效）"
+    );
+    // gate FALSE：即使 slot 有 marker panel，surface 側恆 None。
+    assert!(
+        seen.iter().all(|o| o.is_none()),
+        "gate=FALSE（無 active LiquidationCascade declare 者）應為 None，實測 observations={seen:?}"
+    );
+}
