@@ -1,5 +1,7 @@
 # 2026-04-24 TODO 全面重構 Audit 索引
 
+> Archived 2026-07-05: completed audit index; not an active TODO ledger.
+
 **動機**：原 TODO.md 700 行、47578 tokens，混亂度高，難以梳理清晰工作流程。operator 要求 10 角色並行 audit、基於實際代碼驗證現狀、產生可執行修復計畫、重構 TODO 結構。
 
 **輸出**：
@@ -128,4 +130,3 @@ operator 最關心 4 大議題，對應新 TODO 章節分佈：
 ✅ **PM 簽核**：Approved with 6 minor adjustments、可交付性 HIGH (95%)、時序可信度 MEDIUM (78%)  
 ✅ **Live 日期**：中位 2026-05-30（PM 建議 +10% 緩衝 ~2026-06-01）  
 ✅ **執行準備**：subagent 派遣清單、session 拆分方案、並行軌道文檔齊全
-

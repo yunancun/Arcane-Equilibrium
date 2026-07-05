@@ -280,7 +280,7 @@ does not authorize IBKR contact by itself.
 | AUDIT-09 | 3E-ARCH Phase G Re-audit | docs/audits/2026-04-11--3e_arch_phase_g_reaudit.md | 2026-04-11 | REF-14 · 9/9 PASS — 0 BLOCKER |
 | AUDIT-10 | Full Program Chain Audit | docs/audits/2026-04-12--full_program_chain_audit.md | 2026-04-12 | 12 角色合併 · 58 findings（8 P0 · 17 P1 · 28 P2 · 5 P3） |
 | AUDIT-11 | Full Audit Fix Plan (PM Confirmed) | docs/audits/2026-04-12--full_audit_fix_plan_pm_confirmed.md | 2026-04-12 | AUDIT-10 配套 · P0~P3 分級修復排期 + PM 簽核 |
-| AUDIT-12 | TODO Refactor Audit (10-Agent) | docs/audits/2026-04-24--todo_refactor_audit.md | 2026-04-24 | 10 Agent 獨立 audit · PA FIX-PLAN（45 findings / 6 工作組 / 4 Wave）· PM Sign-off |
+| AUDIT-12 | TODO Refactor Audit (10-Agent) | docs/archive/2026-04-24--todo_refactor_audit.md | 2026-04-24 | 10 Agent 獨立 audit · PA FIX-PLAN（45 findings / 6 工作組 / 4 Wave）· PM Sign-off |
 | AUDIT-13 | 2026-05-08 12-Agent Full Audit + PA Fix Plan | 2026-05-08--full_audit_fix_plan.md<br>docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-08--full_audit_pa_fix_plan.md | 2026-05-08 | 12 audit reports -> 88 unique findings -> W-AUDIT-1..7；5 pending operator decisions；K-6 LG-5 reviewer stale finding disputed |
 
 > **註**：早期審計（2026-04-05 L3 12 角色報告）位於 `docs/audits/2026-04-05--l3_comprehensive/` 子目錄；
