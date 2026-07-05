@@ -209,9 +209,9 @@ does not authorize IBKR contact by itself.
 | ARCH-05 | Alpha Tournament SSOT | docs/execution_plan/2026-05-26--alpha_tournament_ssot_spec.md | ✅ Active / IMPL-PENDING | Sprint 2 profit-spine SSOT. Fills v5.8 implicit Alpha Tournament slot with required read order, candidate pool, fee-adjusted scoring, minimum evidence gates, Stage output lanes, role chain, and cross-document pointers. Does not grant trading authority or relax Stage/5-gate constraints. **狀態拆分（P1-16）**：source scaffold = done（`alpha_tournament/` package）；active = false（orchestrator 仍 stub）；Stage 0R evidence = pending；M11 Stage-A smoke cron = installed（liveness-only）；M11 Stage-B divergence output = pending（`replay_divergence_log=0`）。scaffold 落地非「mostly done」，Stage-A smoke 非 promotion/divergence evidence。 |
 | ARCH-06 | Alpha-Edge Regime Evidence Governance | docs/adr/0047-alpha-edge-regime-evidence-governance.md<br>docs/governance_dev/amendments/2026-05-31--AMD-2026-05-31-01-alpha-edge-evidence-governance.md | ✅ Active | Math-primary evidence governance for Alpha-Edge S1-Sx. Bull data is allowed but must be labeled; S4 is a global regime/falsification overlay; Bybit market endpoints are raw state inputs, not prediction; future news/X/Reddit agents are secondary context only. |
 
-### Architecture Decision Records (ADR-0034 ~ ADR-0047)
+### Architecture Decision Records (ADR-0034 ~ ADR-0048)
 
-> v5.8 13-module thesis Sprint 1A 系列 ADR：M1 LAL 起步 / M5/M12/M13 Y3+ trait stub / M8+M10 安全機制 / M9 A/B / M11 counterfactual replay / ContextDistiller v4 / M3/M6/M7 health+reward+decay / M4 hypothesis discovery / funding_arb V3 redesign slot；ADR-0047 追加 Alpha-Edge evidence governance。
+> v5.8 13-module thesis Sprint 1A 系列 ADR：M1 LAL 起步 / M5/M12/M13 Y3+ trait stub / M8+M10 安全機制 / M9 A/B / M11 counterfactual replay / ContextDistiller v4 / M3/M6/M7 health+reward+decay / M4 hypothesis discovery / funding_arb V3 redesign slot；ADR-0047 追加 Alpha-Edge evidence governance；ADR-0048 追加 IBKR Stock/ETF paper+shadow lane。
 >
 > **註**：ADR-0001 ~ ADR-0033 直接索引於 `docs/adr/`（檔名即 ID），不在本 register 重複登錄；本表僅追蹤 ADR-0034+（v5.8 系列）。完整 ADR 清單見 `docs/adr/` 目錄與 `docs/README.md` 索引。
 
@@ -310,7 +310,7 @@ does not authorize IBKR contact by itself.
 | Active SM/EX/DOC/LG-X specifications | 24 |
 | Active OPS-X prerequisites | 1 |
 | Reserved specifications | 0 |
-| Active REF specifications | 19 |
+| REF specifications | 見 REF 表 Status 欄（✅ Active 約 15，另 Draft/Historical/Revise 見表）|
 | Active ARCH specifications | 5 |
 | Active AUDIT entries | 13 |
 | Total code references | 見代碼內 spec-tag grep（數量持續增加，不在此固定計數） |

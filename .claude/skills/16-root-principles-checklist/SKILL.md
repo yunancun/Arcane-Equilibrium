@@ -81,7 +81,10 @@ Rust Engine 降級 L0 時 16 條原則**全部仍成立**：
 
 ## AgentTool 訪問權限分類（V3 報告 B.3；唯一正本）
 
-- 只讀：CognitiveModulator / DreamEngine
+- 只讀：CognitiveModulator
+- learning-plane 受限寫（非交易寫入口）：DreamEngine.persist_dream_insights →
+  PG `dream_insights` 表 INSERT（learning 平面，原則 7），不碰訂單/交易狀態，
+  不違原則 1/2。對交易面只讀。
 - 受限寫：OpportunityTracker
 - 系統寫：唯一執行入口
 

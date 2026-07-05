@@ -23,6 +23,7 @@
 | `CCAgentWorkSpace/E4/workspace/reports/2026-07-04--e4_test_matrix_blindspot_audit.md` | E4 測試矩陣盲點審計。 |
 | `governance_dev/amendments/2026-07-04--AMD-2026-07-04-01-doc06-runtime-mutation-record-rule.md` | AMD-2026-07-04-01：DOC-06 Runtime Mutation 紀錄規則泛化（RM-1..RM-4：before/after + manifest + 持久位置 + 移除裁決 + pin-by-reference），泛化 FA F2 crontab 治理規則為 DOC-06 通用條款。 |
 | `archive/2026-07-04--script_index_changelog_prose_archive.md` | SCRIPT_INDEX.md 頭部「最新補充/歷史補充」229 段 run-on changelog prose 歸檔（R4-2026-IDX-04 收斂）；per-batch SSOT 仍在 SCRIPT_INDEX `## YYYY-MM-DD` 區塊，本檔存派生歷史層 + 確定性提取命令。 |
+| `references/2000_line_exception_registry.md` | 2000 行硬上限 documented pre-existing exception 正本（冷審計 R2 CC-2）：登記 10 個超標生產檔（路徑+行數+拆分歸屬）；CLAUDE.md §七/§九 指針指向此檔，冷審計據此不再重複觸發 retroactive finding。禁在登記波實際拆檔。 |
 
 ### 2026-06-29 IBKR Stock/ETF paper + shadow feasibility lane
 
