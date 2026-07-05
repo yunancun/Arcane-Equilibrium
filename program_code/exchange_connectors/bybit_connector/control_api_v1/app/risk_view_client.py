@@ -51,8 +51,17 @@ def _attach_live_token_if_live(method: str, params: dict[str, Any] | None) -> di
     """
     if not isinstance(params, dict) or params.get("engine") != "live":
         return params
-    from .live_patch_token import call_params_with_token  # noqa: PLC0415
+    from .live_patch_token import LIVE_WRITE_METHODS, call_params_with_token  # noqa: PLC0415
 
+    # OOS-4 純防禦：engine=="live" 走鑄造前，先在此命名入口驗 method 屬 LIVE_WRITE_METHODS
+    # （鏡 Rust live_authz.rs 白名單）。不改行為：現有兩 caller（reset_drawdown_baseline /
+    # resume_paper）皆合法，happy-path 不變。違反 → raise，寧可 fail-loud 也不鑄綁到非
+    # live-write method 的 token。call_params_with_token 內另有同層驗證（雙保險）。
+    if method not in LIVE_WRITE_METHODS:
+        raise ValueError(
+            f"_attach_live_token_if_live: method {method!r} not in LIVE_WRITE_METHODS "
+            "— refusing to mint a live-write token for a non-live-write method"
+        )
     return call_params_with_token(method, params)
 
 
@@ -210,6 +219,39 @@ class RiskViewClient:
         except Exception as e:
             logger.warning("refresh_runtime_status failed: %s", e)
         return self._cached_runtime
+
+    async def live_session_halted(self) -> bool | None:
+        """OOS-3：以 Rust runtime status IPC 為權威回報 live 引擎是否真處 session-halt 態。
+
+        為何走 get_risk_runtime_status(engine="live") 而非讀 snapshot 檔：override
+        分支要「即時、無 TOCTOU」的 halt 態判準——snapshot 檔可能過期，且與 Rust
+        權威狀態之間存在讀寫窗口。IPC 直接向 live pipeline 取 `session_halted`
+        （dispatch 對本 method 用 extract_engine_tx，engine="live" → select(live)），
+        是同一份權威狀態，無檔案窗口。
+
+        回傳三態（fail-closed 由 caller 決定如何處置 None）：
+          - True  : live pipeline 明確回報 session_halted=true
+          - False : live pipeline 明確回報 session_halted=false（非 halt 態）
+          - None  : 讀取失敗 / IPC 不可達 / 回應缺 session_halted 欄
+                    → caller 必 fail-closed（不可把讀不到當作「已 halt」而放行 override）。
+        """
+        if self._ipc is None:
+            logger.warning("live_session_halted: no IPC client — cannot read halt state")
+            return None
+        try:
+            resp = await self._ipc.call(
+                "get_risk_runtime_status", params={"engine": "live"}
+            )
+        except Exception as e:
+            logger.warning("live_session_halted: IPC read failed: %s", e)
+            return None
+        if not isinstance(resp, dict) or "session_halted" not in resp:
+            logger.warning(
+                "live_session_halted: runtime status missing session_halted field: %r",
+                resp,
+            )
+            return None
+        return bool(resp.get("session_halted"))
 
     # ═══════════════════════════════════════════════════════════════════════
     # Cached reads (sync — for FastAPI/sync call sites)
