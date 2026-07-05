@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 # cost_gate_learning_lane_cron.sh - artifact-only cost-gate demo-learning refresh.
 #
+# 檔案大小豁免（documented pre-existing exception，CLAUDE.md §九 2000 行硬上限）：
+#   本檔 > 2000 行，為既有豁免。原因：整個 lane 是單一線性 orchestration，
+#   ~20 個 refresh stage 共用同一組 top-level shell 變數（*_OUT / *_RC /
+#   *_SKIP_REASON / *_LATEST …），並以一條巨型 inline env-prefix 把 80+ 變數傳給
+#   Python heredoc（見 STATUS_JSON=$(...) 段）。抽成 sourced 子腳本無法降低耦合
+#   （source 共用命名空間），反而引入 local/scope 語意漂移風險，破壞 cron 原子性
+#   與 env 繼承；價值低（LOW）且與 PA D6/D7 lane 重構 in-flight 重疊。故採
+#   behavior-preserving 豁免而非拆分。追蹤：D6/D7 lane 重構完成時併同瘦身
+#   （見 E5 2026-07-04 D6/D7 報告 + 冷審計 R2 E5-5 finding）。任何新 stage 應優先
+#   放進 helper_scripts/research/cost_gate_learning_lane/ 的 Python 模組，勿再擴主檔。
+#   SSOT 登記：docs/references/2000_line_exception_registry.md（同 lane status.py
+#   已列，本 cron 檔應併登為新一列；registry 為 CLAUDE.md §九 豁免正本）。
+#
 # Suggested Linux cron:
 #   27 * * * * OPENCLAW_BASE_DIR=$HOME/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/tmp/openclaw \
 #       $HOME/BybitOpenClaw/srv/helper_scripts/cron/cost_gate_learning_lane_cron.sh
