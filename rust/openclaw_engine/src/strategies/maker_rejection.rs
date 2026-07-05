@@ -34,6 +34,13 @@
 
 use std::collections::HashMap;
 
+use crate::config::risk_config::CloseMakerBackoffConfig;
+
+// OOS-9 (2026-07-05)：以下六個常數已 config 化為
+// `risk_config::CloseMakerBackoffConfig`，成為其 default 值來源。`CloseMakerBackoffState`
+// 改讀注入的 config；常數保留供 `CloseMakerBackoffConfig::default()` /
+// bit-identical 對照測試引用，行為不變。
+
 /// Initial close-maker rate-limit backoff for `EC_ReachMaxPendingOrders`.
 /// `EC_ReachMaxPendingOrders` 的 close-maker 初始限流退避。
 pub(crate) const CLOSE_MAKER_BACKOFF_INITIAL_MS: u64 = 1_000;
@@ -322,12 +329,25 @@ pub struct CloseMakerBackoffState {
     per_symbol: HashMap<String, CloseMakerSymbolBackoff>,
     recent_symbol_triggers: HashMap<String, u64>,
     global_pause_until_ms: Option<u64>,
+    /// OOS-9：退避 / 級聯參數（config 化）。`Default` 等於原六常數，故
+    /// `new()` / `Default::default()` 行為 bit-identical。
+    config: CloseMakerBackoffConfig,
 }
 
 impl CloseMakerBackoffState {
-    /// Create an empty process-local backoff state. / 建立空的本 process 退避狀態。
+    /// Create an empty process-local backoff state with default (const-equivalent)
+    /// backoff params. / 建立空的本 process 退避狀態，退避參數用預設（等同原常數）。
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Create an empty state with operator-tuned backoff config injected.
+    /// 以注入的 config 建立空狀態（供 operator/TOML 熱重載值使用）。
+    pub fn with_config(config: CloseMakerBackoffConfig) -> Self {
+        Self {
+            config,
+            ..Self::default()
+        }
     }
 
     fn clear_expired_global_pause(&mut self, now_ms: u64) {
@@ -342,7 +362,7 @@ impl CloseMakerBackoffState {
     }
 
     fn prune_recent_triggers(&mut self, now_ms: u64) {
-        let cutoff = now_ms.saturating_sub(CLOSE_MAKER_GLOBAL_CASCADE_WINDOW_MS);
+        let cutoff = now_ms.saturating_sub(self.config.global_cascade_window_ms);
         self.recent_symbol_triggers
             .retain(|_, last_ts| *last_ts >= cutoff);
     }
@@ -410,16 +430,17 @@ impl CloseMakerBackoffState {
         let (current_backoff_ms, consecutive_count) = match previous {
             Some(prev)
                 if now_ms.saturating_sub(prev.last_trigger_ms)
-                    <= CLOSE_MAKER_BACKOFF_RESET_AFTER_MS =>
+                    <= self.config.backoff_reset_after_ms =>
             {
                 (
-                    prev.current_backoff_ms
-                        .saturating_mul(2)
-                        .clamp(CLOSE_MAKER_BACKOFF_INITIAL_MS, CLOSE_MAKER_BACKOFF_MAX_MS),
+                    prev.current_backoff_ms.saturating_mul(2).clamp(
+                        self.config.backoff_initial_ms,
+                        self.config.backoff_max_ms,
+                    ),
                     prev.consecutive_count.saturating_add(1),
                 )
             }
-            _ => (CLOSE_MAKER_BACKOFF_INITIAL_MS, 1),
+            _ => (self.config.backoff_initial_ms, 1),
         };
         let next_eligible_ms = now_ms.saturating_add(current_backoff_ms);
         self.per_symbol.insert(
@@ -435,8 +456,8 @@ impl CloseMakerBackoffState {
         self.prune_recent_triggers(now_ms);
         self.recent_symbol_triggers.insert(symbol.clone(), now_ms);
 
-        if self.recent_symbol_triggers.len() >= CLOSE_MAKER_GLOBAL_CASCADE_SYMBOLS {
-            let until = now_ms.saturating_add(CLOSE_MAKER_GLOBAL_PAUSE_MS);
+        if self.recent_symbol_triggers.len() >= self.config.global_cascade_symbols {
+            let until = now_ms.saturating_add(self.config.global_pause_ms);
             self.global_pause_until_ms = Some(until);
             self.per_symbol.clear();
             self.recent_symbol_triggers.clear();
@@ -444,7 +465,7 @@ impl CloseMakerBackoffState {
                 symbol,
                 fallback_reason: CloseMakerFallbackReason::RateLimitPauseGlobal,
                 rate_limit_scope: CloseMakerRateLimitScope::Global,
-                backoff_ms: CLOSE_MAKER_GLOBAL_PAUSE_MS,
+                backoff_ms: self.config.global_pause_ms,
                 next_eligible_ms: until,
                 global_pause_until_ms: Some(until),
             };
@@ -767,5 +788,31 @@ mod tests {
         let fresh = state.record_too_many_pending("SYM0USDT", after_pause);
         assert_eq!(fresh.backoff_ms, CLOSE_MAKER_BACKOFF_INITIAL_MS);
         assert_eq!(fresh.rate_limit_scope, CloseMakerRateLimitScope::PerSymbol);
+    }
+
+    #[test]
+    fn test_oos_9_default_new_is_bit_identical_to_source_consts() {
+        // config 化不改值：new() 用 default config，初始退避必等原常數。
+        let mut state = CloseMakerBackoffState::new();
+        let d = state.record_too_many_pending("BTCUSDT", 1_000);
+        assert_eq!(d.backoff_ms, CLOSE_MAKER_BACKOFF_INITIAL_MS);
+    }
+
+    #[test]
+    fn test_oos_9_with_config_injects_backoff_values() {
+        // with_config 注入的值真正驅動退避節奏（證明 config wiring 非死參數）：
+        // 初始退避改 5s、上限 20s，倍增後 clamp 到自訂上限。
+        let cfg = CloseMakerBackoffConfig {
+            backoff_initial_ms: 5_000,
+            backoff_max_ms: 20_000,
+            ..CloseMakerBackoffConfig::default()
+        };
+        let mut state = CloseMakerBackoffState::with_config(cfg);
+        let d1 = state.record_too_many_pending("BTCUSDT", 1_000);
+        assert_eq!(d1.backoff_ms, 5_000, "初始退避讀注入 config");
+        let d2 = state.record_too_many_pending("BTCUSDT", 2_000);
+        assert_eq!(d2.backoff_ms, 10_000, "倍增 5s→10s");
+        let d3 = state.record_too_many_pending("BTCUSDT", 3_000);
+        assert_eq!(d3.backoff_ms, 20_000, "clamp 到自訂上限 20s（非硬編 60s）");
     }
 }

@@ -429,6 +429,19 @@ rate = 0.0015                   # >$1M: 15 bps
 min_turnover_usd = 0.0
 rate = 0.0030                   # <$1M: 30 bps (illiquid alts)
 
+# OOS-9 (2026-07-05) — close-maker TooManyPending 退避 / 級聯參數（config 化）。
+# 把 maker_rejection.rs 六個硬編常數抽成可熱重載 config；此處值與原常數
+# bit-identical，只是把散在代碼的常數搬到 TOML。三環境 config 獨立（禁衛生
+# 合併），demo 沿用原預設。validate() fail-closed：initial<=max、cascade_symbols>=1、
+# 各 ms>0 且有合理上界。
+[close_maker_backoff]
+backoff_initial_ms = 1000          # 單一 symbol 初始退避 1s
+backoff_max_ms = 60000             # 指數退避上限 60s
+backoff_reset_after_ms = 300000    # symbol 靜默 5min 後重置回初始退避
+global_cascade_window_ms = 60000   # distinct-symbol 級聯偵測窗口 1min
+global_cascade_symbols = 10        # 窗口內 10 個 distinct symbol 觸發全域暫停
+global_pause_ms = 300000           # 級聯後全域 close-maker 暫停 5min
+
 # G7-06 (2026-04-24) — Grid OU residual-based σ estimator (Phase A: schema only).
 # Replaces (in Phase B) the raw-Δx σ path in `grid_helpers::compute_ou_step`
 # with a proper residual estimator σ̂ = sqrt(Σ ε² / (n-1)) where ε_t = Δx_t −

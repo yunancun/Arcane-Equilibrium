@@ -1184,6 +1184,70 @@ fn test_g7_04_cusum_partial_toml_falls_back_to_defaults() {
     assert!(cfg.validate().is_ok());
 }
 
+// ----- OOS-9 (2026-07-05): CloseMakerBackoffConfig schema -----
+// close-maker 退避 / 級聯常數 config 化，落 [close_maker_backoff]。預設與
+// maker_rejection.rs 原六常數 bit-identical；此組驗證 default / roundtrip /
+// 缺段 fallback / validate fail-closed。
+
+#[test]
+fn test_oos_9_close_maker_backoff_defaults_match_source_consts() {
+    // 預設值必須逐一等於 maker_rejection.rs 原常數（config 化不改值）。
+    let cfg = RiskConfig::default();
+    assert_eq!(cfg.close_maker_backoff.backoff_initial_ms, 1_000);
+    assert_eq!(cfg.close_maker_backoff.backoff_max_ms, 60_000);
+    assert_eq!(cfg.close_maker_backoff.backoff_reset_after_ms, 300_000);
+    assert_eq!(cfg.close_maker_backoff.global_cascade_window_ms, 60_000);
+    assert_eq!(cfg.close_maker_backoff.global_cascade_symbols, 10);
+    assert_eq!(cfg.close_maker_backoff.global_pause_ms, 300_000);
+    assert!(cfg.validate().is_ok());
+}
+
+#[test]
+fn test_oos_9_close_maker_backoff_partial_toml_falls_back_to_defaults() {
+    // TOML 缺 [close_maker_backoff] → #[serde(default)] 補回原值，行為 bit-identical。
+    let toml_str = r#"
+        [meta]
+        version = 1
+        saved_ts_ms = 0
+    "#;
+    let cfg: RiskConfig = toml::from_str(toml_str).unwrap();
+    assert_eq!(cfg.close_maker_backoff, CloseMakerBackoffConfig::default());
+    assert!(cfg.validate().is_ok());
+}
+
+#[test]
+fn test_oos_9_close_maker_backoff_toml_roundtrip_preserves_custom_values() {
+    // operator 自訂值經 TOML round-trip 無損保留。
+    let mut cfg = RiskConfig::default();
+    cfg.close_maker_backoff.backoff_initial_ms = 2_000;
+    cfg.close_maker_backoff.backoff_max_ms = 120_000;
+    cfg.close_maker_backoff.global_cascade_symbols = 20;
+
+    let toml_str = toml::to_string(&cfg).unwrap();
+    let de: RiskConfig = toml::from_str(&toml_str).unwrap();
+    assert_eq!(de.close_maker_backoff.backoff_initial_ms, 2_000);
+    assert_eq!(de.close_maker_backoff.backoff_max_ms, 120_000);
+    assert_eq!(de.close_maker_backoff.global_cascade_symbols, 20);
+    assert!(de.validate().is_ok());
+}
+
+#[test]
+fn test_oos_9_close_maker_backoff_validate_fail_closed() {
+    // fail-closed：亂序（initial>max）、0 值必被拒。
+    let mut cfg = RiskConfig::default();
+    cfg.close_maker_backoff.backoff_initial_ms = 60_001;
+    cfg.close_maker_backoff.backoff_max_ms = 60_000;
+    assert!(cfg.validate().is_err(), "initial>max must reject");
+
+    let mut cfg = RiskConfig::default();
+    cfg.close_maker_backoff.global_cascade_symbols = 0;
+    assert!(cfg.validate().is_err(), "cascade_symbols=0 must reject");
+
+    let mut cfg = RiskConfig::default();
+    cfg.close_maker_backoff.global_pause_ms = 0;
+    assert!(cfg.validate().is_err(), "global_pause_ms=0 must reject");
+}
+
 // ----- STRATEGIST-TUNE-TARGET-CONFIG-1 (2026-04-25): StrategistConfig schema -----
 // Lifts the previously hardcoded `MAX_PARAM_DELTA_PCT` constant from
 // `strategist_scheduler/mod.rs` into `RiskConfig.strategist.max_param_delta_pct`
