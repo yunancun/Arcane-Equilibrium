@@ -1,0 +1,106 @@
+{
+  "schema_version": "roadmap_work_item_v1",
+  "work_id": "WP2-PIT-DATASET-MANIFEST",
+  "roadmap_wp": "WP2",
+  "phase": "pit_dataset_contract",
+  "priority": "P0",
+  "selected_at": "2026-07-06T18:49:09Z",
+  "selection_reason": "WP1 ProofPacket contract and closure review were complete; WP2 is the next highest-priority unblocked source-only dependency and directly closes the carried E2 concern that proof provenance needed named PIT dataset, rebuild, feature/schema, matched-control, and row-backed fill source evidence.",
+  "owner_chain": [
+    "PM",
+    "PA",
+    "E1",
+    "E1a",
+    "E2",
+    "E4",
+    "QA",
+    "PM"
+  ],
+  "preconditions": [
+    "LOAD_CONTEXT completed",
+    "WP1 recovery state and chain closure committed",
+    "ProofPacket source contract exists",
+    "PIT manifest selected before registry/advisory metadata hardening",
+    "runtime/order-capable work remains blocked by expired standing Demo authorization",
+    "dirty worktree classified and unrelated memory/* left untouched"
+  ],
+  "allowed_actions": [
+    "source_edit",
+    "test_edit",
+    "read_only_repo_inspection",
+    "local_mac_tests",
+    "subagent_dispatch",
+    "pm_report",
+    "operator_summary",
+    "document_index_update",
+    "pm_memory_update"
+  ],
+  "denied_actions": [
+    "runtime_mutation",
+    "db_read",
+    "db_write",
+    "exchange_contact",
+    "private_read",
+    "mcp_server_start",
+    "secret_access",
+    "order_or_probe",
+    "cost_gate_change",
+    "deploy",
+    "live_or_mainnet"
+  ],
+  "files": [
+    "program_code/ml_training/pit_dataset_manifest.py",
+    "program_code/ml_training/pit_dataset_manifest_builder.py",
+    "program_code/ml_training/proof_packet_contract.py",
+    "program_code/ml_training/tests/test_pit_dataset_manifest.py",
+    "program_code/ml_training/tests/test_pit_dataset_manifest_builder.py",
+    "program_code/ml_training/tests/test_proof_packet_contract.py",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp2_pit_dataset_manifest.md",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp2_pit_dataset_manifest.work_item.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp2_pit_dataset_manifest.effect_review.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp2_pit_dataset_manifest.state_packet.json",
+    "docs/CCAgentWorkSpace/Operator/2026-07-06--ai_ml_roadmap_loop_wp2_pit_dataset_manifest.md",
+    "docs/_indexes/document_index.md",
+    "docs/CCAgentWorkSpace/PM/memory.md"
+  ],
+  "acceptance": [
+    "Define pit_dataset_manifest_v1 schema version, canonical field, validator result, hash function, and extractor.",
+    "Validator requires explicit as_of_ts, point-in-time flag, future-data denial, candidate scope, source query window/hash, row-set hash, feature lineage, label lineage, split lineage, leakage evidence, matched controls, row-backed fill source, rebuild evidence, provenance, and manifest hash.",
+    "Unpinned now()/CURRENT_TIMESTAMP/latest/max_age_days query shape is research-only, not dataset-ready.",
+    "Builder is stdlib-only and consumes only caller-provided source mappings and synthetic rows; it does not read env, DB, files, runtime, network, or exchange state.",
+    "ProofPacket PROOF_READY requires valid provenance.pit_dataset_manifest.",
+    "ProofPacket cross-binds PIT manifest candidate_scope to packet candidate_identity.",
+    "ProofPacket blocks authority aliases such as order_allowed, promotion_allowed, live_enabled, cost_gate_lower_allowed, and runtime_write_allowed.",
+    "NO_MATCHED_FILLS remains a blocker artifact and does not require PIT manifest.",
+    "Focused, adjacent, and cost-gate proof tests pass.",
+    "No runtime, DB, exchange, MCP, secret, order/probe, Cost Gate, deploy, live, or mainnet action is performed."
+  ],
+  "verification_commands": [
+    "PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile program_code/ml_training/pit_dataset_manifest.py program_code/ml_training/pit_dataset_manifest_builder.py program_code/ml_training/proof_packet_contract.py program_code/ml_training/tests/test_pit_dataset_manifest.py program_code/ml_training/tests/test_pit_dataset_manifest_builder.py program_code/ml_training/tests/test_proof_packet_contract.py",
+    "PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q program_code/ml_training/tests/test_pit_dataset_manifest.py program_code/ml_training/tests/test_pit_dataset_manifest_builder.py program_code/ml_training/tests/test_proof_packet_contract.py -p no:cacheprovider",
+    "PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q program_code/ml_training/tests/test_pit_dataset_manifest.py program_code/ml_training/tests/test_pit_dataset_manifest_builder.py program_code/ml_training/tests/test_proof_packet_contract.py program_code/ml_training/tests/test_candidate_evidence_manifest.py program_code/ml_training/tests/test_candidate_evidence_source_contract.py program_code/ml_training/tests/test_parquet_etl.py -p no:cacheprovider",
+    "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=helper_scripts/research python3 -m pytest -q helper_scripts/research/tests/test_cost_gate_learning_candidate_proof_evidence.py helper_scripts/research/tests/test_cost_gate_learning_proof_promotion_gate.py -p no:cacheprovider",
+    "git diff --check"
+  ],
+  "effect_metrics": [
+    "gate_delta",
+    "artifact_delta",
+    "test_delta",
+    "risk_delta",
+    "proof_delta",
+    "next_action_quality"
+  ],
+  "kill_gates": [
+    "STOP_DISPATCH_BLOCKED if PA/E1/E1a/E2/E4/QA cannot run",
+    "STOP_TEST if focused or adjacent tests fail",
+    "STOP_EVIDENCE if PIT manifest cannot be machine-checkable or ProofPacket provenance remains generic",
+    "STOP_BOUNDARY if runtime/order/private/MCP/live action is required"
+  ],
+  "evidence_refs": [
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp1_chain_closure.state_packet.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_autonomous_completion_loop_design.md",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_trade_engineering_roadmap_after_maker_challenge.md",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_adversarial_audit.md",
+    "TODO.md"
+  ]
+}

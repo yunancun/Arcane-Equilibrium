@@ -20,6 +20,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+try:
+    from .pit_dataset_manifest import validate_pit_dataset_manifest
+except ImportError:  # pragma: no cover - direct script execution fallback
+    from pit_dataset_manifest import validate_pit_dataset_manifest  # type: ignore
+
 
 PROOF_PACKET_FIELD = "proof_packet"
 PROOF_PACKET_SCHEMA_VERSION = "proof_packet_v1"
@@ -70,6 +75,41 @@ _AUTHORITY_TRUE_KEYS = {
     "runtime_mutation_performed",
     "secret_access_performed",
 }
+_AUTHORITY_KEY_TERMS = (
+    "cost",
+    "cost_gate",
+    "db",
+    "deploy",
+    "live",
+    "mainnet",
+    "mcp",
+    "order",
+    "private",
+    "probe",
+    "promotion",
+    "runtime",
+    "secret",
+)
+_AUTHORITY_ACTION_TERMS = (
+    "allow",
+    "allowed",
+    "author",
+    "change",
+    "deploy",
+    "enable",
+    "enabled",
+    "grant",
+    "granted",
+    "lower",
+    "lowering",
+    "mutat",
+    "perform",
+    "performed",
+    "start",
+    "started",
+    "write",
+)
+_AUTHORITY_ACTION_TOKENS = {"read"}
 _TRUTHY_STRINGS = {"1", "true", "yes", "y", "on", "enabled", "grant", "granted"}
 
 _PROOF_EXCLUSION_KEYS = {
@@ -153,7 +193,13 @@ def validate_proof_packet(packet: Any) -> ProofPacketValidation:
 
     reasons: list[str] = []
     reasons.extend(_validate_candidate_identity(packet.get("candidate_identity")))
-    reasons.extend(_validate_provenance(packet.get("provenance")))
+    reasons.extend(
+        _validate_provenance(
+            packet.get("provenance"),
+            candidate_identity=packet.get("candidate_identity"),
+            require_pit_dataset_manifest=verdict == PROOF_READY,
+        )
+    )
 
     if verdict == PROOF_READY:
         reasons.extend(_validate_ready_packet(packet))
@@ -336,7 +382,12 @@ def _validate_controls(controls: Mapping[str, Any]) -> list[str]:
     return reasons
 
 
-def _validate_provenance(value: Any) -> list[str]:
+def _validate_provenance(
+    value: Any,
+    *,
+    candidate_identity: Any,
+    require_pit_dataset_manifest: bool,
+) -> list[str]:
     if not isinstance(value, Mapping):
         return ["provenance_missing"]
     reasons: list[str] = []
@@ -354,6 +405,45 @@ def _validate_provenance(value: Any) -> list[str]:
         reasons.append("provenance_input_artifact_hashes_missing")
     else:
         reasons.extend(_validate_hash_mapping(input_hashes, "input_artifact_hashes"))
+
+    if require_pit_dataset_manifest:
+        pit_manifest = value.get("pit_dataset_manifest")
+        if pit_manifest is None:
+            reasons.append("provenance_pit_dataset_manifest_missing")
+        else:
+            pit_validation = validate_pit_dataset_manifest(pit_manifest)
+            if not pit_validation.dataset_ready:
+                reasons.extend(
+                    f"provenance_pit_dataset_manifest:{reason}"
+                    for reason in pit_validation.reasons
+                )
+            else:
+                reasons.extend(
+                    _validate_pit_dataset_manifest_candidate_scope(
+                        candidate_identity,
+                        pit_manifest,
+                    )
+                )
+    return reasons
+
+
+def _validate_pit_dataset_manifest_candidate_scope(
+    candidate_identity: Any,
+    pit_manifest: Any,
+) -> list[str]:
+    candidate = _mapping(candidate_identity)
+    candidate_scope = _mapping(_mapping(pit_manifest).get("candidate_scope"))
+    if not candidate or not candidate_scope:
+        return []
+
+    reasons: list[str] = []
+    for field in ("candidate_id", "strategy_name", "symbol", "side"):
+        packet_value = _text(candidate.get(field))
+        scope_value = _text(candidate_scope.get(field))
+        if packet_value and scope_value and packet_value != scope_value:
+            reasons.append(
+                f"provenance_pit_dataset_manifest_candidate_scope_{field}_mismatch"
+            )
     return reasons
 
 
@@ -382,9 +472,25 @@ def _proof_exclusion_reasons(packet: Mapping[str, Any]) -> list[str]:
 def _authority_violations(packet: Mapping[str, Any]) -> list[str]:
     violations: list[str] = []
     for path, key, value in _walk(packet):
-        if key in _AUTHORITY_TRUE_KEYS and _truthy(value):
+        if _is_authority_expansion_key(key) and _truthy(value):
             violations.append(path)
     return sorted(set(violations))
+
+
+def _is_authority_expansion_key(key: str) -> bool:
+    key_text = key.lower()
+    if key in _AUTHORITY_TRUE_KEYS:
+        return True
+    if key_text in _AUTHORITY_TRUE_KEYS:
+        return True
+    if key_text in _AUTHORITY_KEY_TERMS:
+        return True
+    key_tokens = tuple(re.findall(r"[a-z0-9]+", key_text))
+    has_authority_term = any(term in key_text for term in _AUTHORITY_KEY_TERMS)
+    has_authority_action = any(
+        action in key_text for action in _AUTHORITY_ACTION_TERMS
+    ) or any(token in _AUTHORITY_ACTION_TOKENS for token in key_tokens)
+    return has_authority_term and has_authority_action
 
 
 def _walk(value: Any, prefix: str = "") -> list[tuple[str, str, Any]]:
