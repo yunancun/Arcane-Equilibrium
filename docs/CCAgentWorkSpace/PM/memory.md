@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-07 AI/ML Roadmap WP1-WP4 Strict Adversarial Audit
+
+- PM ran a strict source-only adversarial audit over completed WP1-WP4. Verdict: `CONDITIONAL`; boundary held and focused regressions passed, but WP1/WP4 need P1 hardening before downstream authority-grade use.
+- Finding 1: ProofPacket accepts malformed `sha256:` references as proof-ready provenance. Finding 2: advisory review packets accept truthy provider/private/exchange/MCP contact aliases while still validating inactive.
+- WP2 passed this audit; WP3 keeps its known non-transactional trio persistence concern. Reports: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--ai_ml_roadmap_wp1_wp4_strict_adversarial_audit.md`; operator mirror same basename under `docs/CCAgentWorkSpace/Operator/`.
+
 ## 2026-07-06 AI/ML Roadmap Loop WP4 Advisory DreamEngine Role Hardening
 
 - PM selected `WP4-ADVISORY-DREAMENGINE-ROLE-HARDENING` after WP3 because L2/LLM/MLDE/DreamEngine/thought-gate outputs needed a reusable inactive no-authority packet before any controlled Demo bandit work.
