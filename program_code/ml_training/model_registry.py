@@ -48,6 +48,36 @@ from program_code.ml_training.registry_serving_contract import (
 
 logger = logging.getLogger(__name__)
 
+_REGISTER_MODEL_SQL = """
+                INSERT INTO learning.model_registry (
+                    strategy, engine_mode, quantile, schema_version, train_date,
+                    artifact_path, artifact_size_bytes, artifact_sha256,
+                    acceptance_report, verdict,
+                    feature_schema_hash, training_config_hash, training_sample_size,
+                    created_by
+                ) VALUES (
+                    %s, %s, %s, %s, %s::date,
+                    %s, %s, %s,
+                    %s::jsonb, %s,
+                    %s, %s, %s,
+                    %s
+                )
+                ON CONFLICT (strategy, engine_mode, quantile, schema_version, train_date)
+                DO UPDATE SET
+                    artifact_path        = EXCLUDED.artifact_path,
+                    artifact_size_bytes  = EXCLUDED.artifact_size_bytes,
+                    artifact_sha256      = EXCLUDED.artifact_sha256,
+                    acceptance_report    = EXCLUDED.acceptance_report,
+                    verdict              = EXCLUDED.verdict,
+                    feature_schema_hash  = EXCLUDED.feature_schema_hash,
+                    training_config_hash = EXCLUDED.training_config_hash,
+                    training_sample_size = EXCLUDED.training_sample_size,
+                    created_by           = EXCLUDED.created_by,
+                    updated_at           = NOW()
+                WHERE learning.model_registry.canary_status NOT IN ('promoting', 'production')
+                RETURNING id
+                """
+
 # Canary status state-machine values (keep aligned with V023 CHECK constraint).
 # 狀態機值（與 V023 CHECK 對齊）。
 CANARY_SHADOW = "shadow"
@@ -258,51 +288,23 @@ def register_model(
 
     try:
         with conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO learning.model_registry (
-                    strategy, engine_mode, quantile, schema_version, train_date,
-                    artifact_path, artifact_size_bytes, artifact_sha256,
-                    acceptance_report, verdict,
-                    feature_schema_hash, training_config_hash, training_sample_size,
-                    created_by
-                ) VALUES (
-                    %s, %s, %s, %s, %s::date,
-                    %s, %s, %s,
-                    %s::jsonb, %s,
-                    %s, %s, %s,
-                    %s
-                )
-                ON CONFLICT (strategy, engine_mode, quantile, schema_version, train_date)
-                DO UPDATE SET
-                    artifact_path        = EXCLUDED.artifact_path,
-                    artifact_size_bytes  = EXCLUDED.artifact_size_bytes,
-                    artifact_sha256      = EXCLUDED.artifact_sha256,
-                    acceptance_report    = EXCLUDED.acceptance_report,
-                    verdict              = EXCLUDED.verdict,
-                    feature_schema_hash  = EXCLUDED.feature_schema_hash,
-                    training_config_hash = EXCLUDED.training_config_hash,
-                    training_sample_size = EXCLUDED.training_sample_size,
-                    created_by           = EXCLUDED.created_by,
-                    updated_at           = NOW()
-                WHERE learning.model_registry.canary_status NOT IN ('promoting', 'production')
-                RETURNING id
-                """,
-                (
-                    strategy, engine_mode, quantile, schema_version, train_date,
-                    artifact_path, size, sha,
-                    report_jsonb, verdict,
-                    feature_schema_hash, training_config_hash, training_sample_size,
-                    created_by,
-                ),
+            return _register_model_row(
+                cur,
+                strategy=strategy,
+                engine_mode=engine_mode,
+                quantile=quantile,
+                schema_version=schema_version,
+                train_date=train_date,
+                artifact_path=artifact_path,
+                artifact_size_bytes=size,
+                artifact_sha256=sha,
+                report_jsonb=report_jsonb,
+                verdict=verdict,
+                feature_schema_hash=feature_schema_hash,
+                training_config_hash=training_config_hash,
+                training_sample_size=training_sample_size,
+                created_by=created_by,
             )
-            row = cur.fetchone()
-            row_id = int(row[0]) if row else None
-            logger.info(
-                "model_registry: upsert id=%s %s/%s/%s verdict=%s",
-                row_id, strategy, engine_mode, quantile, verdict,
-            )
-            return row_id
     except Exception as e:  # noqa: BLE001
         logger.warning("model_registry: upsert failed for %s/%s/%s: %s",
                        strategy, engine_mode, quantile, e)
@@ -386,6 +388,20 @@ def register_quantile_trio_from_onnx_out(
             registry_serving_contract,
             artifacts,
         )
+        return _register_serving_contract_trio_atomic(
+            artifacts=artifacts,
+            train_date=train_date,
+            strategy=strategy,
+            engine_mode=engine_mode,
+            schema_version=schema_version,
+            verdict=verdict,
+            acceptance_report=acceptance_report,
+            feature_schema_hash=feature_schema_hash,
+            training_config_hash=training_config_hash,
+            training_sample_size=training_sample_size,
+            dsn=dsn,
+            created_by=created_by,
+        )
 
     registered: List[int] = []
     for qname, entry in artifacts.items():
@@ -422,6 +438,109 @@ def register_quantile_trio_from_onnx_out(
             )
         if row_id is not None:
             registered.append(row_id)
+    return registered
+
+
+def _register_model_row(
+    cur: Any,
+    *,
+    strategy: str,
+    engine_mode: str,
+    quantile: str,
+    schema_version: str,
+    train_date: str,
+    artifact_path: str,
+    artifact_size_bytes: Optional[int],
+    artifact_sha256: Optional[str],
+    report_jsonb: Optional[str],
+    verdict: str,
+    feature_schema_hash: Optional[str],
+    training_config_hash: Optional[str],
+    training_sample_size: Optional[int],
+    created_by: str,
+) -> Optional[int]:
+    cur.execute(
+        _REGISTER_MODEL_SQL,
+        (
+            strategy, engine_mode, quantile, schema_version, train_date,
+            artifact_path, artifact_size_bytes, artifact_sha256,
+            report_jsonb, verdict,
+            feature_schema_hash, training_config_hash, training_sample_size,
+            created_by,
+        ),
+    )
+    row = cur.fetchone()
+    row_id = int(row[0]) if row else None
+    logger.info(
+        "model_registry: upsert id=%s %s/%s/%s verdict=%s",
+        row_id, strategy, engine_mode, quantile, verdict,
+    )
+    return row_id
+
+
+def _register_serving_contract_trio_atomic(
+    *,
+    artifacts: Dict[str, Any],
+    train_date: str,
+    strategy: str,
+    engine_mode: str,
+    schema_version: str,
+    verdict: str,
+    acceptance_report: Optional[Dict[str, Any]],
+    feature_schema_hash: Optional[str],
+    training_config_hash: Optional[str],
+    training_sample_size: Optional[int],
+    dsn: Optional[str],
+    created_by: str,
+) -> List[int]:
+    conn = _connect(dsn)
+    if conn is None:
+        raise RegistryServingContractError(
+            "registry_trio_persistence_incomplete:db_unavailable"
+        )
+
+    report_jsonb = json.dumps(acceptance_report) if acceptance_report is not None else None
+    registered: List[int] = []
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                for qname in REQUIRED_QUANTILES:
+                    entry = artifacts[qname]
+                    artifact_path = str(entry.get("path", "")).strip()
+                    size, sha = _file_size_and_sha256(artifact_path)
+                    row_id = _register_model_row(
+                        cur,
+                        strategy=strategy,
+                        engine_mode=engine_mode,
+                        quantile=qname,
+                        schema_version=schema_version,
+                        train_date=train_date,
+                        artifact_path=artifact_path,
+                        artifact_size_bytes=size,
+                        artifact_sha256=sha,
+                        report_jsonb=report_jsonb,
+                        verdict=verdict,
+                        feature_schema_hash=feature_schema_hash,
+                        training_config_hash=training_config_hash,
+                        training_sample_size=training_sample_size,
+                        created_by=created_by,
+                    )
+                    if row_id is None:
+                        raise RegistryServingContractError(
+                            f"registry_trio_persistence_incomplete:{qname}"
+                        )
+                    registered.append(row_id)
+    except RegistryServingContractError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise RegistryServingContractError(
+            f"registry_trio_persistence_failed:{type(e).__name__}"
+        ) from e
+    finally:
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
     return registered
 
 

@@ -156,11 +156,11 @@ def _valid_packet(**overrides) -> dict:
             "rust_build_sha": "c" * 40,
             "source_hashes": {
                 "probe_ledger": "d" * 64,
-                "candidate_manifest": "sha256:candidate-manifest",
+                "candidate_manifest": "sha256:" + "1" * 64,
             },
             "input_artifact_hashes": {
                 "standing_envelope": "e" * 64,
-                "bounded_auth": "sha256:bounded-auth",
+                "bounded_auth": "sha256:" + "2" * 64,
             },
             "pit_dataset_manifest": _valid_pit_manifest(),
         },
@@ -315,6 +315,54 @@ def test_hash_mismatch_is_invalid() -> None:
     assert validation.proof_ready is False
     assert validation.verdict == INVALID
     assert validation.reason == "proof_packet_hash_mismatch"
+
+
+@pytest.mark.parametrize(
+    ("mutator", "expected_reason"),
+    (
+        (
+            lambda packet: packet["provenance"].__setitem__(
+                "code_commit",
+                "sha256:not-a-real-hash",
+            ),
+            "provenance_code_commit_missing_or_malformed",
+        ),
+        (
+            lambda packet: packet["provenance"].__setitem__(
+                "rust_build_sha",
+                "sha256:not-a-real-hash",
+            ),
+            "provenance_rust_build_sha_missing_or_malformed",
+        ),
+        (
+            lambda packet: packet["provenance"]["source_hashes"].__setitem__(
+                "probe_ledger",
+                "sha256:not-a-real-hash",
+            ),
+            "provenance_source_hashes_probe_ledger_hash_malformed",
+        ),
+        (
+            lambda packet: packet["provenance"]["input_artifact_hashes"].__setitem__(
+                "standing_envelope",
+                "sha256:not-a-real-hash",
+            ),
+            "provenance_input_artifact_hashes_standing_envelope_hash_malformed",
+        ),
+    ),
+)
+def test_malformed_sha256_prefixed_refs_cannot_be_proof_ready(
+    mutator,
+    expected_reason: str,
+) -> None:
+    packet = _valid_packet()
+    mutator(packet)
+    packet["proof_packet_hash"] = compute_proof_packet_hash(packet)
+
+    validation = validate_proof_packet(packet)
+
+    assert validation.proof_ready is False
+    assert validation.verdict == INVALID
+    assert expected_reason in validation.reasons
 
 
 def test_missing_candidate_identity_is_pending_schema() -> None:
