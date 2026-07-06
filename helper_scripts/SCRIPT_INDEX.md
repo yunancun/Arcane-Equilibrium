@@ -1,7 +1,17 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
-最後更新：2026-07-04。每批詳情見下方對應 `## YYYY-MM-DD` 區塊（per-batch SSOT）；最新數批摘要見「最新補充」段。
+最後更新：2026-07-06。每批詳情見下方對應 `## YYYY-MM-DD` 區塊（per-batch SSOT）；最新數批摘要見「最新補充」段。
+
+最新補充（2026-07-06 applied migration checksum immutability guard）：新增
+`db/check_applied_migration_checksums.py` 與
+`sql/migrations/applied_checksums.sha384`，把 runtime 已套用的 V001..V150
+migration bytes 以 SHA-384 鎖定。CI 新增 `applied migration immutability guard`
+job；pre-commit hook 新增 staged diff guard。任何已鎖定 migration 的 header、
+comment 或 DDL body 改動都會 fail-closed；即使同時更新 manifest，也會被 git-diff
+guard 擋下。新增未來 V151+ migration 仍允許，待 runtime apply 後再更新 lock。
+邊界：純本地檔案/git metadata 檢查；不連 DB、不讀 secret、不執行 migration、不改
+runtime。
 
 最新補充（2026-07-04 學習證據方法學重設計 B2-1）：新增 4 個 `research/cost_gate_learning_lane/` 模組——① `cost_model.py`（保守反事實成本函數：`2×[taker_fee 5.5 + slip_q75(symbol)]×SM 1.3 + funding_drag`，fallback 鏈 symbol_q75→global_q75→toml_tier，硬 floor=純 taker fee 雙腿 11.0bps，取代單一樂觀 4.0 常數）；② `slippage_quantile_artifact.py`（CLI：每日 read-only SELECT `trading.fills` 產 per-symbol/global taker |slippage| 分位 artifact，供 writer 離線讀）；③ `cost_backfill_overlay.py`（CLI：多 ledger 檔 lineage UNION 去重回填 legacy 樂觀成本 row 為保守值，append-only ledger 不改寫）；④ `evidence_stats.py`（P2-8 純函數：BH-FDR step-up q=0.10 候選面、單側 Student-t p、sign-flip selection test headline 面、E[max] 解析對照，僅標準庫）。修改 `outcome_writer.py`（保守成本 + schema adapter_v2 雙列輸出 cost_bps_optimistic/realized_net_bps + F7 max_exit_delay/censored 語義）、`outcome_review.py`（censored 排除 + OBSERVATION_GAP_SUSPECT + BH-FDR 撤候選 + selection_universe/sign-flip headline + P1-2c overlay 消費 + F1(c) realized_contradiction）、Rust `demo_learning_lane.rs`（P2-7 禁用規則 n=2→8 UCB-futility：`x̄+z₀.₉₀·s/√n<0`）。邊界：全落 demo 學習面 artifact-only；PG 僅 read-only SELECT；不改寫 ledger、不連 Bybit、不下單、不改 auth/risk/order/config/runtime、不降低主 Cost Gate、不碰 live fail-closed 五 gate 與硬邊界。
 

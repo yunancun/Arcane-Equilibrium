@@ -57,6 +57,16 @@ ORDER BY schemaname, tablename;
 
 ## 注意事項 / Notes
 
+- 已套用到 runtime 的 migration bytes 一律不可再改，包含 header/comment。
+  `_sqlx_migrations.checksum` 使用整檔 SHA-384；註釋漂移也會讓 engine
+  開機 migration 驗證中止。已套用清單由
+  `sql/migrations/applied_checksums.sha384` 鎖定，CI/pre-commit 透過
+  `helper_scripts/db/check_applied_migration_checksums.py` fail-closed 檢查。
+- 需要更正既有 migration 的說明文字或 schema 檢查時，預設新增下一個
+  `V###__*.sql` retrofit migration；不得直接改舊檔。唯一例外是
+  operator-approved runtime ledger repair：先 `repair_migration_checksum --verify`，
+  確認只有允許範圍漂移，再用互動式 `--apply` 修 `_sqlx_migrations`，最後同步更新
+  checksum lock。
 - TimescaleDB hypertable 語句用 `DO $$ ... IF EXISTS timescaledb ... END IF; END $$;` 包裹，無 TimescaleDB 環境不會報錯
 - PRIMARY KEY 包含時間列（TimescaleDB 要求）
 - Hypertable FK 不受支持，改用應用層 CHECK + 文檔化邏輯 FK

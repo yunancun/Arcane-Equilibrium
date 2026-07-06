@@ -31,6 +31,14 @@ if [[ -n "$REPO_ROOT" && -f "$REPO_ROOT/helper_scripts/git_hooks/.gitleaks.toml"
 fi
 
 # ----- gitleaks 缺席 → warn-and-pass（exit 0）-----
+if command -v python3 >/dev/null 2>&1 && [[ -n "$REPO_ROOT" ]]; then
+    echo "[pre-commit] applied migration checksum guard 掃描 staged diff..." >&2
+    python3 "$REPO_ROOT/helper_scripts/db/check_applied_migration_checksums.py" --staged
+elif [[ -n "$REPO_ROOT" ]]; then
+    echo "[pre-commit][WARN] python3 未安裝；applied migration checksum guard SKIPPED。" >&2
+fi
+
+# ----- gitleaks 缺席 → warn-and-pass（exit 0）-----
 if ! command -v gitleaks >/dev/null 2>&1; then
     echo "[pre-commit][WARN] gitleaks 未安裝；secret 掃描 SKIPPED（本次 commit 不做 secret gate）。" >&2
     echo "[pre-commit][WARN] 安裝方式：brew install gitleaks  或  https://github.com/gitleaks/gitleaks" >&2
