@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-03（v738 後續 IMPL-B post-approval drift gate 源碼 checkpoint）
+> 最後更新：2026-07-07（TODO v739 active-state hygiene）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**TODO v739 active-state hygiene（2026-07-07）**：PM 依 operator 裁決更新 root `TODO.md`，明確不把 AI/ML roadmap / WP1-WP5 工程循環鏡像進 active TODO。此次只做 docs/TODO hygiene：masthead 改為 compact v739，記錄最新 read-only source/runtime 事實（Mac local `edd6ab3ec` ahead 9、origin/Linux checkout `5d1622994`、engine build_sha `54d5fbf99`、control API repo_head `70d114316`、PG migration head `150`、crontab 34 active command + one stale `OPENCLAW_EXPECTED_SOURCE_HEAD=c0c49deeb` pin）；將冷審計 R2 runtime/cron/tmp P0 殘餘從 active blocker 收斂為事實/債務；保留 active trading-loop blocker `P0-STANDING-DEMO-LOSS-CONTROL-ENVELOPE-REFRESH-CURRENT-HEAD`；新增 no-repeat markers：mature-perp maker-first passive spread capture at current Bybit VIP0 = NO-GO、official MCP exchange tools = source/reference only、legacy `AgentTodo.md` + Signal Diamond TODO = historical ledgers only。Boundary：無 runtime mutation、無 DB write、無 service restart/rebuild、無 secret/private read、無 Bybit/exchange call、無 Decision Lease、無 order/probe、無 Cost Gate/live/mainnet/proof authority。
 
 **TODO v738 P1-7 瘦身（2026-07-04）**：冷審計 R2 P1-7 落地，TODO.md 132,582→29,524 bytes（≈59k→13k tokens，重回 25k Read cap 內）；瘦身前全文快照 `docs/archive/2026-07-04--todo_v738_pre_slim_archive.md`（v738 masthead 敘事、§0 36 行演進殘骸、§1 16 行 DONE_WITH_CONCERNS 墓場、§2 60 行原文、§4 55 條 /tmp sha 驗證清單均在快照內守恆）。同批：PM memory 4352→222 行（L125-4255 遷 memory-archive.md，07-02 檔尾 14 條歸位近期記錄頂部，根修雙累積區致最新條目超出 2000 行 Read 窗的缺陷）。方案正本 `docs/CCAgentWorkSpace/R4/workspace/reports/2026-07-04--p1_7_todo_memory_token_tax_slimming.md`。v738 標準迴圈原敘事（自原 masthead 遷入）：PM advanced `P0-STANDING-DEMO-LOSS-CONTROL-ENVELOPE-REFRESH-CURRENT-HEAD` to exact E3/BB approval for current-head request `bfbbd343` v6 sha `8b177c31a5c6641c7be5cf1126b401884264b29bc08e1d274a2b409df24b7980`，但 approved Step 1 final source drift check 在任何 runtime 動作前失敗（`origin/main` 前進至 `70f0f3750ba34989496e48b8817c1aa0aae1d7a1`），終態 `ROTATED`（final state sha `cd900dc738f24421263a5ed58327c0c0573608dfacaf9915a2b46f7eca76d117`）；runtime read-only precheck `2026-07-02T19:14:52Z` 見 expired standing auth sha `8c891b4e...`、canonical soak plan sha `30056993...`、API/watchdog active、Demo-only engine env；零 helper staging/Control API GET/quote/lease/private endpoint/envelope materialization/canonical write/PG/service/env/risk mutation/Cost Gate change/live/order/fill/PnL/proof。
 
