@@ -55,6 +55,50 @@ async fn test_dispatch_ping() {
 }
 
 #[tokio::test]
+async fn test_dispatch_get_build_capabilities_reports_direct_reload_disabled() {
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let req = r#"{"jsonrpc": "2.0", "method": "get_build_capabilities", "params": {}, "id": 11}"#;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
+    )
+    .await;
+
+    assert!(resp.error.is_none());
+    let result = resp.result.unwrap();
+    assert_eq!(
+        result["edge_predictor_ort"],
+        serde_json::json!(cfg!(feature = "edge_predictor_ort"))
+    );
+    assert_eq!(result["reload_edge_predictor"], serde_json::json!(false));
+    assert_eq!(
+        result["reload_edge_predictor_reason"],
+        serde_json::json!("registry_authorized_serving_contract_required")
+    );
+    assert_eq!(
+        result["registry_authorized_reload_required"],
+        serde_json::json!(true)
+    );
+}
+
+#[tokio::test]
 async fn test_dispatch_get_state() {
     let config = make_test_config();
     let dd = make_test_data_dir();
@@ -335,9 +379,7 @@ async fn test_governance_lease_methods_no_longer_method_not_found() {
         "governance.list_leases",
         "governance.get_risk_state",
     ] {
-        let req = format!(
-            r#"{{"jsonrpc":"2.0","method":"{method}","params":{{}},"id":1}}"#
-        );
+        let req = format!(r#"{{"jsonrpc":"2.0","method":"{method}","params":{{}},"id":1}}"#);
         let resp = dispatch_no_channel(&req).await;
         let err = resp.error.expect("error present (no channel)");
         assert_ne!(

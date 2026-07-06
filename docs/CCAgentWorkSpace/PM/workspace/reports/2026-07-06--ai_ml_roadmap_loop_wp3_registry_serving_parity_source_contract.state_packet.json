@@ -1,0 +1,53 @@
+{
+  "schema_version": "roadmap_loop_state_packet_v1",
+  "status": "ADVANCED_WITH_CONCERNS",
+  "state_reason": "WP3 registry serving parity source contract passed PA/E1/E1a/MIT/AI-E/E2/E4/QA chain and is advisory source-contract ready; QA accepted with residual future-work concerns that do not grant promotion-serving or runtime authority.",
+  "last_completed_work_id": "WP3-REGISTRY-SERVING-PARITY-SOURCE-CONTRACT",
+  "last_completed_commit": null,
+  "current_gate": "G5",
+  "next_work_id": "WP4-ADVISORY-DREAMENGINE-ROLE-HARDENING",
+  "next_safe_action": "select WP4 advisory DreamEngine role hardening as source-only work; ensure L2/LLM/advisory outputs remain not_authority=true, input-hash-bound, budget/logged, inactive review packets, and unable to mutate strategy/config/orders without a separate DemoMutationEnvelope.",
+  "stop_reason": null,
+  "blocking_gate": null,
+  "effect_review_ref": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp3_registry_serving_parity_source_contract.effect_review.json",
+  "work_item_ref": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp3_registry_serving_parity_source_contract.work_item.json",
+  "pm_report_ref": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp3_registry_serving_parity_source_contract.md",
+  "operator_summary_ref": "docs/CCAgentWorkSpace/Operator/2026-07-06--ai_ml_roadmap_loop_wp3_registry_serving_parity_source_contract.md",
+  "evidence_refs": [
+    "program_code/ml_training/registry_serving_contract.py",
+    "program_code/ml_training/model_registry.py",
+    "program_code/ml_training/tests/test_registry_serving_contract.py",
+    "program_code/ml_training/tests/test_model_registry.py",
+    "rust/openclaw_engine/src/ml/registry.rs",
+    "rust/openclaw_engine/src/event_consumer/handlers/edge_predictor.rs",
+    "rust/openclaw_engine/src/event_consumer/handlers/tests.rs",
+    "rust/openclaw_engine/src/ipc_server/dispatch.rs",
+    "rust/openclaw_engine/src/ipc_server/tests/dispatch.rs",
+    "program_code/exchange_connectors/bybit_connector/control_api_v1/app/engine_capabilities_routes.py",
+    "program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_engine_capabilities_routes.py",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp3_registry_serving_parity_source_contract.md",
+    "docs/CCAgentWorkSpace/Operator/2026-07-06--ai_ml_roadmap_loop_wp3_registry_serving_parity_source_contract.md"
+  ],
+  "concerns": [
+    "registry_trio_persistence_incomplete is fail-loud after partial write, not transactional rollback",
+    "runtime DB JSONB extraction and authorized serving reload integration remain future gated work",
+    "promotion_serving_ready=false by design; no serving promotion is authorized",
+    "nearby stale Rust comments should be cleaned in a future low-risk doc/comment pass"
+  ],
+  "denied_actions": [
+    "runtime_mutation",
+    "db_read",
+    "db_write",
+    "exchange_contact",
+    "private_read",
+    "mcp_runtime",
+    "secret_access",
+    "order_or_probe",
+    "cost_gate_change",
+    "deploy",
+    "live_or_mainnet"
+  ],
+  "repo_head": "1ec1b724f40b0e9b802315c73ba84eb33050fd37",
+  "origin_head": "5d16229948eba555ee415048ad028e11649e3d91",
+  "created_at": "2026-07-06T20:22:46Z"
+}

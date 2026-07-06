@@ -41,6 +41,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from program_code.ml_training.registry_serving_contract import (
+    RegistryServingContractError,
+    attach_registry_serving_contract,
+)
+
 logger = logging.getLogger(__name__)
 
 # Canary status state-machine values (keep aligned with V023 CHECK constraint).
@@ -335,6 +340,7 @@ def register_quantile_trio_from_onnx_out(
     schema_version: str,
     verdict: str,
     acceptance_report_path: Optional[str] = None,
+    registry_serving_contract: Optional[Dict[str, Any]] = None,
     feature_schema_hash: Optional[str] = None,
     training_config_hash: Optional[str] = None,
     training_sample_size: Optional[int] = None,
@@ -362,6 +368,25 @@ def register_quantile_trio_from_onnx_out(
             logger.warning("model_registry: acceptance_report read %s failed: %s",
                            acceptance_report_path, e)
 
+    if registry_serving_contract is not None:
+        # registry_serving_contract 是 JSONB 內的 source-only advisory metadata。
+        # 只有完整且唯一的 q10/q50/q90 written trio 可攜帶它；partial/q50-only
+        # output 直接 fail closed，避免單 row 被誤讀為 serving-capable。
+        acceptance_report = attach_registry_serving_contract(
+            acceptance_report,
+            registry_serving_contract,
+        )
+        if not _has_exact_written_quantile_trio(artifacts):
+            logger.warning(
+                "model_registry: registry_serving_contract provided but ONNX "
+                "artifacts are not an exact written q10/q50/q90 trio; skipping DB write"
+            )
+            return []
+        _verify_registry_serving_contract_artifact_hashes(
+            registry_serving_contract,
+            artifacts,
+        )
+
     registered: List[int] = []
     for qname, entry in artifacts.items():
         if qname not in ("q10", "q50", "q90"):
@@ -388,9 +413,63 @@ def register_quantile_trio_from_onnx_out(
             dsn=dsn,
             created_by=created_by,
         )
+        if row_id is None and registry_serving_contract is not None:
+            # 這裡仍不是單一 DB transaction；未來需把三筆 registry write
+            # 收進同一連線事務。當前先 fail-loud，避免 caller 把半套持久化
+            # 誤判成完整 serving contract 已註冊成功。
+            raise RegistryServingContractError(
+                f"registry_trio_persistence_incomplete:{qname}"
+            )
         if row_id is not None:
             registered.append(row_id)
     return registered
+
+
+def _has_exact_written_quantile_trio(artifacts: Any) -> bool:
+    if not isinstance(artifacts, dict):
+        return False
+    if tuple(artifacts.keys()) != REQUIRED_QUANTILES:
+        return False
+    for qname in REQUIRED_QUANTILES:
+        entry = artifacts.get(qname)
+        if not isinstance(entry, dict):
+            return False
+        if not entry.get("written", False):
+            return False
+    return True
+
+
+def _verify_registry_serving_contract_artifact_hashes(
+    contract: Dict[str, Any],
+    artifacts: Any,
+) -> None:
+    contract_hashes = contract.get("artifact_hashes")
+    if not isinstance(contract_hashes, dict):
+        raise RegistryServingContractError(
+            "invalid registry serving contract: artifact_hashes_missing"
+        )
+    for qname in REQUIRED_QUANTILES:
+        artifact_path = str(artifacts[qname].get("path", "")).strip()
+        if not artifact_path:
+            raise RegistryServingContractError(
+                f"invalid registry serving contract: artifact_path_missing:{qname}"
+            )
+        _size, actual_sha = _file_size_and_sha256(artifact_path)
+        if not actual_sha:
+            raise RegistryServingContractError(
+                f"invalid registry serving contract: artifact_sha_unavailable:{qname}"
+            )
+        expected_sha = _strip_sha256_prefix(str(contract_hashes.get(qname, "")).strip())
+        if expected_sha != actual_sha:
+            raise RegistryServingContractError(
+                f"invalid registry serving contract: artifact_hash_mismatch:{qname}"
+            )
+
+
+def _strip_sha256_prefix(value: str) -> str:
+    if value.startswith("sha256:"):
+        return value[len("sha256:") :]
+    return value
 
 
 def transition_canary_status(

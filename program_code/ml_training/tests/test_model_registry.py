@@ -15,6 +15,7 @@ Integration with real PG covered in a separate test (DB fixture, not here).
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -37,10 +38,18 @@ from program_code.ml_training.model_registry import (
     _file_size_and_sha256,
     _connect,
     register_model,
+    register_quantile_trio_from_onnx_out,
     transition_canary_status,
     has_required_persistence_artifact,
     check_db_connectivity,
     RegistryPersistenceError,
+)
+from program_code.ml_training.registry_serving_contract import (
+    PIT_DATASET_MANIFEST_SCHEMA_VERSION,
+    REGISTRY_SERVING_CONTRACT_FIELD,
+    REGISTRY_SERVING_CONTRACT_SCHEMA_VERSION,
+    RegistryServingContractError,
+    compute_registry_serving_contract_hash,
 )
 
 
@@ -56,6 +65,67 @@ def _onnx_out_with(written: bool, path: str = "/tmp/q.onnx") -> dict:
             "q90": {"written": written, "path": path if written else ""},
         },
     }
+
+
+def _onnx_out_trio() -> dict:
+    return {
+        "train_date": "2026-05-29",
+        "artifacts": {
+            "q10": {"written": True, "path": "/tmp/q10.onnx"},
+            "q50": {"written": True, "path": "/tmp/q50.onnx"},
+            "q90": {"written": True, "path": "/tmp/q90.onnx"},
+        },
+    }
+
+
+def _onnx_out_trio_with_files(tmp_path: Path) -> tuple[dict, dict[str, str]]:
+    artifacts = {}
+    artifact_hashes = {}
+    for qname in ("q10", "q50", "q90"):
+        payload = f"fake_{qname}_onnx_bytes".encode("utf-8")
+        path = tmp_path / f"{qname}.onnx"
+        path.write_bytes(payload)
+        artifacts[qname] = {"written": True, "path": str(path)}
+        artifact_hashes[qname] = hashlib.sha256(payload).hexdigest()
+    return {"train_date": "2026-05-29", "artifacts": artifacts}, artifact_hashes
+
+
+def _registry_serving_contract(**overrides) -> dict:
+    contract = {
+        "schema_version": REGISTRY_SERVING_CONTRACT_SCHEMA_VERSION,
+        "serving_mode": "advisory_only",
+        "not_authority": True,
+        "symlink_authority": False,
+        "promotion_serving_ready": False,
+        "dataset_manifest_schema_version": PIT_DATASET_MANIFEST_SCHEMA_VERSION,
+        "dataset_manifest_hash": "a" * 64,
+        "label_schema_hash": "b" * 64,
+        "feature_schema_hash": "c" * 64,
+        "feature_definition_hash": "d" * 64,
+        "split_hash": "e" * 64,
+        "leakage_report_hash": "f" * 64,
+        "serving_config_hash": "1" * 64,
+        "missingness_policy": "nan_sentinel=-999",
+        "units": "prediction=bps",
+        "side_handling": "allowed_sides=Buy,Sell",
+        "artifact_hashes": {
+            "q10": "2" * 64,
+            "q50": "3" * 64,
+            "q90": "4" * 64,
+        },
+        "quantile_trio": ["q10", "q50", "q90"],
+    }
+    _deep_update(contract, overrides)
+    contract["contract_hash"] = compute_registry_serving_contract_hash(contract)
+    return contract
+
+
+def _deep_update(target: dict, updates: dict) -> None:
+    for key, value in updates.items():
+        if isinstance(value, dict) and isinstance(target.get(key), dict):
+            _deep_update(target[key], value)
+        else:
+            target[key] = value
 
 
 def test_required_artifact_true_for_shadow_only_written_trio():
@@ -209,6 +279,158 @@ def test_register_model_skips_when_db_unavailable(monkeypatch):
         dsn=None,
     )
     assert result is None
+
+
+def test_register_quantile_trio_attaches_serving_contract_to_each_report(tmp_path: Path):
+    report_path = tmp_path / "acceptance_report.json"
+    report_path.write_text(json.dumps({"verdict": VERDICT_SHADOW_ONLY, "metrics": {"brier": 0.2}}))
+    onnx_out, artifact_hashes = _onnx_out_trio_with_files(tmp_path)
+    contract = _registry_serving_contract(artifact_hashes=artifact_hashes)
+    calls = []
+
+    def fake_register_model(**kwargs):
+        calls.append(kwargs)
+        return len(calls)
+
+    with patch(
+        "program_code.ml_training.model_registry.register_model",
+        side_effect=fake_register_model,
+    ):
+        ids = register_quantile_trio_from_onnx_out(
+            onnx_out=onnx_out,
+            strategy="grid_trading",
+            engine_mode="demo",
+            schema_version="edge_p3_v1",
+            verdict=VERDICT_SHADOW_ONLY,
+            acceptance_report_path=str(report_path),
+            registry_serving_contract=contract,
+        )
+
+    assert ids == [1, 2, 3]
+    assert [call["quantile"] for call in calls] == ["q10", "q50", "q90"]
+    for call in calls:
+        report = call["acceptance_report"]
+        assert report["verdict"] == VERDICT_SHADOW_ONLY
+        assert report[REGISTRY_SERVING_CONTRACT_FIELD] == contract
+        assert report[REGISTRY_SERVING_CONTRACT_FIELD] is not contract
+
+
+def test_serving_contract_partial_trio_persistence_raises(tmp_path: Path):
+    onnx_out, artifact_hashes = _onnx_out_trio_with_files(tmp_path)
+    contract = _registry_serving_contract(artifact_hashes=artifact_hashes)
+
+    with patch(
+        "program_code.ml_training.model_registry.register_model",
+        side_effect=[1, None, 3],
+    ) as register:
+        with pytest.raises(
+            RegistryServingContractError,
+            match="registry_trio_persistence_incomplete:q50",
+        ):
+            register_quantile_trio_from_onnx_out(
+                onnx_out=onnx_out,
+                strategy="grid_trading",
+                engine_mode="demo",
+                schema_version="edge_p3_v1",
+                verdict=VERDICT_SHADOW_ONLY,
+                registry_serving_contract=contract,
+            )
+
+    assert [call.kwargs["quantile"] for call in register.call_args_list] == [
+        "q10",
+        "q50",
+    ]
+
+
+def test_serving_contract_artifact_hash_mismatch_short_circuits_before_db(
+    tmp_path: Path,
+):
+    onnx_out, artifact_hashes = _onnx_out_trio_with_files(tmp_path)
+    artifact_hashes["q50"] = "0" * 64
+    contract = _registry_serving_contract(artifact_hashes=artifact_hashes)
+
+    with patch("program_code.ml_training.model_registry._connect") as connect:
+        with patch("program_code.ml_training.model_registry.register_model") as register:
+            with pytest.raises(
+                RegistryServingContractError,
+                match="artifact_hash_mismatch:q50",
+            ):
+                register_quantile_trio_from_onnx_out(
+                    onnx_out=onnx_out,
+                    strategy="grid_trading",
+                    engine_mode="demo",
+                    schema_version="edge_p3_v1",
+                    verdict=VERDICT_SHADOW_ONLY,
+                    registry_serving_contract=contract,
+                )
+
+    connect.assert_not_called()
+    register.assert_not_called()
+
+
+def test_serving_contract_missing_artifact_path_short_circuits_before_db(
+    tmp_path: Path,
+):
+    onnx_out, artifact_hashes = _onnx_out_trio_with_files(tmp_path)
+    onnx_out["artifacts"]["q50"]["path"] = ""
+    contract = _registry_serving_contract(artifact_hashes=artifact_hashes)
+
+    with patch("program_code.ml_training.model_registry._connect") as connect:
+        with patch("program_code.ml_training.model_registry.register_model") as register:
+            with pytest.raises(
+                RegistryServingContractError,
+                match="artifact_path_missing:q50",
+            ):
+                register_quantile_trio_from_onnx_out(
+                    onnx_out=onnx_out,
+                    strategy="grid_trading",
+                    engine_mode="demo",
+                    schema_version="edge_p3_v1",
+                    verdict=VERDICT_SHADOW_ONLY,
+                    registry_serving_contract=contract,
+                )
+
+    connect.assert_not_called()
+    register.assert_not_called()
+
+
+def test_invalid_serving_contract_short_circuits_before_connect():
+    invalid_contract = _registry_serving_contract(order_allowed=True)
+
+    with patch("program_code.ml_training.model_registry._connect") as connect:
+        with pytest.raises(RegistryServingContractError):
+            register_quantile_trio_from_onnx_out(
+                onnx_out=_onnx_out_trio(),
+                strategy="grid_trading",
+                engine_mode="demo",
+                schema_version="edge_p3_v1",
+                verdict=VERDICT_SHADOW_ONLY,
+                registry_serving_contract=invalid_contract,
+            )
+
+    connect.assert_not_called()
+
+
+def test_partial_onnx_trio_with_serving_contract_does_not_touch_db():
+    partial_onnx = {
+        "train_date": "2026-05-29",
+        "artifacts": {
+            "q50": {"written": True, "path": "/tmp/q50.onnx"},
+        },
+    }
+
+    with patch("program_code.ml_training.model_registry._connect") as connect:
+        ids = register_quantile_trio_from_onnx_out(
+            onnx_out=partial_onnx,
+            strategy="grid_trading",
+            engine_mode="demo",
+            schema_version="edge_p3_v1",
+            verdict=VERDICT_SHADOW_ONLY,
+            registry_serving_contract=_registry_serving_contract(),
+        )
+
+    assert ids == []
+    connect.assert_not_called()
 
 
 # ───── _file_size_and_sha256 ─────────────────────────────────────────

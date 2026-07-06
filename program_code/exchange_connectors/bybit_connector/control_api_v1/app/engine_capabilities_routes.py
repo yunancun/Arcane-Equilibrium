@@ -59,14 +59,11 @@ _EDGE_P3_IPC_SUPPORT: dict[str, bool] = {
     "fsynced_toml_write": True,
     # Step 7e — DisableEdgePredictorAll two-phase commit + V014 audit
     "disable_edge_predictor_all": True,
-    # Step 7b — ReloadEdgePredictor IPC protocol wired (plumbing). The
-    # default here is False (stub loader path); the live flag is overridden
-    # at probe time from the Rust engine's `get_build_capabilities` IPC,
-    # which reports `cfg!(feature = "edge_predictor_ort")` — so a production
-    # engine built with the ort backend surfaces True while a default-feature
-    # build keeps False without a server restart.
-    # Step 7b：預設 False（stub loader）；probe 時由 Rust `get_build_capabilities`
-    # IPC 回報實際 build-feature 旗標（ort 開啟 → True），故無需重啟 Python。
+    # Step 7b — direct ReloadEdgePredictor remains fail-closed until a
+    # registry-authorized serving contract exists. Rust may still report stale
+    # or test-only build flags, but this API must not advertise direct reload
+    # as usable from `ipc_methods`.
+    # Step 7b：直接 reload 在 registry 授權 serving contract 落地前保持 fail-closed。
     "reload_edge_predictor": False,
     # Step 7c — EmitShadowFill → learning.decision_shadow_fills writer wired
     "emit_shadow_fill": True,
@@ -126,13 +123,13 @@ def _extract_edge_predictor(config: dict[str, Any]) -> dict[str, Any]:
 
 async def _query_build_capabilities(
     ipc: EngineIPCClient | None,
-) -> dict[str, bool]:
+) -> dict[str, Any]:
     """
     Query Rust `get_build_capabilities` IPC once per request. The engine
-    reports `cfg!(feature = "edge_predictor_ort")` so Python's static flags
-    track the running binary. Returns {} on any failure (fail-soft — the
-    static defaults stand in, matching the pre-IPC behaviour).
-    查 Rust build-feature 旗標；失敗時回空 dict，保留靜態預設（fail-soft）。
+    reports `cfg!(feature = "edge_predictor_ort")` plus fail-closed reload
+    metadata. Returns {} on any failure (fail-soft — the static defaults stand
+    in, matching the pre-IPC behaviour).
+    查 Rust build-feature 旗標與 reload metadata；失敗時回空 dict，保留靜態預設。
     """
     if ipc is None:
         return {}
@@ -143,7 +140,11 @@ async def _query_build_capabilities(
         return {}
     if not isinstance(resp, dict):
         return {}
-    return {k: bool(v) for k, v in resp.items() if isinstance(v, bool)}
+    return {
+        k: v
+        for k, v in resp.items()
+        if isinstance(v, (bool, str, int, float)) or v is None
+    }
 
 
 async def _query_engine_snapshot(
@@ -209,7 +210,10 @@ async def get_engine_capabilities(
         data.feature_schema (dict): FeatureVectorV1 metadata (dim / names /
             schema_version). Mirrors Rust `features.rs::FEATURE_NAMES_V1`.
         data.ipc_methods (dict[str, bool]): Which EDGE-P3-1 Step 7 IPC
-            variants this build supports. See `_EDGE_P3_IPC_SUPPORT`.
+            method variants this build supports. `reload_edge_predictor` is
+            fail-closed until registry-authorized reload exists.
+        data.capability_metadata (dict): non-method build/capability metadata
+            such as edge_predictor_ort and reload fail-closed reason.
         data.engines (dict[str, dict]): per-engine edge_predictor view
             (paper / demo / live) — narrow subset of RiskConfig.
         data.degraded (bool): True if any engine's IPC fetch failed.
@@ -225,16 +229,31 @@ async def get_engine_capabilities(
         if reason is not None and first_reason is None:
             first_reason = reason
 
-    # EDGE-P3-1 Step 7b: overlay live build-feature flags from the engine onto
-    # the static declaration so `reload_edge_predictor` tracks the actual ort
-    # backend state. Only keys already present in the static map are overlaid
-    # (guards against a future engine reporting an unknown capability).
-    # Step 7b：以 Rust 實時 build-feature 旗標覆蓋靜態宣告；只覆寫已存在的 key。
+    # EDGE-P3-1 Step 7b: overlay only safe boolean method flags from the engine.
+    # Direct `reload_edge_predictor` is intentionally excluded: the Rust side now
+    # reports it disabled until registry-authorized serving exists, and Python
+    # must fail closed even if a stale/fake IPC build flag says True.
+    # Step 7b：僅覆蓋安全的 bool method 旗標；reload 直接能力一律 fail-closed。
     ipc_methods = dict(_EDGE_P3_IPC_SUPPORT)
     build_flags = await _query_build_capabilities(ipc)
     for key, value in build_flags.items():
-        if key in ipc_methods:
+        if key in ipc_methods and key != "reload_edge_predictor" and isinstance(value, bool):
             ipc_methods[key] = value
+    ipc_methods["reload_edge_predictor"] = False
+
+    reload_reason = build_flags.get("reload_edge_predictor_reason")
+    if not isinstance(reload_reason, str) or not reload_reason:
+        reload_reason = "registry_authorized_serving_contract_required"
+    registry_required = build_flags.get("registry_authorized_reload_required")
+    if not isinstance(registry_required, bool):
+        registry_required = True
+    capability_metadata: dict[str, Any] = {
+        "reload_edge_predictor_reason": reload_reason,
+        "registry_authorized_reload_required": registry_required,
+    }
+    edge_predictor_ort = build_flags.get("edge_predictor_ort")
+    if isinstance(edge_predictor_ort, bool):
+        capability_metadata["edge_predictor_ort"] = edge_predictor_ort
 
     degraded = first_reason is not None
 
@@ -242,6 +261,7 @@ async def get_engine_capabilities(
         "api_version": "v1",
         "feature_schema": _feature_schema(),
         "ipc_methods": ipc_methods,
+        "capability_metadata": capability_metadata,
         "engines": engines,
         "degraded": degraded,
         "reason": first_reason,

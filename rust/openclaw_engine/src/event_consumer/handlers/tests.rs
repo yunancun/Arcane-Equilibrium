@@ -757,11 +757,11 @@ fn test_reload_edge_predictor_rejects_unknown_engine() {
     assert!(out.unwrap_err().contains("invalid engine"));
 }
 
-/// EN: Without a wired EdgePredictorStore, the handler errs before the
-/// stub loader runs — prevents silent success with no hot-swap target.
-/// 中文: 未注入 store 則在 loader 前即拒，避免熱換進空引用。
+/// EN: Direct path reload is rejected before store lookup, filesystem access,
+/// or ORT loader. Registry-authorized contract flow is required first.
+/// 中文: direct path reload 在 store/檔案/ORT 前拒絕；必須先有 registry contract。
 #[test]
-fn test_reload_edge_predictor_requires_store() {
+fn test_reload_edge_predictor_direct_path_requires_registry_contract() {
     let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
     let out = super::handle_reload_edge_predictor(
         "paper",
@@ -770,52 +770,36 @@ fn test_reload_edge_predictor_requires_store() {
         &mut pipeline,
     );
     assert!(out.is_err());
-    assert!(out.unwrap_err().contains("EdgePredictorStore not wired"));
+    let err = out.unwrap_err();
+    assert!(
+        err.contains("registry_authorized_serving_contract_required"),
+        "got: {err}"
+    );
 }
 
-/// EN: With a store wired, the loader errors before a predictor can swap
-/// — the protocol shape is pinned but no predictor is registered. Under
-/// the default build the stub loader errs with `onnx_loader_not_wired`;
-/// under `edge_predictor_ort` the real loader errs because the tempfile's
-/// random name doesn't match the `..._q50_..._<date>.onnx` convention,
-/// which proves the dispatch traverses the full loader path.
-/// 中文: 接了 store 後 loader 回錯誤，store 未被寫入；default build 為 stub
-/// `onnx_loader_not_wired`；ort build 則因檔名無 `_q50_` 標記而拒。
+/// EN: With a store wired, the direct-path authority gate still rejects before
+/// loader traversal, so no predictor can become decision-affecting.
+/// 中文: 即使接了 store，direct-path authority gate 仍在 loader 前拒絕，store 不寫入。
 #[test]
-fn test_reload_edge_predictor_stub_loader_errs() {
+fn test_reload_edge_predictor_direct_path_does_not_touch_store_or_loader() {
     let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
     let store = std::sync::Arc::new(crate::edge_predictor::EdgePredictorStore::new());
     pipeline.set_edge_predictor_store(store.clone());
-    // Use a temp file that DOES exist so we pass the first branch and hit
-    // the loader. Under the default build that's the permanent
-    // "awaiting ML-MIT #26" error; under the ort build the real loader
-    // refuses because the random tempfile name has no `_q50_` marker.
-    // 用實存檔走完整 loader 路徑。default build → "ML-MIT #26"；
-    // ort build → 檔名缺 `_q50_` 標記。
     let tmp = tempfile::NamedTempFile::new().expect("tempfile");
     let out =
         super::handle_reload_edge_predictor("paper", "ma_crossover", tmp.path(), &mut pipeline);
-    let err = out.expect_err("loader must err on unconventional tempfile path");
-    #[cfg(not(feature = "edge_predictor_ort"))]
-    {
-        assert!(err.contains("onnx_loader_not_wired"), "got: {err}");
-        assert!(err.contains("edge_predictor_ort"), "got: {err}");
-    }
-    #[cfg(feature = "edge_predictor_ort")]
-    {
-        assert!(err.contains("_q50_"), "got: {err}");
-    }
-    // Confirm nothing got registered into the store — invariant across backends.
-    // 跨後端不變：store 未被寫入。
+    let err = out.expect_err("direct path reload must fail closed");
+    assert!(
+        err.contains("registry_authorized_serving_contract_required"),
+        "got: {err}"
+    );
     assert_eq!(store.loaded_count(), 0);
 }
 
 /// EN: Engine whitelist trims whitespace so stray \n from a Python proxy
-/// doesn't fall through to the unknown-engine branch. The loader itself
-/// errs after trimming (stub → "ML-MIT #26"; ort → "_q50_" marker),
-/// which proves the whitelist stage accepted the trimmed name.
-/// 中文: engine 白名單 trim 空白（避 Python proxy 換行誤判）；loader 在 trim
-/// 後才出錯（stub → "ML-MIT #26"；ort → "_q50_" 標記）— 表白名單通過。
+/// doesn't fall through to the unknown-engine branch. The direct-path authority
+/// gate then rejects the trimmed valid engine.
+/// 中文: engine 白名單 trim 空白；trim 後合法 engine 會命中 direct-path 權限 gate。
 #[test]
 fn test_reload_edge_predictor_trims_engine_name() {
     let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
@@ -824,10 +808,10 @@ fn test_reload_edge_predictor_trims_engine_name() {
     let tmp = tempfile::NamedTempFile::new().expect("tempfile");
     let out =
         super::handle_reload_edge_predictor("  paper\n", "ma_crossover", tmp.path(), &mut pipeline);
-    let err = out.expect_err("loader path must be reached after whitelist trim");
+    let err = out.expect_err("direct path gate must be reached after whitelist trim");
     assert!(!err.contains("invalid engine"), "trim failed: {err}");
-    #[cfg(not(feature = "edge_predictor_ort"))]
-    assert!(err.contains("onnx_loader_not_wired"), "got: {err}");
-    #[cfg(feature = "edge_predictor_ort")]
-    assert!(err.contains("_q50_"), "got: {err}");
+    assert!(
+        err.contains("registry_authorized_serving_contract_required"),
+        "got: {err}"
+    );
 }
