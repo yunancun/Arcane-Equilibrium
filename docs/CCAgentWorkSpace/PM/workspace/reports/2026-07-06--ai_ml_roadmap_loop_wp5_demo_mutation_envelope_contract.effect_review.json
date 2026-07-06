@@ -1,0 +1,145 @@
+{
+  "schema_version": "implementation_effect_review_v1",
+  "work_id": "WP5-DEMO-MUTATION-ENVELOPE-CONTRACT",
+  "reviewed_at": "2026-07-06T22:32:06Z",
+  "pre_state": {
+    "gate": "G6",
+    "status": "blocked",
+    "blockers": [
+      "DemoMutationEnvelope was referenced by roadmap and audit but was not a canonical source contract in the ML surface.",
+      "mlde_demo_applier records had patch, prev_snapshot, status, IPC response, and payload fields but no machine-checkable envelope mapping.",
+      "Empty, dedupe, dry-run, skipped, failed, and non-demo applications needed an explicit no-counting contract before bandit/reward work."
+    ]
+  },
+  "post_state": {
+    "gate": "G6",
+    "status": "source_contract_ready",
+    "blockers": [
+      "controlled Demo bandit runtime remains blocked until real reward ledger exists",
+      "runtime/order-capable outcome collection remains blocked by expired standing Demo authorization",
+      "future countable Demo learning still requires downstream post-change review and valid proof linkage"
+    ]
+  },
+  "subagent_chain": [
+    {
+      "role": "PA",
+      "agent_id": "019f395d-0f2a-7992-84ab-1cc650029afb",
+      "status": "DONE",
+      "verdict": "DESIGN_READY",
+      "summary": "Selected source-only demo_mutation_envelope_v1 contract plus pure mlde_demo_applier record mapping; bandit runtime remains blocked."
+    },
+    {
+      "role": "E1",
+      "agent_id": "019f3962-325e-70b0-a7aa-8a0f57a4bc65",
+      "status": "DONE",
+      "verdict": "PASS",
+      "summary": "Implemented stdlib-only demo_mutation_envelope_v1 builder, hash, validator, extractor, countability gates, and focused tests."
+    },
+    {
+      "role": "E1a",
+      "agent_id": "019f396a-d405-7990-8233-c0ac4f84cf70",
+      "status": "DONE",
+      "verdict": "PASS",
+      "summary": "Implemented pure applier mapping helper and minimally attached envelopes to _record_application payloads without changing SQL/status/IPC semantics."
+    },
+    {
+      "role": "E2",
+      "agent_id": "019f3972-b0e6-7922-9d1a-b1a8a0d32b6a",
+      "status": "DONE",
+      "verdict": "FAIL FINDINGS=2(C:0/H:2/M:0/L:0)",
+      "summary": "Found countable envelopes could pass without a concrete max-delta bound and authority/scope scanners missed secretAccess/mainnetAccess/candidateScope/candidateEngineMode aliases."
+    },
+    {
+      "role": "E1-fix",
+      "agent_id": "019f3977-1d3d-7b13-84e2-cea2f43c0779",
+      "status": "DONE",
+      "verdict": "PASS",
+      "summary": "Required concrete finite nonnegative max_delta or max_delta_pct for countability and hardened authority/scope alias detection."
+    },
+    {
+      "role": "E2-rereview",
+      "agent_id": "019f397f-519c-7d32-9ae1-02b672653b66",
+      "status": "DONE",
+      "verdict": "PASS FINDINGS=0(C:0/H:0/M:0/L:0)",
+      "summary": "Confirmed both HIGH findings closed and no new blocker introduced."
+    },
+    {
+      "role": "E4",
+      "agent_id": "019f3985-9fae-7710-b79a-e7e34c096259",
+      "status": "DONE",
+      "verdict": "PASS",
+      "summary": "Regression passed: py_compile, envelope/mapping 49, mlde_demo_applier 31, adjacent contract 76, forbidden scan, and diff-check."
+    },
+    {
+      "role": "QA",
+      "agent_id": "019f3989-3835-7483-99be-b19f6b5c7d69",
+      "status": "DONE",
+      "verdict": "ACCEPT",
+      "summary": "Accepted source-only WP5 with no blocking findings; residuals are no runtime/deployed E2E, DB verification, IPC execution, or live proof."
+    }
+  ],
+  "tests": [
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile program_code/ml_training/demo_mutation_envelope.py program_code/ml_training/demo_mutation_envelope_applier_mapping.py program_code/ml_training/mlde_demo_applier.py program_code/ml_training/tests/test_demo_mutation_envelope.py program_code/ml_training/tests/test_demo_mutation_envelope_applier_mapping.py",
+      "result": "PASS"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m pytest -q program_code/ml_training/tests/test_demo_mutation_envelope.py program_code/ml_training/tests/test_demo_mutation_envelope_applier_mapping.py -p no:cacheprovider",
+      "result": "PASS: 49 passed"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m pytest -q program_code/ml_training/tests/test_mlde_demo_applier.py -p no:cacheprovider",
+      "result": "PASS: 31 passed"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m pytest -q program_code/ml_training/tests/test_advisory_review_packet.py program_code/ml_training/tests/test_proof_packet_contract.py program_code/ml_training/tests/test_pit_dataset_manifest.py -p no:cacheprovider",
+      "result": "PASS: 93 passed"
+    },
+    {
+      "command": "rg -n \"requests\\\\.|httpx\\\\.|urllib\\\\.|psycopg2|asyncpg|one_shot_ipc_call|INSERT INTO|UPDATE |DELETE FROM|subprocess|place_order|cancel_order|create_order|OPENCLAW_ALLOW_MAINNET=1\" program_code/ml_training/demo_mutation_envelope.py program_code/ml_training/demo_mutation_envelope_applier_mapping.py",
+      "result": "PASS: no actionable forbidden surface matches"
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS"
+    }
+  ],
+  "artifacts": [
+    "program_code/ml_training/demo_mutation_envelope.py",
+    "program_code/ml_training/demo_mutation_envelope_applier_mapping.py",
+    "program_code/ml_training/mlde_demo_applier.py",
+    "program_code/ml_training/tests/test_demo_mutation_envelope.py",
+    "program_code/ml_training/tests/test_demo_mutation_envelope_applier_mapping.py",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp5_demo_mutation_envelope_contract.work_item.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp5_demo_mutation_envelope_contract.effect_review.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp5_demo_mutation_envelope_contract.state_packet.json"
+  ],
+  "gate_delta": "blocked_to_source_contract_ready",
+  "artifact_delta": "new demo_mutation_envelope_v1 helper, applier mapping helper, minimal _record_application payload attachment, and focused regression tests",
+  "test_delta": "new envelope and mapping coverage passed with existing mlde_demo_applier and adjacent ProofPacket/PIT/advisory contract regressions",
+  "risk_delta": "no_authority_expansion",
+  "proof_delta": "future Demo mutation learning now requires machine-checkable previous/proposed/bounded-delta/governance/rollback/review/proof evidence before countability",
+  "next_action_quality": "next work is not bandit runtime; loop must stop on STOP_LOSS_CONTROL until fresh standing Demo loss-control envelope and real reward ledger path are available",
+  "regressions": [],
+  "concerns": [
+    "source-only acceptance; no runtime/deployed E2E, DB verification, IPC execution, or live proof was performed",
+    "controlled Demo bandit remains blocked until real reward ledger exists",
+    "runtime/order-capable outcome collection remains blocked by expired standing Demo authorization"
+  ],
+  "boundary_check": {
+    "runtime_mutation": false,
+    "db_read": false,
+    "db_write": false,
+    "exchange_contact": false,
+    "private_read": false,
+    "mcp_runtime": false,
+    "secret_access": false,
+    "provider_call": false,
+    "order_capable": false,
+    "cost_gate_change": false,
+    "deploy": false,
+    "live_or_mainnet": false,
+    "bandit_runtime": false
+  },
+  "verdict": "EFFECTIVE"
+}

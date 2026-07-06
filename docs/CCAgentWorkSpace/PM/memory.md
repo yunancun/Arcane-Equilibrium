@@ -25,6 +25,15 @@
 
 ## 近期記錄
 
+## 2026-07-06 AI/ML Roadmap Loop WP5 Demo Mutation Envelope Contract
+
+- PM selected `WP5-DEMO-MUTATION-ENVELOPE-CONTRACT` after WP4 because controlled Demo bandit work needs a machine-checkable DemoMutationEnvelope boundary before any runtime/reward allocation path.
+- Added `demo_mutation_envelope_v1` plus a pure `mlde_demo_applier` record mapping. `_record_application` now attaches `payload.demo_mutation_envelope` without changing SQL schema, status semantics, dedupe, patch calculation, IPC params, or live-candidate behavior.
+- Countability is fail-closed: applied Demo status, non-empty patch, no dedupe/dry-run, concrete bounded delta, rollback, governance review allowance, post-change review pass, and valid proof linkage are all required. Empty/dedupe/dry-run/skipped/failed/non-demo/live/live_demo/missing-bound rows are audit-only or invalid.
+- E2 initially found 2 high issues (missing concrete max-delta bound for countability and missed authority/scope aliases); E1-fix closed both. E2 rereview PASS, E4 PASS, QA ACCEPT.
+- Verification passed: py_compile, envelope/mapping `49 passed`, mlde_demo_applier `31 passed`, adjacent ProofPacket/PIT/advisory contracts `93 passed`, forbidden scan, `git diff --check`.
+- State is `STOPPED` with `STOP_LOSS_CONTROL`: next work is `P0-STANDING-DEMO-LOSS-CONTROL-ENVELOPE-REFRESH-CURRENT-HEAD` through PM->E3->BB, not bandit runtime.
+
 ## 2026-07-07 AI/ML Roadmap WP1-WP4 Fixes And Trading-Focused Audit
 
 - PM fixed all findings from the strict WP1-WP4 audit: ProofPacket `sha256:` refs are strict, advisory packets carry self-hash plus no-provider/no-exchange/no-private/no-MCP contact guards, and registry serving q10/q50/q90 writes are one transaction.

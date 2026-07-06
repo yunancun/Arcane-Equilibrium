@@ -143,6 +143,9 @@ from ml_training.candidate_evidence_source_contract import (  # noqa: E402
 from ml_training.residual_alpha_report_contract import (  # noqa: E402
     RESIDUAL_ALPHA_REPORT_FIELD,
 )
+from ml_training.demo_mutation_envelope_applier_mapping import (  # noqa: E402
+    attach_demo_mutation_envelope_to_payload,
+)
 
 logger = logging.getLogger(__name__)
 IpcCall = Callable[[str, dict[str, Any], float], Awaitable[dict[str, Any]]]
@@ -725,6 +728,18 @@ def _record_application(
     requires_governance: bool,
     payload: dict[str, Any],
 ) -> int:
+    payload_with_envelope = attach_demo_mutation_envelope_to_payload(
+        row=row,
+        application_type=application_type,
+        target_name=target_name,
+        patch=patch,
+        prev_snapshot=prev_snapshot,
+        ipc_response=ipc_response,
+        status=status,
+        reason=reason,
+        requires_governance=requires_governance,
+        payload=payload,
+    )
     cur.execute(
         """
         INSERT INTO learning.mlde_param_applications
@@ -745,7 +760,7 @@ def _record_application(
             status,
             reason,
             requires_governance,
-            Json(payload),
+            Json(payload_with_envelope),
         ),
     )
     return int(cur.fetchone()[0])
