@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-06 AI/ML Roadmap Loop Continuous-State Correction
+
+- PM updated the AI/ML roadmap loop spec after the WP1 dry-run exposed that `ADVANCED` had no durable state cursor. `roadmap_loop_state_packet_v1` is now mandatory after every iteration, not only on stop.
+- Launcher rule: if latest effect review has no matching state packet, write an `ADVANCED_WITH_CONCERNS` recovery packet and continue from `next_work_id`; single-cycle runs require explicit `max_iterations=1`.
+- Source feature work now requires the repo role chain by default; PM direct code is only docs/state/report scope or explicit single-agent exception, otherwise stop as `STOP_DISPATCH_BLOCKED`.
+
 ## 2026-07-06 AI/ML Roadmap Loop WP1 ProofPacket Contract
 
 - PM ran the first autonomous engineering completion loop cycle and selected `WP1-PROOF-PACKET-V1` because runtime/order-capable WP0 remains blocked by expired standing Demo authorization; source-only work was allowed.
