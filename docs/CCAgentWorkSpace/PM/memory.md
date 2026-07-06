@@ -165,6 +165,14 @@
 - Verification passed: changed-file rustfmt PASS; Phase3 focused Rust acceptance DQ `5 passed`, evidence `11 passed`, market-data `8 passed`; full `cargo test -p openclaw_types` PASS; test-count/line-count scans PASS. Desktop shell `~/.cargo/bin` proxies point at a stale rustup-init symlink, so PM ran verification through Homebrew rustup + stable toolchain bin without changing repo or global env.
 - Boundary unchanged: no Rust production code change, Phase3 validator semantics change, source/runtime config change, Rust IPC handler behavior change, FastAPI route behavior change, GUI behavior change, connector production code change, IBKR contact, connector runtime, socket/client construction, secret access, broker session, read-only probe execution, paper order routing/cancel/replace execution, fill import execution, DB/evidence writer, scorecard writer, evidence clock, paper-shadow launch, destructive DB cleanup, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
 
+## 2026-07-06 AI/ML Roadmap Loop WP1 Chain Closure
+
+- PM recovered the missing WP1 state packet, dispatched E2/E4/QA against commit `b9867ac9e`, and closed the original shortened-chain concern.
+- E4 and QA passed: ProofPacket focused `15`, adjacent ML evidence `60`, adjacent cost-gate proof/promotion `20`, plus `git diff --check`.
+- E2 found one medium proof-quality concern: ProofPacket provenance is still too generic until WP2 adds named PIT dataset manifest, rebuild evidence, feature/schema lineage, matched-control artifact hash, and row-backed fill source artifact hash.
+- Loop state is `ADVANCED_WITH_CONCERNS`; next safe work is `WP2-PIT-DATASET-MANIFEST` through `PM -> PA -> E1/E1a -> E2 -> E4 -> QA -> PM`.
+- Boundary unchanged: no runtime mutation, DB read/write, exchange/private read, MCP server, secret access, order/probe, Cost Gate change, deploy, live, or mainnet.
+
 ## 2026-07-02 Stock/ETF Paper Order Request Acceptance Split Guard
 
 - PM split the oversized paper-order request Rust acceptance file by contract boundary: default/accepted fixture, aggregate cross-wire, method-specific shape, boundary regression, and template coverage remain in `stock_etf_paper_order_request_acceptance.rs`; independent gap matrix coverage moved to `stock_etf_paper_order_request_gap_acceptance.rs`.

@@ -1,0 +1,88 @@
+{
+  "schema_version": "roadmap_work_item_v1",
+  "work_id": "WP1-PROOF-PACKET-V1-CHAIN-CLOSURE",
+  "roadmap_wp": "WP1",
+  "phase": "recovery_chain_closure",
+  "priority": "P0",
+  "selected_at": "2026-07-06T18:04:49Z",
+  "selection_reason": "Latest loop recovery state carried an open concern that WP1 source feature work had not received independent E2/E4/QA review; continuous_loop rules require closing or carrying that concern before WP2.",
+  "owner_chain": [
+    "PM",
+    "E2",
+    "E4",
+    "QA",
+    "PM"
+  ],
+  "preconditions": [
+    "LOAD_CONTEXT completed",
+    "WP1 effect review detected without original state packet",
+    "Recovery state packet written",
+    "Commit b9867ac9e is ancestor of current HEAD",
+    "No runtime/order-capable path consumed"
+  ],
+  "allowed_actions": [
+    "read_only_repo_inspection",
+    "source_only_test_execution",
+    "subagent_review_dispatch",
+    "pm_report",
+    "operator_summary",
+    "document_index_update",
+    "pm_memory_update"
+  ],
+  "denied_actions": [
+    "runtime_mutation",
+    "db_write",
+    "exchange_contact",
+    "private_read",
+    "mcp_server_start",
+    "secret_access",
+    "order_or_probe",
+    "cost_gate_change",
+    "deploy",
+    "live_or_mainnet"
+  ],
+  "target_commit": "b9867ac9ee04904a9412b7703ae4eefa0f255afb",
+  "acceptance": [
+    "E2 performs narrow adversarial review of WP1 source contract.",
+    "E4 performs source-only regression verification.",
+    "QA performs WP1 acceptance gate review.",
+    "If PASS, close the shortened-chain concern.",
+    "If review finds non-blocking proof-quality concern, carry it explicitly into WP2 acceptance rather than pretending it is closed.",
+    "No file edits are made by subagents."
+  ],
+  "verification_commands": [
+    "E4: git show --no-patch --oneline b9867ac9e",
+    "E4: git merge-base --is-ancestor b9867ac9e HEAD",
+    "E4: PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile program_code/ml_training/proof_packet_contract.py program_code/ml_training/tests/test_proof_packet_contract.py",
+    "E4: PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q program_code/ml_training/tests/test_proof_packet_contract.py -p no:cacheprovider",
+    "E4: PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q program_code/ml_training/tests/test_proof_packet_contract.py program_code/ml_training/tests/test_candidate_evidence_manifest.py program_code/ml_training/tests/test_candidate_evidence_source_contract.py -p no:cacheprovider",
+    "E4: PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=helper_scripts/research python3 -m pytest -q helper_scripts/research/tests/test_cost_gate_learning_candidate_proof_evidence.py helper_scripts/research/tests/test_cost_gate_learning_proof_promotion_gate.py -p no:cacheprovider",
+    "E4: git diff --check",
+    "QA: python3 -m py_compile program_code/ml_training/proof_packet_contract.py program_code/ml_training/tests/test_proof_packet_contract.py",
+    "QA: python3 -m pytest -q program_code/ml_training/tests/test_proof_packet_contract.py",
+    "QA: adjacent ML evidence pytest",
+    "QA: adjacent cost-gate proof/promotion pytest",
+    "QA: git diff --check",
+    "E2: read-only git/source review of b9867ac9e"
+  ],
+  "effect_metrics": [
+    "chain_delta",
+    "review_delta",
+    "test_delta",
+    "risk_delta",
+    "carried_concern_quality",
+    "next_action_quality"
+  ],
+  "kill_gates": [
+    "STOP_DISPATCH_BLOCKED if subagent dispatch cannot run",
+    "STOP_TEST if E4 or QA regression fails",
+    "STOP_EVIDENCE if E2 finding blocks WP1 gate and cannot be carried into WP2",
+    "STOP_BOUNDARY if runtime/order/private/MCP/live action is required"
+  ],
+  "evidence_refs": [
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp1_proof_packet_contract.state_packet.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp1_proof_packet_contract.effect_review.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_autonomous_completion_loop_design.md",
+    "TODO.md"
+  ]
+}
