@@ -25,6 +25,13 @@
 
 ## 近期記錄
 
+## 2026-07-06 AI/ML Roadmap After Maker-First Challenge
+
+- PM challenged the maker-first NO-GO without overturning its narrow conclusion: mature-perp passive spread capture at current Bybit fee tier remains blocked, but the result must not be overextended into "AI is useless" or "all engineering edge is dead."
+- Signed roadmap: mainline is ProofPacket/candidate-matched outcome loop -> point-in-time dataset manifests -> supervised q10/q50/q90 advisory -> controlled Demo bandit learning; new-listing/event microstructure, M12 adaptive router, and MCP inventory are scoped side lanes with explicit kill gates.
+- Boundary held: planning/report only. No runtime action, DB write, exchange/API/private read, order/probe, Cost Gate change, MCP install/config, secret access, or live/mainnet.
+- Reports: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_trade_engineering_roadmap_after_maker_challenge.md`; operator mirror `docs/CCAgentWorkSpace/Operator/2026-07-06--ai_ml_trade_engineering_roadmap_after_maker_challenge.md`.
+
 ## 2026-07-06 Maker-First / Microstructure Feasibility — NO-GO
 
 - PM ran a read-only $0 four-agent wave (QC/BB/MIT/PA) plus a two-window `fill_sim` run over ~34M rows of recorded `market.l1_events` to test whether a maker-first (passive liquidity-provision) paradigm could fix non-profitability / mechanical design. Verdict: **NO-GO as an engineering profit lever at Bybit VIP0**, triple-confirmed — BB (VIP0 maker is a +2.0 bps fee not a rebate; rebate is institution-gated MM-program only), QC (half-spread ≈ fee on liquid perps), `fill_sim` (**0/172 cells net-positive** across fast-3h + 72h windows; best cell ADAUSDT −3.2 bps; 0 signals survive walk-forward holdout; break-even needs maker fee ≤ ~0.4 bps/side).
