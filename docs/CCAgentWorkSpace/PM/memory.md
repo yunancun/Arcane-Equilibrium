@@ -294,6 +294,12 @@
 - Source-static guard now pins risk policy validator blocker emit order across top-level checks, caps, cash-only controls, universe controls, cost model controls, paper-order controls, and authority boundary flags.
 - Verification passed: risk policy source static `7`, Rust acceptance `9`, full `cargo test -p openclaw_types`, cargo fmt, docs trace, and diff-check. Boundary unchanged: no Rust production code change, IBKR contact, connector/runtime, secret access/serialization, paper order route, scorecard/DB writer, tiny-live/live, or Bybit behavior change.
 
+## 2026-07-07 Standing Demo Loss-Control Refresh Blocked By Engine Env
+
+- PM completed the requested PM->E3->BB authorization path for `P0-STANDING-DEMO-LOSS-CONTROL-ENVELOPE-REFRESH-CURRENT-HEAD`: request sha `62f2a9cc...` at source `798843f2`, E3 `APPROVE_FOR_BB_REVIEW`, BB `APPROVE_RUNTIME_LOSS_CONTROL_REFRESH`.
+- Final source check passed and exactly one runtime-local Control API fast-balance GET produced READY artifact sha `0b1fd2ab...`, equity `9545.91584234`, `rust_snapshot_fast`/`rust_engine`/connected, no authority contamination.
+- PM stopped before guardrail/materialization because corrected readiness sha `a81ae387...` was `BOUNDED_DEMO_RUNTIME_BLOCKED_BY_ENGINE_ENV`: `OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED=0` plus expired auth. Next step is separate PM->E3 runtime/env decision; no standing envelope was materialized.
+
 ## 2026-07-01 Stock/ETF Data Foundation Exact Blocker Guard
 
 - PM tightened source-only data foundation acceptance coverage to exact ordered blocker vectors for `StockEtfInstrumentIdentityV1`, `StockEtfPitUniverseV1`, and `StockEtfReferenceDataSourcesV1` aggregate failure cases.
