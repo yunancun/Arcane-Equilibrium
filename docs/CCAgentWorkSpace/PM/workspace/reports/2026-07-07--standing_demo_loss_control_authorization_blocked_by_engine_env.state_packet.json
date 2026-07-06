@@ -1,0 +1,69 @@
+{
+  "schema_version": "runtime_loss_control_authorization_state_packet_v1",
+  "generated_at_utc": "2026-07-06T23:05:00Z",
+  "status": "BLOCKED",
+  "state_reason": "E3 and BB approved the exact standing Demo loss-control refresh request, but runtime readiness blocked on OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED=0 in the engine environment. The approved expired-standing-auth-only exception cannot be consumed.",
+  "active_blocker_id": "P0-STANDING-DEMO-LOSS-CONTROL-ENVELOPE-REFRESH-CURRENT-HEAD",
+  "selected_work_item": {
+    "schema_version": "roadmap_work_item_v1",
+    "work_id": "P0-STANDING-DEMO-LOSS-CONTROL-ENVELOPE-REFRESH-CURRENT-HEAD",
+    "priority": "P0",
+    "owner_chain": "PM -> E3 -> BB -> PM",
+    "scope": "Refresh or fail-close the expired current-candidate standing Demo loss-control envelope without order/probe/live/Cost Gate authority."
+  },
+  "source": {
+    "approved_source_head": "798843f23b2fda66117cf95bfe7c996f97fdf543",
+    "pm_local_head_at_attempt": "1c2a70fc1",
+    "pm_local_ahead_origin_count_at_attempt": 4,
+    "final_source_check": "PASS_EXACT",
+    "source_stability_ready_sha256": "0cff421abb32d5caf5c5aa9986a362c30feee80f9214f3a29387edac66288664"
+  },
+  "authorization": {
+    "request_path": "/tmp/openclaw/standing_envelope_runtime_refresh_current_head_20260706T224516Z_798843f2/review/standing_demo_loss_control_runtime_authorization_request_v1.json",
+    "request_sha256": "62f2a9cc9225d0c70ce7d38aa071c9d387cccca4811174a79d92e4085d4e5f7c",
+    "post_approval_drift_policy": "docs_tests_codex_exempt_v1",
+    "e3_verdict": "APPROVE_FOR_BB_REVIEW",
+    "bb_verdict": "APPROVE_RUNTIME_LOSS_CONTROL_REFRESH"
+  },
+  "runtime_evidence": {
+    "runtime_precheck_path": "trade-core:/home/ncyu/BybitOpenClaw/var/openclaw/standing_envelope_runtime_refresh_current_head_20260706T224516Z_798843f2/runtime_precheck/runtime_readonly_precheck.json",
+    "runtime_precheck_sha256": "f068006ed61a51f3f1788de61846daa79c2db5e2714a81feed2f68a298935b51",
+    "fast_balance_path": "trade-core:/home/ncyu/BybitOpenClaw/var/openclaw/standing_envelope_runtime_refresh_current_head_20260706T224516Z_798843f2/fast_balance/demo_account_equity_artifact.json",
+    "fast_balance_sha256": "0b1fd2abb088eb48548a43a595c35036a61e8cbe6a6c80e2ba7f286d45b38572",
+    "fast_balance_status": "DEMO_FAST_BALANCE_EQUITY_ARTIFACT_READY_NO_AUTHORITY",
+    "fast_balance_equity_usdt": 9545.91584234,
+    "readiness_path": "trade-core:/home/ncyu/BybitOpenClaw/var/openclaw/standing_envelope_runtime_refresh_current_head_20260706T224516Z_798843f2/readiness/bounded_demo_runtime_readiness_engine3771096.json",
+    "readiness_sha256": "a81ae387037a8476c495e268cd0c4710df82c4bb522857cade4e1bad51fa96bf",
+    "readiness_status": "BOUNDED_DEMO_RUNTIME_BLOCKED_BY_ENGINE_ENV",
+    "readiness_blockers": [
+      "engine_env:engine_env_OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED_not_1",
+      "standing_authorization:standing_auth_expired"
+    ]
+  },
+  "stop_reason": "STOP_LOSS_CONTROL",
+  "blocking_gate": "runtime_readiness_non_expiry_blocker",
+  "next_safe_action": "Open a separate PM->E3 runtime/deploy decision to restore Demo-only engine env OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED=1 without paper/live/mainnet/Cost Gate changes; then rerun source gate, fast-balance, readiness, guardrail, and materialization only if readiness has no non-expiry blocker.",
+  "denied_actions": [
+    "public_quote_or_bbo",
+    "decision_lease",
+    "direct_bybit_private_or_public_market_endpoint",
+    "order_or_probe_or_cancel_or_modify",
+    "bounded_probe",
+    "_latest_promotion",
+    "pg_write",
+    "service_restart",
+    "env_crontab_or_risk_mutation",
+    "cost_gate_change",
+    "deploy",
+    "live_or_mainnet",
+    "proof_or_promotion"
+  ],
+  "answers": {
+    "standing_guardrail_run_after_corrected_readiness": false,
+    "standing_envelope_materialized": false,
+    "runtime_mutation_performed": false,
+    "order_or_probe_performed": false,
+    "cost_gate_change_performed": false,
+    "live_or_mainnet_authority_granted": false
+  }
+}
