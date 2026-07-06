@@ -13,16 +13,23 @@ if str(SRV_ROOT) not in sys.path:
 
 import program_code.broker_connectors.ibkr_connector as ibkr_connector  # noqa: E402
 from program_code.broker_connectors.ibkr_connector import (  # noqa: E402
+    IBKR_API_ABSENT_ENGINEERING_PACKET_ID,
+    IBKR_API_ABSENT_MODE,
     IBKR_CONNECTOR_SURFACE_ID,
     IBKR_PAPER_ATTESTATION_CONTRACT_ID,
+    IBKR_PHASE2_GATE_CANDIDATE_STATUS,
     IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID,
     IBKR_SESSION_ATTESTATION_CONTRACT_ID,
+    IbkrApiAbsentEngineeringPacket,
+    IbkrApiAbsentLoopDecision,
     IbkrPaperAttestationPreview,
     IbkrPaperClientBoundary,
     IbkrReadOnlyClient,
     IbkrReadOnlyEndpointConfig,
     IbkrReadOnlyProbeResultImportPreview,
     IbkrSessionAttestationPreview,
+    api_absent_engineering_fixture,
+    build_api_absent_engineering_packet,
 )
 from program_code.broker_connectors.ibkr_connector.fixtures import (  # noqa: E402
     blocked_paper_attestation_fixture,
@@ -288,11 +295,16 @@ EXPECTED_DEFAULT_BLOCKERS = {
     ),
 }
 EXPECTED_CONNECTOR_EXPORTS = (
+    "IBKR_API_ABSENT_ENGINEERING_PACKET_ID",
+    "IBKR_API_ABSENT_MODE",
     "IBKR_CONNECTOR_SURFACE_ID",
     "IBKR_NON_BYBIT_API_ALLOWLIST_CONTRACT_ID",
     "IBKR_PAPER_ATTESTATION_CONTRACT_ID",
+    "IBKR_PHASE2_GATE_CANDIDATE_STATUS",
     "IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID",
     "IBKR_SESSION_ATTESTATION_CONTRACT_ID",
+    "IbkrApiAbsentEngineeringPacket",
+    "IbkrApiAbsentLoopDecision",
     "IbkrApiActionMatrixPreview",
     "IbkrPaperAttestationPreview",
     "IbkrPaperClientBoundary",
@@ -301,6 +313,8 @@ EXPECTED_CONNECTOR_EXPORTS = (
     "IbkrReadOnlyProbeResultImportPreview",
     "IbkrReadOnlySurfaceStatus",
     "IbkrSessionAttestationPreview",
+    "api_absent_engineering_fixture",
+    "build_api_absent_engineering_packet",
 )
 EXPECTED_READONLY_CLIENT_PUBLIC_SURFACE = {
     "account_snapshot_preview",
@@ -326,12 +340,15 @@ EXPECTED_README_REQUIRED_BOUNDARY_LINES = {
     "- display-only account, market-data, contract-detail, lifecycle, and fill-import previews",
     "- display-only session and paper attestation previews",
     "- display-only readonly probe result-import request previews",
+    "- API-absent engineering readiness packet with simulated/no-contact fixture posture",
+    "- external verification readiness checklist for operator-controlled real contact",
     "- static fixtures for tests",
     "- IBKR SDK imports",
     "- socket or HTTP network contact",
     "- secret reads, env secret fallback, or serialized credential material",
     "- broker write methods",
     "- paper order routing, fill import side effects, DB writes, tiny-live, or live",
+    "- treating missing IBKR credentials, Gateway/TWS session, or operator contact approval as a reason to enable real transport",
     "Rust gates remain the authority for any future read-only or paper capability.",
 }
 FORBIDDEN_README_RUNTIME_CLAIMS = {
@@ -394,6 +411,11 @@ def test_ibkr_connector_package_exports_only_source_boundary_types() -> None:
     assert tuple(ibkr_connector.__all__) == EXPECTED_CONNECTOR_EXPORTS
     for name in EXPECTED_CONNECTOR_EXPORTS:
         assert getattr(ibkr_connector, name) is not None
+    assert IBKR_API_ABSENT_ENGINEERING_PACKET_ID == (
+        "ibkr_demo_ready_api_absent_engineering_packet_v1"
+    )
+    assert IBKR_API_ABSENT_MODE == "DEMO_READY_API_ABSENT"
+    assert IBKR_PHASE2_GATE_CANDIDATE_STATUS == "PENDING_EXTERNAL_ATTESTATION"
     assert IBKR_SESSION_ATTESTATION_CONTRACT_ID == "ibkr_session_attestation_v1"
     assert IBKR_PAPER_ATTESTATION_CONTRACT_ID == "ibkr_paper_attestation_v1"
     assert (
@@ -420,6 +442,10 @@ def test_ibkr_connector_skeleton_has_no_python_broker_write_methods() -> None:
     assert IbkrPaperAttestationPreview().accepted is False
     assert IbkrReadOnlyProbeResultImportPreview().accepted_for_import is False
     assert IbkrReadOnlyProbeResultImportPreview().result_import_performed is False
+    assert IbkrApiAbsentLoopDecision is not None
+    assert IbkrApiAbsentEngineeringPacket().status == "DEMO_READY_API_ABSENT"
+    assert build_api_absent_engineering_packet().status == "DEMO_READY_API_ABSENT"
+    assert api_absent_engineering_fixture()["status"] == "DEMO_READY_API_ABSENT"
 
 
 def test_ibkr_connector_client_public_surfaces_are_frozen_source_only() -> None:

@@ -359,3 +359,21 @@
 - PM tightened `StockEtfPaperShadowReconciliationV1` aggregate acceptance coverage to exact ordered blocker vectors for default, scope/authority/effect cross-wire, lineage/hash gaps, reconciliation-evidence failures, and no-side-effect boundary regressions.
 - Source-static guard now pins validator blocker emit order across top-level identity, required fields, reconciliation evidence, and boundary flags.
 - Verification passed: reconciliation source static `10`, Rust acceptance `10`, full `cargo test -p openclaw_types`, cargo fmt, docs trace, and diff-check. Boundary unchanged: no IBKR contact, connector/runtime, fill import, shadow fill generation, reconciliation/scorecard writer, DB/evidence writer, tiny-live/live, or Bybit behavior change.
+
+## 2026-07-07 IBKR Demo Ready Loop L0-L1 Stop
+
+- PM ran the sentinel-triggered IBKR Demo Ready source audit through L0 and into L1; L0 baseline artifact advanced, L1 stopped because no immutable `phase2_ibkr_external_surface_gate_v1` PASS artifact, operator session/credential approval, secret-slot evidence, topology evidence, or session attestation exists.
+- Verification passed Python Stock/ETF IBKR guard subset `26`; Rust focused gate tests were not runnable because local `~/.cargo/bin/rustup` is a broken symlink to `/opt/homebrew/bin/rustup-init`.
+- Boundary unchanged: no IBKR contact, connector/runtime, secret read/serialization, paper order, fill import, DB/evidence writer, MCP runtime, live/tiny-live path, or Bybit order path reuse.
+
+## 2026-07-07 IBKR Demo Ready API-Absent Engineering Loop
+
+- New attached prompt changed the loop semantics: missing IBKR credential/session/operator approval/real Phase2 PASS artifact is `external_verification_pending`, not STOP. PM added `ibkr_demo_ready_api_absent_engineering_packet_v1` under the inert IBKR connector package and terminal report `2026-07-07--ibkr_demo_ready_api_absent_terminal_packet.md`.
+- Verification passed focused Python IBKR/API-absent/static guard subset `29` and `py_compile`; broader Stock/ETF Python suite was `183 passed, 1 failed` due unrelated dirty `console.html`; Rust tests remain unrunnable because local rustup symlink is broken and no Rust source was changed.
+- Terminal state for this prompt variant: `DEMO_READY_API_ABSENT`. Boundary unchanged: no IBKR contact, connector runtime, secret read/serialization, broker order route, fill import, DB/evidence writer, runtime MCP, live/tiny-live path, or Bybit order path reuse.
+
+## 2026-07-07 IBKR Demo Ready Autonomous L8 Dispatch
+
+- PM continued past `API_ABSENT_READY` into L8 as required. P0 broadened Stock/ETF suite is now green (`184 passed`); P1/P3 Rust no-contact parity was smoke-verified from existing local acceptance binaries (`126 passed` total across selected binaries) because local cargo/rustup remains broken.
+- PM added exact `external_verification_readiness_fixture` to `ibkr_demo_ready_api_absent_engineering_packet_v1`, covering operator checklist, Gateway/TWS topology checklist, secret fingerprint checklist, and Phase2 real-contact runbook.
+- Terminal state for this autonomous prompt: `ENGINEERING_BACKLOG_EXHAUSTED_EXTERNAL_ONLY_PENDING`. Boundary unchanged: no IBKR contact, secret read/serialization, connector runtime, broker route, fill import, DB/evidence writer, runtime MCP, live/tiny-live path, or Bybit order path reuse.
