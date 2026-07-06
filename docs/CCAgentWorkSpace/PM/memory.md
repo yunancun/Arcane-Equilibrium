@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-07 AI/ML Roadmap WP1-WP4 Training / Profit / Evolution Cold Audit
+
+- PM 補跑冷酷對抗性 audit 後裁決：`FAIL-STRICT-AS-STATED / PASS-AS-PREREQUISITES`。WP1-WP4 是正確且必要的 proof/PIT/registry/advisory 前置，但尚未構成完整盈利追逐、自我訓練、自我進化閉環。
+- 驗證：WP1-WP4/quantile/bandit focused suite `165 passed, 1 skipped`；project venv dry-run 可訓練並輸出 ONNX/acceptance report，但最終被 registry DB precheck 擋住，且 acceptance report 沒有 WP contract binding fields。
+- 下一步應落 `WP2.1` training PIT gate、`WP3.1` registry contract emission、`WP5` mutation envelope、`WP6` reward-ledger ProofPacket bridge、`WP7` effect-review stop loop。Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--ai_ml_roadmap_wp1_wp4_training_profit_evolution_cold_audit.md`。
+
 ## 2026-07-06 AI/ML Roadmap Loop WP5 Demo Mutation Envelope Contract
 
 - PM selected `WP5-DEMO-MUTATION-ENVELOPE-CONTRACT` after WP4 because controlled Demo bandit work needs a machine-checkable DemoMutationEnvelope boundary before any runtime/reward allocation path.
