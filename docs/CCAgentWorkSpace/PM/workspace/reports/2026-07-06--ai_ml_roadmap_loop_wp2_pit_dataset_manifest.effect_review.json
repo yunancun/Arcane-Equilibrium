@@ -1,0 +1,146 @@
+{
+  "schema_version": "implementation_effect_review_v1",
+  "work_id": "WP2-PIT-DATASET-MANIFEST",
+  "reviewed_at": "2026-07-06T18:49:09Z",
+  "pre_state": {
+    "gate": "G3",
+    "status": "blocked",
+    "blockers": [
+      "PIT dataset manifest contract did not exist.",
+      "ProofPacket provenance accepted generic source/input artifact hashes without named PIT dataset, rebuild evidence, feature/schema lineage, matched controls, or row-backed fill source evidence.",
+      "training/export surfaces still include trailing-window now()/max_age style inputs that must not be promotion-grade without a pinned manifest."
+    ]
+  },
+  "post_state": {
+    "gate": "G3",
+    "status": "source_contract_ready",
+    "blockers": [
+      "adapter_wiring_pending",
+      "real dataset artifact production remains outside this source-only cycle",
+      "runtime outcome collection still blocked by expired standing Demo authorization"
+    ]
+  },
+  "subagent_chain": [
+    {
+      "role": "PA",
+      "agent_id": "019f389d-f6d9-7450-bd4f-551a5c804374",
+      "status": "DONE_WITH_CONCERNS",
+      "verdict": "DESIGN_READY_WITH_CONCERNS",
+      "summary": "Designed stdlib-only PIT manifest validator, builder, and ProofPacket integration; no source-only blockers."
+    },
+    {
+      "role": "E1",
+      "agent_id": "019f38a3-50bf-7d42-beef-bb3e5077419b",
+      "status": "DONE",
+      "verdict": "PASS",
+      "summary": "Implemented pit_dataset_manifest.py and focused tests; 9 passed."
+    },
+    {
+      "role": "E1a",
+      "agent_id": "019f38ab-8813-7d31-a5ba-5df8a3362d52",
+      "status": "DONE",
+      "verdict": "PASS",
+      "summary": "Implemented builder/rebuild helpers and initial ProofPacket integration; 31 passed."
+    },
+    {
+      "role": "E2",
+      "agent_id": "019f38b4-ec6d-7c30-934f-775ec3004b52",
+      "status": "DONE_WITH_CONCERNS",
+      "verdict": "FAIL FINDINGS=2(C:0/H:0/M:2/L:0)",
+      "summary": "Found missing ProofPacket-to-PIT candidate cross-bind and too-narrow ProofPacket authority alias scan."
+    },
+    {
+      "role": "QA",
+      "agent_id": "019f38b4-ecef-70f0-ab31-5c3f458e8ecf",
+      "status": "DONE_WITH_CONCERNS",
+      "verdict": "FINDINGS=1(C:0/H:0/M:1/L:0)",
+      "summary": "Accepted with concern on missing PIT candidate cross-bind."
+    },
+    {
+      "role": "E1a-fix",
+      "agent_id": "019f38b9-92ca-71c1-8f48-88fef7dbfd47",
+      "status": "DONE",
+      "verdict": "PASS",
+      "summary": "Added PIT candidate_scope cross-check and broader ProofPacket authority alias blocking; 36 passed."
+    },
+    {
+      "role": "E2-fixed",
+      "agent_id": "019f38be-9e09-7603-9c50-c0b98bc86feb",
+      "status": "DONE",
+      "verdict": "PASS",
+      "summary": "Re-review passed; adversarial authority/cost probe and source-only scans passed."
+    },
+    {
+      "role": "E4-fixed",
+      "agent_id": "019f38be-9e57-7993-ae00-c18e5b845de4",
+      "status": "DONE",
+      "verdict": "PASS",
+      "summary": "Regression passed: py_compile, focused 36, adjacent 81/1 skipped, cost-gate 20, diff-check."
+    },
+    {
+      "role": "QA-fixed",
+      "agent_id": "019f38be-a227-7f30-98dd-7b8eea8d1d1b",
+      "status": "DONE",
+      "verdict": "PASS FINDINGS=0(C:0/H:0/M:0/L:0)",
+      "summary": "Acceptance ACCEPT."
+    }
+  ],
+  "tests": [
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile program_code/ml_training/pit_dataset_manifest.py program_code/ml_training/pit_dataset_manifest_builder.py program_code/ml_training/proof_packet_contract.py program_code/ml_training/tests/test_pit_dataset_manifest.py program_code/ml_training/tests/test_pit_dataset_manifest_builder.py program_code/ml_training/tests/test_proof_packet_contract.py",
+      "result": "PASS"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q program_code/ml_training/tests/test_pit_dataset_manifest.py program_code/ml_training/tests/test_pit_dataset_manifest_builder.py program_code/ml_training/tests/test_proof_packet_contract.py -p no:cacheprovider",
+      "result": "PASS: 36 passed"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q program_code/ml_training/tests/test_pit_dataset_manifest.py program_code/ml_training/tests/test_pit_dataset_manifest_builder.py program_code/ml_training/tests/test_proof_packet_contract.py program_code/ml_training/tests/test_candidate_evidence_manifest.py program_code/ml_training/tests/test_candidate_evidence_source_contract.py program_code/ml_training/tests/test_parquet_etl.py -p no:cacheprovider",
+      "result": "PASS: 81 passed, 1 skipped"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=helper_scripts/research python3 -m pytest -q helper_scripts/research/tests/test_cost_gate_learning_candidate_proof_evidence.py helper_scripts/research/tests/test_cost_gate_learning_proof_promotion_gate.py -p no:cacheprovider",
+      "result": "PASS: 20 passed"
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS"
+    },
+    {
+      "command": "static source-only scan for env/DB/file/network/runtime tokens",
+      "result": "PASS: only deny-key constants and comments matched"
+    }
+  ],
+  "artifacts": [
+    "program_code/ml_training/pit_dataset_manifest.py",
+    "program_code/ml_training/pit_dataset_manifest_builder.py",
+    "program_code/ml_training/proof_packet_contract.py",
+    "program_code/ml_training/tests/test_pit_dataset_manifest.py",
+    "program_code/ml_training/tests/test_pit_dataset_manifest_builder.py",
+    "program_code/ml_training/tests/test_proof_packet_contract.py",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp2_pit_dataset_manifest.work_item.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp2_pit_dataset_manifest.effect_review.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp2_pit_dataset_manifest.state_packet.json"
+  ],
+  "gate_delta": "blocked_to_source_contract_ready",
+  "artifact_delta": "new machine-checkable PIT dataset manifest validator, builder, rebuild/hash tests, and ProofPacket provenance integration",
+  "test_delta": "focused PIT/ProofPacket tests increased to 36 passing; adjacent ML evidence and cost-gate proof tests remain passing",
+  "risk_delta": "no_authority_expansion",
+  "proof_delta": "ProofPacket PROOF_READY now requires a valid named PIT dataset manifest cross-bound to candidate identity; generic source hashes alone are insufficient",
+  "next_action_quality": "WP3 registry serving parity is now eligible as advisory-only source work after G2 and G3 source contracts are green",
+  "regressions": [],
+  "boundary_check": {
+    "runtime_mutation": false,
+    "db_read": false,
+    "db_write": false,
+    "exchange_contact": false,
+    "private_read": false,
+    "mcp_runtime": false,
+    "secret_access": false,
+    "order_capable": false,
+    "cost_gate_change": false,
+    "deploy": false,
+    "live_or_mainnet": false
+  },
+  "verdict": "EFFECTIVE"
+}

@@ -165,6 +165,14 @@
 - Verification passed: changed-file rustfmt PASS; Phase3 focused Rust acceptance DQ `5 passed`, evidence `11 passed`, market-data `8 passed`; full `cargo test -p openclaw_types` PASS; test-count/line-count scans PASS. Desktop shell `~/.cargo/bin` proxies point at a stale rustup-init symlink, so PM ran verification through Homebrew rustup + stable toolchain bin without changing repo or global env.
 - Boundary unchanged: no Rust production code change, Phase3 validator semantics change, source/runtime config change, Rust IPC handler behavior change, FastAPI route behavior change, GUI behavior change, connector production code change, IBKR contact, connector runtime, socket/client construction, secret access, broker session, read-only probe execution, paper order routing/cancel/replace execution, fill import execution, DB/evidence writer, scorecard writer, evidence clock, paper-shadow launch, destructive DB cleanup, tiny-live/live authorization, Linux runtime sync/restart, or Bybit behavior change.
 
+## 2026-07-06 AI/ML Roadmap Loop WP2 PIT Dataset Manifest
+
+- PM ran `WP2-PIT-DATASET-MANIFEST` through the required `PM -> PA -> E1/E1a -> E2 -> E4 -> QA -> PM` source-feature chain.
+- Added source-only `pit_dataset_manifest_v1` validator and builder with deterministic row-id/dataset hashes, rebuild evidence, pinned query/as-of requirements, feature/label/split/leakage lineage, matched-control evidence, row-backed fill source, and fail-closed secret/authority/cleanup checks.
+- Updated ProofPacket `PROOF_READY` to require valid `provenance.pit_dataset_manifest`; after E2/QA findings, added candidate_scope cross-binding and broader authority alias blocking for keys such as `order_allowed` and `promotion_allowed`.
+- Verification passed: focused PIT/ProofPacket `36`, adjacent ML evidence `81` with `1 skipped`, adjacent cost-gate proof/promotion `20`, py_compile, static no-I/O scan, and `git diff --check`.
+- Loop state is `ADVANCED`; next source-only item is `WP3-REGISTRY-SERVING-PARITY`. Boundary unchanged: no runtime mutation, DB read/write, exchange/private read, MCP server, secret access, order/probe, Cost Gate change, deploy, live, or mainnet.
+
 ## 2026-07-06 AI/ML Roadmap Loop WP1 Chain Closure
 
 - PM recovered the missing WP1 state packet, dispatched E2/E4/QA against commit `b9867ac9e`, and closed the original shortened-chain concern.

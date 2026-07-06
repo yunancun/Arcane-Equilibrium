@@ -1,0 +1,43 @@
+{
+  "schema_version": "roadmap_loop_state_packet_v1",
+  "status": "ADVANCED",
+  "state_reason": "WP2 PIT dataset manifest source contract, rebuild/hash helpers, tests, and ProofPacket provenance integration passed PA/E1/E1a/E2/E4/QA chain",
+  "last_completed_work_id": "WP2-PIT-DATASET-MANIFEST",
+  "last_completed_commit": null,
+  "current_gate": "G3",
+  "next_work_id": "WP3-REGISTRY-SERVING-PARITY",
+  "next_safe_action": "select WP3 registry-authorized advisory serving metadata/parity as source-only work; do not claim promotion-serving readiness beyond registry-row fail-closed contracts",
+  "stop_reason": null,
+  "blocking_gate": null,
+  "effect_review_ref": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp2_pit_dataset_manifest.effect_review.json",
+  "work_item_ref": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp2_pit_dataset_manifest.work_item.json",
+  "pm_report_ref": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp2_pit_dataset_manifest.md",
+  "operator_summary_ref": "docs/CCAgentWorkSpace/Operator/2026-07-06--ai_ml_roadmap_loop_wp2_pit_dataset_manifest.md",
+  "evidence_refs": [
+    "program_code/ml_training/pit_dataset_manifest.py",
+    "program_code/ml_training/pit_dataset_manifest_builder.py",
+    "program_code/ml_training/proof_packet_contract.py",
+    "program_code/ml_training/tests/test_pit_dataset_manifest.py",
+    "program_code/ml_training/tests/test_pit_dataset_manifest_builder.py",
+    "program_code/ml_training/tests/test_proof_packet_contract.py",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp2_pit_dataset_manifest.md",
+    "docs/CCAgentWorkSpace/Operator/2026-07-06--ai_ml_roadmap_loop_wp2_pit_dataset_manifest.md"
+  ],
+  "concerns": [],
+  "denied_actions": [
+    "runtime_mutation",
+    "db_read",
+    "db_write",
+    "exchange_contact",
+    "private_read",
+    "mcp_runtime",
+    "secret_access",
+    "order_or_probe",
+    "cost_gate_change",
+    "deploy",
+    "live_or_mainnet"
+  ],
+  "repo_head": "8bdd0bb65ab2815e4ffc1c186fe1800976385e8c",
+  "origin_head": "5d16229948eba555ee415048ad028e11649e3d91",
+  "created_at": "2026-07-06T18:49:09Z"
+}

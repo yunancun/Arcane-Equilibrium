@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import copy
+import pytest
 
 from ml_training.proof_packet_contract import (
     INVALID,
@@ -13,6 +13,101 @@ from ml_training.proof_packet_contract import (
     extract_proof_packet,
     validate_proof_packet,
 )
+from ml_training.pit_dataset_manifest import (
+    DATASET_READY,
+    PIT_DATASET_MANIFEST_SCHEMA_VERSION,
+    compute_pit_dataset_manifest_hash,
+)
+
+
+def _valid_pit_manifest(**overrides) -> dict:
+    manifest = {
+        "schema_version": PIT_DATASET_MANIFEST_SCHEMA_VERSION,
+        "verdict": DATASET_READY,
+        "dataset_id": "pit-grid-eth-buy-20260706",
+        "dataset_role": "supervised_training",
+        "as_of_ts": "2026-07-06T12:00:00Z",
+        "point_in_time": True,
+        "future_data_allowed": False,
+        "candidate_scope": {
+            "candidate_id": "grid_trading|ETHUSDT|Buy",
+            "strategy_name": "grid_trading",
+            "symbol": "ETHUSDT",
+            "side": "Buy",
+            "engine_mode": "demo",
+        },
+        "source_query": {
+            "query_id": "learning_rows_grid_eth_buy_20260706T120000Z",
+            "query_hash": "a" * 64,
+            "query_params_hash": "b" * 64,
+            "start_ts": "2026-07-01T00:00:00Z",
+            "end_ts": "2026-07-06T11:59:00Z",
+            "query_text_hash": "c" * 64,
+        },
+        "row_set": {
+            "row_count": 128,
+            "row_ids_hash": "d" * 64,
+            "dataset_hash": "e" * 64,
+            "min_ts": "2026-07-01T00:00:00Z",
+            "max_ts": "2026-07-06T11:59:00Z",
+            "schema_hash": "f" * 64,
+        },
+        "feature_lineage": {
+            "feature_schema_version": "features_v3",
+            "feature_schema_hash": "1" * 64,
+            "feature_definition_hash": "2" * 64,
+            "feature_names_hash": "3" * 64,
+        },
+        "label_lineage": {
+            "label_schema_hash": "4" * 64,
+            "label_config_hash": "5" * 64,
+            "outcome_cutoff_ts": "2026-07-06T12:00:00Z",
+        },
+        "split_lineage": {
+            "split_id": "cpcv-grid-eth-buy-v1",
+            "split_hash": "6" * 64,
+            "embargo_bars": 12,
+            "purge_bars": 4,
+            "train_row_ids_hash": "7" * 64,
+            "validation_row_ids_hash": "8" * 64,
+            "test_row_ids_hash": "9" * 64,
+        },
+        "leakage_evidence": {
+            "leakage_report_hash": "a" * 64,
+            "fold_preprocessing_stats_hash": "b" * 64,
+            "overlap_count": 0,
+        },
+        "matched_controls": {
+            "matched_control_artifact_hash": "c" * 64,
+            "matched_control_row_ids_hash": "d" * 64,
+            "matched_control_count": 16,
+        },
+        "row_backed_fill_source": {
+            "fill_source_artifact_hash": "e" * 64,
+            "fill_row_ids_hash": "f" * 64,
+            "fill_id_field": "fill_id",
+            "order_link_id_field": "order_link_id",
+            "context_id_field": "context_id",
+        },
+        "rebuild_evidence": {
+            "status": "rebuild_hash_match",
+            "original_row_count": 128,
+            "rebuilt_row_count": 128,
+            "original_row_ids_hash": "d" * 64,
+            "rebuilt_row_ids_hash": "d" * 64,
+            "original_dataset_hash": "e" * 64,
+            "rebuilt_dataset_hash": "e" * 64,
+        },
+        "provenance": {
+            "code_commit": "a" * 40,
+            "rust_build_sha": "b" * 40,
+            "source_hashes": {"feature_builder": "c" * 64},
+            "input_artifact_hashes": {"probe_ledger": "d" * 64},
+        },
+    }
+    _deep_update(manifest, overrides)
+    manifest["manifest_hash"] = compute_pit_dataset_manifest_hash(manifest)
+    return manifest
 
 
 def _valid_packet(**overrides) -> dict:
@@ -67,6 +162,7 @@ def _valid_packet(**overrides) -> dict:
                 "standing_envelope": "e" * 64,
                 "bounded_auth": "sha256:bounded-auth",
             },
+            "pit_dataset_manifest": _valid_pit_manifest(),
         },
     }
     _deep_update(packet, overrides)
@@ -118,6 +214,74 @@ def test_valid_proof_packet_is_proof_ready() -> None:
     assert validation.verdict == PROOF_READY
     assert validation.reason == "ok"
     assert validation.no_fill_blocker is False
+
+
+def test_proof_ready_requires_pit_dataset_manifest() -> None:
+    packet = _valid_packet()
+    packet["provenance"].pop("pit_dataset_manifest")
+    packet["proof_packet_hash"] = compute_proof_packet_hash(packet)
+
+    validation = validate_proof_packet(packet)
+
+    assert validation.proof_ready is False
+    assert validation.verdict == PENDING_SCHEMA
+    assert validation.reason == "provenance_pit_dataset_manifest_missing"
+
+
+def test_invalid_pit_dataset_manifest_blocks_proof_ready_with_prefixed_reason() -> None:
+    packet = _valid_packet()
+    packet["provenance"]["pit_dataset_manifest"]["manifest_hash"] = "0" * 64
+    packet["proof_packet_hash"] = compute_proof_packet_hash(packet)
+
+    validation = validate_proof_packet(packet)
+
+    assert validation.proof_ready is False
+    assert validation.verdict == INVALID
+    assert validation.reason.startswith("provenance_pit_dataset_manifest:")
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    (
+        (
+            "candidate_id",
+            "grid_trading|BTCUSDT|Buy",
+            "provenance_pit_dataset_manifest_candidate_scope_candidate_id_mismatch",
+        ),
+        (
+            "strategy_name",
+            "breakout",
+            "provenance_pit_dataset_manifest_candidate_scope_strategy_name_mismatch",
+        ),
+        (
+            "symbol",
+            "BTCUSDT",
+            "provenance_pit_dataset_manifest_candidate_scope_symbol_mismatch",
+        ),
+        (
+            "side",
+            "Sell",
+            "provenance_pit_dataset_manifest_candidate_scope_side_mismatch",
+        ),
+    ),
+)
+def test_proof_ready_cross_checks_pit_manifest_candidate_scope(
+    field: str,
+    value: str,
+    reason: str,
+) -> None:
+    packet = _valid_packet()
+    pit_manifest = packet["provenance"]["pit_dataset_manifest"]
+    pit_manifest["candidate_scope"][field] = value
+    pit_manifest["manifest_hash"] = compute_pit_dataset_manifest_hash(pit_manifest)
+    packet["proof_packet_hash"] = compute_proof_packet_hash(packet)
+
+    validation = validate_proof_packet(packet)
+
+    assert validation.proof_ready is False
+    assert validation.verdict == INVALID
+    assert validation.reason == reason
+    assert reason in validation.reasons
 
 
 def test_extract_reads_only_canonical_field() -> None:
@@ -225,6 +389,26 @@ def test_authority_expansion_fails_closed() -> None:
     assert validation.verdict == INVALID
     assert validation.authority_boundary_violation is True
     assert validation.reason == "authority_boundary_violation:answers.order_authority_granted"
+
+
+def test_authority_alias_expansion_fails_closed() -> None:
+    packet = _valid_packet()
+    packet["answers"] = {
+        "order_allowed": True,
+        "promotion_allowed": True,
+        "live_enabled": True,
+        "cost_gate_lower_allowed": True,
+        "runtime_write_allowed": True,
+    }
+    packet["proof_packet_hash"] = compute_proof_packet_hash(packet)
+
+    validation = validate_proof_packet(packet)
+
+    assert validation.proof_ready is False
+    assert validation.verdict == INVALID
+    assert validation.authority_boundary_violation is True
+    assert "authority_boundary_violation:answers.order_allowed" in validation.reasons
+    assert "authority_boundary_violation:answers.promotion_allowed" in validation.reasons
 
 
 def test_promotion_ready_field_is_not_allowed() -> None:
