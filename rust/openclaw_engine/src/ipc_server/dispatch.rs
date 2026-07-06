@@ -808,21 +808,22 @@ fn handle_reload_edge_estimates(
 }
 
 /// EDGE-P3-1 Step 7b: report compile-time build-feature flags to Python probes.
-/// Python's `engine_capabilities` endpoint needs the live flag value rather
-/// than a static declaration because the Rust engine and Python server are
-/// built separately — without this, a production engine compiled with ort
-/// would still show `reload_edge_predictor=false` at the probe layer.
+/// `edge_predictor_ort` remains the raw ORT build flag. Direct path reload is
+/// advertised separately and stays unavailable until the registry-authorized
+/// serving contract flow exists, even when ORT is compiled in.
 ///
 /// EDGE-P3-1 Step 7b：回報 build-feature 旗標給 Python probe。Rust 引擎與
-/// Python 服務器分別 build，故 Python 必須用實時值而非靜態宣告；否則 ort
-/// build 也會在 probe 層顯示 `reload_edge_predictor=false`。
+/// Python 服務器分別 build；`edge_predictor_ort` 保留 ORT 編譯旗標，但 direct path
+/// reload 在 registry-authorized serving contract 流程落地前一律對外宣告不可用。
 fn handle_get_build_capabilities(id: serde_json::Value) -> JsonRpcResponse {
     let edge_predictor_ort = cfg!(feature = "edge_predictor_ort");
     JsonRpcResponse::success(
         id,
         serde_json::json!({
             "edge_predictor_ort": edge_predictor_ort,
-            "reload_edge_predictor": edge_predictor_ort,
+            "reload_edge_predictor": false,
+            "reload_edge_predictor_reason": "registry_authorized_serving_contract_required",
+            "registry_authorized_reload_required": true,
         }),
     )
 }

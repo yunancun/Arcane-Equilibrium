@@ -178,16 +178,19 @@ def test_capabilities_envelope_shape(client_happy: TestClient) -> None:
 
 
 def test_capabilities_overlays_build_flags_from_ipc() -> None:
-    """EDGE-P3-1 Step 7b: `reload_edge_predictor` must flip True when the
-    engine reports ort build-feature ON via `get_build_capabilities`. The
-    Python server can't know the Rust build config at its own startup, so
-    the static default stands in until the engine answers.
-    Step 7b：引擎回報 ort 開啟時，reload_edge_predictor 必須翻 True。"""
+    """EDGE-P3-1 Step 7b: useful build metadata is surfaced, but direct
+    `reload_edge_predictor` remains fail-closed even if stale IPC says True.
+    Step 7b：保留 build metadata，但 stale reload=true 不得打開直接 reload。"""
     cap_module._IPC_CLIENT = None
 
     async def _fake_call(method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         if method == "get_build_capabilities":
-            return {"edge_predictor_ort": True, "reload_edge_predictor": True}
+            return {
+                "edge_predictor_ort": True,
+                "reload_edge_predictor": True,
+                "reload_edge_predictor_reason": "registry_authorized_serving_contract_required",
+                "registry_authorized_reload_required": True,
+            }
         # get_risk_config — shape is irrelevant for this test; any dict works.
         # get_risk_config — 本測試不關心形狀，任何 dict 均可。
         return {"config": {"edge_predictor": {}}}
@@ -202,11 +205,45 @@ def test_capabilities_overlays_build_flags_from_ipc() -> None:
         client = TestClient(app)
         data = client.get("/api/v1/engine/capabilities").json()["data"]
 
-    assert data["ipc_methods"]["reload_edge_predictor"] is True
+    assert data["ipc_methods"]["reload_edge_predictor"] is False
+    assert data["capability_metadata"]["edge_predictor_ort"] is True
+    assert (
+        data["capability_metadata"]["reload_edge_predictor_reason"]
+        == "registry_authorized_serving_contract_required"
+    )
+    assert data["capability_metadata"]["registry_authorized_reload_required"] is True
     # Other static flags untouched by the overlay (engine didn't report them).
     # 其他靜態旗標未被 overlay（引擎未回報）。
     assert data["ipc_methods"]["decision_feature_snapshot"] is True
     assert data["ipc_methods"]["set_edge_predictor_shadow"] is False
+
+
+def test_capabilities_reload_fail_closed_on_stale_true_without_reason() -> None:
+    """Stale build flag alone cannot advertise direct reload as available.
+    只有 stale build flag 時也不能宣告直接 reload 可用。"""
+    cap_module._IPC_CLIENT = None
+
+    async def _fake_call(method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        if method == "get_build_capabilities":
+            return {"reload_edge_predictor": True}
+        return {"config": {"edge_predictor": {}}}
+
+    fake_ipc = AsyncMock()
+    fake_ipc.call = AsyncMock(side_effect=_fake_call)
+
+    app = FastAPI()
+    app.include_router(engine_capabilities_router)
+    app.dependency_overrides[current_actor] = _viewer_actor
+    with patch.object(cap_module, "_get_ipc", AsyncMock(return_value=fake_ipc)):
+        client = TestClient(app)
+        data = client.get("/api/v1/engine/capabilities").json()["data"]
+
+    assert data["ipc_methods"]["reload_edge_predictor"] is False
+    assert (
+        data["capability_metadata"]["reload_edge_predictor_reason"]
+        == "registry_authorized_serving_contract_required"
+    )
+    assert data["capability_metadata"]["registry_authorized_reload_required"] is True
 
 
 def test_capabilities_build_flags_ignored_when_ipc_fails() -> None:

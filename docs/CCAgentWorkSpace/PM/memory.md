@@ -25,6 +25,14 @@
 
 ## 近期記錄
 
+## 2026-07-06 AI/ML Roadmap Loop WP3 Registry Serving Parity
+
+- PM selected `WP3-REGISTRY-SERVING-PARITY-SOURCE-CONTRACT` after WP2 because registry/advisory serving metadata was the next safe source-only dependency; runtime/order-capable work remains blocked by expired standing Demo authorization.
+- Added `registry_serving_contract_v1` plus Python/Rust validation so advisory registry metadata is `not_authority=true`, `promotion_serving_ready=false`, PIT/feature/schema/policy/hash-bound, and q10/q50/q90 artifact-bound before attachment or validation.
+- Rust and FastAPI capability surfaces now keep direct `reload_edge_predictor=false` until registry-authorized serving integration exists. Final E2 PASS, E4 PASS, QA ACCEPT_WITH_CONCERNS.
+- Verification passed: py_compile; focused Python `58 passed`; expanded ML `106 passed, 13 skipped`; Rust registry `25 passed`; Rust reload `4 passed`; Rust capability `1 passed`; rustfmt; `git diff --check`.
+- State is `ADVANCED_WITH_CONCERNS`: no promotion-serving readiness, no runtime reload authority, partial trio persistence is fail-loud not transactional rollback, and WP4 should harden advisory DreamEngine role boundaries next.
+
 ## 2026-07-06 AI/ML Roadmap Loop Continuous-State Correction
 
 - PM updated the AI/ML roadmap loop spec after the WP1 dry-run exposed that `ADVANCED` had no durable state cursor. `roadmap_loop_state_packet_v1` is now mandatory after every iteration, not only on stop.

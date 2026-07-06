@@ -192,13 +192,12 @@ fn disable_edge_predictor_all_impl(
 }
 
 /// EDGE-P3-1 Step 7b · Plumbing-only reload handler. Validates the engine
-/// whitelist, calls the stub loader (which always Errs pending ML-MIT #26),
-/// and — only if the loader succeeds — swaps the returned predictor into the
-/// per-engine `EdgePredictorStore`. Split out of the match arm so unit tests
-/// can exercise the validation + stub behaviour without threading an entire
-/// `TickPipeline` through a oneshot-send harness.
-/// EDGE-P3-1 Step 7b · Plumbing 專用 handler：engine 白名單驗證 → 呼叫存根 loader
-/// → 成功才熱換。拆出函式以便單元測試免 oneshot 迴圈即可驗行為。
+/// whitelist, then rejects direct path reloads before store lookup, filesystem
+/// access, or ORT load. Registry-authorized serving must arrive via a validated
+/// source contract; a raw path can never become decision-affecting authority.
+/// EDGE-P3-1 Step 7b · Plumbing 專用 handler：engine 白名單驗證後，在 store、
+/// 檔案系統、ORT loader 前拒絕 direct path reload。Serving 必須走 registry
+/// contract 授權；裸 path 不可成為決策權威。
 pub(crate) fn handle_reload_edge_predictor(
     engine: &str,
     strategy: &str,
@@ -219,6 +218,8 @@ pub(crate) fn handle_reload_edge_predictor(
             ));
         }
     }
+
+    reject_direct_path_reload_for_serving_authority()?;
 
     // Require a store before we even try to load — if bootstrap hasn't wired
     // one, a successful load would swap into /dev/null.
@@ -245,6 +246,18 @@ pub(crate) fn handle_reload_edge_predictor(
         engine,
         path.display()
     ))
+}
+
+/// Machine-checkable authority gate for ReloadEdgePredictor. Until a caller can
+/// present a validated registry serving contract, direct path reload stays
+/// advisory-disabled and cannot touch store, disk, ORT, or decision flow.
+/// ReloadEdgePredictor 的機讀權限 gate。未來 caller 能提供已驗證 registry serving
+/// contract 前，direct path reload 一律 advisory-disabled，不碰 store/disk/ORT。
+pub(crate) fn reject_direct_path_reload_for_serving_authority() -> Result<(), String> {
+    Err(
+        "ReloadEdgePredictor direct path reload disabled: registry_authorized_serving_contract_required / direct path reload 無 serving authority"
+            .to_string(),
+    )
 }
 
 /// EDGE-P3-1 Step 7e · Production entry point for the operator kill-switch,

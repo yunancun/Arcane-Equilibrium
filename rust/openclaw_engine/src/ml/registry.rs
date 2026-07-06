@@ -1,40 +1,29 @@
-//! Model registry resolver — reads `learning.model_registry` (V023) to find
-//! the canonical ONNX artifact for a given (strategy, engine_mode, quantile).
-//! Model registry 解析器 — 查 `learning.model_registry`（V023）取某 slot
-//! 的權威 ONNX artifact。
+//! Model registry helpers — V023 registry resolver plus source-only advisory
+//! serving contract validation for registry row metadata.
+//! Model registry helper — 包含 V023 registry 解析器，以及 source-only 的
+//! advisory serving metadata 合約驗證。
 //!
-//! MODULE_NOTE (EN): INFRA-PREBUILD-1 Part B (2026-04-23). Pure read helper —
-//!   no side effects, no caching. Caller (engine startup or SIGHUP handler)
-//!   invokes `resolve_latest_production_artifact` to get the winning model's
-//!   filesystem path, then feeds it to `OnnxModelManager::new(path, ...)`.
-//!   Integration with OnnxModelManager deferred to Phase 3+ when Track L goes
-//!   live — at that point the startup sequence will:
+//! MODULE_NOTE (EN): INFRA-PREBUILD-1 Part B (2026-04-23) originally added the
+//! DB-backed resolver. WP3 adds a pure validator for registry-authorized
+//! advisory serving metadata: the registry row must carry complete lineage,
+//! exact q10/q50/q90 artifact hashes, advisory-only authority flags, and schema
+//! parity before any caller may treat it as advisory-serving-ready. This module
+//! does not load ONNX, inspect symlinks, or grant promotion/order authority.
+//! `_current` filename helpers are legacy convenience only; they are never the
+//! serving authority.
 //!
-//!   Startup flow:
-//!   - query registry for each (strategy × engine_mode × quantile) slot
-//!   - fall back to `_current` symlink if registry row missing
-//!   - fall back to None if symlink missing too (graceful degradation)
-//!
-//!   The helper returns Option<String> so callers can distinguish "no model
-//!   registered yet" (None) from "model registered at this path" (Some).
-//!   Query prefers canary_status='production' then 'promoting', ordered by
-//!   promoted_at DESC, so an in-flight promotion wins over the prior
-//!   production model. Shadow / retired / rejected rows are ignored (they
-//!   are not authoritative for live inference).
-//!
-//! MODULE_NOTE (中): INFRA-PREBUILD-1 B 部（2026-04-23）。純讀 helper，
-//!   無副作用、無 cache。Caller（engine 啟動或 SIGHUP handler）呼叫
-//!   `resolve_latest_production_artifact` 取當前權威 model 的檔案路徑，
-//!   再餵給 `OnnxModelManager::new(path, ...)`。與 OnnxModelManager 的整合
-//!   延後到 Phase 3+ Track L live 時：啟動流程會 (1) 查每個 slot 的 registry
-//!   (2) 不存在則退到 `_current` symlink (3) symlink 也不存在則 None
-//!   （優雅降級）。查詢優先 canary_status='production' 後 'promoting'，以
-//!   promoted_at DESC 排序；進行中的晉升贏過既有 production。shadow/retired/
-//!   rejected row 不被返回（非 live 權威）。
+//! MODULE_NOTE (中): INFRA-PREBUILD-1 B 部（2026-04-23）最早加入 DB-backed
+//! resolver。WP3 在此新增純函式 validator：registry row 必須帶完整 lineage、
+//! 精確 q10/q50/q90 artifact hashes、advisory-only 權限旗標與 schema parity，
+//! caller 才能把它當作 advisory serving metadata。此模組不載入 ONNX、不檢查
+//! symlink、不授予 promotion/order authority。`_current` 檔名 helper 只是
+//! legacy convenience，永遠不是 serving authority。
 //!
 //! Spec: sql/migrations/V023__model_registry.sql · plan INFRA-PREBUILD-1 §B3.
 
 use crate::database::pool::DbPool;
+use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use tracing::{debug, warn};
 
 /// Strategy / engine_mode / quantile identity for a registry lookup.
@@ -74,6 +63,10 @@ pub struct ResolvedArtifact {
     pub verdict: String,
     /// ISO-8601 train_date string (e.g. "2026-04-23").
     pub train_date: String,
+    /// Registry slot quantile ("q10" | "q50" | "q90") for artifact hash
+    /// binding against advisory serving contracts.
+    /// Registry slot quantile，用於與 advisory serving contract 的 artifact hash 綁定。
+    pub quantile: String,
     /// Optional sha256 integrity check — caller may verify on load.
     /// 可選的 sha256 完整性檢查，caller 載入時可校驗。
     pub artifact_sha256: Option<String>,
@@ -89,6 +82,695 @@ pub struct ResolvedArtifact {
     /// feature dim / 排序漂移，`session.run` 會 panic。legacy row 未填寫時
     /// `None`，caller 應視為 OK（warn-log）以保相容。
     pub feature_schema_hash: Option<String>,
+}
+
+/// Advisory serving is metadata-authorized only; this literal is the only
+/// accepted serving mode for the WP3 source-only contract.
+/// Advisory serving 僅由 metadata 授權；WP3 合約只接受此 serving mode。
+pub const REGISTRY_ADVISORY_SERVING_MODE: &str = "advisory_only";
+pub const REGISTRY_SERVING_CONTRACT_SCHEMA_VERSION: &str = "registry_serving_contract_v1";
+pub const PIT_DATASET_MANIFEST_SCHEMA_VERSION: &str = "pit_dataset_manifest_v1";
+
+const REGISTRY_Q10: &str = "q10";
+const REGISTRY_Q50: &str = "q50";
+const REGISTRY_Q90: &str = "q90";
+
+/// Optional q10/q50/q90 fields as they may appear on a raw registry metadata
+/// row. Validation requires all three fields to be present.
+/// 原始 registry metadata row 可能出現的 q10/q50/q90 欄位；驗證要求三者齊全。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RegistryQuantileTrioMetadata {
+    pub q10: Option<String>,
+    pub q50: Option<String>,
+    pub q90: Option<String>,
+}
+
+/// Validated exact q10/q50/q90 trio.
+/// 已驗證的精確 q10/q50/q90 trio。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegistryQuantileTrioContract {
+    pub q10: String,
+    pub q50: String,
+    pub q90: String,
+}
+
+/// Raw registry row advisory serving metadata. All fields are optional to model
+/// source/DB rows that may be missing columns; validation fails closed.
+/// 原始 registry advisory serving metadata；欄位用 Option 表示 row 可能缺欄，
+/// validator 對缺欄 fail-closed。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RegistryAdvisoryServingMetadata {
+    pub schema_version: Option<String>,
+    pub contract_hash: Option<String>,
+    pub dataset_manifest_schema_version: Option<String>,
+    pub dataset_manifest_hash: Option<String>,
+    pub label_schema_hash: Option<String>,
+    pub feature_schema_hash: Option<String>,
+    pub feature_definition_hash: Option<String>,
+    pub split_hash: Option<String>,
+    pub leakage_report_hash: Option<String>,
+    pub serving_config_hash: Option<String>,
+    pub missingness_policy: Option<String>,
+    pub units: Option<String>,
+    pub side_handling: Option<String>,
+    pub artifact_hashes: Option<RegistryQuantileTrioMetadata>,
+    pub quantile_trio: Option<RegistryQuantileTrioMetadata>,
+    pub serving_mode: Option<String>,
+    pub not_authority: Option<bool>,
+    pub symlink_authority: Option<bool>,
+    pub promotion_serving_ready: Option<bool>,
+}
+
+/// Validated advisory-only serving contract. This remains non-promotable:
+/// `promotion_serving_ready` must be false by construction.
+/// 已驗證的 advisory-only serving contract；依設計仍不可 promotion serving。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegistryAdvisoryServingContract {
+    pub schema_version: String,
+    pub contract_hash: String,
+    pub dataset_manifest_schema_version: String,
+    pub dataset_manifest_hash: String,
+    pub label_schema_hash: String,
+    pub feature_schema_hash: String,
+    pub feature_definition_hash: String,
+    pub split_hash: String,
+    pub leakage_report_hash: String,
+    pub serving_config_hash: String,
+    pub missingness_policy: String,
+    pub units: String,
+    pub side_handling: String,
+    pub artifact_hashes: RegistryQuantileTrioContract,
+    pub quantile_trio: RegistryQuantileTrioContract,
+    pub serving_mode: String,
+    pub not_authority: bool,
+    pub symlink_authority: bool,
+    pub promotion_serving_ready: bool,
+}
+
+/// Fail-closed validation errors for registry-authorized advisory serving.
+/// Registry-authorized advisory serving 的 fail-closed 驗證錯誤。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RegistryAdvisoryServingValidationError {
+    MissingField {
+        field: &'static str,
+    },
+    MissingQuantileField {
+        field: &'static str,
+        quantile: &'static str,
+    },
+    QuantileTrioMismatch {
+        quantile: &'static str,
+        expected: &'static str,
+        actual: String,
+    },
+    SchemaVersionMismatch {
+        field: &'static str,
+        expected: &'static str,
+        actual: Option<String>,
+    },
+    MalformedHashField {
+        field: &'static str,
+        actual: String,
+    },
+    ContractHashMismatch {
+        expected: String,
+        actual: String,
+    },
+    ContractHashUncomputable {
+        reason: String,
+    },
+    ServingModeMismatch {
+        actual: Option<String>,
+    },
+    BooleanFieldMismatch {
+        field: &'static str,
+        expected: bool,
+        actual: Option<bool>,
+    },
+    ResolvedArtifactMissingFeatureSchemaHash {
+        registry_id: i64,
+    },
+    ResolvedArtifactMissingArtifactSha256 {
+        registry_id: i64,
+    },
+    ResolvedArtifactUnknownQuantile {
+        registry_id: i64,
+        quantile: String,
+    },
+    FeatureSchemaHashMismatch {
+        registry_id: i64,
+        contract: String,
+        resolved: String,
+    },
+    ArtifactSha256Mismatch {
+        registry_id: i64,
+        quantile: String,
+        contract: String,
+        resolved: String,
+    },
+}
+
+impl std::fmt::Display for RegistryAdvisoryServingValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingField { field } => {
+                write!(f, "registry advisory serving metadata missing {field}")
+            }
+            Self::MissingQuantileField { field, quantile } => {
+                write!(
+                    f,
+                    "registry advisory serving metadata missing {field}.{quantile}"
+                )
+            }
+            Self::QuantileTrioMismatch {
+                quantile,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "registry advisory serving quantile_trio.{quantile} mismatch: expected {expected}, got {actual}"
+            ),
+            Self::SchemaVersionMismatch {
+                field,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "registry advisory serving {field} must be {expected}, got {actual:?}"
+            ),
+            Self::MalformedHashField { field, actual } => write!(
+                f,
+                "registry advisory serving {field} must be sha256 64-hex, got {actual:?}"
+            ),
+            Self::ContractHashMismatch { expected, actual } => write!(
+                f,
+                "registry advisory serving contract_hash mismatch: expected {expected}, got {actual}"
+            ),
+            Self::ContractHashUncomputable { reason } => write!(
+                f,
+                "registry advisory serving contract_hash uncomputable: {reason}"
+            ),
+            Self::ServingModeMismatch { actual } => write!(
+                f,
+                "registry advisory serving_mode must be {REGISTRY_ADVISORY_SERVING_MODE}, got {actual:?}"
+            ),
+            Self::BooleanFieldMismatch {
+                field,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "registry advisory serving {field} must be {expected}, got {actual:?}"
+            ),
+            Self::ResolvedArtifactMissingFeatureSchemaHash { registry_id } => write!(
+                f,
+                "resolved artifact registry_id={registry_id} has no feature_schema_hash"
+            ),
+            Self::ResolvedArtifactMissingArtifactSha256 { registry_id } => write!(
+                f,
+                "resolved artifact registry_id={registry_id} has no artifact_sha256"
+            ),
+            Self::ResolvedArtifactUnknownQuantile {
+                registry_id,
+                quantile,
+            } => write!(
+                f,
+                "resolved artifact registry_id={registry_id} has unknown quantile {quantile:?}"
+            ),
+            Self::FeatureSchemaHashMismatch {
+                registry_id,
+                contract,
+                resolved,
+            } => write!(
+                f,
+                "registry advisory serving feature_schema_hash mismatch for registry_id={registry_id}: contract={contract} resolved={resolved}"
+            ),
+            Self::ArtifactSha256Mismatch {
+                registry_id,
+                quantile,
+                contract,
+                resolved,
+            } => write!(
+                f,
+                "registry advisory serving artifact_sha256 mismatch for registry_id={registry_id} quantile={quantile}: contract={contract} resolved={resolved}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for RegistryAdvisoryServingValidationError {}
+
+/// Validate registry row metadata for advisory-only serving. Pure function:
+/// no DB query, filesystem/symlink inspection, ONNX/ORT load, runtime mutation,
+/// credential access, order/probe, or Cost Gate change.
+///
+/// 驗證 registry row 的 advisory-only serving metadata。純函式：不查 DB、不讀
+/// 檔案或 symlink、不載入 ONNX/ORT、不碰 runtime/憑證/下單/探測/Cost Gate。
+pub fn validate_registry_advisory_serving_metadata(
+    metadata: &RegistryAdvisoryServingMetadata,
+    resolved_artifact: Option<&ResolvedArtifact>,
+) -> Result<RegistryAdvisoryServingContract, RegistryAdvisoryServingValidationError> {
+    let schema_version = require_registry_literal(
+        "schema_version",
+        &metadata.schema_version,
+        REGISTRY_SERVING_CONTRACT_SCHEMA_VERSION,
+    )?;
+    let dataset_manifest_schema_version = require_registry_literal(
+        "dataset_manifest_schema_version",
+        &metadata.dataset_manifest_schema_version,
+        PIT_DATASET_MANIFEST_SCHEMA_VERSION,
+    )?;
+    let dataset_manifest_hash =
+        require_registry_hash("dataset_manifest_hash", &metadata.dataset_manifest_hash)?;
+    let label_schema_hash =
+        require_registry_hash("label_schema_hash", &metadata.label_schema_hash)?;
+    let feature_schema_hash =
+        require_registry_hash("feature_schema_hash", &metadata.feature_schema_hash)?;
+    let feature_definition_hash =
+        require_registry_hash("feature_definition_hash", &metadata.feature_definition_hash)?;
+    let split_hash = require_registry_hash("split_hash", &metadata.split_hash)?;
+    let leakage_report_hash =
+        require_registry_hash("leakage_report_hash", &metadata.leakage_report_hash)?;
+    let serving_config_hash =
+        require_registry_hash("serving_config_hash", &metadata.serving_config_hash)?;
+    let missingness_policy =
+        require_registry_text("missingness_policy", &metadata.missingness_policy)?;
+    let units = require_registry_text("units", &metadata.units)?;
+    let side_handling = require_registry_text("side_handling", &metadata.side_handling)?;
+    let artifact_hashes = validate_artifact_hashes(&metadata.artifact_hashes)?;
+    let quantile_trio = validate_quantile_trio(&metadata.quantile_trio)?;
+    let serving_mode = match metadata.serving_mode.as_deref().map(str::trim) {
+        Some(REGISTRY_ADVISORY_SERVING_MODE) => REGISTRY_ADVISORY_SERVING_MODE.to_string(),
+        _ => {
+            return Err(
+                RegistryAdvisoryServingValidationError::ServingModeMismatch {
+                    actual: metadata.serving_mode.clone(),
+                },
+            )
+        }
+    };
+    let not_authority = require_registry_bool("not_authority", metadata.not_authority, true)?;
+    let symlink_authority =
+        require_registry_bool("symlink_authority", metadata.symlink_authority, false)?;
+    let promotion_serving_ready = require_registry_bool(
+        "promotion_serving_ready",
+        metadata.promotion_serving_ready,
+        false,
+    )?;
+    let computed_contract_hash = compute_registry_advisory_serving_contract_hash_parts(
+        &schema_version,
+        &dataset_manifest_schema_version,
+        &dataset_manifest_hash,
+        &label_schema_hash,
+        &feature_schema_hash,
+        &feature_definition_hash,
+        &split_hash,
+        &leakage_report_hash,
+        &serving_config_hash,
+        &missingness_policy,
+        &units,
+        &side_handling,
+        &artifact_hashes,
+        &quantile_trio,
+        &serving_mode,
+        not_authority,
+        symlink_authority,
+        promotion_serving_ready,
+    )?;
+    let contract_hash = require_registry_hash("contract_hash", &metadata.contract_hash)?;
+    let contract_hash_hex = strip_sha256_prefix(&contract_hash);
+    if contract_hash_hex != computed_contract_hash {
+        return Err(
+            RegistryAdvisoryServingValidationError::ContractHashMismatch {
+                expected: computed_contract_hash,
+                actual: contract_hash,
+            },
+        );
+    }
+
+    if let Some(resolved) = resolved_artifact {
+        validate_resolved_artifact_contract_binding(
+            resolved,
+            &feature_schema_hash,
+            &artifact_hashes,
+        )?;
+    }
+
+    Ok(RegistryAdvisoryServingContract {
+        schema_version,
+        contract_hash,
+        dataset_manifest_schema_version,
+        dataset_manifest_hash,
+        label_schema_hash,
+        feature_schema_hash,
+        feature_definition_hash,
+        split_hash,
+        leakage_report_hash,
+        serving_config_hash,
+        missingness_policy,
+        units,
+        side_handling,
+        artifact_hashes,
+        quantile_trio,
+        serving_mode,
+        not_authority,
+        symlink_authority,
+        promotion_serving_ready,
+    })
+}
+
+fn validate_resolved_artifact_contract_binding(
+    resolved: &ResolvedArtifact,
+    feature_schema_hash: &str,
+    artifact_hashes: &RegistryQuantileTrioContract,
+) -> Result<(), RegistryAdvisoryServingValidationError> {
+    match resolved.feature_schema_hash.as_deref().map(str::trim) {
+        Some(resolved_hash) if resolved_hash == feature_schema_hash => {}
+        Some(resolved_hash) => {
+            return Err(
+                RegistryAdvisoryServingValidationError::FeatureSchemaHashMismatch {
+                    registry_id: resolved.id,
+                    contract: feature_schema_hash.to_string(),
+                    resolved: resolved_hash.to_string(),
+                },
+            )
+        }
+        None => {
+            return Err(
+                RegistryAdvisoryServingValidationError::ResolvedArtifactMissingFeatureSchemaHash {
+                    registry_id: resolved.id,
+                },
+            )
+        }
+    }
+
+    let row_hash = match resolved.artifact_sha256.as_deref().map(str::trim) {
+        Some(hash) if !hash.is_empty() => hash,
+        _ => {
+            return Err(
+                RegistryAdvisoryServingValidationError::ResolvedArtifactMissingArtifactSha256 {
+                    registry_id: resolved.id,
+                },
+            )
+        }
+    };
+    let quantile = resolved.quantile.trim();
+    let contract_hash = match quantile {
+        REGISTRY_Q10 => &artifact_hashes.q10,
+        REGISTRY_Q50 => &artifact_hashes.q50,
+        REGISTRY_Q90 => &artifact_hashes.q90,
+        _ => {
+            return Err(
+                RegistryAdvisoryServingValidationError::ResolvedArtifactUnknownQuantile {
+                    registry_id: resolved.id,
+                    quantile: quantile.to_string(),
+                },
+            )
+        }
+    };
+    if strip_sha256_prefix(row_hash) != strip_sha256_prefix(contract_hash) {
+        return Err(
+            RegistryAdvisoryServingValidationError::ArtifactSha256Mismatch {
+                registry_id: resolved.id,
+                quantile: quantile.to_string(),
+                contract: contract_hash.to_string(),
+                resolved: row_hash.to_string(),
+            },
+        );
+    }
+
+    Ok(())
+}
+
+fn require_registry_text(
+    field: &'static str,
+    value: &Option<String>,
+) -> Result<String, RegistryAdvisoryServingValidationError> {
+    match value.as_deref().map(str::trim) {
+        Some(v) if !v.is_empty() => Ok(v.to_string()),
+        _ => Err(RegistryAdvisoryServingValidationError::MissingField { field }),
+    }
+}
+
+fn require_registry_literal(
+    field: &'static str,
+    value: &Option<String>,
+    expected: &'static str,
+) -> Result<String, RegistryAdvisoryServingValidationError> {
+    match value.as_deref().map(str::trim) {
+        Some(actual) if actual == expected => Ok(actual.to_string()),
+        _ => Err(
+            RegistryAdvisoryServingValidationError::SchemaVersionMismatch {
+                field,
+                expected,
+                actual: value.clone(),
+            },
+        ),
+    }
+}
+
+fn require_registry_hash(
+    field: &'static str,
+    value: &Option<String>,
+) -> Result<String, RegistryAdvisoryServingValidationError> {
+    let text = require_registry_text(field, value)?;
+    if is_sha256_hex(&text) {
+        Ok(text)
+    } else {
+        Err(RegistryAdvisoryServingValidationError::MalformedHashField {
+            field,
+            actual: text,
+        })
+    }
+}
+
+fn strip_sha256_prefix(value: &str) -> &str {
+    value.strip_prefix("sha256:").unwrap_or(value)
+}
+
+fn is_sha256_hex(value: &str) -> bool {
+    let hex = strip_sha256_prefix(value);
+    hex.len() == 64 && hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+fn require_registry_bool(
+    field: &'static str,
+    value: Option<bool>,
+    expected: bool,
+) -> Result<bool, RegistryAdvisoryServingValidationError> {
+    match value {
+        Some(actual) if actual == expected => Ok(actual),
+        _ => Err(
+            RegistryAdvisoryServingValidationError::BooleanFieldMismatch {
+                field,
+                expected,
+                actual: value,
+            },
+        ),
+    }
+}
+
+fn validate_artifact_hashes(
+    artifact_hashes: &Option<RegistryQuantileTrioMetadata>,
+) -> Result<RegistryQuantileTrioContract, RegistryAdvisoryServingValidationError> {
+    let trio =
+        artifact_hashes
+            .as_ref()
+            .ok_or(RegistryAdvisoryServingValidationError::MissingField {
+                field: "artifact_hashes",
+            })?;
+    Ok(RegistryQuantileTrioContract {
+        q10: require_quantile_hash("artifact_hashes", REGISTRY_Q10, &trio.q10)?,
+        q50: require_quantile_hash("artifact_hashes", REGISTRY_Q50, &trio.q50)?,
+        q90: require_quantile_hash("artifact_hashes", REGISTRY_Q90, &trio.q90)?,
+    })
+}
+
+fn validate_quantile_trio(
+    quantile_trio: &Option<RegistryQuantileTrioMetadata>,
+) -> Result<RegistryQuantileTrioContract, RegistryAdvisoryServingValidationError> {
+    let trio =
+        quantile_trio
+            .as_ref()
+            .ok_or(RegistryAdvisoryServingValidationError::MissingField {
+                field: "quantile_trio",
+            })?;
+    let q10 = require_quantile_label(REGISTRY_Q10, &trio.q10)?;
+    let q50 = require_quantile_label(REGISTRY_Q50, &trio.q50)?;
+    let q90 = require_quantile_label(REGISTRY_Q90, &trio.q90)?;
+    Ok(RegistryQuantileTrioContract { q10, q50, q90 })
+}
+
+fn require_quantile_text(
+    field: &'static str,
+    quantile: &'static str,
+    value: &Option<String>,
+) -> Result<String, RegistryAdvisoryServingValidationError> {
+    match value.as_deref().map(str::trim) {
+        Some(v) if !v.is_empty() => Ok(v.to_string()),
+        _ => Err(RegistryAdvisoryServingValidationError::MissingQuantileField { field, quantile }),
+    }
+}
+
+fn require_quantile_hash(
+    field: &'static str,
+    quantile: &'static str,
+    value: &Option<String>,
+) -> Result<String, RegistryAdvisoryServingValidationError> {
+    let text = require_quantile_text(field, quantile, value)?;
+    if is_sha256_hex(&text) {
+        Ok(text)
+    } else {
+        Err(RegistryAdvisoryServingValidationError::MalformedHashField {
+            field,
+            actual: text,
+        })
+    }
+}
+
+fn require_quantile_label(
+    quantile: &'static str,
+    value: &Option<String>,
+) -> Result<String, RegistryAdvisoryServingValidationError> {
+    let label = require_quantile_text("quantile_trio", quantile, value)?;
+    if label == quantile {
+        Ok(label)
+    } else {
+        Err(
+            RegistryAdvisoryServingValidationError::QuantileTrioMismatch {
+                quantile,
+                expected: quantile,
+                actual: label,
+            },
+        )
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compute_registry_advisory_serving_contract_hash_parts(
+    schema_version: &str,
+    dataset_manifest_schema_version: &str,
+    dataset_manifest_hash: &str,
+    label_schema_hash: &str,
+    feature_schema_hash: &str,
+    feature_definition_hash: &str,
+    split_hash: &str,
+    leakage_report_hash: &str,
+    serving_config_hash: &str,
+    missingness_policy: &str,
+    units: &str,
+    side_handling: &str,
+    artifact_hashes: &RegistryQuantileTrioContract,
+    quantile_trio: &RegistryQuantileTrioContract,
+    serving_mode: &str,
+    not_authority: bool,
+    symlink_authority: bool,
+    promotion_serving_ready: bool,
+) -> Result<String, RegistryAdvisoryServingValidationError> {
+    let mut artifact_hashes_json = BTreeMap::new();
+    artifact_hashes_json.insert(
+        REGISTRY_Q10.to_string(),
+        serde_json::Value::String(artifact_hashes.q10.clone()),
+    );
+    artifact_hashes_json.insert(
+        REGISTRY_Q50.to_string(),
+        serde_json::Value::String(artifact_hashes.q50.clone()),
+    );
+    artifact_hashes_json.insert(
+        REGISTRY_Q90.to_string(),
+        serde_json::Value::String(artifact_hashes.q90.clone()),
+    );
+
+    let mut payload = BTreeMap::new();
+    payload.insert(
+        "artifact_hashes".to_string(),
+        serde_json::to_value(artifact_hashes_json).map_err(|err| {
+            RegistryAdvisoryServingValidationError::ContractHashUncomputable {
+                reason: err.to_string(),
+            }
+        })?,
+    );
+    payload.insert(
+        "dataset_manifest_hash".to_string(),
+        serde_json::Value::String(dataset_manifest_hash.to_string()),
+    );
+    payload.insert(
+        "dataset_manifest_schema_version".to_string(),
+        serde_json::Value::String(dataset_manifest_schema_version.to_string()),
+    );
+    payload.insert(
+        "feature_definition_hash".to_string(),
+        serde_json::Value::String(feature_definition_hash.to_string()),
+    );
+    payload.insert(
+        "feature_schema_hash".to_string(),
+        serde_json::Value::String(feature_schema_hash.to_string()),
+    );
+    payload.insert(
+        "label_schema_hash".to_string(),
+        serde_json::Value::String(label_schema_hash.to_string()),
+    );
+    payload.insert(
+        "leakage_report_hash".to_string(),
+        serde_json::Value::String(leakage_report_hash.to_string()),
+    );
+    payload.insert(
+        "missingness_policy".to_string(),
+        serde_json::Value::String(missingness_policy.to_string()),
+    );
+    payload.insert(
+        "not_authority".to_string(),
+        serde_json::Value::Bool(not_authority),
+    );
+    payload.insert(
+        "promotion_serving_ready".to_string(),
+        serde_json::Value::Bool(promotion_serving_ready),
+    );
+    payload.insert(
+        "quantile_trio".to_string(),
+        serde_json::Value::Array(vec![
+            serde_json::Value::String(quantile_trio.q10.clone()),
+            serde_json::Value::String(quantile_trio.q50.clone()),
+            serde_json::Value::String(quantile_trio.q90.clone()),
+        ]),
+    );
+    payload.insert(
+        "schema_version".to_string(),
+        serde_json::Value::String(schema_version.to_string()),
+    );
+    payload.insert(
+        "serving_config_hash".to_string(),
+        serde_json::Value::String(serving_config_hash.to_string()),
+    );
+    payload.insert(
+        "serving_mode".to_string(),
+        serde_json::Value::String(serving_mode.to_string()),
+    );
+    payload.insert(
+        "side_handling".to_string(),
+        serde_json::Value::String(side_handling.to_string()),
+    );
+    payload.insert(
+        "split_hash".to_string(),
+        serde_json::Value::String(split_hash.to_string()),
+    );
+    payload.insert(
+        "symlink_authority".to_string(),
+        serde_json::Value::Bool(symlink_authority),
+    );
+    payload.insert(
+        "units".to_string(),
+        serde_json::Value::String(units.to_string()),
+    );
+
+    let canonical = serde_json::to_string(&payload).map_err(|err| {
+        RegistryAdvisoryServingValidationError::ContractHashUncomputable {
+            reason: err.to_string(),
+        }
+    })?;
+    let mut hasher = Sha256::new();
+    hasher.update(canonical.as_bytes());
+    Ok(hex::encode(hasher.finalize()))
 }
 
 /// Feature-schema hash mismatch between registry row and engine runtime.
@@ -169,9 +851,10 @@ pub fn validate_schema_hash(
 
 /// Resolve the canonical artifact for a slot. Prefers canary_status='production'
 /// then 'promoting'; orders by promoted_at DESC NULLS LAST so in-flight promote
-/// wins. Returns `Ok(None)` when no matching row exists (fall back to symlink).
+/// wins. Returns `Ok(None)` when no matching row exists. `_current` remains a
+/// legacy filename convenience only; it is not registry serving authority.
 /// `Err` only on DB error — caller should log and treat as `None` equivalent
-/// for graceful degradation (a broken registry query must never block inference).
+/// for graceful degradation.
 ///
 /// **Phase 3+ integration contract**: before feeding the returned
 /// `ResolvedArtifact.artifact_path` to `OnnxModelManager::new(...)`, the caller
@@ -182,7 +865,8 @@ pub fn validate_schema_hash(
 /// the Disabled fallback path, not surface the error or retry.
 ///
 /// 取 slot 的權威 artifact。優先 production → promoting；promoted_at DESC NULLS
-/// LAST，進行中的晉升勝出。無匹配 row → Ok(None)（caller 回退 symlink）。
+/// LAST，進行中的晉升勝出。無匹配 row → Ok(None)；`_current` 只可作
+/// legacy filename convenience，不是 registry serving authority。
 /// Err 僅 DB 錯誤，caller 應 log 並視為 None（優雅降級）。
 /// **Phase 3+ 整合契約**：把 `artifact_path` 餵給 `OnnxModelManager::new(...)`
 /// 前必須呼 `validate_schema_hash(resolved, FEATURE_NAMES_V1_HASH)` 檢 schema
@@ -263,6 +947,7 @@ pub async fn resolve_latest_production_artifact(
                 canary_status,
                 verdict,
                 train_date,
+                quantile: slot.quantile.clone(),
                 artifact_sha256,
                 feature_schema_hash,
             }))
@@ -281,13 +966,13 @@ pub async fn resolve_latest_production_artifact(
 /// The filename matches what `onnx_exporter::_atomic_symlink_swap` writes:
 ///   edge_predictor_{engine_mode}_{strategy}_{quantile}_{schema_version}_current.onnx
 ///
-/// Pure synchronous helper — does not touch the filesystem. Used by fallback
-/// path when registry query returns None: caller checks
-/// `{data_dir}/models/{symlink_name}` existence then feeds to OnnxModelManager.
+/// Pure synchronous helper — does not touch the filesystem and does not grant
+/// advisory serving, promotion, order, or runtime authority. Registry serving
+/// authority must come from validated registry row metadata, not this filename.
 ///
 /// 組 slot 的 `_current` symlink 檔名（V017 命名規則）。純同步 helper，
-/// 不觸及檔案系統。registry 查無時 caller 組 `{data_dir}/models/{symlink_name}`
-/// 再檢存在 → 餵給 OnnxModelManager。
+/// 不觸及檔案系統，也不授予 advisory serving、promotion、order 或 runtime
+/// authority。Serving authority 必須來自已驗證的 registry row metadata。
 pub fn symlink_filename(slot: &ModelSlot, schema_version: &str) -> String {
     format!(
         "edge_predictor_{}_{}_{}_{}_current.onnx",
@@ -296,16 +981,15 @@ pub fn symlink_filename(slot: &ModelSlot, schema_version: &str) -> String {
 }
 
 /// Warn-log a registry lookup failure without propagating. Lightweight wrapper
-/// so caller sites stay tidy — any registry error is audit-only; the caller
-/// should always fall through to symlink lookup.
-/// 警告 log registry 查詢失敗；caller 應永遠 fallthrough 到 symlink 查詢。
+/// so caller sites stay tidy. This does not authorize `_current` serving.
+/// 警告 log registry 查詢失敗；不授權 `_current` serving。
 pub fn log_registry_failure(slot: &ModelSlot, err: &sqlx::Error) {
     warn!(
         strategy = %slot.strategy,
         engine_mode = %slot.engine_mode,
         quantile = %slot.quantile,
         error = %err,
-        "model registry lookup failed — falling back to symlink / registry 查詢失敗，回退 symlink"
+        "model registry lookup failed — `_current` filename remains non-authoritative / registry 查詢失敗，`_current` 檔名仍非權威"
     );
 }
 
@@ -369,12 +1053,407 @@ mod tests {
             canary_status: "production".into(),
             verdict: "should_ship".into(),
             train_date: "2026-04-23".into(),
+            quantile: REGISTRY_Q50.into(),
             artifact_sha256: Some("deadbeef".into()),
             feature_schema_hash: Some("abc123".into()),
         };
         let b = a.clone();
         assert_eq!(a, b);
         assert_eq!(a.canary_status, "production");
+    }
+
+    fn _valid_advisory_metadata() -> RegistryAdvisoryServingMetadata {
+        RegistryAdvisoryServingMetadata {
+            schema_version: Some(REGISTRY_SERVING_CONTRACT_SCHEMA_VERSION.into()),
+            contract_hash: Some(
+                "481ac63e09b545238027e971a6716b6c5f5dcb04161617fc43ae9be1819f403d".into(),
+            ),
+            dataset_manifest_schema_version: Some(PIT_DATASET_MANIFEST_SCHEMA_VERSION.into()),
+            dataset_manifest_hash: Some("a".repeat(64)),
+            label_schema_hash: Some("b".repeat(64)),
+            feature_schema_hash: Some("c".repeat(64)),
+            feature_definition_hash: Some("d".repeat(64)),
+            split_hash: Some("e".repeat(64)),
+            leakage_report_hash: Some("f".repeat(64)),
+            serving_config_hash: Some("1".repeat(64)),
+            missingness_policy: Some("fail_closed_missingness_v1".into()),
+            units: Some("bps".into()),
+            side_handling: Some("explicit_side_v1".into()),
+            artifact_hashes: Some(RegistryQuantileTrioMetadata {
+                q10: Some(format!("sha256:{}", "2".repeat(64))),
+                q50: Some("3".repeat(64)),
+                q90: Some(format!("sha256:{}", "4".repeat(64))),
+            }),
+            quantile_trio: Some(RegistryQuantileTrioMetadata {
+                q10: Some("q10".into()),
+                q50: Some("q50".into()),
+                q90: Some("q90".into()),
+            }),
+            serving_mode: Some(REGISTRY_ADVISORY_SERVING_MODE.into()),
+            not_authority: Some(true),
+            symlink_authority: Some(false),
+            promotion_serving_ready: Some(false),
+        }
+    }
+
+    fn _resolved_artifact_with_quantile_hash_and_feature_schema(
+        quantile: &str,
+        artifact_sha256: Option<String>,
+        feature_schema_hash: Option<String>,
+    ) -> ResolvedArtifact {
+        ResolvedArtifact {
+            id: 99,
+            artifact_path: "/tmp/source_only_not_read.onnx".into(),
+            canary_status: "production".into(),
+            verdict: "should_ship".into(),
+            train_date: "2026-07-06".into(),
+            quantile: quantile.into(),
+            artifact_sha256,
+            feature_schema_hash,
+        }
+    }
+
+    fn _resolved_artifact_with_feature_schema(hash: Option<String>) -> ResolvedArtifact {
+        _resolved_artifact_with_quantile_hash_and_feature_schema(
+            REGISTRY_Q50,
+            Some("3".repeat(64)),
+            hash,
+        )
+    }
+
+    #[test]
+    fn test_advisory_serving_metadata_valid_contract_passes() {
+        // WP3 source-only contract: complete registry metadata passes as
+        // advisory-only, still non-promotable and non-authoritative.
+        // WP3 純 source 合約：完整 metadata 僅通過 advisory-only，仍不可 promotion。
+        let metadata = _valid_advisory_metadata();
+        let resolved = _resolved_artifact_with_feature_schema(Some("c".repeat(64)));
+        let contract =
+            validate_registry_advisory_serving_metadata(&metadata, Some(&resolved)).unwrap();
+
+        assert_eq!(
+            contract.schema_version,
+            REGISTRY_SERVING_CONTRACT_SCHEMA_VERSION
+        );
+        assert_eq!(
+            contract.dataset_manifest_schema_version,
+            PIT_DATASET_MANIFEST_SCHEMA_VERSION
+        );
+        assert_eq!(contract.dataset_manifest_hash, "a".repeat(64));
+        assert_eq!(
+            contract.artifact_hashes.q10,
+            format!("sha256:{}", "2".repeat(64))
+        );
+        assert_eq!(contract.quantile_trio.q90, "q90");
+        assert_eq!(
+            contract.contract_hash,
+            "481ac63e09b545238027e971a6716b6c5f5dcb04161617fc43ae9be1819f403d"
+        );
+        assert_eq!(contract.serving_mode, REGISTRY_ADVISORY_SERVING_MODE);
+        assert!(contract.not_authority);
+        assert!(!contract.symlink_authority);
+        assert!(!contract.promotion_serving_ready);
+    }
+
+    #[test]
+    fn test_advisory_serving_valid_q50_row_hash_matches_contract_passes() {
+        // Row artifact hash must bind to the contract hash for the resolved
+        // quantile, after stripping optional sha256 prefixes.
+        // Row artifact hash 必須綁到 resolved quantile 的 contract hash。
+        let metadata = _valid_advisory_metadata();
+        let resolved = _resolved_artifact_with_quantile_hash_and_feature_schema(
+            REGISTRY_Q50,
+            Some(format!("sha256:{}", "3".repeat(64))),
+            Some("c".repeat(64)),
+        );
+
+        assert!(validate_registry_advisory_serving_metadata(&metadata, Some(&resolved)).is_ok());
+    }
+
+    #[test]
+    fn test_advisory_serving_missing_dataset_manifest_hash_fails() {
+        // Missing lineage hash must fail closed.
+        // 缺 lineage hash 必須 fail-closed。
+        let mut metadata = _valid_advisory_metadata();
+        metadata.dataset_manifest_hash = None;
+        let resolved = _resolved_artifact_with_feature_schema(Some("c".repeat(64)));
+
+        assert_eq!(
+            validate_registry_advisory_serving_metadata(&metadata, Some(&resolved)),
+            Err(RegistryAdvisoryServingValidationError::MissingField {
+                field: "dataset_manifest_hash",
+            }),
+        );
+    }
+
+    #[test]
+    fn test_advisory_serving_partial_q50_only_artifact_hashes_fail() {
+        // q50-only artifact metadata is not an exact quantile trio.
+        // 只有 q50 的 artifact metadata 不是完整 quantile trio。
+        let mut metadata = _valid_advisory_metadata();
+        metadata.artifact_hashes = Some(RegistryQuantileTrioMetadata {
+            q10: None,
+            q50: Some("3".repeat(64)),
+            q90: None,
+        });
+        let resolved = _resolved_artifact_with_feature_schema(Some("c".repeat(64)));
+
+        assert_eq!(
+            validate_registry_advisory_serving_metadata(&metadata, Some(&resolved)),
+            Err(
+                RegistryAdvisoryServingValidationError::MissingQuantileField {
+                    field: "artifact_hashes",
+                    quantile: "q10",
+                },
+            ),
+        );
+    }
+
+    #[test]
+    fn test_advisory_serving_authority_flags_fail_closed() {
+        // `_current` authority or promotion-serving readiness must never pass
+        // this advisory-only source contract.
+        // `_current` 權威或 promotion serving ready 均不可通過此 advisory 合約。
+        let resolved = _resolved_artifact_with_feature_schema(Some("c".repeat(64)));
+
+        let mut symlink_authority = _valid_advisory_metadata();
+        symlink_authority.symlink_authority = Some(true);
+        assert_eq!(
+            validate_registry_advisory_serving_metadata(&symlink_authority, Some(&resolved)),
+            Err(
+                RegistryAdvisoryServingValidationError::BooleanFieldMismatch {
+                    field: "symlink_authority",
+                    expected: false,
+                    actual: Some(true),
+                },
+            ),
+        );
+
+        let mut promotion_ready = _valid_advisory_metadata();
+        promotion_ready.promotion_serving_ready = Some(true);
+        assert_eq!(
+            validate_registry_advisory_serving_metadata(&promotion_ready, Some(&resolved)),
+            Err(
+                RegistryAdvisoryServingValidationError::BooleanFieldMismatch {
+                    field: "promotion_serving_ready",
+                    expected: false,
+                    actual: Some(true),
+                },
+            ),
+        );
+    }
+
+    #[test]
+    fn test_advisory_serving_resolved_feature_schema_mismatch_fails() {
+        // Contract/registry parity check rejects feature schema drift before
+        // any ONNX load could happen.
+        // Contract/registry parity 在載入 ONNX 前拒絕 feature schema drift。
+        let metadata = _valid_advisory_metadata();
+        let resolved = _resolved_artifact_with_feature_schema(Some("9".repeat(64)));
+
+        assert_eq!(
+            validate_registry_advisory_serving_metadata(&metadata, Some(&resolved)),
+            Err(
+                RegistryAdvisoryServingValidationError::FeatureSchemaHashMismatch {
+                    registry_id: 99,
+                    contract: "c".repeat(64),
+                    resolved: "9".repeat(64),
+                },
+            ),
+        );
+    }
+
+    #[test]
+    fn test_advisory_serving_resolved_artifact_sha256_mismatch_fails() {
+        let metadata = _valid_advisory_metadata();
+        let resolved = _resolved_artifact_with_quantile_hash_and_feature_schema(
+            REGISTRY_Q50,
+            Some("9".repeat(64)),
+            Some("c".repeat(64)),
+        );
+
+        assert_eq!(
+            validate_registry_advisory_serving_metadata(&metadata, Some(&resolved)),
+            Err(
+                RegistryAdvisoryServingValidationError::ArtifactSha256Mismatch {
+                    registry_id: 99,
+                    quantile: REGISTRY_Q50.into(),
+                    contract: "3".repeat(64),
+                    resolved: "9".repeat(64),
+                },
+            ),
+        );
+    }
+
+    #[test]
+    fn test_advisory_serving_resolved_artifact_sha256_missing_fails() {
+        let metadata = _valid_advisory_metadata();
+        let resolved = _resolved_artifact_with_quantile_hash_and_feature_schema(
+            REGISTRY_Q50,
+            None,
+            Some("c".repeat(64)),
+        );
+
+        assert_eq!(
+            validate_registry_advisory_serving_metadata(&metadata, Some(&resolved)),
+            Err(
+                RegistryAdvisoryServingValidationError::ResolvedArtifactMissingArtifactSha256 {
+                    registry_id: 99,
+                },
+            ),
+        );
+    }
+
+    #[test]
+    fn test_advisory_serving_resolved_artifact_unknown_quantile_fails() {
+        let metadata = _valid_advisory_metadata();
+        let resolved = _resolved_artifact_with_quantile_hash_and_feature_schema(
+            "q95",
+            Some("3".repeat(64)),
+            Some("c".repeat(64)),
+        );
+
+        assert_eq!(
+            validate_registry_advisory_serving_metadata(&metadata, Some(&resolved)),
+            Err(
+                RegistryAdvisoryServingValidationError::ResolvedArtifactUnknownQuantile {
+                    registry_id: 99,
+                    quantile: "q95".into(),
+                },
+            ),
+        );
+    }
+
+    #[test]
+    fn test_advisory_serving_dataset_manifest_schema_version_required() {
+        let resolved = _resolved_artifact_with_feature_schema(Some("c".repeat(64)));
+
+        let mut missing = _valid_advisory_metadata();
+        missing.dataset_manifest_schema_version = None;
+        assert_eq!(
+            validate_registry_advisory_serving_metadata(&missing, Some(&resolved)),
+            Err(
+                RegistryAdvisoryServingValidationError::SchemaVersionMismatch {
+                    field: "dataset_manifest_schema_version",
+                    expected: PIT_DATASET_MANIFEST_SCHEMA_VERSION,
+                    actual: None,
+                },
+            ),
+        );
+
+        let mut wrong = _valid_advisory_metadata();
+        wrong.dataset_manifest_schema_version = Some("dataset_manifest_v0".into());
+        assert_eq!(
+            validate_registry_advisory_serving_metadata(&wrong, Some(&resolved)),
+            Err(
+                RegistryAdvisoryServingValidationError::SchemaVersionMismatch {
+                    field: "dataset_manifest_schema_version",
+                    expected: PIT_DATASET_MANIFEST_SCHEMA_VERSION,
+                    actual: Some("dataset_manifest_v0".into()),
+                },
+            ),
+        );
+    }
+
+    #[test]
+    fn test_advisory_serving_hash_fields_must_be_sha256_hex() {
+        let resolved = _resolved_artifact_with_feature_schema(Some("c".repeat(64)));
+        let mut metadata = _valid_advisory_metadata();
+        metadata.leakage_report_hash = Some("leakage_report_hash_v1".into());
+
+        assert_eq!(
+            validate_registry_advisory_serving_metadata(&metadata, Some(&resolved)),
+            Err(RegistryAdvisoryServingValidationError::MalformedHashField {
+                field: "leakage_report_hash",
+                actual: "leakage_report_hash_v1".into(),
+            },),
+        );
+    }
+
+    #[test]
+    fn test_advisory_serving_artifact_hashes_must_be_sha256_hex() {
+        let resolved = _resolved_artifact_with_feature_schema(Some("c".repeat(64)));
+        let mut metadata = _valid_advisory_metadata();
+        metadata.artifact_hashes = Some(RegistryQuantileTrioMetadata {
+            q10: Some("2".repeat(64)),
+            q50: Some("not_a_hash".into()),
+            q90: Some("4".repeat(64)),
+        });
+
+        assert_eq!(
+            validate_registry_advisory_serving_metadata(&metadata, Some(&resolved)),
+            Err(RegistryAdvisoryServingValidationError::MalformedHashField {
+                field: "artifact_hashes",
+                actual: "not_a_hash".into(),
+            },),
+        );
+    }
+
+    #[test]
+    fn test_advisory_serving_contract_hash_malformed_or_mismatch_fails() {
+        let resolved = _resolved_artifact_with_feature_schema(Some("c".repeat(64)));
+
+        let mut malformed = _valid_advisory_metadata();
+        malformed.contract_hash = Some("not_a_hash".into());
+        assert_eq!(
+            validate_registry_advisory_serving_metadata(&malformed, Some(&resolved)),
+            Err(RegistryAdvisoryServingValidationError::MalformedHashField {
+                field: "contract_hash",
+                actual: "not_a_hash".into(),
+            },),
+        );
+
+        let mut mismatch = _valid_advisory_metadata();
+        mismatch.contract_hash = Some("0".repeat(64));
+        assert_eq!(
+            validate_registry_advisory_serving_metadata(&mismatch, Some(&resolved)),
+            Err(
+                RegistryAdvisoryServingValidationError::ContractHashMismatch {
+                    expected: "481ac63e09b545238027e971a6716b6c5f5dcb04161617fc43ae9be1819f403d"
+                        .into(),
+                    actual: "0".repeat(64),
+                },
+            ),
+        );
+    }
+
+    #[test]
+    fn test_advisory_serving_empty_policy_field_fails() {
+        let resolved = _resolved_artifact_with_feature_schema(Some("c".repeat(64)));
+        let mut metadata = _valid_advisory_metadata();
+        metadata.units = Some("   ".into());
+
+        assert_eq!(
+            validate_registry_advisory_serving_metadata(&metadata, Some(&resolved)),
+            Err(RegistryAdvisoryServingValidationError::MissingField { field: "units" }),
+        );
+    }
+
+    #[test]
+    fn test_current_symlink_helper_is_filename_only_not_authority() {
+        // The helper remains a pure filename formatter. Advisory serving
+        // authority comes only from validated registry metadata.
+        // helper 只格式化檔名；advisory serving 權威只來自已驗證 metadata。
+        let slot = ModelSlot::new("ma_crossover", "demo", "q50");
+        let name = symlink_filename(&slot, "v1");
+        assert_eq!(name, "edge_predictor_demo_ma_crossover_q50_v1_current.onnx");
+
+        let resolved = _resolved_artifact_with_feature_schema(Some("c".repeat(64)));
+        let mut metadata = _valid_advisory_metadata();
+        metadata.symlink_authority = Some(false);
+        assert!(validate_registry_advisory_serving_metadata(&metadata, Some(&resolved)).is_ok());
+
+        metadata.symlink_authority = Some(true);
+        assert!(matches!(
+            validate_registry_advisory_serving_metadata(&metadata, Some(&resolved)),
+            Err(
+                RegistryAdvisoryServingValidationError::BooleanFieldMismatch {
+                    field: "symlink_authority",
+                    expected: false,
+                    actual: Some(true),
+                }
+            )
+        ));
     }
 
     #[test]
@@ -405,6 +1484,7 @@ mod tests {
             canary_status: "production".into(),
             verdict: "should_ship".into(),
             train_date: "2026-04-23".into(),
+            quantile: REGISTRY_Q50.into(),
             artifact_sha256: Some("sha".into()),
             feature_schema_hash,
         }

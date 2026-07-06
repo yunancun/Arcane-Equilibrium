@@ -1,0 +1,195 @@
+{
+  "schema_version": "implementation_effect_review_v1",
+  "work_id": "WP3-REGISTRY-SERVING-PARITY-SOURCE-CONTRACT",
+  "reviewed_at": "2026-07-06T20:22:46Z",
+  "pre_state": {
+    "gate": "G5",
+    "status": "blocked",
+    "blockers": [
+      "Registry serving metadata did not have a machine-checkable advisory-only source contract.",
+      "Registry acceptance_report JSONB could not prove PIT dataset, feature/schema, split/leakage, policy, q10/q50/q90 artifact hash, and serving config parity.",
+      "Rust advisory serving helpers did not require row artifact_sha256 to match the resolved quantile contract hash.",
+      "Direct reload/capability surfaces could be misread as ORT-driven reload readiness rather than registry-authorized serving readiness."
+    ]
+  },
+  "post_state": {
+    "gate": "G5",
+    "status": "advisory_source_contract_ready_with_concerns",
+    "blockers": [
+      "promotion_serving_ready remains false by design",
+      "runtime DB JSONB extraction and authorized serving reload integration remain future gated work",
+      "registry trio persistence is fail-loud after partial write, not transactional rollback",
+      "runtime/order-capable work remains blocked by expired standing Demo authorization"
+    ]
+  },
+  "subagent_chain": [
+    {
+      "role": "PA",
+      "agent_id": "019f38c6-ea49-78d3-91b6-ee3391a3effa",
+      "status": "DONE_WITH_CONCERNS",
+      "verdict": "DESIGN_READY_WITH_CONCERNS",
+      "summary": "Designed advisory-only registry_serving_contract_v1 with PIT, feature/schema, policy, q10/q50/q90 artifact hash, and no-authority boundaries."
+    },
+    {
+      "role": "E1",
+      "agent_id": "019f38ce-42d8-70f2-89cd-f708b39923e2",
+      "status": "DONE",
+      "verdict": "PASS",
+      "summary": "Implemented Python registry_serving_contract.py, model_registry integration, and tests."
+    },
+    {
+      "role": "E1a",
+      "agent_id": "019f38ce-4328-7482-9264-49efc200bfa2",
+      "status": "DONE",
+      "verdict": "PASS",
+      "summary": "Implemented Rust registry advisory serving metadata validation groundwork."
+    },
+    {
+      "role": "MIT",
+      "agent_id": "019f38f3-cf47-7ec2-a025-a01da1a2c788",
+      "status": "DONE_WITH_CONCERNS",
+      "verdict": "WITH_CONCERNS",
+      "summary": "Highlighted persistence atomicity and contract hardening concerns for remediation."
+    },
+    {
+      "role": "AI-E",
+      "agent_id": "019f38f3-f64f-79d1-90a4-22d97096a952",
+      "status": "DONE",
+      "verdict": "PASS",
+      "summary": "Accepted advisory/no-authority ML contract direction after initial remediation."
+    },
+    {
+      "role": "E2",
+      "agent_id": "019f38f3-add6-76a3-a6ce-b03c657f28be",
+      "status": "DONE_WITH_CONCERNS",
+      "verdict": "FAIL FINDINGS=2(C:0/H:1/M:1/L:0)",
+      "summary": "Found missing Rust row artifact_sha256 to contract hash comparison and Python/Rust extra-field canonicalization mismatch."
+    },
+    {
+      "role": "E1-remediation",
+      "agent_id": "019f38f8-2f78-7bf0-bda5-8519dd4e95a2",
+      "status": "DONE",
+      "verdict": "PASS",
+      "summary": "Closed Python schema and persistence concerns: unknown top-level fields invalid and partial trio persistence raises registry_trio_persistence_incomplete."
+    },
+    {
+      "role": "E1a-remediation",
+      "agent_id": "019f38f8-6213-7380-a64a-603af0a348c3",
+      "status": "DONE",
+      "verdict": "PASS",
+      "summary": "Closed Rust quantile artifact comparison concern by binding resolved artifact_sha256 to contract artifact_hashes for the resolved slot."
+    },
+    {
+      "role": "E1a-capability-remediation",
+      "agent_id": "019f3905-b46b-7d60-9e7d-f067fa0f1b0a",
+      "status": "DONE",
+      "verdict": "PASS",
+      "summary": "Made Rust get_build_capabilities report reload_edge_predictor=false with registry_authorized_reload_required=true."
+    },
+    {
+      "role": "E1-fastapi-remediation",
+      "agent_id": "019f3912-7d40-7b51-a0ee-497a4f124fdb",
+      "status": "DONE",
+      "verdict": "PASS",
+      "summary": "Made FastAPI capability aggregation keep reload_edge_predictor=false even when stale IPC claims true, and surfaced capability metadata."
+    },
+    {
+      "role": "E2-final",
+      "agent_id": "019f3914-c13a-70c3-8dc3-f3b4ac21505f",
+      "status": "DONE",
+      "verdict": "PASS",
+      "summary": "Closed FastAPI capability concern; noted only stale nearby Rust comments as non-blocking cleanup."
+    },
+    {
+      "role": "E4-final",
+      "agent_id": "019f3914-f60a-7bc3-b0c7-bf2532506891",
+      "status": "DONE",
+      "verdict": "PASS",
+      "summary": "Regression passed: py_compile, focused Python 58, expanded ML 106/13 skipped, rustfmt, Rust registry 25, reload 4, capabilities 1, and diff-check."
+    },
+    {
+      "role": "QA-final",
+      "agent_id": "019f3915-136e-79a1-ab88-1996937c3bc5",
+      "status": "DONE_WITH_CONCERNS",
+      "verdict": "ACCEPT_WITH_CONCERNS",
+      "summary": "Accepted WP3 as source-contract ready with residual future-work concerns around runtime integration, transactional rollback, and promotion-serving readiness."
+    }
+  ],
+  "tests": [
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile program_code/ml_training/registry_serving_contract.py program_code/ml_training/model_registry.py program_code/ml_training/tests/test_registry_serving_contract.py program_code/ml_training/tests/test_model_registry.py program_code/exchange_connectors/bybit_connector/control_api_v1/app/engine_capabilities_routes.py program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_engine_capabilities_routes.py",
+      "result": "PASS"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q program_code/ml_training/tests/test_registry_serving_contract.py program_code/ml_training/tests/test_model_registry.py program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_engine_capabilities_routes.py -p no:cacheprovider",
+      "result": "PASS: 58 passed"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q program_code/ml_training/tests/test_registry_serving_contract.py program_code/ml_training/tests/test_model_registry.py program_code/ml_training/tests/test_pit_dataset_manifest.py program_code/ml_training/tests/test_pit_dataset_manifest_builder.py program_code/ml_training/tests/test_proof_packet_contract.py program_code/ml_training/tests/test_canary_promoter.py program_code/ml_training/tests/test_model_registry_pg_integration.py -p no:cacheprovider",
+      "result": "PASS: 106 passed, 13 skipped"
+    },
+    {
+      "command": "PATH=$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$PATH rustfmt --edition 2021 --check rust/openclaw_engine/src/ml/registry.rs rust/openclaw_engine/src/event_consumer/handlers/edge_predictor.rs rust/openclaw_engine/src/event_consumer/handlers/tests.rs rust/openclaw_engine/src/ipc_server/dispatch.rs rust/openclaw_engine/src/ipc_server/tests/dispatch.rs",
+      "result": "PASS"
+    },
+    {
+      "command": "cd rust/openclaw_engine && PATH=$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$PATH cargo test ml::registry -- --test-threads=1",
+      "result": "PASS: 25 passed"
+    },
+    {
+      "command": "cd rust/openclaw_engine && PATH=$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$PATH cargo test reload_edge_predictor -- --test-threads=1",
+      "result": "PASS: 4 passed"
+    },
+    {
+      "command": "cd rust/openclaw_engine && PATH=$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$PATH cargo test get_build_capabilities -- --test-threads=1",
+      "result": "PASS: 1 passed"
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS"
+    }
+  ],
+  "artifacts": [
+    "program_code/ml_training/registry_serving_contract.py",
+    "program_code/ml_training/model_registry.py",
+    "program_code/ml_training/tests/test_registry_serving_contract.py",
+    "program_code/ml_training/tests/test_model_registry.py",
+    "rust/openclaw_engine/src/ml/registry.rs",
+    "rust/openclaw_engine/src/event_consumer/handlers/edge_predictor.rs",
+    "rust/openclaw_engine/src/event_consumer/handlers/tests.rs",
+    "rust/openclaw_engine/src/ipc_server/dispatch.rs",
+    "rust/openclaw_engine/src/ipc_server/tests/dispatch.rs",
+    "program_code/exchange_connectors/bybit_connector/control_api_v1/app/engine_capabilities_routes.py",
+    "program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_engine_capabilities_routes.py",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp3_registry_serving_parity_source_contract.work_item.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp3_registry_serving_parity_source_contract.effect_review.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp3_registry_serving_parity_source_contract.state_packet.json"
+  ],
+  "gate_delta": "blocked_to_advisory_source_contract_ready_with_concerns",
+  "artifact_delta": "new machine-checkable advisory-only registry serving contract, Python registry attachment and hash binding, Rust row artifact hash validation, and fail-closed reload capability reporting",
+  "test_delta": "new focused registry serving contract and model registry tests plus Rust registry/reload/capability tests passed",
+  "risk_delta": "no_authority_expansion",
+  "proof_delta": "registry advisory metadata now requires PIT-derived serving parity hashes and row-bound q10/q50/q90 artifact hashes before it can be attached or validated",
+  "next_action_quality": "WP4 advisory DreamEngine role hardening is eligible as source-only work, with LLM/advisory outputs constrained to inactive review packets and no mutation authority",
+  "regressions": [],
+  "concerns": [
+    "registry trio DB persistence fails loud on partial write but is not transactionally rolled back in this source-only cycle",
+    "runtime DB JSONB extraction and authorized serving reload integration remain future gated work",
+    "promotion_serving_ready remains false; WP3 does not authorize model promotion or serving reload",
+    "nearby Rust comments still contain stale ORT-readiness wording, while executable capabilities and tests are fail-closed"
+  ],
+  "boundary_check": {
+    "runtime_mutation": false,
+    "db_read": false,
+    "db_write": false,
+    "exchange_contact": false,
+    "private_read": false,
+    "mcp_runtime": false,
+    "secret_access": false,
+    "order_capable": false,
+    "cost_gate_change": false,
+    "deploy": false,
+    "live_or_mainnet": false
+  },
+  "verdict": "EFFECTIVE_WITH_CONCERNS"
+}
