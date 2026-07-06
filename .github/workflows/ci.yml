@@ -13,6 +13,23 @@ on:
     - cron: '0 3 * * 1'  # 每週一 03:00 UTC（北京 11:00）
 
 jobs:
+  migration-immutability-guard:
+    name: applied migration immutability guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check locked migration checksums
+        run: python3 helper_scripts/db/check_applied_migration_checksums.py
+      - name: Check PR does not rewrite applied migrations
+        if: github.event_name == 'pull_request'
+        run: python3 helper_scripts/db/check_applied_migration_checksums.py --git-diff-base "origin/${{ github.base_ref }}"
+      - name: Check push does not rewrite applied migrations
+        if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
+        run: python3 helper_scripts/db/check_applied_migration_checksums.py --git-diff-base "${{ github.event.before }}"
+
   stable-id-duplication-guard:
     name: stable_id duplication guard
     runs-on: ubuntu-latest
