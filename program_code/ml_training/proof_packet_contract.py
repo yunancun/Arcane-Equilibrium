@@ -45,6 +45,7 @@ _ALLOWED_VERDICTS = {
 _ALLOWED_SIDES = {"Buy", "Sell", "Long", "Short"}
 _ALLOWED_LIQUIDITY_ROLES = {"maker", "taker", "mixed"}
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
+_SHA256_PREFIXED_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{7,64}$")
 _SYMBOL_RE = re.compile(r"^[A-Z0-9:_-]+$")
 
@@ -515,7 +516,10 @@ def _failure_verdict(reasons: list[str], requested_verdict: str) -> str:
         for reason in reasons
     ):
         return INVALID
-    if any("hash_mismatch" in reason or "duplicate" in reason for reason in reasons):
+    if any(
+        "hash_mismatch" in reason or "malformed" in reason or "duplicate" in reason
+        for reason in reasons
+    ):
         return INVALID
     if requested_verdict == NO_MATCHED_FILLS:
         return INVALID if any("has_" in reason for reason in reasons) else PENDING_SCHEMA
@@ -623,7 +627,8 @@ def _is_hex64(value: str) -> bool:
 
 
 def _is_stable_hash(value: str) -> bool:
-    return _is_hex64(value) or (value.startswith("sha256:") and len(value) > 7)
+    normalized = value.strip().lower()
+    return bool(_HEX64_RE.match(normalized) or _SHA256_PREFIXED_RE.match(normalized))
 
 
 def _is_stable_ref(value: str) -> bool:

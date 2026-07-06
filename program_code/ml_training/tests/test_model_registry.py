@@ -286,16 +286,30 @@ def test_register_quantile_trio_attaches_serving_contract_to_each_report(tmp_pat
     report_path.write_text(json.dumps({"verdict": VERDICT_SHADOW_ONLY, "metrics": {"brier": 0.2}}))
     onnx_out, artifact_hashes = _onnx_out_trio_with_files(tmp_path)
     contract = _registry_serving_contract(artifact_hashes=artifact_hashes)
-    calls = []
 
-    def fake_register_model(**kwargs):
-        calls.append(kwargs)
-        return len(calls)
+    class FakeCursor:
+        def __init__(self):
+            self.params = []
 
-    with patch(
-        "program_code.ml_training.model_registry.register_model",
-        side_effect=fake_register_model,
-    ):
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, _sql, params=None):
+            self.params.append(params)
+        def fetchone(self):
+            return (len(self.params),)
+
+    class FakeConn:
+        def __init__(self):
+            self.cursor_obj = FakeCursor()
+            self.closed = False
+
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def cursor(self): return self.cursor_obj
+        def close(self): self.closed = True
+
+    fake_conn = FakeConn()
+    with patch("program_code.ml_training.model_registry._connect", return_value=fake_conn):
         ids = register_quantile_trio_from_onnx_out(
             onnx_out=onnx_out,
             strategy="grid_trading",
@@ -307,22 +321,52 @@ def test_register_quantile_trio_attaches_serving_contract_to_each_report(tmp_pat
         )
 
     assert ids == [1, 2, 3]
-    assert [call["quantile"] for call in calls] == ["q10", "q50", "q90"]
-    for call in calls:
-        report = call["acceptance_report"]
+    assert [params[2] for params in fake_conn.cursor_obj.params] == ["q10", "q50", "q90"]
+    for params in fake_conn.cursor_obj.params:
+        report = json.loads(params[8])
         assert report["verdict"] == VERDICT_SHADOW_ONLY
         assert report[REGISTRY_SERVING_CONTRACT_FIELD] == contract
         assert report[REGISTRY_SERVING_CONTRACT_FIELD] is not contract
+    assert fake_conn.closed is True
 
 
-def test_serving_contract_partial_trio_persistence_raises(tmp_path: Path):
+def test_serving_contract_partial_trio_persistence_rolls_back_single_transaction(
+    tmp_path: Path,
+):
     onnx_out, artifact_hashes = _onnx_out_trio_with_files(tmp_path)
     contract = _registry_serving_contract(artifact_hashes=artifact_hashes)
 
-    with patch(
-        "program_code.ml_training.model_registry.register_model",
-        side_effect=[1, None, 3],
-    ) as register:
+    class FakeCursor:
+        def __init__(self):
+            self.params = []
+            self.rows = [(1,), None, (3,)]
+
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, _sql, params=None):
+            self.params.append(params)
+        def fetchone(self):
+            return self.rows.pop(0)
+
+    class FakeConn:
+        def __init__(self):
+            self.cursor_obj = FakeCursor()
+            self.committed = False
+            self.rolled_back = False
+            self.closed = False
+
+        def __enter__(self): return self
+        def __exit__(self, exc_type, *_a):
+            if exc_type is None:
+                self.committed = True
+            else:
+                self.rolled_back = True
+            return False
+        def cursor(self): return self.cursor_obj
+        def close(self): self.closed = True
+
+    fake_conn = FakeConn()
+    with patch("program_code.ml_training.model_registry._connect", return_value=fake_conn):
         with pytest.raises(
             RegistryServingContractError,
             match="registry_trio_persistence_incomplete:q50",
@@ -336,10 +380,10 @@ def test_serving_contract_partial_trio_persistence_raises(tmp_path: Path):
                 registry_serving_contract=contract,
             )
 
-    assert [call.kwargs["quantile"] for call in register.call_args_list] == [
-        "q10",
-        "q50",
-    ]
+    assert [params[2] for params in fake_conn.cursor_obj.params] == ["q10", "q50"]
+    assert fake_conn.committed is False
+    assert fake_conn.rolled_back is True
+    assert fake_conn.closed is True
 
 
 def test_serving_contract_artifact_hash_mismatch_short_circuits_before_db(

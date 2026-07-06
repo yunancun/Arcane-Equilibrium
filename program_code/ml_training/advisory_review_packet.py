@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 ADVISORY_REVIEW_PACKET_SCHEMA_VERSION = "advisory_review_packet_v1"
+ADVISORY_REVIEW_PACKET_HASH_FIELD = "advisory_review_packet_hash"
 
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _MUTATION_DIMENSION_TOKENS = {
@@ -54,6 +55,38 @@ _GRANT_TOKENS = (
     "lowered",
     "authority",
 )
+_EXTERNAL_CONTACT_TOKENS = {
+    "broker",
+    "credential",
+    "credentials",
+    "exchange",
+    "mcp",
+    "private",
+    "provider",
+}
+_EXTERNAL_CONTACT_ACTION_TOKENS = {
+    "access",
+    "accessed",
+    "call",
+    "called",
+    "connect",
+    "connected",
+    "contact",
+    "contacted",
+    "fetch",
+    "fetched",
+    "perform",
+    "performed",
+    "query",
+    "queried",
+    "read",
+    "request",
+    "requested",
+    "server",
+    "session",
+    "start",
+    "started",
+}
 _FALSE_STRINGS = {
     "",
     "0",
@@ -119,6 +152,13 @@ def stable_sha256_json(value: Any) -> str:
     return hashlib.sha256(_stable_json_bytes(value)).hexdigest()
 
 
+def compute_advisory_review_packet_hash(packet: Mapping[str, Any]) -> str:
+    """對 advisory packet 做 canonical JSON sha256；頂層 self-hash 不入 hash。"""
+    payload = dict(packet)
+    payload.pop(ADVISORY_REVIEW_PACKET_HASH_FIELD, None)
+    return stable_sha256_json(payload)
+
+
 def build_advisory_review_packet(
     *,
     capability_id: str,
@@ -163,6 +203,10 @@ def build_advisory_review_packet(
         "no_promotion_mutation": True,
         "no_cost_gate_mutation": True,
         "no_strategy_config_mutation": True,
+        "no_provider_call": True,
+        "no_exchange_contact": True,
+        "no_private_read": True,
+        "no_mcp_runtime": True,
         "execution_authority": "not_granted",
         "decision_lease_emitted": False,
         "demo_envelope_required_for_mutation": True,
@@ -176,6 +220,7 @@ def build_advisory_review_packet(
         packet["cost_usd"] = float(cost_usd)
     if notes:
         packet["notes"] = list(notes)
+    packet[ADVISORY_REVIEW_PACKET_HASH_FIELD] = compute_advisory_review_packet_hash(packet)
     validate_advisory_review_packet(packet)
     return packet
 
@@ -226,6 +271,16 @@ def _is_forbidden_grant_key(norm_key: str) -> bool:
     return _has_mutation_dimension(tokens) and any(token in token_set for token in _GRANT_TOKENS)
 
 
+def _is_forbidden_external_contact_key(norm_key: str) -> bool:
+    if norm_key.startswith(("no_", "not_")):
+        return False
+    tokens = _key_tokens(norm_key)
+    token_set = set(tokens)
+    if not (token_set & _EXTERNAL_CONTACT_TOKENS):
+        return False
+    return bool(token_set & _EXTERNAL_CONTACT_ACTION_TOKENS)
+
+
 def _scan_for_truthy_grants(value: Any, path: str = "$") -> None:
     if isinstance(value, Mapping):
         for key, child in value.items():
@@ -235,6 +290,8 @@ def _scan_for_truthy_grants(value: Any, path: str = "$") -> None:
                 raise ValueError(f"{child_path} must not be active=true")
             if _is_forbidden_grant_key(norm) and _truthy(child):
                 raise ValueError(f"{child_path} grants forbidden advisory authority")
+            if _is_forbidden_external_contact_key(norm) and _truthy(child):
+                raise ValueError(f"{child_path} records forbidden external contact")
             _scan_for_truthy_grants(child, child_path)
     elif isinstance(value, list):
         for idx, child in enumerate(value):
@@ -263,6 +320,10 @@ def validate_advisory_review_packet(packet: Mapping[str, Any]) -> bool:
         "no_promotion_mutation",
         "no_cost_gate_mutation",
         "no_strategy_config_mutation",
+        "no_provider_call",
+        "no_exchange_contact",
+        "no_private_read",
+        "no_mcp_runtime",
     ):
         _require_exact(packet, key, True)
     _require_exact(packet, "execution_authority", "not_granted")
@@ -279,13 +340,21 @@ def validate_advisory_review_packet(packet: Mapping[str, Any]) -> bool:
         if not isinstance(digest, str) or _SHA256_RE.fullmatch(digest) is None:
             raise ValueError(f"input_hashes[{key!r}] must be a sha256 hex digest")
 
+    packet_hash = packet.get(ADVISORY_REVIEW_PACKET_HASH_FIELD)
+    if not isinstance(packet_hash, str) or _SHA256_RE.fullmatch(packet_hash) is None:
+        raise ValueError("advisory_review_packet_hash must be a sha256 hex digest")
+    if packet_hash != compute_advisory_review_packet_hash(packet):
+        raise ValueError("advisory_review_packet_hash mismatch")
+
     _scan_for_truthy_grants(packet)
     return True
 
 
 __all__ = [
     "ADVISORY_REVIEW_PACKET_SCHEMA_VERSION",
+    "ADVISORY_REVIEW_PACKET_HASH_FIELD",
     "stable_sha256_json",
+    "compute_advisory_review_packet_hash",
     "build_advisory_review_packet",
     "validate_advisory_review_packet",
 ]

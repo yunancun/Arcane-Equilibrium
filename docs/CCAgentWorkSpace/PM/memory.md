@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-07 AI/ML Roadmap WP1-WP4 Fixes And Trading-Focused Audit
+
+- PM fixed all findings from the strict WP1-WP4 audit: ProofPacket `sha256:` refs are strict, advisory packets carry self-hash plus no-provider/no-exchange/no-private/no-MCP contact guards, and registry serving q10/q50/q90 writes are one transaction.
+- Verification passed: focused `116`, WP1-WP4 regression `155`, Control API adjacency `93`, thought-gate/cost `18`, proof/evidence/promotion `90`, py_compile, and diff-check.
+- Second trading-focused adversarial probe passed 21/21 fail-closed payloads while preserving a valid candidate-matched after-cost proof happy path. Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--ai_ml_roadmap_wp1_wp4_fixes_and_trading_adversarial_audit.md`.
+
 ## 2026-07-07 AI/ML Roadmap WP1-WP4 Strict Adversarial Audit
 
 - PM ran a strict source-only adversarial audit over completed WP1-WP4. Verdict: `CONDITIONAL`; boundary held and focused regressions passed, but WP1/WP4 need P1 hardening before downstream authority-grade use.
