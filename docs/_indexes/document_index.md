@@ -26,6 +26,8 @@
 | `CCAgentWorkSpace/Operator/2026-07-06--ai_ml_trade_engineering_roadmap_after_maker_challenge.md` | Operator 摘要：挑戰 maker-first 後的 90 天 AI/ML 交易工程路線圖與不做清單；下一實際 blocker 仍是 standing Demo loss-control envelope refresh。 |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_adversarial_audit.md` | PM 對 AI/ML 交易工程路線圖的對抗性審計：`PASS-WITH-CONDITIONS`，確認方向有效但必須 gate-based；收緊 ProofPacket、PIT manifest、registry serving、DemoMutationEnvelope、new-listing 防挑窗、M12 cost-reduction、MCP pinned source-only 條件。 |
 | `CCAgentWorkSpace/Operator/2026-07-06--ai_ml_roadmap_adversarial_audit.md` | Operator 摘要：AI/ML 路線圖對抗性審計通過但附條件；下一安全工程入口限 `proof_packet_v1`、PIT manifest contract、或 current-head standing envelope refresh。 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_autonomous_completion_loop_design.md` | PM 自治工程推進 loop 設計：將 AI/ML roadmap 轉為 gate-based backlog/state machine/work-item/effect-review/stop-packet 流程；自動推進 source/contracts/tests/reports，自動評估 gate delta，自動停止於 loss-control/runtime/MCP/order/live/no-delta 邊界。 |
+| `CCAgentWorkSpace/Operator/2026-07-06--ai_ml_roadmap_autonomous_completion_loop_design.md` | Operator 摘要：自治工程 loop 只授權工程推進與驗收，不授權 runtime、order、MCP credential、Cost Gate 或 live；第一批落地仍是 `proof_packet_v1`、PIT manifest、或 current-head envelope refresh。 |
 | `CCAgentWorkSpace/E4/workspace/reports/2026-07-03--part2_post_approval_drift_gate_regression.md` | E4 回歸：standing-envelope post-approval drift-gate（Impl B）測試矩陣。 |
 | `CCAgentWorkSpace/E4/workspace/reports/2026-07-03--soak_dispatch_edge_containment_impl_a_regression.md` | E4 回歸：soak dispatch edge-containment（Impl A）測試矩陣。 |
 | `CCAgentWorkSpace/E4/workspace/reports/2026-07-04--e4_test_matrix_blindspot_audit.md` | E4 測試矩陣盲點審計。 |

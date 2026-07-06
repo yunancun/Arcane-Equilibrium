@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-06 AI/ML Roadmap Autonomous Completion Loop Design
+
+- PM designed a source-first autonomous engineering completion loop for the AI/ML roadmap: gate-based backlog, work-item contract, effect-review packet, stop packet, and strict dependency order from ProofPacket/PIT to advisory/bandit/side lanes.
+- The loop is explicitly not a trading loop: it may automate source/docs/tests/reports and role dispatch, but stops on runtime mutation, DB write, exchange/private read, MCP server/credential, order/probe, Cost Gate, live/mainnet, source drift, test failure, or repeated no-delta.
+- First safe implementation tickets remain `proof_packet_v1`, PIT dataset manifest, or current-head standing envelope refresh under existing PM->E3->BB. Reports: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_autonomous_completion_loop_design.md`; operator mirror `docs/CCAgentWorkSpace/Operator/2026-07-06--ai_ml_roadmap_autonomous_completion_loop_design.md`.
+
 ## 2026-07-06 AI/ML Roadmap Adversarial Audit
 
 - PM ran a source-only adversarial audit of the AI/ML roadmap and signed `PASS-WITH-CONDITIONS`: direction is effective if enforced as a gate-based dependency graph, not a calendar promise.
