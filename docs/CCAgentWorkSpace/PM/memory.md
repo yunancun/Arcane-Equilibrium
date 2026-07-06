@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-06 AI/ML Roadmap Loop WP1 ProofPacket Contract
+
+- PM ran the first autonomous engineering completion loop cycle and selected `WP1-PROOF-PACKET-V1` because runtime/order-capable WP0 remains blocked by expired standing Demo authorization; source-only work was allowed.
+- Added `proof_packet_v1` validator/hash/extractor/tests under `program_code/ml_training/`, requiring candidate-matched order/fill/cost/control/provenance proof and treating `NO_MATCHED_FILLS` as blocker artifact, not a label or authority.
+- Verification passed: focused ProofPacket `15`, adjacent ML evidence `60`, adjacent cost-gate proof/promotion `20`, py_compile, diff-check. Reports: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp1_proof_packet_contract.md`; operator summary same basename under `docs/CCAgentWorkSpace/Operator/`.
+
 ## 2026-07-06 AI/ML Roadmap Autonomous Completion Loop Design
 
 - PM designed a source-first autonomous engineering completion loop for the AI/ML roadmap: gate-based backlog, work-item contract, effect-review packet, stop packet, and strict dependency order from ProofPacket/PIT to advisory/bandit/side lanes.
