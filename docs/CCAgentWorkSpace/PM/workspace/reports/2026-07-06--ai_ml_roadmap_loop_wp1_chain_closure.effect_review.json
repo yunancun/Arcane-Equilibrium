@@ -1,0 +1,121 @@
+{
+  "schema_version": "implementation_effect_review_v1",
+  "work_id": "WP1-PROOF-PACKET-V1-CHAIN-CLOSURE",
+  "reviewed_at": "2026-07-06T18:04:49Z",
+  "pre_state": {
+    "gate": "G2",
+    "status": "advanced_with_concerns",
+    "blockers": [
+      "WP1 effect review existed without a matching state packet.",
+      "WP1 source implementation had not received independent E2/E4/QA review."
+    ]
+  },
+  "post_state": {
+    "gate": "G2",
+    "status": "chain_review_completed_with_concern_carried_to_wp2",
+    "blockers": [
+      "proof_packet_provenance_specificity_pending_wp2_pit_manifest",
+      "runtime_outcome_collection_still_blocked_by_expired_standing_demo_authorization"
+    ]
+  },
+  "subagent_reviews": [
+    {
+      "role": "E2",
+      "agent_id": "019f3894-70e1-7180-a372-171e73849765",
+      "status": "DONE_WITH_CONCERNS",
+      "verdict": "FINDINGS=1(C:0/H:0/M:1/L:0)",
+      "summary": "No boundary violation found. Medium concern: proof_packet_v1 provenance accepts generic hashes and does not yet require named PIT dataset manifest, rebuild evidence, feature/schema lineage, matched-control artifact hash, or row-backed fill source artifact hash."
+    },
+    {
+      "role": "E4",
+      "agent_id": "019f3894-7126-7211-80d4-52be1d230c5e",
+      "status": "DONE",
+      "verdict": "PASS",
+      "summary": "py_compile PASS; ProofPacket focused tests 15 passed; adjacent ML evidence tests 60 passed; cost-gate proof/promotion tests 20 passed; git diff --check PASS."
+    },
+    {
+      "role": "QA",
+      "agent_id": "019f3894-7173-7670-84f6-b0c7033ab046",
+      "status": "DONE",
+      "verdict": "PASS FINDINGS=0(C:0/H:0/M:0/L:0)",
+      "summary": "Acceptance ACCEPT. WP1 satisfies source-only ProofPacket acceptance and may proceed to WP2-PIT-DATASET-MANIFEST."
+    }
+  ],
+  "tests": [
+    {
+      "command": "E4: git show --no-patch --oneline b9867ac9e",
+      "result": "PASS"
+    },
+    {
+      "command": "E4: git merge-base --is-ancestor b9867ac9e HEAD",
+      "result": "PASS"
+    },
+    {
+      "command": "E4: PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile program_code/ml_training/proof_packet_contract.py program_code/ml_training/tests/test_proof_packet_contract.py",
+      "result": "PASS"
+    },
+    {
+      "command": "E4: PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q program_code/ml_training/tests/test_proof_packet_contract.py -p no:cacheprovider",
+      "result": "PASS: 15 passed"
+    },
+    {
+      "command": "E4: PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q program_code/ml_training/tests/test_proof_packet_contract.py program_code/ml_training/tests/test_candidate_evidence_manifest.py program_code/ml_training/tests/test_candidate_evidence_source_contract.py -p no:cacheprovider",
+      "result": "PASS: 60 passed"
+    },
+    {
+      "command": "E4: PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=helper_scripts/research python3 -m pytest -q helper_scripts/research/tests/test_cost_gate_learning_candidate_proof_evidence.py helper_scripts/research/tests/test_cost_gate_learning_proof_promotion_gate.py -p no:cacheprovider",
+      "result": "PASS: 20 passed"
+    },
+    {
+      "command": "E4: git diff --check",
+      "result": "PASS"
+    },
+    {
+      "command": "QA: ProofPacket focused pytest",
+      "result": "PASS: 15 passed"
+    },
+    {
+      "command": "QA: adjacent ML evidence pytest",
+      "result": "PASS: 60 passed"
+    },
+    {
+      "command": "QA: adjacent cost-gate proof/promotion pytest",
+      "result": "PASS: 20 passed"
+    },
+    {
+      "command": "QA: git diff --check and static token scan",
+      "result": "PASS"
+    },
+    {
+      "command": "E2: read-only source review of b9867ac9e",
+      "result": "DONE_WITH_CONCERNS: one medium proof-provenance specificity finding"
+    }
+  ],
+  "artifacts": [
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp1_proof_packet_contract.state_packet.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp1_chain_closure.work_item.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp1_chain_closure.effect_review.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp1_chain_closure.state_packet.json"
+  ],
+  "chain_delta": "shortened_chain_concern_closed_by_E2_E4_QA_dispatch",
+  "gate_delta": "advanced_with_concerns_to_chain_review_completed_with_concern_carried_to_wp2",
+  "evidence_delta": "independent E2/E4/QA results captured as machine-readable loop artifacts",
+  "test_delta": "E4 and QA source-only verification passed focused and adjacent tests",
+  "risk_delta": "no_authority_expansion",
+  "proof_delta": "WP1 remains source-contract-ready, but provenance specificity must be hardened by WP2 PIT manifest fields",
+  "next_action_quality": "WP2-PIT-DATASET-MANIFEST is the explicit next dependency and directly addresses the carried E2 concern",
+  "regressions": [],
+  "boundary_check": {
+    "runtime_mutation": false,
+    "db_write": false,
+    "exchange_contact": false,
+    "private_read": false,
+    "mcp_runtime": false,
+    "secret_access": false,
+    "order_capable": false,
+    "cost_gate_change": false,
+    "deploy": false,
+    "live_or_mainnet": false
+  },
+  "verdict": "PARTIAL"
+}
