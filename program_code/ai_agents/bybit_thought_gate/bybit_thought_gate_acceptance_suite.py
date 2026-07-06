@@ -6,9 +6,31 @@ import time
 
 from bybit_h1_report_utils import THOUGHT_GATE_DIR, make_check, read_json, save_latest_and_dated
 
+try:
+    from program_code.ml_training.advisory_review_packet import (
+        build_advisory_review_packet,
+        stable_sha256_json,
+        validate_advisory_review_packet,
+    )
+except ModuleNotFoundError:  # pragma: no cover - import path depends on runner cwd/PYTHONPATH
+    from ml_training.advisory_review_packet import (  # type: ignore
+        build_advisory_review_packet,
+        stable_sha256_json,
+        validate_advisory_review_packet,
+    )
+
 RESP_CHECK = THOUGHT_GATE_DIR / "bybit_ai_response_check_latest.json"
 GOV_DECISION = THOUGHT_GATE_DIR / "bybit_ai_governed_decision_latest.json"
 INV = THOUGHT_GATE_DIR / "bybit_ai_invocation_attempt_latest.json"
+REQ = THOUGHT_GATE_DIR / "bybit_ai_request_envelope_latest.json"
+
+
+def _packet_validation_detail(packet):
+    try:
+        validate_advisory_review_packet(packet)
+        return True, "valid"
+    except Exception as exc:
+        return False, f"{exc.__class__.__name__}:{exc}"
 
 
 def main() -> None:
@@ -16,10 +38,15 @@ def main() -> None:
     r = read_json(RESP_CHECK, {})
     g = read_json(GOV_DECISION, {})
     i = read_json(INV, {})
+    q = read_json(REQ, {})
 
     parsed = (r.get("parsed_json_object") or {})
     guards = (g.get("governance_guards") or {})
     observation = (g.get("governed_observation") or {})
+    governed_packet = g.get("advisory_review_packet")
+    request_packet = q.get("advisory_review_packet")
+    governed_packet_valid, governed_packet_detail = _packet_validation_detail(governed_packet)
+    request_packet_valid, request_packet_detail = _packet_validation_detail(request_packet)
 
     terminal_mode_resp = r.get("terminal_mode")
     terminal_mode_gov = g.get("terminal_mode")
@@ -36,6 +63,23 @@ def main() -> None:
         make_check("execution_authority_not_granted", guards.get("execution_authority") == "not_granted", guards.get("execution_authority")),
         make_check("live_execution_allowed_false", guards.get("live_execution_allowed") is False, guards.get("live_execution_allowed")),
         make_check("decision_lease_emitted_false", guards.get("decision_lease_emitted") is False, guards.get("decision_lease_emitted")),
+        make_check("governed_advisory_review_packet_valid", governed_packet_valid, governed_packet_detail),
+        make_check("request_advisory_review_packet_valid", request_packet_valid, request_packet_detail),
+        make_check(
+            "governed_packet_execution_authority_not_granted",
+            isinstance(governed_packet, dict) and governed_packet.get("execution_authority") == "not_granted",
+            None if not isinstance(governed_packet, dict) else governed_packet.get("execution_authority"),
+        ),
+        make_check(
+            "governed_packet_decision_lease_false",
+            isinstance(governed_packet, dict) and governed_packet.get("decision_lease_emitted") is False,
+            None if not isinstance(governed_packet, dict) else governed_packet.get("decision_lease_emitted"),
+        ),
+        make_check(
+            "governed_packet_demo_mutation_not_granted",
+            isinstance(governed_packet, dict) and governed_packet.get("current_packet_grants_demo_mutation") is False,
+            None if not isinstance(governed_packet, dict) else governed_packet.get("current_packet_grants_demo_mutation"),
+        ),
     ]
 
     if terminal_mode_resp == "legal_no_ai_call":
@@ -48,6 +92,24 @@ def main() -> None:
 
     overall_ok = all(c["ok"] for c in checks)
     failed = [c["name"] for c in checks if not c["ok"]]
+    input_hashes = {
+        "ai_response_check": stable_sha256_json(r),
+        "ai_governed_decision": stable_sha256_json(g),
+        "ai_invocation_attempt": stable_sha256_json(i),
+        "ai_request_envelope": stable_sha256_json(q),
+        "acceptance_checks": stable_sha256_json(checks),
+    }
+    advisory_review_packet = build_advisory_review_packet(
+        capability_id="bybit_thought_gate.h1i_acceptance_suite",
+        producer="bybit_thought_gate_acceptance_suite",
+        mode="thought_gate_acceptance_passed" if overall_ok else "thought_gate_acceptance_failed",
+        input_hashes=input_hashes,
+        budget_ref="bybit_ai_request_envelope.budget_context",
+        notes=[
+            "H1-I acceptance is an inactive advisory/check packet only.",
+            "Acceptance does not grant execution, mutation, Cost Gate, Decision Lease, demo, live, or mainnet authority.",
+        ],
+    )
 
     report = {
         "suite_type": "bybit_thought_gate_acceptance_suite",
@@ -60,6 +122,8 @@ def main() -> None:
         "failed_count": len(failed),
         "checks": checks,
         "failed_checks": failed,
+        "input_hashes": input_hashes,
+        "advisory_review_packet": advisory_review_packet,
         "suite_state": "thought_gate_acceptance_passed" if overall_ok else "thought_gate_acceptance_failed",
         "recommended_action": "may_progress_to_h1i_summary" if overall_ok else "inspect_h1_acceptance_failures",
         "operator_message": (

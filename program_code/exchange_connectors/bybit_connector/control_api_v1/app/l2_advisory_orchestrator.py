@@ -198,6 +198,7 @@ class DispatchResult:
     guard_verdict: str | None = None
     routed_to: str | None = None  # neutral_sink / risk_governor_advisory / manual_inbox / dropped
     l2_reply_id: str | None = None
+    advisory_review_packet: dict[str, Any] | None = None
     notes: list[str] = field(default_factory=list)
 
 
@@ -461,6 +462,7 @@ class L2AdvisoryOrchestrator:
         # cascade 結果投影進 DispatchResult（供 route 薄投影）。
         result.guard_verdict = casc.guard_verdict
         result.l2_reply_id = casc.l2_reply_id
+        result.advisory_review_packet = casc.advisory_review_packet
         result.notes.append(f"executor: stage={casc.stage} sink_written={casc.sink_written}")
         if casc.screen_disabled:
             result.notes.append("executor: M4 ollama_screen DISABLED（flag MIT）")

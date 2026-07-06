@@ -25,6 +25,14 @@
 
 ## 近期記錄
 
+## 2026-07-06 AI/ML Roadmap Loop WP4 Advisory DreamEngine Role Hardening
+
+- PM selected `WP4-ADVISORY-DREAMENGINE-ROLE-HARDENING` after WP3 because L2/LLM/MLDE/DreamEngine/thought-gate outputs needed a reusable inactive no-authority packet before any controlled Demo bandit work.
+- Added `advisory_review_packet_v1` with stable input hashes and validator-backed no-mutation fields; L2 now strips model-supplied packets and rebuilds local packets, including no-output error rows.
+- MLDE shadow, DreamEngine parameter/replay proposals, thought-gate H1-E/H1-H/H1-I/handoff, and admitted `/ml-advisory/dispatch` responses now carry valid inactive packets where they produce advisory output.
+- E2 initially found 2 high + 1 medium, then 1 medium route projection issue; all were fixed. E4 PASS: py_compile, ML/helper `53 passed`, L2 `84 passed`, thought-gate `18 passed`, `git diff --check`.
+- State is `ADVANCED_WITH_CONCERNS`: source-only acceptance, upstream screen/admission rejects are non-proposal gate outcomes, and next safe work is `WP5-DEMO-MUTATION-ENVELOPE-CONTRACT` before any controlled Demo bandit runtime.
+
 ## 2026-07-06 AI/ML Roadmap Loop WP3 Registry Serving Parity
 
 - PM selected `WP3-REGISTRY-SERVING-PARITY-SOURCE-CONTRACT` after WP2 because registry/advisory serving metadata was the next safe source-only dependency; runtime/order-capable work remains blocked by expired standing Demo authorization.

@@ -38,6 +38,17 @@ from pathlib import Path
 from bybit_path_policy import get_thought_gate_runtime_dir
 from typing import Any, Dict, List
 
+try:
+    from program_code.ml_training.advisory_review_packet import (
+        build_advisory_review_packet,
+        stable_sha256_json,
+    )
+except ModuleNotFoundError:  # pragma: no cover - import path depends on runner cwd/PYTHONPATH
+    from ml_training.advisory_review_packet import (  # type: ignore
+        build_advisory_review_packet,
+        stable_sha256_json,
+    )
+
 
 RUNTIME_BASE = get_thought_gate_runtime_dir()
 
@@ -234,6 +245,45 @@ def main() -> None:
         allow_progress_to_h1f_invocation = True
         recommended_action = "may_progress_to_h1f_provider_native_invocation"
 
+    request_payload: Dict[str, Any] = {
+        "provider_target": provider_target,
+        "model_name": model_name,
+        "selected_ai_tier": selected_ai_tier,
+        "route_group": route_group,
+        "route_plan": route_plan,
+        "idempotency_key": idempotency_key,
+        "max_output_tokens": max_output_tokens,
+        "temperature": provider_runtime.get("temperature"),
+        "require_json_response": require_json_response,
+        "system_prompt": system_prompt,
+        "user_prompt": user_prompt,
+        "response_contract": response_contract,
+    }
+    input_hashes = {
+        "thought_gate_input": stable_sha256_json(thought_gate_input),
+        "thought_gate_policy": stable_sha256_json(thought_gate_policy),
+        "ai_prompt_prep": stable_sha256_json(ai_prompt_prep),
+        "ai_route_selector": stable_sha256_json(ai_route_selector),
+        "request_prompt": stable_sha256_json(
+            {
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+            }
+        ),
+        "request_payload": stable_sha256_json(request_payload),
+    }
+    advisory_review_packet = build_advisory_review_packet(
+        capability_id="bybit_thought_gate.h1e_request_envelope",
+        producer="bybit_ai_request_envelope_builder",
+        mode=request_state,
+        input_hashes=input_hashes,
+        budget_ref="bybit_ai_request_envelope.budget_context",
+        notes=[
+            "H1-E request envelope is advisory/provider-request preparation only.",
+            "Prompt and source inputs are referenced by stable hashes for review.",
+        ],
+    )
+
     payload: Dict[str, Any] = {
         "request_type": "bybit_ai_request_envelope",
         "request_version": "v2",
@@ -274,20 +324,9 @@ def main() -> None:
             "max_output_tokens": max_output_tokens,
             "response_deadline_ms_hint": response_deadline_ms_hint,
         },
-        "request_payload": {
-            "provider_target": provider_target,
-            "model_name": model_name,
-            "selected_ai_tier": selected_ai_tier,
-            "route_group": route_group,
-            "route_plan": route_plan,
-            "idempotency_key": idempotency_key,
-            "max_output_tokens": max_output_tokens,
-            "temperature": provider_runtime.get("temperature"),
-            "require_json_response": require_json_response,
-            "system_prompt": system_prompt,
-            "user_prompt": user_prompt,
-            "response_contract": response_contract,
-        },
+        "request_payload": request_payload,
+        "input_hashes": input_hashes,
+        "advisory_review_packet": advisory_review_packet,
         "warning_flags": warning_flags,
         "blocking_reasons": blocking_reasons,
         "request_state": request_state,

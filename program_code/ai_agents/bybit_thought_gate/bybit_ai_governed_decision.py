@@ -7,6 +7,17 @@ from pathlib import Path
 
 from bybit_h1_report_utils import THOUGHT_GATE_DIR, read_json, save_latest_and_dated
 
+try:
+    from program_code.ml_training.advisory_review_packet import (
+        build_advisory_review_packet,
+        stable_sha256_json,
+    )
+except ModuleNotFoundError:  # pragma: no cover - import path depends on runner cwd/PYTHONPATH
+    from ml_training.advisory_review_packet import (  # type: ignore
+        build_advisory_review_packet,
+        stable_sha256_json,
+    )
+
 RESP_CHECK_PATH = THOUGHT_GATE_DIR / "bybit_ai_response_check_latest.json"
 INV_PATH = THOUGHT_GATE_DIR / "bybit_ai_invocation_attempt_latest.json"
 REQ_PATH = THOUGHT_GATE_DIR / "bybit_ai_request_envelope_latest.json"
@@ -72,6 +83,43 @@ def main() -> None:
         allow_progress = False
         recommended_action = "inspect_h1g_before_h1h"
 
+    request_summary = {
+        "provider_target": (inv.get("request_summary") or {}).get("provider_target"),
+        "model_name": (inv.get("request_summary") or {}).get("model_name"),
+        "selected_ai_tier": (inv.get("request_summary") or {}).get("selected_ai_tier"),
+        "route_plan": (inv.get("request_summary") or {}).get("route_plan"),
+        "should_call_ai": (inv.get("request_summary") or {}).get("should_call_ai"),
+    }
+    source_refs = {
+        "ai_response_check_path": str(RESP_CHECK_PATH),
+        "ai_invocation_attempt_path": str(INV_PATH),
+        "ai_request_envelope_path": str(REQ_PATH),
+    }
+    input_hashes = {
+        "ai_response_check": stable_sha256_json(resp_check),
+        "ai_invocation_attempt": stable_sha256_json(inv),
+        "ai_request_envelope": stable_sha256_json(req),
+        "source_refs": stable_sha256_json(source_refs),
+        "request_summary": stable_sha256_json(request_summary),
+        "governed_observation": stable_sha256_json(governed_observation),
+    }
+    ledger_summary = inv.get("ledger_summary")
+    ledger_ref = None
+    if isinstance(ledger_summary, dict) and ledger_summary:
+        ledger_ref = f"h1f_ledger_summary_sha256:{stable_sha256_json(ledger_summary)}"
+    advisory_review_packet = build_advisory_review_packet(
+        capability_id="bybit_thought_gate.h1h_governed_decision",
+        producer="bybit_ai_governed_decision",
+        mode=decision_state,
+        input_hashes=input_hashes,
+        ledger_ref=ledger_ref,
+        budget_ref="bybit_ai_request_envelope.budget_context",
+        notes=[
+            "H1-H normalizes provider/no-call output into advisory observation only.",
+            "No Decision Lease, order, Cost Gate, strategy-config, runtime, DB, or live authority is granted.",
+        ],
+    )
+
     report = {
         "decision_type": "bybit_ai_governed_decision",
         "decision_version": "v2",
@@ -80,18 +128,8 @@ def main() -> None:
         "stage": "H1-H",
         "decision_ok": overall_ok,
         "terminal_mode": terminal_mode,
-        "source_refs": {
-            "ai_response_check_path": str(RESP_CHECK_PATH),
-            "ai_invocation_attempt_path": str(INV_PATH),
-            "ai_request_envelope_path": str(REQ_PATH),
-        },
-        "request_summary": {
-            "provider_target": (inv.get("request_summary") or {}).get("provider_target"),
-            "model_name": (inv.get("request_summary") or {}).get("model_name"),
-            "selected_ai_tier": (inv.get("request_summary") or {}).get("selected_ai_tier"),
-            "route_plan": (inv.get("request_summary") or {}).get("route_plan"),
-            "should_call_ai": (inv.get("request_summary") or {}).get("should_call_ai"),
-        },
+        "source_refs": source_refs,
+        "request_summary": request_summary,
         "governance_guards": {
             "system_mode": "read_only",
             "execution_state": "disabled",
@@ -99,8 +137,25 @@ def main() -> None:
             "live_execution_allowed": False,
             "decision_lease_emitted": False,
             "operator_review_required": True,
+            "not_authority": True,
+            "inactive_review_packet": True,
+            "active": False,
+            "no_order_mutation": True,
+            "no_probe_mutation": True,
+            "no_live_mutation": True,
+            "no_mainnet_mutation": True,
+            "no_runtime_mutation": True,
+            "no_db_mutation": True,
+            "no_secret_mutation": True,
+            "no_promotion_mutation": True,
+            "no_cost_gate_mutation": True,
+            "no_strategy_config_mutation": True,
+            "demo_envelope_required_for_mutation": True,
+            "current_packet_grants_demo_mutation": False,
         },
         "governed_observation": governed_observation,
+        "input_hashes": input_hashes,
+        "advisory_review_packet": advisory_review_packet,
         "decision_state": decision_state,
         "allow_progress_to_h1i_acceptance": allow_progress,
         "recommended_action": recommended_action,

@@ -17,6 +17,11 @@ from pathlib import Path
 from bybit_path_policy import get_thought_gate_runtime_dir
 from typing import Any, Dict, List
 
+try:
+    from program_code.ml_training.advisory_review_packet import validate_advisory_review_packet
+except ModuleNotFoundError:  # pragma: no cover - import path depends on runner cwd/PYTHONPATH
+    from ml_training.advisory_review_packet import validate_advisory_review_packet  # type: ignore
+
 
 REQUEST_PATH = get_thought_gate_runtime_dir() / "bybit_ai_request_envelope_latest.json"
 OUTPUT_LATEST_PATH = get_thought_gate_runtime_dir() / "bybit_ai_request_envelope_contract_latest.json"
@@ -98,6 +103,40 @@ def main() -> None:
     add_check("request_payload_system_prompt_str", isinstance(request_payload.get("system_prompt"), str), type(request_payload.get("system_prompt")).__name__)
     add_check("request_payload_user_prompt_str", isinstance(request_payload.get("user_prompt"), str), type(request_payload.get("user_prompt")).__name__)
     add_check("request_payload_response_contract_dict", isinstance(request_payload.get("response_contract"), dict), type(request_payload.get("response_contract")).__name__)
+
+    input_hashes = payload.get("input_hashes")
+    packet = payload.get("advisory_review_packet")
+    add_check("input_hashes_dict", isinstance(input_hashes, dict) and bool(input_hashes), type(input_hashes).__name__)
+    add_check("advisory_review_packet_dict", isinstance(packet, dict), type(packet).__name__)
+    packet_valid = False
+    packet_detail: Any = "missing_packet"
+    if isinstance(packet, dict):
+        try:
+            packet_valid = validate_advisory_review_packet(packet)
+            packet_detail = "valid"
+        except Exception as exc:
+            packet_detail = f"{exc.__class__.__name__}:{exc}"
+    add_check("advisory_review_packet_valid", packet_valid, packet_detail)
+    add_check(
+        "advisory_packet_input_hashes_match",
+        isinstance(packet, dict) and packet.get("input_hashes") == input_hashes,
+        None if not isinstance(packet, dict) else packet.get("input_hashes"),
+    )
+    add_check(
+        "advisory_packet_execution_authority_not_granted",
+        isinstance(packet, dict) and packet.get("execution_authority") == "not_granted",
+        None if not isinstance(packet, dict) else packet.get("execution_authority"),
+    )
+    add_check(
+        "advisory_packet_no_cost_gate_mutation",
+        isinstance(packet, dict) and packet.get("no_cost_gate_mutation") is True,
+        None if not isinstance(packet, dict) else packet.get("no_cost_gate_mutation"),
+    )
+    add_check(
+        "advisory_packet_demo_mutation_not_granted",
+        isinstance(packet, dict) and packet.get("current_packet_grants_demo_mutation") is False,
+        None if not isinstance(packet, dict) else packet.get("current_packet_grants_demo_mutation"),
+    )
 
     report = {
         "report_type": "bybit_ai_request_envelope_contract_check",

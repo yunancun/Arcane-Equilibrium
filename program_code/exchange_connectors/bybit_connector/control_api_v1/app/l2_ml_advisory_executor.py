@@ -84,6 +84,11 @@ from .l2_memory_recall_context import (
     with_memory_recall_audit_context as _with_memory_recall_audit_context,
 )
 
+try:
+    from ml_training.advisory_review_packet import build_advisory_review_packet
+except ModuleNotFoundError:  # pragma: no cover - package layout fallback
+    from program_code.ml_training.advisory_review_packet import build_advisory_review_packet
+
 logger = logging.getLogger("l2_ml_advisory_executor")
 
 # P3a 合法模式（斷言無 alpha）。
@@ -277,6 +282,7 @@ class MlAdvisoryCascadeResult:
     sink_written: bool = False
     l2_reply_id: str | None = None
     cost_usd: float = 0.0
+    advisory_review_packet: dict[str, Any] | None = None
     notes: list[str] = field(default_factory=list)
     # ── P3b hypothesize 專屬（diagnose/interpret 恆 None/預設）──
     math_gate_verdict: str | None = None  # B1+DSR+PBO+leak+Q1 strictest-wins（pass/DEFER/fail）
@@ -485,6 +491,14 @@ def write_ml_advisory_advisory_sink(
     """
     provider = conn_provider or db_pool.get_pg_conn
     result: dict[str, Any] = {"ok": True, "sink_state": "ml_advisory_advisory_recorded", "errors": []}
+    parsed_output, _packet = _attach_advisory_review_packet(
+        capability_id=f"ml_advisory.{mode}",
+        mode=mode,
+        advisory_output=parsed_output,
+        input_context=None,
+        l2_reply_id=l2_reply_id,
+        cost_usd=None,
+    )
 
     # content：診斷/解讀蒸餾成 "title: detail" 形（reuse critic 的 content 構造慣例），payload
     # 帶 mode + l2_reply_id（D3 回溯）+ engine_mode/strategy_name（reconstructable）+ 完整 parsed
@@ -544,6 +558,65 @@ def write_ml_advisory_advisory_sink(
     return result
 
 
+def _attach_advisory_review_packet(
+    *,
+    capability_id: str,
+    mode: str,
+    advisory_output: dict[str, Any],
+    input_context: dict[str, Any] | None,
+    l2_reply_id: str,
+    cost_usd: float | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """附加本地 inactive review packet；永不信任 model/advisory 自帶 packet。"""
+    output_for_hash = {
+        k: v for k, v in advisory_output.items() if k != "advisory_review_packet"
+    }
+    inputs: dict[str, Any] = {"advisory_output": output_for_hash}
+    if input_context is not None:
+        inputs["input_context"] = input_context
+    packet = build_advisory_review_packet(
+        capability_id=capability_id,
+        producer="l2_ml_advisory_executor",
+        mode=mode,
+        input_payloads=inputs,
+        ledger_ref=l2_reply_id,
+        cost_ref=l2_reply_id,
+        budget_ref="DOC-08",
+        cost_usd=cost_usd,
+    )
+    return {**output_for_hash, "advisory_review_packet": packet}, packet
+
+
+def _build_inactive_error_advisory_output(
+    *,
+    capability_id: str,
+    mode: str,
+    stage: str,
+    error: str,
+    input_context: dict[str, Any],
+    l2_reply_id: str,
+    cost_usd: float,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """為 no-output 早退 ledger row 建立 inactive packet；不表示 advisory 成功。"""
+    advisory_output = {
+        "mode": mode,
+        "stage": stage,
+        "error": error,
+        "no_output": True,
+        "advisory_success": False,
+        "l2_reply_id": l2_reply_id,
+        "cost_usd": float(cost_usd),
+    }
+    return _attach_advisory_review_packet(
+        capability_id=capability_id,
+        mode=mode,
+        advisory_output=advisory_output,
+        input_context=input_context,
+        l2_reply_id=l2_reply_id,
+        cost_usd=cost_usd,
+    )
+
+
 def _build_lesson_content(
     *,
     mode: str,
@@ -566,6 +639,7 @@ def _build_lesson_content(
         "engine_mode": engine_mode,
         "strategy_name": strategy_name,
         "advisory": parsed_output,
+        "advisory_review_packet": parsed_output.get("advisory_review_packet"),
         "asserts_no_alpha": True,  # P3a 斷言無 alpha（非 edge/promotion 推薦）
     }
     detail = json.dumps(body, ensure_ascii=False, default=str)
@@ -675,12 +749,23 @@ async def run_ml_advisory_cascade(
         # cloud 不可用 / 非 JSON → fail-soft（D3 記 error，不寫 sink）。
         result.stage = "cloud_unavailable_or_unparsable"
         result.notes.append("cloud diagnose/interpret 回 None 或非 JSON dict")
+        ledger_context = _with_memory_recall_audit_context(context, memory_recall)
+        error_out, packet = _build_inactive_error_advisory_output(
+            capability_id=capability_id,
+            mode=mode,
+            stage=result.stage,
+            error="cloud_no_output_or_unparsable",
+            input_context=ledger_context,
+            l2_reply_id=l2_reply_id,
+            cost_usd=result.cost_usd,
+        )
+        result.advisory_review_packet = packet
         _ledger(writer, l2_reply_id=l2_reply_id, capability_id=capability_id, trigger=trigger,
                 model=model_str, contract_ver=contract_ver, schema_ver=schema_ver,
                 system_prompt=system_prompt,
-                context=_with_memory_recall_audit_context(context, memory_recall),
+                context=ledger_context,
                 raw_response=raw,
-                parsed_output=None, guard_verdict=None, cost_usd=result.cost_usd,
+                parsed_output=error_out, guard_verdict=None, cost_usd=result.cost_usd,
                 latency_ms=int((time.time() - started) * 1000))
         _record_spend(spend_recorder, capability_id, result.cost_usd)
         return result
@@ -701,6 +786,15 @@ async def run_ml_advisory_cascade(
     # 不論 guard verdict 皆寫 D3 ledger（reconstructable；root principle 8）——guard reject 也要
     # 入庫（記錄被擋的 model 輸出 + guard_verdict），但「不」route 給 sink。
     guard_out = gres.clamped_output if gres.clamped_output is not None else parsed
+    guard_out, packet = _attach_advisory_review_packet(
+        capability_id=capability_id,
+        mode=mode,
+        advisory_output=guard_out,
+        input_context=_with_memory_recall_audit_context(context, memory_recall),
+        l2_reply_id=l2_reply_id,
+        cost_usd=result.cost_usd,
+    )
+    result.advisory_review_packet = packet
     _ledger(writer, l2_reply_id=l2_reply_id, capability_id=capability_id, trigger=trigger,
             model=model_str, contract_ver=contract_ver, schema_ver=schema_ver,
             system_prompt=system_prompt,
@@ -810,12 +904,23 @@ async def _run_hypothesize_cascade(
         # 本地生成不可用 / 非 JSON → fail-soft（D3 記 error，不寫 sink）。
         result.stage = "generate_unavailable_or_unparsable"
         result.notes.append("ollama generate 回 None 或非 JSON dict")
+        ledger_context = _with_memory_recall_audit_context(context, memory_recall)
+        error_out, packet = _build_inactive_error_advisory_output(
+            capability_id=capability_id,
+            mode=mode,
+            stage=result.stage,
+            error="generate_no_output_or_unparsable",
+            input_context=ledger_context,
+            l2_reply_id=l2_reply_id,
+            cost_usd=result.cost_usd,
+        )
+        result.advisory_review_packet = packet
         _ledger(writer, l2_reply_id=l2_reply_id, capability_id=capability_id, trigger=trigger,
                 model="ollama_generate", contract_ver=contract_ver, schema_ver=schema_ver,
                 system_prompt=_hypothesize_system_prompt_for_ledger(memory_recall),
-                context=_with_memory_recall_audit_context(context, memory_recall),
+                context=ledger_context,
                 raw_response=raw_gen,
-                parsed_output=None, guard_verdict=None, cost_usd=result.cost_usd,
+                parsed_output=error_out, guard_verdict=None, cost_usd=result.cost_usd,
                 latency_ms=int((time.time() - started) * 1000))
         _record_spend(spend_recorder, capability_id, result.cost_usd)
         return result
@@ -832,6 +937,15 @@ async def _run_hypothesize_cascade(
 
     if gres.verdict == "reject":
         # guard reject（empty-mechanism / 捏造軸 / 缺子物件）⇒ logged-and-dropped（D3 記，不寫 sink）。
+        guard_out, packet = _attach_advisory_review_packet(
+            capability_id=capability_id,
+            mode=mode,
+            advisory_output=guard_out,
+            input_context=_with_memory_recall_audit_context(context, memory_recall),
+            l2_reply_id=l2_reply_id,
+            cost_usd=result.cost_usd,
+        )
+        result.advisory_review_packet = packet
         result.stage = "guard_rejected"
         result.notes.append(f"guard reject: {','.join(gres.kinds_hit)}")
         _ledger(writer, l2_reply_id=l2_reply_id, capability_id=capability_id, trigger=trigger,
@@ -897,13 +1011,22 @@ async def _run_hypothesize_cascade(
         "math_gate_verdict": math_res["verdict"],
         "novelty": novelty,
     }
+    ledger_output, packet = _attach_advisory_review_packet(
+        capability_id=capability_id,
+        mode=mode,
+        advisory_output={**guard_out, "math_gate": math_res},
+        input_context=_with_memory_recall_audit_context(context, memory_recall),
+        l2_reply_id=l2_reply_id,
+        cost_usd=result.cost_usd,
+    )
+    result.advisory_review_packet = packet
     # 不論 verdict 皆寫 D3 ledger（reconstructable）——含 math gate verdict + reasons。
     _ledger(writer, l2_reply_id=l2_reply_id, capability_id=capability_id, trigger=trigger,
             model="ollama_generate+math_gate", contract_ver=contract_ver, schema_ver=schema_ver,
             system_prompt=_hypothesize_system_prompt_for_ledger(memory_recall),
             context=_with_memory_recall_audit_context(context, memory_recall),
             raw_response=raw_gen,
-            parsed_output={**guard_out, "math_gate": math_res}, guard_verdict=gres.verdict,
+            parsed_output=ledger_output, guard_verdict=gres.verdict,
             fact_inf_assm=fact_inf_assm, cost_usd=result.cost_usd,
             latency_ms=int((time.time() - started) * 1000))
 
@@ -931,7 +1054,8 @@ async def _run_hypothesize_cascade(
 
     # pass 或 DEFER → sink backlog item（content 帶 math gate verdict，標 promotion-relevant 但非
     # auto-promote；晉升人工）。
-    sink_payload = {**guard_out, "gate_verdict": math_res["verdict"], "math_gate": math_res}
+    sink_payload = {**guard_out, "gate_verdict": math_res["verdict"], "math_gate": math_res,
+                    "advisory_review_packet": packet}
     sink_res = write_ml_advisory_advisory_sink(
         engine_mode=engine_mode, mode=mode, parsed_output=sink_payload, l2_reply_id=l2_reply_id,
         symbol=symbol, strategy_name=strategy_name, trigger=trigger, conn_provider=sink_conn_provider,

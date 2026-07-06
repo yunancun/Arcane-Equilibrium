@@ -83,6 +83,11 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, Optional
 
+try:
+    from program_code.ml_training.advisory_review_packet import build_advisory_review_packet
+except ModuleNotFoundError:  # pragma: no cover - package layout fallback
+    from ml_training.advisory_review_packet import build_advisory_review_packet  # type: ignore
+
 # REF-20 Sprint C2 R7-T1.5（PA §2B 漏列補位）：calibrated_replay tier 升級。
 # Optional import 模式（避免未上線環境載入 replay 模組失敗）。
 try:  # pragma: no cover - import guard
@@ -453,6 +458,16 @@ def build_recommendations(
         scanner_context = _scanner_context_from_row(row)
         if scanner_context:
             payload["scanner_context"] = scanner_context
+        payload["advisory_review_packet"] = build_advisory_review_packet(
+            capability_id=f"mlde_shadow_advisor.{rec_type}",
+            producer="mlde_shadow_advisor",
+            mode=rec_type,
+            input_payloads={
+                "aggregate_row": row,
+                "recommendation_payload": payload,
+            },
+            budget_ref="DOC-08",
+        )
         recommendations.append(
             ShadowRecommendation(
                 engine_mode=str(row.get("engine_mode") or cfg.engine_mode),

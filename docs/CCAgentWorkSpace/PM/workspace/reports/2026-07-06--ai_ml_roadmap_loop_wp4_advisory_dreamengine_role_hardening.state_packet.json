@@ -1,0 +1,51 @@
+{
+  "schema_version": "roadmap_loop_state_packet_v1",
+  "status": "ADVANCED_WITH_CONCERNS",
+  "state_reason": "WP4 advisory/DreamEngine role hardening passed PA/E1/E1a/E2/E4/QA chain as source-only; advisory outputs now carry inactive no-authority packets, but controlled Demo bandit remains blocked until DemoMutationEnvelope and reward-ledger prerequisites exist.",
+  "last_completed_work_id": "WP4-ADVISORY-DREAMENGINE-ROLE-HARDENING",
+  "last_completed_commit": null,
+  "current_gate": "G6",
+  "next_work_id": "WP5-DEMO-MUTATION-ENVELOPE-CONTRACT",
+  "next_safe_action": "select a source-only DemoMutationEnvelope contract or explicit mapping to existing applier records; do not implement bandit runtime, change config, write DB, contact providers/exchanges, lower Cost Gate, or mutate Demo without separate authorization.",
+  "stop_reason": null,
+  "blocking_gate": null,
+  "effect_review_ref": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp4_advisory_dreamengine_role_hardening.effect_review.json",
+  "work_item_ref": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp4_advisory_dreamengine_role_hardening.work_item.json",
+  "pm_report_ref": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp4_advisory_dreamengine_role_hardening.md",
+  "operator_summary_ref": "docs/CCAgentWorkSpace/Operator/2026-07-06--ai_ml_roadmap_loop_wp4_advisory_dreamengine_role_hardening.md",
+  "evidence_refs": [
+    "program_code/ml_training/advisory_review_packet.py",
+    "program_code/ml_training/tests/test_advisory_review_packet.py",
+    "program_code/exchange_connectors/bybit_connector/control_api_v1/app/l2_advisory_orchestrator.py",
+    "program_code/exchange_connectors/bybit_connector/control_api_v1/app/l2_ml_advisory_executor.py",
+    "program_code/exchange_connectors/bybit_connector/control_api_v1/app/layer2_routes.py",
+    "program_code/ml_training/mlde_shadow_advisor.py",
+    "program_code/local_model_tools/dream_engine.py",
+    "program_code/ai_agents/bybit_thought_gate/bybit_ai_request_envelope_builder.py",
+    "program_code/ai_agents/bybit_thought_gate/bybit_ai_governed_decision.py",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp4_advisory_dreamengine_role_hardening.md",
+    "docs/CCAgentWorkSpace/Operator/2026-07-06--ai_ml_roadmap_loop_wp4_advisory_dreamengine_role_hardening.md"
+  ],
+  "concerns": [
+    "source-only acceptance; no runtime/provider path was exercised",
+    "upstream screen rejects and admission rejects are non-proposal gating outcomes rather than advisory packets",
+    "controlled Demo bandit remains blocked until DemoMutationEnvelope and real reward ledger prerequisites are accepted"
+  ],
+  "denied_actions": [
+    "runtime_mutation",
+    "db_read",
+    "db_write",
+    "exchange_contact",
+    "private_read",
+    "mcp_runtime",
+    "secret_access",
+    "provider_call",
+    "order_or_probe",
+    "cost_gate_change",
+    "deploy",
+    "live_or_mainnet"
+  ],
+  "repo_head": "30776e586effad8b014b74b80dcf5c4ba5f0992c",
+  "origin_head": "5d16229948eba555ee415048ad028e11649e3d91",
+  "created_at": "2026-07-06T21:30:29Z"
+}
