@@ -1,0 +1,111 @@
+{
+  "schema_version": "roadmap_work_item_v1",
+  "work_id": "WP5-DEMO-MUTATION-ENVELOPE-CONTRACT",
+  "roadmap_wp": "WP5",
+  "phase": "demo_mutation_envelope_contract",
+  "priority": "P1",
+  "selected_at": "2026-07-06T22:32:06Z",
+  "selection_reason": "WP4 advisory role hardening advanced to source-contract readiness; WP5 must first formalize DemoMutationEnvelope or map existing mlde_demo_applier records before any controlled Demo bandit or mutation work can be considered.",
+  "owner_chain": [
+    "PM",
+    "PA",
+    "E1",
+    "E1a",
+    "E2",
+    "E1-fix",
+    "E2",
+    "E4",
+    "QA",
+    "PM"
+  ],
+  "preconditions": [
+    "LOAD_CONTEXT completed",
+    "WP1 ProofPacket source contract complete",
+    "WP2 PIT dataset manifest source contract complete",
+    "WP3 registry serving parity source contract complete",
+    "WP4 advisory role hardening source contract complete",
+    "runtime/order-capable work remains blocked by expired standing Demo authorization",
+    "controlled Demo bandit runtime remains blocked until DemoMutationEnvelope and real reward ledger prerequisites exist",
+    "dirty worktree classified; unrelated memory/* and non-WP5 ML dirty files left unstaged"
+  ],
+  "allowed_actions": [
+    "source_edit",
+    "test_edit",
+    "read_only_repo_inspection",
+    "local_mac_tests",
+    "subagent_dispatch",
+    "pm_report",
+    "operator_summary",
+    "document_index_update",
+    "pm_memory_update"
+  ],
+  "denied_actions": [
+    "runtime_mutation",
+    "db_read",
+    "db_write",
+    "exchange_contact",
+    "private_read",
+    "mcp_server_start",
+    "secret_access",
+    "provider_call",
+    "order_or_probe",
+    "cost_gate_change",
+    "deploy",
+    "live_or_mainnet",
+    "bandit_runtime"
+  ],
+  "files": [
+    "program_code/ml_training/demo_mutation_envelope.py",
+    "program_code/ml_training/demo_mutation_envelope_applier_mapping.py",
+    "program_code/ml_training/mlde_demo_applier.py",
+    "program_code/ml_training/tests/test_demo_mutation_envelope.py",
+    "program_code/ml_training/tests/test_demo_mutation_envelope_applier_mapping.py",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp5_demo_mutation_envelope_contract.md",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp5_demo_mutation_envelope_contract.work_item.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp5_demo_mutation_envelope_contract.effect_review.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp5_demo_mutation_envelope_contract.state_packet.json",
+    "docs/CCAgentWorkSpace/Operator/2026-07-06--ai_ml_roadmap_loop_wp5_demo_mutation_envelope_contract.md",
+    "docs/_indexes/document_index.md",
+    "docs/CCAgentWorkSpace/PM/memory.md"
+  ],
+  "acceptance": [
+    "Define demo_mutation_envelope_v1 source contract with stable hash helper, builder, extractor, validator, and tests.",
+    "Envelope records engine_mode, source proposal or recommendation id, source payload hash, application type, target, previous snapshot, proposed patch, bounded delta, max delta policy, governance verdict, rollback handle, IPC response hash/status, post-change review, proof linkage, and no-authority answers.",
+    "Countability is fail-closed: applied, non-empty, non-dedupe, non-dry-run, concrete bounded delta, rollback, governance, post-change review, and proof linkage are all required before effective_learning_countable can be true.",
+    "Empty patch, dedupe, dry-run, skipped, failed, non-demo, live, live_demo, missing bound, missing rollback, missing proof, or missing review rows remain audit-only or invalid.",
+    "Validator rejects nested/camelCase authority and non-demo scope aliases including secretAccess, mainnetAccess, candidateScope=live, and candidateEngineMode=live_demo.",
+    "Map existing mlde_demo_applier _record_application inputs into the envelope under payload.demo_mutation_envelope without changing SQL schema, fetch, patch calculation, dedupe fingerprint, IPC params, status semantics, or live-candidate behavior.",
+    "Raw IPC response details are represented only by hash/status inside the envelope.",
+    "No bandit runtime, runtime mutation, DB action, exchange contact, provider call, order/probe, Cost Gate change, deploy, live, or mainnet action is performed."
+  ],
+  "verification_commands": [
+    "PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile program_code/ml_training/demo_mutation_envelope.py program_code/ml_training/demo_mutation_envelope_applier_mapping.py program_code/ml_training/mlde_demo_applier.py program_code/ml_training/tests/test_demo_mutation_envelope.py program_code/ml_training/tests/test_demo_mutation_envelope_applier_mapping.py",
+    "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m pytest -q program_code/ml_training/tests/test_demo_mutation_envelope.py program_code/ml_training/tests/test_demo_mutation_envelope_applier_mapping.py -p no:cacheprovider",
+    "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m pytest -q program_code/ml_training/tests/test_mlde_demo_applier.py -p no:cacheprovider",
+    "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m pytest -q program_code/ml_training/tests/test_advisory_review_packet.py program_code/ml_training/tests/test_proof_packet_contract.py program_code/ml_training/tests/test_pit_dataset_manifest.py -p no:cacheprovider",
+    "rg -n \"requests\\\\.|httpx\\\\.|urllib\\\\.|psycopg2|asyncpg|one_shot_ipc_call|INSERT INTO|UPDATE |DELETE FROM|subprocess|place_order|cancel_order|create_order|OPENCLAW_ALLOW_MAINNET=1\" program_code/ml_training/demo_mutation_envelope.py program_code/ml_training/demo_mutation_envelope_applier_mapping.py",
+    "git diff --check"
+  ],
+  "effect_metrics": [
+    "gate_delta",
+    "artifact_delta",
+    "test_delta",
+    "risk_delta",
+    "proof_delta",
+    "next_action_quality"
+  ],
+  "kill_gates": [
+    "STOP_DISPATCH_BLOCKED if PA/E1/E1a/E2/E4/QA cannot run",
+    "STOP_TEST if focused tests, compile, or diff-check fail",
+    "STOP_EVIDENCE if envelope can become countable without concrete bound, review, proof, or rollback",
+    "STOP_BOUNDARY if runtime/order/private/provider/MCP/live action is required",
+    "STOP_LOSS_CONTROL after WP5 if next work requires fresh standing Demo loss-control envelope"
+  ],
+  "evidence_refs": [
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp4_advisory_dreamengine_role_hardening.state_packet.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_autonomous_completion_loop_design.md",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_trade_engineering_roadmap_after_maker_challenge.md",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_adversarial_audit.md",
+    "TODO.md"
+  ]
+}
