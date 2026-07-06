@@ -2,6 +2,8 @@
 
 PM sign-off: `APPROVED-AS-ENGINEERING-GOVERNANCE-DESIGN`
 
+Revision: `2026-07-06-continuous-state-v2`
+
 Scope: design an autonomous engineering loop that can advance, evaluate, and stop work for the
 AI/ML trading roadmap signed on 2026-07-06. This is not a trading loop and not runtime authority.
 No runtime mutation, DB write, exchange/API/private read, MCP install/config, secret access,
@@ -20,11 +22,34 @@ Correct shape:
 4. dispatch or implement only inside that work item's allowed action boundary;
 5. run source/test/schema/evidence verification;
 6. evaluate whether the implementation produced measurable gate movement;
-7. continue, rotate, or stop with a machine-readable state packet.
+7. always write a machine-readable state packet;
+8. continue, rotate, or stop from that state packet.
 
 The loop must be fail-closed. It cannot convert a planning document into order authority. It can
 only prepare source/contracts/tests/reports until an existing PM->E3->BB path grants a specific
 runtime or exchange-facing window.
+
+## 2026-07-06 Continuous-State Correction
+
+The first dry-run implementation cycle produced `WP1-PROOF-PACKET-V1` and an
+`implementation_effect_review_v1`, but it stopped after one `ADVANCED` cycle and did not write a
+state packet. That exposed a design ambiguity: `roadmap_loop_state_packet_v1` was described as a
+stop packet, not as the durable loop cursor.
+
+Correction:
+
+- `roadmap_loop_state_packet_v1` is mandatory after every iteration, including `ADVANCED`.
+- `ADVANCED` is not terminal. A launcher seeing `status=ADVANCED` or
+  `status=ADVANCED_WITH_CONCERNS` must select `next_work_id` and continue while budget remains.
+- A single-cycle run is allowed only when the prompt explicitly sets `max_iterations=1` or
+  `mode=single_iteration`.
+- If a prior iteration has an effect review but no state packet, the next launcher must write a
+  recovery state packet with `status=ADVANCED_WITH_CONCERNS`, reference the missing packet concern,
+  and continue from the recorded next action.
+- Source feature work must use the configured repo role chain. PM direct implementation is an
+  exception only for docs/state/report edits, or when the operator explicitly requests a
+  single-agent/no-subagent run. If required sub-agent tools are unavailable, stop as
+  `STOP_DISPATCH_BLOCKED` rather than silently treating local PM code as a full loop sign-off.
 
 ## Inputs
 
@@ -86,8 +111,8 @@ State meanings:
 | `DISPATCH_OR_IMPLEMENT` | Dispatch correct role chain or make narrow PM source/docs edit if allowed. | `STOP_DISPATCH_BLOCKED` |
 | `VERIFY_SOURCE` | Run focused tests, schema validators, static guards, diff checks. | `STOP_TEST` |
 | `VERIFY_EFFECT` | Compare pre/post gates, artifacts, and residual blockers. | `STOP_NO_DELTA` |
-| `UPDATE_EVIDENCE` | Write PM report, Operator summary, index/memory/state packet. | `STOP_EVIDENCE_WRITE` |
-| `DECIDE` | Continue, rotate, or stop based on gates and budgets. | `STOP_*` |
+| `UPDATE_EVIDENCE` | Write PM report, Operator summary, index/memory/effect review/state packet. | `STOP_EVIDENCE_WRITE` |
+| `DECIDE` | Continue, rotate, or stop based on the state packet and budgets. | `STOP_*` |
 
 ## Work Item Contract
 
@@ -177,30 +202,32 @@ The loop selects work with this policy:
 Pseudo-code:
 
 ```python
-while budget_remaining():
+while budget_remaining() and iterations_remaining():
     ctx = load_context()
+    prior_state = recover_latest_state_or_effect_review(ctx)
+    if prior_state.status in {"STOPPED", "BLOCKED"}:
+        return prior_state
+
     backlog = build_backlog(ctx)
-    item = select_highest_unblocked(backlog, ctx)
+    item = select_next_work(backlog, ctx, prior_state)
     boundary = precheck_boundary(item, ctx)
     if boundary.stop:
-        return write_stop_packet(boundary)
+        return write_state_packet(boundary)
 
     result = dispatch_or_implement(item)
     source_verdict = verify_source(item, result)
     if source_verdict.stop:
-        return write_stop_packet(source_verdict)
+        return write_state_packet(source_verdict)
 
     effect = evaluate_effect(item, source_verdict)
     write_effect_review(item, effect)
 
-    if effect.stop:
-        return write_stop_packet(effect)
-    if effect.advance_allowed:
+    state = write_state_packet(effect)
+    if state.status in {"ADVANCED", "ADVANCED_WITH_CONCERNS", "ROTATED"}:
         continue
-    if effect.rotate_allowed:
-        continue
+    return state
 
-return write_stop_packet("STOP_BUDGET")
+return write_state_packet("STOP_BUDGET")
 ```
 
 ## Effect Evaluation
@@ -273,17 +300,35 @@ The loop stops automatically on:
 | `STOP_BUDGET` | time/cost/token/test budget exhausted | write handoff packet |
 | `STOP_HUMAN_DECISION` | capital/VIP/MM program, live/tiny-live, MCP credential, infrastructure spend, or risk envelope expansion decision needed | operator decision |
 
-Stop packet contract:
+## State Packet Contract
+
+Every iteration writes `roadmap_loop_state_packet_v1`. It is a durable loop cursor, not only a stop
+artifact.
+
+Allowed statuses:
+
+- `ADVANCED`: gate moved and verification passed.
+- `ADVANCED_WITH_CONCERNS`: gate moved, but review/chain/recovery concerns remain.
+- `ROTATED`: current work item is stale/blocked; next work item is selected.
+- `STOPPED`: terminal stop condition reached.
+- `BLOCKED`: cannot continue without missing context, tooling, authority, or operator decision.
+
+State packet contract:
 
 ```json
 {
   "schema_version": "roadmap_loop_state_packet_v1",
-  "status": "STOPPED",
-  "stop_reason": "STOP_LOSS_CONTROL",
+  "status": "ADVANCED",
+  "state_reason": "G2 source contract advanced",
   "last_completed_work_id": "WP1-PROOF-PACKET-V1",
-  "blocking_gate": "G1",
+  "current_gate": "G2",
+  "next_work_id": "WP2-PIT-DATASET-MANIFEST",
+  "next_safe_action": "run PIT dataset manifest contract loop cycle",
+  "stop_reason": null,
+  "blocking_gate": null,
+  "effect_review_ref": "",
   "evidence_refs": [],
-  "next_safe_action": "refresh standing Demo loss-control envelope under PM->E3->BB",
+  "concerns": [],
   "denied_actions": [
     "order_or_probe",
     "private_read",
@@ -297,6 +342,19 @@ Stop packet contract:
   "created_at": ""
 }
 ```
+
+Stop packets use the same schema with `status=STOPPED` and a non-null `stop_reason`. Advance
+packets must include `next_work_id`; if no safe next work exists, status must be `STOPPED` or
+`BLOCKED`.
+
+Recovery rule:
+
+- If the latest artifact is `implementation_effect_review_v1` with `verdict=EFFECTIVE` but no
+  matching state packet, write a recovery state packet:
+  `status=ADVANCED_WITH_CONCERNS`,
+  `state_reason=effect_review_existed_without_state_packet`,
+  `last_completed_work_id=<effect.work_id>`, and `next_work_id` from the PM report/effect review.
+- Do not reimplement the completed work. Continue from `next_work_id`.
 
 ## Allowed Automation
 
@@ -325,7 +383,7 @@ The loop may not automate without a separate gate:
 ## Dispatch Rules Inside The Loop
 
 Use local PM only for small synthesis, state packet writing, index/memory updates, or already scoped
-docs. Otherwise:
+docs. Otherwise dispatch is part of the loop, not optional:
 
 | Work class | Required chain |
 |---|---|
@@ -338,6 +396,13 @@ docs. Otherwise:
 Sub-agent prompt must include the work item contract, denied actions, expected output path, and
 the four-state completion contract. If a role returns `BLOCKED`, the loop must not retry the same
 prompt unchanged.
+
+If sub-agent tooling is unavailable or policy blocks spawning required roles:
+
+- source feature work stops as `STOP_DISPATCH_BLOCKED`, or
+- operator explicitly changes the run mode to `single_agent_source_patch_allowed=true`, in which case
+  the state packet must be `ADVANCED_WITH_CONCERNS` until a separate E2/E4/QA-style review closes the
+  concern.
 
 ## How This Completes WP0-WP8
 
@@ -365,6 +430,17 @@ prompt unchanged.
 If cycle 4 cannot pass due expired/missing authority or source drift, stop with
 `STOP_LOSS_CONTROL` or `STOP_SOURCE_DRIFT`; do not advance to bandits or runtime learning.
 
+Current recovery after the observed WP1 run:
+
+1. Detect `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp1_proof_packet_contract.effect_review.json`.
+2. If no matching `*.state_packet.json` exists, write
+   `2026-07-06--ai_ml_roadmap_loop_wp1_proof_packet_contract.state_packet.json` with
+   `status=ADVANCED_WITH_CONCERNS` and `next_work_id=WP2-PIT-DATASET-MANIFEST`.
+3. Preserve concern: `source_feature_chain_shortened_no_independent_E2_E4_QA`.
+4. Either dispatch a narrow review of commit `b9867ac9e` before WP2, or carry the concern into the
+   WP2 state packet until closed.
+5. Continue to `WP2-PIT-DATASET-MANIFEST`; do not rerun WP1 unless review finds a blocker.
+
 ## Self-Audit
 
 Adversarial checks against this design:
@@ -378,7 +454,7 @@ Adversarial checks against this design:
 - Does it let MCP become execution authority? No. MCP is source-only/pinned/offline unless a future
   E3/BB gate narrows a diagnostic scope.
 - Does it risk infinite no-op loops? It stops after repeated no-delta and requires rotate/blocker.
-- Does it create hidden state? No. Each iteration writes effect review and stop/advance packets.
+- Does it create hidden state? No. Each iteration writes effect review and a mandatory state packet.
 
 Residual risk:
 
