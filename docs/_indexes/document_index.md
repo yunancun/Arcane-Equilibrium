@@ -22,6 +22,8 @@
 | `CCAgentWorkSpace/Operator/2026-07-05--legacy_todo_mag083_phase5_resolution.md` | Operator mirror：legacy TODO MAG-083/MAG-084 + Phase 5 strategy params resolved 判定，同 PM 報告 byte-identical。 |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-07-05--legacy_todo_remaining_work_audit.md` | PM legacy TODO 剩餘工作核實：AgentTodo MAG-002/MAG-003 由 MAG-015 歷史閉合；Signal Diamond 舊 ModeState/fan-out 限制由 3E-4 per-pipeline 架構取代；無可直接派工剩餘項。 |
 | `CCAgentWorkSpace/Operator/2026-07-05--legacy_todo_remaining_work_audit.md` | Operator mirror：legacy TODO remaining-work audit，同 PM 報告 byte-identical。 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_trade_engineering_roadmap_after_maker_challenge.md` | PM 挑戰 maker-first NO-GO 後的 AI/ML 交易工程路線圖：保留 mature-perp maker-first NO-GO，將主線收斂為 ProofPacket/evidence loop、PIT manifest、supervised advisory、controlled Demo bandit、new-listing/event screen、M12 cost-reduction、MCP source-only matrix。 |
+| `CCAgentWorkSpace/Operator/2026-07-06--ai_ml_trade_engineering_roadmap_after_maker_challenge.md` | Operator 摘要：挑戰 maker-first 後的 90 天 AI/ML 交易工程路線圖與不做清單；下一實際 blocker 仍是 standing Demo loss-control envelope refresh。 |
 | `CCAgentWorkSpace/E4/workspace/reports/2026-07-03--part2_post_approval_drift_gate_regression.md` | E4 回歸：standing-envelope post-approval drift-gate（Impl B）測試矩陣。 |
 | `CCAgentWorkSpace/E4/workspace/reports/2026-07-03--soak_dispatch_edge_containment_impl_a_regression.md` | E4 回歸：soak dispatch edge-containment（Impl A）測試矩陣。 |
 | `CCAgentWorkSpace/E4/workspace/reports/2026-07-04--e4_test_matrix_blindspot_audit.md` | E4 測試矩陣盲點審計。 |
