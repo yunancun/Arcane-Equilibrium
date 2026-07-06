@@ -1,0 +1,93 @@
+{
+  "schema_version": "roadmap_work_item_v1",
+  "work_id": "WP1-PROOF-PACKET-V1",
+  "roadmap_wp": "WP1",
+  "phase": "evidence_contract",
+  "priority": "P0",
+  "selected_at": "2026-07-06T17:38:15Z",
+  "selection_reason": "TODO P0 runtime/order-capable paths are blocked by expired standing Demo authorization; proof_packet_v1 is the highest-priority unblocked source-only AI/ML roadmap dependency.",
+  "owner_chain": [
+    "PM",
+    "PA",
+    "E1",
+    "E2",
+    "E4",
+    "QA",
+    "PM"
+  ],
+  "preconditions": [
+    "TODO.md loaded",
+    "AI/ML roadmap and adversarial audit loaded",
+    "runtime standing authorization recognized as expired and not consumed",
+    "source_head_known",
+    "dirty_worktree_classified",
+    "acceptance_tests_defined"
+  ],
+  "allowed_actions": [
+    "source_edit",
+    "test_edit",
+    "docs_edit",
+    "local_mac_tests",
+    "read_only_repo_inspection",
+    "pm_report",
+    "operator_summary",
+    "document_index_update",
+    "pm_memory_update"
+  ],
+  "denied_actions": [
+    "runtime_mutation",
+    "db_write",
+    "exchange_contact",
+    "private_read",
+    "mcp_server_start",
+    "secret_access",
+    "order_or_probe",
+    "cost_gate_change",
+    "deploy",
+    "live_or_mainnet"
+  ],
+  "files": [
+    "program_code/ml_training/proof_packet_contract.py",
+    "program_code/ml_training/tests/test_proof_packet_contract.py",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp1_proof_packet_contract.md",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp1_proof_packet_contract.work_item.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp1_proof_packet_contract.effect_review.json",
+    "docs/CCAgentWorkSpace/Operator/2026-07-06--ai_ml_roadmap_loop_wp1_proof_packet_contract.md",
+    "docs/_indexes/document_index.md",
+    "docs/CCAgentWorkSpace/PM/memory.md"
+  ],
+  "acceptance": [
+    "Define proof_packet_v1 schema version, canonical field, validator result, hash function, and extractor.",
+    "proof_ready requires candidate identity, execution identity, candidate-matched fill ids, entry/exit context ids, maker/taker/fee/slippage/funding/markout/net PnL cost identity, controls, OOS split, and provenance hashes.",
+    "Cleanup, unattributed, proof-excluded, or authority-expanding payloads fail closed.",
+    "NO_MATCHED_FILLS is accepted as a blocker artifact, not a training label or proof.",
+    "Focused and adjacent source tests pass.",
+    "No runtime, DB, exchange, MCP, order/probe, Cost Gate, deploy, live, or mainnet action is performed."
+  ],
+  "verification_commands": [
+    "python3 -m py_compile program_code/ml_training/proof_packet_contract.py program_code/ml_training/tests/test_proof_packet_contract.py",
+    "python3 -m pytest -q program_code/ml_training/tests/test_proof_packet_contract.py",
+    "python3 -m pytest -q program_code/ml_training/tests/test_proof_packet_contract.py program_code/ml_training/tests/test_candidate_evidence_manifest.py program_code/ml_training/tests/test_candidate_evidence_source_contract.py",
+    "PYTHONPATH=helper_scripts/research python3 -m pytest -q helper_scripts/research/tests/test_cost_gate_learning_candidate_proof_evidence.py helper_scripts/research/tests/test_cost_gate_learning_proof_promotion_gate.py",
+    "git diff --check"
+  ],
+  "effect_metrics": [
+    "gate_delta",
+    "artifact_delta",
+    "test_delta",
+    "risk_delta",
+    "next_action_quality"
+  ],
+  "kill_gates": [
+    "STOP_BOUNDARY if runtime/order/private/MCP/live action is required",
+    "STOP_TEST if focused or adjacent tests fail",
+    "STOP_EVIDENCE if proof_packet_v1 cannot produce machine-checkable validation",
+    "STOP_NO_DELTA if no source/test artifact changes gate state"
+  ],
+  "evidence_refs": [
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_autonomous_completion_loop_design.md",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_trade_engineering_roadmap_after_maker_challenge.md",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_adversarial_audit.md",
+    "TODO.md"
+  ]
+}
