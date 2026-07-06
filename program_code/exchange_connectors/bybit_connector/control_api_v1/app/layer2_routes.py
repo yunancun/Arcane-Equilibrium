@@ -885,6 +885,7 @@ async def dispatch_ml_advisory(
         "routed_to": result.routed_to,
         "guard_verdict": result.guard_verdict,
         "l2_reply_id": result.l2_reply_id,
+        "advisory_review_packet": result.advisory_review_packet,
         "notes": list(result.notes),
         "context_assembly_reasons": assembly_reasons,
     }

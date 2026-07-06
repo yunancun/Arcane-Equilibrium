@@ -76,6 +76,11 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, Optional
 
 try:
+    from program_code.ml_training.advisory_review_packet import build_advisory_review_packet
+except ModuleNotFoundError:  # pragma: no cover - package layout fallback
+    from ml_training.advisory_review_packet import build_advisory_review_packet  # type: ignore
+
+try:
     import psycopg2  # type: ignore
     from psycopg2.extras import Json  # type: ignore
 except ImportError:  # pragma: no cover - runtime DB path only
@@ -293,6 +298,16 @@ def build_dream_summary(rows: list[dict[str, Any]], cfg: DreamConfig) -> dict[st
         scanner_context = _scanner_context_from_row(row)
         if scanner_context:
             insight["scanner_context"] = scanner_context
+        insight["advisory_review_packet"] = build_advisory_review_packet(
+            capability_id="dream_engine.parameter_proposal",
+            producer="dream_engine",
+            mode="parameter_proposal",
+            input_payloads={
+                "aggregate_row": row,
+                "proposal_payload": insight,
+            },
+            budget_ref="DOC-08",
+        )
         insights.append(insight)
 
     insights = sorted(
@@ -695,6 +710,9 @@ class ReplayCandidate:
             S3 synthetic candidates carry the metadata so downstream PBO
             < 0.5 / DSR(K) > 0.95 gates have the input they expect. Empty
             dict is rejected (Wave 6 acceptance test 5 verifies non-empty).
+        advisory_review_packet: inactive review packet，含 input hashes 與明確
+            no-authority flags；不授予 replay / demo / live / Cost Gate /
+            strategy-config mutation。
     """
 
     candidate_id: str
@@ -704,6 +722,7 @@ class ReplayCandidate:
     confidence: ConfidenceLiteral
     fixture_payload_hash: str
     selection_bias_metadata: dict[str, Any] = field(default_factory=dict)
+    advisory_review_packet: dict[str, Any] = field(default_factory=dict)
 
 
 # ── Internal helper constants for candidate sampling ─────────────────────────
@@ -1047,6 +1066,25 @@ def generate_replay_candidates(
                 confidence=confidence,
                 fixture_payload_hash=fpx_hash,
                 selection_bias_metadata=dict(selection_bias_metadata),
+                advisory_review_packet=build_advisory_review_packet(
+                    capability_id="dream_engine.replay_candidate",
+                    producer="dream_engine",
+                    mode="replay_candidate",
+                    input_payloads={
+                        "intent": intent,
+                        "candidate": {
+                            "candidate_id": candidate_id,
+                            "strategy_params": strategy_params,
+                            "expected_edge_bps": expected_edge_bps,
+                            "expected_cost_bps": expected_cost_bps,
+                            "confidence": confidence,
+                            "fixture_payload_hash": fpx_hash,
+                            "selection_bias_metadata": selection_bias_metadata,
+                        },
+                    },
+                    ledger_ref=intent.manifest_id,
+                    budget_ref="DOC-08",
+                ),
             )
         )
 

@@ -1,0 +1,168 @@
+{
+  "schema_version": "implementation_effect_review_v1",
+  "work_id": "WP4-ADVISORY-DREAMENGINE-ROLE-HARDENING",
+  "reviewed_at": "2026-07-06T21:30:29Z",
+  "pre_state": {
+    "gate": "G6",
+    "status": "blocked",
+    "blockers": [
+      "L2, LLM, MLDE, DreamEngine, and thought-gate outputs did not share one machine-checkable inactive advisory role contract.",
+      "Some outputs relied on prose or local flags such as applied=false, requires_governance=true, or execution_authority=not_granted without a reusable validator.",
+      "L2 outputs could be logged or routed without a response-level inactive packet, and early no-output ledger rows had no packet.",
+      "DreamEngine and MLDE proposals were advisory by convention but not hash-bound inactive review packets."
+    ]
+  },
+  "post_state": {
+    "gate": "G6",
+    "status": "source_contract_ready_with_concerns",
+    "blockers": [
+      "DemoMutationEnvelope remains unformalized for future bounded mutation work",
+      "controlled Demo bandit runtime remains blocked until real reward ledger and envelope prerequisites exist",
+      "runtime/order-capable work remains blocked by expired standing Demo authorization"
+    ]
+  },
+  "subagent_chain": [
+    {
+      "role": "PA",
+      "agent_id": "019f391d-9f72-7a12-bcc2-08d703f8e969",
+      "status": "DONE",
+      "verdict": "DESIGNED",
+      "summary": "Designed minimal advisory_review_packet_v1 helper and split E1 L2/ML/DreamEngine from E1a thought-gate."
+    },
+    {
+      "role": "E1",
+      "agent_id": "019f3922-8a22-79a3-9fa3-39bf4a0b89b1",
+      "status": "DONE",
+      "verdict": "PASS",
+      "summary": "Implemented shared packet helper plus L2, MLDE, and DreamEngine packetization."
+    },
+    {
+      "role": "E1a",
+      "agent_id": "019f392d-b24b-7622-8b05-802840006cfd",
+      "status": "DONE",
+      "verdict": "PASS",
+      "summary": "Implemented thought-gate H1-E/H1-H/H1-I/handoff packetization and contract checks."
+    },
+    {
+      "role": "E2",
+      "agent_id": "019f3936-0915-71d1-b0f5-65dbbc29ea07",
+      "status": "DONE",
+      "verdict": "FAIL FINDINGS=3(C:0/H:2/M:1/L:0)",
+      "summary": "Found model-supplied packet trust, alias scan gaps, and no-output ledger rows without packets."
+    },
+    {
+      "role": "E1-fix",
+      "agent_id": "019f393b-e0df-7551-84ae-9afd8a475b6b",
+      "status": "DONE",
+      "verdict": "PASS",
+      "summary": "Stripped model-supplied packets, hardened nested/camelCase alias scanning, and added inactive packets to early L2 no-output rows."
+    },
+    {
+      "role": "E2-rereview",
+      "agent_id": "019f3942-491c-75e3-a9a3-62f58464126f",
+      "status": "DONE",
+      "verdict": "FAIL FINDINGS=1(C:0/H:0/M:1/L:0)",
+      "summary": "Confirmed prior findings closed; found admitted ml-advisory API response dropped the packet."
+    },
+    {
+      "role": "E1-fix2",
+      "agent_id": "019f3949-1de4-7820-99c0-66cfbc68d336",
+      "status": "DONE",
+      "verdict": "PASS",
+      "summary": "Projected advisory_review_packet through /ml-advisory/dispatch response data and added route test."
+    },
+    {
+      "role": "E2-final",
+      "agent_id": "019f394b-8eb8-71a3-89fd-c5150389f333",
+      "status": "DONE",
+      "verdict": "PASS",
+      "summary": "Confirmed route packet projection finding closed."
+    },
+    {
+      "role": "E4",
+      "agent_id": "019f3950-3cba-7d80-894d-522ad5adf6fe",
+      "status": "DONE",
+      "verdict": "PASS",
+      "summary": "Regression passed: py_compile, ML/helper 53, L2 84, thought-gate 18, and diff-check."
+    },
+    {
+      "role": "QA",
+      "agent_id": "019f3953-3323-7b83-a257-7d4dca15da5b",
+      "status": "DONE_WITH_CONCERNS",
+      "verdict": "ACCEPT_WITH_CONCERNS",
+      "summary": "Accepted source-only WP4; no blocking defects; upstream short-circuit gates are non-proposal outcomes."
+    }
+  ],
+  "tests": [
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile <changed WP4 Python files>",
+      "result": "PASS"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m pytest -q program_code/ml_training/tests/test_advisory_review_packet.py program_code/ml_training/tests/test_mlde_shadow_advisor.py -p no:cacheprovider",
+      "result": "PASS: 53 passed"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 PATH=venvs/mac_dev/bin:$PATH PYTHONPATH=program_code:program_code/exchange_connectors/bybit_connector/control_api_v1 python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_l2_p3a_ml_advisory.py program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_l2_p3b_hypothesize.py program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_l2_ml_advisory_dispatch_route.py -p no:cacheprovider",
+      "result": "PASS: 84 passed"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code/exchange_connectors/bybit_connector/misc_tools:program_code/ai_agents/bybit_thought_gate:program_code python3 -m pytest -q program_code/ai_agents/bybit_thought_gate/tests/test_advisory_review_packet_thought_gate.py program_code/ai_agents/bybit_thought_gate/tests/test_ai_invocation_ledger.py program_code/ai_agents/bybit_thought_gate/tests/test_ai_invocation_governance.py program_code/ai_agents/bybit_thought_gate/tests/test_ai_cost_log_pricing_gate.py program_code/ai_agents/bybit_thought_gate/tests/test_route_binder_e2e.py -p no:cacheprovider",
+      "result": "PASS: 18 passed"
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS"
+    }
+  ],
+  "artifacts": [
+    "program_code/ml_training/advisory_review_packet.py",
+    "program_code/ml_training/tests/test_advisory_review_packet.py",
+    "program_code/exchange_connectors/bybit_connector/control_api_v1/app/l2_advisory_orchestrator.py",
+    "program_code/exchange_connectors/bybit_connector/control_api_v1/app/l2_ml_advisory_executor.py",
+    "program_code/exchange_connectors/bybit_connector/control_api_v1/app/layer2_routes.py",
+    "program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_l2_p3a_ml_advisory.py",
+    "program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_l2_p3b_hypothesize.py",
+    "program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_l2_ml_advisory_dispatch_route.py",
+    "program_code/ml_training/mlde_shadow_advisor.py",
+    "program_code/ml_training/tests/test_mlde_shadow_advisor.py",
+    "program_code/local_model_tools/dream_engine.py",
+    "program_code/ai_agents/bybit_thought_gate/bybit_ai_request_envelope_builder.py",
+    "program_code/ai_agents/bybit_thought_gate/bybit_ai_governed_decision.py",
+    "program_code/ai_agents/bybit_thought_gate/bybit_thought_gate_acceptance_suite.py",
+    "program_code/ai_agents/bybit_thought_gate/bybit_thought_gate_handoff.py",
+    "program_code/ai_agents/bybit_thought_gate/bybit_ai_request_envelope_contract_check.py",
+    "program_code/ai_agents/bybit_thought_gate/bybit_ai_governed_decision_contract_check.py",
+    "program_code/ai_agents/bybit_thought_gate/tests/test_advisory_review_packet_thought_gate.py",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp4_advisory_dreamengine_role_hardening.work_item.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp4_advisory_dreamengine_role_hardening.effect_review.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp4_advisory_dreamengine_role_hardening.state_packet.json"
+  ],
+  "gate_delta": "blocked_to_source_contract_ready_with_concerns",
+  "artifact_delta": "new advisory_review_packet_v1 helper plus L2, MLDE, DreamEngine, thought-gate packetization and contract tests",
+  "test_delta": "new helper, L2, route, MLDE, DreamEngine, and thought-gate packet regression coverage passed",
+  "risk_delta": "no_authority_expansion",
+  "proof_delta": "advisory outputs now carry validator-backed inactive packets with input hashes and no-mutation fields; model-supplied packet fields are stripped and replaced locally",
+  "next_action_quality": "WP5 must start with DemoMutationEnvelope source contract or explicit mapping before any controlled Demo bandit implementation",
+  "regressions": [],
+  "concerns": [
+    "source-only acceptance; no runtime or provider path was exercised",
+    "upstream screen rejects and admission rejects are treated as non-proposal gating outcomes, not advisory packets",
+    "DemoMutationEnvelope remains future work before controlled Demo bandit allocation"
+  ],
+  "boundary_check": {
+    "runtime_mutation": false,
+    "db_read": false,
+    "db_write": false,
+    "exchange_contact": false,
+    "private_read": false,
+    "mcp_runtime": false,
+    "secret_access": false,
+    "provider_call": false,
+    "order_capable": false,
+    "cost_gate_change": false,
+    "deploy": false,
+    "live_or_mainnet": false
+  },
+  "verdict": "EFFECTIVE_WITH_CONCERNS"
+}

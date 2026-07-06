@@ -36,6 +36,10 @@ from app import l2_capability_registry as REG
 from app import l2_ml_advisory_executor as EXEC
 from app import layer2_routes as LR
 from app.learning_tier_gate import LearningTier
+from ml_training.advisory_review_packet import (
+    build_advisory_review_packet,
+    validate_advisory_review_packet,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -227,6 +231,12 @@ class TestDispatchRouteProjection:
             capability_id="ml_advisory.hypothesize", admitted=True,
             admission_reason="admitted", routed_to="neutral_sink",
             guard_verdict="pass", l2_reply_id="l2r:abc",
+            advisory_review_packet=build_advisory_review_packet(
+                capability_id="ml_advisory.hypothesize",
+                input_payloads={"route_projection": {"l2_reply_id": "l2r:abc"}},
+                producer="test_l2_ml_advisory_dispatch_route",
+                mode="hypothesize",
+            ),
         )
         fake = _FakeOrchestrator(res)
         monkeypatch.setattr(LR, "_get_orchestrator", lambda: fake)
@@ -253,6 +263,8 @@ class TestDispatchRouteProjection:
         assert out["data"]["context_assembly_reasons"] == ["daily_returns_missing_b1_defer"]
         assert out["data"]["l2_reply_id"] == "l2r:abc"
         assert out["data"]["routed_to"] == "neutral_sink"
+        assert out["data"]["advisory_review_packet"] == res.advisory_review_packet
+        assert validate_advisory_review_packet(out["data"]["advisory_review_packet"]) is True
 
     def test_direct_context_passthrough_without_adapter(self, monkeypatch):
         """context 直接給（E2E/診斷用）→ 原樣 passthrough，adapter 不被呼。"""

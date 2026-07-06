@@ -10,6 +10,7 @@ from ml_training.mlde_shadow_advisor import (
     build_recommendations,
     config_from_env as shadow_config_from_env,
 )
+from ml_training.advisory_review_packet import validate_advisory_review_packet
 from program_code.local_model_tools.dream_engine import (
     DreamConfig,
     build_dream_summary,
@@ -111,6 +112,11 @@ def test_shadow_advisor_builds_rank_and_veto_recommendations():
     assert {r.recommendation_type for r in recs} == {"rank", "veto"}
     assert all(r.payload["policy"] == "shadow_advisory_only" for r in recs)
     assert all(0.0 < r.confidence <= cfg.confidence_cap for r in recs)
+    assert all("advisory_review_packet" in r.payload for r in recs)
+    assert all(
+        validate_advisory_review_packet(r.payload["advisory_review_packet"])
+        for r in recs
+    )
     rank = next(r for r in recs if r.recommendation_type == "rank")
     assert rank.payload["scanner_context"]["scanner_trend_phase"] == "clean_trend"
     assert rank.payload["scanner_context"]["scanner_f_bkout"] == 0.74
@@ -276,6 +282,8 @@ def test_dream_summary_emits_parameter_proposals_for_negative_edge():
     assert insight["expected_improvement_bps"] == pytest.approx(4.0)
     assert insight["scanner_context"]["scanner_trend_phase"] == "range_bound"
     assert insight["scanner_context"]["scanner_f_grid"] == 0.83
+    assert validate_advisory_review_packet(insight["advisory_review_packet"])
+    assert insight["advisory_review_packet"]["execution_authority"] == "not_granted"
 
 
 def test_opportunity_tracker_classifies_undertrading_and_overtrading():

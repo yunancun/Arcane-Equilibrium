@@ -34,6 +34,7 @@ if str(_SRV_ROOT) not in sys.path:
     sys.path.insert(0, str(_SRV_ROOT))
 
 from app import l2_ml_advisory_executor as EXEC
+from ml_training.advisory_review_packet import validate_advisory_review_packet
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -308,8 +309,12 @@ def test_hypothesize_pass_routes_to_backlog_sink(_mock_ledger, _fdr_machinery):
     assert res.math_gate_verdict == "pass", f"reasons={res.math_gate_reasons}"
     assert res.stage == "backlog_written"
     assert res.ok is True
+    assert validate_advisory_review_packet(res.advisory_review_packet)
+    assert res.advisory_review_packet["capability_id"] == "ml_advisory.hypothesize"
+    assert res.advisory_review_packet["execution_authority"] == "not_granted"
     # sink INSERT 到 agent.lessons（genuinely inert）。
     assert any("INSERT INTO agent.lessons" in s["sql"] for s in store)
+    assert "advisory_review_packet" in store[0]["params"][2]
     # cloud interpret 跑了（survivor；math gate pass 後）。
     assert res.cloud_called is True
     # P4：conducted（pass）→ 恰一筆 debit（k_for_dsr=n_eff 同源由 store 層測試鎖）。
@@ -455,7 +460,7 @@ def test_hypothesize_novelty_duplicate_defers(monkeypatch, _mock_ledger, _fdr_ma
 
 
 def test_hypothesize_generate_unavailable_fail_soft(_mock_ledger):
-    """Ollama generate 不可用（回 None）→ fail-soft（D3 記 error，不 sink）。"""
+    """Ollama generate 不可用（回 None）→ fail-soft（D3 記 inactive error packet，不 sink）。"""
     eng = _HypEngine(generate_text=None)  # generate 回 None
     store: list[dict[str, Any]] = []
     res = _run(EXEC.run_ml_advisory_cascade(
@@ -467,6 +472,18 @@ def test_hypothesize_generate_unavailable_fail_soft(_mock_ledger):
     assert res.ok is False
     assert res.stage == "generate_unavailable_or_unparsable"
     assert not any("INSERT INTO agent.lessons" in s["sql"] for s in store)
+    kwargs = _mock_ledger.record_l2_call.call_args.kwargs
+    parsed_output = kwargs["parsed_output"]
+    assert parsed_output["mode"] == "hypothesize"
+    assert parsed_output["stage"] == "generate_unavailable_or_unparsable"
+    assert parsed_output["error"] == "generate_no_output_or_unparsable"
+    assert parsed_output["no_output"] is True
+    assert parsed_output["advisory_success"] is False
+    assert parsed_output["l2_reply_id"] == res.l2_reply_id
+    assert parsed_output["cost_usd"] == res.cost_usd
+    assert parsed_output["advisory_review_packet"] == res.advisory_review_packet
+    assert validate_advisory_review_packet(parsed_output["advisory_review_packet"])
+    assert parsed_output["advisory_review_packet"]["ledger_ref"] == res.l2_reply_id
 
 
 def test_hypothesize_screen_reject_short_circuits(_mock_ledger):
