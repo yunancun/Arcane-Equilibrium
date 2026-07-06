@@ -366,6 +366,11 @@
 - Verification passed Python Stock/ETF IBKR guard subset `26`; Rust focused gate tests were not runnable because local `~/.cargo/bin/rustup` is a broken symlink to `/opt/homebrew/bin/rustup-init`.
 - Boundary unchanged: no IBKR contact, connector/runtime, secret read/serialization, paper order, fill import, DB/evidence writer, MCP runtime, live/tiny-live path, or Bybit order path reuse.
 
+## 2026-07-07 AI/ML Downstream Loop WP2.1 Training PIT Gate
+
+- PM advanced `WP2.1-TRAINING-RUN-PIT-MANIFEST-GATE` through PA→E1→E2→E4→QA: contract-bound quantile training now requires valid `pit_dataset_manifest_v1` before train/export/registry, and acceptance reports carry canonical PIT binding metadata.
+- Verification accepted: focused WP2.1 `46 passed, 1 skipped` x2, registry adjacency `49 passed` x2, QA adjacency `90 passed, 1 skipped` x2, py_compile/diff-check PASS. Runtime/loss-control remains blocked and was not consumed; next source-safe work is `WP3.1-TRAINING-REGISTRY-CONTRACT-EMISSION`.
+
 ## 2026-07-07 IBKR Demo Ready API-Absent Engineering Loop
 
 - New attached prompt changed the loop semantics: missing IBKR credential/session/operator approval/real Phase2 PASS artifact is `external_verification_pending`, not STOP. PM added `ibkr_demo_ready_api_absent_engineering_packet_v1` under the inert IBKR connector package and terminal report `2026-07-07--ibkr_demo_ready_api_absent_terminal_packet.md`.

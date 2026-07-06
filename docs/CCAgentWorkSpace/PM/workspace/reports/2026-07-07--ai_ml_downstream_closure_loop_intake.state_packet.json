@@ -1,0 +1,118 @@
+{
+  "schema_version": "roadmap_loop_state_packet_v1",
+  "packet_type": "loop_intake_state",
+  "loop_id": "AI-ML-DOWNSTREAM-CLOSURE-LOOP",
+  "created_at": "2026-07-06T23:02:58Z",
+  "status": "INTAKE_READY",
+  "state_reason": "Downstream closure loop recovered from latest repo state. Source-safe branch is available; runtime/loss-control branch is blocked and must not be consumed.",
+  "repo_root": "/Users/ncyu/Projects/TradeBot/srv",
+  "repo_state": {
+    "branch": "main",
+    "head": "8b99833b9e16e3b03efbc6e2198177672687b0ea",
+    "origin_main": "798843f23b2fda66117cf95bfe7c996f97fdf543",
+    "ahead_count": 5,
+    "behind_count": 0,
+    "dirty_worktree_summary": {
+      "unrelated_dirty_paths": [
+        "memory/MEMORY.md",
+        "memory/feedback_active_profit_unconventional_mandate.md",
+        "memory/project_2026_06_13_profit_diagnosis_searchspace_reconfirm.md",
+        "memory/project_2026_06_14_cold_audit.md",
+        "memory/project_2026_07_06_maker_first_nogo.md"
+      ],
+      "selected_work_overlap": false,
+      "staging_area": "clean"
+    }
+  },
+  "source_of_truth_refs": [
+    "AGENTS.md",
+    "CLAUDE.md",
+    ".codex/MEMORY.md",
+    "README.md",
+    "docs/agents/context-loading.md",
+    "TODO.md",
+    ".codex/agents/PM.md",
+    ".codex/AGENT_DISPATCH_PROTOCOL.md",
+    ".codex/SUBAGENT_EXECUTION_RULES.md",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--ai_ml_downstream_closure_loop_design.md",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--ai_ml_roadmap_wp1_wp5_completion_assessment.md",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp5_demo_mutation_envelope_contract.state_packet.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--standing_demo_loss_control_authorization_blocked_by_engine_env.md",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--standing_demo_loss_control_authorization_blocked_by_engine_env.state_packet.json"
+  ],
+  "neighbor_input_classification": {
+    "wp5_mapping": {
+      "classification": "WP5_MAPPING_READY",
+      "evidence_refs": [
+        "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp5_demo_mutation_envelope_contract.md",
+        "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp5_demo_mutation_envelope_contract.effect_review.json",
+        "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_loop_wp5_demo_mutation_envelope_contract.state_packet.json"
+      ],
+      "reason": "WP5 DemoMutationEnvelope source contract and applier mapping artifacts exist; effect review verdict is EFFECTIVE. WP5 state is stopped only because the next runtime branch needed loss-control authorization."
+    },
+    "runtime_loss_control": {
+      "classification": "RUNTIME_LOSS_CONTROL_BLOCKED",
+      "evidence_refs": [
+        "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--standing_demo_loss_control_authorization_blocked_by_engine_env.md",
+        "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--standing_demo_loss_control_authorization_blocked_by_engine_env.state_packet.json",
+        "TODO.md"
+      ],
+      "reason": "Latest PM->E3->BB attempt is BLOCKED/STOP_LOSS_CONTROL because runtime readiness observed OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED=0 plus expired standing authorization. No guardrail/materialization occurred."
+    }
+  },
+  "work_graph": [
+    "WP2.1-TRAINING-RUN-PIT-MANIFEST-GATE",
+    "WP3.1-TRAINING-REGISTRY-CONTRACT-EMISSION",
+    "WP6-REWARD-LEDGER-PROOFPACKET-BRIDGE",
+    "WP7-EFFECT-REVIEW-AND-STOP-LOOP",
+    "BOUNDED-DEMO-OUTCOME-EVALUATION-RUNTIME-GATED"
+  ],
+  "selected_work_id": "WP2.1-TRAINING-RUN-PIT-MANIFEST-GATE",
+  "selected_work_reason": "WP2.1 is the first incomplete source-only downstream closure item and has no dirty overlap with the existing unrelated memory/* worktree changes.",
+  "current_gate": "DOWNSTREAM_SOURCE_SAFE",
+  "next_work_id": "WP2.1-TRAINING-RUN-PIT-MANIFEST-GATE",
+  "run_mode": {
+    "source_safe": true,
+    "runtime_gated": true,
+    "runtime_gate_ready": false,
+    "dispatch_required_for_source_feature": true,
+    "required_dispatch_chain": [
+      "PM",
+      "PA",
+      "E1/E1a",
+      "E2",
+      "E4",
+      "QA",
+      "PM"
+    ]
+  },
+  "denied_actions": [
+    "runtime_mutation",
+    "db_write",
+    "db_migration",
+    "exchange_contact",
+    "private_read",
+    "mcp_server_or_config",
+    "credential_or_secret_access",
+    "order_or_probe",
+    "cost_gate_change",
+    "deploy",
+    "live_or_mainnet",
+    "runtime_learning",
+    "bounded_demo_outcome_ingestion"
+  ],
+  "stop_conditions_armed": [
+    "STOP_DIRTY_OVERLAP",
+    "STOP_SOURCE_DRIFT",
+    "STOP_BOUNDARY",
+    "STOP_LOSS_CONTROL",
+    "STOP_TEST",
+    "STOP_EVIDENCE",
+    "STOP_NO_DELTA",
+    "STOP_DISPATCH_BLOCKED",
+    "STOP_SOURCE_CLOSURE_COMPLETE_WAIT_RUNTIME",
+    "STOP_WAIT_BOUNDED_DEMO_OUTCOMES"
+  ],
+  "current_stop_condition": null,
+  "next_safe_action": "Dispatch WP2.1 through PM -> PA -> E1/E1a -> E2 -> E4 -> QA -> PM for source-only training PIT manifest gate implementation; stop as STOP_DISPATCH_BLOCKED if required subagent dispatch is unavailable."
+}

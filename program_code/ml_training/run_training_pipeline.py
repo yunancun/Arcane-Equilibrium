@@ -17,10 +17,12 @@ MODULE_NOTE (中): 兩條路徑：
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -72,6 +74,16 @@ class PipelineConfig:
     schema_version: str = "v1"
     onnx_validate_samples: int = 1000  # random vectors for precision gate
 
+    # WP2.1 source-only PIT manifest gate for contract-bound quantile training.
+    # WP2.1：合約綁定分位訓練必須先綁定 PIT dataset manifest；傳統路徑保持
+    # 非 contract-bound，若 caller 誤設 contract_bound_run 會 fail-closed。
+    contract_bound_run: bool = False
+    candidate_id: Optional[str] = None
+    side: Optional[str] = None
+    pit_dataset_manifest: Optional[Dict[str, Any]] = None
+    pit_dataset_manifest_path: Optional[str] = None
+    pit_dataset_manifest_source: Optional[Dict[str, Any]] = None
+
 
 @dataclass
 class PipelineResult:
@@ -87,6 +99,48 @@ class PipelineResult:
     verdict: str = ""
     acceptance_report_path: str = ""
     onnx_artifacts: Dict[str, Any] = field(default_factory=dict)
+    contract_bound_run: bool = False
+    pit_dataset_manifest_hash: str = ""
+    pit_dataset_manifest_path: str = ""
+    pit_dataset_manifest_status: str = ""
+    pit_dataset_manifest_reason: str = ""
+
+
+@dataclass(frozen=True)
+class PitBinding:
+    """Training-time PIT manifest binding emitted into acceptance reports."""
+
+    contract_bound_run: bool = False
+    manifest: Optional[Dict[str, Any]] = None
+    manifest_hash: str = ""
+    manifest_path: str = ""
+    status: str = "not_contract_bound"
+    validation_verdict: str = "not_required"
+    validation_reason: str = "not_contract_bound"
+    candidate_scope: Dict[str, Any] = field(default_factory=dict)
+
+    def to_report_binding(self) -> Dict[str, Any]:
+        binding: Dict[str, Any] = {
+            "schema_version": "training_pit_manifest_binding_v1",
+            "contract_bound_run": self.contract_bound_run,
+            "status": self.status,
+            "manifest_hash": self.manifest_hash,
+            "manifest_path": self.manifest_path,
+            "validation_verdict": self.validation_verdict,
+            "validation_reason": self.validation_reason,
+            "not_authority": True,
+            "runtime_mutation_performed": False,
+            "db_write_performed": False,
+            "exchange_private_read_performed": False,
+            "order_or_probe_performed": False,
+            "live_or_mainnet_performed": False,
+            "cost_gate_change_performed": False,
+            "deploy_performed": False,
+            "secret_access_performed": False,
+        }
+        if self.candidate_scope:
+            binding["candidate_scope"] = dict(self.candidate_scope)
+        return binding
 
 
 def _resolve_symbol_slot(config: PipelineConfig) -> tuple[bool, str]:
@@ -105,6 +159,349 @@ def _resolve_symbol_slot(config: PipelineConfig) -> tuple[bool, str]:
     if sym is None or (isinstance(sym, str) and sym.upper() == "ALL"):
         return True, "ALL"
     return False, sym
+
+
+def _text(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _canonical_json_bytes(value: Dict[str, Any]) -> bytes:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+
+
+def _not_contract_bound_pit_binding() -> PitBinding:
+    return PitBinding()
+
+
+def _apply_pit_binding(result: PipelineResult, binding: PitBinding) -> None:
+    result.contract_bound_run = binding.contract_bound_run
+    result.pit_dataset_manifest_hash = binding.manifest_hash
+    result.pit_dataset_manifest_path = binding.manifest_path
+    result.pit_dataset_manifest_status = binding.status
+    result.pit_dataset_manifest_reason = binding.validation_reason
+
+
+def _pit_gate_failure_result(config: PipelineConfig, reason: str, status: str = "invalid") -> PipelineResult:
+    result = PipelineResult(
+        contract_bound_run=bool(config.contract_bound_run),
+        pit_dataset_manifest_status=status,
+        pit_dataset_manifest_reason=reason,
+        error=reason,
+    )
+    result.stages_completed.append("pit_manifest_gate_failed")
+    return result
+
+
+def _load_pit_manifest_from_config(config: PipelineConfig) -> tuple[Any, str, str, int]:
+    """Load explicit PIT manifest input without inferring external state.
+
+    Returns (manifest, manifest_input_path, failure_reason, input_count).
+    回傳 (manifest, 輸入路徑, 失敗原因, input_count)；只消費 caller 顯式提供的
+    inline/path/source mapping，不讀 DB/runtime/exchange。
+    """
+    inputs = []
+    if config.pit_dataset_manifest is not None:
+        inputs.append("inline")
+    if _text(config.pit_dataset_manifest_path):
+        inputs.append("path")
+    if config.pit_dataset_manifest_source is not None:
+        inputs.append("source")
+    if len(inputs) > 1:
+        return None, "", "pit_dataset_manifest_multiple_inputs", len(inputs)
+    if not inputs:
+        return None, "", "", 0
+
+    kind = inputs[0]
+    if kind == "inline":
+        return copy.deepcopy(config.pit_dataset_manifest), "", "", 1
+
+    if kind == "path":
+        path_text = _text(config.pit_dataset_manifest_path)
+        try:
+            manifest = json.loads(Path(path_text).read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            return None, path_text, f"pit_dataset_manifest_path_unreadable:{type(exc).__name__}", 1
+        return manifest, path_text, "", 1
+
+    from program_code.ml_training.pit_dataset_manifest_builder import (
+        build_pit_dataset_manifest_from_source,
+    )
+
+    build = build_pit_dataset_manifest_from_source(config.pit_dataset_manifest_source or {})
+    if build.manifest is None:
+        return None, "", build.validation.reason, 1
+    return build.manifest, "", "", 1
+
+
+def _candidate_scope_mismatch_reason(
+    config: PipelineConfig,
+    manifest: Dict[str, Any],
+    symbol_slot: str,
+) -> str:
+    scope = manifest.get("candidate_scope") if isinstance(manifest, dict) else None
+    if not isinstance(scope, dict):
+        return "pit_manifest_candidate_scope_missing"
+    expected = {
+        "candidate_id": _text(config.candidate_id),
+        "strategy_name": _text(config.strategy_type),
+        "symbol": _text(symbol_slot),
+        "side": _text(config.side),
+        "engine_mode": _text(config.engine_mode),
+    }
+    for field, expected_value in expected.items():
+        if not expected_value:
+            return f"pit_manifest_config_{field}_missing"
+        actual_value = _text(scope.get(field))
+        if actual_value != expected_value:
+            return f"pit_manifest_candidate_scope_{field}_mismatch"
+    return ""
+
+
+def _write_pit_manifest_sidecar(
+    output_dir: Path,
+    strategy: str,
+    engine_mode: str,
+    symbol_slot: str,
+    manifest: Dict[str, Any],
+) -> str:
+    path = output_dir / f"{strategy}_{engine_mode}_{symbol_slot}_pit_dataset_manifest.json"
+    _atomic_write_bytes(path, _canonical_json_bytes(manifest) + b"\n")
+    return str(path)
+
+
+def _atomic_write_bytes(path: Path, payload: bytes) -> None:
+    """先寫同目錄暫存檔，完整成功後才替換 final artifact。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.{id(payload)}.tmp")
+    try:
+        tmp_path.write_bytes(payload)
+        tmp_path.replace(path)
+    except Exception:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _iso_from_base_ms(base: datetime, offset_ms: int) -> str:
+    ts = base + timedelta(milliseconds=int(offset_ms))
+    return ts.isoformat().replace("+00:00", "Z")
+
+
+def _build_dry_run_pit_manifest_source(
+    config: PipelineConfig,
+    features,
+    labels,
+    timestamps,
+    feature_names,
+    label_composition,
+) -> Dict[str, Any]:
+    """Build deterministic synthetic source mapping for dry-run PIT gate tests.
+
+    這只證明 source-only gate 與 report binding 接線；不是 runtime evidence、
+    ProofPacket、bounded Demo outcome 或 promotion proof。
+    """
+    base = datetime(2026, 7, 1, 0, 0, 0, tzinfo=timezone.utc)
+    as_of_ts = "2026-07-06T00:00:00Z"
+    row_ids = [f"dry-run-row-{idx:06d}" for idx in range(len(labels))]
+    rows = []
+    for idx, row_id in enumerate(row_ids):
+        feature_values = features[idx].tolist() if hasattr(features[idx], "tolist") else list(features[idx])
+        rows.append({
+            "row_id": row_id,
+            "ts": _iso_from_base_ms(base, int(timestamps[idx])),
+            "feature_values": [float(value) for value in feature_values],
+            "label": float(labels[idx]),
+        })
+    split_a = max(1, int(len(row_ids) * 0.6))
+    split_b = max(split_a + 1, int(len(row_ids) * 0.8))
+    split_b = min(split_b, len(row_ids))
+    train_ids = row_ids[:split_a]
+    validation_ids = row_ids[split_a:split_b] or row_ids[-1:]
+    test_ids = row_ids[split_b:] or row_ids[-1:]
+    start_ts = rows[0]["ts"] if rows else as_of_ts
+    end_ts = rows[-1]["ts"] if rows else as_of_ts
+    matched_control_count = max(1, min(16, len(row_ids)))
+    feature_names_list = [str(name) for name in feature_names]
+    label_summary = label_composition or {"source": "dry_run_synthetic"}
+
+    return {
+        "dataset_id": (
+            f"dry-run-{config.strategy_type}-{config.engine_mode}-"
+            f"{config.symbol}-{config.candidate_id}"
+        ),
+        "dataset_role": "synthetic_training_dry_run",
+        "as_of_ts": as_of_ts,
+        "candidate_scope": {
+            "candidate_id": _text(config.candidate_id),
+            "strategy_name": _text(config.strategy_type),
+            "symbol": _text(config.symbol),
+            "side": _text(config.side),
+            "engine_mode": _text(config.engine_mode),
+        },
+        "window": {
+            "start_ts": start_ts,
+            "end_ts": end_ts,
+            "min_ts": start_ts,
+            "max_ts": end_ts,
+        },
+        "query": {
+            "query_id": (
+                f"dry_run_source_only_{config.strategy_type}_"
+                f"{config.engine_mode}_{config.symbol}"
+            ),
+            "query_text": (
+                "SELECT deterministic synthetic dry_run training rows "
+                "WHERE ts >= :start_ts AND ts <= :end_ts"
+            ),
+            "params": {
+                "start_ts": start_ts,
+                "end_ts": end_ts,
+                "candidate_id": _text(config.candidate_id),
+                "symbol": _text(config.symbol),
+                "side": _text(config.side),
+                "source_only": True,
+            },
+        },
+        "rows": {"rows": rows},
+        "features": {
+            "feature_schema_version": _text(config.schema_version),
+            "feature_names": feature_names_list,
+            "definition": {
+                "source": "deterministic_dry_run_synthetic_features",
+                "n_features": len(feature_names_list),
+            },
+            "schema": {name: "float32" for name in feature_names_list},
+        },
+        "labels": {
+            "schema": {"label": "float32"},
+            "config": {
+                "source": "deterministic_dry_run_synthetic_labels",
+                "label_composition": label_summary,
+            },
+            "outcome_cutoff_ts": as_of_ts,
+        },
+        "splits": {
+            "split_id": "dry-run-source-only-cpcv-v1",
+            "train_row_ids": train_ids,
+            "validation_row_ids": validation_ids,
+            "test_row_ids": test_ids,
+            "embargo_bars": 12,
+            "purge_bars": 4,
+        },
+        "leakage": {
+            "report": {"checked": True, "source": "dry_run_synthetic"},
+            "fold_preprocessing_stats": {"fit_scope": "train_fold_only"},
+            "overlap_count": 0,
+        },
+        "controls": {
+            "matched_control_rows": [
+                {"row_id": f"dry-run-control-{idx:06d}"}
+                for idx in range(matched_control_count)
+            ],
+            "matched_control_count": matched_control_count,
+        },
+        "fills": {
+            "fill_rows": [{
+                "fill_id": "dry-run-fill-entry-000000",
+                "order_link_id": "dry-run-order-000000",
+                "context_id": "dry-run-context-000000",
+            }],
+            "fill_id_field": "fill_id",
+            "order_link_id_field": "order_link_id",
+            "context_id_field": "context_id",
+        },
+        "provenance": {
+            "code_commit": "0" * 40,
+            "rust_build_sha": "1" * 40,
+            "source_hashes": {
+                "pit_dataset_manifest_builder": "2" * 64,
+                "run_training_pipeline": "3" * 64,
+            },
+            "input_artifact_hashes": {
+                "dry_run_synthetic_dataset": "4" * 64,
+                "dry_run_synthetic_labels": "5" * 64,
+            },
+        },
+    }
+
+
+def _resolve_training_pit_binding(
+    config: PipelineConfig,
+    *,
+    output_dir: Path,
+    symbol_slot: str,
+    pooled: bool,
+    features,
+    labels,
+    timestamps,
+    feature_names,
+    label_composition,
+) -> tuple[Optional[PitBinding], str]:
+    if not config.contract_bound_run:
+        return _not_contract_bound_pit_binding(), ""
+
+    if pooled:
+        return None, "pit_manifest_pooled_symbol_not_allowed"
+
+    manifest, _input_path, load_error, input_count = _load_pit_manifest_from_config(config)
+    if load_error:
+        return None, load_error
+
+    if input_count == 0:
+        if not config.dry_run:
+            return None, "pit_dataset_manifest_missing"
+        if not (_text(config.candidate_id) and _text(config.symbol) and _text(config.side)):
+            return None, "pit_manifest_dry_run_scope_missing"
+        from program_code.ml_training.pit_dataset_manifest_builder import (
+            build_pit_dataset_manifest_from_source,
+        )
+        source = _build_dry_run_pit_manifest_source(
+            config, features, labels, timestamps, feature_names, label_composition,
+        )
+        build = build_pit_dataset_manifest_from_source(source)
+        manifest = build.manifest
+        if manifest is None:
+            return None, build.validation.reason
+
+    from program_code.ml_training.pit_dataset_manifest import (
+        DATASET_READY,
+        compute_pit_dataset_manifest_hash,
+        validate_pit_dataset_manifest,
+    )
+
+    validation = validate_pit_dataset_manifest(manifest)
+    if not validation.dataset_ready or validation.verdict != DATASET_READY:
+        return None, validation.reason
+    if not isinstance(manifest, dict):
+        return None, "pit_dataset_manifest_not_mapping"
+    mismatch = _candidate_scope_mismatch_reason(config, manifest, symbol_slot)
+    if mismatch:
+        return None, mismatch
+
+    manifest_hash = compute_pit_dataset_manifest_hash(manifest)
+    manifest_path = _write_pit_manifest_sidecar(
+        output_dir, config.strategy_type, config.engine_mode, symbol_slot, manifest,
+    )
+    scope = manifest.get("candidate_scope")
+    return PitBinding(
+        contract_bound_run=True,
+        manifest=copy.deepcopy(manifest),
+        manifest_hash=manifest_hash,
+        manifest_path=manifest_path,
+        status=DATASET_READY,
+        validation_verdict=validation.verdict,
+        validation_reason=validation.reason,
+        candidate_scope=dict(scope) if isinstance(scope, dict) else {},
+    ), ""
 
 
 def _load_dataset(
@@ -244,7 +641,6 @@ def _run_quantile_pipeline(
     import numpy as np
     from program_code.ml_training.quantile_trainer import (
         QuantileTrainingConfig,
-        train_quantile_trio,
     )
     from program_code.ml_training.calibration import fit_cqr_trio, evaluate_cqr_coverage
     from program_code.ml_training.quantile_reports import (
@@ -261,9 +657,28 @@ def _run_quantile_pipeline(
     # P1-7 C：解析 pooled / per-symbol；供 acceptance report 檔名 + 指標標記。
     pooled, symbol_slot = _resolve_symbol_slot(config)
 
+    pit_binding, pit_error = _resolve_training_pit_binding(
+        config,
+        output_dir=output_dir,
+        symbol_slot=symbol_slot,
+        pooled=pooled,
+        features=features,
+        labels=labels,
+        timestamps=timestamps,
+        feature_names=feature_names,
+        label_composition=label_composition,
+    )
+    if pit_error:
+        failed = _pit_gate_failure_result(config, pit_error)
+        return failed
+    pit_binding = pit_binding or _not_contract_bound_pit_binding()
+    _apply_pit_binding(result, pit_binding)
+
     qcfg = QuantileTrainingConfig(schema_version=config.schema_version)
 
     # Stage 2: train q10/q50/q90.
+    from program_code.ml_training.quantile_trainer import train_quantile_trio
+
     train_result = train_quantile_trio(
         features=features,
         labels=labels,
@@ -311,10 +726,25 @@ def _run_quantile_pipeline(
         # P1-3：label 組成硬 gate（synthetic_share==0 且 zeros_share≤0.5，
         # fail → verdict 封頂 shadow_only）。
         label_composition=label_composition,
+        pit_dataset_manifest=pit_binding.manifest,
+        pit_dataset_manifest_binding=pit_binding.to_report_binding(),
+        persist_required=pit_binding.contract_bound_run,
     )
     result.stages_completed.append("acceptance_report")
     result.verdict = report.get("verdict", "")
     result.acceptance_report_path = str(report_path)
+    if pit_binding.contract_bound_run:
+        try:
+            persisted = json.loads(report_path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            result.error = f"pit acceptance report persist verification failed: {exc}"
+            result.stages_completed.append("pit_manifest_report_verify_failed")
+            return result
+        persisted_binding = persisted.get("pit_dataset_manifest_binding", {})
+        if persisted_binding.get("manifest_hash") != pit_binding.manifest_hash:
+            result.error = "pit_manifest_report_hash_mismatch"
+            result.stages_completed.append("pit_manifest_report_verify_failed")
+            return result
 
     # Stage 5: ONNX export — gate on verdict ≠ no_ship.
     # shadow_only still emits ONNX so Rust can wire shadow inference.
@@ -484,9 +914,15 @@ def _run_legacy_scorer_pipeline(
 def run_pipeline(config: PipelineConfig) -> PipelineResult:
     """Run training pipeline end-to-end; routes to quantile or legacy path.
     端到端執行；依 config.use_quantile_predictor 路由。"""
-    result = PipelineResult()
+    result = PipelineResult(contract_bound_run=bool(config.contract_bound_run))
 
     try:
+        if config.contract_bound_run and not config.use_quantile_predictor:
+            return _pit_gate_failure_result(
+                config,
+                "contract_bound_quantile_path_required",
+                status="invalid",
+            )
         logger.info(
             "[pipeline] start: strategy=%s engine=%s quantile=%s dry_run=%s",
             config.strategy_type, config.engine_mode,
