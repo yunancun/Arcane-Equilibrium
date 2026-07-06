@@ -25,6 +25,15 @@
 
 ## 近期記錄
 
+## 2026-07-06 Maker-First / Microstructure Feasibility — NO-GO
+
+- PM ran a read-only $0 four-agent wave (QC/BB/MIT/PA) plus a two-window `fill_sim` run over ~34M rows of recorded `market.l1_events` to test whether a maker-first (passive liquidity-provision) paradigm could fix non-profitability / mechanical design. Verdict: **NO-GO as an engineering profit lever at Bybit VIP0**, triple-confirmed — BB (VIP0 maker is a +2.0 bps fee not a rebate; rebate is institution-gated MM-program only), QC (half-spread ≈ fee on liquid perps), `fill_sim` (**0/172 cells net-positive** across fast-3h + 72h windows; best cell ADAUSDT −3.2 bps; 0 signals survive walk-forward holdout; break-even needs maker fee ≤ ~0.4 bps/side).
+- Structural reason is market-making-native, not directional-alpha: captured half-spread < adverse selection + maker fee; wide-spread symbols do NOT help (adverse selection scales with spread). The lower-fee tier that would flip it is an operator capital/BD lever, not engineering.
+- Correction to the session's initial thesis (falsified by PA at code level): the hot path is NOT a hardcoded naive taker — maker/PostOnly entry is live (`use_maker_entry=true` demo+live), demo close-maker is attempted; the taker wall is on the exit leg and is a microstructure reality (passive exits don't reliably fill), not a code gap. Genuinely dormant = `order_router.rs` M12 adaptive router (0-caller `unimplemented!()`) — a cost-reduction capability, not alpha.
+- Still open (not concluded, mandate-respecting): brand-new-listing wide-spread capture (offline-screenable $0); full CP-3 multi-regime accumulation (passive via recorder+cron, unlikely to overturn the regime-independent fee wall); infra-tier change. P0 read-only prep came back CLEAN (Rust RiskConfig sole cap authority; June live-write 5-gate-bypass P1 remediated at HEAD; no hidden 10-USDT path; context_id-keyed outcomes).
+- Lesson: a detached long research job (`fill_sim`, reparented to init) survives its launching agent's idle-kill; its liveness = remote PID + output artifact, independent of the agent — diagnose before `TaskStop`. PM prematurely stopped a resuming QC here and recovered by reading the durable JSON in the main session (no data lost).
+- Boundary held: read-only, offline, $0. No order, probe, private read, exchange contact, secret access, MCP, Cost Gate change, DB write, migration, runtime mutation, or live/mainnet. No implementation dispatched; awaiting operator fork (niche screen / infra decision / M12 cost-reduction). Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--maker_first_microstructure_feasibility_verdict.md`.
+
 ## 2026-07-05 AI/ML Trading Maturity Engineering Plan
 
 - PM integrated QC/MIT/AI-E/PA/E3/BB reviews plus local CC root-principle review into a five-phase AI/ML trading maturity plan: evidence loop, point-in-time training foundation, advisory model layer, controlled Demo learning, and optional RL/MCP research.
