@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-07 AI/ML Downstream Closure Loop Design
+
+- PM designed the post-WP1-WP5 downstream closure loop as `DESIGN_READY_SOURCE_FIRST_RUNTIME_GATED`: no need to wait for neighbor data to design or run source-safe WP2.1/WP3.1 work, but runtime learning remains gated by PM->E3->BB and bounded Demo outcome evidence.
+- Loop order: `WP2.1` training PIT gate -> `WP3.1` registry contract emission -> `WP6` reward-ledger ProofPacket bridge -> `WP7` effect-review stop loop; each iteration must write effect review and state packet.
+- Auto-stop codes include dirty overlap, source drift, boundary, loss-control, test, evidence, no-delta, wait-neighbor, source-closure-wait-runtime, wait-bounded-demo-outcomes, and loop-complete. Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--ai_ml_downstream_closure_loop_design.md`。
+
 ## 2026-07-07 AI/ML Roadmap WP1-WP5 Completion Assessment
 
 - PM combined WP5 with prior WP1-WP4 audit and signed `PASS-SOURCE-CONTRACT-LAYER / FAIL-FULL-TRAINING-PROFIT-EVOLUTION-CLOSURE`: WP1-WP5 source contracts are complete enough, but the full AI/ML trading-learning loop is not complete.
