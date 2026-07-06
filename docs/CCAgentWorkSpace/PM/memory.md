@@ -25,6 +25,13 @@
 
 ## 近期記錄
 
+## 2026-07-06 AI/ML Roadmap Adversarial Audit
+
+- PM ran a source-only adversarial audit of the AI/ML roadmap and signed `PASS-WITH-CONDITIONS`: direction is effective if enforced as a gate-based dependency graph, not a calendar promise.
+- Key constraints: define `proof_packet_v1` before treating ProofPacket as an interface; make PIT manifests mandatory; extend registry-authorized serving metadata; formalize/map `DemoMutationEnvelope`; pre-register new-listing/event screens; scope M12 as cost reduction only; keep MCP pinned source-only.
+- Boundary held: no runtime action, DB write, exchange/API/private read, order/probe, MCP install/config, Cost Gate change, secret access, or live/mainnet.
+- Reports: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_adversarial_audit.md`; operator mirror `docs/CCAgentWorkSpace/Operator/2026-07-06--ai_ml_roadmap_adversarial_audit.md`.
+
 ## 2026-07-06 AI/ML Roadmap After Maker-First Challenge
 
 - PM challenged the maker-first NO-GO without overturning its narrow conclusion: mature-perp passive spread capture at current Bybit fee tier remains blocked, but the result must not be overextended into "AI is useless" or "all engineering edge is dead."
