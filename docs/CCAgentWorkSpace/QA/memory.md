@@ -176,3 +176,6 @@ P3a `test_l2_p3a_ml_advisory.py` **53 passed**（含 TestD3ContractVerProvenance
 
 ## 2026-06-12 — P2 incident-policy dispatch trigger source QA acceptance
 `P2-INCIDENT-POLICY-DISPATCH-TRIGGER` source acceptance PASS_WITH_CONDITIONS：Mac/Linux C4 true producer path 1p each、notify-only no-AllFail 1p each、engine_dead targeted canary 5p each；static scan confirms engine_dead no order/auth/DB/risk/trading mutation and sm_halt/position_drift only feed incident_policy. Runtime healthz/watchdog sanity OK, but no deployed-E2E or restart claim. Report `2026-06-12--incident_policy_dispatch_trigger_qa_acceptance.md`.
+
+## 2026-07-07 — WP2.1 Training Run PIT Manifest Gate source QA acceptance
+`WP2.1-TRAINING-RUN-PIT-MANIFEST-GATE` source-only QA acceptance PASS：chain PM→PA→E1→E2 return→E1 fix→E2 PASS_TO_E4→E4→QA complete；contract-bound quantile PIT gate is before train/export/registry, canonical acceptance report binding is present, non-contract-bound is explicit `not_contract_bound`, pooled/legacy fail closed, and PIT/report persistence is atomic. E4 evidence accepted (`46 passed, 1 skipped` x2, registry `49 passed` x2, QA adjacency `90 passed, 1 skipped` x2, py_compile/diff-check PASS). Runtime/loss-control branch remains separate BLOCKED_BY_RUNTIME_ENV/STOP_LOSS_CONTROL and was not consumed. Report `2026-07-07--wp2_1_training_run_pit_manifest_gate_acceptance.md`.

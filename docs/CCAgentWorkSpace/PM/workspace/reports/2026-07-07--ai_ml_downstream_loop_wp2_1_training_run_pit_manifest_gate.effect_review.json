@@ -1,0 +1,80 @@
+{
+  "schema_version": "implementation_effect_review_v1",
+  "work_id": "WP2.1-TRAINING-RUN-PIT-MANIFEST-GATE",
+  "loop_id": "AI-ML-DOWNSTREAM-CLOSURE-LOOP",
+  "created_at": "2026-07-06T23:40:15Z",
+  "pre_state": {
+    "training_pipeline_pit_gate": "missing",
+    "acceptance_report_pit_binding": "missing",
+    "registry_contract_emission": "not_started",
+    "runtime_loss_control": "blocked",
+    "source_head_at_intake": "8b99833b9e16e3b03efbc6e2198177672687b0ea"
+  },
+  "post_state": {
+    "training_pipeline_pit_gate": "implemented_source_only",
+    "acceptance_report_pit_binding": "canonical_pit_dataset_manifest_and_training_pit_manifest_binding_v1",
+    "contract_bound_fail_closed_cases": [
+      "missing_manifest",
+      "invalid_manifest_hash",
+      "candidate_scope_mismatch",
+      "pooled_symbol_none_or_ALL",
+      "unpinned_query",
+      "leakage_overlap",
+      "legacy_scorer_contract_bound_route"
+    ],
+    "atomic_persistence": "pit_sidecar_and_acceptance_report_use_same_directory_temp_plus_replace",
+    "runtime_loss_control": "blocked_unchanged",
+    "next_source_work": "WP3.1-TRAINING-REGISTRY-CONTRACT-EMISSION"
+  },
+  "tests": [
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m py_compile program_code/ml_training/run_training_pipeline.py program_code/ml_training/quantile_reports.py program_code/ml_training/pit_dataset_manifest.py program_code/ml_training/pit_dataset_manifest_builder.py program_code/ml_training/model_registry.py",
+      "result": "PASS"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m pytest -q program_code/ml_training/tests/test_run_training_pipeline.py program_code/ml_training/tests/test_quantile_reports.py program_code/ml_training/tests/test_pit_dataset_manifest.py program_code/ml_training/tests/test_pit_dataset_manifest_builder.py -p no:cacheprovider",
+      "result": "PASS",
+      "observed": "46 passed, 1 skipped x2 per E4"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m pytest -q program_code/ml_training/tests/test_model_registry.py program_code/ml_training/tests/test_registry_serving_contract.py -p no:cacheprovider",
+      "result": "PASS",
+      "observed": "49 passed x2 per E4"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m pytest -q program_code/ml_training/tests/test_run_training_pipeline.py program_code/ml_training/tests/test_quantile_trainer.py program_code/ml_training/tests/test_proof_packet_contract.py program_code/ml_training/tests/test_pit_dataset_manifest.py program_code/ml_training/tests/test_registry_serving_contract.py -p no:cacheprovider",
+      "result": "PASS",
+      "observed": "90 passed, 1 skipped x2 per E4"
+    },
+    {
+      "command": "git diff --check -- WP2.1 scoped source/report paths",
+      "result": "PASS"
+    }
+  ],
+  "artifact_delta": "Adds contract-bound PIT manifest fields to PipelineConfig/PipelineResult; attaches canonical pit_dataset_manifest plus training_pit_manifest_binding_v1 to quantile acceptance reports; adds atomic persistence and focused tests.",
+  "gate_delta": "Training can now be explicitly contract-bound to pit_dataset_manifest_v1; WP3.1 can consume acceptance-report PIT binding as source input.",
+  "proof_delta": "No profit proof or bounded Demo outcome proof added. This only improves training lineage and downstream proof substrate.",
+  "runtime_delta": "blocked",
+  "risk_delta": "no_authority_expansion",
+  "regressions": [],
+  "concerns": [
+    "program_code/ml_training/run_training_pipeline.py is 1005 lines, above the 800-line review-attention threshold but below the 2000-line hard cap; E2 accepted this as non-blocking because PA scoped small private helpers into the file.",
+    "Runtime/loss-control branch remains blocked by OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED=0 plus expired standing auth and was not consumed."
+  ],
+  "boundary_check": {
+    "runtime_mutation": false,
+    "db_read": false,
+    "db_write": false,
+    "db_migration": false,
+    "exchange_contact": false,
+    "private_read": false,
+    "mcp_server_or_config": false,
+    "credential_or_secret_access": false,
+    "order_or_probe": false,
+    "cost_gate_change": false,
+    "deploy": false,
+    "live_or_mainnet": false,
+    "bounded_demo_outcome_ingestion": false
+  },
+  "verdict": "EFFECTIVE"
+}

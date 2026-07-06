@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -255,6 +256,9 @@ def generate_acceptance_report(
     harness_n_samples: int = 1000,
     harness_seed: int = 1337,
     label_composition: Optional[Dict[str, Any]] = None,
+    pit_dataset_manifest: Optional[Dict[str, Any]] = None,
+    pit_dataset_manifest_binding: Optional[Dict[str, Any]] = None,
+    persist_required: bool = False,
 ) -> Dict[str, Any]:
     """Assemble per-gate metrics + overall verdict (ship / shadow / no_ship).
 
@@ -268,6 +272,11 @@ def generate_acceptance_report(
       label_composition — P1-3 訓練集 label 組成（parquet_etl.build_label_composition
         產出）；提供時作為第六道硬 gate（synthetic_share == 0 且 zeros_share ≤ 0.5，
         fail → verdict 封頂 shadow_only）並原樣寫入 report。
+      pit_dataset_manifest / pit_dataset_manifest_binding — WP2.1 source-only
+        PIT manifest contract metadata. Non-contract-bound callers omit them and
+        receive an explicit not_contract_bound binding.
+      persist_required — True 時 output_path 寫入失敗會 fail-loud；僅供
+        contract-bound training gate 使用，舊呼叫端維持 fail-soft。
 
     Returns dict with all gate metrics, sample-size bucket, final verdict.
     Verdict logic:
@@ -295,12 +304,35 @@ def generate_acceptance_report(
         # P1-3：label 組成永遠落 report（None = 呼叫端未提供，如 dry-run），
         # 供 MIT/E4 驗收溯源（top_close_tags / informative vs synthetic 記帳）。
         "label_composition": label_composition,
+        "pit_dataset_manifest": pit_dataset_manifest,
+        "pit_dataset_manifest_binding": (
+            pit_dataset_manifest_binding
+            if pit_dataset_manifest_binding is not None
+            else {
+                "schema_version": "training_pit_manifest_binding_v1",
+                "contract_bound_run": False,
+                "status": "not_contract_bound",
+                "manifest_hash": "",
+                "manifest_path": "",
+                "validation_verdict": "not_required",
+                "validation_reason": "not_contract_bound",
+                "not_authority": True,
+                "runtime_mutation_performed": False,
+                "db_write_performed": False,
+                "exchange_private_read_performed": False,
+                "order_or_probe_performed": False,
+                "live_or_mainnet_performed": False,
+                "cost_gate_change_performed": False,
+                "deploy_performed": False,
+                "secret_access_performed": False,
+            }
+        ),
     }
 
     if not result.success:
         report["verdict"] = VERDICT_NO_SHIP
         report["verdict_reason"] = f"training failed: {result.error}"
-        return _maybe_persist(report, output_path)
+        return _maybe_persist(report, output_path, persist_required=persist_required)
 
     # Sample-size bucket first (short-circuit for small n).
     bucket = _sample_size_bucket(result.n_samples_labeled)
@@ -376,20 +408,44 @@ def generate_acceptance_report(
         result.n_samples_labeled, all_hard_gates_pass,
     )
 
-    return _maybe_persist(report, output_path)
+    return _maybe_persist(report, output_path, persist_required=persist_required)
 
 
-def _maybe_persist(report: Dict[str, Any], output_path: Optional[str]) -> Dict[str, Any]:
+def _maybe_persist(
+    report: Dict[str, Any],
+    output_path: Optional[str],
+    *,
+    persist_required: bool = False,
+) -> Dict[str, Any]:
     """JSON-serialize report to output_path if provided; fail-soft.
-    提供 output_path 時 JSON 持久化；失敗不中斷。"""
+    提供 output_path 時 JSON 持久化；預設失敗不中斷。persist_required=True 時
+    fail-loud，供 contract-bound PIT gate 使用。"""
     if not output_path:
+        if persist_required:
+            raise RuntimeError("acceptance_report_output_path_required")
         return report
     try:
         path = Path(output_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w", encoding="utf-8") as f:
-            json.dump(report, f, indent=2, default=str)
+        _atomic_write_json(path, report)
         logger.info("acceptance report persisted: %s", output_path)
     except Exception as e:  # noqa: BLE001
+        if persist_required:
+            raise RuntimeError(f"acceptance_report_persist_failed:{type(e).__name__}") from e
         logger.warning("acceptance report persist failed (non-fatal): %s", e)
     return report
+
+
+def _atomic_write_json(path: Path, report: Dict[str, Any]) -> None:
+    """先寫同目錄暫存 JSON，完整成功後才替換 final artifact。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.{id(report)}.tmp")
+    try:
+        with tmp_path.open("w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, default=str)
+        tmp_path.replace(path)
+    except Exception:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise

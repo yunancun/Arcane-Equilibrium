@@ -1,0 +1,64 @@
+{
+  "schema_version": "roadmap_work_item_v1",
+  "work_id": "WP2.1-TRAINING-RUN-PIT-MANIFEST-GATE",
+  "loop_id": "AI-ML-DOWNSTREAM-CLOSURE-LOOP",
+  "selected_at": "2026-07-06T23:02:58Z",
+  "priority": "P1",
+  "gate": "DOWNSTREAM_SOURCE_SAFE",
+  "selection_reason": "First incomplete source-safe downstream closure item after WP1-WP5 source contracts. Runtime/loss-control neighbor state is blocked, but WP2.1 does not require runtime, DB, exchange, credential, order, Cost Gate, deploy, live, or bounded Demo outcome access.",
+  "objective": "Make contract-bound quantile training require a valid pit_dataset_manifest_v1 before training can claim a contract-bound run, attach canonical PIT manifest/binding metadata to acceptance reports, and keep non-contract-bound behavior explicit.",
+  "allowed_actions": [
+    "source_code_edit",
+    "source_tests",
+    "source_reports",
+    "local_py_compile",
+    "local_pytest",
+    "git_diff_check"
+  ],
+  "denied_actions": [
+    "runtime_mutation",
+    "db_read",
+    "db_write",
+    "db_migration",
+    "exchange_contact",
+    "private_read",
+    "mcp_server_or_config",
+    "credential_or_secret_access",
+    "order_or_probe",
+    "cost_gate_change",
+    "deploy",
+    "live_or_mainnet",
+    "runtime_learning",
+    "bounded_demo_outcome_ingestion"
+  ],
+  "required_dispatch_chain": [
+    "PM",
+    "PA",
+    "E1",
+    "E2",
+    "E4",
+    "QA",
+    "PM"
+  ],
+  "acceptance_criteria": [
+    "Contract-bound quantile run fails closed before train/export/registry when PIT manifest is missing, invalid, pooled, candidate-scope mismatched, unpinned, leakage-prone, or legacy-scorer routed.",
+    "Successful contract-bound run emits canonical pit_dataset_manifest and training_pit_manifest_binding_v1 in the acceptance report.",
+    "Non-contract-bound run remains backward compatible and explicitly records not_contract_bound binding.",
+    "PIT sidecar and acceptance report persistence avoid partial final artifacts by same-directory temp write plus atomic replace.",
+    "Focused and adjacent source tests pass and no runtime/loss-control branch is consumed."
+  ],
+  "primary_files": [
+    "program_code/ml_training/run_training_pipeline.py",
+    "program_code/ml_training/quantile_reports.py",
+    "program_code/ml_training/tests/test_run_training_pipeline.py",
+    "program_code/ml_training/tests/test_quantile_reports.py"
+  ],
+  "supporting_reports": [
+    "docs/CCAgentWorkSpace/PA/workspace/reports/2026-07-07--wp2_1_training_run_pit_manifest_gate_design.md",
+    "docs/CCAgentWorkSpace/E1/workspace/reports/2026-07-07--wp2_1_training_run_pit_manifest_gate_implementation.md",
+    "docs/CCAgentWorkSpace/E2/workspace/reports/2026-07-07--wp2_1_training_run_pit_manifest_gate_review.md",
+    "docs/CCAgentWorkSpace/E2/workspace/reports/2026-07-07--wp2_1_training_run_pit_manifest_gate_rereview.md",
+    "docs/CCAgentWorkSpace/E4/workspace/reports/2026-07-07--wp2_1_training_run_pit_manifest_gate_regression.md",
+    "docs/CCAgentWorkSpace/QA/workspace/reports/2026-07-07--wp2_1_training_run_pit_manifest_gate_acceptance.md"
+  ]
+}

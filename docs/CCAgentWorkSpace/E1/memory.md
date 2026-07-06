@@ -795,3 +795,8 @@
 - lease 已 move 入 EarnLeaseGuard→加非消耗式 `lease_id_str()` 取 decision_lease_id（設計 §4.1 的 `lease.as_str()` 在現碼不可達，最小安全解）。cargo lib 4324 passed/0 failed/0 warn；migration mock 全 suite 226 passed。
 - fmt：`cargo fmt --check` 在我兩檔的 diff **全落在 pre-existing 未觸行**（124/375/519/735/743 等）——repo baseline 本就 fmt-drift，我新增碼零新 diff；surgical 原則不順手重排 pre-existing。standalone `rustfmt` 與 `cargo fmt` config 不同，以 cargo fmt 為準。
 - 環境：本機 cargo 唯一可跑路徑=`~/.rustup/toolchains/stable-aarch64-apple-darwin/bin/{cargo,rustc}` 直呼 + 該 bin dir 前置 PATH（`~/.cargo/bin/*`→rustup→`/opt/homebrew/bin/rustup-init` symlink 鏈已斷）。
+
+## 2026-07-07 — WP2.1 training-run PIT manifest gate（source-only，待 E2，無 commit）
+- 在 `run_training_pipeline.py`/`quantile_reports.py` 接上 contract-bound quantile pre-train PIT manifest gate：missing/hash mismatch/scope mismatch/unpinned/leakage/pooled/legacy path 皆 fail-closed；dry-run synthetic manifest 只在 explicit candidate+symbol+side 下產 sidecar/report binding。
+- 驗證：py_compile 指定 5 檔 passed；focused pytest 41 passed/1 skipped；registry adjacency 49 passed；diff --check passed。Concern：`run_training_pipeline.py` 991 行超 800 review-attention，因 PA 指定 helper 留同檔未拆。
+- E2 RETURN 返工收掉：sidecar/report 改同目錄 temp + `Path.replace()` 原子替換；補 sidecar replace/json.dump failure 保護既有 final artifact 測試，補 pooled `None`/`"ALL"` fail-before-train 永久測試；focused pytest 46 passed/1 skipped，registry adjacency 49 passed。

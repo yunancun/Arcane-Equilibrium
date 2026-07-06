@@ -271,6 +271,132 @@ def test_acceptance_report_json_persistence(tmp_path: Path):
     assert loaded["verdict"] == report["verdict"]
 
 
+def test_acceptance_report_defaults_to_not_contract_bound_pit_binding():
+    cfg = QuantileTrainingConfig()
+    res = _make_result(n_labeled=SAMPLE_GATE_PROD + 50)
+
+    report = generate_acceptance_report(res, cfg, include_train_serve_harness=False)
+
+    assert report["pit_dataset_manifest"] is None
+    binding = report["pit_dataset_manifest_binding"]
+    assert binding["schema_version"] == "training_pit_manifest_binding_v1"
+    assert binding["contract_bound_run"] is False
+    assert binding["status"] == "not_contract_bound"
+    assert binding["validation_verdict"] == "not_required"
+    assert binding["validation_reason"] == "not_contract_bound"
+    assert binding["runtime_mutation_performed"] is False
+    assert binding["db_write_performed"] is False
+    assert binding["exchange_private_read_performed"] is False
+    assert binding["order_or_probe_performed"] is False
+    assert binding["live_or_mainnet_performed"] is False
+
+
+def test_acceptance_report_attaches_pit_manifest_and_binding(tmp_path: Path):
+    cfg = QuantileTrainingConfig()
+    res = _make_result(n_labeled=SAMPLE_GATE_PROD + 50)
+    manifest = {"schema_version": "pit_dataset_manifest_v1", "manifest_hash": "a" * 64}
+    binding = {
+        "schema_version": "training_pit_manifest_binding_v1",
+        "contract_bound_run": True,
+        "status": "dataset_ready",
+        "manifest_hash": "a" * 64,
+        "manifest_path": str(tmp_path / "manifest.json"),
+        "validation_verdict": "dataset_ready",
+        "validation_reason": "ok",
+        "not_authority": True,
+        "runtime_mutation_performed": False,
+        "db_write_performed": False,
+        "exchange_private_read_performed": False,
+        "order_or_probe_performed": False,
+        "live_or_mainnet_performed": False,
+        "cost_gate_change_performed": False,
+        "deploy_performed": False,
+        "secret_access_performed": False,
+    }
+    out = tmp_path / "report.json"
+
+    report = generate_acceptance_report(
+        res,
+        cfg,
+        output_path=str(out),
+        include_train_serve_harness=False,
+        pit_dataset_manifest=manifest,
+        pit_dataset_manifest_binding=binding,
+        persist_required=True,
+    )
+
+    loaded = json.loads(out.read_text())
+    assert report["pit_dataset_manifest"] == manifest
+    assert report["pit_dataset_manifest_binding"] == binding
+    assert loaded["pit_dataset_manifest"] == manifest
+    assert loaded["pit_dataset_manifest_binding"] == binding
+
+
+def test_acceptance_report_required_persist_failure_preserves_existing_final(
+    monkeypatch, tmp_path: Path,
+):
+    cfg = QuantileTrainingConfig()
+    res = _make_result(n_labeled=SAMPLE_GATE_PROD + 50)
+    out = tmp_path / "report.json"
+    old_payload = '{"old": true}'
+    out.write_text(old_payload, encoding="utf-8")
+    seen = {"same_dir": False, "tmp_name": ""}
+
+    def failing_dump(_report, file_obj, *args, **kwargs):
+        tmp_path_seen = Path(file_obj.name)
+        seen["same_dir"] = tmp_path_seen.parent == out.parent
+        seen["tmp_name"] = tmp_path_seen.name
+        file_obj.write('{"partial":')
+        raise OSError("synthetic json dump failure")
+
+    monkeypatch.setattr(
+        "program_code.ml_training.quantile_reports.json.dump",
+        failing_dump,
+    )
+
+    with pytest.raises(RuntimeError, match="acceptance_report_persist_failed:OSError"):
+        generate_acceptance_report(
+            res,
+            cfg,
+            output_path=str(out),
+            include_train_serve_harness=False,
+            persist_required=True,
+        )
+
+    assert out.read_text(encoding="utf-8") == old_payload
+    assert seen["same_dir"] is True
+    assert seen["tmp_name"] != out.name
+
+
+def test_acceptance_report_optional_persist_failure_preserves_existing_final(
+    monkeypatch, tmp_path: Path,
+):
+    cfg = QuantileTrainingConfig()
+    res = _make_result(n_labeled=SAMPLE_GATE_PROD + 50)
+    out = tmp_path / "report.json"
+    old_payload = '{"old": true}'
+    out.write_text(old_payload, encoding="utf-8")
+
+    def failing_dump(_report, file_obj, *args, **kwargs):
+        file_obj.write('{"partial":')
+        raise OSError("synthetic json dump failure")
+
+    monkeypatch.setattr(
+        "program_code.ml_training.quantile_reports.json.dump",
+        failing_dump,
+    )
+
+    report = generate_acceptance_report(
+        res,
+        cfg,
+        output_path=str(out),
+        include_train_serve_harness=False,
+    )
+
+    assert report["verdict"] == VERDICT_SHIP
+    assert out.read_text(encoding="utf-8") == old_payload
+
+
 def test_train_serve_harness_shape():
     """Harness shipped only when lightgbm available (booster.predict callable).
     仰賴 lightgbm 的 harness；缺失則 skip。"""
