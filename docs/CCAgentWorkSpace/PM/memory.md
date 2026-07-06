@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-07 AI/ML Roadmap WP1-WP5 Completion Assessment
+
+- PM combined WP5 with prior WP1-WP4 audit and signed `PASS-SOURCE-CONTRACT-LAYER / FAIL-FULL-TRAINING-PROFIT-EVOLUTION-CLOSURE`: WP1-WP5 source contracts are complete enough, but the full AI/ML trading-learning loop is not complete.
+- Verification passed: WP1-WP5/training/bandit/applier `245 passed, 1 skipped`, advisory/runner adjacency `61 passed`, compile gate PASS. Venv dry-run trained/exported ONNX but still failed at registry DB precheck and acceptance report lacked WP1-WP5/reward/effect binding fields.
+- Remaining downstream work: `WP2.1` training PIT gate, `WP3.1` registry contract emission, `WP6` reward-ledger ProofPacket bridge, `WP7` effect-review stop loop, and standing Demo loss-control refresh before runtime learning. Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--ai_ml_roadmap_wp1_wp5_completion_assessment.md`。
+
 ## 2026-07-07 AI/ML Roadmap WP1-WP4 Training / Profit / Evolution Cold Audit
 
 - PM 補跑冷酷對抗性 audit 後裁決：`FAIL-STRICT-AS-STATED / PASS-AS-PREREQUISITES`。WP1-WP4 是正確且必要的 proof/PIT/registry/advisory 前置，但尚未構成完整盈利追逐、自我訓練、自我進化閉環。
