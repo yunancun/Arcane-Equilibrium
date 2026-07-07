@@ -1,0 +1,66 @@
+{
+  "schema_version": "profit_first_ai_ml_resolution_loop_runtime_gate_prep_request_v1",
+  "generated_at_utc": "2026-07-07T20:33:43Z",
+  "request_id": "profit-first-ai-ml-runtime-gate-prep-near-buy-20260707T202414Z",
+  "status": "NOT_DISPATCHED_GATE_NOT_READY",
+  "dispatch_chain": {
+    "pm_request": "PREPARED_NOT_SENT",
+    "e3_review": "NOT_DISPATCHED_RUNTIME_GATE_PREP_BLOCKED",
+    "bb_review": "NOT_DISPATCHED_E3_NOT_OPENED"
+  },
+  "candidate": {
+    "candidate_id": "ma_crossover|NEARUSDT|Buy",
+    "strategy": "ma_crossover",
+    "symbol": "NEARUSDT",
+    "side": "Buy",
+    "horizon_minutes": 60
+  },
+  "request_scope_after_repair": {
+    "goal": "Review candidate-aligned runtime/loss-control and bounded-probe readiness for ma_crossover|NEARUSDT|Buy before any bounded Demo AI/ML learning test.",
+    "allowed_before_e3": [
+      "source_and_artifact_read",
+      "candidate_aligned_no_authority_packet_generation",
+      "json_schema_validation",
+      "static_guard_checks"
+    ],
+    "requires_e3_before": [
+      "runtime_env_mutation",
+      "standing_demo_authorization_materialization",
+      "public_bbo_window",
+      "decision_lease_window",
+      "private_exchange_read",
+      "order_or_probe_capable_action"
+    ]
+  },
+  "gate_blockers_preventing_dispatch": [
+    "standing_demo_authorization_candidate_mismatch",
+    "false_negative_operator_review_not_approved_for_preflight",
+    "false_negative_bounded_probe_preflight_not_ready",
+    "bounded_probe_touchability_preflight_not_ready",
+    "bounded_probe_placement_repair_plan_not_ready",
+    "bounded_probe_authority_patch_readiness_not_ready",
+    "bounded_probe_operator_authorization_not_ready",
+    "active_decision_lease_not_ready",
+    "fresh_bbo_instrument_order_shape_not_ready",
+    "guardian_rust_authority_not_ready_in_same_window",
+    "auditability_reconstructability_not_ready"
+  ],
+  "e3_bb_report_refs": {
+    "e3_report": null,
+    "bb_report": null,
+    "reason": "PM did not dispatch E3/BB because gate prep is blocked before review."
+  },
+  "denied_actions": [
+    "dispatch_e3_from_this_packet",
+    "dispatch_bb_from_this_packet",
+    "bounded_demo_ai_ml_learning_test",
+    "order_or_probe",
+    "decision_lease",
+    "bybit_public_or_private_call",
+    "runtime_env_or_service_mutation",
+    "db_write_or_migration",
+    "cost_gate_change",
+    "live_or_mainnet",
+    "proof_or_promotion_claim"
+  ]
+}

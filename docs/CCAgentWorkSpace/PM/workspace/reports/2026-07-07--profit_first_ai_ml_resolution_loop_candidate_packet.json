@@ -1,0 +1,156 @@
+{
+  "schema_version": "profit_first_ai_ml_resolution_loop_candidate_packet_v1",
+  "generated_at_utc": "2026-07-07T20:33:43Z",
+  "source_artifacts": {
+    "blocked_outcome_review": {
+      "path": "trade-core:/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/blocked_outcome_review_20260707T202701Z.json",
+      "sha256": "6deead76a875b49c6bd516cd61df3efcef1563fab7a7781d5fa3a2c20ccd81af",
+      "status": "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT",
+      "generated_at_utc": "2026-07-07T20:30:37.212262+00:00"
+    },
+    "false_negative_candidate_packet": {
+      "path": "trade-core:/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/false_negative_candidate_packet_20260707T202701Z.json",
+      "sha256": "28f9bb9af0c6c34aa31b01b5857317dad1d9f6372ddf282ede47bfe71b79998c",
+      "status": "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW",
+      "generated_at_utc": "2026-07-07T20:31:46.859789+00:00"
+    }
+  },
+  "selected_candidate": {
+    "candidate_id": "ma_crossover|NEARUSDT|Buy",
+    "strategy": "ma_crossover",
+    "symbol": "NEARUSDT",
+    "side": "Buy",
+    "horizon_minutes": 60,
+    "expected_edge_mechanism": "False-negative Cost Gate candidate: blocked-signal markouts clear after-cost review thresholds without global Cost Gate lowering.",
+    "loss_controls_required": [
+      "candidate_scoped_standing_demo_loss_control_envelope",
+      "max_probe_intents_before_review",
+      "max_filled_probe_outcomes_before_review",
+      "max_order_notional_from_GUI_Rust_RiskConfig_cap",
+      "active_decision_lease",
+      "Guardian_Rust_authority",
+      "book_clean",
+      "auditability",
+      "reconstructability"
+    ],
+    "proof_requirements": [
+      "candidate_matched_orders_and_fills",
+      "actual_fees_and_slippage",
+      "fresh_BBO_and_instrument_lineage",
+      "matched_blocked_signal_controls",
+      "proof_exclusion_pass",
+      "execution_realism_review",
+      "repeat_or_OOS_path"
+    ],
+    "metrics": {
+      "outcome_count": 5058,
+      "gross_positive_outcome_count": 5058,
+      "avg_gross_bps": 157.283,
+      "avg_cost_bps": 92.3,
+      "avg_net_bps": 64.983,
+      "min_net_bps": 59.32008795690392,
+      "max_net_bps": 70.27756121442427,
+      "net_positive_pct": 100.0,
+      "wrongful_block_score": 129.9659,
+      "legacy_optimistic_cost_present": false
+    },
+    "authority": {
+      "operator_review_ready": true,
+      "probe_authority_granted": false,
+      "order_authority_granted": false,
+      "promotion_evidence": false,
+      "global_cost_gate_lowering_recommended": false,
+      "main_cost_gate_adjustment": "NONE"
+    }
+  },
+  "ranked_edge_amplification_candidates": [
+    {
+      "rank": 1,
+      "candidate_id": "ma_crossover|BTCUSDT|Buy",
+      "outcome_count": 141702,
+      "avg_gross_bps": 18.6938,
+      "avg_cost_bps": 62.5695,
+      "avg_net_bps": -43.8756,
+      "net_positive_pct": 19.728,
+      "required_net_uplift_bps": 43.8756,
+      "required_net_positive_pct_uplift": 40.272,
+      "status": "LEGACY_OPTIMISTIC_COST_UNBACKFILLED"
+    },
+    {
+      "rank": 2,
+      "candidate_id": "grid_trading|NEARUSDT|Sell",
+      "outcome_count": 8333,
+      "avg_gross_bps": 4.8768,
+      "avg_cost_bps": 44.515,
+      "avg_net_bps": -39.6382,
+      "net_positive_pct": 33.4933,
+      "required_net_uplift_bps": 39.6382,
+      "required_net_positive_pct_uplift": 26.5067,
+      "status": "LEGACY_OPTIMISTIC_COST_UNBACKFILLED"
+    },
+    {
+      "rank": 3,
+      "candidate_id": "grid_trading|AVAXUSDT|Sell",
+      "outcome_count": 9270,
+      "avg_gross_bps": 1.5366,
+      "avg_cost_bps": 44.8722,
+      "avg_net_bps": -43.3356,
+      "net_positive_pct": 25.8792,
+      "required_net_uplift_bps": 43.3356,
+      "required_net_positive_pct_uplift": 34.1208,
+      "status": "LEGACY_OPTIMISTIC_COST_UNBACKFILLED"
+    },
+    {
+      "rank": 4,
+      "candidate_id": "grid_trading|SUIUSDT|Sell",
+      "outcome_count": 9127,
+      "avg_gross_bps": 1.1104,
+      "avg_cost_bps": 45.0,
+      "avg_net_bps": -43.8896,
+      "net_positive_pct": 28.2568,
+      "required_net_uplift_bps": 43.8896,
+      "required_net_positive_pct_uplift": 31.7432,
+      "status": "LEGACY_OPTIMISTIC_COST_UNBACKFILLED"
+    },
+    {
+      "rank": 5,
+      "candidate_id": "grid_trading|OPUSDT|Sell",
+      "outcome_count": 9290,
+      "avg_gross_bps": 1.828,
+      "avg_cost_bps": 53.4251,
+      "avg_net_bps": -51.5972,
+      "net_positive_pct": 21.4855,
+      "required_net_uplift_bps": 51.5972,
+      "required_net_positive_pct_uplift": 38.5145,
+      "status": "LEGACY_OPTIMISTIC_COST_UNBACKFILLED"
+    },
+    {
+      "rank": 6,
+      "candidate_id": "ma_crossover|BTCUSDT|Sell",
+      "outcome_count": 159545,
+      "avg_gross_bps": 7.0267,
+      "avg_cost_bps": 65.2935,
+      "avg_net_bps": -58.2668,
+      "net_positive_pct": 11.2495,
+      "required_net_uplift_bps": 58.2668,
+      "required_net_positive_pct_uplift": 48.7505,
+      "status": "LEGACY_OPTIMISTIC_COST_UNBACKFILLED"
+    }
+  ],
+  "runtime_gate_status": {
+    "selected_branch": "RUNTIME_GATE_PREP",
+    "runtime_gate_ready": false,
+    "false_negative_candidate_ready": true,
+    "operator_review_ready": true,
+    "candidate_aligned_standing_authorization_ready": false,
+    "bounded_probe_chain_ready": false,
+    "next_work_item": "P0-PROFIT-FIRST-NEAR-BUY-CANDIDATE-ALIGNED-GATE-REFRESH"
+  },
+  "denials": {
+    "probe_authority_granted_by_this_packet": false,
+    "order_authority_granted_by_this_packet": false,
+    "cost_gate_lowering_recommended": false,
+    "promotion_proof": false,
+    "live_or_mainnet_authority": false
+  }
+}
