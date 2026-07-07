@@ -1,0 +1,74 @@
+{
+  "schema_version": "roadmap_work_item_v1",
+  "work_id": "WP7-EFFECT-REVIEW-AND-STOP-LOOP",
+  "loop_id": "AI-ML-DOWNSTREAM-CLOSURE-LOOP",
+  "selected_at": "2026-07-07T07:40:42Z",
+  "priority": "P1",
+  "gate": "DOWNSTREAM_SOURCE_SAFE",
+  "selection_reason": "WP6 advanced the source-only reward ledger ProofPacket bridge. WP7 is the final source-safe downstream closure item: define a learning_effect_review_v1 packet and validator that can decide continue, rollback, rotate, stop, or review-only promotion from reward_ledger_v1 evidence without runtime, DB, exchange, credential, order, Cost Gate, deploy, live, registry persistence, or bounded Demo outcome access.",
+  "objective": "Implement a source-only learning_effect_review_v1 packet, builder, validator, hash, extractor, fail-closed decision priority, and tests for review-only learning effect decisions over caller-provided reward_ledger_v1 records.",
+  "allowed_actions": [
+    "source_code_edit",
+    "source_tests",
+    "source_reports",
+    "local_py_compile",
+    "local_pytest",
+    "git_diff_check"
+  ],
+  "denied_actions": [
+    "runtime_mutation",
+    "db_read",
+    "db_write",
+    "db_migration",
+    "exchange_contact",
+    "private_read",
+    "mcp_server_or_config",
+    "credential_or_secret_access",
+    "order_or_probe",
+    "cost_gate_change",
+    "deploy",
+    "live_or_mainnet",
+    "model_reload",
+    "symlink_promotion",
+    "serving_reload",
+    "runtime_learning",
+    "bounded_demo_outcome_ingestion",
+    "registry_persistence"
+  ],
+  "required_dispatch_chain": [
+    "PM",
+    "PA",
+    "E1",
+    "E2",
+    "E1",
+    "E2",
+    "E1",
+    "E2",
+    "E4",
+    "QA",
+    "PM"
+  ],
+  "acceptance_criteria": [
+    "learning_effect_review_v1 packet and validator consume only caller-provided reward_ledger_v1 records and embedded source refs.",
+    "Decisions are exactly continue, rollback, rotate_candidate, stop_loss_control, stop_no_edge, stop_evidence, and promote_review_only.",
+    "Authority, invalid reward/source, loss-control, evidence/control/OOS/sample failures preempt continue and promote_review_only.",
+    "promote_review_only is review-only and grants no promotion, order, live, Cost Gate, model reload, symlink, serving reload, runtime, or DB authority.",
+    "Reward/proof/mutation refs are complete canonical sets derived from embedded reward records and cannot be forged or dropped after review_hash recompute.",
+    "Loss limits require all required fields with correct types; truthy breach strings fail closed.",
+    "Focused and adjacent source tests pass and no runtime/loss-control branch is consumed."
+  ],
+  "primary_files": [
+    "program_code/ml_training/learning_effect_review.py",
+    "program_code/ml_training/tests/test_learning_effect_review.py"
+  ],
+  "supporting_reports": [
+    "docs/CCAgentWorkSpace/PA/workspace/reports/2026-07-07--wp7_learning_effect_review_stop_loop_design.md",
+    "docs/CCAgentWorkSpace/E1/workspace/reports/2026-07-07--wp7_learning_effect_review_stop_loop_implementation.md",
+    "docs/CCAgentWorkSpace/E2/workspace/reports/2026-07-07--wp7_learning_effect_review_stop_loop_review.md",
+    "docs/CCAgentWorkSpace/E1/workspace/reports/2026-07-07--wp7_learning_effect_review_stop_loop_rework.md",
+    "docs/CCAgentWorkSpace/E1/workspace/reports/2026-07-07--wp7_learning_effect_review_stop_loop_rework2.md",
+    "docs/CCAgentWorkSpace/E2/workspace/reports/2026-07-07--wp7_learning_effect_review_stop_loop_rereview2.md",
+    "docs/CCAgentWorkSpace/E4/workspace/reports/2026-07-07--wp7_learning_effect_review_stop_loop_regression.md",
+    "docs/CCAgentWorkSpace/QA/workspace/reports/2026-07-07--wp7_learning_effect_review_stop_loop_acceptance.md"
+  ]
+}

@@ -470,3 +470,15 @@ surgical 修：`checks_ipc_edge.py::check_model_registry_freshness` 僅在 `slot
 - E1 rework2 closes the remaining optional-registry MED: build-time contradiction probe now rejects `registry_optional_source_contract_bound`, and post-build `source_artifacts` mutation with recomputed `record_hash` also rejects. Clean explicit execution-only optional fixture and registry-required happy path both pass.
 - Verification: py_compile PASS; WP6/upstream `112 passed`; adjacency `83 passed`; original forged lineage and missing-registry probes remain fail-closed; static side-effect rg no matches; diff-check PASS.
 - `reward_ledger.py` is 913 lines, classified as review-attention (>800, <2000) not blocker. Report: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-07-07--wp6_reward_ledger_proofpacket_bridge_rereview2.md`.
+
+## 2026-07-07 — WP7 learning_effect_review stop-loop E2 review → RETURN E1
+- Source-only boundary and focused tests are green (`py_compile` no output; WP7+upstream `117 passed`; diff-check no output), but RETURN on 3 MED fail-closed holes.
+- MED-1: top-level `proof_packet_refs` / `mutation_envelope_refs` are only checked non-empty, and `reward_ledger_refs` need not exactly cover embedded records. Forging proof/mutation refs or dropping reward refs plus recomputing `review_hash` still returns `valid=True / promote_review_only`.
+- MED-2: authority scan catches explicit order/live/mainnet/Cost Gate/model/symlink aliases but misses `trade_allowed`, `trading_enabled`, `enable_trading`, and `execution_authority_granted`, which still promote after hash recompute.
+- MED-3: `loss_limits.breach="true"` plus missing/non-numeric consecutive-window or missing USDT cap fields can still produce `promote_review_only`; malformed loss controls must preempt profitable decisions.
+- Report: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-07-07--wp7_learning_effect_review_stop_loop_review.md`. 教訓：review packet hash integrity 不只重算整包 hash，還要釘「top-level refs == embedded source lineage exact set」；否則 attacker 可同步改 refs+review_hash 讓 metadata 說謊而核心 source_artifacts 仍綠。
+
+## 2026-07-07 — WP7 learning_effect_review stop-loop E2 re-review 2 → PASS to E4
+- E1 rework2 closes the remaining authority string-grant gap: `trade_allowed` / trading aliases / execution authority aliases with `"allowed"`, `"allow"`, `"active"`, `"authorized"`, or `"approved"` plus recomputed `review_hash` now reject as `authority_boundary_violation`; explicit false strings `false`/`0`/`disabled`/`denied` remain non-violating.
+- Rechecked prior MED-1 and MED-3: dropped/extra reward refs and forged proof/mutation refs stop at `stop_evidence`; `breach="true"`, missing USDT cap, missing/bad consecutive-window cap stop at `stop_loss_control`.
+- Verification: py_compile PASS no output; WP7+upstream `134 passed in 3.40s`; diff-check PASS no output. Report: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-07-07--wp7_learning_effect_review_stop_loop_rereview2.md`.
