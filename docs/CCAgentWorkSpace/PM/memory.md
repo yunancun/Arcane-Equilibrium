@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-07 Runtime Loss-Control Authorization READY
+
+- PM ran the exact `PM -> E3 -> BB -> PM` gate for Demo-only runtime/env restoration; E3 approved for BB and BB approved exact restoration, with no order/probe/test/direct Bybit/Cost Gate/live/mainnet authority.
+- Runtime blocker cleared by setting only `OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED=1`, correcting engine restart path drift back to `/home/ncyu/BybitOpenClaw/var/openclaw`, and rerunning source-stability, local fast-balance, readiness, expired-auth guardrail, and materialization.
+- State packet is `RUNTIME_LOSS_CONTROL_READY`; standing auth `eabf2dab...` active until `2026-07-08T01:53:48.341325+00:00`; next bounded Demo AI/ML learning test still needs separate same-window PM->E3->BB.
+
 ## 2026-07-07 Demo Test Runtime Loss-Control Unblock Request Stop
 
 - PM reviewed the operator assertion that runtime/loss-control was released and Demo testing could proceed. Local artifacts still classify runtime/loss-control as blocked, so PM dispatched E3 for report-only pre-review and did not dispatch BB.

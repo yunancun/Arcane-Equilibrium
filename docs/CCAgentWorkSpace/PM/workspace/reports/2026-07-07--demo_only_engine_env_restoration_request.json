@@ -1,0 +1,140 @@
+{
+  "schema_version": "demo_only_engine_env_restoration_request_v1",
+  "generated_at_utc": "2026-07-07T13:36:58Z",
+  "status": "PM_REQUEST_E3_REVIEW",
+  "active_blocker_id": "P0-STANDING-DEMO-LOSS-CONTROL-ENVELOPE-REFRESH-CURRENT-HEAD",
+  "objective": "Restore only the Demo bounded-probe adapter engine environment blocker so runtime/loss-control readiness can be re-evaluated. This request is not a Demo test, not order/probe authority, and not Cost Gate authority.",
+  "dispatch_chain": "PM -> E3 -> BB -> PM",
+  "source_state": {
+    "mac_repo": "/Users/ncyu/Projects/TradeBot/srv",
+    "mac_head": "e655de92673e4960ceca1888a07a4843ac4ddb3e",
+    "mac_origin_main": "e655de92673e4960ceca1888a07a4843ac4ddb3e",
+    "github_origin_main": "e655de92673e4960ceca1888a07a4843ac4ddb3e",
+    "linux_repo": "trade-core:/home/ncyu/BybitOpenClaw/srv",
+    "linux_head": "e655de92673e4960ceca1888a07a4843ac4ddb3e",
+    "linux_origin_main": "e655de92673e4960ceca1888a07a4843ac4ddb3e",
+    "linux_worktree_clean": true,
+    "mac_worktree_clean": false,
+    "mac_dirty_state_consumed": false,
+    "mac_dirty_state_note": "Mac has pre-existing unrelated modified/untracked files. Runtime action, if approved, must use the clean Linux checkout and exact env scope only."
+  },
+  "runtime_precheck": {
+    "host": "trade-core",
+    "engine_pid": "3771096",
+    "env_file": "/home/ncyu/BybitOpenClaw/secrets/environment_files/basic_system_services.env",
+    "observed_engine_env": {
+      "OPENCLAW_ALLOW_MAINNET": "0",
+      "OPENCLAW_ENABLE_PAPER": "0",
+      "OPENCLAW_DEMO_LEARNING_LANE_WRITER": "1",
+      "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED": "0",
+      "OPENCLAW_DATA_DIR": "/home/ncyu/BybitOpenClaw/var/openclaw",
+      "OPENCLAW_DEMO_LEARNING_LANE_PLAN": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_demo_probe_soak_plan.json"
+    },
+    "observed_persisted_env": {
+      "OPENCLAW_ALLOW_MAINNET": "0",
+      "OPENCLAW_ENABLE_PAPER": "0",
+      "OPENCLAW_DEMO_LEARNING_LANE_WRITER": "1",
+      "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED": "0",
+      "OPENCLAW_DEMO_LEARNING_LANE_PLAN": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_demo_probe_soak_plan.json"
+    },
+    "observed_connector_env": {
+      "BYBIT_MODE": "demo",
+      "BYBIT_CONNECTOR_WRITE_ENABLED": "true"
+    },
+    "services": {
+      "api_user_unit": "openclaw-trading-api.service",
+      "watchdog_user_unit": "openclaw-watchdog.service",
+      "dedicated_engine_user_unit_present": false
+    }
+  },
+  "requested_exact_scope": {
+    "allowed_runtime_mutation": "demo_only_engine_env_restoration",
+    "allowed_file_edit": {
+      "path": "/home/ncyu/BybitOpenClaw/secrets/environment_files/basic_system_services.env",
+      "line_change": "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED=0 -> OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED=1",
+      "other_line_changes_allowed": false
+    },
+    "allowed_restart": {
+      "command": "cd /home/ncyu/BybitOpenClaw/srv && bash helper_scripts/restart_all.sh --engine-only --keep-auth",
+      "rebuild_allowed": false,
+      "api_restart_allowed": false,
+      "service_deploy_allowed": false,
+      "purpose": "load the approved Demo-only env flag into the Rust engine process"
+    },
+    "required_preserved_values": {
+      "OPENCLAW_ALLOW_MAINNET": "0",
+      "OPENCLAW_ENABLE_PAPER": "0",
+      "OPENCLAW_DEMO_LEARNING_LANE_WRITER": "1",
+      "OPENCLAW_DEMO_LEARNING_LANE_PLAN": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_demo_probe_soak_plan.json",
+      "BYBIT_MODE": "demo",
+      "BYBIT_CONNECTOR_WRITE_ENABLED": "true"
+    }
+  },
+  "post_approval_verification_plan": [
+    "Re-confirm Linux HEAD equals origin/main e655de92673e4960ceca1888a07a4843ac4ddb3e and Linux worktree is clean before env edit.",
+    "Before editing, copy the env file to the runtime artifact directory without printing secrets.",
+    "Patch only OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED from 0 to 1.",
+    "Run engine-only restart with --keep-auth and no rebuild.",
+    "Re-read persisted env and /proc/<engine_pid>/environ for the allowlisted env keys only.",
+    "Run Linux source stability guard from the clean Linux checkout.",
+    "If E3/BB explicitly approve, run exactly one local Control API fast-balance/readiness check using the existing no-secret helper boundary.",
+    "Run standing auth refresh guardrail with --allow-expired-standing-auth-readiness-only only if readiness has no non-expiry blockers.",
+    "Materialize the standing Demo loss-control envelope only if the guardrail emits READY and the runtime materialization stays inside the reviewed path with mode 0600."
+  ],
+  "bb_review_requested": true,
+  "bb_review_reason": "The restoration enables a Bybit Demo bounded-probe adapter prerequisite even though it grants no order/probe by itself. BB must review exchange-facing boundary and confirm no direct Bybit private/public/order endpoint call is allowed in this scope.",
+  "explicitly_denied_actions": [
+    "paper_enablement",
+    "live_enablement",
+    "mainnet_enablement",
+    "cost_gate_lowering_or_change",
+    "order_or_probe_or_cancel_or_modify",
+    "bounded_demo_test_execution",
+    "public_quote_or_bbo",
+    "direct_bybit_private_read",
+    "direct_bybit_public_market_read",
+    "credential_or_secret_value_read_or_output",
+    "db_write_or_migration",
+    "pg_write",
+    "model_promotion",
+    "symlink_promotion",
+    "serving_reload",
+    "mcp_server_config_or_credential_access",
+    "api_restart",
+    "rebuild",
+    "risk_config_mutation",
+    "plan_mutation",
+    "cost_gate_learning_ledger_append",
+    "proof_or_promotion_claim"
+  ],
+  "stop_policy": {
+    "if_e3_rejects": {
+      "status": "STOPPED",
+      "stop_reason": "STOP_LOSS_CONTROL"
+    },
+    "if_bb_rejects": {
+      "status": "STOPPED",
+      "stop_reason": "STOP_BOUNDARY"
+    },
+    "if_post_approval_verification_finds_non_scope_drift": {
+      "status": "BLOCKED",
+      "stop_reason": "STOP_BOUNDARY"
+    },
+    "if_readiness_has_non_expiry_blocker_after_restoration": {
+      "status": "BLOCKED",
+      "stop_reason": "STOP_LOSS_CONTROL"
+    }
+  },
+  "no_authority_answers": {
+    "runtime_mutation_performed_by_this_packet": false,
+    "env_mutation_performed_by_this_packet": false,
+    "service_restart_performed_by_this_packet": false,
+    "order_or_probe_allowed_by_this_packet": false,
+    "cost_gate_change_allowed_by_this_packet": false,
+    "direct_exchange_read_allowed_by_this_packet": false,
+    "db_write_allowed_by_this_packet": false,
+    "live_or_mainnet_allowed_by_this_packet": false,
+    "standing_envelope_materialized_by_this_packet": false,
+    "bounded_demo_learning_test_allowed_by_this_packet": false
+  }
+}
