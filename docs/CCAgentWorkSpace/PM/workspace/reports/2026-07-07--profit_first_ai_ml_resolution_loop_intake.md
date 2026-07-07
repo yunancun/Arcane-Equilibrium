@@ -33,7 +33,7 @@ That moves the state-machine branch from `EDGE_AMPLIFICATION` to
 prep fails closed because the downstream candidate-aligned authorization chain
 is not ready.
 
-## Current Repo / Runtime State
+## Intake Repo / Runtime State
 
 - Mac repo: `/Users/ncyu/Projects/TradeBot/srv`
 - Mac HEAD: `c6a5032ee0dfa100db269e604441991b2fd84b6d`
