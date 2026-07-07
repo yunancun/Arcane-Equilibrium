@@ -11,6 +11,7 @@ from ml_training.registry_serving_contract import (
     REGISTRY_SERVING_CONTRACT_SCHEMA_VERSION,
     RegistryServingContractError,
     attach_registry_serving_contract,
+    build_registry_serving_contract_from_training_acceptance,
     compute_registry_serving_contract_hash,
     extract_registry_serving_contract,
     validate_registry_serving_contract,
@@ -53,6 +54,43 @@ def _deep_update(target: dict, updates: dict) -> None:
             _deep_update(target[key], value)
         else:
             target[key] = value
+
+
+def _acceptance_report(**overrides) -> dict:
+    manifest = {
+        "schema_version": PIT_DATASET_MANIFEST_SCHEMA_VERSION,
+        "manifest_hash": "a" * 64,
+        "candidate_scope": {"side": "Buy"},
+        "feature_lineage": {
+            "feature_schema_hash": "c" * 64,
+            "feature_definition_hash": "d" * 64,
+        },
+        "label_lineage": {"label_schema_hash": "b" * 64},
+        "split_lineage": {"split_hash": "e" * 64},
+        "leakage_evidence": {"leakage_report_hash": "f" * 64},
+    }
+    report = {
+        "feature_schema_hash": "c" * 64,
+        "feature_definition_hash": "d" * 64,
+        "pit_dataset_manifest": manifest,
+        "pit_dataset_manifest_binding": {
+            "schema_version": "training_pit_manifest_binding_v1",
+            "contract_bound_run": True,
+            "status": "dataset_ready",
+            "manifest_hash": "a" * 64,
+        },
+    }
+    _deep_update(report, overrides)
+    return report
+
+
+def _onnx_out(tmp_path) -> dict:
+    artifacts = {}
+    for quantile in ("q10", "q50", "q90"):
+        path = tmp_path / f"{quantile}.onnx"
+        path.write_bytes(f"{quantile}:artifact bytes".encode("ascii"))
+        artifacts[quantile] = {"written": True, "path": str(path)}
+    return {"artifacts": artifacts, "train_date": "2026-07-07"}
 
 
 def test_valid_registry_serving_contract_passes_and_hash_is_stable() -> None:
@@ -248,3 +286,103 @@ def test_attach_copies_and_attaches_only_valid_contract() -> None:
     with pytest.raises(RegistryServingContractError):
         attach_registry_serving_contract(report, invalid)
     assert REGISTRY_SERVING_CONTRACT_FIELD not in report
+
+
+def test_build_contract_from_training_acceptance_is_deterministic(tmp_path) -> None:
+    report = _acceptance_report()
+    onnx_out = _onnx_out(tmp_path)
+
+    first = build_registry_serving_contract_from_training_acceptance(
+        acceptance_report=report,
+        onnx_out=onnx_out,
+    )
+    second = build_registry_serving_contract_from_training_acceptance(
+        acceptance_report=report,
+        onnx_out=onnx_out,
+    )
+
+    assert first == second
+    assert first["schema_version"] == REGISTRY_SERVING_CONTRACT_SCHEMA_VERSION
+    assert first["serving_mode"] == "advisory_only"
+    assert first["not_authority"] is True
+    assert first["symlink_authority"] is False
+    assert first["promotion_serving_ready"] is False
+    assert first["dataset_manifest_hash"] == "a" * 64
+    assert first["label_schema_hash"] == "b" * 64
+    assert first["feature_schema_hash"] == "c" * 64
+    assert first["feature_definition_hash"] == "d" * 64
+    assert first["split_hash"] == "e" * 64
+    assert first["leakage_report_hash"] == "f" * 64
+    assert first["quantile_trio"] == ["q10", "q50", "q90"]
+    assert validate_registry_serving_contract(first).advisory_ready is True
+
+
+@pytest.mark.parametrize(
+    ("report_override", "match"),
+    (
+        ({"pit_dataset_manifest": None}, "pit_dataset_manifest_missing"),
+        (
+            {"pit_dataset_manifest_binding": None},
+            "pit_dataset_manifest_binding_missing",
+        ),
+        (
+            {"pit_dataset_manifest_binding": {"manifest_hash": "0" * 64}},
+            "pit_dataset_manifest_binding_manifest_hash_mismatch",
+        ),
+        (
+            {"feature_schema_hash": "0" * 64},
+            "acceptance_feature_schema_hash_mismatch",
+        ),
+        (
+            {"feature_definition_hash": "0" * 64},
+            "acceptance_feature_definition_hash_mismatch",
+        ),
+    ),
+)
+def test_build_contract_rejects_missing_or_mismatched_pit_inputs(
+    tmp_path,
+    report_override,
+    match,
+) -> None:
+    with pytest.raises(RegistryServingContractError, match=match):
+        build_registry_serving_contract_from_training_acceptance(
+            acceptance_report=_acceptance_report(**report_override),
+            onnx_out=_onnx_out(tmp_path),
+        )
+
+
+def test_build_contract_rejects_missing_exact_artifact_trio(tmp_path) -> None:
+    onnx_out = _onnx_out(tmp_path)
+    onnx_out["artifacts"].pop("q90")
+
+    with pytest.raises(
+        RegistryServingContractError,
+        match="onnx_artifacts_not_exact_q10_q50_q90",
+    ):
+        build_registry_serving_contract_from_training_acceptance(
+            acceptance_report=_acceptance_report(),
+            onnx_out=onnx_out,
+        )
+
+
+def test_build_contract_rejects_missing_artifact_path(tmp_path) -> None:
+    onnx_out = _onnx_out(tmp_path)
+    onnx_out["artifacts"]["q50"]["path"] = str(tmp_path / "missing.onnx")
+
+    with pytest.raises(RegistryServingContractError, match="onnx_artifact_unreadable:q50"):
+        build_registry_serving_contract_from_training_acceptance(
+            acceptance_report=_acceptance_report(),
+            onnx_out=onnx_out,
+        )
+
+
+def test_build_contract_rejects_authority_alias_in_serving_config(tmp_path) -> None:
+    with pytest.raises(
+        RegistryServingContractError,
+        match="authority_boundary_violation:serving_config.order_allowed",
+    ):
+        build_registry_serving_contract_from_training_acceptance(
+            acceptance_report=_acceptance_report(),
+            onnx_out=_onnx_out(tmp_path),
+            serving_config={"order_allowed": True},
+        )

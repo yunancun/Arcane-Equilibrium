@@ -15,6 +15,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -159,6 +160,181 @@ class RegistryServingContractValidation:
 
 class RegistryServingContractError(ValueError):
     """Provided serving contract failed source-only validation before DB access."""
+
+
+def build_registry_serving_contract_from_training_acceptance(
+    *,
+    acceptance_report: Mapping[str, Any],
+    onnx_out: Mapping[str, Any],
+    serving_config: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """從 training acceptance report + ONNX artifact bytes 建 advisory contract。
+
+    純 source-only：只讀 caller 傳入的 dict 與 artifact 檔案 bytes；不讀 DB、
+    runtime、env、exchange 或 secret。任何缺失/不匹配都在 registry DB 前
+    fail closed。
+    """
+    if not isinstance(acceptance_report, Mapping):
+        raise RegistryServingContractError("acceptance_report_not_mapping")
+    if not isinstance(onnx_out, Mapping):
+        raise RegistryServingContractError("onnx_out_not_mapping")
+    if serving_config is not None and not isinstance(serving_config, Mapping):
+        raise RegistryServingContractError("serving_config_not_mapping")
+    if serving_config:
+        authority_violations = _authority_violations(serving_config)
+        if authority_violations:
+            raise RegistryServingContractError(
+                f"authority_boundary_violation:serving_config.{authority_violations[0]}"
+            )
+
+    manifest = _required_mapping(
+        acceptance_report,
+        "pit_dataset_manifest",
+        "pit_dataset_manifest_missing",
+    )
+    binding = _required_mapping(
+        acceptance_report,
+        "pit_dataset_manifest_binding",
+        "pit_dataset_manifest_binding_missing",
+    )
+    _require_equal(
+        _text(binding.get("schema_version")),
+        "training_pit_manifest_binding_v1",
+        "pit_dataset_manifest_binding_schema_version_invalid",
+    )
+    if binding.get("contract_bound_run") is not True:
+        raise RegistryServingContractError("pit_dataset_manifest_binding_not_contract_bound")
+    _require_equal(
+        _text(binding.get("status")),
+        "dataset_ready",
+        "pit_dataset_manifest_binding_status_not_dataset_ready",
+    )
+
+    manifest_hash = _required_hash_value(
+        manifest,
+        "manifest_hash",
+        "pit_dataset_manifest_hash_missing",
+    )
+    binding_manifest_hash = _required_hash_value(
+        binding,
+        "manifest_hash",
+        "pit_dataset_manifest_binding_manifest_hash_missing",
+    )
+    _require_equal(
+        binding_manifest_hash,
+        manifest_hash,
+        "pit_dataset_manifest_binding_manifest_hash_mismatch",
+    )
+
+    feature_lineage = _required_mapping(
+        manifest,
+        "feature_lineage",
+        "pit_dataset_manifest_feature_lineage_missing",
+    )
+    label_lineage = _required_mapping(
+        manifest,
+        "label_lineage",
+        "pit_dataset_manifest_label_lineage_missing",
+    )
+    split_lineage = _required_mapping(
+        manifest,
+        "split_lineage",
+        "pit_dataset_manifest_split_lineage_missing",
+    )
+    leakage_evidence = _required_mapping(
+        manifest,
+        "leakage_evidence",
+        "pit_dataset_manifest_leakage_evidence_missing",
+    )
+
+    feature_schema_hash = _required_hash_value(
+        acceptance_report,
+        "feature_schema_hash",
+        "acceptance_feature_schema_hash_missing",
+    )
+    feature_definition_hash = _required_hash_value(
+        acceptance_report,
+        "feature_definition_hash",
+        "acceptance_feature_definition_hash_missing",
+    )
+    _require_equal(
+        feature_schema_hash,
+        _required_hash_value(
+            feature_lineage,
+            "feature_schema_hash",
+            "pit_dataset_manifest_feature_schema_hash_missing",
+        ),
+        "acceptance_feature_schema_hash_mismatch",
+    )
+    _require_equal(
+        feature_definition_hash,
+        _required_hash_value(
+            feature_lineage,
+            "feature_definition_hash",
+            "pit_dataset_manifest_feature_definition_hash_missing",
+        ),
+        "acceptance_feature_definition_hash_mismatch",
+    )
+
+    artifact_hashes = _artifact_hashes_from_onnx_out(onnx_out)
+    side = _manifest_candidate_side(manifest)
+    config_payload = {
+        "schema_version": REGISTRY_SERVING_CONTRACT_SCHEMA_VERSION,
+        "feature_schema_hash": feature_schema_hash,
+        "feature_definition_hash": feature_definition_hash,
+        "quantile_trio": list(_REQUIRED_QUANTILES),
+        "missingness_policy": "missing_or_nan=reject;unknown_feature=reject",
+        "units": "prediction=edge_bps;artifact=onnx",
+        "side_handling": f"candidate_scope_side_required=true;side={side or 'unknown'}",
+    }
+    if serving_config:
+        config_payload.update(copy.deepcopy(dict(serving_config)))
+    authority_violations = _authority_violations(config_payload)
+    if authority_violations:
+        raise RegistryServingContractError(
+            f"authority_boundary_violation:serving_config.{authority_violations[0]}"
+        )
+
+    serving_config_hash = _canonical_sha256(config_payload)
+    contract = {
+        "schema_version": REGISTRY_SERVING_CONTRACT_SCHEMA_VERSION,
+        "serving_mode": "advisory_only",
+        "not_authority": True,
+        "symlink_authority": False,
+        "promotion_serving_ready": False,
+        "dataset_manifest_schema_version": PIT_DATASET_MANIFEST_SCHEMA_VERSION,
+        "dataset_manifest_hash": manifest_hash,
+        "label_schema_hash": _required_hash_value(
+            label_lineage,
+            "label_schema_hash",
+            "pit_dataset_manifest_label_schema_hash_missing",
+        ),
+        "feature_schema_hash": feature_schema_hash,
+        "feature_definition_hash": feature_definition_hash,
+        "split_hash": _required_hash_value(
+            split_lineage,
+            "split_hash",
+            "pit_dataset_manifest_split_hash_missing",
+        ),
+        "leakage_report_hash": _required_hash_value(
+            leakage_evidence,
+            "leakage_report_hash",
+            "pit_dataset_manifest_leakage_report_hash_missing",
+        ),
+        "serving_config_hash": serving_config_hash,
+        "missingness_policy": str(config_payload["missingness_policy"]),
+        "units": str(config_payload["units"]),
+        "side_handling": str(config_payload["side_handling"]),
+        "artifact_hashes": artifact_hashes,
+        "quantile_trio": list(_REQUIRED_QUANTILES),
+    }
+    contract["contract_hash"] = compute_registry_serving_contract_hash(contract)
+    validation = validate_registry_serving_contract(contract)
+    if not validation.advisory_ready:
+        raise RegistryServingContractError(
+            f"invalid registry serving contract: {validation.reason}"
+        )
+    return contract
 
 
 def extract_registry_serving_contract(mapping: Any) -> Any:
@@ -398,6 +574,92 @@ def _result(
     )
 
 
+def _artifact_hashes_from_onnx_out(onnx_out: Mapping[str, Any]) -> dict[str, str]:
+    artifacts = onnx_out.get("artifacts")
+    if not isinstance(artifacts, Mapping):
+        raise RegistryServingContractError("onnx_artifacts_missing")
+    if tuple(artifacts.keys()) != _REQUIRED_QUANTILES:
+        raise RegistryServingContractError("onnx_artifacts_not_exact_q10_q50_q90")
+
+    artifact_hashes: dict[str, str] = {}
+    for quantile in _REQUIRED_QUANTILES:
+        entry = artifacts.get(quantile)
+        if not isinstance(entry, Mapping):
+            raise RegistryServingContractError(f"onnx_artifact_entry_not_mapping:{quantile}")
+        if entry.get("written") is not True:
+            raise RegistryServingContractError(f"onnx_artifact_not_written:{quantile}")
+        path = _text(entry.get("path"))
+        if not path:
+            raise RegistryServingContractError(f"onnx_artifact_path_missing:{quantile}")
+        artifact_hashes[quantile] = _artifact_sha256(path, quantile)
+    return artifact_hashes
+
+
+def _artifact_sha256(path: str, quantile: str) -> str:
+    try:
+        os.stat(path)
+    except OSError as exc:
+        raise RegistryServingContractError(
+            f"onnx_artifact_unreadable:{quantile}"
+        ) from exc
+    digest = hashlib.sha256()
+    try:
+        with open(path, "rb") as handle:
+            while chunk := handle.read(1 << 20):
+                digest.update(chunk)
+    except OSError as exc:
+        raise RegistryServingContractError(
+            f"onnx_artifact_unreadable:{quantile}"
+        ) from exc
+    return digest.hexdigest()
+
+
+def _required_mapping(
+    mapping: Mapping[str, Any],
+    key: str,
+    reason: str,
+) -> Mapping[str, Any]:
+    value = mapping.get(key)
+    if not isinstance(value, Mapping):
+        raise RegistryServingContractError(reason)
+    return value
+
+
+def _required_hash_value(
+    mapping: Mapping[str, Any],
+    key: str,
+    reason: str,
+) -> str:
+    value = _text(mapping.get(key))
+    if not value:
+        raise RegistryServingContractError(reason)
+    if not _is_hash(value):
+        raise RegistryServingContractError(f"{reason}:malformed")
+    return _strip_sha256_prefix(value)
+
+
+def _require_equal(actual: str, expected: str, reason: str) -> None:
+    if actual != expected:
+        raise RegistryServingContractError(reason)
+
+
+def _manifest_candidate_side(manifest: Mapping[str, Any]) -> str:
+    candidate_scope = manifest.get("candidate_scope")
+    if not isinstance(candidate_scope, Mapping):
+        return ""
+    return _text(candidate_scope.get("side"))
+
+
+def _canonical_sha256(payload: Mapping[str, Any]) -> str:
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def _authority_violations(contract: Mapping[str, Any]) -> list[str]:
     violations: list[str] = []
     for path, key, value in _walk(contract):
@@ -471,6 +733,7 @@ __all__ = [
     "RegistryServingContractValidation",
     "RegistryServingContractError",
     "attach_registry_serving_contract",
+    "build_registry_serving_contract_from_training_acceptance",
     "compute_registry_serving_contract_hash",
     "extract_registry_serving_contract",
     "validate_registry_serving_contract",

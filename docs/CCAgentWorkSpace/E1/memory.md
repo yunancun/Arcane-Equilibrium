@@ -800,3 +800,8 @@
 - 在 `run_training_pipeline.py`/`quantile_reports.py` 接上 contract-bound quantile pre-train PIT manifest gate：missing/hash mismatch/scope mismatch/unpinned/leakage/pooled/legacy path 皆 fail-closed；dry-run synthetic manifest 只在 explicit candidate+symbol+side 下產 sidecar/report binding。
 - 驗證：py_compile 指定 5 檔 passed；focused pytest 41 passed/1 skipped；registry adjacency 49 passed；diff --check passed。Concern：`run_training_pipeline.py` 991 行超 800 review-attention，因 PA 指定 helper 留同檔未拆。
 - E2 RETURN 返工收掉：sidecar/report 改同目錄 temp + `Path.replace()` 原子替換；補 sidecar replace/json.dump failure 保護既有 final artifact 測試，補 pooled `None`/`"ALL"` fail-before-train 永久測試；focused pytest 46 passed/1 skipped，registry adjacency 49 passed。
+
+## 2026-07-07 — WP3.1 training registry contract emission（source-only，無 commit）
+- `registry_serving_contract.py` 新增 `build_registry_serving_contract_from_training_acceptance`：只讀 acceptance report / onnx_out / artifact bytes，要求 PIT manifest+binding、feature hash parity、exact q10/q50/q90 written trio、artifact sha256，並用既有 validator 擋 authority alias。
+- `run_training_pipeline.py` 在 contract-bound ONNX export 後、DB connectivity 前 build contract，同目錄 temp+replace 寫回 acceptance report，並把同一 contract 傳 registry；non-contract-bound 不傳 keyword，no_ship 無 contract。
+- 驗證：py_compile PASS；focused registry/model/pipeline `74 passed`；adjacency `106 passed, 1 skipped`；scoped diff --check PASS。邊界：無 DB/runtime/exchange/secret/order/Cost Gate/deploy/live，未 stage/commit。

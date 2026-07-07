@@ -23,6 +23,10 @@
 
 ## 近期記錄
 
+## 2026-07-07 — WP3.1 training registry contract emission E2 review → PASS_TO_E4
+- 審 `registry_serving_contract.py` + `run_training_pipeline.py` + focused tests；builder 只讀 acceptance report / onnx_out / artifact bytes，無 DB/runtime/env/exchange/secret；contract-bound path 在 ONNX 後、DB precheck 前 build+persist+pass contract，non-contract-bound 不合成 contract。
+- 親跑 py_compile PASS、focused pytest 74 passed、adjacency 106 passed/1 skipped、diff-check PASS。0 blocking finding；測試可後續補 binding schema/status、artifact written=false、manifest schema_version 異常等負向分支。`run_training_pipeline.py` 1046 行為 review-attention，非本 patch blocker。
+
 ## 2026-06-08 — L2 Advisory Mesh Phase 2（Orchestrator+registry+admission+adjudication+fail-safe+guard）E2 對抗審 → RETURN E1（1 HIGH + 2 MED + 2 LOW；全 dormant，0 P2-runtime-blocker，但需修正 spec-claim 才 PASS）
 - **範圍**：branch `feature/l2-critic-lessons-tools`，P2 疊 P1 `f1c3c1ca` 未 commit。5 新模塊（l2_capability_registry/l2_prompt_contract_registry/l2_out_of_bound_guard/l2_conflict_adjudicator/l2_advisory_orchestrator，共 1275 行全 <800）+ wiring delta（layer2_engine +20/layer2_routes +95）+ TOML(48) + 60 test + singleton §2.6.2-2.6.4。全用 `venvs/mac_dev/bin/python`（3.12 tomllib）。
 - **裁決 = RETURN E1**。linchpin 全綠（mutation 親證有 bite），但 **HIGH-1 per-capability daily ceiling 是 no-op**——code/comment 宣稱 PA §F.1 stage4「per-capability 硬日上限→NO_ADVICE」但實際只 re-read 全域 `remaining`，零 per-cap spend accounting。實證：cap_daily=0.01 + 全域 remaining=1.5 → 30/30 distinct-subject trigger 全 admitted，per-cap ceiling 從不 fire。**load-bearing 全域 $2/day storm 閘正確**（test_storm 綠），HIGH-1 只是被宣稱卻未交付的「額外」per-cap 細化。dormant（dispatch 0 production caller）但 spec-claim 不實必修。

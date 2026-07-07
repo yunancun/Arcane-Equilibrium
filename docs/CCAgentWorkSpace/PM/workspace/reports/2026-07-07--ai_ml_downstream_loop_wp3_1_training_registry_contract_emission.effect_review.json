@@ -1,0 +1,80 @@
+{
+  "schema_version": "implementation_effect_review_v1",
+  "work_id": "WP3.1-TRAINING-REGISTRY-CONTRACT-EMISSION",
+  "loop_id": "AI-ML-DOWNSTREAM-CLOSURE-LOOP",
+  "created_at": "2026-07-06T23:58:57Z",
+  "pre_state": {
+    "training_pipeline_pit_gate": "implemented_source_only",
+    "acceptance_report_pit_binding": "canonical_pit_dataset_manifest_and_training_pit_manifest_binding_v1",
+    "registry_contract_emission": "missing_from_training_pipeline",
+    "runtime_loss_control": "blocked",
+    "source_head_at_start": "e84d2c24967c0fac95b2d2a3ad15b53480260d16"
+  },
+  "post_state": {
+    "registry_contract_emission": "implemented_source_only",
+    "registry_contract_builder": "build_registry_serving_contract_from_training_acceptance",
+    "acceptance_report_registry_contract": "persisted_canonical_registry_serving_contract",
+    "registry_call_contract_passthrough": "same_contract_passed_to_register_quantile_trio_from_onnx_out",
+    "fail_before_db_cases": [
+      "missing_pit_manifest_or_binding",
+      "binding_manifest_hash_mismatch",
+      "acceptance_feature_schema_hash_mismatch",
+      "acceptance_feature_definition_hash_mismatch",
+      "missing_or_unreadable_onnx_artifact",
+      "non_exact_q10_q50_q90_trio",
+      "authority_alias_in_serving_config"
+    ],
+    "non_contract_bound_behavior": "no_registry_serving_contract_emitted",
+    "runtime_loss_control": "blocked_unchanged",
+    "next_source_work": "WP6-REWARD-LEDGER-PROOFPACKET-BRIDGE"
+  },
+  "tests": [
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m py_compile program_code/ml_training/registry_serving_contract.py program_code/ml_training/model_registry.py program_code/ml_training/run_training_pipeline.py program_code/ml_training/quantile_reports.py",
+      "result": "PASS"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m pytest -q program_code/ml_training/tests/test_registry_serving_contract.py program_code/ml_training/tests/test_model_registry.py program_code/ml_training/tests/test_run_training_pipeline.py -p no:cacheprovider",
+      "result": "PASS",
+      "observed": "74 passed; repeated by E1/E2/E4/QA"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m pytest -q program_code/ml_training/tests/test_run_training_pipeline.py program_code/ml_training/tests/test_quantile_reports.py program_code/ml_training/tests/test_pit_dataset_manifest.py program_code/ml_training/tests/test_pit_dataset_manifest_builder.py program_code/ml_training/tests/test_registry_serving_contract.py program_code/ml_training/tests/test_model_registry.py -p no:cacheprovider",
+      "result": "PASS",
+      "observed": "106 passed, 1 skipped"
+    },
+    {
+      "command": "git diff --check -- WP3.1 scoped source/report paths",
+      "result": "PASS"
+    }
+  ],
+  "artifact_delta": "Adds a pure source-only registry_serving_contract_v1 builder, wires contract-bound quantile training to persist and pass the canonical contract, and adds focused builder/pipeline tests.",
+  "gate_delta": "Training acceptance reports can now carry both PIT manifest binding and registry serving contract metadata before any registry persistence path.",
+  "proof_delta": "No profit proof or bounded Demo outcome proof added. This improves registry lineage substrate for downstream ProofPacket/reward-ledger bridge work.",
+  "runtime_delta": "blocked",
+  "risk_delta": "no_authority_expansion",
+  "regressions": [],
+  "concerns": [
+    "program_code/ml_training/run_training_pipeline.py is 1046 lines, above the 800-line review-attention threshold but below the 2000-line hard cap; E2/E4/QA accepted this as non-blocking because the patch is localized.",
+    "Runtime/loss-control branch remains blocked by prior standing Demo authorization state and was not consumed.",
+    "Runtime DB registry persistence, model reload, symlink promotion, Demo/live authority, and bounded outcome evaluation remain unvalidated by this source-only checkpoint."
+  ],
+  "boundary_check": {
+    "runtime_mutation": false,
+    "db_read": false,
+    "db_write": false,
+    "db_migration": false,
+    "exchange_contact": false,
+    "private_read": false,
+    "mcp_server_or_config": false,
+    "credential_or_secret_access": false,
+    "order_or_probe": false,
+    "cost_gate_change": false,
+    "deploy": false,
+    "live_or_mainnet": false,
+    "model_reload": false,
+    "symlink_promotion": false,
+    "bounded_demo_outcome_ingestion": false
+  },
+  "verdict": "EFFECTIVE"
+}

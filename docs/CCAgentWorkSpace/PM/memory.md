@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-07 IBKR Demo Ready Work Queue L8G/L8H Closure
+
+- PM continued the IBKR demo-ready loop past the earlier premature handoff, found one no-contact gap in API-absent terminal semantics, and fixed it so the packet reports `WORK_QUEUE_AUTONOMOUS` / `EXTERNAL_VERIFICATION_PENDING` and advances from L7 to L8 work queue.
+- Verification passed: focused Python `29`, full Stock/ETF Python `184`, full `openclaw_types` `35 unit + 219 acceptance` plus doc-tests with explicit `RUSTDOC`, engine `stock_etf` `32`, and diff-check. Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--ibkr_demo_ready_work_queue_l8g_l8h_closure.md`.
+- Exit guard is clean: all no-contact gaps are closed; remaining work is operator external verification only under ADR-0048/AMD-2026-06-29-01.
+
 ## 2026-07-07 AI/ML Downstream Closure Loop Design
 
 - PM designed the post-WP1-WP5 downstream closure loop as `DESIGN_READY_SOURCE_FIRST_RUNTIME_GATED`: no need to wait for neighbor data to design or run source-safe WP2.1/WP3.1 work, but runtime learning remains gated by PM->E3->BB and bounded Demo outcome evidence.
@@ -370,6 +376,11 @@
 
 - PM advanced `WP2.1-TRAINING-RUN-PIT-MANIFEST-GATE` through PA→E1→E2→E4→QA: contract-bound quantile training now requires valid `pit_dataset_manifest_v1` before train/export/registry, and acceptance reports carry canonical PIT binding metadata.
 - Verification accepted: focused WP2.1 `46 passed, 1 skipped` x2, registry adjacency `49 passed` x2, QA adjacency `90 passed, 1 skipped` x2, py_compile/diff-check PASS. Runtime/loss-control remains blocked and was not consumed; next source-safe work is `WP3.1-TRAINING-REGISTRY-CONTRACT-EMISSION`.
+
+## 2026-07-07 AI/ML Downstream Loop WP3.1 Registry Contract Emission
+
+- PM advanced `WP3.1-TRAINING-REGISTRY-CONTRACT-EMISSION` through PA→E1→E2→E4→QA: contract-bound quantile training now builds/persists canonical `registry_serving_contract_v1` from acceptance report, PIT manifest/binding, feature hashes, and exact q10/q50/q90 ONNX artifact bytes.
+- Verification accepted: py_compile PASS, focused registry/model/pipeline `74 passed`, adjacent ml_training `106 passed, 1 skipped`, focused repeat `74 passed`, scoped diff-check PASS. Runtime/loss-control remains blocked and was not consumed; next source-safe work is `WP6-REWARD-LEDGER-PROOFPACKET-BRIDGE`.
 
 ## 2026-07-07 IBKR Demo Ready API-Absent Engineering Loop
 

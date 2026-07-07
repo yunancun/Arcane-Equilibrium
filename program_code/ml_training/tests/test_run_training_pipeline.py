@@ -22,6 +22,9 @@ from program_code.ml_training.quantile_trainer import (
     PerQuantileMetrics,
     QuantileTrainingResult,
 )
+from program_code.ml_training.registry_serving_contract import (
+    REGISTRY_SERVING_CONTRACT_FIELD,
+)
 
 
 def test_pipeline_dry_run_degrades_gracefully_without_lgb(monkeypatch, tmp_path):
@@ -114,6 +117,8 @@ def _manifest_source(**overrides) -> dict:
         "features": {
             "feature_schema_version": "features_v3",
             "feature_names": ["feature_1"],
+            "feature_schema_hash": "f" * 64,
+            "feature_definition_hash": "e" * 64,
             "definition": {"feature_1": "lagged_return"},
             "schema": {"feature_1": "float"},
         },
@@ -218,7 +223,7 @@ def _fake_quantile_result(n_labeled: int, feature_names: list[str]) -> QuantileT
 
 
 def _patch_quantile_success(monkeypatch):
-    calls = {"train": 0, "export": 0, "registry": 0}
+    calls = {"train": 0, "export": 0, "registry": 0, "registry_kwargs": []}
 
     def fake_train(**kwargs):
         calls["train"] += 1
@@ -226,10 +231,17 @@ def _patch_quantile_success(monkeypatch):
 
     def fake_export(**kwargs):
         calls["export"] += 1
-        return {"artifacts": {}, "train_date": "2026-07-07"}
+        artifacts = {}
+        output_dir = Path(kwargs["output_dir"])
+        for quantile in ("q10", "q50", "q90"):
+            path = output_dir / f"{quantile}.onnx"
+            path.write_bytes(f"{quantile}:artifact bytes".encode("ascii"))
+            artifacts[quantile] = {"written": True, "path": str(path)}
+        return {"artifacts": artifacts, "train_date": "2026-07-07"}
 
     def fake_register(**kwargs):
         calls["registry"] += 1
+        calls["registry_kwargs"].append(kwargs)
         return []
 
     monkeypatch.setattr(
@@ -436,7 +448,9 @@ def test_contract_bound_dry_run_emits_deterministic_manifest_and_report(
     result = run_pipeline(cfg)
 
     assert result.success
-    assert calls == {"train": 1, "export": 1, "registry": 1}
+    assert calls["train"] == 1
+    assert calls["export"] == 1
+    assert calls["registry"] == 1
     assert result.pit_dataset_manifest_status == "dataset_ready"
     sidecar = tmp_path / "grid_trading_demo_ETHUSDT_pit_dataset_manifest.json"
     assert result.pit_dataset_manifest_path == str(sidecar)
@@ -463,6 +477,27 @@ def test_contract_bound_dry_run_emits_deterministic_manifest_and_report(
     assert sidecar.read_text() == first_sidecar
 
 
+def test_contract_bound_quantile_path_persists_and_passes_registry_contract(
+    monkeypatch,
+    tmp_path,
+):
+    _patch_dataset(monkeypatch, n=250)
+    calls = _patch_quantile_success(monkeypatch)
+    cfg = _contract_config(tmp_path, pit_dataset_manifest=_dataset_ready_manifest())
+
+    result = run_pipeline(cfg)
+
+    assert result.success
+    assert calls["registry"] == 1
+    report = json.loads(
+        (tmp_path / "grid_trading_demo_ETHUSDT_acceptance_report.json").read_text()
+    )
+    persisted_contract = report[REGISTRY_SERVING_CONTRACT_FIELD]
+    passed_contract = calls["registry_kwargs"][0]["registry_serving_contract"]
+    assert persisted_contract == passed_contract
+    assert "registry_serving_contract" in result.stages_completed
+
+
 def test_non_contract_bound_dry_run_preserves_behavior_and_reports_binding(
     monkeypatch, tmp_path,
 ):
@@ -481,12 +516,50 @@ def test_non_contract_bound_dry_run_preserves_behavior_and_reports_binding(
 
     assert result.success
     assert result.pit_dataset_manifest_status == "not_contract_bound"
-    assert calls == {"train": 1, "export": 1, "registry": 1}
+    assert calls["train"] == 1
+    assert calls["export"] == 1
+    assert calls["registry"] == 1
     report = json.loads((tmp_path / "grid_trading_demo_ETHUSDT_acceptance_report.json").read_text())
     assert report["pit_dataset_manifest"] is None
     assert report["pit_dataset_manifest_binding"]["contract_bound_run"] is False
     assert report["pit_dataset_manifest_binding"]["validation_reason"] == "not_contract_bound"
+    assert "registry_serving_contract" not in calls["registry_kwargs"][0]
+    assert REGISTRY_SERVING_CONTRACT_FIELD not in report
     assert not (tmp_path / "grid_trading_demo_ETHUSDT_pit_dataset_manifest.json").exists()
+
+
+def test_contract_build_failure_happens_before_registry_db_connect(
+    monkeypatch,
+    tmp_path,
+):
+    _patch_dataset(monkeypatch, n=250)
+    calls = _patch_quantile_success(monkeypatch)
+
+    def missing_trio_export(**kwargs):
+        output_dir = Path(kwargs["output_dir"])
+        path = output_dir / "q50.onnx"
+        path.write_bytes(b"q50 only")
+        return {
+            "artifacts": {"q50": {"written": True, "path": str(path)}},
+            "train_date": "2026-07-07",
+        }
+
+    monkeypatch.setattr(
+        "program_code.ml_training.onnx_exporter.export_quantile_trio_to_onnx",
+        missing_trio_export,
+    )
+    monkeypatch.setattr(
+        "program_code.ml_training.model_registry.check_db_connectivity",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("db precheck called")),
+    )
+
+    result = run_pipeline(
+        _contract_config(tmp_path, pit_dataset_manifest=_dataset_ready_manifest())
+    )
+
+    assert not result.success
+    assert result.error == "onnx_artifacts_not_exact_q10_q50_q90"
+    assert calls["registry"] == 0
 
 
 def test_legacy_scorer_contract_bound_fails_closed_before_training(tmp_path):
