@@ -9,6 +9,10 @@
   "branch_selected": "RUNTIME_GATE_PREP",
   "branch_selection_reason": "Current Linux _latest false-negative candidate packet has false_negative_candidates_present=true and operator_review_ready=true for ma_crossover|NEARUSDT|Buy.",
   "source_binding": {
+    "sample_context": "intake_pre_docs_checkpoint",
+    "sampled_before_docs_checkpoint_commit": true,
+    "docs_checkpoint_pushed_to_origin_main": true,
+    "linux_source_sync_after_docs_checkpoint_performed": false,
     "mac_repo": "/Users/ncyu/Projects/TradeBot/srv",
     "mac_head": "c6a5032ee0dfa100db269e604441991b2fd84b6d",
     "mac_origin_main": "c6a5032ee0dfa100db269e604441991b2fd84b6d",
