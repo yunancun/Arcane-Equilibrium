@@ -1,0 +1,49 @@
+{
+  "schema_version": "runtime_loss_control_authorization_state_packet_v1",
+  "created_at": "2026-07-07T08:38:48Z",
+  "request": "operator_asserted_runtime_loss_control_unblocked_three_side_sync_demo_test_allowed",
+  "status": "BLOCKED",
+  "stop_reason": "STOP_LOSS_CONTROL",
+  "state_reason": "Operator assertion alone is not a machine-checkable RUNTIME_LOSS_CONTROL_READY packet. Latest durable PM packet remains BLOCKED/STOP_LOSS_CONTROL, readiness includes non-expiry engine-env blocker OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED=0 plus expired standing auth, no guardrail/materialization exists, and current Mac repo is ahead/dirty relative to origin/main.",
+  "runtime_loss_control_classification": "RUNTIME_LOSS_CONTROL_BLOCKED",
+  "bb_dispatch": "NO",
+  "e3_verdict": "BLOCKED_STOP_LOSS_CONTROL",
+  "e3_report_ref": "docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-07--demo_test_runtime_loss_control_unblock_e3_review.md",
+  "latest_blocked_authorization_refs": [
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--standing_demo_loss_control_authorization_blocked_by_engine_env.md",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--standing_demo_loss_control_authorization_blocked_by_engine_env.state_packet.json"
+  ],
+  "source_closure_ref": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--ai_ml_downstream_loop_wp7_learning_effect_review_stop_loop.state_packet.json",
+  "blocking_reasons": [
+    "latest_exact_scope_packet_status_is_blocked_not_ready",
+    "engine_env_OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED_not_1",
+    "standing_authorization_expired",
+    "guardrail_not_rerun_after_corrected_readiness",
+    "standing_envelope_not_materialized",
+    "mac_repo_ahead_4_and_dirty_relative_to_origin_main",
+    "prior_E3_BB_approval_was_for_stopped_refresh_attempt_and_cannot_be_reused"
+  ],
+  "denied_actions": [
+    "runtime_mutation",
+    "db_read",
+    "db_write",
+    "db_migration",
+    "exchange_contact",
+    "private_read",
+    "mcp_server_or_config",
+    "credential_or_secret_access",
+    "order_or_probe",
+    "cost_gate_change",
+    "deploy_or_restart",
+    "live_or_mainnet",
+    "model_reload",
+    "symlink_promotion",
+    "serving_reload",
+    "bounded_demo_outcome_ingestion",
+    "demo_test_execution"
+  ],
+  "next_safe_action": "Open a separate exact-scope PM->E3 runtime/env decision for restoring Demo-only engine env so OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED=1 without paper/live/mainnet or Cost Gate change, then rerun source gate/readiness/guardrail/materialization before any demo-test scope can go to BB.",
+  "repo_head": "e49ef454564a08bb89e0b11900f681027067a530",
+  "origin_head": "77f0b56782000a73c28215f1dc2762e5bdb09b07",
+  "worktree_dirty_summary": "unrelated_dirty_memory_ibkr_bybit_control_api_v1_and_operator_pm_untracked_files_remain_unstaged"
+}
