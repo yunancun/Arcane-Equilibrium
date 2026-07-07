@@ -455,3 +455,18 @@ surgical 修：`checks_ipc_edge.py::check_model_registry_freshness` 僅在 `slot
 ## 2026-07-07 — WP2.1 training-run PIT manifest gate E2 re-review → PASS to E4
 - E1 closed both RETURN items: sidecar/report now use same-directory temp + `Path.replace()` with caught-failure cleanup/final preservation; `persist_required=True` raises while default remains fail-soft. Pooled `None`/`ALL` permanent test asserts `train == 0`.
 - Verification: py_compile passed; focused WP2.1 pytest `46 passed, 1 skipped`; registry adjacency `49 passed`; manual atomic failure probe preserved old finals and left zero temp files. INFO only: `run_training_pipeline.py` now 1005 lines (>800 review-attention, <2000 hard cap).
+
+## 2026-07-07 — WP6 reward_ledger ProofPacket bridge E2 review → RETURN E1
+- Source-only boundary and focused tests were mostly sound (py_compile PASS; WP6/upstream 104 passed; adjacency 83 passed; static side-effect rg no matches; diff-check PASS), but RETURN on 2 MED contract holes.
+- MED-1: `validate_reward_record()` only recomputes `record_hash`; forged upstream lineage hashes plus recomputed record hash still validate ready. MED-2: registry lineage requiredness is inferred from absent flags and silently defaults to `execution_reward_not_training_contract_bound`.
+- Report: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-07-07--wp6_reward_ledger_proofpacket_bridge_review.md`.
+
+## 2026-07-07 — WP6 reward_ledger ProofPacket bridge E2 re-review → RETURN E1
+- E1 closed original MED-1/MED-2 probes: forged lineage+record_hash now rejects, missing registry contract defaults to `registry_lineage_missing`; source_artifacts are now source-backed and validation reruns upstream hashes/validators. Verification: py_compile PASS, WP6/upstream 109 passed, adjacency 83 passed, static side-effect rg no matches, diff-check PASS.
+- New MED: optional registry mode can still override contradictory source claims. `registry_required=False` + allowed optional reason passes even when `effect_window.registry_required=True` and `acceptance_report_ref.contract_bound=True`; optional mode needs contradiction rejection before E4.
+- Report: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-07-07--wp6_reward_ledger_proofpacket_bridge_rereview.md`.
+
+## 2026-07-07 — WP6 reward_ledger ProofPacket bridge E2 re-review 2 → PASS to E4
+- E1 rework2 closes the remaining optional-registry MED: build-time contradiction probe now rejects `registry_optional_source_contract_bound`, and post-build `source_artifacts` mutation with recomputed `record_hash` also rejects. Clean explicit execution-only optional fixture and registry-required happy path both pass.
+- Verification: py_compile PASS; WP6/upstream `112 passed`; adjacency `83 passed`; original forged lineage and missing-registry probes remain fail-closed; static side-effect rg no matches; diff-check PASS.
+- `reward_ledger.py` is 913 lines, classified as review-attention (>800, <2000) not blocker. Report: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-07-07--wp6_reward_ledger_proofpacket_bridge_rereview2.md`.

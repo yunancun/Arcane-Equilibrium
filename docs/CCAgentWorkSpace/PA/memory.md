@@ -355,3 +355,7 @@ test**（先 PositionUpdate(size=0) 後 Fill(Buy,is_close) → 斷言 flat 非 L
 ## 2026-07-07 — WP3.1 training registry contract emission design（source-only, E1-READY）
 - 交付 `docs/CCAgentWorkSpace/PA/workspace/reports/2026-07-07--wp3_1_training_registry_contract_emission_design.md`（Operator stub 同步）。結論：`registry_serving_contract_v1` validator/atomic registry path 已存在，真缺口是 `run_training_pipeline.py` 未從 acceptance report + PIT manifest + q10/q50/q90 ONNX bytes 建 contract 並傳入 registry call。
 - E1 範圍：新增純 builder 於 `registry_serving_contract.py`，wire contract-bound quantile path；hash 必重用 PIT manifest lineage（manifest/label/feature/split/leakage）並在 DB connect 前驗 exact trio/artifact hash/authority alias。禁止 DB/runtime/serving/promotion/symlink/order/Cost Gate 擴權；非 contract-bound route 不得合成假 contract。
+
+## 2026-07-07 — WP6 reward ledger ProofPacket bridge design（source-only, E1-READY）
+- 交付 `docs/CCAgentWorkSpace/PA/workspace/reports/2026-07-07--wp6_reward_ledger_proofpacket_bridge_design.md`（Operator stub 同步）。結論：新增 additive `reward_ledger_v1` bridge，且只消費 `PROOF_READY` candidate-matched ProofPacket + `STATUS_COUNTABLE` DemoMutationEnvelope；no-fill/cleanup/unmatched/dry-run/dedupe/non-demo/live/proof-excluded/non-countable/missing lineage 全 fail-closed。
+- E1 範圍：`program_code/ml_training/reward_ledger.py` + `program_code/ml_training/tests/test_reward_ledger.py`；禁止 DB/runtime/exchange/private read、order/probe、Cost Gate、deploy、live/mainnet 或 learning-state mutation。

@@ -988,3 +988,7 @@ BASELINE: 2026-07-07 passed=46 failed=0 skipped=1 error=0 (scope=WP2.1 focused t
 ## 2026-07-07 · WP3.1 Training Registry Contract Emission post-E2 回歸 — PASS
 - Source-only E4 regression passed: py_compile PASS; focused/adjoining pytest `74 passed` then repeat `74 passed`; wider ml_training adjacency `106 passed, 1 skipped`; requested `git diff --check` PASS. No product-code edit, stage/commit, runtime/DB/exchange/secret/deploy/order/Cost Gate/live/mainnet. Report: `docs/CCAgentWorkSpace/E4/workspace/reports/2026-07-07--wp3_1_training_registry_contract_emission_regression.md`.
 BASELINE: 2026-07-07 passed=74 failed=0 skipped=0 error=0 (scope=WP3.1 focused/adjoining registry contract emission; wider adjacency=106/0/1/0; source-only Mac regression)
+
+## 2026-07-07 · WP6 Reward Ledger ProofPacket Bridge post-E2 回歸 — PASS
+- Source-only E4 regression passed: py_compile PASS; focused WP6 pytest `112 passed` then repeat `112 passed`; upstream adjacency `83 passed` then repeat `83 passed`; forbidden source-surface rg PASS with no matches; requested `git diff --check` PASS. No product-code edit, stage/commit, runtime/DB/exchange/secret/deploy/order/Cost Gate/live/mainnet. Report: `docs/CCAgentWorkSpace/E4/workspace/reports/2026-07-07--wp6_reward_ledger_proofpacket_bridge_regression.md`.
+BASELINE: 2026-07-07 passed=112 failed=0 skipped=0 error=0 (scope=WP6 reward-ledger ProofPacket bridge focused source-only regression; upstream adjacency=83/0/0/0; Mac pytest)
