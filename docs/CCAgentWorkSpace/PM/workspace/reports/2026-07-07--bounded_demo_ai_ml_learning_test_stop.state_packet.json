@@ -1,0 +1,107 @@
+{
+  "schema": "runtime_loss_control_authorization_state_packet_v1",
+  "secondary_schema": "bounded_demo_ai_ml_learning_test_state_packet_v1",
+  "generated_at_utc": "2026-07-07T14:22:00Z",
+  "scope": "bounded_demo_ai_ml_learning_test_exact_scope",
+  "status": "BLOCKED",
+  "stop_reason": "STOP_LOSS_CONTROL",
+  "request_id": "pm-e3-bb-bounded-demo-ai-ml-learning-test-20260707T142000Z",
+  "dispatch_chain": {
+    "pm_request": "DONE",
+    "e3_review": "BLOCKED_STOP_LOSS_CONTROL",
+    "bb_review": "NOT_DISPATCHED_E3_BLOCKED",
+    "pm_closure": "STOP_PACKET"
+  },
+  "source_binding": {
+    "mac_local_head": "243e0cd6d57edb2039b144ed55b9a7556dcef633",
+    "mac_origin_main": "243e0cd6d57edb2039b144ed55b9a7556dcef633",
+    "github_origin_main": "243e0cd6d57edb2039b144ed55b9a7556dcef633",
+    "linux_trade_core_head": "243e0cd6d57edb2039b144ed55b9a7556dcef633",
+    "linux_trade_core_origin_main": "243e0cd6d57edb2039b144ed55b9a7556dcef633",
+    "note": "Evidence artifacts were generated against this source binding before this docs/state closure commit."
+  },
+  "candidate": {
+    "candidate_key": "grid_trading|ETHUSDT|Buy",
+    "strategy": "grid_trading",
+    "symbol": "ETHUSDT",
+    "side": "Buy",
+    "standing_demo_resolved_cap": "954.18759458",
+    "standing_demo_expires_at_utc": "2026-07-08T01:53:48.341325+00:00",
+    "standing_demo_authorization_sha256": "eabf2dab8ddbe9c680a4b047d7a338d5d34a30a28a36134ab820e83a1b174197"
+  },
+  "prior_runtime_loss_control_gate": {
+    "status": "RUNTIME_LOSS_CONTROL_READY",
+    "ready_packet_path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--runtime_loss_control_authorization_ready.state_packet.json",
+    "runtime_readiness_status": "BOUNDED_DEMO_RUNTIME_READY_FOR_FINAL_WINDOW_GATES",
+    "runtime_readiness_remote_path": "/home/ncyu/BybitOpenClaw/var/openclaw/demo_only_engine_env_restoration_20260707T133658Z_e655de9/readiness/bounded_demo_runtime_readiness_after_materialization_engine544751.json",
+    "runtime_readiness_sha256": "b77946c0985680a2fe7ff0c332d2ce79e1c204d61e59e92295f88bd6104c05b6",
+    "scope_note": "This prior gate clears runtime/env/loss-control prerequisite only. It grants no order, probe, Demo test, live/mainnet, Cost Gate, DB, proof, or direct exchange authority."
+  },
+  "evidence": {
+    "pm_request_json": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--bounded_demo_ai_ml_learning_test_exact_scope_request.json",
+    "pm_request_md": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--bounded_demo_ai_ml_learning_test_exact_scope_request.md",
+    "e3_report": "docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-07--bounded_demo_ai_ml_learning_test_e3_review.md",
+    "runtime_precheck_path": "/home/ncyu/BybitOpenClaw/var/openclaw/bounded_demo_ai_ml_learning_test_20260707T141248Z_243e0cd6d/precheck/bounded_demo_ai_ml_learning_test_precheck.json",
+    "runtime_precheck_sha256": "7b3d6881f78446a9c4c053569dc7bd6aff4654a6b7436e2c55872151a226db49",
+    "source_stability_first_sample_path": "/home/ncyu/BybitOpenClaw/var/openclaw/bounded_demo_ai_ml_learning_test_20260707T141248Z_243e0cd6d/source/source_stability_first_sample.json",
+    "source_stability_first_sample_sha256": "88535012518e05bb44f4c93ddd661800dcae3d4dadcfa04fd1e1484a5cc0d789",
+    "source_stability_ready_check_path": "/home/ncyu/BybitOpenClaw/var/openclaw/bounded_demo_ai_ml_learning_test_20260707T141248Z_243e0cd6d/source/source_stability_ready_check.json",
+    "source_stability_ready_check_sha256": "4e67badd14e1bde3e4f4c20a5d24aeeef69dbbdb93e775c1feb5989fe68e35aa",
+    "source_stability_ready_status": "SOURCE_STABILITY_WINDOW_READY_FOR_E3_BB_REVIEW"
+  },
+  "blockers": [
+    "false_negative_bounded_probe_preflight_latest_not_ready",
+    "bounded_probe_placement_repair_plan_latest_not_ready",
+    "bounded_probe_authority_patch_readiness_latest_not_ready",
+    "bounded_probe_operator_authorization_latest_not_authorize",
+    "no_existing_pm_supervised_one_shot_order_runner_identified"
+  ],
+  "authorization_result": {
+    "bb_dispatch_allowed": false,
+    "bounded_demo_ai_ml_learning_test_allowed": false,
+    "order_allowed": false,
+    "probe_allowed": false,
+    "public_bbo_window_allowed": false,
+    "decision_lease_allowed": false,
+    "runtime_env_mutation_allowed": false
+  },
+  "explicit_denials": {
+    "live_mainnet": false,
+    "paper": false,
+    "cost_gate_lowering_or_change": false,
+    "db_write_or_migration": false,
+    "secret_value_hash_prefix_suffix_output": false,
+    "mcp_server_config_or_credential_access": false,
+    "model_or_symlink_promotion_or_serving_reload": false,
+    "runtime_env_mutation_or_restart": false,
+    "direct_exchange_private_read": false,
+    "manual_direct_bybit_order_path": false
+  },
+  "verification_commands": [
+    {
+      "command": "git -C /Users/ncyu/Projects/TradeBot/srv rev-parse HEAD origin/main",
+      "result": "243e0cd6d57edb2039b144ed55b9a7556dcef633 / 243e0cd6d57edb2039b144ed55b9a7556dcef633"
+    },
+    {
+      "command": "git ls-remote origin refs/heads/main",
+      "result": "243e0cd6d57edb2039b144ed55b9a7556dcef633"
+    },
+    {
+      "command": "ssh trade-core 'cd /home/ncyu/BybitOpenClaw/srv && git rev-parse HEAD origin/main && git status --short'",
+      "result": "243e0cd6d57edb2039b144ed55b9a7556dcef633 / 243e0cd6d57edb2039b144ed55b9a7556dcef633 / clean"
+    },
+    {
+      "command": "python3 -m json.tool docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--bounded_demo_ai_ml_learning_test_exact_scope_request.json",
+      "result": "PASS"
+    },
+    {
+      "command": "ssh trade-core source_stability_window_guard.py ready check",
+      "result": "SOURCE_STABILITY_WINDOW_READY_FOR_E3_BB_REVIEW, sha256=4e67badd14e1bde3e4f4c20a5d24aeeef69dbbdb93e775c1feb5989fe68e35aa"
+    },
+    {
+      "command": "ssh trade-core bounded Demo AI/ML learning-test runtime precheck",
+      "result": "BLOCKED by five loss-control/order-readiness blockers, sha256=7b3d6881f78446a9c4c053569dc7bd6aff4654a6b7436e2c55872151a226db49"
+    }
+  ],
+  "next_allowed_action": "Regenerate the bounded-probe preflight, placement repair, authority readiness, operator authorization, and audited-runner evidence as a separate exact scope. Do not proceed to BB or bounded Demo AI/ML learning test until E3 first approves that refreshed scope."
+}
