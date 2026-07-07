@@ -1,0 +1,128 @@
+{
+  "schema": "runtime_loss_control_authorization_state_packet_v1",
+  "secondary_schema": "bounded_probe_blocked_signal_refresh_state_packet_v1",
+  "generated_at_utc": "2026-07-07T15:01:11Z",
+  "scope": "bounded_probe_blocked_signal_refresh_pre_e3",
+  "status": "BLOCKED",
+  "stop_reason": "STOP_LOSS_CONTROL",
+  "request_id": "pm-bounded-probe-blocked-signal-refresh-20260707T150111Z",
+  "dispatch_chain": {
+    "pm_pre_e3_refresh": "DONE",
+    "e3_review": "NOT_DISPATCHED_FALSE_NEGATIVE_CANDIDATE_NOT_READY",
+    "bb_review": "NOT_DISPATCHED_E3_NOT_OPENED",
+    "pm_closure": "STOP_PACKET"
+  },
+  "source_binding": {
+    "mac_local_head": "9d1ff1d8ca03a8e5dca3c39017abba5e8796a6ce",
+    "mac_origin_main": "9d1ff1d8ca03a8e5dca3c39017abba5e8796a6ce",
+    "github_origin_main": "9d1ff1d8ca03a8e5dca3c39017abba5e8796a6ce",
+    "linux_trade_core_head": "9d1ff1d8ca03a8e5dca3c39017abba5e8796a6ce",
+    "linux_trade_core_origin_main": "9d1ff1d8ca03a8e5dca3c39017abba5e8796a6ce"
+  },
+  "candidate": {
+    "candidate_key": "grid_trading|ETHUSDT|Buy",
+    "strategy": "grid_trading",
+    "symbol": "ETHUSDT",
+    "side": "Buy",
+    "standing_demo_authorization_sha256": "eabf2dab8ddbe9c680a4b047d7a338d5d34a30a28a36134ab820e83a1b174197",
+    "standing_demo_resolved_cap": "954.18759458",
+    "standing_demo_expires_at_utc": "2026-07-08T01:53:48.341325+00:00"
+  },
+  "artifact_root": "/home/ncyu/BybitOpenClaw/var/openclaw/bounded_probe_blocked_signal_refresh_nopg_20260707T145938Z_9d1ff1d8c",
+  "evidence": {
+    "pm_report": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--bounded_probe_blocked_signal_refresh_pm_stop.md",
+    "operator_summary": "docs/CCAgentWorkSpace/Operator/2026-07-07--bounded_probe_blocked_signal_refresh_stop.md",
+    "blocked_outcome_review_nopg_path": "/home/ncyu/BybitOpenClaw/var/openclaw/bounded_probe_blocked_signal_refresh_nopg_20260707T145938Z_9d1ff1d8c/blocked_outcome_review_nopg.json",
+    "blocked_outcome_review_nopg_sha256": "91b4ade9acdd90503f89ab3c375b49b24d4c1d9a201d1d8e44e2243c7409382f",
+    "false_negative_candidate_packet_nopg_path": "/home/ncyu/BybitOpenClaw/var/openclaw/bounded_probe_blocked_signal_refresh_nopg_20260707T145938Z_9d1ff1d8c/false_negative_candidate_packet_nopg.json",
+    "false_negative_candidate_packet_nopg_sha256": "1f604ee621d3043f4441e27c6d866b7dadda3a18d78ee02390eb8396e582659c",
+    "false_negative_candidate_packet_nopg_md_sha256": "c869584b9abb309bcd66debd38500e21618ea626278d6c065b0e3f374bf3bc44",
+    "manual_pg_attempt_artifact_root": "/home/ncyu/BybitOpenClaw/var/openclaw/bounded_probe_blocked_signal_refresh_20260707T145745Z_9d1ff1d8c",
+    "manual_pg_attempt_result": "PG_AUTH_FAILED_NO_SECRET_OUTPUT_NO_ARTIFACTS",
+    "cron_refresh_reference": "cost_gate_learning_lane_cron 2026-07-07 14:27 UTC completed rc=0 for materializer/outcome/review/false-negative/preflight/bounded-probe stages"
+  },
+  "refresh_statuses": {
+    "blocked_outcome_review_nopg": "COLLECT_MORE_BLOCKED_SIGNAL_OUTCOMES",
+    "blocked_outcome_review_nopg_blocked_signal_outcome_count": 647308,
+    "blocked_outcome_review_nopg_review_candidate_side_cell_count": 0,
+    "blocked_outcome_review_nopg_false_negative_candidate_count": 0,
+    "blocked_outcome_review_nopg_edge_amplification_required_side_cell_count": 25,
+    "blocked_outcome_review_nopg_top_side_cell_key": "flash_dip_buy|ETHUSDT|Buy",
+    "blocked_outcome_review_nopg_top_side_cell_status": "LEGACY_OPTIMISTIC_COST_UNBACKFILLED",
+    "false_negative_candidate_packet_nopg": "COST_GATE_EDGE_AMPLIFICATION_REQUIRED",
+    "false_negative_candidate_packet_nopg_ranked_candidate_count": 6,
+    "false_negative_candidate_packet_nopg_false_negative_candidate_count": 0,
+    "false_negative_candidate_packet_nopg_edge_amplification_candidate_count": 6,
+    "false_negative_candidate_packet_nopg_operator_review_ready": false,
+    "false_negative_candidate_packet_nopg_probe_authority_granted": false,
+    "false_negative_candidate_packet_nopg_order_authority_granted": false,
+    "false_negative_candidate_packet_latest": "COST_GATE_EDGE_AMPLIFICATION_REQUIRED",
+    "false_negative_operator_review_latest": "STANDING_DEMO_AUTHORIZATION_INVALID_FOR_PREFLIGHT_REVIEW",
+    "autonomous_parameter_proposal_latest": "LEARNED_CANDIDATE_PACKET_NOT_READY",
+    "false_negative_bounded_probe_preflight_latest": "STANDING_DEMO_AUTHORIZATION_INVALID_FOR_PREFLIGHT",
+    "bounded_probe_touchability_preflight_latest": "BOUNDED_PROBE_DESIGN_NOT_READY",
+    "bounded_probe_placement_repair_plan_latest": "BOUNDED_PROBE_DESIGN_NOT_READY",
+    "bounded_probe_authority_patch_readiness_latest": "PLACEMENT_REPAIR_PLAN_NOT_READY",
+    "bounded_probe_operator_authorization_latest": "FALSE_NEGATIVE_PREFLIGHT_NOT_READY"
+  },
+  "repair_result": {
+    "false_negative_candidate_ready": false,
+    "operator_review_ready": false,
+    "bounded_probe_chain_ready": false,
+    "operator_authorization_ready": false,
+    "e3_dispatch_allowed": false,
+    "bb_dispatch_allowed": false,
+    "bounded_demo_ai_ml_learning_test_allowed": false,
+    "order_allowed": false,
+    "probe_allowed": false,
+    "primary_blocker": "false_negative_candidate_count_zero_operator_review_ready_false",
+    "secondary_blockers": [
+      "only_edge_amplification_candidates_present",
+      "top_side_cell_legacy_optimistic_cost_unbackfilled",
+      "false_negative_operator_review_not_ready",
+      "false_negative_preflight_not_ready",
+      "placement_repair_plan_not_ready",
+      "authority_patch_readiness_not_ready",
+      "operator_authorization_not_ready"
+    ]
+  },
+  "explicit_denials": {
+    "live_mainnet": false,
+    "paper": false,
+    "order_or_probe": false,
+    "cost_gate_lowering_or_change": false,
+    "db_write_or_migration_by_pm": false,
+    "secret_output": false,
+    "direct_exchange_private_read": false,
+    "runtime_env_mutation_or_restart": false,
+    "manual_direct_bybit_order_path": false,
+    "model_or_symlink_promotion_or_serving_reload": false
+  },
+  "verification_commands": [
+    {
+      "command": "git -C /Users/ncyu/Projects/TradeBot/srv rev-parse HEAD origin/main",
+      "result": "9d1ff1d8ca03a8e5dca3c39017abba5e8796a6ce / 9d1ff1d8ca03a8e5dca3c39017abba5e8796a6ce"
+    },
+    {
+      "command": "git -C /Users/ncyu/Projects/TradeBot/srv ls-remote origin refs/heads/main",
+      "result": "9d1ff1d8ca03a8e5dca3c39017abba5e8796a6ce"
+    },
+    {
+      "command": "ssh trade-core 'cd /home/ncyu/BybitOpenClaw/srv && git rev-parse HEAD origin/main && git status --short --branch'",
+      "result": "9d1ff1d8ca03a8e5dca3c39017abba5e8796a6ce / 9d1ff1d8ca03a8e5dca3c39017abba5e8796a6ce / clean"
+    },
+    {
+      "command": "ssh trade-core outcome_review retained-ledger no-PG refresh",
+      "result": "COLLECT_MORE_BLOCKED_SIGNAL_OUTCOMES, blocked_signal_outcome_count=647308, false_negative_candidate_count=0"
+    },
+    {
+      "command": "ssh trade-core false_negative_candidate_packet no-PG refresh",
+      "result": "COST_GATE_EDGE_AMPLIFICATION_REQUIRED, ranked_candidate_count=6, false_negative_candidate_count=0, operator_review_ready=false"
+    },
+    {
+      "command": "ssh trade-core manual PG-backed reject_materializer attempt",
+      "result": "STOPPED_BEFORE_ARTIFACT_WRITE: local PG auth failed in interactive shell; no secret output or credential workaround"
+    }
+  ],
+  "next_allowed_action": "Improve edge or reduce friction for ranked edge-amplification side cells, or continue blocked-signal collection until a false-negative candidate appears with operator_review_ready=true; then regenerate bounded-probe preflight/placement/authority/operator-auth and open a fresh PM -> E3 exact scope."
+}
