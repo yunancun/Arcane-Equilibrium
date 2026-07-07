@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-07 Bounded-Probe Blocked-Signal Refresh Stop
+
+- PM continued after the repair-refresh E3 stop by refreshing retained-ledger blocked-signal evidence before opening any new E3/BB scope; fresh no-PG review reached 647,308 blocked outcomes but false-negative candidates remained 0.
+- False-negative packet stayed `COST_GATE_EDGE_AMPLIFICATION_REQUIRED` with 6 edge-amplification candidates and `operator_review_ready=false`, so PM did not open E3 and BB was not dispatched.
+- State packet: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--bounded_probe_blocked_signal_refresh_stop.state_packet.json`; next allowed work is edge amplification / friction reduction or continued blocked-signal collection until a real false-negative candidate is operator-review-ready.
+
 ## 2026-07-07 Runtime Loss-Control Authorization READY
 
 - PM ran the exact `PM -> E3 -> BB -> PM` gate for Demo-only runtime/env restoration; E3 approved for BB and BB approved exact restoration, with no order/probe/test/direct Bybit/Cost Gate/live/mainnet authority.
