@@ -1,0 +1,73 @@
+{
+  "schema_version": "roadmap_work_item_v1",
+  "work_id": "WP6-REWARD-LEDGER-PROOFPACKET-BRIDGE",
+  "loop_id": "AI-ML-DOWNSTREAM-CLOSURE-LOOP",
+  "selected_at": "2026-07-07T00:30:37Z",
+  "priority": "P1",
+  "gate": "DOWNSTREAM_SOURCE_SAFE",
+  "selection_reason": "WP3.1 advanced source-only registry contract emission. WP6 is the next downstream source-safe closure item: bridge candidate-matched ProofPacket and countable DemoMutationEnvelope evidence into an offline reward_ledger_v1 record without consuming runtime, DB, exchange, credential, order, Cost Gate, deploy, live, or bounded Demo outcome access.",
+  "objective": "Define a source-only reward_ledger_v1 contract, builder, validator, dedupe helper, and tests that accept only PROOF_READY ProofPacket plus STATUS_COUNTABLE DemoMutationEnvelope inputs and preserve source-backed lineage to PIT manifest, registry contract, acceptance report, and no-authority boundaries.",
+  "allowed_actions": [
+    "source_code_edit",
+    "source_tests",
+    "source_reports",
+    "local_py_compile",
+    "local_pytest",
+    "git_diff_check"
+  ],
+  "denied_actions": [
+    "runtime_mutation",
+    "db_read",
+    "db_write",
+    "db_migration",
+    "exchange_contact",
+    "private_read",
+    "mcp_server_or_config",
+    "credential_or_secret_access",
+    "order_or_probe",
+    "cost_gate_change",
+    "deploy",
+    "live_or_mainnet",
+    "model_reload",
+    "symlink_promotion",
+    "runtime_learning",
+    "bounded_demo_outcome_ingestion",
+    "registry_persistence"
+  ],
+  "required_dispatch_chain": [
+    "PM",
+    "PA",
+    "E1",
+    "E2",
+    "E1",
+    "E2",
+    "E1",
+    "E2",
+    "E4",
+    "QA",
+    "PM"
+  ],
+  "acceptance_criteria": [
+    "reward_ledger_v1 builder accepts only valid PROOF_READY ProofPacket plus STATUS_COUNTABLE DemoMutationEnvelope inputs.",
+    "No-fill, cleanup, unmatched candidate/source, dry-run, dedupe, non-demo/live, proof-excluded, audit-only/non-countable, missing PIT, missing registry-required lineage, and authority aliases fail closed.",
+    "Records are source-backed: validation recomputes record, ProofPacket, DemoMutationEnvelope, PIT manifest, registry contract, and acceptance report hashes where applicable.",
+    "Registry lineage is required by default; optional execution-only mode is explicit and rejects contradictory contract-bound markers.",
+    "Dedupe and batch helpers remain in-memory/source-only and do not persist to DB/runtime state.",
+    "Focused and adjacent source tests pass and no runtime/loss-control branch is consumed."
+  ],
+  "primary_files": [
+    "program_code/ml_training/reward_ledger.py",
+    "program_code/ml_training/tests/test_reward_ledger.py"
+  ],
+  "supporting_reports": [
+    "docs/CCAgentWorkSpace/PA/workspace/reports/2026-07-07--wp6_reward_ledger_proofpacket_bridge_design.md",
+    "docs/CCAgentWorkSpace/E1/workspace/reports/2026-07-07--wp6_reward_ledger_proofpacket_bridge_implementation.md",
+    "docs/CCAgentWorkSpace/E2/workspace/reports/2026-07-07--wp6_reward_ledger_proofpacket_bridge_review.md",
+    "docs/CCAgentWorkSpace/E1/workspace/reports/2026-07-07--wp6_reward_ledger_proofpacket_bridge_rework.md",
+    "docs/CCAgentWorkSpace/E2/workspace/reports/2026-07-07--wp6_reward_ledger_proofpacket_bridge_rereview.md",
+    "docs/CCAgentWorkSpace/E1/workspace/reports/2026-07-07--wp6_reward_ledger_proofpacket_bridge_rework2.md",
+    "docs/CCAgentWorkSpace/E2/workspace/reports/2026-07-07--wp6_reward_ledger_proofpacket_bridge_rereview2.md",
+    "docs/CCAgentWorkSpace/E4/workspace/reports/2026-07-07--wp6_reward_ledger_proofpacket_bridge_regression.md",
+    "docs/CCAgentWorkSpace/QA/workspace/reports/2026-07-07--wp6_reward_ledger_proofpacket_bridge_acceptance.md"
+  ]
+}

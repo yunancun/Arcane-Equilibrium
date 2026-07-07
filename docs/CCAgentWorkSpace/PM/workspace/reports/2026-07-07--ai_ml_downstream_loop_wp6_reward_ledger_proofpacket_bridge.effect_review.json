@@ -1,0 +1,103 @@
+{
+  "schema_version": "implementation_effect_review_v1",
+  "work_id": "WP6-REWARD-LEDGER-PROOFPACKET-BRIDGE",
+  "loop_id": "AI-ML-DOWNSTREAM-CLOSURE-LOOP",
+  "created_at": "2026-07-07T00:30:37Z",
+  "pre_state": {
+    "proof_packet_contract": "implemented_source_only",
+    "pit_manifest_gate": "implemented_source_only",
+    "registry_contract_emission": "implemented_source_only",
+    "demo_mutation_envelope": "implemented_source_only",
+    "reward_ledger_bridge": "missing",
+    "runtime_loss_control": "blocked",
+    "source_head_at_start": "8534d716efcbaeb610d9da727db2af94f6f41ef9"
+  },
+  "post_state": {
+    "reward_ledger_bridge": "implemented_source_only",
+    "record_schema": "reward_ledger_v1",
+    "builder": "build_reward_record_from_proof_and_mutation",
+    "validator": "validate_reward_record",
+    "hashing": "compute_reward_record_hash",
+    "append_only_helpers": [
+      "dedupe_reward_records",
+      "validate_reward_batch"
+    ],
+    "accepted_inputs": [
+      "PROOF_READY ProofPacket",
+      "STATUS_COUNTABLE DemoMutationEnvelope",
+      "caller_provided_effect_window",
+      "registry_serving_contract_v1 when registry_required",
+      "acceptance_report_ref when available"
+    ],
+    "fail_closed_cases": [
+      "no_fill_or_no_candidate_matched_fill",
+      "cleanup_or_proof_excluded_outcome",
+      "unmatched_candidate_or_source_identity",
+      "dry_run_or_dedupe_mutation",
+      "non_demo_or_live_engine_mode",
+      "audit_only_or_non_countable_mutation",
+      "missing_pit_manifest_lineage",
+      "missing_registry_required_lineage",
+      "contradictory_optional_registry_contract_bound_markers",
+      "authority_expansion_aliases",
+      "forged_source_artifacts_after_record_hash_recompute"
+    ],
+    "runtime_loss_control": "blocked_unchanged",
+    "next_source_work": "WP7-EFFECT-REVIEW-AND-STOP-LOOP"
+  },
+  "tests": [
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m py_compile program_code/ml_training/reward_ledger.py program_code/ml_training/proof_packet_contract.py program_code/ml_training/demo_mutation_envelope.py program_code/ml_training/registry_serving_contract.py",
+      "result": "PASS"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m pytest -q program_code/ml_training/tests/test_reward_ledger.py program_code/ml_training/tests/test_proof_packet_contract.py program_code/ml_training/tests/test_demo_mutation_envelope.py program_code/ml_training/tests/test_demo_mutation_envelope_applier_mapping.py -p no:cacheprovider",
+      "result": "PASS",
+      "observed": "112 passed; repeated by E1/E2/E4/QA"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m pytest -q program_code/ml_training/tests/test_pit_dataset_manifest.py program_code/ml_training/tests/test_registry_serving_contract.py program_code/ml_training/tests/test_run_training_pipeline.py program_code/ml_training/tests/test_model_registry.py -p no:cacheprovider",
+      "result": "PASS",
+      "observed": "83 passed; repeated by E2/E4"
+    },
+    {
+      "command": "rg -n \"psycopg2|asyncpg|requests|httpx|urllib|socket|subprocess|one_shot_ipc_call|ipc_dispatch|place_order|create_order|cancel_order|submit_order|INSERT INTO|UPDATE learning|DELETE FROM|os\\.environ|getenv\" program_code/ml_training/reward_ledger.py",
+      "result": "PASS",
+      "observed": "no matches; rg exit 1 expected"
+    },
+    {
+      "command": "git diff --check -- WP6 scoped source/report paths",
+      "result": "PASS"
+    }
+  ],
+  "artifact_delta": "Adds a pure source-only reward_ledger_v1 builder/validator/hash/dedupe surface and focused tests for ProofPacket plus DemoMutationEnvelope countability and lineage.",
+  "gate_delta": "Downstream reward samples can now be represented only when candidate-matched ProofPacket and bounded Demo mutation evidence are both source-valid and lineage-bound.",
+  "proof_delta": "No real bounded Demo outcome proof was ingested. This creates the source contract required before runtime/loss-control authorized outcome evaluation can be counted.",
+  "runtime_delta": "blocked",
+  "risk_delta": "no_authority_expansion",
+  "regressions": [],
+  "concerns": [
+    "program_code/ml_training/reward_ledger.py is 913 lines, above the 800-line review-attention threshold but below the 2000-line hard cap; E2/E4/QA accepted this as non-blocking and recommended splitting helpers before future growth.",
+    "Runtime/loss-control branch remains blocked by standing Demo authorization state and was not consumed.",
+    "Durable append-only persistence, DB uniqueness, registry persistence, serving promotion, Cost Gate changes, and real bounded Demo outcome ingestion remain unvalidated by this source-only checkpoint."
+  ],
+  "boundary_check": {
+    "runtime_mutation": false,
+    "db_read": false,
+    "db_write": false,
+    "db_migration": false,
+    "exchange_contact": false,
+    "private_read": false,
+    "mcp_server_or_config": false,
+    "credential_or_secret_access": false,
+    "order_or_probe": false,
+    "cost_gate_change": false,
+    "deploy": false,
+    "live_or_mainnet": false,
+    "model_reload": false,
+    "symlink_promotion": false,
+    "bounded_demo_outcome_ingestion": false,
+    "registry_persistence": false
+  },
+  "verdict": "EFFECTIVE_WITH_CONCERNS"
+}

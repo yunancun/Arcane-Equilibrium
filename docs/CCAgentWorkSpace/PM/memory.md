@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-07 AI/ML Downstream Loop WP6 Reward Ledger ProofPacket Bridge
+
+- PM advanced `WP6-REWARD-LEDGER-PROOFPACKET-BRIDGE` through PA->E1->E2->E1->E2->E1->E2->E4->QA as source-only, adding `reward_ledger_v1` for candidate-matched ProofPacket plus countable DemoMutationEnvelope evidence.
+- The validator is source-backed: it recomputes reward record, ProofPacket, DemoMutationEnvelope, PIT manifest, registry contract, and acceptance report hashes where applicable; forged source artifacts fail even after `record_hash` recompute.
+- Verification passed: py_compile, focused WP6/proof/demo `112 passed`, upstream adjacency `83 passed`, forbidden source-surface scan, and diff-check. State is `ADVANCED_WITH_CONCERNS` because runtime/loss-control and real bounded Demo outcomes remain blocked. Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--ai_ml_downstream_loop_wp6_reward_ledger_proofpacket_bridge.md`.
+
 ## 2026-07-07 IBKR Demo Ready Work Queue L8G/L8H Closure
 
 - PM continued the IBKR demo-ready loop past the earlier premature handoff, found one no-contact gap in API-absent terminal semantics, and fixed it so the packet reports `WORK_QUEUE_AUTONOMOUS` / `EXTERNAL_VERIFICATION_PENDING` and advances from L7 to L8 work queue.
