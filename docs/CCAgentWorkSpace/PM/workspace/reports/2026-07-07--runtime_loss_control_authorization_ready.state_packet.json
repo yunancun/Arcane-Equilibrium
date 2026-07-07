@@ -1,0 +1,191 @@
+{
+  "schema_version": "runtime_loss_control_authorization_state_packet_v1",
+  "generated_at_utc": "2026-07-07T13:58:38Z",
+  "status": "RUNTIME_LOSS_CONTROL_READY",
+  "stop_reason": null,
+  "state_reason": "PM->E3->BB approved the exact Demo-only engine env restoration request. PM restored only OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED=1 on the Linux Demo runtime, corrected a restart helper environment-path drift back to the approved runtime data/socket paths, reran source stability, local Control API fast-balance/readiness, expired-auth-only guardrail, and materialized a fresh standing Demo loss-control envelope. No order/probe/test/live/mainnet/Cost Gate/direct exchange/DB write authority is granted by this packet.",
+  "active_blocker_id": "P0-STANDING-DEMO-LOSS-CONTROL-ENVELOPE-REFRESH-CURRENT-HEAD",
+  "selected_work_item": {
+    "schema_version": "roadmap_work_item_v1",
+    "work_id": "P0-STANDING-DEMO-LOSS-CONTROL-ENVELOPE-REFRESH-CURRENT-HEAD",
+    "priority": "P0",
+    "owner_chain": "PM -> E3 -> BB -> PM",
+    "scope": "Restore Demo-only runtime/env blocker and refresh/materialize the standing Demo loss-control envelope without order/probe/live/Cost Gate authority."
+  },
+  "source": {
+    "runtime_gate_source_head": "e655de92673e4960ceca1888a07a4843ac4ddb3e",
+    "mac_repo": "/Users/ncyu/Projects/TradeBot/srv",
+    "mac_head_at_gate_start": "e655de92673e4960ceca1888a07a4843ac4ddb3e",
+    "mac_origin_main_at_gate_start": "e655de92673e4960ceca1888a07a4843ac4ddb3e",
+    "github_origin_main_at_gate_start": "e655de92673e4960ceca1888a07a4843ac4ddb3e",
+    "linux_repo": "trade-core:/home/ncyu/BybitOpenClaw/srv",
+    "linux_head_at_gate_start": "e655de92673e4960ceca1888a07a4843ac4ddb3e",
+    "linux_origin_main_at_gate_start": "e655de92673e4960ceca1888a07a4843ac4ddb3e",
+    "linux_worktree_clean_at_gate_start": true,
+    "mac_worktree_clean_at_gate_start": false,
+    "mac_dirty_state_consumed": false,
+    "source_stability_first_sample_path": "trade-core:/home/ncyu/BybitOpenClaw/var/openclaw/demo_only_engine_env_restoration_20260707T133658Z_e655de9/source_stability_first_sample.json",
+    "source_stability_first_sample_sha256": "6f7c6ffd891fbb0bfcbfd0d624cae984fe717899d81089f5ad7d0171f94ec956",
+    "source_stability_ready_path": "trade-core:/home/ncyu/BybitOpenClaw/var/openclaw/demo_only_engine_env_restoration_20260707T133658Z_e655de9/source_stability_ready_check.json",
+    "source_stability_ready_sha256": "5b76a9bd903ea89d1c6721f9b893037ff1d2a5f21be90392f23154e0133e5b63",
+    "source_stability_status": "SOURCE_STABILITY_WINDOW_READY_FOR_E3_BB_REVIEW",
+    "source_stability_blockers": []
+  },
+  "authorization": {
+    "request_path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--demo_only_engine_env_restoration_request.json",
+    "request_sha256": "4d5ec4252bd00062cc3a804465c3fced49a443a7ff7de18190af2fc66fc14a2b",
+    "dispatch_chain": "PM -> E3 -> BB -> PM",
+    "e3_report_path": "docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-07--demo_only_engine_env_restoration_e3_review.md",
+    "e3_report_sha256": "766e1a2456b21402778a289de2d504eda9fe2b015d6c47001a4564862fe31d38",
+    "e3_verdict": "APPROVE_FOR_BB_REVIEW",
+    "bb_report_path": "docs/CCAgentWorkSpace/BB/workspace/reports/2026-07-07--demo_only_engine_env_restoration_bb_review.md",
+    "bb_report_sha256": "db10b0185c7535d8113210ab4085e96618eed52309ee1a06c6d9253a05d39c4c",
+    "bb_verdict": "APPROVE_EXACT_DEMO_ENV_RESTORATION",
+    "approved_runtime_mutation": "Change only OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED=0 to 1 in the Linux Demo engine env file and restart only the engine with --keep-auth/no rebuild/no API restart.",
+    "approved_local_readiness_checks": "The reviewed PM request included source stability, one local Control API fast-balance/readiness path, expired-auth-only guardrail, and materialization only if guardrail READY. No direct Bybit public/private endpoint authority was granted."
+  },
+  "runtime_env_restoration": {
+    "host": "trade-core",
+    "runtime_artifact_dir": "trade-core:/home/ncyu/BybitOpenClaw/var/openclaw/demo_only_engine_env_restoration_20260707T133658Z_e655de9",
+    "env_file_path": "/home/ncyu/BybitOpenClaw/secrets/environment_files/basic_system_services.env",
+    "env_backup_created_without_output": true,
+    "allowed_line_change_performed": "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED=0 -> OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED=1",
+    "other_env_line_changes_performed": false,
+    "first_restart_command": "cd /home/ncyu/BybitOpenClaw/srv && bash helper_scripts/restart_all.sh --engine-only --keep-auth",
+    "first_restart_scope_drift": {
+      "observed": true,
+      "reason": "The helper inherited no systemd runtime environment under direct SSH and briefly started the engine with default /tmp/openclaw data/socket paths.",
+      "order_or_probe_or_exchange_or_db_action_performed": false,
+      "remediated_before_readiness": true
+    },
+    "corrective_restart": {
+      "performed": true,
+      "method": "Engine-only restart with the original approved runtime data/socket/secrets-root environment values explicitly supplied; no rebuild and no API restart.",
+      "final_engine_pid": "544751",
+      "final_socket_path": "/home/ncyu/BybitOpenClaw/var/openclaw/engine.sock"
+    },
+    "final_engine_env_allowlist": {
+      "OPENCLAW_ALLOW_MAINNET": "0",
+      "OPENCLAW_ENABLE_PAPER": "0",
+      "OPENCLAW_DEMO_LEARNING_LANE_WRITER": "1",
+      "OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED": "1",
+      "OPENCLAW_DATA_DIR": "/home/ncyu/BybitOpenClaw/var/openclaw",
+      "OPENCLAW_IPC_SOCKET": "/home/ncyu/BybitOpenClaw/var/openclaw/engine.sock",
+      "OPENCLAW_DEMO_LEARNING_LANE_PLAN": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_demo_probe_soak_plan.json"
+    },
+    "api_user_unit_active": true,
+    "watchdog_user_unit_active": true
+  },
+  "runtime_evidence": {
+    "fast_balance_path": "trade-core:/home/ncyu/BybitOpenClaw/var/openclaw/demo_only_engine_env_restoration_20260707T133658Z_e655de9/fast_balance/demo_account_equity_artifact.json",
+    "fast_balance_sha256": "2252ff2f2770a8698cd2076d3b539a6222f52d280bf6d7b1cd55c961d4e613c4",
+    "fast_balance_status": "DEMO_FAST_BALANCE_EQUITY_ARTIFACT_READY_NO_AUTHORITY",
+    "fast_balance_equity_usdt": 9544.67467679,
+    "fast_balance_read_model": "rust_snapshot_fast",
+    "fast_balance_pipeline_status": "connected",
+    "readiness_before_materialization_path": "trade-core:/home/ncyu/BybitOpenClaw/var/openclaw/demo_only_engine_env_restoration_20260707T133658Z_e655de9/readiness/bounded_demo_runtime_readiness_engine544751.json",
+    "readiness_before_materialization_sha256": "6e75a8020bd06ab7df8d8d6e9e8c439229df6ab8503e1198088174939754d17d",
+    "readiness_before_materialization_status": "BOUNDED_DEMO_RUNTIME_BLOCKED_BY_AUTH_OR_PLAN",
+    "readiness_before_materialization_blockers": [
+      "standing_authorization:standing_auth_expired"
+    ],
+    "non_expiry_readiness_blockers_after_env_restoration": [],
+    "guardrail_path": "trade-core:/home/ncyu/BybitOpenClaw/var/openclaw/demo_only_engine_env_restoration_20260707T133658Z_e655de9/guardrail/standing_demo_authorization_refresh_guardrail.json",
+    "guardrail_sha256": "6bebec7c4ce2677321831edad82ba3f52116a00ed970a2815e19256b0b2fd5b3",
+    "guardrail_status": "STANDING_DEMO_AUTHORIZATION_REFRESH_READY_NO_RUNTIME_MUTATION",
+    "expired_auth_readiness_only_exception_applied": true,
+    "final_readiness_path": "trade-core:/home/ncyu/BybitOpenClaw/var/openclaw/demo_only_engine_env_restoration_20260707T133658Z_e655de9/readiness/bounded_demo_runtime_readiness_after_materialization_engine544751.json",
+    "final_readiness_sha256": "b77946c0985680a2fe7ff0c332d2ce79e1c204d61e59e92295f88bd6104c05b6",
+    "final_readiness_status": "BOUNDED_DEMO_RUNTIME_READY_FOR_FINAL_WINDOW_GATES",
+    "final_readiness_blockers": []
+  },
+  "standing_demo_loss_control_envelope": {
+    "materialized": true,
+    "runtime_path": "trade-core:/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/standing_demo_operator_authorization.json",
+    "runtime_file_mode": "0600",
+    "status": "STANDING_DEMO_AUTHORIZATION_ACTIVE",
+    "standing_authorization_id": "standing-demo-refresh-20260707T135348Z-2b0d57e548c1",
+    "environment": "demo",
+    "scope": "demo_api_only_bounded_probe",
+    "demo_only": true,
+    "expires_at_utc": "2026-07-08T01:53:48.341325+00:00",
+    "candidate": "grid_trading|ETHUSDT|Buy",
+    "max_authorized_probe_orders_per_candidate": 2,
+    "resolved_cap_usdt": 954.18759458,
+    "cap_not_increased_from_prior_standing": true,
+    "materialized_sanitized_path": "trade-core:/home/ncyu/BybitOpenClaw/var/openclaw/demo_only_engine_env_restoration_20260707T133658Z_e655de9/materialization/standing_demo_operator_authorization.materialized_sanitized.json",
+    "materialized_sanitized_sha256": "efa95afb0039cc83eb15ae002c4b6632eded26b36145c40198597eaae3395773",
+    "runtime_authorization_sha256": "eabf2dab8ddbe9c680a4b047d7a338d5d34a30a28a36134ab820e83a1b174197",
+    "pre_materialization_backup_created_without_output": true,
+    "answers": {
+      "probe_authority_granted_by_this_packet": false,
+      "order_authority_granted_by_this_packet": false,
+      "order_submission_performed": false,
+      "runtime_env_mutation_performed_after_guardrail": false,
+      "global_cost_gate_lowering_recommended": false,
+      "main_cost_gate_adjustment": "NONE",
+      "live_authority_granted": false,
+      "promotion_proof": false
+    }
+  },
+  "verification_commands_results": [
+    {
+      "command": "git fetch origin && git rev-parse HEAD && git rev-parse origin/main && git ls-remote origin refs/heads/main",
+      "result": "Mac HEAD, local origin/main, and GitHub main all equaled e655de92673e4960ceca1888a07a4843ac4ddb3e before runtime action."
+    },
+    {
+      "command": "ssh trade-core 'cd /home/ncyu/BybitOpenClaw/srv && git rev-parse HEAD origin/main && git status --short --branch'",
+      "result": "Linux HEAD and origin/main equaled e655de92673e4960ceca1888a07a4843ac4ddb3e; status was ## main...origin/main."
+    },
+    {
+      "command": "ssh trade-core 'read allowlisted engine env from /proc/<pid>/environ'",
+      "result": "Final engine PID 544751 had mainnet=0, paper=0, Demo writer=1, bounded adapter=1, approved data/socket paths, and approved Demo learning lane plan path."
+    },
+    {
+      "command": "sha256sum final source-stability, fast-balance, readiness, guardrail, materialization artifacts",
+      "result": "All expected SHA-256 values matched the runtime artifact files recorded in this packet."
+    }
+  ],
+  "denied_actions": [
+    "paper_enablement",
+    "live_enablement",
+    "mainnet_enablement",
+    "cost_gate_lowering_or_change",
+    "order_or_probe_or_cancel_or_modify",
+    "bounded_demo_learning_test_execution",
+    "public_quote_or_bbo",
+    "direct_bybit_private_read",
+    "direct_bybit_public_market_read",
+    "credential_or_secret_value_read_or_output",
+    "db_write_or_migration",
+    "pg_write",
+    "model_promotion",
+    "symlink_promotion",
+    "serving_reload",
+    "mcp_server_config_or_credential_access",
+    "api_restart",
+    "rebuild",
+    "risk_config_mutation",
+    "plan_mutation",
+    "cost_gate_learning_ledger_append",
+    "proof_or_promotion_claim"
+  ],
+  "answers": {
+    "runtime_loss_control_ready": true,
+    "standing_guardrail_run_after_corrected_readiness": true,
+    "standing_envelope_materialized": true,
+    "demo_only_engine_env_blocker_cleared": true,
+    "standing_authorization_expired_blocker_cleared": true,
+    "corrected_readiness_pass_after_materialization": true,
+    "order_or_probe_performed": false,
+    "order_or_probe_allowed_by_this_packet": false,
+    "bounded_demo_learning_test_allowed_by_this_packet": false,
+    "cost_gate_change_performed": false,
+    "direct_exchange_read_performed": false,
+    "db_write_or_migration_performed": false,
+    "live_or_mainnet_authority_granted": false,
+    "next_stage_may_be_opened": true,
+    "next_stage_requires_separate_same_window_pm_e3_bb_scope": true
+  },
+  "next_safe_action": "Open a separate same-window PM->E3->BB exact scope for the bounded Demo AI/ML learning test. That next scope must revalidate active standing envelope, source/runtime heads, Decision Lease, BBO/instrument/order shape, Guardian/Rust authority, auditability, and reconstructability before any order/probe-capable action."
+}
