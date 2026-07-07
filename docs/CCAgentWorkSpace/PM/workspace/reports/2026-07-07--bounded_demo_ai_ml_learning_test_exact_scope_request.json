@@ -1,0 +1,110 @@
+{
+  "schema": "bounded_demo_ai_ml_learning_test_exact_scope_request_v1",
+  "generated_at_utc": "2026-07-07T14:20:00Z",
+  "request_id": "pm-e3-bb-bounded-demo-ai-ml-learning-test-20260707T142000Z",
+  "pm_role": "PM",
+  "dispatch_chain": [
+    "PM",
+    "E3",
+    "BB",
+    "PM"
+  ],
+  "status": "REQUEST_FOR_E3_REVIEW",
+  "source_binding": {
+    "mac_local_head": "243e0cd6d57edb2039b144ed55b9a7556dcef633",
+    "mac_origin_main": "243e0cd6d57edb2039b144ed55b9a7556dcef633",
+    "github_origin_main": "243e0cd6d57edb2039b144ed55b9a7556dcef633",
+    "linux_trade_core_head": "243e0cd6d57edb2039b144ed55b9a7556dcef633",
+    "linux_trade_core_origin_main": "243e0cd6d57edb2039b144ed55b9a7556dcef633"
+  },
+  "objective": "Open an exact-scope same-window PM -> E3 -> BB gate for a bounded Demo AI/ML learning test on the current candidate, without bypassing runtime/loss-control gates.",
+  "candidate": {
+    "candidate_key": "grid_trading|ETHUSDT|Buy",
+    "strategy": "grid_trading",
+    "symbol": "ETHUSDT",
+    "side": "Buy",
+    "standing_demo_resolved_cap": "954.18759458",
+    "standing_demo_expires_at_utc": "2026-07-08T01:53:48.341325+00:00"
+  },
+  "prior_ready_gate": {
+    "status": "RUNTIME_LOSS_CONTROL_READY",
+    "packet_path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--runtime_loss_control_authorization_ready.state_packet.json",
+    "runtime_readiness_status": "BOUNDED_DEMO_RUNTIME_READY_FOR_FINAL_WINDOW_GATES",
+    "runtime_readiness_remote_path": "/home/ncyu/BybitOpenClaw/var/openclaw/demo_only_engine_env_restoration_20260707T133658Z_e655de9/readiness/bounded_demo_runtime_readiness_after_materialization_engine544751.json",
+    "runtime_readiness_sha256": "b77946c0985680a2fe7ff0c332d2ce79e1c204d61e59e92295f88bd6104c05b6",
+    "standing_auth_sha256": "eabf2dab8ddbe9c680a4b047d7a338d5d34a30a28a36134ab820e83a1b174197",
+    "note": "Prior ready gate granted runtime/loss-control readiness only. It did not grant order/probe/test authority."
+  },
+  "new_scope_evidence": {
+    "remote_artifact_root": "/home/ncyu/BybitOpenClaw/var/openclaw/bounded_demo_ai_ml_learning_test_20260707T141248Z_243e0cd6d",
+    "source_stability_first_sample_path": "/home/ncyu/BybitOpenClaw/var/openclaw/bounded_demo_ai_ml_learning_test_20260707T141248Z_243e0cd6d/source/source_stability_first_sample.json",
+    "source_stability_first_sample_sha256": "88535012518e05bb44f4c93ddd661800dcae3d4dadcfa04fd1e1484a5cc0d789",
+    "source_stability_ready_check_path": "/home/ncyu/BybitOpenClaw/var/openclaw/bounded_demo_ai_ml_learning_test_20260707T141248Z_243e0cd6d/source/source_stability_ready_check.json",
+    "source_stability_ready_check_sha256": "4e67badd14e1bde3e4f4c20a5d24aeeef69dbbdb93e775c1feb5989fe68e35aa",
+    "source_stability_ready_status": "SOURCE_STABILITY_WINDOW_READY_FOR_E3_BB_REVIEW",
+    "runtime_precheck_path": "/home/ncyu/BybitOpenClaw/var/openclaw/bounded_demo_ai_ml_learning_test_20260707T141248Z_243e0cd6d/precheck/bounded_demo_ai_ml_learning_test_precheck.json",
+    "runtime_precheck_sha256": "7b3d6881f78446a9c4c053569dc7bd6aff4654a6b7436e2c55872151a226db49",
+    "runtime_precheck_blockers": [
+      "bounded_probe_authority_patch_readiness_latest_not_ready",
+      "bounded_probe_operator_authorization_latest_not_authorize",
+      "bounded_probe_placement_repair_plan_latest_not_ready",
+      "false_negative_bounded_probe_preflight_latest_not_ready",
+      "no_existing_pm_supervised_one_shot_order_runner_identified"
+    ]
+  },
+  "requested_exact_scope_if_and_only_if_approved": {
+    "phase_0_revalidation": [
+      "Reconfirm source HEADs, clean Linux runtime checkout, engine PID, and allowlisted Demo-only env.",
+      "Reconfirm standing Demo loss-control envelope is active, unexpired, candidate-matched, and cap-bound.",
+      "Use only already reviewed local Control API read-only checks if E3/BB explicitly allow the specific check."
+    ],
+    "phase_a_no_order_artifact_refresh": [
+      "Refresh or regenerate no-order bounded probe/test readiness artifacts only through existing reviewed helpers.",
+      "Do not synthesize operator typed-confirm strings or authorization fields.",
+      "Stop if false-negative preflight, placement repair, authority patch readiness, or operator authorization remains non-READY."
+    ],
+    "phase_b_public_market_window": [
+      "Use only existing reviewed public BBO/instrument window helpers when required.",
+      "No direct exchange private endpoint read."
+    ],
+    "phase_c_decision_lease": [
+      "Acquire at most one existing active Decision Lease through reviewed helper if all prior gates are READY.",
+      "Release in finally/cleanup path.",
+      "No order while lease-only checks are running unless the later phase is also fully approved and READY."
+    ],
+    "phase_d_single_bounded_demo_test": [
+      "Only if BB approves the same exact scope and an existing PM-supervised audited runner is identified.",
+      "At most one Demo-only PostOnly near-touch limit-or-skip order for grid_trading|ETHUSDT|Buy.",
+      "Cap must be less than or equal to the active standing Demo resolved cap 954.18759458.",
+      "No manual direct Bybit order POST and no ad hoc exchange order path.",
+      "Skip rather than place if any gate is missing, stale, mismatched, or non-READY."
+    ]
+  },
+  "explicit_denials": {
+    "live_mainnet": false,
+    "paper": false,
+    "cost_gate_lowering_or_change": false,
+    "db_write_or_migration": false,
+    "secret_value_hash_prefix_suffix_output": false,
+    "mcp_server_config_or_credential_access": false,
+    "model_or_symlink_promotion_or_serving_reload": false,
+    "runtime_env_mutation_or_restart": false,
+    "direct_exchange_private_read": false,
+    "order_or_probe_without_same_scope_bb_approval": false
+  },
+  "pm_recommended_verdict": "BLOCKED_STOP_LOSS_CONTROL_UNLESS_E3_CAN_IDENTIFY_A_REVIEWED_RUNNER_AND_ALL_BOUNDED_PROBE_GATES_CAN_BE_MADE_READY_WITHIN_SCOPE",
+  "e3_required_decision": [
+    "APPROVE_FOR_BB_REVIEW",
+    "BLOCKED_STOP_LOSS_CONTROL",
+    "BLOCKED_STOP_BOUNDARY"
+  ],
+  "bb_required_decision_if_e3_approves": [
+    "APPROVED_EXACT_SCOPE",
+    "BLOCKED_STOP_LOSS_CONTROL",
+    "BLOCKED_STOP_BOUNDARY"
+  ],
+  "stop_policy": {
+    "missing_loss_control_or_runtime_gates": "STOP_LOSS_CONTROL",
+    "scope_expansion_or_unreviewed_order_path": "STOP_BOUNDARY"
+  }
+}
