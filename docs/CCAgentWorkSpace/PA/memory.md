@@ -351,3 +351,7 @@ test**（先 PositionUpdate(size=0) 後 Fill(Buy,is_close) → 斷言 flat 非 L
 ## 2026-07-07 — WP2.1 training-run PIT manifest gate design（source-only, E1-READY）
 - 交付 `docs/CCAgentWorkSpace/PA/workspace/reports/2026-07-07--wp2_1_training_run_pit_manifest_gate_design.md`；結論：非 dry-run 不能從現有 ETL 5-tuple 誠實 auto-infer PIT manifest，contract-bound quantile run 必須明確提供 manifest/source/path，dry-run 可 deterministic synthetic manifest 但只能證 source gate。
 - E1 範圍：`run_training_pipeline.py` + `quantile_reports.py` + focused tests；gate 必在 `train_quantile_trio`/ONNX/registry 前 fail-closed，acceptance report 寫 canonical `pit_dataset_manifest` + hash/path binding，無 runtime/DB/exchange/Cost Gate/live authority。
+
+## 2026-07-07 — WP3.1 training registry contract emission design（source-only, E1-READY）
+- 交付 `docs/CCAgentWorkSpace/PA/workspace/reports/2026-07-07--wp3_1_training_registry_contract_emission_design.md`（Operator stub 同步）。結論：`registry_serving_contract_v1` validator/atomic registry path 已存在，真缺口是 `run_training_pipeline.py` 未從 acceptance report + PIT manifest + q10/q50/q90 ONNX bytes 建 contract 並傳入 registry call。
+- E1 範圍：新增純 builder 於 `registry_serving_contract.py`，wire contract-bound quantile path；hash 必重用 PIT manifest lineage（manifest/label/feature/split/leakage）並在 DB connect 前驗 exact trio/artifact hash/authority alias。禁止 DB/runtime/serving/promotion/symlink/order/Cost Gate 擴權；非 contract-bound route 不得合成假 contract。

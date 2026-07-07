@@ -1,0 +1,67 @@
+{
+  "schema_version": "roadmap_work_item_v1",
+  "work_id": "WP3.1-TRAINING-REGISTRY-CONTRACT-EMISSION",
+  "loop_id": "AI-ML-DOWNSTREAM-CLOSURE-LOOP",
+  "selected_at": "2026-07-06T23:58:57Z",
+  "priority": "P1",
+  "gate": "DOWNSTREAM_SOURCE_SAFE",
+  "selection_reason": "WP2.1 advanced the training PIT manifest gate. WP3.1 is the next source-only closure item and can be completed without runtime, DB, exchange, credential, order, Cost Gate, deploy, live, or bounded Demo outcome access.",
+  "objective": "Emit registry_serving_contract_v1 from contract-bound training acceptance reports, PIT manifest/binding, feature/schema hashes, and exact q10/q50/q90 ONNX artifact bytes, then pass the same advisory-only contract into the existing registry trio path.",
+  "allowed_actions": [
+    "source_code_edit",
+    "source_tests",
+    "source_reports",
+    "local_py_compile",
+    "local_pytest",
+    "git_diff_check"
+  ],
+  "denied_actions": [
+    "runtime_mutation",
+    "db_read",
+    "db_write",
+    "db_migration",
+    "exchange_contact",
+    "private_read",
+    "mcp_server_or_config",
+    "credential_or_secret_access",
+    "order_or_probe",
+    "cost_gate_change",
+    "deploy",
+    "live_or_mainnet",
+    "model_reload",
+    "symlink_promotion",
+    "runtime_learning",
+    "bounded_demo_outcome_ingestion"
+  ],
+  "required_dispatch_chain": [
+    "PM",
+    "PA",
+    "E1",
+    "E2",
+    "E4",
+    "QA",
+    "PM"
+  ],
+  "acceptance_criteria": [
+    "Contract-bound quantile training emits a valid registry_serving_contract_v1 from acceptance report, PIT manifest/binding, feature/schema hashes, and q10/q50/q90 ONNX artifact bytes.",
+    "The persisted acceptance report contains canonical registry_serving_contract.",
+    "The same contract is passed to register_quantile_trio_from_onnx_out.",
+    "Missing or mismatched PIT, feature, schema, artifact, or authority data fails before DB connectivity or registry calls.",
+    "Authority flags remain advisory-only: not_authority=true, promotion_serving_ready=false, symlink_authority=false, serving_mode=advisory_only.",
+    "Non-contract-bound training preserves existing behavior and emits no synthetic registry contract.",
+    "Focused and adjacent source tests pass and no runtime/loss-control branch is consumed."
+  ],
+  "primary_files": [
+    "program_code/ml_training/registry_serving_contract.py",
+    "program_code/ml_training/run_training_pipeline.py",
+    "program_code/ml_training/tests/test_registry_serving_contract.py",
+    "program_code/ml_training/tests/test_run_training_pipeline.py"
+  ],
+  "supporting_reports": [
+    "docs/CCAgentWorkSpace/PA/workspace/reports/2026-07-07--wp3_1_training_registry_contract_emission_design.md",
+    "docs/CCAgentWorkSpace/E1/workspace/reports/2026-07-07--wp3_1_training_registry_contract_emission_implementation.md",
+    "docs/CCAgentWorkSpace/E2/workspace/reports/2026-07-07--wp3_1_training_registry_contract_emission_review.md",
+    "docs/CCAgentWorkSpace/E4/workspace/reports/2026-07-07--wp3_1_training_registry_contract_emission_regression.md",
+    "docs/CCAgentWorkSpace/QA/workspace/reports/2026-07-07--wp3_1_training_registry_contract_emission_acceptance.md"
+  ]
+}

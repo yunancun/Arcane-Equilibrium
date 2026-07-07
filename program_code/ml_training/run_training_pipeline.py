@@ -291,6 +291,23 @@ def _atomic_write_bytes(path: Path, payload: bytes) -> None:
         raise
 
 
+def _persist_acceptance_report_with_registry_contract(
+    *,
+    report_path: Path,
+    report: Dict[str, Any],
+    registry_serving_contract: Dict[str, Any],
+) -> Dict[str, Any]:
+    """同目錄 temp+replace 寫回已附 registry contract 的 acceptance report。"""
+    from program_code.ml_training.registry_serving_contract import (
+        attach_registry_serving_contract,
+    )
+
+    attached = attach_registry_serving_contract(report, registry_serving_contract)
+    payload = json.dumps(attached, indent=2, default=str).encode("utf-8")
+    _atomic_write_bytes(report_path, payload)
+    return attached
+
+
 def _iso_from_base_ms(base: datetime, offset_ms: int) -> str:
     ts = base + timedelta(milliseconds=int(offset_ms))
     return ts.isoformat().replace("+00:00", "Z")
@@ -375,6 +392,8 @@ def _build_dry_run_pit_manifest_source(
         "features": {
             "feature_schema_version": _text(config.schema_version),
             "feature_names": feature_names_list,
+            "feature_schema_hash": "f" * 64,
+            "feature_definition_hash": "e" * 64,
             "definition": {
                 "source": "deterministic_dry_run_synthetic_features",
                 "n_features": len(feature_names_list),
@@ -774,6 +793,25 @@ def _run_quantile_pipeline(
     result.onnx_artifacts = onnx_out
     result.stages_completed.append("onnx_export")
 
+    registry_serving_contract = None
+    if pit_binding.contract_bound_run:
+        from program_code.ml_training.registry_serving_contract import (
+            build_registry_serving_contract_from_training_acceptance,
+        )
+
+        registry_serving_contract = (
+            build_registry_serving_contract_from_training_acceptance(
+                acceptance_report=report,
+                onnx_out=onnx_out,
+            )
+        )
+        report = _persist_acceptance_report_with_registry_contract(
+            report_path=report_path,
+            report=report,
+            registry_serving_contract=registry_serving_contract,
+        )
+        result.stages_completed.append("registry_serving_contract")
+
     # Stage 5.5: Register ONNX artifacts in learning.model_registry (V023).
     # INFRA-PREBUILD-1 Part B (2026-04-23): persist artifact path + verdict +
     # acceptance report JSONB + provenance hashes so Rust OnnxModelManager can
@@ -806,22 +844,25 @@ def _run_quantile_pipeline(
             "DB connectivity precheck failed"
         )
     try:
-        registry_ids = register_quantile_trio_from_onnx_out(
-            onnx_out=onnx_out,
-            strategy=config.strategy_type,
-            engine_mode=config.engine_mode,
-            schema_version=config.schema_version,
-            verdict=result.verdict,
-            acceptance_report_path=result.acceptance_report_path,
-            feature_schema_hash=train_result.feature_schema_hash,
+        registry_kwargs = {
+            "onnx_out": onnx_out,
+            "strategy": config.strategy_type,
+            "engine_mode": config.engine_mode,
+            "schema_version": config.schema_version,
+            "verdict": result.verdict,
+            "acceptance_report_path": result.acceptance_report_path,
+            "feature_schema_hash": train_result.feature_schema_hash,
             # P1-3：registry 記帳改 informative count（排除合成 reject），
             # 終結「524k 樣本」假象；composition 缺席（dry-run）回退 labeled 數。
-            training_sample_size=(
+            "training_sample_size": (
                 int(label_composition["n_informative"])
                 if label_composition else train_result.n_samples_labeled
             ),
-            dsn=config.dsn,
-        )
+            "dsn": config.dsn,
+        }
+        if registry_serving_contract is not None:
+            registry_kwargs["registry_serving_contract"] = registry_serving_contract
+        registry_ids = register_quantile_trio_from_onnx_out(**registry_kwargs)
         if registry_ids:
             result.stages_completed.append(f"model_registry_wrote_{len(registry_ids)}")
         elif registry_required:

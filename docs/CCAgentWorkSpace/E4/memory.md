@@ -984,3 +984,7 @@ BASELINE: 2026-07-03 passed=5492 failed=0 skipped=0 error=0 (rust cargo test --w
 ## 2026-07-07 · WP2.1 Training Run PIT Manifest Gate post-E2 回歸 — PASS
 - Source-only E4 regression passed: py_compile PASS; focused WP2.1 pytest ×2 `46 passed, 1 skipped`; registry adjacency ×2 `49 passed`; QA adjacency ×2 `90 passed, 1 skipped`; requested diff-check PASS. No runtime/DB/exchange/secret/deploy/order/Cost Gate/live/mainnet. Report: `docs/CCAgentWorkSpace/E4/workspace/reports/2026-07-07--wp2_1_training_run_pit_manifest_gate_regression.md`.
 BASELINE: 2026-07-07 passed=46 failed=0 skipped=1 error=0 (scope=WP2.1 focused training-run PIT manifest gate; registry adjacency=49/0/0/0; QA adjacency=90/0/1/0; source-only Mac regression)
+
+## 2026-07-07 · WP3.1 Training Registry Contract Emission post-E2 回歸 — PASS
+- Source-only E4 regression passed: py_compile PASS; focused/adjoining pytest `74 passed` then repeat `74 passed`; wider ml_training adjacency `106 passed, 1 skipped`; requested `git diff --check` PASS. No product-code edit, stage/commit, runtime/DB/exchange/secret/deploy/order/Cost Gate/live/mainnet. Report: `docs/CCAgentWorkSpace/E4/workspace/reports/2026-07-07--wp3_1_training_registry_contract_emission_regression.md`.
+BASELINE: 2026-07-07 passed=74 failed=0 skipped=0 error=0 (scope=WP3.1 focused/adjoining registry contract emission; wider adjacency=106/0/1/0; source-only Mac regression)
