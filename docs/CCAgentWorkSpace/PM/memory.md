@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-07 AI/ML Downstream Loop WP7 Learning Effect Review Stop Loop
+
+- PM advanced `WP7-EFFECT-REVIEW-AND-STOP-LOOP` through PA->E1->E2->E1->E2->E1->E2->E4->QA as source-only, adding `learning_effect_review_v1` for review-only continue/rollback/rotate/stop/no-edge/promote-review decisions over reward_ledger_v1 records.
+- E2 returned hardening for ref integrity, authority aliases, and loss-limit shape; E1 rework/rework2 closed all findings. Validator now exact-set checks reward/proof/mutation refs, rejects trading/execution authority string grants after hash recompute, and treats malformed/truthy loss limits fail-closed.
+- Verification passed: py_compile, focused WP7/reward/proof/demo `134 passed`, upstream adjacency `83 passed`, forbidden source-surface scan, and diff-check. State is `STOPPED` with `STOP_SOURCE_CLOSURE_COMPLETE_WAIT_RUNTIME`: WP2.1/WP3.1/WP6/WP7 source closure is complete, but runtime/loss-control and bounded Demo outcomes remain blocked. Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--ai_ml_downstream_loop_wp7_learning_effect_review_stop_loop.md`.
+
 ## 2026-07-07 AI/ML Downstream Loop WP6 Reward Ledger ProofPacket Bridge
 
 - PM advanced `WP6-REWARD-LEDGER-PROOFPACKET-BRIDGE` through PA->E1->E2->E1->E2->E1->E2->E4->QA as source-only, adding `reward_ledger_v1` for candidate-matched ProofPacket plus countable DemoMutationEnvelope evidence.

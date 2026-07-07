@@ -25,6 +25,9 @@
 
 ## 近期記錄
 
+## 2026-07-07 — WP7 learning_effect_review_v1 source-only 設計（E1-ready）
+- 交付 `docs/CCAgentWorkSpace/PA/workspace/reports/2026-07-07--wp7_learning_effect_review_stop_loop_design.md` 與 Operator stub。WP7 應新增 `program_code/ml_training/learning_effect_review.py` + focused tests，只消費 `reward_ledger_v1` source records，輸出 `continue/rollback/rotate_candidate/stop_loss_control/stop_no_edge/stop_evidence/promote_review_only`；promotion 僅 review-only，無 order/live/Cost Gate/model reload/symlink/runtime/DB authority。Fail-closed priority：authority/loss-control/evidence/sample/control failures 必須先於 profitable decision。
+
 ## 2026-07-06 — 執行路徑真相：thesis「naive taker + dormant exec層」半-FALSIFIED（design/trace, read-only）
 - **maker path 是 live 非 dormant**：4 策略(ma/bb_breakout/grid/bb_reversion)經 `make_intent_with_qty`(ma helpers.rs:62)在 `use_maker_entry` 下發 `order_type="limit"`+`TimeInForce::PostOnly`，用 `compute_post_only_price`(strategies/common/maker_price.rs BBO-aware 嚴格被動，RCA 7f0e793 修 100% reject)。demo/live TOML `use_maker_entry=true`；close-maker demo=ON(risk_config_demo.toml:267)、live/paper=OFF 且**結構性 Demo-only**(commands.rs:91 拒非-Demo + risk_config_advanced.rs:370 hot-reload 守衛)。
 - **order_type 全鏈忠實傳遞 0 強制 market**：OrderIntent.order_type→OrderDispatchRequest→CreateOrderRequest(event_consumer/dispatch.rs:358 "limit"→Limit else Market)→place_order body orderType(order_manager.rs:363)。brief 引的 `order_type:"market"`(orchestrator.rs:380/mode_state.rs:394)**全在 #[cfg(test)] fixture**，非生產路徑——brief grep 誤導。
