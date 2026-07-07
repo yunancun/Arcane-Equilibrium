@@ -1,0 +1,113 @@
+{
+  "schema": "runtime_loss_control_authorization_state_packet_v1",
+  "secondary_schema": "bounded_probe_repair_refresh_state_packet_v1",
+  "generated_at_utc": "2026-07-07T14:43:00Z",
+  "scope": "bounded_probe_repair_refresh_exact_scope",
+  "status": "BLOCKED",
+  "stop_reason": "STOP_LOSS_CONTROL",
+  "request_id": "pm-e3-bb-bounded-probe-repair-refresh-20260707T143800Z",
+  "dispatch_chain": {
+    "pm_request": "DONE",
+    "e3_review": "BLOCKED_STOP_LOSS_CONTROL",
+    "bb_review": "NOT_DISPATCHED_E3_BLOCKED",
+    "pm_closure": "STOP_PACKET"
+  },
+  "source_binding": {
+    "mac_local_head": "de22d42211b278670db6dd9a6cd2c97ff7231888",
+    "mac_origin_main": "de22d42211b278670db6dd9a6cd2c97ff7231888",
+    "github_origin_main": "de22d42211b278670db6dd9a6cd2c97ff7231888",
+    "linux_trade_core_head": "de22d42211b278670db6dd9a6cd2c97ff7231888",
+    "linux_trade_core_origin_main": "de22d42211b278670db6dd9a6cd2c97ff7231888"
+  },
+  "candidate": {
+    "candidate_key": "grid_trading|ETHUSDT|Buy",
+    "strategy": "grid_trading",
+    "symbol": "ETHUSDT",
+    "side": "Buy",
+    "standing_demo_authorization_sha256": "eabf2dab8ddbe9c680a4b047d7a338d5d34a30a28a36134ab820e83a1b174197",
+    "standing_demo_resolved_cap": "954.18759458",
+    "standing_demo_expires_at_utc": "2026-07-08T01:53:48.341325+00:00"
+  },
+  "artifact_root": "/home/ncyu/BybitOpenClaw/var/openclaw/bounded_probe_repair_refresh_20260707T143600Z_de22d4221",
+  "evidence": {
+    "pm_request_json": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--bounded_probe_repair_refresh_exact_scope_request.json",
+    "pm_request_md": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--bounded_probe_repair_refresh_exact_scope_request.md",
+    "e3_report": "docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-07--bounded_probe_repair_refresh_e3_review.md",
+    "pm_report": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--bounded_probe_repair_refresh_pm_stop.md",
+    "operator_summary": "docs/CCAgentWorkSpace/Operator/2026-07-07--bounded_probe_repair_refresh_e3_stop.md",
+    "source_stability_ready_check_path": "/home/ncyu/BybitOpenClaw/var/openclaw/bounded_probe_repair_refresh_20260707T143600Z_de22d4221/source/source_stability_ready_check.json",
+    "source_stability_ready_check_sha256": "8c5885fec5b85381b3d7928c8c841e8f0e8f598a847368fc19785260d768a8b9",
+    "repair_summary_path": "/home/ncyu/BybitOpenClaw/var/openclaw/bounded_probe_repair_refresh_20260707T143600Z_de22d4221/precheck/bounded_probe_repair_refresh_summary.json",
+    "repair_summary_sha256": "eaca5a5a246cf310961cf6bb4c01b53adb818af81c382d016beaf2077d42c85b",
+    "source_only_active_order_wiring_contract_path": "/home/ncyu/BybitOpenClaw/var/openclaw/bounded_probe_repair_refresh_20260707T143600Z_de22d4221/runner/bounded_probe_active_order_wiring_contract_source_only.json",
+    "source_only_active_order_wiring_contract_sha256": "6bbcb8947011be0fae2cae1cbfaa272c56be92e90670723478010352f7fc27c8"
+  },
+  "refresh_statuses": {
+    "source_stability_ready_check": "SOURCE_STABILITY_WINDOW_READY_FOR_E3_BB_REVIEW",
+    "blocked_outcome_review_latest": "COLLECT_MORE_BLOCKED_SIGNAL_OUTCOMES",
+    "blocked_outcome_review_ranked_candidates_count": 0,
+    "false_negative_candidate_packet_refresh": "COST_GATE_EDGE_AMPLIFICATION_REQUIRED",
+    "false_negative_operator_review_refresh": "STANDING_DEMO_AUTHORIZATION_INVALID_FOR_PREFLIGHT_REVIEW",
+    "autonomous_parameter_proposal_refresh": "LEARNED_CANDIDATE_PACKET_NOT_READY",
+    "false_negative_bounded_probe_preflight_refresh": "STANDING_DEMO_AUTHORIZATION_INVALID_FOR_PREFLIGHT",
+    "bounded_probe_touchability_preflight_refresh": "BOUNDED_PROBE_DESIGN_NOT_READY",
+    "bounded_probe_placement_repair_plan_refresh": "BOUNDED_PROBE_DESIGN_NOT_READY",
+    "bounded_probe_authority_patch_readiness_refresh": "PLACEMENT_REPAIR_PLAN_NOT_READY",
+    "bounded_probe_operator_authorization_refresh": "STANDING_DEMO_AUTHORIZATION_INVALID",
+    "active_order_wiring_contract_source_only": "ACTIVE_ORDER_WIRING_CONTRACT_READY_FOR_E3_BB_REVIEW",
+    "active_order_wiring_contract_with_authority_input": "AUTHORITY_BOUNDARY_VIOLATION"
+  },
+  "repair_result": {
+    "bounded_probe_chain_ready": false,
+    "operator_authorization_ready": false,
+    "audited_runner_source_seam_identified": true,
+    "bb_dispatch_allowed": false,
+    "bounded_demo_ai_ml_learning_test_allowed": false,
+    "order_allowed": false,
+    "probe_allowed": false,
+    "primary_blocker": "blocked_outcome_review_latest_has_zero_ranked_candidates_collect_more_blocked_signal_outcomes",
+    "secondary_blockers": [
+      "false_negative_candidate_packet_not_ready",
+      "false_negative_operator_review_not_ready",
+      "false_negative_preflight_not_ready",
+      "placement_repair_plan_not_ready",
+      "authority_patch_readiness_not_ready",
+      "operator_authorization_not_ready"
+    ]
+  },
+  "explicit_denials": {
+    "live_mainnet": false,
+    "paper": false,
+    "order_or_probe": false,
+    "cost_gate_lowering_or_change": false,
+    "db_write_or_migration_by_pm": false,
+    "secret_output": false,
+    "direct_exchange_private_read": false,
+    "runtime_env_mutation_or_restart": false,
+    "manual_direct_bybit_order_path": false,
+    "model_or_symlink_promotion_or_serving_reload": false
+  },
+  "verification_commands": [
+    {
+      "command": "git -C /Users/ncyu/Projects/TradeBot/srv rev-parse HEAD origin/main",
+      "result": "de22d42211b278670db6dd9a6cd2c97ff7231888 / de22d42211b278670db6dd9a6cd2c97ff7231888"
+    },
+    {
+      "command": "ssh trade-core 'cd /home/ncyu/BybitOpenClaw/srv && git rev-parse HEAD origin/main && git status --short --branch'",
+      "result": "de22d42211b278670db6dd9a6cd2c97ff7231888 / de22d42211b278670db6dd9a6cd2c97ff7231888 / clean"
+    },
+    {
+      "command": "python3 -m json.tool docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--bounded_probe_repair_refresh_exact_scope_request.json",
+      "result": "PASS"
+    },
+    {
+      "command": "ssh trade-core source_stability_window_guard.py ready check",
+      "result": "SOURCE_STABILITY_WINDOW_READY_FOR_E3_BB_REVIEW, sha256=8c5885fec5b85381b3d7928c8c841e8f0e8f598a847368fc19785260d768a8b9"
+    },
+    {
+      "command": "ssh trade-core bounded-probe repair refresh chain",
+      "result": "BLOCKED: bounded_probe_chain_ready=false, operator_authorization_ready=false, audited_runner_source_seam_identified=true"
+    }
+  ],
+  "next_allowed_action": "Collect more blocked signal outcomes until ranked false-negative candidates are present; then regenerate bounded-probe preflight, placement repair, authority readiness, and operator authorization before opening a new PM -> E3 exact scope."
+}

@@ -1,0 +1,96 @@
+{
+  "schema": "bounded_probe_repair_refresh_exact_scope_request_v1",
+  "generated_at_utc": "2026-07-07T14:38:00Z",
+  "request_id": "pm-e3-bb-bounded-probe-repair-refresh-20260707T143800Z",
+  "pm_role": "PM",
+  "dispatch_chain": [
+    "PM",
+    "E3",
+    "BB",
+    "PM"
+  ],
+  "status": "REQUEST_FOR_E3_REVIEW",
+  "objective": "Review the exact-scope no-order repair/refresh attempt for bounded-probe preflight, placement, authority readiness, operator authorization, and audited runner identification before any bounded Demo AI/ML learning test.",
+  "source_binding": {
+    "mac_local_head": "de22d42211b278670db6dd9a6cd2c97ff7231888",
+    "mac_origin_main": "de22d42211b278670db6dd9a6cd2c97ff7231888",
+    "github_origin_main": "de22d42211b278670db6dd9a6cd2c97ff7231888",
+    "linux_trade_core_head": "de22d42211b278670db6dd9a6cd2c97ff7231888",
+    "linux_trade_core_origin_main": "de22d42211b278670db6dd9a6cd2c97ff7231888"
+  },
+  "candidate": {
+    "candidate_key": "grid_trading|ETHUSDT|Buy",
+    "strategy": "grid_trading",
+    "symbol": "ETHUSDT",
+    "side": "Buy",
+    "standing_demo_resolved_cap": "954.18759458",
+    "standing_demo_authorization_sha256": "eabf2dab8ddbe9c680a4b047d7a338d5d34a30a28a36134ab820e83a1b174197",
+    "standing_demo_expires_at_utc": "2026-07-08T01:53:48.341325+00:00"
+  },
+  "artifact_root": "/home/ncyu/BybitOpenClaw/var/openclaw/bounded_probe_repair_refresh_20260707T143600Z_de22d4221",
+  "source_stability": {
+    "first_sample_path": "/home/ncyu/BybitOpenClaw/var/openclaw/bounded_probe_repair_refresh_20260707T143600Z_de22d4221/source/source_stability_first_sample.json",
+    "first_sample_sha256": "54b62e6384da71b87248b71784851eea92efa19309d27ca5d0124077ece5f806",
+    "ready_check_path": "/home/ncyu/BybitOpenClaw/var/openclaw/bounded_probe_repair_refresh_20260707T143600Z_de22d4221/source/source_stability_ready_check.json",
+    "ready_check_sha256": "8c5885fec5b85381b3d7928c8c841e8f0e8f598a847368fc19785260d768a8b9"
+  },
+  "repair_refresh_artifacts": {
+    "summary_path": "/home/ncyu/BybitOpenClaw/var/openclaw/bounded_probe_repair_refresh_20260707T143600Z_de22d4221/precheck/bounded_probe_repair_refresh_summary.json",
+    "summary_sha256": "eaca5a5a246cf310961cf6bb4c01b53adb818af81c382d016beaf2077d42c85b",
+    "blocked_outcome_review_latest_sha256": "2cdaae0848c2c3223a8d13041c3177f16650f9e188dbdd240fbd9e79eed6c3f7",
+    "false_negative_candidate_packet_refresh_sha256": "c6fac93d1df5a826a87a33257836e0d61a30d2cc315aa020daf9426e4ed604aa",
+    "false_negative_operator_review_refresh_sha256": "acbb39eacd0ad765ffe25973ee30ff6b72e550f948ab72034a92648f6aa7a494",
+    "autonomous_parameter_proposal_refresh_sha256": "1d064d888257a38ddf5d5139f40e17f1073219d6e353a285153e9a1da2a3d380",
+    "false_negative_bounded_probe_preflight_refresh_sha256": "a92b1061f1d2e4817a4ddfecac8c2220df4607d8fdd2f059baef7068d32b6054",
+    "bounded_probe_touchability_preflight_refresh_sha256": "70850e78d92ed156b895f2867a6e8bfe7fdbfe3109aff2d195e7027ef8152298",
+    "bounded_probe_placement_repair_plan_refresh_sha256": "4404b1f99f3d22719b812d22a2e713e6cc9986d063df76acd5336d18a3e23a44",
+    "bounded_probe_authority_patch_readiness_refresh_sha256": "eee5f6bb1abd4e1549a5624091e1af08e66c69b41317d42d357c14b100d1b5d6",
+    "bounded_probe_operator_authorization_refresh_sha256": "db0ed5dd95c09e69d552d4b8f9899e4ca0539f0318cdf0146ae50e38efe6aead",
+    "active_order_wiring_contract_with_authority_input_sha256": "ea6b0aa3dda35f7b49ad5735b201dda7b977f3248174c1033fa710e676f610d9",
+    "active_order_wiring_contract_source_only_sha256": "6bbcb8947011be0fae2cae1cbfaa272c56be92e90670723478010352f7fc27c8"
+  },
+  "refresh_statuses": {
+    "blocked_outcome_review_latest": "COLLECT_MORE_BLOCKED_SIGNAL_OUTCOMES",
+    "blocked_outcome_review_ranked_candidates_count": 0,
+    "false_negative_candidate_packet_refresh": "COST_GATE_EDGE_AMPLIFICATION_REQUIRED",
+    "false_negative_operator_review_refresh": "STANDING_DEMO_AUTHORIZATION_INVALID_FOR_PREFLIGHT_REVIEW",
+    "autonomous_parameter_proposal_refresh": "LEARNED_CANDIDATE_PACKET_NOT_READY",
+    "false_negative_bounded_probe_preflight_refresh": "STANDING_DEMO_AUTHORIZATION_INVALID_FOR_PREFLIGHT",
+    "bounded_probe_touchability_preflight_refresh": "BOUNDED_PROBE_DESIGN_NOT_READY",
+    "bounded_probe_placement_repair_plan_refresh": "BOUNDED_PROBE_DESIGN_NOT_READY",
+    "bounded_probe_authority_patch_readiness_refresh": "PLACEMENT_REPAIR_PLAN_NOT_READY",
+    "bounded_probe_operator_authorization_refresh": "STANDING_DEMO_AUTHORIZATION_INVALID",
+    "active_order_wiring_contract_with_authority_input": "AUTHORITY_BOUNDARY_VIOLATION",
+    "active_order_wiring_contract_source_only": "ACTIVE_ORDER_WIRING_CONTRACT_READY_FOR_E3_BB_REVIEW"
+  },
+  "pm_readiness_assessment": {
+    "bounded_probe_chain_ready": false,
+    "operator_authorization_ready": false,
+    "audited_runner_source_seam_identified": true,
+    "primary_blocker": "blocked_outcome_review_latest_has_zero_ranked_candidates_collect_more_blocked_signal_outcomes",
+    "bb_dispatch_recommended": false
+  },
+  "requested_e3_decision": [
+    "APPROVE_FOR_BB_REVIEW",
+    "BLOCKED_STOP_LOSS_CONTROL",
+    "BLOCKED_STOP_BOUNDARY"
+  ],
+  "bb_decision_if_e3_approves": [
+    "APPROVED_EXACT_SCOPE",
+    "BLOCKED_STOP_LOSS_CONTROL",
+    "BLOCKED_STOP_BOUNDARY"
+  ],
+  "explicit_denials": {
+    "live_mainnet": false,
+    "paper": false,
+    "order_or_probe": false,
+    "cost_gate_lowering_or_change": false,
+    "db_write_or_migration_by_pm": false,
+    "secret_output": false,
+    "direct_exchange_private_read": false,
+    "runtime_env_mutation_or_restart": false,
+    "manual_direct_bybit_order_path": false,
+    "model_or_symlink_promotion_or_serving_reload": false
+  },
+  "pm_recommended_verdict": "BLOCKED_STOP_LOSS_CONTROL"
+}
