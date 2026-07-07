@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-07（TODO v743 bounded-probe blocked-signal refresh stop）
+> 最後更新：2026-07-07（TODO v744 profit-first AI/ML loop intake）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**TODO v744 profit-first AI/ML loop intake（2026-07-07）**：PM 啟動 Profit-First AI/ML Resolution Loop，完成 `LOOP_INTAKE` 並未開 E3/BB。讀取當前 Linux `_latest` artifact 後發現 v743 的 blocked-signal 狀態已過期：`blocked_outcome_review_20260707T202701Z.json` sha `6deead76...` status `DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT`，blocked outcomes `671728`，false-negative candidates `1`，top review candidate `ma_crossover|NEARUSDT|Buy`，avg net `64.983bps`；`false_negative_candidate_packet_20260707T202701Z.json` sha `28f9bb9a...` status `COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW`，`operator_review_ready=true`。State machine 因此由 `EDGE_AMPLIFICATION` 轉入 `RUNTIME_GATE_PREP`，但 intake stop 為 `STOP_RUNTIME_GATE_NOT_READY`：standing Demo auth sha `eabf2dab...` 仍 scoped to old `grid_trading|ETHUSDT|Buy`，false-negative operator review / preflight / touchability / placement / authority / operator-auth chain 均未對 NEAR Buy READY。Reports：PM `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--profit_first_ai_ml_resolution_loop_intake.md`，state/effect/candidate/runtime-gate request JSON 同 basename，operator stub `docs/CCAgentWorkSpace/Operator/2026-07-07--profit_first_ai_ml_resolution_loop_intake.md`。Boundary：無 E3/BB dispatch、無 bounded Demo test、無 order/probe、無 Decision Lease、無 Bybit call、無 DB write、無 runtime mutation、無 Cost Gate change、無 live/mainnet、無 proof claim。
 
 **TODO v743 bounded-probe blocked-signal refresh stop（2026-07-07）**：PM 依上一輪 STOP 結論繼續，先補 blocked-signal outcomes / refresh false-negative packet，再視結果決定是否開 PM->E3。三端 source 綁定 `9d1ff1d8ca03a8e5dca3c39017abba5e8796a6ce`。Cron 最新鏈條在 2026-07-07 14:27 UTC 已 rc=0 append blocked outcomes；PM 另跑 no-PG retained-ledger review 到 `/home/ncyu/BybitOpenClaw/var/openclaw/bounded_probe_blocked_signal_refresh_nopg_20260707T145938Z_9d1ff1d8c`：review sha `91b4ade9...` status `COLLECT_MORE_BLOCKED_SIGNAL_OUTCOMES`, blocked outcomes `647308`, false-negative candidates `0`, edge-amplification side cells `25`, top side cell status `LEGACY_OPTIMISTIC_COST_UNBACKFILLED`; packet sha `1f604ee6...` status `COST_GATE_EDGE_AMPLIFICATION_REQUIRED`, ranked candidates `6`, false-negative candidates `0`, `operator_review_ready=false`。因此 PM 未開 E3，BB 未派發，state packet `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--bounded_probe_blocked_signal_refresh_stop.state_packet.json` 為 `BLOCKED/STOP_LOSS_CONTROL`。Boundary：無 order/probe/bounded Demo AI/ML learning test、無 live/mainnet/paper、無 Cost Gate change/lowering、無 DB write/migration、無 direct exchange private read、無 secret output、無 runtime env mutation/restart、無 model/symlink/serving promotion。下一步只能 edge amplification / friction reduction 或繼續收集 blocked-signal outcomes，直到 false-negative candidate 且 `operator_review_ready=true` 再重開 PM->E3。
 

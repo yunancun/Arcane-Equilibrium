@@ -1,0 +1,80 @@
+{
+  "schema_version": "profit_first_ai_ml_resolution_loop_effect_review_v1",
+  "generated_at_utc": "2026-07-07T20:33:43Z",
+  "round": 1,
+  "work_item": "LOOP_INTAKE_AND_RUNTIME_GATE_PREP_CLASSIFICATION",
+  "verdict": "EFFECTIVE_STATE_ADVANCE_BLOCKED_AT_RUNTIME_GATE_PREP",
+  "state_delta": {
+    "prior_reported_false_negative_candidate_count": 0,
+    "current_false_negative_candidate_count": 1,
+    "prior_reported_operator_review_ready": false,
+    "current_operator_review_ready": true,
+    "prior_branch": "EDGE_AMPLIFICATION",
+    "current_branch": "RUNTIME_GATE_PREP",
+    "selected_candidate": "ma_crossover|NEARUSDT|Buy"
+  },
+  "artifact_delta": [
+    {
+      "artifact": "blocked_outcome_review_latest.json",
+      "delta": "status advanced to DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT with 671728 blocked outcomes and 1 false-negative candidate"
+    },
+    {
+      "artifact": "false_negative_candidate_packet_latest.json",
+      "delta": "status advanced to COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW and operator_review_ready=true"
+    },
+    {
+      "artifact": "TODO.md",
+      "delta": "updated active queue pointer from stale edge-amplification-only state to candidate-ready-but-gate-blocked state"
+    }
+  ],
+  "candidate_effect_review": {
+    "candidate_id": "ma_crossover|NEARUSDT|Buy",
+    "after_cost_candidate": true,
+    "avg_net_bps": 64.983,
+    "net_positive_pct": 100.0,
+    "legacy_optimistic_cost_present": false,
+    "global_cost_gate_lowering_recommended": false,
+    "proof_or_promotion_claim": false,
+    "review_result": "reviewable_false_negative_candidate_but_not_runtime_admissible"
+  },
+  "runtime_gate_effect_review": {
+    "runtime_loss_control_ready_prerequisite": true,
+    "candidate_aligned_standing_authorization_ready": false,
+    "false_negative_operator_review_approved": false,
+    "bounded_probe_preflight_ready": false,
+    "placement_repair_ready": false,
+    "authority_patch_readiness_ready": false,
+    "bounded_probe_operator_authorization_ready": false,
+    "same_window_execution_gates_ready": false,
+    "decision": "stop_runtime_gate_not_ready_and_prepare_candidate_aligned_gate_refresh"
+  },
+  "test_delta": {
+    "json_validation_planned": true,
+    "diff_check_planned": true,
+    "focused_unit_tests_required": false,
+    "focused_unit_tests_required_reason": "docs and JSON state artifacts only; no production code or helper code changed"
+  },
+  "boundary": {
+    "e3_or_bb_dispatched": false,
+    "order_or_probe_performed": false,
+    "decision_lease_performed": false,
+    "bybit_call_performed": false,
+    "db_write_or_migration_performed": false,
+    "runtime_env_or_service_mutation_performed": false,
+    "cost_gate_change_performed": false,
+    "live_or_mainnet_performed": false,
+    "proof_claim_performed": false
+  },
+  "next_decision": {
+    "continue": true,
+    "next_branch": "RUNTIME_GATE_PREP_REPAIR",
+    "next_work_item": "P0-PROFIT-FIRST-NEAR-BUY-CANDIDATE-ALIGNED-GATE-REFRESH",
+    "stop_if": [
+      "source_runtime_head_drift",
+      "candidate_packet_stale_or_no_longer_operator_review_ready",
+      "standing_authorization_cannot_be_candidate_aligned_without_e3_bb",
+      "bounded_probe_chain_remains_not_ready",
+      "any_requested_action_would_require_unreviewed_order_probe_cost_gate_runtime_mutation"
+    ]
+  }
+}
