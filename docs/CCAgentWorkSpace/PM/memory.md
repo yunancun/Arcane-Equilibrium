@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-07 Demo Test Runtime Loss-Control Unblock Request Stop
+
+- PM reviewed the operator assertion that runtime/loss-control was released and Demo testing could proceed. Local artifacts still classify runtime/loss-control as blocked, so PM dispatched E3 for report-only pre-review and did not dispatch BB.
+- E3 verdict was `BLOCKED_STOP_LOSS_CONTROL`: the latest exact-scope packet remains `BLOCKED/STOP_LOSS_CONTROL`; readiness still includes `OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED=0` plus expired standing auth; no guardrail/materialization exists; local Mac `srv` is ahead 4 and dirty.
+- No runtime/DB/exchange/private/secret/order/Cost Gate/deploy/live/model reload/symlink/serving/bounded Demo action was performed. Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--demo_test_runtime_loss_control_unblock_pm_stop.md`.
+
 ## 2026-07-07 AI/ML Downstream Loop WP7 Learning Effect Review Stop Loop
 
 - PM advanced `WP7-EFFECT-REVIEW-AND-STOP-LOOP` through PA->E1->E2->E1->E2->E1->E2->E4->QA as source-only, adding `learning_effect_review_v1` for review-only continue/rollback/rotate/stop/no-edge/promote-review decisions over reward_ledger_v1 records.

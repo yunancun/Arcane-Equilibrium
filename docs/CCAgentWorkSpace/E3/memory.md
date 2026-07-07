@@ -26,6 +26,10 @@
 
 ## 近期記錄
 
+### 2026-07-07 Demo test runtime/loss-control unblock pre-review
+
+Verdict: `BLOCKED_STOP_LOSS_CONTROL`. Operator assertion that runtime/loss-control was unblocked and demo testing could proceed was not sufficient: latest PM packet remains `BLOCKED/STOP_LOSS_CONTROL` on `OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED=0` plus expired standing auth; no guardrail/materialization occurred; AI/ML WP7 packet still classifies neighbor state as `RUNTIME_LOSS_CONTROL_BLOCKED`; Mac source is ahead/dirty while GitHub and Linux are aligned at `77f0b567...`. BB should not be dispatched for demo testing until PM produces a new exact-scope source-stable runtime/env or loss-control packet. Report: `docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-07--demo_test_runtime_loss_control_unblock_e3_review.md`.
+
 ### 2026-06-07 L2 Advisory Mesh v3 設計安全審計
 
 **評級：CONCERNS（0 CRITICAL / 2 HIGH / 3 MEDIUM / 4 LOW）**
