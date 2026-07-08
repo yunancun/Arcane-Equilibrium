@@ -75,17 +75,27 @@ FORBIDDEN_OUTPUT_TRUE_KEYS = {
     "bybit_private_call_performed",
     "bybit_order_endpoint_allowed_by_this_packet",
     "decision_lease_allowed",
+    "operator_auth_authorize",
+    "order_or_probe_authority_granted",
     "private_endpoint_allowed",
+    "private_or_order_endpoint_called",
     "order_endpoint_allowed",
     "pg_query_performed",
     "pg_write_performed",
+    "db_or_pg_write",
     "runtime_mutation_performed",
+    "runtime_mutation_allowed",
+    "runtime_config_service_mutation",
     "service_restart_performed",
     "cost_gate_lowering_performed",
+    "cost_gate_lowering",
+    "global_cost_gate_lowering_recommended",
     "risk_expansion",
     "live_authority_granted",
     "mainnet_authority_granted",
+    "live_or_mainnet",
     "promotion_proof",
+    "proof_or_promotion_claim",
     "profit_proof",
 }
 
@@ -160,6 +170,47 @@ def _sha256(path: Path | None) -> str | None:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _approval_report_review(
+    *,
+    role: str,
+    expected_sha256: Any,
+    path: Path | None,
+) -> dict[str, Any]:
+    role_key = role.lower()
+    expected = _str(expected_sha256)
+    actual = _sha256(path)
+    blockers: list[str] = []
+    verdict = None
+    text = ""
+    if not expected:
+        blockers.append(f"renewed_active_bbo_{role_key}_report_sha_missing")
+    if path is None:
+        blockers.append(f"renewed_active_bbo_{role_key}_report_path_missing")
+    elif actual is None:
+        blockers.append(f"renewed_active_bbo_{role_key}_report_missing")
+    else:
+        text = path.read_text(encoding="utf-8")
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("VERDICT:"):
+                verdict = stripped.removeprefix("VERDICT:").strip()
+                break
+        if expected and actual != expected:
+            blockers.append(f"renewed_active_bbo_{role_key}_report_sha_mismatch")
+        if verdict != "APPROVE_WITH_CONDITIONS":
+            blockers.append(
+                f"renewed_active_bbo_{role_key}_report_verdict_not_approved_with_conditions"
+            )
+    return {
+        "path": str(path) if path else None,
+        "expected_sha256": expected or None,
+        "actual_sha256": actual,
+        "verdict": verdict,
+        "approved_with_conditions": not blockers,
+        "blockers": blockers,
+    }
+
+
 def _read_json(path: Path | None) -> dict[str, Any] | None:
     if path is None:
         return None
@@ -214,6 +265,15 @@ def _candidate_from_side_cell(side_cell_key: str | None) -> dict[str, Any]:
     }
 
 
+def _complete_candidate_identity(candidate: dict[str, Any]) -> dict[str, Any]:
+    identity = _candidate_identity(candidate)
+    side_cell = _candidate_from_side_cell(_str(identity.get("side_cell_key")))
+    for key in ("strategy_name", "symbol", "side"):
+        if identity.get(key) is None:
+            identity[key] = side_cell.get(key)
+    return identity
+
+
 def _candidate_aligned(left: dict[str, Any], right: dict[str, Any]) -> bool:
     if not left.get("side_cell_key") or not right.get("side_cell_key"):
         return False
@@ -222,6 +282,21 @@ def _candidate_aligned(left: dict[str, Any], right: dict[str, Any]) -> bool:
     if None in left_key or None in right_key:
         return left.get("side_cell_key") == right.get("side_cell_key")
     return left_key == right_key
+
+
+def _add_authority_check(
+    checks: dict[str, list[Any]],
+    key: str,
+    value: Any,
+) -> None:
+    checks.setdefault(key, []).append(value)
+
+
+def _authority_check_failed(values: list[Any], *, required: bool) -> bool:
+    present_values = [value for value in values if value is not None]
+    if not present_values:
+        return required
+    return any(value is not False for value in present_values)
 
 
 def _artifact_summary(
@@ -451,35 +526,87 @@ def _validate_renewed_manifest(
     now_utc: dt.datetime,
     max_age_seconds: int,
     expected_candidate: dict[str, Any],
+    e3_approval_report_path: Path | None,
+    bb_approval_report_path: Path | None,
 ) -> dict[str, Any]:
     data = _dict(payload)
     answers = _dict(data.get("active_answers"))
-    post = _dict(data.get("post_governance_summary"))
+    active_window = _dict(data.get("active_window"))
+    phase_a = _dict(data.get("phase_a"))
+    phase_b = _dict(data.get("phase_b"))
+    post = _dict(data.get("post_governance_summary") or data.get("post_governance"))
+    authority_boundary = _dict(data.get("authority_boundary"))
     candidate = _candidate_from_side_cell(_str(data.get("candidate")))
     blockers: list[str] = []
     authority: list[str] = []
+    active_status = data.get("active_status") or active_window.get("status")
+    phase_a_count = data.get("phase_a_request_count")
+    if phase_a_count is None:
+        phase_a_count = phase_a.get("request_count")
+    phase_b_count = data.get("phase_b_request_count")
+    if phase_b_count is None:
+        phase_b_count = phase_b.get("request_count")
+    gate_ready = answers.get("fresh_actual_admission_bbo_and_gate_ready_during_window")
+    if gate_ready is None:
+        gate_ready = (
+            active_window.get("actual_admission_bbo_status_during_active_window")
+            == "CURRENT_CANDIDATE_PUBLIC_QUOTE_CONSTRUCTION_REFRESH_READY_NO_ORDER"
+            and active_window.get("gate_evidence_status_during_active_window")
+            == "CURRENT_CANDIDATE_DECISION_LEASE_GUARDIAN_GATE_READY_NO_ORDER"
+        )
+    lease_released = answers.get("lease_released_before_artifact")
+    if lease_released is None:
+        lease_released = active_window.get("lease_released_before_artifact")
     if data.get("schema_version") != "renewed_active_bbo_execution_manifest_v1":
         blockers.append("renewed_active_bbo_manifest_schema_mismatch")
     if data.get("state_transition") != "DONE_WITH_CONCERNS":
         blockers.append("renewed_active_bbo_state_transition_not_done_with_concerns")
-    if data.get("active_status") != "CURRENT_CANDIDATE_ACTUAL_ADMISSION_BBO_LEASE_WINDOW_DONE_NO_ORDER":
+    if active_status != "CURRENT_CANDIDATE_ACTUAL_ADMISSION_BBO_LEASE_WINDOW_DONE_NO_ORDER":
         blockers.append("renewed_active_bbo_window_not_done_no_order")
-    if data.get("e3_decision") != "APPROVE_WITH_CONDITIONS":
-        blockers.append("renewed_active_bbo_e3_not_approved_with_conditions")
-    if data.get("bb_decision") != "APPROVE_WITH_CONDITIONS":
-        blockers.append("renewed_active_bbo_bb_not_approved_with_conditions")
+    e3_report_review = _approval_report_review(
+        role=E3_ROLE,
+        expected_sha256=data.get("e3_report_sha256"),
+        path=e3_approval_report_path,
+    )
+    bb_report_review = _approval_report_review(
+        role=BB_ROLE,
+        expected_sha256=data.get("bb_report_sha256"),
+        path=bb_approval_report_path,
+    )
+    if data.get("e3_decision") is not None:
+        if data.get("e3_decision") != "APPROVE_WITH_CONDITIONS":
+            blockers.append("renewed_active_bbo_e3_not_approved_with_conditions")
+    else:
+        blockers.extend(_list(e3_report_review.get("blockers")))
+    if data.get("bb_decision") is not None:
+        if data.get("bb_decision") != "APPROVE_WITH_CONDITIONS":
+            blockers.append("renewed_active_bbo_bb_not_approved_with_conditions")
+    else:
+        blockers.extend(_list(bb_report_review.get("blockers")))
     if not _candidate_aligned(candidate, expected_candidate):
         blockers.append("renewed_active_bbo_candidate_mismatch")
-    if answers.get("fresh_actual_admission_bbo_and_gate_ready_during_window") is not True:
+    if gate_ready is not True:
         blockers.append("renewed_active_bbo_gate_not_ready_during_window")
-    if answers.get("lease_released_before_artifact") is not True:
+    if lease_released is not True:
         blockers.append("renewed_active_bbo_lease_not_released_before_artifact")
     if _float(post.get("lease_count")) != 0.0 or _float(post.get("lease_live_count")) != 0.0:
         blockers.append("renewed_active_bbo_post_governance_lease_not_zero")
-    if _float(data.get("phase_a_request_count")) != 3.0:
+    post_risk_level = post.get("risk_level")
+    if post_risk_level not in (None, "", "NORMAL"):
+        blockers.append("renewed_active_bbo_post_governance_risk_level_not_normal")
+    post_position_multiplier = post.get("position_size_multiplier")
+    if (
+        post_position_multiplier is not None
+        and _float(post_position_multiplier) != 1.0
+    ):
+        blockers.append(
+            "renewed_active_bbo_post_governance_position_size_multiplier_not_1"
+        )
+    if _float(phase_a_count) != 3.0:
         blockers.append("renewed_active_bbo_phase_a_request_count_not_3")
-    if _float(data.get("phase_b_request_count")) != 3.0:
+    if _float(phase_b_count) != 3.0:
         blockers.append("renewed_active_bbo_phase_b_request_count_not_3")
+    authority_checks: dict[str, list[Any]] = {}
     for key in (
         "order_submission_performed",
         "order_cancel_performed",
@@ -492,11 +619,63 @@ def _validate_renewed_manifest(
         "live_authority_granted",
         "mainnet_authority_granted",
         "promotion_proof",
+        "operator_auth_authorize",
     ):
-        if answers.get(key) is not False:
+        _add_authority_check(authority_checks, key, answers.get(key))
+    if authority_boundary:
+        compact_checks = {
+            "order_submission_performed": authority_boundary.get(
+                "order_or_probe_authority_granted"
+            ),
+            "order_cancel_performed": authority_boundary.get(
+                "order_or_probe_authority_granted"
+            ),
+            "order_modify_performed": authority_boundary.get(
+                "order_or_probe_authority_granted"
+            ),
+            "bybit_private_call_performed": authority_boundary.get(
+                "private_or_order_endpoint_called"
+            ),
+            "pg_write_performed": authority_boundary.get("db_or_pg_write"),
+            "runtime_mutation_performed": authority_boundary.get(
+                "runtime_config_service_mutation"
+            ),
+            "service_restart_performed": authority_boundary.get(
+                "runtime_config_service_mutation"
+            ),
+            "cost_gate_lowering_performed": authority_boundary.get(
+                "cost_gate_lowering"
+            ),
+            "live_authority_granted": authority_boundary.get("live_or_mainnet"),
+            "mainnet_authority_granted": authority_boundary.get("live_or_mainnet"),
+            "promotion_proof": authority_boundary.get("proof_or_promotion_claim"),
+            "operator_auth_authorize": authority_boundary.get(
+                "operator_auth_authorize"
+            ),
+        }
+        for key, value in compact_checks.items():
+            _add_authority_check(authority_checks, key, value)
+    optional_authority_keys = {"operator_auth_authorize"}
+    for key, values in authority_checks.items():
+        if _authority_check_failed(
+            values,
+            required=key not in optional_authority_keys,
+        ):
             authority.append(f"renewed_active_bbo_{key}_not_false")
-    if answers.get("main_cost_gate_adjustment") != "NONE":
-        authority.append("renewed_active_bbo_cost_gate_adjustment_not_none")
+    cost_gate_adjustments = [
+        answers.get("main_cost_gate_adjustment"),
+        (
+            authority_boundary.get("main_cost_gate_adjustment")
+            if authority_boundary
+            else None
+        ),
+    ]
+    if authority_boundary and authority_boundary.get("cost_gate_lowering") is False:
+        cost_gate_adjustments.append("NONE")
+    for value in cost_gate_adjustments:
+        if value not in (None, "", "NONE"):
+            authority.append("renewed_active_bbo_cost_gate_adjustment_not_none")
+            break
     age = _age_seconds(data, now_utc)
     if age is None:
         blockers.append("renewed_active_bbo_manifest_generated_at_missing_or_invalid")
@@ -505,11 +684,15 @@ def _validate_renewed_manifest(
     return {
         "candidate": candidate,
         "age_seconds": age,
-        "active_status": data.get("active_status"),
-        "active_lease_id": _dict(data.get("active_window")).get("lease_id"),
-        "active_quote_request_count": data.get("phase_b_request_count"),
+        "active_status": active_status,
+        "active_lease_id": active_window.get("lease_id"),
+        "active_quote_request_count": phase_b_count,
         "post_governance_lease_count": post.get("lease_count"),
         "post_governance_lease_live_count": post.get("lease_live_count"),
+        "approval_reports": {
+            E3_ROLE: e3_report_review,
+            BB_ROLE: bb_report_review,
+        },
         "blockers": blockers,
         "authority_violations": authority,
     }
@@ -597,6 +780,8 @@ def build_order_capable_demo_invoke_review_packet(
     renewed_active_bbo_manifest_runtime_path: str | None = None,
     strict_order_fill_scan_path: Path | None = None,
     strict_order_fill_scan_runtime_path: str | None = None,
+    e3_approval_report_path: Path | None = None,
+    bb_approval_report_path: Path | None = None,
     source_head: str | None = None,
     source_origin_main: str | None = None,
     source_branch_status: str | None = None,
@@ -614,7 +799,7 @@ def build_order_capable_demo_invoke_review_packet(
         now_utc=now,
         max_age_seconds=max_source_contract_age_seconds,
     )
-    candidate = _dict(source_review.get("candidate"))
+    candidate = _complete_candidate_identity(_dict(source_review.get("candidate")))
     standing_review = _validate_standing_auth(
         standing_demo_authorization,
         now_utc=now,
@@ -631,6 +816,8 @@ def build_order_capable_demo_invoke_review_packet(
         now_utc=now,
         max_age_seconds=max_renewed_no_order_age_seconds,
         expected_candidate=candidate,
+        e3_approval_report_path=e3_approval_report_path,
+        bb_approval_report_path=bb_approval_report_path,
     )
     fill_review = _validate_fill_scan(
         strict_order_fill_scan,
@@ -646,6 +833,10 @@ def build_order_capable_demo_invoke_review_packet(
             + _list(fill_review.get("blockers"))
         )
     )
+    candidate_symbol = _str(candidate.get("symbol"))
+    if not candidate_symbol:
+        loss_control_blockers.append("candidate_symbol_missing_for_public_request_scope")
+        loss_control_blockers = sorted(set(loss_control_blockers))
     authority_violations = sorted(
         set(
             _list(source_review.get("authority_violations"))
@@ -750,8 +941,11 @@ def build_order_capable_demo_invoke_review_packet(
             "future_phase_a_public_demo_market_data": {
                 "allowed_http_requests_exact": [
                     "GET /v5/market/time",
-                    "GET /v5/market/tickers?category=linear&symbol=ETHUSDT",
-                    "GET /v5/market/instruments-info?category=linear&symbol=ETHUSDT",
+                    f"GET /v5/market/tickers?category=linear&symbol={candidate_symbol}",
+                    (
+                        "GET /v5/market/instruments-info?"
+                        f"category=linear&symbol={candidate_symbol}"
+                    ),
                 ],
                 "max_public_get_count_per_window": 3,
                 "private_endpoint_allowed": False,
@@ -877,6 +1071,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--renewed-active-bbo-manifest-runtime-path")
     parser.add_argument("--strict-order-fill-scan-json", type=Path, required=True)
     parser.add_argument("--strict-order-fill-scan-runtime-path")
+    parser.add_argument("--e3-approval-report", type=Path)
+    parser.add_argument("--bb-approval-report", type=Path)
     parser.add_argument("--source-head")
     parser.add_argument("--source-origin-main")
     parser.add_argument("--source-branch-status")
@@ -928,6 +1124,8 @@ def main() -> int:
         renewed_active_bbo_manifest_runtime_path=args.renewed_active_bbo_manifest_runtime_path,
         strict_order_fill_scan_path=args.strict_order_fill_scan_json,
         strict_order_fill_scan_runtime_path=args.strict_order_fill_scan_runtime_path,
+        e3_approval_report_path=args.e3_approval_report,
+        bb_approval_report_path=args.bb_approval_report,
         source_head=args.source_head,
         source_origin_main=args.source_origin_main,
         source_branch_status=args.source_branch_status,

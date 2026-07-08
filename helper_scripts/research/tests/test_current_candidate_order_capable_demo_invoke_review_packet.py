@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import datetime as dt
+import hashlib
 import json
 import sys
 
@@ -182,6 +183,64 @@ def _fill_scan(**overrides) -> dict:
     return payload
 
 
+def _approval_report(tmp_path, role: str, verdict: str = "APPROVE_WITH_CONDITIONS"):
+    path = tmp_path / f"{role.lower()}_review.md"
+    path.write_text(
+        f"STATUS: DONE\nVERDICT: {verdict}\n\n# {role} Review\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _file_sha256(path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _compact_renewed_manifest(tmp_path, **overrides) -> tuple[dict, object, object]:
+    e3_report = _approval_report(tmp_path, "E3")
+    bb_report = _approval_report(tmp_path, "BB")
+    payload = {
+        "schema_version": "renewed_active_bbo_execution_manifest_v1",
+        "generated_at_utc": GEN.isoformat(),
+        "state_transition": "DONE_WITH_CONCERNS",
+        "candidate": SIDE_CELL,
+        "e3_report_sha256": _file_sha256(e3_report),
+        "bb_report_sha256": _file_sha256(bb_report),
+        "phase_a": {
+            "request_count": 3,
+            "status": "CURRENT_CANDIDATE_PUBLIC_QUOTE_CONSTRUCTION_REFRESH_READY_NO_ORDER",
+        },
+        "phase_b": {
+            "request_count": 3,
+            "status": "CURRENT_CANDIDATE_PUBLIC_QUOTE_CONSTRUCTION_REFRESH_READY_NO_ORDER",
+        },
+        "active_window": {
+            "status": "CURRENT_CANDIDATE_ACTUAL_ADMISSION_BBO_LEASE_WINDOW_DONE_NO_ORDER",
+            "lease_id": "lease:36701be74236",
+            "actual_admission_bbo_status_during_active_window": "CURRENT_CANDIDATE_PUBLIC_QUOTE_CONSTRUCTION_REFRESH_READY_NO_ORDER",
+            "gate_evidence_status_during_active_window": "CURRENT_CANDIDATE_DECISION_LEASE_GUARDIAN_GATE_READY_NO_ORDER",
+            "lease_released_before_artifact": True,
+        },
+        "post_governance": {
+            "lease_count": 0,
+            "lease_live_count": 0,
+            "risk_level": "NORMAL",
+            "position_size_multiplier": 1.0,
+        },
+        "authority_boundary": {
+            "order_or_probe_authority_granted": False,
+            "private_or_order_endpoint_called": False,
+            "db_or_pg_write": False,
+            "runtime_config_service_mutation": False,
+            "cost_gate_lowering": False,
+            "live_or_mainnet": False,
+            "proof_or_promotion_claim": False,
+        },
+    }
+    payload.update(overrides)
+    return payload, e3_report, bb_report
+
+
 def _packet(**overrides) -> dict:
     kwargs = {
         "active_order_contract": _active_order_contract(),
@@ -226,6 +285,253 @@ def test_ready_packet_keeps_order_submission_denied() -> None:
     assert packet["reviews"]["bounded_demo_soak_plan"][
         "materialized_order_authority_is_input_only"
     ] is True
+    assert packet["requested_scope"]["future_phase_a_public_demo_market_data"][
+        "allowed_http_requests_exact"
+    ] == [
+        "GET /v5/market/time",
+        "GET /v5/market/tickers?category=linear&symbol=ETHUSDT",
+        "GET /v5/market/instruments-info?category=linear&symbol=ETHUSDT",
+    ]
+
+
+def test_requested_public_market_data_scope_uses_candidate_symbol() -> None:
+    side_cell = "ma_crossover|NEARUSDT|Buy"
+    candidate = {
+        "side_cell_key": side_cell,
+        "strategy_name": "ma_crossover",
+        "symbol": "NEARUSDT",
+        "side": "Buy",
+        "outcome_horizon_minutes": 60,
+    }
+    packet = _packet(
+        active_order_contract=_active_order_contract(candidate=candidate),
+        standing_demo_authorization=_standing_auth(candidate=candidate),
+        bounded_demo_soak_plan=_soak_plan(
+            operator_authorization={
+                **_soak_plan()["operator_authorization"],
+                "side_cell_key": side_cell,
+            },
+            probe_candidates=[
+                {
+                    **candidate,
+                    "guardrails": {
+                        "demo_only": True,
+                        "max_demo_notional_usdt_per_order": 954.18759777,
+                        "main_cost_gate_adjustment": "NONE",
+                        "placement_mode": "buy_near_touch_post_only_at_or_below_best_bid",
+                    },
+                }
+            ],
+        ),
+        renewed_active_bbo_manifest=_renewed_manifest(candidate=side_cell),
+        strict_order_fill_scan=_fill_scan(candidate=side_cell),
+    )
+
+    requests = packet["requested_scope"]["future_phase_a_public_demo_market_data"][
+        "allowed_http_requests_exact"
+    ]
+    assert packet["status"] == mod.READY_STATUS
+    assert "GET /v5/market/tickers?category=linear&symbol=NEARUSDT" in requests
+    assert (
+        "GET /v5/market/instruments-info?category=linear&symbol=NEARUSDT"
+        in requests
+    )
+    assert all("ETHUSDT" not in request for request in requests)
+
+
+def test_compact_renewed_manifest_shape_is_accepted(tmp_path) -> None:
+    e3_report = _approval_report(tmp_path, "E3")
+    bb_report = _approval_report(tmp_path, "BB")
+    packet = _packet(
+        e3_approval_report_path=e3_report,
+        bb_approval_report_path=bb_report,
+        renewed_active_bbo_manifest={
+            "schema_version": "renewed_active_bbo_execution_manifest_v1",
+            "generated_at_utc": GEN.isoformat(),
+            "state_transition": "DONE_WITH_CONCERNS",
+            "candidate": SIDE_CELL,
+            "e3_report_sha256": _file_sha256(e3_report),
+            "bb_report_sha256": _file_sha256(bb_report),
+            "phase_a": {
+                "request_count": 3,
+                "status": "CURRENT_CANDIDATE_PUBLIC_QUOTE_CONSTRUCTION_REFRESH_READY_NO_ORDER",
+            },
+            "phase_b": {
+                "request_count": 3,
+                "status": "CURRENT_CANDIDATE_PUBLIC_QUOTE_CONSTRUCTION_REFRESH_READY_NO_ORDER",
+            },
+            "active_window": {
+                "status": "CURRENT_CANDIDATE_ACTUAL_ADMISSION_BBO_LEASE_WINDOW_DONE_NO_ORDER",
+                "lease_id": "lease:36701be74236",
+                "actual_admission_bbo_status_during_active_window": "CURRENT_CANDIDATE_PUBLIC_QUOTE_CONSTRUCTION_REFRESH_READY_NO_ORDER",
+                "gate_evidence_status_during_active_window": "CURRENT_CANDIDATE_DECISION_LEASE_GUARDIAN_GATE_READY_NO_ORDER",
+                "lease_released_before_artifact": True,
+            },
+            "post_governance": {
+                "lease_count": 0,
+                "lease_live_count": 0,
+                "risk_level": "NORMAL",
+            },
+            "authority_boundary": {
+                "order_or_probe_authority_granted": False,
+                "private_or_order_endpoint_called": False,
+                "db_or_pg_write": False,
+                "runtime_config_service_mutation": False,
+                "cost_gate_lowering": False,
+                "live_or_mainnet": False,
+                "proof_or_promotion_claim": False,
+            },
+        }
+    )
+
+    assert packet["status"] == mod.READY_STATUS
+    assert packet["reviews"]["renewed_no_order_active_bbo_window"]["blockers"] == []
+    assert (
+        packet["reviews"]["renewed_no_order_active_bbo_window"]["approval_reports"][
+            "E3"
+        ]["approved_with_conditions"]
+        is True
+    )
+    assert (
+        packet["reviews"]["renewed_no_order_active_bbo_window"]["approval_reports"][
+            "BB"
+        ]["approved_with_conditions"]
+        is True
+    )
+    assert (
+        packet["reviews"]["renewed_no_order_active_bbo_window"][
+            "authority_violations"
+        ]
+        == []
+    )
+
+
+def test_compact_renewed_manifest_sha_without_report_path_blocks(tmp_path) -> None:
+    e3_report = _approval_report(tmp_path, "E3")
+    bb_report = _approval_report(tmp_path, "BB")
+    packet = _packet(
+        renewed_active_bbo_manifest={
+            **_renewed_manifest(),
+            "e3_decision": None,
+            "bb_decision": None,
+            "e3_report_sha256": _file_sha256(e3_report),
+            "bb_report_sha256": _file_sha256(bb_report),
+        }
+    )
+
+    assert packet["status"] == mod.BLOCKED_BY_LOSS_CONTROL_STATUS
+    assert "renewed_active_bbo_e3_report_path_missing" in packet[
+        "loss_control_blockers"
+    ]
+    assert "renewed_active_bbo_bb_report_path_missing" in packet[
+        "loss_control_blockers"
+    ]
+
+
+def test_compact_renewed_manifest_active_answer_contamination_fails_closed(
+    tmp_path,
+) -> None:
+    manifest, e3_report, bb_report = _compact_renewed_manifest(
+        tmp_path,
+        active_answers={"order_submission_performed": True},
+    )
+
+    packet = _packet(
+        e3_approval_report_path=e3_report,
+        bb_approval_report_path=bb_report,
+        renewed_active_bbo_manifest=manifest,
+    )
+
+    assert packet["status"] == mod.AUTHORITY_BOUNDARY_VIOLATION_STATUS
+    assert "renewed_active_bbo_order_submission_performed_not_false" in packet[
+        "authority_boundary_violations"
+    ]
+
+
+def test_compact_renewed_manifest_operator_auth_authorize_fails_closed(
+    tmp_path,
+) -> None:
+    manifest, e3_report, bb_report = _compact_renewed_manifest(tmp_path)
+    manifest["authority_boundary"]["operator_auth_authorize"] = True
+
+    packet = _packet(
+        e3_approval_report_path=e3_report,
+        bb_approval_report_path=bb_report,
+        renewed_active_bbo_manifest=manifest,
+    )
+
+    assert packet["status"] == mod.AUTHORITY_BOUNDARY_VIOLATION_STATUS
+    assert "renewed_active_bbo_operator_auth_authorize_not_false" in packet[
+        "authority_boundary_violations"
+    ]
+
+
+def test_compact_renewed_manifest_post_governance_loss_control_blocks(
+    tmp_path,
+) -> None:
+    manifest, e3_report, bb_report = _compact_renewed_manifest(tmp_path)
+    manifest["post_governance"]["risk_level"] = "CAUTIOUS"
+    manifest["post_governance"]["position_size_multiplier"] = 0.5
+
+    packet = _packet(
+        e3_approval_report_path=e3_report,
+        bb_approval_report_path=bb_report,
+        renewed_active_bbo_manifest=manifest,
+    )
+
+    assert packet["status"] == mod.BLOCKED_BY_LOSS_CONTROL_STATUS
+    assert "renewed_active_bbo_post_governance_risk_level_not_normal" in packet[
+        "loss_control_blockers"
+    ]
+    assert (
+        "renewed_active_bbo_post_governance_position_size_multiplier_not_1"
+        in packet["loss_control_blockers"]
+    )
+
+
+def test_side_cell_only_source_candidate_derives_symbol_for_requested_scope() -> None:
+    side_cell = "ma_crossover|NEARUSDT|Buy"
+    candidate = {
+        "side_cell_key": side_cell,
+        "strategy_name": "ma_crossover",
+        "symbol": "NEARUSDT",
+        "side": "Buy",
+        "outcome_horizon_minutes": 60,
+    }
+
+    packet = _packet(
+        active_order_contract=_active_order_contract(
+            candidate={"side_cell_key": side_cell}
+        ),
+        standing_demo_authorization=_standing_auth(candidate=candidate),
+        bounded_demo_soak_plan=_soak_plan(
+            operator_authorization={
+                **_soak_plan()["operator_authorization"],
+                "side_cell_key": side_cell,
+            },
+            probe_candidates=[
+                {
+                    **candidate,
+                    "guardrails": {
+                        "demo_only": True,
+                        "max_demo_notional_usdt_per_order": 954.18759777,
+                        "main_cost_gate_adjustment": "NONE",
+                        "placement_mode": "buy_near_touch_post_only_at_or_below_best_bid",
+                    },
+                }
+            ],
+        ),
+        renewed_active_bbo_manifest=_renewed_manifest(candidate=side_cell),
+        strict_order_fill_scan=_fill_scan(candidate=side_cell),
+    )
+
+    requests = packet["requested_scope"]["future_phase_a_public_demo_market_data"][
+        "allowed_http_requests_exact"
+    ]
+    assert packet["status"] == mod.READY_STATUS
+    assert packet["candidate"]["symbol"] == "NEARUSDT"
+    assert "GET /v5/market/tickers?category=linear&symbol=NEARUSDT" in requests
+    assert all("UNKNOWN" not in request for request in requests)
 
 
 def test_expired_standing_auth_blocks_review_packet() -> None:
@@ -329,6 +635,24 @@ def test_output_authority_checker_catches_packet_scope_aliases() -> None:
             }
         )
         == "$.requested_scope.future_phase_c_conditional_single_bounded_demo_order.allowed_by_this_packet"
+    )
+    assert (
+        mod._check_output_authority(
+            {"authority_boundary": {"operator_auth_authorize": True}}
+        )
+        == "$.authority_boundary.operator_auth_authorize"
+    )
+    assert (
+        mod._check_output_authority(
+            {"authority_boundary": {"order_or_probe_authority_granted": True}}
+        )
+        == "$.authority_boundary.order_or_probe_authority_granted"
+    )
+    assert (
+        mod._check_output_authority(
+            {"post_governance": {"runtime_mutation_allowed": True}}
+        )
+        == "$.post_governance.runtime_mutation_allowed"
     )
 
 
