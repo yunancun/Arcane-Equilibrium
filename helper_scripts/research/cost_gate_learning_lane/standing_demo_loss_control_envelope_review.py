@@ -25,6 +25,11 @@ from cost_gate_learning_lane.contract import (
 from cost_gate_learning_lane.false_negative_candidate_packet import (
     SCHEMA_VERSION as FALSE_NEGATIVE_CANDIDATE_PACKET_SCHEMA_VERSION,
 )
+from cost_gate_learning_lane.current_candidate_no_order_refresh_envelope import (
+    _derive_gui_risk_cap as _derive_gui_risk_cap_from_gui,
+    _read_toml as _read_toml_file,
+    _resolve_account_equity_from_artifact as _resolve_account_equity_from_artifact,
+)
 from cost_gate_learning_lane.standing_demo_authorization import (
     summarize_standing_demo_authorization,
 )
@@ -58,6 +63,7 @@ FALSE_NEGATIVE_CANDIDATE_PACKET_READY_STATUS = (
     "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW"
 )
 DEFAULT_MAX_ARTIFACT_AGE_HOURS = 24
+DEFAULT_MAX_ACCOUNT_EQUITY_ARTIFACT_AGE_SECONDS = 24 * 60 * 60
 DEFAULT_AUTHORIZATION_TTL_HOURS = 12
 DEFAULT_MAX_AUTHORIZATION_TTL_HOURS = 24
 DEFAULT_MAX_AUTHORIZED_PROBE_ORDERS = 2
@@ -746,6 +752,10 @@ def build_standing_demo_loss_control_envelope_review(
     false_negative_candidate_packet: dict[str, Any] | None,
     false_negative_candidate_packet_path: Path | None = None,
     false_negative_candidate_packet_error: str | None = None,
+    gui_risk_config: dict[str, Any] | None = None,
+    account_equity_artifact: dict[str, Any] | None = None,
+    account_equity_usdt: Any = None,
+    account_equity_artifact_path: Path | None = None,
     selected_side_cell_key: str | None = None,
     operator_id: str | None = DEFAULT_OPERATOR_ID,
     standing_demo_authorization_output_path: Path = DEFAULT_MATERIALIZATION_PATH,
@@ -755,6 +765,9 @@ def build_standing_demo_loss_control_envelope_review(
     max_authorization_ttl_hours: int = DEFAULT_MAX_AUTHORIZATION_TTL_HOURS,
     now_utc: dt.datetime | None = None,
     max_artifact_age_hours: int = DEFAULT_MAX_ARTIFACT_AGE_HOURS,
+    max_account_equity_artifact_age_seconds: int = (
+        DEFAULT_MAX_ACCOUNT_EQUITY_ARTIFACT_AGE_SECONDS
+    ),
 ) -> dict[str, Any]:
     """Build a fail-closed review packet for future runtime materialization."""
     if max_artifact_age_hours < 1 or max_artifact_age_hours > 24 * 14:
@@ -792,6 +805,42 @@ def build_standing_demo_loss_control_envelope_review(
     candidate_reviewable = _candidate_reviewable(candidate)
     candidate_scope_complete = _candidate_scope_complete(candidate_scope)
     risk_cap_lineage = _risk_cap_lineage_summary(candidate)
+    equity_resolution: dict[str, Any] = {}
+    derived_cap_resolution: dict[str, Any] = {}
+    derived_risk_cap_lineage: dict[str, Any] = {}
+    risk_cap_lineage_source = "false_negative_candidate_packet"
+    if (
+        risk_cap_lineage.get("valid") is not True
+        and gui_risk_config is not None
+        and account_equity_artifact is not None
+    ):
+        equity_usdt, equity_resolution = _resolve_account_equity_from_artifact(
+            account_equity_artifact=account_equity_artifact,
+            account_equity_usdt=account_equity_usdt,
+            now_utc=now,
+            max_age_seconds=max(1, int(max_account_equity_artifact_age_seconds)),
+        )
+        _resolved_cap, derived_cap_resolution = _derive_gui_risk_cap_from_gui(
+            gui_risk_config=gui_risk_config,
+            account_equity_usdt=equity_usdt,
+            equity_resolution=equity_resolution,
+        )
+        derived_risk_cap_lineage = {
+            **derived_cap_resolution,
+            "cap_source": (
+                "standing_demo_loss_control_envelope_review."
+                "gui_risk_config_plus_demo_equity"
+            ),
+            "account_equity_artifact_path": (
+                str(account_equity_artifact_path)
+                if account_equity_artifact_path
+                else None
+            ),
+        }
+        risk_cap_lineage = _risk_cap_lineage_summary(
+            {"risk_cap_lineage": derived_risk_cap_lineage}
+        )
+        risk_cap_lineage_source = "gui_risk_config_plus_demo_equity_artifact"
     risk_cap_valid = risk_cap_lineage.get("valid") is True
 
     envelope_preview: dict[str, Any] = {}
@@ -979,6 +1028,9 @@ def build_standing_demo_loss_control_envelope_review(
             "authority_preserved": authority_ok,
             "authority_contamination_reasons": authority_reasons,
             "selection_method": selection_method,
+            "risk_cap_lineage_source": risk_cap_lineage_source,
+            "account_equity_resolution": equity_resolution,
+            "derived_cap_resolution": derived_cap_resolution,
         },
         "candidate": candidate if candidate_selected else {},
         "candidate_scope": candidate_scope if candidate_scope_complete else {},
@@ -1125,6 +1177,14 @@ def _same_path(left: Path | None, right: Path | None) -> bool:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--false-negative-candidate-packet-json", type=Path, required=True)
+    parser.add_argument("--gui-risk-config-toml", type=Path)
+    parser.add_argument("--account-equity-artifact-json", type=Path)
+    parser.add_argument("--account-equity-usdt")
+    parser.add_argument(
+        "--max-account-equity-artifact-age-seconds",
+        type=int,
+        default=DEFAULT_MAX_ACCOUNT_EQUITY_ARTIFACT_AGE_SECONDS,
+    )
     parser.add_argument("--selected-side-cell-key")
     parser.add_argument("--operator-id", default=DEFAULT_OPERATOR_ID)
     parser.add_argument(
@@ -1162,10 +1222,17 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = _build_parser().parse_args()
     packet, err = _read_json(args.false_negative_candidate_packet_json)
+    equity_artifact, equity_err = _read_json(args.account_equity_artifact_json)
+    if equity_err and args.account_equity_artifact_json is not None:
+        raise SystemExit(f"account equity artifact unavailable: {equity_err}")
     review = build_standing_demo_loss_control_envelope_review(
         false_negative_candidate_packet=packet,
         false_negative_candidate_packet_path=args.false_negative_candidate_packet_json,
         false_negative_candidate_packet_error=err,
+        gui_risk_config=_read_toml_file(args.gui_risk_config_toml),
+        account_equity_artifact=equity_artifact,
+        account_equity_usdt=args.account_equity_usdt,
+        account_equity_artifact_path=args.account_equity_artifact_json,
         selected_side_cell_key=args.selected_side_cell_key,
         operator_id=args.operator_id,
         standing_demo_authorization_output_path=(
@@ -1176,6 +1243,9 @@ def main() -> int:
         authorization_ttl_hours=args.authorization_ttl_hours,
         max_authorization_ttl_hours=args.max_authorization_ttl_hours,
         max_artifact_age_hours=args.max_artifact_age_hours,
+        max_account_equity_artifact_age_seconds=(
+            args.max_account_equity_artifact_age_seconds
+        ),
     )
     materialization_path = args.standing_demo_authorization_output_path
     if _same_path(args.json_output, materialization_path) or _same_path(
