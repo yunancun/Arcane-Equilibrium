@@ -1,0 +1,64 @@
+{
+  "schema_version": "profit_first_same_window_noorder_gate_effect_review_v1",
+  "packet_id": "profit_first_dynamic_candidate_same_window_noorder_gate_done_effect_20260708",
+  "generated_at_utc": "2026-07-08T18:07:00Z",
+  "status": "READY_FOR_BOUNDED_DEMO_FINAL_WINDOW",
+  "substatus": "DONE_WITH_CONCERNS__NEXT_AUTHORIZATION_REQUIRED",
+  "candidate": "ma_crossover|NEARUSDT|Buy",
+  "source_runtime_binding": {
+    "execution_source_head": "08f7e9571f03a2dea7a0a20e0e8fe4e0d4c01d91",
+    "execution_runtime_head": "08f7e9571f03a2dea7a0a20e0e8fe4e0d4c01d91",
+    "request_sha256": "89eb2f595238b8826df3e6b1c9c5ee087d9aad9e1254549cef90fcb5fcd2bd09",
+    "request_manifest_sha256": "992fc3975b353783364787612b688882c2442759092bcf0fe8a5aec9593be1bf",
+    "e3_report_sha256": "d06536d33bd81238622d29b9255012670db4ec403fc9522c5503ce1f49e81ae2",
+    "bb_report_sha256": "fb684fba5f7e55b9296ec8336fb006ee3267241dbc11979301f1b2a1dd7611c4"
+  },
+  "runtime_execution": {
+    "base_path": "/home/ncyu/BybitOpenClaw/var/openclaw/profit_first_dynamic_candidate_same_window_final_gate_20260708T175744Z_08f7e957_noorder",
+    "renewed_execution_manifest_path": "/home/ncyu/BybitOpenClaw/var/openclaw/profit_first_dynamic_candidate_same_window_final_gate_20260708T175744Z_08f7e957_noorder/renewed_active_bbo_execution_manifest.json",
+    "renewed_execution_manifest_sha256": "17a3a426f31cbff6c0180dfdd239ea6b0ef2b132df486dfc76764825963cf321",
+    "manifest_state_transition": "DONE_WITH_CONCERNS",
+    "phase_a_public_market_data_gets": 3,
+    "phase_b_public_market_data_gets": 3,
+    "total_public_market_data_gets": 6,
+    "dry_run_status": "CURRENT_CANDIDATE_ACTUAL_ADMISSION_BBO_LEASE_WINDOW_DRY_RUN_READY",
+    "active_window_status": "CURRENT_CANDIDATE_ACTUAL_ADMISSION_BBO_LEASE_WINDOW_DONE_NO_ORDER",
+    "active_lease_id": "lease:4142221203d4",
+    "active_lease_scope": "TRADE_ENTRY",
+    "active_lease_ttl_seconds": 5.0,
+    "active_lease_acquire_ok": true,
+    "active_lease_release_ok": true,
+    "lease_released_before_artifact": true,
+    "post_governance_lease_count": 0,
+    "post_governance_lease_live_count": 0,
+    "post_governance_risk_level": "NORMAL",
+    "post_governance_position_size_multiplier": 1.0
+  },
+  "effects_performed": {
+    "local_no_authority_input_refresh": true,
+    "unauthenticated_demo_public_market_data_gets": 6,
+    "decision_lease_acquire_release_no_order_window": true,
+    "read_only_governance_snapshots": true,
+    "runtime_artifact_writes_under_evidence_base": true
+  },
+  "effects_not_performed": {
+    "order_submission": false,
+    "order_cancel": false,
+    "order_modify": false,
+    "probe": false,
+    "private_or_order_endpoint": false,
+    "operator_auth_authorize": false,
+    "db_or_pg_write": false,
+    "runtime_config_service_env_mutation": false,
+    "service_restart_or_build": false,
+    "global_cost_gate_lowering": false,
+    "live_or_mainnet": false,
+    "profit_proof_or_promotion_claim": false
+  },
+  "concerns": [
+    "The gate is no-order only and produced no candidate-matched order, fill, fee, slippage, PnL, or proof evidence.",
+    "The released lease and no-order BBO artifacts are not reusable as order authority.",
+    "Current operator-auth readiness remains decision=defer; the order-capable path needs a separate exact scope and explicit authorization."
+  ],
+  "next_required_state": "ORDER_CAPABLE_EXACT_SCOPE_OPERATOR_AUTHORIZATION_REQUIRED"
+}

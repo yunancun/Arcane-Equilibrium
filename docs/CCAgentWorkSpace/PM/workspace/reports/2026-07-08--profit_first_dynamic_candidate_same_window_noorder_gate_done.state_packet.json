@@ -2,7 +2,9 @@
   "schema_version": "profit_first_same_window_noorder_gate_state_packet_v1",
   "packet_id": "profit_first_dynamic_candidate_same_window_noorder_gate_done_20260708",
   "generated_at_utc": "2026-07-08T18:04:49Z",
-  "status": "DONE_WITH_CONCERNS__NEXT_AUTHORIZATION_REQUIRED",
+  "status": "READY_FOR_BOUNDED_DEMO_FINAL_WINDOW",
+  "substatus": "DONE_WITH_CONCERNS__NEXT_AUTHORIZATION_REQUIRED",
+  "stop_condition_used": "READY_FOR_BOUNDED_DEMO_FINAL_WINDOW",
   "candidate": {
     "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy",
     "strategy_name": "ma_crossover",

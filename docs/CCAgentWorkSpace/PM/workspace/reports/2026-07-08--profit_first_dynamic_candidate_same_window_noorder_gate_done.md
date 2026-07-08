@@ -1,6 +1,8 @@
 # Profit-First Dynamic Candidate Same-Window No-Order Gate Done
 
-Status: `DONE_WITH_CONCERNS__NEXT_AUTHORIZATION_REQUIRED`
+Status: `READY_FOR_BOUNDED_DEMO_FINAL_WINDOW`
+
+Substatus: `DONE_WITH_CONCERNS__NEXT_AUTHORIZATION_REQUIRED`
 
 ## Summary
 
