@@ -131,3 +131,29 @@ jobs:
           POSTGRES_PASSWORD: contract_pass
           POSTGRES_DB: contract_db
         run: python3 helper_scripts/db/audit_migrations.py
+
+  # stock_etf 靜態 guard（G0.5）：ADR-0048 IBKR lane 的 AST/檔案掃描層防線
+  # （Python 唯讀邊界 / route GET-only / GUI 不寫 / surface coverage），原本只在
+  # 本地 pytest 跑、hosted CI 無覆蓋。純 stdlib（ast/re/pathlib）+ pytest，無 FastAPI 等重依賴。
+  # 成本紀律（2000min/月，單 runner）：限 pull_request → 只 PR 跑、ubuntu-latest 1x 倍率、零 macOS 10x。
+  stock-etf-static-guards:
+    name: stock_etf static guards (python)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pytest
+        # pytest-asyncio 供 repo 根 pytest.ini 的 asyncio_mode=strict（否則發 unknown-ini 警告）。
+        run: pip install pytest pytest-asyncio
+      - name: Run stock_etf static-guard tests
+        run: |
+          python -m pytest -q \
+            program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_python_no_write_static_guard.py \
+            program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_route_static_guard.py \
+            program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_static_gui_guard.py \
+            program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_surface_coverage_static_guard.py

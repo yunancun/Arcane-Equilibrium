@@ -43,6 +43,20 @@
     return items.map(item => ocChip(String(item), toneFor(item))).join('');
   }
 
+  // 帳戶數值未達 present && accepted 時的佔位。
+  //
+  // 為什麼 fail-closed：未連線 / Phase 2 未過閘的 IBKR 帳戶若照樣渲染
+  // cash=0 buying_power=0，會被讀成一個真實的 $0 券商帳戶（fake $0.00
+  // 反模式，FA-IBKR-1）。這裡改顯 em-dash 並明示狀態；blocked（未採集，
+  // present=false）與 degraded（來源降級 api_unavailable）不可 collapse
+  // 成同一句，否則操作員無法分辨「未連線」與「來源不可用」。
+  function accountValuePlaceholder(status) {
+    const label = status && status.degraded === true
+      ? '帳戶未連線 · 來源降級 / not connected · degraded'
+      : '帳戶未連線 · 待 Phase 2 / not connected';
+    return '<span class="se-muted">' + esc('— · ' + label) + '</span>';
+  }
+
   function renderAuthorizationStatus(data) {
     const status = data || authorizationFallback('api_unavailable');
     const matrix = status.authorization_matrix || {};
@@ -153,6 +167,10 @@
     const session = status.session_attestation || {};
     const policy = status.paper_attestation_policy || {};
     const state = status.account_status_state || 'blocked';
+    // 券商數值閘門：快照已採集（account_snapshot_present）且驗證通過
+    // （account_snapshot.accepted）才是真實餘額，否則走佔位不顯 0。
+    const snapshotUsable =
+      status.account_snapshot_present === true && account.accepted === true;
     const blockers = []
       .concat(status.phase2_gate_blockers || [])
       .concat(account.blockers || [])
@@ -186,15 +204,20 @@
       kvRow('account.positions_hash_present', boolChip(account.portfolio_positions_hash_present, true)),
       kvRow(
         'account.balances',
-        '<span class="se-code">' +
-          ocEsc(
-            'ccy=' + String(account.currency || '-') +
-            ' cash=' + String(account.cash_balance_minor_units || 0) +
-            ' buying_power=' + String(account.buying_power_minor_units || 0)
-          ) +
-        '</span>'
+        snapshotUsable
+          ? '<span class="se-code">' +
+              ocEsc(
+                'ccy=' + String(account.currency || '-') +
+                ' cash=' + String(account.cash_balance_minor_units || 0) +
+                ' buying_power=' + String(account.buying_power_minor_units || 0)
+              ) +
+            '</span>'
+          : accountValuePlaceholder(status)
       ),
-      kvRow('account.as_of_ms', textChip(account.as_of_ms || 0)),
+      kvRow(
+        'account.as_of_ms',
+        snapshotUsable ? textChip(account.as_of_ms || 0) : accountValuePlaceholder(status)
+      ),
       kvRow('account.source_report_hash_present', boolChip(account.source_report_hash_present, true)),
       kvRow('session.contract_id', textChip(session.contract_id || '-')),
       kvRow('session.expected_contract_id', textChip(session.expected_contract_id || '-')),
