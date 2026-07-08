@@ -1,0 +1,545 @@
+{
+  "answers": {
+    "active_runtime_order_authority": false,
+    "active_runtime_probe_authority": false,
+    "authorization_confirmation_source": null,
+    "bounded_demo_probe_authorized": false,
+    "global_cost_gate_lowering_recommended": false,
+    "main_cost_gate_adjustment": "NONE",
+    "operator_authorization_object_emitted": false,
+    "order_authority_granted_in_authorization_object": false,
+    "order_submission_performed": false,
+    "plan_mutation_performed": false,
+    "probe_authority_granted_in_authorization_object": false,
+    "promotion_evidence": false,
+    "ready_for_operator_authorization_review": true,
+    "runtime_mutation_performed": false,
+    "standing_demo_authorization_present": true,
+    "standing_demo_authorization_valid": false,
+    "writer_enabled": false
+  },
+  "artifacts": {
+    "authority_patch_readiness": {
+      "age_seconds": 23.127767,
+      "generated_at_utc": "2026-07-08T12:15:32.394141+00:00",
+      "max_age_seconds": 86400,
+      "name": "authority_patch_readiness",
+      "path": "/tmp/tradebot_dynamic_candidate_materialization_20260708/outputs/bounded_probe_authority_patch_readiness_latest_near_buy.json",
+      "present": true,
+      "schema_version": "bounded_demo_probe_authority_patch_readiness_v1",
+      "sha256": "f8c3e6ee1d559f2188505f8dbe67892f9fda85b31590e050de97545b3339a167",
+      "status": "FRESH"
+    },
+    "placement_repair_plan": {
+      "age_seconds": 31.347173,
+      "generated_at_utc": "2026-07-08T12:15:24.174735+00:00",
+      "max_age_seconds": 86400,
+      "name": "placement_repair_plan",
+      "path": "/tmp/tradebot_dynamic_candidate_materialization_20260708/outputs/bounded_probe_placement_repair_plan_latest_near_buy.json",
+      "present": true,
+      "schema_version": "bounded_demo_probe_placement_repair_plan_v1",
+      "sha256": "50f6a6585e37e95a0ab12022faaed8352b3e7adb754bec2cd9cc2e8344c6a4d0",
+      "status": "FRESH"
+    },
+    "sealed_horizon_probe_preflight": {
+      "age_seconds": 45.886917,
+      "generated_at_utc": "2026-07-08T12:15:09.634991+00:00",
+      "max_age_seconds": 86400,
+      "name": "sealed_horizon_probe_preflight",
+      "path": "/tmp/tradebot_dynamic_candidate_materialization_20260708/outputs/false_negative_bounded_probe_preflight_latest_near_buy.json",
+      "present": true,
+      "schema_version": "cost_gate_false_negative_bounded_demo_probe_preflight_v1",
+      "sha256": "6eb1d507c18f24cf1668af6bdcf6457f3114c9dd7a345b25c66d18fb94eda36e",
+      "status": "FRESH"
+    },
+    "standing_demo_authorization": {
+      "age_seconds": 204.635818,
+      "generated_at_utc": "2026-07-08T12:12:30.886090+00:00",
+      "max_age_seconds": 86400,
+      "name": "standing_demo_authorization",
+      "path": "/tmp/tradebot_dynamic_candidate_materialization_20260708/inputs/standing_demo_operator_authorization.materialized.json",
+      "present": true,
+      "schema_version": "standing_demo_operator_authorization_v1",
+      "sha256": "05fe07f5ad4f92c459c4c6f67bfe534a04b0ea4b4e8f2d8aa43879d87009152f",
+      "status": "FRESH"
+    }
+  },
+  "authority_patch_readiness": {
+    "candidate": {
+      "outcome_horizon_minutes": 60,
+      "side": "Buy",
+      "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+      "strategy_name": "ma_crossover",
+      "symbol": "NEARUSDT"
+    },
+    "ready_for_operator_authorization": true,
+    "reason": "source_contains_required_near_touch_authority_adapter_and_evidence_hooks",
+    "rust_authority_path_wiring_present": true,
+    "rust_near_touch_authority_adapter_present": true,
+    "status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW"
+  },
+  "authorization_confirmation_source": null,
+  "authorization_id": null,
+  "blocking_gate_count": 0,
+  "blocking_gates": [],
+  "boundary": "artifact-only bounded Demo probe operator authorization review; no plan mutation, writer enablement, PG query/write, Bybit call, order, config, risk, runtime mutation, main Cost Gate lowering, or promotion proof",
+  "candidate": {
+    "outcome_horizon_minutes": 60,
+    "side": "Buy",
+    "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+    "strategy_name": "ma_crossover",
+    "symbol": "NEARUSDT"
+  },
+  "decision": "defer",
+  "expires_at_utc": null,
+  "gates": [
+    {
+      "evidence": {},
+      "name": "authority_boundary_preserved",
+      "next_actions": [
+        "remove_authority_granting_input_before_authorization_review"
+      ],
+      "passed": true,
+      "reason": "inputs must not already grant Cost Gate lowering, probe/order authority, or promotion proof",
+      "status": "PRESERVED"
+    },
+    {
+      "evidence": {
+        "candidate": {
+          "outcome_horizon_minutes": 60,
+          "side": "Buy",
+          "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+          "strategy_name": "ma_crossover",
+          "symbol": "NEARUSDT"
+        },
+        "cap_source": "standing_demo_loss_control_envelope_review.gui_risk_config_plus_demo_equity",
+        "local_10_usdt_cap_is_global_risk_authority": false,
+        "max_demo_notional_usdt_per_order": 954.46746768,
+        "max_probe_intents_before_review": 2,
+        "max_total_demo_notional_usdt_before_review": 1908.93493536,
+        "per_trade_risk_pct_display": 10.0,
+        "per_trade_risk_pct_fraction": 0.1,
+        "ready_for_operator_authorization": true,
+        "reason": "false_negative_candidate_ready_for_bounded_demo_probe_authorization_review",
+        "risk_source_of_truth": "GUI-backed Rust RiskConfig",
+        "schema_version": "cost_gate_false_negative_bounded_demo_probe_preflight_v1",
+        "status": "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+      },
+      "name": "false_negative_preflight_ready",
+      "next_actions": [
+        "operator_review_false_negative_candidate_with_exact_preflight_confirm"
+      ],
+      "passed": true,
+      "reason": "false-negative preflight must reach READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION after operator review",
+      "status": "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+    },
+    {
+      "evidence": {
+        "authority_contamination": false,
+        "candidate_scope": {
+          "outcome_horizon_minutes": 60,
+          "side": "Buy",
+          "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+          "strategy_name": "ma_crossover",
+          "symbol": "NEARUSDT"
+        },
+        "candidate_scope_matches": true,
+        "candidate_scoping_required": true,
+        "cost_gate_lowering_recommended": false,
+        "demo_only": true,
+        "environment": "demo",
+        "environment_valid": true,
+        "expires_at_utc": "2026-07-09T00:12:30.886090+00:00",
+        "expiry_valid": true,
+        "live_authority_granted": false,
+        "max_authorization_ttl_hours": 24,
+        "max_authorized_probe_orders_per_candidate": 2,
+        "operator_id": "profit-first-fast-demo-loop",
+        "promotion_evidence": false,
+        "risk_cap_lineage": {
+          "account_equity_usdt": 9544.67467679,
+          "bounded_probe_local_cap_usdt_is_authority": false,
+          "cap_source": "standing_demo_loss_control_envelope_review.gui_risk_config_plus_demo_equity",
+          "local_10_usdt_cap_is_global_risk_authority": false,
+          "per_trade_risk_pct_display": 10.0,
+          "per_trade_risk_pct_fraction": 0.1,
+          "position_size_max_pct": 25.0,
+          "resolved_cap_usdt": 954.46746768,
+          "risk_source_of_truth": "GUI-backed Rust RiskConfig",
+          "rounded_notional_usdt": null,
+          "single_position_budget_usdt": 2386.1686692,
+          "valid": true
+        },
+        "runtime_authority_granted": false,
+        "safe": true,
+        "schema_valid": true,
+        "scope": "demo_api_only_bounded_probe",
+        "scope_valid": true,
+        "standing_authorization_id": "standing-demo-loss-control-20260708T121230Z-e3c77d8c6fa9",
+        "status": "STANDING_DEMO_AUTHORIZATION_ACTIVE",
+        "status_active": true,
+        "valid_for_candidate_scoped_authorization": true
+      },
+      "name": "standing_demo_authorization_safe",
+      "next_actions": [
+        "remove_or_reissue_standing_demo_authorization_without_live_runtime_or_promotion_authority"
+      ],
+      "passed": true,
+      "reason": "standing Demo authorization input must not carry live, runtime, Cost Gate, or promotion authority",
+      "status": "SAFE"
+    },
+    {
+      "evidence": {
+        "authority_contamination": false,
+        "candidate_scope": {
+          "outcome_horizon_minutes": 60,
+          "side": "Buy",
+          "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+          "strategy_name": "ma_crossover",
+          "symbol": "NEARUSDT"
+        },
+        "candidate_scope_matches": true,
+        "candidate_scoping_required": true,
+        "cost_gate_lowering_recommended": false,
+        "demo_only": true,
+        "environment": "demo",
+        "environment_valid": true,
+        "expires_at_utc": "2026-07-09T00:12:30.886090+00:00",
+        "expiry_valid": true,
+        "live_authority_granted": false,
+        "max_authorization_ttl_hours": 24,
+        "max_authorized_probe_orders_per_candidate": 2,
+        "operator_id": "profit-first-fast-demo-loop",
+        "promotion_evidence": false,
+        "risk_cap_lineage": {
+          "account_equity_usdt": 9544.67467679,
+          "bounded_probe_local_cap_usdt_is_authority": false,
+          "cap_source": "standing_demo_loss_control_envelope_review.gui_risk_config_plus_demo_equity",
+          "local_10_usdt_cap_is_global_risk_authority": false,
+          "per_trade_risk_pct_display": 10.0,
+          "per_trade_risk_pct_fraction": 0.1,
+          "position_size_max_pct": 25.0,
+          "resolved_cap_usdt": 954.46746768,
+          "risk_source_of_truth": "GUI-backed Rust RiskConfig",
+          "rounded_notional_usdt": null,
+          "single_position_budget_usdt": 2386.1686692,
+          "valid": true
+        },
+        "runtime_authority_granted": false,
+        "safe": true,
+        "schema_valid": true,
+        "scope": "demo_api_only_bounded_probe",
+        "scope_valid": true,
+        "standing_authorization_id": "standing-demo-loss-control-20260708T121230Z-e3c77d8c6fa9",
+        "status": "STANDING_DEMO_AUTHORIZATION_ACTIVE",
+        "status_active": true,
+        "valid_for_candidate_scoped_authorization": true
+      },
+      "name": "standing_demo_authorization_valid_for_candidate_scope",
+      "next_actions": [
+        "supply_fresh_candidate_scoped_standing_demo_authorization_or_remove_invalid_envelope"
+      ],
+      "passed": true,
+      "reason": "supplied standing Demo authorization must be valid for the candidate-scoped bounded authorization review",
+      "status": "VALID"
+    },
+    {
+      "evidence": {
+        "expected_cap_usdt": 954.46746768,
+        "placement_cap_source": "standing_demo_loss_control_envelope_review.gui_risk_config_plus_demo_equity",
+        "placement_cap_usdt": 954.46746768,
+        "placement_local_10_usdt_cap_is_global_risk_authority": false,
+        "placement_matches_expected_cap": true,
+        "placement_risk_source_of_truth": "GUI-backed Rust RiskConfig",
+        "preflight_cap_source": "standing_demo_loss_control_envelope_review.gui_risk_config_plus_demo_equity",
+        "preflight_cap_usdt": 954.46746768,
+        "preflight_local_10_usdt_cap_is_global_risk_authority": false,
+        "preflight_matches_expected_cap": true,
+        "preflight_risk_source_of_truth": "GUI-backed Rust RiskConfig",
+        "source_valid": true,
+        "standing_cap_usdt": 954.46746768,
+        "standing_input_supplied": true,
+        "valid": true
+      },
+      "name": "gui_risk_notional_limit_valid",
+      "next_actions": [
+        "refresh_preflight_and_placement_with_gui_risk_cap_lineage"
+      ],
+      "passed": true,
+      "reason": "preflight and placement per-order notional caps must match GUI-backed Rust RiskConfig cap lineage; a local 10 USDT diagnostic cap is not authorization-grade risk control",
+      "status": "VALID"
+    },
+    {
+      "evidence": {
+        "candidate": {
+          "outcome_horizon_minutes": 60,
+          "side": "Buy",
+          "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+          "strategy_name": "ma_crossover",
+          "symbol": "NEARUSDT"
+        },
+        "cap_source": "standing_demo_loss_control_envelope_review.gui_risk_config_plus_demo_equity",
+        "local_10_usdt_cap_is_global_risk_authority": false,
+        "max_demo_notional_usdt_per_order": 954.46746768,
+        "max_fresh_bbo_age_ms": 1000,
+        "max_initial_passive_gap_bps": 75.0,
+        "max_probe_intents_before_review": 2,
+        "order_mode": "post_only_near_touch_or_skip",
+        "per_trade_risk_pct_display": 10.0,
+        "per_trade_risk_pct_fraction": 0.1,
+        "ready_for_operator_authorization": true,
+        "reason": "first_candidate_attempt_requires_review_only_near_touch_or_skip_probe_placement",
+        "risk_source_of_truth": "GUI-backed Rust RiskConfig",
+        "status": "PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW"
+      },
+      "name": "placement_repair_plan_ready",
+      "next_actions": [
+        "refresh_bounded_probe_placement_repair_plan"
+      ],
+      "passed": true,
+      "reason": "placement repair plan must be fresh and near-touch-or-skip ready",
+      "status": "PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW"
+    },
+    {
+      "evidence": {
+        "candidate": {
+          "outcome_horizon_minutes": 60,
+          "side": "Buy",
+          "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+          "strategy_name": "ma_crossover",
+          "symbol": "NEARUSDT"
+        },
+        "ready_for_operator_authorization": true,
+        "reason": "source_contains_required_near_touch_authority_adapter_and_evidence_hooks",
+        "rust_authority_path_wiring_present": true,
+        "rust_near_touch_authority_adapter_present": true,
+        "status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW"
+      },
+      "name": "authority_path_patch_readiness_ready",
+      "next_actions": [
+        "refresh_bounded_probe_authority_patch_readiness"
+      ],
+      "passed": true,
+      "reason": "source readiness must confirm near-touch Adapter and authority-path wiring",
+      "status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW"
+    },
+    {
+      "evidence": {
+        "placement_candidate": {
+          "outcome_horizon_minutes": 60,
+          "side": "Buy",
+          "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+          "strategy_name": "ma_crossover",
+          "symbol": "NEARUSDT"
+        },
+        "preflight_candidate": {
+          "outcome_horizon_minutes": 60,
+          "side": "Buy",
+          "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+          "strategy_name": "ma_crossover",
+          "symbol": "NEARUSDT"
+        },
+        "readiness_candidate": {
+          "outcome_horizon_minutes": 60,
+          "side": "Buy",
+          "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+          "strategy_name": "ma_crossover",
+          "symbol": "NEARUSDT"
+        }
+      },
+      "name": "candidate_alignment",
+      "next_actions": [
+        "regenerate_artifacts_for_one_matching_side_cell"
+      ],
+      "passed": true,
+      "reason": "preflight, placement plan, and source readiness must name the same side-cell/horizon",
+      "status": "ALIGNED"
+    },
+    {
+      "evidence": {},
+      "name": "authorization_id_present",
+      "next_actions": [
+        "set_authorization_id_before_authorizing_probe"
+      ],
+      "passed": true,
+      "reason": "authorization requires a durable authorization id",
+      "status": "MISSING"
+    },
+    {
+      "evidence": {},
+      "name": "operator_id_present",
+      "next_actions": [
+        "set_operator_id_before_authorizing_probe"
+      ],
+      "passed": true,
+      "reason": "authorization requires a non-empty operator id",
+      "status": "PRESENT"
+    },
+    {
+      "evidence": {
+        "explicit_operator_id": "profit-first-fast-demo-loop",
+        "operator_id": "profit-first-fast-demo-loop",
+        "standing_operator_id": "profit-first-fast-demo-loop"
+      },
+      "name": "standing_demo_operator_matches",
+      "next_actions": [
+        "use_the_standing_demo_authorization_operator_id_or_reissue_authorization"
+      ],
+      "passed": true,
+      "reason": "explicit operator id must match the standing Demo authorization operator id",
+      "status": "MATCH"
+    },
+    {
+      "evidence": {
+        "requested_max_authorized_probe_orders": 0,
+        "source_candidate_max_probe_orders": 2
+      },
+      "name": "probe_budget_valid",
+      "next_actions": [
+        "set_max_authorized_probe_orders_lte_source_budget"
+      ],
+      "passed": true,
+      "reason": "authorized probe orders must be positive and no larger than the source plan budget",
+      "status": "MISSING_OR_EXCEEDS_SOURCE_LIMIT"
+    },
+    {
+      "evidence": {
+        "expires_at_utc": null,
+        "max_authorization_ttl_hours": 24
+      },
+      "name": "authorization_expiry_valid",
+      "next_actions": [
+        "set_short_future_expires_at_utc_before_authorization"
+      ],
+      "passed": true,
+      "reason": "authorization expiry must be future-dated and within the allowed TTL cap",
+      "status": "MISSING_OR_INVALID"
+    },
+    {
+      "evidence": {
+        "authorization_confirmation_source": null,
+        "standing_demo_authorization_valid": false,
+        "typed_confirm_expected": null,
+        "typed_confirm_matches": false,
+        "typed_confirm_provided": false,
+        "typed_confirm_readiness": "MISSING_AUTHORIZATION_FIELDS",
+        "typed_confirm_template": "authorize_bounded_demo_probe:ma_crossover|NEARUSDT|Buy:<max_authorized_probe_orders<=2>:<authorization_id>"
+      },
+      "name": "typed_confirm_matches",
+      "next_actions": [
+        "copy_exact_typed_confirm_or_supply_valid_standing_demo_authorization"
+      ],
+      "passed": true,
+      "reason": "authorization requires either the exact typed confirmation phrase or a fresh standing Demo-only authorization that still scopes the emitted object to one candidate",
+      "status": "MISSING_OR_MISMATCH"
+    }
+  ],
+  "generated_at_utc": "2026-07-08T12:15:55.521908+00:00",
+  "next_actions": [
+    "operator_may_authorize_bounded_demo_probe_with_exact_typed_confirm",
+    "do_not_edit_plan_or_enable_writer_until_authorization_artifact_is_reviewed"
+  ],
+  "operator_authorization": null,
+  "operator_id": "profit-first-fast-demo-loop",
+  "placement_repair_plan": {
+    "candidate": {
+      "outcome_horizon_minutes": 60,
+      "side": "Buy",
+      "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+      "strategy_name": "ma_crossover",
+      "symbol": "NEARUSDT"
+    },
+    "cap_source": "standing_demo_loss_control_envelope_review.gui_risk_config_plus_demo_equity",
+    "local_10_usdt_cap_is_global_risk_authority": false,
+    "max_demo_notional_usdt_per_order": 954.46746768,
+    "max_fresh_bbo_age_ms": 1000,
+    "max_initial_passive_gap_bps": 75.0,
+    "max_probe_intents_before_review": 2,
+    "order_mode": "post_only_near_touch_or_skip",
+    "per_trade_risk_pct_display": 10.0,
+    "per_trade_risk_pct_fraction": 0.1,
+    "ready_for_operator_authorization": true,
+    "reason": "first_candidate_attempt_requires_review_only_near_touch_or_skip_probe_placement",
+    "risk_source_of_truth": "GUI-backed Rust RiskConfig",
+    "status": "PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW"
+  },
+  "preflight": {
+    "candidate": {
+      "outcome_horizon_minutes": 60,
+      "side": "Buy",
+      "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+      "strategy_name": "ma_crossover",
+      "symbol": "NEARUSDT"
+    },
+    "cap_source": "standing_demo_loss_control_envelope_review.gui_risk_config_plus_demo_equity",
+    "local_10_usdt_cap_is_global_risk_authority": false,
+    "max_demo_notional_usdt_per_order": 954.46746768,
+    "max_probe_intents_before_review": 2,
+    "max_total_demo_notional_usdt_before_review": 1908.93493536,
+    "per_trade_risk_pct_display": 10.0,
+    "per_trade_risk_pct_fraction": 0.1,
+    "ready_for_operator_authorization": true,
+    "reason": "false_negative_candidate_ready_for_bounded_demo_probe_authorization_review",
+    "risk_source_of_truth": "GUI-backed Rust RiskConfig",
+    "schema_version": "cost_gate_false_negative_bounded_demo_probe_preflight_v1",
+    "status": "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+  },
+  "reason": "defer",
+  "requested_max_authorized_probe_orders": null,
+  "review_note": "E3 approved materialization prep only; keep operator authorization deferred pending BB-reviewed exchange-facing scope.",
+  "review_scope": "operator_authorization_artifact_only_not_plan_mutation",
+  "schema_version": "bounded_demo_probe_operator_authorization_packet_v1",
+  "source_candidate_max_probe_orders": 2,
+  "standing_demo_authorization": {
+    "authority_contamination": false,
+    "candidate_scope": {
+      "outcome_horizon_minutes": 60,
+      "side": "Buy",
+      "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+      "strategy_name": "ma_crossover",
+      "symbol": "NEARUSDT"
+    },
+    "candidate_scope_matches": true,
+    "candidate_scoping_required": true,
+    "cost_gate_lowering_recommended": false,
+    "demo_only": true,
+    "environment": "demo",
+    "environment_valid": true,
+    "expires_at_utc": "2026-07-09T00:12:30.886090+00:00",
+    "expiry_valid": true,
+    "live_authority_granted": false,
+    "max_authorization_ttl_hours": 24,
+    "max_authorized_probe_orders_per_candidate": 2,
+    "operator_id": "profit-first-fast-demo-loop",
+    "promotion_evidence": false,
+    "risk_cap_lineage": {
+      "account_equity_usdt": 9544.67467679,
+      "bounded_probe_local_cap_usdt_is_authority": false,
+      "cap_source": "standing_demo_loss_control_envelope_review.gui_risk_config_plus_demo_equity",
+      "local_10_usdt_cap_is_global_risk_authority": false,
+      "per_trade_risk_pct_display": 10.0,
+      "per_trade_risk_pct_fraction": 0.1,
+      "position_size_max_pct": 25.0,
+      "resolved_cap_usdt": 954.46746768,
+      "risk_source_of_truth": "GUI-backed Rust RiskConfig",
+      "rounded_notional_usdt": null,
+      "single_position_budget_usdt": 2386.1686692,
+      "valid": true
+    },
+    "runtime_authority_granted": false,
+    "safe": true,
+    "schema_valid": true,
+    "scope": "demo_api_only_bounded_probe",
+    "scope_valid": true,
+    "standing_authorization_id": "standing-demo-loss-control-20260708T121230Z-e3c77d8c6fa9",
+    "status": "STANDING_DEMO_AUTHORIZATION_ACTIVE",
+    "status_active": true,
+    "valid_for_candidate_scoped_authorization": true
+  },
+  "status": "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW",
+  "typed_confirm_expected": null,
+  "typed_confirm_matches": false,
+  "typed_confirm_provided": false,
+  "typed_confirm_readiness": "MISSING_AUTHORIZATION_FIELDS",
+  "typed_confirm_template": "authorize_bounded_demo_probe:ma_crossover|NEARUSDT|Buy:<max_authorized_probe_orders<=2>:<authorization_id>"
+}

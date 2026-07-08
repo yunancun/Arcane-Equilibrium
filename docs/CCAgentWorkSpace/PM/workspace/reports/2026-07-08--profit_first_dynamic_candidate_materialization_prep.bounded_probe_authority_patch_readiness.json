@@ -1,0 +1,804 @@
+{
+  "active_caller_enablement_review": {
+    "active_caller_enablement_authority_granted": false,
+    "active_caller_source_ready_for_review": true,
+    "actual_active_caller_enablement_ready": false,
+    "blockers": [
+      "runtime_source_sync_not_verified",
+      "post_restart_pending_order_reconciliation_not_proven",
+      "runtime_adapter_enablement_not_performed_source_only_packet"
+    ],
+    "boundary": "source-only caller enablement review; this packet never enables the runtime adapter and never grants probe/order authority",
+    "evidence": {
+      "default_zero_cap_supplier_limit_matches": [],
+      "post_restart_pending_order_reconciliation_proven": false,
+      "production_active_caller_present": true,
+      "runtime_active_order_request_supplier_argument_present": true,
+      "runtime_active_order_request_supplier_contract_checks": {
+        "accepted_demo_equity_source_present": true,
+        "active_order_request_constructed_in_production": true,
+        "active_order_request_limits_constructed_in_production": true,
+        "candidate_bound_order_link_id_present": true,
+        "decision_lease_id_carried": true,
+        "default_zero_cap_not_used_as_supplier_limit": true,
+        "effective_single_order_cap_present": true,
+        "gui_percent_limit_fields_present": true,
+        "gui_riskconfig_source_present": true,
+        "hardcoded_local_10_usdt_cap_absent": true,
+        "supplier_argument_present": true
+      },
+      "runtime_active_order_request_supplier_contract_missing": [],
+      "runtime_active_order_request_supplier_present": true,
+      "runtime_adapter_enablement_gate_present": true,
+      "runtime_admission_record_call_sites": [
+        {
+          "active_order_dispatch_channel_arg": "self.order_dispatch_tx.clone()",
+          "active_order_request_arg": "active_order_request",
+          "active_order_request_arg_is_not_none": true,
+          "line": 1352,
+          "path": "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs"
+        }
+      ],
+      "runtime_gate_feeds_admission_scan": true,
+      "runtime_source_sync_verified": false,
+      "runtime_writer_default_adapter_disabled": false,
+      "source_seam_ready": true,
+      "suspicious_hardcoded_local_10_usdt_cap_matches": [],
+      "tick_dispatch_call_sites": [],
+      "writer_call_sites": [
+        {
+          "line": 35,
+          "path": "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
+          "symbol": "submit_candidate_matched_bounded_probe_order"
+        },
+        {
+          "line": 45,
+          "path": "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
+          "symbol": "active_bounded_probe_order_submission"
+        }
+      ]
+    },
+    "required_before_enablement": [
+      "source_reviewed_production_active_caller",
+      "reviewed_runtime_adapter_enablement_gate",
+      "runtime_active_order_request_supplier_with_gui_riskconfig_cap_lineage",
+      "fresh_e3_bb_exchange_facing_order_envelope_review",
+      "runtime_source_sync_and_readiness_probe",
+      "post_restart_pending_order_reconciliation_review",
+      "candidate_matched_result_and_execution_realism_review_after_probe"
+    ],
+    "status": "ACTIVE_CALLER_SOURCE_READY_FOR_E3_BB_REVIEW"
+  },
+  "active_order_submission_readiness": {
+    "active_order_submission_ready": true,
+    "blockers": [],
+    "boundary": "source scan only; this packet never grants active order authority",
+    "evidence": {
+      "adapter_enabled_hardcoded_false": false,
+      "dispatch_no_order_contract": false,
+      "file_presence": {
+        "rust/openclaw_engine/src/bounded_probe_near_touch.rs": true,
+        "rust/openclaw_engine/src/demo_learning_lane_writer.rs": true,
+        "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs": true
+      },
+      "missing_positive_active_evidence": [],
+      "near_touch_pure_no_order_contract": false,
+      "positive_active_evidence": {
+        "adapter_enabled_by_runtime_bounded_probe_gate": true,
+        "dispatch_forwards_admitted_bounded_probe_to_exchange": true,
+        "writer_submits_candidate_matched_probe_order": true
+      },
+      "runtime_writer_default_adapter_disabled": false,
+      "writer_no_order_contract": false
+    },
+    "required_before_order": [
+      "runtime_source_sync_and_clean_head_verification",
+      "post_restart_pending_order_reconciliation_review",
+      "fresh_e3_bb_exchange_facing_order_envelope_review",
+      "candidate_matched_attempt_fill_fee_slippage_lineage",
+      "guardian_decision_lease_rust_authority_path_preserved"
+    ],
+    "status": "ACTIVE_ORDER_SUBMISSION_WIRING_PRESENT"
+  },
+  "answers": {
+    "active_caller_enablement_authority_granted": false,
+    "active_caller_enablement_ready": false,
+    "active_caller_source_ready_for_review": true,
+    "active_caller_source_ready_for_review_is_order_authority": false,
+    "active_order_submission_authority_granted": false,
+    "active_order_submission_ready": true,
+    "active_order_submission_ready_is_order_authority": false,
+    "active_runtime_order_authority": false,
+    "active_runtime_probe_authority": false,
+    "actual_runtime_admission_enablement_ready": false,
+    "adapter_enabled_by_this_packet": false,
+    "adapter_enablement_performed": false,
+    "allowed_to_submit_order": false,
+    "allowed_to_submit_order_in_current_review": false,
+    "api_call_performed": false,
+    "auth_mutation_performed": false,
+    "bybit_call_performed": false,
+    "bybit_private_call_performed": false,
+    "bybit_public_market_data_call_performed": false,
+    "canonical_plan_mutation_performed": false,
+    "crontab_edit_performed": false,
+    "crontab_mutation_performed": false,
+    "exchange_facing_order_authority_granted": false,
+    "existing_authority_seams_present": true,
+    "global_cost_gate_lowering_recommended": false,
+    "ledger_append_performed": false,
+    "live_authority_granted": false,
+    "live_execution_allowed": false,
+    "main_cost_gate_adjustment": "NONE",
+    "order_authority_granted": false,
+    "order_cancel_modify_performed": false,
+    "order_submission_performed": false,
+    "pg_query_performed": false,
+    "pg_write_performed": false,
+    "placement_repair_plan_ready": true,
+    "plan_mutation_performed": false,
+    "post_restart_pending_order_reconciliation_proven": false,
+    "probe_authority_granted": false,
+    "promotion_evidence": false,
+    "promotion_proof": false,
+    "risk_mutation_performed": false,
+    "runtime_adapter_enablement_performed": false,
+    "runtime_admission_propagation_ready_for_e3_bb_review": true,
+    "runtime_config_mutation_performed": false,
+    "runtime_env_mutation_performed": false,
+    "runtime_mutation_performed": false,
+    "runtime_order_authority_found": false,
+    "runtime_probe_authority_found": false,
+    "runtime_source_sync_verified": false,
+    "rust_active_order_submission_wiring_present": true,
+    "rust_authority_path_wiring_present": true,
+    "rust_near_touch_authority_adapter_present": true,
+    "rust_patch_required": false,
+    "rust_writer_enabled": false,
+    "service_mutation_performed": false,
+    "service_restart_performed": false,
+    "source_ready_sufficient_for_e3_bb_enablement_review": true,
+    "source_scan_complete": true,
+    "writer_enabled": false,
+    "writer_enablement_performed": false
+  },
+  "boundary": "artifact-only bounded Demo probe source-readiness scan; no PG query/write, Bybit call, order, config, risk, auth, runtime mutation, Cost Gate lowering, probe authority, order authority, or promotion proof",
+  "generated_at_utc": "2026-07-08T12:15:32.394141+00:00",
+  "next_actions": [
+    "PM_E3_BB_runtime_source_admission_propagation_review_before_any_runtime_enablement",
+    "separate_runtime_source_sync_and_post_restart_reconciliation_before_any_adapter_enablement",
+    "separate_exchange_facing_order_envelope_review_before_any_demo_order"
+  ],
+  "placement_repair_plan": {
+    "artifact": {
+      "age_seconds": 8.219406,
+      "generated_at_utc": "2026-07-08T12:15:24.174735+00:00",
+      "max_age_seconds": 86400,
+      "present": true,
+      "schema_version": "bounded_demo_probe_placement_repair_plan_v1",
+      "status": "FRESH"
+    },
+    "authority_preserved": true,
+    "candidate": {
+      "outcome_horizon_minutes": 60,
+      "side": "Buy",
+      "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+      "strategy_name": "ma_crossover",
+      "symbol": "NEARUSDT"
+    },
+    "max_demo_notional_usdt_per_order": 954.46746768,
+    "max_fresh_bbo_age_ms": 1000,
+    "max_initial_passive_gap_bps": 75.0,
+    "max_probe_intents_before_review": 2,
+    "order_mode": "post_only_near_touch_or_skip",
+    "post_order_evidence": [
+      "demo_order_intent_and_order_state_rows",
+      "demo_order_to_fill_gap_audit_after_probe",
+      "fill_fee_slippage_rows_after_fill",
+      "bounded_probe_result_review",
+      "matched_blocked_signal_control_outcomes",
+      "bounded_probe_execution_realism_review_if_edge_under_captured"
+    ],
+    "ready_for_source_patch_review": true,
+    "reason": "first_candidate_attempt_requires_review_only_near_touch_or_skip_probe_placement",
+    "skip_record_type": "bounded_probe_touchability_block",
+    "status": "PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW"
+  },
+  "profitability_improvement_lanes": [
+    {
+      "current_candidate": "ma_crossover|NEARUSDT|Buy",
+      "lane": "execution_realism_first",
+      "machine_gate": "candidate_matched_fill_fee_slippage_lineage_recorded",
+      "next_engineering_module": "bounded_demo_probe_near_touch_authority_adapter",
+      "objective": "convert selected Cost Gate-blocked side-cell signals into touchable maker Demo attempts before changing Cost Gate thresholds",
+      "why_it_can_improve_profitability": "Current evidence shows orders but no fills; without touchable attempts the system cannot learn fee, slippage, queue, or edge capture."
+    },
+    {
+      "current_candidate": "ma_crossover|NEARUSDT|Buy",
+      "lane": "edge_amplification_by_side_cell_horizon",
+      "machine_gate": "matched_blocked_controls_positive_and_independent",
+      "next_engineering_module": "multi_horizon_blocked_signal_control_loop",
+      "objective": "specialize probes to ranked strategy/symbol/side/horizon cells instead of lowering the global Cost Gate",
+      "why_it_can_improve_profitability": "It concentrates risk budget on blocked cells with observed net-cost cushion and avoids spending Demo budget on robust negative cells."
+    },
+    {
+      "current_gap": [],
+      "lane": "autonomous_learning_feedback",
+      "machine_gate": "probe_edge_capture_ratio_and_matched_control_pass",
+      "next_engineering_module": "bounded_probe_result_and_execution_realism_review",
+      "objective": "feed bounded probe results back into result-review and execution-realism review before any parameter or Cost Gate change",
+      "why_it_can_improve_profitability": "It separates alpha existence from realized edge capture, preventing positive-looking signals from being promoted when execution loses the edge."
+    }
+  ],
+  "reason": "source_contains_required_near_touch_authority_adapter_and_evidence_hooks",
+  "runtime_admission_propagation_review": {
+    "answers": {
+      "active_caller_source_ready_for_review_is_order_authority": false,
+      "active_order_submission_ready_is_order_authority": false,
+      "active_runtime_order_authority": false,
+      "active_runtime_probe_authority": false,
+      "actual_runtime_admission_enablement_ready": false,
+      "adapter_enabled_by_this_packet": false,
+      "adapter_enablement_performed": false,
+      "allowed_to_submit_order": false,
+      "allowed_to_submit_order_in_current_review": false,
+      "api_call_performed": false,
+      "auth_mutation_performed": false,
+      "bybit_call_performed": false,
+      "bybit_private_call_performed": false,
+      "bybit_public_market_data_call_performed": false,
+      "canonical_plan_mutation_performed": false,
+      "crontab_edit_performed": false,
+      "crontab_mutation_performed": false,
+      "exchange_facing_order_authority_granted": false,
+      "global_cost_gate_lowering_recommended": false,
+      "ledger_append_performed": false,
+      "live_authority_granted": false,
+      "live_execution_allowed": false,
+      "main_cost_gate_adjustment": "NONE",
+      "order_authority_granted": false,
+      "order_cancel_modify_performed": false,
+      "order_submission_performed": false,
+      "pg_query_performed": false,
+      "pg_write_performed": false,
+      "plan_mutation_performed": false,
+      "post_restart_pending_order_reconciliation_proven": false,
+      "probe_authority_granted": false,
+      "promotion_evidence": false,
+      "promotion_proof": false,
+      "risk_mutation_performed": false,
+      "runtime_adapter_enablement_performed": false,
+      "runtime_admission_propagation_ready_for_e3_bb_review": true,
+      "runtime_config_mutation_performed": false,
+      "runtime_env_mutation_performed": false,
+      "runtime_mutation_performed": false,
+      "runtime_order_authority_found": false,
+      "runtime_probe_authority_found": false,
+      "runtime_source_sync_verified": false,
+      "rust_writer_enabled": false,
+      "service_mutation_performed": false,
+      "service_restart_performed": false,
+      "source_ready_sufficient_for_e3_bb_enablement_review": true,
+      "writer_enabled": false,
+      "writer_enablement_performed": false
+    },
+    "blockers": [
+      "runtime_source_sync_not_verified",
+      "post_restart_pending_order_reconciliation_not_proven",
+      "runtime_adapter_enablement_not_performed_source_only_packet"
+    ],
+    "boundary": "source-only runtime/admission propagation review; source readiness is not adapter enablement, probe authority, order authority, or runtime/exchange authorization",
+    "evidence": {
+      "active_caller_source_ready_for_review": true,
+      "active_caller_source_ready_for_review_is_order_authority": false,
+      "active_order_submission_ready": true,
+      "active_order_submission_ready_is_order_authority": false,
+      "active_runtime_order_authority": false,
+      "active_runtime_probe_authority": false,
+      "actual_runtime_admission_enablement_ready": false,
+      "adapter_enabled_by_this_packet": false,
+      "adapter_enablement_performed": false,
+      "allowed_to_submit_order": false,
+      "allowed_to_submit_order_in_current_review": false,
+      "api_call_performed": false,
+      "auth_mutation_performed": false,
+      "bybit_call_performed": false,
+      "bybit_private_call_performed": false,
+      "bybit_public_market_data_call_performed": false,
+      "canonical_plan_mutation_performed": false,
+      "crontab_edit_performed": false,
+      "crontab_mutation_performed": false,
+      "exchange_facing_order_authority_granted": false,
+      "global_cost_gate_lowering_recommended": false,
+      "ledger_append_performed": false,
+      "live_authority_granted": false,
+      "live_execution_allowed": false,
+      "main_cost_gate_adjustment": "NONE",
+      "order_authority_granted": false,
+      "order_cancel_modify_performed": false,
+      "order_submission_performed": false,
+      "pg_query_performed": false,
+      "pg_write_performed": false,
+      "plan_mutation_performed": false,
+      "post_restart_pending_order_reconciliation_proven": false,
+      "probe_authority_granted": false,
+      "promotion_evidence": false,
+      "promotion_proof": false,
+      "risk_mutation_performed": false,
+      "runtime_adapter_enablement_performed": false,
+      "runtime_config_mutation_performed": false,
+      "runtime_env_mutation_performed": false,
+      "runtime_mutation_performed": false,
+      "runtime_order_authority_found": false,
+      "runtime_probe_authority_found": false,
+      "runtime_source_sync_verified": false,
+      "rust_writer_enabled": false,
+      "service_mutation_performed": false,
+      "service_restart_performed": false,
+      "writer_enabled": false,
+      "writer_enablement_performed": false
+    },
+    "max_safe_next_action": "PM_E3_BB_runtime_source_admission_propagation_review_only",
+    "required_before_runtime_enablement": [
+      "PM_E3_BB_runtime_source_admission_propagation_review_before_any_runtime_enablement",
+      "runtime_source_sync_and_clean_head_verification",
+      "post_restart_pending_order_reconciliation_review",
+      "reviewed_runtime_adapter_enablement_gate",
+      "fresh_candidate_scoped_authorization_and_admission",
+      "separate_exchange_facing_order_envelope_review_before_any_demo_order"
+    ],
+    "runtime_admission_propagation_ready_for_e3_bb_review": true,
+    "source_ready_sufficient_for_e3_bb_enablement_review": true,
+    "status": "RUNTIME_ADMISSION_PROPAGATION_SOURCE_READY_FOR_E3_BB_REVIEW_NO_RUNTIME_AUTHORITY"
+  },
+  "schema_version": "bounded_demo_probe_authority_patch_readiness_v1",
+  "source_readiness": {
+    "adapter_module_present": true,
+    "authority_path_wiring_present": true,
+    "existing_authority_seams": [
+      {
+        "category": "existing_authority_seam",
+        "check_id": "demo_learning_lane_admission_policy",
+        "description": "Rust has a pure Cost Gate demo-learning admission Module that keeps main Cost Gate lowering disallowed.",
+        "evidence": [
+          {
+            "line": 638,
+            "path": "rust/openclaw_engine/src/demo_learning_lane.rs",
+            "pattern": "evaluate_probe_admission",
+            "snippet": "pub fn evaluate_probe_admission("
+          },
+          {
+            "line": 19,
+            "path": "rust/openclaw_engine/src/demo_learning_lane.rs",
+            "pattern": "ORDER_AUTHORITY_GRANTED",
+            "snippet": "pub const ORDER_AUTHORITY_GRANTED: &str =                              ;"
+          },
+          {
+            "line": 82,
+            "path": "rust/openclaw_engine/src/demo_learning_lane.rs",
+            "pattern": "main_cost_gate_adjustment",
+            "snippet": "pub main_cost_gate_adjustment: String,"
+          }
+        ],
+        "loaded_file_count": 1,
+        "missing_paths": [],
+        "missing_patterns": [],
+        "missing_reason": null,
+        "paths": [
+          "rust/openclaw_engine/src/demo_learning_lane.rs"
+        ],
+        "present": true,
+        "required_patterns": [
+          "evaluate_probe_admission",
+          "ORDER_AUTHORITY_GRANTED",
+          "main_cost_gate_adjustment"
+        ],
+        "scan_mode": "code_without_comments_or_strings"
+      },
+      {
+        "category": "existing_authority_seam",
+        "check_id": "eligible_reject_hot_path_capture",
+        "description": "Eligible Demo/LiveDemo Cost Gate rejects can be normalized into learning-lane RejectEvent rows.",
+        "evidence": [
+          {
+            "line": 12,
+            "path": "rust/openclaw_engine/src/demo_learning_lane_hot_path.rs",
+            "pattern": "exchange_gate_reject_event",
+            "snippet": "pub fn exchange_gate_reject_event("
+          },
+          {
+            "line": 8,
+            "path": "rust/openclaw_engine/src/demo_learning_lane_hot_path.rs",
+            "pattern": "ELIGIBLE_REJECT_REASON_CODE",
+            "snippet": "normalize_reject_reason_code, RejectEvent, ELIGIBLE_REJECT_REASON_CODE,"
+          }
+        ],
+        "loaded_file_count": 1,
+        "missing_paths": [],
+        "missing_patterns": [],
+        "missing_reason": null,
+        "paths": [
+          "rust/openclaw_engine/src/demo_learning_lane_hot_path.rs"
+        ],
+        "present": true,
+        "required_patterns": [
+          "exchange_gate_reject_event",
+          "ELIGIBLE_REJECT_REASON_CODE"
+        ],
+        "scan_mode": "code_without_comments_or_strings"
+      },
+      {
+        "category": "existing_authority_seam",
+        "check_id": "admission_ledger_writer",
+        "description": "The writer can persist admission and capture-error JSONL rows without submitting orders.",
+        "evidence": [
+          {
+            "line": 17,
+            "path": "rust/openclaw_engine/src/demo_learning_lane_ledger.rs",
+            "pattern": "ADMISSION_LEDGER_RECORD_TYPE",
+            "snippet": "pub const ADMISSION_LEDGER_RECORD_TYPE: &str =                           ;"
+          },
+          {
+            "line": 18,
+            "path": "rust/openclaw_engine/src/demo_learning_lane_ledger.rs",
+            "pattern": "CAPTURE_ERROR_LEDGER_RECORD_TYPE",
+            "snippet": "pub const CAPTURE_ERROR_LEDGER_RECORD_TYPE: &str =                      ;"
+          },
+          {
+            "line": 31,
+            "path": "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
+            "pattern": "build_admission_ledger_record_with_placement",
+            "snippet": "attempt_id_for_reject_event, build_admission_ledger_record_with_placement,"
+          },
+          {
+            "line": 32,
+            "path": "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
+            "pattern": "build_capture_error_ledger_record",
+            "snippet": "build_capture_error_ledger_record, AdmissionLedgerRecord,"
+          },
+          {
+            "line": 47,
+            "path": "rust/openclaw_engine/src/demo_learning_lane_ledger.rs",
+            "pattern": "allowed_to_submit_order",
+            "snippet": "pub allowed_to_submit_order: bool,"
+          }
+        ],
+        "loaded_file_count": 2,
+        "missing_paths": [],
+        "missing_patterns": [],
+        "missing_reason": null,
+        "paths": [
+          "rust/openclaw_engine/src/demo_learning_lane_writer.rs",
+          "rust/openclaw_engine/src/demo_learning_lane_ledger.rs"
+        ],
+        "present": true,
+        "required_patterns": [
+          "ADMISSION_LEDGER_RECORD_TYPE",
+          "CAPTURE_ERROR_LEDGER_RECORD_TYPE",
+          "build_admission_ledger_record_with_placement",
+          "build_capture_error_ledger_record",
+          "allowed_to_submit_order"
+        ],
+        "scan_mode": "code_without_comments_or_strings"
+      },
+      {
+        "category": "existing_authority_seam",
+        "check_id": "order_intent_limit_tif_surface",
+        "description": "OrderIntent already carries limit_price and TimeInForce, so a bounded Adapter can alter placement shape without inventing a new order object.",
+        "evidence": [
+          {
+            "line": null,
+            "path": null,
+            "pattern": "OrderIntent.limit_price",
+            "snippet": "structural check present"
+          },
+          {
+            "line": null,
+            "path": null,
+            "pattern": "OrderIntent.time_in_force",
+            "snippet": "structural check present"
+          },
+          {
+            "line": null,
+            "path": null,
+            "pattern": "TimeInForce.PostOnly",
+            "snippet": "structural check present"
+          }
+        ],
+        "loaded_file_count": 2,
+        "missing_paths": [],
+        "missing_patterns": [],
+        "missing_reason": null,
+        "paths": [
+          "rust/openclaw_engine/src/intent_processor/mod.rs",
+          "rust/openclaw_engine/src/order_manager.rs"
+        ],
+        "present": true,
+        "required_patterns": [
+          "OrderIntent.limit_price",
+          "OrderIntent.time_in_force",
+          "TimeInForce.PostOnly"
+        ],
+        "scan_mode": "code_without_comments_or_strings_structural"
+      },
+      {
+        "category": "existing_authority_seam",
+        "check_id": "dispatch_bbo_reference_surface",
+        "description": "Tick dispatch exposes best_bid/best_ask and reference price data near the exchange dispatch point.",
+        "evidence": [
+          {
+            "line": 109,
+            "path": "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs",
+            "pattern": "best_bid",
+            "snippet": "best_bid: Option<f64>,"
+          },
+          {
+            "line": 110,
+            "path": "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs",
+            "pattern": "best_ask",
+            "snippet": "best_ask: Option<f64>,"
+          },
+          {
+            "line": 107,
+            "path": "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs",
+            "pattern": "execution_reference",
+            "snippet": "fn execution_reference("
+          }
+        ],
+        "loaded_file_count": 1,
+        "missing_paths": [],
+        "missing_patterns": [],
+        "missing_reason": null,
+        "paths": [
+          "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs"
+        ],
+        "present": true,
+        "required_patterns": [
+          "best_bid",
+          "best_ask",
+          "execution_reference"
+        ],
+        "scan_mode": "code_without_comments_or_strings"
+      },
+      {
+        "category": "existing_authority_seam",
+        "check_id": "exchange_dispatch_limit_tif_forwarding",
+        "description": "Exchange dispatch already forwards order_type, limit_price, and TimeInForce to the downstream order request.",
+        "evidence": [
+          {
+            "line": 1186,
+            "path": "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs",
+            "pattern": "OrderDispatchRequest",
+            "snippet": "let send_result = tx.send(OrderDispatchRequest {"
+          },
+          {
+            "line": 1208,
+            "path": "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs",
+            "pattern": "limit_price: intent.limit_price",
+            "snippet": "limit_price: intent.limit_price,"
+          },
+          {
+            "line": 1209,
+            "path": "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs",
+            "pattern": "time_in_force: intent.time_in_force",
+            "snippet": "time_in_force: intent.time_in_force,"
+          }
+        ],
+        "loaded_file_count": 1,
+        "missing_paths": [],
+        "missing_patterns": [],
+        "missing_reason": null,
+        "paths": [
+          "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs"
+        ],
+        "present": true,
+        "required_patterns": [
+          "OrderDispatchRequest",
+          "limit_price: intent.limit_price",
+          "time_in_force: intent.time_in_force"
+        ],
+        "scan_mode": "code_without_comments_or_strings"
+      }
+    ],
+    "existing_authority_seams_present": true,
+    "missing_existing_seams": [],
+    "missing_required_patch_seams": [],
+    "repo_root": "/Users/ncyu/Projects/TradeBot/srv",
+    "required_patch_seams": [
+      {
+        "category": "adapter_module_seam",
+        "check_id": "bounded_probe_near_touch_adapter",
+        "description": "A pure Rust Adapter Module should apply the placement repair plan's post_only_near_touch_or_skip rule to the selected side-cell.",
+        "evidence": [
+          {
+            "line": 144,
+            "path": "rust/openclaw_engine/src/bounded_probe_near_touch.rs",
+            "pattern": "post_only_near_touch_or_skip",
+            "snippet": "pub fn post_only_near_touch_or_skip("
+          },
+          {
+            "line": 103,
+            "path": "rust/openclaw_engine/src/bounded_probe_near_touch.rs",
+            "pattern": "BoundedProbePlacementDecision",
+            "snippet": "pub enum BoundedProbePlacementDecision {"
+          }
+        ],
+        "loaded_file_count": 1,
+        "missing_paths": [],
+        "missing_patterns": [],
+        "missing_reason": null,
+        "paths": [
+          "rust/openclaw_engine/src/bounded_probe_near_touch.rs"
+        ],
+        "present": true,
+        "required_patterns": [
+          "post_only_near_touch_or_skip",
+          "BoundedProbePlacementDecision"
+        ],
+        "scan_mode": "code_without_comments_or_strings"
+      },
+      {
+        "category": "adapter_module_seam",
+        "check_id": "fresh_bbo_age_guard",
+        "description": "The Adapter should fail closed when the BBO snapshot is older than max_fresh_bbo_age_ms.",
+        "evidence": [
+          {
+            "line": 42,
+            "path": "rust/openclaw_engine/src/bounded_probe_near_touch.rs",
+            "pattern": "max_fresh_bbo_age_ms",
+            "snippet": "pub max_fresh_bbo_age_ms: u64,"
+          }
+        ],
+        "loaded_file_count": 1,
+        "missing_paths": [],
+        "missing_patterns": [],
+        "missing_reason": null,
+        "paths": [
+          "rust/openclaw_engine/src/bounded_probe_near_touch.rs"
+        ],
+        "present": true,
+        "required_patterns": [
+          "max_fresh_bbo_age_ms"
+        ],
+        "scan_mode": "code_without_comments_or_strings"
+      },
+      {
+        "category": "adapter_module_seam",
+        "check_id": "max_initial_gap_guard",
+        "description": "The Adapter should compute initial touch gap bps and skip when it exceeds max_initial_passive_gap_bps.",
+        "evidence": [
+          {
+            "line": 43,
+            "path": "rust/openclaw_engine/src/bounded_probe_near_touch.rs",
+            "pattern": "max_initial_passive_gap_bps",
+            "snippet": "pub max_initial_passive_gap_bps: f64,"
+          },
+          {
+            "line": 113,
+            "path": "rust/openclaw_engine/src/bounded_probe_near_touch.rs",
+            "pattern": "touch_gap_bps",
+            "snippet": "pub touch_gap_bps: f64,"
+          }
+        ],
+        "loaded_file_count": 1,
+        "missing_paths": [],
+        "missing_patterns": [],
+        "missing_reason": null,
+        "paths": [
+          "rust/openclaw_engine/src/bounded_probe_near_touch.rs"
+        ],
+        "present": true,
+        "required_patterns": [
+          "max_initial_passive_gap_bps",
+          "touch_gap_bps"
+        ],
+        "scan_mode": "code_without_comments_or_strings"
+      },
+      {
+        "category": "adapter_module_seam",
+        "check_id": "touchability_skip_record",
+        "description": "Skipped near-touch attempts should be recorded as bounded_probe_touchability_block rather than silently lost.",
+        "evidence": [
+          {
+            "line": 105,
+            "path": "rust/openclaw_engine/src/bounded_probe_near_touch.rs",
+            "pattern": "BoundedProbeTouchabilityBlock",
+            "snippet": "Skip(BoundedProbeTouchabilityBlock),"
+          },
+          {
+            "line": 110,
+            "path": "rust/openclaw_engine/src/bounded_probe_near_touch.rs",
+            "pattern": "record_type",
+            "snippet": "pub record_type: &'static str,"
+          }
+        ],
+        "loaded_file_count": 1,
+        "missing_paths": [],
+        "missing_patterns": [],
+        "missing_reason": null,
+        "paths": [
+          "rust/openclaw_engine/src/bounded_probe_near_touch.rs"
+        ],
+        "present": true,
+        "required_patterns": [
+          "BoundedProbeTouchabilityBlock",
+          "record_type"
+        ],
+        "scan_mode": "code_without_comments_or_strings"
+      },
+      {
+        "category": "adapter_module_seam",
+        "check_id": "candidate_matched_attempt_lineage",
+        "description": "The Adapter output should name bounded_probe_attempt rows and carry side_cell_key lineage for later fill/fee/slippage review.",
+        "evidence": [
+          {
+            "line": 104,
+            "path": "rust/openclaw_engine/src/bounded_probe_near_touch.rs",
+            "pattern": "BoundedProbeAttemptPlacement",
+            "snippet": "Submit(BoundedProbeAttemptPlacement),"
+          },
+          {
+            "line": 62,
+            "path": "rust/openclaw_engine/src/bounded_probe_near_touch.rs",
+            "pattern": "side_cell_key",
+            "snippet": "pub side_cell_key: String,"
+          }
+        ],
+        "loaded_file_count": 1,
+        "missing_paths": [],
+        "missing_patterns": [],
+        "missing_reason": null,
+        "paths": [
+          "rust/openclaw_engine/src/bounded_probe_near_touch.rs"
+        ],
+        "present": true,
+        "required_patterns": [
+          "BoundedProbeAttemptPlacement",
+          "side_cell_key"
+        ],
+        "scan_mode": "code_without_comments_or_strings"
+      },
+      {
+        "category": "authority_path_wiring_seam",
+        "check_id": "authority_path_wiring",
+        "description": "The tick/exchange authority path should call the Adapter before any future bounded probe order is submitted.",
+        "evidence": [
+          {
+            "line": 134,
+            "path": "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs",
+            "pattern": "post_only_near_touch_from_optional_bbo_or_skip",
+            "snippet": "crate::bounded_probe_near_touch::post_only_near_touch_from_optional_bbo_or_skip("
+          },
+          {
+            "line": 135,
+            "path": "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs",
+            "pattern": "BoundedProbeOptionalBboPlacementRequest",
+            "snippet": "&crate::bounded_probe_near_touch::BoundedProbeOptionalBboPlacementRequest {"
+          },
+          {
+            "line": 43,
+            "path": "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs",
+            "pattern": "BOUNDED_PROBE_ATTEMPT_RECORD_TYPE",
+            "snippet": "const BOUNDED_PROBE_ATTEMPT_RECORD_TYPE: &str =                        ;"
+          }
+        ],
+        "loaded_file_count": 1,
+        "missing_paths": [],
+        "missing_patterns": [],
+        "missing_reason": null,
+        "paths": [
+          "rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs"
+        ],
+        "present": true,
+        "required_patterns": [
+          "post_only_near_touch_from_optional_bbo_or_skip",
+          "BoundedProbeOptionalBboPlacementRequest",
+          "BOUNDED_PROBE_ATTEMPT_RECORD_TYPE"
+        ],
+        "scan_mode": "code_without_comments_or_strings"
+      }
+    ],
+    "required_patch_seams_present": true
+  },
+  "status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW"
+}

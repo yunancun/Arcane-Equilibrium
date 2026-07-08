@@ -1,0 +1,36 @@
+{
+  "schema_version": "profit_first_ai_ml_resolution_loop_effect_review_v1",
+  "generated_at_utc": "2026-07-08T12:31:00Z",
+  "status": "READY_FOR_BOUNDED_DEMO_FINAL_WINDOW",
+  "actual_effects": [
+    {
+      "type": "review_gate_passed",
+      "agent": "BB",
+      "verdict": "APPROVE_FOR_BOUNDED_DEMO_FINAL_WINDOW_PREP"
+    },
+    {
+      "type": "source_artifact_checkpoint",
+      "summary": "recorded BB report, PM final-window-ready report, state packet, effect review, operator summary, TODO, and changelog"
+    }
+  ],
+  "forbidden_effects_observed": {
+    "bybit_public_or_private_call": false,
+    "decision_lease_acquire_or_release": false,
+    "order_probe_cancel_or_modify": false,
+    "bounded_demo_final_window": false,
+    "operator_authorization_authorize": false,
+    "runtime_adapter_enablement": false,
+    "service_restart_or_build": false,
+    "db_write_or_migration": false,
+    "cost_gate_lowering": false,
+    "live_or_mainnet": false,
+    "proof_or_promotion_claim": false
+  },
+  "authority_result": {
+    "ready_for_bounded_demo_final_window": true,
+    "same_window_final_gate_still_required": true,
+    "bounded_demo_probe_authorized": false,
+    "order_authority_granted": false,
+    "probe_authority_granted": false
+  }
+}

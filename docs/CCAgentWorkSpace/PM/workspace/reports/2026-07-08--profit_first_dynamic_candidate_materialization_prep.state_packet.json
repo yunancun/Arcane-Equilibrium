@@ -1,0 +1,84 @@
+{
+  "schema_version": "profit_first_ai_ml_resolution_loop_state_packet_v1",
+  "packet_id": "profit_first_dynamic_candidate_materialization_prep_20260708",
+  "generated_at_utc": "2026-07-08T12:18:14Z",
+  "status": "READY_FOR_BB_DISPATCH",
+  "branch": "RUNTIME_GATE_PREP",
+  "candidate_policy": {
+    "candidate_selection_dynamic_not_fixed": true,
+    "latest_selection_rechecked_before_runtime_write": true,
+    "selection_sources_before_bb": [
+      "latest runtime false_negative_candidate_packet_latest.json",
+      "latest runtime autonomous_parameter_proposal_latest.json"
+    ],
+    "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy",
+    "rotated": false
+  },
+  "source_runtime_binding": {
+    "source_head": "da1a04ecac9e2de86a47a700b76e183509995362",
+    "origin_main": "da1a04ecac9e2de86a47a700b76e183509995362",
+    "linux_head": "da1a04ecac9e2de86a47a700b76e183509995362",
+    "linux_origin_main": "da1a04ecac9e2de86a47a700b76e183509995362",
+    "linux_worktree_clean": true
+  },
+  "e3_review": {
+    "path": "docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-08--profit_first_dynamic_candidate_gate_refresh_e3_review.md",
+    "verdict": "APPROVE_FOR_PM_MATERIALIZATION_PREP"
+  },
+  "runtime_materialization": {
+    "target_path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/standing_demo_operator_authorization.json",
+    "old_sha256": "eabf2dab8ddbe9c680a4b047d7a338d5d34a30a28a36134ab820e83a1b174197",
+    "new_sha256": "05fe07f5ad4f92c459c4c6f67bfe534a04b0ea4b4e8f2d8aa43879d87009152f",
+    "mode": "600",
+    "candidate": "ma_crossover|NEARUSDT|Buy",
+    "expires_at_utc": "2026-07-09T00:12:30.886090+00:00",
+    "order_authority_granted": false,
+    "probe_authority_granted": false,
+    "bounded_demo_probe_authorized": false
+  },
+  "no_order_refresh_latest": {
+    "standing_demo_loss_control_envelope_review_latest": {
+      "sha256": "b921414ff408a1d4632d128107d4c92ab263a9867f9014103f4f88ad42e2b0f6",
+      "status": "STANDING_DEMO_LOSS_CONTROL_ENVELOPE_REVIEW_READY_NO_RUNTIME_MUTATION"
+    },
+    "false_negative_operator_review_latest": {
+      "sha256": "1cd8cd53845240ee58318326a3c27cd608a143086d0a2584526cb3ade5bd1c0d",
+      "status": "APPROVED_COST_GATE_FALSE_NEGATIVE_FOR_BOUNDED_DEMO_PROBE_PREFLIGHT"
+    },
+    "false_negative_bounded_probe_preflight_latest": {
+      "sha256": "6eb1d507c18f24cf1668af6bdcf6457f3114c9dd7a345b25c66d18fb94eda36e",
+      "status": "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+    },
+    "bounded_probe_touchability_preflight_latest": {
+      "sha256": "e7d75123f4f0f582dfef9d105f07b83110751e6e1278a6dc255d91c264e23c69",
+      "status": "FIRST_ATTEMPT_TOUCHABILITY_BOOTSTRAP_REQUIRED"
+    },
+    "bounded_probe_placement_repair_plan_latest": {
+      "sha256": "50f6a6585e37e95a0ab12022faaed8352b3e7adb754bec2cd9cc2e8344c6a4d0",
+      "status": "PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW"
+    },
+    "bounded_probe_authority_patch_readiness_latest": {
+      "sha256": "f8c3e6ee1d559f2188505f8dbe67892f9fda85b31590e050de97545b3339a167",
+      "status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW"
+    },
+    "bounded_probe_operator_authorization_latest": {
+      "sha256": "0438247d3a696d420e8272bf16d549ead70403d773fc903d97639efc75f72bd4",
+      "status": "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW",
+      "decision": "defer"
+    }
+  },
+  "boundaries": {
+    "bybit_public_or_private_call": false,
+    "decision_lease": false,
+    "order_probe_cancel_modify": false,
+    "bounded_demo_final_window": false,
+    "bounded_probe_operator_authorization_authorize": false,
+    "runtime_adapter_enablement": false,
+    "service_restart_or_build": false,
+    "db_write_or_migration": false,
+    "cost_gate_lowered": false,
+    "live_or_mainnet": false,
+    "proof_or_promotion_claim": false
+  },
+  "next_required_state": "BB_EXACT_SCOPE_REVIEW"
+}

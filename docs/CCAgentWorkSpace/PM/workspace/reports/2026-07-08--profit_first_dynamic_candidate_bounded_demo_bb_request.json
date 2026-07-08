@@ -1,0 +1,120 @@
+{
+  "schema_version": "pm_to_bb_exact_scope_request_v1",
+  "request_id": "PM_BB_PROFIT_FIRST_DYNAMIC_CANDIDATE_BOUNDED_DEMO_FINAL_WINDOW_REVIEW_20260708",
+  "generated_at_utc": "2026-07-08T12:18:14Z",
+  "status": "READY_FOR_BB_DISPATCH",
+  "requesting_agent": "PM",
+  "target_agent": "BB",
+  "work_item": "P0-PROFIT-FIRST-DYNAMIC-CANDIDATE-BOUNDED-DEMO-FINAL-WINDOW-BB-REVIEW",
+  "candidate_policy": {
+    "candidate_selection_dynamic_not_fixed": true,
+    "bb_must_recheck_latest_candidate_before_approval": true,
+    "selected_side_cell_key_at_request_generation": "ma_crossover|NEARUSDT|Buy",
+    "if_latest_selection_differs": "ROTATED; do not approve this request; PM must regenerate candidate-aligned no-authority chain"
+  },
+  "candidate": {
+    "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+    "strategy_name": "ma_crossover",
+    "symbol": "NEARUSDT",
+    "side": "Buy",
+    "outcome_horizon_minutes": 60,
+    "avg_net_bps": 64.983,
+    "net_positive_pct": 100.0,
+    "outcome_count": 5058
+  },
+  "source_runtime_binding": {
+    "source_head": "da1a04ecac9e2de86a47a700b76e183509995362",
+    "origin_main": "da1a04ecac9e2de86a47a700b76e183509995362",
+    "linux_head": "da1a04ecac9e2de86a47a700b76e183509995362",
+    "linux_origin_main": "da1a04ecac9e2de86a47a700b76e183509995362",
+    "linux_worktree_clean": true
+  },
+  "e3_prerequisite": {
+    "report": "docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-08--profit_first_dynamic_candidate_gate_refresh_e3_review.md",
+    "verdict": "APPROVE_FOR_PM_MATERIALIZATION_PREP"
+  },
+  "runtime_inputs": {
+    "standing_demo_operator_authorization": {
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/standing_demo_operator_authorization.json",
+      "sha256": "05fe07f5ad4f92c459c4c6f67bfe534a04b0ea4b4e8f2d8aa43879d87009152f",
+      "candidate": "ma_crossover|NEARUSDT|Buy",
+      "expires_at_utc": "2026-07-09T00:12:30.886090+00:00",
+      "mode": "600",
+      "order_authority_granted": false,
+      "probe_authority_granted": false
+    },
+    "false_negative_candidate_packet_latest": {
+      "sha256": "1387ae73d65c7ba5f476a8b562e787089673d484528c2d132e4789de11af67ae"
+    },
+    "autonomous_parameter_proposal_latest": {
+      "sha256": "676f6c3ec91aae33542314fd435bb929fa5140feaf3c3c12fedd4a1b7b260282"
+    }
+  },
+  "no_order_readiness_artifacts": {
+    "false_negative_operator_review_latest": {
+      "sha256": "1cd8cd53845240ee58318326a3c27cd608a143086d0a2584526cb3ade5bd1c0d",
+      "status": "APPROVED_COST_GATE_FALSE_NEGATIVE_FOR_BOUNDED_DEMO_PROBE_PREFLIGHT"
+    },
+    "false_negative_bounded_probe_preflight_latest": {
+      "sha256": "6eb1d507c18f24cf1668af6bdcf6457f3114c9dd7a345b25c66d18fb94eda36e",
+      "status": "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+    },
+    "bounded_probe_touchability_preflight_latest": {
+      "sha256": "e7d75123f4f0f582dfef9d105f07b83110751e6e1278a6dc255d91c264e23c69",
+      "status": "FIRST_ATTEMPT_TOUCHABILITY_BOOTSTRAP_REQUIRED"
+    },
+    "bounded_probe_placement_repair_plan_latest": {
+      "sha256": "50f6a6585e37e95a0ab12022faaed8352b3e7adb754bec2cd9cc2e8344c6a4d0",
+      "status": "PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW"
+    },
+    "bounded_probe_authority_patch_readiness_latest": {
+      "sha256": "f8c3e6ee1d559f2188505f8dbe67892f9fda85b31590e050de97545b3339a167",
+      "status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW"
+    },
+    "bounded_probe_operator_authorization_latest": {
+      "sha256": "0438247d3a696d420e8272bf16d549ead70403d773fc903d97639efc75f72bd4",
+      "status": "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW",
+      "decision": "defer",
+      "operator_authorization_object_emitted": false
+    }
+  },
+  "requested_bb_review_scope": {
+    "allowed": [
+      "review Bybit/API/policy compatibility of a later same-window bounded Demo final gate",
+      "review NEARUSDT Demo market/order-shape constraints implied by post_only_near_touch_or_skip",
+      "review whether max 2 probe intents, max 954.46746768 USDT per order, post-only maker-side near-touch-or-skip, and skip-on-gap-greater-than-75bps are acceptable for a future Demo-only bounded probe",
+      "approve or reject proceeding to a separate same-window final gate request"
+    ],
+    "forbidden_in_this_bb_review": [
+      "new public Bybit market data call",
+      "new private Bybit call",
+      "Decision Lease acquire or release",
+      "order/probe/cancel/modify",
+      "bounded Demo final window execution",
+      "setting bounded-probe operator authorization decision to authorize",
+      "runtime adapter enablement",
+      "service restart or build",
+      "DB write or migration",
+      "Cost Gate lowering or global threshold mutation",
+      "live or mainnet action",
+      "proof or promotion claim"
+    ]
+  },
+  "future_final_window_constraints_if_bb_approves": [
+    "PM must recheck source/runtime heads, Linux cleanliness, latest candidate selection, all artifact sha256s, and standing auth freshness in the same invocation window",
+    "PM must open or produce the final-window gate before any Bybit public/private call, Decision Lease, order, or probe",
+    "any final-window exchange-facing action must preserve Guardian/Decision Lease/Rust authority path",
+    "order mode must be post_only_near_touch_or_skip",
+    "fresh BBO age must be <= 1000ms",
+    "skip and record touchability block if touch gap > 75bps",
+    "operator authorization must remain defer unless a later exact authorization scope approves otherwise",
+    "first-attempt bootstrap is not proof and cannot be promoted as PnL evidence"
+  ],
+  "rejection_to_work_item_mapping": {
+    "candidate_rotated": "ROTATED; regenerate dynamic candidate chain from latest machine-readable artifacts",
+    "bybit_policy_rejects_order_shape": "repair placement plan or reduce scope to non-exchange-facing review",
+    "risk_limits_too_broad": "tighten max notional/probe count and rerun E3/BB request",
+    "artifact_stale": "rerun no-order readiness chain and rebuild BB request",
+    "source_or_runtime_drift": "ROTATED; refetch/resync and regenerate request"
+  }
+}
