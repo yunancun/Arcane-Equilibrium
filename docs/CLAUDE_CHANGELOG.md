@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-08（TODO v756 same-window exact-scope request ready）
+> 最後更新：2026-07-08（TODO v757 same-window request hash refresh）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**TODO v757 same-window request hash refresh（2026-07-08）**：Before E3/BB dispatch, PM rechecked Linux runtime `_latest` and found hashes advanced while candidate/status/decision stayed aligned: `ma_crossover|NEARUSDT|Buy`, proposal avg net `64.983bps`, candidate packet `47e20d7f...`, proposal `92f7e0fc...`, standing auth unchanged `05fe07f5...`, operator review `a1940002...`, bounded preflight `c99bfbbc...`, touchability `0efac726...`, placement `a9616319...`, authority readiness `17d3b0e6...`, operator-auth readiness `7abf1233...` with `decision=defer`。PM refreshed exact same-window no-order request sha to `89eb2f59...` and kept scope unchanged: no-order Phase 0/A/B only, no Bybit public/private call before E3/BB approval, no order/probe/cancel/modify, no operator auth authorize, no runtime mutation, no DB write, no Cost Gate lowering, no live/mainnet, no proof/promotion。
 
 **TODO v756 same-window exact-scope request ready（2026-07-08）**：PM verified Mac/GitHub/Linux source alignment at `7cae899f...`, Linux clean, and current runtime hashes still candidate-aligned to `ma_crossover|NEARUSDT|Buy`：candidate `d4d4a37b...`, proposal `b21f4a40...`, standing auth `05fe07f5...`, operator review `80579cec...`, bounded preflight `bdd8988f...`, touchability `29ccfd57...`, placement `4e2b0a39...`, authority readiness `baa38ff5...`, operator-auth readiness `63f537fd...` with `decision=defer`。PM emitted exact E3/BB request `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_same_window_final_gate_exact_scope_request.json`, sha `49ced54a...`, plus manifest, for no-order same-window Phase 0/A/B only：local no-authority input refresh, exactly three Demo public market-data GETs for NEARUSDT, and one 5s `TRADE_ENTRY` Decision Lease acquire/release BBO window if E3 and BB both approve. Boundary remains no Bybit public/private call before approval、no order/probe/cancel/modify、no operator auth authorize、no standing auth mutation、no adapter/writer enablement、no service restart/build、no DB write/migration、no Cost Gate lowering、no live/mainnet、no proof/promotion。
 
