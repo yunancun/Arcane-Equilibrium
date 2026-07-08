@@ -31,6 +31,16 @@
     "pre_request_verified_alignment_commit": "c66338e8b733acb52fc44160b55fb8e34105ecd6",
     "request_must_be_consumed_from_committed_origin_main": true,
     "required_current_alignment": "Mac HEAD, Mac origin/main, GitHub main, Linux HEAD, and Linux origin/main must all match the committed checkpoint containing this request packet",
+    "allowed_diff_from_pre_request_alignment_commit": [
+      "TODO.md",
+      "docs/CLAUDE_CHANGELOG.md",
+      "docs/CCAgentWorkSpace/Operator/2026-07-08--profit_first_near_buy_order_capable_fresh_window_refresh_ready.md",
+      "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_order_capable_fresh_window_refresh_ready.effect_review.json",
+      "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_order_capable_fresh_window_refresh_ready.md",
+      "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_order_capable_fresh_window_refresh_ready.state_packet.json",
+      "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_order_capable_fresh_window_refresh_request.json",
+      "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_order_capable_fresh_window_refresh_request.manifest.json"
+    ],
     "required_linux_clean": true,
     "if_alignment_or_allowed_diff_check_fails": "ROTATED",
     "pre_request_checked_at_utc": "2026-07-08T22:54:50Z",

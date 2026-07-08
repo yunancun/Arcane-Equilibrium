@@ -6,7 +6,7 @@ Active blocker: `P0-CURRENT-CANDIDATE-ORDER-CAPABLE-DEMO-INVOKE-FRESH-WINDOW-RUN
 
 ## Current Machine Truth
 
-- Three-way source sync was completed first: Mac `HEAD`, Mac `origin/main`, GitHub `main`, Linux `HEAD`, and Linux `origin/main` all matched `c66338e8b733acb52fc44160b55fb8e34105ecd6`; Linux worktree was clean.
+- Three-way source sync was completed before artifact generation: Mac `HEAD`, Mac `origin/main`, GitHub `main`, Linux `HEAD`, and Linux `origin/main` all matched `c66338e8b733acb52fc44160b55fb8e34105ecd6`; Linux worktree was clean. The exact request allows only the subsequent docs/TODO checkpoint diff needed to commit this packet.
 - Current dynamic candidate remains `ma_crossover|NEARUSDT|Buy` from latest runtime artifacts, with `avg_net_bps=64.983` and current `outcome_count=5058`.
 - Runtime canonical soak plan was materialized under the approved plan-materialization scope:
   - canonical path: `/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_demo_probe_soak_plan.json`
@@ -37,8 +37,8 @@ PM generated a fresh current-head E3/BB exact-scope request:
 
 - Request: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_order_capable_fresh_window_refresh_request.json`
 - Manifest: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_order_capable_fresh_window_refresh_request.manifest.json`
-- Request sha256: `ac1aa607efa5de0cf6d3834de8a09dc7a74748dddd88af4600d3372aaf8afaac`
-- Manifest sha256: `dad9859e1b1511e5af682fb6e802c5aaaf09415e9a1fdc1e7397642a940a1108`
+- Request sha256: `e9e6c0fd511ec138db922b33e9e594426866156f1f85bda5eaf893d1ebe6f1b5`
+- Manifest sha256: `d67ad102611cde05fcd8e4fb40f90494733aaa546544927b9373a5c71dc4067a`
 
 Requested scope is no-order only: E3/BB may review whether PM can refresh a new same-window Phase A/B no-order window at current source/runtime head using exactly three Demo public market-data GETs plus one short `TRADE_ENTRY` no-order Decision Lease acquire/release. The request does not authorize order/probe/private endpoint use.
 
