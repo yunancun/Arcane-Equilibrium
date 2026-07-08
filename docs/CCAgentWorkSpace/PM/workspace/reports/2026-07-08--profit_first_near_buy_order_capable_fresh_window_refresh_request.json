@@ -1,0 +1,242 @@
+{
+  "schema_version": "current_candidate_same_window_final_gate_exact_scope_request_v1",
+  "request_id": "PM_E3_BB_PROFIT_FIRST_NEAR_BUY_ORDER_CAPABLE_STALE_NOORDER_WINDOW_REFRESH_20260708T225450Z",
+  "generated_at_utc": "2026-07-08T22:54:50Z",
+  "status": "READY_FOR_E3_BB_DISPATCH",
+  "requesting_agent": "PM",
+  "target_agents": [
+    "E3",
+    "BB"
+  ],
+  "work_item": "P0-CURRENT-CANDIDATE-ORDER-CAPABLE-DEMO-INVOKE-FRESH-WINDOW-RUN-GATE",
+  "terminal_target_if_approved_and_completed": "READY_FOR_BOUNDED_DEMO_FINAL_WINDOW",
+  "scope_summary": "Fresh current-head no-order Phase A/B refresh only, to replace stale renewed_active_bbo_execution_manifest input before rebuilding the order-capable Demo invocation review packet for ma_crossover|NEARUSDT|Buy. This request asks E3 and BB to approve or reject exactly three Demo public market-data GETs plus one short Demo TRADE_ENTRY Decision Lease acquire/release no-order BBO window. It does not request order/probe/cancel/modify authority.",
+  "candidate_policy": {
+    "candidate_selection_dynamic_not_fixed": true,
+    "selected_side_cell_key_at_request_generation": "ma_crossover|NEARUSDT|Buy",
+    "latest_selection_must_be_rechecked_before_consumption": true,
+    "if_latest_selection_differs": "ROTATED"
+  },
+  "candidate": {
+    "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+    "strategy_name": "ma_crossover",
+    "symbol": "NEARUSDT",
+    "side": "Buy",
+    "market": "Bybit Demo linear",
+    "outcome_horizon_minutes": 60,
+    "avg_net_bps": 64.983,
+    "current_runtime_outcome_count": 5058
+  },
+  "source_binding": {
+    "pre_request_verified_alignment_commit": "c66338e8b733acb52fc44160b55fb8e34105ecd6",
+    "request_must_be_consumed_from_committed_origin_main": true,
+    "required_current_alignment": "Mac HEAD, Mac origin/main, GitHub main, Linux HEAD, and Linux origin/main must all match the committed checkpoint containing this request packet",
+    "required_linux_clean": true,
+    "if_alignment_or_allowed_diff_check_fails": "ROTATED",
+    "pre_request_checked_at_utc": "2026-07-08T22:54:50Z",
+    "mac_dirty_files_excluded_from_evidence": [
+      "docs/CCAgentWorkSpace/E1a/memory.md",
+      "docs/CCAgentWorkSpace/E2/memory.md",
+      "docs/CCAgentWorkSpace/PA/memory.md",
+      "docs/architecture/singleton-registry.md",
+      "memory/MEMORY.md",
+      "program_code/exchange_connectors/bybit_connector/control_api_v1/app/auth.py",
+      "program_code/exchange_connectors/bybit_connector/control_api_v1/app/auth_legacy_routes.py",
+      "program_code/exchange_connectors/bybit_connector/control_api_v1/app/auth_routes_common.py",
+      "program_code/exchange_connectors/bybit_connector/control_api_v1/app/main_legacy.py",
+      "program_code/exchange_connectors/bybit_connector/control_api_v1/app/static/login.html",
+      "program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_batch_b_security_auth.py",
+      "program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_ops1_csp_report_only.py",
+      "program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_ops1_csrf_middleware.py",
+      "rust/openclaw_engine/src/ipc_server/handlers/mod.rs",
+      "rust/openclaw_engine/src/ipc_server/handlers/stock_etf.rs",
+      "rust/openclaw_engine/src/ipc_server/tests/stock_etf/foundation_status_fixtures.rs",
+      "memory/feedback_active_profit_unconventional_mandate.md",
+      "memory/project_2026_06_13_profit_diagnosis_searchspace_reconfirm.md",
+      "memory/project_2026_06_14_cold_audit.md",
+      "memory/project_2026_07_06_maker_first_nogo.md"
+    ]
+  },
+  "runtime_inputs_to_recheck_before_consumption": {
+    "false_negative_candidate_packet_latest": {
+      "runtime_path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/false_negative_candidate_packet_latest.json",
+      "sha256": "02c7eec6f3d30a46721326057251b654c59d53d1d378bc00edf6d15ff1048740",
+      "status": "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW",
+      "generated_at_utc": "2026-07-08T22:32:33.230407+00:00"
+    },
+    "autonomous_parameter_proposal_latest": {
+      "runtime_path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/autonomous_parameter_proposal_latest.json",
+      "sha256": "74535a9c323de86c3b3b006baeb52d1c311d90e61e6a3d6f470da5b90131041d",
+      "status": "REVIEWABLE_PARAMETER_PROPOSAL_READY",
+      "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+      "avg_net_bps": 64.983,
+      "generated_at_utc": "2026-07-08T22:32:33.367616+00:00"
+    },
+    "standing_demo_operator_authorization": {
+      "runtime_path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/standing_demo_operator_authorization.json",
+      "sha256": "05fe07f5ad4f92c459c4c6f67bfe534a04b0ea4b4e8f2d8aa43879d87009152f",
+      "status": "STANDING_DEMO_AUTHORIZATION_ACTIVE",
+      "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+      "expires_at_utc": "2026-07-09T00:12:30.886090+00:00",
+      "mode": "0600",
+      "order_authority_granted": false,
+      "probe_authority_granted": false,
+      "live_authority_granted": false,
+      "resolved_cap_usdt": 954.46746768,
+      "generated_at_utc": "2026-07-08T12:12:30.886090+00:00"
+    },
+    "bounded_demo_soak_plan_canonical": {
+      "runtime_path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_demo_probe_soak_plan.json",
+      "sha256": "a296365eb03086b1e28595cc793c333068f5fde750e994232ad8563e6e36d32a",
+      "status": "READY_FOR_DEMO_LEARNING_PROBE",
+      "generated_at_utc": "2026-07-08T19:01:23.727980+00:00",
+      "materialization_record_sha256": "a71b9fc42277e77414268ec052b34e32153a024fd8ffa8f058d6f5ddbc50e73a"
+    },
+    "active_order_wiring_contract": {
+      "runtime_path": "/tmp/openclaw_near_order_capable_after_plan_materialization_20260708T2250Z_c66338e8/outputs/bounded_probe_active_order_wiring_contract_ready.json",
+      "sha256": "cf2c9ff29d29f8f251759f2fc0cbd37b1c7a9ef63959956048e8d7ec1babc6e0",
+      "status": "ACTIVE_ORDER_WIRING_CONTRACT_READY_FOR_E3_BB_REVIEW",
+      "generated_at_utc": "2026-07-08T22:44:26.489764+00:00"
+    },
+    "strict_order_fill_scan": {
+      "runtime_path": "/tmp/openclaw_near_order_capable_after_plan_materialization_20260708T2250Z_c66338e8/outputs/current_candidate_order_fill_evidence_scan_strict.json",
+      "sha256": "ca4bf9cb4188bf8c31fba919cc49ca6d6fd426c521afd5d7a78444359ff3d88c",
+      "status": "NO_CANDIDATE_MATCHED_ACTUAL_ORDER_FILL_EVIDENCE",
+      "generated_at_utc": "2026-07-08T22:44:35.305648+00:00"
+    },
+    "blocked_order_capable_review_packet": {
+      "runtime_path": "/tmp/openclaw_near_order_capable_after_plan_materialization_20260708T2250Z_c66338e8/outputs/current_candidate_order_capable_demo_invoke_review_packet.json",
+      "sha256": "305774b2b1f0d3d3a3c4807e6f2739a47c395f0fb4c85b831e298f7a2081b40f",
+      "status": "CURRENT_CANDIDATE_ORDER_CAPABLE_DEMO_INVOKE_REVIEW_PACKET_BLOCKED_BY_LOSS_CONTROL",
+      "loss_control_blockers": [
+        "renewed_active_bbo_manifest_stale_for_review_packet"
+      ],
+      "generated_at_utc": "2026-07-08T22:44:58.163343+00:00"
+    },
+    "stale_renewed_active_bbo_execution_manifest": {
+      "runtime_path": "/home/ncyu/BybitOpenClaw/var/openclaw/profit_first_dynamic_candidate_same_window_final_gate_20260708T175744Z_08f7e957_noorder/renewed_active_bbo_execution_manifest.json",
+      "sha256": "17a3a426f31cbff6c0180dfdd239ea6b0ef2b132df486dfc76764825963cf321",
+      "schema_version": "renewed_active_bbo_execution_manifest_v1",
+      "candidate": "ma_crossover|NEARUSDT|Buy",
+      "generated_at_utc": "2026-07-08T18:03:59.591986+00:00",
+      "stale_for_current_review_packet": true,
+      "old_approval_bound_checkpoint": "08f7e9571f03a2dea7a0a20e0e8fe4e0d4c01d91"
+    }
+  },
+  "requested_review_decision": {
+    "e3": "Approve, reject, or block the exact current-head no-order same-window Phase A/B refresh after checking source/runtime/security boundaries.",
+    "bb": "Approve, reject, or block the exact current-head no-order same-window Phase A/B refresh after checking Bybit Demo public market-data endpoint, instrument/BBO, and exchange-facing policy boundaries.",
+    "requested_outcome_enum": [
+      "APPROVE_WITH_CONDITIONS",
+      "REJECT",
+      "BLOCKED_NEEDS_PM_REFRESH"
+    ]
+  },
+  "requested_scope_if_approved": {
+    "phase_0_pm_no_authority_inputs": {
+      "purpose": "Recheck current source/runtime/auth/candidate/hash state and prepare local no-authority inputs only.",
+      "exchange_endpoint_allowed": false,
+      "decision_lease_allowed": false,
+      "private_endpoint_allowed": false,
+      "order_or_probe_allowed": false,
+      "pg_write_allowed": false,
+      "runtime_mutation_allowed": false,
+      "service_restart_or_build_allowed": false
+    },
+    "phase_a_public_quote_and_downstream_no_order_refresh": {
+      "condition": "Only after E3 and BB approve this exact request and source/runtime/candidate/hash/auth rechecks still match.",
+      "endpoint_base_url": "https://api-demo.bybit.com",
+      "allowed_http_requests_exact": [
+        "GET /v5/market/time",
+        "GET /v5/market/tickers?category=linear&symbol=NEARUSDT",
+        "GET /v5/market/instruments-info?category=linear&symbol=NEARUSDT"
+      ],
+      "max_public_get_count": 3,
+      "auth_or_cookie_headers_allowed": false,
+      "redirects_allowed": false,
+      "private_or_order_endpoint_allowed": false,
+      "outputs_expected": [
+        "fresh quote/construction artifact",
+        "runtime admission handoff no-order artifact",
+        "bounded Demo admission review artifact",
+        "read-only governance snapshot",
+        "Guardian-adjusted sizing proposal",
+        "sizing-aware Decision Lease / Guardian gate artifact",
+        "actual-admission BBO lease-window dry-run artifact"
+      ],
+      "stop_if_any_output_not_ready": true
+    },
+    "phase_b_conditional_active_lease_bbo_no_order_window": {
+      "condition": "Only if Phase A outputs are fresh, dry-run is READY, source/runtime/authority blockers are empty, and both E3 and BB approve this exact request.",
+      "helper": "helper_scripts/research/cost_gate_learning_lane/current_candidate_actual_admission_bbo_lease_window.py",
+      "env_required": {
+        "OPENCLAW_CURRENT_CANDIDATE_ACTUAL_ADMISSION_BBO_LEASE_WINDOW": "1"
+      },
+      "cli_shape": [
+        "--run",
+        "--yes",
+        "--lease-ttl-seconds",
+        "5",
+        "--base-url",
+        "https://api-demo.bybit.com"
+      ],
+      "decision_lease_scope": "TRADE_ENTRY no-order validation window only",
+      "decision_lease_ttl_seconds_max": 5,
+      "decision_lease_must_be_released": true,
+      "post_run_governance_snapshot_required": true,
+      "runtime_admission_after_release_must_be_false": true,
+      "private_endpoint_allowed": false,
+      "order_submission_allowed": false,
+      "probe_submission_allowed": false,
+      "order_cancel_allowed": false,
+      "order_modify_allowed": false
+    },
+    "renewed_active_bbo_execution_manifest": {
+      "schema_version_required": "renewed_active_bbo_execution_manifest_v1",
+      "window_status_expected": "CURRENT_CANDIDATE_ACTUAL_ADMISSION_BBO_LEASE_WINDOW_DONE_NO_ORDER",
+      "e3_decision_required": "APPROVE_WITH_CONDITIONS",
+      "bb_decision_required": "APPROVE_WITH_CONDITIONS",
+      "candidate_required": "ma_crossover|NEARUSDT|Buy",
+      "phase_a_request_count_required": 3,
+      "phase_b_request_count_required": 3,
+      "post_governance_lease_count_required": 0,
+      "post_governance_lease_live_count_required": 0
+    }
+  },
+  "hard_forbidden_actions": [
+    "live_or_mainnet",
+    "Bybit private endpoint",
+    "Bybit order endpoint",
+    "order/probe/cancel/modify",
+    "operator authorization decision authorize",
+    "standing authorization materialization or mutation",
+    "runtime adapter/writer enablement",
+    "service restart or build",
+    "runtime env/config/crontab mutation",
+    "DB write or migration",
+    "Postgres write",
+    "Cost Gate lowering or global threshold mutation",
+    "Guardian/risk/Rust authority bypass",
+    "Decision Lease reuse after release",
+    "promotion/profit proof claim"
+  ],
+  "stop_conditions": [
+    "E3 or BB rejects or marks BLOCKED_NEEDS_PM_REFRESH",
+    "Mac/GitHub/Linux source heads diverge from the reviewed committed checkpoint before consumption",
+    "Linux worktree is not clean before consumption",
+    "latest dynamic candidate changes away from ma_crossover|NEARUSDT|Buy",
+    "any runtime input SHA/status/decision listed in this packet changes before consumption",
+    "standing Demo authorization expires or loses candidate/cap/no-authority alignment before consumption",
+    "Phase A public request count exceeds exactly 3 or touches any non-public endpoint",
+    "Phase A or dry-run has any source/runtime/authority blocker",
+    "Decision Lease acquire fails, release fails, or any live lease remains after Phase B",
+    "fresh BBO exceeds canonical max age or remains loss-control blocked",
+    "any order/private/PG/service/risk/Cost Gate/live/mainnet boundary is touched"
+  ],
+  "acceptance_criteria": [
+    "E3 and BB return explicit APPROVE_WITH_CONDITIONS or explicit rejection/block status tied to this packet path and committed checkpoint.",
+    "No quote, lease, private/order endpoint, PG write, service/env/risk/Cost Gate mutation, or live/mainnet action occurs before both approvals.",
+    "If approved and executed, all generated runtime artifacts include paths, sha256, request counts, lease acquire/release status, freshness, blockers, authority flags, and post-governance lease_count=0/live=0.",
+    "The resulting PM report and state packet must not claim order/probe authority; successful no-order Phase A/B only enables a later separate order-capable review packet rebuild."
+  ]
+}
