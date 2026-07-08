@@ -1,10 +1,12 @@
 {
   "schema_version": "profit_first_ai_ml_resolution_loop_effect_review_v1",
   "generated_at_utc": "2026-07-08T10:45:00Z",
+  "operator_scope_revision_at_utc": "2026-07-08T10:55:00Z",
   "status": "READY_FOR_PM_E3_DISPATCH",
   "work_item": "P0-PROFIT-FIRST-NEAR-BUY-CANDIDATE-ALIGNED-GATE-REFRESH",
   "intended_effects": [
-    "refresh current NEAR Buy candidate-aligned no-authority gate chain",
+    "refresh current snapshot NEAR Buy candidate-aligned no-authority gate chain",
+    "record operator dynamic-candidate policy so the snapshot candidate is not manually pinned",
     "repair producer contract where current candidate packet lacks risk_cap_lineage",
     "emit exact PM->E3 request only after machine-readable no-authority artifacts are READY"
   ],
@@ -52,11 +54,14 @@
   },
   "authority_result": {
     "candidate_aligned_no_authority_chain_ready": true,
+    "candidate_selection_dynamic_not_fixed": true,
+    "pre_e3_latest_candidate_refresh_required": true,
+    "snapshot_artifacts_consumable_only_if_latest_selection_still_matches": true,
     "pm_e3_request_emitted": true,
     "bounded_demo_probe_authorized": false,
     "order_authority_granted": false,
     "probe_authority_granted": false,
     "operator_authorization_object_emitted": false,
-    "next_allowed_action": "dispatch PM->E3 exact request after fresh source/runtime head recheck"
+    "next_allowed_action": "dispatch PM->E3 exact request after fresh source/runtime head and latest candidate-selection recheck"
   }
 }

@@ -4,7 +4,7 @@ Status: `READY_FOR_PM_E3_DISPATCH`
 
 ## Executive Summary
 
-PM did not reuse the stale `STOP_RUNTIME_GATE_NOT_READY` intake stop as a terminal state. The loop refreshed the current runtime artifacts, confirmed the current candidate is `ma_crossover|NEARUSDT|Buy`, and completed the no-authority candidate-aligned gate chain required before a PM->E3 dispatch.
+PM did not reuse the stale `STOP_RUNTIME_GATE_NOT_READY` intake stop as a terminal state. The loop refreshed the current runtime artifacts, observed the current snapshot candidate `ma_crossover|NEARUSDT|Buy`, and completed the no-authority candidate-aligned gate chain required before a PM->E3 dispatch.
 
 The latest runtime `_latest` packet is newer than the 2026-07-07 prompt snapshot:
 
@@ -16,6 +16,8 @@ The latest runtime `_latest` packet is newer than the 2026-07-07 prompt snapshot
 - Operator review ready: `true`
 
 The runtime standing authorization remains the old `grid_trading|ETHUSDT|Buy` object and expired at `2026-07-08T01:53:48.341325+00:00`. It was not consumed as NEAR authority. A candidate-aligned NEAR Buy standing authorization preview was generated only as a source/report artifact and was not materialized into runtime.
+
+Operator revision: the candidate must not be manually fixed. The NEAR Buy artifacts in this report are snapshot artifacts only. Before E3 consumes this request, PM/E3 must re-read the latest machine-readable runtime/no-authority artifacts and reselect from current information. If the latest selected candidate is no longer `ma_crossover|NEARUSDT|Buy`, this request is `ROTATED`; the NEAR preview must not be materialized and the gate chain must be regenerated for the latest selected candidate. Before BB, this dynamic selection may not use a new public/private Bybit call, Decision Lease, order, or probe.
 
 ## Source And Runtime Sync
 
@@ -51,6 +53,7 @@ The touchability audit was a read-only Linux PG audit and produced `FILL_FLOW_PR
 PM generated `2026-07-08--profit_first_near_buy_candidate_aligned_gate_refresh.exact_scope_request.json` for E3. The request is intentionally narrow:
 
 - Review source/artifact checkpoint and source/runtime stability.
+- Re-read latest machine-readable runtime/no-authority artifacts; consume this NEAR snapshot only if latest selection still matches.
 - If still current, authorize candidate-aligned standing Demo loss-control materialization and no-order refresh only.
 - Keep bounded-probe operator authorization at `defer`.
 - Do not open public/private Bybit, Decision Lease, order/probe, adapter enablement, service restart, DB write, Cost Gate mutation, live/mainnet, or proof/promotion in this request.

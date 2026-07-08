@@ -2,10 +2,29 @@
   "schema_version": "profit_first_ai_ml_resolution_loop_state_packet_v1",
   "packet_id": "profit_first_near_buy_candidate_aligned_gate_refresh_20260708",
   "generated_at_utc": "2026-07-08T10:45:00Z",
+  "operator_scope_revision_at_utc": "2026-07-08T10:55:00Z",
   "status": "READY_FOR_PM_E3_DISPATCH",
   "branch": "RUNTIME_GATE_PREP",
   "work_item": "P0-PROFIT-FIRST-NEAR-BUY-CANDIDATE-ALIGNED-GATE-REFRESH",
-  "candidate": {
+  "candidate_policy": {
+    "operator_decision": "candidate must not be fixed; use latest machine-readable market/runtime information dynamically",
+    "snapshot_candidate_not_fixed": true,
+    "pre_e3_candidate_refresh_required": true,
+    "snapshot_artifacts_consumable_only_if_latest_selection_still_matches": true,
+    "selection_sources_before_bb": [
+      "latest existing runtime Cost Gate artifacts",
+      "latest existing no-authority learning/proposal artifacts",
+      "read-only DB/audit artifacts when allowed by PM/E3 scope"
+    ],
+    "forbidden_before_bb": [
+      "new public Bybit market data call",
+      "new private Bybit call",
+      "Decision Lease",
+      "order/probe/cancel/modify"
+    ],
+    "if_latest_candidate_differs": "ROTATED; regenerate candidate-aligned no-authority chain for the latest selected candidate"
+  },
+  "snapshot_candidate": {
     "side_cell_key": "ma_crossover|NEARUSDT|Buy",
     "strategy_name": "ma_crossover",
     "symbol": "NEARUSDT",
@@ -94,7 +113,7 @@
   "runtime_authority": {
     "old_runtime_standing_authorization_candidate": "grid_trading|ETHUSDT|Buy",
     "old_runtime_standing_authorization_expires_at_utc": "2026-07-08T01:53:48.341325+00:00",
-    "old_runtime_standing_authorization_valid_for_current_candidate": false,
+    "old_runtime_standing_authorization_valid_for_snapshot_candidate": false,
     "candidate_aligned_preview_materialized": false,
     "bounded_demo_probe_authorized": false,
     "order_authority_granted": false,
