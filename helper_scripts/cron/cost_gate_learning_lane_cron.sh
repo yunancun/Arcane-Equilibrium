@@ -185,6 +185,33 @@ print(str(candidate.get("side_cell_key") or "").strip())
 PY
 }
 
+json_false_negative_packet_has_side_cell_key() {
+    local path="$1"
+    local side_cell_key="$2"
+    if [[ -z "$path" || ! -f "$path" || -z "$side_cell_key" ]]; then
+        return 1
+    fi
+    "$PYBIN" - "$path" "$side_cell_key" <<'PY' 2>/dev/null
+import json
+import sys
+
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as fh:
+        payload = json.load(fh)
+except Exception:
+    sys.exit(1)
+
+target = str(sys.argv[2] or "").strip()
+rows = payload.get("ranked_false_negative_candidates")
+if not isinstance(rows, list):
+    sys.exit(1)
+for row in rows:
+    if isinstance(row, dict) and str(row.get("side_cell_key") or "").strip() == target:
+        sys.exit(0)
+sys.exit(1)
+PY
+}
+
 validate_int() {
     local name="$1"
     local value="$2"
@@ -561,11 +588,6 @@ FALSE_NEGATIVE_OPERATOR_REVIEW_ARGS=(
     --json-output "$FALSE_NEGATIVE_OPERATOR_REVIEW_OUT"
     --output "$FALSE_NEGATIVE_OPERATOR_REVIEW_MD_OUT"
 )
-if [[ -n "$FALSE_NEGATIVE_OPERATOR_REVIEW_SELECTED_SIDE_CELL_KEY" ]]; then
-    FALSE_NEGATIVE_OPERATOR_REVIEW_ARGS+=(
-        --selected-side-cell-key "$FALSE_NEGATIVE_OPERATOR_REVIEW_SELECTED_SIDE_CELL_KEY"
-    )
-fi
 if [[ -n "$STANDING_DEMO_AUTHORIZATION_JSON" && -f "$STANDING_DEMO_AUTHORIZATION_JSON" ]]; then
     FALSE_NEGATIVE_OPERATOR_REVIEW_ARGS+=(
         --standing-demo-authorization-json "$STANDING_DEMO_AUTHORIZATION_JSON"
@@ -895,6 +917,18 @@ else
     fi
 
     if [[ "$REFRESH_FALSE_NEGATIVE_OPERATOR_REVIEW" == "1" ]]; then
+        if [[ -n "$FALSE_NEGATIVE_OPERATOR_REVIEW_SELECTED_SIDE_CELL_KEY" ]]; then
+            if json_false_negative_packet_has_side_cell_key \
+                "$FALSE_NEGATIVE_CANDIDATE_PACKET_OUT" \
+                "$FALSE_NEGATIVE_OPERATOR_REVIEW_SELECTED_SIDE_CELL_KEY"; then
+                FALSE_NEGATIVE_OPERATOR_REVIEW_ARGS+=(
+                    --selected-side-cell-key "$FALSE_NEGATIVE_OPERATOR_REVIEW_SELECTED_SIDE_CELL_KEY"
+                )
+            else
+                echo "[$(ts)] WARN: stale false-negative selected side-cell ignored: ${FALSE_NEGATIVE_OPERATOR_REVIEW_SELECTED_SIDE_CELL_KEY}" >> "$LOG"
+                FALSE_NEGATIVE_OPERATOR_REVIEW_SELECTED_SIDE_CELL_KEY=""
+            fi
+        fi
         (
             cd "$BASE"
             export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
