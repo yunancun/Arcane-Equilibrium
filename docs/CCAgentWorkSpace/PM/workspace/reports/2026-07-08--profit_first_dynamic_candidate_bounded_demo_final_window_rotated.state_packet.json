@@ -1,0 +1,68 @@
+{
+  "schema_version": "profit_first_ai_ml_resolution_loop_state_packet_v1",
+  "packet_id": "profit_first_dynamic_candidate_bounded_demo_final_window_rotated_20260708",
+  "generated_at_utc": "2026-07-08T12:35:59Z",
+  "status": "ROTATED",
+  "rotation_reason": "runtime_latest_candidate_and_proposal_hash_drift_after_bb_review",
+  "candidate_policy": {
+    "candidate_selection_dynamic_not_fixed": true,
+    "selected_side_cell_key_at_bb_review": "ma_crossover|NEARUSDT|Buy",
+    "selected_side_cell_key_at_rotation_check": "ma_crossover|NEARUSDT|Buy",
+    "candidate_string_changed": false,
+    "machine_readable_evidence_hash_changed": true,
+    "must_regenerate_before_same_window_final_gate": true
+  },
+  "prior_ready_packet": {
+    "path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_bounded_demo_final_window_ready.state_packet.json",
+    "status": "READY_FOR_BOUNDED_DEMO_FINAL_WINDOW",
+    "now_historical_only": true
+  },
+  "invalidated_exact_scope_artifacts": {
+    "pm_ready_report": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_bounded_demo_final_window_ready.md",
+    "bb_request": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_bounded_demo_bb_request.json",
+    "bb_review": "docs/CCAgentWorkSpace/BB/workspace/reports/2026-07-08--profit_first_dynamic_candidate_bounded_demo_final_window_bb_review.md",
+    "reason": "exact-scope request was bound to older runtime candidate/proposal hashes"
+  },
+  "source_runtime_binding_at_rotation_check": {
+    "source_head": "f1ec838d5cd66b6cd5b4bdd6e0c52546529bfe32",
+    "origin_main": "f1ec838d5cd66b6cd5b4bdd6e0c52546529bfe32",
+    "github_main": "f1ec838d5cd66b6cd5b4bdd6e0c52546529bfe32",
+    "linux_head": "f1ec838d5cd66b6cd5b4bdd6e0c52546529bfe32",
+    "linux_origin_main": "f1ec838d5cd66b6cd5b4bdd6e0c52546529bfe32",
+    "linux_worktree_clean": true,
+    "local_unrelated_dirty_changes_present": true
+  },
+  "runtime_readiness_at_rotation_check": {
+    "standing_demo_operator_authorization_sha256": "05fe07f5ad4f92c459c4c6f67bfe534a04b0ea4b4e8f2d8aa43879d87009152f",
+    "standing_demo_operator_authorization_status": "STANDING_DEMO_AUTHORIZATION_ACTIVE",
+    "standing_demo_operator_authorization_expires_at_utc": "2026-07-09T00:12:30.886090+00:00",
+    "standing_demo_operator_authorization_side_cell_key": "ma_crossover|NEARUSDT|Buy",
+    "false_negative_candidate_packet_sha256_at_bb_review": "1387ae73d65c7ba5f476a8b562e787089673d484528c2d132e4789de11af67ae",
+    "false_negative_candidate_packet_sha256_at_rotation_check": "47d4bccb4816e049a8959f27804fae3b9c6f996172e699f03c864e73a52cfddc",
+    "false_negative_candidate_packet_generated_at_utc": "2026-07-08T12:32:25.662859+00:00",
+    "autonomous_parameter_proposal_sha256_at_bb_review": "676f6c3ec91aae33542314fd435bb929fa5140feaf3c3c12fedd4a1b7b260282",
+    "autonomous_parameter_proposal_sha256_at_rotation_check": "76c7846969af266528c658d76b26c0dd7aac3fef1aca79c221725e66b0911370",
+    "autonomous_parameter_proposal_generated_at_utc": "2026-07-08T12:32:25.789875+00:00",
+    "latest_candidate_avg_net_bps": 64.983,
+    "bounded_probe_operator_authorization_sha256": "0438247d3a696d420e8272bf16d549ead70403d773fc903d97639efc75f72bd4",
+    "bounded_probe_operator_authorization_status": "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW",
+    "bounded_probe_operator_authorization_decision": "defer",
+    "bounded_demo_probe_authorized": false,
+    "order_authority_granted": false,
+    "probe_authority_granted": false
+  },
+  "next_required_state": "REGENERATE_DYNAMIC_CANDIDATE_CHAIN_FROM_LATEST_ARTIFACTS",
+  "boundaries": {
+    "bybit_public_or_private_call": false,
+    "decision_lease": false,
+    "order_probe_cancel_modify": false,
+    "bounded_demo_final_window": false,
+    "operator_authorization_authorize": false,
+    "runtime_adapter_enablement": false,
+    "service_restart_or_build": false,
+    "db_write_or_migration": false,
+    "cost_gate_lowered": false,
+    "live_or_mainnet": false,
+    "proof_or_promotion_claim": false
+  }
+}

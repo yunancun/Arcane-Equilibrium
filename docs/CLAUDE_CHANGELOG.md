@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-08（TODO v748 bounded Demo final-window ready）
+> 最後更新：2026-07-08（TODO v749 bounded Demo final-window rotated）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**TODO v749 bounded Demo final-window rotated（2026-07-08）**：PM final sanity check after v748 found runtime `_latest` machine-readable input hash drift: candidate packet `1387ae73...` -> `47d4bccb...`, proposal `676f6c3e...` -> `76c78469...`, generated at `2026-07-08T12:32:25Z`. Candidate string remained `ma_crossover|NEARUSDT|Buy` with avg net `64.983bps`, but dynamic candidate policy requires exact final-window packets to bind the latest runtime hashes, not only the candidate text. PM state `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_bounded_demo_final_window_rotated.state_packet.json` terminal `ROTATED`; prior E3/BB approvals are historical prep evidence only and not execution authority. Runtime standing auth remains candidate-aligned sha `05fe07f5...`, mode 0600, expires `2026-07-09T00:12:30.886090+00:00`, and grants no order/probe authority. Boundary：無 Bybit call、無 Decision Lease、無 order/probe/cancel、無 bounded Demo final window、無 operator auth authorize、無 adapter enablement、無 service restart/build、無 DB write/migration、無 Cost Gate lowering、無 live/mainnet、無 proof/promotion。
 
 **TODO v748 bounded Demo final-window ready（2026-07-08）**：BB read-only review `docs/CCAgentWorkSpace/BB/workspace/reports/2026-07-08--profit_first_dynamic_candidate_bounded_demo_final_window_bb_review.md` verdict `APPROVE_FOR_BOUNDED_DEMO_FINAL_WINDOW_PREP`。BB rechecked request sha `d0d21a3b...`, E3 prerequisite, source/runtime alignment `da1a04ec...`, latest candidate packet sha `1387ae73...`, proposal sha `676f6c3e...`, standing auth sha `05fe07f5...`, and no-order operator-auth readiness sha `0438247d...` with `decision=defer`。BB judged future constraints acceptable as prep only: Demo-only NEARUSDT Buy, max 2 probe intents, max `954.46746768` USDT/order, `post_only_near_touch_or_skip`, fresh BBO `<=1000ms`, skip if touch gap `>75bps`, preserve Guardian/Decision Lease/Rust authority, first-attempt bootstrap not proof。Residual caveat: BB did not call Bybit, so current instrument status/tick/qty/min-notional/live BBO must be checked inside same-window final gate. PM state `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_bounded_demo_final_window_ready.state_packet.json` terminal `READY_FOR_BOUNDED_DEMO_FINAL_WINDOW`。Boundary：無 Bybit call、無 Decision Lease、無 order/probe/cancel、無 bounded Demo final window、無 operator auth authorize、無 adapter enablement、無 service restart/build、無 DB write/migration、無 Cost Gate lowering、無 live/mainnet、無 proof/promotion。
 
