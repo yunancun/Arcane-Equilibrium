@@ -1,0 +1,74 @@
+{
+  "schema_version": "profit_first_same_window_noorder_gate_state_packet_v1",
+  "packet_id": "profit_first_dynamic_candidate_same_window_noorder_gate_done_20260708",
+  "generated_at_utc": "2026-07-08T18:04:49Z",
+  "status": "DONE_WITH_CONCERNS__NEXT_AUTHORIZATION_REQUIRED",
+  "candidate": {
+    "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy",
+    "strategy_name": "ma_crossover",
+    "symbol": "NEARUSDT",
+    "side": "Buy",
+    "avg_net_bps": 64.983
+  },
+  "source_runtime_binding": {
+    "execution_source_head": "08f7e9571f03a2dea7a0a20e0e8fe4e0d4c01d91",
+    "execution_runtime_head": "08f7e9571f03a2dea7a0a20e0e8fe4e0d4c01d91",
+    "request_sha256": "89eb2f595238b8826df3e6b1c9c5ee087d9aad9e1254549cef90fcb5fcd2bd09",
+    "request_manifest_sha256": "992fc3975b353783364787612b688882c2442759092bcf0fe8a5aec9593be1bf",
+    "e3_report_sha256": "d06536d33bd81238622d29b9255012670db4ec403fc9522c5503ce1f49e81ae2",
+    "bb_report_sha256": "fb684fba5f7e55b9296ec8336fb006ee3267241dbc11979301f1b2a1dd7611c4"
+  },
+  "runtime_evidence": {
+    "base_path": "/home/ncyu/BybitOpenClaw/var/openclaw/profit_first_dynamic_candidate_same_window_final_gate_20260708T175744Z_08f7e957_noorder",
+    "renewed_execution_manifest": {
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/profit_first_dynamic_candidate_same_window_final_gate_20260708T175744Z_08f7e957_noorder/renewed_active_bbo_execution_manifest.json",
+      "sha256": "17a3a426f31cbff6c0180dfdd239ea6b0ef2b132df486dfc76764825963cf321"
+    },
+    "phase_a": {
+      "status": "CURRENT_CANDIDATE_PUBLIC_QUOTE_CONSTRUCTION_REFRESH_READY_NO_ORDER",
+      "request_count": 3,
+      "sha256": "1d202622fba0c50f9c682d39985f0dfe3ad73eebf81753e0ff030673d31b0832"
+    },
+    "dry_run": {
+      "status": "CURRENT_CANDIDATE_ACTUAL_ADMISSION_BBO_LEASE_WINDOW_DRY_RUN_READY",
+      "blocking_gates": [],
+      "sha256": "b8c7cb65480abc02640e5168af15c41a56b13d470e3f242a5f5296116e238186"
+    },
+    "active_window": {
+      "status": "CURRENT_CANDIDATE_ACTUAL_ADMISSION_BBO_LEASE_WINDOW_DONE_NO_ORDER",
+      "lease_id": "lease:4142221203d4",
+      "lease_scope": "TRADE_ENTRY",
+      "lease_ttl_seconds": 5.0,
+      "acquire_ok": true,
+      "release_ok": true,
+      "lease_released_before_artifact": true,
+      "gate_evidence_status_during_active_window": "CURRENT_CANDIDATE_DECISION_LEASE_GUARDIAN_GATE_READY_NO_ORDER",
+      "actual_admission_bbo_status_during_active_window": "CURRENT_CANDIDATE_PUBLIC_QUOTE_CONSTRUCTION_REFRESH_READY_NO_ORDER",
+      "sha256": "4c28c553e7a6b3778e1c9def65ac662418482fca403c0b15f9e7b904b220d8f1"
+    },
+    "phase_b": {
+      "status": "CURRENT_CANDIDATE_PUBLIC_QUOTE_CONSTRUCTION_REFRESH_READY_NO_ORDER",
+      "request_count": 3,
+      "sha256": "f38fac86ab783a46de88c5fedbccc9587e70802ad5dade6d615d462f90a9278e"
+    },
+    "post_governance": {
+      "status": "RUNTIME_GOVERNANCE_IPC_READONLY_SNAPSHOT_READY",
+      "lease_count": 0,
+      "lease_live_count": 0,
+      "risk_level": "NORMAL",
+      "position_size_multiplier": 1.0,
+      "sha256": "3dcd22e505ce42d07a7e8c3175be4cd6721a23c9b6538ab8dfc6bd4228c7b611"
+    }
+  },
+  "authority_boundary": {
+    "private_or_order_endpoint_called": false,
+    "order_or_probe_authority_granted": false,
+    "operator_auth_authorize": false,
+    "db_or_pg_write": false,
+    "runtime_config_service_mutation": false,
+    "cost_gate_lowering": false,
+    "live_or_mainnet": false,
+    "proof_or_promotion_claim": false
+  },
+  "next_required_state": "ORDER_CAPABLE_EXACT_SCOPE_OPERATOR_AUTHORIZATION_REQUIRED"
+}
