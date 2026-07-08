@@ -1,6 +1,6 @@
 # Profit-First Dynamic Candidate No-Authority Chain Repaired
 
-Status: `READY_FOR_PM_E3_DISPATCH`
+Status: `READY_FOR_PM_BB_DISPATCH`
 
 ## Summary
 
@@ -9,6 +9,8 @@ The `ROTATED` blocker was caused by stale false-negative selection wiring in `he
 Source fix commit `725fddc3ab365da7655d57aba9ee03bc59d97417` validates any selected side-cell against the freshly generated false-negative candidate packet before passing it to the operator-review producer. If the selected key is stale or absent, the wrapper leaves selection empty so the producer uses the latest top-ranked false-negative candidate.
 
 PM then regenerated only no-authority runtime artifacts from latest runtime inputs. A dispatch precheck later observed cron-regenerated `_latest` hashes, still candidate-aligned and READY through operator-auth readiness, with `decision=defer` and no order/probe authorization. This report now binds the E3 request to those latest hashes.
+
+E3 reviewed the refreshed request and returned `APPROVE_FOR_PM_BB_REPAIR_REVIEW_REQUEST` in `docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_e3_review.md`. PM therefore emitted a read-only BB exact-scope request for repaired-chain review; this still does not authorize any exchange-facing action.
 
 ## Verification
 
@@ -44,6 +46,8 @@ Performed:
 - Linux source-only fast-forward.
 - Runtime no-authority JSON/MD artifact refresh for the current chain.
 - PM exact E3 request packet emission.
+- E3 read-only review report.
+- PM exact BB request packet emission.
 
 Not performed:
 
@@ -62,8 +66,8 @@ Not performed:
 
 ## Next
 
-Dispatch E3 only for the exact no-authority repaired-chain review in:
+Dispatch BB only for the exact repaired-chain review in:
 
-`docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_e3_request.json`
+`docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_bb_request.json`
 
-If E3 sees source/runtime/candidate/hash drift, the result must be `ROTATED`. If E3 approves, PM may prepare a separate BB request; no exchange-facing final-window action is authorized by this packet.
+If BB sees source/runtime/candidate/hash drift, the result must be `ROTATED`. If BB approves, PM may enter `READY_FOR_BOUNDED_DEMO_FINAL_WINDOW` and must still open a separate same-window final gate before any Bybit, Decision Lease, order, or probe action.

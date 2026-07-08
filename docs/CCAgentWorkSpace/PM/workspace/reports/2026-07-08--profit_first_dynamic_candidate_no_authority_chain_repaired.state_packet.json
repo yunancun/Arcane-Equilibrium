@@ -1,8 +1,8 @@
 {
   "schema_version": "profit_first_ai_ml_resolution_loop_state_packet_v1",
   "packet_id": "profit_first_dynamic_candidate_no_authority_chain_repaired_20260708",
-  "generated_at_utc": "2026-07-08T16:50:56Z",
-  "status": "READY_FOR_PM_E3_DISPATCH",
+  "generated_at_utc": "2026-07-08T16:59:11Z",
+  "status": "READY_FOR_PM_BB_DISPATCH",
   "candidate_policy": {
     "candidate_selection_dynamic_not_fixed": true,
     "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy",
@@ -99,8 +99,13 @@
       "probe_authority_granted_in_authorization_object": false
     }
   },
-  "next_required_state": "PM_E3_EXACT_SCOPE_REVIEW",
+  "e3_review": {
+    "report": "docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_e3_review.md",
+    "verdict": "APPROVE_FOR_PM_BB_REPAIR_REVIEW_REQUEST"
+  },
+  "next_required_state": "PM_BB_EXACT_SCOPE_REVIEW",
   "e3_request": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_e3_request.json",
+  "bb_request": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_bb_request.json",
   "boundaries": {
     "runtime_no_authority_artifact_refresh_performed": true,
     "bybit_public_or_private_call": false,
