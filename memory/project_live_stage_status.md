@@ -12,4 +12,4 @@ type: project
 - 所有新功能/修復必須按 **Live 標準**完成（不可留 "paper-only workaround"）
 - 風控、對帳、降級等安全機制必須假設真金白銀運行
 - 測試覆蓋率、邊界條件、fail-closed 行為要求更嚴格
-- 6-RC-6（多通道告警）是唯一未完成的安全功能，阻塞於 OC-3
+- ~~6-RC-6（多通道告警）是唯一未完成的安全功能，阻塞於 OC-3~~ **← 2026-07-09 更正：此 blocker 已 stale/移除**（現 `TODO.md` 已無 `6-RC-6`/`OC-3`;alert-sink / 告警 sink 工作已於 2026-06 落地，見 MEMORY.md 索引 P2p 哨兵條目）
