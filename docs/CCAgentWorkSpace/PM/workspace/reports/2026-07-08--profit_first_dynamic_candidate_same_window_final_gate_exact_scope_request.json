@@ -1,0 +1,270 @@
+{
+  "schema_version": "current_candidate_same_window_final_gate_exact_scope_request_v1",
+  "request_id": "PM_E3_BB_PROFIT_FIRST_DYNAMIC_CANDIDATE_SAME_WINDOW_FINAL_GATE_NO_ORDER_PHASE_AB_20260708T173209Z",
+  "generated_at_utc": "2026-07-08T17:32:09Z",
+  "status": "READY_FOR_E3_BB_DISPATCH",
+  "requesting_agent": "PM",
+  "target_agents": [
+    "E3",
+    "BB"
+  ],
+  "work_item": "P0-CURRENT-CANDIDATE-FRESH-INVOCATION-WINDOW-LEASE-BBO-ORDER-SHAPE-GATE",
+  "terminal_target_if_approved_and_completed": "READY_FOR_BOUNDED_DEMO_FINAL_WINDOW",
+  "scope_summary": "Same-window final gate, no-order Phase 0/A/B only, for current dynamic candidate ma_crossover|NEARUSDT|Buy. This request asks E3 and BB to approve or reject exactly three Demo public market-data GETs plus one short Demo TRADE_ENTRY Decision Lease acquire/release no-order BBO window. It does not request order/probe/cancel/modify authority.",
+  "candidate_policy": {
+    "candidate_selection_dynamic_not_fixed": true,
+    "selected_side_cell_key_at_request_generation": "ma_crossover|NEARUSDT|Buy",
+    "latest_selection_must_be_rechecked_before_consumption": true,
+    "if_latest_selection_differs": "ROTATED"
+  },
+  "candidate": {
+    "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+    "strategy_name": "ma_crossover",
+    "symbol": "NEARUSDT",
+    "side": "Buy",
+    "market": "Bybit Demo linear",
+    "outcome_horizon_minutes": 60,
+    "avg_net_bps": 64.983,
+    "blocked_outcome_count": 671728
+  },
+  "source_binding": {
+    "required_source_fix_commit": "725fddc3ab365da7655d57aba9ee03bc59d97417",
+    "pre_request_verified_alignment_commit": "7cae899f49042cdc83ea45335e4aeefa120ae7ca",
+    "request_must_be_consumed_from_committed_origin_main": true,
+    "required_current_alignment": "Mac HEAD, Mac origin/main, GitHub main, Linux HEAD, and Linux origin/main must all match the committed checkpoint containing this request packet",
+    "allowed_diff_from_pre_request_alignment_commit": [
+      "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_same_window_final_gate_exact_scope_request.json",
+      "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_same_window_final_gate_exact_scope_request.manifest.json",
+      "TODO.md",
+      "docs/CLAUDE_CHANGELOG.md"
+    ],
+    "required_linux_clean": true,
+    "if_alignment_or_allowed_diff_check_fails": "ROTATED",
+    "pre_request_checked_at_utc": "2026-07-08T17:30:42Z",
+    "mac_dirty_files_excluded_from_evidence": [
+      "memory/MEMORY.md",
+      "program_code/exchange_connectors/bybit_connector/control_api_v1/app/auth.py",
+      "program_code/exchange_connectors/bybit_connector/control_api_v1/app/auth_legacy_routes.py",
+      "program_code/exchange_connectors/bybit_connector/control_api_v1/app/auth_routes_common.py",
+      "program_code/exchange_connectors/bybit_connector/control_api_v1/app/main_legacy.py",
+      "program_code/exchange_connectors/bybit_connector/control_api_v1/app/static/login.html",
+      "program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_batch_b_security_auth.py",
+      "program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_ops1_csp_report_only.py",
+      "program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_ops1_csrf_middleware.py",
+      "memory/feedback_active_profit_unconventional_mandate.md",
+      "memory/project_2026_06_13_profit_diagnosis_searchspace_reconfirm.md",
+      "memory/project_2026_06_14_cold_audit.md",
+      "memory/project_2026_07_06_maker_first_nogo.md"
+    ]
+  },
+  "e3_bb_prerequisites": {
+    "e3_prep_review": {
+      "path": "docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_e3_review.md",
+      "verdict": "APPROVE_FOR_PM_BB_REPAIR_REVIEW_REQUEST"
+    },
+    "bb_prep_review": {
+      "path": "docs/CCAgentWorkSpace/BB/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_bb_review.md",
+      "verdict": "APPROVE_FOR_PM_FINAL_WINDOW_PREP_REQUEST"
+    },
+    "prep_stop_report": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_e3_bb_prep_pass_stop.md"
+  },
+  "runtime_inputs_to_recheck_before_consumption": {
+    "false_negative_candidate_packet_latest": {
+      "runtime_path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/false_negative_candidate_packet_latest.json",
+      "sha256": "d4d4a37b24d5839a76436632daa180acfd1fe8ba781ae816bf196e728f3ea9f2",
+      "status": "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW",
+      "generated_at_utc": "2026-07-08T16:32:32.654977+00:00"
+    },
+    "autonomous_parameter_proposal_latest": {
+      "runtime_path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/autonomous_parameter_proposal_latest.json",
+      "sha256": "b21f4a40df0a5f38297c0c2cf66d971d0a9ba881564034fe53692e3d8c5d1d6e",
+      "status": "REVIEWABLE_PARAMETER_PROPOSAL_READY",
+      "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+      "avg_net_bps": 64.983,
+      "generated_at_utc": "2026-07-08T16:32:32.791094+00:00"
+    },
+    "standing_demo_operator_authorization": {
+      "runtime_path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/standing_demo_operator_authorization.json",
+      "sha256": "05fe07f5ad4f92c459c4c6f67bfe534a04b0ea4b4e8f2d8aa43879d87009152f",
+      "status": "STANDING_DEMO_AUTHORIZATION_ACTIVE",
+      "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+      "expires_at_utc": "2026-07-09T00:12:30.886090+00:00",
+      "mode": "0600",
+      "order_authority_granted": false,
+      "probe_authority_granted": false,
+      "live_authority_granted": false,
+      "resolved_cap_usdt": 954.46746768,
+      "generated_at_utc": "2026-07-08T12:12:30.886090+00:00"
+    },
+    "false_negative_operator_review_latest": {
+      "runtime_path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/false_negative_operator_review_latest.json",
+      "sha256": "80579cec8478693536e1feb2dcacf656ff60486082707e5cc25a09e160be0aae",
+      "status": "APPROVED_COST_GATE_FALSE_NEGATIVE_FOR_BOUNDED_DEMO_PROBE_PREFLIGHT",
+      "decision": "approve-preflight",
+      "side_cell_key": "ma_crossover|NEARUSDT|Buy"
+    },
+    "false_negative_bounded_probe_preflight_latest": {
+      "runtime_path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/false_negative_bounded_probe_preflight_latest.json",
+      "sha256": "bdd8988fbaf6378dd1c79e6fd76defacb10bf502625061f7d61a0b14a0f2adb2",
+      "status": "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION",
+      "side_cell_key": "ma_crossover|NEARUSDT|Buy"
+    },
+    "bounded_probe_touchability_preflight_latest": {
+      "runtime_path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_probe_touchability_preflight_latest.json",
+      "sha256": "29ccfd57c7f5b976d9caf05d2915a360d4eda8bdeecb50367fa606f34cd1e6b0",
+      "status": "FIRST_ATTEMPT_TOUCHABILITY_BOOTSTRAP_REQUIRED",
+      "side_cell_key": "ma_crossover|NEARUSDT|Buy"
+    },
+    "bounded_probe_placement_repair_plan_latest": {
+      "runtime_path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_probe_placement_repair_plan_latest.json",
+      "sha256": "4e2b0a39c2908a2d7a81e0c08c520e7aeee4990f6c0dbb988640553a7e947d24",
+      "status": "PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW",
+      "side_cell_key": "ma_crossover|NEARUSDT|Buy"
+    },
+    "bounded_probe_authority_patch_readiness_latest": {
+      "runtime_path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_probe_authority_patch_readiness_latest.json",
+      "sha256": "baa38ff5dba6285dc348952f92efc536231168a5ad17e94e7eef366a3524d34f",
+      "status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW"
+    },
+    "bounded_probe_operator_authorization_latest": {
+      "runtime_path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_probe_operator_authorization_latest.json",
+      "sha256": "63f537fd940b2f88da4bf466ff19ad20f66471054148301dda14d7c5072499d4",
+      "status": "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW",
+      "decision": "defer",
+      "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+      "blocking_gates": [],
+      "operator_authorization_object_emitted": false
+    }
+  },
+  "requested_review_decision": {
+    "e3": "Approve, reject, or block the exact no-order same-window Phase 0/A/B sequence after checking source/runtime/security boundaries.",
+    "bb": "Approve, reject, or block the exact no-order same-window Phase 0/A/B sequence after checking Bybit Demo public market-data endpoint, instrument/BBO, and exchange-facing policy boundaries.",
+    "requested_outcome_enum": [
+      "APPROVE_WITH_CONDITIONS",
+      "REJECT",
+      "BLOCKED_NEEDS_PM_REFRESH"
+    ]
+  },
+  "requested_scope_if_approved": {
+    "phase_0_pm_no_authority_inputs": {
+      "purpose": "Refresh or reconstruct only local no-authority source/equity/envelope/admission inputs needed before exchange-facing Phase A.",
+      "exchange_endpoint_allowed": false,
+      "decision_lease_allowed": false,
+      "private_endpoint_allowed": false,
+      "order_or_probe_allowed": false,
+      "pg_write_allowed": false,
+      "runtime_mutation_allowed": false,
+      "service_restart_or_build_allowed": false,
+      "outputs_expected": [
+        "fresh Demo fast-balance equity artifact if required by the existing no-authority helper",
+        "fresh current-candidate no-order refresh envelope",
+        "fresh no-order admission/handoff/gate/sizing dry-run inputs"
+      ]
+    },
+    "phase_a_public_quote_and_downstream_no_order_refresh": {
+      "condition": "Only after E3 and BB approve this exact request and source/runtime/candidate/hash/auth rechecks still match.",
+      "endpoint_base_url": "https://api-demo.bybit.com",
+      "allowed_http_requests_exact": [
+        "GET /v5/market/time",
+        "GET /v5/market/tickers?category=linear&symbol=NEARUSDT",
+        "GET /v5/market/instruments-info?category=linear&symbol=NEARUSDT"
+      ],
+      "max_public_get_count": 3,
+      "auth_or_cookie_headers_allowed": false,
+      "redirects_allowed": false,
+      "private_or_order_endpoint_allowed": false,
+      "outputs_expected": [
+        "fresh quote/construction artifact",
+        "runtime admission handoff no-order artifact",
+        "bounded Demo admission review artifact",
+        "read-only governance snapshot",
+        "Guardian-adjusted sizing proposal",
+        "sizing-aware Decision Lease / Guardian gate artifact",
+        "actual-admission BBO lease-window dry-run artifact"
+      ],
+      "stop_if_any_output_not_ready": true
+    },
+    "phase_b_conditional_active_lease_bbo_no_order_window": {
+      "condition": "Only if Phase A outputs are fresh, dry-run is READY, source/runtime/authority blockers are empty, and both E3 and BB approve this exact request.",
+      "helper": "helper_scripts/research/cost_gate_learning_lane/current_candidate_actual_admission_bbo_lease_window.py",
+      "env_required": {
+        "OPENCLAW_CURRENT_CANDIDATE_ACTUAL_ADMISSION_BBO_LEASE_WINDOW": "1"
+      },
+      "cli_shape": [
+        "--run",
+        "--yes",
+        "--lease-ttl-seconds",
+        "5",
+        "--base-url",
+        "https://api-demo.bybit.com"
+      ],
+      "decision_lease_scope": "TRADE_ENTRY no-order validation window only",
+      "decision_lease_ttl_seconds_max": 5,
+      "decision_lease_must_be_released": true,
+      "post_run_governance_snapshot_required": true,
+      "runtime_admission_after_release_must_be_false": true,
+      "private_endpoint_allowed": false,
+      "order_submission_allowed": false,
+      "probe_submission_allowed": false,
+      "order_cancel_allowed": false,
+      "order_modify_allowed": false
+    },
+    "renewed_active_bbo_execution_manifest": {
+      "schema_version_required": "renewed_active_bbo_execution_manifest_v1",
+      "state_transition_expected": "DONE_WITH_CONCERNS",
+      "window_status_expected": "CURRENT_CANDIDATE_ACTUAL_ADMISSION_BBO_LEASE_WINDOW_DONE_NO_ORDER",
+      "e3_decision_required": "APPROVE_WITH_CONDITIONS",
+      "bb_decision_required": "APPROVE_WITH_CONDITIONS",
+      "candidate_required": "ma_crossover|NEARUSDT|Buy",
+      "phase_a_request_count_required": 3,
+      "phase_b_request_count_required": 3,
+      "post_governance_lease_count_required": 0,
+      "post_governance_lease_live_count_required": 0
+    }
+  },
+  "hard_forbidden_actions": [
+    "live_or_mainnet",
+    "Bybit private endpoint",
+    "Bybit order endpoint",
+    "order/probe/cancel/modify",
+    "operator authorization decision authorize",
+    "standing authorization materialization or mutation",
+    "runtime adapter/writer enablement",
+    "service restart or build",
+    "runtime env/config/crontab mutation",
+    "DB write or migration",
+    "Postgres write",
+    "Cost Gate lowering or global threshold mutation",
+    "Guardian/risk/Rust authority bypass",
+    "Decision Lease reuse after release",
+    "promotion/profit proof claim"
+  ],
+  "stop_conditions": [
+    "E3 or BB rejects or marks BLOCKED_NEEDS_PM_REFRESH",
+    "Mac/GitHub/Linux source heads diverge from the reviewed committed checkpoint before consumption",
+    "Linux worktree is not clean before consumption",
+    "latest dynamic candidate changes away from ma_crossover|NEARUSDT|Buy",
+    "any runtime input SHA/status/decision listed in this packet changes before consumption",
+    "standing Demo authorization expires or loses candidate/cap/no-authority alignment before consumption",
+    "operator-auth readiness changes from decision=defer outside a separate exact authorization scope",
+    "Phase A public request count exceeds exactly 3 or touches any non-public endpoint",
+    "Phase A or dry-run has any source/runtime/authority blocker",
+    "Decision Lease acquire fails, release fails, or any live lease remains after Phase B",
+    "fresh BBO exceeds canonical max age or remains loss-control blocked",
+    "any order/private/PG/service/risk/Cost Gate/live/mainnet boundary is touched"
+  ],
+  "acceptance_criteria": [
+    "E3 and BB return explicit APPROVE_WITH_CONDITIONS or explicit rejection/block status tied to this packet path and committed checkpoint.",
+    "No quote, lease, private/order endpoint, PG write, service/env/risk/Cost Gate mutation, or live/mainnet action occurs before both approvals.",
+    "If approved and executed, all generated runtime artifacts include paths, sha256, request counts, lease acquire/release status, freshness, blockers, authority flags, and post-governance lease_count=0/live=0.",
+    "The resulting PM report and state packet must not claim order/probe authority; successful no-order Phase A/B only enables a later separate order-capable review packet."
+  ],
+  "rejection_to_next_work_item_mapping": {
+    "candidate_rotated": "ROTATED; regenerate dynamic candidate chain from latest machine-readable artifacts",
+    "source_or_runtime_drift": "ROTATED; refetch/resync and regenerate request",
+    "standing_auth_expired": "P0-STANDING-DEMO-LOSS-CONTROL-ENVELOPE-REFRESH-CURRENT-HEAD",
+    "bb_policy_or_endpoint_rejects_scope": "repair same-window public quote/admission scope or reduce to non-exchange-facing review",
+    "lease_or_guardian_boundary_rejects_scope": "repair Decision Lease / Guardian no-order gate evidence before retry",
+    "operator_authorization_required_for_phase_ab": "HARD_BLOCKED_NO_SAFE_ACTION unless a separate exact operator authorization scope is approved"
+  }
+}

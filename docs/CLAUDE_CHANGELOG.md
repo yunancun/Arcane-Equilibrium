@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-08（TODO v755 stale readiness hygiene）
+> 最後更新：2026-07-08（TODO v756 same-window exact-scope request ready）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**TODO v756 same-window exact-scope request ready（2026-07-08）**：PM verified Mac/GitHub/Linux source alignment at `7cae899f...`, Linux clean, and current runtime hashes still candidate-aligned to `ma_crossover|NEARUSDT|Buy`：candidate `d4d4a37b...`, proposal `b21f4a40...`, standing auth `05fe07f5...`, operator review `80579cec...`, bounded preflight `bdd8988f...`, touchability `29ccfd57...`, placement `4e2b0a39...`, authority readiness `baa38ff5...`, operator-auth readiness `63f537fd...` with `decision=defer`。PM emitted exact E3/BB request `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_same_window_final_gate_exact_scope_request.json`, sha `49ced54a...`, plus manifest, for no-order same-window Phase 0/A/B only：local no-authority input refresh, exactly three Demo public market-data GETs for NEARUSDT, and one 5s `TRADE_ENTRY` Decision Lease acquire/release BBO window if E3 and BB both approve. Boundary remains no Bybit public/private call before approval、no order/probe/cancel/modify、no operator auth authorize、no standing auth mutation、no adapter/writer enablement、no service restart/build、no DB write/migration、no Cost Gate lowering、no live/mainnet、no proof/promotion。
 
 **TODO v755 stale readiness hygiene（2026-07-08）**：PM session verified the v754 E3/BB prep state, then corrected a stale active-queue evidence sentence: prior runtime/loss-control readiness through `2026-07-08T01:53:48.341325+00:00` is now explicitly historical/expired and cannot be consumed. No state downgrade from `READY_FOR_BOUNDED_DEMO_FINAL_WINDOW`; no Bybit call、Decision Lease、order/probe/cancel、bounded Demo final window、operator auth authorize、standing auth materialization/change、adapter enablement、service restart/build、DB write/migration、Cost Gate lowering、live/mainnet、or proof/promotion.
 
