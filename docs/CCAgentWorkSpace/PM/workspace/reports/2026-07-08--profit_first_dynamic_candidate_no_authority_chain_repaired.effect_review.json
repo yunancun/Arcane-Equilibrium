@@ -1,0 +1,52 @@
+{
+  "schema_version": "profit_first_ai_ml_resolution_loop_effect_review_v1",
+  "generated_at_utc": "2026-07-08T12:56:36Z",
+  "status": "READY_FOR_PM_E3_DISPATCH",
+  "actual_effects": [
+    {
+      "type": "source_fix",
+      "commit": "725fddc3ab365da7655d57aba9ee03bc59d97417",
+      "summary": "cron wrapper now ignores stale selected side-cell keys not present in the fresh false-negative candidate packet"
+    },
+    {
+      "type": "verification",
+      "summary": "bash syntax, focused cron static tests, and local no-authority chain replay passed"
+    },
+    {
+      "type": "linux_source_only_sync",
+      "summary": "Linux trade-core fast-forwarded to source fix commit 725fddc3ab365da7655d57aba9ee03bc59d97417 before the source/artifact checkpoint"
+    },
+    {
+      "type": "runtime_no_authority_artifact_refresh",
+      "summary": "regenerated candidate-aligned no-authority JSON/MD artifacts under cost_gate_learning_lane and updated _latest pointers"
+    },
+    {
+      "type": "source_artifact_checkpoint",
+      "summary": "recorded PM report, state packet, effect review, E3 request, operator summary, TODO, and changelog"
+    }
+  ],
+  "forbidden_effects_observed": {
+    "bybit_public_or_private_call": false,
+    "decision_lease_acquire_or_release": false,
+    "order_probe_cancel_or_modify": false,
+    "bounded_demo_final_window": false,
+    "operator_authorization_authorize": false,
+    "standing_authorization_materialization_or_change": false,
+    "runtime_adapter_enablement": false,
+    "service_restart_or_build": false,
+    "runtime_env_mutation": false,
+    "db_write_or_migration": false,
+    "cost_gate_lowering": false,
+    "live_or_mainnet": false,
+    "proof_or_promotion_claim": false
+  },
+  "authority_result": {
+    "ready_for_pm_e3_dispatch": true,
+    "ready_for_bounded_demo_final_window": false,
+    "same_window_final_gate_still_required": true,
+    "bounded_demo_probe_authorized": false,
+    "operator_authorization_object_emitted": false,
+    "order_authority_granted": false,
+    "probe_authority_granted": false
+  }
+}
