@@ -1,0 +1,99 @@
+{
+  "schema_version": "pm_profit_first_state_packet_v1",
+  "generated_at_utc": "2026-07-08T22:54:50Z",
+  "status": "READY_FOR_PM_E3_DISPATCH",
+  "active_blocker_id": "P0-CURRENT-CANDIDATE-ORDER-CAPABLE-DEMO-INVOKE-FRESH-WINDOW-RUN-GATE",
+  "next_blocker_id": "P0-CURRENT-CANDIDATE-ORDER-CAPABLE-DEMO-INVOKE-FRESH-WINDOW-RUN-GATE",
+  "candidate": {
+    "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+    "strategy_name": "ma_crossover",
+    "symbol": "NEARUSDT",
+    "side": "Buy",
+    "outcome_horizon_minutes": 60,
+    "avg_net_bps": 64.983,
+    "current_runtime_outcome_count": 5058,
+    "selection_policy": "dynamic_latest_runtime_artifacts_not_fixed_prompt_snapshot"
+  },
+  "source_runtime_alignment": {
+    "mac_head": "c66338e8b733acb52fc44160b55fb8e34105ecd6",
+    "mac_origin_main": "c66338e8b733acb52fc44160b55fb8e34105ecd6",
+    "github_main": "c66338e8b733acb52fc44160b55fb8e34105ecd6",
+    "linux_head": "c66338e8b733acb52fc44160b55fb8e34105ecd6",
+    "linux_origin_main": "c66338e8b733acb52fc44160b55fb8e34105ecd6",
+    "linux_worktree": "clean"
+  },
+  "materialization_effect": {
+    "performed": true,
+    "approved_scope": "PM same-window plan-materialization recheck after E3 and BB approval",
+    "canonical_soak_plan_path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_demo_probe_soak_plan.json",
+    "canonical_soak_plan_sha256": "a296365eb03086b1e28595cc793c333068f5fde750e994232ad8563e6e36d32a",
+    "materialization_record_path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_demo_probe_soak_plan_materialization_20260708T223909Z.json",
+    "materialization_record_sha256": "a71b9fc42277e77414268ec052b34e32153a024fd8ffa8f058d6f5ddbc50e73a",
+    "status": "CANONICAL_SOAK_PLAN_MATERIALIZED_NO_ORDER_AUTHORITY"
+  },
+  "runtime_artifacts": [
+    {
+      "name": "false_negative_candidate_packet_latest",
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/false_negative_candidate_packet_latest.json",
+      "sha256": "02c7eec6f3d30a46721326057251b654c59d53d1d378bc00edf6d15ff1048740",
+      "status": "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW"
+    },
+    {
+      "name": "autonomous_parameter_proposal_latest",
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/autonomous_parameter_proposal_latest.json",
+      "sha256": "74535a9c323de86c3b3b006baeb52d1c311d90e61e6a3d6f470da5b90131041d",
+      "status": "REVIEWABLE_PARAMETER_PROPOSAL_READY",
+      "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy"
+    },
+    {
+      "name": "standing_demo_operator_authorization",
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/standing_demo_operator_authorization.json",
+      "sha256": "05fe07f5ad4f92c459c4c6f67bfe534a04b0ea4b4e8f2d8aa43879d87009152f",
+      "status": "STANDING_DEMO_AUTHORIZATION_ACTIVE",
+      "expires_at_utc": "2026-07-09T00:12:30.886090+00:00"
+    },
+    {
+      "name": "bounded_demo_soak_plan",
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_demo_probe_soak_plan.json",
+      "sha256": "a296365eb03086b1e28595cc793c333068f5fde750e994232ad8563e6e36d32a",
+      "status": "READY_FOR_DEMO_LEARNING_PROBE"
+    },
+    {
+      "name": "active_order_wiring_contract",
+      "path": "/tmp/openclaw_near_order_capable_after_plan_materialization_20260708T2250Z_c66338e8/outputs/bounded_probe_active_order_wiring_contract_ready.json",
+      "sha256": "cf2c9ff29d29f8f251759f2fc0cbd37b1c7a9ef63959956048e8d7ec1babc6e0",
+      "status": "ACTIVE_ORDER_WIRING_CONTRACT_READY_FOR_E3_BB_REVIEW"
+    },
+    {
+      "name": "strict_order_fill_scan",
+      "path": "/tmp/openclaw_near_order_capable_after_plan_materialization_20260708T2250Z_c66338e8/outputs/current_candidate_order_fill_evidence_scan_strict.json",
+      "sha256": "ca4bf9cb4188bf8c31fba919cc49ca6d6fd426c521afd5d7a78444359ff3d88c",
+      "status": "NO_CANDIDATE_MATCHED_ACTUAL_ORDER_FILL_EVIDENCE"
+    },
+    {
+      "name": "order_capable_demo_invoke_review_packet",
+      "path": "/tmp/openclaw_near_order_capable_after_plan_materialization_20260708T2250Z_c66338e8/outputs/current_candidate_order_capable_demo_invoke_review_packet.json",
+      "sha256": "305774b2b1f0d3d3a3c4807e6f2739a47c395f0fb4c85b831e298f7a2081b40f",
+      "status": "CURRENT_CANDIDATE_ORDER_CAPABLE_DEMO_INVOKE_REVIEW_PACKET_BLOCKED_BY_LOSS_CONTROL",
+      "loss_control_blockers": [
+        "renewed_active_bbo_manifest_stale_for_review_packet"
+      ]
+    }
+  ],
+  "request_artifacts": {
+    "exact_scope_request_json": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_order_capable_fresh_window_refresh_request.json",
+    "exact_scope_manifest_json": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_order_capable_fresh_window_refresh_request.manifest.json"
+  },
+  "hard_boundary": {
+    "bybit_public_call_performed_after_materialization": false,
+    "bybit_private_call_performed": false,
+    "bybit_order_endpoint_called": false,
+    "decision_lease_acquired_after_materialization": false,
+    "order_probe_cancel_modify_performed": false,
+    "pg_or_db_write_performed": false,
+    "service_env_crontab_mutation_performed": false,
+    "cost_gate_lowering_performed": false,
+    "live_or_mainnet_performed": false,
+    "proof_or_promotion_claim_performed": false
+  }
+}

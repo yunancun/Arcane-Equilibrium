@@ -1,0 +1,60 @@
+{
+  "schema_version": "pm_profit_first_effect_review_v1",
+  "generated_at_utc": "2026-07-08T22:54:50Z",
+  "status": "READY_FOR_PM_E3_DISPATCH",
+  "candidate": "ma_crossover|NEARUSDT|Buy",
+  "effects": [
+    {
+      "type": "three_way_source_sync",
+      "result": "Mac/GitHub/Linux aligned",
+      "commit": "c66338e8b733acb52fc44160b55fb8e34105ecd6"
+    },
+    {
+      "type": "approved_runtime_materialization",
+      "result": "canonical bounded Demo soak plan now matches NEAR Buy reviewed plan preview",
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_demo_probe_soak_plan.json",
+      "sha256": "a296365eb03086b1e28595cc793c333068f5fde750e994232ad8563e6e36d32a"
+    },
+    {
+      "type": "source_only_artifact_generation",
+      "result": "active order wiring contract ready for E3/BB review, no authority granted",
+      "sha256": "cf2c9ff29d29f8f251759f2fc0cbd37b1c7a9ef63959956048e8d7ec1babc6e0"
+    },
+    {
+      "type": "artifact_only_scan",
+      "result": "no candidate-matched actual order/fill evidence",
+      "sha256": "ca4bf9cb4188bf8c31fba919cc49ca6d6fd426c521afd5d7a78444359ff3d88c"
+    },
+    {
+      "type": "gate_packet",
+      "result": "blocked only by stale renewed no-order BBO manifest",
+      "sha256": "305774b2b1f0d3d3a3c4807e6f2739a47c395f0fb4c85b831e298f7a2081b40f",
+      "loss_control_blockers": [
+        "renewed_active_bbo_manifest_stale_for_review_packet"
+      ]
+    },
+    {
+      "type": "pm_to_e3_bb_exact_scope_request",
+      "result": "fresh current-head no-order same-window refresh request emitted"
+    }
+  ],
+  "prohibited_effects": {
+    "bybit_public_call_after_materialization": false,
+    "bybit_private_call": false,
+    "bybit_order_endpoint": false,
+    "decision_lease_after_materialization": false,
+    "order_probe_cancel_modify": false,
+    "operator_auth_authorize": false,
+    "pg_query_or_write": false,
+    "service_restart_or_build": false,
+    "runtime_env_config_crontab_mutation": false,
+    "cost_gate_lowering": false,
+    "live_or_mainnet": false,
+    "proof_or_promotion_claim": false
+  },
+  "residual_risk": [
+    "The standing Demo authorization expires at 2026-07-09T00:12:30.886090+00:00 and must be rechecked before any E3/BB consumption.",
+    "The old no-order BBO/lease manifest is stale and tied to checkpoint 08f7e957, so it must not be reused at c66338e8.",
+    "The next request is no-order Phase A/B only; it is not an order-capable Demo invocation approval."
+  ]
+}
