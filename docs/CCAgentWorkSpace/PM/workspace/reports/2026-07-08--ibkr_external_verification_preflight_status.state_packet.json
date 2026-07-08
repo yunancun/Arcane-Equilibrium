@@ -1,0 +1,86 @@
+{
+  "packet_id": "ibkr_external_verification_preflight_status_2026-07-08",
+  "generated_at": "2026-07-08T10:36:42Z",
+  "role": "PM local and Linux read-only preflight",
+  "repo_root": "/Users/ncyu/Projects/TradeBot/srv",
+  "source_head": "05ce5543e",
+  "origin_main": "05ce5543e",
+  "linux_head": "05ce5543e",
+  "linux_origin_main": "05ce5543e",
+  "linux_status": "## main...origin/main",
+  "verdict": "STOP_EXTERNAL_VERIFICATION_PREREQUISITES_ABSENT",
+  "ready_demo": {
+    "no_contact_source_surface": true,
+    "real_ibkr_connectivity": false,
+    "paper_session_healthcheck": false,
+    "reason": "operator_runtime_prerequisites_absent"
+  },
+  "sync": {
+    "three_way_aligned": true,
+    "synchronized_commit": "05ce5543e",
+    "synchronized_subject": "Add IBKR dual-engine no-contact packet"
+  },
+  "verification": {
+    "python_stock_etf_ibkr_subset": {
+      "status": "passed",
+      "tests_passed": 32,
+      "command": "python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_ibkr_api_absent_engineering.py program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_ibkr_connector_skeleton.py program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_ibkr_connector_action_matrix.py program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_python_no_write_static_guard.py program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_stock_etf_surface_coverage_static_guard.py"
+    },
+    "rust_openclaw_types_ibkr_subset": {
+      "status": "passed",
+      "tests_passed": 95,
+      "toolchain": "/Users/ncyu/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+      "rustc": "/Users/ncyu/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc"
+    },
+    "rust_openclaw_engine_stock_etf_filter": {
+      "status": "passed",
+      "tests_passed": 32,
+      "tests_failed": 0,
+      "tests_filtered_out": 4309
+    }
+  },
+  "linux_preflight": {
+    "scope": "metadata_only_no_contact",
+    "ibkr_processes_found": false,
+    "ibkr_ports_found": false,
+    "checked_ports": [
+      4002,
+      4001,
+      7496
+    ],
+    "secret_dirs": [
+      {
+        "path": "/home/ncyu/BybitOpenClaw/secrets/external/ibkr",
+        "present": false
+      },
+      {
+        "path": "/home/ncyu/BybitOpenClaw/secrets/ibkr",
+        "present": false
+      },
+      {
+        "path": "/home/ncyu/BybitOpenClaw/var/openclaw/secrets/external/ibkr",
+        "present": false
+      }
+    ],
+    "phase2_pass_artifact_present": false,
+    "phase2_candidates_are_source_templates_only": true
+  },
+  "remaining_blockers": [
+    "phase2_ibkr_external_surface_gate_v1_pass_artifact_absent",
+    "ibkr_paper_or_readonly_secret_slot_evidence_absent",
+    "loopback_ib_gateway_or_tws_paper_topology_absent",
+    "ibkr_session_attestation_absent",
+    "operator_credential_session_manual_approval_absent"
+  ],
+  "boundary_proof": {
+    "ibkr_contact_performed": false,
+    "secret_content_read": false,
+    "socket_opened_to_ibkr": false,
+    "gateway_or_tws_started": false,
+    "mcp_server_started": false,
+    "paper_order_submitted": false,
+    "live_path_touched": false,
+    "db_mutated": false
+  },
+  "next_allowed_action": "operator_runtime_prerequisites_then_fresh_pm_dispatch_before_first_readonly_healthcheck"
+}
