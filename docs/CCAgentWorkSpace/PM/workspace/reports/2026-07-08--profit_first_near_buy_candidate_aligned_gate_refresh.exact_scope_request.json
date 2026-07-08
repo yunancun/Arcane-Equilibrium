@@ -1,0 +1,122 @@
+{
+  "schema_version": "pm_to_e3_exact_scope_request_v1",
+  "request_id": "PM_E3_PROFIT_FIRST_NEAR_BUY_CANDIDATE_ALIGNED_GATE_REFRESH_20260708",
+  "generated_at_utc": "2026-07-08T10:45:00Z",
+  "status": "READY_FOR_PM_E3_DISPATCH",
+  "requesting_agent": "PM",
+  "target_agent": "E3",
+  "work_item": "P0-PROFIT-FIRST-NEAR-BUY-CANDIDATE-ALIGNED-GATE-REFRESH",
+  "candidate": {
+    "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+    "strategy_name": "ma_crossover",
+    "symbol": "NEARUSDT",
+    "side": "Buy",
+    "outcome_horizon_minutes": 60,
+    "avg_net_bps": 64.983,
+    "blocked_outcomes": 764040,
+    "operator_review_ready": true
+  },
+  "pre_dispatch_binding": {
+    "mac_head_at_request_generation": "1d8caa7179c3b11f1858c7dd859a1ccdad04b68c",
+    "origin_main_at_request_generation": "1d8caa7179c3b11f1858c7dd859a1ccdad04b68c",
+    "linux_head_after_initial_source_only_sync": "1d8caa7179c3b11f1858c7dd859a1ccdad04b68c",
+    "linux_origin_main_after_initial_source_only_sync": "1d8caa7179c3b11f1858c7dd859a1ccdad04b68c",
+    "dispatch_must_recheck_final_checkpoint_head": true,
+    "stop_if_source_or_runtime_drift": true
+  },
+  "machine_ready_artifacts": [
+    {
+      "name": "standing_demo_loss_control_envelope_review",
+      "path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_candidate_aligned_gate_refresh.standing_demo_loss_control_envelope_review.json",
+      "sha256": "1a95874f23abdab4fafee4a542bbf84551727477323cd8f9a468366d4be6d552",
+      "status": "STANDING_DEMO_LOSS_CONTROL_ENVELOPE_REVIEW_READY_NO_RUNTIME_MUTATION"
+    },
+    {
+      "name": "standing_demo_operator_authorization_preview",
+      "path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_candidate_aligned_gate_refresh.standing_demo_operator_authorization.preview.json",
+      "sha256": "0578aba9b1da524cf9982f67e2c694a84b262dbd82c71909a407853ab7d91d51",
+      "status": "PREVIEW_ONLY_NOT_MATERIALIZED"
+    },
+    {
+      "name": "false_negative_operator_review",
+      "path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_candidate_aligned_gate_refresh.false_negative_operator_review.json",
+      "sha256": "cc750eb9c4ae60acdf90652d8e7289f3ce6f1e795d3438315ad11276c8c821e0",
+      "status": "APPROVED_COST_GATE_FALSE_NEGATIVE_FOR_BOUNDED_DEMO_PROBE_PREFLIGHT"
+    },
+    {
+      "name": "false_negative_bounded_probe_preflight",
+      "path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_candidate_aligned_gate_refresh.false_negative_bounded_probe_preflight.json",
+      "sha256": "c7492d63e60c0f999cfab49c0f97932abb00e30477933cd5c4cdefa52308327d",
+      "status": "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+    },
+    {
+      "name": "bounded_probe_touchability_preflight",
+      "path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_candidate_aligned_gate_refresh.bounded_probe_touchability_preflight.json",
+      "sha256": "fafb0e44eb87525c37298b4f3d54a1d4ffff3b633a3a74be75699feee6a67bca",
+      "status": "FIRST_ATTEMPT_TOUCHABILITY_BOOTSTRAP_REQUIRED"
+    },
+    {
+      "name": "bounded_probe_placement_repair_plan",
+      "path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_candidate_aligned_gate_refresh.bounded_probe_placement_repair_plan.json",
+      "sha256": "b54051db4043dcbdd3901a19aed7b208c2b34f32dac4df2a72def40d2321a173",
+      "status": "PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW"
+    },
+    {
+      "name": "bounded_probe_authority_patch_readiness",
+      "path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_candidate_aligned_gate_refresh.bounded_probe_authority_patch_readiness.json",
+      "sha256": "fe0da47bc17d624ed4e695d68d6835f1cc0b73180fd19fb3408b195d64ecc4f2",
+      "status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW"
+    },
+    {
+      "name": "bounded_probe_operator_authorization_readiness",
+      "path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_candidate_aligned_gate_refresh.bounded_probe_operator_authorization_readiness.json",
+      "sha256": "f278a8a5dda75b90eae97a29d224e3b1504f596f47826a8f20b2c6dbcf876f1e",
+      "status": "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW",
+      "decision": "defer"
+    }
+  ],
+  "requested_e3_review_scope": {
+    "allowed": [
+      "verify final Mac/origin/Linux source heads are stable and Linux worktree is clean",
+      "review producer cap-lineage repair and focused test evidence",
+      "review candidate-aligned standing_demo_operator_authorization_v1 preview for NEAR Buy",
+      "approve or reject materializing only the candidate-aligned standing Demo loss-control envelope to runtime with mode 0600",
+      "approve or reject no-order false-negative operator review and bounded-probe preflight refresh after materialization",
+      "review whether source/runtime admission propagation is sufficient for a later BB-reviewed exchange-facing bounded Demo final window"
+    ],
+    "forbidden": [
+      "public Bybit market data call",
+      "private Bybit call",
+      "Decision Lease acquire or release",
+      "order/probe/cancel/modify",
+      "bounded Demo final window execution",
+      "setting bounded-probe operator authorization decision to authorize",
+      "runtime adapter enablement",
+      "service restart or rebuild",
+      "DB write or migration",
+      "Cost Gate lowering or global threshold mutation",
+      "live or mainnet action",
+      "proof or promotion claim"
+    ]
+  },
+  "acceptance_for_e3_approval": [
+    "all artifact sha256 values match this request",
+    "candidate remains exactly ma_crossover|NEARUSDT|Buy",
+    "old runtime standing authorization is not consumed as current-candidate authority",
+    "candidate-aligned preview remains Demo-only, scoped, unmaterialized before E3 approval, and grants no order/probe by itself",
+    "GUI-backed Rust RiskConfig cap lineage is preserved and local 10 USDT is not treated as global risk authority",
+    "bounded-probe operator authorization remains defer unless a later exact exchange-facing scope passes E3 and BB",
+    "source/runtime heads are stable at E3 consumption time"
+  ],
+  "rejection_to_work_item_mapping": {
+    "cap_lineage_rejected": "repair standing_demo_loss_control_envelope_review cap lineage producer or GUI/equity source contract",
+    "artifact_stale": "rerun no-authority producer chain from latest runtime artifacts",
+    "source_drift": "ROTATED; refetch, resync, and regenerate exact-scope request",
+    "materialization_boundary_too_broad": "split standing-envelope materialization from exchange-facing bounded Demo final window",
+    "runtime_admission_not_reviewable": "produce source/runtime admission propagation packet without enabling runtime adapter"
+  },
+  "next_after_e3": {
+    "if_approved_and_exchange_facing_scope_needed": "open BB exact scope before any public/private Bybit, Decision Lease, bounded Demo final window, order, or probe",
+    "if_rejected": "convert E3 rejection reason into the mapped engineering work item unless it is a hard boundary"
+  }
+}

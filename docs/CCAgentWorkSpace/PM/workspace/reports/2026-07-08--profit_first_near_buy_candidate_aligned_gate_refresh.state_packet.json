@@ -1,0 +1,115 @@
+{
+  "schema_version": "profit_first_ai_ml_resolution_loop_state_packet_v1",
+  "packet_id": "profit_first_near_buy_candidate_aligned_gate_refresh_20260708",
+  "generated_at_utc": "2026-07-08T10:45:00Z",
+  "status": "READY_FOR_PM_E3_DISPATCH",
+  "branch": "RUNTIME_GATE_PREP",
+  "work_item": "P0-PROFIT-FIRST-NEAR-BUY-CANDIDATE-ALIGNED-GATE-REFRESH",
+  "candidate": {
+    "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+    "strategy_name": "ma_crossover",
+    "symbol": "NEARUSDT",
+    "side": "Buy",
+    "avg_net_bps": 64.983,
+    "blocked_outcomes": 764040,
+    "operator_review_ready": true
+  },
+  "source_runtime_binding": {
+    "source_head_at_gate_generation": "1d8caa7179c3b11f1858c7dd859a1ccdad04b68c",
+    "origin_main_at_gate_generation": "1d8caa7179c3b11f1858c7dd859a1ccdad04b68c",
+    "linux_head_after_source_only_sync": "1d8caa7179c3b11f1858c7dd859a1ccdad04b68c",
+    "linux_origin_main_after_source_only_sync": "1d8caa7179c3b11f1858c7dd859a1ccdad04b68c",
+    "linux_worktree_clean_after_source_only_sync": true,
+    "e3_consumption_requires_fresh_head_recheck": true
+  },
+  "input_artifacts": {
+    "false_negative_candidate_packet_latest": {
+      "source": "runtime:_latest",
+      "copied_to": "/tmp/tradebot_near_gate_refresh_20260708/inputs/false_negative_candidate_packet_latest.json",
+      "sha256": "0dc8b5bebab9e65804a2a3d77246ff35210ace9d337d95601bc617e36d7a8bf0",
+      "generated_at_utc": "2026-07-08T09:32:50.943215+00:00"
+    },
+    "demo_account_equity_artifact": {
+      "source": "prior approved Demo fast-balance artifact",
+      "copied_to": "/tmp/tradebot_near_gate_refresh_20260708/inputs/demo_account_equity_artifact.json",
+      "sha256": "2252ff2f2770a8698cd2076d3b539a6222f52d280bf6d7b1cd55c961d4e613c4",
+      "generated_at_utc": "2026-07-07T13:52:59.893393+00:00",
+      "max_age_seconds_used": 86400
+    },
+    "autonomous_parameter_proposal_latest": {
+      "source": "runtime:_latest",
+      "copied_to": "/tmp/tradebot_near_gate_refresh_20260708/inputs/autonomous_parameter_proposal_latest.json",
+      "sha256": "c61d152d2cca722318a75313e047f161fbb81ccc958b6036acaf03bf5acefdd4"
+    },
+    "demo_order_to_fill_gap_audit": {
+      "source": "read-only Linux PG audit",
+      "repo_path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_candidate_aligned_gate_refresh.demo_order_to_fill_gap_audit.json",
+      "sha256": "2272de0c3d2e70e76c25442236ee82e0de24c95939282b9a0ce90010f134dbb7",
+      "generated_at_utc": "2026-07-08T10:10:29+00:00"
+    }
+  },
+  "generated_gate_artifacts": {
+    "standing_demo_loss_control_envelope_review": {
+      "repo_path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_candidate_aligned_gate_refresh.standing_demo_loss_control_envelope_review.json",
+      "sha256": "1a95874f23abdab4fafee4a542bbf84551727477323cd8f9a468366d4be6d552",
+      "status": "STANDING_DEMO_LOSS_CONTROL_ENVELOPE_REVIEW_READY_NO_RUNTIME_MUTATION"
+    },
+    "standing_demo_operator_authorization_preview": {
+      "repo_path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_candidate_aligned_gate_refresh.standing_demo_operator_authorization.preview.json",
+      "sha256": "0578aba9b1da524cf9982f67e2c694a84b262dbd82c71909a407853ab7d91d51",
+      "materialized": false
+    },
+    "false_negative_operator_review": {
+      "repo_path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_candidate_aligned_gate_refresh.false_negative_operator_review.json",
+      "sha256": "cc750eb9c4ae60acdf90652d8e7289f3ce6f1e795d3438315ad11276c8c821e0",
+      "status": "APPROVED_COST_GATE_FALSE_NEGATIVE_FOR_BOUNDED_DEMO_PROBE_PREFLIGHT"
+    },
+    "false_negative_bounded_probe_preflight": {
+      "repo_path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_candidate_aligned_gate_refresh.false_negative_bounded_probe_preflight.json",
+      "sha256": "c7492d63e60c0f999cfab49c0f97932abb00e30477933cd5c4cdefa52308327d",
+      "status": "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+    },
+    "bounded_probe_touchability_preflight": {
+      "repo_path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_candidate_aligned_gate_refresh.bounded_probe_touchability_preflight.json",
+      "sha256": "fafb0e44eb87525c37298b4f3d54a1d4ffff3b633a3a74be75699feee6a67bca",
+      "status": "FIRST_ATTEMPT_TOUCHABILITY_BOOTSTRAP_REQUIRED"
+    },
+    "bounded_probe_placement_repair_plan": {
+      "repo_path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_candidate_aligned_gate_refresh.bounded_probe_placement_repair_plan.json",
+      "sha256": "b54051db4043dcbdd3901a19aed7b208c2b34f32dac4df2a72def40d2321a173",
+      "status": "PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW"
+    },
+    "bounded_probe_authority_patch_readiness": {
+      "repo_path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_candidate_aligned_gate_refresh.bounded_probe_authority_patch_readiness.json",
+      "sha256": "fe0da47bc17d624ed4e695d68d6835f1cc0b73180fd19fb3408b195d64ecc4f2",
+      "status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW"
+    },
+    "bounded_probe_operator_authorization_readiness": {
+      "repo_path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_candidate_aligned_gate_refresh.bounded_probe_operator_authorization_readiness.json",
+      "sha256": "f278a8a5dda75b90eae97a29d224e3b1504f596f47826a8f20b2c6dbcf876f1e",
+      "status": "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW",
+      "decision": "defer"
+    }
+  },
+  "runtime_authority": {
+    "old_runtime_standing_authorization_candidate": "grid_trading|ETHUSDT|Buy",
+    "old_runtime_standing_authorization_expires_at_utc": "2026-07-08T01:53:48.341325+00:00",
+    "old_runtime_standing_authorization_valid_for_current_candidate": false,
+    "candidate_aligned_preview_materialized": false,
+    "bounded_demo_probe_authorized": false,
+    "order_authority_granted": false,
+    "probe_authority_granted": false
+  },
+  "boundaries": {
+    "live_or_mainnet": false,
+    "public_or_private_bybit_call": false,
+    "decision_lease": false,
+    "order_probe_cancel_modify": false,
+    "runtime_env_or_service_mutation": false,
+    "standing_authorization_materialized": false,
+    "db_write_or_migration": false,
+    "cost_gate_lowered": false,
+    "proof_or_promotion_claim": false
+  },
+  "next_required_state": "PM_E3_EXACT_SCOPE_DISPATCH"
+}

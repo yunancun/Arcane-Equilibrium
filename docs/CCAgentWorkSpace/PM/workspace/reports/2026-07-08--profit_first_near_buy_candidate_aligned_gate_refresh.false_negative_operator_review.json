@@ -1,0 +1,339 @@
+{
+  "answers": {
+    "bounded_demo_probe_authorized": false,
+    "bounded_demo_probe_preflight_approved": true,
+    "global_cost_gate_lowering_recommended": false,
+    "main_cost_gate_adjustment": "NONE",
+    "operator_review_approval_source": "standing_demo_authorization",
+    "operator_review_approved_for_preflight": true,
+    "order_authority_granted": false,
+    "probe_authority_granted": false,
+    "promotion_evidence": false,
+    "review_grants_runtime_authority": false,
+    "standing_demo_authorization_consumed": true,
+    "standing_demo_authorization_present": true,
+    "standing_demo_authorization_valid": true
+  },
+  "artifacts": {
+    "false_negative_candidate_packet": {
+      "age_seconds": 2036.539351,
+      "generated_at_utc": "2026-07-08T09:32:50.943215+00:00",
+      "max_age_seconds": 86400,
+      "name": "false_negative_candidate_packet",
+      "path": "/tmp/tradebot_near_gate_refresh_20260708/inputs/false_negative_candidate_packet_latest.json",
+      "present": true,
+      "schema_version": "cost_gate_false_negative_candidate_packet_v1",
+      "source_error": null,
+      "status": "FRESH"
+    },
+    "standing_demo_authorization": {
+      "age_seconds": 10.684835,
+      "generated_at_utc": "2026-07-08T10:06:36.797731+00:00",
+      "max_age_seconds": 86400,
+      "name": "standing_demo_authorization",
+      "path": "/tmp/tradebot_near_gate_refresh_20260708/outputs/standing_demo_operator_authorization_near_buy.preview.json",
+      "present": true,
+      "schema_version": "standing_demo_operator_authorization_v1",
+      "source_error": null,
+      "status": "FRESH"
+    }
+  },
+  "blocking_gate_count": 0,
+  "blocking_gates": [],
+  "boundary": "artifact-only Cost Gate false-negative operator review; no PG query/write, Bybit call, order, config, risk, auth, runtime mutation, main Cost Gate lowering, probe authority, order authority, or promotion proof",
+  "candidate": {
+    "avg_cost_bps": 92.3,
+    "avg_gross_bps": 157.283,
+    "avg_net_bps": 64.983,
+    "candidate_class": "false_negative_after_cost",
+    "dominant_horizon_minutes": 60,
+    "false_negative_rank": 1,
+    "global_cost_gate_lowering_recommended": false,
+    "horizon_minutes": [
+      60
+    ],
+    "learning_diagnosis": "FALSE_NEGATIVE_CANDIDATE_AFTER_COST",
+    "net_cost_cushion_bps": 64.983,
+    "net_positive_pct": 100.0,
+    "next_action": "operator_review_bounded_probe_authority_without_global_gate_lowering",
+    "operator_review_required": true,
+    "order_authority_granted": false,
+    "outcome_count": 5058,
+    "probe_authority_granted": false,
+    "promotion_evidence": false,
+    "reason": "blocked_signal_markouts_clear_review_thresholds",
+    "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+    "sides": [
+      "Buy"
+    ],
+    "status": "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE",
+    "strategy_names": [
+      "ma_crossover"
+    ],
+    "symbols": [
+      "NEARUSDT"
+    ],
+    "wrongful_block_score": 129.9659
+  },
+  "decision": "approve-preflight",
+  "gates": [
+    {
+      "evidence": {},
+      "name": "authority_boundary_preserved",
+      "next_actions": [
+        "remove_authority_granting_input_before_review"
+      ],
+      "passed": true,
+      "reason": "review input must not grant Cost Gate lowering, probe/order authority, or promotion proof",
+      "status": "PRESERVED"
+    },
+    {
+      "evidence": {
+        "authority_contamination": false,
+        "candidate_scope": {
+          "outcome_horizon_minutes": 60,
+          "side": "Buy",
+          "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+          "strategy_name": "ma_crossover",
+          "symbol": "NEARUSDT"
+        },
+        "candidate_scope_matches": true,
+        "candidate_scoping_required": true,
+        "cost_gate_lowering_recommended": false,
+        "demo_only": true,
+        "environment": "demo",
+        "environment_valid": true,
+        "expires_at_utc": "2026-07-08T22:06:36.797731+00:00",
+        "expiry_valid": true,
+        "live_authority_granted": false,
+        "max_authorization_ttl_hours": 24,
+        "max_authorized_probe_orders_per_candidate": 2,
+        "operator_id": "profit-first-fast-demo-loop",
+        "promotion_evidence": false,
+        "risk_cap_lineage": {
+          "account_equity_usdt": 9544.67467679,
+          "bounded_probe_local_cap_usdt_is_authority": false,
+          "cap_source": "standing_demo_loss_control_envelope_review.gui_risk_config_plus_demo_equity",
+          "local_10_usdt_cap_is_global_risk_authority": false,
+          "per_trade_risk_pct_display": 10.0,
+          "per_trade_risk_pct_fraction": 0.1,
+          "position_size_max_pct": 25.0,
+          "resolved_cap_usdt": 954.46746768,
+          "risk_source_of_truth": "GUI-backed Rust RiskConfig",
+          "rounded_notional_usdt": null,
+          "single_position_budget_usdt": 2386.1686692,
+          "valid": true
+        },
+        "runtime_authority_granted": false,
+        "safe": true,
+        "schema_valid": true,
+        "scope": "demo_api_only_bounded_probe",
+        "scope_valid": true,
+        "standing_authorization_id": "standing-demo-loss-control-20260708T100636Z-6adb99b5d0fb",
+        "status": "STANDING_DEMO_AUTHORIZATION_ACTIVE",
+        "status_active": true,
+        "valid_for_candidate_scoped_authorization": true
+      },
+      "name": "standing_demo_authorization_valid_for_preflight_review",
+      "next_actions": [
+        "supply_fresh_valid_standing_demo_authorization_or_remove_invalid_envelope"
+      ],
+      "passed": true,
+      "reason": "standing Demo envelope must be fresh, Demo-only, scoped for bounded probe review, candidate-scoped, unexpired, and free of runtime/order/Cost Gate/promotion authority",
+      "status": "VALID"
+    },
+    {
+      "evidence": {
+        "answers": {
+          "global_cost_gate_lowering_recommended": false,
+          "operator_review_ready": true,
+          "order_authority_granted": false,
+          "probe_authority_granted": false,
+          "promotion_evidence": false
+        },
+        "artifact": {
+          "age_seconds": 2036.539351,
+          "generated_at_utc": "2026-07-08T09:32:50.943215+00:00",
+          "max_age_seconds": 86400,
+          "name": "false_negative_candidate_packet",
+          "path": "/tmp/tradebot_near_gate_refresh_20260708/inputs/false_negative_candidate_packet_latest.json",
+          "present": true,
+          "schema_version": "cost_gate_false_negative_candidate_packet_v1",
+          "source_error": null,
+          "status": "FRESH"
+        },
+        "summary": {
+          "edge_amplification_candidate_count": 10,
+          "false_negative_candidate_count": 1,
+          "keep_blocked_candidate_count": 5,
+          "ranked_candidate_count": 11,
+          "sample_accumulation_candidate_count": 0,
+          "top_edge_amplification_required_net_uplift_bps": 36.4803,
+          "top_edge_amplification_side_cell_key": "grid_trading|NEARUSDT|Sell",
+          "top_false_negative_net_cost_cushion_bps": 64.983,
+          "top_false_negative_side_cell_key": "ma_crossover|NEARUSDT|Buy",
+          "top_false_negative_wrongful_block_score": 129.9659
+        }
+      },
+      "name": "false_negative_candidate_packet_ready",
+      "next_actions": [
+        "refresh_cost_gate_false_negative_candidate_packet"
+      ],
+      "passed": true,
+      "reason": "candidate packet must be fresh, schema-valid, and ready for operator review",
+      "status": "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW"
+    },
+    {
+      "evidence": {
+        "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy",
+        "selection_method": "explicit_side_cell_key"
+      },
+      "name": "candidate_selected",
+      "next_actions": [
+        "select_ranked_false_negative_side_cell_for_review"
+      ],
+      "passed": true,
+      "reason": "review must name a ranked false-negative side-cell candidate",
+      "status": "SELECTED"
+    },
+    {
+      "evidence": {
+        "avg_cost_bps": 92.3,
+        "avg_gross_bps": 157.283,
+        "avg_net_bps": 64.983,
+        "candidate_class": "false_negative_after_cost",
+        "dominant_horizon_minutes": 60,
+        "false_negative_rank": 1,
+        "global_cost_gate_lowering_recommended": false,
+        "horizon_minutes": [
+          60
+        ],
+        "learning_diagnosis": "FALSE_NEGATIVE_CANDIDATE_AFTER_COST",
+        "net_cost_cushion_bps": 64.983,
+        "net_positive_pct": 100.0,
+        "next_action": "operator_review_bounded_probe_authority_without_global_gate_lowering",
+        "operator_review_required": true,
+        "order_authority_granted": false,
+        "outcome_count": 5058,
+        "probe_authority_granted": false,
+        "promotion_evidence": false,
+        "reason": "blocked_signal_markouts_clear_review_thresholds",
+        "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+        "sides": [
+          "Buy"
+        ],
+        "status": "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE",
+        "strategy_names": [
+          "ma_crossover"
+        ],
+        "symbols": [
+          "NEARUSDT"
+        ],
+        "wrongful_block_score": 129.9659
+      },
+      "name": "candidate_reviewable",
+      "next_actions": [
+        "rebuild_packet_or_select_reviewable_false_negative_candidate"
+      ],
+      "passed": true,
+      "reason": "selected candidate must remain a no-authority false-negative after-cost review row",
+      "status": "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE"
+    },
+    {
+      "evidence": {},
+      "name": "operator_id_present",
+      "next_actions": [
+        "record_operator_id_before_approval"
+      ],
+      "passed": true,
+      "reason": "approval requires a non-empty operator id",
+      "status": "PRESENT"
+    },
+    {
+      "evidence": {
+        "standing_demo_authorization_envelope_valid": true,
+        "standing_demo_authorization_valid": true,
+        "typed_confirm_expected": "approve_cost_gate_false_negative_preflight:ma_crossover|NEARUSDT|Buy:1",
+        "typed_confirm_matches": false,
+        "typed_confirm_provided": false
+      },
+      "name": "typed_confirm_matches",
+      "next_actions": [
+        "copy_exact_typed_confirm_from_artifact_before_approval"
+      ],
+      "passed": true,
+      "reason": "typed-confirm approval requires the exact phrase; standing Demo envelope approval is recorded in its separate fail-closed gate",
+      "status": "STANDING_DEMO_AUTHORIZATION"
+    }
+  ],
+  "generated_at_utc": "2026-07-08T10:06:47.482566+00:00",
+  "main_cost_gate_adjustment": "NONE",
+  "next_actions": [
+    "build_candidate_matched_bounded_demo_probe_preflight_for_approved_false_negative",
+    "preserve_global_cost_gate_no_lowering",
+    "require_touchability_fill_fee_slippage_lineage_before_probe_authorization"
+  ],
+  "operator_id": "profit-first-fast-demo-loop",
+  "operator_review_approval_source": "standing_demo_authorization",
+  "operator_review_approved_for_preflight": true,
+  "order_authority_granted": false,
+  "probe_authority_granted": false,
+  "promotion_evidence": false,
+  "reason": "approve-preflight",
+  "review_note": "candidate-aligned standing Demo loss-control preview generated source-only; no runtime materialization",
+  "review_scope": "preflight_review_only_not_probe_authorization",
+  "schema_version": "cost_gate_false_negative_operator_review_v1",
+  "selected_false_negative_rank": 1,
+  "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy",
+  "selection_method": "explicit_side_cell_key",
+  "standing_demo_authorization": {
+    "authority_contamination": false,
+    "candidate_scope": {
+      "outcome_horizon_minutes": 60,
+      "side": "Buy",
+      "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+      "strategy_name": "ma_crossover",
+      "symbol": "NEARUSDT"
+    },
+    "candidate_scope_matches": true,
+    "candidate_scoping_required": true,
+    "cost_gate_lowering_recommended": false,
+    "demo_only": true,
+    "environment": "demo",
+    "environment_valid": true,
+    "expires_at_utc": "2026-07-08T22:06:36.797731+00:00",
+    "expiry_valid": true,
+    "live_authority_granted": false,
+    "max_authorization_ttl_hours": 24,
+    "max_authorized_probe_orders_per_candidate": 2,
+    "operator_id": "profit-first-fast-demo-loop",
+    "promotion_evidence": false,
+    "risk_cap_lineage": {
+      "account_equity_usdt": 9544.67467679,
+      "bounded_probe_local_cap_usdt_is_authority": false,
+      "cap_source": "standing_demo_loss_control_envelope_review.gui_risk_config_plus_demo_equity",
+      "local_10_usdt_cap_is_global_risk_authority": false,
+      "per_trade_risk_pct_display": 10.0,
+      "per_trade_risk_pct_fraction": 0.1,
+      "position_size_max_pct": 25.0,
+      "resolved_cap_usdt": 954.46746768,
+      "risk_source_of_truth": "GUI-backed Rust RiskConfig",
+      "rounded_notional_usdt": null,
+      "single_position_budget_usdt": 2386.1686692,
+      "valid": true
+    },
+    "runtime_authority_granted": false,
+    "safe": true,
+    "schema_valid": true,
+    "scope": "demo_api_only_bounded_probe",
+    "scope_valid": true,
+    "standing_authorization_id": "standing-demo-loss-control-20260708T100636Z-6adb99b5d0fb",
+    "status": "STANDING_DEMO_AUTHORIZATION_ACTIVE",
+    "status_active": true,
+    "valid_for_candidate_scoped_authorization": true
+  },
+  "status": "APPROVED_COST_GATE_FALSE_NEGATIVE_FOR_BOUNDED_DEMO_PROBE_PREFLIGHT",
+  "typed_confirm_expected": "approve_cost_gate_false_negative_preflight:ma_crossover|NEARUSDT|Buy:1",
+  "typed_confirm_matches": false,
+  "typed_confirm_provided": false
+}

@@ -96,6 +96,56 @@ def _candidate_packet(**overrides: object) -> dict[str, object]:
     return payload
 
 
+def _candidate_packet_without_risk_lineage() -> dict[str, object]:
+    packet = _candidate_packet()
+    row = dict(packet["ranked_false_negative_candidates"][0])
+    row.pop("risk_cap_lineage", None)
+    packet["ranked_false_negative_candidates"] = [row]
+    return packet
+
+
+def _equity_artifact(
+    *,
+    equity: float = 9552.43426257,
+    generated_at: dt.datetime = NOW,
+) -> dict[str, object]:
+    return {
+        "schema_version": "demo_account_equity_artifact_v1",
+        "status": "DEMO_FAST_BALANCE_EQUITY_ARTIFACT_READY_NO_AUTHORITY",
+        "generated_at_utc": generated_at.isoformat(),
+        "environment": "demo",
+        "source_endpoint": "/api/v1/strategy/demo/balance?fast=1",
+        "payload": {
+            "data": {
+                "read_model": "rust_snapshot_fast",
+                "pipeline_status": "connected",
+                "totalEquity": equity,
+                "total_equity": equity,
+                "equity": equity,
+                "balance": equity,
+            }
+        },
+        "answers": {
+            "global_cost_gate_lowering_recommended": False,
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+    }
+
+
+def _gui_risk_config() -> dict[str, object]:
+    return {
+        "limits": {
+            "per_trade_risk_pct": 0.1,
+            "position_size_max_pct": 25.0,
+            "total_exposure_max_pct": 150.0,
+            "correlated_exposure_max_pct": 65.0,
+            "max_order_notional_usdt": 0.0,
+        }
+    }
+
+
 def test_ready_review_builds_valid_candidate_scoped_envelope_without_runtime_mutation() -> None:
     review = build_standing_demo_loss_control_envelope_review(
         false_negative_candidate_packet=_candidate_packet(),
@@ -146,6 +196,45 @@ def test_ready_review_builds_valid_candidate_scoped_envelope_without_runtime_mut
         review["materialization_plan"]["future_apply_steps_require_e3_review"][2]
     )
     assert "Standing Demo Loss-Control Envelope Review" in markdown
+
+
+def test_gui_risk_inputs_supply_missing_candidate_packet_cap_lineage() -> None:
+    review = build_standing_demo_loss_control_envelope_review(
+        false_negative_candidate_packet=_candidate_packet_without_risk_lineage(),
+        selected_side_cell_key=SIDE_CELL,
+        operator_id="operator-test",
+        gui_risk_config=_gui_risk_config(),
+        account_equity_artifact=_equity_artifact(),
+        now_utc=NOW,
+    )
+
+    assert review["status"] == READY_STATUS
+    assert (
+        review["source_inputs"]["risk_cap_lineage_source"]
+        == "gui_risk_config_plus_demo_equity_artifact"
+    )
+    assert review["source_inputs"]["account_equity_resolution"]["accepted"] is True
+    envelope = review["envelope_preview"]
+    assert envelope["risk_cap_lineage"]["resolved_cap_usdt"] == 955.24342626
+    assert envelope["risk_cap_lineage"]["per_trade_risk_pct_fraction"] == 0.1
+    assert envelope["risk_cap_lineage"]["per_trade_risk_pct_display"] == 10.0
+    assert (
+        envelope["risk_cap_lineage"]["local_10_usdt_cap_is_global_risk_authority"]
+        is False
+    )
+
+
+def test_missing_candidate_cap_lineage_still_fails_without_gui_risk_inputs() -> None:
+    review = build_standing_demo_loss_control_envelope_review(
+        false_negative_candidate_packet=_candidate_packet_without_risk_lineage(),
+        selected_side_cell_key=SIDE_CELL,
+        operator_id="operator-test",
+        now_utc=NOW,
+    )
+
+    assert review["status"] == "GUI_RISK_CAP_INPUT_REQUIRED"
+    assert "gui_risk_cap_lineage_valid" in review["blocking_gates"]
+    assert review["envelope_preview"] == {}
 
 
 def test_authority_contamination_blocks_and_omits_envelope() -> None:

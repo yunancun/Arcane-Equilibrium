@@ -1,0 +1,62 @@
+{
+  "schema_version": "profit_first_ai_ml_resolution_loop_effect_review_v1",
+  "generated_at_utc": "2026-07-08T10:45:00Z",
+  "status": "READY_FOR_PM_E3_DISPATCH",
+  "work_item": "P0-PROFIT-FIRST-NEAR-BUY-CANDIDATE-ALIGNED-GATE-REFRESH",
+  "intended_effects": [
+    "refresh current NEAR Buy candidate-aligned no-authority gate chain",
+    "repair producer contract where current candidate packet lacks risk_cap_lineage",
+    "emit exact PM->E3 request only after machine-readable no-authority artifacts are READY"
+  ],
+  "actual_effects": [
+    {
+      "type": "source_only_code_change",
+      "paths": [
+        "helper_scripts/research/cost_gate_learning_lane/standing_demo_loss_control_envelope_review.py",
+        "helper_scripts/research/tests/test_cost_gate_standing_demo_loss_control_envelope_review.py"
+      ],
+      "summary": "standing envelope review can derive missing cap lineage from GUI-backed Rust RiskConfig plus accepted Demo equity artifact; fail-closed fallback coverage added"
+    },
+    {
+      "type": "source_only_artifact_checkpoint",
+      "paths": [
+        "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_candidate_aligned_gate_refresh.md",
+        "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_candidate_aligned_gate_refresh.state_packet.json",
+        "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_candidate_aligned_gate_refresh.exact_scope_request.json",
+        "docs/CCAgentWorkSpace/Operator/2026-07-08--profit_first_near_buy_candidate_aligned_gate_refresh.md"
+      ],
+      "summary": "PM report, state packet, exact request, operator summary, and generated gate artifacts recorded"
+    },
+    {
+      "type": "source_only_linux_sync",
+      "summary": "Linux trade-core was clean and fast-forwarded to the existing GitHub main docs/state checkpoint before gate work"
+    },
+    {
+      "type": "read_only_runtime_audit",
+      "summary": "Linux PG audit was read-only and produced touchability baseline; no write or migration occurred"
+    }
+  ],
+  "forbidden_effects_observed": {
+    "live_or_mainnet": false,
+    "public_bybit_call": false,
+    "private_bybit_call": false,
+    "decision_lease_acquire_or_release": false,
+    "order_probe_cancel_or_modify": false,
+    "standing_authorization_materialization": false,
+    "runtime_env_mutation": false,
+    "service_restart_or_build": false,
+    "db_write_or_migration": false,
+    "cost_gate_lowering": false,
+    "proof_or_promotion_claim": false,
+    "unrelated_dirty_changes_touched": false
+  },
+  "authority_result": {
+    "candidate_aligned_no_authority_chain_ready": true,
+    "pm_e3_request_emitted": true,
+    "bounded_demo_probe_authorized": false,
+    "order_authority_granted": false,
+    "probe_authority_granted": false,
+    "operator_authorization_object_emitted": false,
+    "next_allowed_action": "dispatch PM->E3 exact request after fresh source/runtime head recheck"
+  }
+}
