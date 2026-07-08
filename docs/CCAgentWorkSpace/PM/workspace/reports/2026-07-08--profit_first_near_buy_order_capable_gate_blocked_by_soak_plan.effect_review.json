@@ -1,0 +1,57 @@
+{
+  "schema_version": "profit_first_effect_review_v1",
+  "generated_at_utc": "2026-07-08T18:49:15+00:00",
+  "status": "HARD_BLOCKED_NO_SAFE_ACTION",
+  "candidate": "ma_crossover|NEARUSDT|Buy",
+  "effects": {
+    "source_files_changed": [
+      "helper_scripts/research/cost_gate_learning_lane/current_candidate_order_capable_demo_invoke_review_packet.py",
+      "helper_scripts/research/cost_gate_learning_lane/current_candidate_order_fill_evidence_scan_strict.py",
+      "helper_scripts/research/tests/test_current_candidate_order_capable_demo_invoke_review_packet.py",
+      "helper_scripts/research/tests/test_current_candidate_order_fill_evidence_scan_strict.py"
+    ],
+    "docs_files_changed": [
+      "TODO.md",
+      "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_order_capable_gate_blocked_by_soak_plan.md",
+      "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_order_capable_gate_blocked_by_soak_plan.state_packet.json",
+      "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_order_capable_gate_blocked_by_soak_plan.effect_review.json",
+      "docs/CCAgentWorkSpace/Operator/2026-07-08--profit_first_near_buy_order_capable_gate_blocked_by_soak_plan.md"
+    ],
+    "runtime_files_written": [],
+    "runtime_files_read_only": [
+      "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/standing_demo_operator_authorization.json",
+      "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_probe_operator_authorization_latest.json",
+      "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_demo_probe_soak_plan.json",
+      "/home/ncyu/BybitOpenClaw/var/openclaw/profit_first_dynamic_candidate_same_window_final_gate_20260708T175744Z_08f7e957_noorder/renewed_active_bbo_execution_manifest.json",
+      "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/probe_ledger.jsonl",
+      "/home/ncyu/BybitOpenClaw/var/openclaw/pipeline_snapshot_demo.json",
+      "/home/ncyu/BybitOpenClaw/var/openclaw/pipeline_snapshot.json",
+      "/home/ncyu/BybitOpenClaw/var/openclaw/engine.log"
+    ]
+  },
+  "verification": {
+    "focused_pytest": "19 passed",
+    "py_compile": "passed",
+    "source_checkpoint": "84132cc3b8a6e9ba118d0823353a4f9ec9735406",
+    "active_order_contract_sha256": "1b2535bd23863251bb29c31a827b63777bf76b43f3e6772a86f124c10d2adfae",
+    "order_capable_packet_sha256": "9b39f4f72d35e9d2f90a1f536bdb53cfe077ac8a8059886a2ab1d1c9ca02ed46",
+    "strict_scan_sha256": "3453ac4f46e083650eed973189de61920b52ed5bc2bb577aa0f5c2a79a06ac6c"
+  },
+  "risk_boundary": {
+    "bybit_call_performed": false,
+    "decision_lease_performed": false,
+    "order_or_probe_performed": false,
+    "db_or_pg_write_performed": false,
+    "pg_query_performed": false,
+    "runtime_or_service_mutation_performed": false,
+    "canonical_plan_write_performed": false,
+    "cost_gate_lowering_performed": false,
+    "live_or_mainnet_authority_granted": false,
+    "proof_or_promotion_claim": false
+  },
+  "residual_risk": [
+    "Canonical soak plan remains stale ETH and expired; it must not be rematerialized or consumed.",
+    "Standing Demo authorization expires at 2026-07-09T00:12:30.886090+00:00 and must be rechecked before any future scope.",
+    "Generated order-capable packet is intentionally blocked and is not an E3/BB dispatch request."
+  ]
+}
