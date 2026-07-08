@@ -6,7 +6,7 @@ type: project
 
 ## 事實
 
-2026-03-31 建立了 `docs/CCAgentWorkSpace/` 目錄，15 個 Agent 角色各自有獨立工作空間。
+2026-03-31 建立了 `docs/CCAgentWorkSpace/` 目錄，18 個 Agent 角色各自有獨立工作空間（另加 `Operator` 目錄 + `README.md`）。
 
 **Why:** 每個 Agent 啟動時需要對照自己的 workspace 工作記錄，避免重複工作或忘記上次決策。報告先存 workspace 再回報，形成可查閱的工作歷史。
 
@@ -20,9 +20,9 @@ type: project
 
 `/home/ncyu/BybitOpenClaw/srv/docs/CCAgentWorkSpace/`
 
-## 15 個 Agent 目錄
+## 18 個 Agent 目錄
 
-PM / FA / PA / CC / E1 / E1a / E2 / E3 / E4 / E5 / A3 / R4 / TW / AI-E / QA
+PM / FA / PA / CC / E1 / E1a / E2 / E3 / E4 / E5 / A3 / R4 / TW / AI-E / QA / QC / MIT / BB（另有 `Operator` 目錄 + `README.md`）
 
 每個目錄下有：
 - `profile.md` — 角色定位、技能、激活條件（靜態）

@@ -1,23 +1,11 @@
 ---
-name: MICRO-PROFIT-FIX-1 設計意圖澄清 + 2026-04-22 runtime 狀態校正
-description: MICRO-PROFIT-FIX-1 應該是「有微利就套」；2026-04-22 發現 T3 deprecation 後 runtime 已 2.5d 無實作
+name: MICRO-PROFIT-FIX-1 設計意圖澄清
+description: MICRO-PROFIT-FIX-1 應該是「有微利就套（net>0）」，核心是 net>0 就套現，不是 cost_edge_ratio gate
 type: feedback
 originSessionId: 07d18dec-5d35-44d7-8c6f-2a37e462ab5d
 ---
 
-## 🔴 2026-04-22 runtime 狀態校正（新增，操作前必讀）
-
-**實測**：2026-04-19 Track P T3 deprecation commit 把 `risk_checks.rs:250-264` 的 COST EDGE gate 整個註解掉，**MICRO-PROFIT-FIX-1 narrow-band gate 已無 runtime 實作**。後續本應由 Priority 6 PHYS-LOCK + ExitFeatures 取代但：
-- 2026-04-19 晚 T3 rebuild → 2026-04-21 晚 T4 接線 rebuild：Priority 6 features=None 永遠 Hold（**2.5 天退場層完全空窗**）
-- 2026-04-21 晚 T4 接線後：Gate 1 `est_net_bps` 99.1% NULL + P0-13 ATR scale bug → PHYS-LOCK **7 天 0 fire**
-
-**因此本 feedback 的設計意圖**（「有微利就套」）**目前在 runtime 完全未實作**。任何基於此 memory 的決策（P0-3 Phase 5 edge 重評、P1-10 R1 驗收結論）都需先修 P0-13/P0-14 才能真正執行設計意圖。
-
-詳 `docs/worklogs/2026-04-22--passive_wait_silent_fail_audit.md` §3.4 + TODO §P0-15。
-
----
-
-## 原設計意圖（保留）
+## 原設計意圖
 
 MICRO-PROFIT-FIX-1 的設計初衷是「**每次有微利（扣完 fee 後仍為正）就套利**」，不是「低收益條件下 cost_edge_ratio 夠大才套現」的 gate 判斷。
 

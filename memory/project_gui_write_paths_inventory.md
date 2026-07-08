@@ -4,7 +4,13 @@ description: 1C-3/1C-4 後 GUI 寫入路徑的真實分類，避免重做盤點 
 type: project
 ---
 
-2026-04-08 P0 全 GUI 寫入面盤點結論（93 endpoints / 16 route 模組）：
+> ⚠️ **2026-07-09 註記：本檔為 2026-04-08 快照，已知漂移**（fake-success 判別方法論仍有效，但數字/路徑/型別已過期）：
+> 1. **`TradingMode` 已刪除**，由 `PipelineKind` 取代 — `rust/openclaw_engine/src/config/mod.rs:51`「3E-10.4: TradingMode DELETED — replaced by PipelineKind (tick_pipeline.rs)」;:165 `trading_mode` field 亦刪除。下方「冷參數不能 hot-patch」教訓仍成立，只是型別名改了（見已更正段）。
+> 2. **Python 控制平面路徑已移位**：從 top-level `control_api_v1/` 移到 `program_code/exchange_connectors/bybit_connector/control_api_v1/`（top-level 已不存在）。
+> 3. **「93 endpoints / 16 route 模組」是舊快照計數，已漂移**，勿當現值引用。
+> 下方 fake-success 判別（R/PR/P 三類 + 三步排查模板）為 durable，保留。
+
+2026-04-08 P0 全 GUI 寫入面盤點結論（93 endpoints / 16 route 模組，**計數已漂移見頂部註記**）：
 
 ## 三類寫入路徑
 
@@ -14,7 +20,7 @@ type: project
 
 ## ⚠️ 容易誤判的點
 
-**Rust `TradingMode` 是冷參數**（`rust/openclaw_engine/src/config/mod.rs:327-332`）：只在啟動時讀 engine.toml，運行時 hot-reload 邏輯明確 preserve old value + log "requires restart"。**不能 hot-patch，新增 patch_runtime_mode IPC 是錯的**。
+**Rust pipeline mode 是冷參數**（原 `TradingMode`，2026-04 起已刪除、由 `PipelineKind` 取代 — 見頂部註記 + `rust/openclaw_engine/src/config/mod.rs:51`）：pipeline 於構造時由 `PipelineKind` 標識、無全局熱切換 mode。舊 `TradingMode` 只在啟動時讀 engine.toml，運行時 hot-reload 邏輯明確 preserve old value + log "requires restart"。**不能 hot-patch，新增 patch_runtime_mode IPC 是錯的**（此教訓不變）。
 
 **Python `global_execution_mode_switch` 是 operator 授權平面**（disabled / observe_only / shadow_only / demo_reserved / live_reserved），不是 engine 執行模式。`state_compiler.py` 用它 gate 多個動作（lines 196/210/232/261/311/344/538/542/551）。Rust 只執行 IPC 進來的訂單；Python 控制平面決定要不要讓訂單進 IPC。**架構本來就對的**。
 

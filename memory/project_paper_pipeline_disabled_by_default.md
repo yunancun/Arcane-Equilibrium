@@ -1,9 +1,22 @@
 ---
 name: Paper 管線 2026-04-16 起預設關閉
-description: 2026-04-16 起 Paper 管線 opt-in via OPENCLAW_ENABLE_PAPER=1；預設關閉以停止噪音污染；3E-ARCH 結構保留，僅 runtime spawn 被 gate
+description: SUPERSEDED 2026-05-23 — Paper 管線已 ARCHIVED（OPENCLAW_ENABLE_PAPER=1 被 ignored，非「預設關閉可重啟」）;replacement=Replay Stage 0R + Demo micro-canary。下方 2026-04-16 body 保留為 history
 type: project
 originSessionId: abb660ab-97c1-4057-990d-57e49d15432b
 ---
+## ⚠️ 2026-07-09 更正（SUPERSEDED — paper 已 ARCHIVED，非僅「預設關閉」）
+
+**Ground truth（2026-05-23 起）**：`OPENCLAW_ENABLE_PAPER=1` **已被忽略（ignored）**;paper 管線是 **ARCHIVED**，不是「預設關閉、export+restart 可重啟」。下方 body 的重啟指令**已 DEAD**（見標註）。intended replacement = **Replay Stage 0R + Demo micro-canary**（對齊 CLAUDE.md §四「Stage 1 alpha-bearing promotion is Demo-only after a green Stage 0R replay preflight」/「Legacy crypto Paper is not an active promotion evidence lane」）。
+
+證據（file:line）：
+- `rust/openclaw_engine/src/main_pipelines.rs:237` — `"OPENCLAW_ENABLE_PAPER=1 ignored: paper pipeline is archived; use Replay Stage 0R + Demo micro-canary"`;同檔 :172 `"paper pipeline archived: use Replay Stage 0R + Demo micro-canary instead"`、:244 `"paper pipeline ARCHIVED/DISABLED; promotion_allowed=false"`、:273/:291 `disabled_reason: "paper archived 2026-05-23; ..."`。
+- `rust/openclaw_engine/src/main.rs:1239` — `OPENCLAW_ENABLE_PAPER=1 → ignored since 2026-05-23`;:1343 `OPENCLAW_ENABLE_PAPER=1 is ignored`;:1342 `spawn_paper_pipeline` always writes archived DISABLED markers and drains。
+- `rust/openclaw_engine/src/panel_aggregator/btc_lead_lag.rs:66` — 「自 2026-05-23，`OPENCLAW_ENABLE_PAPER=1` 不再觸發 spawn」。
+
+歷史 Gate 1.6 負餘額守門（下方 body）仍是真實生效的守門，保留為 history。
+
+---
+
 **事實**：2026-04-16 commit（PAPER-DISABLE-1）起，Paper 管線**預設不啟動**。環境變數 `OPENCLAW_ENABLE_PAPER=1` 才 spawn；否則：
 1. `paper_health` 設 `PipelineHealth::Disabled = 3`
 2. 寫入 `/tmp/openclaw/paper_state.json` + `pipeline_snapshot_paper.json` 含 `disabled: true` + `disabled_since_ms` 標記
@@ -19,7 +32,7 @@ originSessionId: abb660ab-97c1-4057-990d-57e49d15432b
 
 **How to apply**：
 - 引擎重啟後預期：log 出現 `paper pipeline DISABLED`；`trading.fills WHERE engine_mode='paper'` 停止累積
-- 如需重新啟用 paper（W22+ Agent 探索階段）：`export OPENCLAW_ENABLE_PAPER=1` + `restart_all.sh --rebuild`
+- ~~如需重新啟用 paper（W22+ Agent 探索階段）：`export OPENCLAW_ENABLE_PAPER=1` + `restart_all.sh --rebuild`~~ **← DEAD（2026-05-23 起 env 被 ignored、paper ARCHIVED;見頂部更正。replacement = Replay Stage 0R + Demo micro-canary）**
 - 3E-ARCH 結構保留 — `PipelineKind::Paper`、`risk_stores.paper`、`per_engine_predictors.paper`、`paper_positions_mirror`、`strategy_params_paper.toml`、`risk_config_paper.toml` 全部保留；只有 runtime spawn 被 gate
 - 同時新增 **Gate 1.6 負餘額守門**（`intent_processor/router.rs`）：`balance() <= 0 && get_position(symbol).is_none() → reject "insufficient_balance"`。Paper 專用觸發（demo/live 由交易所保證金檢查兜底），反向平倉仍允許
 

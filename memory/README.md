@@ -13,21 +13,37 @@ Linux boxes, future CI sandboxes).
 
 ## How to sync to a new machine (e.g. Mac dev)
 
-On the new machine, after `git pull`:
+> ⚠️ **2026-07-09 correction**: the Mac does **not** rsync memory. Both project
+> keys' `memory` are **symlinks into the repo**. The old instruction
+> (`rsync -av --delete ... "$HOME/.claude/projects/$MAC_PROJECT_KEY/memory/"`)
+> would run `--delete` **onto a symlink of the repo itself** — a footgun. Use
+> the symlink setup below instead.
+
+On this Mac, CC actually loads memory via the **no-`srv` project key**
+(`-Users-ncyu-Projects-TradeBot`), which chains to the `-srv` key's symlink;
+the `-srv` key points straight at the repo. Verified live (`readlink`):
+
+```
+~/.claude/projects/-Users-ncyu-Projects-TradeBot-srv/memory
+  → /Users/ncyu/Projects/TradeBot/srv/memory            # 直指 repo
+~/.claude/projects/-Users-ncyu-Projects-TradeBot/memory
+  → ../-Users-ncyu-Projects-TradeBot-srv/memory          # chain 到上者
+```
+
+On a new machine, after `git pull`, **create the symlinks** (do not copy):
 
 ```bash
-# Replace <MAC_PROJECT_KEY> with the slash-to-dash form of your absolute
-# $OPENCLAW_BASE_DIR, e.g. /Users/ncyu/Projects/TradeBot/srv → -Users-ncyu-Projects-TradeBot-srv
-MAC_PROJECT_KEY="-Users-ncyu-Projects-TradeBot-srv"
-
-mkdir -p "$HOME/.claude/projects/$MAC_PROJECT_KEY"
-rsync -av --delete "$OPENCLAW_BASE_DIR/memory/" "$HOME/.claude/projects/$MAC_PROJECT_KEY/memory/"
+# -srv key points straight at the repo ($OPENCLAW_BASE_DIR = your srv abs path)
+ln -sfn "$OPENCLAW_BASE_DIR/memory" "$HOME/.claude/projects/-Users-ncyu-Projects-TradeBot-srv/memory"
+# no-srv key chains to the -srv key (this is the path CC on this Mac loads)
+ln -sfn "../-Users-ncyu-Projects-TradeBot-srv/memory" "$HOME/.claude/projects/-Users-ncyu-Projects-TradeBot/memory"
 ```
 
 Verify CC sees it on next launch:
 
 ```bash
-ls "$HOME/.claude/projects/$MAC_PROJECT_KEY/memory/MEMORY.md"
+readlink "$HOME/.claude/projects/-Users-ncyu-Projects-TradeBot-srv/memory"
+ls "$HOME/.claude/projects/-Users-ncyu-Projects-TradeBot/memory/MEMORY.md"
 ```
 
 ## How to refresh this snapshot (from Linux)
@@ -43,6 +59,12 @@ git push
 ```
 
 ## Bidirectional sync caveat
+
+> ⚠️ **2026-07-09 correction (Mac side)**: since the Mac's `memory` is a symlink
+> into the repo, Mac CC writes land **directly in `srv/memory/`** — there is no
+> "reverse rsync from the Mac" step; just `git add memory/ && git commit && push`
+> from the repo. The reverse-rsync text below is retained as history for
+> non-symlink setups only.
 
 If Mac CC writes new memories and you want them to flow back to Linux, run the
 same rsync in reverse from the Mac side into the repo, then push. Resolving

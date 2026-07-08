@@ -28,6 +28,8 @@ metadata:
 **Why**：V5.8 13 模組（3500-5200hr）的 active gate 全 conditional on「有 edge 可治理」；edge 未證前建 autonomy 基建 = 為不存在的引擎造變速箱，且 M4 production writeback 已被 Decision Lease 基建 `UUID column vs lease:<id>` schema mismatch 反噬。違反憲法優先序。
 **How to apply**：edge 證實前 autonomy 只做 DESIGN；任何 Sprint 2+ schema 派工以 `sql/migrations/` 真實檔為編號權威（非 V5.8 §9 / 非 TODO Banner）；下游派工前先 reconcile V### roster。relates [[project_phase5_promotion_edge_crisis]] [[project_2026_05_10_sprint_n0_closure]] [[feedback_demo_loose_live_strict_policy]] [[project_2026_05_22_layered_autonomy_with_failsafe]]
 
+**演變軌跡(2026-07-09):** Q1「凍結 autonomy 主攻 alpha」已反轉——autonomy 非但未凍,2026-07-05+ operator 指令 TradeBot 跑 standing **profit-first 自主 loop**(discover→execute→learn 現行工程主線,見 [[project_2026_07_08_profit_first_autonomy_loop]]);V### roster BLOCKER 亦早解(Linux PG 現 head=150)。本條凍結決策/schema-roster 診斷為 2026-05-31 點狀,保留為敘事起點,不再作當前排期權威。
+
 
 ---
 

@@ -5,6 +5,12 @@ type: project
 originSessionId: 189878ce-df95-4b97-a566-ea1b4e395fe9
 ---
 
+## ⚠️ 2026-07-09 演變更正（L2 advisory mesh 已大致 shipped + 路徑漂移）
+
+1. **路徑漂移**：下方 5-Agent 表原引 top-level `control_api_v1/app/*.py`，已改指新 base `program_code/exchange_connectors/bybit_connector/control_api_v1/app/`（top-level `control_api_v1/` 已不存在;本檔表內路徑已同步更新）。
+2. **「Layer 2 自主推理循環 待開發」框架已被超越**：L2 advisory mesh 已 shipped（P1–P4，見 memory `project_2026_06_08_l2_d3_phase1_green` + MEMORY.md 索引）。**active tail 僅剩 `P1-L2-ADVISORY-MESH-E2E-1`**（`TODO.md` WAITING_OPERATOR）= operator 批准一次 true `diagnose_leak` 真 Ollama model call、寫真 `agent.l2_calls` row、記錄證據後復原 capability disabled;既有 deploy/E2E-0 只證 `l2_gate_seam_log` rejection + `l2_calls=0`，不視為全閉。
+3. 下方 L0/L1/L2 三層概念描述 + 2026-04-23 更正保留為 history;唯 Gap B「Layer 2 核心待設計」措辭已被 P1–P4 shipped 取代，僅 E2E-1 一次性 operator-gated 窗口未閉。
+
 ## ⚠️ 2026-04-23 重大更正
 
 **先前敘述「H1-H5 全為 stub」與 CLAUDE.md §十 舊描述 均過期**。
@@ -14,12 +20,12 @@ originSessionId: 189878ce-df95-4b97-a566-ea1b4e395fe9
 ### 5-Agent 代碼現況（非 stub）
 | Agent | 檔案 | 行數 | Runtime 狀態 |
 |---|---|---|---|
-| StrategistAgent | `control_api_v1/app/strategist_agent.py:85` | 1170 | `shadow=False`（Sprint 5a live，`strategy_wiring.py:243`） |
-| GuardianAgent | `control_api_v1/app/guardian_agent.py:87` | 587 | MessageBus subscribed |
-| AnalystAgent | `control_api_v1/app/analyst_agent.py:162` | 834 | MessageBus subscribed |
-| ExecutorAgent | `control_api_v1/app/executor_agent.py:118` | 630 | **`_shadow_mode=True` 默認**，`strategy_wiring.py:467` `ExecutorConfig()` 未覆蓋 |
-| ScoutWorker | `control_api_v1/app/scout_worker.py:38` | 194 | MessageBus subscribed |
-| Conductor | `control_api_v1/app/multi_agent_framework.py:675` | 1137 | 5 角色註冊 |
+| StrategistAgent | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/strategist_agent.py:85` | 1170 | `shadow=False`（Sprint 5a live，`strategy_wiring.py:243`） |
+| GuardianAgent | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/guardian_agent.py:87` | 587 | MessageBus subscribed |
+| AnalystAgent | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/analyst_agent.py:162` | 834 | MessageBus subscribed |
+| ExecutorAgent | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/executor_agent.py:118` | 630 | **`_shadow_mode=True` 默認**，`strategy_wiring.py:467` `ExecutorConfig()` 未覆蓋 |
+| ScoutWorker | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/scout_worker.py:38` | 194 | MessageBus subscribed |
+| Conductor | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/multi_agent_framework.py:675` | 1137 | 5 角色註冊 |
 
 ### H1-H5 Middleware（非 stub）
 - `h1_thought_gate.py` 185 行

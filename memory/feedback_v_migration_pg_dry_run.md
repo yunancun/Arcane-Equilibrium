@@ -38,7 +38,7 @@ REF-20 Sprint C R6-T0' V055 retrofit took 5 rounds (E1 round 1-5 + E2 round 1-5)
 
 **Related**: P0-PROCESS-1 (Mac Python 3.10 / Linux Python 3.12 FastAPI lazy ForwardRef difference, Sprint A R3) — same Mac vs Linux drift class. V### migration is a new instance of the same anti-pattern.
 
-**Bake into governance**: Update CLAUDE.md §七 SQL migration 規範 to include "PG dry-run mandatory before E1 IMPL design" — pending operator decision on whether to make this hard rule or recommended practice.
+**Baked into governance（已定案）**: CLAUDE.md「Data, Migrations, And Validation」已納入「V### 涉 PG reflection / transaction control / schema 假設須先做 Linux PG empirical dry-run before sign-off」+「migration idempotency must be tested by applying twice」。不再是 pending，已是硬規範。
 
 ---
 
