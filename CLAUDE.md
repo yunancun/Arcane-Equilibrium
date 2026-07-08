@@ -27,7 +27,9 @@ in reports/archive. Do not mirror long status paragraphs here.
 - Bybit remains the only active live execution exchange. ADR-approved
   non-Bybit exceptions are explicitly scoped: Binance market-data-only per
   ADR-0033/0040, and IBKR `stock_etf_cash` read-only/paper/shadow research per
-  ADR-0048 + AMD-2026-06-29-01. IBKR live/tiny-live remains denied.
+  ADR-0048 + AMD-2026-06-29-01, with Phase 2 read-only external contact
+  authorized per AMD-2026-07-08-01 (Rust-owned read-only TWS client only; gated).
+  IBKR live/tiny-live remains denied.
 - Rust `openclaw_engine` is the trading, risk, strategy-config, and execution
   authority.
 - Python/FastAPI is the control plane, GUI backend, bridge, replay surface, and
