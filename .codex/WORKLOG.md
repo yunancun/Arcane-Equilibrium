@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-07-09 00:00 CEST
+- dispatched scanner-driven Autonomous Learning Runtime adversarial design chain: `CC`, `FA`, `QC`, `MIT`, `AI-E`, `E5`, `E3`, `BB`, `PA`
+- result: direction accepted only as source/artifact-only single-shot P0; no scheduler/daemon/IPC/PG/runtime/Bybit/order behavior in P0
+- reports: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_autonomous_learning_runtime_engineering_plan.md` and `docs/CCAgentWorkSpace/Operator/2026-07-09--scanner_driven_autonomous_learning_runtime_engineering_plan.md`
+- boundary: docs/worklog only; no source code edit, runtime SSH, PG, Bybit/API/order, Decision Lease, scanner cadence/subscription change, Cost Gate change, proof or promotion claim
+
 2026-06-26 23:55 CEST
 - closed `P1-RUNTIME-HEALTH-HYGIENE-STANDING-DEMO-AUTH-PLUMBING-SYNC-REVIEW` as `DONE_WITH_CONCERNS`
 - runtime `trade-core` fast-forwarded `b224c759... -> 69f6c4b2...`; crontab expected-head pins old/target `11/0 -> 0/11`; line count stayed `70`; no mainnet, adapter, or probe-outcome-recording expansion
