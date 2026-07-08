@@ -1,7 +1,7 @@
 {
   "schema_version": "profit_first_ai_ml_resolution_loop_effect_review_v1",
-  "generated_at_utc": "2026-07-08T16:50:56Z",
-  "status": "READY_FOR_PM_E3_DISPATCH",
+  "generated_at_utc": "2026-07-08T16:59:11Z",
+  "status": "READY_FOR_PM_BB_DISPATCH",
   "actual_effects": [
     {
       "type": "source_fix",
@@ -23,6 +23,14 @@
     {
       "type": "source_artifact_checkpoint",
       "summary": "recorded PM report, state packet, effect review, E3 request, operator summary, TODO, and changelog"
+    },
+    {
+      "type": "e3_exact_scope_review",
+      "summary": "E3 returned APPROVE_FOR_PM_BB_REPAIR_REVIEW_REQUEST and wrote the read-only review report"
+    },
+    {
+      "type": "bb_exact_scope_request",
+      "summary": "PM emitted a read-only BB request for repaired-chain review; no final-window or exchange-facing authority granted"
     }
   ],
   "forbidden_effects_observed": {
@@ -41,7 +49,8 @@
     "proof_or_promotion_claim": false
   },
   "authority_result": {
-    "ready_for_pm_e3_dispatch": true,
+    "ready_for_pm_e3_dispatch": false,
+    "ready_for_pm_bb_dispatch": true,
     "ready_for_bounded_demo_final_window": false,
     "same_window_final_gate_still_required": true,
     "bounded_demo_probe_authorized": false,

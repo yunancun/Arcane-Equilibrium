@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-08（TODO v752 E3 dispatch hash refresh）
+> 最後更新：2026-07-08（TODO v753 E3 approved and BB request emitted）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**TODO v753 E3 approved and BB request emitted（2026-07-08）**：E3 exact-scope read-only review `docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_e3_review.md` returned `APPROVE_FOR_PM_BB_REPAIR_REVIEW_REQUEST` against checkpoint `3d2473c55...`, Linux clean, current candidate `ma_crossover|NEARUSDT|Buy`, and runtime hashes `d4d4a37b...` / `b21f4a40...` / `80579cec...` / `bdd8988f...` / `29ccfd57...` / `4e2b0a39...` / `baa38ff5...` / `63f537fd...`。PM emitted exact BB request `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_bb_request.json`; current state `READY_FOR_PM_BB_DISPATCH`。Boundary remains no Bybit call、no Decision Lease、no order/probe/cancel、no bounded Demo final window、no operator auth authorize、no standing auth materialization/change、no adapter enablement、no service restart/build、no DB write/migration、no Cost Gate lowering、no live/mainnet、no proof/promotion。
 
 **TODO v752 E3 dispatch hash refresh（2026-07-08）**：PM dispatch precheck found runtime `_latest` hashes advanced again after v751, but candidate and no-authority statuses remained aligned: `ma_crossover|NEARUSDT|Buy`, avg net `64.983bps`, candidate packet `d4d4a37b...`, proposal `b21f4a40...`, standing auth `05fe07f5...`, operator review `80579cec...` approved preflight, bounded preflight `bdd8988f...` READY, touchability `29ccfd57...` first-attempt bootstrap, placement `4e2b0a39...` READY, authority readiness `baa38ff5...` READY, operator-auth readiness `63f537fd...` READY with `decision=defer` and no auth object. PM refreshed `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_e3_request.json` to the latest hashes before E3 dispatch. Boundary remains no Bybit call、no Decision Lease、no order/probe/cancel、no bounded Demo final window、no operator auth authorize、no standing auth materialization/change、no adapter enablement、no service restart/build、no DB write/migration、no Cost Gate lowering、no live/mainnet、no proof/promotion。
 
