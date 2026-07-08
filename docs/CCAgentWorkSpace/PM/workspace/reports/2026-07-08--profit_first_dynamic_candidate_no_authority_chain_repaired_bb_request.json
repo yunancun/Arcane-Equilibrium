@@ -1,38 +1,48 @@
 {
   "schema_version": "pm_to_bb_exact_scope_request_v1",
-  "request_id": "PM_BB_PROFIT_FIRST_DYNAMIC_CANDIDATE_REPAIRED_CHAIN_REVIEW_20260708T165911Z",
-  "generated_at_utc": "2026-07-08T16:59:11Z",
+  "request_id": "profit_first_dynamic_candidate_no_authority_chain_repaired_bb_review_20260708T170759Z",
+  "generated_at_utc": "2026-07-08T17:07:59Z",
   "status": "READY_FOR_BB_DISPATCH",
-  "requesting_agent": "PM",
+  "requested_by": "PM",
   "target_agent": "BB",
-  "work_item": "P0-PROFIT-FIRST-DYNAMIC-CANDIDATE-ALIGNED-GATE-REFRESH",
-  "candidate_policy": {
+  "requested_verdict_if_pass": "APPROVE_FOR_PM_FINAL_WINDOW_PREP_REQUEST",
+  "terminal_if_drift": "ROTATED",
+  "scope": {
+    "title": "Bybit/API/policy review of repaired dynamic candidate no-authority chain",
     "candidate_selection_dynamic_not_fixed": true,
-    "bb_must_recheck_latest_candidate_before_approval": true,
-    "selected_side_cell_key_at_request_generation": "ma_crossover|NEARUSDT|Buy",
-    "if_latest_selection_differs": "ROTATED"
-  },
-  "candidate": {
-    "side_cell_key": "ma_crossover|NEARUSDT|Buy",
-    "strategy_name": "ma_crossover",
-    "symbol": "NEARUSDT",
-    "side": "Buy",
-    "outcome_horizon_minutes": 60,
-    "avg_net_bps": 64.983,
-    "net_positive_pct": 100.0,
-    "outcome_count": 5058,
-    "order_authority_granted": false,
-    "probe_authority_granted": false,
-    "promotion_evidence": false
+    "current_selected_side_cell_key": "ma_crossover|NEARUSDT|Buy",
+    "allowed_actions": [
+      "read source files and committed PM/E3 artifacts",
+      "read runtime JSON artifacts",
+      "verify source/runtime/GitHub head alignment",
+      "verify latest candidate and no-authority chain statuses and hashes",
+      "review Bybit/API/policy compatibility for a later separate final-window request",
+      "return BB review verdict"
+    ],
+    "forbidden_actions": [
+      "public or private Bybit call",
+      "Decision Lease acquire or release",
+      "order, probe, cancel, or modify",
+      "bounded Demo final window execution",
+      "operator authorization authorize",
+      "standing authorization materialization or change",
+      "runtime adapter enablement",
+      "service restart or build",
+      "runtime env mutation",
+      "DB write or migration",
+      "Cost Gate lowering",
+      "live or mainnet",
+      "proof or promotion claim"
+    ]
   },
   "source_binding": {
-    "source_fix_commit": "725fddc3ab365da7655d57aba9ee03bc59d97417",
+    "required_source_fix_commit": "725fddc3ab365da7655d57aba9ee03bc59d97417",
     "e3_review_checkpoint": "3d2473c55ebecfe02b23ca6ad856d002edd3aee6",
     "request_must_be_consumed_from_committed_origin_main": true,
-    "required_current_alignment": "Mac origin/main, GitHub main, Linux HEAD, and Linux origin/main must all match the committed checkpoint containing this BB request",
-    "allowed_diff_from_e3_review_checkpoint": [
-      "docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_e3_review.md",
+    "required_current_alignment": "Mac HEAD, Mac origin/main, GitHub main, Linux HEAD, and Linux origin/main must all match the committed checkpoint containing this request packet",
+    "allowed_diff_from_source_fix_commit": [
       "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired*",
+      "docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_e3_review.md",
       "docs/CCAgentWorkSpace/Operator/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired.md",
       "TODO.md",
       "docs/CLAUDE_CHANGELOG.md"
@@ -41,25 +51,35 @@
     "if_alignment_or_allowed_diff_check_fails": "ROTATED"
   },
   "e3_prerequisite": {
-    "report": "docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_e3_review.md",
+    "report_path": "docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_e3_review.md",
     "verdict": "APPROVE_FOR_PM_BB_REPAIR_REVIEW_REQUEST",
-    "reviewed_request": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_e3_request.json",
-    "e3_boundary": "read-only prep only; no BB action, Bybit call, Decision Lease, order/probe, runtime mutation, Cost Gate lowering, live/mainnet, proof, or promotion authorized"
+    "confidence": "high",
+    "linux_artifact_inspection_utc": "2026-07-08T17:06:11.499595+00:00",
+    "notes": [
+      "E3 approved only read-only prep for a separate BB repaired-chain review request.",
+      "E3 approval grants no Bybit call, Decision Lease, final window, order/probe, runtime mutation, Cost Gate lowering, live/mainnet, or proof authority."
+    ]
+  },
+  "candidate": {
+    "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+    "strategy_name": "ma_crossover",
+    "symbol": "NEARUSDT",
+    "side": "Buy",
+    "outcome_horizon_minutes": 60,
+    "avg_net_bps": 64.983
   },
   "runtime_artifact_requirements": {
     "false_negative_candidate_packet_latest": {
       "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/false_negative_candidate_packet_latest.json",
       "sha256": "d4d4a37b24d5839a76436632daa180acfd1fe8ba781ae816bf196e728f3ea9f2",
       "status": "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW",
-      "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy",
-      "avg_net_bps": 64.983
+      "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy"
     },
     "autonomous_parameter_proposal_latest": {
       "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/autonomous_parameter_proposal_latest.json",
       "sha256": "b21f4a40df0a5f38297c0c2cf66d971d0a9ba881564034fe53692e3d8c5d1d6e",
       "status": "REVIEWABLE_PARAMETER_PROPOSAL_READY",
-      "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy",
-      "avg_net_bps": 64.983
+      "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy"
     },
     "standing_demo_operator_authorization": {
       "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/standing_demo_operator_authorization.json",
@@ -67,10 +87,8 @@
       "status": "STANDING_DEMO_AUTHORIZATION_ACTIVE",
       "expires_at_utc": "2026-07-09T00:12:30.886090+00:00",
       "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy",
-      "max_single_order_notional_usdt": "954.46746768",
       "order_authority_granted": false,
-      "probe_authority_granted": false,
-      "bounded_demo_probe_authorized": false
+      "probe_authority_granted": false
     },
     "false_negative_operator_review_latest": {
       "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/false_negative_operator_review_latest.json",
@@ -109,32 +127,34 @@
       "decision": "defer",
       "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy",
       "blocking_gates": [],
-      "operator_authorization_object_emitted": false,
-      "order_authority_granted": false,
-      "probe_authority_granted": false
+      "operator_authorization_object_emitted": false
     }
+  },
+  "authority_assertions": {
+    "bounded_demo_probe_authorized": false,
+    "operator_authorization_object_emitted": false,
+    "order_authority_granted": false,
+    "probe_authority_granted": false,
+    "global_cost_gate_lowering_recommended": false,
+    "main_cost_gate_adjustment": "NONE",
+    "promotion_evidence": false,
+    "proof_claim": false
   },
   "requested_bb_review_scope": {
     "allowed": [
-      "read committed PM and E3 artifacts",
-      "read runtime JSON artifacts",
-      "verify source/runtime/GitHub head alignment",
-      "verify no-authority chain status and hashes",
-      "review Bybit/API/policy compatibility of a later same-window bounded Demo final gate",
-      "review NEARUSDT Demo market/order-shape constraints implied by post_only_near_touch_or_skip",
-      "approve or reject proceeding to a separate same-window final gate request"
+      "review whether the repaired NEARUSDT Buy no-authority chain may proceed to PM preparation of a later same-window final gate packet",
+      "review Bybit/API/policy compatibility of candidate-scoped Demo-only constraints if a later final gate is opened",
+      "review max 2 future probe intents, max 954.46746768 USDT per order, post-only maker-side near-touch-or-skip, skip-on-gap-greater-than-75bps, and proof-exclusion posture as prep only"
     ],
-    "forbidden": [
+    "forbidden_in_this_bb_review": [
       "new public Bybit market data call",
       "new private Bybit call",
       "Decision Lease acquire or release",
-      "order, probe, cancel, or modify",
+      "order/probe/cancel/modify",
       "bounded Demo final window execution",
       "setting bounded-probe operator authorization decision to authorize",
-      "standing authorization materialization or change",
       "runtime adapter enablement",
       "service restart or build",
-      "runtime env mutation",
       "DB write or migration",
       "Cost Gate lowering or global threshold mutation",
       "live or mainnet action",
@@ -143,19 +163,18 @@
   },
   "future_final_window_constraints_if_bb_approves": [
     "PM must recheck source/runtime heads, Linux cleanliness, latest candidate selection, all artifact sha256s, and standing auth freshness in the same invocation window",
-    "PM must open or produce a separate same-window final gate before any Bybit public/private call, Decision Lease, order, or probe",
+    "PM must open or produce the final-window gate before any Bybit public/private call, Decision Lease, order, or probe",
     "any final-window exchange-facing action must preserve Guardian/Decision Lease/Rust authority path",
     "order mode must be post_only_near_touch_or_skip",
     "fresh BBO age must be <= 1000ms",
     "skip and record touchability block if touch gap > 75bps",
-    "max 2 probe intents and max 954.46746768 USDT per order",
     "operator authorization must remain defer unless a later exact authorization scope approves otherwise",
     "first-attempt bootstrap is not proof and cannot be promoted as PnL evidence"
   ],
   "requested_output": {
     "report_path": "docs/CCAgentWorkSpace/BB/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_bb_review.md",
     "verdict_values": [
-      "APPROVE_FOR_BOUNDED_DEMO_FINAL_WINDOW_PREP",
+      "APPROVE_FOR_PM_FINAL_WINDOW_PREP_REQUEST",
       "ROTATED",
       "BLOCKED_NO_SAFE_ACTION"
     ],
@@ -164,16 +183,8 @@
       "Linux clean recheck",
       "latest dynamic candidate recheck",
       "runtime artifact hash recheck",
-      "E3 prerequisite verification",
-      "Bybit/API/policy compatibility review without calling Bybit",
-      "explicit statement that this does not authorize Bybit, Decision Lease, order/probe, final window, Cost Gate lowering, live/mainnet, or proof"
+      "Bybit/API/policy compatibility review",
+      "explicit statement that this does not authorize Bybit calls, Decision Lease, order/probe, final window execution, Cost Gate lowering, live/mainnet, or proof"
     ]
-  },
-  "rejection_to_work_item_mapping": {
-    "candidate_rotated": "ROTATED; regenerate dynamic candidate chain from latest machine-readable artifacts",
-    "bybit_policy_rejects_order_shape": "repair placement plan or reduce scope to non-exchange-facing review",
-    "risk_limits_too_broad": "tighten max notional/probe count and rerun E3/BB request",
-    "artifact_stale": "rerun no-order readiness chain and rebuild BB request",
-    "source_or_runtime_drift": "ROTATED; refetch/resync and regenerate request"
   }
 }
