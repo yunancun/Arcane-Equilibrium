@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-08（TODO v761 bounded-probe plan materialization BB request ready）
+> 最後更新：2026-07-08（TODO v762 bounded-probe plan materialization BB approved）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**TODO v762 bounded-probe plan materialization BB approved（2026-07-08）**：BB exact-scope read-only review `docs/CCAgentWorkSpace/BB/workspace/reports/2026-07-08--profit_first_near_buy_bounded_probe_plan_materialization_bb_review.md` sha `b730fdf6...` returned `APPROVE_FOR_PM_SAME_WINDOW_PLAN_MATERIALIZATION_RECHECK` against checkpoint `015d4033...`, Linux clean, E3 report sha `bb03bcc9...`, BB request sha `05d27a04...`, runtime authorization packet sha `0e075af5...`, plan inclusion review sha `5e08595c...`, construction preview sha `d4561891...`, and canonical soak plan sha `30056993...` still old ETH. PM state is `READY_FOR_BOUNDED_DEMO_FINAL_WINDOW` with next action limited to same-window source/runtime/hash/candidate/expiry recheck before any plan materialization. Boundary remains no canonical plan write, no `_latest` overwrite, no Bybit call, no Decision Lease, no order/probe/cancel/modify, no PG/DB query/write, no runtime/service/env/crontab mutation, no Cost Gate lowering, no live/mainnet, no proof/promotion.
 
 **TODO v761 bounded-probe plan materialization BB request ready（2026-07-08）**：E3 exact-scope read-only review `docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-08--profit_first_near_buy_bounded_probe_plan_materialization_e3_review.md` sha `bb03bcc9...` returned `APPROVE_FOR_PM_BB_PLAN_MATERIALIZATION_REVIEW` against checkpoint `ab496b449...`, Linux clean, current candidate `ma_crossover|NEARUSDT|Buy`, runtime authorization packet sha `0e075af5...`, plan inclusion review sha `5e08595c...`, construction preview sha `d4561891...`, and canonical soak plan sha `30056993...` still old ETH. PM emitted exact BB request `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_bounded_probe_plan_materialization_bb_request.json`; current state `READY_FOR_PM_BB_DISPATCH`. Boundary remains no canonical plan write, no `_latest` overwrite, no Bybit call, no Decision Lease, no order/probe/cancel/modify, no PG/DB query/write, no runtime/service/env/crontab mutation, no Cost Gate lowering, no live/mainnet, no proof/promotion.
 
