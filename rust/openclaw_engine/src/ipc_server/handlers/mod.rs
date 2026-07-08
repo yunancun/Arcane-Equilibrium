@@ -65,6 +65,11 @@ pub(in crate::ipc_server) use risk::{
     handle_restore_exit_config_defaults, handle_risk_runtime_status, handle_update_risk_config,
 };
 pub(in crate::ipc_server) use stock_etf::handle_stock_etf_ipc;
+// 測試專用再導出：讓 ipc_server::tests 直接呼叫純載入器，以真實 repo TOML
+// 驗證 stock_etf 風控 caps 確實被載入（win ② happy-path 實證）。非測試建置
+// 無此消費端，故 cfg(test) 限定以免 unused re-export 警告。
+#[cfg(test)]
+pub(in crate::ipc_server) use stock_etf::load_stock_etf_risk_policy_from_dir;
 pub(in crate::ipc_server) use strategy::{
     handle_set_strategy_active, handle_strategy_param_cmd, handle_submit_paper_order,
     StrategyParamOp,
