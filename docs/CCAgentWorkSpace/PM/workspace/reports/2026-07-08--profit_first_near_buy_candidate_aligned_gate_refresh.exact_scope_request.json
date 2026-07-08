@@ -1,12 +1,31 @@
 {
   "schema_version": "pm_to_e3_exact_scope_request_v1",
-  "request_id": "PM_E3_PROFIT_FIRST_NEAR_BUY_CANDIDATE_ALIGNED_GATE_REFRESH_20260708",
+  "request_id": "PM_E3_PROFIT_FIRST_DYNAMIC_CANDIDATE_GATE_REFRESH_20260708",
   "generated_at_utc": "2026-07-08T10:45:00Z",
+  "operator_scope_revision_at_utc": "2026-07-08T10:55:00Z",
   "status": "READY_FOR_PM_E3_DISPATCH",
   "requesting_agent": "PM",
   "target_agent": "E3",
   "work_item": "P0-PROFIT-FIRST-NEAR-BUY-CANDIDATE-ALIGNED-GATE-REFRESH",
-  "candidate": {
+  "candidate_policy": {
+    "operator_decision": "do_not_pin_candidate; use latest machine-readable market/runtime information dynamically",
+    "snapshot_candidate_not_fixed": true,
+    "snapshot_artifacts_consumable_only_if_latest_selection_still_matches": true,
+    "pre_e3_candidate_refresh_required": true,
+    "selection_sources_before_bb": [
+      "latest existing runtime Cost Gate artifacts",
+      "latest existing no-authority learning/proposal artifacts",
+      "read-only DB/audit artifacts when allowed by PM/E3 scope"
+    ],
+    "forbidden_before_bb": [
+      "new public Bybit market data call",
+      "new private Bybit call",
+      "Decision Lease",
+      "order/probe/cancel/modify"
+    ],
+    "if_latest_candidate_differs": "ROTATED; do not materialize this NEAR Buy preview; regenerate the candidate-aligned chain for the latest selected candidate"
+  },
+  "snapshot_candidate": {
     "side_cell_key": "ma_crossover|NEARUSDT|Buy",
     "strategy_name": "ma_crossover",
     "symbol": "NEARUSDT",
@@ -78,10 +97,11 @@
   "requested_e3_review_scope": {
     "allowed": [
       "verify final Mac/origin/Linux source heads are stable and Linux worktree is clean",
+      "re-read latest machine-readable runtime/no-authority artifacts and verify the current selected candidate before consuming any snapshot candidate artifacts",
       "review producer cap-lineage repair and focused test evidence",
-      "review candidate-aligned standing_demo_operator_authorization_v1 preview for NEAR Buy",
-      "approve or reject materializing only the candidate-aligned standing Demo loss-control envelope to runtime with mode 0600",
-      "approve or reject no-order false-negative operator review and bounded-probe preflight refresh after materialization",
+      "review candidate-aligned standing_demo_operator_authorization_v1 preview only if the latest selected candidate still matches the snapshot candidate",
+      "approve or reject materializing only the latest-selected candidate-aligned standing Demo loss-control envelope to runtime with mode 0600",
+      "approve or reject no-order false-negative operator review and bounded-probe preflight refresh after materialization for the latest selected candidate",
       "review whether source/runtime admission propagation is sufficient for a later BB-reviewed exchange-facing bounded Demo final window"
     ],
     "forbidden": [
@@ -101,7 +121,9 @@
   },
   "acceptance_for_e3_approval": [
     "all artifact sha256 values match this request",
-    "candidate remains exactly ma_crossover|NEARUSDT|Buy",
+    "E3 re-reads latest machine-readable runtime/no-authority artifacts and does not treat the snapshot candidate as manually pinned",
+    "the NEAR Buy snapshot artifacts are consumable only if the latest selected candidate still resolves to ma_crossover|NEARUSDT|Buy",
+    "if the latest selected candidate differs, E3 returns ROTATED and PM regenerates the candidate-aligned chain for the latest selected candidate",
     "old runtime standing authorization is not consumed as current-candidate authority",
     "candidate-aligned preview remains Demo-only, scoped, unmaterialized before E3 approval, and grants no order/probe by itself",
     "GUI-backed Rust RiskConfig cap lineage is preserved and local 10 USDT is not treated as global risk authority",
@@ -111,6 +133,7 @@
   "rejection_to_work_item_mapping": {
     "cap_lineage_rejected": "repair standing_demo_loss_control_envelope_review cap lineage producer or GUI/equity source contract",
     "artifact_stale": "rerun no-authority producer chain from latest runtime artifacts",
+    "candidate_rotated": "ROTATED; reselect from latest machine-readable market/runtime artifacts and regenerate the candidate-aligned no-authority chain",
     "source_drift": "ROTATED; refetch, resync, and regenerate exact-scope request",
     "materialization_boundary_too_broad": "split standing-envelope materialization from exchange-facing bounded Demo final window",
     "runtime_admission_not_reviewable": "produce source/runtime admission propagation packet without enabling runtime adapter"
