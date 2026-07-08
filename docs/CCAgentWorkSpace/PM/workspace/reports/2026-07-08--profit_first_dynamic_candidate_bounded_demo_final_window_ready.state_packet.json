@@ -1,0 +1,54 @@
+{
+  "schema_version": "profit_first_ai_ml_resolution_loop_state_packet_v1",
+  "packet_id": "profit_first_dynamic_candidate_bounded_demo_final_window_ready_20260708",
+  "generated_at_utc": "2026-07-08T12:31:00Z",
+  "status": "READY_FOR_BOUNDED_DEMO_FINAL_WINDOW",
+  "candidate_policy": {
+    "candidate_selection_dynamic_not_fixed": true,
+    "selected_side_cell_key_at_bb_review": "ma_crossover|NEARUSDT|Buy",
+    "must_recheck_before_final_gate": true,
+    "rotated_at_bb_review": false
+  },
+  "reviews": {
+    "e3": {
+      "path": "docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-08--profit_first_dynamic_candidate_gate_refresh_e3_review.md",
+      "verdict": "APPROVE_FOR_PM_MATERIALIZATION_PREP"
+    },
+    "bb": {
+      "path": "docs/CCAgentWorkSpace/BB/workspace/reports/2026-07-08--profit_first_dynamic_candidate_bounded_demo_final_window_bb_review.md",
+      "verdict": "APPROVE_FOR_BOUNDED_DEMO_FINAL_WINDOW_PREP"
+    }
+  },
+  "source_runtime_binding_at_bb_review": {
+    "source_head": "da1a04ecac9e2de86a47a700b76e183509995362",
+    "origin_main": "da1a04ecac9e2de86a47a700b76e183509995362",
+    "linux_head": "da1a04ecac9e2de86a47a700b76e183509995362",
+    "linux_origin_main": "da1a04ecac9e2de86a47a700b76e183509995362",
+    "linux_worktree_clean": true
+  },
+  "runtime_readiness": {
+    "standing_demo_operator_authorization_sha256": "05fe07f5ad4f92c459c4c6f67bfe534a04b0ea4b4e8f2d8aa43879d87009152f",
+    "standing_demo_operator_authorization_expires_at_utc": "2026-07-09T00:12:30.886090+00:00",
+    "false_negative_candidate_packet_sha256": "1387ae73d65c7ba5f476a8b562e787089673d484528c2d132e4789de11af67ae",
+    "autonomous_parameter_proposal_sha256": "676f6c3ec91aae33542314fd435bb929fa5140feaf3c3c12fedd4a1b7b260282",
+    "bounded_probe_operator_authorization_status": "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW",
+    "bounded_probe_operator_authorization_decision": "defer",
+    "bounded_demo_probe_authorized": false,
+    "order_authority_granted": false,
+    "probe_authority_granted": false
+  },
+  "next_required_state": "SAME_WINDOW_FINAL_GATE_REQUIRED",
+  "boundaries": {
+    "bybit_public_or_private_call": false,
+    "decision_lease": false,
+    "order_probe_cancel_modify": false,
+    "bounded_demo_final_window": false,
+    "operator_authorization_authorize": false,
+    "runtime_adapter_enablement": false,
+    "service_restart_or_build": false,
+    "db_write_or_migration": false,
+    "cost_gate_lowered": false,
+    "live_or_mainnet": false,
+    "proof_or_promotion_claim": false
+  }
+}

@@ -1,0 +1,155 @@
+{
+  "answers": {
+    "global_cost_gate_lowering_recommended": false,
+    "main_cost_gate_adjustment": "NONE",
+    "near_touch_or_skip_required": true,
+    "order_authority_granted": false,
+    "placement_repair_plan_ready_for_operator_review": true,
+    "probe_authority_granted": false,
+    "promotion_evidence": false,
+    "runtime_mutation_performed": false
+  },
+  "boundary": "artifact-only bounded Demo probe placement repair plan; no PG query/write, Bybit call, order, config, risk, auth, runtime mutation, Cost Gate lowering, probe authority, order authority, or promotion proof",
+  "candidate": {
+    "outcome_horizon_minutes": 60,
+    "side": "Buy",
+    "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+    "strategy_name": "ma_crossover",
+    "symbol": "NEARUSDT"
+  },
+  "generated_at_utc": "2026-07-08T12:15:24.174735+00:00",
+  "next_actions": [
+    "operator_review_first_attempt_near_touch_or_skip_placement_plan",
+    "only_after_separate_authorization_patch_existing_rust_authority_path",
+    "rerun_order_to_fill_touchability_audit_after_first_candidate_attempt"
+  ],
+  "placement_repair_plan": {
+    "active": false,
+    "authority_boundary": {
+      "global_cost_gate_lowering_recommended": false,
+      "main_cost_gate_adjustment": "NONE",
+      "order_authority_granted": false,
+      "probe_authority_granted": false,
+      "promotion_evidence": false
+    },
+    "candidate": {
+      "outcome_horizon_minutes": 60,
+      "side": "Buy",
+      "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+      "strategy_name": "ma_crossover",
+      "symbol": "NEARUSDT"
+    },
+    "environment": "demo_or_live_demo_only",
+    "execution_path": "existing_rust_authority_path_only",
+    "implementation_target": "future_operator_approved_existing_rust_authority_path_patch",
+    "max_deep_no_touch_gap_bps": 500.0,
+    "max_fresh_bbo_age_ms": 1000,
+    "max_initial_passive_gap_bps": 75.0,
+    "order_mode": "post_only_near_touch_or_skip",
+    "post_order_evidence": [
+      "demo_order_intent_and_order_state_rows",
+      "demo_order_to_fill_gap_audit_after_probe",
+      "fill_fee_slippage_rows_after_fill",
+      "bounded_probe_result_review",
+      "matched_blocked_signal_control_outcomes",
+      "bounded_probe_execution_realism_review_if_edge_under_captured"
+    ],
+    "pre_order_checks": [
+      "fresh_bbo_snapshot_age_lte_max_fresh_bbo_age_ms",
+      "instrument_tick_size_and_qty_step_loaded_from_existing_authority_path",
+      "computed_post_only_limit_is_maker_side_and_not_crossing",
+      "computed_best_touch_gap_bps_lte_max_initial_passive_gap_bps",
+      "if_gap_exceeds_limit_skip_probe_order_and_record_touchability_block",
+      "respect_max_demo_notional_usdt_per_order",
+      "respect_max_probe_intents_before_review"
+    ],
+    "probe_limits": {
+      "cap_source": "standing_demo_loss_control_envelope_review.gui_risk_config_plus_demo_equity",
+      "local_10_usdt_cap_is_global_risk_authority": false,
+      "max_demo_notional_usdt_per_order": 954.46746768,
+      "max_probe_intents_before_review": 2,
+      "per_trade_risk_pct_display": 10.0,
+      "per_trade_risk_pct_fraction": 0.1,
+      "risk_source_of_truth": "GUI-backed Rust RiskConfig"
+    },
+    "requires_separate_operator_authorization": true,
+    "runtime_touchability_baseline": {
+      "deep_passive_no_touch_orders": 0,
+      "fill_rows": 62,
+      "first_attempt_bootstrap": true,
+      "first_attempt_bootstrap_is_proof": false,
+      "max_best_touch_gap_bps": 146.6077,
+      "min_best_touch_gap_bps": -67.325,
+      "order_touchability_status": "FILL_FLOW_PRESENT",
+      "reviewed_orders": 100
+    },
+    "schema_version": "bounded_demo_probe_placement_repair_plan_v1",
+    "side_aware_limit_rule": {
+      "Buy": {
+        "post_only_limit_formula": "min(best_bid, best_ask - tick_size)",
+        "skip_if": "touch_gap_bps > max_initial_passive_gap_bps",
+        "touch_gap_bps_formula": "(best_ask - limit_price) / best_ask * 10000"
+      },
+      "Sell": {
+        "post_only_limit_formula": "max(best_ask, best_bid + tick_size)",
+        "skip_if": "touch_gap_bps > max_initial_passive_gap_bps",
+        "touch_gap_bps_formula": "(limit_price - best_bid) / best_bid * 10000"
+      }
+    },
+    "skip_record": {
+      "reason": "probe_order_skipped_because_near_touch_requirement_not_met",
+      "record_type": "bounded_probe_touchability_block",
+      "required_fields": [
+        "side_cell_key",
+        "symbol",
+        "side",
+        "bbo_ts",
+        "best_bid",
+        "best_ask",
+        "computed_limit_price",
+        "touch_gap_bps",
+        "max_initial_passive_gap_bps",
+        "reason"
+      ]
+    },
+    "status": "OPERATOR_REVIEW_READY_NOT_ACTIVE"
+  },
+  "reason": "first_candidate_attempt_requires_review_only_near_touch_or_skip_probe_placement",
+  "schema_version": "bounded_demo_probe_placement_repair_plan_v1",
+  "source_touchability_preflight": {
+    "artifact": {
+      "age_seconds": 6.510071,
+      "generated_at_utc": "2026-07-08T12:15:17.664664+00:00",
+      "max_age_seconds": 86400,
+      "present": true,
+      "schema_version": "bounded_demo_probe_touchability_preflight_v1",
+      "status": "FRESH"
+    },
+    "authority_preserved": true,
+    "reason": "no_candidate_matched_orders_exist_for_first_touchability_attempt",
+    "status": "FIRST_ATTEMPT_TOUCHABILITY_BOOTSTRAP_REQUIRED"
+  },
+  "status": "PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW",
+  "touchability_summary": {
+    "bbo_touched_no_fill_orders": 16,
+    "cap_source": "standing_demo_loss_control_envelope_review.gui_risk_config_plus_demo_equity",
+    "deep_passive_no_touch_orders": 0,
+    "fill_rows": 62,
+    "first_attempt_bootstrap": true,
+    "first_attempt_bootstrap_is_proof": false,
+    "local_10_usdt_cap_is_global_risk_authority": false,
+    "max_best_touch_gap_bps": 146.6077,
+    "max_deep_no_touch_gap_bps": 500.0,
+    "max_demo_notional_usdt_per_order": 954.46746768,
+    "max_initial_passive_gap_bps": 75.0,
+    "max_probe_intents_before_review": 2,
+    "min_best_touch_gap_bps": -67.325,
+    "order_touchability_status": "FILL_FLOW_PRESENT",
+    "per_trade_risk_pct_display": 10.0,
+    "per_trade_risk_pct_fraction": 0.1,
+    "preflight_reason": "no_candidate_matched_orders_exist_for_first_touchability_attempt",
+    "preflight_status": "FIRST_ATTEMPT_TOUCHABILITY_BOOTSTRAP_REQUIRED",
+    "reviewed_orders": 100,
+    "risk_source_of_truth": "GUI-backed Rust RiskConfig"
+  }
+}

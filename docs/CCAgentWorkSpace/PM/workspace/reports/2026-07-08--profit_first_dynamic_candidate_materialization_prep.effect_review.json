@@ -1,0 +1,51 @@
+{
+  "schema_version": "profit_first_ai_ml_resolution_loop_effect_review_v1",
+  "generated_at_utc": "2026-07-08T12:18:14Z",
+  "status": "READY_FOR_BB_DISPATCH",
+  "work_item": "P0-PROFIT-FIRST-DYNAMIC-CANDIDATE-ALIGNED-GATE-REFRESH",
+  "intended_effects": [
+    "consume E3 approval for materialization prep",
+    "recheck dynamic candidate selection before runtime write",
+    "materialize only the candidate-aligned standing Demo loss-control envelope",
+    "refresh no-order readiness artifacts for the same candidate",
+    "prepare BB exact-scope request for the next exchange-facing gate"
+  ],
+  "actual_effects": [
+    {
+      "type": "runtime_file_materialization",
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/standing_demo_operator_authorization.json",
+      "old_sha256": "eabf2dab8ddbe9c680a4b047d7a338d5d34a30a28a36134ab820e83a1b174197",
+      "new_sha256": "05fe07f5ad4f92c459c4c6f67bfe534a04b0ea4b4e8f2d8aa43879d87009152f",
+      "mode": "600"
+    },
+    {
+      "type": "runtime_no_order_artifact_refresh",
+      "summary": "updated runtime timestamped and _latest no-authority readiness artifacts for ma_crossover|NEARUSDT|Buy"
+    },
+    {
+      "type": "source_artifact_checkpoint",
+      "summary": "recorded E3 verdict, PM report, state/effect packets, generated artifacts, and BB request"
+    }
+  ],
+  "forbidden_effects_observed": {
+    "bybit_public_or_private_call": false,
+    "decision_lease_acquire_or_release": false,
+    "order_probe_cancel_or_modify": false,
+    "bounded_demo_final_window": false,
+    "bounded_probe_operator_authorization_authorize": false,
+    "runtime_adapter_enablement": false,
+    "service_restart_or_build": false,
+    "db_write_or_migration": false,
+    "cost_gate_lowering": false,
+    "live_or_mainnet": false,
+    "proof_or_promotion_claim": false
+  },
+  "authority_result": {
+    "standing_demo_loss_control_materialized": true,
+    "bounded_demo_probe_authorized": false,
+    "operator_authorization_object_emitted": false,
+    "order_authority_granted": false,
+    "probe_authority_granted": false,
+    "next_allowed_action": "dispatch BB exact-scope review before any exchange-facing final window"
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "answers": {
+    "active_runtime_order_authority": false,
+    "active_runtime_probe_authority": false,
+    "bounded_demo_probe_authorized": false,
+    "candidate_scoping_required": true,
+    "crontab_mutation_performed": false,
+    "demo_only": true,
+    "env_mutation_performed": false,
+    "global_cost_gate_lowering_recommended": false,
+    "live_authority_granted": false,
+    "main_cost_gate_adjustment": "NONE",
+    "operator_authorization_object_emitted": false,
+    "order_authority_granted": false,
+    "order_submission_performed": false,
+    "probe_authority_granted": false,
+    "promotion_evidence": false,
+    "promotion_proof": false,
+    "runtime_mutation_performed": false
+  },
+  "candidate": {
+    "outcome_horizon_minutes": 60,
+    "side": "Buy",
+    "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+    "strategy_name": "ma_crossover",
+    "symbol": "NEARUSDT"
+  },
+  "candidate_scoping_required": true,
+  "demo_only": true,
+  "environment": "demo",
+  "expires_at_utc": "2026-07-09T00:12:30.886090+00:00",
+  "generated_at_utc": "2026-07-08T12:12:30.886090+00:00",
+  "max_authorized_probe_orders_per_candidate": 2,
+  "operator_id": "profit-first-fast-demo-loop",
+  "risk_cap_lineage": {
+    "account_equity_usdt": 9544.67467679,
+    "bounded_probe_local_cap_usdt_is_authority": false,
+    "cap_source": "standing_demo_loss_control_envelope_review.gui_risk_config_plus_demo_equity",
+    "local_10_usdt_cap_is_global_risk_authority": false,
+    "per_trade_risk_pct_display": 10.0,
+    "per_trade_risk_pct_fraction": 0.1,
+    "position_size_max_pct": 25.0,
+    "resolved_cap_usdt": 954.46746768,
+    "risk_source_of_truth": "GUI-backed Rust RiskConfig",
+    "rounded_notional_usdt": null,
+    "single_position_budget_usdt": 2386.1686692,
+    "valid": true
+  },
+  "schema_version": "standing_demo_operator_authorization_v1",
+  "scope": "demo_api_only_bounded_probe",
+  "standing_authorization_id": "standing-demo-loss-control-20260708T121230Z-e3c77d8c6fa9",
+  "status": "STANDING_DEMO_AUTHORIZATION_ACTIVE"
+}
