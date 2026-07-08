@@ -385,6 +385,7 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert "-m cost_gate_learning_lane.bounded_probe_execution_realism_review" in src
     assert "-m cost_gate_learning_lane.false_negative_operator_review" in src
     assert "json_selected_candidate_side_cell_key()" in src
+    assert "json_false_negative_packet_has_side_cell_key()" in src
     assert "OPENCLAW_COST_GATE_CAP_FEASIBLE_CANDIDATE_SELECTION_JSON" in src
     assert "OPENCLAW_COST_GATE_FALSE_NEGATIVE_OPERATOR_REVIEW_SELECTED_SIDE_CELL_KEY" in src
     assert "-m cost_gate_learning_lane.learning_ssot_decision" in src
@@ -392,6 +393,12 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert "-m cost_gate_learning_lane.false_negative_bounded_probe_preflight" in src
     assert '--false-negative-candidate-packet-json "$FALSE_NEGATIVE_CANDIDATE_PACKET_OUT"' in src
     assert '--selected-side-cell-key "$FALSE_NEGATIVE_OPERATOR_REVIEW_SELECTED_SIDE_CELL_KEY"' in src
+    packet_copy_index = src.index('cp "$FALSE_NEGATIVE_CANDIDATE_PACKET_OUT"')
+    selected_append_index = src.index(
+        '--selected-side-cell-key "$FALSE_NEGATIVE_OPERATOR_REVIEW_SELECTED_SIDE_CELL_KEY"'
+    )
+    assert packet_copy_index < selected_append_index
+    assert "stale false-negative selected side-cell ignored" in src
     assert '--touchability-preflight-json "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT"' in src
     assert '--placement-repair-plan-json "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT"' in src
     assert '--operator-authorization-json "$BOUNDED_PROBE_OPERATOR_AUTHORIZATION_OUT"' in src
