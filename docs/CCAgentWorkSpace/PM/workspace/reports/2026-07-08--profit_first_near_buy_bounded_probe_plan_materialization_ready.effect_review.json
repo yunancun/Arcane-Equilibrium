@@ -1,0 +1,59 @@
+{
+  "schema_version": "profit_first_effect_review_v1",
+  "generated_at_utc": "2026-07-08T19:02:51Z",
+  "status": "READY_FOR_PM_E3_DISPATCH",
+  "candidate": "ma_crossover|NEARUSDT|Buy",
+  "effects": {
+    "source_files_changed": [],
+    "docs_files_changed": [
+      "TODO.md",
+      "docs/CLAUDE_CHANGELOG.md",
+      "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_bounded_probe_plan_materialization_ready.md",
+      "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_bounded_probe_plan_materialization_ready.state_packet.json",
+      "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_bounded_probe_plan_materialization_ready.effect_review.json",
+      "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_bounded_probe_plan_materialization_e3_request.json",
+      "docs/CCAgentWorkSpace/Operator/2026-07-08--profit_first_near_buy_bounded_probe_plan_materialization_ready.md"
+    ],
+    "runtime_files_written": [
+      "/tmp/openclaw_near_bounded_probe_authorization_20260708T190054Z_db2c9e105/bounded_probe_operator_authorization_authorized.json",
+      "/tmp/openclaw_near_bounded_probe_authorization_20260708T190054Z_db2c9e105/bounded_probe_operator_authorization_authorized.md",
+      "/tmp/openclaw_near_bounded_probe_authorization_20260708T190054Z_db2c9e105/bounded_probe_plan_inclusion_review.json",
+      "/tmp/openclaw_near_bounded_probe_authorization_20260708T190054Z_db2c9e105/bounded_probe_plan_inclusion_review.md"
+    ],
+    "runtime_files_read_only": [
+      "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/standing_demo_operator_authorization.json",
+      "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/false_negative_bounded_probe_preflight_latest.json",
+      "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_probe_placement_repair_plan_latest.json",
+      "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_probe_authority_patch_readiness_latest.json",
+      "/home/ncyu/BybitOpenClaw/var/openclaw/profit_first_dynamic_candidate_same_window_final_gate_20260708T175744Z_08f7e957_noorder/active_lease_bbo_window/actual_construction_preview.json",
+      "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/probe_ledger.jsonl",
+      "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_demo_probe_soak_plan.json"
+    ]
+  },
+  "verification": {
+    "json_parse": "passed",
+    "bounded_probe_operator_authorization_sha256": "0e075af5b0a5ef8b3e343caffe7ab3608bbb45cf418600c5cf689e3c5e5e7124",
+    "bounded_probe_plan_inclusion_review_sha256": "5e08595c3b009741e3ede221d7ce96c233864d6ddb1f434797b1c105249305fc",
+    "focused_pytest": "passed: 50 tests",
+    "py_compile": "passed",
+    "git_diff_check": "passed"
+  },
+  "risk_boundary": {
+    "canonical_soak_plan_write_performed": false,
+    "latest_overwrite_performed": false,
+    "bybit_call_performed": false,
+    "decision_lease_performed": false,
+    "order_or_probe_performed": false,
+    "db_or_pg_write_performed": false,
+    "pg_query_performed": false,
+    "runtime_or_service_mutation_performed": false,
+    "cost_gate_lowering_performed": false,
+    "live_or_mainnet_authority_granted": false,
+    "proof_or_promotion_claim": false
+  },
+  "residual_risk": [
+    "Canonical soak plan is still old ETH and must not be consumed.",
+    "Standing authorization expires at 2026-07-09T00:12:30.886090+00:00 and must be rechecked before E3/BB consumption.",
+    "No BB review has approved materialization; no same-window final gate exists yet."
+  ]
+}

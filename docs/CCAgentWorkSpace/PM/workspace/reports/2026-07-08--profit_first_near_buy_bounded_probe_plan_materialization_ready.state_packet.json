@@ -1,0 +1,105 @@
+{
+  "schema_version": "profit_first_pm_state_packet_v1",
+  "generated_at_utc": "2026-07-08T19:02:51Z",
+  "status": "READY_FOR_PM_E3_DISPATCH",
+  "substatus": "BOUNDED_PROBE_AUTHORIZED_AND_PLAN_INCLUSION_PREVIEW_READY_NO_ADMISSION",
+  "active_blocker_id": "P0-CURRENT-CANDIDATE-ORDER-CAPABLE-DEMO-INVOKE-FRESH-WINDOW-RUN-GATE",
+  "candidate": {
+    "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+    "strategy_name": "ma_crossover",
+    "symbol": "NEARUSDT",
+    "side": "Buy",
+    "outcome_horizon_minutes": 60
+  },
+  "source_runtime_binding": {
+    "mac_head": "db2c9e1058a476d887a126214ecc4c5392bac230",
+    "mac_origin_main": "db2c9e1058a476d887a126214ecc4c5392bac230",
+    "linux_head": "db2c9e1058a476d887a126214ecc4c5392bac230",
+    "linux_origin_main": "db2c9e1058a476d887a126214ecc4c5392bac230",
+    "linux_worktree_clean": true
+  },
+  "runtime_inputs": {
+    "standing_demo_operator_authorization": {
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/standing_demo_operator_authorization.json",
+      "sha256": "05fe07f5ad4f92c459c4c6f67bfe534a04b0ea4b4e8f2d8aa43879d87009152f",
+      "status": "STANDING_DEMO_AUTHORIZATION_ACTIVE",
+      "expires_at_utc": "2026-07-09T00:12:30.886090+00:00"
+    },
+    "false_negative_bounded_probe_preflight_latest": {
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/false_negative_bounded_probe_preflight_latest.json",
+      "sha256": "b72af09bc4c9f603774e9211e8a4f5885d0f150497ad14961725292849feb1df",
+      "status": "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+    },
+    "bounded_probe_placement_repair_plan_latest": {
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_probe_placement_repair_plan_latest.json",
+      "sha256": "46535beb3e263109847e227d575fcec547cfe0a779d739700675519d9bc68070",
+      "status": "PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW"
+    },
+    "bounded_probe_authority_patch_readiness_latest": {
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_probe_authority_patch_readiness_latest.json",
+      "sha256": "beeb61c88d0a58020b437204c08aaf73e68306e1fd4ae1f811cc21d4587d5db4",
+      "status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW"
+    },
+    "current_candidate_construction_preview": {
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/profit_first_dynamic_candidate_same_window_final_gate_20260708T175744Z_08f7e957_noorder/active_lease_bbo_window/actual_construction_preview.json",
+      "sha256": "d4561891a8ddaf318923be31043591033413a58ff66ef2a8acb842b7e79a2981",
+      "status": "CURRENT_CANDIDATE_CONSTRUCTION_PREVIEW_READY_NO_ORDER"
+    },
+    "canonical_bounded_demo_soak_plan": {
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_demo_probe_soak_plan.json",
+      "sha256": "30056993b5cae70a0fcad0503221e12bd74dae4e42a29d0d2c88423c64739823",
+      "candidate": "grid_trading|ETHUSDT|Buy",
+      "updated": false
+    }
+  },
+  "generated_artifacts": {
+    "bounded_probe_operator_authorization": {
+      "path": "/tmp/openclaw_near_bounded_probe_authorization_20260708T190054Z_db2c9e105/bounded_probe_operator_authorization_authorized.json",
+      "sha256": "0e075af5b0a5ef8b3e343caffe7ab3608bbb45cf418600c5cf689e3c5e5e7124",
+      "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+      "authorization_confirmation_source": "standing_demo_authorization",
+      "authorization_id": "standing-demo-8f2e19a68b39a5b3",
+      "max_authorized_probe_orders": 2,
+      "expires_at_utc": "2026-07-09T00:12:30.886090+00:00"
+    },
+    "bounded_probe_plan_inclusion_review": {
+      "path": "/tmp/openclaw_near_bounded_probe_authorization_20260708T190054Z_db2c9e105/bounded_probe_plan_inclusion_review.json",
+      "sha256": "5e08595c3b009741e3ede221d7ce96c233864d6ddb1f434797b1c105249305fc",
+      "status": "PLAN_INCLUSION_PREVIEW_READY_NO_ADMISSION",
+      "authorization_packet_validation_reason": "operator_authorization_valid",
+      "inactive_adapter_decision": "ADAPTER_DISABLED",
+      "hypothetical_adapter_enabled_decision": "ADMIT_DEMO_LEARNING_PROBE"
+    },
+    "pm_to_e3_request": {
+      "path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_bounded_probe_plan_materialization_e3_request.json",
+      "status": "READY_FOR_PM_E3_DISPATCH"
+    }
+  },
+  "answers": {
+    "operator_authorization_object_emitted": true,
+    "plan_inclusion_preview_ready": true,
+    "ready_for_pm_e3_dispatch": true,
+    "ready_for_bounded_demo_final_window": false,
+    "canonical_soak_plan_write_performed": false,
+    "latest_overwrite_performed": false,
+    "active_runtime_probe_authority": false,
+    "active_runtime_order_authority": false,
+    "adapter_enabled_by_this_packet": false,
+    "decision_lease_acquire_performed": false,
+    "decision_lease_release_performed": false,
+    "bybit_call_performed": false,
+    "order_submission_performed": false,
+    "order_cancel_performed": false,
+    "order_modify_performed": false,
+    "pg_query_performed": false,
+    "pg_write_performed": false,
+    "runtime_mutation_performed": false,
+    "service_restart_performed": false,
+    "cost_gate_lowering_performed": false,
+    "live_authority_granted": false,
+    "mainnet_authority_granted": false,
+    "promotion_proof": false,
+    "profit_proof": false
+  },
+  "next_machine_executable_stage": "PM_TO_E3_EXACT_SCOPE_DISPATCH_FOR_PLAN_MATERIALIZATION_REVIEW"
+}

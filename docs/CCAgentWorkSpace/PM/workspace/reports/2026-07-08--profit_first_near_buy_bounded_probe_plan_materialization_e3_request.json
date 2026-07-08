@@ -1,0 +1,152 @@
+{
+  "schema_version": "pm_to_e3_exact_scope_request_v1",
+  "request_id": "profit_first_near_buy_bounded_probe_plan_materialization_e3_review_20260708T190251Z",
+  "generated_at_utc": "2026-07-08T19:02:51Z",
+  "requested_by": "PM",
+  "target_agent": "E3",
+  "status": "READY_FOR_PM_E3_DISPATCH",
+  "requested_verdict_if_pass": "APPROVE_FOR_PM_BB_PLAN_MATERIALIZATION_REVIEW",
+  "terminal_if_drift": "ROTATED",
+  "candidate": {
+    "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+    "strategy_name": "ma_crossover",
+    "symbol": "NEARUSDT",
+    "side": "Buy",
+    "outcome_horizon_minutes": 60
+  },
+  "source_runtime_binding": {
+    "mac_head": "db2c9e1058a476d887a126214ecc4c5392bac230",
+    "mac_origin_main": "db2c9e1058a476d887a126214ecc4c5392bac230",
+    "linux_head": "db2c9e1058a476d887a126214ecc4c5392bac230",
+    "linux_origin_main": "db2c9e1058a476d887a126214ecc4c5392bac230",
+    "linux_worktree_clean": true,
+    "must_recheck_before_review": true
+  },
+  "scope": {
+    "title": "Review NEAR Buy bounded-probe authorization and inactive plan-inclusion preview for later BB materialization review",
+    "allowed_actions_for_e3": [
+      "read source files",
+      "read committed PM artifacts",
+      "read exact runtime JSON artifacts listed in this request",
+      "verify source/runtime/GitHub head alignment",
+      "verify operator authorization packet safety",
+      "verify plan inclusion review safety",
+      "verify canonical soak plan is not already mutated by this request",
+      "return E3 review verdict"
+    ],
+    "forbidden_actions_for_e3": [
+      "canonical soak plan write or overwrite",
+      "copy timestamped authorization into latest",
+      "runtime adapter or writer enablement",
+      "Decision Lease acquire or release",
+      "Bybit public, private, or order call",
+      "order, probe, cancel, or modify",
+      "DB or PG query/write/migration",
+      "runtime env/service/crontab mutation",
+      "Cost Gate lowering or global threshold mutation",
+      "live or mainnet action",
+      "proof or promotion claim"
+    ]
+  },
+  "machine_ready_artifacts": {
+    "bounded_probe_operator_authorization": {
+      "path": "/tmp/openclaw_near_bounded_probe_authorization_20260708T190054Z_db2c9e105/bounded_probe_operator_authorization_authorized.json",
+      "sha256": "0e075af5b0a5ef8b3e343caffe7ab3608bbb45cf418600c5cf689e3c5e5e7124",
+      "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+      "decision": "authorize",
+      "authorization_confirmation_source": "standing_demo_authorization",
+      "authorization_id": "standing-demo-8f2e19a68b39a5b3",
+      "operator_id": "profit-first-fast-demo-loop",
+      "expires_at_utc": "2026-07-09T00:12:30.886090+00:00",
+      "max_authorized_probe_orders": 2,
+      "active_runtime_probe_authority": false,
+      "active_runtime_order_authority": false
+    },
+    "bounded_probe_plan_inclusion_review": {
+      "path": "/tmp/openclaw_near_bounded_probe_authorization_20260708T190054Z_db2c9e105/bounded_probe_plan_inclusion_review.json",
+      "sha256": "5e08595c3b009741e3ede221d7ce96c233864d6ddb1f434797b1c105249305fc",
+      "status": "PLAN_INCLUSION_PREVIEW_READY_NO_ADMISSION",
+      "authorization_packet_validation_reason": "operator_authorization_valid",
+      "inactive_adapter_decision": "ADAPTER_DISABLED",
+      "hypothetical_adapter_enabled_decision": "ADMIT_DEMO_LEARNING_PROBE",
+      "allowed_to_submit_order_in_current_review": false
+    },
+    "construction_preview": {
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/profit_first_dynamic_candidate_same_window_final_gate_20260708T175744Z_08f7e957_noorder/active_lease_bbo_window/actual_construction_preview.json",
+      "sha256": "d4561891a8ddaf318923be31043591033413a58ff66ef2a8acb842b7e79a2981",
+      "status": "CURRENT_CANDIDATE_CONSTRUCTION_PREVIEW_READY_NO_ORDER"
+    }
+  },
+  "runtime_inputs": {
+    "standing_demo_operator_authorization": {
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/standing_demo_operator_authorization.json",
+      "sha256": "05fe07f5ad4f92c459c4c6f67bfe534a04b0ea4b4e8f2d8aa43879d87009152f",
+      "expires_at_utc": "2026-07-09T00:12:30.886090+00:00"
+    },
+    "false_negative_bounded_probe_preflight_latest": {
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/false_negative_bounded_probe_preflight_latest.json",
+      "sha256": "b72af09bc4c9f603774e9211e8a4f5885d0f150497ad14961725292849feb1df",
+      "status": "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+    },
+    "bounded_probe_placement_repair_plan_latest": {
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_probe_placement_repair_plan_latest.json",
+      "sha256": "46535beb3e263109847e227d575fcec547cfe0a779d739700675519d9bc68070",
+      "status": "PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW"
+    },
+    "bounded_probe_authority_patch_readiness_latest": {
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_probe_authority_patch_readiness_latest.json",
+      "sha256": "beeb61c88d0a58020b437204c08aaf73e68306e1fd4ae1f811cc21d4587d5db4",
+      "status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW"
+    },
+    "current_canonical_soak_plan": {
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_demo_probe_soak_plan.json",
+      "sha256": "30056993b5cae70a0fcad0503221e12bd74dae4e42a29d0d2c88423c64739823",
+      "candidate": "grid_trading|ETHUSDT|Buy",
+      "must_not_be_consumed_as_current_candidate_plan": true
+    }
+  },
+  "requested_output": {
+    "report_path": "docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-08--profit_first_near_buy_bounded_probe_plan_materialization_e3_review.md",
+    "verdict_values": [
+      "APPROVE_FOR_PM_BB_PLAN_MATERIALIZATION_REVIEW",
+      "ROTATED",
+      "BLOCKED_NO_SAFE_ACTION"
+    ],
+    "must_include": [
+      "source head recheck",
+      "Linux clean recheck",
+      "candidate identity and expiry recheck",
+      "operator authorization packet hash recheck",
+      "plan inclusion review hash recheck",
+      "canonical soak plan not mutated recheck",
+      "explicit statement that E3 does not authorize order/probe, Bybit call, Decision Lease, adapter enablement, Cost Gate lowering, live/mainnet, or proof"
+    ]
+  },
+  "future_scope_if_e3_and_bb_approve": {
+    "materialization_candidate": "copy exact plan_preview from the reviewed plan inclusion artifact into canonical bounded_demo_probe_soak_plan.json only after final same-window source/runtime/hash/expiry recheck",
+    "canonical_output_path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_demo_probe_soak_plan.json",
+    "requires_bb_after_e3": true,
+    "requires_final_pm_same_window_recheck": true,
+    "still_does_not_authorize_order_submission": true
+  },
+  "authority_assertions": {
+    "approval_granted_by_this_packet": false,
+    "bb_review_granted_by_this_packet": false,
+    "canonical_plan_write_performed": false,
+    "latest_overwrite_performed": false,
+    "active_runtime_probe_authority": false,
+    "active_runtime_order_authority": false,
+    "adapter_enabled_by_this_packet": false,
+    "decision_lease_acquire_performed": false,
+    "decision_lease_release_performed": false,
+    "bybit_call_performed": false,
+    "order_submission_performed": false,
+    "pg_query_performed": false,
+    "pg_write_performed": false,
+    "cost_gate_lowering_performed": false,
+    "live_authority_granted": false,
+    "mainnet_authority_granted": false,
+    "promotion_proof": false,
+    "profit_proof": false
+  }
+}
