@@ -8,7 +8,7 @@ The `ROTATED` blocker was caused by stale false-negative selection wiring in `he
 
 Source fix commit `725fddc3ab365da7655d57aba9ee03bc59d97417` validates any selected side-cell against the freshly generated false-negative candidate packet before passing it to the operator-review producer. If the selected key is stale or absent, the wrapper leaves selection empty so the producer uses the latest top-ranked false-negative candidate.
 
-PM then regenerated only no-authority runtime artifacts from latest runtime inputs. The chain is now candidate-aligned and READY through operator-auth readiness, with `decision=defer` and no order/probe authorization.
+PM then regenerated only no-authority runtime artifacts from latest runtime inputs. A dispatch precheck later observed cron-regenerated `_latest` hashes, still candidate-aligned and READY through operator-auth readiness, with `decision=defer` and no order/probe authorization. This report now binds the E3 request to those latest hashes.
 
 ## Verification
 
@@ -17,22 +17,23 @@ PM then regenerated only no-authority runtime artifacts from latest runtime inpu
 - Local no-authority replay from copied runtime inputs restored NEAR Buy chain before runtime refresh.
 - Linux source-only fast-forwarded to source fix commit `725fddc3ab365da7655d57aba9ee03bc59d97417`; Linux worktree clean.
 - Mac `HEAD`, `origin/main`, GitHub main, Linux `HEAD`, and Linux `origin/main` were all `725fddc3ab365da7655d57aba9ee03bc59d97417` before this source/artifact checkpoint. E3 must consume the committed checkpoint that contains this packet and recheck Mac/GitHub/Linux alignment at that checkpoint.
+- Dispatch precheck at `2026-07-08T16:50:56Z` found the same candidate `ma_crossover|NEARUSDT|Buy` and READY no-authority statuses, with newer runtime `_latest` hashes listed below.
 
 ## Runtime No-Authority Chain
 
-Timestamped runtime refresh stamp: `20260708T125556Z`.
+Latest runtime recheck stamp: `20260708T165056Z`.
 
 | Artifact | Latest sha | Status |
 |---|---|---|
-| `false_negative_candidate_packet_latest.json` | `47d4bccb4816e049a8959f27804fae3b9c6f996172e699f03c864e73a52cfddc` | `COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW` |
-| `autonomous_parameter_proposal_latest.json` | `76c7846969af266528c658d76b26c0dd7aac3fef1aca79c221725e66b0911370` | `REVIEWABLE_PARAMETER_PROPOSAL_READY` |
+| `false_negative_candidate_packet_latest.json` | `d4d4a37b24d5839a76436632daa180acfd1fe8ba781ae816bf196e728f3ea9f2` | `COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW` |
+| `autonomous_parameter_proposal_latest.json` | `b21f4a40df0a5f38297c0c2cf66d971d0a9ba881564034fe53692e3d8c5d1d6e` | `REVIEWABLE_PARAMETER_PROPOSAL_READY` |
 | `standing_demo_operator_authorization.json` | `05fe07f5ad4f92c459c4c6f67bfe534a04b0ea4b4e8f2d8aa43879d87009152f` | `STANDING_DEMO_AUTHORIZATION_ACTIVE` |
-| `false_negative_operator_review_latest.json` | `9d3d49ad80f0db07ae723e3c31c8cf5571948d877bfabcfe482d4c6801f272ec` | `APPROVED_COST_GATE_FALSE_NEGATIVE_FOR_BOUNDED_DEMO_PROBE_PREFLIGHT` |
-| `false_negative_bounded_probe_preflight_latest.json` | `3bcdeaefbcc596bc1c6c5ca983140ff717bbdbdbcedb1d88191af36f4d4ad178` | `READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION` |
-| `bounded_probe_touchability_preflight_latest.json` | `5215481a828f2225948a8cf3e5ba5c29f88d63cd5f59421708319bff6ca78340` | `FIRST_ATTEMPT_TOUCHABILITY_BOOTSTRAP_REQUIRED` |
-| `bounded_probe_placement_repair_plan_latest.json` | `53c50304b16b04dc840bc27e6aeaef74fc179f2705146431ea0aa6490263602f` | `PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW` |
-| `bounded_probe_authority_patch_readiness_latest.json` | `87ce92612945c5423a0627c22e3f3ec77cc70491892a761d243e6f8c8e097b3d` | `AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW` |
-| `bounded_probe_operator_authorization_latest.json` | `b004ace6f3c278648afe6dfb3bd4e75e99c7705ae52642db68d7401c8ff985eb` | `READY_FOR_OPERATOR_AUTHORIZATION_REVIEW`, `decision=defer` |
+| `false_negative_operator_review_latest.json` | `80579cec8478693536e1feb2dcacf656ff60486082707e5cc25a09e160be0aae` | `APPROVED_COST_GATE_FALSE_NEGATIVE_FOR_BOUNDED_DEMO_PROBE_PREFLIGHT` |
+| `false_negative_bounded_probe_preflight_latest.json` | `bdd8988fbaf6378dd1c79e6fd76defacb10bf502625061f7d61a0b14a0f2adb2` | `READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION` |
+| `bounded_probe_touchability_preflight_latest.json` | `29ccfd57c7f5b976d9caf05d2915a360d4eda8bdeecb50367fa606f34cd1e6b0` | `FIRST_ATTEMPT_TOUCHABILITY_BOOTSTRAP_REQUIRED` |
+| `bounded_probe_placement_repair_plan_latest.json` | `4e2b0a39c2908a2d7a81e0c08c520e7aeee4990f6c0dbb988640553a7e947d24` | `PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW` |
+| `bounded_probe_authority_patch_readiness_latest.json` | `baa38ff5dba6285dc348952f92efc536231168a5ad17e94e7eef366a3524d34f` | `AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW` |
+| `bounded_probe_operator_authorization_latest.json` | `63f537fd940b2f88da4bf466ff19ad20f66471054148301dda14d7c5072499d4` | `READY_FOR_OPERATOR_AUTHORIZATION_REVIEW`, `decision=defer` |
 
 ## Boundary
 

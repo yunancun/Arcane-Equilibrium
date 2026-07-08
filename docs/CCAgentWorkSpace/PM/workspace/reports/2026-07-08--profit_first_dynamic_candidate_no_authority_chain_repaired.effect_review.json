@@ -1,6 +1,6 @@
 {
   "schema_version": "profit_first_ai_ml_resolution_loop_effect_review_v1",
-  "generated_at_utc": "2026-07-08T12:56:36Z",
+  "generated_at_utc": "2026-07-08T16:50:56Z",
   "status": "READY_FOR_PM_E3_DISPATCH",
   "actual_effects": [
     {
@@ -17,8 +17,8 @@
       "summary": "Linux trade-core fast-forwarded to source fix commit 725fddc3ab365da7655d57aba9ee03bc59d97417 before the source/artifact checkpoint"
     },
     {
-      "type": "runtime_no_authority_artifact_refresh",
-      "summary": "regenerated candidate-aligned no-authority JSON/MD artifacts under cost_gate_learning_lane and updated _latest pointers"
+      "type": "runtime_latest_hash_recheck",
+      "summary": "dispatch precheck observed cron-regenerated _latest hashes at 20260708T165056Z; candidate and no-authority READY statuses remained aligned"
     },
     {
       "type": "source_artifact_checkpoint",

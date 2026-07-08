@@ -1,7 +1,7 @@
 {
   "schema_version": "profit_first_ai_ml_resolution_loop_state_packet_v1",
   "packet_id": "profit_first_dynamic_candidate_no_authority_chain_repaired_20260708",
-  "generated_at_utc": "2026-07-08T12:56:36Z",
+  "generated_at_utc": "2026-07-08T16:50:56Z",
   "status": "READY_FOR_PM_E3_DISPATCH",
   "candidate_policy": {
     "candidate_selection_dynamic_not_fixed": true,
@@ -14,7 +14,8 @@
     "root_cause": "cron wrapper passed stale cap-feasible side-cell grid_trading|AVAXUSDT|Sell into false-negative operator review",
     "source_fix_commit": "725fddc3ab365da7655d57aba9ee03bc59d97417",
     "source_fix_summary": "validate selected side-cell against fresh false-negative candidate packet before appending --selected-side-cell-key; ignore stale keys and let producer choose latest top-ranked false-negative",
-    "runtime_refresh_stamp": "20260708T125556Z"
+    "runtime_latest_recheck_stamp": "20260708T165056Z",
+    "runtime_hash_refresh_reason": "dispatch precheck found cron-regenerated _latest hashes; candidate and no-authority statuses remained aligned and READY"
   },
   "source_runtime_binding": {
     "required_source_fix_commit": "725fddc3ab365da7655d57aba9ee03bc59d97417",
@@ -32,16 +33,16 @@
   },
   "runtime_artifacts": {
     "false_negative_candidate_packet_latest": {
-      "sha256": "47d4bccb4816e049a8959f27804fae3b9c6f996172e699f03c864e73a52cfddc",
+      "sha256": "d4d4a37b24d5839a76436632daa180acfd1fe8ba781ae816bf196e728f3ea9f2",
       "status": "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW",
-      "generated_at_utc": "2026-07-08T12:32:25.662859+00:00",
+      "generated_at_utc": "2026-07-08T16:32:32.654977+00:00",
       "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy",
       "avg_net_bps": 64.983
     },
     "autonomous_parameter_proposal_latest": {
-      "sha256": "76c7846969af266528c658d76b26c0dd7aac3fef1aca79c221725e66b0911370",
+      "sha256": "b21f4a40df0a5f38297c0c2cf66d971d0a9ba881564034fe53692e3d8c5d1d6e",
       "status": "REVIEWABLE_PARAMETER_PROPOSAL_READY",
-      "generated_at_utc": "2026-07-08T12:32:25.789875+00:00",
+      "generated_at_utc": "2026-07-08T16:32:32.791094+00:00",
       "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy",
       "avg_net_bps": 64.983
     },
@@ -55,40 +56,40 @@
       "bounded_demo_probe_authorized": false
     },
     "false_negative_operator_review_latest": {
-      "sha256": "9d3d49ad80f0db07ae723e3c31c8cf5571948d877bfabcfe482d4c6801f272ec",
+      "sha256": "80579cec8478693536e1feb2dcacf656ff60486082707e5cc25a09e160be0aae",
       "status": "APPROVED_COST_GATE_FALSE_NEGATIVE_FOR_BOUNDED_DEMO_PROBE_PREFLIGHT",
       "decision": "approve-preflight",
       "generated_at_utc": "2026-07-08T12:55:56.985137+00:00",
       "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy"
     },
     "false_negative_bounded_probe_preflight_latest": {
-      "sha256": "3bcdeaefbcc596bc1c6c5ca983140ff717bbdbdbcedb1d88191af36f4d4ad178",
+      "sha256": "bdd8988fbaf6378dd1c79e6fd76defacb10bf502625061f7d61a0b14a0f2adb2",
       "status": "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION",
-      "generated_at_utc": "2026-07-08T12:55:57.037783+00:00",
+      "generated_at_utc": "2026-07-08T16:32:32.838758+00:00",
       "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy"
     },
     "bounded_probe_touchability_preflight_latest": {
-      "sha256": "5215481a828f2225948a8cf3e5ba5c29f88d63cd5f59421708319bff6ca78340",
+      "sha256": "29ccfd57c7f5b976d9caf05d2915a360d4eda8bdeecb50367fa606f34cd1e6b0",
       "status": "FIRST_ATTEMPT_TOUCHABILITY_BOOTSTRAP_REQUIRED",
-      "generated_at_utc": "2026-07-08T12:55:57.072993+00:00",
+      "generated_at_utc": "2026-07-08T16:35:36.487328+00:00",
       "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy"
     },
     "bounded_probe_placement_repair_plan_latest": {
-      "sha256": "53c50304b16b04dc840bc27e6aeaef74fc179f2705146431ea0aa6490263602f",
+      "sha256": "4e2b0a39c2908a2d7a81e0c08c520e7aeee4990f6c0dbb988640553a7e947d24",
       "status": "PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW",
-      "generated_at_utc": "2026-07-08T12:55:57.102467+00:00",
+      "generated_at_utc": "2026-07-08T16:35:36.512637+00:00",
       "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy"
     },
     "bounded_probe_authority_patch_readiness_latest": {
-      "sha256": "87ce92612945c5423a0627c22e3f3ec77cc70491892a761d243e6f8c8e097b3d",
+      "sha256": "baa38ff5dba6285dc348952f92efc536231168a5ad17e94e7eef366a3524d34f",
       "status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
-      "generated_at_utc": "2026-07-08T12:55:57.140216+00:00"
+      "generated_at_utc": "2026-07-08T16:35:36.546749+00:00"
     },
     "bounded_probe_operator_authorization_latest": {
-      "sha256": "b004ace6f3c278648afe6dfb3bd4e75e99c7705ae52642db68d7401c8ff985eb",
+      "sha256": "63f537fd940b2f88da4bf466ff19ad20f66471054148301dda14d7c5072499d4",
       "status": "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW",
       "decision": "defer",
-      "generated_at_utc": "2026-07-08T12:55:57.568051+00:00",
+      "generated_at_utc": "2026-07-08T16:35:36.968051+00:00",
       "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy",
       "blocking_gates": [],
       "ready_for_operator_authorization_review": true,
