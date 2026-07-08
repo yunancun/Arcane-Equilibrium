@@ -1,0 +1,51 @@
+{
+  "schema_version": "profit_first_effect_review_v1",
+  "generated_at_utc": "2026-07-08T19:18:58Z",
+  "status": "READY_FOR_PM_BB_DISPATCH",
+  "candidate": "ma_crossover|NEARUSDT|Buy",
+  "effects": {
+    "source_files_changed": [],
+    "docs_files_changed": [
+      "TODO.md",
+      "docs/CLAUDE_CHANGELOG.md",
+      "docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-08--profit_first_near_buy_bounded_probe_plan_materialization_e3_review.md",
+      "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_bounded_probe_plan_materialization_e3_approved_bb_request.md",
+      "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_bounded_probe_plan_materialization_e3_approved_bb_request.state_packet.json",
+      "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_bounded_probe_plan_materialization_e3_approved_bb_request.effect_review.json",
+      "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_bounded_probe_plan_materialization_bb_request.json",
+      "docs/CCAgentWorkSpace/Operator/2026-07-08--profit_first_near_buy_bounded_probe_plan_materialization_e3_approved_bb_request.md"
+    ],
+    "runtime_files_written": [],
+    "runtime_files_read_only": [
+      "/tmp/openclaw_near_bounded_probe_authorization_20260708T190054Z_db2c9e105/bounded_probe_operator_authorization_authorized.json",
+      "/tmp/openclaw_near_bounded_probe_authorization_20260708T190054Z_db2c9e105/bounded_probe_plan_inclusion_review.json",
+      "/home/ncyu/BybitOpenClaw/var/openclaw/profit_first_dynamic_candidate_same_window_final_gate_20260708T175744Z_08f7e957_noorder/active_lease_bbo_window/actual_construction_preview.json",
+      "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_demo_probe_soak_plan.json"
+    ]
+  },
+  "verification": {
+    "e3_verdict": "APPROVE_FOR_PM_BB_PLAN_MATERIALIZATION_REVIEW",
+    "e3_report_sha256": "bb03bcc9d911ad17bff674720f81bb1785061393f6187f51d7ea2f1131cc4ed8",
+    "bb_request_sha256": "05d27a0419954905faf82a3e02c59d10814d399d6f52149c5b55a13b6d3ba89c",
+    "json_parse": "passed",
+    "git_diff_check": "passed"
+  },
+  "risk_boundary": {
+    "canonical_soak_plan_write_performed": false,
+    "latest_overwrite_performed": false,
+    "bybit_call_performed": false,
+    "decision_lease_performed": false,
+    "order_or_probe_performed": false,
+    "db_or_pg_write_performed": false,
+    "pg_query_performed": false,
+    "runtime_or_service_mutation_performed": false,
+    "cost_gate_lowering_performed": false,
+    "live_or_mainnet_authority_granted": false,
+    "proof_or_promotion_claim": false
+  },
+  "residual_risk": [
+    "BB has not yet approved plan materialization review.",
+    "Canonical soak plan is still old ETH and must not be consumed for NEAR.",
+    "Standing authorization expires at 2026-07-09T00:12:30.886090+00:00 and must be rechecked before any BB or PM consumption."
+  ]
+}

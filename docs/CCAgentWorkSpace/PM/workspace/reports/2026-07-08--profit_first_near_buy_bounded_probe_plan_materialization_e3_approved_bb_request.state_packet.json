@@ -1,0 +1,90 @@
+{
+  "schema_version": "profit_first_pm_state_packet_v1",
+  "generated_at_utc": "2026-07-08T19:18:58Z",
+  "status": "READY_FOR_PM_BB_DISPATCH",
+  "substatus": "E3_APPROVED_BB_PLAN_MATERIALIZATION_REQUEST_READY",
+  "active_blocker_id": "P0-CURRENT-CANDIDATE-ORDER-CAPABLE-DEMO-INVOKE-FRESH-WINDOW-RUN-GATE",
+  "candidate": {
+    "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+    "strategy_name": "ma_crossover",
+    "symbol": "NEARUSDT",
+    "side": "Buy",
+    "outcome_horizon_minutes": 60
+  },
+  "source_runtime_binding": {
+    "reviewed_checkpoint": "ab496b4495bc30eb459c02b0340f97420d6ce57b",
+    "mac_head_at_e3_review": "ab496b4495bc30eb459c02b0340f97420d6ce57b",
+    "mac_origin_main_at_e3_review": "ab496b4495bc30eb459c02b0340f97420d6ce57b",
+    "github_main_at_e3_review": "ab496b4495bc30eb459c02b0340f97420d6ce57b",
+    "linux_head_at_e3_review": "ab496b4495bc30eb459c02b0340f97420d6ce57b",
+    "linux_origin_main_at_e3_review": "ab496b4495bc30eb459c02b0340f97420d6ce57b",
+    "linux_worktree_clean_at_e3_review": true,
+    "must_recheck_before_bb_review": true,
+    "if_source_runtime_hash_candidate_or_expiry_drift": "ROTATED"
+  },
+  "e3_review": {
+    "report_path": "docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-08--profit_first_near_buy_bounded_probe_plan_materialization_e3_review.md",
+    "sha256": "bb03bcc9d911ad17bff674720f81bb1785061393f6187f51d7ea2f1131cc4ed8",
+    "verdict": "APPROVE_FOR_PM_BB_PLAN_MATERIALIZATION_REVIEW",
+    "review_time_linux_utc": "2026-07-08T19:16:43.699761+00:00"
+  },
+  "machine_ready_artifacts": {
+    "bounded_probe_operator_authorization": {
+      "path": "/tmp/openclaw_near_bounded_probe_authorization_20260708T190054Z_db2c9e105/bounded_probe_operator_authorization_authorized.json",
+      "sha256": "0e075af5b0a5ef8b3e343caffe7ab3608bbb45cf418600c5cf689e3c5e5e7124",
+      "status": "BOUNDED_DEMO_PROBE_AUTHORIZED",
+      "authorization_id": "standing-demo-8f2e19a68b39a5b3",
+      "expires_at_utc": "2026-07-09T00:12:30.886090+00:00",
+      "max_authorized_probe_orders": 2
+    },
+    "bounded_probe_plan_inclusion_review": {
+      "path": "/tmp/openclaw_near_bounded_probe_authorization_20260708T190054Z_db2c9e105/bounded_probe_plan_inclusion_review.json",
+      "sha256": "5e08595c3b009741e3ede221d7ce96c233864d6ddb1f434797b1c105249305fc",
+      "status": "PLAN_INCLUSION_PREVIEW_READY_NO_ADMISSION",
+      "inactive_adapter_decision": "ADAPTER_DISABLED",
+      "hypothetical_adapter_enabled_decision": "ADMIT_DEMO_LEARNING_PROBE",
+      "allowed_to_submit_order_in_current_review": false
+    },
+    "construction_preview": {
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/profit_first_dynamic_candidate_same_window_final_gate_20260708T175744Z_08f7e957_noorder/active_lease_bbo_window/actual_construction_preview.json",
+      "sha256": "d4561891a8ddaf318923be31043591033413a58ff66ef2a8acb842b7e79a2981",
+      "status": "CURRENT_CANDIDATE_CONSTRUCTION_PREVIEW_READY_NO_ORDER"
+    },
+    "canonical_soak_plan": {
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_demo_probe_soak_plan.json",
+      "sha256": "30056993b5cae70a0fcad0503221e12bd74dae4e42a29d0d2c88423c64739823",
+      "candidate": "grid_trading|ETHUSDT|Buy",
+      "updated": false
+    }
+  },
+  "bb_request": {
+    "path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_bounded_probe_plan_materialization_bb_request.json",
+    "status": "READY_FOR_PM_BB_DISPATCH",
+    "requested_verdict_if_pass": "APPROVE_FOR_PM_SAME_WINDOW_PLAN_MATERIALIZATION_RECHECK"
+  },
+  "answers": {
+    "ready_for_pm_bb_dispatch": true,
+    "ready_for_bounded_demo_final_window": false,
+    "canonical_soak_plan_write_performed": false,
+    "latest_overwrite_performed": false,
+    "active_runtime_probe_authority": false,
+    "active_runtime_order_authority": false,
+    "adapter_enabled_by_this_packet": false,
+    "decision_lease_acquire_performed": false,
+    "decision_lease_release_performed": false,
+    "bybit_call_performed": false,
+    "order_submission_performed": false,
+    "order_cancel_performed": false,
+    "order_modify_performed": false,
+    "pg_query_performed": false,
+    "pg_write_performed": false,
+    "runtime_mutation_performed": false,
+    "service_restart_performed": false,
+    "cost_gate_lowering_performed": false,
+    "live_authority_granted": false,
+    "mainnet_authority_granted": false,
+    "promotion_proof": false,
+    "profit_proof": false
+  },
+  "next_machine_executable_stage": "PM_TO_BB_EXACT_SCOPE_DISPATCH_FOR_PLAN_MATERIALIZATION_REVIEW"
+}
