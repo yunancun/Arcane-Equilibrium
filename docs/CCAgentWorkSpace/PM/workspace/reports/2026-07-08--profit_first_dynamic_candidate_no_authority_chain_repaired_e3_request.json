@@ -1,7 +1,7 @@
 {
   "schema_version": "pm_to_e3_exact_scope_request_v1",
-  "request_id": "profit_first_dynamic_candidate_no_authority_chain_repaired_e3_review_20260708",
-  "generated_at_utc": "2026-07-08T12:56:36Z",
+  "request_id": "profit_first_dynamic_candidate_no_authority_chain_repaired_e3_review_20260708T165056Z",
+  "generated_at_utc": "2026-07-08T16:50:56Z",
   "requested_by": "PM",
   "target_agent": "E3",
   "requested_verdict_if_pass": "APPROVE_FOR_PM_BB_REPAIR_REVIEW_REQUEST",
@@ -55,19 +55,19 @@
       "bash -n helper_scripts/cron/cost_gate_learning_lane_cron.sh",
       "python3 -m pytest -q helper_scripts/cron/tests/test_cost_gate_learning_lane_cron_static.py",
       "local no-authority chain replay with latest runtime inputs",
-      "Linux no-authority runtime chain refresh stamp 20260708T125556Z"
+      "dispatch precheck observed cron-regenerated runtime _latest hashes at 20260708T165056Z with the same candidate and READY no-authority statuses"
     ]
   },
   "runtime_artifact_requirements": {
     "false_negative_candidate_packet_latest": {
       "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/false_negative_candidate_packet_latest.json",
-      "sha256": "47d4bccb4816e049a8959f27804fae3b9c6f996172e699f03c864e73a52cfddc",
+      "sha256": "d4d4a37b24d5839a76436632daa180acfd1fe8ba781ae816bf196e728f3ea9f2",
       "status": "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW",
       "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy"
     },
     "autonomous_parameter_proposal_latest": {
       "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/autonomous_parameter_proposal_latest.json",
-      "sha256": "76c7846969af266528c658d76b26c0dd7aac3fef1aca79c221725e66b0911370",
+      "sha256": "b21f4a40df0a5f38297c0c2cf66d971d0a9ba881564034fe53692e3d8c5d1d6e",
       "status": "REVIEWABLE_PARAMETER_PROPOSAL_READY",
       "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy"
     },
@@ -80,37 +80,37 @@
     },
     "false_negative_operator_review_latest": {
       "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/false_negative_operator_review_latest.json",
-      "sha256": "9d3d49ad80f0db07ae723e3c31c8cf5571948d877bfabcfe482d4c6801f272ec",
+      "sha256": "80579cec8478693536e1feb2dcacf656ff60486082707e5cc25a09e160be0aae",
       "status": "APPROVED_COST_GATE_FALSE_NEGATIVE_FOR_BOUNDED_DEMO_PROBE_PREFLIGHT",
       "decision": "approve-preflight",
       "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy"
     },
     "false_negative_bounded_probe_preflight_latest": {
       "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/false_negative_bounded_probe_preflight_latest.json",
-      "sha256": "3bcdeaefbcc596bc1c6c5ca983140ff717bbdbdbcedb1d88191af36f4d4ad178",
+      "sha256": "bdd8988fbaf6378dd1c79e6fd76defacb10bf502625061f7d61a0b14a0f2adb2",
       "status": "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION",
       "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy"
     },
     "bounded_probe_touchability_preflight_latest": {
       "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_probe_touchability_preflight_latest.json",
-      "sha256": "5215481a828f2225948a8cf3e5ba5c29f88d63cd5f59421708319bff6ca78340",
+      "sha256": "29ccfd57c7f5b976d9caf05d2915a360d4eda8bdeecb50367fa606f34cd1e6b0",
       "status": "FIRST_ATTEMPT_TOUCHABILITY_BOOTSTRAP_REQUIRED",
       "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy"
     },
     "bounded_probe_placement_repair_plan_latest": {
       "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_probe_placement_repair_plan_latest.json",
-      "sha256": "53c50304b16b04dc840bc27e6aeaef74fc179f2705146431ea0aa6490263602f",
+      "sha256": "4e2b0a39c2908a2d7a81e0c08c520e7aeee4990f6c0dbb988640553a7e947d24",
       "status": "PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW",
       "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy"
     },
     "bounded_probe_authority_patch_readiness_latest": {
       "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_probe_authority_patch_readiness_latest.json",
-      "sha256": "87ce92612945c5423a0627c22e3f3ec77cc70491892a761d243e6f8c8e097b3d",
+      "sha256": "baa38ff5dba6285dc348952f92efc536231168a5ad17e94e7eef366a3524d34f",
       "status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW"
     },
     "bounded_probe_operator_authorization_latest": {
       "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_probe_operator_authorization_latest.json",
-      "sha256": "b004ace6f3c278648afe6dfb3bd4e75e99c7705ae52642db68d7401c8ff985eb",
+      "sha256": "63f537fd940b2f88da4bf466ff19ad20f66471054148301dda14d7c5072499d4",
       "status": "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW",
       "decision": "defer",
       "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy",
