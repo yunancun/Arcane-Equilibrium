@@ -1,0 +1,119 @@
+{
+  "schema_version": "profit_first_ai_ml_resolution_loop_state_packet_v1",
+  "packet_id": "profit_first_dynamic_candidate_no_authority_chain_repaired_20260708",
+  "generated_at_utc": "2026-07-08T12:56:36Z",
+  "status": "READY_FOR_PM_E3_DISPATCH",
+  "candidate_policy": {
+    "candidate_selection_dynamic_not_fixed": true,
+    "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy",
+    "candidate_string_changed_from_rotated_packet": false,
+    "must_recheck_before_e3_consumption": true,
+    "if_latest_selection_or_hashes_differ": "ROTATED"
+  },
+  "repair": {
+    "root_cause": "cron wrapper passed stale cap-feasible side-cell grid_trading|AVAXUSDT|Sell into false-negative operator review",
+    "source_fix_commit": "725fddc3ab365da7655d57aba9ee03bc59d97417",
+    "source_fix_summary": "validate selected side-cell against fresh false-negative candidate packet before appending --selected-side-cell-key; ignore stale keys and let producer choose latest top-ranked false-negative",
+    "runtime_refresh_stamp": "20260708T125556Z"
+  },
+  "source_runtime_binding": {
+    "required_source_fix_commit": "725fddc3ab365da7655d57aba9ee03bc59d97417",
+    "pre_checkpoint_verified_alignment_commit": "725fddc3ab365da7655d57aba9ee03bc59d97417",
+    "checkpoint_consumption_requirement": "consume this packet from the committed origin/main checkpoint that contains it; Mac origin/main, GitHub main, Linux HEAD, and Linux origin/main must all match that checkpoint before E3 consumption",
+    "allowed_diff_from_source_fix_commit": [
+      "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired*",
+      "docs/CCAgentWorkSpace/Operator/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired.md",
+      "TODO.md",
+      "docs/CLAUDE_CHANGELOG.md"
+    ],
+    "if_current_checkpoint_contains_other_diffs": "ROTATED",
+    "linux_worktree_clean": true,
+    "local_unrelated_dirty_changes_present": true
+  },
+  "runtime_artifacts": {
+    "false_negative_candidate_packet_latest": {
+      "sha256": "47d4bccb4816e049a8959f27804fae3b9c6f996172e699f03c864e73a52cfddc",
+      "status": "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW",
+      "generated_at_utc": "2026-07-08T12:32:25.662859+00:00",
+      "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy",
+      "avg_net_bps": 64.983
+    },
+    "autonomous_parameter_proposal_latest": {
+      "sha256": "76c7846969af266528c658d76b26c0dd7aac3fef1aca79c221725e66b0911370",
+      "status": "REVIEWABLE_PARAMETER_PROPOSAL_READY",
+      "generated_at_utc": "2026-07-08T12:32:25.789875+00:00",
+      "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy",
+      "avg_net_bps": 64.983
+    },
+    "standing_demo_operator_authorization": {
+      "sha256": "05fe07f5ad4f92c459c4c6f67bfe534a04b0ea4b4e8f2d8aa43879d87009152f",
+      "status": "STANDING_DEMO_AUTHORIZATION_ACTIVE",
+      "expires_at_utc": "2026-07-09T00:12:30.886090+00:00",
+      "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy",
+      "order_authority_granted": false,
+      "probe_authority_granted": false,
+      "bounded_demo_probe_authorized": false
+    },
+    "false_negative_operator_review_latest": {
+      "sha256": "9d3d49ad80f0db07ae723e3c31c8cf5571948d877bfabcfe482d4c6801f272ec",
+      "status": "APPROVED_COST_GATE_FALSE_NEGATIVE_FOR_BOUNDED_DEMO_PROBE_PREFLIGHT",
+      "decision": "approve-preflight",
+      "generated_at_utc": "2026-07-08T12:55:56.985137+00:00",
+      "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy"
+    },
+    "false_negative_bounded_probe_preflight_latest": {
+      "sha256": "3bcdeaefbcc596bc1c6c5ca983140ff717bbdbdbcedb1d88191af36f4d4ad178",
+      "status": "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION",
+      "generated_at_utc": "2026-07-08T12:55:57.037783+00:00",
+      "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy"
+    },
+    "bounded_probe_touchability_preflight_latest": {
+      "sha256": "5215481a828f2225948a8cf3e5ba5c29f88d63cd5f59421708319bff6ca78340",
+      "status": "FIRST_ATTEMPT_TOUCHABILITY_BOOTSTRAP_REQUIRED",
+      "generated_at_utc": "2026-07-08T12:55:57.072993+00:00",
+      "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy"
+    },
+    "bounded_probe_placement_repair_plan_latest": {
+      "sha256": "53c50304b16b04dc840bc27e6aeaef74fc179f2705146431ea0aa6490263602f",
+      "status": "PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW",
+      "generated_at_utc": "2026-07-08T12:55:57.102467+00:00",
+      "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy"
+    },
+    "bounded_probe_authority_patch_readiness_latest": {
+      "sha256": "87ce92612945c5423a0627c22e3f3ec77cc70491892a761d243e6f8c8e097b3d",
+      "status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW",
+      "generated_at_utc": "2026-07-08T12:55:57.140216+00:00"
+    },
+    "bounded_probe_operator_authorization_latest": {
+      "sha256": "b004ace6f3c278648afe6dfb3bd4e75e99c7705ae52642db68d7401c8ff985eb",
+      "status": "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW",
+      "decision": "defer",
+      "generated_at_utc": "2026-07-08T12:55:57.568051+00:00",
+      "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy",
+      "blocking_gates": [],
+      "ready_for_operator_authorization_review": true,
+      "bounded_demo_probe_authorized": false,
+      "operator_authorization_object_emitted": false,
+      "order_authority_granted_in_authorization_object": false,
+      "probe_authority_granted_in_authorization_object": false
+    }
+  },
+  "next_required_state": "PM_E3_EXACT_SCOPE_REVIEW",
+  "e3_request": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_e3_request.json",
+  "boundaries": {
+    "runtime_no_authority_artifact_refresh_performed": true,
+    "bybit_public_or_private_call": false,
+    "decision_lease": false,
+    "order_probe_cancel_modify": false,
+    "bounded_demo_final_window": false,
+    "operator_authorization_authorize": false,
+    "standing_authorization_materialization_or_change": false,
+    "runtime_adapter_enablement": false,
+    "service_restart_or_build": false,
+    "runtime_env_mutation": false,
+    "db_write_or_migration": false,
+    "cost_gate_lowered": false,
+    "live_or_mainnet": false,
+    "proof_or_promotion_claim": false
+  }
+}

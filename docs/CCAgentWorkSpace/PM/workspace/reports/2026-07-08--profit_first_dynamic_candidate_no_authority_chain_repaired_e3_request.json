@@ -1,0 +1,146 @@
+{
+  "schema_version": "pm_to_e3_exact_scope_request_v1",
+  "request_id": "profit_first_dynamic_candidate_no_authority_chain_repaired_e3_review_20260708",
+  "generated_at_utc": "2026-07-08T12:56:36Z",
+  "requested_by": "PM",
+  "target_agent": "E3",
+  "requested_verdict_if_pass": "APPROVE_FOR_PM_BB_REPAIR_REVIEW_REQUEST",
+  "terminal_if_drift": "ROTATED",
+  "scope": {
+    "title": "Review repaired dynamic candidate no-authority chain",
+    "candidate_selection_dynamic_not_fixed": true,
+    "current_selected_side_cell_key": "ma_crossover|NEARUSDT|Buy",
+    "allowed_actions": [
+      "read source files",
+      "read committed PM artifacts",
+      "read runtime JSON artifacts",
+      "verify source/runtime/GitHub head alignment",
+      "verify no-authority chain statuses and hashes",
+      "return E3 review verdict"
+    ],
+    "forbidden_actions": [
+      "public or private Bybit call",
+      "Decision Lease acquire or release",
+      "order, probe, cancel, or modify",
+      "bounded Demo final window",
+      "operator authorization authorize",
+      "standing authorization materialization or change",
+      "runtime adapter enablement",
+      "service restart or build",
+      "runtime env mutation",
+      "DB write or migration",
+      "Cost Gate lowering",
+      "live or mainnet",
+      "proof or promotion claim"
+    ]
+  },
+  "source_binding": {
+    "required_source_fix_commit": "725fddc3ab365da7655d57aba9ee03bc59d97417",
+    "pre_checkpoint_verified_alignment_commit": "725fddc3ab365da7655d57aba9ee03bc59d97417",
+    "request_must_be_consumed_from_committed_origin_main": true,
+    "required_current_alignment": "Mac origin/main, GitHub main, Linux HEAD, and Linux origin/main must all match the committed checkpoint containing this request packet",
+    "allowed_diff_from_source_fix_commit": [
+      "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired*",
+      "docs/CCAgentWorkSpace/Operator/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired.md",
+      "TODO.md",
+      "docs/CLAUDE_CHANGELOG.md"
+    ],
+    "required_linux_clean": true,
+    "if_alignment_or_allowed_diff_check_fails": "ROTATED"
+  },
+  "root_cause_and_repair": {
+    "root_cause": "stale cap-feasible selected side-cell grid_trading|AVAXUSDT|Sell was passed into false-negative operator review although the latest false-negative packet selected ma_crossover|NEARUSDT|Buy",
+    "source_fix_commit": "725fddc3ab365da7655d57aba9ee03bc59d97417",
+    "verification": [
+      "bash -n helper_scripts/cron/cost_gate_learning_lane_cron.sh",
+      "python3 -m pytest -q helper_scripts/cron/tests/test_cost_gate_learning_lane_cron_static.py",
+      "local no-authority chain replay with latest runtime inputs",
+      "Linux no-authority runtime chain refresh stamp 20260708T125556Z"
+    ]
+  },
+  "runtime_artifact_requirements": {
+    "false_negative_candidate_packet_latest": {
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/false_negative_candidate_packet_latest.json",
+      "sha256": "47d4bccb4816e049a8959f27804fae3b9c6f996172e699f03c864e73a52cfddc",
+      "status": "COST_GATE_FALSE_NEGATIVE_CANDIDATES_READY_FOR_OPERATOR_REVIEW",
+      "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy"
+    },
+    "autonomous_parameter_proposal_latest": {
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/autonomous_parameter_proposal_latest.json",
+      "sha256": "76c7846969af266528c658d76b26c0dd7aac3fef1aca79c221725e66b0911370",
+      "status": "REVIEWABLE_PARAMETER_PROPOSAL_READY",
+      "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy"
+    },
+    "standing_demo_operator_authorization": {
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/standing_demo_operator_authorization.json",
+      "sha256": "05fe07f5ad4f92c459c4c6f67bfe534a04b0ea4b4e8f2d8aa43879d87009152f",
+      "status": "STANDING_DEMO_AUTHORIZATION_ACTIVE",
+      "expires_at_utc": "2026-07-09T00:12:30.886090+00:00",
+      "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy"
+    },
+    "false_negative_operator_review_latest": {
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/false_negative_operator_review_latest.json",
+      "sha256": "9d3d49ad80f0db07ae723e3c31c8cf5571948d877bfabcfe482d4c6801f272ec",
+      "status": "APPROVED_COST_GATE_FALSE_NEGATIVE_FOR_BOUNDED_DEMO_PROBE_PREFLIGHT",
+      "decision": "approve-preflight",
+      "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy"
+    },
+    "false_negative_bounded_probe_preflight_latest": {
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/false_negative_bounded_probe_preflight_latest.json",
+      "sha256": "3bcdeaefbcc596bc1c6c5ca983140ff717bbdbdbcedb1d88191af36f4d4ad178",
+      "status": "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION",
+      "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy"
+    },
+    "bounded_probe_touchability_preflight_latest": {
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_probe_touchability_preflight_latest.json",
+      "sha256": "5215481a828f2225948a8cf3e5ba5c29f88d63cd5f59421708319bff6ca78340",
+      "status": "FIRST_ATTEMPT_TOUCHABILITY_BOOTSTRAP_REQUIRED",
+      "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy"
+    },
+    "bounded_probe_placement_repair_plan_latest": {
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_probe_placement_repair_plan_latest.json",
+      "sha256": "53c50304b16b04dc840bc27e6aeaef74fc179f2705146431ea0aa6490263602f",
+      "status": "PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW",
+      "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy"
+    },
+    "bounded_probe_authority_patch_readiness_latest": {
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_probe_authority_patch_readiness_latest.json",
+      "sha256": "87ce92612945c5423a0627c22e3f3ec77cc70491892a761d243e6f8c8e097b3d",
+      "status": "AUTHORITY_PATH_PATCH_READY_FOR_OPERATOR_REVIEW"
+    },
+    "bounded_probe_operator_authorization_latest": {
+      "path": "/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_probe_operator_authorization_latest.json",
+      "sha256": "b004ace6f3c278648afe6dfb3bd4e75e99c7705ae52642db68d7401c8ff985eb",
+      "status": "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW",
+      "decision": "defer",
+      "selected_side_cell_key": "ma_crossover|NEARUSDT|Buy",
+      "blocking_gates": []
+    }
+  },
+  "authority_assertions": {
+    "bounded_demo_probe_authorized": false,
+    "operator_authorization_object_emitted": false,
+    "order_authority_granted": false,
+    "probe_authority_granted": false,
+    "global_cost_gate_lowering_recommended": false,
+    "main_cost_gate_adjustment": "NONE",
+    "promotion_evidence": false,
+    "proof_claim": false
+  },
+  "requested_output": {
+    "report_path": "docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_e3_review.md",
+    "verdict_values": [
+      "APPROVE_FOR_PM_BB_REPAIR_REVIEW_REQUEST",
+      "ROTATED",
+      "BLOCKED_NO_SAFE_ACTION"
+    ],
+    "must_include": [
+      "source head recheck",
+      "Linux clean recheck",
+      "latest dynamic candidate recheck",
+      "runtime artifact hash recheck",
+      "no-authority boundary review",
+      "explicit statement that this does not authorize Bybit, Decision Lease, order/probe, final window, Cost Gate lowering, live/mainnet, or proof"
+    ]
+  }
+}
