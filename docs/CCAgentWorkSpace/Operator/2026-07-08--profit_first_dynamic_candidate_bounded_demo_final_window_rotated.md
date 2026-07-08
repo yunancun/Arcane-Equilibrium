@@ -8,8 +8,9 @@ The candidate string still resolves to `ma_crossover|NEARUSDT|Buy`, but the runt
 
 - Candidate packet: `1387ae73...` -> `47d4bccb...`
 - Proposal packet: `676f6c3e...` -> `76c78469...`
+- Operator-auth readiness: `0438247d...` -> `608eb813...`, now `FALSE_NEGATIVE_PREFLIGHT_NOT_READY`
 
-Because candidate selection is dynamic, the next final-window packet must restart from these latest hashes. The previous E3/BB approvals remain historical prep evidence only and must not be used as execution authority.
+Because candidate selection is dynamic and no-order readiness is no longer READY, the next final-window packet must restart from these latest hashes and repair/regenerate the no-authority chain first. The previous E3/BB approvals remain historical prep evidence only and must not be used as execution authority.
 
 Still not performed:
 

@@ -3,7 +3,7 @@
   "packet_id": "profit_first_dynamic_candidate_bounded_demo_final_window_rotated_20260708",
   "generated_at_utc": "2026-07-08T12:35:59Z",
   "status": "ROTATED",
-  "rotation_reason": "runtime_latest_candidate_and_proposal_hash_drift_after_bb_review",
+  "rotation_reason": "runtime_latest_candidate_proposal_and_no_order_readiness_drift_after_bb_review",
   "candidate_policy": {
     "candidate_selection_dynamic_not_fixed": true,
     "selected_side_cell_key_at_bb_review": "ma_crossover|NEARUSDT|Buy",
@@ -44,14 +44,57 @@
     "autonomous_parameter_proposal_sha256_at_rotation_check": "76c7846969af266528c658d76b26c0dd7aac3fef1aca79c221725e66b0911370",
     "autonomous_parameter_proposal_generated_at_utc": "2026-07-08T12:32:25.789875+00:00",
     "latest_candidate_avg_net_bps": 64.983,
-    "bounded_probe_operator_authorization_sha256": "0438247d3a696d420e8272bf16d549ead70403d773fc903d97639efc75f72bd4",
-    "bounded_probe_operator_authorization_status": "READY_FOR_OPERATOR_AUTHORIZATION_REVIEW",
+    "bounded_probe_operator_authorization_sha256_at_bb_review": "0438247d3a696d420e8272bf16d549ead70403d773fc903d97639efc75f72bd4",
+    "bounded_probe_operator_authorization_sha256_at_post_commit_recheck": "608eb813491d821060df6a24dba1ea3bfc5403f3171b100c49c03fcc5e053418",
+    "bounded_probe_operator_authorization_status": "FALSE_NEGATIVE_PREFLIGHT_NOT_READY",
     "bounded_probe_operator_authorization_decision": "defer",
+    "bounded_probe_operator_authorization_blocking_gates": [
+      "false_negative_preflight_ready",
+      "placement_repair_plan_ready",
+      "authority_path_patch_readiness_ready"
+    ],
     "bounded_demo_probe_authorized": false,
     "order_authority_granted": false,
     "probe_authority_granted": false
   },
-  "next_required_state": "REGENERATE_DYNAMIC_CANDIDATE_CHAIN_FROM_LATEST_ARTIFACTS",
+  "runtime_no_order_chain_at_post_commit_recheck": {
+    "false_negative_operator_review_latest": {
+      "sha256": "d7d08d510207713493ba5de95421264c1ab9105f20c217e4e484df5f08551b59",
+      "status": "STANDING_DEMO_AUTHORIZATION_INVALID_FOR_PREFLIGHT_REVIEW",
+      "blocking_gates": [
+        "standing_demo_authorization_valid_for_preflight_review",
+        "candidate_selected",
+        "candidate_reviewable"
+      ]
+    },
+    "false_negative_bounded_probe_preflight_latest": {
+      "sha256": "030daa3d0a8cfaff07426f4653a311eb617b1d0a4980fc7b0db0323e4ad2234d",
+      "status": "FALSE_NEGATIVE_OPERATOR_REVIEW_REQUIRED",
+      "blocking_gates": [
+        "false_negative_operator_review_present",
+        "candidate_alignment",
+        "false_negative_operator_review_approved_for_preflight"
+      ]
+    },
+    "bounded_probe_touchability_preflight_latest": {
+      "sha256": "4d1f9f2421754d9270af3abcc9b6244b3f8abb83163d43653d373df139d2d541",
+      "status": "BOUNDED_PROBE_DESIGN_NOT_READY"
+    },
+    "bounded_probe_placement_repair_plan_latest": {
+      "sha256": "335535408fd4d89c31e1d0f361f4a7e786d9d5dc1c24385ae4530705d4b2df02",
+      "status": "BOUNDED_PROBE_DESIGN_NOT_READY"
+    },
+    "bounded_probe_authority_patch_readiness_latest": {
+      "sha256": "cfb1ca00c13ffcc70b250066231fd799ea857d3ac9830dc981501c7f9aea3227",
+      "status": "PLACEMENT_REPAIR_PLAN_NOT_READY"
+    },
+    "bounded_probe_operator_authorization_latest": {
+      "sha256": "608eb813491d821060df6a24dba1ea3bfc5403f3171b100c49c03fcc5e053418",
+      "status": "FALSE_NEGATIVE_PREFLIGHT_NOT_READY",
+      "decision": "defer"
+    }
+  },
+  "next_required_state": "REGENERATE_OR_REPAIR_DYNAMIC_CANDIDATE_NO_AUTHORITY_CHAIN_FROM_LATEST_ARTIFACTS",
   "boundaries": {
     "bybit_public_or_private_call": false,
     "decision_lease": false,

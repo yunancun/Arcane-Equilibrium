@@ -8,6 +8,10 @@
       "summary": "detected runtime latest candidate/proposal sha drift after BB review while selected candidate string remained ma_crossover|NEARUSDT|Buy"
     },
     {
+      "type": "read_only_runtime_no_order_chain_recheck",
+      "summary": "detected latest no-order readiness chain regressed to non-READY statuses, including bounded_probe_operator_authorization_latest FALSE_NEGATIVE_PREFLIGHT_NOT_READY"
+    },
+    {
       "type": "source_artifact_checkpoint",
       "summary": "recorded ROTATED PM report, state packet, effect review, operator summary, TODO, and changelog"
     }
