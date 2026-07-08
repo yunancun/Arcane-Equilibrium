@@ -1,6 +1,6 @@
 # Profit-First Dynamic Candidate No-Authority Chain Repaired
 
-Status: `READY_FOR_PM_BB_DISPATCH`
+Status: `READY_FOR_BOUNDED_DEMO_FINAL_WINDOW`
 
 ## Summary
 
@@ -11,6 +11,8 @@ Source fix commit `725fddc3ab365da7655d57aba9ee03bc59d97417` validates any selec
 PM then regenerated only no-authority runtime artifacts from latest runtime inputs. A dispatch precheck later observed cron-regenerated `_latest` hashes, still candidate-aligned and READY through operator-auth readiness, with `decision=defer` and no order/probe authorization. This report now binds the E3 request to those latest hashes.
 
 E3 reviewed the refreshed request and returned `APPROVE_FOR_PM_BB_REPAIR_REVIEW_REQUEST` in `docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_e3_review.md`. PM therefore emitted a read-only BB exact-scope request for repaired-chain review; this still does not authorize any exchange-facing action.
+
+BB reviewed the repaired-chain request and returned `APPROVE_FOR_PM_FINAL_WINDOW_PREP_REQUEST` in `docs/CCAgentWorkSpace/BB/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_bb_review.md`. The loop is now at `READY_FOR_BOUNDED_DEMO_FINAL_WINDOW`: a separate same-window final gate is still required before any Bybit call, Decision Lease, order, or probe.
 
 ## Verification
 
@@ -48,6 +50,7 @@ Performed:
 - PM exact E3 request packet emission.
 - E3 read-only review report.
 - PM exact BB request packet emission.
+- BB read-only review report.
 
 Not performed:
 
@@ -66,8 +69,6 @@ Not performed:
 
 ## Next
 
-Dispatch BB only for the exact repaired-chain review in:
+The next step is a separate same-window final gate for the repaired chain. No existing packet authorizes that gate.
 
-`docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_bb_request.json`
-
-If BB sees source/runtime/candidate/hash drift, the result must be `ROTATED`. If BB approves, PM may enter `READY_FOR_BOUNDED_DEMO_FINAL_WINDOW` and must still open a separate same-window final gate before any Bybit, Decision Lease, order, or probe action.
+Before any final-window action, PM must recheck source/runtime/candidate/hash stability, standing auth freshness, book/BBO/instrument/order shape, Guardian/Rust authority, Decision Lease path, auditability, and reconstructability in the same invocation window. Any drift means `ROTATED`.

@@ -1,7 +1,7 @@
 {
   "schema_version": "profit_first_ai_ml_resolution_loop_effect_review_v1",
-  "generated_at_utc": "2026-07-08T16:59:11Z",
-  "status": "READY_FOR_PM_BB_DISPATCH",
+  "generated_at_utc": "2026-07-08T17:14:06Z",
+  "status": "READY_FOR_BOUNDED_DEMO_FINAL_WINDOW",
   "actual_effects": [
     {
       "type": "source_fix",
@@ -31,6 +31,10 @@
     {
       "type": "bb_exact_scope_request",
       "summary": "PM emitted a read-only BB request for repaired-chain review; no final-window or exchange-facing authority granted"
+    },
+    {
+      "type": "bb_exact_scope_review",
+      "summary": "BB returned APPROVE_FOR_PM_FINAL_WINDOW_PREP_REQUEST and wrote the read-only review report"
     }
   ],
   "forbidden_effects_observed": {
@@ -50,8 +54,8 @@
   },
   "authority_result": {
     "ready_for_pm_e3_dispatch": false,
-    "ready_for_pm_bb_dispatch": true,
-    "ready_for_bounded_demo_final_window": false,
+    "ready_for_pm_bb_dispatch": false,
+    "ready_for_bounded_demo_final_window": true,
     "same_window_final_gate_still_required": true,
     "bounded_demo_probe_authorized": false,
     "operator_authorization_object_emitted": false,

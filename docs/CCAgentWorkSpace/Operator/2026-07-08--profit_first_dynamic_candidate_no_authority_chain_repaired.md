@@ -1,6 +1,6 @@
 # Operator Summary: Dynamic Candidate No-Authority Chain Repaired
 
-Status: `READY_FOR_PM_BB_DISPATCH`
+Status: `READY_FOR_BOUNDED_DEMO_FINAL_WINDOW`
 
 Root cause: cron reused a stale cap-feasible selected side-cell `grid_trading|AVAXUSDT|Sell`; the latest false-negative packet now selects `ma_crossover|NEARUSDT|Buy`. The cron wrapper now validates any selected side-cell against the fresh false-negative packet and ignores stale keys. Dispatch precheck observed newer `_latest` hashes, still on the same candidate and READY no-authority path.
 
@@ -14,8 +14,9 @@ Runtime `_latest` no-authority chain was regenerated for `ma_crossover|NEARUSDT|
 - Operator auth readiness: `READY_FOR_OPERATOR_AUTHORIZATION_REVIEW`, `decision=defer`, sha `63f537fd...`
 
 E3 approved read-only prep with verdict `APPROVE_FOR_PM_BB_REPAIR_REVIEW_REQUEST`.
+BB approved read-only final-window prep with verdict `APPROVE_FOR_PM_FINAL_WINDOW_PREP_REQUEST`.
 
-No execution authority exists. The next step is BB review of the exact repaired-chain request; this is not a bounded Demo final-window approval.
+No execution authority exists. The next step is a separate same-window final gate; this packet is not that gate and does not authorize Bybit, Decision Lease, order, or probe.
 
 Still not performed:
 
@@ -39,3 +40,4 @@ Primary reports:
 - E3 request: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_e3_request.json`
 - E3 review: `docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_e3_review.md`
 - BB request: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_bb_request.json`
+- BB review: `docs/CCAgentWorkSpace/BB/workspace/reports/2026-07-08--profit_first_dynamic_candidate_no_authority_chain_repaired_bb_review.md`
