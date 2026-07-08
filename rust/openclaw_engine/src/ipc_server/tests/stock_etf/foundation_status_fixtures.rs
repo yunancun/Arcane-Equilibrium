@@ -148,6 +148,14 @@ async fn stock_etf_data_foundation_status_is_blocked_source_fixture_without_side
 
 #[tokio::test]
 async fn stock_etf_policy_status_is_blocked_source_fixture_without_side_effects() {
+    // E2 LOW 硬化：顯式把 risk-config dir 指向保證不存在的 dir，使 denied 判定
+    // 不再隱式依賴 cargo-test CWD 是否恰好缺檔。注意：policy_status 走進程級
+    // OnceLock（stock_etf_risk_policy），若他測已先觸發初始化，此設定為 no-op；
+    // 但任何非真實-repo dir 都缺該 TOML → 一律 fail-closed denied，故斷言穩定。
+    let prev_risk_dir = std::env::var("OPENCLAW_RISK_CONFIG_DIR").ok();
+    let missing_dir = std::env::temp_dir().join("openclaw_stock_etf_denied_path_absent");
+    std::env::set_var("OPENCLAW_RISK_CONFIG_DIR", &missing_dir);
+
     let config = make_test_config();
     let dd = make_test_data_dir();
     let req = r#"{"jsonrpc":"2.0","method":"stock_etf.get_policy_status","params":{},"id":4815}"#;
@@ -310,6 +318,48 @@ async fn stock_etf_policy_status_is_blocked_source_fixture_without_side_effects(
 
     assert_eq!(result["phase2"]["first_ibkr_contact_allowed"], false);
     assert_eq!(result["phase2"]["connector_enabled"], false);
+
+    if let Some(v) = prev_risk_dir {
+        std::env::set_var("OPENCLAW_RISK_CONFIG_DIR", v);
+    } else {
+        std::env::remove_var("OPENCLAW_RISK_CONFIG_DIR");
+    }
+}
+
+/// win ②：直接以真實 repo TOML 驗證 stock_etf 風控 caps 確實被載入（不只驗
+/// denied fallback）。
+///
+/// 為什麼用 pure loader 而非走 IPC/OnceLock：stock_etf_risk_policy() 的
+/// OnceLock + OPENCLAW_RISK_CONFIG_DIR 為進程級全域，與同 binary 的 startup
+/// 測試搶 env 會 order-fragile；pure loader 收 dir 參數、繞過全域狀態，讓
+/// load+parse+from_source_config glue 可被確定性驗證。路徑解析沿用
+/// openclaw_types acceptance test 同一 CARGO_MANIFEST_DIR + ../.. 模式。
+#[test]
+fn stock_etf_risk_policy_loads_real_repo_caps_via_pure_loader() {
+    let risk_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("settings")
+        .join("risk_control_rules");
+    let policy = load_stock_etf_risk_policy_from_dir(&risk_dir)
+        .expect("real repo stock_etf risk config loads and parses");
+    let verdict = policy.validate();
+
+    assert!(
+        verdict.accepted,
+        "repository stock_etf risk config blockers: {:?}",
+        verdict.blockers
+    );
+    assert_eq!(policy.source_version, 1);
+    assert_eq!(policy.config_version, 1);
+    assert_eq!(policy.max_order_notional_usd, 1_000.0);
+    assert_eq!(policy.max_position_notional_usd, 5_000.0);
+    assert_eq!(policy.max_daily_notional_usd, 10_000.0);
+    assert_eq!(policy.max_open_orders, 5);
+    assert_eq!(policy.max_open_positions, 10);
+    assert!(!policy.enabled);
+    assert!(policy.shadow_only);
+    assert!(policy.bybit_live_execution_unchanged);
 }
 
 #[tokio::test]

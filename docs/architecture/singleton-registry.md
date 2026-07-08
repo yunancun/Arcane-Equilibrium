@@ -473,6 +473,27 @@ per `docs/execution_plan/2026-06-17--intelligent-param-adjusting-agent-master-sp
 
 ---
 
+### §2.9 win ② — stock_etf 顯示面 risk-policy source-of-record 快取（Rust，2026-07-08）
+
+per operator-approved win ② + G0.5 plan：把 dormant `risk_config_stock_etf_paper.toml` 接進 Rust，讓 `stock_etf.get_policy_status` 顯示的 caps 等於真正的 source-of-record（原本走 `StockEtfRiskPolicyV1::default()` 全 0/denied）。純顯示路徑，**不**啟用任何下單路徑（lane 仍 `enabled=false` / `shadow_only=true`）。fail-closed：載入/解析失敗回退 denied fallback + `risk_config_load_error`。註：本 static 為**唯讀** load-once memoized value（內部無 interior mutability），屬 §1.2 邊界；比照同檔 §2.8 `PROMOTION_EDGE_SLOT`（同為 OnceLock 唯讀 slot）保守登記，避免 unregistered-singleton 疑義。
+
+| 欄位 | 值 |
+|---|---|
+| name | `STOCK_ETF_RISK_POLICY`（module-level `static STOCK_ETF_RISK_POLICY: OnceLock<Result<StockEtfRiskPolicyV1, String>>`）|
+| type_signature | `OnceLock<Result<StockEtfRiskPolicyV1, String>>`；內含**不可變** `StockEtfRiskPolicyV1`（無 Mutex/RwLock；load-once 後唯讀）|
+| location | `rust/openclaw_engine/src/ipc_server/handlers/stock_etf.rs`（`static STOCK_ETF_RISK_POLICY`；loader `load_stock_etf_risk_policy()`；accessor `stock_etf_risk_policy() -> &'static Result<..>`）|
+| owner_lifecycle | lazy：首次 `stock_etf.get_policy_status` IPC 觸 `OnceLock::get_or_init` 從 TOML 載入一次；engine process lifetime；無顯式銷毀（process exit 釋放）|
+| cross_task_pattern | 每個 IPC connection 在獨立 tokio task 跑 `dispatch_request`；唯讀 handler `policy_status_summary` 經 `stock_etf_risk_policy()` 共享同一 `&'static Result` → clone 出 policy 顯示；load-once 後純讀無鎖 |
+| lock_primitive | `std::sync::OnceLock`（set-once；內部無 Mutex/RwLock；載入後不可變）|
+| visibility | 私有（module-internal `static` + `fn`；僅 `policy_status_summary` 消費）|
+| caller_chain | **producer**：`stock_etf_risk_policy()` lazy init（讀 `settings/risk_control_rules/risk_config_stock_etf_paper.toml` → `StockEtfRiskPolicyV1::from_source_config`）。**consumer**：`ipc_server::handlers::stock_etf::policy_status_summary`（`stock_etf.get_policy_status` 唯讀 IPC）|
+| health_monitoring | NO —— 顯示面 dormant 研究 lane；載入失敗 warn 一次 + 回退 denied（accepted=false + blockers 表達），非 M3 health row |
+| registered_date | 2026-07-08 |
+| governance_authority | operator-approved win ② + G0.5 plan；ADR-0048 IBKR stock_etf_cash paper/shadow（顯示面，無 runtime authority）|
+| migration_plan | none（in-memory 唯讀快取，重啟乾淨重載；顯示面 caps 由 TOML SSOT 決定）|
+
+---
+
 ## §3 Registration Rules
 
 ### §3.1 新登記前必做（PA / E1 / E2 共同）
