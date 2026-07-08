@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-07-08 Profit-First Dynamic Candidate E3/BB Prep Pass Stop
+
+- PM completed the current `ma_crossover|NEARUSDT|Buy` no-authority prep dispatch: E3 approved PM->BB, and BB approved PM final-window prep against checkpoint `c1caa8aa5...`.
+- State is `READY_FOR_BOUNDED_DEMO_FINAL_WINDOW`, but operator-auth readiness remains `decision=defer`; no Bybit call, Decision Lease, order/probe, final-window, Cost Gate, live/mainnet, or proof authority exists.
+- Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_e3_bb_prep_pass_stop.md`.
+
 ## 2026-07-07 Bounded-Probe Blocked-Signal Refresh Stop
 
 - PM continued after the repair-refresh E3 stop by refreshing retained-ledger blocked-signal evidence before opening any new E3/BB scope; fresh no-PG review reached 647,308 blocked outcomes but false-negative candidates remained 0.

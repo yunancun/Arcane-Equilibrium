@@ -12,6 +12,29 @@ This BB review was read-only. No Bybit public/private API call, no internet look
 
 The normal public changelog check was intentionally not performed because this PM dispatch explicitly restricted Bybit/API/policy compatibility review to local docs/knowledge only and forbade internet/Bybit calls.
 
+## Facts
+
+- Exact PM request file was read and matched request id `profit_first_dynamic_candidate_no_authority_chain_repaired_bb_review_20260708T170759Z` with status `READY_FOR_BB_DISPATCH`.
+- Current committed source heads matched checkpoint `c1caa8aa5be2f762938138dbc2456f0912056fdf` across Mac `HEAD`, Mac `origin/main`, GitHub `refs/heads/main`, Linux `HEAD`, and Linux `origin/main`.
+- Linux worktree was clean at inspection time.
+- Linux runtime artifact hashes matched the request, including sentinel candidate packet hash `d4d4a37b24d5839a76436632daa180acfd1fe8ba781ae816bf196e728f3ea9f2` and operator-auth readiness hash `63f537fd940b2f88da4bf466ff19ad20f66471054148301dda14d7c5072499d4`.
+- Runtime candidate chain remained bound to `ma_crossover|NEARUSDT|Buy`, horizon 60m, avg net `64.983bps`.
+- Operator-auth readiness remained `READY_FOR_OPERATOR_AUTHORIZATION_REVIEW`, decision `defer`, with `blocking_gates=[]` and `operator_authorization_object_emitted=false`.
+- Standing Demo authorization remained candidate-aligned and unexpired versus the inspection window, with no order/probe/live authority granted.
+
+## Inferences
+
+- Because source heads, Linux cleanliness, and runtime hashes all matched the request, the request was not `ROTATED` at inspection time.
+- The reviewed constraints are Bybit/API/policy compatible only as PM prep for a later separate same-window final gate packet.
+- The future constraints are conservative for this prep stage: max two intents, max `954.46746768` USDT/order, `post_only_near_touch_or_skip`, skip if touch gap exceeds 75bps, fresh BBO <= 1000ms in the future final gate, Demo-only, proof-excluded, and no global Cost Gate lowering.
+- The approval does not carry into any exchange-facing action; a later final gate must repeat source/runtime/hash/candidate/auth checks in the same invocation window.
+
+## Assumptions
+
+- GitHub main is represented by `git ls-remote origin refs/heads/main` against the configured `origin`.
+- Mac dirty/staged worktree contents were outside the committed checkpoint evidence and were not used for source alignment.
+- This review uses the repo Bybit reference and BB memory as the local policy/API baseline; no external Bybit docs/changelog refresh was performed because this dispatch was constrained to local/read-only review and no Bybit calls.
+
 ## Source And Runtime Head Recheck
 
 - Mac `HEAD`: `c1caa8aa5be2f762938138dbc2456f0912056fdf`
