@@ -3,7 +3,7 @@
   "generated_at_utc": "2026-07-08T22:54:50Z",
   "status": "READY_FOR_E3_BB_DISPATCH",
   "request_path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_order_capable_fresh_window_refresh_request.json",
-  "request_sha256": "ac1aa607efa5de0cf6d3834de8a09dc7a74748dddd88af4600d3372aaf8afaac",
+  "request_sha256": "e9e6c0fd511ec138db922b33e9e594426866156f1f85bda5eaf893d1ebe6f1b5",
   "pre_request_verified_alignment_commit": "c66338e8b733acb52fc44160b55fb8e34105ecd6",
   "request_must_be_consumed_from_committed_origin_main": true,
   "candidate": "ma_crossover|NEARUSDT|Buy",

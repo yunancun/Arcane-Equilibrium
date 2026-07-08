@@ -15,6 +15,7 @@
     "selection_policy": "dynamic_latest_runtime_artifacts_not_fixed_prompt_snapshot"
   },
   "source_runtime_alignment": {
+    "alignment_scope": "pre_request_artifact_generation_before_docs_checkpoint_commit",
     "mac_head": "c66338e8b733acb52fc44160b55fb8e34105ecd6",
     "mac_origin_main": "c66338e8b733acb52fc44160b55fb8e34105ecd6",
     "github_main": "c66338e8b733acb52fc44160b55fb8e34105ecd6",
