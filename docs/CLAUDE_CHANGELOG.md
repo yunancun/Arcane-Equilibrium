@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-08（TODO v757 same-window request hash refresh）
+> 最後更新：2026-07-08（TODO v758 same-window no-order gate done）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**TODO v758 same-window no-order gate done（2026-07-08）**：PM consumed the E3/BB-approved exact no-order Phase 0/A/B request sha `89eb2f59...` from execution checkpoint `08f7e957...` for current dynamic candidate `ma_crossover|NEARUSDT|Buy`。E3 report sha `d06536d3...` and BB report sha `fb684fba...` were `APPROVE_WITH_CONDITIONS`。Runtime evidence base `/home/ncyu/BybitOpenClaw/var/openclaw/profit_first_dynamic_candidate_same_window_final_gate_20260708T175744Z_08f7e957_noorder` produced renewed execution manifest sha `17a3a426...`: Phase A exactly three Demo public market-data GETs sha `1d202622...`, dry-run READY sha `b8c7cb65...`, active `TRADE_ENTRY` no-order lease `lease:4142221203d4` acquired/released successfully sha `4c28c553...`, Phase B exactly three Demo public market-data GETs sha `f38fac86...`, and post-governance lease/live counts `0/0` sha `3dcd22e5...`。Initial unapproved `127.0.0.1:8100` Control API attempt failed closed before exchange/lease action; a later default `/tmp/openclaw/engine.sock` IPC miss failed closed after Phase A and before active lease; final run used approved runtime data/socket/secret settings. Boundary remains no private/order/probe/cancel/modify endpoint、no operator-auth `authorize`、no DB/PG write、no runtime/config/service/env/crontab mutation、no Cost Gate lowering、no live/mainnet、no proof/promotion。State is `DONE_WITH_CONCERNS__NEXT_AUTHORIZATION_REQUIRED`; next action requires separate order-capable exact scope + fresh same-window checks + E3/BB + explicit operator authorization.
 
 **TODO v757 same-window request hash refresh（2026-07-08）**：Before E3/BB dispatch, PM rechecked Linux runtime `_latest` and found hashes advanced while candidate/status/decision stayed aligned: `ma_crossover|NEARUSDT|Buy`, proposal avg net `64.983bps`, candidate packet `47e20d7f...`, proposal `92f7e0fc...`, standing auth unchanged `05fe07f5...`, operator review `a1940002...`, bounded preflight `c99bfbbc...`, touchability `0efac726...`, placement `a9616319...`, authority readiness `17d3b0e6...`, operator-auth readiness `7abf1233...` with `decision=defer`。PM refreshed exact same-window no-order request sha to `89eb2f59...` and kept scope unchanged: no-order Phase 0/A/B only, no Bybit public/private call before E3/BB approval, no order/probe/cancel/modify, no operator auth authorize, no runtime mutation, no DB write, no Cost Gate lowering, no live/mainnet, no proof/promotion。
 
