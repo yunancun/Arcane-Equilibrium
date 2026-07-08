@@ -16,12 +16,17 @@ from program_code.broker_connectors.ibkr_connector import (  # noqa: E402
     IBKR_API_ABSENT_ENGINEERING_PACKET_ID,
     IBKR_API_ABSENT_MODE,
     IBKR_CONNECTOR_SURFACE_ID,
+    IBKR_DEMO_ENGINE_ID,
+    IBKR_DUAL_ENGINE_CONTRACT_ID,
+    IBKR_LIVE_ENGINE_ID,
     IBKR_PAPER_ATTESTATION_CONTRACT_ID,
     IBKR_PHASE2_GATE_CANDIDATE_STATUS,
     IBKR_READONLY_PROBE_RESULT_IMPORT_REQUEST_CONTRACT_ID,
     IBKR_SESSION_ATTESTATION_CONTRACT_ID,
     IbkrApiAbsentEngineeringPacket,
     IbkrApiAbsentLoopDecision,
+    IbkrDualEngineContractFixture,
+    IbkrDualEngineProfile,
     IbkrPaperAttestationPreview,
     IbkrPaperClientBoundary,
     IbkrReadOnlyClient,
@@ -29,13 +34,16 @@ from program_code.broker_connectors.ibkr_connector import (  # noqa: E402
     IbkrReadOnlyProbeResultImportPreview,
     IbkrSessionAttestationPreview,
     api_absent_engineering_fixture,
+    build_ibkr_dual_engine_contract,
     build_api_absent_engineering_packet,
+    ibkr_dual_engine_contract_fixture,
 )
 from program_code.broker_connectors.ibkr_connector.fixtures import (  # noqa: E402
     blocked_paper_attestation_fixture,
     blocked_readonly_probe_result_import_fixture,
     blocked_readonly_fixture,
     blocked_session_attestation_fixture,
+    ibkr_dual_engine_contract_fixture as fixture_dual_engine_contract,
 )
 
 
@@ -298,6 +306,9 @@ EXPECTED_CONNECTOR_EXPORTS = (
     "IBKR_API_ABSENT_ENGINEERING_PACKET_ID",
     "IBKR_API_ABSENT_MODE",
     "IBKR_CONNECTOR_SURFACE_ID",
+    "IBKR_DEMO_ENGINE_ID",
+    "IBKR_DUAL_ENGINE_CONTRACT_ID",
+    "IBKR_LIVE_ENGINE_ID",
     "IBKR_NON_BYBIT_API_ALLOWLIST_CONTRACT_ID",
     "IBKR_PAPER_ATTESTATION_CONTRACT_ID",
     "IBKR_PHASE2_GATE_CANDIDATE_STATUS",
@@ -306,6 +317,8 @@ EXPECTED_CONNECTOR_EXPORTS = (
     "IbkrApiAbsentEngineeringPacket",
     "IbkrApiAbsentLoopDecision",
     "IbkrApiActionMatrixPreview",
+    "IbkrDualEngineContractFixture",
+    "IbkrDualEngineProfile",
     "IbkrPaperAttestationPreview",
     "IbkrPaperClientBoundary",
     "IbkrReadOnlyClient",
@@ -314,7 +327,9 @@ EXPECTED_CONNECTOR_EXPORTS = (
     "IbkrReadOnlySurfaceStatus",
     "IbkrSessionAttestationPreview",
     "api_absent_engineering_fixture",
+    "build_ibkr_dual_engine_contract",
     "build_api_absent_engineering_packet",
+    "ibkr_dual_engine_contract_fixture",
 )
 EXPECTED_READONLY_CLIENT_PUBLIC_SURFACE = {
     "account_snapshot_preview",
@@ -341,6 +356,9 @@ EXPECTED_README_REQUIRED_BOUNDARY_LINES = {
     "- display-only session and paper attestation previews",
     "- display-only readonly probe result-import request previews",
     "- API-absent engineering readiness packet with simulated/no-contact fixture posture",
+    "- display-only dual engine contract for `ibkr_demo_engine` and `ibkr_live_engine`",
+    "- source-only trade-core service port reservation plan",
+    "- session/admission epoch Phase2 seal model for hot-path checks",
     "- external verification readiness checklist for operator-controlled real contact",
     "- static fixtures for tests",
     "- IBKR SDK imports",
@@ -348,6 +366,7 @@ EXPECTED_README_REQUIRED_BOUNDARY_LINES = {
     "- secret reads, env secret fallback, or serialized credential material",
     "- broker write methods",
     "- paper order routing, fill import side effects, DB writes, tiny-live, or live",
+    "- withdraw, transfer, or account-management movement paths",
     "- treating missing IBKR credentials, Gateway/TWS session, or operator contact approval as a reason to enable real transport",
     "Rust gates remain the authority for any future read-only or paper capability.",
 }
@@ -414,8 +433,11 @@ def test_ibkr_connector_package_exports_only_source_boundary_types() -> None:
     assert IBKR_API_ABSENT_ENGINEERING_PACKET_ID == (
         "ibkr_demo_ready_api_absent_engineering_packet_v1"
     )
-    assert IBKR_API_ABSENT_MODE == "DEMO_READY_API_ABSENT"
+    assert IBKR_API_ABSENT_MODE == "WORK_QUEUE_AUTONOMOUS"
     assert IBKR_PHASE2_GATE_CANDIDATE_STATUS == "PENDING_EXTERNAL_ATTESTATION"
+    assert IBKR_DUAL_ENGINE_CONTRACT_ID == "ibkr_dual_engine_local_contract_v1"
+    assert IBKR_DEMO_ENGINE_ID == "ibkr_demo_engine"
+    assert IBKR_LIVE_ENGINE_ID == "ibkr_live_engine"
     assert IBKR_SESSION_ATTESTATION_CONTRACT_ID == "ibkr_session_attestation_v1"
     assert IBKR_PAPER_ATTESTATION_CONTRACT_ID == "ibkr_paper_attestation_v1"
     assert (
@@ -443,9 +465,27 @@ def test_ibkr_connector_skeleton_has_no_python_broker_write_methods() -> None:
     assert IbkrReadOnlyProbeResultImportPreview().accepted_for_import is False
     assert IbkrReadOnlyProbeResultImportPreview().result_import_performed is False
     assert IbkrApiAbsentLoopDecision is not None
-    assert IbkrApiAbsentEngineeringPacket().status == "DEMO_READY_API_ABSENT"
-    assert build_api_absent_engineering_packet().status == "DEMO_READY_API_ABSENT"
-    assert api_absent_engineering_fixture()["status"] == "DEMO_READY_API_ABSENT"
+    assert IbkrApiAbsentEngineeringPacket().status == "EXTERNAL_VERIFICATION_PENDING"
+    assert build_api_absent_engineering_packet().status == "EXTERNAL_VERIFICATION_PENDING"
+    assert api_absent_engineering_fixture()["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert (
+        api_absent_engineering_fixture()["loops"][-1]["next_loop_or_exit"]
+        == "L8_WORK_QUEUE_AUTODISPATCH"
+    )
+    assert IbkrDualEngineProfile is not None
+    assert IbkrDualEngineContractFixture().contract_id == IBKR_DUAL_ENGINE_CONTRACT_ID
+    assert (
+        build_ibkr_dual_engine_contract().contract_id == IBKR_DUAL_ENGINE_CONTRACT_ID
+    )
+    assert (
+        ibkr_dual_engine_contract_fixture()["contract_id"]
+        == IBKR_DUAL_ENGINE_CONTRACT_ID
+    )
+    assert fixture_dual_engine_contract() == ibkr_dual_engine_contract_fixture()
+    assert (
+        api_absent_engineering_fixture()["dual_engine_fixture"]["contract_id"]
+        == IBKR_DUAL_ENGINE_CONTRACT_ID
+    )
 
 
 def test_ibkr_connector_client_public_surfaces_are_frozen_source_only() -> None:

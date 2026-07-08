@@ -13,8 +13,21 @@ from dataclasses import dataclass, field
 IBKR_API_ABSENT_ENGINEERING_PACKET_ID = (
     "ibkr_demo_ready_api_absent_engineering_packet_v1"
 )
-IBKR_API_ABSENT_MODE = "DEMO_READY_API_ABSENT"
+IBKR_API_ABSENT_MODE = "WORK_QUEUE_AUTONOMOUS"
+IBKR_API_ABSENT_STATUS = "EXTERNAL_VERIFICATION_PENDING"
 IBKR_PHASE2_GATE_CANDIDATE_STATUS = "PENDING_EXTERNAL_ATTESTATION"
+IBKR_DUAL_ENGINE_CONTRACT_ID = "ibkr_dual_engine_local_contract_v1"
+IBKR_DEMO_ENGINE_ID = "ibkr_demo_engine"
+IBKR_LIVE_ENGINE_ID = "ibkr_live_engine"
+
+BYBIT_CONTROL_API_REFERENCE_PORT = 8710
+BYBIT_OPENCLAW_PROXY_REFERENCE_PORT = 18789
+IBKR_CONTROL_API_RESERVED_PORT = 8711
+IBKR_DEMO_ENGINE_IPC_RESERVED_PORT = 18790
+IBKR_LIVE_ENGINE_IPC_RESERVED_PORT = 18791
+IBKR_PAPER_GATEWAY_PORT = 4002
+IBKR_LIVE_GATEWAY_PORT = 4001
+IBKR_LIVE_TWS_PORT = 7496
 
 API_ABSENT_LOOP_ORDER = (
     "L0_BASELINE_AUDIT",
@@ -50,6 +63,244 @@ NO_CONTACT_BOUNDARY_PROOF = (
     "bybit_path_reused=false",
     "live_or_tiny_live_authorized=false",
 )
+
+DENIED_FUNDS_MOVEMENT_ACTIONS = (
+    "account_transfer",
+    "cash_withdrawal",
+    "internal_transfer",
+    "external_transfer",
+)
+
+READ_WRITE_INTERFACE_ACTIONS = (
+    "server_time_read",
+    "connection_health_read",
+    "account_summary_snapshot_read",
+    "portfolio_positions_snapshot_read",
+    "contract_details_read",
+    "market_data_snapshot_read",
+    "historical_bars_read",
+    "open_orders_read",
+    "executions_commissions_read",
+    "paper_or_authorized_order_submit",
+    "paper_or_authorized_order_cancel",
+    "paper_or_authorized_order_replace",
+)
+
+PHASE2_RESEAL_TRIGGERS = (
+    "engine_profile_change",
+    "api_binding_change",
+    "account_fingerprint_change",
+    "slot_capability_change",
+    "gateway_process_restart",
+    "gateway_port_change",
+    "risk_policy_hash_change",
+    "decision_lease_policy_change",
+    "operator_epoch_revoke",
+)
+
+
+@dataclass(frozen=True)
+class IbkrDualEngineProfile:
+    """Secret-free description of one local IBKR engine profile."""
+
+    engine_id: str
+    role: str
+    api_binding_kind: str
+    risk_profile: str
+    gate_profile: str
+    default_control_port: int
+    default_engine_ipc_port: int
+    broker_gateway_ports: tuple[int, ...]
+    can_use_paper_api_for_local_engine_tests: bool
+    can_bind_true_live_api_after_governance: bool
+    read_write_api_interface_present: bool = True
+    true_live_api_bound_now: bool = False
+    real_ibkr_contact_enabled: bool = False
+    broker_order_route_enabled_now: bool = False
+    live_order_route_authorized_now: bool = False
+    withdraw_transfer_supported: bool = False
+    secret_content_loaded: bool = False
+    secret_content_serialized: bool = False
+    slot_metadata_only: bool = True
+    session_epoch_required: bool = True
+    per_call_full_seal_check_required: bool = False
+    per_call_cached_epoch_check_required: bool = True
+    bybit_path_reused: bool = False
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "engine_id": self.engine_id,
+            "role": self.role,
+            "api_binding_kind": self.api_binding_kind,
+            "risk_profile": self.risk_profile,
+            "gate_profile": self.gate_profile,
+            "default_control_port": self.default_control_port,
+            "default_engine_ipc_port": self.default_engine_ipc_port,
+            "broker_gateway_ports": list(self.broker_gateway_ports),
+            "can_use_paper_api_for_local_engine_tests": (
+                self.can_use_paper_api_for_local_engine_tests
+            ),
+            "can_bind_true_live_api_after_governance": (
+                self.can_bind_true_live_api_after_governance
+            ),
+            "read_write_api_interface_present": self.read_write_api_interface_present,
+            "true_live_api_bound_now": self.true_live_api_bound_now,
+            "real_ibkr_contact_enabled": self.real_ibkr_contact_enabled,
+            "broker_order_route_enabled_now": self.broker_order_route_enabled_now,
+            "live_order_route_authorized_now": self.live_order_route_authorized_now,
+            "withdraw_transfer_supported": self.withdraw_transfer_supported,
+            "secret_content_loaded": self.secret_content_loaded,
+            "secret_content_serialized": self.secret_content_serialized,
+            "slot_metadata_only": self.slot_metadata_only,
+            "session_epoch_required": self.session_epoch_required,
+            "per_call_full_seal_check_required": self.per_call_full_seal_check_required,
+            "per_call_cached_epoch_check_required": (
+                self.per_call_cached_epoch_check_required
+            ),
+            "bybit_path_reused": self.bybit_path_reused,
+        }
+
+
+@dataclass(frozen=True)
+class IbkrDualEngineContractFixture:
+    """No-contact local contract for IBKR demo/live-grade engine separation."""
+
+    contract_id: str = IBKR_DUAL_ENGINE_CONTRACT_ID
+    source_version: int = 1
+    broker: str = "ibkr"
+    asset_lane: str = "stock_etf_cash"
+    status: str = "SOURCE_ONLY_NO_CONTACT"
+    adr: str = "ADR-0048"
+    amd: str = "AMD-2026-06-29-01"
+    profiles: tuple[IbkrDualEngineProfile, ...] = field(default_factory=tuple)
+    service_port_plan: dict[str, object] = field(default_factory=dict)
+    ibkr_gateway_port_plan: dict[str, object] = field(default_factory=dict)
+    phase2_seal_policy: dict[str, object] = field(default_factory=dict)
+    interface_policy: dict[str, object] = field(default_factory=dict)
+    current_authority: dict[str, object] = field(default_factory=dict)
+    source_artifacts: tuple[str, ...] = field(default_factory=tuple)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "contract_id": self.contract_id,
+            "source_version": self.source_version,
+            "broker": self.broker,
+            "asset_lane": self.asset_lane,
+            "status": self.status,
+            "adr": self.adr,
+            "amd": self.amd,
+            "profiles": [profile.to_dict() for profile in self.profiles],
+            "service_port_plan": dict(self.service_port_plan),
+            "ibkr_gateway_port_plan": dict(self.ibkr_gateway_port_plan),
+            "phase2_seal_policy": dict(self.phase2_seal_policy),
+            "interface_policy": dict(self.interface_policy),
+            "current_authority": dict(self.current_authority),
+            "source_artifacts": list(self.source_artifacts),
+        }
+
+
+def build_ibkr_dual_engine_contract() -> IbkrDualEngineContractFixture:
+    """Build the latest no-contact IBKR local dual-engine contract."""
+
+    profiles = (
+        IbkrDualEngineProfile(
+            engine_id=IBKR_DEMO_ENGINE_ID,
+            role="paper_demo_execution_and_evidence",
+            api_binding_kind="paper_or_demo",
+            risk_profile="demo_risk_profile",
+            gate_profile="paper_demo_gate_profile",
+            default_control_port=IBKR_CONTROL_API_RESERVED_PORT,
+            default_engine_ipc_port=IBKR_DEMO_ENGINE_IPC_RESERVED_PORT,
+            broker_gateway_ports=(IBKR_PAPER_GATEWAY_PORT,),
+            can_use_paper_api_for_local_engine_tests=True,
+            can_bind_true_live_api_after_governance=False,
+        ),
+        IbkrDualEngineProfile(
+            engine_id=IBKR_LIVE_ENGINE_ID,
+            role="live_grade_gate_risk_session_rehearsal",
+            api_binding_kind="live_or_second_paper_for_comparison",
+            risk_profile="live_grade_risk_profile",
+            gate_profile="live_grade_gate_profile",
+            default_control_port=IBKR_CONTROL_API_RESERVED_PORT,
+            default_engine_ipc_port=IBKR_LIVE_ENGINE_IPC_RESERVED_PORT,
+            broker_gateway_ports=(IBKR_LIVE_GATEWAY_PORT, IBKR_LIVE_TWS_PORT),
+            can_use_paper_api_for_local_engine_tests=True,
+            can_bind_true_live_api_after_governance=True,
+        ),
+    )
+
+    return IbkrDualEngineContractFixture(
+        profiles=profiles,
+        service_port_plan={
+            "runtime_owner": "trade-core",
+            "bybit_control_api_reference_port": BYBIT_CONTROL_API_REFERENCE_PORT,
+            "bybit_openclaw_proxy_reference_port": (
+                BYBIT_OPENCLAW_PROXY_REFERENCE_PORT
+            ),
+            "ibkr_control_api_reserved_port": IBKR_CONTROL_API_RESERVED_PORT,
+            "ibkr_demo_engine_ipc_reserved_port": (
+                IBKR_DEMO_ENGINE_IPC_RESERVED_PORT
+            ),
+            "ibkr_live_engine_ipc_reserved_port": IBKR_LIVE_ENGINE_IPC_RESERVED_PORT,
+            "service_started": False,
+            "listener_bound": False,
+        },
+        ibkr_gateway_port_plan={
+            "paper_gateway_port": IBKR_PAPER_GATEWAY_PORT,
+            "live_gateway_port": IBKR_LIVE_GATEWAY_PORT,
+            "live_tws_port": IBKR_LIVE_TWS_PORT,
+            "paper_gateway_authorized_now": False,
+            "true_live_gateway_authorized_now": False,
+            "source_only_reserved": True,
+        },
+        phase2_seal_policy={
+            "full_phase2_seal_required_before_session_admission": True,
+            "session_admission_epoch_required": True,
+            "per_order_full_seal_check_required": False,
+            "per_call_cached_epoch_and_capability_check_required": True,
+            "decision_lease_required_per_order": True,
+            "risk_guard_required_per_order": True,
+            "audit_event_required_per_order": True,
+            "reseal_triggers": list(PHASE2_RESEAL_TRIGGERS),
+            "hot_path_latency_model": (
+                "check_cached_epoch_capability_lease_risk_and_audit_not_full_artifact"
+            ),
+        },
+        interface_policy={
+            "read_write_api_interface_default": True,
+            "read_write_actions": list(READ_WRITE_INTERFACE_ACTIONS),
+            "withdraw_transfer_actions_supported": False,
+            "denied_funds_movement_actions": list(DENIED_FUNDS_MOVEMENT_ACTIONS),
+            "product_family_future_extension_allowed": True,
+            "current_governed_lane": "stock_etf_cash",
+            "python_broker_write_authority": False,
+            "rust_authority_required_for_any_broker_write": True,
+        },
+        current_authority={
+            "real_ibkr_contact_enabled": False,
+            "connector_runtime_started": False,
+            "secret_content_loaded": False,
+            "secret_content_serialized": False,
+            "demo_order_route_enabled": False,
+            "live_order_route_enabled": False,
+            "true_live_api_bound": False,
+            "runtime_mcp_required": False,
+            "bybit_path_reused": False,
+            "withdraw_or_transfer_path_present": False,
+        },
+        source_artifacts=(
+            "program_code/broker_connectors/ibkr_connector/api_absent_engineering.py",
+            "settings/broker/ibkr_dual_engine_contract.template.toml",
+            "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--ibkr_dual_engine_live_grade_design_conclusion.md",
+            "docs/CCAgentWorkSpace/Operator/2026-07-07--ibkr_dual_engine_live_grade_design_conclusion.md",
+        ),
+    )
+
+
+def ibkr_dual_engine_contract_fixture() -> dict[str, object]:
+    """Return the dual-engine contract as a plain dictionary."""
+
+    return build_ibkr_dual_engine_contract().to_dict()
 
 
 @dataclass(frozen=True)
@@ -89,7 +340,7 @@ class IbkrApiAbsentEngineeringPacket:
     packet_id: str = IBKR_API_ABSENT_ENGINEERING_PACKET_ID
     source_version: int = 1
     mode: str = IBKR_API_ABSENT_MODE
-    status: str = IBKR_API_ABSENT_MODE
+    status: str = IBKR_API_ABSENT_STATUS
     phase2_gate_candidate_status: str = IBKR_PHASE2_GATE_CANDIDATE_STATUS
     asset_lane: str = "stock_etf_cash"
     broker: str = "ibkr"
@@ -103,6 +354,7 @@ class IbkrApiAbsentEngineeringPacket:
     evidence_ai_ml_fixture: dict[str, object] = field(default_factory=dict)
     release_disable_fixture: dict[str, object] = field(default_factory=dict)
     external_verification_readiness_fixture: dict[str, object] = field(default_factory=dict)
+    dual_engine_fixture: dict[str, object] = field(default_factory=dict)
     external_verification_pending: tuple[str, ...] = EXTERNAL_VERIFICATION_PENDING
     boundary_proof: tuple[str, ...] = NO_CONTACT_BOUNDARY_PROOF
 
@@ -127,6 +379,7 @@ class IbkrApiAbsentEngineeringPacket:
             "external_verification_readiness_fixture": dict(
                 self.external_verification_readiness_fixture
             ),
+            "dual_engine_fixture": dict(self.dual_engine_fixture),
             "external_verification_pending": list(self.external_verification_pending),
             "boundary_proof": list(self.boundary_proof),
         }
@@ -244,7 +497,7 @@ def build_api_absent_engineering_packet() -> IbkrApiAbsentEngineeringPacket:
         ),
         IbkrApiAbsentLoopDecision(
             current_loop="L7_RELEASE_DISABLE_PACKET",
-            verdict="EXIT",
+            verdict="ADVANCE",
             implemented_changes=(
                 "api_absent_release_packet_fixture_recorded",
                 "disable_cleanup_and_external_verification_checklist_recorded",
@@ -255,8 +508,8 @@ def build_api_absent_engineering_packet() -> IbkrApiAbsentEngineeringPacket:
                 "ibkr_demo_ready_api_absent_engineering_packet_v1.release_disable_fixture",
             ),
             tests=("api_absent_packet_tests",),
-            next_loop_or_exit="DEMO_READY_API_ABSENT",
-            reason="engineering packet is complete while real IBKR external verification remains pending",
+            next_loop_or_exit="L8_WORK_QUEUE_AUTODISPATCH",
+            reason="api-absent readiness is a checkpoint; work queue dispatch continues until no-contact gaps are closed",
         ),
     )
 
@@ -373,6 +626,7 @@ def build_api_absent_engineering_packet() -> IbkrApiAbsentEngineeringPacket:
             "runtime_mcp_required": False,
             "python_broker_write_authority": False,
         },
+        dual_engine_fixture=ibkr_dual_engine_contract_fixture(),
     )
 
 

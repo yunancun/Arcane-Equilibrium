@@ -1,0 +1,141 @@
+# IBKR dual-engine local contract template.
+# Source-only and no-contact: this template does not authorize IBKR contact,
+# start services, inspect credentials, route orders, transfer, or withdraw.
+
+[contract]
+contract_id = "ibkr_dual_engine_local_contract_v1"
+source_version = 1
+broker = "ibkr"
+asset_lane = "stock_etf_cash"
+status = "SOURCE_ONLY_NO_CONTACT"
+adr = "ADR-0048"
+amd = "AMD-2026-06-29-01"
+
+[trade_core_ports]
+runtime_owner = "trade-core"
+bybit_control_api_reference_port = 8710
+bybit_openclaw_proxy_reference_port = 18789
+ibkr_control_api_reserved_port = 8711
+ibkr_demo_engine_ipc_reserved_port = 18790
+ibkr_live_engine_ipc_reserved_port = 18791
+service_started = false
+listener_bound = false
+
+[ibkr_gateway_ports]
+paper_gateway_port = 4002
+live_gateway_port = 4001
+live_tws_port = 7496
+paper_gateway_authorized_now = false
+true_live_gateway_authorized_now = false
+source_only_reserved = true
+
+[engines.demo]
+engine_id = "ibkr_demo_engine"
+role = "paper_demo_execution_and_evidence"
+api_binding_kind = "paper_or_demo"
+risk_profile = "demo_risk_profile"
+gate_profile = "paper_demo_gate_profile"
+default_control_port = 8711
+default_engine_ipc_port = 18790
+broker_gateway_ports = [4002]
+can_use_paper_api_for_local_engine_tests = true
+can_bind_true_live_api_after_governance = false
+read_write_api_interface_present = true
+true_live_api_bound_now = false
+real_ibkr_contact_enabled = false
+broker_order_route_enabled_now = false
+live_order_route_authorized_now = false
+withdraw_transfer_supported = false
+secret_content_loaded = false
+secret_content_serialized = false
+slot_metadata_only = true
+session_epoch_required = true
+per_call_full_seal_check_required = false
+per_call_cached_epoch_check_required = true
+bybit_path_reused = false
+
+[engines.live]
+engine_id = "ibkr_live_engine"
+role = "live_grade_gate_risk_session_rehearsal"
+api_binding_kind = "live_or_second_paper_for_comparison"
+risk_profile = "live_grade_risk_profile"
+gate_profile = "live_grade_gate_profile"
+default_control_port = 8711
+default_engine_ipc_port = 18791
+broker_gateway_ports = [4001, 7496]
+can_use_paper_api_for_local_engine_tests = true
+can_bind_true_live_api_after_governance = true
+read_write_api_interface_present = true
+true_live_api_bound_now = false
+real_ibkr_contact_enabled = false
+broker_order_route_enabled_now = false
+live_order_route_authorized_now = false
+withdraw_transfer_supported = false
+secret_content_loaded = false
+secret_content_serialized = false
+slot_metadata_only = true
+session_epoch_required = true
+per_call_full_seal_check_required = false
+per_call_cached_epoch_check_required = true
+bybit_path_reused = false
+
+[phase2_seal_policy]
+full_phase2_seal_required_before_session_admission = true
+session_admission_epoch_required = true
+per_order_full_seal_check_required = false
+per_call_cached_epoch_and_capability_check_required = true
+decision_lease_required_per_order = true
+risk_guard_required_per_order = true
+audit_event_required_per_order = true
+hot_path_latency_model = "check_cached_epoch_capability_lease_risk_and_audit_not_full_artifact"
+reseal_triggers = [
+  "engine_profile_change",
+  "api_binding_change",
+  "account_fingerprint_change",
+  "slot_capability_change",
+  "gateway_process_restart",
+  "gateway_port_change",
+  "risk_policy_hash_change",
+  "decision_lease_policy_change",
+  "operator_epoch_revoke",
+]
+
+[interface_policy]
+read_write_api_interface_default = true
+read_write_actions = [
+  "server_time_read",
+  "connection_health_read",
+  "account_summary_snapshot_read",
+  "portfolio_positions_snapshot_read",
+  "contract_details_read",
+  "market_data_snapshot_read",
+  "historical_bars_read",
+  "open_orders_read",
+  "executions_commissions_read",
+  "paper_or_authorized_order_submit",
+  "paper_or_authorized_order_cancel",
+  "paper_or_authorized_order_replace",
+]
+withdraw_transfer_actions_supported = false
+denied_funds_movement_actions = [
+  "account_transfer",
+  "cash_withdrawal",
+  "internal_transfer",
+  "external_transfer",
+]
+product_family_future_extension_allowed = true
+current_governed_lane = "stock_etf_cash"
+python_broker_write_authority = false
+rust_authority_required_for_any_broker_write = true
+
+[current_authority]
+real_ibkr_contact_enabled = false
+connector_runtime_started = false
+secret_content_loaded = false
+secret_content_serialized = false
+demo_order_route_enabled = false
+live_order_route_enabled = false
+true_live_api_bound = false
+runtime_mcp_required = false
+bybit_path_reused = false
+withdraw_or_transfer_path_present = false

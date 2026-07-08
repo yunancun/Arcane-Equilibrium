@@ -14,8 +14,12 @@ if str(SRV_ROOT) not in sys.path:
 from program_code.broker_connectors.ibkr_connector import (  # noqa: E402
     IBKR_API_ABSENT_ENGINEERING_PACKET_ID,
     IBKR_API_ABSENT_MODE,
+    IBKR_DEMO_ENGINE_ID,
+    IBKR_DUAL_ENGINE_CONTRACT_ID,
+    IBKR_LIVE_ENGINE_ID,
     IBKR_PHASE2_GATE_CANDIDATE_STATUS,
     build_api_absent_engineering_packet,
+    ibkr_dual_engine_contract_fixture,
 )
 from program_code.broker_connectors.ibkr_connector.fixtures import (  # noqa: E402
     api_absent_engineering_fixture,
@@ -55,6 +59,40 @@ EXPECTED_BOUNDARY_PROOF = [
     "python_broker_write_authority=false",
     "bybit_path_reused=false",
     "live_or_tiny_live_authorized=false",
+]
+
+EXPECTED_PHASE2_RESEAL_TRIGGERS = [
+    "engine_profile_change",
+    "api_binding_change",
+    "account_fingerprint_change",
+    "slot_capability_change",
+    "gateway_process_restart",
+    "gateway_port_change",
+    "risk_policy_hash_change",
+    "decision_lease_policy_change",
+    "operator_epoch_revoke",
+]
+
+EXPECTED_READ_WRITE_INTERFACE_ACTIONS = [
+    "server_time_read",
+    "connection_health_read",
+    "account_summary_snapshot_read",
+    "portfolio_positions_snapshot_read",
+    "contract_details_read",
+    "market_data_snapshot_read",
+    "historical_bars_read",
+    "open_orders_read",
+    "executions_commissions_read",
+    "paper_or_authorized_order_submit",
+    "paper_or_authorized_order_cancel",
+    "paper_or_authorized_order_replace",
+]
+
+EXPECTED_DENIED_FUNDS_MOVEMENT_ACTIONS = [
+    "account_transfer",
+    "cash_withdrawal",
+    "internal_transfer",
+    "external_transfer",
 ]
 
 FALSE_PATHS = [
@@ -127,13 +165,13 @@ TRUE_PATHS = [
 ]
 
 
-def test_api_absent_engineering_packet_reaches_terminal_api_absent_state() -> None:
+def test_api_absent_engineering_packet_advances_to_work_queue_not_terminal() -> None:
     packet = build_api_absent_engineering_packet().to_dict()
 
     assert packet["packet_id"] == IBKR_API_ABSENT_ENGINEERING_PACKET_ID
     assert packet["source_version"] == 1
     assert packet["mode"] == IBKR_API_ABSENT_MODE
-    assert packet["status"] == "DEMO_READY_API_ABSENT"
+    assert packet["status"] == "EXTERNAL_VERIFICATION_PENDING"
     assert packet["phase2_gate_candidate_status"] == IBKR_PHASE2_GATE_CANDIDATE_STATUS
     assert packet["asset_lane"] == "stock_etf_cash"
     assert packet["broker"] == "ibkr"
@@ -143,9 +181,8 @@ def test_api_absent_engineering_packet_reaches_terminal_api_absent_state() -> No
 
     loops = packet["loops"]
     assert [loop["current_loop"] for loop in loops] == EXPECTED_LOOP_ORDER
-    assert [loop["verdict"] for loop in loops[:-1]] == ["ADVANCE"] * 7
-    assert loops[-1]["verdict"] == "EXIT"
-    assert loops[-1]["next_loop_or_exit"] == "DEMO_READY_API_ABSENT"
+    assert [loop["verdict"] for loop in loops] == ["ADVANCE"] * 8
+    assert loops[-1]["next_loop_or_exit"] == "L8_WORK_QUEUE_AUTODISPATCH"
 
     for loop in loops:
         assert loop["mode"] == IBKR_API_ABSENT_MODE
@@ -204,6 +241,151 @@ def test_api_absent_fixture_keeps_real_ibkr_transport_and_live_paths_closed() ->
         assert packet[section][key] is False, f"{section}.{key}"
     for section, key in TRUE_PATHS:
         assert packet[section][key] is True, f"{section}.{key}"
+
+
+def test_dual_engine_fixture_matches_latest_no_contact_design() -> None:
+    packet = api_absent_engineering_fixture()
+    dual = packet["dual_engine_fixture"]
+
+    assert dual == ibkr_dual_engine_contract_fixture()
+    assert dual["contract_id"] == IBKR_DUAL_ENGINE_CONTRACT_ID
+    assert dual["source_version"] == 1
+    assert dual["status"] == "SOURCE_ONLY_NO_CONTACT"
+    assert dual["broker"] == "ibkr"
+    assert dual["asset_lane"] == "stock_etf_cash"
+
+    profiles = {profile["engine_id"]: profile for profile in dual["profiles"]}
+    assert list(profiles) == [IBKR_DEMO_ENGINE_ID, IBKR_LIVE_ENGINE_ID]
+
+    demo = profiles[IBKR_DEMO_ENGINE_ID]
+    assert demo["role"] == "paper_demo_execution_and_evidence"
+    assert demo["api_binding_kind"] == "paper_or_demo"
+    assert demo["risk_profile"] == "demo_risk_profile"
+    assert demo["gate_profile"] == "paper_demo_gate_profile"
+    assert demo["default_control_port"] == 8711
+    assert demo["default_engine_ipc_port"] == 18790
+    assert demo["broker_gateway_ports"] == [4002]
+    assert demo["can_use_paper_api_for_local_engine_tests"] is True
+    assert demo["can_bind_true_live_api_after_governance"] is False
+
+    live = profiles[IBKR_LIVE_ENGINE_ID]
+    assert live["role"] == "live_grade_gate_risk_session_rehearsal"
+    assert live["api_binding_kind"] == "live_or_second_paper_for_comparison"
+    assert live["risk_profile"] == "live_grade_risk_profile"
+    assert live["gate_profile"] == "live_grade_gate_profile"
+    assert live["default_control_port"] == 8711
+    assert live["default_engine_ipc_port"] == 18791
+    assert live["broker_gateway_ports"] == [4001, 7496]
+    assert live["can_use_paper_api_for_local_engine_tests"] is True
+    assert live["can_bind_true_live_api_after_governance"] is True
+
+    for name, profile in profiles.items():
+        assert profile["read_write_api_interface_present"] is True, name
+        assert profile["true_live_api_bound_now"] is False, name
+        assert profile["real_ibkr_contact_enabled"] is False, name
+        assert profile["broker_order_route_enabled_now"] is False, name
+        assert profile["live_order_route_authorized_now"] is False, name
+        assert profile["withdraw_transfer_supported"] is False, name
+        assert profile["secret_content_loaded"] is False, name
+        assert profile["secret_content_serialized"] is False, name
+        assert profile["slot_metadata_only"] is True, name
+        assert profile["session_epoch_required"] is True, name
+        assert profile["per_call_full_seal_check_required"] is False, name
+        assert profile["per_call_cached_epoch_check_required"] is True, name
+        assert profile["bybit_path_reused"] is False, name
+
+    assert dual["service_port_plan"] == {
+        "runtime_owner": "trade-core",
+        "bybit_control_api_reference_port": 8710,
+        "bybit_openclaw_proxy_reference_port": 18789,
+        "ibkr_control_api_reserved_port": 8711,
+        "ibkr_demo_engine_ipc_reserved_port": 18790,
+        "ibkr_live_engine_ipc_reserved_port": 18791,
+        "service_started": False,
+        "listener_bound": False,
+    }
+    assert dual["ibkr_gateway_port_plan"] == {
+        "paper_gateway_port": 4002,
+        "live_gateway_port": 4001,
+        "live_tws_port": 7496,
+        "paper_gateway_authorized_now": False,
+        "true_live_gateway_authorized_now": False,
+        "source_only_reserved": True,
+    }
+
+
+def test_dual_engine_fixture_keeps_hot_path_seal_and_funds_movement_boundary() -> None:
+    dual = ibkr_dual_engine_contract_fixture()
+    seal = dual["phase2_seal_policy"]
+
+    assert seal["full_phase2_seal_required_before_session_admission"] is True
+    assert seal["session_admission_epoch_required"] is True
+    assert seal["per_order_full_seal_check_required"] is False
+    assert seal["per_call_cached_epoch_and_capability_check_required"] is True
+    assert seal["decision_lease_required_per_order"] is True
+    assert seal["risk_guard_required_per_order"] is True
+    assert seal["audit_event_required_per_order"] is True
+    assert seal["reseal_triggers"] == EXPECTED_PHASE2_RESEAL_TRIGGERS
+    assert seal["hot_path_latency_model"] == (
+        "check_cached_epoch_capability_lease_risk_and_audit_not_full_artifact"
+    )
+
+    policy = dual["interface_policy"]
+    assert policy["read_write_api_interface_default"] is True
+    assert policy["read_write_actions"] == EXPECTED_READ_WRITE_INTERFACE_ACTIONS
+    assert policy["withdraw_transfer_actions_supported"] is False
+    assert policy["denied_funds_movement_actions"] == (
+        EXPECTED_DENIED_FUNDS_MOVEMENT_ACTIONS
+    )
+    assert policy["product_family_future_extension_allowed"] is True
+    assert policy["current_governed_lane"] == "stock_etf_cash"
+    assert policy["python_broker_write_authority"] is False
+    assert policy["rust_authority_required_for_any_broker_write"] is True
+
+    authority = dual["current_authority"]
+    assert authority == {
+        "real_ibkr_contact_enabled": False,
+        "connector_runtime_started": False,
+        "secret_content_loaded": False,
+        "secret_content_serialized": False,
+        "demo_order_route_enabled": False,
+        "live_order_route_enabled": False,
+        "true_live_api_bound": False,
+        "runtime_mcp_required": False,
+        "bybit_path_reused": False,
+        "withdraw_or_transfer_path_present": False,
+    }
+
+
+def test_dual_engine_template_pins_source_contract_values() -> None:
+    template_path = SRV_ROOT / "settings" / "broker" / (
+        "ibkr_dual_engine_contract.template.toml"
+    )
+    source = template_path.read_text(encoding="utf-8")
+
+    expected_fragments = [
+        'contract_id = "ibkr_dual_engine_local_contract_v1"',
+        'engine_id = "ibkr_demo_engine"',
+        'engine_id = "ibkr_live_engine"',
+        "bybit_control_api_reference_port = 8710",
+        "bybit_openclaw_proxy_reference_port = 18789",
+        "ibkr_control_api_reserved_port = 8711",
+        "ibkr_demo_engine_ipc_reserved_port = 18790",
+        "ibkr_live_engine_ipc_reserved_port = 18791",
+        "paper_gateway_port = 4002",
+        "live_gateway_port = 4001",
+        "live_tws_port = 7496",
+        "read_write_api_interface_default = true",
+        "withdraw_transfer_actions_supported = false",
+        "per_order_full_seal_check_required = false",
+        "per_call_cached_epoch_and_capability_check_required = true",
+        "true_live_api_bound = false",
+        "withdraw_or_transfer_path_present = false",
+    ]
+
+    assert template_path.exists()
+    for fragment in expected_fragments:
+        assert fragment in source
 
 
 def test_api_absent_engineering_module_remains_static_and_side_effect_free() -> None:

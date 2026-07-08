@@ -37,6 +37,12 @@
 - Runtime blocker cleared by setting only `OPENCLAW_BOUNDED_PROBE_ADAPTER_ENABLED=1`, correcting engine restart path drift back to `/home/ncyu/BybitOpenClaw/var/openclaw`, and rerunning source-stability, local fast-balance, readiness, expired-auth guardrail, and materialization.
 - State packet is `RUNTIME_LOSS_CONTROL_READY`; standing auth `eabf2dab...` active until `2026-07-08T01:53:48.341325+00:00`; next bounded Demo AI/ML learning test still needs separate same-window PM->E3->BB.
 
+## 2026-07-07 IBKR Dual Engine Live-Grade Design Conclusion
+
+- Operator clarified IBKR should mirror Bybit's demo/live-grade split: `ibkr_demo_engine` for paper/demo validation and `ibkr_live_engine` for live-grade local gate/risk/session rehearsal, with possible future true-live API binding only after gates/governance pass.
+- Engineering conclusion: build dual engine shape now, keep true IBKR live contact/execution unauthorized under current ADR-0048 until a future governance update; no withdraw/transfer interface; secrets remain operator-managed via slot/capability/fingerprint metadata.
+- Phase2 seal should be session/admission-epoch based, not per-order; per call should only check cached epoch, capability, lease, risk, and audit readiness. Report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--ibkr_dual_engine_live_grade_design_conclusion.md`.
+
 ## 2026-07-07 Demo Test Runtime Loss-Control Unblock Request Stop
 
 - PM reviewed the operator assertion that runtime/loss-control was released and Demo testing could proceed. Local artifacts still classify runtime/loss-control as blocked, so PM dispatched E3 for report-only pre-review and did not dispatch BB.
@@ -423,3 +429,9 @@
 - PM continued past `API_ABSENT_READY` into L8 as required. P0 broadened Stock/ETF suite is now green (`184 passed`); P1/P3 Rust no-contact parity was smoke-verified from existing local acceptance binaries (`126 passed` total across selected binaries) because local cargo/rustup remains broken.
 - PM added exact `external_verification_readiness_fixture` to `ibkr_demo_ready_api_absent_engineering_packet_v1`, covering operator checklist, Gateway/TWS topology checklist, secret fingerprint checklist, and Phase2 real-contact runbook.
 - Terminal state for this autonomous prompt: `ENGINEERING_BACKLOG_EXHAUSTED_EXTERNAL_ONLY_PENDING`. Boundary unchanged: no IBKR contact, secret read/serialization, connector runtime, broker route, fill import, DB/evidence writer, runtime MCP, live/tiny-live path, or Bybit order path reuse.
+
+## 2026-07-07 IBKR Dual Engine No-Contact Infrastructure Completion
+
+- PM implemented the latest operator-approved source shape: `ibkr_demo_engine` plus `ibkr_live_engine`, with `ibkr_live_engine` serving local live-grade gate/risk/session rehearsal now and possible true-live binding only after future governance and gate PASS.
+- Source contracts now expose `ibkr_dual_engine_local_contract_v1`, trade-core port reservations (`8711`, `18790`, `18791`), Gateway/TWS references (`4002`, `4001`, `7496`), read/write interface buckets, denied transfer/withdraw actions, and a session/admission-epoch Phase2 seal model instead of per-order full seal revalidation.
+- Verification passed: py_compile, focused IBKR Python `18 passed`, broad Stock/ETF Python `187 passed`, full Rust `openclaw_types` PASS, and Rust `openclaw_engine stock_etf` PASS (`32 passed`). Boundary unchanged: no IBKR contact, secret read/serialization, connector/runtime, service bind, broker route, fill import, DB/evidence writer, runtime MCP, live binding, transfer/withdraw, or Bybit order path reuse.

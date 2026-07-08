@@ -12,6 +12,9 @@ Allowed in this package now:
 - display-only session and paper attestation previews
 - display-only readonly probe result-import request previews
 - API-absent engineering readiness packet with simulated/no-contact fixture posture
+- display-only dual engine contract for `ibkr_demo_engine` and `ibkr_live_engine`
+- source-only trade-core service port reservation plan
+- session/admission epoch Phase2 seal model for hot-path checks
 - external verification readiness checklist for operator-controlled real contact
 - static fixtures for tests
 
@@ -22,6 +25,7 @@ Denied in this package now:
 - secret reads, env secret fallback, or serialized credential material
 - broker write methods
 - paper order routing, fill import side effects, DB writes, tiny-live, or live
+- withdraw, transfer, or account-management movement paths
 - treating missing IBKR credentials, Gateway/TWS session, or operator contact approval as a reason to enable real transport
 
 Rust gates remain the authority for any future read-only or paper capability.
