@@ -1,0 +1,23 @@
+{
+  "schema_version": "exact_scope_request_manifest_v1",
+  "generated_at_utc": "2026-07-08T17:32:09Z",
+  "status": "READY_FOR_E3_BB_DISPATCH",
+  "request_path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_dynamic_candidate_same_window_final_gate_exact_scope_request.json",
+  "request_sha256": "49ced54ab3de6c7272ba2fb3e5dfbed5d11177e4340f539ece691cca0315d595",
+  "pre_request_verified_alignment_commit": "7cae899f49042cdc83ea45335e4aeefa120ae7ca",
+  "request_must_be_consumed_from_committed_origin_main": true,
+  "candidate": "ma_crossover|NEARUSDT|Buy",
+  "scope": "no-order same-window Phase 0/A/B only; exactly three Demo public market-data GETs plus one short TRADE_ENTRY Decision Lease acquire/release window if E3 and BB approve",
+  "authority_granted_by_manifest": false,
+  "hard_boundary": {
+    "bybit_public_call_before_e3_bb_approval": false,
+    "bybit_private_call_allowed": false,
+    "order_probe_cancel_modify_allowed": false,
+    "operator_auth_authorize_allowed": false,
+    "runtime_mutation_allowed": false,
+    "db_write_allowed": false,
+    "cost_gate_lowering_allowed": false,
+    "live_or_mainnet_allowed": false,
+    "proof_or_promotion_claim_allowed": false
+  }
+}
