@@ -1,0 +1,88 @@
+{
+  "schema_version": "profit_first_pm_state_packet_v1",
+  "generated_at_utc": "2026-07-08T18:49:15+00:00",
+  "status": "HARD_BLOCKED_NO_SAFE_ACTION",
+  "substatus": "ORDER_CAPABLE_PACKET_BLOCKED_BY_STALE_ETH_SOAK_PLAN_AND_EXPIRED_OPERATOR_AUTH",
+  "active_blocker_id": "P0-CURRENT-CANDIDATE-ORDER-CAPABLE-DEMO-INVOKE-FRESH-WINDOW-RUN-GATE",
+  "candidate": {
+    "side_cell_key": "ma_crossover|NEARUSDT|Buy",
+    "strategy_name": "ma_crossover",
+    "symbol": "NEARUSDT",
+    "side": "Buy",
+    "outcome_horizon_minutes": 60
+  },
+  "source_repairs": [
+    "current_candidate_order_capable_demo_invoke_review_packet accepts compact renewed manifest shape",
+    "compact manifest approval requires E3/BB report sha256 and APPROVE_WITH_CONDITIONS verdict",
+    "compact authority aliases, active_answers contamination, and post-governance loss-control state fail closed",
+    "requested public market-data scope uses candidate symbol",
+    "added artifact-only strict candidate order/fill evidence scan producer"
+  ],
+  "runtime_reads": {
+    "source_head_after_checkpoint": "84132cc3b8a6e9ba118d0823353a4f9ec9735406",
+    "source_origin_main_after_checkpoint": "84132cc3b8a6e9ba118d0823353a4f9ec9735406",
+    "linux_head_after_source_sync": "84132cc3b8a6e9ba118d0823353a4f9ec9735406",
+    "linux_origin_main_after_source_sync": "84132cc3b8a6e9ba118d0823353a4f9ec9735406",
+    "linux_worktree_clean": true,
+    "standing_demo_authorization_sha256": "05fe07f5ad4f92c459c4c6f67bfe534a04b0ea4b4e8f2d8aa43879d87009152f",
+    "bounded_probe_operator_authorization_latest_sha256": "7abf1233021f9dce8ce6772bfcae7ecebaeb0a2429786c8d2e2540c49bc0ccb9",
+    "bounded_probe_operator_authorization_decision": "defer",
+    "bounded_probe_operator_authorization_object_emitted": false,
+    "bounded_demo_soak_plan_sha256": "30056993b5cae70a0fcad0503221e12bd74dae4e42a29d0d2c88423c64739823",
+    "renewed_active_bbo_manifest_sha256": "17a3a426f31cbff6c0180dfdd239ea6b0ef2b132df486dfc76764825963cf321"
+  },
+  "generated_artifacts": {
+    "strict_order_fill_scan": {
+      "path": "/tmp/openclaw_order_capable_near_20260708T184751Z_84132cc3/outputs/current_candidate_order_fill_evidence_scan_strict.json",
+      "sha256": "3453ac4f46e083650eed973189de61920b52ed5bc2bb577aa0f5c2a79a06ac6c",
+      "status": "NO_CANDIDATE_MATCHED_ACTUAL_ORDER_FILL_EVIDENCE",
+      "candidate_rows": 0,
+      "snapshot_strict_hits": 0,
+      "engine_log_strict_tail_hits": 0
+    },
+    "order_capable_review_packet": {
+      "path": "/tmp/openclaw_order_capable_near_20260708T184751Z_84132cc3/outputs/order_capable_demo_invoke_review_packet.json",
+      "sha256": "9b39f4f72d35e9d2f90a1f536bdb53cfe077ac8a8059886a2ab1d1c9ca02ed46",
+      "status": "CURRENT_CANDIDATE_ORDER_CAPABLE_DEMO_INVOKE_REVIEW_PACKET_BLOCKED_BY_LOSS_CONTROL",
+      "authority_boundary_violations": [],
+      "loss_control_blockers": [
+        "soak_plan_candidate_mismatch",
+        "soak_plan_operator_auth_candidate_mismatch",
+        "soak_plan_operator_auth_expired"
+      ]
+    }
+  },
+  "remaining_blocker": {
+    "canonical_soak_plan_candidate": "grid_trading|ETHUSDT|Buy",
+    "required_candidate": "ma_crossover|NEARUSDT|Buy",
+    "embedded_operator_authorization_expires_at_utc": "2026-07-01T09:02:17.250395+00:00",
+    "requires_explicit_operator_authorization": true,
+    "requires_e3_bb_materialization_scope": true
+  },
+  "answers": {
+    "operator_review_ready": true,
+    "e3_bb_request_emitted": false,
+    "ready_for_pm_e3_dispatch": false,
+    "ready_for_bounded_demo_final_window": false,
+    "order_submission_performed": false,
+    "order_cancel_performed": false,
+    "order_modify_performed": false,
+    "bybit_public_call_performed": false,
+    "bybit_private_call_performed": false,
+    "decision_lease_acquire_performed": false,
+    "decision_lease_release_performed": false,
+    "pg_query_performed": false,
+    "pg_write_performed": false,
+    "runtime_mutation_performed": false,
+    "service_restart_performed": false,
+    "canonical_plan_write_performed": false,
+    "latest_write_performed": false,
+    "cost_gate_lowering_performed": false,
+    "live_authority_granted": false,
+    "mainnet_authority_granted": false,
+    "promotion_proof": false,
+    "profit_proof": false
+  },
+  "next_machine_executable_stage": null,
+  "next_operator_decision_required": "authorize or reject a bounded-probe operator authorization object for ma_crossover|NEARUSDT|Buy; without that, no safe source-only path can clear the canonical soak-plan blocker"
+}
