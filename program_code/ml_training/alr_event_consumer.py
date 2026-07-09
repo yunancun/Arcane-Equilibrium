@@ -25,6 +25,11 @@ from ml_training.alr_operational_repository import (
     fetch_untrained_scanner_cycles,
     persist_statistical_run,
 )
+from ml_training.alr_outcome_feedback import build_outcome_feedback
+from ml_training.alr_outcome_feedback_repository import (
+    fetch_unreviewed_outcome_runs,
+    persist_outcome_feedback,
+)
 from ml_training.alr_scanner_snapshot_adapter import adapt_scanner_snapshot
 from ml_training.alr_scanner_statistical_experiment import (
     AlrScannerStatisticalExperimentError,
@@ -210,6 +215,10 @@ def event_consumer_loop(
 
     _accumulate(totals, drain_notified_backlog(connection, [], max_batch=max_batch))
     if source_head is not None:
+        _accumulate_feedback(
+            totals,
+            process_outcome_feedback_backlog(connection, max_batch=max_batch),
+        )
         _accumulate_operational(
             totals,
             run_operational_backlog(
@@ -229,6 +238,10 @@ def event_consumer_loop(
             drain_notified_backlog(connection, notifications, max_batch=max_batch),
         )
         if source_head is not None:
+            _accumulate_feedback(
+                totals,
+                process_outcome_feedback_backlog(connection, max_batch=max_batch),
+            )
             _accumulate_operational(
                 totals,
                 run_operational_backlog(
@@ -237,6 +250,55 @@ def event_consumer_loop(
                     max_batch=max_batch,
                 ),
             )
+    return totals
+
+
+def process_outcome_feedback_backlog(connection: Any, *, max_batch: int) -> dict[str, int]:
+    """Persist bounded P2-5 outcome feedback; deferred evidence rotates targets.
+
+    There is no approved runtime proof/reward producer in the current service
+    boundary.  The empty input is intentionally bridged to `DEFER_EVIDENCE`,
+    rather than being synthesized into profit, proof, or promotion evidence.
+    A future producer may supply artifacts through the same pure builder only
+    after its own explicit authority review.
+    """
+    if isinstance(max_batch, bool) or not isinstance(max_batch, int) or not 1 <= max_batch <= 256:
+        raise AlrEventConsumerError("feedback_batch_limit_invalid")
+    rows = fetch_unreviewed_outcome_runs(connection, limit=min(max_batch, 64))
+    totals = {
+        "feedback_persisted": 0,
+        "feedback_duplicates": 0,
+        "feedback_deferred": 0,
+        "feedback_rotations": 0,
+        "feedback_boundary_blocks": 0,
+    }
+    for row in rows:
+        if not isinstance(row, Mapping):
+            raise AlrEventConsumerError("feedback_row_invalid")
+        feedback = build_outcome_feedback(
+            run={
+                "run_hash": row.get("run_hash"),
+                "candidate_artifact_hash": row.get("candidate_artifact_hash"),
+            },
+            candidate_artifact=row.get("candidate_artifact"),
+        )
+        persisted = persist_outcome_feedback(connection, feedback)
+        status = persisted.get("status")
+        if status == "PERSISTED":
+            totals["feedback_persisted"] += 1
+        elif status == "DUPLICATE":
+            totals["feedback_duplicates"] += 1
+        else:
+            raise AlrEventConsumerError("feedback_persistence_status_invalid")
+        feedback_status = persisted.get("feedback_status")
+        if feedback_status == "DEFER_EVIDENCE":
+            totals["feedback_deferred"] += 1
+            if persisted.get("rotate_next_target") is True:
+                totals["feedback_rotations"] += 1
+        elif feedback_status == "BLOCKED_BOUNDARY":
+            totals["feedback_boundary_blocks"] += 1
+        elif feedback_status != "EVIDENCE_OBSERVED_NO_PROMOTION":
+            raise AlrEventConsumerError("feedback_status_invalid")
     return totals
 
 
@@ -487,6 +549,23 @@ def _accumulate_operational(totals: dict[str, int], result: Mapping[str, int]) -
         for key in required
     ):
         raise AlrEventConsumerError("operational_result_invalid")
+    for key in required:
+        totals[key] = totals.get(key, 0) + result[key]
+
+
+def _accumulate_feedback(totals: dict[str, int], result: Mapping[str, int]) -> None:
+    required = {
+        "feedback_persisted",
+        "feedback_duplicates",
+        "feedback_deferred",
+        "feedback_rotations",
+        "feedback_boundary_blocks",
+    }
+    if set(result) != required or any(
+        isinstance(result[key], bool) or not isinstance(result[key], int) or result[key] < 0
+        for key in required
+    ):
+        raise AlrEventConsumerError("feedback_result_invalid")
     for key in required:
         totals[key] = totals.get(key, 0) + result[key]
 
