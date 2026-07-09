@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-08（TODO v763 order-capable fresh no-order window request ready）
+> 最後更新：2026-07-09（TODO v764 ALR operational shadow P2 queue import）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**TODO v764 ALR operational shadow P2 queue import（2026-07-09）**：Operator accepted ADR-0049 and AMD-2026-07-09-02 to replace the historical ALR source-only terminal condition with a separately governed local operational-shadow workstream. Root `TODO.md` now imports `P2-ALR-OPERATIONAL-SHADOW-V1` as the active authority and points to the versioned P2 queue. P2-0 records scanner evidence-only, append-only `learning.alr_*` persistence, no-serving/no-proof, retention, and future E3/BB deployment boundaries. P2-1 begins with a read-only adapter for existing Rust `trading.scanner_snapshots`; migration apply, service start, Linux runtime consumption, and retention sweep remain blocked on a fresh exact-scope `PM -> E3 -> BB -> PM` gate.
 
 **TODO v763 order-capable fresh no-order window request ready（2026-07-08）**：PM first completed three-way sync to `c66338e8b733acb52fc44160b55fb8e34105ecd6` across Mac, GitHub, and Linux, with Linux clean. Under the prior E3/BB-approved plan-materialization scope, PM atomically materialized the reviewed NEAR Buy bounded Demo soak plan to canonical runtime path `/home/ncyu/BybitOpenClaw/var/openclaw/cost_gate_learning_lane/bounded_demo_probe_soak_plan.json`, new sha `a296365e...`, with materialization record sha `a71b9fc4...` and no order/probe/private endpoint/Decision Lease authority. PM regenerated current-head order-capable inputs: active-order contract sha `cf2c9ff2...` READY, strict NEAR scan sha `ca4bf9cb...` with zero candidate-matched actual order/fill evidence, and order-capable packet sha `305774b2...` blocked only by `renewed_active_bbo_manifest_stale_for_review_packet`. Because stale no-order manifest sha `17a3a426...` was approved at old checkpoint `08f7e957...`, PM emitted current-head exact E3/BB request `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-08--profit_first_near_buy_order_capable_fresh_window_refresh_request.json` sha `e9e6c0fd...` plus manifest for no-order Phase A/B refresh only. State is `READY_FOR_PM_E3_DISPATCH`; boundary remains no Bybit call before E3/BB, no private/order/probe/cancel/modify, no operator-auth authorize, no adapter/writer enablement, no DB/PG write, no service/env/risk mutation, no Cost Gate lowering, no live/mainnet, no proof/promotion.
 

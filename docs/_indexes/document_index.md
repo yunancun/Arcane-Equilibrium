@@ -6,6 +6,14 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-07-09 ALR operational shadow P2
+
+| 文件 | 内容 |
+|------|------|
+| `adr/0049-scanner-driven-alr-operational-shadow.md` | Accepted ALR P2 boundary: existing Rust scanner snapshots are evidence-only input; ALR needs hash/watermark lineage, append-only `learning.alr_*` persistence, zero trading/serving authority, and a P3 Demo gate. |
+| `governance_dev/amendments/2026-07-09--AMD-2026-07-09-02-alr-operational-shadow.md` | Operator-accepted operational-shadow authorization. It permits P2 source/test and scoped later migration/service work, while retaining the fresh E3/BB gate and all broker/order/proof prohibitions. |
+| `execution_plan/2026-07-09--alr-operational-shadow-p2-queue-v1.md` | Versioned P2 acceptance queue. Root `TODO.md` remains the live state authority; normal completion requires `DONE_OPERATIONAL_SHADOW`, not a source-only marker. |
+
 ### 2026-07 冷審計 R2 + soak dispatch / drift-gate 設計批（2026-07-04 TW per R4 補登）
 
 > 本節補回 R4 cold-audit R2 指認的「_indexes/document_index.md 零 2026-07 條目」缺口，收 operator 已批准之設計 spec、冷審計主線報告與 E4 回歸報告；IBKR stock_etf 2026-07-01 大批 source-static-guard checkpoint（100+ 份）不逐條展開，主題導航見 `initiative_index.md`。

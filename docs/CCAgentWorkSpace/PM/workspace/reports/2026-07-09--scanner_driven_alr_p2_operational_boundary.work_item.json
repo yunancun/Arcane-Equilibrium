@@ -1,0 +1,22 @@
+{
+  "schema": "alr_work_item_v1",
+  "created_at": "2026-07-09T00:00:00Z",
+  "work_item_id": "P2-0-ALR-OPERATIONAL-BOUNDARY",
+  "boundary_label": "ALR_OPERATIONAL_COMPLETION_V2",
+  "status": "DONE",
+  "owner_chain": ["PM", "CC", "FA", "PA", "PM"],
+  "execution_mode": "ROLE_FALLBACK_SINGLE_SESSION",
+  "target_files": [
+    "docs/adr/0049-scanner-driven-alr-operational-shadow.md",
+    "docs/governance_dev/amendments/2026-07-09--AMD-2026-07-09-02-alr-operational-shadow.md",
+    "docs/execution_plan/2026-07-09--alr-operational-shadow-p2-queue-v1.md",
+    "TODO.md"
+  ],
+  "acceptance": [
+    "P2 operational boundary is accepted without reopening a trading path",
+    "root TODO imports the versioned P2 queue as authoritative active work",
+    "scanner remains evidence-only and P3 is an explicit Operator gate",
+    "fresh E3/BB is required before migration apply, service start, Linux runtime consumption, or retention sweep"
+  ],
+  "next_work_item": "P2-1-ALR-SCANNER-READ-ADAPTER"
+}

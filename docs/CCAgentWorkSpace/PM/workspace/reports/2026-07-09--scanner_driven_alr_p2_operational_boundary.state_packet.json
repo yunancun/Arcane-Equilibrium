@@ -1,0 +1,28 @@
+{
+  "schema": "alr_loop_state_packet_v1",
+  "created_at": "2026-07-09T00:00:00Z",
+  "repo_head_before": "eb10328295",
+  "selected_work_item": "P2-0-ALR-OPERATIONAL-BOUNDARY",
+  "state": "ADVANCED",
+  "next_state": "P2-1-ALR-SCANNER-READ-ADAPTER",
+  "next_action": "Implement and test a fail-closed read adapter for existing Rust scanner snapshots using source key, canonical hash, and durable-watermark contracts.",
+  "execution_mode": "ROLE_FALLBACK_SINGLE_SESSION",
+  "runtime_authority": false,
+  "exchange_authority": false,
+  "trading_authority": false,
+  "serving_authority": false,
+  "promotion_authority": false,
+  "retention_apply_authority": false,
+  "fresh_e3_bb_required_before": [
+    "migration apply",
+    "service start",
+    "sustained Linux service consumption",
+    "retention sweep"
+  ],
+  "role_chain": [
+    {"role": "CC(default)", "status": "DONE_WITH_CONCERNS", "verdict": "conditional approve: scanner evidence-only and no authority expansion"},
+    {"role": "FA(default)", "status": "DONE_WITH_CONCERNS", "verdict": "operational-shadow acceptance must remain distinct from Demo/profit proof"},
+    {"role": "PA(default)", "status": "DONE", "verdict": "existing scanner snapshots provide a feasible read-adapter source"},
+    {"role": "PM(default)", "status": "DONE", "verdict": "P2-0 boundary completed; P2-1 selected"}
+  ]
+}
