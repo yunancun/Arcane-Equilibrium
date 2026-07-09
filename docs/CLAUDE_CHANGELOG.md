@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-09（TODO v764 ALR operational shadow P2 queue import）
+> 最後更新：2026-07-09（TODO v774 ALR P2-4 operational shadow apply）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**TODO v774 ALR P2-4 operational shadow apply（2026-07-09）**：P2-4 first added a scanner-only recurrence/novelty statistical challenger, V152 append-only run/artifact/lineage contracts, and source-head-pinned ALR unit support. The first disposable PostgreSQL probe reconciled four real shadow rows but deferred because PostgreSQL `TIMESTAMPTZ` arrived as `datetime`; `cf2fb7607` canonicalized it to UTC-Z and added a regression. R2 passed `218` adjacent tests plus a new disposable PostgreSQL run (`4` reconciled sources, `1` run, `4` training-input edges, UPDATE denied). Fresh PM/E3/BB then fast-forwarded Linux to `cf2fb7607`, applied V152 and the reviewed role contract, and restarted only `openclaw-alr-shadow.service`. Production appended one `scanner_novelty_statistical_baseline` run with status `DEFER_EVIDENCE`, `32` training-input edges, five artifacts, unchanged scanner count `79744`, zero duplicate source keys, and exact false/zero authority evidence. Engine PID `1561777` was not restarted; its notifier remains dormant due to write-capable Demo flags. P2-5 is now active; no profitability/proof/serving/promotion claim exists.
 
 **TODO v773 ALR P2-3 service-only apply（2026-07-09）**：Fresh PM/E3/BB scope approved only the ALR database identity, private DSN, and user listener; the existing engine was denied restart because its runtime has Demo learning writer and bounded-probe enabled plus connector write true. `alr_shadow` is non-superuser/no-inherit/connection-limit 2 with scanner SELECT and ALR SELECT/INSERT only. Service startup and one restart recovery consumed 64 new durable source cycles without duplicate source keys or scanner mutation; engine PID stayed unchanged. P2-4 is active from this backlog. Rust event notifier and P2-8 new-cycle soak remain dormant pending a separate safe no-order engine activation path.
 
