@@ -1,0 +1,28 @@
+{
+  "schema": "alr_loop_state_packet_v1",
+  "created_at": "2026-07-09T00:00:00Z",
+  "repo_head": "715334273",
+  "origin_main": "715334273",
+  "linux_head": "0bafe2f9e",
+  "linux_origin_main": "0bafe2f9e",
+  "linux_dirty_count": 0,
+  "selected_work_item": "P2-2-ALR-PERSISTENCE-FRESH-GATE",
+  "state": "ADVANCED_WITH_PREAPPLY_BLOCKER",
+  "next_state": "P2-2-ALR-PERSISTENCE-IMPLEMENTATION",
+  "next_action": "Implement one V151+ append-only learning.alr_* migration/repository and run an isolated Linux Docker PostgreSQL double-apply. Existing-PG apply and scanner read remain blocked until post-implementation alignment recheck.",
+  "execution_mode": "ROLE_FALLBACK_SINGLE_SESSION",
+  "runtime_authority": false,
+  "isolated_container_test_authority": true,
+  "exchange_authority": false,
+  "trading_authority": false,
+  "decision_lease_authority": false,
+  "cost_gate_authority": false,
+  "serving_authority": false,
+  "promotion_authority": false,
+  "role_chain": [
+    {"role": "PM(default)", "status": "DONE", "verdict": "scope constrained to P2-2 source and isolated DB test"},
+    {"role": "E3(default)", "status": "APPROVE_WITH_CONDITIONS", "verdict": "append-only, parameterized, no-authority implementation; stale Linux blocks apply"},
+    {"role": "BB(default)", "status": "APPROVE", "verdict": "no broker surface and all broker authority remains denied"},
+    {"role": "PM(default)", "status": "DONE", "verdict": "select P2-2 implementation"}
+  ]
+}
