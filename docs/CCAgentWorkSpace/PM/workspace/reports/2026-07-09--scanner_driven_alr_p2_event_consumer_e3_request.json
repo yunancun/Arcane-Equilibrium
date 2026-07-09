@@ -1,0 +1,37 @@
+{
+  "schema": "alr_runtime_scope_request_v1",
+  "created_at": "2026-07-09T00:00:00Z",
+  "request_id": "P2-3-ALR-EVENT-CONSUMER-FRESH-E3",
+  "work_item": "P2-3-ALR-EVENT-CONSUMER",
+  "execution_mode": "ROLE_FALLBACK_SINGLE_SESSION",
+  "source_checkpoint": {
+    "mac_head": "beb555567",
+    "github_main": "beb555567",
+    "linux_head": "beb555567",
+    "linux_dirty_count": 0
+  },
+  "read_only_preflight": {
+    "scanner_notify_producer_present": false,
+    "alr_related_db_role_present": false,
+    "existing_user_services": [
+      "openclaw-gateway.service",
+      "openclaw-trading-api.service",
+      "openclaw-watchdog.service"
+    ]
+  },
+  "requested_scope": [
+    "add a best-effort Rust scanner-persistence notification after a successful snapshot insert, without changing scanner cadence, score, registry, dispatch, or snapshot content",
+    "add a Python user-level ALR shadow consumer that LISTENs for the notification, drains bounded unseen backlog, and fails closed",
+    "add a dedicated least-privilege ALR database identity limited to SELECT on trading.scanner_snapshots and SELECT/INSERT on learning.alr_*",
+    "add a user systemd unit with one-instance lock, bounded batch/resource budget, graceful shutdown, and Restart=on-failure only; no cron/timer/fixed learning schedule",
+    "after source review and fresh alignment, build/restart only the Rust writer required for the notification and start only the ALR user service"
+  ],
+  "denials": [
+    "no Bybit/official MCP or exchange network call",
+    "no order/probe/cancel/modify, Decision Lease, Cost Gate, RiskConfig, Guardian, or dispatch mutation",
+    "no scanner cadence/score/registry/dispatch or snapshot-content change",
+    "no serving/promotion/_latest/proof authority",
+    "no delete of scanner, order/fill, proof, audit, or ALR lineage data"
+  ],
+  "requested_verdict": "APPROVE_FOR_PM_BB_P2_3_SCOPE_REVIEW"
+}

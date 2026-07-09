@@ -1,0 +1,23 @@
+{
+  "schema": "alr_effect_review_v1",
+  "created_at": "2026-07-09T00:00:00Z",
+  "work_item_id": "P2-3-ALR-EVENT-CONSUMER-FRESH-GATE",
+  "verdict": "APPROVE_SOURCE_AND_ISOLATED_TESTS_ONLY",
+  "effect_summary": "The fresh P2-3 gate rejects polling/scheduler shortcuts and authorizes only source/isolated-test work for a best-effort scanner-persistence notification, bounded local listener, user-unit definition, and least-privilege role contract.",
+  "boundary_checks": {
+    "scanner_cadence_score_registry_dispatch_mutation": false,
+    "exchange_authority": false,
+    "trading_authority": false,
+    "decision_lease_authority": false,
+    "cost_gate_authority": false,
+    "serving_or_promotion_authority": false,
+    "role_provision_performed": false,
+    "engine_restart_performed": false,
+    "service_start_performed": false
+  },
+  "prestart_blockers": [
+    "scanner notification producer absent before implementation",
+    "dedicated ALR database role absent",
+    "implemented source/test evidence and fresh prestart E3/BB review required"
+  ]
+}
