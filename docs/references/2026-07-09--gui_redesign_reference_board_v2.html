@@ -1,0 +1,333 @@
+<title>TradeBot GUI 設計參考圖鑑</title>
+<style>
+  :root {
+    --bg: #F4F3EF;
+    --surface: #FFFFFF;
+    --surface2: #ECEAE4;
+    --ink: #1B1E24;
+    --muted: #5D6370;
+    --line: rgba(27, 30, 36, 0.13);
+    --accent: #8A6D3B;
+    --accent-ink: #6B5329;
+    --chip-bg: rgba(138, 109, 59, 0.09);
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+    --serif: "Songti TC", "Noto Serif TC", "Source Han Serif TC", Georgia, serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0E1116; --surface: #151A21; --surface2: #1B212B;
+      --ink: #E8EAF0; --muted: #8B93A5; --line: rgba(232,234,240,0.10);
+      --accent: #C9A96A; --accent-ink: #D8BC82; --chip-bg: rgba(201,169,106,0.10);
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #F4F3EF; --surface: #FFFFFF; --surface2: #ECEAE4;
+    --ink: #1B1E24; --muted: #5D6370; --line: rgba(27,30,36,0.13);
+    --accent: #8A6D3B; --accent-ink: #6B5329; --chip-bg: rgba(138,109,59,0.09);
+  }
+  :root[data-theme="dark"] {
+    --bg: #0E1116; --surface: #151A21; --surface2: #1B212B;
+    --ink: #E8EAF0; --muted: #8B93A5; --line: rgba(232,234,240,0.10);
+    --accent: #C9A96A; --accent-ink: #D8BC82; --chip-bg: rgba(201,169,106,0.10);
+  }
+
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--sans); line-height: 1.75; margin: 0; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 56px 28px 80px; }
+
+  .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent-ink); }
+  header.masthead h1 { font-size: clamp(26px, 4vw, 38px); line-height: 1.25; margin: 10px 0 8px; text-wrap: balance; }
+  header.masthead .sub { color: var(--muted); max-width: 64ch; margin: 0; }
+
+  section.blk { margin-top: 56px; }
+  section.blk > h2 { font-size: 22px; margin: 0 0 4px; }
+  section.blk > .lede { color: var(--muted); margin: 0 0 20px; max-width: 70ch; }
+
+  /* 校準 */
+  .lessons { display: grid; gap: 12px; }
+  .lesson { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px 20px; }
+  .lesson .t { font-weight: 600; margin-bottom: 4px; }
+  .lesson p { margin: 0; font-size: 14.5px; color: var(--muted); }
+  .lesson.crit { border-left: 3px solid #B8442E; }
+  .lesson.crit .t { color: #B8442E; }
+
+  /* 主張 token 表 */
+  .concept { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 22px 26px; margin-bottom: 20px; }
+  .concept p { margin: 0 0 12px; max-width: 72ch; }
+  .concept p:last-child { margin-bottom: 0; }
+  .concept .zh { font-family: var(--serif); font-size: 17px; }
+
+  .tokens { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin: 18px 0; }
+  .tok { border: 1px solid var(--line); border-radius: 7px; overflow: hidden; background: var(--surface); }
+  .tok .swatch { height: 52px; display: flex; align-items: flex-end; padding: 6px 10px; font-family: var(--mono); font-size: 10.5px; }
+  .tok .meta { padding: 8px 12px; }
+  .tok .meta .n { font-weight: 600; font-size: 13.5px; }
+  .tok .meta .d { font-size: 12px; color: var(--muted); line-height: 1.5; }
+
+  .spec { display: grid; grid-template-columns: 130px 1fr; gap: 4px 18px; font-size: 14px; margin: 14px 0; }
+  .spec dt { font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); padding-top: 3px; }
+  .spec dd { margin: 0 0 10px; }
+  @media (max-width: 600px) { .spec { grid-template-columns: 1fr; } .spec dt { margin-top: 8px; } }
+
+  pre.wire {
+    font-family: var(--mono); font-size: 11.5px; line-height: 1.5;
+    background: var(--surface2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 16px 20px; overflow-x: auto; margin: 14px 0; color: var(--ink);
+  }
+
+  /* ============ 玄衡儀 mockup(展品,固定色) ============ */
+  .mock { border-radius: 10px; overflow: hidden; border: 1px solid var(--line); box-shadow: 0 10px 34px rgba(0,0,0,0.22); font-family: var(--mono); font-variant-numeric: tabular-nums; user-select: none; margin: 20px 0 8px; }
+  .mock-note { font-size: 12.5px; color: var(--muted); margin: 0 2px 0; }
+
+  .xh { background: #171114; color: #E9E4DA; }
+  .xh .top { display: flex; align-items: center; gap: 18px; padding: 10px 16px; border-bottom: 1px solid rgba(233,228,218,0.09); }
+  .xh .brand { font-family: var(--serif); font-size: 15px; color: #E9E4DA; letter-spacing: 0.06em; white-space: nowrap; }
+  .xh .brand .en { font-family: var(--mono); font-size: 9px; color: #877F72; display: block; letter-spacing: 0.22em; }
+  .xh .beam-wrap { flex: 1; min-width: 120px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .xh .beam { position: relative; width: min(300px, 100%); height: 18px; }
+  .xh .beam .bar { position: absolute; left: 0; right: 0; top: 8px; height: 1.5px; background: #B49B5F; transform: rotate(-2.4deg); transform-origin: center; border-radius: 1px; }
+  .xh .beam .bar::before, .xh .beam .bar::after { content: ""; position: absolute; top: -3px; width: 7px; height: 7px; border: 1px solid #B49B5F; border-radius: 50%; background: #171114; }
+  .xh .beam .bar::before { left: -2px; } .xh .beam .bar::after { right: -2px; }
+  .xh .beam .pivot { position: absolute; left: 50%; top: 9px; transform: translateX(-50%); width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 7px solid #B49B5F; }
+  .xh .beam-lbl { display: flex; justify-content: space-between; width: min(300px, 100%); font-size: 9px; color: #877F72; letter-spacing: 0.1em; }
+  .xh .beam-lbl b { color: #B49B5F; font-weight: 400; }
+  .xh .stat { font-size: 10px; color: #877F72; text-align: right; line-height: 1.7; white-space: nowrap; }
+  .xh .stat .ok { color: #3FB68B; }
+
+  .xh .cols { display: grid; grid-template-columns: 5fr 4fr; border-bottom: 1px solid rgba(233,228,218,0.09); }
+  @media (max-width: 620px) { .xh .cols { grid-template-columns: 1fr; } }
+  .xh .panel { padding: 14px 16px; }
+  .xh .panel + .panel { border-left: 1px solid rgba(233,228,218,0.09); }
+  @media (max-width: 620px) { .xh .panel + .panel { border-left: none; border-top: 1px solid rgba(233,228,218,0.09); } }
+  .xh .ptitle { font-family: var(--serif); font-size: 13px; color: #E9E4DA; margin-bottom: 10px; }
+  .xh .ptitle .code { font-family: var(--mono); font-size: 9px; color: #877F72; letter-spacing: 0.18em; margin-left: 8px; }
+  .xh .row2 { display: flex; justify-content: space-between; align-items: baseline; padding: 3px 0; font-size: 11.5px; }
+  .xh .row2 .k { color: #877F72; font-size: 10px; letter-spacing: 0.1em; }
+  .xh .row2 .v { text-align: right; }
+  .xh .up { color: #3FB68B; } .xh .dn { color: #E5484D; } .xh .au { color: #B49B5F; }
+  .xh .bignum { font-size: 26px; color: #E9E4DA; letter-spacing: 0.01em; }
+  .xh .bignum small { font-size: 11px; color: #877F72; margin-left: 6px; }
+  .xh .seal { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border: 1px solid #B8442E; color: #B8442E; font-family: var(--serif); font-size: 9.5px; border-radius: 2px; margin-right: 6px; vertical-align: -2px; }
+  .xh svg { display: block; width: 100%; height: auto; margin-top: 6px; }
+  .xh .logs { padding: 6px 0; }
+  .xh .logblock { margin: 6px 16px; border: 1px solid rgba(233,228,218,0.09); border-radius: 6px; padding: 6px 12px; font-size: 10.5px; color: #A89F92; display: flex; gap: 12px; align-items: baseline; }
+  .xh .logblock .ts { color: #877F72; font-size: 9.5px; }
+  .xh .logblock .ok { color: #3FB68B; } .xh .logblock .warn { color: #B49B5F; }
+  .xh .cmdk { margin: 8px 16px 12px; border: 1px solid rgba(233,228,218,0.14); border-radius: 6px; padding: 6px 12px; font-size: 11px; color: #877F72; display: flex; justify-content: space-between; }
+  .xh .cmdk kbd { font-family: var(--mono); background: rgba(233,228,218,0.06); border: 1px solid rgba(233,228,218,0.14); border-radius: 4px; padding: 0 6px; font-size: 9.5px; color: #A89F92; }
+
+  /* 表格 */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+  table.plain { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 640px; background: var(--surface); }
+  table.plain th, table.plain td { text-align: left; padding: 10px 16px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.plain tr:last-child td { border-bottom: none; }
+  table.plain th { font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-weight: 500; background: var(--surface2); }
+  table.plain a { color: var(--accent-ink); text-decoration: none; }
+  table.plain a:hover { text-decoration: underline; }
+  table.plain .dirref { font-family: var(--mono); font-size: 12px; color: var(--accent-ink); white-space: nowrap; }
+
+  /* 卡片 */
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; }
+  .card .name { font-weight: 600; font-size: 15px; }
+  .card .name .tag { font-family: var(--mono); font-size: 10px; color: var(--accent-ink); border: 1px solid var(--accent); border-radius: 3px; padding: 0 5px; margin-left: 6px; vertical-align: 2px; }
+  .card p { margin: 0; font-size: 13.5px; color: var(--muted); }
+  .card a { font-family: var(--mono); font-size: 12px; color: var(--accent-ink); text-decoration: none; overflow-wrap: anywhere; }
+  .card a:hover { text-decoration: underline; }
+  .cardgroup { margin-bottom: 22px; }
+  .cardgroup h3 { font-family: var(--mono); font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); font-weight: 500; margin: 0 0 10px; }
+
+  footer.note { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+  footer.note p { margin: 0 0 6px; max-width: 76ch; }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <span class="eyebrow">GUI Redesign · Reference Board · v2 · 2026-07-09</span>
+    <h1>設計主張:玄衡儀<br>——從「抄哪家交易所」到「造一台自己的儀器」</h1>
+    <p class="sub">第二版。引入 Anthropic 官方 frontend-design skill 重審第一版,並把參考面從交易所擴展到 Linear、teenage engineering、Berkeley Mono、iA 這些跨領域標杆。第一版的五方向圖鑑仍可在本頁版本記錄裡回看(initial-five-directions)。</p>
+  </header>
+
+  <!-- ============ 一、校準 ============ -->
+  <section class="blk">
+    <h2>一、skill 對第一版的三條校準</h2>
+    <p class="lede">frontend-design skill 的核心立場:設計要「不可能被誤認為別家」,而不是在成熟風格裡挑一個。用它回看第一版,有一條直接打臉:</p>
+    <div class="lessons">
+      <div class="lesson crit">
+        <div class="t">自我批判:第一版頭號推薦撞上了「AI 默認審美」</div>
+        <p>skill 點名了三種 AI 生成設計的俗套,第二種是「近黑底 + 單一亮色 accent」——這正是第一版方向 B(Hyperliquid 薄荷綠)的底層公式。而且照著 Hyperliquid 做,本質是穿別人的制服:它的薄荷綠是它的身分,不是你的。深色高密度的<em>結論</em>仍然成立(那是品類規律),但 accent 與氣質必須是自己選的,不能是「深色終端的默認出廠色」。</p>
+      </div>
+      <div class="lesson">
+        <div class="t">校準二:字體要有主張,不能用「安全臉」</div>
+        <p>skill 明確反對「任何項目都能用的那套字體」。跨界調研恰好給出答案:U.S. Graphics 用一套 Berkeley Mono 撐起整個「terminal 美學做成高級品」的品牌;iA 證明 tabular-nums + 嚴格對齊本身就是設計。字體(尤其等寬字型的選擇)應該是這次改版裡最有辨識度的單一決策。</p>
+      </div>
+      <div class="lesson">
+        <div class="t">校準三:要有一個 signature 元素,而且只要一個</div>
+        <p>「把大膽花在一處,其餘保持安靜」。第一版給了五種風格但零個記憶點。第二版的全部大膽預算,花在下面這一個元素上:衡樑。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 二、主張 ============ -->
+  <section class="blk">
+    <h2>二、設計主張:玄衡儀</h2>
+    <div class="concept">
+      <p class="zh">這個系統自己的名字就是最好的設計題目:玄衡 · Arcane Equilibrium。</p>
+      <p>「玄」在傳統色譜裡不是純黑,是「黑而有赤」——帶一絲暗紅底溫的深黑。「衡」是秤樑,也是「璇璣玉衡」——古代觀測天象的儀器。順著名字走,這個 GUI 的正確身分不是「另一個交易所界面」,而是<strong>一台觀測市場的儀器</strong>:玄漆為底、青銅刻度、朱砂鈐印。而「印」甚至不是強加的比喻——系統詞彙裡本來就有 seal(proof packet 封存、hidden-OOS sealer、seal-lineage):被封存驗證的東西蓋一方小朱印,是把既有工程概念可視化,不是裝飾。</p>
+      <p>操作者是工程師、無人工下單、治理概念(gate / lease / envelope / audit)是界面的主角——儀器美學(teenage engineering 的規格表排版、Berkeley Mono 的等寬網格)比交易所美學更貼合這個產品的真實。</p>
+    </div>
+
+    <h3 style="font-size:16px; margin:26px 0 4px;">色板(玄衡五色)</h3>
+    <div class="tokens">
+      <div class="tok"><div class="swatch" style="background:#171114; color:#877F72;">#171114</div><div class="meta"><div class="n">玄 · 底</div><div class="d">黑而有赤:帶暗紅底溫的近黑,區別於藍調深色主題的「出廠感」</div></div></div>
+      <div class="tok"><div class="swatch" style="background:#E9E4DA; color:#877F72;">#E9E4DA</div><div class="meta"><div class="n">帛 · 文字</div><div class="d">暖白如絹帛,不用冷藍白;長時間盯盤更溫和</div></div></div>
+      <div class="tok"><div class="swatch" style="background:#B49B5F; color:#171114;">#B49B5F</div><div class="meta"><div class="n">青銅 · accent</div><div class="d">儀器刻度色:唯一品牌強調色,用於焦點/選中/衡樑</div></div></div>
+      <div class="tok"><div class="swatch" style="background:#B8442E; color:#E9E4DA;">#B8442E</div><div class="meta"><div class="n">朱 · 鈐印</div><div class="d">只給「權威態」:sealed/live authority/kill-switch;以印章形制出現,與虧損紅(#E5484D)靠形+色雙重區分</div></div></div>
+      <div class="tok"><div class="swatch" style="background:#877F72; color:#171114;">#877F72</div><div class="meta"><div class="n">松煙 · 次要</div><div class="d">暖灰:標籤、輔助信息;海拔分層用帛色的 alpha 階(Linear 手法)</div></div></div>
+      <div class="tok"><div class="swatch" style="background:linear-gradient(90deg,#3FB68B 50%,#E5484D 50%); color:#171114;">#3FB68B / #E5484D</div><div class="meta"><div class="n">語義漲跌</div><div class="d">嚴格保留給多空盈虧,永不挪作品牌用;色盲安全需附 ▲▼ 第二指示</div></div></div>
+    </div>
+
+    <dl class="spec">
+      <dt>Type · 數據</dt>
+      <dd><strong>IBM Plex Mono</strong>(免費、氣質工業)承載一切數字/代碼/標籤,全部數值 <code>tabular-nums</code> 右對齊;升級選項:<strong>Berkeley Mono</strong>(usgraphics.com,$75 起)——「terminal 高級感」的原產地字型。</dd>
+      <dt>Type · 標題</dt>
+      <dd><strong>思源宋體(Noto Serif TC)</strong>只用於面板題與報告頁大標——中文襯線在滿屏等寬字裡就是「儀器上的銘文」,這是本方案的一個 aesthetic risk,節制使用(每屏 ≤3 處)。</dd>
+      <dt>Type · 正文</dt>
+      <dd>系統字(PingFang TC / SF)——UI 正文保持隱形,把性格讓給上面兩位。</dd>
+      <dt>Layout</dt>
+      <dd>兩種密度檔位,不用一套字階硬撐:<strong>儀表態</strong>(監控/持倉/風控:teenage engineering 式規格表密度,絲印小標籤+細規則線)與<strong>卷宗態</strong>(復盤/審計/報告:iA 式編輯排版,大字號、1.6+ 行高、~65ch 行寬)。widget → 命名 preset 的工作台結構保留(Kraken/TT 的結構遺產)。</dd>
+      <dt>Signature</dt>
+      <dd><strong>衡樑</strong>:頂欄常駐的一根青銅髮絲線秤樑,支點居中,左右兩端 = 風控包絡已用/剩餘(或多/空敞口)。健康時水平微光,越過閾值時緩緩傾斜、支點變色。它同時是:系統名的直譯、operator 最關心的單一治理指標、和沒有任何交易所有過的記憶點。全站唯一的環境動效預算都給它。</dd>
+      <dt>Motion</dt>
+      <dd>數據區微動效 ≤220ms、只確認數值變化、永不遮數字(Hyperliquid 紀律);衡樑允許 500ms 級緩動(它是環境儀表,不是數據)。<code>prefers-reduced-motion</code> 全部靜止。</dd>
+    </dl>
+
+    <pre class="wire">┌──────────────────────────────────────────────────────────────┐
+│ 玄衡        ────────▲────────  衡樑     engine ● lease 287s  │ ← 常駐頂欄
+├──────────┬───────────────────────────────────┬───────────────┤
+│ nav rail │   widget workspace(儀表態)        │  風控包絡     │
+│ 儀表     │   ┌─────────┐ ┌─────────┐        │  gate 狀態    │
+│ 策略     │   │ PnL     │ │ 持倉     │        │  lease/seal   │
+│ 卷宗     │   └─────────┘ └─────────┘        │               │
+├──────────┴───────────────────────────────────┴───────────────┤
+│ event log(Warp block 式:可折疊/可複製/帶時間戳)     ⌘K    │ ← 底欄
+└──────────────────────────────────────────────────────────────┘</pre>
+
+    <div class="mock xh" aria-label="玄衡儀風格示意">
+      <div class="top">
+        <div class="brand">玄衡<span class="en">ARCANE EQUILIBRIUM</span></div>
+        <div class="beam-wrap">
+          <div class="beam"><div class="bar"></div><div class="pivot"></div></div>
+          <div class="beam-lbl"><span>風控已用 <b>31%</b></span><span>剩餘 <b>69%</b></span></div>
+        </div>
+        <div class="stat">engine <span class="ok">●</span> heartbeat 1.2s<br>lease TTL 287s</div>
+      </div>
+      <div class="cols">
+        <div class="panel">
+          <div class="ptitle">今日結衡<span class="code">PNL-LEDGER</span></div>
+          <div class="bignum">+64.98<small>bps net · 5,058 fills</small></div>
+          <svg viewBox="0 0 330 64" role="img" aria-label="淨收益曲線示意">
+            <line x1="0" y1="32" x2="330" y2="32" stroke="rgba(233,228,218,0.08)" stroke-width="1"/>
+            <polyline points="0,50 40,46 70,48 105,38 140,42 180,30 215,34 255,22 290,26 330,16" fill="none" stroke="#3FB68B" stroke-width="1.5"/>
+            <circle cx="330" cy="16" r="2.5" fill="#3FB68B"/>
+          </svg>
+          <div class="row2"><span class="k">MA_CROSSOVER · NEARUSDT</span><span class="v up">+4.39%</span></div>
+          <div class="row2"><span class="k">GRID · BTCUSDT</span><span class="v dn">-1.07%</span></div>
+        </div>
+        <div class="panel">
+          <div class="ptitle">封驗<span class="code">GATE / SEAL REGISTRY</span></div>
+          <div class="row2"><span class="k"><span class="seal">封</span>PROOF-PACKET · WP1</span><span class="v au">SEALED</span></div>
+          <div class="row2"><span class="k"><span class="seal">封</span>HIDDEN-OOS · R7</span><span class="v au">SEALED</span></div>
+          <div class="row2"><span class="k">GATE-05 · COST</span><span class="v up">PASS</span></div>
+          <div class="row2"><span class="k">GATE-02 · LEASE</span><span class="v up">ACTIVE</span></div>
+          <div class="row2"><span class="k">KILL-SWITCH</span><span class="v">ARMED</span></div>
+        </div>
+      </div>
+      <div class="logs">
+        <div class="logblock"><span class="ts">14:02:11</span><span>engine.admit <span class="ok">PASS</span> ma_crossover NEARUSDT Buy</span></div>
+        <div class="logblock"><span class="ts">14:02:09</span><span>cost_gate <span class="warn">REJECT</span> edge 1.8bps &lt; cost 2.0bps</span></div>
+      </div>
+      <div class="cmdk"><span>跳轉或執行命令…</span><span><kbd>⌘</kbd> <kbd>K</kbd></span></div>
+    </div>
+    <p class="mock-note">風格示意(CSS 重現):玄底、帛字、青銅衡樑、朱印封驗、宋體銘文標題、Warp 式 log block。傾斜的衡樑即「風控已用 31%」的實時姿態。</p>
+  </section>
+
+  <!-- ============ 三、五方向再定位 ============ -->
+  <section class="blk">
+    <h2>三、第一版五方向的再定位</h2>
+    <p class="lede">五個方向沒有作廢——它們從「候選風格」降級為「玄衡儀的原料」,各留下一件東西:</p>
+    <div class="tablewrap">
+      <table class="plain">
+        <tr><th>方向</th><th>留下什麼</th><th>關鍵鏈接</th></tr>
+        <tr><td><span class="dirref">A</span> Bloomberg 血統</td><td>command line 心智(→ ⌘K)+「密度就是專業」的品類鐵律</td><td><a href="https://uxmag.com/articles/the-impossible-bloomberg-makeover" target="_blank" rel="noopener">UX Mag makeover 文</a></td></tr>
+        <tr><td><span class="dirref">B</span> Hyperliquid 流</td><td>高密度零裝飾的紀律、微動效 ≤220ms 不遮數字;accent 色不抄</td><td><a href="https://app.hyperliquid.xyz/trade" target="_blank" rel="noopener">app.hyperliquid.xyz</a></td></tr>
+        <tr><td><span class="dirref">C</span> Kraken Pro / TT</td><td>widget → named preset 工作台結構;Audit Trail 一等公民</td><td><a href="https://blog.kraken.com/product/create-custom-layouts-on-kraken-pro" target="_blank" rel="noopener">Kraken Custom Layouts</a> · <a href="https://optimusfutures.com/Platforms/TradingTechnologies-Platform.php" target="_blank" rel="noopener">TT 截圖</a></td></tr>
+        <tr><td><span class="dirref">D</span> Koyfin / TradingView</td><td>color-group widget 聯動;圖表網格/十字線以 TradingView 為基準</td><td><a href="https://www.koyfin.com/features/market-dashboards/" target="_blank" rel="noopener">Koyfin dashboards</a> · <a href="https://www.tradingview.com/features/" target="_blank" rel="noopener">TV features</a></td></tr>
+        <tr><td><span class="dirref">E</span> Geist / OKX 黑白</td><td>等寬數字紀律、模式分層(Demo/Live/審計一鍵切換)</td><td><a href="https://vercel.com/geist/introduction" target="_blank" rel="noopener">Geist docs</a> · <a href="https://www.okx.com/en-us/learn/okx-interface-update" target="_blank" rel="noopener">OKX 三模式</a></td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ 四、跨界借鑒 ============ -->
+  <section class="blk">
+    <h2>四、跨界借鑒(交易所之外,已逐一驗證)</h2>
+    <p class="lede">按「借什麼」分組;每張卡一個具體手法,不是泛泛的「設計很好」:</p>
+
+    <div class="cardgroup">
+      <h3>儀器美學 —— 玄衡儀的直系血親</h3>
+      <div class="cards">
+        <div class="card"><div class="name">teenage engineering<span class="tag">網站即儀器</span></div><p>絲印(silkscreen)排版:小號等寬全大寫標籤+細規則線構成規格表——玄衡儀「儀表態」的字階範式直接源於此。</p><a href="https://teenage.engineering" target="_blank" rel="noopener">teenage.engineering</a></div>
+        <div class="card"><div class="name">U.S. Graphics / Berkeley Mono<span class="tag">原產地</span></div><p>「terminal 美學做成奢侈品」的原型:MIL-SPEC 圖紙風、全站單一等寬字型、型號化命名(TX-02)。策略/lane/gate 賦予規格編號的想法源於此。官網擋爬蟲,瀏覽器直接開。</p><a href="https://usgraphics.com" target="_blank" rel="noopener">usgraphics.com</a></div>
+        <div class="card"><div class="name">Warp / Ghostty</div><p>Warp 的 output-block:每條命令+輸出是一個可折疊、可複製、帶時間戳的卡片——event log 的正確形制。Ghostty 證明純排版即可傳達工程可信度。</p><a href="https://www.warp.dev" target="_blank" rel="noopener">warp.dev</a> · <a href="https://ghostty.org" target="_blank" rel="noopener">ghostty.org</a></div>
+      </div>
+    </div>
+
+    <div class="cardgroup">
+      <h3>產品工藝 —— 深色界面的手感從哪來</h3>
+      <div class="cards">
+        <div class="card"><div class="name">Linear<span class="tag">深色標杆</span></div><p>深色「海拔」不靠陰影靠亮度階:邊框/分隔/hover 全用同一組 alpha-white token,層次一致不髒。玄衡儀的分層機制照此辦理。</p><a href="https://linear.app" target="_blank" rel="noopener">linear.app</a></div>
+        <div class="card"><div class="name">Stripe</div><p>色彩克制紀律:漸變只做品牌點綴、絕不進數據區;docs 的雙欄同步滾動可搬到策略配置說明頁。</p><a href="https://stripe.com" target="_blank" rel="noopener">stripe.com</a></div>
+        <div class="card"><div class="name">Raycast</div><p>玻璃(backdrop-blur)只用於浮層,主面板純色;快捷鍵用「鍵帽」元件可視化——hotkey 提示直接照抄。</p><a href="https://www.raycast.com" target="_blank" rel="noopener">raycast.com</a></div>
+        <div class="card"><div class="name">Resend</div><p>深色底上的「微光層」:極低透明度 radial glow 標記焦點區,替代高飽和高亮引導注意力——衡樑的「健康微光」用這個手法。</p><a href="https://resend.com" target="_blank" rel="noopener">resend.com</a></div>
+        <div class="card"><div class="name">Supabase<span class="tag">可讀源碼</span></div><p>dark-first 開發者 dashboard,前端開源:深色表格、行 hover、密集 filter bar 的實現可以直接讀代碼,不止看截圖。</p><a href="https://supabase.com" target="_blank" rel="noopener">supabase.com</a></div>
+        <div class="card"><div class="name">Ableton Learning Music</div><p>「可互動處才有色彩」:灰階為底,只有可操作控件與數據語義著色——數據密集界面防過載的第一原則。</p><a href="https://learningmusic.ableton.com" target="_blank" rel="noopener">learningmusic.ableton.com</a></div>
+      </div>
+    </div>
+
+    <div class="cardgroup">
+      <h3>編輯敘事 —— 卷宗態的老師</h3>
+      <div class="cards">
+        <div class="card"><div class="name">iA<span class="tag">排版原教旨</span></div><p>tabular figures + 嚴格 baseline grid:所有數值列右對齊+等寬數字,PnL 列掃讀速度立刻不同——這是命門級細節。</p><a href="https://ia.net" target="_blank" rel="noopener">ia.net</a></div>
+        <div class="card"><div class="name">Anthropic</div><p>編輯級 type scale:報告/文檔頁用大字號、1.6+ 行高、~65ch 行寬——「卷宗態」的直接參照。</p><a href="https://www.anthropic.com" target="_blank" rel="noopener">anthropic.com</a></div>
+        <div class="card"><div class="name">The Pudding</div><p>scrollytelling:交易復盤/postmortem 頁用步進式圖表註解,把一次虧損歸因變成可讀敘事而非數據傾倒。</p><a href="https://pudding.cool" target="_blank" rel="noopener">pudding.cool</a></div>
+      </div>
+    </div>
+
+    <div class="cardgroup">
+      <h3>靈感畫廊 —— 給你自己翻的</h3>
+      <div class="cards">
+        <div class="card"><div class="name">recent.design(原 godly.website)</div><p>「astronomically good web design」精選,可按 dark/minimal 過濾,附滾動錄屏預覽。</p><a href="https://recent.design" target="_blank" rel="noopener">recent.design</a></div>
+        <div class="card"><div class="name">Dark Design / Minimal Gallery</div><p>前者專收深色站(可按 Software/Hardware 過濾),後者 30+ 分類極簡精選。</p><a href="https://www.dark.design" target="_blank" rel="noopener">dark.design</a> · <a href="https://minimal.gallery" target="_blank" rel="noopener">minimal.gallery</a></div>
+        <div class="card"><div class="name">Awwwards SOTY · Igloo Inc</div><p>2024 年度站:全黑 WebGL 沉浸體驗。借它的黑底光影層次與載入序列做品牌時刻;3D 不進工作界面——反面教材意義同樣重要。</p><a href="https://www.awwwards.com/websites/sites_of_the_year/" target="_blank" rel="noopener">awwwards.com/SOTY</a> · <a href="https://www.igloo.inc" target="_blank" rel="noopener">igloo.inc</a></div>
+        <div class="card"><div class="name">Behance 交易類精選(第一版遺產)</div><p>Extej 的 Leverage(4.5K 讚)與 space307 的 Smoke Theme terminal(真產品團隊)仍值得翻。</p><a href="https://www.behance.net/gallery/153538523/Leverage-UI-UX-Dashboard-for-Web3-Wallet-Hedge-Fund" target="_blank" rel="noopener">behance.net/153538523</a> · <a href="https://dribbble.com/shots/10536744-Trading-Terminal-Smoke-Theme" target="_blank" rel="noopener">dribbble/10536744</a></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 五、落地 ============ -->
+  <section class="blk">
+    <h2>五、工程落地基座(不變,仍然成立)</h2>
+    <div class="cards">
+      <div class="card"><div class="name">Palantir Blueprint<span class="tag">首選</span></div><p>data-dense React 系統:虛擬化 Table、一鍵深色。玄衡儀的 token 披在它的骨架上。</p><a href="https://blueprintjs.com/" target="_blank" rel="noopener">blueprintjs.com</a></div>
+      <div class="card"><div class="name">IBM Carbon data table 規範</div><p>排序/篩選/批量/行密度三檔的完整交互 spec,直接抄最省力。</p><a href="https://carbondesignsystem.com/components/data-table/usage/" target="_blank" rel="noopener">carbondesignsystem.com</a></div>
+      <div class="card"><div class="name">Coinbase CDS 兩層色 token</div><p>spectrum → semantic 的 token 架構:玄衡五色做 spectrum 層,漲跌/狀態做 semantic 層。</p><a href="https://cds.coinbase.com/getting-started/theming/" target="_blank" rel="noopener">cds.coinbase.com</a></div>
+      <div class="card"><div class="name">IBM Plex Mono / Noto Serif TC</div><p>兩個字體均開源免費(Google Fonts / GitHub);Berkeley Mono 為付費升級項。</p><a href="https://fonts.google.com/specimen/IBM+Plex+Mono" target="_blank" rel="noopener">fonts.google.com</a></div>
+    </div>
+  </section>
+
+  <footer class="note">
+    <p>下一步(等 operator 裁決):① 認可/修改「玄衡儀」主張 → ② 我出一版現有 GUI 某個真實 tab 的高保真 mockup(用真實數據結構)做 before/after 對比 → ③ token 系統寫成 CSS variables 正本,進 Phase 0。</p>
+    <p>驗證說明:usgraphics.com 對自動抓取回 403(站點活躍,瀏覽器可開);其餘鏈接均已程式化驗證。第一版五方向完整圖鑑在本 artifact 的版本記錄 initial-five-directions 中。</p>
+  </footer>
+</div>
