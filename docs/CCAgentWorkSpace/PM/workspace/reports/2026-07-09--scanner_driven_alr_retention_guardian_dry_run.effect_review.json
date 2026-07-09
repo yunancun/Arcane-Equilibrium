@@ -1,0 +1,111 @@
+{
+  "schema": "alr_effect_review_v1",
+  "created_at": "2026-07-09T02:28:59Z",
+  "work_item_id": "P0-AIML-ALR-RETENTION-GUARDIAN-DRY-RUN",
+  "effect_summary": "Implemented a standalone source-only retention guardian dry-run helper. It consumes caller-provided artifact manifests, emits retention_guardian_dry_run_v1 JSON, hashes the manifest and reference graph, protects proof/audit/dispute/lineage/negative/reference-contact rows, fails closed on unknown or ambiguous references, and performs no artifact mutation.",
+  "files_changed": [
+    "program_code/ml_training/alr_retention_guardian_dry_run.py",
+    "program_code/ml_training/tests/test_alr_retention_guardian_dry_run.py",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/queue.md",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/manifest.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_retention_guardian_dry_run.work_item.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_retention_guardian_dry_run.effect_review.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_retention_guardian_dry_run.state_packet.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_retention_guardian_dry_run.md",
+    "docs/CCAgentWorkSpace/Operator/2026-07-09--scanner_driven_alr_retention_guardian_dry_run.md"
+  ],
+  "boundary_checks": {
+    "boundary_label_present": true,
+    "dry_run_only": true,
+    "single_output_json_artifact": true,
+    "exclusive_create_used": true,
+    "non_empty_output_dir_rejected": true,
+    "output_symlink_rejected": true,
+    "output_dir_and_ancestor_symlinks_rejected": true,
+    "resolved_output_path_forbidden_terms_checked": true,
+    "latest_paths_rejected": true,
+    "raw_schema_missing_fields_fail_closed": true,
+    "raw_schema_extra_fields_fail_closed": true,
+    "reference_graph_hash_bound": true,
+    "all_reference_fields_create_edges_or_fail_closed": true,
+    "input_hashes_content_sha256_edges": true,
+    "proof_audit_dispute_lineage_negative_protected": true,
+    "unknown_refs_fail_closed": true,
+    "no_existing_retention_prune_or_apply_script_wrapped": true,
+    "no_executable_runtime_or_network_path": true,
+    "no_executable_source_outside_owned_files": true
+  },
+  "verification": [
+    {
+      "command": "PYTHONPATH=program_code PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile program_code/ml_training/alr_retention_guardian_dry_run.py program_code/ml_training/tests/test_alr_retention_guardian_dry_run.py",
+      "result": "PASS"
+    },
+    {
+      "command": "PYTHONPATH=program_code PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q program_code/ml_training/tests/test_alr_retention_guardian_dry_run.py -p no:cacheprovider",
+      "result": "PASS",
+      "observed": "27 passed"
+    },
+    {
+      "command": "PYTHONPATH=program_code PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q program_code/ml_training/tests/test_alr_retention_guardian_dry_run.py program_code/ml_training/tests/test_alr_outcome_bridge.py program_code/ml_training/tests/test_learning_target_arbiter.py program_code/ml_training/tests/test_alr_controller_contracts.py -p no:cacheprovider",
+      "result": "PASS",
+      "observed": "124 passed"
+    },
+    {
+      "command": "git diff --check -- program_code/ml_training/alr_retention_guardian_dry_run.py program_code/ml_training/tests/test_alr_retention_guardian_dry_run.py",
+      "result": "PASS"
+    },
+    {
+      "command": "E2 final gate",
+      "result": "PASS"
+    },
+    {
+      "command": "E4 final gate",
+      "result": "PASS",
+      "observed": "No findings after bounded output fix"
+    },
+    {
+      "command": "QA final gate",
+      "result": "ACCEPT"
+    }
+  ],
+  "line_count_review": {
+    "program_code/ml_training/alr_retention_guardian_dry_run.py": 894,
+    "program_code/ml_training/tests/test_alr_retention_guardian_dry_run.py": 483,
+    "review_attention_required_over_800": true,
+    "review_attention_satisfied_by": [
+      "E2 final PASS",
+      "E4 final PASS",
+      "QA ACCEPT"
+    ],
+    "hard_cap_over_2000": false
+  },
+  "authority_flags": {
+    "root_todo_imported": false,
+    "adr_amd_applied": false,
+    "runtime_effects": false,
+    "pg_effects": false,
+    "ipc_effects": false,
+    "exchange_effects": false,
+    "official_mcp_effects": false,
+    "decision_lease_effects": false,
+    "order_or_probe_effects": false,
+    "cost_gate_effects": false,
+    "latest_overwrite": false,
+    "serving_authority_granted": false,
+    "proof_or_promotion_authority_granted": false,
+    "delete_or_apply_performed": false,
+    "scheduler_or_daemon_created": false,
+    "live_or_mainnet_authority_granted": false
+  },
+  "candidate_matched_fills_count": 0,
+  "proof_packet_ready_count": 0,
+  "reward_ledger_ready_count": 0,
+  "concerns": [
+    "alr_retention_guardian_dry_run.py is above the 800-line review-attention threshold; E2, E4, and QA reviewed it.",
+    "The module performs explicit local JSON read/write only through guarded CLI paths.",
+    "Denied vocabulary appears in source/tests only as fail-closed path and authority validation terms.",
+    "Ignored pytest and pycache artifacts were produced by verification and remain unstaged.",
+    "P1 rows remain DEFERRED_P0 and were not implemented."
+  ],
+  "verdict": "EFFECTIVE_RETENTION_GUARDIAN_DRY_RUN_READY"
+}
