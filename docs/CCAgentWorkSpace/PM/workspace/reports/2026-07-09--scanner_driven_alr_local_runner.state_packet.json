@@ -1,0 +1,75 @@
+{
+  "schema": "alr_loop_state_packet_v1",
+  "created_at": "2026-07-09T17:28:56Z",
+  "repo_head_before": "0bafe2f9ee69e53cc00d95ef39dc32a050cb5f20",
+  "repo_head_after": "0bafe2f9ee69e53cc00d95ef39dc32a050cb5f20",
+  "selected_work_item": "P1-AIML-ALR-LOCAL-RUNNER",
+  "selection_reason": "Operator prompt explicitly activated the P1 source-only ALR rows after P0 completion; P1-A is the first P1 implementation row.",
+  "state": "DONE",
+  "next_state": "P1-AIML-ALR-PERSISTENCE-DESIGN_ACTIVE",
+  "next_action": "Continue the foreground Codex source-development loop with P1-AIML-ALR-PERSISTENCE-DESIGN under SOURCE_ONLY_OFFLINE_P0_P1. Produce ADR/AMD/spec/report design artifacts only; do not create or apply migrations or touch runtime/PG.",
+  "stop_reason": null,
+  "owned_files": [
+    "program_code/ml_training/alr_local_runner.py",
+    "program_code/ml_training/tests/test_alr_local_runner.py",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/queue.md",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/manifest.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_local_runner.work_item.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_local_runner.effect_review.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_local_runner.state_packet.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_local_runner.md",
+    "docs/CCAgentWorkSpace/Operator/2026-07-09--scanner_driven_alr_local_runner.md"
+  ],
+  "verification_commands": [
+    "PYTHONPATH=program_code PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile program_code/ml_training/alr_local_runner.py program_code/ml_training/tests/test_alr_local_runner.py",
+    "PYTHONPATH=program_code PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q program_code/ml_training/tests/test_alr_local_runner.py -p no:cacheprovider",
+    "PYTHONPATH=program_code PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q program_code/ml_training/tests/test_alr_local_runner.py program_code/ml_training/tests/test_alr_controller_contracts.py program_code/ml_training/tests/test_learning_target_arbiter.py program_code/ml_training/tests/test_alr_outcome_bridge.py program_code/ml_training/tests/test_alr_retention_guardian_dry_run.py program_code/ml_training/tests/test_learning_effect_review.py -p no:cacheprovider",
+    "git diff --check -- program_code/ml_training/alr_local_runner.py program_code/ml_training/tests/test_alr_local_runner.py"
+  ],
+  "candidate_matched_fills_count": 0,
+  "proof_packet_ready_count": 0,
+  "reward_ledger_ready_count": 0,
+  "effect_review_ready": true,
+  "model_training_performed": false,
+  "serving_authority_granted": false,
+  "llm_authority": false,
+  "runtime_authority": false,
+  "exchange_authority": false,
+  "trading_authority": false,
+  "boundary_escalation_required": false,
+  "dispatch_tooling_available": true,
+  "dispatch_blocker": null,
+  "role_chain": [
+    {
+      "role": "PA(default)",
+      "status": "DONE",
+      "verdict": "approved explicit foreground runner scope"
+    },
+    {
+      "role": "E1(worker)",
+      "status": "DONE",
+      "verdict": "implemented two-file runner and tests"
+    },
+    {
+      "role": "E2(explorer)",
+      "status": "DONE",
+      "verdict": "PASS after state/report selected-ref fixes"
+    },
+    {
+      "role": "E4(explorer)",
+      "status": "DONE",
+      "verdict": "PASS after existing-empty output-dir fix"
+    },
+    {
+      "role": "QA(explorer)",
+      "status": "DONE",
+      "verdict": "ACCEPT"
+    }
+  ],
+  "concerns": [
+    "alr_local_runner.py is over the 800-line review-attention threshold and below the 2000-line hard cap.",
+    "Explicit local JSON IO is present only for guarded caller-provided paths.",
+    "Unrelated dirty files were present and preserved outside the owned file set.",
+    "P1-B may design future PG/provenance state but still has no migration, PG, runtime, or apply authority."
+  ]
+}
