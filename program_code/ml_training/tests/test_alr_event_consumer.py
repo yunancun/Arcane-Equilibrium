@@ -18,6 +18,7 @@ from ml_training.alr_event_consumer import (
     release_single_instance,
     parse_scanner_notification,
     process_outcome_feedback_backlog,
+    process_retention_backlog,
     run_operational_backlog,
     wait_for_pg_notifications,
 )
@@ -356,6 +357,19 @@ def test_event_loop_processes_feedback_before_next_target_rotation(
             "training_insufficient_source_cycles": 0,
         },
     )
+    monkeypatch.setattr(
+        consumer,
+        "process_retention_backlog",
+        lambda connection, *, max_batch: calls.append("retention")
+        or {
+            "retention_scanned": 0,
+            "retention_quarantined": 0,
+            "retention_restored": 0,
+            "retention_swept": 0,
+            "retention_retained": 0,
+            "retention_skipped": 0,
+        },
+    )
 
     result = event_consumer_loop(
         object(),
@@ -365,9 +379,37 @@ def test_event_loop_processes_feedback_before_next_target_rotation(
         source_head="a" * 40,
     )
 
-    assert calls == ["feedback", "target"]
+    assert calls == ["feedback", "target", "retention"]
     assert result["feedback_rotations"] == 1
     assert result["training_runs"] == 1
+
+
+def test_retention_backlog_reports_only_derived_cache_actions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        consumer,
+        "run_retention_pass",
+        lambda connection, *, now, grace_seconds, limit: {
+            "scanned": 2,
+            "quarantined": 1,
+            "restored": 0,
+            "swept": 1,
+            "retained": 0,
+            "skipped": 0,
+        },
+    )
+
+    result = process_retention_backlog(object(), max_batch=8)
+
+    assert result == {
+        "retention_scanned": 2,
+        "retention_quarantined": 1,
+        "retention_restored": 0,
+        "retention_swept": 1,
+        "retention_retained": 0,
+        "retention_skipped": 0,
+    }
 
 
 def test_dsn_file_must_be_private_and_explicitly_local(tmp_path: Path) -> None:

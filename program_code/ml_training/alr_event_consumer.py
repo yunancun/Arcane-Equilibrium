@@ -13,6 +13,7 @@ import stat
 import threading
 from contextlib import contextmanager
 from collections.abc import Iterable, Iterator, Mapping
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,7 @@ from ml_training.alr_persistence_repository import (
     load_restart_state,
     persist_scanner_cycle,
 )
+from ml_training.alr_retention_repository import run_retention_pass
 from ml_training.alr_operational_repository import (
     fetch_untrained_scanner_cycles,
     persist_statistical_run,
@@ -49,6 +51,7 @@ _LOCAL_DSN_REQUIRED = {
 }
 _DSN_FORBIDDEN_KEYS = {"hostaddr", "service", "servicefile"}
 _SOURCE_HEAD_RE = re.compile(r"^[0-9a-f]{40}$")
+_RETENTION_GRACE_SECONDS = 900
 
 
 class AlrEventConsumerError(ValueError):
@@ -227,6 +230,10 @@ def event_consumer_loop(
                 max_batch=max_batch,
             ),
         )
+        _accumulate_retention(
+            totals,
+            process_retention_backlog(connection, max_batch=max_batch),
+        )
     while not should_stop():
         notifications = wait_for_notifications(connection, timeout_seconds=1.0)
         if should_stop():
@@ -249,6 +256,10 @@ def event_consumer_loop(
                     source_head=source_head,
                     max_batch=max_batch,
                 ),
+            )
+            _accumulate_retention(
+                totals,
+                process_retention_backlog(connection, max_batch=max_batch),
             )
     return totals
 
@@ -300,6 +311,25 @@ def process_outcome_feedback_backlog(connection: Any, *, max_batch: int) -> dict
         elif feedback_status != "EVIDENCE_OBSERVED_NO_PROMOTION":
             raise AlrEventConsumerError("feedback_status_invalid")
     return totals
+
+
+def process_retention_backlog(connection: Any, *, max_batch: int) -> dict[str, int]:
+    """Run one bounded two-phase pass over ALR-owned derived cache only."""
+    if isinstance(max_batch, bool) or not isinstance(max_batch, int) or not 1 <= max_batch <= 256:
+        raise AlrEventConsumerError("retention_batch_limit_invalid")
+    result = run_retention_pass(
+        connection,
+        now=datetime.now(timezone.utc),
+        grace_seconds=_RETENTION_GRACE_SECONDS,
+        limit=min(max_batch, 64),
+    )
+    required = {"scanned", "quarantined", "restored", "swept", "retained", "skipped"}
+    if set(result) != required or any(
+        isinstance(result[key], bool) or not isinstance(result[key], int) or result[key] < 0
+        for key in required
+    ):
+        raise AlrEventConsumerError("retention_result_invalid")
+    return {f"retention_{key}": result[key] for key in required}
 
 
 def run_operational_backlog(
@@ -566,6 +596,24 @@ def _accumulate_feedback(totals: dict[str, int], result: Mapping[str, int]) -> N
         for key in required
     ):
         raise AlrEventConsumerError("feedback_result_invalid")
+    for key in required:
+        totals[key] = totals.get(key, 0) + result[key]
+
+
+def _accumulate_retention(totals: dict[str, int], result: Mapping[str, int]) -> None:
+    required = {
+        "retention_scanned",
+        "retention_quarantined",
+        "retention_restored",
+        "retention_swept",
+        "retention_retained",
+        "retention_skipped",
+    }
+    if set(result) != required or any(
+        isinstance(result[key], bool) or not isinstance(result[key], int) or result[key] < 0
+        for key in required
+    ):
+        raise AlrEventConsumerError("retention_result_invalid")
     for key in required:
         totals[key] = totals.get(key, 0) + result[key]
 

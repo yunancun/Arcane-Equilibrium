@@ -35,6 +35,8 @@ REVOKE ALL ON TABLE learning.alr_watermark_events FROM alr_shadow;
 REVOKE ALL ON TABLE learning.alr_provenance_edges FROM alr_shadow;
 REVOKE ALL ON TABLE learning.alr_training_runs FROM alr_shadow;
 REVOKE ALL ON TABLE learning.alr_outcome_feedback_events FROM alr_shadow;
+REVOKE ALL ON TABLE learning.alr_derived_cache_entries FROM alr_shadow;
+REVOKE ALL ON TABLE learning.alr_retention_events FROM alr_shadow;
 
 GRANT SELECT, INSERT ON TABLE learning.alr_artifact_nodes TO alr_shadow;
 GRANT SELECT, INSERT ON TABLE learning.alr_source_events TO alr_shadow;
@@ -43,5 +45,7 @@ GRANT SELECT, INSERT ON TABLE learning.alr_watermark_events TO alr_shadow;
 GRANT SELECT, INSERT ON TABLE learning.alr_provenance_edges TO alr_shadow;
 GRANT SELECT, INSERT ON TABLE learning.alr_training_runs TO alr_shadow;
 GRANT SELECT, INSERT ON TABLE learning.alr_outcome_feedback_events TO alr_shadow;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE learning.alr_derived_cache_entries TO alr_shadow;
+GRANT SELECT, INSERT ON TABLE learning.alr_retention_events TO alr_shadow;
 
 COMMIT;
