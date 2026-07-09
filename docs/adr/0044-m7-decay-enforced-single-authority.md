@@ -1,7 +1,7 @@
 # ADR 0044: M7 Decay Detection + Single Decay Authority + DECAY_ENFORCED Lifecycle
 
 Date: 2026-05-21
-Status: **Proposed-pending-commit**（v5.8 §2 M7 module ADR 級落地；對應 PA dispatch CR-7 single decay authority + H-11 14d × 50% mitigation + AMD-2026-05-21-01 protected scope）
+Status: **Accepted**（v5.8 §2 M7 module ADR 級落地；對應 PA dispatch CR-7 single decay authority + H-11 14d × 50% mitigation + AMD-2026-05-21-01 protected scope）
 Operator Sign-off: 2026-05-21（主會話 PM dispatch — v5.8 §2 M7 採 single decay authority + 6 lifecycle FSM；DECAY_ENFORCED 改名為 CR-7 字面跨域碰撞 mitigation）
 Related: v5.8 §2 M7 Decay Detection (lines 253-277) / M7 design spec `docs/execution_plan/2026-05-21--m7_decay_enforced_design_spec.md`（463 行；本 ADR 為其治理層 promotion）/ V113 schema spec `docs/execution_plan/2026-05-21--v113_m7_decay_signals_schema_spec.md` / M11 threshold M7 dedup decay enforced rename spec `docs/execution_plan/2026-05-21--m11_threshold_m7_dedup_decay_enforced_rename.md` / ADR-0034 LAL Tier 0 active blocker / ADR-0036 model blacklist (decay signal Sharpe 估計適用) / ADR-0038 M11 replay (字面命名空間分離參考——M11 module 名稱不與 M7 decay 重疊) / AMD-2026-05-21-01 protected scope
 

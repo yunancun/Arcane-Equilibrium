@@ -101,6 +101,7 @@ Top-level archive 檔名索引如下；完整歷史語義仍以 `_indexes/docume
 - `2026-04-21--completed_todo_batch.md`
 - `2026-04-22--step_0_derived_todo_batch.md`
 - `2026-04-24--completed_todo_batch.md`
+- `2026-04-24--todo_refactor_audit.md`
 - `2026-04-24--todo_snapshot_pre_refactor.md`
 - `2026-04-24--todo_v1_refactor_snapshot.md`
 - `2026-04-24--todo_v2_dual_axis_snapshot.md`
@@ -146,8 +147,10 @@ Top-level archive 檔名索引如下；完整歷史語義仍以 `_indexes/docume
 - `2026-05-31--todo_v92_archive.md`
 - `2026-05-31--todo_v93_pre_aeg_cleanup_archive.md`
 - `2026-06-03--todo_v110_pre_cleanup_archive.md`
+- `2026-06-05--l2_advisory_mesh_todo.md`
 - `2026-06-10--skills_todo_audit_closed.md`
 - `2026-07-04--todo_v738_pre_slim_archive.md`
+- `2026-07-09--gui_baseline_pre_redesign_manifest.md`
 - `README.md`
 
 ---

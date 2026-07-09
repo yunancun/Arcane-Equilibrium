@@ -1,7 +1,7 @@
 # ADR 0033: ADR-0006 Amendment — Binance Market-Data Approved · Binance Trading Defer Y2 · DEX/Hyperliquid NOT Approved · D12 + ToS Posture
 
 Date: 2026-05-21
-Status: **Proposed-pending-commit**（v5.7 §12 ADR-0006 amendment 提案落地為獨立 ADR；本 ADR 為 ADR-0006 amendment，不取代 ADR-0006）
+Status: **Accepted**（v5.7 §12 ADR-0006 amendment 提案落地為獨立 ADR；本 ADR 為 ADR-0006 amendment，不取代 ADR-0006）
 Operator Sign-off: 2026-05-21（主會話 PM dispatch via v5.7 §12 governance recap「ADR-0006 amendment: Bybit primary + Binance market data + DEX not approved」）
 Related: ADR-0006 (Bybit-only exchange — 2026-04-03 baseline, amendment target) / v5.7 §6 (market.liquidations writer existing) / v5.7 §8 Sprint 1A (Binance market-data-only WebSocket NEW) / v5.7 §11 Reviewer Conditions / v5.7 §12 Governance Compliance Recap
 

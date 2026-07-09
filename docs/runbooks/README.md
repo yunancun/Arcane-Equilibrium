@@ -17,6 +17,8 @@
 | Earn / 资金移动 | `2026-05-21--earn_governance_runbook.md` |
 | M-series 运维 | `2026-05-21--m*_runbook.md` |
 | OPS / trust first use | `2026-05-28--ops_1_cert_trust_first_use.md` |
+| LG-1 H0 flip 回滾 | `2026-05-11--lg1_h0_flip_rollback.md` |
+| LG-2 pricing assertion 失敗 | `2026-05-11--lg2_pricing_assertion_failure.md` |
 
 ## 使用规则
 
