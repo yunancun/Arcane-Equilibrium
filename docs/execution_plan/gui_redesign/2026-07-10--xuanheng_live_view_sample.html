@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>玄衡 Console — Live 視圖樣品(玄衡儀 · 2026-07-10)</title>
+<style>
+/* ═══ tokens(正本=同目錄 tokens.css;此處內聯以便單檔打開)═══ */
+:root{
+  --font-sans: system-ui,-apple-system,"Segoe UI",Roboto,"PingFang TC","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif;
+  --font-mono: ui-monospace,"SF Mono","JetBrains Mono","IBM Plex Mono",Menlo,Consolas,monospace;
+  --font-serif: "Songti TC","Songti SC","Noto Serif TC","Noto Serif CJK SC","Source Han Serif TC",Georgia,serif;
+  --fs-micro:11px; --fs-dense:12px; --fs-base:13px; --fs-md:14px;
+  --fs-section:15px; --fs-title:20px; --fs-hero:27px; --fs-hero-lg:32px;
+  --lh-tight:1.15; --lh-snug:1.30; --lh-normal:1.45; --lh-cjk:1.60;
+  --ls-eyebrow:0.08em; --ls-silk:0.12em;
+  --weight-regular:400; --weight-medium:510; --weight-semi:600;
+  --num-features:"tnum" 1,"zero" 1;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px; --sp-6:32px;
+  --r-1:5px; --r-2:8px; --r-3:12px; --r-full:9999px; --r-seal:2px;
+  --row-h:34px; --cell-pad:8px 12px;
+  --dur-fast:120ms; --dur-base:200ms; --ease-out:cubic-bezier(.2,0,0,1); --dur-beam:500ms;
+  /* 帛晝(light,base) */
+  --bg-app:#F1EBE0; --bg-surface:#F8F4EB; --bg-raised:#FDFAF3;
+  --bg-hover:#EAE3D5; --bg-sunken:#E9E1D2;
+  --border-subtle:rgba(34,27,24,.13); --border-strong:rgba(34,27,24,.26);
+  --text-primary:#221B18; --text-secondary:#5C544B; --text-muted:#8A8073;
+  --accent:#7C6434; --accent-weak:rgba(124,100,52,.12);
+  --pos:#1E7F5C; --pos-bg:rgba(30,127,92,.11);
+  --neg:#C13A3A; --neg-bg:rgba(193,58,58,.10);
+  --warn:#9A6700; --warn-bg:rgba(154,103,0,.12);
+  --live:#D93036; --live-bg:rgba(217,48,54,.12);
+  --seal:#A63A26; --seal-bg:rgba(166,58,38,.08);
+  --focus:var(--accent);
+  --shadow-pop:0 12px 34px rgba(34,27,24,.16);
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg-app:#171114; --bg-surface:#1D1619; --bg-raised:#241B1F;
+    --bg-hover:#2A2025; --bg-sunken:#120D10;
+    --border-subtle:rgba(233,228,218,.10); --border-strong:rgba(233,228,218,.22);
+    --text-primary:#E9E4DA; --text-secondary:#A89F92; --text-muted:#877F72;
+    --accent:#B49B5F; --accent-weak:rgba(180,155,95,.13);
+    --pos:#3FB68B; --pos-bg:rgba(63,182,139,.13);
+    --neg:#E5484D; --neg-bg:rgba(229,72,77,.12);
+    --warn:#D98E1F; --warn-bg:rgba(217,142,31,.13);
+    --live:#FF5457; --live-bg:rgba(255,84,87,.14);
+    --seal:#B8442E; --seal-bg:rgba(184,68,46,.10);
+    --shadow-pop:0 16px 40px rgba(0,0,0,.55);
+  }
+}
+:root[data-theme="dark"]{
+  --bg-app:#171114; --bg-surface:#1D1619; --bg-raised:#241B1F;
+  --bg-hover:#2A2025; --bg-sunken:#120D10;
+  --border-subtle:rgba(233,228,218,.10); --border-strong:rgba(233,228,218,.22);
+  --text-primary:#E9E4DA; --text-secondary:#A89F92; --text-muted:#877F72;
+  --accent:#B49B5F; --accent-weak:rgba(180,155,95,.13);
+  --pos:#3FB68B; --pos-bg:rgba(63,182,139,.13);
+  --neg:#E5484D; --neg-bg:rgba(229,72,77,.12);
+  --warn:#D98E1F; --warn-bg:rgba(217,142,31,.13);
+  --live:#FF5457; --live-bg:rgba(255,84,87,.14);
+  --seal:#B8442E; --seal-bg:rgba(184,68,46,.10);
+  --shadow-pop:0 16px 40px rgba(0,0,0,.55);
+}
+:root[data-density="compact"]{ --row-h:27px; --cell-pad:4px 10px; --fs-base:12px; --fs-md:13px; }
+
+/* ═══ 基礎 ═══ */
+*{ box-sizing:border-box; }
+html,body{ height:100%; margin:0; }
+body{
+  background:var(--bg-app); color:var(--text-primary);
+  font-family:var(--font-sans); font-size:var(--fs-base); line-height:var(--lh-cjk);
+  display:flex; flex-direction:column;
+}
+.num{ font-family:var(--font-mono); font-variant-numeric:tabular-nums slashed-zero;
+      font-feature-settings:var(--num-features); font-variant-ligatures:none; text-align:right; }
+.inscription{ font-family:var(--font-serif); letter-spacing:.06em; }
+.silk{ font-family:var(--font-mono); font-size:var(--fs-micro); letter-spacing:var(--ls-silk);
+       text-transform:uppercase; color:var(--text-muted); }
+.seal-mark{ display:inline-flex; align-items:center; justify-content:center;
+            width:16px; height:16px; border:1px solid var(--seal); color:var(--seal);
+            background:var(--seal-bg); font-family:var(--font-serif); font-size:10px;
+            border-radius:var(--r-seal); flex:none; }
+:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
+@media (prefers-reduced-motion:reduce){ *{ transition:none!important; animation:none!important; } }
+button{ font:inherit; color:inherit; background:none; border:none; cursor:pointer; }
+
+/* ═══ 頂欄:品牌 + lane + 衡樑 + 狀態 + 切換 ═══ */
+.topbar{
+  display:flex; align-items:center; gap:var(--sp-4);
+  padding:0 var(--sp-4); height:52px; flex:none;
+  background:var(--bg-surface); border-bottom:1px solid var(--border-subtle);
+}
+.brand{ display:flex; flex-direction:column; line-height:var(--lh-tight); }
+.brand .zh{ font-family:var(--font-serif); font-size:17px; letter-spacing:.08em; }
+.brand .en{ font-family:var(--font-mono); font-size:9px; letter-spacing:.2em;
+            text-transform:uppercase; color:var(--text-muted); }
+.lane{ display:flex; border:1px solid var(--border-subtle); border-radius:var(--r-1); overflow:hidden; }
+.lane button{ padding:5px 12px; font-size:var(--fs-dense); color:var(--text-secondary); }
+.lane button[aria-pressed="true"]{ background:var(--accent-weak); color:var(--accent); font-weight:var(--weight-medium); }
+.lane button + button{ border-left:1px solid var(--border-subtle); }
+
+/* 衡樑(signature):青銅髮絲線秤樑,實時映射風控包絡;全站唯一環境動效 */
+.beam-wrap{ flex:1; min-width:140px; display:flex; flex-direction:column; align-items:center; gap:2px; }
+.beam{ position:relative; width:min(320px,100%); height:16px; }
+.beam .bar{
+  position:absolute; left:0; right:0; top:7px; height:1.5px; border-radius:1px;
+  background:var(--accent);
+  transform:rotate(var(--beam-angle,0deg)); transform-origin:center;
+  transition:transform var(--dur-beam) var(--ease-out), background var(--dur-base);
+}
+.beam.beam-warn .bar{ background:var(--warn); }
+.beam .bar::before,.beam .bar::after{
+  content:""; position:absolute; top:-3.5px; width:8px; height:8px;
+  border:1.5px solid currentColor; border-radius:50%; background:var(--bg-surface);
+}
+.beam .bar{ color:var(--accent); }
+.beam.beam-warn .bar{ color:var(--warn); }
+.beam .bar::before{ left:-2px; } .beam .bar::after{ right:-2px; }
+.beam .pivot{
+  position:absolute; left:50%; top:8px; transform:translateX(-50%);
+  width:0; height:0; border-left:5px solid transparent; border-right:5px solid transparent;
+  border-bottom:7px solid var(--accent);
+}
+.beam.beam-warn .pivot{ border-bottom-color:var(--warn); }
+.beam-lbl{ display:flex; justify-content:space-between; width:min(320px,100%);
+           font-family:var(--font-mono); font-size:10px; color:var(--text-muted); }
+.beam-lbl b{ color:var(--accent); font-weight:var(--weight-regular); }
+.beam-warn ~ .beam-lbl b{ color:var(--warn); }
+
+.topstat{ font-family:var(--font-mono); font-size:10.5px; color:var(--text-muted);
+          text-align:right; line-height:1.6; white-space:nowrap; }
+.topstat .ok{ color:var(--pos); }
+.toggles{ display:flex; gap:var(--sp-2); }
+.toggles button{
+  border:1px solid var(--border-subtle); border-radius:var(--r-1);
+  padding:4px 10px; font-size:var(--fs-dense); color:var(--text-secondary);
+  transition:border-color var(--dur-fast);
+}
+.toggles button:hover{ border-color:var(--accent); color:var(--text-primary); }
+
+/* ═══ 主體:rail + 內容 ═══ */
+.shell{ display:flex; flex:1; min-height:0; }
+.rail{
+  width:168px; flex:none; padding:var(--sp-4) var(--sp-3);
+  background:var(--bg-surface); border-right:1px solid var(--border-subtle);
+  overflow-y:auto;
+}
+.rail .grp{ margin-bottom:var(--sp-5); }
+.rail .grp-t{ margin-bottom:var(--sp-2); }
+.rail a{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:6px 10px; border-radius:var(--r-1); margin-bottom:1px;
+  color:var(--text-secondary); text-decoration:none; font-size:var(--fs-base);
+}
+.rail a:hover{ background:var(--bg-hover); color:var(--text-primary); }
+.rail a[aria-current="page"]{ background:var(--accent-weak); color:var(--accent); font-weight:var(--weight-medium); }
+.rail .env-badge{ font-family:var(--font-mono); font-size:9.5px; color:var(--text-muted); }
+
+.main{ flex:1; min-width:0; overflow-y:auto; padding:var(--sp-4) var(--sp-5) var(--sp-6); }
+.view{ max-width:1200px; margin:0 auto; }
+
+/* LiveDemo 模式帶(三態紀律:Mainnet 紫紅雙線 / LiveDemo 橙 / integrity-fail 灰) */
+.mode-band{
+  display:flex; align-items:center; gap:var(--sp-3);
+  border:1px solid var(--warn); background:var(--warn-bg);
+  border-radius:var(--r-2); padding:8px 14px; margin-bottom:var(--sp-4);
+  font-size:var(--fs-base);
+}
+.mode-band .tag{ font-family:var(--font-mono); font-size:var(--fs-micro);
+                 color:var(--warn); border:1px solid var(--warn);
+                 border-radius:var(--r-1); padding:1px 7px; white-space:nowrap; }
+
+/* 面板 */
+.panel{
+  background:var(--bg-surface); border:1px solid var(--border-subtle);
+  border-radius:var(--r-2); padding:var(--sp-4); margin-bottom:var(--sp-4);
+}
+.panel-t{
+  display:flex; align-items:baseline; gap:var(--sp-2); margin-bottom:var(--sp-3);
+}
+.panel-t .zh{ font-family:var(--font-serif); font-size:var(--fs-section); letter-spacing:.06em; }
+.panel-t .code{ font-family:var(--font-mono); font-size:9.5px; letter-spacing:var(--ls-silk);
+                text-transform:uppercase; color:var(--text-muted); }
+
+/* KPI 行:1 個 hero + 其餘 section 級 */
+.kpis{ display:grid; grid-template-columns:minmax(200px,1.4fr) repeat(3,1fr); gap:var(--sp-3); margin-bottom:var(--sp-4); }
+@media (max-width:860px){ .kpis{ grid-template-columns:1fr 1fr; } }
+.kpi{ background:var(--bg-surface); border:1px solid var(--border-subtle);
+      border-radius:var(--r-2); padding:var(--sp-3) var(--sp-4); }
+.kpi .v{ font-size:var(--fs-title); margin-top:2px; text-align:left; }
+.kpi.hero .v{ font-size:var(--fs-hero); letter-spacing:-0.02em; }
+.kpi .d{ font-size:var(--fs-dense); margin-top:2px; }
+.kpi .d.up{ color:var(--pos); } .kpi .d.down{ color:var(--neg); }
+.up{ color:var(--pos); } .down{ color:var(--neg); }
+
+/* 兩欄:持倉+成交 / 封驗+事件 */
+.cols{ display:grid; grid-template-columns:minmax(0,3fr) minmax(0,2fr); gap:var(--sp-4); align-items:start; }
+@media (max-width:960px){ .cols{ grid-template-columns:1fr; } }
+
+/* 表格 */
+.tbl{ width:100%; border-collapse:collapse; font-size:var(--fs-base); }
+.tbl th{
+  text-align:left; padding:var(--cell-pad); border-bottom:1px solid var(--border-strong);
+  color:var(--text-muted); font-weight:var(--weight-medium); font-size:var(--fs-micro);
+  font-family:var(--font-mono); letter-spacing:var(--ls-eyebrow); text-transform:uppercase;
+  white-space:nowrap;
+}
+.tbl td{ padding:var(--cell-pad); border-bottom:1px solid var(--border-subtle); height:var(--row-h); }
+.tbl tr:last-child td{ border-bottom:none; }
+.tbl tr:hover td{ background:var(--bg-hover); }
+.tbl .num{ white-space:nowrap; }
+.side{ font-family:var(--font-mono); font-size:var(--fs-micro); font-weight:var(--weight-semi); }
+.side.long{ color:var(--pos); } .side.short{ color:var(--neg); }
+/* 數據狀態(canon 7):stale 調暗+新鮮度徽章;unknown 用 —,永不假 0.00 */
+tr.stale td{ opacity:.5; }
+.fresh-badge{ font-family:var(--font-mono); font-size:9.5px; color:var(--warn);
+              border:1px solid var(--warn); border-radius:var(--r-1); padding:0 5px; margin-left:6px; }
+
+/* 封驗登記 */
+.reg{ display:flex; flex-direction:column; }
+.reg .row{
+  display:flex; align-items:center; gap:var(--sp-2);
+  padding:7px 2px; border-bottom:1px solid var(--border-subtle); font-size:var(--fs-base);
+}
+.reg .row:last-child{ border-bottom:none; }
+.reg .k{ flex:1; display:flex; align-items:center; gap:var(--sp-2); color:var(--text-secondary); }
+.reg .k code{ font-family:var(--font-mono); font-size:var(--fs-dense); color:var(--text-primary); }
+.reg .st{ font-family:var(--font-mono); font-size:var(--fs-micro); letter-spacing:.04em; }
+.st.pass{ color:var(--pos); } .st.sealed{ color:var(--seal); }
+.st.active{ color:var(--accent); } .st.armed{ color:var(--text-secondary); }
+
+/* 事件流(Warp block 式) */
+.logs{ display:flex; flex-direction:column; gap:var(--sp-2); }
+.logblock{
+  border:1px solid var(--border-subtle); border-radius:var(--r-1);
+  padding:6px 10px; font-family:var(--font-mono); font-size:var(--fs-dense);
+  color:var(--text-secondary); display:flex; gap:var(--sp-3); align-items:baseline;
+  background:var(--bg-raised);
+}
+.logblock .ts{ font-size:10px; color:var(--text-muted); flex:none; }
+.logblock .ok{ color:var(--pos); } .logblock .rej{ color:var(--warn); }
+
+/* 真金硬化區(canon 6):熱紅、物理隔離、typed-confirm */
+.danger-zone{
+  margin-top:var(--sp-5); border:1px solid var(--live); background:var(--live-bg);
+  border-radius:var(--r-2); padding:var(--sp-3) var(--sp-4);
+  display:flex; align-items:center; gap:var(--sp-4); flex-wrap:wrap;
+}
+.danger-zone .lbl{ font-weight:var(--weight-semi); color:var(--live); }
+.danger-zone .note{ font-size:var(--fs-dense); color:var(--text-secondary); flex:1; min-width:200px; }
+.btn-emergency{
+  border:2px solid var(--live); color:var(--live); border-radius:var(--r-2);
+  padding:8px 20px; font-size:var(--fs-md); font-weight:var(--weight-semi);
+  background:transparent; transition:background var(--dur-fast);
+}
+.btn-emergency:hover{ background:var(--live); color:var(--bg-surface); }
+
+/* 底部狀態帶 */
+.statusbar{
+  flex:none; display:flex; align-items:center; gap:var(--sp-5);
+  padding:0 var(--sp-4); height:30px;
+  background:var(--bg-sunken); border-top:1px solid var(--border-subtle);
+  font-family:var(--font-mono); font-size:10.5px; color:var(--text-muted);
+  overflow-x:auto; white-space:nowrap;
+}
+.statusbar .ok{ color:var(--pos); }
+.statusbar .cmdk{ margin-left:auto; }
+.statusbar kbd{ font-family:var(--font-mono); background:var(--bg-surface);
+                border:1px solid var(--border-subtle); border-radius:4px;
+                padding:0 5px; font-size:9.5px; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand"><span class="zh">玄衡</span><span class="en">Arcane Equilibrium</span></div>
+  <nav class="lane" aria-label="資產 lane">
+    <button aria-pressed="true">Crypto Perp · Bybit</button>
+    <button aria-pressed="false">Stock ETF · IBKR</button>
+  </nav>
+  <div class="beam-wrap" title="風控包絡:日虧損上限已用比例(衡樑=signature 元素)">
+    <div class="beam" id="beam"><div class="bar"></div><div class="pivot"></div></div>
+    <div class="beam-lbl"><span>包絡已用 <b id="beamUsed">31%</b></span><span>剩餘 <b id="beamLeft">69%</b></span></div>
+  </div>
+  <div class="topstat">engine <span class="ok">●</span> heartbeat 1.2s<br>lease TTL <span class="num">287s</span></div>
+  <div class="toggles">
+    <button id="themeBtn" title="切換 玄夜/帛晝">玄夜</button>
+    <button id="densityBtn" title="切換密度">舒適</button>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="rail" aria-label="主導航">
+    <div class="grp">
+      <div class="grp-t silk">Environment</div>
+      <a href="#">研究 <span class="env-badge">research</span></a>
+      <a href="#">回放 <span class="env-badge">replay</span></a>
+      <a href="#">Demo <span class="env-badge">demo</span></a>
+      <a href="#" aria-current="page">Live <span class="env-badge">live</span></a>
+    </div>
+    <div class="grp">
+      <div class="grp-t silk">Cross-cutting</div>
+      <a href="#">治理</a>
+      <a href="#">風控</a>
+      <a href="#">AI / 學習</a>
+      <a href="#">監控</a>
+      <a href="#">設置</a>
+    </div>
+  </nav>
+
+  <main class="main">
+    <div class="view">
+
+      <!-- 三態模式帶:此樣品展示 LiveDemo 態(橙);Mainnet=紫紅雙線+REAL FUNDS;engine≠live=灰 integrity-fail -->
+      <div class="mode-band">
+        <span class="tag">LiveDemo · api-demo</span>
+        <span>Live 級控制流 · demo endpoint · 授權/TTL/風控按 Live 標準,不因 endpoint 降級</span>
+      </div>
+
+      <div class="kpis">
+        <div class="kpi hero">
+          <div class="silk">今日淨收益 · Net PnL</div>
+          <div class="v num up">+64.98 <small style="font-size:13px">bps</small></div>
+          <div class="d up">▲ 對 7 日均值 +12.4</div>
+        </div>
+        <div class="kpi">
+          <div class="silk">成交 · Fills</div>
+          <div class="v num">5,058</div>
+          <div class="d up">▲ 312</div>
+        </div>
+        <div class="kpi">
+          <div class="silk">未實現 · Unrealized</div>
+          <div class="v num down">−18.42 <small style="font-size:12px">USDT</small></div>
+          <div class="d down">▼ 2 倉位</div>
+        </div>
+        <div class="kpi">
+          <div class="silk">包絡已用 · Envelope</div>
+          <div class="v num">31%</div>
+          <div class="d">日虧損上限 1,000 USDT</div>
+        </div>
+      </div>
+
+      <div class="cols">
+        <div>
+          <section class="panel">
+            <div class="panel-t"><span class="zh inscription">持倉</span><span class="code">POSITIONS · 3</span></div>
+            <div style="overflow-x:auto">
+              <table class="tbl">
+                <thead><tr>
+                  <th>合約</th><th>方向</th><th style="text-align:right">數量</th>
+                  <th style="text-align:right">開倉價</th><th style="text-align:right">標記價</th>
+                  <th style="text-align:right">未實現</th><th style="text-align:right">淨 bps</th>
+                </tr></thead>
+                <tbody>
+                  <tr>
+                    <td class="num" style="text-align:left">NEARUSDT</td>
+                    <td><span class="side long">▲ LONG</span></td>
+                    <td class="num">1,240</td><td class="num">7.1050</td><td class="num">7.4210</td>
+                    <td class="num up">+391.84</td><td class="num up">+44.48</td>
+                  </tr>
+                  <tr>
+                    <td class="num" style="text-align:left">BTCUSDT</td>
+                    <td><span class="side short">▼ SHORT</span></td>
+                    <td class="num">0.024000</td><td class="num">107,208.5</td><td class="num">108,412.5</td>
+                    <td class="num down">−28.90</td><td class="num down">−11.23</td>
+                  </tr>
+                  <tr class="stale">
+                    <td class="num" style="text-align:left">TONUSDT<span class="fresh-badge">12s 前</span></td>
+                    <td><span class="side long">▲ LONG</span></td>
+                    <td class="num">850</td><td class="num">6.9120</td><td class="num">—</td>
+                    <td class="num">—</td><td class="num">—</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-t"><span class="zh inscription">事件流</span><span class="code">EVENT LOG</span></div>
+            <div class="logs">
+              <div class="logblock"><span class="ts">14:02:11</span><span>engine.admit <span class="ok">PASS</span> ma_crossover NEARUSDT Buy · lease L-4471</span></div>
+              <div class="logblock"><span class="ts">14:02:09</span><span>cost_gate <span class="rej">REJECT</span> edge 1.8bps &lt; cost 2.0bps · grid BTCUSDT</span></div>
+              <div class="logblock"><span class="ts">14:01:55</span><span>lease.renew <span class="ok">OK</span> ttl=300s · Decision Lease L-4471</span></div>
+              <div class="logblock"><span class="ts">14:01:40</span><span>reconciler <span class="ok">OK</span> 幻影倉檢測 0 hit · 3 positions</span></div>
+            </div>
+          </section>
+
+          <!-- 真金硬化區:物理隔離於良性控件之外(canon 6) -->
+          <div class="danger-zone">
+            <span class="lbl">⚠ 緊急停止</span>
+            <span class="note">停止引擎並取消全部掛單。需鍵入 <code>STOP</code> 確認(typed-confirm);與平倉為兩個獨立能力。</span>
+            <button class="btn-emergency">緊急停止…</button>
+          </div>
+        </div>
+
+        <div>
+          <section class="panel">
+            <div class="panel-t"><span class="zh inscription">封驗</span><span class="code">GATE / SEAL REGISTRY</span></div>
+            <div class="reg">
+              <div class="row"><span class="k"><span class="seal-mark">封</span><code>PROOF-PACKET · WP1</code></span><span class="st sealed">SEALED</span></div>
+              <div class="row"><span class="k"><span class="seal-mark">封</span><code>HIDDEN-OOS · R7</code></span><span class="st sealed">SEALED</span></div>
+              <div class="row"><span class="k"><code>GATE-05 · COST</code></span><span class="st pass">PASS</span></div>
+              <div class="row"><span class="k"><code>GATE-02 · LEASE</code></span><span class="st active">ACTIVE · L-4471</span></div>
+              <div class="row"><span class="k"><code>GATE-01 · AUTH</code></span><span class="st pass">5/5 GATES</span></div>
+              <div class="row"><span class="k"><code>KILL-SWITCH</code></span><span class="st armed">ARMED</span></div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-t"><span class="zh inscription">風控包絡</span><span class="code">RISK ENVELOPE</span></div>
+            <div class="reg">
+              <div class="row"><span class="k">日虧損上限</span><span class="num">310.20 / 1,000.00</span></div>
+              <div class="row"><span class="k">單倉風險</span><span class="num">3% / trade</span></div>
+              <div class="row"><span class="k">符號上限</span><span class="num">18 / 25</span></div>
+              <div class="row"><span class="k">IBKR lane</span><span class="st armed">READ-ONLY · 待 Phase 2</span></div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<footer class="statusbar">
+  <span>engine <span class="ok">●</span> live_demo</span>
+  <span>WS 新鮮度 <span class="num">0.4s</span></span>
+  <span>PG <span class="ok">●</span></span>
+  <span>build aedca22</span>
+  <span class="cmdk">跳轉或執行 <kbd>⌘</kbd><kbd>K</kbd></span>
+</footer>
+
+<script>
+// ── 主題切換:顯式 data-theme 覆蓋 OS 偏好,兩方向皆勝 ──
+const themeBtn = document.getElementById('themeBtn');
+function currentDark(){
+  const t = document.documentElement.dataset.theme;
+  if (t === 'dark') return true;
+  if (t === 'light') return false;
+  return matchMedia('(prefers-color-scheme: dark)').matches;
+}
+function renderThemeBtn(){ themeBtn.textContent = currentDark() ? '玄夜' : '帛晝'; }
+themeBtn.addEventListener('click', () => {
+  document.documentElement.dataset.theme = currentDark() ? 'light' : 'dark';
+  renderThemeBtn();
+});
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', renderThemeBtn);
+renderThemeBtn();
+
+// ── 密度切換 ──
+const densityBtn = document.getElementById('densityBtn');
+densityBtn.addEventListener('click', () => {
+  const c = document.documentElement.dataset.density === 'compact';
+  if (c) delete document.documentElement.dataset.density;
+  else document.documentElement.dataset.density = 'compact';
+  densityBtn.textContent = c ? '舒適' : '緊湊';
+});
+
+// ── 衡樑:包絡已用比例 → 傾角(重端下沉;>80% 轉 warn 色)──
+// 樣品用假數據演示;真接線=訂閱風控包絡 WS,寫 scoped var(tokens.css 用法紀律)
+function setBeam(usedPct){
+  const beam = document.getElementById('beam');
+  const angle = ((100 - usedPct) - usedPct) / 100 * -6; // 50/50 水平,滿載 −6°(已用端沉)
+  beam.style.setProperty('--beam-angle', angle.toFixed(2) + 'deg');
+  beam.classList.toggle('beam-warn', usedPct >= 80);
+  document.getElementById('beamUsed').textContent = usedPct + '%';
+  document.getElementById('beamLeft').textContent = (100 - usedPct) + '%';
+}
+setBeam(31);
+</script>
+</body>
+</html>
