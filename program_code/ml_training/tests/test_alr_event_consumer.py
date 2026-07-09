@@ -17,6 +17,7 @@ from ml_training.alr_event_consumer import (
     runtime_file_lock,
     release_single_instance,
     parse_scanner_notification,
+    process_outcome_feedback_backlog,
     run_operational_backlog,
     wait_for_pg_notifications,
 )
@@ -274,6 +275,99 @@ def test_operational_backlog_is_bounded_and_deferred_without_training_authority(
 def test_operational_backlog_requires_a_pinned_source_head() -> None:
     with pytest.raises(AlrEventConsumerError, match="operational_source_head_invalid"):
         run_operational_backlog(object(), source_head="unknown", max_batch=32)
+
+
+def test_feedback_backlog_persists_absence_and_requests_rotation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rows = [
+        {
+            "run_hash": "a" * 64,
+            "candidate_artifact_hash": "b" * 64,
+            "candidate_artifact": {"candidate_scope": {}},
+        }
+    ]
+    monkeypatch.setattr(
+        consumer,
+        "fetch_unreviewed_outcome_runs",
+        lambda connection, *, limit: rows,
+    )
+    monkeypatch.setattr(
+        consumer,
+        "build_outcome_feedback",
+        lambda **kwargs: {"feedback": "absent-evidence"},
+    )
+    monkeypatch.setattr(
+        consumer,
+        "persist_outcome_feedback",
+        lambda connection, feedback: {
+            "status": "PERSISTED",
+            "feedback_status": "DEFER_EVIDENCE",
+            "rotate_next_target": True,
+            "global_stop": False,
+        },
+    )
+
+    result = process_outcome_feedback_backlog(object(), max_batch=8)
+
+    assert result == {
+        "feedback_persisted": 1,
+        "feedback_duplicates": 0,
+        "feedback_deferred": 1,
+        "feedback_rotations": 1,
+        "feedback_boundary_blocks": 0,
+    }
+
+
+def test_event_loop_processes_feedback_before_next_target_rotation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        consumer,
+        "drain_notified_backlog",
+        lambda connection, notifications, *, max_batch: {
+            "notifications_seen": len(notifications),
+            "rows_seen": 0,
+            "persisted": 0,
+            "duplicates": 0,
+        },
+    )
+    monkeypatch.setattr(
+        consumer,
+        "process_outcome_feedback_backlog",
+        lambda connection, *, max_batch: calls.append("feedback")
+        or {
+            "feedback_persisted": 1,
+            "feedback_duplicates": 0,
+            "feedback_deferred": 1,
+            "feedback_rotations": 1,
+            "feedback_boundary_blocks": 0,
+        },
+    )
+    monkeypatch.setattr(
+        consumer,
+        "run_operational_backlog",
+        lambda connection, *, source_head, max_batch: calls.append("target")
+        or {
+            "training_runs": 1,
+            "training_duplicates": 0,
+            "training_deferred": 0,
+            "training_insufficient_source_cycles": 0,
+        },
+    )
+
+    result = event_consumer_loop(
+        object(),
+        max_batch=8,
+        should_stop=lambda: True,
+        wait_for_notifications=lambda *args, **kwargs: [],
+        source_head="a" * 40,
+    )
+
+    assert calls == ["feedback", "target"]
+    assert result["feedback_rotations"] == 1
+    assert result["training_runs"] == 1
 
 
 def test_dsn_file_must_be_private_and_explicitly_local(tmp_path: Path) -> None:
