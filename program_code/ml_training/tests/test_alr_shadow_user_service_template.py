@@ -22,3 +22,5 @@ def test_user_service_template_is_listener_only_and_has_no_activation_action() -
     assert "enable " not in text
     assert "postgres://" not in text
     assert "password=" not in text
+    assert "ALR_RECONCILE_AFTER" not in text
+    assert "reconcile-after" not in text

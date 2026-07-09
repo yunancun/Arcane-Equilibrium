@@ -10,18 +10,25 @@ import select
 import shlex
 import signal
 import stat
+import subprocess
 import threading
+import time
 from contextlib import contextmanager
 from collections.abc import Iterable, Iterator, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ml_training.alr_persistence_repository import (
-    fetch_unseen_scanner_snapshots_after,
-    fetch_unseen_scanner_snapshots,
-    load_restart_state,
-    persist_scanner_cycle,
+from ml_training.alr_consumer_repository import (
+    fail_consumer_session,
+    new_session_id,
+    start_consumer_session,
+    stop_consumer_session,
+)
+from ml_training.alr_freshness_runtime import (
+    drain_fresh_lane,
+    drain_historical_lane,
+    drain_notified_identities,
 )
 from ml_training.alr_retention_repository import run_retention_pass
 from ml_training.alr_operational_repository import (
@@ -37,7 +44,6 @@ from ml_training.alr_outcome_feedback_repository import (
     fetch_unreviewed_outcome_runs,
     persist_outcome_feedback,
 )
-from ml_training.alr_scanner_snapshot_adapter import adapt_scanner_snapshot
 from ml_training.alr_scanner_statistical_experiment import (
     AlrScannerStatisticalExperimentError,
     build_scanner_statistical_experiment,
@@ -57,6 +63,16 @@ _LOCAL_DSN_REQUIRED = {
 _DSN_FORBIDDEN_KEYS = {"hostaddr", "service", "servicefile"}
 _SOURCE_HEAD_RE = re.compile(r"^[0-9a-f]{40}$")
 _RETENTION_GRACE_SECONDS = 900
+_ZERO_AUTHORITY_COUNTERS = {
+    "exchange_contact_count": 0,
+    "trading_action_count": 0,
+    "order_or_probe_count": 0,
+    "decision_lease_count": 0,
+    "cost_gate_change_count": 0,
+    "proof_claim_count": 0,
+    "serving_promotion_count": 0,
+    "latest_pointer_update_count": 0,
+}
 
 
 class AlrEventConsumerError(ValueError):
@@ -121,95 +137,17 @@ def drain_notified_backlog(
     notifications: Iterable[tuple[str, str]],
     *,
     max_batch: int,
+    session_id: str,
 ) -> dict[str, int]:
-    """Validate a notification burst and reconcile one bounded source backlog.
-
-    Notifications are wake-up hints only.  Scanner rows remain the sole source
-    of cycle content, so a missed or coalesced notification cannot create a
-    synthetic learning input.
-    """
-    if isinstance(max_batch, bool) or not isinstance(max_batch, int) or not 1 <= max_batch <= 256:
-        raise AlrEventConsumerError("backlog_batch_limit_invalid")
-
-    notification_count = 0
-    for notification in notifications:
-        if not isinstance(notification, tuple) or len(notification) != 2:
-            raise AlrEventConsumerError("notification_tuple_invalid")
-        channel, payload = notification
-        parse_scanner_notification(channel, payload)
-        notification_count += 1
-
-    rows = fetch_unseen_scanner_snapshots(connection, limit=max_batch)
-    return _persist_reconciled_rows(
+    """精確消費 notification identity；notification 不可推進 fresh cursor。"""
+    return drain_notified_identities(
         connection,
-        rows=rows,
-        notification_count=notification_count,
+        notifications,
+        max_batch=max_batch,
+        session_id=session_id,
+        parse_notification=parse_scanner_notification,
+        notification_error_type=AlrEventConsumerError,
     )
-
-
-def drain_scanner_reconciliation(
-    connection: Any,
-    *,
-    after_ts: str,
-    max_batch: int,
-) -> dict[str, int]:
-    """Persist a bounded, explicit post-cursor scanner reconciliation once.
-
-    This is intentionally not an idle poll or scheduler.  The cursor is supplied
-    only by a fresh deployment gate for a shadow soak, and the same durable
-    idempotency path handles every row that the scanner read-adapter returns.
-    """
-    if isinstance(max_batch, bool) or not isinstance(max_batch, int) or not 1 <= max_batch <= 256:
-        raise AlrEventConsumerError("backlog_batch_limit_invalid")
-    rows = fetch_unseen_scanner_snapshots_after(
-        connection,
-        after_ts=after_ts,
-        limit=max_batch,
-    )
-    return _persist_reconciled_rows(connection, rows=rows, notification_count=0)
-
-
-def _persist_reconciled_rows(
-    connection: Any,
-    *,
-    rows: list[Mapping[str, Any]],
-    notification_count: int,
-) -> dict[str, int]:
-    try:
-        restart_state = load_restart_state(connection)
-        processed_source_keys = set(restart_state["processed_source_keys"])
-        watermark = restart_state["watermark"]
-        persisted = 0
-        duplicates = 0
-        for row in rows:
-            cycle = adapt_scanner_snapshot(
-                row,
-                processed_source_keys=processed_source_keys,
-                watermark=watermark,
-            )
-            result = persist_scanner_cycle(connection, cycle)
-            status = result.get("status")
-            if status == "PERSISTED":
-                persisted += 1
-                processed_source_keys.add(cycle["source"]["source_key"])
-                watermark = cycle["next_watermark"]
-            elif status == "DUPLICATE":
-                duplicates += 1
-                processed_source_keys.add(cycle["source"]["source_key"])
-            else:
-                raise AlrEventConsumerError("persistence_status_invalid")
-        # A no-row read also opens a transaction under psycopg2. End it before
-        # waiting again so PostgreSQL can deliver the next LISTEN notification.
-        connection.commit()
-    except Exception:
-        connection.rollback()
-        raise
-    return {
-        "notifications_seen": notification_count,
-        "rows_seen": len(rows),
-        "persisted": persisted,
-        "duplicates": duplicates,
-    }
 
 
 @contextmanager
@@ -245,80 +183,89 @@ def event_consumer_loop(
     max_batch: int,
     should_stop: Any,
     wait_for_notifications: Any,
+    session_id: str,
     source_head: str | None = None,
-    reconcile_after: str | None = None,
+    notification_timeout_seconds: float = 5.0,
+    history_interval_seconds: float = 60.0,
+    monotonic_seconds: Any = time.monotonic,
 ) -> dict[str, int]:
-    """Reconcile once, then drain only validated PostgreSQL LISTEN wakes."""
+    """Fresh 優先 listener；idle reconciliation 後才允許小額 history lane。"""
     totals = {
         "drains": 0,
         "notifications_seen": 0,
+        "notifications_received": 0,
+        "notifications_consumed": 0,
+        "notifications_invalid": 0,
         "rows_seen": 0,
         "persisted": 0,
         "duplicates": 0,
     }
-
-    _accumulate(totals, drain_notified_backlog(connection, [], max_batch=max_batch))
-    if reconcile_after is not None:
-        _accumulate(
-            totals,
-            drain_scanner_reconciliation(
-                connection,
-                after_ts=reconcile_after,
-                max_batch=max_batch,
-            ),
-        )
+    fresh_result = drain_fresh_lane(
+        connection,
+        session_id=session_id,
+        max_batch=max_batch,
+    )
+    _accumulate(totals, fresh_result)
+    last_history_run = monotonic_seconds()
     if source_head is not None:
-        _accumulate_feedback(
+        _process_operational_cycle(
             totals,
-            process_outcome_feedback_backlog(connection, max_batch=max_batch),
-        )
-        _accumulate_operational(
-            totals,
-            run_operational_backlog(
-                connection,
-                source_head=source_head,
-                max_batch=max_batch,
-            ),
-        )
-        _accumulate_retention(
-            totals,
-            process_retention_backlog(connection, max_batch=max_batch),
-        )
-        _accumulate_health(
-            totals,
-            process_health_snapshot(connection, source_head=source_head),
+            connection=connection,
+            source_head=source_head,
+            max_batch=max_batch,
         )
     while not should_stop():
-        notifications = wait_for_notifications(connection, timeout_seconds=1.0)
+        notifications = wait_for_notifications(
+            connection,
+            timeout_seconds=notification_timeout_seconds,
+            max_batch=max_batch,
+        )
         if should_stop():
             break
-        if not notifications:
-            continue
-        _accumulate(
-            totals,
-            drain_notified_backlog(connection, notifications, max_batch=max_batch),
-        )
-        if source_head is not None:
-            _accumulate_feedback(
-                totals,
-                process_outcome_feedback_backlog(connection, max_batch=max_batch),
+        cycle_rows = 0
+        if notifications:
+            exact_result = drain_notified_backlog(
+                connection,
+                notifications,
+                max_batch=max_batch,
+                session_id=session_id,
             )
-            _accumulate_operational(
-                totals,
-                run_operational_backlog(
-                    connection,
+            _accumulate(totals, exact_result)
+            cycle_rows += exact_result["rows_seen"]
+        fresh_result = drain_fresh_lane(
+            connection,
+            session_id=session_id,
+            max_batch=max_batch,
+        )
+        _accumulate(totals, fresh_result)
+        cycle_rows += fresh_result["rows_seen"]
+        now = monotonic_seconds()
+        if (
+            not notifications
+            and fresh_result["rows_seen"] == 0
+            and now - last_history_run >= history_interval_seconds
+        ):
+            history_result = drain_historical_lane(
+                connection,
+                session_id=session_id,
+                max_batch=min(max_batch, 8),
+            )
+            _accumulate(totals, history_result)
+            cycle_rows += history_result["rows_seen"]
+            last_history_run = now
+        if source_head is not None:
+            if cycle_rows:
+                _process_operational_cycle(
+                    totals,
+                    connection=connection,
                     source_head=source_head,
                     max_batch=max_batch,
-                ),
-            )
-            _accumulate_retention(
-                totals,
-                process_retention_backlog(connection, max_batch=max_batch),
-            )
-            _accumulate_health(
-                totals,
-                process_health_snapshot(connection, source_head=source_head),
-            )
+                )
+            else:
+                _accumulate_health(
+                    totals,
+                    process_health_snapshot(connection, source_head=source_head),
+                )
     return totals
 
 
@@ -393,15 +340,25 @@ def process_retention_backlog(connection: Any, *, max_batch: int) -> dict[str, i
 def process_health_snapshot(connection: Any, *, source_head: str) -> dict[str, int]:
     """Persist one local ALR health snapshot after a bounded listener cycle."""
     snapshot = collect_health_snapshot(connection, source_head=source_head)
+    counters = snapshot.get("authority_counters")
+    required_counters = {
+        "run_authority_mismatch_count",
+        "feedback_authority_mismatch_count",
+        *_ZERO_AUTHORITY_COUNTERS,
+    }
+    if (
+        not isinstance(counters, Mapping)
+        or set(counters) != required_counters
+        or any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in counters.values()
+        )
+        or any(counters[key] != 0 for key in _ZERO_AUTHORITY_COUNTERS)
+    ):
+        raise AlrEventConsumerError("health_authority_counters_invalid")
     persisted = persist_health_snapshot(connection, snapshot)
     if persisted.get("status") != "PERSISTED":
         raise AlrEventConsumerError("health_persistence_status_invalid")
-    counters = snapshot.get("authority_counters")
-    if not isinstance(counters, Mapping) or any(
-        isinstance(value, bool) or not isinstance(value, int) or value < 0
-        for value in counters.values()
-    ):
-        raise AlrEventConsumerError("health_authority_counters_invalid")
     return {
         "health_snapshots": 1,
         "health_authority_mismatches": int(
@@ -476,8 +433,9 @@ def wait_for_pg_notifications(
     connection: Any,
     *,
     timeout_seconds: float,
+    max_batch: int,
 ) -> list[tuple[str, str]]:
-    """Wait for a PostgreSQL socket event; an idle timeout never drains work."""
+    """先 bounded drain client queue；socket poll 新事件後仍保留超額 remainder。"""
     if (
         isinstance(timeout_seconds, bool)
         or not isinstance(timeout_seconds, (int, float))
@@ -485,12 +443,15 @@ def wait_for_pg_notifications(
         or timeout_seconds > 60
     ):
         raise AlrEventConsumerError("notification_wait_timeout_invalid")
-    ready, _, _ = select.select([connection], [], [], timeout_seconds)
-    if not ready:
-        return []
-    connection.poll()
-    notifications = list(connection.notifies)
-    connection.notifies.clear()
+    if isinstance(max_batch, bool) or not isinstance(max_batch, int) or not 1 <= max_batch <= 256:
+        raise AlrEventConsumerError("notification_batch_limit_invalid")
+    if not connection.notifies:
+        ready, _, _ = select.select([connection], [], [], timeout_seconds)
+        if not ready:
+            return []
+        connection.poll()
+    notifications = list(connection.notifies[:max_batch])
+    del connection.notifies[: len(notifications)]
     pairs: list[tuple[str, str]] = []
     for notification in notifications:
         channel = getattr(notification, "channel", None)
@@ -506,35 +467,86 @@ def run_event_consumer(
     dsn_path: Path,
     lock_path: Path,
     max_batch: int,
-    source_head: str | None = None,
-    reconcile_after: str | None = None,
+    source_head: str,
+    repo_root: Path | None = None,
 ) -> dict[str, int]:
-    """Run the Linux shadow consumer until SIGTERM/SIGINT requests shutdown."""
+    """驗證 checkout pin 後執行 shadow consumer，並持久化真實 lifecycle。"""
+    verify_runtime_source_head(source_head, repo_root=repo_root)
     dsn = read_local_dsn_file(dsn_path)
     stop_event = threading.Event()
     previous_handlers = _install_shutdown_handlers(stop_event)
     connection: Any | None = None
     db_lock_acquired = False
+    session_id: str | None = None
+    session_started = False
     try:
         with runtime_file_lock(lock_path):
             connection = _connect_listener(dsn)
             db_lock_acquired = acquire_single_instance(connection)
             if not db_lock_acquired:
                 raise AlrEventConsumerError("single_instance_lock_busy")
-            return event_consumer_loop(
-                connection,
-                max_batch=max_batch,
-                should_stop=stop_event.is_set,
-                wait_for_notifications=wait_for_pg_notifications,
-                source_head=source_head,
-                reconcile_after=reconcile_after,
-            )
+            session_id = new_session_id()
+            start_consumer_session(connection, session_id=session_id)
+            session_started = True
+            try:
+                result = event_consumer_loop(
+                    connection,
+                    max_batch=max_batch,
+                    should_stop=stop_event.is_set,
+                    wait_for_notifications=wait_for_pg_notifications,
+                    session_id=session_id,
+                    source_head=source_head,
+                )
+                stop_consumer_session(connection, session_id=session_id)
+                session_started = False
+                return result
+            except Exception as exc:
+                connection.rollback()
+                if session_started:
+                    try:
+                        fail_consumer_session(
+                            connection,
+                            session_id=session_id,
+                            error_code=type(exc).__name__,
+                        )
+                        session_started = False
+                    except Exception:
+                        connection.rollback()
+                raise
     finally:
         if connection is not None:
             if db_lock_acquired:
                 release_single_instance(connection)
             connection.close()
         _restore_shutdown_handlers(previous_handlers)
+
+
+def verify_runtime_source_head(
+    source_head: str,
+    *,
+    repo_root: Path | None = None,
+) -> str:
+    """在任何 DB 讀寫前 fail-closed 比對 pinned head 與 checkout HEAD。"""
+    if not isinstance(source_head, str) or not _SOURCE_HEAD_RE.fullmatch(source_head):
+        raise AlrEventConsumerError("source_head_required")
+    root = repo_root or Path(__file__).resolve().parents[2]
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=root,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise AlrEventConsumerError("source_head_verification_unavailable") from exc
+    actual = completed.stdout.strip()
+    if completed.returncode != 0 or not _SOURCE_HEAD_RE.fullmatch(actual):
+        raise AlrEventConsumerError("source_head_verification_unavailable")
+    if actual != source_head:
+        raise AlrEventConsumerError("source_head_mismatch")
+    return actual
 
 
 def _connect_listener(dsn: str) -> Any:
@@ -597,18 +609,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--lock-file", required=True, type=Path)
     parser.add_argument("--max-batch", type=int, default=32)
     parser.add_argument("--source-head", default=os.environ.get("ALR_SOURCE_HEAD"))
-    parser.add_argument(
-        "--reconcile-after",
-        default=os.environ.get("ALR_RECONCILE_AFTER"),
-        help="fresh-gated UTC cursor for one bounded shadow-soak reconciliation",
-    )
     arguments = parser.parse_args(argv)
     result = run_event_consumer(
         dsn_path=arguments.dsn_file,
         lock_path=arguments.lock_file,
         max_batch=arguments.max_batch,
         source_head=arguments.source_head,
-        reconcile_after=arguments.reconcile_after,
     )
     print(
         json.dumps(
@@ -618,10 +624,15 @@ def main(argv: list[str] | None = None) -> int:
                 "authority": {
                     "exchange_authority": False,
                     "trading_authority": False,
+                    "order_or_probe_authority": False,
+                    "decision_lease_authority": False,
+                    "cost_gate_authority": False,
                     "proof_authority": False,
                     "serving_authority": False,
                     "promotion_authority": False,
+                    "latest_authority": False,
                 },
+                "authority_counters": dict(_ZERO_AUTHORITY_COUNTERS),
             },
             sort_keys=True,
         )
@@ -629,8 +640,46 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _process_operational_cycle(
+    totals: dict[str, int],
+    *,
+    connection: Any,
+    source_head: str,
+    max_batch: int,
+) -> None:
+    """Fresh/history drain 後依既有順序執行 bounded research-only 工作。"""
+    _accumulate_feedback(
+        totals,
+        process_outcome_feedback_backlog(connection, max_batch=max_batch),
+    )
+    _accumulate_operational(
+        totals,
+        run_operational_backlog(
+            connection,
+            source_head=source_head,
+            max_batch=max_batch,
+        ),
+    )
+    _accumulate_retention(
+        totals,
+        process_retention_backlog(connection, max_batch=max_batch),
+    )
+    _accumulate_health(
+        totals,
+        process_health_snapshot(connection, source_head=source_head),
+    )
+
+
 def _accumulate(totals: dict[str, int], result: Mapping[str, int]) -> None:
-    required = {"notifications_seen", "rows_seen", "persisted", "duplicates"}
+    required = {
+        "notifications_seen",
+        "notifications_received",
+        "notifications_consumed",
+        "notifications_invalid",
+        "rows_seen",
+        "persisted",
+        "duplicates",
+    }
     if set(result) != required or any(
         isinstance(result[key], bool) or not isinstance(result[key], int) or result[key] < 0
         for key in required
