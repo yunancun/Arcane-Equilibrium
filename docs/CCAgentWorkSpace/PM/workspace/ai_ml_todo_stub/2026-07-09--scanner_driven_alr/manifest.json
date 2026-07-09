@@ -5,7 +5,7 @@
   "status": "ACTIVE_STUB",
   "maturity_label": "ALR_P0_SOURCE_ONLY_TARGET_INTAKE",
   "boundary_label": "SOURCE_ONLY_OFFLINE_P0_P1",
-  "repo_head_observed": "d077949fc1ec1a39b6121566f8a2333f87fee27c",
+  "repo_head_observed": "a923893ef04629ed50f41352285c7347327e9195",
   "authority": {
     "root_todo_authority": false,
     "requires_pm_import_to_root_todo": true,
@@ -64,5 +64,5 @@
       "root TODO.md import"
     ]
   },
-  "current_entry_item": "P0-AIML-ALR-BOUNDARY-PACKET"
+  "current_entry_item": "P0-AIML-ALR-CONTROLLER-CONTRACTS"
 }

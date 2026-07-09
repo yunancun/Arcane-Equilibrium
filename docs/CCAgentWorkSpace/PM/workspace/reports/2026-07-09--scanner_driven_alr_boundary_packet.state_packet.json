@@ -1,0 +1,65 @@
+{
+  "schema": "alr_loop_state_packet_v1",
+  "created_at": "2026-07-09T00:16:11Z",
+  "repo_head_before": "a923893ef04629ed50f41352285c7347327e9195",
+  "repo_head_after": "a923893ef04629ed50f41352285c7347327e9195",
+  "selected_work_item": "P0-AIML-ALR-BOUNDARY-PACKET",
+  "selection_reason": "First ACTIVE row in queue.md and no prior ALR state packet existed.",
+  "state": "ADVANCED_WITH_CONCERNS",
+  "next_state": "P0-AIML-ALR-CONTROLLER-CONTRACTS_ACTIVE",
+  "next_action": "Continue with P0-AIML-ALR-CONTROLLER-CONTRACTS through PM -> PA -> E1/E1a -> E2 -> E4 -> QA -> PM, implementing source-only controller contracts and tests under SOURCE_ONLY_OFFLINE_P0_P1.",
+  "stop_reason": null,
+  "owned_files": [
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/boundary_packet.md",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/queue.md",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/manifest.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_boundary_packet.work_item.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_boundary_packet.effect_review.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_boundary_packet.state_packet.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_boundary_packet.md",
+    "docs/CCAgentWorkSpace/Operator/2026-07-09--scanner_driven_alr_boundary_packet.md"
+  ],
+  "verification_commands": [
+    "python3 -m json.tool docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/manifest.json",
+    "python3 -m json.tool docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_boundary_packet.work_item.json",
+    "python3 -m json.tool docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_boundary_packet.effect_review.json",
+    "python3 -m json.tool docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_boundary_packet.state_packet.json",
+    "rg -n \"SOURCE_ONLY_OFFLINE_P0_P1|ADR-0035|scanner|Proof Taxonomy|root TODO|BLOCKED_BOUNDARY|STOP_DISPATCH_BLOCKED|DEFER_EVIDENCE|NOT_APPLIED\" docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/boundary_packet.md",
+    "git diff --check -- docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_boundary_packet.work_item.json docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_boundary_packet.effect_review.json docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_boundary_packet.state_packet.json docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_boundary_packet.md docs/CCAgentWorkSpace/Operator/2026-07-09--scanner_driven_alr_boundary_packet.md",
+    "git diff --name-only -- docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_boundary_packet.work_item.json docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_boundary_packet.effect_review.json docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_boundary_packet.state_packet.json docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_boundary_packet.md docs/CCAgentWorkSpace/Operator/2026-07-09--scanner_driven_alr_boundary_packet.md"
+  ],
+  "candidate_matched_fills_count": 0,
+  "proof_packet_ready_count": 0,
+  "reward_ledger_ready_count": 0,
+  "effect_review_ready": true,
+  "model_training_performed": false,
+  "serving_authority_granted": false,
+  "llm_authority": false,
+  "runtime_authority": false,
+  "exchange_authority": false,
+  "trading_authority": false,
+  "boundary_escalation_required": false,
+  "dispatch_tooling_available": true,
+  "dispatch_blocker": null,
+  "role_chain": [
+    {
+      "role": "CC(default)",
+      "status": "DONE",
+      "verdict": "PASS"
+    },
+    {
+      "role": "FA(default)",
+      "status": "DONE_WITH_CONCERNS",
+      "verdict": "functionally_ready_docs_only"
+    },
+    {
+      "role": "PA(default)",
+      "status": "DONE_WITH_CONCERNS",
+      "verdict": "PASS_WITH_CONCERNS"
+    }
+  ],
+  "concerns": [
+    "ADR/AMD proposal text is intentionally NOT_APPLIED and must not be consumed as accepted governance.",
+    "Controller contracts remain source-only and still require the implementation role chain."
+  ]
+}

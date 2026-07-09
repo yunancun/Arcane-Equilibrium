@@ -1,0 +1,58 @@
+{
+  "schema": "alr_effect_review_v1",
+  "created_at": "2026-07-09T00:16:11Z",
+  "work_item_id": "P0-AIML-ALR-BOUNDARY-PACKET",
+  "effect_summary": "Boundary packet emitted for the scanner-driven ALR stub. It validates SOURCE_ONLY_OFFLINE_P0_P1 as docs/state/report integration only and marks ADR/AMD proposal text as NOT_APPLIED.",
+  "files_changed": [
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/boundary_packet.md",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/queue.md",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/manifest.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_boundary_packet.work_item.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_boundary_packet.effect_review.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_boundary_packet.state_packet.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_boundary_packet.md",
+    "docs/CCAgentWorkSpace/Operator/2026-07-09--scanner_driven_alr_boundary_packet.md"
+  ],
+  "boundary_checks": {
+    "boundary_label_present": true,
+    "not_applied_markers_present": true,
+    "scanner_evidence_only_pinned": true,
+    "adr_0035_separation_pinned": true,
+    "source_only_denials_pinned": true,
+    "proof_taxonomy_pinned": true,
+    "root_todo_location_decision_pinned": true,
+    "stop_states_pinned": true,
+    "doc_quotes_forbidden_terms_only": true,
+    "no_executable_source_changed": true
+  },
+  "authority_flags": {
+    "root_todo_imported": false,
+    "adr_amd_applied": false,
+    "runtime_effects": false,
+    "pg_effects": false,
+    "ipc_effects": false,
+    "exchange_effects": false,
+    "official_mcp_effects": false,
+    "decision_lease_effects": false,
+    "order_or_probe_effects": false,
+    "cost_gate_effects": false,
+    "latest_overwrite": false,
+    "serving_authority_granted": false,
+    "proof_or_promotion_authority_granted": false,
+    "delete_or_apply_performed": false,
+    "scheduler_or_daemon_created": false,
+    "live_or_mainnet_authority_granted": false
+  },
+  "proof_taxonomy_validated": true,
+  "root_todo_imported": false,
+  "adr_amd_applied": false,
+  "runtime_effects": false,
+  "candidate_matched_fills_count": 0,
+  "proof_packet_ready_count": 0,
+  "reward_ledger_ready_count": 0,
+  "concerns": [
+    "State is ADVANCED_WITH_CONCERNS because ADR/AMD proposal text must remain visibly NOT_APPLIED and must not be mistaken for accepted governance.",
+    "This packet unblocks only source-only controller contract work; runtime, exchange-facing, proof/promotion, delete/apply, root TODO, ADR/AMD mainline, and migration work remain denied."
+  ],
+  "verdict": "EFFECTIVE_BOUNDARY_VALIDATED_WITH_CONCERNS"
+}
