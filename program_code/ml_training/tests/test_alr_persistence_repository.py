@@ -9,8 +9,9 @@ from ml_training.alr_persistence_repository import (
     AlrPersistenceConflict,
     AlrPersistenceError,
     build_persistence_plan,
+    fetch_persisted_scanner_identity,
+    fetch_scanner_snapshot_by_identity,
     fetch_unseen_scanner_snapshots,
-    fetch_unseen_scanner_snapshots_after,
     load_restart_state,
     persist_scanner_cycle,
 )
@@ -87,7 +88,17 @@ class _LedgerCursor:
 
     def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> None:
         self.connection.calls.append((sql, params))
-        if "SELECT source_hash" in sql:
+        if "SELECT source_key, source_hash" in sql:
+            self.columns = ("source_key", "source_hash")
+            assert params is not None
+            matching = [
+                (source_key, source["source_hash"])
+                for source_key, source in self.connection.source_events.items()
+                if source["source_scan_id"] == params[1]
+                and source["source_ts"] == params[2]
+            ]
+            self.row = None if not matching else matching[0]
+        elif "SELECT source_hash" in sql:
             self.columns = ("source_hash",)
             source_key = str(params[1])
             source = self.connection.source_events.get(source_key)
@@ -97,7 +108,13 @@ class _LedgerCursor:
             else:
                 self.row = None if source is None else (source["source_hash"],)
         elif "FROM trading.scanner_snapshots AS scanner" in sql:
-            self.row = self.connection.unseen_rows
+            self.row = (
+                self.connection.unseen_rows[0]
+                if "TIMESTAMPTZ 'epoch'" in sql and self.connection.unseen_rows
+                else None
+                if "TIMESTAMPTZ 'epoch'" in sql
+                else self.connection.unseen_rows
+            )
         elif "INSERT INTO learning.alr_source_events" in sql:
             source_key = str(params[1])
             if source_key not in self.connection.source_events:
@@ -184,6 +201,22 @@ def test_persists_duplicate_and_restart_state_without_mutation() -> None:
     )
 
 
+def test_reads_existing_source_identity_for_hash_bound_traversal() -> None:
+    connection = _LedgerConnection()
+    persist_scanner_cycle(connection, _cycle())
+
+    existing = fetch_persisted_scanner_identity(
+        connection,
+        scan_id="scan-1783598400000",
+        source_ts="2026-07-09T12:00:00Z",
+    )
+
+    assert existing == {
+        "source_key": "scan-1783598400000|2026-07-09T12:00:00Z",
+        "source_hash": _cycle()["source_hash"],
+    }
+
+
 def test_rejects_same_source_key_with_different_hash_and_rolls_back() -> None:
     connection = _LedgerConnection()
     persist_scanner_cycle(connection, _cycle())
@@ -242,35 +275,27 @@ def test_reads_only_unseen_scanner_snapshots_with_a_bounded_query() -> None:
     assert "DELETE" not in sql.upper()
 
 
-def test_reads_only_unseen_scanner_rows_after_a_valid_utc_cursor() -> None:
+def test_reads_exact_notification_identity_without_float_timestamp_conversion() -> None:
     connection = _LedgerConnection()
-    connection.unseen_rows = [{"scan_id": "scan-3", "ts": "2026-07-09T12:02:00Z"}]
+    connection.unseen_rows = [
+        {"scan_id": "scan-1783598400000", "ts": "2026-07-09T12:00:00Z"}
+    ]
 
-    rows = fetch_unseen_scanner_snapshots_after(
+    row = fetch_scanner_snapshot_by_identity(
         connection,
-        after_ts="2026-07-09T12:01:00Z",
-        limit=3,
+        scan_id="scan-1783598400000",
+        ts_ms=1783598400000,
     )
 
-    assert rows == connection.unseen_rows
-    scanner_calls = [call for call in connection.calls if "trading.scanner_snapshots" in call[0]]
-    assert len(scanner_calls) == 1
-    sql, params = scanner_calls[0]
-    assert "scanner.ts > %s" in sql
-    assert "NOT EXISTS" in sql
-    assert params == ("2026-07-09T12:01:00.000000+00:00", "trading.scanner_snapshots", 3)
-    assert "UPDATE" not in sql.upper()
-    assert "DELETE" not in sql.upper()
-
-
-@pytest.mark.parametrize("after_ts", ["", "2026-07-09T12:01:00", "not-a-timestamp"])
-def test_rejects_an_ambiguous_or_invalid_reconciliation_cursor(after_ts: str) -> None:
-    with pytest.raises(AlrPersistenceError, match="scanner_fetch_after_timestamp_invalid"):
-        fetch_unseen_scanner_snapshots_after(
-            _LedgerConnection(),
-            after_ts=after_ts,
-            limit=3,
-        )
+    assert row == connection.unseen_rows[0]
+    sql, params = next(
+        call for call in connection.calls if "trading.scanner_snapshots" in call[0]
+    )
+    assert "TIMESTAMPTZ 'epoch'" in sql
+    assert "%s::bigint * INTERVAL '1 millisecond'" in sql
+    assert "to_timestamp" not in sql
+    assert params == ("scan-1783598400000", 1783598400000)
+    assert all(token not in sql.upper() for token in ("INSERT ", "UPDATE ", "DELETE "))
 
 
 def test_repository_keeps_alr_shadow_reads_select_only() -> None:

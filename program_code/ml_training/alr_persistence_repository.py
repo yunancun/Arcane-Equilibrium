@@ -6,7 +6,6 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping
-from datetime import datetime, timezone
 from typing import Any
 
 
@@ -172,41 +171,59 @@ def fetch_unseen_scanner_snapshots(connection: Any, *, limit: int) -> list[dict[
     return [dict(row) for row in rows]
 
 
-def fetch_unseen_scanner_snapshots_after(
+def fetch_scanner_snapshot_by_identity(
     connection: Any,
     *,
-    after_ts: str,
-    limit: int,
-) -> list[dict[str, Any]]:
-    """Read bounded unseen scanner rows strictly after an explicit UTC cursor.
-
-    This exists for a manually-gated shadow-soak reconciliation when a large
-    historical scanner backlog would otherwise hide newly observed Rust cycles.
-    It is still a SELECT-only read of the authoritative scanner table; callers
-    persist any accepted rows through the normal append-only ledger path.
-    """
-    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 256:
-        raise AlrPersistenceError("scanner_fetch_limit_invalid")
-    normalized_after_ts = _normalize_utc_timestamp(after_ts)
+    scan_id: str,
+    ts_ms: int,
+) -> dict[str, Any] | None:
+    """Read the scanner row named by one validated notification identity."""
+    if not isinstance(scan_id, str) or not scan_id.strip():
+        raise AlrPersistenceError("scanner_identity_scan_id_invalid")
+    if isinstance(ts_ms, bool) or not isinstance(ts_ms, int) or ts_ms < 0:
+        raise AlrPersistenceError("scanner_identity_ts_ms_invalid")
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT scanner.ts, scanner.scan_id, scanner.active_symbols, scanner.added, "
             "scanner.removed, scanner.rejected_count, scanner.scan_duration_ms, "
             "scanner.candidates, scanner.config "
             "FROM trading.scanner_snapshots AS scanner "
-            "WHERE scanner.ts > %s AND NOT EXISTS ("
-            "SELECT 1 FROM learning.alr_source_events AS alr "
-            "WHERE alr.source_table = %s AND alr.source_scan_id = scanner.scan_id "
-            "AND alr.source_ts = scanner.ts"
-            ") ORDER BY scanner.ts ASC, scanner.scan_id ASC LIMIT %s",
-            (normalized_after_ts, SOURCE_TABLE, limit),
+            "WHERE scanner.scan_id = %s AND scanner.ts = "
+            "TIMESTAMPTZ 'epoch' + (%s::bigint * INTERVAL '1 millisecond')",
+            (scan_id, ts_ms),
         )
-        rows = cursor.fetchall()
-    if not isinstance(rows, list):
-        raise AlrPersistenceError("scanner_fetch_rows_not_list")
-    if not all(isinstance(row, Mapping) for row in rows):
-        raise AlrPersistenceError("scanner_fetch_row_not_mapping")
-    return [dict(row) for row in rows]
+        row = cursor.fetchone()
+    if row is None:
+        return None
+    if not isinstance(row, Mapping):
+        raise AlrPersistenceError("scanner_identity_row_not_mapping")
+    return dict(row)
+
+
+def fetch_persisted_scanner_identity(
+    connection: Any,
+    *,
+    scan_id: str,
+    source_ts: Any,
+) -> dict[str, str] | None:
+    """讀取既有 ALR source identity，供 traversal 做 hash-bound 驗證。"""
+    if not isinstance(scan_id, str) or not scan_id.strip():
+        raise AlrPersistenceError("persisted_identity_scan_id_invalid")
+    if source_ts is None:
+        raise AlrPersistenceError("persisted_identity_source_ts_invalid")
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT source_key, source_hash FROM learning.alr_source_events "
+            "WHERE source_table = %s AND source_scan_id = %s AND source_ts = %s",
+            (SOURCE_TABLE, scan_id, source_ts),
+        )
+        row = cursor.fetchone()
+    if row is None:
+        return None
+    return {
+        "source_key": str(_row_value(row, 0, "source_key")),
+        "source_hash": str(_row_value(row, 1, "source_hash")),
+    }
 
 
 def load_restart_state(connection: Any) -> dict[str, Any]:
@@ -240,21 +257,6 @@ def load_restart_state(connection: Any) -> dict[str, Any]:
             }
         ),
     }
-
-
-def _normalize_utc_timestamp(value: Any) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise AlrPersistenceError("scanner_fetch_after_timestamp_invalid")
-    candidate = value.strip()
-    if candidate.endswith("Z"):
-        candidate = f"{candidate[:-1]}+00:00"
-    try:
-        parsed = datetime.fromisoformat(candidate)
-    except ValueError as exc:
-        raise AlrPersistenceError("scanner_fetch_after_timestamp_invalid") from exc
-    if parsed.tzinfo is None:
-        raise AlrPersistenceError("scanner_fetch_after_timestamp_invalid")
-    return parsed.astimezone(timezone.utc).isoformat(timespec="microseconds")
 
 
 def _duplicate_plan(plan: Mapping[str, Any]) -> dict[str, Any]:

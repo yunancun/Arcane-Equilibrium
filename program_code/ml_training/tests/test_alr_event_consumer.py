@@ -7,12 +7,12 @@ from types import SimpleNamespace
 import pytest
 
 from ml_training import alr_event_consumer as consumer
+from ml_training import alr_freshness_runtime as freshness
 from ml_training.alr_event_consumer import (
     ALR_SCANNER_NOTIFY_CHANNEL,
     AlrEventConsumerError,
     acquire_single_instance,
     drain_notified_backlog,
-    drain_scanner_reconciliation,
     event_consumer_loop,
     read_local_dsn_file,
     runtime_file_lock,
@@ -22,6 +22,7 @@ from ml_training.alr_event_consumer import (
     process_outcome_feedback_backlog,
     process_retention_backlog,
     run_operational_backlog,
+    verify_runtime_source_head,
     wait_for_pg_notifications,
 )
 
@@ -34,6 +35,20 @@ def _notification_payload(**overrides: object) -> str:
     }
     payload.update(overrides)
     return json.dumps(payload, sort_keys=True)
+
+
+def _drain_result(**overrides: int) -> dict[str, int]:
+    result = {
+        "notifications_seen": 0,
+        "notifications_received": 0,
+        "notifications_consumed": 0,
+        "notifications_invalid": 0,
+        "rows_seen": 0,
+        "persisted": 0,
+        "duplicates": 0,
+    }
+    result.update(overrides)
+    return result
 
 
 def test_accepts_only_identity_bound_scanner_notification() -> None:
@@ -86,83 +101,126 @@ class _DrainConnection:
 
 
 def test_coalesces_notification_burst_into_one_bounded_drain(monkeypatch: pytest.MonkeyPatch) -> None:
-    fetched_limits: list[int] = []
     persisted: list[str] = []
-
+    monkeypatch.setattr(freshness, "record_consumer_event", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        consumer,
+        freshness,
+        "fetch_persisted_scanner_identity",
+        lambda connection, *, scan_id, source_ts: None,
+    )
+    monkeypatch.setattr(
+        freshness,
         "load_restart_state",
         lambda connection: {"processed_source_keys": set(), "watermark": None},
     )
-
-    def fetch(connection: object, *, limit: int) -> list[dict[str, object]]:
-        fetched_limits.append(limit)
-        return [
-            _scanner_row("scan-1", "2026-07-09T12:00:00Z"),
-            _scanner_row("scan-2", "2026-07-09T12:01:00Z"),
-        ]
-
-    monkeypatch.setattr(consumer, "fetch_unseen_scanner_snapshots", fetch)
+    monkeypatch.setattr(
+        freshness,
+        "fetch_scanner_snapshot_by_identity",
+        lambda connection, *, scan_id, ts_ms: _scanner_row(
+            scan_id,
+            "2026-07-09T12:00:00Z",
+        ),
+    )
 
     def persist(connection: object, cycle: dict[str, object]) -> dict[str, object]:
         persisted.append(str(cycle["source_hash"]))
         return {"status": "PERSISTED"}
 
-    monkeypatch.setattr(consumer, "persist_scanner_cycle", persist)
+    monkeypatch.setattr(freshness, "persist_scanner_cycle", persist)
     notifications = [
         (ALR_SCANNER_NOTIFY_CHANNEL, _notification_payload()),
         (ALR_SCANNER_NOTIFY_CHANNEL, _notification_payload()),
     ]
 
     connection = _DrainConnection()
-    result = drain_notified_backlog(connection, notifications, max_batch=2)
+    result = drain_notified_backlog(
+        connection,
+        notifications,
+        max_batch=2,
+        session_id="00000000-0000-0000-0000-000000000001",
+    )
 
     assert result == {
         "notifications_seen": 2,
-        "rows_seen": 2,
-        "persisted": 2,
-        "duplicates": 0,
-    }
-    assert fetched_limits == [2]
-    assert len(persisted) == 2
-    assert connection.commits == 1
-    assert connection.rollbacks == 0
-
-
-def test_explicit_reconciliation_reads_only_the_post_cursor_batch(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    requested: list[tuple[str, int]] = []
-    monkeypatch.setattr(
-        consumer,
-        "fetch_unseen_scanner_snapshots_after",
-        lambda connection, *, after_ts, limit: requested.append((after_ts, limit))
-        or [_scanner_row("scan-new", "2026-07-09T12:03:00Z")],
-    )
-    monkeypatch.setattr(
-        consumer,
-        "load_restart_state",
-        lambda connection: {"processed_source_keys": set(), "watermark": None},
-    )
-    monkeypatch.setattr(
-        consumer,
-        "persist_scanner_cycle",
-        lambda connection, cycle: {"status": "PERSISTED"},
-    )
-
-    result = drain_scanner_reconciliation(
-        _DrainConnection(),
-        after_ts="2026-07-09T12:02:00Z",
-        max_batch=3,
-    )
-
-    assert requested == [("2026-07-09T12:02:00Z", 3)]
-    assert result == {
-        "notifications_seen": 0,
+        "notifications_received": 2,
+        "notifications_consumed": 2,
+        "notifications_invalid": 0,
         "rows_seen": 1,
         "persisted": 1,
         "duplicates": 0,
     }
+    assert len(persisted) == 1
+    assert connection.commits == 1
+    assert connection.rollbacks == 0
+
+
+def test_notification_identity_preempts_79k_historical_backlog_same_drain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeScannerRepository:
+        def __init__(self) -> None:
+            self.historical_rows = [f"historical-{index}" for index in range(79_000)]
+            self.history_fetches = 0
+
+        def fetch_exact(
+            self,
+            connection: object,
+            *,
+            scan_id: str,
+            ts_ms: int,
+        ) -> dict[str, object]:
+            del connection, scan_id, ts_ms
+            return fresh_row
+
+        def fetch_history(self, *args: object, **kwargs: object) -> list[object]:
+            del args, kwargs
+            self.history_fetches += 1
+            return self.historical_rows[:2]
+
+    repository = FakeScannerRepository()
+    persisted_scan_ids: list[str] = []
+    fresh_row = _scanner_row("scan-1783598400000", "2026-07-09T12:00:00Z")
+    monkeypatch.setattr(freshness, "record_consumer_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        freshness,
+        "fetch_persisted_scanner_identity",
+        lambda connection, *, scan_id, source_ts: None,
+    )
+    monkeypatch.setattr(
+        freshness,
+        "load_restart_state",
+        lambda connection: {"processed_source_keys": set(), "watermark": None},
+    )
+    monkeypatch.setattr(
+        freshness,
+        "fetch_scanner_snapshot_by_identity",
+        repository.fetch_exact,
+    )
+    monkeypatch.setattr(
+        freshness,
+        "fetch_historical_lane_rows",
+        repository.fetch_history,
+    )
+
+    def persist(connection: object, cycle: dict[str, object]) -> dict[str, object]:
+        source = cycle["source"]
+        assert isinstance(source, dict)
+        persisted_scan_ids.append(str(source["scan_id"]))
+        return {"status": "PERSISTED"}
+
+    monkeypatch.setattr(freshness, "persist_scanner_cycle", persist)
+
+    result = drain_notified_backlog(
+        _DrainConnection(),
+        [(ALR_SCANNER_NOTIFY_CHANNEL, _notification_payload())],
+        max_batch=2,
+        session_id="00000000-0000-0000-0000-000000000001",
+    )
+
+    assert persisted_scan_ids[0] == "scan-1783598400000"
+    assert result["persisted"] == 1
+    assert len(repository.historical_rows) == 79_000
+    assert repository.history_fetches == 0
 
 
 class _LockCursor:
@@ -221,29 +279,42 @@ def test_runtime_file_lock_rejects_a_second_process(tmp_path: Path) -> None:
         pass
 
 
-def test_event_loop_reconciles_once_then_only_drains_on_notification(
+def test_event_loop_prioritizes_exact_then_fresh_and_keeps_history_idle_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    drains: list[list[tuple[str, str]]] = []
+    calls: list[str] = []
     waits = 0
+    monkeypatch.setattr(
+        consumer,
+        "drain_fresh_lane",
+        lambda connection, *, session_id, max_batch: calls.append("fresh")
+        or _drain_result(),
+    )
+    monkeypatch.setattr(
+        consumer,
+        "drain_historical_lane",
+        lambda connection, *, session_id, max_batch: calls.append("history")
+        or _drain_result(),
+    )
+    monkeypatch.setattr(
+        consumer,
+        "drain_notified_backlog",
+        lambda connection, notifications, *, max_batch, session_id: calls.append("exact")
+        or _drain_result(
+            notifications_seen=1,
+            notifications_received=1,
+            notifications_consumed=1,
+            rows_seen=1,
+            persisted=1,
+        ),
+    )
 
-    def drain(
+    def wait_for_notifications(
         connection: object,
-        notifications: list[tuple[str, str]],
         *,
+        timeout_seconds: float,
         max_batch: int,
-    ) -> dict[str, int]:
-        drains.append(notifications)
-        return {
-            "notifications_seen": len(notifications),
-            "rows_seen": len(notifications),
-            "persisted": len(notifications),
-            "duplicates": 0,
-        }
-
-    monkeypatch.setattr(consumer, "drain_notified_backlog", drain)
-
-    def wait_for_notifications(connection: object, *, timeout_seconds: float) -> list[tuple[str, str]]:
+    ) -> list[tuple[str, str]]:
         nonlocal waits
         waits += 1
         if waits == 1:
@@ -255,51 +326,67 @@ def test_event_loop_reconciles_once_then_only_drains_on_notification(
         max_batch=2,
         should_stop=lambda: waits >= 3,
         wait_for_notifications=wait_for_notifications,
+        session_id="00000000-0000-0000-0000-000000000001",
     )
 
-    assert drains == [[], [(ALR_SCANNER_NOTIFY_CHANNEL, _notification_payload())]]
+    assert calls == ["fresh", "fresh", "exact", "fresh"]
     assert result == {
-        "drains": 2,
+        "drains": 4,
         "notifications_seen": 1,
+        "notifications_received": 1,
+        "notifications_consumed": 1,
+        "notifications_invalid": 0,
         "rows_seen": 1,
         "persisted": 1,
         "duplicates": 0,
     }
 
 
-def test_event_loop_runs_explicit_reconciliation_only_on_startup(
+def test_event_loop_history_is_fixed_smaller_bound_after_idle_fresh_zero(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: list[str] = []
+    calls: list[tuple[str, int]] = []
+    waits = 0
     monkeypatch.setattr(
         consumer,
-        "drain_notified_backlog",
-        lambda connection, notifications, *, max_batch: calls.append("normal")
-        or {"notifications_seen": 0, "rows_seen": 0, "persisted": 0, "duplicates": 0},
+        "drain_fresh_lane",
+        lambda connection, *, session_id, max_batch: calls.append(("fresh", max_batch))
+        or _drain_result(),
     )
     monkeypatch.setattr(
         consumer,
-        "drain_scanner_reconciliation",
-        lambda connection, *, after_ts, max_batch: calls.append(f"after:{after_ts}")
-        or {"notifications_seen": 0, "rows_seen": 3, "persisted": 3, "duplicates": 0},
+        "drain_historical_lane",
+        lambda connection, *, session_id, max_batch: calls.append(("history", max_batch))
+        or _drain_result(),
     )
+
+    def wait(
+        connection: object,
+        *,
+        timeout_seconds: float,
+        max_batch: int,
+    ) -> list[tuple[str, str]]:
+        nonlocal waits
+        waits += 1
+        return []
+
+    clock = iter([0.0, 61.0])
 
     result = event_consumer_loop(
         object(),
-        max_batch=3,
-        should_stop=lambda: True,
-        wait_for_notifications=lambda *args, **kwargs: [],
-        reconcile_after="2026-07-09T12:02:00Z",
+        max_batch=32,
+        should_stop=lambda: waits >= 2,
+        wait_for_notifications=wait,
+        session_id="00000000-0000-0000-0000-000000000001",
+        monotonic_seconds=lambda: next(clock),
     )
 
-    assert calls == ["normal", "after:2026-07-09T12:02:00Z"]
-    assert result == {
-        "drains": 2,
-        "notifications_seen": 0,
-        "rows_seen": 3,
-        "persisted": 3,
-        "duplicates": 0,
-    }
+    assert calls == [
+        ("fresh", 32),
+        ("fresh", 32),
+        ("history", 8),
+    ]
+    assert result["drains"] == 3
 
 
 def test_operational_backlog_is_bounded_and_deferred_without_training_authority(
@@ -399,13 +486,13 @@ def test_event_loop_processes_feedback_before_next_target_rotation(
     calls: list[str] = []
     monkeypatch.setattr(
         consumer,
-        "drain_notified_backlog",
-        lambda connection, notifications, *, max_batch: {
-            "notifications_seen": len(notifications),
-            "rows_seen": 0,
-            "persisted": 0,
-            "duplicates": 0,
-        },
+        "drain_fresh_lane",
+        lambda connection, *, session_id, max_batch: _drain_result(),
+    )
+    monkeypatch.setattr(
+        consumer,
+        "drain_historical_lane",
+        lambda connection, *, session_id, max_batch: _drain_result(),
     )
     monkeypatch.setattr(
         consumer,
@@ -455,6 +542,7 @@ def test_event_loop_processes_feedback_before_next_target_rotation(
         max_batch=8,
         should_stop=lambda: True,
         wait_for_notifications=lambda *args, **kwargs: [],
+        session_id="00000000-0000-0000-0000-000000000001",
         source_head="a" * 40,
     )
 
@@ -501,8 +589,12 @@ def test_health_snapshot_is_collected_and_persisted_without_authority(
             "feedback_authority_mismatch_count": 0,
             "exchange_contact_count": 0,
             "trading_action_count": 0,
+            "order_or_probe_count": 0,
+            "decision_lease_count": 0,
+            "cost_gate_change_count": 0,
             "proof_claim_count": 0,
-            "serving_or_promotion_count": 0,
+            "serving_promotion_count": 0,
+            "latest_pointer_update_count": 0,
         },
         "no_authority": {"trading_authority": False},
     }
@@ -523,6 +615,28 @@ def test_health_snapshot_is_collected_and_persisted_without_authority(
         "health_snapshots": 1,
         "health_authority_mismatches": 0,
     }
+
+
+def test_health_snapshot_rejects_nonzero_direct_authority_counter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    counters = {
+        "run_authority_mismatch_count": 0,
+        "feedback_authority_mismatch_count": 0,
+        **consumer._ZERO_AUTHORITY_COUNTERS,
+    }
+    counters["order_or_probe_count"] = 1
+    monkeypatch.setattr(
+        consumer,
+        "collect_health_snapshot",
+        lambda connection, *, source_head: {
+            "snapshot_hash": "a" * 64,
+            "authority_counters": counters,
+        },
+    )
+
+    with pytest.raises(AlrEventConsumerError, match="health_authority_counters_invalid"):
+        process_health_snapshot(object(), source_head="b" * 40)
 
 
 def test_dsn_file_must_be_private_and_explicitly_local(tmp_path: Path) -> None:
@@ -546,7 +660,60 @@ def test_dsn_file_must_be_private_and_explicitly_local(tmp_path: Path) -> None:
         read_local_dsn_file(linked_dsn)
 
 
-def test_listen_wait_returns_identity_pairs_only_when_socket_is_ready(
+def test_runtime_source_head_must_match_checkout_before_database_use(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    head = "a" * 40
+    monkeypatch.setattr(
+        consumer.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout=f"{head}\n",
+        ),
+    )
+
+    assert verify_runtime_source_head(head, repo_root=tmp_path) == head
+    with pytest.raises(AlrEventConsumerError, match="source_head_mismatch"):
+        verify_runtime_source_head("b" * 40, repo_root=tmp_path)
+
+    source = Path(consumer.__file__).read_text(encoding="utf-8")
+    assert "ALR_RECONCILE_AFTER" not in source
+    assert "reconcile_after" not in source
+
+
+def test_main_emits_exact_zero_authority_counter_vector(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(consumer, "run_event_consumer", lambda **kwargs: _drain_result())
+
+    assert consumer.main(
+        [
+            "--dsn-file",
+            "/tmp/alr-shadow.dsn",
+            "--lock-file",
+            "/tmp/alr-shadow.lock",
+            "--source-head",
+            "a" * 40,
+        ]
+    ) == 0
+    output = json.loads(capsys.readouterr().out)
+
+    assert output["authority_counters"] == {
+        "exchange_contact_count": 0,
+        "trading_action_count": 0,
+        "order_or_probe_count": 0,
+        "decision_lease_count": 0,
+        "cost_gate_change_count": 0,
+        "proof_claim_count": 0,
+        "serving_promotion_count": 0,
+        "latest_pointer_update_count": 0,
+    }
+
+
+def test_listen_wait_boundedly_drains_prepopulated_queue_without_dropping_remainder(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class Connection:
@@ -554,8 +721,9 @@ def test_listen_wait_returns_identity_pairs_only_when_socket_is_ready(
             self.notifies = [
                 SimpleNamespace(
                     channel=ALR_SCANNER_NOTIFY_CHANNEL,
-                    payload=_notification_payload(),
+                    payload=_notification_payload(scan_id=f"scan-{index}"),
                 )
+                for index in range(3)
             ]
             self.polls = 0
 
@@ -564,12 +732,11 @@ def test_listen_wait_returns_identity_pairs_only_when_socket_is_ready(
 
     connection = Connection()
     monkeypatch.setattr(consumer.select, "select", lambda *args: ([], [], []))
-    assert wait_for_pg_notifications(connection, timeout_seconds=1.0) == []
-    assert connection.polls == 0
+    first = wait_for_pg_notifications(connection, timeout_seconds=1.0, max_batch=2)
 
-    monkeypatch.setattr(consumer.select, "select", lambda *args: ([connection], [], []))
-    assert wait_for_pg_notifications(connection, timeout_seconds=1.0) == [
-        (ALR_SCANNER_NOTIFY_CHANNEL, _notification_payload())
-    ]
-    assert connection.polls == 1
+    assert len(first) == 2
+    assert len(connection.notifies) == 1
+    assert connection.polls == 0
+    second = wait_for_pg_notifications(connection, timeout_seconds=1.0, max_batch=2)
+    assert len(second) == 1
     assert connection.notifies == []
