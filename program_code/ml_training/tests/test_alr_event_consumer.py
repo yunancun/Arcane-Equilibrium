@@ -12,6 +12,7 @@ from ml_training.alr_event_consumer import (
     AlrEventConsumerError,
     acquire_single_instance,
     drain_notified_backlog,
+    drain_scanner_reconciliation,
     event_consumer_loop,
     read_local_dsn_file,
     runtime_file_lock,
@@ -128,6 +129,42 @@ def test_coalesces_notification_burst_into_one_bounded_drain(monkeypatch: pytest
     assert connection.rollbacks == 0
 
 
+def test_explicit_reconciliation_reads_only_the_post_cursor_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requested: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        consumer,
+        "fetch_unseen_scanner_snapshots_after",
+        lambda connection, *, after_ts, limit: requested.append((after_ts, limit))
+        or [_scanner_row("scan-new", "2026-07-09T12:03:00Z")],
+    )
+    monkeypatch.setattr(
+        consumer,
+        "load_restart_state",
+        lambda connection: {"processed_source_keys": set(), "watermark": None},
+    )
+    monkeypatch.setattr(
+        consumer,
+        "persist_scanner_cycle",
+        lambda connection, cycle: {"status": "PERSISTED"},
+    )
+
+    result = drain_scanner_reconciliation(
+        _DrainConnection(),
+        after_ts="2026-07-09T12:02:00Z",
+        max_batch=3,
+    )
+
+    assert requested == [("2026-07-09T12:02:00Z", 3)]
+    assert result == {
+        "notifications_seen": 0,
+        "rows_seen": 1,
+        "persisted": 1,
+        "duplicates": 0,
+    }
+
+
 class _LockCursor:
     def __init__(self, acquired: bool) -> None:
         self.acquired = acquired
@@ -226,6 +263,41 @@ def test_event_loop_reconciles_once_then_only_drains_on_notification(
         "notifications_seen": 1,
         "rows_seen": 1,
         "persisted": 1,
+        "duplicates": 0,
+    }
+
+
+def test_event_loop_runs_explicit_reconciliation_only_on_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        consumer,
+        "drain_notified_backlog",
+        lambda connection, notifications, *, max_batch: calls.append("normal")
+        or {"notifications_seen": 0, "rows_seen": 0, "persisted": 0, "duplicates": 0},
+    )
+    monkeypatch.setattr(
+        consumer,
+        "drain_scanner_reconciliation",
+        lambda connection, *, after_ts, max_batch: calls.append(f"after:{after_ts}")
+        or {"notifications_seen": 0, "rows_seen": 3, "persisted": 3, "duplicates": 0},
+    )
+
+    result = event_consumer_loop(
+        object(),
+        max_batch=3,
+        should_stop=lambda: True,
+        wait_for_notifications=lambda *args, **kwargs: [],
+        reconcile_after="2026-07-09T12:02:00Z",
+    )
+
+    assert calls == ["normal", "after:2026-07-09T12:02:00Z"]
+    assert result == {
+        "drains": 2,
+        "notifications_seen": 0,
+        "rows_seen": 3,
+        "persisted": 3,
         "duplicates": 0,
     }
 
