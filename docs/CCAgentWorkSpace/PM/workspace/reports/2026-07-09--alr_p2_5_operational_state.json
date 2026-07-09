@@ -1,0 +1,28 @@
+{
+  "schema_version": "alr_p2_5_operational_state_v1",
+  "state": "P2_5_DONE_P2_6_ACTIVE",
+  "source_head": "2787042d09960186cb6edd1471c4c712ff78af0d",
+  "service": {
+    "name": "openclaw-alr-shadow.service",
+    "active": true,
+    "source_head_pinned": true,
+    "engine_restarted": false
+  },
+  "observed": {
+    "training_runs": 2,
+    "training_input_edges": 64,
+    "feedback_events": 1,
+    "feedback_rotation_edges": 1,
+    "duplicate_source_keys": 0,
+    "run_authority_mismatches": 0,
+    "feedback_authority_mismatches": 0
+  },
+  "feedback": {
+    "status": "DEFER_EVIDENCE",
+    "proof_packet_present": false,
+    "reward_record_count": 0,
+    "rotate_next_target": true,
+    "global_stop": false
+  },
+  "next": "P2-6 ALR-owned derived-cache retention guardian"
+}
