@@ -1,0 +1,37 @@
+{
+  "schema_version": "alr_p2_operational_shadow_state_v1",
+  "state": "DONE_OPERATIONAL_SHADOW",
+  "completed_at": "2026-07-09T21:59:24.432076Z",
+  "behavioral_source_head": "26401fbbce9a97e68583a5b8f069ffa3fba0a4d1",
+  "authority_chain": "PM -> E3 -> BB -> QA -> PM",
+  "role_execution": "ROLE_FALLBACK_SINGLE_SESSION",
+  "closed_soak": {
+    "raw_scanner_baseline_count": 79786,
+    "baseline_ts": "2026-07-09T21:53:38.956000Z",
+    "real_new_scanner_cycles": 5,
+    "raw_only_count": 0,
+    "alr_only_count": 0,
+    "source_duplicate_key_count": 0,
+    "service_pid_path": [1973155, 1982389, 1982461],
+    "engine_pid_during_window": 1561777,
+    "training_target_decisions": 2,
+    "health_snapshots": 2
+  },
+  "authority": {
+    "exchange_authority": false,
+    "trading_authority": false,
+    "order_or_probe_authority": false,
+    "decision_lease_authority": false,
+    "cost_gate_authority": false,
+    "proof_authority": false,
+    "serving_authority": false,
+    "promotion_authority": false,
+    "latest_authority": false
+  },
+  "next_state": "WAIT_OPERATOR_DEMO_AUTH",
+  "post_window_external_drift": {
+    "engine_pid": 1983100,
+    "observed_at": "2026-07-09T21:59:57Z",
+    "effect": "P3 requires fresh runtime revalidation; no P2 authority changes"
+  }
+}
