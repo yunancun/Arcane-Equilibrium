@@ -110,6 +110,10 @@ pub mod governance;
 // engine_runtime domain IMPL + 5 stub (per ADR-0042 Decision 3) + amplification
 // cap (per ADR-0042 Decision 4 + ADR-0036 1-anomaly = 1-state-change/24h)。
 pub mod health;
+// IBKR Phase 2 P1（AMD-2026-07-08-01）：secret_slot_contract fingerprint-only 純
+// loader（scaffold-only leg，0 production caller；consumers = P5 attestation /
+// healthcheck 於後續 phase 接入）。
+pub mod ibkr_secret_slot_loader;
 pub mod instrument_info;
 pub mod intent_processor;
 pub mod ipc_server;
