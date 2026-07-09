@@ -17,6 +17,7 @@ from ml_training.alr_event_consumer import (
     runtime_file_lock,
     release_single_instance,
     parse_scanner_notification,
+    run_operational_backlog,
     wait_for_pg_notifications,
 )
 
@@ -224,6 +225,55 @@ def test_event_loop_reconciles_once_then_only_drains_on_notification(
         "persisted": 1,
         "duplicates": 0,
     }
+
+
+def test_operational_backlog_is_bounded_and_deferred_without_training_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fetched_limits: list[int] = []
+    cycles = [
+        {
+            "source_hash": f"{ordinal:064x}",
+            "source_key": f"scan-{ordinal}|2026-07-09T12:0{ordinal}:00Z",
+            "source_ts": f"2026-07-09T12:0{ordinal}:00Z",
+            "canonical_payload": {"candidates": [{"symbol": "BTCUSDT"}]},
+        }
+        for ordinal in range(1, 4)
+    ]
+    monkeypatch.setattr(
+        consumer,
+        "fetch_untrained_scanner_cycles",
+        lambda connection, *, limit: fetched_limits.append(limit) or cycles,
+    )
+    monkeypatch.setattr(
+        consumer,
+        "build_scanner_statistical_experiment",
+        lambda **kwargs: {"research_only": True},
+    )
+    monkeypatch.setattr(
+        consumer,
+        "persist_statistical_run",
+        lambda connection, result: {"status": "PERSISTED"},
+    )
+
+    result = run_operational_backlog(
+        object(),
+        source_head="a" * 40,
+        max_batch=128,
+    )
+
+    assert fetched_limits == [64]
+    assert result == {
+        "training_runs": 1,
+        "training_duplicates": 0,
+        "training_deferred": 0,
+        "training_insufficient_source_cycles": 0,
+    }
+
+
+def test_operational_backlog_requires_a_pinned_source_head() -> None:
+    with pytest.raises(AlrEventConsumerError, match="operational_source_head_invalid"):
+        run_operational_backlog(object(), source_head="unknown", max_batch=32)
 
 
 def test_dsn_file_must_be_private_and_explicitly_local(tmp_path: Path) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import select
 import shlex
 import signal
@@ -20,7 +21,15 @@ from ml_training.alr_persistence_repository import (
     load_restart_state,
     persist_scanner_cycle,
 )
+from ml_training.alr_operational_repository import (
+    fetch_untrained_scanner_cycles,
+    persist_statistical_run,
+)
 from ml_training.alr_scanner_snapshot_adapter import adapt_scanner_snapshot
+from ml_training.alr_scanner_statistical_experiment import (
+    AlrScannerStatisticalExperimentError,
+    build_scanner_statistical_experiment,
+)
 
 
 ALR_SCANNER_NOTIFY_CHANNEL = "alr_scanner_snapshot_v1"
@@ -34,6 +43,7 @@ _LOCAL_DSN_REQUIRED = {
     "user": "alr_shadow",
 }
 _DSN_FORBIDDEN_KEYS = {"hostaddr", "service", "servicefile"}
+_SOURCE_HEAD_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
 class AlrEventConsumerError(ValueError):
@@ -187,6 +197,7 @@ def event_consumer_loop(
     max_batch: int,
     should_stop: Any,
     wait_for_notifications: Any,
+    source_head: str | None = None,
 ) -> dict[str, int]:
     """Reconcile once, then drain only validated PostgreSQL LISTEN wakes."""
     totals = {
@@ -198,6 +209,15 @@ def event_consumer_loop(
     }
 
     _accumulate(totals, drain_notified_backlog(connection, [], max_batch=max_batch))
+    if source_head is not None:
+        _accumulate_operational(
+            totals,
+            run_operational_backlog(
+                connection,
+                source_head=source_head,
+                max_batch=max_batch,
+            ),
+        )
     while not should_stop():
         notifications = wait_for_notifications(connection, timeout_seconds=1.0)
         if should_stop():
@@ -208,7 +228,57 @@ def event_consumer_loop(
             totals,
             drain_notified_backlog(connection, notifications, max_batch=max_batch),
         )
+        if source_head is not None:
+            _accumulate_operational(
+                totals,
+                run_operational_backlog(
+                    connection,
+                    source_head=source_head,
+                    max_batch=max_batch,
+                ),
+            )
     return totals
+
+
+def run_operational_backlog(
+    connection: Any,
+    *,
+    source_head: str,
+    max_batch: int,
+) -> dict[str, int]:
+    """Build one bounded P2-4 research challenger from ALR-ledger source rows.
+
+    The scanner notification does not carry learning content.  This function
+    reads immutable ALR source artifacts after a scanner drain, runs only the
+    pure recurrence/novelty statistical experiment, and persists a challenger
+    whose after-cost verdict remains ``DEFER_EVIDENCE``.
+    """
+    if not isinstance(source_head, str) or not _SOURCE_HEAD_RE.fullmatch(source_head):
+        raise AlrEventConsumerError("operational_source_head_invalid")
+    if isinstance(max_batch, bool) or not isinstance(max_batch, int) or not 1 <= max_batch <= 256:
+        raise AlrEventConsumerError("operational_batch_limit_invalid")
+    if max_batch < 3:
+        return _operational_result("INSUFFICIENT_SOURCE_CYCLES")
+    cycles = fetch_untrained_scanner_cycles(connection, limit=min(max_batch, 64))
+    if len(cycles) < 3:
+        return _operational_result("INSUFFICIENT_SOURCE_CYCLES")
+    try:
+        experiment = build_scanner_statistical_experiment(
+            source_head=source_head,
+            cycles=cycles,
+        )
+    except AlrScannerStatisticalExperimentError:
+        # A malformed or insufficient evidence set cannot claim an edge and
+        # does not terminate the listener. P2-5 persists granular defer rows.
+        return _operational_result("DEFER_EVIDENCE")
+    persisted = persist_statistical_run(connection, experiment)
+    status = persisted.get("status")
+    if status not in {"PERSISTED", "DUPLICATE"}:
+        raise AlrEventConsumerError("operational_persistence_status_invalid")
+    result = _operational_result(status)
+    result["training_runs"] = 1 if status == "PERSISTED" else 0
+    result["training_duplicates"] = 1 if status == "DUPLICATE" else 0
+    return result
 
 
 def read_local_dsn_file(dsn_path: Path) -> str:
@@ -265,6 +335,7 @@ def run_event_consumer(
     dsn_path: Path,
     lock_path: Path,
     max_batch: int,
+    source_head: str | None = None,
 ) -> dict[str, int]:
     """Run the Linux shadow consumer until SIGTERM/SIGINT requests shutdown."""
     dsn = read_local_dsn_file(dsn_path)
@@ -283,6 +354,7 @@ def run_event_consumer(
                 max_batch=max_batch,
                 should_stop=stop_event.is_set,
                 wait_for_notifications=wait_for_pg_notifications,
+                source_head=source_head,
             )
     finally:
         if connection is not None:
@@ -351,11 +423,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dsn-file", required=True, type=Path)
     parser.add_argument("--lock-file", required=True, type=Path)
     parser.add_argument("--max-batch", type=int, default=32)
+    parser.add_argument("--source-head", default=os.environ.get("ALR_SOURCE_HEAD"))
     arguments = parser.parse_args(argv)
     result = run_event_consumer(
         dsn_path=arguments.dsn_file,
         lock_path=arguments.lock_file,
         max_batch=arguments.max_batch,
+        source_head=arguments.source_head,
     )
     print(
         json.dumps(
@@ -386,6 +460,35 @@ def _accumulate(totals: dict[str, int], result: Mapping[str, int]) -> None:
     totals["drains"] += 1
     for key in required:
         totals[key] += result[key]
+
+
+def _operational_result(status: str) -> dict[str, int]:
+    if status not in {"PERSISTED", "DUPLICATE", "DEFER_EVIDENCE", "INSUFFICIENT_SOURCE_CYCLES"}:
+        raise AlrEventConsumerError("operational_status_invalid")
+    return {
+        "training_runs": 0,
+        "training_duplicates": 0,
+        "training_deferred": 1 if status == "DEFER_EVIDENCE" else 0,
+        "training_insufficient_source_cycles": 1
+        if status == "INSUFFICIENT_SOURCE_CYCLES"
+        else 0,
+    }
+
+
+def _accumulate_operational(totals: dict[str, int], result: Mapping[str, int]) -> None:
+    required = {
+        "training_runs",
+        "training_duplicates",
+        "training_deferred",
+        "training_insufficient_source_cycles",
+    }
+    if set(result) != required or any(
+        isinstance(result[key], bool) or not isinstance(result[key], int) or result[key] < 0
+        for key in required
+    ):
+        raise AlrEventConsumerError("operational_result_invalid")
+    for key in required:
+        totals[key] = totals.get(key, 0) + result[key]
 
 
 def _row_value(row: Any, index: int, key: str) -> Any:
