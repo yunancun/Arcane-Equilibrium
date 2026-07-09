@@ -14,6 +14,8 @@ reviewer_roles = []
 sealed = false
 raw_artifact_hash = ""
 redacted_summary_hash = ""
+contact_authorization_amd = "AMD-2026-07-08-01"
+approval_lineage_hash = ""
 supersedes_artifact_id = ""
 
 [gate]

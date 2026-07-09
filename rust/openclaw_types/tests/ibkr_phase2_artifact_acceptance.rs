@@ -39,6 +39,8 @@ fn accepted_artifact_fixture() -> IbkrPhase2GateArtifactV1 {
         api_session_topology: openclaw_types::IbkrApiSessionTopologyV1::source_template(),
         raw_artifact_hash: "a".repeat(64),
         redacted_summary_hash: "b".repeat(64),
+        // T1：approval_lineage_hash 需合法 64-hex 才綠（contact 靠 default 常量）。
+        approval_lineage_hash: "a".repeat(64),
         ..IbkrPhase2GateArtifactV1::default()
     }
 }
@@ -63,6 +65,7 @@ fn default_gate_artifact_blocks_contact() {
             IbkrPhase2GateArtifactBlocker::OperatorReviewerMissing,
             IbkrPhase2GateArtifactBlocker::RawArtifactHashInvalid,
             IbkrPhase2GateArtifactBlocker::RedactedSummaryHashInvalid,
+            IbkrPhase2GateArtifactBlocker::ApprovalLineageHashInvalid,
             IbkrPhase2GateArtifactBlocker::ExternalSurfaceGateRejected,
             IbkrPhase2GateArtifactBlocker::PolicyPrerequisiteFlagsRejected,
             IbkrPhase2GateArtifactBlocker::SecretSlotContractRejected,
@@ -168,7 +171,7 @@ fn artifact_rejects_missing_review_hash_and_seal_fields() {
 fn artifact_rejects_each_metadata_seal_and_hash_gap_independently() {
     use IbkrPhase2GateArtifactBlocker as Blocker;
 
-    let cases: [(fn(&mut IbkrPhase2GateArtifactV1), Blocker); 11] = [
+    let cases: [(fn(&mut IbkrPhase2GateArtifactV1), Blocker); 13] = [
         (
             |artifact| artifact.artifact_id = String::new(),
             Blocker::ArtifactIdMissing,
@@ -180,6 +183,10 @@ fn artifact_rejects_each_metadata_seal_and_hash_gap_independently() {
         (
             |artifact| artifact.amd = "AMD-2026-06-29-99".to_string(),
             Blocker::AmdMismatch,
+        ),
+        (
+            |artifact| artifact.contact_authorization_amd = "AMD-2026-07-08-99".to_string(),
+            Blocker::ContactAuthorizationAmdMismatch,
         ),
         (
             |artifact| artifact.source_commit = String::new(),
@@ -212,6 +219,10 @@ fn artifact_rejects_each_metadata_seal_and_hash_gap_independently() {
         (
             |artifact| artifact.redacted_summary_hash = "c".repeat(63),
             Blocker::RedactedSummaryHashInvalid,
+        ),
+        (
+            |artifact| artifact.approval_lineage_hash = "a".repeat(63),
+            Blocker::ApprovalLineageHashInvalid,
         ),
     ];
 

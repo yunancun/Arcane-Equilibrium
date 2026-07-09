@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ibkr_phase2_gate::{
     IbkrExternalSurfaceGateV1, IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID, IBKR_PHASE2_ADR,
-    IBKR_PHASE2_AMD,
+    IBKR_PHASE2_AMD, IBKR_PHASE2_CONTACT_AMD,
 };
 use crate::ibkr_phase2_policies::IbkrPhase2GatePrerequisiteFlags;
 use crate::ibkr_phase2_runtime::{IbkrApiSessionTopologyV1, IbkrSecretSlotContractV1};
@@ -31,6 +31,15 @@ pub struct IbkrPhase2GateArtifactV1 {
     pub api_session_topology: IbkrApiSessionTopologyV1,
     pub raw_artifact_hash: String,
     pub redacted_summary_hash: String,
+    /// 自記授權此 seal 的 contact-授權 AMD（= `IBKR_PHASE2_CONTACT_AMD` 07-08-01）。
+    /// 為什麼獨立於 shape-AMD `amd`(06-29-01)：兩軸——shape 是型別世代、contact 是
+    /// 「授權首次接觸」授權書；分欄令 sealed 檔自證是哪份 contact 授權放行的（T1）。
+    pub contact_authorization_amd: String,
+    /// 授權此 seal 的 approval canonical 之 sha256_hex（tamper-evident lineage，T1）。
+    /// 為什麼：sealed 檔自記綁定它的 approval 內容指紋，事後可核。types 只驗 shape
+    /// (64-hex) 不重算——lineage 內容由 producer seal-time 計算填入（同 raw/redacted
+    /// hash 紀律：型別層不重算內容）。
+    pub approval_lineage_hash: String,
     pub supersedes_artifact_id: Option<String>,
 }
 
@@ -59,6 +68,9 @@ impl Default for IbkrPhase2GateArtifactV1 {
             api_session_topology: IbkrApiSessionTopologyV1::default(),
             raw_artifact_hash: String::new(),
             redacted_summary_hash: String::new(),
+            // 鎖定②：Default 取常量（對稱既有 adr/amd 默認）；artifact 仍因其他 blocker 被拒。
+            contact_authorization_amd: IBKR_PHASE2_CONTACT_AMD.to_string(),
+            approval_lineage_hash: String::new(),
             supersedes_artifact_id: None,
         }
     }
@@ -84,6 +96,10 @@ impl IbkrPhase2GateArtifactV1 {
         if self.amd != IBKR_PHASE2_AMD {
             blockers.push(Blocker::AmdMismatch);
         }
+        // T1：sealed 檔須自記 contact-授權 AMD；≠ 常量即拒（維持 decl==check 序）。
+        if self.contact_authorization_amd != IBKR_PHASE2_CONTACT_AMD {
+            blockers.push(Blocker::ContactAuthorizationAmdMismatch);
+        }
         if self.source_commit.trim().is_empty() {
             blockers.push(Blocker::SourceCommitMissing);
         }
@@ -107,6 +123,11 @@ impl IbkrPhase2GateArtifactV1 {
         }
         if !is_sha256_hex(&self.redacted_summary_hash) {
             blockers.push(Blocker::RedactedSummaryHashInvalid);
+        }
+        // T1：approval_lineage_hash 只驗 shape(64-hex)；內容 tamper-evidence 由 producer
+        // seal-time 重算（types 不重算，同 raw/redacted hash 紀律）。
+        if !is_sha256_hex(&self.approval_lineage_hash) {
+            blockers.push(Blocker::ApprovalLineageHashInvalid);
         }
         if !self.gate.validate().ibkr_contact_allowed {
             blockers.push(Blocker::ExternalSurfaceGateRejected);
@@ -153,6 +174,7 @@ pub enum IbkrPhase2GateArtifactBlocker {
     ArtifactIdMissing,
     AdrMismatch,
     AmdMismatch,
+    ContactAuthorizationAmdMismatch,
     SourceCommitMissing,
     CreatedAtMissing,
     ImmutableStoragePathMissing,
@@ -161,6 +183,7 @@ pub enum IbkrPhase2GateArtifactBlocker {
     OperatorReviewerMissing,
     RawArtifactHashInvalid,
     RedactedSummaryHashInvalid,
+    ApprovalLineageHashInvalid,
     ExternalSurfaceGateRejected,
     IbkrCallAlreadyPerformed,
     PolicyPrerequisiteFlagsRejected,

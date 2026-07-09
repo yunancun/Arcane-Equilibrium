@@ -9,6 +9,10 @@ use crate::stock_etf_lane::BrokerEnvironment;
 
 pub const IBKR_PHASE2_ADR: &str = "ADR-0048";
 pub const IBKR_PHASE2_AMD: &str = "AMD-2026-06-29-01";
+/// contact-授權 AMD（首次接觸授權書，≠ shape-AMD `IBKR_PHASE2_AMD` 06-29-01）。單一
+/// 真源：artifact `contact_authorization_amd` 欄、producer approval 6 綁定與 IPC
+/// summary 皆引此常量（兩軸不可混——shape 是型別世代、contact 是接觸授權）。
+pub const IBKR_PHASE2_CONTACT_AMD: &str = "AMD-2026-07-08-01";
 pub const IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID: &str = "phase2_ibkr_external_surface_gate_v1";
 pub const IBKR_SESSION_ATTESTATION_CONTRACT_ID: &str = "ibkr_session_attestation_v1";
 pub const IBKR_PAPER_GATEWAY_DEFAULT_PORT: u16 = 4002;
