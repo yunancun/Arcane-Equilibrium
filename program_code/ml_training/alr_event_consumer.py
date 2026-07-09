@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_training.alr_persistence_repository import (
+    fetch_unseen_scanner_snapshots_after,
     fetch_unseen_scanner_snapshots,
     load_restart_state,
     persist_scanner_cycle,
@@ -138,11 +139,46 @@ def drain_notified_backlog(
         parse_scanner_notification(channel, payload)
         notification_count += 1
 
+    rows = fetch_unseen_scanner_snapshots(connection, limit=max_batch)
+    return _persist_reconciled_rows(
+        connection,
+        rows=rows,
+        notification_count=notification_count,
+    )
+
+
+def drain_scanner_reconciliation(
+    connection: Any,
+    *,
+    after_ts: str,
+    max_batch: int,
+) -> dict[str, int]:
+    """Persist a bounded, explicit post-cursor scanner reconciliation once.
+
+    This is intentionally not an idle poll or scheduler.  The cursor is supplied
+    only by a fresh deployment gate for a shadow soak, and the same durable
+    idempotency path handles every row that the scanner read-adapter returns.
+    """
+    if isinstance(max_batch, bool) or not isinstance(max_batch, int) or not 1 <= max_batch <= 256:
+        raise AlrEventConsumerError("backlog_batch_limit_invalid")
+    rows = fetch_unseen_scanner_snapshots_after(
+        connection,
+        after_ts=after_ts,
+        limit=max_batch,
+    )
+    return _persist_reconciled_rows(connection, rows=rows, notification_count=0)
+
+
+def _persist_reconciled_rows(
+    connection: Any,
+    *,
+    rows: list[Mapping[str, Any]],
+    notification_count: int,
+) -> dict[str, int]:
     try:
         restart_state = load_restart_state(connection)
         processed_source_keys = set(restart_state["processed_source_keys"])
         watermark = restart_state["watermark"]
-        rows = fetch_unseen_scanner_snapshots(connection, limit=max_batch)
         persisted = 0
         duplicates = 0
         for row in rows:
@@ -162,7 +198,7 @@ def drain_notified_backlog(
                 processed_source_keys.add(cycle["source"]["source_key"])
             else:
                 raise AlrEventConsumerError("persistence_status_invalid")
-        # A no-row read also opens a transaction under psycopg2.  End it before
+        # A no-row read also opens a transaction under psycopg2. End it before
         # waiting again so PostgreSQL can deliver the next LISTEN notification.
         connection.commit()
     except Exception:
@@ -210,6 +246,7 @@ def event_consumer_loop(
     should_stop: Any,
     wait_for_notifications: Any,
     source_head: str | None = None,
+    reconcile_after: str | None = None,
 ) -> dict[str, int]:
     """Reconcile once, then drain only validated PostgreSQL LISTEN wakes."""
     totals = {
@@ -221,6 +258,15 @@ def event_consumer_loop(
     }
 
     _accumulate(totals, drain_notified_backlog(connection, [], max_batch=max_batch))
+    if reconcile_after is not None:
+        _accumulate(
+            totals,
+            drain_scanner_reconciliation(
+                connection,
+                after_ts=reconcile_after,
+                max_batch=max_batch,
+            ),
+        )
     if source_head is not None:
         _accumulate_feedback(
             totals,
@@ -461,6 +507,7 @@ def run_event_consumer(
     lock_path: Path,
     max_batch: int,
     source_head: str | None = None,
+    reconcile_after: str | None = None,
 ) -> dict[str, int]:
     """Run the Linux shadow consumer until SIGTERM/SIGINT requests shutdown."""
     dsn = read_local_dsn_file(dsn_path)
@@ -480,6 +527,7 @@ def run_event_consumer(
                 should_stop=stop_event.is_set,
                 wait_for_notifications=wait_for_pg_notifications,
                 source_head=source_head,
+                reconcile_after=reconcile_after,
             )
     finally:
         if connection is not None:
@@ -549,12 +597,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--lock-file", required=True, type=Path)
     parser.add_argument("--max-batch", type=int, default=32)
     parser.add_argument("--source-head", default=os.environ.get("ALR_SOURCE_HEAD"))
+    parser.add_argument(
+        "--reconcile-after",
+        default=os.environ.get("ALR_RECONCILE_AFTER"),
+        help="fresh-gated UTC cursor for one bounded shadow-soak reconciliation",
+    )
     arguments = parser.parse_args(argv)
     result = run_event_consumer(
         dsn_path=arguments.dsn_file,
         lock_path=arguments.lock_file,
         max_batch=arguments.max_batch,
         source_head=arguments.source_head,
+        reconcile_after=arguments.reconcile_after,
     )
     print(
         json.dumps(

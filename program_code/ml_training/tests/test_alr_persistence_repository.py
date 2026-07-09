@@ -7,8 +7,10 @@ import pytest
 
 from ml_training.alr_persistence_repository import (
     AlrPersistenceConflict,
+    AlrPersistenceError,
     build_persistence_plan,
     fetch_unseen_scanner_snapshots,
+    fetch_unseen_scanner_snapshots_after,
     load_restart_state,
     persist_scanner_cycle,
 )
@@ -238,6 +240,37 @@ def test_reads_only_unseen_scanner_snapshots_with_a_bounded_query() -> None:
     assert params == ("trading.scanner_snapshots", 2)
     assert "UPDATE" not in sql.upper()
     assert "DELETE" not in sql.upper()
+
+
+def test_reads_only_unseen_scanner_rows_after_a_valid_utc_cursor() -> None:
+    connection = _LedgerConnection()
+    connection.unseen_rows = [{"scan_id": "scan-3", "ts": "2026-07-09T12:02:00Z"}]
+
+    rows = fetch_unseen_scanner_snapshots_after(
+        connection,
+        after_ts="2026-07-09T12:01:00Z",
+        limit=3,
+    )
+
+    assert rows == connection.unseen_rows
+    scanner_calls = [call for call in connection.calls if "trading.scanner_snapshots" in call[0]]
+    assert len(scanner_calls) == 1
+    sql, params = scanner_calls[0]
+    assert "scanner.ts > %s" in sql
+    assert "NOT EXISTS" in sql
+    assert params == ("2026-07-09T12:01:00.000000+00:00", "trading.scanner_snapshots", 3)
+    assert "UPDATE" not in sql.upper()
+    assert "DELETE" not in sql.upper()
+
+
+@pytest.mark.parametrize("after_ts", ["", "2026-07-09T12:01:00", "not-a-timestamp"])
+def test_rejects_an_ambiguous_or_invalid_reconciliation_cursor(after_ts: str) -> None:
+    with pytest.raises(AlrPersistenceError, match="scanner_fetch_after_timestamp_invalid"):
+        fetch_unseen_scanner_snapshots_after(
+            _LedgerConnection(),
+            after_ts=after_ts,
+            limit=3,
+        )
 
 
 def test_repository_keeps_alr_shadow_reads_select_only() -> None:
