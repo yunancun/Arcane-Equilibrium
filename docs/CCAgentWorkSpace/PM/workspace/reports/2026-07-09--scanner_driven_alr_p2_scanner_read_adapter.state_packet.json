@@ -1,0 +1,30 @@
+{
+  "schema": "alr_loop_state_packet_v1",
+  "created_at": "2026-07-09T00:00:00Z",
+  "repo_head_before": "7243942ee",
+  "repo_head_at_acceptance": "cdafbc157",
+  "origin_main_at_acceptance": "cdafbc157",
+  "selected_work_item": "P2-1-ALR-SCANNER-READ-ADAPTER",
+  "state": "ADVANCED",
+  "next_state": "P2-2-FRESH-E3-BB-GATE",
+  "next_action": "Run the exact-scope PM -> E3 -> BB -> PM review for isolated append-only learning.alr_* migration/repository work before any migration creation/apply, service start, sustained Linux consumption, or retention sweep.",
+  "execution_mode": "ROLE_FALLBACK_SINGLE_SESSION",
+  "runtime_authority": false,
+  "exchange_authority": false,
+  "trading_authority": false,
+  "proof_authority": false,
+  "serving_authority": false,
+  "promotion_authority": false,
+  "retention_apply_authority": false,
+  "scanner_cycles_consumed": 0,
+  "training_runs": 0,
+  "evidence_records": 0,
+  "role_chain": [
+    {"role": "PA(default)", "status": "DONE", "verdict": "pure adapter is feasible over V030 rows; P2-2 owns durable repository access"},
+    {"role": "E1(default)", "status": "DONE", "verdict": "implemented adapter and 14 direct behavior tests"},
+    {"role": "E2(default)", "status": "DONE_AFTER_RETURN", "verdict": "returned added/removed lifecycle gap, then passed after red-to-green correction"},
+    {"role": "E4(default)", "status": "PASS", "verdict": "153 passed twice; compile and diff checks pass"},
+    {"role": "QA(default)", "status": "PASS_TO_FRESH_E3_BB_GATE", "verdict": "P2-1 source slice accepted; operational runtime path remains pending"},
+    {"role": "PM(default)", "status": "DONE", "verdict": "P2-1 complete; select fresh P2-2 gate"}
+  ]
+}

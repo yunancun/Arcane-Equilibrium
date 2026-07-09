@@ -1,0 +1,21 @@
+{
+  "schema": "alr_work_item_v1",
+  "created_at": "2026-07-09T00:00:00Z",
+  "work_item_id": "P2-1-ALR-SCANNER-READ-ADAPTER",
+  "boundary_label": "ALR_OPERATIONAL_COMPLETION_V2",
+  "status": "DONE",
+  "owner_chain": ["PM", "PA", "E1", "E2", "E4", "QA", "PM"],
+  "execution_mode": "ROLE_FALLBACK_SINGLE_SESSION",
+  "target_files": [
+    "program_code/ml_training/alr_scanner_snapshot_adapter.py",
+    "program_code/ml_training/tests/test_alr_scanner_snapshot_adapter.py"
+  ],
+  "acceptance": [
+    "validates the V030 Rust scanner row fields without mutating scanner",
+    "binds scan_id and timestamp to a canonical SHA-256 payload hash",
+    "handles duplicate and late unseen cycles without watermark rewind",
+    "returns scanner-evidence-only output with zero exchange, trading, proof, serving, and promotion authority",
+    "passes focused, adjacent, and adversarial lifecycle tests"
+  ],
+  "next_work_item": "P2-2-FRESH-E3-BB-GATE"
+}

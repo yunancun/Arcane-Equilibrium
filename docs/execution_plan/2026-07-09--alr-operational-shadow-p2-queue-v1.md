@@ -11,8 +11,8 @@ The only normal P2 terminal state is `DONE_OPERATIONAL_SHADOW`. It requires all 
 | ID | Status | Owner chain | Acceptance |
 |---|---|---|---|
 | P2-0 | DONE | PM -> CC -> FA -> PA -> PM | ADR/AMD, root TODO import, and this versioned queue establish the operational boundary without granting trading authority. |
-| P2-1 | ACTIVE | PM -> PA -> E1 -> E2 -> E4 -> QA -> PM | Read `trading.scanner_snapshots` as the Rust scanner source through `(ts, scan_id)`, canonical hash, watermark, and fail-closed schema validation; do not mutate scanner. |
-| P2-2 | WAITING_P2-1 | PM -> PA -> E1 -> E2 -> E4 -> QA -> PM; E3 -> BB -> PM before apply | Append-only `learning.alr_*` migration and repository prove idempotency, duplicate handling, crash/restart recovery, and provenance graph. |
+| P2-1 | DONE | PM -> PA -> E1 -> E2 -> E4 -> QA -> PM | Source adapter validates the exact V030 row fields, binds `(scan_id, ts)` to a canonical SHA-256 payload hash, handles duplicate and late cycles without watermark rewind, and exposes only evidence-only/zero-authority output. It does not open DB/network/runtime access or mutate scanner. |
+| P2-2 | ACTIVE_FRESH_E3_BB_GATE | PM -> E3 -> BB -> PM -> PA -> E1 -> E2 -> E4 -> QA -> PM | Before migration creation/apply or runtime access, obtain a fresh exact-scope gate. Then append-only `learning.alr_*` migration and repository must prove idempotency, duplicate handling, crash/restart recovery, and provenance graph. |
 | P2-3 | WAITING_P2-2 | PM -> PA -> E1 -> E2 -> E4 -> QA -> PM | User-level event/backlog/novelty consumer has backpressure, resource budget, one-instance lock, graceful shutdown, and fail-closed recovery; no cron or fixed learning scheduler. |
 | P2-4 | WAITING_P2-3 | PM -> QC -> MIT -> AI-E -> PA -> E1 -> E2 -> E4 -> QA -> PM | LearningTarget -> PIT dataset -> existing training/statistical pipeline -> after-cost evaluation -> challenger artifact with no serving/promotion. |
 | P2-5 | WAITING_P2-4 | PM -> QC -> MIT -> E1 -> E2 -> E4 -> QA -> PM | ProofPacket/RewardLedger feedback records gaps, rotates on `DEFER_EVIDENCE`, and never treats missing evidence as proof. |
