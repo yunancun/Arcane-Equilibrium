@@ -3,7 +3,7 @@
 Date: 2026-05-21
 Status: **Accepted**（v5.8 §2 M6 module ADR 級落地；對應 PA dispatch H-2 GP kernel + acquisition function + iter budget + 30% rollback 累積 cap mandate）
 Operator Sign-off: 2026-05-21（主會話 PM dispatch — v5.8 §2 M6 採 Bayesian Optimization 取代 v5.7 manual-set reward weight；H-2 mandate 為算法選擇邊界）
-Related: v5.8 §2 M6 Bayesian Reward Weight (lines 219-251) / M6 design spec `docs/execution_plan/2026-05-21--m6_bayesian_reward_weight_design_spec.md`（849 行；本 ADR 為其治理層 promotion）/ V110 schema spec `docs/execution_plan/2026-05-21--v110_m6_reward_weight_history_schema_spec.md` / ADR-0021 Alpha Source Architecture Upgrade / ADR-0034 LAL Tier 2-3 audit / ADR-0037 M9 cluster 3 risk profile / ADR-0036 model blacklist (M6 GP variance 估計適用)
+Related: v5.8 §2 M6 Bayesian Reward Weight (lines 219-251) / M6 design spec `docs/archive/2026-07-09--execution_plan_v58_closed/2026-05-21--m6_bayesian_reward_weight_design_spec.md`（849 行；本 ADR 為其治理層 promotion）/ V110 schema spec `docs/archive/2026-07-09--execution_plan_v58_closed/2026-05-21--v110_m6_reward_weight_history_schema_spec.md` / ADR-0021 Alpha Source Architecture Upgrade / ADR-0034 LAL Tier 2-3 audit / ADR-0037 M9 cluster 3 risk profile / ADR-0036 model blacklist (M6 GP variance 估計適用)
 
 ## Context
 
@@ -214,8 +214,8 @@ per PA H-2（2026-05-21）必須在 ADR 鎖入：GP kernel + acquisition functio
 
 ## Cross-References
 
-- **M6 design spec**：`docs/execution_plan/2026-05-21--m6_bayesian_reward_weight_design_spec.md`（849 行）
-- **V110 schema spec**：`docs/execution_plan/2026-05-21--v110_m6_reward_weight_history_schema_spec.md`
+- **M6 design spec**：`docs/archive/2026-07-09--execution_plan_v58_closed/2026-05-21--m6_bayesian_reward_weight_design_spec.md`（849 行）
+- **V110 schema spec**：`docs/archive/2026-07-09--execution_plan_v58_closed/2026-05-21--v110_m6_reward_weight_history_schema_spec.md`
 - **v5.8 §2 M6**：`docs/execution_plan/2026-05-20--execution-plan-v5.8.md:219-251`
 - **ADR-0021**：`docs/adr/0021-alpha-source-architecture-upgrade.md`（Alpha Surface 與 λ_alpha 對接）
 - **ADR-0034**：`docs/adr/0034-decision-lease-layered-approval-lal.md`（LAL Tier 2-3 對接）

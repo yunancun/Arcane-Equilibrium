@@ -150,7 +150,7 @@ AMD-2026-05-21-01 是 operator D5 提出的 autonomy directive，將以 amendmen
 
 ### Wave 5 v2 Autonomy Level overlay（2026-05-28 sync）
 
-AMD-2026-05-21-01 v2 + `docs/execution_plan/2026-05-22--autonomy_level_toggle_design_spec.md` 將 **Autonomy Level** 定義為 system-wide policy 維度，與 LAL / Stage 正交：
+AMD-2026-05-21-01 v2 + `docs/archive/2026-07-09--execution_plan_v58_closed/2026-05-22--autonomy_level_toggle_design_spec.md` 將 **Autonomy Level** 定義為 system-wide policy 維度，與 LAL / Stage 正交：
 
 | Path | Level 1 Conservative | Level 2 Standard | Non-negotiable carve-out |
 |---|---|---|---|

@@ -61,7 +61,7 @@ Each candidate report must include:
 ## References
 
 - Operator decision report: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--alpha_edge_operator_decisions.md`
-- Alpha-Edge execution plan: `docs/execution_plan/2026-05-31--alpha_edge_research_execution_plan.md`
+- Alpha-Edge execution plan: `docs/archive/2026-07-09--execution_plan_v58_closed/2026-05-31--alpha_edge_research_execution_plan.md`
 - Alpha Source Architecture Upgrade: `docs/adr/0021-alpha-source-architecture-upgrade.md`
 - Bybit V5 Kline: `https://bybit-exchange.github.io/docs/v5/market/kline`
 - Bybit V5 Open Interest: `https://bybit-exchange.github.io/docs/v5/market/open-interest`

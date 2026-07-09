@@ -37,23 +37,23 @@ Phase 6   (W19-20,8/14-8/27):  驗收
 
 | 文件 | 內容 | Agent 何時讀 |
 |------|------|-------------|
-| [phase_0a.md](phase_0a.md) | PG Schema DDL + Grafana VIEW（19 任務） | 開始 Phase 0a 時 |
-| [phase_0b.md](phase_0b.md) | TimescaleDB + 壓縮 + ML 依賴（19 任務） | 開始 Phase 0b 時 |
-| [phase_1.md](phase_1.md) | 市場數據 + FeatureCollector + PSI（20 任務） | 開始 Phase 1 時 |
-| [phase_2.md](phase_2.md) | 交易鏈 + Scorer + ONNX（28 任務，最大 Phase） | 開始 Phase 2 時 |
-| [phase_3a.md](phase_3a.md) | update_params() Python+Rust 10 策略（17 任務） | 開始 Phase 3a 時 |
+| [phase_0a.md](../archive/2026-07-09--execution_plan_v58_closed/phase_0a.md) | PG Schema DDL + Grafana VIEW（19 任務） | 開始 Phase 0a 時 |
+| [phase_0b.md](../archive/2026-07-09--execution_plan_v58_closed/phase_0b.md) | TimescaleDB + 壓縮 + ML 依賴（19 任務） | 開始 Phase 0b 時 |
+| [phase_1.md](../archive/2026-07-09--execution_plan_v58_closed/phase_1.md) | 市場數據 + FeatureCollector + PSI（20 任務） | 開始 Phase 1 時 |
+| [phase_2.md](../archive/2026-07-09--execution_plan_v58_closed/phase_2.md) | 交易鏈 + Scorer + ONNX（28 任務，最大 Phase） | 開始 Phase 2 時 |
+| [phase_3a.md](../archive/2026-07-09--execution_plan_v58_closed/phase_3a.md) | update_params() Python+Rust 10 策略（17 任務） | 開始 Phase 3a 時 |
 | [phase_3b.md](phase_3b.md) | Optuna + TS + CPCV + 黑天鵝（17 任務） | 開始 Phase 3b 時 |
-| [phase_4.md](phase_4.md) | Claude Teacher + LinUCB + News + DL-3（20 任務） | 開始 Phase 4 時 |
-| [phase_5.md](phase_5.md) | James-Stein + DL-1 + DL-2（13 任務） | 開始 Phase 5 時 |
-| [phase_6.md](phase_6.md) | 漸進放權 + 驗收（13 任務） | 開始 Phase 6 時 |
-| [critical_path.md](critical_path.md) | 關鍵路徑 + Contingency + 量化指標 | 排期變更時 |
+| [phase_4.md](../archive/2026-07-09--execution_plan_v58_closed/phase_4.md) | Claude Teacher + LinUCB + News + DL-3（20 任務） | 開始 Phase 4 時 |
+| [phase_5.md](../archive/2026-07-09--execution_plan_v58_closed/phase_5.md) | James-Stein + DL-1 + DL-2（13 任務） | 開始 Phase 5 時 |
+| [phase_6.md](../archive/2026-07-09--execution_plan_v58_closed/phase_6.md) | 漸進放權 + 驗收（13 任務） | 開始 Phase 6 時 |
+| [critical_path.md](../archive/2026-07-09--execution_plan_v58_closed/critical_path.md) | 關鍵路徑 + Contingency + 量化指標 | 排期變更時 |
 | [2026-06-05--l2-advisory-mesh-execution-plan.md](2026-06-05--l2-advisory-mesh-execution-plan.md) | L2 Advisory Mesh 可執行 roadmap（v4-final 設計轉 phase）；D3→Orchestrator→哨兵→ml_advisory→FDR loop→GUI，每 phase E1 驗收 + sign-off + green-gate；QC B1 / MIT M1 / MIT M2 ENDORSE FIX/NOTE 已折入；E1-READY 等 operator | 啟動 L2 Advisory Mesh E1 前 |
 | [2026-06-05--l2-copilot-design-session-consolidated.md](2026-06-05--l2-copilot-design-session-consolidated.md) | L2 copilot 設計 session 整合背景（FinceptTerminal 催生 / 角色重定義 / 核心決策 / 四審結論）；供未來 plan audit 引用 | 追溯 L2 設計理由時 |
 | [2026-05-02--ref20_paper_replay_lab_dev_plan_draft_v0.1.md](../archive/2026-05-28--ref20_paper_replay_lab_dev_plan_superseded/2026-05-02--ref20_paper_replay_lab_dev_plan_draft_v0.1.md) | REF-20 Paper Replay Lab 開發方案 v0.1：早期審查材料，未 sign-off（2026-05-28 archived；由 v3 取代） | 追溯早期風險來源時 |
 | [2026-05-02--ref20_paper_replay_lab_dev_plan_v1.md](../archive/2026-05-28--ref20_paper_replay_lab_dev_plan_superseded/2026-05-02--ref20_paper_replay_lab_dev_plan_v1.md) | REF-20 Paper Replay Lab 開發方案 V1：第一版開發基線，已被 Round2 audit 推進為 V2（2026-05-28 archived；由 v3 取代） | 追溯 V2 變更來源時 |
-| [2026-05-02--ref20_v1_round2_audit.md](2026-05-02--ref20_v1_round2_audit.md) | REF-20 V1 第二輪 audit：對 V1 的安全 / 資料 / 量化 / UX / API 審查意見 | 追溯 V2 採納與反對理由時 |
+| [2026-05-02--ref20_v1_round2_audit.md](../archive/2026-07-09--execution_plan_v58_closed/2026-05-02--ref20_v1_round2_audit.md) | REF-20 V1 第二輪 audit：對 V1 的安全 / 資料 / 量化 / UX / API 審查意見 | 追溯 V2 採納與反對理由時 |
 | [2026-05-02--ref20_paper_replay_lab_dev_plan_v2.md](../archive/2026-05-28--ref20_paper_replay_lab_dev_plan_superseded/2026-05-02--ref20_paper_replay_lab_dev_plan_v2.md) | REF-20 Paper Replay Lab 開發方案 V2：整合 Round2，已被 Round3/V2.1 收斂為更嚴格實作基線（2026-05-28 archived；由 v3 取代） | 追溯 Round3/V2.1 變更來源時 |
-| [2026-05-02--ref20_v2_round3_audit.md](2026-05-02--ref20_v2_round3_audit.md) | REF-20 V2 第三輪 audit：指出 V2 仍需補 schema 物理欄位、DB role guard、migration governance、P2 isolation、UX subdoc、Mac non-actionable policy 等 P0 gates | 追溯 V2.1 採納與改寫理由時 |
+| [2026-05-02--ref20_v2_round3_audit.md](../archive/2026-07-09--execution_plan_v58_closed/2026-05-02--ref20_v2_round3_audit.md) | REF-20 V2 第三輪 audit：指出 V2 仍需補 schema 物理欄位、DB role guard、migration governance、P2 isolation、UX subdoc、Mac non-actionable policy 等 P0 gates | 追溯 V2.1 採納與改寫理由時 |
 | [2026-05-02--ref20_paper_replay_lab_dev_plan_v2_1_round3.md](../archive/2026-05-28--ref20_paper_replay_lab_dev_plan_superseded/2026-05-02--ref20_paper_replay_lab_dev_plan_v2_1_round3.md) | REF-20 Paper Replay Lab 開發方案 V2.1 Round3：當前實作前基線，接受 Round3 真實問題並保留 P2 使用 TickPipeline/IntentProcessor 的 isolated no-write 方向（2026-05-28 archived；由 v3 取代） | 啟動 REF-20 / Reality-Calibrated Replay 實作前 |
 | [2026-05-02--ref20_ux_subdoc_v1.md](2026-05-02--ref20_ux_subdoc_v1.md) | REF-20 Paper Replay Lab UX Subdoc V1：P1 前必讀 UX contract，定義 Session/Replay/Compare/Handoff、mode badges、disabled states、no submit/cancel 邊界 | 啟動 Paper Replay Lab P1 frontend 前 |
 | [2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_3.md](2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_3.md) | REF-21 Full-Chain Replay Engine V1.3：active plan；修正 negative-edge fail-open，補 subprocess deploy path、V057/V058/V059/V060 DDL sketch + Linux PG dry-run、promotion FSM/signatures、Bybit SSOT URI、block bootstrap、survival/correlation/cost thresholds、baseline SLA | 啟動 R1 hardening、R2/R3 或 Agent replay exploration 前 |

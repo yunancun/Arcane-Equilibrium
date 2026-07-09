@@ -192,3 +192,24 @@ High-value hot interaction candidates:
 - 只 archive 不 delete；沿 phase 1/2 policy。
 - 本批為整目錄歸檔，未留 per-path redirect stub；舊路徑活引用一律改指上表 New path。
 - **未移動**（不改寫其引用）：`docs/audits/`（複數，dated audit library）、`docs/governance_dev/amendments/` + `SPECIFICATION_REGISTER.md` / `README.md` / `DEPRECATED.md` / `NAMING_NOTE.md` + `2026-03-30--round2_fix_plan*` 等根層文件。
+
+---
+
+## Executed Redirects (2026-07-09) — execution_plan v5.8 closed batch
+
+> 來源：execution_plan v5.8 收斂後歷史清理。`docs/execution_plan/` 中 **101 個已完结 spec/phase** 已 git-mv 至 `docs/archive/2026-07-09--execution_plan_v58_closed/`（保留 `specs/` 子目錄結構）；**56 個現役/被代碼引用/當前 active 文件留在原目錄**（v5.7/v5.8 主檔、AEG-S0/S1、L2 mesh、m5/m8/m12/m13、earn、IBKR stock_etf、`phase_3b.md` 等）。
+> 這是與上方「Executed Redirects (2026-07-09)」整目錄歸檔批次**不同**的一批（本批只動 `docs/execution_plan/` 內的個別已完结檔）。
+
+| Old path glob | New path glob | Reason | Stub |
+|---|---|---|---|
+| `docs/execution_plan/<101 closed specs>` | `docs/archive/2026-07-09--execution_plan_v58_closed/<同名（含 specs/ 子路徑）>` | v5.8 module/phase 設計、V###-schema spec、REF-20/21 audit、dispatch packet、sprint_1a 系列等歷史已完结 deliverable 轉歷史證據 | — (整批歸檔，無 per-file stub) |
+
+- **權威清單**：不逐一列出 101 個 basename；authoritative list = `docs/archive/2026-07-09--execution_plan_v58_closed/`（含 89 個 top-level 檔：80 個 dated spec + `critical_path.md` + `phase_{0a,0b,1,2,3a,4,5,6}.md`，及 `specs/` 下 12 個檔）目錄實體。cross-check 快照亦存於本次歸檔工作紀錄。
+- **已同步的 live 導航/治理檔（本批）**：`docs/_indexes/document_index.md`（43 條 repoint）、`docs/_indexes/initiative_index.md`（m1/m10 repoint；m5 留原目錄未動）、`docs/execution_plan/README.md`（11 條相對連結 repoint：9 phase/critical + 2 ref20 audit）、`docs/README.md`（樹狀圖 annotate）、`docs/adr/{0018,0025,0034,0037,0038,0042,0043,0044,0045,0046,0047}.md`（各 moved-spec 引用 repoint；m5/m8/m12/m13 等留存 spec 引用不動）。
+- **NOTE（承上表 Candidate Redirects L48-49 / GUI Integration Priority L95-98）**：`2026-05-06--gui_openclaw_control_console_plan.md` 與 `2026-05-06--openclaw_gateway_development_plan.md` 早前規劃的 `docs/02-execution-plans/*` canonical 目標**未執行**；此二檔本批實際歸檔至 `docs/archive/2026-07-09--execution_plan_v58_closed/`，前述 planning 行僅存歷史提案價值。
+- **凍結歷史檔不改寫**：`docs/CLAUDE_CHANGELOG.md`、`docs/archive/**`、`docs/CCAgentWorkSpace/**`、`docs/architecture/**` 及 dated role reports 之舊路徑引用維持 correct-as-of-date。
+
+### Retention policy (2026-07-09 execution_plan batch)
+
+- 只 archive 不 delete；沿 phase 1/2 policy。
+- 本批為個別已完结檔歸檔，未留 per-path redirect stub；live 索引/導航活引用一律改指上表 New path glob。

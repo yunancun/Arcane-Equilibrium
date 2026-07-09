@@ -210,7 +210,8 @@ docs/
 ├── CCAgentWorkSpace/                  ← Agent 工作空间（profile/memory/workspace per agent）
 ├── agents/                            ← Agent context loading / TODO maintenance / issue tracker / domain / triage-label 指南
 │
-├── execution_plan/                    ← 执行计划（Sprint/Wave 排期、里程碑规划）
+├── execution_plan/                    ← 执行计划（Sprint/Wave 排期、里程碑规划；56 现役文件留在本目录）
+│   └── (已归档 2026-07-09) 101 个 v5.8 已完结 spec/phase → archive/2026-07-09--execution_plan_v58_closed/
 │
 ├── (已归档 2026-07-09) rust_migration/ → archive/2026-07-09--rust_migration_completed/  ← Rust 迁移文档（迁移完结）
 │

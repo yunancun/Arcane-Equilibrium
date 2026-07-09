@@ -45,7 +45,7 @@ funding_arb V2 **Retired closed**。enforcement 在 TOML config-load 層：三�
 ## References
 
 - AMD-2026-05-26-01: `docs/governance_dev/amendments/2026-05-26--AMD-2026-05-26-01-funding-arb-deprecation.md`
-- PA Workflow F Phase 1 spec: `docs/execution_plan/specs/2026-05-26--funding-arb-deprecation-cascade.md`
+- PA Workflow F Phase 1 spec: `docs/archive/2026-07-09--execution_plan_v58_closed/specs/2026-05-26--funding-arb-deprecation-cascade.md`
 - AMD-2026-05-09-02 W-AUDIT-6 strategy verdict: `docs/governance_dev/amendments/2026-05-09--operator_decision_audit_closure.md`
 - AMD-2026-05-15-01 Stage 0R replay preflight (revive gate): `docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-01-canary-rebase-replay-preflight-demo-micro-canary.md`
 - ADR-0046 funding_arb future redesign slot: `docs/adr/0046-funding-arb-v3-redesign-slot.md` (Proposed; PA Sprint 1A-δ/ε)

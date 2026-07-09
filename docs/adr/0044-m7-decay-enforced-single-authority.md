@@ -3,7 +3,7 @@
 Date: 2026-05-21
 Status: **Accepted**（v5.8 §2 M7 module ADR 級落地；對應 PA dispatch CR-7 single decay authority + H-11 14d × 50% mitigation + AMD-2026-05-21-01 protected scope）
 Operator Sign-off: 2026-05-21（主會話 PM dispatch — v5.8 §2 M7 採 single decay authority + 6 lifecycle FSM；DECAY_ENFORCED 改名為 CR-7 字面跨域碰撞 mitigation）
-Related: v5.8 §2 M7 Decay Detection (lines 253-277) / M7 design spec `docs/execution_plan/2026-05-21--m7_decay_enforced_design_spec.md`（463 行；本 ADR 為其治理層 promotion）/ V113 schema spec `docs/execution_plan/2026-05-21--v113_m7_decay_signals_schema_spec.md` / M11 threshold M7 dedup decay enforced rename spec `docs/execution_plan/2026-05-21--m11_threshold_m7_dedup_decay_enforced_rename.md` / ADR-0034 LAL Tier 0 active blocker / ADR-0036 model blacklist (decay signal Sharpe 估計適用) / ADR-0038 M11 replay (字面命名空間分離參考——M11 module 名稱不與 M7 decay 重疊) / AMD-2026-05-21-01 protected scope
+Related: v5.8 §2 M7 Decay Detection (lines 253-277) / M7 design spec `docs/archive/2026-07-09--execution_plan_v58_closed/2026-05-21--m7_decay_enforced_design_spec.md`（463 行；本 ADR 為其治理層 promotion）/ V113 schema spec `docs/archive/2026-07-09--execution_plan_v58_closed/2026-05-21--v113_m7_decay_signals_schema_spec.md` / M11 threshold M7 dedup decay enforced rename spec `docs/archive/2026-07-09--execution_plan_v58_closed/2026-05-21--m11_threshold_m7_dedup_decay_enforced_rename.md` / ADR-0034 LAL Tier 0 active blocker / ADR-0036 model blacklist (decay signal Sharpe 估計適用) / ADR-0038 M11 replay (字面命名空間分離參考——M11 module 名稱不與 M7 decay 重疊) / AMD-2026-05-21-01 protected scope
 
 ## Context
 
@@ -216,9 +216,9 @@ per PA H-11 反向 attack：M7 decay signal 對 alpha-bearing strategy 觸發 DE
 
 ## Cross-References
 
-- **M7 design spec**：`docs/execution_plan/2026-05-21--m7_decay_enforced_design_spec.md`（463 行）
-- **V113 schema spec**：`docs/execution_plan/2026-05-21--v113_m7_decay_signals_schema_spec.md`
-- **M11 threshold M7 dedup rename spec**：`docs/execution_plan/2026-05-21--m11_threshold_m7_dedup_decay_enforced_rename.md`
+- **M7 design spec**：`docs/archive/2026-07-09--execution_plan_v58_closed/2026-05-21--m7_decay_enforced_design_spec.md`（463 行）
+- **V113 schema spec**：`docs/archive/2026-07-09--execution_plan_v58_closed/2026-05-21--v113_m7_decay_signals_schema_spec.md`
+- **M11 threshold M7 dedup rename spec**：`docs/archive/2026-07-09--execution_plan_v58_closed/2026-05-21--m11_threshold_m7_dedup_decay_enforced_rename.md`
 - **v5.8 §2 M7**：`docs/execution_plan/2026-05-20--execution-plan-v5.8.md:253-277`
 - **ADR-0034 M1 LAL**：`docs/adr/0034-decision-lease-layered-approval-lal.md`（Tier 0 active blocker + Tier 3 operator approve）
 - **ADR-0036 M8 black-list**：`docs/adr/0036-m8-anomaly-detection-and-m10-tier-d-model-blacklist.md`（Signal 估計禁用 HMM / GARCH）

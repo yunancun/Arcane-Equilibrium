@@ -3,7 +3,7 @@
 Date: 2026-05-21
 Status: **Accepted**（v5.8 §2 M3 module ADR 級落地；對應 PA dispatch CR-7 single-authority 系列 + H-11 amplification mitigation）
 Operator Sign-off: 2026-05-21（主會話 PM dispatch — v5.8 §2 M3 採「集中健康觀測 + 4 級狀態機 + degradation cascade」治理路徑；M3 design spec 648 行 Sprint 1A-β land 為 ADR 落地證據）
-Related: v5.8 §2 M3 Health-Aware Degradation (lines 123-151) / M3 design spec `docs/execution_plan/2026-05-21--m3_health_monitoring_design_spec.md`（648 行；本 ADR 為其治理層 promotion）/ V106 schema spec `docs/execution_plan/2026-05-21--v106_m3_health_observations_schema_spec.md` / ADR-0034 LAL Decision 4 / ADR-0036 M8 anomaly amplification dedup / AMD-2026-05-21-01 autonomy-vs-human-final-review
+Related: v5.8 §2 M3 Health-Aware Degradation (lines 123-151) / M3 design spec `docs/archive/2026-07-09--execution_plan_v58_closed/2026-05-21--m3_health_monitoring_design_spec.md`（648 行；本 ADR 為其治理層 promotion）/ V106 schema spec `docs/archive/2026-07-09--execution_plan_v58_closed/2026-05-21--v106_m3_health_observations_schema_spec.md` / ADR-0034 LAL Decision 4 / ADR-0036 M8 anomaly amplification dedup / AMD-2026-05-21-01 autonomy-vs-human-final-review
 
 ## Context
 
@@ -193,8 +193,8 @@ Threshold 數值列入 V106 spec `regime_threshold_table`（per ADR-0036 Decisio
 
 ## Cross-References
 
-- **M3 design spec**：`docs/execution_plan/2026-05-21--m3_health_monitoring_design_spec.md`（648 行；本 ADR 治理層 promotion）
-- **V106 schema spec**：`docs/execution_plan/2026-05-21--v106_m3_health_observations_schema_spec.md`（schema DDL 主責）
+- **M3 design spec**：`docs/archive/2026-07-09--execution_plan_v58_closed/2026-05-21--m3_health_monitoring_design_spec.md`（648 行；本 ADR 治理層 promotion）
+- **V106 schema spec**：`docs/archive/2026-07-09--execution_plan_v58_closed/2026-05-21--v106_m3_health_observations_schema_spec.md`（schema DDL 主責）
 - **v5.8 §2 M3**：`docs/execution_plan/2026-05-20--execution-plan-v5.8.md:123-151`
 - **ADR-0034 M1 LAL**：`docs/adr/0034-decision-lease-layered-approval-lal.md`（HEALTH_DEGRADED → LAL toggle fallback）
 - **ADR-0036 M8 anomaly**：`docs/adr/0036-m8-anomaly-detection-and-m10-tier-d-model-blacklist.md`（amplification cap signature source）

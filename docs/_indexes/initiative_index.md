@@ -51,7 +51,7 @@
 | Topic | Reference path | Current authority |
 |---|---|---|
 | v5.7 / v5.8 autonomy thesis | `docs/execution_plan/2026-05-20--execution-plan-v5.7.md`; `docs/execution_plan/2026-05-20--execution-plan-v5.8.md` | `TODO.md` v5.9 thesis-shift / AEG mainline |
-| M1/M5/M10 module specs | `docs/execution_plan/2026-05-21--m1_lal_layered_approval_lease_design_spec.md`; `docs/execution_plan/2026-05-21--m5_online_learning_design_spec.md`; `docs/execution_plan/2026-05-21--m10_discovery_tier_design_spec.md` | `TODO.md` and latest PM/role reports |
+| M1/M5/M10 module specs | `docs/archive/2026-07-09--execution_plan_v58_closed/2026-05-21--m1_lal_layered_approval_lease_design_spec.md`; `docs/execution_plan/2026-05-21--m5_online_learning_design_spec.md`; `docs/archive/2026-07-09--execution_plan_v58_closed/2026-05-21--m10_discovery_tier_design_spec.md` | `TODO.md` and latest PM/role reports |
 | funding_short_v2 | `docs/execution_plan/2026-05-25--alpha_candidate_1_funding_short_v2_spec.md`; `memory/project_2026_05_31_funding_short_structural_doa.md` | Bybit `instruments-info.upperFundingRate`; current AEG/funding rows in `TODO.md` |
 | Old Layer 2 plan | `docs/references/2026-03-27--layer2_ai_reasoning_engine_implementation_plan.md` | `TODO.md` row `P1-L2-ADVISORY-MESH-E2E-1`; 2026-06-05 L2 execution plan |
 | Paper Replay / REF-20 | `docs/references/2026-05-02--paper_replay_learning_surface_design.md`; REF-20 execution plans | `CLAUDE.md` Paper boundary; AMD-2026-05-15-01; ADR-0047; `TODO.md` |

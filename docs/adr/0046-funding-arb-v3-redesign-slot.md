@@ -45,7 +45,7 @@ Status: **Proposed**（decision TBD；尚未 Accepted）
 
 - ADR-0018 funding_arb V2 Retired: `docs/adr/0018-funding-arb-v2-deprecation-watch.md`
 - AMD-2026-05-26-01 funding_arb Deprecation Closure: `docs/governance_dev/amendments/2026-05-26--AMD-2026-05-26-01-funding-arb-deprecation.md`（§5 Decision 3 — Future Redesign Slot Preservation）
-- Workflow F Phase 1 cascade spec: `docs/execution_plan/specs/2026-05-26--funding-arb-deprecation-cascade.md`
+- Workflow F Phase 1 cascade spec: `docs/archive/2026-07-09--execution_plan_v58_closed/specs/2026-05-26--funding-arb-deprecation-cascade.md`
 - AMD-2026-05-15-01 Stage 0R replay preflight（revive gate）: `docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-01-canary-rebase-replay-preflight-demo-micro-canary.md`
 - BB APPROVE 候選方向（basis observation vs execution 分維）: `docs/audits/2026-05-25--v1_to_v58_full_consolidation_drift.md`（§B workflow）
 - v5.8 ADR roster（ADR-0046 proposed 2026-05-25）: `docs/execution_plan/2026-05-20--execution-plan-v5.8.md`
