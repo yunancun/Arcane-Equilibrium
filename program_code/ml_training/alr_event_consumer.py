@@ -27,6 +27,10 @@ from ml_training.alr_operational_repository import (
     fetch_untrained_scanner_cycles,
     persist_statistical_run,
 )
+from ml_training.alr_health_repository import (
+    collect_health_snapshot,
+    persist_health_snapshot,
+)
 from ml_training.alr_outcome_feedback import build_outcome_feedback
 from ml_training.alr_outcome_feedback_repository import (
     fetch_unreviewed_outcome_runs,
@@ -234,6 +238,10 @@ def event_consumer_loop(
             totals,
             process_retention_backlog(connection, max_batch=max_batch),
         )
+        _accumulate_health(
+            totals,
+            process_health_snapshot(connection, source_head=source_head),
+        )
     while not should_stop():
         notifications = wait_for_notifications(connection, timeout_seconds=1.0)
         if should_stop():
@@ -260,6 +268,10 @@ def event_consumer_loop(
             _accumulate_retention(
                 totals,
                 process_retention_backlog(connection, max_batch=max_batch),
+            )
+            _accumulate_health(
+                totals,
+                process_health_snapshot(connection, source_head=source_head),
             )
     return totals
 
@@ -330,6 +342,27 @@ def process_retention_backlog(connection: Any, *, max_batch: int) -> dict[str, i
     ):
         raise AlrEventConsumerError("retention_result_invalid")
     return {f"retention_{key}": result[key] for key in required}
+
+
+def process_health_snapshot(connection: Any, *, source_head: str) -> dict[str, int]:
+    """Persist one local ALR health snapshot after a bounded listener cycle."""
+    snapshot = collect_health_snapshot(connection, source_head=source_head)
+    persisted = persist_health_snapshot(connection, snapshot)
+    if persisted.get("status") != "PERSISTED":
+        raise AlrEventConsumerError("health_persistence_status_invalid")
+    counters = snapshot.get("authority_counters")
+    if not isinstance(counters, Mapping) or any(
+        isinstance(value, bool) or not isinstance(value, int) or value < 0
+        for value in counters.values()
+    ):
+        raise AlrEventConsumerError("health_authority_counters_invalid")
+    return {
+        "health_snapshots": 1,
+        "health_authority_mismatches": int(
+            counters.get("run_authority_mismatch_count", 0)
+        )
+        + int(counters.get("feedback_authority_mismatch_count", 0)),
+    }
 
 
 def run_operational_backlog(
@@ -614,6 +647,17 @@ def _accumulate_retention(totals: dict[str, int], result: Mapping[str, int]) -> 
         for key in required
     ):
         raise AlrEventConsumerError("retention_result_invalid")
+    for key in required:
+        totals[key] = totals.get(key, 0) + result[key]
+
+
+def _accumulate_health(totals: dict[str, int], result: Mapping[str, int]) -> None:
+    required = {"health_snapshots", "health_authority_mismatches"}
+    if set(result) != required or any(
+        isinstance(result[key], bool) or not isinstance(result[key], int) or result[key] < 0
+        for key in required
+    ):
+        raise AlrEventConsumerError("health_result_invalid")
     for key in required:
         totals[key] = totals.get(key, 0) + result[key]
 

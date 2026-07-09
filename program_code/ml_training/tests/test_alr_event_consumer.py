@@ -17,6 +17,7 @@ from ml_training.alr_event_consumer import (
     runtime_file_lock,
     release_single_instance,
     parse_scanner_notification,
+    process_health_snapshot,
     process_outcome_feedback_backlog,
     process_retention_backlog,
     run_operational_backlog,
@@ -370,6 +371,12 @@ def test_event_loop_processes_feedback_before_next_target_rotation(
             "retention_skipped": 0,
         },
     )
+    monkeypatch.setattr(
+        consumer,
+        "process_health_snapshot",
+        lambda connection, *, source_head: calls.append("health")
+        or {"health_snapshots": 1, "health_authority_mismatches": 0},
+    )
 
     result = event_consumer_loop(
         object(),
@@ -379,7 +386,7 @@ def test_event_loop_processes_feedback_before_next_target_rotation(
         source_head="a" * 40,
     )
 
-    assert calls == ["feedback", "target", "retention"]
+    assert calls == ["feedback", "target", "retention", "health"]
     assert result["feedback_rotations"] == 1
     assert result["training_runs"] == 1
 
@@ -409,6 +416,40 @@ def test_retention_backlog_reports_only_derived_cache_actions(
         "retention_swept": 1,
         "retention_retained": 0,
         "retention_skipped": 0,
+    }
+
+
+def test_health_snapshot_is_collected_and_persisted_without_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot = {
+        "snapshot_hash": "a" * 64,
+        "authority_counters": {
+            "run_authority_mismatch_count": 0,
+            "feedback_authority_mismatch_count": 0,
+            "exchange_contact_count": 0,
+            "trading_action_count": 0,
+            "proof_claim_count": 0,
+            "serving_or_promotion_count": 0,
+        },
+        "no_authority": {"trading_authority": False},
+    }
+    monkeypatch.setattr(
+        consumer,
+        "collect_health_snapshot",
+        lambda connection, *, source_head: snapshot,
+    )
+    monkeypatch.setattr(
+        consumer,
+        "persist_health_snapshot",
+        lambda connection, value: {"status": "PERSISTED", "snapshot_hash": "a" * 64},
+    )
+
+    result = process_health_snapshot(object(), source_head="b" * 40)
+
+    assert result == {
+        "health_snapshots": 1,
+        "health_authority_mismatches": 0,
     }
 
 
