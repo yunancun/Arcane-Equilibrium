@@ -129,11 +129,11 @@ Workflow({ name: "openclaw-full-audit", args: { baseline, focus, axes?, scope?, 
 `openclaw-full-audit` 找**問題**（工程質量：bug/合規/安全），對偶的 `profit-diagnosis` 找**錢**（盈利歸因 + 開發方向）。交易系統的研判需兩者並用——前者保系統不出事，後者保系統會賺錢。
 
 `Workflow({ name: "profit-diagnosis", args: { baseline, scope, focus, priors } })` — read-only，三階段：
-- **Evidence**：MIT/AI-E 共享取數（fills/edge/gate 拒單統計/dormant 清單/AI 成本 ROI/profit-first loop 候選與 order-fill proof 狀態）——共享一次取數防 4 probe 重複拉 runtime
-- **Probe**：QC/BB/MIT/AI-E 各域**守**（診斷現有錢漏 leak/凍 frozen/沒賺 unrealized，基於 runtime 證據；over-gate 雙向按淨貢獻計價）+**攻**（侵略性、跳出現有範式、最廣 scope 含非-Bybit IBKR lane；用各 lens 原生數學找結構性·機械性 edge——operator 6/14 鐵則；可 WebSearch 借鑒外部）；死軸自動重派一輪
-- **Map**：PA 綜合成 ROI 排序的開發機會地圖（守攻分區、翻牆概率、證據等級、regime 標記、驗證路徑、owner）；覆蓋缺口（死軸/BLOCKED）顯式進 return，≠該域清白
+- **Evidence**：MIT/AI-E 共享取數（fills/edge/gate 拒單統計/dormant 清單/AI 成本 ROI/profit-first loop 候選與 order-fill proof 狀態）——共享一次取數防內視角 4 probe（EXT 不取 runtime）重複拉；死軸重派一輪
+- **Probe**：QC/BB/MIT/AI-E 各域**守**（診斷現有錢漏 leak/凍 frozen/沒賺 unrealized，基於 runtime 證據；over-gate 雙向按淨貢獻計價）+**攻**（侵略性、跳出現有範式、最廣 scope 含非-Bybit IBKR lane；用各 lens 原生數學找結構性·機械性 edge——operator 6/14 鐵則）+**EXT 外部成熟經驗軸**（QC 擔任，必用 WebSearch/WebFetch：別人如何在同樣的牆——VIP0 無 rebate/小資本——前賺錢；schema 強制 sources[url+claim_quote 實開引句]+local_constraint_fit 映射回本地約束，防幻覺引用）；死軸/空手軸自動重派一輪
+- **Map**：PA 綜合成 ROI 排序的開發機會地圖（defend/attack/unlock/learn 四分區、翻牆概率、證據等級、regime 標記、驗證路徑、owner）；覆蓋缺口（死軸/BLOCKED）顯式進 return，≠該域清白
 
-鐵律：所有 edge 數字帶 runtime 證據不憑記憶；bull-only 標 regime-bet 且標記須傳遞到 top_moves；**conductor 每輪必以 `priors` 注入現行已判定裁決快照（主會話 memory 在手零過時；腳本內建 fallback 是 2026-07-09 快照）——已 NO-GO/KILL 方向無推翻證據不得重提，禁止重跑同一測試**；attack 類 ASSUMPTION 機會先 leak-free 驗證（QC walk-forward / 歷史 kline backfill）才升格開發項，不直接投產；最快驗證路徑（flag-off/dormant 解凍，近零成本）優先於開發新東西；top_moves 候選優先送 profit-first loop 的 discover→admit 通道（spec `docs/agents/profit-first-autonomy-loop.md`），不與 standing loop 形成平行開發權威。
+鐵律：**姿態（operator 鐵則）：強硬堅強找出一切盈利可能——挫折第一反應=換思路+搜外部信息+學成熟經驗，不是放棄；空手紀律雙重強制——schema minItems:1（tool-call 層硬拒+重試，2026-07-09 smoke 實證）+ 代碼級後備（空手軸重派、二輪仍空進 coverage）+ 承重欄位 minLength 防樣板句，「本域無機會/現無廉價 lever/只能等」不可接受為最終答案，直接機會稀薄時以 unlock（前提解鎖監測）與 learn（外部經驗引入）補位——姿態強硬但證據誠實（FACT 須可重跑，Map 對擬入榜 FACT 抽跑核對）**。所有 edge 數字帶 runtime 證據不憑記憶；bull-only 標 regime-bet 且標記須傳遞到 top_moves；**conductor 每輪必以 `priors` 注入現行已判定裁決快照（主會話 memory 在手零過時；腳本內建 fallback 是 2026-07-09 快照）——已 NO-GO/KILL 方向無推翻證據不得重提，禁止重跑同一測試；但 NO-GO 是換思路的路標非終點，被鎖方向的前提（fee tier/資本/infra）是 operator 槓桿，監測解鎖是合法機會項**；attack 類 ASSUMPTION 機會先 leak-free 驗證（QC walk-forward / 歷史 kline backfill）才升格開發項，不直接投產；最快驗證路徑（flag-off/dormant 解凍，近零成本）優先於開發新東西；top_moves 候選優先送 profit-first loop 的 discover→admit 通道（spec `docs/agents/profit-first-autonomy-loop.md`），不與 standing loop 形成平行開發權威。
 
 ## 與常規鏈的關係
 
