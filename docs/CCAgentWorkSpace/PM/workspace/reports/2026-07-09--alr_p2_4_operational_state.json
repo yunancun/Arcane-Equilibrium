@@ -1,0 +1,27 @@
+{
+  "schema_version": "alr_p2_4_operational_state_v1",
+  "state": "P2_4_DONE_P2_5_ACTIVE",
+  "source_head": "cf2fb7607b5bacf35bc2a50f168453f10dfbada9",
+  "service": {
+    "name": "openclaw-alr-shadow.service",
+    "active": true,
+    "source_head_pinned": true,
+    "engine_restarted": false
+  },
+  "observed": {
+    "scanner_before": 79744,
+    "scanner_after": 79744,
+    "training_runs": 1,
+    "training_input_edges": 32,
+    "source_key_duplicates": 0,
+    "authority_mismatches": 0
+  },
+  "authority": {
+    "exchange": false,
+    "trading": false,
+    "proof": false,
+    "serving": false,
+    "promotion": false
+  },
+  "next": "P2-5 ProofPacket/RewardLedger feedback and deferred-target rotation"
+}
