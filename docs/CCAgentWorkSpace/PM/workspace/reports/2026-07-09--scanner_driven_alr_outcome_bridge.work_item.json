@@ -1,0 +1,63 @@
+{
+  "schema": "alr_work_item_v1",
+  "created_at": "2026-07-09T01:49:54Z",
+  "work_item_id": "P0-AIML-ALR-OUTCOME-BRIDGE",
+  "boundary_label": "SOURCE_ONLY_OFFLINE_P0_P1",
+  "status": "DONE",
+  "owner_chain": [
+    "PM",
+    "PA",
+    "E1",
+    "E2",
+    "E4",
+    "QA",
+    "PM"
+  ],
+  "selected_row_status_before": "ACTIVE",
+  "target_files": [
+    "program_code/ml_training/alr_outcome_bridge.py",
+    "program_code/ml_training/tests/test_alr_outcome_bridge.py",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/queue.md",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/manifest.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_outcome_bridge.work_item.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_outcome_bridge.effect_review.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_outcome_bridge.state_packet.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_outcome_bridge.md",
+    "docs/CCAgentWorkSpace/Operator/2026-07-09--scanner_driven_alr_outcome_bridge.md"
+  ],
+  "forbidden_files": [
+    "TODO.md",
+    "docs/adr/",
+    "docs/amd/",
+    "sql/migrations/",
+    "runtime config",
+    "exchange connectors",
+    "_latest artifacts"
+  ],
+  "acceptance_pins": [
+    "alr_outcome_bridge_v1",
+    "proof_packet_v1",
+    "reward_ledger_v1",
+    "existing proof and reward validators reused",
+    "DEFER_EVIDENCE for incomplete evidence",
+    "BLOCKED_BOUNDARY for authority contamination",
+    "repeat evidence clone bypass rejected",
+    "case-insensitive _latest path rejection",
+    "no STOP_NO_EDGE emitted",
+    "SOURCE_ONLY_OFFLINE_P0_P1"
+  ],
+  "dependencies": [
+    "P0-AIML-ALR-CONTROLLER-CONTRACTS",
+    "P0-AIML-ALR-LEARNING-TARGET-ARBITER",
+    "PA(default) design",
+    "E1(worker) implementation and rework",
+    "E2(explorer) final PASS",
+    "E4(worker) PASS",
+    "QA(worker) ACCEPT"
+  ],
+  "unblocks": [
+    "P0-AIML-ALR-RETENTION-GUARDIAN-DRY-RUN"
+  ],
+  "repo_head_before": "c4e127ebe0c74b933a6b2785f4c4fa9cbaa8e5f3",
+  "repo_head_after": "c4e127ebe0c74b933a6b2785f4c4fa9cbaa8e5f3"
+}
