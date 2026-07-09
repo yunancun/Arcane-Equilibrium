@@ -1,0 +1,20 @@
+{
+  "schema": "alr_broker_boundary_review_request_v1",
+  "created_at": "2026-07-09T00:00:00Z",
+  "request_id": "P2-2-ALR-PERSISTENCE-FRESH-BB",
+  "work_item": "P2-2-ALR-APPEND-ONLY-PERSISTENCE",
+  "e3_review": "docs/CCAgentWorkSpace/E3/workspace/reports/2026-07-09--alr_p2_2_persistence_scope_e3_review.md",
+  "e3_verdict": "APPROVE_FOR_PM_BB_P2_2_SCOPE_REVIEW",
+  "scope": "local append-only learning.alr_* migration/repository and isolated PostgreSQL test only",
+  "broker_surface_assertions": {
+    "bybit_rest": false,
+    "bybit_websocket": false,
+    "official_mcp": false,
+    "credentials": false,
+    "orders_or_probes": false,
+    "decision_lease": false,
+    "cost_gate": false,
+    "serving_or_promotion": false
+  },
+  "requested_verdict": "APPROVE_FOR_PM_P2_2_SOURCE_AND_ISOLATED_DB_TESTS"
+}

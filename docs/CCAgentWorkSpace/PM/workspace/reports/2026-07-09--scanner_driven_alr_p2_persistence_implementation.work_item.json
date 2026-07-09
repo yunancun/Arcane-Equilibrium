@@ -1,0 +1,27 @@
+{
+  "schema": "alr_work_item_v1",
+  "created_at": "2026-07-09T00:00:00Z",
+  "work_item_id": "P2-2-ALR-APPEND-ONLY-PERSISTENCE",
+  "boundary_label": "ALR_OPERATIONAL_COMPLETION_V2",
+  "status": "READY_FOR_PREAPPLY_ALIGNMENT",
+  "owner_chain": ["PM", "E3", "BB", "PA", "E1", "E2", "E4", "QA", "PM"],
+  "execution_mode": "ROLE_FALLBACK_SINGLE_SESSION",
+  "target_files": [
+    "sql/migrations/V151__alr_persistence_foundation.sql",
+    "program_code/ml_training/alr_persistence_repository.py",
+    "program_code/ml_training/tests/test_alr_persistence_repository.py"
+  ],
+  "acceptance_met": [
+    "append-only learning.alr_* migration with guard and privilege contracts",
+    "parameterized read-only scanner query plus atomic persistence repository",
+    "duplicate, conflict, restart, mapping-row, and concurrent-insert handling",
+    "isolated PostgreSQL double-apply and real repository integration evidence",
+    "two identical focused plus adjacent regression runs"
+  ],
+  "remaining_before_done": [
+    "commit/push the exact source",
+    "Mac/GitHub/Linux head alignment and clean Linux checkout",
+    "V151-only existing-PG dry-run/apply and postapply verification"
+  ],
+  "next_work_item": "P2-2-THREE-HEAD-PREAPPLY-ALIGNMENT"
+}
