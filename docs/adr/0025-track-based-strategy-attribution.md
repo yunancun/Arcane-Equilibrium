@@ -129,7 +129,7 @@ intent marked `BLOCKED_CROSSTRACK`.
 ## Implementation Anchors
 
 - Rust enum: `openclaw_types/src/track.rs` (new)
-- Migration: V101 + V102 v3 spec — see `docs/execution_plan/2026-05-20--v101_v102_track_attribution_migration_spec.md`
+- Migration: V101 + V102 v3 spec — see `docs/archive/2026-07-09--execution_plan_v58_closed/2026-05-20--v101_v102_track_attribution_migration_spec.md`
 - Guardian check 6: deferred; spec language updated.
 - GUI tabs (progressive): N+1 SQL views + REST endpoint only; N+2
   summary tab after 14d data.

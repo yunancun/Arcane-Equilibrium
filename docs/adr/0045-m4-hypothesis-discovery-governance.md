@@ -4,9 +4,9 @@ Date: 2026-05-21
 Status: **Reserved** (per R4 C-1 audit 2026-05-21 — M4 spec ADR-0042 → ADR-0045 reassignment due to ADR-0042 編號衝突 with M3 health monitoring；本 ADR 為 placeholder 待 Sprint 6+ M4 IMPL 階段 PM dispatch TW 補完整 Decision/Consequences/Sign-off)
 Operator Sign-off: PENDING (Sprint 1A-ε 後續 / Sprint 6+ M4 IMPL 啟動前)
 Related:
-- `docs/execution_plan/2026-05-21--m4_hypothesis_discovery_design_spec.md` (877 行 PA design spec；§10 V103 EXTEND outline + §9 Cowork hybrid path)
-- `docs/execution_plan/2026-05-21--m4_minimum_bar_and_leakage_protocol.md` (839 行 Wave 2 land；6 attribute minimum bar + leakage protocol baseline)
-- `docs/execution_plan/2026-05-21--v103_extend_m4_hypothesis_columns_schema_spec.md` (pending MIT Sprint 1A-ε land；V103 EXTEND 6 column full DDL)
+- `docs/archive/2026-07-09--execution_plan_v58_closed/2026-05-21--m4_hypothesis_discovery_design_spec.md` (877 行 PA design spec；§10 V103 EXTEND outline + §9 Cowork hybrid path)
+- `docs/archive/2026-07-09--execution_plan_v58_closed/2026-05-21--m4_minimum_bar_and_leakage_protocol.md` (839 行 Wave 2 land；6 attribute minimum bar + leakage protocol baseline)
+- `docs/archive/2026-07-09--execution_plan_v58_closed/2026-05-21--v103_extend_m4_hypothesis_columns_schema_spec.md` (pending MIT Sprint 1A-ε land；V103 EXTEND 6 column full DDL)
 - ADR-0024 Cowork subscription operator-assistant
 - ADR-0034 LAL (M1 LAL Tier 1-2 audit for M4 DRAFT writeback Decision Lease)
 - ADR-0037 M9 A/B framework (M4 hypothesis 走 M9 cluster 4 exit logic variant test)

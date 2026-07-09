@@ -318,7 +318,7 @@ CREATE INDEX IF NOT EXISTS idx_replay_div_log_ts_desc
 - **ADR-0007**：`docs/adr/0007-mac-dev-linux-runtime-split.md`（Mac 不跑 full replay）
 - **ADR-0010**：`docs/adr/0010-timescale-hypertable-with-guard-migrations.md`（V107 Guard 範式）
 - **v5.7 §6 market.liquidations writer existing**：`docs/execution_plan/2026-05-20--execution-plan-v5.7.md`
-- **BB W-AUDIT-8a C1 spec**：`docs/execution_plan/2026-05-15--w_audit_8a_c1_liquidation_topic_probe_plan.md`
+- **BB W-AUDIT-8a C1 spec**：`docs/archive/2026-07-09--execution_plan_v58_closed/2026-05-15--w_audit_8a_c1_liquidation_topic_probe_plan.md`
 - **BB C6 PROOF PASS memory**：`memory/project_decision_outcomes_not_dead.md`（`market.liquidations` 31,473 rows accumulated 證據）
 - **Bybit API reference**：`docs/references/2026-04-04--bybit_api_reference.md:1080-1108`（Bybit V5 historical liquidations 不存在 confirmation）
 - **AMD-2026-05-15-01**：`docs/governance_dev/amendments/2026-05-15--canary_rebase_replay_preflight.md`（Stage 0R preflight 共用 replay engine）
