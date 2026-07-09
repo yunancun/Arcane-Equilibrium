@@ -1,0 +1,136 @@
+/* ═══════════════════════════════════════════════════════════════════
+   玄衡 Console — 設計 token 正本(玄衡儀 · 2026-07-10 operator 裁決版)
+   ═══════════════════════════════════════════════════════════════════
+   來源:GUI-DESIGN-WORKING-DOC.md §0(裁決)+ §2(結構性基線,沿用)
+   雙主題:玄夜(玄底帛字,黑漆儀器)/ 帛晝(帛底玄字,絹紙卷宗)
+   ——同一五色在兩個地面互換角色,不是數值反轉。
+   切換協議:OS 偏好默認(prefers-color-scheme)+ 顯式 data-theme 覆蓋,
+   顯式必勝(兩個方向都要贏過 media query)。
+   紅色紀律(canon 9):--neg 虧損文字紅 / --live 真金熱紅(永不稀釋)
+   / --seal 朱鈐印(只以方印形制出現,絕不做文字色)。不得新增第四紅。
+   Phase 0 用法:所有 tab <link> 本檔;刪 JS 注入 :root 與 console.html
+   inline :root;禁 inline style=(唯一豁免:JS 寫 scoped var)。
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root{
+  /* ── 字體堆疊(系統字,無 webfont CDN)── */
+  --font-sans: system-ui,-apple-system,"Segoe UI",Roboto,"PingFang TC","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif;
+  --font-mono: ui-monospace,"SF Mono","JetBrains Mono","IBM Plex Mono",Menlo,Consolas,monospace;
+  /* 銘文:只用於面板題/卷宗態大標,每屏 ≤3 處(canon 11);數據區永不用襯線 */
+  --font-serif: "Songti TC","Songti SC","Noto Serif TC","Noto Serif CJK SC","Source Han Serif TC",Georgia,serif;
+
+  /* ── 字階(px)— 淺層刻意;13 是重心 ── */
+  --fs-micro:11px; --fs-dense:12px; --fs-base:13px; --fs-md:14px;
+  --fs-section:15px; --fs-title:20px; --fs-hero:27px; --fs-hero-lg:32px;
+
+  /* ── 行高(拉丁)── */
+  --lh-solid:1.0; --lh-tight:1.15; --lh-snug:1.30; --lh-normal:1.45; --lh-cjk:1.60;
+
+  /* ── 字距 ── */
+  --ls-hero:-0.02em; --ls-title:-0.01em; --ls-normal:0;
+  --ls-label:0.01em; --ls-eyebrow:0.08em; --ls-caps:0.04em;
+  /* 絲印標籤(儀表態 metadata 行):小號等寬全大寫,CJK 永不 uppercase(canon 4) */
+  --ls-silk:0.12em;
+
+  /* ── 字重(510 = 12-13px 下的主力強調;500 太弱)── */
+  --weight-regular:400; --weight-medium:510; --weight-semi:600;
+
+  /* ── 數字:每個數字都要 tabular + slashed zero ── */
+  --num-features:"tnum" 1,"zero" 1;
+
+  /* ── 間距(4px 基)── */
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px; --sp-6:32px; --sp-7:48px; --sp-8:64px;
+
+  /* ── 半徑(數據控件永不 pill)── */
+  --r-1:5px; --r-2:8px; --r-3:12px;
+  --r-full:9999px; /* 僅狀態點/toggle */
+  --r-seal:2px;    /* 朱印:方印形制,近直角 */
+
+  /* ── 密度 ── */
+  --row-h:34px; --cell-pad:8px 12px; /* comfortable(默認) */
+
+  /* ── 動效(functional-only;衡樑例外見 --dur-beam)── */
+  --dur-fast:120ms; --dur-base:200ms; --ease-out:cubic-bezier(.2,0,0,1);
+  --dur-beam:500ms; /* 衡樑環境緩動,全站唯一;reduced-motion 下靜止 */
+
+  /* ═══ 帛晝(light,base)— 帛底玄字,絹紙卷宗 ═══ */
+  /* 地面:暖紙,不用純白冷白 */
+  --bg-app:#F1EBE0; --bg-surface:#F8F4EB; --bg-raised:#FDFAF3;
+  --bg-hover:#EAE3D5; --bg-sunken:#E9E1D2;
+  /* 髮絲線:玄墨的 alpha 階(海拔靠亮度+髮絲線,不靠陰影,canon 5) */
+  --border-subtle:rgba(34,27,24,.13); --border-strong:rgba(34,27,24,.26);
+  /* 文字:玄墨 */
+  --text-primary:#221B18; --text-secondary:#5C544B; --text-muted:#8A8073;
+  /* 青銅 accent:焦點/選中/衡樑/品牌刻度,不給數據不給裝飾(canon 10) */
+  --accent:#7C6434; --accent-weak:rgba(124,100,52,.12);
+  /* 語義:漲跌永附第二通道 ▲▼(canon 3) */
+  --pos:#1E7F5C; --pos-bg:rgba(30,127,92,.11);
+  --neg:#C13A3A; --neg-bg:rgba(193,58,58,.10);
+  /* warn 用琥珀,與青銅拉開,必附 ⚠(canon 10) */
+  --warn:#9A6700; --warn-bg:rgba(154,103,0,.12);
+  /* 真金熱紅:兩主題永不稀釋(canon 6) */
+  --live:#D93036; --live-bg:rgba(217,48,54,.12);
+  /* 朱鈐印:只給 sealed/authority 態,只以方印形制出現(canon 9) */
+  --seal:#A63A26; --seal-bg:rgba(166,58,38,.08);
+  --focus:var(--accent);
+  --shadow-pop:0 12px 34px rgba(34,27,24,.16); /* 僅真浮層(modal/popover) */
+  color-scheme:light dark;
+}
+
+/* ═══ 玄夜(dark)— 玄底帛字,黑漆儀器 ═══
+   OS 偏好默認 + 顯式 toggle 皆勝出 */
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg-app:#171114; --bg-surface:#1D1619; --bg-raised:#241B1F;
+    --bg-hover:#2A2025; --bg-sunken:#120D10;
+    --border-subtle:rgba(233,228,218,.10); --border-strong:rgba(233,228,218,.22);
+    --text-primary:#E9E4DA; --text-secondary:#A89F92; --text-muted:#877F72;
+    --accent:#B49B5F; --accent-weak:rgba(180,155,95,.13);
+    --pos:#3FB68B; --pos-bg:rgba(63,182,139,.13);
+    --neg:#E5484D; --neg-bg:rgba(229,72,77,.12);
+    --warn:#D98E1F; --warn-bg:rgba(217,142,31,.13);
+    --live:#FF5457; --live-bg:rgba(255,84,87,.14);
+    --seal:#B8442E; --seal-bg:rgba(184,68,46,.10);
+    --shadow-pop:0 16px 40px rgba(0,0,0,.55);
+  }
+}
+:root[data-theme="dark"]{
+  --bg-app:#171114; --bg-surface:#1D1619; --bg-raised:#241B1F;
+  --bg-hover:#2A2025; --bg-sunken:#120D10;
+  --border-subtle:rgba(233,228,218,.10); --border-strong:rgba(233,228,218,.22);
+  --text-primary:#E9E4DA; --text-secondary:#A89F92; --text-muted:#877F72;
+  --accent:#B49B5F; --accent-weak:rgba(180,155,95,.13);
+  --pos:#3FB68B; --pos-bg:rgba(63,182,139,.13);
+  --neg:#E5484D; --neg-bg:rgba(229,72,77,.12);
+  --warn:#D98E1F; --warn-bg:rgba(217,142,31,.13);
+  --live:#FF5457; --live-bg:rgba(255,84,87,.14);
+  --seal:#B8442E; --seal-bg:rgba(184,68,46,.10);
+  --shadow-pop:0 16px 40px rgba(0,0,0,.55);
+}
+
+/* ── 密度切換 ── */
+:root[data-density="compact"]{ --row-h:27px; --cell-pad:4px 10px; --fs-base:12px; --fs-md:13px; }
+
+/* ── 基礎原子(Phase 0 起全站共用)── */
+.num{
+  font-family:var(--font-mono);
+  font-variant-numeric:tabular-nums slashed-zero;
+  font-feature-settings:var(--num-features);
+  font-variant-ligatures:none;
+  text-align:right;
+}
+/* 銘文題(canon 11):宋體,每屏 ≤3 處 */
+.inscription{ font-family:var(--font-serif); letter-spacing:.06em; }
+/* 絲印標籤(儀表態 metadata):小號等寬全大寫,僅拉丁 */
+.silk{ font-family:var(--font-mono); font-size:var(--fs-micro);
+       letter-spacing:var(--ls-silk); text-transform:uppercase;
+       color:var(--text-muted); }
+/* 朱印(canon 9):方印形制,絕不做文字色 */
+.seal-mark{ display:inline-flex; align-items:center; justify-content:center;
+            width:16px; height:16px; border:1px solid var(--seal);
+            color:var(--seal); background:var(--seal-bg);
+            font-family:var(--font-serif); font-size:10px;
+            border-radius:var(--r-seal); }
+
+:focus-visible{ outline:2px solid var(--focus); outline-offset:2px; }
+@media (prefers-reduced-motion:reduce){ *{ transition:none!important; animation:none!important; } }
