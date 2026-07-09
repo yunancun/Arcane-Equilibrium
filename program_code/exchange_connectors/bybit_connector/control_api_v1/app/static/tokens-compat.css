@@ -1,0 +1,44 @@
+/* ═══════════════════════════════════════════════════════════════════
+   tokens-compat.css — Phase 0 過渡映射層(舊 token 名 → 玄衡儀語義 token)
+   ═══════════════════════════════════════════════════════════════════
+   用途:GUI 大改 P0.1 刪除三處 token fork(styles.css :root /
+   common.js ocInjectBaseCSS :root / console.html inline :root)後,
+   存量代碼仍引用舊 token 名;本檔以 var() 別名橋接到 tokens.css 語義
+   token,讓舊消費點在兩主題下自動取得正確值,全檔不寫任何 hex。
+   生命週期:P0.4 樣式收斂(全部消費點改用新語義 token)完成後整檔刪除。
+   載入順序:必須在 tokens.css 之後、其餘樣式之前 <link>。
+   特別裁決:--blue → var(--text-secondary) 是 canon 1(monochrome
+   chrome,非數據一律中性色)的中性化裁決 —— 舊 --blue 承載「中性資訊」
+   語義,新體系中性資訊不再用彩色;全 static/ 實測 41 個 --blue 消費點
+   (40 個 var(--blue) + 1 個帶字面 fallback 的 var() 型於 tab-governance.html,
+   2026-07-10 grep),P0.4 逐一複審決定各自歸宿(中性文字/accent/語義色)。
+   同名不入檔:--accent、--warn 舊名與 tokens.css 新定義同名,
+   由 tokens.css 直接生效,不在本檔重複映射。
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root{
+  /* ── 地面/邊框 ── */
+  --bg: var(--bg-app);
+  --card-bg: var(--bg-surface);
+  --card: var(--bg-surface);
+  --border: var(--border-subtle);
+
+  /* ── 文字 ── */
+  --text: var(--text-primary);
+  --text-dim: var(--text-secondary);
+  --dim: var(--text-secondary);
+  --muted: var(--text-muted);
+  --neutral: var(--text-muted);
+
+  /* ── 語義色 ── */
+  --green: var(--pos);
+  --good: var(--pos);
+  --red: var(--neg);
+  --bad: var(--neg);
+  --yellow: var(--warn);
+  /* canon 1 中性化裁決:舊「中性資訊藍」不再是彩色,詳見檔頭 */
+  --blue: var(--text-secondary);
+
+  /* ── 形制 ── */
+  --card-radius: var(--r-2);
+}
