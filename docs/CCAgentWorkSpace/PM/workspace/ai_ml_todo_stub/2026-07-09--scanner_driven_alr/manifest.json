@@ -2,10 +2,10 @@
   "schema": "ai_ml_alr_todo_stub_manifest_v1",
   "created_at": "2026-07-09",
   "owner": "PM",
-  "status": "P1_COMPLETE_P2_READINESS_PENDING",
-  "maturity_label": "ALR_P1_SOURCE_ONLY_COMPLETE",
+  "status": "SOURCE_ONLY_DONE_BLOCKED_BOUNDARY_FOR_P2_RUNTIME",
+  "maturity_label": "ALR_P1_SOURCE_ONLY_COMPLETE_P2_AUDITED_NOT_APPLIED",
   "boundary_label": "SOURCE_ONLY_OFFLINE_P0_P1",
-  "repo_head_observed": "9d97e3998bc96d380781071042e5392b2c5e9a85",
+  "repo_head_observed": "907a476afa824fc6672b8b440d8bd9b9b369df25",
   "authority": {
     "root_todo_authority": false,
     "requires_pm_import_to_root_todo": true,
@@ -64,5 +64,5 @@
       "root TODO.md import"
     ]
   },
-  "current_entry_item": "P2-READINESS-AUDIT-SOURCE-ONLY"
+  "current_entry_item": "DONE_SOURCE_ONLY"
 }
