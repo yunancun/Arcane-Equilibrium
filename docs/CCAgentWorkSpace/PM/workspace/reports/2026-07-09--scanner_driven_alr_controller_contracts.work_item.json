@@ -1,0 +1,61 @@
+{
+  "schema": "alr_work_item_v1",
+  "created_at": "2026-07-09T00:42:29Z",
+  "work_item_id": "P0-AIML-ALR-CONTROLLER-CONTRACTS",
+  "boundary_label": "SOURCE_ONLY_OFFLINE_P0_P1",
+  "status": "DONE",
+  "owner_chain": [
+    "PM",
+    "PA",
+    "E1",
+    "E2",
+    "E4",
+    "QA",
+    "PM"
+  ],
+  "selected_row_status_before": "ACTIVE",
+  "target_files": [
+    "program_code/ml_training/alr_controller_contracts.py",
+    "program_code/ml_training/tests/test_alr_controller_contracts.py",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/queue.md",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/manifest.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_controller_contracts.work_item.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_controller_contracts.effect_review.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_controller_contracts.state_packet.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_controller_contracts.md",
+    "docs/CCAgentWorkSpace/Operator/2026-07-09--scanner_driven_alr_controller_contracts.md"
+  ],
+  "forbidden_files": [
+    "TODO.md",
+    "docs/adr/",
+    "docs/amd/",
+    "sql/migrations/",
+    "runtime config",
+    "exchange connectors",
+    "_latest artifacts"
+  ],
+  "acceptance_pins": [
+    "alr_work_item_v1",
+    "alr_effect_review_v1",
+    "alr_loop_state_packet_v1",
+    "first unblocked row selector",
+    "actual ALR queue status support",
+    "loop_contract minimum state fields",
+    "fail-closed authority scanner",
+    "SOURCE_ONLY_OFFLINE_P0_P1"
+  ],
+  "dependencies": [
+    "P0-AIML-ALR-BOUNDARY-PACKET",
+    "PA(default) design",
+    "E1(worker) implementation and rework",
+    "E2(explorer) final PASS",
+    "E4(worker) regression PASS",
+    "QA(worker) ACCEPT"
+  ],
+  "unblocks": [
+    "P0-AIML-ALR-LEARNING-TARGET-ARBITER",
+    "P0-AIML-ALR-RETENTION-GUARDIAN-DRY-RUN after selector-compatible disjoint work selection"
+  ],
+  "repo_head_before": "fc33dc39759fa7bea051bb4101c619541ff20f4f",
+  "repo_head_after": "fc33dc39759fa7bea051bb4101c619541ff20f4f"
+}
