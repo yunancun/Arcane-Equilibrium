@@ -1,0 +1,75 @@
+{
+  "schema": "alr_loop_state_packet_v1",
+  "created_at": "2026-07-09T02:28:59Z",
+  "repo_head_before": "8f90c46f53ee3ab54a27b16ab750b10780732924",
+  "repo_head_after": "8f90c46f53ee3ab54a27b16ab750b10780732924",
+  "selected_work_item": "P0-AIML-ALR-RETENTION-GUARDIAN-DRY-RUN",
+  "selection_reason": "First ACTIVE row after outcome bridge checkpoint; final remaining P0 row in scanner-driven ALR source-only queue.",
+  "state": "DONE",
+  "next_state": "P0_COMPLETE_P1_DEFERRED",
+  "next_action": "Stop the foreground P0 source-development loop. All P0 rows are DONE or DONE_WITH_CONCERNS; P1 rows remain DEFERRED_P0 and require explicit future PM activation before implementation.",
+  "stop_reason": null,
+  "owned_files": [
+    "program_code/ml_training/alr_retention_guardian_dry_run.py",
+    "program_code/ml_training/tests/test_alr_retention_guardian_dry_run.py",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/queue.md",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/manifest.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_retention_guardian_dry_run.work_item.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_retention_guardian_dry_run.effect_review.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_retention_guardian_dry_run.state_packet.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_retention_guardian_dry_run.md",
+    "docs/CCAgentWorkSpace/Operator/2026-07-09--scanner_driven_alr_retention_guardian_dry_run.md"
+  ],
+  "verification_commands": [
+    "PYTHONPATH=program_code PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile program_code/ml_training/alr_retention_guardian_dry_run.py program_code/ml_training/tests/test_alr_retention_guardian_dry_run.py",
+    "PYTHONPATH=program_code PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q program_code/ml_training/tests/test_alr_retention_guardian_dry_run.py -p no:cacheprovider",
+    "PYTHONPATH=program_code PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q program_code/ml_training/tests/test_alr_retention_guardian_dry_run.py program_code/ml_training/tests/test_alr_outcome_bridge.py program_code/ml_training/tests/test_learning_target_arbiter.py program_code/ml_training/tests/test_alr_controller_contracts.py -p no:cacheprovider",
+    "git diff --check -- program_code/ml_training/alr_retention_guardian_dry_run.py program_code/ml_training/tests/test_alr_retention_guardian_dry_run.py"
+  ],
+  "candidate_matched_fills_count": 0,
+  "proof_packet_ready_count": 0,
+  "reward_ledger_ready_count": 0,
+  "effect_review_ready": true,
+  "model_training_performed": false,
+  "serving_authority_granted": false,
+  "llm_authority": false,
+  "runtime_authority": false,
+  "exchange_authority": false,
+  "trading_authority": false,
+  "boundary_escalation_required": false,
+  "dispatch_tooling_available": true,
+  "dispatch_blocker": null,
+  "role_chain": [
+    {
+      "role": "PA(default)",
+      "status": "DONE",
+      "verdict": "approved standalone source-only dry-run helper scope"
+    },
+    {
+      "role": "E1(worker)",
+      "status": "DONE_WITH_CONCERNS",
+      "verdict": "implemented; initial pytest required venv/PYTHONPATH invocation"
+    },
+    {
+      "role": "E2(explorer)",
+      "status": "DONE",
+      "verdict": "PASS after raw-schema, ref-graph, input-hash, and static-guard fixes"
+    },
+    {
+      "role": "E4(default)",
+      "status": "DONE",
+      "verdict": "PASS after bounded-output, symlink, and exclusive-create fixes"
+    },
+    {
+      "role": "QA(default)",
+      "status": "DONE",
+      "verdict": "ACCEPT after output-dir and ancestor symlink guard"
+    }
+  ],
+  "concerns": [
+    "alr_retention_guardian_dry_run.py is over the 800-line review-attention threshold and below the 2000-line hard cap.",
+    "Explicit local JSON IO is present only for guarded single-shot CLI paths.",
+    "Unrelated dirty files were present and preserved outside the owned file set.",
+    "P1 rows remain DEFERRED_P0 and were not implemented."
+  ]
+}

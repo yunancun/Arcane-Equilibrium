@@ -1,0 +1,67 @@
+{
+  "schema": "alr_work_item_v1",
+  "created_at": "2026-07-09T02:28:59Z",
+  "work_item_id": "P0-AIML-ALR-RETENTION-GUARDIAN-DRY-RUN",
+  "boundary_label": "SOURCE_ONLY_OFFLINE_P0_P1",
+  "status": "DONE",
+  "owner_chain": [
+    "PM",
+    "PA",
+    "E1",
+    "E2",
+    "E4",
+    "QA",
+    "PM"
+  ],
+  "selected_row_status_before": "ACTIVE",
+  "target_files": [
+    "program_code/ml_training/alr_retention_guardian_dry_run.py",
+    "program_code/ml_training/tests/test_alr_retention_guardian_dry_run.py",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/queue.md",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/manifest.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_retention_guardian_dry_run.work_item.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_retention_guardian_dry_run.effect_review.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_retention_guardian_dry_run.state_packet.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_retention_guardian_dry_run.md",
+    "docs/CCAgentWorkSpace/Operator/2026-07-09--scanner_driven_alr_retention_guardian_dry_run.md"
+  ],
+  "forbidden_files": [
+    "TODO.md",
+    "docs/adr/",
+    "docs/amd/",
+    "sql/migrations/",
+    "runtime config",
+    "exchange connectors",
+    "_latest artifacts",
+    "existing retention prune/apply scripts",
+    "cron or daemon configuration"
+  ],
+  "acceptance_pins": [
+    "retention_guardian_dry_run_v1",
+    "retention_guardian_artifact_manifest_v1",
+    "hash-bound input manifest",
+    "hash-bound transitive reference graph",
+    "proof audit dispute lineage negative artifacts protected",
+    "unknown refs fail closed",
+    "raw missing and extra artifact fields fail closed",
+    "input_hashes match target content_sha256 edges",
+    "no delete move chmod symlink apply prune wrapper",
+    "bounded output directory and exclusive create",
+    "SOURCE_ONLY_OFFLINE_P0_P1"
+  ],
+  "dependencies": [
+    "P0-AIML-ALR-CONTROLLER-CONTRACTS",
+    "P0-AIML-ALR-LEARNING-TARGET-ARBITER",
+    "P0-AIML-ALR-OUTCOME-BRIDGE",
+    "PA(default) design",
+    "E1 implementation",
+    "E2 final PASS",
+    "E4 final PASS",
+    "QA ACCEPT"
+  ],
+  "unblocks": [
+    "P0 source-only queue completion; P1 rows remain DEFERRED_P0 pending explicit PM activation"
+  ],
+  "repo_head_before": "8f90c46f53ee3ab54a27b16ab750b10780732924",
+  "repo_head_after": "8f90c46f53ee3ab54a27b16ab750b10780732924"
+}
