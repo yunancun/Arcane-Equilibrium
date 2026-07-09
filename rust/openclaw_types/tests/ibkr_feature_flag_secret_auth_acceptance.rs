@@ -48,6 +48,9 @@ fn accepted_artifact_fixture(secret: &IbkrSecretSlotContractV1) -> IbkrPhase2Gat
         api_session_topology: topology,
         raw_artifact_hash: "e".repeat(64),
         redacted_summary_hash: "f".repeat(64),
+        // T1：approval_lineage_hash 需合法 64-hex 才不觸 ApprovalLineageHashInvalid
+        //（單點解除 accepted_matrix 衍生崩；contact 靠 default 常量）。
+        approval_lineage_hash: "e".repeat(64),
         ..IbkrPhase2GateArtifactV1::default()
     }
 }

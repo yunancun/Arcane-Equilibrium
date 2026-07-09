@@ -14,7 +14,8 @@
 //!   - `seal_phase2_artifact`（write-once seal，雙綠 + triangulation 才寫）
 //!   - `phase2_producer_outcome` / `phase2_gate_producer_summary`（report 面）
 //!   - `phase2_immutable_pass_artifact_present`（precontact 唯一 production 消費點）
-//! 依賴：`openclaw_types`（消費既有 4 個 `ibkr_phase2_*` 型別，**不改型別 crate**）、
+//! 依賴：`openclaw_types`（消費 `ibkr_phase2_*` 型別；T1 `IBKR-P2-SEAL-LINEAGE-FIELDS`
+//!   受權為 artifact 型別加 `contact_authorization_amd`+`approval_lineage_hash` 兩欄）、
 //!   `ibkr_secret_slot_loader`（P1 秘密槽 leg：OnceLock + denied fallback）、
 //!   `boot_observability::BUILD_GIT_SHA`（source_commit）、`sha2`/`hex`/`toml`/
 //!   `serde_json`/`libc::geteuid`。
@@ -52,7 +53,7 @@ use openclaw_types::{
     IbkrApiSessionTopologyV1, IbkrExternalSurfaceGateStatus, IbkrExternalSurfaceGateV1,
     IbkrPhase2GateArtifactV1, IbkrPhase2GatePrerequisiteFlags, IbkrPhase2PolicyBundleV1,
     IbkrSecretSlotContractV1, NonBybitApiAllowlistV1, IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
-    IBKR_PHASE2_ADR, IBKR_PHASE2_AMD,
+    IBKR_PHASE2_ADR, IBKR_PHASE2_AMD, IBKR_PHASE2_CONTACT_AMD,
 };
 
 use crate::boot_observability::BUILD_GIT_SHA;
@@ -60,11 +61,6 @@ use crate::boot_observability::BUILD_GIT_SHA;
 // ---------------------------------------------------------------------------
 // 常量
 // ---------------------------------------------------------------------------
-
-/// approval 引的 **contact-授權** AMD（≠ artifact 的 shape-AMD `IBKR_PHASE2_AMD`
-/// = 06-29-01）。finding-2：兩軸不可混——approval 是「授權首次接觸」（07-08-01），
-/// shape 是「artifact 型別世代」（06-29-01）。硬編 shape-AMD 到 approval 會誤放行。
-const PHASE2_CONTACT_AMD: &str = "AMD-2026-07-08-01";
 
 /// 穩定 artifact_id（=contract_id 字串）：二次 seal 撞 `create_new`/`hard_link`。
 const PHASE2_ARTIFACT_ID: &str = "phase2_ibkr_external_surface_gate_v1";
@@ -122,7 +118,7 @@ pub struct Phase2SealApproval {
 /// 6) bounded freshness：now-issued<=30d；clock 異常（future-dated）判無效不 fail-open。
 fn approval_is_valid(a: &Phase2SealApproval, now_ms: u64, build_sha: &str) -> bool {
     a.adr == IBKR_PHASE2_ADR
-        && a.amd == PHASE2_CONTACT_AMD
+        && a.amd == IBKR_PHASE2_CONTACT_AMD
         && source_commit_is_known(build_sha)
         && a.approved_source_commit == build_sha
         && a.reviewer_roles.iter().any(|r| r == "PM")
@@ -196,14 +192,11 @@ fn sha256_hex(bytes: &[u8]) -> String {
 ///
 /// 為什麼清兩 hash 欄位：hash 不能覆蓋自身（否則不可自洽）。為什麼 sealed 正規化：
 /// sealed 是構造細節，恒為封存意圖 true，正規化保證重算穩定。
-/// 為什麼 approval-lineage 不另立欄位（finding-2）：型別 crate 凍結、不得加欄位；
-/// approval 綁定事實已鏡射進 artifact 的 `adr`/`source_commit`/`reviewer_roles`，
-/// 三者皆落在本 raw hash 覆蓋域內 → 竄改任一即 hash 不符（tamper-evident lineage）；
-/// 且 raw hash 只依賴 artifact 自身，令 `seal(artifact, gov_dir)` 與磁碟 re-verify
-/// 皆自洽、無需重讀 approval 檔（見 report 偏差說明）。
-// TODO(finding-2, IBKR-P2-SEAL-LINEAGE-FIELDS): 當前以鏡射 adr/source_commit/
-// reviewer_roles 進 raw-hash 作 proxy lineage；完整 tamper-evident lineage（嵌
-// approval-content-hash + 自記 contact AMD）待上述 ticket 給 artifact 型別加欄後閉合。
+/// finding-2（T1 `IBKR-P2-SEAL-LINEAGE-FIELDS` 已閉合）：artifact 型別新增
+/// `contact_authorization_amd`（自記 contact AMD）+ `approval_lineage_hash`（授權此
+/// seal 的 approval canonical 之 sha256），兩欄隨整 struct serde 序列化**自動納入**本
+/// raw hash 覆蓋域（此函數 0 改）→ 竄改任一即 hash 不符（tamper-evident lineage）；
+/// 且 raw hash 只依賴 artifact 自身，令 `seal` 與磁碟 re-verify 皆自洽、無需重讀 approval。
 fn compute_raw_artifact_hash(artifact: &IbkrPhase2GateArtifactV1) -> String {
     let mut norm = artifact.clone();
     norm.raw_artifact_hash = String::new();
@@ -236,12 +229,36 @@ fn redacted_summary_value(a: &IbkrPhase2GateArtifactV1) -> serde_json::Value {
         "secret_slot_fingerprint": a.secret_slot_contract.secret_slot_fingerprint,
         "account_fingerprint_hash": a.secret_slot_contract.account_fingerprint_hash,
         "topology_account_fingerprint_hash": a.api_session_topology.account_fingerprint_hash,
+        // T1：兩者皆非明文（AMD 字串 + 64-hex approval lineage）；令 redacted 摘要也覆蓋
+        // lineage → 竄改 lineage 亦破 redacted hash。
+        "contact_authorization_amd": a.contact_authorization_amd,
+        "approval_lineage_hash": a.approval_lineage_hash,
     })
 }
 
 fn compute_redacted_summary_hash(a: &IbkrPhase2GateArtifactV1) -> String {
     let json = serde_json::to_string(&redacted_summary_value(a)).unwrap_or_default();
     sha256_hex(json.as_bytes())
+}
+
+/// approval_lineage_hash = sha256(approval canonical JSON)（T1）。
+///
+/// **決定性關鍵**（E2 審點）：用 `serde_json::json!` 顯式固定 key 序 + `roles.sort()`，
+/// 絕不用裸 `to_string(&approval)`（struct 欄位序 / roles 元素序不保證穩定 → hash
+/// 漂移，令 tamper-evidence 失效）。此 hash 於 seal-time 填入 artifact，令 sealed 檔
+/// tamper-evidently 自記是哪份 approval 授權了它。
+fn compute_approval_lineage_hash(a: &Phase2SealApproval) -> String {
+    let mut roles = a.reviewer_roles.clone();
+    roles.sort();
+    let canonical = serde_json::json!({
+        "adr": a.adr,
+        "amd": a.amd,
+        "reviewer_roles": roles,
+        "approved_source_commit": a.approved_source_commit,
+        "issued_at_ms": a.issued_at_ms,
+        "expires_at_ms": a.expires_at_ms,
+    });
+    sha256_hex(serde_json::to_string(&canonical).unwrap_or_default().as_bytes())
 }
 
 /// pre-seal 自洽閘：重算兩 hash 與 artifact 內存欄位比對（因 types `validate()` 只驗
@@ -286,12 +303,14 @@ fn build_external_surface_gate(
 /// 組裝 artifact 候選（`sealed=true` 是構造意圖，非「已封存」保證——實際落檔仍須過
 /// seal 的雙綠 + write-once）。
 ///
-/// - `reviewer_roles`：approval 有效 → 綁定其 roles（含 PM+Operator）；否則 `[]`
-///   （absent/無效 → validate `OperatorReviewerMissing` → 不 seal）。producer 絕不
-///   自注 "Operator"。
-/// - `api_session_topology.account_fingerprint_hash` 覆寫為 secret leg 的 hash
-///   （跨腿對齊；triangulation 由 seal / outcome enforce，types 不 cross-check）。
-/// - 兩 hash 於組裝末尾計算（覆蓋所有實質欄位）。
+/// - `reviewer_roles` / `contact_authorization_amd` / `approval_lineage_hash`：approval
+///   有效 → 綁定其 roles（含 PM+Operator）+ 常量 contact AMD + approval lineage hash；
+///   否則三者皆空（absent/無效 → validate `OperatorReviewerMissing` /
+///   `ContactAuthorizationAmdMismatch` / `ApprovalLineageHashInvalid` → 不 seal）。
+///   producer 絕不自注 "Operator"。
+/// - `api_session_topology` 用其自身之值（T2：不再覆寫 fp）；triangulation 由 seal /
+///   outcome 以真 equality cross-check enforce，types 不 cross-check。
+/// - 兩 hash 於組裝末尾計算（覆蓋所有實質欄位，含上述兩新欄）。
 fn build_phase2_artifact_candidate(
     policy_bundle: &IbkrPhase2PolicyBundleV1,
     allowlist: &NonBybitApiAllowlistV1,
@@ -313,36 +332,40 @@ fn build_phase2_artifact_candidate(
         secret_contract.live_secret_absent_or_empty,
     );
 
-    // 跨腿指紋對齊：topology 的 account_fingerprint_hash 覆寫為 secret leg 之值。
-    // TODO(finding-1, IBKR-P2-TRIANGULATION-CROSSCHECK): 此無條件覆寫使 triangulation
-    // 現恒真（topology 恒 source_template 故 dormant、零 runtime 效果）。在 {P5
-    // topology/session-attestation 成獨立 account 源} 與 {production-seal-wiring} 二者
-    // 較早者，必須移除此覆寫，改為兩獨立真值源的真 equality cross-check
-    // (secret.account_fingerprint_hash == topology.account_fingerprint_hash)。
-    let mut topo = topology.clone();
-    topo.account_fingerprint_hash = secret_contract.account_fingerprint_hash.clone();
+    // T2（IBKR-P2-TRIANGULATION-CROSSCHECK）：移除舊的無條件覆寫，改用 topology 自身之
+    // account_fingerprint_hash——令 triangulation 成為兩獨立真值源的真 equality
+    // cross-check（見 `account_fingerprint_triangulation_ok` + seal 攔截）。遮蔽消除後：
+    // pre-P5 topology 恒 source_template placeholder，production 下與 denied-secret fp
+    // 不等 → triangulation mismatch → 正確 never-seal BLOCKED；topology 之真獨立 account
+    // fp 源（P5 topology/session-attestation）待後續階段。
+    let topo = topology.clone();
 
-    // approval A-model：僅在 6 綁定全過時綁定 reviewer_roles（含 Operator）。
+    // approval A-model：僅在 6 綁定全過時綁 reviewer_roles（含 Operator）+ 自記常量 contact
+    // AMD + approval lineage hash（T1）。無效 approval → 三者皆空 → validate 拒
+    // （OperatorReviewerMissing / ContactAuthorizationAmdMismatch /
+    // ApprovalLineageHashInvalid），fail-closed。producer 絕不自注 "Operator"。
     let approval_valid = approval
         .map(|a| approval_is_valid(a, now_ms, source_commit))
         .unwrap_or(false);
-    let reviewer_roles = if approval_valid {
-        approval.map(|a| a.reviewer_roles.clone()).unwrap_or_default()
-    } else {
-        Vec::new()
-    };
+    let (reviewer_roles, contact_authorization_amd, approval_lineage_hash) =
+        match (approval_valid, approval) {
+            (true, Some(a)) => (
+                a.reviewer_roles.clone(),
+                IBKR_PHASE2_CONTACT_AMD.to_string(),
+                compute_approval_lineage_hash(a),
+            ),
+            _ => (Vec::new(), String::new(), String::new()),
+        };
 
     let mut artifact = IbkrPhase2GateArtifactV1 {
         contract_id: IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID.to_string(),
         source_version: 1,
         artifact_id: PHASE2_ARTIFACT_ID.to_string(),
         adr: IBKR_PHASE2_ADR.to_string(),
-        // shape-AMD 06-29-01（≠ approval 的 contact-AMD 07-08-01；finding-2 兩軸）。
-        // TODO(finding-2, IBKR-P2-SEAL-LINEAGE-FIELDS): sealed 檔目前只自記 shape-AMD
-        // (06-29-01)；contact-授權 AMD(07-08-01) 僅存在於 report 面 + approval seal-time
-        // 閘，未入凍結的 artifact 型別。在任何 production caller 真正 invoke seal 之前，
-        // 必須先給 IbkrPhase2GateArtifactV1 加 contact_authorization_amd +
-        // approval_lineage_hash 兩欄（走 PA→E1→E2→E4，types crate 改動）。
+        // shape-AMD 06-29-01（型別世代，≠ contact-AMD 07-08-01；兩軸）。T1 已閉合：
+        // sealed 檔另以 `contact_authorization_amd` 自記 contact 授權、以
+        // `approval_lineage_hash` 自記授權它的 approval 內容指紋，二者皆入 raw/redacted
+        // hash 覆蓋域（tamper-evident lineage）。
         amd: IBKR_PHASE2_AMD.to_string(),
         source_commit: source_commit.to_string(),
         created_at_ms: now_ms,
@@ -355,6 +378,8 @@ fn build_phase2_artifact_candidate(
         api_session_topology: topo,
         raw_artifact_hash: String::new(),
         redacted_summary_hash: String::new(),
+        contact_authorization_amd,
+        approval_lineage_hash,
         supersedes_artifact_id: None,
     };
     artifact.raw_artifact_hash = compute_raw_artifact_hash(&artifact);
@@ -362,8 +387,8 @@ fn build_phase2_artifact_candidate(
     artifact
 }
 
-/// finding-1（producer enforce，types 不 cross-check）：secret leg 與 topology 的
-/// account_fingerprint_hash 必相等且非空。不等 → 拒 seal。
+/// finding-1（T2 遮蔽已消除，真 equality 啟用；producer enforce，types 不 cross-check）：
+/// secret leg 與 topology 的 account_fingerprint_hash 必相等且非空。不等 → 拒 seal。
 fn account_fingerprint_triangulation_ok(a: &IbkrPhase2GateArtifactV1) -> bool {
     let secret_fp = &a.secret_slot_contract.account_fingerprint_hash;
     !secret_fp.is_empty() && *secret_fp == a.api_session_topology.account_fingerprint_hash
@@ -816,7 +841,7 @@ pub(crate) fn phase2_gate_producer_summary() -> serde_json::Value {
         "sealed_artifact_basename": sealed_path.map(|_| SEALED_FILENAME),
         "adr": IBKR_PHASE2_ADR,
         "artifact_shape_amd": IBKR_PHASE2_AMD,
-        "contact_authorization_amd": PHASE2_CONTACT_AMD,
+        "contact_authorization_amd": IBKR_PHASE2_CONTACT_AMD,
         "ibkr_call_performed": false,
         "seal_written_this_phase": false,
     })
@@ -872,10 +897,19 @@ mod tests {
         IbkrApiSessionTopologyV1::source_template()
     }
 
+    /// T2：覆寫移除後，全綠候選需 topology fp == secret fp 才過 triangulation
+    /// （source_template topology="c"*64 ≠ secret="b"*64，不對齊即 seal 失敗）。
+    /// 此 helper 模擬 P5 之「topology 有真獨立且與 secret 一致的 account fp 源」。
+    fn matched_topology(secret: &IbkrSecretSlotContractV1) -> IbkrApiSessionTopologyV1 {
+        let mut topo = IbkrApiSessionTopologyV1::source_template();
+        topo.account_fingerprint_hash = secret.account_fingerprint_hash.clone();
+        topo
+    }
+
     fn direct_approval(now: u64, sha: &str) -> Phase2SealApproval {
         Phase2SealApproval {
             adr: "ADR-0048".to_string(),
-            amd: "AMD-2026-07-08-01".to_string(),
+            amd: IBKR_PHASE2_CONTACT_AMD.to_string(),
             reviewer_roles: vec!["PM".to_string(), "Operator".to_string()],
             approved_source_commit: sha.to_string(),
             issued_at_ms: now - 1000,
@@ -907,15 +941,17 @@ mod tests {
     }
 
     /// 組全綠候選（approval 直建有效），immutable_storage_path=gov/SEALED。
+    /// T2：topology 用 `matched_topology`（fp 對齊 secret）令 triangulation 過。
     fn build_full_green(gov: &Path) -> IbkrPhase2GateArtifactV1 {
         let sha = fake_sha();
         let approval = direct_approval(FIXED_NOW, &sha);
         let path = gov.join(SEALED_FILENAME).to_string_lossy().into_owned();
+        let secret = valid_secret();
         build_phase2_artifact_candidate(
             &valid_bundle(),
             &valid_allowlist(),
-            &valid_secret(),
-            &valid_topology(),
+            &secret,
+            &matched_topology(&secret),
             Some(&approval),
             &path,
             &sha,
@@ -945,6 +981,9 @@ mod tests {
         let v = artifact.validate();
         assert!(v.ibkr_contact_allowed, "unexpected blockers: {:?}", v.blockers);
         assert!(verify_artifact_hashes(&artifact));
+        // T1：sealed 檔自記 contact AMD（= 常量）+ 非空 approval lineage hash（64-hex）。
+        assert_eq!(artifact.contact_authorization_amd, IBKR_PHASE2_CONTACT_AMD);
+        assert!(openclaw_types::is_sha256_hex(&artifact.approval_lineage_hash));
 
         let sealed = seal_phase2_artifact(&artifact, &gov).expect("seal ok");
         let mode = fs::symlink_metadata(&sealed).unwrap().permissions().mode() & 0o777;
@@ -1164,11 +1203,14 @@ mod tests {
         let path = gov.join(SEALED_FILENAME).to_string_lossy().into_owned();
         let sha = fake_sha();
         let approval = direct_approval(FIXED_NOW, &sha);
+        let secret = valid_secret();
+        // T2：用 matched_topology 令 triangulation 過，seal 才會抵達目錄權限閘（否則會先
+        // 在 triangulation 被 NotValid 攔，此測試就不再測權限）。
         let artifact = build_phase2_artifact_candidate(
             &valid_bundle(),
             &valid_allowlist(),
-            &valid_secret(),
-            &valid_topology(),
+            &secret,
+            &matched_topology(&secret),
             Some(&approval),
             &path,
             &sha,
@@ -1313,6 +1355,29 @@ mod tests {
         assert!(load_phase2_seal_approval_from_dir(&gov).is_err());
     }
 
+    // --- T1: approval lineage hash 決定性 + roles 序無關 + 內容敏感 ---
+    #[test]
+    fn approval_lineage_hash_is_deterministic_and_role_order_independent() {
+        let sha = fake_sha();
+        let a1 = direct_approval(FIXED_NOW, &sha);
+        // roles 反序：sort 後 canonical 相同 → hash 必相同。
+        let mut a2 = a1.clone();
+        a2.reviewer_roles = vec!["Operator".to_string(), "PM".to_string()];
+        assert_eq!(
+            compute_approval_lineage_hash(&a1),
+            compute_approval_lineage_hash(&a2),
+            "roles 排序後 lineage hash 必與元素順序無關"
+        );
+        // 內容變動（issued_at_ms）→ hash 必變（tamper-sensitive）。
+        let mut a3 = a1.clone();
+        a3.issued_at_ms += 1;
+        assert_ne!(
+            compute_approval_lineage_hash(&a1),
+            compute_approval_lineage_hash(&a3)
+        );
+        assert!(openclaw_types::is_sha256_hex(&compute_approval_lineage_hash(&a1)));
+    }
+
     // --- 補: verify_sealed_artifact 抓磁碟竄改（parse 後欄位不符）---
     #[test]
     fn verify_sealed_detects_ondisk_tamper() {
@@ -1347,9 +1412,15 @@ mod tests {
         assert_eq!(s["producer_status"], "blocked");
         assert_eq!(s["immutable_pass_artifact_present"], false);
         assert_eq!(s["ibkr_call_performed"], false);
-        assert_eq!(s["contact_authorization_amd"], PHASE2_CONTACT_AMD);
+        assert_eq!(s["contact_authorization_amd"], IBKR_PHASE2_CONTACT_AMD);
         assert_eq!(s["artifact_shape_amd"], IBKR_PHASE2_AMD);
         assert!(s["blockers"].as_array().is_some());
+        // T2：production placeholder topology（"c"*64）≠ denied-secret fp（空）→
+        // triangulation mismatch，佐證覆寫移除後真 equality 生效（自然正確 BLOCKED）。
+        assert_eq!(
+            s["leg_status"]["account_fingerprint_triangulation_ok"],
+            false
+        );
 
         match prev {
             Some(v) => std::env::set_var("OPENCLAW_DATA_DIR", v),

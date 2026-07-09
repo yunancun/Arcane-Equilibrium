@@ -75,7 +75,7 @@ pub use ibkr_phase2_gate::{
     IbkrSessionAttestationBlocker, IbkrSessionAttestationStatus, IbkrSessionAttestationV1,
     IbkrSessionAttestationVerdict, IbkrSessionDataTier, IBKR_EXTERNAL_SURFACE_GATE_CONTRACT_ID,
     IBKR_LIVE_GATEWAY_PORT, IBKR_LIVE_TWS_PORT, IBKR_PAPER_GATEWAY_DEFAULT_PORT, IBKR_PHASE2_ADR,
-    IBKR_PHASE2_AMD, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
+    IBKR_PHASE2_AMD, IBKR_PHASE2_CONTACT_AMD, IBKR_SESSION_ATTESTATION_CONTRACT_ID,
 };
 pub use ibkr_phase2_policies::{
     IbkrAuditEventPolicyBlocker, IbkrAuditEventPolicyV1, IbkrPaperAttestationPolicyBlocker,
