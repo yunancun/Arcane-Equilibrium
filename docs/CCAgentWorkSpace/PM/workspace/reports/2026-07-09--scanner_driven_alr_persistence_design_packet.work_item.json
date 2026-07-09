@@ -1,0 +1,60 @@
+{
+  "schema": "alr_work_item_v1",
+  "created_at": "2026-07-09T17:45:31Z",
+  "work_item_id": "P1-AIML-ALR-PERSISTENCE-DESIGN",
+  "boundary_label": "SOURCE_ONLY_OFFLINE_P0_P1",
+  "status": "DONE_WITH_CONCERNS",
+  "owner_chain": [
+    "PM",
+    "CC",
+    "FA",
+    "PA",
+    "PM"
+  ],
+  "selected_row_status_before": "ACTIVE",
+  "target_files": [
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/queue.md",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/manifest.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_persistence_design_packet.work_item.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_persistence_design_packet.effect_review.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_persistence_design_packet.state_packet.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_persistence_design_packet.md",
+    "docs/CCAgentWorkSpace/Operator/2026-07-09--scanner_driven_alr_persistence_design_packet.md"
+  ],
+  "forbidden_files": [
+    "TODO.md",
+    "docs/adr/",
+    "docs/governance_dev/amendments/",
+    "docs/amd/",
+    "sql/migrations/",
+    "program_code/",
+    "rust/",
+    "runtime config",
+    "exchange connectors",
+    "_latest artifacts",
+    "cron or daemon configuration"
+  ],
+  "acceptance_pins": [
+    "DESIGN_ONLY",
+    "NOT_APPLIED",
+    "NO_MIGRATION_CREATED",
+    "NO_PG_CONTACT",
+    "NO_RUNTIME_AUTHORITY",
+    "V151__alr_persistence_foundation.sql PROPOSED_RESERVED_NOT_CREATED",
+    "append-only provenance contract",
+    "Linux PG dry-run plan future-only",
+    "rollback and forward-compensation plan",
+    "SOURCE_ONLY_OFFLINE_P0_P1"
+  ],
+  "dependencies": [
+    "P1-AIML-ALR-LOCAL-RUNNER",
+    "CC(default) governance audit",
+    "FA(default) functional audit",
+    "PA(default) architecture synthesis"
+  ],
+  "unblocks": [
+    "P1-AIML-ALR-STAT-SELECTOR-BASELINE"
+  ],
+  "repo_head_before": "eeb82579b6a9cdd52458d5eb79bcda6abb8b87a9",
+  "repo_head_after": "eeb82579b6a9cdd52458d5eb79bcda6abb8b87a9"
+}
