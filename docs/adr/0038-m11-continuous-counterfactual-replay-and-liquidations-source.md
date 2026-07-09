@@ -1,7 +1,7 @@
 # ADR 0038: M11 Continuous Counterfactual Replay — Self-Hosted PG `market.liquidations` As Historical Source
 
 Date: 2026-05-21
-Status: **Proposed-pending-commit**（v5.8 §2 M11 module ADR 級落地；BB 5.21 audit push back 落地：「Bybit historical liquidations REST API 不存在」→ M11 nightly replay 必用自家累積 PG `market.liquidations` table，不依賴 vendor optionality）
+Status: **Accepted**（v5.8 §2 M11 module ADR 級落地；BB 5.21 audit push back 落地：「Bybit historical liquidations REST API 不存在」→ M11 nightly replay 必用自家累積 PG `market.liquidations` table，不依賴 vendor optionality）
 Operator Sign-off: 2026-05-21（主會話 PM dispatch via v5.8 §2 M11「Continuous Counterfactual Replay + nightly source」)
 Related: v5.8 §2 M11 / ADR-0017 (Scanner is evidence not authority — runtime decision 不依賴 vendor-side history) / ADR-0029 (market.public_trades + orderbook_l2_snapshot storage policy — trade tape baseline) / ADR-0034 (Decision Lease Layered Approval LAL — replay window 擴展受 LAL 2 約束) / v5.7 §6 market.liquidations writer existing / `docs/references/2026-04-04--bybit_api_reference.md` (Bybit V5 API surface — historical liquidations 不存在 confirmation) / BB C6 PROOF PASS memory project (`project_decision_outcomes_not_dead` — `market.liquidations` 31,473 rows 已驗) / V107 schema spec (placeholder pending CR-7) / V109 anomaly schema (per CR-7 M11+M7 dedup contract)
 

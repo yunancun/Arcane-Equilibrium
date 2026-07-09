@@ -1,7 +1,7 @@
 # ADR 0041: ContextDistiller v4 — Layered Snapshot + Token Hard Cap + DOC-08 AI Cost Amendment
 
 Date: 2026-05-21
-Status: **Proposed-pending-commit**（per AI-E 5.21 v5.8 executability audit must-fix 6 條第 1 條 + PA dispatch consolidation CR-16 + PM 仲裁建議 #8「(b) 砍頻率 + Y2 Q1 重評」；本 ADR 為 ADR-0027 (AI Plan Mode Time-Based Budgeting) 的 v4 ContextDistiller 級擴展，不取代）
+Status: **Accepted**（per AI-E 5.21 v5.8 executability audit must-fix 6 條第 1 條 + PA dispatch consolidation CR-16 + PM 仲裁建議 #8「(b) 砍頻率 + Y2 Q1 重評」；本 ADR 為 ADR-0027 (AI Plan Mode Time-Based Budgeting) 的 v4 ContextDistiller 級擴展，不取代）
 Operator Sign-off: 2026-05-21（主會話 PM dispatch via v5.8 §2 13 module thesis + AI-E audit GO-WITH-CONDITIONS 第 1 條 must-fix「ADR-0041 ContextDistiller v4 補入 Sprint 1A-β」）
 Related: ADR-0027 (AI Plan Mode Time-Based Budgeting — 本 ADR 為其 v4 級延伸，operator-hours discipline 不變) / DOC-08 §4 AI 預算管理（每日 $2.00 硬上限 + 保守模式 ~$17/月 baseline；本 ADR 為其 cap amendment）/ DOC-08 §5 AI 注意力稅 cost_edge_ratio 等級 / ADR-0024-lite (Cowork subscription operator-assistant 邊界) / ADR-0034 (LAL 4 capital structure / venue change always operator) / AMD-2026-05-21-01 (autonomy-vs-human-final-review opt-in path) / v5.8 §2 M4 (Self-Supervised Hypothesis Discovery + Cowork review) / v5.8 §2 M8 (Anomaly Detection) / v5.8 §2 M11 (Counterfactual Replay Automation) / token-cost-analysis skill (`srv/.claude/skills/token-cost-analysis/SKILL.md` — AI-E) / AI-E v5.8 audit (`docs/CCAgentWorkSpace/AI-E/workspace/reports/2026-05-21--v58_executability_audit.md`) / PA dispatch consolidation (`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v58_dispatch_consolidation.md` §1 CR-16 + §8 仲裁 #8)
 

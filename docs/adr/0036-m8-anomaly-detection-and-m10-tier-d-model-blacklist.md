@@ -1,7 +1,7 @@
 # ADR 0036: M8 Anomaly Detection + M10 Tier D Regime — Model Blacklist + ATR-vol/Funding-state 雙 axis 替代
 
 Date: 2026-05-21
-Status: **Proposed-pending-commit**（v5.8 §2 M8 + M10 Tier D 算法選擇邊界合併治理 ADR；對應 PA dispatch CR-5 + PM final verdict §四 仲裁 #5）
+Status: **Accepted**（v5.8 §2 M8 + M10 Tier D 算法選擇邊界合併治理 ADR；對應 PA dispatch CR-5 + PM final verdict §四 仲裁 #5）
 Operator Sign-off: 2026-05-21（主會話 PM dispatch — PA 仲裁 #5「採 (a) ATR-vol regime + funding state 雙 axis 為 Y2-Y3 主路徑；Y3+ 再 evaluate PELT」）
 Related: v5.8 §2 M8 Anomaly Detection (lines 279-318) / v5.8 §2 M10 Tier D Regime Discovery (line 367) / `srv/.claude/skills/math-model-audit/SKILL.md`（HMM / GARCH 黑名單 source of truth）/ `srv/.claude/skills/walk-forward-validation-protocol/SKILL.md`（block bootstrap + OOS 驗證 SOP）/ ADR-0021 Alpha Source Architecture Upgrade / ADR-0037 (M9 A/B framework；Decision 4 反模式 (e) 引用本 ADR Decision 1 HMM/GARCH 黑名單適用 M9 variance structure 估計)
 

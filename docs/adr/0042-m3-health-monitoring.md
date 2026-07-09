@@ -1,7 +1,7 @@
 # ADR 0042: M3 Health Monitoring — Single Health Authority + 4-State Ladder + 6 Domain + Amplification / Cascade Cap
 
 Date: 2026-05-21
-Status: **Proposed-pending-commit**（v5.8 §2 M3 module ADR 級落地；對應 PA dispatch CR-7 single-authority 系列 + H-11 amplification mitigation）
+Status: **Accepted**（v5.8 §2 M3 module ADR 級落地；對應 PA dispatch CR-7 single-authority 系列 + H-11 amplification mitigation）
 Operator Sign-off: 2026-05-21（主會話 PM dispatch — v5.8 §2 M3 採「集中健康觀測 + 4 級狀態機 + degradation cascade」治理路徑；M3 design spec 648 行 Sprint 1A-β land 為 ADR 落地證據）
 Related: v5.8 §2 M3 Health-Aware Degradation (lines 123-151) / M3 design spec `docs/execution_plan/2026-05-21--m3_health_monitoring_design_spec.md`（648 行；本 ADR 為其治理層 promotion）/ V106 schema spec `docs/execution_plan/2026-05-21--v106_m3_health_observations_schema_spec.md` / ADR-0034 LAL Decision 4 / ADR-0036 M8 anomaly amplification dedup / AMD-2026-05-21-01 autonomy-vs-human-final-review
 

@@ -1,7 +1,7 @@
 # ADR 0040: Multi-Venue Gate Spec — M13 Binance Trade Enable Defer Y3+ At Earliest
 
 Date: 2026-05-21
-Status: **Proposed-pending-commit**（per operator D4 2026-05-21；本 ADR 為 ADR-0033 §Decision 2 時點 amendment standalone）
+Status: **Accepted**（per operator D4 2026-05-21；本 ADR 為 ADR-0033 §Decision 2 時點 amendment standalone）
 Operator Sign-off: 2026-05-21（主會話 PM dispatch via BB 5.21 v5.8 audit push back + PM final verdict §四 D4「M13 Y2 Binance trade enable → Y3+ at earliest」批准）
 Supersedes: ADR-0033 §Decision 2 「Y1 末（Sprint 10 W36-39）evaluation」時點 → 改 Y3+ first quarter (~Y2 末 W104+) evaluation；ADR-0033 §Decision 1（Binance market-data Y1 approved）+ §Decision 3（DEX/Hyperliquid not approved）+ §Decision 4（D12 + ToS posture）**不變**
 Sign-off chain note: ADR-0033 + ADR-0040 在同一 operator sign-off session（2026-05-21 主會話 PM dispatch）一起確認。邏輯順序為 ADR-0033 sign-off 先成立（v5.7 §12 ADR-0006 amendment 提案落地）→ ADR-0040 sign-off 包含對 ADR-0033 §Decision 2 的 timing supersede（v5.8 BB audit push back 觸發）；治理 trail = ADR-0006 baseline → ADR-0033 baseline amendment → ADR-0040 timing amendment，三 ADR 並存形成完整 cross-venue gate evidence chain。

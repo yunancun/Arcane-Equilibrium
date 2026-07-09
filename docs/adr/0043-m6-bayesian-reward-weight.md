@@ -1,7 +1,7 @@
 # ADR 0043: M6 Bayesian Reward Weight Tuning — Portfolio Weight Authority + GP Matern 5/2 + EI Acquisition + 30d 30% Rollback Cap
 
 Date: 2026-05-21
-Status: **Proposed-pending-commit**（v5.8 §2 M6 module ADR 級落地；對應 PA dispatch H-2 GP kernel + acquisition function + iter budget + 30% rollback 累積 cap mandate）
+Status: **Accepted**（v5.8 §2 M6 module ADR 級落地；對應 PA dispatch H-2 GP kernel + acquisition function + iter budget + 30% rollback 累積 cap mandate）
 Operator Sign-off: 2026-05-21（主會話 PM dispatch — v5.8 §2 M6 採 Bayesian Optimization 取代 v5.7 manual-set reward weight；H-2 mandate 為算法選擇邊界）
 Related: v5.8 §2 M6 Bayesian Reward Weight (lines 219-251) / M6 design spec `docs/execution_plan/2026-05-21--m6_bayesian_reward_weight_design_spec.md`（849 行；本 ADR 為其治理層 promotion）/ V110 schema spec `docs/execution_plan/2026-05-21--v110_m6_reward_weight_history_schema_spec.md` / ADR-0021 Alpha Source Architecture Upgrade / ADR-0034 LAL Tier 2-3 audit / ADR-0037 M9 cluster 3 risk profile / ADR-0036 model blacklist (M6 GP variance 估計適用)
 

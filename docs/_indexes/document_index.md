@@ -67,7 +67,6 @@
 | `CCAgentWorkSpace/E4/workspace/reports/2026-07-03--soak_dispatch_edge_containment_impl_a_regression.md` | E4 回歸：soak dispatch edge-containment（Impl A）測試矩陣。 |
 | `CCAgentWorkSpace/E4/workspace/reports/2026-07-04--e4_test_matrix_blindspot_audit.md` | E4 測試矩陣盲點審計。 |
 | `governance_dev/amendments/2026-07-04--AMD-2026-07-04-01-doc06-runtime-mutation-record-rule.md` | AMD-2026-07-04-01：DOC-06 Runtime Mutation 紀錄規則泛化（RM-1..RM-4：before/after + manifest + 持久位置 + 移除裁決 + pin-by-reference），泛化 FA F2 crontab 治理規則為 DOC-06 通用條款。 |
-| `archive/2026-07-04--script_index_changelog_prose_archive.md` | SCRIPT_INDEX.md 頭部「最新補充/歷史補充」229 段 run-on changelog prose 歸檔（R4-2026-IDX-04 收斂）；per-batch SSOT 仍在 SCRIPT_INDEX `## YYYY-MM-DD` 區塊，本檔存派生歷史層 + 確定性提取命令。 |
 | `references/2000_line_exception_registry.md` | 2000 行硬上限 documented pre-existing exception 正本（冷審計 R2 CC-2）：登記 10 個超標生產檔（路徑+行數+拆分歸屬）；CLAUDE.md §七/§九 指針指向此檔，冷審計據此不再重複觸發 retroactive finding。禁在登記波實際拆檔。 |
 
 ### 2026-06-29 IBKR Stock/ETF paper + shadow feasibility lane
@@ -1126,8 +1125,6 @@
 | `2026-04-11--daily_summary.md` | ★★★★ 2026-04-11 日匯總：3E-ARCH 三引擎並行 + Multi-Symbol + Fix Rounds Phase A-G |
 | `2026-04-12--daily_summary.md` | ★★★★ 2026-04-12 日匯總：全程序鏈審計 P0+P1+P2+P3 58 findings + A3 GUI 36 + BB Bybit API 10 + FIX-08 拆分 + Earned-Trust TTL Ladder + PNL-FIX-1/2 · 4250 tests |
 | `2026-04-13--daily_summary.md` | ★★★ 2026-04-13 日匯總：R-06-v2 Agent Value Delivery（Executor shadow IPC / Analyst→DB→Strategist feedback / Guardian rejection / Conductor real health）· 1124 Rust + 2852 Python |
-| `2026-04-14--engine_self_healing.md` | ENGINE-HEAL 4 Fix：panic hook + crash-only + WS stale self-cancel + watchdog 4 道保險（尚未合併至 daily_summary）|
-| `2026-04-14--qol_1_and_qol_3_delivery.md` | QoL-1（paper_state restore_from_db）+ QoL-3（PyO3 雙 venv 部署）交付（尚未合併至 daily_summary）|
 | `2026-04-27--live_auth_watcher_event_consumer_spawn_fix.md` | ★★ P0 Silent Regression：LiveAuthWatcher respawn 路徑遺漏 `spawn_live_pipeline` → event_consumer 8 天未 spawn（2252 tests）· commits 588d207 / 0fa41b1 / merge 1fac9b1 |
 
 > 2026-04-14 worklog audit：所有舊碎片已合併至當日 `daily_summary.md` 並刪除；`2026-04-08--arch_rc1_1c_history_archive.md` 已移至 `docs/archive/`。

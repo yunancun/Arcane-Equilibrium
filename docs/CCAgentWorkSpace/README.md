@@ -51,6 +51,7 @@
 | [MIT/](MIT/) | Market / Information Theory Auditor — data / feature / CV / schema rigor | 分析層 |
 | [QA/](QA/) | Quality Assurance — 端到端集成驗收 | 分析層 |
 | [QC/](QC/) | Quantitative Consultant — 量化策略審計 | 顧問層 |
+| [Operator/](Operator/) | Operator 摘要 / 交接鏡像目錄 — 無 profile/memory，僅存扁平化結論報告 | 鏡像層 |
 
 ## 工作流程約束
 - 所有 Agent 報告先存 workspace，再回報 PM/用戶

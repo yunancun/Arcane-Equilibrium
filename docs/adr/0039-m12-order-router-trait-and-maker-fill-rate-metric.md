@@ -1,7 +1,7 @@
 # ADR 0039: M12 OrderRouter Trait — Maker-Fill-Rate Metric + Adaptive Routing Audit Schema
 
 Date: 2026-05-21
-Status: **Proposed-pending-commit**（v5.8 §2 M12 module ADR 級落地；BB 5.21 audit push back 落地：「OrderRouter trait 必含 `maker_fill_rate_30d` metric 以監控 Bybit ToS rebate / maker rebate eligibility」→ 新增 5+1 = 6 method trait + V115 adaptive routing audit log schema）
+Status: **Accepted**（v5.8 §2 M12 module ADR 級落地；BB 5.21 audit push back 落地：「OrderRouter trait 必含 `maker_fill_rate_30d` metric 以監控 Bybit ToS rebate / maker rebate eligibility」→ 新增 5+1 = 6 method trait + V115 adaptive routing audit log schema）
 Operator Sign-off: 2026-05-21（主會話 PM dispatch via v5.8 §2 M12「Adaptive Order Routing DESIGN initial / IMPL delayed」per operator: do even if delayed）
 Related: v5.8 §2 M12 / ADR-0029 (market.public_trades + orderbook_l2_snapshot trade tape policy — maker fill 計算數據源) / ADR-0033 (ADR-0006 amendment — Binance Y2 trading defer + DEX/Hyperliquid not approved；本 ADR Y2 cross-venue routing 對齊) / ADR-0030 (Copy Trading evidence-gated — Bybit 平台內 Copy Trading 不影響本 ADR routing) / ADR-0034 (Decision Lease LAL — routing 超 bounds 走 LAL 3 protected) / `docs/references/2026-04-04--bybit_api_reference.md` (Bybit V5 maker/taker fee + rebate tier reference) / crypto-microstructure-knowledge skill (PostOnly fee 計算 + rebate tier 對照表) / V094 fills_close_maker_audit (per CR-14 既有 maker fill schema 範式) / V115 schema reserve (placeholder pending CR-14)
 

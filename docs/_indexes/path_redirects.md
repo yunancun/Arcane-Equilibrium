@@ -1,7 +1,7 @@
 # Documentation Path Redirect Plan
 
 Date: 2026-05-06
-Status: planning index only; no paths have been moved by this file.
+Status: planning + executed-redirect log；2026-05-28 起已有路徑實際遷移（見下方 "Executed Redirects (2026-05-28)" 與 "(2026-05-28 phase 2)" 兩段）。原始 rename taxonomy 仍屬 plan，但 doc cleanup phase 1/2 已實際 mv 多個 worklog / execution_plan / references 路徑並留 stub。
 
 This file records the safe rename / relocation plan recommended by R4. It is
 intentionally a redirect plan, not an executed migration, because many current
@@ -17,7 +17,7 @@ are stable:
 - `TODO.md`
 - `CONTEXT.md`
 - `AGENTS.md`
-- `L2_TODO.md` until its open tails are fully retired from `TODO.md`
+- ~~`L2_TODO.md`~~ 已於 2026-06-05 歸檔至 `docs/archive/2026-06-05--l2_advisory_mesh_todo.md`（不再是 root 待凍結路徑）；active tail 現存於 `TODO.md` row `P1-L2-ADVISORY-MESH-E2E-1`
 - `.codex/*`
 - `memory/*`
 - `docs/architecture/multi_agent_rework_2026-05-05/AgentTodo.md`
@@ -52,13 +52,13 @@ are stable:
 | `docs/audit/*` | `docs/04-audits/legacy/*` | cold batch after redirect stubs |
 | `docs/audits/*` | `docs/04-audits/*` | cold batch after redirect stubs |
 | `.claude_reports/*.md` | `docs/90-archive/generated/claude-reports/*.md` | cold batch after no active references |
-| `L2_TODO.md` | `docs/execution_plan/2026-06-05--l2_advisory_mesh_active_tail.md` or archive stub | only after `TODO.md` owns no open L2 tail and all direct references are updated |
+| `L2_TODO.md` | ✅ DONE：已歸檔至 `docs/archive/2026-06-05--l2_advisory_mesh_todo.md` | 已執行（2026-06-05）；active tail 現存於 `TODO.md` row `P1-L2-ADVISORY-MESH-E2E-1` |
 
 ## Current No-Move Decisions (2026-06-12)
 
 | Path | Decision | Reason |
 |---|---|---|
-| `L2_TODO.md` | keep in place; add ACTIVE-TAIL MIRRORED banner | It still has many direct references and open operator-gated tails are mirrored in `TODO.md`; moving it now would create more drift than it removes. |
+| `L2_TODO.md` | ARCHIVED（不再 in-place）：已移至 `docs/archive/2026-06-05--l2_advisory_mesh_todo.md` | 此 2026-06-12 no-move 決策已被後續歸檔推翻；root `L2_TODO.md` 已歸檔，active tail 現存於 `TODO.md` row `P1-L2-ADVISORY-MESH-E2E-1`。 |
 | `docs/CCAgentWorkSpace/*/workspace/reports/*` | no bulk move | These are evidence artifacts with many hard references. Use `docs/_indexes/initiative_index.md` for routing. |
 | `docs/audit/` and `docs/audits/` | no path migration in first batch | Directory names are confusing, but reports are evidence. Add README semantics first; migrate only with redirect stubs later. |
 | `docs/runbooks/` | no path migration in second batch | Add `README.md` router first; runbooks may contain operational hard references and should not be moved without operator/deploy context. |
