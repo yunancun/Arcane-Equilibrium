@@ -61,6 +61,6 @@
 
 | Folder | Meaning |
 |---|---|
-| `docs/audit/` | Legacy 62-finding audit bundle and working ledgers. Do not treat as current issue tracker. |
+| `docs/archive/2026-07-09--legacy_62finding_audit_bundle/` | Legacy 62-finding audit bundle and working ledgers (archived 2026-07-09). Do not treat as current issue tracker. |
 | `docs/audits/` | General dated audit and verdict reports. |
-| `docs/governance_dev/audits/` | Governance-development audit evidence. |
+| `docs/archive/2026-07-09--governance_dev_phase_history/audits/` | Governance-development audit evidence (archived 2026-07-09). |

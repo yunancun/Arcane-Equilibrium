@@ -14,14 +14,16 @@
 ```
 governance_dev/
 ├── README.md                  ← 本文件
-├── phase0_takeover/           ← Phase 0 接手：目錄架構、代碼閱讀、AI 整合評估（5 份報告）
-├── phase1_gap_analysis/       ← Phase 1 差距分析：22 份治理文件 vs 代碼對比（2 份報告）
-├── phase2_execution/          ← Phase 2 執行：T2.01–T2.23 治理模組實現（3 份審核報告）
-│   ├── T2_EXECUTION_SUMMARY.md         ← ★ 執行總覽（21 模組矩陣 + 關鍵指標）
-│   ├── T2_PM_QUALITY_AUDIT_REPORT.md   ← PM 品質審核（2026-03-29）
-│   └── T2_TW_COMMENT_AUDIT_REPORT.md   ← TW 註釋品質審核（2026-03-30）
-└── changelogs/                ← 修改日誌：T2.01–T2.23 共 23 份變更記錄
+├── SPECIFICATION_REGISTER.md  ← 仍 Active spec 索引（SM/EX/DOC/ADR/AMD/AUDIT + Amendments）
+├── amendments/                ← 仍 Active spec amendments（正式規範修訂記錄）
+├── DEPRECATED.md / NAMING_NOTE.md ← 退役口徑 + 命名約束
+└── 2026-03-30--round2_fix_plan* 等根層文件 ← Round 2 修复计划等仍 active 根層文件
 ```
+
+> **2026-07-09 归档**：历史 phase / T2.xx 子目录（`phase0_takeover/`、`phase1_gap_analysis/`、
+> `phase2_execution/`、`changelogs/`、`governance_extracts/`、`audits/`、`phase2..12*` 等）已整体
+> 移至 `docs/archive/2026-07-09--governance_dev_phase_history/<同名子目录>/`。历史 T2 执行总览
+> （`T2_EXECUTION_SUMMARY.md` 等）现位于该 archive 的 `phase2_execution/` 下。
 
 ## 文件命名規範
 

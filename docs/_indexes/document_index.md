@@ -296,7 +296,7 @@
 |------|------|
 | `README.md` | Router-first docs 入口已瘦身；长 Document Index 迁至本文件。 |
 | `_indexes/document_inventory.json` | v2 摘要库存；`docs_markdown=2619`，只作规模/目录导航，不作删除判据。 |
-| `_indexes/audit_index.md` | Audit 目录语义索引：`docs/audit/`、`docs/audits/`、`governance_dev/audits/`、role reports。 |
+| `_indexes/audit_index.md` | Audit 目录语义索引：`docs/archive/2026-07-09--legacy_62finding_audit_bundle/`、`docs/audits/`、`archive/2026-07-09--governance_dev_phase_history/audits/`、role reports。 |
 | `runbooks/README.md` | Runbook 目录入口；声明 runbook 不是 operator approval。 |
 | `architecture/README.md` | Architecture 目录入口；区分 stable overlays 与 historical MAG ledger。 |
 | `archive/README.md` | Archive 目录入口；声明 archive 不是 backlog。 |
@@ -316,7 +316,7 @@
 |------|------|
 | `_indexes/initiative_index.md` | 主题入口索引：L2、AEG/Gate-B、P5-SM、OPS-2、incident-policy、Multi-Agent historical ledger；明确不是 active queue。 |
 | `_indexes/README.md` | `docs/_indexes` 目录说明；标记 `document_inventory.json` 为 stale snapshot。 |
-| `audit/README.md` | 说明 `docs/audit/` 是 legacy 62-finding audit bundle，不是当前 issue tracker。 |
+| `archive/2026-07-09--legacy_62finding_audit_bundle/README.md` | 说明 `docs/archive/2026-07-09--legacy_62finding_audit_bundle/` 是 legacy 62-finding audit bundle，不是当前 issue tracker。 |
 | `audits/README.md` | 说明 `docs/audits/` 是 dated audit evidence，不是 active queue。 |
 
 ### 2026-06-12 AEG-S3 Gate-B watch / preflight
@@ -1133,7 +1133,7 @@
 
 | 路径 | 内容 |
 |------|------|
-| `2026-03-25_api_gui_handoff/` | Control API v1 + GUI v1 阶段交接（含 12 份文档 + source_docs） |
+| `archive/2026-07-09--api_gui_handoff_2026-03-25/` | Control API v1 + GUI v1 阶段交接（含 12 份文档 + source_docs）· 2026-07-09 已归档 |
 
 ### decisions/ — 架构/设计决策记录 + 治理源文件
 
@@ -1372,8 +1372,12 @@
 
 > 注意：governance_dev/ 下早期文件使用大寫命名（如 `T2_EXECUTION_SUMMARY.md`），
 > 晚於 2026-03-31 的新文件必須遵循 `YYYY-MM-DD--描述.md` 命名規範。
+>
+> 2026-07-09 归档：以下 phase / changelogs / governance_extracts / audits 历史子目录已整体移至
+> `docs/archive/2026-07-09--governance_dev_phase_history/<同名子目录>/`；governance_dev/ 现只保留
+> amendments/、SPECIFICATION_REGISTER.md、Round 2 修复计划等仍 active 的根层文件。
 
-#### governance_dev/audits/ — ★ 审计报告
+#### archive/2026-07-09--governance_dev_phase_history/audits/ — ★ 审计报告
 
 | 文件 | 内容 |
 |------|------|
@@ -1388,7 +1392,7 @@
 | `2026-03-31--development_roadmap_v2.md` | 4-Phase 开发路线图 V2（基于 Gap 分析制定） |
 | `2026-03-31--phase0_round2.5_audit_report.md` | Phase 0 Round 2.5 审计报告（2 P0 + 1 P1 修复 + 287 spec Gap 分析） |
 
-#### governance_dev/audits/2026-03-30--全面審核/ — ★★★ 全系统冷酷功能审核（9 Batch）
+#### archive/2026-07-09--governance_dev_phase_history/audits/2026-03-30--全面審核/ — ★★★ 全系统冷酷功能审核（9 Batch）
 
 | 文件 | 内容 |
 |------|------|
@@ -1426,7 +1430,7 @@
 | `EXTRACTION_VALIDATION.txt` | 提取验证报告（规格数量/覆盖度/交叉引用校验） |
 | `QUICK_START_REFERENCE.txt` | 治理开发快速入门参考 |
 
-#### governance_dev/governance_extracts/ — 治理规格提取（5 份参考文档）
+#### archive/2026-07-09--governance_dev_phase_history/governance_extracts/ — 治理规格提取（5 份参考文档）
 
 | 文件 | 内容 |
 |------|------|
@@ -1436,11 +1440,11 @@
 | `OPENCLAW_GOVERNANCE_SUMMARY.md` | 治理综合摘要（13 份文件结构化总结） |
 | `OPENCLAW_TECHNICAL_SPEC.md` | 技术规格总结（22 份治理规格集） |
 
-#### governance_dev/changelogs/ — T2.01–T2.23 模组变更日志（23 份）
+#### archive/2026-07-09--governance_dev_phase_history/changelogs/ — T2.01–T2.23 模组变更日志（23 份）
 
 每份治理模组的实现变更日志，命名格式 `2026-03-29_T2.XX_模组名.md`。
 
-#### governance_dev/phase2_execution/ — Phase 2 治理模組执行记录
+#### archive/2026-07-09--governance_dev_phase_history/phase2_execution/ — Phase 2 治理模組执行记录
 
 | 文件 | 内容 |
 |------|------|
@@ -1455,7 +1459,7 @@
 | `FIXTURE_REFACTOR_SUMMARY.md` | 测试 Fixture 重构总结 |
 | `TEST_FIXTURE_OVERVIEW.md` | 测试 Fixture 重构概览 |
 
-#### governance_dev/phase3_integration/ — Phase 3 治理集成
+#### archive/2026-07-09--governance_dev_phase_history/phase3_integration/ — Phase 3 治理集成
 
 | 文件 | 内容 |
 |------|------|
@@ -1467,7 +1471,7 @@
 | `2026-03-30_TW_ENGINEERING_AUDIT_REPORT.md` | TW 工程审计报告 |
 | `REVIEW_GOVERNANCE_GUI.md` | GUI 治理集成审查（PASS） |
 
-#### governance_dev/phase4_acceptance/ — Phase 4 验收
+#### archive/2026-07-09--governance_dev_phase_history/phase4_acceptance/ — Phase 4 验收
 
 | 文件 | 内容 |
 |------|------|
@@ -1479,7 +1483,7 @@
 | `T4.06_PM_GUI_GOVERNANCE_PLAN.md` | PM GUI 治理计划 |
 | `TEST_REPORT_GOVERNANCE_E4.md` | E4 测试工程师验收报告 |
 
-#### governance_dev/phase1–12 其他阶段 — 各阶段任务书 + PM 验收 + FA 缺口审计
+#### archive/2026-07-09--governance_dev_phase_history/phase1–12 其他阶段 — 各阶段任务书 + PM 验收 + FA 缺口审计
 
 每阶段通常包含：`PHASE*_TASK_BOOK`, `PHASE*_PM_ACCEPTANCE_REPORT`, `FA_GAP_AUDIT_REPORT`。
 详见各子目录。

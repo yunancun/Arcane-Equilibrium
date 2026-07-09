@@ -10,9 +10,9 @@
 
 | 路径 | 语义 | 不要误读成 |
 |---|---|---|
-| `docs/audit/` | Legacy 62-finding audit bundle、working ledgers、remediation tracking 历史证据。 | 当前 GitHub issue tracker 或 active blocker list。 |
+| `docs/archive/2026-07-09--legacy_62finding_audit_bundle/` | Legacy 62-finding audit bundle、working ledgers、remediation tracking 历史证据（2026-07-09 归档）。 | 当前 GitHub issue tracker 或 active blocker list。 |
 | `docs/audits/` | 按日期保存的专项 audit / verdict / system audit evidence。 | 当前 sign-off 状态；必须看最新 PM/role report。 |
-| `docs/governance_dev/audits/` | 治理开发阶段的 round audit 和合规证据。 | 当前治理实现状态。 |
+| `docs/archive/2026-07-09--governance_dev_phase_history/audits/` | 治理开发阶段的 round audit 和合规证据（2026-07-09 归档）。 | 当前治理实现状态。 |
 | `docs/CCAgentWorkSpace/*/workspace/reports/` | 角色级审阅、实现、验证和 PM closure 报告。 | 可批量移动的日志堆；这些路径被大量引用。 |
 
 ## 读取顺序
@@ -23,6 +23,6 @@
 
 ## 迁移规则
 
-- 现阶段不合并 `docs/audit/` 与 `docs/audits/`。
+- legacy 62-finding bundle 已于 2026-07-09 归档至 `docs/archive/2026-07-09--legacy_62finding_audit_bundle/`，不再与 `docs/audits/` 混淆。
 - 如未来迁移到统一 taxonomy，必须先更新 `docs/_indexes/path_redirects.md`，
   并在旧路径保留 redirect stub。
