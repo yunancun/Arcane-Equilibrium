@@ -470,7 +470,11 @@ fn load_ibkr_secret_slot_contract() -> Result<IbkrSecretSlotContractV1, String> 
 
 /// 進程級快取存取（load-once）；返回 &'static Result 供呼叫端 clone。
 /// 首次載入失敗時 warn 一次（OnceLock 保證只發生一次，避免洗版）。
-fn ibkr_secret_slot_contract() -> &'static Result<IbkrSecretSlotContractV1, String> {
+///
+/// P2（AMD-2026-07-08-01）：由 scaffold-only 升為 pub(crate)——
+/// `ibkr_phase2_gate_producer` 复用同一 OnceLock 秘密槽 leg 組裝 gate artifact，
+/// 保證跨腿指紋單一真源、fail-closed 一致（純 visibility bump，語義零改）。
+pub(crate) fn ibkr_secret_slot_contract() -> &'static Result<IbkrSecretSlotContractV1, String> {
     IBKR_SECRET_SLOT_CONTRACT.get_or_init(|| {
         let loaded = load_ibkr_secret_slot_contract();
         if let Err(e) = &loaded {
@@ -489,7 +493,10 @@ fn ibkr_secret_slot_contract() -> &'static Result<IbkrSecretSlotContractV1, Stri
 /// 為什麼全 Unknown + 兩指紋空 + `live_secret_absent_or_empty=false`：絕不捏造
 /// accepted=true 的假 PASS；未能證明 live absent 即視為未證（fail-closed）。安全方向
 /// 常量（env_var_credential_fallback_denied=true / 兩 serialized=false）照舊。
-fn denied_ibkr_secret_slot_contract_fallback() -> IbkrSecretSlotContractV1 {
+///
+/// P2（AMD-2026-07-08-01）：升為 pub(crate) 供 `ibkr_phase2_gate_producer` 在
+/// OnceLock 載入 Err 時取用同一 denied leg（純 visibility bump，語義零改）。
+pub(crate) fn denied_ibkr_secret_slot_contract_fallback() -> IbkrSecretSlotContractV1 {
     IbkrSecretSlotContractV1 {
         contract_id: IBKR_SECRET_SLOT_CONTRACT_ID.to_string(),
         source_version: 1,

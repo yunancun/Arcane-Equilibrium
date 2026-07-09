@@ -114,6 +114,11 @@ pub mod health;
 // loader（scaffold-only leg，0 production caller；consumers = P5 attestation /
 // healthcheck 於後續 phase 接入）。
 pub mod ibkr_secret_slot_loader;
+// IBKR Phase 2 P2（AMD-2026-07-08-01）：external-surface gate producer——程式化組裝
+// `IbkrPhase2GateArtifactV1`、雙綠（validate + hash re-verify）+ approval A-model +
+// write-once seal（create_new/hard_link，refuse-ephemeral）。現狀必然 BLOCKED（真槽
+// absent + 無 approval），跑 report-only 不寫檔（正確 fail-closed）。
+pub mod ibkr_phase2_gate_producer;
 pub mod instrument_info;
 pub mod intent_processor;
 pub mod ipc_server;

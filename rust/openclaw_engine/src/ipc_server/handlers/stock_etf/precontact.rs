@@ -53,7 +53,9 @@ pub(super) fn phase2_precontact_summary() -> serde_json::Value {
         },
         "readonly_probe_request": readonly_probe_request_summary(),
         "readonly_probe_result_import_request": readonly_probe_result_import_request_summary(),
-        "immutable_pass_artifact_present": false,
+        // P2（AMD-2026-07-08-01）：由 producer 的磁碟 sealed 態 re-verify 反映（非
+        // file-exists）——單一真源，precontact 不二次組裝 gate。現狀無 sealed 檔 → false。
+        "immutable_pass_artifact_present": crate::ibkr_phase2_gate_producer::phase2_immutable_pass_artifact_present(),
         "first_ibkr_contact_allowed": false,
         "connector_enabled": false,
         "secret_slot_touched": false,
