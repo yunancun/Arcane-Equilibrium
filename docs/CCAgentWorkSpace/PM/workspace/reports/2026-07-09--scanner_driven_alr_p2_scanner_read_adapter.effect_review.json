@@ -1,0 +1,32 @@
+{
+  "schema": "alr_effect_review_v1",
+  "created_at": "2026-07-09T00:00:00Z",
+  "work_item_id": "P2-1-ALR-SCANNER-READ-ADAPTER",
+  "verdict": "PASS_WITH_BOUNDARY",
+  "effect_summary": "P2-1 introduces a pure, fail-closed source adapter for Rust-owned scanner snapshot rows. It establishes row-level provenance and cursor semantics without reading a database, writing persistence, starting a service, contacting an exchange, or extending any authority.",
+  "boundary_checks": {
+    "scanner_evidence_only": true,
+    "exchange_authority": false,
+    "trading_authority": false,
+    "decision_lease_authority": false,
+    "cost_gate_authority": false,
+    "proof_authority": false,
+    "serving_or_promotion_authority": false,
+    "runtime_mutation_performed": false,
+    "scanner_row_consumed": false,
+    "persistence_write_performed": false,
+    "retention_apply_performed": false
+  },
+  "verification": [
+    "E2 source review against Rust scanner runner, V030, and trading writer",
+    "red-to-green lifecycle invariant test for added/removed/active symbols",
+    "two focused plus adjacent ALR pytest runs: 153 passed each",
+    "py_compile and owned-file git diff --check pass",
+    "direct IO/trading authority import and call scan has no matches"
+  ],
+  "conditions": [
+    "P2-2 must first obtain a fresh PM -> E3 -> BB -> PM gate.",
+    "P2-1 output is not a durable processed-key store; P2-2 must persist deduplication and recovery state in append-only ALR-owned tables.",
+    "No profitability, proof, serving, or promotion claim is supported by this slice."
+  ]
+}
