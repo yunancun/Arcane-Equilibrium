@@ -12,6 +12,12 @@ YYYY-MM-DD HH:MM TZ
 ```
 
 2026-07-09 00:00 CEST
+- dispatched ALR todo-stub/prompt adversarial review chain: `CC`, `FA`, `QC`, `MIT`, `AI-E`, `E3`, `BB`, `PA`
+- result: created `docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/` with queue, boundaries, loop contract, retention contract, manifest, and startup prompt
+- PM signoff: conditional pass as foreground Codex source-development loop under `SOURCE_ONLY_OFFLINE_P0_P1`; first item is `P0-AIML-ALR-BOUNDARY-PACKET`, target `boundary_packet.md`
+- boundary: docs/stub/prompt only; no runtime SSH, PG, Bybit/MCP/network/order, Decision Lease, scanner cadence/subscription change, Cost Gate, `_latest`, serving, proof, promotion, or cleanup apply
+
+2026-07-09 00:00 CEST
 - dispatched scanner-driven Autonomous Learning Runtime adversarial design chain: `CC`, `FA`, `QC`, `MIT`, `AI-E`, `E5`, `E3`, `BB`, `PA`
 - result: direction accepted only as source/artifact-only single-shot P0; no scheduler/daemon/IPC/PG/runtime/Bybit/order behavior in P0
 - reports: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_autonomous_learning_runtime_engineering_plan.md` and `docs/CCAgentWorkSpace/Operator/2026-07-09--scanner_driven_autonomous_learning_runtime_engineering_plan.md`

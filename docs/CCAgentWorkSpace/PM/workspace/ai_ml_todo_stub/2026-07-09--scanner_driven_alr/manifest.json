@@ -1,0 +1,68 @@
+{
+  "schema": "ai_ml_alr_todo_stub_manifest_v1",
+  "created_at": "2026-07-09",
+  "owner": "PM",
+  "status": "ACTIVE_STUB",
+  "maturity_label": "ALR_P0_SOURCE_ONLY_TARGET_INTAKE",
+  "boundary_label": "SOURCE_ONLY_OFFLINE_P0_P1",
+  "repo_head_observed": "d077949fc1ec1a39b6121566f8a2333f87fee27c",
+  "authority": {
+    "root_todo_authority": false,
+    "requires_pm_import_to_root_todo": true,
+    "source_development_loop_only": true,
+    "runtime_authority": false,
+    "exchange_authority": false,
+    "trading_authority": false
+  },
+  "source_reports": [
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_autonomous_learning_runtime_engineering_plan.md",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-07--ai_ml_roadmap_wp1_wp5_completion_assessment.md",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-06--ai_ml_roadmap_autonomous_completion_loop_design.md"
+  ],
+  "adversarial_audit_roles": [
+    "CC(default)",
+    "FA(default)",
+    "QC(default)",
+    "MIT(default)",
+    "AI-E(default)",
+    "E3(explorer)",
+    "BB(default)",
+    "PA(default)"
+  ],
+  "hard_boundaries": [
+    "scanner artifacts are intake evidence only",
+    "P0 optimizes expected_value_of_information, not expected trade PnL",
+    "candidate-matched after-cost proof is required for edge claims",
+    "no runtime SSH, restart, rebuild, deploy, service, or env mutation",
+    "no PG read/write/DDL/migration or Timescale policy mutation",
+    "no IPC listener/writer, Decision Lease acquisition, or adapter/writer enablement",
+    "no Bybit REST/WS public or private contact",
+    "no official exchange MCP install, start, connect, credential read, private read, or order path",
+    "no order, probe, cancel, modify, cancel-all, fee-rate private read, or /v5/order endpoint",
+    "no inheritance from standing Demo authorization, prior no-order approvals, prior Bybit public GET approvals, or current trading P0 TODO context",
+    "no Cost Gate change, proof promotion, model serving promotion, or _latest overwrite",
+    "no cron, daemon, launchd, systemd, sidecar, scheduler, or hidden background loop",
+    "RetentionGuardian P0 is dry-run manifest only and performs no delete/move/apply"
+  ],
+  "queue_files": {
+    "readme": "README.md",
+    "queue": "queue.md",
+    "boundaries": "boundaries.md",
+    "loop_contract": "loop_contract.md",
+    "retention_guardian_contract": "retention_guardian_contract.md",
+    "startup_prompt": "startup_prompt.md",
+    "boundary_packet_target": "boundary_packet.md"
+  },
+  "boundary_packet_targets": {
+    "primary": "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/boundary_packet.md",
+    "allowed_fallback": "docs/CCAgentWorkSpace/PM/workspace/reports/<date>--scanner_driven_alr_boundary_packet.md",
+    "not_allowed_without_future_pm_scope": [
+      "docs/adr/",
+      "docs/amd/",
+      "sql/migrations/",
+      "runtime config",
+      "root TODO.md import"
+    ]
+  },
+  "current_entry_item": "P0-AIML-ALR-BOUNDARY-PACKET"
+}
