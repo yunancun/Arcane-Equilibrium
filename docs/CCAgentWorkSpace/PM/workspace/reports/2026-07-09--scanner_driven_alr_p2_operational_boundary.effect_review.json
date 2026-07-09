@@ -1,0 +1,26 @@
+{
+  "schema": "alr_effect_review_v1",
+  "created_at": "2026-07-09T00:00:00Z",
+  "work_item_id": "P2-0-ALR-OPERATIONAL-BOUNDARY",
+  "verdict": "PASS_WITH_CONDITIONS",
+  "effect_summary": "Established the P2 operational-shadow governance and root queue without creating a migration, reading or writing runtime state, starting a service, contacting an exchange, or changing trading authority.",
+  "boundary_checks": {
+    "scanner_evidence_only": true,
+    "exchange_authority": false,
+    "trading_authority": false,
+    "decision_lease_authority": false,
+    "cost_gate_authority": false,
+    "serving_or_promotion_authority": false,
+    "retention_apply_performed": false,
+    "runtime_mutation_performed": false
+  },
+  "verification": [
+    "git diff --check on owned P2-0 files",
+    "required scanner/hash/watermark, P3, and fresh E3/BB gate wording scan",
+    "root TODO and versioned queue cross-reference review"
+  ],
+  "conditions": [
+    "P2-1 must validate the real scanner snapshot row shape and fail closed.",
+    "P2-2 migration apply, service start, sustained Linux service consumption, and retention sweep require a fresh PM -> E3 -> BB -> PM gate."
+  ]
+}
