@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-09（TODO v775 ALR P2-5 feedback rotation apply）
+> 最後更新：2026-07-09（TODO v776 ALR P2-6 retention apply）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**TODO v776 ALR P2-6 retention apply（2026-07-09）**：P2-6 added V154 ALR-owned rebuildable cache and immutable retention-event tables, a reference-graph guardian that quarantines before grace recheck/sweep, and the only scoped shadow UPDATE/DELETE grant. Focused/adjacent suite passed `210`; disposable PostgreSQL proved one cache quarantine then sweep after grace, retained the derived-cache artifact plus two events, and denied training-run deletion. Fresh PM/E3/BB applied V154 and restarted only the ALR service at `14a09b562`. Production had no cache data, so the guardian pass safely yielded zero entries/events; cache UPDATE/DELETE are granted while training-run UPDATE/DELETE and scanner INSERT are denied. The restart processed ordinary ALR work to three runs/two feedback events, zero source duplicates; scanner count and engine PID remained unchanged. P2-7 is active.
 
 **TODO v775 ALR P2-5 feedback rotation apply（2026-07-09）**：P2-5 added a pure ProofPacket/RewardLedger outcome bridge consumer, V153 append-only feedback/rotation ledger, and event-loop ordering that processes unreviewed feedback before one next target selection. No canonical runtime proof/reward producer exists, so current input absence is recorded as `DEFER_EVIDENCE`, never synthesized as proof or PnL. Focused plus adjacent suite passed `186`; disposable PostgreSQL applied V030-V153, reconciled eight rows, made a first target, wrote one deferred feedback plus rotation edge, made a second target, and denied feedback UPDATE. Fresh PM/E3/BB applied V153 and re-applied the least-privilege contract at `2787042d0`, then restarted only the ALR service. Production has two 32-source statistical runs, one `DEFER_EVIDENCE` feedback (proof absent/reward zero/rotate true), 64 training-input edges, one rotation edge, zero duplicate source keys, and exact false/zero authority records. A concurrent Rust engine cycle advanced scanner count by one; scanner INSERT remains denied to ALR and engine PID `1561777` was untouched. P2-6 is active; P2-8 notifier soak remains separately blocked.
 
