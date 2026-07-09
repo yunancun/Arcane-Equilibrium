@@ -119,6 +119,10 @@ pub mod ibkr_secret_slot_loader;
 // write-once seal（create_new/hard_link，refuse-ephemeral）。現狀必然 BLOCKED（真槽
 // absent + 無 approval），跑 report-only 不寫檔（正確 fail-closed）。
 pub mod ibkr_phase2_gate_producer;
+// IBKR B1 只讀 TWS 連接器（ADR-0048 / AMD-2026-07-08-01，G4 首次接觸）：connect handshake
+// + reqCurrentTime 最小首接觸；純 codec + generic driver + 3 層惰性 gate；唯一具體
+// TcpStream::connect 於 `ibkr_g4_contact` feature 後（default build 無 socket、無 caller）。
+pub mod ibkr_readonly_tws_client;
 pub mod instrument_info;
 pub mod intent_processor;
 pub mod ipc_server;
