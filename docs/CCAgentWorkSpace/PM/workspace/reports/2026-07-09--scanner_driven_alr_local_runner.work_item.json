@@ -1,0 +1,72 @@
+{
+  "schema": "alr_work_item_v1",
+  "created_at": "2026-07-09T17:28:56Z",
+  "work_item_id": "P1-AIML-ALR-LOCAL-RUNNER",
+  "boundary_label": "SOURCE_ONLY_OFFLINE_P0_P1",
+  "status": "DONE",
+  "owner_chain": [
+    "PM",
+    "PA",
+    "E1",
+    "E2",
+    "E4",
+    "QA",
+    "PM"
+  ],
+  "selected_row_status_before": "DEFERRED_P0_ACTIVATED_BY_OPERATOR",
+  "target_files": [
+    "program_code/ml_training/alr_local_runner.py",
+    "program_code/ml_training/tests/test_alr_local_runner.py",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/queue.md",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/manifest.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_local_runner.work_item.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_local_runner.effect_review.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_local_runner.state_packet.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_local_runner.md",
+    "docs/CCAgentWorkSpace/Operator/2026-07-09--scanner_driven_alr_local_runner.md"
+  ],
+  "forbidden_files": [
+    "TODO.md",
+    "docs/adr/",
+    "docs/amd/",
+    "sql/migrations/",
+    "runtime config",
+    "exchange connectors",
+    "_latest artifacts",
+    "cron or daemon configuration",
+    "serving or promotion artifacts",
+    "Decision Lease or order/probe files"
+  ],
+  "acceptance_pins": [
+    "alr_local_runner_manifest_v1",
+    "alr_local_runner_report_v1",
+    "alr_loop_state_packet_v1",
+    "explicit --manifest and --out-dir invocation",
+    "single bounded foreground run",
+    "state/report selected work item consistency",
+    "previous artifact hash rotation detection",
+    "top-level previous_state_packet_path auto recovery",
+    "existing empty output dir accepted",
+    "non-empty output dir rejected",
+    "output symlink and ancestor symlink rejected",
+    "_latest refs rejected",
+    "exclusive create JSON outputs",
+    "SOURCE_ONLY_OFFLINE_P0_P1"
+  ],
+  "dependencies": [
+    "P0-AIML-ALR-CONTROLLER-CONTRACTS",
+    "P0-AIML-ALR-LEARNING-TARGET-ARBITER",
+    "P0-AIML-ALR-OUTCOME-BRIDGE",
+    "P0-AIML-ALR-RETENTION-GUARDIAN-DRY-RUN",
+    "PA(default) design",
+    "E1 implementation",
+    "E2 final PASS",
+    "E4 final PASS",
+    "QA ACCEPT"
+  ],
+  "unblocks": [
+    "P1-AIML-ALR-PERSISTENCE-DESIGN"
+  ],
+  "repo_head_before": "0bafe2f9ee69e53cc00d95ef39dc32a050cb5f20",
+  "repo_head_after": "0bafe2f9ee69e53cc00d95ef39dc32a050cb5f20"
+}

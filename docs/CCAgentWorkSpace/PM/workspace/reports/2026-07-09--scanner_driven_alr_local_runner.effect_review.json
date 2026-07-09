@@ -1,0 +1,109 @@
+{
+  "schema": "alr_effect_review_v1",
+  "created_at": "2026-07-09T17:28:56Z",
+  "work_item_id": "P1-AIML-ALR-LOCAL-RUNNER",
+  "effect_summary": "Implemented an explicit source-only ALR local runner. It consumes a hash-bound caller manifest, composes one bounded P0 component step per invocation, emits bounded JSON artifacts plus alr_loop_state_packet_v1 and alr_local_runner_report_v1, detects referenced-artifact hash rotation, recovers completed artifacts from a caller-provided previous state packet, and performs no runtime, scheduler, exchange, proof, promotion, or order action.",
+  "files_changed": [
+    "program_code/ml_training/alr_local_runner.py",
+    "program_code/ml_training/tests/test_alr_local_runner.py",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/queue.md",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/manifest.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_local_runner.work_item.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_local_runner.effect_review.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_local_runner.state_packet.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_local_runner.md",
+    "docs/CCAgentWorkSpace/Operator/2026-07-09--scanner_driven_alr_local_runner.md"
+  ],
+  "boundary_checks": {
+    "boundary_label_present": true,
+    "explicit_manifest_required": true,
+    "explicit_out_dir_required": true,
+    "foreground_single_invocation_only": true,
+    "no_hidden_scheduler_or_background_loop": true,
+    "latest_paths_rejected": true,
+    "expected_previous_hashes_checked": true,
+    "rotated_state_emitted_on_hash_mismatch": true,
+    "state_packet_validated_by_controller_contract": true,
+    "state_and_report_selected_ref_consistent": true,
+    "all_done_queue_keeps_empty_selection_consistent": true,
+    "existing_empty_output_dir_accepted": true,
+    "non_empty_output_dir_rejected": true,
+    "output_symlink_rejected": true,
+    "output_dir_and_ancestor_symlinks_rejected": true,
+    "exclusive_create_used_for_outputs": true,
+    "no_executable_runtime_or_network_path": true,
+    "no_executable_source_outside_owned_files": true
+  },
+  "verification": [
+    {
+      "command": "PYTHONPATH=program_code PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile program_code/ml_training/alr_local_runner.py program_code/ml_training/tests/test_alr_local_runner.py",
+      "result": "PASS"
+    },
+    {
+      "command": "PYTHONPATH=program_code PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q program_code/ml_training/tests/test_alr_local_runner.py -p no:cacheprovider",
+      "result": "PASS",
+      "observed": "15 passed"
+    },
+    {
+      "command": "PYTHONPATH=program_code PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q program_code/ml_training/tests/test_alr_local_runner.py program_code/ml_training/tests/test_alr_controller_contracts.py program_code/ml_training/tests/test_learning_target_arbiter.py program_code/ml_training/tests/test_alr_outcome_bridge.py program_code/ml_training/tests/test_alr_retention_guardian_dry_run.py program_code/ml_training/tests/test_learning_effect_review.py -p no:cacheprovider",
+      "result": "PASS",
+      "observed": "170 passed"
+    },
+    {
+      "command": "git diff --check -- program_code/ml_training/alr_local_runner.py program_code/ml_training/tests/test_alr_local_runner.py",
+      "result": "PASS"
+    },
+    {
+      "command": "E2 final gate",
+      "result": "PASS"
+    },
+    {
+      "command": "E4 final gate",
+      "result": "PASS"
+    },
+    {
+      "command": "QA final gate",
+      "result": "ACCEPT"
+    }
+  ],
+  "line_count_review": {
+    "program_code/ml_training/alr_local_runner.py": 865,
+    "program_code/ml_training/tests/test_alr_local_runner.py": 569,
+    "review_attention_required_over_800": true,
+    "review_attention_satisfied_by": [
+      "E2 final PASS",
+      "E4 final PASS",
+      "QA ACCEPT"
+    ],
+    "hard_cap_over_2000": false
+  },
+  "authority_flags": {
+    "root_todo_imported": false,
+    "adr_amd_applied": false,
+    "runtime_effects": false,
+    "pg_effects": false,
+    "ipc_effects": false,
+    "exchange_effects": false,
+    "official_mcp_effects": false,
+    "decision_lease_effects": false,
+    "order_or_probe_effects": false,
+    "cost_gate_effects": false,
+    "latest_overwrite": false,
+    "serving_authority_granted": false,
+    "proof_or_promotion_authority_granted": false,
+    "delete_or_apply_performed": false,
+    "scheduler_or_daemon_created": false,
+    "live_or_mainnet_authority_granted": false
+  },
+  "candidate_matched_fills_count": 0,
+  "proof_packet_ready_count": 0,
+  "reward_ledger_ready_count": 0,
+  "concerns": [
+    "alr_local_runner.py is above the 800-line review-attention threshold; E2, E4, and QA reviewed it.",
+    "The runner performs explicit local JSON reads and writes only through guarded caller-provided paths.",
+    "Denied vocabulary appears in source/tests only as fail-closed path and authority validation terms.",
+    "Unrelated dirty files were present before this row and remain unstaged.",
+    "P1-B is now the next source-only design row; runtime/PG implementation remains forbidden."
+  ],
+  "verdict": "EFFECTIVE_ALR_LOCAL_RUNNER_READY"
+}
