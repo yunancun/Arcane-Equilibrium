@@ -240,6 +240,14 @@ def test_reads_only_unseen_scanner_snapshots_with_a_bounded_query() -> None:
     assert "DELETE" not in sql.upper()
 
 
+def test_repository_keeps_alr_shadow_reads_select_only() -> None:
+    connection = _LedgerConnection()
+
+    persist_scanner_cycle(connection, _cycle())
+
+    assert all("FOR SHARE" not in sql.upper() for sql, _ in connection.calls)
+
+
 def test_v151_is_append_only_alr_owned_and_non_destructive() -> None:
     migration = (
         Path(__file__).parents[3]

@@ -79,7 +79,7 @@ def persist_scanner_cycle(connection: Any, cycle: Mapping[str, Any]) -> dict[str
         with connection.cursor() as cursor:
             cursor.execute(
                 "SELECT source_hash FROM learning.alr_source_events "
-                "WHERE source_table = %s AND source_key = %s FOR SHARE",
+                "WHERE source_table = %s AND source_key = %s",
                 (plan["source_table"], plan["source_key"]),
             )
             existing = cursor.fetchone()
@@ -109,7 +109,7 @@ def persist_scanner_cycle(connection: Any, cycle: Mapping[str, Any]) -> dict[str
             if cursor.fetchone() is None:
                 cursor.execute(
                     "SELECT source_hash FROM learning.alr_source_events "
-                    "WHERE source_table = %s AND source_key = %s FOR SHARE",
+                    "WHERE source_table = %s AND source_key = %s",
                     (plan["source_table"], plan["source_key"]),
                 )
                 raced = cursor.fetchone()
