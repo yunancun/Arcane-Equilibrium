@@ -1,0 +1,73 @@
+{
+  "schema": "alr_loop_state_packet_v1",
+  "created_at": "2026-07-09T00:42:29Z",
+  "repo_head_before": "fc33dc39759fa7bea051bb4101c619541ff20f4f",
+  "repo_head_after": "fc33dc39759fa7bea051bb4101c619541ff20f4f",
+  "selected_work_item": "P0-AIML-ALR-CONTROLLER-CONTRACTS",
+  "selection_reason": "First ACTIVE row after boundary packet checkpoint.",
+  "state": "ADVANCED",
+  "next_state": "P0-AIML-ALR-LEARNING-TARGET-ARBITER_ACTIVE",
+  "next_action": "Continue with P0-AIML-ALR-LEARNING-TARGET-ARBITER through PM -> PA -> E1/E1a -> E2 -> E4 -> QA -> PM, implementing a source-only single-shot learning target arbiter under SOURCE_ONLY_OFFLINE_P0_P1.",
+  "stop_reason": null,
+  "owned_files": [
+    "program_code/ml_training/alr_controller_contracts.py",
+    "program_code/ml_training/tests/test_alr_controller_contracts.py",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/queue.md",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/manifest.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_controller_contracts.work_item.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_controller_contracts.effect_review.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_controller_contracts.state_packet.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_controller_contracts.md",
+    "docs/CCAgentWorkSpace/Operator/2026-07-09--scanner_driven_alr_controller_contracts.md"
+  ],
+  "verification_commands": [
+    "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m py_compile program_code/ml_training/alr_controller_contracts.py program_code/ml_training/learning_effect_review.py program_code/ml_training/reward_ledger.py",
+    "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m pytest -q program_code/ml_training/tests/test_alr_controller_contracts.py program_code/ml_training/tests/test_learning_effect_review.py program_code/ml_training/tests/test_reward_ledger.py -p no:cacheprovider",
+    "rg executable runtime/network/DB/order import scan on alr_controller_contracts.py",
+    "git diff --cached --check after staging owned files"
+  ],
+  "candidate_matched_fills_count": 0,
+  "proof_packet_ready_count": 0,
+  "reward_ledger_ready_count": 0,
+  "effect_review_ready": true,
+  "model_training_performed": false,
+  "serving_authority_granted": false,
+  "llm_authority": false,
+  "runtime_authority": false,
+  "exchange_authority": false,
+  "trading_authority": false,
+  "boundary_escalation_required": false,
+  "dispatch_tooling_available": true,
+  "dispatch_blocker": null,
+  "role_chain": [
+    {
+      "role": "PA(default)",
+      "status": "DONE_WITH_CONCERNS",
+      "verdict": "E1 can implement in proposed files"
+    },
+    {
+      "role": "E1(worker)",
+      "status": "DONE",
+      "verdict": "implemented and reworked findings"
+    },
+    {
+      "role": "E2(explorer)",
+      "status": "DONE",
+      "verdict": "PASS"
+    },
+    {
+      "role": "E4(worker)",
+      "status": "DONE_WITH_CONCERNS",
+      "verdict": "PASS"
+    },
+    {
+      "role": "QA(worker)",
+      "status": "DONE_WITH_CONCERNS",
+      "verdict": "ACCEPT"
+    }
+  ],
+  "concerns": [
+    "Denial vocabulary appears in source only to fail closed on authority expansion.",
+    "Cached diff-check must be run after staging because source files were untracked during E4."
+  ]
+}
