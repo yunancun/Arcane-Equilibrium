@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-09（TODO v777 ALR P2-7 health apply）
+> 最後更新：2026-07-10（TODO v778 ALR P2 operational shadow completion）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**TODO v778 ALR P2 operational shadow completion（2026-07-10）**：P2-8 source added a gated timestamp-bounded SELECT-only reconciliation for a large historical scanner backlog; full ALR source suite passed `220`, plus `py_compile` and diff check. After fresh PM/E3/BB gate and Mac/GitHub/Linux alignment, the ALR-only service reconciled five real post-baseline Rust scanner cycles exactly once, then restarted without its temporary cursor drop-in. Closed-window raw/ALR/raw-only/ALR-only counts were `5/5/0/0`; the three required cycles are present `3/3`; service PID was `1973155 -> 1982389 -> 1982461`; target runs and health snapshots advanced with false/zero authority, scanner INSERT and immutable-ledger UPDATE/DELETE denied, and retention cache/events remained `0/0`. This closes `DONE_OPERATIONAL_SHADOW`, not profitability or proof. An un-attributed engine PID restart to `1983100` occurred after the closed window and is only a future P3 revalidation input. P3 request is emitted and stops at `WAIT_OPERATOR_DEMO_AUTH`.
 
 **TODO v777 ALR P2-7 health apply（2026-07-09）**：P2-7 added V155 immutable health snapshots and listener emission after bounded scanner/feedback/retention work. Source tests passed focused health contracts; disposable PostgreSQL wrote one health event/artifact with UPDATE denied. Fresh PM/E3/BB applied V155 and restarted only the ALR service at `2a3a78465`. Production now has one health snapshot covering watermark, scanner backlog `65`, feedback backlog `1`, latest target/run, four runs, three deferred evidence gaps, recovery duplicate `0`, retention bytes/events `0`, failure `0`, and all authority mismatch/action counters `0`; health UPDATE/DELETE and scanner INSERT remain denied, scanner count/engine PID unchanged. P2-8 is active for a fresh-gated natural-cycle restart soak without engine restart.
 
