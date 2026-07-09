@@ -1,0 +1,24 @@
+{
+  "schema_version": "alr_p2_7_operational_state_v1",
+  "state": "P2_7_DONE_P2_8_ACTIVE",
+  "source_head": "2a3a78465b802d8490a0e55b3452a87cbb46cf48",
+  "service": {
+    "name": "openclaw-alr-shadow.service",
+    "active": true,
+    "source_head_pinned": true,
+    "engine_restarted": false
+  },
+  "health": {
+    "health_events": 1,
+    "scanner_backlog": 65,
+    "outcome_feedback_backlog": 1,
+    "training_runs": 4,
+    "deferred_feedback_count": 3,
+    "duplicate_source_keys": 0,
+    "retention_entries": 0,
+    "retention_payload_bytes": 0,
+    "run_authority_mismatch_count": 0,
+    "feedback_authority_mismatch_count": 0
+  },
+  "next": "P2-8 natural scanner-cycle shadow soak without engine restart"
+}

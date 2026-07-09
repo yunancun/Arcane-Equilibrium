@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-09（TODO v776 ALR P2-6 retention apply）
+> 最後更新：2026-07-09（TODO v777 ALR P2-7 health apply）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**TODO v777 ALR P2-7 health apply（2026-07-09）**：P2-7 added V155 immutable health snapshots and listener emission after bounded scanner/feedback/retention work. Source tests passed focused health contracts; disposable PostgreSQL wrote one health event/artifact with UPDATE denied. Fresh PM/E3/BB applied V155 and restarted only the ALR service at `2a3a78465`. Production now has one health snapshot covering watermark, scanner backlog `65`, feedback backlog `1`, latest target/run, four runs, three deferred evidence gaps, recovery duplicate `0`, retention bytes/events `0`, failure `0`, and all authority mismatch/action counters `0`; health UPDATE/DELETE and scanner INSERT remain denied, scanner count/engine PID unchanged. P2-8 is active for a fresh-gated natural-cycle restart soak without engine restart.
 
 **TODO v776 ALR P2-6 retention apply（2026-07-09）**：P2-6 added V154 ALR-owned rebuildable cache and immutable retention-event tables, a reference-graph guardian that quarantines before grace recheck/sweep, and the only scoped shadow UPDATE/DELETE grant. Focused/adjacent suite passed `210`; disposable PostgreSQL proved one cache quarantine then sweep after grace, retained the derived-cache artifact plus two events, and denied training-run deletion. Fresh PM/E3/BB applied V154 and restarted only the ALR service at `14a09b562`. Production had no cache data, so the guardian pass safely yielded zero entries/events; cache UPDATE/DELETE are granted while training-run UPDATE/DELETE and scanner INSERT are denied. The restart processed ordinary ALR work to three runs/two feedback events, zero source duplicates; scanner count and engine PID remained unchanged. P2-7 is active.
 
