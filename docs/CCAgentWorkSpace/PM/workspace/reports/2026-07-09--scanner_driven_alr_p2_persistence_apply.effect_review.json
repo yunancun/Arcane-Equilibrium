@@ -1,0 +1,40 @@
+{
+  "schema": "alr_effect_review_v1",
+  "created_at": "2026-07-09T00:00:00Z",
+  "work_item_id": "P2-2-ALR-PERSISTENCE-APPLY",
+  "verdict": "PASS",
+  "effect_summary": "V151 applied once to existing PostgreSQL after exact source alignment. The one-shot repository consumed one existing Rust scanner cycle into ALR-owned append-only ledger rows, recorded a duplicate event, and reconstructed restart state without changing scanner source data or extending authority.",
+  "migration": {
+    "file": "sql/migrations/V151__alr_persistence_foundation.sql",
+    "sha256": "294d7ed007ad160958950d84f2de61a8d46b1c5fb488fefa5865190d490a653f",
+    "dry_run": "PASS",
+    "apply": "PASS"
+  },
+  "postapply_counts": {
+    "artifact_nodes": 3,
+    "source_events": 1,
+    "ingest_events": 2,
+    "watermark_events": 1,
+    "provenance_edges": 1
+  },
+  "one_shot": {
+    "scanner_cycles_read": 1,
+    "persisted": 1,
+    "duplicates": 1,
+    "restart_key_present": true
+  },
+  "authority_counters": {
+    "exchange_authority": false,
+    "trading_authority": false,
+    "proof_authority": false,
+    "serving_authority": false,
+    "promotion_authority": false,
+    "decision_lease_authority": false,
+    "cost_gate_authority": false
+  },
+  "conditions": [
+    "trading_ai role is absent; P2-3 must verify or provision an approved service DB identity before service start.",
+    "P2-3 service/event consumer requires a fresh PM -> E3 -> BB -> PM gate.",
+    "No profit, proof, serving, or promotion claim is supported."
+  ]
+}
