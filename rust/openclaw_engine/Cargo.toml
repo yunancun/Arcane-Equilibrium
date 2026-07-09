@@ -124,6 +124,14 @@ replay_isolated = []
 # per docs/execution_plan/2026-05-21--sprint_1a_zeta_impl_spike_scope_spec.md §AC-5.1。
 spike = []
 
+# IBKR B1 只讀 TWS 連接器 — G4 首次接觸 feature flag（ADR-0048 / AMD-2026-07-08-01）。
+# 純 marker feature（無額外依賴）；gate 掉 `bin/ibkr_g4_first_contact.rs` 與
+# `ibkr_readonly_tws_client::g4_operator_triggered_first_contact`（唯一具體
+# TcpStream::connect）。default `cargo build` 不含此 feature → 引擎 artifact 無 IBKR G4
+# socket 符號（由 helper_scripts/ci/ibkr_g4_symbol_audit.sh nm 斷言）。
+# IBKR B1 read-only TWS connector — G4 first-contact feature flag.
+ibkr_g4_contact = []
+
 [[bin]]
 name = "openclaw-engine"
 path = "src/main.rs"
@@ -222,3 +230,12 @@ path = "src/bin/funding_oi_backfill.rs"
 name = "replay_runner"
 path = "src/bin/replay_runner.rs"
 required-features = ["replay_isolated"]
+
+# IBKR B1 G4 首次接觸觸發 bin（AMD-2026-07-08-01）：feature-gated；default dry-run
+# （打印 gate 狀態，不接觸 socket）；`--contact` + env OPENCLAW_IBKR_G4_CONTACT_APPLY=1 才真
+# connect。無 production caller；main.rs / boot 無 invoke。required-features 使 default
+# `cargo build` 完全不編譯此 bin（socket 符號物理上不入引擎 artifact graph）。
+[[bin]]
+name = "ibkr_g4_first_contact"
+path = "src/bin/ibkr_g4_first_contact.rs"
+required-features = ["ibkr_g4_contact"]
