@@ -1,9 +1,12 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>玄衡 · Arcane Equilibrium Control Center</title>
+  <!-- Phase 0 過渡:token 正本 tokens.css+compat 映射層須先於一切樣式載入;data-theme="dark" 釘死玄夜主題,因存量樣式仍有暗色硬編碼,OS 淺色偏好會產生壞對比;P1.3 主題切換上線後移除釘死 -->
+  <link rel="stylesheet" href="/static/tokens.css" />
+  <link rel="stylesheet" href="/static/tokens-compat.css" />
   <link rel="stylesheet" href="/static/styles.css" />
   <script>
   // Auth check: verify HttpOnly cookie via /api/v1/auth/check (APR01-MEDIUM-13)

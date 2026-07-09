@@ -1,13 +1,16 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
 <title>玄衡 · Arcane Equilibrium — Login</title>
+<!-- Phase 0 過渡:token 正本 tokens.css+compat 映射層須先於一切樣式載入;data-theme="dark" 釘死玄夜主題,因存量樣式仍有暗色硬編碼,OS 淺色偏好會產生壞對比;P1.3 主題切換上線後移除釘死 -->
+<link rel="stylesheet" href="/static/tokens.css" />
+<link rel="stylesheet" href="/static/tokens-compat.css" />
 <link rel="stylesheet" href="/static/styles.css" />
 <style>
-  /* :root variables are in styles.css (canonical location, includes --card and --dim aliases for this page) */
+  /* token 正本=tokens.css;本頁 --card/--dim 簡短別名由 tokens-compat.css 映射(P0.1) */
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%;background:var(--bg);color:var(--text);font:14px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,monospace;display:flex;align-items:center;justify-content:center}
   .login-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:40px;width:380px;text-align:center}

@@ -708,17 +708,13 @@ function classifyLiveMutation(d) {
 }
 
 // ─── Tab Page Base CSS (injected by each tab) ────────────────────────────────
+// token 定義已移至 tokens.css + tokens-compat.css(各 tab <head> <link> 載入,P0.1);
+// 本函數只餘組件樣式注入(後續 phase 抽離成靜態 CSS 檔)。
 function ocInjectBaseCSS() {
   if (document.getElementById('oc-base-css')) return;
   const style = document.createElement('style');
   style.id = 'oc-base-css';
   style.textContent = `
-    :root {
-      --bg: #0d1117; --card-bg: #161b22; --border: #30363d;
-      --text: #c9d1d9; --text-dim: #8b949e; --accent: #58a6ff;
-      --green: #3fb950; --red: #f85149; --yellow: #d29922; --blue: #388bfd;
-      --card-radius: 10px;
-    }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; background: var(--bg); color: var(--text);
       font: 13px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', Roboto, sans-serif; }
