@@ -7,6 +7,7 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping, Sequence
+from datetime import datetime, timezone
 from typing import Any
 
 from ml_training.pit_dataset_manifest import compute_pit_dataset_manifest_hash
@@ -176,7 +177,12 @@ def fetch_untrained_scanner_cycles(connection: Any, *, limit: int) -> list[dict[
         rows = cursor.fetchall()
     if not isinstance(rows, list) or not all(isinstance(row, Mapping) for row in rows):
         raise AlrOperationalError("untrained_fetch_rows_invalid")
-    return [dict(row) for row in rows]
+    normalized: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        item["source_ts"] = _canonical_utc_z(item.get("source_ts"))
+        normalized.append(item)
+    return normalized
 
 
 def _find_run(cursor: Any, plan: Mapping[str, Any]) -> str | None:
@@ -352,6 +358,22 @@ def _required_hash(value: Any, field: str, *, length: int = 64) -> str:
     if not expression.fullmatch(value):
         raise AlrOperationalError(f"{field}_invalid")
     return value
+
+
+def _canonical_utc_z(value: Any) -> str:
+    if isinstance(value, datetime):
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise AlrOperationalError("source_ts_invalid")
+        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    if not isinstance(value, str) or not value.endswith("Z") or not value.strip():
+        raise AlrOperationalError("source_ts_invalid")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise AlrOperationalError("source_ts_invalid") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise AlrOperationalError("source_ts_invalid")
+    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _result(status: str, plan: Mapping[str, Any]) -> dict[str, Any]:

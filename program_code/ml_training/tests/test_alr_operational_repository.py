@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -164,6 +165,22 @@ def test_reads_only_bounded_untrained_alr_scanner_cycles() -> None:
     assert params == ("trading.scanner_snapshots", 4)
     assert "UPDATE" not in query.upper()
     assert "DELETE" not in query.upper()
+
+
+def test_normalizes_postgresql_timestamptz_to_canonical_utc_z() -> None:
+    connection = _LedgerConnection()
+    connection.untrained_rows = [
+        {
+            "source_hash": "1" * 64,
+            "source_key": "scan-1|2026-07-09T12:00:00Z",
+            "source_ts": datetime(2026, 7, 9, 14, 0, tzinfo=timezone.utc),
+            "canonical_payload": {"scan_id": "scan-1"},
+        }
+    ]
+
+    rows = fetch_untrained_scanner_cycles(connection, limit=4)
+
+    assert rows[0]["source_ts"] == "2026-07-09T14:00:00Z"
 
 
 def test_v152_expands_only_alr_owned_artifacts_and_run_ledger() -> None:
