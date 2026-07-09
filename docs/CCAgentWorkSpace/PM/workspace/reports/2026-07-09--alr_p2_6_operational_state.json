@@ -1,0 +1,25 @@
+{
+  "schema_version": "alr_p2_6_operational_state_v1",
+  "state": "P2_6_DONE_P2_7_ACTIVE",
+  "source_head": "14a09b5621f0c5e81018a0e9cd8ccccd1647c82a",
+  "service": {
+    "name": "openclaw-alr-shadow.service",
+    "active": true,
+    "source_head_pinned": true,
+    "engine_restarted": false
+  },
+  "retention": {
+    "production_cache_entries": 0,
+    "production_retention_events": 0,
+    "derived_cache_update_delete_granted": true,
+    "non_cache_update_delete_denied": true
+  },
+  "observed": {
+    "training_runs": 3,
+    "feedback_events": 2,
+    "duplicate_source_keys": 0,
+    "scanner_count_before": 79770,
+    "scanner_count_after": 79770
+  },
+  "next": "P2-7 health, state, metrics, restart recovery, authority counters"
+}
