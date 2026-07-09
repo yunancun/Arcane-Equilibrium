@@ -12,6 +12,7 @@ def test_user_service_template_is_listener_only_and_has_no_activation_action() -
     assert "-m ml_training.alr_event_consumer" in text
     assert "--dsn-file %h/.config/openclaw/alr-shadow.dsn" in text
     assert "--lock-file %t/alr-shadow/consumer.lock" in text
+    assert "Environment=ALR_SOURCE_HEAD=__ALR_SOURCE_HEAD__" in text
     assert "RuntimeDirectory=alr-shadow" in text
     assert "Restart=on-failure" in text
     assert "NoNewPrivileges=true" in text

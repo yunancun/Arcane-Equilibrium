@@ -16,5 +16,6 @@ def test_role_contract_is_least_privilege_and_has_no_credential_creation() -> No
     assert "GRANT CONNECT ON DATABASE trading_ai TO alr_shadow" in text
     assert "GRANT SELECT ON TABLE trading.scanner_snapshots TO alr_shadow" in text
     assert "GRANT SELECT, INSERT ON TABLE learning.alr_source_events TO alr_shadow" in text
+    assert "GRANT SELECT, INSERT ON TABLE learning.alr_training_runs TO alr_shadow" in text
     assert "GRANT UPDATE" not in text
     assert "GRANT DELETE" not in text

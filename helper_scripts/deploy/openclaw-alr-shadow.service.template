@@ -8,6 +8,8 @@ After=default.target
 Type=exec
 WorkingDirectory=%h/BybitOpenClaw/srv
 Environment=PYTHONPATH=%h/BybitOpenClaw/srv/program_code
+# The gated installer replaces this with the immutable deployed source commit.
+Environment=ALR_SOURCE_HEAD=__ALR_SOURCE_HEAD__
 ExecStart=/usr/bin/python3 -m ml_training.alr_event_consumer --dsn-file %h/.config/openclaw/alr-shadow.dsn --lock-file %t/alr-shadow/consumer.lock --max-batch 32
 Restart=on-failure
 RestartSec=5
