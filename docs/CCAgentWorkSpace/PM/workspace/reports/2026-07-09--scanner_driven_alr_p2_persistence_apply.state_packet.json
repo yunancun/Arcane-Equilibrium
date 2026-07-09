@@ -1,0 +1,29 @@
+{
+  "schema": "alr_loop_state_packet_v1",
+  "created_at": "2026-07-09T00:00:00Z",
+  "repo_head": "9732dd362",
+  "origin_main": "9732dd362",
+  "linux_head": "9732dd362",
+  "linux_dirty_count": 0,
+  "selected_work_item": "P2-2-ALR-PERSISTENCE-APPLY",
+  "state": "ADVANCED",
+  "next_state": "P2-3-ALR-EVENT-CONSUMER-FRESH-GATE",
+  "next_action": "Obtain fresh PM -> E3 -> BB -> PM review for a user-level event/backlog/novelty shadow consumer before any service start.",
+  "execution_mode": "ROLE_FALLBACK_SINGLE_SESSION",
+  "scanner_cycles_consumed": 1,
+  "training_runs": 0,
+  "evidence_records": 2,
+  "existing_pg_apply_performed": true,
+  "service_start_performed": false,
+  "exchange_authority": false,
+  "trading_authority": false,
+  "decision_lease_authority": false,
+  "cost_gate_authority": false,
+  "serving_authority": false,
+  "promotion_authority": false,
+  "retention_apply_authority": false,
+  "p2_3_preflight": {
+    "trading_ai_role_present": false,
+    "resolution_required_before_service_start": true
+  }
+}
