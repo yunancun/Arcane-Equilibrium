@@ -260,6 +260,8 @@ const ORDER_COLS: usize = 16;
 const STATE_CHANGE_COLS: usize = 8;
 const SCANNER_SNAPSHOT_COLS: usize = 9;
 const SCANNER_OPPORTUNITY_DECAY_COLS: usize = 16;
+const ALR_SCANNER_NOTIFY_CHANNEL: &str = "alr_scanner_snapshot_v1";
+const ALR_SCANNER_NOTIFICATION_SCHEMA_VERSION: &str = "alr_scanner_notification_v1";
 
 fn should_clear_buffer(table: &str, outcome: BatchInsertOutcome, pending_rows: usize) -> bool {
     if outcome.all_ok() {
@@ -992,7 +994,45 @@ async fn flush_scanner_snapshots(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
     )
     .await;
     if should_clear_buffer("trading.scanner_snapshots", outcome, buf.len()) {
+        notify_alr_scanner_snapshots(pg, buf.as_slice()).await;
         buf.clear();
+    }
+}
+
+fn scanner_notification_payload(msg: &TradingMsg) -> Option<String> {
+    let TradingMsg::ScannerSnapshot { scan_id, ts_ms, .. } = msg else {
+        return None;
+    };
+    Some(
+        serde_json::json!({
+            "schema_version": ALR_SCANNER_NOTIFICATION_SCHEMA_VERSION,
+            "scan_id": scan_id,
+            "ts_ms": ts_ms,
+        })
+        .to_string(),
+    )
+}
+
+async fn notify_alr_scanner_snapshots(pg: &sqlx::PgPool, snapshots: &[TradingMsg]) {
+    for snapshot in snapshots {
+        let Some(payload) = scanner_notification_payload(snapshot) else {
+            continue;
+        };
+        if let Err(error) = sqlx::query("SELECT pg_notify($1, $2)")
+            .bind(ALR_SCANNER_NOTIFY_CHANNEL)
+            .bind(payload)
+            .execute(pg)
+            .await
+        {
+            // The scanner rows are durable already.  A later ALR startup
+            // reconciliation repairs this best-effort wake-up without retaining
+            // or replaying the Rust-owned scanner buffer.
+            warn!(
+                channel = ALR_SCANNER_NOTIFY_CHANNEL,
+                error = %error,
+                "ALR scanner notification failed after durable snapshot insert"
+            );
+        }
     }
 }
 
@@ -1060,6 +1100,41 @@ async fn flush_scanner_opportunity_decays(pool: &DbPool, buf: &mut Vec<TradingMs
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn alr_scanner_notification_is_identity_only() {
+        let snapshot = TradingMsg::ScannerSnapshot {
+            scan_id: "scan-identity-only".into(),
+            ts_ms: 1_783_598_400_000,
+            active_symbols: vec!["BTCUSDT".into()],
+            added: vec!["BTCUSDT".into()],
+            removed: vec![],
+            rejected_count: 0,
+            scan_duration_ms: 1,
+            candidates: serde_json::json!([{"symbol": "BTCUSDT"}]),
+            config: serde_json::json!({"rank_limit": 1}),
+        };
+
+        let payload = scanner_notification_payload(&snapshot).expect("scanner payload");
+        let decoded: serde_json::Value = serde_json::from_str(&payload).expect("valid json");
+        let fields = decoded.as_object().expect("notification object");
+
+        assert_eq!(fields.len(), 3);
+        assert_eq!(
+            fields.get("schema_version"),
+            Some(&serde_json::json!("alr_scanner_notification_v1"))
+        );
+        assert_eq!(
+            fields.get("scan_id"),
+            Some(&serde_json::json!("scan-identity-only"))
+        );
+        assert_eq!(
+            fields.get("ts_ms"),
+            Some(&serde_json::json!(1_783_598_400_000_u64))
+        );
+        assert!(!fields.contains_key("candidates"));
+        assert!(!fields.contains_key("config"));
+    }
 
     #[test]
     fn test_trading_msg_routing() {

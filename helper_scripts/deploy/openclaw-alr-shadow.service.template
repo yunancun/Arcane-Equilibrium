@@ -1,0 +1,26 @@
+# Source template only.  Installation, enablement, credential creation, and
+# service start require the P2-3 post-implementation E3/BB prestart gate.
+[Unit]
+Description=OpenClaw ALR scanner-shadow event consumer
+After=default.target
+
+[Service]
+Type=exec
+WorkingDirectory=%h/BybitOpenClaw/srv
+Environment=PYTHONPATH=%h/BybitOpenClaw/srv/program_code
+ExecStart=/usr/bin/python3 -m ml_training.alr_event_consumer --dsn-file %h/.config/openclaw/alr-shadow.dsn --lock-file %t/alr-shadow/consumer.lock --max-batch 32
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=alr-shadow
+RuntimeDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+RestrictAddressFamilies=AF_UNIX AF_INET
+MemoryMax=512M
+TasksMax=64
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target
