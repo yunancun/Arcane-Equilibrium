@@ -298,7 +298,7 @@ does not authorize IBKR contact by itself.
 | AUDIT-13 | 2026-05-08 12-Agent Full Audit + PA Fix Plan | 2026-05-08--full_audit_fix_plan.md<br>docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-08--full_audit_pa_fix_plan.md | 2026-05-08 | 12 audit reports -> 88 unique findings -> W-AUDIT-1..7；5 pending operator decisions；K-6 LG-5 reviewer stale finding disputed |
 
 > **註**：早期審計（2026-04-05 L3 12 角色報告）位於 `docs/audits/2026-04-05--l3_comprehensive/` 子目錄；
-> Phase 治理審計位於 `docs/governance_dev/audits/`（如 `2026-03-31--gap_analysis_287_specs.md`）。
+> Phase 治理審計位於 `docs/archive/2026-07-09--governance_dev_phase_history/audits/`（如 `2026-03-31--gap_analysis_287_specs.md`；2026-07-09 已归档）。
 > 各 Agent workspace audit 位於 `docs/CCAgentWorkSpace/<Agent>/workspace/reports/`，不在本表內。
 
 ---
@@ -343,7 +343,7 @@ does not authorize IBKR contact by itself.
    - Documents：`YYYY-MM-DD--<topic>.md`（中文描述優先）
 3. Add spec code references in code comments (e.g., `# Per SM-XX §Y` / `// REF-XX`)
 4. Create test file with matching name (test_module_name.py)
-5. Add changelog entry in `docs/governance_dev/phase{N}_*/changelogs/` 或 `docs/CLAUDE_CHANGELOG.md`
+5. Add changelog entry in `docs/CLAUDE_CHANGELOG.md`（歷史 `governance_dev/phase{N}_*/changelogs/` 已於 2026-07-09 归档至 `docs/archive/2026-07-09--governance_dev_phase_history/changelogs/`）
 6. Update this register **and** the migrated index `docs/_indexes/document_index.md`（跨 initiative 條目另更 `docs/_indexes/initiative_index.md`；舊 `docs/README.md` 索引已於 2026-05-28 遷移）
 
 ---

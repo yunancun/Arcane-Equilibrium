@@ -125,8 +125,8 @@ srv/
 │   ├── db/fresh_start_reset.py    ← DB 经验数据清理（保留市场/模型）
 │   └── maintenance_scripts/       ← 清理 / 检查脚本
 └── docs/
-    ├── rust_migration/            ← 8 阶段执行文件（R-00~R-07，R-04 last-mile 待补）
-    └── worklogs/                  ← Session 工作日志
+    ├── archive/2026-07-09--rust_migration_completed/  ← 8 阶段执行文件（R-00~R-07；2026-07-09 迁移完结归档）
+    └── worklogs/                  ← Session 工作日志（顶层现役；2026-04 历史已归档 archive/2026-07-09--worklogs_2026-04/）
 ```
 
 ---
@@ -307,11 +307,11 @@ LG-5 W3 FUP-1 启动 reviewer → restart_all.sh --keep-auth（纯 Python 改动
 | TODO maintenance standard | `docs/agents/todo-maintenance.md` |
 | 当前工作计划（P0/P1/P2 三层） | `TODO.md` |
 | Decision Lease review agenda | `docs/CCAgentWorkSpace/PM/2026-05-02--decision_lease_review_agenda.md` |
-| 审计报告 | `docs/governance_dev/audits/` |
+| 审计报告 | `docs/archive/2026-07-09--governance_dev_phase_history/audits/` |
 | QC 量化审查 | `docs/CCAgentWorkSpace/QC/workspace/reports/` |
 | 工作日志 | `docs/worklogs/` |
 | 变更历史 | `docs/CLAUDE_CHANGELOG.md` |
 | 治理文件（SPEC 源） | Cowork `01_source_documents/` + `docs/governance_dev/SPECIFICATION_REGISTER.md` |
-| Phase 2/3 执行记录 | `docs/governance_dev/phase2_execution/` / `phase3_integration/` |
+| Phase 2/3 执行记录 | `docs/archive/2026-07-09--governance_dev_phase_history/phase2_execution/` / `phase3_integration/` |
 
 GitHub: [yunancun/BybitOpenClaw](https://github.com/yunancun/BybitOpenClaw)

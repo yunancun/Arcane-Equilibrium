@@ -150,7 +150,12 @@ Top-level archive 檔名索引如下；完整歷史語義仍以 `_indexes/docume
 - `2026-06-05--l2_advisory_mesh_todo.md`
 - `2026-06-10--skills_todo_audit_closed.md`
 - `2026-07-04--todo_v738_pre_slim_archive.md`
+- `2026-07-09--api_gui_handoff_2026-03-25/`
+- `2026-07-09--governance_dev_phase_history/`
 - `2026-07-09--gui_baseline_pre_redesign_manifest.md`
+- `2026-07-09--legacy_62finding_audit_bundle/`
+- `2026-07-09--rust_migration_completed/`
+- `2026-07-09--worklogs_2026-04/`
 - `README.md`
 
 ---
@@ -207,24 +212,15 @@ docs/
 │
 ├── execution_plan/                    ← 执行计划（Sprint/Wave 排期、里程碑规划）
 │
-├── rust_migration/                    ← Rust 迁移文档（迁移规划、进度追踪）
+├── (已归档 2026-07-09) rust_migration/ → archive/2026-07-09--rust_migration_completed/  ← Rust 迁移文档（迁移完结）
 │
-└── governance_dev/                    ← 治理开发全部文档
-    ├── audits/                        ← ★ 审计报告（Round 1/2 审计 + 合规审计）
-    ├── changelogs/                    ← T2.01–T2.23 模组变更日志
-    ├── governance_extracts/           ← 治理文件结构化提取（索引/速查/技术规格/实现清单）
-    ├── phase0_restart/                ← Phase 0 重启审计
-    ├── phase0_takeover/               ← Phase 0 接管（目录/代码/AI 架构/计划）
-    ├── phase1_gap_analysis/           ← Phase 1 缺口分析
-    ├── phase1_governance_wiring/      ← Phase 1 治理接线
-    ├── phase2_execution/              ← Phase 2 治理模组执行（21 模组 + PM/TW 审核）
-    ├── phase2_risk_hardening/         ← Phase 2 风控强化
-    ├── phase3_bug_fix_hardening/      ← Phase 3 Bug 修复强化
-    ├── phase3_integration/            ← Phase 3 治理集成 + 安全审计
-    ├── phase4_acceptance/             ← Phase 4 验收（合规/测试/UX/文档/PM）
-    ├── phase4_reconciliation_hardening/ ← Phase 4 对账强化
-    ├── phase5–12/                     ← Phase 5-12（治理完整性/测试/Demo/REST/事件/执行/打磨）
-    └── 2026-03-30--round2_fix_plan*   ← Round 2 修复计划（Batch 7-12）
+└── governance_dev/                    ← 治理开发文档（现役：amendments/ + SPECIFICATION_REGISTER + 根层文件）
+    ├── amendments/                    ← 仍 Active spec amendments（正式规范修订记录）
+    ├── SPECIFICATION_REGISTER.md      ← 仍 Active spec 索引
+    ├── DEPRECATED.md / NAMING_NOTE.md ← 退役口径 + 命名约束
+    ├── 2026-03-30--round2_fix_plan*   ← Round 2 修复计划（Batch 7-12）
+    └── (已归档 2026-07-09) phase0..12 / changelogs / governance_extracts / audits
+        → archive/2026-07-09--governance_dev_phase_history/<同名子目录>/
 ```
 
 ---

@@ -8,7 +8,7 @@
 > The authoritative implementation is now the Rust engine under `src/` (GovernanceCore, RiskGovernor, DecisionLease, etc.).
 >
 > Do **not** use historical phase/T2.xx documents as implementation guidance. For current architecture, refer to:
-> - `docs/rust_migration/` — Rust migration phase plans
+> - `docs/archive/2026-07-09--rust_migration_completed/` — Rust migration phase plans（2026-07-09 归档）
 > - `docs/references/2026-04-03--rust_migration_v3_final.md` — V3-FINAL Rust migration spec
 > - `docs/architecture/` — current architecture documents
 > - `docs/governance_dev/amendments/` — 仍 Active spec amendments

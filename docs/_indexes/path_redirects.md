@@ -170,3 +170,25 @@ High-value hot interaction candidates:
 - `docs/README.md` L28-35 樹狀圖 worklogs 子目錄列表收合（-6 行）
 - `docs/README.md` L862-987 + L1005-1009 phase packet 詳細索引（總 132 行）折疊為 L862 起 14 行 "Phase Packet Archive Index" 段
 - 總 README 減少 117 行（1461 → 1344，-8%）；保留 worklogs/ 頂層段（28 個 04-08+ 現役 daily_summary）
+
+---
+
+## Executed Redirects (2026-07-09)
+
+> 來源：doc archive cleanup（歷史已完結 deliverable 整體歸檔）。5 個路徑已 git-mv 至 `docs/archive/2026-07-09--*`；本批只同步 live 索引/導航檔引用。
+> 已更新的 live 導航檔：`docs/_indexes/{document_index,initiative_index,audit_index,README,path_redirects}.md`、`docs/README.md`、`docs/governance_dev/{README,DEPRECATED,SPECIFICATION_REGISTER}.md`、`docs/audits/README.md`、根 `README.md`。
+> 未動的凍結歷史檔（dated role reports / `docs/archive/**` / `CLAUDE_CHANGELOG.md` 等）舊路徑引用維持 correct-as-of-date，不改寫。
+
+| Old path | New path | Reason | Stub |
+|---|---|---|---|
+| `docs/rust_migration/` | `docs/archive/2026-07-09--rust_migration_completed/` | Rust 遷移完結；8 階段執行文件（R-00~R-07 + README）轉歷史證據 | — (整目錄歸檔，無 stub) |
+| `docs/audit/` | `docs/archive/2026-07-09--legacy_62finding_audit_bundle/` | legacy 62-finding audit bundle；非當前 issue tracker | — (整目錄歸檔，無 stub) |
+| `docs/handoffs/2026-03-25_api_gui_handoff/` | `docs/archive/2026-07-09--api_gui_handoff_2026-03-25/` | Control API v1 + GUI v1 階段交接完結 | — (整目錄歸檔，無 stub) |
+| `docs/governance_dev/{phase0_restart,phase0_takeover,phase1_gap_analysis,phase1_governance_wiring,phase2_execution,phase2_risk_hardening,phase3_bug_fix_hardening,phase3_integration,phase4_acceptance,phase4_reconciliation_hardening,phase5_governance_completeness,phase6_test_hardening,phase7_demo_api_integration,phase8_rest_api_alerting,phase9_quality_and_completeness,phase10_event_and_gate_wiring,phase11_final_event_and_enforcement,phase12_final_polish,changelogs,governance_extracts,audits}/` | `docs/archive/2026-07-09--governance_dev_phase_history/<同名子目錄>/` | Python-era phase / T2.xx 歷史證據整體歸檔 | — (整目錄歸檔，無 stub) |
+| `docs/worklogs/2026-04-*.md` | `docs/archive/2026-07-09--worklogs_2026-04/` | 2026-04 session 工作日誌轉歷史；頂層保留 2026-05+ 現役 | — (整目錄歸檔，無 stub) |
+
+### Retention policy (2026-07-09)
+
+- 只 archive 不 delete；沿 phase 1/2 policy。
+- 本批為整目錄歸檔，未留 per-path redirect stub；舊路徑活引用一律改指上表 New path。
+- **未移動**（不改寫其引用）：`docs/audits/`（複數，dated audit library）、`docs/governance_dev/amendments/` + `SPECIFICATION_REGISTER.md` / `README.md` / `DEPRECATED.md` / `NAMING_NOTE.md` + `2026-03-30--round2_fix_plan*` 等根層文件。
