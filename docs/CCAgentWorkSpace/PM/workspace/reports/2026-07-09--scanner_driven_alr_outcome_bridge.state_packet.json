@@ -1,0 +1,75 @@
+{
+  "schema": "alr_loop_state_packet_v1",
+  "created_at": "2026-07-09T01:49:54Z",
+  "repo_head_before": "c4e127ebe0c74b933a6b2785f4c4fa9cbaa8e5f3",
+  "repo_head_after": "c4e127ebe0c74b933a6b2785f4c4fa9cbaa8e5f3",
+  "selected_work_item": "P0-AIML-ALR-OUTCOME-BRIDGE",
+  "selection_reason": "First ACTIVE row after learning target arbiter checkpoint.",
+  "state": "ADVANCED",
+  "next_state": "P0-AIML-ALR-RETENTION-GUARDIAN-DRY-RUN_ACTIVE",
+  "next_action": "Continue with P0-AIML-ALR-RETENTION-GUARDIAN-DRY-RUN through PM -> PA -> E1/E1a -> E2 -> E4 -> QA -> PM, implementing a source-only dry-run retention guardian that emits protected classifications and performs no delete/move/apply action.",
+  "stop_reason": null,
+  "owned_files": [
+    "program_code/ml_training/alr_outcome_bridge.py",
+    "program_code/ml_training/tests/test_alr_outcome_bridge.py",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/queue.md",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/manifest.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_outcome_bridge.work_item.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_outcome_bridge.effect_review.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_outcome_bridge.state_packet.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_outcome_bridge.md",
+    "docs/CCAgentWorkSpace/Operator/2026-07-09--scanner_driven_alr_outcome_bridge.md"
+  ],
+  "verification_commands": [
+    "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m py_compile program_code/ml_training/alr_outcome_bridge.py program_code/ml_training/proof_packet_contract.py program_code/ml_training/reward_ledger.py program_code/ml_training/alr_controller_contracts.py",
+    "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m pytest -q program_code/ml_training/tests/test_alr_outcome_bridge.py -p no:cacheprovider",
+    "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m pytest -q program_code/ml_training/tests/test_alr_outcome_bridge.py program_code/ml_training/tests/test_proof_packet_contract.py program_code/ml_training/tests/test_reward_ledger.py program_code/ml_training/tests/test_alr_controller_contracts.py -p no:cacheprovider",
+    "rg denied executable import/call scan on alr_outcome_bridge.py and test_alr_outcome_bridge.py",
+    "git diff --cached --check after staging owned files"
+  ],
+  "candidate_matched_fills_count": 0,
+  "proof_packet_ready_count": 0,
+  "reward_ledger_ready_count": 0,
+  "effect_review_ready": true,
+  "model_training_performed": false,
+  "serving_authority_granted": false,
+  "llm_authority": false,
+  "runtime_authority": false,
+  "exchange_authority": false,
+  "trading_authority": false,
+  "boundary_escalation_required": false,
+  "dispatch_tooling_available": true,
+  "dispatch_blocker": null,
+  "role_chain": [
+    {
+      "role": "PA(default)",
+      "status": "DONE",
+      "verdict": "approved two-file source-only implementation scope"
+    },
+    {
+      "role": "E1(worker)",
+      "status": "DONE_WITH_CONCERNS",
+      "verdict": "implemented; module over 800 lines"
+    },
+    {
+      "role": "E2(explorer)",
+      "status": "DONE",
+      "verdict": "PASS after repeat-evidence clone fix"
+    },
+    {
+      "role": "E4(worker)",
+      "status": "DONE_WITH_CONCERNS",
+      "verdict": "PASS; line-count concern only"
+    },
+    {
+      "role": "QA(worker)",
+      "status": "DONE",
+      "verdict": "ACCEPT"
+    }
+  ],
+  "concerns": [
+    "alr_outcome_bridge.py is over the 800-line review-attention threshold and below the 2000-line hard cap.",
+    "Explicit local JSON IO is present only for guarded single-shot CLI paths.",
+    "Unrelated dirty files were present and preserved outside the owned file set."
+  ]
+}
