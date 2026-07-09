@@ -5,7 +5,7 @@
   "status": "ACTIVE_STUB",
   "maturity_label": "ALR_P0_SOURCE_ONLY_TARGET_INTAKE",
   "boundary_label": "SOURCE_ONLY_OFFLINE_P0_P1",
-  "repo_head_observed": "fc33dc39759fa7bea051bb4101c619541ff20f4f",
+  "repo_head_observed": "c24f0eb9d6aae653f0584c395ccb66848cb8c876",
   "authority": {
     "root_todo_authority": false,
     "requires_pm_import_to_root_todo": true,
@@ -64,5 +64,5 @@
       "root TODO.md import"
     ]
   },
-  "current_entry_item": "P0-AIML-ALR-LEARNING-TARGET-ARBITER"
+  "current_entry_item": "P0-AIML-ALR-OUTCOME-BRIDGE"
 }

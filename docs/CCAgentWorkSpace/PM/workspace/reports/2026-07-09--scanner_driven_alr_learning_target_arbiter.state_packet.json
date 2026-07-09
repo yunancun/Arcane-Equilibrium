@@ -1,0 +1,75 @@
+{
+  "schema": "alr_loop_state_packet_v1",
+  "created_at": "2026-07-09T01:16:27Z",
+  "repo_head_before": "c24f0eb9d6aae653f0584c395ccb66848cb8c876",
+  "repo_head_after": "c24f0eb9d6aae653f0584c395ccb66848cb8c876",
+  "selected_work_item": "P0-AIML-ALR-LEARNING-TARGET-ARBITER",
+  "selection_reason": "First ACTIVE row after controller contracts checkpoint.",
+  "state": "ADVANCED",
+  "next_state": "P0-AIML-ALR-OUTCOME-BRIDGE_ACTIVE",
+  "next_action": "Continue with P0-AIML-ALR-OUTCOME-BRIDGE through PM -> PA -> E1/E1a -> E2 -> E4 -> QA -> PM, implementing a source-only bridge that consumes only proof_packet_v1 and reward_ledger_v1 and otherwise returns DEFER_EVIDENCE.",
+  "stop_reason": null,
+  "owned_files": [
+    "program_code/ml_training/learning_target_arbiter.py",
+    "program_code/ml_training/tests/test_learning_target_arbiter.py",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/queue.md",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/manifest.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_learning_target_arbiter.work_item.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_learning_target_arbiter.effect_review.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_learning_target_arbiter.state_packet.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_learning_target_arbiter.md",
+    "docs/CCAgentWorkSpace/Operator/2026-07-09--scanner_driven_alr_learning_target_arbiter.md"
+  ],
+  "verification_commands": [
+    "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m py_compile program_code/ml_training/learning_target_arbiter.py program_code/ml_training/alr_controller_contracts.py",
+    "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m pytest -q program_code/ml_training/tests/test_learning_target_arbiter.py -p no:cacheprovider",
+    "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m pytest -q program_code/ml_training/tests/test_learning_target_arbiter.py program_code/ml_training/tests/test_alr_controller_contracts.py -p no:cacheprovider",
+    "rg denied-surface scan on learning_target_arbiter.py and test_learning_target_arbiter.py",
+    "git diff --cached --check after staging owned files"
+  ],
+  "candidate_matched_fills_count": 0,
+  "proof_packet_ready_count": 0,
+  "reward_ledger_ready_count": 0,
+  "effect_review_ready": true,
+  "model_training_performed": false,
+  "serving_authority_granted": false,
+  "llm_authority": false,
+  "runtime_authority": false,
+  "exchange_authority": false,
+  "trading_authority": false,
+  "boundary_escalation_required": false,
+  "dispatch_tooling_available": true,
+  "dispatch_blocker": null,
+  "role_chain": [
+    {
+      "role": "PA(default)",
+      "status": "DONE",
+      "verdict": "approved two-file source-only implementation scope"
+    },
+    {
+      "role": "E1(worker)",
+      "status": "DONE",
+      "verdict": "implemented and reworked E2 findings"
+    },
+    {
+      "role": "E2(explorer)",
+      "status": "DONE",
+      "verdict": "PASS after QA reject fixes"
+    },
+    {
+      "role": "E4(worker)",
+      "status": "DONE",
+      "verdict": "PASS"
+    },
+    {
+      "role": "QA(worker)",
+      "status": "DONE",
+      "verdict": "ACCEPT"
+    }
+  ],
+  "concerns": [
+    "The runtime schema name is artifact terminology only and grants no live runtime authority.",
+    "Denied-surface terms appear only in fail-closed validation and test fixtures.",
+    "Unrelated dirty files were present and preserved outside the owned file set."
+  ]
+}

@@ -1,0 +1,108 @@
+{
+  "schema": "alr_effect_review_v1",
+  "created_at": "2026-07-09T01:16:27Z",
+  "work_item_id": "P0-AIML-ALR-LEARNING-TARGET-ARBITER",
+  "effect_summary": "Implemented a source-only learning target arbiter CLI and tests. The arbiter validates a hash-bound snapshot manifest, ranks eligible targets by expected value of information, writes only an explicit output path, and fails closed on _latest, proof, reward, edge, promotion, and authority expansion attempts.",
+  "files_changed": [
+    "program_code/ml_training/learning_target_arbiter.py",
+    "program_code/ml_training/tests/test_learning_target_arbiter.py",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/queue.md",
+    "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-09--scanner_driven_alr/manifest.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_learning_target_arbiter.work_item.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_learning_target_arbiter.effect_review.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_learning_target_arbiter.state_packet.json",
+    "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-09--scanner_driven_alr_learning_target_arbiter.md",
+    "docs/CCAgentWorkSpace/Operator/2026-07-09--scanner_driven_alr_learning_target_arbiter.md"
+  ],
+  "boundary_checks": {
+    "boundary_label_present": true,
+    "explicit_out_required": true,
+    "input_manifest_hash_validated": true,
+    "output_binds_input_manifest_hash": true,
+    "latest_paths_and_source_refs_rejected_case_insensitive": true,
+    "latest_flags_require_exact_false": true,
+    "source_tier_separator_variants_blocked": true,
+    "objective_expected_value_of_information_only": true,
+    "scanner_no_order_artifact_count_authority_attempts_rejected": true,
+    "truthy_no_authority_rejected": true,
+    "truthy_proof_exclusion_rejected": true,
+    "authority_counters_and_flags_zero_false": true,
+    "stdlib_only_imports": true,
+    "doc_and_test_quotes_forbidden_terms_only": true,
+    "no_executable_runtime_or_network_path": true,
+    "no_executable_source_outside_owned_files": true
+  },
+  "verification": [
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m py_compile program_code/ml_training/learning_target_arbiter.py program_code/ml_training/alr_controller_contracts.py",
+      "result": "PASS"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m pytest -q program_code/ml_training/tests/test_learning_target_arbiter.py -p no:cacheprovider",
+      "result": "PASS",
+      "observed": "33 passed"
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=program_code python3 -m pytest -q program_code/ml_training/tests/test_learning_target_arbiter.py program_code/ml_training/tests/test_alr_controller_contracts.py -p no:cacheprovider",
+      "result": "PASS",
+      "observed": "75 passed"
+    },
+    {
+      "command": "rg denied-surface scan on learning_target_arbiter.py and test_learning_target_arbiter.py",
+      "result": "PASS",
+      "observed": "matches are denial vocabulary, fail-closed rejection logic, and source-only CLI test harness only"
+    },
+    {
+      "command": "E2 rereview after QA reject fixes",
+      "result": "PASS",
+      "observed": "latest flags, case-insensitive _latest checks, and separator-collapsed source tiers are closed"
+    },
+    {
+      "command": "E4 final regression",
+      "result": "PASS",
+      "observed": "75 passed; stdlib-only imports; no denied executable surface"
+    },
+    {
+      "command": "QA final gate",
+      "result": "ACCEPT",
+      "observed": "row acceptance confirmed"
+    },
+    {
+      "command": "git diff --cached --check after staging owned files",
+      "result": "PASS"
+    }
+  ],
+  "line_count_review": {
+    "program_code/ml_training/learning_target_arbiter.py": 367,
+    "program_code/ml_training/tests/test_learning_target_arbiter.py": 446,
+    "review_attention_required_over_800": false,
+    "hard_cap_over_2000": false
+  },
+  "authority_flags": {
+    "root_todo_imported": false,
+    "adr_amd_applied": false,
+    "runtime_effects": false,
+    "pg_effects": false,
+    "ipc_effects": false,
+    "exchange_effects": false,
+    "official_mcp_effects": false,
+    "decision_lease_effects": false,
+    "order_or_probe_effects": false,
+    "cost_gate_effects": false,
+    "latest_overwrite": false,
+    "serving_authority_granted": false,
+    "proof_or_promotion_authority_granted": false,
+    "delete_or_apply_performed": false,
+    "scheduler_or_daemon_created": false,
+    "live_or_mainnet_authority_granted": false
+  },
+  "candidate_matched_fills_count": 0,
+  "proof_packet_ready_count": 0,
+  "reward_ledger_ready_count": 0,
+  "concerns": [
+    "The schema name includes runtime as an artifact name only; it is not live runtime authority.",
+    "Denied vocabulary appears in source/tests only as fail-closed validation terms and regression fixtures.",
+    "Ignored pytest and pycache artifacts were produced by verification and remain unstaged."
+  ],
+  "verdict": "EFFECTIVE_LEARNING_TARGET_ARBITER_READY"
+}
