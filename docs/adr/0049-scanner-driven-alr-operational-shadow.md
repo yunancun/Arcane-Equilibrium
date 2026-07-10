@@ -35,3 +35,29 @@ The Rust scanner already persists each completed cycle as an immutable source re
 ## Consequences
 
 P2 may close a durable local learning shadow loop without opening a trading path. `DONE_OPERATIONAL_SHADOW` requires the P2 queue's scanner ingestion, persistence, service, training/evaluation, feedback, retention, health, restart-recovery, Linux soak, and adversarial audit criteria; it is separate from the P3 bounded Demo authorization gate.
+
+## 2026-07-10 V3 Freshness And Learning Completion Addendum
+
+This addendum preserves the original ADR and AMD-2026-07-09-02 as historical authorization records, but supersedes their P2-8 completion interpretation. The prior `DONE_OPERATIONAL_SHADOW` state is invalid because steady-state fresh ingestion was later falsified. Current completion truth follows AMD-2026-07-10-02 and ALR P2 queue v2.
+
+### Freshness And Health
+
+1. Notification consumption preserves the exact `(scan_id, ts)` identity. A notification is wake/identity only; it is never the scanner payload, proof, reward, or trading authority.
+2. A durable live watermark performs bounded catch-up for missed or coalesced notifications. Fresh/live and historical backfill lanes use independent persistent cursor/state; fresh is always serviced first, while historical work is capped and low priority. Normal operation cannot depend on temporary `ALR_RECONCILE_AFTER` state or a service drop-in.
+3. Health persists `raw_latest_ts`, `alr_latest_source_ts`, `ingest_lag_seconds`, `fresh_raw_only_count`, `historical_backfill_remaining`, notification received/consumed/invalid counts, `last_success_at`, and real failure/restart counters. Untrained work is not an ingestion-gap proxy, and failure/restart counts cannot be hard-coded to zero.
+
+### Acceptance
+
+The acceptance surface includes 79k+1 fresh-priority behavior; duplicate, out-of-order, late, coalesced/missed notification handling; crash/restart and watermark recovery; concurrent single-instance enforcement; starvation resistance; forced raw-only health alarms; scanner SELECT-only access; and false/zero authority counters.
+
+Runtime completion requires at least ten consecutive natural Rust scanner cycles with no temporary cursor, bounded-latency raw/ALR identity equality, `fresh_raw_only_count=0`, duplicate `0`, and an advancing ALR source timestamp. The window must survive one ALR-only service restart without restarting the engine. Any failed window is repaired and restarted from cycle one.
+
+### Learning, Retention, And Terminal Truth
+
+Scanner evidence may select a research object, but training labels/rewards require candidate-matched point-in-time lineage, `proof_packet_v1`, `reward_ledger_v1`, actual fee/slippage/funding, reconstruction, and an after-cost label. Evaluation requires walk-forward, purge/embargo, OOS, matched controls, and negative cells. Eligible evidence must produce an actual run with `model_training_performed=true`; outputs remain challenger-only and never auto-serve, auto-promote, or overwrite `_latest`.
+
+Retention remains reference-graph-first and may delete only ALR-owned, rebuildable, unreferenced derived cache after quarantine and grace/recheck. If production has no eligible cache, the truthful result is `NOT_EXERCISED_NO_ELIGIBLE_CACHE`, not a claimed sweep.
+
+The only normal terminal is `DONE_FRESH_OPERATIONAL_LEARNING_SHADOW`. When all safe sources are proven insufficient for a qualified label, the only alternative terminal is `WAIT_OPERATOR_DEMO_AUTH_EXACT`, and it requires a new executable-but-unauthorized exact packet. The current exact packet is `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-10--alr_f5_exact_demo_authorization_packet.json`, SHA-256 `1ab349a6f753e4d3846b0699d7404f18e231d8ca95b8f250bb19b9f89b7eabde`, with Operator authorization false, execution false, and hash-bound E3/BB approval for Operator decision only.
+
+Neither this ADR, the alternative terminal, nor the packet grants exchange contact, order/probe/cancel/modify/close, Decision Lease, Cost Gate, live/mainnet, Guardian/RiskConfig mutation, proof, serving, promotion, or `_latest` authority. Protected fill/order/cost/proof/control/OOS/audit/authorization/risk/reconciliation/lineage evidence remains non-deletable, and all authority maps/counters remain false/zero.

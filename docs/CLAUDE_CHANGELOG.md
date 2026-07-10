@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-10（TODO v778 ALR P2 operational shadow completion）
+> 最後更新：2026-07-10（TODO v779 ALR freshness and learning completion V3）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**TODO v779 ALR freshness and learning completion V3（2026-07-10）**：Production steady-state evidence invalidated v778's terminal inference: notifications discarded their exact identity and the global oldest-first limit let about 79k history rows starve fresh intake. Behavioral source `091b5d446...` fixes exact `(scan_id, ts)` intake, durable live catch-up, independent fresh/history cursors, low-priority history, and truthful health under physical V156 `d55d2ab7...`. Focused/full suites passed `215` and `1271 passed, 31 skipped`; PostgreSQL 16 passed 79k+1, gap, replay, cursor, catalog, and ACL attacks. Fresh E3/BB applied V156/role/pin and restarted only ALR; V156-to-V156 recovery moved PID `2038844 -> 2040797` while engine stayed `1983100`. Ten natural cycles closed at raw/ALR/raw-only/ALR-only `10/10/0/0`, identity/hash/payload `10/10/10`, duplicate `0`, notification identities `10/10`, and max latency `2.608247s`; history cursor advanced without claiming backlog reduction. F5 found no qualified candidate-matched fee/slippage/funding/reconstruction/PIT/proof/reward/OOS/control chain, so actual training remained false. F6 truth is `NOT_EXERCISED_NO_ELIGIBLE_CACHE`. New exact unauthorized Demo packet SHA `1ab349a6...abde` for `grid_trading|SUIUSDT|Sell` reproduces its VOI hashes and has E3/BB approval for Operator decision only. Terminal is `WAIT_OPERATOR_DEMO_AUTH_EXACT`; no exchange/order/probe/cancel/close/Decision Lease/Cost Gate/live/serving/promotion authority or action occurred. v778 remains historical but its `DONE_OPERATIONAL_SHADOW` conclusion is superseded.
 
 **TODO v778 ALR P2 operational shadow completion（2026-07-10）**：P2-8 source added a gated timestamp-bounded SELECT-only reconciliation for a large historical scanner backlog; full ALR source suite passed `220`, plus `py_compile` and diff check. After fresh PM/E3/BB gate and Mac/GitHub/Linux alignment, the ALR-only service reconciled five real post-baseline Rust scanner cycles exactly once, then restarted without its temporary cursor drop-in. Closed-window raw/ALR/raw-only/ALR-only counts were `5/5/0/0`; the three required cycles are present `3/3`; service PID was `1973155 -> 1982389 -> 1982461`; target runs and health snapshots advanced with false/zero authority, scanner INSERT and immutable-ledger UPDATE/DELETE denied, and retention cache/events remained `0/0`. This closes `DONE_OPERATIONAL_SHADOW`, not profitability or proof. An un-attributed engine PID restart to `1983100` occurred after the closed window and is only a future P3 revalidation input. P3 request is emitted and stops at `WAIT_OPERATOR_DEMO_AUTH`.
 
