@@ -279,12 +279,14 @@ function stratV2Params(s) {
     if (s.regime_aware)                rows.push('Regime ✓');
     if (s.use_limit_orders != null)    rows.push(s.use_limit_orders ? 'Limit ✓' : 'Market');
   } else if (base === 'funding_arb' || base === 'FundingRate_Arb') {
-    if (s.funding_threshold != null) rows.push('FundThr=' + (s.funding_threshold * 10000).toFixed(1) + 'bps');
-    if (s.total_fee_bps != null)     rows.push('TotalFee=' + s.total_fee_bps + 'bps');
+    // funding_threshold 為 fraction,×10000 轉 bps;total_fee_bps 已是 bps。皆走 ocBps(2dp + ' bps' + U+2212)。
+    if (s.funding_threshold != null) rows.push('FundThr=' + ocBps(s.funding_threshold * 10000));
+    if (s.total_fee_bps != null)     rows.push('TotalFee=' + ocBps(s.total_fee_bps));
     if (s.delta_neutral)             rows.push('ΔNeutral ✓');
     if (s.cost_summary) {
       const cs = s.cost_summary;
-      if (cs.net_funding_pnl != null) rows.push('NetPnL=' + cs.net_funding_pnl.toFixed(4));
+      // net_funding_pnl 為帶號 PnL 金額 → ocMoney(帶 +/− U+2212 與幣別;保 4dp 免微額塌成假零)。
+      if (cs.net_funding_pnl != null) rows.push('NetPnL=' + ocMoney(cs.net_funding_pnl, 4));
     }
   } else if (base === 'grid_trading' || base === 'Grid_Trading' || base === 'grid') {
     if (s.upper_price != null) rows.push('U=' + s.upper_price);
@@ -593,7 +595,7 @@ async function loadScanner() {
     html += '<tr>';
     html += '<td><strong>' + ocEsc(o.symbol) + '</strong></td>';
     html += '<td>' + ocEsc(o.strategy_type || o.type || '--') + '</td>';
-    html += '<td>' + ocNum(o.score, 2) + '</td>';
+    html += '<td class="num">' + ocNum(o.score, 2) + '</td>';
     html += '<td class="fs-micro t-dim">' + ocEsc(o.reason || '--') + '</td>';
     html += '</tr>';
   });
@@ -654,14 +656,15 @@ async function loadIntents() {
     if (status === 'submitted') statusChip = 'good';
     else if (status.startsWith('rejected') || status.startsWith('blocked')) statusChip = 'bad';
     else if (status === 'pending') statusChip = 'warn';
-    const conf = i.confidence != null ? (i.confidence * 100).toFixed(0) + '%' : '--';
+    // confidence 為 fraction(0-1)→ ocPct(內部 ×100,2dp);無值回 OC_EMPTY(canon 7 不假零)。
+    const conf = ocPct(i.confidence);
     html += '<tr>';
     html += '<td>' + ocTimeShort(i.collected_ts_ms) + '</td>';
     html += '<td>' + ocEsc(i.symbol) + '</td>';
-    html += '<td class="' + (i.side === 'Buy' ? 'green' : 'red') + '">' + ocEsc(i.side) + '</td>';
+    html += '<td>' + ocSide(i.side) + '</td>';
     html += '<td>' + ocEsc(i.order_type || 'market') + '</td>';
-    html += '<td>' + ocNum(i.qty, 4) + '</td>';
-    html += '<td class="fs-micro">' + conf + '</td>';
+    html += '<td class="num">' + ocQty(i.qty) + '</td>';
+    html += '<td class="num fs-micro">' + conf + '</td>';
     html += '<td class="fs-micro">' + ocEsc(i.source || i.strategy_name || '--') + '</td>';
     html += '<td>' + ocChip(status, statusChip) + '</td>';
     html += '</tr>';
@@ -785,14 +788,15 @@ async function showStratHistEffect(rowId) {
   }
   const row = d.data.row || {};
   const eff = d.data.effect || {};
-  const pnlClass = ocPnlClass(eff.net_pnl);
+  // Net PnL 帶方向 → 第二通道:態 class 走 ocSignParts(val-pos/val-neg/val-flat),值 ocMoney 自帶 U+2212 號。
+  const pnlParts = ocSignParts(eff.net_pnl);
   let html = '<div class="oc-card strat-detail-card">';
   html += '<div class="fw-semi mb-2">7-day Effect: ' + ocEsc(row.strategy_name || '-') + ' (' + ocEsc(row.engine_mode || '-') + ')</div>';
   html += '<div class="fs-micro t-dim mb-2">Since apply @ ' + ocTimeShort(row.applied_at) + '</div>';
   html += '<div class="oc-metrics">';
-  html += '<div class="oc-metric"><div class="oc-metric-label">Fills</div><div class="oc-metric-val">' + (eff.fill_count || 0) + '</div></div>';
-  html += '<div class="oc-metric"><div class="oc-metric-label">Net PnL</div><div class="oc-metric-val ' + pnlClass + '">' + ocMoney(eff.net_pnl, 4) + '</div></div>';
-  html += '<div class="oc-metric"><div class="oc-metric-label">Win Rate</div><div class="oc-metric-val">' + ocPct(eff.win_rate) + '</div></div>';
+  html += '<div class="oc-metric"><div class="oc-metric-label">Fills</div><div class="oc-metric-val num">' + (eff.fill_count || 0) + '</div></div>';
+  html += '<div class="oc-metric"><div class="oc-metric-label">Net PnL</div><div class="oc-metric-val num ' + pnlParts.cls + '">' + ocMoney(eff.net_pnl, 4) + '</div></div>';
+  html += '<div class="oc-metric"><div class="oc-metric-label">Win Rate</div><div class="oc-metric-val num">' + ocPct(eff.win_rate) + '</div></div>';
   html += '</div>';
   html += '<div class="fs-micro t-dim mt-2">Window: ' + ocTimeShort(eff.window_start_ms) + ' → ' + ocTimeShort(eff.window_end_ms);
   if (eff.first_fill_ts) html += ' · first fill ' + ocTimeShort(eff.first_fill_ts);

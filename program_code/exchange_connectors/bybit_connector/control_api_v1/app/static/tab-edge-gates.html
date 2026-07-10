@@ -153,8 +153,11 @@ function chipFor(status, label) {
   return ocChip(text, toneFor(s));
 }
 
+// 泛型 value+suffix 格式化。P0.3 後僅服務「非契約型別」:count / ratio / 'x'(倍率)/ 'm'(分鐘)。
+// bps 走 ocBps、% 走 ocPctVal(型別正確,見各呼叫點),不再經此 helper——消除本檔 bps 重複實作(PA finding)。
+// 無值回 OC_EMPTY(canon 7 禁假零),非舊 '--' 哨兵。
 function metricValue(value, suffix, decimals) {
-  if (value == null || value === '') return '--';
+  if (value == null || value === '') return OC_EMPTY;
   const n = Number(value);
   if (!Number.isFinite(n)) return ocEsc(value);
   const d = decimals == null ? 1 : decimals;
@@ -174,13 +177,15 @@ function gateValueCells(gate) {
   const c = (gate && gate.current) || {};
   if (!gate) return [];
   if (gate.gate_id === '33') {
+    // fee_drop_pct / maker_like_pct 皆 already-percent(producer *100.0,見 prelive_edge_gate_trends.py)→ ocPctVal(2dp)。
     return [
-      ['Fee drop', metricValue(c.fee_drop_pct, '%', 1)],
-      ['Maker-like', metricValue(c.maker_like_pct, '%', 1)],
+      ['Fee drop', ocPctVal(c.fee_drop_pct)],
+      ['Maker-like', ocPctVal(c.maker_like_pct)],
       ['Entry fills', metricValue(c.entry_fills, '', 0)],
     ];
   }
   if (gate.gate_id === '38') {
+    // lifetime_ratio(倍率 x)/ p50(分鐘 m)/ reentry_rate(比率)皆非契約型別 → 保留 metricValue。
     return [
       ['Lifetime', metricValue(c.lifetime_ratio, 'x', 2)],
       ['Live p50', metricValue(c.live_demo_p50_min, 'm', 1)],
@@ -188,8 +193,10 @@ function gateValueCells(gate) {
     ];
   }
   if (gate.gate_id === '40') {
+    // avg_net_bps 為帶方向淨邊際(AVG(net_bps_after_fee),可正負)→ ocBps + 第二通道 sign/色。
+    // 屬「帶號水位」非 period-over-period delta,依 §2.2 只 +/− 不加 ▲▼。
     return [
-      ['Avg net', metricValue(c.avg_net_bps, ' bps', 2)],
+      ['Avg net', ocSigned(c.avg_net_bps, ocBps)],
       ['Rows', metricValue(c.rows, '', 0)],
       ['Bad cells', metricValue((c.bad_cells || []).length, '', 0)],
     ];
@@ -202,7 +209,7 @@ function renderGateCard(gate) {
   const cells = gateValueCells(gate).map(pair =>
     '<div class="oc-edge-gate-value">' +
       '<div class="label">' + ocEsc(pair[0]) + '</div>' +
-      '<div class="value">' + pair[1] + '</div>' +
+      '<div class="value num">' + pair[1] + '</div>' +
     '</div>'
   ).join('');
   return '<div class="oc-edge-gate-card edge-card-' + tone + '">' +
@@ -219,8 +226,10 @@ function renderGateCard(gate) {
 
 function readinessValue(item) {
   const key = item && item.key ? String(item.key) : '';
-  if (key.indexOf('fee_drop') >= 0 || key.indexOf('maker_like') >= 0) return metricValue(item.value, '%', 1);
-  if (key.indexOf('avg_net') >= 0) return metricValue(item.value, ' bps', 2);
+  // fee_drop / maker_like already-percent → ocPctVal;avg_net 帶方向 bps → ocBps(帶號 U+2212);
+  // ratio/rate/count 非契約型別 → 保留 metricValue。此為「值 / 目標」緊湊讀出,回純字串不掛色 span。
+  if (key.indexOf('fee_drop') >= 0 || key.indexOf('maker_like') >= 0) return ocPctVal(item.value);
+  if (key.indexOf('avg_net') >= 0) return ocBps(item.value, true);
   if (key.indexOf('ratio') >= 0 || key.indexOf('rate') >= 0) return metricValue(item.value, '', 2);
   return metricValue(item.value, '', 0);
 }
@@ -294,24 +303,28 @@ function renderStrategies(payload) {
   const crisis = rows.filter(r => String(r.status).toLowerCase() === 'crisis');
   const passing = rows.filter(r => String(r.status).toLowerCase() === 'pass');
   ocSetText('edge-crisis-val', String(crisis.length));
-  document.getElementById('edge-crisis-val').className = 'oc-metric-val ' + (crisis.length ? 'red' : 'green');
+  document.getElementById('edge-crisis-val').className = 'oc-metric-val num ' + (crisis.length ? 'red' : 'green');
   ocSetText('edge-crisis-sub', crisis.length ? crisis.map(r => r.strategy_name).join(', ') : 'no crisis strategy');
   ocSetText('edge-strategy-pass-val', String(passing.length) + '/' + String(rows.length || KNOWN_STRATEGIES.length));
-  document.getElementById('edge-strategy-pass-val').className = 'oc-metric-val ' + (passing.length === rows.length ? 'green' : 'yellow');
+  document.getElementById('edge-strategy-pass-val').className = 'oc-metric-val num ' + (passing.length === rows.length ? 'green' : 'yellow');
   ocSetText('edge-strategy-pass-sub', rows.filter(r => String(r.status).toLowerCase() !== 'pass').map(r => r.strategy_name + ':' + r.status).join(', ') || 'all pass');
 
   const html = rows.map(row => {
     const bad = Array.isArray(row.bad_cells) ? row.bad_cells : [];
+    // bad-cell 列為 ocEsc 純字串脈絡:avg 走 ocBps(帶 U+2212 負號,經 ocEsc 不受影響),不掛色 span。
     const badHtml = bad.length
-      ? '<div class="bad-cell-list">' + bad.map(c => ocEsc((c.engine_mode || '') + ' ' + (c.symbol || '') + ' n=' + (c.rows || 0) + ' avg=' + metricValue(c.avg_net_bps, ' bps', 2))).join('<br>') + '</div>'
+      ? '<div class="bad-cell-list">' + bad.map(c => ocEsc((c.engine_mode || '') + ' ' + (c.symbol || '') + ' n=' + (c.rows || 0) + ' avg=' + ocBps(c.avg_net_bps))).join('<br>') + '</div>'
       : '';
+    // avg_net_*_bps 帶方向 → 態 class 掛 <td> 自身(§3.3),值 ocBps 帶號;win_rate_24h_pct already-percent(SQL *100.0)→ ocPctVal。
+    const p24 = ocSignParts(row.avg_net_24h_bps);
+    const pWin = ocSignParts(row.avg_net_window_bps);
     return '<tr>' +
       '<td><span class="strategy-name">' + ((typeof ocStrategyChip === 'function') ? ocStrategyChip(row.strategy_name || '--') : ocEsc(row.strategy_name || '--')) + '</span></td>' +
       '<td>' + chipFor(row.status) + '</td>' +
-      '<td>' + metricValue(row.avg_net_24h_bps, ' bps', 2) + '</td>' +
-      '<td>' + metricValue(row.rows_24h, '', 0) + '</td>' +
-      '<td>' + metricValue(row.win_rate_24h_pct, '%', 1) + '</td>' +
-      '<td>' + metricValue(row.avg_net_window_bps, ' bps', 2) + '<div class="edge-muted">n=' + metricValue(row.rows_window, '', 0) + '</div></td>' +
+      '<td class="num ' + p24.cls + '">' + ocBps(row.avg_net_24h_bps, true) + '</td>' +
+      '<td class="num">' + metricValue(row.rows_24h, '', 0) + '</td>' +
+      '<td class="num">' + ocPctVal(row.win_rate_24h_pct) + '</td>' +
+      '<td class="num ' + pWin.cls + '">' + ocBps(row.avg_net_window_bps, true) + '<div class="edge-muted">n=' + metricValue(row.rows_window, '', 0) + '</div></td>' +
       '<td><div>' + ocEsc(row.summary || '') + '</div>' + badHtml + '</td>' +
     '</tr>';
   }).join('');
