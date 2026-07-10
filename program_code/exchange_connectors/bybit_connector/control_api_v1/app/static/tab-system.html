@@ -68,11 +68,33 @@
   #confirm-ok.confirm-ok-live-ready { border-color: rgba(168,85,247,0.7); }
   #confirm-ok.confirm-ok-holding { background: #7e22ce; border-color: #c084fc; }
   .confirm-footer { padding: 12px 20px; border-top: 1px solid #21262d; display: flex; justify-content: flex-end; gap: 8px; }
+  /* ── P0.2 批次 2:inline style= 收斂出的頁面組件(本塊在 body,文檔序晚於
+     ocInjectBaseCSS 注入的 head <style>,同 specificity 由本塊勝出)── */
+  /* 父層字級修飾:oc-metric-val 的 className 會被 JS 整串重寫(鐵則二),字級掛不被觸碰的包裹層 */
+  .mv--sm .oc-metric-val { font-size: var(--fs-dense); }
+  .mv--md .oc-metric-val { font-size: var(--fs-md); }
+  /* 小號 chip 內距;chip 2px 級內距屬組件層(§4 家族 8 註)。qa-feed-chip 的
+     className 重寫串(loadQuickStatus)先前已引用本類但全站無定義,此處補上正本 */
+  .qa-chip-sm { padding: 1px 7px; }
+  .mode-flow { display: flex; align-items: center; gap: var(--sp-1); flex-wrap: wrap;
+    font-size: var(--fs-micro); color: var(--text-secondary); margin-bottom: var(--sp-3);
+    padding: var(--sp-2) var(--sp-3); background: var(--bg-app); border-radius: var(--r-1);
+    border: 1px solid var(--border-subtle); }
+  /* live_reserved 紫色家族(.purple / confirm-live-guard / hold-bar 同色系)為 palette 外色,
+     P0.4 單點裁決其歸宿;本批僅把 inline 出現點按原值遷入本塊,不改觀感、不擴散新 hex 消費面 */
+  /* 選擇器升為雙類(0,2,0)並置於 .mode-btn.active/:hover 之後,同權後載勝出;
+     復現原 inline border-color 全狀態(含 hover / live_reserved 為當前模式 active)恆紫,
+     不讓青銅 accent 蓋掉 live 風險識別框(E2 P0.2 批次 2 HIGH) */
+  .mode-btn.mode-btn--live { border-color: rgba(168,85,247,0.4); }
+  .confirm-body .warn-box--live { border-color: rgba(168,85,247,0.5); color: #a855f7; } /* 晚於 .warn-box 定義,同權後載勝出 */
+  .confirm-list { margin: var(--sp-2) 0; padding-left: var(--sp-4); line-height: 2; } /* line-height:2 是刻意鬆排,不在 §5 對照表,按組件層原樣保留 */
+  .oc-metrics.metrics-2col { grid-template-columns: 1fr 1fr; }
+  .oc-metrics.metrics-fit { grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); }
 </style>
 
 <!-- ═══ Runtime Summary ═══ -->
 <div class="oc-card">
-  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+  <div class="row-between wrap gap-2">
     <div>
       <h2>&#x1F4CA; 運行態摘要 / Runtime Summary</h2>
       <div class="subtitle">系統核心狀態一覽 — 鼠標悬停查看詳細說明</div>
@@ -87,8 +109,8 @@
     <div class="oc-metric tip-metric" id="m-auth-wrap"><div class="oc-metric-label">執行權限</div><div class="oc-metric-val" id="m-auth">--</div><div class="tip-box" id="m-auth-tip"></div></div>
     <div class="oc-metric tip-metric" id="m-demo-wrap"><div class="oc-metric-label">系統能力</div><div class="oc-metric-val" id="m-demo">--</div><div class="tip-box" id="m-demo-tip"></div></div>
     <div class="oc-metric tip-metric" id="m-prot-wrap"><div class="oc-metric-label">誤操作保護</div><div class="oc-metric-val" id="m-prot">--</div><div class="tip-box" id="m-prot-tip"></div></div>
-    <div class="oc-metric tip-metric" id="m-stage-wrap"><div class="oc-metric-label">階段標簽</div><div class="oc-metric-val" id="m-stage" style="font-size:12px">--</div><div class="tip-box" id="m-stage-tip"></div></div>
-    <div class="oc-metric tip-metric" id="m-engine-wrap"><div class="oc-metric-label">引擎運行</div><div class="oc-metric-val" id="m-engine" style="font-size:14px">--</div><div class="tip-box" id="m-engine-tip"></div></div>
+    <div class="oc-metric tip-metric mv--sm" id="m-stage-wrap"><div class="oc-metric-label">階段標簽</div><div class="oc-metric-val" id="m-stage">--</div><div class="tip-box" id="m-stage-tip"></div></div>
+    <div class="oc-metric tip-metric mv--md" id="m-engine-wrap"><div class="oc-metric-label">引擎運行</div><div class="oc-metric-val" id="m-engine">--</div><div class="tip-box" id="m-engine-tip"></div></div>
   </div>
 
   <!-- Quick Actions / 快捷操作 -->
@@ -102,44 +124,44 @@
     <!-- Demo/Feed/Scanner：僅狀態指示器，非可點擊按鈕 -->
     <span class="qa-status-row" title="Bybit Demo 演示連接狀態由 Rust 引擎管理，無法從 GUI 直接開關">
       <span class="qa-dot qa-dot-off" id="qa-demo-dot"></span>
-      <span style="font-size:12px">Bybit Demo 演示</span>
-      <span class="oc-chip oc-chip-neutral" id="qa-demo-chip" style="font-size:10px;padding:1px 7px">Rust管理</span>
+      <span class="fs-dense">Bybit Demo 演示</span>
+      <span class="oc-chip oc-chip-neutral qa-chip-sm" id="qa-demo-chip">Rust管理</span>
     </span>
     <span class="qa-status-row" title="行情流由 Rust 引擎自動管理，無法從 GUI 開關">
       <span class="qa-dot qa-dot-off" id="qa-feed-dot"></span>
-      <span style="font-size:12px">行情流 Feed</span>
-      <span class="oc-chip oc-chip-neutral" id="qa-feed-chip" style="font-size:10px;padding:1px 7px">自動</span>
+      <span class="fs-dense">行情流 Feed</span>
+      <span class="oc-chip oc-chip-neutral qa-chip-sm" id="qa-feed-chip">自動</span>
     </span>
     <span class="qa-status-row" title="掃描器在「策略中心」Tab 管理，此處僅顯示運行狀態">
       <span class="qa-dot qa-dot-off" id="qa-scanner-dot"></span>
-      <span style="font-size:12px">掃描器 Scanner</span>
-      <span class="oc-chip oc-chip-neutral" id="qa-scanner-chip" style="font-size:10px;padding:1px 7px">策略中心</span>
+      <span class="fs-dense">掃描器 Scanner</span>
+      <span class="oc-chip oc-chip-neutral qa-chip-sm" id="qa-scanner-chip">策略中心</span>
     </span>
   </div>
 </div>
 
 <!-- ═══ Global Mode Control ═══ -->
 <div class="oc-card" id="mode-control-card">
-  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:14px">
+  <div class="row-between wrap gap-2 mb-3">
     <div>
-      <h3 style="margin:0">🎛️ 全局模式控制 / Global Mode Control</h3>
-      <div class="subtitle" style="margin-top:4px">切換系統運行階段 — 每次切換需二次確認</div>
+      <h3 class="m-0">🎛️ 全局模式控制 / Global Mode Control</h3>
+      <div class="subtitle mt-1">切換系統運行階段 — 每次切換需二次確認</div>
     </div>
     <span id="cur-mode-chip" class="oc-chip oc-chip-neutral">loading...</span>
   </div>
 
   <!-- Mode progression flow / 模式升級路徑流程圖 -->
-  <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;font-size:11px;color:var(--text-dim);margin-bottom:10px;padding:6px 10px;background:var(--bg);border-radius:6px;border:1px solid #21262d">
+  <div class="mode-flow">
     <span title="完全靜默 / Silent">&#x1F512; 設計</span>
-    <span style="color:var(--border)">&#x2192;</span>
+    <span class="t-muted">&#x2192;</span>
     <span title="觀察市場，無交易 / Observe, no trading">&#x1F441;&#xFE0F; 觀察</span>
-    <span style="color:var(--border)">&#x2192;</span>
+    <span class="t-muted">&#x2192;</span>
     <span title="Paper 模擬引擎激活 / Paper engine active">&#x1F311; 影子</span>
-    <span style="color:var(--border)">&#x2192;</span>
+    <span class="t-muted">&#x2192;</span>
     <span title="Paper 模擬 + Bybit Demo 演示沙盒 / Paper + Bybit Demo sandbox">&#x1F9EA; Demo</span>
-    <span style="color:var(--border)">&#x2192;</span>
-    <span title="實盤交易（真實資金）/ Live trading — real money" style="color:#a855f7">&#x1F7E3; 實盤</span>
-    <span style="margin-left:8px;font-size:10px">— 點擊按鈕切換模式，每次切換需二次確認 / Click a button below to switch modes</span>
+    <span class="t-muted">&#x2192;</span>
+    <span title="實盤交易（真實資金）/ Live trading — real money" class="purple">&#x1F7E3; 實盤</span>
+    <span class="ml-2">— 點擊按鈕切換模式，每次切換需二次確認 / Click a button below to switch modes</span>
   </div>
 
   <div class="mode-btn-grid" id="mode-btn-grid">
@@ -167,7 +189,7 @@
       <div class="mode-btn-sub">demo_reserved</div>
       <div class="mode-btn-desc">Paper 模擬 + Bybit Demo 演示沙盒雙重執行</div>
     </button>
-    <button class="mode-btn" id="mbtn-live_reserved"  onclick="confirmMode('live_reserved')" style="border-color:rgba(168,85,247,0.4)">
+    <button class="mode-btn mode-btn--live" id="mbtn-live_reserved"  onclick="confirmMode('live_reserved')">
       <div class="mode-btn-icon">🟣</div>
       <div class="mode-btn-name">實盤</div>
       <div class="mode-btn-sub">live_reserved</div>
@@ -175,10 +197,10 @@
     </button>
   </div>
 
-  <div style="margin-top:12px;font-size:11px;color:var(--text-dim);line-height:1.7">
-    <strong style="color:var(--text)">模式升級路徑：</strong>
-    設計 → 觀察（行情流啟動）→ 影子（Paper 模擬引擎啟動）→ Demo 預留（Bybit Demo 演示双執行）→ <strong style="color:#a855f7">實盤（真實資金）</strong><br>
-    <strong style="color:var(--text)">注意：</strong>各模式獨立控制 — 切換模式不會停止已運行的 Paper / Demo / Live 會話，需在對應 Tab 手動控制。
+  <div class="mt-3 fs-micro t-dim lh-cjk">
+    <strong class="t-primary">模式升級路徑：</strong>
+    設計 → 觀察（行情流啟動）→ 影子（Paper 模擬引擎啟動）→ Demo 預留（Bybit Demo 演示双執行）→ <strong class="purple">實盤（真實資金）</strong><br>
+    <strong class="t-primary">注意：</strong>各模式獨立控制 — 切換模式不會停止已運行的 Paper / Demo / Live 會話，需在對應 Tab 手動控制。
   </div>
 </div>
 
@@ -220,7 +242,7 @@
   <div class="oc-metrics" id="biz-grid">
     <div class="oc-metric"><div class="oc-metric-label">模擬淨盈虧</div><div class="oc-metric-val" id="b-pnl">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">今日 AI 成本</div><div class="oc-metric-val blue" id="b-cost">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">30 天 AI 成本</div><div class="oc-metric-val" id="b-cost30" style="font-size:14px">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">30 天 AI 成本</div><div class="oc-metric-val fs-md" id="b-cost30">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">累計訂單數</div><div class="oc-metric-val" id="b-orders">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">當前持倉數</div><div class="oc-metric-val" id="b-positions">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">注册策略數</div><div class="oc-metric-val" id="b-strategies">--</div></div>
@@ -357,46 +379,46 @@ const MODE_CONFIRM = {
     icon: '🔒', label: '僅設計模式',
     title: '🔒 切換到僅設計模式 / design_only',
     body: `<strong>系統將進入完全靜默狀態。</strong>
-<ul style="margin:8px 0;padding-left:18px;line-height:2">
+<ul class="confirm-list">
   <li>後台行情流：<strong>不會自動啟動</strong>（重啟服務後）</li>
   <li>Paper 模擬：不受影響（已啟動的不會自動停止）</li>
   <li>Bybit Demo 演示：不受影響</li>
   <li>掃描器：繼續運行</li>
 </ul>
 <div class="warn-box">⚠ 降級模式不會自動停止已運行的服務，需手動在「Demo 演示」Tab 關閉。</div>
-<p style="margin-top:8px;font-size:12px;color:var(--text-dim)">適用場景：完全暫停系統，準備維護或配置修改。</p>`
+<p class="mt-2 fs-dense t-dim">適用場景：完全暫停系統，準備維護或配置修改。</p>`
   },
   observe_only: {
     icon: '👁️', label: '僅觀察模式',
     title: '👁️ 切換到僅觀察模式 / observe_only',
     body: `<strong>系統將進入純數據收集狀態。</strong>
-<ul style="margin:8px 0;padding-left:18px;line-height:2">
+<ul class="confirm-list">
   <li>後台行情流：<strong>服務重啟後自動啟動</strong>（BTCUSDT + ETHUSDT）</li>
   <li>K線 / 指標 / 觀察值：持續積累，為 AI 分析建立數據基礎</li>
   <li>Paper 模擬：<strong>不會自動開啟</strong>（需在快捷按鈕手動啟動）</li>
   <li>Bybit Demo 演示：不激活，不發送任何訂單</li>
   <li>執行路徑：完全關閉，只讀</li>
 </ul>
-<p style="margin-top:8px;font-size:12px;color:var(--text-dim)">適用場景：系統冷啟動、數據預热、暫停交易但繼續積累市場數據。</p>`
+<p class="mt-2 fs-dense t-dim">適用場景：系統冷啟動、數據預热、暫停交易但繼續積累市場數據。</p>`
   },
   shadow_only: {
     icon: '🌑', label: '影子模式',
     title: '🌑 切換到影子模式 / shadow_only',
     body: `<strong>系統將激活 Paper 模擬執行引擎。</strong>
-<ul style="margin:8px 0;padding-left:18px;line-height:2">
+<ul class="confirm-list">
   <li>後台行情流：<strong>自動啟動</strong></li>
   <li>Paper 模擬：<strong>需手動在快捷按鈕啟動會話</strong></li>
   <li>影子決策管線：激活（策略信號 → 風控 → 模擬執行）</li>
   <li>Bybit Demo 演示：<strong>不激活</strong>，只在本地模擬</li>
   <li>學習系統：積累數據，自動晉升判斷</li>
 </ul>
-<p style="margin-top:8px;font-size:12px;color:var(--text-dim)">適用場景：在完全隔離環境中測試策略，無任何外部訂單。</p>`
+<p class="mt-2 fs-dense t-dim">適用場景：在完全隔離環境中測試策略，無任何外部訂單。</p>`
   },
   demo_reserved: {
     icon: '🧪', label: 'Demo 預留',
     title: '🧪 切換到 Demo 預留模式 / demo_reserved',
     body: `<strong>系統將允許 Bybit Demo 演示沙盒執行。</strong>
-<ul style="margin:8px 0;padding-left:18px;line-height:2">
+<ul class="confirm-list">
   <li>後台行情流：<strong>自動啟動</strong></li>
   <li>Paper 模擬：可啟動（本地虛擬資金模擬）</li>
   <li>Bybit Demo 演示：<strong>雙重執行</strong> — 訂單同時在本地 Paper 模擬引擎和 Bybit 官方 Demo 演示沙盒執行</li>
@@ -404,21 +426,21 @@ const MODE_CONFIRM = {
   <li>真實資金：<strong>無任何風險</strong>，Demo 演示賬戶使用虛擬資金</li>
 </ul>
 <div class="warn-box">⚠ Bybit Demo 演示賬戶餘額不足時需在 Bybit 官網手動補充（無 API 接口）。</div>
-<p style="margin-top:8px;font-size:12px;color:var(--text-dim)">適用場景：完整測試交易鏈路（含 Bybit 訂單撮合），驗證策略在真實訂單流中的表現。</p>`
+<p class="mt-2 fs-dense t-dim">適用場景：完整測試交易鏈路（含 Bybit 訂單撮合），驗證策略在真實訂單流中的表現。</p>`
   },
   live_reserved: {
     icon: '🟣', label: '實盤',
     title: '🟣 切換到實盤模式 / live_reserved',
-    body: `<strong style="color:#a855f7">⚠ 實盤模式 — 真實資金風險</strong>
-<ul style="margin:8px 0;padding-left:18px;line-height:2">
+    body: `<strong class="purple">⚠ 實盤模式 — 真實資金風險</strong>
+<ul class="confirm-list">
   <li>引擎模式：<strong>live_reserved</strong> — 允許實盤引擎啟動</li>
   <li>Paper / Demo session：<strong>獨立運行，不受影響</strong></li>
   <li>實盤啟動：需在「實盤交易」Tab 點擊「啟動 Live」</li>
   <li>真實資金：<strong>所有訂單使用真實 Bybit 賬戶資金</strong></li>
   <li>前置條件：OPENCLAW_ALLOW_MAINNET=1 + Live API Key 配置</li>
 </ul>
-<div class="warn-box" style="border-color:rgba(168,85,247,0.5);color:#a855f7">🟣 此模式開放實盤交易權限。確認前請檢查風控參數和 API Key 配置。</div>
-<p style="margin-top:8px;font-size:12px;color:var(--text-dim)">切換後 Paper/Demo session 繼續獨立運行，live session 需單獨在實盤 Tab 啟動/停止。</p>`
+<div class="warn-box warn-box--live">🟣 此模式開放實盤交易權限。確認前請檢查風控參數和 API Key 配置。</div>
+<p class="mt-2 fs-dense t-dim">切換後 Paper/Demo session 繼續獨立運行，live session 需單獨在實盤 Tab 啟動/停止。</p>`
   },
 };
 
@@ -856,7 +878,7 @@ async function loadSourceContext() {
   };
   function scCn(v) { return SC_CN[v] || v; }
 
-  let html = '<div class="oc-metrics" style="grid-template-columns:1fr 1fr">';
+  let html = '<div class="oc-metrics metrics-2col">';
   const fields = [
     ['REST 連接', ctx.rest_private_connection_state, ctx.rest_private_connection_state === 'ready'],
     ['WebSocket 連接', ctx.ws_private_connection_state, ctx.ws_private_connection_state === 'ready'],
@@ -867,7 +889,7 @@ async function loadSourceContext() {
   ];
   fields.forEach(([label, val, ok]) => {
     const display = typeof val === 'boolean' ? (val ? '正常' : '異常') : scCn(String(val || '--'));
-    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val ' + (ok ? 'green' : '') + '" style="font-size:14px">' + ocEsc(display) + '</div></div>';
+    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val fs-md ' + (ok ? 'green' : '') + '">' + ocEsc(display) + '</div></div>';
   });
   html += '</div>';
   ocSetHtml('source-context-body', html);
@@ -883,11 +905,11 @@ async function loadHealth() {
   if (h.scores) {
     const SCORE_CN = { 'overall_health_score': '綜合健康', 'ai_health_score': 'AI 健康', 'exchange_health_score': '交易所健康',
       'infra_health_score': '基礎設施', 'data_freshness_score': '數據新鮮度' };
-    html += '<div class="oc-metrics" style="grid-template-columns:repeat(auto-fit,minmax(100px,1fr))">';
+    html += '<div class="oc-metrics metrics-fit">';
     Object.entries(h.scores).forEach(([k, v]) => {
       const label = SCORE_CN[k] || k.replace(/_/g, ' ');
       const cls = v >= 80 ? 'green' : v >= 50 ? 'yellow' : 'red';
-      html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val ' + cls + '" style="font-size:18px">' + v + '</div></div>';
+      html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val fs-title ' + cls + '">' + v + '</div></div>';
     });
     html += '</div>';
   }
@@ -895,8 +917,8 @@ async function loadHealth() {
   if (h.gates) {
     const GATE_CN = { 'health_gates_overall_state': '總門禁', 'exchange_timeout_gate_state': '交易所超時',
       'ws_disconnect_gate_state': 'WS 斷連', 'latency_gate_state': '延遲', 'freshness_gate_state': '新鮮度' };
-    html += '<div style="margin-top:10px;font-size:12px;color:var(--text-dim)">門禁狀態：</div>';
-    html += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px">';
+    html += '<div class="mt-3 fs-dense t-dim">門禁狀態：</div>';
+    html += '<div class="row wrap gap-2 mt-1">';
     Object.entries(h.gates).forEach(([k, v]) => {
       const label = GATE_CN[k] || k;
       const passed = v === 'passed';
