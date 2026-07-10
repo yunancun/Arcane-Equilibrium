@@ -1,33 +1,33 @@
 {
   "schema": "global_qualified_autonomous_learning_shadow_loop_state_v1",
-  "generated_at": "2026-07-10T20:16:18Z",
+  "generated_at": "2026-07-10T21:47:24Z",
   "goal_id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
   "goal_thread_id": "019f4b6d-1e5b-7551-9fce-7a2f029a1675",
   "goal_status": "ACTIVE",
   "current_work_package": "WP2-CANDIDATE-AWARE-ARBITER",
-  "current_work_package_state": "ACTIVE_WP2B_PROSPECTIVE_EVENT_LINEAGE",
+  "current_work_package_state": "ACTIVE_WP2B_LINEAGE_PROPAGATION",
   "baseline_packet": "baseline_state_packet.json",
   "baseline_packet_sha256": "30c10a497f02794525ce6e1d70972829bde7942a6a0bb181e36a13e308400b60",
   "baseline_evidence_delta_hash": "0ab0b80f307951108d0cf5edd3bb5940cb936bd093081c37c6d90e874e52ec28",
   "source_runtime": {
     "branch": "main",
     "baseline_aligned_head": "1a3ecdd57927e70dd8c6dedfed4ecef04c7a46d3",
-    "mac_head": "c84e14f5de67f8a6e55d3759d307087323118f86",
-    "mac_origin_main": "c84e14f5de67f8a6e55d3759d307087323118f86",
-    "source_capture_kind": "WP2A_SOURCE_ACCEPTANCE_CHECKPOINT",
-    "behavioral_source_checkpoint": "c84e14f5de67f8a6e55d3759d307087323118f86",
+    "mac_head": "1afdf423104ce8303d90f9e86b0896039948a692",
+    "mac_origin_main": "1afdf423104ce8303d90f9e86b0896039948a692",
+    "source_capture_kind": "WP2B_PROSPECTIVE_LINEAGE_SOURCE_ACCEPTANCE_CHECKPOINT",
+    "behavioral_source_checkpoint": "1afdf423104ce8303d90f9e86b0896039948a692",
     "linux_head": "7d1c247947f0fb6c139f8a0583c5e6ed6ae62c70",
     "linux_origin_main": "a927c37d14f768b923f11b29ea61d8e94ca8d5ff",
     "mac_unrelated_dirty_worktree_preserved": true,
     "linux_worktree_clean": true,
-    "post_baseline_drift_classification": "SOURCE_AHEAD_RUNTIME_UNCHANGED_NO_WP2A_DEPLOY",
+    "post_baseline_drift_classification": "SOURCE_AHEAD_RUNTIME_UNCHANGED_NO_WP2B_DEPLOY",
     "service_pin": "7d1c247947f0fb6c139f8a0583c5e6ed6ae62c70",
     "service_pid": 2381011,
     "service_nrestarts": 0,
     "service_failed_sessions": 0,
     "service_unclean_sessions": 0,
     "runtime_snapshot_observed_at": "2026-07-10T14:43:50.582201Z",
-    "runtime_snapshot_fresh_for_wp2a": false,
+    "runtime_snapshot_fresh_for_wp2b": false,
     "restart_gate": "WP1_R4_EXACT_TARGET_APPLIED_AND_ACCEPTED"
   },
   "postgres": {
@@ -165,6 +165,28 @@
     "event_driven_primary_proven": false,
     "runtime_or_pg_acceptance": false
   },
+  "wp2b_source_checkpoint": {
+    "candidate_board_extraction_commit": "13d2b980cecd4b9f83de669c19220c820afe4e89",
+    "prospective_lineage_commit": "1afdf423104ce8303d90f9e86b0896039948a692",
+    "status": "PARTIAL_SOURCE_ACCEPTED_PROPAGATION_ACTIVE",
+    "candidate_board_tests": "199 passed",
+    "candidate_board_golden_hash_count": 4,
+    "python_contract_and_fixture_tests": "66 passed",
+    "python_e4_unique_tests": "220 passed",
+    "rust_e2_tests": "16 passed",
+    "rust_e4_current_tests": "35 passed",
+    "rust_cargo_check": "PASS",
+    "e2": "PASS_TO_E4_PM",
+    "e4": "PASS_TO_QA",
+    "qa": "PASS_SOURCE_CHECKPOINT_TO_PM",
+    "p0_p1_p2": "0/0/0",
+    "source_chain": "organic Cost Gate reject -> immutable Rust candidate_event_context_v1 -> optional backward-compatible learning ledger; pure Python candidate_evaluation_context_v1 contract available",
+    "candidate_event_capture_before_strategy_mutation": true,
+    "historical_context_backfill_allowed": false,
+    "python_outcome_propagation_present": false,
+    "event_driven_primary_proven": false,
+    "runtime_or_pg_acceptance": false
+  },
   "supersession": {
     "sui": {
       "status": "ROTATED_UNCONSUMABLE_STALE_PACKET",
@@ -219,9 +241,9 @@
     "DONE_OPERATIONAL_SHADOW",
     "BACKLOG_EXHAUSTED"
   ],
-  "next_safe_action": "Execute WP2-B: behavior-preserving candidate-board Module extraction, then prospective Rust candidate_event_context_v1, cold Python candidate_evaluation_context_v1, and event-driven primary handoff; no exchange contact",
+  "next_safe_action": "Execute WP2-B B2.2: propagate only validated prospective lineage through Python adapter/outcomes, keep historical PG/snapshot rows explicitly unqualified without backfill, then connect validated cold evaluation projection and event-driven primary handoff; no exchange contact",
   "remaining_safe_work_inventory": [
-    "WP2-B prospective event/evaluation lineage and event-driven primary handoff",
+    "WP2-B validated lineage propagation, cold evaluation projection, and event-driven primary handoff",
     "WP3 proof/reward repository adapters",
     "WP4 versioned training/registry contracts",
     "WP5 OOS and decision engine",
@@ -229,14 +251,14 @@
     "WP7 adversarial final audit"
   ],
   "facts": [
-    "WP2-A source acceptance captured Mac and origin at c84e14f5de67f8a6e55d3759d307087323118f86",
-    "The last accepted WP1 runtime snapshot at 2026-07-10T14:43:50.582201Z had a clean Linux checkout and ALR service pin at 7d1c247947f0fb6c139f8a0583c5e6ed6ae62c70; WP2-A did not re-inspect or mutate runtime",
-    "At the last accepted WP1 runtime snapshot, 638 run and 638 feedback rows were DEFER with zero proof, reward, actual training, and hidden OOS; WP2-A makes no newer runtime-count claim",
+    "WP2-B source acceptance captured Mac and origin at 1afdf423104ce8303d90f9e86b0896039948a692",
+    "The last accepted WP1 runtime snapshot at 2026-07-10T14:43:50.582201Z had a clean Linux checkout and ALR service pin at 7d1c247947f0fb6c139f8a0583c5e6ed6ae62c70; WP2-B did not re-inspect or mutate runtime",
+    "At the last accepted WP1 runtime snapshot, 638 run and 638 feedback rows were DEFER with zero proof, reward, actual training, and hidden OOS; WP2-B makes no newer runtime-count claim",
     "WP1 isolated and production runtime acceptance passed with durable suppression and write-accounting evidence",
     "The earlier unauthorized QA disposable local-PG probe remains retracted; R4 produced the only accepted isolated evidence"
   ],
   "inferences": [
-    "WP2-A candidate-aware source selection is accepted; prospective immutable lineage and event-driven handoff are now the highest-ROI safe gap",
+    "Prospective immutable event/evaluation contracts are accepted; validated Python propagation and event-driven handoff are now the highest-ROI safe gap",
     "Zero qualified candidates is not a Goal blocker while source/test work remains"
   ],
   "assumptions": [
@@ -245,7 +267,7 @@
   ],
   "authority_granted_by_goal": false,
   "runtime_action_performed_this_loop": false,
-  "runtime_action_classification": "NONE_WP2A_SOURCE_ONLY",
+  "runtime_action_classification": "NONE_WP2B_SOURCE_ONLY",
   "exchange_action_performed_this_loop": false,
   "order_action_performed_this_loop": false,
   "unrelated_worktree_changes_consumed": false
