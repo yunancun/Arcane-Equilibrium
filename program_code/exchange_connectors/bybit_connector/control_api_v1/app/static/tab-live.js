@@ -166,7 +166,7 @@ async function loadTrustStatus() {
   function _applyToBar(barId, badgeId, cleanDaysId, expiresId, signedId) {
     const bar = document.getElementById(barId);
     if (!bar) return;
-    bar.style.display = 'flex';
+    bar.classList.remove('hidden');
     bar.classList.remove('ok', 'warn', 'crit', 'review');
     bar.classList.add(barClass);
 
@@ -265,7 +265,7 @@ function openLiveAuth() {
 
 function applyDevelopmentSupportVisibility(enabled) {
   document.querySelectorAll('[data-dev-mode-only="global-mode-control"]').forEach(node => {
-    node.style.display = enabled ? '' : 'none';
+    node.classList.toggle('hidden', !enabled);
   });
 }
 
@@ -302,8 +302,8 @@ function _applyLiveModeUI() {
   // Integrity-fail: engine_kind != 'live' → hide dashboard, show fail view
   // 完整性失效：engine_kind != 'live' → 隱藏儀表板，顯示警示視圖
   if (_liveModeState.actual_engine_kind !== 'live') {
-    if (dash) dash.style.display = 'none';
-    if (fail) fail.style.display = 'block';
+    if (dash) dash.classList.add('hidden');
+    if (fail) fail.classList.remove('hidden');
     if (ifvTitle) {
       ifvTitle.textContent = _liveModeState.status_error === 'status_unavailable'
         ? '⚠️ Live 狀態暫時不可用 — 保留控制入口，請重新檢查'
@@ -321,8 +321,8 @@ function _applyLiveModeUI() {
 
   // Live engine running — show dashboard with appropriate mode theme
   // Live 引擎運行中 — 以對應主題顯示儀表板
-  if (dash) dash.style.display = 'block';
-  if (fail) fail.style.display = 'none';
+  if (dash) dash.classList.remove('hidden');
+  if (fail) fail.classList.add('hidden');
 
   if (_liveModeState.actual_endpoint === 'mainnet') {
     body.classList.add('live-mode-mainnet');
@@ -339,19 +339,19 @@ function _applyLiveModeUI() {
       banner.innerHTML =
         '<strong>Live Mainnet — 真實資金 / REAL FUNDS at risk</strong>' +
         '<span class="real-funds-badge">&#x26A0;&#xFE0F; REAL FUNDS · Mainnet</span><br>' +
-        '<span style="font-size:12px;color:var(--text-dim)">' +
+        '<span class="fs-dense t-dim">' +
         '此頁面操作直接影響 Bybit Mainnet 帳戶。請確保風控參數正確配置，謹慎操作。</span>';
     } else if (_liveModeState.actual_endpoint === 'live_demo') {
       banner.innerHTML =
         '<strong>LiveDemo · api-demo endpoint</strong>' +
         '<span class="live-demo-badge">&#x1F7E0; LiveDemo · api-demo.bybit.com</span><br>' +
-        '<span style="font-size:12px;color:var(--text-dim)">' +
+        '<span class="fs-dense t-dim">' +
         'Live 管線跑 demo 服務器（authorization / TTL / 風控按 Live 嚴格標準，不因 endpoint 降級）。' +
         '本面板非 Mainnet「真實資金」，但 Operator 操作仍會影響 demo 帳戶歷史。</span>';
     } else {
       banner.innerHTML =
-        '<strong style="color:#94a3b8">Live 槽未配置 — 顯示資料來自 demo 槽</strong><br>' +
-        '<span style="font-size:12px;color:var(--text-dim)">' +
+        '<strong class="live-slot-empty-label">Live 槽未配置 — 顯示資料來自 demo 槽</strong><br>' +
+        '<span class="fs-dense t-dim">' +
         'Live slot is empty; data shown comes from the shared demo client. ' +
         '請至 Settings 配置 Live API key 後再評估真實 live 行為。</span>';
     }
@@ -361,15 +361,13 @@ function _applyLiveModeUI() {
   const epBadge = document.getElementById('live-endpoint-badge');
   if (epBadge) {
     if (_liveModeState.actual_endpoint === 'mainnet') {
-      epBadge.style.display = '';
       epBadge.className = 'real-funds-badge';
       epBadge.textContent = 'Mainnet';
     } else if (_liveModeState.actual_endpoint === 'live_demo') {
-      epBadge.style.display = '';
       epBadge.className = 'live-demo-badge';
       epBadge.textContent = 'LiveDemo';
     } else {
-      epBadge.style.display = 'none';
+      epBadge.className = 'hidden';
     }
   }
 }
@@ -591,7 +589,7 @@ function _renderLiveDustPanel(positions) {
       '<td>' + estCell + '</td>' +
       '<td>' + minCell + '</td>' +
       '<td>' + gap + '</td>' +
-      '<td style="font-size:11px">' + _ocRenderOwnerStrategy(owner, p) + '</td>' +
+      '<td class="fs-micro">' + _ocRenderOwnerStrategy(owner, p) + '</td>' +
       '</tr>';
   }).join('');
 }
@@ -753,14 +751,14 @@ async function loadDashboardData() {
     if (_isPhantomViewError(posData)) {
       // F5/A1 phantom-view short circuit / F5/A1 幽靈視圖短路
       const msg = ocEsc(posData.error_zh || posData.error || 'Live slot not configured');
-      posBody.innerHTML = '<tr><td colspan="11" style="color:#f87171;text-align:center;padding:16px">⚠ ' + msg + '</td></tr>';
+      posBody.innerHTML = '<tr><td colspan="11" class="t-neg t-center p-4">⚠ ' + msg + '</td></tr>';
       document.getElementById('live-position-count').textContent = 'N/A';
       _renderLiveDustPanel([]);
     } else {
     const arr = (posData && Array.isArray(posData.positions)) ? posData.positions : [];
     document.getElementById('live-position-count').textContent = arr.length;
     if (arr.length === 0) {
-      posBody.innerHTML = '<tr><td colspan="11" style="color:var(--text-dim);text-align:center;padding:16px">無持倉 / No positions</td></tr>';
+      posBody.innerHTML = '<tr><td colspan="11" class="t-dim t-center p-4">無持倉 / No positions</td></tr>';
     } else {
       // F5-RETURN/Issue-2 — `closeLivePosition` row buttons are written via
       //   innerHTML below; they don't exist when checkLiveEngineStatus() ran
@@ -776,7 +774,7 @@ async function loadDashboardData() {
         // Bybit flat format (camelCase) + snake_case fallback
         // Bybit 扁平格式（camelCase）+ snake_case 兼容
         const pnl = parseFloat(p.unrealisedPnl || p.unrealized_pnl || p.unrealised_pnl || 0);
-        const pnlCls = pnl >= 0 ? 'color:var(--green)' : 'color:#f87171';
+        const pnlCls = pnl >= 0 ? 'green' : 'red';
         const size = p.size || p.qty || '--';
         const entry = p.avgPrice || p.avg_price || p.entry_price || '--';
         const mark = p.markPrice || p.mark_price || '--';
@@ -802,14 +800,14 @@ async function loadDashboardData() {
         const reasonAttr = ocEsc(String(p.frozen_reason || ''));
         return `<tr>
           <td><strong>${sym}</strong></td>
-          <td style="font-size:11px">${_ocRenderOwnerStrategy(strat, p)}</td>
+          <td class="fs-micro">${_ocRenderOwnerStrategy(strat, p)}</td>
           <td>${ocEsc(p.side || '--')}</td>
           <td>${ocEsc(String(size))}</td>
           <td>${ocEsc(String(leverage))}x</td>
           <td>${ocEsc(String(entry))}</td>
           <td>${ocEsc(ocAmount(ocPositionEntryValue(p)))}</td>
           <td>${ocEsc(String(mark))}</td>
-          <td style="${pnlCls}">${pnl.toFixed(4)}</td>
+          <td class="${pnlCls}">${pnl.toFixed(4)}</td>
           <td>${ocEsc(String(liq))}</td>
           <td><button class="oc-btn oc-btn-danger oc-row-close-action" data-owner-strategy="${ownerAttr}" data-frozen-reason="${reasonAttr}" onclick="closeLivePosition('${sym}', this.dataset.ownerStrategy, this.dataset.frozenReason)">${btnLabel}</button></td>
         </tr>`;
@@ -824,7 +822,7 @@ async function loadDashboardData() {
     }
     }  // end of !_isPhantomViewError(posData) branch / 非幽靈視圖分支結束
   } catch (_) {
-    posBody.innerHTML = '<tr><td colspan="11" style="color:var(--text-dim);text-align:center">無法加載持倉數據</td></tr>';
+    posBody.innerHTML = '<tr><td colspan="11" class="t-dim t-center">無法加載持倉數據</td></tr>';
   }
 
   // Render dust-positions summary panel from the same positions payload above.
@@ -850,14 +848,14 @@ async function loadDashboardData() {
     if (_isPhantomViewError(ordData)) {
       // F5/A1 phantom-view short circuit / F5/A1 幽靈視圖短路
       const msg = ocEsc(ordData.error_zh || ordData.error || 'Live slot not configured');
-      ordBody.innerHTML = '<tr><td colspan="7" style="color:#f87171;text-align:center;padding:16px">⚠ ' + msg + '</td></tr>';
+      ordBody.innerHTML = '<tr><td colspan="7" class="t-neg t-center p-4">⚠ ' + msg + '</td></tr>';
       document.getElementById('live-order-count').textContent = 'N/A';
       return;
     }
     const ordArr = (ordData && Array.isArray(ordData.list)) ? ordData.list : [];
     document.getElementById('live-order-count').textContent = ordArr.length;
     if (ordArr.length === 0) {
-      ordBody.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim);text-align:center;padding:16px">無掛單 / No open orders</td></tr>';
+      ordBody.innerHTML = '<tr><td colspan="7" class="t-dim t-center p-4">無掛單 / No open orders</td></tr>';
     } else {
       ordBody.innerHTML = ordArr.map(o => {
         // Bybit order format: orderId, symbol, side, qty, price, orderStatus, orderType
@@ -873,7 +871,7 @@ async function loadDashboardData() {
         const strat = _liveStratMap[symRaw] || '--';
         return `<tr>
           <td>${ocEsc(symRaw || '--')}</td>
-          <td style="font-size:11px">${ocEsc(strat)}</td>
+          <td class="fs-micro">${ocEsc(strat)}</td>
           <td>${ocEsc(o.side || '--')}</td>
           <td>${ocEsc(String(qty))}</td>
           <td>${ocEsc(String(price))}</td>
@@ -883,7 +881,7 @@ async function loadDashboardData() {
       }).join('');
     }
   } catch (_) {
-    ordBody.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim);text-align:center">無法加載掛單數據</td></tr>';
+    ordBody.innerHTML = '<tr><td colspan="7" class="t-dim t-center">無法加載掛單數據</td></tr>';
     document.getElementById('live-order-count').textContent = '--';
   }
 }
@@ -984,15 +982,13 @@ async function checkLiveEngineStatus() {
   const cBadge = document.getElementById('live-contraction-badge');
   if (cBadge) {
     if (contractionState === 'halted') {
-      cBadge.style.display = '';
       cBadge.className = 'oc-chip oc-chip-bad';
       cBadge.textContent = `🚨 自動停止 (回撤${drawdownPct != null ? drawdownPct.toFixed(1) + '%' : ''})`;
     } else if (contractionState === 'warned') {
-      cBadge.style.display = '';
       cBadge.className = 'oc-chip oc-chip-warn';
       cBadge.textContent = `⚠ 回撤警告 ${drawdownPct != null ? drawdownPct.toFixed(1) + '%' : ''}`;
     } else {
-      cBadge.style.display = 'none';
+      cBadge.className = 'hidden';
     }
   }
 
@@ -1206,7 +1202,7 @@ async function loadLiveMetrics() {
   const d = await ocApi('/api/v1/live/metrics');
   if (!d || !d.data) {
     if (!_liveMetricsLoadedOnce) {
-      ocSetHtml('live-perf-metrics', '<div style="color:var(--text-dim);font-size:12px;padding:12px">暫無指標數據</div>');
+      ocSetHtml('live-perf-metrics', '<div class="t-dim fs-dense p-3">暫無指標數據</div>');
     }
     return;
   }
@@ -1214,7 +1210,7 @@ async function loadLiveMetrics() {
   if (_isPhantomViewError(d.data)) {
     const msg = ocEsc(d.data.error_zh || d.data.error || 'Live slot not configured');
     ocSetHtml('live-perf-metrics',
-      '<div style="color:#f87171;font-size:12px;padding:12px">⚠ ' + msg + '</div>');
+      '<div class="t-neg fs-dense p-3">⚠ ' + msg + '</div>');
     _liveMetricsLoadedOnce = true;
     return;
   }
@@ -1227,7 +1223,7 @@ async function loadLiveMetrics() {
     return;
   }
   if (!_liveMetricsLoadedOnce) {
-    ocSetHtml('live-perf-metrics', '<div style="color:var(--text-dim);font-size:12px;padding:12px">暫無後端性能指標</div>');
+    ocSetHtml('live-perf-metrics', '<div class="t-dim fs-dense p-3">暫無後端性能指標</div>');
   }
 }
 
@@ -1247,7 +1243,7 @@ async function loadLivePnlSeries() {
     if (_isPhantomViewError(payload)) {
       const msg = ocEsc(payload.error_zh || payload.error || 'Live slot not configured');
       ocPnlSeriesTrend('live-pnl-line', 'live-pnl-label', [], 'live-pnl-zero', null);
-      ocSetHtml('live-pnl-series-rows', '<tr><td colspan="5" style="color:#f87171;text-align:center;padding:12px">⚠ ' + msg + '</td></tr>');
+      ocSetHtml('live-pnl-series-rows', '<tr><td colspan="5" class="t-neg t-center p-3">⚠ ' + msg + '</td></tr>');
       return;
     }
     points = (payload && Array.isArray(payload.points)) ? payload.points : [];
@@ -1265,7 +1261,7 @@ async function loadLivePnlSeries() {
     ocSetHtml('live-pnl-series-rows', ocPnlSeriesTableRows(points));
   } else {
     ocPnlSeriesTrend('live-pnl-line', 'live-pnl-label', [], 'live-pnl-zero', null);
-    ocSetHtml('live-pnl-series-rows', '<tr><td colspan="5" style="color:var(--text-dim);text-align:center;padding:12px">暫無 PnL bucket；後端序列待載入或當前區間無成交</td></tr>');
+    ocSetHtml('live-pnl-series-rows', '<tr><td colspan="5" class="t-dim t-center p-3">暫無 PnL bucket；後端序列待載入或當前區間無成交</td></tr>');
   }
 }
 
@@ -1380,7 +1376,7 @@ function _renderReadiness(payload) {
   if (!box) return;
   const items = readiness && Array.isArray(readiness.items) ? readiness.items : [];
   if (!items.length) {
-    box.style.display = 'none';
+    box.classList.add('hidden');
     box.innerHTML = '';
     return;
   }
@@ -1406,7 +1402,7 @@ function _renderReadiness(payload) {
     );
   });
   box.innerHTML = rows.join('');
-  box.style.display = '';
+  box.classList.remove('hidden');
 }
 
 async function loadPreLiveEdgeGates() {
@@ -1415,17 +1411,17 @@ async function loadPreLiveEdgeGates() {
   const gateBox = document.getElementById('live-edge-gates');
   if (!gateBox) return;
   if (!payload || !payload.gates) {
-    gateBox.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:12px">暫無 gate 趨勢資料 / No edge gate trend data</div>';
+    gateBox.innerHTML = '<div class="t-dim fs-dense p-3">暫無 gate 趨勢資料 / No edge gate trend data</div>';
     const readinessBox = document.getElementById('live-readiness-checklist');
     if (readinessBox) {
-      readinessBox.style.display = 'none';
+      readinessBox.classList.add('hidden');
       readinessBox.innerHTML = '';
     }
     return;
   }
   const gates = ['33', '38', '40'].map(id => payload.gates[id]).filter(Boolean);
   if (!gates.length) {
-    gateBox.innerHTML = '<div style="color:var(--text-dim);font-size:12px;padding:12px">暫無 gate 趨勢資料 / No edge gate trend data</div>';
+    gateBox.innerHTML = '<div class="t-dim fs-dense p-3">暫無 gate 趨勢資料 / No edge gate trend data</div>';
     return;
   }
   gateBox.innerHTML = gates.map(_renderEdgeGateCard).join('');
@@ -1459,8 +1455,8 @@ let _livePnlHistoryState = {
 function toggleFills() {
   const section = document.getElementById('fills-section');
   const btn = document.getElementById('fills-toggle-btn');
-  const isOpen = section.style.display !== 'none';
-  section.style.display = isOpen ? 'none' : '';
+  const isOpen = !section.classList.contains('hidden');
+  section.classList.toggle('hidden', isOpen);
   btn.classList.toggle('open', !isOpen);
   if (!isOpen && !_fillsLoaded) {
     loadFills();
@@ -1493,19 +1489,19 @@ function _liveFillRow(f) {
   const feeStr = fee !== '--' ? parseFloat(fee).toFixed(6) : '--';
   const oid = f.orderId || f.order_id || '--';
   const side = f.side || '--';
-  const sideCls = side === 'Buy' ? 'color:var(--green)' : side === 'Sell' ? 'color:#f87171' : '';
+  const sideCls = side === 'Buy' ? 'green' : side === 'Sell' ? 'red' : '';
   const strategy = f.strategy || f.strategy_name || f.owner_strategy || _liveStratMap[f.symbol || ''] || '';
   return `<tr>
-    <td style="white-space:nowrap">${ocEsc(ocFillTime(ts))}</td>
+    <td class="nowrap">${ocEsc(ocFillTime(ts))}</td>
     <td><strong>${ocEsc(f.symbol || '--')}</strong></td>
-    <td style="font-size:11px">${strategy ? _ocRenderOwnerStrategy(strategy, f) : '--'}</td>
-    <td style="${sideCls}">${ocEsc(side)}</td>
+    <td class="fs-micro">${strategy ? _ocRenderOwnerStrategy(strategy, f) : '--'}</td>
+    <td class="${sideCls}">${ocEsc(side)}</td>
     <td>${ocEsc(String(qty))}</td>
     <td>${ocEsc(String(price))}</td>
     <td>${ocEsc(ocAmount(execValue))}</td>
-    <td style="color:var(--text-dim)">${ocEsc(feeStr)}</td>
+    <td class="t-dim">${ocEsc(feeStr)}</td>
     ${ocPnlCell(_liveFillPnl(f))}
-    <td style="font-size:10px;color:var(--text-dim)">${ocEsc(String(oid)).slice(0, 12)}…</td>
+    <td class="fs-micro t-dim">${ocEsc(String(oid)).slice(0, 12)}…</td>
   </tr>`;
 }
 
@@ -1562,11 +1558,11 @@ function _liveProfitRow(r) {
   return '<tr>' +
     '<td class="oc-fill-time" title="' + ocEsc(closeTime) + '">' + ocEsc(closeTime) + '</td>' +
     '<td><strong>' + ocEsc(r.sym) + '</strong></td>' +
-    '<td style="font-size:11px">' + (r.strategy ? _ocRenderOwnerStrategy(r.strategy, r) : '--') + '</td>' +
+    '<td class="fs-micro">' + (r.strategy ? _ocRenderOwnerStrategy(r.strategy, r) : '--') + '</td>' +
     '<td>' + ocEsc(openText) + '</td>' +
     '<td>' + ocEsc(closeText) + '</td>' +
     '<td>' + ocNum(r.qty, 4) + '</td>' +
-    '<td style="color:var(--text-dim)">' + ocEsc(hold) + '</td>' +
+    '<td class="t-dim">' + ocEsc(hold) + '</td>' +
     '<td class="' + pnlCls + '">' + sign + r.pnl.toFixed(4) + '</td>' +
     '</tr>';
 }
@@ -1608,13 +1604,13 @@ function _liveClosedPnlRow(r) {
   return '<tr>' +
     '<td class="oc-fill-time" title="' + ocEsc(closeTime) + '">' + ocEsc(closeTime) + '</td>' +
     '<td><strong>' + ocEsc(r.symbol || '') + '</strong></td>' +
-    '<td style="font-size:11px" title="' + ocEsc(sourceLabel) + '">' +
+    '<td class="fs-micro" title="' + ocEsc(sourceLabel) + '">' +
       '<span class="' + (mutedStrategy ? 'oc-row-muted' : '') + '">' + ocEsc(strategyText) + '</span>' +
       '<span class="oc-source-note">' + ocEsc(sourceLabel) + '</span></td>' +
     '<td>' + (entryPrice != null ? ocNum(parseFloat(entryPrice), 2) : '--') + '</td>' +
     '<td>' + (exitPrice != null ? ocNum(parseFloat(exitPrice), 2) : '--') + '</td>' +
     '<td>' + ocEsc(String(qty != null ? qty : '--')) + '</td>' +
-    '<td style="color:var(--text-dim)">' + ocEsc(String(r.side || '--')) + '</td>' +
+    '<td class="t-dim">' + ocEsc(String(r.side || '--')) + '</td>' +
     '<td class="' + pnlCls + '" title="' + ocEsc(title) + '"><span aria-label="exchange-confirmed">&#x2705;</span> ' + ocEsc(String(closedPnlRaw != null ? closedPnlRaw : '--')) + driftHtml + '</td>' +
     '</tr>';
 }
@@ -1675,7 +1671,7 @@ function _liveRenderPnlHistory() {
   _liveUpdateFillControls(payload, rows);
   if (badge) badge.textContent = _livePnlHistoryState.rows.length ? '收益 ' + _livePnlHistoryState.rows.length + ' 筆' : '';
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="8" style="color:var(--text-dim);text-align:center;padding:16px">Bybit closed-pnl 暫無平倉收益</td></tr>';
+    body.innerHTML = '<tr><td colspan="8" class="t-dim t-center p-4">Bybit closed-pnl 暫無平倉收益</td></tr>';
     return;
   }
   body.innerHTML = rows.map(_liveClosedPnlRow).join('');
@@ -1696,7 +1692,7 @@ async function _liveLoadPnlBatch(opts) {
   _liveUpdateFillControls(_livePnlHistoryState.lastPayload, _liveCurrentPnlRows());
   document.getElementById('live-fills-head').innerHTML = _liveFillHead('profit');
   if (!_livePnlHistoryState.loadedOnce) {
-    body.innerHTML = '<tr><td colspan="8" style="color:var(--text-dim);text-align:center;padding:16px">加載中...</td></tr>';
+    body.innerHTML = '<tr><td colspan="8" class="t-dim t-center p-4">加載中...</td></tr>';
   }
   try {
     let qs = '?limit=' + LIVE_PNL_PRELOAD_SIZE + '&lookback_days=730';
@@ -1705,7 +1701,7 @@ async function _liveLoadPnlBatch(opts) {
     const payload = d && d.data;
     if (_isPhantomViewError(payload)) {
       const msg = ocEsc(payload.error_zh || payload.error || 'Live slot not configured');
-      body.innerHTML = '<tr><td colspan="8" style="color:#f87171;text-align:center;padding:16px">&#9888; ' + msg + '</td></tr>';
+      body.innerHTML = '<tr><td colspan="8" class="t-neg t-center p-4">&#9888; ' + msg + '</td></tr>';
       if (badge) badge.textContent = '';
       _fillsLoaded = false;
       _livePnlHistoryState.loading = false;
@@ -1728,7 +1724,7 @@ async function _liveLoadPnlBatch(opts) {
     _liveFillState.loading = false;
     _liveUpdateFillControls(_livePnlHistoryState.lastPayload, _liveCurrentPnlRows());
     if (!_livePnlHistoryState.loadedOnce) {
-      body.innerHTML = '<tr><td colspan="8" style="color:var(--text-dim);text-align:center">無法加載收益 / PnL</td></tr>';
+      body.innerHTML = '<tr><td colspan="8" class="t-dim t-center">無法加載收益 / PnL</td></tr>';
     }
     return null;
   }
@@ -1811,14 +1807,14 @@ async function loadFills() {
   _liveUpdateFillControls(null, []);
   document.getElementById('live-fills-head').innerHTML = _liveFillHead(_liveFillState.tab);
   if (!_liveFillsLoadedOnce) {
-    body.innerHTML = '<tr><td colspan="' + (_liveFillState.tab === 'profit' ? '8' : '10') + '" style="color:var(--text-dim);text-align:center;padding:16px">加載中...</td></tr>';
+    body.innerHTML = '<tr><td colspan="' + (_liveFillState.tab === 'profit' ? '8' : '10') + '" class="t-dim t-center p-4">加載中...</td></tr>';
   }
   try {
     const d = await ocApi('/api/v1/live/fills' + qs);
     const payload = d && d.data;
     if (_isPhantomViewError(payload)) {
       const msg = ocEsc(payload.error_zh || payload.error || 'Live slot not configured');
-      body.innerHTML = '<tr><td colspan="' + (_liveFillState.tab === 'profit' ? '8' : '10') + '" style="color:#f87171;text-align:center;padding:16px">⚠ ' + msg + '</td></tr>';
+      body.innerHTML = '<tr><td colspan="' + (_liveFillState.tab === 'profit' ? '8' : '10') + '" class="t-neg t-center p-4">⚠ ' + msg + '</td></tr>';
       if (badge) badge.textContent = '';
       _fillsLoaded = false;
       _liveFillState.loading = false;
@@ -1832,17 +1828,17 @@ async function loadFills() {
     _liveUpdateFillControls(payload, arr);
     if (badge) badge.textContent = arr.length ? '本页 ' + arr.length + ' 筆' + (_liveFillState.hasMore ? '+' : '') : '';
     if (arr.length === 0) {
-      body.innerHTML = '<tr><td colspan="' + (_liveFillState.tab === 'profit' ? '8' : '10') + '" style="color:var(--text-dim);text-align:center;padding:16px">暫無成交記錄 / No fills</td></tr>';
+      body.innerHTML = '<tr><td colspan="' + (_liveFillState.tab === 'profit' ? '8' : '10') + '" class="t-dim t-center p-4">暫無成交記錄 / No fills</td></tr>';
       return;
     }
     body.innerHTML = _liveFillState.tab === 'profit'
-      ? (_liveBuildProfitRows(arr).map(_liveProfitRow).join('') || '<tr><td colspan="8" style="color:var(--text-dim);text-align:center;padding:16px">本页没有可關联收益</td></tr>')
+      ? (_liveBuildProfitRows(arr).map(_liveProfitRow).join('') || '<tr><td colspan="8" class="t-dim t-center p-4">本页没有可關联收益</td></tr>')
       : arr.map(_liveFillRow).join('');
   } catch(e) {
     _liveFillState.loading = false;
     _liveUpdateFillControls(null, []);
     if (!_liveFillsLoadedOnce) {
-      body.innerHTML = '<tr><td colspan="' + (_liveFillState.tab === 'profit' ? '8' : '10') + '" style="color:var(--text-dim);text-align:center">無法加載成交記錄</td></tr>';
+      body.innerHTML = '<tr><td colspan="' + (_liveFillState.tab === 'profit' ? '8' : '10') + '" class="t-dim t-center">無法加載成交記錄</td></tr>';
     }
   }
 }
