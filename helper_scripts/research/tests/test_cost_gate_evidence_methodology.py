@@ -737,6 +737,46 @@ def test_f1_missing_entry_ts_rows_block_candidacy_of_qualified_sample():
     assert cell["review_candidate"] is False
 
 
+def test_f1_t_test_n_is_effective_entry_count_not_raw_row_count():
+    """t 檢定的 n 必須是 n_eff(mutation bite:改回 raw outcome_count 必紅)。
+
+    fixture:30 個 distinct hourly entry(跨 6 UTC 日、值帶擾動)每個複製 3 份
+    → outcome_count=90、n_eff=30。cell 的 p 必須等於 one_sided_t_p_value(mean,
+    std, n_eff=30);若 outcome_review 的 t 檢定分母被 mutation 回 raw 行數
+    (n=90),p 收縮兩個數量級以上 → approx 等值斷言必紅。效應量刻意取中等
+    (mean≈0.3、std≈0.72)使兩個 p 都落在可分辨區間,不會同時 underflow 到 0。
+    """
+    jitter = [0.0, -1.0, 1.0, 0.5, -0.5]
+    rows = []
+    for i in range(30):
+        for copy in range(3):
+            rows.append(
+                _blocked_outcome_row(
+                    f"tn{i}-{copy}",
+                    "strat|XXXUSDT|Buy",
+                    4.3 + jitter[i % 5],
+                    cost_model_version="conservative_v1",
+                    entry_ts_ms=_spread_entry_ts(i),
+                )
+            )
+    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    cell = packet["top_side_cells"][0]
+    assert cell["outcome_count"] == 90
+    assert cell["effective_entry_count"] == 30
+    assert cell["duplicate_outcome_row_count"] == 60
+    # 手算對照(獨立於 cell 欄位):net = gross − 4.0 = 0.3 + jitter。
+    nets = [0.3 + jitter[i % 5] for i in range(30)]
+    mean = sum(nets) / 30
+    std = math.sqrt(sum((v - mean) ** 2 for v in nets) / 29)
+    assert cell["avg_net_bps"] == pytest.approx(mean, abs=1e-12)
+    assert cell["std_net_bps"] == pytest.approx(std, abs=1e-12)
+    p_eff = evidence_stats.one_sided_t_p_value(mean, std, 30)
+    p_raw = evidence_stats.one_sided_t_p_value(mean, std, 90)
+    # 分離保證:raw-n(90)的 p 比 n_eff(30)的 p 小 >100×,approx 不可能誤過。
+    assert p_raw < p_eff / 100.0
+    assert cell["one_sided_t_p_value"] == pytest.approx(p_eff, rel=1e-9)
+
+
 # ---------------------------------------------------------------------------
 # WP-A.2:成本雙軌(主判=實測 E[cost];conservative tail=敏感性欄)
 # ---------------------------------------------------------------------------
