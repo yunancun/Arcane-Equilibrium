@@ -4,7 +4,7 @@ Date: 2026-07-10
 Owner: PM
 Goal: `GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1`
 Codex Goal thread: `019f4b6d-1e5b-7551-9fce-7a2f029a1675`
-Status: `ACTIVE_WP1_ARTIFACT_CHURN_CONTROL`
+Status: `ACTIVE_WP2_CANDIDATE_AWARE_ARBITER`
 
 This is the durable PM-owned queue and state surface for the active Goal. It
 supersedes the old ALR P2 completion/terminal interpretation, but does not edit
