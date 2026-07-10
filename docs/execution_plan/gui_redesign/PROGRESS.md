@@ -2,9 +2,9 @@
 
 ## 狀態欄
 - **STATUS**: IN_PROGRESS
-- **CURRENT**: P0.3 批次 B1(非資金 A:research/replay+monitor/system/settings+app-actions.js;逐點 .toFixed→契約 formatter+掛 .num+% 走 ocPct/ocPctVal)
-- **LAST-COMMIT**: 1f85b382d(P0.3 B0 formatter 契約)
-- 回歸基線更新:structure/ 5F→**6F**(新 pre-existing `test_development_agent_governance::test_registry_is_single_valid_interface_and_views_are_current` FileNotFoundError,非 GUI/非批 9,clean HEAD stash 驗證同 6F;疑兄弟 session registry 中間態,待其收尾)
+- **CURRENT**: P0.3 批次 B2(非資金 B:learning/earn+governance/risk+autonomy-posture.js;risk% fraction/percent 選對、risk-tab.js:524 猜測式移除、bps 走 ocBps)
+- **LAST-COMMIT**: 4d6ab4ceb(P0.3 B1 非資金 A)
+- 回歸基線更新:structure/ 6F→**4F**(兄弟 session commit 修掉 test_development_agent_governance+stable_boundary_docs;現 4F=stock_etf_ipc×2/ipc_tests/strategy_blocked_symbols 全 pre-existing 非 GUI)
 - **BLOCKERS**: —
 - **AWAITING-OPERATOR**: —
 - **NEEDS-LINUX-RUNTIME**: —
@@ -34,7 +34,7 @@
   - 批次規則(PA 規格 §11):開工先實測該批檔案 style= 計數;`.oc-input--num` 組件隨 tab-ai/tab-risk 所屬批次落地;E1a 報告須含「全局新類 baseline 使用 sweep」節(E2 R2 LOW-1)
 - [~] P0.3 數字排版 pass:全站數值 `.num`+第二通道(▲▼/LONG-SHORT/±);精度 USD 2dp/BTC 6dp/%2dp/bps 2dp——**設計正本 `design/06_numerics.md`(PA,`f63f4b60b`)**;批次 B0→B1-B4 非資金 tab→B5/D demo→B6/E live(gated 最後)
   - [x] B0 formatter 契約落地——證據 `1f85b382d`:common-formatters.js(ocPct 1dp→2dp/ocMoney ASCII→U+2212/新 ocQty·ocBps·ocPctVal·ocPrice/OC_EMPTY='—'/第二通道 ocSignParts·ocSigned·ocSide)+oc-utilities §C CSS+guard 測試(node vm 真執行鎖 dp)+ocIsBlank 遷移 7 處;E1a→E2 PASS 0 blocker(§1.5 塌零裁決 SAFE:money_abs 僅 2 聚合 metric 非 per-fill)→回歸零 delta;惰性零 tab 重接
-  - [ ] B1 非資金 A:research/replay+monitor/system/settings+app-actions.js
+  - [x] B1 非資金 A(monitor/system 實改;replay/settings/app-actions NO-OP)——證據 `4d6ab4ceb`:tab-system b-cost 4dp column 例外(AI 成本 sub-cent)+b-cost30 2dp+.num×6/tab-monitoring .num×6;第二通道 0(計數/水位無漲跌);E1a→E2 PASS 0 blocker(4dp 例外正確、.num 皆 data-value、b-orders 計數對齊不違 gating)→回歸零 delta;E2 OBS 留 P0.4(靜態 -- 佔位→OC_EMPTY/AI 成本 FX 轉換/oc-agents unit-span defer)
   - [ ] B2 非資金 B:learning/earn+governance/risk+autonomy-posture.js(risk% fraction/percent 選對、risk-tab.js:524 猜測式移除)
   - [ ] B3 analytics:strategy/edge-gates/ai/canary(合併 tab-edge-gates metricValue→ocBps)
   - [ ] B4 stock-etf ×11(唯讀佔位上契約)
@@ -112,3 +112,4 @@
 | 2026-07-10 | R12.5 | 三端同步 | — | operator 指示:Mac=origin=Linux 全 `c525cd38f`;Linux ff 14 commits(7d1c24794→),pristine repo;on-disk 玄衡儀 tokens.css 驗證+control_api 運行中(uvicorn Tailscale 100.91.109.86:8000,靜態檔 disk 服務免 rebuild);401=login gate 正常 |
 | 2026-07-10 | R13 | P0.3 設計 | f63f4b60b | PA 出 P0.3 spec-of-record `design/06_numerics.md`(精度契約/第二通道雙層 API/.num 應用/批次 B0-E/驗證);findings:ocMoney ASCII hyphen 違 canon3、ocPct 1dp、bps 3 套、risk-tab 量級猜測、LIVE 4dp→2dp 塌零;設計 checkpoint 完成,B0 下輪 |
 | 2026-07-10 | R14 | P0.3 B0 formatter 契約 | 1f85b382d | 契約基建落地(9 新/修 formatter+第二通道雙層+§C CSS+node vm guard 測試);E1a→E2 PASS 0 blocker(§1.5 塌零親查 SAFE=money_abs 僅 2 聚合、per-fill ocPnlCell 未動;契約 codepoint 核、第二通道零 XSS、ocIsBlank 等價、guard 有牙);回歸零 delta;惰性零重接;3 LOW 留 D/E;perf-metric grid 兩格 4dp→2dp 需 QC 知悉。E2 附記:agent_governance.py authorize-command dispatcher bug(args.check AttributeError,非本任務) |
+| 2026-07-10 | R15 | P0.3 B1 非資金 A | 4d6ab4ceb | monitor/system 契約應用(b-cost 4dp 例外+.num×12);replay/settings/app-actions NO-OP;E1a→E2 PASS 0 blocker;回歸 structure 6F→4F(兄弟修 2 個 pre-existing,B1 零新失敗);E2 OBS 留 P0.4 |
