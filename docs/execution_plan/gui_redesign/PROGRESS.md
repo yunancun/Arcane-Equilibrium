@@ -2,8 +2,8 @@
 
 ## 狀態欄
 - **STATUS**: IN_PROGRESS
-- **CURRENT**: P0.3 數字排版 pass(全站 .num mono+tabular+右對齊+第二通道;精度 USD 2dp/BTC 6dp/%2dp/bps 2dp)
-- **LAST-COMMIT**: aa20dbf85(P0.2 批次 9,**P0.2 完結**)
+- **CURRENT**: P0.3 批次 B0(formatter 契約落地:common-formatters.js 精度契約+第二通道 helper+oc-utilities §C+guard 測試;惰性零 tab 應用)
+- **LAST-COMMIT**: f63f4b60b(P0.3 設計正本 06_numerics.md)
 - 回歸基線更新:structure/ 5F→**6F**(新 pre-existing `test_development_agent_governance::test_registry_is_single_valid_interface_and_views_are_current` FileNotFoundError,非 GUI/非批 9,clean HEAD stash 驗證同 6F;疑兄弟 session registry 中間態,待其收尾)
 - **BLOCKERS**: —
 - **AWAITING-OPERATOR**: —
@@ -32,7 +32,10 @@
     - [x] 8b live(107→0)——證據 `e351afa91`:tab-live.html 68/tab-live.js 39(1886→1882<2000);E1a 未中斷+硬邊界+canon6 自查→E2 PASS 0 blocking(親算重核:onclick/endpoint sorted-diff 空、openTypedConfirmModal/classifyLiveMutation/doEmergencyStop/ocEsc 72 全 IDENTICAL、typed-confirm phrase+全 modal 文案 byte-IDENTICAL、淨 −4=4 冗餘 badge display 純刪;canon 6 熱紅逐點 HEAD=WORKING 構造性保全、--live/--neg 未互換;讀值陷阱 truth-table 等價)→回歸 392P/5F
   - [x] 批次 9 P0.2 收尾殘留(59→0)——證據 `aa20dbf85`:cards/linucb 20/news 17/dl3 11/teacher 10(tab-phase4 注入 fragment,批 3 漏)+app-gui.js 1(glossary padding→p-4);E1a 未中斷→E2 PASS 0 blocking(注入正確性 p4-* 後代選擇器解析、p-4 來源 oc-utilities L67 等值、鐵則一二/裸屬性全綠;2 LOW=conv-track 透明度+雙主題目視待 A3)→回歸零 delta;新增 legit §7 scoped-var 2(linucb --cell-bg/--conv-w);**P0.2 清零完結,operator-grep 剩 5 全 legit**
   - 批次規則(PA 規格 §11):開工先實測該批檔案 style= 計數;`.oc-input--num` 組件隨 tab-ai/tab-risk 所屬批次落地;E1a 報告須含「全局新類 baseline 使用 sweep」節(E2 R2 LOW-1)
-- [ ] P0.3 數字排版 pass:全站數值 `.num`(mono+tabular+右對齊)+第二通道(▲▼/LONG-SHORT/±);精度紀律 USD 2dp/BTC 6dp/% 2dp/bps 2dp
+- [~] P0.3 數字排版 pass:全站數值 `.num`+第二通道(▲▼/LONG-SHORT/±);精度 USD 2dp/BTC 6dp/%2dp/bps 2dp——**設計正本 `design/06_numerics.md`(PA,`f63f4b60b`)**;批次 B0→B1-B4 非資金 tab→B5/D demo→B6/E live(gated 最後)
+  - [ ] B0 formatter 契約落地(common-formatters.js:ocPct 1dp→2dp/ocMoney ASCII hyphen→U+2212/新 ocQty·ocBps·ocPctVal·ocPrice/OC_EMPTY='—'/第二通道 ocSignParts·ocSigned·ocSide;oc-utilities §C 第二通道 CSS;guard 測試鎖 dp;惰性零 tab 應用,仿 P0.2 batch1)
+  - [ ] B1-B4 非資金 tab 應用;B5/D demo;B6/E live(**顯示精度變更需 QC/operator 知悉**,per-fill 欄保 4dp column-fixed 例外)
+  - PA findings 待 B0-E 處置:~33 手寫 (v*100).toFixed(1)+'%'、bps 3 套實作(app-paper 0dp/tab-live _edgeMetricValue/tab-edge-gates metricValue 重複)、risk-tab.js:524 量級猜測啟發式(禁)、LIVE 4dp→2dp 塌零(per-fill 保 4dp)
 - [ ] P0.4 樣式 fork 合併:`live-*`/`se-*`/`rc-*`/`gov-*` → `oc-*` 原語;83 裸 hex → 語義 token;半徑歸 5/8/12
 - [ ] P0.5 IBKR lane 語義 chips(DENIED/PRESENT/MISSING/OK)+治理 banner 統一(fake-$0 修復已 shipped,核對即可)
 - [ ] P0.6 CI 守衛升級:grep 禁 `style="`/`<style`(白名單殼層過渡)/裸 hex 新增
@@ -101,3 +104,5 @@
 | 2026-07-10 | R10 | P0.2 批次 8a demo | b1e8ad4a6 | batch 8 拆 8a-demo/8b-live;8a tab-demo.html 51→0;E1a 未中斷+硬邊界自查(onclick/endpoint/confirm 計數 HEAD↔working IDENTICAL)→E2 PASS 0 blocking(親算重核硬邊界、canon 6 全平框琥珀非熱紅 verbatim、confirm 3→5=CSS class 名假陽性);零新 utility;回歸 392P/5F;剩 8b-live 最高風險 |
 | 2026-07-10 | R11 | P0.2 批次 8b live | e351afa91 | P0.2 最高風險子批完成;tab-live 107→0;E2 最嚴親算 PASS 0 blocking(硬邊界 sorted-diff 空+typed-confirm/五閘/emergency 文案 byte-IDENTICAL、canon 6 熱紅構造性保全逐點 HEAD=WORKING、讀值陷阱等價);**8 批主體完結**;收尾審計揭 batch 9 殘留(cards 59 tab-phase4 fragment 漏+app-gui 1)+2 legit(canary scoped-var/app-learning 孤兒) |
 | 2026-07-10 | R12 | P0.2 批次 9 收尾 | aa20dbf85 | **P0.2 完結**;cards 59+app-gui 1→0;E1a 未中斷→E2 PASS 0 blocking(注入正確性/p-4 來源/鐵則親證);回歸零 delta(6F 全 pre-existing,新 6th test_development_agent_governance FileNotFound 非 GUI,stash 驗同);全站 operator-grep style= 剩 5 全 legit;operator 指示 batch9 後三端同步 |
+| 2026-07-10 | R12.5 | 三端同步 | — | operator 指示:Mac=origin=Linux 全 `c525cd38f`;Linux ff 14 commits(7d1c24794→),pristine repo;on-disk 玄衡儀 tokens.css 驗證+control_api 運行中(uvicorn Tailscale 100.91.109.86:8000,靜態檔 disk 服務免 rebuild);401=login gate 正常 |
+| 2026-07-10 | R13 | P0.3 設計 | f63f4b60b | PA 出 P0.3 spec-of-record `design/06_numerics.md`(精度契約/第二通道雙層 API/.num 應用/批次 B0-E/驗證);findings:ocMoney ASCII hyphen 違 canon3、ocPct 1dp、bps 3 套、risk-tab 量級猜測、LIVE 4dp→2dp 塌零;設計 checkpoint 完成,B0 下輪 |
