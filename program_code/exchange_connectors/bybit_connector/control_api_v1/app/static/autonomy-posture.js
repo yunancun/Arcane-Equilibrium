@@ -74,17 +74,16 @@ function autonomyRenderEligibility(eligibility) {
   if (!el) return;
   const gates = (eligibility && Array.isArray(eligibility.gates)) ? eligibility.gates : [];
   if (!gates.length) {
-    el.innerHTML = '<div style="color:var(--text-dim);font-size:12px">No eligibility data / 無門檻資料</div>';
+    el.innerHTML = '<div class="t-dim fs-dense">No eligibility data / 無門檻資料</div>';
     return;
   }
   let html = '';
   gates.forEach(function(gate) {
     const ok = gate.passed === true;
-    html += '<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;'
-      + 'padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg)">';
-    html += '<div style="min-width:0">';
-    html += '<div style="font-size:12px;font-weight:600">' + ocEsc(gate.id || '-') + ' · ' + ocEsc(gate.label || '-') + '</div>';
-    html += '<div style="font-size:11px;color:var(--text-dim);line-height:1.5">' + ocEsc(gate.detail || '') + '</div>';
+    html += '<div class="gov-gate-row">';
+    html += '<div class="gov-minw0">';
+    html += '<div class="fs-dense fw-semi">' + ocEsc(gate.id || '-') + ' · ' + ocEsc(gate.label || '-') + '</div>';
+    html += '<div class="fs-micro t-dim lh-cjk">' + ocEsc(gate.detail || '') + '</div>';
     html += '</div>';
     html += ocChip(ok ? '已通過 · PASS' : '未達標 · BLOCKED', ok ? 'good' : 'warn');
     html += '</div>';
@@ -97,7 +96,7 @@ function autonomyRenderMatrix(matrix) {
   if (!tbody) return;
   const rows = Array.isArray(matrix) ? matrix : [];
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-dim)">No matrix data / 無矩陣資料</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" class="t-dim">No matrix data / 無矩陣資料</td></tr>';
     return;
   }
   let html = '';
@@ -129,7 +128,7 @@ function autonomyRenderPosture(payload) {
   const escEl = document.getElementById('autonomy-notification-escalation');
   if (escEl) {
     escEl.innerHTML = '升級結果：<strong>' + ocEsc(autonomyPlainWithRaw(AUTONOMY_ESCALATION_LABELS, notif.escalation_result || '--')) + '</strong> '
-      + '<span style="font-size:10px">（三路通知全失敗 → 等待 1 小時 → 自動切到 SM-04 防禦模式）</span>';
+      + '<span class="fs-micro">（三路通知全失敗 → 等待 1 小時 → 自動切到 SM-04 防禦模式）</span>';
   }
 
   autonomyRenderEligibility(payload && payload.eligibility);
