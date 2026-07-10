@@ -1,9 +1,9 @@
 {
   "schema": "global_qualified_autonomous_learning_shadow_effect_review_v1",
-  "generated_at": "2026-07-10T13:48:32Z",
+  "generated_at": "2026-07-10T15:48:41Z",
   "goal_id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
-  "loop": "WP1_SOURCE_CHECKPOINT",
-  "status": "SOURCE_READY_RUNTIME_GATE_PENDING",
+  "loop": "WP1_RUNTIME_ACCEPTANCE_AND_WP2_DISPATCH",
+  "status": "WP1_DONE_WP2_ACTIVE",
   "terminal": false,
   "before": {
     "health_rows_60m": 735,
@@ -14,21 +14,28 @@
   },
   "after": {
     "goal_status": "ACTIVE",
-    "wp1_source_status": "SOURCE_READY_RUNTIME_UNPROVEN",
+    "wp1_source_status": "DONE_RUNTIME_ACCEPTED",
     "source_checkpoint": "c080c552b",
     "source_and_rca_parent_checkpoint": "e3228cdba",
-    "mac_origin_aligned_at_parent_capture": true,
+    "operational_target": "7d1c247947f0fb6c139f8a0583c5e6ed6ae62c70",
+    "mac_origin_at_apply": "a927c37d14f768b923f11b29ea61d8e94ca8d5ff",
+    "linux_and_service_pin": "7d1c247947f0fb6c139f8a0583c5e6ed6ae62c70",
     "semantic_health_suppression_implemented": true,
     "bounded_db_clock_heartbeat_implemented": true,
     "equivalent_defer_suppression_implemented": true,
     "complete_write_metrics_implemented": true,
-    "runtime_benefit_proven": false
+    "runtime_benefit_proven": true,
+    "wp2_dispatched": true
   },
   "effect_delta": [
     "Reduced semantic-no-delta health and equivalent-DEFER write paths at source level",
     "Made source-cursor consumption, bounded heartbeat, actual row/byte metrics, and ratios explicit",
     "Closed cross-head, TTL, clock-skew, partial-lineage, and ratio-tamper attacks",
-    "Retracted an unauthorized disposable local-PG probe and recorded durable RCA-1"
+    "Retracted an unauthorized disposable local-PG probe and recorded durable RCA-1",
+    "Passed authorized R4 isolated PostgreSQL equivalent-DEFER, feedback, and DB-clock heartbeat proofs with zero residue",
+    "Reduced production health row and byte rates to 15.82% and 23.16% of the preceding stale hour without starvation",
+    "Observed one production equivalent-decision suppression and five exactly-accounted feedback writes",
+    "Kept ALR no-authority and engine/API/watchdog identities unchanged"
   ],
   "machine_verification": {
     "focused_tests": "70 passed",
@@ -40,17 +47,33 @@
     "e2": "PASS",
     "e4": "PASS",
     "qa": "PASS_SOURCE_STATIC_UNIT_ONLY_WITH_RCA_1",
-    "authorized_runtime_probe": false,
-    "production_benefit_proven": false
+    "authorized_runtime_probe": true,
+    "isolated_pg_r4": "PASS",
+    "production_benefit_proven": true,
+    "runtime_session_id": "bed1cba0-2a5b-45e3-8103-3243c80fdfd5",
+    "runtime_checkpoint": "2026-07-10T14:43:50.582201Z",
+    "runtime_elapsed_seconds": 430.582201,
+    "health_attempts_emitted_suppressed": "87/13/74",
+    "health_suppression_ratio": 0.8505747126436781,
+    "health_row_rate_ratio": 0.15817678471133112,
+    "health_byte_rate_ratio": 0.23159219011833387,
+    "decision_suppression": 1,
+    "feedback_accounting": "5 attempts / 5 persisted / 15 artifacts + 15 edges + 5 events / 0 duplicates",
+    "authority_cache_retention": "run_mismatch=0 feedback_mismatch=0 cache=0 retention=0",
+    "service_stability": "PID 2381011, NRestarts=0, >1h extended stability",
+    "protected_processes": "engine/api/watchdog unchanged",
+    "e3_final": "PASS",
+    "journal_warning_or_higher": 0
   },
   "anti_repeat": {
-    "same_scope_retry": true,
-    "retry_count": 1,
-    "rca_count": 1,
-    "next_loop_must_change": "fresh exact-head E3/BB gate before any PG-backed or service action"
+    "same_scope_retry": false,
+    "runtime_gate_attempts": ["R1_HEAD_DRIFT_STOP", "R2_INTERPRETER_AND_CLEANUP_DEFECT", "R3_GUARD_FALSE_REJECT", "R4_PASS"],
+    "rca_count": 2,
+    "floating_window_evaluator_defect": "Initial post-continuation query sampled 4249s cumulative metrics against the 420s attempt bound; evidence retracted and corrected to immutable DB checkpoint",
+    "next_loop_must_change": "WP2 candidate-aware arbiter; do not repeat WP1"
   },
   "authority_delta": "NONE",
-  "runtime_delta": "UNAUTHORIZED_DISPOSABLE_LOCAL_PG_PROBE_RETRACTED_NO_RESIDUE_OBSERVED",
-  "database_delta": "TEMPORARY_MAC_LOCAL_ONLY_CLEANED_NOT_ACCEPTANCE_EVIDENCE",
+  "runtime_delta": "AUTHORIZED_EXACT_TARGET_ALR_SERVICE_ONLY_REPIN_RESTART_ACCEPTED",
+  "database_delta": "APPEND_ONLY_ALR_EVIDENCE_ONLY; NO_MIGRATION_OR_ROLE_CHANGE; CACHE_RETENTION_ZERO",
   "exchange_delta": "NONE"
 }
