@@ -193,9 +193,9 @@ function openPromptModal(options) {
         '<p id="oc-gp-body"></p>' +
         '<label class="oc-prompt-label" for="oc-gp-input" id="oc-gp-label"></label>' +
         '<input id="oc-gp-input" class="oc-prompt-input" type="text" autocomplete="off">' +
-        '<textarea id="oc-gp-textarea" class="oc-prompt-textarea" style="display:none"></textarea>' +
-        '<select id="oc-gp-select" class="oc-prompt-select" style="display:none"></select>' +
-        '<div id="oc-gp-counter" style="text-align:right;font-size:11px;color:var(--text-dim);display:none"><span id="oc-gp-counter-cur">0</span>/<span id="oc-gp-counter-max">0</span></div>' +
+        '<textarea id="oc-gp-textarea" class="oc-prompt-textarea hidden"></textarea>' +
+        '<select id="oc-gp-select" class="oc-prompt-select hidden"></select>' +
+        '<div id="oc-gp-counter" class="t-right fs-micro t-dim hidden"><span id="oc-gp-counter-cur">0</span>/<span id="oc-gp-counter-max">0</span></div>' +
         '<div id="oc-gp-error" class="oc-prompt-error" role="alert"></div>' +
         '<div class="btn-row">' +
           '<button id="oc-gp-cancel" class="oc-btn">取消 / Cancel</button>' +
@@ -217,14 +217,16 @@ function openPromptModal(options) {
 
   titleEl.textContent = title;
   bodyEl.textContent = body;
-  bodyEl.style.display = body ? '' : 'none';
+  // P0.2:顯隱一律走 .hidden 類(05_utilities.md §3.3 引理:show 端原寫 '' 等價);
+  // 鐵則一:oc-gp-* 元素 display 軸的全部寫點僅本函數內,已同批 class 化。
+  bodyEl.classList.toggle('hidden', !body);
   labelEl.textContent = label;
   errorEl.textContent = '';
   confirmBtn.textContent = confirmLabel;
 
-  inputEl.style.display = choices || multiline ? 'none' : '';
-  textareaEl.style.display = multiline ? '' : 'none';
-  selectEl.style.display = choices ? '' : 'none';
+  inputEl.classList.toggle('hidden', !!(choices || multiline));
+  textareaEl.classList.toggle('hidden', !multiline);
+  selectEl.classList.toggle('hidden', !choices);
   inputEl.value = defaultValue;
   textareaEl.value = defaultValue;
   selectEl.innerHTML = '';
@@ -255,11 +257,11 @@ function openPromptModal(options) {
   var counterCurEl = document.getElementById('oc-gp-counter-cur');
   var counterMaxEl = document.getElementById('oc-gp-counter-max');
   if (maxlength > 0 && !choices) {
-    counterEl.style.display = '';
+    counterEl.classList.remove('hidden');
     counterMaxEl.textContent = String(maxlength);
     counterCurEl.textContent = String(defaultValue.length);
   } else {
-    counterEl.style.display = 'none';
+    counterEl.classList.add('hidden');
   }
 
   overlay.classList.add('show');
@@ -364,11 +366,13 @@ function openTypedConfirmModal(options) {
     overlay.innerHTML =
       '<div class="oc-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="oc-tc-title" tabindex="-1">' +
         '<h3 id="oc-tc-title"></h3>' +
-        '<p id="oc-tc-body" style="white-space:pre-line"></p>' +
-        '<div id="oc-tc-meta" style="font-size:11px;color:var(--text-dim);margin:6px 0 10px;line-height:1.6;display:none"></div>' +
-        '<label class="oc-prompt-label" for="oc-tc-input" id="oc-tc-hint" style="display:block;margin-top:8px;font-size:12px;color:var(--text-dim)"></label>' +
-        '<input id="oc-tc-input" class="oc-prompt-input" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" style="width:100%;font-family:monospace;letter-spacing:1px">' +
-        '<div class="btn-row" style="margin-top:14px">' +
+        '<p id="oc-tc-body" class="pre-line"></p>' +
+        '<div id="oc-tc-meta" class="fs-micro t-dim mt-2 mb-3 lh-cjk hidden"></div>' +
+        // P0.2:hint 原 inline 的 display:block/font-size/color 與注入 CSS .oc-prompt-label 宣告重複,僅補 margin-top
+        '<label class="oc-prompt-label mt-2" for="oc-tc-input" id="oc-tc-hint"></label>' +
+        // P0.2:width:100% 與注入 CSS .oc-prompt-input 重複刪除;monospace→.mono、1px 字距→.ls-wide(§4 歸宿)
+        '<input id="oc-tc-input" class="oc-prompt-input mono ls-wide" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">' +
+        '<div class="btn-row mt-3">' +
           '<button id="oc-tc-cancel" class="oc-btn">取消 / Cancel</button>' +
           '<button id="oc-tc-confirm" class="oc-btn oc-btn-danger" disabled>確認</button>' +
         '</div>' +
@@ -385,10 +389,10 @@ function openTypedConfirmModal(options) {
   if (rollback) metaParts.push('回滾 / Rollback：' + rollback);
   if (metaParts.length) {
     metaEl.textContent = metaParts.join('\n');
-    metaEl.style.display = '';
+    metaEl.classList.remove('hidden');
     metaEl.style.whiteSpace = 'pre-line';
   } else {
-    metaEl.style.display = 'none';
+    metaEl.classList.add('hidden');
   }
   var hintEl = document.getElementById('oc-tc-hint');
   hintEl.textContent = hint;
@@ -475,7 +479,7 @@ function openTypedConfirmModal(options) {
     if (!el) { console.warn('[OpenClawDisabledStateCard.render] container not found: ' + containerId); return false; }
     opts = opts || {};
     // P2/P3/P6 allowlist for phase chip variant; others fallback to P2 yellow visual.
-    var p = String(opts.phase || '').toUpperCase(), pSlug = p === 'P3' ? 'phase-p3' : p === 'P6' ? 'phase-p6' : 'phase-p2', pZh = opts.phase_label_zh || (p ? p + ' 待啟用' : '待啟用'), pEn = opts.phase_label_en || (p ? p + ' Pending' : 'Pending'), gateZh = i18n(opts.gate_label_i18n_key, opts.gate_label_zh || ''), gateEn = opts.gate_label || ((!gateZh && !opts.gate_label) ? 'Disabled — gate pending' : ''), bannerZh = i18n(opts.banner_i18n_key, opts.banner_text_zh || ''), bannerEn = opts.banner_text || '', icon = opts.icon || '🔒', lbls = LBLS[opts.metrics_layout], metricsHtml = lbls ? ('<div class="oc-disabled-card-metrics">' + lbls.map(function(l) { return '<div class="oc-disabled-card-metric"><div class="label">' + ocEsc(l[0]) + '</div><div class="val" aria-hidden="true">— pending —</div><div class="label" style="opacity:0.5;margin-top:2px">' + ocEsc(l[1]) + '</div></div>'; }).join('') + '</div>') : '';
+    var p = String(opts.phase || '').toUpperCase(), pSlug = p === 'P3' ? 'phase-p3' : p === 'P6' ? 'phase-p6' : 'phase-p2', pZh = opts.phase_label_zh || (p ? p + ' 待啟用' : '待啟用'), pEn = opts.phase_label_en || (p ? p + ' Pending' : 'Pending'), gateZh = i18n(opts.gate_label_i18n_key, opts.gate_label_zh || ''), gateEn = opts.gate_label || ((!gateZh && !opts.gate_label) ? 'Disabled — gate pending' : ''), bannerZh = i18n(opts.banner_i18n_key, opts.banner_text_zh || ''), bannerEn = opts.banner_text || '', icon = opts.icon || '🔒', lbls = LBLS[opts.metrics_layout], metricsHtml = lbls ? ('<div class="oc-disabled-card-metrics">' + lbls.map(function(l) { return '<div class="oc-disabled-card-metric"><div class="label">' + ocEsc(l[0]) + '</div><div class="val" aria-hidden="true">— pending —</div><div class="label o-50 mt-1">' + ocEsc(l[1]) + '</div></div>'; }).join('') + '</div>') : '';
     el.innerHTML = '<div class="oc-disabled-card" role="status" aria-disabled="true" tabindex="0" title="' + ocEsc(gateZh || gateEn) + '"><div class="oc-disabled-card-header"><span class="oc-disabled-card-icon" aria-hidden="true">' + ocEsc(icon) + '</span><div class="oc-disabled-card-title"><h3>' + (gateZh ? '<span class="zh">' + ocEsc(gateZh) + '</span>' : '') + '</h3>' + (gateEn ? '<div class="en">' + ocEsc(gateEn) + '</div>' : '') + '</div><span class="oc-disabled-card-phase ' + ocSanitizeClass(pSlug) + '" aria-label="' + ocEsc(pZh + (pEn && pEn !== pZh ? ' / ' + pEn : '')) + '">' + ocEsc(pZh) + '</span></div>' + ((bannerZh || bannerEn) ? ('<div class="oc-disabled-card-banner">' + (bannerZh ? '<span class="zh">' + ocEsc(bannerZh) + '</span>' : '') + (bannerEn ? '<span class="en">' + ocEsc(bannerEn) + '</span>' : '') + '</div>') : '') + metricsHtml + '</div>';
     return true;
   } };

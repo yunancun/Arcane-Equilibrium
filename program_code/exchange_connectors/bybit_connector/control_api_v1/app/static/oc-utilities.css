@@ -1,0 +1,116 @@
+/* ═══════════════════════════════════════════════════════════════════
+   oc-utilities.css — P0.2 utility class 層(inline style= 清理詞彙表)
+   ═══════════════════════════════════════════════════════════════════
+   spec-of-record:docs/execution_plan/gui_redesign/design/05_utilities.md
+   本檔為該規格 §4 詞彙表的實作鏡像 + §B 過渡組件附錄(annex),
+   append-only:新增 class 走 05_utilities.md §11 協議(規格與本檔同
+   commit 追加);改名/改宣告/刪除既有 class 一律禁止,直到 P0.4 複審。
+   為何全部 !important(§3.1):被替換的 inline style= 具 inline 優先級;
+   !important 使 utility 必然重現 inline 的勝負(含 ocInjectBaseCSS
+   運行時注入 <style> 永遠後載的場景),代價由 §3.2 兩條鐵則
+   (JS 軸排除 / className-wipe 禁直掛)結構性防護。
+   載入位置:22 份完整文檔統一 tokens.css → tokens-compat.css → 本檔。
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ═══ oc-utilities.css §A 詞彙表(P0.2;append-only,變更走 05_utilities.md §11)═══ */
+
+/* ── 1 文字色階(canon:降級用色階不用縮字號)── */
+.t-primary{ color:var(--text-primary)!important; }
+.t-dim    { color:var(--text-secondary)!important; } /* 舊 var(--text-dim) 395 處的歸宿 */
+.t-muted  { color:var(--text-muted)!important; }
+.t-warn   { color:var(--warn)!important; }           /* 舊 var(--yellow)/#d29922 系 */
+.t-neg    { color:var(--neg)!important; }            /* 純文字紅;帶符號數值組件用 01_typography .val-neg(P0.3) */
+.t-pos    { color:var(--pos)!important; }
+.t-accent { color:var(--accent)!important; }         /* canon 10:僅焦點/選中/連結性 CTA */
+
+/* ── 2 字階角色(canon 2:off-scale 收斂,對照表見 §5.1)── */
+.fs-micro  { font-size:var(--fs-micro)!important; }   /* 9/10/11px → 11 */
+.fs-dense  { font-size:var(--fs-dense)!important; }   /* 12px */
+.fs-base   { font-size:var(--fs-base)!important; }    /* 13px */
+.fs-md     { font-size:var(--fs-md)!important; }      /* 14px */
+.fs-section{ font-size:var(--fs-section)!important; } /* 15/16px → 15 */
+.fs-title  { font-size:var(--fs-title)!important; }   /* 18/20/22px → 20 */
+.fs-hero   { font-size:var(--fs-hero)!important; }    /* 27/28px → 27 */
+
+/* ── 3 字重(canon 2:僅 400/510/600;500→510,700→600)── */
+.fw-medium{ font-weight:var(--weight-medium)!important; }
+.fw-semi  { font-weight:var(--weight-semi)!important; }
+
+/* ── 4 字族(僅字族;數字排版完整套件用 tokens.css .num)── */
+.mono{ font-family:var(--font-mono)!important; }
+
+/* ── 5 flex 家族 ── */
+.row        { display:flex!important; align-items:center!important; }
+.row-between{ display:flex!important; align-items:center!important; justify-content:space-between!important; }
+.col        { display:flex!important; flex-direction:column!important; }
+.wrap       { flex-wrap:wrap!important; }
+.flex-1     { flex:1 1 0%!important; }
+.ml-auto    { margin-left:auto!important; }
+
+/* ── 6 間隙(--sp-* 檔位;收斂見 §5.2)── */
+.gap-1{ gap:var(--sp-1)!important; }  /* 3/4/5px → 4 */
+.gap-2{ gap:var(--sp-2)!important; }  /* 6/7/8px → 8 */
+.gap-3{ gap:var(--sp-3)!important; }  /* 10/12/14px → 12 */
+.gap-4{ gap:var(--sp-4)!important; }  /* 16px */
+
+/* ── 7 margin(高頻方向 top/bottom + m-0/mx-1;多軸在前)── */
+.m-0 { margin:0!important; }
+.mx-1{ margin-left:var(--sp-1)!important; margin-right:var(--sp-1)!important; }
+.mt-1{ margin-top:var(--sp-1)!important; }    .mb-1{ margin-bottom:var(--sp-1)!important; }
+.mt-2{ margin-top:var(--sp-2)!important; }    .mb-2{ margin-bottom:var(--sp-2)!important; }
+.mt-3{ margin-top:var(--sp-3)!important; }    .mb-3{ margin-bottom:var(--sp-3)!important; }
+.mt-4{ margin-top:var(--sp-4)!important; }    .mb-4{ margin-bottom:var(--sp-4)!important; }
+
+/* ── 8 padding(高頻檔位;chip/小按鈕的 2px 級內距屬組件,見 §8)── */
+.p-2 { padding:var(--sp-2)!important; }
+.p-3 { padding:var(--sp-3)!important; }
+.p-4 { padding:var(--sp-4)!important; }
+.px-2{ padding-left:var(--sp-2)!important; padding-right:var(--sp-2)!important; }
+.px-3{ padding-left:var(--sp-3)!important; padding-right:var(--sp-3)!important; }
+.py-1{ padding-top:var(--sp-1)!important; padding-bottom:var(--sp-1)!important; }
+.py-2{ padding-top:var(--sp-2)!important; padding-bottom:var(--sp-2)!important; }
+
+/* ── 9 寬度(定寬不設通用 utility,裁決見 §5.4)── */
+.w-full{ width:100%!important; }
+
+/* ── 10 顯示 ── */
+.hidden{ display:none!important; }  /* 與 tab-settings.html 既有頁內定義逐字相同 */
+.block { display:block!important; }
+
+/* ── 11 文字雜項 ── */
+.t-center { text-align:center!important; }
+.t-right  { text-align:right!important; }
+.nowrap   { white-space:nowrap!important; }
+.pre-line { white-space:pre-line!important; }
+.clip     { overflow:hidden!important; }
+
+/* ── 12 行高/字距 ── */
+.lh-cjk { line-height:var(--lh-cjk)!important; }      /* 多行中文段 1.6 */
+.ls-wide{ letter-spacing:var(--ls-eyebrow)!important; } /* 舊 1px/0.5px 級手調字距歸宿 */
+
+/* ── 13 透明度(機械過渡;TOKEN-GAP:無 opacity token。
+       P0.4 複審:排版性降級應改走色階(canon),此類僅存真「圖層變暗」用途)── */
+.o-50{ opacity:.5!important; }
+
+/* ── 14 語義狀態(canon 7;JS 以 classList 切換)── */
+.is-stale{ opacity:.5!important; }  /* 數據未就緒/過期變暗;就緒後 classList.remove */
+
+/* ── 15 游標 ── */
+.pointer    { cursor:pointer!important; }
+.cursor-help{ cursor:help!important; }
+
+/* ═══ §B 過渡組件附錄(annex)— 跨文檔 JS 模板產出的迷你組件 ═══ */
+
+/* 重試小按鈕(common.js ocLoadError 模板)。為何 !important:.oc-btn 的
+   padding/font-size 由 ocInjectBaseCSS 運行時注入 <style> 供給,注入樣式
+   永遠排在靜態 link 之後、同 specificity 後載者勝,必須壓回。
+   P0.4: 併入組件層 */
+.oc-btn--xs{ padding:2px 8px!important; font-size:var(--fs-micro)!important; }
+
+/* 品類標籤(common-formatters.js ocCategoryTag 模板)。中性化=刻意視覺變更
+   (canon 1:非數據 chrome 一律中性;原四色 rgba palette 棄用,PM 已批)。
+   P0.4: 併入組件層 */
+.oc-cat-tag{ display:inline-block; font-size:var(--fs-micro); padding:1px 5px;
+  border-radius:var(--r-1); color:var(--text-secondary);
+  background:var(--bg-raised); border:1px solid var(--border-strong);
+  margin-left:var(--sp-1); vertical-align:middle; line-height:14px; }

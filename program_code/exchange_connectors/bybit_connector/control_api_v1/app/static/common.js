@@ -1026,7 +1026,7 @@ function ocLoadError(elementId, retryFnName, msg) {
   var el = document.getElementById(elementId);
   if (!el) return;
   var retryBtn = retryFnName
-    ? ' <button class="oc-btn" style="padding:2px 8px;font-size:10px" onclick="' + retryFnName + '()">↺ 重試 / Retry</button>'
+    ? ' <button class="oc-btn oc-btn--xs" onclick="' + retryFnName + '()">↺ 重試 / Retry</button>'
     : '';
   el.innerHTML = '<div class="oc-load-error">⚠ ' +
     (msg || '连接失败，請檢查引擎状态 / Connection failed — check engine') +

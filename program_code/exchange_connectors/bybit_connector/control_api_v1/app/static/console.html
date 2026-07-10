@@ -7,6 +7,7 @@
 <!-- Phase 0 過渡:token 正本 tokens.css+compat 映射層須先於一切樣式載入;data-theme="dark" 釘死玄夜主題,因存量樣式仍有暗色硬編碼,OS 淺色偏好會產生壞對比;P1.3 主題切換上線後移除釘死 -->
 <link rel="stylesheet" href="/static/tokens.css" />
 <link rel="stylesheet" href="/static/tokens-compat.css" />
+<link rel="stylesheet" href="/static/oc-utilities.css" />
 <script src="/static/js/fetch_with_csrf.js?v=20260527.ops1"></script>
 <script src="/static/common-formatters.js?v=20260519.split-p2"></script>
 <script src="/static/common-mode-badge.js?v=20260519.split-p2"></script>
@@ -65,6 +66,10 @@
   .mc-label { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.3px; }
   .mc-val { font-size: 17px; font-weight: 700; margin-top: 1px; }
   .mc-sub { font-size: 10px; color: var(--text-dim); margin-top: 1px; }
+  /* P0.2:.mc-val 字級修飾走父層類——s-live-mode 等值元素被 JS 整串 className
+     重寫(mc-val wipe,05_utilities.md §3.2 鐵則二),utility 直掛會被抹除 */
+  .mc--sm .mc-val { font-size: 13px; }
+  .mc--md .mc-val { font-size: 14px; }
   .green { color: var(--green); } .red { color: var(--red); }
   .yellow { color: var(--yellow); } .blue { color: var(--blue); }
 
@@ -73,6 +78,13 @@
   .side-panel:hover { background: rgba(56,139,253,0.04); }
   .panel-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border); display: inline-block; cursor: pointer; }
   .panel-dot-active { background: var(--accent); }
+  /* P0.2:側欄 Live/Demo 切換鈕(原 inline style= + JS 六條 style 寫入→active 狀態類);
+     active 配色:live=真金熱紅 --live 系,demo=選中態 --accent 系(05_utilities.md §5.5 舊藍中性化裁決) */
+  .sp-btn { flex: 1; padding: 4px 0; font-size: var(--fs-micro); font-weight: var(--weight-semi);
+    border-radius: var(--r-1); cursor: pointer;
+    border: 1px solid var(--border-subtle); background: transparent; color: var(--text-secondary); }
+  .sp-btn--live.active { background: var(--live-bg); border-color: var(--live); color: var(--live); }
+  .sp-btn--demo.active { background: var(--accent-weak); border-color: var(--accent); color: var(--accent); }
 
   /* ── Tab Bar ────────────────────────────────────────────────── */
   .tab-bar { display: flex; align-items: stretch; gap: 8px; background: var(--card-bg);
@@ -190,9 +202,9 @@
        初值用中性 loading 佔位，取到真值前不冒充任何模式。 -->
   <span class="tag tag-neutral" id="mode-tag" title="引擎當前 system_mode（來自 /api/v1/live/session/status）">mode …</span>
   <span class="spacer"></span>
-  <span id="clock" style="font-size:11px;color:var(--text-dim)"></span>
+  <span id="clock" class="fs-micro t-dim"></span>
   <span class="oc-curr-badge" onclick="ocToggleCurrency()" title="Click to cycle USDT → USD → EUR / 點擊切換計價貨幣">USDT</span>
-  <span style="font-size:11px;color:var(--text-dim);margin:0 4px" id="user-label"></span>
+  <span class="fs-micro t-dim mx-1" id="user-label"></span>
   <button class="header-btn" onclick="ocLogout()">Logout</button>
 </div>
 
@@ -203,31 +215,29 @@
   <div class="sidebar">
 
     <!-- Live / Demo panel switcher buttons / 實盤/Demo 面板切換按鈕 -->
-    <div style="display:flex;gap:4px;margin-bottom:8px">
-      <button id="spbtn-live" onclick="toggleSidePanel('live')"
-        style="flex:1;padding:4px 0;font-size:11px;font-weight:600;border-radius:6px;border:1px solid rgba(239,68,68,0.5);background:rgba(239,68,68,0.15);color:#ef4444;cursor:pointer">
+    <div class="row gap-1 mb-2">
+      <button id="spbtn-live" class="sp-btn sp-btn--live active" onclick="toggleSidePanel('live')">
         🔴 Live
       </button>
-      <button id="spbtn-paper" onclick="toggleSidePanel('demo')"
-        style="flex:1;padding:4px 0;font-size:11px;font-weight:600;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--text-dim);cursor:pointer">
+      <button id="spbtn-paper" class="sp-btn sp-btn--demo" onclick="toggleSidePanel('demo')">
         🧪 Demo
       </button>
     </div>
 
     <!-- Switchable Live / Demo panel -->
     <div id="side-panel-live" class="side-panel active">
-      <h2 style="margin:0 0 5px">&#x1F534; Live / 實盤</h2>
-      <div class="mc" id="live-section" style="opacity:0.5">
+      <h2 class="m-0 mb-1">&#x1F534; Live / 實盤</h2>
+      <div class="mc mc--sm is-stale" id="live-section">
         <div class="mc-label">System Mode</div>
-        <div class="mc-val" id="s-live-mode" style="font-size:13px">--</div>
+        <div class="mc-val" id="s-live-mode">--</div>
         <div class="mc-sub" id="s-live-mode-detail"></div>
       </div>
-      <div class="mc" id="live-balance-section" style="opacity:0.5">
+      <div class="mc mc--md is-stale" id="live-balance-section">
         <div class="mc-label">Balance</div>
-        <div class="mc-val" id="s-live-balance" style="font-size:14px">--</div>
+        <div class="mc-val" id="s-live-balance">--</div>
         <div class="mc-sub" id="s-live-balance-detail"></div>
       </div>
-      <div class="mc" id="live-pnl-section" style="opacity:0.5">
+      <div class="mc is-stale" id="live-pnl-section">
         <!-- Sidebar and Live tab both consume account_metrics_today.
              This is DB-local-day realized_pnl - fees + funding, not position
              cumRealisedPnl and not session/lifetime total fees.
@@ -240,11 +250,11 @@
       </div>
     </div>
 
-    <div id="side-panel-paper" class="side-panel" style="display:none">
-      <h2 style="margin:0 0 5px">&#x1F3E6; Demo / 演示</h2>
-      <div class="mc">
+    <div id="side-panel-paper" class="side-panel hidden">
+      <h2 class="m-0 mb-1">&#x1F3E6; Demo / 演示</h2>
+      <div class="mc mc--md">
         <div class="mc-label">Balance</div>
-        <div class="mc-val" id="s-paper-balance" style="font-size:14px">--</div>
+        <div class="mc-val" id="s-paper-balance">--</div>
         <div class="mc-sub" id="s-paper-balance-detail"></div>
       </div>
       <div class="mc">
@@ -256,36 +266,36 @@
 
 
     <h2>AI Cost / AI 成本</h2>
-    <div class="mc">
+    <div class="mc mc--md">
       <div class="mc-label">Today</div>
-      <div class="mc-val blue" id="s-cost" style="font-size:14px">$--</div>
+      <div class="mc-val blue" id="s-cost">$--</div>
       <div class="mc-sub" id="s-cost-detail"></div>
     </div>
 
     <h2>System / 系統</h2>
-    <div class="mc">
+    <div class="mc mc--md">
       <div class="mc-label">Control API</div>
-      <div class="mc-val" id="s-api" style="font-size:14px">--</div>
+      <div class="mc-val" id="s-api">--</div>
     </div>
-    <div class="mc">
+    <div class="mc mc--md">
       <div class="mc-label">OpenClaw Gateway</div>
-      <div class="mc-val" id="s-oc" style="font-size:14px">--</div>
+      <div class="mc-val" id="s-oc">--</div>
     </div>
     <!-- 引擎狀態燈：Rust openclaw_engine 是交易/風控/執行唯一權威，宕機時所有下單
          與風控路徑失效。原本 engine_alive 只在 System tab 一張卡，跨 tab 時看不到；
          此處掛在側欄常駐區，任何 tab 都能看到引擎存活狀態（只讀，不改任何 live 授權/gate）。 -->
-    <div class="mc">
+    <div class="mc mc--md">
       <div class="mc-label">Rust 引擎 / Engine</div>
-      <div class="mc-val" id="s-engine-alive" style="font-size:14px">--</div>
+      <div class="mc-val" id="s-engine-alive">--</div>
     </div>
 
-    <div class="mc-sub" style="margin-top:6px;text-align:center">
+    <div class="mc-sub mt-2 t-center">
       自動刷新 30s / Auto-refresh 30s | <span id="s-token-status">--</span>
     </div>
   </div>
 
   <!-- ─── Main Content ─── -->
-  <div style="display:flex;flex-direction:column;overflow:hidden">
+  <div class="col clip">
 
     <!-- Tab Bar -->
     <div class="tab-bar" id="tab-bar"></div>
@@ -779,22 +789,17 @@ document.getElementById('s-token-status').textContent = 'cookie-auth';
 let _sidePanel = 'live';
 function toggleSidePanel(clicked) {
   _sidePanel = clicked === 'paper' ? 'demo' : clicked;
-  document.getElementById('side-panel-live').style.display = _sidePanel === 'live' ? '' : 'none';
-  document.getElementById('side-panel-paper').style.display = _sidePanel === 'demo' ? '' : 'none';
-  // Update button active state / 更新按鈕激活狀態
+  // P0.2:顯隱走 .hidden 類(05_utilities.md §3.3 引理:.side-panel 無 display
+  // 宣告,show 端原寫 '' 等價於移除 .hidden);鐵則一:此二元素 display 軸的
+  // 全部 JS 寫點僅此兩行,已同批 class 化。
+  document.getElementById('side-panel-live').classList.toggle('hidden', _sidePanel !== 'live');
+  document.getElementById('side-panel-paper').classList.toggle('hidden', _sidePanel !== 'demo');
+  // 更新按鈕激活狀態:視覺由頁內 .sp-btn--live.active / .sp-btn--demo.active 供給
   const liveActive = _sidePanel === 'live';
   const btnLive = document.getElementById('spbtn-live');
   const btnPaper = document.getElementById('spbtn-paper');
-  if (btnLive) {
-    btnLive.style.background = liveActive ? 'rgba(239,68,68,0.15)' : 'transparent';
-    btnLive.style.borderColor = liveActive ? 'rgba(239,68,68,0.5)' : 'var(--border)';
-    btnLive.style.color = liveActive ? '#ef4444' : 'var(--text-dim)';
-  }
-  if (btnPaper) {
-    btnPaper.style.background = liveActive ? 'transparent' : 'rgba(56,139,253,0.12)';
-    btnPaper.style.borderColor = liveActive ? 'var(--border)' : 'rgba(56,139,253,0.3)';
-    btnPaper.style.color = liveActive ? 'var(--text-dim)' : 'var(--blue)';
-  }
+  if (btnLive) btnLive.classList.toggle('active', liveActive);
+  if (btnPaper) btnPaper.classList.toggle('active', !liveActive);
 }
 
 // ─── Sidebar API helper (APR01-MEDIUM-13: cookie-based auth) ─
@@ -853,9 +858,11 @@ async function refreshSidebar() {
   // blocking API workers on exchange REST during the 30s refresh loop.
   // 實盤板塊 — 始終顯示；側欄使用 Rust 快照 fast path，避免 30 秒刷新循環
   // 因交易所 REST 卡住而拖死 API worker。
-  document.getElementById('live-section').style.opacity = '1';
-  document.getElementById('live-balance-section').style.opacity = '1';
-  document.getElementById('live-pnl-section').style.opacity = '1';
+  // P0.2:未就緒變暗改走 .is-stale 狀態類(初始掛在 markup 上);刷新開始即移除。
+  // 鐵則一:三元素 opacity 軸的全部 JS 寫點僅此三行,已同批 class 化,不得再有同軸 inline 寫點殘留。
+  document.getElementById('live-section').classList.remove('is-stale');
+  document.getElementById('live-balance-section').classList.remove('is-stale');
+  document.getElementById('live-pnl-section').classList.remove('is-stale');
 
   // F5/A1+A2 — fetch session status + balance + metrics in one go.
   //   session/status → mode label + actual_endpoint (LiveDemo / Mainnet / unconfigured)
