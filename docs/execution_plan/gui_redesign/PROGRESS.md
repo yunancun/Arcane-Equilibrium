@@ -2,8 +2,9 @@
 
 ## 狀態欄
 - **STATUS**: IN_PROGRESS
-- **CURRENT**: P0.2 批次 9 收尾殘留(cards/*.html 59[tab-phase4 注入的 4 fragment]+app-gui.js 1[index glossary]=60;canary scoped-var/app-learning 孤兒 legit 不計)
-- **LAST-COMMIT**: e351afa91(P0.2 批次 8b live)
+- **CURRENT**: P0.3 數字排版 pass(全站 .num mono+tabular+右對齊+第二通道;精度 USD 2dp/BTC 6dp/%2dp/bps 2dp)
+- **LAST-COMMIT**: aa20dbf85(P0.2 批次 9,**P0.2 完結**)
+- 回歸基線更新:structure/ 5F→**6F**(新 pre-existing `test_development_agent_governance::test_registry_is_single_valid_interface_and_views_are_current` FileNotFoundError,非 GUI/非批 9,clean HEAD stash 驗證同 6F;疑兄弟 session registry 中間態,待其收尾)
 - **BLOCKERS**: —
 - **AWAITING-OPERATOR**: —
 - **NEEDS-LINUX-RUNTIME**: —
@@ -16,7 +17,7 @@
   - **P0.4 半徑整併群(來自各批 findings)**:tab-paper.html sparkline/feed-price/oc-subtab-btn 等 `6px`→`--r-1`(5)整組轉(避免單點轉造成 5/6 錯位;E2 批次 4 LOW-1);半徑全站歸 5/8/12;各批 palette 外色 verbatim(purple/gradient/scrim/藍 tint)逐一 token 化或裁決保留
   - **P0.4 越界文字/常量殘留(來自各批)**:批次 1 oc-tc-meta whiteSpace 常量、批次 2 tab-system 5 處紫 relocation 單點裁決、_OC_CAT_CONFIG dead color data、批次 1/2 btn.style.* enum painting
   - **A3 Phase 0 全審必查(來自 E1a/E2)**:玄夜釘死後各 tab 對比度(尤 tab-governance 125 var 點)、`--blue` 中性化後資訊層級感、login.html `--card/--dim` 別名鏈、prefers-reduced-motion 全停+青銅 focus-visible 全站生效知悉
-- [ ] P0.2 inline `style=` 清理(基線**實測 1,469**(07-08 快照 1,375 已漂移)→0;per-file ratchet;按批次,每批一 checkpoint)
+- [x] P0.2 inline `style=` 清理(基線**實測 1,469**→**全站 operator-grep 剩 5=全 legit**:app-learning 孤兒 2[Phase2 defer]+linucb §7 scoped-var 2+canary §7 scoped-var 1)——9 批全過 E1a→E2(→E4/PM 回歸),每批 commit;證據見各批 SHA;**P0.2 完結 `aa20dbf85`**
   - [x] 批次 1 console/common 殼層(50→0)——證據 `fcb931ee2`:PA 規格正本 `design/05_utilities.md`(16 family+全體 !important+兩鐵則:JS 軸同批原子化/className-wipe 禁直掛)+oc-utilities.css+22 檔第三連 link+2 個 spec-drift guard 測試;ocCategoryTag 四 hex→中性 chip=唯一刻意可見變更(canon 1,operator 要品類色需新 token 裁決);E1a→E2 APPROVE-WITH-NITS(0 blocker)→E4 PASS(srv 814/5/2,+2 零退步)
   - [x] 批次 2 monitoring/system/settings(211→0)——證據 `3d1e53147`:PA(規格已存,直接套用)→E1a→E2 退回 1 HIGH(.mode-btn--live specificity 輸給 hover/active→雙類升權復現原恆紫)+1 LOW(報告量測歸因)已修→回歸 PASS;語義升級 settings 紫→--live;spend-limit 中斷後 HIGH 修復+回歸門由 PM 親跑本地完成(E2 對抗判斷門中斷前已過);全站 style= 1,420→1,210
   - [x] 批次 3 agents/ai/development/phase4(232→0)——證據 `783acd9b3`:tab-agents 30/tab-ai 129/tab-development 11/agent-tracker.js 59/openclaw-agent-control.js 3;phase4 NO-OP;E1a 完成主體後撞 401 未及自報(報告由 PM 依 diff+E2+回歸重建)→E2 APPROVE-WITH-NITS 0 blocker(鐵則一/二窮舉零殘留;1 LOW=4 CJK 空格越界已 PM 還原)→回歸 PASS(406 passed/5F pre-existing);`.oc-input--num` 進 annex;gradient 四色 verbatim P0.4
@@ -29,7 +30,7 @@
   - [~] 批次 8 demo/live(交易關鍵,最後;拆 8a-demo/8b-live)
     - [x] 8a demo(51→0)——證據 `b1e8ad4a6`:tab-demo.html;E1a 未中斷→E2 PASS 0 blocking(硬邊界親算 HEAD↔working:onclick 21↔21/endpoint 9↔9/confirm·gate·ocEsc 計數全 IDENTICAL;canon 6 全平框琥珀 verbatim 非熱紅;裸屬性 0)→回歸 392P/5F;零新 utility
     - [x] 8b live(107→0)——證據 `e351afa91`:tab-live.html 68/tab-live.js 39(1886→1882<2000);E1a 未中斷+硬邊界+canon6 自查→E2 PASS 0 blocking(親算重核:onclick/endpoint sorted-diff 空、openTypedConfirmModal/classifyLiveMutation/doEmergencyStop/ocEsc 72 全 IDENTICAL、typed-confirm phrase+全 modal 文案 byte-IDENTICAL、淨 −4=4 冗餘 badge display 純刪;canon 6 熱紅逐點 HEAD=WORKING 構造性保全、--live/--neg 未互換;讀值陷阱 truth-table 等價)→回歸 392P/5F
-  - [ ] 批次 9 P0.2 收尾殘留(60):**cards/*.html 59**(linucb 21/news 17/dl3 11/teacher 10——tab-phase4 注入 fragment,批 3 因 tab-phase4 本身 NO-OP 而漏)+**app-gui.js 1**(index glossary-wrap padding:16px→p-4);legit 不計=canary-tab.js 1(§7 scoped-var --canary-fill-w)+app-learning.js 2(index 孤兒 Phase 2 defer)
+  - [x] 批次 9 P0.2 收尾殘留(59→0)——證據 `aa20dbf85`:cards/linucb 20/news 17/dl3 11/teacher 10(tab-phase4 注入 fragment,批 3 漏)+app-gui.js 1(glossary padding→p-4);E1a 未中斷→E2 PASS 0 blocking(注入正確性 p4-* 後代選擇器解析、p-4 來源 oc-utilities L67 等值、鐵則一二/裸屬性全綠;2 LOW=conv-track 透明度+雙主題目視待 A3)→回歸零 delta;新增 legit §7 scoped-var 2(linucb --cell-bg/--conv-w);**P0.2 清零完結,operator-grep 剩 5 全 legit**
   - 批次規則(PA 規格 §11):開工先實測該批檔案 style= 計數;`.oc-input--num` 組件隨 tab-ai/tab-risk 所屬批次落地;E1a 報告須含「全局新類 baseline 使用 sweep」節(E2 R2 LOW-1)
 - [ ] P0.3 數字排版 pass:全站數值 `.num`(mono+tabular+右對齊)+第二通道(▲▼/LONG-SHORT/±);精度紀律 USD 2dp/BTC 6dp/% 2dp/bps 2dp
 - [ ] P0.4 樣式 fork 合併:`live-*`/`se-*`/`rc-*`/`gov-*` → `oc-*` 原語;83 裸 hex → 語義 token;半徑歸 5/8/12
@@ -99,3 +100,4 @@
 | 2026-07-10 | R9 | P0.2 批次 7b governance | 3eb95ad8e | E1a 未中斷(7a 三次中斷後首個乾淨大批,裸屬性教訓已內化自查 0);295→0 四檔;E2 PASS 0 blocker(讀值陷阱核實=toggle 邏輯無反向、順帶修 pre-existing broken risk-badge invalid CSS=A3 簽核、canon 9 朱印紫不轉 --seal);governance-tab.js 1921→1877<2000;回歸 392P/5F;**批 7 完結,P0.2 只剩批 8 demo/live 交易關鍵** |
 | 2026-07-10 | R10 | P0.2 批次 8a demo | b1e8ad4a6 | batch 8 拆 8a-demo/8b-live;8a tab-demo.html 51→0;E1a 未中斷+硬邊界自查(onclick/endpoint/confirm 計數 HEAD↔working IDENTICAL)→E2 PASS 0 blocking(親算重核硬邊界、canon 6 全平框琥珀非熱紅 verbatim、confirm 3→5=CSS class 名假陽性);零新 utility;回歸 392P/5F;剩 8b-live 最高風險 |
 | 2026-07-10 | R11 | P0.2 批次 8b live | e351afa91 | P0.2 最高風險子批完成;tab-live 107→0;E2 最嚴親算 PASS 0 blocking(硬邊界 sorted-diff 空+typed-confirm/五閘/emergency 文案 byte-IDENTICAL、canon 6 熱紅構造性保全逐點 HEAD=WORKING、讀值陷阱等價);**8 批主體完結**;收尾審計揭 batch 9 殘留(cards 59 tab-phase4 fragment 漏+app-gui 1)+2 legit(canary scoped-var/app-learning 孤兒) |
+| 2026-07-10 | R12 | P0.2 批次 9 收尾 | aa20dbf85 | **P0.2 完結**;cards 59+app-gui 1→0;E1a 未中斷→E2 PASS 0 blocking(注入正確性/p-4 來源/鐵則親證);回歸零 delta(6F 全 pre-existing,新 6th test_development_agent_governance FileNotFound 非 GUI,stash 驗同);全站 operator-grep style= 剩 5 全 legit;operator 指示 batch9 後三端同步 |
