@@ -21,7 +21,7 @@
 #   生產「代碼」的路徑不硬編碼原則不受影響,wrapper 內部一律走 ${OPENCLAW_DATA_DIR}。
 #
 # Tier 分層(FA D2 決策面,實際裝回哪些行等 operator 批後由 conductor 執行):
-#   Tier 0 資料保全/審計(4) · Tier 1 學習/風控/監測 producer(14) ·
+#   Tier 0 資料保全/審計(4) · Tier 1 學習/風控/監測 producer(15,07-10 +gate_b 每日深掃) ·
 #   Tier 2 flash_dip 觀測族(4) · Tier 3 research/alpha(8) · Tier 4 legacy(2,退役候選)。
 #   另含 06-29 重裝恢復的 5 條(demo-learning stack ×4 + ml_training)、
 #   07-04 窗口恢復的 2 條(announcement sentinel + passive_wait_healthcheck)。
@@ -36,13 +36,17 @@
 */1 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/halt_audit_pg_writer_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/halt_audit_pg_writer_cron.cron.log 2>&1
 */2 * * * * cd /home/ncyu/BybitOpenClaw/srv && OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw OPENCLAW_DATABASE_URL_FILE=/home/ncyu/BybitOpenClaw/var/openclaw/runtime_secrets/openclaw_database_url /usr/bin/python3 helper_scripts/canary/canary_audit_pg_writer.py >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/canary_audit_pg_writer.cron.log 2>&1
 
-# ---- Tier 1 — 學習 / 風控 / 監測 producer(14) ----
+# ---- Tier 1 — 學習 / 風控 / 監測 producer(15) ----
 */30 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/edge_label_backfill_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/edge_label_backfill_cron.cron.log 2>&1
 12 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/edge_estimate_snapshots_cycle_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/edge_estimate_snapshots_cycle_cron.cron.log 2>&1
 29 5 * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/daily_kline_backfill_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/daily_kline_backfill_cron.cronout.log 2>&1
 0 6 * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/db/counterfactual_daily_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/counterfactual_daily_cron.cron.log 2>&1
 20 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw OPENCLAW_SECRETS_ROOT=/home/ncyu/BybitOpenClaw/secrets /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/ref21_symbol_universe_snapshot_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/ref21_symbol_universe_snapshot_cron.cron.log 2>&1
-12,42 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/gate_b_watch_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/gate_b_watch_cron.cron.log 2>&1
+# gate_b_watch 30min 輪 + 每日 05:26 深掃(10 頁公告)。OPENCLAW_GATE_B_AUTO_CAPTURE=1 =
+# AMD-2026-07-10-01 operator 授權:未來 5 個新上市自啟隔離 Gate-B capture(cap=5 持久化,
+# cap 滿自動停+audit 行;R-0 zero-leak 原樣,capture 產物不進交易路徑)。
+12,42 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw OPENCLAW_GATE_B_AUTO_CAPTURE=1 /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/gate_b_watch_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/gate_b_watch_cron.cron.log 2>&1
+26 5 * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw OPENCLAW_GATE_B_AUTO_CAPTURE=1 OPENCLAW_GATE_B_WATCH_ANNOUNCEMENT_PAGES=10 /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/gate_b_watch_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/gate_b_watch_cron.cron.log 2>&1
 */5 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/panel_aggregator_health_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/panel_aggregator_health_cron.cron.log 2>&1
 41 4 * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/feature_baseline_writer_cron.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/feature_baseline_writer_cron.cron.log 2>&1
 0 * * * * OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/home/ncyu/BybitOpenClaw/var/openclaw /home/ncyu/BybitOpenClaw/srv/helper_scripts/cron/wave9_replay_no_live_mutation_watch.sh >> /home/ncyu/BybitOpenClaw/var/openclaw/logs/wave9_replay_no_live_mutation_watch.cron.log 2>&1
