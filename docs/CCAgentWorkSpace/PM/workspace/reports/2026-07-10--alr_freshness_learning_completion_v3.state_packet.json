@@ -1,0 +1,187 @@
+{
+  "schema_version": "alr_freshness_learning_completion_v3_state_v1",
+  "generated_at_utc": "2026-07-10T00:46:01Z",
+  "state": "WAIT_OPERATOR_DEMO_AUTH_EXACT",
+  "behavioral_source_head": "091b5d446403d8fe83a15b57142819cbd1ceac6d",
+  "supersedes_terminal_inference": "DONE_OPERATIONAL_SHADOW",
+  "f1_fresh_ingestion": {
+    "status": "PASS",
+    "exact_notification_identity": "(scan_id, ts)",
+    "durable_fresh_catchup": true,
+    "fresh_and_history_cursors_independent": true,
+    "history_low_priority": true,
+    "temporary_cursor_or_dropin": false,
+    "alr_reconcile_after_present": false
+  },
+  "f2_truthful_health": {
+    "status": "PASS",
+    "fresh_raw_only_count": 0,
+    "ingest_lag_seconds": 0.0,
+    "failure_count": 0,
+    "restart_count": 1,
+    "unclean_recovery_count": 0,
+    "notification_duplicate_count": 0,
+    "notification_invalid_count": 0
+  },
+  "f3_adversarial": {
+    "status": "PASS",
+    "focused_tests": "215 passed",
+    "full_ml_tests": "1271 passed, 31 skipped",
+    "postgresql_major": 16,
+    "history_plus_fresh_fixture": "79000+1 PASS",
+    "covered": [
+      "duplicate",
+      "out_of_order",
+      "late",
+      "coalesced",
+      "missed_notification",
+      "max_batch_plus_one",
+      "crash_restart",
+      "singleton",
+      "fresh_not_starved",
+      "artificial_raw_only_gap_alarm_and_repair",
+      "phantom_cursor_rejected",
+      "weakened_catalog_objects_fail_closed"
+    ],
+    "scanner_acl": "S---",
+    "consumer_event_acl": "SI--"
+  },
+  "f4_runtime": {
+    "status": "PASS",
+    "v156_sha256": "d55d2ab71e40e921b9d60362112a75d42b5ad84f0793ba42ba3d2073cccc6b9f",
+    "role_contract_sha256": "bf004e45077f1d425ca13089d67426dccd5831d4d4f8487a8aeb333b4e927905",
+    "physical_v156_applied": true,
+    "sqlx_ledger": {
+      "max_version": 150,
+      "row_count": 132,
+      "v156_rows": 0,
+      "truth": "intentionally unchanged because the scoped bootstrap applies raw SQL"
+    },
+    "recovery": {
+      "alr_pid_before": 2038844,
+      "alr_pid_after": 2040797,
+      "engine_pid_before": 1983100,
+      "engine_pid_after": 1983100,
+      "sessions_started": 2,
+      "sessions_stopped": 1,
+      "sessions_failed": 0,
+      "unclean_recoveries": 0,
+      "open_sessions": 1,
+      "cursor_nonregression": true,
+      "new_duplicate_count": 0
+    },
+    "natural_soak": {
+      "baseline_mark": "2026-07-10 02:08:48.850250+02:00",
+      "baseline_identity": [
+        "2026-07-10 02:08:04.167000+02:00",
+        "scan-1783642084167"
+      ],
+      "first_ten_scan_ids": [
+        "scan-1783642145098",
+        "scan-1783642205584",
+        "scan-1783642266519",
+        "scan-1783642327006",
+        "scan-1783642387637",
+        "scan-1783642448574",
+        "scan-1783642509208",
+        "scan-1783642569983",
+        "scan-1783642631215",
+        "scan-1783642692157"
+      ],
+      "end_identity": [
+        "2026-07-10 02:18:12.157000+02:00",
+        "scan-1783642692157"
+      ],
+      "raw_count": 10,
+      "alr_count": 10,
+      "raw_only_count": 0,
+      "alr_only_count": 0,
+      "identity_matches": 10,
+      "hash_matches": 10,
+      "payload_matches": 10,
+      "duplicate_ingests": 0,
+      "notification_received_identities": 10,
+      "notification_consumed_identities": 10,
+      "latency_seconds": {
+        "min": 0.979724,
+        "mean": 1.7048254,
+        "max": 2.608247
+      }
+    },
+    "history_progress": {
+      "remaining_before": 75657,
+      "remaining_after": 75657,
+      "remaining_decreased": false,
+      "explanation": "cursor traversed rows already persisted by the legacy consumer; no completion claim",
+      "success_events_final_inspection": 10,
+      "rows_seen_final_inspection": 80,
+      "cursor_start": [
+        "2026-04-30 09:18:33.585000+02:00",
+        "scan-1777533513585"
+      ],
+      "cursor_end": [
+        "2026-05-01 18:48:34.871000+02:00",
+        "scan-1777654114871"
+      ],
+      "fresh_starved": false
+    }
+  },
+  "f5_learning": {
+    "status": "F5_EVIDENCE_INSUFFICIENT",
+    "model_training_performed": false,
+    "alr_runs": 139,
+    "alr_run_decisions": "all DEFER_EVIDENCE",
+    "feedback_events": 138,
+    "proof_packet_present_count": 0,
+    "reward_record_count": 0,
+    "realized_fill_label_lifecycles": 3569,
+    "complete_fee_lifecycles": 3569,
+    "complete_slippage_lifecycles": 201,
+    "any_slippage_lifecycles": 2063,
+    "complete_order_id_reconstruction": 3524,
+    "complete_reference_price_time_source": 2166,
+    "funding_heuristic_contexts_without_candidate_identity": 76,
+    "hidden_oos_state_registry_count": 0,
+    "qualified_full_chain_count": 0,
+    "exact_packet": {
+      "path": "docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-10--alr_f5_exact_demo_authorization_packet.json",
+      "sha256": "1ab349a6f753e4d3846b0699d7404f18e231d8ca95b8f250bb19b9f89b7eabde",
+      "candidate_id": "grid_trading|SUIUSDT|Sell",
+      "operator_authorized": false,
+      "execution_performed": false,
+      "e3_review": "E3_APPROVE_EXACT_PACKET_FOR_OPERATOR_DECISION_ONLY",
+      "bb_review": "BB_APPROVE_EXACT_PACKET_FOR_OPERATOR_DECISION_ONLY"
+    }
+  },
+  "f6_retention": {
+    "status": "NOT_EXERCISED_NO_ELIGIBLE_CACHE",
+    "derived_cache_rows": 0,
+    "quarantine_eligible_rows": 0,
+    "sweep_eligible_rows": 0,
+    "restore_eligible_rows": 0,
+    "retention_events": 0,
+    "deletion_performed": false
+  },
+  "authority": {
+    "exchange_authority": false,
+    "trading_authority": false,
+    "order_or_probe_authority": false,
+    "decision_lease_authority": false,
+    "cost_gate_authority": false,
+    "proof_authority": false,
+    "serving_authority": false,
+    "promotion_authority": false,
+    "latest_authority": false
+  },
+  "authority_counters": {
+    "exchange_contact_count": 0,
+    "trading_action_count": 0,
+    "order_or_probe_count": 0,
+    "decision_lease_count": 0,
+    "cost_gate_change_count": 0,
+    "proof_claim_count": 0,
+    "serving_promotion_count": 0,
+    "latest_pointer_update_count": 0
+  },
+  "terminal_reason": "Fresh operational shadow passes, but no qualified full-chain training/evaluation run exists; an exact E3/BB-reviewed Demo acquisition packet exists and remains operator-unauthorized."
+}
