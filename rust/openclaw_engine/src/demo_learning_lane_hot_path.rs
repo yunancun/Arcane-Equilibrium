@@ -44,6 +44,7 @@ pub fn exchange_gate_reject_event(
         ts_ms,
         context_id: non_empty(context_id),
         signal_id: non_empty(signal_id),
+        candidate_event_context: None,
     })
 }
 

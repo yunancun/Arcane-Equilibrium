@@ -1,0 +1,18 @@
+{
+  "schema_version": "candidate_event_context_canonical_fixture_v1",
+  "input": {
+    "unicode": "玄衡é",
+    "one": 1.0,
+    "small": 1e-7,
+    "negative_zero": -0.0,
+    "nested": {
+      "z": {
+        "β": "值",
+        "a": -0.0
+      },
+      "a": [1.0, 1e-7]
+    }
+  },
+  "expected_canonical_json": "{\"negative_zero\":-0.0,\"nested\":{\"a\":[1.0,1e-7],\"z\":{\"a\":-0.0,\"β\":\"值\"}},\"one\":1.0,\"small\":1e-7,\"unicode\":\"玄衡é\"}",
+  "expected_sha256": "d2a9ca36ea5fda9efb19474cb9bdbaa1ded7d79d7ea1f22023b8cc29714bd4c2"
+}

@@ -90,6 +90,7 @@ fn selected_event() -> RejectEvent {
         ts_ms: NOW_MS,
         context_id: Some("ctx-demo-ma_crossover-ETHUSDT-1782040200000".to_string()),
         signal_id: Some("sig-demo-ma_crossover-ETHUSDT-1782040200000".to_string()),
+        candidate_event_context: None,
     }
 }
 
@@ -170,6 +171,35 @@ fn no_authority_decision_still_builds_learning_ledger_record() {
         parsed[0].attempt_id.as_deref(),
         Some(record.attempt_id.as_str())
     );
+}
+
+#[test]
+fn candidate_event_context_is_optional_and_old_ledger_json_stays_compatible() {
+    let event = selected_event();
+    assert!(event.candidate_event_context.is_none());
+    let decision = evaluate_probe_admission(
+        &sample_plan("NOT_GRANTED"),
+        &event,
+        &[],
+        NOW_MS,
+        &AdmissionConfig::default(),
+        true,
+        "NORMAL",
+    );
+    let generated_at = Utc.timestamp_millis_opt(NOW_MS as i64).single().unwrap();
+    let record = build_admission_ledger_record(&decision, &event, generated_at);
+    let json = record.to_json_string().unwrap();
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert!(value["event"].get("candidate_event_context").is_none());
+
+    let old_row = r#"{"record_type":"probe_admission_decision","event":{"strategy_name":"ma_crossover","symbol":"ETHUSDT","side":"Sell","ts_ms":1782040200000}}"#;
+    let parsed = LedgerRecord::from_jsonl_str(old_row).unwrap();
+    assert!(parsed[0]
+        .event
+        .as_ref()
+        .expect("old event remains readable")
+        .candidate_event_context
+        .is_none());
 }
 
 #[test]

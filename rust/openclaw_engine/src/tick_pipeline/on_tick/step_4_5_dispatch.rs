@@ -346,6 +346,112 @@ fn record_undispatched_rejection(
     persist_verdict(trading_tx, em, &intent.symbol, ts_ms, &verdict_info, em);
 }
 
+/// 把當 tick 的 scanner 審計值複製成不可變候選 lineage；不讀後來的 scan。
+fn candidate_scanner_inputs_for_reject(
+    scanner: Option<&IntentScannerContext>,
+) -> Option<crate::candidate_event_context::CandidateScannerInputsV1> {
+    let scanner = scanner?;
+    let opportunity = match scanner.opportunity.as_ref() {
+        Some(value) => Some(serde_json::to_value(value).ok()?),
+        None => None,
+    };
+    Some(crate::candidate_event_context::CandidateScannerInputsV1 {
+        authority_mode: scanner.authority_mode.as_str().to_string(),
+        legacy_would_block: scanner.legacy_would_block,
+        legacy_block_reason: scanner.legacy_block_reason.clone(),
+        scan_id: scanner.scan_id.clone(),
+        best_strategy: scanner.best_strategy.clone(),
+        intent_strategy: scanner.intent_strategy.clone(),
+        market_regime: scanner.market_regime.clone(),
+        trend_phase: scanner.trend_phase.clone(),
+        trend_score: scanner.trend_score,
+        range_score: scanner.range_score,
+        shock_score: scanner.shock_score,
+        close_alignment: scanner.close_alignment,
+        range_position: scanner.range_position,
+        crowding_score: scanner.crowding_score,
+        reversal_risk_score: scanner.reversal_risk_score,
+        directional_efficiency: scanner.directional_efficiency,
+        dir_pct: scanner.dir_pct,
+        signed_dir_pct: scanner.signed_dir_pct,
+        range_pct: scanner.range_pct,
+        fr_bps: scanner.fr_bps,
+        f_ma: scanner.f_ma,
+        f_grid: scanner.f_grid,
+        f_bbrv: scanner.f_bbrv,
+        f_bkout: scanner.f_bkout,
+        f_funding_arb: scanner.f_funding_arb,
+        edge_bps: scanner.edge_bps,
+        edge_n: scanner.edge_n,
+        edge_status: scanner.edge_status.clone(),
+        route_mode: scanner.route_mode.clone(),
+        market_status: scanner.market_status.clone(),
+        route_reason: scanner.route_reason.clone(),
+        opportunity,
+        final_score: scanner.final_score,
+        raw_score: scanner.raw_score,
+    })
+}
+
+/// 以 symbol 排序後才累加 mark notional，避免 HashMap 迭代順序污染 hash。
+fn candidate_mark_notionals_from_rows(mut rows: Vec<(String, bool, f64)>) -> (f64, f64) {
+    rows.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut gross = 0.0;
+    let mut net = 0.0;
+    for (_, is_long, mark_notional) in rows {
+        gross += mark_notional.abs();
+        net += if is_long {
+            mark_notional
+        } else {
+            -mark_notional
+        };
+    }
+    (gross, net)
+}
+
+fn candidate_portfolio_mark_notionals_for_reject(
+    paper_state: &crate::paper_state::PaperState,
+) -> (f64, f64) {
+    let rows = paper_state
+        .positions()
+        .into_iter()
+        .map(|position| {
+            let mark_price = paper_state
+                .latest_price(&position.symbol)
+                .filter(|price| price.is_finite() && *price > 0.0)
+                .unwrap_or(position.entry_price);
+            (
+                position.symbol.clone(),
+                position.is_long,
+                position.qty * mark_price,
+            )
+        })
+        .collect();
+    candidate_mark_notionals_from_rows(rows)
+}
+
+fn candidate_endpoint_environment(
+    endpoint: Option<crate::bybit_rest_client::BybitEnvironment>,
+) -> Option<String> {
+    endpoint.map(|endpoint| match endpoint {
+        crate::bybit_rest_client::BybitEnvironment::Demo => "demo".to_string(),
+        crate::bybit_rest_client::BybitEnvironment::LiveDemo => "live_demo".to_string(),
+        crate::bybit_rest_client::BybitEnvironment::Testnet => "testnet".to_string(),
+        crate::bybit_rest_client::BybitEnvironment::Mainnet => "mainnet".to_string(),
+    })
+}
+
+fn candidate_governance_profile(
+    profile: openclaw_core::governance_core::GovernanceProfile,
+) -> String {
+    match profile {
+        openclaw_core::governance_core::GovernanceProfile::Exploration => "Exploration",
+        openclaw_core::governance_core::GovernanceProfile::Validation => "Validation",
+        openclaw_core::governance_core::GovernanceProfile::Production => "Production",
+    }
+    .to_string()
+}
+
 impl TickPipeline {
     /// Execute Step 4 (strategy dispatch) + Step 5 (intent processing with
     /// rejection / fill callbacks) + maker-sweep + deferred-close execution
@@ -1282,6 +1388,106 @@ impl TickPipeline {
                                     );
                                 }
                             } else if let Some(ref reason) = gate.rejected_reason {
+                                // 不變量：lineage 必在 `on_rejection` 回滾/改變策略內部狀態
+                                // 之前捕獲；僅 organic exchange Cost Gate reject 進此 seam。
+                                let mut learning_reject_event =
+                                    crate::demo_learning_lane_hot_path::exchange_gate_reject_event(
+                                        intent,
+                                        em,
+                                        reason,
+                                        event.ts_ms,
+                                        &context_id,
+                                        &signal_id,
+                                    );
+                                if let Some(reject_event) = learning_reject_event.as_mut() {
+                                    let accepted_demo_equity_usdt =
+                                        self.intent_processor.accepted_demo_equity_usdt();
+                                    let (gross_mark_notional_usdt, net_mark_notional_usdt) =
+                                        candidate_portfolio_mark_notionals_for_reject(
+                                            &self.paper_state,
+                                        );
+                                    let risk_state =
+                                        self.governance.risk.snapshot_level().as_str().to_string();
+                                    let governance_profile = candidate_governance_profile(
+                                        crate::mode_state::effective_governance_profile(
+                                            self.pipeline_kind,
+                                            self.endpoint_env,
+                                        ),
+                                    );
+                                    let portfolio_snapshot_ref =
+                                        format!("paper_state:{em}:{context_id}:{}", event.ts_ms);
+                                    reject_event.candidate_event_context = Some(
+                                        crate::candidate_event_context::capture_candidate_event_context(
+                                            crate::candidate_event_context::CandidateEventCaptureInput {
+                                                captured_at_ms: event.ts_ms,
+                                                strategy_name: intent.strategy.clone(),
+                                                runtime_strategy_name: strategy.name().to_string(),
+                                                build_git_sha:
+                                                    crate::boot_observability::BUILD_GIT_SHA
+                                                        .to_string(),
+                                                strategy_params_json: strategy.get_params_json(),
+                                                conf_scale: strategy.conf_scale(),
+                                                symbol: intent.symbol.clone(),
+                                                side: if intent.is_long {
+                                                    "Buy".to_string()
+                                                } else {
+                                                    "Sell".to_string()
+                                                },
+                                                horizon_env_value: std::env::var(
+                                                    crate::candidate_event_context::OUTCOME_HORIZON_ENV,
+                                                )
+                                                .ok(),
+                                                evidence_engine_mode: em.to_string(),
+                                                pipeline_kind: self.pipeline_kind.to_string(),
+                                                endpoint_environment:
+                                                    candidate_endpoint_environment(self.endpoint_env),
+                                                context_id: Some(context_id.clone()),
+                                                signal_id: Some(signal_id.clone()),
+                                                scanner_inputs:
+                                                    candidate_scanner_inputs_for_reject(
+                                                        scanner_ctx.as_ref(),
+                                                    ),
+                                                market_inputs: crate::candidate_event_context::CandidateMarketInputsV1 {
+                                                    observed_at_ms: event.ts_ms,
+                                                    last_price: Some(event.last_price),
+                                                    best_bid,
+                                                    best_ask,
+                                                    tick_size,
+                                                    index_price,
+                                                    funding_rate,
+                                                    open_interest,
+                                                    atr_value: Some(atr_value),
+                                                },
+                                                risk_state,
+                                                governance_profile,
+                                                risk_config: serde_json::to_value(
+                                                    self.intent_processor.risk_config(),
+                                                )
+                                                .ok(),
+                                                portfolio_snapshot_ref: Some(
+                                                    portfolio_snapshot_ref,
+                                                ),
+                                                portfolio_snapshot: Some(
+                                                    crate::candidate_event_context::CandidatePortfolioSnapshotV1 {
+                                                        schema_version: crate::candidate_event_context::CANDIDATE_PORTFOLIO_SNAPSHOT_SCHEMA_VERSION.to_string(),
+                                                        captured_at_ms: event.ts_ms,
+                                                        balance: self.paper_state.balance(),
+                                                        accepted_demo_equity_usdt,
+                                                        peak_balance: self.paper_state.peak_balance(),
+                                                        drawdown_pct: self.paper_state.drawdown_pct(),
+                                                        position_count: self.paper_state.position_count(),
+                                                        gross_mark_notional_usdt,
+                                                        net_mark_notional_usdt,
+                                                        total_realized_pnl: self.paper_state.total_realized_pnl(),
+                                                        total_fees: self.paper_state.total_fees(),
+                                                        total_funding_pnl: self.paper_state.total_funding_pnl(),
+                                                        trade_count: self.paper_state.trade_count(),
+                                                    },
+                                                ),
+                                            },
+                                        ),
+                                    );
+                                }
                                 strategy.on_rejection(intent, reason);
                                 let mq = gate.verdict_info.as_ref().and_then(|vi| vi.modified_qty);
                                 push_display_intent(
@@ -1292,16 +1498,7 @@ impl TickPipeline {
                                     format!("rejected:{}", reason),
                                 );
 
-                                if let Some(reject_event) =
-                                    crate::demo_learning_lane_hot_path::exchange_gate_reject_event(
-                                        intent,
-                                        em,
-                                        reason,
-                                        event.ts_ms,
-                                        &context_id,
-                                        &signal_id,
-                                    )
-                                {
+                                if let Some(reject_event) = learning_reject_event {
                                     let writer_enabled =
                                         self.demo_learning_lane_writer.is_enabled();
                                     let side_cell_key = reject_event.side_cell_key();

@@ -92,6 +92,7 @@ fn bounded_probe_event() -> RejectEvent {
         ts_ms: BOUNDED_PROBE_NOW_MS,
         context_id: Some("ctx-demo-ma_crossover-ETHUSDT-1782040200000".to_string()),
         signal_id: Some("sig-demo-ma_crossover-ETHUSDT-1782040200000".to_string()),
+        candidate_event_context: None,
     }
 }
 
@@ -134,6 +135,22 @@ fn bounded_probe_order_request() -> ActiveBoundedProbeOrderRequest {
             ..ActiveBoundedProbeRiskLimits::default()
         },
     }
+}
+
+#[test]
+fn candidate_portfolio_notionals_are_permutation_deterministic_by_symbol() {
+    let forward = super::candidate_mark_notionals_from_rows(vec![
+        ("AAAUSDT".to_string(), true, 10_000_000_000_000_000.0),
+        ("BBBUSDT".to_string(), true, 1.0),
+        ("CCCUSDT".to_string(), true, 1.0),
+    ]);
+    let reverse = super::candidate_mark_notionals_from_rows(vec![
+        ("CCCUSDT".to_string(), true, 1.0),
+        ("BBBUSDT".to_string(), true, 1.0),
+        ("AAAUSDT".to_string(), true, 10_000_000_000_000_000.0),
+    ]);
+
+    assert_eq!(forward, reverse);
 }
 
 #[test]
@@ -661,6 +678,20 @@ impl crate::strategies::Strategy for AlwaysOpenStrategy {
     fn on_rejection(&mut self, _intent: &crate::intent_processor::OrderIntent, reason: &str) {
         self.rejections.lock().unwrap().push(reason.to_string());
     }
+    fn get_params_json(&self) -> String {
+        if self.rejections.lock().unwrap().is_empty() {
+            r#"{"capture_phase":"before_rejection"}"#.to_string()
+        } else {
+            r#"{"capture_phase":"after_rejection"}"#.to_string()
+        }
+    }
+    fn conf_scale(&self) -> f64 {
+        if self.rejections.lock().unwrap().is_empty() {
+            1.25
+        } else {
+            0.25
+        }
+    }
 }
 
 struct SoakDispatchHarness {
@@ -971,6 +1002,34 @@ fn soak_cost_gate_reject_feeds_probe_writer_channel_while_armed() {
             crate::demo_learning_lane::ELIGIBLE_REJECT_REASON_CODE,
             "reject reason 必 normalize 成 eligible code"
         );
+        let candidate_context = msg
+            .event
+            .candidate_event_context
+            .expect("organic Cost Gate reject 必帶 typed candidate_event_context_v1");
+        assert_eq!(
+            candidate_context.capture_status,
+            crate::candidate_event_context::CAPTURE_BLOCKED_STATUS,
+            "缺 scanner/BBO/endpoint/equity 的既有 harness 必 fail closed"
+        );
+        assert_eq!(
+            candidate_context.capture_blockers,
+            vec![
+                "SCAN_CONTEXT_MISSING_OR_INVALID",
+                "ENDPOINT_BINDING_MISSING_OR_INCOMPATIBLE",
+                "BBO_MISSING_OR_INVALID",
+                "PORTFOLIO_SNAPSHOT_INVALID",
+                "ACCEPTED_DEMO_EQUITY_MISSING_OR_INVALID",
+            ]
+        );
+        assert_eq!(
+            candidate_context.strategy_params_json, r#"{"capture_phase":"before_rejection"}"#,
+            "lineage 必在 strategy.on_rejection 改變策略狀態前捕獲"
+        );
+        assert_eq!(candidate_context.conf_scale, Some(1.25));
+        assert_eq!(candidate_context.event_hash.len(), 64);
+        let context_json = serde_json::to_value(&candidate_context).unwrap();
+        assert!(context_json.get("order_authority").is_none());
+        assert!(context_json.get("decision_lease").is_none());
     });
 }
 

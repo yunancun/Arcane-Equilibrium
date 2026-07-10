@@ -725,6 +725,7 @@ mod tests {
             ts_ms: NOW_MS,
             context_id: Some("ctx-demo-ma_crossover-ETHUSDT-1782040200000".to_string()),
             signal_id: Some("sig-demo-ma_crossover-ETHUSDT-1782040200000".to_string()),
+            candidate_event_context: None,
         }
     }
 

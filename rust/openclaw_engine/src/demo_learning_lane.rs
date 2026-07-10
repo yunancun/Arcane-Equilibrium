@@ -226,7 +226,7 @@ pub struct CandidateGuardrails {
     pub notional_or_qty_not_granted_by_artifact: Option<bool>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RejectEvent {
     pub strategy_name: String,
     pub symbol: String,
@@ -236,6 +236,7 @@ pub struct RejectEvent {
     pub ts_ms: u64,
     pub context_id: Option<String>,
     pub signal_id: Option<String>,
+    pub candidate_event_context: Option<crate::candidate_event_context::CandidateEventContextV1>,
 }
 
 impl RejectEvent {
@@ -369,6 +370,8 @@ pub struct LedgerEventRef {
     pub context_id: Option<String>,
     #[serde(default)]
     pub signal_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidate_event_context: Option<crate::candidate_event_context::CandidateEventContextV1>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
