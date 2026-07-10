@@ -4,17 +4,19 @@
   "owner": "PM",
   "goal_id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
   "goal_thread_id": "019f4b6d-1e5b-7551-9fce-7a2f029a1675",
-  "status": "ACTIVE_WP1_ARTIFACT_CHURN_CONTROL",
+  "status": "ACTIVE_WP1_SOURCE_READY_RUNTIME_GATE_PENDING",
   "baseline_repo_head": "1a3ecdd57927e70dd8c6dedfed4ecef04c7a46d3",
-  "checkpoint_mac_origin_head": "a84917fd9190890d0bc0a9e1905a10e9bbe87979",
+  "wp1_behavioral_source_checkpoint": "c080c552b",
+  "checkpoint_mac_origin_head": "175e5c91d2f37bd1b8456f063e77fd6f6d59bb80",
   "checkpoint_linux_head": "1a3ecdd57927e70dd8c6dedfed4ecef04c7a46d3",
   "checkpoint_linux_origin_main": "1a3ecdd57927e70dd8c6dedfed4ecef04c7a46d3",
   "checkpoint_linux_worktree_clean": true,
-  "post_baseline_drift_classification": "GUI_ONLY_NO_ALR_RUNTIME_SOURCE_SERVICE_MIGRATION_DIFF",
+  "post_baseline_drift_classification": "WP1_SOURCE_CHECKPOINT_LOCAL_ORIGIN_PUSH_PENDING",
   "runtime_source_pin_observed": "8dfa1200a37351b142df60f8cd8bd84a5adce6c5",
   "baseline_packet_sha256": "30c10a497f02794525ce6e1d70972829bde7942a6a0bb181e36a13e308400b60",
   "baseline_evidence_delta_sha256": "0ab0b80f307951108d0cf5edd3bb5940cb936bd093081c37c6d90e874e52ec28",
   "current_item": "WP1-ARTIFACT-CHURN-CONTROL",
+  "current_item_state": "SOURCE_READY_RUNTIME_GATE_PENDING",
   "terminal_eligible": false,
   "files": {
     "readme": "README.md",
@@ -47,6 +49,15 @@
     "order_authority": false,
     "serving_or_promotion_authority": false,
     "protected_evidence_delete_authority": false
+  },
+  "wp1_gate_incident": {
+    "classification": "MATERIAL_GATE_SEQUENCE_NONCONFORMANCE",
+    "financial_effect": "NONE_OBSERVED",
+    "production_linux_exchange_effect": "NONE_OBSERVED",
+    "evidence_status": "RETRACTED_UNCONSUMABLE",
+    "rca_recorded": true,
+    "residue_observed": false,
+    "runtime_acceptance": false
   },
   "compute_budget_contract": {
     "track_training_and_inference_cost_latency_energy_or_api_budget": true,

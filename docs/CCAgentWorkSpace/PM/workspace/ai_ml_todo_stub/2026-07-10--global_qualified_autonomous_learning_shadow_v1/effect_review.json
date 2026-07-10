@@ -1,49 +1,54 @@
 {
   "schema": "global_qualified_autonomous_learning_shadow_effect_review_v1",
-  "generated_at": "2026-07-10T10:01:33Z",
+  "generated_at": "2026-07-10T13:44:10Z",
   "goal_id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
-  "loop": "WP0",
-  "status": "ADVANCED_TO_WP1",
+  "loop": "WP1_SOURCE_CHECKPOINT",
+  "status": "SOURCE_READY_RUNTIME_GATE_PENDING",
   "terminal": false,
   "before": {
-    "active_terminal_truth": "WAIT_OPERATOR_DEMO_AUTH_EXACT",
-    "active_sui_packet_sha256": "1ab349a6f753e4d3846b0699d7404f18e231d8ca95b8f250bb19b9f89b7eabde",
-    "durable_goal_queue_present": false,
-    "fresh_runtime_baseline_present": false
+    "health_rows_60m": 735,
+    "health_payload_mb_60m": 1.256,
+    "health_suppression_ratio": 0.0,
+    "equivalent_defer_suppression_present": false,
+    "complete_write_metrics_present": false
   },
   "after": {
     "goal_status": "ACTIVE",
-    "sui_status": "ROTATED_UNCONSUMABLE_STALE_PACKET",
-    "near_status": "FROZEN_INVALIDATED_EFFECTIVE_SAMPLE",
-    "durable_goal_queue_present": true,
-    "fresh_runtime_baseline_present": true,
-    "g1_g9_matrix_present": true
+    "wp1_source_status": "SOURCE_READY_RUNTIME_UNPROVEN",
+    "source_checkpoint": "c080c552b",
+    "semantic_health_suppression_implemented": true,
+    "bounded_db_clock_heartbeat_implemented": true,
+    "equivalent_defer_suppression_implemented": true,
+    "complete_write_metrics_implemented": true,
+    "runtime_benefit_proven": false
   },
   "effect_delta": [
-    "Replaced a stale operator-wait terminal with a continuing G1-G9 Goal contract",
-    "Separated current machine facts from historical V3 evidence",
-    "Ranked WP1 churn control ahead of adding more artifact producers",
-    "Preserved all unrelated dirty worktree changes and historical packet bytes"
+    "Reduced semantic-no-delta health and equivalent-DEFER write paths at source level",
+    "Made source-cursor consumption, bounded heartbeat, actual row/byte metrics, and ratios explicit",
+    "Closed cross-head, TTL, clock-skew, partial-lineage, and ratio-tamper attacks",
+    "Retracted an unauthorized disposable local-PG probe and recorded durable RCA-1"
   ],
   "machine_verification": {
-    "alr_focused_tests": "215 passed",
-    "source_alignment_at_baseline": true,
-    "runtime_probe_read_only": true,
+    "focused_tests": "70 passed",
+    "alr_tests": "246 passed",
+    "full_ml_training_tests": "1302 passed, 31 skipped",
+    "source_checkpoint": "c080c552b",
     "json_validation": "PASS",
     "git_diff_check": "PASS",
-    "pa_checkpoint_review": "PASS",
-    "post_baseline_source_drift": "GUI_ONLY_NO_ALR_RUNTIME_SOURCE_SERVICE_MIGRATION_DIFF",
-    "checkpoint_mac_origin_head": "a84917fd9190890d0bc0a9e1905a10e9bbe87979",
-    "checkpoint_linux_head": "1a3ecdd57927e70dd8c6dedfed4ecef04c7a46d3"
+    "e2": "PASS",
+    "e4": "PASS",
+    "qa": "PASS_SOURCE_STATIC_UNIT_ONLY_WITH_RCA_1",
+    "authorized_runtime_probe": false,
+    "production_benefit_proven": false
   },
   "anti_repeat": {
-    "same_scope_retry": false,
-    "retry_count": 0,
-    "rca_count": 0,
-    "next_loop_must_change": "semantic artifact churn and repeated DEFER write rate"
+    "same_scope_retry": true,
+    "retry_count": 1,
+    "rca_count": 1,
+    "next_loop_must_change": "fresh exact-head E3/BB gate before any PG-backed or service action"
   },
   "authority_delta": "NONE",
-  "runtime_delta": "NONE",
-  "database_delta": "NONE",
+  "runtime_delta": "UNAUTHORIZED_DISPOSABLE_LOCAL_PG_PROBE_RETRACTED_NO_RESIDUE_OBSERVED",
+  "database_delta": "TEMPORARY_MAC_LOCAL_ONLY_CLEANED_NOT_ACCEPTANCE_EVIDENCE",
   "exchange_delta": "NONE"
 }
