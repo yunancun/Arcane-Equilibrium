@@ -144,10 +144,10 @@
   <div class="oc-metrics" id="risk-metrics">
     <div class="oc-metric"><div class="oc-metric-label">Risk Pressure</div><div class="oc-metric-val" id="r-pressure">--</div><div class="oc-metric-sub">0-100%</div></div>
     <div class="oc-metric"><div class="oc-metric-label">Current Drawdown</div><div class="oc-metric-val" id="r-drawdown">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Peak Balance</div><div class="oc-metric-val" id="r-peak">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Peak Balance</div><div class="oc-metric-val num" id="r-peak">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">交易暫停 Trading Halted</div><div class="oc-metric-val" id="r-halted">--</div></div>
     <div class="oc-metric"><div class="oc-metric-label">Governor Tier</div><div class="oc-metric-val" id="r-cooldown">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Max Symbol Losses</div><div class="oc-metric-val" id="r-losses">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">Max Symbol Losses</div><div class="oc-metric-val num" id="r-losses">--</div></div>
   </div>
 </div>
 
@@ -335,14 +335,14 @@
     <div>
       <div class="fs-base fw-semi mb-2">原值 / Original <span class="rc-sub-hint">修改後高亮 / highlights on edit</span></div>
       <div class="oc-metrics rc-orig-metrics">
-        <div class="oc-metric"><div class="oc-metric-label">Hard Stop</div><div class="oc-metric-val red" id="s-hard">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Hard Stop</div><div class="oc-metric-val red num" id="s-hard">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Take Profit</div><div class="oc-metric-val green" id="s-tp">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Trailing Stop</div><div class="oc-metric-val yellow" id="s-trailing">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Time Stop</div><div class="oc-metric-val" id="s-time">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label">ATR Multiplier</div><div class="oc-metric-val blue" id="s-atr">--</div></div>
-        <div class="oc-metric"><div class="oc-metric-label">Max Drawdown</div><div class="oc-metric-val" id="s-drawdown">--</div></div>
-        <div class="oc-metric"><div class="oc-metric-label">Max Leverage</div><div class="oc-metric-val" id="s-leverage">--</div></div>
-        <div class="oc-metric"><div class="oc-metric-label">Daily Loss</div><div class="oc-metric-val" id="s-daily">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Max Drawdown</div><div class="oc-metric-val num" id="s-drawdown">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Max Leverage</div><div class="oc-metric-val num" id="s-leverage">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Daily Loss</div><div class="oc-metric-val num" id="s-daily">--</div></div>
       </div>
     </div>
   </div>
@@ -432,11 +432,11 @@
     <div>
       <div class="fs-base fw-semi mb-2">原值 / Original <span class="rc-sub-hint">修改後高亮 / highlights on edit</span></div>
       <div class="oc-metrics rc-orig-metrics">
-        <div class="oc-metric"><div class="oc-metric-label">P1 Risk/Trade</div><div class="oc-metric-val yellow" id="s-p1-risk">--</div></div>
-        <div class="oc-metric"><div class="oc-metric-label">Max Single Pos</div><div class="oc-metric-val" id="s-single-pos">--</div></div>
-        <div class="oc-metric"><div class="oc-metric-label">Total Exposure</div><div class="oc-metric-val" id="s-total-exp">--</div></div>
-        <div class="oc-metric"><div class="oc-metric-label">Correlated Exp</div><div class="oc-metric-val" id="s-corr-exp">--</div></div>
-        <div class="oc-metric"><div class="oc-metric-label">Same-Direction</div><div class="oc-metric-val" id="s-same-dir">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">P1 Risk/Trade</div><div class="oc-metric-val yellow num" id="s-p1-risk">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Max Single Pos</div><div class="oc-metric-val num" id="s-single-pos">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Total Exposure</div><div class="oc-metric-val num" id="s-total-exp">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Correlated Exp</div><div class="oc-metric-val num" id="s-corr-exp">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Same-Direction</div><div class="oc-metric-val num" id="s-same-dir">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Allowed Cats</div><div class="oc-metric-val" id="s-allowed-cats">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Margin Mode</div><div class="oc-metric-val" id="s-margin-mode">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label">Position Mode</div><div class="oc-metric-val" id="s-position-mode">--</div></div>
@@ -477,8 +477,8 @@
     <div>
       <div class="fs-base fw-semi mb-2">原值 / Original <span class="rc-sub-hint">修改後高亮 / highlights on edit</span></div>
       <div class="oc-metrics rc-orig-metrics">
-        <div class="oc-metric"><div class="oc-metric-label">Trigger Count</div><div class="oc-metric-val" id="s-cool-count">--</div></div>
-        <div class="oc-metric"><div class="oc-metric-label">Duration</div><div class="oc-metric-val" id="s-cool-min">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Trigger Count</div><div class="oc-metric-val num" id="s-cool-count">--</div></div>
+        <div class="oc-metric"><div class="oc-metric-label">Duration</div><div class="oc-metric-val num" id="s-cool-min">--</div></div>
       </div>
     </div>
   </div>

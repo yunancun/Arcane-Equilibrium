@@ -489,11 +489,11 @@
     <div class="oc-metrics">
       <div class="oc-metric">
         <div class="oc-metric-label">Active Leases / 活躍租約</div>
-        <div class="oc-metric-val" id="lease-active">--</div>
+        <div class="oc-metric-val num" id="lease-active">--</div>
       </div>
       <div class="oc-metric">
         <div class="oc-metric-label">Total Tracked / 總追踪數</div>
-        <div class="oc-metric-val" id="lease-total">--</div>
+        <div class="oc-metric-val num" id="lease-total">--</div>
       </div>
       <div class="oc-metric">
         <div class="oc-metric-label">Manual Approval / 手動批准</div>
@@ -890,11 +890,11 @@
     </div>
     <div class="oc-metric">
       <div class="oc-metric-label">Observations / 观測數</div>
-      <div class="oc-metric-val" id="lt-obs">--</div>
+      <div class="oc-metric-val num" id="lt-obs">--</div>
     </div>
     <div class="oc-metric">
       <div class="oc-metric-label">Win Rate / 勝率</div>
-      <div class="oc-metric-val" id="lt-winrate">--</div>
+      <div class="oc-metric-val num" id="lt-winrate">--</div>
     </div>
   </div>
 
@@ -1055,11 +1055,11 @@
     </div>
     <div class="oc-metric">
       <div class="oc-metric-label">Incidents / 事件</div>
-      <div class="oc-metric-val" id="summary-incidents">--</div>
+      <div class="oc-metric-val num" id="summary-incidents">--</div>
     </div>
     <div class="oc-metric">
       <div class="oc-metric-label">Errors / 錯誤</div>
-      <div class="oc-metric-val" id="summary-errors">--</div>
+      <div class="oc-metric-val num" id="summary-errors">--</div>
     </div>
     <div class="oc-metric">
       <div class="oc-metric-label">Updated / 更新</div>
@@ -1339,10 +1339,11 @@ function _govSignedAuthDisplayState(signed, liveHalt) {
     const dd = Number(liveHalt.session_drawdown_pct);
     const limit = Number(liveHalt.drawdown_threshold_pct);
     let detail = '';
+    // session_drawdown_pct / drawdown_threshold_pct 皆 already-percent → ocPctVal(2dp);散文,不掛 .num。
     if (Number.isFinite(dd) && Number.isFinite(limit)) {
-      detail = ' (snapshot DD ' + dd.toFixed(2) + '% / limit ' + limit.toFixed(2) + '%)';
+      detail = ' (snapshot DD ' + ocPctVal(dd) + ' / limit ' + ocPctVal(limit) + ')';
     } else if (Number.isFinite(dd)) {
-      detail = ' (snapshot DD ' + dd.toFixed(2) + '%)';
+      detail = ' (snapshot DD ' + ocPctVal(dd) + ')';
     }
     return {
       known: true,
@@ -1367,11 +1368,11 @@ function _govLiveAuthHaltText(liveHalt) {
   const limit = Number(liveHalt.drawdown_threshold_pct);
   if (Number.isFinite(dd) && Number.isFinite(limit)) {
     return 'Live halt active: renew will be auto-revoked until risk reset (snapshot DD ' +
-      dd.toFixed(2) + '% / limit ' + limit.toFixed(2) + '%)';
+      ocPctVal(dd) + ' / limit ' + ocPctVal(limit) + ')';
   }
   if (Number.isFinite(dd)) {
     return 'Live halt active: renew will be auto-revoked until risk reset (snapshot DD ' +
-      dd.toFixed(2) + '%)';
+      ocPctVal(dd) + ')';
   }
   return 'Live halt active: renew will be auto-revoked until risk reset';
 }
@@ -1472,8 +1473,9 @@ async function govLoadLiveAuthStatus(options) {
   // Clean days / 連續乾淨天數
   const cleanEl = document.getElementById('gov-trust-clean-days');
   if (cleanEl) {
+    // clean_days_in_tier 為天數計數(非 %)→ ocNum(,1);散文,不掛 .num。
     const days = d.clean_days_in_tier ?? 0;
-    cleanEl.textContent = 'Clean days: ' + days.toFixed(1);
+    cleanEl.textContent = 'Clean days: ' + ocNum(days, 1);
   }
 
   // Last auth ID (small print) / 上次授權 ID（小字）

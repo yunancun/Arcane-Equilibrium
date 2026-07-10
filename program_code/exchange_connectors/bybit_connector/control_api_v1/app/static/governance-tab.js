@@ -899,7 +899,8 @@ async function loadLearningTier() {
     // 渲染層級、觀測數、勝率 / Render tier, observation count, win rate
     ocSetHtml('lt-tier', ocChip(ocEsc(tier), _ltTierColor(tier)));
     ocSetText('lt-obs', String(obsCount));
-    ocSetText('lt-winrate', winRate != null ? (winRate * 100).toFixed(1) + '%' : '--');
+    // win_rate 為 fraction(0.55→"55.00%")→ ocPct(內部 ×100,2dp);無值回 OC_EMPTY(canon 7 不假零)。
+    ocSetText('lt-winrate', ocPct(winRate));
 
     // 進度條：基於下一層級所需觀測數 / Progress bar based on next tier observation requirement
     const obsRequired = nextReqs.observations || nextReqs.min_observations || 0;
