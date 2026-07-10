@@ -377,21 +377,21 @@ html, body {
     <div class="live-metrics">
       <div class="live-metric">
         <div class="live-metric-label">總淨值 / Total Equity</div>
-        <div class="live-metric-val neutral" id="live-equity">--</div>
+        <div class="live-metric-val neutral num" id="live-equity">--</div>
         <div class="live-metric-sub" id="live-equity-sub"></div>
       </div>
       <div class="live-metric">
         <div class="live-metric-label">可用餘額 / Available</div>
-        <div class="live-metric-val neutral" id="live-available">--</div>
+        <div class="live-metric-val neutral num" id="live-available">--</div>
         <div class="live-metric-sub" id="live-available-sub"></div>
       </div>
       <div class="live-metric">
         <div class="live-metric-label">錢包餘額 / Wallet Balance</div>
-        <div class="live-metric-val neutral" id="live-wallet-balance">--</div>
+        <div class="live-metric-val neutral num" id="live-wallet-balance">--</div>
       </div>
       <div class="live-metric">
         <div class="live-metric-label">已用保證金 / Margin Used</div>
-        <div class="live-metric-val neutral" id="live-margin-used">--</div>
+        <div class="live-metric-val neutral num" id="live-margin-used">--</div>
       </div>
     </div>
   </div>
@@ -402,24 +402,24 @@ html, body {
     <div class="live-metrics">
       <div class="live-metric span2">
         <div class="live-metric-label">未實現 PnL / Unrealized PnL</div>
-        <div class="live-metric-val large neutral" id="live-unrealized-pnl">--</div>
+        <div class="live-metric-val large neutral num" id="live-unrealized-pnl">--</div>
       </div>
       <div class="live-metric">
         <div class="live-metric-label">今日已實現 / Realized (Today)</div>
-        <div class="live-metric-val neutral" id="live-realized-pnl">--</div>
+        <div class="live-metric-val neutral num" id="live-realized-pnl">--</div>
         <div class="live-metric-sub" id="live-realized-sub"></div>
       </div>
       <div class="live-metric">
         <div class="live-metric-label">今日淨 PnL / Net Today</div>
-        <div class="live-metric-val neutral" id="live-net-pnl">--</div>
+        <div class="live-metric-val neutral num" id="live-net-pnl">--</div>
       </div>
       <div class="live-metric">
         <div class="live-metric-label">持倉數 / Positions</div>
-        <div class="live-metric-val neutral" id="live-position-count">--</div>
+        <div class="live-metric-val neutral num" id="live-position-count">--</div>
       </div>
       <div class="live-metric">
         <div class="live-metric-label">掛單數 / Open Orders</div>
-        <div class="live-metric-val neutral" id="live-order-count">--</div>
+        <div class="live-metric-val neutral num" id="live-order-count">--</div>
       </div>
     </div>
     <!-- PnL Trend Sparkline / 盈虧趨勢圖 -->
@@ -578,6 +578,6 @@ html, body {
      舊 dialog 形成雙層 modal（先 1-click → typed-phrase）。
      現直接 button onclick="do*()"，統一走 SDK；UI 行為 = single typed-phrase modal。 -->
 
-<script src="/static/tab-live.js?v=20260628.gui-fills-time"></script>
+<script src="/static/tab-live.js?v=20260711.p03-b6e-live"></script>
 </body>
 </html>

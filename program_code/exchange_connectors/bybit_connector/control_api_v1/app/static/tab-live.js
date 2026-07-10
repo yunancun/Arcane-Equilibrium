@@ -54,6 +54,15 @@ function _isLiveTabRefreshVisible() {
   return _liveTabVisible && document.visibilityState !== 'hidden';
 }
 
+// 標的價格 cell(§1.2 column-fixed dp):價 <1 需更多小數位防塌零(真金頁尤忌,
+// 微幣 0.00002 收 2dp 會顯 0.00 假零,canon 7);≥1 用 2dp。price<=0 視為無值→OC_EMPTY。
+function _livePriceCell(v) {
+  const n = parseFloat(v);
+  if (!Number.isFinite(n) || n <= 0) return OC_EMPTY;
+  const dp = n >= 1 ? 2 : n >= 0.01 ? 4 : n >= 0.0001 ? 6 : 8;
+  return ocPrice(n, dp);
+}
+
 function _signedAuthDisplayState(signed, liveHalt) {
   const known = !!(signed && signed.status);
   if (!known) {
@@ -566,29 +575,29 @@ function _renderLiveDustPanel(positions) {
   footer.style.display = 'none';
   tbody.innerHTML = dust.map(p => {
     const sym = ocEsc(p.symbol || '--');
-    const side = ocEsc(p.side || '--');
-    const qty = ocEsc(String(p.size || p.qty || '--'));
-    const mark = ocEsc(String(p.markPrice || p.mark_price || '--'));
+    const side = ocSide(p.side);                              // 方向 badge(多 LONG ▲ / 空 SHORT ▼)
+    const qty = ocQty(p.size || p.qty);                       // base-asset 量,6dp
+    const mark = _livePriceCell(p.markPrice || p.mark_price); // 標價,column-fixed dp
     const est = parseFloat(p.est_notional);
     const min = parseFloat(p.min_notional);
-    const estCell = Number.isFinite(est) ? '$' + est.toFixed(2) : '--';
-    const minCell = Number.isFinite(min) ? '$' + min.toFixed(2) : '--';
+    const estCell = Number.isFinite(est) ? ocBalance(est) : OC_EMPTY;  // 名義金額量值,2dp(FX)
+    const minCell = Number.isFinite(min) ? ocBalance(min) : OC_EMPTY;
     // Gap % = how far the position notional is below the exchange minimum.
     // Higher = harder to recover via price drift alone.
-    // Gap % = 倉位名義值距交易所最小值的差距百分比。越高代表越難靠價格漂移自然恢復。
-    let gap = '--';
+    // Gap % = 倉位名義值距交易所最小值的差距。(min-est)/min = fraction → ocPct 內部 ×100 出 2dp(舊 1dp)。
+    let gap = OC_EMPTY;
     if (Number.isFinite(est) && Number.isFinite(min) && min > 0) {
-      gap = ((min - est) / min * 100).toFixed(1) + '%';
+      gap = ocPct((min - est) / min);
     }
     const owner = p.owner_strategy || '';
     return '<tr>' +
       '<td><strong>' + sym + '</strong></td>' +
       '<td>' + side + '</td>' +
-      '<td>' + qty + '</td>' +
-      '<td>' + mark + '</td>' +
-      '<td>' + estCell + '</td>' +
-      '<td>' + minCell + '</td>' +
-      '<td>' + gap + '</td>' +
+      '<td class="num">' + qty + '</td>' +
+      '<td class="num">' + mark + '</td>' +
+      '<td class="num">' + estCell + '</td>' +
+      '<td class="num">' + minCell + '</td>' +
+      '<td class="num">' + gap + '</td>' +
       '<td class="fs-micro">' + _ocRenderOwnerStrategy(owner, p) + '</td>' +
       '</tr>';
   }).join('');
@@ -634,12 +643,6 @@ function _liveMetricValue(payload, key) {
   return Number.isFinite(value) ? value : NaN;
 }
 
-function _formatSignedMoneyValue(value) {
-  return Number.isFinite(value) && value !== 0
-    ? (value >= 0 ? '+' : '') + value.toFixed(4)
-    : '--';
-}
-
 function _applyLiveTodayPnl(metricsData) {
   const realizedEl = document.getElementById('live-realized-pnl');
   const realizedSub = document.getElementById('live-realized-sub');
@@ -666,18 +669,22 @@ function _applyLiveTodayPnl(metricsData) {
   const fills = Number(today.total_fills);
   const net = Number(today.net_pnl);
 
-  realizedEl.textContent = _formatSignedMoneyValue(gross);
-  realizedEl.className = 'live-metric-val' + (gross > 0 ? ' pos' : gross < 0 ? ' neg' : ' neutral');
+  // 今日已實現 / 淨 PnL = 帳戶級「日聚合」→ §1.5 嚴格 2dp(舊 4dp 收斂;此為 LIVE
+  // 顯示精度變更點,需 QC/operator 知悉);金額走 ocMoney(U+2212 自帶)+ .val-*(ocSignParts)。
+  // 帳戶「今日累計」屬水位非 period-over-period delta,依 §2.2 只 +/− 不加 ▲▼。
+  realizedEl.textContent = ocMoney(gross);
+  realizedEl.className = 'live-metric-val num ' + ocSignParts(gross).cls;
   if (realizedSub) {
     const parts = [];
-    if (Number.isFinite(fees)) parts.push('Fees ' + fees.toFixed(4));
-    if (Number.isFinite(funding) && funding !== 0) parts.push('Funding ' + funding.toFixed(4));
+    // 子標聚合金額同收 2dp:費用為量值→ocBalance、資金費為帶號→ocMoney。
+    if (Number.isFinite(fees)) parts.push('Fees ' + ocBalance(fees));
+    if (Number.isFinite(funding) && funding !== 0) parts.push('Funding ' + ocMoney(funding));
     if (Number.isFinite(fills)) parts.push('fills ' + String(Math.round(fills)));
     realizedSub.textContent = parts.join(' · ');
   }
 
-  netEl.textContent = _formatSignedMoneyValue(net);
-  netEl.className = 'live-metric-val' + (net > 0 ? ' pos' : net < 0 ? ' neg' : ' neutral');
+  netEl.textContent = ocMoney(net);
+  netEl.className = 'live-metric-val num ' + ocSignParts(net).cls;
 }
 
 async function loadDashboardData() {
@@ -725,20 +732,24 @@ async function loadDashboardData() {
         balData.wallet_balance || balData.walletBalance || balData.total_wallet_balance || equity || 0
       );
       const marginUsed = equity > 0 && avail > 0 ? equity - avail : 0;
-      document.getElementById('live-equity').textContent = equity > 0 ? '₮' + equity.toFixed(2) : '--';
-      document.getElementById('live-available').textContent = avail > 0 ? '₮' + avail.toFixed(2) : '--';
-      document.getElementById('live-wallet-balance').textContent = wallet > 0 ? '₮' + wallet.toFixed(2) : '--';
-      document.getElementById('live-margin-used').textContent = marginUsed > 0 ? '₮' + marginUsed.toFixed(2) : '--';
+      // 餘額量值 = 水位,無符號 → ocBalance(2dp,FX 轉換後);既有 >0 存在性 guard 保留,
+      // 無值回 OC_EMPTY(canon 7 禁假零)。此為契約 formatter 化,精度仍 2dp 不變。
+      document.getElementById('live-equity').textContent = equity > 0 ? ocBalance(equity) : OC_EMPTY;
+      document.getElementById('live-available').textContent = avail > 0 ? ocBalance(avail) : OC_EMPTY;
+      document.getElementById('live-wallet-balance').textContent = wallet > 0 ? ocBalance(wallet) : OC_EMPTY;
+      document.getElementById('live-margin-used').textContent = marginUsed > 0 ? ocBalance(marginUsed) : OC_EMPTY;
 
       if (avail > 0 && equity > 0) {
-        const pct = ((avail / equity) * 100).toFixed(1);
-        document.getElementById('live-available-sub').textContent = pct + '% of equity free';
+        // 可用占比 = fraction(avail/equity)→ ocPct 內部 ×100 出 2dp(舊 1dp 收斂)。
+        document.getElementById('live-available-sub').textContent = ocPct(avail / equity) + ' of equity free';
       }
 
       const pnlEl = document.getElementById('live-unrealized-pnl');
       if (pnlEl) {
-        pnlEl.textContent = upnl !== 0 ? (upnl >= 0 ? '+' : '') + upnl.toFixed(4) : '--';
-        pnlEl.className = 'live-metric-val large' + (upnl > 0 ? ' pos' : upnl < 0 ? ' neg' : ' neutral');
+        // 未實現 PnL = 當前浮盈水位 → ocMoney(2dp,舊 4dp 收斂=LIVE 精度變更)+ .val-*;
+        // 水位非 delta,依 §2.2 不加 ▲▼。真 0 顯 +0.00(誠實零),缺值→OC_EMPTY。
+        pnlEl.textContent = ocMoney(upnl);
+        pnlEl.className = 'live-metric-val large num ' + ocSignParts(upnl).cls;
       }
     }
   } catch (_) {}
@@ -774,7 +785,8 @@ async function loadDashboardData() {
         // Bybit flat format (camelCase) + snake_case fallback
         // Bybit 扁平格式（camelCase）+ snake_case 兼容
         const pnl = parseFloat(p.unrealisedPnl || p.unrealized_pnl || p.unrealised_pnl || 0);
-        const pnlCls = pnl >= 0 ? 'green' : 'red';
+        // 每倉未實現盈虧 = 水位 → sign + .val-* 色不加箭頭(§2.2);2dp 收斂(舊 4dp=LIVE 精度變更)。
+        const pnlParts = ocSignParts(pnl);
         const size = p.size || p.qty || '--';
         const entry = p.avgPrice || p.avg_price || p.entry_price || '--';
         const mark = p.markPrice || p.mark_price || '--';
@@ -801,14 +813,14 @@ async function loadDashboardData() {
         return `<tr>
           <td><strong>${sym}</strong></td>
           <td class="fs-micro">${_ocRenderOwnerStrategy(strat, p)}</td>
-          <td>${ocEsc(p.side || '--')}</td>
-          <td>${ocEsc(String(size))}</td>
+          <td>${ocSide(p.side)}</td>
+          <td class="num">${ocQty(size)}</td>
           <td>${ocEsc(String(leverage))}x</td>
-          <td>${ocEsc(String(entry))}</td>
-          <td>${ocEsc(ocAmount(ocPositionEntryValue(p)))}</td>
-          <td>${ocEsc(String(mark))}</td>
-          <td class="${pnlCls}">${pnl.toFixed(4)}</td>
-          <td>${ocEsc(String(liq))}</td>
+          <td class="num">${_livePriceCell(entry)}</td>
+          <td class="num">${ocBalance(ocPositionEntryValue(p))}</td>
+          <td class="num">${_livePriceCell(mark)}</td>
+          <td class="num ${pnlParts.cls}">${ocMoney(pnl)}</td>
+          <td class="num">${_livePriceCell(liq)}</td>
           <td><button class="oc-btn oc-btn-danger oc-row-close-action" data-owner-strategy="${ownerAttr}" data-frozen-reason="${reasonAttr}" onclick="closeLivePosition('${sym}', this.dataset.ownerStrategy, this.dataset.frozenReason)">${btnLabel}</button></td>
         </tr>`;
       }).join('');
@@ -872,9 +884,9 @@ async function loadDashboardData() {
         return `<tr>
           <td>${ocEsc(symRaw || '--')}</td>
           <td class="fs-micro">${ocEsc(strat)}</td>
-          <td>${ocEsc(o.side || '--')}</td>
-          <td>${ocEsc(String(qty))}</td>
-          <td>${ocEsc(String(price))}</td>
+          <td>${ocSide(o.side)}</td>
+          <td class="num">${ocQty(qty)}</td>
+          <td class="num">${_livePriceCell(price)}</td>
           <td>${ocEsc(String(orderType))}</td>
           <td>${ocEsc(String(status))}</td>
         </tr>`;
@@ -983,10 +995,10 @@ async function checkLiveEngineStatus() {
   if (cBadge) {
     if (contractionState === 'halted') {
       cBadge.className = 'oc-chip oc-chip-bad';
-      cBadge.textContent = `🚨 自動停止 (回撤${drawdownPct != null ? drawdownPct.toFixed(1) + '%' : ''})`;
+      cBadge.textContent = `🚨 自動停止 (回撤${drawdownPct != null ? ocPctVal(drawdownPct) : ''})`;
     } else if (contractionState === 'warned') {
       cBadge.className = 'oc-chip oc-chip-warn';
-      cBadge.textContent = `⚠ 回撤警告 ${drawdownPct != null ? drawdownPct.toFixed(1) + '%' : ''}`;
+      cBadge.textContent = `⚠ 回撤警告 ${drawdownPct != null ? ocPctVal(drawdownPct) : ''}`;
     } else {
       cBadge.className = 'hidden';
     }
@@ -1288,8 +1300,12 @@ function _edgeGateChip(status) {
   return ocChip(text, _edgeGateTone(s));
 }
 
+// 泛型 value+suffix 格式化。P0.3 後僅服務「非契約型別」:count / ratio / 'x'(倍率)/ 'm'(分鐘)。
+// bps 走 ocBps、% 走 ocPctVal(型別正確,見各呼叫點),不再經此 helper——消除 PA 指出的 bps
+// 重複實作(_edgeMetricValue 是與 tab-edge-gates metricValue 逐字重複的 helper #2)。
+// 無值回 OC_EMPTY(canon 7 禁假零),非舊 '--' 哨兵。
 function _edgeMetricValue(value, suffix, decimals) {
-  if (value == null || value === '') return '--';
+  if (value == null || value === '') return OC_EMPTY;
   const n = Number(value);
   if (!Number.isFinite(n)) return ocEsc(value);
   const d = decimals == null ? 1 : decimals;
@@ -1309,13 +1325,15 @@ function _edgeGateValueCells(gate) {
   const c = (gate && gate.current) || {};
   if (!gate) return '';
   if (gate.gate_id === '33') {
+    // fee_drop_pct / maker_like_pct 皆 already-percent(producer *100.0,見 prelive_edge_gate_trends.py)→ ocPctVal(2dp)。
     return [
-      ['Fee drop', _edgeMetricValue(c.fee_drop_pct, '%', 1)],
-      ['Maker-like', _edgeMetricValue(c.maker_like_pct, '%', 1)],
+      ['Fee drop', ocPctVal(c.fee_drop_pct)],
+      ['Maker-like', ocPctVal(c.maker_like_pct)],
       ['Entry fills', _edgeMetricValue(c.entry_fills, '', 0)],
     ];
   }
   if (gate.gate_id === '38') {
+    // lifetime_ratio(倍率 x)/ p50(分鐘 m)/ reentry_rate(比率)皆非契約型別 → 保留 _edgeMetricValue。
     return [
       ['Lifetime', _edgeMetricValue(c.lifetime_ratio, 'x', 2)],
       ['Live p50', _edgeMetricValue(c.live_demo_p50_min, 'm', 1)],
@@ -1323,10 +1341,12 @@ function _edgeGateValueCells(gate) {
     ];
   }
   if (gate.gate_id === '40') {
+    // avg_net_bps 為帶方向淨邊際(AVG(net_bps_after_fee),可正負)→ ocBps + 第二通道 sign/色;
+    // 屬「帶號水位」非 period-over-period delta,依 §2.2 只 +/− 不加 ▲▼。win_rate_pct already-% → ocPctVal。
     return [
-      ['Avg net', _edgeMetricValue(c.avg_net_bps, ' bps', 2)],
+      ['Avg net', ocSigned(c.avg_net_bps, ocBps)],
       ['Rows', _edgeMetricValue(c.rows, '', 0)],
-      ['Win rate', _edgeMetricValue(c.win_rate_pct, '%', 1)],
+      ['Win rate', ocPctVal(c.win_rate_pct)],
     ];
   }
   return [];
@@ -1358,11 +1378,13 @@ function _renderEdgeGateCard(gate) {
 
 function _readinessValue(item) {
   const key = item && item.key ? String(item.key) : '';
+  // fee_drop / maker_like already-percent → ocPctVal;avg_net 帶方向 bps → ocBps(帶號 U+2212);
+  // ratio/rate/count 非契約型別 → 保留 _edgeMetricValue。此為「值 / 目標」緊湊讀出,回純字串不掛色 span。
   if (key.indexOf('fee_drop') >= 0 || key.indexOf('maker_like') >= 0) {
-    return _edgeMetricValue(item.value, '%', 1);
+    return ocPctVal(item.value);
   }
   if (key.indexOf('avg_net') >= 0) {
-    return _edgeMetricValue(item.value, ' bps', 2);
+    return ocBps(item.value, true);
   }
   if (key.indexOf('ratio') >= 0 || key.indexOf('rate') >= 0) {
     return _edgeMetricValue(item.value, '', 2);
@@ -1486,20 +1508,21 @@ function _liveFillRow(f) {
   const price = f.execPrice || f.exec_price || f.price || '--';
   const execValue = ocFillExecValue(f);
   const fee = f.execFee || f.exec_fee || '--';
-  const feeStr = fee !== '--' ? parseFloat(fee).toFixed(6) : '--';
+  // B0 deferred 輸出鏈修:sentinel-agnostic(ocIsBlank 容雙哨兵)+ 缺值→OC_EMPTY;
+  // per-fill 手續費保 6dp column 例外(收 2dp 會把微額手續費塌 0.00)。
+  const feeStr = !ocIsBlank(fee) ? ocNum(parseFloat(fee), 6) : OC_EMPTY;
   const oid = f.orderId || f.order_id || '--';
   const side = f.side || '--';
-  const sideCls = side === 'Buy' ? 'green' : side === 'Sell' ? 'red' : '';
   const strategy = f.strategy || f.strategy_name || f.owner_strategy || _liveStratMap[f.symbol || ''] || '';
   return `<tr>
     <td class="nowrap">${ocEsc(ocFillTime(ts))}</td>
     <td><strong>${ocEsc(f.symbol || '--')}</strong></td>
     <td class="fs-micro">${strategy ? _ocRenderOwnerStrategy(strategy, f) : '--'}</td>
-    <td class="${sideCls}">${ocEsc(side)}</td>
-    <td>${ocEsc(String(qty))}</td>
-    <td>${ocEsc(String(price))}</td>
-    <td>${ocEsc(ocAmount(execValue))}</td>
-    <td class="t-dim">${ocEsc(feeStr)}</td>
+    <td>${ocSide(side)}</td>
+    <td class="num">${ocQty(qty)}</td>
+    <td class="num">${_livePriceCell(price)}</td>
+    <td class="num">${ocBalance(execValue)}</td>
+    <td class="num t-dim">${feeStr}</td>
     ${ocPnlCell(_liveFillPnl(f))}
     <td class="fs-micro t-dim">${ocEsc(String(oid)).slice(0, 12)}…</td>
   </tr>`;
@@ -1549,11 +1572,13 @@ function _liveBuildProfitRows(fills) {
 }
 
 function _liveProfitRow(r) {
-  const openText = r.open ? (r.open.side + ' @ ' + ocNum(r.open.price, 2)) : '--';
-  const closeText = (r.close.side || '--') + (r.close.price ? ' @ ' + ocNum(r.close.price, 2) : '');
+  // 開/平 摘要 = 方向詞 + 標價(column-fixed dp);整串經 cell ocEsc(價格為機械數字,esc 無副作用)。
+  const openText = r.open ? (r.open.side + ' @ ' + _livePriceCell(r.open.price)) : OC_EMPTY;
+  const closeText = (r.close.side || '--') + (r.close.price ? ' @ ' + _livePriceCell(r.close.price) : '');
   const hold = r.holdMs != null && r.holdMs >= 0 ? (r.holdMs / 60000).toFixed(1) + 'm' : (r.paired ? '--' : 'page edge');
-  const pnlCls = r.pnl >= 0 ? 'green' : 'red';
-  const sign = r.pnl >= 0 ? '+' : '';
+  // 平倉收益 = per-fill 已實現盈虧 → column-fixed 4dp 例外(§1.5,收 2dp 會塌微額成交);
+  // 帶方向 sign + .val-* 色(ocSignParts,取代舊 green/red),ocMoney(,4) 自帶 U+2212。
+  const pnlParts = ocSignParts(r.pnl);
   const closeTime = ocFillDateTime(r.close.time);
   return '<tr>' +
     '<td class="oc-fill-time" title="' + ocEsc(closeTime) + '">' + ocEsc(closeTime) + '</td>' +
@@ -1561,9 +1586,9 @@ function _liveProfitRow(r) {
     '<td class="fs-micro">' + (r.strategy ? _ocRenderOwnerStrategy(r.strategy, r) : '--') + '</td>' +
     '<td>' + ocEsc(openText) + '</td>' +
     '<td>' + ocEsc(closeText) + '</td>' +
-    '<td>' + ocNum(r.qty, 4) + '</td>' +
+    '<td class="num">' + ocQty(r.qty) + '</td>' +
     '<td class="t-dim">' + ocEsc(hold) + '</td>' +
-    '<td class="' + pnlCls + '">' + sign + r.pnl.toFixed(4) + '</td>' +
+    '<td class="num ' + pnlParts.cls + '">' + ocMoney(r.pnl, 4) + '</td>' +
     '</tr>';
 }
 
@@ -1584,7 +1609,8 @@ function _liveClosedPnlRow(r) {
   const exitPrice = r.avg_exit_price != null ? r.avg_exit_price : r.avgExitPrice;
   const closedPnlRaw = r.closed_pnl != null ? r.closed_pnl : r.closedPnl;
   const closedPnlNum = parseFloat(closedPnlRaw);
-  const pnlCls = Number.isFinite(closedPnlNum) ? (closedPnlNum >= 0 ? 'green' : 'red') : '';
+  // 平倉收益 = per-fill 已實現盈虧 → 帶方向 sign + .val-* 色(ocSignParts,取代舊 green/red)。
+  const pnlParts = ocSignParts(closedPnlNum);
   const strategy = r.strategy_name || r.strategy || '';
   const source = r.strategy_source || r.strategySource || '';
   const mutedStrategy = !strategy || source === 'bybit_unknown' || source === 'pg_missing_unknown_external';
@@ -1607,11 +1633,11 @@ function _liveClosedPnlRow(r) {
     '<td class="fs-micro" title="' + ocEsc(sourceLabel) + '">' +
       '<span class="' + (mutedStrategy ? 'oc-row-muted' : '') + '">' + ocEsc(strategyText) + '</span>' +
       '<span class="oc-source-note">' + ocEsc(sourceLabel) + '</span></td>' +
-    '<td>' + (entryPrice != null ? ocNum(parseFloat(entryPrice), 2) : '--') + '</td>' +
-    '<td>' + (exitPrice != null ? ocNum(parseFloat(exitPrice), 2) : '--') + '</td>' +
-    '<td>' + ocEsc(String(qty != null ? qty : '--')) + '</td>' +
-    '<td class="t-dim">' + ocEsc(String(r.side || '--')) + '</td>' +
-    '<td class="' + pnlCls + '" title="' + ocEsc(title) + '"><span aria-label="exchange-confirmed">&#x2705;</span> ' + ocEsc(String(closedPnlRaw != null ? closedPnlRaw : '--')) + driftHtml + '</td>' +
+    '<td class="num">' + _livePriceCell(entryPrice) + '</td>' +
+    '<td class="num">' + _livePriceCell(exitPrice) + '</td>' +
+    '<td class="num">' + ocQty(qty) + '</td>' +
+    '<td>' + ocSide(r.side) + '</td>' +
+    '<td class="num ' + pnlParts.cls + '" title="' + ocEsc(title) + '"><span aria-label="exchange-confirmed">&#x2705;</span> ' + ocMoney(closedPnlNum, 4) + driftHtml + '</td>' +
     '</tr>';
 }
 
