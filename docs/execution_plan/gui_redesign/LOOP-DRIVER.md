@@ -23,6 +23,8 @@
    - E2 過 → E4(node --check 全部觸碰 JS/HTML + 回歸計數對基線)。
    - dispatch prompt 一律留 NO-OP exit(「若發現已完成,回報 NO-OP 並說明證據」)。
    - 前台阻塞等待收工(desktop idle-pause 會殺後台 agent,勿散養)。
+   - **防中斷紀律(R3/R4/R8 固化)**:E1a 屢在「報告階段」被殺(spend-limit/401/user-interrupt)→ ①E1a 指令必含「主體每完成一檔即落樹;最終報告先寫入 workspace 檔再回覆」;②E1a 中斷不重跑主體——PM 依 diff 判斷完整度,派 E2 窮舉審查補位(逐元素親證;grep style=0 不可信,裸屬性破版是 grep 盲區,R8 實錘);③中斷殘留的 HIGH 由 PM 親修或退回,報告由 PM 依 diff+E2+回歸重建。
+   - **批次上限(R8 固化)**:單批 inline style >250 或觸碰 >5 檔必先拆(governance 521→7a/7b 先例);開工先實測該批計數,不信 07-08 快照。
 4. **驗證軸**(每 checkpoint 必過,失敗不 commit):
    - `node --check` 觸碰的每個 JS;HTML 結構完整(自檢首尾標籤);
    - 禁新增 inline `style=`/裸 hex/`<style>`(唯一豁免:JS 寫 scoped var);禁引入任何框架;
