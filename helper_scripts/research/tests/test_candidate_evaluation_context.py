@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 
@@ -13,6 +15,7 @@ from cost_gate_learning_lane.candidate_evaluation_context import (
     build_candidate_evaluation_context,
     candidate_learning_context_projection,
     canonical_sha256,
+    validate_candidate_event_context,
     validate_candidate_evaluation_context,
 )
 
@@ -29,116 +32,53 @@ def test_canonical_sha256_matches_rust_serde_json_float_and_utf8_bytes() -> None
 
 
 def _event_context() -> dict[str, object]:
-    portfolio_snapshot = {
-        "schema_version": "candidate_portfolio_snapshot_v1",
-        "captured_at_ms": 1_783_700_000_000,
-        "balance": 10_000.0,
-        "accepted_demo_equity_usdt": 10_000.0,
-        "peak_balance": 10_000.0,
-        "drawdown_pct": 0.0,
-        "position_count": 0,
-        "gross_mark_notional_usdt": 0.0,
-        "net_mark_notional_usdt": 0.0,
-        "total_realized_pnl": 0.0,
-        "total_fees": 0.0,
-        "total_funding_pnl": 0.0,
-        "trade_count": 0,
-    }
-    strategy_config_hash = _sha({
-        "strategy_params": {"slow": 20, "fast": 5},
-        "conf_scale": 1.0,
-    })
-    body: dict[str, object] = {
-        "schema_version": "candidate_event_context_v1",
-        "captured_at_ms": 1_783_700_000_000,
-        "strategy_name": "ma_crossover",
-        "strategy_version": "0123456789abcdef0123456789abcdef01234567",
-        "build_git_sha": "0123456789abcdef0123456789abcdef01234567",
-        "strategy_params_json": '{"slow":20,"fast":5}',
-        "strategy_params_canonical_json": '{"fast":5,"slow":20}',
-        "conf_scale": 1.0,
-        "strategy_config_hash": strategy_config_hash,
-        "symbol": "BTCUSDT",
-        "side": "Buy",
-        "horizon_policy": {
-            "schema_version": "candidate_horizon_policy_v1",
-            "source": "default_60_minutes",
-            "outcome_horizon_minutes": 60,
-            "default_applied": True,
-        },
-        "evidence_engine_mode": "live_demo",
-        "pipeline_kind": "live",
-        "endpoint_environment": "live_demo",
-        "venue": "bybit",
-        "product": "linear_perpetual",
-        "context_id": "ctx-live_demo-BTCUSDT-1783700000000",
-        "signal_id": "sig-live_demo-ma_crossover-BTCUSDT-1783700000000",
-        "scan_id": "scan-20260710-001",
-        "scanner_inputs": {
-            "authority_mode": "advisory",
-            "legacy_would_block": False,
-            "legacy_block_reason": None,
-            "scan_id": "scan-20260710-001",
-            "best_strategy": "ma_crossover",
-            "intent_strategy": "ma_crossover",
-            "market_regime": "range",
-            "trend_phase": "neutral",
-            "trend_score": 0.1,
-            "range_score": 0.8,
-            "shock_score": 0.0,
-            "close_alignment": 0.5,
-            "range_position": 0.4,
-            "crowding_score": 0.2,
-            "reversal_risk_score": 0.1,
-            "directional_efficiency": 0.3,
-            "dir_pct": 0.2,
-            "signed_dir_pct": -0.2,
-            "range_pct": 0.6,
-            "fr_bps": 0.4,
-            "f_ma": 61.0,
-            "f_grid": 40.0,
-            "f_bbrv": 55.0,
-            "f_bkout": 12.0,
-            "f_funding_arb": 8.0,
-            "edge_bps": -2.5,
-            "edge_n": 17,
-            "edge_status": "observed",
-            "route_mode": "advisory",
-            "market_status": "compatible",
-            "route_reason": "scanner_candidate",
-            "opportunity": None,
-            "final_score": 58.0,
-            "raw_score": 62.0,
-        },
-        "market_inputs": {
-            "observed_at_ms": 1_783_700_000_000,
-            "last_price": 2_500.0,
-            "best_bid": 2_499.9,
-            "best_ask": 2_500.1,
-            "tick_size": 0.1,
-            "index_price": 2_499.8,
-            "funding_rate": 0.0001,
-            "open_interest": 1_000_000.0,
-            "atr_value": 25.0,
-        },
-        "risk_context": {
-            "risk_state": "NORMAL",
-            "governance_profile": "Validation",
-            "risk_config_hash": _sha({"limits": {"leverage_max": 2.0}}),
-        },
-        "portfolio_snapshot": portfolio_snapshot,
-        "portfolio_snapshot_ref": (
-            "paper_state:live_demo:ctx-live_demo-BTCUSDT-1783700000000:1783700000000"
-        ),
-        "portfolio_snapshot_hash": _sha(portfolio_snapshot),
-        "capture_status": "CAPTURE_COMPLETE",
-        "capture_blockers": [],
-        "boundary": (
-            "immutable learning evidence only; no training, serving, promotion, order, "
-            "lease, gate, config, broker, or runtime authority"
-        ),
-    }
-    return {**body, "event_hash": _sha(body)}
+    fixture_path = (
+        Path(__file__).resolve().parents[3]
+        / "rust/openclaw_engine/tests/fixtures/candidate_event_context_v1/canonical_fixture.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    return deepcopy(fixture["valid_candidate_event_context"])
+
+
+def test_public_candidate_event_context_validator_is_lossless_and_detached() -> None:
+    source = _event_context()
+
+    validated = validate_candidate_event_context(source)
+
+    assert validated == source
+    assert validated is not source
+    validated["market_inputs"]["last_price"] = 1.0  # type: ignore[index]
+    assert source["market_inputs"]["last_price"] == 2_500.0  # type: ignore[index]
+
+
+@pytest.mark.parametrize(
+    ("mutation", "error"),
+    [
+        ("hash_mismatch", "EVENT_CONTEXT_HASH_MISMATCH"),
+        ("capture_blocked", "EVENT_CONTEXT_CAPTURE_INCOMPLETE"),
+        ("nonempty_blockers", "EVENT_CONTEXT_CAPTURE_BLOCKED"),
+        ("semantic_mutation", "SYMBOL_INVALID"),
+    ],
+)
+def test_public_candidate_event_context_validator_rejects_invalid_lineage(
+    mutation: str,
+    error: str,
+) -> None:
+    event = _event_context()
+    if mutation == "hash_mismatch":
+        event["event_hash"] = "0" * 64
+    elif mutation == "capture_blocked":
+        event["capture_status"] = "CAPTURE_BLOCKED"
+        event = _rehash_event(event)
+    elif mutation == "nonempty_blockers":
+        event["capture_blockers"] = ["BBO_MISSING_OR_INVALID"]
+        event = _rehash_event(event)
+    else:
+        event["symbol"] = "btcusdt"
+        event = _rehash_event(event)
+
+    with pytest.raises(CandidateEvaluationContextError, match=error):
+        validate_candidate_event_context(event)
 
 
 def _rehash_event(event: dict[str, object]) -> dict[str, object]:

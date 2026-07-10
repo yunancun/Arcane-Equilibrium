@@ -383,6 +383,18 @@ def _event_parts(value: Any) -> tuple[dict[str, Any], str]:
     })
     return identity, supplied_hash
 
+def validate_candidate_event_context(
+    value: Mapping[str, Any],
+) -> dict[str, Any]:
+    """驗證 Rust 原始 event context，並回傳語義不變的 detached copy。
+
+    為什麼：runtime propagation 只能攜帶已通過完整 hash/schema/semantic gate 的
+    prospective lineage；此接口不得補值、投影或從目前狀態重建欄位。
+    """
+    source = _mapping(value, "EVENT_CONTEXT_MISSING_OR_INVALID")
+    _event_parts(source)
+    return copy.deepcopy(source)
+
 def _identity(value: Any) -> dict[str, Any]:
     source = _mapping(value, "IDENTITY_INVALID")
     result: dict[str, Any] = {}
@@ -804,5 +816,6 @@ __all__ = [
     "build_candidate_evaluation_context",
     "candidate_learning_context_projection",
     "canonical_sha256",
+    "validate_candidate_event_context",
     "validate_candidate_evaluation_context",
 ]

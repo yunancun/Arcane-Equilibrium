@@ -11,6 +11,7 @@ must be wired in the Rust hot path after explicit operator authority exists.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 import datetime as dt
 from dataclasses import dataclass
 import json
@@ -29,6 +30,9 @@ from cost_gate_learning_lane.contract import (
     ORDER_AUTHORITY_GRANTED,
     OUTCOME_ADAPTER_SCHEMA_VERSION,
 )
+from cost_gate_learning_lane.candidate_evaluation_context import (
+    validate_candidate_event_context,
+)
 from cost_gate_learning_lane.ledger_rotation import (
     maybe_rotate_ledger,
     retained_ledger_files,
@@ -41,6 +45,10 @@ from cost_gate_learning_lane.outcome_writer import (
 )
 from cost_gate_learning_lane.policy import DEMO_LEARNING_LANE_SCHEMA_VERSION
 from cost_gate_learning_lane.proof_exclusion import proof_exclusion_reasons
+
+
+CANDIDATE_EVENT_CONTEXT_VALID_STATUS = "VALID"
+CANDIDATE_EVENT_CONTEXT_UNQUALIFIED_STATUS = "UNQUALIFIED_CONTEXT_MISSING"
 
 
 @dataclass(frozen=True)
@@ -124,6 +132,45 @@ def _str(value: Any) -> str:
     return str(value or "").strip()
 
 
+def validate_ledger_event_candidate_context(
+    event: Mapping[str, Any],
+) -> dict[str, Any]:
+    """驗證並綁定 ledger event 的 prospective context；缺欄保留 legacy shape。
+
+    為什麼 fail-closed：只驗 event hash 仍可把合法 context graft 到另一個 outer
+    event；七個 event-time identity 欄位必須型別與值都完全相等，且不得回填。
+    """
+    validated_event = dict(event)
+    if "candidate_event_context" not in validated_event:
+        return validated_event
+    context = validate_candidate_event_context(
+        validated_event["candidate_event_context"]
+    )
+    bindings = (
+        ("strategy_name", "strategy_name"),
+        ("symbol", "symbol"),
+        ("side", "side"),
+        ("context_id", "context_id"),
+        ("signal_id", "signal_id"),
+        ("engine_mode", "evidence_engine_mode"),
+        ("ts_ms", "captured_at_ms"),
+    )
+    for outer_field, context_field in bindings:
+        outer_value = validated_event.get(outer_field)
+        context_value = context[context_field]
+        if (
+            outer_field not in validated_event
+            or type(outer_value) is not type(context_value)
+            or outer_value != context_value
+        ):
+            raise ValueError(
+                "CANDIDATE_EVENT_CONTEXT_OUTER_BINDING_MISMATCH:"
+                f"{outer_field}"
+            )
+    validated_event["candidate_event_context"] = context
+    return validated_event
+
+
 def side_cell_key(strategy_name: Any, symbol: Any, side: Any) -> str:
     return "|".join([_str(strategy_name), _str(symbol).upper(), _str(side)])
 
@@ -187,6 +234,28 @@ def read_jsonl_ledger(path: Path) -> list[dict[str, Any]]:
                         f"malformed JSONL ledger at {file_path}:{line_no}"
                     ) from exc
                 if isinstance(row, dict):
+                    summary = row.get("candidate_summary")
+                    summary_has_context = isinstance(summary, Mapping) and (
+                        "candidate_event_context" in summary
+                        or "candidate_event_context_status" in summary
+                    )
+                    if isinstance(row.get("event"), Mapping):
+                        row = dict(row)
+                        row["event"] = validate_ledger_event_candidate_context(row["event"])
+                        if (
+                            "candidate_event_context" in row["event"]
+                            or summary_has_context
+                        ):
+                            row["candidate_summary"] = (
+                                _candidate_summary_with_event_context(
+                                    _dict(summary),
+                                    row["event"],
+                                )
+                            )
+                    elif summary_has_context:
+                        # 為什麼 fail-closed：summary-only VALID/context 無 outer event
+                        # 可供 identity binding，不能把缺失/非 object event 當 legacy。
+                        _candidate_summary_with_event_context(_dict(summary), {})
                     rows.append(row)
     return rows
 
@@ -367,6 +436,40 @@ def _candidate_summary(candidate: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _candidate_summary_with_event_context(
+    summary: Mapping[str, Any],
+    event: Mapping[str, Any],
+) -> dict[str, Any]:
+    """把已驗證 raw context 正規化進 summary，拒絕第二份衝突 lineage。"""
+    normalized_summary = dict(summary)
+    validated_event = validate_ledger_event_candidate_context(event)
+    if "candidate_event_context" not in validated_event:
+        if "candidate_event_context" in normalized_summary:
+            raise ValueError("CANDIDATE_EVENT_CONTEXT_SUMMARY_CONFLICT")
+        status = normalized_summary.get("candidate_event_context_status")
+        if status is not None and status != CANDIDATE_EVENT_CONTEXT_UNQUALIFIED_STATUS:
+            raise ValueError("CANDIDATE_EVENT_CONTEXT_SUMMARY_CONFLICT")
+        return normalized_summary
+
+    context = validated_event["candidate_event_context"]
+    if (
+        "candidate_event_context" in normalized_summary
+        and normalized_summary["candidate_event_context"] != context
+    ):
+        raise ValueError("CANDIDATE_EVENT_CONTEXT_SUMMARY_CONFLICT")
+    if (
+        "candidate_event_context_status" in normalized_summary
+        and normalized_summary["candidate_event_context_status"]
+        != CANDIDATE_EVENT_CONTEXT_VALID_STATUS
+    ):
+        raise ValueError("CANDIDATE_EVENT_CONTEXT_SUMMARY_CONFLICT")
+    normalized_summary["candidate_event_context"] = context
+    normalized_summary["candidate_event_context_status"] = (
+        CANDIDATE_EVENT_CONTEXT_VALID_STATUS
+    )
+    return normalized_summary
+
+
 def summarize_side_cell_runtime_state(
     candidate: dict[str, Any],
     ledger_rows: list[dict[str, Any]],
@@ -512,6 +615,11 @@ def _decision(
     candidate: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     allowed = decision == ADMIT_DECISION
+    validated_event = validate_ledger_event_candidate_context(event)
+    candidate_summary = _candidate_summary_with_event_context(
+        _candidate_summary(candidate),
+        validated_event,
+    )
     return {
         "schema_version": ADAPTER_SCHEMA_VERSION,
         "generated_at_utc": now_utc.isoformat(),
@@ -520,9 +628,9 @@ def _decision(
         "allowed_to_submit_order": allowed,
         "no_order_authority": not allowed,
         "side_cell_key": side_cell_key_value,
-        "event": event,
+        "event": validated_event,
         "runtime_state": runtime_state or {},
-        "candidate_summary": _candidate_summary(candidate),
+        "candidate_summary": candidate_summary,
         "plan_summary": {
             "schema_version": (plan or {}).get("schema_version"),
             "status": (plan or {}).get("status"),
@@ -557,6 +665,7 @@ def evaluate_probe_admission(
     rows = ledger_rows or []
 
     normalized_event = dict(reject_event)
+    normalized_event = validate_ledger_event_candidate_context(normalized_event)
     normalized_event["side_cell_key"] = _event_to_side_cell(reject_event)
     normalized_event["reject_reason_code"] = normalize_reject_reason_code(
         reject_event.get("reject_reason_code") or reject_event.get("rejected_reason")
@@ -735,8 +844,16 @@ def evaluate_probe_admission(
     )
 
 
-def build_ledger_record(decision: dict[str, Any], *, record_type: str = "probe_admission_decision") -> dict[str, Any]:
-    event = decision.get("event") or {}
+def build_ledger_record(
+    decision: dict[str, Any],
+    *,
+    record_type: str = "probe_admission_decision",
+) -> dict[str, Any]:
+    event = validate_ledger_event_candidate_context(_dict(decision.get("event")))
+    candidate_summary = _candidate_summary_with_event_context(
+        _dict(decision.get("candidate_summary")),
+        event,
+    )
     return {
         "schema_version": ADAPTER_SCHEMA_VERSION,
         "record_type": record_type,
@@ -747,7 +864,7 @@ def build_ledger_record(decision: dict[str, Any], *, record_type: str = "probe_a
         "side_cell_key": decision.get("side_cell_key"),
         "event": event,
         "runtime_state": decision.get("runtime_state") or {},
-        "candidate_summary": decision.get("candidate_summary") or {},
+        "candidate_summary": candidate_summary,
         "reason": decision.get("reason"),
         "boundary": decision.get("boundary"),
     }
