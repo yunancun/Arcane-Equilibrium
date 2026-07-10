@@ -2,8 +2,8 @@
 
 ## 狀態欄
 - **STATUS**: IN_PROGRESS
-- **CURRENT**: P0.2 批次 7(governance/risk)
-- **LAST-COMMIT**: 7a1dbb87b(P0.2 批次 6)
+- **CURRENT**: P0.2 批次 7b(governance:tab-governance/governance-tab.js/autonomy-posture.js/canary-tab.js=302)
+- **LAST-COMMIT**: 0b432dde6(P0.2 批次 7a risk)
 - **BLOCKERS**: —
 - **AWAITING-OPERATOR**: —
 - **NEEDS-LINUX-RUNTIME**: —
@@ -23,7 +23,9 @@
   - [x] 批次 4 learning/replay/paper/earn(102→0)——證據 `a5c5f15f4`:tab-learning 27/tab-replay 1/tab-paper 35/tab-earn 29/handoff_helper.js 5/earn-tab.js 5;app-paper.js NO-OP;app-learning.js(2 style=)跳過=index 孤兒 Phase 2 未決;E1a(自報完整,報告階段未再中斷)→E2 APPROVE-WITH-NITS 0 blocking→回歸 PASS(406P/5F);`.ml-3` 進 §A;LOW=sparkline 6px→r-1 defer P0.4
   - [x] 批次 5 edge-gates/strategy(86→0)——證據 `e0b0d328c`:tab-edge-gates 3/tab-strategy 83;兩檔僅載 common*.js 自成一體,零新 utility;E1a DONE_WITH_CONCERNS(兩裁決點)→E2 PASS 0 finding(兩裁決點 APPROVE:tab-strategy 新建頁內塊正確/`.oc-diff-changed` 復用 blast=0)→回歸 PASS(406P/5F);進度條走 setProperty scoped-var(§7 form-1);autonomy-posture.js/canary-tab.js(各 7)歸批次 7(tab-governance 載入)
   - [x] 批次 6 stock-etf(2→0,近-NO-OP)——證據 `7a1dbb87b`:tab-stock-etf.html 2 個 inline style→0(se-muted mb-2/se-blocker-list mt-3);11 個 stock-etf JS 模組本就 0 inline style(建於 G0.5 guard 期);PM 直接 apply(trivial-edit 例外);治理驗證 **G0.5 guard 25/25 全綠**(IBKR read-only 邊界 margin 類無法觸及);structure 381P/5F
-  - [ ] 批次 7 governance/risk
+  - [~] 批次 7 governance/risk(521 styles,過大拆 7a/7b)
+    - [x] 7a risk(219→0)——證據 `0b432dde6`:tab-risk.html 209/risk-tab.js 10;E1a 完成主體後被中斷未自報(第三次報告階段中斷)→E2 抓中斷「改一半」HIGH(18 width token 寫成裸 HTML 屬性 class 不生效破版,grep style=0 掩蓋)並修復→鐵則一/二窮舉零殘留→回歸 PASS(406P/5F);PM 裁決 7 卡語義框移除=canon 1 中性化(交 A3);報告 PM 重建
+    - [ ] 7b governance:tab-governance.html 213/governance-tab.js 75/autonomy-posture.js 7/canary-tab.js 7=302
   - [ ] 批次 8 demo/live(交易關鍵,最後)
   - 批次規則(PA 規格 §11):開工先實測該批檔案 style= 計數;`.oc-input--num` 組件隨 tab-ai/tab-risk 所屬批次落地;E1a 報告須含「全局新類 baseline 使用 sweep」節(E2 R2 LOW-1)
 - [ ] P0.3 數字排版 pass:全站數值 `.num`(mono+tabular+右對齊)+第二通道(▲▼/LONG-SHORT/±);精度紀律 USD 2dp/BTC 6dp/% 2dp/bps 2dp
@@ -90,3 +92,4 @@
 | 2026-07-10 | R5 | P0.2 批次 4 | a5c5f15f4 | 上輪防中斷指令生效:E1a 自報完整(報告先寫再回覆);E2 APPROVE-WITH-NITS 0 blocking(語義別名 byte-exact 無變色親證);LOW=sparkline 6px 半徑 defer P0.4 群改;P0.4 清單擴充(半徑整併群/越界文字常量);全站 style= 累進批 1-4 完成 |
 | 2026-07-10 | R6 | P0.2 批次 5 | e0b0d328c | 乾淨輪(無 agent 中斷);E1a 兩裁決點自標 concerns→E2 全 APPROVE 0 finding;架構決策記錄:tab(iframe)專屬選擇器入頁內 `<style>` 塊而非殼層 styles.css(§8 字面以 index=殼層文檔舉例,tab 不適用);全站 style= 累進批 1-5 完成,剩 stock-etf/governance-risk/demo-live 三批 |
 | 2026-07-10 | R7 | P0.2 批次 6 | 7a1dbb87b | 近-NO-OP(stock-etf 11 JS 模組建於 G0.5 guard 期本就 0 inline);僅 tab HTML 2 swap,PM trivial-edit 直接 apply+G0.5 25/25 治理驗證(未派 E1a/E2,因 2 個既存 utility swap 屬例外且治理面由 guard 守);剩 governance-risk(批 7,含 autonomy-posture/canary-tab.js)+demo-live(批 8,交易關鍵) |
+| 2026-07-10 | R8 | P0.2 批次 7a risk | 0b432dde6 | batch 7 拆 7a/7b;E1a 第三次報告階段中斷(user-interrupt-during-tool),主體 219→0 落樹;E2 補審抓中斷「改一半」HIGH(裸屬性破版=grep 盲區,唯逐元素親證可抓)並修+鐵則窮舉零殘留;PM 裁決卡框中性化+重建報告+回歸(406P/5F);背景 task_29034ec8(snapshot 修)另一 session 完成=3 passed |
