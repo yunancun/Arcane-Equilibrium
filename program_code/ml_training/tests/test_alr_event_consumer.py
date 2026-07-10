@@ -660,6 +660,7 @@ def test_event_loop_processes_feedback_before_next_target_rotation(
 ) -> None:
     calls: list[str] = []
     captured_write_metrics: list[dict[str, object]] = []
+    captured_target_config: list[tuple[Path | None, dict[str, object] | None]] = []
     monkeypatch.setattr(
         consumer,
         "drain_fresh_lane",
@@ -689,12 +690,19 @@ def test_event_loop_processes_feedback_before_next_target_rotation(
             "feedback_payload_bytes_written": 256,
         },
     )
-    monkeypatch.setattr(
-        consumer,
-        "run_operational_backlog",
-        lambda connection, *, source_head, max_batch: calls.append("target")
-        or {
-            "training_runs": 1,
+    def target(
+        connection: object,
+        *,
+        source_head: str,
+        max_batch: int,
+        evidence_directory: Path | None,
+        candidate_policy: dict[str, object] | None,
+    ) -> dict[str, int]:
+        del connection, source_head, max_batch
+        calls.append("target")
+        captured_target_config.append((evidence_directory, candidate_policy))
+        return {
+            "training_runs": 0,
             "training_duplicates": 0,
             "training_deferred": 0,
             "training_insufficient_source_cycles": 0,
@@ -703,15 +711,16 @@ def test_event_loop_processes_feedback_before_next_target_rotation(
             "decision_write_attempts": 1,
             "decision_writes_suppressed": 0,
             "decision_duplicate_retries": 0,
-            "operational_artifact_rows_written": 5,
-            "operational_provenance_rows_written": 7,
-            "operational_run_rows_written": 1,
+            "operational_artifact_rows_written": 1,
+            "operational_provenance_rows_written": 3,
+            "operational_run_rows_written": 0,
             "operational_feedback_rows_written": 0,
-            "operational_defer_artifact_rows_written": 1,
-            "operational_payload_bytes_written": 1024,
+            "operational_defer_artifact_rows_written": 0,
+            "operational_payload_bytes_written": 512,
             "operational_source_rows_consumed": 3,
-        },
-    )
+        }
+
+    monkeypatch.setattr(consumer, "run_candidate_aware_backlog", target)
     monkeypatch.setattr(
         consumer,
         "process_retention_backlog",
@@ -754,11 +763,16 @@ def test_event_loop_processes_feedback_before_next_target_rotation(
         wait_for_notifications=lambda *args, **kwargs: [],
         session_id="00000000-0000-0000-0000-000000000001",
         source_head="a" * 40,
+        candidate_evidence_directory=Path("/durable/evidence"),
+        candidate_policy={"policy_hash": "b" * 64},
     )
 
     assert calls == ["feedback", "target", "retention", "health"]
     assert result["feedback_rotations"] == 1
-    assert result["training_runs"] == 1
+    assert result["training_runs"] == 0
+    assert captured_target_config == [
+        (Path("/durable/evidence"), {"policy_hash": "b" * 64})
+    ]
     assert captured_write_metrics == [
         {
             "schema_version": "alr_write_metrics_v1",
@@ -781,12 +795,12 @@ def test_event_loop_processes_feedback_before_next_target_rotation(
                 "attempts": 1,
                 "writes_suppressed": 0,
                 "duplicate_retries": 0,
-                "artifact_rows_written": 8,
-                "provenance_rows_written": 10,
-                "run_rows_written": 1,
+                "artifact_rows_written": 4,
+                "provenance_rows_written": 6,
+                "run_rows_written": 0,
                 "feedback_rows_written": 1,
-                "defer_artifact_rows_written": 1,
-                "payload_bytes_written": 1280,
+                "defer_artifact_rows_written": 0,
+                "payload_bytes_written": 768,
                 "source_rows_consumed": 3,
                 "suppression_ratio": 0.0,
             },
@@ -873,7 +887,7 @@ def test_idle_health_heartbeat_does_not_trigger_another_training_cycle(
             "health_authority_mismatches": 0,
         }
 
-    monkeypatch.setattr(consumer, "run_operational_backlog", target)
+    monkeypatch.setattr(consumer, "run_candidate_aware_backlog", target)
     monkeypatch.setattr(
         consumer,
         "process_retention_backlog",

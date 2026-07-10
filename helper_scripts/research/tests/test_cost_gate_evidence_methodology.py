@@ -10,9 +10,17 @@ MODULE_NOTE:
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
+import json
 import math
+from pathlib import Path
+import sys
 
 import pytest
+
+_PROGRAM_CODE = Path(__file__).resolve().parents[3] / "program_code"
+if str(_PROGRAM_CODE) not in sys.path:
+    sys.path.insert(0, str(_PROGRAM_CODE))
 
 from cost_gate_learning_lane import cost_model
 from cost_gate_learning_lane import evidence_stats
@@ -23,6 +31,18 @@ from cost_gate_learning_lane.outcome_review import (
 from cost_gate_learning_lane.outcome_writer import (
     ProbeOutcomeConfig,
     build_blocked_signal_outcome_records,
+)
+from program_code.ml_training.alr_candidate_learning_arbiter import (
+    build_candidate_learning_decision,
+)
+from program_code.ml_training.alr_candidate_evidence_adapter import (
+    load_candidate_evidence_snapshot,
+)
+from program_code.ml_training.alr_candidate_learning_projection import (
+    build_candidate_aware_learning_projection,
+)
+from program_code.ml_training.alr_operational_repository import (
+    build_candidate_learning_projection_plan,
 )
 
 
@@ -187,6 +207,843 @@ def _spread_entry_ts(index: int, *, per_day: int = 5) -> int:
         + (index // per_day) * _DAY_MS
         + (index % per_day) * _HOUR_MS
     )
+
+
+def _with_complete_candidate_lineage(
+    row,
+    *,
+    strategy_version="v1",
+    config_hash="a" * 64,
+):
+    complete = _with_typed_candidate_learning_context(row)
+    context = dict(complete["candidate_summary"]["candidate_learning_context"])
+    context["strategy_version"] = strategy_version
+    context["strategy_config_hash"] = config_hash
+    context["target_regime_hash"] = "b" * 64
+    complete["candidate_summary"] = {"candidate_learning_context": context}
+    return complete
+
+
+def _with_typed_candidate_learning_context(row):
+    typed = dict(row)
+    daily_buckets = [
+        {
+            "utc_date": f"2026-{month_day}",
+            "scan_complete": True,
+            "distinct_entries": 5,
+        }
+        for month_day in (
+            "06-27",
+            "06-28",
+            "06-29",
+            "06-30",
+            "07-01",
+            "07-02",
+            "07-03",
+        )
+    ]
+    estimator_payload = {
+        "daily_buckets": daily_buckets,
+        "estimated_rows_scanned": 700,
+        "predicted_canonical_bytes": 7_000,
+        "zero_resource_attested": False,
+    }
+    resource = dict(estimator_payload)
+    resource["resource_estimator_hash"] = hashlib.sha256(
+        json.dumps(
+            estimator_payload,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    typed["candidate_summary"] = {
+        "candidate_learning_context": {
+            "strategy_version": "v3.2.1",
+            "strategy_config_hash": "1" * 64,
+            "target_regime_context": {
+                "label": "range_low_vol",
+                "utc_date": "2026-07-03",
+                "point_in_time": "D-1",
+            },
+            "target_regime_hash": "2" * 64,
+            "venue": "bybit",
+            "product": "linear_perpetual",
+            "evidence_engine_mode": "demo",
+            "evidence_regime_label": "neutral|low_vol|liquid",
+            "hidden_oos_consumed": False,
+            "context_hashes": {
+                "data": "3" * 64,
+                "evidence": "4" * 64,
+                "cost": "5" * 64,
+                "portfolio": "6" * 64,
+            },
+            "resource": resource,
+            "portfolio": {
+                "sector_exposure_share": "0.10",
+                "strategy_active_target_share": "0.20",
+                "beta_to_portfolio": "0.30",
+            },
+            "proof": {
+                "proof_stage": 1,
+                "completed_proof_stages": [0, 1],
+                "next_gap": {"kind": "NONE", "code": "DATA_GATES_READY"},
+            },
+        }
+    }
+    return typed
+
+
+def test_learning_candidate_board_emits_typed_arbiter_input_with_cr1_cluster_se():
+    day_effects = (-3.0, -2.0, -1.0, 1.0, 2.0, 3.0)
+    rows = []
+    gross_values = []
+    for index in range(30):
+        gross = -20.0 + day_effects[index // 5] + (index % 5) * 0.1
+        gross_values.append(gross)
+        rows.append(
+            _with_typed_candidate_learning_context(
+                _blocked_outcome_row(
+                    f"typed-{index}",
+                    "strat|TYPEDUSDT|Buy",
+                    gross,
+                    cost_model_version="conservative_v1",
+                    entry_ts_ms=_spread_entry_ts(index),
+                )
+            )
+        )
+
+    packet = build_blocked_signal_outcome_review(
+        rows,
+        slippage_quantiles=_expected_cost_artifact(mean_abs=2.0, cvar90=8.0),
+        now_utc=NOW,
+    )
+
+    candidate = packet["learning_candidate_board"]["candidate_rows"][0]
+    typed = candidate["arbiter_input"]
+    assert candidate["arbiter_input_complete"] is True
+    assert candidate["selection_eligible"] is True
+    assert typed["schema_version"] == "alr_candidate_arbiter_input_v1"
+    assert typed["identity"]["engine_mode"] == "shadow"
+    assert typed["identity"]["evidence_engine_mode"] == "demo"
+    assert typed["identity"]["config_hash"] == "1" * 64
+    assert typed["context_hashes"] == {
+        "data": "3" * 64,
+        "evidence": "4" * 64,
+        "cost": "5" * 64,
+        "portfolio": "6" * 64,
+    }
+    assert typed["quality"]["hidden_oos_consumed"] is False
+    assert typed["quality"]["replica_inconsistency_count"] == 0
+    assert typed["evidence"]["n_eff"] == 30
+    assert typed["evidence"]["utc_day_count"] == 6
+    assert typed["evidence"]["proof_stage"] == 1
+    assert typed["evidence"]["completed_proof_stages"] == [0, 1]
+    assert typed["evidence"]["next_gap"] == {
+        "kind": "NONE",
+        "code": "DATA_GATES_READY",
+    }
+    expected_nets = [gross - 15.0 for gross in gross_values]
+    expected_mean = sum(expected_nets) / len(expected_nets)
+    cluster_sums = []
+    for day in range(6):
+        cluster_sums.append(
+            sum(value - expected_mean for value in expected_nets[day * 5 : day * 5 + 5])
+        )
+    expected_variance = (
+        (6.0 / 5.0)
+        * sum(value * value for value in cluster_sums)
+        / (len(expected_nets) ** 2)
+    )
+    assert typed["evidence"]["mean_net_e"] == pytest.approx(expected_mean)
+    assert typed["evidence"]["day_cluster_variance"] == pytest.approx(
+        expected_variance
+    )
+    assert typed["evidence"]["cluster_se"] == pytest.approx(
+        math.sqrt(expected_variance)
+    )
+    resource_payload = {
+        key: value
+        for key, value in typed["resource"].items()
+        if key != "resource_estimator_hash"
+    }
+    assert typed["resource"]["resource_estimator_hash"] == hashlib.sha256(
+        json.dumps(
+            resource_payload,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    assert len(typed["resource"]["daily_buckets"]) == 7
+    assert typed["portfolio"]["beta_to_portfolio"] == "0.30"
+    policy_body = {
+        "decision_ts_s": int(NOW.replace(hour=0).timestamp()),
+        "as_of_utc_date": "2026-07-04",
+        "algorithm_version": "candidate_learning_arbiter_v1",
+        "tie_break_version": "candidate_learning_tie_break_v1",
+        "q18_scale": 18,
+        "thresholds": {
+            "e1_n_eff_min": 30,
+            "e2_utc_days_min": 5,
+            "e3_top_day_share_max": "0.5",
+            "e4_censored_share_max": "0.3",
+        },
+        "row_budget": 10_000,
+        "byte_budget": 1_000_000,
+        "collection_window_days": 7,
+        "max_new_entries_per_window": 70,
+        "cooldown_seconds": 1_800,
+        "unknown_portfolio_penalty": "1",
+    }
+    policy = dict(policy_body)
+    stable_policy = {
+        key: value
+        for key, value in policy_body.items()
+        if key not in {"decision_ts_s", "as_of_utc_date"}
+    }
+    policy["policy_config_hash"] = hashlib.sha256(
+        json.dumps(
+            stable_policy,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    decision = build_candidate_learning_decision(
+        source_head="a" * 40,
+        scanner_research_seeds=[],
+        candidate_evidence_board=[typed],
+        prior_decisions=[],
+        policy=policy,
+    )
+    assert decision["decision"] == "QUALIFIED_CANDIDATE_SELECTED", decision
+    assert decision["candidate_assessments"][0]["state"] == "DECISION_READY"
+
+
+def test_real_board_file_flows_through_bounded_adapter_and_projection(
+    tmp_path: Path,
+):
+    rows = []
+    day_effects = (-3.0, -2.0, -1.0, 1.0, 2.0, 3.0)
+    for index in range(30):
+        gross = -20.0 + day_effects[index // 5] + (index % 5) * 0.1
+        rows.append(
+            _with_typed_candidate_learning_context(
+                _blocked_outcome_row(
+                    f"integration-{index}",
+                    "strat|TYPEDUSDT|Buy",
+                    gross,
+                    cost_model_version="conservative_v1",
+                    entry_ts_ms=_spread_entry_ts(index),
+                )
+            )
+        )
+    packet = build_blocked_signal_outcome_review(
+        rows,
+        slippage_quantiles=_expected_cost_artifact(mean_abs=2.0, cvar90=8.0),
+        now_utc=NOW,
+    )
+    snapshot_path = tmp_path / "blocked_outcome_review_20260704T180000Z.json"
+    snapshot_path.write_text(
+        json.dumps(packet, ensure_ascii=True, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    evaluated_at = "2026-07-04T18:01:00Z"
+    snapshot = load_candidate_evidence_snapshot(
+        tmp_path,
+        evaluated_at=evaluated_at,
+        max_age_seconds=3_600,
+        max_files=8,
+        max_bytes=2_000_000,
+    )
+    policy_body = {
+        "decision_ts_s": int(
+            dt.datetime.fromisoformat(evaluated_at.replace("Z", "+00:00")).timestamp()
+        ),
+        "as_of_utc_date": "2026-07-04",
+        "algorithm_version": "candidate_learning_arbiter_v1",
+        "tie_break_version": "candidate_learning_tie_break_v1",
+        "q18_scale": 18,
+        "thresholds": {
+            "e1_n_eff_min": 30,
+            "e2_utc_days_min": 5,
+            "e3_top_day_share_max": "0.5",
+            "e4_censored_share_max": "0.3",
+        },
+        "row_budget": 10_000,
+        "byte_budget": 1_000_000,
+        "collection_window_days": 7,
+        "max_new_entries_per_window": 70,
+        "cooldown_seconds": 1_800,
+        "unknown_portfolio_penalty": "1",
+    }
+    stable_policy = {
+        key: value
+        for key, value in policy_body.items()
+        if key not in {"decision_ts_s", "as_of_utc_date"}
+    }
+    policy = {
+        **policy_body,
+        "policy_config_hash": hashlib.sha256(
+            json.dumps(
+                stable_policy,
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest(),
+    }
+    cycles = [
+        {
+            "source_hash": f"{ordinal:064x}",
+            "source_key": f"scan-{ordinal}|2026-07-04T17:5{ordinal}:00Z",
+            "source_ts": f"2026-07-04T17:5{ordinal}:00Z",
+            "canonical_payload": {
+                "candidates": [{"symbol": "TYPEDUSDT"}],
+                "added": ["TYPEDUSDT"] if ordinal == 1 else [],
+            },
+        }
+        for ordinal in range(1, 4)
+    ]
+
+    projection = build_candidate_aware_learning_projection(
+        source_head="a" * 40,
+        cycles=cycles,
+        evidence_snapshot=snapshot,
+        prior_decisions=[],
+        policy=policy,
+    )
+    plan = build_candidate_learning_projection_plan(projection)
+
+    assert snapshot["source_status"] == "READY"
+    assert projection["decision"]["decision_code"] == "QUALIFIED_CANDIDATE_SELECTED"
+    assert projection["decision"]["selected_candidate"]["identity"]["symbol"] == "TYPEDUSDT"
+    assert plan["artifact"]["canonical_payload"]["decision"] == projection["decision"]
+    assert plan["artifact"]["canonical_payload"]["training_run_created"] is False
+
+
+def test_learning_candidate_board_aggregates_regimes_across_same_family():
+    rows = []
+    for index, label in enumerate(
+        (
+            "bull|high_vol|liquid",
+            "bull|high_vol|liquid",
+            "bear|low_vol|thin",
+            "bear|low_vol|thin",
+        )
+    ):
+        row = _with_typed_candidate_learning_context(
+            _blocked_outcome_row(
+                f"regime-{index}",
+                "strat|REGIMEUSDT|Buy",
+                -20.0 + index,
+                cost_model_version="conservative_v1",
+                entry_ts_ms=_spread_entry_ts(index, per_day=1),
+            )
+        )
+        context = dict(row["candidate_summary"]["candidate_learning_context"])
+        context["evidence_regime_label"] = label
+        row["candidate_summary"] = {"candidate_learning_context": context}
+        rows.append(row)
+
+    packet = build_blocked_signal_outcome_review(
+        rows,
+        slippage_quantiles=_expected_cost_artifact(mean_abs=2.0, cvar90=8.0),
+        now_utc=NOW,
+    )
+
+    board_rows = packet["learning_candidate_board"]["candidate_rows"]
+    assert len(board_rows) == 1
+    for candidate in board_rows:
+        counts = candidate["regime_entry_counts"]
+        assert set(counts) == {
+            f"{trend}|{volatility}|{liquidity}"
+            for trend in ("bear", "neutral", "bull")
+            for volatility in ("low_vol", "mid_vol", "high_vol")
+            for liquidity in ("liquid", "thin")
+        } | {"unknown"}
+        assert counts["bear|low_vol|thin"] == 2
+        assert counts["bull|high_vol|liquid"] == 2
+        assert sum(counts.values()) == candidate["n_eff"] == 4
+        coverage = candidate["regime_coverage_inputs"]
+        assert coverage["composite_bucket_universe_size"] == 18
+        assert coverage["observed_composite_bucket_count"] == 2
+        assert coverage["effective_entry_count"] == candidate["n_eff"]
+        assert coverage["unknown_regime_share"] == 0.0
+
+
+@pytest.mark.parametrize("hidden_value", (True, None))
+def test_learning_candidate_board_never_synthesizes_hidden_oos_false(
+    hidden_value,
+):
+    row = _with_typed_candidate_learning_context(
+        _blocked_outcome_row(
+            "hidden-oos",
+            "strat|HIDDENUSDT|Buy",
+            -20.0,
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(0),
+        )
+    )
+    context = dict(row["candidate_summary"]["candidate_learning_context"])
+    if hidden_value is None:
+        context.pop("hidden_oos_consumed")
+    else:
+        context["hidden_oos_consumed"] = hidden_value
+    row["candidate_summary"] = {"candidate_learning_context": context}
+
+    candidate = build_blocked_signal_outcome_review([row], now_utc=NOW)[
+        "learning_candidate_board"
+    ]["candidate_rows"][0]
+
+    assert candidate["selection_eligible"] is False
+    if hidden_value is True:
+        assert candidate["arbiter_input_complete"] is True
+        assert candidate["arbiter_input"]["quality"]["hidden_oos_consumed"] is True
+        assert "HIDDEN_OOS_CONSUMED" in candidate["blockers"]
+    else:
+        assert candidate["arbiter_input_complete"] is False
+        assert "HIDDEN_OOS_STATUS_MISSING_OR_INVALID" in candidate["blockers"]
+
+
+def test_learning_candidate_board_accepts_finite_beta_above_one() -> None:
+    row = _with_typed_candidate_learning_context(
+        _blocked_outcome_row(
+            "finite-beta",
+            "strat|BETAUSDT|Buy",
+            -20.0,
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(0),
+        )
+    )
+    context = dict(row["candidate_summary"]["candidate_learning_context"])
+    context["portfolio"] = {
+        **context["portfolio"],
+        "beta_to_portfolio": "1.5",
+    }
+    row["candidate_summary"] = {"candidate_learning_context": context}
+
+    candidate = build_blocked_signal_outcome_review([row], now_utc=NOW)[
+        "learning_candidate_board"
+    ]["candidate_rows"][0]
+
+    assert candidate["arbiter_input_complete"] is True
+    assert "PORTFOLIO_METRICS_MISSING_OR_INVALID" not in candidate["blockers"]
+    assert candidate["arbiter_input"]["portfolio"]["beta_to_portfolio"] == "1.5"
+
+
+def test_learning_candidate_board_uses_full_universe_not_legacy_top16():
+    rows = [
+        _blocked_outcome_row(
+            f"full-{index:02d}",
+            f"strat|S{index:02d}USDT|Buy",
+            10.0 + index,
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(index),
+        )
+        for index in range(17)
+    ]
+
+    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+
+    assert len(packet["top_side_cells"]) == 16
+    board = packet["learning_candidate_board"]
+    assert board["schema_version"] == "cost_gate_learning_candidate_board_v1"
+    assert board["candidate_universe_complete"] is True
+    assert len(board["candidate_rows"]) == 17
+
+
+def test_learning_candidate_board_splits_horizons_without_changing_legacy_cell():
+    short = _blocked_outcome_row(
+        "mixed-60",
+        "strat|MIXEDUSDT|Buy",
+        12.0,
+        cost_model_version="conservative_v1",
+        entry_ts_ms=_spread_entry_ts(0),
+    )
+    long = _blocked_outcome_row(
+        "mixed-240",
+        "strat|MIXEDUSDT|Buy",
+        14.0,
+        cost_model_version="conservative_v1",
+        entry_ts_ms=_spread_entry_ts(1),
+    )
+    long["horizon_minutes"] = 240
+
+    packet = build_blocked_signal_outcome_review([short, long], now_utc=NOW)
+
+    legacy = packet["top_side_cells"]
+    assert len(legacy) == 1
+    assert legacy[0]["horizon_minutes"] == [60, 240]
+    board_rows = packet["learning_candidate_board"]["candidate_rows"]
+    assert [row["horizon_minutes"] for row in board_rows] == [60, 240]
+    assert [row["raw_outcome_count"] for row in board_rows] == [1, 1]
+
+
+def test_learning_candidate_board_keeps_legacy_row_but_blocks_incomplete_identity():
+    legacy = _blocked_outcome_row(
+        "legacy-lineage",
+        "strat|LEGACYUSDT|Buy",
+        12.0,
+        cost_model_version="conservative_v1",
+        entry_ts_ms=_spread_entry_ts(0),
+    )
+
+    packet = build_blocked_signal_outcome_review([legacy], now_utc=NOW)
+
+    row = packet["learning_candidate_board"]["candidate_rows"][0]
+    assert row["identity_complete"] is False
+    assert row["arbiter_input_complete"] is False
+    assert row["selection_eligible"] is False
+    assert "IDENTITY_LINEAGE_INCOMPLETE" in row["blockers"]
+    assert "CANDIDATE_LEARNING_CONTEXT_MISSING" in row["blockers"]
+    assert "DATA_CONTEXT_HASH_MISSING_OR_INVALID" in row["blockers"]
+    assert "RESOURCE_ESTIMATOR_HASH_MISSING_OR_INVALID" in row["blockers"]
+    assert "RESOURCE_DAILY_BUCKETS_INCOMPLETE" in row["blockers"]
+    assert "PORTFOLIO_METRICS_MISSING_OR_INVALID" in row["blockers"]
+    assert "PROOF_PREFIX_MISSING_OR_INVALID" in row["blockers"]
+    assert row["candidate_identity"]["strategy_version"] is None
+    assert row["candidate_identity"]["strategy_config_hash"] is None
+    assert row["candidate_identity"]["target_regime_context"] is None
+    assert row["arbiter_input"]["identity"]["engine_mode"] == "shadow"
+    assert row["arbiter_input"]["identity"]["evidence_engine_mode"] is None
+
+
+def test_learning_candidate_board_retains_complete_identity_without_version_pooling():
+    base = _blocked_outcome_row(
+        "identity-v1",
+        "strat|IDENTITYUSDT|Buy",
+        12.0,
+        cost_model_version="conservative_v1",
+        entry_ts_ms=_spread_entry_ts(0),
+    )
+    first = _with_complete_candidate_lineage(base, strategy_version="v1")
+    second = _with_complete_candidate_lineage(
+        {
+            **base,
+            "attempt_id": "identity-v2",
+            "entry_ts_ms": _spread_entry_ts(1),
+        },
+        strategy_version="v2",
+        config_hash="c" * 64,
+    )
+
+    packet = build_blocked_signal_outcome_review([second, first], now_utc=NOW)
+
+    board_rows = packet["learning_candidate_board"]["candidate_rows"]
+    assert len(board_rows) == 2
+    identities = [row["candidate_identity"] for row in board_rows]
+    assert [identity["strategy_version"] for identity in identities] == ["v1", "v2"]
+    assert identities[0]["strategy_config_hash"] == "a" * 64
+    assert identities[1]["strategy_config_hash"] == "c" * 64
+    assert all(row["identity_complete"] is True for row in board_rows)
+    candidate_ids = [row["candidate_id"] for row in board_rows]
+    assert len(set(candidate_ids)) == 2
+    assert all(len(candidate_id) == 64 for candidate_id in candidate_ids)
+
+
+def test_learning_candidate_board_splits_target_regimes_within_stable_family():
+    rows = []
+    regimes = (
+        ("range_low_vol", "2" * 64),
+        ("trend_high_vol", "7" * 64),
+    )
+    for regime_index, (label, regime_hash) in enumerate(regimes):
+        for observation_index, gross in enumerate((-20.0, -18.0)):
+            row = _with_typed_candidate_learning_context(
+                _blocked_outcome_row(
+                    f"regime-identity-{regime_index}-{observation_index}",
+                    "strat|REGIMEIDENTITYUSDT|Buy",
+                    gross,
+                    cost_model_version="conservative_v1",
+                    entry_ts_ms=_spread_entry_ts(
+                        regime_index + observation_index * 5
+                    ),
+                )
+            )
+            context = dict(row["candidate_summary"]["candidate_learning_context"])
+            context["target_regime_context"] = {
+                **context["target_regime_context"],
+                "label": label,
+            }
+            context["target_regime_hash"] = regime_hash
+            row["candidate_summary"] = {"candidate_learning_context": context}
+            rows.append(row)
+
+    board = build_blocked_signal_outcome_review(rows, now_utc=NOW)[
+        "learning_candidate_board"
+    ]
+
+    assert len(board["candidate_rows"]) == 2
+    assert {
+        row["candidate_identity"]["target_regime_context"]["label"]
+        for row in board["candidate_rows"]
+    } == {label for label, _ in regimes}
+    assert {
+        row["candidate_identity"]["target_regime_hash"]
+        for row in board["candidate_rows"]
+    } == {regime_hash for _, regime_hash in regimes}
+    assert len({row["candidate_family_key"] for row in board["candidate_rows"]}) == 1
+    assert len({row["candidate_id"] for row in board["candidate_rows"]}) == 2
+
+    policy_body = {
+        "decision_ts_s": int(NOW.replace(hour=0).timestamp()),
+        "as_of_utc_date": "2026-07-04",
+        "algorithm_version": "candidate_learning_arbiter_v1",
+        "tie_break_version": "candidate_learning_tie_break_v1",
+        "q18_scale": 18,
+        "thresholds": {
+            "e1_n_eff_min": 30,
+            "e2_utc_days_min": 5,
+            "e3_top_day_share_max": "0.5",
+            "e4_censored_share_max": "0.3",
+        },
+        "row_budget": 10_000,
+        "byte_budget": 1_000_000,
+        "collection_window_days": 7,
+        "max_new_entries_per_window": 70,
+        "cooldown_seconds": 1_800,
+        "unknown_portfolio_penalty": "1",
+    }
+    stable_policy = {
+        key: value
+        for key, value in policy_body.items()
+        if key not in {"decision_ts_s", "as_of_utc_date"}
+    }
+    policy = {
+        **policy_body,
+        "policy_config_hash": hashlib.sha256(
+            json.dumps(
+                stable_policy,
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest(),
+    }
+    decision = build_candidate_learning_decision(
+        source_head="a" * 40,
+        scanner_research_seeds=[],
+        candidate_evidence_board=[
+            row["arbiter_input"] for row in board["candidate_rows"]
+        ],
+        prior_decisions=[],
+        policy=policy,
+    )
+    assessments = decision["candidate_assessments"]
+    assert len(assessments) == 2
+    assert len({item["family_key"] for item in assessments}) == 1
+    assert len({item["evaluation_id"] for item in assessments}) == 2
+
+
+def test_dynamic_evaluation_context_conflict_does_not_fragment_stable_cohort():
+    first = _with_typed_candidate_learning_context(
+        _blocked_outcome_row(
+            "cohort-first",
+            "strat|COHORTUSDT|Buy",
+            -20.0,
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(0),
+        )
+    )
+    second = _with_typed_candidate_learning_context(
+        _blocked_outcome_row(
+            "cohort-second",
+            "strat|COHORTUSDT|Buy",
+            -19.0,
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(1),
+        )
+    )
+    context = dict(second["candidate_summary"]["candidate_learning_context"])
+    context["portfolio"] = {
+        **context["portfolio"],
+        "strategy_active_target_share": "0.25",
+    }
+    context["context_hashes"] = {
+        **context["context_hashes"],
+        "portfolio": "9" * 64,
+    }
+    second["candidate_summary"] = {"candidate_learning_context": context}
+
+    board = build_blocked_signal_outcome_review(
+        [second, first], now_utc=NOW
+    )["learning_candidate_board"]
+
+    assert len(board["candidate_rows"]) == 1
+    candidate = board["candidate_rows"][0]
+    assert candidate["raw_outcome_count"] == 2
+    assert candidate["arbiter_input_complete"] is False
+    assert candidate["selection_eligible"] is False
+    assert "CANDIDATE_EVALUATION_CONTEXT_CONFLICT" in candidate["blockers"]
+
+
+def test_learning_candidate_board_reports_dedup_n_eff_not_raw_rows():
+    rows = []
+    for index, offset_ms in enumerate((0, 5_000, 30_000)):
+        row = _blocked_outcome_row(
+            f"duplicate-{index}",
+            "strat|DUPUSDT|Buy",
+            12.0,
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(0) + offset_ms,
+        )
+        rows.append(_with_complete_candidate_lineage(row))
+
+    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+
+    candidate = packet["learning_candidate_board"]["candidate_rows"][0]
+    assert candidate["raw_outcome_count"] == 3
+    assert candidate["distinct_entry_observation_count"] == 1
+    assert candidate["duplicate_outcome_row_count"] == 2
+    assert candidate["n_eff"] == 1
+    assert candidate["window_overlap_excluded_entry_count"] == 0
+
+
+def test_learning_candidate_board_hash_is_canonical_and_permutation_stable():
+    rows = []
+    for index, symbol in enumerate(("HASHBUSDT", "HASHAUSDT")):
+        row = _blocked_outcome_row(
+            f"hash-{index}",
+            f"strat|{symbol}|Buy",
+            12.0 + index,
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(index),
+        )
+        rows.append(_with_complete_candidate_lineage(row))
+
+    forward = build_blocked_signal_outcome_review(rows, now_utc=NOW)[
+        "learning_candidate_board"
+    ]
+    reversed_board = build_blocked_signal_outcome_review(
+        list(reversed(rows)), now_utc=NOW
+    )["learning_candidate_board"]
+
+    assert forward == reversed_board
+    assert len(forward["board_hash"]) == 64
+    without_hash = {key: value for key, value in forward.items() if key != "board_hash"}
+    encoded = json.dumps(
+        without_hash,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    assert forward["board_hash"] == hashlib.sha256(encoded).hexdigest()
+
+
+def test_learning_candidate_board_exposes_cost_censoring_and_regime_inputs():
+    rows = [
+        _with_complete_candidate_lineage(
+            _blocked_outcome_row(
+                f"qualified-{index}",
+                "strat|QUALIFIEDUSDT|Buy",
+                -20.0 + (index % 5) - 2.0,
+                cost_model_version="conservative_v1",
+                entry_ts_ms=_spread_entry_ts(index),
+            )
+        )
+        for index in range(30)
+    ]
+    artifact = _expected_cost_artifact(mean_abs=2.0, cvar90=8.0)
+
+    packet = build_blocked_signal_outcome_review(
+        rows,
+        slippage_quantiles=artifact,
+        now_utc=NOW,
+    )
+
+    candidate = packet["learning_candidate_board"]["candidate_rows"][0]
+    assert packet["top_side_cells"][0]["review_candidate"] is False
+    assert candidate["identity_complete"] is True
+    assert candidate["selection_eligible"] is False
+    assert "DAY_CLUSTER_VARIANCE_DEGENERATE" in candidate["blockers"]
+    assert candidate["n_eff"] == 30
+    assert candidate["distinct_entry_utc_days"] == 6
+    assert candidate["top_entry_day_share"] == pytest.approx(1.0 / 6.0)
+    assert candidate["censored_share"] == 0.0
+    assert candidate["expected_cost_recomputable_share"] == 1.0
+    assert candidate["tail_cost_recomputable_share"] == 1.0
+    assert candidate["regime_entry_counts"]["neutral|low_vol|liquid"] == 30
+    assert sum(candidate["regime_entry_counts"].values()) == 30
+    assert candidate["hidden_oos_consumed"] is False
+
+
+def test_learning_candidate_board_invalid_uncensored_row_blocks_selection():
+    rows = [
+        _with_complete_candidate_lineage(
+            _blocked_outcome_row(
+                f"valid-{index}",
+                "strat|INVALIDUSDT|Sell",
+                -20.0 + (index % 5),
+                cost_model_version="conservative_v1",
+                entry_ts_ms=_spread_entry_ts(index),
+            )
+        )
+        for index in range(30)
+    ]
+    invalid = _with_complete_candidate_lineage(
+        {
+            **rows[0],
+            "attempt_id": "invalid-net",
+            "entry_ts_ms": _spread_entry_ts(31),
+            "realized_net_bps": None,
+        }
+    )
+    rows.append(invalid)
+
+    packet = build_blocked_signal_outcome_review(
+        rows,
+        slippage_quantiles=_expected_cost_artifact(mean_abs=2.0, cvar90=8.0),
+        now_utc=NOW,
+    )
+
+    candidate = packet["learning_candidate_board"]["candidate_rows"][0]
+    assert candidate["raw_outcome_count"] == 31
+    assert candidate["valid_uncensored_outcome_count"] == 30
+    assert candidate["invalid_outcome_row_count"] == 1
+    assert "INVALID_OUTCOME_ROWS_PRESENT" in candidate["blockers"]
+    assert candidate["selection_eligible"] is False
+
+
+def test_learning_candidate_board_censoring_share_uses_raw_plus_censored_rows():
+    rows = [
+        _with_complete_candidate_lineage(
+            _blocked_outcome_row(
+                f"uncensored-{index}",
+                "strat|CENSORUSDT|Buy",
+                -20.0 + (index % 5),
+                cost_model_version="conservative_v1",
+                entry_ts_ms=_spread_entry_ts(index),
+            )
+        )
+        for index in range(30)
+    ]
+    for index in range(14):
+        rows.append(
+            {
+                **rows[0],
+                "attempt_id": f"censored-{index}",
+                "entry_ts_ms": _spread_entry_ts(40 + index),
+                "censored": True,
+                "gross_bps": None,
+                "realized_net_bps": None,
+            }
+        )
+
+    packet = build_blocked_signal_outcome_review(
+        rows,
+        slippage_quantiles=_expected_cost_artifact(mean_abs=2.0, cvar90=8.0),
+        now_utc=NOW,
+    )
+
+    candidate = packet["learning_candidate_board"]["candidate_rows"][0]
+    assert candidate["raw_outcome_count"] == 44
+    assert candidate["censored_count"] == 14
+    assert candidate["censored_share"] == pytest.approx(14.0 / 44.0)
+    assert "CENSORING_EXCESS" in candidate["blockers"]
+    assert candidate["selection_eligible"] is False
 
 
 def test_backfill_overlay_flip():

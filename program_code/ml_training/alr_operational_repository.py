@@ -38,6 +38,19 @@ _EDGE_ROLES = {
     "experiment_candidate",
     "candidate_defer_evidence",
 }
+_CANDIDATE_PROJECTION_SCHEMA_VERSION = "alr_candidate_learning_projection_v1"
+_CANDIDATE_PROJECTION_ARTIFACT_SCHEMA_VERSION = (
+    "alr_candidate_learning_projection_artifact_v1"
+)
+_CANDIDATE_DECISION_SCHEMA_VERSION = "alr_candidate_learning_decision_v1"
+_CANDIDATE_PROJECTION_ARTIFACT_KINDS = {"learning_target", "target_rotation"}
+_CANDIDATE_PROJECTION_FALSE_CLAIMS = (
+    "training_run_created",
+    "model_training_performed",
+    "serving_ready",
+    "promotion_ready",
+    "order_or_probe_created",
+)
 
 
 class AlrOperationalError(ValueError):
@@ -349,6 +362,293 @@ def persist_statistical_run(connection: Any, result: Mapping[str, Any]) -> dict[
     )
 
 
+def build_candidate_learning_projection_plan(
+    projection: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate a candidate decision artifact without inventing a V152 run."""
+    if not isinstance(projection, Mapping):
+        raise AlrOperationalError("candidate_projection_invalid")
+    if projection.get("schema_version") != _CANDIDATE_PROJECTION_SCHEMA_VERSION:
+        raise AlrOperationalError("candidate_projection_schema_invalid")
+    source_head = _required_hash(
+        projection.get("source_head"),
+        "candidate_projection_source_head",
+        length=40,
+    )
+    no_authority = _all_false_mapping(
+        projection.get("no_authority"),
+        "candidate_projection_authority",
+    )
+    authority_counters = _all_zero_mapping(
+        projection.get("authority_counters"),
+        "candidate_projection_authority",
+    )
+
+    source_set = _required_mapping(
+        projection.get("source_set"),
+        "candidate_projection_source_set",
+    )
+    source_hashes_raw = source_set.get("source_hashes")
+    if not isinstance(source_hashes_raw, list) or not source_hashes_raw:
+        raise AlrOperationalError("candidate_projection_source_hashes_invalid")
+    source_hashes = [
+        _required_hash(item, "candidate_projection_source_hash")
+        for item in source_hashes_raw
+    ]
+    if len(source_hashes) != len(set(source_hashes)):
+        raise AlrOperationalError("candidate_projection_source_hash_duplicate")
+    source_count = source_set.get("source_count")
+    if (
+        isinstance(source_count, bool)
+        or not isinstance(source_count, int)
+        or source_count != len(source_hashes)
+    ):
+        raise AlrOperationalError("candidate_projection_source_count_invalid")
+    source_set_hash = _required_hash(
+        source_set.get("source_set_hash"),
+        "candidate_projection_source_set_hash",
+    )
+    if source_set_hash != _canonical_sha256(source_hashes):
+        raise AlrOperationalError("candidate_projection_source_set_hash_mismatch")
+
+    decision = _required_mapping(
+        projection.get("decision"),
+        "candidate_projection_decision",
+    )
+    if decision.get("schema_version") != _CANDIDATE_DECISION_SCHEMA_VERSION:
+        raise AlrOperationalError("candidate_projection_decision_schema_invalid")
+    decision_code = decision.get("decision_code")
+    if not isinstance(decision_code, str) or not (
+        decision_code == "QUALIFIED_CANDIDATE_SELECTED"
+        or decision_code.startswith("NO_QUALIFIED_CANDIDATE_")
+    ):
+        raise AlrOperationalError("candidate_projection_decision_code_invalid")
+    decision_hash = _required_hash(
+        decision.get("decision_hash"),
+        "candidate_projection_decision_hash",
+    )
+    if decision_hash != _canonical_sha256(
+        {key: value for key, value in decision.items() if key != "decision_hash"}
+    ):
+        raise AlrOperationalError("candidate_projection_decision_hash_mismatch")
+    decision_authority = _all_false_mapping(
+        decision.get("no_authority"),
+        "candidate_projection_authority",
+    )
+    decision_counters = _all_zero_mapping(
+        decision.get("authority_counters"),
+        "candidate_projection_authority",
+    )
+    if decision_authority != no_authority or decision_counters != authority_counters:
+        raise AlrOperationalError("candidate_projection_authority_mismatch")
+    selected_candidate = decision.get("selected_candidate")
+    if decision_code == "QUALIFIED_CANDIDATE_SELECTED":
+        if not isinstance(selected_candidate, Mapping):
+            raise AlrOperationalError("candidate_projection_selected_candidate_missing")
+        expected_kind = "learning_target"
+    else:
+        if selected_candidate is not None:
+            raise AlrOperationalError("candidate_projection_unqualified_candidate_present")
+        expected_kind = "target_rotation"
+
+    artifact = _required_mapping(
+        projection.get("artifact"),
+        "candidate_projection_artifact",
+    )
+    artifact_kind = artifact.get("artifact_kind")
+    if artifact_kind not in _CANDIDATE_PROJECTION_ARTIFACT_KINDS:
+        raise AlrOperationalError("candidate_projection_artifact_kind_invalid")
+    if artifact_kind != expected_kind:
+        raise AlrOperationalError("candidate_projection_artifact_kind_mismatch")
+    artifact_payload = _required_mapping(
+        artifact.get("canonical_payload"),
+        "candidate_projection_artifact_payload",
+    )
+    if (
+        artifact_payload.get("schema_version")
+        != _CANDIDATE_PROJECTION_ARTIFACT_SCHEMA_VERSION
+    ):
+        raise AlrOperationalError("candidate_projection_artifact_schema_invalid")
+    if any(
+        artifact_payload.get(field) is not False
+        for field in _CANDIDATE_PROJECTION_FALSE_CLAIMS
+    ):
+        raise AlrOperationalError("candidate_projection_training_claim_invalid")
+    if (
+        artifact_payload.get("next_stage")
+        != "WP4_VERSIONED_TRAINING_SCHEMA_REQUIRED"
+    ):
+        raise AlrOperationalError("candidate_projection_next_stage_invalid")
+    source_refs = _required_mapping(
+        artifact_payload.get("source_refs"),
+        "candidate_projection_source_refs",
+    )
+    if source_refs.get("latest_alias_used") is not False:
+        raise AlrOperationalError("candidate_projection_latest_alias_invalid")
+    evidence_source_status = source_refs.get("evidence_source_status")
+    if not isinstance(evidence_source_status, str) or not evidence_source_status:
+        raise AlrOperationalError("candidate_projection_evidence_status_invalid")
+    _required_hash(
+        source_refs.get("evidence_snapshot_hash"),
+        "candidate_projection_evidence_snapshot_hash",
+    )
+    if evidence_source_status == "READY":
+        _required_hash(
+            source_refs.get("evidence_content_sha256"),
+            "candidate_projection_evidence_content_sha256",
+        )
+        _required_hash(
+            source_refs.get("evidence_board_hash"),
+            "candidate_projection_evidence_board_hash",
+        )
+    elif (
+        source_refs.get("evidence_content_sha256") is not None
+        or source_refs.get("evidence_board_hash") is not None
+        or decision_code == "QUALIFIED_CANDIDATE_SELECTED"
+    ):
+        raise AlrOperationalError("candidate_projection_invalid_source_claim")
+    if source_refs.get("scanner_source_set_hash") != source_set_hash:
+        raise AlrOperationalError("candidate_projection_scanner_source_set_mismatch")
+    if (
+        artifact_payload.get("decision") != decision
+        or artifact_payload.get("decision_code") != decision_code
+        or artifact_payload.get("decision_hash") != decision_hash
+        or artifact_payload.get("selected_candidate") != selected_candidate
+        or artifact_payload.get("selected_collection_target")
+        != decision.get("selected_collection_target")
+    ):
+        raise AlrOperationalError("candidate_projection_decision_payload_mismatch")
+    payload_authority = _all_false_mapping(
+        artifact_payload.get("no_authority"),
+        "candidate_projection_authority",
+    )
+    payload_counters = _all_zero_mapping(
+        artifact_payload.get("authority_counters"),
+        "candidate_projection_authority",
+    )
+    if payload_authority != no_authority or payload_counters != authority_counters:
+        raise AlrOperationalError("candidate_projection_authority_mismatch")
+    artifact_hash = _required_hash(
+        artifact.get("artifact_hash"),
+        "candidate_projection_artifact_hash",
+    )
+    if artifact_hash != _canonical_sha256(artifact_payload):
+        raise AlrOperationalError("candidate_projection_artifact_hash_mismatch")
+
+    edges_raw = projection.get("provenance_edges")
+    if not isinstance(edges_raw, list) or len(edges_raw) != len(source_hashes):
+        raise AlrOperationalError("candidate_projection_edges_invalid")
+    edges: list[dict[str, str]] = []
+    seen_edges: set[str] = set()
+    seen_sources: set[str] = set()
+    for raw_edge in edges_raw:
+        edge = _required_mapping(raw_edge, "candidate_projection_edge")
+        edge_hash = _required_hash(
+            edge.get("edge_hash"),
+            "candidate_projection_edge_hash",
+        )
+        from_hash = _required_hash(
+            edge.get("from_artifact_hash"),
+            "candidate_projection_edge_from",
+        )
+        to_hash = _required_hash(
+            edge.get("to_artifact_hash"),
+            "candidate_projection_edge_to",
+        )
+        if (
+            edge.get("edge_role") != "training_input"
+            or from_hash not in source_hashes
+            or to_hash != artifact_hash
+            or edge_hash in seen_edges
+            or from_hash in seen_sources
+        ):
+            raise AlrOperationalError("candidate_projection_edge_invalid")
+        normalized_edge = {
+            "from_artifact_hash": from_hash,
+            "to_artifact_hash": to_hash,
+            "edge_role": "training_input",
+        }
+        if edge_hash != _canonical_sha256(normalized_edge):
+            raise AlrOperationalError("candidate_projection_edge_hash_mismatch")
+        normalized_edge["edge_hash"] = edge_hash
+        edges.append(normalized_edge)
+        seen_edges.add(edge_hash)
+        seen_sources.add(from_hash)
+    if seen_sources != set(source_hashes):
+        raise AlrOperationalError("candidate_projection_source_edges_incomplete")
+
+    projection_hash = _required_hash(
+        projection.get("projection_hash"),
+        "candidate_projection_hash",
+    )
+    if projection_hash != _canonical_sha256(
+        {key: value for key, value in projection.items() if key != "projection_hash"}
+    ):
+        raise AlrOperationalError("candidate_projection_hash_mismatch")
+    return {
+        "projection_hash": projection_hash,
+        "source_head": source_head,
+        "source_set_hash": source_set_hash,
+        "source_hashes": source_hashes,
+        "source_count": source_count,
+        "decision_code": decision_code,
+        "decision_hash": decision_hash,
+        "artifact": {
+            "artifact_kind": artifact_kind,
+            "artifact_hash": artifact_hash,
+            "canonical_payload": copy.deepcopy(dict(artifact_payload)),
+        },
+        "edges": edges,
+        "no_authority": no_authority,
+        "authority_counters": authority_counters,
+    }
+
+
+def persist_candidate_learning_projection(
+    connection: Any,
+    projection: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Persist one decision node and scanner lineage, never a training run."""
+    plan = build_candidate_learning_projection_plan(projection)
+    artifact = plan["artifact"]
+    try:
+        with connection.cursor() as cursor:
+            existing = _find_artifact_payload(cursor, artifact["artifact_hash"])
+            if existing is not None:
+                if existing != artifact["canonical_payload"]:
+                    raise AlrOperationalConflict(
+                        "candidate_projection_artifact_hash_conflict"
+                    )
+                if not _candidate_projection_edges_complete(cursor, plan["edges"]):
+                    raise AlrOperationalConflict(
+                        "candidate_projection_lineage_incomplete"
+                    )
+                connection.commit()
+                return _candidate_projection_result("DUPLICATE", plan)
+
+            artifact_rows_written = int(_insert_artifact(cursor, artifact))
+            provenance_rows_written = 0
+            for edge in plan["edges"]:
+                provenance_rows_written += int(_insert_edge(cursor, edge))
+            if (
+                artifact_rows_written != 1
+                or provenance_rows_written != len(plan["edges"])
+            ):
+                raise AlrOperationalConflict(
+                    "candidate_projection_write_count_incomplete"
+                )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    return _candidate_projection_result(
+        "PERSISTED",
+        plan,
+        artifact_rows_written=artifact_rows_written,
+        provenance_rows_written=provenance_rows_written,
+    )
+
+
 def fetch_untrained_scanner_cycles(connection: Any, *, limit: int) -> list[dict[str, Any]]:
     """Read only ALR-ledger scanner cycles without a P2-4 training-input edge."""
     if isinstance(limit, bool) or not isinstance(limit, int) or not 3 <= limit <= 64:
@@ -376,6 +676,71 @@ def fetch_untrained_scanner_cycles(connection: Any, *, limit: int) -> list[dict[
         item["source_ts"] = _canonical_utc_z(item.get("source_ts"))
         normalized.append(item)
     return normalized
+
+
+def fetch_recent_candidate_projection_decisions(
+    connection: Any,
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Read bounded immutable target history used only for cooldown checks."""
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 256:
+        raise AlrOperationalError("candidate_projection_history_limit_invalid")
+    kinds = ["learning_target", "target_rotation"]
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT canonical_payload FROM learning.alr_artifact_nodes "
+            "WHERE artifact_kind = ANY(%s) "
+            "AND canonical_payload ->> 'schema_version' = %s "
+            "ORDER BY created_at DESC, artifact_hash DESC LIMIT %s",
+            (kinds, _CANDIDATE_PROJECTION_ARTIFACT_SCHEMA_VERSION, limit),
+        )
+        rows = cursor.fetchall()
+    if not isinstance(rows, list) or not all(isinstance(row, Mapping) for row in rows):
+        raise AlrOperationalError("candidate_projection_history_rows_invalid")
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        payload = _row_field(row, 0, "canonical_payload")
+        if not isinstance(payload, Mapping):
+            raise AlrOperationalError("candidate_projection_history_invalid")
+        decision = payload.get("decision")
+        if not isinstance(decision, Mapping):
+            raise AlrOperationalError("candidate_projection_history_invalid")
+        selected_candidate = decision.get("selected_candidate")
+        selected_collection = decision.get("selected_collection_target")
+        selected_values = [
+            item
+            for item in (selected_candidate, selected_collection)
+            if item is not None
+        ]
+        if not selected_values:
+            continue
+        if len(selected_values) != 1 or not isinstance(selected_values[0], Mapping):
+            raise AlrOperationalError("candidate_projection_history_invalid")
+        selected = selected_values[0]
+        family_key = selected.get("family_key") or selected.get(
+            "candidate_family_key"
+        )
+        material_fingerprint = selected.get("material_fingerprint")
+        if not _HEX64_RE.fullmatch(family_key or "") or not _HEX64_RE.fullmatch(
+            material_fingerprint or ""
+        ):
+            raise AlrOperationalError("candidate_projection_history_invalid")
+        evaluated_at = decision.get("evaluated_at")
+        try:
+            decision_ts_s = int(_parse_utc_z(evaluated_at).timestamp())
+        except (AlrOperationalError, OverflowError, OSError, ValueError) as exc:
+            raise AlrOperationalError(
+                "candidate_projection_history_invalid"
+            ) from exc
+        result.append(
+            {
+                "family_key": family_key,
+                "material_fingerprint": material_fingerprint,
+                "decision_ts_s": decision_ts_s,
+            }
+        )
+    return result
 
 
 def _find_reusable_defer(
@@ -556,6 +921,23 @@ def _suppression_edges_complete(
     count = _row_field(row, 0, "count") if row is not None else None
     if isinstance(count, bool) or not isinstance(count, int) or count < 0:
         raise AlrOperationalError("suppression_edge_count_invalid")
+    return count == len(edge_hashes)
+
+
+def _candidate_projection_edges_complete(
+    cursor: Any,
+    edges: Sequence[Mapping[str, str]],
+) -> bool:
+    edge_hashes = [edge["edge_hash"] for edge in edges]
+    cursor.execute(
+        "SELECT count(*) FROM learning.alr_provenance_edges "
+        "WHERE edge_hash = ANY(%s)",
+        (edge_hashes,),
+    )
+    row = cursor.fetchone()
+    count = _row_field(row, 0, "count") if row is not None else None
+    if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+        raise AlrOperationalError("candidate_projection_edge_count_invalid")
     return count == len(edge_hashes)
 
 
@@ -832,6 +1214,36 @@ def _suppression_result(
         else 0,
         "no_authority": dict(plan["no_authority"]),
         "authority_counters": dict(plan["authority_counters"]),
+    }
+
+
+def _candidate_projection_result(
+    status: str,
+    plan: Mapping[str, Any],
+    *,
+    artifact_rows_written: int = 0,
+    provenance_rows_written: int = 0,
+) -> dict[str, Any]:
+    if status not in {"PERSISTED", "DUPLICATE"}:
+        raise AlrOperationalError("candidate_projection_result_status_invalid")
+    payload_bytes_written = (
+        len(
+            _canonical_json(plan["artifact"]["canonical_payload"]).encode(
+                "utf-8"
+            )
+        )
+        if artifact_rows_written
+        else 0
+    )
+    return {
+        "status": status,
+        "artifact_hash": plan["artifact"]["artifact_hash"],
+        "artifact_rows_written": artifact_rows_written,
+        "provenance_rows_written": provenance_rows_written,
+        "payload_bytes_written": payload_bytes_written,
+        "source_rows_consumed": provenance_rows_written,
+        "training_run_rows_written": 0,
+        "model_training_performed": False,
     }
 
 

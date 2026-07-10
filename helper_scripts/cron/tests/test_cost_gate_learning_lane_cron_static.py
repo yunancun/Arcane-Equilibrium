@@ -552,6 +552,41 @@ def test_wrapper_bounded_probe_reviews_use_fresh_result_review_only() -> None:
     assert "BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST" in src
 
 
+def test_wrapper_atomically_publishes_candidate_board_to_service_rendezvous() -> None:
+    src = _src(WRAPPER)
+    assert (
+        'ALR_CANDIDATE_EVIDENCE_DIR="${ALR_CANDIDATE_EVIDENCE_DIR:-$HOME/.local/share/openclaw/alr-candidate-evidence}"'
+        in src
+    )
+    assert 'ALR_CANDIDATE_EVIDENCE_RETENTION="${ALR_CANDIDATE_EVIDENCE_RETENTION:-128}"' in src
+    assert 'ALR_CANDIDATE_EVIDENCE_MAX_BYTES="${ALR_CANDIDATE_EVIDENCE_MAX_BYTES:-67108864}"' in src
+    assert 'validate_bounded_int "ALR_CANDIDATE_EVIDENCE_RETENTION" "$ALR_CANDIDATE_EVIDENCE_RETENTION" 1 128' in src
+    assert 'validate_bounded_int "ALR_CANDIDATE_EVIDENCE_MAX_BYTES" "$ALR_CANDIDATE_EVIDENCE_MAX_BYTES" 1 67108864' in src
+    assert "-m cost_gate_learning_lane.candidate_board_publisher" in src
+    assert '--source "$REVIEW_OUT"' in src
+    assert '--destination "$ALR_CANDIDATE_EVIDENCE_DIR"' in src
+    assert '--retention-limit "$ALR_CANDIDATE_EVIDENCE_RETENTION"' in src
+    assert '--max-total-bytes "$ALR_CANDIDATE_EVIDENCE_MAX_BYTES"' in src
+    review_index = src.index('"$PYBIN" "${REVIEW_ARGS[@]}"')
+    publish_index = src.index('"$PYBIN" "${CANDIDATE_BOARD_PUBLISH_ARGS[@]}"')
+    latest_index = src.index('cp "$REVIEW_OUT" "$REVIEW_LATEST"')
+    assert review_index < publish_index < latest_index
+    assert 'cp "$REVIEW_OUT" "$ALR_CANDIDATE_EVIDENCE_DIR/' not in src
+    assert "blocked_outcome_review_latest.json" not in src[
+        src.index("CANDIDATE_BOARD_PUBLISH_ARGS=(") : publish_index
+    ]
+    assert 'candidate_board_publish_status="PUBLISHED_OR_ALREADY_PUBLISHED"' in src
+    assert 'candidate_board_publish_status="FAILED"' in src
+    assert 'candidate_board_publish_status="SKIPPED"' in src
+    assert 'candidate_board_publish_skip_reason="preinstall_refresh_only"' in src
+    assert '"candidate_board_publish_rc": int(os.environ["CANDIDATE_BOARD_PUBLISH_RC"])' in src
+    assert '"candidate_board_publish_status": os.environ["CANDIDATE_BOARD_PUBLISH_STATUS"]' in src
+    assert '"candidate_board_publish_skip_reason": os.environ["CANDIDATE_BOARD_PUBLISH_SKIP_REASON"] or None' in src
+    assert '"candidate_board_publish_source_content_sha256": (' in src
+    assert '"candidate_board_publish_artifact_sha256": (' in src
+    assert 'candidate_board_publish_sha' in src
+
+
 def test_wrapper_operator_authorization_stage_uses_standing_env_without_raw_auth_fields() -> None:
     src = _src(WRAPPER)
     assert "BOUNDED_PROBE_OPERATOR_AUTHORIZATION_ARGS=(" in src

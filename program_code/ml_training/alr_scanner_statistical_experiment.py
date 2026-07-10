@@ -12,6 +12,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from ml_training.alr_candidate_learning_projection import (
+    build_candidate_aware_learning_projection,
+)
+
 from ml_training.alr_stat_selector_baseline import (
     BOUNDARY_LABEL as SELECTOR_BOUNDARY_LABEL,
     INPUT_SCHEMA_VERSION as SELECTOR_INPUT_SCHEMA_VERSION,
