@@ -22,7 +22,7 @@
 
 | 文件 | 内容 |
 |------|------|
-| `adr/0049-scanner-driven-alr-operational-shadow.md` | Accepted ALR P2 boundary: existing Rust scanner snapshots are evidence-only input; ALR needs hash/watermark lineage, append-only `learning.alr_*` persistence, zero trading/serving authority, and a P3 Demo gate. |
+| `adr/0049-scanner-driven-alr-operational-shadow.md` | Accepted ALR boundary plus 2026-07-10 Goal addendum: scanner remains evidence-only, append-only `learning.alr_*` and zero trading/serving authority remain; AMD-2026-07-10-03 makes G1-G9 qualified learning the active completion truth and rotates the historical SUI packet. |
 | `governance_dev/amendments/2026-07-09--AMD-2026-07-09-02-alr-operational-shadow.md` | Operator-accepted operational-shadow authorization. It permits P2 source/test and scoped later migration/service work, while retaining the fresh E3/BB gate and all broker/order/proof prohibitions. |
 | `execution_plan/2026-07-09--alr-operational-shadow-p2-queue-v1.md` | Versioned P2 acceptance queue. Root `TODO.md` remains the live state authority; normal completion requires `DONE_OPERATIONAL_SHADOW`, not a source-only marker. |
 

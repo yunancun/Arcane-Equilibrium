@@ -61,3 +61,28 @@ Retention remains reference-graph-first and may delete only ALR-owned, rebuildab
 The only normal terminal is `DONE_FRESH_OPERATIONAL_LEARNING_SHADOW`. When all safe sources are proven insufficient for a qualified label, the only alternative terminal is `WAIT_OPERATOR_DEMO_AUTH_EXACT`, and it requires a new executable-but-unauthorized exact packet. The current exact packet is `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-10--alr_f5_exact_demo_authorization_packet.json`, SHA-256 `1ab349a6f753e4d3846b0699d7404f18e231d8ca95b8f250bb19b9f89b7eabde`, with Operator authorization false, execution false, and hash-bound E3/BB approval for Operator decision only.
 
 Neither this ADR, the alternative terminal, nor the packet grants exchange contact, order/probe/cancel/modify/close, Decision Lease, Cost Gate, live/mainnet, Guardian/RiskConfig mutation, proof, serving, promotion, or `_latest` authority. Protected fill/order/cost/proof/control/OOS/audit/authorization/risk/reconciliation/lineage evidence remains non-deletable, and all authority maps/counters remain false/zero.
+
+## 2026-07-10 Global Qualified Autonomous Learning Shadow V1 Addendum
+
+AMD-2026-07-10-03 supersedes only the preceding addendum's terminal and exact
+SUI packet binding. The fresh-lane, truthful-health, adversarial,
+qualified-learning, retention, and hard-boundary clauses above remain active.
+The historical SUI packet SHA `1ab349a6...abde` is now
+`ROTATED_UNCONSUMABLE_STALE_PACKET`: it binds source `091b5d446...`, while the
+WP0 baseline observed Mac/origin/Linux at `1a3ecdd579...` and the running ALR
+service pin at `8dfa1200a...`; its E3/BB reviews were presentation-only and are
+stale. Operator decision is no longer requested for that packet.
+
+The active completion truth is the G1-G9 contract in AMD-2026-07-10-03 and the
+canonical Goal queue under
+`docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/2026-07-10--global_qualified_autonomous_learning_shadow_v1/`.
+`WAIT_OPERATOR_DEMO_AUTH_EXACT`, `DEFER_EVIDENCE`, no eligible cache, source-only
+completion, and backlog exhaustion are nonterminal. `CHALLENGER_ACCEPT` remains
+isolated learning state and grants no serving, promotion, `_latest`, risk,
+Decision Lease, exchange, or order authority.
+
+Any future candidate-matched Demo evidence acquisition is a separate external
+effect: it requires a current qualified candidate, fresh SHA-bound E3/BB and
+Operator approval, and same-window Rust/Guardian/Decision-Lease/GUI RiskConfig,
+equity, BBO/instrument/order shape, disaster-protection, audit, and
+reconstruction gates. The Goal itself grants none of that authority.

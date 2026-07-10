@@ -1,0 +1,189 @@
+{
+  "schema": "global_qualified_autonomous_learning_shadow_baseline_v1",
+  "generated_at": "2026-07-10T10:01:33Z",
+  "observation_window": {
+    "start": "2026-07-10T09:55:00Z",
+    "end": "2026-07-10T09:58:00Z",
+    "mode": "READ_ONLY",
+    "database_transaction_read_only": true,
+    "exchange_contact": false
+  },
+  "goal": {
+    "id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
+    "thread_id": "019f4b6d-1e5b-7551-9fce-7a2f029a1675",
+    "status": "ACTIVE"
+  },
+  "source": {
+    "branch": "main",
+    "mac_head": "1a3ecdd57927e70dd8c6dedfed4ecef04c7a46d3",
+    "mac_origin_main": "1a3ecdd57927e70dd8c6dedfed4ecef04c7a46d3",
+    "linux_head": "1a3ecdd57927e70dd8c6dedfed4ecef04c7a46d3",
+    "linux_origin_main": "1a3ecdd57927e70dd8c6dedfed4ecef04c7a46d3",
+    "linux_worktree_clean": true,
+    "mac_unrelated_dirty_worktree_preserved": true,
+    "alr_service_source_pin": "8dfa1200a37351b142df60f8cd8bd84a5adce6c5",
+    "alr_behavior_diff_from_service_pin_to_head": "NONE_IN_SCOPED_ALR_SOURCE_PATHS",
+    "restart_readiness": "FAIL_CLOSED_SOURCE_HEAD_MISMATCH_UNTIL_REVIEWED_REPIN"
+  },
+  "service": {
+    "name": "openclaw-alr-shadow.service",
+    "enabled": true,
+    "active": true,
+    "main_pid": 2073347,
+    "active_since": "2026-07-10T00:59:21Z",
+    "systemd_nrestarts": 0,
+    "db_lifecycle": {
+      "session_started": 3,
+      "clean_stopped": 2,
+      "failed": 0,
+      "unclean": 0,
+      "current_session_open": true
+    },
+    "event_driven": true,
+    "cron_or_fixed_training_scheduler": false
+  },
+  "postgres": {
+    "sqlx_ledger_rows": 132,
+    "sqlx_max_version": 150,
+    "sqlx_failures": 0,
+    "sqlx_v151_to_v156_rows": 0,
+    "physical_alr_table_count": 11,
+    "physical_v151_to_v156_schema_present": true,
+    "migration_hashes_mac_linux_equal": true,
+    "role_contract_hashes_mac_linux_equal": true,
+    "acl_status": "HISTORICAL_LEAST_PRIVILEGE_PRESENT_REVERIFY_BEFORE_NEXT_RUNTIME_APPLY",
+    "v157_present": false,
+    "v157_reserved": false
+  },
+  "intake": {
+    "raw_scanner_rows": 80495,
+    "raw_latest_ts": "2026-07-10T09:55:24.246Z",
+    "alr_source_rows": 5261,
+    "alr_latest_source_ts": "2026-07-10T09:55:24.246Z",
+    "alr_latest_persisted_at": "2026-07-10T09:55:27.084Z",
+    "ingest_lag_seconds": 0,
+    "fresh_raw_only_count": 0,
+    "historical_backfill_remaining": 75234,
+    "notifications_received": 583,
+    "notifications_consumed": 583,
+    "notifications_duplicate": 0,
+    "notifications_invalid": 0,
+    "latest_fresh_cursor_ts": "2026-07-10T09:57:26.159Z",
+    "latest_fresh_cursor_event_persisted_at": "2026-07-10T09:57:29.124Z"
+  },
+  "learning": {
+    "training_runs": 362,
+    "run_kind_distribution": {
+      "scanner_novelty_statistical_baseline": 362
+    },
+    "run_status_distribution": {
+      "DEFER_EVIDENCE": 362
+    },
+    "feedback_rows": 362,
+    "feedback_defer_rows": 362,
+    "proof_packet_present_rows": 0,
+    "reward_total": 0,
+    "complete_after_cost_chain_rows": 0,
+    "model_training_performed_rows": 0,
+    "model_artifact_rows": 0,
+    "challenger_registry_rows": 0,
+    "hidden_oos_rows": 0,
+    "second_evidence_delta_auto_evolution_proven": false
+  },
+  "candidate_surface": {
+    "candidate_artifacts": 364,
+    "strategy_distribution": {
+      "scanner_novelty": 364
+    },
+    "unique_candidate_ids": 37,
+    "ada_repeat_count": 209,
+    "side": "NONE",
+    "horizon_present": false,
+    "regime_present": false,
+    "strategy_version_present": false,
+    "config_hash_present": false,
+    "qualified_current_candidate_count": 0,
+    "distinct_entry_n_eff": null,
+    "utc_day_coverage": null,
+    "top_day_concentration": null,
+    "regime_coverage": null
+  },
+  "artifact_cost": {
+    "artifact_rows": 20825,
+    "artifact_payload_mb": 493.99,
+    "last_60m_payload_mb": 52.9,
+    "health_rows": 7406,
+    "health_payload_mb": 12.63,
+    "last_60m_health_rows": 735,
+    "last_60m_health_payload_mb": 1.256,
+    "health_average_interval_seconds": 4.9,
+    "last_60m_history_source_rows": 498,
+    "last_60m_history_ingest_rows": 498,
+    "last_60m_history_payload_mb_approx": 50.8,
+    "last_60m_candidate_artifacts": 56,
+    "last_60m_defer_artifacts": 56,
+    "suppression_ratio": 0.0,
+    "derived_cache_rows": 0,
+    "retention_event_rows": 0
+  },
+  "evidence_delta_hash": "0ab0b80f307951108d0cf5edd3bb5940cb936bd093081c37c6d90e874e52ec28",
+  "supersession": {
+    "sui": {
+      "status": "ROTATED_UNCONSUMABLE_STALE_PACKET",
+      "packet_sha256": "1ab349a6f753e4d3846b0699d7404f18e231d8ca95b8f250bb19b9f89b7eabde",
+      "packet_source_head": "091b5d446",
+      "consumable": false,
+      "operator_decision_requested": false,
+      "reasons": [
+        "SOURCE_HEAD_DRIFT",
+        "CURRENT_CANDIDATE_NOT_SUI",
+        "CURRENT_GUI_RUST_RISKCONFIG_EQUITY_CAP_LINEAGE_INVALID",
+        "CURRENT_GUARDIAN_BBO_ORDER_SHAPE_LINEAGE_INVALID",
+        "E3_BB_REVIEWS_PRESENTATION_ONLY_AND_STALE"
+      ]
+    },
+    "near": {
+      "status": "FROZEN_INVALIDATED_EFFECTIVE_SAMPLE",
+      "n_raw": 5058,
+      "distinct_entry_ts": 2,
+      "n_eff": 1,
+      "utc_days": 1,
+      "verdicts": [
+        "SAMPLE_INSUFFICIENT_AFTER_DEDUP",
+        "EXECUTION_REALISM_SUSPECT"
+      ],
+      "edge_claim_allowed": false,
+      "no_edge_claim_allowed": false,
+      "order_dispatch_allowed": false
+    }
+  },
+  "authority": {
+    "exchange": false,
+    "trading": false,
+    "order_or_probe": false,
+    "decision_lease": false,
+    "guardian_mutation": false,
+    "riskconfig_mutation": false,
+    "global_cost_gate_mutation": false,
+    "live_or_mainnet": false,
+    "serving": false,
+    "promotion": false,
+    "latest_pointer": false,
+    "protected_evidence_delete": false,
+    "direct_parameter_apply": false
+  },
+  "facts": [
+    "Mac, origin/main, Linux checkout, and Linux origin/main matched at capture time",
+    "The running ALR pin is older than the checkout and the verifier runs only at startup",
+    "All observed runs and feedback decisions are DEFER and no qualified outcome/training/OOS chain exists",
+    "Health snapshots are persisted about every 4.9 seconds even when no semantic state changes"
+  ],
+  "inferences": [
+    "The highest-ROI safe first implementation is churn suppression before adding more artifact producers",
+    "Safe source/test/governance work remains, so zero qualified candidates is not a Goal blocker"
+  ],
+  "assumptions": [
+    "The user is the project Operator",
+    "No unobserved accepted artifact reserves V157 or AMD-2026-07-10-03"
+  ]
+}
