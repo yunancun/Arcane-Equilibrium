@@ -4,7 +4,7 @@
   "owner": "PM",
   "goal_id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
   "goal_thread_id": "019f4b6d-1e5b-7551-9fce-7a2f029a1675",
-  "status": "ACTIVE_WP2_CANDIDATE_AWARE_ARBITER",
+  "status": "ACTIVE_WP2B_PROSPECTIVE_EVENT_LINEAGE",
   "baseline_repo_head": "1a3ecdd57927e70dd8c6dedfed4ecef04c7a46d3",
   "wp1_behavioral_source_checkpoint": "c080c552b",
   "checkpoint_mac_origin_head": "a927c37d14f768b923f11b29ea61d8e94ca8d5ff",
@@ -17,7 +17,10 @@
   "baseline_packet_sha256": "30c10a497f02794525ce6e1d70972829bde7942a6a0bb181e36a13e308400b60",
   "baseline_evidence_delta_sha256": "0ab0b80f307951108d0cf5edd3bb5940cb936bd093081c37c6d90e874e52ec28",
   "current_item": "WP2-CANDIDATE-AWARE-ARBITER",
-  "current_item_state": "ACTIVE_CONTRACT_AND_FIXTURE_DISCOVERY",
+  "current_item_state": "ACTIVE_WP2B_PROSPECTIVE_EVENT_LINEAGE",
+  "current_source_head": "c84e14f5de67f8a6e55d3759d307087323118f86",
+  "current_origin_main": "c84e14f5de67f8a6e55d3759d307087323118f86",
+  "current_source_runtime_classification": "SOURCE_AHEAD_RUNTIME_UNCHANGED_NO_WP2A_DEPLOY",
   "terminal_eligible": false,
   "files": {
     "readme": "README.md",
@@ -82,6 +85,22 @@
     "service_nrestarts": 0,
     "engine_api_watchdog_unchanged": true,
     "e3_final": "PASS"
+  },
+  "wp2a_source_acceptance": {
+    "checkpoint": "c84e14f5de67f8a6e55d3759d307087323118f86",
+    "status": "DONE_SOURCE_ACCEPTED_PROVISIONAL_BRIDGE",
+    "integrated_tests": "458 passed",
+    "cron_static_tests": "17 passed",
+    "e2": "PASS",
+    "ai_e": "PASS_FINAL_SOURCE_RECHECK",
+    "e4": "PASS_TO_QA",
+    "qa": "PASS_SOURCE_CHECKPOINT_TO_PM",
+    "p0_p1_p2": "0/0/0",
+    "true_source_chain_proven": true,
+    "cron_role": "PROVISIONAL_COLD_RECONCILIATION_BRIDGE",
+    "event_driven_primary_proven": false,
+    "runtime_action": false,
+    "training_or_authority_delta": false
   },
   "compute_budget_contract": {
     "track_training_and_inference_cost_latency_energy_or_api_budget": true,
