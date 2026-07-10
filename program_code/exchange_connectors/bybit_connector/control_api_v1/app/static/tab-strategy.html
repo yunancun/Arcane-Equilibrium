@@ -17,12 +17,40 @@
 <body>
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
 
+<!-- ═══ Strategy Center 頁內組件(P0.2 batch 5:inline style→頁內塊;語義 token 零 hex;P0.4 收斂對象)═══ -->
+<style>
+  /* 健康度彙總栏:oc-card 緊湊內距覆蓋(padding 10→12/16、margin 10→12,§5.2 收斂;頁內塊文檔序晚於 head 注入故勝) */
+  .sh-summary-card{ padding:var(--sp-3) var(--sp-4); margin-bottom:var(--sp-3); }
+  /* 迷你分布條:軌道 + 兩段進度填充(width/left 由 JS setProperty 寫 scoped-var,§7 目標形態) */
+  .sh-dist-bar{ flex:1; min-width:80px; height:6px; border-radius:var(--r-1); background:var(--border-subtle); overflow:hidden; position:relative; }
+  .sh-dist-fill{ position:absolute; top:0; height:100%; width:var(--fill-w,0%); transition:width .3s; }
+  .sh-dist-fill--active{ left:0; background:var(--pos); }
+  .sh-dist-fill--paused{ left:var(--fill-x,0); background:var(--warn); }
+  /* 建立策略表單面板:內嵌卡(display 由 hidden class 切換,§3.3 引理) */
+  .strat-create-panel{ background:var(--bg); border:1px solid var(--border-subtle); border-radius:var(--r-2); }
+  /* 表單行:底對齊 flex(align-items:flex-end 非 center,故不套 .row) */
+  .strat-form-row{ display:flex; gap:var(--sp-2); flex-wrap:wrap; align-items:flex-end; }
+  /* 策略卡 #ID 標籤右間距(margin-right 全站僅 4 處,不升為 utility) */
+  .strat-id-num{ margin-right:var(--sp-2); }
+  /* 定寬輸入(§5.4 元素特定定寬,頁內具名選擇器,px 字面合法) */
+  #new-symbol{ width:120px; }
+  #new-qty{ width:90px; }
+  /* scheduler cycle 健康度 footer 卡 */
+  .strat-cycle-footer{ background:var(--bg); border:1px solid var(--border-subtle); border-radius:var(--r-1); }
+  /* 指標/信號引擎 2 欄栅格 */
+  .strat-engine-grid{ display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-3); }
+  /* reason 單行省略號截斷 */
+  .strat-reason-cell{ max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* Diff / 7d Effect 詳情卡(oc-card 深底 + 緊湊內距) */
+  .strat-detail-card{ padding:var(--sp-3); background:var(--bg); }
+</style>
+
 <!-- ═══ Orchestrator Status Bar ═══ -->
 <div class="oc-control-bar">
-  <span style="font-weight:600">&#x2699; 策略编排器 / Strategy Orchestrator</span>
+  <span class="fw-semi">&#x2699; 策略编排器 / Strategy Orchestrator</span>
   <span id="orch-regime" class="oc-chip oc-chip-neutral">--</span>
-  <span style="flex:1"></span>
-  <span style="font-size:12px;color:var(--text-dim)">
+  <span class="flex-1"></span>
+  <span class="fs-dense t-dim">
     Active: <strong id="orch-active">0</strong> / Total: <strong id="orch-total">0</strong> (上限 100 / max 100)
   </span>
   <button class="oc-btn" onclick="loadAll()">&#x1F504; Refresh</button>
@@ -32,38 +60,38 @@
 
 <!-- ═══ Strategy Health Summary Bar ═══ -->
 <!-- 策略健康度彙總栏 — active/paused/stopped 分布（SUGGESTION §4.4） -->
-<div class="oc-card" style="padding:10px 16px;margin-bottom:10px">
-  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-    <span style="font-size:12px;color:var(--text-dim);font-weight:600">策略分布 / Health:</span>
+<div class="oc-card sh-summary-card">
+  <div class="row wrap gap-2">
+    <span class="fs-dense t-dim fw-semi">策略分布 / Health:</span>
     <span class="oc-chip oc-chip-good" id="sh-active-chip">Active 0</span>
     <span class="oc-chip oc-chip-warn" id="sh-paused-chip">Paused 0</span>
     <span class="oc-chip oc-chip-neutral" id="sh-stopped-chip">Stopped 0</span>
     <!-- Mini distribution bar / 迷你分布條 -->
-    <div id="sh-bar" style="flex:1;min-width:80px;height:6px;border-radius:3px;background:#21262d;overflow:hidden;position:relative">
-      <div id="sh-bar-active" style="position:absolute;left:0;top:0;height:100%;background:var(--green);transition:width 0.3s"></div>
-      <div id="sh-bar-paused" style="position:absolute;top:0;height:100%;background:var(--yellow);transition:width 0.3s"></div>
+    <div id="sh-bar" class="sh-dist-bar">
+      <div id="sh-bar-active" class="sh-dist-fill sh-dist-fill--active"></div>
+      <div id="sh-bar-paused" class="sh-dist-fill sh-dist-fill--paused"></div>
     </div>
-    <span id="sh-summary" style="font-size:11px;color:var(--text-dim)"></span>
+    <span id="sh-summary" class="fs-micro t-dim"></span>
   </div>
 </div>
 
 <!-- ═══ Strategy Cards ═══ -->
 <div class="oc-card">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-    <h3 style="margin:0">&#x1F4CB; 策略列表 / Registered Strategies</h3>
+  <div class="row-between mb-3">
+    <h3 class="m-0">&#x1F4CB; 策略列表 / Registered Strategies</h3>
     <button class="oc-btn oc-btn-primary" onclick="toggleCreateForm()">&#x2795; 建立策略 / Create Strategy</button>
   </div>
 
   <!-- Create Strategy Form (hidden by default) -->
-  <div id="create-form" style="display:none;margin-bottom:14px;padding:14px;background:var(--bg);border:1px solid #21262d;border-radius:8px">
-    <div style="font-size:13px;font-weight:600;margin-bottom:8px">新建策略 / Create New Strategy</div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-      <div><label style="font-size:10px;color:var(--text-dim)">Type / 類型</label>
+  <div id="create-form" class="hidden strat-create-panel mb-3 p-3">
+    <div class="fs-base fw-semi mb-2">新建策略 / Create New Strategy</div>
+    <div class="strat-form-row">
+      <div><label class="fs-micro t-dim">Type / 類型</label>
       <select class="oc-select" id="new-type"><option value="ma_crossover">MA Crossover / 均線交叉</option><option value="bb_reversion">BB Reversion / 布林回歸</option><option value="funding_arb">Funding Arb / 資金費率套利</option><option value="grid">Grid / 網格交易</option><option value="bb_breakout">BB Breakout / 布林突破</option></select></div>
-      <div><label style="font-size:10px;color:var(--text-dim)">Symbol / 币種</label>
-      <input class="oc-input" id="new-symbol" value="BTCUSDT" style="width:120px" /></div>
-      <div><label style="font-size:10px;color:var(--text-dim)">Qty/Trade</label>
-      <input class="oc-input" id="new-qty" type="number" value="0.001" step="0.001" style="width:90px" /></div>
+      <div><label class="fs-micro t-dim">Symbol / 币種</label>
+      <input class="oc-input" id="new-symbol" value="BTCUSDT" /></div>
+      <div><label class="fs-micro t-dim">Qty/Trade</label>
+      <input class="oc-input" id="new-qty" type="number" value="0.001" step="0.001" /></div>
       <button class="oc-btn oc-btn-success" onclick="createStrategy()">Create</button>
       <button class="oc-btn" onclick="toggleCreateForm()">Cancel</button>
     </div>
@@ -91,7 +119,7 @@
   <div class="oc-card">
     <h3>&#x1F680; 活跃交易對 / Active Symbols</h3>
     <div class="subtitle">Rust ScannerRunner 管理的活跃交易對（固定 + 動態掃描）</div>
-    <div id="deployed-meta" style="font-size:11px;color:var(--text-dim);margin-bottom:6px"></div>
+    <div id="deployed-meta" class="fs-micro t-dim mb-2"></div>
     <div class="oc-table-wrap">
       <table class="oc-table">
         <thead><tr><th>Symbol / 币種</th><th>Type / 類型</th><th>Strategies / 策略數</th><th>State / 状态</th></tr></thead>
@@ -136,19 +164,19 @@
 <details class="oc-collapse">
   <summary>&#x1F553; 策略师变更歷史 / Strategist Apply History</summary>
   <div class="oc-collapse-body">
-    <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">
+    <div class="fs-micro t-dim mb-2">
       Strategist 5-min 自動 tune 与 Operator 手動 promote 審計轨跡（learning.strategist_applied_params，V019+V020）。
       All rows are successful applies (V019 persists post-apply).
     </div>
-    <div class="oc-metrics" style="margin-bottom:10px">
+    <div class="oc-metrics mb-3">
       <div class="oc-metric"><div class="oc-metric-label">Total Applies</div><div class="oc-metric-val" id="sh-total">--</div></div>
       <div class="oc-metric"><div class="oc-metric-label">Auto-tune</div><div class="oc-metric-val" id="sh-auto">--</div></div>
       <div class="oc-metric"><div class="oc-metric-label">Manual Promote</div><div class="oc-metric-val" id="sh-manual">--</div></div>
       <div class="oc-metric"><div class="oc-metric-label">Operator Override</div><div class="oc-metric-val" id="sh-override">--</div></div>
     </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:flex-end">
+    <div class="strat-form-row mb-3">
       <div>
-        <label style="font-size:10px;color:var(--text-dim);display:block">Engine Mode</label>
+        <label class="fs-micro t-dim block">Engine Mode</label>
         <select class="oc-select" id="sh-mode">
           <option value="">All / 全部</option>
           <option value="paper">paper</option>
@@ -159,7 +187,7 @@
         </select>
       </div>
       <div>
-        <label style="font-size:10px;color:var(--text-dim);display:block">Strategy</label>
+        <label class="fs-micro t-dim block">Strategy</label>
         <select class="oc-select" id="sh-strat">
           <option value="">All / 全部</option>
           <option value="ma_crossover">ma_crossover</option>
@@ -170,7 +198,7 @@
         </select>
       </div>
       <div>
-        <label style="font-size:10px;color:var(--text-dim);display:block">Source</label>
+        <label class="fs-micro t-dim block">Source</label>
         <select class="oc-select" id="sh-source">
           <option value="">All / 全部</option>
           <option value="strategist_scheduler">strategist_scheduler</option>
@@ -195,14 +223,14 @@
         <tbody id="sh-tbody"><tr class="empty-row"><td colspan="6">Loading...</td></tr></tbody>
       </table>
     </div>
-    <div id="sh-detail-box" style="margin-top:10px"></div>
+    <div id="sh-detail-box" class="mt-3"></div>
     <!-- Footer: cycle metrics 解釋 empty table / 週期指標解釋空表原因 -->
-    <div id="sh-cycle-footer" style="margin-top:12px;padding:8px 10px;background:var(--bg);border:1px solid #21262d;border-radius:6px;font-size:11px;color:var(--text-dim)">
-      <span style="font-weight:600;color:var(--text)">近 scheduler cycle 健康度 /  Recent cycle health:</span>
-      <span style="margin-left:6px">rejects <strong id="sh-cyc-rejects" style="color:var(--yellow)">--</strong></span>
-      <span style="margin-left:10px">applies <strong id="sh-cyc-applies" style="color:var(--green)">--</strong></span>
-      <span style="margin-left:10px" id="sh-cyc-last">last: --</span>
-      <div style="margin-top:4px;font-size:10px" id="sh-cyc-hint"></div>
+    <div id="sh-cycle-footer" class="strat-cycle-footer mt-3 py-2 px-3 fs-micro t-dim">
+      <span class="fw-semi t-primary">近 scheduler cycle 健康度 /  Recent cycle health:</span>
+      <span class="ml-2">rejects <strong id="sh-cyc-rejects" class="t-warn">--</strong></span>
+      <span class="ml-3">applies <strong id="sh-cyc-applies" class="t-pos">--</strong></span>
+      <span class="ml-3" id="sh-cyc-last">last: --</span>
+      <div class="mt-1 fs-micro" id="sh-cyc-hint"></div>
     </div>
   </div>
 </details>
@@ -270,7 +298,7 @@ function stratV2Params(s) {
   }
 
   if (!rows.length) return '';
-  return '<div style="font-size:10px;color:var(--text-dim);margin-top:3px">' + rows.join(' · ') + '</div>';
+  return '<div class="fs-micro t-dim mt-1">' + rows.join(' · ') + '</div>';
 }
 
 // ─── Explainers ───────────────────────────────────────────────
@@ -291,8 +319,8 @@ $('explain-intents').innerHTML = ocExplain(
 
 // ─── Create / Delete Strategy ─────────────────────────────────
 function toggleCreateForm() {
-  const form = $('create-form');
-  form.style.display = form.style.display === 'none' ? '' : 'none';
+  // 顯隱切換走 hidden class(§3.3 引理:原 inline 唯一 display 來源=display:none,''↔'none' ≡ classList hidden)
+  $('create-form').classList.toggle('hidden');
 }
 
 // isSubmitting flag prevents double-submit on rapid clicks
@@ -351,7 +379,7 @@ async function strategyAction(name, action) {
 async function loadStrategies() {
   let d;
   try { d = await ocApi('/api/v1/strategy/list'); } catch(e) { d = null; }
-  if (!d || !d.data) { ocSetHtml('strategy-grid', '<div class="oc-loading" style="color:var(--text-dim)">無法載入策略 / Failed to load strategies</div>'); return; }
+  if (!d || !d.data) { ocSetHtml('strategy-grid', '<div class="oc-loading t-dim">無法載入策略 / Failed to load strategies</div>'); return; }
   const strategies = d.data.strategies || [];
 
   // Update counters
@@ -370,8 +398,9 @@ async function loadStrategies() {
   const pausedPct = (paused / total * 100).toFixed(0);
   const barActive = document.getElementById('sh-bar-active');
   const barPaused = document.getElementById('sh-bar-paused');
-  if (barActive) { barActive.style.width = activePct + '%'; }
-  if (barPaused) { barPaused.style.width = pausedPct + '%'; barPaused.style.left = activePct + '%'; }
+  // 進度寬度/偏移走 scoped-var(§7 唯一豁免:setProperty 寫 custom property,由 .sh-dist-fill 消費)
+  if (barActive) { barActive.style.setProperty('--fill-w', activePct + '%'); }
+  if (barPaused) { barPaused.style.setProperty('--fill-w', pausedPct + '%'); barPaused.style.setProperty('--fill-x', activePct + '%'); }
   ocSetText('sh-summary', active + '/' + total + ' running');
 
   if (!strategies.length) {
@@ -394,13 +423,13 @@ async function loadStrategies() {
     html += '<div class="oc-strat-card' + stratCardClass + '">';
     html += '<div class="strat-header">';
     const sid = s.strategy_id || 0;
-    html += '<span style="font-size:11px;color:var(--text-dim);margin-right:6px">#' + sid + '</span>';
+    html += '<span class="strat-id-num fs-micro t-dim">#' + sid + '</span>';
     const displayName = stratLabel(stratName);
     const strategyNameHtml = (typeof ocStrategyChip === 'function' && stratKey)
       ? ocStrategyChip(stratName, { label: displayName })
       : ocEsc(displayName);
     html += '<span class="strat-name">' + strategyNameHtml + '</span>';
-    html += '<span class="oc-chip oc-chip-' + chipType + '" style="margin-left:auto">' + ocEsc(state) + '</span>';
+    html += '<span class="oc-chip oc-chip-' + chipType + ' ml-auto">' + ocEsc(state) + '</span>';
     html += '</div>';
     html += '<div class="strat-meta">';
     if (s.symbol) html += 'Symbol: <strong>' + ocEsc(s.symbol) + '</strong>';
@@ -411,7 +440,7 @@ async function loadStrategies() {
     html += '</div>';
     // V2 strategy parameters row / V2 策略参數行
     html += stratV2Params(s);
-    html += '<div class="strat-actions oc-action-row oc-action-row-strategy" style="margin-top:8px">';
+    html += '<div class="strat-actions oc-action-row oc-action-row-strategy mt-2">';
     html += '<span class="oc-action-cluster oc-action-cluster-pause" data-danger-zone="strategy-pause">';
     html += '<button class="oc-btn oc-btn-warning oc-action-pause" title="暂停 / Pause" ' + (state !== 'active' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(stratName) + '\',\'pause\')">&#x23F8; Pause</button>';
     html += '</span>';
@@ -419,7 +448,7 @@ async function loadStrategies() {
     html += '<button class="oc-btn oc-btn-danger oc-btn-critical oc-action-stop" title="手動硬關閉 / Manual hard-close" ' + (state === 'stopped' ? 'disabled' : '') + ' onclick="strategyAction(\'' + ocEsc(stratName) + '\',\'stop\')">&#x1F6D1; Stop</button>';
     html += '</span>';
     html += '<span class="oc-action-cluster oc-action-cluster-destructive" data-danger-zone="strategy-delete">';
-    html += '<button class="oc-btn oc-btn-destructive oc-action-delete" title="永久删除策略（不可撤銷） / Delete permanently — irreversible" style="font-size:10px;padding:2px 8px" onclick="deleteStrategy(\'' + ocEsc(stratName) + '\')">&#x1F5D1; Delete</button>';
+    html += '<button class="oc-btn oc-btn-destructive oc-action-delete oc-btn--xs" title="永久删除策略（不可撤銷） / Delete permanently — irreversible" onclick="deleteStrategy(\'' + ocEsc(stratName) + '\')">&#x1F5D1; Delete</button>';
     html += '</span>';
     html += '</div>';
     html += '</div>';
@@ -430,7 +459,7 @@ async function loadStrategies() {
 async function loadOrchestrator() {
   let d;
   try { d = await ocApi('/api/v1/strategy/status'); } catch(e) { d = null; }
-  if (!d || !d.data) { ocSetHtml('orch-details', '<div class="oc-loading" style="color:var(--text-dim)">無法載入 / Load failed</div>'); return; }
+  if (!d || !d.data) { ocSetHtml('orch-details', '<div class="oc-loading t-dim">無法載入 / Load failed</div>'); return; }
   const orch = d.data;
 
   // Regime badge — comes from signal_engine signal history (Regime_Detector rule)
@@ -477,7 +506,7 @@ async function loadOrchestrator() {
   ];
   fields.forEach(([label, val]) => {
     if (val == null) return;
-    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val" style="font-size:14px">' + val + '</div></div>';
+    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val fs-md">' + val + '</div></div>';
   });
   ocSetHtml('orch-details', '<div class="oc-metrics">' + html + '</div>');
 
@@ -496,21 +525,21 @@ function renderEngineDetails(orch) {
   const sigBySrc = sigStats.signals_by_source || {};
   const sigByDir = sigStats.signals_by_direction || {};
 
-  let html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">';
+  let html = '<div class="strat-engine-grid">';
 
   // Indicator engine
   html += '<div>';
-  html += '<div style="font-size:12px;font-weight:600;margin-bottom:6px">&#x1F9EE; 指標引擎 / Indicator Engine</div>';
-  html += '<div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">共 ' + (indEng.indicator_count || 0) + ' 個指標 / ' + (indEng.indicator_count || 0) + ' indicators</div>';
+  html += '<div class="fs-dense fw-semi mb-2">&#x1F9EE; 指標引擎 / Indicator Engine</div>';
+  html += '<div class="fs-micro t-dim mb-1">共 ' + (indEng.indicator_count || 0) + ' 個指標 / ' + (indEng.indicator_count || 0) + ' indicators</div>';
   const indStats = indEng.stats || {};
-  html += '<div style="font-size:11px;margin-bottom:6px">';
+  html += '<div class="fs-micro mb-2">';
   html += 'Computations: ' + (indStats.total_computations || 0) + ' · Errors: ' + (indStats.computation_errors || 0) + ' · Cache Hits: ' + (indStats.cache_hits || 0);
   html += '</div>';
   const indicators = indEng.indicators_registered || [];
   if (indicators.length) {
-    html += '<div style="display:flex;flex-wrap:wrap;gap:4px">';
+    html += '<div class="row wrap gap-1">';
     indicators.forEach(ind => {
-      html += '<span class="oc-chip oc-chip-neutral" style="font-size:10px">' + ocEsc(ind) + '</span>';
+      html += '<span class="oc-chip oc-chip-neutral fs-micro">' + ocEsc(ind) + '</span>';
     });
     html += '</div>';
   }
@@ -518,13 +547,13 @@ function renderEngineDetails(orch) {
 
   // Signal engine
   html += '<div>';
-  html += '<div style="font-size:12px;font-weight:600;margin-bottom:6px">&#x26A1; 信號引擎 / Signal Engine</div>';
-  html += '<div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">共 ' + (sigEng.rule_count || 0) + ' 條規則 · ' + (sigEng.history_size || 0) + ' 條歷史</div>';
-  html += '<div style="font-size:11px;margin-bottom:4px">Evals: ' + (sigStats.total_evaluations || 0) + ' · Generated: ' + (sigStats.signals_generated || 0) + ' · Errors: ' + (sigStats.rule_errors || 0) + '</div>';
+  html += '<div class="fs-dense fw-semi mb-2">&#x26A1; 信號引擎 / Signal Engine</div>';
+  html += '<div class="fs-micro t-dim mb-1">共 ' + (sigEng.rule_count || 0) + ' 條規則 · ' + (sigEng.history_size || 0) + ' 條歷史</div>';
+  html += '<div class="fs-micro mb-1">Evals: ' + (sigStats.total_evaluations || 0) + ' · Generated: ' + (sigStats.signals_generated || 0) + ' · Errors: ' + (sigStats.rule_errors || 0) + '</div>';
 
   // Signal direction breakdown
   if (Object.keys(sigByDir).length) {
-    html += '<div style="font-size:11px;margin-bottom:6px">';
+    html += '<div class="fs-micro mb-2">';
     ['long','short','close_long','close_short','neutral'].forEach(dir => {
       if (sigByDir[dir] != null) {
         const color = dir === 'long' ? 'good' : dir === 'short' ? 'bad' : dir.startsWith('close') ? 'warn' : 'neutral';
@@ -536,9 +565,9 @@ function renderEngineDetails(orch) {
 
   // Signal source breakdown
   if (Object.keys(sigBySrc).length) {
-    html += '<div style="display:flex;flex-wrap:wrap;gap:4px">';
+    html += '<div class="row wrap gap-1">';
     Object.entries(sigBySrc).sort((a,b) => b[1]-a[1]).forEach(([src, cnt]) => {
-      html += '<span class="oc-chip oc-chip-info" style="font-size:10px">' + ocEsc(src) + ':' + cnt + '</span>';
+      html += '<span class="oc-chip oc-chip-info fs-micro">' + ocEsc(src) + ':' + cnt + '</span>';
     });
     html += '</div>';
   }
@@ -565,7 +594,7 @@ async function loadScanner() {
     html += '<td><strong>' + ocEsc(o.symbol) + '</strong></td>';
     html += '<td>' + ocEsc(o.strategy_type || o.type || '--') + '</td>';
     html += '<td>' + ocNum(o.score, 2) + '</td>';
-    html += '<td style="font-size:11px;color:var(--text-dim)">' + ocEsc(o.reason || '--') + '</td>';
+    html += '<td class="fs-micro t-dim">' + ocEsc(o.reason || '--') + '</td>';
     html += '</tr>';
   });
   ocSetHtml('scanner-tbody', html);
@@ -602,7 +631,7 @@ async function loadDeployed() {
     html += '<tr>';
     html += '<td><strong>' + ocEsc(dd.symbol) + '</strong></td>';
     html += '<td>' + kindChip + '</td>';
-    html += '<td style="font-size:11px;color:var(--text-dim)">' + stratLabel + '</td>';
+    html += '<td class="fs-micro t-dim">' + stratLabel + '</td>';
     html += '<td>' + ocChip(dd.state || 'active', dd.state === 'active' ? 'good' : 'neutral') + '</td>';
     html += '</tr>';
   });
@@ -612,7 +641,7 @@ async function loadDeployed() {
 async function loadIntents() {
   let d;
   try { d = await ocApi('/api/v1/strategy/intents'); } catch(e) { d = null; }
-  if (!d || !d.data) { ocSetHtml('intents-tbody', '<tr class="empty-row"><td colspan="8" style="color:var(--text-dim)">無法載入 / Load failed</td></tr>'); return; }
+  if (!d || !d.data) { ocSetHtml('intents-tbody', '<tr class="empty-row"><td colspan="8" class="t-dim">無法載入 / Load failed</td></tr>'); return; }
   const intents = d.data.intents || d.data || [];
   if (!intents.length) {
     ocSetHtml('intents-tbody', '<tr class="empty-row"><td colspan="8">暂無交易意圖 / No intents</td></tr>');
@@ -632,8 +661,8 @@ async function loadIntents() {
     html += '<td class="' + (i.side === 'Buy' ? 'green' : 'red') + '">' + ocEsc(i.side) + '</td>';
     html += '<td>' + ocEsc(i.order_type || 'market') + '</td>';
     html += '<td>' + ocNum(i.qty, 4) + '</td>';
-    html += '<td style="font-size:11px">' + conf + '</td>';
-    html += '<td style="font-size:11px">' + ocEsc(i.source || i.strategy_name || '--') + '</td>';
+    html += '<td class="fs-micro">' + conf + '</td>';
+    html += '<td class="fs-micro">' + ocEsc(i.source || i.strategy_name || '--') + '</td>';
     html += '<td>' + ocChip(status, statusChip) + '</td>';
     html += '</tr>';
   });
@@ -675,12 +704,12 @@ async function loadStrategistHistory() {
   let d;
   try { d = await ocApi('/api/v1/strategist/history' + (qs ? '?' + qs : '')); } catch(e) { d = null; }
   if (!d || !d.data) {
-    ocSetHtml('sh-tbody', '<tr class="empty-row"><td colspan="6" style="color:var(--text-dim)">無法載入 / Failed to load</td></tr>');
+    ocSetHtml('sh-tbody', '<tr class="empty-row"><td colspan="6" class="t-dim">無法載入 / Failed to load</td></tr>');
     _shRows = [];
     return;
   }
   if (d.data.degraded) {
-    ocSetHtml('sh-tbody', '<tr class="empty-row"><td colspan="6" style="color:var(--yellow)">Degraded: ' + ocEsc(d.data.reason || 'unknown') + '</td></tr>');
+    ocSetHtml('sh-tbody', '<tr class="empty-row"><td colspan="6" class="t-warn">Degraded: ' + ocEsc(d.data.reason || 'unknown') + '</td></tr>');
     _shRows = [];
     return;
   }
@@ -696,14 +725,14 @@ async function loadStrategistHistory() {
                   : r.source === 'operator_override' ? 'info'
                   : 'neutral';
     html += '<tr>';
-    html += '<td style="font-size:11px;white-space:nowrap">' + ocTimeShort(r.applied_at) + '</td>';
+    html += '<td class="fs-micro nowrap">' + ocTimeShort(r.applied_at) + '</td>';
     html += '<td>' + ocChip(r.engine_mode || '--', 'neutral') + '</td>';
     html += '<td>' + ocEsc(r.strategy_name || '--') + '</td>';
     html += '<td>' + ocChip(r.source || '--', srcType) + '</td>';
-    html += '<td style="max-width:260px;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + ocEsc(r.reason || '') + '">' + ocEsc(r.reason || '') + '</td>';
-    html += '<td style="white-space:nowrap">';
-    html += '<button class="oc-btn" style="padding:2px 8px;font-size:10px" onclick="showStratHistDiff(' + r.id + ')">Diff</button> ';
-    html += '<button class="oc-btn" style="padding:2px 8px;font-size:10px" onclick="showStratHistEffect(' + r.id + ')">7d Effect</button>';
+    html += '<td class="strat-reason-cell fs-micro" title="' + ocEsc(r.reason || '') + '">' + ocEsc(r.reason || '') + '</td>';
+    html += '<td class="nowrap">';
+    html += '<button class="oc-btn oc-btn--xs" onclick="showStratHistDiff(' + r.id + ')">Diff</button> ';
+    html += '<button class="oc-btn oc-btn--xs" onclick="showStratHistEffect(' + r.id + ')">7d Effect</button>';
     html += '</td>';
     html += '</tr>';
   });
@@ -719,21 +748,21 @@ function showStratHistDiff(rowId) {
   const prev = row.prev_params_json || {};
   const cur = row.params_json || {};
   const keys = Array.from(new Set([...Object.keys(prev), ...Object.keys(cur)])).sort();
-  let html = '<div class="oc-card" style="padding:10px;background:var(--bg)">';
-  html += '<div style="font-weight:600;margin-bottom:6px">Diff: ' + ocEsc(row.strategy_name) + ' (' + ocEsc(row.engine_mode) + ') @ ' + ocTimeShort(row.applied_at) + '</div>';
-  html += '<div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">Reason: ' + ocEsc(row.reason || '-') + ' · Source: ' + ocEsc(row.source || '-') + '</div>';
+  let html = '<div class="oc-card strat-detail-card">';
+  html += '<div class="fw-semi mb-2">Diff: ' + ocEsc(row.strategy_name) + ' (' + ocEsc(row.engine_mode) + ') @ ' + ocTimeShort(row.applied_at) + '</div>';
+  html += '<div class="fs-micro t-dim mb-2">Reason: ' + ocEsc(row.reason || '-') + ' · Source: ' + ocEsc(row.source || '-') + '</div>';
   if (!keys.length) {
-    html += '<div style="color:var(--text-dim);font-size:11px">No params recorded</div>';
+    html += '<div class="t-dim fs-micro">No params recorded</div>';
   } else {
     html += '<table class="oc-table"><thead><tr><th>Param</th><th>Prev</th><th>Current</th></tr></thead><tbody>';
     keys.forEach(k => {
       const a = JSON.stringify(prev[k]);
       const b = JSON.stringify(cur[k]);
       const changed = a !== b;
-      html += '<tr' + (changed ? ' style="background:rgba(210,153,34,0.06)"' : '') + '>';
-      html += '<td style="font-size:11px">' + ocEsc(k) + '</td>';
-      html += '<td style="font-family:ui-monospace,monospace;font-size:11px">' + ocEsc(a != null ? a : '-') + '</td>';
-      html += '<td style="font-family:ui-monospace,monospace;font-size:11px' + (changed ? ';color:var(--yellow);font-weight:600' : '') + '">' + ocEsc(b != null ? b : '-') + '</td>';
+      html += '<tr' + (changed ? ' class="oc-diff-changed"' : '') + '>';
+      html += '<td class="fs-micro">' + ocEsc(k) + '</td>';
+      html += '<td class="mono fs-micro">' + ocEsc(a != null ? a : '-') + '</td>';
+      html += '<td class="mono fs-micro' + (changed ? ' t-warn fw-semi' : '') + '">' + ocEsc(b != null ? b : '-') + '</td>';
       html += '</tr>';
     });
     html += '</tbody></table>';
@@ -757,15 +786,15 @@ async function showStratHistEffect(rowId) {
   const row = d.data.row || {};
   const eff = d.data.effect || {};
   const pnlClass = ocPnlClass(eff.net_pnl);
-  let html = '<div class="oc-card" style="padding:10px;background:var(--bg)">';
-  html += '<div style="font-weight:600;margin-bottom:6px">7-day Effect: ' + ocEsc(row.strategy_name || '-') + ' (' + ocEsc(row.engine_mode || '-') + ')</div>';
-  html += '<div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">Since apply @ ' + ocTimeShort(row.applied_at) + '</div>';
+  let html = '<div class="oc-card strat-detail-card">';
+  html += '<div class="fw-semi mb-2">7-day Effect: ' + ocEsc(row.strategy_name || '-') + ' (' + ocEsc(row.engine_mode || '-') + ')</div>';
+  html += '<div class="fs-micro t-dim mb-2">Since apply @ ' + ocTimeShort(row.applied_at) + '</div>';
   html += '<div class="oc-metrics">';
   html += '<div class="oc-metric"><div class="oc-metric-label">Fills</div><div class="oc-metric-val">' + (eff.fill_count || 0) + '</div></div>';
   html += '<div class="oc-metric"><div class="oc-metric-label">Net PnL</div><div class="oc-metric-val ' + pnlClass + '">' + ocMoney(eff.net_pnl, 4) + '</div></div>';
   html += '<div class="oc-metric"><div class="oc-metric-label">Win Rate</div><div class="oc-metric-val">' + ocPct(eff.win_rate) + '</div></div>';
   html += '</div>';
-  html += '<div style="font-size:10px;color:var(--text-dim);margin-top:8px">Window: ' + ocTimeShort(eff.window_start_ms) + ' → ' + ocTimeShort(eff.window_end_ms);
+  html += '<div class="fs-micro t-dim mt-2">Window: ' + ocTimeShort(eff.window_start_ms) + ' → ' + ocTimeShort(eff.window_end_ms);
   if (eff.first_fill_ts) html += ' · first fill ' + ocTimeShort(eff.first_fill_ts);
   if (eff.last_fill_ts) html += ' · last fill ' + ocTimeShort(eff.last_fill_ts);
   html += '</div></div>';
@@ -779,7 +808,7 @@ async function loadStrategistCycleMetrics() {
     ocSetText('sh-cyc-rejects', '--');
     ocSetText('sh-cyc-applies', '--');
     ocSetText('sh-cyc-last', 'last: --');
-    ocSetHtml('sh-cyc-hint', '<span style="color:var(--red)">端點不可用（uvicorn 需 restart 帶入新 route）</span>');
+    ocSetHtml('sh-cyc-hint', '<span class="t-neg">端點不可用（uvicorn 需 restart 帶入新 route）</span>');
     return;
   }
   const r = d.data.rejects || 0;
@@ -799,9 +828,9 @@ async function loadStrategistCycleMetrics() {
   ocSetText('sh-cyc-last', lastStr);
   let hint = '';
   if (d.data.degraded) {
-    hint = '<span style="color:var(--yellow)">log 檔不可讀（' + ocEsc(d.data.log_path || '?') + '），計數未必完整</span>';
+    hint = '<span class="t-warn">log 檔不可讀（' + ocEsc(d.data.log_path || '?') + '），計數未必完整</span>';
   } else if (a === 0 && r > 0) {
-    hint = '<span style="color:var(--yellow)">⚠ 所有 propose 被 ±30% cap 拒絕（LLM 產出超邊界）→ 表永遠空 ≠ GUI 壞</span>';
+    hint = '<span class="t-warn">⚠ 所有 propose 被 ±30% cap 拒絕（LLM 產出超邊界）→ 表永遠空 ≠ GUI 壞</span>';
   } else if (a === 0 && r === 0) {
     hint = '近 ' + ocEsc(d.data.scan_window || '?') + ' 內無 strategist cycle 活動（scheduler 可能停滯或未啟動）';
   } else {
