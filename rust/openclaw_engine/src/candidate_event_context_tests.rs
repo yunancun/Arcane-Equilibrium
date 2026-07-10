@@ -126,6 +126,33 @@ fn shared_cross_language_fixture_matches_canonical_bytes_and_hash() {
 }
 
 #[test]
+fn shared_valid_candidate_event_context_is_typed_complete_and_hash_bound() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../tests/fixtures/candidate_event_context_v1/canonical_fixture.json"
+    ))
+    .expect("shared candidate event fixture parses");
+    let fixture_context = fixture["valid_candidate_event_context"].clone();
+    let context: CandidateEventContextV1 = serde_json::from_value(fixture_context.clone())
+        .expect("shared valid context matches the Rust typed contract");
+
+    assert_eq!(
+        context.schema_version,
+        CANDIDATE_EVENT_CONTEXT_SCHEMA_VERSION
+    );
+    assert_eq!(context.capture_status, CAPTURE_COMPLETE_STATUS);
+    assert!(context.capture_blockers.is_empty());
+
+    let mut serialized = serde_json::to_value(&context).expect("typed shared context serializes");
+    assert_eq!(serialized, fixture_context);
+    let supplied_hash = context.event_hash;
+    serialized
+        .as_object_mut()
+        .expect("typed shared context serializes as object")
+        .remove("event_hash");
+    assert_eq!(canonical_sha256(&serialized), supplied_hash);
+}
+
+#[test]
 fn complete_capture_is_typed_hashed_and_authority_free() {
     let input = complete_input();
     let first = capture_candidate_event_context(input.clone());

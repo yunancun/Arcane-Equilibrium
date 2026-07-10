@@ -34,6 +34,7 @@ from cost_gate_learning_lane.contract import (  # noqa: E402
     PROBE_ADMISSION_DECISION_RECORD_TYPE,
 )
 from cost_gate_learning_lane.runtime_adapter import (  # noqa: E402
+    CANDIDATE_EVENT_CONTEXT_UNQUALIFIED_STATUS,
     RuntimeAdmissionConfig,
     append_jsonl_ledger,
     build_ledger_record,
@@ -41,6 +42,7 @@ from cost_gate_learning_lane.runtime_adapter import (  # noqa: E402
     normalize_reject_reason_code,
     read_jsonl_ledger,
     side_cell_key,
+    validate_ledger_event_candidate_context,
 )
 
 
@@ -204,12 +206,46 @@ def fetch_cost_gate_reject_feature_rows(
     sql, params = build_cost_gate_reject_feature_sql(cfg)
     with conn.cursor() as cur:
         cur.execute(sql, params)
-        return _cursor_rows_to_dicts(cur)
+        return [
+            {**row, "_materializer_source": "pg_decision_features"}
+            for row in _cursor_rows_to_dicts(cur)
+        ]
 
 
 def reject_feature_row_to_event(row: dict[str, Any]) -> dict[str, Any]:
-    """Normalize a PG feature row into the runtime adapter reject event shape."""
-    ts_ms = _int(row.get("ts_ms")) or _dt_to_ms(row.get("ts"))
+    """把 feature row 轉成 reject event；prospective context 必 raw-first 驗證。"""
+    has_candidate_context = "candidate_event_context" in row
+    if (
+        has_candidate_context
+        and row.get("_materializer_source") != "explicit_source_rows"
+    ):
+        # 為什麼 fail-closed：PG/snapshot/unmarked 都是 historical recovery，
+        # 即使 context 本身 hash 合法也可能是外來 graft，禁止升格為 prospective。
+        raise ValueError("CANDIDATE_EVENT_CONTEXT_SOURCE_NOT_EXPLICIT")
+    if has_candidate_context:
+        # 為什麼先驗 raw outer：若先 upper/lower/int/side normalization，錯誤 graft
+        # 會被修成看似一致；prospective lineage 禁止任何 trim/coerce/backfill。
+        event = validate_ledger_event_candidate_context(
+            {
+                "strategy_name": row.get("strategy_name"),
+                "symbol": row.get("symbol"),
+                "side": row.get("side"),
+                "context_id": row.get("context_id"),
+                "signal_id": row.get("signal_id"),
+                "engine_mode": row.get("engine_mode"),
+                "ts_ms": row.get("ts_ms"),
+                "candidate_event_context": row.get("candidate_event_context"),
+            }
+        )
+        event["reject_reason_code"] = row.get("reject_reason_code")
+        last_price = _float(row.get("last_price"))
+        if last_price is not None and last_price > 0.0:
+            event["last_price"] = last_price
+        return event
+
+    ts_ms = _int(row.get("ts_ms"))
+    if ts_ms <= 0:
+        ts_ms = _dt_to_ms(row.get("ts"))
     event = {
         "strategy_name": row.get("strategy_name"),
         "symbol": _str(row.get("symbol")).upper(),
@@ -386,6 +422,14 @@ def build_materialized_reject_ledger_batch(
             risk_state=risk_state,
         )
         record = build_ledger_record(decision)
+        if "candidate_event_context" not in event:
+            # 為什麼顯式 unqualified：PG/snapshot 歷史資料沒有 prospective lineage，
+            # 可保留作 counterfactual，但不得被後續 cold consumer 誤當合格 context。
+            summary = _dict(record.get("candidate_summary"))
+            summary["candidate_event_context_status"] = (
+                CANDIDATE_EVENT_CONTEXT_UNQUALIFIED_STATUS
+            )
+            record["candidate_summary"] = summary
         attempt_id = _str(record.get("attempt_id"))
         if attempt_id in seen_attempt_ids:
             skipped_existing += 1
@@ -395,7 +439,14 @@ def build_materialized_reject_ledger_batch(
             record["source"] = "materialized_from_pipeline_snapshot_recent_intents"
             record["source_schema"] = "pipeline_snapshot.recent_intents"
             record["source_snapshot_path"] = feature_row.get("_source_snapshot_path")
+        elif materializer_source == "explicit_source_rows":
+            record["source"] = "materialized_from_explicit_source_rows"
+            record["source_schema"] = "explicit_source_rows"
+        elif materializer_source == "pg_decision_features":
+            record["source"] = "materialized_from_pg_decision_features"
+            record["source_schema"] = "learning.decision_features"
         else:
+            # 保留既有 in-memory API 相容性；CLI PG 路徑在入口已顯式標記來源。
             record["source"] = "materialized_from_pg_decision_features"
             record["source_schema"] = "learning.decision_features"
         record["source_context_id"] = event.get("context_id")
@@ -580,7 +631,10 @@ def main() -> int:
     snapshot_error: str | None = None
 
     if args.source_rows:
-        feature_rows = _read_json_or_jsonl_rows(args.source_rows)
+        feature_rows = [
+            {**row, "_materializer_source": "explicit_source_rows"}
+            for row in _read_json_or_jsonl_rows(args.source_rows)
+        ]
         source_rows_count = len(feature_rows)
     else:
         conn = connect_readonly_reject_materializer_pg(

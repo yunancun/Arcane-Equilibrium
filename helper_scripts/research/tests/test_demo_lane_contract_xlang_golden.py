@@ -72,6 +72,15 @@ def _load(name: str) -> dict:
     return json.loads((_fixture_dir() / name).read_text(encoding="utf-8"))
 
 
+def _candidate_event_context() -> dict:
+    root = Path(__file__).resolve().parents[3]
+    path = (
+        root
+        / "rust/openclaw_engine/tests/fixtures/candidate_event_context_v1/canonical_fixture.json"
+    )
+    return json.loads(path.read_text(encoding="utf-8"))["valid_candidate_event_context"]
+
+
 # BYBIT_ORDER_LINK_ID_MAX_LEN 只在 Rust 常量；Python 側由 build 內 bybit-safe 檢查
 # 隱含強制，取 manifest shared 值供 Python 測試比對（避免硬編碼漂移）。
 _MAX_ORDER_LINK_ID_LEN = _load("constants.json")["shared"]["BYBIT_ORDER_LINK_ID_MAX_LEN"]
@@ -234,6 +243,81 @@ def test_c2_python_reads_rust_shape_row():
     assert "bounded_probe_placement" not in rust_row
     # decision fallback（頂層 decision 存在）
     assert ra._row_decision(rust_row) == ADMIT_DECISION
+
+
+def test_c2_python_preserves_valid_rust_candidate_event_context(tmp_path):
+    context = _candidate_event_context()
+    event = {
+        "strategy_name": context["strategy_name"],
+        "symbol": context["symbol"],
+        "side": context["side"],
+        "context_id": context["context_id"],
+        "signal_id": context["signal_id"],
+        "engine_mode": context["evidence_engine_mode"],
+        "ts_ms": context["captured_at_ms"],
+        "candidate_event_context": context,
+    }
+    path = tmp_path / "valid_candidate_context.jsonl"
+    path.write_text(json.dumps({"event": event}) + "\n", encoding="utf-8")
+
+    rows = ra.read_jsonl_ledger(path)
+
+    assert rows[0]["event"]["candidate_event_context"] == context
+    assert (
+        rows[0]["event"]["candidate_event_context"]["event_hash"]
+        == context["event_hash"]
+    )
+    assert rows[0]["candidate_summary"]["candidate_event_context_status"] == "VALID"
+    assert rows[0]["candidate_summary"]["candidate_event_context"] == context
+
+
+def test_c2_python_rejects_invalid_rust_candidate_event_context(tmp_path):
+    context = _candidate_event_context()
+    context["event_hash"] = "0" * 64
+    event = {
+        "strategy_name": context["strategy_name"],
+        "symbol": context["symbol"],
+        "side": context["side"],
+        "context_id": context["context_id"],
+        "signal_id": context["signal_id"],
+        "engine_mode": context["evidence_engine_mode"],
+        "ts_ms": context["captured_at_ms"],
+        "candidate_event_context": context,
+    }
+    path = tmp_path / "invalid_candidate_context.jsonl"
+    path.write_text(json.dumps({"event": event}) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="EVENT_CONTEXT_HASH_MISMATCH"):
+        ra.read_jsonl_ledger(path)
+
+
+@pytest.mark.parametrize(
+    ("shape", "declaration"),
+    [
+        ("missing_event", "context"),
+        ("missing_event", "valid_status"),
+        ("nonmapping_event", "context"),
+        ("nonmapping_event", "valid_status"),
+    ],
+)
+def test_c2_summary_only_valid_context_cannot_bypass_event_validation(
+    tmp_path,
+    shape,
+    declaration,
+):
+    summary = (
+        {"candidate_event_context": _candidate_event_context()}
+        if declaration == "context"
+        else {"candidate_event_context_status": "VALID"}
+    )
+    row = {"candidate_summary": summary}
+    if shape == "nonmapping_event":
+        row["event"] = "not-an-event-object"
+    path = tmp_path / f"summary_only_{shape}.jsonl"
+    path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="CANDIDATE_EVENT_CONTEXT_SUMMARY_CONFLICT"):
+        ra.read_jsonl_ledger(path)
 
 
 def test_c2_poison_bad_json_raises(tmp_path):
