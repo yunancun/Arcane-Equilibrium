@@ -1,6 +1,6 @@
 {
   "schema": "global_qualified_autonomous_learning_shadow_effect_review_v1",
-  "generated_at": "2026-07-10T13:44:10Z",
+  "generated_at": "2026-07-10T13:48:32Z",
   "goal_id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
   "loop": "WP1_SOURCE_CHECKPOINT",
   "status": "SOURCE_READY_RUNTIME_GATE_PENDING",
@@ -16,6 +16,8 @@
     "goal_status": "ACTIVE",
     "wp1_source_status": "SOURCE_READY_RUNTIME_UNPROVEN",
     "source_checkpoint": "c080c552b",
+    "source_and_rca_parent_checkpoint": "e3228cdba",
+    "mac_origin_aligned_at_parent_capture": true,
     "semantic_health_suppression_implemented": true,
     "bounded_db_clock_heartbeat_implemented": true,
     "equivalent_defer_suppression_implemented": true,

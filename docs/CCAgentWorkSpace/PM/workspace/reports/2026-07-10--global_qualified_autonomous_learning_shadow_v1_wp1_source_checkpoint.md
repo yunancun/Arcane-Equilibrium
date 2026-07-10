@@ -2,6 +2,7 @@
 
 Date: 2026-07-10
 Code checkpoint: `c080c552b`
+Source plus durable RCA parent checkpoint: `e3228cdba`
 Status: `WP1_SOURCE_READY_RUNTIME_GATE_PENDING`
 Goal status: `ACTIVE`
 

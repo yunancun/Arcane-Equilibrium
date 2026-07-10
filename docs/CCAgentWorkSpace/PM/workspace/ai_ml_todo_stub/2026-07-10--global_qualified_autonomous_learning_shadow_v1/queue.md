@@ -1,11 +1,13 @@
 # GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1 Queue
 
-Updated: 2026-07-10T13:44:10Z
+Updated: 2026-07-10T13:48:32Z
 Goal status: `ACTIVE`
 Current item: `WP1-ARTIFACT-CHURN-CONTROL`
 WP1 checkpoint: code `c080c552b`, state
 `SOURCE_READY_RUNTIME_GATE_PENDING`; the unauthorized disposable local-PG
 probe is retracted and cannot satisfy runtime acceptance.
+Source plus durable RCA reached Mac/origin at `e3228cdba`; the fresh gate must
+still bind the live HEAD observed after this state-only correction.
 Evidence binding: `baseline_state_packet.json` SHA-256
 `30c10a497f02794525ce6e1d70972829bde7942a6a0bb181e36a13e308400b60`,
 evidence-delta SHA-256
