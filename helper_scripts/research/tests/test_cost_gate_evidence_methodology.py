@@ -151,7 +151,9 @@ def test_funding_crossing_count():
 # ---------------------------------------------------------------------------
 
 
-def _blocked_outcome_row(attempt_id, side_cell, gross, *, cost_model_version=None):
+def _blocked_outcome_row(
+    attempt_id, side_cell, gross, *, cost_model_version=None, entry_ts_ms=None
+):
     row = {
         "record_type": "blocked_signal_outcome",
         "attempt_id": attempt_id,
@@ -167,28 +169,55 @@ def _blocked_outcome_row(attempt_id, side_cell, gross, *, cost_model_version=Non
     }
     if cost_model_version:
         row["cost_model_version"] = cost_model_version
+    if entry_ts_ms is not None:
+        row["entry_ts_ms"] = entry_ts_ms
     return row
 
 
+# F1 fixture 時間軸:每日 per_day 個 entry、日內 1h 間距(≥60m horizon → 非重疊
+# 窗全入選),跨日分散滿足預註冊 §3 E2(days≥5)/E3(top-day≤50%)。
+_DAY_MS = 86_400_000
+_HOUR_MS = 3_600_000
+_ENTRY_BASE_TS_MS = 1_782_000_000_000  # 整日 UTC 邊界
+
+
+def _spread_entry_ts(index: int, *, per_day: int = 5) -> int:
+    return (
+        _ENTRY_BASE_TS_MS
+        + (index // per_day) * _DAY_MS
+        + (index % per_day) * _HOUR_MS
+    )
+
+
 def test_backfill_overlay_flip():
-    """用例 3:legacy net=+5(cost 4.0),overlay cost=25.0 → candidate=False ∧ flipped=True。"""
+    """用例 3:legacy 樂觀淨值過線,overlay cost=25.0 → candidate=False ∧ flipped=True。"""
+    # 5 筆 legacy,gross 帶擾動(全同值會觸發零變異數 dedup-escape 疑點),
+    # net_opt = gross−4 全正 → 樂觀下過線;跨 5 UTC 日滿足 E2/E3。
+    grosses = [8.0, 9.0, 10.0, 9.5, 8.5]
     rows = [
-        # 3 筆 legacy gross=+9(net_opt=+5),全正 → 樂觀下過線。
-        _blocked_outcome_row("a1", "strat|GGGUSDT|Buy", 9.0),
-        _blocked_outcome_row("a2", "strat|GGGUSDT|Buy", 9.0),
-        _blocked_outcome_row("a3", "strat|GGGUSDT|Buy", 9.0),
+        _blocked_outcome_row(
+            f"a{i + 1}",
+            "strat|GGGUSDT|Buy",
+            gross,
+            entry_ts_ms=_spread_entry_ts(i, per_day=1),
+        )
+        for i, gross in enumerate(grosses)
     ]
     overlay = {
-        aid: {
-            "attempt_id": aid,
+        f"a{i + 1}": {
+            "attempt_id": f"a{i + 1}",
             "cost_bps_conservative": 25.0,
-            "realized_net_bps_conservative": 9.0 - 25.0,
+            "realized_net_bps_conservative": gross - 25.0,
             "cost_model_version": "conservative_v1",
             "cost_model_source": "global_q75",
         }
-        for aid in ("a1", "a2", "a3")
+        for i, gross in enumerate(grosses)
     }
-    packet = build_blocked_signal_outcome_review(rows, overlay=overlay, now_utc=NOW)
+    # F1:n_eff=5 fixture,n_eff 門檻對齊到 5(flip 語義本測不涉 n_eff floor)。
+    cfg = BlockedOutcomeReviewConfig(min_effective_entries_per_side_cell=5)
+    packet = build_blocked_signal_outcome_review(
+        rows, overlay=overlay, cfg=cfg, now_utc=NOW
+    )
     cell = packet["top_side_cells"][0]
     assert cell["review_candidate"] is False
     assert cell["candidacy_flipped_by_cost_model"] is True
@@ -198,8 +227,14 @@ def test_backfill_overlay_flip():
 def test_realized_contradiction_flag():
     """用例 4:edge EV=−16.76/n=18 vs counterfactual avg 高 → EXECUTION_REALISM_SUSPECT。"""
     rows = [
-        _blocked_outcome_row(f"c{i}", "strat|HHHUSDT|Buy", 79.0, cost_model_version="conservative_v1")
-        for i in range(3)
+        _blocked_outcome_row(
+            f"c{i}",
+            "strat|HHHUSDT|Buy",
+            gross,
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(i, per_day=1),
+        )
+        for i, gross in enumerate([77.0, 79.0, 81.0])
     ]
     edge = {"strat::HHHUSDT": {"realized_ev_bps": -16.76, "n": 18}}
     packet = build_blocked_signal_outcome_review(rows, edge_estimates=edge, now_utc=NOW)
@@ -265,6 +300,9 @@ def test_bh_fdr_gates_review_candidate():
                 "strategy_name": "strat",
                 "side": "Buy",
                 "horizon_minutes": 60,
+                # F1:6 個 distinct UTC 日各 1 entry(n_eff=6、E2/E3 過,BH 撤下
+                # 路徑不因 eligibility 被搶先攔截)。
+                "entry_ts_ms": _spread_entry_ts(i, per_day=1),
                 "gross_bps": net + 4.0,
                 "realized_net_bps": net,
                 "net_bps_optimistic": net,
@@ -272,11 +310,16 @@ def test_bh_fdr_gates_review_candidate():
                 "cost_model_version": "conservative_v1",
             }
         )
-    cfg = BlockedOutcomeReviewConfig(min_net_positive_pct=0.0)
+    # n_eff=6 fixture:n_eff 門檻對齊到 6,讓 cell 先成候選、再走 BH 撤下路徑
+    # (門檻默認 30 下 cell 會先被 n_eff floor 攔,測不到 BH revocation 本體)。
+    cfg = BlockedOutcomeReviewConfig(
+        min_net_positive_pct=0.0, min_effective_entries_per_side_cell=6
+    )
     packet = build_blocked_signal_outcome_review(rows, cfg=cfg, now_utc=NOW)
     cell = packet["top_side_cells"][0]
     assert cell["bh_fdr_pass"] is False
     assert cell["review_candidate"] is False
+    assert cell["status"] == "EXPLORATION_CANDIDATE_BH_FDR_NOT_PASSED"
 
 
 # ---------------------------------------------------------------------------
@@ -368,6 +411,540 @@ def test_censored_excluded_from_stats():
     assert cell["censored_pct"] == pytest.approx(40.0)
     assert cell["status"] == "OBSERVATION_GAP_SUSPECT"
     assert cell["review_candidate"] is False
+
+
+# ---------------------------------------------------------------------------
+# F1(R3 charter WP-A.1;正本 = QC 預註冊 §2/§3):(cell, entry_minute, horizon)
+# 分鐘量化去重 + 非重疊窗 n_eff + E2/E3 天數 eligibility + 複本一致性
+# ---------------------------------------------------------------------------
+
+
+def test_f1_duplicate_entry_copies_collapse_to_single_effective_observation():
+    """F1 偽複製 fixture:同 entry 多副本必須壓成單一有效觀測。
+
+    NEAR 案形狀縮小版:2 個相鄰分鐘 entry 各複製多份 → 去重 =2 個觀測,60m
+    horizon 窗重疊 → 非重疊 n_eff=1;raw 行數不得再進 eligibility/t/BH
+    (t/p 必須為 None,候選必須被攔)。
+    """
+    entry_a = 1_783_436_340_000
+    entry_b = 1_783_436_400_000
+    rows = []
+    # entry A:+70.28 淨值 ×10 份;entry B:+59.32 淨值 ×8 份(副本值完全相同)。
+    for i in range(10):
+        rows.append(
+            _blocked_outcome_row(
+                f"dupA{i}",
+                "ma_crossover|NEARUSDT|Buy",
+                74.28,
+                cost_model_version="conservative_v1",
+                entry_ts_ms=entry_a,
+            )
+        )
+    for i in range(8):
+        rows.append(
+            _blocked_outcome_row(
+                f"dupB{i}",
+                "ma_crossover|NEARUSDT|Buy",
+                63.32,
+                cost_model_version="conservative_v1",
+                entry_ts_ms=entry_b,
+            )
+        )
+    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    cell = packet["top_side_cells"][0]
+    assert cell["outcome_count"] == 18
+    assert cell["distinct_entry_observation_count"] == 2
+    # 相鄰分鐘 × 60m horizon = 窗重疊 → 非重疊 greedy 只留最早 entry。
+    assert cell["window_overlap_excluded_entry_count"] == 1
+    assert cell["effective_entry_count"] == 1
+    assert cell["duplicate_outcome_row_count"] == 16
+    # n_eff=1 < min_outcomes(3) → 樣本不足,不得成候選、不得有 t/BH。
+    assert cell["status"] == "COLLECT_MORE_BLOCKED_SIGNAL_OUTCOMES"
+    assert cell["review_candidate"] is False
+    assert cell["one_sided_t_p_value"] is None
+    assert cell["bh_fdr_pass"] is None
+    assert cell["wrongful_block_score"] == 0.0
+    # avg 為非重疊樣本均值(僅最早 entry A 的代表值),非 raw 行數加權。
+    assert cell["avg_net_bps"] == pytest.approx(70.28)
+    assert packet["blocked_signal_effective_entry_count"] == 1
+    assert packet["blocked_signal_distinct_entry_observation_count"] == 2
+    assert packet["blocked_signal_duplicate_outcome_row_count"] == 16
+    assert packet["review_candidate_side_cell_count"] == 0
+
+
+def test_f1_near_replication_distinct_ms_same_minute_single_day_blocked():
+    """E2 攻擊重現:同分鐘 distinct-ms 秒級重發 ×30(全同值、單日)不得成候選。
+
+    v4 毫秒精確去重會把這 30 行算成 30 個 distinct entry(n_eff=30 → 偽候選、
+    p=0、BH pass);分鐘量化後全部落同一觀測 → n_eff=1,一切檢定不得產生。
+    """
+    base_ts = 1_783_436_340_000
+    rows = [
+        _blocked_outcome_row(
+            f"ms{i}",
+            "ma_crossover|NEARUSDT|Buy",
+            29.0,  # net = +25(全同值)
+            cost_model_version="conservative_v1",
+            entry_ts_ms=base_ts + i * 997,  # 毫秒各異,同一分鐘內
+        )
+        for i in range(30)
+    ]
+    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    cell = packet["top_side_cells"][0]
+    assert cell["outcome_count"] == 30
+    assert cell["distinct_entry_observation_count"] == 1
+    assert cell["effective_entry_count"] == 1
+    assert cell["duplicate_outcome_row_count"] == 29
+    assert cell["status"] == "COLLECT_MORE_BLOCKED_SIGNAL_OUTCOMES"
+    assert cell["review_candidate"] is False
+    assert cell["one_sided_t_p_value"] is None
+    assert cell["bh_fdr_pass"] is None
+    assert packet["review_candidate_side_cell_count"] == 0
+    assert packet["status"] != "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
+
+
+def test_f1_single_day_episode_blocked_by_distinct_days_eligibility():
+    """n_eff 過 floor 但 UTC 天數 < 5(預註冊 §3 E2)→ 不得成候選。
+
+    35 個 hourly distinct entry(值帶擾動、全正)只跨 2 個 UTC 日 —— 單日/雙日
+    episode regime-bet 形態必須被 E2 攔下,診斷 = 樣本不足,非 BLOCK_CONFIRMED。
+    """
+    rows = [
+        _blocked_outcome_row(
+            f"sd{i}",
+            "strat|NNNUSDT|Buy",
+            16.0 + [0.0, -1.0, 1.0, 0.5, -0.5][i % 5],
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_ENTRY_BASE_TS_MS + i * _HOUR_MS,
+        )
+        for i in range(35)
+    ]
+    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    cell = packet["top_side_cells"][0]
+    assert cell["effective_entry_count"] == 35
+    assert cell["distinct_entry_utc_days"] == 2
+    assert cell["status"] == "EFFECTIVE_ENTRY_SAMPLE_INSUFFICIENT"
+    assert cell["reason"] == "distinct_entry_utc_days_below_preregistered_min"
+    assert cell["review_candidate"] is False
+    assert cell["learning_diagnosis"] == "EFFECTIVE_ENTRY_SAMPLE_INSUFFICIENT"
+    assert cell["bh_fdr_pass"] is None
+    assert cell["wrongful_block_score"] == 0.0
+
+
+def test_f1_top_day_concentration_blocked_by_share_eligibility():
+    """名義多天、實質單日主導(top-day share > 50%,預註冊 §3 E3)→ 不得成候選。"""
+    jitter = [0.0, -1.0, 1.0, 0.5, -0.5]
+    rows = []
+    # day0:18 個 hourly entry(60%);day1-4:各 3 個 → days=5 過 E2,share 過不了 E3。
+    for i in range(18):
+        rows.append(
+            _blocked_outcome_row(
+                f"td0-{i}",
+                "strat|MMMUSDT|Buy",
+                16.0 + jitter[i % 5],
+                cost_model_version="conservative_v1",
+                entry_ts_ms=_ENTRY_BASE_TS_MS + i * _HOUR_MS,
+            )
+        )
+    for day in range(1, 5):
+        for slot in range(3):
+            rows.append(
+                _blocked_outcome_row(
+                    f"td{day}-{slot}",
+                    "strat|MMMUSDT|Buy",
+                    16.0 + jitter[(day + slot) % 5],
+                    cost_model_version="conservative_v1",
+                    entry_ts_ms=_ENTRY_BASE_TS_MS + day * _DAY_MS + slot * _HOUR_MS,
+                )
+            )
+    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    cell = packet["top_side_cells"][0]
+    assert cell["effective_entry_count"] == 30
+    assert cell["distinct_entry_utc_days"] == 5
+    assert cell["top_entry_day_share_pct"] == pytest.approx(60.0)
+    assert cell["status"] == "EFFECTIVE_ENTRY_SAMPLE_INSUFFICIENT"
+    assert cell["reason"] == "top_day_entry_share_above_preregistered_max"
+    assert cell["review_candidate"] is False
+
+
+def test_f1_window_overlap_entries_not_double_counted():
+    """非重疊窗 greedy(預註冊 §2.6):30min 間距 × 60m horizon → n_eff 折半。"""
+    rows = [
+        _blocked_outcome_row(
+            f"ov{i}",
+            "strat|LLLUSDT|Buy",
+            16.0 + [0.0, -1.0, 1.0, 0.5][i % 4],
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_ENTRY_BASE_TS_MS + i * 30 * 60_000,
+        )
+        for i in range(10)
+    ]
+    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    cell = packet["top_side_cells"][0]
+    assert cell["distinct_entry_observation_count"] == 10
+    assert cell["effective_entry_count"] == 5
+    assert cell["window_overlap_excluded_entry_count"] == 5
+
+
+def test_f1_replica_value_mismatch_marks_data_integrity_suspect():
+    """同觀測單位複本值不一致(預註冊 §2.3)→ DATA_INTEGRITY_SUSPECT,不得平均。"""
+    rows = [
+        _blocked_outcome_row(
+            f"rc{i}",
+            "strat|KKKUSDT|Buy",
+            16.0 + [0.0, -1.0, 1.0, 0.5, -0.5][i % 5],
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(i, per_day=1),
+        )
+        for i in range(5)
+    ]
+    # 同分鐘 distinct-ms 複本,gross/net 與代表行不同 → 複本不一致。
+    conflict = _blocked_outcome_row(
+        "rc0-conflict",
+        "strat|KKKUSDT|Buy",
+        40.0,
+        cost_model_version="conservative_v1",
+        entry_ts_ms=_spread_entry_ts(0, per_day=1) + 500,
+    )
+    cfg = BlockedOutcomeReviewConfig(min_effective_entries_per_side_cell=5)
+    packet = build_blocked_signal_outcome_review(rows + [conflict], cfg=cfg, now_utc=NOW)
+    cell = packet["top_side_cells"][0]
+    assert cell["replica_inconsistent_group_count"] == 1
+    assert cell["data_integrity_suspect"] is True
+    assert cell["status"] == "DATA_INTEGRITY_SUSPECT"
+    assert cell["learning_diagnosis"] == "DATA_INTEGRITY_SUSPECT"
+    assert cell["review_candidate"] is False
+    assert cell["one_sided_t_p_value"] is None
+    assert cell["bh_fdr_pass"] is None
+    assert packet["data_integrity_suspect_side_cell_count"] == 1
+
+
+def test_f1_zero_variance_sample_marks_data_integrity_suspect():
+    """跨天全同值樣本(σ=0)= 去重逃逸嫌疑(預註冊 §4 V=0)→ 不給 p、不得成候選。"""
+    rows = [
+        _blocked_outcome_row(
+            f"zv{i}",
+            "strat|IIIUSDT|Buy",
+            29.0,  # 全同值 +25 淨值
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(i),
+        )
+        for i in range(30)
+    ]
+    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    cell = packet["top_side_cells"][0]
+    assert cell["effective_entry_count"] == 30
+    assert cell["zero_variance_suspect"] is True
+    assert cell["status"] == "DATA_INTEGRITY_SUSPECT"
+    assert cell["reason"] == "zero_variance_effective_sample_dedup_escape_suspect"
+    assert cell["review_candidate"] is False
+    assert cell["one_sided_t_p_value"] is None
+    assert packet["review_candidate_side_cell_count"] == 0
+
+
+def test_f1_effective_entry_floor_blocks_candidacy_below_preregistered_min():
+    """過線但 n_eff<預註冊門檻(30,QC 預註冊 §3 E1)→ EFFECTIVE_ENTRY_SAMPLE_INSUFFICIENT。
+
+    boundary fixture:n_eff=29=30−1,直測門檻邊界(默認 cfg,無放寬;跨 6 日
+    排除 E2/E3 干擾,失敗原因必須落在 E1 floor)。
+    """
+    rows = [
+        _blocked_outcome_row(
+            f"fl{i}",
+            "strat|OOOUSDT|Buy",
+            16.0 + [0.0, -1.0, 1.0, 0.5, -0.5][i % 5],
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(i),
+        )
+        for i in range(29)
+    ]
+    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    cell = packet["top_side_cells"][0]
+    assert cell["effective_entry_count"] == 29
+    assert cell["status"] == "EFFECTIVE_ENTRY_SAMPLE_INSUFFICIENT"
+    assert cell["reason"] == "distinct_entry_effective_n_below_preregistered_threshold"
+    assert cell["review_candidate"] is False
+    assert cell["learning_diagnosis"] == "EFFECTIVE_ENTRY_SAMPLE_INSUFFICIENT"
+    # 併入 insufficient 計數 → packet 落 continue_recording 而非誤判定案。
+    assert packet["status"] == "COLLECT_MORE_BLOCKED_SIGNAL_OUTCOMES"
+    assert packet["insufficient_sample_side_cell_count"] == 1
+
+
+def test_f1_distinct_entries_meeting_floor_can_still_be_candidate():
+    """n_eff=30(= 門檻)+ 跨 6 日 + BH 過 → 候選路徑不因 F1 修復被誤殺(默認 cfg)。"""
+    nets = [12.5, 11.5, 10.5, 12.0, 11.0] * 6
+    rows = [
+        _blocked_outcome_row(
+            f"ok{i}",
+            "strat|PPPUSDT|Buy",
+            net + 4.0,
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(i),
+        )
+        for i, net in enumerate(nets)
+    ]
+    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    cell = packet["top_side_cells"][0]
+    assert cell["effective_entry_count"] == 30
+    assert cell["distinct_entry_utc_days"] == 6
+    assert cell["top_entry_day_share_pct"] == pytest.approx(100.0 / 6.0)
+    assert cell["status"] == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE"
+    assert cell["review_candidate"] is True
+    assert cell["bh_fdr_pass"] is True
+
+
+def test_f1_missing_entry_ts_rows_collapse_failclosed():
+    """entry_ts_ms 缺失無法證明 distinct → 不入樣本,n_eff=0(fail-closed)。"""
+    rows = [
+        _blocked_outcome_row(
+            f"m{i}", "strat|QQQUSDT|Buy", 16.0, cost_model_version="conservative_v1"
+        )
+        for i in range(5)
+    ]
+    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    cell = packet["top_side_cells"][0]
+    assert cell["outcome_count"] == 5
+    assert cell["effective_entry_count"] == 0
+    assert cell["entry_ts_missing_row_count"] == 5
+    assert cell["status"] == "COLLECT_MORE_BLOCKED_SIGNAL_OUTCOMES"
+    assert cell["review_candidate"] is False
+
+
+def test_f1_missing_entry_ts_rows_block_candidacy_of_qualified_sample():
+    """合格樣本 + 少量缺 entry_ts row → 候選被身分完整性欄攔(排除數據不得立案)。"""
+    nets = [12.5, 11.5, 10.5, 12.0, 11.0] * 6
+    rows = [
+        _blocked_outcome_row(
+            f"mx{i}",
+            "strat|SSSUSDT|Buy",
+            net + 4.0,
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(i),
+        )
+        for i, net in enumerate(nets)
+    ]
+    rows.append(
+        _blocked_outcome_row(
+            "mx-missing", "strat|SSSUSDT|Buy", 16.0, cost_model_version="conservative_v1"
+        )
+    )
+    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    cell = packet["top_side_cells"][0]
+    assert cell["effective_entry_count"] == 30
+    assert cell["entry_ts_missing_row_count"] == 1
+    assert cell["status"] == "EFFECTIVE_ENTRY_SAMPLE_INSUFFICIENT"
+    assert cell["reason"] == "entry_ts_missing_rows_block_candidacy"
+    assert cell["review_candidate"] is False
+
+
+# ---------------------------------------------------------------------------
+# WP-A.2:成本雙軌(主判=實測 E[cost];conservative tail=敏感性欄)
+# ---------------------------------------------------------------------------
+
+
+def _expected_cost_artifact(*, mean_abs, cvar90=None, symbol_rows=None, asof=None):
+    """v2 artifact 形狀:mean_abs 為主判成分;cvar90 缺省時消費端 fallback q90。"""
+    return {
+        "asof": (asof or NOW.isoformat()),
+        "symbols": symbol_rows or [],
+        "global": {
+            "n": 500,
+            "mean_abs": mean_abs,
+            "mean_signed": mean_abs / 2.0,
+            "q50": mean_abs / 2.0,
+            "q75": mean_abs * 2.0,
+            "q90": mean_abs * 4.0,
+            "cvar90": cvar90,
+        },
+    }
+
+
+# 成本雙軌測試共用:n_eff=5 fixture,n_eff 門檻對齊到 5(本組測的是成本軌語義,
+# 非 n_eff floor;floor 本體由 F1 測試組以默認 30 直測)。fixture 每日 1 entry
+# 跨 5 UTC 日(過 E2/E3);gross 帶 ±2 對稱擾動(避免零變異數疑點)均值不變。
+_COST_TRACK_CFG = BlockedOutcomeReviewConfig(min_effective_entries_per_side_cell=5)
+_COST_TRACK_JITTER = [-2.0, -1.0, 0.0, 1.0, 2.0]
+
+
+def test_expected_cost_main_judgment_with_artifact():
+    """artifact 可用 → 主判 = gross − E[cost](mean_abs 無安全乘數);保守軌降為敏感性欄。
+
+    fixture:gross 均值 +30,conservative cost=4.0(row 上)→ realized_net 均值 26;
+    E[cost] = 2×(5.5+2.0)=15 → expected net 均值 15。門檻 0/60% 下兩軌都過,
+    但主判欄位必須是 expected 軌數字。CVaR90 尾部欄並列:cvar90=8.0 →
+    cost_tail = 2×(5.5+8.0)=27 → mean_net_tail=3.0。
+    """
+    rows = [
+        _blocked_outcome_row(
+            f"ec{i}",
+            "strat|RRRUSDT|Buy",
+            30.0 + _COST_TRACK_JITTER[i],
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(i, per_day=1),
+        )
+        for i in range(5)
+    ]
+    artifact = _expected_cost_artifact(mean_abs=2.0, cvar90=8.0)
+    packet = build_blocked_signal_outcome_review(
+        rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
+    )
+    cell = packet["top_side_cells"][0]
+    assert packet["cost_basis_main"] == "expected_slippage_mean_abs_v1"
+    assert packet["expected_cost_artifact"]["available"] is True
+    assert packet["expected_cost_artifact"]["global_mean_abs_bps"] == pytest.approx(2.0)
+    assert packet["expected_cost_artifact"]["global_tail_bps"] == pytest.approx(8.0)
+    assert packet["expected_cost_artifact"]["global_tail_metric"] == "cvar90"
+    assert cell["cost_basis_main"] == "expected_slippage_mean_abs_v1"
+    assert cell["avg_expected_cost_bps"] == pytest.approx(15.0)
+    assert cell["avg_net_bps"] == pytest.approx(30.0 - 15.0)
+    assert cell["avg_net_bps_expected"] == pytest.approx(15.0)
+    # 預註冊 §6.2 CVaR90 尾部欄並列輸出且不作主判。
+    assert cell["mean_net_tail"] == pytest.approx(3.0)
+    assert cell["net_tail_positive_pct"] == pytest.approx(100.0)
+    assert cell["avg_tail_cost_bps"] == pytest.approx(27.0)
+    assert cell["tail_metric"] == "cvar90"
+    # conservative_v1 第三對照欄(row 上 realized_net = 30−4 = 26)且不作主判。
+    assert cell["avg_net_bps_conservative"] == pytest.approx(26.0)
+    assert cell["conservative_tail_would_clear_thresholds"] is True
+
+
+def test_expected_cost_tail_falls_back_to_q90_when_cvar90_missing():
+    """cvar90 缺欄 → 尾部 fallback q90 並記 tail_metric=q90_fallback(預註冊 §6.2)。"""
+    rows = [
+        _blocked_outcome_row(
+            f"tq{i}",
+            "strat|VVVUSDT|Buy",
+            30.0 + _COST_TRACK_JITTER[i],
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(i, per_day=1),
+        )
+        for i in range(5)
+    ]
+    # mean_abs=2.0 → q90=8.0;無 cvar90 → tail 用 q90 → cost_tail=27。
+    artifact = _expected_cost_artifact(mean_abs=2.0)
+    packet = build_blocked_signal_outcome_review(
+        rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
+    )
+    cell = packet["top_side_cells"][0]
+    assert packet["expected_cost_artifact"]["global_tail_metric"] == "q90_fallback"
+    assert cell["tail_metric"] == "q90_fallback"
+    assert cell["avg_tail_cost_bps"] == pytest.approx(27.0)
+    assert cell["mean_net_tail"] == pytest.approx(3.0)
+
+
+def test_expected_cost_track_requires_mean_abs_column():
+    """舊版 v1 artifact(只有 q50/q75/q90,無 mean_abs)→ 主判 fail-closed 回退 conservative_v1。
+
+    為什麼:預註冊 §6.1 凍結 E[slip_leg]=mean_abs;右偏 |slip| 下 q50 < mean,
+    以 q50 頂替會系統性低估成本(anti-conservative)。缺欄必須整軌拒用。
+    """
+    rows = [
+        _blocked_outcome_row(
+            f"lg{i}",
+            "strat|WWWUSDT|Buy",
+            30.0 + _COST_TRACK_JITTER[i],
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(i, per_day=1),
+        )
+        for i in range(5)
+    ]
+    legacy_v1 = {
+        "asof": NOW.isoformat(),
+        "symbols": [],
+        "global": {"n": 500, "q50": 2.0, "q75": 4.0, "q90": 8.0},
+    }
+    packet = build_blocked_signal_outcome_review(
+        rows, slippage_quantiles=legacy_v1, cfg=_COST_TRACK_CFG, now_utc=NOW
+    )
+    assert packet["cost_basis_main"] == "conservative_v1"
+    assert packet["expected_cost_artifact"]["available"] is False
+    cell = packet["top_side_cells"][0]
+    assert cell["avg_net_bps"] == pytest.approx(26.0)
+    assert cell["mean_net_tail"] is None
+    assert cell["tail_metric"] is None
+
+
+def test_expected_cost_flips_conservative_false_negative():
+    """conservative 下不過線、實測 E[cost] 下過線的 cell:主判必須用實測軌。
+
+    gross 均值 +20,conservative cost=92.3(toml 最保守 tier 形狀)→ realized 均值
+    −72.3(不過);E[cost]=2×(5.5+2)=15 → expected net 均值 +5(過)。這正是 WP-A
+    「誤殺假說」要能翻出來的形狀。
+    """
+    rows = []
+    for i in range(5):
+        gross = 20.0 + _COST_TRACK_JITTER[i]
+        row = _blocked_outcome_row(
+            f"fn{i}",
+            "strat|SSSUSDT|Buy",
+            gross,
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(i, per_day=1),
+        )
+        row["cost_bps"] = 92.3
+        row["realized_net_bps"] = gross - 92.3
+        rows.append(row)
+    artifact = _expected_cost_artifact(mean_abs=2.0)
+    packet = build_blocked_signal_outcome_review(
+        rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
+    )
+    cell = packet["top_side_cells"][0]
+    assert cell["avg_net_bps"] == pytest.approx(5.0)
+    assert cell["avg_net_bps_conservative"] == pytest.approx(-72.3)
+    assert cell["conservative_tail_would_clear_thresholds"] is False
+    assert cell["status"] == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE"
+    assert cell["review_candidate"] is True
+
+
+def test_expected_cost_track_unavailable_falls_back_conservative():
+    """artifact 缺失/過期 → 主判 fail-closed 回退 conservative_v1(不放寬)。"""
+    rows = [
+        _blocked_outcome_row(
+            f"na{i}",
+            "strat|TTTUSDT|Buy",
+            30.0 + _COST_TRACK_JITTER[i],
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(i, per_day=1),
+        )
+        for i in range(5)
+    ]
+    # 無 artifact。
+    packet = build_blocked_signal_outcome_review(rows, now_utc=NOW)
+    assert packet["cost_basis_main"] == "conservative_v1"
+    assert packet["expected_cost_artifact"]["available"] is False
+    cell = packet["top_side_cells"][0]
+    assert cell["avg_net_bps"] == pytest.approx(26.0)
+    assert cell["avg_net_bps_expected"] is None
+    # 過期 artifact(asof 超 48h)同樣回退。
+    stale = _expected_cost_artifact(
+        mean_abs=2.0, asof=(NOW - dt.timedelta(hours=72)).isoformat()
+    )
+    stale_packet = build_blocked_signal_outcome_review(
+        rows, slippage_quantiles=stale, now_utc=NOW
+    )
+    assert stale_packet["cost_basis_main"] == "conservative_v1"
+
+
+def test_expected_cost_respects_fee_floor():
+    """E[cost] 不得低於純 taker fee 雙腿 floor(11.0bps,手續費不打折)。"""
+    rows = [
+        _blocked_outcome_row(
+            f"ff{i}",
+            "strat|UUUUSDT|Buy",
+            30.0 + _COST_TRACK_JITTER[i],
+            cost_model_version="conservative_v1",
+            entry_ts_ms=_spread_entry_ts(i, per_day=1),
+        )
+        for i in range(5)
+    ]
+    # 畸形負 mean_abs → 夾到 fee floor(尾部軌同 floor)。
+    artifact = _expected_cost_artifact(mean_abs=-50.0)
+    packet = build_blocked_signal_outcome_review(
+        rows, slippage_quantiles=artifact, cfg=_COST_TRACK_CFG, now_utc=NOW
+    )
+    cell = packet["top_side_cells"][0]
+    assert cell["avg_expected_cost_bps"] == pytest.approx(cost_model.FEE_FLOOR_BPS)
+    assert cell["avg_tail_cost_bps"] == pytest.approx(cost_model.FEE_FLOOR_BPS)
 
 
 # ---------------------------------------------------------------------------

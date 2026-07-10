@@ -18,19 +18,50 @@ NOW = dt.datetime(2026, 7, 4, 18, 0, 0, tzinfo=dt.timezone.utc)
 
 
 def test_quantile_artifact_rollup_projection():
-    """ROLLUP 行(symbol=None)→ global;per-symbol 排序 + thin_sample(n<100)。"""
+    """ROLLUP 行(symbol=None)→ global;per-symbol 排序 + thin_sample(n<100)。
+
+    v2 擴欄(預註冊 §6):mean_abs/mean_signed/cvar90 必須逐 symbol 投影;缺欄
+    (舊查詢形狀)→ None(消費端 fail-closed / q90 fallback)。
+    """
     rows = [
-        {"symbol": "ETHUSDT", "n": 213, "q50": 2.0, "q75": 2.23, "q90": 5.0},
+        {
+            "symbol": "ETHUSDT",
+            "n": 213,
+            "mean_abs": 2.4,
+            "mean_signed": -0.3,
+            "q50": 2.0,
+            "q75": 2.23,
+            "q90": 5.0,
+            "cvar90": 7.5,
+        },
         {"symbol": "ATOMUSDT", "n": 66, "q50": 3.0, "q75": 13.18, "q90": 20.0},
-        {"symbol": None, "n": 178, "q50": 4.28, "q75": 24.97, "q90": 54.08},
+        {
+            "symbol": None,
+            "n": 178,
+            "mean_abs": 6.1,
+            "mean_signed": 0.9,
+            "q50": 4.28,
+            "q75": 24.97,
+            "q90": 54.08,
+            "cvar90": 88.4,
+        },
     ]
     artifact = sqa.build_slippage_quantile_artifact(rows, now_utc=NOW)
+    assert artifact["schema_version"] == "cost_gate_slippage_quantile_artifact_v2"
     assert artifact["global"]["q75"] == 24.97
+    assert artifact["global"]["mean_abs"] == 6.1
+    assert artifact["global"]["mean_signed"] == 0.9
+    assert artifact["global"]["cvar90"] == 88.4
     assert artifact["n_total_global"] == 178
     syms = {s["symbol"]: s for s in artifact["symbols"]}
     assert syms["ETHUSDT"]["thin_sample"] is False  # n=213 ≥ 100
+    assert syms["ETHUSDT"]["mean_abs"] == 2.4
+    assert syms["ETHUSDT"]["cvar90"] == 7.5
     assert syms["ATOMUSDT"]["thin_sample"] is True  # n=66 < 100
-    # 產出可被 cost_model.load_slippage_quantiles 讀回。
+    # 缺欄行 → None(不虛構;消費端 fail-closed)。
+    assert syms["ATOMUSDT"]["mean_abs"] is None
+    assert syms["ATOMUSDT"]["cvar90"] is None
+    # 產出可被 cost_model.load_slippage_quantiles 讀回(v1 消費端不受擴欄影響)。
     from cost_gate_learning_lane.cost_model import load_slippage_quantiles
 
     table = load_slippage_quantiles(artifact)

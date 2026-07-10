@@ -84,6 +84,12 @@ class SealedHorizonLearningEvidenceConfig:
     min_outcome_net_positive_pct: float = 50.0
     min_avg_net_bps: float = 0.0
     min_review_outcomes_per_side_cell: int = 100
+    # F1:distinct-entry n_eff 候選門檻 pass-through(默認 30 = QC 預註冊
+    # docs/research/2026-07-10--counterfactual_rerun_preregistration.md §3 E1)。
+    min_review_effective_entries_per_side_cell: int = 30
+    # 預註冊 §3 E2/E3 pass-through(distinct UTC days ≥5;top-day share ≤50%)。
+    min_review_distinct_entry_utc_days: int = 5
+    max_review_top_entry_day_share_pct: float = 50.0
     min_review_avg_net_bps: float = 0.0
     min_review_net_positive_pct: float = 60.0
     statement_timeout_ms: int = 180_000
@@ -587,6 +593,11 @@ def build_sealed_horizon_learning_evidence_from_rows(
     ]
     review_cfg = BlockedOutcomeReviewConfig(
         min_outcomes_per_side_cell=cfg.min_review_outcomes_per_side_cell,
+        min_effective_entries_per_side_cell=(
+            cfg.min_review_effective_entries_per_side_cell
+        ),
+        min_distinct_entry_utc_days=cfg.min_review_distinct_entry_utc_days,
+        max_top_entry_day_share_pct=cfg.max_review_top_entry_day_share_pct,
         min_avg_net_bps=cfg.min_review_avg_net_bps,
         min_net_positive_pct=cfg.min_review_net_positive_pct,
     )
@@ -623,6 +634,13 @@ def _run_from_args(args: argparse.Namespace) -> dict[str, Any]:
         min_outcome_net_positive_pct=args.min_outcome_net_positive_pct,
         min_avg_net_bps=args.min_avg_net_bps,
         min_review_outcomes_per_side_cell=args.min_review_outcomes_per_side_cell,
+        min_review_effective_entries_per_side_cell=(
+            args.min_review_effective_entries_per_side_cell
+        ),
+        min_review_distinct_entry_utc_days=args.min_review_distinct_entry_utc_days,
+        max_review_top_entry_day_share_pct=(
+            args.max_review_top_entry_day_share_pct
+        ),
         min_review_avg_net_bps=args.min_review_avg_net_bps,
         min_review_net_positive_pct=args.min_review_net_positive_pct,
         statement_timeout_ms=args.pg_statement_timeout_ms,
@@ -712,6 +730,11 @@ def _run_from_args(args: argparse.Namespace) -> dict[str, Any]:
     ]
     review_cfg = BlockedOutcomeReviewConfig(
         min_outcomes_per_side_cell=cfg.min_review_outcomes_per_side_cell,
+        min_effective_entries_per_side_cell=(
+            cfg.min_review_effective_entries_per_side_cell
+        ),
+        min_distinct_entry_utc_days=cfg.min_review_distinct_entry_utc_days,
+        max_top_entry_day_share_pct=cfg.max_review_top_entry_day_share_pct,
         min_avg_net_bps=cfg.min_review_avg_net_bps,
         min_net_positive_pct=cfg.min_review_net_positive_pct,
     )
@@ -769,6 +792,15 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-outcome-net-positive-pct", type=float, default=50.0)
     parser.add_argument("--min-avg-net-bps", type=float, default=0.0)
     parser.add_argument("--min-review-outcomes-per-side-cell", type=int, default=100)
+    # F1:distinct-entry n_eff 候選門檻(默認 30 = QC 預註冊 §3 E1 凍結值)。
+    parser.add_argument(
+        "--min-review-effective-entries-per-side-cell", type=int, default=30
+    )
+    # 預註冊 §3 E2/E3 凍結值(distinct UTC days ≥5;top-day share ≤50%)。
+    parser.add_argument("--min-review-distinct-entry-utc-days", type=int, default=5)
+    parser.add_argument(
+        "--max-review-top-entry-day-share-pct", type=float, default=50.0
+    )
     parser.add_argument("--min-review-avg-net-bps", type=float, default=0.0)
     parser.add_argument("--min-review-net-positive-pct", type=float, default=60.0)
     parser.add_argument("--print-json", action="store_true")

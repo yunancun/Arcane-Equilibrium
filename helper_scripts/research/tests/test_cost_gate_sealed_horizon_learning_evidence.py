@@ -150,6 +150,11 @@ def test_sealed_horizon_learning_evidence_records_240m_blocked_outcome(tmp_path)
     ledger = tmp_path / "sealed_ledger.jsonl"
     cfg = SealedHorizonLearningEvidenceConfig(
         min_review_outcomes_per_side_cell=1,
+        # F1:單筆 240m outcome fixture(n_eff=1),n_eff/天數欄顯式對齊到不攔
+        # (單日單 entry;E2/E3 eligibility 本體由 evidence methodology 測試組直測)。
+        min_review_effective_entries_per_side_cell=1,
+        min_review_distinct_entry_utc_days=1,
+        max_review_top_entry_day_share_pct=100.0,
         min_review_net_positive_pct=1.0,
     )
 
