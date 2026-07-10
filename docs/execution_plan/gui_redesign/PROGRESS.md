@@ -2,8 +2,8 @@
 
 ## 狀態欄
 - **STATUS**: IN_PROGRESS
-- **CURRENT**: P0.3 批次 B2(非資金 B:learning/earn+governance/risk+autonomy-posture.js;risk% fraction/percent 選對、risk-tab.js:524 猜測式移除、bps 走 ocBps)
-- **LAST-COMMIT**: 4d6ab4ceb(P0.3 B1 非資金 A)
+- **CURRENT**: P0.3 批次 B3(analytics:strategy/edge-gates/ai/canary;合併 tab-edge-gates metricValue→ocBps、ocPct 唯一消費點驗 2dp)
+- **LAST-COMMIT**: 6dc50bd8c(P0.3 B2 非資金 B)
 - 回歸基線更新:structure/ 6F→**4F**(兄弟 session commit 修掉 test_development_agent_governance+stable_boundary_docs;現 4F=stock_etf_ipc×2/ipc_tests/strategy_blocked_symbols 全 pre-existing 非 GUI)
 - **BLOCKERS**: —
 - **AWAITING-OPERATOR**: —
@@ -35,12 +35,13 @@
 - [~] P0.3 數字排版 pass:全站數值 `.num`+第二通道(▲▼/LONG-SHORT/±);精度 USD 2dp/BTC 6dp/%2dp/bps 2dp——**設計正本 `design/06_numerics.md`(PA,`f63f4b60b`)**;批次 B0→B1-B4 非資金 tab→B5/D demo→B6/E live(gated 最後)
   - [x] B0 formatter 契約落地——證據 `1f85b382d`:common-formatters.js(ocPct 1dp→2dp/ocMoney ASCII→U+2212/新 ocQty·ocBps·ocPctVal·ocPrice/OC_EMPTY='—'/第二通道 ocSignParts·ocSigned·ocSide)+oc-utilities §C CSS+guard 測試(node vm 真執行鎖 dp)+ocIsBlank 遷移 7 處;E1a→E2 PASS 0 blocker(§1.5 塌零裁決 SAFE:money_abs 僅 2 聚合 metric 非 per-fill)→回歸零 delta;惰性零 tab 重接
   - [x] B1 非資金 A(monitor/system 實改;replay/settings/app-actions NO-OP)——證據 `4d6ab4ceb`:tab-system b-cost 4dp column 例外(AI 成本 sub-cent)+b-cost30 2dp+.num×6/tab-monitoring .num×6;第二通道 0(計數/水位無漲跌);E1a→E2 PASS 0 blocker(4dp 例外正確、.num 皆 data-value、b-orders 計數對齊不違 gating)→回歸零 delta;E2 OBS 留 P0.4(靜態 -- 佔位→OC_EMPTY/AI 成本 FX 轉換/oc-agents unit-span defer)
-  - [ ] B2 非資金 B:learning/earn+governance/risk+autonomy-posture.js(risk% fraction/percent 選對、risk-tab.js:524 猜測式移除)
+  - [x] B2 非資金 B(risk/governance/earn 實改;learning/autonomy NO-OP)——證據 `6dc50bd8c`:**移除 risk-tab.js fmtPctOrUnknown 量級猜測**(1 呼叫=Drawdown,判 fraction→ocPct);fraction→ocPct/already-%→ocPctVal(15+ cell)判定=舊碼 ×100-or-not 已編碼型別逐一匹配零量級變更;earn 假零→OC_EMPTY;governance:822 winRate*100 刻意留(POST payload 非顯示);E1a→E2 PASS 0 blocker(分類逐點 VERIFIED 零 100×)→回歸零 delta;**E2 LOW:E1a 遺留 10 node-check scratch 檔於 served dir(PM 已刪未提交,教訓:node-check 抽取檔須落 scratchpad)**
   - [ ] B3 analytics:strategy/edge-gates/ai/canary(合併 tab-edge-gates metricValue→ocBps)
   - [ ] B4 stock-etf ×11(唯讀佔位上契約)
   - [ ] B5/D demo(gated 倒二:tab-demo/app-paper;app-paper 0dp bps→ocBps)+ B6/E live(gated 最後:tab-live;合併 _edgeMetricValue→ocBps、ocPnlCell 4dp column 例外、修 fee!=='--'→ocIsBlank、4dp→2dp)——**顯示精度變更需 QC/operator 知悉**
   - **B0 QC 知悉**:perf-metric grid(live/demo/paper)7D TOTAL FEES/AI COST 兩格 money_abs 4dp→2dp(聚合非 per-fill,§1.5 SAFE)
   - **E2 B0 LOW 留 D/E**:ocFormatPerformanceMetric 內部 3 blank guard 仍回 '--' 非 OC_EMPTY(混合哨兵)、ocDate/ocTime 保 '--'(契約外)、governance _formatValue ''→'--'(intended)
+  - **P0.4 量級猜測整併(來自 B2)**:governance-tab.js:822(winRate*100 POST payload)+risk-tab.js:836(snapshot-fallback p1_risk_pct<1?*100)兩處同類 fraction/percent 量級猜測——B2 因屬 POST/邏輯層刻意未碰,P0.4 統一(需後端契約確認送出格式,非純顯示)
 - [ ] P0.4 樣式 fork 合併:`live-*`/`se-*`/`rc-*`/`gov-*` → `oc-*` 原語;83 裸 hex → 語義 token;半徑歸 5/8/12
 - [ ] P0.5 IBKR lane 語義 chips(DENIED/PRESENT/MISSING/OK)+治理 banner 統一(fake-$0 修復已 shipped,核對即可)
 - [ ] P0.6 CI 守衛升級:grep 禁 `style="`/`<style`(白名單殼層過渡)/裸 hex 新增
@@ -113,3 +114,4 @@
 | 2026-07-10 | R13 | P0.3 設計 | f63f4b60b | PA 出 P0.3 spec-of-record `design/06_numerics.md`(精度契約/第二通道雙層 API/.num 應用/批次 B0-E/驗證);findings:ocMoney ASCII hyphen 違 canon3、ocPct 1dp、bps 3 套、risk-tab 量級猜測、LIVE 4dp→2dp 塌零;設計 checkpoint 完成,B0 下輪 |
 | 2026-07-10 | R14 | P0.3 B0 formatter 契約 | 1f85b382d | 契約基建落地(9 新/修 formatter+第二通道雙層+§C CSS+node vm guard 測試);E1a→E2 PASS 0 blocker(§1.5 塌零親查 SAFE=money_abs 僅 2 聚合、per-fill ocPnlCell 未動;契約 codepoint 核、第二通道零 XSS、ocIsBlank 等價、guard 有牙);回歸零 delta;惰性零重接;3 LOW 留 D/E;perf-metric grid 兩格 4dp→2dp 需 QC 知悉。E2 附記:agent_governance.py authorize-command dispatcher bug(args.check AttributeError,非本任務) |
 | 2026-07-10 | R15 | P0.3 B1 非資金 A | 4d6ab4ceb | monitor/system 契約應用(b-cost 4dp 例外+.num×12);replay/settings/app-actions NO-OP;E1a→E2 PASS 0 blocker;回歸 structure 6F→4F(兄弟修 2 個 pre-existing,B1 零新失敗);E2 OBS 留 P0.4 |
+| 2026-07-10 | R16 | P0.3 B2 非資金 B | 6dc50bd8c | **移除 risk-tab fmtPctOrUnknown 量級猜測**(correctness);fraction/percent 分類逐一匹配舊碼零 100× 變更(E2 全 VERIFIED);earn 假零→OC_EMPTY;governance:822 POST payload 刻意留;E1a→E2 PASS 0 blocker;回歸零 delta 4F;E2 LOW=10 scratch 檔已刪;P0.4 量級猜測整併×2 入帳 |
