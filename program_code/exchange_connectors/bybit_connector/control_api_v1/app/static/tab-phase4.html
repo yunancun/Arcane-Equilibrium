@@ -121,6 +121,32 @@
   margin-bottom: 12px;
   display: none;
 }
+
+/* ── Phase 4 卡片內資料表格與進度組件（cards/*.html 注入片段共用）──────────
+   為何頁級：cards/*.html 是 innerHTML 注入片段（無 <head>、不接 <link>），
+   linucb/news/dl3/teacher 四卡共用同一密集表格與進度條樣式；組件放宿主頁
+   <style>，片段靠繼承（不在片段內建塊/link）。P0.2 批次 9 inline style= 收斂歸宿。
+   palette 外色（#2ea043 綠 / #6e7681 灰 / #d29922 琥珀）沿用本檔 .phase4-light-dot
+   既有 raw hex 家族保持一致（避免同頁綠燈與進度綠中間態不一），P0.4 統一 token 化。 */
+.phase4-card .p4-grid { border-collapse: collapse; font-size: var(--fs-micro); }
+.phase4-card .p4-grid th,
+.phase4-card .p4-grid td { padding: 2px 6px; }
+.phase4-card .p4-grid td { background: var(--cell-bg, transparent); }
+.phase4-card .p4-thead-row { text-align: left; border-bottom: 1px solid var(--border, #30363d); }
+.phase4-card .p4-report-link { text-decoration: underline; }
+
+/* LinUCB 收斂進度條行：label / track / 動態寬度 fill（--conv-w scoped-var）/ count */
+.phase4-card .p4-conv-row { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-micro); margin: 2px 0; }
+.phase4-card .p4-conv-label { flex: 0 0 160px; }
+.phase4-card .p4-conv-track { flex: 1 1 auto; background: var(--border, #30363d); border-radius: var(--r-1); overflow: hidden; height: 8px; }
+.phase4-card .p4-conv-fill { display: block; height: 100%; width: var(--conv-w, 0%); background: #2ea043; }
+.phase4-card .p4-conv-count { flex: 0 0 48px; text-align: right; }
+
+/* LinUCB 影子比較條：enum 狀態色走 class-per-enum（canon 7/§7），色沿用本檔燈號家族 */
+.phase4-card .p4-shadow-bar { font-size: var(--fs-micro); padding: var(--sp-1); border: 1px solid; border-radius: var(--r-1); }
+.phase4-card .p4-shadow-bar.is-promote { border-color: #2ea043; color: #2ea043; }
+.phase4-card .p4-shadow-bar.is-keep    { border-color: #d29922; color: #d29922; }
+.phase4-card .p4-shadow-bar.is-other   { border-color: #6e7681; color: #6e7681; }
 </style>
 </head>
 <body>

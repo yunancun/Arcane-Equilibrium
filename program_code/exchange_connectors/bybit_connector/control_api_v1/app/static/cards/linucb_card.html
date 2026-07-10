@@ -28,38 +28,38 @@
     <div><strong>Schema hash:</strong> <span id="linucb-schema-hash">—</span></div>
   </div>
 
-  <div style="margin:10px 0;">
-    <label for="linucb-version-select" style="font-size:12px;">
+  <div class="mt-3 mb-3">
+    <label for="linucb-version-select" class="fs-dense">
       Arm space / 臂空間:
     </label>
-    <select id="linucb-version-select" style="font-size:12px;">
+    <select id="linucb-version-select" class="fs-dense">
       <option value="v1_15">v1_15 (5×3)</option>
       <option value="v2_25" disabled title="Migration not yet executed / 遷移未執行">v2_25 (5×5)</option>
       <option value="v3_375" disabled title="Migration not yet executed / 遷移未執行">v3_375 (5×3×25)</option>
     </select>
   </div>
 
-  <div style="margin-top:10px;">
-    <div style="font-size:12px;color:var(--text-muted,#8b949e);margin-bottom:4px;">
+  <div class="mt-3">
+    <div class="fs-dense t-muted mb-1">
       Per-arm heatmap (pulls) / 每臂熱力圖
     </div>
-    <table id="linucb-heatmap" style="border-collapse:collapse;font-size:11px;">
+    <table id="linucb-heatmap" class="p4-grid">
       <thead>
-        <tr><th style="padding:2px 6px;">regime \ strategy</th></tr>
+        <tr><th>regime \ strategy</th></tr>
       </thead>
       <tbody></tbody>
     </table>
   </div>
 
-  <div style="margin-top:10px;">
-    <div style="font-size:12px;color:var(--text-muted,#8b949e);margin-bottom:4px;">
+  <div class="mt-3">
+    <div class="fs-dense t-muted mb-1">
       Convergence (n_pulls / min_samples) / 收斂進度
     </div>
     <div id="linucb-convergence"></div>
   </div>
 
-  <div id="linucb-shadow" style="margin-top:10px;display:none;">
-    <div style="font-size:12px;color:var(--text-muted,#8b949e);">
+  <div id="linucb-shadow" class="mt-3 hidden">
+    <div class="fs-dense t-muted">
       Shadow compare / 影子比較
     </div>
     <div id="linucb-shadow-bar"></div>
@@ -67,7 +67,7 @@
 
   <!-- A3-MAJOR-3 fix：移除無後端接線的 dead button；遷移/回滾須從 CLI 操作 -->
   <div class="phase4-card-footer">
-    <span style="font-size:11px;color:var(--text-dim)">遷移/回滾須從 CLI 操作</span>
+    <span class="fs-micro t-dim">遷移/回滾須從 CLI 操作</span>
   </div>
 </div>
 
@@ -90,9 +90,9 @@
     if (!tbody || !thead) return;
     tbody.innerHTML = '';
     // header / 表頭
-    thead.innerHTML = '<th style="padding:2px 6px;">regime \\ strategy</th>' +
+    thead.innerHTML = '<th>regime \\ strategy</th>' +
       STRATEGIES.map(function(s){
-        return '<th style="padding:2px 6px;font-weight:normal;">'+s+'</th>';
+        return '<th class="fw-normal">'+s+'</th>';
       }).join('');
 
     var byKey = {};
@@ -101,12 +101,12 @@
 
     REGIMES.forEach(function(reg) {
       var tr = document.createElement('tr');
-      tr.innerHTML = '<td style="padding:2px 6px;">'+ocEsc(reg)+'</td>' +
+      tr.innerHTML = '<td>'+ocEsc(reg)+'</td>' +
         STRATEGIES.map(function(strat) {
           var key = reg + '__' + strat;
           var a = byKey[key] || {n_pulls: 0};
-          return '<td style="padding:2px 6px;text-align:right;background:' +
-                 colorFor(a.n_pulls, maxP) + ';">' + (a.n_pulls || 0) + '</td>';
+          return '<td class="t-right" style="--cell-bg:' +
+                 colorFor(a.n_pulls, maxP) + '">' + (a.n_pulls || 0) + '</td>';
         }).join('');
       tbody.appendChild(tr);
     });
@@ -119,13 +119,14 @@
     arms.slice().sort(function(a,b){return b.n_pulls - a.n_pulls;}).forEach(function(a) {
       var pct = Math.min(100, Math.round(100 * a.n_pulls / Math.max(1, minSamples)));
       var row = document.createElement('div');
-      row.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:11px;margin:2px 0;';
+      row.className = 'p4-conv-row';
       row.innerHTML =
-        '<span style="flex:0 0 160px;">'+ ocEsc(a.arm_id) +'</span>' +
-        '<span style="flex:1 1 auto;background:#30363d;border-radius:3px;overflow:hidden;height:8px;">' +
-          '<span style="display:block;height:100%;width:'+ pct +'%;background:#2ea043;"></span>' +
+        '<span class="p4-conv-label">'+ ocEsc(a.arm_id) +'</span>' +
+        '<span class="p4-conv-track">' +
+          '<span class="p4-conv-fill" style="--conv-w:'
+            + pct + '%"></span>' +
         '</span>' +
-        '<span style="flex:0 0 48px;text-align:right;">'+ a.n_pulls +'</span>';
+        '<span class="p4-conv-count">'+ a.n_pulls +'</span>';
       host.appendChild(row);
     });
   }
@@ -134,12 +135,12 @@
     var host = document.getElementById('linucb-shadow');
     var bar = document.getElementById('linucb-shadow-bar');
     if (!host || !bar) return;
-    if (!shadow || !shadow.active) { host.style.display = 'none'; return; }
-    host.style.display = 'block';
-    var color = shadow.decision === 'PROMOTE' ? '#2ea043'
-              : (shadow.decision === 'KEEP_CHAMPION' ? '#d29922' : '#6e7681');
+    if (!shadow || !shadow.active) { host.classList.add('hidden'); return; }
+    host.classList.remove('hidden');
+    var cls = shadow.decision === 'PROMOTE' ? 'is-promote'
+            : (shadow.decision === 'KEEP_CHAMPION' ? 'is-keep' : 'is-other');
     bar.innerHTML =
-      '<div style="font-size:11px;padding:4px;border:1px solid '+color+';border-radius:4px;color:'+color+';">' +
+      '<div class="p4-shadow-bar '+cls+'">' +
       ocEsc(shadow.champion || '—') + ' vs ' + ocEsc(shadow.challenger || '—') +
       ' · Δ=' + (shadow.delta || 0).toFixed(4) +
       ' · z=' + ((shadow.delta && shadow.sigma) ? (shadow.delta/shadow.sigma).toFixed(2) : '—') +

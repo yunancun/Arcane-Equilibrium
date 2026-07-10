@@ -80,7 +80,7 @@ function ensureGuiEnhancements() {
     hintCard.innerHTML = `
       <details class="raw-toggle">
         <summary>${zhEnPrimary("關键概念提示（按需展開）", "Key Concept Hints")}</summary>
-        <div class="glossary-wrap" style="padding:16px;">
+        <div class="glossary-wrap p-4">
           ${annotateGlossary("事實", "Facts", "先看交易所、賬户、runtime 實際返回了什么。事實是「真實情况」，不是你点按钮点出来的權限。", "Facts are the actual returned conditions, not permissions granted by a button.")}
           ${annotateGlossary("權限配置", "Control Permission", "再看你在控制面配置了什么，例如 demo reserved、spot shadow。這些是「允許系統往下判斷」，不是「马上能執行」。", "Control permissions allow the system to continue guarded evaluation; they are not immediate execution authority.")}
           ${annotateGlossary("状态推進", "State Progress", "最后看 demo validate、demo arm 這類步驟。它们表示系統流程往前走了，但仍可能保持封閉。", "State progress means the workflow moved forward, but it can still remain closed.")}
