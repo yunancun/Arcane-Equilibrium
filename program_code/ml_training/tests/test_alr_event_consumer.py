@@ -415,7 +415,18 @@ def test_operational_backlog_is_bounded_and_deferred_without_training_authority(
     monkeypatch.setattr(
         consumer,
         "persist_statistical_run",
-        lambda connection, result: {"status": "PERSISTED"},
+        lambda connection, result: {
+            "status": "PERSISTED",
+            "decision_writes_suppressed": 0,
+            "duplicate_retries": 0,
+            "artifact_rows_written": 5,
+            "provenance_rows_written": 7,
+            "run_rows_written": 1,
+            "feedback_rows_written": 0,
+            "defer_artifact_rows_written": 1,
+            "payload_bytes_written": 1024,
+            "source_rows_consumed": 3,
+        },
     )
 
     result = run_operational_backlog(
@@ -430,7 +441,158 @@ def test_operational_backlog_is_bounded_and_deferred_without_training_authority(
         "training_duplicates": 0,
         "training_deferred": 0,
         "training_insufficient_source_cycles": 0,
+        "defer_suppressions": 0,
+        "suppression_duplicate_retries": 0,
+        "decision_write_attempts": 1,
+        "decision_writes_suppressed": 0,
+        "decision_duplicate_retries": 0,
+        "operational_artifact_rows_written": 5,
+        "operational_provenance_rows_written": 7,
+        "operational_run_rows_written": 1,
+        "operational_feedback_rows_written": 0,
+        "operational_defer_artifact_rows_written": 1,
+        "operational_payload_bytes_written": 1024,
+        "operational_source_rows_consumed": 3,
     }
+
+
+def test_operational_backlog_reports_equivalent_defer_suppression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cycles = [
+        {
+            "source_hash": f"{ordinal:064x}",
+            "source_key": f"scan-{ordinal}|2026-07-09T12:0{ordinal}:00Z",
+            "source_ts": f"2026-07-09T12:0{ordinal}:00Z",
+            "canonical_payload": {"candidates": [{"symbol": "BTCUSDT"}]},
+        }
+        for ordinal in range(1, 4)
+    ]
+    monkeypatch.setattr(
+        consumer,
+        "fetch_untrained_scanner_cycles",
+        lambda connection, *, limit: cycles,
+    )
+    monkeypatch.setattr(
+        consumer,
+        "build_scanner_statistical_experiment",
+        lambda **kwargs: {"research_only": True},
+    )
+    monkeypatch.setattr(
+        consumer,
+        "persist_statistical_run",
+        lambda connection, result: {
+            "status": "SUPPRESSED_EQUIVALENT_DEFER",
+            "decision_writes_suppressed": 1,
+            "duplicate_retries": 0,
+            "artifact_rows_written": 1,
+            "provenance_rows_written": 3,
+            "run_rows_written": 0,
+            "feedback_rows_written": 0,
+            "defer_artifact_rows_written": 0,
+            "payload_bytes_written": 256,
+            "source_rows_consumed": 3,
+        },
+    )
+
+    result = run_operational_backlog(
+        object(),
+        source_head="a" * 40,
+        max_batch=32,
+    )
+
+    assert result == {
+        "training_runs": 0,
+        "training_duplicates": 0,
+        "training_deferred": 0,
+        "training_insufficient_source_cycles": 0,
+        "defer_suppressions": 1,
+        "suppression_duplicate_retries": 0,
+        "decision_write_attempts": 1,
+        "decision_writes_suppressed": 1,
+        "decision_duplicate_retries": 0,
+        "operational_artifact_rows_written": 1,
+        "operational_provenance_rows_written": 3,
+        "operational_run_rows_written": 0,
+        "operational_feedback_rows_written": 0,
+        "operational_defer_artifact_rows_written": 0,
+        "operational_payload_bytes_written": 256,
+        "operational_source_rows_consumed": 3,
+    }
+
+
+def test_operational_backlog_reports_duplicate_suppression_without_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cycles = [
+        {
+            "source_hash": f"{ordinal:064x}",
+            "source_key": f"scan-{ordinal}|2026-07-09T12:0{ordinal}:00Z",
+            "source_ts": f"2026-07-09T12:0{ordinal}:00Z",
+            "canonical_payload": {"candidates": [{"symbol": "BTCUSDT"}]},
+        }
+        for ordinal in range(1, 4)
+    ]
+    monkeypatch.setattr(
+        consumer,
+        "fetch_untrained_scanner_cycles",
+        lambda connection, *, limit: cycles,
+    )
+    monkeypatch.setattr(
+        consumer,
+        "build_scanner_statistical_experiment",
+        lambda **kwargs: {"research_only": True},
+    )
+    monkeypatch.setattr(
+        consumer,
+        "persist_statistical_run",
+        lambda connection, result: {
+            "status": "DUPLICATE_SUPPRESSION",
+            "decision_writes_suppressed": 1,
+            "duplicate_retries": 1,
+            "artifact_rows_written": 0,
+            "provenance_rows_written": 0,
+            "run_rows_written": 0,
+            "feedback_rows_written": 0,
+            "defer_artifact_rows_written": 0,
+            "payload_bytes_written": 0,
+            "source_rows_consumed": 0,
+        },
+    )
+
+    result = run_operational_backlog(
+        object(),
+        source_head="a" * 40,
+        max_batch=32,
+    )
+
+    assert result["decision_write_attempts"] == 1
+    assert result["decision_writes_suppressed"] == 1
+    assert result["decision_duplicate_retries"] == 1
+    assert result["suppression_duplicate_retries"] == 1
+    assert result["operational_artifact_rows_written"] == 0
+    assert result["operational_run_rows_written"] == 0
+
+
+def test_write_metric_builder_reports_explicit_nonzero_ratios() -> None:
+    metrics = consumer._build_write_metrics(
+        {
+            "health_attempts": 4,
+            "health_snapshots": 1,
+            "health_state_delta_writes": 1,
+            "health_heartbeat_writes": 0,
+            "health_writes_suppressed": 3,
+            "decision_write_attempts": 5,
+            "decision_writes_suppressed": 2,
+            "decision_duplicate_retries": 1,
+        },
+        session_id="00000000-0000-0000-0000-000000000001",
+    )
+
+    assert metrics["health"]["suppression_ratio"] == 0.75
+    assert metrics["decision"]["suppression_ratio"] == 0.4
+    assert metrics["feedback"]["persisted_ratio"] == 0.0
+    assert metrics["feedback"]["duplicate_retry_ratio"] == 0.0
 
 
 def test_operational_backlog_requires_a_pinned_source_head() -> None:
@@ -466,6 +628,12 @@ def test_feedback_backlog_persists_absence_and_requests_rotation(
             "feedback_status": "DEFER_EVIDENCE",
             "rotate_next_target": True,
             "global_stop": False,
+            "artifact_rows_written": 3,
+            "provenance_rows_written": 3,
+            "feedback_event_rows_written": 1,
+            "total_rows_written": 7,
+            "payload_bytes_written": 256,
+            "duplicate_retries": 0,
         },
     )
 
@@ -477,6 +645,13 @@ def test_feedback_backlog_persists_absence_and_requests_rotation(
         "feedback_deferred": 1,
         "feedback_rotations": 1,
         "feedback_boundary_blocks": 0,
+        "feedback_write_attempts": 1,
+        "feedback_duplicate_retries": 0,
+        "feedback_artifact_rows_written": 3,
+        "feedback_provenance_rows_written": 3,
+        "feedback_event_rows_written": 1,
+        "feedback_total_rows_written": 7,
+        "feedback_payload_bytes_written": 256,
     }
 
 
@@ -484,6 +659,7 @@ def test_event_loop_processes_feedback_before_next_target_rotation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[str] = []
+    captured_write_metrics: list[dict[str, object]] = []
     monkeypatch.setattr(
         consumer,
         "drain_fresh_lane",
@@ -504,6 +680,13 @@ def test_event_loop_processes_feedback_before_next_target_rotation(
             "feedback_deferred": 1,
             "feedback_rotations": 1,
             "feedback_boundary_blocks": 0,
+            "feedback_write_attempts": 1,
+            "feedback_duplicate_retries": 0,
+            "feedback_artifact_rows_written": 3,
+            "feedback_provenance_rows_written": 3,
+            "feedback_event_rows_written": 1,
+            "feedback_total_rows_written": 7,
+            "feedback_payload_bytes_written": 256,
         },
     )
     monkeypatch.setattr(
@@ -515,6 +698,18 @@ def test_event_loop_processes_feedback_before_next_target_rotation(
             "training_duplicates": 0,
             "training_deferred": 0,
             "training_insufficient_source_cycles": 0,
+            "defer_suppressions": 0,
+            "suppression_duplicate_retries": 0,
+            "decision_write_attempts": 1,
+            "decision_writes_suppressed": 0,
+            "decision_duplicate_retries": 0,
+            "operational_artifact_rows_written": 5,
+            "operational_provenance_rows_written": 7,
+            "operational_run_rows_written": 1,
+            "operational_feedback_rows_written": 0,
+            "operational_defer_artifact_rows_written": 1,
+            "operational_payload_bytes_written": 1024,
+            "operational_source_rows_consumed": 3,
         },
     )
     monkeypatch.setattr(
@@ -530,12 +725,27 @@ def test_event_loop_processes_feedback_before_next_target_rotation(
             "retention_skipped": 0,
         },
     )
-    monkeypatch.setattr(
-        consumer,
-        "process_health_snapshot",
-        lambda connection, *, source_head: calls.append("health")
-        or {"health_snapshots": 1, "health_authority_mismatches": 0},
-    )
+    def health(
+        connection: object,
+        *,
+        source_head: str,
+        write_metrics: dict[str, object],
+    ) -> dict[str, int]:
+        del connection, source_head
+        calls.append("health")
+        captured_write_metrics.append(write_metrics)
+        return {
+            "health_attempts": 1,
+            "health_snapshots": 1,
+            "health_state_delta_writes": 1,
+            "health_heartbeat_writes": 0,
+            "health_writes_suppressed": 0,
+            "health_rows_written": 2,
+            "health_payload_bytes_written": 512,
+            "health_authority_mismatches": 0,
+        }
+
+    monkeypatch.setattr(consumer, "process_health_snapshot", health)
 
     result = event_consumer_loop(
         object(),
@@ -549,6 +759,151 @@ def test_event_loop_processes_feedback_before_next_target_rotation(
     assert calls == ["feedback", "target", "retention", "health"]
     assert result["feedback_rotations"] == 1
     assert result["training_runs"] == 1
+    assert captured_write_metrics == [
+        {
+            "schema_version": "alr_write_metrics_v1",
+            "scope": {
+                "kind": "consumer_session_cumulative",
+                "session_id": "00000000-0000-0000-0000-000000000001",
+                "through_completed_health_attempt": 0,
+            },
+            "health": {
+                "attempts": 0,
+                "emitted": 0,
+                "state_delta_writes": 0,
+                "heartbeat_writes": 0,
+                "writes_suppressed": 0,
+                "rows_written": 0,
+                "payload_bytes_written": 0,
+                "suppression_ratio": 0.0,
+            },
+            "decision": {
+                "attempts": 1,
+                "writes_suppressed": 0,
+                "duplicate_retries": 0,
+                "artifact_rows_written": 8,
+                "provenance_rows_written": 10,
+                "run_rows_written": 1,
+                "feedback_rows_written": 1,
+                "defer_artifact_rows_written": 1,
+                "payload_bytes_written": 1280,
+                "source_rows_consumed": 3,
+                "suppression_ratio": 0.0,
+            },
+            "feedback": {
+                "attempts": 1,
+                "persisted": 1,
+                "duplicate_retries": 0,
+                "persisted_ratio": 1.0,
+                "duplicate_retry_ratio": 0.0,
+                "artifact_rows_written": 3,
+                "provenance_rows_written": 3,
+                "event_rows_written": 1,
+                "total_rows_written": 7,
+                "payload_bytes_written": 256,
+            },
+        }
+    ]
+
+
+def test_idle_health_heartbeat_does_not_trigger_another_training_cycle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target_calls = 0
+    health_calls = 0
+    waits = 0
+
+    monkeypatch.setattr(
+        consumer,
+        "drain_fresh_lane",
+        lambda connection, *, session_id, max_batch: _drain_result(),
+    )
+    monkeypatch.setattr(
+        consumer,
+        "process_outcome_feedback_backlog",
+        lambda connection, *, max_batch: {
+            "feedback_persisted": 0,
+            "feedback_duplicates": 0,
+            "feedback_deferred": 0,
+            "feedback_rotations": 0,
+            "feedback_boundary_blocks": 0,
+            "feedback_write_attempts": 0,
+            "feedback_duplicate_retries": 0,
+            "feedback_artifact_rows_written": 0,
+            "feedback_provenance_rows_written": 0,
+            "feedback_event_rows_written": 0,
+            "feedback_total_rows_written": 0,
+            "feedback_payload_bytes_written": 0,
+        },
+    )
+
+    def target(*args: object, **kwargs: object) -> dict[str, int]:
+        nonlocal target_calls
+        target_calls += 1
+        return {
+            "training_runs": 0,
+            "training_duplicates": 0,
+            "training_deferred": 0,
+            "training_insufficient_source_cycles": 1,
+            "defer_suppressions": 0,
+            "suppression_duplicate_retries": 0,
+            "decision_write_attempts": 0,
+            "decision_writes_suppressed": 0,
+            "decision_duplicate_retries": 0,
+            "operational_artifact_rows_written": 0,
+            "operational_provenance_rows_written": 0,
+            "operational_run_rows_written": 0,
+            "operational_feedback_rows_written": 0,
+            "operational_defer_artifact_rows_written": 0,
+            "operational_payload_bytes_written": 0,
+            "operational_source_rows_consumed": 0,
+        }
+
+    def health(*args: object, **kwargs: object) -> dict[str, int]:
+        nonlocal health_calls
+        health_calls += 1
+        return {
+            "health_attempts": 1,
+            "health_snapshots": 0,
+            "health_state_delta_writes": 0,
+            "health_heartbeat_writes": 0,
+            "health_writes_suppressed": 1,
+            "health_rows_written": 0,
+            "health_payload_bytes_written": 0,
+            "health_authority_mismatches": 0,
+        }
+
+    monkeypatch.setattr(consumer, "run_operational_backlog", target)
+    monkeypatch.setattr(
+        consumer,
+        "process_retention_backlog",
+        lambda connection, *, max_batch: {
+            "retention_scanned": 0,
+            "retention_quarantined": 0,
+            "retention_restored": 0,
+            "retention_swept": 0,
+            "retention_retained": 0,
+            "retention_skipped": 0,
+        },
+    )
+    monkeypatch.setattr(consumer, "process_health_snapshot", health)
+
+    def wait(*args: object, **kwargs: object) -> list[tuple[str, str]]:
+        nonlocal waits
+        waits += 1
+        return []
+
+    event_consumer_loop(
+        object(),
+        max_batch=8,
+        should_stop=lambda: waits >= 2,
+        wait_for_notifications=wait,
+        session_id="00000000-0000-0000-0000-000000000001",
+        source_head="a" * 40,
+    )
+
+    assert target_calls == 1
+    assert health_calls == 2
 
 
 def test_retention_backlog_reports_only_derived_cache_actions(
@@ -606,13 +961,72 @@ def test_health_snapshot_is_collected_and_persisted_without_authority(
     monkeypatch.setattr(
         consumer,
         "persist_health_snapshot",
-        lambda connection, value: {"status": "PERSISTED", "snapshot_hash": "a" * 64},
+        lambda connection, value: {
+            "status": "PERSISTED",
+            "snapshot_hash": "a" * 64,
+            "emission_reason": "STATE_DELTA",
+            "semantic_state_changed": True,
+            "heartbeat_due": False,
+            "rows_written": 2,
+            "payload_bytes_written": 512,
+            "writes_suppressed": 0,
+        },
     )
 
     result = process_health_snapshot(object(), source_head="b" * 40)
 
     assert result == {
+        "health_attempts": 1,
         "health_snapshots": 1,
+        "health_state_delta_writes": 1,
+        "health_heartbeat_writes": 0,
+        "health_writes_suppressed": 0,
+        "health_rows_written": 2,
+        "health_payload_bytes_written": 512,
+        "health_authority_mismatches": 0,
+    }
+
+
+def test_health_snapshot_reports_semantic_no_delta_suppression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot = {
+        "snapshot_hash": "a" * 64,
+        "authority_counters": {
+            "run_authority_mismatch_count": 0,
+            "feedback_authority_mismatch_count": 0,
+            **consumer._ZERO_AUTHORITY_COUNTERS,
+        },
+    }
+    monkeypatch.setattr(
+        consumer,
+        "collect_health_snapshot",
+        lambda connection, *, source_head: snapshot,
+    )
+    monkeypatch.setattr(
+        consumer,
+        "persist_health_snapshot",
+        lambda connection, value: {
+            "status": "SUPPRESSED_NO_DELTA",
+            "snapshot_hash": "a" * 64,
+            "semantic_state_changed": False,
+            "heartbeat_due": False,
+            "rows_written": 0,
+            "payload_bytes_written": 0,
+            "writes_suppressed": 1,
+        },
+    )
+
+    result = process_health_snapshot(object(), source_head="b" * 40)
+
+    assert result == {
+        "health_attempts": 1,
+        "health_snapshots": 0,
+        "health_state_delta_writes": 0,
+        "health_heartbeat_writes": 0,
+        "health_writes_suppressed": 1,
+        "health_rows_written": 0,
+        "health_payload_bytes_written": 0,
         "health_authority_mismatches": 0,
     }
 

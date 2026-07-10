@@ -27,7 +27,21 @@ def main() -> int:
     connection = _connect(_required_env("ALR_ISOLATED_SHADOW_DSN"))
     try:
         result = process_health_snapshot(connection, source_head="a" * 40)
-        if result != {"health_snapshots": 1, "health_authority_mismatches": 0}:
+        expected = {
+            "health_attempts": 1,
+            "health_snapshots": 1,
+            "health_state_delta_writes": 1,
+            "health_heartbeat_writes": 0,
+            "health_writes_suppressed": 0,
+            "health_rows_written": 2,
+            "health_authority_mismatches": 0,
+        }
+        if (
+            set(result) != set(expected) | {"health_payload_bytes_written"}
+            or any(result.get(key) != value for key, value in expected.items())
+            or not isinstance(result.get("health_payload_bytes_written"), int)
+            or result["health_payload_bytes_written"] <= 0
+        ):
             raise AssertionError(f"health_result_invalid:{result}")
         with connection.cursor() as cursor:
             cursor.execute("SELECT count(*) AS count FROM learning.alr_health_events")

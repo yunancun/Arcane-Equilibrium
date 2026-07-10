@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import copy
 from pathlib import Path
 
 import pytest
@@ -86,6 +87,75 @@ def test_is_deterministic_across_input_order() -> None:
     assert forward["run"]["source_set_hash"] == reverse["run"]["source_set_hash"]
 
 
+def test_defer_fingerprint_tracks_semantic_evidence_not_source_identity() -> None:
+    first = build_scanner_statistical_experiment(
+        source_head="b" * 40,
+        cycles=_cycles(),
+    )
+    equivalent_cycles = copy.deepcopy(_cycles())
+    for ordinal, cycle in enumerate(equivalent_cycles, start=11):
+        cycle["source_hash"] = f"{ordinal:064x}"
+        cycle["source_key"] = str(cycle["source_key"]).replace(
+            "2026-07-09", "2026-07-10"
+        )
+        cycle["source_ts"] = str(cycle["source_ts"]).replace(
+            "2026-07-09", "2026-07-10"
+        )
+        cycle["canonical_payload"]["ts"] = str(
+            cycle["canonical_payload"]["ts"]
+        ).replace("2026-07-09", "2026-07-10")
+    equivalent = build_scanner_statistical_experiment(
+        source_head="b" * 40,
+        cycles=equivalent_cycles,
+    )
+    different_head = build_scanner_statistical_experiment(
+        source_head="c" * 40,
+        cycles=equivalent_cycles,
+    )
+
+    changed_cycles = copy.deepcopy(equivalent_cycles)
+    changed_cycles[1]["canonical_payload"]["added"] = ["ALPHAUSDT"]
+    changed = build_scanner_statistical_experiment(
+        source_head="b" * 40,
+        cycles=changed_cycles,
+    )
+    control_changed_cycles = copy.deepcopy(equivalent_cycles)
+    control_changed_cycles[1]["canonical_payload"]["added"] = ["BETAUSDT"]
+    control_changed = build_scanner_statistical_experiment(
+        source_head="b" * 40,
+        cycles=control_changed_cycles,
+    )
+    config_changed_cycles = copy.deepcopy(equivalent_cycles)
+    config_changed_cycles[1]["canonical_payload"]["config"] = {
+        "scanner_revision": "v2"
+    }
+    config_changed = build_scanner_statistical_experiment(
+        source_head="b" * 40,
+        cycles=config_changed_cycles,
+    )
+
+    fingerprint = first["candidate_artifact"]["decision_fingerprint"]
+    assert equivalent["candidate_artifact"]["decision_fingerprint"] == fingerprint
+    assert equivalent["defer_evidence"]["decision_fingerprint"] == fingerprint
+    assert different_head["candidate_artifact"]["decision_fingerprint"] != fingerprint
+    assert changed["candidate_artifact"]["decision_fingerprint"] != fingerprint
+    assert (
+        control_changed["candidate_artifact"]["decision_fingerprint"]
+        != fingerprint
+    )
+    assert (
+        config_changed["candidate_artifact"]["decision_fingerprint"]
+        != fingerprint
+    )
+    components = first["candidate_artifact"]["decision_fingerprint_components"]
+    assert components["candidate_identity"]["symbol"] == "ALPHAUSDT"
+    assert components["regime_context"]["measurement"] == "recurrence_not_return"
+    assert components["semantic_evidence"]["scanner_occurrences"] == 4
+    assert components["blockers"]
+    assert components["reevaluation_policy"]["max_suppression_seconds"] == 1800
+    assert len(components["decision_policy_hash"]) == 64
+
+
 def test_rejects_duplicate_sources_and_missing_candidates() -> None:
     duplicate = _cycles()
     duplicate.append(dict(duplicate[0]))
@@ -106,6 +176,22 @@ def test_rejects_tampered_after_cost_or_authority_claim() -> None:
     validation = validate_scanner_statistical_experiment(result)
     assert validation.valid is False
     assert validation.reason == "after_cost_status_invalid"
+
+
+def test_rejects_tampered_defer_decision_fingerprint() -> None:
+    result = build_scanner_statistical_experiment(
+        source_head="d" * 40,
+        cycles=_cycles(),
+    )
+    result["candidate_artifact"]["decision_fingerprint_components"][
+        "blockers"
+    ] = []
+    result["experiment_hash"] = compute_scanner_statistical_experiment_hash(result)
+
+    validation = validate_scanner_statistical_experiment(result)
+
+    assert validation.valid is False
+    assert validation.reason == "decision_fingerprint_mismatch"
 
 
 def test_source_is_pure_and_has_no_runtime_or_training_imports() -> None:
