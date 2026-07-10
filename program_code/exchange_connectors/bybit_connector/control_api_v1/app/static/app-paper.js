@@ -112,12 +112,16 @@ function renderPaperSession(d) {
 function renderPaperPnl(d) {
   const el = document.getElementById("paperPnlItems");
   if (!d) { el.textContent = "無數據 / No data"; return; }
-  const pnlColor = (v) => v > 0 ? "paper-positive" : v < 0 ? "paper-negative" : "";
+  // 會話 PnL 聚合 = 水位(累計值,非變化量)→ 第二通道用 sign + .val-* 色不加箭頭(§2.2);
+  // 金額走 ocMoney(2dp,U+2212 自帶),色 class 由 ocSignParts 取(取代舊 paper-positive/negative)。
+  // 手續費為成本量值,以 U+2212 前綴 + ocBalance(2dp);真無值回 OC_EMPTY(canon 7 禁假零)。
+  const cls = (v) => ocSignParts(v).cls;
+  const feeCell = ocIsBlank(d.total_fees_paid) ? OC_EMPTY : '−' + ocBalance(d.total_fees_paid);
   el.innerHTML = `
-    <div class="paper-pnl-row"><span>已實現 / Realized</span><span class="${pnlColor(d.realized_pnl)}">${(d.realized_pnl || 0).toFixed(4)} USDT</span></div>
-    <div class="paper-pnl-row"><span>未實現 / Unrealized</span><span class="${pnlColor(d.unrealized_pnl)}">${(d.unrealized_pnl || 0).toFixed(4)} USDT</span></div>
-    <div class="paper-pnl-row"><span>手續費 / Fees</span><span>-${(d.total_fees_paid || 0).toFixed(4)} USDT</span></div>
-    <div class="paper-pnl-row paper-pnl-net"><span>净值 / Net PnL</span><span class="${pnlColor(d.net_paper_pnl)}">${(d.net_paper_pnl || 0).toFixed(4)} USDT</span></div>
+    <div class="paper-pnl-row"><span>已實現 / Realized</span><span class="num ${cls(d.realized_pnl)}">${ocMoney(d.realized_pnl)}</span></div>
+    <div class="paper-pnl-row"><span>未實現 / Unrealized</span><span class="num ${cls(d.unrealized_pnl)}">${ocMoney(d.unrealized_pnl)}</span></div>
+    <div class="paper-pnl-row"><span>手續費 / Fees</span><span class="num val-neg">${feeCell}</span></div>
+    <div class="paper-pnl-row paper-pnl-net"><span>净值 / Net PnL</span><span class="num ${cls(d.net_paper_pnl)}">${ocMoney(d.net_paper_pnl)}</span></div>
   `;
 }
 
@@ -129,14 +133,15 @@ function renderPaperPositions(d) {
   if (positions.length === 0) { el.textContent = "無持倉 / No positions"; return; }
   el.innerHTML = positions.map(p => {
     const sym = ocEsc(p.symbol || '??');
-    const pnlColor = p.unrealized_pnl > 0 ? "paper-positive" : p.unrealized_pnl < 0 ? "paper-negative" : "";
+    // 每倉未實現盈虧 = 水位(當前市值浮盈)→ sign + .val-* 色不加箭頭(§2.2);量→ocQty(6dp)、
+    // 價→ocPrice(2dp)、開倉名義→ocBalance(2dp),方向→ocSide badge(多/空 LONG/SHORT ▲▼)。
     return `<div class="paper-position-row">
       <span class="paper-pos-symbol">${sym}</span>
-      <span class="paper-pos-side">${ocEsc(p.side)}</span>
-      <span>${ocEsc(p.qty)}</span>
-      <span>@ ${(p.avg_entry_price || p.entry_price || 0).toFixed(2)}</span>
-      <span>${ocAmount(ocPositionEntryValue(p))}</span>
-      <span class="${pnlColor}">${(p.unrealized_pnl || 0).toFixed(4)}</span>
+      <span class="paper-pos-side">${ocSide(p.side)}</span>
+      <span class="num">${ocQty(p.qty)}</span>
+      <span class="num">@ ${ocPrice(p.avg_entry_price || p.entry_price)}</span>
+      <span class="num">${ocBalance(ocPositionEntryValue(p))}</span>
+      <span class="num ${ocSignParts(p.unrealized_pnl).cls}">${ocMoney(p.unrealized_pnl)}</span>
     </div>`;
   }).join("");
 }
@@ -150,9 +155,9 @@ function renderPaperOrders(d) {
     const stateClass = o.state.includes("filled") ? "paper-filled" : o.state.includes("canceled") || o.state.includes("rejected") ? "paper-canceled" : "paper-working";
     return `<div class="paper-order-row ${stateClass}">
       <span>${ocEsc(o.symbol)}</span>
-      <span>${ocEsc(o.side)}</span>
+      <span>${ocSide(o.side)}</span>
       <span>${ocEsc(o.order_type)}</span>
-      <span>${ocEsc(o.qty)}${o.price ? " @ " + ocEsc(o.price) : ""}</span>
+      <span class="num">${ocQty(o.qty)}${o.price ? " @ " + ocPrice(o.price) : ""}</span>
       <span class="paper-order-state">${ocEsc(stateLabel)}</span>
     </div>`;
   }).join("");
@@ -165,10 +170,10 @@ function renderPaperFills(d) {
   el.innerHTML = fills.slice(-20).reverse().map(f => {
     return `<div class="paper-fill-row">
       <span>${ocEsc(f.symbol)}</span>
-      <span>${ocEsc(f.side)}</span>
-      <span>${ocEsc(f.qty)} @ ${(f.price || 0).toFixed(2)}</span>
-      <span>${ocAmount(ocFillExecValue(f))}</span>
-      <span>Fee: ${(f.fee || 0).toFixed(6)}</span>
+      <span>${ocSide(f.side)}</span>
+      <span class="num">${ocQty(f.qty)} @ ${ocPrice(f.price)}</span>
+      <span class="num">${ocBalance(ocFillExecValue(f))}</span>
+      <span class="num">Fee: ${ocNum(f.fee, 6)}</span>
     </div>`;
   }).join("");
 }
@@ -240,7 +245,7 @@ function renderMarketFeedStatus(d) {
     pricesEl.innerHTML = symbols.map(sym => {
       return `<span class="paper-feed-price-item">
         <span class="price-symbol">${ocEsc(sym)}</span>
-        <span class="price-value">${prices[sym].toFixed(2)}</span>
+        <span class="price-value num">${ocPrice(prices[sym], prices[sym] < 0.01 ? 6 : prices[sym] < 1 ? 4 : 2)}</span>
       </span>`;
     }).join("");
   } else if (isRunning) {
@@ -802,8 +807,9 @@ function ocPaperSubtabInit() {
     const specs = coverage.instrument_specs || {};
     const retention = coverage.retention_policy || {};
     const warnings = Array.isArray(data.warnings) ? data.warnings : [];
+    // 覆蓋率 fraction(0.8→"80.00%")→ ocPct(內部 ×100,2dp);真無值回 OC_EMPTY(canon 7)。
     const pct = function (v) {
-      return typeof v === "number" && Number.isFinite(v) ? (v * 100).toFixed(0) + "%" : "--";
+      return typeof v === "number" && Number.isFinite(v) ? ocPct(v) : OC_EMPTY;
     };
     const sampleCount = Math.min(
       Number(execCal.slippage_sample_count || 0),
@@ -869,11 +875,12 @@ function ocPaperSubtabInit() {
     const fidelity = data.input_fidelity || {};
     const specs = data.instrument_specs || {};
     const execCal = data.execution_calibration || {};
+    // 覆蓋率/機率 fraction → ocPct(2dp);bps → ocBps(2dp,附 bps 尾綴與 U+2212 負號);真無值回 OC_EMPTY。
     const pct = function (v) {
-      return typeof v === "number" && Number.isFinite(v) ? (v * 100).toFixed(0) + "%" : "--";
+      return typeof v === "number" && Number.isFinite(v) ? ocPct(v) : OC_EMPTY;
     };
     const fmtBps = function (v) {
-      return typeof v === "number" && Number.isFinite(v) ? v.toFixed(0) + " bps" : "--";
+      return typeof v === "number" && Number.isFinite(v) ? ocBps(v) : OC_EMPTY;
     };
     const microCoverage = typeof micro.coverage_ratio === "number" ? micro.coverage_ratio : 0;
     const fidelityMicro = fidelity.microstructure || {};
@@ -1008,7 +1015,7 @@ function ocPaperSubtabInit() {
       + _metricCellHtml("oc-replay-summary-pnl", "Net PnL / 淨損益", fmt(net, 4),
         typeof net === "number" && net >= 0 ? "oc-cell-ok" : "oc-cell-warn", "Fee-aware replay report PnL")
       + _metricCellHtml("oc-replay-summary-net-bps", "Net Bps / 淨bps",
-        fmt(analytics.net_bps_after_fee, 2),
+        ocBps(analytics.net_bps_after_fee, true),
         typeof analytics.net_bps_after_fee === "number" && analytics.net_bps_after_fee >= 0 ? "oc-cell-ok" : "oc-cell-warn",
         "Fee-net replay return in bps of starting balance")
       + _metricCellHtml("oc-replay-summary-verdict", "Verdict / 判定",
@@ -1028,15 +1035,15 @@ function ocPaperSubtabInit() {
       + _metricCellHtml("oc-replay-summary-decisions", "Decisions / 決策", String(decisions),
         decisions > 0 ? "oc-cell-ok" : "oc-cell-warn", "Strategy decision trace entries")
       + _metricCellHtml("oc-replay-summary-drawdown", "Drawdown / 回撤",
-        fmt(analytics.max_drawdown_bps, 2) + " bps",
+        ocBps(analytics.max_drawdown_bps),
         typeof analytics.max_drawdown_bps === "number" ? "oc-cell-ok" : "oc-cell-warn",
         String(analytics.drawdown_status || "balance curve unavailable"))
       + _metricCellHtml("oc-replay-summary-bands", "Run Bands / 區間",
-        bands.q10 != null ? (fmt(bands.q10, 1) + " / " + fmt(bands.q50, 1) + " / " + fmt(bands.q90, 1)) : String(analytics.run_band_status || "--"),
+        bands.q10 != null ? (ocBps(bands.q10, true) + " / " + ocBps(bands.q50, true) + " / " + ocBps(bands.q90, true)) : String(analytics.run_band_status || "--"),
         analytics.run_band_status === "stationary_block_bootstrap" ? "oc-cell-ok" : "oc-cell-warn",
         "Stationary block bootstrap q10/q50/q90 in bps")
       + _metricCellHtml("oc-replay-summary-baseline", "Baseline Delta / 基準差",
-        baseline.delta_net_bps_after_fee != null ? fmt(baseline.delta_net_bps_after_fee, 2) + " bps" : String(analytics.baseline_comparison_status || "not_configured"),
+        baseline.delta_net_bps_after_fee != null ? ocBps(baseline.delta_net_bps_after_fee, true) : String(analytics.baseline_comparison_status || "not_configured"),
         baseline.verdict === "candidate_better" ? "oc-cell-ok" : "oc-cell-neutral",
         "Read-only baseline-vs-candidate comparison when a baseline payload is attached")
       + _metricCellHtml("oc-replay-summary-balance", "Balance / 餘額",

@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="/static/tokens.css" />
 <link rel="stylesheet" href="/static/tokens-compat.css" />
 <link rel="stylesheet" href="/static/oc-utilities.css" />
-<script src="/static/common-formatters.js?v=20260628.gui-fills-md"></script>
+<script src="/static/common-formatters.js?v=20260711.p03-numerics"></script>
 <script src="/static/common-mode-badge.js?v=20260519.split-p2"></script>
 <script src="/static/common-modals.js?v=20260519.split-p2"></script>
 <script src="/static/js/fetch_with_csrf.js?v=20260527.ops1"></script>
@@ -75,11 +75,11 @@
   <div class="oc-card">
     <h3>&#x1F4B0; 賬户余额 / Account Balance</h3>
     <div class="oc-metrics" id="balance-grid">
-      <div class="oc-metric"><div class="oc-metric-label">初始余额 / Initial Balance</div><div class="oc-metric-val" id="d-initial">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label" title="钱包余额 + 未實現盈亏，當前賬户的真實總價值。/ Wallet balance + unrealized PnL, the current real-time total value of the account.">總净值 / Total Equity</div><div class="oc-metric-val" id="d-equity">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">可用余额 / Available Balance</div><div class="oc-metric-val" id="d-available">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">已用保證金 / Margin Used</div><div class="oc-metric-val" id="d-margin">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">峰值余额 / Peak Balance</div><div class="oc-metric-val" id="d-peak">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">初始余额 / Initial Balance</div><div class="oc-metric-val num" id="d-initial">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label" title="钱包余额 + 未實現盈亏，當前賬户的真實總價值。/ Wallet balance + unrealized PnL, the current real-time total value of the account.">總净值 / Total Equity</div><div class="oc-metric-val num" id="d-equity">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">可用余额 / Available Balance</div><div class="oc-metric-val num" id="d-available">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">已用保證金 / Margin Used</div><div class="oc-metric-val num" id="d-margin">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label">峰值余额 / Peak Balance</div><div class="oc-metric-val num" id="d-peak">--</div></div>
     </div>
   </div>
 
@@ -92,7 +92,7 @@
       <div class="oc-metric"><div class="oc-metric-label">未實現盈亏 / Unrealized PnL</div><div class="oc-metric-val" id="d-unrealized">--</div></div>
       <div class="oc-metric"><div class="oc-metric-label" title="盈利交易占總交易的百分比。注意：高勝率不等于盈利，需結合盈亏比。/ Win percentage. High win rate does not guarantee profit — check win/loss ratio.">勝率 / Win Rate</div><div class="oc-metric-val" id="d-winrate">--</div></div>
       <div class="oc-metric"><div class="oc-metric-label" title="平均盈利 / 平均亏損。>1 表示贏的比輸的多。与勝率結合看：勝率高但盈亏比<1 仍可能總體亏損。/ Avg win ÷ avg loss. >1 means wins are larger than losses.">盈亏比 / W/L Ratio</div><div class="oc-metric-val" id="d-wlratio">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label" title="从峰值到最低点的最大跌幅百分比，衡量最坏情况下的資金回撤。越小越好。/ Largest peak-to-trough decline in equity. Lower is better.">最大回撤 / Max Drawdown</div><div class="oc-metric-val" id="d-maxdd">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label" title="从峰值到最低点的最大跌幅百分比，衡量最坏情况下的資金回撤。越小越好。/ Largest peak-to-trough decline in equity. Lower is better.">最大回撤 / Max Drawdown</div><div class="oc-metric-val num" id="d-maxdd">--</div></div>
     </div>
     <!-- PnL Trend Sparkline / 盈亏趋势圖 -->
     <div class="mt-3">
@@ -216,7 +216,7 @@
         </table>
       </div>
     <div class="oc-metrics mt-2">
-      <div class="oc-metric"><div class="oc-metric-label" title="本次會話的初始投入資金。/ Initial capital at session start.">初始投入 / Initial Capital</div><div class="oc-metric-val" id="d-fills-capital">--</div></div>
+      <div class="oc-metric"><div class="oc-metric-label" title="本次會話的初始投入資金。/ Initial capital at session start.">初始投入 / Initial Capital</div><div class="oc-metric-val num" id="d-fills-capital">--</div></div>
       <div class="oc-metric"><div class="oc-metric-label" title="已實現 + 未實現盈亏 = 當前净收益。正值盈利，負值亏損。/ Realized + Unrealized PnL = current net return.">累計收益 / Net Return</div><div class="oc-metric-val" id="d-fills-return">--</div></div>
     </div>
     </div>
@@ -450,30 +450,31 @@ function _renderDemoDustPanel(positions) {
   }
   footer.style.display = 'none';
   tbody.innerHTML = dust.map(p => {
+    // 方向→ocSide badge;量→ocQty(6dp)、標記價→ocPrice;估值/最小名義→ocBalance(2dp,FX 轉換一致)。
     const sym = ocEsc(p.symbol || '--');
-    const side = ocEsc(p.side || '--');
-    const qty = ocEsc(String(p.size || p.qty || '--'));
-    const mark = ocEsc(String(p.markPrice || p.mark_price || '--'));
+    const side = ocSide(p.side);
+    const qty = ocQty(p.size || p.qty);
+    const mark = ocPrice(p.markPrice || p.mark_price);
     const est = parseFloat(p.est_notional);
     const min = parseFloat(p.min_notional);
-    const estCell = Number.isFinite(est) ? '$' + est.toFixed(2) : '--';
-    const minCell = Number.isFinite(min) ? '$' + min.toFixed(2) : '--';
+    const estCell = Number.isFinite(est) ? ocBalance(est) : OC_EMPTY;
+    const minCell = Number.isFinite(min) ? ocBalance(min) : OC_EMPTY;
     // Gap % = how far the position notional is below the exchange minimum.
     // Higher = harder to recover via price drift alone.
-    // Gap % = 倉位名義值距交易所最小值的差距百分比。越高代表越難靠價格漂移自然恢復。
-    let gap = '--';
+    // Gap % = 倉位名義值距交易所最小值的差距百分比。已是 percent 值 → ocPctVal(already-%,2dp)。
+    let gap = OC_EMPTY;
     if (Number.isFinite(est) && Number.isFinite(min) && min > 0) {
-      gap = ((min - est) / min * 100).toFixed(1) + '%';
+      gap = ocPctVal((min - est) / min * 100);
     }
     const owner = p.owner_strategy || '';
     return '<tr>' +
       '<td><strong>' + sym + '</strong></td>' +
       '<td>' + side + '</td>' +
-      '<td>' + qty + '</td>' +
-      '<td>' + mark + '</td>' +
-      '<td>' + estCell + '</td>' +
-      '<td>' + minCell + '</td>' +
-      '<td>' + gap + '</td>' +
+      '<td class="num">' + qty + '</td>' +
+      '<td class="num">' + mark + '</td>' +
+      '<td class="num">' + estCell + '</td>' +
+      '<td class="num">' + minCell + '</td>' +
+      '<td class="num">' + gap + '</td>' +
       '<td class="fs-micro">' + _ocRenderOwnerStrategy(owner, p) + '</td>' +
       '</tr>';
   }).join('');
@@ -575,26 +576,27 @@ function renderBalance(raw) {
   const peakDisplay = Number.isFinite(enginePeak) && enginePeak > 0 ? enginePeak : equity;
   ocSetText('d-peak', ocBalance(peakDisplay, 2));
 
-  // PnL fields
+  // PnL fields — 皆為水位(累計/當前值)→ 第二通道 sign + .val-* 色不加箭頭(§2.2);
+  // 色 class 由 ocSignParts 取(取代舊 ocPnlClass green/red),+ .num 掛排版原子。
   const net = realized + unrealized;
   const elNet = $('d-net');
   elNet.textContent = ocMoney(net);
-  elNet.className = 'oc-metric-val ' + ocPnlClass(net);
+  elNet.className = 'oc-metric-val num ' + ocSignParts(net).cls;
 
   const elU = $('d-unrealized');
   elU.textContent = ocMoney(unrealized);
-  elU.className = 'oc-metric-val ' + ocPnlClass(unrealized);
+  elU.className = 'oc-metric-val num ' + ocSignParts(unrealized).cls;
 
   const elR = $('d-realized');
   elR.textContent = ocMoney(realized);
-  elR.className = 'oc-metric-val ' + ocPnlClass(realized);
+  elR.className = 'oc-metric-val num ' + ocSignParts(realized).cls;
 
   // Fill history summary: initial capital + net return (from balance data)
   // 成交歷史摘要：初始投入 + 累計收益（取自 balance 已有數據）
   ocSetText('d-fills-capital', ocBalance(initialApprox, 2));
   const elFillsReturn = $('d-fills-return');
   elFillsReturn.textContent = ocMoney(net);
-  elFillsReturn.className = 'oc-metric-val ' + ocPnlClass(net);
+  elFillsReturn.className = 'oc-metric-val num ' + ocSignParts(net).cls;
 
   // DB-truth metrics are loaded by loadDemoMetrics(); do not reconstruct
   // round trips in the browser from a latest-fill sample.
@@ -636,7 +638,6 @@ async function loadPositions() {
   let html = '';
   positions.forEach(p => {
     const pnl = parseFloat(p.unrealisedPnl || p.unrealised_pnl || p.unrealized_pnl || 0);
-    const sideLabel = p.side === 'Buy' ? '做多' : '做空';
     // Bybit API: category from symbol suffix heuristic (USDT=linear, USD=inverse, else spot)
     const sym = p.symbol || '';
     const cat = p.category || (sym.endsWith('USD') && !sym.endsWith('USDT') ? 'inverse' : 'linear');
@@ -659,19 +660,21 @@ async function loadPositions() {
     const btnLabel = isDust ? '清塵 / Clear Dust' : '平倉';
     const ownerAttr = ocEsc(String(strat || ''));
     const reasonAttr = ocEsc(String(p.frozen_reason || ''));
+    // 方向→ocSide badge;量→ocQty(6dp)、價→ocPrice、開倉名義→ocBalance;每倉未實現盈虧=水位→
+    // sign + .val-* 色不加箭頭(§2.2);微額(|pnl|<0.01)保 4dp 防塌 0.00(既有 micro guard 保留)。
+    const pnlDecimals = (Math.abs(pnl) > 0 && Math.abs(pnl) < 0.01) ? 4 : undefined;
     html += '<tr>';
     html += '<td><strong>' + ocEsc(p.symbol) + '</strong></td>';
     html += '<td class="fs-micro">' + _ocRenderOwnerStrategy(strat, p) + '</td>';
     html += '<td>' + ocCategoryTag(cat) + '</td>';
-    html += '<td class="' + (p.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
-    html += '<td>' + ocNum(parseFloat(p.size || p.qty || 0), 4) + '</td>';
-    html += '<td>' + ocNum(parseFloat(p.avgPrice || p.avg_price || p.entry_price || 0), 2) + '</td>';
-    html += '<td>' + ocAmount(ocPositionEntryValue(p)) + '</td>';
-    html += '<td>' + ocNum(parseFloat(p.markPrice || p.mark_price || 0), 2) + '</td>';
-    const pnlDecimals = (Math.abs(pnl) > 0 && Math.abs(pnl) < 0.01) ? 4 : undefined;
-    html += '<td class="' + ocPnlClass(pnl) + '">' + ocMoney(pnl, pnlDecimals) + '</td>';
-    html += '<td>' + (p.leverage || '1') + 'x</td>';
-    html += '<td>' + ocNum(parseFloat(p.liqPrice || p.liq_price || 0), 2) + '</td>';
+    html += '<td>' + ocSide(p.side) + '</td>';
+    html += '<td class="num">' + ocQty(parseFloat(p.size || p.qty || 0)) + '</td>';
+    html += '<td class="num">' + ocPrice(parseFloat(p.avgPrice || p.avg_price || p.entry_price || 0)) + '</td>';
+    html += '<td class="num">' + ocBalance(ocPositionEntryValue(p)) + '</td>';
+    html += '<td class="num">' + ocPrice(parseFloat(p.markPrice || p.mark_price || 0)) + '</td>';
+    html += '<td class="num ' + ocSignParts(pnl).cls + '">' + ocMoney(pnl, pnlDecimals) + '</td>';
+    html += '<td class="num">' + (p.leverage || '1') + 'x</td>';
+    html += '<td class="num">' + ocPrice(parseFloat(p.liqPrice || p.liq_price || 0)) + '</td>';
     html += '<td><button class="oc-btn oc-btn-danger oc-btn--xs"' +
            ' data-owner-strategy="' + ownerAttr + '"' +
            ' data-frozen-reason="' + reasonAttr + '"' +
@@ -718,7 +721,6 @@ async function loadDemoOrders() {
   const typeMap = { Market: '市價', Limit: '限價' };
   const statusMap = { New: '掛單中', PartiallyFilled: '部分成交', Untriggered: '待触发' };
   orders.forEach(o => {
-    const sideLabel = o.side === 'Buy' ? '买入' : '卖出';
     const orderType = o.orderType || o.order_type || '';
     const status = o.orderStatus || o.status || '';
     const isConditional = o._orderFilter === 'StopOrder' || status === 'Untriggered';
@@ -731,11 +733,11 @@ async function loadDemoOrders() {
     html += '<td>' + ocEsc(o.symbol) + '</td>';
     html += '<td class="fs-micro">' + ocEsc(strat) + '</td>';
     html += '<td>' + ocCategoryTag(cat) + '</td>';
-    html += '<td class="' + (o.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
+    html += '<td>' + ocSide(o.side) + '</td>';
     html += '<td>' + typeLabel + '</td>';
-    html += '<td>' + ocNum(parseFloat(o.qty || o.origQty || 0), 4) + '</td>';
-    html += '<td>' + (parseFloat(o.price || 0) > 0 ? ocNum(parseFloat(o.price), 2) : '市價') + '</td>';
-    html += '<td>' + (triggerPrice > 0 ? ocNum(triggerPrice, 2) : '--') + '</td>';
+    html += '<td class="num">' + ocQty(parseFloat(o.qty || o.origQty || 0)) + '</td>';
+    html += '<td class="num">' + (parseFloat(o.price || 0) > 0 ? ocPrice(parseFloat(o.price)) : '市價') + '</td>';
+    html += '<td class="num">' + (triggerPrice > 0 ? ocPrice(triggerPrice) : OC_EMPTY) + '</td>';
     html += '<td>' + (statusMap[status] || ocEsc(status)) + '</td>';
     html += '</tr>';
   });
@@ -779,7 +781,6 @@ function _demoFillHead(tab) {
 }
 
 function _demoFillRow(f) {
-  const sideLabel = f.side === 'Buy' ? '买入' : '卖出';
   const ts = _demoFillTs(f);
   const price = _demoFillPrice(f);
   const qty = _demoFillQty(f);
@@ -787,19 +788,22 @@ function _demoFillRow(f) {
   const sym = f.symbol || '';
   const cat = f.category || (sym.endsWith('USD') && !sym.endsWith('USDT') ? 'inverse' : 'linear');
   const strategy = f.strategy || f.strategy_name || f.owner_strategy || '';
+  // 方向→ocSide badge;量→ocQty(6dp)、價→ocPrice、成交名義→ocBalance、手續費保 6dp(per-fill 微額 column-fixed)。
+  // per-fill 已實現盈虧 = column-fixed 4dp 例外(§1.5,收 2dp 會把微額成交塌 0.00 假零);
+  // 帶方向 → sign + .val-* 色(ocSignParts),ocMoney(,4) 自帶 U+2212。
   let html = '<tr>';
   html += '<td>' + ocFillTime(ts) + '</td>';
   html += '<td>' + ocEsc(sym) + '</td>';
   html += '<td class="fs-micro">' + (strategy ? _ocRenderOwnerStrategy(strategy, f) : '--') + '</td>';
   html += '<td>' + ocCategoryTag(cat) + '</td>';
-  html += '<td class="' + (f.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
-  html += '<td>' + ocNum(qty, 4) + '</td>';
-  html += '<td>' + ocNum(price, 2) + '</td>';
-  html += '<td>' + ocAmount(ocFillExecValue(f)) + '</td>';
-  html += '<td>' + ocNum(fee, 6) + '</td>';
+  html += '<td>' + ocSide(f.side) + '</td>';
+  html += '<td class="num">' + ocQty(qty) + '</td>';
+  html += '<td class="num">' + ocPrice(price) + '</td>';
+  html += '<td class="num">' + ocBalance(ocFillExecValue(f)) + '</td>';
+  html += '<td class="num">' + ocNum(fee, 6) + '</td>';
   const pnl = _demoFillPnl(f);
-  const pnlCls = pnl >= 0 ? 'green' : 'red';
-  html += '<td class="' + pnlCls + '" title="engine-calc · PG realized_pnl"><span aria-label="engine-calc">&#x2699;</span> ' + ocMoney(pnl) + '</td>';
+  const pnlParts = ocSignParts(pnl);
+  html += '<td class="num ' + pnlParts.cls + '" title="engine-calc · PG realized_pnl"><span aria-label="engine-calc">&#x2699;</span> ' + ocMoney(pnl, 4) + '</td>';
   html += '</tr>';
   return html;
 }
@@ -821,7 +825,8 @@ function _demoProfitRow(r) {
   const exitPrice = r.avg_exit_price != null ? r.avg_exit_price : r.avgExitPrice;
   const closedPnlRaw = r.closed_pnl != null ? r.closed_pnl : r.closedPnl;
   const closedPnlNum = parseFloat(closedPnlRaw);
-  const pnlCls = Number.isFinite(closedPnlNum) ? (closedPnlNum >= 0 ? 'green' : 'red') : '';
+  // 平倉收益 = per-fill 已實現盈虧 → 帶方向 sign + .val-* 色(ocSignParts,取代舊 green/red)。
+  const pnlParts = ocSignParts(closedPnlNum);
   const strategy = r.strategy_name || r.strategy || '';
   const source = r.strategy_source || r.strategySource || '';
   const mutedStrategy = !strategy || source === 'bybit_unknown' || source === 'pg_missing_unknown_external';
@@ -844,11 +849,11 @@ function _demoProfitRow(r) {
     '<td class="fs-micro" title="' + ocEsc(sourceLabel) + '">' +
       '<span class="' + (mutedStrategy ? 'oc-row-muted' : '') + '">' + ocEsc(strategyText) + '</span>' +
       '<span class="oc-source-note">' + ocEsc(sourceLabel) + '</span></td>' +
-    '<td>' + (entryPrice != null ? ocNum(parseFloat(entryPrice), 2) : '--') + '</td>' +
-    '<td>' + (exitPrice != null ? ocNum(parseFloat(exitPrice), 2) : '--') + '</td>' +
-    '<td>' + ocEsc(String(qty != null ? qty : '--')) + '</td>' +
-    '<td class="t-dim">' + ocEsc(String(r.side || '--')) + '</td>' +
-    '<td class="' + pnlCls + '" title="' + ocEsc(title) + '"><span aria-label="exchange-confirmed">&#x2705;</span> ' + ocEsc(String(closedPnlRaw != null ? closedPnlRaw : '--')) + driftHtml + '</td>' +
+    '<td class="num">' + (entryPrice != null ? ocPrice(parseFloat(entryPrice)) : OC_EMPTY) + '</td>' +
+    '<td class="num">' + (exitPrice != null ? ocPrice(parseFloat(exitPrice)) : OC_EMPTY) + '</td>' +
+    '<td class="num">' + (qty != null ? ocQty(qty) : OC_EMPTY) + '</td>' +
+    '<td>' + ocSide(r.side) + '</td>' +
+    '<td class="num ' + pnlParts.cls + '" title="' + ocEsc(title) + '"><span aria-label="exchange-confirmed">&#x2705;</span> ' + ocMoney(closedPnlNum, 4) + driftHtml + '</td>' +
     '</tr>';
 }
 
@@ -1201,26 +1206,29 @@ async function loadComparison(passedDemoBal) {
     const match = String(pVal) === String(dVal);
     html += '<tr>';
     html += '<td>' + label + '</td>';
-    html += '<td>' + pVal + '</td>';
-    html += '<td>' + dVal + '</td>';
+    html += '<td class="num">' + pVal + '</td>';
+    html += '<td class="num">' + dVal + '</td>';
     html += '<td>' + (match ? '<span class="green">&#x2713;</span>' : '<span class="yellow">&#x2260;</span>') + '</td>';
     html += '</tr>';
   });
   ocSetHtml('comparison-tbody', html);
 }
 
+// 註:以下三 helper 現無呼叫者(loadDemoMetrics 走 ocFormatPerformanceMetric);仍對齊契約
+// 以清 §5.3 grep 基線並防未來復用時漂精度,P0.4 複審可考慮刪除。
 function _ocMetricPct(rate) {
+  // fraction(0.184→"18.40%")→ ocPct(內部 ×100,2dp);無值回 OC_EMPTY(canon 7)。
   const v = parseFloat(rate);
-  return Number.isFinite(v) ? (v * 100).toFixed(1) + '%' : 'N/A';
+  return Number.isFinite(v) ? ocPct(v) : OC_EMPTY;
 }
 function _ocMetricRatio(ratio) {
   if (ratio === 'inf') return '∞';
   const v = parseFloat(ratio);
-  return Number.isFinite(v) && v > 0 ? v.toFixed(2) : 'N/A';
+  return Number.isFinite(v) && v > 0 ? ocNum(v, 2) : OC_EMPTY;
 }
 function _ocMetricBps(value) {
   const v = parseFloat(value);
-  return Number.isFinite(v) ? v.toFixed(2) + ' bps' : 'N/A';
+  return Number.isFinite(v) ? ocBps(v) : OC_EMPTY;
 }
 
 async function loadDemoMetrics() {
@@ -1236,13 +1244,14 @@ async function loadDemoMetrics() {
   const netPnlMetric = ocPerformanceMetricByKey(metrics, 'net_pnl_7d');
   const netPnl = netPnlMetric ? Number(netPnlMetric.value) : NaN;
 
+  // 勝率/盈亏比以 7d net PnL 正負與 W/L≥1 著色(既有語義)→ .val-*(取代 green/red),+ .num。
   const wrEl = $('d-winrate');
   wrEl.textContent = winRateMetric ? ocFormatPerformanceMetric(winRateMetric) : '--';
-  wrEl.className = 'oc-metric-val ' + (Number.isFinite(netPnl) ? (netPnl > 0 ? 'green' : 'red') : '');
+  wrEl.className = 'oc-metric-val num ' + (Number.isFinite(netPnl) ? (netPnl > 0 ? 'val-pos' : 'val-neg') : '');
   const wlEl = $('d-wlratio');
   wlEl.textContent = wlMetric ? ocFormatPerformanceMetric(wlMetric) : '--';
   const wlValue = Number(wlMetric && wlMetric.value);
-  wlEl.className = 'oc-metric-val ' + (Number.isFinite(wlValue) ? (wlValue >= 1 ? 'green' : 'red') : '');
+  wlEl.className = 'oc-metric-val num ' + (Number.isFinite(wlValue) ? (wlValue >= 1 ? 'val-pos' : 'val-neg') : '');
   ocSetText('d-maxdd', maxDdMetric ? ocFormatPerformanceMetric(maxDdMetric) : '--');
 
   if (!m) {
@@ -1369,8 +1378,9 @@ function openDemoCloseAllDialog() {
   if (sumEl) {
     const s = _demoCloseAllSummary || { count: 0, totalUpl: 0 };
     if (s.count > 0) {
+      // 合計 UPL = 水位 → sign + .val-* 色(ocSignParts,取代 green/red);#id 選擇器承載版位,色由 class。
       sumEl.textContent = '將平掉 ' + s.count + ' 筆倉位，合計預估 UPL ≈ ' + ocMoney(s.totalUpl);
-      sumEl.className = s.totalUpl >= 0 ? 'green' : 'red';
+      sumEl.className = ocSignParts(s.totalUpl).cls;
     } else {
       sumEl.textContent = '目前無 Demo 持倉（僅取消掛單）';
       sumEl.className = '';
