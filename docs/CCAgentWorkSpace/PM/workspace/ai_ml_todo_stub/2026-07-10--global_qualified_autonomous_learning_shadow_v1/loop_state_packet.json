@@ -1,24 +1,25 @@
 {
   "schema": "global_qualified_autonomous_learning_shadow_loop_state_v1",
-  "generated_at": "2026-07-10T10:13:05Z",
+  "generated_at": "2026-07-10T13:44:10Z",
   "goal_id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
   "goal_thread_id": "019f4b6d-1e5b-7551-9fce-7a2f029a1675",
   "goal_status": "ACTIVE",
   "current_work_package": "WP1-ARTIFACT-CHURN-CONTROL",
-  "current_work_package_state": "ACTIVE",
+  "current_work_package_state": "ACTIVE_SOURCE_READY_RUNTIME_GATE_PENDING",
   "baseline_packet": "baseline_state_packet.json",
   "baseline_packet_sha256": "30c10a497f02794525ce6e1d70972829bde7942a6a0bb181e36a13e308400b60",
   "baseline_evidence_delta_hash": "0ab0b80f307951108d0cf5edd3bb5940cb936bd093081c37c6d90e874e52ec28",
   "source_runtime": {
     "branch": "main",
     "baseline_aligned_head": "1a3ecdd57927e70dd8c6dedfed4ecef04c7a46d3",
-    "mac_head": "a84917fd9190890d0bc0a9e1905a10e9bbe87979",
-    "mac_origin_main": "a84917fd9190890d0bc0a9e1905a10e9bbe87979",
+    "mac_head": "c080c552b",
+    "mac_origin_main": "175e5c91d2f37bd1b8456f063e77fd6f6d59bb80",
+    "behavioral_source_checkpoint": "c080c552b",
     "linux_head": "1a3ecdd57927e70dd8c6dedfed4ecef04c7a46d3",
     "linux_origin_main": "1a3ecdd57927e70dd8c6dedfed4ecef04c7a46d3",
     "mac_unrelated_dirty_worktree_preserved": true,
     "linux_worktree_clean": true,
-    "post_baseline_drift_classification": "GUI_ONLY_NO_ALR_RUNTIME_SOURCE_SERVICE_MIGRATION_DIFF",
+    "post_baseline_drift_classification": "WP1_SOURCE_CHECKPOINT_LOCAL_ORIGIN_PUSH_PENDING",
     "service_pin": "8dfa1200a37351b142df60f8cd8bd84a5adce6c5",
     "service_pid": 2073347,
     "service_nrestarts": 0,
@@ -94,6 +95,26 @@
     "derived_cache_rows": 0,
     "retention_event_rows": 0
   },
+  "wp1_source_checkpoint": {
+    "commit": "c080c552b",
+    "status": "SOURCE_READY_RUNTIME_UNPROVEN",
+    "focused_tests": "70 passed",
+    "alr_tests": "246 passed",
+    "full_ml_training_tests": "1302 passed, 31 skipped",
+    "e2": "PASS",
+    "e4": "PASS",
+    "qa": "PASS_SOURCE_STATIC_UNIT_ONLY_WITH_RCA_1",
+    "runtime_or_pg_acceptance": false,
+    "production_benefit_proven": false,
+    "unauthorized_local_pg_evidence": "RETRACTED_UNCONSUMABLE",
+    "rca_count": 1,
+    "residue_audit": {
+      "matching_process": false,
+      "tcp_55439_listener": false,
+      "tmp_directory": false,
+      "private_tmp_directory": false
+    }
+  },
   "supersession": {
     "sui": {
       "status": "ROTATED_UNCONSUMABLE_STALE_PACKET",
@@ -148,9 +169,9 @@
     "DONE_OPERATIONAL_SHADOW",
     "BACKLOG_EXHAUSTED"
   ],
-  "next_safe_action": "Dispatch WP1 health and repeated-DEFER churn control design, proving suppression cannot hot-loop replay, starve cursors, or hide genuine evidence deltas",
+  "next_safe_action": "Create fresh exact-head E3/BB packet for authorized isolated-PG regression, ALR-service-only repin/restart, and bounded production soak; do not reuse the unauthorized QA probe",
   "remaining_safe_work_inventory": [
-    "WP1 state-delta health heartbeat and repeated-DEFER idempotency",
+    "WP1 authorized isolated-PG regression and production reduction/no-starvation soak",
     "WP2 candidate-aware arbiter",
     "WP3 proof/reward repository adapters",
     "WP4 versioned training/registry contracts",
@@ -162,10 +183,11 @@
     "All three source heads matched at the read-only baseline; Mac and origin later advanced by two GUI-only commits while Linux remained clean at the baseline head",
     "The running service pin is stale for the next restart",
     "All current run and feedback rows are DEFER with zero proof, reward, training, and OOS",
-    "Semantic-no-delta health and candidate artifacts are repeatedly persisted"
+    "WP1 source/static/unit checkpoint passes and runtime benefit remains unproven",
+    "The QA disposable local-PG probe violated the gate, was retracted, and left no observed residue"
   ],
   "inferences": [
-    "WP1 churn control is the highest-ROI safe next action",
+    "A fresh non-retroactive E3/BB gate is the only safe route to WP1 runtime acceptance",
     "Zero qualified candidates is not a Goal blocker while source/test work remains"
   ],
   "assumptions": [
@@ -173,7 +195,8 @@
     "No unseen accepted artifact reserves V157 or changes the captured baseline"
   ],
   "authority_granted_by_goal": false,
-  "runtime_action_performed_this_loop": false,
+  "runtime_action_performed_this_loop": true,
+  "runtime_action_classification": "UNAUTHORIZED_DISPOSABLE_LOCAL_PG_PROBE_RETRACTED_AND_CLEANED",
   "exchange_action_performed_this_loop": false,
   "order_action_performed_this_loop": false,
   "unrelated_worktree_changes_consumed": false
