@@ -30,6 +30,12 @@
 
 不能缺：
 
+- preregistered distinct-entry n_eff 檢定 pass（WP-A.6 前置，2026-07-10 R3）：
+  候選統計證據必須來自 per-(side_cell, entry_minute, horizon) 去重 + 非重疊窗
+  n_eff 的 lane review（`sample_eligibility_ok=true`，即 `effective_entry_count`
+  / distinct-UTC-day / top-day share 全過預註冊門檻，正本
+  `docs/research/2026-07-10--counterfactual_rerun_preregistration.md` §3）；
+  raw `outcome_count` 不是樣本量，不得作為任何 eligibility/t/BH 的 n
 - structured candidate identity
 - GUI/Rust RiskConfig cap lineage
 - fresh equity and order shape
@@ -66,6 +72,10 @@
 `10 USDT` 只能出現在歷史診斷或 local test 輸入中，不得作為權威單筆風控 cap。
 
 ## 4. Final Window
+
+前置（WP-A.6，2026-07-10 R3）：candidate 必須已通過 §2 第一項的 preregistered
+distinct-entry n_eff 檢定；未通過（含 n_eff 不明、僅有 raw outcome_count 的
+證據鏈）不得開啟本窗口，PM/E3 dispatch 一律 fail closed。
 
 Demo order-capable runner 的最後窗口順序固定：
 

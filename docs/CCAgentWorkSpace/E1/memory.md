@@ -819,3 +819,69 @@
 - 測試 14 條覆蓋 profitable repeat、positive-not-repeat、negative EV、no matched fills invalid、insufficient sample、missing controls、failed mutation、loss-limit breach、authority alias、review hash mismatch、duplicate record id、mixed candidate、acceptance hash mismatch、canonical extract。驗證：指定 py_compile PASS；指定 WP7+reward/proof/demo pytest `117 passed in 1.63s`；`git diff --check` PASS。`learning_effect_review.py` 635 行，低於 800。
 - E2 RETURN rework 收掉三項：refs integrity 改為從 embedded `source_artifacts.reward_records` 派生 reward/proof/mutation canonical sets 並要求 supplied refs exact equality，重算 `review_hash` 後 dropped/extra/forged refs 仍 `stop_evidence`；authority alias 擴到 `trade_allowed`/`trading_enabled`/`enable_trading`/`execution_authority_granted` 等 trading/execution 權限；loss_limits 全欄位 required+typed，`breach="true"`/missing USDT/missing或字串 consecutive 皆 `stop_loss_control`。指定 WP7+reward/proof/demo pytest `129 passed in 3.11s`；py_compile PASS；無 runtime/DB/exchange/order/Cost Gate/deploy/live/model reload/symlink。
 - 第二次 E2 re-review RETURN 窄修：authority expansion key 改用專用 `_authority_value_grants`，字串值除明確 false tokens（false/0/off/disabled/denied 等）外一律 fail-closed，補 `trade_allowed="allowed"/"allow"` 與 execution alias `"active"/"approved"` rehash regression；false string tokens 保持不誤擋。指定 py_compile PASS；WP7+reward/proof/demo pytest `134 passed in 3.46s`。
+
+## 2026-07-09 — IBKR B1 只讀 TWS 連接器（source-only，無 commit，待 E2）
+- 新增 `rust/openclaw_engine/src/ibkr_readonly_tws_client.rs`（單檔 `#![allow(dead_code)]`）：只 connect handshake + `reqCurrentTime`（G4 最小首接觸），零新契約。4 段：純 codec（`API\0`+4-byte BE u32 frame、null-terminated 欄）/ generic driver `drive_handshake_and_current_time<S: AsyncRead+AsyncWrite+Unpin>`（pub(crate)，經 `tokio::io::duplex` 測）/ structural guard（literal `127.0.0.1`+paper 4002 only、4001/7496 硬拒）/ gated entry `g4_operator_triggered_first_contact`（`#[cfg(feature="ibkr_g4_contact")]`，唯一 `TcpStream::connect`）。
+- 惰性 3 層 gate：env `OPENCLAW_IBKR_G4_CONTACT_APPLY=="1"` → `phase2_immutable_pass_artifact_present()`（直接調 producer）→ G4 approval 6 綁定 valid → structural host/port → connect。G4 approval reader **鏡像**（非 reuse，避免改 E3-locked 檔）P2 owner-only 6 綁定，用**獨立檔** `phase2_g4_first_contact_approval.toml`+獨立型別，拒 seal approval 檔。managedAccounts(15) 採 **drop**（明文 `DU…` 從不 bind）。
+- 交付：lib.rs +1 `pub mod`（P1/P2 相鄰）；Cargo.toml +feature `ibkr_g4_contact` + `[[bin]] ibkr_g4_first_contact`（required-features，default dry-run）；`src/bin/ibkr_g4_first_contact.rs`（無 production caller）；`helper_scripts/ci/ibkr_g4_symbol_audit.sh`（nm 斷言 default `openclaw-engine` artifact 無 G4 socket 符號）+SCRIPT_INDEX。Mac 無 cargo；未本地編譯，E4 Linux 驗（`cargo test` default + `cargo build` default no-socket + `--features ibkr_g4_contact` bin）。偏差：g4 entry/status/result/error 為 bin 跨 crate 存取設 `pub`（driver 維持 pub(crate)）。
+- E2 RETURN 修 3 處（只改該檔）：#1[HIGH] drain-until-49 容忍 msgId 4 ERR_MSG——`decode_error_code`(typed,取 fields[3],無 panic/裸索引)，code≥2100(farm-OK 連線 info)→續讀、code<2100(如504)→新 `TwsClientError::GatewayError{code}` fail-closed(僅 numeric code 零明文)；`driver_rejects_unexpected_msg_id` 改 msgId 8。#2[MED] `g4_approval_is_valid` +`any(r=="PM")` 忠實鏡像 P2(PM+Operator)。#3[LOW] managedAccounts 注釋更正「全欄 tokenize 取 msgId 後整體丟棄」。test 19→22，brace 176/176、0 verbatim needle。待 re-E2 delta。
+- E4 Linux RETURN：連接器功能全綠(22/0)但 L3 symbol-audit 是 vacuous PASS——根因 `rust/Cargo.toml [profile.release] strip="symbols"` strip 掉 release → nm 讀 0 符號 → 誤報 PASS(fail-open)。只改 `ibkr_g4_symbol_audit.sh`+SCRIPT_INDEX：①改審 **unstripped debug** artifact(`target/debug/openclaw-engine`，`cargo build` 無 --release/--features)——default debug 裡 `ibkr_readonly_tws_client` 0 符號(0-caller DCE)=honest PASS。②**fail-closed on inconclusive**=exit 5：總符號=0(stripped/空 symtab) 或 缺 `openclaw_engine` anchor(證 symtab 有料)即 fail-closed，安全 gate 無法鑑別絕不報 PASS。③修死 pattern 3 `ibkr_readonly_tws_client.*connect`(恒0)→模塊級 `ibkr_readonly_tws_client`(0-caller 回歸 gate)。④cargo 解析 `$CARGO`→`~/.cargo/bin/cargo`→PATH(非 login shell 找不到 bare cargo)。⑤plain `nm` 全 symtab。Mac 本地 stub+真 nm 6+2 case 全綠(空/無anchor→5、g4fn/g4bin/模塊符號→1)。待 E4 Linux 重跑(debug honest PASS + feature build 正控有牙)。
+
+## 2026-07-10 — R3 修復包 WP-C#1：ai_pricing.yaml 補 claude-sonnet-5
+
+- 只改 `settings/ai_pricing.yaml`：anthropic 段新增 `claude-sonnet-5` key（input 2.00 / output 10.00 / active:true）=官方 intro 價（platform.claude.com/docs pricing 2026-07-10 查核），窗口至 2026-08-31，注釋含 TODO(2026-09-01 起改 3.00/15.00) 與新 tokenizer +30% 提示；claude-api skill 本地不存在（project/srv/user skills 皆查無）→按 charter fallback 官方文檔。
+- 自測：yaml parse OK、模擬 pricing.rs 載入語義（flatten/非負/有限）total 11 active 9（≥5 boot sanity）、rs Test 8 spot-check（sonnet-4-6 active / sonnet-4-5 inactive）不受影響；Python 側走 tier 別名正規化無精確計數斷言，加 key 零破壞。待 E2 審查。
+
+## 2026-07-10 — PROFIT-1 cost_gate 雙重扣成本溯源（R3 修復包 WP-A#5，evidence-only，無代碼改動）
+- **證實**：edge 輸入=已實現淨值（realized_edge_stats.py:405-408 扣 entry+exit fee、:523 併 funding、滑點內含於成交價）→ gate 再以 `threshold=2×(fee+slip)×1e4/wr×1.3` 二次扣成本（gates.rs:45/:147-152/:475-478）。active 面唯一=demo 19d side-specific 分支（gates.rs:235-267，無 validation 前置）；live/demo-coarse 因 0 validated-positive cell 維持 dormant。PG 實證：30d 71,207 筆 `CostGateJsDemoThreshold`（=charter WP-A#4 母集）全 demo、起始 06-20=19d 落地次日；FILUSDT 拒絕串與現行 side cell 精確吻合。
+- 不改碼理由（偏差聲明）：live fail-closed 禁鬆動＋19d=06-19 RCA 刻意 loss-control（「不動其他 gate 邏輯」）＋WP-A#1-4 並行重跑會被移動靶化；2026-06-18 已有 pre-locked 修法（QC 方案 A lower-CI floor）。衍生發現：哨兵 [90] 謂詞要求 validation_passed=true → 對 19d active 面結構性漏報（MODULE_NOTE「不漏報」claim 已 stale）。報告：workspace/reports/2026-07-10--profit1_cost_gate_double_deduct_tracing.md
+
+## 2026-07-10 — R3 修復包 WP-B Gate-B 新上市自動 capture（AMD-2026-07-10-01，待 E2，無 commit）
+- governance：新 AMD `docs/governance_dev/amendments/2026-07-10--AMD-2026-07-10-01-gate-b-auto-capture-next-5-listings.md`（operator 2026-07-10 授權未來 5 個新上市自動觸發 Gate-B capture；cap=5 / R-0 zero-leak 原樣 / cap 滿自動停+audit 行）+ SPECIFICATION_REGISTER row + document_index row。
+- wiring：新 sibling 模塊 `helper_scripts/canary/gate_b_auto_capture.py`（預設 OFF `OPENCLAW_GATE_B_AUTO_CAPTURE=1`；`AUTO_CAPTURE_CAP=5` 測試釘死；計數持久化 gate_b_watch_state.json `auto_capture.captured_symbols`；detached spawn 隔離 `aeg_gate_b_probe.py` 24h、artifact 釘 `<data_dir>/aeg_gate_b_runs`；運行中探針附掛不二次 spawn；spawn 失敗不耗名額；audit jsonl 每事件含 authorization ref）；gate_b_watch.run_once 接線 + artifact `auto_capture` block + boundary 措辭隨 flag 分流。防 cap 誤耗：只收 prelaunch_active / 公告標題含 symbol 的 premarket listing，conversion/pre-IPO 不觸發。
+- 驗證：新測 14 + 既有 gate_b_watch 8 全綠；canary 全 suite 533 passed（排除 pre-existing `test_check_cost_gate_double_deduct.py`——本機 shell python3=3.10 無 tomllib，屬環境非回歸）；新檔零硬編碼機器路徑。cron template 加每日 05:26 深掃行（pages=10）+ 30min 行加 flag；Linux 活化單行清單留報告由主 session 執行。
+
+## 2026-07-10 — R3 WP-A.1/2 outcome_review F1 去重+成本雙軌
+- outcome_review.py 升 v4:per-(side_cell,entry_ts_ms) 去重,eligibility/t/BH-FDR 只認 distinct-entry n_eff(門檻參數化默認 5 待 QC 定案;entry_ts 缺失全收 unknown 桶 fail-closed);成本雙軌=主判接 slippage_quantile_artifact q50 E[cost](無 1.3 乘數,fee floor 11bps 不破),conservative_v1 降為敏感性欄,artifact 缺失/過期回退保守主判。sealed_horizon 加 min_review_effective_entries_per_side_cell pass-through。
+- 教訓:raw row 數是「觀測量」不是「樣本量」——秒級重發信號把單一 entry 複製數千行,任何以行數為 n 的統計都會偽顯著;新增計數類欄位時要同時想清楚它可否進檢定分母。
+- 遺留:cron REVIEW_ARGS 尚未帶 --slippage-artifact(activation 步驟,主 session 決策);test_cost_gate_learning_lane_decision_packet::test_cli_missing_optional_sealed_evidence_fails_closed_to_packet 為 pre-existing 牆鐘 time-bomb(fixture 2026-06-22+336h,07-06 起必紅),非本次改動所致。
+
+## 2026-07-10 — R3 WP-A E2 RETURN 修復輪 1(n_eff 30 + mean_abs/CVaR90)
+- 兩條 E2 P1 逐條修:①n_eff 候選門檻默認 5→30(outcome_review + sealed_horizon dataclass+argparse 四處),對齊 QC 預註冊 §3 E1;②主判滑點 q50→mean_abs、尾部並列 CVaR90(fallback q90,tail_metric 記名),slippage_quantile_artifact SQL/payload 擴 mean_abs/mean_signed/cvar90(schema v1→v2 純增欄),cost_basis_main 改名 expected_slippage_mean_abs_v1;舊 v1 artifact 缺 mean_abs → 整軌 fail-closed 回退 conservative_v1。
+- 教訓:同 tree 已有預註冊定案文檔時,「暫定值待定案」注釋=E2 必抓的失效理由;PG 實查證實 |slip| 右偏(global mean_abs 17.7 vs q50 2.99)——分位≠期望,成本量測欄位命名要帶度量名防再混。
+
+## 2026-07-10 — R3 WP-A E2 RETURN 修復輪 2(樣本語義全面對齊預註冊 §2/§3)
+- outcome_review 升 v5:去重鍵 (cell, entry_minute, horizon) 分鐘量化(毫秒鍵擋不住同分鐘 distinct-ms 近似複製)+ §2.2 代表行 attempt_id-min 不平均 + §2.3 複本一致性(不一致→DATA_INTEGRITY_SUSPECT)+ §2.6 非重疊窗 greedy n_eff + §3 E2 days≥5/E3 top-day≤50% eligibility + §4 V=0 零變異數疑點 + §5.1 BH family 限 eligibility-passing cells;wrongful_block_score 同步 eligibility 門。E2 合成攻擊(30 row 全同值 distinct-ms 單分鐘)CLI 親跑:v4 判候選 p=0 → v5 n_eff=1 無 p 無候選。
+- 教訓:對齊預註冊「引門檻值」不夠,度量單位/樣本定義必須逐條同構(分鐘量化、非重疊、天數分布各擋一層,缺一層攻擊面就還開著);fixture 全同值會撞 V=0 疑點,測試設計要帶對稱擾動保均值。
+- 遺留:lane 檢定仍用 IID t(預註冊 §4 cluster-SE by day 未實作,屬 WP-A.4 rerun 管線範疇);pooled-horizon cell 行未拆 per-(cell,horizon)(比 prereg 保守:跨 horizon 窗重疊一併由 greedy 消除);decision_packet CLI 牆鐘 time-bomb 測試 pre-existing 仍紅。
+
+## 2026-07-10 — R3 修復包 commit 執行(本地 main,未 push)
+- 四批落地:WP-A `49049f84d`(cost-gate-lane 7 檔)/WP-B `b7359b2cd`(gate-b 5 檔含 SCRIPT_INDEX)/WP-C.1 `473706171`(ai_pricing)/docs `10dbfb10b`(prereg+AMD-2026-07-10-01+register/index+E1 六報告,--only+[skip ci])。PROFIT-1 零碼改(CONFIRMED 但取不改 gates.rs 最小安全解)→併 docs 批,無獨立 commit。
+- 未 commit 留主 session:GUI 大改平行 session 檔(static/+auth*+ops1 tests+oc-utilities.css)、13 role memory+memory/ 檔、07-09 研判報告(PA/MIT/AI-E/QC/BB/Operator 副本);WP-A.6 checklist 與 WP-A.7 TODO 更新不在 working tree(未做,gap 已報)。
+
+## 2026-07-10 — R3 WP-C.2 L2 E2E-1 one-shot 執行 = BLOCKED（fail-closed 復原完成）
+- 程序全走完（enable diagnose_leak+debounce 0→單次 dispatch admitted→立即復原 disabled,TOML sha byte-identical+6 probe enabled=[]),但真 model call 結構性不可達:control API venv 無 anthropic/openai SDK(三 cloud provider 全不可用,17ms error-path row `l2r:81346608c06e` cost $0);唯一可用 local_llm/Ollama 被 executor 硬編 tier=sonnet+config 校驗死鎖(grandfathered 非法 default 對 `anthropic+qwen3.5:9b` 使任何 provider/model 更新不可精確復原)擋死。
+- 教訓:①「已部署 dormant 基建」的可用性斷言要在 enable 前先驗 provider 鏈(venv import+is_available),歷史 row `l2r:93166da5722f`(2026-06-10)同簽名=此缺口自部署起就在;②多 worker uvicorn 下 in-memory config 更新不跨 worker,任何靠 POST /config 的 runtime 手術都要考慮收斂;③900s trailing-edge debounce 使「單次 dispatch」永遠 admit 不了,one-shot 程序設計時 admission 語義要先讀。
+- 解鎖三路徑(A venv 裝 anthropic SDK/B 修 default 對+臨時 fallback pin=永久 config 漂移/C 小改 executor)已寫報告 §6,operator/PM 拍板後可復用腳本重跑。
+
+## 2026-07-10 — R3 WP-A.4 反事實重跑 = 誤殺假說落錘(0 翻正)
+- 71,207 母集+33 GROSS cells 按預註冊重跑:family m=7 全 VETO(mean_net_E −23~−67bps,cluster p≈1,BH 0 過),σ_dedup=67.3bps;NEAR 5058 行→n_eff=1+EXECUTION_REALISM_SUSPECT,F1 裁決落錘;gate 雙向計價 Σn_eff×mean=−33.6k bps·n(gate 為淨止損)。artifact=`E1/workspace/reports/2026-07-10--counterfactual_rerun_evidence/`。
+- 教訓:①凍結重放時 importlib 動態載入含 dataclass 的模組必先登記 sys.modules;②「latest」artifact 會被 hourly cron 覆蓋,凍結錨必須釘 stamped 檔+sha256;③§2.3 複本一致性在秒級重發(同分鐘不同 entry 價)機制下掃出 24 cells DATA_INTEGRITY_SUSPECT——嚴格按凍結判準排除+單列申報,判準調整留 QC prereg v2,不擅改。
+
+## 2026-07-10 — R3 WP-C.2 L2 E2E-1 one-shot RERUN = 真 model call 達成（DONE_WITH_CONCERNS）
+- 路徑 A 解鎖後重跑 §2 程序：`l2r:724ac38bc4fc` anthropic:sonnet cost $0.014883 / latency 17.8s / raw 3401 字元實質診斷；復原三重驗證（TOML byte-identical + 磁碟 fresh-load + **12/12 per-worker orchestrator in-memory probe** `enabled=[]`）;無需重啟服務——`_get_client` lazy import 無失敗緩存,運行中 worker 直接拾取新裝 SDK。
+- 教訓:①CSRF double-submit middleware 對 Bearer API client 一樣強制,自鑄同值 cookie+header pair 即合規通過(非繞過);②`cloud_unavailable_or_unparsable` stage 字串涵蓋兩種語義,判「provider 死」前必先查 PG row 的 cost/latency/raw_len——本次 model 真被呼叫,只是 sonnet 回 fence 包 JSON 而 executor 不剝 fence → sink 未寫;③`GET /registry/capabilities` 是 fresh disk load、`GET /orchestrator/status` 才讀 per-worker cache,復原驗證要用後者。
+- Follow-up(新代碼走 PA 鏈,未做):剝 markdown fence 再 json.loads/stage 語義拆分/D3 row 落 token 欄。報告:workspace/reports/2026-07-10--l2_e2e1_oneshot_rerun_success.md
+
+## 2026-07-10 — R3 收口輪 E1(五項:E2 rerun findings NO-OP 確認 + 四項落地,無 commit)
+- E2 rerun-code P2×3(cluster V=0 併 DATA_INTEGRITY / 凍結 SQL deviation_log / 判準承載鏈中段測試缺口)核實為前輩已完成——counterfactual_rerun.py 已含全部修復+test 檔 20 測全綠 → NO-OP 跳過不重做。續作棒紀律教訓:untracked 檔無 git log 可循時,以「修復注釋+測試 docstring 與 findings 逐條對應」判定已完成。
+- 四項落地:①t(n_eff) mutation-biting 測試 `test_f1_t_test_n_is_effective_entry_count_not_raw_row_count`(親證 mutation 回 outcome_count 必紅後 byte-identical 還原;效應量刻意取中等 mean≈0.3/std≈0.72,防 n_eff 與 raw-n 兩個 p 同時 underflow 到 0 使測試失去牙);②WP-A.6 order-capable checklist 前置(正本裁定=profit-first-fast-demo-promotion-loop.md §2「不能缺」首項+§4 Final Window 前置句);③prereg 登記 document_index.md 新節+docs/README.md 目錄樹 research/ 行;④cron REVIEW_ARGS 接 `--slippage-artifact`(env-overridable 默認 `$LANE_DIR/slippage_quantiles_latest.json`;CLI 雙向 smoke:缺檔→conservative_v1 回退、在檔→expected_slippage_mean_abs_v1 主判)。
+- 回歸:research lane 1591/1/4(唯一 fail=pre-existing decision_packet 牆鐘 time-bomb)、root tests 814/5/2(5 fail 名單逐字同 E4 baseline);5 檔全純 insertion。報告:workspace/reports/2026-07-10--r3-closeout-e1-rerun-findings-wpa6-cron-slippage.md
+
+## 2026-07-10 — test_snapshot_stable_entrypoint 3 測 test-only 修復(pre-existing,待 E2)
+- 兩根因照 conductor 歸因落地:①CSRF double-submit 測試側自鑄 `oc_csrf` cookie+`X-CSRF-Token` header 同值對(合規非繞過);②build_client() sys.modules 清理 4 模組→全 `app` 前綴,**唯一例外 `app.db_pool`**——conftest 進程級 prod-DB 封鎖 patch 打在模組物件上,全清重生會帶回真 _init_pool(P0 2026-06-10 事故面),保留快取物件=封鎖存活(scratchpad 探針實證身份+patch 存活;app 內 db_pool 匯入全為 from-form,經 sys.modules 快取解析安全)。
+- 四驗收全過:solo 3 passed/與 agents_routes 28 passed/csrf 19 passed/與 bridge 組 snapshot 3 綠+bridge 持平 solo 基線(其 503 測 solo 即敗=同家族 pre-existing CSRF 403,非本 diff)。教訓:任何「全清 sys.modules」修法必先盤點 conftest 施加在模組物件上的進程級 patch,清掉=拆防護。
+
+## 2026-07-10 — R3 收口 wave commit 執行(E1 as commit executor,E4 PASS 後四批窄 staging)
+- E4 `2026-07-10--r3_closeout_regression.md`=PASS(zero regression)→ 按 PM §六 四批 commit(feat rerun 管線/test mutation-biting/docs 四證據報告+TODO v781/chore cron flag),全程逐檔點名絕不 add -A,禁 push。
+- TODO `P1-L2-ADVISORY-MESH-E2E-1` 由 BLOCKED_CLOUD_SDK_MISSING 如實轉 DONE_WITH_CONCERNS_FENCE_SINK_FOLLOWUP(真 model call l2r:724ac38bc4fc 達成、TOML byte-identical 復原、L2 維持 disabled;fence-parsing sink gap=follow-up 票);CLAUDE_CHANGELOG 補 v780 backfill+v781。教訓:TODO bump 時 changelog 增量須同批,否則留洞給後人。
