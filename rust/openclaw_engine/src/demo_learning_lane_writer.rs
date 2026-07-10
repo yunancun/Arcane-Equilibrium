@@ -1033,6 +1033,7 @@ mod tests {
             ts_ms: 1_782_041_000_000,
             context_id: Some("ctx-live_demo-ETHUSDT-1782041000000".to_string()),
             signal_id: Some("sig-live_demo-ma_crossover-ETHUSDT-1782041000000".to_string()),
+            candidate_event_context: None,
         }
     }
 

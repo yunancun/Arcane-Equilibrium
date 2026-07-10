@@ -22,7 +22,7 @@ pub const ADMISSION_LEDGER_BOUNDARY: &str =
 pub const BOUNDED_PROBE_PLACEMENT_PREVIEW_BOUNDARY: &str =
     "bounded-probe placement preview only; no Bybit call, order submission, or authority grant";
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct AdmissionLedgerEvent {
     pub side_cell_key: String,
     pub strategy_name: String,
@@ -35,6 +35,8 @@ pub struct AdmissionLedgerEvent {
     pub context_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signal_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub candidate_event_context: Option<crate::candidate_event_context::CandidateEventContextV1>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -191,6 +193,7 @@ fn build_admission_ledger_event(event: &RejectEvent) -> AdmissionLedgerEvent {
         ts_ms: event.ts_ms,
         context_id: non_empty(&event.context_id),
         signal_id: non_empty(&event.signal_id),
+        candidate_event_context: event.candidate_event_context.clone(),
     }
 }
 
