@@ -1,7 +1,21 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
-最後更新：2026-07-06。每批詳情見下方對應 `## YYYY-MM-DD` 區塊（per-batch SSOT）；最新數批摘要見「最新補充」段。
+最後更新：2026-07-10。每批詳情見下方對應 `## YYYY-MM-DD` 區塊（per-batch SSOT）；最新數批摘要見「最新補充」段。
+
+最新補充（2026-07-10 WP-A.4 反事實重跑管線）：新增
+`research/cost_gate_learning_lane/counterfactual_rerun.py`（one-shot research
+driver）：按 QC 預註冊 `docs/research/2026-07-10--counterfactual_rerun_
+preregistration.md` 對 71,207「正 edge<threshold」拒單母集 + 33 個
+GROSS_EDGE_POSITIVE cells 重跑反事實——凍結 SQL 計數斷言、v3 凍結分類器重放
+枚舉母集 B、per-(cell, entry_minute, horizon) 去重 + greedy 非重疊 n_eff、
+E1-E5 eligibility、CR1 day-cluster 單側 t、BH-FDR(q=0.10)、成本雙軌
+(E[cost] 主判 + CVaR90 尾部 + conservative_v1 對照)、§7 regime 標註、§8 判定
+式,產 `counterfactual_rerun_prereg_v1` verdict artifact。`evidence_stats.py`
+新增 `cluster_one_sided_t_p_value`(CR1 純函數,預註冊 §4)。邊界:PG 全程
+SELECT-only(session readonly);不寫 PG、不連 Bybit、不下單、不動 runtime
+Cost Gate / 風控 / 授權;唯一寫入面 = artifact JSON;order_authority=
+NOT_GRANTED、promotion_evidence=false。
 
 最新補充（2026-07-06 applied migration checksum immutability guard）：新增
 `db/check_applied_migration_checksums.py` 與

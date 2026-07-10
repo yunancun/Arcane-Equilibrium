@@ -4,7 +4,8 @@ MODULE_NOTE:
   模塊用途：把 best-of-K 證據面的統計控制集中成純函數：BH-FDR step-up(候選面)、
     single-sided Student-t p-value(每 cell)、sign-flip selection test(headline 面)、
     E[max] 解析式 sanity 對照。全部只用標準庫，無 scipy/numpy 依賴(lane 需可離線跑)。
-  主要函數：one_sided_t_p_value、bh_fdr_pass、sign_flip_selection_p_value、
+  主要函數：one_sided_t_p_value、cluster_one_sided_t_p_value(CR1 day-cluster,
+    預註冊 §4)、bh_fdr_pass、sign_flip_selection_p_value、
     expected_max_under_null_bps。
   硬邊界：不做任何 IO/PG/runtime mutation；sign-flip 用固定 seed 的 stdlib random，
     結果可重現(測試用例 11 依賴此)。
@@ -100,6 +101,49 @@ def one_sided_t_p_value(mean: float, std: float, n: int) -> float | None:
         return 0.0 if mean > 0.0 else 1.0
     t = mean / (std / math.sqrt(n))
     return _student_t_sf(t, n - 1)
+
+
+def cluster_one_sided_t_p_value(
+    values: Sequence[float],
+    clusters: Sequence[object],
+) -> dict[str, float | int | str | None]:
+    """CR1 cluster-robust 單側 t 檢定(預註冊 §4 凍結公式;H0: μ≤0,H1: μ>0)。
+
+    V = [G/(G−1)] × (1/n²) × Σ_g S_g²,S_g = Σ_{i∈g}(x_i − x̄);
+    t = x̄/√V,df = G−1,單側 p = P(T_{G−1} > t)。
+    為什麼 cluster by day:同 UTC 日的 markout 共享日級市場衝擊,IID t 會低估
+    變異數;CR1 在 cluster 層聚合殘差,df 隨 distinct 日數(G)走。
+    退化保護(§4):G < 2 → p=None(E2 eligibility 已擋,雙記防繞);
+    V ≤ 0 → p=None + zero_cluster_variance(樣本全同值 = 去重逃逸嫌疑,
+    不得產生 p=0 偽顯著)。
+    性質:每觀測自成一 cluster(G=n)時 V = s²/n(ddof=1)、df=n−1,
+    與 IID t 完全一致(單元測試依賴此收斂性)。
+    """
+    n = len(values)
+    if n == 0 or len(clusters) != n:
+        return {"p": None, "t": None, "g": 0, "n": n, "df": None,
+                "degenerate_reason": "empty_or_mismatched_inputs"}
+    mean = sum(values) / n
+    sums: dict[object, float] = {}
+    for value, cluster in zip(values, clusters):
+        sums[cluster] = sums.get(cluster, 0.0) + (value - mean)
+    g = len(sums)
+    if g < 2:
+        return {"p": None, "t": None, "g": g, "n": n, "df": None,
+                "degenerate_reason": "cluster_count_below_2"}
+    variance = (g / (g - 1)) * sum(s * s for s in sums.values()) / (n * n)
+    if variance <= 0.0 or not math.isfinite(variance):
+        return {"p": None, "t": None, "g": g, "n": n, "df": g - 1,
+                "degenerate_reason": "zero_cluster_variance"}
+    t = mean / math.sqrt(variance)
+    return {
+        "p": _student_t_sf(t, g - 1),
+        "t": t,
+        "g": g,
+        "n": n,
+        "df": g - 1,
+        "degenerate_reason": None,
+    }
 
 
 def bh_fdr_pass(p_values: Sequence[float], q: float) -> list[bool]:
