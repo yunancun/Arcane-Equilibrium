@@ -35,14 +35,14 @@ const AUTONOMY_NOTIF_LABELS = {
 
 // 查表回白話；找不到時回原值（fail-loud：operator 看得到未對應的 raw enum）。
 function autonomyPlainLabel(map, raw) {
-  if (raw == null || raw === '' || raw === '--') return raw == null ? '--' : String(raw);
+  if (ocIsBlank(raw)) return raw == null ? '--' : String(raw);
   const key = String(raw);
   return Object.prototype.hasOwnProperty.call(map, key) ? map[key] : key;
 }
 
 // 白話 +（原始 enum）並列，保留可審計的真相。
 function autonomyPlainWithRaw(map, raw) {
-  if (raw == null || raw === '' || raw === '--') return '--';
+  if (ocIsBlank(raw)) return '--';
   const key = String(raw);
   if (Object.prototype.hasOwnProperty.call(map, key)) return map[key] + '（' + key + '）';
   return key;

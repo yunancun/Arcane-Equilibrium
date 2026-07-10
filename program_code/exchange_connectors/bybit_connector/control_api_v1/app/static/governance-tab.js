@@ -1385,7 +1385,7 @@ function _getApprovalGuidance(what) {
 
 // ── 格式化 old/new value ──
 function _formatValue(val) {
-  if (val == null || val === '--') return '--';
+  if (ocIsBlank(val)) return '--';
   // 先嘗試翻譯單個狀態值
   const translated = _translateStateVal(val);
   if (translated !== val) return translated + '（' + val + '）';

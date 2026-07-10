@@ -131,3 +131,28 @@
    注入樣式永遠後載、同 specificity 勝出,定寬修飾必須壓回。
    P0.2 batch 3 引入(tab-ai 7 個數字欄位);P0.4: 併入組件層 */
 .oc-input--num{ width:80px!important; }
+
+/* ═══ oc-utilities.css §C 數值第二通道(P0.3;append-only,變更走 06_numerics.md §8)═══ */
+/* B0 契約落地(2026-07-10 P0.3 batch B0):落 .val-* / .delta-arrow / .unit /
+   .side-badge;逐字對照 06_numerics.md §2.5。零 tab 應用(惰性),tab 掛載在 B1-E。
+   色 utility 用 !important 壓 inline/運行時注入;結構性(content/margin/::before)
+   無 inline 競爭者,依 05_utilities §3 就地省 !important。 */
+.val-pos { color:var(--pos)!important; }
+.val-neg { color:var(--neg)!important; }
+.val-flat{ color:var(--text-muted)!important; }
+.num-key { font-weight:var(--weight-medium)!important; }   /* 表格 row-anchor 欄升一級字重(01_typography §6.3) */
+
+.delta-arrow{ font-size:var(--fs-micro); margin-left:4px; }
+.val-pos .delta-arrow::before{ content:"▲"; }
+.val-neg .delta-arrow::before{ content:"▼"; }
+.val-flat .delta-arrow::before{ content:"·"; }
+
+.unit{ font-size:var(--fs-micro); font-weight:var(--weight-regular);
+       color:var(--text-muted); margin-left:4px; }
+.unit.tight{ margin-left:1px; }   /* % 與 × 貼緊 */
+
+.side-badge{ display:inline-flex; align-items:center; gap:2px;
+             font-size:var(--fs-micro); font-weight:var(--weight-semi);
+             border-radius:var(--r-1); padding:1px 6px; letter-spacing:var(--ls-caps); }
+.side-long { color:var(--pos); background:var(--pos-bg); }
+.side-short{ color:var(--neg); background:var(--neg-bg); }

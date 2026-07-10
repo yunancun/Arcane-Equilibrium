@@ -20,30 +20,40 @@
  * §九 2000 LOC 硬上限。
  */
 
+// ─── No-data sentinel / 空值哨兵(P0.3 §1.4)──────────────────────────────────
+// 為什麼:canon 7 禁假零。真的沒有值時 formatter 一律回 em-dash '—'(U+2014),
+// 永不回 '0.00'。stale/loading/blocked 是容器態(非 formatter 職責)。
+// ocIsBlank 對新舊哨兵(null/''/'--'/'—')皆為真,使輸入-guard 可 sentinel-agnostic
+// (不再硬綁 '--' 字面),遷移期新舊哨兵並存不產生瞬態 bug。
+const OC_EMPTY = '—';
+function ocIsBlank(v) {
+  return v == null || v === '' || v === '--' || v === '—';
+}
+
 // ─── Formatters ──────────────────────────────────────────────────────────────
 function ocMoney(v, decimals) {
-  // PnL display: converts to active currency, adds +/- prefix.
-  // Example: ocMoney(100) → "+USDT 100.00" / "+$100.00" / "+€92.00"
-  // PnL 顯示：转换为當前货币，添加 +/- 前缀。
-  if (v == null || isNaN(v)) return '--';
+  // PnL 顯示:转换为當前货币,帶 +/− 前缀(負號用 U+2212,tabular 寬與 + 對齊,canon 3)。
+  // 範例:ocMoney(100) → "+USDT 100.00" / "+$100.00";ocMoney(-3.5) → "−…3.50"。
+  if (v == null || isNaN(v)) return OC_EMPTY;
   const d = decimals != null ? decimals : 2;
   const converted = ocFxConvert(Number(v));
-  const prefix = converted >= 0 ? '+' : '-';
+  const prefix = converted >= 0 ? '+' : '−';
   return prefix + ocCurrSymbol() + Math.abs(converted).toFixed(d);
 }
 
 function ocBalance(v, decimals) {
   // Balance display: converts to active currency, no +/- prefix.
   // Example: ocBalance(9994) → "USDT 9994.00" / "$9994.00" / "€9194.48"
-  // 余额顯示：转换为當前货币，無 +/- 前缀。
-  if (v == null || isNaN(v)) return '--';
+  // 余额顯示：转换为當前货币，無 +/- 前缀。無值回 OC_EMPTY(canon 7 禁假零)。
+  if (v == null || isNaN(v)) return OC_EMPTY;
   const d = decimals != null ? decimals : 2;
   const converted = ocFxConvert(Number(v));
   return ocCurrSymbol() + converted.toFixed(d);
 }
 
 function ocNum(v, decimals) {
-  if (v == null || isNaN(v)) return '--';
+  // 泛型逃生口(count/ratio/id/非型別化數);有型別的價/量/率/bps 走專用 formatter。
+  if (v == null || isNaN(v)) return OC_EMPTY;
   return Number(v).toFixed(decimals != null ? decimals : 2);
 }
 
@@ -83,16 +93,94 @@ function ocFillExecValue(fill) {
   return null;
 }
 
+// 【P0.3 凍結】變動精度(2/4dp)違「column-fixed dp」契約,且 v<=0 隱藏語義夾帶;
+// 不新增呼叫者。既有 9 個消費點按語境遷 ocQty(量)/ocBalance(額),P0.4 複審後刪。
 function ocAmount(v, decimals) {
-  if (v == null || isNaN(v) || Number(v) <= 0) return '--';
+  if (v == null || isNaN(v) || Number(v) <= 0) return OC_EMPTY;
   const abs = Math.abs(Number(v));
   const d = decimals != null ? decimals : (abs > 0 && abs < 0.01 ? 4 : 2);
   return ocBalance(v, d);
 }
 
+// ocPct(frac):輸入為 fraction(0.184→"18.40%"),內部 ×100;精度 2dp(canon 3)。
+// already-percent 輸入(18.4)請改用 ocPctVal(不 ×100),勿靠量級猜測。
 function ocPct(v) {
-  if (v == null || isNaN(v)) return '--';
-  return (v * 100).toFixed(1) + '%';
+  if (v == null || isNaN(v)) return OC_EMPTY;
+  return (v * 100).toFixed(2) + '%';
+}
+
+// ─── P0.3 精度契約新增 formatter(§1.2;dp 綁死,防散落手寫 toFixed 精度不一)──────
+
+// base-asset 數量(BTC/coin qty),6dp 無千分位。取代散落 ocNum(q,6)/ocNum(q,2)。
+function ocQty(v) {
+  if (v == null || isNaN(v)) return OC_EMPTY;
+  return Number(v).toFixed(6);
+}
+
+// bps 數值,2dp + ' bps'。signed=true 顯式帶 +/− 前綴;負號一律 U+2212(canon 3),
+// 不用 ASCII '-'。合併全站三份重複 bps 實作。
+function ocBps(v, signed) {
+  if (v == null || isNaN(v)) return OC_EMPTY;
+  const n = Number(v);
+  const mag = Math.abs(n).toFixed(2);
+  let prefix = '';
+  if (signed) prefix = n < 0 ? '−' : '+';
+  else if (n < 0) prefix = '−';
+  return prefix + mag + ' bps';
+}
+
+// already-percent 輸入(18.4→"18.40%",不 ×100),2dp。fraction 輸入請用 ocPct。
+function ocPctVal(v) {
+  if (v == null || isNaN(v)) return OC_EMPTY;
+  return Number(v).toFixed(2) + '%';
+}
+
+// 標的價格語義別名(利 grep),薄封裝 = ocNum(v, dp||2)。預設 2dp;價 <1 由 column 傳更大 dp。
+function ocPrice(v, dp) {
+  return ocNum(v, dp != null ? dp : 2);
+}
+
+// ─── P0.3 第二通道 helper(§2;canon 3 CVD-safe)────────────────────────────────
+
+// 低階:回純結構 {sign, cls, arrow},無 HTML。給需把 class 掛在 <td> 自身、
+// 自組 markup 的表格碼。sign 用 U+2212 負號;flat/零/無值回 middot '·' + val-flat。
+function ocSignParts(v) {
+  const n = Number(v);
+  if (v == null || isNaN(n) || n === 0) {
+    return { sign: '·', cls: 'val-flat', arrow: false };
+  }
+  if (n > 0) return { sign: '+', cls: 'val-pos', arrow: true };
+  return { sign: '−', cls: 'val-neg', arrow: true };
+}
+
+// 高階:sign 前綴 + fmtFn(量值) 包成帶語義色的 <span class="num val-*">。
+// 為什麼 fmtFn 收量值(abs):sign 由本函式統一產出 U+2212/+/·,fmtFn 只負責精度;
+// 故 fmtFn 應傳「量值 formatter」(ocBps/ocPct/ocPctVal/ocNum/ocQty),勿傳 ocMoney
+// (ocMoney 自帶符號通道,會雙重符號)。數字自產不 ocEsc;opts.arrow=true 才掛
+// <i class="delta-arrow">,箭頭 glyph 由 CSS ::before 出(不進串、不可選取複製進數字)。
+function ocSigned(v, fmtFn, opts) {
+  opts = opts || {};
+  const fmt = typeof fmtFn === 'function' ? fmtFn : ocNum;
+  if (v == null || isNaN(v)) {
+    return '<span class="num val-flat">' + OC_EMPTY + '</span>';
+  }
+  const parts = ocSignParts(v);
+  const body = fmt(Math.abs(Number(v)));
+  const arrow = opts.arrow ? '<i class="delta-arrow" aria-hidden="true"></i>' : '';
+  return '<span class="num ' + parts.cls + '">' + parts.sign + body + arrow + '</span>';
+}
+
+// 方向 badge(§2.3):Buy→多 LONG ▲(side-long)、Sell→空 SHORT ▼(side-short);未知→OC_EMPTY。
+// 三通道去色可辨(中文詞 多/空 + 拉丁 LONG/SHORT + 箭頭 ▲▼),色只是方向習慣非盈虧(canon 3)。
+function ocSide(side) {
+  const s = (side == null ? '' : String(side)).trim().toLowerCase();
+  if (s === 'buy' || s === 'long') {
+    return '<span class="side-badge side-long">多 LONG ▲</span>';
+  }
+  if (s === 'sell' || s === 'short') {
+    return '<span class="side-badge side-short">空 SHORT ▼</span>';
+  }
+  return OC_EMPTY;
 }
 
 function ocDate(ts) {
@@ -165,12 +253,13 @@ function ocFormatPerformanceMetric(metric) {
   const unit = String(metric.unit || '');
   const n = Number(value);
   if (!Number.isFinite(n)) return '--';
+  // 單位分派對齊 §1.2 契約:一律走 canonical formatter,消除本地 1dp/4dp 手寫。
   if (unit === 'count') return String(Math.round(n));
   if (unit === 'money' || unit === 'usdt') return ocMoney(n);
-  if (unit === 'money_abs') return ocBalance(n, 4);
-  if (unit === 'bps') return n.toFixed(2) + ' bps';
-  if (unit === 'rate') return (n * 100).toFixed(1) + '%';
-  if (unit === 'percent') return n.toFixed(2) + '%';
+  if (unit === 'money_abs') return ocBalance(n);           // 2dp 無符號金額量值
+  if (unit === 'bps') return ocBps(n);                     // 2dp + ' bps'
+  if (unit === 'rate') return ocPct(n);                    // fraction 輸入,2dp(消除舊 1dp)
+  if (unit === 'percent') return ocPctVal(n);              // already-percent 輸入,2dp
   if (unit === 'ratio') return ocNum(n, 2);
   if (unit === 'seconds') {
     if (n >= 3600) return (n / 3600).toFixed(1) + ' h';
@@ -284,7 +373,7 @@ const OC_STRATEGY_COLOR_META = {
 function ocStrategyKey(strategy) {
   if (strategy == null) return '';
   const raw = String(strategy).trim();
-  if (!raw || raw === '--') return '';
+  if (ocIsBlank(raw)) return '';
   const normalized = raw
     .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
     .replace(/[^a-zA-Z0-9]+/g, '_')
@@ -323,7 +412,7 @@ function ocStrategyLabel(strategy) {
 
 function ocStrategyChip(strategy, options) {
   const raw = strategy == null ? '' : String(strategy);
-  if (!raw || raw === '--') return '--';
+  if (ocIsBlank(raw)) return '--';
   const meta = ocStrategyMeta(raw);
   if (!meta) return ocEsc(raw);
   const opts = options || {};
