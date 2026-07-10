@@ -445,15 +445,15 @@
   <div class="oc-metrics mt-3" id="kelly-summary-grid">
     <div class="oc-metric">
       <div class="oc-metric-label">策略數</div>
-      <div class="oc-metric-val" id="kelly-strategy-count">--</div>
+      <div class="oc-metric-val num" id="kelly-strategy-count">--</div>
     </div>
     <div class="oc-metric">
       <div class="oc-metric-label">平均 Kelly%</div>
-      <div class="oc-metric-val" id="kelly-avg-fraction">--</div>
+      <div class="oc-metric-val num" id="kelly-avg-fraction">--</div>
     </div>
     <div class="oc-metric">
       <div class="oc-metric-label">總樣本量</div>
-      <div class="oc-metric-val" id="kelly-total-samples">--</div>
+      <div class="oc-metric-val num" id="kelly-total-samples">--</div>
     </div>
   </div>
   <div class="oc-table-wrap mt-3">
@@ -1165,10 +1165,11 @@ async function loadConfig() {
   if (!d || !d.data) { ocSetHtml('ai-config', '<div class="oc-loading">No config</div>'); return; }
   const cfg = d.data;
   let html = '<div class="oc-metrics metrics-1col">';
+  // fallback_tierN_threshold_pct 為 fraction(預設 0.5 / 0.85,顯示前 ×100)→ ocPct(2dp)。散文,不掛 .num。
   const t2 = (cfg.fallback_tier2_provider || '?') + ' / ' + (cfg.fallback_tier2_model || '?')
-    + ' @ ' + ((cfg.fallback_tier2_threshold_pct ?? 0.5) * 100).toFixed(0) + '%';
+    + ' @ ' + ocPct(cfg.fallback_tier2_threshold_pct ?? 0.5);
   const t3 = (cfg.fallback_tier3_provider || '?') + ' / ' + (cfg.fallback_tier3_model || '?')
-    + ' @ ' + ((cfg.fallback_tier3_threshold_pct ?? 0.85) * 100).toFixed(0) + '%';
+    + ' @ ' + ocPct(cfg.fallback_tier3_threshold_pct ?? 0.85);
   const fields = [
     ['默認供應商', cfg.default_provider || 'anthropic'],
     ['默認模型(tier)', cfg.default_model || 'sonnet'],
@@ -1413,7 +1414,7 @@ async function runEvolution() {
     });
     if (!d) throw new Error('request failed');
     const sharpe = d.best_sharpe !== undefined
-      ? 'Sharpe=' + Number(d.best_sharpe).toFixed(2)
+      ? 'Sharpe=' + ocNum(d.best_sharpe, 2)
       : '完成';
     // 使用 ocEsc 防止 XSS（策略名由用戶輸入）/ Use ocEsc for XSS prevention (user input)
     resultEl.textContent = ocEsc('進化完成 ' + sharpe + ' · 評估=' + (d.evaluated_combinations ?? '--'));
@@ -1443,8 +1444,9 @@ async function refreshKellyData() {
       totalFrac += (strategies[k].kelly_fraction || 0);
       totalSamples += (strategies[k].sample_size || 0);
     });
+    // kelly_fraction 為 fraction(0-1),平均後 ×100 → ocPct(2dp);無數據回 OC_EMPTY。
     document.getElementById('kelly-avg-fraction').textContent =
-      keys.length > 0 ? (totalFrac / keys.length * 100).toFixed(2) + '%' : '--';
+      keys.length > 0 ? ocPct(totalFrac / keys.length) : OC_EMPTY;
     document.getElementById('kelly-total-samples').textContent = totalSamples;
 
     const tbody = document.getElementById('kelly-tbody');
@@ -1456,12 +1458,14 @@ async function refreshKellyData() {
       const s = strategies[k];
       // P0.2 batch 3:層級色 enum → class-per-enum（§7;normal 綠 keyword→--pos 主題色）
       const tierCls = s.kelly_tier === 'normal' ? 't-pos' : (s.kelly_tier === 'moderate' ? 't-accent' : 't-dim');
+      // kelly_fraction / win_rate 皆 fraction(0-1,顯示 ×100)→ ocPct(2dp);recommended_qty 為 base-asset 量 → ocQty(6dp)。
+      // NB:此 win_rate 是 fraction,與 tab-edge-gates 的 win_rate_24h_pct(already-percent,SQL *100.0)語義相反——同名不同制。
       return `<tr>
         <td>${ocEsc(k)}</td>
-        <td>${(s.kelly_fraction * 100).toFixed(2)}%</td>
-        <td>${s.recommended_qty.toFixed(4)}</td>
-        <td>${(s.win_rate * 100).toFixed(1)}%</td>
-        <td>${s.sample_size}</td>
+        <td class="num">${ocPct(s.kelly_fraction)}</td>
+        <td class="num">${ocQty(s.recommended_qty)}</td>
+        <td class="num">${ocPct(s.win_rate)}</td>
+        <td class="num">${s.sample_size}</td>
         <td class="${tierCls}">${ocEsc(s.kelly_tier)}</td>
       </tr>`;
     }).join('');
