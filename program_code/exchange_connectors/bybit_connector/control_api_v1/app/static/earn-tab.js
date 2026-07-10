@@ -69,8 +69,13 @@
   // ─── DOM helper / XSS-safe ─────────────────────────────────────────
   function _el(id) { return document.getElementById(id); }
 
-  function _show(id) { var e = _el(id); if (e) e.style.display = ''; }
-  function _hide(id) { var e = _el(id); if (e) e.style.display = 'none'; }
+  // P0.2 batch 4：狀態殼顯隱改走 .hidden utility（class 化）。
+  // 為什麼：對應 HTML 的 loading/error/empty/data 殼由 inline display:none 遷為
+  //         class="hidden"（oc-utilities.css .hidden{display:none!important}）；
+  //         show 端原為 ''（回落 CSS/UA 默認）↔ classList.remove('hidden') 等價（§3.3 引理），
+  //         hide 端 'none' ↔ classList.add('hidden')。元素與其全部寫點同批原子化（鐵則一）。
+  function _show(id) { var e = _el(id); if (e) e.classList.remove('hidden'); }
+  function _hide(id) { var e = _el(id); if (e) e.classList.add('hidden'); }
 
   // ─── §3.1 Header / 標頭 ────────────────────────────────────────────
   function _renderHeader(bybitEnv, engineMode) {
@@ -315,7 +320,7 @@
       var aprPct = (Number(item.estimateApr) || 0).toFixed(2);
       var aprChip = j === 0 ? ocChip('Sprint 1B 鎖定', 'info') : '';
       html += '<tr>' +
-        '<td><code style="font-size:11px">' + ocEsc(item.productId || '--') + '</code> ' + aprChip + '</td>' +
+        '<td><code class="fs-micro">' + ocEsc(item.productId || '--') + '</code> ' + aprChip + '</td>' +
         '<td>' + ocEsc(item.coin || '--') + '</td>' +
         '<td>' + ocEsc(aprPct) + ' %</td>' +
         '<td>' + ocNum(item.minStake || 0, 2) + '</td>' +
@@ -608,13 +613,13 @@
       var p = positions[i];
       var statusType = (String(p.status || '') === 'Holding') ? 'good' : 'info';
       html += '<tr>' +
-        '<td><code style="font-size:11px">' + ocEsc(p.productId || '--') + '</code></td>' +
+        '<td><code class="fs-micro">' + ocEsc(p.productId || '--') + '</code></td>' +
         '<td>' + ocEsc(p.coin || '--') + '</td>' +
         '<td>' + ocNum(p.amount || 0, 4) + '</td>' +
         '<td>' + ocNum(p.totalPnl || 0, 4) + '</td>' +
         '<td>' + ocNum(p.claimableYield || 0, 4) + '</td>' +
         '<td>' + ocChip(ocEsc(p.status || '--'), statusType) + '</td>' +
-        '<td><code style="font-size:10px">' + ocEsc(p.orderId || '--') + '</code></td>' +
+        '<td><code class="fs-micro">' + ocEsc(p.orderId || '--') + '</code></td>' +
         '</tr>';
     }
     _el('earn-positions-tbody').innerHTML = html;
@@ -665,8 +670,8 @@
         '<td>' + ocNum(r.amount || r.amount_usdt || 0, 2) + '</td>' +
         '<td>' + ocNum((Number(r.apr) || 0), 2) + ' %</td>' +
         '<td>' + ocChip(ocEsc(outcomeStr), outcomeType) + '</td>' +
-        '<td><code style="font-size:10px">' + ocEsc(r.lease_id || '--') + '</code></td>' +
-        '<td><code style="font-size:10px">' + ocEsc(r.movement_id || '--') + '</code></td>' +
+        '<td><code class="fs-micro">' + ocEsc(r.lease_id || '--') + '</code></td>' +
+        '<td><code class="fs-micro">' + ocEsc(r.movement_id || '--') + '</code></td>' +
         '</tr>';
     }
     _el('earn-records-tbody').innerHTML = html;

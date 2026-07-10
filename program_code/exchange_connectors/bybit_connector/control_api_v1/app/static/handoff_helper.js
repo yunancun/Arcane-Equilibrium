@@ -202,11 +202,11 @@
     var headerHtml =
       '<div class="oc-handoff-header">' +
         '<div class="oc-handoff-title">' +
-          '<h3 style="margin:0;font-size:14px;font-weight:600">' +
+          '<h3 class="m-0 fs-md fw-semi">' +
             ocEsc(tZh("terminology.handoff.zh", "候選交接")) +
             ' / Bounded Demo Handoff' +
           '</h3>' +
-          '<div style="font-size:11px;color:var(--text-dim);margin-top:2px">' +
+          '<div class="fs-micro t-dim mt-1">' +
             ocEsc(tZh("terminology.handoff.meaning_zh", "受限 demo 候選路徑")) +
             ' · UX §6' +
           '</div>' +
@@ -242,7 +242,7 @@
     var notDataNotice = !hasData ? (
       '<div class="oc-handoff-empty-notice" role="status">' +
         ocEsc("尚未選擇回放候選 — 從上方 Compare 列選 verdict='demo_candidate' 的實驗") +
-        '<br/><span style="font-size:11px;color:var(--text-dim)">' +
+        '<br/><span class="fs-micro t-dim">' +
         ocEsc("No replay candidate selected — pick one with verdict='demo_candidate' from Compare list") +
         '</span>' +
       '</div>'
@@ -251,7 +251,7 @@
     var operatorNotesHtml =
       '<div class="oc-handoff-notes-row">' +
         '<label class="oc-handoff-field-label" for="oc-handoff-notes">' +
-          ocEsc("操作員備註 / Operator Notes") + ' <span style="opacity:0.6">(' +
+          ocEsc("操作員備註 / Operator Notes") + ' <span class="o-50">(' +
           ocEsc("選填 / optional") + ')</span></label>' +
         '<textarea id="oc-handoff-notes" rows="2" maxlength="500" ' +
         'placeholder="' + ocEsc("交接原因或前後文觀察…") + ' / Reason or context…"></textarea>' +
@@ -770,7 +770,7 @@
             ocEsc("候選資料摘要 / Candidate Summary") +
           '</div>' +
           '<div id="oc-handoff-modal-summary" class="oc-handoff-modal-summary"></div>' +
-          '<div class="oc-handoff-modal-section-title" style="margin-top:14px">' +
+          '<div class="oc-handoff-modal-section-title mt-3">' +
             ocEsc("typed 確認語 / Typed Confirmation Phrase") +
           '</div>' +
           '<div id="oc-handoff-modal-phrase-hint" class="oc-handoff-modal-hint"></div>' +

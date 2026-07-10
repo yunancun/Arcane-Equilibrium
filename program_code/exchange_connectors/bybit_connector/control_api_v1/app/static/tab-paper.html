@@ -85,6 +85,24 @@
       font-size: 12px;
     }
   }
+
+  /* P0.2 batch 4：原 inline style 遷入頁內組件。 */
+  /* Paper 初始餘額輸入：定寬 90px 非檔位值（§5.4）→ id 選擇器。 */
+  #paper-init-bal { width: 90px; }
+  /* feed-badge：loadFeed 每次刷新整串重寫 className（鐵則二），改 id 選擇器承載樣式，不隨 className 抹除。 */
+  #feed-badge { margin-left: var(--sp-2); font-size: var(--fs-micro); }
+  /* PnL sparkline svg（多屬性;#21262d 按 §5.5 歸 --border-subtle;bg rgba 無 token,P0.4 收斂）。 */
+  .paper-pnl-sparkline { display: block; background: rgba(13,17,23,0.5); border-radius: 6px; border: 1px solid var(--border-subtle); }
+
+  /* 平倉確認 modal（原 inline style 遷入;顯隱由 openPaperCloseModal/closePaperCloseModal
+     走 classList('hidden') 切換,鐵則一同批原子化）。#161b22/#30363d/#21262d 按 §5.5 歸
+     surface/border token;scrim/藍色 info tint/box-shadow 無對應 token,verbatim 遷入待 P0.4。 */
+  .paper-confirm-overlay { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; }
+  .paper-confirm-box { background: var(--card-bg); border: 1px solid var(--border-strong); border-radius: var(--r-3); width: min(420px,90vw); box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
+  .paper-confirm-header { padding: var(--sp-4); border-bottom: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center; }
+  .paper-confirm-close { background: none; border: none; color: var(--text-secondary); font-size: var(--fs-title); cursor: pointer; }
+  .paper-confirm-info { background: rgba(56,139,253,0.08); border: 1px solid rgba(56,139,253,0.2); border-radius: var(--r-2); padding: var(--sp-3); font-size: var(--fs-base); line-height: var(--lh-cjk); white-space: pre-line; }
+  .paper-confirm-footer { padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--border-subtle); display: flex; gap: var(--sp-2); justify-content: flex-end; }
 </style>
 
 <!-- Legacy Paper sub-tab navigation. Replay is now a standalone top-level tab.
@@ -130,11 +148,11 @@
 
   <!-- Paper Session Control Bar / Paper 會話控制欄 -->
   <div class="oc-control-bar">
-    <span style="font-weight:600">&#x1F4B0; Paper 模擬</span>
+    <span class="fw-semi">&#x1F4B0; Paper 模擬</span>
     <span id="session-badge" class="oc-chip oc-chip-neutral">--</span>
-    <span class="spacer" style="flex:1"></span>
-    <label style="font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:4px" title="Paper 初始餘額（USDT）/ Paper Initial Balance (USDT)">
-      Balance: <input id="paper-init-bal" type="number" min="100" max="10000000" step="100" value="10000" style="width:90px;font-size:12px" />
+    <span class="spacer flex-1"></span>
+    <label class="fs-micro t-dim row gap-1" title="Paper 初始餘額（USDT）/ Paper Initial Balance (USDT)">
+      Balance: <input id="paper-init-bal" type="number" min="100" max="10000000" step="100" value="10000" class="fs-dense" />
     </label>
     <span class="oc-action-row" id="paper-session-controls">
       <span class="oc-action-cluster oc-action-cluster-state" data-danger-zone="paper-session-run">
@@ -151,17 +169,17 @@
         <button class="oc-btn oc-btn-destructive" id="btn-stop-all" onclick="sessionStopAll()" disabled title="停止 Paper + Demo 雙引擎 / Stop both Paper and Demo engines">&#x23F9;&#x23F9; 雙停</button>
       </span>
     </span>
-    <span style="margin-left:10px;font-size:12px;color:var(--text-dim)">餘額: <strong id="balance-val">--</strong></span>
+    <span class="ml-3 fs-dense t-dim">餘額: <strong id="balance-val">--</strong></span>
   </div>
 
   <div id="explain-paper"></div>
 
   <!-- Market Feed / 實時行情（默認折叠，只讀狀態，啟停由主儀表盤控制） -->
   <details class="oc-collapse">
-    <summary>&#x1F4E1; 實時行情 / Market Feed <span id="feed-badge" class="oc-chip oc-chip-neutral" style="margin-left:8px;font-size:10px">--</span></summary>
+    <summary>&#x1F4E1; 實時行情 / Market Feed <span id="feed-badge" class="oc-chip oc-chip-neutral">--</span></summary>
     <div class="oc-collapse-body">
       <div class="feed-prices" id="feed-prices">等待行情數據...</div>
-      <div style="font-size:11px;color:var(--text-dim);margin-top:4px" id="feed-stats"></div>
+      <div class="fs-micro t-dim mt-1" id="feed-stats"></div>
     </div>
   </details>
 
@@ -187,13 +205,13 @@
       <div class="oc-metric"><div class="oc-metric-label" title="從峰值到最低點的最大跌幅百分比，衡量最壞情況下的資金回撤。越小越好。/ Largest peak-to-trough decline in equity. Measures worst-case capital loss. Lower is better.">最大回撤 / Max Drawdown</div><div class="oc-metric-val" id="p-maxdd">--</div></div>
     </div>
     <!-- PnL Trend Sparkline / 盈虧趨勢迷你圖（SUGGESTION §4.4） -->
-    <div style="margin-top:10px">
-      <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px;display:flex;align-items:center;gap:6px">
+    <div class="mt-3">
+      <div class="fs-micro t-dim mb-1 row gap-2">
         <span>累計收益趨勢 / Cumulative PnL Trend</span>
-        <span style="color:var(--text-dim);font-size:9px">（當前頁 50 筆成交 / current 50 fills）</span>
+        <span class="t-dim fs-micro">（當前頁 50 筆成交 / current 50 fills）</span>
       </div>
       <svg id="pnl-sparkline" width="100%" height="120"
-        style="display:block;background:rgba(13,17,23,0.5);border-radius:6px;border:1px solid #21262d"
+        class="paper-pnl-sparkline"
         viewBox="0 0 400 120" preserveAspectRatio="none">
         <line id="pnl-sparkline-zero" x1="8" x2="392" y1="60" y2="60" stroke="#30363d" stroke-width="0.5" stroke-dasharray="3,3"/>
         <polyline id="pnl-sparkline-line" points="" fill="none" stroke="var(--green)" stroke-width="2" stroke-linejoin="round"/>
@@ -204,9 +222,9 @@
 
   <!-- Positions / 持倉 -->
   <div class="oc-card">
-    <h3 style="display:flex;align-items:center;gap:10px">
+    <h3 class="row gap-3">
       &#x1F4CA; 持倉 / Positions
-      <button class="oc-btn oc-btn-destructive oc-toolbar-danger-action" style="padding:3px 10px;font-size:11px;margin-left:auto" onclick="closeAllPositions()">&#x23F9; 全部平倉</button>
+      <button class="oc-btn oc-btn-destructive oc-toolbar-danger-action py-1 px-3 fs-micro ml-auto" onclick="closeAllPositions()">&#x23F9; 全部平倉</button>
     </h3>
     <div class="oc-table-wrap">
       <table class="oc-table">
@@ -253,7 +271,7 @@
           <tbody id="fills-tbody"><tr class="empty-row"><td colspan="9">載入中...</td></tr></tbody>
         </table>
       </div>
-      <div class="oc-metrics" style="margin-top:8px">
+      <div class="oc-metrics mt-2">
         <div class="oc-metric"><div class="oc-metric-label" title="本次會話的初始投入資金。/ Initial capital at session start.">初始投入 / Initial Capital</div><div class="oc-metric-val" id="p-fills-capital">--</div></div>
         <div class="oc-metric"><div class="oc-metric-label" title="已實現 + 未實現盈虧 = 當前淨收益。正值盈利，負值虧損。/ Realized + Unrealized PnL = current net return.">累計收益 / Net Return</div><div class="oc-metric-val" id="p-fills-return">--</div></div>
       </div>
@@ -280,13 +298,13 @@
        <details> 殼保留作為 IA 銜接點 (per PM brief)，body 改為 disabled-state 解釋
        （UX subdoc §8 phase/gate language: 「P1 已下架」明確說明 blocking gate）。 -->
   <details class="oc-collapse">
-    <summary>&#x1F4E9; 手動下單 / Submit Order <span class="oc-chip oc-chip-neutral" style="margin-left:8px;font-size:10px">P1 已下架 / Retired</span></summary>
+    <summary>&#x1F4E9; 手動下單 / Submit Order <span class="oc-chip oc-chip-neutral ml-2 fs-micro">P1 已下架 / Retired</span></summary>
     <div class="oc-collapse-body">
-      <div class="oc-subtab-placeholder" style="margin-top:0">
-        <div style="font-size:13px;color:var(--text);margin-bottom:6px">
+      <div class="oc-subtab-placeholder m-0">
+        <div class="fs-base t-primary mb-2">
           &#x1F512; 手動下單已於 P1 下架 / Manual order submission retired in P1
         </div>
-        <div style="font-size:11px;color:var(--text-dim);line-height:1.6">
+        <div class="fs-micro t-dim lh-cjk">
           Legacy Paper 不暴露 manual order submission（per UX subdoc §3 + V3 §12 #19 acceptance）。<br>
           Rust 引擎透過策略管理訂單；operator 透過上方 Session 控制條啟動 / 暫停 / 停止。<br>
           Legacy Paper does not expose manual order submission. Rust engine manages orders<br>
@@ -505,7 +523,7 @@ async function loadSession() {
 
 async function loadPositions() {
   const d = await ocApi('/api/v1/paper/positions');
-  if (!d || !d.data) { ocSetHtml('positions-tbody', '<tr class="empty-row"><td colspan="11" style="color:var(--text-dim)">⚠ 連接失敗 / Connection failed <button class="oc-btn" onclick="loadPositions()" style="padding:2px 8px;font-size:10px;margin-left:8px">↺ 重試</button></td></tr>'); return; }
+  if (!d || !d.data) { ocSetHtml('positions-tbody', '<tr class="empty-row"><td colspan="11" class="t-dim">⚠ 連接失敗 / Connection failed <button class="oc-btn oc-btn--xs ml-2" onclick="loadPositions()">↺ 重試</button></td></tr>'); return; }
   const raw = d.data.positions || d.data || {};
   const positions = Array.isArray(raw) ? raw : Object.values(raw);
   _cachedPositions = positions;
@@ -541,7 +559,7 @@ async function loadPositions() {
     const strat = p.strategy_name || '--';
     html += '<tr>';
     html += '<td><strong>' + ocEsc(p.symbol) + '</strong></td>';
-    html += '<td style="font-size:11px">' + ocEsc(strat) + '</td>';
+    html += '<td class="fs-micro">' + ocEsc(strat) + '</td>';
     html += '<td>' + ocCategoryTag(cat) + '</td>';
     html += '<td class="' + (p.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
     html += '<td>' + ocNum(qty, 4) + '</td>';
@@ -562,10 +580,12 @@ function openPaperCloseModal(title, body, onConfirm) {
   document.getElementById('paper-confirm-title').textContent = title;
   document.getElementById('paper-confirm-body').textContent = body;
   _paperCloseCallback = onConfirm;
-  document.getElementById('paper-confirm-modal').style.display = 'flex';
+  // P0.2 batch 4：顯隱改走 .hidden utility（class 化）。overlay 顯示需 display:flex 置中,
+  // 由 .paper-confirm-overlay 供給;.hidden 移除即回落 flex（鐵則一同批原子化）。
+  document.getElementById('paper-confirm-modal').classList.remove('hidden');
 }
 function closePaperCloseModal() {
-  document.getElementById('paper-confirm-modal').style.display = 'none';
+  document.getElementById('paper-confirm-modal').classList.add('hidden');
   _paperCloseCallback = null;
 }
 function confirmPaperClose() {
@@ -618,7 +638,7 @@ async function loadOrders() {
   // REF-20 R20-P1-U3: 操作欄 cancel button 已下架，render 改為 8 列（原 9 列）
   // REF-20 R20-P1-U3: 操作 column cancel button retired; render 8 cols (was 9)
   const d = await ocApi('/api/v1/paper/orders');
-  if (!d || !d.data) { ocSetHtml('orders-tbody', '<tr class="empty-row"><td colspan="8" style="color:var(--text-dim)">⚠ 連接失敗 / Connection failed <button class="oc-btn" onclick="loadOrders()" style="padding:2px 8px;font-size:10px;margin-left:8px">↺ 重試</button></td></tr>'); return; }
+  if (!d || !d.data) { ocSetHtml('orders-tbody', '<tr class="empty-row"><td colspan="8" class="t-dim">⚠ 連接失敗 / Connection failed <button class="oc-btn oc-btn--xs ml-2" onclick="loadOrders()">↺ 重試</button></td></tr>'); return; }
   const orders = d.data.orders || d.data || [];
   const active = orders.filter(o => o.state === 'paper_order_working' || o.state === 'paper_order_partially_filled');
   if (!active.length) {
@@ -634,7 +654,7 @@ async function loadOrders() {
     const strat = o.strategy_name || '--';
     html += '<tr>';
     html += '<td>' + ocEsc(o.symbol) + '</td>';
-    html += '<td style="font-size:11px">' + ocEsc(strat) + '</td>';
+    html += '<td class="fs-micro">' + ocEsc(strat) + '</td>';
     html += '<td>' + ocCategoryTag(cat) + '</td>';
     html += '<td class="' + (o.side === 'Buy' ? 'green' : 'red') + '">' + sideLabel + '</td>';
     html += '<td>' + (typeLabels[o.order_type] || ocEsc(o.order_type)) + '</td>';
@@ -771,7 +791,7 @@ async function loadPaperFillBatch(opts) {
     _paperFillHistoryState.loading = false;
     updatePaperFillControls(currentPaperFillRows());
     if (!_paperFillHistoryState.loadedOnce) {
-      ocSetHtml('fills-tbody', '<tr class="empty-row"><td colspan="9" style="color:var(--text-dim)">&#9888; 連接失敗 / Connection failed <button class="oc-btn" onclick="loadPaperFillBatch({render:true})" style="padding:2px 8px;font-size:10px;margin-left:8px">&#x21BA; 重試</button></td></tr>');
+      ocSetHtml('fills-tbody', '<tr class="empty-row"><td colspan="9" class="t-dim">&#9888; 連接失敗 / Connection failed <button class="oc-btn oc-btn--xs ml-2" onclick="loadPaperFillBatch({render:true})">&#x21BA; 重試</button></td></tr>');
     }
     return null;
   }
@@ -841,7 +861,7 @@ async function loadMetrics() {
 
 async function loadShadow() {
   const d = await ocApi('/api/v1/paper/shadow/decisions');
-  if (!d || !d.data) { ocSetHtml('shadow-tbody', '<tr class="empty-row"><td colspan="6" style="color:var(--text-dim)">⚠ 連接失敗 / Load failed</td></tr>'); return; }
+  if (!d || !d.data) { ocSetHtml('shadow-tbody', '<tr class="empty-row"><td colspan="6" class="t-dim">⚠ 連接失敗 / Load failed</td></tr>'); return; }
   const decisions = d.data.decisions || d.data || [];
   if (!decisions.length) {
     ocSetHtml('shadow-tbody', '<tr class="empty-row"><td colspan="6">暫無影子決策</td></tr>');
@@ -1010,16 +1030,16 @@ document.addEventListener('DOMContentLoaded', function _ocInitPaperHandoff() {
 </script>
 
 <!-- Paper Close Confirm Modal / 模擬平倉確認彈窗 -->
-<div id="paper-confirm-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.6);align-items:center;justify-content:center">
-  <div style="background:#161b22;border:1px solid #30363d;border-radius:12px;width:min(420px,90vw);box-shadow:0 20px 50px rgba(0,0,0,0.5)">
-    <div style="padding:16px 20px;border-bottom:1px solid #21262d;display:flex;justify-content:space-between;align-items:center">
-      <h3 id="paper-confirm-title" style="margin:0;font-size:14px;font-weight:600">確認操作</h3>
-      <button onclick="closePaperCloseModal()" style="background:none;border:none;color:#8b949e;font-size:18px;cursor:pointer">&#x2715;</button>
+<div id="paper-confirm-modal" class="hidden paper-confirm-overlay">
+  <div class="paper-confirm-box">
+    <div class="paper-confirm-header">
+      <h3 id="paper-confirm-title" class="m-0 fs-md fw-semi">確認操作</h3>
+      <button onclick="closePaperCloseModal()" class="paper-confirm-close">&#x2715;</button>
     </div>
-    <div style="padding:16px 20px">
-      <div style="background:rgba(56,139,253,0.08);border:1px solid rgba(56,139,253,0.2);border-radius:8px;padding:10px 14px;font-size:13px;line-height:1.6;white-space:pre-line" id="paper-confirm-body"></div>
+    <div class="p-4">
+      <div class="paper-confirm-info" id="paper-confirm-body"></div>
     </div>
-    <div style="padding:12px 20px;border-top:1px solid #21262d;display:flex;gap:8px;justify-content:flex-end">
+    <div class="paper-confirm-footer">
       <button class="oc-btn" onclick="closePaperCloseModal()">取消 / Cancel</button>
       <button class="oc-btn oc-btn-danger oc-btn-critical" onclick="confirmPaperClose()">確認平倉 / Confirm Close</button>
     </div>

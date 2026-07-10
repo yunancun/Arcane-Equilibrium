@@ -209,6 +209,9 @@ E1a 逐元素檢法:`grep -n "getElementById('<id>')" <doc> <其載入的 js>` �
 /* ── §A 批次 2 追加(2026-07-10 P0.2 batch 2:monitoring/system/settings;§11 append-only)── */
 .ml-2{ margin-left:var(--sp-2)!important; }              /* 家族 7 margin:高頻 margin-left 檔位(6/8px → 8) */
 .cursor-not-allowed{ cursor:not-allowed!important; }     /* 家族 15 游標:disabled 控件 */
+
+/* ── §A 批次 4 追加(2026-07-10 P0.2 batch 4:learning/replay/paper/earn;§11 append-only)── */
+.ml-3{ margin-left:var(--sp-3)!important; }              /* 家族 7 margin:margin-left sp-3 檔位(10px → 12) */
 ```
 
 計 16 個 family、約 55 個 class(PM 目標 ~15 類 ±5 → 達標;「類」按 family 計)。
