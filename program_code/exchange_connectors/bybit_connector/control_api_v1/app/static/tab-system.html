@@ -241,11 +241,11 @@
   <div class="subtitle">今日 PnL、AI 成本、整體 ROI</div>
   <div class="oc-metrics" id="biz-grid">
     <div class="oc-metric"><div class="oc-metric-label">模擬淨盈虧</div><div class="oc-metric-val" id="b-pnl">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">今日 AI 成本</div><div class="oc-metric-val blue" id="b-cost">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">30 天 AI 成本</div><div class="oc-metric-val fs-md" id="b-cost30">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">累計訂單數</div><div class="oc-metric-val" id="b-orders">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">當前持倉數</div><div class="oc-metric-val" id="b-positions">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">注册策略數</div><div class="oc-metric-val" id="b-strategies">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">今日 AI 成本</div><div class="oc-metric-val blue num" id="b-cost">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">30 天 AI 成本</div><div class="oc-metric-val fs-md num" id="b-cost30">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">累計訂單數</div><div class="oc-metric-val num" id="b-orders">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">當前持倉數</div><div class="oc-metric-val num" id="b-positions">--</div></div>
+    <div class="oc-metric"><div class="oc-metric-label">注册策略數</div><div class="oc-metric-val num" id="b-strategies">--</div></div>
   </div>
 </div>
 
@@ -909,7 +909,7 @@ async function loadHealth() {
     Object.entries(h.scores).forEach(([k, v]) => {
       const label = SCORE_CN[k] || k.replace(/_/g, ' ');
       const cls = v >= 80 ? 'green' : v >= 50 ? 'yellow' : 'red';
-      html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val fs-title ' + cls + '">' + v + '</div></div>';
+      html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val fs-title num ' + cls + '">' + v + '</div></div>';
     });
     html += '</div>';
   }
@@ -1007,8 +1007,10 @@ async function loadBusiness() {
   }
   const costD = costR.status === 'fulfilled' ? costR.value : null;
   if (costD && costD.data && costD.data.available) {
-    ocSetText('b-cost', '$' + costD.data.today_cost.toFixed(4));
-    ocSetText('b-cost30', '$' + costD.data.total_cost_30d.toFixed(2));
+    // 今日 AI 成本 sub-cent 敏感:契約 2dp 會把 $0.0034 塌成 $0.00(canon 7 假零),
+    // 故此欄 column-fixed 4dp 例外(同 per-fill PnL 邏輯);30d 聚合額走契約預設 2dp。
+    ocSetText('b-cost', ocBalance(costD.data.today_cost, 4));
+    ocSetText('b-cost30', ocBalance(costD.data.total_cost_30d));
   }
   const strategiesD = strategiesR.status === 'fulfilled' ? strategiesR.value : null;
   if (strategiesD && strategiesD.data) {
