@@ -31,7 +31,7 @@ async function loadRiskGovernor() {
       ocSetHtml('rg-name', '—');
       ocSetHtml('rg-reason', '—');
       ocSetHtml('rg-mode', '—');
-      document.getElementById('rg-override-btn').style.display = 'none';
+      document.getElementById('rg-override-btn').classList.add('hidden');
       return;
     }
     const r = d.data;
@@ -47,7 +47,8 @@ async function loadRiskGovernor() {
     ocSetHtml('rg-mode', ocChip(r.mode || '—', modeColors[r.mode] || 'neutral'));
 
     // Show override button only if level > 0 (can de-escalate)
-    document.getElementById('rg-override-btn').style.display = r.level > 0 ? '' : 'none';
+    // P0.2 batch 7a:display 切換改走 .hidden classList(§3.3 引理:''↔'none' 安全)
+  document.getElementById('rg-override-btn').classList.toggle('hidden', !(r.level > 0));
   } catch (e) {
     console.warn('Risk governor unavailable:', e);
   }
@@ -64,11 +65,11 @@ function showRiskOverrideModal() {
     sel.appendChild(opt);
   }
   document.getElementById('rg-override-reason').value = '';
-  document.getElementById('modal-risk-override').style.display = 'flex';
+  document.getElementById('modal-risk-override').classList.remove('hidden');
 }
 
 function closeRiskOverrideModal() {
-  document.getElementById('modal-risk-override').style.display = 'none';
+  document.getElementById('modal-risk-override').classList.add('hidden');
 }
 
 async function submitRiskOverride() {
@@ -83,7 +84,7 @@ async function submitRiskOverride() {
       target_level: level,
       reason: reason
     });
-    document.getElementById('modal-risk-override').style.display = 'none';
+    document.getElementById('modal-risk-override').classList.add('hidden');
     // 為什麼讀 data.status / data.applied：後端有三種結果都可能 ok:true——
     //   (a) applied=false + status=de_escalation_pending_approval → 僅入待審批，等級未變
     //   (b) status=override_applied + applied=true → 真生效
@@ -194,17 +195,18 @@ function selectRiskEngine(engine) {
     engine = 'demo';
   }
   _selectedRiskEngine = engine;
+  // P0.2 batch 7a:引擎 tab active 態改走 classList(原 4 個 .style.* 寫點/engine)。
+  // paper/demo → .is-active(青銅 accent);live → .is-active-live(--live 熱紅);
+  // 顏色/opacity 全在頁內 <style>,狀態語義與原枚舉一致。
   ['paper', 'demo', 'live'].forEach(e => {
     const b = $('etab-' + e);
     if (!b) return;
     const active = e === engine;
-    b.style.opacity = active ? '1' : '0.55';
-    b.style.background = active ? (e === 'live' ? 'rgba(248,81,73,0.15)' : 'rgba(56,139,253,0.15)') : '';
-    b.style.borderColor = active ? (e === 'live' ? 'rgba(248,81,73,0.5)' : 'rgba(56,139,253,0.4)') : '';
-    b.style.color = active ? (e === 'live' ? 'var(--red)' : 'var(--blue)') : '';
+    b.classList.toggle('is-active', active && e !== 'live');
+    b.classList.toggle('is-active-live', active && e === 'live');
   });
   const w = $('engine-risk-live-warn');
-  if (w) w.style.display = engine === 'live' ? '' : 'none';
+  if (w) w.classList.toggle('hidden', engine !== 'live');
   // Update engine badges on each editable card / 更新每張可編輯卡片的引擎標記
   _updateEngineBadges(engine);
   _riskFormDirty = false;
@@ -247,10 +249,10 @@ function _wrapLiveSave(cb, desc) {
   if (d) d.textContent = '操作：' + desc + ' (engine=live)';
   _liveRiskSavePendingCallback = cb;
   const dlg = document.getElementById('dlg-engine-live-confirm');
-  if (dlg) dlg.style.display = 'flex';
+  if (dlg) dlg.classList.remove('hidden');
 }
 function confirmLiveEngineRiskSave() {
-  document.getElementById('dlg-engine-live-confirm').style.display = 'none';
+  document.getElementById('dlg-engine-live-confirm').classList.add('hidden');
   if (_liveRiskSavePendingCallback) { _liveRiskSavePendingCallback(); _liveRiskSavePendingCallback = null; }
 }
 
@@ -566,7 +568,7 @@ Explain your reasoning briefly. Answer in both Chinese and English.`;
       const result = d.data.result || d.data.recommendation || d.data.response || JSON.stringify(d.data, null, 2);
       _lastAIAdvice = d.data;
       $('ai-advice-body').textContent = result;
-      $('btn-apply-ai').style.display = '';
+      $('btn-apply-ai').classList.remove('hidden');
     } else {
       $('ai-advice-body').textContent = 'AI 查詢失敗。請檢查 AI 引擎是否已配置。\nAI query failed. Check if AI engine is configured.';
     }
@@ -728,10 +730,10 @@ async function loadRiskConfig() {
   // 不要讀 cfg.overrides — Rust 回 null 值會讓下方 Object.entries(null) 拋錯。
   const p0 = cfg.category_overrides || cfg.category || cfg.p0 || {};
   const gc = cfg.global_config || cfg.global || cfg.p1 || {};
-  let html0 = '<div class="oc-metrics" style="grid-template-columns:1fr">';
+  let html0 = '<div class="oc-metrics rc-metrics-1col">';
   if (typeof p0 === 'object' && Object.keys(p0).length) {
     Object.entries(p0).forEach(([cat, limits]) => {
-      html0 += '<div class="oc-metric"><div class="oc-metric-label">' + ocEsc(cat) + '</div><div class="oc-metric-val" style="font-size:12px">';
+      html0 += '<div class="oc-metric"><div class="oc-metric-label">' + ocEsc(cat) + '</div><div class="oc-metric-val fs-dense">';
       if (typeof limits === 'object') {
         Object.entries(limits).forEach(([k, v]) => { html0 += ocEsc(k.replace(/_/g,' ')) + ': ' + ocEsc(v) + '<br>'; });
       } else { html0 += ocEsc(limits); }
@@ -740,14 +742,14 @@ async function loadRiskConfig() {
   } else {
     // Show allowed categories from global config
     const cats = gc.allowed_categories || [];
-    html0 += '<div class="oc-metric"><div class="oc-metric-label">Allowed Categories</div><div class="oc-metric-val" style="font-size:13px">' + (cats.length ? cats.join(', ') : '--') + '</div></div>';
-    html0 += '<div class="oc-metric"><div class="oc-metric-label">Max Single Position</div><div class="oc-metric-val" style="font-size:13px">' + (gc.max_single_position_pct || '--') + '%</div></div>';
+    html0 += '<div class="oc-metric"><div class="oc-metric-label">Allowed Categories</div><div class="oc-metric-val fs-base">' + (cats.length ? cats.join(', ') : '--') + '</div></div>';
+    html0 += '<div class="oc-metric"><div class="oc-metric-label">Max Single Position</div><div class="oc-metric-val fs-base">' + (gc.max_single_position_pct || '--') + '%</div></div>';
   }
   html0 += '</div>';
   ocSetHtml('p0-config', html0);
 
   // P1 - Global config: field is "global_config"
-  let html1 = '<div class="oc-metrics" style="grid-template-columns:1fr">';
+  let html1 = '<div class="oc-metrics rc-metrics-1col">';
   const p1Fields = [
     ['Max Leverage', gc.max_leverage],
     ['Max Session Drawdown', gc.max_session_drawdown_pct != null ? gc.max_session_drawdown_pct + '%' : null],
@@ -759,14 +761,14 @@ async function loadRiskConfig() {
     ['Max Holding Hours', gc.max_holding_hours],
   ];
   p1Fields.forEach(([label, val]) => {
-    html1 += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val" style="font-size:14px">' + (val != null ? val : '--') + '</div></div>';
+    html1 += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val fs-md">' + (val != null ? val : '--') + '</div></div>';
   });
   html1 += '</div>';
   ocSetHtml('p1-config', html1);
 
   // P2 - Agent adjustable: field is "agent_adjustable" or from global config
   const p2 = cfg.agent_adjustable || cfg.agent || cfg.p2 || {};
-  let html2 = '<div class="oc-metrics" style="grid-template-columns:1fr">';
+  let html2 = '<div class="oc-metrics rc-metrics-1col">';
   const p2Fields = [
     ['Max Stop Loss', (p2.max_stop_loss_pct || gc.max_stop_loss_pct || '--') + '%'],
     ['Max Take Profit', (p2.max_take_profit_pct || gc.max_take_profit_pct || '--') + '%'],
@@ -775,7 +777,7 @@ async function loadRiskConfig() {
     ['Trailing Stop', (p2.trailing_stop_pct || '--') + '%'],
   ];
   p2Fields.forEach(([label, val]) => {
-    html2 += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val" style="font-size:14px">' + (val != null ? val : '--') + '</div></div>';
+    html2 += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val fs-md">' + (val != null ? val : '--') + '</div></div>';
   });
   html2 += '</div>';
   ocSetHtml('p2-config', html2);
@@ -909,12 +911,12 @@ async function loadAIContext() {
     ['Volatility', ctx.volatility],
   ];
   items.forEach(([label, val]) => {
-    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val" style="font-size:13px">' + ocEsc(val || '--') + '</div></div>';
+    html += '<div class="oc-metric"><div class="oc-metric-label">' + label + '</div><div class="oc-metric-val fs-base">' + ocEsc(val || '--') + '</div></div>';
   });
   html += '</div>';
 
   if (ctx.factors && ctx.factors.length) {
-    html += '<h4 style="margin-top:12px;font-size:12px;color:var(--text-dim)">影響因素 / Factors:</h4><ul style="margin:6px 0 0 16px;font-size:12px;color:var(--text-dim)">';
+    html += '<h4 class="mt-3 fs-dense t-dim">影響因素 / Factors:</h4><ul class="rc-factor-list">';
     ctx.factors.forEach(f => { html += '<li>' + ocEsc(typeof f === 'string' ? f : f.description || f.name) + '</li>'; });
     html += '</ul>';
   }
@@ -1056,7 +1058,8 @@ async function loadAiBudget() {
       const pct = limit > 0 ? Math.min(100, (usage / limit) * 100) : 0;
       const fillEl = document.getElementById('ai-budget-bar-fill');
       const textEl = document.getElementById('ai-budget-bar-text');
-      if (fillEl) fillEl.style.width = pct.toFixed(1) + '%';
+      // P0.2 batch 7a:進度條寬度走 §7 form-1 scoped-var;.rc-budget-fill{width:var(--fill-w,0%)} 消費
+      if (fillEl) fillEl.style.setProperty('--fill-w', pct.toFixed(1) + '%');
       if (textEl) textEl.textContent =
         'MTD: $' + usage.toFixed(2) + ' / $' + limit.toFixed(2) + ' (' + pct.toFixed(1) + '%)';
       // Degrade light: green/yellow/red/grey
@@ -1071,7 +1074,7 @@ async function loadAiBudget() {
       if (labelEl) labelEl.textContent = 'degrade: ' + lvl;
       statusEl.textContent = 'OK · refreshed ' + new Date().toLocaleTimeString();
       statusEl.className = '';
-      editEl.style.display = 'block';
+      editEl.classList.remove('hidden');
     } else {
       statusEl.textContent = 'Engine error: ' + ((data && data.error) || 'unknown');
       statusEl.className = 'oc-chip oc-chip-warn';
