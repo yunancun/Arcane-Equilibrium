@@ -24,20 +24,31 @@
   .grafana-fallback { display: flex; flex-direction: column; align-items: center; justify-content: center;
     height: 100%; color: var(--text-dim); padding: 40px; text-align: center; }
   .grafana-fallback h3 { font-size: 16px; color: var(--text); margin-bottom: 8px; }
+  /* ── P0.2 批次 2:inline style= 收斂出的頁面組件(頁內 <style> 在 body,
+     文檔序晚於 ocInjectBaseCSS 注入的 head <style>,同 specificity 由本塊勝出)── */
+  .card--flush { padding: 0; overflow: hidden; }                       /* 無內距卡片(Grafana embed 滿版) */
+  .gf-bar { padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border-subtle); }
+  .gf-icon { font-size: var(--fs-hero-lg); margin-bottom: var(--sp-4); opacity: .3; } /* 裝飾 emoji;48px 按 §5.1 收斂至 hero-lg(32) */
+  .gf-setup { text-align: left; max-width: 400px; }
+  .oc-metrics.metrics-1col { grid-template-columns: 1fr; }
+  /* 父層字級修飾:oc-metric-val 的 className 會被 JS 整串重寫(鐵則二),
+     字級掛在不被 JS 觸碰的 .oc-metric 包裹層 */
+  .mv--sm .oc-metric-val { font-size: var(--fs-dense); }
+  .mv--md .oc-metric-val { font-size: var(--fs-md); }
 </style>
 
 <!-- ═══ Grafana Embed ═══ -->
-<div class="oc-card" style="padding:0;overflow:hidden">
-  <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border)">
-    <h3 style="margin:0">&#x1F4CA; Grafana 監控面板 / Monitoring Dashboard</h3>
-    <div style="display:flex;gap:8px;align-items:center">
+<div class="oc-card card--flush">
+  <div class="row-between gf-bar">
+    <h3 class="m-0">&#x1F4CA; Grafana 監控面板 / Monitoring Dashboard</h3>
+    <div class="row gap-2">
       <span id="grafana-badge" class="oc-chip oc-chip-neutral">checking...</span>
       <button class="oc-btn" onclick="window.open('http://trade-core:3000','_blank')">Open Grafana &#x2197;</button>
     </div>
   </div>
   <div class="grafana-wrap" id="grafana-wrap">
     <div class="grafana-fallback" id="grafana-fallback">
-      <div style="font-size:48px;margin-bottom:16px;opacity:0.3">&#x1F4CA;</div>
+      <div class="gf-icon">&#x1F4CA;</div>
       <h3>Grafana 连接中...</h3>
       <p>正在檢查 Grafana 服務是否可用</p>
     </div>
@@ -52,11 +63,11 @@
   <div class="oc-card">
     <h3>&#x1F310; Pipeline Bridge</h3>
     <div id="explain-pipeline"></div>
-    <div class="oc-metrics" style="grid-template-columns:1fr" id="pipeline-metrics">
-      <div class="oc-metric"><div class="oc-metric-label">Status</div><div class="oc-metric-val" id="pipe-status" style="font-size:14px">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">Tick Count</div><div class="oc-metric-val" id="pipe-ticks" style="font-size:14px">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">Intent Count</div><div class="oc-metric-val" id="pipe-intents" style="font-size:14px">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">Last Tick</div><div class="oc-metric-val" id="pipe-last" style="font-size:12px">--</div></div>
+    <div class="oc-metrics metrics-1col" id="pipeline-metrics">
+      <div class="oc-metric mv--md"><div class="oc-metric-label">Status</div><div class="oc-metric-val" id="pipe-status">--</div></div>
+      <div class="oc-metric mv--md"><div class="oc-metric-label">Tick Count</div><div class="oc-metric-val" id="pipe-ticks">--</div></div>
+      <div class="oc-metric mv--md"><div class="oc-metric-label">Intent Count</div><div class="oc-metric-val" id="pipe-intents">--</div></div>
+      <div class="oc-metric mv--sm"><div class="oc-metric-label">Last Tick</div><div class="oc-metric-val" id="pipe-last">--</div></div>
     </div>
   </div>
 
@@ -64,11 +75,11 @@
   <div class="oc-card">
     <h3>&#x1F4E8; Telegram Alerter</h3>
     <div id="explain-telegram"></div>
-    <div class="oc-metrics" style="grid-template-columns:1fr" id="telegram-metrics">
-      <div class="oc-metric"><div class="oc-metric-label">Status</div><div class="oc-metric-val" id="tg-status" style="font-size:14px">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">Messages Sent</div><div class="oc-metric-val" id="tg-sent" style="font-size:14px">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">Failed</div><div class="oc-metric-val" id="tg-failed" style="font-size:14px">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">Last Sent</div><div class="oc-metric-val" id="tg-last" style="font-size:12px">--</div></div>
+    <div class="oc-metrics metrics-1col" id="telegram-metrics">
+      <div class="oc-metric mv--md"><div class="oc-metric-label">Status</div><div class="oc-metric-val" id="tg-status">--</div></div>
+      <div class="oc-metric mv--md"><div class="oc-metric-label">Messages Sent</div><div class="oc-metric-val" id="tg-sent">--</div></div>
+      <div class="oc-metric mv--md"><div class="oc-metric-label">Failed</div><div class="oc-metric-val" id="tg-failed">--</div></div>
+      <div class="oc-metric mv--sm"><div class="oc-metric-label">Last Sent</div><div class="oc-metric-val" id="tg-last">--</div></div>
     </div>
   </div>
 
@@ -76,12 +87,12 @@
   <div class="oc-card">
     <h3>&#x1F9E0; OpenClaw Gateway</h3>
     <div id="explain-openclaw"></div>
-    <div class="oc-metrics" style="grid-template-columns:1fr" id="oc-metrics">
-      <div class="oc-metric"><div class="oc-metric-label">Status</div><div class="oc-metric-val" id="oc-status" style="font-size:14px">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">Agents</div><div class="oc-metric-val" id="oc-agents" style="font-size:14px">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">Channels</div><div class="oc-metric-val" id="oc-channels" style="font-size:14px">--</div></div>
+    <div class="oc-metrics metrics-1col" id="oc-metrics">
+      <div class="oc-metric mv--md"><div class="oc-metric-label">Status</div><div class="oc-metric-val" id="oc-status">--</div></div>
+      <div class="oc-metric mv--md"><div class="oc-metric-label">Agents</div><div class="oc-metric-val" id="oc-agents">--</div></div>
+      <div class="oc-metric mv--md"><div class="oc-metric-label">Channels</div><div class="oc-metric-val" id="oc-channels">--</div></div>
     </div>
-    <div style="margin-top:8px">
+    <div class="mt-2">
       <button class="oc-btn oc-btn-primary" onclick="window.open(window.location.origin+'/openclaw/','_blank')">Open Gateway &#x2197;</button>
     </div>
   </div>
@@ -141,12 +152,12 @@ function showGrafanaOffline() {
   $('grafana-badge').textContent = 'Not Connected';
   $('grafana-badge').className = 'oc-chip oc-chip-neutral';
   $('grafana-fallback').innerHTML = `
-    <div style="font-size:48px;margin-bottom:16px;opacity:0.3">&#x1F4CA;</div>
+    <div class="gf-icon">&#x1F4CA;</div>
     <h3>Grafana 未连接 / Not Connected</h3>
-    <p style="color:var(--text-dim);margin-bottom:16px">Grafana 監控服務未啟動或不可訪问</p>
-    <details style="text-align:left;max-width:400px">
-      <summary style="color:var(--accent);cursor:pointer;font-size:12px">如何配置 Grafana / Setup Guide</summary>
-      <div style="margin-top:8px;font-size:12px;color:var(--text-dim);line-height:1.6">
+    <p class="t-dim mb-4">Grafana 監控服務未啟動或不可訪问</p>
+    <details class="gf-setup">
+      <summary class="t-accent pointer fs-dense">如何配置 Grafana / Setup Guide</summary>
+      <div class="mt-2 fs-dense t-dim lh-cjk">
         <p>1. 安装 Grafana: <code>sudo apt install grafana</code></p>
         <p>2. 安装 Prometheus: <code>sudo apt install prometheus</code></p>
         <p>3. 配置 Prometheus 抓取 Trading API 的 /metrics 端点</p>
@@ -248,7 +259,7 @@ async function loadHealthDetail() {
     let cls = '';
     if (v === 'true' || v === 'passed' || v === 'healthy') cls = 'green';
     else if (v === 'false' || v === 'failed' || v === 'fail') cls = 'red';
-    html += '<div class="oc-metric"><div class="oc-metric-label" style="font-size:10px">' + ocEsc(label) + '</div><div class="oc-metric-val ' + cls + '" style="font-size:13px">' + ocEsc(v) + '</div></div>';
+    html += '<div class="oc-metric"><div class="oc-metric-label fs-micro">' + ocEsc(label) + '</div><div class="oc-metric-val fs-base ' + cls + '">' + ocEsc(v) + '</div></div>';
   });
   html += '</div>';
   ocSetHtml('health-detail', html);

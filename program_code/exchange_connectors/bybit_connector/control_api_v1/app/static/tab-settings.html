@@ -18,10 +18,9 @@
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
 
 <!-- Restart countdown banner — shown after restart is scheduled / 重啟倒計時横幅 -->
-<div id="restart-top-banner" style="display:none;position:sticky;top:0;z-index:400;background:rgba(248,81,73,0.92);color:#fff;
-  padding:8px 16px;display:none;align-items:center;gap:12px;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,0.4)">
+<div id="restart-top-banner" class="rst-banner hidden">
   <span id="restart-banner-text">&#x23F1; 服務器將在 <strong id="restart-banner-countdown">--</strong> 後重啟 / Server restarts in <strong id="restart-banner-countdown2">--</strong></span>
-  <span style="font-size:11px;color:rgba(255,255,255,0.7)">重啟期間監控中斷，無法執行止損</span>
+  <span class="rst-banner-sub">重啟期間監控中斷，無法執行止損</span>
 </div>
 
 <!-- ═════════════════════════════════════════════════════════════════════════════
@@ -81,12 +80,12 @@
   <div id="explain-demo-control"></div>
 
   <div class="oc-metrics" id="demo-state-grid">
-    <div class="oc-metric"><div class="oc-metric-label">Demo State</div><div class="oc-metric-val" id="dc-state" style="font-size:14px">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Validation</div><div class="oc-metric-val" id="dc-valid" style="font-size:14px">--</div></div>
-    <div class="oc-metric"><div class="oc-metric-label">Armed</div><div class="oc-metric-val" id="dc-armed" style="font-size:14px">--</div></div>
+    <div class="oc-metric mv--md"><div class="oc-metric-label">Demo State</div><div class="oc-metric-val" id="dc-state">--</div></div>
+    <div class="oc-metric mv--md"><div class="oc-metric-label">Validation</div><div class="oc-metric-val" id="dc-valid">--</div></div>
+    <div class="oc-metric mv--md"><div class="oc-metric-label">Armed</div><div class="oc-metric-val" id="dc-armed">--</div></div>
   </div>
 
-  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+  <div class="row gap-2 wrap mt-3">
     <!-- P1-05：Validate / Safe Recheck 是「手動標記」動作（非驗證），標題加註避免誤認為已驗證就緒 -->
     <button class="oc-btn oc-btn-primary" onclick="demoAction('validate')" title="手動標記，非真實驗證 / manual mark, not proven readiness">&#x2714; 手動標記 Validate（非驗證）</button>
     <button class="oc-btn" onclick="demoAction('arm')">&#x1F512; Arm Demo</button>
@@ -95,17 +94,17 @@
     <button class="oc-btn" onclick="bundleRecheck()" title="手動標記，非真實驗證 / manual mark, not proven readiness">&#x1F504; 手動標記 Safe Recheck（非驗證）</button>
   </div>
 
-  <div id="action-result" style="margin-top:10px"></div>
+  <div id="action-result" class="mt-3"></div>
 </div>
 
 <!-- ═══ Quick Actions ═══ -->
 <div class="oc-card">
   <h3>&#x26A1; 全局模式控制 / Global Mode Control</h3>
   <div id="explain-actions"></div>
-  <div style="margin:8px 0 6px;font-size:12px;color:var(--text-dim)">
-    當前模式 Current Mode: <strong id="qa-current-mode" style="color:var(--accent)">--</strong>
+  <div class="mt-2 mb-2 fs-dense t-dim">
+    當前模式 Current Mode: <strong id="qa-current-mode">--</strong>
   </div>
-  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+  <div class="row gap-2 wrap mt-2">
     <button class="oc-btn" id="btn-set-demo" onclick="configAction('set-demo-mode')">Set Demo Reserved</button>
     <button class="oc-btn" id="btn-enable-spot" onclick="configAction('enable-spot')">Enable Spot Shadow</button>
   </div>
@@ -125,26 +124,26 @@
     <div id="explain-config-change"></div>
     <div class="oc-grid-2">
       <div>
-        <h4 style="font-size:13px;margin-bottom:8px">Cost Entry / 成本錄入</h4>
-        <div style="display:grid;gap:8px">
-          <div><label style="font-size:11px;color:var(--text-dim)">Category</label>
-          <select class="oc-select" id="cost-cat" style="width:100%"><option value="ai_api">AI API</option><option value="infrastructure">Infrastructure</option><option value="data_feed">Data Feed</option><option value="other">Other</option></select></div>
-          <div><label style="font-size:11px;color:var(--text-dim)">Amount ($)</label>
-          <input class="oc-input" id="cost-amount" type="number" step="0.01" style="width:100%" /></div>
-          <div><label style="font-size:11px;color:var(--text-dim)">Note</label>
-          <input class="oc-input" id="cost-note" style="width:100%" placeholder="可選描述 / Optional description" /></div>
+        <h4 class="fs-base mb-2">Cost Entry / 成本錄入</h4>
+        <div class="col gap-2">
+          <div><label class="fs-micro t-dim">Category</label>
+          <select class="oc-select w-full" id="cost-cat"><option value="ai_api">AI API</option><option value="infrastructure">Infrastructure</option><option value="data_feed">Data Feed</option><option value="other">Other</option></select></div>
+          <div><label class="fs-micro t-dim">Amount ($)</label>
+          <input class="oc-input w-full" id="cost-amount" type="number" step="0.01" /></div>
+          <div><label class="fs-micro t-dim">Note</label>
+          <input class="oc-input w-full" id="cost-note" placeholder="可選描述 / Optional description" /></div>
           <button class="oc-btn oc-btn-primary" onclick="submitCost()">Submit Cost</button>
         </div>
       </div>
       <div>
-        <h4 style="font-size:13px;margin-bottom:8px">PnL Entry / 盈虧錄入</h4>
-        <div style="display:grid;gap:8px">
-          <div><label style="font-size:11px;color:var(--text-dim)">Category</label>
-          <select class="oc-select" id="pnl-cat" style="width:100%"><option value="trading">Trading</option><option value="funding">Funding</option><option value="other">Other</option></select></div>
-          <div><label style="font-size:11px;color:var(--text-dim)">Amount ($)</label>
-          <input class="oc-input" id="pnl-amount" type="number" step="0.01" style="width:100%" /></div>
-          <div><label style="font-size:11px;color:var(--text-dim)">Note</label>
-          <input class="oc-input" id="pnl-note" style="width:100%" placeholder="可選描述 / Optional description" /></div>
+        <h4 class="fs-base mb-2">PnL Entry / 盈虧錄入</h4>
+        <div class="col gap-2">
+          <div><label class="fs-micro t-dim">Category</label>
+          <select class="oc-select w-full" id="pnl-cat"><option value="trading">Trading</option><option value="funding">Funding</option><option value="other">Other</option></select></div>
+          <div><label class="fs-micro t-dim">Amount ($)</label>
+          <input class="oc-input w-full" id="pnl-amount" type="number" step="0.01" /></div>
+          <div><label class="fs-micro t-dim">Note</label>
+          <input class="oc-input w-full" id="pnl-note" placeholder="可選描述 / Optional description" /></div>
           <button class="oc-btn oc-btn-primary" onclick="submitPnl()">Submit PnL</button>
         </div>
       </div>
@@ -164,20 +163,19 @@
      原「計劃重啟服務器」按鈕點擊後永遠失敗，屬死控制項。
      改為 disabled-state 佔位：保留 IA 入口讓 operator 認得，但明確說明已停用 + 正確替代路徑，
      不再呈現可點擊但無效的危險按鈕。修改僅前端；後端 410 維持不動。 -->
-<div class="oc-card" style="border-color:rgba(71,85,105,0.35);opacity:0.85"
+<div class="oc-card card--disabled"
      role="region" aria-label="計劃重啟（已停用）">
-  <h3 style="color:var(--text-dim)">&#x1F504; 計劃重啟 / Scheduled Restart
-    <span class="oc-chip" style="font-size:11px;background:rgba(71,85,105,0.3);margin-left:6px">已停用 / Disabled</span>
+  <h3 class="t-dim">&#x1F504; 計劃重啟 / Scheduled Restart
+    <span class="oc-chip oc-chip-neutral ml-2">已停用 / Disabled</span>
   </h3>
-  <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;line-height:1.6">
+  <div class="fs-dense t-dim mb-3 lh-cjk">
     GUI 內的計劃重啟已停用：重啟編排只能由 service manager（launchctl / systemctl）
     或 <code>helper_scripts/restart_all.sh</code> 執行，不在 API 請求處理內進行。<br>
     Scheduled restart from the GUI is disabled; use the service manager or
     <code>restart_all.sh</code>.
   </div>
-  <button class="oc-btn oc-btn-danger" disabled aria-disabled="true"
-          title="此控制項已停用，請改用 service manager 或 restart_all.sh"
-          style="margin-top:4px;opacity:0.5;cursor:not-allowed">&#x26A0; 計劃重啟服務器（已停用）</button>
+  <button class="oc-btn oc-btn-danger mt-1 o-50 cursor-not-allowed" disabled aria-disabled="true"
+          title="此控制項已停用，請改用 service manager 或 restart_all.sh">&#x26A0; 計劃重啟服務器（已停用）</button>
 </div>
 
 <!-- W-AUDIT-7c (2026-05-09): restart modal 已從本 sub-tab 抽出移至檔尾，
@@ -202,6 +200,7 @@
   background: #161b22; border: 1px solid #30363d;
   border-radius: 12px; overflow: hidden;
   box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  width: min(560px, calc(100vw - 32px)); /* P0.2:自 restartModal inline style= 收入(唯一消費點) */
 }
 .confirm-modal-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -258,6 +257,7 @@
   border-radius: 12px; padding: 20px;
   box-shadow: 0 20px 60px rgba(0,0,0,0.5);
   max-height: 90vh; overflow-y: auto;
+  max-width: 480px; /* P0.2:自 dlg-apikey inline style= 收入(唯一消費點) */
 }
 .oc-dialog .note {
   font-size: 11px; color: var(--yellow, #f0c040);
@@ -281,42 +281,98 @@
 .pf-toggle input:disabled + .slider { opacity:0.4; cursor:not-allowed; }
 .pf-mode-select { background:var(--bg); border:1px solid #30363d; color:var(--text); font-size:11px; padding:2px 6px; border-radius:4px; cursor:pointer; }
 .pf-mode-select:disabled { opacity:0.4; cursor:not-allowed; }
+
+/* ── P0.2 批次 2:inline style= 收斂出的頁面組件(本塊在 body,文檔序晚於
+   ocInjectBaseCSS 注入的 head <style>,同 specificity 由本塊勝出)── */
+/* 重啟倒計時橫幅:顯隱走全局 .hidden(!important 蓋過本組件 display:flex);
+   原「近全濃度紅底 + 白字」字面值按 §5.5 落 token(token 集無中間 alpha 檔→全濃度,列 A3) */
+.rst-banner { position: sticky; top: 0; z-index: 400; display: flex;
+  background: var(--neg); color: var(--text-primary);
+  padding: var(--sp-2) var(--sp-4); align-items: center; gap: var(--sp-3);
+  font-size: var(--fs-base); box-shadow: var(--shadow-pop); }
+.rst-banner-sub { font-size: var(--fs-micro); color: var(--text-primary); opacity: .7; }
+/* 父層字級修飾:oc-metric-val 的 className 會被 JS 整串重寫(鐵則二),字級掛不被觸碰的包裹層 */
+.mv--md .oc-metric-val { font-size: var(--fs-md); }
+/* 分類色卡片邊框:palette 外 rgba 按語義落 -bg/weak 級 token(§5.5;觀感差異列 A3) */
+.card--disabled { border-color: var(--border-strong); opacity: .85; }
+.card--tint-pos { border-color: var(--pos-bg); }
+.card--tint-accent { border-color: var(--accent-weak); }
+.card--tint-warn { border-color: var(--warn-bg); }
+/* 全局模式當前值:demo_reserved 顯 pos、其餘 accent(JS classList 切 qa-mode--demo,取代 style.color 寫點) */
+#qa-current-mode { color: var(--accent); }
+#qa-current-mode.qa-mode--demo { color: var(--pos); }
+/* 卡片網格(API key 槽位 + 產品族共用;260px 為卡片最小可讀寬,精確值留組件層) */
+.slot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--sp-3); }
+/* API key 槽位卡(JS 模板產出);邊框三態 class-per-enum 取代原 borderColor 字串變數 */
+.apikey-card { background: var(--bg-surface); border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2); padding: var(--sp-3); }
+.apikey-card--live { border-color: var(--live-bg); }
+.apikey-card--livedemo { border-color: var(--warn-bg); }
+/* Live-Demo 等同 Live 待遇注記:原紫色字面值為 palette 外色,按語義歸位 --live(canon 6/9;列 A3) */
+.apikey-note-live { color: var(--live); }
+/* 替換 key modal 警示框:槽位 enum 配色(JS classList 切換,取代 style.color/display 寫點) */
+.apikey-warn--live { color: var(--neg); }
+.apikey-warn--livedemo { color: var(--warn); }
+/* 告警通知卡:channel 分組框 + 標頭;state chip 的 className 被 JS 重寫(鐵則二),
+   ml-auto / 字號走父層後代選擇器((0,2,0) 蓋注入層 (0,1,0)) */
+.alert-ch-box { background: var(--bg-surface); border: 1px solid var(--border-subtle);
+  border-radius: var(--r-2); padding: var(--sp-3); margin-bottom: var(--sp-3); }
+.alert-ch-head { display: flex; align-items: center; gap: var(--sp-2);
+  font-weight: var(--weight-semi); font-size: var(--fs-base);
+  margin-bottom: var(--sp-3); cursor: pointer; }
+.alert-ch-head .oc-chip { margin-left: auto; font-size: var(--fs-micro); }
+/* 敏感欄位下方提示:默認 dim,「已標記清除」時 JS 加 --warn 變體(取代 style.color 寫點) */
+.alert-note { font-size: var(--fs-micro); color: var(--text-secondary); margin-top: var(--sp-1); }
+.alert-note--warn { color: var(--neg); }
+/* 產品族能力標籤 class-per-enum(取代 capColors 內聯色變數;文字與邊框同色) */
+.pf-cap--pos { color: var(--pos); border: 1px solid var(--pos); }
+.pf-cap--neg { color: var(--neg); border: 1px solid var(--neg); }
+.pf-cap--warn { color: var(--warn); border: 1px solid var(--warn); }
+.pf-cap--accent { color: var(--accent); border: 1px solid var(--accent); }
+.pf-cap--dim { color: var(--text-secondary); border: 1px solid var(--text-secondary); }
+.pf-note { font-size: var(--fs-micro); color: var(--text-secondary); margin: -6px 0 var(--sp-2); } /* 負縮進貼齊 title,精確值留組件層 */
+/* 重啟 modal:中性次要按鈕(原半透明槽灰字面值→bg-hover,列報告)與風險說明塊 */
+.btn-neutral { background: var(--bg-hover); }
+.confirm-block--risk { border-color: var(--neg); background: var(--neg-bg); }
+#restart-summary { font-size: var(--fs-base); line-height: 1.8; } /* 1.8 不在 §5 對照表,原樣留組件層 */
+#dlg-apikey-status, #alert-config-status { min-height: 18px; }
+#alert-wh-urls { resize: vertical; }
 </style>
 
 <!-- ═══ Legacy Paper Engine Toggle ═══ -->
-<div class="oc-card" style="border-color:rgba(52,211,153,0.28)">
+<div class="oc-card card--tint-pos">
   <h3>&#x1F9EA; Legacy Paper Engine / 舊 Paper 引擎</h3>
-  <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;line-height:1.6">
+  <div class="fs-dense t-dim mb-3 lh-cjk">
     Paper 引擎默認關閉；Replay 回測已獨立為主入口。啟用後主控制台才會顯示 Paper Tab。<br>
     Paper is disabled by default. Replay backtesting is now a standalone tab. Enable this only when you explicitly need the legacy Paper surface.
   </div>
-  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-    <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text)">
+  <div class="row gap-3 wrap">
+    <label class="row gap-2 fs-base t-primary">
       <input type="checkbox" id="paper-engine-enabled" class="settings-checkbox">
       Enable Paper Engine / 顯示 Paper Tab
     </label>
     <button class="oc-btn oc-btn-primary" onclick="savePaperEngineStatus()">保存 / Save</button>
     <span id="paper-engine-setting-badge" class="oc-chip oc-chip-neutral">Loading...</span>
   </div>
-  <div id="paper-engine-setting-status" style="font-size:11px;color:var(--text-dim);margin-top:10px;line-height:1.6">Loading...</div>
+  <div id="paper-engine-setting-status" class="fs-micro t-dim mt-3 lh-cjk">Loading...</div>
 </div>
 
 <!-- ═══ Development Support Toggle ═══ -->
-<div class="oc-card" style="border-color:rgba(56,139,253,0.28)">
+<div class="oc-card card--tint-accent">
   <h3>&#x1F6E0; 開發狀態支持頁 / Development Support</h3>
-  <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;line-height:1.6">
+  <div class="fs-dense t-dim mb-3 lh-cjk">
     關閉時隱藏主儀表盤和 Live 頁面的 Global Mode Control 支持入口。開啟後顯示 Support Tab，用 V001-V063 圖標儀表盤查看全局開發過程狀態。<br>
     This is a browser-local support surface. It does not change trading mode, risk config, live authorization, or engine runtime.
   </div>
-  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-    <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text)">
+  <div class="row gap-3 wrap">
+    <label class="row gap-2 fs-base t-primary">
       <input type="checkbox" id="development-support-enabled" class="settings-checkbox">
       Enable Development Support / 顯示開發狀態 Tab
     </label>
     <button class="oc-btn oc-btn-primary" onclick="saveDevelopmentSupportStatus()">保存 / Save</button>
     <span id="development-support-badge" class="oc-chip oc-chip-neutral">Loading...</span>
   </div>
-  <div id="development-support-status" style="font-size:11px;color:var(--text-dim);margin-top:10px;line-height:1.6">Loading...</div>
+  <div id="development-support-status" class="fs-micro t-dim mt-3 lh-cjk">Loading...</div>
 </div>
 
 </div><!-- /subtab-system -->
@@ -326,13 +382,13 @@
   role="tabpanel" aria-labelledby="subtab-btn-connection" hidden>
 
 <!-- ═══ API Key Management ═══ -->
-<div class="oc-card" style="border-color:rgba(210,153,34,0.3)">
+<div class="oc-card card--tint-warn">
   <h3>&#x1F511; API Key 管理 / API Key Management</h3>
-  <div style="font-size:12px;color:var(--text-dim);margin-bottom:14px">
+  <div class="fs-dense t-dim mb-3">
     每個引擎槽位獨立配置 Bybit API key。寫入前自動通過 Bybit REST 驗證。GUI 僅顯示遮罩 hint，永不暴露明文。<br>
     Each engine slot has its own Bybit API key. Auto-validated via Bybit REST before saving. GUI shows masked hint only — plaintext never exposed.
   </div>
-  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px" id="apikey-slots-grid">
+  <div class="slot-grid" id="apikey-slots-grid">
     <!-- Dynamically rendered by loadApiKeyStatus() / 由 loadApiKeyStatus() 動態渲染 -->
     <div class="oc-loading">Loading...</div>
   </div>
@@ -351,12 +407,14 @@
        啟用但憑證不齊全時後端回 400。
      遮罩 / 清空敏感欄位 / 提交後立即清 DOM 三條與 API Key 卡片同 pattern。
      M1：狀態 chip 反映「真能告警」（enabled AND credentialed = armed），不只反映 enabled flag。 -->
-<div class="oc-card" style="border-color:rgba(56,139,253,0.3)">
-  <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-    <h3 style="margin:0">&#x1F514; 告警通知 / Alert Notifications</h3>
-    <span class="oc-chip oc-chip-warn" id="alert-status-chip" style="margin-left:auto">載入中…</span>
+<div class="oc-card card--tint-accent">
+  <!-- 標頭雙子元素改 row-between:等價原「gap+chip margin-left:auto」;
+       chip 的 className 會被 JS 重寫(鐵則二),不得在 chip 上掛 utility -->
+  <div class="row-between gap-2 mb-1">
+    <h3 class="m-0">&#x1F514; 告警通知 / Alert Notifications</h3>
+    <span class="oc-chip oc-chip-warn" id="alert-status-chip">載入中…</span>
   </div>
-  <div style="font-size:12px;color:var(--text-dim);margin-bottom:14px">
+  <div class="fs-dense t-dim mb-3">
     引擎宕機（engine-down）時透過 Telegram 或 Webhook 推送告警。GUI 僅顯示遮罩 hint，永不暴露明文 token/secret。留空表示「不變」，按「清除」可移除已存值。<br>
     Engine-down alerts via Telegram or Webhook. GUI shows masked hint only — plaintext token/secret never exposed. Leave blank to keep unchanged; use "Clear" to remove a stored value.
   </div>
@@ -364,29 +422,29 @@
   <!-- 載入前 / 失敗時的佔位；renderAlertConfig() 成功後顯示 #alert-config-body -->
   <div id="alert-config-loading" class="oc-loading">Loading...</div>
 
-  <div id="alert-config-body" style="display:none">
+  <div id="alert-config-body" class="hidden">
     <!-- ── Telegram ── -->
-    <div style="background:var(--card-bg);border:1px solid rgba(56,139,253,0.2);border-radius:8px;padding:14px;margin-bottom:14px">
-      <label style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px;margin-bottom:10px;cursor:pointer">
+    <div class="alert-ch-box">
+      <label class="alert-ch-head">
         <input type="checkbox" id="alert-tg-enabled" />
         <span>&#x2708; Telegram</span>
-        <span class="oc-chip" id="alert-tg-state-chip" style="margin-left:auto;font-size:11px"></span>
+        <span class="oc-chip" id="alert-tg-state-chip"></span>
       </label>
-      <div style="display:grid;gap:10px">
+      <div class="col gap-3">
         <div>
-          <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px">Chat ID</label>
-          <input class="oc-input" id="alert-tg-chat-id" type="text" placeholder="例如 -1001234567890" autocomplete="off" style="width:100%;font-family:monospace" />
+          <label class="fs-micro t-dim block mb-1">Chat ID</label>
+          <input class="oc-input w-full mono" id="alert-tg-chat-id" type="text" placeholder="例如 -1001234567890" autocomplete="off" />
         </div>
         <div>
-          <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px">Bot Token</label>
-          <div style="display:flex;gap:8px;align-items:center">
-            <input class="oc-input" id="alert-tg-token" type="password" placeholder="未設定" autocomplete="new-password" style="flex:1;font-family:monospace" />
-            <button class="oc-btn" type="button" style="font-size:11px;white-space:nowrap" id="alert-tg-token-clear" onclick="alertMarkClear('tg-token')">清除 / Clear</button>
+          <label class="fs-micro t-dim block mb-1">Bot Token</label>
+          <div class="row gap-2">
+            <input class="oc-input flex-1 mono" id="alert-tg-token" type="password" placeholder="未設定" autocomplete="new-password" />
+            <button class="oc-btn fs-micro nowrap" type="button" id="alert-tg-token-clear" onclick="alertMarkClear('tg-token')">清除 / Clear</button>
           </div>
-          <div style="font-size:10px;color:var(--text-dim);margin-top:4px" id="alert-tg-token-note"></div>
+          <div class="alert-note" id="alert-tg-token-note"></div>
         </div>
         <!-- N3：一行 Telegram 設定指引，降低 operator 不知如何取得 Token / Chat ID 的門檻。 -->
-        <div style="font-size:10px;color:var(--text-dim);line-height:1.5">
+        <div class="fs-micro t-dim lh-cjk">
           &#x1F4A1; 透過 <code>@BotFather</code> 建立 bot 取得 Token；用 <code>@userinfobot</code> 查 Chat ID。<br>
           Create a bot via <code>@BotFather</code>; get Chat ID from <code>@userinfobot</code>.
         </div>
@@ -394,35 +452,36 @@
     </div>
 
     <!-- ── Webhook ── -->
-    <div style="background:var(--card-bg);border:1px solid rgba(56,139,253,0.2);border-radius:8px;padding:14px;margin-bottom:14px">
-      <label style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px;margin-bottom:10px;cursor:pointer">
+    <div class="alert-ch-box">
+      <label class="alert-ch-head">
         <input type="checkbox" id="alert-wh-enabled" />
         <span>&#x1F517; Webhook</span>
-        <span class="oc-chip" id="alert-wh-state-chip" style="margin-left:auto;font-size:11px"></span>
+        <span class="oc-chip" id="alert-wh-state-chip"></span>
       </label>
-      <div style="display:grid;gap:10px">
+      <div class="col gap-3">
         <div>
-          <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px">URL（每行一個 / one per line）</label>
-          <textarea class="oc-input" id="alert-wh-urls" rows="3" placeholder="https://example.com/hook" autocomplete="off" style="width:100%;font-family:monospace;resize:vertical"></textarea>
+          <label class="fs-micro t-dim block mb-1">URL（每行一個 / one per line）</label>
+          <textarea class="oc-input w-full mono" id="alert-wh-urls" rows="3" placeholder="https://example.com/hook" autocomplete="off"></textarea>
         </div>
         <div>
           <!-- N4：HMAC 屬技術細節，從主 label 移到 tooltip/hint，避免嚇到不熟簽章的 operator。 -->
-          <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px"
+          <label class="fs-micro t-dim block mb-1"
             title="選填。若填入，告警 webhook 會帶 HMAC-SHA256 X-OpenClaw-Signature 標頭供接收端驗簽。/ Optional HMAC-SHA256 signing key.">Secret（簽章用，可留空 / signing key, optional）</label>
-          <div style="display:flex;gap:8px;align-items:center">
-            <input class="oc-input" id="alert-wh-secret" type="password" placeholder="未設定" autocomplete="new-password" style="flex:1;font-family:monospace" />
-            <button class="oc-btn" type="button" style="font-size:11px;white-space:nowrap" id="alert-wh-secret-clear" onclick="alertMarkClear('wh-secret')">清除 / Clear</button>
+          <div class="row gap-2">
+            <input class="oc-input flex-1 mono" id="alert-wh-secret" type="password" placeholder="未設定" autocomplete="new-password" />
+            <button class="oc-btn fs-micro nowrap" type="button" id="alert-wh-secret-clear" onclick="alertMarkClear('wh-secret')">清除 / Clear</button>
           </div>
-          <div style="font-size:10px;color:var(--text-dim);margin-top:4px" id="alert-wh-secret-note"></div>
+          <div class="alert-note" id="alert-wh-secret-note"></div>
         </div>
       </div>
     </div>
 
-    <div id="alert-config-status" style="font-size:12px;min-height:18px;margin-bottom:10px"></div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <div id="alert-config-status" class="fs-dense mb-3"></div>
+    <div class="row gap-2 wrap">
       <button class="oc-btn oc-btn-primary" type="button" id="alert-save-btn" onclick="saveAlertConfig()">&#x2714; 保存 / Save</button>
       <button class="oc-btn" type="button" id="alert-test-btn" onclick="sendAlertTest()">&#x1F4E8; 發送測試告警 / Send test alert</button>
-      <span style="font-size:10px;color:var(--text-dim);align-self:center" id="alert-last-modified"></span>
+      <!-- align-self:center 已冗餘:父層 row 即 align-items:center -->
+      <span class="fs-micro t-dim" id="alert-last-modified"></span>
     </div>
   </div>
 </div>
@@ -444,16 +503,16 @@
   <div class="oc-collapse-body">
     <div class="oc-grid-2">
       <div>
-        <h4 style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Control Plane</h4>
+        <h4 class="fs-dense t-dim mb-2">Control Plane</h4>
         <pre class="oc-pre" id="debug-cp">Loading...</pre>
       </div>
       <div>
-        <h4 style="font-size:12px;color:var(--text-dim);margin-bottom:6px">System Overview</h4>
+        <h4 class="fs-dense t-dim mb-2">System Overview</h4>
         <pre class="oc-pre" id="debug-ov">Loading...</pre>
       </div>
     </div>
-    <div style="margin-top:10px">
-      <h4 style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Audit Summary</h4>
+    <div class="mt-3">
+      <h4 class="fs-dense t-dim mb-2">Audit Summary</h4>
       <pre class="oc-pre" id="debug-audit">Loading...</pre>
     </div>
   </div>
@@ -464,14 +523,14 @@
   <summary>&#x2139; 系統信息 / System Info</summary>
   <div class="oc-collapse-body">
     <div class="oc-metrics" id="sys-info">
-      <div class="oc-metric"><div class="oc-metric-label">System Mode</div><div class="oc-metric-val" style="font-size:14px">read_only</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">Execution State</div><div class="oc-metric-val" style="font-size:14px">disabled</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">Execution Authority</div><div class="oc-metric-val" style="font-size:14px">not_granted</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">Decision Lease</div><div class="oc-metric-val" id="sys-decision-lease" style="font-size:14px">--</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">Live Execution</div><div class="oc-metric-val red" style="font-size:14px">BLOCKED</div></div>
-      <div class="oc-metric"><div class="oc-metric-label">Max Retries</div><div class="oc-metric-val" style="font-size:14px">0</div></div>
+      <div class="oc-metric mv--md"><div class="oc-metric-label">System Mode</div><div class="oc-metric-val">read_only</div></div>
+      <div class="oc-metric mv--md"><div class="oc-metric-label">Execution State</div><div class="oc-metric-val">disabled</div></div>
+      <div class="oc-metric mv--md"><div class="oc-metric-label">Execution Authority</div><div class="oc-metric-val">not_granted</div></div>
+      <div class="oc-metric mv--md"><div class="oc-metric-label">Decision Lease</div><div class="oc-metric-val" id="sys-decision-lease">--</div></div>
+      <div class="oc-metric mv--md"><div class="oc-metric-label">Live Execution</div><div class="oc-metric-val red">BLOCKED</div></div>
+      <div class="oc-metric mv--md"><div class="oc-metric-label">Max Retries</div><div class="oc-metric-val">0</div></div>
     </div>
-    <div style="margin-top:10px;font-size:11px;color:var(--text-dim)">
+    <div class="mt-3 fs-micro t-dim">
       這些是系統的硬编碼安全邊界，不可通過 GUI 修改。只有通過代碼變更和正式審批流程才能改變這些值。
     </div>
   </div>
@@ -489,7 +548,7 @@
 <!-- ═══ Restart Multi-Step Modal ═══ -->
 <div id="restartModal" class="confirm-modal hidden">
   <div class="confirm-modal-backdrop" onclick="closeRestartModal()"></div>
-  <div class="confirm-modal-dialog" style="width:min(560px,calc(100vw - 32px))">
+  <div class="confirm-modal-dialog">
 
     <!-- Step 1: Warning + time selection -->
     <div id="restart-step-1">
@@ -498,9 +557,9 @@
         <button class="confirm-close" onclick="closeRestartModal()">×</button>
       </div>
       <div class="confirm-modal-body">
-        <div class="confirm-block" style="border-color:rgba(239,68,68,0.3);background:rgba(239,68,68,0.05)">
-          <div class="confirm-label" style="color:#f87171">風險說明 / Risks</div>
-          <div style="font-size:13px;line-height:1.6">
+        <div class="confirm-block confirm-block--risk">
+          <div class="confirm-label t-neg">風險說明 / Risks</div>
+          <div class="fs-base lh-cjk">
             • 重啟期間（約 10-30 秒）市場監控中斷，無法執行止損<br>
             • 未平倉的 Paper 模擬 倉位在重啟後恢復，但可能錯過止損時機<br>
             • Bybit Demo 演示 倉位不受影響（由交易所端管理）<br>
@@ -508,8 +567,8 @@
           </div>
         </div>
         <div>
-          <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px">選擇重啟延遲時間 / Select restart delay</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <div class="fs-dense t-dim mb-3">選擇重啟延遲時間 / Select restart delay</div>
+          <div class="row gap-2 wrap">
             <label class="restart-time-opt"><input type="radio" name="restartDelay" value="5"> 5 分鐘</label>
             <label class="restart-time-opt"><input type="radio" name="restartDelay" value="10" checked> 10 分鐘</label>
             <label class="restart-time-opt"><input type="radio" name="restartDelay" value="15"> 15 分鐘</label>
@@ -525,7 +584,7 @@
     </div>
 
     <!-- Step 2: Force liquidate? -->
-    <div id="restart-step-2" style="display:none">
+    <div id="restart-step-2" class="hidden">
       <div class="confirm-modal-header">
         <h3>強制清倉？/ Force Liquidate?</h3>
         <button class="confirm-close" onclick="closeRestartModal()">×</button>
@@ -533,7 +592,7 @@
       <div class="confirm-modal-body">
         <div class="confirm-block">
           <div class="confirm-label">清倉規則 / Liquidation Rules</div>
-          <div style="font-size:13px;line-height:1.6">
+          <div class="fs-base lh-cjk">
             系統會立即平倉所有<strong>扣除手續費後仍為盈利</strong>的 Paper 模擬 倉位。<br>
             虧損倉位<strong>不會</strong>被強制平倉，以避免鎖定損失。<br>
             The system will close all Paper positions where <strong>net PnL after fees &gt; 0</strong>.<br>
@@ -543,13 +602,13 @@
       </div>
       <div class="confirm-modal-footer">
         <button class="button-muted confirm-cancel" onclick="closeRestartModal()">取消</button>
-        <button class="oc-btn" onclick="restartStep3(false)" style="background:rgba(71,85,105,.3)">否 — 保留全部倉位</button>
+        <button class="oc-btn btn-neutral" onclick="restartStep3(false)">否 — 保留全部倉位</button>
         <button class="oc-btn oc-btn-primary" onclick="restartStep3(true)">是 — 清倉盈利倉位</button>
       </div>
     </div>
 
     <!-- Step 3: Final confirmation -->
-    <div id="restart-step-3" style="display:none">
+    <div id="restart-step-3" class="hidden">
       <div class="confirm-modal-header">
         <h3>&#x2714; 確認執行 / Confirm</h3>
         <button class="confirm-close" onclick="closeRestartModal()">×</button>
@@ -557,9 +616,9 @@
       <div class="confirm-modal-body">
         <div class="confirm-block">
           <div class="confirm-label">執行計劃 / Plan</div>
-          <div id="restart-summary" style="font-size:13px;line-height:1.8"></div>
+          <div id="restart-summary"></div>
         </div>
-        <div style="font-size:12px;color:var(--text-dim)">確認後無法取消。請確保你已了解重啟期間的風險。</div>
+        <div class="fs-dense t-dim">確認後無法取消。請確保你已了解重啟期間的風險。</div>
       </div>
       <div class="confirm-modal-footer">
         <button class="button-muted confirm-cancel" onclick="closeRestartModal()">取消</button>
@@ -572,25 +631,26 @@
 
 <!-- ── API Key Replace Dialog (modal) ──────────────────────────────── -->
 <div class="oc-dialog-overlay" id="dlg-apikey">
-  <div class="oc-dialog" style="max-width:480px">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-      <h3 style="margin:0">&#x270F; 替換 API Key — <span id="dlg-apikey-slot-label"></span></h3>
-      <button style="background:none;border:none;color:var(--text-dim);font-size:20px;cursor:pointer;padding:0 4px;line-height:1" onclick="closeApikeyDialog()">&times;</button>
+  <div class="oc-dialog">
+    <div class="row-between mb-3">
+      <h3 class="m-0">&#x270F; 替換 API Key — <span id="dlg-apikey-slot-label"></span></h3>
+      <!-- 關閉鈕宣告與 .confirm-close(本頁塊)逐字相同,直接複用 -->
+      <button class="confirm-close" onclick="closeApikeyDialog()">&times;</button>
     </div>
-    <p style="margin-bottom:6px">輸入新的 Bybit API key 和 secret。系統會先驗證有效性，通過後才寫入磁盤。</p>
+    <p class="mb-2">輸入新的 Bybit API key 和 secret。系統會先驗證有效性，通過後才寫入磁盤。</p>
     <div class="note">&#x26A0; secret 僅在此次輸入時可見。保存後將永久遮罩，請妥善備份原始 key。</div>
-    <div id="dlg-apikey-warn-box" style="display:none;font-size:11px;color:#f87171;margin-bottom:8px"></div>
-    <div style="display:grid;gap:10px;margin-bottom:14px">
+    <div id="dlg-apikey-warn-box" class="hidden fs-micro mb-2"></div>
+    <div class="col gap-3 mb-3">
       <div>
-        <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px">API Key</label>
-        <input class="oc-input" id="dlg-apikey-key" type="text" placeholder="e.g. abcdefXXXXXXXXXX" autocomplete="off" style="width:100%;font-family:monospace" />
+        <label class="fs-micro t-dim block mb-1">API Key</label>
+        <input class="oc-input w-full mono" id="dlg-apikey-key" type="text" placeholder="e.g. abcdefXXXXXXXXXX" autocomplete="off" />
       </div>
       <div>
-        <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px">API Secret</label>
-        <input class="oc-input" id="dlg-apikey-secret" type="password" placeholder="•••••••••••••••••••••••••••••••" autocomplete="new-password" style="width:100%;font-family:monospace" />
+        <label class="fs-micro t-dim block mb-1">API Secret</label>
+        <input class="oc-input w-full mono" id="dlg-apikey-secret" type="password" placeholder="•••••••••••••••••••••••••••••••" autocomplete="new-password" />
       </div>
     </div>
-    <div id="dlg-apikey-status" style="font-size:12px;min-height:18px;margin-bottom:10px"></div>
+    <div id="dlg-apikey-status" class="fs-dense mb-3"></div>
     <div class="btn-row">
       <button class="oc-btn" onclick="closeApikeyDialog()">取消</button>
       <button class="oc-btn oc-btn-primary" id="dlg-apikey-save-btn" onclick="doSaveApiKey()">&#x2714; 驗證並保存</button>
@@ -693,9 +753,9 @@ function openRestartModal() {
   return;
   // eslint-disable-next-line no-unreachable
   document.getElementById('restartModal').classList.remove('hidden');
-  document.getElementById('restart-step-1').style.display = '';
-  document.getElementById('restart-step-2').style.display = 'none';
-  document.getElementById('restart-step-3').style.display = 'none';
+  document.getElementById('restart-step-1').classList.remove('hidden');
+  document.getElementById('restart-step-2').classList.add('hidden');
+  document.getElementById('restart-step-3').classList.add('hidden');
 }
 
 function closeRestartModal() {
@@ -705,8 +765,8 @@ function closeRestartModal() {
 function restartStep2() {
   const sel = document.querySelector('input[name="restartDelay"]:checked');
   _restartDelay = sel ? parseInt(sel.value) : 10;
-  document.getElementById('restart-step-1').style.display = 'none';
-  document.getElementById('restart-step-2').style.display = '';
+  document.getElementById('restart-step-1').classList.add('hidden');
+  document.getElementById('restart-step-2').classList.remove('hidden');
 }
 
 function restartStep3(liquidate) {
@@ -715,8 +775,8 @@ function restartStep3(liquidate) {
   document.getElementById('restart-summary').innerHTML =
     '⏱ 重啟延遲：<strong>' + delayLabel + '</strong><br>' +
     '🗂 清倉：<strong>' + (_restartLiquidate ? '是 — 關閉盈利 Paper 模擬 倉位' : '否 — 保留全部倉位') + '</strong>';
-  document.getElementById('restart-step-2').style.display = 'none';
-  document.getElementById('restart-step-3').style.display = '';
+  document.getElementById('restart-step-2').classList.add('hidden');
+  document.getElementById('restart-step-3').classList.remove('hidden');
 }
 
 async function executeRestart() {
@@ -737,7 +797,7 @@ async function executeRestart() {
     const skippedN = (d.positions_skipped || []).length;
     let msg = '✅ 已排程：' + _restartDelay + ' 分鐘後重啟';
     if (_restartLiquidate) msg += '｜已平倉 ' + closedN + ' 個，保留 ' + skippedN + ' 個（虧損）';
-    ocSetHtml('restart-status', '<div class="oc-chip oc-chip-good" style="font-size:12px">' + msg + '</div>');
+    ocSetHtml('restart-status', '<div class="oc-chip oc-chip-good fs-dense">' + msg + '</div>');
     ocToast('重啟已排程，' + _restartDelay + ' 分鐘後執行', 'success');
     startRestartCountdown(d.restart_at_ts_ms);
   } else {
@@ -753,7 +813,8 @@ function startRestartCountdown(restartAtMs) {
   const banner = document.getElementById('restart-top-banner');
   const cd1 = document.getElementById('restart-banner-countdown');
   const cd2 = document.getElementById('restart-banner-countdown2');
-  if (banner) banner.style.display = 'flex';  // show sticky banner / 顯示顶部横幅
+  // 顯示顶部横幅:.rst-banner 組件供給 display:flex,顯隱走全局 .hidden(§3.3 決策樹顯式值分支)
+  if (banner) banner.classList.remove('hidden');
 
   const iv = setInterval(() => {
     const remaining = Math.max(0, Math.ceil((restartAtMs - Date.now()) / 1000));
@@ -761,11 +822,11 @@ function startRestartCountdown(restartAtMs) {
     const label = m + 'm ' + s + 's';
     if (remaining <= 0) {
       clearInterval(iv);
-      el.innerHTML = '<div class="oc-chip" style="color:var(--text-dim);font-size:12px">服務器重啟中...</div>';
-      if (banner) banner.style.display = 'none';
+      el.innerHTML = '<div class="oc-chip t-dim fs-dense">服務器重啟中...</div>';
+      if (banner) banner.classList.add('hidden');
       return;
     }
-    el.innerHTML = '<div class="oc-chip oc-chip-good" style="font-size:12px">&#x23F1; 重啟倒計時：' + label + '</div>';
+    el.innerHTML = '<div class="oc-chip oc-chip-good fs-dense">&#x23F1; 重啟倒計時：' + label + '</div>';
     // Update sticky banner / 更新顶部横幅
     if (cd1) cd1.textContent = label;
     if (cd2) cd2.textContent = label;
@@ -918,7 +979,8 @@ async function loadControlPlane() {
   if (modeEl) {
     const modeLabels = { disabled: '禁用 Disabled', demo_reserved: 'Demo 演示 預留', shadow_only: '影子模式', observe_only: '觀察模式', design_only: '僅設計' };
     modeEl.textContent = modeLabels[mode] || mode || '--';
-    modeEl.style.color = mode === 'demo_reserved' ? 'var(--green)' : 'var(--accent)';
+    // enum 型配色走 class-per-enum(§7):默認 accent、demo_reserved 切 pos(頁內 #qa-current-mode 規則)
+    modeEl.classList.toggle('qa-mode--demo', mode === 'demo_reserved');
   }
   const btnDemo = document.getElementById('btn-set-demo');
   if (btnDemo) {
@@ -977,15 +1039,16 @@ async function loadProductFamilyConfig() {
   if (typeof families !== 'object') return;
 
   const modeLabels = { disabled:'禁用 / Disabled', observe_only:'觀察 / Observe', shadow_only:'影子 / Shadow', demo_reserved:'Demo 演示', live_reserved:'Live 實盤' };
-  const capColors = { enabled:'var(--green)', disabled:'#f87171', observe_only:'var(--yellow)', shadow_only:'var(--accent)' };
+  // enum 型配色走 class-per-enum(§7):固定 map 查表產 class,非用戶輸入,取代原 capColors 內聯色變數
+  const capClasses = { enabled:'pf-cap--pos', disabled:'pf-cap--neg', observe_only:'pf-cap--warn', shadow_only:'pf-cap--accent' };
 
-  let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px">';
+  let html = '<div class="slot-grid">';
   Object.entries(families).forEach(([name, f]) => {
     const facts = f.facts || {};
     const ctrl = f.controls || {};
     const derived = f.derived || {};
     const cap = derived.capability_state || 'disabled';
-    const capColor = capColors[cap] || 'var(--text-dim)';
+    const capCls = capClasses[cap] || 'pf-cap--dim';
     const enabled = !!ctrl.enabled_switch;
     const visible = !!ctrl.visibility_switch;
     const mode = ctrl.mode_switch || 'disabled';
@@ -994,14 +1057,14 @@ async function loadProductFamilyConfig() {
 
     html += '<div class="pf-card">';
     html += '<div class="pf-card-title">' + ocEsc(label);
-    html += ' <span class="pf-cap" style="color:' + capColor + ';border:1px solid ' + capColor + '">' + ocEsc(cap) + '</span>';
+    html += ' <span class="pf-cap ' + capCls + '">' + ocEsc(cap) + '</span>';
     if (support.agentReady) {
-      html += ' <span class="pf-cap" style="color:var(--green);border:1px solid var(--green);font-size:10px">策略就緒</span>';
+      html += ' <span class="pf-cap pf-cap--pos">策略就緒</span>';
     } else {
-      html += ' <span class="pf-cap" style="color:#f87171;border:1px solid #f87171;font-size:10px">策略未就緒</span>';
+      html += ' <span class="pf-cap pf-cap--neg">策略未就緒</span>';
     }
     html += '</div>';
-    if (support.note) html += '<div style="font-size:10px;color:var(--text-dim);margin:-6px 0 8px">' + ocEsc(support.note) + '</div>';
+    if (support.note) html += '<div class="pf-note">' + ocEsc(support.note) + '</div>';
 
     // 啟用開關 / Enabled switch
     html += '<div class="pf-row"><span>啟用 / Enabled</span>';
@@ -1035,7 +1098,7 @@ async function loadProductFamilyConfig() {
 
     // 交易所權限 / Exchange permission (只讀)
     const exPerm = facts.exchange_permission_fact;
-    html += '<div class="pf-row"><span>交易所權限</span><span style="color:' + (exPerm ? 'var(--green)' : '#f87171') + '">' + (exPerm ? '已授權' : '未授權') + '</span></div>';
+    html += '<div class="pf-row"><span>交易所權限</span><span class="' + (exPerm ? 't-pos' : 't-neg') + '">' + (exPerm ? '已授權' : '未授權') + '</span></div>';
 
     html += '</div>';
   });
@@ -1204,21 +1267,22 @@ const APIKEY_SLOTS = [
 let _currentApikeySlot = '';
 
 function apiKeyStatusView(data) {
+  // detailCls:enum 型配色走 class-per-enum(§7),utility 類取代原 detailColor 內聯色字串
   const hasKey = data && data.has_key;
   const status = (data && data.validation_status) ? data.validation_status : '';
   if (!hasKey) {
-    return { chipCls: 'oc-chip-warn', chipTxt: '未配置', detail: '', detailColor: '' };
+    return { chipCls: 'oc-chip-warn', chipTxt: '未配置', detail: '', detailCls: '' };
   }
   if (status === 'valid') {
-    return { chipCls: 'oc-chip-good', chipTxt: '有效', detail: 'API 驗證通過', detailColor: 'var(--green)' };
+    return { chipCls: 'oc-chip-good', chipTxt: '有效', detail: 'API 驗證通過', detailCls: 't-pos' };
   }
   if (status === 'invalid') {
-    return { chipCls: 'oc-chip-bad', chipTxt: '失效', detail: 'API 驗證失效', detailColor: '#f87171' };
+    return { chipCls: 'oc-chip-bad', chipTxt: '失效', detail: 'API 驗證失效', detailCls: 't-neg' };
   }
   if (status === 'validation_unavailable') {
-    return { chipCls: 'oc-chip-warn', chipTxt: '待複查', detail: 'API 驗證暫不可用', detailColor: 'var(--yellow,#f0c040)' };
+    return { chipCls: 'oc-chip-warn', chipTxt: '待複查', detail: 'API 驗證暫不可用', detailCls: 't-warn' };
   }
-  return { chipCls: 'oc-chip-good', chipTxt: '已配置', detail: '', detailColor: '' };
+  return { chipCls: 'oc-chip-good', chipTxt: '已配置', detail: '', detailCls: '' };
 }
 
 async function loadApiKeyStatus() {
@@ -1237,42 +1301,43 @@ async function loadApiKeyStatus() {
     const hint = (d && d.key_hint) ? d.key_hint : '（未設置）';
     const lastMod = (d && d.last_modified) ? d.last_modified : '';
     const validationError = (d && d.validation_error) ? d.validation_error : '';
-    const borderColor = slot.warn ? 'rgba(239,68,68,0.3)' : slot.liveDemoNote ? 'rgba(240,192,64,0.3)' : 'rgba(56,139,253,0.2)';
+    // 槽位邊框三態 class-per-enum(§7),取代原 borderColor 內聯色字串
+    const cardCls = slot.warn ? ' apikey-card--live' : slot.liveDemoNote ? ' apikey-card--livedemo' : '';
     const statusView = apiKeyStatusView(d);
 
-    html += '<div style="background:var(--card-bg);border:1px solid ' + borderColor + ';border-radius:8px;padding:14px">';
-    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">';
-    html += '<span style="font-size:18px">' + slot.icon + '</span>';
-    html += '<span style="font-weight:600;font-size:13px">' + ocEsc(slot.label) + '</span>';
-    html += '<span class="oc-chip ' + statusView.chipCls + '" style="margin-left:auto">' + statusView.chipTxt + '</span>';
+    html += '<div class="apikey-card' + cardCls + '">';
+    html += '<div class="row gap-2 mb-2">';
+    html += '<span class="fs-title">' + slot.icon + '</span>';
+    html += '<span class="fw-semi fs-base">' + ocEsc(slot.label) + '</span>';
+    html += '<span class="oc-chip ' + statusView.chipCls + ' ml-auto">' + statusView.chipTxt + '</span>';
     html += '</div>';
-    html += '<div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">' + ocEsc(slot.desc) + '</div>';
-    html += '<div style="font-family:monospace;font-size:12px;color:var(--text);margin-bottom:6px">Key: <strong id="apikey-hint-' + slot.id + '">' + ocEsc(hint) + '</strong></div>';
+    html += '<div class="fs-micro t-dim mb-3">' + ocEsc(slot.desc) + '</div>';
+    html += '<div class="mono fs-dense t-primary mb-2">Key: <strong id="apikey-hint-' + slot.id + '">' + ocEsc(hint) + '</strong></div>';
     if (statusView.detail) {
-      html += '<div style="font-size:11px;color:' + statusView.detailColor + ';margin-bottom:8px">';
+      html += '<div class="fs-micro mb-2 ' + statusView.detailCls + '">';
       html += ocEsc(statusView.detail);
       if (validationError) html += ': ' + ocEsc(validationError);
       html += '</div>';
     }
     if (lastMod) {
-      html += '<div style="font-size:10px;color:var(--text-dim);margin-bottom:10px">最後更新: ' + ocEsc(lastMod) + '</div>';
+      html += '<div class="fs-micro t-dim mb-3">最後更新: ' + ocEsc(lastMod) + '</div>';
     }
     if (slot.warn) {
-      html += '<div style="font-size:11px;color:#f87171;margin-bottom:8px">⚠ 實盤 key 修改後立即生效，請謹慎操作。</div>';
+      html += '<div class="fs-micro t-neg mb-2">⚠ 實盤 key 修改後立即生效，請謹慎操作。</div>';
     }
     if (slot.liveDemoNote) {
-      html += '<div style="font-size:11px;color:var(--yellow,#f0c040);margin-bottom:8px">💡 此槽位與 Live 實盤 共享同一 key 存儲。寫入後 Live 實盤 也會使用該 key。</div>';
-      html += '<div style="font-size:11px;color:#a855f7;margin-bottom:8px;line-height:1.55">⚠ Live-Demo 等同 Live 待遇（Same treatment as Live）— 完整風控 / 紫色主題 / 二次確認 / Global Gate 全部生效</div>';
+      html += '<div class="fs-micro t-warn mb-2">💡 此槽位與 Live 實盤 共享同一 key 存儲。寫入後 Live 實盤 也會使用該 key。</div>';
+      html += '<div class="fs-micro mb-2 lh-cjk apikey-note-live">⚠ Live-Demo 等同 Live 待遇（Same treatment as Live）— 完整風控 / 紫色主題 / 二次確認 / Global Gate 全部生效</div>';
     }
-    html += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
-    html += '<button class="oc-btn oc-btn-primary" style="font-size:12px" onclick="openApikeyDialog(\'' + slot.id + '\')">✏ 替換 Key</button>';
+    html += '<div class="row gap-2 wrap">';
+    html += '<button class="oc-btn oc-btn-primary fs-dense" onclick="openApikeyDialog(\'' + slot.id + '\')">✏ 替換 Key</button>';
     if (hasKey) {
-      html += '<button class="oc-btn" style="font-size:12px" onclick="peekApiKey(\'' + slot.id + '\')">👁 查看 Key</button>';
+      html += '<button class="oc-btn fs-dense" onclick="peekApiKey(\'' + slot.id + '\')">👁 查看 Key</button>';
     }
     html += '</div>';
     html += '</div>';
   });
-  grid.innerHTML = html || '<div style="color:var(--text-dim);font-size:12px">無法載入 key 狀態</div>';
+  grid.innerHTML = html || '<div class="t-dim fs-dense">無法載入 key 狀態</div>';
 }
 
 function openApikeyDialog(slot) {
@@ -1283,18 +1348,19 @@ function openApikeyDialog(slot) {
   document.getElementById('dlg-apikey-secret').value = '';
   document.getElementById('dlg-apikey-status').textContent = '';
   document.getElementById('dlg-apikey-save-btn').disabled = false;
-  // Show contextual warning for live slots / 對 live 槽位顯示上下文警告
+  // 對 live 槽位顯示上下文警告;槽位 enum 配色走 class-per-enum(§7),
+  // 顯隱走全局 .hidden(§3.3 引理:原 show 端寫 '')
   const warnBox = document.getElementById('dlg-apikey-warn-box');
   if (slot === 'live') {
-    warnBox.style.display = '';
-    warnBox.style.color = '#f87171';
+    warnBox.classList.remove('hidden', 'apikey-warn--livedemo');
+    warnBox.classList.add('apikey-warn--live');
     warnBox.textContent = '⚠ 實盤 key 修改後立即生效，系統將連接 api.bybit.com 驗證。';
   } else if (slot === 'live_demo') {
-    warnBox.style.display = '';
-    warnBox.style.color = 'var(--yellow, #f0c040)';
+    warnBox.classList.remove('hidden', 'apikey-warn--live');
+    warnBox.classList.add('apikey-warn--livedemo');
     warnBox.textContent = '💡 此 key 通過 api-demo.bybit.com 驗證，但寫入 Live 引擎路徑。請確認輸入的是 Demo 帳號的 key。';
   } else {
-    warnBox.style.display = 'none';
+    warnBox.classList.add('hidden');
   }
   document.getElementById('dlg-apikey').classList.add('show');
   setTimeout(() => document.getElementById('dlg-apikey-key').focus(), 50);
@@ -1335,12 +1401,12 @@ async function doSaveApiKey() {
   const saveBtn = document.getElementById('dlg-apikey-save-btn');
 
   if (!apiKey || !apiSecret) {
-    statusEl.innerHTML = '<span style="color:#f87171">⚠ API key 和 secret 均不能為空</span>';
+    statusEl.innerHTML = '<span class="t-neg">⚠ API key 和 secret 均不能為空</span>';
     return;
   }
 
   saveBtn.disabled = true;
-  statusEl.innerHTML = '<span style="color:var(--text-dim)">⏳ 正在通過 Bybit 驗證...</span>';
+  statusEl.innerHTML = '<span class="t-dim">⏳ 正在通過 Bybit 驗證...</span>';
 
   const d = await ocPost('/api/v1/settings/api-key/' + slot, { api_key: apiKey, api_secret: apiSecret });
 
@@ -1350,12 +1416,12 @@ async function doSaveApiKey() {
 
   if (d && (d.saved || (d.data && d.data.saved))) {
     const hint = (d.key_hint) || (d.data && d.data.key_hint) || '****';
-    statusEl.innerHTML = '<span style="color:var(--green)">✓ 驗證通過，已保存 (' + ocEsc(hint) + ')</span>';
+    statusEl.innerHTML = '<span class="t-pos">✓ 驗證通過，已保存 (' + ocEsc(hint) + ')</span>';
     ocToast(slot + ' API key 已更新', 'success');
     setTimeout(() => { closeApikeyDialog(); loadApiKeyStatus(); }, 1200);
   } else {
     const errMsg = (d && d.error) || (d && d.data && d.data.error) || '驗證失敗，請檢查 key 是否正確';
-    statusEl.innerHTML = '<span style="color:#f87171">✗ ' + ocEsc(errMsg) + '</span>';
+    statusEl.innerHTML = '<span class="t-neg">✗ ' + ocEsc(errMsg) + '</span>';
     saveBtn.disabled = false;
   }
 }
@@ -1427,12 +1493,13 @@ async function _alertFetch(path, body) {
   }
 }
 
-/** 在卡內 status 區顯示一行訊息（color: 'dim'|'green'|'red'）。文字節點走 ocEsc 防 XSS。 */
+/** 在卡內 status 區顯示一行訊息（color: 'dim'|'green'|'red'）。文字節點走 ocEsc 防 XSS。
+ *  enum 型配色走 class-per-enum(§7):utility 類取代原內聯色字串。 */
 function _alertCardStatus(text, color) {
   const el = document.getElementById('alert-config-status');
   if (!el) return;
-  const c = color === 'green' ? 'var(--green)' : (color === 'red' ? '#f87171' : 'var(--text-dim)');
-  el.innerHTML = '<span style="color:' + c + '">' + ocEsc(text) + '</span>';
+  const cls = color === 'green' ? 't-pos' : (color === 'red' ? 't-neg' : 't-dim');
+  el.innerHTML = '<span class="' + cls + '">' + ocEsc(text) + '</span>';
 }
 
 /**
@@ -1459,8 +1526,9 @@ function alertMarkClear(fieldKey) {
   const input = document.getElementById(inputId);
   if (input) { input.value = ''; input.placeholder = '已標記清除 — 保存後移除'; }
   ocSetText(noteId, '⚠ 已標記清除：保存後將移除已存值。重新輸入可取消。');
+  // 警示配色走 .alert-note--warn 狀態類(取代 style.color 寫點;_alertSetConfiguredNote 負責復位)
   const noteEl = document.getElementById(noteId);
-  if (noteEl) noteEl.style.color = '#f87171';
+  if (noteEl) noteEl.classList.add('alert-note--warn');
 }
 
 /**
@@ -1479,7 +1547,7 @@ async function loadAlertConfig() {
     loadingEl.style.display = '';
     loadingEl.textContent = '無法載入告警配置：' + reason;
     loadingEl.style.color = '#f87171';
-    bodyEl.style.display = 'none';
+    bodyEl.classList.add('hidden');
     const chip = document.getElementById('alert-status-chip');
     if (chip) {
       // 404 = 後端尚未啟用（中性灰，非「警告」）；其他失敗 = 黃色警告。
@@ -1501,7 +1569,7 @@ function renderAlertConfig(cfg) {
   const bodyEl = document.getElementById('alert-config-body');
   if (!loadingEl || !bodyEl) return;
   loadingEl.style.display = 'none';
-  bodyEl.style.display = '';
+  bodyEl.classList.remove('hidden');
 
   // 快取最新視圖供送出前 guard 用（判斷已存憑證是否存在）。
   _ocAlertLastView = cfg;
@@ -1560,7 +1628,8 @@ function renderAlertConfig(cfg) {
 function _alertSetConfiguredNote(noteId, configured, hint) {
   const el = document.getElementById(noteId);
   if (!el) return;
-  el.style.color = 'var(--text-dim)';
+  // 復位回 .alert-note 默認 dim 配色(取代原 style.color 重置寫點)
+  el.classList.remove('alert-note--warn');
   if (configured) {
     // hint 來自後端，已遮罩（如 ••••1234）；仍用 ocEsc 包裝防意外字符
     el.textContent = '目前已設定（' + ocEsc(hint || '••••') + '）。留空保持不變，或按清除移除。';
