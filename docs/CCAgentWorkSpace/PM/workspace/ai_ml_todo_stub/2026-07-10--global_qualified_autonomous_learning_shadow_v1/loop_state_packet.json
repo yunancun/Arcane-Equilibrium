@@ -1,31 +1,33 @@
 {
   "schema": "global_qualified_autonomous_learning_shadow_loop_state_v1",
-  "generated_at": "2026-07-10T15:48:41Z",
+  "generated_at": "2026-07-10T20:16:18Z",
   "goal_id": "GLOBAL_QUALIFIED_AUTONOMOUS_LEARNING_SHADOW_V1",
   "goal_thread_id": "019f4b6d-1e5b-7551-9fce-7a2f029a1675",
   "goal_status": "ACTIVE",
   "current_work_package": "WP2-CANDIDATE-AWARE-ARBITER",
-  "current_work_package_state": "ACTIVE_CONTRACT_AND_FIXTURE_DISCOVERY",
+  "current_work_package_state": "ACTIVE_WP2B_PROSPECTIVE_EVENT_LINEAGE",
   "baseline_packet": "baseline_state_packet.json",
   "baseline_packet_sha256": "30c10a497f02794525ce6e1d70972829bde7942a6a0bb181e36a13e308400b60",
   "baseline_evidence_delta_hash": "0ab0b80f307951108d0cf5edd3bb5940cb936bd093081c37c6d90e874e52ec28",
   "source_runtime": {
     "branch": "main",
     "baseline_aligned_head": "1a3ecdd57927e70dd8c6dedfed4ecef04c7a46d3",
-    "mac_head": "a927c37d14f768b923f11b29ea61d8e94ca8d5ff",
-    "mac_origin_main": "a927c37d14f768b923f11b29ea61d8e94ca8d5ff",
-    "source_capture_kind": "WP1_IMMUTABLE_RUNTIME_ACCEPTANCE_CHECKPOINT",
-    "behavioral_source_checkpoint": "c080c552b",
+    "mac_head": "c84e14f5de67f8a6e55d3759d307087323118f86",
+    "mac_origin_main": "c84e14f5de67f8a6e55d3759d307087323118f86",
+    "source_capture_kind": "WP2A_SOURCE_ACCEPTANCE_CHECKPOINT",
+    "behavioral_source_checkpoint": "c84e14f5de67f8a6e55d3759d307087323118f86",
     "linux_head": "7d1c247947f0fb6c139f8a0583c5e6ed6ae62c70",
     "linux_origin_main": "a927c37d14f768b923f11b29ea61d8e94ca8d5ff",
     "mac_unrelated_dirty_worktree_preserved": true,
     "linux_worktree_clean": true,
-    "post_baseline_drift_classification": "LINUX_AND_SERVICE_EXACT_TARGET_WITH_REVIEWED_GUI_ONLY_REMOTE_DESCENDANTS",
+    "post_baseline_drift_classification": "SOURCE_AHEAD_RUNTIME_UNCHANGED_NO_WP2A_DEPLOY",
     "service_pin": "7d1c247947f0fb6c139f8a0583c5e6ed6ae62c70",
     "service_pid": 2381011,
     "service_nrestarts": 0,
     "service_failed_sessions": 0,
     "service_unclean_sessions": 0,
+    "runtime_snapshot_observed_at": "2026-07-10T14:43:50.582201Z",
+    "runtime_snapshot_fresh_for_wp2a": false,
     "restart_gate": "WP1_R4_EXACT_TARGET_APPLIED_AND_ACCEPTED"
   },
   "postgres": {
@@ -142,6 +144,27 @@
       "warning_or_higher_journal_entries": 0
     }
   },
+  "wp2a_source_checkpoint": {
+    "commit": "c84e14f5de67f8a6e55d3759d307087323118f86",
+    "status": "DONE_SOURCE_ACCEPTED_PROVISIONAL_BRIDGE",
+    "integrated_tests": "458 passed",
+    "cron_static_tests": "17 passed",
+    "publisher_policy_full_chain_tests": "35 passed",
+    "true_full_chain_tests": "5 passed",
+    "e2": "PASS",
+    "ai_e": "PASS_FINAL_SOURCE_RECHECK",
+    "e4": "PASS_TO_QA",
+    "qa": "PASS_SOURCE_CHECKPOINT_TO_PM",
+    "p0_p1_p2": "0/0/0",
+    "source_chain": "outcome_review -> stamped publisher -> evidence adapter -> active event consumer -> candidate projection -> operational repository",
+    "candidate_logic_mocked": false,
+    "runtime_boundaries_mocked": true,
+    "training_runs_created": 0,
+    "authority_claims": false,
+    "cron_role": "PROVISIONAL_COLD_RECONCILIATION_BRIDGE",
+    "event_driven_primary_proven": false,
+    "runtime_or_pg_acceptance": false
+  },
   "supersession": {
     "sui": {
       "status": "ROTATED_UNCONSUMABLE_STALE_PACKET",
@@ -175,7 +198,7 @@
   },
   "gates": {
     "G1": "PARTIAL",
-    "G2": "FAIL",
+    "G2": "PARTIAL_SOURCE_ACCEPTED",
     "G3": "FAIL",
     "G4": "FAIL",
     "G5": "FAIL",
@@ -196,9 +219,9 @@
     "DONE_OPERATIONAL_SHADOW",
     "BACKLOG_EXHAUSTED"
   ],
-  "next_safe_action": "Freeze WP2 candidate-aware arbiter input/output schema and mutation-biting fixtures through QC/MIT/AI-E and PA; no exchange contact",
+  "next_safe_action": "Execute WP2-B: behavior-preserving candidate-board Module extraction, then prospective Rust candidate_event_context_v1, cold Python candidate_evaluation_context_v1, and event-driven primary handoff; no exchange contact",
   "remaining_safe_work_inventory": [
-    "WP2 candidate-aware arbiter",
+    "WP2-B prospective event/evaluation lineage and event-driven primary handoff",
     "WP3 proof/reward repository adapters",
     "WP4 versioned training/registry contracts",
     "WP5 OOS and decision engine",
@@ -206,14 +229,14 @@
     "WP7 adversarial final audit"
   ],
   "facts": [
-    "All three source heads matched at the read-only baseline; Mac and origin later advanced by two GUI-only commits while Linux remained clean at the baseline head",
-    "The runtime checkout and service pin match the exact reviewed WP1 target; later remote descendants were GUI-only and were not merged",
-    "All current run and feedback rows remain DEFER with zero proof, reward, training, and OOS",
+    "WP2-A source acceptance captured Mac and origin at c84e14f5de67f8a6e55d3759d307087323118f86",
+    "The last accepted WP1 runtime snapshot at 2026-07-10T14:43:50.582201Z had a clean Linux checkout and ALR service pin at 7d1c247947f0fb6c139f8a0583c5e6ed6ae62c70; WP2-A did not re-inspect or mutate runtime",
+    "At the last accepted WP1 runtime snapshot, 638 run and 638 feedback rows were DEFER with zero proof, reward, actual training, and hidden OOS; WP2-A makes no newer runtime-count claim",
     "WP1 isolated and production runtime acceptance passed with durable suppression and write-accounting evidence",
     "The earlier unauthorized QA disposable local-PG probe remains retracted; R4 produced the only accepted isolated evidence"
   ],
   "inferences": [
-    "WP2 candidate-aware selection is now the highest-ROI safe gap",
+    "WP2-A candidate-aware source selection is accepted; prospective immutable lineage and event-driven handoff are now the highest-ROI safe gap",
     "Zero qualified candidates is not a Goal blocker while source/test work remains"
   ],
   "assumptions": [
@@ -221,8 +244,8 @@
     "No unseen accepted artifact reserves V157 or changes the captured baseline"
   ],
   "authority_granted_by_goal": false,
-  "runtime_action_performed_this_loop": true,
-  "runtime_action_classification": "AUTHORIZED_R4_DISPOSABLE_PG_THEN_EXACT_TARGET_ALR_SERVICE_ONLY_APPLY_ACCEPTED",
+  "runtime_action_performed_this_loop": false,
+  "runtime_action_classification": "NONE_WP2A_SOURCE_ONLY",
   "exchange_action_performed_this_loop": false,
   "order_action_performed_this_loop": false,
   "unrelated_worktree_changes_consumed": false
