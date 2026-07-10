@@ -219,6 +219,8 @@
   }
   .canary-progress-bar-fill {
     height: 100%;
+    /* P0.2 batch 7b：寬度走 scoped-var（§7 form-1），JS 以 --canary-fill-w 自訂屬性供給 */
+    width: var(--canary-fill-w, 0%);
     background: var(--accent, #58a6ff);
     border-radius: 6px;
     transition: width 0.4s ease;
@@ -251,6 +253,123 @@
     border-radius: 8px;
     background: rgba(13, 17, 23, 0.4);
   }
+
+  /* ═══ P0.2 batch 7b：inline style→頁內組件（語義 token；註記色為 palette 外色 verbatim,P0.4 複審）═══ */
+  /* 快速狀態橫幅容器 */
+  .gov-quickstat-bar {
+    display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
+    padding: var(--sp-2) var(--sp-3); background: var(--card-bg);
+    border: 1px solid var(--border); border-radius: var(--r-2);
+    margin-bottom: var(--sp-3); font-size: var(--fs-dense);
+  }
+  /* 值顯示盒（risk-reason / recon-result；pre-wrap 保留多行原因文字換行） */
+  .gov-value-box {
+    font-size: var(--fs-dense); background: var(--bg); padding: var(--sp-2);
+    border-radius: var(--r-1); min-height: 32px; white-space: pre-wrap;
+  }
+  /* 待批准提示盒（藍 accent 左邊框） */
+  .gov-pending-note {
+    margin-bottom: var(--sp-3); padding: var(--sp-2); background: var(--accent-weak);
+    border-left: 3px solid var(--accent); border-radius: 0 var(--r-1) var(--r-1) 0;
+  }
+  /* Live Auth 狀態列（border-color 由 JS 依狀態覆蓋，故 component 不設 !important） */
+  .gov-liveauth-row {
+    display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
+    margin-bottom: var(--sp-3); padding: var(--sp-3); background: var(--bg);
+    border: 1px solid var(--border); border-radius: var(--r-2);
+  }
+  /* 通用 bg 面板盒 */
+  .gov-panel-box {
+    padding: var(--sp-3); background: var(--bg);
+    border: 1px solid var(--border); border-radius: var(--r-2);
+  }
+  /* 全大寫小標籤 */
+  .gov-caps-label {
+    font-size: var(--fs-micro); color: var(--text-secondary); font-weight: var(--weight-semi);
+    letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: var(--sp-2);
+  }
+  /* 進度條軌 + 填充（填充寬走 scoped-var，JS setProperty('--lt-progress-w')） */
+  .gov-progress-track { background: var(--bg); border-radius: var(--r-1); height: 8px; overflow: hidden; }
+  .lt-progress-fill {
+    height: 100%; width: var(--lt-progress-w, 0%); background: var(--accent);
+    border-radius: var(--r-1); transition: width var(--dur-base) var(--ease-out);
+  }
+  .gov-learn-body--flush { padding: 0; background: transparent; border: none; }
+  .gov-toggle-caret { float: right; }
+  .gov-scroll-4 { max-height: 400px; overflow-y: auto; }
+  .gov-metrics-120 { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+  .gov-textarea { width: 100%; height: 80px; resize: vertical; font-family: inherit; }
+  .gov-th-num { width: 60px; } .gov-th-path { min-width: 200px; }
+  .gov-th-cat { min-width: 140px; } .gov-th-lvl { min-width: 170px; }
+  .gov-col-wide { flex: 2; min-width: 300px; } .gov-col { flex: 1; min-width: 240px; }
+  .gov-col-mid { flex: 1; min-width: 260px; }
+  .gov-switch-reason { font-size: var(--fs-micro); color: var(--text-secondary); margin-top: var(--sp-1); font-style: italic; }
+  /* P0.4：Level badge 藍底 accent-weak，待中性化 / accent 二分複審 */
+  .gov-level-badge {
+    display: inline-block; padding: var(--sp-1) var(--sp-3); border-radius: var(--r-1);
+    font-size: var(--fs-md); font-weight: var(--weight-semi);
+    background: var(--accent-weak); color: var(--accent);
+  }
+  /* P0.4：琥珀 #f59e0b/#fbbf24 為 palette 外色（與 .gov-boundary-note 同族），待 warn token 收斂 */
+  .gov-autonomy-banner {
+    margin-bottom: var(--sp-3); padding: var(--sp-3); background: rgba(245, 158, 11, .12);
+    border-left: 4px solid #f59e0b; border-radius: 0 var(--r-1) var(--r-1) 0; color: #fbbf24;
+    font-size: var(--fs-dense); line-height: var(--lh-cjk);
+  }
+  /* P0.4：紫 #a855f7 為 palette 外色（Live Auth / T3 authority 識別色），待 canon 1 中性化複審。
+     注：非朱印——canon 9 朱印僅方印形制；此處為文字 / 按鈕 tint，不套 --seal */
+  .gov-purple-text { color: #a855f7; }
+  .gov-btn-purple { background: rgba(168, 85, 247, .2); border-color: rgba(168, 85, 247, .6); color: #a855f7; }
+  .gov-btn-purple-soft { background: rgba(168, 85, 247, .1); border-color: rgba(168, 85, 247, .4); color: #a855f7; }
+  /* trust tier 徽章：靜態形制走 token；初始 T0 slate 為 palette 外色，JS 依 tier 覆蓋 background/color（P0.4） */
+  .gov-trust-tier-badge {
+    display: inline-block; padding: var(--sp-1) var(--sp-2); border-radius: var(--r-1);
+    font-size: var(--fs-micro); font-weight: var(--weight-semi);
+    background: rgba(100, 116, 139, .2); color: #94a3b8;
+  }
+
+  /* ═══ P0.2 batch 7b：governance-tab.js innerHTML 模板組件（單文檔宿主 → §8 頁內層）═══ */
+  .gov-event-row { padding: var(--sp-2) 0; border-bottom: 1px solid var(--border); }
+  .gov-cell { background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-2); padding: var(--sp-3); }
+  .gov-recovery-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--r-1); padding: var(--sp-3); font-size: var(--fs-dense); }
+  .gov-change-card { background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-2); padding: var(--sp-3); font-size: var(--fs-dense); }
+  .gov-lease-card { background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-1); padding: var(--sp-2) var(--sp-3); font-size: var(--fs-dense); }
+  /* 展開/差異詳情盒（pre-line 保留換行） */
+  .gov-detail-box { margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-3); background: var(--card-bg);
+    border: 1px solid var(--border); border-radius: var(--r-1); color: var(--text-primary);
+    line-height: var(--lh-cjk); white-space: pre-line; font-size: var(--fs-micro); }
+  .gov-diff-box { margin: var(--sp-2) 0; padding: var(--sp-2) var(--sp-3); background: var(--card-bg);
+    border: 1px solid var(--border); border-radius: var(--r-1); font-size: var(--fs-micro); line-height: var(--lh-cjk); }
+  /* 藍 accent 資訊盒 */
+  .gov-info-box { margin-top: var(--sp-2); padding: var(--sp-2); background: var(--accent-weak);
+    border-radius: var(--r-1); font-size: var(--fs-micro); color: var(--text-secondary); line-height: var(--lh-cjk); }
+  .gov-info-box--left { margin-bottom: var(--sp-2); margin-top: 0; border-left: 3px solid var(--accent);
+    border-radius: 0 var(--r-1) var(--r-1) 0; color: var(--text-primary); }
+  .gov-noshrink { flex-shrink: 0; }
+  .gov-flex { display: flex; }
+  .gov-outcome-wrap { margin-top: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-1); overflow: hidden; font-size: var(--fs-micro); }
+  .gov-outcome { flex: 1; padding: var(--sp-2) var(--sp-3); }
+  .gov-outcome--pos { background: var(--pos-bg); border-right: 1px solid var(--border); }
+  .gov-outcome--neg { background: var(--neg-bg); }
+  .gov-scope-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--sp-2); }
+  .gov-pre-json { font-size: var(--fs-micro); margin: var(--sp-1) 0; overflow-x: auto; }
+  .gov-details-caret { cursor: pointer; color: var(--accent); user-select: none; }
+  .gov-reason-cell { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gov-time { color: var(--text-secondary); font-size: var(--fs-micro); margin-right: var(--sp-2); }
+  .gov-capitalize { text-transform: capitalize; }
+  .gov-criteria-row { display: flex; align-items: flex-start; gap: var(--sp-2); font-size: var(--fs-dense); padding: var(--sp-1) 0; border-bottom: 1px solid var(--border); }
+  .gov-mw-360 { max-width: 360px; }
+  /* 風險等級徽章（class-per-enum；bg/border 走 --neg/warn/pos-bg，取代原 var()+'22' 無效 alpha） */
+  .gov-risk-badge { display: inline-block; margin: 2px 0; padding: 1px 6px; border-radius: var(--r-1); font-size: var(--fs-micro); font-weight: var(--weight-semi); }
+  .gov-risk-badge--lg { padding: 2px 8px; margin: 0 0 var(--sp-2); border: 1px solid; }
+  .gov-risk-high { color: var(--neg); background: var(--neg-bg); border-color: var(--neg); }
+  .gov-risk-med { color: var(--warn); background: var(--warn-bg); border-color: var(--warn); }
+  .gov-risk-low { color: var(--pos); background: var(--pos-bg); border-color: var(--pos); }
+  .gov-risk-none { color: var(--text-secondary); background: var(--bg-raised); border-color: var(--border); }
+  /* autonomy-posture.js 模板組件 */
+  .gov-gate-row { display: flex; justify-content: space-between; gap: var(--sp-3); align-items: flex-start;
+    padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-1); background: var(--bg); }
+  .gov-minw0 { min-width: 0; }
 </style>
 </head>
 <body>
@@ -258,7 +377,7 @@
 
 <!-- ═══ Page Header ═══ -->
 <div class="oc-card">
-  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+  <div class="row-between wrap gap-2">
     <div>
       <h2>&#x2696; Governance Control Center / 治理控制中心</h2>
       <div class="subtitle">授權、租約、執行、風控、對賬的統一控制台</div>
@@ -270,21 +389,20 @@
 <!-- ═══ Quick Status Banner / 快速狀態栏 ═══ -->
 <!-- One-line summary: Auth | Risk Level | OMS | Reconciler | Learning — updates with main 10s poll -->
 <!-- 單行狀態摘要：授權 | 風險等級 | 執行 | 對賬 | 學習層級 — 隨主輪詢 10s 刷新 -->
-<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 14px;
-  background:var(--card-bg);border:1px solid var(--border);border-radius:8px;margin-bottom:14px;font-size:12px">
-  <span style="color:var(--text-dim)">&#x26A1; Quick Status:</span>
+<div class="gov-quickstat-bar">
+  <span class="t-dim">&#x26A1; Quick Status:</span>
   <span title="SM-01 授權狀態 / SM-01 authorization state">Auth: <strong id="qs-auth">--</strong></span>
-  <span style="color:var(--border)">|</span>
+  <span class="t-muted">|</span>
   <span title="SM-04 風險治理等級 / SM-04 risk governance level">Risk: <strong id="qs-risk">--</strong></span>
-  <span style="color:var(--border)">|</span>
+  <span class="t-muted">|</span>
   <span title="SM-03 訂單執行狀態 / SM-03 order execution state">OMS: <strong id="qs-oms">--</strong></span>
-  <span style="color:var(--border)">|</span>
+  <span class="t-muted">|</span>
   <span title="EX-04 對賬狀態 / EX-04 reconciliation status">Recon: <strong id="qs-recon">--</strong></span>
-  <span style="color:var(--border)">|</span>
+  <span class="t-muted">|</span>
   <span title="學習層級 / Learning tier">Learning: <strong id="qs-learning">--</strong></span>
   <!-- P2-14 (v80 冷審 Wave 3, 2026-05-29)：原呼叫 loadGovernance() 未定義，刷新按鈕無效；
        真正的整頁刷新函數是 governance-tab.js 的 loadAll()，改呼此函數修復死按鈕。 -->
-  <button class="oc-btn" style="margin-left:auto;padding:2px 8px;font-size:11px" onclick="loadAll()" title="刷新 / Refresh">&#x1F504;</button>
+  <button class="oc-btn oc-btn--xs ml-auto" onclick="loadAll()" title="刷新 / Refresh">&#x1F504;</button>
 </div>
 
 <!-- ═══ Core State Machines / 核心狀態機 ═══ -->
@@ -293,7 +411,7 @@
 
   <!-- Card 1: Authorization (SM-01) -->
   <div class="oc-card gov-sm-card">
-    <h3>&#x1F511; Authorization / 授權 <abbr title="SM-01: 授權狀態機。批准的是操作授權，不是某一筆 Decision Lease / Authorization state machine. This approves operating authorization, not an individual Decision Lease." style="font-size:10px;color:var(--text-dim);cursor:help">SM-01</abbr></h3>
+    <h3>&#x1F511; Authorization / 授權 <abbr title="SM-01: 授權狀態機。批准的是操作授權，不是某一筆 Decision Lease / Authorization state machine. This approves operating authorization, not an individual Decision Lease." class="fs-micro t-dim cursor-help">SM-01</abbr></h3>
     <div class="subtitle">授權狀態和範圍</div>
     <div class="gov-sm-note">SM-01 管理操作授權、有效期和可用範圍。沒有有效授權時，系統不得進入真實執行鏈路。</div>
     <details class="gov-learn">
@@ -303,55 +421,55 @@
       </div>
     </details>
 
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-      <div style="flex:1">
-        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">State / 狀態</div>
+    <div class="row-between wrap mb-3 gap-2">
+      <div class="flex-1">
+        <div class="fs-micro t-dim mb-1">State / 狀態</div>
         <div id="auth-state-badge">--</div>
       </div>
-      <div style="flex:1">
-        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Expires / 過期</div>
-        <div id="auth-expiry" style="font-size:13px">--</div>
+      <div class="flex-1">
+        <div class="fs-micro t-dim mb-1">Expires / 過期</div>
+        <div id="auth-expiry" class="fs-base">--</div>
       </div>
     </div>
 
     <!-- Auth Scope Visualizer / 授權範圍可視化 -->
-    <div style="margin-top:12px;margin-bottom:12px">
-      <h4 style="cursor:pointer;font-size:0.95em;margin:0;padding:0" onclick="toggleAuthScope()">
-        Authorization Scope / 授權範圍 <span id="auth-scope-toggle" style="font-size:0.85em">▶</span>
+    <div class="mt-3 mb-3">
+      <h4 class="pointer fs-dense m-0" onclick="toggleAuthScope()">
+        Authorization Scope / 授權範圍 <span id="auth-scope-toggle" class="fs-micro">▶</span>
       </h4>
-      <div id="auth-scope-body" style="display:none;margin-top:8px">
-        <div id="auth-scope-content" style="padding:8px 0">
-          <p style="color:var(--text-dim);font-size:12px">Loading... / 載入中...</p>
+      <div id="auth-scope-body" class="hidden mt-2">
+        <div id="auth-scope-content" class="py-2">
+          <p class="t-dim fs-dense">Loading... / 載入中...</p>
         </div>
       </div>
     </div>
 
     <!-- Auth state description line / 授權狀態說明 -->
-    <div id="auth-state-desc" style="font-size:11px;color:var(--text-dim);margin-top:4px;margin-bottom:8px"></div>
+    <div id="auth-state-desc" class="fs-micro t-dim mt-1 mb-2"></div>
 
     <div class="gov-boundary-note" id="auth-lease-boundary-note">
       <strong>Approve 批准的是 Authorization。</strong>
       Decision Lease 是程序在最後入場窗口向 Rust Governance 申請的短 TTL 租約，GUI 只顯示，不手動批准單筆 lease。
     </div>
 
-    <div id="auth-pending-indicator" style="display:none;margin-bottom:12px;padding:8px;background:rgba(56,139,253,0.1);border-left:3px solid var(--blue);border-radius:0 6px 6px 0">
-      <div style="font-size:12px;color:var(--blue)">Pending Approval / 待批准</div>
+    <div id="auth-pending-indicator" class="gov-pending-note hidden">
+      <div class="fs-dense t-accent">Pending Approval / 待批准</div>
     </div>
 
-    <button class="oc-btn" id="btn-request-auth" style="width:100%;display:none;margin-bottom:8px" onclick="showRequestAuthModal()">
+    <button class="oc-btn w-full mb-2 hidden" id="btn-request-auth" onclick="showRequestAuthModal()">
       &#x1F4CB; 申請授權 Request Authorization
     </button>
 
-    <button class="oc-btn oc-btn-primary" id="btn-approve" style="width:100%;display:none" onclick="showApprovalModal()">
+    <button class="oc-btn oc-btn-primary w-full hidden" id="btn-approve" onclick="showApprovalModal()">
       &#x2714; Approve Authorization / 批准授權
     </button>
   </div>
 
   <!-- Card 2: Decision Leases (SM-02) -->
   <div class="oc-card gov-sm-card">
-    <h3 style="cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="toggleDL()">
-      <span>&#x1F4DD; Decision Leases / 決策租約 <abbr title="SM-02: 決策租約狀態機。每個 AI 交易意圖持有一個有時效的租約，過期自動作廢 / Decision lease state machine. Each AI intent holds a time-bounded lease that auto-expires." style="font-size:10px;color:var(--text-dim);cursor:help">SM-02</abbr></span>
-      <span id="dl-toggle" style="font-size:10px;color:var(--text-dim)">▶ 展開</span>
+    <h3 class="pointer row-between" onclick="toggleDL()">
+      <span>&#x1F4DD; Decision Leases / 決策租約 <abbr title="SM-02: 決策租約狀態機。每個 AI 交易意圖持有一個有時效的租約，過期自動作廢 / Decision lease state machine. Each AI intent holds a time-bounded lease that auto-expires." class="fs-micro t-dim cursor-help">SM-02</abbr></span>
+      <span id="dl-toggle" class="fs-micro t-dim">▶ 展開</span>
     </h3>
     <div class="subtitle">只讀短租約追踪</div>
     <div class="gov-sm-note">SM-02 把 AI 或策略意圖轉換為短時有效的執行租約。租約只能由受控程序在最後執行窗口申請、使用、釋放；GUI 不提供手動批准 lease 的入口。</div>
@@ -363,7 +481,7 @@
       </div>
     </details>
 
-    <div id="dl-body" style="display:none">
+    <div id="dl-body" class="hidden">
     <div class="gov-boundary-note" id="lease-readonly-boundary-note">
       <strong>Decision Lease 是執行窗口證據，不是人工審批票。</strong>
       若這裡顯示 0，代表當前沒有可用短租約；下一次 Demo probe 必須由 runner 重新申請。
@@ -379,19 +497,19 @@
       </div>
       <div class="oc-metric">
         <div class="oc-metric-label">Manual Approval / 手動批准</div>
-        <div class="oc-metric-val" style="font-size:13px">not_supported</div>
+        <div class="oc-metric-val fs-base">not_supported</div>
       </div>
     </div>
 
     <!-- Collapsible lease detail list / 可折疊租約詳情列表 -->
-    <div style="margin-top:12px">
-      <h4 style="cursor:pointer;font-size:0.9em;margin:0;padding:0;display:flex;justify-content:space-between;align-items:center" onclick="toggleLeaseList()">
+    <div class="mt-3">
+      <h4 class="pointer fs-dense m-0 row-between" onclick="toggleLeaseList()">
         <span>詳情 Details</span>
-        <span id="lease-list-toggle" style="font-size:0.85em">▶</span>
+        <span id="lease-list-toggle" class="fs-micro">▶</span>
       </h4>
-      <div id="lease-list-body" style="display:none;margin-top:8px">
+      <div id="lease-list-body" class="hidden mt-2">
         <div id="lease-list-content">
-          <p style="color:var(--text-dim);font-size:12px">Loading... / 載入中...</p>
+          <p class="t-dim fs-dense">Loading... / 載入中...</p>
         </div>
       </div>
     </div>
@@ -400,7 +518,7 @@
 
   <!-- Card 3: OMS Execution (SM-03) -->
   <div class="oc-card gov-sm-card">
-    <h3>&#x1F9FE; OMS / 執行狀態 <abbr title="SM-03: OMS 執行狀態機。管理訂單從建立、校驗、提交到成交、取消或失敗的生命週期 / OMS execution state machine. Manages order lifecycle from creation and validation to submission, fill, cancel, or failure." style="font-size:10px;color:var(--text-dim);cursor:help">SM-03</abbr></h3>
+    <h3>&#x1F9FE; OMS / 執行狀態 <abbr title="SM-03: OMS 執行狀態機。管理訂單從建立、校驗、提交到成交、取消或失敗的生命週期 / OMS execution state machine. Manages order lifecycle from creation and validation to submission, fill, cancel, or failure." class="fs-micro t-dim cursor-help">SM-03</abbr></h3>
     <div class="subtitle">訂單生命週期和執行邊界</div>
     <div class="gov-sm-note">SM-03 管理訂單從建立、校驗、提交、成交到取消或失敗的生命週期。只有通過授權、租約和風控的意圖才應進入此狀態機。</div>
     <details class="gov-learn">
@@ -413,15 +531,15 @@
     <div class="oc-metrics">
       <div class="oc-metric">
         <div class="oc-metric-label">Readiness / 準備狀態</div>
-        <div class="oc-metric-val" id="oms-readiness" style="font-size:13px">--</div>
+        <div class="oc-metric-val fs-base" id="oms-readiness">--</div>
       </div>
       <div class="oc-metric">
         <div class="oc-metric-label">Blocker / 阻斷原因</div>
-        <div class="oc-metric-val" id="oms-blocker" style="font-size:12px;line-height:1.45">--</div>
+        <div class="oc-metric-val fs-dense lh-cjk" id="oms-blocker">--</div>
       </div>
     </div>
-    <div style="margin-top:12px">
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">Lifecycle / 生命週期</div>
+    <div class="mt-3">
+      <div class="fs-micro t-dim mb-2">Lifecycle / 生命週期</div>
       <div class="gov-state-flow" id="oms-lifecycle">
         <span class="oc-chip oc-chip-neutral">CREATED</span>
         <span class="gov-flow-arrow">→</span>
@@ -440,7 +558,7 @@
 
   <!-- Card 4: Risk Governor (SM-04) -->
   <div class="oc-card gov-sm-card">
-    <h3>&#x1F6E1; Risk Governor / 風控治理 <abbr title="SM-04: 風險治理狀態機。管理 Normal/Cautious/Defensive/CircuitBreaker 四級風險等級 / Risk governance state machine. Manages Normal/Cautious/Defensive/CircuitBreaker levels." style="font-size:10px;color:var(--text-dim);cursor:help">SM-04</abbr></h3>
+    <h3>&#x1F6E1; Risk Governor / 風控治理 <abbr title="SM-04: 風險治理狀態機。管理 Normal/Cautious/Defensive/CircuitBreaker 四級風險等級 / Risk governance state machine. Manages Normal/Cautious/Defensive/CircuitBreaker levels." class="fs-micro t-dim cursor-help">SM-04</abbr></h3>
     <div class="subtitle">風險等級和模式</div>
     <div class="gov-sm-note">SM-04 根據賬户、持倉、回撤和異常信號調整風險等級。風險升高時自動收縮；風險降低通常需要明確審批。</div>
     <details class="gov-learn">
@@ -450,23 +568,23 @@
       </div>
     </details>
 
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-      <div style="flex:1">
-        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Level / 等級</div>
+    <div class="row-between wrap mb-3 gap-2">
+      <div class="flex-1">
+        <div class="fs-micro t-dim mb-1">Level / 等級</div>
         <div id="risk-level-badge">--</div>
       </div>
-      <div style="flex:1">
-        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Mode / 模式</div>
+      <div class="flex-1">
+        <div class="fs-micro t-dim mb-1">Mode / 模式</div>
         <div id="risk-mode-badge">--</div>
       </div>
     </div>
 
-    <div style="margin-bottom:12px">
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Reason / 原因</div>
-      <div id="risk-reason" style="font-size:12px;background:var(--bg);padding:8px;border-radius:6px;min-height:32px;white-space:pre-wrap">--</div>
+    <div class="mb-3">
+      <div class="fs-micro t-dim mb-1">Reason / 原因</div>
+      <div id="risk-reason" class="gov-value-box">--</div>
     </div>
 
-    <button class="oc-btn oc-btn-primary" id="btn-override" style="width:100%" onclick="showOverrideModal()">
+    <button class="oc-btn oc-btn-primary w-full" id="btn-override" onclick="showOverrideModal()">
       &#x1F4A7; De-escalate / 降級
     </button>
   </div>
@@ -483,14 +601,14 @@
     Candidate 可以缺盈利證明而進 Demo 核實；但不能缺 loss-control envelope、GUI/Rust 風控、Decision Lease、Rust authority、審計與可重建性。
   </div>
 
-  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px">
+  <div class="row wrap gap-3 mb-3">
     <div>
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Runtime Window / 執行窗口</div>
+      <div class="fs-micro t-dim mb-1">Runtime Window / 執行窗口</div>
       <div id="demo-probe-status">--</div>
     </div>
-    <div style="flex:1;min-width:260px">
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Current Interpretation / 當前解讀</div>
-      <div id="demo-probe-runtime-detail" style="font-size:12px;color:var(--text-dim);line-height:1.55">--</div>
+    <div class="gov-col-mid">
+      <div class="fs-micro t-dim mb-1">Current Interpretation / 當前解讀</div>
+      <div id="demo-probe-runtime-detail" class="fs-dense t-dim lh-cjk">--</div>
     </div>
   </div>
 
@@ -525,9 +643,9 @@
 <!-- ═══ Reconciliation (EX-04) / 對帳擴展 ═══ -->
 <div class="gov-section-label">Reconciliation Extension / 對賬擴展</div>
 <div class="oc-card gov-full-row">
-  <h3 style="cursor:pointer;display:flex;justify-content:space-between;align-items:center" onclick="toggleRecon()">
-    <span>&#x1F503; Reconciliation / 對賬 <abbr title="EX-04: 持倉對賬。比較 Rust 內部持倉與交易所實際持倉，檢測漂移 / Position reconciler. Compares engine positions vs exchange actuals, detects drift." style="font-size:10px;color:var(--text-dim);cursor:help">EX-04</abbr></span>
-    <span id="recon-toggle" style="font-size:10px;color:var(--text-dim)">▶ 展開</span>
+  <h3 class="pointer row-between" onclick="toggleRecon()">
+    <span>&#x1F503; Reconciliation / 對賬 <abbr title="EX-04: 持倉對賬。比較 Rust 內部持倉與交易所實際持倉，檢測漂移 / Position reconciler. Compares engine positions vs exchange actuals, detects drift." class="fs-micro t-dim cursor-help">EX-04</abbr></span>
+    <span id="recon-toggle" class="fs-micro t-dim">▶ 展開</span>
   </h3>
   <div class="subtitle">一致性檢查和手動觸發</div>
   <div class="gov-sm-note">EX-04 比較系統內部記錄與交易所實際狀態，發現持倉、訂單或餘額漂移。它不是核心授權狀態機，但會影響風控和審計判斷。</div>
@@ -538,24 +656,24 @@
     </div>
   </details>
 
-  <div id="recon-body" style="display:none">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-    <div style="flex:1">
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Status / 狀態</div>
+  <div id="recon-body" class="hidden">
+  <div class="row-between wrap mb-3 gap-2">
+    <div class="flex-1">
+      <div class="fs-micro t-dim mb-1">Status / 狀態</div>
       <div id="recon-consistency">--</div>
     </div>
-    <div style="flex:1">
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Last Check / 最後檢查</div>
-      <div id="recon-time" style="font-size:12px">--</div>
+    <div class="flex-1">
+      <div class="fs-micro t-dim mb-1">Last Check / 最後檢查</div>
+      <div id="recon-time" class="fs-dense">--</div>
     </div>
   </div>
 
-  <div style="margin-bottom:12px">
-    <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Result / 結果</div>
-    <div id="recon-result" style="font-size:12px;background:var(--bg);padding:8px;border-radius:6px;min-height:32px">--</div>
+  <div class="mb-3">
+    <div class="fs-micro t-dim mb-1">Result / 結果</div>
+    <div id="recon-result" class="gov-value-box">--</div>
   </div>
 
-  <button class="oc-btn oc-btn-primary" id="btn-reconcile" style="width:100%" onclick="showReconcileModal()">
+  <button class="oc-btn oc-btn-primary w-full" id="btn-reconcile" onclick="showReconcileModal()">
     &#x1F504; Trigger / 觸發對賬
   </button>
   </div><!-- end recon-body -->
@@ -567,41 +685,37 @@
 <!-- 從 tab-live.html 移入 — 即使 Live 引擎未啟動也可操作，打破鎖死循環 -->
 <div class="oc-card" id="live-auth-card">
   <h3>&#x1F511; Live Auth / 實盤授權
-    <span style="font-size:11px;font-weight:400;color:var(--text-dim);margin-left:8px">（永遠可操作 / always accessible）</span>
+    <span class="fs-micro fw-normal t-dim ml-2">（永遠可操作 / always accessible）</span>
   </h3>
   <div class="subtitle">管理 Earned-Trust 階梯授權；即使 Live engine 未啟動亦可在此 Renew</div>
 
   <!-- Status row / 狀態列 -->
-  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px;padding:10px 14px;
-    background:var(--bg);border:1px solid var(--border);border-radius:8px" id="gov-live-auth-status-row">
-    <span id="gov-trust-tier-badge" class="trust-tier-badge"
-      style="background:rgba(100,116,139,.2);color:#94a3b8;display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700">
+  <div class="gov-liveauth-row" id="gov-live-auth-status-row">
+    <span id="gov-trust-tier-badge" class="trust-tier-badge gov-trust-tier-badge">
       --
     </span>
-    <span id="gov-trust-expires-label" style="font-size:12px;color:var(--text-dim)">Trust TTL: --</span>
-    <span id="gov-signed-auth-status" style="font-size:12px;color:var(--text-dim)">Signed auth: --</span>
-    <span id="gov-trust-clean-days" style="font-size:12px;color:var(--text-dim)">Clean days: --</span>
-    <span id="gov-trust-auth-id" style="font-size:10px;color:var(--text-dim);font-family:monospace"></span>
-    <span id="gov-trust-review-flag" style="display:none;font-size:11px;color:#a855f7;font-weight:600">
+    <span id="gov-trust-expires-label" class="fs-dense">Trust TTL: --</span>
+    <span id="gov-signed-auth-status" class="fs-dense">Signed auth: --</span>
+    <span id="gov-trust-clean-days" class="fs-dense t-dim">Clean days: --</span>
+    <span id="gov-trust-auth-id" class="fs-micro t-dim mono"></span>
+    <span id="gov-trust-review-flag" class="gov-purple-text fs-micro fw-semi hidden">
       &#x26A0;&#xFE0F; Full Review Required
     </span>
   </div>
 
   <!-- Action buttons / 操作按鈕 -->
-  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-    <button class="oc-btn oc-btn-primary" id="gov-btn-renew-live-auth" onclick="govRenewLiveAuth()"
-      style="background:rgba(168,85,247,.2);border-color:rgba(168,85,247,.6);color:#a855f7">
+  <div class="row wrap gap-2">
+    <button class="oc-btn oc-btn-primary gov-btn-purple" id="gov-btn-renew-live-auth" onclick="govRenewLiveAuth()">
       &#x1F511; Renew Live Auth / 續期
     </button>
-    <button class="oc-btn" id="gov-btn-full-review" onclick="govRenewReview()"
-      style="display:none;background:rgba(168,85,247,.1);border-color:rgba(168,85,247,.4);color:#a855f7">
+    <button class="oc-btn gov-btn-purple-soft hidden" id="gov-btn-full-review" onclick="govRenewReview()">
       &#x1F50D; T3 Full Review
     </button>
-    <button class="oc-btn" style="padding:2px 8px;font-size:11px" onclick="govLoadLiveAuthStatus()">
+    <button class="oc-btn oc-btn--xs" onclick="govLoadLiveAuthStatus()">
       &#x1F504;
     </button>
-    <span id="gov-live-auth-loading" style="display:none;font-size:11px;color:var(--text-dim)">載入中...</span>
-    <span id="gov-live-auth-renew-hint" style="display:none;font-size:11px;color:var(--yellow);font-weight:600"></span>
+    <span id="gov-live-auth-loading" class="fs-micro t-dim hidden">載入中...</span>
+    <span id="gov-live-auth-renew-hint" class="fs-micro t-warn fw-semi hidden"></span>
   </div>
 </div>
 
@@ -613,10 +727,7 @@
 <div class="gov-section-label">Autonomy Posture / 自主程度</div>
 <div class="oc-card gov-full-row" id="autonomy-posture-card">
   <!-- Runtime banner：後端 endpoint + V099 schema 已接；切換仍受 evidence/TOTP/cooldown gate 限制 -->
-  <div id="autonomy-preview-banner"
-       style="margin-bottom:12px;padding:10px 12px;background:rgba(245,158,11,.12);
-              border-left:4px solid #f59e0b;border-radius:0 6px 6px 0;
-              color:#fbbf24;font-size:12px;line-height:1.6">
+  <div id="autonomy-preview-banner" class="gov-autonomy-banner">
     <strong id="autonomy-runtime-banner-title">Loading Autonomy Posture / 載入中</strong>
     <span id="autonomy-runtime-banner-body">
       正在讀取 <code>/api/v1/governance/autonomy-level/state</code>。
@@ -625,7 +736,7 @@
 
   <h3>&#x1F39B;&#xFE0F; Autonomy Posture / 自主程度設定
     <abbr title="System-wide policy controlling which protected/opt-in paths go LAL auto vs operator approve manual. AMD-2026-05-21-01 v2 §Decision 1."
-          style="font-size:10px;color:var(--text-dim);cursor:help">AMD v2</abbr>
+          class="fs-micro t-dim cursor-help">AMD v2</abbr>
   </h3>
   <div class="subtitle">系統要多自主？— 保守自主（門檻較高）／ 標準自主（門檻較低）切換</div>
   <div class="gov-sm-note">
@@ -643,31 +754,26 @@
       （5 道安全閘門 + 換交易所兩個等級都永遠需手動核准）。<br/>
       切換需要：Operator 身份 + 兩步驟驗證（2FA TOTP）+ 打字確認「CONFIRM SWITCH」+
       至少 30 字理由 + 24 小時冷卻期 + 三路通知（Slack + Email + Console 橫幅）。<br/>
-      <span style="color:var(--text-dim);font-size:10px">技術備註：自主程度與 LAL 0-4（每筆決策核准深度）+ Stage 0R-4（每策略升級階段）三維度正交；
+      <span class="t-dim fs-micro">技術備註：自主程度與 LAL 0-4（每筆決策核准深度）+ Stage 0R-4（每策略升級階段）三維度正交；
       Level 只動 path 集合邊界，不動 §Decision 2 的 5 條 fail-safe hard requirements。</span>
     </div>
   </details>
 
   <!-- ── Current Level Display / 當前等級顯示（PA spec §5.6 header）── -->
-  <div style="display:flex;justify-content:space-between;align-items:center;
-              padding:12px 14px;background:var(--bg);border:1px solid var(--border);
-              border-radius:8px;margin-bottom:14px;flex-wrap:wrap;gap:10px">
-    <div style="flex:1;min-width:240px">
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Current Level / 當前等級</div>
-      <div id="autonomy-current-level-badge" style="display:inline-block;padding:4px 10px;
-            border-radius:6px;font-size:14px;font-weight:700;
-            background:rgba(56,139,253,.18);color:#58a6ff">
+  <div class="gov-panel-box row-between wrap gap-3 mb-3">
+    <div class="gov-col">
+      <div class="fs-micro t-dim mb-1">Current Level / 當前等級</div>
+      <div id="autonomy-current-level-badge" class="gov-level-badge">
         --
       </div>
     </div>
-    <div style="flex:2;min-width:300px">
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">
+    <div class="gov-col-wide">
+      <div class="fs-micro t-dim mb-1">
         Last switched / 上次切換（雙時間戳 UTC + local · per A3 AP-8）
       </div>
-      <div id="autonomy-last-switched" style="font-size:12px;line-height:1.6">--</div>
-      <div id="autonomy-switched-by" style="font-size:11px;color:var(--text-dim);margin-top:2px">by --</div>
-      <div id="autonomy-switch-reason" style="font-size:11px;color:var(--text-dim);
-           margin-top:4px;font-style:italic">--</div>
+      <div id="autonomy-last-switched" class="fs-dense lh-cjk">--</div>
+      <div id="autonomy-switched-by" class="fs-micro t-dim mt-1">by --</div>
+      <div id="autonomy-switch-reason" class="gov-switch-reason">--</div>
     </div>
     <div>
       <button class="oc-btn oc-btn-primary" id="autonomy-switch-btn"
@@ -679,22 +785,21 @@
   </div>
 
   <!-- ── Level 2 Eligibility Progress / Level 2 啟用閘門進度（PA spec §5.4 + FA U-FA-1）── -->
-  <div style="margin-bottom:14px">
-    <div style="font-size:11px;color:var(--text-dim);font-weight:700;
-                letter-spacing:0.06em;text-transform:uppercase;margin-bottom:8px">
+  <div class="mb-3">
+    <div class="gov-caps-label">
       Level 2 Eligibility / Level 2 啟用閘門進度
     </div>
-    <div id="autonomy-eligibility-list" style="display:flex;flex-direction:column;gap:6px">
+    <div id="autonomy-eligibility-list" class="col gap-2">
       <!-- 由 JS render：C-1 21d demo 穩定期 / C-2 5 策略 N≥30 / C-3 Wilson CI 95% lower bound 正向 -->
-      <div style="color:var(--text-dim);font-size:12px">Loading... / 載入中...</div>
+      <div class="t-dim fs-dense">Loading... / 載入中...</div>
     </div>
   </div>
 
   <!-- ── 14 path × 2 level Matrix Panel（PA spec §2.1 完整對照矩陣）── -->
   <details id="autonomy-matrix-details" class="gov-learn">
     <summary>14 path × 2 level Matrix / 14 條 path × 2 等級對照表（per AMD v2 §Decision 1）</summary>
-    <div class="gov-learn-body" style="padding:0;background:transparent;border:none">
-      <div style="font-size:11px;color:var(--text-dim);margin:8px 0">
+    <div class="gov-learn-body gov-learn-body--flush">
+      <div class="fs-micro t-dim mt-2 mb-2">
         對照表共 20 row（5-gate 5 + protected 6 + opt-in 8 + venue 1）× 2 level = 40 cell；
         Level 1→Level 2 升級時預設展開（per A3 U2 AP-7）。
       </div>
@@ -702,15 +807,15 @@
         <table class="oc-table" id="autonomy-matrix-table">
           <thead>
             <tr>
-              <th style="width:60px">#</th>
-              <th style="min-width:200px">Path</th>
-              <th style="min-width:140px">Category / 分類</th>
-              <th style="min-width:170px">Level 1 Conservative</th>
-              <th style="min-width:170px">Level 2 Standard</th>
+              <th class="gov-th-num">#</th>
+              <th class="gov-th-path">Path</th>
+              <th class="gov-th-cat">Category / 分類</th>
+              <th class="gov-th-lvl">Level 1 Conservative</th>
+              <th class="gov-th-lvl">Level 2 Standard</th>
             </tr>
           </thead>
           <tbody id="autonomy-matrix-tbody">
-            <tr><td colspan="5" style="color:var(--text-dim)">Loading... / 載入中...</td></tr>
+            <tr><td colspan="5" class="t-dim">Loading... / 載入中...</td></tr>
           </tbody>
         </table>
       </div>
@@ -718,25 +823,23 @@
   </details>
 
   <!-- ── 三路通知 status footer（per AMD v2 §Decision 3.1）── -->
-  <div style="margin-top:14px;padding:10px 12px;background:var(--bg);
-              border:1px solid var(--border);border-radius:8px">
-    <div style="font-size:11px;color:var(--text-dim);font-weight:700;
-                letter-spacing:0.06em;text-transform:uppercase;margin-bottom:8px">
+  <div class="gov-panel-box mt-3">
+    <div class="gov-caps-label">
       通知管道 / 最近一次切換的三路通知
     </div>
-    <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px" id="autonomy-notification-row">
+    <div class="row wrap gap-3 fs-dense" id="autonomy-notification-row">
       <span>Slack：<strong id="autonomy-notif-slack">--</strong>
-        <span style="color:var(--text-dim);font-size:10px">(最慢 10 秒內送達)</span></span>
-      <span style="color:var(--border)">|</span>
+        <span class="t-dim fs-micro">(最慢 10 秒內送達)</span></span>
+      <span class="t-muted">|</span>
       <span>Email：<strong id="autonomy-notif-email">--</strong>
-        <span style="color:var(--text-dim);font-size:10px">(最慢 60 秒內送達)</span></span>
-      <span style="color:var(--border)">|</span>
+        <span class="t-dim fs-micro">(最慢 60 秒內送達)</span></span>
+      <span class="t-muted">|</span>
       <span>Console 橫幅：<strong id="autonomy-notif-banner">--</strong>
-        <span style="color:var(--text-dim);font-size:10px">(最慢 5 秒內送達)</span></span>
+        <span class="t-dim fs-micro">(最慢 5 秒內送達)</span></span>
     </div>
-    <div id="autonomy-notification-escalation" style="margin-top:6px;font-size:11px;color:var(--text-dim)">
+    <div id="autonomy-notification-escalation" class="mt-2 fs-micro t-dim">
       升級結果：<strong>--</strong>
-      <span style="font-size:10px">（三路通知全失敗 → 等待 1 小時 → 自動切到 SM-04 防禦模式）</span>
+      <span class="fs-micro">（三路通知全失敗 → 等待 1 小時 → 自動切到 SM-04 防禦模式）</span>
     </div>
   </div>
 </div>
@@ -747,14 +850,14 @@
   <h3>&#x1F4CB; Paper 模擬 &#x2192; Live 實盤 Gate / 升級門禁</h3>
   <div class="subtitle">升級 Live 實盤前的 11 項准入評估</div>
 
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-    <div style="flex:1">
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Gate Status / 門禁狀態</div>
+  <div class="row-between wrap mb-3 gap-2">
+    <div class="flex-1">
+      <div class="fs-micro t-dim mb-1">Gate Status / 門禁狀態</div>
       <div id="plg-status-badge">--</div>
     </div>
-    <div style="flex:1">
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Score / 評分</div>
-      <div id="plg-score" style="font-size:18px;font-weight:600">--</div>
+    <div class="flex-1">
+      <div class="fs-micro t-dim mb-1">Score / 評分</div>
+      <div id="plg-score" class="fs-title fw-semi">--</div>
     </div>
     <div>
       <button class="oc-btn oc-btn-primary" onclick="evaluatePaperLiveGate()">&#x1F4CA; 評估 Evaluate</button>
@@ -763,13 +866,13 @@
 
   <!-- Criteria list toggle / 准入項目列表折疊 -->
   <div>
-    <h4 style="cursor:pointer;font-size:0.9em;margin:0 0 8px 0;padding:0;display:flex;justify-content:space-between;align-items:center" onclick="togglePLGCriteria()">
+    <h4 class="pointer fs-dense m-0 mb-2 row-between" onclick="togglePLGCriteria()">
       <span>准入項目 Criteria</span>
-      <span id="plg-criteria-toggle" style="font-size:0.85em">▶</span>
+      <span id="plg-criteria-toggle" class="fs-micro">▶</span>
     </h4>
-    <div id="plg-criteria-body" style="display:none">
-      <div id="plg-criteria-list" style="padding:8px 0">
-        <p style="color:var(--text-dim);font-size:12px">Loading... / 載入中...</p>
+    <div id="plg-criteria-body" class="hidden">
+      <div id="plg-criteria-list" class="py-2">
+        <p class="t-dim fs-dense">Loading... / 載入中...</p>
       </div>
     </div>
   </div>
@@ -780,7 +883,7 @@
   <h3>&#x1F393; Learning Tier / 學習層級</h3>
   <div class="subtitle">L0&#x2192;L5 自動晉升追踪</div>
 
-  <div class="oc-metrics" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:12px">
+  <div class="oc-metrics gov-metrics-120 mb-3">
     <div class="oc-metric">
       <div class="oc-metric-label">Current Tier / 當前層級</div>
       <div class="oc-metric-val" id="lt-tier">--</div>
@@ -796,16 +899,16 @@
   </div>
 
   <!-- Progress bar toward next tier / 升級進度條 -->
-  <div style="margin-bottom:12px">
-    <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">Progress to Next Tier / 下一層級進度</div>
-    <div style="background:var(--bg);border-radius:6px;height:8px;overflow:hidden">
-      <div id="lt-progress" style="height:100%;width:0%;background:var(--accent);border-radius:6px;transition:width 0.4s ease"></div>
+  <div class="mb-3">
+    <div class="fs-micro t-dim mb-2">Progress to Next Tier / 下一層級進度</div>
+    <div class="gov-progress-track">
+      <div id="lt-progress" class="lt-progress-fill"></div>
     </div>
   </div>
 
-  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+  <div class="row-between wrap gap-2">
     <div id="lt-eligible">--</div>
-    <button id="btn-promote" class="oc-btn oc-btn-success" style="display:none" onclick="showPromoteModal()">
+    <button id="btn-promote" class="oc-btn oc-btn-success hidden" onclick="showPromoteModal()">
       &#x1F4C8; 手動晉升 Promote
     </button>
   </div>
@@ -821,14 +924,14 @@
      ═══════════════════════════════════════════════════════════════════════ -->
 <div class="gov-section-label">Graduated Canary / 漸進金絲雀</div>
 <div class="oc-card" id="canary-status-card">
-  <h3 style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+  <h3 class="row-between wrap gap-2">
     <span>
       &#x1F423; Graduated Canary Cohort Status / 漸進金絲雀 Cohort 狀態
-      <abbr title="AMD-2026-05-09-03 W-AUDIT-9：alpha-bearing pathway 預設 5-stage canary（Stage 0 shadow → 1 paper → 2 demo single → 3 demo full → 4 LIVE_PENDING）。" style="font-size:10px;color:var(--text-dim);cursor:help">
+      <abbr title="AMD-2026-05-09-03 W-AUDIT-9：alpha-bearing pathway 預設 5-stage canary（Stage 0 shadow → 1 paper → 2 demo single → 3 demo full → 4 LIVE_PENDING）。" class="fs-micro t-dim cursor-help">
         AMD-03
       </abbr>
     </span>
-    <button class="oc-btn" style="font-size:11px;padding:4px 10px"
+    <button class="oc-btn oc-btn--xs"
             onclick="if (typeof loadCanaryCohorts === 'function') loadCanaryCohorts();">
       &#x1F504; 刷新 Refresh
     </button>
@@ -854,34 +957,34 @@
   </details>
 
   <!-- 5-stage 視覺合約 ladder -->
-  <div style="margin-top:14px">
-    <div class="gov-section-label" style="margin:0 0 6px;font-size:10px">5 Stages / 5 階段</div>
+  <div class="mt-3">
+    <div class="gov-section-label m-0 mb-2 fs-micro">5 Stages / 5 階段</div>
     <div id="canary-stage-ladder" aria-label="Graduated canary 5 stage ladder">
-      <p style="color:var(--text-dim);font-size:12px">Loading... / 載入中...</p>
+      <p class="t-dim fs-dense">Loading... / 載入中...</p>
     </div>
   </div>
 
   <!-- active cohort 列表 -->
-  <div style="margin-top:14px">
-    <div class="gov-section-label" style="margin:0 0 6px;font-size:10px">Active Cohorts / 活躍 Cohort</div>
+  <div class="mt-3">
+    <div class="gov-section-label m-0 mb-2 fs-micro">Active Cohorts / 活躍 Cohort</div>
     <div id="canary-cohort-list" aria-label="Active canary cohorts">
-      <p style="color:var(--text-dim);font-size:12px">Loading... / 載入中...</p>
+      <p class="t-dim fs-dense">Loading... / 載入中...</p>
     </div>
   </div>
 
   <!-- metric registry 表格（讀 governance.canary_stage_metric_registry） -->
-  <details style="margin-top:14px" id="canary-metric-registry-section">
-    <summary style="cursor:pointer;color:var(--accent);font-size:12px;font-weight:600">
+  <details class="mt-3" id="canary-metric-registry-section">
+    <summary class="pointer t-accent fs-dense fw-semi">
       Stage Metric Registry / 階段 Metric 註冊表
     </summary>
-    <div style="margin-top:8px">
-      <p style="font-size:11px;color:var(--text-dim);margin-bottom:8px">
+    <div class="mt-2">
+      <p class="fs-micro t-dim mb-2">
         每 stage 的 auto-promote / auto-rollback metric 定義（per AMD §4.2
         governance.canary_stage_metric_registry）。healthcheck [58] 用以驗 metric
         SQL 存在 + drift；GUI 顯示供 operator 審視 SLA 條件。
       </p>
       <div id="canary-metric-registry">
-        <p style="color:var(--text-dim);font-size:12px">Loading... / 載入中...</p>
+        <p class="t-dim fs-dense">Loading... / 載入中...</p>
       </div>
     </div>
   </details>
@@ -891,30 +994,30 @@
 <div class="gov-section-label">Approvals & Events / 審批與事件</div>
 <!-- ═══ Pending Approvals / 待批准項目 ═══ -->
 <div class="oc-card" id="pending-approvals-card">
-  <h3 style="cursor:pointer" onclick="togglePendingApprovals()">
+  <h3 class="pointer" onclick="togglePendingApprovals()">
     &#x2B55; Pending Approvals / 待批准項目
-    <span id="pending-toggle" style="float:right">▼</span>
+    <span id="pending-toggle" class="gov-toggle-caret">▼</span>
   </h3>
   <div id="pending-approvals-body">
-    <div class="oc-tabs-wrapper" style="margin-top:12px">
+    <div class="oc-tabs-wrapper mt-3">
       <!-- Tab 1: Recovery Requests -->
-      <div style="margin-bottom:12px">
-        <h4 style="font-size:12px;color:var(--text-dim);margin-bottom:8px">Recovery Requests / 恢復請求</h4>
-        <div id="pending-recovery-content" style="padding:8px 0">
-          <p style="color:var(--text-dim);font-size:12px">Loading... / 載入中...</p>
+      <div class="mb-3">
+        <h4 class="fs-dense t-dim mb-2">Recovery Requests / 恢復請求</h4>
+        <div id="pending-recovery-content" class="py-2">
+          <p class="t-dim fs-dense">Loading... / 載入中...</p>
         </div>
       </div>
       <!-- Tab 2: Audit Changes -->
-      <div style="margin-bottom:12px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-          <h4 style="font-size:12px;color:var(--text-dim);margin:0">Change Approvals / 變更批准</h4>
-          <span id="btn-bulk-actions" style="margin-left:auto;display:none">
-            <button class="oc-btn oc-btn-success" style="font-size:11px;padding:3px 10px" onclick="bulkAudit('approve')">全部同意 Approve All</button>
-            <button class="oc-btn oc-btn-danger" style="font-size:11px;padding:3px 10px" onclick="bulkAudit('reject')">全部拒絕 Reject All</button>
+      <div class="mb-3">
+        <div class="row gap-2 mb-2">
+          <h4 class="fs-dense t-dim m-0">Change Approvals / 變更批准</h4>
+          <span id="btn-bulk-actions" class="ml-auto hidden">
+            <button class="oc-btn oc-btn-success oc-btn--xs" onclick="bulkAudit('approve')">全部同意 Approve All</button>
+            <button class="oc-btn oc-btn-danger oc-btn--xs" onclick="bulkAudit('reject')">全部拒絕 Reject All</button>
           </span>
         </div>
-        <div id="pending-audit-content" style="padding:8px 0">
-          <p style="color:var(--text-dim);font-size:12px">Loading... / 載入中...</p>
+        <div id="pending-audit-content" class="py-2">
+          <p class="t-dim fs-dense">Loading... / 載入中...</p>
         </div>
       </div>
     </div>
@@ -922,15 +1025,15 @@
 </div>
 
 <div class="oc-card" id="events-feed-card">
-  <h3 style="cursor:pointer" onclick="toggleEventsFeed()">
+  <h3 class="pointer" onclick="toggleEventsFeed()">
     &#x1F4E1; Governance Events / 治理事件流
-    <span id="events-feed-toggle" style="float:right">▶</span>
+    <span id="events-feed-toggle" class="gov-toggle-caret">▶</span>
   </h3>
-  <div id="events-feed-body" style="display:none">
-    <div id="events-feed-content" style="max-height:400px;overflow-y:auto;padding:4px 0">
-      <p style="color:var(--text-dim);font-size:12px">Loading... / 載入中...</p>
+  <div id="events-feed-body" class="hidden">
+    <div id="events-feed-content" class="gov-scroll-4 py-1">
+      <p class="t-dim fs-dense">Loading... / 載入中...</p>
     </div>
-    <div style="margin-top:10px;text-align:center">
+    <div class="mt-3 t-center">
       <button class="oc-btn" onclick="loadEventsFeed(50)">&#x2B07; 載入更多 Load More</button>
     </div>
   </div>
@@ -941,7 +1044,7 @@
 <div class="oc-card">
   <h3>&#x1F4CA; Governance Summary / 治理摘要</h3>
 
-  <div class="oc-metrics" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))">
+  <div class="oc-metrics gov-metrics-120">
     <div class="oc-metric">
       <div class="oc-metric-label">Enabled / 啟用</div>
       <div class="oc-metric-val" id="summary-enabled">--</div>
@@ -960,34 +1063,34 @@
     </div>
     <div class="oc-metric">
       <div class="oc-metric-label">Updated / 更新</div>
-      <div class="oc-metric-val" id="summary-time" style="font-size:11px">--</div>
+      <div class="oc-metric-val fs-micro" id="summary-time">--</div>
     </div>
   </div>
 </div>
 
 <!-- ═══ Incident Timeline / 事件時間線 ═══ -->
 <div class="oc-card" id="incident-timeline-card">
-  <h3 style="cursor:pointer" onclick="toggleIncidentLog()">
+  <h3 class="pointer" onclick="toggleIncidentLog()">
     &#x23F3; Incident Timeline / 事件時間線
-    <span id="incident-toggle" style="float:right">▼</span>
+    <span id="incident-toggle" class="gov-toggle-caret">▼</span>
   </h3>
   <div id="incident-log-body">
-    <div id="incident-log-content" style="max-height:400px;overflow-y:auto">
-      <p style="color:var(--text-dim)">Loading... / 載入中...</p>
+    <div id="incident-log-content" class="gov-scroll-4">
+      <p class="t-dim">Loading... / 載入中...</p>
     </div>
   </div>
 </div>
 
 <!-- ═══ Audit Trail / 審計軌跡 ═══ -->
 <div class="oc-card" id="audit-trail-card">
-  <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="toggleAuditTrail()">
-    <h3 style="margin:0">&#x1F50E; Audit Trail / 審計軌跡</h3>
-    <div style="display:flex;align-items:center;gap:8px">
-      <button class="oc-btn" style="font-size:11px;padding:4px 10px" onclick="event.stopPropagation();loadAuditTrail()">&#x1F504; 刷新 Refresh</button>
+  <div class="row-between pointer" onclick="toggleAuditTrail()">
+    <h3 class="m-0">&#x1F50E; Audit Trail / 審計軌跡</h3>
+    <div class="row gap-2">
+      <button class="oc-btn oc-btn--xs" onclick="event.stopPropagation();loadAuditTrail()">&#x1F504; 刷新 Refresh</button>
       <span id="audit-toggle">▼</span>
     </div>
   </div>
-  <div id="audit-trail-body" style="margin-top:12px">
+  <div id="audit-trail-body" class="mt-3">
     <div class="oc-table-wrap">
       <table class="oc-table" id="audit-trail-table">
         <thead>
@@ -1000,7 +1103,7 @@
           </tr>
         </thead>
         <tbody id="audit-trail-tbody">
-          <tr><td colspan="5" style="color:var(--text-dim)">Loading... / 載入中...</td></tr>
+          <tr><td colspan="5" class="t-dim">Loading... / 載入中...</td></tr>
         </tbody>
       </table>
     </div>
@@ -1008,25 +1111,25 @@
 </div>
 
 <!-- ═══ Modal: Request Authorization ═══ -->
-<div id="modal-request-auth" class="oc-modal" style="display:none">
+<div id="modal-request-auth" class="oc-modal hidden">
   <div class="oc-modal-content">
     <h3>&#x1F4CB; 申請授權 / Request Authorization</h3>
-    <p style="font-size:12px;color:var(--text-dim);margin:8px 0 12px 0">
+    <p class="fs-dense t-dim mt-2 mb-3">
       為 Live 實盤交易申請操作員授權。Paper 模擬會自動授權，無需此步驟。<br>
       Request Operator authorization for Live trading. Paper is auto-authorized.
     </p>
-    <div style="margin-bottom:12px">
-      <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:6px">TTL / 有效期</label>
-      <select id="request-auth-ttl" class="oc-select" style="width:100%">
+    <div class="mb-3">
+      <label class="fs-micro t-dim block mb-2">TTL / 有效期</label>
+      <select id="request-auth-ttl" class="oc-select w-full">
         <option value="8">8 小時 / 8 hours</option>
         <option value="24" selected>24 小時 / 24 hours</option>
         <option value="72">72 小時 / 72 hours (3 days)</option>
         <option value="168">168 小時 / 168 hours (1 week)</option>
       </select>
     </div>
-    <div style="margin-bottom:12px">
-      <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:6px">Reason / 申請原因 <span style="color:var(--red)">*</span></label>
-      <textarea id="request-auth-reason" class="oc-input" style="width:100%;height:80px;resize:vertical;font-family:inherit"
+    <div class="mb-3">
+      <label class="fs-micro t-dim block mb-2">Reason / 申請原因 <span class="t-neg">*</span></label>
+      <textarea id="request-auth-reason" class="oc-input gov-textarea"
         placeholder="請說明申請原因 / Please enter the reason for this authorization request..." maxlength="300"></textarea>
     </div>
     <div class="oc-modal-footer">
@@ -1037,13 +1140,13 @@
 </div>
 
 <!-- ═══ Modal: Approve Authorization ═══ -->
-<div id="modal-approve" class="oc-modal" style="display:none">
+<div id="modal-approve" class="oc-modal hidden">
   <div class="oc-modal-content">
     <h3>Approve Authorization / 批准授權</h3>
-    <p style="font-size:12px;color:var(--text-dim);margin:8px 0 12px 0">
+    <p class="fs-dense t-dim mt-2 mb-3">
       這會批准 SM-01 Authorization，不會批准或建立某一筆 Decision Lease。Decision Lease 仍由 runner 在 final execution window 申請。
     </p>
-    <textarea id="approve-note" class="oc-input" style="width:100%;height:80px;resize:vertical;font-family:inherit"
+    <textarea id="approve-note" class="oc-input gov-textarea"
       placeholder="Approval reason / 批准理由..." maxlength="500"></textarea>
     <div class="oc-modal-footer">
       <button class="oc-btn" onclick="hideApprovalModal()">Cancel / 取消</button>
@@ -1053,21 +1156,21 @@
 </div>
 
 <!-- ═══ Modal: Override Risk Level ═══ -->
-<div id="modal-override" class="oc-modal" style="display:none">
+<div id="modal-override" class="oc-modal hidden">
   <div class="oc-modal-content">
     <h3>De-escalate Risk Level / 降級風險等級</h3>
-    <p style="font-size:12px;color:var(--text-dim);margin:8px 0 12px 0">
+    <p class="fs-dense t-dim mt-2 mb-3">
       Select target risk level (de-escalation only)
     </p>
-    <div style="margin-bottom:12px">
-      <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:6px">Target Level / 目標等級</label>
-      <select id="override-level" class="oc-select" style="width:100%">
+    <div class="mb-3">
+      <label class="fs-micro t-dim block mb-2">Target Level / 目標等級</label>
+      <select id="override-level" class="oc-select w-full">
         <option value="">-- Select Level --</option>
       </select>
     </div>
-    <div style="margin-bottom:12px">
-      <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:6px">Reason / 原因</label>
-      <textarea id="override-reason" class="oc-input" style="width:100%;height:80px;resize:vertical;font-family:inherit"
+    <div class="mb-3">
+      <label class="fs-micro t-dim block mb-2">Reason / 原因</label>
+      <textarea id="override-reason" class="oc-input gov-textarea"
         placeholder="Reason for de-escalation / 降級原因..." maxlength="500"></textarea>
     </div>
     <div class="oc-modal-footer">
@@ -1078,13 +1181,13 @@
 </div>
 
 <!-- ═══ Modal: Trigger Reconciliation ═══ -->
-<div id="modal-reconcile" class="oc-modal" style="display:none">
+<div id="modal-reconcile" class="oc-modal hidden">
   <div class="oc-modal-content">
     <h3>Manual Reconciliation / 手動對賬</h3>
-    <p style="font-size:12px;color:var(--text-dim);margin:8px 0 12px 0">
+    <p class="fs-dense t-dim mt-2 mb-3">
       Trigger a manual reconciliation check (1-500 characters)
     </p>
-    <textarea id="reconcile-reason" class="oc-input" style="width:100%;height:80px;resize:vertical;font-family:inherit"
+    <textarea id="reconcile-reason" class="oc-input gov-textarea"
       placeholder="Reason for manual reconciliation / 手動對賬原因..." maxlength="500"></textarea>
     <div class="oc-modal-footer">
       <button class="oc-btn" onclick="hideReconcileModal()">Cancel / 取消</button>
@@ -1094,24 +1197,24 @@
 </div>
 
 <!-- ═══ Modal: Promote Learning Tier ═══ -->
-<div id="modal-promote" class="oc-modal" style="display:none">
+<div id="modal-promote" class="oc-modal hidden">
   <div class="oc-modal-content">
     <h3>&#x1F393; 手動晉升 Manual Tier Promotion</h3>
-    <p style="font-size:12px;color:var(--text-dim);margin:8px 0 12px 0">
+    <p class="fs-dense t-dim mt-2 mb-3">
       手動晉升學習層級 (需要 Operator 批准) / Manually promote learning tier (requires Operator approval)
     </p>
-    <div style="margin-bottom:12px">
-      <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:6px">Target Tier / 目標層級</label>
-      <select id="promote-tier" class="oc-select" style="width:100%">
+    <div class="mb-3">
+      <label class="fs-micro t-dim block mb-2">Target Tier / 目標層級</label>
+      <select id="promote-tier" class="oc-select w-full">
         <option value="">-- Select Tier --</option>
         <option value="L1">L1 — Local Ollama</option>
         <option value="L2">L2 — Cloud AI</option>
         <option value="L3">L3 — Advanced AI</option>
       </select>
     </div>
-    <div style="margin-bottom:12px">
-      <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:6px">Reason / 原因</label>
-      <textarea id="promote-reason" class="oc-input" style="width:100%;height:80px;resize:vertical;font-family:inherit"
+    <div class="mb-3">
+      <label class="fs-micro t-dim block mb-2">Reason / 原因</label>
+      <textarea id="promote-reason" class="oc-input gov-textarea"
         placeholder="Reason for manual promotion / 手動晉升原因..." maxlength="500"></textarea>
     </div>
     <div class="oc-modal-footer">
@@ -1147,16 +1250,14 @@
 function toggleDL() {
   const body = document.getElementById('dl-body');
   const tog = document.getElementById('dl-toggle');
-  const open = body.style.display !== 'none';
-  body.style.display = open ? 'none' : '';
-  tog.textContent = open ? '▶ 展開' : '▼ 折疊';
+  const nowHidden = body.classList.toggle('hidden');
+  tog.textContent = nowHidden ? '▶ 展開' : '▼ 折疊';
 }
 function toggleRecon() {
   const body = document.getElementById('recon-body');
   const tog = document.getElementById('recon-toggle');
-  const open = body.style.display !== 'none';
-  body.style.display = open ? 'none' : '';
-  tog.textContent = open ? '▶ 展開' : '▼ 折疊';
+  const nowHidden = body.classList.toggle('hidden');
+  tog.textContent = nowHidden ? '▶ 展開' : '▼ 折疊';
 }
 
 // ── Quick Status Banner updater — hooks into governance-tab.js data flows ──
@@ -1284,10 +1385,10 @@ function _govApplyRenewHint(liveHalt) {
   }
   if (!hint) return;
   if (msg) {
-    hint.style.display = '';
+    hint.classList.remove('hidden');
     hint.textContent = msg;
   } else {
-    hint.style.display = 'none';
+    hint.classList.add('hidden');
     hint.textContent = '';
   }
 }
@@ -1310,13 +1411,13 @@ async function govLoadLiveAuthStatus(options) {
   }
   _govLiveAuthInFlight = true;
   const loadingEl = document.getElementById('gov-live-auth-loading');
-  if (loadingEl) loadingEl.style.display = '';
+  if (loadingEl) loadingEl.classList.remove('hidden');
 
   let d;
   try {
     const r = await ocApi('/api/v1/live/auth/trust-status');
     d = r && r.data;
-    if (loadingEl) loadingEl.style.display = 'none';
+    if (loadingEl) loadingEl.classList.add('hidden');
     if (!d) return;
     _govLastLiveAuthStatus = d;
 
@@ -1387,8 +1488,8 @@ async function govLoadLiveAuthStatus(options) {
   const reviewFlag = document.getElementById('gov-trust-review-flag');
   const reviewBtn  = document.getElementById('gov-btn-full-review');
   const showReview = !!(d.requires_operator_review || d.requires_full_review);
-  if (reviewFlag) reviewFlag.style.display = showReview ? '' : 'none';
-  if (reviewBtn)  reviewBtn.style.display  = showReview ? '' : 'none';
+  if (reviewFlag) reviewFlag.classList.toggle('hidden', !showReview);
+  if (reviewBtn)  reviewBtn.classList.toggle('hidden', !showReview);
 
   // Status row border color by state / 狀態列邊框顏色依狀態
   const row = document.getElementById('gov-live-auth-status-row');
@@ -1404,7 +1505,7 @@ async function govLoadLiveAuthStatus(options) {
   } catch (err) {
     console.warn('[govLoadLiveAuthStatus] failed', err);
   } finally {
-    if (loadingEl) loadingEl.style.display = 'none';
+    if (loadingEl) loadingEl.classList.add('hidden');
     _govLiveAuthInFlight = false;
     if (_govLiveAuthRefreshPending) {
       _govLiveAuthRefreshPending = false;

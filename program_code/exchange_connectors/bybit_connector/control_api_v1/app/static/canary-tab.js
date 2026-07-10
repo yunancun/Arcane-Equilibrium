@@ -142,7 +142,7 @@
     if (!Array.isArray(cohorts) || cohorts.length === 0) {
       el.innerHTML =
         '<div class="canary-empty">'
-        + '<p style="color:var(--text-dim);font-size:12px">'
+        + '<p class="t-dim fs-dense">'
         + '尚無 active cohort 落地（governance.canary_stage_log 為空）。'
         + '當 W-AUDIT-9 T3 shadow_mode_provider stage-aware land + operator '
         + '在 Settings tab 拍板 Stage 1 cohort 後，本表開始顯示。'
@@ -189,7 +189,7 @@
             +   '<div class="canary-progress-bar-wrap" role="progressbar" aria-valuenow="'
             +     ocEsc(String(Math.round(progress.ratio * 100)))
             +     '" aria-valuemin="0" aria-valuemax="100" aria-label="觀察期進度">'
-            +     '<div class="canary-progress-bar-fill" style="width:'
+            +     '<div class="canary-progress-bar-fill" style="--canary-fill-w:'
             +       ocEsc(String(Math.round(progress.ratio * 100))) + '%"></div>'
             +   '</div>'
             +   '<div class="canary-progress-meta">'
@@ -202,7 +202,7 @@
             +   '<span class="canary-meta-val">' + ocEsc(lastKind) + '</span>';
       if (leaseShort) {
         html +=  ' · <span class="canary-meta-key">lease：</span>'
-              + '<span class="canary-meta-val" style="font-family:monospace">…'
+              + '<span class="canary-meta-val mono">…'
               + ocEsc(leaseShort) + '</span>';
       }
       html += '</div>';
@@ -219,7 +219,7 @@
               + '</button>'
               + '</div>';
       } else {
-        html += '<div class="canary-cohort-actions" style="color:var(--text-dim);font-size:11px">'
+        html += '<div class="canary-cohort-actions t-dim fs-micro">'
               + (currentStage >= 3
                   ? '此 stage 不走手動晉升（Stage 3 自動 / Stage 4 走 5-gate live boundary）'
                   : '無可晉升動作')
@@ -254,7 +254,7 @@
     if (!el) return;
     if (!Array.isArray(metrics) || metrics.length === 0) {
       el.innerHTML =
-        '<p style="color:var(--text-dim);font-size:12px">'
+        '<p class="t-dim fs-dense">'
         + 'metric registry 為空（V080 種子 row 尚未 land 或 active=false）。'
         + 'healthcheck [58] 會 WARN drift 提醒 operator seed metric。'
         + '</p>';
@@ -289,9 +289,9 @@
             + '<td>' + ocEsc(name) + '</td>'
             + '<td><span class="' + ocSanitizeClass(dirClass) + '">'
             +   ocEsc(dir) + '</span></td>'
-            + '<td style="font-family:monospace">' + ocEsc(threshold) + '</td>'
+            + '<td class="mono">' + ocEsc(threshold) + '</td>'
             + '<td>' + ocEsc(windowHuman) + '</td>'
-            + '<td style="font-size:11px;color:var(--text-dim)">' + ocEsc(desc) + '</td>'
+            + '<td class="fs-micro t-dim">' + ocEsc(desc) + '</td>'
             + '</tr>';
     });
     html += '</tbody></table></div>';

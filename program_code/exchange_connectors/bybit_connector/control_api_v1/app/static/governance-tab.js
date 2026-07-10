@@ -114,88 +114,46 @@ function updateDemoProbeAdmissionCard() {
 function toggleAuthScope() {
   const body = document.getElementById('auth-scope-body');
   const toggle = document.getElementById('auth-scope-toggle');
-  if (body.style.display === 'none') {
-    body.style.display = '';
-    toggle.textContent = '▼';
-  } else {
-    body.style.display = 'none';
-    toggle.textContent = '▶';
-  }
+  toggle.textContent = body.classList.toggle('hidden') ? '▶' : '▼';
 }
 
 function toggleIncidentLog() {
   const body = document.getElementById('incident-log-body');
   const toggle = document.getElementById('incident-toggle');
-  if (body.style.display === 'none') {
-    body.style.display = '';
-    toggle.textContent = '▼';
-  } else {
-    body.style.display = 'none';
-    toggle.textContent = '▶';
-  }
+  toggle.textContent = body.classList.toggle('hidden') ? '▶' : '▼';
 }
 
 function toggleAuditTrail() {
   const body = document.getElementById('audit-trail-body');
   const toggle = document.getElementById('audit-toggle');
-  if (body.style.display === 'none') {
-    body.style.display = '';
-    toggle.textContent = '▼';
-  } else {
-    body.style.display = 'none';
-    toggle.textContent = '▶';
-  }
+  toggle.textContent = body.classList.toggle('hidden') ? '▶' : '▼';
 }
 
 function togglePendingApprovals() {
   const body = document.getElementById('pending-approvals-body');
   const toggle = document.getElementById('pending-toggle');
-  if (body.style.display === 'none') {
-    body.style.display = '';
-    toggle.textContent = '▼';
-  } else {
-    body.style.display = 'none';
-    toggle.textContent = '▶';
-  }
+  toggle.textContent = body.classList.toggle('hidden') ? '▶' : '▼';
 }
 
 // 切換租約詳情列表 / Toggle lease detail list
 function toggleLeaseList() {
   const body = document.getElementById('lease-list-body');
   const toggle = document.getElementById('lease-list-toggle');
-  if (body.style.display === 'none') {
-    body.style.display = '';
-    toggle.textContent = '▼';
-  } else {
-    body.style.display = 'none';
-    toggle.textContent = '▶';
-  }
+  toggle.textContent = body.classList.toggle('hidden') ? '▶' : '▼';
 }
 
 // 切換 PaperLiveGate 準入項目 / Toggle PaperLiveGate criteria list
 function togglePLGCriteria() {
   const body = document.getElementById('plg-criteria-body');
   const toggle = document.getElementById('plg-criteria-toggle');
-  if (body.style.display === 'none') {
-    body.style.display = '';
-    toggle.textContent = '▼';
-  } else {
-    body.style.display = 'none';
-    toggle.textContent = '▶';
-  }
+  toggle.textContent = body.classList.toggle('hidden') ? '▶' : '▼';
 }
 
 // 切換治理事件流 / Toggle governance events feed
 function toggleEventsFeed() {
   const body = document.getElementById('events-feed-body');
   const toggle = document.getElementById('events-feed-toggle');
-  if (body.style.display === 'none') {
-    body.style.display = '';
-    toggle.textContent = '▼';
-  } else {
-    body.style.display = 'none';
-    toggle.textContent = '▶';
-  }
+  toggle.textContent = body.classList.toggle('hidden') ? '▶' : '▼';
 }
 
 // ─── Change Detection & Event Logging ──────────────────────────
@@ -272,13 +230,13 @@ function detectChanges(newStatus) {
 function renderIncidentLog() {
   const el = document.getElementById('incident-log-content');
   if (_govEventLog.length === 0) {
-    el.innerHTML = '<p style="color:var(--text-dim);padding:8px">No events yet / 尚無事件。Events are detected during auto-refresh. / 事件在自動刷新時偵測。</p>'; // SAFE: static HTML only
+    el.innerHTML = '<p class="t-dim p-2">No events yet / 尚無事件。Events are detected during auto-refresh. / 事件在自動刷新時偵測。</p>'; // SAFE: static HTML only
     return;
   }
   let html = '';
   for (const e of _govEventLog) {
-    html += '<div style="padding:8px 0;border-bottom:1px solid var(--border)">';
-    html += '<span style="color:var(--text-dim);font-size:0.85em;margin-right:8px">' + ocEsc(e.time) + '</span>';
+    html += '<div class="gov-event-row">';
+    html += '<span class="gov-time">' + ocEsc(e.time) + '</span>';
     html += ocChip(e.sm, 'neutral') + ' ';
     html += ocChip(e.severity === 'bad' ? 'CRITICAL' : e.severity === 'warn' ? 'WARNING' : 'INFO', e.severity) + ' ';
     html += '<span>' + ocEsc(e.msg) + '</span>';
@@ -292,7 +250,7 @@ function renderIncidentLog() {
 function renderAuditTrail() {
   const tbody = document.getElementById('audit-trail-tbody');
   if (_govEventLog.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-dim)">No state changes detected / 尚未偵測到狀態變更</td></tr>'; // SAFE: static HTML only
+    tbody.innerHTML = '<tr><td colspan="5" class="t-dim">No state changes detected / 尚未偵測到狀態變更</td></tr>'; // SAFE: static HTML only
     return;
   }
   let html = '';
@@ -338,40 +296,39 @@ async function loadAuditTrail() {
       const guidance = _getApprovalGuidance(what);
 
       html += '<tr>';
-      html += '<td style="font-size:11px;white-space:nowrap">' + ocEsc(timeStr) + '</td>';
+      html += '<td class="fs-micro nowrap">' + ocEsc(timeStr) + '</td>';
       html += '<td>' + ocChip(ocEsc(_translateWho(who)), 'neutral') + '</td>';
 
       // What 列：翻譯名 + 風險標簽 + 可展開說明
       // What column: translated name + risk badge + expandable explanation
-      html += '<td style="max-width:360px">';
-      html += '<div style="font-weight:600;font-size:12px">' + ocEsc(whatCn) + '</div>';
+      html += '<td class="gov-mw-360">';
+      html += '<div class="fw-semi fs-dense">' + ocEsc(whatCn) + '</div>';
       if (guidance) {
         // 風險標簽 / Risk badge
         if (guidance.risk) {
-          let riskColor = 'var(--text-dim)';
-          if (guidance.risk === '高') riskColor = 'var(--red)';
-          else if (guidance.risk === '中' || guidance.risk === '中-高') riskColor = 'var(--yellow, #d29922)';
-          else if (guidance.risk === '低' || guidance.risk === '低-中') riskColor = 'var(--green)';
-          else if (guidance.risk === '無') riskColor = 'var(--text-dim)';
-          html += '<span style="display:inline-block;margin:2px 0;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:600;'
-            + 'background:' + riskColor + '22;color:' + riskColor + '">風險：' + ocEsc(guidance.risk) + '</span> ';
+          // 風險等級 → class-per-enum（§7：原 inline 動態色改頁內類；var()+'22' alpha pre-existing 無效追加一併移除）
+          let riskCls = 'gov-risk-none';
+          if (guidance.risk === '高') riskCls = 'gov-risk-high';
+          else if (guidance.risk === '中' || guidance.risk === '中-高') riskCls = 'gov-risk-med';
+          else if (guidance.risk === '低' || guidance.risk === '低-中') riskCls = 'gov-risk-low';
+          html += '<span class="gov-risk-badge ' + riskCls + '">風險：' + ocEsc(guidance.risk) + '</span> ';
         }
         // 正式說明（始終可見）/ Formal detail (always visible)
         if (guidance.detail) {
-          html += '<div style="font-size:10px;color:var(--text-dim);margin-top:2px;line-height:1.5">' + ocEsc(guidance.detail) + '</div>';
+          html += '<div class="fs-micro t-dim mt-1 lh-cjk">' + ocEsc(guidance.detail) + '</div>';
         }
         // 通俗解釋（折叠）/ Plain-language explanation (collapsed)
         if (guidance.explain) {
-          html += '<details style="margin-top:3px;font-size:10px"><summary style="cursor:pointer;color:var(--accent);user-select:none">'
+          html += '<details class="mt-1 fs-micro"><summary class="gov-details-caret">'
             + '詳細說明</summary>'
-            + '<div style="margin-top:4px;padding:6px 8px;background:var(--card-bg);border:1px solid var(--border);border-radius:4px;color:var(--text);line-height:1.7;white-space:pre-line">'
+            + '<div class="gov-detail-box">'
             + ocEsc(guidance.explain) + '</div></details>';
         }
       }
       html += '</td>';
 
       html += '<td>' + ocChip(ocEsc(changeType), 'info') + '</td>';
-      html += '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-dim);font-size:11px" title="' + ocEsc(reason) + '">' + ocEsc(reason) + '</td>';
+      html += '<td class="gov-reason-cell t-dim fs-micro" title="' + ocEsc(reason) + '">' + ocEsc(reason) + '</td>';
       html += '</tr>';
     }
     tbody.innerHTML = html;
@@ -390,13 +347,13 @@ function showRequestAuthModal() {
   // 重置表單並顯示授權申請彈窗 / Reset form and show modal
   $('request-auth-ttl').value = '24';
   $('request-auth-reason').value = '';
-  $('modal-request-auth').style.display = 'flex';
+  $('modal-request-auth').classList.remove('hidden');
 }
 
 // hideRequestAuthModal: 關閉授權申請彈窗
 // Hide the Request Authorization modal
 function hideRequestAuthModal() {
-  $('modal-request-auth').style.display = 'none';
+  $('modal-request-auth').classList.add('hidden');
 }
 
 // submitRequestAuth: 提交授權申請（POST /api/v1/governance/auth/request）
@@ -420,30 +377,30 @@ async function submitRequestAuth() {
 
 function showApprovalModal() {
   $('approve-note').value = '';
-  $('modal-approve').style.display = 'flex';
+  $('modal-approve').classList.remove('hidden');
 }
 
 function hideApprovalModal() {
-  $('modal-approve').style.display = 'none';
+  $('modal-approve').classList.add('hidden');
 }
 
 function showOverrideModal() {
   $('override-level').value = '';
   $('override-reason').value = '';
-  $('modal-override').style.display = 'flex';
+  $('modal-override').classList.remove('hidden');
 }
 
 function hideOverrideModal() {
-  $('modal-override').style.display = 'none';
+  $('modal-override').classList.add('hidden');
 }
 
 function showReconcileModal() {
   $('reconcile-reason').value = '';
-  $('modal-reconcile').style.display = 'flex';
+  $('modal-reconcile').classList.remove('hidden');
 }
 
 function hideReconcileModal() {
-  $('modal-reconcile').style.display = 'none';
+  $('modal-reconcile').classList.add('hidden');
 }
 
 // ─── Form Submission ──────────────────────────────────────────
@@ -521,11 +478,11 @@ async function submitReconcile() {
 function renderAuthScope(scope) {
   const el = document.getElementById('auth-scope-content');
   if (!scope || Object.keys(scope).length === 0) {
-    el.innerHTML = '<p style="color:var(--text-dim);font-size:12px">No scope data / 無範圍資料</p>'; // SAFE: static HTML only
+    el.innerHTML = '<p class="t-dim fs-dense">No scope data / 無範圍資料</p>'; // SAFE: static HTML only
     return;
   }
 
-  let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">';
+  let html = '<div class="gov-scope-grid">';
 
   // Render each scope key as a card
   for (const [key, value] of Object.entries(scope)) {
@@ -537,13 +494,13 @@ function renderAuthScope(scope) {
     } else if (Array.isArray(value)) {
       valueDisplay = value.map(v => ocChip(ocEsc(String(v)), 'neutral')).join(' ');
     } else if (typeof value === 'object' && value !== null) {
-      valueDisplay = '<pre style="font-size:0.8em;margin:4px 0;overflow-x:auto">' + ocEsc(JSON.stringify(value, null, 2)) + '</pre>';
+      valueDisplay = '<pre class="gov-pre-json">' + ocEsc(JSON.stringify(value, null, 2)) + '</pre>';
     } else {
       valueDisplay = ocChip(ocEsc(String(value)), 'neutral');
     }
 
-    html += '<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px">';
-    html += '<div style="font-size:0.85em;color:var(--text-dim);margin-bottom:4px;text-transform:capitalize">' + label + '</div>';
+    html += '<div class="gov-cell">';
+    html += '<div class="fs-micro t-dim mb-1 gov-capitalize">' + label + '</div>';
     html += '<div>' + valueDisplay + '</div>';
     html += '</div>';
   }
@@ -570,9 +527,9 @@ function renderAuthCard(authData) {
     ocSetText('auth-expiry', '--');
     ocSetText('auth-state-desc', '');
     renderAuthScope({});
-    $('btn-approve').style.display = 'none';
-    $('btn-request-auth').style.display = 'none';
-    $('auth-pending-indicator').style.display = 'none';
+    $('btn-approve').classList.add('hidden');
+    $('btn-request-auth').classList.add('hidden');
+    $('auth-pending-indicator').classList.add('hidden');
     updateOmsCard();
     return;
   }
@@ -608,13 +565,13 @@ function renderAuthCard(authData) {
   renderAuthScope(scope);
 
   const isPending = authData.pending_approval === true;
-  $('auth-pending-indicator').style.display = isPending ? 'block' : 'none';
-  $('btn-approve').style.display = isPending ? '' : 'none';
+  $('auth-pending-indicator').classList.toggle('hidden', !isPending);
+  $('btn-approve').classList.toggle('hidden', !isPending);
 
   // Show "Request Authorization" button for states that need a fresh auth object
   // 無授權、草稿、已過期/吊銷/拒絕 時顯示申請授權按鈕
   const needsRequest = ['NONE', 'DRAFT', 'EXPIRED', 'REVOKED', 'REJECTED'].includes(state);
-  $('btn-request-auth').style.display = needsRequest ? '' : 'none';
+  $('btn-request-auth').classList.toggle('hidden', !needsRequest);
 }
 
 function renderRiskCard(riskData) {
@@ -659,12 +616,12 @@ function renderRiskCard(riskData) {
 function renderLeaseList(leases) {
   const el = document.getElementById('lease-list-content');
   if (!leases || leases.length === 0) {
-    el.innerHTML = '<p style="color:var(--text-dim);font-size:12px;padding:4px 0">暫無活躍租約 No active leases</p>'; // SAFE: static HTML only
+    el.innerHTML = '<p class="t-dim fs-dense py-1">暫無活躍租約 No active leases</p>'; // SAFE: static HTML only
     return;
   }
 
   const now = Date.now();
-  let html = '<div style="display:flex;flex-direction:column;gap:6px">';
+  let html = '<div class="col gap-2">';
   for (const lease of leases) {
     // lease_id 縮短為最後 8 位 / Truncate lease_id to last 8 chars
     const shortId = (lease.lease_id || lease.id || '--').slice(-8);
@@ -687,12 +644,12 @@ function renderLeaseList(leases) {
       }
     }
 
-    html += '<div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px">';
-    html += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px">';
-    html += '<span style="font-family:monospace;color:var(--text-dim)">' + ocEsc('…' + shortId) + '</span>';
+    html += '<div class="gov-lease-card">';
+    html += '<div class="row-between wrap gap-1">';
+    html += '<span class="mono t-dim">' + ocEsc('…' + shortId) + '</span>';
     html += ocChip(ocEsc(symbol), 'info') + ' ';
     html += ocChip(ocEsc(direction), direction === 'Buy' || direction === 'buy' ? 'good' : 'bad') + ' ';
-    html += '<span style="color:var(--text-dim);font-size:11px">' + ocEsc(strategy) + '</span>';
+    html += '<span class="t-dim fs-micro">' + ocEsc(strategy) + '</span>';
     html += '<span>Expires: ' + expiryStr + '</span>';
     html += '</div>';
     html += '</div>';
@@ -776,7 +733,7 @@ async function loadPaperLiveGate() {
       ocSetHtml('plg-status-badge', ocChip('Unavailable / 不可用', 'neutral'));
       ocSetText('plg-score', '--');
       document.getElementById('plg-criteria-list').innerHTML =
-        '<p style="color:var(--text-dim);font-size:12px">Data unavailable / 數據不可用</p>'; // SAFE: static HTML only
+        '<p class="t-dim fs-dense">Data unavailable / 數據不可用</p>'; // SAFE: static HTML only
       return;
     }
 
@@ -793,19 +750,19 @@ async function loadPaperLiveGate() {
     // 渲染準入項目列表 / Render criteria list
     if (criteria.length === 0) {
       document.getElementById('plg-criteria-list').innerHTML =
-        '<p style="color:var(--text-dim);font-size:12px">No criteria data / 無準入項目數據</p>'; // SAFE: static HTML only
+        '<p class="t-dim fs-dense">No criteria data / 無準入項目數據</p>'; // SAFE: static HTML only
     } else {
-      let html = '<div style="display:flex;flex-direction:column;gap:6px">';
+      let html = '<div class="col gap-2">';
       for (const c of criteria) {
         const icon = c.passed ? '✅' : '❌';
         const name = c.name || '--';
         const reason = c.reason || '';
-        html += '<div style="display:flex;align-items:flex-start;gap:8px;font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">';
-        html += '<span style="flex-shrink:0">' + icon + '</span>';
+        html += '<div class="gov-criteria-row">';
+        html += '<span class="gov-noshrink">' + icon + '</span>';
         html += '<div>';
-        html += '<div style="font-weight:' + (c.passed ? '400' : '600') + ';color:' + (c.passed ? 'inherit' : 'var(--red)') + '">' + ocEsc(name) + '</div>';
+        html += '<div class="' + (c.passed ? 'fw-normal' : 'fw-semi t-neg') + '">' + ocEsc(name) + '</div>';
         if (reason) {
-          html += '<div style="color:var(--text-dim);font-size:11px">' + ocEsc(reason) + '</div>';
+          html += '<div class="t-dim fs-micro">' + ocEsc(reason) + '</div>';
         }
         html += '</div>';
         html += '</div>';
@@ -891,7 +848,7 @@ async function evaluatePaperLiveGate() {
       // A3: 評估完成後自動展開準入項目列表，讓操作員立即看到結果
       const criteriaBody = document.getElementById('plg-criteria-body');
       const criteriaToggle = document.getElementById('plg-criteria-toggle');
-      if (criteriaBody) { criteriaBody.style.display = ''; }
+      if (criteriaBody) { criteriaBody.classList.remove('hidden'); }
       if (criteriaToggle) { criteriaToggle.textContent = '▼'; }
     } else {
       ocToast((d && d.message) ? d.message : 'Evaluation failed / 評估失敗', 'error');
@@ -947,7 +904,7 @@ async function loadLearningTier() {
     // 進度條：基於下一層級所需觀測數 / Progress bar based on next tier observation requirement
     const obsRequired = nextReqs.observations || nextReqs.min_observations || 0;
     const pct = obsRequired > 0 ? Math.min(100, Math.round((obsCount / obsRequired) * 100)) : (eligible ? 100 : 0);
-    document.getElementById('lt-progress').style.width = pct + '%';
+    document.getElementById('lt-progress').style.setProperty('--lt-progress-w', pct + '%');
 
     // 資格徽章 / Eligibility badge
     ocSetHtml('lt-eligible', ocChip(
@@ -957,7 +914,7 @@ async function loadLearningTier() {
 
     // 晉升按鈕僅在可晉升時顯示 / Show promote button only when eligible
     const btn = document.getElementById('btn-promote');
-    if (btn) btn.style.display = eligible ? '' : 'none';
+    if (btn) btn.classList.toggle('hidden', !eligible);
 
     // A3: Dynamically filter promote dropdown to only show tiers ABOVE current
     // A3: 動態過滤晉升下拉，只顯示高於當前層級的選項（防止誤操作降級）
@@ -994,11 +951,11 @@ function showPromoteModal() {
   if (el) el.value = '';
   const re = document.getElementById('promote-reason');
   if (re) re.value = '';
-  document.getElementById('modal-promote').style.display = 'flex';
+  document.getElementById('modal-promote').classList.remove('hidden');
 }
 
 function hidePromoteModal() {
-  document.getElementById('modal-promote').style.display = 'none';
+  document.getElementById('modal-promote').classList.add('hidden');
 }
 
 // submitPromotion: 提交手動晉升請求
@@ -1054,7 +1011,7 @@ async function loadEventsFeed(limit) {
     const events = (d && d.ok && d.data && Array.isArray(d.data.events)) ? d.data.events : [];
 
     if (events.length === 0) {
-      el.innerHTML = '<p style="color:var(--text-dim);font-size:12px;padding:8px">No events yet / 暫無事件</p>'; // SAFE: static HTML only
+      el.innerHTML = '<p class="t-dim fs-dense p-2">No events yet / 暫無事件</p>'; // SAFE: static HTML only
       return;
     }
 
@@ -1074,20 +1031,20 @@ async function loadEventsFeed(limit) {
       else if (evUpper.includes('WARN') || evUpper.includes('ESCALAT') || evUpper.includes('REDUCE')) chipColor = 'warn';
       else if (evUpper.includes('APPROV') || evUpper.includes('SUCCESS') || evUpper.includes('OK')) chipColor = 'good';
 
-      html += '<div style="padding:8px 0;border-bottom:1px solid var(--border)">';
-      html += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px">';
-      html += '<span style="color:var(--text-dim);font-size:11px;white-space:nowrap">' + ocEsc(timeStr) + '</span>';
+      html += '<div class="gov-event-row">';
+      html += '<div class="row wrap gap-2 mb-1">';
+      html += '<span class="t-dim fs-micro nowrap">' + ocEsc(timeStr) + '</span>';
       html += ocChip(ocEsc(evType), chipColor);
       html += '</div>';
       if (desc) {
-        html += '<div style="font-size:12px;color:var(--text-dim)">' + ocEsc(desc) + '</div>';
+        html += '<div class="fs-dense t-dim">' + ocEsc(desc) + '</div>';
       }
       html += '</div>';
     }
     el.innerHTML = html;
   } catch (e) {
     console.warn('Events feed load failed:', e);
-    el.innerHTML = '<p style="color:var(--text-dim);font-size:12px;padding:8px">Failed to load events / 事件載入失敗</p>'; // SAFE: static HTML only
+    el.innerHTML = '<p class="t-dim fs-dense p-2">Failed to load events / 事件載入失敗</p>'; // SAFE: static HTML only
   }
 }
 
@@ -1112,26 +1069,26 @@ function showUnavailable() {
 function renderPendingRecovery(requests) {
   const el = document.getElementById('pending-recovery-content');
   if (!requests || requests.length === 0) {
-    el.innerHTML = '<p style="color:var(--text-dim);font-size:12px">目前沒有待審批的恢復請求</p>'; // SAFE: static HTML only
+    el.innerHTML = '<p class="t-dim fs-dense">目前沒有待審批的恢復請求</p>'; // SAFE: static HTML only
     return;
   }
 
   const _RECOVERY_STATUS_CN = { PENDING: '待批准', APPROVED: '已批准', REJECTED: '已拒絕', EXPIRED: '已過期' };
 
-  let html = '<div style="display:flex;flex-direction:column;gap:8px">';
+  let html = '<div class="col gap-2">';
   for (const req of requests) {
     const statusCn = _RECOVERY_STATUS_CN[req.status] || req.status || '待批准';
-    html += '<div style="background:var(--card-bg);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:12px">';
-    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' + ocChip(statusCn, 'warn') + '</div>';
-    html += '<div style="font-weight:600;margin-bottom:4px">' + ocEsc(req.description || '系統請求恢復到安全狀態') + '</div>';
-    html += '<div style="margin-top:8px;padding:8px;background:rgba(56,139,253,0.06);border-radius:6px;font-size:11px;color:var(--text-dim);line-height:1.6">'
+    html += '<div class="gov-recovery-card">';
+    html += '<div class="row gap-2 mb-2">' + ocChip(statusCn, 'warn') + '</div>';
+    html += '<div class="fw-semi mb-1">' + ocEsc(req.description || '系統請求恢復到安全狀態') + '</div>';
+    html += '<div class="gov-info-box">'
       + '批准 = 允許系統從異常狀態恢復；拒絕 = 保持當前狀態不變。'
       + '</div>';
-    html += '<div style="display:flex;gap:8px;margin-top:8px">';
+    html += '<div class="gov-flex gap-2 mt-2">';
     var _reqIdJs = (req.request_id || req.id || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"); /* APR01-MEDIUM-4 XSS fix: JS string escape */
-    html += '<button class="oc-btn oc-btn-success" style="font-size:11px;padding:5px 16px" onclick="confirmApproveRecovery(\'' + ocEsc(_reqIdJs) + '\')">✔ 批准恢復</button>';
+    html += '<button class="oc-btn oc-btn-success fs-micro py-1 px-4" onclick="confirmApproveRecovery(\'' + ocEsc(_reqIdJs) + '\')">✔ 批准恢復</button>';
     html += '</div>';
-    html += '<div style="font-size:10px;color:var(--text-dim);margin-top:6px;opacity:0.6">ID: ' + ocEsc(req.request_id || req.id || '--') + '</div>';
+    html += '<div class="fs-micro t-dim mt-2 o-50">ID: ' + ocEsc(req.request_id || req.id || '--') + '</div>';
     html += '</div>';
   }
   html += '</div>';
@@ -1459,13 +1416,13 @@ function renderPendingAudit(changes) {
   const el = document.getElementById('pending-audit-content');
   const btnBulk = document.getElementById('btn-bulk-actions');
   if (!changes || changes.length === 0) {
-    el.innerHTML = '<p style="color:var(--text-dim);font-size:12px">目前沒有待批准的變更</p>'; // SAFE: static HTML only
-    if (btnBulk) btnBulk.style.display = 'none';
+    el.innerHTML = '<p class="t-dim fs-dense">目前沒有待批准的變更</p>'; // SAFE: static HTML only
+    if (btnBulk) btnBulk.classList.add('hidden');
     return;
   }
-  if (btnBulk) btnBulk.style.display = '';
+  if (btnBulk) btnBulk.classList.remove('hidden');
 
-  let html = '<div style="display:flex;flex-direction:column;gap:12px">';
+  let html = '<div class="col gap-3">';
   for (const c of changes) {
     const cid = ocEsc(c.change_id || '');
     const cidJs = ocEsc((c.change_id || '').replace(/'/g, "\\'")); /* B12: JS string escape + HTML attribute escape */
@@ -1481,62 +1438,61 @@ function renderPendingAudit(changes) {
     if (c.old_value != null || c.new_value != null) {
       const oldStr = _formatValue(c.old_value);
       const newStr = _formatValue(c.new_value);
-      changeDetail = '<div style="margin:6px 0;padding:8px 10px;background:var(--card-bg);border:1px solid var(--border);border-radius:6px;font-size:11px;line-height:1.8">'
-        + '<div><span style="color:var(--text-dim)">變更前：</span><span style="color:var(--red)">' + ocEsc(oldStr) + '</span></div>'
-        + '<div><span style="color:var(--text-dim)">變更後：</span><span style="color:var(--green)">' + ocEsc(newStr) + '</span></div>'
+      changeDetail = '<div class="gov-diff-box">'
+        + '<div><span class="t-dim">變更前：</span><span class="t-neg">' + ocEsc(oldStr) + '</span></div>'
+        + '<div><span class="t-dim">變更後：</span><span class="t-pos">' + ocEsc(newStr) + '</span></div>'
         + '</div>';
     }
 
     // Affected components (translated)
     let comps = '';
     if (c.affected_components && c.affected_components.length > 0) {
-      comps = '<div style="margin-top:4px;font-size:11px;color:var(--text-dim)">影響範圍：'
+      comps = '<div class="mt-1 fs-micro t-dim">影響範圍：'
         + c.affected_components.map(x => ocEsc(_translateComp(x))).join('、') /* APR01-MEDIUM-4 XSS fix */
         + '</div>';
     }
 
-    html += '<div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:12px">';
+    html += '<div class="gov-change-card">';
     // Header row: type badge + status + time
-    html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">';
+    html += '<div class="row wrap gap-2 mb-2">';
     html += _changeTypeBadge(c.change_type);
     html += statusChip;
-    html += '<span style="margin-left:auto;font-size:11px;color:var(--text-dim)">' + ocTime(c.when_ms || c.when) + '</span>';
+    html += '<span class="ml-auto fs-micro t-dim">' + ocTime(c.when_ms || c.when) + '</span>';
     html += '</div>';
     // What — main description (Chinese)
-    html += '<div style="font-weight:600;margin-bottom:6px;font-size:13px">' + ocEsc(whatCn) + '</div>';
+    html += '<div class="fw-semi mb-2 fs-base">' + ocEsc(whatCn) + '</div>';
 
     // Risk badge + formal explanation (always visible)
     // 風險標簽 + 正式說明（始終可見）
     if (guidance) {
-      let riskColor = 'var(--text-dim)';
-      if (guidance.risk === '高') riskColor = 'var(--red)';
-      else if (guidance.risk === '中' || guidance.risk === '中-高') riskColor = 'var(--yellow, #d29922)';
-      else if (guidance.risk === '低' || guidance.risk === '低-中') riskColor = 'var(--green)';
+      // 風險等級 → class-per-enum（§7：原 inline 動態色改頁內類）
+      let riskCls = 'gov-risk-none';
+      if (guidance.risk === '高') riskCls = 'gov-risk-high';
+      else if (guidance.risk === '中' || guidance.risk === '中-高') riskCls = 'gov-risk-med';
+      else if (guidance.risk === '低' || guidance.risk === '低-中') riskCls = 'gov-risk-low';
 
       if (guidance.risk) {
-        html += '<span style="display:inline-block;margin-bottom:6px;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;'
-          + 'background:' + riskColor + '22;color:' + riskColor + ';border:1px solid ' + riskColor + '44'
-          + '">風險等級：' + ocEsc(guidance.risk) + '</span>';
+        html += '<span class="gov-risk-badge gov-risk-badge--lg ' + riskCls + '">風險等級：' + ocEsc(guidance.risk) + '</span>';
       }
       if (guidance.detail) {
-        html += '<div style="margin-bottom:8px;padding:8px 10px;background:rgba(88,166,255,0.06);border-left:3px solid var(--accent);border-radius:0 6px 6px 0;font-size:11px;color:var(--text);line-height:1.7">'
+        html += '<div class="gov-info-box gov-info-box--left">'
           + ocEsc(guidance.detail) + '</div>';
       }
       // Collapsible plain-language explanation (hidden by default)
       // 可折叠的通俗說明（默認隱藏）
       if (guidance.explain) {
         const eid = 'explain-' + cid.replace(/[^a-zA-Z0-9]/g, '');
-        html += '<details style="margin-bottom:8px;font-size:11px"><summary style="cursor:pointer;color:var(--accent);user-select:none;padding:4px 0">'
+        html += '<details class="mb-2 fs-micro"><summary class="gov-details-caret py-1">'
           + '詳細說明 / Learn more</summary>'
-          + '<div style="margin-top:6px;padding:8px 10px;background:var(--card-bg);border:1px solid var(--border);border-radius:6px;color:var(--text);line-height:1.8;white-space:pre-line">'
+          + '<div class="gov-detail-box">'
           + ocEsc(guidance.explain) + '</div></details>';
       }
     }
 
     // Who + reason
-    html += '<div style="color:var(--text-dim);margin-bottom:4px">發起人：<strong style="color:var(--text)">' + ocEsc(_translateWho(c.who)) + '</strong></div>';
+    html += '<div class="t-dim mb-1">發起人：<strong class="t-primary">' + ocEsc(_translateWho(c.who)) + '</strong></div>';
     if (c.reason) {
-      html += '<div style="color:var(--text-dim);margin-bottom:4px">原因：' + ocEsc(c.reason) + '</div>';
+      html += '<div class="t-dim mb-1">原因：' + ocEsc(c.reason) + '</div>';
     }
     // Old→New value diff
     html += changeDetail;
@@ -1547,26 +1503,26 @@ function renderPendingAudit(changes) {
     const isPending = c.approval_status === 'PENDING' || c.approval_status === 'EMERGENCY_BYPASSED';
     if (isPending) {
       // Show approve/reject consequences
-      html += '<div style="margin-top:10px;border:1px solid var(--border);border-radius:6px;overflow:hidden;font-size:11px">';
-      html += '<div style="display:flex">';
-      html += '<div style="flex:1;padding:8px 10px;background:rgba(63,185,80,0.06);border-right:1px solid var(--border)">';
-      html += '<div style="font-weight:600;color:var(--green);margin-bottom:4px">✔ 批准後果</div>';
-      html += '<div style="color:var(--text);line-height:1.6">' + ocEsc(guidance ? guidance.approve : '確認此變更有效。') + '</div>';
+      html += '<div class="gov-outcome-wrap">';
+      html += '<div class="gov-flex">';
+      html += '<div class="gov-outcome gov-outcome--pos">';
+      html += '<div class="fw-semi t-pos mb-1">✔ 批准後果</div>';
+      html += '<div class="t-primary lh-cjk">' + ocEsc(guidance ? guidance.approve : '確認此變更有效。') + '</div>';
       html += '</div>';
-      html += '<div style="flex:1;padding:8px 10px;background:rgba(248,81,73,0.06)">';
-      html += '<div style="font-weight:600;color:var(--red);margin-bottom:4px">✖ 拒絕後果</div>';
-      html += '<div style="color:var(--text);line-height:1.6">' + ocEsc(guidance ? guidance.reject : '標記此變更為不合規，需要進一步處理。') + '</div>';
+      html += '<div class="gov-outcome gov-outcome--neg">';
+      html += '<div class="fw-semi t-neg mb-1">✖ 拒絕後果</div>';
+      html += '<div class="t-primary lh-cjk">' + ocEsc(guidance ? guidance.reject : '標記此變更為不合規，需要進一步處理。') + '</div>';
       html += '</div>';
       html += '</div></div>';
 
-      html += '<div style="display:flex;gap:8px;margin-top:10px">';
-      html += '<button class="oc-btn oc-btn-success" style="font-size:12px;padding:6px 20px" '
+      html += '<div class="gov-flex gap-2 mt-3">';
+      html += '<button class="oc-btn oc-btn-success fs-dense py-2 px-4" '
         + 'onclick="auditApprove(\'' + cidJs + '\')">✔ 批准</button>';
-      html += '<button class="oc-btn oc-btn-danger" style="font-size:12px;padding:6px 20px" '
+      html += '<button class="oc-btn oc-btn-danger fs-dense py-2 px-4" '
         + 'onclick="auditReject(\'' + cidJs + '\')">✖ 拒絕</button>';
       html += '</div>';
     }
-    html += '<div style="font-size:10px;color:var(--text-dim);margin-top:8px;opacity:0.5">ID: ' + cid
+    html += '<div class="fs-micro t-dim mt-2 o-50">ID: ' + cid
       + (c.what ? ' · 原文 Original: ' + ocEsc(c.what) : '') + '</div>';
     html += '</div>';
   }
@@ -1732,7 +1688,7 @@ async function loadPendingApprovals() {
   } else {
     _lastPendingRecovery = [];
     const el = document.getElementById('pending-recovery-content');
-    if (el) el.innerHTML = '<p style="color:var(--red);font-size:12px">Failed to load recovery requests / 載入恢復請求失敗（治理中樞可能未啟用）</p>'; // SAFE: static HTML only
+    if (el) el.innerHTML = '<p class="t-neg fs-dense">Failed to load recovery requests / 載入恢復請求失敗（治理中樞可能未啟用）</p>'; // SAFE: static HTML only
   }
 
   const audit = await govGetPendingAudit();
@@ -1742,7 +1698,7 @@ async function loadPendingApprovals() {
   } else {
     _lastPendingAudit = [];
     const el = document.getElementById('pending-audit-content');
-    if (el) el.innerHTML = '<p style="color:var(--red);font-size:12px">Failed to load pending approvals / 載入待批准項目失敗（治理中樞可能未啟用）</p>'; // SAFE: static HTML only
+    if (el) el.innerHTML = '<p class="t-neg fs-dense">Failed to load pending approvals / 載入待批准項目失敗（治理中樞可能未啟用）</p>'; // SAFE: static HTML only
   }
 }
 
@@ -1914,7 +1870,7 @@ ocStartRefresh(loadAll, 10000);
   if (el) {
     el.addEventListener('click', function(e) {
       if (e.target === this) {
-        this.style.display = 'none';
+        this.classList.add('hidden');
       }
     });
   }
